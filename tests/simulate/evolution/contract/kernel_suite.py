@@ -32,7 +32,7 @@ def kernel_context(
 ) -> ApplyContext:
     """Use the production timeline planner when invoking a direct solver seam."""
     names = np.full(len(table.timeline), family)
-    plans, _ = direct_plans(table, names)
+    plans, _ = direct_plans(table, names, budget=budget)
     return ApplyContext(budget, plans.get(family))
 
 

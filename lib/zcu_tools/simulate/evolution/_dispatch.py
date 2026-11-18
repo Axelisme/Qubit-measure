@@ -725,9 +725,13 @@ class _Classifier:
             unresolved = context == ""
             context[unresolved] = self.selection.names[context_rows[unresolved]]
             context[~self.geometry.pending[context_rows]] = ""
-            plans, chain = direct_plans(self.table, context, context_rows)
+            plans, chain = direct_plans(
+                self.table, context, context_rows, budget=self.context.budget
+            )
         else:
-            plans, chain = direct_plans(self.table, self.names)
+            plans, chain = direct_plans(
+                self.table, self.names, budget=self.context.budget
+            )
         backend = self.context.opencl
         dimension = self.context.source.initial_density.shape[0]
         gpu = (

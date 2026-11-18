@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, DOP853 GPU detection and admission
+**Last updated:** 2026-11-18, CPU DP5(4) within dop853
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -201,8 +201,9 @@ to build for one dimension before execution, `auto` falls back only for that
 dimension. Read the reason in `opencl_detection_error` with routing telemetry
 enabled. Errors during GPU execution raise instead of retrying on CPU.
 
-One work-group integrates one row on device, using the CPU method's DOP853
-tableau, error norm, controller and budget-scaled tolerances. The GPU computes
+One work-group integrates one row on device, using the DOP853 tableau,
+error norm, controller and budget-scaled tolerances. CPU rows can instead use
+DP5(4) under the [kernel summary](#kernel-summary) rule. The GPU computes
 the starting interaction-frame phasor of each step in FP64 and uses FP32
 within the step. Before handing off the density, the runner returns it to the
 model eigenbasis, symmetrizes it and normalizes its trace. The scheduler
@@ -668,7 +669,10 @@ rows as `cache_hits`, with zero CPU, rejected rows and estimated work.
 Engine evolves always execute numerical work. For `dop853`, `opencl_rows`
 counts endpoints computed on GPU and `opencl_detection_error` reports why
 automatic detection or the active dimension's compilation failed. It is
-`None` when neither failed.
+`None` when neither failed. `dp54_rows` counts physical DP5(4) endpoints;
+`dop853_rows` counts physical DOP853 endpoints, including `opencl_rows`.
+Both tableau counts add across merged reports and are zero on exact-result reuse.
+A shared prefix contributes one execution, not one execution per consumer.
 
 `PathDiagnostics.execution_device` is read-only and available with telemetry
 off. It is `cpu` if no row ran on GPU; otherwise it contains the OpenCL device
@@ -819,7 +823,7 @@ routes and final densities. This does not force every sampled row to DOP853.
 | [`multitone_gate`](kernels/multitone_gate.py), retained simultaneous RWA gate family | `multiple`, disabled | Rejects every row. The retained 20-use inventory cost preference cannot restore numerical admission at 19 or 20 uses; pinning cannot bypass rejection. Shared single-tone gate numerics are unchanged. | [19/20 and pinned rejection contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | NOT EXERCISED; no density error |
 | [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only | Exactly two constant envelopes, fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Sampled rows are rejected. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports its final metrics. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms. At each endpoint, the kernel sums all tones' kicks before acting on density. Row-local kick time equals the propagation duration; following idle rows do not extend it. Apply step ceiling is 16 ns. | [`joint_constant`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. DOP853 local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B). CPU rows with d ≤ 10,000 ns and B ≥ 1e-3 use DP5(4) at one third of both tolerances. Other CPU rows and all GPU rows use DOP853. | [`shaped_complex`, `two_carriers`, `joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [CPU DP5(4) cases](#cpu-dp54-accuracy) | PASS |
 
 For dissipative DC rows, [slow dispatch](_slow_dispatch.py) charges channel
 construction as `3.8 * (M/32)^6` seconds, divided by the exact prepare key's
@@ -981,6 +985,23 @@ local contribution. The separate
 [history case](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
 checks both densities when accumulated inventory changes the default route from
 `shaped_sambe` to `single_tone_gate`.
+
+### CPU DP5(4) accuracy
+
+The `dop853` family uses DP5(4) on CPU for rows up to and including 10 µs
+when the evolve budget is at least `1e-3`. The spike covered durations up to
+10 µs at the default budget; it did not cover tighter budgets. Dividing both
+local tolerances by three kept all six spike cells below `1e-3` full-density
+error. At the default budget the uncapped DP5(4) tolerances are
+`rtol=1e-5`, `atol=1e-7`. Lab-frame chains retain their bare-phase cap
+before the division. DP5(4) uses a fifth-order controller exponent (`-1/5`).
+Both CPU tableaux share the adaptive loop, frames, workspace and knot stops.
+
+The [CPU matrix](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
+checks a 100 ns sampled row, an FTF d=24 simultaneous-drive point with
+960 samples per tone, and a sampled row exactly at 10 µs. It confirms DP5(4)
+through routing telemetry and compares every complex density entry at readout
+to the independent two-tolerance interaction-frame Lindblad reference.
 
 These measurements cover the linked inputs, not every input admitted by a
 guard. Historical population calibrations, omission proxies and local solver
@@ -1223,8 +1244,8 @@ class's methods.
 | Rates → population generator Q | [../baths.py](../baths.py), shared by evolution propagators, ADC conditional responses and fluxonium manifold modes. |
 | Secular coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
 | Density basis conversion | `transform_density` in [state.py](state.py), shared by population conversion, scheduler boundaries, Dyson input bounds and compiled DOP853 chains. Callers retain basis selection and traversal. |
-| Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
-| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. CPU DOP853 apply, `t6` direct rows and period fractional tails share this entry point and its budget-scaled local tolerance policy, supplying explicit frames. Budget validation, knot stops and numerical failures are unchanged. |
+| Adaptive DOP853 and DP5(4) tableaux, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
+| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. CPU `dop853` rows, `t6` direct rows and period fractional tails share this entry point, supplying explicit frames. Only CPU `dop853` rows can reduce the shared DOP853 tolerances by selecting DP5(4). Budget validation, knot stops and numerical failures are unchanged. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py) owns period builds and trajectories, with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. [kernels/_period_channel.py](kernels/_period_channel.py) owns complete secular-channel playback. Separate from two-tone Floquet frames. |
@@ -1341,8 +1362,9 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v9`. With the default `backend="auto"`,
-eligible `dop853` rows can use the mixed-precision GPU solver.
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v10`. It distinguishes the CPU
+DP5(4) rule from earlier results. With the default `backend="auto"`, eligible
+`dop853` rows can still use the mixed-precision GPU solver.
 `simulators.ftf.environment` owns private replay and checks backend, model,
 numerical, RNG and dependency versions before
 recomputing a round. Evolution does not persist densities or offline tables

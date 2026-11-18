@@ -24,10 +24,12 @@ from zcu_tools.simulate.evolution import (
 
 from .accuracy import AccuracyMeasurement, measurement_property, require_families
 from .accuracy_cases import (
+    CPU_DP54_CASES,
     DISSIPATIVE_DC_CASES,
     OPENCL_CASES,
     AccuracyCase,
     accuracy_case,
+    cpu_dp54_case,
     history_case,
     multisegment_case,
 )
@@ -138,6 +140,35 @@ def test_pinned_family_density(
         )
     )
     assert error <= 2e-3, f"{name}/{family}: density error {error:.9g} > 2e-3"
+
+
+@pytest.mark.parametrize("name", CPU_DP54_CASES)
+def test_cpu_dp54_density(name: str, request: pytest.FixtureRequest) -> None:
+    case = cpu_dp54_case(name)
+    families = (case.idle_family, *case.families) if case.idle_family else case.families
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=families)) as engine,
+    ):
+        result = engine.evolve(case.source, (case.batch,), telemetry=True)
+        require_families(result.paths, families)
+        report = result.paths.routing["dop853"]
+        assert report.dp54_rows == len(case.batch.points)
+        assert report.dop853_rows == 0
+        # At the 10 µs edge the adaptive, knot-stopped reference need not
+        # take 200,000 steps at each tolerance just to obey the default ceiling.
+        max_step_ns = 0.5 if name == "cpu_dp54_duration_edge" else 0.05
+        reference = interaction_reference(
+            case.source, case.batch, max_step_ns=max_step_ns
+        )
+    error = density_error(result.densities, reference.density)
+    request.node.user_properties.append(
+        measurement_property(
+            AccuracyMeasurement(name, "dop853", error, reference.convergence_error)
+        )
+    )
+    assert reference.convergence_error <= 2e-6
+    assert error <= 2e-3, f"{name}: density error {error:.9g} > 2e-3"
 
 
 @pytest.mark.requires_opencl

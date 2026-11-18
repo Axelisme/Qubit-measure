@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from functools import partial
+from pathlib import Path
 
 import numpy as np
 from zcu_tools.simulate.evolution import (
@@ -17,6 +18,8 @@ from zcu_tools.simulate.evolution import (
     SecularDrive,
     SecularModel,
     TimelineBatch,
+    read_frozen_manifest,
+    read_physical_input,
 )
 from zcu_tools.simulate.fluxonium import (
     DispersiveResonator,
@@ -416,6 +419,45 @@ def _opencl_case(name: str) -> AccuracyCase:
         replace(batch, tracks=tracks),
         ("dop853",),
         idle_family="t4" if large_model else None,
+    )
+
+
+CPU_DP54_CASES = (
+    "cpu_dp54_short_sampled",
+    "cpu_dp54_ftf_960",
+    "cpu_dp54_duration_edge",
+)
+
+
+def cpu_dp54_case(name: str) -> AccuracyCase:
+    """Build a sampled CPU dop853 accuracy case with a fresh source.
+
+    The synthetic cases use one coherent three-level point and nine knots at
+    100 or 10,000 ns. The FTF input is the high-gain simultaneous-drive point
+    with 24 retained states and 960 actual compiler envelope samples per tone.
+    Its idle tail needs t4. Unknown names raise ValueError.
+    """
+    if name == "cpu_dp54_ftf_960":
+        fixture = Path(__file__).parent / "data" / "cpu_dp54_ftf_960.json.gz"
+        (record,) = read_frozen_manifest(fixture)
+        frozen = read_physical_input(record.physical)
+        return AccuracyCase(name, frozen.source, frozen.batch, ("dop853",), "t4")
+    if name not in CPU_DP54_CASES:
+        raise ValueError(f"unknown CPU DP5(4) case: {name}")
+    duration = 100.0 if name == "cpu_dp54_short_sampled" else 10_000.0
+    times = np.linspace(0.0, duration, 9)
+    samples = np.exp(-0.5 * ((times - duration / 2) / (duration / 6)) ** 2)
+    envelope = EnvelopeSpec("sampled", samples.astype(np.complex128), times)
+    batch = timeline(1, duration)
+    tracks = (
+        drive_track(batch, envelope, frequency=0.129, gain=0.003),
+        drive_track(batch, envelope, frequency=0.17, gain=-0.007),
+    )
+    return AccuracyCase(
+        name,
+        coherent_source(synthetic_model()),
+        replace(batch, tracks=tracks),
+        ("dop853",),
     )
 
 

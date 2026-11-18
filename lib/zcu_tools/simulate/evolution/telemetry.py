@@ -42,6 +42,10 @@ class FamilyRouting:
         active dimension's compilation failed, or None when neither failed.
         Populated only for DOP853. Merged reports retain the first nonempty
         reason in input order.
+    dp54_rows: physical endpoints executed by CPU DP5(4) within dop853.
+    dop853_rows: physical endpoints executed by DOP853 within dop853, including
+        opencl_rows. Both tableau counts are zero for reuse and other families;
+        execution of a shared prefix counts once, not once per consumer.
     CPU values exclude dispatch, geometry, ADC and I/O. All values are
     nonnegative; actual_cpu_s is the sum of the two measured phases.
     """
@@ -58,6 +62,8 @@ class FamilyRouting:
     duration_ns: float = 0.0
     opencl_rows: int = 0
     opencl_detection_error: str | None = None
+    dp54_rows: int = 0
+    dop853_rows: int = 0
 
     @property
     def actual_cpu_s(self) -> float:
@@ -76,6 +82,8 @@ class _Totals:
     prepare_builds: int = 0
     admission_rows: int = 0
     opencl_rows: int = 0
+    dp54_rows: int = 0
+    dop853_rows: int = 0
 
 
 class RoutingCollector:
@@ -127,7 +135,17 @@ class RoutingCollector:
         """Count count physical endpoints completed on OpenCL for family name."""
         if self.enabled and count:
             with self._lock:
-                self._totals.setdefault(name, _Totals()).opencl_rows += count
+                total = self._totals.setdefault(name, _Totals())
+                total.opencl_rows += count
+                total.dop853_rows += count
+
+    def ran_cpu_dop853(self, name: str, rows: int, dp54_rows: int) -> None:
+        """Count completed CPU endpoints: dp54_rows of rows used DP5(4)."""
+        if self.enabled and rows:
+            with self._lock:
+                total = self._totals.setdefault(name, _Totals())
+                total.dp54_rows += dp54_rows
+                total.dop853_rows += rows - dp54_rows
 
     def reject(self, name: str, count: int) -> None:
         """Count actual numerical rejections, never cost-based skips."""
@@ -181,6 +199,8 @@ class RoutingCollector:
                 prepare_builds=total.prepare_builds,
                 admission_rows=total.admission_rows,
                 opencl_rows=total.opencl_rows,
+                dp54_rows=total.dp54_rows,
+                dop853_rows=total.dop853_rows,
                 prepare_cpu_s=total.prepare_cpu_s,
                 apply_cpu_s=total.apply_cpu_s,
                 rejected_rows=total.rejected_rows,

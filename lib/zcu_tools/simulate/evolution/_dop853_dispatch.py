@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 
 from .kernel import RowPlan, SegmentTable
 from .kernels._dop853_opencl import ROWS_PER_BATCH
-from .kernels.dop853 import DOP853Plan
+from .kernels.dop853 import DOP853Plan, cpu_dp54_rows
 from .kernels.flux_dop853 import FluxDOP853Plan
 
 _MAX_OPENCL_DIMENSION = 32
@@ -131,6 +131,8 @@ def direct_plans(
     table: SegmentTable,
     names: NDArray[np.str_],
     rows: NDArray[np.int64] | None = None,
+    *,
+    budget: float,
 ) -> tuple[dict[str, RowPlan], NDArray[np.int64]]:
     """Plan direct rows from complete chronological timeline routing.
 
@@ -139,6 +141,8 @@ def direct_plans(
     just its deferred candidates. Empty names break chains. Returned decisions
     retain global-row indexing; frames outside the selected family are empty.
     A chain ID is its first global row, independent of payload/apply partition.
+    budget is the evolve allowance used to select the tableau for CPU endpoints;
+    OpenCL uses its own DOP853 tableau even for rows marked for DP5(4) on CPU.
     """
     size = len(table.timeline)
     if rows is None:
@@ -178,7 +182,13 @@ def direct_plans(
             # Chains retain lab endpoints for basis changes across row models.
             frame[rows[selected & ~members]] = "interaction"
             frame.setflags(write=False)
-            plans[name] = DOP853Plan(frame, chain)
+            dp54 = np.zeros(size, dtype=bool)
+            selected_rows = rows[selected]
+            dp54[selected_rows] = cpu_dp54_rows(
+                table.duration_ns[selected_rows], budget
+            )
+            dp54.setflags(write=False)
+            plans[name] = DOP853Plan(frame, chain, dp54)
         else:
             plans[name] = FluxDOP853Plan(chain)
     chain.setflags(write=False)

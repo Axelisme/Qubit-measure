@@ -30,7 +30,7 @@ from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
 
 # Replay identity of the segment engine numerical algorithms, independent of records.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v9"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v10"
 
 
 @dataclass(frozen=True)
@@ -466,7 +466,7 @@ def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
     frontend_cpu_s are summed.
     max_trace_error is the maximum, or zero for empty parts. Routing sums each
     family's row counts, CPU times, hits, rejections, costs, builds,
-    admission rows and OpenCL endpoints. For each family, the first nonempty
+    admission rows and endpoints by tableau and OpenCL. For each family, the first nonempty
     OpenCL detection failure is retained in input order.
     estimated_cpu_s is None if any contributing family estimate is unknown.
     Reuse-hit diagnostics participate exactly as returned, without adding hits
@@ -524,6 +524,8 @@ def _merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
         prepare_builds=sum(part.prepare_builds for part in parts),
         admission_rows=sum(part.admission_rows for part in parts),
         opencl_rows=sum(part.opencl_rows for part in parts),
+        dp54_rows=sum(part.dp54_rows for part in parts),
+        dop853_rows=sum(part.dop853_rows for part in parts),
         opencl_detection_error=_first_opencl_detection_error(parts),
     )
 

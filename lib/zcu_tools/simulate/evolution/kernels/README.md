@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-18，DC Lindblad channel
+**Last updated:** 2026-11-18，CPU DP5(4)
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -30,8 +30,11 @@ Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_ga
 `multitone_gate` 的 family guard 拒收所有列，保留 family 與共用 single-tone 數值 owner。
 這是現行拒收契約，不預告恢復 admission。
 其餘候選沿用既有定價，可能選到 `common_frame` 或 `dop853`。
-`dop853.advance_endpoints` 擁有旋轉座標 density 積分，`dop853` 與 `t6` direct
-沿用相同的每段 budget 容差規則。這是局部積分控制，不保證整條序列的最終誤差。
+`dop853.advance_endpoints` 擁有旋轉座標 density 積分。
+`dop853` 的 CPU row 在時長 ≤10 µs 且 budget ≥1e-3 時走 DP5(4)，兩個局部容差都除以三。
+[共用 solver](_dop853.py) 提供兩套 tableau、RMS 誤差與 controller，兩種方法共用 workspace、RHS 與 knot 停點。
+GPU、`t6` direct、period fractional tail 與 `flux_dop853` 仍用 DOP853。
+局部容差不保證整條序列的最終誤差；見 [CPU DP5(4) 精度案例](../README.md#cpu-dp54-accuracy)。
 `t6` 的每一列都走 direct，不依 key 重用數選算法，也不掃描完整 acquire inventory。
 Preparation 只打包 model operators；[`_t6_dispatch`](../_t6_dispatch.py) 保留 prepare-key 建構。
 完整 owner 對照見 [evolution README](../README.md#algorithm-ownership-and-reuse)。

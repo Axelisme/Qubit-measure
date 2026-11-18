@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
 from ._dop853 import tolerances
-from ._dop853_chain import run_chain
+from ._dop853_chain import ChainRows, run_chain
 from ._dop853_data import (
     Context,
     Models,
@@ -22,6 +22,20 @@ from ._dop853_data import (
 from ._dop853_intervals import playback_time
 from ._workload_facts import packed_segments
 
+# The spike exercised rows through 10 µs at the production budget. Tighter
+# budgets were not measured and favor the higher-order DOP853 method.
+_MAX_DP54_DURATION_NS = 10_000.0
+_MIN_DP54_BUDGET = 1e-3
+
+
+def cpu_dp54_rows(duration_ns: NDArray[np.float64], budget: float) -> NDArray[np.bool_]:
+    """Mark positive-duration dop853 rows that use DP5(4) if run on CPU.
+
+    Supply validated row durations in ns and a positive finite evolve budget.
+    The result aligns with duration_ns. GPU endpoints always use DOP853.
+    """
+    return (budget >= _MIN_DP54_BUDGET) & (duration_ns <= _MAX_DP54_DURATION_NS)
+
 
 @dataclass(frozen=True)
 class DOP853Plan:
@@ -29,10 +43,13 @@ class DOP853Plan:
 
     frame: interaction, lab, or empty for a row belonging to another family.
     chain: first row of a touching chain, or -1 for an independent row.
+    cpu_dp54: global-row mask for DP5(4) on CPU; None retains DOP853. Only
+        family dispatch supplies a mask. Other endpoint consumers use DOP853.
     """
 
     frame: NDArray[np.str_]
     chain: NDArray[np.int64]
+    cpu_dp54: NDArray[np.bool_] | None = None
 
 
 class EndpointData(NamedTuple):
@@ -121,10 +138,10 @@ def _lab_context(data, row, model, interval, previous):
 
 
 @njit(nogil=True, cache=True)
-def _run(data, row_models, states, controls):
+def _run(data, chain_rows, states, controls):
     # Cache the linked solver behind a callback-free signature. Passing compiled
     # callables from Python gives Numba process-specific specialization keys.
-    run_chain(_rhs, _lab_context, data, row_models, states, controls)
+    run_chain(_rhs, _lab_context, data, chain_rows, states, controls)
 
 
 @njit(nogil=True, cache=True)
@@ -196,15 +213,14 @@ def _interaction_context(data, row, model, interval, previous):
 
 
 @njit(nogil=True, cache=True)
-def _run_interaction(data, row_models, states, controls):
+def _run_interaction(data, chain_rows, states, controls):
     # Only independent rows enter: each starts at sigma(0)=rho(0), with its own
     # controller and seed. The callback-free entry point has a stable disk key.
     run_chain(
-        _interaction_rhs, _interaction_context, data, row_models, states, controls
+        _interaction_rhs, _interaction_context, data, chain_rows, states, controls
     )
-    rows, model_index, _ = row_models
-    for index in range(len(rows)):
-        row, model = rows[index], model_index[index]
+    for index in range(len(chain_rows.rows)):
+        row, model = chain_rows.rows[index], chain_rows.model_index[index]
         phases = np.exp(
             -2j * np.pi * data.models.energies[model] * data.segments.duration[row]
         )
@@ -332,7 +348,9 @@ class DOP853Kernel:
         secular dissipator, then return to model eigenbasis. Each row keeps its
         own adaptive step controller and original normalized RMS error norm,
         independent of the other rows in the call. There is no gain grouping or
-        pooled RMS. Each interval uses the complete row's tolerances; this is
+        pooled RMS. The CPU plan selects DP5(4) for rows within its calibrated
+        duration and budget bounds; OpenCL always uses DOP853. Each interval
+        uses the complete row's tolerances; this is
         local control, not a new end-to-end error bound. No adaptive history
         carries between intervals, rows or calls, so row order and worker/apply partition
         do not change an independent row's numerical path, including mixed
@@ -381,10 +399,21 @@ class DOP853Kernel:
         data = EndpointData(prepared.models, packed_segments(table, context.work_plan))
         if cpu_plan is not None:
             advance_endpoints(data, (rows, key_index), states, budget, cpu_plan)
+            _report_cpu_tableaux(context, self.name, cpu_plan, rows)
         if runner is not None:
             states[:] = runner.advance(data, (rows, key_index), states, budget)
             context.work_plan.routing.ran_opencl(self.name, len(rows))
         return np.zeros(len(rows), dtype=np.bool_)
+
+
+def _report_cpu_tableaux(
+    context: ApplyContext, name: str, plan: DOP853Plan, rows: NDArray[np.int64]
+) -> None:
+    routing = context.work_plan.routing
+    if routing.enabled:
+        dp54 = plan.cpu_dp54
+        count = 0 if dp54 is None else int(np.count_nonzero(dp54[rows]))
+        routing.ran_cpu_dop853(name, len(rows), count)
 
 
 def prepare_models(models: list[SecularModel]) -> DOP853Prepared:
@@ -411,9 +440,10 @@ def advance_endpoints(
 
     Local rtol=min(1e-4, 0.03*budget) and atol=min(1e-6, 0.0003*budget)
     follow the shared DOP853 budget policy, without a fixed step ceiling.
-    These are local controls, not a whole-sequence error bound. The chain runner
-    retains the full-density RMS norm and caps lab-frame errors by budget
-    divided by bare spectral phase.
+    The chain runner retains the full-density RMS norm and caps lab-frame
+    errors by budget divided by bare spectral phase. Rows marked cpu_dp54
+    use DP5(4) and one third of both DOP853 tolerances. These are local
+    controls, not a whole-sequence error bound.
     Active control knots still stop integration and reset the step seed.
     No normalization, clipping, RWA or bath splitting occurs.
 
@@ -430,7 +460,13 @@ def advance_endpoints(
         0, np.flatnonzero(interaction[1:] != interaction[:-1]) + 1, len(rows)
     ]
     for begin, end in zip(boundaries[:-1], boundaries[1:], strict=True):
-        chain_rows = (rows[begin:end], key_index[begin:end], plan.chain)
+        selected = rows[begin:end]
+        dp54 = (
+            np.zeros(len(selected), dtype=np.bool_)
+            if plan.cpu_dp54 is None
+            else plan.cpu_dp54[selected]
+        )
+        chain_rows = ChainRows(selected, key_index[begin:end], plan.chain, dp54)
         if interaction[begin]:
             _run_interaction(data, chain_rows, states[begin:end], controls)
         else:
