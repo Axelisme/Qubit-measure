@@ -12,7 +12,7 @@ from ._dop853_dispatch import (
 )
 from .kernel import Kernel, KernelContext, SegmentTable
 from .kernels._dop853 import ROW_INITIAL_STEP_NS
-from .kernels._multitone_spot import sampled_candidates, sampled_groups
+from .kernels._multitone_spot import SampledGroup, sampled_groups
 from .kernels._rwa_fourier import fourier_coefficient
 from .kernels._rwa_numeric import STEP_NS, multitone_retention
 from .kernels.multitone_rwa import MultitoneRWAKernel
@@ -28,7 +28,10 @@ def _parallel_seconds(
     """Estimate elapsed work without parallelizing within a timeline."""
     if not len(rows):
         return 0.0
-    totals = np.bincount(table.timeline[rows], weights=costs)
+    # Complete-table rows are ordered by timeline. Only allocate for timelines
+    # represented in the group, regardless of their global indices.
+    starts = np.r_[0, np.flatnonzero(np.diff(table.timeline[rows])) + 1]
+    totals = np.add.reduceat(costs, starts)
     return max(float(totals.sum()) / workers, float(totals.max()))
 
 
@@ -105,6 +108,7 @@ def _rwa_seconds(
     table: SegmentTable,
     rows: NDArray[np.int64],
     direct: NDArray[np.float64],
+    spot_rows: tuple[int, ...],
     context: KernelContext,
 ) -> float:
     # Calibration: 3/4-level short and sparse/dense-knot rows plus the 24-level
@@ -114,8 +118,7 @@ def _rwa_seconds(
     # source history do not enter dispatch.
     d = context.source.initial_density.shape[0]
     apply = np.array([_rwa_apply_seconds(table, int(row), context) for row in rows])
-    groups = sampled_groups(table, context).groups
-    indices = np.searchsorted(rows, [row for group in groups for row in group.spot_rows])
+    indices = np.searchsorted(rows, spot_rows)
     probe = float(np.sum(direct[indices] + apply[indices] + 260e-6 + 2.5e-6 * d))
     playback = _parallel_seconds(table, rows, apply + 65e-6 + 1e-6 * d, context.workers)
     return probe + playback
@@ -150,13 +153,18 @@ def _gpu_seconds(
     if backend is None:
         return np.inf
     dimension = context.source.initial_density.shape[0]
+
     # Price only endpoints that can still be independent if adjacent drives
     # fall back to direct. Execution will recheck the final route and wave.
-    names = np.where(table.tones > 0, "dop853", "")
-    plans, _ = direct_plans(table, names)
-    mask = opencl_rows(table, plans.get("dop853"), dimension)
-    if mask is None:
-        return np.inf
+    def eligible_rows() -> NDArray[np.bool_]:
+        names = np.where(table.tones > 0, "dop853", "")
+        plans, _ = direct_plans(table, names)
+        mask = opencl_rows(table, plans.get("dop853"), dimension)
+        return np.zeros(len(table.tones), dtype=bool) if mask is None else mask
+
+    mask = context.work_plan.fact(
+        FactKey("sampled-rwa-opencl-rows", np.ndarray), eligible_rows
+    )
     remaining = np.ones(len(rows), dtype=bool)
     eligible = np.flatnonzero(mask[rows])
     timelines = table.timeline[rows[eligible]]
@@ -180,13 +188,20 @@ def _gpu_seconds(
 
 def _prefer(
     table: SegmentTable,
+    group: SampledGroup,
     context: KernelContext,
     rwa: MultitoneRWAKernel,
     common: Kernel | None,
 ) -> bool:
-    rows = np.array(sampled_candidates(table, context), dtype=np.int64)
+    if (
+        common is None
+        and context.families is not None
+        and "dop853" not in context.families
+    ):
+        return True
+    rows = np.asarray(group.rows, dtype=np.int64)
     direct = _direct_seconds(table, rows, context)
-    rwa_cost = _rwa_seconds(table, rows, direct, context)
+    rwa_cost = _rwa_seconds(table, rows, direct, group.spot_rows, context)
     allow_direct = context.families is None or "dop853" in context.families
     if not allow_direct:
         direct = np.full_like(direct, np.inf)
@@ -224,23 +239,34 @@ def _prefer(
 
 def prefer_sampled_rwa(
     table: SegmentTable,
+    rows: NDArray[np.int64],
     context: KernelContext,
     rwa: MultitoneRWAKernel,
     common: Kernel | None,
-) -> bool:
-    """Price the complete nonempty sampled candidate group before its guard.
+) -> NDArray[np.bool_]:
+    """Return row-aligned preferences for proxy-eligible complete-table rows.
 
-    table is the complete geometry, not a prefix or worker slice. The fallback
-    is CPU/GPU DOP853 and/or the allowed common frame. An explicit whitelist
-    without either competitor skips pricing, but still runs the RWA guard.
+    Each group pays for its own playback and fresh CPU probes before comparing
+    with CPU/GPU DOP853 and admitted common frame. A whitelist without either
+    competitor keeps RWA eligible; the caller still runs its numerical guard.
+    Estimates and preferences expire with context.work_plan.
     """
-    if (
-        common is None
-        and context.families is not None
-        and "dop853" not in context.families
-    ):
-        return True
-    return context.work_plan.fact(
-        FactKey(("sampled-rwa-preference", context.budget), bool),
-        lambda: _prefer(table, context, rwa, common),
-    )
+    admission = sampled_groups(table, context)
+    membership = admission.by_row[rows]
+    preferred = np.zeros(len(admission.groups), dtype=bool)
+
+    def compare(group: SampledGroup) -> bool:
+        wins = _prefer(table, group, context, rwa, common)
+        if context.capture is not None:
+            context.capture.sampled_group(
+                group, "not_probed" if wins else "cost_skipped"
+            )
+        return wins
+
+    for index in np.unique(membership):
+        group = admission.groups[index]
+        preferred[index] = context.work_plan.fact(
+            FactKey(("sampled-rwa-preference", context.budget, group.rows[0]), bool),
+            lambda group=group: compare(group),
+        )
+    return preferred[membership]

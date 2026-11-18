@@ -196,16 +196,17 @@ class PrefixResolver:
                 if self.capture is None
                 else self.capture.prefix(geometry, first, row, group)
             )
+            prefix_context = replace(context, complete_row_offset=first)
             dispatch = classify(
                 prefix,
                 kernels,
-                context,
+                prefix_context,
                 trace=None if capture is None else capture.round(prefix),
             )
             schedule = Schedule(
                 prefix,
                 dispatch,
-                replace(context, opencl=None),
+                replace(prefix_context, opencl=None),
                 cancel,
                 initial,
                 capture=capture,

@@ -349,12 +349,13 @@ def test_default_empty_and_warm_history_density(
 
 
 @pytest.mark.parametrize(
-    "name, expected_spots",
-    [("cheap_sampled_separated", 2), ("sampled_multitone_phase_sequence", 6)],
+    "name, expected_spots, copies",
+    [("cheap_sampled_separated", 2, 2), ("sampled_multitone_phase_sequence", 6, 1)],
 )
 def test_sampled_multitone_rejects_each_failed_group(
     name: str,
     expected_spots: int,
+    copies: int,
     request: pytest.FixtureRequest,
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
@@ -373,12 +374,18 @@ def test_sampled_multitone_rejects_each_failed_group(
         dense = replace(envelope, sample_ns=knots, samples=envelope.values(knots))
         tracks.append(replace(track, envelopes=(dense,)))
     batch = replace(case.batch, tracks=tuple(tracks))
-    expected_rows = sum(len(spans) for spans in segment_spans(batch))
+    # One consumer cannot repay its own DOP853 probe. Duplicate each isolated
+    # phase where needed without changing its drive or independent reference.
+    stride = int(batch.points.max()) + 1
+    batches = tuple(
+        replace(batch, points=batch.points + index * stride) for index in range(copies)
+    )
+    expected_rows = copies * sum(len(spans) for spans in segment_spans(batch))
     with closing(
         Engine(1, families=("multitone_rwa", "dop853"), backend="cpu")
     ) as engine:
-        inspection = engine.inspect_dispatch(case.source, (batch,))
-        result = engine.evolve(case.source, (batch,), telemetry=True)
+        inspection = engine.inspect_dispatch(case.source, batches)
+        result = engine.evolve(case.source, batches, telemetry=True)
     assert len(inspection.rows) == expected_rows
     for row in inspection.rows:
         assert row.family == "dop853"
@@ -391,7 +398,7 @@ def test_sampled_multitone_rejects_each_failed_group(
     assert routing.admission_rows == expected_spots
     assert routing.rejected_rows == expected_rows
     reference = matrix_reference(case)
-    error = density_error(result.densities, reference.density)
+    error = density_error(result.densities, np.tile(reference.density, (copies, 1, 1)))
     request.node.user_properties.append(
         measurement_property(
             AccuracyMeasurement(

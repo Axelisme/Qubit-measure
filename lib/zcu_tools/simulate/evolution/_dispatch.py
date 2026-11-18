@@ -41,7 +41,7 @@ from .kernel import (
     RowPlan,
     SegmentTable,
 )
-from .kernels._multitone_spot import sampled_candidates
+from .kernels._multitone_spot import sampled_groups
 from .kernels.common_frame import zero_mean_carrier
 from .kernels.dop853 import DOP853Kernel
 from .kernels.floquet import FloquetPlan
@@ -564,11 +564,13 @@ class _Classifier:
         # Group shaped and constant consumers together before any legacy prepare.
         multiple = rows[self.domains["multiple"][rows]]
         rwa = self.kernels.get("multitone_rwa")
-        sampled = (
-            np.isin(multiple, sampled_candidates(self.table, self.context))
-            if len(multiple) and isinstance(rwa, MultitoneRWAKernel)
-            else np.zeros(len(multiple), dtype=bool)
-        )
+        sampled = np.zeros(len(multiple), dtype=bool)
+        if len(multiple) and isinstance(rwa, MultitoneRWAKernel):
+            complete = self.context.work_plan.complete_table
+            if complete is None:
+                raise RuntimeError("sampled RWA dispatch requires complete geometry")
+            full_rows = multiple + self.context.complete_row_offset
+            sampled = sampled_groups(complete, self.context).by_row[full_rows] >= 0
         common = self.domains["two"] | self.domains["multiple"]
         common[multiple[sampled]] = False
         self.try_common_frame(rows[common[rows]])
@@ -653,25 +655,23 @@ class _Classifier:
         if complete is None:
             raise RuntimeError("sampled RWA pricing requires complete geometry")
         preferred = prefer_sampled_rwa(
-            complete, self.context, rwa, self.kernels.get("common_frame")
+            complete,
+            rows + self.context.complete_row_offset,
+            self.context,
+            rwa,
+            self.kernels.get("common_frame"),
         )
         direct = ("dop853",) if "dop853" in self.kernels else ()
-        if preferred:
-            rows = self.try_multitone_gate(rows)
-            rows = self.try_kernel(rwa, rows)
-            rows = self.try_common_frame(rows)
-            # Retain attempted-family diagnostics for exhausted allowlists.
-            if self.context.families is not None:
-                direct = (rwa.name, *direct)
-        else:
-            rows = self.try_common_frame(rows)
-            rows = self.try_multitone_gate(rows)
-        self.accept(
-            "multiple",
-            rows,
-            direct,
-            cost_skipped=("common_frame", rwa.name, "multitone_gate"),
-        )
+        cost_skipped = ("common_frame", rwa.name, "multitone_gate")
+        probes = self.try_multitone_gate(rows[preferred])
+        probes = self.try_kernel(rwa, probes)
+        probes = self.try_common_frame(probes)
+        # Retain attempted-family diagnostics for exhausted allowlists.
+        fallback = (rwa.name, *direct) if self.context.families is not None else direct
+        self.accept("multiple", probes, fallback, cost_skipped=cost_skipped)
+        skipped = self.try_common_frame(rows[~preferred])
+        skipped = self.try_multitone_gate(skipped)
+        self.accept("multiple", skipped, direct, cost_skipped=cost_skipped)
 
     def classify_multiple(self, rows: NDArray[np.int64]) -> None:
         """Try reusable gates, then the cheaper admitted RWA/direct alternative."""

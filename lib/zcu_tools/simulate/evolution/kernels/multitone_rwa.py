@@ -444,9 +444,9 @@ class MultitoneRWAKernel:
     ) -> NDArray[np.bool_]:
         """Check constant proxies and borrow each sampled group's own decision.
 
-        rows are complete-table indices. Sampled groups that intersect these
-        rows compare their fixed-probe endpoints once per work plan. Returns a
-        row-aligned acceptance mask; numerical failures propagate.
+        rows index the supplied table. Sampled groups that intersect these
+        rows in the complete geometry compare their probes once per work plan.
+        Returns a row-aligned acceptance mask; numerical failures propagate.
         """
         constant = table.constant_envelopes(rows)
         accepted = np.zeros(len(rows), dtype=np.bool_)
@@ -457,7 +457,7 @@ class MultitoneRWAKernel:
         complete = context.work_plan.complete_table
         geometry = table if complete is None else complete
         admission = sampled_groups(geometry, context)
-        membership = admission.by_row[rows]
+        membership = admission.by_row[rows + context.complete_row_offset]
         pending = sampled & (membership >= 0)
         needed = membership[pending]
         passed = np.zeros(len(admission.groups), dtype=np.bool_)
@@ -499,7 +499,15 @@ class MultitoneRWAKernel:
             )
             advance_endpoints(data, (rows, indices), direct, context.budget, plan)
             context.work_plan.routing.admitted(self.name, len(rows))
-            return bool(np.max(np.abs(rwa - direct)) <= SPOT_POLICY[1] * context.budget)
+            difference = np.abs(rwa - direct)
+            accepted = bool(np.max(difference) <= SPOT_POLICY[1] * context.budget)
+            if context.capture is not None:
+                context.capture.sampled_group(
+                    group,
+                    "accepted" if accepted else "rejected",
+                    np.max(difference, axis=(1, 2)),
+                )
+            return accepted
 
         return context.work_plan.fact(key, build)
 

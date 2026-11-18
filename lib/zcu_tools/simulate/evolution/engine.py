@@ -758,8 +758,9 @@ class Engine:
         otherwise raises ValueError. A closed engine raises RuntimeError.
         cancel: read-only is_set query checked between chunks; None disables it;
         when set, raises Cancelled, without returning partial results.
-        capture optionally appends frozen batch inputs and actual route events
-        to a caller-owned CaptureBuffer; None does no recording. Success marks
+        capture optionally appends frozen batch inputs, actual route events and
+        sampled RWA spot decisions/errors (not propagated probe states) to a
+        caller-owned CaptureBuffer; None does no recording. Success marks
         this call's records complete; exceptions retain incomplete records and
         propagate unchanged. Concurrent use of the same buffer raises ValueError
         at entry. Capture itself performs no file I/O; see CaptureBuffer for
@@ -824,7 +825,13 @@ class Engine:
                     time.thread_time() - frontend_started if telemetry else 0.0
                 )
                 context = KernelContext(
-                    source, budget, work_plan, self._families, self._opencl, workers
+                    source,
+                    budget,
+                    work_plan,
+                    self._families,
+                    self._opencl,
+                    workers,
+                    capture=capture_run,
                 )
                 reuse_snapshot = self._routing_reuse.snapshot(
                     reuse_key, geometry.table, context
