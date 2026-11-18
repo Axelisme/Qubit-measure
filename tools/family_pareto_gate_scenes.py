@@ -55,13 +55,19 @@ _DEPTH500_COUNTS = {
     "min_pairs": (537, 1232, 1436),  # seed42 interleaved: fewest aligned pairs
     "max_pairs": (661, 988, 932),  # seed7 reference: most aligned pairs
 }
-GATE_SCENES = tuple(
+_ORIGINAL_GATE_SCENES = tuple(
     f"multitone_gate_{shape}_n{count}" for shape in _X90_GAINS for count in (1, 21, 100)
 ) + tuple(
     f"multitone_depth500_{shape}_{inventory}"
     for shape in ("gaussian", "sampled")
     for inventory in _DEPTH500_COUNTS
 )
+# Until the new index rows are published, keep all-scene rebuilds compatible
+# with the existing index. Each staged name is buildable by explicit selection.
+_STAGED_SEQUENCE_SCENES = tuple(
+    f"multitone_depth50_{shape}_max_pairs" for shape in _X90_GAINS
+) + tuple(f"multitone_depth500_{shape}_max_pairs" for shape in ("drag", "flat_top"))
+GATE_SCENES = _ORIGINAL_GATE_SCENES + _STAGED_SEQUENCE_SCENES
 
 
 def _x90_envelope(shape: str, role: int) -> EnvelopeSpec:
@@ -170,10 +176,13 @@ def _gate_order(inventory: str) -> list[str]:
 
 
 def make_gate_inputs(scenario: str | None = None) -> list[Input]:
-    """Declare fixed-FTF repeated pairs and depth500 three-gate sequences.
+    """Declare fixed-FTF repeated pairs, gate inventories and short prefixes.
 
-    scenario selects one GATE_SCENES name before any model work; None builds all.
-    Unknown names raise ValueError. ModelSource uses the fixed model's Gibbs
+    scenario selects one GATE_SCENES name before model work. None builds the
+    tracked index inventory; new staged sequences require explicit selection.
+    Depth50 is the original max_pairs permutation truncated to 50/500 of its
+    complete gates, not 50 circuit layers. Unknown names raise ValueError.
+    ModelSource uses the fixed model's Gibbs
     density, baths and dephasing at flux .48/.20/.49 Phi0, local4x4x4/retained32.
     X90 pairs/tails last 100 ns; the representative, uncalibrated CZ lasts
     200 ns. Pulse recipes and calibration provenance are recorded here, without
@@ -185,7 +194,7 @@ def make_gate_inputs(scenario: str | None = None) -> list[Input]:
         raise ValueError(
             f"Unknown gate scene: {scenario}. Legal names: {', '.join(GATE_SCENES)}"
         )
-    names = GATE_SCENES if scenario is None else (scenario,)
+    names = _ORIGINAL_GATE_SCENES if scenario is None else (scenario,)
     settings = parse_ftf(FTF_MODEL)
     joint = JointModel(
         joint_parameters(settings),
@@ -199,16 +208,26 @@ def make_gate_inputs(scenario: str | None = None) -> list[Input]:
         )
     ) as source:
         for name in names:
-            shape, suffix = (
-                name.removeprefix("multitone_gate_").rsplit("_n", 1)
-                if name.startswith("multitone_gate_")
-                else name.removeprefix("multitone_depth500_").split("_", 1)
-            )
-            order = (
-                ["pair"] * int(suffix)
-                if name.startswith("multitone_gate_")
-                else _gate_order(suffix)
-            )
+            kernel = name.startswith("multitone_gate_")
+            sequence_metadata = {}
+            if kernel:
+                shape, count = name.removeprefix("multitone_gate_").rsplit("_n", 1)
+                order = ["pair"] * int(count)
+            else:
+                depth, coordinates = name.removeprefix("multitone_depth").split("_", 1)
+                shape, bound, kind = coordinates.rsplit("_", 2)
+                inventory = f"{bound}_{kind}"
+                order = _gate_order(inventory)
+                full_count = len(order)
+                order = order[: full_count * int(depth) // 500]
+                # Preserve metadata digests of already published scenes.
+                if name not in _ORIGINAL_GATE_SCENES:
+                    sequence_metadata = {
+                        "inventory": inventory,
+                        "permutation_seed": 0,
+                        "gate_count": len(order),
+                        "depth500_gate_count": full_count,
+                    }
             templates = _gate_templates(shape)
             batch = numeric_gate_sequence(source, templates, order, level=(0, 0, 0))
             families = ("multitone_gate", "dop853")
@@ -225,9 +244,8 @@ def make_gate_inputs(scenario: str | None = None) -> list[Input]:
                         "model_settings": settings.model_dump(
                             mode="json", exclude={"numerics": {"debug_capture"}}
                         ),
-                        "measurement_layer": "kernel"
-                        if name.startswith("multitone_gate_")
-                        else "sequence",
+                        "measurement_layer": "kernel" if kernel else "sequence",
+                        **sequence_metadata,
                         "pulse_sequence": "contiguous gates, absolute carrier phase, ordered F1 then F2 tracks",
                         "shape": shape,
                         "gate_order": order,
