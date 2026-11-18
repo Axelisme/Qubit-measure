@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-16
+**Last updated:** 2026-11-18
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -43,7 +43,7 @@ explicitly. Anonymous startup devices have no reconnect identity.
 Successful builder return transfers cleanup to the host. Read the
 [acquisition environment contract](../program/v2/simulation/README.md) before
 writing a builder or numeric source. Public Run metadata contains only the
-optional opaque `simulation_id`; private replay inputs remain on the binding.
+optional opaque `simulation_id`; private acquisition inputs remain on the binding.
 `white_noise(soccfg, *, std_adc, seed, routes)` requires a caller-built QICK
 profile, ADC sample standard deviation, seed and wiring. `routes` is a tuple of
 (generator, ADC) pairs or `"all"` for every generator × ADC pair. The environment

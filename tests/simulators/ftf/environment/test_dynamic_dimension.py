@@ -28,7 +28,8 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
-from zcu_tools.simulators.ftf.environment import FTFSource, replay
+from zcu_tools.simulators.ftf.environment import FTFSource
+from zcu_tools.simulators.ftf.environment import template as template_module
 from zcu_tools.simulators.telemetry import RoutingRecord, RoutingTelemetry
 
 from tests.program._profiles import profile_soccfg
@@ -238,7 +239,9 @@ def test_remembered_dimension_does_not_cross_preparation_invalidation(
         elif change == "revision":
             # The author API has no revision setter. Change the numeric version
             # supplied to the facts owner without inspecting its private cache.
-            monkeypatch.setattr(replay, "SEGMENT_NUMERIC_VERSION", "changed-numerics")
+            monkeypatch.setattr(
+                template_module, "SEGMENT_NUMERIC_VERSION", "changed-numerics"
+            )
         elif change == "engine":
             engine.close()
             engine = PilotEngine()

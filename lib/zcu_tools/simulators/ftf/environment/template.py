@@ -28,6 +28,7 @@ from zcu_tools.simulate.boundary import (
     TimelineTemplate,
 )
 from zcu_tools.simulate.evolution import (
+    SEGMENT_NUMERIC_VERSION,
     EnvelopeSpec,
     FluxWaveform,
     ModelSource,
@@ -36,7 +37,6 @@ from zcu_tools.simulate.evolution import (
 )
 from zcu_tools.simulate.lines import DistortionTerm, FluxLine
 from zcu_tools.simulators.ftf.config import FTFSettings
-from zcu_tools.simulators.ftf.environment import replay
 from zcu_tools.simulators.ftf.environment.numeric import (
     dc_flux,
     drive_sources,
@@ -58,6 +58,8 @@ from zcu_tools.simulators.ftf.physics import (
     schedule,
 )
 from zcu_tools.simulators.ftf.physics.model import prefix_model_source
+
+BACKEND_VERSION = "ftf-segment-v13"
 
 # Sample filtered fast-flux waveforms on the existing 2 ns DAC grid.
 _WAVEFORM_SAMPLE_NS = 2.0
@@ -85,7 +87,7 @@ class FTFModelFacts:
     ) -> None:
         self._settings_json = settings.model_dump_json()
         self._snapshot = snapshot
-        self._revision = (replay.BACKEND_VERSION, replay.SEGMENT_NUMERIC_VERSION)
+        self._revision = (BACKEND_VERSION, SEGMENT_NUMERIC_VERSION)
         self.joint = JointModel(
             joint_parameters(settings),
             dc_flux(settings, snapshot),
@@ -130,8 +132,7 @@ class FTFModelFacts:
         """Whether the complete settings, snapshot and current revisions are equal."""
         return (
             self._snapshot == snapshot
-            and self._revision
-            == (replay.BACKEND_VERSION, replay.SEGMENT_NUMERIC_VERSION)
+            and self._revision == (BACKEND_VERSION, SEGMENT_NUMERIC_VERSION)
             and self._settings_json == settings.model_dump_json()
         )
 

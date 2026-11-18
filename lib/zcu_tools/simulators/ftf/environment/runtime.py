@@ -58,8 +58,8 @@ from zcu_tools.simulate.evolution import (
     PathDiagnostics,
     RoutingHistory,
     batch_populations,
-    write_capture,
 )
+from zcu_tools.simulators.capture import AcquireCaptureSettings
 from zcu_tools.simulators.ftf.config import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.simulators.ftf.environment.acquisition import FTFAcquisitionOptions
 from zcu_tools.simulators.ftf.environment.cavity import (
@@ -86,13 +86,12 @@ from zcu_tools.simulators.ftf.environment.readout import (
     FTFReadoutConfig,
     readout_configuration,
 )
-from zcu_tools.simulators.ftf.environment.replay import BACKEND_VERSION, replay_versions
 from zcu_tools.simulators.ftf.environment.template import (
+    BACKEND_VERSION,
     FTFModelFacts,
     FTFTemplatePlan,
     plan_template,
 )
-from zcu_tools.simulators.replay import ReplayAcquire, save_replay
 from zcu_tools.simulators.telemetry import RoutingTelemetry
 
 # Fixed-size digests and state counts outlive the larger byte-bounded preparations.
@@ -341,7 +340,7 @@ class FTFAcquire:
         """Return integrated totals or decimated shots for this snapshot/index.
 
         Numeric/ADC errors propagate without partial results or changing the
-        cached snapshot. Replay writes, when enabled, finish before returning.
+        cached snapshot. Debug capture is published at acquire completion.
         Decimated shots are rearranged from point-major C6 order to QICK loop
         order (including the reps axis). Neither mode averages or rounds data.
         cancel is checked between evolution chunks; None disables cancellation.
@@ -407,20 +406,6 @@ class FTFAcquire:
                         )
                     )
                 result = RoundSignals(tuple(channels))
-        if owner.private_replay is not None:
-            save_replay(
-                owner.private_replay,
-                ReplayAcquire(
-                    settings=owner.effective_settings,
-                    request=acquire,
-                    versions=replay_versions(
-                        execution_device=prepared.paths.execution_device,
-                        workers=owner.engine.workers,
-                    ),
-                ),
-                replace(snapshot, model_identity=owner.identity),
-                index,
-            )
         return result
 
     def _reuse_or_prepare(
@@ -664,11 +649,8 @@ class FTFSource:
     identities whose live values are read by snapshot, even after session
     disconnects or registry renames. engine optionally supplies a configured numerical
     executor; this source takes ownership, including close(). Without it, use
-    workers=1 and a 4 MiB routing-facts allowance. acquisition.private_replay
-    selects an optional absolute author-only input archive directory; None performs
-    no replay I/O. readout optionally supplies detached author capabilities,
-    otherwise adapts settings.
-    Replay rejects overrides that cannot be reconstructed from those settings.
+    workers=1 and a 4 MiB routing-facts allowance. readout optionally supplies
+    detached author capabilities; None adapts settings.
 
     open_acquire drops the previous session's preparation references. execute
     opens a session only when its request object changes, preserving preparation
@@ -709,7 +691,7 @@ class FTFSource:
     finish_acquire for the binding completion callback. None (default) creates no
     directory, reads no telemetry clocks, and retains no routing reports.
     acquisition supplies FTFAcquisitionOptions for the environment clock and
-    private truth/replay paths; None uses its defaults. acquisition.clock=None
+    private drift truth log; None uses its defaults. acquisition.clock=None
     creates a clock. begin_acquire freezes losses once per acquisition.
     acquisition.truth_log optionally selects
     the private JSONL path; None uses ~/.local/state/zcu-tools/simulation/ftf/
@@ -733,16 +715,7 @@ class FTFSource:
         history: RoutingHistory | None = None,
     ) -> None:
         options = FTFAcquisitionOptions() if acquisition is None else acquisition
-        private_replay = options.private_replay
-        if private_replay is not None and not private_replay.is_absolute():
-            raise ValueError("private replay requires an explicit absolute root")
         self.readout = readout_configuration(settings) if readout is None else readout
-        if private_replay is not None and self.readout != readout_configuration(
-            settings
-        ):
-            raise ValueError(
-                "private replay requires readout settings to match author configuration"
-            )
         self.settings = settings
         self.soccfg = soccfg
         self.devices = devices
@@ -753,7 +726,6 @@ class FTFSource:
         self._truth_log = options.truth_log
         self._drift: FTFCoherenceDrift | None = None
         self._pending_acquire = False
-        self.private_replay = private_replay
         self.telemetry = telemetry
         self._history = history
         self.engine = Engine(1) if engine is None else engine
@@ -765,6 +737,7 @@ class FTFSource:
         self.envelope_encoder = EnvelopeEncoder()
         self._preparation_engine = self.engine
         self.capture: CaptureBuffer | None = None
+        self._capture_settings: AcquireCaptureSettings | None = None
         self._closed = False
 
     @property
@@ -810,6 +783,11 @@ class FTFSource:
             self._facts = None
             self._clear_preparations()
         self.capture = CaptureBuffer() if self.settings.numerics.debug_capture else None
+        self._capture_settings = (
+            None
+            if self.capture is None
+            else AcquireCaptureSettings(self.effective_settings)
+        )
         self._pending_acquire = True
 
     def model_facts(self, snapshot: EnvironmentSnapshot) -> FTFModelFacts:
@@ -861,7 +839,10 @@ class FTFSource:
             ):
                 raise ValueError(f"dc_bias.sources.{name}.value: outside source limits")
             values.append((name, info.value))
-        return EnvironmentSnapshot("ftf-v2", self.identity, tuple(values))
+        snapshot = EnvironmentSnapshot("ftf-v2", self.identity, tuple(values))
+        if self._capture_settings is not None:
+            self._capture_settings.record(snapshot, self.effective_settings)
+        return snapshot
 
     def open_acquire(self, request: AcquireRequest) -> FTFAcquire:
         """Start a fixed template request, invalidating/releasing the previous session.
@@ -916,13 +897,18 @@ class FTFSource:
 
         outcome retains captured round inputs (including failed attempts), wall
         seconds including pacing, builder seconds and normal-return status.
-        Only the matching current session contributes routing work. Direct execute
-        users may supply their own outcome after the final round and cleanup.
-        Enabled debug_capture publishes the buffer before summary construction,
-        even with telemetry disabled. capture_file is the successful basename
-        or None when recording is off or publication fails.
+        Only the matching current session contributes routing work. Direct callers
+        may supply their own outcome after the final round and cleanup. Debug capture
+        keeps detached rounds but omits settings for identities it did not observe.
+        The buffer publishes before summary construction, even with telemetry disabled.
+        capture_file is the successful basename or None when recording is off or
+        publication fails.
         """
-        capture_file = write_capture(self.capture) if self.capture is not None else None
+        capture_settings = self._capture_settings
+        self._capture_settings = None
+        capture_file = None
+        if self.capture is not None and capture_settings is not None:
+            capture_file = capture_settings.write(self.capture, outcome)
         if self.telemetry is None:
             return
         rounds = outcome.rounds
@@ -940,7 +926,7 @@ class FTFSource:
                 "evolve_wall_s": 0.0 if session is None else session.evolve_wall_s,
                 "readout_wall_s": 0.0 if session is None else session.readout_wall_s,
                 "complete": outcome.complete,
-                "capture_file": None if capture_file is None else capture_file.name,
+                "capture_file": capture_file,
                 "extras": {
                     **_dimension_telemetry(session),
                     "ftf.projection_outcomes": list(
@@ -1031,10 +1017,8 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
     counts or board settings are inferred from physical wiring. The same soccfg
     supplies the SoC and numeric PFB carrier selection. One environment supports
     separate pulse and mux acquires without reconfiguration. Host receives no model truth.
-    acquisition.private_replay explicitly enables author-only checked input archives at an
-    absolute directory. Replay recomputes with checked numeric and RNG versions;
-    no U table or exact density record is consulted. One engine persists across
-    acquires, using workers (default 1) as its sole parallel width.
+    acquisition selects the optional clock and drift truth log. One engine
+    persists across acquires, using workers (default 1) as its sole parallel width.
     Worker threads live only during multi-timeline evolve; dropping the environment
     releases its in-memory routing facts. FTFSource.close explicitly clears it.
     warmup=False starts no background work. True prepares common CPU paths, then

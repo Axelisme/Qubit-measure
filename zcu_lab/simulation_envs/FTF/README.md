@@ -139,11 +139,11 @@ F1／F2 可選 `q_cap`、`xqp`、`aphi`；coupler 只有 `q_cap`、`aphi`，`q_i
 
 `FTFAcquisitionOptions` 從 `zcu_tools.simulators.ftf.environment` 匯入，以 `acquisition=` 傳給 `ftf` 或 `FTFSource`。
 `clock` 可注入環境專用時鐘，`truth_log` 可指定另一個 `Path`，相對路徑以 cwd 解析。
-`truth_log=None` 使用上面的預設位置。`private_replay` 另選絕對 archive root，省略則不保存 replay。
+`truth_log=None` 使用上面的預設位置。
 檔案含模型真值，不進一般 Run／GUI／MCP metadata。呼叫者負責路徑與檔案保留期限。
 完整參數見 [acquisition 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)。
 
-## 演化與重播
+## 演化與除錯
 
 `retained_levels` 是耦合系統的維度上限。FTF 在符合條件的 acquire 用一條 pilot timeline 決定演化維度，讀出仍使用上限基底。
 少於 8 條 timeline、上限不超過 12 態、需要 projective herald 或含早期 cavity drive 時，整次 acquire 直接用上限。
@@ -159,11 +159,7 @@ Notebook 傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，保留�
 
 整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 caller-owned 完整 preparation 只保留在記憶體，Engine 的數值 preparation 限一次 evolve。不需要離線建庫或 GPU，也不保存 exact density records。
 
-從 `zcu_tools.simulators.ftf.environment` 匯入 `FTFAcquisitionOptions`，再用 `ftf(..., acquisition=FTFAcquisitionOptions(private_replay=absolute_directory))` 保存私有輸入。
-同一模組的 `replay_round(round_path, soccfg=recording_profile)` 檢查數值、RNG 與相依套件版本，再重算一個已保存的 round。
-CPU 錄製一律用 CPU 重算；GPU 錄製要用相同 OpenCL 身分和錄製時的 worker 數。
-詳見 [FTF private replay](../../../lib/zcu_tools/simulators/ftf/environment/README.md#private-replay)。
-Archive 保存當次 effective settings，`drift=None`，因此重播不依賴時鐘，也不再抽漂移。
-Model identity 保存在 round snapshot；重播不需要演化資料庫、目前物理 YAML 或較早的 rounds。
-Caller 必須提供錄製時使用的板子 profile，archive 不保存它，replay 也不驗證其一致性。
-私有檔案含模型真值，不放入一般 Run／GUI／MCP metadata。
+要查一次模擬結果，在環境 YAML 設定 `numerics.debug_capture: true` 後再 acquire。
+在快取的 `simulator-debug/v1` 開啟該次的 `capture-*.json.gz`，可讀 Engine 輸入、每列實際 family 與逐 round DC 值。用該 round 的 `model_identity` 查 `metadata.effective_settings` 中的有效設定。
+若 telemetry 開啟，當次 `routing-*.jsonl` 的 `capture_file` 指向這份 manifest，並記下投影結果與各階段耗時。
+見 [FTF Debug capture](../../../lib/zcu_tools/simulators/ftf/environment/README.md#debug-capture)。Capture 含模型真值，不放入一般 Run／GUI／MCP metadata。

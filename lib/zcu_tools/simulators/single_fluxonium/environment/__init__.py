@@ -1,6 +1,5 @@
-"""Single-fluxonium environment, physical acquisition and private round replay."""
+"""Single-fluxonium environment and physical acquisition."""
 
-from zcu_tools.simulators.single_fluxonium.environment.replay import replay_round
 from zcu_tools.simulators.single_fluxonium.environment.runtime import (
     SingleFluxoniumPreflight,
     SingleFluxoniumRuntimeOptions,
@@ -12,6 +11,5 @@ __all__ = [
     "SingleFluxoniumPreflight",
     "SingleFluxoniumRuntimeOptions",
     "SingleFluxoniumSource",
-    "replay_round",
     "single_fluxonium",
 ]

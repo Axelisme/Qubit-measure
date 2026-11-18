@@ -147,6 +147,6 @@ before `check_ready()`; omission keeps the current value.
 
 For an offline physical smoke, use `ftf(settings, workers=1)` with typed YAML
 `readout.drive.kind: mux`, an ADC receiver list and independent drive lines.
-Use replay archives for backend `ftf-segment-v7`; older backends are rejected.
+Enable `numerics.debug_capture` to inspect the [FTF capture manifest](../../../../lib/zcu_tools/simulators/ftf/environment/README.md#debug-capture).
 Small truncations and short smoke runs demonstrate execution only.
 Establish convergence and calibrate pulses before using fitted values.

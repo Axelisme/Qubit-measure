@@ -52,7 +52,7 @@ def _serialize_sources(value: Mapping[str, SourceValue]) -> dict[str, SourceValu
     return dict(value)
 
 
-# Both named source families must stay immutable while retaining JSON replay.
+# Both named source families remain immutable and serialize as JSON objects.
 SourceMap = Annotated[
     Mapping[Name, SourceValue],
     AfterValidator(_immutable_sources),

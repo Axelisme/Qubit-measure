@@ -24,7 +24,7 @@ status: accepted
 | `analysis` | 分析工具；模型自己的公開 renderer，使用與客製化由 caller 決定 | 檔案讀寫；實驗的圖形政策 |
 | `plotting` | 具名 Figure、owner 更新機制與共用診斷圖 | 分析計算；lab 的 live 工具與格式 |
 | `simulate` | 數值模擬、通用數值輸入與參考解 codec | 讀取量測資料容器、裝置佈局或使用者環境參數；模型數值由呼叫端提供 |
-| `simulators` | 具體物理模擬器（FTF、single_fluxonium、six_fluxonium）的模型、environment 與私有 replay | 通用演化、ADC、bath、元件 Hamiltonian 等機制，留在 `simulate` |
+| `simulators` | 具體物理模擬器（FTF、single_fluxonium、six_fluxonium）的模型與 environment | 通用演化、ADC、bath、元件 Hamiltonian 等機制，留在 `simulate` |
 | `resources` | 實驗領域資料容器與 YAML、JSON、CSV 的讀寫；waveform 資產的命名、formula 語意與 NPZ 實體 I/O | 量測資料檔；program 的執行機制；重複 waveform codec |
 | `core` | 共用的無狀態型別與格式。`core.waveform_format` 驗證 samples、編解碼 NPZ 與 opaque JSON recipe | 檔案 I/O、formula 語意、GUI、資源 scope 或硬體 |
 | `cfg_model` | 配置 schema 與注入依賴契約，見下節。搬進 core 尚未排定 | 執行行為與 I/O |
@@ -38,6 +38,8 @@ status: accepted
 | `zcu_lab`（repo 根目錄） | 具體實驗、recipes 與其 gui、notebook 附件 | 離線遷移的對照與宣告（放 `migrations/`） |
 
 放置新程式碼時，先找最貼近的類別；所有類別都不合，才放 `utils`。
+
+FTF 與 single_fluxonium 的除錯資訊由 debug capture 提供：開啟 `numerics.debug_capture` 時，manifest 記錄 Engine 輸入、逐列 routes、seed、每輪 DC、model identity 與該 identity 當時的有效設定。除錯需要新的資訊時，擴充 manifest 的內容。2026-11-18，使用者說：「你需要的资讯应该本身就在 dump 的结果里了。如果你会需要 replace 多余的资讯、多余的算法，那就是你 dump 的资料不够多嘛。」出處：[移除 private replay](../discussions/2026-11-18-remove-private-replay.md)。
 
 ### 框架機制與模型參數
 
@@ -121,7 +123,7 @@ t1_curve 負責主模選取與診斷，使用者回答「對」。這個分工�
 漂移設定型別 `DriftParameter` 與 schema `CoherenceDrift` 由 `resources.single_fluxonium.schema` 擁有，single、six 與 FTF 共用；resources 不依賴 experiment。
 設定編排、acquisition 開始時的取值凍結與 truth log I/O 留在 experiment：`experiment.single_fluxonium.drift` 的 `LossRow` 與 `write_truth` 是 single、six、FTF 共用 truth JSONL 的唯一格式與寫入 owner，
 FTF 呼叫它而不複製格式；coupler 沒有的 q_ind／xqp 以 null 表達。每個環境自己組 effective settings 與 loss streams，FTF 不建 single settings 的 adapter。
-Truth 是模擬端 acquisition 的診斷資料，不進 Run record、GUI、MCP 或 Labber metadata；replay 用當次保存的 effective settings，不重新取時鐘或漂移。
+Truth 是模擬端 acquisition 的診斷資料，不進 Run record、GUI、MCP 或 Labber metadata。FTF 與 single-fluxonium 開啟 `numerics.debug_capture` 時，manifest 的 `metadata.effective_settings` 按已觀察的 round model identity 記錄當時的有效設定，包含取樣後的損耗。發布使用 round snapshot 對應的記錄。
 依賴方向沿用 C8、C9 的 experiment → simulate／resources，不新增 package edge。
 物理前提見 [[0078]]。使用者於 2026-10-27 提出漂移需求：「另外我想引入跨acquire的T1/T2漂移，這樣overnight量測才有意義」。
 Owner 分工是 advisor 於 2026-10-27 與 2026-10-28 依本篇 simulate 與 experiment 定位、以及使用者授權「B你可以自己開task，不用我看過」訂定。

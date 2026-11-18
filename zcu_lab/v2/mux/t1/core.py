@@ -93,9 +93,8 @@ The caller owns compatible soc/soccfg, devices, plots and a fresh stop signal.
 This core does not initialize external devices, save automatically or close a
 caller's environment. Use `ftf(settings, workers=1)` for a physical offline smoke,
 with typed YAML `readout.drive.kind: mux`, an ADC receiver list and independently
-bound drive lines. The FTF backend is `ftf-segment-v7`; earlier replay backends
-are rejected, not converted. Small truncations demonstrate execution only and
-do not establish physical convergence or calibration accuracy.
+bound drive lines. Small truncations demonstrate execution only and do not
+establish physical convergence or calibration accuracy.
 
 ## Results, cancellation and analysis
 
