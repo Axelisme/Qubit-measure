@@ -135,7 +135,7 @@ def preparation_key(
     Optional source-owned encoder reuses only immutable envelope fingerprints;
     omitting it computes the same digest without retaining any envelopes. Each
     outer occurrence hashes only a domain tag and the 32-byte fingerprint. These
-    keys serve process-local preparation reuse, not replay or disk persistence.
+    keys serve only process-local preparation reuse.
     """
     digest = sha256()
     envelope_encoder = EnvelopeEncoder(0) if encoder is None else encoder

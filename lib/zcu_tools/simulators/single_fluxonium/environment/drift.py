@@ -129,8 +129,8 @@ class CoherenceDrift:
         """Freeze effective settings at sim_now and append exactly one truth row.
 
         The first call returns the configured losses. Later calls advance each
-        stream by elapsed simulated seconds. Returned settings disable drift so
-        private replay uses these values without clocks or further sampling.
+        stream by elapsed simulated seconds. Returned settings contain the
+        frozen losses and disable drift for the rest of the acquire.
         """
         values = {
             name: process.sample(sim_now) for name, process in self._processes.items()

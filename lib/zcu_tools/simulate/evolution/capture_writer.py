@@ -21,11 +21,14 @@ def capture_directory() -> Path:
     return user_cache_root() / "simulator-debug" / "v1"
 
 
-def write_capture(buffer: CaptureBuffer) -> Path | None:
+def write_capture(
+    buffer: CaptureBuffer, *, metadata: dict[str, object] | None = None
+) -> Path | None:
     """Publish one frozen manifest from buffer and return its absolute path.
 
     buffer is a caller-owned CaptureBuffer. Call only after all evolves using
     it have returned or raised. Read records once, including an empty snapshot.
+    If supplied, metadata is caller-owned JSON data for the whole capture.
     Each call chooses a new capture-<uuid4 hex>.json.gz name; rewriting a buffer
     retains its earlier records in a different file. Write a same-directory
     temporary file with write_frozen_manifest and publish with os.replace.
@@ -44,7 +47,7 @@ def write_capture(buffer: CaptureBuffer) -> Path | None:
     temporary = directory / f".{name}.tmp"
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        write_frozen_manifest(temporary, records)
+        write_frozen_manifest(temporary, records, metadata=metadata)
         os.replace(temporary, destination)
         return destination
     except (OSError, ValueError, TypeError) as error:
