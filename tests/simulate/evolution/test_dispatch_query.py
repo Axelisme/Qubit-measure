@@ -1,4 +1,4 @@
-"""Dispatch queries observe Engine routes without advancing quantum states."""
+"""Dispatch queries observe Engine routes without advancing user timelines."""
 
 from contextlib import closing
 from dataclasses import replace
@@ -46,9 +46,10 @@ def test_later_short_circuit_keeps_an_earlier_guard_rejection():
         EnvelopeSpec("sampled", np.array([0.2, 1.0]), np.array([0.0, 20.0])),
         duration=20.0,
     )
+    # A low carrier rejects RWA independent of the sampled spot comparison.
     timeline = replace(
         batch(20, duration=20.0),
-        tracks=(pulse, replace(pulse, frequency_ghz=np.full(20, 0.3))),
+        tracks=(pulse, replace(pulse, frequency_ghz=np.full(20, 0.03))),
     )
     with (
         closing(source()) as src,

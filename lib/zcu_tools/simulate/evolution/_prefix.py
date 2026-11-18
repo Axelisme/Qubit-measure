@@ -196,14 +196,20 @@ class PrefixResolver:
                 if self.capture is None
                 else self.capture.prefix(geometry, first, row, group)
             )
+            prefix_context = replace(context, complete_row_offset=first)
             dispatch = classify(
                 prefix,
                 kernels,
-                context,
+                prefix_context,
                 trace=None if capture is None else capture.round(prefix),
             )
             schedule = Schedule(
-                prefix, dispatch, context, cancel, initial, capture=capture
+                prefix,
+                dispatch,
+                prefix_context,
+                cancel,
+                initial,
+                capture=capture,
             )
             result = schedule.run(kernels, pool, chunks)
             inputs[group] = result.densities[0]
