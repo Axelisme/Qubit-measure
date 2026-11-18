@@ -1,5 +1,8 @@
 """Evolve-local sampled RWA prices, including serial full-drive spot checks."""
 
+from collections.abc import Callable
+from functools import cache
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -10,7 +13,7 @@ from ._dop853_dispatch import (
     opencl_wave_prices,
     two_tone_knot_counts,
 )
-from .kernel import Kernel, KernelContext, SegmentTable
+from .kernel import KernelContext, SegmentTable
 from .kernels._dop853 import ROW_INITIAL_STEP_NS
 from .kernels._multitone_spot import SampledGroup, sampled_groups
 from .kernels._rwa_fourier import fourier_coefficient
@@ -148,24 +151,13 @@ def _gpu_seconds(
     table: SegmentTable,
     rows: NDArray[np.int64],
     direct: NDArray[np.float64],
+    mask: NDArray[np.bool_],
     context: KernelContext,
 ) -> float:
     backend = context.opencl
     if backend is None:
         return np.inf
     dimension = context.source.initial_density.shape[0]
-
-    # Price only endpoints that can still be independent if adjacent drives
-    # fall back to direct. Execution will recheck the final route and wave.
-    def eligible_rows() -> NDArray[np.bool_]:
-        names = np.where(table.tones > 0, "dop853", "")
-        plans, _ = direct_plans(table, names, budget=context.budget)
-        mask = opencl_rows(table, plans.get("dop853"), dimension)
-        return np.zeros(len(table.tones), dtype=bool) if mask is None else mask
-
-    mask = context.work_plan.fact(
-        FactKey("sampled-rwa-opencl-rows", np.ndarray), eligible_rows
-    )
     remaining = np.ones(len(rows), dtype=bool)
     eligible = np.flatnonzero(mask[rows])
     timelines = table.timeline[rows[eligible]]
@@ -197,10 +189,11 @@ def _prefer(
     group: SampledGroup,
     context: KernelContext,
     rwa: MultitoneRWAKernel,
-    common: Kernel | None,
+    price_common: Callable[[SegmentTable, NDArray[np.int64]], NDArray[np.bool_]] | None,
+    gpu_eligible: Callable[[], NDArray[np.bool_]],
 ) -> bool:
     if (
-        common is None
+        price_common is None
         and context.families is not None
         and "dop853" not in context.families
     ):
@@ -218,22 +211,23 @@ def _prefer(
     if not forced and rwa_cost >= cpu_cost:
         return False
 
-    if common is not None:
+    if price_common is not None:
         offers = _common_offers(table, rows, context, rwa)
         best_case = _parallel_seconds(
             table, rows, np.minimum(direct, offers), context.workers
         )
         if best_case <= rwa_cost:
             contenders = np.flatnonzero(offers < direct)
-            with context.work_plan.routing.measure(common.name, "prepare"):
-                admitted = common.guard(table, rows[contenders], context)
+            admitted = price_common(table, rows[contenders])
             direct[contenders[admitted]] = offers[contenders[admitted]]
             cpu_cost = _parallel_seconds(table, rows, direct, context.workers)
             if rwa_cost >= cpu_cost:
                 return False
 
     gpu_cost = (
-        _gpu_seconds(table, rows, direct, context) if backend is not None else np.inf
+        _gpu_seconds(table, rows, direct, gpu_eligible(), context)
+        if backend is not None
+        else np.inf
     )
     if forced and np.isfinite(gpu_cost):
         return rwa_cost < gpu_cost
@@ -254,21 +248,34 @@ def prefer_sampled_rwa(
     rows: NDArray[np.int64],
     context: KernelContext,
     rwa: MultitoneRWAKernel,
-    common: Kernel | None,
+    price_common: Callable[[SegmentTable, NDArray[np.int64]], NDArray[np.bool_]] | None,
+    direct_candidates: NDArray[np.int64],
 ) -> NDArray[np.bool_]:
     """Return row-aligned preferences for proxy-eligible complete-table rows.
 
     Each group pays for its own playback and fresh CPU probes before comparing
     with CPU/GPU DOP853 and admitted common frame. A whitelist without either
     competitor keeps RWA eligible; the caller still runs its numerical guard.
+    price_common guards contenders and can hand off coefficients to the caller.
+    direct_candidates contains the complete-table rows still able to form
+    DOP853 chains, treating unresolved drives as direct without running guards.
     Estimates and preferences expire with context.work_plan.
     """
     admission = sampled_groups(table, context)
     membership = admission.by_row[rows]
     preferred = np.zeros(len(admission.groups), dtype=bool)
 
+    @cache
+    def gpu_eligible() -> NDArray[np.bool_]:
+        # Share eligibility across groups in this routing round only.
+        names = np.full(len(direct_candidates), "dop853")
+        plans, _ = direct_plans(table, names, direct_candidates, budget=context.budget)
+        dimension = context.source.initial_density.shape[0]
+        mask = opencl_rows(table, plans.get("dop853"), dimension)
+        return np.zeros(len(table.tones), dtype=bool) if mask is None else mask
+
     def compare(group: SampledGroup) -> bool:
-        wins = _prefer(table, group, context, rwa, common)
+        wins = _prefer(table, group, context, rwa, price_common, gpu_eligible)
         if context.capture is not None:
             context.capture.sampled_group(
                 group, "not_probed" if wins else "cost_skipped"

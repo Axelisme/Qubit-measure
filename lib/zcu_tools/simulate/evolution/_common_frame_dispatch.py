@@ -189,7 +189,8 @@ def _cheap_rwa(
     inventory = populate_multitone_inventory(
         geometry, context.source, context.work_plan, context.budget
     )
-    return np.isin(rows, inventory.cheap)
+    complete_rows = rows if table is geometry else rows + context.complete_row_offset
+    return np.isin(complete_rows, inventory.cheap)
 
 
 def preferred(

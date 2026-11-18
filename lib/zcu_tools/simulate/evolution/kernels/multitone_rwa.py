@@ -384,8 +384,10 @@ class MultitoneRWAKernel:
     Admission requires two envelopes, fixed flux, each |f|>=0.05 GHz and
     budget >=1e-3. Constant pairs require distinct ports. Sampled candidates
     share an evolve-local spot check against full-drive DOP853 on a fixed
-    coherent probe. The strongest, steepest and most curved survivors must
-    agree within 0.1 times the budget in maximum absolute density difference.
+    coherent probe. Within each same-shape group, select the row with the
+    largest abs(gain) times envelope peak for each tone and probe each selected
+    row once. No additional slope or curvature probes are selected. All probes
+    must agree within 0.1 times the budget in maximum absolute density difference.
     Carrier spacing does not veto admission: close or equal carriers use the same joint
     omission solver and retained-dimension limit. Full-operator/carrier and
     retained-norm phase caps do not apply here. Single-constant RWA and

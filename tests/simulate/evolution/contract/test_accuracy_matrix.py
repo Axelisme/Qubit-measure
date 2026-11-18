@@ -11,7 +11,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
     Engine,
+    EnvelopeSpec,
     ModelSource,
     NoValidKernel,
     RoutingHistory,
@@ -20,6 +22,7 @@ from zcu_tools.simulate.evolution import (
     common_frame_diagnostic,
     load_reference,
     multitone_rwa_diagnostic,
+    read_capture_metadata,
     segment_spans,
     write_reference,
 )
@@ -32,8 +35,10 @@ from .accuracy_cases import (
     AccuracyCase,
     accuracy_case,
     cpu_dp54_case,
+    drive_track,
     history_case,
     multisegment_case,
+    timeline,
 )
 from .guard_edge_cases import (
     EDGE_FAMILIES,
@@ -365,6 +370,58 @@ def test_constant_multitone_guard_edge_density(request: pytest.FixtureRequest) -
             assert error <= 2e-3, (
                 f"constant multitone guard-edge density error {error:.9g} > 2e-3"
             )
+
+
+def test_sampled_multitone_spot_edge_density(request: pytest.FixtureRequest) -> None:
+    """A sampled pair just inside the measured spot limit passes full density."""
+    case = accuracy_case("joint_gate_inventory")
+    batch = timeline(1, 1.5)
+    envelope = EnvelopeSpec(
+        "sampled", np.array([0.8, 1.0, 0.9], complex), np.array([0.0, 0.75, 1.5])
+    )
+    tracks = tuple(
+        drive_track(
+            batch,
+            envelope,
+            frequency=float(track.frequency_ghz[0]),
+            gain=0.43,
+            port=track.port,
+        )
+        for track in case.batch.tracks
+    )
+    batch = replace(batch, tracks=tracks)
+    budget = 1e-3
+    capture = CaptureBuffer()
+    with (
+        closing(case.source),
+        closing(Engine(1, families=("multitone_rwa",), backend="cpu")) as engine,
+    ):
+        result = engine.evolve(case.source, (batch,), budget=budget, capture=capture)
+        require_families(result.paths, ("multitone_rwa",))
+        (admission,) = read_capture_metadata(capture.records[0])[
+            "sampled_rwa_admissions"
+        ]
+        assert admission["decision"] == "accepted"
+        (spot,) = admission["spots"]
+        probe_error = spot["max_density_error"]
+        assert probe_error is not None
+        assert 0.095 * budget < probe_error <= 0.1 * budget
+        reference = converged_reference(case.source, batch)
+    error = density_error(result.densities, reference.density)
+    request.node.user_properties.append(
+        measurement_property(
+            AccuracyMeasurement(
+                "guard_edge/sampled_multitone_rwa",
+                "multitone_rwa",
+                error,
+                reference.convergence_error,
+            )
+        )
+    )
+    request.node.user_properties.append(("sampled_multitone_spot_error", probe_error))
+    assert error <= 2e-3, (
+        f"sampled multitone spot-edge density error {error:.9g} > 2e-3"
+    )
 
 
 @pytest.mark.parametrize("name", CASE_NAMES)
