@@ -962,6 +962,7 @@ def _dimension_telemetry(
     session: FTFAcquire | None,
 ) -> dict[str, int | float | bool | None]:
     dimension = None if session is None else session.dimension
+    price = None if dimension is None else dimension.verification_price
     return {
         "ftf.selected_dimension": None if dimension is None else dimension.dimension,
         "ftf.dimension_reused": dimension is not None and dimension.reused,
@@ -969,6 +970,16 @@ def _dimension_telemetry(
         "ftf.pilot_drop": None if dimension is None else dimension.drop,
         "ftf.pilot_error": None if dimension is None else dimension.error,
         "ftf.pilot_wall_s": 0.0 if session is None else session.pilot_wall_s,
+        "ftf.pilot_verify_price_skipped": price is not None and price.skipped,
+        "ftf.pilot_candidate_dimension": None if price is None else price.candidate,
+        "ftf.pilot_candidate_drop": None if price is None else price.candidate_drop,
+        "ftf.pilot_upper_dimension": None if price is None else price.upper,
+        "ftf.pilot_upper_wall_s": None if price is None else price.upper_wall_s,
+        "ftf.pilot_timelines": None if price is None else price.timelines,
+        "ftf.pilot_workers": None if price is None else price.workers,
+        "ftf.pilot_remaining_waves": None if price is None else price.remaining_waves,
+        "ftf.pilot_estimated_verify_s": None if price is None else price.verify_s,
+        "ftf.pilot_estimated_savings_s": None if price is None else price.savings_s,
     }
 
 

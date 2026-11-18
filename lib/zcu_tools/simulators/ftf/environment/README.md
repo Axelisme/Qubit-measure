@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, dimension reuse and debug capture
+**Last updated:** 2026-11-18, pricing the pilot verification
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -128,6 +128,17 @@ See [Dimension selection](#dimension-selection) for the cases that skip the pilo
 | `ftf.pilot_drop` | `drop(N)`, the largest magnitude of an upper-reference density entry outside the selected block. It is zero when a pilot selects the upper basis, or `null` if no pilot completed. |
 | `ftf.pilot_error` | Maximum absolute density difference between the upper reference and the zero-padded verification, even if verification rejects the smaller basis. It is `null` if no verification completed. |
 | `ftf.pilot_wall_s` | Pilot selection wall time in seconds, including elapsed pilot work on failure. It overlaps `evolve_wall_s` and is `0.0` when the pilot does not run. |
+| `ftf.pilot_verify_price_skipped` | `true` when the estimate ruled out a smaller-basis check, including break-even. Otherwise `false`. |
+| `ftf.pilot_candidate_dimension`, `ftf.pilot_candidate_drop` | Smaller basis k and `drop(k)` before verification. These describe the candidate even when N falls back to the upper basis. |
+| `ftf.pilot_upper_dimension`, `ftf.pilot_upper_wall_s` | Upper basis size and measured wall seconds c for the isolated upper solve. c excludes locating the pilot and checking discarded density entries. |
+| `ftf.pilot_timelines`, `ftf.pilot_workers`, `ftf.pilot_remaining_waves` | First-round timeline count T, configured host worker width W, and remaining waves R. |
+| `ftf.pilot_estimated_verify_s`, `ftf.pilot_estimated_savings_s` | Estimated wall seconds for one smaller solve and the wall seconds it could save over the remaining waves. |
+
+The estimate fields are `null` if no smaller candidate was priced and reported.
+An upper-only candidate has a pilot point but no estimate.
+A price skip has an estimate and no error. An accuracy rejection has an estimate
+and a completed verification error above `1e-3`. A reused N carries no pilot estimate
+from the earlier acquire.
 
 Projection values live only in `extras`:
 `ftf.projection_outcomes` counts retained outcome histories per C-order point in the
@@ -314,10 +325,17 @@ elements. Ties take the largest carrier detuning from the active port's
 strongest ground transition, then the first C-order point. The upper model
 evolves that timeline once. FTF finds the smallest integer dimension of at least
 twelve for which the largest magnitude of any discarded row or column entry is
-at most `5e-4`. If that dimension is smaller than the upper basis, FTF evolves
-it once and accepts it only when the zero-padded density differs from the upper
-reference by at most `1e-3` in every entry. Pilot accuracy is checked on that
-timeline; it is not a bound on untested sweep points.
+at most `5e-4`. If that dimension k is smaller than the upper basis, FTF estimates
+the cost of checking it. Let c be the isolated upper solve's wall time, r be
+k divided by the upper basis size, and R be `ceil((T - 1) / W)` for T timelines
+and configured worker width W. FTF uses linear scaling: the check costs `r * c`
+and could save `R * (1 - r) * c` over the remaining timelines. FTF skips the check
+and keeps the upper basis unless the expected savings strictly exceed the cost.
+The decision does not require telemetry to be enabled.
+
+If the check pays back, FTF evolves the pilot once at k. It accepts k only when
+the zero-padded density differs from the upper reference by at most `1e-3` in
+every entry. This checks accuracy on the pilot, not on untested sweep points.
 
 The reduced model projects the initial state onto the energy prefix and
 renormalizes it. The first successful selection fixes the batch dimension across

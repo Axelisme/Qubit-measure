@@ -1,6 +1,7 @@
 """FTF acquire chooses a dimension from a complete pilot density before ADC."""
 
 import json
+import time
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -48,9 +49,12 @@ pytestmark = pytest.mark.sim
 class PilotEngine(Engine):
     """Physical density answers make the FTF selection observable at the ADC."""
 
-    def __init__(self, *, extent: int = 12, bad_phase: bool = False) -> None:
-        super().__init__(1, backend="cpu")
+    def __init__(
+        self, *, extent: int = 12, bad_phase: bool = False, workers: int = 1
+    ) -> None:
+        super().__init__(workers, backend="cpu")
         self.calls: list[tuple[int, tuple[int, ...]]] = []
+        self.wall_s = 0.0
         self.extent = extent
         self.bad_phase = bad_phase
         self.round_models: list[tuple[SecularModel, NDArray[np.complex128]]] = []
@@ -90,6 +94,7 @@ class PilotEngine(Engine):
             # population that the real upper reference lacks.
             rho *= 1 - 4e-4
             rho[1, 1] += 4e-4
+        self.wall_s += 3.0
         return EvolutionResult(
             points, np.repeat(rho[None], len(points), axis=0), PathDiagnostics()
         )
@@ -300,10 +305,48 @@ def test_upper_selection_reuses_the_reference_row_without_another_attempt(
     assert extras["ftf.selected_dimension"] == 16
     assert extras["ftf.pilot_point"] == 7
     assert extras["ftf.pilot_drop"] == 0.0
+    assert extras["ftf.pilot_verify_price_skipped"] is False
     if eligible:
         assert extras["ftf.pilot_error"] == pytest.approx(1.0, abs=2e-6)
+        assert extras["ftf.pilot_candidate_dimension"] == 13
     else:
         assert extras["ftf.pilot_error"] is None
+        assert extras["ftf.pilot_candidate_dimension"] is None
+        assert extras["ftf.pilot_estimated_verify_s"] is None
+
+
+@pytest.mark.parametrize(("workers", "waves", "savings_s"), [(7, 1, 1.0), (4, 2, 2.0)])
+def test_price_not_amortized_skips_verification_and_keeps_upper_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    workers: int,
+    waves: int,
+    savings_s: float,
+) -> None:
+    engine = PilotEngine(extent=11, workers=workers)
+    monkeypatch.setattr(time, "monotonic", lambda: engine.wall_s)
+    acquire = _request()
+    result, extras = _sample(engine, acquire, 18, tmp_path)
+
+    assert engine.calls == [(18, (7,)), (18, tuple(range(7)))]
+    assert result.state_counts.shape == (8, 18)
+    np.testing.assert_array_equal(result.state_counts[:7, 12], acquire.reps)
+    assert result.state_counts[7, 12] == 0
+    assert result.state_counts[7, 0] == acquire.reps
+    assert extras["ftf.selected_dimension"] == 18
+    assert extras["ftf.pilot_point"] == 7
+    assert extras["ftf.pilot_drop"] == 0.0
+    assert extras["ftf.pilot_error"] is None
+    assert extras["ftf.pilot_verify_price_skipped"] is True
+    assert extras["ftf.pilot_candidate_dimension"] == 12
+    assert extras["ftf.pilot_candidate_drop"] == 0.0
+    assert extras["ftf.pilot_upper_dimension"] == 18
+    assert extras["ftf.pilot_upper_wall_s"] == 3.0
+    assert extras["ftf.pilot_timelines"] == 8
+    assert extras["ftf.pilot_workers"] == workers
+    assert extras["ftf.pilot_remaining_waves"] == waves
+    assert extras["ftf.pilot_estimated_verify_s"] == 2.0
+    assert extras["ftf.pilot_estimated_savings_s"] == savings_s
 
 
 def test_equal_dc_replaces_the_split_preparation_before_reusing_full_batch() -> None:

@@ -277,6 +277,8 @@ FTF acquire 使用 `simulate.evolution.Engine` 的分段算法。FTF 環境換�
 
 離線 Intel OpenCL 建表、U-table library、archive/reuse/validation 發布流程與 persistent exact density records 已移除。FTF 不需要數值資料庫路徑，也沒有 `build_database.py`。選裝 `gpu` extra 可讓合格的 `dop853` rows 在 OpenCL GPU 上執行，見 [GPU backend](../../../lib/zcu_tools/simulate/evolution/README.md#gpu-backend)。這套執行 backend 不做離線建表。引擎內部的週期表與 gate prepare 只在記憶體中重用，不是磁碟建庫機制。Routing-facts 預算不包含模型、solver、ADC、回傳 density 或仍被工作持有的資料，不是 process RAM 上限。
 
+FTF 在符合條件的 acquire 以上限基底解一條 pilot，再從完整 density 選候選維度。只有剩餘 timelines 的預估節省超過驗算成本，FTF 才以候選維度驗算一次。估價不回本或驗算超過誤差預算都用上限。規則與估價欄位見 [FTF dimension selection](../../../lib/zcu_tools/simulators/ftf/environment/README.md#dimension-selection) 和 [routing telemetry](../../../lib/zcu_tools/simulators/ftf/environment/README.md#routing-telemetry)。
+
 每 round 捕捉當下 snapshot。相同 snapshot 的 round 重用完整的讀出 preparation；若上一 round 用 pilot 的上限結果填一點，本 round 先用選定維度演化整批。Snapshot 改變時重新演化。每 round 使用新的抽樣身份，獨立 shot 不承接量子態或隨機輸出。
 
 開啟 `numerics.debug_capture` 後，從 manifest 的 `inputs` 讀 Engine 輸入與每列實際 routes。FTF 與 single-fluxonium 的 `metadata` 保存 acquire 成敗、實際 seed／sequence、每輪 DC 與 model identity，以及已觀察 identity 的有效設定。沒有 round snapshot 時讀 admission settings。Telemetry 開啟時用 `capture_file` 找到同次 acquire 的 manifest。這些診斷資料不進一般 Run/native/RPC metadata。

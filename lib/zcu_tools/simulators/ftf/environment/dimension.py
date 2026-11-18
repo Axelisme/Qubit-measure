@@ -1,8 +1,10 @@
 """Acquire-local dimension policy and terminal density pilot selection."""
 
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
+from math import ceil
 
 import numpy as np
 from numpy.typing import NDArray
@@ -29,6 +31,34 @@ _DROP_BUDGET = 0.5 * EVOLUTION_BUDGET
 
 
 @dataclass(frozen=True)
+class VerificationPrice:
+    """Wall estimate for verifying a candidate smaller than the upper basis.
+
+    candidate and upper are state counts; candidate_drop is the magnitude of
+    the largest omitted upper-density element at candidate. timelines counts
+    the whole first round, workers is the configured host width, and
+    remaining_waves counts the batches of worker slots after the pilot.
+    upper_wall_s measures the isolated upper solve. verify_s and savings_s
+    estimate the cost of one check and the total wall saved if it passes.
+    """
+
+    candidate: int
+    candidate_drop: float
+    upper: int
+    upper_wall_s: float
+    timelines: int
+    workers: int
+    remaining_waves: int
+    verify_s: float
+    savings_s: float
+
+    @property
+    def skipped(self) -> bool:
+        """Whether estimated savings do not strictly exceed verification cost."""
+        return self.savings_s <= self.verify_s
+
+
+@dataclass(frozen=True)
 class DimensionSelection:
     """Selected state count and the diagnostics for that acquire's pilot.
 
@@ -37,6 +67,7 @@ class DimensionSelection:
     at the upper basis and None without a pilot. error is the zero-padded
     verification's maximum absolute density error, or None if not attempted.
     reused is true when this acquire uses a prior acquire's selection.
+    verification_price is present only when a smaller dimension was priced.
     """
 
     dimension: int
@@ -44,6 +75,7 @@ class DimensionSelection:
     drop: float | None = None
     error: float | None = None
     reused: bool = False
+    verification_price: VerificationPrice | None = None
 
 
 def pilot_size(points: int, upper: int) -> bool:
@@ -190,31 +222,52 @@ def pilot_dimension(
 
     Call for a pilot-eligible first round. Returns the selection, the model
     source for the remaining batch, and the upper result for the pilot point.
-    The smaller verification is never used as production output.
+    A smaller basis is checked only if estimated savings exceed the check's
+    cost. The verification is never used as production output.
     """
     batches = tuple(plan.batch for plan in plans)
     index, row = _pilot_location(batches, facts.source)
     batch = _slice_batch(batches[index], slice(row, row + 1))
     point = int(batch.points[0])
+    start = time.monotonic()
     reference = _isolated_evolve(engine, facts.source, batch, options)
+    upper_wall_s = time.monotonic() - start
     upper = reference.densities[0]
+    upper_size = len(upper)
     k, drop = _candidate(upper)
-    if k == len(upper):
-        return (
-            DimensionSelection(k, pilot_point=point, drop=drop),
-            facts.source,
-            reference,
-        )
+    full = DimensionSelection(upper_size, pilot_point=point, drop=0.0)
+    if k == upper_size:
+        return full, facts.source, reference
+
+    timelines = sum(len(batch.points) for batch in batches)
+    workers = engine.workers
+    waves = ceil((timelines - 1) / workers)
+    # Linear scaling (p=1). Form both ratios over the same denominator so
+    # exact break-even cannot become profitable through cancellation in 1-r.
+    price = VerificationPrice(
+        candidate=k,
+        candidate_drop=drop,
+        upper=upper_size,
+        upper_wall_s=upper_wall_s,
+        timelines=timelines,
+        workers=workers,
+        remaining_waves=waves,
+        verify_s=(k / upper_size) * upper_wall_s,
+        savings_s=(waves * (upper_size - k) / upper_size) * upper_wall_s,
+    )
+    full = replace(full, verification_price=price)
+    if price.skipped:
+        return full, facts.source, reference
+
     reduced = facts.evolution_source(k)
     estimate = _isolated_evolve(engine, reduced, batch, options).densities[0]
     padded = np.zeros_like(upper)
     padded[:k, :k] = estimate
     error = float(np.max(np.abs(padded - upper)))
     if error <= EVOLUTION_BUDGET:
-        selection = DimensionSelection(k, pilot_point=point, drop=drop, error=error)
+        selection = replace(full, dimension=k, drop=drop, error=error)
         return selection, reduced, reference
-    selection = DimensionSelection(len(upper), pilot_point=point, drop=0.0, error=error)
-    return selection, facts.source, reference
+    return replace(full, error=error), facts.source, reference
 
 
 def _without_reference(
