@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from hashlib import sha256
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,11 +16,9 @@ from zcu_tools.simulate.evolution import (
     TimelineBatch,
     merge_path_diagnostics,
 )
-from zcu_tools.simulators.ftf.config import FTFSettings
 from zcu_tools.simulators.ftf.environment.cavity import CavityEvolutionOptions
-from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET, resonators
+from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET
 from zcu_tools.simulators.ftf.environment.template import FTFModelFacts, FTFTemplatePlan
-from zcu_tools.simulators.ftf.physics.model import prefix_model_source
 
 # A short sequence does not amortize the dimension check over enough points.
 _MIN_POINTS = 8
@@ -37,12 +36,14 @@ class DimensionSelection:
     skipped. drop is the largest discarded density element magnitude, zero
     at the upper basis and None without a pilot. error is the zero-padded
     verification's maximum absolute density error, or None if not attempted.
+    reused is true when this acquire uses a prior acquire's selection.
     """
 
     dimension: int
     pilot_point: int | None = None
     drop: float | None = None
     error: float | None = None
+    reused: bool = False
 
 
 def pilot_size(points: int, upper: int) -> bool:
@@ -54,17 +55,6 @@ def can_pilot(plans: tuple[FTFTemplatePlan, ...]) -> bool:
     """Whether these timelines support one complete density per pilot evolve."""
     return not any(
         any(plan.projective_reads) or any(plan.cavity_drives) for plan in plans
-    )
-
-
-def evolution_source(
-    facts: FTFModelFacts, settings: FTFSettings, n: int
-) -> ModelSource:
-    """Declare the selected DC prefix at these round facts, or return the upper source."""
-    if n == len(facts.source.initial_density):
-        return facts.source
-    return prefix_model_source(
-        facts.joint.energy_prefix(n), facts.source, resonators=resonators(settings)
     )
 
 
@@ -193,7 +183,6 @@ def pilot_dimension(
     engine: Engine,
     plans: tuple[FTFTemplatePlan, ...],
     facts: FTFModelFacts,
-    settings: FTFSettings,
     *,
     options: CavityEvolutionOptions,
 ) -> tuple[DimensionSelection, ModelSource, EvolutionResult]:
@@ -216,7 +205,7 @@ def pilot_dimension(
             facts.source,
             reference,
         )
-    reduced = evolution_source(facts, settings, k)
+    reduced = facts.evolution_source(k)
     estimate = _isolated_evolve(engine, reduced, batch, options).densities[0]
     padded = np.zeros_like(upper)
     padded[:k, :k] = estimate
@@ -253,16 +242,19 @@ def evolve_terminal(
     options: CavityEvolutionOptions,
     upper: int,
     reference: EvolutionResult | None,
-) -> EvolutionResult:
-    """Evolve terminal timelines with the selected source and embed in the upper basis.
+) -> tuple[EvolutionResult, tuple[bytes, ...]]:
+    """Evolve terminal timelines, embedding in the upper basis, with route digests.
 
     reference is the isolated upper result for one point, or None to solve the
-    whole batch. If supplied, solve only the other points before joining results.
-    Points keep their original C-order IDs.
+    whole batch. If supplied, only the other points register production routing
+    facts. The split and full batches use different routing digests. Points keep
+    their original C-order IDs.
     """
     batches = tuple(plan.batch for plan in plans)
+    key = options.key
     if reference is not None:
         batches = _without_reference(batches, int(reference.points[0]))
+        key = sha256(b"ftf-terminal-split\0" + key).digest()
     with options.evolving():
         result = engine.evolve(
             source,
@@ -271,15 +263,16 @@ def evolve_terminal(
             cancel=options.cancel,
             telemetry=options.telemetry,
             capture=options.capture,
+            reuse_key=key,
         )
     result = embed_upper(result, upper)
-    if reference is None:
-        return result
-    return EvolutionResult(
-        np.concatenate([result.points, reference.points]),
-        np.concatenate([result.densities, reference.densities]),
-        merge_path_diagnostics((result.paths, reference.paths)),
-    )
+    if reference is not None:
+        result = EvolutionResult(
+            np.concatenate([result.points, reference.points]),
+            np.concatenate([result.densities, reference.densities]),
+            merge_path_diagnostics((result.paths, reference.paths)),
+        )
+    return result, (key,)
 
 
 def embed_upper(result: EvolutionResult, upper: int) -> EvolutionResult:
