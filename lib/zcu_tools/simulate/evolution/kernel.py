@@ -273,8 +273,10 @@ class KernelContext:
     Standalone callers supply a fresh WorkPlan and close it after use.
     families is the immutable acquire-wide family allowlist for dispatch;
     None preserves unrestricted selection. Kernels retain their original guards.
-    opencl borrows the Engine's DOP853 backend for pricing and ordinary
-    timeline work; prefix execution drops this backend.
+    opencl borrows the Engine's DOP853 backend for pricing and timeline work;
+    None plans and runs CPU-only work (including shared prefixes).
+    opencl_dp54 selects DP5(4) when True and DOP853 when False; unused without
+    an OpenCL backend.
     workers is the effective acquire-wide CPU width used to price sampled rows.
     complete_row_offset maps contiguous prefix-table rows back to complete-table
     rows by addition. It is zero for complete geometry and standalone work.
@@ -286,6 +288,7 @@ class KernelContext:
     work_plan: WorkPlan
     families: frozenset[str] | None = None
     opencl: OpenCLBackend | None = None
+    opencl_dp54: bool = False
     workers: int = 1
     complete_row_offset: int = 0
     capture: CaptureRun | None = None
@@ -304,14 +307,15 @@ class ApplyContext:
         calls; Engine always passes the same WorkPlan to every apply.
     plan: this family's CPU RowPlan, or None when no plan is needed. CPU
         kernels reject missing required plans or plans that they cannot consume.
-    opencl: runner borrowed for a batch consisting only of admitted independent
-        DOP853 rows; None for CPU applies, including neighbors of OpenCL rows.
+    opencl: (borrowed runner, use DP5(4)) for a batch consisting only of
+        admitted independent DOP853 rows. False selects DOP853. Pass None
+        for CPU applies, including neighbors of OpenCL rows.
     """
 
     budget: float
     plan: RowPlan | None = None
     work_plan: WorkPlan = field(default_factory=WorkPlan)
-    opencl: OpenCLDOP853 | None = None
+    opencl: tuple[OpenCLDOP853, bool] | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:

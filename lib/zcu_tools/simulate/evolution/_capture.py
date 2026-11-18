@@ -296,11 +296,18 @@ class CaptureRun:
         """Record complete-table group coordinates without retaining probe states.
 
         errors aligns with group.spot_rows on numerical acceptance/rejection.
-        Price decisions omit errors; a later numerical guard replaces them.
+        Price decisions omit errors and cannot replace a completed comparison.
         Call on the complete CaptureRun, not a local prefix view.
         """
         first = group.rows[0]
         with self._sampled_lock:
+            item = self._sampled.get(first)
+            if (
+                errors is None
+                and item is not None
+                and item["decision"] in {"accepted", "rejected"}
+            ):
+                return
             spots: list[CaptureSampledSpot] = []
             for index, row in enumerate(group.spot_rows):
                 key = self.keys[row]
@@ -314,12 +321,11 @@ class CaptureRun:
                         else float(errors[index]),
                     }
                 )
-            if first in self._sampled:
-                item = self._sampled[first]
+            if item is not None:
                 item["decision"] = decision
                 item["spots"] = spots
             else:
-                item: CaptureSampledAdmission = {
+                item = {
                     "rows": [
                         {"batch": key.batch, "point": key.point, "segment": key.segment}
                         for key in (self.keys[row] for row in group.rows)

@@ -354,6 +354,13 @@ class _Classifier:
         self.guard_plans: dict[str, list[RowPlan]] = {}
         self.plans: dict[str, RowPlan] = {}
 
+    def scheduling_cost(
+        self, kernel: Kernel, rows: NDArray[np.int64]
+    ) -> NDArray[np.float64]:
+        if isinstance(kernel, DOP853Kernel):
+            return kernel.cost(self.table, rows, budget=self.budget)
+        return kernel.cost(self.table, rows)
+
     def observe(
         self, kernel: Kernel, rows: NDArray[np.int64], decision: GuardDecision
     ) -> None:
@@ -363,7 +370,7 @@ class _Classifier:
         if self.trace is None or not len(rows):
             return
         scheduling_costs = (
-            kernel.cost(self.table, rows)
+            self.scheduling_cost(kernel, rows)
             if decision != "untested_after_short_circuit"
             else [None] * len(rows)
         )
@@ -398,7 +405,7 @@ class _Classifier:
         self.deferred[local] = True
         self.observe(kernel, local, "deferred")
         if len(local):
-            self.costs[local] = kernel.cost(self.table, local)
+            self.costs[local] = self.scheduling_cost(kernel, local)
         selections = (
             selected for index, selected in groups.selections() if caller_keys[index]
         )
@@ -755,7 +762,7 @@ class _Classifier:
     def _result(self) -> Dispatch:
         for name in np.unique(self.names[self.names != ""]):
             rows = np.flatnonzero(self.names == name)
-            self.costs[rows] = self.kernels[str(name)].cost(self.table, rows)
+            self.costs[rows] = self.scheduling_cost(self.kernels[str(name)], rows)
         if not np.isfinite(self.costs).all() or np.any(self.costs < 0):
             raise ValueError("kernel costs must be finite and nonnegative")
         if self.selection is not None and self.selection.names is not None:
@@ -769,15 +776,19 @@ class _Classifier:
             unresolved = context == ""
             context[unresolved] = self.selection.names[context_rows[unresolved]]
             context[~self.geometry.pending[context_rows]] = ""
-            plans, chain = direct_plans(self.table, context, context_rows)
+            plans, chain = direct_plans(
+                self.table, context, context_rows, budget=self.context.budget
+            )
         else:
-            plans, chain = direct_plans(self.table, self.names)
+            plans, chain = direct_plans(
+                self.table, self.names, budget=self.context.budget
+            )
         backend = self.context.opencl
         dimension = self.context.source.initial_density.shape[0]
         gpu = (
             opencl_rows(self.table, plans.get("dop853"), dimension)
             if backend is not None
-            and backend.failure(dimension) is None
+            and backend.failure(dimension, dp54=self.context.opencl_dp54) is None
             and isinstance(self.kernels.get("dop853"), DOP853Kernel)
             else None
         )

@@ -206,7 +206,7 @@ class PrefixResolver:
             schedule = Schedule(
                 prefix,
                 dispatch,
-                replace(prefix_context, opencl=None),
+                prefix_context,
                 cancel,
                 initial,
                 capture=capture,

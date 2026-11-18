@@ -15,6 +15,7 @@ from .kernels._dop853 import ROW_INITIAL_STEP_NS
 from .kernels._multitone_spot import SampledGroup, sampled_groups
 from .kernels._rwa_fourier import fourier_coefficient
 from .kernels._rwa_numeric import STEP_NS, multitone_retention
+from .kernels.dop853 import cpu_work_scale
 from .kernels.multitone_rwa import MultitoneRWAKernel
 from .workplan import FactKey
 
@@ -158,7 +159,7 @@ def _gpu_seconds(
     # fall back to direct. Execution will recheck the final route and wave.
     def eligible_rows() -> NDArray[np.bool_]:
         names = np.where(table.tones > 0, "dop853", "")
-        plans, _ = direct_plans(table, names)
+        plans, _ = direct_plans(table, names, budget=context.budget)
         mask = opencl_rows(table, plans.get("dop853"), dimension)
         return np.zeros(len(table.tones), dtype=bool) if mask is None else mask
 
@@ -174,7 +175,12 @@ def _gpu_seconds(
     for wave in np.unique(ordinal):
         indices = eligible[ordinal == wave]
         cpu_wave, gpu_wave = opencl_wave_prices(
-            table, rows[indices], dimension, context.workers
+            table,
+            rows[indices],
+            dimension,
+            context.workers,
+            budget=context.budget,
+            dp54=context.opencl_dp54,
         )
         if backend.forced or gpu_wave < cpu_wave:
             gpu += gpu_wave
@@ -200,8 +206,9 @@ def _prefer(
     ):
         return True
     rows = np.asarray(group.rows, dtype=np.int64)
-    direct = _direct_seconds(table, rows, context)
-    rwa_cost = _rwa_seconds(table, rows, direct, group.spot_rows, context)
+    probe_direct = _direct_seconds(table, rows, context)
+    rwa_cost = _rwa_seconds(table, rows, probe_direct, group.spot_rows, context)
+    direct = probe_direct * cpu_work_scale(table.duration_ns[rows], context.budget)
     allow_direct = context.families is None or "dop853" in context.families
     if not allow_direct:
         direct = np.full_like(direct, np.inf)
@@ -233,7 +240,12 @@ def _prefer(
     if gpu_cost <= rwa_cost < cpu_cost and backend is not None:
         # The existing lazy device check may run a self-test. Never compile a
         # point variant to price a candidate that might not run.
-        return backend.candidate(context.source.initial_density.shape[0]) is None
+        return (
+            backend.candidate(
+                context.source.initial_density.shape[0], dp54=context.opencl_dp54
+            )
+            is None
+        )
     return rwa_cost < cpu_cost
 
 
@@ -266,7 +278,15 @@ def prefer_sampled_rwa(
     for index in np.unique(membership):
         group = admission.groups[index]
         preferred[index] = context.work_plan.fact(
-            FactKey(("sampled-rwa-preference", context.budget, group.rows[0]), bool),
+            FactKey(
+                (
+                    "sampled-rwa-preference",
+                    context.budget,
+                    group.rows[0],
+                    context.opencl is not None,
+                ),
+                bool,
+            ),
             lambda group=group: compare(group),
         )
     return preferred[membership]
