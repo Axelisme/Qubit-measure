@@ -179,19 +179,37 @@ STEP_SAFETY = 0.9
 STEP_MIN_FACTOR = 0.2
 STEP_MAX_FACTOR = 10.0
 STEP_ERROR_EXPONENT = -1 / 8
-_DP54_ERROR_EXPONENT = -1 / 5
+DP54_ERROR_EXPONENT = -1 / 5
+# The spike did not cover a tighter budget, where DOP853 can be cheaper.
+DP54_MIN_BUDGET = 1e-3
 # Dividing both local tolerances by three kept all six spike cells below 1e-3.
 DP54_TOLERANCE_DIVISOR = 3.0
 ENDPOINT_ATTEMPT_LIMIT = 10_000_000
 ERROR_NORM_BLEND = 0.01
 
 
-def endpoint_coefficients() -> dict[str, NDArray[np.float64]]:
-    """Return copies of the RK tableau and embedded 5th/3rd error weights."""
+def endpoint_coefficients(*, dp54: bool = False) -> dict[str, NDArray[np.float64]]:
+    """Copy the selected tableau and its embedded error weights.
+
+    DP5(4) includes the seventh RHS at the fifth-order candidate. DOP853
+    supplies both error vectors for its combined 5th/3rd error estimate.
+    """
+    if dp54:
+        return {
+            "A": np.vstack((_DP54_A, _DP54_B)),
+            "B": np.r_[_DP54_B, 0.0],
+            "C": np.r_[_DP54_C, 1.0],
+            "E5": _DP54_ERROR.copy(),
+        }
     return {
         name: values.copy()
         for name, values in (("A", _A), ("B", _B), ("C", _C), ("E5", _E5), ("E3", _E3))
     }
+
+
+def endpoint_stage_count(*, dp54: bool) -> int:
+    """Return the number of derivatives stored for one selected endpoint step."""
+    return len(_DP54_ERROR) if dp54 else len(_B)
 
 
 class Tolerances(NamedTuple):
@@ -406,7 +424,7 @@ def integrate_workspace(
         return state
     candidate = workspace.candidate
     tableau = (_DP54_A, _DP54_B, _DP54_C) if use_dp54 else (_A, _B, _C)
-    exponent = _DP54_ERROR_EXPONENT if use_dp54 else STEP_ERROR_EXPONENT
+    exponent = DP54_ERROR_EXPONENT if use_dp54 else STEP_ERROR_EXPONENT
     time = 0.0
     step = min(first_step, controls.max_step)
     rejected = False

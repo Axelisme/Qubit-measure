@@ -4,6 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .kernel import RowPlan, SegmentTable
+from .kernels._dop853 import DP54_MIN_BUDGET
 from .kernels._dop853_opencl import ROWS_PER_BATCH
 from .kernels.dop853 import DOP853Plan, cpu_dp54_rows
 from .kernels.flux_dop853 import FluxDOP853Plan
@@ -12,6 +13,9 @@ _MAX_OPENCL_DIMENSION = 32
 _MAX_OPENCL_KNOTS = 960
 _MIN_OPENCL_DURATION_NS = 100.0
 _MAX_OPENCL_DURATION_NS = 10_000.0
+# Arc d=24/d=32 simultaneous-drive medians were 0.68/0.61 of DOP853 wall.
+# Use the slower factor for matrix work, not for launch or per-trial floors.
+_DP54_GPU_WORK_SCALE = 0.68
 
 
 def opencl_rows(
@@ -102,7 +106,7 @@ def opencl_preferred(
     For an available device, the price uses the acquire work and worker width,
     not Engine or disk cache warmth or measured wall time. Calibrated on Arc
     for d=3 sampled pulses and d=32 FTF simultaneous drive at 1, 4 and 24 points.
-    The evolve budget determines which tableau the CPU alternative would use.
+    The evolve budget determines the tableau priced on each device.
     """
     # One extra knot covers a final held value before the appended row end.
     knots = _union_knots(table, rows) + 1
@@ -115,9 +119,9 @@ def opencl_preferred(
     # This model is in seconds, unlike the relative scheduling units. On the
     # 960-knot FTF rows, measured DP5(4) CPU was 1.02–1.52 times the legacy
     # CPU estimate (which underpredicted actual DOP853 CPU on this host).
-    # Reprice just the CPU alternative; device work still uses 12 stages.
     cpu_row *= np.where(cpu_dp54_rows(table.duration_ns[rows], budget), 1.2, 1.0)
     cpu = max(float(cpu_row.sum()) / lanes, float(cpu_row.max()))
+    gpu_work = work * _DP54_GPU_WORK_SCALE if budget >= DP54_MIN_BUDGET else work
     # Like routing history, replacing the Engine must not change the route.
     # Disk cache amortizes cold compilation per machine, driver, kernel and d;
     # charge only the resident-program overhead, regardless of cache state.
@@ -130,7 +134,7 @@ def opencl_preferred(
         for start in range(0, len(members), ROWS_PER_BATCH):
             batch = members[start : start + ROWS_PER_BATCH]
             gpu += _batch_gpu_seconds(
-                work[batch], trials[batch], int(knots[batch].max()), dimension
+                gpu_work[batch], trials[batch], int(knots[batch].max()), dimension
             )
     return gpu < cpu
 
@@ -150,7 +154,7 @@ def direct_plans(
     retain global-row indexing; frames outside the selected family are empty.
     A chain ID is its first global row, independent of payload/apply partition.
     budget is the evolve allowance used to select the tableau for CPU endpoints;
-    OpenCL uses its own DOP853 tableau even for rows marked for DP5(4) on CPU.
+    OpenCL tableau selection is separate because admission bounds row duration.
     """
     size = len(table.timeline)
     if rows is None:

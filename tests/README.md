@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-18，CPU DP5(4) 精度矩陣選集
+**Last updated:** 2026-11-18，OpenCL DP5(4) 精度矩陣選集
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -179,7 +179,9 @@ uv run --directory <worktree> --no-sync -- \
 `PASS` 表示最大誤差不超過 `2e-3`。`FAIL` 保留超標數字，即使案例標了 xfail。
 `NOT EXERCISED` 表示此次選集沒有該 family 或 backend 的觀察值，誤差欄顯示 `-`，不填 `0`。
 `dop853/opencl` 另計實際走 GPU 的案例。GPU lane 選 `-m requires_opencl` 時，
-矩陣用 `telemetry=True` 核對 GPU row 數，並驗證交接密度的 trace 與 Hermiticity。
+矩陣用 `telemetry=True` 核對 GPU row 與 tableau 數，並驗證交接密度的 trace 與 Hermiticity。
+GPU DP5(4) 選集含合成 sampled 案例、FTF 960-knot 點與 10 µs 邊緣。
+`tight-budget` 用小於 `1e-3` 的 budget 驗證 GPU 保留 DOP853。
 CPU DP5(4) 的三個節點是
 `test_cpu_dp54_density[cpu_dp54_short_sampled]`、
 `test_cpu_dp54_density[cpu_dp54_ftf_960]` 與

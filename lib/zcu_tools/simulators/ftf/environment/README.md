@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, CPU DP5(4) replay revision
+**Last updated:** 2026-11-18, OpenCL DP5(4) replay revision
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -679,7 +679,7 @@ field inheritance.
 Direct means retain conditional moments, their numeric values and their existing
 RNG stream. Raw getters do not advance that stream or shift shots to match a
 finite-shot direct mean. Each acquisition route reproduces itself for equal
-seed, inputs and recorded versions. Evolution uses `segment-engine-v10`.
+seed, inputs and recorded versions. Evolution uses `segment-engine-v11`.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.

@@ -27,6 +27,7 @@ from .accuracy_cases import (
     AccuracyCase,
     accuracy_case,
     coherent_source,
+    cpu_dp54_case,
     drive_track,
     linear_drive_model,
     timeline,
@@ -116,10 +117,10 @@ def stub_opencl(monkeypatch: pytest.MonkeyPatch) -> str:
         def check_device(self) -> None:
             pass
 
-        def cached_build_failure(self, dimension: int) -> None:
+        def cached_build_failure(self, dimension: int, *, dp54: bool) -> None:
             return None
 
-        def compile_variant(self, dimension: int) -> None:
+        def compile_variant(self, dimension: int, *, dp54: bool) -> None:
             return None
 
         def advance(
@@ -128,6 +129,8 @@ def stub_opencl(monkeypatch: pytest.MonkeyPatch) -> str:
             row_models: object,
             states: np.ndarray,
             budget: float,
+            *,
+            dp54: bool,
         ) -> np.ndarray:
             return states
 
@@ -140,16 +143,30 @@ def stub_opencl(monkeypatch: pytest.MonkeyPatch) -> str:
     return DeviceStub.execution_device
 
 
-def test_opencl_dop853_keeps_eighth_order_tableau(stub_opencl: str) -> None:
+@pytest.mark.parametrize(
+    ("budget", "dp54"),
+    [
+        pytest.param(0.999e-3, False, id="under-budget"),
+        pytest.param(1e-3, True, id="inclusive-budget"),
+    ],
+)
+def test_opencl_dop853_selects_tableau_by_budget(
+    stub_opencl: str, budget: float, dp54: bool
+) -> None:
     case = accuracy_case("sampled_gaussian_9")
-    with closing(Engine(1, backend="opencl", families=case.families)) as engine:
-        paths = engine.evolve(case.source, (case.batch,), telemetry=True).paths
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="opencl", families=case.families)) as engine,
+    ):
+        paths = engine.evolve(
+            case.source, (case.batch,), budget=budget, telemetry=True
+        ).paths
 
     assert paths.execution_device == stub_opencl
     report = paths.routing["dop853"]
     assert report.opencl_rows == len(case.batch.points)
-    assert report.dp54_rows == 0
-    assert report.dop853_rows == report.opencl_rows
+    assert report.dp54_rows == (report.opencl_rows if dp54 else 0)
+    assert report.dop853_rows == (0 if dp54 else report.opencl_rows)
 
 
 def test_explicit_opencl_raises_during_construction_without_a_device(
@@ -277,34 +294,27 @@ def test_auto_rejects_a_wrong_device_endpoint_and_remembers_the_failure(
 def test_auto_keeps_gpu_when_the_detection_result_cannot_be_written(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import pyopencl as cl
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path))
+    replace_file = Path.replace
+    blocked = 0
 
-    root = tmp_path / "cache"
-    displaced = tmp_path / "displaced-cache"
-    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(root))
-    build = cl.Program.build
-
-    def build_then_block_cache_writes(
-        program: cl.Program,
-        options: str | Sequence[str] | None = None,
-        devices: Sequence[cl.Device] | None = None,
-        cache_dir: str | None = None,
-    ) -> cl.Program:
-        built = build(program, options=options, devices=devices, cache_dir=cache_dir)
-        # Block filesystem writes only after compilation succeeds. A file in
-        # place of the root denies subdirectory creation even on Windows.
-        root.rename(displaced)
-        root.touch()
-        return built
+    def reject_detection_write(path: Path, target: str | Path) -> Path:
+        nonlocal blocked
+        destination = Path(target)
+        if destination.parent.name == "detection" and destination.is_relative_to(
+            tmp_path
+        ):
+            blocked += 1
+            raise OSError("injected detection cache write failure")
+        return replace_file(path, target)
 
     source = coherent_source(synthetic_model(32))
     batch = _dense_batch(1)
-    with closing(Engine(2, families=("dop853",))) as auto:
-        with monkeypatch.context() as driver:
-            driver.setattr(cl.Program, "build", build_then_block_cache_writes)
+    with closing(source), closing(Engine(2, families=("dop853",))) as auto:
+        with monkeypatch.context() as filesystem:
+            filesystem.setattr(Path, "replace", reject_detection_write)
             device = auto.detect_execution_device()
-        root.unlink()
-        displaced.rename(root)
+        assert blocked == 1
         assert device.startswith("opencl:")
         result = auto.evolve(source, (batch,), telemetry=True)
     assert result.paths.execution_device == device
@@ -326,9 +336,9 @@ def _dense_batch(count: int) -> TimelineBatch:
     )
 
 
-def test_auto_reprices_only_the_dp54_cpu_alternative(stub_opencl: str) -> None:
-    # One dense 13-level endpoint sits between the legacy DOP853 CPU price
-    # and the calibrated DP5(4) CPU price. Keep GPU work identical across calls.
+def test_auto_reprices_the_dp54_cpu_alternative(stub_opencl: str) -> None:
+    # For one dense 13-level endpoint the GPU launch/trial floor dominates.
+    # Its price sits between the DOP853 and calibrated DP5(4) CPU prices.
     batch = _dense_batch(1)
     with (
         closing(coherent_source(synthetic_model(13))) as source,
@@ -339,6 +349,23 @@ def test_auto_reprices_only_the_dp54_cpu_alternative(stub_opencl: str) -> None:
 
     assert tight.paths.execution_device == "cpu"
     assert tight.paths.routing["dop853"].dop853_rows == 1
+    assert loose.paths.execution_device == stub_opencl
+    assert loose.paths.routing["dop853"].opencl_rows == 1
+
+
+def test_auto_reprices_the_dp54_opencl_alternative(stub_opencl: str) -> None:
+    # A sparse 20-level endpoint is cheaper on CPU with the old GPU price,
+    # even with CPU DP5(4). The lower GPU compute price tips the comparison.
+    case = cpu_dp54_case("cpu_dp54_short_sampled")
+    with (
+        closing(case.source),
+        closing(coherent_source(synthetic_model(20))) as source,
+        closing(Engine(1, families=case.families)) as engine,
+    ):
+        tight = engine.evolve(source, (case.batch,), budget=0.999e-3, telemetry=True)
+        loose = engine.evolve(source, (case.batch,), budget=1e-3, telemetry=True)
+
+    assert tight.paths.routing["dop853"].opencl_rows == 0
     assert loose.paths.execution_device == stub_opencl
     assert loose.paths.routing["dop853"].opencl_rows == 1
 
@@ -413,7 +440,7 @@ def test_auto_routing_and_density_do_not_depend_on_chunk_count() -> None:
 
 
 @pytest.mark.requires_opencl
-def test_auto_isolates_a_failing_dimension_build(
+def test_auto_isolates_a_failing_dimension_tableau_build(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import pyopencl as cl
@@ -430,9 +457,9 @@ def test_auto_isolates_a_failing_dimension_build(
     ) -> cl.Program:
         nonlocal failures
         defines = options.split() if isinstance(options, str) else options or ()
-        if "-DD=32" in defines:
+        if "-DD=32" in defines and "-DDP54=1" in defines:
             failures += 1
-            raise RuntimeError("injected d32 compiler rejection")
+            raise RuntimeError("injected d32 DP5(4) compiler rejection")
         return build(program, options=options, devices=devices, cache_dir=cache_dir)
 
     monkeypatch.setattr(cl.Program, "build", build_device_program)
@@ -445,6 +472,7 @@ def test_auto_isolates_a_failing_dimension_build(
     ):
         expected = cpu.evolve(source, (batch,))
         declined = auto.evolve(source, (batch,), telemetry=True)
+        tight = auto.evolve(source, (batch,), budget=0.999e-3, telemetry=True)
         supported = auto.evolve(good_source, (_dense_batch(24),), telemetry=True)
     with closing(Engine(2, families=("dop853",))) as restarted:
         cached = restarted.evolve(source, (batch,), telemetry=True)
@@ -455,13 +483,16 @@ def test_auto_isolates_a_failing_dimension_build(
         assert report.opencl_rows == 0
         assert report.opencl_detection_error is not None
         assert "dimension 32" in report.opencl_detection_error
-        assert "injected d32 compiler rejection" in report.opencl_detection_error
+        assert "injected d32 DP5(4) compiler rejection" in report.opencl_detection_error
     assert failures == 1
+    tight_report = tight.paths.routing["dop853"]
+    assert tight_report.opencl_rows == tight_report.dop853_rows == len(batch.points)
+    assert tight_report.opencl_detection_error is None
     assert supported.paths.routing["dop853"].opencl_rows == 24
     assert supported.paths.routing["dop853"].opencl_detection_error is None
     with (
         closing(Engine(2, families=("dop853",), backend="opencl")) as forced,
-        pytest.raises(RuntimeError, match="injected d32 compiler rejection"),
+        pytest.raises(RuntimeError, match=r"injected d32 DP5\(4\) compiler rejection"),
     ):
         forced.evolve(source, (batch,))
 

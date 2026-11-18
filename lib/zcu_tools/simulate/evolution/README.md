@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, CPU DP5(4) within dop853
+**Last updated:** 2026-11-18, OpenCL DP5(4) within dop853
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -181,29 +181,30 @@ managed lanes can run GPU tests on machines with a compatible driver.
 | --- | --- |
 | `"auto"` (default) | Detects OpenCL on the first eligible row. For eligible DOP853 work, compares CPU and GPU cost, including warm program setup, transfers and batch size. |
 | `"cpu"` | Never probes or uses OpenCL. |
-| `"opencl"` | Requires a device that passes detection at construction. Sends eligible DOP853 rows to that device without price comparison or fallback. A dimension-specific build failure raises during evolve. Ineligible rows can still run on CPU. |
+| `"opencl"` | Requires a device that passes detection at construction. Sends eligible DOP853 rows to that device without price comparison or fallback. A build failure for the selected dimension and tableau raises during evolve. Ineligible rows can still run on CPU. |
 
 Eligibility depends on structure, not envelope shape. The row must be an
-independent, unchained interaction-frame DOP853 endpoint at fixed DC, with no
+independent, unchained interaction-frame `dop853` endpoint at fixed DC, with no
 flux modulation or segment shift. It must last 100 ns to 10 µs and have at most
 32 retained levels. Two sampled tones must cover the whole row. The union of
 their sample grids can contain at most 960 knots, because the runner restarts
 integration at knots from either tone. Other rows in the same timeline may
 run on CPU.
 
-Detection imports `pyopencl`, finds an FP64 GPU, compiles a small program and
-checks a fixed endpoint against CPU. The maximum absolute entry difference
-must be at most `1e-5`. The Engine can reuse the stored probe result for the
-same device, driver and kernel. Failure to write that result does not change
-the probe outcome. If detection fails, `opencl` raises during construction and
-`auto` uses CPU with the same numerical result as `"cpu"`. If a program fails
-to build for one dimension before execution, `auto` falls back only for that
-dimension. Read the reason in `opencl_detection_error` with routing telemetry
-enabled. Errors during GPU execution raise instead of retrying on CPU.
+Detection imports `pyopencl`, finds an FP64 GPU and compiles both tableaux
+for a fixed three-level endpoint. Each result must differ from its CPU
+counterpart by at most `1e-5` per complex entry. The Engine can reuse the
+stored probe result for the same device, driver and kernel. Failure to write
+that result does not change the probe outcome. If detection fails, `opencl`
+raises during construction and `auto` uses CPU with the same numerical result
+as `"cpu"`. If a program fails to build before execution, `auto` falls back
+only for that dimension and tableau. Enable routing telemetry to read the
+reason in `opencl_detection_error`. GPU execution errors raise without a CPU retry.
 
-One work-group integrates one row on device, using the DOP853 tableau,
-error norm, controller and budget-scaled tolerances. CPU rows can instead use
-DP5(4) under the [kernel summary](#kernel-summary) rule. The GPU computes
+One work-group integrates one row on device. At budgets ≥ `1e-3`, eligible
+rows use DP5(4) with one third of the DOP853 local tolerances. Every eligible
+row is at most 10 µs, so it meets the same duration limit as CPU DP5(4).
+Tighter budgets retain DOP853. The GPU computes
 the starting interaction-frame phasor of each step in FP64 and uses FP32
 within the step. Before handing off the density, the runner returns it to the
 model eigenbasis, symmetrizes it and normalizes its trace. The scheduler
@@ -212,12 +213,16 @@ measured dispatch times to target about 0.1 s per batch without reading OS or
 driver timeout settings.
 
 The CPU/GPU cost choice uses the ready rows, worker count and evolve budget.
-The CPU estimate uses the DP5(4) price when that tableau would run on CPU.
-The GPU estimate remains based on DOP853. Disk cache warmth and measured
-batch times do not enter that choice. Program
-builds and detection records use
-`<user-cache-root>/opencl/dop853/<digest>/`; the digest covers the kernel
-source and options, dimension, device and driver. The driver can also cache
+For DP5(4), the GPU estimate multiplies matrix work by 0.68 and keeps the
+launch, transfer and per-trial floors unchanged. The factor uses the slower
+of two warm 24-point `simultaneous_drive` measurements on Intel Arc.
+At d=24 the median fell from 0.303 s to 0.206 s (1.47×); at d=32 it fell from
+0.502 s to 0.308 s (1.63×). Maximum absolute complex-density errors against
+the independent reference were `3.04e-5` and `2.76e-5`, respectively.
+Disk cache warmth and measured batch times do not enter routing.
+Program builds and detection records use `<user-cache-root>/opencl/dop853/<digest>/`;
+the digest covers the kernel source and options, including dimension and tableau,
+plus the device and driver. The driver can also cache
 builds itself. The simulator's [cache root](../README.md#numba-machine-code-cache)
 can be set with an absolute `ZCU_TOOLS_CACHE_DIR`. A cold build populates the
 cache for later Engines and is not charged in the routing cost. The Engine
@@ -672,9 +677,9 @@ all adopting timelines. Caller-retained complete preparation hits report logical
 rows as `cache_hits`, with zero CPU, rejected rows and estimated work.
 Engine evolves always execute numerical work. For `dop853`, `opencl_rows`
 counts endpoints computed on GPU and `opencl_detection_error` reports why
-automatic detection or the active dimension's compilation failed. It is
-`None` when neither failed. `dp54_rows` counts physical DP5(4) endpoints;
-`dop853_rows` counts physical DOP853 endpoints, including `opencl_rows`.
+automatic detection or compilation for the active dimension and tableau failed.
+It is `None` when neither failed. `dp54_rows` counts physical DP5(4) endpoints;
+`dop853_rows` counts physical DOP853 endpoints. Both counts include CPU and GPU.
 Both tableau counts add across merged reports and are zero on exact-result reuse.
 A shared prefix contributes one execution, not one execution per consumer.
 The paired benchmark reads these counts from Engine results. The
@@ -829,7 +834,7 @@ routes and final densities. This does not force every sampled row to DOP853.
 | [`multitone_gate`](kernels/multitone_gate.py), retained simultaneous RWA gate family | `multiple`, disabled | Rejects every row. The retained 20-use inventory cost preference cannot restore numerical admission at 19 or 20 uses; pinning cannot bypass rejection. Shared single-tone gate numerics are unchanged. | [19/20 and pinned rejection contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | NOT EXERCISED; no density error |
 | [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only | Exactly two constant envelopes, fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Sampled rows are rejected. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports its final metrics. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms. At each endpoint, the kernel sums all tones' kicks before acting on density. Row-local kick time equals the propagation duration; following idle rows do not extend it. Apply step ceiling is 16 ns. | [`joint_constant`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. DOP853 local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B). CPU rows with d ≤ 10,000 ns and B ≥ 1e-3 use DP5(4) at one third of both tolerances. Other CPU rows and all GPU rows use DOP853. | [`shaped_complex`, `two_carriers`, `joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [CPU DP5(4) cases](#cpu-dp54-accuracy) | PASS |
+| [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. DOP853 local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B). CPU and [eligible OpenCL](#gpu-backend) rows with d ≤ 10,000 ns and B ≥ 1e-3 use DP5(4) at one third of both tolerances. Other rows use DOP853. | [`shaped_complex`, `two_carriers`, `joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [CPU and OpenCL DP5(4) cases](#cpu-dp54-accuracy) | PASS |
 
 For dissipative DC rows, [slow dispatch](_slow_dispatch.py) charges channel
 construction as `3.8 * (M/32)^6` seconds, divided by the exact prepare key's
@@ -1008,6 +1013,9 @@ checks a 100 ns sampled row, an FTF d=24 simultaneous-drive point with
 960 samples per tone, and a sampled row exactly at 10 µs. It confirms DP5(4)
 through routing telemetry and compares every complex density entry at readout
 to the independent two-tolerance interaction-frame Lindblad reference.
+The OpenCL matrix uses the same FTF point and duration edge, plus synthetic
+sampled cases and a tighter-budget DOP853 control. It checks the actual GPU
+row and tableau counts, then compares full density to the independent reference.
 
 These measurements cover the linked inputs, not every input admitted by a
 guard. Historical population calibrations, omission proxies and local solver
@@ -1251,7 +1259,7 @@ class's methods.
 | Secular coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
 | Density basis conversion | `transform_density` in [state.py](state.py), shared by population conversion, scheduler boundaries, Dyson input bounds and compiled DOP853 chains. Callers retain basis selection and traversal. |
 | Adaptive DOP853 and DP5(4) tableaux, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
-| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. CPU `dop853` rows, `t6` direct rows and period fractional tails share this entry point, supplying explicit frames. Only CPU `dop853` rows can reduce the shared DOP853 tolerances by selecting DP5(4). Budget validation, knot stops and numerical failures are unchanged. |
+| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. CPU `dop853` rows, `t6` direct rows and period fractional tails share this entry point, supplying explicit frames. Within this CPU entry point, only `dop853` rows can reduce the shared DOP853 tolerances by selecting DP5(4). [OpenCL `dop853`](#gpu-backend) uses the same tableaux and tolerance rule in its device runner. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py) owns period builds and trajectories, with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. [kernels/_period_channel.py](kernels/_period_channel.py) owns complete secular-channel playback. Separate from two-tone Floquet frames. |
@@ -1368,9 +1376,8 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v10`. It distinguishes the CPU
-DP5(4) rule from earlier results. With the default `backend="auto"`, eligible
-`dop853` rows can still use the mixed-precision GPU solver.
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v11`. It distinguishes the OpenCL
+DP5(4) rule from earlier results. The CPU tableau rule is unchanged.
 `simulators.ftf.environment` owns private replay and checks backend, model,
 numerical, RNG and dependency versions before
 recomputing a round. Evolution does not persist densities or offline tables

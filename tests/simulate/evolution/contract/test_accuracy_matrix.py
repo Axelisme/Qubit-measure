@@ -172,32 +172,52 @@ def test_cpu_dp54_density(name: str, request: pytest.FixtureRequest) -> None:
 
 
 @pytest.mark.requires_opencl
-@pytest.mark.parametrize("name", OPENCL_CASES)
+@pytest.mark.parametrize(
+    ("name", "budget", "dp54"),
+    [
+        *(pytest.param(name, 1e-3, True, id=name) for name in OPENCL_CASES),
+        pytest.param("cpu_dp54_ftf_960", 1e-3, True, id="ftf_960"),
+        pytest.param("cpu_dp54_duration_edge", 1e-3, True, id="duration_edge"),
+        pytest.param("sampled_gaussian_9", 0.999e-3, False, id="tight-budget"),
+    ],
+)
 def test_opencl_dop853_density(
     name: str,
+    budget: float,
+    dp54: bool,
     request: pytest.FixtureRequest,
 ) -> None:
-    case = accuracy_case(name)
-    families = ("t4", *case.families) if case.idle_family else case.families
-    with closing(
-        Engine(1, backend="opencl", families=families, chunks_per_worker=1)
-    ) as engine:
-        result = engine.evolve(case.source, (case.batch,), telemetry=True)
-    require_families(result.paths, families)
-    assert result.paths.routing["dop853"].opencl_rows == len(case.batch.points)
-    assert result.paths.max_trace_error <= 1e-8
-    densities = result.densities
-    assert np.max(np.abs(densities - densities.conj().swapaxes(-1, -2))) <= 1e-10
+    case = cpu_dp54_case(name) if name in CPU_DP54_CASES else accuracy_case(name)
+    families = (case.idle_family, *case.families) if case.idle_family else case.families
+    with closing(case.source):
+        with closing(
+            Engine(1, backend="opencl", families=families, chunks_per_worker=1)
+        ) as engine:
+            result = engine.evolve(
+                case.source, (case.batch,), budget=budget, telemetry=True
+            )
+        require_families(result.paths, families)
+        report = result.paths.routing["dop853"]
+        assert report.opencl_rows == len(case.batch.points)
+        assert report.dp54_rows == (report.opencl_rows if dp54 else 0)
+        assert report.dop853_rows == (0 if dp54 else report.opencl_rows)
+        assert result.paths.max_trace_error <= 1e-8
+        densities = result.densities
+        assert np.max(np.abs(densities - densities.conj().swapaxes(-1, -2))) <= 1e-10
 
-    reference = interaction_reference(case.source, case.batch)
-    assert reference.convergence_error <= 2e-6
-    with closing(Engine(1, backend="cpu", families=families)) as engine:
-        cpu = engine.evolve(case.source, (case.batch,))
+        max_step_ns = 0.5 if name == "cpu_dp54_duration_edge" else 0.05
+        reference = interaction_reference(
+            case.source, case.batch, max_step_ns=max_step_ns
+        )
+        assert reference.convergence_error <= 2e-6
+        with closing(Engine(1, backend="cpu", families=families)) as engine:
+            cpu = engine.evolve(case.source, (case.batch,), budget=budget)
     error = density_error(densities, reference.density)
+    method = "dp54" if dp54 else "dop853"
     request.node.user_properties.append(
         measurement_property(
             AccuracyMeasurement(
-                name + "/pinned", "dop853/opencl", error, reference.convergence_error
+                f"{name}/{method}", "dop853/opencl", error, reference.convergence_error
             )
         )
     )

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
-from ._dop853 import tolerances
+from ._dop853 import DP54_MIN_BUDGET, tolerances
 from ._dop853_chain import ChainRows, run_chain
 from ._dop853_data import (
     Context,
@@ -22,10 +22,7 @@ from ._dop853_data import (
 from ._dop853_intervals import playback_time
 from ._workload_facts import packed_segments
 
-# The spike exercised rows through 10 µs at the production budget. Tighter
-# budgets were not measured and favor the higher-order DOP853 method.
 _MAX_DP54_DURATION_NS = 10_000.0
-_MIN_DP54_BUDGET = 1e-3
 # Seven paired CPU endpoints (d=8..32, 0.1..10 µs) took 0.50..0.75 times
 # the same row's DOP853 apply CPU. Keep the existing relative scheduling units.
 _DP54_SCHEDULING_SCALE = 0.6
@@ -35,9 +32,9 @@ def cpu_dp54_rows(duration_ns: NDArray[np.float64], budget: float) -> NDArray[np
     """Mark positive-duration dop853 rows that use DP5(4) if run on CPU.
 
     Supply validated row durations in ns and a positive finite evolve budget.
-    The result aligns with duration_ns. GPU endpoints always use DOP853.
+    The result aligns with duration_ns.
     """
-    return (budget >= _MIN_DP54_BUDGET) & (duration_ns <= _MAX_DP54_DURATION_NS)
+    return (budget >= DP54_MIN_BUDGET) & (duration_ns <= _MAX_DP54_DURATION_NS)
 
 
 @dataclass(frozen=True)
@@ -419,8 +416,12 @@ class DOP853Kernel:
             advance_endpoints(data, (rows, key_index), states, budget, cpu_plan)
             _report_cpu_tableaux(context, self.name, cpu_plan, rows)
         if runner is not None:
-            states[:] = runner.advance(data, (rows, key_index), states, budget)
-            context.work_plan.routing.ran_opencl(self.name, len(rows))
+            # OpenCL admission already bounds duration to at most 10 µs.
+            dp54 = budget >= DP54_MIN_BUDGET
+            states[:] = runner.advance(
+                data, (rows, key_index), states, budget, dp54=dp54
+            )
+            context.work_plan.routing.ran_opencl(self.name, len(rows), dp54=dp54)
         return np.zeros(len(rows), dtype=np.bool_)
 
 

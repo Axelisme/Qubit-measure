@@ -744,7 +744,7 @@ class _Classifier:
         gpu = (
             opencl_rows(self.table, plans.get("dop853"), dimension)
             if backend is not None
-            and backend.failure(dimension) is None
+            and backend.failure(dimension, self.context.budget) is None
             and isinstance(self.kernels.get("dop853"), DOP853Kernel)
             else None
         )

@@ -42,9 +42,9 @@ class FamilyRouting:
         active dimension's compilation failed, or None when neither failed.
         Populated only for DOP853. Merged reports retain the first nonempty
         reason in input order.
-    dp54_rows: physical endpoints executed by CPU DP5(4) within dop853.
-    dop853_rows: physical endpoints executed by DOP853 within dop853, including
-        opencl_rows. Both tableau counts are zero for reuse and other families;
+    dp54_rows: physical endpoints executed by DP5(4) within dop853, across devices.
+    dop853_rows: physical endpoints executed by DOP853 within dop853, across
+        devices. Both tableau counts are zero for reuse and other families;
         execution of a shared prefix counts once, not once per consumer.
     CPU values exclude dispatch, geometry, ADC and I/O. All values are
     nonnegative; actual_cpu_s is the sum of the two measured phases.
@@ -131,13 +131,16 @@ class RoutingCollector:
             with self._lock:
                 self._totals.setdefault(name, _Totals()).admission_rows += count
 
-    def ran_opencl(self, name: str, count: int) -> None:
-        """Count count physical endpoints completed on OpenCL for family name."""
+    def ran_opencl(self, name: str, count: int, *, dp54: bool) -> None:
+        """Record completed OpenCL endpoints for the selected tableau."""
         if self.enabled and count:
             with self._lock:
                 total = self._totals.setdefault(name, _Totals())
                 total.opencl_rows += count
-                total.dop853_rows += count
+                if dp54:
+                    total.dp54_rows += count
+                else:
+                    total.dop853_rows += count
 
     def ran_cpu_dop853(self, name: str, rows: int, dp54_rows: int) -> None:
         """Count completed CPU endpoints: dp54_rows of rows used DP5(4)."""
