@@ -17,10 +17,11 @@ def direct_preferred(
     Only dissipative zero-carrier rows pay the dense Lindblad channel charge.
     Exact prepare keys amortize construction over this acquire, never history
     or resident cache state. Model lookup and key grouping build no channels.
-    The measured single-thread expm charges are 0.035/1.71/19.1/120 s at
-    M=16/32/48/64. Use 1.71*(M/32)**6 for O((M**2)**3) construction and
-    0.000422*(M/32)**4 per application. Direct uses the existing two-tone
-    bandwidth/action scheduling model; neither estimate certifies admission.
+    Single-thread dissipative DC channel runs took 0.08–0.10 s at M=16,
+    4.6–5.4 s at M=32 and 49.5 s at M=48. Charge 3.8*(M/32)**6 for
+    O((M**2)**3) construction and 0.000422*(M/32)**4 per application.
+    Direct uses a slow-domain calibration of the bandwidth/action model
+    over 40–350 ns plateaus. Neither estimate certifies admission.
     """
 
     def build() -> frozenset[int]:
@@ -46,14 +47,14 @@ def direct_preferred(
                 + np.linalg.norm(drive.quadrature_ghz, 2)
             )
             direct = (
-                5.67e-5
+                1.4e-5
                 * table.duration_ns[row]
                 * (float(np.ptp(model.energies_ghz)) + 2 * strength)
                 * (1 + 4 * np.sqrt(strength) + 4 * strength)
                 * (size / 16) ** 0.324
                 * (1e-3 / context.budget) ** 0.125
             )
-            channel = 1.71 * (size / 32) ** 6 / counts[group]
+            channel = 3.8 * (size / 32) ** 6 / counts[group]
             channel += 0.000422 * (size / 32) ** 4
             consumers = selected[inverse == group]
             context.work_plan.routing.expect(
