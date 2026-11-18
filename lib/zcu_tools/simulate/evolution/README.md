@@ -673,6 +673,8 @@ automatic detection or the active dimension's compilation failed. It is
 `dop853_rows` counts physical DOP853 endpoints, including `opencl_rows`.
 Both tableau counts add across merged reports and are zero on exact-result reuse.
 A shared prefix contributes one execution, not one execution per consumer.
+The paired benchmark reads these counts from Engine results. The
+[acquire routing JSONL](../../simulators/README.md#acquire-telemetry) does not store them.
 
 `PathDiagnostics.execution_device` is read-only and available with telemetry
 off. It is `cpu` if no row ran on GPU; otherwise it contains the OpenCL device
