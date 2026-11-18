@@ -17,9 +17,6 @@ from .secular import ModelSource
 from .workplan import FactKey, WorkPlan
 
 _GATE_INVENTORY = FactKey(("multitone-gate-inventory", GATE_POLICY), tuple)
-# Six matched CPU rows at budget 1e-3 overpredicted DOP853 by 4.19–10.52×.
-# Calibrate only the gate competitor; build terms and RWA keep the raw scale.
-_GATE_DOP853_PRICE_SCALE = 0.15
 # Full M=16 constant-pair preparation measured 0.24--0.28 ms. This reserve
 # covers endpoint construction; the two dense applications stay in base work.
 CONSTANT_KICK_PREPARE_S = 0.0003
@@ -80,11 +77,7 @@ def gate_preferred(
         if not uses:
             continue
         cost = gate_cost(table, int(row), context)
-        alternative = (
-            _GATE_DOP853_PRICE_SCALE * cost.direct
-            if "dop853" in competitors
-            else np.inf
-        )
+        alternative = cost.dop853_competitor if "dop853" in competitors else np.inf
         if canonical[row] in rwa_rows:
             representative = rwa_rows[canonical[row]]
             other = multitone_cost(geometry, representative, context)
@@ -102,11 +95,13 @@ def gate_preferred(
 class GateCost:
     """Cold gate terms in estimated CPU seconds, independent of use count.
 
-    direct is the uncalibrated full-drive work scale. endpoints, fourier,
+    direct is the uncalibrated full-drive work scale. dop853_competitor is
+    the calibrated CPU alternative for this comparison only. endpoints, fourier,
     tight_split and budget_split are one key's build; guard and apply are per use.
     """
 
     direct: float
+    dop853_competitor: float
     endpoints: float
     fourier: float
     tight_split: float
@@ -156,8 +151,18 @@ def _price_gate(table: SegmentTable, row: int, context: KernelContext) -> GateCo
     tight_split = len(SPLIT_PHASES) * baseline * split_precision * 0.155
     budget_split = len(SPLIT_PHASES) * direct * 0.105
     apply = (2e-8 * 4 * nodes + 7.5e-6 * 4) * scale
+    # Duration is a CPU pricing proxy, not a solver or frame selection rule.
+    duration_ns = float(table.duration_ns[row])
+    fraction = min(1.0, max(0.0, (duration_ns - 25.0) / 75.0))
     return GateCost(
-        direct, endpoints, fourier, tight_split, budget_split, 2e-6 * scale, apply
+        direct,
+        (0.0891 + (0.412 - 0.0891) * fraction) * direct,
+        endpoints,
+        fourier,
+        tight_split,
+        budget_split,
+        2e-6 * scale,
+        apply,
     )
 
 

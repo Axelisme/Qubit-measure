@@ -27,10 +27,13 @@ from zcu_tools.simulate.evolution import (
 
 from .accuracy import AccuracyMeasurement, measurement_property, require_families
 from .accuracy_cases import (
+    CPU_DP54_CASES,
     DISSIPATIVE_DC_CASES,
+    OPENCL_CASES,
     AccuracyCase,
     accuracy_case,
     coherent_source,
+    cpu_dp54_case,
     drive_track,
     history_case,
     multisegment_case,
@@ -178,6 +181,85 @@ def test_multitone_gate_dual_phase_density(
     assert error <= 2e-3
 
 
+@pytest.mark.parametrize("name", CPU_DP54_CASES)
+def test_cpu_dp54_density(name: str, request: pytest.FixtureRequest) -> None:
+    case = cpu_dp54_case(name)
+    families = (case.idle_family, *case.families) if case.idle_family else case.families
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=families)) as engine,
+    ):
+        result = engine.evolve(case.source, (case.batch,), telemetry=True)
+        require_families(result.paths, families)
+        report = result.paths.routing["dop853"]
+        assert report.dp54_rows == len(case.batch.points)
+        assert report.dop853_rows == 0
+        reference = interaction_reference(
+            case.source, case.batch, max_step_ns=case.interaction_max_step_ns
+        )
+    error = density_error(result.densities, reference.density)
+    request.node.user_properties.append(
+        measurement_property(
+            AccuracyMeasurement(name, "dop853", error, reference.convergence_error)
+        )
+    )
+    assert reference.convergence_error <= 2e-6
+    assert error <= 2e-3, f"{name}: density error {error:.9g} > 2e-3"
+
+
+@pytest.mark.requires_opencl
+@pytest.mark.parametrize(
+    ("name", "budget", "dp54"),
+    [
+        *(pytest.param(name, 1e-3, True, id=name) for name in OPENCL_CASES),
+        pytest.param("cpu_dp54_two_tone_960", 1e-3, True, id="synthetic-two-tone-960"),
+        pytest.param("cpu_dp54_duration_edge", 1e-3, True, id="duration_edge"),
+        pytest.param("sampled_gaussian_9", 0.999e-3, False, id="tight-budget"),
+    ],
+)
+def test_opencl_dop853_density(
+    name: str,
+    budget: float,
+    dp54: bool,
+    request: pytest.FixtureRequest,
+) -> None:
+    case = cpu_dp54_case(name) if name in CPU_DP54_CASES else accuracy_case(name)
+    families = (case.idle_family, *case.families) if case.idle_family else case.families
+    with closing(case.source):
+        with closing(
+            Engine(1, backend="opencl", families=families, chunks_per_worker=1)
+        ) as engine:
+            result = engine.evolve(
+                case.source, (case.batch,), budget=budget, telemetry=True
+            )
+        require_families(result.paths, families)
+        report = result.paths.routing["dop853"]
+        assert report.opencl_rows == len(case.batch.points)
+        assert report.dp54_rows == (report.opencl_rows if dp54 else 0)
+        assert report.dop853_rows == (0 if dp54 else report.opencl_rows)
+        assert result.paths.max_trace_error <= 1e-8
+        densities = result.densities
+        assert np.max(np.abs(densities - densities.conj().swapaxes(-1, -2))) <= 1e-10
+
+        reference = interaction_reference(
+            case.source, case.batch, max_step_ns=case.interaction_max_step_ns
+        )
+        assert reference.convergence_error <= 2e-6
+        with closing(Engine(1, backend="cpu", families=families)) as engine:
+            cpu = engine.evolve(case.source, (case.batch,), budget=budget)
+    error = density_error(densities, reference.density)
+    method = "dp54" if dp54 else "dop853"
+    request.node.user_properties.append(
+        measurement_property(
+            AccuracyMeasurement(
+                f"{name}/{method}", "dop853/opencl", error, reference.convergence_error
+            )
+        )
+    )
+    assert error <= 2e-3
+    assert density_error(densities, cpu.densities) < 1e-3
+
+
 def test_multitone_gate_mixed_phase_keys_density(
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
@@ -229,7 +311,7 @@ def test_multitone_gate_rejects_large_split_defect() -> None:
 
 def test_multitone_gate_split_refusal_executes_the_direct_fallback() -> None:
     """A reused shaped key can lose on density admission, not on cold price."""
-    repeats = 512  # Amortize the build so this case reaches numerical admission.
+    repeats = 768  # Amortize the build so this case reaches numerical admission.
     case = multitone_phase_case("flat_top", repeats, gain=0.55)
     with (
         closing(Engine(1, families=("multitone_gate", "dop853"))) as engine,
@@ -256,11 +338,21 @@ def test_multitone_gate_split_admission_tightens_with_budget() -> None:
         assert "multitone_gate" in rejected.value.attempted
 
 
-def test_multitone_gate_can_match_less_accurate_direct_fallback() -> None:
+@pytest.mark.parametrize(
+    "rate,accepted_budget,rejected_budget",
+    [
+        pytest.param(2e-5, 3e-3, 1e-3, id="same-tableau"),
+        pytest.param(8e-6, 2e-3, 0.999e-3, id="cpu-dp54-boundary"),
+    ],
+)
+def test_multitone_gate_can_match_less_accurate_direct_fallback(
+    rate: float, accepted_budget: float, rejected_budget: float
+) -> None:
     """A phase-resolved gate can replace a direct solve of comparable accuracy."""
     # Resonant circular drives accumulate direct integration error over several
-    # rotations. The weak bath gives a split defect above the fixed budget floor.
-    frequency, rate, duration = 0.1, 2e-5, 20.0
+    # rotations. In the boundary case the split defect (1.90e-4) is above the
+    # floor and the old budget probe's limit but below the DP5(4) limit (2.72e-4).
+    frequency, duration = 0.1, 20.0
     x = np.array([[0, 1], [1, 0]], dtype=complex)
     y = np.array([[0, 1j], [-1j, 0]])
     model = SecularModel(
@@ -285,18 +377,18 @@ def test_multitone_gate_can_match_less_accurate_direct_fallback() -> None:
     batch = replace(idle, tracks=tracks)
     with (
         closing(coherent_source(model)) as source,
-        closing(Engine(1, families=("multitone_gate",))) as engine,
+        closing(Engine(1, families=("multitone_gate",), backend="cpu")) as engine,
     ):
-        result = engine.evolve(source, (batch,), budget=3e-3)
+        result = engine.evolve(source, (batch,), budget=accepted_budget)
         require_families(result.paths, ("multitone_gate",))
         reference = converged_reference(source, batch)
         assert density_error(result.densities, reference.density) <= 2e-3
 
-        # Both budgets give the same floor; the more accurate fallback no
-        # longer justifies this gate's split defect at the smaller budget.
+        # The more accurate fallback no longer justifies this gate's split
+        # defect at the smaller budget.
         with pytest.raises(NoValidKernel) as rejected:
-            engine.evolve(source, (batch,), budget=1e-3)
-        assert "multitone_gate" in rejected.value.attempted
+            engine.evolve(source, (batch,), budget=rejected_budget)
+        assert rejected.value.attempted == ("multitone_gate",)
 
 
 @pytest.mark.parametrize("family", EDGE_FAMILIES)

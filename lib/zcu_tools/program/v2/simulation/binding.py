@@ -34,14 +34,13 @@ class SimulationProvenance:
             the only field copied to public Run metadata as simulation_id. It
             identifies the environment instance, not model content or a seed.
         backend_version: Environment-author-supplied backend implementation
-            version string, retained as private replay metadata. The binding
-            imposes no format or version compatibility check.
+            version string for private diagnostics. The binding imposes no
+            format or version compatibility check.
         rng_version: Binding-generated private RNG/seed-derivation version,
-            currently "PCG64/SeedSequence-v2/numpy-<version>". Replay requires
-            compatible RNG/library versions as well as the private inputs.
+            currently "PCG64/SeedSequence-v2/numpy-<version>".
 
     backend_version and rng_version are not normal GUI/MCP metadata. Publishing
-    identifier does not authorize publishing this whole record or replay inputs.
+    identifier does not authorize publishing this whole record or numeric inputs.
     """
 
     identifier: str
@@ -106,7 +105,7 @@ class SimulationBinding:
         execute: Environment-owned callable taking a RoundRequest and returning
             IntegratedRound (integrated) or RoundSignals (decimated) for all ADCs. It runs in the same acquiring thread.
         root_seed: Nonnegative integer supplied through seed or generated once
-            by NumPy SeedSequence when seed is None. Private replay entropy.
+            by NumPy SeedSequence when seed is None. Private sampling entropy.
         rng_version: Private RNG/derivation version string, currently
             "PCG64/SeedSequence-v2/numpy-<version>".
         provenance: SimulationProvenance for this binding. Only its identifier
@@ -121,7 +120,7 @@ class SimulationBinding:
             A backend failure leaves its captured input here, so this is not a
             list of successfully completed rounds.
 
-    last_request, rounds and seed/version fields remain private replay data in
+    last_request, rounds and seed/version fields remain private numeric data in
     memory, not automatic serialized history or normal GUI/MCP metadata.
     """
 

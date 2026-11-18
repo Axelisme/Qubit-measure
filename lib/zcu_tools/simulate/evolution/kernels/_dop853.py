@@ -1,4 +1,4 @@
-"""Reusable complex DOP853 interval integration for numba kernel workers.
+"""Reusable complex DOP853 and DP5(4) interval integration for Numba workers.
 
 The explicit 8th-order tableau and embedded 5th/3rd-order estimators are
 Hairer's DOP853 coefficients (also used by SciPy). Interval callers stop
@@ -160,6 +160,58 @@ _E5 = np.array(
 )
 
 
+# Dormand–Prince 5(4): six stages for the fifth-order update, then one
+# derivative at that candidate for the embedded fourth-order error.
+_DP54_A = np.zeros((6, 6))
+_DP54_A[1, :1] = (1 / 5,)
+_DP54_A[2, :2] = (3 / 40, 9 / 40)
+_DP54_A[3, :3] = (44 / 45, -56 / 15, 32 / 9)
+_DP54_A[4, :4] = (19372 / 6561, -25360 / 2187, 64448 / 6561, -212 / 729)
+_DP54_A[5, :5] = (9017 / 3168, -355 / 33, 46732 / 5247, 49 / 176, -5103 / 18656)
+_DP54_B = np.array([35 / 384, 0.0, 500 / 1113, 125 / 192, -2187 / 6784, 11 / 84])
+_DP54_C = np.array([0.0, 1 / 5, 3 / 10, 4 / 5, 8 / 9, 1.0])
+_DP54_ERROR = np.r_[_DP54_B, 0.0] - np.array(
+    [5179 / 57600, 0.0, 7571 / 16695, 393 / 640, -92097 / 339200, 187 / 2100, 1 / 40]
+)
+
+ROW_INITIAL_STEP_NS = 0.1
+STEP_SAFETY = 0.9
+STEP_MIN_FACTOR = 0.2
+STEP_MAX_FACTOR = 10.0
+STEP_ERROR_EXPONENT = -1 / 8
+DP54_ERROR_EXPONENT = -1 / 5
+# The spike did not cover a tighter budget, where DOP853 can be cheaper.
+DP54_MIN_BUDGET = 1e-3
+# Dividing both local tolerances by three kept all six spike cells below 1e-3.
+DP54_TOLERANCE_DIVISOR = 3.0
+ENDPOINT_ATTEMPT_LIMIT = 10_000_000
+ERROR_NORM_BLEND = 0.01
+
+
+def endpoint_coefficients(*, dp54: bool = False) -> dict[str, NDArray[np.float64]]:
+    """Copy the selected tableau and its embedded error weights.
+
+    DP5(4) includes the seventh RHS at the fifth-order candidate. DOP853
+    supplies both error vectors for its combined 5th/3rd error estimate.
+    """
+    if dp54:
+        return {
+            "A": np.vstack((_DP54_A, _DP54_B)),
+            "B": np.r_[_DP54_B, 0.0],
+            "C": np.r_[_DP54_C, 1.0],
+            "E5": _DP54_ERROR.copy(),
+        }
+    return {
+        name: values.copy()
+        for name, values in (("A", _A), ("B", _B), ("C", _C), ("E5", _E5), ("E3", _E3))
+    }
+
+
+def endpoint_stage_count(*, dp54: bool) -> int:
+    """Return the number of derivatives stored for one selected endpoint step."""
+    return len(_DP54_ERROR) if dp54 else len(_B)
+
+
 class Tolerances(NamedTuple):
     """Local errors, ns step ceiling and optional bare-phase allowance.
 
@@ -223,21 +275,23 @@ def make_workspace(state: NDArray[np.complex128]) -> Workspace:
 
 
 @njit(nogil=True, cache=True, inline="always")
-def _trial_into(rhs, context, state, time, step, buffers):
-    """Overwrite trial buffers, retaining the tableau\'s accumulation order."""
+def _trial_into(rhs, context, state, time_step, buffers, tableau):
+    """Overwrite trial buffers, retaining the tableau's accumulation order."""
+    time, step = time_step
     stages, intermediate, candidate = buffers
+    a, b, c = tableau
     stages[0] = rhs(time, state, context)
-    for stage in range(1, 12):
+    for stage in range(1, len(b)):
         intermediate[:] = state
         for previous in range(stage):
-            weight = step * _A[stage, previous]
+            weight = step * a[stage, previous]
             if weight != 0:
                 for index in range(state.size):
                     intermediate[index] += weight * stages[previous, index]
-        stages[stage] = rhs(time + _C[stage] * step, intermediate, context)
+        stages[stage] = rhs(time + c[stage] * step, intermediate, context)
     candidate[:] = state
-    for stage in range(12):
-        weight = step * _B[stage]
+    for stage in range(len(b)):
+        weight = step * b[stage]
         if weight != 0:
             for index in range(state.size):
                 candidate[index] += weight * stages[stage, index]
@@ -249,7 +303,14 @@ def _trial(rhs, context, state, time, step):
     stages = np.empty((12, state.size), dtype=np.complex128)
     intermediate = np.empty_like(state)
     candidate = np.empty_like(state)
-    _trial_into(rhs, context, state, time, step, (stages, intermediate, candidate))
+    _trial_into(
+        rhs,
+        context,
+        state,
+        (time, step),
+        (stages, intermediate, candidate),
+        (_A, _B, _C),
+    )
     return candidate, stages
 
 
@@ -273,7 +334,38 @@ def _error_norm(stages, state, candidate, step, controls):
         third_norm += abs(third / scale) ** 2
     if fifth_norm == 0 and third_norm == 0:
         return 0.0
-    return step * fifth_norm / np.sqrt((fifth_norm + 0.01 * third_norm) * norm_size)
+    return (
+        step
+        * fifth_norm
+        / np.sqrt((fifth_norm + ERROR_NORM_BLEND * third_norm) * norm_size)
+    )
+
+
+@njit(nogil=True, cache=True)
+def _dp54_error_norm(stages, state, candidate, step, controls):
+    norm_size = controls.norm_size or state.size
+    squared_error = 0.0
+    for index in range(state.size):
+        scale = controls.atol + controls.rtol * max(
+            abs(state[index]), abs(candidate[index])
+        )
+        error = 0j
+        for stage in range(len(_DP54_ERROR)):
+            error += _DP54_ERROR[stage] * stages[stage, index]
+        squared_error += abs(error / scale) ** 2
+    return step * np.sqrt(squared_error / norm_size)
+
+
+class IntervalStep(NamedTuple):
+    """One interval's duration and initial step in ns, plus its tableau choice.
+
+    duration_ns is nonnegative. seed_ns is positive. use_dp54 selects the
+    fifth-order Dormand–Prince pair rather than DOP853.
+    """
+
+    duration_ns: float
+    seed_ns: float
+    use_dp54: bool
 
 
 @njit(nogil=True, cache=True, inline="always")
@@ -303,7 +395,7 @@ def integrate(
     workspace = make_workspace(state)
     workspace.current[:] = state
     return integrate_workspace(
-        rhs, context, duration_ns, controls, first_step, workspace
+        rhs, context, IntervalStep(duration_ns, first_step, False), controls, workspace
     )
 
 
@@ -311,12 +403,14 @@ def integrate(
 def integrate_workspace(
     rhs: Callable[[float, NDArray[np.complex128], Context], NDArray[np.complex128]],
     context: Context,
-    duration_ns: float,
+    interval: IntervalStep,
     controls: Tolerances,
-    first_step: float,
     workspace: Workspace,
 ) -> NDArray[np.complex128]:
     """Integrate with caller-owned buffers and the same contract as integrate.
+
+    interval supplies the local time range, seed and tableau choice; controls
+    supplies that method's tolerances.
 
     rhs(time_ns, flat_state, context) uses interval-local ns and complex128
     input/output. Load the input into workspace.current before each call.
@@ -324,10 +418,13 @@ def integrate_workspace(
     must store endpoints before reusing it for another row. Interval boundaries
     reset the controller and derivative; only storage survives between calls.
     """
+    duration_ns, first_step, use_dp54 = interval
     state = workspace.current
     if duration_ns == 0:
         return state
     candidate = workspace.candidate
+    tableau = (_DP54_A, _DP54_B, _DP54_C) if use_dp54 else (_A, _B, _C)
+    exponent = DP54_ERROR_EXPONENT if use_dp54 else STEP_ERROR_EXPONENT
     time = 0.0
     step = min(first_step, controls.max_step)
     rejected = False
@@ -335,29 +432,37 @@ def integrate_workspace(
     while time < duration_ns:
         attempts += 1
         step = min(step, controls.max_step, duration_ns - time)
-        if attempts > 10000000 or step <= 0 or time + step == time:
+        if attempts > ENDPOINT_ATTEMPT_LIMIT or step <= 0 or time + step == time:
             raise RuntimeError("DOP853 step underflow or iteration limit")
         _trial_into(
             rhs,
             context,
             state,
-            time,
-            step,
+            (time, step),
             (workspace.stages, workspace.intermediate, candidate),
+            tableau,
         )
-        error = _error_norm(workspace.stages, state, candidate, step, controls)
+        if use_dp54:
+            workspace.stages[len(_DP54_B)] = rhs(time + step, candidate, context)
+            error = _dp54_error_norm(workspace.stages, state, candidate, step, controls)
+        else:
+            error = _error_norm(workspace.stages, state, candidate, step, controls)
         if not np.isfinite(error) or not _finite(candidate):
             raise RuntimeError("DOP853 nonfinite solution or error estimate")
         if error <= 1:
             state, candidate = candidate, state
             time += step
-            factor = 10.0 if error == 0 else min(10.0, 0.9 * error ** (-1 / 8))
+            factor = (
+                STEP_MAX_FACTOR
+                if error == 0
+                else min(STEP_MAX_FACTOR, STEP_SAFETY * error**exponent)
+            )
             if rejected:
                 factor = min(1.0, factor)
             step *= factor
             rejected = False
         else:
-            step *= max(0.2, 0.9 * error ** (-1 / 8))
+            step *= max(STEP_MIN_FACTOR, STEP_SAFETY * error**exponent)
             rejected = True
     return state
 

@@ -81,6 +81,7 @@ GUI 的 `Adapter.save_stem(context)` 委派自己的 `AxesSpec.save_stem` 或 `G
 Database 的 runs 平放與按 point 分層都可行，目前選平放，日後有移植需要再改。2026-10-28 使用者裁決：「Database平放與按point分感覺都可以，我認為目前平放就先保持好了」。
 
 Native run 目錄為 `Database/<name>/runs/<stem>/`。再次 Save 的 callback 回傳相同 stem 時，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result point／全域 figures 副本，檔名為 `<stem>_<圖名>.png`。Native 同名目的仍由 saver 明確 replace=True 原子覆寫，不加避讓規則。自訂 callback 若依保存時間改名，後續保存會寫到另一個目錄。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 Labber 初始路徑為 `Database/<name>/Labber/YYYY/MM/Data_MMDD/<stem>.hdf5`。只有初始名字已存在才沿用既有 numeric suffix helper。Helper 不作跨程序原子保留。每次 Save 可以產生另一個 Labber 檔，不改 acquisition 時間或完成狀態。只量測不存檔時，acquired 事件不建立 run 目錄。
 

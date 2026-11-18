@@ -20,6 +20,7 @@ def interaction_reference(
     *,
     coarse: SolverTolerances = _COARSE,
     fine: SolverTolerances = _FINE,
+    max_step_ns: float = 0.05,
 ) -> ReferenceResult:
     """Solve full Lindblad evolution without RWA and verify two-tolerance agreement.
 
@@ -34,7 +35,9 @@ def interaction_reference(
     Return ReferenceResult with fine density (points,M,M) in the caller's DC
     energy basis and the maximum absolute coarse/fine density difference.
     coarse/fine specify DOP853 rtol/atol; defaults are 2e-10/2e-12 and
-    2e-12/2e-14. Integrations stop at envelope knots, drive support and explicit
+    2e-12/2e-14. max_step_ns is the positive step ceiling for both solves;
+    long sampled inputs can use a larger ceiling while retaining adaptive
+    tolerances. Integrations stop at envelope knots, drive support and explicit
     segment boundaries. The exact H0 interaction transform drops no drive terms;
     secular jumps and elementwise dephasing are invariant under this transform.
     The final state is rotated back to the lab frame and DC energy basis.
@@ -47,8 +50,8 @@ def interaction_reference(
     failure. ModelSource model-building and missing-port errors propagate.
     No acquisition, production propagation, clipping or normalization runs.
     """
-    approximate = interaction_density(source, batch, coarse)
-    density = interaction_density(source, batch, fine)
+    approximate = interaction_density(source, batch, coarse, max_step_ns=max_step_ns)
+    density = interaction_density(source, batch, fine, max_step_ns=max_step_ns)
     error = float(np.max(np.abs(approximate - density), initial=0.0))
     if error > 2e-6:
         raise AssertionError(
@@ -61,13 +64,16 @@ def interaction_density(
     source: ModelSource,
     batch: TimelineBatch,
     tolerances: SolverTolerances,
+    *,
+    max_step_ns: float = 0.05,
 ) -> NDArray[np.complex128]:
     """Integrate one tolerance chain and return all final DC-basis densities.
 
     Use the same full-drive static-schedule inputs, units, initial-state rules
     and failure modes as interaction_reference, except there is no convergence
-    check. tolerances supplies DOP853 rtol/atol. Return complex128 densities
-    (points,M,M) without clipping or normalization; the caller owns source.
+    check. tolerances supplies DOP853 rtol/atol; max_step_ns is its positive step
+    ceiling in ns. Return complex128 densities (points,M,M) without clipping or
+    normalization; the caller owns source.
     To continue, supply these matrices as TimelineBatch.initial_densities with
     each previous end_ns as the new start_ns. Keep track origins and phase at
     the common absolute origin unchanged. Check convergence only after both
@@ -99,7 +105,7 @@ def interaction_density(
             else batch.initial_densities[point]
         )
         initial = overlap.conj().T @ initial @ overlap
-        density = _solve_point(model, initial, batch, point, tolerances)
+        density = _solve_point(model, initial, batch, point, tolerances, max_step_ns)
         results.append(overlap @ density @ overlap.conj().T)
     return np.asarray(results, dtype=np.complex128)
 
@@ -110,6 +116,7 @@ def _solve_point(
     batch: TimelineBatch,
     point: int,
     tolerances: SolverTolerances,
+    max_step_ns: float,
 ) -> NDArray[np.complex128]:
     size = len(model.energies_ghz)
     gaps = model.energies_ghz[:, None] - model.energies_ghz[None, :]
@@ -125,7 +132,7 @@ def _solve_point(
             method="DOP853",
             rtol=tolerances.rtol,
             atol=tolerances.atol,
-            max_step=0.05,
+            max_step=max_step_ns,
         )
         if not solution.success:
             raise RuntimeError(solution.message)

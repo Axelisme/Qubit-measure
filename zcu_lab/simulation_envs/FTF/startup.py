@@ -1,5 +1,6 @@
 """Open or create the FTF entry and install offline resources in a measure GUI."""
 
+import logging
 import os
 from pathlib import Path
 
@@ -51,11 +52,11 @@ def startup(ctx: StartupContext) -> None:
     Template, entry, environment and binding failures propagate to
     the startup runner, which retains completed work and registered cleanup.
 
-    Build with one fewer worker than host CPUs, at least one, and no numeric
-    warmup. This script never acquires or controls hardware. Successfully
-    registered drivers become GUI-owned. The close callback releases borrowed
-    references and closes only untransferred
-    drivers, after background work drains and before GUI driver cleanup.
+    Reserve one host CPU, with at least one simulation worker. Prepare common
+    CPU paths and the OpenCL program in the background so the first acquisition
+    need not compile them after startup work finishes. This script never acquires
+    or controls hardware. Successfully registered drivers become GUI-owned.
+    The close callback drains preparation and closes only untransferred drivers.
     """
     settings = load_ftf(Path(__file__).with_name("ftf.yaml"))
     template = load_entry_template(Path(__file__).with_name("entry-template.yaml"))
@@ -84,17 +85,30 @@ def startup(ctx: StartupContext) -> None:
     environment = ftf(
         settings,
         workers=simulation_workers(os.cpu_count()),
-        warmup=False,
+        warmup=True,
         soccfg=soccfg,
     )
     transferred: set[str] = set()
 
     def close_environment() -> None:
-        # Runtime reads this manager; transferred drivers are borrowed until close.
-        # Only the GUI closes them. Rejected drivers remain script-owned.
-        for name in transferred:
-            environment.devices.drop_device(name)
-        environment.devices.close_all_devices()
+        errors: list[Exception] = []
+        if environment.close_backend is not None:
+            try:
+                environment.close_backend()
+            except Exception as error:
+                logging.exception("FTF backend cleanup failed")
+                errors.append(error)
+        try:
+            # Only the GUI closes transferred drivers. Rejected drivers remain
+            # script-owned.
+            for name in transferred:
+                environment.devices.drop_device(name)
+            environment.devices.close_all_devices()
+        except Exception as error:
+            logging.exception("FTF device cleanup failed")
+            errors.append(error)
+        if errors:
+            raise ExceptionGroup("FTF resource cleanup failed", errors)
 
     ctx.on_close(close_environment)
     ctx.soc.install(environment.soc, environment.soccfg)

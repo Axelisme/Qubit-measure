@@ -2,7 +2,8 @@
 
 **讀者：** framework-dev、agent。透過本索引與各篇 ADR 查找跨模組決策及其依據。
 
-每篇 ADR 以現在式描述目前生效的跨模組設計。索引只放定位用摘要；細節、替代方案與演化脈絡留在 ADR 本文。
+每篇 ADR 以現在式描述目前生效的跨模組設計。索引只放定位用摘要；細節留在 ADR 本文。
+ADR 正文寫目前生效的規則與客觀事實；使用者的裁決以原話與日期附上。被取代的做法、移除經過、比較過的選項與選項代號，寫在 `docs/discussions/` 的討論紀錄。
 
 程式碼註解與記憶檔以 `ADR-NNNN` 引用本目錄；ADR 之間以 `[[NNNN]]` 互鏈。
 
@@ -66,10 +67,13 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：模擬器的測試與量測按層分開（kernel、dispatch、序列、前端、environment），不做 program → 編譯 → 演化 → I/Q 的 e2e，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 原則：guard 在整個參數空間不放行超標；速度優化只做有耗時紀錄的瓶頸，修法時程未定時先走慢但對的候選，見 [ADR-0078](0078-evolution-module-boundary.md#先保證正確再優化瓶頸)。
 原則：評估算法時預算固定為使用者按場景宣告的需求，在固定預算下找算法適合的場景，不為算法放寬預算；長序列預算按 gate 數放寬，見 [ADR-0078](0078-evolution-module-boundary.md#固定預算找適合的場景)。
+原則：模擬算法與機制同時適用 Windows 與 Linux，不依賴單一作業系統的設定或行為，見 [ADR-0078](0078-evolution-module-boundary.md#跨平台不綁作業系統)。
+原則：GPU 是可選功能，沒有 GPU 套件或可用裝置時維持 CPU 行為與逐位相同的結果，見 [ADR-0078](0078-evolution-module-boundary.md#gpu-是可選功能)。
 原則：有誤差問題的快速算法先查原因並修正，修不好的範圍才收 guard，見 [ADR-0078](0078-evolution-module-boundary.md#快速算法先修好不輕易放棄)。
 原則：支援範圍由物理與介面決定，不看使用頻率；頻率只排優化先後，見 [ADR-0078](0078-evolution-module-boundary.md#支援範圍不看使用頻率)。
 原則：實驗參數不當時模擬器照常給結果並警告，契約外輸入照舊 fast fail，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器不替使用者擋實驗參數)。
 原則：每個模擬器提供同一組調試介面，定位與驗證工具只依賴它；共通部分有型別，模擬器特有的值放 dict，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器帶通用調試介面)。
+原則：模擬器優化以使用者看得到的結果正確性為準，存檔格式、版本與相容性配合優化；除錯資訊寫進 debug capture manifest，見 [ADR-0078](0078-evolution-module-boundary.md#優化優先於周邊約定除錯靠-dump不靠重算)。
 原則：kernel 的量測場景只有一段，重複就是同一段接 N 次，見 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)。
 原則：場景照約化參數軸宣告覆蓋，不為個別實驗加專屬場景，見 [ADR-0078](0078-evolution-module-boundary.md#場景覆蓋靠約化的參數空間)。
 
@@ -77,7 +81,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：頻率、時間、loss parameters 與 lifetime 的單位和換算契約。
 - [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：Evolution 的 dispatch／kernel 分工、公開黑箱、數值 preparation 壽命與 t6 只保留 direct 的決定。
-- [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：公共有理數時基、整數 request、compiled frontend 與 replay v2。
+- [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：公共有理數時基、整數 request 與 compiled frontend。
 
 改模擬器時的流程與自查見 [模擬器維護規則](../../lib/zcu_tools/simulate/maintenance.md)。
 

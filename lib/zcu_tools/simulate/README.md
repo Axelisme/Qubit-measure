@@ -272,8 +272,8 @@ owns the RawShots protocol, channel declaration order and acquisition normalizat
 Boundary statistics remain pure data. Deferred raw does no work during mean draws;
 its full CTMC paths use a separate stream and are not shifted to direct totals. [`evolution`](evolution/README.md) uses the segment engine's fast
 algorithms by default and shares prepared data within one evolve. It does not read or
-write an offline U-table library or persistent density records. Private replay
-recomputes from archived inputs under matching numeric and RNG versions.
+write an offline U-table library or persistent density records. The optional
+[Engine capture](evolution/README.md#capture-persistence) records inputs and actual routes.
 
 ## FTF circuits and noise
 

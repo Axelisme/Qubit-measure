@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-11-16，GUI 模擬保留一核
+**Last updated:** 2026-11-18，GPU 預編譯
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -56,7 +56,7 @@ Script 接著建立離線 FTF 環境，安裝 SoC，登記 f1_bias、coupler_bia
 f2_bias 三個 live device，GUI 即可從 New Tab 開實驗。毋須手動 Open 或選 point。
 Template 不含 module library 或校準值；tab 可編輯，但執行量測前仍須設定有效輸入。
 Script 透過共用 GUI 策略選擇 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核。
-`warmup=False` 不變，不在啟動時預編譯或執行 acquisition。
+`warmup=True` 在背景準備常用 CPU 路徑與可用的 OpenCL 程式，不執行 acquisition。
 
 MCP 的等效入口是
 `connect(launch="new", script="/absolute/path/startup.py", project_root="/absolute/new-ftf-project")`。
@@ -114,7 +114,7 @@ FTF 的 `DriveLine.operator: flux` 仍只在 DC 附近線性化。Fast-flux 線�
 
 `default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量、型別與時脈由共用的 [qick_216_v2.yaml](../profiles/qick_216_v2.yaml) 提供，不從模型接線推導。Caller 要確保物理模型 YAML 的綁定符合該板子。樣板使用 pulse readout gen0／ADC0、mixmux8 mux readout gen7／PFB readout 2 與 3，以及 f1_charge gen2、f2_charge gen3。共用板子 YAML 提供 8 個 generator 與 10 個 readout，FTF 只綁定其中所需的通道。ADC output sample interval `dt_ns` 由 caller 的板子 YAML 決定，模型 YAML 不設定 ADC clock。空出的 v6 gen1 可供註解中的 fast-flux 範例使用。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製 startup 與 YAML，並調整 Notebook 的 YAML 路徑。
 
-[Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder。成功回傳後，Notebook 負責關閉傳回的 device manager。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們；callback 先移除這些借用，再關閉尚未交付的 driver。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
+[Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder，並用 `closing_environment` 關閉引擎與裝置。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們。Callback 先關閉引擎，再移除這些借用並關閉尚未交付的 driver。引擎清理失敗時仍會清理裝置。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 
 ## 啟用跨 acquisition 漂移
 
@@ -139,20 +139,23 @@ F1／F2 可選 `q_cap`、`xqp`、`aphi`；coupler 只有 `q_cap`、`aphi`，`q_i
 
 `FTFAcquisitionOptions` 從 `zcu_tools.simulators.ftf.environment` 匯入，以 `acquisition=` 傳給 `ftf` 或 `FTFSource`。
 `clock` 可注入環境專用時鐘，`truth_log` 可指定另一個 `Path`，相對路徑以 cwd 解析。
-`truth_log=None` 使用上面的預設位置。`private_replay` 另選絕對 archive root，省略則不保存 replay。
+`truth_log=None` 使用上面的預設位置。
 檔案含模型真值，不進一般 Run／GUI／MCP metadata。呼叫者負責路徑與檔案保留期限。
 完整參數見 [acquisition 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)。
 
-## 演化與重播
+## 演化與除錯
 
-FTF 預設使用分段引擎的快速算法。GUI startup 透過共用策略明確傳 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核，至少使用 1 個 worker。GUI 保持 `warmup=False`，不啟動數值預編譯。核心數未知時使用 1 個 worker，八核主機使用 7 個 GUI workers。
+GUI startup 選擇 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核，至少使用一個 worker。八核主機使用七個 GUI workers。GUI 傳 `warmup=True`，在背景準備常用 CPU 路徑，並依 `retained_levels` 預編譯可用的 OpenCL 程式。準備成功後，第一次 acquisition 不必再等這些編譯。
 
-Notebook 明確傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，仍保留兩核。建立環境後，它啟動單一背景 worker 預編譯常用數值路徑。核心數未知時使用 1 個 worker，八核主機使用 6 個 Notebook workers。公開 `ftf()` 的預設仍是 `workers=1, warmup=False`；`workers` 必須為正整數。測試、benchmark、研究與其他直接呼叫不套用 GUI 策略。
+Notebook 傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，保留兩核，並在背景預編譯常用 CPU 路徑與可用的 GPU 程式。八核主機使用六個 Notebook workers。公開 `ftf()` 仍預設 `workers=1, warmup=False`；測試、benchmark、研究與直接呼叫不套用 GUI 策略。
 
-預編譯會占用 CPU 與記憶體，只把編譯時間與其他工作重疊，不縮短總編譯成本。同一個 process 內啟用 warmup 的環境共用同一個 future。
+同一個 process 內的環境共用相同維度的 GPU 預編譯，不重複編譯。獨立 warmup 引擎只填磁碟快取，不抽樣或改變正式 device bias。沒有可用 GPU 時維持按需執行的 CPU 路徑。
 
-啟用預編譯時，`env.warmup.status` 提供進度與錯誤。停用時 `env.warmup` 為 `None`。`env.wait_ready()` 等待完成；若要讓計時排除預編譯，先等 ready 再啟動計時。Acquire 也會自動等待，失敗則回到 on-demand 編譯。背景工作不抽樣、不切換正式 device bias，也不保留正式引擎的數值 preparation。結束 process 時會等當前編譯完成，不強制中止 compiler。完整介面見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#startup-preparation)。
+若有準備工作，`env.warmup.status` 提供進度與錯誤，`env.wait_ready()` 等待結束。若要排除預編譯，先等工作結束再開始計時。Acquire 會自動等待，準備失敗仍按需運算。GUI 關閉時等背景工作結束再釋放裝置，不強制中止 compiler。完整介面見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#startup-preparation)。
 
 整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 caller-owned 完整 preparation 只保留在記憶體，Engine 的數值 preparation 限一次 evolve。不需要離線建庫或 GPU，也不保存 exact density records。
 
-從 `zcu_tools.simulators.ftf.environment` 匯入 `FTFAcquisitionOptions`，再用 `ftf(..., acquisition=FTFAcquisitionOptions(private_replay=absolute_directory))` 保存私有輸入。同一模組的 `replay_round(round_path, soccfg=recording_profile)` 在相同數值、RNG 與相依套件版本下重算一個已保存的 round，不讀取演化資料庫。Archive 保存當次 effective settings，`drift=None`，因此重播不依賴時鐘，也不再抽漂移。Model identity 保存在既有的 round snapshot；重播不需要目前物理 YAML 或較早的 rounds。Caller 必須提供錄製時使用的板子 profile，archive 不保存它，replay 也不驗證其一致性。私有檔案含模型真值，不放入一般 Run／GUI／MCP metadata。
+要查一次模擬結果，在環境 YAML 設定 `numerics.debug_capture: true` 後再 acquire。
+在快取的 `simulator-debug/v1` 開啟該次的 `capture-*.json.gz`，可讀 Engine 輸入、每列實際 family 與逐 round DC 值。用該 round 的 `model_identity` 查 `metadata.effective_settings` 中的有效設定。
+若 telemetry 開啟，當次 `routing-*.jsonl` 的 `capture_file` 指向這份 manifest，並記下投影結果與各階段耗時。
+見 [FTF Debug capture](../../../lib/zcu_tools/simulators/ftf/environment/README.md#debug-capture)。Capture 含模型真值，不放入一般 Run／GUI／MCP metadata。

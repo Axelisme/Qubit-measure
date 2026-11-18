@@ -41,6 +41,7 @@ Module 明填 `gen_ch`、`nqz` 與 `mixer_freq`，共用 const 播放 `length` �
 有序的 1 至 8 筆 tones 各自保存 `freq`、`gain`、`phase` 與 logical ADC channel `ro_ch`。
 每筆 tone 的 generator 與 ADC 使用同一個 MHz 頻率，不引用 Pulse 或 waveform。
 Mux readout 不接受 sweep 或逐 tone library key，`set_param` 一律拒絕更新，caller 重建 cfg 與 program。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 Tone 的選填 `label` 預設空字串，隨 Spec、cfg 與 library 保存。
 Label 只作顯示，可以重複，不代表 component；program 不解讀它。
@@ -95,6 +96,7 @@ Centroid3 輸出 [g,e,f]，每 shot 選 Euclidean 距離最近的中心，等距
 F 不代表 circle 的 other。
 普通 `acquire` 保留原生 IQ 與 QICK threshold／angle，不提供 host classify 或 herald option。
 分類取數的 processor、累加與保存分工見下節 [Shot sums 與 heralding](#shot-sums-與-heralding)。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 三態 reference 只用 acquired IQ 與 preparation labels 建立中心及 training confusion。
 它經既有完整 readout module proposal／Apply 流程，只更新 Run 捕捉的 library 目標的 classifier，保留其他欄位與 child keys。

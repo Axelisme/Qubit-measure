@@ -1,5 +1,6 @@
 """Full-Hamiltonian plateau channels against an independent dense Lindblad ODE."""
 
+from contextlib import closing
 from dataclasses import replace
 
 import numpy as np
@@ -14,6 +15,7 @@ from zcu_tools.simulate.evolution.kernels.slow_envelope import SlowEnvelopeKerne
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from .._engine import batch, run, track
+from ..contract.accuracy_cases import coherent_source, drive_track, timeline
 from ..contract.kernel_suite import KernelCase, reference, synthetic_model
 
 
@@ -85,6 +87,22 @@ def test_populations_match_dense_ode(frequency: float) -> None:
     np.testing.assert_allclose(
         result.densities[0].diagonal().real, expected.diagonal().real, atol=1e-3, rtol=0
     )
+
+
+def test_shared_dissipative_dc_uses_direct_integration() -> None:
+    sweep = timeline(100, 100.0)
+    pulse = replace(
+        drive_track(sweep, EnvelopeSpec("constant"), frequency=0.0, gain=0.02),
+        phase_rad=np.full(100, 0.17),
+    )
+    sweep = replace(sweep, tracks=(pulse,))
+    # Inspect the route without evolving the 100 identical timelines.
+    with (
+        closing(coherent_source(synthetic_model(32))) as src,
+        closing(Engine(1)) as engine,
+    ):
+        result = engine.inspect_dispatch(src, (sweep,))
+    assert {row.family for row in result.rows} == {"dop853"}
 
 
 def test_segment_policy_refines_the_channel_and_changes_prepare_identity() -> None:

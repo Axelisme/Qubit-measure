@@ -111,9 +111,9 @@ class MultitoneGateKernel:
 
     Require two tones, at least one sampled envelope, fixed flux and positive
     duration. Fit one 5x6 phase grid at rtol/atol 2.75e-7/2.75e-9.
-    Compare playback and Engine-budget DOP853 with the same tight Lindblad
-    endpoints at four phase/density pairs, three outside the grid. This checks
-    interpolation and splitting together; it does not bound sequence error.
+    Compare playback and a CPU fallback probe at the Engine budget against
+    tight Lindblad endpoints at four phase/density pairs, three outside the
+    grid. This checks interpolation and splitting, not whole-sequence error.
     Return a rejected guard on excess defect without rebuilding.
     Numerical failures propagate. Phase and absolute start are apply-only.
     Guard products live only within one evolve (ADR-0078). No RWA or pruning.

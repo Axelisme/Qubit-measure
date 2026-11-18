@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-18 (FTF gate scene declarations and benchmark storage)
+**Last updated:** 2026-11-18 (FTF gate scenes and paired Engine backend selection)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -205,8 +205,9 @@ both sides. Cross-worktree coordination and ABBA statistics belong to
 
 ## Paired Engine benchmark
 
-`tools.paired_benchmark` compares one indexed frozen scenario in two worktrees.
-Both sides must contain committed copies of the common measurement tools and
+`tools.paired_benchmark` compares one indexed frozen scenario across two sides.
+Use two worktrees to compare revisions, or the same worktree to compare Engine
+backends. Both sides must contain committed copies of the common measurement tools and
 codecs. Each side needs its own bootstrapped uv environment. The tool does not
 copy uncommitted scripts into older commits or synchronize dependencies.
 Use a common committed tool baseline for both versions being compared.
@@ -258,8 +259,13 @@ child must match that side's first handshake before its first sample.
 `--families NAME ...` fixes the Engine candidate whitelist exactly as supplied.
 Omitting it keeps default routing. The tool does not infer a different physical
 workload or append companions. `--budget` defaults to 1e-3 and `--workers` to 1.
-Worker width changes execution, not the reference key. Different point counts
-or dimensions require separately frozen records and separate comparisons.
+`--baseline-backend` and `--candidate-backend` each accept `auto` (default),
+`cpu` or `opencl`. To measure the automatic GPU route against the CPU on the
+same checkout, give both `--baseline` and `--candidate` that path and set
+`--baseline-backend cpu --candidate-backend auto`. Keep the scenario, mode,
+workers, families and budget identical. Worker width and backend change execution,
+not the reference key. Different point counts or dimensions require separately
+frozen records and comparisons.
 
 Modes describe process state as well as session history:
 
@@ -281,7 +287,11 @@ All modes delegate session transitions and wall/process clocks to
 `simulator_measurement`. Only one `Engine.evolve` is timed per sample.
 Process startup, imports, source/Engine construction, reference I/O, warmup,
 history reset, density errors and telemetry conversion stay outside the timers.
-Disk-cache priming and owner warmups are separate operations.
+Disk-cache priming and owner warmups are separate operations. For an OpenCL
+comparison that excludes cold builds, use a warm mode. Measure cold builds
+separately with fresh OpenCL build and detection caches. Record whether the
+OpenCL driver had its own persistent cache enabled. `cold` refers only to
+Numba and does not reset OpenCL caches.
 The timed call includes Engine dispatch, scheduling and worker management;
 it is not bare-kernel timing.
 
@@ -305,7 +315,7 @@ diagnostics. Warm sessions also run 12 untimed warmups in total.
 
 `BenchmarkReport` schema 1 preserves both sides' HEAD/tree/dirty facts,
 interpreter and effective Numba cache, all raw blocks, calibration decisions,
-worker/budget/family coordinates, observed CPU affinity/native-thread settings
+worker/budget/family/backend coordinates, observed CPU affinity/native-thread settings
 and the caller's exclusive declaration. Every observation includes ordered
 points, the complete complex density, same-coordinate oracle error, reference
 key and convergence error. `density_errors` compares complete cross-side
@@ -313,8 +323,11 @@ matrices per block, never only populations or a truncated block. A same-dimensio
 oracle does not establish truncation convergence.
 
 Available family routing reports retain aggregate `prepare_cpu_s`,
-`apply_cpu_s`, logical `rows` and `cache_hits`. These are calling-thread CPU,
-not Engine wall or process CPU. Missing accounting remains unavailable, not zero.
+`apply_cpu_s`, logical `rows` and `cache_hits`. The CPU fields measure the
+calling thread, not Engine wall or process CPU. `dop853.opencl_rows` and
+`dop853.opencl_detection_error` identify GPU execution and auto fallback.
+`dop853.dp54_rows` and `dop853.dop853_rows` count physical endpoints by
+tableau across CPU and GPU. Missing accounting remains unavailable, not zero.
 Across different frozen N coordinates, time differences estimate marginal cost.
 Keep nonlinear points separate. `apply_cpu_s/rows` is a logical-row amortization,
 not the cost of one apply call. Diagnostics from an extra sample are not a

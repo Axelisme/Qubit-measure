@@ -1,6 +1,6 @@
 # Simulation environments
 
-**Last updated:** 2026-11-16，GUI simulation workers
+**Last updated:** 2026-11-18，FTF GPU 預編譯
 
 **讀者：** lab-author、agent。查找 GUI／Notebook 模擬環境、參數與 compile profile 的入口。
 
@@ -127,7 +127,7 @@ soccfg = build_soccfg(yaml.safe_load(board_yaml.read_text(encoding="utf-8")))
 env = ftf(configuration, soccfg=soccfg, time_scale=0)
 ```
 
-使用完畢後呼叫 `env.devices.close_all_devices()`。若要排除 startup preparation 的計時，先呼叫 `env.wait_ready()` 再啟動 timer。
+使用完畢後呼叫 `env.close_backend()` 釋放引擎，再關閉 `env.devices` 的 drivers。若要排除 startup preparation 的計時，先呼叫 `env.wait_ready()` 再啟動 timer。
 也可在工作副本設定 `numerics.time_scale: 0`。預設 `time_scale=None` 時 builder 使用 YAML 值。
 
 要一併停用 telemetry，先以 `from zcu_tools.simulators.ftf.config import load_ftf` 匯入 loader，
@@ -145,11 +145,11 @@ single_fluxonium、integer_fluxonium、six_fluxonium 與 FTF 的 GUI startup 呼
 `zcu_tools.gui.app.measure.startup_context.simulation_workers(os.cpu_count())`。
 策略選擇 `max(1, (cpu_count or 1) - 1)`，保留一核，至少使用 1 個 worker。
 核心數未知時使用 1 個 worker，八核主機使用 7 個 GUI workers。
-GUI startup 不做預編譯，FTF 保持 `warmup=False`。
+FTF GUI startup 傳 `warmup=True`，在背景準備常用 CPU 路徑，並預編譯可用的 OpenCL 程式。
 工廠與 Engine 的預設仍為 `workers=1`，測試、benchmark、研究與直接呼叫不套用 GUI 策略。
 Engine 只在多條 timeline 間平行，單條 timeline 或單 worker 串行；演化期間 native BLAS 使用 1 個執行緒。
 
-Notebook 的保留兩核與預編譯規則不變。Workers／warmup 選擇及 ready 後才計時的操作，見
-[FTF 演化與重播](FTF/README.md#演化與重播)。
+FTF Notebook 保留兩核，傳 `warmup=True` 同時啟用 CPU 與可用的 GPU 預編譯。等待 ready 後再計時的操作，見
+[FTF 演化與除錯](FTF/README.md#演化與除錯)。
 Framework 的 `EnvironmentWarmup` 介面與 coverage 邊界見
 [FTF startup preparation](../../lib/zcu_tools/simulators/ftf/environment/README.md#startup-preparation)。

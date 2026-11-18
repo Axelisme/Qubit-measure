@@ -85,7 +85,7 @@ class FTFCoherenceDrift:
 
         The first call returns YAML losses. Later calls use exact elapsed-time OU
         transitions. All three loops get one truth row, including constant loops;
-        coupler q_ind/xqp are null. Returned settings disable drift for replay.
+        coupler q_ind/xqp are null. Returned settings contain the frozen losses.
         Backward/nonfinite time raises ValueError; truth-log I/O errors propagate.
         """
         if not math.isfinite(sim_now) or (

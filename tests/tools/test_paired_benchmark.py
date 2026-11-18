@@ -8,8 +8,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.simulate import evolution
 from zcu_tools.simulate.evolution import (
     EvolutionResult,
+    FamilyRouting,
     FrozenRecord,
     PathDiagnostics,
     ReferenceResult,
@@ -299,9 +301,19 @@ def test_comparison_calibrates_both_sides_then_runs_shared_mode_and_separate_dia
     assert resets == ["A", "A", "A", "B", "B", "B"]
 
 
+@pytest.mark.parametrize("backend", ["cpu", "auto"])
 def test_prepared_child_requires_reference_before_evolve_and_inspects_complete_density(
-    tmp_path,
+    tmp_path, monkeypatch, backend
 ):
+    engine_type = evolution.Engine
+    backends = []
+
+    def record_engine(workers, **kwargs):
+        backends.append(kwargs.get("backend", "auto"))
+        return engine_type(workers, **kwargs)
+
+    # The configured backend is not observable from a synthetic evolve result.
+    monkeypatch.setattr(evolution, "Engine", record_engine)
     scene = make_scene("idle_coherence")
     cache = tmp_path / "scenes"
     index = tmp_path / "index.json"
@@ -323,14 +335,23 @@ def test_prepared_child_requires_reference_before_evolve_and_inspects_complete_d
             scene_cache=cache,
             index=index,
             mode="first",
+            backend=backend,
         )
         calls = []
+        unavailable = "OpenCL requires a GPU supporting cl_khr_fp64"
 
         def invoke(engine, case, options, request):
             calls.append(request.telemetry)
             density = reference.copy()
             density[:, 0, 1] += 0.125j
-            return EvolutionResult(case.batch.points, density, PathDiagnostics())
+            routing = (
+                {"dop853": FamilyRouting(rows=2, opencl_detection_error=unavailable)}
+                if options.backend == "auto" and request.telemetry
+                else {}
+            )
+            return EvolutionResult(
+                case.batch.points, density, PathDiagnostics(routing=routing)
+            )
 
         with (
             ExitStack() as stack,
@@ -342,15 +363,22 @@ def test_prepared_child_requires_reference_before_evolve_and_inspects_complete_d
             references, scene.source, scene.batch, ReferenceResult(reference, 0.0)
         )
     with paired.prepared_child(config, invoke=invoke) as (ready, runner):
-        sample = runner.sample(telemetry=False)
+        sample = runner.sample(telemetry=backend == "auto")
     selected = family_pareto.select_inputs(index, "scene", scene_cache=cache)
     assert ready.records == [selected[0].identity]
-    assert calls == [False]
+    assert backends == [backend]
+    assert calls == [backend == "auto"]
     assert sample.observation.reference_error == 0.125
     assert sample.observation.points == [0, 1]
     assert sample.observation.reference_key
     assert sample.observation.convergence_error == 0.0
-    assert sample.observation.aggregate is None
+    if backend == "auto":
+        assert (
+            sample.observation.routing["dop853"]["opencl_detection_error"]
+            == unavailable
+        )
+    else:
+        assert sample.observation.aggregate is None
 
 
 def test_main_writes_complete_report_and_preserves_previous_output_on_handshake_failure(
@@ -363,6 +391,10 @@ def test_main_writes_complete_report_and_preserves_previous_output_on_handshake_
         str(tmp_path / "A"),
         "--candidate",
         str(tmp_path / "B"),
+        "--baseline-backend",
+        "cpu",
+        "--candidate-backend",
+        "opencl",
         "--scenario",
         "scene",
         "--reference-cache",
@@ -378,7 +410,7 @@ def test_main_writes_complete_report_and_preserves_previous_output_on_handshake_
 
     @contextmanager
     def opener(launch):
-        delta = 0.25 if launch.config.worktree.name == "B" else 0.0
+        delta = 0.25 if launch.config.backend == "opencl" else 0.0
         observation = paired.Observation(
             points=[0],
             density_real=[[[1, delta], [delta, 0]]],
@@ -401,6 +433,7 @@ def test_main_writes_complete_report_and_preserves_previous_output_on_handshake_
     original = output.read_bytes()
     report = paired.BenchmarkReport.model_validate_json(original)
     assert report.schema_version == 1
+    assert tuple(side.backend for side in report.coordinates) == ("cpu", "opencl")
     assert report.comparison.summary.wall.median == 1
     assert report.comparison.telemetry is True
     assert report.comparison.diagnostics is None

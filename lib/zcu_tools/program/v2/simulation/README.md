@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-17
+**Last updated:** 2026-11-18
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -404,9 +404,7 @@ Readout plans and environment templates convert integer tick grids to ns through
 `TimeBase.ns`; frequency conversion to GHz remains with the physical consumers.
 The request schema, compiled frontend and physical consumers use integer timing.
 Physical planners receive the request's TimeBase, and plan/preparation cache keys
-include it. Persisted acquire and round replay use format version 2, preserving
-the rational time base and integer ticks. Older replay versions are rejected
-without conversion.
+include it.
 
 ComputedPulse follows the selected compiled waveform and timestamp effects. The frontend does not pad a selected event to the longest
 candidate. `add_table_sweep(name, values)` uses the same top-level axes as
@@ -508,7 +506,7 @@ ADC work and pacing sleeps remain synchronous.
 Only `SimulationProvenance.identifier` is copied to public Run metadata as optional
 `simulation_id`. Backend/RNG versions and private requests remain on the typed
 binding. Seeds, device-round inputs and model content are not put in normal GUI
-or MCP metadata. Persistent private replay is a separate delivery.
+or MCP metadata. Physical environments can publish a separate [debug capture](../../../simulators/README.md#debug-capture).
 
 General program classes depend on the public mixin entry, not frontend, binding,
 signal-packing or SoC internals. `.importlinter` enforces that direct dependency

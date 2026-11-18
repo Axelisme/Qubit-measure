@@ -33,8 +33,22 @@ class FamilyRouting:
     prepare_builds: coefficient products built by common_frame, or exact-key
         frame construction attempts by floquet (including invalid frames).
         Zero for families without product instrumentation.
+    prepare_key_builds: key slots passed to scheduled prepare calls or returned
+        in guard preparations. Rebuilding a key counts again. Rejected guard
+        products count if returned; guard-only checks without products do not.
     admission_rows: common-frame row indicator evaluations, excluding apply and
         caller-preparation hits. Other families currently leave this count zero.
+    opencl_rows: physical endpoints executed by OpenCL within this family.
+        Zero for CPU-only calls and reuse hits. The backend does not rename
+        the family or change the logical row counts.
+    opencl_detection_error: reason automatic DOP853 device detection or the
+        active dimension's compilation failed, or None when neither failed.
+        Populated only for DOP853. Merged reports retain the first nonempty
+        reason in input order.
+    dp54_rows: physical endpoints executed by DP5(4) within dop853, across devices.
+    dop853_rows: physical endpoints executed by DOP853 within dop853, across
+        devices. Both tableau counts are zero for reuse and other families;
+        execution of a shared prefix counts once, not once per consumer.
     CPU values exclude dispatch, geometry, ADC and I/O. All values are
     nonnegative; actual_cpu_s is the sum of the two measured phases.
     """
@@ -49,6 +63,11 @@ class FamilyRouting:
     prepare_builds: int = 0
     admission_rows: int = 0
     duration_ns: float = 0.0
+    opencl_rows: int = 0
+    opencl_detection_error: str | None = None
+    dp54_rows: int = 0
+    dop853_rows: int = 0
+    prepare_key_builds: int = 0
 
     @property
     def actual_cpu_s(self) -> float:
@@ -66,6 +85,10 @@ class _Totals:
     missing_estimate: bool = False
     prepare_builds: int = 0
     admission_rows: int = 0
+    opencl_rows: int = 0
+    dp54_rows: int = 0
+    dop853_rows: int = 0
+    prepare_key_builds: int = 0
 
 
 class RoutingCollector:
@@ -107,11 +130,36 @@ class RoutingCollector:
             with self._lock:
                 self._totals.setdefault(name, _Totals()).prepare_builds += count
 
+    def prepared_keys(self, name: str, count: int) -> None:
+        """Count prepared key slots, including repeated builds of the same key."""
+        if self.enabled and count:
+            with self._lock:
+                self._totals.setdefault(name, _Totals()).prepare_key_builds += count
+
     def admitted(self, name: str, count: int) -> None:
         """Count row indicator evaluations, not apply calls or result hits."""
         if self.enabled and count:
             with self._lock:
                 self._totals.setdefault(name, _Totals()).admission_rows += count
+
+    def ran_opencl(self, name: str, count: int, *, dp54: bool) -> None:
+        """Record completed OpenCL endpoints for the selected tableau."""
+        if self.enabled and count:
+            with self._lock:
+                total = self._totals.setdefault(name, _Totals())
+                total.opencl_rows += count
+                if dp54:
+                    total.dp54_rows += count
+                else:
+                    total.dop853_rows += count
+
+    def ran_cpu_dop853(self, name: str, rows: int, dp54_rows: int) -> None:
+        """Count completed CPU endpoints: dp54_rows of rows used DP5(4)."""
+        if self.enabled and rows:
+            with self._lock:
+                total = self._totals.setdefault(name, _Totals())
+                total.dp54_rows += dp54_rows
+                total.dop853_rows += rows - dp54_rows
 
     def reject(self, name: str, count: int) -> None:
         """Count actual numerical rejections, never cost-based skips."""
@@ -163,7 +211,11 @@ class RoutingCollector:
                 rows=segments.get(name, 0),
                 duration_ns=durations.get(name, 0.0),
                 prepare_builds=total.prepare_builds,
+                prepare_key_builds=total.prepare_key_builds,
                 admission_rows=total.admission_rows,
+                opencl_rows=total.opencl_rows,
+                dp54_rows=total.dp54_rows,
+                dop853_rows=total.dop853_rows,
                 prepare_cpu_s=total.prepare_cpu_s,
                 apply_cpu_s=total.apply_cpu_s,
                 rejected_rows=total.rejected_rows,

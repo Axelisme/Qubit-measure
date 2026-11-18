@@ -5,7 +5,6 @@ an author probe, not by weakening the environment defaults in these tests.
 """
 
 from dataclasses import replace
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -23,12 +22,6 @@ from zcu_tools.simulate.boundary import (
     TimelineTemplate,
 )
 from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics
-from zcu_tools.simulators.replay import (
-    ReplayAcquire,
-    read_replay,
-    replay_paths,
-    save_replay,
-)
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment.runtime import (
     SingleFluxoniumRuntimeOptions,
@@ -193,60 +186,29 @@ def test_onetone_mean_matches_causal_scalar_cavity_solution():
         env.devices.close_all_devices()
 
 
-@pytest.mark.parametrize("mode", ["integrated", "decimated"])
-def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
-    from zcu_tools.simulators.single_fluxonium.environment import replay
-
-    env = single_fluxonium(
-        physical_settings(), soccfg=profile_soccfg("single_fluxonium")
-    )
+def test_delivered_raw_keeps_its_round_after_source_closes():
+    config = physical_settings()
+    env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(
-        physical_settings(),
+        config,
         env.devices,
         runtime=SingleFluxoniumRuntimeOptions(engine=EngineDouble()),
     )
     try:
-        source.private_replay = tmp_path / "archive"
-        request = request_for(source, "rabi", mode, reps=8)
+        request = request_for(source, "rabi", reps=8)
         snapshot = source.snapshot()
-        try:
-            result = source.execute(RoundRequest(request, snapshot, 2))
-        except NotImplementedError:
-            pytest.fail(
-                "single-cavity execute must produce replayable physical signals"
-            )
-        if isinstance(result, IntegratedRound):
-            expected = result.raw.materialize(request.reps, request.avg_level)
-        else:
-            expected = {c.channel: c.iq.copy() for c in result.channels}
-        paths = replay_paths(source.private_replay)
-        assert len(paths) == 1
-        later = source.execute(RoundRequest(request, snapshot, 3))
-        if isinstance(later, IntegratedRound):
-            assert not np.array_equal(
-                later.statistics.channels[0].sums,
-                expect_integrated(result).statistics.channels[0].sums,
-            )
+        session = source.open_acquire(request)
+        result = expect_integrated(session.sample_round(snapshot, 2))
+        expected = result.raw.materialize(request.reps, request.avg_level)
+        later = expect_integrated(session.sample_round(snapshot, 3))
+        assert not np.array_equal(
+            later.statistics.channels[0].sums, result.statistics.channels[0].sums
+        )
     finally:
         source.close()
         env.devices.close_all_devices()
-    if isinstance(result, IntegratedRound):
-        for ch, raw in result.raw.materialize(request.reps, request.avg_level).items():
-            np.testing.assert_array_equal(raw, expected[ch])
-    saved = read_replay(paths[0])
-    assert saved.round.index == 2
-    assert saved.acquire.request.point_dims == request.point_dims
-    incompatible = saved.acquire.model_copy(
-        update={
-            "versions": tuple(
-                (name, "single-fluxonium-segment-v1" if name == "backend" else value)
-                for name, value in saved.acquire.versions
-            )
-        }
-    )
-    path = save_replay(tmp_path / "obsolete", incompatible, saved.round.snapshot, 2)
-    with pytest.raises(ValueError, match="version mismatch"):
-        replay.replay_round(path)
+    for ch, raw in result.raw.materialize(request.reps, request.avg_level).items():
+        np.testing.assert_array_equal(raw, expected[ch])
 
 
 def named_drive_settings():
@@ -403,55 +365,12 @@ def test_program_acquire_raw_decimated_and_live_round_refresh():
         env.devices.close_all_devices()
 
 
-@pytest.mark.parametrize("target", ["single", "ftf"])
-def test_replay_rejects_other_backend_settings_before_numeric_work(
-    tmp_path: Path, target
-):
-    from zcu_tools.simulate.boundary import EnvironmentSnapshot
-    from zcu_tools.simulators.ftf.config import parse_ftf
-    from zcu_tools.simulators.ftf.environment import replay as ftf_replay
-    from zcu_tools.simulators.single_fluxonium.environment import (
-        replay as single_replay,
-    )
-
-    from tests.simulators.ftf.config._data import ftf_document
-
-    wrong = parse_ftf(ftf_document()) if target == "single" else physical_settings()
-    replay = single_replay if target == "single" else ftf_replay
-    fixed = ReplayAcquire(
-        settings=wrong,
-        request=AcquireRequest(
-            "integrated", (1,), 0, (), 123, 0, "test", time_base=TIME_BASE
-        ),
-        versions=replay.replay_versions(),
-    )
-    path = save_replay(tmp_path, fixed, EnvironmentSnapshot("wrong", "wrong"), 0)
-    try:
-        if target == "single":
-            single_replay.replay_round(path)
-        else:
-            ftf_replay.replay_round(path, soccfg=profile_soccfg("ftf"))
-    except AttributeError:
-        pytest.fail(
-            f"{target} replay must reject other-backend settings with ValueError before numeric work"
-        )
-    except ValueError as error:
-        assert (
-            "single-fluxonium replay requires single-fluxonium settings"
-            if target == "single"
-            else "FTF replay requires FTF settings"
-        ) in str(error)
-    else:
-        pytest.fail("replay must reject settings belonging to another backend")
-
-
-def test_changed_settings_refresh_snapshot_identity_and_replay_inputs(tmp_path: Path):
+def test_changed_settings_refresh_snapshot_identity_and_physical_facts():
     config = physical_settings()
     env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(
         config,
         env.devices,
-        private_replay=tmp_path / "archive",
         runtime=SingleFluxoniumRuntimeOptions(engine=EngineDouble()),
     )
     try:
@@ -472,12 +391,9 @@ def test_changed_settings_refresh_snapshot_identity_and_replay_inputs(tmp_path: 
         assert after.values == before.values
         assert source.model_facts(after) is not old_facts
         result = expect_integrated(source.execute(RoundRequest(request, after, 0)))
-        archived = replay_paths(tmp_path / "archive")[0]
     finally:
         source.close()
         env.devices.close_all_devices()
-    saved = read_replay(archived)
-    assert saved.round.snapshot.model_identity == after.model_identity
     assert result.statistics.channels[0].sums.shape == (2, 1, 2)
 
 

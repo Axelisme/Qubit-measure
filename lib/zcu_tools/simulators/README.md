@@ -1,12 +1,12 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-17, optional acquire captures and telemetry correlation
+**Last updated:** 2026-11-18, round settings and detached rounds in debug capture
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
 [ADR-0072](../../../docs/adr/0072-module-boundaries.md) defines model placement and framework dependencies.
 [ADR-0078](../../../docs/adr/0078-evolution-module-boundary.md) governs evolution integration and preparation lifetimes.
-[ADR-0084](../../../docs/adr/0084-simulation-integer-time-base.md) defines integer request times and replay v2.
+[ADR-0084](../../../docs/adr/0084-simulation-integer-time-base.md) defines integer request times.
 
 `simulators` composes framework mechanisms into three physical environments.
 Each model owns its topology, YAML schema and environment assembly.
@@ -77,7 +77,7 @@ boundary. `AcquireTelemetry` requires the first nine fields below.
 | `timestamp` | Writer-generated UTC ISO timestamp. |
 | `frontend_cpu_s` | Geometry and work-plan calling-thread CPU seconds. |
 | `estimated_cost_unit` | `relative scheduling units`, the label for family scheduling costs. |
-| `families` | Engine family names mapped to aggregated counters and CPU seconds. |
+| `families` | Engine family names mapped to merged routing counters, CPU seconds and optional OpenCL detection error. |
 
 All four wall fields are floats. A failed call retains elapsed time through its
 exception; a stage not entered contributes `0.0`. `complete` comes from the binding
@@ -91,8 +91,14 @@ Use extras keys such as `ftf.projection_outcomes`; the prefix names the simulato
 extension, not a row identity. Required extras keys are indexed directly by their
 consumer. The writer projects only declared fields and never modifies the caller's
 summary. It stores no numerical inputs or simulator identity.
-Family counters retain the [Engine report contract](../simulate/evolution/README.md#routing-telemetry).
-Family CPU excludes ADC, sampling and routing bookkeeping. It is not wall time.
+Each family entry contains `rows`, `duration_ns`, `prepare_cpu_s`, `apply_cpu_s`,
+`actual_cpu_s`, `cache_hits`, `rejected_rows`, `estimated_cost`, `estimated_cpu_s`,
+`prepare_builds`, `admission_rows`, `opencl_rows` and `opencl_detection_error`.
+These fields use the [Engine report's aggregation rules](../simulate/evolution/README.md#routing-telemetry).
+The writer lists the fields explicitly so new Engine diagnostics do not add JSONL keys.
+Acquire logs have no per-row method field and do not store the Engine's `dp54_rows`
+or `dop853_rows` endpoint counts. Family CPU excludes ADC, sampling and routing
+bookkeeping. It is not wall time.
 
 `numerics.telemetry.enabled` defaults to true in all three environments.
 Their default `numerics.telemetry.directory=null` selects the same project-root
@@ -128,7 +134,7 @@ Engine inputs and actual routes. The default is false. Six's top-level switch
 owns one buffer for all six sources; nested qubit switches do not publish files.
 One admitted acquire creates one buffer and passes it to every evolve.
 After return or failure, on_end publishes one manifest before building telemetry.
-A compile failure publishes an empty manifest. Readiness or on_begin failure
+A compile failure publishes a manifest with no Engine inputs. Readiness or on_begin failure
 does not call on_end and leaves no capture. A later acquire failure does not
 change the complete flag of an earlier successful evolve.
 
@@ -143,28 +149,35 @@ It returns `<user-cache-root>/simulator-debug/v1`, shared across worktrees and
 tasks. `ZCU_TOOLS_CACHE_DIR` overrides the shared root with a non-empty absolute
 path. The [capture writer](../simulate/evolution/README.md#capture-persistence)
 defines atomic publication, codec failures and retention.
-Captures contain numerical inputs and are not ordinary run metadata or Git data.
 
-## Private replay
+Open the gzip JSON manifest. Its `inputs` list holds frozen Engine inputs,
+actual families and candidate decisions. The [capture inspector](../../../tools/README.md#simulator-capture-inspection)
+summarizes those routes and matches the telemetry row by `capture_file`.
+FTF and single also write a top-level `metadata` object:
 
-`simulators.replay` owns opt-in private FTF and single-fluxonium input JSON,
-content integrity, atomic file I/O and acquire/round reference resolution.
-It retains detached waveform samples and settings, not measured I/Q.
-Template arrays preserve dtype, shape and flat values, with typed float64, int64
-and bool reconstruction. Acquire and round files use version 2 and reject version 1.
-Replay requests require explicit `reps` and `relax_delay_ticks`; complete version 2
-archives already contain both fields. Request clocks retain positive integer
-num/den fields in MHz.
-All time arrays retain int64 ticks, including ADC and envelope periods.
-Numeric manifests remain opaque and are verified by their numeric owner.
-Replay does not change normal waveform assets or data.h5 policies.
+- `rounds`: attempted rounds in order, including failed execution after a
+  successful snapshot. Each entry has its zero-based `index`, `dc_values`
+  by source name in the units declared in the settings, and `model_identity`.
+- `effective_settings`: the settings captured for each observed round
+  `model_identity`. Direct FTF callers can supply detached round snapshots. If
+  the capture did not observe a round's identity, `rounds` still lists the round
+  but `effective_settings` has no entry for it. Drift-enabled settings contain
+  the sampled losses and `drift: null`. Changes after the final round do not appear.
+- `admission_settings`: the effective settings at admission if the outcome has
+  no round snapshots, such as after a compile failure. In that case
+  `effective_settings` is empty. Otherwise `admission_settings` is null.
+- `sampling`: the actual `root_seed` and acquire `sequence` from the request.
+  A null configured seed still produces a root seed. `sampling` is null
+  if the outcome has no round snapshots.
+- `complete`: acquire return status, distinct from each evolve's status.
+  A normal partial Stop is true; an escaping exception is false.
+Captures contain numerical inputs and model settings. Keep them out of ordinary Run metadata and Git.
 
 ## Test owners
 
 `tests/simulators/<model>/config/` owns YAML validation.
 `tests/simulators/<model>/environment/` owns public planning and acquisition behavior.
 `tests/simulators/ftf/physics/` owns joint-model physics and its simulation marker.
-`tests/simulators/test_replay.py` owns private archive roundtrips and integrity errors.
 `tests/simulators/test_telemetry.py` owns shared summary serialization, file rotation
 and warning isolation. `tests/simulators/test_capture.py` owns the shared capture
 lifecycle through public acquire with non-evolving Engine collaborators.
