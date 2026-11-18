@@ -3,13 +3,18 @@
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event
 from uuid import uuid4
 
 import h5py
 import pytest
 from zcu_tools.datafile import Container, ContainerAttrs, JsonObject, save
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
-from zcu_tools.gui.app.measure.services.results_index import scan_results
+from zcu_tools.gui.app.measure.services.results_index import (
+    ResultEntryBatch,
+    ResultsScanCancelled,
+    scan_results,
+)
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     AnalyzedPayload,
@@ -198,6 +203,64 @@ def test_old_metadata_and_cfg_are_browsed_without_current_experiment_schema(
     assert index.read_figure(broken.key, "saved.png") == b"saved raster"
     assert index.get_run("entry/missing").experiment is None
     assert len(index.runs) == 3
+
+
+def test_entry_batches_arrive_before_scanning_the_next_entry(project: Path) -> None:
+    # An unenumerable entry still contributes progress and its item issue.
+    broken = project / "Database" / "broken"
+    outside = project / "outside"
+    outside.mkdir()
+    broken.symlink_to(outside, target_is_directory=True)
+    new_run = project / "Database/beta/runs/late"
+    batches: list[ResultEntryBatch] = []
+
+    def publish(batch: ResultEntryBatch) -> None:
+        batches.append(batch)
+        if batch.entry == "alpha":
+            new_run.mkdir()
+
+    index = scan_results(project, on_entry=publish)
+
+    assert [(b.entry, b.completed_entries, b.total_entries) for b in batches] == [
+        ("alpha", 1, 4),
+        ("beta", 2, 4),
+        ("broken", 3, 4),
+        ("orphan", 4, 4),
+    ]
+    assert [row.entry for row in batches[0].runs] == ["alpha", "alpha"]
+    assert index.get_run("beta/late").run_path == new_run
+    assert index.runs == tuple(row for batch in batches for row in batch.runs)
+    assert not batches[2].runs
+    assert [issue.path for issue in batches[2].issues] == [broken]
+    assert index.issues == tuple(issue for batch in batches for issue in batch.issues)
+
+
+def test_cancel_discards_an_unfinished_entry_without_reading_later_runs(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    beta_first = _layout(project, "beta", "mux/readout", _RUN1).run_path / "data.h5"
+    beta_second = _layout(project, "beta", "mux/readout", _RUN2).run_path / "data.h5"
+    cancelled = Event()
+    opened: list[Path] = []
+    batches: list[ResultEntryBatch] = []
+    open_file = h5py.File
+
+    def request_cancel(path: Path, mode: str) -> h5py.File:
+        handle = open_file(path, mode)
+        opened.append(path)
+        if path == beta_first:
+            cancelled.set()
+        return handle
+
+    # Trigger cancellation at the native read seam, inside an entry.
+    monkeypatch.setattr(h5py, "File", request_cancel)
+    with pytest.raises(ResultsScanCancelled):
+        scan_results(project, on_entry=batches.append, cancelled=cancelled.is_set)
+
+    assert [batch.entry for batch in batches] == ["alpha"]
+    assert len(batches[0].runs) == 2
+    assert beta_first in opened
+    assert beta_second not in opened
 
 
 def test_index_spans_entries_points_and_preserves_slash_tag(project: Path) -> None:

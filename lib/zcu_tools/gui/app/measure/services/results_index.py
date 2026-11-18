@@ -90,6 +90,23 @@ class ResultItemIssue:
 
 
 @dataclass(frozen=True)
+class ResultEntryBatch:
+    """Detached rows and item issues from one completed Database entry.
+
+    entry is the scanned name. completed_entries counts this and earlier names;
+    total_entries counts all names selected at the start, including unreadable
+    or empty entries. runs is ordered by run directory name. issues records
+    paths within this entry that could not be safely enumerated.
+    """
+
+    entry: str
+    completed_entries: int
+    total_entries: int
+    runs: tuple[ResultRun, ...]
+    issues: tuple[ResultItemIssue, ...]
+
+
+@dataclass(frozen=True)
 class ResultsIndex:
     """Detached project query snapshot; no open files, locks or live entry state.
 
@@ -159,8 +176,16 @@ class ResultsIndex:
         return _inside(run.run_path, path).read_bytes()
 
 
+class ResultsScanCancelled(RuntimeError):
+    """A cooperative stop interrupted the scan; no complete snapshot exists."""
+
+
 def scan_results(
-    project_root: Path, *, entries: tuple[str, ...] | None = None
+    project_root: Path,
+    *,
+    entries: tuple[str, ...] | None = None,
+    on_entry: Callable[[ResultEntryBatch], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> ResultsIndex:
     """Scan project_root/Database and same-named project_root/result ledgers.
 
@@ -175,32 +200,67 @@ def scan_results(
     leaves that entry's runs unregistered. Escaping members are excluded and
     diagnosed without following them. Unenumerable entries/runs produce named
     ResultsIndex.issues, not synthetic runs. Never create files or locks.
+
+    on_entry, if given, receives a detached batch on the calling thread after
+    each entry and before reading the next. Database root issues appear only
+    in the returned complete snapshot. Callback exceptions propagate.
+
+    cancelled is a calling-thread predicate (for example Event.is_set). It is
+    checked before scanning, between runs, and before publishing or returning.
+    True raises ResultsScanCancelled instead of returning an incomplete snapshot.
+    Already delivered batches remain valid; in-flight I/O is not interrupted.
     """
     root = project_root.resolve()
     if entries is not None:
         for entry in entries:
             validate_path_segment(entry, field="entry")
-    database = root / "Database"
-    try:
-        _inside(database, database)
-        if not database.exists():
-            return ResultsIndex(root, ())
-        names = (
-            sorted(set(entries))
-            if entries is not None
-            else sorted(path.name for path in database.iterdir())
-        )
-    except (OSError, ValueError) as error:
-        return ResultsIndex(root, (), (ResultItemIssue(None, database, str(error)),))
+    _check_cancelled(cancelled)
+    names, issues = _database_entries(root / "Database", entries)
     runs: list[ResultRun] = []
-    issues: list[ResultItemIssue] = []
-    for entry in names:
-        runs.extend(_scan_entry(root, entry, issues))
+    for completed, entry in enumerate(names, 1):
+        _check_cancelled(cancelled)
+        entry_issues: list[ResultItemIssue] = []
+        entry_runs = _scan_entry(root, entry, entry_issues, cancelled)
+        _check_cancelled(cancelled)
+        runs.extend(entry_runs)
+        issues.extend(entry_issues)
+        if on_entry is not None:
+            on_entry(
+                ResultEntryBatch(
+                    entry, completed, len(names), tuple(entry_runs), tuple(entry_issues)
+                )
+            )
+    _check_cancelled(cancelled)
     return ResultsIndex(root, tuple(runs), tuple(issues))
 
 
+def _check_cancelled(cancelled: Callable[[], bool] | None) -> None:
+    if cancelled is not None and cancelled():
+        raise ResultsScanCancelled("Results scan cancelled")
+
+
+def _database_entries(
+    database: Path, entries: tuple[str, ...] | None
+) -> tuple[list[str], list[ResultItemIssue]]:
+    try:
+        _inside(database, database)
+        if not database.exists():
+            return [], []
+        return (
+            sorted(set(entries))
+            if entries is not None
+            else sorted(path.name for path in database.iterdir()),
+            [],
+        )
+    except (OSError, ValueError) as error:
+        return [], [ResultItemIssue(None, database, str(error))]
+
+
 def _scan_entry(
-    root: Path, entry: str, issues: list[ResultItemIssue]
+    root: Path,
+    entry: str,
+    issues: list[ResultItemIssue],
+    cancelled: Callable[[], bool] | None,
 ) -> list[ResultRun]:
     location = root / "Database" / entry
     try:
@@ -235,6 +295,7 @@ def _scan_entry(
     )
     directory = _ScanDirectory(location, (*prefixes, str(location)))
     for path in paths:
+        _check_cancelled(cancelled)
         try:
             info = directory.child_stat(
                 path, lambda child: _checked_run(root, entry, child)
