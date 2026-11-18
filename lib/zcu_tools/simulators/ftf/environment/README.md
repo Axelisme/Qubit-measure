@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, GPU startup preparation
+**Last updated:** 2026-11-18, OpenCL DP5(4) replay revision
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -88,20 +88,17 @@ Each line contains `timestamp`, `points` (request grid, excluding shots),
 `rounds` (captured attempts), `wall_s` (admitted acquire time including pacing,
 excluding telemetry I/O), `frontend_cpu_s` (geometry and WorkPlan calling-thread
 CPU), `estimated_cost_unit` and `families`. Failed calls
-before a captured request have zero points and empty families. Family values are
-`rows`, `prepare_cpu_s`, `apply_cpu_s`, `actual_cpu_s`, `cache_hits`,
-`rejected_rows`, `prepare_builds`, `admission_rows`, `estimated_cost` and nullable
-`estimated_cpu_s`; counter meanings and family-specific instrumentation follow the
-[evolution report contract](../../../simulate/evolution/README.md#routing-telemetry).
+before a captured request have zero points and empty families.
 Rows and hits sum across rounds. Noiseless reuse contributes logical rows and
 cache hits but zero kernel CPU, rejections and estimated work. Actual CPU excludes
 ADC, sampling and routing bookkeeping; wall includes those operations.
 Numeric templates contain no program/experiment identifier, so `experiment` is
 omitted rather than guessed from controls or caller frames.
 
-The shared [telemetry contract](../../README.md#acquire-telemetry) defines common
-summary fields, the shared default directory and separate-analysis setup. `FTFSource.finish_acquire(outcome)` receives the binding's
-`AcquireOutcome` and projects its builder-only `compile_wall_s` and `complete`.
+The [shared telemetry contract](../../README.md#acquire-telemetry) lists the
+persisted family fields and defines the common summary and directory settings.
+`FTFSource.finish_acquire(outcome)` receives the binding's `AcquireOutcome` and
+projects its builder-only `compile_wall_s` and `complete`.
 `complete` means the acquire body and cleanup returned normally, including partial
 Stop results. An escaping error is false.
 `evolve_wall_s` sums each `Engine.evolve` call, including direct evolution,
@@ -682,7 +679,7 @@ field inheritance.
 Direct means retain conditional moments, their numeric values and their existing
 RNG stream. Raw getters do not advance that stream or shift shots to match a
 finite-shot direct mean. Each acquisition route reproduces itself for equal
-seed, inputs and recorded versions. Evolution uses `segment-engine-v9`.
+seed, inputs and recorded versions. Evolution uses `segment-engine-v11`.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.
