@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, execution and CPU chunk semantics
+**Last updated:** 2026-11-18, DOP853 GPU backend
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -12,6 +12,7 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 ## Contents
 
 - [Public entry points](#public-entry-points)
+- [GPU backend](#gpu-backend)
 - [Frozen numeric inputs and references](#frozen-numeric-inputs-and-references)
 - [Dispatch inspection](#dispatch-inspection)
 - [Engine capture](#engine-capture)
@@ -57,7 +58,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Solver-free reference storage | `SolverTolerances`, `ReferenceResult`, `reference_key`, `load_reference`, `write_reference` |
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
-routing_cache_bytes=4*1024**2)` owns immutable routing facts.
+routing_cache_bytes=4*1024**2, backend="auto")` owns immutable routing facts.
 Numerical preparations live only within one evolve. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
@@ -161,6 +162,60 @@ are admission proxies, not a certificate of final full-density accuracy.
 The 0.08 threshold has margin on the fixed acceptance set described below.
 It is not a maximum usable threshold or an accuracy guarantee for arbitrary
 inputs. Dispatch order and other families are unchanged.
+
+## GPU backend
+
+OpenCL is an execution backend for `dop853`, not an extra family. On Windows
+or Linux, install a GPU driver that exposes `cl_khr_fp64` and add the optional
+`gpu` extra. For a GUI checkout, run:
+
+```bash
+uv sync --directory <worktree> --locked --no-dev --extra gui --extra gpu
+```
+
+The extra installs `pyopencl` from `uv.lock`, not the driver. The `all` extra
+does not include `gpu`. The default development group includes `gpu` so
+managed lanes can run GPU tests on machines with a compatible driver.
+
+| `Engine(backend=...)` | Behavior |
+| --- | --- |
+| `"auto"` (default) | Detects OpenCL on the first eligible row. For eligible DOP853 work, compares CPU and GPU cost, including warm program setup, transfers and batch size. |
+| `"cpu"` | Never probes or uses OpenCL. |
+| `"opencl"` | Requires a supported device at construction. Sends eligible DOP853 rows to that device without the automatic cost comparison. A missing device or a build failure raises. Other rows can still run on CPU. |
+
+Eligibility depends on structure, not envelope shape. The row must be an
+independent, unchained interaction-frame DOP853 endpoint at fixed DC, with no
+flux modulation or segment shift. It must last 100 ns to 10 µs and have at most
+32 retained levels. Two sampled tones must cover the whole row, with at most
+960 knots per tone. Other rows in the same timeline may run on CPU.
+
+Automatic detection imports `pyopencl` on demand, finds an FP64 GPU, compiles
+a small program and checks a fixed endpoint against CPU. The maximum absolute
+entry difference must be at most `1e-5`. The Engine can reuse the stored probe
+result for the same device, driver and kernel. If detection fails, `auto` uses
+CPU with the same numerical result as `"cpu"`; if the program fails to build
+for one dimension before execution, only that dimension falls back. Read the
+reason in `opencl_detection_error` with routing telemetry enabled. Errors
+during GPU execution raise instead of retrying on CPU.
+
+One work-group integrates one row on device, using the CPU method's DOP853
+tableau, error norm, controller and budget-scaled tolerances. The GPU computes
+the starting interaction-frame phasor of each step in FP64 and uses FP32
+within the step. Before handing off the density, the runner returns it to the
+model eigenbasis, symmetrizes it and normalizes its trace. The scheduler
+batches ready rows across the acquire by dimension and model key. It uses
+measured dispatch times to target about 0.1 s per batch without reading OS or
+driver timeout settings.
+
+The CPU/GPU cost choice uses the acquire, worker count and device identity.
+Disk cache warmth and measured batch times do not enter that choice. Program
+builds and detection records use
+`<user-cache-root>/opencl/dop853/<digest>/`; the digest covers the kernel
+source and options, dimension, device and driver. The driver can also cache
+builds itself. The simulator's [cache root](../README.md#numba-machine-code-cache)
+can be set with an absolute `ZCU_TOOLS_CACHE_DIR`. A cold build populates the
+cache for later Engines and is not charged in the routing cost. The Engine
+owns the OpenCL context and releases it on `close()` after active work ends.
 
 ## Frozen numeric inputs and references
 
