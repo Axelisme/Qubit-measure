@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-17
+**Last updated:** 2026-11-19，Results Browser 索引
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -136,9 +136,13 @@ Predictor… uses Ctrl+P and Results browser… uses Ctrl+R in the measure windo
 Both shortcuts keep working when their buttons move into More ▾. Button tooltips
 and folded menu entries show the shortcuts.
 Results browser… on the toolbar opens an independent top-level Results browser.
-When space is short, the button moves into More ▾. Closing the
-measure window closes this browser. It reads the Controller results query once
-and filters the shared index without changing the opened entry or point.
+When space is short, the button moves into More ▾. The browser shows before
+the index scan completes. Its status bar shows entries scanned and runs found,
+then total runs and issues. Search, filters, pins and Load use the runs already
+delivered. New entries join the current search and filter without changing the
+opened entry or point. Closing the browser hides it; reopening shows its retained
+index without restarting the scan. Closing the measure window cancels and drains
+the scan before detaching the browser's subscription.
 Unenumerable Database items appear beside the filters as Cannot index, with
 entry, rejected path and reason in the tooltip. They do not hide healthy runs.
 The navigation tree starts with entries, then experiment → point → run or

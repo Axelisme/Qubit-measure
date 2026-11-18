@@ -32,7 +32,10 @@ from tests.gui.app.measure._native_save_support import (
     SavingAdapter,
 )
 from tests.gui.app.measure._record_support import require_record
-from tests.gui.app.measure.ui._results_browser_support import navigation_path
+from tests.gui.app.measure.ui._results_browser_support import (
+    navigation_path,
+    wait_for_results,
+)
 
 
 def test_menu_opens_independent_results_window(
@@ -62,6 +65,10 @@ def test_browser_shows_item_read_issues_alongside_healthy_results(
     assert ui.observe(object_name="results.focus").text == "All results · 1 runs"
     issue = ui.observe(object_name="results.issues")
     assert issue.visible
+    assert (
+        ui.observe(object_name="results.index_status").text
+        == "Index ready: 1 runs · 1 issues"
+    )
     assert "broken" in issue.text and str(source) in issue.tooltip
     assert "escapes" in issue.tooltip
     ui.screenshot(tmp_path / "item-issues.png")
@@ -756,6 +763,7 @@ def test_new_analysis_tab_loads_without_requiring_live_entry_or_point(
 ) -> None:
     ui, variant = load_browser
     ui.click("Results browser…")
+    wait_for_results(ui)
     ui.click(object_name="results.figure.0")
     ui.click("Load into analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
@@ -800,6 +808,7 @@ def identity_browser(
     qapp.processEvents()
     ui = ComponentDriver(window)
     ui.click("Results browser…")
+    wait_for_results(ui)
     return ui
 
 
@@ -904,6 +913,7 @@ def test_ambiguous_tag_is_browsable_but_does_not_choose_an_adapter(
     qapp.processEvents()
     ui = ComponentDriver(window)
     ui.click("Results browser…")
+    wait_for_results(ui)
     ui.click(object_name="results.figure.0")
     assert ("experiment", "test/saving") in {
         row.columns
@@ -932,6 +942,7 @@ def test_browser_keeps_existing_load_admission_and_failed_tab_cleanup(
     if rejection == "tag":
         live_registry.register("test/saving", WrongTagAdapter)
     ui.click("Results browser…")
+    wait_for_results(ui)
     if rejection == "format":
         # A file can change after indexing; Load, not the browser, admits bytes.
         session.native_data_path.write_bytes(b"not a native container")

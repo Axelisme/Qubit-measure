@@ -93,12 +93,14 @@ class ResultItemIssue:
 class ResultEntryBatch:
     """Detached rows and item issues from one completed Database entry.
 
-    entry is the scanned name. completed_entries counts this and earlier names;
+    project_root is the canonical absolute scan root. entry is the scanned name.
+    completed_entries counts this and earlier names;
     total_entries counts all names selected at the start, including unreadable
     or empty entries. runs is ordered by run directory name. issues records
     paths within this entry that could not be safely enumerated.
     """
 
+    project_root: Path
     entry: str
     completed_entries: int
     total_entries: int
@@ -111,6 +113,8 @@ class ResultsIndex:
     """Detached project query snapshot; no open files, locks or live entry state.
 
     project_root is absolute. runs is sorted by entry then run-directory name.
+    The snapshot may contain only completed entries during a background scan;
+    scan_results returns a complete snapshot on success.
     issues records entries/run directories that could not be safely enumerated;
     per-file and Result ledger failures remain in ResultRun.issues.
     Member selectors are exact indexed filenames, never arbitrary paths.
@@ -227,7 +231,12 @@ def scan_results(
         if on_entry is not None:
             on_entry(
                 ResultEntryBatch(
-                    entry, completed, len(names), tuple(entry_runs), tuple(entry_issues)
+                    root,
+                    entry,
+                    completed,
+                    len(names),
+                    tuple(entry_runs),
+                    tuple(entry_issues),
                 )
             )
     _check_cancelled(cancelled)

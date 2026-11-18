@@ -30,8 +30,9 @@ def test_run_lightbox_fits_blocks_gallery_and_dismisses_with_browser(
     for width, height in ((1400, 850), (1920, 1200), (1200, 1000)):
         ui.resize_window(width, height)
         overlay = visible_bounds(ui, "results.lightbox")
-        browser = visible_bounds(ui, "results.browser")
-        assert overlay == browser
+        content = visible_bounds(ui, "results.content")
+        assert overlay == content
+        assert ui.observe(object_name="results.index_status").visible
         x, y, w, h = visible_bounds(ui, "results.lightbox.image")
         ax, ay, aw, ah = visible_bounds(ui, "results.lightbox.area")
         assert abs(w / h - 400 / 220) < 0.01

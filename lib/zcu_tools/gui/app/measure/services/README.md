@@ -1,6 +1,6 @@
 # Measure services
 
-**Last updated:** 2026-11-17，global／point 文件選擇
+**Last updated:** 2026-11-19，Results Browser 索引
 
 **讀者：** framework-dev、agent。查找 Measure application 操作的 owner，以及 service 與 session、UI、remote 的接縫。
 
@@ -19,8 +19,11 @@ UI 與 remote 經 Controller／control facets 呼叫這些 owners，不各自建
 | `workflow_control.py`、`workflow_run.py`、`workflow_tab.py` | 將 workflow 註冊、執行與 tab 交接接到同一份 session。 |
 | `startup.py`、`experiment_reload.py`、`workspace.py` | 執行啟動、重載與目前程序內的 workspace 重建。 |
 | `results_index.py`、`results_comparison.py` | 唯讀索引保存成果，將已存 summary 投影為比較列，不重新分析。 |
+| `results_index_owner.py` | 為瀏覽器啟動一次背景索引，在 owner thread 交付每個 entry。 |
 
 Results index 隔離各 entry 的 global／ledger 與 run 成員讀取錯誤，保留其他成果。
+ResultsIndexOwner 借用既有 executor 與 owner scheduler。索引不取得 operation handle 或 hardware lease。
+Controller 關閉時發出合作取消，再等背景工作與交付結束。掃描在每筆 run 之間檢查取消，不中斷已開始的檔案 I/O。
 Ledger 讀取使用 resources 的無 lock typed partial snapshot，只消費 acquired 身分／時間與 saved 成功路徑。未用的歷史 payload 或 attachment reference 不影響登錄；實際使用的壞值仍診斷並沿既有 entry 層級隔離。
 沒有對應 Result entry 的 Database run 仍可瀏覽。無法安全列舉的 Database 項目
 以 `ResultsIndex.issues` 回報 entry、路徑與原因，不偽造 run；可列出的 run

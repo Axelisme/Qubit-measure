@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QStatusBar,
     QTextEdit,
     QWidget,
 )
@@ -19,6 +20,8 @@ def display_text(widget: QWidget) -> str:
         return widget.text()
     if isinstance(widget, QComboBox):
         return widget.currentText()
+    if isinstance(widget, QStatusBar):
+        return widget.currentMessage()
     if isinstance(widget, (QTextEdit, QPlainTextEdit)):
         return widget.toPlainText()
     return ""

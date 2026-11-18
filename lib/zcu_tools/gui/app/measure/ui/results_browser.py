@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import QDate, QEvent, QObject, QPoint, QPointF, Qt
+from qtpy.QtCore import QDate, QEvent, QObject, QPoint, QPointF, QSignalBlocker, Qt
 from qtpy.QtGui import QAction, QHideEvent, QImage, QMouseEvent, QPixmap, QResizeEvent
 from qtpy.QtWidgets import (
     QApplication,
@@ -21,6 +22,7 @@ from qtpy.QtWidgets import (
     QMenu,
     QPushButton,
     QSplitter,
+    QStatusBar,
     QStyle,
     QStyleOptionComboBox,
     QTabWidget,
@@ -33,6 +35,8 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.app.measure.registry import ExperimentResolution
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsIndex
+from zcu_tools.gui.app.measure.services.results_index_owner import ResultsScanState
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .results_comparison import ResultsComparison
@@ -108,7 +112,11 @@ class _CalendarDateEdit(QDateEdit):
 
 
 class ResultsBrowserWindow(QMainWindow):
-    """Retain one read-only results view; the measure window owns its lifetime."""
+    """Show the retained app-owned scan without doing filesystem I/O on construction.
+
+    Close hides this top-level window. MainWindow calls dispose at teardown
+    to detach the subscription before deleting the view (ADR-0067).
+    """
 
     def __init__(
         self, controller: Controller, parent: QMainWindow | None = None
@@ -117,7 +125,8 @@ class ResultsBrowserWindow(QMainWindow):
         self.setObjectName("results.browser")
         self.setWindowTitle("Results browser")
         self.resize(1400, 850)
-        index = controller.query_results()
+        index = ResultsIndex(Path(controller.get_project_root()).absolute(), ())
+        self._lifetime = LifetimeScope(self)
 
         def open_run(adapter: str, path: str) -> LoadTabResultOutcome:
             outcome = controller.tab_control.open_tab_from_file(adapter, path)
@@ -133,6 +142,38 @@ class ResultsBrowserWindow(QMainWindow):
             resolve_experiment=controller.resolve_experiment,
         )
         self.setCentralWidget(self._browser)
+        self._index_status = QStatusBar(self)
+        self._index_status.setObjectName("results.index_status")
+        self.setStatusBar(self._index_status)
+        self._lifetime.add_cleanup(
+            controller.watch_results_index(self._lifetime.callback(self._present_scan))
+        )
+
+    def _present_scan(self, state: ResultsScanState) -> None:
+        self._browser.present_index(state.index)
+        runs = len(state.index.runs)
+        match state.phase:
+            case "indexing":
+                message = (
+                    "Indexing results…"
+                    if state.total_entries is None
+                    else f"Indexing results: {state.completed_entries} / {state.total_entries} entries · {runs} runs"
+                )
+            case "ready":
+                issues = len(state.index.issues) + sum(
+                    len(run.issues) for run in state.index.runs
+                )
+                message = f"Index ready: {runs} runs · {issues} issues"
+            case "cancelled":
+                message = f"Index cancelled: {runs} runs"
+            case "failed":
+                message = f"Index failed: {state.error}"
+        self._index_status.showMessage(message)
+
+    def dispose(self) -> None:
+        """Retire the index subscription and hide this view, without stopping the scan."""
+        self._lifetime.close()
+        self.close()
 
     def set_writable(self, *, writable: bool) -> None:
         """Gate new-tab commands while retaining read-only browsing and local pins."""
@@ -140,8 +181,10 @@ class ResultsBrowserWindow(QMainWindow):
 
 
 class ResultsBrowser(QWidget):
-    """Browse an immutable index without changing the opened entry or point.
+    """Browse delivered index snapshots without changing the opened entry or point.
 
+    index is the initial snapshot, often empty. present_index applies later
+    snapshots from the same scan; only delivered runs are browsable or openable.
     open_run accepts a resolved adapter name and native data path, returning the
     existing Load outcome or raising a user-facing error. resolve_experiment is
     the catalog owner's query, called only when Open is requested. Navigation,
@@ -158,8 +201,10 @@ class ResultsBrowser(QWidget):
         resolve_experiment: Callable[[str | None], ExperimentResolution],
     ) -> None:
         super().__init__(parent)
+        self.setObjectName("results.content")
         self._index = index
         self._resolve_experiment = resolve_experiment
+        self._dates_edited = False
         self.setStyleSheet("""
             QWidget { background: #f6f8fb; color: #1e293b; font-size: 12px; }
             QTreeWidget, QTableWidget, QPlainTextEdit, QLineEdit, QComboBox {
@@ -216,6 +261,21 @@ class ResultsBrowser(QWidget):
         self._lightbox = ResultLightbox(self)
         self._render()
 
+    def present_index(self, index: ResultsIndex) -> None:
+        """Show a newer snapshot of the same scan on the Qt owner thread.
+
+        New entries extend the existing sorted rows. Preserve current search,
+        filter, focus and pins and allow commands on already-delivered runs.
+        """
+        if self._index == index:
+            return
+        self._index = index
+        self._gallery.replace_index(index)
+        self.comparison.replace_index(index)
+        self._refresh_filter_choices()
+        self._show_item_issues()
+        self._render()
+
     def resizeEvent(self, a0: QResizeEvent | None) -> None:
         super().resizeEvent(a0)
         self._lightbox.setGeometry(self.rect())
@@ -267,24 +327,43 @@ class ResultsBrowser(QWidget):
         self._visible_count.setObjectName("results.visible_count")
         make_label_selectable(self._visible_count)
         layout.addWidget(self._visible_count)
-        issues = QLabel(
-            "Cannot index: "
-            + ", ".join(
-                sorted({issue.entry or "Database" for issue in self._index.issues})
-            )
-        )
-        issues.setObjectName("results.issues")
-        issues.setWordWrap(True)
-        issues.setToolTip(
+        self._issues_label = QLabel()
+        self._issues_label.setObjectName("results.issues")
+        self._issues_label.setWordWrap(True)
+        make_label_selectable(self._issues_label)
+        layout.addWidget(self._issues_label)
+        self._show_item_issues()
+        return layout
+
+    def _show_item_issues(self) -> None:
+        issues = self._index.issues
+        entries = ", ".join(sorted({issue.entry or "Database" for issue in issues}))
+        self._issues_label.setText(f"Cannot index: {entries}")
+        self._issues_label.setToolTip(
             "\n".join(
                 f"{issue.entry or 'Database'}: {issue.path}: {issue.reason}"
-                for issue in self._index.issues
+                for issue in issues
             )
         )
-        make_label_selectable(issues)
-        issues.setVisible(bool(self._index.issues))
-        layout.addWidget(issues)
-        return layout
+        self._issues_label.setVisible(bool(issues))
+
+    def _refresh_filter_choices(self) -> None:
+        selected = self._experiment.currentText()
+        names = sorted({self._experiment_name(run) for run in self._index.runs})
+        with QSignalBlocker(self._experiment):
+            self._experiment.clear()
+            self._experiment.addItem("All experiments")
+            self._experiment.addItems(names)
+            self._experiment.setCurrentText(selected)
+        if not self._dates_edited and not self._dates_enabled.isChecked():
+            dates = [run.at[:10] for run in self._index.runs if run.at]
+            if dates:
+                for field, value in (
+                    (self._date_from, min(dates)),
+                    (self._date_to, max(dates)),
+                ):
+                    with QSignalBlocker(field):
+                        field.setDate(QDate.fromString(value, "yyyy-MM-dd"))
 
     def _date_filter(self, name: str, initial: str, layout: QHBoxLayout) -> QDateEdit:
         edit = _CalendarDateEdit(QDate.fromString(initial, "yyyy-MM-dd"))
@@ -296,9 +375,13 @@ class ResultsBrowser(QWidget):
             "Enable Filter by date (UTC), then click the date text or right-hand arrow "
             "to choose a date. From / To are inclusive; runs without a UTC time are excluded."
         )
-        edit.dateChanged.connect(self._render)
+        edit.dateChanged.connect(self._date_changed)
         layout.addWidget(edit)
         return edit
+
+    def _date_changed(self) -> None:
+        self._dates_edited = True
+        self._render()
 
     def _toggle_dates(self) -> None:
         enabled = self._dates_enabled.isChecked()
