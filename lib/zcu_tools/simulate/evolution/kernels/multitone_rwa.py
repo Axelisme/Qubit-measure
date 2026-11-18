@@ -16,7 +16,7 @@ from ..secular import SecularModel
 from ..workplan import FactKey, WorkPlan
 from ._dop853 import Tolerances, integrate, tolerances
 from ._dop853_data import Models, Segments, pack_models
-from ._multitone_spot import SPOT_POLICY, probe_density, sampled_candidates, spot_rows
+from ._multitone_spot import SPOT_POLICY, SampledGroup, probe_density, sampled_groups
 from ._rwa_fourier import (
     RWACoefficients,
     endpoint_kick,
@@ -442,28 +442,39 @@ class MultitoneRWAKernel:
     def guard(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.bool_]:
-        """Apply row proxies and borrow a single complete sampled-group decision."""
+        """Check constant proxies and borrow each sampled group's own decision.
+
+        rows are complete-table indices. Sampled groups that intersect these
+        rows compare their fixed-probe endpoints once per work plan. Returns a
+        row-aligned acceptance mask; numerical failures propagate.
+        """
         constant = table.constant_envelopes(rows)
         accepted = np.zeros(len(rows), dtype=np.bool_)
         accepted[constant] = admit_multitone_rows(table, rows[constant], context)
-        sampled_rows = rows[~constant & (table.tones[rows] == 2)]
-        if not len(sampled_rows):
+        sampled = ~constant & (table.tones[rows] == 2)
+        if not np.any(sampled):
             return accepted
         complete = context.work_plan.complete_table
         geometry = table if complete is None else complete
-        candidates = sampled_candidates(geometry, context)
-        pending = ~constant & np.isin(rows, candidates)
-        if np.any(pending) and self._spot_check(geometry, candidates, context):
-            accepted[pending] = True
+        admission = sampled_groups(geometry, context)
+        membership = admission.by_row[rows]
+        pending = sampled & (membership >= 0)
+        needed = membership[pending]
+        passed = np.zeros(len(admission.groups), dtype=np.bool_)
+        for index in np.unique(needed):
+            passed[index] = self._spot_check(geometry, admission.groups[index], context)
+        accepted[pending] = passed[needed]
         return accepted
 
     def _spot_check(
-        self, table: SegmentTable, candidates: tuple[int, ...], context: KernelContext
+        self, table: SegmentTable, group: SampledGroup, context: KernelContext
     ) -> bool:
-        key = FactKey((SPOT_POLICY, TableIdentity(table), context.budget), bool)
+        key = FactKey(
+            (SPOT_POLICY, TableIdentity(table), context.budget, group.rows[0]), bool
+        )
 
         def build() -> bool:
-            rows = np.asarray(spot_rows(table, candidates, context), dtype=np.int64)
+            rows = np.asarray(group.spot_rows, dtype=np.int64)
             keys = self.prepare_keys(table, rows, context)
             prepared = self.prepare(keys, table, rows, context)
             size = prepared.models.energies.shape[1]

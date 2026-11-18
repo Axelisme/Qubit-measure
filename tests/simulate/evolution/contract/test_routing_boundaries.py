@@ -454,16 +454,160 @@ def test_sampled_multitone_reuses_one_spot_check_only_within_evolve() -> None:
             assert result.paths.routing["multitone_rwa"].admission_rows == 1
 
 
+def test_sampled_multitone_rejection_does_not_cross_phase_groups() -> None:
+    case = accuracy_case("sampled_multitone_phase_sequence")
+    batch = timeline(3, 8.0)
+    batch = replace(
+        batch,
+        tracks=tuple(
+            replace(
+                drive_track(batch, track.envelopes[0], port=track.port),
+                frequency_ghz=np.full(3, track.frequency_ghz[0]),
+                phase_rad=np.array([track.phase_rad[0], track.phase_rad[0], -0.9]),
+                amplitude=track.amplitude[[1, 0, 0]],
+            )
+            for track in case.batch.tracks[:2]
+        ),
+    )
+    families = ("multitone_rwa", "dop853")
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=families)) as engine,
+    ):
+        inspection = engine.inspect_dispatch(case.source, (batch,))
+        assert [row.family for row in inspection.rows] == [
+            "dop853",
+            "dop853",
+            "multitone_rwa",
+        ]
+        result = engine.evolve(case.source, (batch,), telemetry=True)
+    assert result.paths.segments_by_kernel == {"dop853": 2, "multitone_rwa": 1}
+    routing = result.paths.routing["multitone_rwa"]
+    assert routing.admission_rows == 2
+    assert routing.rejected_rows == 2
+
+
+def _short_sampled_pair(case: AccuracyCase, count: int) -> TimelineBatch:
+    batch = timeline(count, 1.5)
+    envelope = EnvelopeSpec(
+        "sampled", np.array([0.8, 1.0, 0.9], complex), np.array([0.0, 0.75, 1.5])
+    )
+    return replace(
+        batch,
+        tracks=tuple(
+            replace(
+                drive_track(
+                    batch,
+                    envelope,
+                    frequency=float(track.frequency_ghz[0]),
+                    port=track.port,
+                ),
+                phase_rad=np.full(count, track.phase_rad[0]),
+            )
+            for track in case.batch.tracks
+        ),
+    )
+
+
+def test_sampled_multitone_probes_each_tones_amplitude_maximum() -> None:
+    case = accuracy_case("joint_constant")
+    scan = _short_sampled_pair(case, 3)
+    batch = replace(
+        scan,
+        tracks=tuple(
+            replace(track, amplitude=np.array(gains))
+            for track, gains in zip(
+                scan.tracks, ((0.03, 0.015, 0.002), (0.015, 0.031, 0.002)), strict=True
+            )
+        ),
+    )
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine,
+    ):
+        result = engine.evolve(case.source, (batch,), telemetry=True)
+    assert result.paths.segments_by_kernel == {"multitone_rwa": 3}
+    assert result.paths.routing["multitone_rwa"].admission_rows == 2
+
+
+@pytest.mark.parametrize("variation", ["scale", "one_ulp_sample", "sample_grid"])
+def test_sampled_multitone_requires_exact_proportional_envelopes(
+    variation: str,
+) -> None:
+    case = accuracy_case("joint_constant")
+    scan = _short_sampled_pair(case, 2)
+    samples = np.array([0.5 + 0.125j, 1.0, 0.75 - 0.25j], complex)
+    scaled = np.asarray(samples * 1.5, dtype=np.complex128)
+    if variation == "one_ulp_sample":
+        scaled.real[0] = np.nextafter(scaled.real[0], np.inf)
+    knots = np.array([0.0, 0.75, 1.5])
+    scaled_knots = np.array([0.0, 0.6, 1.5]) if variation == "sample_grid" else knots
+    envelopes = (
+        EnvelopeSpec("sampled", samples, knots),
+        EnvelopeSpec("sampled", scaled, scaled_knots),
+    )
+    batch = replace(
+        scan,
+        tracks=tuple(
+            replace(
+                track,
+                amplitude=np.array([0.01, 0.02]),
+                envelopes=envelopes,
+                envelope_index=np.arange(2),
+            )
+            for track in scan.tracks
+        ),
+    )
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine,
+    ):
+        result = engine.evolve(case.source, (batch,), telemetry=True)
+    assert result.paths.segments_by_kernel == {"multitone_rwa": 2}
+    assert result.paths.routing["multitone_rwa"].admission_rows == (
+        1 if variation == "scale" else 2
+    )
+
+
+def test_sampled_multitone_does_not_group_different_pulse_slices() -> None:
+    case = accuracy_case("joint_constant")
+    scan = _short_sampled_pair(case, 2)
+    first, second = scan.tracks
+    # Both points resume at 0.5 ns and play a 1 ns pair at identical phases.
+    # Only the second point's first tone is already 0.5 ns into its envelope.
+    batch = replace(
+        scan,
+        start_ns=np.full(2, 0.5),
+        initial_densities=np.repeat(case.source.initial_density[None], 2, axis=0),
+        tracks=(
+            replace(
+                first, start_ns=np.array([0.5, 0.0]), duration_ns=np.array([1.0, 1.5])
+            ),
+            replace(second, start_ns=np.full(2, 0.5), duration_ns=np.ones(2)),
+        ),
+    )
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine,
+    ):
+        result = engine.evolve(case.source, (batch,), telemetry=True)
+    assert result.paths.segments_by_kernel == {"multitone_rwa": 2}
+    assert result.paths.routing["multitone_rwa"].admission_rows == 2
+
+
 def _joint_gate_case(count: int) -> AccuracyCase:
     case = accuracy_case("joint_gate_inventory")
     batch = timeline(count, 1.5)
     tracks = tuple(
-        drive_track(
-            batch,
-            track.envelopes[0],
-            frequency=float(track.frequency_ghz[0]),
-            gain=float(track.amplitude[0]),
-            port=track.port,
+        replace(
+            drive_track(
+                batch,
+                track.envelopes[0],
+                frequency=float(track.frequency_ghz[0]),
+                gain=float(track.amplitude[0]),
+                port=track.port,
+            ),
+            phase_rad=np.full(count, track.phase_rad[0]),
         )
         for track in case.batch.tracks
     )
@@ -475,8 +619,9 @@ def test_sampled_multitone_admission_is_independent_of_reuse(count: int) -> None
     case = _joint_gate_case(count)
     reference = converged_reference(case.source, case.batch)
     with closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine:
-        result = engine.evolve(case.source, (case.batch,))
+        result = engine.evolve(case.source, (case.batch,), telemetry=True)
     assert result.paths.segments_by_kernel == {"multitone_rwa": count}
+    assert result.paths.routing["multitone_rwa"].admission_rows == 1
     assert density_error(result.densities, reference.density) <= 2e-3
 
     with closing(Engine(1, backend="cpu")) as engine:
