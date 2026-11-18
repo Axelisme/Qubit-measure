@@ -58,8 +58,8 @@ there. Backend cleanup failure does not skip device cleanup.
 
 Use a separate project root for this environment. Do not mix synthetic results
 with hardware results or reuse another environment's entry as calibration.
-Neither GUI nor MCP should read simulator truth, internal populations or replay
-archives. Use the acquired IQ and visible spectra as measurement evidence.
+Neither GUI nor MCP should read simulator truth, internal populations or debug
+captures. Use the acquired IQ and visible spectra as measurement evidence.
 
 ## Channels and units
 

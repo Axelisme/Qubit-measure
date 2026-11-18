@@ -1,10 +1,10 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-17, acquire telemetry and optional capture publication
+**Last updated:** 2026-11-18, round settings in debug capture
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
-`single_fluxonium(path_or_settings, *, soccfg, workers=1, private_replay=None, clock=None, truth_log=None, history=None, families=None)` returns the normal
+`single_fluxonium(path_or_settings, *, soccfg, workers=1, clock=None, truth_log=None, history=None, families=None)` returns the normal
 `SimulationEnvironment`. It creates one fixed-unit DC FakeDevice, a mock SoC,
 one route per named microwave line, an optional fast-flux route and one readout generator/ADC route.
 All generators bind to that ADC for transport admission. Only the configured
@@ -40,9 +40,15 @@ The startup policy is defined in [ADR-0069](../../../../../docs/adr/0069-experim
 `numerics.debug_capture` defaults to false. Enable it to publish one frozen
 Engine-input and route manifest after each admitted acquire, including failure.
 Every evolve in that acquire shares the same buffer. Telemetry can remain off.
-When enabled, telemetry stores the published basename in `capture_file`,
-or null when capture is off or publication fails. Capture writes run before
-summary construction and outside binding's measured wall time.
+Open the `capture-*.json.gz` manifest to read `inputs` for Engine inputs and per-row
+routes. In `metadata`, use a round's `model_identity` to look up its settings
+in `effective_settings`. Each attempted round retains its DC values, even if
+execution failed after its snapshot. If no snapshot was taken, read
+`admission_settings` instead. `sampling` shows the actual seed and sequence
+when a round snapshot exists.
+When telemetry is enabled, use `capture_file` in `routing-*.jsonl` to match the
+manifest to its acquire row. The row shows family totals and stage timings. Capture writes run before summary
+construction and outside binding's measured wall time.
 See the [shared switch contract](../../README.md#debug-capture) for empty
 captures, retention and the cache directory.
 
@@ -144,7 +150,7 @@ sampling path, including RNG consumption.
 
 ## Physical and ADC composition
 
-`SingleFluxoniumSource(settings, devices, *, private_replay=None, readout_kind="pulse", runtime=SingleFluxoniumRuntimeOptions())` captures the
+`SingleFluxoniumSource(settings, devices, *, readout_kind="pulse", runtime=SingleFluxoniumRuntimeOptions())` captures the
 startup driver object. `snapshot()` reads its current A/V value and checks the
 fixed unit and inclusive limits. Registry removal or renaming does not restore
 startup values. `model_facts(snapshot)` builds the retained projection, Gibbs
@@ -248,7 +254,7 @@ and filesystem failures.
 ## Reuse and lifetime
 
 `open_acquire(request)` invalidates the preceding session. `sample_round` and
-`execute` propagate numeric, ADC and replay errors without partial results.
+`execute` propagate numeric and ADC errors without partial results.
 Invalidated sessions and closed sources raise `RuntimeError`. Direct callers
 serialize source methods. `close()` clears structure, models, plans and routing facts,
 invalidates the session and leaves caller-owned drivers untouched.
@@ -268,7 +274,7 @@ discard full models, plans and preparation. Rates are rebuilt from the current
 acquisition's frozen losses. Temperature, DC, truncation or other structural
 settings changes discard structure too. No dissipative propagator or density
 survives a loss change through this reuse. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md).
-Keys include settings, the full snapshot, numeric/dependency versions, layout,
+Keys include settings, the full snapshot, backend/numeric versions, layout,
 all borrowed control/readout arrays and every waveform sample/time. Buffers are
 reread on each lookup. Evolution validates reuse against its own routing policy.
 Noise, counts, round identities and measured IQ are never cached.
@@ -279,20 +285,6 @@ conditional sums follows the complete-preparation rules above. It does not
 carry forward a sampled herald result.
 Reassigning `source.settings` to validated settings changes the snapshot's
 settings identity and clears preparations on the next lookup. It does not
-replace the startup driver or reset its value. Replay captures the current
-settings and validates that same identity when reconstructing the source.
+replace the startup driver or reset its value.
 Delivered raw sources retain their own immutable inputs after another acquire,
 cache eviction or source close. Repeated materialization returns fresh arrays.
-
-## Private replay
-
-Pass an explicit absolute `private_replay` directory to the builder or source.
-The resource owner archives detached settings, controls, envelopes, RNG identity
-and the selected snapshot. With drift enabled, archived settings contain the
-acquisition's effective losses with drift disabled and a matching model identity.
-Replay never samples a new drift state or reads the live clock. It stores no measured IQ. Call
-`replay_round(round_json_path)` to recompute only that round without live devices.
-The single-fluxonium backend has its own version string. Private single-model replay supports pulse mode only; the constructor rejects mux mode with a replay root. Wrong settings backend,
-model identity, dependency versions or numeric references raise `ValueError`.
-Integrity and I/O errors propagate. These author-only archives contain model
-truth and do not belong in normal GUI/RPC metadata.

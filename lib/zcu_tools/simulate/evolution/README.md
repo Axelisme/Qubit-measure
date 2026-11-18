@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, full-drive gate admission and DP5(4) within dop853
+**Last updated:** 2026-11-18, full-drive gate admission, DP5(4), and debug capture
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -336,19 +336,20 @@ neither runs timeline workers nor computes prefix densities.
 An evaluated guard reports `accepted` or `rejected`. A local key reports
 `deferred`. Candidates after a stopped round report
 `untested_after_short_circuit`, unless an earlier round already evaluated them.
-Structurally inapplicable and cost-skipped families are not listed unless
-offered. A gate that loses the pre-build comparison does not run its
-table-building guard. Without `families=`, the skipped gate is absent. With an
-allowlist, a later fallback round can name it after another family has stopped
-the row; the gate then reports `untested_after_short_circuit`, not rejection.
+Structurally inapplicable and cost-skipped families are absent unless offered.
+A gate that loses the pre-build price comparison does not run its table-building
+guard. Without `families=`, the skipped gate is absent from `candidates`. With
+an allowlist, a later fallback round can name it after another family has
+stopped the row. The gate then reports `untested_after_short_circuit`, not a
+guard rejection.
 
-Candidate `scheduling_cost` is `Kernel.cost`'s nonnegative relative row work for
-chunk interleaving, not seconds or a numerical certificate. It cannot explain
-why a family was chosen. For `dop853` this is the CPU fallback cost, reduced for
-rows eligible for CPU DP5(4). Backend selection happens when the scheduler has
-a ready wave. The cold-amortized estimate used to
-order candidates is not exposed. Short-circuited candidates have
-`scheduling_cost=None`; evaluated and deferred candidates include their value.
+Candidate `scheduling_cost` is `Kernel.cost`'s nonnegative relative row work
+for chunk interleaving. It is neither a time estimate nor a numerical
+certificate. For `dop853` it is the CPU fallback cost, reduced for rows
+eligible for CPU DP5(4). The scheduler selects a backend when a wave is ready.
+Inspection does not expose the cold-amortized estimate used to order candidates.
+Short-circuited candidates have `scheduling_cost=None`; evaluated and deferred
+candidates include their value.
 
 Inspection does not modify routing history. It projects usage without writing
 counters, content membership or generation, and does not create routing-reuse
@@ -512,11 +513,13 @@ for the lifecycle and event-log choices.
 
 ## Capture persistence
 
-`write_capture(buffer: CaptureBuffer) -> Path | None` snapshots records once
+`write_capture(buffer, *, metadata=None)` snapshots records once
 and publishes a new `capture-<uuid4 hex>.json.gz` file. Rewriting the same
 buffer keeps earlier records in a different file. An empty buffer produces
 a zero-record manifest, not None. Read it with `read_frozen_manifest(path)`.
-The existing frozen format and physical hashes do not change.
+Optional JSON `metadata` describes the whole capture and is readable in the
+manifest. `read_frozen_manifest` returns only the Engine records. The format
+version and physical hashes do not change.
 
 `capture_directory() -> Path` returns the absolute
 `<user-cache-root>/simulator-debug/v1` directory without creating it.
@@ -1404,12 +1407,10 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v11`. It distinguishes the OpenCL
-DP5(4) rule from earlier results. The CPU tableau rule is unchanged.
-`simulators.ftf.environment` owns private replay and checks backend, model,
-numerical, RNG and dependency versions before
-recomputing a round. Evolution does not persist densities or offline tables
-across processes or Engine lifetimes.
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v11`. This version includes the
+OpenCL DP5(4) route for eligible `dop853` rows. Engine captures and paired
+benchmark reports record the numeric version. Evolution does not persist
+densities or offline tables across processes or Engine lifetimes.
 
 ## Research records
 

@@ -42,6 +42,7 @@ from zcu_tools.simulate.boundary import (
     TimelineTemplate,
 )
 from zcu_tools.simulate.evolution import (
+    SEGMENT_NUMERIC_VERSION,
     Basis,
     CaptureBuffer,
     DriveSource,
@@ -50,18 +51,17 @@ from zcu_tools.simulate.evolution import (
     PathDiagnostics,
     RoutingHistory,
     batch_populations,
-    write_capture,
 )
 from zcu_tools.simulate.fluxonium import (
     FluxoniumNoise,
     SingleFluxoniumModel,
 )
+from zcu_tools.simulators.capture import AcquireCaptureSettings
 from zcu_tools.simulators.single_fluxonium.config import (
     load_single_fluxonium,
     parse_single_fluxonium,
 )
 from zcu_tools.simulators.single_fluxonium.config.schema import SingleFluxoniumSettings
-from zcu_tools.simulators.single_fluxonium.environment import replay
 from zcu_tools.simulators.single_fluxonium.environment.acquire import (
     SingleFluxoniumAcquire,
     SingleFluxoniumPreparation,
@@ -81,6 +81,8 @@ from zcu_tools.simulators.single_fluxonium.environment.template import (
     plan_template,
 )
 from zcu_tools.simulators.telemetry import RoutingTelemetry
+
+_BACKEND_VERSION = "single-fluxonium-chain-v2"
 
 
 @dataclass(frozen=True)
@@ -239,7 +241,7 @@ class SingleFluxoniumSource:
     devices: caller-owned manager with the named startup DC driver, retained as
         .devices. Snapshot retains that driver's identity across registry removal
         or renaming; no real device is opened and no value is reset here.
-    Full facts use the latest settings/snapshot/backend/numeric/dependency key.
+    Full facts use the latest settings/snapshot/backend/numeric key.
     Loss-independent structure uses a separate key excluding losses and drift.
     Plan keys additionally hash every borrowed control/readout array and complete
     waveform samples/times, never array or template identity. Cache hits return
@@ -256,9 +258,6 @@ class SingleFluxoniumSource:
     None uses that record's defaults.
     An injected engine transfers exclusive ownership to this source; shared
     clocks remain environment-owned. Its cache caps do not bound process RSS.
-    private_replay optionally selects an explicit absolute author archive root;
-    None disables I/O. Private single-model replay accepts pulse mode only;
-    combining mux mode with private_replay raises ValueError before acquisition.
     runtime.clock optionally supplies the environment's shared SimulationClock;
     None creates a standalone clock. runtime.truth_log selects a private JSONL
     file; None uses a fresh session directory. Only enabled drift writes truth.
@@ -278,16 +277,11 @@ class SingleFluxoniumSource:
         settings: SingleFluxoniumSettings,
         devices: DeviceManager,
         *,
-        private_replay: Path | None = None,
         readout_kind: Literal["pulse", "mux"] = "pulse",
         runtime: SingleFluxoniumRuntimeOptions | None = None,
     ) -> None:
-        if private_replay is not None and not private_replay.is_absolute():
-            raise ValueError("private replay requires an explicit absolute root")
         if readout_kind not in ("pulse", "mux"):
             raise ValueError("readout_kind must be pulse or mux")
-        if readout_kind == "mux" and private_replay is not None:
-            raise ValueError("single-fluxonium private replay requires pulse readout")
         self._readout_kind: Literal["pulse", "mux"] = readout_kind
         self.settings = settings
         policy = settings.numerics.telemetry
@@ -305,8 +299,8 @@ class SingleFluxoniumSource:
         self.readout_wall_s = 0.0
         self.capture: CaptureBuffer | None = None
         """Current acquire recording; None when debug_capture is disabled."""
+        self._capture_settings: AcquireCaptureSettings | None = None
         self.devices = devices
-        self.private_replay = private_replay
         runtime = SingleFluxoniumRuntimeOptions() if runtime is None else runtime
         self._clock = SimulationClock() if runtime.clock is None else runtime.clock
         self._truth_log = runtime.truth_log
@@ -323,15 +317,10 @@ class SingleFluxoniumSource:
         self._structure: SingleFluxoniumModel | None = None
         self._structure_key: bytes | None = None
         self._facts: SingleFluxoniumFacts | None = None
-        self._facts_key: (
-            tuple[str, EnvironmentSnapshot, tuple[tuple[str, str], ...]] | None
-        ) = None
+        self._facts_key: tuple[str, EnvironmentSnapshot, tuple[str, str]] | None = None
         self._plan: SingleFluxoniumPlan | None = None
         self._plan_key: (
-            tuple[
-                str, EnvironmentSnapshot, tuple[tuple[str, str], ...], TimeBase, bytes
-            ]
-            | None
+            tuple[str, EnvironmentSnapshot, tuple[str, str], TimeBase, bytes] | None
         ) = None
         self._closed = False
 
@@ -345,7 +334,7 @@ class SingleFluxoniumSource:
 
         Reassigning settings discards the old effective values immediately;
         the next begin initializes drift from the new configuration. With drift
-        disabled, this returns settings unchanged. Replay archives this snapshot.
+        disabled, this returns settings unchanged.
         """
         if self._drift is not None and self._drift.settings == self.settings:
             return self._effective_settings
@@ -375,6 +364,11 @@ class SingleFluxoniumSource:
         self.paths.clear()
         self.evolve_wall_s = self.readout_wall_s = 0.0
         self.capture = CaptureBuffer() if self.settings.numerics.debug_capture else None
+        self._capture_settings = (
+            None
+            if self.capture is None
+            else AcquireCaptureSettings(self.effective_settings)
+        )
         self._pending_acquire = True
 
     def finish_acquire(self, outcome: AcquireOutcome) -> None:
@@ -382,11 +376,16 @@ class SingleFluxoniumSource:
 
         Uses captured attempts for points/rounds and accumulated Engine/ADC work.
         Writer failures warn once without changing the outcome. Disabled policy
-        writes no telemetry. When debug_capture is enabled, publish its buffer
-        first even with telemetry disabled; include the successful basename or
-        None in the summary. The binding is the sole authority for complete.
+        writes no telemetry. For debug capture, take round snapshots after
+        begin_acquire. Publish the buffer before telemetry and include the
+        successful basename or None in the summary. The binding is the sole
+        authority for complete.
         """
-        capture_file = write_capture(self.capture) if self.capture is not None else None
+        capture_settings = self._capture_settings
+        self._capture_settings = None
+        capture_file = None
+        if self.capture is not None and capture_settings is not None:
+            capture_file = capture_settings.write(self.capture, outcome)
         if self.telemetry is not None:
             self.telemetry.write(
                 {
@@ -400,7 +399,7 @@ class SingleFluxoniumSource:
                     "readout_wall_s": self.readout_wall_s,
                     "complete": outcome.complete,
                     "extras": {},
-                    "capture_file": None if capture_file is None else capture_file.name,
+                    "capture_file": capture_file,
                 },
                 paths=self.paths,
             )
@@ -424,7 +423,18 @@ class SingleFluxoniumSource:
             "single-fluxonium-v1", self.identity, ((source.name, info.value),)
         )
         dc_flux(self.settings, snapshot)
+        if self._capture_settings is not None:
+            self._capture_settings.record(snapshot, self.effective_settings)
         return snapshot
+
+    def _generation_key(
+        self, snapshot: EnvironmentSnapshot
+    ) -> tuple[str, EnvironmentSnapshot, tuple[str, str]]:
+        return (
+            self.effective_settings.model_dump_json(),
+            snapshot,
+            (_BACKEND_VERSION, SEGMENT_NUMERIC_VERSION),
+        )
 
     def model_facts(self, snapshot: EnvironmentSnapshot) -> SingleFluxoniumFacts:
         """Return current-loss models with reusable loss-independent structure.
@@ -437,11 +447,7 @@ class SingleFluxoniumSource:
         RuntimeError follows close; invalid DC raises ValueError.
         """
         self._require_open()
-        key = (
-            self.effective_settings.model_dump_json(),
-            snapshot,
-            replay.replay_versions(),
-        )
+        key = self._generation_key(snapshot)
         structure_key = sha256(
             repr(
                 (
@@ -490,11 +496,7 @@ class SingleFluxoniumSource:
         This method does not evolve or acquire. RuntimeError follows close.
         """
         self._require_open()
-        generation = (
-            self.effective_settings.model_dump_json(),
-            snapshot,
-            replay.replay_versions(),
-        )
+        generation = self._generation_key(snapshot)
         if self._facts_key is not None and self._facts_key != generation:
             self._clear()
         key = (*generation, time_base, _template_digest(template))
@@ -513,7 +515,7 @@ class SingleFluxoniumSource:
 
     @property
     def identity(self) -> str:
-        """SHA256 of current effective settings, used by snapshot and replay.
+        """SHA256 of current effective settings, recorded in round snapshots.
 
         Reassigning .settings changes this identity and invalidates preparation
         keys on the next call. The startup driver object remains unchanged.
@@ -790,7 +792,7 @@ class SingleFluxoniumSource:
 
         Reuses the active session only for the identical request object. A new
         request invalidates the old session. No backend work is repeated when
-        consumers later request raw. Numeric/ADC/replay failures propagate.
+        consumers later request raw. Numeric and ADC failures propagate.
         """
         self._require_open()
         if self._session is None or self._session.request is not request.acquire:
@@ -830,7 +832,6 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
     *,
     soccfg: QickConfig,
     workers: int = 1,
-    private_replay: Path | None = None,
     clock: SimulationClock | None = None,
     truth_log: Path | None = None,
     history: RoutingHistory | None = None,
@@ -851,7 +852,6 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
     The backend evolves complete timelines and uses one physical ADC cavity.
     workers selects the Engine's parallel width across timelines (default 1).
     Values below 1 raise ValueError; construction starts no worker pool.
-    private_replay enables author-only detached round inputs at an absolute root.
     clock optionally injects a shared monotonic physical clock, otherwise a new
     clock is owned by this environment. truth_log selects a private JSONL file
     for enabled drift, defaulting to a new session under ~/.local/state/
@@ -894,7 +894,6 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
         source = SingleFluxoniumSource(
             settings,
             devices,
-            private_replay=private_replay,
             runtime=SingleFluxoniumRuntimeOptions(
                 engine=Engine(workers=workers, families=families),
                 history=history,
@@ -911,7 +910,7 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
         binding = SimulationBinding(
             source.snapshot,
             source.execute,
-            backend_version=replay.BACKEND_VERSION,
+            backend_version=_BACKEND_VERSION,
             seed=settings.numerics.seed,
             timing=SimulationTiming(
                 time_scale=settings.numerics.time_scale, clock=sim_clock

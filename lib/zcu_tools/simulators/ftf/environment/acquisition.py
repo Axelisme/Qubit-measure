@@ -8,7 +8,7 @@ from zcu_tools.program.v2.simulation import SimulationClock
 
 @dataclass(frozen=True)
 class FTFAcquisitionOptions:
-    """Select an environment clock and author-only acquisition output paths.
+    """Select an environment clock and author-only drift truth log.
 
     clock is a caller-owned SimulationClock using monotonic seconds, or None to
     create one per builder/source. Source and binding share it; completed rounds
@@ -18,13 +18,9 @@ class FTFAcquisitionOptions:
     None uses ~/.local/state/zcu-tools/simulation/ftf/<session>/truth.jsonl.
     Enabled drift creates parents and appends three loop rows at acquisition begin;
     disabled drift creates no file. Log serialization and I/O errors propagate.
-    private_replay selects an explicit absolute archive root, or None to disable
-    archives. Relative roots raise ValueError at builder/source construction.
-    Acquisition appends checked private inputs before returning numeric results;
-    archive errors propagate. Callers own both paths and their retention policy.
+    Callers own log retention.
     This immutable value creates no clock, directories, files or other resources.
     """
 
     clock: SimulationClock | None = None
     truth_log: Path | None = None
-    private_replay: Path | None = None
