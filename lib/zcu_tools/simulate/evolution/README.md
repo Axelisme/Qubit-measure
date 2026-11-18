@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, full-drive gate admission and CPU competitor pricing
+**Last updated:** 2026-11-18, full-drive gate admission and CPU pricing, DP5(4), debug capture, and shaped fallback reuse
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -327,14 +327,15 @@ plateau and explicit boundary splits. Continuations number only retained spans
 at or after `start_ns`. Each row also reports absolute `start_ns` and `duration_ns`.
 
 A `selected` row's `family` matches evolve from the same initial history.
-A `deferred` row has a local prepare key whose guard belongs to its timeline
-worker. A `needs_prefix_input` row needs a driven prefix density that evolve
-would compute first. These unresolved rows return `family=None`; inspection
-neither runs timeline workers nor computes prefix densities.
+A `deferred` row still needs its timeline worker to finish routing. A local
+prepare key can already have a decision if evolve would resolve its guard
+before scheduling. A `needs_prefix_input` row needs a driven prefix density
+that evolve would compute first. Unresolved rows return `family=None`.
+Inspection neither runs timeline workers nor computes prefix densities.
 
 `candidates` records offered families and guard decisions in first-offer order.
-An evaluated guard reports `accepted` or `rejected`. A local key reports
-`deferred`. Candidates after a stopped round report
+An evaluated guard reports `accepted` or `rejected`. A guard left to a timeline
+worker reports `deferred`. Candidates after a stopped round report
 `untested_after_short_circuit`, unless an earlier round already evaluated them.
 Structurally inapplicable and cost-skipped families are absent unless offered.
 A gate that loses the pre-build price comparison does not run its table-building
@@ -667,8 +668,15 @@ reports calling-thread geometry and WorkPlan CPU.
 Common-frame reports also count `prepare_builds` and `admission_rows`.
 Floquet's `prepare_builds` counts exact-key frame construction attempts,
 including invalid frames and frames whose rows are all refused. Other families
-leave these counters at zero. Telemetry does not change guards, routes,
-densities or cancellation.
+leave those counters at zero. `prepare_key_builds` counts key slots passed to
+scheduled preparation or returned as guard products, including discarded guard
+products. Building the same key again counts again; a guard without a returned
+product does not count. Several key slots can share spectral work, so this
+counter does not count spectral constructions. Merge adds key builds, and
+result reuse reports zero.
+These key counts are available in the Engine report; acquire JSONL keeps its
+[explicit field set](../../simulators/README.md#acquire-telemetry).
+Telemetry does not change guards, routes, densities or cancellation.
 
 `PathDiagnostics.duration_ns_by_kernel` always reports logical physical ns per
 family, even with telemetry off, without CPU clocks. Its immutable mapping
@@ -810,6 +818,14 @@ tone with carrier magnitude at or above 30 MHz. `shaped` has one sampled tone. `
 has two tones with a sampled envelope, or at least three tones.
 A family in a domain is a candidate, not a promise of selection. Cost ordering,
 input preconditions and numerical guards still apply with `families=`.
+
+For shaped rows with `period_table` as the first allowed fallback and an exact
+table key shared across timelines, dispatch resolves the `shaped_sambe` guard
+before scheduling. After a refusal the scheduler can build one fallback table
+for those timelines. Dispatch batches local Sambe keys that share the same
+spectral work in that timeline. If a key joins the batch only for spectral reuse
+and Sambe refuses it, its worker still handles the fallback. Other local Sambe
+keys stay deferred. This does not change guard thresholds or candidate order.
 
 In the table, `B` is the per-segment `budget`, `d` is duration in ns and `T` is
 one carrier period in ns. Split, motion, omission and phase indicators use the
@@ -1133,11 +1149,13 @@ or rejected rows. Returning `None` raises rather than retrying `guard`.
 When false, classification calls `guard` directly. Multitone dispatch owns the
 per-key gate price comparison; prefix and worker calls borrow the complete-acquire
 inventory, never subset counts, routing history or resident warmth. The kernel
-guard checks only numerical admission. `multitone_gate` hands validated model-only Fourier
-products to apply without rebuilding. Pinning admits validated keys even once;
-unresolved phase dependence rejects a key regardless of its use count.
-Cross-timeline keys are guarded before shared preparation. Local builders run
-inside their timeline worker and retain the same handoff.
+guard checks only numerical admission. `multitone_gate` hands validated model-only
+Fourier products to apply without rebuilding. Pinning admits validated keys even
+once; unresolved phase dependence rejects a key regardless of its use count.
+
+Cross-timeline keys are guarded before shared preparation. Local builders usually
+run inside their timeline worker. A guard resolved before scheduling, such as
+Sambe with a shared table fallback, uses the same handoff.
 
 `bind_input` can contract a common known input into an evolve-local read-only
 payload. Dyson uses it for source or shared-prefix inputs. Prefix resolution

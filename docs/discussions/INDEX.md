@@ -20,6 +20,8 @@
 
 - 2026-11-18 [Full-drive gate 的 CPU 競品估價](2026-11-18-gate-direct-duration-price.md)：價格重校。原六組加上已量的 DRAG lab 窗重校 duration 端點，原 flat-top lab 連段仍未量測。
 
+- 2026-11-18 [成形脈衝的 fallback 共用與 prepare key 計數](2026-11-18-shaped-fallback-key-reuse.md)：公開診斷。Engine 計入已丟棄的 guard 產品，提前解析保留 timeline 內的 Sambe spectral 共用與跨 timeline 的 period table 共用。
+
 - 2026-11-18 [移除 private replay](2026-11-18-remove-private-replay.md)：刪除或收窄。FTF 與 single-fluxonium 不再逐位重算；debug capture 記下 Engine 輸入、選路與每輪的有效設定。
 
 - 2026-11-18 [短 `dop853` row 改用 DP5(4)](2026-11-18-short-dop853-dp54.md)：公開診斷。`dop853` 保留原 family，公開 telemetry 分開計兩種 tableau 的實際端點；合成精度矩陣與真實 FTF 驗收分開。
