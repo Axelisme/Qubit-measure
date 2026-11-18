@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, debug capture and acquire telemetry
+**Last updated:** 2026-11-18, pricing the pilot verification
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -38,6 +38,7 @@ and source-owned history. These controls are not physical YAML or program cfg.
   - [Physical facts and conditional readout](#physical-facts-and-conditional-readout)
 - [Startup preparation](#startup-preparation)
 - [Acquisition and numeric composition](#acquisition-and-numeric-composition)
+  - [Dimension selection](#dimension-selection)
   - [Preparation reuse](#preparation-reuse)
   - [Control conversion](#control-conversion)
   - [Flux pulses](#flux-pulses)
@@ -108,7 +109,7 @@ persisted family fields and defines the common summary and directory settings.
 projects its builder-only `compile_wall_s` and `complete`.
 `complete` means the acquire body and cleanup returned normally, including partial
 Stop results. An escaping error is false.
-`evolve_wall_s` sums each `Engine.evolve` call, including direct evolution,
+`evolve_wall_s` sums each `Engine.evolve` call, including dimension pilots,
 cavity-memory spans and projective outcome continuations across software rounds.
 `readout_wall_s` sums cavity field propagation, population conversion, conditional
 ADC preparation and integrated or decimated sampling. These scopes do not overlap
@@ -116,6 +117,29 @@ evolution. A failing call contributes time through its exception; a stage never
 entered contributes `0.0`. Reusing a preparation adds no evolution wall, but still
 counts fresh round sampling. Preparation and pacing remain in total wall's
 remainder. Raw-shot materialization requested after acquire is outside this row.
+FTF records one dimension decision per acquire in `extras`, not per round.
+See [Dimension selection](#dimension-selection) for the cases that skip the pilot.
+
+| Field | Meaning |
+| --- | --- |
+| `ftf.selected_dimension` | Selected dimension N, or `null` if selection did not finish. |
+| `ftf.dimension_reused` | `true` when N comes from an earlier acquire of the same content, even if this acquire needs to evolve again. Otherwise `false`. |
+| `ftf.pilot_point` | Pilot timeline's zero-based index in the whole acquire grid flattened in C order, not its position in a template. Later rounds keep this index. It is `null` if no pilot completed. |
+| `ftf.pilot_drop` | `drop(N)`, the largest magnitude of an upper-reference density entry outside the selected block. It is zero when a pilot selects the upper basis, or `null` if no pilot completed. |
+| `ftf.pilot_error` | Maximum absolute density difference between the upper reference and the zero-padded verification, even if verification rejects the smaller basis. It is `null` if no verification completed. |
+| `ftf.pilot_wall_s` | Pilot selection wall time in seconds, including elapsed pilot work on failure. It overlaps `evolve_wall_s` and is `0.0` when the pilot does not run. |
+| `ftf.pilot_verify_price_skipped` | `true` when the estimate ruled out a smaller-basis check, including break-even. Otherwise `false`. |
+| `ftf.pilot_candidate_dimension`, `ftf.pilot_candidate_drop` | Smaller basis k and `drop(k)` before verification. These describe the candidate even when N falls back to the upper basis. |
+| `ftf.pilot_upper_dimension`, `ftf.pilot_upper_wall_s` | Upper basis size and measured wall seconds c for the isolated upper solve. c excludes locating the pilot and checking discarded density entries. |
+| `ftf.pilot_timelines`, `ftf.pilot_workers`, `ftf.pilot_remaining_waves` | First-round timeline count T, configured host worker width W, and remaining waves R. |
+| `ftf.pilot_estimated_verify_s`, `ftf.pilot_estimated_savings_s` | Estimated wall seconds for one smaller solve and the wall seconds it could save over the remaining waves. |
+
+The estimate fields are `null` if no smaller candidate was priced and reported.
+An upper-only candidate has a pilot point but no estimate.
+A price skip has an estimate and no error. An accuracy rejection has an estimate
+and a completed verification error above `1e-3`. A reused N carries no pilot estimate
+from the earlier acquire.
+
 Projection values live only in `extras`:
 `ftf.projection_outcomes` counts retained outcome histories per C-order point in the
 latest solved round. `ftf.projection_pruned_weight` gives each point's cumulative
@@ -211,7 +235,7 @@ process-level reference count: the first sets the limit and the last restores
 it. Do not independently change threadpoolctl limits while an evolve is active.
 Empty work, one timeline, and `workers=1` run serially without a joblib pool.
 Other calls own a threading pool only during `evolve`; no idle pool survives.
-`FTFSource.close()` clears preparations and the engine's routing facts.
+`FTFSource.close()` clears preparations, remembered dimensions and the engine's routing facts.
 It clears source-owned routing history but preserves caller-borrowed history.
 Dropping the environment also releases this in-memory state; no disk cache is involved.
 
@@ -288,12 +312,47 @@ real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
 
 ## Acquisition and numeric composition
 
+### Dimension selection
+
+`numerics.truncation.retained_levels` sets the upper joint basis. Acquires with
+fewer than eight timelines or an upper basis of at most twelve states use that
+basis directly. A projective read or an early cavity pulse also uses the upper
+basis: its continuation is not one terminal-only pilot evolution.
+
+For an eligible acquire, FTF selects one pilot from the first round. It takes
+the largest sum of absolute in-play drive areas scaled by the port matrix
+elements. Ties take the largest carrier detuning from the active port's
+strongest ground transition, then the first C-order point. The upper model
+evolves that timeline once. FTF finds the smallest integer dimension of at least
+twelve for which the largest magnitude of any discarded row or column entry is
+at most `5e-4`. If that dimension k is smaller than the upper basis, FTF estimates
+the cost of checking it. Let c be the isolated upper solve's wall time, r be
+k divided by the upper basis size, and R be `ceil((T - 1) / W)` for T timelines
+and configured worker width W. FTF uses linear scaling: the check costs `r * c`
+and could save `R * (1 - r) * c` over the remaining timelines. FTF skips the check
+and keeps the upper basis unless the expected savings strictly exceed the cost.
+The decision does not require telemetry to be enabled.
+
+If the check pays back, FTF evolves the pilot once at k. It accepts k only when
+the zero-padded density differs from the upper reference by at most `1e-3` in
+every entry. This checks accuracy on the pilot, not on untested sweep points.
+
+The reduced model projects the initial state onto the energy prefix and
+renormalizes it. The first successful selection fixes the batch dimension across
+software rounds. Each round builds its model from that round's live DC snapshot.
+In the pilot round, FTF uses the isolated upper solve for the pilot point and
+solves the rest as one batch at the selected dimension. The smaller verification
+never supplies output. Later rounds solve all points together at the selected
+dimension. FTF pads smaller densities with zero rows and columns before ADC.
+Isolated pilot solves do not add to the production source's routing history.
+
 ### Preparation reuse
 
 `open_acquire(request)` starts a session for a fixed request. Its
 `sample_round(snapshot, index)` reuses the preceding round's noiseless event
-populations and conditional response when the snapshot is equal. Every round
-draws a new stream.
+populations and conditional response when the snapshot and solve shape match.
+The split pilot round does not supply a preparation for the next full batch.
+Every round draws a new stream.
 Opening another acquire invalidates the old session and drops its references.
 Projection continuation densities exist only during span preparation. A later shot, round or acquire does not inherit a preceding
 outcome's terminal state or sampled herald result. Immutable outcome weights,
@@ -301,25 +360,33 @@ event populations and conditional sums follow the complete-preparation reuse
 rules below. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
 A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sums,
 content mappings, path diagnostics and integrated sampling plans across acquires.
-Its key reads full current C1 content, layout, mode, reps and readout values,
-including absolute phase origins. Physical settings/snapshot/numeric changes,
-engine replacement, failed preparation and close clear the preparations. It never
-retains request seeds, acquire sequences, noisy IQ or round results. Hits update
+A later acquire can reuse either a pilot round's split preparation or a full-batch
+preparation. Both retain the selected N. A separate 256-entry LRU remembers N for
+that same content after the preparation is evicted. On a preparation miss with a
+remembered N, FTF skips the pilot and evolves the full batch at N.
+The key still reads full current C1 content, layout, mode, reps and readout
+values, including absolute phase origins. Physical settings, snapshot or numeric
+changes, engine replacement, failed preparation and close clear both caches.
+A later round at a changed snapshot keeps its session's N and can reuse that
+round's preparation locally. A new acquire at that snapshot runs its own pilot. These caches never retain request seeds,
+acquire sequences, noisy IQ or round results. Hits update
 numeric-use identity and repeat report-only accuracy warnings through evolution's
 `PathDiagnostics.warn_exceeded()`. Hits ask `Engine.reuse` to resolve the current
 selection from immutable inventory and pricing facts. FTF neither inspects
 cumulative source counters nor infers history sensitivity from count increments. An unchanged
 selection returns the saved preparation without template conversion, geometry,
 WorkPlan construction, numerical preparation, population conversion or cache put.
-A changed selection or evicted routing facts calls `Engine.evolve` and refreshes
-populations and paths while retaining ADC channels. Content keys exclude
+A changed route or evicted routing facts calls `Engine.evolve` and refreshes
+populations and paths while retaining ADC channels. A prior N still applies, so
+this refresh evolves the full batch without a pilot. The split and full shapes
+register separate routing facts against the stable model source for their N. Content keys exclude
 cumulative counts, so growing usage does not force a preparation-cache miss.
 Evolution counts each distinct acquire content's complete row inventory once;
 identical repeats do not invent additional numerical playback to amortize a gate.
-Other hits return the saved preparation without evolving. Equal consecutive
-software rounds remain one preparation. The public
+Equal consecutive full-batch software rounds remain one preparation. The public
 `source.preparation_cache` reports cumulative `builds`, `hits` and `resident_bytes`.
-Its `max_bytes` can be adjusted between calls; zero disables residency. The budget
+Its `max_bytes` can be adjusted between calls; zero disables preparation
+residency without discarding the separate N records. The budget
 counts Python containers/keys and whole ndarray allocations, including bases of
 views. Active/caller references are separate from resident budgets.
 Conditional ADC solvers are request-local. A separate source-owned

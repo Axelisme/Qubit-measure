@@ -51,7 +51,10 @@ from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
-from tests.gui.app.measure.ui._results_browser_support import navigation_path
+from tests.gui.app.measure.ui._results_browser_support import (
+    navigation_path,
+    wait_for_results,
+)
 
 
 class OwnerScheduler:
@@ -398,6 +401,7 @@ def test_native_saved_analysis_is_visible_in_browser_and_comparison(
         ui.screenshot(evidence / "01-main-window.png")
         ui.click("Results browser…")
         assert ui.observe(object_name="results.browser").visible
+        wait_for_results(ui)
         ui.screenshot(evidence / "02-browser.png")
         branch = ("native",)
         for caption in ("p", "test/saving", "a1b2c3  ·  Unknown time"):

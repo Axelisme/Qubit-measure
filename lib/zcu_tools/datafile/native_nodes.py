@@ -16,8 +16,7 @@ def known_node(node: h5.Group, name: str) -> h5.Group | h5.Dataset | None:
     current: h5.Group | h5.Dataset = node.file if name.startswith("/") else node
     pending = name.split("/")
     traversals = 0
-    # Match HDF5's own limit rather than imposing a new wire restriction.
-    limit = h5.h5p.create(h5.h5p.LINK_ACCESS).get_nlinks()
+    limit = 0
     while pending:
         part = pending.pop(0)
         if part in {"", "."}:
@@ -30,6 +29,9 @@ def known_node(node: h5.Group, name: str) -> h5.Group | h5.Dataset | None:
         if isinstance(link, h5.ExternalLink):
             raise ValueError(f"{location}: external link targets are not allowed")
         if isinstance(link, h5.SoftLink):
+            if traversals == 0:
+                # Match HDF5's limit; hard links need no traversal budget.
+                limit = h5.h5p.create(h5.h5p.LINK_ACCESS).get_nlinks()
             traversals += 1
             if traversals > limit:
                 raise ValueError(f"{location}: cyclic or over-nested soft link")

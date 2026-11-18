@@ -16,6 +16,9 @@ from zcu_tools.simulators.ftf.physics import (
     SquidCircuit,
 )
 
+# Absolute allowance shared by FTF acquisition and its dimension verification.
+EVOLUTION_BUDGET = 1e-3
+
 
 def circuit(value: Fluxonium, truncation: FluxoniumTruncation) -> FluxoniumCircuit:
     """Translate named fluxonium GHz/truncation/noise values without rescaling."""

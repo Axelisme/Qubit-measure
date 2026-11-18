@@ -24,8 +24,8 @@ from ._workload_facts import packed_segments
 
 _MAX_DP54_DURATION_NS = 10_000.0
 # Seven paired CPU endpoints (d=8..32, 0.1..10 µs) took 0.50..0.75 times
-# the same row's DOP853 apply CPU. Keep the existing relative scheduling units.
-_DP54_SCHEDULING_SCALE = 0.6
+# the same row's DOP853 apply CPU.
+_DP54_CPU_WORK_SCALE = 0.6
 
 
 def cpu_dp54_rows(duration_ns: NDArray[np.float64], budget: float) -> NDArray[np.bool_]:
@@ -35,6 +35,13 @@ def cpu_dp54_rows(duration_ns: NDArray[np.float64], budget: float) -> NDArray[np
     The result aligns with duration_ns.
     """
     return (budget >= DP54_MIN_BUDGET) & (duration_ns <= _MAX_DP54_DURATION_NS)
+
+
+def cpu_work_scale(
+    duration_ns: NDArray[np.float64], budget: float
+) -> NDArray[np.float64]:
+    """Scale DOP853 CPU work estimates by the eligible production tableau."""
+    return np.where(cpu_dp54_rows(duration_ns, budget), _DP54_CPU_WORK_SCALE, 1.0)
 
 
 @dataclass(frozen=True)
@@ -281,11 +288,7 @@ class DOP853Kernel:
         Backend selection happens later, on the scheduler's ready wave.
         """
         duration = table.duration_ns[rows]
-        scale = (
-            1.0
-            if budget is None
-            else np.where(cpu_dp54_rows(duration, budget), _DP54_SCHEDULING_SCALE, 1.0)
-        )
+        scale = 1.0 if budget is None else cpu_work_scale(duration, budget)
         return np.asarray(
             0.8 * scale * (1.0 + table.tones[rows]) * np.maximum(1.0, duration / 0.1),
             dtype=np.float64,

@@ -4,12 +4,14 @@
 """FTF round snapshots, persistent engine ownership and compact readout sampling."""
 
 import time
+from collections import OrderedDict
 from collections.abc import Collection, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from math import prod
 from pathlib import Path
+from weakref import ReferenceType, ref
 
 import numpy as np
 from qick import QickConfig
@@ -52,6 +54,7 @@ from zcu_tools.simulate.evolution import (
     CaptureBuffer,
     Engine,
     EvolutionResult,
+    ModelSource,
     PathDiagnostics,
     RoutingHistory,
     batch_populations,
@@ -61,10 +64,19 @@ from zcu_tools.simulators.ftf.config import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.simulators.ftf.environment.acquisition import FTFAcquisitionOptions
 from zcu_tools.simulators.ftf.environment.cavity import (
     CavityEvolutionOptions,
+    ProjectionEvolution,
     evolve_plans,
     evolve_projective_plans,
 )
+from zcu_tools.simulators.ftf.environment.dimension import (
+    DimensionSelection,
+    can_pilot,
+    evolve_terminal,
+    pilot_dimension,
+    pilot_size,
+)
 from zcu_tools.simulators.ftf.environment.drift import FTFCoherenceDrift
+from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET
 from zcu_tools.simulators.ftf.environment.preparation import (
     EnvelopeEncoder,
     PreparationCache,
@@ -81,6 +93,9 @@ from zcu_tools.simulators.ftf.environment.template import (
     plan_template,
 )
 from zcu_tools.simulators.telemetry import RoutingTelemetry
+
+# Fixed-size digests and state counts outlive the larger byte-bounded preparations.
+_MAX_DIMENSION_RECORDS = 256
 
 
 @dataclass(frozen=True)
@@ -116,6 +131,8 @@ class _Prepared:
     reuse_keys: tuple[bytes, ...]
     projection_outcomes: tuple[int, ...]
     projection_pruned_weight: tuple[float, ...]
+    split_pilot: bool
+    pilot_dimension: int | None
 
 
 def _readout_distribution(
@@ -238,20 +255,37 @@ def _prepare_channels(
 class FTFAcquire:
     """One fixed request with at most the immediately preceding round's preparation.
 
-    Construct through FTFSource.open_acquire. sample_round takes a detached live
-    snapshot and a zero-based software round index. Equal consecutive snapshots
-    reuse density and conditional responses, but draw a fresh round stream.
+    Construct through FTFSource.open_acquire. Each round draws a fresh stream.
+    After a round uses split pilot preparation, the next round solves the full
+    batch at the selected dimension without a pilot, even for an equal snapshot.
+    Later rounds reuse that full preparation while the snapshot stays equal.
     Opening the next acquire invalidates this session and releases its references;
-    source-owned bounded noiseless records can survive. Using an invalidated
-    session raises RuntimeError. Calls are synchronous and
+    source-owned preparations and selected-dimension records can survive. Using
+    an invalidated session raises RuntimeError. Calls are synchronous and
     must be serialized by the caller (the binding provides acquire admission).
     evolve_wall_s sums Engine.evolve wall seconds across this session's rounds.
     readout_wall_s sums cavity propagation, ADC preparation and round sampling.
     Both include elapsed work in failed calls and stay zero with telemetry off.
     """
 
-    def __init__(self, source: "FTFSource", request: AcquireRequest) -> None:
+    def __init__(
+        self,
+        source: "FTFSource",
+        request: AcquireRequest,
+        dimensions: OrderedDict[bytes, int],
+    ) -> None:
+        """Bind the owning source, fixed request, and source's dimension records.
+
+        Use FTFSource.open_acquire to validate the request and manage sessions.
+        The source supplies its bounded LRU of pilot-selected state counts,
+        keyed by the same preparation digest as its noiseless preparations.
+        A record can outlive its preparation: a later acquire then skips only
+        the pilot, not evolution. Changes invalidating model/preparation facts,
+        preparation failure, and source close clear the records. A round with
+        a different snapshot does not publish the old selection for that snapshot.
+        """
         self._source = source
+        self._dimensions = dimensions
         self._active = True
         self.request = request
         self._snapshot: EnvironmentSnapshot | None = None
@@ -259,6 +293,25 @@ class FTFAcquire:
         self.routing: list[PathDiagnostics] = []
         self.evolve_wall_s = 0.0
         self.readout_wall_s = 0.0
+        self._dimension: DimensionSelection | None = None
+        self._pilot_facts: ReferenceType[FTFModelFacts] | None = None
+        self.pilot_wall_s = 0.0
+
+    @property
+    def dimension(self) -> DimensionSelection | None:
+        """The first round's selected dimension; None before preparation."""
+        return self._dimension
+
+    @contextmanager
+    def _timing_pilot(self) -> Generator[None]:
+        if self._source.telemetry is None:
+            yield
+            return
+        start = time.monotonic()
+        try:
+            yield
+        finally:
+            self.pilot_wall_s += time.monotonic() - start
 
     @contextmanager
     def _evolving(self) -> Generator[None]:
@@ -295,8 +348,12 @@ class FTFAcquire:
         *,
         cancel: CancellationQuery | None = None,
     ) -> IntegratedRound | RoundSignals:
-        """Return integrated totals or decimated shots for this snapshot/index.
+        """Sample integrated totals or decimated shots for a detached live snapshot.
 
+        index is the zero-based software round index for the fresh RNG stream.
+        After split pilot preparation, solve the full batch at the selected
+        dimension on the next round even if snapshot is unchanged. Reuse full
+        density and conditional responses on later rounds with equal snapshots.
         Numeric/ADC errors propagate without partial results or changing the
         cached snapshot. Debug capture is published at acquire completion.
         Decimated shots are rearranged from point-major C6 order to QICK loop
@@ -307,12 +364,18 @@ class FTFAcquire:
         owner = self._source
         if not self._active:
             raise RuntimeError("FTF acquire session is no longer active")
-        if self._prepared is None or snapshot != self._snapshot:
+        if (
+            self._prepared is None
+            or snapshot != self._snapshot
+            or self._prepared.split_pilot
+        ):
+            # The first round used a split solve; later rounds need the full batch.
             try:
                 prepared = self._reuse_or_prepare(snapshot, index, cancel=cancel)
             except Exception:
                 # Do not retain partial products from a failed preparation.
                 owner.preparation_cache.clear()
+                self._dimensions.clear()
                 self._prepared = None
                 self._snapshot = None
                 raise
@@ -368,49 +431,136 @@ class FTFAcquire:
         cancel: CancellationQuery | None = None,
     ) -> _Prepared:
         owner = self._source
-        # This check must precede every lookup, including equal-content requests.
+        # Invalidate stale generations before looking up equal-content requests.
         facts = owner.model_facts(snapshot)
         key = preparation_key(
             self.request, owner.readout, encoder=owner.envelope_encoder
         )
-        prepared = owner.preparation_cache.get(key)
-        if prepared is None or not all(
-            owner.engine.reuse(facts.source, reuse_key)
-            for reuse_key in prepared.reuse_keys
-        ):
-            # Evolution replays inventory and reprices immutable policy facts.
-            # Only a changed selection or evicted facts requires a fresh solve.
-            prepared = self._prepare(
-                snapshot, index, key=key, previous=prepared, cancel=cancel
+        previous = None
+        # Only another acquire can consume a retained split preparation. Within
+        # this acquire, the next round after a split always solves the full batch.
+        if self._pilot_facts is None:
+            previous = owner.preparation_cache.get(key)
+            dimension = (
+                self._dimensions.get(key)
+                if previous is None
+                else previous.pilot_dimension
             )
+            if dimension is not None:
+                self._dimension = DimensionSelection(dimension, reused=True)
+                self._pilot_facts = ref(facts)
+            if previous is not None:
+                model = (
+                    facts.source
+                    if dimension is None
+                    else facts.evolution_source(dimension)
+                )
+                # Reprice the original solve shape before reusing its populations.
+                if all(
+                    owner.engine.reuse(model, reuse_key, budget=EVOLUTION_BUDGET)
+                    for reuse_key in previous.reuse_keys
+                ):
+                    self._remember_dimension(key, dimension)
+                    return self._reuse(previous, index, len(model.initial_density))
+        options = CavityEvolutionOptions(
+            key,
+            owner.telemetry is not None,
+            cancel=cancel,
+            capture=owner.capture,
+            evolving=self._evolving,
+            reading=self._reading,
+        )
+        prepared = self._prepare(snapshot, index, facts, options, previous)
+        # A changed live snapshot uses the session's N, but has not validated
+        # that N for a future acquire starting at the changed snapshot.
+        if self._pilot_facts is None or self._pilot_facts() is facts:
             owner.preparation_cache.put(key, prepared)
-        else:
-            if owner.telemetry is not None:
-                self.routing.append(prepared.paths.for_reuse(telemetry=True))
-            owner.evaluations = (
-                FTFNumericUse(
-                    self.request.sequence,
-                    index,
-                    prepared.paths,
-                    projection_outcomes=prepared.projection_outcomes,
-                    projection_pruned_weight=prepared.projection_pruned_weight,
-                ),
-            )
-            prepared.paths.warn_exceeded()
+            self._remember_dimension(key, prepared.pilot_dimension)
         return prepared
+
+    def _remember_dimension(self, key: bytes, dimension: int | None) -> None:
+        if dimension is not None:
+            self._dimensions[key] = dimension
+            self._dimensions.move_to_end(key)
+            if len(self._dimensions) > _MAX_DIMENSION_RECORDS:
+                self._dimensions.popitem(last=False)
+
+    def _reuse(self, prepared: _Prepared, index: int, dimension: int) -> _Prepared:
+        owner = self._source
+        if self._dimension is None:
+            self._dimension = DimensionSelection(dimension)
+        if owner.telemetry is not None:
+            self.routing.append(prepared.paths.for_reuse(telemetry=True))
+        owner.evaluations = (
+            FTFNumericUse(
+                self.request.sequence,
+                index,
+                prepared.paths,
+                projection_outcomes=prepared.projection_outcomes,
+                projection_pruned_weight=prepared.projection_pruned_weight,
+            ),
+        )
+        prepared.paths.warn_exceeded()
+        return prepared
+
+    def _round_model(
+        self,
+        plans: tuple[FTFTemplatePlan, ...],
+        facts: FTFModelFacts,
+        options: CavityEvolutionOptions,
+    ) -> tuple[ModelSource, EvolutionResult | None]:
+        upper = len(facts.source.initial_density)
+        if self._dimension is None:
+            if pilot_size(prod(self.request.point_dims), upper) and can_pilot(plans):
+                with self._timing_pilot():
+                    self._dimension, model, reference = pilot_dimension(
+                        self._source.engine, plans, facts, options=options
+                    )
+                self._pilot_facts = ref(facts)
+                return model, reference
+            self._dimension = DimensionSelection(upper)
+        return facts.evolution_source(self._dimension.dimension), None
+
+    def _evolve(
+        self,
+        plans: tuple[FTFTemplatePlan, ...],
+        facts: FTFModelFacts,
+        options: CavityEvolutionOptions,
+        model: ModelSource,
+        reference: EvolutionResult | None,
+    ) -> tuple[EvolutionResult, tuple[bytes, ...], ProjectionEvolution | None]:
+        owner = self._source
+        settings = owner.effective_settings
+        if model is not facts.source or reference is not None:
+            evolved, keys = evolve_terminal(
+                owner.engine,
+                model,
+                plans,
+                options=options,
+                upper=len(facts.source.initial_density),
+                reference=reference,
+            )
+            return evolved, keys, None
+        if any(any(plan.projective_reads) for plan in plans):
+            projection = evolve_projective_plans(
+                owner.engine, plans, facts, settings, options=options
+            )
+            return projection.result, projection.reuse_keys, projection
+        evolved, keys = evolve_plans(
+            owner.engine, plans, facts, settings, options=options
+        )
+        return evolved, keys, None
 
     def _prepare(
         self,
         snapshot: EnvironmentSnapshot,
         index: int,
-        *,
-        key: bytes,
-        previous: _Prepared | None = None,
-        cancel: CancellationQuery | None = None,
+        facts: FTFModelFacts,
+        options: CavityEvolutionOptions,
+        previous: _Prepared | None,
     ) -> _Prepared:
         acquire = self.request
         owner = self._source
-        facts = owner.model_facts(snapshot)
         plans = tuple(
             plan_template(
                 owner.effective_settings,
@@ -424,24 +574,10 @@ class FTFAcquire:
             for template in acquire.templates
         )
         _validate_event_layouts(plans)
-        projection = None
-        options = CavityEvolutionOptions(
-            key,
-            owner.telemetry is not None,
-            cancel=cancel,
-            capture=owner.capture,
-            evolving=self._evolving,
-            reading=self._reading,
+        model, reference = self._round_model(plans, facts, options)
+        evolved, reuse_keys, projection = self._evolve(
+            plans, facts, options, model, reference
         )
-        if any(any(plan.projective_reads) for plan in plans):
-            projection = evolve_projective_plans(
-                owner.engine, plans, facts, owner.effective_settings, options=options
-            )
-            evolved, reuse_keys = projection.result, projection.reuse_keys
-        else:
-            evolved, reuse_keys = evolve_plans(
-                owner.engine, plans, facts, owner.effective_settings, options=options
-            )
         if owner.telemetry is not None:
             self.routing.append(evolved.paths)
         # Retain solve diagnostics even when ADC preparation rejects a row.
@@ -513,6 +649,8 @@ class FTFAcquire:
             reuse_keys,
             outcome_counts,
             pruned_weight,
+            reference is not None,
+            len(model.initial_density) if self._pilot_facts is not None else None,
         )
 
 
@@ -531,19 +669,23 @@ class FTFSource:
 
     open_acquire drops the previous session's preparation references. execute
     opens a session only when its request object changes, preserving preparation
-    across equal-snapshot rounds. The engine and routing facts survive acquires.
+    across equal-snapshot full-batch rounds. The engine and routing facts survive
+    acquires.
     preparation_cache owns at most 4 MiB of read-only probabilities, conditionals,
     content mappings, path diagnostics and deterministic integrated samplers.
     Exact current C1 content, layout, mode, reps and readout values select entries.
     History-sensitive hits ask Engine to reprice cached immutable routing facts.
     Only a changed selection or evicted facts evolves and refreshes populations;
     stable hits retain populations, channels, samplers and the preparation entry.
-    Physical/numeric generation and engine replacement clear them before lookup.
-    Its public max_bytes may be adjusted between calls; zero disables residency.
+    Pilot preparations retain N. An independent bounded LRU keeps the selected N
+    after a preparation is evicted, so a repeat skips the pilot on a miss.
+    Physical/numeric generation and engine replacement clear both caches before
+    lookup. Its public max_bytes may be adjusted between calls; zero disables
+    preparation residency but not remembered dimensions.
     Cumulative builds/hits and resident_bytes report reuse, never noisy results
     or request sampling identities. A hit updates this acquire's numeric use and
-    reemits any report-only accuracy warning. Failed preparation clears the
-    complete preparation cache. Active sessions/caller references are outside budgets.
+    reemits any report-only accuracy warning. Failed preparation clears both
+    caches. Active sessions/caller references are outside budgets.
     At most one complete snapshot's physical model survives across acquires;
     full settings and numeric revisions also participate in its exact key.
     Conditional ADC solvers live only during preparation; the complete preparation
@@ -606,6 +748,7 @@ class FTFSource:
         self._session: FTFAcquire | None = None
         self._facts: FTFModelFacts | None = None
         self.preparation_cache: PreparationCache[_Prepared] = PreparationCache()
+        self._dimensions: OrderedDict[bytes, int] = OrderedDict()
         self.envelope_encoder = EnvelopeEncoder()
         self._preparation_engine = self.engine
         self.capture: CaptureBuffer | None = None
@@ -635,7 +778,7 @@ class FTFSource:
         (or fresh entropy). Subsequent calls keep those streams and start a new
         acquisition even without a request. All points/rounds share the values.
         Enabled drift writes three private truth rows and invalidates physical
-        facts plus complete preparations. Disabled drift draws no RNG and
+        facts, complete preparations and remembered dimensions. Disabled drift draws no RNG and
         writes nothing. Closed sources raise RuntimeError; log I/O errors propagate.
         """
         if self._closed:
@@ -651,9 +794,9 @@ class FTFSource:
                 )
             self._effective_settings = self._drift.sample(self._clock.now())
             if self._facts is not None:
-                self._facts.source.close()
+                self._facts.close()
             self._facts = None
-            self.preparation_cache.clear()
+            self._clear_preparations()
         self.capture = CaptureBuffer() if self.settings.numerics.debug_capture else None
         self._capture_settings = (
             None
@@ -672,19 +815,23 @@ class FTFSource:
         if self._closed:
             raise RuntimeError("FTF source is closed")
         if self.engine is not self._preparation_engine:
-            self.preparation_cache.clear()
+            self._clear_preparations()
             self._preparation_engine = self.engine
         if self._facts is None or not self._facts.matches(
             self.effective_settings, snapshot
         ):
-            self.preparation_cache.clear()
+            self._clear_preparations()
             if self._facts is not None:
-                self._facts.source.close()
+                self._facts.close()
             self._facts = None
             self._facts = FTFModelFacts(
                 self.effective_settings, snapshot, history=self._history
             )
         return self._facts
+
+    def _clear_preparations(self) -> None:
+        self.preparation_cache.clear()
+        self._dimensions.clear()
 
     def snapshot(self) -> EnvironmentSnapshot:
         """Read bound startup DC values once, rejecting missing/invalid sources.
@@ -745,7 +892,7 @@ class FTFSource:
         self._pending_acquire = False
         if self._session is not None:
             self._session.invalidate()
-        self._session = FTFAcquire(self, request)
+        self._session = FTFAcquire(self, request, self._dimensions)
         self.evaluations = ()
         return self._session
 
@@ -796,6 +943,7 @@ class FTFSource:
                 "complete": outcome.complete,
                 "capture_file": capture_file,
                 "extras": {
+                    **_dimension_telemetry(session),
                     "ftf.projection_outcomes": list(
                         self.evaluations[-1].projection_outcomes
                         if paths and self.evaluations
@@ -812,17 +960,42 @@ class FTFSource:
         )
 
     def close(self) -> None:
-        """Release preparations, model/source usage and Engine; safe to repeat."""
+        """Release preparations, dimensions, model/source usage and Engine; safe to repeat."""
         if self._session is not None:
             self._session.invalidate()
             self._session = None
         if self._facts is not None:
-            self._facts.source.close()
+            self._facts.close()
         self._facts = None
-        self.preparation_cache.clear()
+        self._clear_preparations()
         self.envelope_encoder.clear()
         self._closed = True
         self.engine.close()
+
+
+def _dimension_telemetry(
+    session: FTFAcquire | None,
+) -> dict[str, int | float | bool | None]:
+    dimension = None if session is None else session.dimension
+    price = None if dimension is None else dimension.verification_price
+    return {
+        "ftf.selected_dimension": None if dimension is None else dimension.dimension,
+        "ftf.dimension_reused": dimension is not None and dimension.reused,
+        "ftf.pilot_point": None if dimension is None else dimension.pilot_point,
+        "ftf.pilot_drop": None if dimension is None else dimension.drop,
+        "ftf.pilot_error": None if dimension is None else dimension.error,
+        "ftf.pilot_wall_s": 0.0 if session is None else session.pilot_wall_s,
+        "ftf.pilot_verify_price_skipped": price is not None and price.skipped,
+        "ftf.pilot_candidate_dimension": None if price is None else price.candidate,
+        "ftf.pilot_candidate_drop": None if price is None else price.candidate_drop,
+        "ftf.pilot_upper_dimension": None if price is None else price.upper,
+        "ftf.pilot_upper_wall_s": None if price is None else price.upper_wall_s,
+        "ftf.pilot_timelines": None if price is None else price.timelines,
+        "ftf.pilot_workers": None if price is None else price.workers,
+        "ftf.pilot_remaining_waves": None if price is None else price.remaining_waves,
+        "ftf.pilot_estimated_verify_s": None if price is None else price.verify_s,
+        "ftf.pilot_estimated_savings_s": None if price is None else price.savings_s,
+    }
 
 
 def _routing_telemetry(settings: FTFSettings) -> RoutingTelemetry | None:

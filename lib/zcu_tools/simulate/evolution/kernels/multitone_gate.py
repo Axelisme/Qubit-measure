@@ -17,6 +17,7 @@ from ..kernel import (
     Prepared,
     SegmentTable,
 )
+from ..workplan import FactKey
 from . import _multitone_gate_phase as phase
 from ._gate_endpoints import GATE_SUBSEGMENTS
 from ._multitone_gate_split import SPLIT_PHASES, advance_probes, probe_densities
@@ -106,6 +107,48 @@ def _build(table: SegmentTable, row: int, context: KernelContext) -> _Prepared:
     return _Prepared(*arrays)
 
 
+def gate_candidates(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.int64]:
+    """Return fixed-flux, positive-duration, sampled dual-tone candidate rows.
+
+    Indices are local to table. No phase products are built or validated here;
+    split admission still belongs to the numerical guard.
+    """
+    selected = rows[(table.tones[rows] == 2) & (table.duration_ns[rows] > 0)]
+    selected = selected[~table.constant_envelopes(selected)]
+    if table.flux_waveform is None:
+        return selected
+    return np.array(
+        [row for row in selected if fixed_flux(table, int(row))], dtype=np.int64
+    )
+
+
+@dataclass(frozen=True)
+class _GateAdmission:
+    handoff: GuardPreparation | None
+
+
+def _admit_key(
+    table: SegmentTable, row: int, context: KernelContext, key: np.void
+) -> _GateAdmission:
+    """Build and validate exactly once per evolve and canonical prepare key."""
+
+    def build() -> _GateAdmission:
+        prepared = _build(table, row, context)
+        defect, fallback_defect = _split_defects(prepared, table, row, context)
+        floor = _SPLIT_BUDGET_FRACTION * min(context.budget, 1e-3)
+        threshold = max(floor, _SPLIT_FALLBACK_FACTOR * fallback_defect)
+        if defect <= threshold:
+            context.work_plan.routing.prepared_keys(MultitoneGateKernel.name, 1)
+            return _GateAdmission(
+                GuardPreparation(np.array([key], dtype="V32"), prepared)
+            )
+        return _GateAdmission(None)
+
+    return context.work_plan.fact(
+        FactKey(("full-drive-gate-admission", key.tobytes()), _GateAdmission), build
+    )
+
+
 class MultitoneGateKernel:
     """Prepare one full-drive key for arbitrary joint density and two phases.
 
@@ -155,20 +198,10 @@ class MultitoneGateKernel:
         in routing-history facts. Reordering/subsetting rows preserves admission.
         """
         accepted = np.zeros(len(rows), dtype=bool)
-        positions = np.array(
-            [
-                index
-                for index, row in enumerate(rows)
-                if table.tones[row] == 2
-                and table.duration_ns[row] > 0
-                and not table.constant_envelopes(np.array([row]))[0]
-                and fixed_flux(table, int(row))
-            ],
-            dtype=np.int64,
-        )
-        if not len(positions):
+        selected = gate_candidates(table, rows)
+        if not len(selected):
             return GuardResult(accepted)
-        selected = rows[positions]
+        positions = np.flatnonzero(np.isin(rows, selected))
         keys, representatives, inverse = np.unique(
             self.prepare_keys(table, selected, context),
             return_index=True,
@@ -177,15 +210,10 @@ class MultitoneGateKernel:
         products = []
         for index, representative in enumerate(representatives):
             row = int(selected[representative])
-            prepared = _build(table, row, context)
-            defect, fallback_defect = _split_defects(prepared, table, row, context)
-            # Stay comparable to the direct solver this gate replaces. Keep
-            # a budget-scaled allowance when the fallback is especially accurate.
-            floor = _SPLIT_BUDGET_FRACTION * min(context.budget, 1e-3)
-            threshold = max(floor, _SPLIT_FALLBACK_FACTOR * fallback_defect)
-            if defect <= threshold:
+            result = _admit_key(table, row, context, keys[index])
+            if result.handoff is not None:
                 accepted[positions[inverse == index]] = True
-                products.append(GuardPreparation(keys[index : index + 1], prepared))
+                products.append(result.handoff)
         return GuardResult(accepted, tuple(products))
 
     def prepare(

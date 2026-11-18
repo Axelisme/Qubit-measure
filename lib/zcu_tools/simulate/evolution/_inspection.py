@@ -83,7 +83,7 @@ class DispatchRow:
 
 @dataclass(frozen=True)
 class DispatchInspection:
-    """One acquire's dispatch observations without density evolution.
+    """One acquire's dispatch observations without evolving user timelines.
 
     rows: immutable rows in batch order, input point order, then chronological
         split-span order. Empty work returns (). Only selected rows promise a

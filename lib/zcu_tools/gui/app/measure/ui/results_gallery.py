@@ -138,6 +138,10 @@ class ResultsGallery(QScrollArea):
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
+    def replace_index(self, index: ResultsIndex) -> None:
+        """Use a newer snapshot of the same scan without discarding saved cards."""
+        self._index = index
+
     def present(
         self,
         runs: tuple[ResultRun, ...],

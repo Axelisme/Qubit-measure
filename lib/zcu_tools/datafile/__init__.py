@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .comment import encode_labber_comment
-    from .container import inspect, load, read_doc, save
+    from .container import inspect, load, read_doc, read_docs, save
     from .container_models import (
         Axis,
         Container,
@@ -44,6 +44,7 @@ __all__ = [
     "save",
     "load",
     "read_doc",
+    "read_docs",
     "inspect",
     "Axis",
     "Variable",
@@ -78,6 +79,7 @@ _EXPORT_MODULES = {
     "save": ".container",
     "load": ".container",
     "read_doc": ".container",
+    "read_docs": ".container",
     "inspect": ".container",
     "Axis": ".container_models",
     "Variable": ".container_models",

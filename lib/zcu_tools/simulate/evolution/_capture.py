@@ -17,6 +17,7 @@ from ._inspection import GuardDecision, RowKey
 
 if TYPE_CHECKING:
     from ._planning import Geometry
+    from .kernels._multitone_spot import SampledGroup
 from .engine import SEGMENT_NUMERIC_VERSION, TimelineBatch
 from .frozen import FROZEN_PHYSICAL_VERSION, FrozenRecord, physical_input
 from .secular import ModelSource
@@ -55,10 +56,14 @@ class CapturePosition(TypedDict):
     segment: int
 
 
-class CaptureAdopter(CapturePosition):
-    """A prefix-input adopting row, including its zero-based batch index."""
+class CaptureRowKey(CapturePosition):
+    """Point and segment with their zero-based batch index in the same evolve."""
 
     batch: int
+
+
+class CaptureAdopter(CaptureRowKey):
+    """A prefix-input adopting row in the same evolve."""
 
 
 class CapturePrefixRun(TypedDict):
@@ -72,6 +77,31 @@ class CapturePrefixRun(TypedDict):
     adopters: list[CaptureAdopter]
 
 
+class CaptureSampledSpot(CaptureRowKey):
+    """A selected probe row and its observed error, if actually compared.
+
+    max_density_error is the maximum elementwise absolute difference between
+    the full RWA and CPU DOP853 probe densities, or None if not compared.
+    """
+
+    max_density_error: float | None
+
+
+class CaptureSampledAdmission(TypedDict):
+    """One considered amplitude group's sampled multitone RWA decision.
+
+    rows lists its complete-inventory members. spots lists the distinct chosen
+    probe rows. accepted/rejected mean a completed numerical guard, not the
+    final route. cost_skipped means a cheaper competitor made the probe
+    unnecessary. not_probed means RWA was preferred on price or allowed by a
+    pin, but no comparison completed. Uncompared spots have no error value.
+    """
+
+    rows: list[CaptureRowKey]
+    decision: Literal["accepted", "rejected", "cost_skipped", "not_probed"]
+    spots: list[CaptureSampledSpot]
+
+
 class CaptureMetadata(TypedDict):
     """JSON metadata shared by capture producers and readers.
 
@@ -81,6 +111,8 @@ class CaptureMetadata(TypedDict):
     fields preserve the numeric-algorithm string and physical-codec integer.
     complete becomes True only on normal return. routes contain actual rounds;
     prefix_runs describe shared execution, not fabricated adopter work.
+    sampled_rwa_admissions records one entry per considered amplitude group
+    in its first member's batch, including groups with members in other batches.
     """
 
     capture_id: str
@@ -94,6 +126,7 @@ class CaptureMetadata(TypedDict):
     complete: bool
     routes: list[CaptureRoute]
     prefix_runs: list[CapturePrefixRun]
+    sampled_rwa_admissions: list[CaptureSampledAdmission]
 
 
 _CAPTURE_METADATA_ADAPTER = TypeAdapter(CaptureMetadata)
@@ -189,6 +222,7 @@ class CaptureBuffer:
                     "complete": False,
                     "routes": [],
                     "prefix_runs": [],
+                    "sampled_rwa_admissions": [],
                 }
                 self._records.append(
                     FrozenRecord(f"{capture_id}-{index}", physical, item)
@@ -206,6 +240,12 @@ class CaptureBuffer:
                             batches[item["batch_index"]].points
                         )
                     }
+                    item["sampled_rwa_admissions"].sort(
+                        key=lambda group: (
+                            order[group["rows"][0]["point"]],
+                            group["rows"][0]["segment"],
+                        )
+                    )
                     item["routes"].sort(
                         key=lambda event: (
                             event["prefix_run"]
@@ -244,6 +284,59 @@ class CaptureRun:
             for row, timeline in enumerate(table.timeline)
         )
         self.prefix_run: int | None = None
+        self._sampled: dict[int, CaptureSampledAdmission] = {}
+        self._sampled_lock = Lock()
+
+    def sampled_group(
+        self,
+        group: SampledGroup,
+        decision: Literal["accepted", "rejected", "cost_skipped", "not_probed"],
+        errors: NDArray[np.float64] | None = None,
+    ) -> None:
+        """Record complete-table group coordinates without retaining probe states.
+
+        errors aligns with group.spot_rows on numerical acceptance/rejection.
+        Price decisions omit errors and cannot replace a completed comparison.
+        Call on the complete CaptureRun, not a local prefix view.
+        """
+        first = group.rows[0]
+        with self._sampled_lock:
+            item = self._sampled.get(first)
+            if (
+                errors is None
+                and item is not None
+                and item["decision"] in {"accepted", "rejected"}
+            ):
+                return
+            spots: list[CaptureSampledSpot] = []
+            for index, row in enumerate(group.spot_rows):
+                key = self.keys[row]
+                spots.append(
+                    {
+                        "batch": key.batch,
+                        "point": key.point,
+                        "segment": key.segment,
+                        "max_density_error": None
+                        if errors is None
+                        else float(errors[index]),
+                    }
+                )
+            if item is not None:
+                item["decision"] = decision
+                item["spots"] = spots
+            else:
+                admission: CaptureSampledAdmission = {
+                    "rows": [
+                        {"batch": key.batch, "point": key.point, "segment": key.segment}
+                        for key in (self.keys[row] for row in group.rows)
+                    ],
+                    "decision": decision,
+                    "spots": spots,
+                }
+                self._sampled[first] = admission
+                self.metadata[self.keys[first].batch]["sampled_rwa_admissions"].append(
+                    admission
+                )
 
     def prefix(
         self, geometry: Geometry, first: int, row: int, group: int

@@ -6,11 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from ._multitone_dispatch import (
-    CONSTANT_KICK_PREPARE_S,
-    cheap_rwa_graph,
-    populate_multitone_inventory,
-)
+from ._multitone_dispatch import CONSTANT_KICK_PREPARE_S, populate_multitone_inventory
 from .kernel import KernelContext, SegmentTable
 from .kernels._rwa_numeric import multitone_retention
 from .kernels._workload_facts import envelope_bounds
@@ -188,15 +184,13 @@ def _cheap_rwa(
     cheap = np.zeros(len(rows), dtype=bool)
     if rwa is None:
         return cheap
-    if table is context.work_plan.complete_table:
-        inventory = populate_multitone_inventory(
-            table, context.source, context.work_plan, context.budget
-        )
-        return np.isin(rows, inventory.cheap)
-    admitted = rwa.guard(table, rows, context)
-    for index in np.flatnonzero(admitted):
-        cheap[index] = cheap_rwa_graph(table, int(rows[index]), context)
-    return cheap
+    complete = context.work_plan.complete_table
+    geometry = table if complete is None else complete
+    inventory = populate_multitone_inventory(
+        geometry, context.source, context.work_plan, context.budget
+    )
+    complete_rows = rows if table is geometry else rows + context.complete_row_offset
+    return np.isin(complete_rows, inventory.cheap)
 
 
 def preferred(
@@ -208,7 +202,8 @@ def preferred(
     """Price complete builds, reuse and rejection risk, never accuracy.
 
     Prefix/worker subsets borrow complete-group mean prices. A cheap admitted
-    unexpanded RWA graph wins before any common cost-feature construction.
+    unexpanded constant RWA graph wins before common cost-feature construction.
+    Sampled competition is priced separately, without running a sampled probe.
     Remaining rows price wasted cold builds using first-order SW strength,
     weighted by actual gains and envelope peaks. The empirical eighth-power
     risk near eta=.08 is a cost forecast, not an admission/accuracy veto.

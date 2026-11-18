@@ -9,6 +9,7 @@ from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._history_form_support import history_controller
 from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure.ui._results_browser_support import wait_for_results
 
 
 def test_browser_load_keeps_factory_failure_in_form_and_run(
@@ -29,6 +30,7 @@ def test_browser_load_keeps_factory_failure_in_form_and_run(
         ui = ComponentDriver(window)
         try:
             ui.click("Results browser…")
+            wait_for_results(ui)
             ui.select_combo("Experiment → point", object_name="results.group")
             for depth in (1, 2, 3):
                 group = next(

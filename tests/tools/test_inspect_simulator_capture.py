@@ -62,6 +62,7 @@ def metadata() -> CaptureMetadata:
                 "candidates": [{"family": "floquet", "guard": "deferred"}],
             },
         ],
+        "sampled_rwa_admissions": [],
         "prefix_runs": [],
     }
 

@@ -6,7 +6,7 @@ related: [0063, 0072]
 
 # 0080 — datafile：通用容器格式與獨立介面
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-11-18
 
 ## 脈絡
 
@@ -47,6 +47,7 @@ related: [0063, 0072]
 - `save(path, container: Container, *, replace: bool = False)`：寫到呼叫者的精確路徑，同目錄 temp 加 atomic replace。讀寫共用 `Container(vars, docs, groups, attrs)`，caller 可以直接修改 load 的結果再寫回，不另行拆出 header 參數。
 - `load(path) -> Container`：`groups` 是 detached opaque handle，只供寫回，原檔關閉或刪除後仍可使用。`attrs` 是 frozen `ContainerAttrs(format_version: str, producer: str, kind: str | None, extra: Mapping[str, JsonScalar])`。新檔由 caller 指定 3.0 與 producer，kind 可為 None。讀回的同 major 來源 minor 與未知根屬性 extra 在 save 保留，不降版。`format` 固定為 zcu.container，不接受 extra 覆寫 header keys。extra 只接受有限 JSON scalar，null 以 HDF5 null-dataspace attribute 表示。
 - `read_doc(path, name) -> JsonObject`：只讀指定的有限 JSON object，不讀 vars、其他 docs 或 opaque groups。只接受與 load 相同的 zcu.container 3.x。缺文件 raise 指名來源檔與文件名的 KeyError；格式或文件非法 raise 指名來源檔的 FormatError。壞 vars 不阻礙合法文件讀取。
+- `read_docs(path, names)`：在一次開檔中讀取指定名稱，關檔後依名稱回傳 detached JSON 或該份文件的錯誤。只驗 header、docs group 與指定文件。檔案 I/O 或共用格式檢查失敗時 raise；一份文件失敗不遮住其他文件。不指定或解釋任何生產者的文件名稱。
 - `inspect(path) -> ContainerInfo`：只讀根屬性與 var schema、doc/group 名稱，不解碼 docs，也不載陣列。
 - `Variable(values, axes: tuple[Axis, ...], unit)`、`Axis(name, unit, values)`：axes 按 NumPy 維度順序排列。`VariableSchema` 回報 inspect 的形狀、軸、dtype 與單位。`ContainerInfo` 的 axes 不載座標值。另提供 `JsonObject`、`JsonScalar` 與 `FormatError`。
 

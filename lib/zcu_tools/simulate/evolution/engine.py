@@ -25,12 +25,13 @@ from numpy.typing import NDArray
 from ._envelope import sample_values
 from ._inspection import DispatchCandidate, DispatchInspection
 from ._parallel import execution_pool, native_limit
+from ._timeline_selection import select_points
 from ._validation import density, integers, owned, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
 
-# Replay identity of the segment engine numerical algorithms, independent of records.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v11"
+# Numerical algorithm revision used by capture, reporting, and simulator caches.
+SEGMENT_NUMERIC_VERSION = "segment-engine-v12"
 
 
 @dataclass(frozen=True)
@@ -157,7 +158,7 @@ class DriveTrack:
 
 @dataclass(frozen=True)
 class TimelineBatch:
-    """All points of one template, in original flat point order.
+    """Evolution data for the points of one template, in batch row order.
 
     points: unique nonnegative int64 (n,) C1 point indices.
     tracks: DriveTrack tuple, one slot per drive with n per-point values.
@@ -224,6 +225,22 @@ class TimelineBatch:
         object.__setattr__(self, "end_ns", end)
         self._validate_segments()
         self._validate_continuation()
+
+    def select_points(self, positions: Sequence[int]) -> TimelineBatch:
+        """Return an immutable batch for the given zero-based row positions.
+
+        Positions index this batch's rows, not the flat point IDs in `points`.
+        The result follows the supplied order. Empty positions select zero rows;
+        negative, out-of-range, repeated or non-integer positions raise ValueError.
+
+        Select point IDs, end times, and all per-point drive fields, keeping
+        each track's port and envelope table. Select flux schedule rows and
+        waveform rows (if present), rebuilding offsets from zero. Select
+        segment boundaries, span shifts, continuation start times and initial
+        densities. Absent optional data stays absent. Do not rebase absolute
+        times or phase origins. The original batch is unchanged.
+        """
+        return select_points(self, positions)
 
     def _validate_continuation(self) -> None:
         if (self.start_ns is None) != (self.initial_densities is None):
@@ -761,8 +778,9 @@ class Engine:
         otherwise raises ValueError. A closed engine raises RuntimeError.
         cancel: read-only is_set query checked between chunks; None disables it;
         when set, raises Cancelled, without returning partial results.
-        capture optionally appends frozen batch inputs and actual route events
-        to a caller-owned CaptureBuffer; None does no recording. Success marks
+        capture optionally appends frozen batch inputs, actual route events and
+        sampled RWA spot decisions/errors (not propagated probe states) to a
+        caller-owned CaptureBuffer; None does no recording. Success marks
         this call's records complete; exceptions retain incomplete records and
         propagate unchanged. Concurrent use of the same buffer raises ValueError
         at entry. Capture itself performs no file I/O; see CaptureBuffer for
@@ -827,7 +845,14 @@ class Engine:
                 frontend_cpu_s = (
                     time.thread_time() - frontend_started if telemetry else 0.0
                 )
-                context = KernelContext(source, budget, work_plan, self._families)
+                context = KernelContext(
+                    source,
+                    budget,
+                    work_plan,
+                    self._families,
+                    workers=workers,
+                    capture=capture_run,
+                )
                 reuse_snapshot = self._routing_reuse.snapshot(
                     reuse_key, geometry.table, context
                 )
@@ -874,17 +899,23 @@ class Engine:
         budget: float = 1e-3,
         cancel: CancellationQuery | None = None,
     ) -> DispatchInspection:
-        """Inspect the shared classifier without evolving density.
+        """Inspect the shared classifier without evolving the user's timeline.
 
         source, batches and budget have the same meaning as evolve. Rows use
         batch/point/split-segment coordinates documented by RowKey. Only selected
-        rows have a final family. Deferred rows still need their timeline
-        worker to finish routing; some timeline-local guards run before
-        scheduling when needed for shared preparation. Rows requiring a driven
-        prefix density report needs_prefix_input instead of computing the prefix.
-        Floquet guards still integrate their one-period propagator. Numerical
-        preparation and model errors propagate, as in evolve. A closed Engine or invalid budget
-        raises before planning; cancellation raises Cancelled without a result.
+        rows have a final family. Some timeline-local guards run before
+        scheduling for shared preparation. Other rows remain deferred if a
+        timeline worker must finish routing. Inspection starts no workers.
+        Rows requiring a driven prefix density report needs_prefix_input
+        instead of computing the prefix. Guards may evolve their own probes:
+        Floquet integrates its one-period propagator and sampled multitone RWA
+        compares fixed probe endpoints. If OpenCL availability could change
+        sampled RWA pricing, inspection uses DOP853's lazy device check,
+        including its self-test and machine-level detection/program caches.
+        It does not compile a workload point variant. CPU-only engines do not
+        check a device. Numerical preparation and model errors propagate as
+        in evolve. A closed Engine or invalid budget raises before planning;
+        cancellation raises Cancelled without a result.
         Callers serialize operations sharing a source/history, as for evolve.
         Does not modify routing history: usage, content membership and
         generation stay unchanged. Pricing projects the totals that evolve
@@ -894,6 +925,7 @@ class Engine:
         Source model caches and shift registrations may be populated.
         """
         from ._dispatch import classify, create_work_plan
+        from ._dop853_dispatch import with_opencl
         from ._input_key import input_key
         from ._inspection import report
         from ._planning import plan
@@ -916,7 +948,17 @@ class Engine:
                 )
             ) as work_plan:
                 # ADR-0078: expose observations, not a second dispatch entry point.
-                context = KernelContext(source, budget, work_plan, self._families)
+                workers = (
+                    self._workers
+                    if len(geometry.points) > 1 and len(geometry.table.timeline)
+                    else 1
+                )
+                context = with_opencl(
+                    KernelContext(
+                        source, budget, work_plan, self._families, workers=workers
+                    ),
+                    self._opencl,
+                )
                 dispatch = classify(geometry, self._kernels, context, trace=trace)
                 if cancel.is_set():
                     raise Cancelled()

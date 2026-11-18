@@ -642,13 +642,19 @@ def admit_multitone_rows(
 ) -> NDArray[np.bool_]:
     """Admit ordinary multitone RWA with adaptive omission and dimension limits.
 
-    Requires at least two smooth tones at fixed flux and the shared minimum
-    budget. Constant pairs require distinct ports. Uses row-local retained
+    Requires two tones at fixed flux and the shared minimum budget. Constant
+    pairs require distinct ports. Sampled rows use these proxies before a
+    separate measured guard; smoothness does not reject them. Uses row-local retained
     transfer, phase and dimension bounds, not strength or carrier-spacing caps.
     Constant pairs also require epsilon_dom**2 * Omega_ret * row duration
     <=1.476e-4 cycle after retention. Invalid budgets raise ValueError.
     """
-    return _admit_rows(table, rows, context, single_tone=False, adaptive_multitone=True)
+    pairs = table.tones[rows] == 2
+    accepted = np.zeros(len(rows), dtype=np.bool_)
+    accepted[pairs] = _admit_rows(
+        table, rows[pairs], context, single_tone=False, adaptive_multitone=True
+    )
+    return accepted
 
 
 def admit_rows(
@@ -727,8 +733,10 @@ def _admissible_frequencies(
     *,
     adaptive_multitone: bool,
 ) -> NDArray[np.float64] | None:
-    """Require smooth envelopes, then allocate and check absolute carriers."""
-    if not all(_smooth(table, int(e), context) for e in envs):
+    """Check carriers and retain the other families' smoothness requirement."""
+    if not adaptive_multitone and not all(
+        _smooth(table, int(e), context) for e in envs
+    ):
         return None
     frequencies = np.abs(table.tone_frequency_ghz[row, :count])
     if np.min(frequencies) < _rwa_fourier.EDGE_GHZ or (

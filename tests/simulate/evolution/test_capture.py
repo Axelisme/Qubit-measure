@@ -199,7 +199,7 @@ def test_capture_keeps_guard_rejections_after_numerical_failure():
         2, evolution.EnvelopeSpec("sampled", np.array([0.2, 1.0]), np.array([0.0, 3.0]))
     )
     timeline = replace(
-        batch(2), tracks=(pulse, replace(pulse, frequency_ghz=np.full(2, 0.3)))
+        batch(2), tracks=(pulse, replace(pulse, frequency_ghz=np.full(2, 0.03)))
     )
     with (
         closing(source()) as src,

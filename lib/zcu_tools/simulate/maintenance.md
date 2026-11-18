@@ -86,7 +86,7 @@
 
 **4.1 按層量，不做 e2e。** Kernel 層量一段輸入：`Engine.evolve` 以 `families=` 固定候選；測重複就是同一段接 N 次；一次只改一個約化軸；誤差與耗時在同一組座標上量。
 序列層用手寫的多段 `TimelineBatch`，量最終誤差、整體耗時與 family 去留。
-選路用 `Engine.inspect_dispatch` 檢查，不演化 density。
+選路用 `Engine.inspect_dispatch` 檢查。查詢可演化 guard 自己的探針，不跑使用者 timeline。
 使用者回報的錯在各層都重現不出來時，才跑一次 e2e 定位；腳本不入庫，也不當門檻。
 
 - 依據：ADR-0078〈[模擬器的測試與量測分層，不做 e2e](../../../docs/adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)〉〈[每個 kernel 的量測場景只有一段](../../../docs/adr/0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)〉；[Simulator benchmark](../../../tools/README.md#simulator-benchmark)。
