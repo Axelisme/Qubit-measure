@@ -1,10 +1,13 @@
 """Low-reuse shaped sweeps through Engine, including guarded fallbacks."""
 
+from contextlib import closing
 from dataclasses import replace
 from threading import Event
+from unittest.mock import patch
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from zcu_tools.simulate.evolution import (
     DriveTrack,
     Engine,
@@ -15,6 +18,115 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
+from zcu_tools.simulate.evolution.kernels import shaped_sambe
+
+
+def _triangle_track(
+    starts: NDArray[np.float64], durations: NDArray[np.float64]
+) -> DriveTrack:
+    count = len(durations)
+    return DriveTrack(
+        "drive",
+        starts,
+        durations,
+        np.full(count, 2.0),
+        np.full(count, 0.37),
+        np.ones(count),
+        tuple(
+            EnvelopeSpec(
+                "sampled",
+                np.array([0.1, 0.7, 0.1], dtype=complex),
+                np.array([0.0, length / 2, length]),
+            )
+            for length in durations
+        ),
+        np.arange(count),
+        np.ones(count, dtype=bool),
+    )
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_shared_period_fallback_builds_one_table(workers: int) -> None:
+    """Distinct duration guards can refuse rows that need the same band table."""
+    x = np.array([[0, 0.15], [0.15, 0]], dtype=complex)
+    model = SecularModel(
+        (0,),
+        "shared-fallback",
+        np.array([0.0, 1.8]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("drive", x, np.zeros_like(x)),),
+        np.zeros((2, 2)),
+        np.zeros((2, 2)),
+    )
+    durations = np.r_[30.0, np.arange(200.0, 280.0, 10.0)]
+    count = len(durations)
+    batch = TimelineBatch(
+        np.arange(count),
+        (_triangle_track(np.zeros(count), durations),),
+        FluxSchedule(np.arange(count + 1), np.zeros(count), np.zeros((count, 1), int)),
+        durations,
+    )
+    with (
+        closing(
+            ModelSource(np.diag([1.0, 0.0]).astype(complex), lambda _: model)
+        ) as src,
+        closing(Engine(workers, backend="cpu")) as engine,
+        closing(Engine(1, backend="cpu", families=("dop853",))) as direct,
+    ):
+        result = engine.evolve(src, (batch,), telemetry=True)
+        expected = direct.evolve(src, (batch,), budget=1e-7)
+
+    sambe = result.paths.routing["shaped_sambe"]
+    assert sambe.rejected_rows == 8
+    # All nine duration keys reach spectral construction; eight products are discarded.
+    assert sambe.prepare_key_builds == 9
+    assert result.paths.segments_by_kernel == {"shaped_sambe": 1, "period_table": 8}
+    assert result.paths.routing["period_table"].prepare_key_builds == 1
+    np.testing.assert_allclose(result.densities, expected.densities, atol=2e-3, rtol=0)
+
+
+@pytest.mark.parametrize(
+    "second_duration", [145.0, 30.0], ids=["period-first", "mixed"]
+)
+def test_eager_sambe_preserves_timeline_spectral_reuse(second_duration: float) -> None:
+    x = np.array([[0, 0.0012], [0.0012, 0]], dtype=complex)
+    model = SecularModel(
+        (0,),
+        "spectral-reuse",
+        np.array([0.0, 1.8]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("drive", x, np.zeros_like(x)),),
+        np.zeros((2, 2)),
+        np.zeros((2, 2)),
+    )
+    first = np.array([140.0, 160.0])
+    second = np.array([second_duration, 170.0])
+    batch = TimelineBatch(
+        np.arange(2),
+        (_triangle_track(np.zeros(2), first), _triangle_track(first, second)),
+        FluxSchedule(np.arange(3), np.zeros(2), np.zeros((2, 1), dtype=np.int64)),
+        first + second,
+    )
+    with (
+        closing(
+            ModelSource(np.diag([1.0, 0.0]).astype(complex), lambda _: model)
+        ) as src,
+        closing(Engine(2, backend="cpu")) as engine,
+        closing(Engine(1, backend="cpu", families=("dop853",))) as direct,
+    ):
+        # Public telemetry counts duration keys, not the coefficient work they
+        # can share. Observe the real builder without substituting its result.
+        builder = "_coefficients"
+        with patch.object(
+            shaped_sambe, builder, wraps=getattr(shaped_sambe, builder)
+        ) as build:
+            result = engine.evolve(src, (batch,), telemetry=True)
+        expected = direct.evolve(src, (batch,), budget=1e-7)
+
+    assert result.paths.segments_by_kernel == {"shaped_sambe": 4}
+    assert result.paths.routing["shaped_sambe"].prepare_key_builds == 4
+    np.testing.assert_allclose(result.densities, expected.densities, atol=2e-3, rtol=0)
+    assert build.call_count <= 2  # One coefficient build per timeline suffices.
 
 
 @pytest.mark.parametrize("frequency", [0.05, -0.05, -0.294, 5.0])
