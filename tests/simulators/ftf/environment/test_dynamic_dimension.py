@@ -1,7 +1,6 @@
 """FTF acquire chooses a dimension from a complete pilot density before ADC."""
 
 import json
-import time
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -25,7 +24,6 @@ from zcu_tools.simulate.evolution import (
     EvolutionResult,
     ModelSource,
     PathDiagnostics,
-    RoutingHistory,
     SecularModel,
     TimelineBatch,
 )
@@ -34,6 +32,7 @@ from zcu_tools.simulators.ftf.environment import template as template_module
 from zcu_tools.simulators.telemetry import RoutingRecord, RoutingTelemetry
 
 from tests.program._profiles import profile_soccfg
+from tests.simulators._engine import EngineDouble
 from tests.simulators.ftf.environment._dimension_cases import dimension_bypass
 from tests.simulators.ftf.environment._dimension_cases import (
     dimension_request as _request,
@@ -46,15 +45,14 @@ from tests.simulators.ftf.environment._templates import expect_statistics, snaps
 pytestmark = pytest.mark.sim
 
 
-class PilotEngine(Engine):
+class PilotEngine(EngineDouble):
     """Physical density answers make the FTF selection observable at the ADC."""
 
     def __init__(
         self, *, extent: int = 12, bad_phase: bool = False, workers: int = 1
     ) -> None:
         super().__init__(workers, backend="cpu")
-        self.calls: list[tuple[int, tuple[int, ...]]] = []
-        self.wall_s = 0.0
+        self.solve_shapes: list[tuple[int, tuple[int, ...]]] = []
         self.extent = extent
         self.bad_phase = bad_phase
         self.round_models: list[tuple[SecularModel, NDArray[np.complex128]]] = []
@@ -73,7 +71,7 @@ class PilotEngine(Engine):
     ) -> EvolutionResult:
         points = np.concatenate([batch.points for batch in batches])
         n = len(source.initial_density)
-        self.calls.append((n, tuple(int(p) for p in points)))
+        self.solve_shapes.append((n, tuple(int(p) for p in points)))
         self.round_models.append((source.model((0, 0, 0)), source.initial_density))
         if len(points) == 1 and n > 12:
             # Population at index 12 is tiny; its coherence with the ground
@@ -94,7 +92,6 @@ class PilotEngine(Engine):
             # population that the real upper reference lacks.
             rho *= 1 - 4e-4
             rho[1, 1] += 4e-4
-        self.wall_s += 3.0
         return EvolutionResult(
             points, np.repeat(rho[None], len(points), axis=0), PathDiagnostics()
         )
@@ -144,35 +141,35 @@ def _acquire_rows(logs: Path) -> list[RoutingRecord]:
 def test_equal_acquire_reuses_pilot_preparation_with_fresh_sampling(
     tmp_path: Path,
 ) -> None:
-    history = RoutingHistory()
-    source = FTFSource(
-        _settings(16),
-        DeviceManager(),
-        soccfg=profile_soccfg("ftf"),
-        engine=Engine(1, backend="cpu"),
-        history=history,
-        telemetry=RoutingTelemetry(tmp_path),
-    )
+    engine = PilotEngine()
+    source = _dimension_source(engine, tmp_path)
     reference = FTFSource(
         _settings(16),
         DeviceManager(),
         soccfg=profile_soccfg("ftf"),
-        engine=Engine(1, backend="cpu"),
+        engine=PilotEngine(),
     )
     try:
         acquire = _request()
         first = _execute_acquire(source, acquire)
+        assert engine.solve_shapes == [(16, (7,)), (13, (7,)), (13, tuple(range(7)))]
         hits = source.preparation_cache.hits
         repeat = replace(acquire, sequence=acquire.sequence + 1)
+        engine.solve_shapes.clear()
         second = _execute_acquire(source, repeat)
         assert source.preparation_cache.hits == hits + 1
+        assert not engine.solve_shapes
         expected = _execute_acquire(reference, repeat)
 
-        # An unchanged content key cannot bypass Engine's route validation.
-        history.clear()
+        # A cache hit is not permission to bypass the Engine's reprice decision.
+        engine.reuse_allowed = False
         refreshed = replace(repeat, sequence=repeat.sequence + 1)
         _execute_acquire(source, refreshed)
+        assert engine.solve_shapes == [(13, tuple(range(8)))]
+        engine.reuse_allowed = True
+        engine.solve_shapes.clear()
         _execute_acquire(source, replace(refreshed, sequence=refreshed.sequence + 1))
+        assert not engine.solve_shapes
         assert source.preparation_cache.hits == hits + 3
     finally:
         source.close()
@@ -207,14 +204,14 @@ def test_evicted_pilot_preparation_evolves_the_full_selected_batch(
         _execute_acquire(source, acquire)
         assert source.preparation_cache.resident_bytes > 0
         source.preparation_cache.max_bytes = 0
-        engine.calls.clear()
+        engine.solve_shapes.clear()
         repeat = replace(acquire, sequence=acquire.sequence + 1)
         second = _execute_acquire(source, repeat)
         assert source.preparation_cache.resident_bytes == 0
     finally:
         source.close()
 
-    assert engine.calls == [(13, tuple(range(8)))]
+    assert engine.solve_shapes == [(13, tuple(range(8)))]
     np.testing.assert_array_equal(second.state_counts[:, 12], acquire.reps)
     _, row = _acquire_rows(tmp_path)
     extras = row["extras"]
@@ -257,12 +254,12 @@ def test_remembered_dimension_does_not_cross_preparation_invalidation(
             )
             with pytest.raises(ValueError, match="readout"):
                 _execute_acquire(source, invalid, state)
-        engine.calls.clear()
+        engine.solve_shapes.clear()
         _execute_acquire(source, replace(acquire, sequence=acquire.sequence + 1), state)
     finally:
         source.close()
 
-    assert engine.calls == [(16, (7,)), (13, (7,)), (13, tuple(range(7)))]
+    assert engine.solve_shapes == [(16, (7,)), (13, (7,)), (13, tuple(range(7)))]
     assert _acquire_rows(tmp_path)[-1]["extras"]["ftf.dimension_reused"] is False
 
 
@@ -272,7 +269,7 @@ def test_pilot_keeps_a_state_with_small_population_but_large_coherence(
     engine = PilotEngine()
     acquire = replace(_request(), reps=32768, loop_dims=(32768, 8))
     result, extras = _sample(engine, acquire, 16, tmp_path)
-    assert engine.calls == [(16, (7,)), (13, (7,)), (13, tuple(range(7)))]
+    assert engine.solve_shapes == [(16, (7,)), (13, (7,)), (13, tuple(range(7)))]
     assert result.state_counts.shape == (8, 16)
     np.testing.assert_array_equal(result.state_counts[:7, 12], acquire.reps)
     np.testing.assert_array_equal(result.state_counts[:, 13:], 0)
@@ -299,7 +296,7 @@ def test_upper_selection_reuses_the_reference_row_without_another_attempt(
     if eligible:
         expected.append((13, (7,)))
     expected.append((16, tuple(range(7))))
-    assert engine.calls == expected
+    assert engine.solve_shapes == expected
     np.testing.assert_array_equal(result.state_counts[:7, 12], acquire.reps)
     assert result.state_counts[7, 12] == 0
     assert extras["ftf.selected_dimension"] == 16
@@ -315,20 +312,17 @@ def test_upper_selection_reuses_the_reference_row_without_another_attempt(
         assert extras["ftf.pilot_estimated_verify_s"] is None
 
 
-@pytest.mark.parametrize(("workers", "waves", "savings_s"), [(7, 1, 1.0), (4, 2, 2.0)])
+@pytest.mark.parametrize(("workers", "waves"), [(7, 1), (4, 2)])
 def test_price_not_amortized_skips_verification_and_keeps_upper_result(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     workers: int,
     waves: int,
-    savings_s: float,
 ) -> None:
     engine = PilotEngine(extent=11, workers=workers)
-    monkeypatch.setattr(time, "monotonic", lambda: engine.wall_s)
     acquire = _request()
     result, extras = _sample(engine, acquire, 18, tmp_path)
 
-    assert engine.calls == [(18, (7,)), (18, tuple(range(7)))]
+    assert engine.solve_shapes == [(18, (7,)), (18, tuple(range(7)))]
     assert result.state_counts.shape == (8, 18)
     np.testing.assert_array_equal(result.state_counts[:7, 12], acquire.reps)
     assert result.state_counts[7, 12] == 0
@@ -341,12 +335,20 @@ def test_price_not_amortized_skips_verification_and_keeps_upper_result(
     assert extras["ftf.pilot_candidate_dimension"] == 12
     assert extras["ftf.pilot_candidate_drop"] == 0.0
     assert extras["ftf.pilot_upper_dimension"] == 18
-    assert extras["ftf.pilot_upper_wall_s"] == 3.0
     assert extras["ftf.pilot_timelines"] == 8
     assert extras["ftf.pilot_workers"] == workers
     assert extras["ftf.pilot_remaining_waves"] == waves
-    assert extras["ftf.pilot_estimated_verify_s"] == 2.0
-    assert extras["ftf.pilot_estimated_savings_s"] == savings_s
+    upper_s = extras["ftf.pilot_upper_wall_s"]
+    verify_s = extras["ftf.pilot_estimated_verify_s"]
+    savings_s = extras["ftf.pilot_estimated_savings_s"]
+    assert isinstance(upper_s, float) and upper_s > 0.0
+    assert isinstance(verify_s, float) and isinstance(savings_s, float)
+    assert verify_s == pytest.approx(upper_s * (2 / 3), abs=0)
+    assert savings_s == pytest.approx(upper_s * (waves / 3), abs=0)
+    if waves == 1:
+        assert savings_s < verify_s
+    else:
+        assert savings_s == verify_s
 
 
 def test_equal_dc_replaces_the_split_preparation_before_reusing_full_batch() -> None:
@@ -366,7 +368,11 @@ def test_equal_dc_replaces_the_split_preparation_before_reusing_full_batch() -> 
 
     assert first.state_counts[7, 12] == 0
     assert second.state_counts[7, 12] == third.state_counts[7, 12] == acquire.reps
-    assert engine.calls == [(16, (7,)), (16, tuple(range(7))), (16, tuple(range(8)))]
+    assert engine.solve_shapes == [
+        (16, (7,)),
+        (16, tuple(range(7))),
+        (16, tuple(range(8))),
+    ]
 
 
 @pytest.mark.parametrize(("upper", "points"), [(16, 7), (12, 8)])
@@ -376,7 +382,7 @@ def test_small_acquire_uses_upper_without_a_pilot(
     engine = PilotEngine()
     acquire = _request(points)
     result, extras = _sample(engine, acquire, upper, tmp_path)
-    assert engine.calls == [(upper, tuple(range(points)))]
+    assert engine.solve_shapes == [(upper, tuple(range(points)))]
     np.testing.assert_array_equal(
         result.state_counts[:, min(12, upper - 1)], acquire.reps
     )
@@ -393,20 +399,29 @@ def test_readout_continuation_uses_upper_across_whole_acquire(
     kind: Literal["herald", "early_cavity"],
 ) -> None:
     acquire, readout = dimension_bypass(kind)
+    engine = EngineDouble(backend="cpu")
     source = FTFSource(
         _settings(16),
         DeviceManager(),
         soccfg=profile_soccfg("ftf"),
-        engine=Engine(1, backend="cpu"),
+        engine=engine,
         readout=readout,
     )
     try:
         session = source.open_acquire(acquire)
-        result = expect_statistics(session.sample_round(snapshot(), 0))
-        assert session.dimension is not None
-        assert session.dimension.dimension == 16
-        assert session.dimension.drop is None
-        assert result.state_counts.shape[0] == 8
+        for index, state in enumerate((snapshot(), snapshot(0.8))):
+            engine.calls.clear()
+            result = expect_statistics(session.sample_round(state, index))
+            assert session.dimension is not None
+            assert session.dimension.dimension == 16
+            assert session.dimension.pilot_point is None
+            assert session.dimension.drop is None
+            assert result.state_counts.shape[0] == 8
+            seen_points = set()
+            for model, batches in engine.calls:
+                assert model.initial_density.shape == (16, 16)
+                seen_points.update(int(p) for batch in batches for p in batch.points)
+            assert seen_points == set(range(8))
     finally:
         source.close()
 
@@ -451,7 +466,7 @@ def test_round_keeps_the_selected_dimension_but_uses_live_dc(tmp_path: Path) -> 
 
     first_round = [(16, (7,)), (13, (7,)), (13, tuple(range(7)))]
     full_round = (13, tuple(range(8)))
-    assert engine.calls == [*first_round, full_round, full_round, *first_round]
+    assert engine.solve_shapes == [*first_round, full_round, full_round, *first_round]
     reduced_model, reduced_initial = engine.round_models[4]
     np.testing.assert_array_equal(
         reduced_model.energies_ghz, upper_model.energies_ghz[:13]
@@ -486,5 +501,5 @@ def test_equal_drive_uses_the_far_carrier_endpoint(tmp_path: Path) -> None:
     )
     engine = PilotEngine()
     _, extras = _sample(engine, replace(acquire, templates=templates), 16, tmp_path)
-    assert engine.calls[:2] == [(16, (0,)), (13, (0,))]
+    assert engine.solve_shapes[:2] == [(16, (0,)), (13, (0,))]
     assert extras["ftf.pilot_point"] == 0

@@ -25,6 +25,7 @@ from numpy.typing import NDArray
 from ._envelope import sample_values
 from ._inspection import DispatchCandidate, DispatchInspection
 from ._parallel import execution_pool, native_limit
+from ._timeline_selection import select_points
 from ._validation import density, integers, owned, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
@@ -157,7 +158,7 @@ class DriveTrack:
 
 @dataclass(frozen=True)
 class TimelineBatch:
-    """All points of one template, in original flat point order.
+    """Evolution data for the points of one template, in batch row order.
 
     points: unique nonnegative int64 (n,) C1 point indices.
     tracks: DriveTrack tuple, one slot per drive with n per-point values.
@@ -224,6 +225,22 @@ class TimelineBatch:
         object.__setattr__(self, "end_ns", end)
         self._validate_segments()
         self._validate_continuation()
+
+    def select_points(self, positions: Sequence[int]) -> TimelineBatch:
+        """Return an immutable batch for the given zero-based row positions.
+
+        Positions index this batch's rows, not the flat point IDs in `points`.
+        The result follows the supplied order. Empty positions select zero rows;
+        negative, out-of-range, repeated or non-integer positions raise ValueError.
+
+        Select point IDs, end times, and all per-point drive fields, keeping
+        each track's port and envelope table. Select flux schedule rows and
+        waveform rows (if present), rebuilding offsets from zero. Select
+        segment boundaries, span shifts, continuation start times and initial
+        densities. Absent optional data stays absent. Do not rebase absolute
+        times or phase origins. The original batch is unchanged.
+        """
+        return select_points(self, positions)
 
     def _validate_continuation(self) -> None:
         if (self.start_ns is None) != (self.initial_densities is None):

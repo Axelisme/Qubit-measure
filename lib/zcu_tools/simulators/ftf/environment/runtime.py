@@ -255,12 +255,13 @@ def _prepare_channels(
 class FTFAcquire:
     """One fixed request with at most the immediately preceding round's preparation.
 
-    Construct through FTFSource.open_acquire. sample_round takes a detached live
-    snapshot and a zero-based software round index. Equal consecutive snapshots
-    reuse density and conditional responses, but draw a fresh round stream.
+    Construct through FTFSource.open_acquire. Each round draws a fresh stream.
+    After a round uses split pilot preparation, the next round solves the full
+    batch at the selected dimension without a pilot, even for an equal snapshot.
+    Later rounds reuse that full preparation while the snapshot stays equal.
     Opening the next acquire invalidates this session and releases its references;
-    source-owned bounded noiseless records can survive. Using an invalidated
-    session raises RuntimeError. Calls are synchronous and
+    source-owned preparations and selected-dimension records can survive. Using
+    an invalidated session raises RuntimeError. Calls are synchronous and
     must be serialized by the caller (the binding provides acquire admission).
     evolve_wall_s sums Engine.evolve wall seconds across this session's rounds.
     readout_wall_s sums cavity propagation, ADC preparation and round sampling.
@@ -273,6 +274,16 @@ class FTFAcquire:
         request: AcquireRequest,
         dimensions: OrderedDict[bytes, int],
     ) -> None:
+        """Bind the owning source, fixed request, and source's dimension records.
+
+        Use FTFSource.open_acquire to validate the request and manage sessions.
+        The source supplies its bounded LRU of pilot-selected state counts,
+        keyed by the same preparation digest as its noiseless preparations.
+        A record can outlive its preparation: a later acquire then skips only
+        the pilot, not evolution. Changes invalidating model/preparation facts,
+        preparation failure, and source close clear the records. A round with
+        a different snapshot does not publish the old selection for that snapshot.
+        """
         self._source = source
         self._dimensions = dimensions
         self._active = True
@@ -337,8 +348,12 @@ class FTFAcquire:
         *,
         cancel: CancellationQuery | None = None,
     ) -> IntegratedRound | RoundSignals:
-        """Return integrated totals or decimated shots for this snapshot/index.
+        """Sample integrated totals or decimated shots for a detached live snapshot.
 
+        index is the zero-based software round index for the fresh RNG stream.
+        After split pilot preparation, solve the full batch at the selected
+        dimension on the next round even if snapshot is unchanged. Reuse full
+        density and conditional responses on later rounds with equal snapshots.
         Numeric/ADC errors propagate without partial results or changing the
         cached snapshot. Debug capture is published at acquire completion.
         Decimated shots are rearranged from point-major C6 order to QICK loop

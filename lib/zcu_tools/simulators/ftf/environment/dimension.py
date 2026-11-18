@@ -12,8 +12,6 @@ from numpy.typing import NDArray
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
-    FluxSchedule,
-    FluxWaveform,
     ModelSource,
     TimelineBatch,
     merge_path_diagnostics,
@@ -134,47 +132,6 @@ def _pilot_location(
     return index, row
 
 
-def _slice_batch(batch: TimelineBatch, rows: slice) -> TimelineBatch:
-    first, stop, _ = rows.indices(len(batch.points))
-    flux = batch.flux
-    start = flux.offsets[first]
-    flat = slice(start, flux.offsets[stop])
-    waveform = batch.flux_waveform
-    if waveform is not None:
-        start_sample = waveform.offsets[first]
-        samples = slice(start_sample, waveform.offsets[stop])
-        waveform = FluxWaveform(
-            waveform.offsets[first : stop + 1] - start_sample,
-            waveform.time_ns[samples],
-            waveform.flux[samples],
-        )
-    return replace(
-        batch,
-        points=batch.points[rows],
-        end_ns=batch.end_ns[rows],
-        tracks=tuple(
-            replace(
-                track,
-                start_ns=track.start_ns[rows],
-                duration_ns=track.duration_ns[rows],
-                frequency_ghz=track.frequency_ghz[rows],
-                phase_rad=track.phase_rad[rows],
-                amplitude=track.amplitude[rows],
-                envelope_index=track.envelope_index[rows],
-                active=track.active[rows],
-            )
-            for track in batch.tracks
-        ),
-        flux=FluxSchedule(
-            flux.offsets[first : stop + 1] - start,
-            flux.start_ns[flat],
-            flux.level[flat],
-        ),
-        flux_waveform=waveform,
-        segment_boundaries=batch.segment_boundaries[rows],
-    )
-
-
 def _isolated_evolve(
     engine: Engine,
     source: ModelSource,
@@ -227,7 +184,7 @@ def pilot_dimension(
     """
     batches = tuple(plan.batch for plan in plans)
     index, row = _pilot_location(batches, facts.source)
-    batch = _slice_batch(batches[index], slice(row, row + 1))
+    batch = batches[index].select_points((row,))
     point = int(batch.points[0])
     start = time.monotonic()
     reference = _isolated_evolve(engine, facts.source, batch, options)
@@ -281,9 +238,9 @@ def _without_reference(
             continue
         row = int(rows[0])
         if row:
-            kept.append(_slice_batch(batch, slice(0, row)))
+            kept.append(batch.select_points(range(row)))
         if row + 1 < len(batch.points):
-            kept.append(_slice_batch(batch, slice(row + 1, None)))
+            kept.append(batch.select_points(range(row + 1, len(batch.points))))
     return tuple(kept)
 
 
