@@ -43,6 +43,7 @@ Composition 將選好的 `Path` 注入 `MeasureGuiBehavior`。Lib 不 import zcu
 Framework 只保存 `measure_layout_v1.json` 的視窗尺寸與左面板寬度。SoC、devices、entry／point、tabs 與輸入的重開政策由腳本決定，框架不保存、還原或遷移領域 session。RAM 的 `WorkspaceTab`／`WorkspaceSnapshot` 供 workspace 重建與實驗 reload 使用，不是磁碟 schema。
 
 預設 `default_startup.py` 擁有 user cache 根目錄下的 `measure-session.json`。它依序嘗試上次 SoC、各 device、entry／point。保存的 point 為 None 時，成功開 entry 即是 global，可重開 tabs 並還原 input。保存了 point label 時，還須成功選取該 point；失敗略過 tabs，不回退 global。Entry 開啟失敗也略過 tabs。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 Device 連線失敗時嘗試 remember 為未連線列。每項失敗記 log 並繼續，最後狀態列顯示一行摘要；略過的 tab 不會在稍後選來源時自動重試。腳本以 `on_close` 讀取當時 live state 並保存自己的檔案，不保存硬體設定或量測結果。
 

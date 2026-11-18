@@ -37,6 +37,7 @@ related: [0063, 0072]
 - `format_version` 只有兩個等級：minor 只能新增命名空間內的可選內容，reader 必須接受同 major 的任何 minor；major 改變就是另一個 reader。
 - 未知內容一律保真：讀到的 `docs`／`groups`／`vars` 不管認不認得，寫回時完整帶著；`vars` 之外的 HDF5 節點不改動。這取代今天的整檔 `NativeExtensions.file_image`。
 - Reader 只接受 zcu.container major 3。舊 `zcu.experiment-data` 2.x 不在支援範圍，直接拒絕。
+  使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 - 生產者的文件 schema 版本放在各自的 doc 內（如 `docs/cfg.schema_version`），容器不管。
 
 ### 介面

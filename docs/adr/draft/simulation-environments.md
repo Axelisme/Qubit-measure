@@ -328,6 +328,7 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 對含 N 個 samples 的窗口，decimated 的每 quadrature sample 為 N(0,std_adc²)；integrated 回 sample sum，可直接抽等價的 N(0,N×std_adc²)。這些分布定義在 adapter rounding 前；int64 rounding、normalization 與 averaging 仍走共用 acquisition。Companion raw 從同一 decimated trace 求和，不另抽 noise，raw／averaged 共用資料。
 
 此 preset 遵守共同 seed、round identity、重播與清理契約，不使用全域 RNG，不作任何失敗 fallback。不新增非零 mean、相關 noise 或物理模型；公開入口是 `experiment.simulation.white_noise(std_adc=1.0, seed=None, ...)`，回傳相同的具名環境 bundle。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 ### 舊 TLS 與 Notebook 遷移
 

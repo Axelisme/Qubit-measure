@@ -242,6 +242,7 @@ executor 與 remote handler／wire types 留在原 owner。`artifacts` 與 `writ
 contracts 分別檢查兩個方向。
 
 Framework 擁有它消費的實驗 adapter interface，實驗側提供宣告和行為，app composition 注入 catalog。`AdapterCapabilities` 由 Analysis／Interactive 與 PostAnalysis 值推導分析支援範圍，不是作者旗標。Measure 的 Qt tab 依 analysis／post-analysis 宣告建立控制項；remote 的 writeback subtab params 依宣告拒絕不支援的分析類別。Run guard 一律要求 SoC 連線；每個 adapter 都可嘗試 Load，由 spec 判定檔案相容性，不支援時顯示原因並保留舊成果。Load admission 不要求目前 context。`GuardService.admit` 在既有 result 前提之後拒絕缺少 analysis／post-analysis 的操作，再檢查 tab busy。Analyze 不要求目前 context。Catalog reload／shutdown 的不可用狀態是所有 action 的第一個前提；Run、Load 不新增 storage 前提。Application 提供同一份 decision 給 UI 與 remote 的 admission 投影，hardware exclusion 仍由 operation gate 裁決。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 Capability 不等於當次 readiness、檔案相容、權限或 hardware lease。Framework 在既有 guard 和 operation 邊界分別判斷部分 context／cfg 與動態 busy 狀態，額外實驗驗證放在 adapter.run 開頭，不提供 validate_run_request hook。這不代替 execution guard 或硬體操作。四種值、options 生成與建值期檢查見 [measure adapter contract](../../lib/zcu_tools/gui/app/measure/README.md) 及 [experiment adapter owner](../../zcu_lab/v2/gui-contracts.md)。
 
