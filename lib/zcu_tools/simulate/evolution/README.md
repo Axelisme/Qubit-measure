@@ -784,9 +784,9 @@ amortization never reads history.
 
 The estimator uses the raw full-drive work scale for gate endpoint and split
 terms and the grid size for Fourier and playback. Only the gate's CPU
-`dop853` competitor multiplies the raw scale by a duration factor: 0.12 through
-25 ns, then linear to 0.24 at 100 ns, and constant thereafter. Duration is a
-pricing proxy calibrated from six matched CPU DP5(4) cases at budget 1e-3.
+`dop853` competitor multiplies the raw scale by a duration factor: 0.0891 through
+25 ns, then linear to 0.412 at 100 ns, and constant thereafter. The calibration
+uses seven CPU DP5(4) measurements at budget 1e-3, including two DRAG windows.
 The factor does not depend on envelope or frame. It does not change gate build
 or playback prices, the RWA comparison, or the direct solver. See the
 [pricing discussion](../../../../docs/discussions/2026-11-18-gate-direct-duration-price.md).

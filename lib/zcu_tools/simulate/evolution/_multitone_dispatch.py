@@ -156,7 +156,7 @@ def _price_gate(table: SegmentTable, row: int, context: KernelContext) -> GateCo
     fraction = min(1.0, max(0.0, (duration_ns - 25.0) / 75.0))
     return GateCost(
         direct,
-        (0.12 + 0.12 * fraction) * direct,
+        (0.0891 + (0.412 - 0.0891) * fraction) * direct,
         endpoints,
         fourier,
         tight_split,

@@ -18,7 +18,7 @@
 
 ## 模擬量測環境
 
-- 2026-11-18 [Full-drive gate 的 CPU 競品估價](2026-11-18-gate-direct-duration-price.md)：價格重校。六個 CPU DP5(4) 訓練案例排除固定係數，gate 建構前比價改用 duration 代理，留出案例尚未量測。
+- 2026-11-18 [Full-drive gate 的 CPU 競品估價](2026-11-18-gate-direct-duration-price.md)：價格重校。原六組加上已量的 DRAG lab 窗重校 duration 端點，原 flat-top lab 連段仍未量測。
 
 - 2026-11-18 [移除 private replay](2026-11-18-remove-private-replay.md)：刪除或收窄。FTF 與 single-fluxonium 不再逐位重算；debug capture 記下 Engine 輸入、選路與每輪的有效設定。
 

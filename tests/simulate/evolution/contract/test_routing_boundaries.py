@@ -689,6 +689,7 @@ def test_short_inventory_skips_unprofitable_gate_before_guard(count: int) -> Non
 # At this pulse length enough reuse can beat the direct price even after
 # including playback. Keep the 1.5 ns geometry for the common-frame contract.
 _PRICE_CASE_DURATION_NS = 6.0
+_PROFITABLE_GATE_USES = 768
 
 
 @pytest.mark.parametrize("prior_gate_use", [False, True], ids=["cold", "warm"])
@@ -704,9 +705,13 @@ def test_short_reuse_loses_to_dop853_without_building_gate(
         closing(Engine(1, families=("multitone_gate", "dop853"))) as engine,
     ):
         if prior_gate_use:
-            long = _joint_gate_case(512, _PRICE_CASE_DURATION_NS).batch
+            long = _joint_gate_case(
+                _PROFITABLE_GATE_USES, _PRICE_CASE_DURATION_NS
+            ).batch
             previous = engine.evolve(source, (long,))
-            assert previous.paths.segments_by_kernel == {"multitone_gate": 512}
+            assert previous.paths.segments_by_kernel == {
+                "multitone_gate": _PROFITABLE_GATE_USES
+            }
         query = engine.inspect_dispatch(source, (case.batch,))
         result = engine.evolve(source, (case.batch,), telemetry=True)
     assert len(query.rows) == count
@@ -725,6 +730,10 @@ def test_short_reuse_loses_to_dop853_without_building_gate(
     ("duration", "count", "status", "family"),
     [
         pytest.param(25.0, 160, "selected", "dop853", id="short-direct-wins"),
+        pytest.param(
+            25.0, 205, "selected", "dop853", id="short-more-reuse-still-direct"
+        ),
+        pytest.param(100.0, 60, "deferred", None, id="long-less-reuse-gate-offered"),
         pytest.param(100.0, 100, "deferred", None, id="long-gate-offered"),
     ],
 )
@@ -763,7 +772,7 @@ def test_gate_direct_price_compares_short_and_long_reuse(
 @pytest.mark.parametrize("shared", [False, True])
 def test_profitable_gate_is_offered_using_complete_inventory(shared: bool) -> None:
     """Local builders defer; a shared key runs its numerical guard in the caller."""
-    count = 512
+    count = _PROFITABLE_GATE_USES
     duration = _PRICE_CASE_DURATION_NS
     case = _joint_gate_case(count if shared else 1, duration)
     work = case.batch
@@ -792,7 +801,7 @@ def test_profitable_gate_is_offered_using_complete_inventory(shared: bool) -> No
 
 def test_profitable_gate_reuse_pays_only_its_own_build() -> None:
     """Frequent reuse can repay one cold build, but not a distinct key's build."""
-    count = 512
+    count = _PROFITABLE_GATE_USES
     case = _joint_gate_case(count, _PRICE_CASE_DURATION_NS)
     rare = _joint_gate_case(1, _PRICE_CASE_DURATION_NS).batch
     rare = replace(
