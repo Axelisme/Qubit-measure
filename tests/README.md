@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-18，OpenCL 精度矩陣選集
+**Last updated:** 2026-11-18，OpenCL DP5(4) 精度矩陣選集
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -179,7 +179,16 @@ uv run --directory <worktree> --no-sync -- \
 `PASS` 表示最大誤差不超過 `2e-3`。`FAIL` 保留超標數字，即使案例標了 xfail。
 `NOT EXERCISED` 表示此次選集沒有該 family 或 backend 的觀察值，誤差欄顯示 `-`，不填 `0`。
 `dop853/opencl` 另計實際走 GPU 的案例。GPU lane 選 `-m requires_opencl` 時，
-矩陣用 `telemetry=True` 核對 GPU row 數，並驗證交接密度的 trace 與 Hermiticity。
+矩陣用 `telemetry=True` 核對 GPU row 與 tableau 數，並驗證交接密度的 trace 與 Hermiticity。
+GPU DP5(4) 選集包含合成的 960-knot 雙 tone 案例、10 µs 邊緣與其他 sampled 案例。
+`tight-budget` 用小於 `1e-3` 的 budget 驗證 GPU 保留 DOP853。
+CPU DP5(4) 的三個節點是
+`test_cpu_dp54_density[cpu_dp54_short_sampled]`、
+`test_cpu_dp54_density[cpu_dp54_two_tone_960]` 與
+`test_cpu_dp54_density[cpu_dp54_duration_edge]`。
+它們固定 `backend="cpu"`，用 telemetry 確認 tableau，再用獨立的 interaction-frame
+Lindblad solver 比對完整 density。960-knot 案例在測試內建構 24 能階、100 ns 的雙 tone，
+每個 tone 使用同一時間網格上各自變化的取樣包絡。不讀凍結資料或共用參考解快取。
 案例數計算 case/family 觀察值，不是 point 或 segment 數。
 同一輸入的 pinned、空歷史與暖歷史分別計數。
 
@@ -235,8 +244,9 @@ Lab-frame 參考解在這類輸入上一點 600 秒算不完。
 它只接受整個 shot 單一 schedule level 的 timeline。
 帶 continuous flux waveform 或一個 shot 多個 level 的輸入會 raise。
 兩個參考解在 DC 固定的精度案例上由 pytest 互相比對，差值不超過 `2e-6`。
-精度矩陣的 `dephasing_pump`、`raman_decay`、`raman_weak_legs` 使用這個參考解，
-其餘案例繼續用 lab-frame 參考解。這三個零載波 constant drive 案例在 pinned
+OpenCL 與 CPU DP5(4) 案例用這個參考解。
+`dephasing_pump`、`raman_decay`、`raman_weak_legs` 也使用它。
+這三個零載波 constant drive 案例在 pinned
 `slow_envelope` 與預設空／暖歷史下，都驗證完整 density ≤2e-3。
 前兩例的 bath rate 為 0.1/ns 與 0.02/ns，超過約 0.01/ns 的物理使用範圍。
 弱腿 Λ 的 decay rate 為 0.0002/ns，在範圍內。

@@ -1,17 +1,35 @@
 """Shared single-threaded interval-chain control for both DOP853 kernels."""
 
+from typing import NamedTuple
+
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
 from ..state import transform_density
 from ._dop853 import (
+    DP54_TOLERANCE_DIVISOR,
     ROW_INITIAL_STEP_NS,
+    IntervalStep,
     Tolerances,
     integrate_workspace,
     make_workspace,
 )
 from ._dop853_intervals import row_intervals
+
+
+class ChainRows(NamedTuple):
+    """Rows and solver choices passed to one chronological CPU apply.
+
+    rows contains global row IDs. model_index supplies one packed model index
+    per row. chain is indexed by global row ID and identifies touching rows.
+    dp54 is row-aligned; True selects DP5(4) and False selects DOP853.
+    """
+
+    rows: NDArray[np.int64]
+    model_index: NDArray[np.int64]
+    chain: NDArray[np.int64]
+    dp54: NDArray[np.bool_]
 
 
 # Inline callback-taking control into the kernel's cached entry point, so no
@@ -21,7 +39,7 @@ def run_chain(
     rhs,
     make_context,
     data,
-    row_models: tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.int64]],
+    chain_rows: ChainRows,
     states: NDArray[np.complex128],
     controls: Tolerances,
 ):
@@ -34,8 +52,7 @@ def run_chain(
     interval clocks and call-owned RHS buffers reused across that row's knots.
     Passing previous=None allocates those buffers; a previous context reuses them.
     Step buffers belong to this invocation and are reused across rows.
-    row_models is (rows, model_index, global_chain_ids). The first two vectors
-    align with states (rows, M, M); chain IDs are indexed by global table row.
+    chain_rows supplies the rows and model indices for states (rows, M, M).
     Each chain reads only its first input slot; subsequent rows use the previous
     endpoint, changing basis on model changes. Disjoint rows read their own
     input. Each active sample knot stops integration and resets a deterministic
@@ -43,15 +60,17 @@ def run_chain(
     Source-coordinate endpoints preserve event sides and nextafter bridges.
     Constant envelopes and ordinary DOP853's unpacked flux add no stops.
     Chain membership comes from dispatch, not apply-call adjacency.
+    Both tableaux use the same frame, intervals and workspace.
     A finite controls.phase_budget caps
     local rtol by that allowance divided by bare spectral phase over this row,
     scaling atol by the same factor. Lab-frame ordinary density propagation
     supplies the allowance; interaction and continuous-flux callers retain
-    their original controls. This is a calibrated margin, not a global bound.
+    their original controls. DP5(4) divides both local errors by three after
+    the phase cap. These are calibrated margins, not global bounds.
     Integration failures propagate; earlier endpoints may already be stored.
     """
     models, segments = data.models, data.segments
-    rows, model_index, chain = row_models
+    rows, model_index, chain, dp54 = chain_rows
     if not len(rows):
         return
     workspace = make_workspace(states[0].ravel())
@@ -75,6 +94,9 @@ def run_chain(
         )
         phase_rtol = controls.phase_budget / max(1.0, spectral_phase)
         scale = min(1.0, phase_rtol / controls.rtol)
+        use_dp54 = dp54[index]
+        if use_dp54:
+            scale /= DP54_TOLERANCE_DIVISOR
         row_controls = Tolerances(
             controls.rtol * scale,
             controls.atol * scale,
@@ -94,9 +116,12 @@ def run_chain(
             result = integrate_workspace(
                 rhs,
                 context,
-                interval.duration,
+                IntervalStep(
+                    interval.duration,
+                    min(ROW_INITIAL_STEP_NS, interval.duration, row_controls.max_step),
+                    use_dp54,
+                ),
                 row_controls,
-                min(ROW_INITIAL_STEP_NS, interval.duration, row_controls.max_step),
                 workspace,
             )
         states[index] = result.reshape(state.shape)

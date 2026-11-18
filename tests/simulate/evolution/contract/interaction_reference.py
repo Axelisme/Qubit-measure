@@ -20,6 +20,7 @@ def interaction_reference(
     *,
     coarse: SolverTolerances = _COARSE,
     fine: SolverTolerances = _FINE,
+    max_step_ns: float = 0.05,
 ) -> ReferenceResult:
     """Solve full Lindblad evolution without RWA and verify two-tolerance agreement.
 
@@ -34,7 +35,9 @@ def interaction_reference(
     Return ReferenceResult with fine density (points,M,M) in the caller's DC
     energy basis and the maximum absolute coarse/fine density difference.
     coarse/fine specify DOP853 rtol/atol; defaults are 2e-10/2e-12 and
-    2e-12/2e-14. Integrations stop at envelope knots, drive support and explicit
+    2e-12/2e-14. max_step_ns is the positive step ceiling for both solves;
+    long sampled inputs can use a larger ceiling while retaining adaptive
+    tolerances. Integrations stop at envelope knots, drive support and explicit
     segment boundaries. The exact H0 interaction transform drops no drive terms;
     secular jumps and elementwise dephasing are invariant under this transform.
     The final state is rotated back to the lab frame and DC energy basis.
@@ -60,8 +63,8 @@ def interaction_reference(
         levels = batch.flux.level[first:last]
         if np.any(levels != levels[0]):
             raise ValueError("DC flux changes within shot")
-    approximate = _solve_batch(source, batch, coarse)
-    density = _solve_batch(source, batch, fine)
+    approximate = _solve_batch(source, batch, coarse, max_step_ns)
+    density = _solve_batch(source, batch, fine, max_step_ns)
     error = float(np.max(np.abs(approximate - density), initial=0.0))
     if error > 2e-6:
         raise AssertionError(
@@ -74,6 +77,7 @@ def _solve_batch(
     source: ModelSource,
     batch: TimelineBatch,
     tolerances: SolverTolerances,
+    max_step_ns: float,
 ) -> NDArray[np.complex128]:
     dc = source.model((0,) * batch.flux.level.shape[1])
     results = []
@@ -88,7 +92,7 @@ def _solve_batch(
             else batch.initial_densities[point]
         )
         initial = overlap.conj().T @ initial @ overlap
-        density = _solve_point(model, initial, batch, point, tolerances)
+        density = _solve_point(model, initial, batch, point, tolerances, max_step_ns)
         results.append(overlap @ density @ overlap.conj().T)
     return np.asarray(results, dtype=np.complex128)
 
@@ -99,6 +103,7 @@ def _solve_point(
     batch: TimelineBatch,
     point: int,
     tolerances: SolverTolerances,
+    max_step_ns: float,
 ) -> NDArray[np.complex128]:
     size = len(model.energies_ghz)
     gaps = model.energies_ghz[:, None] - model.energies_ghz[None, :]
@@ -114,7 +119,7 @@ def _solve_point(
             method="DOP853",
             rtol=tolerances.rtol,
             atol=tolerances.atol,
-            max_step=0.05,
+            max_step=max_step_ns,
         )
         if not solution.success:
             raise RuntimeError(solution.message)

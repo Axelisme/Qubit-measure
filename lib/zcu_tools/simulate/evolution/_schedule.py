@@ -450,9 +450,11 @@ class Schedule:
             rows,
             dimension,
             self.workers,
+            budget=self.budget,
+            dp54=self.context.opencl_dp54,
         ):
             return None
-        return backend.prepare(dimension)
+        return backend.prepare(dimension, dp54=self.context.opencl_dp54)
 
     def _apply_opencl(
         self,
@@ -486,7 +488,7 @@ class Schedule:
                     ApplyContext(
                         self.budget,
                         work_plan=self.context.work_plan,
-                        opencl=runner,
+                        opencl=(runner, self.context.opencl_dp54),
                     ),
                 )
         except RuntimeError as error:
@@ -532,7 +534,11 @@ class Schedule:
         routing = self.context.work_plan.routing.snapshot(segments, durations)
         backend = self.context.opencl
         failure = (
-            None if backend is None else backend.failure(self.initial_density.shape[0])
+            None
+            if backend is None
+            else backend.failure(
+                self.initial_density.shape[0], dp54=self.context.opencl_dp54
+            )
         )
         if failure is not None and "dop853" in routing:
             routing["dop853"] = replace(
@@ -915,7 +921,10 @@ class _Chunk:
                 waiting = gpu[self.cursor[pending]]
                 if (
                     waiting.any()
-                    and backend.candidate(self.states.shape[1]) is not None
+                    and backend.candidate(
+                        self.states.shape[1], dp54=self.schedule.context.opencl_dp54
+                    )
+                    is not None
                 ):
                     if waiting.all():
                         return _ChunkProgress([], [_OpenCLWave(self, pending)])

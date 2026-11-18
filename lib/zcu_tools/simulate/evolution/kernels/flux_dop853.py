@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import FluxExpansion, ModelSource
 from ._dop853 import tolerances
-from ._dop853_chain import run_chain
+from ._dop853_chain import ChainRows, run_chain
 from ._dop853_data import (
     Context,
     Models,
@@ -167,7 +167,16 @@ def _context(data, row, model, interval, previous):
 def _run(data, row_models, states, controls):
     # Keep RHS/context dispatchers inside the compiled entry point so its disk
     # cache key contains only data types, not process-specific callback IDs.
-    run_chain(_rhs, _context, data, row_models, states, controls)
+    rows, model_index, chain = row_models
+    use_dp54 = np.zeros(len(rows), dtype=np.bool_)
+    run_chain(
+        _rhs,
+        _context,
+        data,
+        ChainRows(rows, model_index, chain, use_dp54),
+        states,
+        controls,
+    )
 
 
 class FluxDOP853Kernel:
