@@ -14,7 +14,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..._numba_cache import user_cache_root
-from ._dop853 import ROW_INITIAL_STEP_NS, Tolerances, tolerances
+from ._dop853 import (
+    DP54_TOLERANCE_DIVISOR,
+    ROW_INITIAL_STEP_NS,
+    Tolerances,
+    endpoint_stage_count,
+    tolerances,
+)
 from ._dop853_data import Models, Segments
 from ._dop853_opencl_selftest import PROBE_DIMENSION, PROBE_REVISION, endpoint_error
 from ._dop853_opencl_source import opencl_source
@@ -100,7 +106,7 @@ class OpenCLBackend:
         self._runner: OpenCLDOP853 | None = None
         self._detect_lock = Lock()
         self._probe_failure: str | None = None
-        self._build_failures: dict[int, str | None] = {}
+        self._build_failures: dict[tuple[int, bool], str | None] = {}
         if forced:
             self._detect_device()
 
@@ -111,29 +117,32 @@ class OpenCLBackend:
             runner = self._runner
         return "cpu" if runner is None else runner.execution_device
 
-    def failure(self, dimension: int) -> str | None:
-        """Return the device probe or dimension build failure already observed."""
-        return self._probe_failure or self._build_failures.get(dimension)
+    def failure(self, dimension: int, *, dp54: bool) -> str | None:
+        """Return an observed probe or build failure for this dimension and tableau."""
+        return self._probe_failure or self._build_failures.get((dimension, dp54))
 
-    def candidate(self, dimension: int) -> OpenCLDOP853 | None:
-        """Detect on the first eligible row and read recorded variant failures.
+    def candidate(self, dimension: int, *, dp54: bool) -> OpenCLDOP853 | None:
+        """Detect on the first eligible row and read the chosen variant's failures.
 
         Workers can reach this together. Detection does not compile unpriced
         point programs. A forced backend has already passed device detection
         and does not consult cached compiler rejections for point programs.
         """
-        if self.failure(dimension) is not None:
+        key = (dimension, dp54)
+        if self.failure(dimension, dp54=dp54) is not None:
             return None
-        if self.forced or dimension in self._build_failures:
+        if self.forced or key in self._build_failures:
             return self._runner
         with self._detect_lock:
             self._detect_device()
             runner = self._runner
             if runner is None:
                 return None
-            if dimension not in self._build_failures:
-                self._build_failures[dimension] = runner.cached_build_failure(dimension)
-            return runner if self._build_failures[dimension] is None else None
+            if key not in self._build_failures:
+                self._build_failures[key] = runner.cached_build_failure(
+                    dimension, dp54=dp54
+                )
+            return runner if self._build_failures[key] is None else None
 
     def _detect_device(self) -> None:
         if self._runner is not None or self._probe_failure is not None:
@@ -151,18 +160,18 @@ class OpenCLBackend:
         else:
             self._runner = runner
 
-    def prepare(self, dimension: int) -> OpenCLDOP853 | None:
-        """Build an auto wave's selected variant before running any point.
+    def prepare(self, dimension: int, *, dp54: bool) -> OpenCLDOP853 | None:
+        """Build an auto wave's dimension/tableau variant before running any point.
 
         Called after workers have joined. A failed auto build disables only
-        this dimension. A forced runner keeps its build errors in point apply.
+        this variant. A forced runner keeps its build errors in point apply.
         """
-        runner = self.candidate(dimension)
+        runner = self.candidate(dimension, dp54=dp54)
         if runner is None or self.forced:
             return runner
-        failure = runner.compile_variant(dimension)
+        failure = runner.compile_variant(dimension, dp54=dp54)
         if failure is not None:
-            self._build_failures[dimension] = failure
+            self._build_failures[dimension, dp54] = failure
             return None
         return runner
 
@@ -206,7 +215,7 @@ class OpenCLDOP853:
             )
         except cl.Error as error:
             raise RuntimeError(
-                f"cannot discover an OpenCL GPU with cl_khr_fp64: {error}"
+                f"cannot discover an OpenCL GPU with cl_khr_fp64 (code {error.code}): {error}"
             ) from error
         if device is None:
             raise RuntimeError("OpenCL requires a GPU supporting cl_khr_fp64")
@@ -214,11 +223,11 @@ class OpenCLDOP853:
             self._context = cl.Context([device])
         except cl.Error as error:
             raise RuntimeError(
-                f"cannot create an OpenCL context for {device.name}: {error}"
+                f"cannot create an OpenCL context for {device.name} (code {error.code}): {error}"
             ) from error
         self._cl = cl
         self._device = device
-        self._programs: dict[int, cl.Program] = {}
+        self._programs: dict[tuple[int, bool], cl.Program] = {}
         self._build_lock = Lock()
         self._source = opencl_source()
         kernel_version = sha256(self._source.encode()).hexdigest()
@@ -239,7 +248,8 @@ class OpenCLDOP853:
         A matching cached result avoids both compilation and the numerical
         probe. A build or self-test failure, including a cached one, raises.
         """
-        _, program = self._program_location(PROBE_DIMENSION)
+        # Both probes share one receipt. The common source hashes both tableaux.
+        _, program = self._program_location(PROBE_DIMENSION, dp54=False)
         name = f"{program.name}-probe-{PROBE_REVISION}-{_PROBE_TOLERANCE:g}.txt"
         path = program.parent / "detection" / name
         record = _read_detection(path)
@@ -251,32 +261,33 @@ class OpenCLDOP853:
         if record.startswith("failed\n"):
             raise RuntimeError(record.removeprefix("failed\n"))
 
-    def _build_failure_path(self, dimension: int) -> Path:
-        _, program = self._program_location(dimension)
+    def _build_failure_path(self, dimension: int, *, dp54: bool) -> Path:
+        _, program = self._program_location(dimension, dp54=dp54)
         return program.parent / "detection" / f"{program.name}-build.txt"
 
-    def cached_build_failure(self, dimension: int) -> str | None:
-        """Read a known compiler rejection for this variant, without compiling."""
+    def cached_build_failure(self, dimension: int, *, dp54: bool) -> str | None:
+        """Read a known compiler rejection for this dimension and tableau."""
         try:
-            record = _read_detection(self._build_failure_path(dimension))
+            record = _read_detection(self._build_failure_path(dimension, dp54=dp54))
         except (OSError, ValueError) as error:
             return f"DOP853 OpenCL dimension {dimension} build cache failed: {error}"
         if record is not None and record.startswith("failed\n"):
             return record.removeprefix("failed\n")
         return None
 
-    def compile_variant(self, dimension: int) -> str | None:
-        """Build for automatic routing and return a persisted reason on failure."""
+    def compile_variant(self, dimension: int, *, dp54: bool) -> str | None:
+        """Build the chosen variant for auto and persist any rejection reason."""
         try:
-            self._program(dimension)
+            self._program(dimension, dp54=dp54)
         except (self._cl.Error, OSError, RuntimeError, ValueError) as error:
+            method = "DP5(4)" if dp54 else "DOP853"
             reason = (
                 f"DOP853 OpenCL build failed at dimension {dimension} "
-                f"on {self._device.name}: {error}"
+                f"({method}) on {self._device.name}: {error}"
             )
             try:
                 _write_detection(
-                    self._build_failure_path(dimension), f"failed\n{reason}"
+                    self._build_failure_path(dimension, dp54=dp54), f"failed\n{reason}"
                 )
             except (OSError, ValueError) as cache_error:
                 return f"{reason} (could not store detection result: {cache_error})"
@@ -285,25 +296,26 @@ class OpenCLDOP853:
 
     def _probe(self) -> str:
         device = self._device.name
-        try:
-            self._program(PROBE_DIMENSION)
-        except (self._cl.Error, OSError, RuntimeError, ValueError) as error:
-            return f"failed\nDOP853 OpenCL probe build failed on {device}: {error}"
-        try:
-            error = endpoint_error(self)
-        except (
-            self._cl.Error,
-            ArithmeticError,
-            OSError,
-            RuntimeError,
-            ValueError,
-        ) as error:
-            return f"failed\nDOP853 OpenCL self-test failed on {device}: {error}"
-        if not np.isfinite(error) or error > _PROBE_TOLERANCE:
-            return (
-                f"failed\nDOP853 OpenCL self-test failed on {device}: "
-                f"max CPU–GPU density error {error:.3g} exceeds {_PROBE_TOLERANCE:.3g}"
-            )
+        for dp54, method in ((False, "DOP853"), (True, "DP5(4)")):
+            try:
+                self._program(PROBE_DIMENSION, dp54=dp54)
+            except (self._cl.Error, OSError, RuntimeError, ValueError) as error:
+                return f"failed\nDOP853 OpenCL probe build failed on {device} ({method}): {error}"
+            try:
+                delta = endpoint_error(self, dp54=dp54)
+            except (
+                self._cl.Error,
+                ArithmeticError,
+                OSError,
+                RuntimeError,
+                ValueError,
+            ) as error:
+                return f"failed\nDOP853 OpenCL self-test failed on {device} ({method}): {error}"
+            if not np.isfinite(delta) or delta > _PROBE_TOLERANCE:
+                return (
+                    f"failed\nDOP853 OpenCL self-test failed on {device} ({method}): "
+                    f"max CPU–GPU density error {delta:.3g} exceeds {_PROBE_TOLERANCE:.3g}"
+                )
         return "passed\n"
 
     def _width(self, dimension: int) -> int:
@@ -317,9 +329,15 @@ class OpenCLDOP853:
         )
         return 1 << (limit.bit_length() - 1)
 
-    def _program_location(self, dimension: int) -> tuple[list[str], Path]:
+    def _program_location(
+        self, dimension: int, *, dp54: bool
+    ) -> tuple[list[str], Path]:
         device = self._device
-        options = [f"-DD={dimension}", f"-DWG={self._width(dimension)}"]
+        options = [
+            f"-DD={dimension}",
+            f"-DWG={self._width(dimension)}",
+            f"-DDP54={int(dp54)}",
+        ]
         fields = (
             self._source,
             *options,
@@ -334,17 +352,21 @@ class OpenCLDOP853:
         identity = sha256("\0".join(fields).encode()).hexdigest()
         return options, user_cache_root() / "opencl" / "dop853" / identity
 
-    def _program(self, dimension: int) -> cl.Program:
+    def _program(self, dimension: int, *, dp54: bool) -> cl.Program:
         with self._build_lock:
-            old = self._programs.get(dimension)
+            key = (dimension, dp54)
+            old = self._programs.get(key)
             if old is not None:
                 return old
-            options, directory = self._program_location(dimension)
+            options, directory = self._program_location(dimension, dp54=dp54)
             directory.mkdir(parents=True, exist_ok=True)
-            program = self._cl.Program(self._context, self._source).build(
-                options=options, devices=[self._device], cache_dir=str(directory)
-            )
-            self._programs[dimension] = program
+            try:
+                program = self._cl.Program(self._context, self._source).build(
+                    options=options, devices=[self._device], cache_dir=str(directory)
+                )
+            except self._cl.Error as error:
+                raise RuntimeError(f"OpenCL code {error.code}: {error}") from error
+            self._programs[key] = program
             return program
 
     def advance(
@@ -353,13 +375,16 @@ class OpenCLDOP853:
         row_models: tuple[NDArray[np.int64], NDArray[np.int64]],
         states: NDArray[np.complex128],
         budget: float,
+        *,
+        dp54: bool,
     ) -> NDArray[np.complex128]:
         """Return DC-eigenbasis endpoints for pre-admitted independent rows.
 
         row_models gives valid global row IDs and model indices into data.
         states has shape (rows,D,D) and contains the input in each row's model
-        basis; it is not modified. budget is the positive DOP853 local error
-        allowance. The caller admits rows with two full-support sampled tones.
+        basis; it is not modified. dp54 selects DP5(4) with one third of the
+        local tolerances derived from the positive budget. Otherwise use DOP853.
+        The caller admits rows with two full-support sampled tones.
         Build, driver and numerical failures raise RuntimeError; no CPU retry.
         Queue, buffers and mutable kernel arguments belong to this call.
         """
@@ -371,6 +396,11 @@ class OpenCLDOP853:
             return_inverse=True,
         )
         controls = tolerances(budget)
+        if dp54:
+            controls = controls._replace(
+                rtol=controls.rtol / DP54_TOLERANCE_DIVISOR,
+                atol=controls.atol / DP54_TOLERANCE_DIVISOR,
+            )
         try:
             for group_id, group in enumerate(groups):
                 model = _pack_model(data.models, int(group[0]), group[1:])
@@ -379,9 +409,13 @@ class OpenCLDOP853:
                     batch = members[start : start + ROWS_PER_BATCH]
                     playback = _pack_playback(data.segments, rows[batch])
                     result[batch] = self._solve(
-                        model, playback, states[batch], controls
+                        model, playback, states[batch], controls, dp54=dp54
                     )
-        except (self._cl.Error, OSError) as error:
+        except self._cl.Error as error:
+            raise RuntimeError(
+                f"DOP853 OpenCL failed on {self._device.name} (code {error.code}): {error}"
+            ) from error
+        except OSError as error:
             raise RuntimeError(
                 f"DOP853 OpenCL failed on {self._device.name}: {error}"
             ) from error
@@ -393,11 +427,13 @@ class OpenCLDOP853:
         playback: _Playback,
         states: NDArray[np.complex128],
         controls: Tolerances,
+        *,
+        dp54: bool,
     ) -> NDArray[np.complex128]:
         state = states.astype(np.complex64)
         count, dimension, _ = state.shape
         cl = self._cl
-        kernel = cl.Kernel(self._program(dimension), "advance")
+        kernel = cl.Kernel(self._program(dimension, dp54=dp54), "advance")
         progress = np.zeros((count, 4), dtype=np.int32)
         inputs = (*model, *playback)
         flags = cl.mem_flags
@@ -412,7 +448,11 @@ class OpenCLDOP853:
                 np.full(count, ROW_INITIAL_STEP_NS, dtype=np.float32),
             )
         ]
-        slopes = cl.Buffer(self._context, flags.READ_WRITE, 12 * state.nbytes)
+        slopes = cl.Buffer(
+            self._context,
+            flags.READ_WRITE,
+            endpoint_stage_count(dp54=dp54) * state.nbytes,
+        )
         immutable = [
             cl.Buffer(
                 self._context, flags.READ_ONLY | flags.COPY_HOST_PTR, hostbuf=array
@@ -443,7 +483,16 @@ class OpenCLDOP853:
                     np.int32(trials),
                     row_map,
                 )
-                cl.enqueue_copy(queue, progress, buffers[1], is_blocking=True)
+                try:
+                    cl.enqueue_copy(queue, progress, buffers[1], is_blocking=True)
+                except cl.Error as error:
+                    status = None
+                    with suppress(cl.Error):
+                        status = event.command_execution_status
+                    raise RuntimeError(
+                        f"DOP853 OpenCL failed on {self._device.name} "
+                        f"(code {error.code}, advance execution status {status}): {error}"
+                    ) from error
                 if np.any(progress[:, 3]):
                     code = int(progress[progress[:, 3] != 0, 3][0])
                     detail = (
