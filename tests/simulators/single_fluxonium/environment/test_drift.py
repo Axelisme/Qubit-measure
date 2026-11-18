@@ -1,5 +1,6 @@
 """Log-loss drift contracts with supplied times and independent RNG streams."""
 
+import gzip
 import json
 from contextlib import contextmanager
 from dataclasses import replace
@@ -10,20 +11,15 @@ import pytest
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import (
-    IntegratedRound,
     SimulationBinding,
     SimulationClock,
 )
 from zcu_tools.simulate.boundary import AcquireRequest, ReadoutWindow
-from zcu_tools.simulators.replay import read_replay, replay_paths
-from zcu_tools.simulators.single_fluxonium.config import (
-    SingleFluxoniumSettings,
-    parse_single_fluxonium,
-)
+from zcu_tools.simulate.evolution import capture_directory
+from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment import (
     SingleFluxoniumRuntimeOptions,
     SingleFluxoniumSource,
-    replay_round,
     single_fluxonium,
 )
 
@@ -80,13 +76,12 @@ def request_for(binding: SimulationBinding, sequence: int):
 
 
 @contextmanager
-def environment(config, root: Path, clock: SimulationClock, *, archive: bool = False):
+def environment(config, root: Path, clock: SimulationClock):
     env = single_fluxonium(
         config,
         soccfg=profile_soccfg("single_fluxonium"),
         clock=clock,
         truth_log=root / "truth.jsonl",
-        private_replay=root / "replay" if archive else None,
     )
     try:
         yield env
@@ -96,26 +91,24 @@ def environment(config, root: Path, clock: SimulationClock, *, archive: bool = F
         env.devices.close_all_devices()
 
 
-def integrated(result) -> IntegratedRound:
-    if not isinstance(result, IntegratedRound):
-        raise AssertionError("integrated acquisition must return statistics and raw")
-    return result
-
-
 @pytest.mark.sim
-def test_acquisition_freezes_loss_at_admission_and_replays_after_drift(tmp_path: Path):
+def test_acquisition_freezes_loss_at_admission_and_dumps_effective_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path / "capture-cache"))
     now = [100.0]
     clock = SimulationClock(monotonic=lambda: now[0])
-    with environment(drift_settings(), tmp_path, clock, archive=True) as env:
+    document = drift_settings().model_dump(mode="json")
+    document["numerics"]["debug_capture"] = True
+    with environment(parse_single_fluxonium(document), tmp_path, clock) as env:
         binding = env.soc.binding
-        results = []
         for sequence in range(2):
             with binding.acquire() as admitted_sequence:
                 assert admitted_sequence == sequence
                 admitted_time = now[0]
                 now[0] += 20.0  # Request construction must not move the sampling time.
                 request = request_for(binding, sequence)
-                results.append(integrated(binding.sample_round(request, 0)))
+                binding.sample_round(request, 0)
                 binding.sample_round(request, 1)
             truth = tmp_path / "truth.jsonl"
             assert truth.exists(), (
@@ -132,31 +125,21 @@ def test_acquisition_freezes_loss_at_admission_and_replays_after_drift(tmp_path:
         assert rows[1]["session"] == rows[0]["session"]
         for name in ("q_cap", "xqp", "aphi"):
             assert rows[1][name] != rows[0][name]
-        archives = [
-            (path, read_replay(path)) for path in replay_paths(tmp_path / "replay")
-        ]
-        assert len(archives) == 4
-        for _, saved in archives:
-            archived_settings = saved.acquire.settings
-            if not isinstance(archived_settings, SingleFluxoniumSettings):
-                pytest.fail("single-model replay must retain single-model settings")
-            assert archived_settings.drift is None
-            assert (
-                archived_settings.chip.qubit.q_cap
-                == rows[saved.acquire.request.sequence]["q_cap"]
-            )
-        archived = next(
-            path
-            for path, saved in archives
-            if saved.acquire.request.sequence == 0 and saved.round.index == 0
-        )
-        replayed = integrated(replay_round(archived))
-        np.testing.assert_array_equal(
-            replayed.statistics.channels[0].sums, results[0].statistics.channels[0].sums
-        )
-        np.testing.assert_array_equal(
-            replayed.raw.materialize(8, 0)[0], results[0].raw.materialize(8, 0)[0]
-        )
+    captures = list(capture_directory().glob("capture-*.json.gz"))
+    assert len(captures) == 2
+    observed = {}
+    for capture in captures:
+        with gzip.open(capture, "rt", encoding="utf-8") as stream:
+            metadata = json.load(stream)["metadata"]
+        effective = metadata["effective_settings"]
+        assert effective["drift"] is None
+        observed[metadata["sampling"]["sequence"]] = {
+            name: effective["chip"]["qubit"][name] for name in ("q_cap", "xqp", "aphi")
+        }
+    assert observed == {
+        sequence: {name: row[name] for name in ("q_cap", "xqp", "aphi")}
+        for sequence, row in enumerate(rows)
+    }
 
 
 @pytest.mark.sim

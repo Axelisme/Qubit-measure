@@ -495,11 +495,13 @@ for the lifecycle and event-log choices.
 
 ## Capture persistence
 
-`write_capture(buffer: CaptureBuffer) -> Path | None` snapshots records once
+`write_capture(buffer, *, metadata=None)` snapshots records once
 and publishes a new `capture-<uuid4 hex>.json.gz` file. Rewriting the same
 buffer keeps earlier records in a different file. An empty buffer produces
 a zero-record manifest, not None. Read it with `read_frozen_manifest(path)`.
-The existing frozen format and physical hashes do not change.
+Optional JSON `metadata` describes the whole capture and is readable in the
+manifest. `read_frozen_manifest` returns only the Engine records. The format
+version and physical hashes do not change.
 
 `capture_directory() -> Path` returns the absolute
 `<user-cache-root>/simulator-debug/v1` directory without creating it.
@@ -1343,9 +1345,8 @@ or `Engine.evolve` to resolve the current route.
 
 `SEGMENT_NUMERIC_VERSION` is `segment-engine-v9`. With the default `backend="auto"`,
 eligible `dop853` rows can use the mixed-precision GPU solver.
-`simulators.ftf.environment` owns private replay and checks backend, model,
-numerical, RNG and dependency versions before
-recomputing a round. Evolution does not persist densities or offline tables
+The numeric version is recorded in Engine captures and paired benchmark reports.
+Evolution does not persist densities or offline tables
 across processes or Engine lifetimes.
 
 ## Research records

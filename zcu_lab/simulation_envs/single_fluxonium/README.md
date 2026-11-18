@@ -113,7 +113,7 @@ a transition frequency or support fitting a spectral line. Use a small scan
 for those conclusions. Startup assembly and a framework acquire probe do not
 replace a separate GUI/MCP acceptance run.
 
-## Readout and replay limits
+## Readout limits
 
 A nonterminal readout block with an ADC trigger causes one projective read at
 its pulse start. The terminal readout block still ends evolution. An earlier
@@ -125,8 +125,12 @@ jumps during that read change its IQ only, not later evolution. See
 for trigger binding and layout rules, and [field-guide.md](field-guide.md) for
 basis, bath and line assumptions.
 
-Notebook authors can pass an absolute `private_replay` directory to
-`zcu_tools.simulators.single_fluxonium.environment.single_fluxonium`. The resource owner saves
-one immutable round reference and detached input content. Call the package's
-`replay_round(path)` to recompute that round. These archives contain model truth,
-not measured IQ, and belong outside ordinary GUI/RPC metadata.
+## Debug capture
+
+Set `numerics.debug_capture: true` and acquire again to investigate a simulation.
+Open that acquire's `capture-*.json.gz` under the `simulator-debug/v1` cache for
+Engine inputs, actual routing, effective settings and per-round DC values.
+If telemetry is enabled, match the manifest basename to `capture_file` in
+`routing-*.jsonl` for acquire timings and family totals.
+See the [environment's debug capture guide](../../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#debug-capture).
+Keep captures out of normal GUI/RPC metadata.

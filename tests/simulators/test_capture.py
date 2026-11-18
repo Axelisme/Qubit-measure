@@ -1,5 +1,6 @@
 """Three environments publish one capture at the admitted acquire boundary."""
 
+import gzip
 import json
 from contextlib import contextmanager
 from importlib import import_module
@@ -117,6 +118,48 @@ def telemetry_records(tmp_path):
         for path in (tmp_path / "telemetry").glob("routing-*.jsonl")
         for line in path.read_text().splitlines()
     ]
+
+
+@pytest.mark.parametrize(
+    "capture_environment", ["ftf", "single_fluxonium"], indirect=True
+)
+@pytest.mark.parametrize("fail_second_round", [False, True])
+def test_capture_records_effective_settings_and_each_attempt(
+    capture_environment, fail_second_round, tmp_path
+):
+    name, build = capture_environment
+    with build(telemetry=False) as (env, engines):
+        source_name = "bias" if name == "ftf" else "single_test_bias"
+        bias = env.create_device("FakeDevice", source_name)
+        bias.set_value(0.1)
+        identity = env.soc.binding.capture_snapshot().model_identity
+        program = capture_program(name, env)
+
+        def next_round(*_args, **_kwargs):
+            bias.set_value(0.3)
+            if fail_second_round:
+                engines[0].error = RuntimeError("second round failed")
+
+        if fail_second_round:
+            with pytest.raises(RuntimeError, match="second round failed"):
+                program.acquire(
+                    env.soc, rounds=2, round_hook=next_round, progress=False
+                )
+        else:
+            program.acquire(env.soc, rounds=2, round_hook=next_round, progress=False)
+
+    path = next(capture_directory().glob("capture-*.json.gz"))
+    with gzip.open(path, "rt", encoding="utf-8") as stream:
+        metadata = json.load(stream)["metadata"]
+    assert metadata["complete"] is not fail_second_round
+    assert metadata["effective_settings"]["numerics"]["seed"] == 123
+    assert metadata["effective_settings"]["numerics"]["time_scale"] == 0
+    assert metadata["sampling"] == {"root_seed": 123, "sequence": 0}
+    assert metadata["rounds"] == [
+        {"index": 0, "dc_values": {source_name: 0.1}, "model_identity": identity},
+        {"index": 1, "dc_values": {source_name: 0.3}, "model_identity": identity},
+    ]
+    assert telemetry_records(tmp_path) == []
 
 
 def test_acquire_capture_is_shared_and_published_before_telemetry(

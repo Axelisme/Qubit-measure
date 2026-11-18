@@ -464,7 +464,7 @@ MIST, flux away from zero, fast flux, long sequences, receiver background or
 other circuit parameters. Cavity thermal occupation zero does not mean the
 qubit bath is zero-temperature.
 
-Keep simulator truth and replay archives on the environment-validation side.
+Keep simulator truth and debug captures on the environment-validation side.
 GUI, MCP and operator analysis consume IQ, preparation labels and public
 diagnostics. They must not consume density matrices or model-internal populations.
 All results here are synthetic and are not hardware acceptance criteria.

@@ -147,8 +147,8 @@ class SixFluxoniumSource:
     source and the outer binding; None creates one. truth_log selects private
     JSONL output for enabled qubits, or a fresh six-fluxonium session directory.
     begin_acquire freezes losses once for every point/round; execute also admits
-    new standalone requests. Truth I/O failures propagate. No private replay is
-    provided. The caller retains device and injected clock ownership.
+    new standalone requests. Truth I/O failures propagate. The caller retains
+    device and injected clock ownership.
     history is borrowed by all six sources; None gives each ModelSource its own.
     families restricts every source's Engine, including projection continuations;
     unknown names raise on construction, unavailable domains raise on acquire.

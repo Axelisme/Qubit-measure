@@ -7,7 +7,8 @@ import pytest
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.boundary import ChargeDriveRequirement, RoundRequest
-from zcu_tools.simulators.ftf.environment import FTFSource, replay
+from zcu_tools.simulators.ftf.environment import FTFSource
+from zcu_tools.simulators.ftf.environment import template as template_module
 
 from tests.core._simulation import tick_array, ticks
 from tests.program._profiles import profile_soccfg
@@ -35,6 +36,36 @@ def test_open_acquire_rejects_unsupported_charge_requirements():
             source.open_acquire(requested)
     finally:
         source.close()
+
+
+def test_delivered_raw_keeps_its_round_after_eviction_and_close():
+    source = FTFSource(
+        settings().with_telemetry(enabled=False),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+    )
+    acquire = request()
+    try:
+        session = source.open_acquire(acquire)
+        result = session.sample_round(snapshot(), 2)
+        assert isinstance(result, IntegratedRound)
+        expected = {
+            channel: raw.tobytes()
+            for channel, raw in result.raw.materialize(
+                acquire.reps, acquire.avg_level
+            ).items()
+        }
+        source.preparation_cache.max_bytes = 0
+        source.open_acquire(replace(acquire, sequence=8)).sample_round(snapshot(), 3)
+    finally:
+        source.close()
+
+    delivered = result.raw.materialize(acquire.reps, acquire.avg_level)
+    assert {channel: raw.tobytes() for channel, raw in delivered.items()} == expected
+    for raw in delivered.values():
+        raw.fill(0)
+    again = result.raw.materialize(acquire.reps, acquire.avg_level)
+    assert {channel: raw.tobytes() for channel, raw in again.items()} == expected
 
 
 def draw(source, acquire=None, snap=None):
@@ -354,7 +385,7 @@ def test_changed_preparation_inputs_miss(change, monkeypatch):
                 }
             )
         elif change == "revision":
-            monkeypatch.setattr(replay, "BACKEND_VERSION", "changed-backend")
+            monkeypatch.setattr(template_module, "BACKEND_VERSION", "changed-backend")
         elif change == "engine":
             from zcu_tools.simulate.evolution import Engine
 
