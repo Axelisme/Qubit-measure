@@ -507,11 +507,13 @@ for the lifecycle and event-log choices.
 
 ## Capture persistence
 
-`write_capture(buffer: CaptureBuffer) -> Path | None` snapshots records once
+`write_capture(buffer, *, metadata=None)` snapshots records once
 and publishes a new `capture-<uuid4 hex>.json.gz` file. Rewriting the same
 buffer keeps earlier records in a different file. An empty buffer produces
 a zero-record manifest, not None. Read it with `read_frozen_manifest(path)`.
-The existing frozen format and physical hashes do not change.
+Optional JSON `metadata` describes the whole capture and is readable in the
+manifest. `read_frozen_manifest` returns only the Engine records. The format
+version and physical hashes do not change.
 
 `capture_directory() -> Path` returns the absolute
 `<user-cache-root>/simulator-debug/v1` directory without creating it.
@@ -1390,11 +1392,10 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v11`. It distinguishes the OpenCL
-DP5(4) rule from earlier results. The CPU tableau rule is unchanged.
-`simulators.ftf.environment` owns private replay and checks backend, model,
-numerical, RNG and dependency versions before
-recomputing a round. Evolution does not persist densities or offline tables
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v11`. This version includes the
+OpenCL DP5(4) route for eligible `dop853` rows. Engine captures and paired
+benchmark reports record the numeric version. Evolution does not persist
+densities or offline tables
 across processes or Engine lifetimes.
 
 ## Research records

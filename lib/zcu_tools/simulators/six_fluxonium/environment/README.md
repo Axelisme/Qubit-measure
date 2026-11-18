@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-17, acquire telemetry and optional capture publication
+**Last updated:** 2026-11-18
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -178,8 +178,7 @@ Builder `truth_log=Path(...)` selects another file. Rows include the shared sess
 Truth I/O errors propagate at admission. No truth enters Run, GUI, MCP or Labber
 metadata. Drift-off writes nothing. A new environment resets its clock offset and
 drift state. Equal roots and acquisition time sequences reconstruct each qubit's
-trajectory; six-fluxonium does not provide private acquisition replay.
-Single-fluxonium's pulse-only private replay contract is unchanged.
+trajectory.
 
 ## Bounded statistics
 

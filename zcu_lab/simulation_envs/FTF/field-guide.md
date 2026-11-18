@@ -165,11 +165,11 @@ Elapsed wall seconds 包含 snapshot、計算與補等耗時，失敗或取消�
 `qubit` 依序為 `f1`、`coupler`、`f2`，記錄 session UUID、simulated seconds、UTC wall time 與有效損耗。
 Coupler 的 `q_ind`、`xqp` 為 JSON `null`。關閉漂移不寫真值 log；寫檔錯誤會傳出，並非 warning 後繼續。
 
-若要改 log 位置或保存 private replay，使用 `ftf(..., acquisition=FTFAcquisitionOptions(...))`，
-不在 YAML 或 entry 加路徑。Replay 保存當次有效設定，`drift=None`，重播不依賴時鐘或原 YAML。
-真值與 replay 檔案不進一般 Run／GUI／MCP metadata，路徑與保留期限由呼叫者管理。
-參數與 replay 格式見 [acquisition 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)
-及 [private replay](../../../lib/zcu_tools/simulators/ftf/environment/README.md#private-replay)。
+用 `ftf(..., acquisition=FTFAcquisitionOptions(truth_log=...))` 更改真值 log 位置，不在 YAML 或 entry 加路徑。
+開啟 `numerics.debug_capture` 也能在 manifest 看到當次有效設定，包括凍結的損耗。
+真值 log 與 capture 不進一般 Run／GUI／MCP metadata。
+見 [acquisition 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)
+及 [Debug capture](../../../lib/zcu_tools/simulators/ftf/environment/README.md#debug-capture)。
 
 ## Design：設計初猜
 
