@@ -325,7 +325,7 @@ class CaptureRun:
                 item["decision"] = decision
                 item["spots"] = spots
             else:
-                item = {
+                admission: CaptureSampledAdmission = {
                     "rows": [
                         {"batch": key.batch, "point": key.point, "segment": key.segment}
                         for key in (self.keys[row] for row in group.rows)
@@ -333,9 +333,9 @@ class CaptureRun:
                     "decision": decision,
                     "spots": spots,
                 }
-                self._sampled[first] = item
+                self._sampled[first] = admission
                 self.metadata[self.keys[first].batch]["sampled_rwa_admissions"].append(
-                    item
+                    admission
                 )
 
     def prefix(

@@ -395,9 +395,11 @@ def test_default_empty_and_warm_history_density(
             assert error <= 2e-3, f"{name}/{state}: density error {error:.9g} > 2e-3"
 
 
+# Against CPU DP5(4), funding the same DOP853 probes takes three copies
+# of each isolated 384 ns phase and two copies of the two-amplitude sequence.
 @pytest.mark.parametrize(
     "name, expected_spots, copies",
-    [("cheap_sampled_separated", 2, 2), ("sampled_multitone_phase_sequence", 6, 1)],
+    [("cheap_sampled_separated", 2, 3), ("sampled_multitone_phase_sequence", 6, 2)],
 )
 def test_sampled_multitone_rejects_each_failed_group(
     name: str,
