@@ -8,8 +8,8 @@ from ..secular import SecularModel
 from ._dop853_data import pack_models, pack_segments
 from .dop853 import DOP853Plan, EndpointData, advance_endpoints
 
-# One density trajectory per phase pair. Include (0, 0) and off-grid pairs;
-# sample all four quarter turns on each axis without taking the full product.
+# One density trajectory per phase pair. Sample all four quarter turns on
+# each axis; only (0, 0) is on the 5×6 endpoint grid.
 SPLIT_PHASES = (np.pi / 2) * np.array([[0, 0], [1, 2], [2, 3], [3, 1]])
 SPLIT_PHASES.setflags(write=False)
 SPLIT_REFERENCE_BUDGET = 1e-8  # DOP853 local rtol/atol 3e-10/3e-12

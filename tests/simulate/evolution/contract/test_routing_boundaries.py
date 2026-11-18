@@ -157,19 +157,23 @@ def test_profitable_gate_is_offered_using_complete_inventory(shared: bool) -> No
             assert guards["multitone_gate"] == "deferred"
 
 
-def test_profitable_neighbor_does_not_pay_another_keys_build() -> None:
-    """A large acquire does not amortize its rare, distinct physics key."""
-    case = _joint_gate_case(4096)
+def test_moderate_gate_reuse_pays_only_its_own_build() -> None:
+    """A moderate count can repay one cold build, but not a distinct key's build."""
+    count = 64
+    case = _joint_gate_case(count)
     rare = _joint_gate_case(1).batch
     rare = replace(
         rare,
-        points=np.array([4096]),
+        points=np.array([count]),
         tracks=tuple(
             replace(track, amplitude=track.amplitude * 1.1) for track in rare.tracks
         ),
     )
     with closing(Engine(1, families=("multitone_gate", "dop853"))) as engine:
+        result = engine.evolve(case.source, (case.batch, rare), telemetry=True)
         query = engine.inspect_dispatch(case.source, (case.batch, rare))
+    assert result.paths.segments_by_kernel == {"multitone_gate": count, "dop853": 1}
+    assert result.paths.routing["multitone_gate"].rejected_rows == 0
     rare_rows = [row for row in query.rows if row.key.batch == 1]
     assert len(rare_rows) == 1
     assert rare_rows[0].family == "dop853"

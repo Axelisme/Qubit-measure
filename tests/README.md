@@ -191,12 +191,10 @@ uv run --directory <worktree> --no-sync -- \
 矩陣用 `Engine(1, families=(family,)).evolve(...)` 固定可用 family，
 再從 `paths.segments_by_kernel` 確認實際路徑。
 17 個 family 都有 pinned density 案例，預期 family 沒有執行任何 segment 時獨立失敗。
-`multitone_gate` 的 `test_multitone_gate_dual_phase_density` 驗 Gaussian、flat-top 與 DRAG。
-每種包絡跑 1 次或 7 次，重複時涵蓋固定與獨立變化的雙相位，完整 density 對同一 oracle。
-`test_multitone_gate_sampled_upgrade_density` 驗需要升級的任意實數取樣 key，重複 7 次且雙相位各自變化。
-`test_multitone_gate_mixed_phase_keys_density` 在同次 evolve 混合不同解析度的 key 與 constant+sampled pair。
-高 gain 案例移除 bath，從 `Engine.evolve` 驗終階相位解析仍不足時的 `NoValidKernel.attempted`。
-強 bath 案例驗 split 缺陷拒收。另一個 bath 案例用同一 key 驗預設 budget 放行、完整 density 符合 oracle，收緊 budget 時拒收。
+`multitone_gate` 的 `test_multitone_gate_dual_phase_density` 驗 Gaussian、sampled、flat-top 與 DRAG。
+每種包絡跑 1 次或 7 次，重複時涵蓋固定與獨立變化的雙相位，完整 density 對獨立參考解。
+`test_multitone_gate_mixed_phase_keys_density` 在同次 evolve 驗不同波形的 key，包含 constant+sampled pair。
+強 bath 案例驗 pinned split 缺陷拒收。另一案例讓比價勝出的 key 因 split 拒收，並實際執行合格的 DOP853。另一個 bath 案例用同一 key 驗預設 budget 放行、完整 density 符合 oracle，收緊 budget 時拒收。
 共振雙 tone 案例固定門檻下限，驗較大的 budget 下 gate 可取代精度相近的 DOP853，收緊 budget 後則拒收。
 這些小模型案例不代表長序列已通過精度或速度驗收。
 Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生誤差觀察值。

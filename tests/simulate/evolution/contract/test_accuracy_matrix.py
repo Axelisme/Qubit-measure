@@ -146,17 +146,23 @@ def test_pinned_family_density(
     assert error <= 2e-3, f"{name}/{family}: density error {error:.9g} > 2e-3"
 
 
-@pytest.mark.parametrize("shape", ["gaussian", "flat_top", "drag"])
+@pytest.mark.parametrize(
+    "shape,gain",
+    [("gaussian", 0.6), ("sampled", 0.6), ("flat_top", 0.5), ("drag", 0.5)],
+)
 @pytest.mark.parametrize("repeats,varying_phases", [(1, True), (7, False), (7, True)])
 def test_multitone_gate_dual_phase_density(
     shape: str,
+    gain: float,
     repeats: int,
     varying_phases: bool,
     request: pytest.FixtureRequest,
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
     """A checked full-drive key plays once or repeatedly at independent phases."""
-    case = multitone_phase_case(shape, repeats, varying_phases=varying_phases)
+    case = multitone_phase_case(
+        shape, repeats, varying_phases=varying_phases, gain=gain
+    )
     reference = matrix_reference(case)
     with closing(Engine(1, families=("multitone_gate",))) as engine:
         result = engine.evolve(case.source, (case.batch,))
@@ -172,24 +178,14 @@ def test_multitone_gate_dual_phase_density(
     assert error <= 2e-3
 
 
-def test_multitone_gate_sampled_upgrade_density() -> None:
-    """A phase-demanding sampled key remains accurate across seven dual phases."""
-    case = multitone_phase_case("sampled", 7, gain=2.0)
-    with closing(Engine(1, families=("multitone_gate",))) as engine:
-        result = engine.evolve(case.source, (case.batch,))
-    require_families(result.paths, ("multitone_gate",))
-    reference = converged_reference(case.source, case.batch)
-    assert density_error(result.densities, reference.density) <= 2e-3
-
-
 def test_multitone_gate_mixed_phase_keys_density(
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
-    """One evolve plays easy, phase-demanding and constant+sampled keys together."""
+    """One evolve plays distinct waveform keys, including a constant+sampled pair."""
     cases = (
         multitone_phase_case("gaussian", 7),
-        multitone_phase_case("sampled", 7, gain=2.0),
-        multitone_phase_case("constant_sampled", 7),
+        multitone_phase_case("sampled", 7),
+        multitone_phase_case("constant_sampled", 7, gain=0.5),
     )
     batches = tuple(
         replace(case.batch, points=np.array([point]))
@@ -231,6 +227,21 @@ def test_multitone_gate_rejects_large_split_defect() -> None:
     assert "multitone_gate" in rejected.value.attempted
 
 
+def test_multitone_gate_split_refusal_executes_the_direct_fallback() -> None:
+    """A reused shaped key can lose on density admission, not on cold price."""
+    repeats = 160
+    case = multitone_phase_case("flat_top", repeats, gain=0.55)
+    with (
+        closing(Engine(1, families=("multitone_gate", "dop853"))) as engine,
+        closing(Engine(1, families=("dop853",))) as direct,
+    ):
+        result = engine.evolve(case.source, (case.batch,), telemetry=True)
+        expected = direct.evolve(case.source, (case.batch,))
+    assert result.paths.segments_by_kernel == {"dop853": repeats}
+    assert result.paths.routing["multitone_gate"].rejected_rows == repeats
+    assert density_error(result.densities, expected.densities) <= 1e-9
+
+
 def test_multitone_gate_split_admission_tightens_with_budget() -> None:
     """The same dissipative key can fit the default budget but not a tighter one."""
     case = _with_gate_bath(multitone_phase_case("gaussian", 7), 100)
@@ -269,7 +280,7 @@ def test_multitone_gate_can_match_less_accurate_direct_fallback() -> None:
     )
     tracks = tuple(
         drive_track(idle, envelope, frequency=frequency, gain=gain, port=port)
-        for port, gain in (("a", 0.2), ("b", 0.003))
+        for port, gain in (("a", 0.2), ("b", 0.001))
     )
     batch = replace(idle, tracks=tracks)
     with (
@@ -286,24 +297,6 @@ def test_multitone_gate_can_match_less_accurate_direct_fallback() -> None:
         with pytest.raises(NoValidKernel) as rejected:
             engine.evolve(source, (batch,), budget=1e-3)
         assert "multitone_gate" in rejected.value.attempted
-
-
-def test_multitone_gate_rejects_unresolved_dual_phase_key() -> None:
-    """Strong phase dependence fails validation even without a secular split error."""
-    case = multitone_phase_case("gaussian", 1, gain=20)
-    model = case.source.model((0,))
-    # Remove dissipation so the high-gain refusal is phase resolution, not D/U splitting.
-    source = coherent_source(
-        replace(model, rates_per_ns=np.zeros((3, 3)), dephasing_per_ns=np.zeros((3, 3)))
-    )
-    with (
-        closing(Engine(1, families=("multitone_gate",))) as engine,
-        pytest.raises(NoValidKernel) as rejected,
-    ):
-        engine.evolve(source, (case.batch,))
-    assert rejected.value.domain == "multiple"
-    assert rejected.value.attempted == ("multitone_gate",)
-    assert rejected.value.points == (0,)
 
 
 @pytest.mark.parametrize("family", EDGE_FAMILIES)
