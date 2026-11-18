@@ -24,8 +24,13 @@ from ._rwa_gate import canonical_keys
 from ._secular import coherence_decay, split_step
 from ._workload_facts import fixed_flux
 
-# Initial small-model calibration: ordinary keys measure below 4e-7, a
-# Gaussian with 100x bath measures 1.60e-5, and 4000x bath measures 5.41e-4.
+# At budget 1e-3, reserve a tenth for this sampled split check. The fixed FTF
+# depth-500 Gaussian and sampled X90 pair keys (32 states, 100 ns) measure
+# 3.04e-5 and 3.64e-5 against tight full-Lindblad endpoints. Tightening the
+# reference budget from 1e-8 to 1e-9 changes either endpoint by less than 5e-10.
+# The 1e-4 threshold clears both, plus the small Gaussian 100x-bath control
+# (1.60e-5), but rejects the 4000x-bath control (5.41e-4). Tighter Engine
+# budgets scale the threshold down; larger budgets cannot relax it.
 _SPLIT_BUDGET_FRACTION = 0.1
 
 

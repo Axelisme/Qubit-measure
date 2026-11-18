@@ -685,18 +685,19 @@ Cold-cost choices use the complete acquire inventory rather than resident cache
 warmth. Prefix and worker subsets share those choices. `multitone_gate` pays
 guard + first-stage construction/current-acquire key uses + apply. Construction
 includes the 9×10 nodes, 64 phase validation probes, Fourier fitting and four
-full Lindblad split probes. A phase validation upgrade is not prepaid. The gate must beat the eligible direct/RWA alternatives
-before its numerical guard builds anything. RWA keeps its existing history-based
-cold price; gate amortization never reads history.
+full Lindblad split probes. A phase validation upgrade is not prepaid. The
+price must beat the eligible direct/RWA alternatives before the guard builds
+anything. RWA keeps its history-based cold price; gate amortization never reads
+history.
 
 Gate construction expires after each evolve. A fixed 20-use preference would
 become stale when construction costs or `dop853` speed change. The price now
 follows their work estimates. Phase construction uses a coefficient fitted to
 four fixed-FTF X90/CZ keys at 32 states. Those phase build estimates differ from
-measured CPU times by about -16% to +16%. Per-row guard and playback terms
-remain work assumptions, not separately measured FTF timings. Numerical approximations
-retain their own admission limits. They do not certify arbitrary-input or
-whole-sequence accuracy.
+measured CPU times by about -16% to +16%. The same two X90 keys calibrate the
+split price: their four probes take 4.80 and 7.62 CPU seconds per key. Per-row
+guard and playback terms remain work estimates. Neither guard certifies
+arbitrary-input or whole-sequence accuracy.
 
 Historical calibration note for [slow-envelope propagation](kernels/slow_envelope.py):
 the calibrated population tolerance is 1e-2, with about 1e-4 or less measured on
