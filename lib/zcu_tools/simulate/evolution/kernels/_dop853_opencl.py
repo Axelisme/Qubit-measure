@@ -15,7 +15,6 @@ from numpy.typing import NDArray
 
 from ..._numba_cache import user_cache_root
 from ._dop853 import (
-    DP54_MIN_BUDGET,
     DP54_TOLERANCE_DIVISOR,
     ROW_INITIAL_STEP_NS,
     Tolerances,
@@ -118,22 +117,19 @@ class OpenCLBackend:
             runner = self._runner
         return "cpu" if runner is None else runner.execution_device
 
-    def failure(self, dimension: int, budget: float) -> str | None:
-        """Return an observed probe or build failure for this dimension and budget."""
-        return self._probe_failure or self._build_failures.get(
-            (dimension, budget >= DP54_MIN_BUDGET)
-        )
+    def failure(self, dimension: int, *, dp54: bool) -> str | None:
+        """Return an observed probe or build failure for this dimension and tableau."""
+        return self._probe_failure or self._build_failures.get((dimension, dp54))
 
-    def candidate(self, dimension: int, budget: float) -> OpenCLDOP853 | None:
+    def candidate(self, dimension: int, *, dp54: bool) -> OpenCLDOP853 | None:
         """Detect on the first eligible row and read the chosen variant's failures.
 
         Workers can reach this together. Detection does not compile unpriced
         point programs. A forced backend has already passed device detection
         and does not consult cached compiler rejections for point programs.
         """
-        dp54 = budget >= DP54_MIN_BUDGET
         key = (dimension, dp54)
-        if self.failure(dimension, budget) is not None:
+        if self.failure(dimension, dp54=dp54) is not None:
             return None
         if self.forced or key in self._build_failures:
             return self._runner
@@ -164,16 +160,15 @@ class OpenCLBackend:
         else:
             self._runner = runner
 
-    def prepare(self, dimension: int, budget: float) -> OpenCLDOP853 | None:
+    def prepare(self, dimension: int, *, dp54: bool) -> OpenCLDOP853 | None:
         """Build an auto wave's dimension/tableau variant before running any point.
 
         Called after workers have joined. A failed auto build disables only
         this variant. A forced runner keeps its build errors in point apply.
         """
-        runner = self.candidate(dimension, budget)
+        runner = self.candidate(dimension, dp54=dp54)
         if runner is None or self.forced:
             return runner
-        dp54 = budget >= DP54_MIN_BUDGET
         failure = runner.compile_variant(dimension, dp54=dp54)
         if failure is not None:
             self._build_failures[dimension, dp54] = failure

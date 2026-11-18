@@ -132,7 +132,11 @@ def stub_opencl(monkeypatch: pytest.MonkeyPatch) -> str:
             *,
             dp54: bool,
         ) -> np.ndarray:
-            return states
+            # Encode the device's actual tableau argument in a normalized endpoint.
+            endpoints = np.zeros_like(states)
+            marker = 1 if dp54 else 0
+            endpoints[:, marker, marker] = 1
+            return endpoints
 
         def close(self) -> None:
             pass
@@ -150,23 +154,31 @@ def stub_opencl(monkeypatch: pytest.MonkeyPatch) -> str:
         pytest.param(1e-3, True, id="inclusive-budget"),
     ],
 )
+@pytest.mark.parametrize("case_name", ["sampled_gaussian_9", "cpu_dp54_two_tone_960"])
 def test_opencl_dop853_selects_tableau_by_budget(
-    stub_opencl: str, budget: float, dp54: bool
+    stub_opencl: str, budget: float, dp54: bool, case_name: str
 ) -> None:
-    case = accuracy_case("sampled_gaussian_9")
+    case = (
+        accuracy_case(case_name)
+        if case_name == "sampled_gaussian_9"
+        else cpu_dp54_case(case_name)
+    )
     with (
         closing(case.source),
         closing(Engine(1, backend="opencl", families=case.families)) as engine,
     ):
-        paths = engine.evolve(
+        result = engine.evolve(
             case.source, (case.batch,), budget=budget, telemetry=True
-        ).paths
+        )
 
-    assert paths.execution_device == stub_opencl
-    report = paths.routing["dop853"]
+    assert result.paths.execution_device == stub_opencl
+    report = result.paths.routing["dop853"]
     assert report.opencl_rows == len(case.batch.points)
     assert report.dp54_rows == (report.opencl_rows if dp54 else 0)
     assert report.dop853_rows == (0 if dp54 else report.opencl_rows)
+    # Telemetry alone can agree with the plan while the runner gets the wrong flag.
+    marker = 1 if dp54 else 0
+    np.testing.assert_array_equal(result.densities[:, marker, marker], 1)
 
 
 def test_explicit_opencl_raises_during_construction_without_a_device(

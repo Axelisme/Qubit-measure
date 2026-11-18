@@ -155,11 +155,8 @@ def test_cpu_dp54_density(name: str, request: pytest.FixtureRequest) -> None:
         report = result.paths.routing["dop853"]
         assert report.dp54_rows == len(case.batch.points)
         assert report.dop853_rows == 0
-        # At the 10 µs edge the adaptive, knot-stopped reference need not
-        # take 200,000 steps at each tolerance just to obey the default ceiling.
-        max_step_ns = 0.5 if name == "cpu_dp54_duration_edge" else 0.05
         reference = interaction_reference(
-            case.source, case.batch, max_step_ns=max_step_ns
+            case.source, case.batch, max_step_ns=case.interaction_max_step_ns
         )
     error = density_error(result.densities, reference.density)
     request.node.user_properties.append(
@@ -176,7 +173,7 @@ def test_cpu_dp54_density(name: str, request: pytest.FixtureRequest) -> None:
     ("name", "budget", "dp54"),
     [
         *(pytest.param(name, 1e-3, True, id=name) for name in OPENCL_CASES),
-        pytest.param("cpu_dp54_ftf_960", 1e-3, True, id="ftf_960"),
+        pytest.param("cpu_dp54_two_tone_960", 1e-3, True, id="synthetic-two-tone-960"),
         pytest.param("cpu_dp54_duration_edge", 1e-3, True, id="duration_edge"),
         pytest.param("sampled_gaussian_9", 0.999e-3, False, id="tight-budget"),
     ],
@@ -205,9 +202,8 @@ def test_opencl_dop853_density(
         densities = result.densities
         assert np.max(np.abs(densities - densities.conj().swapaxes(-1, -2))) <= 1e-10
 
-        max_step_ns = 0.5 if name == "cpu_dp54_duration_edge" else 0.05
         reference = interaction_reference(
-            case.source, case.batch, max_step_ns=max_step_ns
+            case.source, case.batch, max_step_ns=case.interaction_max_step_ns
         )
         assert reference.convergence_error <= 2e-6
         with closing(Engine(1, backend="cpu", families=families)) as engine:

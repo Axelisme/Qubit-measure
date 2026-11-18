@@ -3,7 +3,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from functools import partial
-from pathlib import Path
 
 import numpy as np
 from zcu_tools.simulate.evolution import (
@@ -18,8 +17,6 @@ from zcu_tools.simulate.evolution import (
     SecularDrive,
     SecularModel,
     TimelineBatch,
-    read_frozen_manifest,
-    read_physical_input,
 )
 from zcu_tools.simulate.fluxonium import (
     DispersiveResonator,
@@ -37,8 +34,9 @@ class AccuracyCase:
 
     source owns model/history state; batch contains all points. families lists
     independent pinned targets. idle_family names the undriven companion needed
-    alongside each target; None means no idle companion. These declarations are
-    test expectations, not per-segment Engine routing.
+    alongside each target; None means no idle companion. interaction_max_step_ns
+    is the independent interaction-picture reference step ceiling, in ns.
+    These declarations are test expectations, not per-segment Engine routing.
     """
 
     name: str
@@ -46,6 +44,7 @@ class AccuracyCase:
     batch: TimelineBatch
     families: tuple[str, ...]
     idle_family: str | None = None
+    interaction_max_step_ns: float = 0.05
 
 
 DISSIPATIVE_DC_CASES = ("dephasing_pump", "raman_decay", "raman_weak_legs")
@@ -424,40 +423,46 @@ def _opencl_case(name: str) -> AccuracyCase:
 
 CPU_DP54_CASES = (
     "cpu_dp54_short_sampled",
-    "cpu_dp54_ftf_960",
+    "cpu_dp54_two_tone_960",
     "cpu_dp54_duration_edge",
 )
 
 
 def cpu_dp54_case(name: str) -> AccuracyCase:
-    """Build a sampled CPU dop853 accuracy case with a fresh source.
+    """Build a synthetic sampled dop853 accuracy case with a fresh source.
 
-    The synthetic cases use one coherent three-level point and nine knots at
-    100 or 10,000 ns. The FTF input is the high-gain simultaneous-drive point
-    with 24 retained states and 960 actual compiler envelope samples per tone.
-    Its idle tail needs t4. Unknown names raise ValueError.
+    Each case plays two tones on one coherent point. The 100 ns, 24-level
+    case uses 960 knots per tone; the 3-level cases use nine knots at 100 or
+    10,000 ns. Unknown names raise ValueError.
     """
-    if name == "cpu_dp54_ftf_960":
-        fixture = Path(__file__).parent / "data" / "cpu_dp54_ftf_960.json.gz"
-        (record,) = read_frozen_manifest(fixture)
-        frozen = read_physical_input(record.physical)
-        return AccuracyCase(name, frozen.source, frozen.batch, ("dop853",), "t4")
     if name not in CPU_DP54_CASES:
         raise ValueError(f"unknown CPU DP5(4) case: {name}")
-    duration = 100.0 if name == "cpu_dp54_short_sampled" else 10_000.0
-    times = np.linspace(0.0, duration, 9)
+    dense = name == "cpu_dp54_two_tone_960"
+    duration_edge = name == "cpu_dp54_duration_edge"
+    duration = 10_000.0 if duration_edge else 100.0
+    times = np.linspace(0.0, duration, 960 if dense else 9, endpoint=not dense)
     samples = np.exp(-0.5 * ((times - duration / 2) / (duration / 6)) ** 2)
     envelope = EnvelopeSpec("sampled", samples.astype(np.complex128), times)
+    second = (
+        EnvelopeSpec(
+            "sampled", (1 + 0.3j) * np.sin(np.pi * times / duration) ** 2, times
+        )
+        if dense
+        else envelope
+    )
     batch = timeline(1, duration)
     tracks = (
         drive_track(batch, envelope, frequency=0.129, gain=0.003),
-        drive_track(batch, envelope, frequency=0.17, gain=-0.007),
+        drive_track(batch, second, frequency=0.17, gain=-0.007),
     )
     return AccuracyCase(
         name,
-        coherent_source(synthetic_model()),
+        coherent_source(synthetic_model(24 if dense else 3)),
         replace(batch, tracks=tracks),
         ("dop853",),
+        # At 10 µs the adaptive, knot-stopped oracle does not need 200,000
+        # steps at each tolerance just to obey the default ceiling.
+        interaction_max_step_ns=0.5 if duration_edge else 0.05,
     )
 
 

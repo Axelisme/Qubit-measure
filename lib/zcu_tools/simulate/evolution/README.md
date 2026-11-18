@@ -204,7 +204,9 @@ reason in `opencl_detection_error`. GPU execution errors raise without a CPU ret
 One work-group integrates one row on device. At budgets ≥ `1e-3`, eligible
 rows use DP5(4) with one third of the DOP853 local tolerances. Every eligible
 row is at most 10 µs, so it meets the same duration limit as CPU DP5(4).
-Tighter budgets retain DOP853. The GPU computes
+Tighter budgets retain DOP853. Dispatch selects the OpenCL tableau once per
+`evolve` call. Pricing, program lookup and build, execution and routing
+telemetry use that same choice. The GPU computes
 the starting interaction-frame phasor of each step in FP64 and uses FP32
 within the step. Before handing off the density, the runner returns it to the
 model eigenbasis, symmetrizes it and normalizes its trace. The scheduler
@@ -1009,13 +1011,14 @@ before the division. DP5(4) uses a fifth-order controller exponent (`-1/5`).
 Both CPU tableaux share the adaptive loop, frames, workspace and knot stops.
 
 The [CPU matrix](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
-checks a 100 ns sampled row, an FTF d=24 simultaneous-drive point with
-960 samples per tone, and a sampled row exactly at 10 µs. It confirms DP5(4)
-through routing telemetry and compares every complex density entry at readout
-to the independent two-tolerance interaction-frame Lindblad reference.
-The OpenCL matrix uses the same FTF point and duration edge, plus synthetic
-sampled cases and a tighter-budget DOP853 control. It checks the actual GPU
-row and tableau counts, then compares full density to the independent reference.
+checks a 100 ns sampled row, a synthetic d=24 two-tone row with 960 knots per
+tone, and a sampled row exactly at 10 µs. It confirms DP5(4) through routing
+telemetry and compares every complex density entry at readout to the independent
+two-tolerance interaction-frame Lindblad reference. The OpenCL matrix shares
+the synthetic 960-knot case and duration edge, plus other sampled cases and a
+tighter-budget DOP853 control. It checks GPU row and tableau counts and compares
+full density to the same reference solver. The [FTF discussion](../../../../docs/discussions/2026-11-18-short-dop853-dp54.md)
+records the separate evidence from real FTF workloads.
 
 These measurements cover the linked inputs, not every input admitted by a
 guard. Historical population calibrations, omission proxies and local solver
@@ -1072,12 +1075,12 @@ does not certify the adiabatic approximation.
   one family in one evolve. Floquet stores admissions and retained equations;
   the direct solvers store frame or chain decisions. Plans never enter
   persistent kernel state.
-- `KernelContext(source, budget, work_plan, opencl)` supplies preparation, key
-  and guard calls with one evolve owner and an optional OpenCL backend.
-  `ApplyContext(budget, plan, work_plan, opencl)` supplies the finite positive
-  per-segment allowance, the family's plan and an optional runner for a batch
-  of admitted OpenCL rows. Floquet and both CPU direct solvers require their own
-  plan; a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
+- `KernelContext` supplies preparation, key and guard calls with one evolve
+  owner. For OpenCL it also carries the backend and dispatch's tableau choice.
+  `ApplyContext` supplies the finite positive per-segment allowance and the
+  family's CPU plan or, for admitted OpenCL rows, the runner and selected
+  tableau. Floquet and both CPU direct solvers require their own plan; a missing
+  plan raises `ValueError`, and a wrong family type raises `TypeError`.
   Families without plans, including `single_tone_rwa`, `multitone_rwa`,
   `single_tone_gate` and `multitone_gate`, reject a non-`None` plan with `ValueError`.
 

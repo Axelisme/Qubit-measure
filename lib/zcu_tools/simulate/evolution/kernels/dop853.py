@@ -348,6 +348,9 @@ class DOP853Kernel:
     ) -> NDArray[np.bool_]:
         """Advance independent rows or consecutive same-timeline intervals.
 
+        Supply this kernel's prepared models and the segment table they cover.
+        rows selects global segment IDs; key_index and the writable states
+        array align with rows and select the models and input densities.
         Rows chain when their time supports touch within 1e-9 ns. A chain's
         first states slot supplies its input; each slot receives that interval's
         endpoint in its own model eigenbasis. Later input slots are ignored.
@@ -363,13 +366,15 @@ class DOP853Kernel:
         secular dissipator, then return to model eigenbasis. Each row keeps its
         own adaptive step controller and original normalized RMS error norm,
         independent of the other rows in the call. There is no gain grouping or
-        pooled RMS. The CPU plan selects DP5(4) for rows within its calibrated
-        duration and budget bounds; OpenCL always uses DOP853. Each interval
-        uses the complete row's tolerances; this is
-        local control, not a new end-to-end error bound. No adaptive history
-        carries between intervals, rows or calls, so row order and worker/apply partition
-        do not change an independent row's numerical path, including mixed
-        IP/lab calls. Every row in a touching chain retains the lab-frame
+        pooled RMS. On CPU, context.plan specifies the frame, chain and
+        DP5(4) mask; unmarked rows use DOP853. On OpenCL, context.opencl
+        supplies the device runner and tableau for the entire admitted batch,
+        with no CPU plan required. DP5(4) divides both DOP853 tolerances by
+        three on either device. Each interval uses the complete row's local
+        tolerances derived from context.budget, not an end-to-end error bound.
+        No adaptive history carries between intervals, rows or calls. Row order
+        and worker/apply partition do not change an independent row's numerical
+        path, including mixed IP/lab calls. Every row in a touching chain retains the lab-frame
         runner, with local tolerances capped by budget divided by accumulated
         bare spectral phase. This prevents local GHz integration error from
         becoming a biased waiting frequency. Dispatch fixes
@@ -377,18 +382,19 @@ class DOP853Kernel:
         those decisions even when a prepared-payload boundary splits a chain.
         No RWA, drive truncation, splitting or envelope changes are made.
 
-        Raises ValueError for incompatible prepared data, state/index shapes or
-        nonexistent ports. RuntimeError signals numerical failure; earlier rows
-        may already have been advanced. A context with an OpenCL runner must
-        contain only pre-admitted independent rows, and needs no CPU plan.
-        OpenCL endpoints are symmetrized and normalized for handoff; CPU
+        Raises ValueError for a missing CPU plan, incompatible prepared data,
+        invalid state/index shapes or prepared indices, or absent ports.
+        Raises TypeError for another family's CPU plan. RuntimeError
+        signals a numerical or OpenCL execution failure; earlier rows may have
+        advanced. A context with an OpenCL runner accepts only pre-admitted
+        independent rows. OpenCL endpoints are symmetrized and normalized; CPU
         endpoints are unmodified. Neither clips.
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
-        runner = context.opencl
+        opencl = context.opencl
         cpu_plan = None
-        if runner is None:
+        if opencl is None:
             plan = context.plan
             if plan is None:
                 raise ValueError("DOP853 requires a row plan")
@@ -415,9 +421,8 @@ class DOP853Kernel:
         if cpu_plan is not None:
             advance_endpoints(data, (rows, key_index), states, budget, cpu_plan)
             _report_cpu_tableaux(context, self.name, cpu_plan, rows)
-        if runner is not None:
-            # OpenCL admission already bounds duration to at most 10 µs.
-            dp54 = budget >= DP54_MIN_BUDGET
+        if opencl is not None:
+            runner, dp54 = opencl
             states[:] = runner.advance(
                 data, (rows, key_index), states, budget, dp54=dp54
             )

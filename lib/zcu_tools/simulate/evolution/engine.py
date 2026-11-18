@@ -780,6 +780,7 @@ class Engine:
         """
         from ._capture import CaptureRun
         from ._dispatch import classify, create_work_plan
+        from ._dop853_dispatch import with_opencl
         from ._input_key import input_key
         from ._planning import plan
         from ._prefix import PrefixResolver
@@ -834,7 +835,7 @@ class Engine:
                     geometry = PrefixResolver(
                         geometry, kernels, context, cancel, capture=capture_run
                     ).resolve(pool, self._chunks)
-                    context = replace(context, opencl=self._opencl)
+                    context = with_opencl(context, self._opencl)
                     dispatch = classify(
                         geometry,
                         kernels,

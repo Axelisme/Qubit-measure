@@ -1,11 +1,13 @@
 """Timeline-wide frame and chain decisions for the direct solvers."""
 
+from dataclasses import replace
+
 import numpy as np
 from numpy.typing import NDArray
 
-from .kernel import RowPlan, SegmentTable
+from .kernel import KernelContext, RowPlan, SegmentTable
 from .kernels._dop853 import DP54_MIN_BUDGET
-from .kernels._dop853_opencl import ROWS_PER_BATCH
+from .kernels._dop853_opencl import ROWS_PER_BATCH, OpenCLBackend
 from .kernels.dop853 import DOP853Plan, cpu_dp54_rows
 from .kernels.flux_dop853 import FluxDOP853Plan
 
@@ -16,6 +18,19 @@ _MAX_OPENCL_DURATION_NS = 10_000.0
 # Arc d=24/d=32 simultaneous-drive medians were 0.68/0.61 of DOP853 wall.
 # Use the slower factor for matrix work, not for launch or per-trial floors.
 _DP54_GPU_WORK_SCALE = 0.68
+
+
+def with_opencl(context: KernelContext, backend: OpenCLBackend | None) -> KernelContext:
+    """Attach the optional timeline backend and choose its evolve-wide tableau.
+
+    OpenCL admission already caps every eligible row at 10 µs. Only the
+    budget distinguishes the tableaus on that backend (ADR-0078).
+    """
+    return replace(
+        context,
+        opencl=backend,
+        opencl_dp54=backend is not None and context.budget >= DP54_MIN_BUDGET,
+    )
 
 
 def opencl_rows(
@@ -98,6 +113,7 @@ def opencl_preferred(
     workers: int,
     *,
     budget: float,
+    dp54: bool,
 ) -> bool:
     """Compare CPU and GPU wall prices for one acquire-wide ready wave.
 
@@ -106,7 +122,7 @@ def opencl_preferred(
     For an available device, the price uses the acquire work and worker width,
     not Engine or disk cache warmth or measured wall time. Calibrated on Arc
     for d=3 sampled pulses and d=32 FTF simultaneous drive at 1, 4 and 24 points.
-    The evolve budget determines the tableau priced on each device.
+    budget prices the CPU alternative. dp54 is the selected OpenCL tableau.
     """
     # One extra knot covers a final held value before the appended row end.
     knots = _union_knots(table, rows) + 1
@@ -121,7 +137,7 @@ def opencl_preferred(
     # CPU estimate (which underpredicted actual DOP853 CPU on this host).
     cpu_row *= np.where(cpu_dp54_rows(table.duration_ns[rows], budget), 1.2, 1.0)
     cpu = max(float(cpu_row.sum()) / lanes, float(cpu_row.max()))
-    gpu_work = work * _DP54_GPU_WORK_SCALE if budget >= DP54_MIN_BUDGET else work
+    gpu_work = work * _DP54_GPU_WORK_SCALE if dp54 else work
     # Like routing history, replacing the Engine must not change the route.
     # Disk cache amortizes cold compilation per machine, driver, kernel and d;
     # charge only the resident-program overhead, regardless of cache state.
