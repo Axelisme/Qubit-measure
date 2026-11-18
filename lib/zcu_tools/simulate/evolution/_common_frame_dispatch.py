@@ -12,6 +12,7 @@ from ._multitone_dispatch import (
     populate_multitone_inventory,
 )
 from .kernel import KernelContext, SegmentTable
+from .kernels._multitone_spot import sampled_candidates
 from .kernels._rwa_numeric import multitone_retention
 from .kernels._workload_facts import envelope_bounds
 from .kernels.common_frame import (
@@ -188,14 +189,22 @@ def _cheap_rwa(
     cheap = np.zeros(len(rows), dtype=bool)
     if rwa is None:
         return cheap
-    if table is context.work_plan.complete_table:
-        inventory = populate_multitone_inventory(
-            table, context.source, context.work_plan, context.budget
-        )
-        return np.isin(rows, inventory.cheap)
-    admitted = rwa.guard(table, rows, context)
-    for index in np.flatnonzero(admitted):
-        cheap[index] = cheap_rwa_graph(table, int(rows[index]), context)
+    complete = context.work_plan.complete_table
+    geometry = table if complete is None else complete
+    inventory = populate_multitone_inventory(
+        geometry, context.source, context.work_plan, context.budget
+    )
+    cheap = np.isin(rows, inventory.cheap)
+    if np.all(table.constant_envelopes(rows)):
+        return cheap
+    sampled = np.flatnonzero(np.isin(rows, sampled_candidates(geometry, context)))
+    sampled = np.array(
+        [i for i in sampled if cheap_rwa_graph(table, int(rows[i]), context)],
+        dtype=np.int64,
+    )
+    if len(sampled):
+        with context.work_plan.routing.measure(rwa.name, "prepare"):
+            cheap[sampled] = rwa.guard(table, rows[sampled], context)
     return cheap
 
 

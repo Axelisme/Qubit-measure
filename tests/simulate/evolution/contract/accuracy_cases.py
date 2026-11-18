@@ -232,8 +232,8 @@ def cheap_sampled_case(*, nearby: bool) -> AccuracyCase:
 
     nearby=True uses 0.6/0.6001 GHz carriers; False uses 0.6/0.73 GHz.
     Each case has two 384 ns points, complex coherence and a secular bath.
-    Nonflat samples prevent constant-plateau extraction. Return a fresh source
-    and history, with the expected post-pause family for the pricing branch.
+    Nonflat samples prevent constant-plateau extraction. The nearby pair
+    passes measured admission; the separated pair falls back to direct.
     """
     name = "cheap_sampled_nearby" if nearby else "cheap_sampled_separated"
     # Circular adjacent transitions retain one three-state component (real
@@ -267,15 +267,14 @@ def cheap_sampled_case(*, nearby: bool) -> AccuracyCase:
             ),
         ),
     )
-    families = ("common_frame",) if nearby else ("dop853",)
+    families = ("multitone_rwa", "common_frame") if nearby else ("dop853",)
     return AccuracyCase(name, coherent_source(model), batch, families)
 
 
 def joint_case(*, constant: bool) -> AccuracyCase:
     """Build a four-level two-port case with a complete 20-point inventory.
 
-    constant=True uses constant envelopes and permits multitone_rwa/dop853.
-    False uses short sampled envelopes and permits only dop853 during the pause.
+    Both the constant and short sampled envelopes permit multitone_rwa/dop853.
     Return a fresh source/history with coherence, relaxation and dephasing.
     """
     name = "joint_constant" if constant else "joint_gate_inventory"
@@ -311,11 +310,105 @@ def joint_case(*, constant: bool) -> AccuracyCase:
                 for track in batch.tracks
             ),
         )
-        families = ("multitone_rwa", "dop853")
-    else:
-        # Sampled multitone families are paused, not failed density samples.
-        families = ("dop853",)
-    return AccuracyCase(name, coherent_source(model), batch, families)
+    return AccuracyCase(
+        name, coherent_source(model), batch, ("multitone_rwa", "dop853")
+    )
+
+
+def sampled_multitone_risk_case() -> AccuracyCase:
+    """Build a phase-varied dual-tone sequence with an excited-state omission risk.
+
+    The weak point and strong point both pass omission proxies. Abrupt nonzero
+    pulse endpoints and different phases make omitted off-resonant coherences
+    survive across pulses. The isolated ground state cannot expose this error.
+    """
+    energies = np.array([0.0, 0.2, 0.8, 1.1])
+    a, b = np.zeros((4, 4), complex), np.zeros((4, 4), complex)
+    a[1, 2], b[2, 3] = 0.003, 0.002
+    model = SecularModel(
+        (0,),
+        "sampled-multitone-excited-risk",
+        energies,
+        np.eye(4, dtype=complex),
+        (
+            SecularDrive("a", a + a.T, 1j * (a - a.T)),
+            SecularDrive("b", b + b.T, 1j * (b - b.T)),
+        ),
+        np.zeros((4, 4)),
+        np.zeros((4, 4)),
+    )
+    duration = 8.0
+    phases = (0.13, -1.35, 0.41, 1.91, -0.7, 2.8)
+    batch = timeline(2, duration * len(phases))
+    envelope = EnvelopeSpec(
+        "sampled", np.array([0.8, 1.0, 0.9], complex), np.array([0.0, 3.0, duration])
+    )
+    tracks = []
+    for index, phase in enumerate(phases):
+        start = index * duration
+        for port, carrier, gain in (("a", 0.69, 0.8), ("b", 0.31, 0.6)):
+            track = drive_track(
+                batch, envelope, frequency=carrier, gain=gain, port=port
+            )
+            tracks.append(
+                replace(
+                    track,
+                    start_ns=np.full(2, start),
+                    duration_ns=np.full(2, duration),
+                    phase_rad=np.full(2, phase - 2 * np.pi * carrier * start),
+                    amplitude=np.array([gain * 0.002, gain]),
+                )
+            )
+    return AccuracyCase(
+        "sampled_multitone_phase_sequence",
+        coherent_source(model),
+        replace(batch, tracks=tuple(tracks)),
+        ("dop853",),
+    )
+
+
+def sampled_multitone_short_sweep_case() -> AccuracyCase:
+    """Build a held-out 25 ns frequency sweep with 32 retained levels."""
+    case = joint_case(constant=True)
+    base = case.source.model((0,))
+    size = 32
+    model = SecularModel(
+        (0,),
+        "sampled-multitone-short-sweep-32",
+        np.r_[base.energies_ghz, np.linspace(1.7, 5.2, size - 4)],
+        np.eye(size, dtype=complex),
+        tuple(
+            SecularDrive(
+                drive.name,
+                np.pad(drive.in_phase_ghz, ((0, size - 4), (0, size - 4))),
+                np.pad(drive.quadrature_ghz, ((0, size - 4), (0, size - 4))),
+            )
+            for drive in base.drives
+        ),
+        np.pad(base.rates_per_ns, ((0, size - 4), (0, size - 4))),
+        (np.ones((size, size)) - np.eye(size)) * 1e-5,
+    )
+    duration = 25.0
+    batch = timeline(3, duration)
+    knots = np.linspace(0.0, duration, 9)
+    envelope = EnvelopeSpec(
+        "sampled", np.sin(np.pi * knots / duration).astype(complex), knots
+    )
+    return AccuracyCase(
+        "sampled_multitone_short_sweep_32",
+        coherent_source(model),
+        replace(
+            batch,
+            tracks=(
+                drive_track(batch, envelope, frequency=0.6, gain=0.08, port="a"),
+                replace(
+                    drive_track(batch, envelope, gain=0.08, port="b"),
+                    frequency_ghz=np.array([0.278, 0.302, 0.317]),
+                ),
+            ),
+        ),
+        ("multitone_rwa", "dop853"),
+    )
 
 
 def common_frame_case(name: str) -> AccuracyCase:
@@ -444,6 +537,8 @@ def accuracy_case(name: str) -> AccuracyCase:
         ),
         "adiabatic_ramp": adiabatic_case,
         "joint_gate_inventory": partial(joint_case, constant=False),
+        "sampled_multitone_phase_sequence": sampled_multitone_risk_case,
+        "sampled_multitone_short_sweep_32": sampled_multitone_short_sweep_case,
         "joint_constant": partial(joint_case, constant=True),
         "single_tone_sideband": single_tone_sideband_case,
     }

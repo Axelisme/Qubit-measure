@@ -391,15 +391,14 @@ class Kernel(Protocol):
     ) -> NDArray[np.bool_]:
         """Pure validity mask (len(rows),) at positive per-segment error budget.
 
-        Each row's mask depends only on that row's table data, source and
-        budget, never on other rows in the call. Splitting rows into arbitrary
-        segments, calling guard separately and concatenating results in the
-        original row order must match a whole call bit for bit, regardless of
-        call order.
+        Each decision depends on table data, source, budget and immutable
+        complete-acquire facts, never on the current subset. Splitting a call
+        and concatenating decisions in the original order preserves its mask.
 
         Known input means the source initial density or the engine-computed
-        density for this row's certified prefix group. Guard may read that
-        immutable input, but never evolve density or inspect worker states.
+        density for this row's certified prefix group. A guard may read that
+        input but may not evolve it or inspect worker states. A measured guard
+        can evolve its own fixed probes and publish the decision in WorkPlan.
         The engine owns branch order and cross-family cost comparisons. Family
         wrappers may also require immutable complete-acquire key counts, as
         multitone_gate does. Prefix and worker calls borrow those same counts;

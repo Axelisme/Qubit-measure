@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-18，DC Lindblad channel
+**Last updated:** 2026-11-18，sampled multitone RWA admission
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -26,10 +26,11 @@ compiled `interaction_hamiltonian` 的 source location 也改到 `_rwa_fourier.p
 `multitone_rwa` 在每個 row 端點先加總所有 tone 的 kick，再作用於 density。
 末端 kick 與演化使用相同的 row duration；sampled row 不套用 kick。
 Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_gate.py`。
-`multitone_rwa` 的 family guard 只收 distinct-port constant pairs，拒收 sampled 多 tone 列。
-`multitone_gate` 的 family guard 拒收所有列，保留 family 與共用 single-tone 數值 owner。
-這是現行拒收契約，不預告恢復 admission。
-其餘候選沿用既有定價，可能選到 `common_frame` 或 `dop853`。
+`multitone_rwa` 對過 omission proxies 的 sampled 雙 tone 列，抽查強度、slope、curvature 最大的列。
+同 key 只比一次，最多三列。Guard 以固定 coherent 初態呼叫 `dop853.advance_endpoints`，
+把完整 density 和 RWA 比對。各抽查列差值須 ≤ 0.1 × budget，否則整群退回其餘候選。
+這取代 2026-11-14 的 sampled RWA 過渡期拒收，不改 distinct-port constant pairs 或
+`multitone_gate` 的 guard。頻掃、短脈衝與相位序列案例見 [kernel 表](../README.md#kernel-summary)。
 `dop853.advance_endpoints` 擁有旋轉座標 density 積分，`dop853` 與 `t6` direct
 沿用相同的每段 budget 容差規則。這是局部積分控制，不保證整條序列的最終誤差。
 `t6` 的每一列都走 direct，不依 key 重用數選算法，也不掃描完整 acquire inventory。

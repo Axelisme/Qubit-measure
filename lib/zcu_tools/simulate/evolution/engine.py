@@ -30,7 +30,7 @@ from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
 
 # Replay identity of the segment engine numerical algorithms, independent of records.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v9"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v10"
 
 
 @dataclass(frozen=True)
@@ -870,15 +870,16 @@ class Engine:
         budget: float = 1e-3,
         cancel: CancellationQuery | None = None,
     ) -> DispatchInspection:
-        """Inspect the shared classifier without evolving density.
+        """Inspect the shared classifier without evolving the user's timeline.
 
         source, batches and budget have the same meaning as evolve. Rows use
         batch/point/split-segment coordinates documented by RowKey. Only selected
         rows have a final family; local guards remain deferred. Rows requiring
         a driven prefix density report needs_prefix_input instead of computing
-        the prefix. Floquet guards still integrate their one-period propagator.
-        Numerical preparation and
-        model errors propagate, as in evolve. A closed Engine or invalid budget
+        the prefix. Guards may evolve their own probes: Floquet integrates its
+        one-period propagator and sampled multitone RWA compares fixed probe
+        endpoints. Numerical preparation and model errors propagate, as in
+        evolve. A closed Engine or invalid budget
         raises before planning; cancellation raises Cancelled without a result.
         Callers serialize operations sharing a source/history, as for evolve.
         Does not modify routing history: usage, content membership and
