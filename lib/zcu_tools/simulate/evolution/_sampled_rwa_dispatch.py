@@ -1,6 +1,6 @@
 """Evolve-local sampled RWA prices, including serial full-drive spot checks."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import cache
 
 import numpy as np
@@ -18,6 +18,7 @@ from .kernels._dop853 import ROW_INITIAL_STEP_NS
 from .kernels._multitone_spot import SampledGroup, sampled_groups
 from .kernels._rwa_fourier import fourier_coefficient
 from .kernels._rwa_numeric import STEP_NS, multitone_retention
+from .kernels.common_frame import zero_mean_carrier
 from .kernels.dop853 import cpu_work_scale
 from .kernels.multitone_rwa import MultitoneRWAKernel
 from .workplan import FactKey
@@ -114,6 +115,8 @@ def _rwa_seconds(
     direct: NDArray[np.float64],
     spot_rows: tuple[int, ...],
     context: KernelContext,
+    *,
+    total_cpu: bool = False,
 ) -> float:
     # Calibration: 3/4-level short and sparse/dense-knot rows plus the 24-level
     # simultaneous-drive scan. The spot is serial, uses its own coherent state,
@@ -124,18 +127,38 @@ def _rwa_seconds(
     apply = np.array([_rwa_apply_seconds(table, int(row), context) for row in rows])
     indices = np.searchsorted(rows, spot_rows)
     probe = float(np.sum(direct[indices] + apply[indices] + 260e-6 + 2.5e-6 * d))
-    playback = _parallel_seconds(table, rows, apply + 65e-6 + 1e-6 * d, context.workers)
-    return probe + playback
+    playback = apply + 65e-6 + 1e-6 * d
+    elapsed = (
+        float(playback.sum())
+        if total_cpu
+        else _parallel_seconds(table, rows, playback, context.workers)
+    )
+    return probe + elapsed
 
 
-def _common_offers(
+def sampled_rwa_cpu_seconds(
+    table: SegmentTable, group: SampledGroup, context: KernelContext
+) -> float:
+    """Return one group's fixed CPU probes plus serial playback for all its rows."""
+    rows = np.asarray(group.rows, dtype=np.int64)
+    return _rwa_seconds(
+        table,
+        rows,
+        _direct_seconds(table, rows, context),
+        group.spot_rows,
+        context,
+        total_cpu=True,
+    )
+
+
+def sampled_common_prices(
     table: SegmentTable,
     rows: NDArray[np.int64],
     context: KernelContext,
-    rwa: MultitoneRWAKernel,
+    rwa: MultitoneRWAKernel | None,
 ) -> NDArray[np.float64]:
-    """Borrow common frame's existing complete-group prices and offer policy."""
-    plan = populate_common_frame_plan(table, context, price_rwa=True)
+    """Return existing CPU prices for offered common frame; infinity otherwise."""
+    plan = populate_common_frame_plan(table, context, price_rwa=rwa is not None)
     prices = {price.key: price.common for price in plan.prices}
     offered = preferred(table, rows, context, rwa)
     if context.families is not None and "dop853" not in context.families:
@@ -143,7 +166,9 @@ def _common_offers(
         offered = np.ones_like(offered)
     estimates = np.full(len(rows), np.inf)
     for index in np.flatnonzero(offered):
-        estimates[index] = prices[plan.keys[rows[index]].tobytes()]
+        row = rows[index]
+        if not zero_mean_carrier(table.tone_frequency_ghz[row, :2]):
+            estimates[index] = prices[plan.keys[row].tobytes()]
     return estimates
 
 
@@ -184,6 +209,37 @@ def _gpu_seconds(
     )
 
 
+def _gpu_eligible_mask(
+    table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
+) -> NDArray[np.bool_]:
+    names = np.full(len(rows), "dop853")
+    plans, _ = direct_plans(table, names, rows, budget=context.budget)
+    dimension = context.source.initial_density.shape[0]
+    mask = opencl_rows(table, plans.get("dop853"), dimension)
+    return np.zeros(len(table.tones), dtype=bool) if mask is None else mask
+
+
+def gpu_sampled_groups(
+    table: SegmentTable,
+    context: KernelContext,
+    groups: Mapping[int, SampledGroup],
+    direct_candidates: NDArray[np.int64],
+) -> set[int]:
+    """Return groups whose original direct wave prefers OpenCL, before device discovery.
+
+    direct_candidates contains complete row IDs after excluding known
+    non-direct neighbors. The same independent-endpoint chain, waves and
+    CPU/GPU estimates as Step 9 apply. This does not check or compile a device.
+    """
+    mask = _gpu_eligible_mask(table, direct_candidates, context)
+    selected = set()
+    for index, group in groups.items():
+        rows = np.asarray(group.rows, dtype=np.int64)
+        if np.isfinite(_gpu_seconds(table, rows, np.zeros(len(rows)), mask, context)):
+            selected.add(index)
+    return selected
+
+
 def _prefer(
     table: SegmentTable,
     group: SampledGroup,
@@ -212,7 +268,7 @@ def _prefer(
         return False
 
     if price_common is not None:
-        offers = _common_offers(table, rows, context, rwa)
+        offers = sampled_common_prices(table, rows, context, rwa)
         best_case = _parallel_seconds(
             table, rows, np.minimum(direct, offers), context.workers
         )
@@ -268,11 +324,7 @@ def prefer_sampled_rwa(
     @cache
     def gpu_eligible() -> NDArray[np.bool_]:
         # Share eligibility across groups in this routing round only.
-        names = np.full(len(direct_candidates), "dop853")
-        plans, _ = direct_plans(table, names, direct_candidates, budget=context.budget)
-        dimension = context.source.initial_density.shape[0]
-        mask = opencl_rows(table, plans.get("dop853"), dimension)
-        return np.zeros(len(table.tones), dtype=bool) if mask is None else mask
+        return _gpu_eligible_mask(table, direct_candidates, context)
 
     def compare(group: SampledGroup) -> bool:
         wins = _prefer(table, group, context, rwa, price_common, gpu_eligible)

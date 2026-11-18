@@ -83,6 +83,7 @@
 
 - 2026-11-14 [Sampled multitone 的過渡期拒收](2026-11-14-sampled-multitone-interim.md)：收窄 admission。兩個 multitone family 暫停 sampled 列，保留 constant pairs 與既有 fallback 定價。
 - 2026-11-18 [Sampled multitone RWA 的實測放行](2026-11-18-sampled-multitone-rwa-admission.md)：實測放行。同形 sampled 雙 tone 列按群抽查並計價，24 點正例快 3.149 倍，拒收照原選路。
+- 2026-11-19 [成形雙 tone 的共同選路](2026-11-19-shared-multitone-pricing.md)：候選排序。CPU 重疊群按總 CPU 秒選路，跨群的 gate 建構按使用次數分攤並在建構前重核。
 
 - 2026-11-14 [RB 型相位序列作為固定量表輸入](2026-11-14-random-gate-sequence-workloads.md)：場景擴充。離線固定 phase prefix 與 recovery，constant／Gaussian 共用，不加入 runtime RB 代數。
 

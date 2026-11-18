@@ -592,6 +592,9 @@ def _dense_sampled_pair(count: int) -> AccuracyCase:
     return replace(case, batch=replace(case.batch, tracks=tracks))
 
 
+_STEP9_FAMILIES = ("multitone_rwa", "common_frame", "dop853")
+
+
 @pytest.mark.parametrize("count", [1, 64], ids=["unamortized", "amortized"])
 def test_sampled_multitone_prices_the_evolve_local_probe(count: int) -> None:
     # At one CPU worker, RWA is about 135 us/row plus a 614 us probe.
@@ -600,7 +603,11 @@ def test_sampled_multitone_prices_the_evolve_local_probe(count: int) -> None:
     # while one row cannot repay even the probe.
     case = _dense_sampled_pair(count)
     batch = case.batch
-    with closing(case.source), closing(Engine(1, backend="cpu")) as engine:
+    # Exercise the established scale without the new gate competitor.
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=_STEP9_FAMILIES)) as engine,
+    ):
         reference = converged_reference(case.source, batch)
         for _ in range(2):
             result = engine.evolve(case.source, (batch,), telemetry=True)
@@ -624,7 +631,10 @@ def test_sampled_amplitude_groups_do_not_share_probe_costs() -> None:
     phases[8] += 0.4
     batch = replace(case.batch, tracks=(replace(first, phase_rad=phases), second))
     capture = CaptureBuffer()
-    with closing(case.source), closing(Engine(1, backend="cpu")) as engine:
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=_STEP9_FAMILIES)) as engine,
+    ):
         inspection = engine.inspect_dispatch(case.source, (batch,))
         isolated = inspection.rows[8]
         assert isolated.family in {"common_frame", "dop853"}
@@ -671,15 +681,26 @@ def test_whitelisted_multitone_gate_keeps_numerical_fallback() -> None:
         result = engine.evolve(case.source, (case.batch,))
     assert result.paths.segments_by_kernel == {"multitone_gate": count}
     assert density_error(result.densities, reference.density) <= 2e-3
-    # The default route's shared-frame premise needs its original 20 points;
-    # it is independent of the one-use allowlist fallback above.
+
+
+def test_shared_sampled_common_frame_without_gate_in_cold_and_warm_history() -> None:
     shared = _joint_gate_case(20)
     shared_reference = converged_reference(shared.source, shared.batch)
-    with closing(Engine(1)) as engine:
+    with (
+        closing(shared.source),
+        closing(Engine(1, backend="cpu", families=_STEP9_FAMILIES)) as engine,
+    ):
         for _ in range(2):
             result = engine.evolve(shared.source, (shared.batch,))
             assert result.paths.segments_by_kernel == {"common_frame": 20}
             assert density_error(result.densities, shared_reference.density) <= 2e-3
+
+
+def test_shared_sampled_gate_beats_an_admitted_original_common_frame() -> None:
+    case = _joint_gate_case(20)
+    with closing(case.source), closing(Engine(1, backend="cpu")) as engine:
+        query = engine.inspect_dispatch(case.source, (case.batch,))
+    assert {row.family for row in query.rows} == {"multitone_gate"}
 
 
 def test_pinned_multitone_gate_below_cost_break_even() -> None:

@@ -1,13 +1,14 @@
 """Cold prices for omission-expanded multitone RWA and full-drive integration."""
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .kernel import KernelContext, SegmentTable
+from .kernel import Kernel, KernelContext, SegmentTable
 from .kernels._multitone_gate_phase import PHASE_GRID, PHASE_RTOL
 from .kernels._multitone_gate_split import SPLIT_PHASES, SPLIT_REFERENCE_BUDGET
 from .kernels._rwa_gate import GATE_POLICY, canonical_keys
@@ -51,6 +52,7 @@ def gate_preferred(
     rows: NDArray[np.int64],
     context: KernelContext,
     competitors: tuple[str, ...],
+    diverted: Counter[bytes] | None = None,
 ) -> NDArray[np.bool_]:
     """Compare cold gate prices before building any phase coefficients.
 
@@ -73,8 +75,9 @@ def gate_preferred(
     rwa_rows = {canonical_keys(geometry, context)[row]: row for row in rwa.admitted}
     preferred = np.zeros(len(rows), dtype=bool)
     for index, row in enumerate(rows):
-        uses = counts.get(canonical[row], 0)
-        if not uses:
+        key = canonical[row]
+        uses = counts.get(key, 0) - (0 if diverted is None else diverted[key])
+        if uses <= 0:
             continue
         cost = gate_cost(table, int(row), context)
         alternative = cost.dop853_competitor if "dop853" in competitors else np.inf
@@ -298,6 +301,25 @@ def populate_multitone_plan(
         )
 
     return plan.fact(FactKey(("multitone-cold-plan", budget), frozenset), build)
+
+
+def expanded_direct(
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    context: KernelContext,
+    competitors: Mapping[str, Kernel],
+) -> NDArray[np.bool_]:
+    """Use the cold expanded-RWA comparison only if both families are available."""
+    if (
+        not len(rows)
+        or not isinstance(competitors.get("multitone_rwa"), MultitoneRWAKernel)
+        or "dop853" not in competitors
+    ):
+        return np.zeros(len(rows), dtype=bool)
+    direct = populate_multitone_plan(
+        table, context.source, context.work_plan, context.budget
+    )
+    return np.array([int(row) in direct for row in rows], dtype=bool)
 
 
 @dataclass(frozen=True)

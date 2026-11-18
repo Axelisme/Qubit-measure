@@ -37,8 +37,7 @@ def _stub_device(monkeypatch: pytest.MonkeyPatch, *, available: bool) -> list[st
     return events
 
 
-def _long_sampled_pair() -> AccuracyCase:
-    count = 12
+def _long_sampled_pair(count: int = 12) -> AccuracyCase:
     case = accuracy_case("joint_gate_inventory")
     batch = timeline(count, 100.0)
     knots = np.linspace(0.0, 100.0, 200)
@@ -125,10 +124,12 @@ def test_sampled_price_queries_reuse_only_a_decisive_device_check(
     batch = case.batch
     count = len(batch.points)
     envelope = batch.tracks[0].envelopes[0]
+    families = ("multitone_rwa", "common_frame", "dop853")
     with (
         closing(case.source),
-        closing(Engine(1, backend="cpu")) as cpu,
-        closing(Engine(1, backend="auto")) as auto,
+        closing(Engine(1, backend="cpu", families=families)) as cpu,
+        closing(Engine(1, backend="auto", families=families)) as auto,
+        closing(Engine(1, backend="auto")) as default,
     ):
         assert {
             row.family for row in cpu.inspect_dispatch(case.source, (batch,)).rows
@@ -150,6 +151,9 @@ def test_sampled_price_queries_reuse_only_a_decisive_device_check(
             ),
         )
         assert auto.inspect_dispatch(case.source, (small,)).rows[0].family == "dop853"
+        assert (
+            default.inspect_dispatch(case.source, (small,)).rows[0].family == "dop853"
+        )
         assert not events
         expected = "dop853" if available else "multitone_rwa"
         for _ in range(2):
@@ -159,3 +163,20 @@ def test_sampled_price_queries_reuse_only_a_decisive_device_check(
         result = auto.evolve(case.source, (batch,))
         assert result.paths.segments_by_kernel == {expected: count}
         assert events.count("check") == 1
+
+
+def test_default_eligible_opencl_wave_keeps_the_original_gpu_competition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = _stub_device(monkeypatch, available=True)
+    case = _long_sampled_pair(160)
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu")) as cpu,
+        closing(Engine(1, backend="auto")) as auto,
+    ):
+        cpu_query = cpu.inspect_dispatch(case.source, (case.batch,))
+        gpu_query = auto.inspect_dispatch(case.source, (case.batch,))
+    assert {row.family for row in cpu_query.rows} == {"multitone_gate"}
+    assert {row.family for row in gpu_query.rows} == {"dop853"}
+    assert events == ["check", "cached"]

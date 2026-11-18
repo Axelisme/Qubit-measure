@@ -46,7 +46,9 @@ Guard 放行 playback 誤差不超過 `max(0.1 × min(budget, 1e-3), 1.5 × e_do
 Budget probe 特別準時，budget 換算的下限仍容許小誤差。
 這是抽樣檢查，不能限制未抽樣的相位、density 或整條序列的誤差。
 建構前逐 key 比價。每個冷 key 的建構價只算一次端點、Fourier 與兩組 split 積分，按使用次數攤提，另計 apply。
-Guard 將通過的數值產品交給 scheduler，只活一次 evolve。拒收後不重建，交給其餘合格候選。單 tone 的數值分支不變。
+Guard 在一次 evolve 內記住每個 key 的 split 結果，並把放行的產品交給 scheduler。
+不同相位群、代表 prefix 或其他消費者不重建同一 key。
+拒收後由 [dispatch 的共同選路](../README.md#decision-graph) 決定回退。單 tone 的數值分支不變。
 
 `dop853.advance_endpoints` 擁有旋轉座標 density 積分。
 `dop853` 的 CPU row 和符合 [OpenCL 條件](../README.md#gpu-backend)的 row，在時長 ≤10 µs 且 budget ≥1e-3 時走 DP5(4)，兩個局部容差都除以三。

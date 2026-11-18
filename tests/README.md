@@ -256,6 +256,9 @@ native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e
 短 inventory 在空歷史和前次已執行同 key 的情況下都預測 DOP853；實際 evolve 確認選路與未付 gate prepare。長 inventory 驗證合格 key 可執行 gate，且不能攤提到另一個罕用 key。
 測試使用有冷價間距的輸入，不重算係數或鎖住 break-even 的精確位置。
 固定 `multitone_gate` 可以略過成本比較，不能略過相位與 split 驗證。
+[共同選路測試](simulate/evolution/contract/test_shared_multitone_routing.py)
+從 `Engine.inspect_dispatch` 檢查重疊群的價格順序、拒收後的 family 和跨相位群的重核。
+舊的 RWA 群價格與 OpenCL lazy check 測試以多家白名單排除 gate。
 多段案例量整條 timeline 的最終誤差。混合路徑的每個 family 列出同一個最終誤差，
 不是各段的局部誤差。
 歷史案例另外驗證八點 inventory 的結果，並比較兩點輸入在歷史改變前後的實際路徑。

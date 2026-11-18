@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, full-drive dual-phase gates and sampled multitone RWA
+**Last updated:** 2026-11-19, shared sampled multitone pricing
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -790,7 +790,8 @@ thresholds and algorithm details live with their owners:
 | Row domains, named candidate order and terminal routes | [dispatch](_dispatch.py); [kernel collection](kernels/__init__.py) instantiates implementations only |
 | Shaped and two-tone cold-cost choices | [shaped dispatch](_shaped_dispatch.py), [two-tone dispatch](_two_tone_dispatch.py) return family names, not positional indices or unnamed flags |
 | Multitone gate amortization | [multitone dispatch](_multitone_dispatch.py) compares cold per-key gate prices with eligible direct/RWA alternatives, using complete-acquire canonical-key counts |
-| Sampled multitone RWA pricing | [sampled RWA dispatch](_sampled_rwa_dispatch.py) compares the cost of each group's playback and fresh RWA/CPU DOP853 probes with DOP853 and eligible common frame |
+| Sampled multitone RWA pricing | [sampled RWA dispatch](_sampled_rwa_dispatch.py) prices fixed probes and playback; it retains the prior CPU and GPU wave comparison outside the overlap |
+| Overlapping sampled gate and RWA offers | [shared multitone dispatch](_shared_multitone_dispatch.py) compares complete amplitude groups in CPU seconds and rechecks build amortization after RWA probes |
 | Dissipative DC channel pricing | [slow dispatch](_slow_dispatch.py) compares M⁶ channel construction amortized over complete-acquire exact prepare keys with DOP853 |
 | Slow/plateau carrier boundary | [slow-envelope comparison](kernels/slow_envelope.py) owns the strict absolute-carrier comparison shared by dispatch and its guard |
 | Common-frame pricing and numerical construction | [common-frame dispatch](_common_frame_dispatch.py), [kernel](kernels/common_frame_kernel.py) |
@@ -802,34 +803,54 @@ thresholds and algorithm details live with their owners:
 | Direct integration and chronological chains | [DOP853 planning](_dop853_dispatch.py), [DOP853](kernels/dop853.py), [flux DOP853](kernels/flux_dop853.py) |
 
 Cold-cost choices use the complete acquire inventory rather than resident cache
-warmth. Prefix and worker subsets share those choices; shared prefixes only
-price CPU work. `multitone_gate` charges
+warmth. Prefix and worker subsets borrow complete-acquire counts. A shared
+prefix runs on the CPU. `multitone_gate` charges
 one cold construction per key: 30 full-drive endpoint nodes, Fourier fitting,
 four tight DOP853 Lindblad references and four direct solves at the Engine
 budget. The budget probes use DP5(4) for [CPU-eligible rows](#cpu-dp54-accuracy)
 and DOP853 otherwise. Both sets of probes use the interaction frame regardless
 of the execution backend. Dispatch divides the build price by current-acquire
-key uses, then adds per-row key work and playback. The price must beat the
-eligible direct/RWA alternatives before the guard builds. Gate construction
-expires after each evolve. RWA keeps its history-based cold price. Gate
-amortization never reads history.
+key uses, then adds per-row key work and playback. The price must beat an
+eligible alternative before the guard builds. Gate construction expires after
+each evolve. Constant-pair RWA keeps its history-based cold price. Neither gate
+amortization nor sampled RWA probe pricing reads history.
 
 The estimator uses the raw full-drive work scale for gate endpoint and split
-terms and the grid size for Fourier and playback. Only the gate's CPU
-`dop853` competitor multiplies the raw scale by a duration factor: 0.0891 through
-25 ns, then linear to 0.412 at 100 ns, and constant thereafter. The calibration
-uses seven CPU DP5(4) measurements at budget 1e-3, including two DRAG windows.
-The factor does not depend on envelope or frame. It does not change gate build
-or playback prices, the RWA comparison, or the direct solver. See the
+terms and the grid size for Fourier and playback. The calibrated CPU
+`dop853` competitor multiplies the raw scale by 0.0891 through 25 ns, then
+linearly increases the factor to 0.412 at 100 ns and holds it constant.
+The calibration uses seven CPU DP5(4) measurements at budget 1e-3, including two
+DRAG windows. The factor does not change gate work, the independent RWA probe
+estimate, or the direct solver. See the
 [pricing discussion](../../../../docs/discussions/2026-11-18-gate-direct-duration-price.md).
 
 Insufficient current reuse can leave a numerically eligible gate unbuilt.
 These are CPU estimates, not wall-time guarantees. The split check does not
 certify arbitrary inputs or whole-sequence accuracy.
 
-Sampled RWA charges each probe to its own amplitude group.
-A losing price skips the comparison. A pin to RWA still requires the numerical
-guard. Admission does not certify arbitrary-input or whole-sequence accuracy.
+For a proxy-eligible amplitude group with an allowed gate candidate and no
+eligible original GPU route, dispatch compares total CPU seconds, without
+dividing by worker count. The original route excludes sampled RWA and gate.
+If the existing common-frame offer and guard accept a row, the original price
+is the common-frame price. Otherwise it is the calibrated CPU `dop853` price
+when allowed. The RWA offer includes one set of spot checks and all group
+playback. The gate offer takes the cheaper of the gate and original costs for
+each key. Each gate key charges its group a share of the build proportional to
+that group's uses. The denominator includes eligible uses in other phase
+groups and outside sampled RWA groups.
+
+Dispatch runs probes for the groups that select RWA first. Before building a
+gate, it rechecks the full build against the remaining uses. An RWA refusal
+releases its group to the next offer. If any tested gate key succeeds, its rows
+stay on gate and rejected keys return individually to the original route.
+If every gate key fails the price recheck or numerical guard, dispatch can
+try RWA if it still beats the original route. A cold key builds at most once.
+
+Groups without an allowed gate candidate retain the earlier RWA comparison.
+When the original GPU wave is eligible and wins, the entire group uses the
+earlier RWA, common-frame and GPU comparison. That path does not compare GPU
+wall seconds with gate CPU seconds. A single-family pin skips price, not the
+guard. See the [routing discussion](../../../../docs/discussions/2026-11-19-shared-multitone-pricing.md).
 
 Historical calibration note for [slow-envelope propagation](kernels/slow_envelope.py):
 the calibrated population tolerance is 1e-2, with about 1e-4 or less measured on
@@ -906,11 +927,8 @@ to other candidates such as `common_frame` or `dop853`. This empirical check rep
 [2026-11-14 interim rejection](../../../../docs/discussions/2026-11-14-sampled-multitone-interim.md)
 for sampled RWA, but does not certify arbitrary input states or accumulated
 sequence error. The matrix covers rejected phase-varied sequences and short
-32-level frequency scans.
-
-`multitone_gate` admits validated dual-tone keys using full-drive phase
-expansion, without RWA. Rejected keys leave routing to the remaining admitted
-families.
+32-level frequency scans. See the [decision graph](#decision-graph) for the
+cost order shared with full-drive dual-phase gates.
 
 | Family and use | Dispatch domain | Approximation and numerical admission | Pinned accuracy cases | Full density ≤ 2e-3 |
 | --- | --- | --- | --- | --- |
@@ -1199,9 +1217,10 @@ or rejected rows. Returning `None` raises rather than retrying `guard`.
 When false, classification calls `guard` directly. Multitone dispatch owns the
 per-key gate price comparison; prefix and worker calls borrow the complete-acquire
 inventory, never subset counts, routing history or resident warmth. The kernel
-guard checks only numerical admission. `multitone_gate` hands validated model-only
-Fourier products to apply without rebuilding. Pinning admits validated keys even
-once; unresolved phase dependence rejects a key regardless of its use count.
+guard checks only numerical admission. `multitone_gate` records a split decision
+and any accepted Fourier product once per evolve-local prepare key. Dispatch
+hands accepted products to apply. A pinned key still needs to pass the phase
+and split checks.
 
 Cross-timeline keys are guarded before shared preparation. Local builders usually
 run inside their timeline worker. A guard resolved before scheduling, such as
