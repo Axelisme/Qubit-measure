@@ -47,7 +47,7 @@ def capture_environment(request, tmp_path, monkeypatch):
         config = parse_six_fluxonium(six_document())
 
     @contextmanager
-    def build(*, capture: bool | None = True, telemetry=True):
+    def build(*, capture: bool | None = True, telemetry=True, fresh_seed=False):
         updates: dict[str, object] = {
             "telemetry": TelemetrySettings(
                 enabled=telemetry, directory=tmp_path / "telemetry"
@@ -57,6 +57,8 @@ def capture_environment(request, tmp_path, monkeypatch):
             updates["debug_capture"] = capture
         if name != "six_fluxonium":
             updates["time_scale"] = 0
+        if fresh_seed:
+            updates["seed"] = None
         configured = config.model_copy(
             update={"numerics": config.numerics.model_copy(update=updates)}
         )
@@ -152,14 +154,71 @@ def test_capture_records_effective_settings_and_each_attempt(
     with gzip.open(path, "rt", encoding="utf-8") as stream:
         metadata = json.load(stream)["metadata"]
     assert metadata["complete"] is not fail_second_round
-    assert metadata["effective_settings"]["numerics"]["seed"] == 123
-    assert metadata["effective_settings"]["numerics"]["time_scale"] == 0
+    assert metadata["effective_settings"][identity]["numerics"]["seed"] == 123
+    assert metadata["effective_settings"][identity]["numerics"]["time_scale"] == 0
     assert metadata["sampling"] == {"root_seed": 123, "sequence": 0}
     assert metadata["rounds"] == [
         {"index": 0, "dc_values": {source_name: 0.1}, "model_identity": identity},
         {"index": 1, "dc_values": {source_name: 0.3}, "model_identity": identity},
     ]
     assert telemetry_records(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "capture_environment", ["ftf", "single_fluxonium"], indirect=True
+)
+@pytest.mark.parametrize("rounds", [1, 2])
+def test_capture_matches_calibration_used_in_each_round(
+    capture_environment, rounds, monkeypatch
+):
+    name, build = capture_environment
+    runtime = import_module(f"zcu_tools.simulators.{name}.environment.runtime")
+    source_name = "FTFSource" if name == "ftf" else "SingleFluxoniumSource"
+    source_type = getattr(runtime, source_name)
+    sources = []
+
+    def observe_source(*args, **kwargs):
+        source = source_type(*args, **kwargs)
+        sources.append(source)
+        return source
+
+    # The builder does not return the source author API for changing settings.
+    monkeypatch.setattr(runtime, source_name, observe_source)
+    with build(telemetry=False, fresh_seed=True) as (env, _engines):
+        (source,) = sources
+        binding = env.soc.binding
+        identities = [source.identity]
+        offsets = [0.3, 0.32, 0.34] if name == "ftf" else [0.5, 0.52, 0.54]
+
+        def reconfigure(*_args):
+            dc = source.settings.dc_bias
+            offset = offsets[len(identities)]
+            if name == "ftf":
+                offset = dc.offset_phi0.model_copy(update={"f1": offset})
+            source.settings = source.settings.model_copy(
+                update={"dc_bias": dc.model_copy(update={"offset_phi0": offset})}
+            )
+            identities.append(source.identity)
+
+        capture_program(name, env).acquire(
+            env.soc, rounds=rounds, round_hook=reconfigure, progress=False
+        )
+        root_seed = binding.root_seed
+
+    path = next(capture_directory().glob("capture-*.json.gz"))
+    with gzip.open(path, "rt", encoding="utf-8") as stream:
+        metadata = json.load(stream)["metadata"]
+    assert metadata["sampling"] == {"root_seed": root_seed, "sequence": 0}
+    assert len(identities) == rounds + 1  # Includes the unused final reconfiguration.
+    assert [row["model_identity"] for row in metadata["rounds"]] == identities[:-1]
+    settings = metadata["effective_settings"]
+    assert set(settings) == set(identities[:-1]), (
+        f"expected only settings used by recorded rounds, got {settings.get('dc_bias')}"
+    )
+    for identity, offset in zip(identities[:-1], offsets[:rounds], strict=True):
+        assert settings[identity]["numerics"]["seed"] is None
+        captured = settings[identity]["dc_bias"]["offset_phi0"]
+        assert (captured["f1"] if name == "ftf" else captured) == offset
 
 
 def test_acquire_capture_is_shared_and_published_before_telemetry(
@@ -249,6 +308,14 @@ def test_compile_failure_writes_empty_capture_but_begin_failure_writes_nothing(
             raise RuntimeError("compile failed")
         path = next(capture_directory().glob("capture-*.json.gz"))
         assert read_frozen_manifest(path) == ()
+        if name != "six_fluxonium":
+            with gzip.open(path, "rt", encoding="utf-8") as stream:
+                metadata = json.load(stream)["metadata"]
+            assert not metadata["complete"]
+            assert metadata["rounds"] == []
+            assert metadata["sampling"] is None
+            assert metadata["effective_settings"] == {}
+            assert metadata["admission_settings"]["numerics"]["seed"] == 123
         path.unlink()
         runtime = import_module(f"zcu_tools.simulators.{name}.environment.runtime")
         source_type = {

@@ -131,7 +131,8 @@ def test_acquisition_freezes_loss_at_admission_and_dumps_effective_values(
     for capture in captures:
         with gzip.open(capture, "rt", encoding="utf-8") as stream:
             metadata = json.load(stream)["metadata"]
-        effective = metadata["effective_settings"]
+        identity = metadata["rounds"][0]["model_identity"]
+        effective = metadata["effective_settings"][identity]
         assert effective["drift"] is None
         observed[metadata["sampling"]["sequence"]] = {
             name: effective["chip"]["qubit"][name] for name in ("q_cap", "xqp", "aphi")

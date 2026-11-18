@@ -1,35 +1,89 @@
-"""Project acquire observations into the debug capture manifest."""
+"""Simulator-owned metadata for FTF and single-fluxonium debug captures."""
+
+from typing import TypedDict
 
 from zcu_tools.program.v2.simulation import AcquireOutcome
+from zcu_tools.resources.simulation_schema import Values
+from zcu_tools.simulate.boundary import EnvironmentSnapshot
+from zcu_tools.simulate.evolution import CaptureBuffer, write_capture
 
 
-def acquire_capture_metadata(
-    outcome: AcquireOutcome, *, effective_settings: dict[str, object]
-) -> dict[str, object]:
-    """Return JSON metadata for one admitted acquire, including failed rounds.
+class CaptureSampling(TypedDict):
+    """Binding RNG inputs: actual root seed and zero-based acquire sequence."""
 
-    outcome supplies the binding's captured snapshots and normal-return flag.
-    effective_settings is the simulator's JSON-mode settings after any drift.
-    Sampling is null before the first successful snapshot; rounds list the
-    attempted rounds in execution order with native DC values and model identity.
-    This projection does not read live devices or repeat any sampling.
+    root_seed: int
+    sequence: int
+
+
+class CaptureRound(TypedDict):
+    """A round's zero-based index, native DC values by name, and settings identity."""
+
+    index: int
+    dc_values: dict[str, float]
+    model_identity: str
+
+
+class AcquireCaptureMetadata(TypedDict):
+    """Normal-return flag, captured attempts, and the settings they refer to.
+
+    Sampling is null without a round snapshot. effective_settings holds
+    simulator-specific JSON by round model identity, including sampled losses.
+    admission_settings supplies the settings at begin only when no round was captured.
     """
-    rounds = outcome.rounds
-    request = rounds[0].acquire if rounds else None
-    return {
-        "complete": outcome.complete,
-        "effective_settings": effective_settings,
-        "sampling": (
-            None
-            if request is None
-            else {"root_seed": request.root_seed, "sequence": request.sequence}
-        ),
-        "rounds": [
+
+    complete: bool
+    sampling: CaptureSampling | None
+    rounds: list[CaptureRound]
+    effective_settings: dict[str, dict[str, object]]
+    admission_settings: dict[str, object] | None
+
+
+class AcquireCaptureSettings:
+    """Retain immutable settings for one captured acquire, beginning at admission.
+
+    Settings are supplied by the owning simulator after any drift sampling.
+    The generic capture writer knows only opaque JSON (ADR-0078).
+    """
+
+    def __init__(self, admission_settings: Values) -> None:
+        self._admission = admission_settings
+        self._by_identity: dict[str, Values] = {}
+
+    def record(self, snapshot: EnvironmentSnapshot, settings: Values) -> None:
+        """Keep the immutable settings represented by this successful snapshot."""
+        self._by_identity.setdefault(snapshot.model_identity, settings)
+
+    def write(self, buffer: CaptureBuffer, outcome: AcquireOutcome) -> str | None:
+        """Publish after evolution and return the basename or None on writer failure.
+
+        Only snapshots in outcome.rounds are included, even if other snapshots
+        were observed. A round whose execution failed still names its settings.
+        All outcome snapshots must have been recorded by this acquire.
+        """
+        rounds: list[CaptureRound] = [
             {
-                "index": round_request.index,
-                "dc_values": dict(round_request.snapshot.values),
-                "model_identity": round_request.snapshot.model_identity,
+                "index": item.index,
+                "dc_values": dict(item.snapshot.values),
+                "model_identity": item.snapshot.model_identity,
             }
-            for round_request in rounds
-        ],
-    }
+            for item in outcome.rounds
+        ]
+        request = outcome.rounds[0].acquire if rounds else None
+        metadata: AcquireCaptureMetadata = {
+            "complete": outcome.complete,
+            "sampling": (
+                None
+                if request is None
+                else {"root_seed": request.root_seed, "sequence": request.sequence}
+            ),
+            "rounds": rounds,
+            "effective_settings": {
+                identity: self._by_identity[identity].model_dump(mode="json")
+                for identity in dict.fromkeys(item["model_identity"] for item in rounds)
+            },
+            "admission_settings": None
+            if rounds
+            else self._admission.model_dump(mode="json"),
+        }
+        path = write_capture(buffer, metadata=dict(metadata))
+        return None if path is None else path.name

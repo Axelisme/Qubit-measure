@@ -51,13 +51,12 @@ from zcu_tools.simulate.evolution import (
     PathDiagnostics,
     RoutingHistory,
     batch_populations,
-    write_capture,
 )
 from zcu_tools.simulate.fluxonium import (
     FluxoniumNoise,
     SingleFluxoniumModel,
 )
-from zcu_tools.simulators.capture import acquire_capture_metadata
+from zcu_tools.simulators.capture import AcquireCaptureSettings
 from zcu_tools.simulators.single_fluxonium.config import (
     load_single_fluxonium,
     parse_single_fluxonium,
@@ -300,6 +299,7 @@ class SingleFluxoniumSource:
         self.readout_wall_s = 0.0
         self.capture: CaptureBuffer | None = None
         """Current acquire recording; None when debug_capture is disabled."""
+        self._capture_settings: AcquireCaptureSettings | None = None
         self.devices = devices
         runtime = SingleFluxoniumRuntimeOptions() if runtime is None else runtime
         self._clock = SimulationClock() if runtime.clock is None else runtime.clock
@@ -364,6 +364,11 @@ class SingleFluxoniumSource:
         self.paths.clear()
         self.evolve_wall_s = self.readout_wall_s = 0.0
         self.capture = CaptureBuffer() if self.settings.numerics.debug_capture else None
+        self._capture_settings = (
+            None
+            if self.capture is None
+            else AcquireCaptureSettings(self.effective_settings)
+        )
         self._pending_acquire = True
 
     def finish_acquire(self, outcome: AcquireOutcome) -> None:
@@ -371,19 +376,16 @@ class SingleFluxoniumSource:
 
         Uses captured attempts for points/rounds and accumulated Engine/ADC work.
         Writer failures warn once without changing the outcome. Disabled policy
-        writes no telemetry. When debug_capture is enabled, publish its buffer
-        first even with telemetry disabled; include the successful basename or
-        None in the summary. The binding is the sole authority for complete.
+        writes no telemetry. For debug capture, take round snapshots after
+        begin_acquire. Publish the buffer before telemetry and include the
+        successful basename or None in the summary. The binding is the sole
+        authority for complete.
         """
+        capture_settings = self._capture_settings
+        self._capture_settings = None
         capture_file = None
-        if self.capture is not None:
-            capture_file = write_capture(
-                self.capture,
-                metadata=acquire_capture_metadata(
-                    outcome,
-                    effective_settings=self.effective_settings.model_dump(mode="json"),
-                ),
-            )
+        if self.capture is not None and capture_settings is not None:
+            capture_file = capture_settings.write(self.capture, outcome)
         if self.telemetry is not None:
             self.telemetry.write(
                 {
@@ -397,7 +399,7 @@ class SingleFluxoniumSource:
                     "readout_wall_s": self.readout_wall_s,
                     "complete": outcome.complete,
                     "extras": {},
-                    "capture_file": None if capture_file is None else capture_file.name,
+                    "capture_file": capture_file,
                 },
                 paths=self.paths,
             )
@@ -421,7 +423,18 @@ class SingleFluxoniumSource:
             "single-fluxonium-v1", self.identity, ((source.name, info.value),)
         )
         dc_flux(self.settings, snapshot)
+        if self._capture_settings is not None:
+            self._capture_settings.record(snapshot, self.effective_settings)
         return snapshot
+
+    def _generation_key(
+        self, snapshot: EnvironmentSnapshot
+    ) -> tuple[str, EnvironmentSnapshot, tuple[str, str]]:
+        return (
+            self.effective_settings.model_dump_json(),
+            snapshot,
+            (_BACKEND_VERSION, SEGMENT_NUMERIC_VERSION),
+        )
 
     def model_facts(self, snapshot: EnvironmentSnapshot) -> SingleFluxoniumFacts:
         """Return current-loss models with reusable loss-independent structure.
@@ -434,11 +447,7 @@ class SingleFluxoniumSource:
         RuntimeError follows close; invalid DC raises ValueError.
         """
         self._require_open()
-        key = (
-            self.effective_settings.model_dump_json(),
-            snapshot,
-            (_BACKEND_VERSION, SEGMENT_NUMERIC_VERSION),
-        )
+        key = self._generation_key(snapshot)
         structure_key = sha256(
             repr(
                 (
@@ -487,11 +496,7 @@ class SingleFluxoniumSource:
         This method does not evolve or acquire. RuntimeError follows close.
         """
         self._require_open()
-        generation = (
-            self.effective_settings.model_dump_json(),
-            snapshot,
-            (_BACKEND_VERSION, SEGMENT_NUMERIC_VERSION),
-        )
+        generation = self._generation_key(snapshot)
         if self._facts_key is not None and self._facts_key != generation:
             self._clear()
         key = (*generation, time_base, _template_digest(template))

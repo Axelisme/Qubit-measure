@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, acquire debug capture
+**Last updated:** 2026-11-18, round settings in debug capture
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -67,9 +67,11 @@ Profiling overrides and the caller's board-loading example belong to
 Engine-input and route manifest after each admitted acquire, including failure.
 Every evolve in that acquire shares the same buffer. Telemetry can remain off.
 Open the `capture-*.json.gz` manifest to read `inputs` for Engine inputs and per-row
-routes, and `metadata` for effective settings, sampling identity and each attempted
-round's DC values and model identity. Round snapshots include a failed round
-if execution started after its snapshot.
+routes. In `metadata`, use a round's `model_identity` to look up its settings
+in `effective_settings`. Each attempted round retains its DC values, even if
+execution failed after its snapshot. If no snapshot was taken, read
+`admission_settings` instead. `sampling` shows the actual seed and sequence
+when a round snapshot exists.
 When telemetry is enabled, use `capture_file` in `routing-*.jsonl` to match the
 manifest to its acquire row. The row shows family totals, stage timings and
 projection outcomes and pruned weights. Capture writes run before summary

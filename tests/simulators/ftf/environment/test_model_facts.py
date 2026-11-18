@@ -118,6 +118,7 @@ def test_full_physical_key_invalidates_and_only_last_snapshot_is_retained(
             }
         )
     else:
+        # No public seam changes the numeric revision; observe the model rebuild through acquire.
         monkeypatch.setattr(template_module, "SEGMENT_NUMERIC_VERSION", "other-numeric")
     source.open_acquire(request()).sample_round(changed, 0)
     assert engine.sources[2]() is not None

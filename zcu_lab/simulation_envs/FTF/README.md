@@ -156,6 +156,6 @@ Notebook 傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，保留�
 整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 caller-owned 完整 preparation 只保留在記憶體，Engine 的數值 preparation 限一次 evolve。不需要離線建庫或 GPU，也不保存 exact density records。
 
 要查一次模擬結果，在環境 YAML 設定 `numerics.debug_capture: true` 後再 acquire。
-在快取的 `simulator-debug/v1` 開啟該次的 `capture-*.json.gz`，可讀 Engine 輸入、每列實際 family、當次有效設定與逐 round DC 值。
+在快取的 `simulator-debug/v1` 開啟該次的 `capture-*.json.gz`，可讀 Engine 輸入、每列實際 family 與逐 round DC 值。用該 round 的 `model_identity` 查 `metadata.effective_settings` 中的有效設定。
 若 telemetry 開啟，當次 `routing-*.jsonl` 的 `capture_file` 指向這份 manifest，並記下投影結果與各階段耗時。
 見 [FTF Debug capture](../../../lib/zcu_tools/simulators/ftf/environment/README.md#debug-capture)。Capture 含模型真值，不放入一般 Run／GUI／MCP metadata。

@@ -1,6 +1,6 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-18, acquire debug capture
+**Last updated:** 2026-11-18, round settings in debug capture
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
@@ -149,13 +149,19 @@ actual families and candidate decisions. The [capture inspector](../../../tools/
 summarizes those routes and matches the telemetry row by `capture_file`.
 FTF and single also write a top-level `metadata` object:
 
-- `effective_settings`: the model settings used for this acquire, with sampled
-  losses and `drift: null` when drift is enabled.
-- `sampling`: the actual `root_seed` and acquire `sequence`. This is null if
-  no round snapshot was captured.
 - `rounds`: attempted rounds in order, including failed execution after a
   successful snapshot. Each entry has its zero-based `index`, `dc_values`
   by source name in the units declared in the settings, and `model_identity`.
+- `effective_settings`: the settings captured for each distinct round
+  `model_identity`. Look up a round's identity here to read its configuration.
+  Drift-enabled settings contain the sampled losses and `drift: null`.
+  Changes after the final round do not appear.
+- `admission_settings`: the effective settings at admission if no round
+  snapshot was captured, such as after a compile failure. In that case
+  `effective_settings` is empty. Otherwise `admission_settings` is null.
+- `sampling`: the binding's actual `root_seed` and acquire `sequence`.
+  A null configured seed still produces a root seed. `sampling` is null
+  if no round snapshot was captured.
 - `complete`: acquire return status, distinct from each evolve's status.
   A normal partial Stop is true; an escaping exception is false.
 Captures contain numerical inputs and model settings. Keep them out of ordinary Run metadata and Git.

@@ -55,9 +55,8 @@ from zcu_tools.simulate.evolution import (
     PathDiagnostics,
     RoutingHistory,
     batch_populations,
-    write_capture,
 )
-from zcu_tools.simulators.capture import acquire_capture_metadata
+from zcu_tools.simulators.capture import AcquireCaptureSettings
 from zcu_tools.simulators.ftf.config import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.simulators.ftf.environment.acquisition import FTFAcquisitionOptions
 from zcu_tools.simulators.ftf.environment.cavity import (
@@ -299,7 +298,7 @@ class FTFAcquire:
         """Return integrated totals or decimated shots for this snapshot/index.
 
         Numeric/ADC errors propagate without partial results or changing the
-        cached snapshot. Replay writes, when enabled, finish before returning.
+        cached snapshot. Debug capture is published at acquire completion.
         Decimated shots are rearranged from point-major C6 order to QICK loop
         order (including the reps axis). Neither mode averages or rounds data.
         cancel is checked between evolution chunks; None disables cancellation.
@@ -610,6 +609,7 @@ class FTFSource:
         self.envelope_encoder = EnvelopeEncoder()
         self._preparation_engine = self.engine
         self.capture: CaptureBuffer | None = None
+        self._capture_settings: AcquireCaptureSettings | None = None
         self._closed = False
 
     @property
@@ -655,6 +655,11 @@ class FTFSource:
             self._facts = None
             self.preparation_cache.clear()
         self.capture = CaptureBuffer() if self.settings.numerics.debug_capture else None
+        self._capture_settings = (
+            None
+            if self.capture is None
+            else AcquireCaptureSettings(self.effective_settings)
+        )
         self._pending_acquire = True
 
     def model_facts(self, snapshot: EnvironmentSnapshot) -> FTFModelFacts:
@@ -702,7 +707,10 @@ class FTFSource:
             ):
                 raise ValueError(f"dc_bias.sources.{name}.value: outside source limits")
             values.append((name, info.value))
-        return EnvironmentSnapshot("ftf-v2", self.identity, tuple(values))
+        snapshot = EnvironmentSnapshot("ftf-v2", self.identity, tuple(values))
+        if self._capture_settings is not None:
+            self._capture_settings.record(snapshot, self.effective_settings)
+        return snapshot
 
     def open_acquire(self, request: AcquireRequest) -> FTFAcquire:
         """Start a fixed template request, invalidating/releasing the previous session.
@@ -757,21 +765,16 @@ class FTFSource:
 
         outcome retains captured round inputs (including failed attempts), wall
         seconds including pacing, builder seconds and normal-return status.
-        Only the matching current session contributes routing work. Direct execute
-        users may supply their own outcome after the final round and cleanup.
-        Enabled debug_capture publishes the buffer before summary construction,
-        even with telemetry disabled. capture_file is the successful basename
-        or None when recording is off or publication fails.
+        Only the matching current session contributes routing work. For debug
+        capture, take round snapshots after begin_acquire. The buffer publishes
+        before summary construction, even with telemetry disabled. capture_file
+        is the successful basename or None when recording is off or publication fails.
         """
+        capture_settings = self._capture_settings
+        self._capture_settings = None
         capture_file = None
-        if self.capture is not None:
-            capture_file = write_capture(
-                self.capture,
-                metadata=acquire_capture_metadata(
-                    outcome,
-                    effective_settings=self.effective_settings.model_dump(mode="json"),
-                ),
-            )
+        if self.capture is not None and capture_settings is not None:
+            capture_file = capture_settings.write(self.capture, outcome)
         if self.telemetry is None:
             return
         rounds = outcome.rounds
@@ -789,7 +792,7 @@ class FTFSource:
                 "evolve_wall_s": 0.0 if session is None else session.evolve_wall_s,
                 "readout_wall_s": 0.0 if session is None else session.readout_wall_s,
                 "complete": outcome.complete,
-                "capture_file": None if capture_file is None else capture_file.name,
+                "capture_file": capture_file,
                 "extras": {
                     "ftf.projection_outcomes": list(
                         self.evaluations[-1].projection_outcomes

@@ -129,7 +129,8 @@ basis, bath and line assumptions.
 
 Set `numerics.debug_capture: true` and acquire again to investigate a simulation.
 Open that acquire's `capture-*.json.gz` under the `simulator-debug/v1` cache for
-Engine inputs, actual routing, effective settings and per-round DC values.
+Engine inputs, actual routing and per-round DC values. Use the round's
+`model_identity` to look up its effective settings in `metadata.effective_settings`.
 If telemetry is enabled, match the manifest basename to `capture_file` in
 `routing-*.jsonl` for acquire timings and family totals.
 See the [environment's debug capture guide](../../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#debug-capture).

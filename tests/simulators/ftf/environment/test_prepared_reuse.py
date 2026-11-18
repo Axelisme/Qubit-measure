@@ -13,6 +13,7 @@ from zcu_tools.simulators.ftf.environment import template as template_module
 from tests.core._simulation import tick_array, ticks
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
+from tests.simulators._engine import EngineDouble
 from tests.simulators.ftf.environment._templates import (
     expect_statistics,
     request,
@@ -43,6 +44,7 @@ def test_delivered_raw_keeps_its_round_after_eviction_and_close():
         settings().with_telemetry(enabled=False),
         DeviceManager(),
         soccfg=profile_soccfg("ftf"),
+        engine=EngineDouble(),
     )
     acquire = request()
     try:
@@ -63,7 +65,7 @@ def test_delivered_raw_keeps_its_round_after_eviction_and_close():
     delivered = result.raw.materialize(acquire.reps, acquire.avg_level)
     assert {channel: raw.tobytes() for channel, raw in delivered.items()} == expected
     for raw in delivered.values():
-        raw.fill(0)
+        raw.flat[0] += 1
     again = result.raw.materialize(acquire.reps, acquire.avg_level)
     assert {channel: raw.tobytes() for channel, raw in again.items()} == expected
 
@@ -385,6 +387,7 @@ def test_changed_preparation_inputs_miss(change, monkeypatch):
                 }
             )
         elif change == "revision":
+            # No public seam changes the backend revision; observe the preparation miss through acquire.
             monkeypatch.setattr(template_module, "BACKEND_VERSION", "changed-backend")
         elif change == "engine":
             from zcu_tools.simulate.evolution import Engine
