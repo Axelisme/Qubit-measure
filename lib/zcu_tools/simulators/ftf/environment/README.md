@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, GPU startup preparation
+**Last updated:** 2026-11-18, acquire dimension
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -37,6 +37,7 @@ and source-owned history. These controls are not physical YAML or program cfg.
   - [Physical facts and conditional readout](#physical-facts-and-conditional-readout)
 - [Startup preparation](#startup-preparation)
 - [Acquisition and numeric composition](#acquisition-and-numeric-composition)
+  - [Dimension selection](#dimension-selection)
   - [Preparation reuse](#preparation-reuse)
   - [Control conversion](#control-conversion)
   - [Flux pulses](#flux-pulses)
@@ -104,7 +105,7 @@ summary fields, the shared default directory and separate-analysis setup. `FTFSo
 `AcquireOutcome` and projects its builder-only `compile_wall_s` and `complete`.
 `complete` means the acquire body and cleanup returned normally, including partial
 Stop results. An escaping error is false.
-`evolve_wall_s` sums each `Engine.evolve` call, including direct evolution,
+`evolve_wall_s` sums each `Engine.evolve` call, including dimension pilots,
 cavity-memory spans and projective outcome continuations across software rounds.
 `readout_wall_s` sums cavity field propagation, population conversion, conditional
 ADC preparation and integrated or decimated sampling. These scopes do not overlap
@@ -112,6 +113,14 @@ evolution. A failing call contributes time through its exception; a stage never
 entered contributes `0.0`. Reusing a preparation adds no evolution wall, but still
 counts fresh round sampling. Preparation and pacing remain in total wall's
 remainder. Raw-shot materialization requested after acquire is outside this row.
+Dimension diagnostics live in `extras`. `ftf.selected_dimension` gives the
+chosen dimension, or null if no selection finished. `ftf.pilot_drop` is the
+largest magnitude of an upper-reference density entry outside the selected
+block. It is zero if the upper pilot was selected and null if no pilot finished.
+`ftf.pilot_error` is the verification's full-density max absolute error, or null
+if no verification finished. `ftf.pilot_wall_s` gives total pilot time and is
+zero when skipped. It overlaps the pilot portion of `evolve_wall_s`.
+
 Projection values live only in `extras`:
 `ftf.projection_outcomes` counts retained outcome histories per C-order point in the
 latest solved round. `ftf.projection_pruned_weight` gives each point's cumulative
@@ -284,6 +293,33 @@ real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
 
 ## Acquisition and numeric composition
 
+### Dimension selection
+
+`numerics.truncation.retained_levels` sets the upper joint basis. Acquires with
+fewer than eight timelines or an upper basis of at most twelve states use that
+basis directly. A projective read or an early cavity pulse also uses the upper
+basis: its continuation is not one terminal-only pilot evolution.
+
+For an eligible acquire, FTF selects one pilot from the first round. It takes
+the largest sum of absolute in-play drive areas scaled by the port matrix
+elements. Ties take the largest carrier detuning from the active port's
+strongest ground transition, then the first C-order point. The upper model
+evolves that timeline once. FTF finds the smallest integer dimension of at least
+twelve for which the largest magnitude of any discarded row or column entry is
+at most `5e-4`. If that dimension is smaller than the upper basis, FTF evolves
+it once and accepts it only when the zero-padded density differs from the upper
+reference by at most `1e-3` in every entry. Pilot accuracy is checked on that
+timeline; it is not a bound on untested sweep points.
+
+The reduced model projects the initial state onto the energy prefix and
+renormalizes it. The first successful selection fixes the dimension across
+software rounds, while every round keeps its own live DC model. FTF restores the
+upper basis with zero rows and columns before ADC. If the upper basis wins, the
+first round uses its saved reference for the pilot point. If a smaller model
+wins, FTF recomputes the pilot point in the full batch: the single-row and
+full-batch Engine routes need not share a family or preparation key. Pilot
+calls do not add to the production source's routing history.
+
 ### Preparation reuse
 
 `open_acquire(request)` starts a session for a fixed request. Its
@@ -297,7 +333,10 @@ event populations and conditional sums follow the complete-preparation reuse
 rules below. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
 A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sums,
 content mappings, path diagnostics and integrated sampling plans across acquires.
-Its key reads full current C1 content, layout, mode, reps and readout values,
+An acquire that runs a pilot does not retain its preparation in the cross-acquire
+cache: a new acquire runs its own pilot. Equal consecutive rounds still reuse
+one preparation. The LRU key reads full current C1 content, layout, mode, reps and
+readout values,
 including absolute phase origins. Physical settings/snapshot/numeric changes,
 engine replacement, failed preparation and close clear the preparations. It never
 retains request seeds, acquire sequences, noisy IQ or round results. Hits update

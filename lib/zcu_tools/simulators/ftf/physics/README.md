@@ -1,6 +1,6 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-18, DC energy prefix
 
 **讀者：** framework-dev、agent。固定座標 FTF 數值模型、路由與快取契約。
 
@@ -16,8 +16,11 @@ exact-input eigensystems and bath-rate results as read-only arrays, within its o
 fixed projection. Native fluxonium operators use a separate eight-entry cache
 keyed by exact EC, EL and oscillator cutoff; projected operators never enter that
 cross-joint cache. Neither memo changes the numerical operation order.
-Native n² is formed before local
-and joint projection; squared truncated n is not a substitute.
+Native n² is formed before local and joint projection; squared truncated n is
+not a substitute. An acquire can derive an energy prefix from the upper joint
+without diagonalizing the product Hamiltonian again. The prefix preserves the
+upper DC eigenvector phases and uses the upper DC secular blocks. At non-DC
+flux, the secular model diagonalizes within the smaller fixed coordinates.
 
 `charge_operator(subsystem)` returns full dimensionless n in the retained basis.
 `flux_operator(subsystem)` returns the analytic derivative of this model's H/h

@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-11-17
+**Last updated:** 2026-11-18, acquire dimension
 
 `numerics.debug_capture` is optional and defaults to false. True records one
 acquire's Engine inputs and routes using the
@@ -15,6 +15,9 @@ acquire's Engine inputs and routes using the
 中性的 physical values、receiver PSD 與 solver 欄位由 `resources.simulation_schema` 擁有，與 single-fluxonium 共用。共用型別由 `simulators.ftf.config.schema` 使用。YAML decoding 使用公開 `resources.yaml.load_yaml`，重複明寫 key 的拒絕與 merge override 行為不變。
 
 使用者填表與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。欄位型別與省略語意的程式契約在 [schema.py](schema.py)。[環境 README](../../../../../zcu_lab/simulation_envs/FTF/README.md) 提供工作副本與 GUI／Notebook 入口。
+
+`numerics.truncation.retained_levels` 是耦合系統的維度上限，不超過三個 local levels 的乘積。
+[FTF acquire](../environment/README.md#dimension-selection) 用 pilot 決定演化維度；讀出仍用上限基底。
 
 `numerics.seed` 與各 resonator 的 `thermal_occupation` 必填，可明填 `null`。
 前者在 startup 選一次 seed，後者按共通溫度計算 Bose occupation。

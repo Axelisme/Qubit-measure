@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-11-18，GPU 預編譯
+**Last updated:** 2026-11-18，每次 acquire 選維度
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -144,6 +144,8 @@ F1／F2 可選 `q_cap`、`xqp`、`aphi`；coupler 只有 `q_cap`、`aphi`，`q_i
 完整參數見 [acquisition 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)。
 
 ## 演化與重播
+
+`retained_levels` 是耦合系統的維度上限。FTF 在每次符合條件的 acquire 用一條 pilot timeline 決定演化維度，讀出仍使用上限基底。少於 8 條 timeline 的 acquire 直接用上限。見 [pilot 規則](../../../lib/zcu_tools/simulators/ftf/environment/README.md#dimension-selection)。
 
 GUI startup 選擇 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核，至少使用一個 worker。八核主機使用七個 GUI workers。GUI 傳 `warmup=True`，在背景準備常用 CPU 路徑，並依 `retained_levels` 預編譯可用的 OpenCL 程式。準備成功後，第一次 acquisition 不必再等這些編譯。
 

@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。依 YAML 欄位、單位與模型限制設定 FTF 環境並對照 entry 接線。
 
-**Last updated:** 2026-11-09，`retained_levels` 與 CZ 目標態
+**Last updated:** 2026-11-18，`retained_levels` 維度上限
 
 本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [simulators.ftf.config](../../../lib/zcu_tools/simulators/ftf/config/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 
@@ -444,7 +444,7 @@ Cov(sample) = noise_psd_adc2_ns / dt_ns
 
 ## Numerics：native、local、system 與 solver
 
-`numerics.truncation` 與 `numerics.solver` 都必填。截斷有三層，先在 native basis 建立單元件，再保留各自的 local levels，最後在耦合系統保留 `retained_levels`。增加 system 維度不能補回先前已丟棄的 local 或 native states。
+`numerics.truncation` 與 `numerics.solver` 都必填。截斷有三層，先在 native basis 建立單元件，再保留各自的 local levels，最後在耦合系統最多保留 `retained_levels` 個態。增加 system 維度不能補回先前已丟棄的 local 或 native states。
 
 ### Truncation
 
@@ -456,11 +456,11 @@ Cov(sample) = noise_psd_adc2_ns / dt_ns
 | `f1.levels`、`f2.levels` | 各 fluxonium 的 local retained dimension | 無單位，整數 ≥ 1，且 ≤ 各自 native_cutoff | 各自必填 |
 | `coupler.charge_cutoff` | SQUID charge basis 的 ncut，charge states 為 −ncut 到 +ncut | 無單位，整數 ≥ 1，native dimension 是 2*ncut+1 | 必填，不是直接填 dimension |
 | `coupler.levels` | Coupler 的 local retained dimension | 無單位，整數 ≥ 1，且 ≤ 2*charge_cutoff+1 | 必填 |
-| `retained_levels` | 耦合系統的 system retained dimension | 無單位，整數 ≥ 1，且 ≤ f1.levels * coupler.levels * f2.levels | 必填 |
+| `retained_levels` | 耦合系統演化維度的上限 | 無單位，整數 ≥ 1，且 ≤ f1.levels * coupler.levels * f2.levels | 必填 |
 
 樣板是 native dimensions 24、17、24，local levels 各 4，因此 local product 是 64，再保留 24 個 system levels。這只說明維度關係。判斷收斂時，應分別增加 native、local、system 維度，並比較關心的頻率、matrix elements 或量測結果。
 
-`retained_levels` 保留耦合系統能量最低的 M 個本徵態，更高的態不在模擬基底內。CZ 的驅動從 |1,0,1⟩ 打到 |1,1,1⟩，所以 M 至少要等於 |1,1,1⟩ 的能量排名（從 1 起算）。排名超過 M 時模擬不會報錯，但掃不到 chevron。樣板電路的排名在整數磁通附近是 23 到 24，半磁通附近最高 12，中間磁通最高 28。換電路參數或工作點後，用 `JointModel` 的 `parent_vectors` 找出 |1,1,1⟩ 權重最大的本徵態，重算排名。
+`retained_levels` 建立能量最低 M 個本徵態的上限基底。符合條件的 acquire 可以由 [pilot](../../../lib/zcu_tools/simulators/ftf/environment/README.md#dimension-selection) 選擇更小的前綴。排名超過 M 的態不在模擬基底內。CZ 的驅動從 |1,0,1⟩ 打到 |1,1,1⟩，所以 M 至少要等於 |1,1,1⟩ 的能量排名（從 1 起算）。排名超過 M 時模擬不會報錯，但掃不到 chevron。樣板電路的排名在整數磁通附近是 23 到 24，半磁通附近最高 12，中間磁通最高 28。換電路參數或工作點後，用 `JointModel` 的 `parent_vectors` 找出 |1,1,1⟩ 權重最大的本徵態，重算排名。
 
 ### Solver 與 seed
 

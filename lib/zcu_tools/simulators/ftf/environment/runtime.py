@@ -61,10 +61,21 @@ from zcu_tools.simulators.ftf.config import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.simulators.ftf.environment.acquisition import FTFAcquisitionOptions
 from zcu_tools.simulators.ftf.environment.cavity import (
     CavityEvolutionOptions,
+    ProjectionEvolution,
     evolve_plans,
     evolve_projective_plans,
 )
+from zcu_tools.simulators.ftf.environment.dimension import (
+    DimensionSelection,
+    can_pilot,
+    embed_upper,
+    evolution_source,
+    evolve_terminal,
+    pilot_dimension,
+    pilot_size,
+)
 from zcu_tools.simulators.ftf.environment.drift import FTFCoherenceDrift
+from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET
 from zcu_tools.simulators.ftf.environment.preparation import (
     EnvelopeEncoder,
     PreparationCache,
@@ -260,6 +271,24 @@ class FTFAcquire:
         self.routing: list[PathDiagnostics] = []
         self.evolve_wall_s = 0.0
         self.readout_wall_s = 0.0
+        self._dimension: DimensionSelection | None = None
+        self.pilot_wall_s = 0.0
+
+    @property
+    def dimension(self) -> DimensionSelection | None:
+        """The first round's selected dimension; None before preparation."""
+        return self._dimension
+
+    @contextmanager
+    def _timing_pilot(self) -> Generator[None]:
+        if self._source.telemetry is None:
+            yield
+            return
+        start = time.monotonic()
+        try:
+            yield
+        finally:
+            self.pilot_wall_s += time.monotonic() - start
 
     @contextmanager
     def _evolving(self) -> Generator[None]:
@@ -388,9 +417,13 @@ class FTFAcquire:
         key = preparation_key(
             self.request, owner.readout, encoder=owner.envelope_encoder
         )
+        # A pilot is acquisition-local: its reference and selected dimension
+        # cannot be read from or saved to the cross-acquire preparation cache.
+        if self._dimension is not None and self._dimension.drop is not None:
+            return self._prepare(snapshot, index, key=key, cancel=cancel)
         prepared = owner.preparation_cache.get(key)
         if prepared is None or not all(
-            owner.engine.reuse(facts.source, reuse_key)
+            owner.engine.reuse(facts.source, reuse_key, budget=EVOLUTION_BUDGET)
             for reuse_key in prepared.reuse_keys
         ):
             # Evolution replays inventory and reprices immutable policy facts.
@@ -398,8 +431,10 @@ class FTFAcquire:
             prepared = self._prepare(
                 snapshot, index, key=key, previous=prepared, cancel=cancel
             )
-            owner.preparation_cache.put(key, prepared)
+            if self._dimension is not None and self._dimension.drop is None:
+                owner.preparation_cache.put(key, prepared)
         else:
+            self._dimension = DimensionSelection(len(facts.source.initial_density))
             if owner.telemetry is not None:
                 self.routing.append(prepared.paths.for_reuse(telemetry=True))
             owner.evaluations = (
@@ -413,6 +448,42 @@ class FTFAcquire:
             )
             prepared.paths.warn_exceeded()
         return prepared
+
+    def _evolve(
+        self,
+        plans: tuple[FTFTemplatePlan, ...],
+        facts: FTFModelFacts,
+        options: CavityEvolutionOptions,
+    ) -> tuple[EvolutionResult, tuple[bytes, ...], ProjectionEvolution | None]:
+        owner = self._source
+        settings = owner.effective_settings
+        upper = len(facts.source.initial_density)
+        model = facts.source
+        reference = None
+        if self._dimension is None:
+            if pilot_size(prod(self.request.point_dims), upper) and can_pilot(plans):
+                with self._timing_pilot():
+                    self._dimension, model, reference = pilot_dimension(
+                        owner.engine, plans, facts, settings, options=options
+                    )
+            else:
+                self._dimension = DimensionSelection(upper)
+        elif self._dimension.dimension < upper:
+            model = evolution_source(facts, settings, self._dimension.dimension)
+        if self._dimension.dimension < upper or reference is not None:
+            evolved = evolve_terminal(
+                owner.engine, model, plans, options=options, reference=reference
+            )
+            return embed_upper(evolved, upper), (), None
+        if any(any(plan.projective_reads) for plan in plans):
+            projection = evolve_projective_plans(
+                owner.engine, plans, facts, settings, options=options
+            )
+            return projection.result, projection.reuse_keys, projection
+        evolved, keys = evolve_plans(
+            owner.engine, plans, facts, settings, options=options
+        )
+        return evolved, keys, None
 
     def _prepare(
         self,
@@ -439,7 +510,6 @@ class FTFAcquire:
             for template in acquire.templates
         )
         _validate_event_layouts(plans)
-        projection = None
         options = CavityEvolutionOptions(
             key,
             owner.telemetry is not None,
@@ -448,15 +518,7 @@ class FTFAcquire:
             evolving=self._evolving,
             reading=self._reading,
         )
-        if any(any(plan.projective_reads) for plan in plans):
-            projection = evolve_projective_plans(
-                owner.engine, plans, facts, owner.effective_settings, options=options
-            )
-            evolved, reuse_keys = projection.result, projection.reuse_keys
-        else:
-            evolved, reuse_keys = evolve_plans(
-                owner.engine, plans, facts, owner.effective_settings, options=options
-            )
+        evolved, reuse_keys, projection = self._evolve(plans, facts, options)
         if owner.telemetry is not None:
             self.routing.append(evolved.paths)
         # Retain solve diagnostics even when ADC preparation rejects a row.
@@ -799,6 +861,7 @@ class FTFSource:
         if session is None or session.request is not request:
             session = None
         paths = () if session is None else session.routing
+        dimension = None if session is None else session.dimension
         self.telemetry.write(
             {
                 "points": prod(request.point_dims) if request is not None else 0,
@@ -810,6 +873,14 @@ class FTFSource:
                 "complete": outcome.complete,
                 "capture_file": None if capture_file is None else capture_file.name,
                 "extras": {
+                    "ftf.selected_dimension": None
+                    if dimension is None
+                    else dimension.dimension,
+                    "ftf.pilot_drop": None if dimension is None else dimension.drop,
+                    "ftf.pilot_error": None if dimension is None else dimension.error,
+                    "ftf.pilot_wall_s": 0.0
+                    if session is None
+                    else session.pilot_wall_s,
                     "ftf.projection_outcomes": list(
                         self.evaluations[-1].projection_outcomes
                         if paths and self.evaluations

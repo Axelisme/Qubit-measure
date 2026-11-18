@@ -27,7 +27,7 @@ from zcu_tools.simulate.evolution import (
     segment_spans,
 )
 from zcu_tools.simulators.ftf.config import FTFSettings
-from zcu_tools.simulators.ftf.environment.numeric import resonators
+from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET, resonators
 from zcu_tools.simulators.ftf.environment.template import FTFModelFacts, FTFTemplatePlan
 from zcu_tools.simulators.ftf.physics import CavityDrive
 
@@ -245,6 +245,7 @@ def _evolve_outcomes(
                 result = engine.evolve(
                     facts.source,
                     (batch,),
+                    budget=EVOLUTION_BUDGET,
                     cancel=options.cancel,
                     telemetry=options.telemetry,
                     capture=options.capture,
@@ -380,6 +381,7 @@ def evolve_plans(
             return engine.evolve(
                 facts.source,
                 tuple(plan.batch for plan in plans),
+                budget=EVOLUTION_BUDGET,
                 cancel=options.cancel,
                 telemetry=options.telemetry,
                 capture=options.capture,
@@ -428,6 +430,7 @@ def _evolve_cavities(
             result = engine.evolve(
                 facts.source,
                 plain,
+                budget=EVOLUTION_BUDGET,
                 cancel=options.cancel,
                 telemetry=options.telemetry,
                 capture=options.capture,
@@ -449,6 +452,7 @@ def _evolve_cavities(
             result = engine.evolve(
                 facts.source,
                 batches,
+                budget=EVOLUTION_BUDGET,
                 cancel=options.cancel,
                 telemetry=options.telemetry,
                 capture=options.capture,
