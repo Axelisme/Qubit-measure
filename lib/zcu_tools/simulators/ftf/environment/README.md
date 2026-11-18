@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, acquire dimension
+**Last updated:** 2026-11-18, cross-acquire dimension reuse
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -119,6 +119,7 @@ See [Dimension selection](#dimension-selection) for the cases that skip the pilo
 | Field | Meaning |
 | --- | --- |
 | `ftf.selected_dimension` | Selected dimension N, or `null` if selection did not finish. |
+| `ftf.dimension_reused` | `true` when N comes from an earlier acquire of the same content, even if this acquire needs to evolve again. Otherwise `false`. |
 | `ftf.pilot_point` | Pilot timeline's zero-based index in the whole acquire grid flattened in C order, not its position in a template. Later rounds keep this index. It is `null` if no pilot completed. |
 | `ftf.pilot_drop` | `drop(N)`, the largest magnitude of an upper-reference density entry outside the selected block. It is zero when a pilot selects the upper basis, or `null` if no pilot completed. |
 | `ftf.pilot_error` | Maximum absolute density difference between the upper reference and the zero-padded verification, even if verification rejects the smaller basis. It is `null` if no verification completed. |
@@ -219,7 +220,7 @@ process-level reference count: the first sets the limit and the last restores
 it. Do not independently change threadpoolctl limits while an evolve is active.
 Empty work, one timeline, and `workers=1` run serially without a joblib pool.
 Other calls own a threading pool only during `evolve`; no idle pool survives.
-`FTFSource.close()` clears preparations and the engine's routing facts.
+`FTFSource.close()` clears preparations, remembered dimensions and the engine's routing facts.
 It clears source-owned routing history but preserves caller-borrowed history.
 Dropping the environment also releases this in-memory state; no disk cache is involved.
 
@@ -337,28 +338,33 @@ event populations and conditional sums follow the complete-preparation reuse
 rules below. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
 A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sums,
 content mappings, path diagnostics and integrated sampling plans across acquires.
-An acquire that runs a pilot does not retain its preparation in the cross-acquire
-cache: a new acquire runs its own pilot. Equal consecutive full batches reuse
-one preparation. The LRU key reads full current C1 content, layout, mode, reps and
-readout values,
-including absolute phase origins. Physical settings/snapshot/numeric changes,
-engine replacement, failed preparation and close clear the preparations. It never
-retains request seeds, acquire sequences, noisy IQ or round results. Hits update
+A later acquire can reuse either a pilot round's split preparation or a full-batch
+preparation. Both retain the selected N. A separate 256-entry LRU remembers N for
+that same content after the preparation is evicted. On a preparation miss with a
+remembered N, FTF skips the pilot and evolves the full batch at N.
+The key still reads full current C1 content, layout, mode, reps and readout
+values, including absolute phase origins. Physical settings, snapshot or numeric
+changes, engine replacement, failed preparation and close clear both caches.
+A later round at a changed snapshot keeps its session's N and can reuse that
+round's preparation locally. A new acquire at that snapshot runs its own pilot. These caches never retain request seeds,
+acquire sequences, noisy IQ or round results. Hits update
 numeric-use identity and repeat report-only accuracy warnings through evolution's
 `PathDiagnostics.warn_exceeded()`. Hits ask `Engine.reuse` to resolve the current
 selection from immutable inventory and pricing facts. FTF neither inspects
 cumulative source counters nor infers history sensitivity from count increments. An unchanged
 selection returns the saved preparation without template conversion, geometry,
 WorkPlan construction, numerical preparation, population conversion or cache put.
-A changed selection or evicted routing facts calls `Engine.evolve` and refreshes
-populations and paths while retaining ADC channels. Content keys exclude
+A changed route or evicted routing facts calls `Engine.evolve` and refreshes
+populations and paths while retaining ADC channels. A prior N still applies, so
+this refresh evolves the full batch without a pilot. The split and full shapes
+register separate routing facts against the stable model source for their N. Content keys exclude
 cumulative counts, so growing usage does not force a preparation-cache miss.
 Evolution counts each distinct acquire content's complete row inventory once;
 identical repeats do not invent additional numerical playback to amortize a gate.
-Other hits return the saved preparation without evolving. Equal consecutive
-full-batch software rounds remain one preparation. The public
+Equal consecutive full-batch software rounds remain one preparation. The public
 `source.preparation_cache` reports cumulative `builds`, `hits` and `resident_bytes`.
-Its `max_bytes` can be adjusted between calls; zero disables residency. The budget
+Its `max_bytes` can be adjusted between calls; zero disables preparation
+residency without discarding the separate N records. The budget
 counts Python containers/keys and whole ndarray allocations, including bases of
 views. Active/caller references are separate from resident budgets.
 Conditional ADC solvers are request-local. A separate source-owned
