@@ -191,6 +191,7 @@ Timeline 結尾與作者時間的合法範圍為 `[0, 2**31)`，中間算術須�
 已知的常數、sweep、framework table 與 hint 仍供證明及省指令使用；hint 不會關閉既有資訊。
 這個時間視圖不改 signed 非時間資料，也不改已捕獲來源的身份。
 2026-10-31，使用者裁定：「F3同意，range_hint是可選的」。lo=0／hi 未知與保留已知來源的細節由 advisor 於 2026-11-01 依代理授權裁定。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 Program／timeline owner 擁有 framework producer bounds 與翻譯後的全流寫入稽核。
 原生常數、sweep、loader table 與 playback owner 提供來源關係、合法 index 及依賴。

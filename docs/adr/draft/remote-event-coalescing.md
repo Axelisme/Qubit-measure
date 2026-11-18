@@ -13,6 +13,7 @@ status: draft
 ## 待實作邊界
 
 GUI 訂閱端可以按同一 event-loop tick 的 payload type 和 tab 去重反應。Bus 仍同步且無 timer；收合不能改變必要的 domain commit 順序。Remote 已有 subscriber-aware lazy push，不要求 transport 作批次 flush。本 draft 不核准 replay buffer、Web 事件服務或新的高頻 wire channel。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 ## 轉正條件
 
