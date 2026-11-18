@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, segment replay version
+**Last updated:** 2026-11-18, debug capture and acquire telemetry
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -30,6 +30,7 @@ and source-owned history. These controls are not physical YAML or program cfg.
 ## Contents
 
 - [Round pacing](#round-pacing)
+- [Debug capture](#debug-capture)
 - [Routing telemetry](#routing-telemetry)
 - [Numeric source](#numeric-source)
   - [Acquisition clock and loss drift](#acquisition-clock-and-loss-drift)
@@ -43,7 +44,6 @@ and source-owned history. These controls are not physical YAML or program cfg.
   - [Cavity drives](#cavity-drives)
   - [Readout and sampling](#readout-and-sampling)
   - [Physical applicability](#physical-applicability)
-  - [Private replay](#private-replay)
 
 ## Round pacing
 
@@ -66,9 +66,16 @@ Profiling overrides and the caller's board-loading example belong to
 `numerics.debug_capture` defaults to false. Enable it to publish one frozen
 Engine-input and route manifest after each admitted acquire, including failure.
 Every evolve in that acquire shares the same buffer. Telemetry can remain off.
-When enabled, telemetry stores the published basename in `capture_file`,
-or null when capture is off or publication fails. Capture writes run before
-summary construction and outside binding's measured wall time.
+Open the `capture-*.json.gz` manifest to read `inputs` for Engine inputs and per-row
+routes. In `metadata`, use a round's `model_identity` to look up its settings
+in `effective_settings`. Each attempted round retains its DC values, even if
+execution failed after its snapshot. If no snapshot was taken, read
+`admission_settings` instead. `sampling` shows the actual seed and sequence
+when a round snapshot exists.
+When telemetry is enabled, use `capture_file` in `routing-*.jsonl` to match the
+manifest to its acquire row. The row shows family totals, stage timings and
+projection outcomes and pruned weights. Capture writes run before summary
+construction and outside binding's measured wall time.
 See the [shared switch contract](../../README.md#debug-capture) for empty
 captures, retention and the cache directory.
 
@@ -88,20 +95,17 @@ Each line contains `timestamp`, `points` (request grid, excluding shots),
 `rounds` (captured attempts), `wall_s` (admitted acquire time including pacing,
 excluding telemetry I/O), `frontend_cpu_s` (geometry and WorkPlan calling-thread
 CPU), `estimated_cost_unit` and `families`. Failed calls
-before a captured request have zero points and empty families. Family values are
-`rows`, `prepare_cpu_s`, `apply_cpu_s`, `actual_cpu_s`, `cache_hits`,
-`rejected_rows`, `prepare_builds`, `admission_rows`, `estimated_cost` and nullable
-`estimated_cpu_s`; counter meanings and family-specific instrumentation follow the
-[evolution report contract](../../../simulate/evolution/README.md#routing-telemetry).
+before a captured request have zero points and empty families.
 Rows and hits sum across rounds. Noiseless reuse contributes logical rows and
 cache hits but zero kernel CPU, rejections and estimated work. Actual CPU excludes
 ADC, sampling and routing bookkeeping; wall includes those operations.
 Numeric templates contain no program/experiment identifier, so `experiment` is
 omitted rather than guessed from controls or caller frames.
 
-The shared [telemetry contract](../../README.md#acquire-telemetry) defines common
-summary fields, the shared default directory and separate-analysis setup. `FTFSource.finish_acquire(outcome)` receives the binding's
-`AcquireOutcome` and projects its builder-only `compile_wall_s` and `complete`.
+The [shared telemetry contract](../../README.md#acquire-telemetry) lists the
+persisted family fields and defines the common summary and directory settings.
+`FTFSource.finish_acquire(outcome)` receives the binding's `AcquireOutcome` and
+projects its builder-only `compile_wall_s` and `complete`.
 `complete` means the acquire body and cleanup returned normally, including partial
 Stop results. An escaping error is false.
 `evolve_wall_s` sums each `Engine.evolve` call, including direct evolution,
@@ -142,8 +146,8 @@ charge admission. Empty requirements preserve ordinary acquisition.
 
 ### Acquisition clock and loss drift
 
-`FTFAcquisitionOptions(clock=None, truth_log=None, private_replay=None)` selects
-one environment clock and private persistence paths. Pass it as `acquisition=` to
+`FTFAcquisitionOptions(clock=None, truth_log=None)` selects
+one environment clock and the private drift truth log. Pass it as `acquisition=` to
 `ftf` or `FTFSource`, not as separate builder/source keywords. An omitted clock
 creates one per environment. A caller-owned clock must not be shared between
 independent environments. The builder shares it between acquisition admission and
@@ -179,12 +183,12 @@ Each begin writes rows with `qubit` keys `f1`, `coupler`, `f2`, a session UUID,
 simulated seconds, UTC wall time and effective q_cap/q_ind/xqp/aphi.
 The coupler has JSON null q_ind/xqp. An explicit `truth_log=Path(...)` selects
 another file; relative paths resolve from cwd. Enabled drift creates parent
-directories and appends; callers own retention for both truth and replay paths.
+directories and appends; callers own truth-log retention.
 A new source or environment restart creates a new session starting at chip values.
 Disabled drift writes nothing. Truth-log serialization and filesystem failures
 propagate before request construction.
-Routing telemetry remains a separate YAML-controlled policy. Truth and replay
-files must not enter ordinary Run, GUI or MCP metadata.
+Routing telemetry remains a separate YAML-controlled policy. Keep truth logs
+and debug captures out of ordinary Run, GUI and MCP metadata.
 
 ### Workers and engine budget
 
@@ -200,7 +204,7 @@ The shared GUI worker policy is
 `gui.app.measure.startup_context.simulation_workers(cpu_count)`, defined by
 [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
 Startup instructions belong to
-[FTF startup](../../../../../zcu_lab/simulation_envs/FTF/README.md#演化與重播).
+[FTF startup](../../../../../zcu_lab/simulation_envs/FTF/README.md#演化與除錯).
 Evolution limits
 native BLAS to one thread for the entire call. Overlapping evolves share a
 process-level reference count: the first sets the limit and the last restores
@@ -324,7 +328,7 @@ resident immutable `PulseEnvelope`. The full binary content (types, dtypes,
 shapes, sample times and complex values) is hashed once on a miss. Each outer key
 occurrence hashes only a domain tag and the 32-byte fingerprint. Equal content
 produces equal keys with or without an encoder; identities only select resident
-reuse. These keys stay in process-local caches, not replay or disk. The budget
+reuse. These keys stay in process-local caches. The budget
 includes the full retained envelope, numeric objects, fingerprints and Python
 containers. It reports cumulative `builds`/`hits` and `resident_bytes`;
 `max_bytes` is adjustable between calls and zero disables
@@ -600,8 +604,7 @@ Separate acquires can select different paths in the same environment.
 The caller supplies the board profile independently of model wiring. Runtime
 uses that profile without inferring channel counts or selecting a mock profile;
 the environment routes include both configured readout paths and all drive lines.
-`plan_template` and `FTFSource` accept an explicit `readout=` override; private replay rejects an
-override that cannot be reconstructed from captured settings. Plans expose
+`plan_template` and `FTFSource` accept an explicit `readout=` override. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
 Each batch retains the same chronological logical-event axis. An event contains
 only its own incident pulse block and that ADC's observed grids. Empty grids mean
@@ -649,43 +652,3 @@ multilevel relaxation. Direct-mean variance includes initial-state mixture,
 receiver noise and the integrated rounding term.
 Physical raw and traces additionally resolve continuous jump times and cavity
 memory. They need only agree with direct means in expectation, not realization.
-
-### Private replay
-
-`acquisition=FTFAcquisitionOptions(private_replay=absolute_directory)` opts into
-checked private input archives. Acquire and round JSON use schema version 2.
-Version 1 archives fail rather than converting float times. Import `FTFAcquisitionOptions` from
-`zcu_tools.simulators.ftf.environment`. Relative replay roots raise `ValueError`.
-`replay_round(round_path, soccfg=recording_profile)` recomputes one round without
-drivers, earlier rounds, current YAML or numeric records. Import it from
-`zcu_tools.simulators.ftf.environment`. The caller must supply the board profile used during
-recording. Archives do not store that profile, and replay does not verify its
-identity. It never infers board settings from saved model wiring.
-`ReplayAcquire.settings` stores that acquisition's effective settings with
-`drift=None`, so replay neither reads the simulation clock nor samples drift.
-`ReplayRound.snapshot.model_identity` stores the effective model identity.
-The version pairs require an exact backend, model, engine numeric version, RNG
-and dependency match. They also record `workers`, the Engine's worker count, and
-`execution_device`, the device that computed the round's evolution. If no row ran
-on GPU, the record says `cpu` and replay forces the CPU backend without checking
-for OpenCL. If any row ran on GPU, replay requires the same OpenCL device name,
-driver, kernel version and pyopencl version, then reruns automatic routing with
-the recorded worker count. A different or unavailable GPU raises `ValueError`
-with both identities. pyopencl is not a global replay dependency. Archives
-missing either execution field fail the version check.
-The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v13`. Integrated raw and decimated traces resolve
-continuous CTMC jump times and cavity memory, with one physical path per shot
-shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v12`
-and earlier backends fail explicitly because they predate segment-boundary cavity
-field inheritance.
-Direct means retain conditional moments, their numeric values and their existing
-RNG stream. Raw getters do not advance that stream or shift shots to match a
-finite-shot direct mean. Each acquisition route reproduces itself for equal
-seed, inputs and recorded versions. Evolution uses `segment-engine-v10`.
-Old exact-record manifests also fail explicitly. Archives contain model truth and
-must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
-the opaque simulation identifier.
-
-There is no offline database builder, U-table library or persistent density
-record store. Replay retains inputs and recomputes evolution and readout.

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from ._dop853_opencl import OpenCLDOP853
 
 PROBE_DIMENSION = 3
-PROBE_REVISION = "1"
+PROBE_REVISION = "2"
 
 
 def _probe_input() -> EndpointData:
@@ -55,11 +55,11 @@ def _probe_input() -> EndpointData:
     return EndpointData(pack_models([model]), segments)
 
 
-def endpoint_error(runner: OpenCLDOP853) -> float:
-    """Run one fixed 100 ns sampled endpoint; return max CPU–GPU entry error.
+def endpoint_error(runner: OpenCLDOP853, *, dp54: bool) -> float:
+    """Compare CPU and GPU full density for one fixed 100 ns sampled endpoint.
 
-    Compare production FP64 CPU and mixed-precision GPU DOP853 at the same
-    budget; propagate build, driver and arithmetic failures to detection.
+    Both devices use the requested tableau at the same budget. Return the
+    maximum entry difference; propagate numerical or driver errors to detection.
     """
     data = _probe_input()
     psi = np.array([2, 1j, 1 - 1j]) / np.sqrt(7)
@@ -67,8 +67,7 @@ def endpoint_error(runner: OpenCLDOP853) -> float:
     cpu = initial.copy()
     row = np.zeros(1, dtype=np.int64)
     budget = 1e-3
-    gpu = runner.advance(data, (row, row), initial, budget)
-    advance_endpoints(
-        data, (row, row), cpu, budget, DOP853Plan(np.array(["interaction"]), row - 1)
-    )
+    gpu = runner.advance(data, (row, row), initial, budget, dp54=dp54)
+    plan = DOP853Plan(np.array(["interaction"]), row - 1, np.array([dp54]))
+    advance_endpoints(data, (row, row), cpu, budget, plan)
     return float(np.max(np.abs(cpu - gpu)))

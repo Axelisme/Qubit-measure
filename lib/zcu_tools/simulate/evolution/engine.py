@@ -29,8 +29,8 @@ from ._validation import density, integers, owned, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
 
-# Replay identity of the segment engine numerical algorithms, independent of records.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v10"
+# Numerical algorithm revision used by capture, reporting, and simulator caches.
+SEGMENT_NUMERIC_VERSION = "segment-engine-v11"
 
 
 @dataclass(frozen=True)
@@ -466,7 +466,7 @@ def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
     frontend_cpu_s are summed.
     max_trace_error is the maximum, or zero for empty parts. Routing sums each
     family's row counts, CPU times, hits, rejections, costs, builds,
-    admission rows and OpenCL endpoints. For each family, the first nonempty
+    admission rows and endpoints by tableau and OpenCL. For each family, the first nonempty
     OpenCL detection failure is retained in input order.
     estimated_cpu_s is None if any contributing family estimate is unknown.
     Reuse-hit diagnostics participate exactly as returned, without adding hits
@@ -524,6 +524,8 @@ def _merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
         prepare_builds=sum(part.prepare_builds for part in parts),
         admission_rows=sum(part.admission_rows for part in parts),
         opencl_rows=sum(part.opencl_rows for part in parts),
+        dp54_rows=sum(part.dp54_rows for part in parts),
+        dop853_rows=sum(part.dop853_rows for part in parts),
         opencl_detection_error=_first_opencl_detection_error(parts),
     )
 
@@ -778,6 +780,7 @@ class Engine:
         """
         from ._capture import CaptureRun
         from ._dispatch import classify, create_work_plan
+        from ._dop853_dispatch import with_opencl
         from ._input_key import input_key
         from ._planning import plan
         from ._prefix import PrefixResolver
@@ -832,7 +835,7 @@ class Engine:
                     geometry = PrefixResolver(
                         geometry, kernels, context, cancel, capture=capture_run
                     ).resolve(pool, self._chunks)
-                    context = replace(context, opencl=self._opencl)
+                    context = with_opencl(context, self._opencl)
                     dispatch = classify(
                         geometry,
                         kernels,

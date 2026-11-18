@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-18，sampled multitone RWA admission
+**Last updated:** 2026-11-18，sampled multitone RWA admission 與 DP5(4)
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -29,12 +29,16 @@ Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_ga
 [`_multitone_spot.py`](_multitone_spot.py) 將通過 omission proxies 的 sampled 雙 tone 列按形狀分群。
 同群的 model、列長、port、carrier、起始相位、取樣網格與切片偏移都相同。
 每個 tone 的 I/Q 包絡樣本只可差一個正振幅倍率。每群抽查各 tone 振幅最大的列，重複列只比一次。
-Guard 以固定 coherent 初態呼叫 `dop853.advance_endpoints`，把完整 density 和 RWA 比對。
+Guard 以固定 coherent 初態呼叫 `dop853.advance_endpoints` 的 DOP853 路徑，把完整 density 和 RWA 比對。
 各抽查列差值須 ≤ 0.1 × budget，否則只有該群退回其餘候選。
 這取代 2026-11-14 的 sampled RWA 過渡期拒收，不改 distinct-port constant pairs 或
 `multitone_gate` 的 guard。頻掃、短脈衝與相位序列案例見 [kernel 表](../README.md#kernel-summary)。
-`dop853.advance_endpoints` 擁有旋轉座標 density 積分，`dop853` 與 `t6` direct
-沿用相同的每段 budget 容差規則。這是局部積分控制，不保證整條序列的最終誤差。
+
+`dop853.advance_endpoints` 擁有旋轉座標 density 積分。
+`dop853` 的 CPU row 和符合 [OpenCL 條件](../README.md#gpu-backend)的 row，在時長 ≤10 µs 且 budget ≥1e-3 時走 DP5(4)，兩個局部容差都除以三。
+[共用 solver](_dop853.py) 提供兩套 tableau 與 controller 常數。兩種方法在各自的裝置上共用積分迴圈、RHS 與 knot 停點。
+`t6` direct、period fractional tail 與 `flux_dop853` 仍用 DOP853。
+局部容差不保證整條序列的最終誤差；見 [DP5(4) 精度案例](../README.md#cpu-dp54-accuracy)。
 `t6` 的每一列都走 direct，不依 key 重用數選算法，也不掃描完整 acquire inventory。
 Preparation 只打包 model operators；[`_t6_dispatch`](../_t6_dispatch.py) 保留 prepare-key 建構。
 完整 owner 對照見 [evolution README](../README.md#algorithm-ownership-and-reuse)。

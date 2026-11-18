@@ -44,12 +44,52 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
             duration_ns_by_kernel={"dop853": family.duration_ns},
         )
         for family in (
-            FamilyRouting(rows=3, opencl_rows=3, duration_ns=300),
             FamilyRouting(
-                rows=1, opencl_detection_error="self-test failed", duration_ns=100
+                rows=3,
+                opencl_rows=3,
+                dop853_rows=3,
+                duration_ns=300,
+                apply_cpu_s=0.25,
+                estimated_cost=7.0,
+                estimated_cpu_s=0.5,
             ),
-            FamilyRouting(rows=1, opencl_detection_error="no device", duration_ns=100),
+            FamilyRouting(
+                rows=2,
+                dp54_rows=1,
+                cache_hits=1,
+                rejected_rows=2,
+                opencl_detection_error="self-test failed",
+                duration_ns=125,
+                prepare_cpu_s=0.125,
+                apply_cpu_s=0.5,
+                estimated_cost=2.0,
+                estimated_cpu_s=0.25,
+            ),
+            FamilyRouting(
+                rows=1,
+                dop853_rows=1,
+                opencl_detection_error="no device",
+                duration_ns=100,
+                estimated_cost=1.0,
+            ),
         )
+    ) + (
+        PathDiagnostics(
+            {"common_frame": 2},
+            routing={
+                "common_frame": FamilyRouting(
+                    rows=2,
+                    duration_ns=80,
+                    prepare_cpu_s=0.25,
+                    apply_cpu_s=0.125,
+                    estimated_cost=3.0,
+                    estimated_cpu_s=0.125,
+                    prepare_builds=1,
+                    admission_rows=2,
+                )
+            },
+            duration_ns_by_kernel={"common_frame": 80},
+        ),
     )
     writer.write(summary, paths=paths)
     assert json.dumps(summary, sort_keys=True) == before
@@ -102,10 +142,38 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
             "ftf.projection_pruned_weight": [0.0, 0.01],
         },
     }
-    dop853 = record["families"]["dop853"]
-    assert dop853["rows"] == 5
-    assert dop853["opencl_rows"] == 3
-    assert dop853["opencl_detection_error"] == "self-test failed"
+    assert record["families"] == {
+        "dop853": {
+            "rows": 6,
+            "prepare_cpu_s": 0.125,
+            "apply_cpu_s": 0.75,
+            "cache_hits": 1,
+            "rejected_rows": 2,
+            "estimated_cost": 10.0,
+            "estimated_cpu_s": None,
+            "prepare_builds": 0,
+            "admission_rows": 0,
+            "duration_ns": 525.0,
+            "opencl_rows": 3,
+            "opencl_detection_error": "self-test failed",
+            "actual_cpu_s": 0.875,
+        },
+        "common_frame": {
+            "rows": 2,
+            "prepare_cpu_s": 0.25,
+            "apply_cpu_s": 0.125,
+            "cache_hits": 0,
+            "rejected_rows": 0,
+            "estimated_cost": 3.0,
+            "estimated_cpu_s": 0.125,
+            "prepare_builds": 1,
+            "admission_rows": 2,
+            "duration_ns": 80.0,
+            "opencl_rows": 0,
+            "opencl_detection_error": None,
+            "actual_cpu_s": 0.375,
+        },
+    }
 
 
 def test_writer_removes_oldest_routing_files_and_warns_only_once(tmp_path: Path):

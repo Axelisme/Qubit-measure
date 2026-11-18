@@ -66,7 +66,6 @@ def single_environment(configuration, *, soccfg, engine=None, **kwargs):
     source = SingleFluxoniumSource(
         configuration,
         env.devices,
-        private_replay=kwargs.get("private_replay"),
         runtime=SingleFluxoniumRuntimeOptions(
             engine=EngineDouble(families=kwargs.get("families"))
             if engine is None

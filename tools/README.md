@@ -325,7 +325,9 @@ oracle does not establish truncation convergence.
 Available family routing reports retain aggregate `prepare_cpu_s`,
 `apply_cpu_s`, logical `rows` and `cache_hits`. The CPU fields measure the
 calling thread, not Engine wall or process CPU. `dop853.opencl_rows` and
-`dop853.opencl_detection_error` identify GPU execution and auto fallback. Missing accounting remains unavailable, not zero.
+`dop853.opencl_detection_error` identify GPU execution and auto fallback.
+`dop853.dp54_rows` and `dop853.dop853_rows` count physical endpoints by
+tableau across CPU and GPU. Missing accounting remains unavailable, not zero.
 Across different frozen N coordinates, time differences estimate marginal cost.
 Keep nonlinear points separate. `apply_cpu_s/rows` is a logical-row amortization,
 not the cost of one apply call. Diagnostics from an extra sample are not a

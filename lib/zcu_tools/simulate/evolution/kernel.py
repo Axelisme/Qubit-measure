@@ -274,6 +274,8 @@ class KernelContext:
     None preserves unrestricted selection. Kernels retain their original guards.
     opencl borrows the Engine's DOP853 backend during ordinary timeline work;
     None plans and runs CPU-only work (including shared prefixes).
+    opencl_dp54 is dispatch's tableau decision: True for DP5(4), False for
+    DOP853. Unused without an OpenCL backend.
     """
 
     source: ModelSource
@@ -281,6 +283,7 @@ class KernelContext:
     work_plan: WorkPlan
     families: frozenset[str] | None = None
     opencl: OpenCLBackend | None = None
+    opencl_dp54: bool = False
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:
@@ -296,14 +299,15 @@ class ApplyContext:
         calls; Engine always passes the same WorkPlan to every apply.
     plan: this family's CPU RowPlan, or None when no plan is needed. CPU
         kernels reject missing required plans or plans that they cannot consume.
-    opencl: runner borrowed for a batch consisting only of admitted independent
-        DOP853 rows; None for CPU applies, including neighbors of OpenCL rows.
+    opencl: (borrowed runner, use DP5(4)) for a batch consisting only of
+        admitted independent DOP853 rows. False selects DOP853. Pass None
+        for CPU applies, including neighbors of OpenCL rows.
     """
 
     budget: float
     plan: RowPlan | None = None
     work_plan: WorkPlan = field(default_factory=WorkPlan)
-    opencl: OpenCLDOP853 | None = None
+    opencl: tuple[OpenCLDOP853, bool] | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:

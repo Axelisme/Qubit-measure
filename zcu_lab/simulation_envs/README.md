@@ -150,6 +150,6 @@ FTF GUI startup 傳 `warmup=True`，在背景準備常用 CPU 路徑，並預編
 Engine 只在多條 timeline 間平行，單條 timeline 或單 worker 串行；演化期間 native BLAS 使用 1 個執行緒。
 
 FTF Notebook 保留兩核，傳 `warmup=True` 同時啟用 CPU 與可用的 GPU 預編譯。等待 ready 後再計時的操作，見
-[FTF 演化與重播](FTF/README.md#演化與重播)。
+[FTF 演化與除錯](FTF/README.md#演化與除錯)。
 Framework 的 `EnvironmentWarmup` 介面與 coverage 邊界見
 [FTF startup preparation](../../lib/zcu_tools/simulators/ftf/environment/README.md#startup-preparation)。
