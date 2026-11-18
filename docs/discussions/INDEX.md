@@ -142,7 +142,7 @@
 - 2026-11-16 [range_find 的 writeback：沒有就建立，有就覆寫](2026-11-16-range-find-writeback-upsert.md)：寫回目標缺元件。參數列帶選填 create_kind，Apply 在同一次 edit 先建元件再設值；不加列種類或入口，決策見 [ADR-0008](../adr/0008-cfg-editor-session.md)。
 - 2026-11-17 [Global／point 參數型別收斂與文件組](2026-11-17-global-point-parameter-types-and-document-set.md)：型別收斂。Global 與 point 共用 `ParameterView` 等一套型別，以 `point=None` 選 global；三檔合稱文件組由 session 持有，每種檔一個形狀相同的開檔入口，決策見 [ADR-0063](../adr/0063-persistence-ownership.md#同一種資料不因-global-或-point-分兩套)。
 - 2026-11-17 [Aliases 綁檔物件的讀取、refresh 與候選准入](2026-11-17-alias-file-cached-observation.md)：公開契約語意。物件持有一次觀察，只有 refresh 讀檔；session 以 opener 開候選，語法通過才與表一起換上。
-- 2026-11-18 [Results Browser 開窗與背景索引](2026-11-18-results-browser-open-speed.md)：背景工作邊界。開窗逐批交付，隱藏不重掃；唯讀索引不算 operation，見 [ADR-0067](../adr/0067-gui-application.md#results-browser-唯讀檢視)。
+- 2026-11-18 [Results Browser 開窗與背景索引](2026-11-18-results-browser-open-speed.md)：背景工作邊界。開窗逐批交付，隱藏不重掃；唯讀索引不算 operation，見 [Measure README](../../lib/zcu_tools/gui/app/measure/README.md#owners)。
 
 ## 量測策略
 

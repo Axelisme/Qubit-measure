@@ -19,7 +19,7 @@ basis:
 
 使用者於 2026-11-18 裁定「1B 2照掃 3單獨開，但歸你與designer管」。這次移除掃描重工，改在背景讀取，保留 `legacy-Axel.bak`。使用者另選「A」保留 cfg 搜尋，不把讀 cfg 延到掃描之後。
 
-Results Browser 顯示後，Measure app 逐個 Database entry 交付清單。關閉瀏覽器只隱藏，同一個 app 程序重開時沿用原掃描。designer 於同日代裁採用 app owner，不把掃描算成 operation；這項邊界待使用者覆核。現行規則見 [ADR-0067](../adr/0067-gui-application.md#results-browser-唯讀檢視)。
+Results Browser 顯示後，Measure app 逐個 Database entry 交付清單。關閉瀏覽器只隱藏，同一個 app 程序重開時沿用原掃描。designer 於同日代裁採用 app owner，不把掃描算成 operation；這項邊界待使用者覆核。現行行為見 [Measure README](../../lib/zcu_tools/gui/app/measure/README.md#owners)。
 
 ## 問題
 
@@ -48,3 +48,8 @@ Results Browser 顯示後，Measure app 逐個 Database entry 交付清單。關
 - 實驗室重現數字由 2026-11-18 的使用者工作區報告取得，原始工作檔未入庫。
 - 第一輪 scanner 比較用 23 個合成 entry、5,948 筆 run、5,850 個 HDF5，同一 CPU slot 未插樁各跑三次。掃描中位數由 8.516 秒降到 4.069 秒，唯讀投影相同。這輪 PNG 是 placeholder，沒有用於開窗驗收。單獨量 cfg dataset 讀取與 JSON 解碼，5,850 次共 0.648 秒和 0.616 秒，並未把這筆插樁讀數從總時間扣除。
 - 背景取消的[公開契約案例](../../tests/gui/app/measure/services/test_results_index_shutdown.py)在大 entry 第 32 筆 native read 暫停，經 `Controller.close()` 的 owner loop 釋放讀取，不掃後面的 runs。沒有取秒數作測試斷言。[元件情境](../../tests/gui/app/measure/ui/test_results_browser_progress.py)用合成資料驗證頁面逐批進展與主窗關閉。
+- 正式配對：同一合成工作區（23 entries、5,948 runs，其中 98 筆沒有 HDF5；1,661 筆在 legacy entry），同一 CPU slot 各三次，基線 main `1ae244996`。
+  - 無 UI 完整掃描的中位數由 17.865 秒降到 8.186 秒，為基線的 45.82%。
+  - 開窗到首次 Paint 由 16.519 秒降到 0.040 秒。
+  - 開窗當次的掃描為基線的 53.64%，畫面與縮圖同時在跑，只記錄。
+  - 驗收口徑由 designer 代裁：50% 門檻判無 UI 的完整掃描，2 秒門檻判首次 Paint。首次 Paint 是 offscreen Qt 事件，不是實體螢幕延遲。
