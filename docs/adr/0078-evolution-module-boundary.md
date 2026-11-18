@@ -42,9 +42,9 @@ Builder 的 `families` 是整次 acquire 的候選白名單，不是逐段指定
 
 ### `Engine` 的 GPU backend
 
-2026-11-18，使用者選「A」，並說「只有 Windows 和 Linux，其餘採用建議」。使用者給的理由是「由于我会跨电脑平台使用，所以不要采用局限于特定 OS 系统的算法」與「也有可能在没有 GPU 的系统上使用，所以 GPU 功能确实是属于可选开启」。
+2026-11-18，使用者對讓 `dop853` 提供 OpenCL 執行後端的方案答「A」。平台範圍與無可用 GPU 的行為遵循[〈跨平台，不綁作業系統〉](#跨平台不綁作業系統)與[〈GPU 是可選功能〉](#gpu-是可選功能)。
 
-`Engine(backend="auto"|"cpu"|"opencl")` 選的是 `dop853` 的執行裝置，不增加 family，也不讓呼叫端逐段選算法。預設 `"auto"` 在第一個合格 row 才偵測裝置，按成本選 CPU 或 GPU。Windows 筆電沒裝 `gpu` extra 時，原腳本不必改動，輸出與 CPU 逐位相同。測試與配對量測可用 `"cpu"` 固定 CPU；呼叫者明確指定 `"opencl"` 時，裝置不可用就報錯。GPU 執行中出錯不靜默退回 CPU。安裝、適用範圍及失敗契約見 [GPU backend](../../lib/zcu_tools/simulate/evolution/README.md#gpu-backend)。
+`Engine(backend="auto"|"cpu"|"opencl")` 選的是 `dop853` 的執行裝置，不增加 family，也不讓呼叫端逐段選算法。預設 `"auto"` 在第一個合格 row 才偵測裝置，按成本選 CPU 或 GPU。測試、配對量測與逐位比對可用 `"cpu"` 固定 CPU。GPU 執行中出錯不靜默退回 CPU。安裝、適用範圍及失敗契約見 [GPU backend](../../lib/zcu_tools/simulate/evolution/README.md#gpu-backend)。
 
 ### 凍結數值輸入與參考解交接
 
@@ -178,6 +178,28 @@ Guard 在整個參數空間不放行最終誤差超過 `2e-3` 的結果。
 
 2026-11-18，使用者說：「我認為不同場景的預算分配確實不同，但模擬算法的衡量不應該改變預算，而是固定預算並找適合的場景」，並說：「還有對於depth 500這種超長序列，我能接受更多的誤差。」對長序列預算的選項答「A」。
 這條原則出自子空間約化在單 tone 與雙 qubit 序列上的比較。
+
+### 跨平台，不綁作業系統
+
+模擬器的算法與執行機制在 Windows 與 Linux 上都成立，不依賴單一作業系統的設定或行為。
+
+例：GPU dispatch 不按 Linux xe driver 的 `preempt_timeout_us=640000` 設定長度。程式量每批耗時，把每次送出控制在約 0.1 s。這個做法不需要修改 Linux driver 或 Windows 的 TDR 設定（預設 2 s）。
+
+邊界：某台機器沒有可用的 GPU 驅動時，可以改用 CPU。結果仍正確，只是較慢。macOS 不在支援範圍。
+
+2026-11-18，使用者說：「由于我会跨电脑平台使用，所以不要采用局限于特定 OS 系统的算法」，並確認：「只有 Windows 和 Linux，其餘採用建議」。
+這條原則出自 [`dop853` 的 OpenCL GPU backend](../discussions/2026-11-18-ftf-gpu-dop853-backend.md)。
+
+### GPU 是可選功能
+
+沒裝 GPU 套件或沒有可用 GPU 時，模擬器的行為與結果與沒有 GPU 功能時完全相同。
+
+例：Windows 筆電沒裝 `gpu` extra，執行同一份 FTF 腳本仍走 CPU，結果與加入 GPU 功能前逐位相同。
+
+邊界：只有使用者明示要求 GPU（`backend="opencl"`）時，找不到可用 GPU 才報錯。
+
+2026-11-18，使用者說：「也有可能在没有 GPU 的系统上使用，所以 GPU 功能确实是属于可选开启」，並說：「OpenCL 应该是没问题的」。
+這條原則出自 [`dop853` 的 OpenCL GPU backend](../discussions/2026-11-18-ftf-gpu-dop853-backend.md)。
 
 ### 快速算法先修好，不輕易放棄
 

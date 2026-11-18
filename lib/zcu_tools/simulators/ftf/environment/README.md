@@ -234,8 +234,8 @@ Callers select startup work with `ftf(..., warmup=...)`:
   `retained_levels`. It skips the GPU item if pyopencl is absent or `families`
   excludes `dop853`. If detection finds no usable GPU, the item completes
   without a solve. Otherwise the disposable Engine runs a synthetic solve.
-  Its automatic routing selects CPU for unsupported dimensions. On completion,
-  a usable GPU program for the dimension is in the disk cache.
+  Its automatic routing selects CPU for unsupported dimensions. If the solve
+  uses OpenCL, preparation leaves the program in the disk cache.
 - An explicit `EnvironmentWarmup` runs only the caller's items.
 
 GUI and Notebook policy belongs to

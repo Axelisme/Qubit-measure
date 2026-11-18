@@ -18,6 +18,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-18 [`dop853` 的 OpenCL GPU backend](2026-11-18-ftf-gpu-dop853-backend.md)：新增執行後端。`dop853` 獨立 row 在有 FP64 OpenCL GPU 時成批交給 GPU，一條 timeline 一個 work-group，沒有 GPU 時逐位不變；replay 綁執行裝置，GUI 啟動在背景預編譯。
+
 - 2026-11-17 [Capture 的唯讀體檢與 typed metadata](2026-11-17-capture-inspection.md)：唯讀報告。共用 owner schema 讀逐輪實錄，以 capture_file 對行，條件差異只標記、不重算。
 
 - 2026-11-17 [Capture 的發布與 acquire 關聯](2026-11-17-capture-publication.md)：公開寫出。Writer 共用 cache root，以原子 manifest 發布和 capture_file 關聯三個 environment 的同次 telemetry。

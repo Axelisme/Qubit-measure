@@ -66,6 +66,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：模擬器的測試與量測按層分開（kernel、dispatch、序列、前端、environment），不做 program → 編譯 → 演化 → I/Q 的 e2e，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 原則：guard 在整個參數空間不放行超標；速度優化只做有耗時紀錄的瓶頸，修法時程未定時先走慢但對的候選，見 [ADR-0078](0078-evolution-module-boundary.md#先保證正確再優化瓶頸)。
 原則：評估算法時預算固定為使用者按場景宣告的需求，在固定預算下找算法適合的場景，不為算法放寬預算；長序列預算按 gate 數放寬，見 [ADR-0078](0078-evolution-module-boundary.md#固定預算找適合的場景)。
+原則：模擬算法與機制同時適用 Windows 與 Linux，不依賴單一作業系統的設定或行為，見 [ADR-0078](0078-evolution-module-boundary.md#跨平台不綁作業系統)。
+原則：GPU 是可選功能，沒有 GPU 套件或可用裝置時維持 CPU 行為與逐位相同的結果，見 [ADR-0078](0078-evolution-module-boundary.md#gpu-是可選功能)。
 原則：有誤差問題的快速算法先查原因並修正，修不好的範圍才收 guard，見 [ADR-0078](0078-evolution-module-boundary.md#快速算法先修好不輕易放棄)。
 原則：支援範圍由物理與介面決定，不看使用頻率；頻率只排優化先後，見 [ADR-0078](0078-evolution-module-boundary.md#支援範圍不看使用頻率)。
 原則：實驗參數不當時模擬器照常給結果並警告，契約外輸入照舊 fast fail，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器不替使用者擋實驗參數)。
