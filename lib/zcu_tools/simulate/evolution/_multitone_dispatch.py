@@ -138,9 +138,9 @@ def _price_gate(table: SegmentTable, row: int, context: KernelContext) -> GateCo
     scale = size_ratio**3
     nodes = int(np.prod(PHASE_GRID))
     direct = _direct_cost(table, row, context)
-    # Provisional coefficients: transfer the per-node work model, not the old
-    # build price. Only the current grid's endpoints are integrated. Split
-    # work is charged for both solves, with the matching tolerance multipliers.
+    # Charge only the current grid's endpoints, not a previous grid's build.
+    # The per-node model and both tolerance multipliers include the two split
+    # solves once; the per-use guard charge below is for key/row work only.
     baseline = direct / (1e-3 / context.budget) ** 0.125
     precision = (3e-5 / PHASE_RTOL) ** 0.125
     endpoints = baseline * nodes * 0.289 * precision

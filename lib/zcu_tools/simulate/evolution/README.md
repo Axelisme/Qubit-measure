@@ -682,24 +682,18 @@ thresholds and algorithm details live with their owners:
 | Direct integration and chronological chains | [DOP853 planning](_dop853_dispatch.py), [DOP853](kernels/dop853.py), [flux DOP853](kernels/flux_dop853.py) |
 
 Cold-cost choices use the complete acquire inventory rather than resident cache
-warmth. Prefix and worker subsets share those choices. `multitone_gate` pays
-guard + first-stage construction/current-acquire key uses + apply. Construction
-includes the 9×10 nodes, 64 phase validation probes, Fourier fitting, four
-tight Lindblad reference solves and four Engine-budget direct solves. A phase
-validation upgrade is not prepaid. The price must beat the eligible direct/RWA
-alternatives before the guard builds anything. RWA keeps its history-based
-cold price; gate amortization never reads history.
+warmth. Prefix and worker subsets share those choices. `multitone_gate` charges
+one cold construction per key: 30 full-drive endpoint nodes, Fourier fitting,
+four tight Lindblad reference solves and four Engine-budget direct solves.
+Dispatch divides that once by current-acquire key uses, then adds per-row key
+work and playback. The price must beat the eligible direct/RWA alternatives
+before the guard builds. Gate construction expires after each evolve. RWA
+keeps its history-based cold price; gate amortization never reads history.
 
-Gate construction expires after each evolve. A fixed 20-use preference would
-become stale when construction costs or `dop853` speed change. The price now
-follows their work estimates. Phase construction uses a coefficient fitted to
-four fixed-FTF X90/CZ keys at 32 states. Those phase build estimates differ from
-measured CPU times by about -16% to +16%. The two 100 ns X90 keys calibrate the
-tight reference work. Their four solves take 4.80 and 7.62 CPU seconds per key
-in the isolated calibration. The four fallback solves take 0.98 and 0.94
-CPU seconds per key at budget 1e-3. Their price scales the ordinary direct
-work estimate to match that isolated work. Per-row guard and playback terms
-remain work estimates. Neither guard certifies arbitrary-input or whole-sequence accuracy.
+The estimator scales its endpoint and split terms from the direct solver's
+work estimate and uses the grid size for Fourier and playback. These terms
+estimate CPU work, not wall time or a speed guarantee. The split check does
+not certify arbitrary inputs or whole-sequence accuracy.
 
 Historical calibration note for [slow-envelope propagation](kernels/slow_envelope.py):
 the calibrated population tolerance is 1e-2, with about 1e-4 or less measured on
