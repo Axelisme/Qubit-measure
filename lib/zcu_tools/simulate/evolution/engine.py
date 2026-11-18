@@ -522,6 +522,7 @@ def _merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
             else None
         ),
         prepare_builds=sum(part.prepare_builds for part in parts),
+        prepare_key_builds=sum(part.prepare_key_builds for part in parts),
         admission_rows=sum(part.admission_rows for part in parts),
         opencl_rows=sum(part.opencl_rows for part in parts),
         dp54_rows=sum(part.dp54_rows for part in parts),
@@ -885,17 +886,19 @@ class Engine:
 
         source, batches and budget have the same meaning as evolve. Rows use
         batch/point/split-segment coordinates documented by RowKey. Only selected
-        rows have a final family; local guards remain deferred. Rows requiring
-        a driven prefix density report needs_prefix_input instead of computing
-        the prefix. Guards may evolve their own probes: Floquet integrates its
-        one-period propagator and sampled multitone RWA compares fixed probe
-        endpoints. If OpenCL availability could change sampled RWA pricing,
-        inspection uses DOP853's lazy device check, including its self-test
-        and machine-level detection/program caches. It does not compile a
-        workload point variant. CPU-only engines do not check a device.
-        Numerical preparation and model errors propagate, as in evolve.
-        A closed Engine or invalid budget
-        raises before planning; cancellation raises Cancelled without a result.
+        rows have a final family. Some timeline-local guards run before
+        scheduling for shared preparation. Other rows remain deferred if a
+        timeline worker must finish routing. Inspection starts no workers.
+        Rows requiring a driven prefix density report needs_prefix_input
+        instead of computing the prefix. Guards may evolve their own probes:
+        Floquet integrates its one-period propagator and sampled multitone RWA
+        compares fixed probe endpoints. If OpenCL availability could change
+        sampled RWA pricing, inspection uses DOP853's lazy device check,
+        including its self-test and machine-level detection/program caches.
+        It does not compile a workload point variant. CPU-only engines do not
+        check a device. Numerical preparation and model errors propagate as
+        in evolve. A closed Engine or invalid budget raises before planning;
+        cancellation raises Cancelled without a result.
         Callers serialize operations sharing a source/history, as for evolve.
         Does not modify routing history: usage, content membership and
         generation stay unchanged. Pricing projects the totals that evolve
