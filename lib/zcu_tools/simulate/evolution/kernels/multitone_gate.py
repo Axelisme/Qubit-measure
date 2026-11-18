@@ -19,9 +19,13 @@ from ..kernel import (
 )
 from . import _multitone_gate_phase as phase
 from ._gate_endpoints import GATE_SUBSEGMENTS
+from ._multitone_gate_split import SPLIT_PHASES, advance_probes, probe_densities
 from ._rwa_gate import canonical_keys
 from ._secular import coherence_decay, split_step
-from ._workload_facts import envelope_bounds, fixed_flux
+from ._workload_facts import fixed_flux
+
+_SPLIT_BUDGET_FRACTION = 0.1
+_SPLIT_FALLBACK_FACTOR = 1.5
 
 
 @dataclass(frozen=True)
@@ -71,26 +75,30 @@ def _play(coefficients, grid_sizes, baths, key_index, phases, states):
         states[row] = rho
 
 
-def _split_admitted(table: SegmentTable, row: int, context: KernelContext) -> bool:
-    """Bound the four-quarter secular split using complete drive quadratures."""
+def _split_defects(
+    prepared: _Prepared, table: SegmentTable, row: int, context: KernelContext
+) -> tuple[float, float]:
+    """Return max-entry defects of playback and fallback vs one tight reference.
+
+    A complete Hermitian operator basis would cost M² solves and store an M⁴
+    channel per phase. Four physical densities instead sample these maps;
+    neither defect bounds other phases, inputs or complete sequences.
+    """
     model = table.model(context.source, row)
-    peaks = envelope_bounds(table, context.work_plan).peaks
-    strength = 0.0
-    for tone in range(2):
-        drive = model.drives[table.tone_port[row, tone]]
-        strength += (
-            abs(table.tone_amplitude[row, tone])
-            * peaks[table.tone_envelope[row, tone]]
-            * (
-                np.linalg.norm(drive.in_phase_ghz, 2)
-                + np.linalg.norm(drive.quadrature_ghz, 2)
-            )
-        )
-    gamma = max(
-        float(np.max(coherence_decay(model))),
-        float(np.max(model.rates_per_ns.sum(axis=0))),
+    split = probe_densities(len(model.energies_ghz))
+    reference, fallback = advance_probes(model, table, row, split, context.budget)
+    _play(
+        prepared.coefficients,
+        prepared.grid_sizes,
+        (prepared.populations, prepared.coherences),
+        np.zeros(len(SPLIT_PHASES), dtype=np.int64),
+        SPLIT_PHASES,
+        split,
     )
-    return bool(table.duration_ns[row] ** 3 * gamma * strength**2 / 16 <= 0.01)
+    return (
+        float(np.max(np.abs(split - reference))),
+        float(np.max(np.abs(fallback - reference))),
+    )
 
 
 def _build(table: SegmentTable, row: int, context: KernelContext) -> _Prepared | None:
@@ -116,15 +124,16 @@ class MultitoneGateKernel:
     """Prepare one full-drive key for arbitrary joint density and two phases.
 
     Require two tones, at least one sampled envelope, fixed flux and positive
-    duration. A model-only four-way secular split proxy must be <=0.01. Build
-    a 9x10 Fourier grid and 64 independent validation points together, at
-    rtol/atol 2.75e-7/2.75e-9. Failed validation rebuilds once at 13x13 and
+    duration. Build a 9x10 Fourier grid and 64 independent validation points
+    together at rtol/atol 2.75e-7/2.75e-9. Failed validation rebuilds at 13x13 and
     1e-8/1e-10. Admit only keys whose every quarter has full-unitary Frobenius
     defect <=1.9e-7. Two failed stages refuse the key; solver failures propagate.
     Phase and absolute start are apply-only, not key fields. Guard preparations
     are handed to the scheduler and live only within one evolve (ADR-0078).
-    No RWA or graph pruning is performed. The empirical validation and split
-    proxy do not certify arbitrary sequences against the final density budget.
+    After phase admission, compare playback and Engine-budget DOP853 with
+    the same tight full-Lindblad endpoints at four phase/density pairs.
+    Neither sampled check certifies arbitrary sequences against the final density budget.
+    No RWA or graph pruning is performed.
     """
 
     name = "multitone_gate"
@@ -185,10 +194,15 @@ class MultitoneGateKernel:
         products = []
         for index, representative in enumerate(representatives):
             row = int(selected[representative])
-            if not _split_admitted(table, row, context):
-                continue
             prepared = _build(table, row, context)
-            if prepared is not None:
+            if prepared is None:
+                continue
+            defect, fallback_defect = _split_defects(prepared, table, row, context)
+            # Stay comparable to the direct solver this gate replaces. Keep
+            # a budget-scaled allowance when the fallback is especially accurate.
+            floor = _SPLIT_BUDGET_FRACTION * min(context.budget, 1e-3)
+            threshold = max(floor, _SPLIT_FALLBACK_FACTOR * fallback_defect)
+            if defect <= threshold:
                 accepted[positions[inverse == index]] = True
                 products.append(GuardPreparation(keys[index : index + 1], prepared))
         return GuardResult(accepted, tuple(products))

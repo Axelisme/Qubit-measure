@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 
 from .kernel import KernelContext, SegmentTable
 from .kernels._multitone_gate_phase import PHASE_GRID, PHASE_RTOL
+from .kernels._multitone_gate_split import SPLIT_PHASES, SPLIT_REFERENCE_BUDGET
 from .kernels._rwa_gate import GATE_POLICY, canonical_keys
 from .kernels._rwa_numeric import multitone_retention
 from .kernels.multitone_rwa import MultitoneRWAKernel
@@ -110,7 +111,17 @@ def gate_cost(table: SegmentTable, row: int, context: KernelContext) -> "Multito
     three decimals; estimates differ by approximately +4.5/+16.1/-15.0/-15.8%.
     This is not full guard/apply timing or a bound for other physical inputs.
 
-    The rtol ratio uses the existing eighth-power work model. All first-stage
+    The same X90 pair keys calibrate the four fixed-precision Lindblad probes.
+    At reference budget 1e-8 they take 4.801/7.621 warm CPU seconds in total
+    (Gaussian/sampled). The split coefficient 0.155 minimizes the worst
+    relative residual of the budget-scaled direct estimate, rounded to three
+    decimals. The four Engine-budget DOP853 solves use the same probe inputs.
+    At budget 1e-3 they take 0.979/0.938 warm CPU seconds versus nominal direct
+    estimates of 8.633/9.595 for four solves. A 0.105 multiplier minimizes
+    their worst relative residual, rounded to three decimals. The two groups
+    are charged once per key, not once per row.
+
+    The tolerance ratios use the existing eighth-power work model. All first-stage
     nodes and 64 validation trajectories integrate once. FFT fitting charges
     an assumed 0.2 us per quarter/node/log2(node) at 16 levels, scaled
     quadratically. Playback assumes 0.02 us per quarter/mode and 7.5 us per
@@ -138,13 +149,19 @@ def _price_gate(
     nodes = int(np.prod(PHASE_GRID))
     trajectories = nodes + 64
     direct = _direct_cost(table, row, context)
-    # Undo direct's tolerance multiplier: build precision is budget-independent.
+    # Undo direct's tolerance multiplier for the fixed-precision phase and reference work.
     baseline = direct / (1e-3 / context.budget) ** 0.125
     precision = (min(1e-4, 0.03e-3) / PHASE_RTOL) ** 0.125
     integrate = baseline * trajectories * 0.289 * precision
     fit = 2e-7 * 4 * nodes * np.log2(nodes) * (len(model.energies_ghz) / 16) ** 2
+    split_precision = (1e-3 / SPLIT_REFERENCE_BUDGET) ** 0.125
+    reference = len(SPLIT_PHASES) * baseline * split_precision * 0.155
+    # Scale the ordinary direct price for the warm isolated fallback probes.
+    fallback = len(SPLIT_PHASES) * direct * 0.105
     apply = (2e-8 * 4 * nodes + 7.5e-6 * 4) * scale
-    return MultitoneCost(direct, float(integrate + fit), 2e-6 * scale, apply)
+    return MultitoneCost(
+        direct, float(integrate + fit + reference + fallback), 2e-6 * scale, apply
+    )
 
 
 @dataclass(frozen=True)
