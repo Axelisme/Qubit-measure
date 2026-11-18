@@ -33,6 +33,9 @@ class FamilyRouting:
     prepare_builds: coefficient products built by common_frame, or exact-key
         frame construction attempts by floquet (including invalid frames).
         Zero for families without product instrumentation.
+    prepare_key_builds: key slots passed to scheduled prepare calls or returned
+        in guard preparations. Rebuilding a key counts again. Rejected guard
+        products count if returned; guard-only checks without products do not.
     admission_rows: common-frame row indicator evaluations, excluding apply and
         caller-preparation hits. Other families currently leave this count zero.
     opencl_rows: physical endpoints executed by OpenCL within this family.
@@ -58,6 +61,7 @@ class FamilyRouting:
     duration_ns: float = 0.0
     opencl_rows: int = 0
     opencl_detection_error: str | None = None
+    prepare_key_builds: int = 0
 
     @property
     def actual_cpu_s(self) -> float:
@@ -76,6 +80,7 @@ class _Totals:
     prepare_builds: int = 0
     admission_rows: int = 0
     opencl_rows: int = 0
+    prepare_key_builds: int = 0
 
 
 class RoutingCollector:
@@ -116,6 +121,12 @@ class RoutingCollector:
         if self.enabled and count:
             with self._lock:
                 self._totals.setdefault(name, _Totals()).prepare_builds += count
+
+    def prepared_keys(self, name: str, count: int) -> None:
+        """Count prepared key slots, including repeated builds of the same key."""
+        if self.enabled and count:
+            with self._lock:
+                self._totals.setdefault(name, _Totals()).prepare_key_builds += count
 
     def admitted(self, name: str, count: int) -> None:
         """Count row indicator evaluations, not apply calls or result hits."""
@@ -179,6 +190,7 @@ class RoutingCollector:
                 rows=segments.get(name, 0),
                 duration_ns=durations.get(name, 0.0),
                 prepare_builds=total.prepare_builds,
+                prepare_key_builds=total.prepare_key_builds,
                 admission_rows=total.admission_rows,
                 opencl_rows=total.opencl_rows,
                 prepare_cpu_s=total.prepare_cpu_s,

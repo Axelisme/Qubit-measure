@@ -647,8 +647,11 @@ reports calling-thread geometry and WorkPlan CPU.
 Common-frame reports also count `prepare_builds` and `admission_rows`.
 Floquet's `prepare_builds` counts exact-key frame construction attempts,
 including invalid frames and frames whose rows are all refused. Other families
-leave these counters at zero. Telemetry does not change guards, routes,
-densities or cancellation.
+leave those counters at zero. `prepare_key_builds` counts key slots passed to
+scheduled preparation or returned as guard products, including discarded guard
+products. Building the same key again counts again; a guard without a returned
+product does not count. Merge adds key builds, and result reuse reports zero.
+Telemetry does not change guards, routes, densities or cancellation.
 
 `PathDiagnostics.duration_ns_by_kernel` always reports logical physical ns per
 family, even with telemetry off, without CPU clocks. Its immutable mapping
@@ -764,6 +767,12 @@ tone with carrier magnitude at or above 30 MHz. `shaped` has one sampled tone. `
 has two tones with a sampled envelope, or at least three tones.
 A family in a domain is a candidate, not a promise of selection. Cost ordering,
 input preconditions and numerical guards still apply with `families=`.
+
+For shaped rows with `period_table` as the first fallback and an exact table
+key shared across timelines, dispatch resolves the `shaped_sambe` guard before
+scheduling. After a refusal the scheduler can build the fallback table once
+for the whole cohort. Other timeline-local Sambe keys stay deferred. This
+changes when the guard runs, not its thresholds or the candidate order.
 
 In the table, `B` is the per-segment `budget`, `d` is duration in ns and `T` is
 one carrier period in ns. Split, motion, omission and phase indicators use the

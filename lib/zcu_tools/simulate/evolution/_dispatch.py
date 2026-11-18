@@ -242,7 +242,9 @@ def prepare(
     build. Other families use their ordinary prepare entry point unchanged.
     Keys, representatives, budget and failure semantics follow Kernel.prepare.
     """
-    with context.work_plan.routing.measure(kernel.name, "prepare"):
+    routing = context.work_plan.routing
+    routing.prepared_keys(kernel.name, len(keys))
+    with routing.measure(kernel.name, "prepare"):
         if isinstance(kernel, GateCacheKernel):
             duration = keys["duration"]
             phase_adaptive = (duration > 0) & (duration <= 30.0)
@@ -267,11 +269,16 @@ def _guard_key(
     rows: NDArray[np.int64],
 ) -> _Guarded:
     """Keep guard products only when this call has accepted consumers."""
-    with context.work_plan.routing.measure(kernel.name, "prepare"):
+    routing = context.work_plan.routing
+    with routing.measure(kernel.name, "prepare"):
         result = kernel.guard_prepared(table, rows, context)
     if result is None:
         raise RuntimeError(
             f"kernel {kernel.name} declares guard_builds without a handoff"
+        )
+    if routing.enabled:
+        routing.prepared_keys(
+            kernel.name, sum(len(p.keys) for p in result.preparations)
         )
     accepted = result.accepted
     selected = rows[accepted]
@@ -376,9 +383,12 @@ class _Classifier:
             )
 
     def guard_keys(
-        self, kernel: Kernel, rows: NDArray[np.int64]
+        self,
+        kernel: Kernel,
+        rows: NDArray[np.int64],
+        caller_rows: NDArray[np.int64] | None,
     ) -> Iterable[_Guarded | None]:
-        """Batch one timeline's local builders; guard shared keys with the pool."""
+        """Keep full keys in the caller when shared or needed for shared fallback."""
         if self.selection is not None:
             # This worker owns one timeline. A single batch lets the kernel
             # reuse call-local work across distinct prepare keys, then drop it.
@@ -392,6 +402,8 @@ class _Classifier:
             if kernel.name == "common_frame"
             else groups.shared
         )
+        if caller_rows is not None and len(caller_rows):
+            caller_keys[groups.inverse[np.isin(rows, caller_rows)]] = True
         local = rows[~caller_keys[groups.inverse]]
         self.deferred[local] = True
         self.observe(kernel, local, "deferred")
@@ -439,13 +451,19 @@ class _Classifier:
                 eligible = eligible[~previous[eligible]]
         return eligible
 
-    def try_kernel(self, kernel: Kernel, rows: NDArray[np.int64]) -> NDArray[np.int64]:
-        """Batch cheap guards in the caller and never retry its rejected rows."""
+    def try_kernel(
+        self,
+        kernel: Kernel,
+        rows: NDArray[np.int64],
+        *,
+        caller_rows: NDArray[np.int64] | None = None,
+    ) -> NDArray[np.int64]:
+        """Guard rows once; keep builders for caller_rows out of worker deferral."""
         eligible = self.eligible_rows(kernel, rows)
         if not len(eligible):
             return rows
         if kernel.guard_builds:
-            results = self.guard_keys(kernel, eligible)
+            results = self.guard_keys(kernel, eligible, caller_rows)
         else:
             with self.context.work_plan.routing.measure(kernel.name, "prepare"):
                 accepted = kernel.guard(self.table, eligible, self.context)
@@ -529,13 +547,20 @@ class _Classifier:
                 self.try_kernel(covariant, selected[preferred])
         spectral = self.kernels.get("shaped_sambe")
         if spectral is not None:
-            selected = plan.rows[
+            pending = (
                 self.scope[plan.rows]
                 & (self.names[plan.rows] == "")
                 & ~self.deferred[plan.rows]
-            ]
-            if len(selected):
-                self.try_kernel(spectral, selected)
+            )
+            if np.any(pending):
+                selected = plan.rows[pending]
+                self.try_kernel(
+                    spectral,
+                    selected,
+                    caller_rows=self.shared_period_fallback(
+                        selected, plan.order[pending]
+                    ),
+                )
         pending = (
             self.scope[plan.rows]
             & (self.names[plan.rows] == "")
@@ -550,6 +575,27 @@ class _Classifier:
                 tuple(str(name) for name in candidates),
                 cost_skipped=("single_tone_gate", "shaped_sambe"),
             )
+
+    def shared_period_fallback(
+        self, rows: NDArray[np.int64], order: NDArray[np.str_]
+    ) -> NDArray[np.int64] | None:
+        """Find caller rows whose first fallback can share a table across timelines."""
+        period = self.kernels.get("period_table")
+        if self.selection is not None or period is None or len(rows) < 2:
+            return None
+        first = order[:, 0]
+        if self.context.families is not None:
+            # Every order includes period_table, which is allowed here.
+            allowed = np.isin(order, tuple(self.context.families))
+            first = order[np.arange(len(rows)), allowed.argmax(axis=1)]
+        candidates = rows[first == period.name]
+        if len(candidates) < 2:
+            return None
+        # A worker's Sambe refusal arrives too late for the scheduler to share
+        # the fallback table with other timelines. Resolve just these guards
+        # before scheduling, without changing the numerical choice or prices.
+        groups = group_keys(period, self.table, candidates, self.context)
+        return candidates[groups.shared[groups.inverse]]
 
     def classify(self) -> Dispatch:
         rows = np.flatnonzero(self.scope)

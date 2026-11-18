@@ -1,5 +1,6 @@
 """Low-reuse shaped sweeps through Engine, including guarded fallbacks."""
 
+from contextlib import closing
 from dataclasses import replace
 from threading import Event
 
@@ -15,6 +16,62 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_shared_period_fallback_builds_one_table(workers: int) -> None:
+    """Distinct duration guards can refuse rows that need the same band table."""
+    x = np.array([[0, 0.15], [0.15, 0]], dtype=complex)
+    model = SecularModel(
+        (0,),
+        "shared-fallback",
+        np.array([0.0, 1.8]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("drive", x, np.zeros_like(x)),),
+        np.zeros((2, 2)),
+        np.zeros((2, 2)),
+    )
+    durations = np.r_[30.0, np.arange(200.0, 280.0, 10.0)]
+    count = len(durations)
+    envelopes = tuple(
+        EnvelopeSpec(
+            "sampled",
+            np.array([0.1, 0.7, 0.1], dtype=complex),
+            np.array([0.0, length / 2, length]),
+        )
+        for length in durations
+    )
+    track = DriveTrack(
+        "drive",
+        np.zeros(count),
+        durations,
+        np.full(count, 2.0),
+        np.full(count, 0.37),
+        np.ones(count),
+        envelopes,
+        np.arange(count),
+        np.ones(count, dtype=bool),
+    )
+    batch = TimelineBatch(
+        np.arange(count),
+        (track,),
+        FluxSchedule(np.arange(count + 1), np.zeros(count), np.zeros((count, 1), int)),
+        durations,
+    )
+    with (
+        closing(
+            ModelSource(np.diag([1.0, 0.0]).astype(complex), lambda _: model)
+        ) as src,
+        closing(Engine(workers, backend="cpu")) as engine,
+        closing(Engine(1, backend="cpu", families=("dop853",))) as direct,
+    ):
+        result = engine.evolve(src, (batch,), telemetry=True)
+        expected = direct.evolve(src, (batch,), budget=1e-7)
+
+    assert result.paths.routing["shaped_sambe"].rejected_rows == 8
+    assert result.paths.segments_by_kernel == {"shaped_sambe": 1, "period_table": 8}
+    assert result.paths.routing["period_table"].prepare_key_builds == 1
+    np.testing.assert_allclose(result.densities, expected.densities, atol=2e-3, rtol=0)
 
 
 @pytest.mark.parametrize("frequency", [0.05, -0.05, -0.294, 5.0])

@@ -522,6 +522,7 @@ def _merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
             else None
         ),
         prepare_builds=sum(part.prepare_builds for part in parts),
+        prepare_key_builds=sum(part.prepare_key_builds for part in parts),
         admission_rows=sum(part.admission_rows for part in parts),
         opencl_rows=sum(part.opencl_rows for part in parts),
         opencl_detection_error=_first_opencl_detection_error(parts),
