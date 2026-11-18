@@ -107,7 +107,7 @@ Single-fluxonium 的選填 YAML `drift` 區塊為 `q_cap`、`xqp`、`aphi` 各�
 
 開啟漂移時，模擬端每次 acquisition 寫一行 JSONL。預設位置為 `~/.local/state/zcu-tools/simulation/single-fluxonium/<session>/truth.jsonl`，builder/source 的 `truth_log` 可指定其他檔案。每行包含 session UUID、秒制 `sim_now`、UTC ISO `wall_time`，以及 `q_cap`、`q_ind`、`xqp`、`aphi`。新環境產生新 session。關閉漂移不建立檔案。I/O 失敗向 caller 傳遞，不偽裝成成功。
 
-FTF 與 single-fluxonium 開啟 `numerics.debug_capture` 時，manifest 記錄已觀察的 round model identity 與當時的有效設定，包含取樣後的損耗。發布不重取時鐘或漂移。Truth 與 debug capture 均不進 Run、GUI、MCP 或 Labber metadata。此交付不新增 six-fluxonium 的獨立漂移，也不精簡跨 acquisition 快取。
+FTF 與 single-fluxonium 開啟 `numerics.debug_capture` 時，manifest 記錄已觀察的 round model identity 與當時的有效設定，包含取樣後的損耗。發布使用 round snapshot 對應的記錄。Truth 與 debug capture 均不進 Run、GUI、MCP 或 Labber metadata。此交付不新增 six-fluxonium 的獨立漂移，也不精簡跨 acquisition 快取。
 
 ### Acquire 接線與 projective readout
 
@@ -269,6 +269,8 @@ Photon dephasing 使用 joint-state resonator pull 的完整差、total linewidt
 
 這是低 occupation 下的 exponential Markov 近似，不生成精確1/f包絡、Ramsey／echo 差異或逐 shot 低頻 noise trace，echo 不消除此不可逆 dephasing。適用假設留在文件，不以事後降低 I/Q contrast 代替演化。
 
+<a name="分段引擎與重算式重播"></a>
+
 ### 分段引擎與 debug capture
 
 FTF acquire 預設使用 `simulate.evolution.Engine` 的快速分段算法。`experiment.ftf` 以模板陣列換算單位、取得 DC 模型，將一組 timeline 交給引擎。引擎切段、分類、去重，先建立共用 prepare，再以 joblib threading chunks 演化至 readout 起點。每個 `FTFSource` 持有一個引擎，跨 acquire 只保留 routing facts，數值 preparation 限一次 evolve。每次 evolve 自己建立及釋放 worker pool。
@@ -277,7 +279,7 @@ FTF acquire 預設使用 `simulate.evolution.Engine` 的快速分段算法。`ex
 
 每 round 仍捕捉當下 snapshot。同一 acquire 內，snapshot 與上一 round 相同時，組合層重用 density 與條件響應；抽樣身份仍隨 round 改變。Snapshot 改變則重新演化，不跨獨立 shot 承接量子態或隨機輸出。
 
-Private replay 已移除。開啟 `numerics.debug_capture` 後，從 manifest 的 `inputs` 讀 Engine 輸入與每列實際 routes。FTF 與 single-fluxonium 的 `metadata` 保存 acquire 成敗、實際 seed／sequence、每輪 DC 與 model identity，以及已觀察 identity 的有效設定。沒有 round snapshot 時讀 admission settings。Telemetry 開啟時用 `capture_file` 找到同次 acquire 的 manifest。這些診斷資料不進一般 Run/native/RPC metadata。
+開啟 `numerics.debug_capture` 後，從 manifest 的 `inputs` 讀 Engine 輸入與每列實際 routes。FTF 與 single-fluxonium 的 `metadata` 保存 acquire 成敗、實際 seed／sequence、每輪 DC 與 model identity，以及已觀察 identity 的有效設定。沒有 round snapshot 時讀 admission settings。Telemetry 開啟時用 `capture_file` 找到同次 acquire 的 manifest。這些診斷資料不進一般 Run/native/RPC metadata。
 
 數值 API、preparation lifetime 與記憶體歸算見 [evolution README](../../../lib/zcu_tools/simulate/evolution/README.md)。早期離線建庫方案只保留於[討論快照](../../discussions/2026-10-15-offline-propagator-library.md)，不再描述現行入口。依賴方向仍由 [[0072]] 的 C8、C9、C12 保護，沒有新增 simulate→resources／program／device 依賴。
 
@@ -375,6 +377,6 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 I/Q-only 練習在原版本已跑通 F1、F2，conditional Ramsey 只取得一點。驗收採「能跑起來」，不代表全 16 點完成或原精度達標。歷史正式 workload 的完整 acquire 成本為 cold 平均 2.864 秒／point、warm direct-record 平均 0.457 秒／point，不能稱平均 1 秒已達標。這些數字不能代表現行分段引擎。
 
-FTF 使用分段引擎與 guarded ADC sums。較早的校準、raw、seal 與成本證據保留在各自的原版本；不能用它們驗收目前版本的科學精度或效能。
+FTF 使用分段引擎與 guarded ADC sums。科學精度與效能的驗收對應當次測試使用的版本。
 
 固定 original basis 的內部自洽驗證與跨 basis population 比較仍保留。跨 basis phase／complex 偏差照實保留，不作通過條件。模擬的絕對頻率與相位有 MHz 級 basis 偏差，不適合對照外部能譜或硬體絕對值。這些限制不改變既定物理模型，也不構成 runtime 收斂認證。
