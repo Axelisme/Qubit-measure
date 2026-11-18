@@ -209,7 +209,8 @@ Lindblad solver 比對完整 density。960-knot 案例在測試內建構 24 能�
 每種包絡跑 1 次或 7 次，重複時涵蓋固定與獨立變化的雙相位，完整 density 對獨立參考解。
 `test_multitone_gate_mixed_phase_keys_density` 在同次 evolve 驗不同波形的 key，包含 constant+sampled pair。
 強 bath 案例驗 pinned split 缺陷拒收。另一案例讓比價勝出的 key 因 split 拒收，並實際執行合格的 DOP853。另一個 bath 案例用同一 key 驗預設 budget 放行、完整 density 符合 oracle，收緊 budget 時拒收。
-共振雙 tone 案例固定門檻下限，驗較大的 budget 下 gate 可取代精度相近的 DOP853，收緊 budget 後則拒收。
+共振雙 tone 案例驗 gate 可取代精度相近的 CPU fallback，收緊 budget 後則拒收。
+其中一組在 DP5(4) 適用時通過，固定用 DOP853 的舊探針會拒收。
 這些小模型案例不代表長序列已通過精度或速度驗收。
 Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生誤差觀察值。
 各案例包含完整 complex coherence、relaxation 與 dephasing。模型尺寸依案例族區分：

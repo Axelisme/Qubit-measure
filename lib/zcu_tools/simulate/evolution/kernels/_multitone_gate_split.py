@@ -1,12 +1,14 @@
 """Full Lindblad density probes for the full-drive dual-phase gate guard."""
 
+from dataclasses import replace
+
 import numpy as np
 from numpy.typing import NDArray
 
 from ..kernel import SegmentTable
 from ..secular import SecularModel
 from ._dop853_data import pack_models, pack_segments
-from .dop853 import DOP853Plan, EndpointData, advance_endpoints
+from .dop853 import DOP853Plan, EndpointData, advance_endpoints, cpu_dp54_rows
 
 # One density trajectory per phase pair. Sample all four quarter turns on
 # each axis; only (0, 0) is on the 5×6 endpoint grid.
@@ -32,11 +34,11 @@ def advance_probes(
     initial: NDArray[np.complex128],
     budget: float,
 ) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
-    """Return tight-reference and Engine-budget DOP853 probe endpoints.
+    """Return tight DOP853 and production CPU budget probe endpoints.
 
     Compact the representative into independent timelines at local zero.
-    Both solves start with the same probe densities and envelope clocks.
-    Use the ordinary isolated-row interaction frame and DOP853 budget policy.
+    Both solves use the same input densities, envelope clocks and interaction
+    frame. Only the budget solve selects DP5(4) for CPU-eligible rows.
     The input densities are not modified. Integration errors propagate.
     """
     rows = np.arange(len(SPLIT_PHASES), dtype=np.int64)
@@ -57,8 +59,15 @@ def advance_probes(
     )
     data = EndpointData(pack_models([model]), pack_segments(probes))
     row_models = (rows, np.zeros_like(rows))
-    plan = DOP853Plan(np.full(len(rows), "interaction"), np.full_like(rows, -1))
+    reference_plan = DOP853Plan(
+        np.full(len(rows), "interaction"), np.full_like(rows, -1)
+    )
+    budget_plan = replace(
+        reference_plan, cpu_dp54=cpu_dp54_rows(probes.duration_ns, budget)
+    )
     reference, fallback = initial.copy(), initial.copy()
-    advance_endpoints(data, row_models, reference, SPLIT_REFERENCE_BUDGET, plan)
-    advance_endpoints(data, row_models, fallback, budget, plan)
+    advance_endpoints(
+        data, row_models, reference, SPLIT_REFERENCE_BUDGET, reference_plan
+    )
+    advance_endpoints(data, row_models, fallback, budget, budget_plan)
     return reference, fallback

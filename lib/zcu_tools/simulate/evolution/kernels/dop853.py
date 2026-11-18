@@ -43,8 +43,8 @@ class DOP853Plan:
 
     frame: interaction, lab, or empty for a row belonging to another family.
     chain: first row of a touching chain, or -1 for an independent row.
-    cpu_dp54: global-row mask for DP5(4) on CPU; None retains DOP853. Only
-        family dispatch supplies a mask. Other endpoint consumers use DOP853.
+    cpu_dp54: global-row mask for DP5(4) on CPU; None retains DOP853. CPU
+        dispatch and the multitone gate budget probe use the same eligibility.
     """
 
     frame: NDArray[np.str_]

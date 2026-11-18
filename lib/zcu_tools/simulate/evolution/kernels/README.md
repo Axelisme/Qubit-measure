@@ -31,7 +31,9 @@ Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_ga
 `_multitone_gate_phase.py` 用一張 5×6 網格擬合係數，不按包絡形狀或虛部分類。
 `_gate_endpoints.py` 以 rtol/atol 2.75e-7/2.75e-9 積分節點並做 polar retraction。
 `_multitone_gate_split.py` 對四組相位與初始 density 各做 tight reference 和當次 `Engine` budget 的 direct 積分。
-其中三組在網格外，同時檢查內插與耗散分割。
+Tight reference 固定用 DOP853。Budget probe 沿用 production `dop853` 的 CPU row 判準，合格用 DP5(4)，其餘用 DOP853。
+兩組探針都在 interaction frame 積分，不依 OpenCL 選路改變。
+其中三組相位在網格外，同時檢查內插與耗散分割。
 四子段 playback 與 budget probe 都以同一份完整 Lindblad reference 量最大 density 元素誤差。
 Guard 放行 playback 誤差不超過 `max(0.1 × min(budget, 1e-3), 1.5 × e_dop)` 的 key，`e_dop` 是 budget probe 的誤差。
 Budget probe 特別準時，budget 換算的下限仍容許小誤差。

@@ -770,11 +770,14 @@ thresholds and algorithm details live with their owners:
 Cold-cost choices use the complete acquire inventory rather than resident cache
 warmth. Prefix and worker subsets share those choices. `multitone_gate` charges
 one cold construction per key: 30 full-drive endpoint nodes, Fourier fitting,
-four tight Lindblad reference solves and four Engine-budget direct solves.
-Dispatch divides that once by current-acquire key uses, then adds per-row key
-work and playback. The price must beat the eligible direct/RWA alternatives
-before the guard builds. Gate construction expires after each evolve. RWA
-keeps its history-based cold price; gate amortization never reads history.
+four tight DOP853 Lindblad references and four direct solves at the Engine
+budget. The budget probes use DP5(4) for [CPU-eligible rows](#cpu-dp54-accuracy)
+and DOP853 otherwise. Both sets of probes use the interaction frame regardless
+of the execution backend. Dispatch divides the build price by current-acquire
+key uses, then adds per-row key work and playback. The price must beat the
+eligible direct/RWA alternatives before the guard builds. Gate construction
+expires after each evolve. RWA keeps its history-based cold price. Gate
+amortization never reads history.
 
 The estimator uses the raw full-drive work scale for gate endpoint and split
 terms and the grid size for Fourier and playback. Only the CPU DOP853 price
@@ -1284,7 +1287,7 @@ class's methods.
 | Secular coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
 | Density basis conversion | `transform_density` in [state.py](state.py), shared by population conversion, scheduler boundaries, Dyson input bounds and compiled DOP853 chains. Callers retain basis selection and traversal. |
 | Adaptive DOP853 and DP5(4) tableaux, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
-| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. CPU `dop853` rows, `t6` direct rows, period fractional tails and the multitone-gate split check share this entry point, supplying explicit frames and budgets. The CPU `dop853` plan selects DP5(4) and its tighter local tolerances for eligible rows. [OpenCL `dop853`](#gpu-backend) uses the same tableaux and tolerance rule in its device runner. |
+| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. CPU `dop853` rows, `t6` direct rows, period fractional tails and the multitone-gate split check share this entry point, supplying explicit frames and budgets. The CPU `dop853` plan and the gate budget probe select DP5(4) and its tighter local tolerances using the same row eligibility. [OpenCL `dop853`](#gpu-backend) uses the same tableaux and tolerance rule in its device runner. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node, [adaptive single-phase](kernels/gate_phase.py) and [dual-phase](kernels/_multitone_gate_phase.py) builders. Single-tone integration is unchanged. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py) owns period builds and trajectories, with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. [kernels/_period_channel.py](kernels/_period_channel.py) owns complete secular-channel playback. Separate from two-tone Floquet frames. |

@@ -338,11 +338,21 @@ def test_multitone_gate_split_admission_tightens_with_budget() -> None:
         assert "multitone_gate" in rejected.value.attempted
 
 
-def test_multitone_gate_can_match_less_accurate_direct_fallback() -> None:
+@pytest.mark.parametrize(
+    "rate,accepted_budget,rejected_budget",
+    [
+        pytest.param(2e-5, 3e-3, 1e-3, id="same-tableau"),
+        pytest.param(8e-6, 2e-3, 0.999e-3, id="cpu-dp54-boundary"),
+    ],
+)
+def test_multitone_gate_can_match_less_accurate_direct_fallback(
+    rate: float, accepted_budget: float, rejected_budget: float
+) -> None:
     """A phase-resolved gate can replace a direct solve of comparable accuracy."""
     # Resonant circular drives accumulate direct integration error over several
-    # rotations. The weak bath gives a split defect above the fixed budget floor.
-    frequency, rate, duration = 0.1, 2e-5, 20.0
+    # rotations. In the boundary case the split defect (1.90e-4) is above the
+    # floor and the old budget probe's limit but below the DP5(4) limit (2.72e-4).
+    frequency, duration = 0.1, 20.0
     x = np.array([[0, 1], [1, 0]], dtype=complex)
     y = np.array([[0, 1j], [-1j, 0]])
     model = SecularModel(
@@ -367,18 +377,18 @@ def test_multitone_gate_can_match_less_accurate_direct_fallback() -> None:
     batch = replace(idle, tracks=tracks)
     with (
         closing(coherent_source(model)) as source,
-        closing(Engine(1, families=("multitone_gate",))) as engine,
+        closing(Engine(1, families=("multitone_gate",), backend="cpu")) as engine,
     ):
-        result = engine.evolve(source, (batch,), budget=3e-3)
+        result = engine.evolve(source, (batch,), budget=accepted_budget)
         require_families(result.paths, ("multitone_gate",))
         reference = converged_reference(source, batch)
         assert density_error(result.densities, reference.density) <= 2e-3
 
-        # Both budgets give the same floor; the more accurate fallback no
-        # longer justifies this gate's split defect at the smaller budget.
+        # The more accurate fallback no longer justifies this gate's split
+        # defect at the smaller budget.
         with pytest.raises(NoValidKernel) as rejected:
-            engine.evolve(source, (batch,), budget=1e-3)
-        assert "multitone_gate" in rejected.value.attempted
+            engine.evolve(source, (batch,), budget=rejected_budget)
+        assert rejected.value.attempted == ("multitone_gate",)
 
 
 @pytest.mark.parametrize("family", EDGE_FAMILIES)
