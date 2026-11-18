@@ -1,6 +1,7 @@
-"""OpenCL translation of the production DOP853 interaction-frame endpoint solver."""
+"""OpenCL translation of the dop853 family's interaction-frame endpoint solver."""
 
 from ._dop853 import (
+    DP54_ERROR_EXPONENT,
     ENDPOINT_ATTEMPT_LIMIT,
     ERROR_NORM_BLEND,
     ROW_INITIAL_STEP_NS,
@@ -13,13 +14,40 @@ from ._dop853 import (
 
 
 def opencl_source() -> str:
-    """Return kernel source with coefficients and controller policy from DOP853.
+    """Return the common source for both tableau variants.
 
-    Compile with D (density dimension) and WG (power-of-two reduction width).
-    The state remains in the interaction frame across bounded launches.
+    Compile with D (density dimension), WG (power-of-two reduction width) and
+    DP54 (1 for DP5(4), 0 for DOP853). The state stays in the interaction frame
+    across bounded launches.
     """
-    definitions = ["#pragma OPENCL EXTENSION cl_khr_fp64 : enable"]
-    for name, values in endpoint_coefficients().items():
+    definitions = [
+        "#pragma OPENCL EXTENSION cl_khr_fp64 : enable",
+        "#if DP54",
+        *_tableau_definitions(dp54=True),
+        "#else",
+        *_tableau_definitions(dp54=False),
+        "#endif",
+    ]
+    for name, scalar in {
+        "SEED": ROW_INITIAL_STEP_NS,
+        "SAFETY": STEP_SAFETY,
+        "MIN_FACTOR": STEP_MIN_FACTOR,
+        "MAX_FACTOR": STEP_MAX_FACTOR,
+        "NORM_BLEND": ERROR_NORM_BLEND,
+    }.items():
+        definitions.append(f"#define {name} ({scalar:.17e}f)")
+    definitions.append(f"#define ATTEMPT_LIMIT {ENDPOINT_ATTEMPT_LIMIT}")
+    return "\n".join([*definitions, _KERNEL])
+
+
+def _tableau_definitions(*, dp54: bool) -> list[str]:
+    coefficients = endpoint_coefficients(dp54=dp54)
+    exponent = DP54_ERROR_EXPONENT if dp54 else STEP_ERROR_EXPONENT
+    definitions = [
+        f"#define STAGES {len(coefficients['C'])}",
+        f"#define EXPONENT ({exponent:.17e}f)",
+    ]
+    for name, values in coefficients.items():
         shape = "".join(f"[{axis}]" for axis in values.shape)
         numbers = [f"{v:.17e}f" for v in values.ravel()]
         if values.ndim == 2:
@@ -29,17 +57,7 @@ def opencl_source() -> str:
                 for i in range(0, len(numbers), width)
             ]
         definitions.append(f"__constant float {name}{shape} = {{{','.join(numbers)}}};")
-    for name, scalar in {
-        "SEED": ROW_INITIAL_STEP_NS,
-        "SAFETY": STEP_SAFETY,
-        "MIN_FACTOR": STEP_MIN_FACTOR,
-        "MAX_FACTOR": STEP_MAX_FACTOR,
-        "EXPONENT": STEP_ERROR_EXPONENT,
-        "NORM_BLEND": ERROR_NORM_BLEND,
-    }.items():
-        definitions.append(f"#define {name} ({scalar:.17e}f)")
-    definitions.append(f"#define ATTEMPT_LIMIT {ENDPOINT_ATTEMPT_LIMIT}")
-    return "\n".join([*definitions, _KERNEL])
+    return definitions
 
 
 _KERNEL = r"""
@@ -136,18 +154,27 @@ inline float embedded_error(__local Scratch *work, __global const float2 *state,
     int lane = get_local_id(0);
     float2 norms = (float2)(0);
     for (int q = lane; q < Q; q += WG) {
-        float2 value = state[q], e5 = (float2)(0), e3 = (float2)(0);
-        for (int s = 0; s < 12; ++s) {
+        float2 value = state[q], e5 = (float2)(0);
+#if !DP54
+        float2 e3 = (float2)(0);
+#endif
+        for (int s = 0; s < STAGES; ++s) {
             float2 slope = slopes[s*Q+q];
             if (B[s] != 0) value += (step * B[s]) * slope;
             e5 += E5[s] * slope;
+#if !DP54
             e3 += E3[s] * slope;
+#endif
         }
         work->rho[q] = value;
         float scale = tolerance.y + tolerance.x * fmax(length(state[q]), length(value));
         e5 /= scale;
+#if DP54
+        norms += (float2)(dot(e5, e5), 0.0f);
+#else
         e3 /= scale;
         norms += (float2)(dot(e5, e5), dot(e3, e3));
+#endif
         if (!all(isfinite(value))) norms.x = INFINITY;
     }
     work->norms[lane] = norms;
@@ -157,7 +184,11 @@ inline float embedded_error(__local Scratch *work, __global const float2 *state,
         barrier(CLK_LOCAL_MEM_FENCE);
     }
     float2 total = work->norms[0];
+#if DP54
+    return step * sqrt(total.x / Q);
+#else
     return all(total == 0) ? 0.0f : step * total.x / sqrt((total.x + NORM_BLEND * total.y) * Q);
+#endif
 }
 
 // progress = (interval, trials since knot, previous rejection, error code).
@@ -172,7 +203,7 @@ __kernel void advance(__global float2 *states, __global float2 *derivatives,
                       __global const int *active_rows) {
     int row = active_rows[get_group_id(0)], lane = get_local_id(0);
     __global float2 *state = states + row*Q;
-    __global float2 *slopes = derivatives + row*12*Q;
+    __global float2 *slopes = derivatives + row*STAGES*Q;
     __global const double *times = knots + row*width;
     __global const float2 *env = samples + 2*row*width;
     __local Scratch work;
@@ -202,7 +233,7 @@ __kernel void advance(__global float2 *states, __global float2 *derivatives,
         }
         double4 tone = tones[row];
         step_origin(&work, energies, tone, left + clock);
-        for (int s = 0; s < 12; ++s) {
+        for (int s = 0; s < STAGES; ++s) {
             for (int q = lane; q < Q; q += WG) {
                 float2 value = state[q];
                 for (int p = 0; p < s; ++p)

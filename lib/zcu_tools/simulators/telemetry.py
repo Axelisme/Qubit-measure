@@ -6,7 +6,6 @@ import json
 import warnings
 from collections.abc import Sequence
 from contextlib import suppress
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -67,9 +66,10 @@ class RoutingRecord(AcquireTelemetry):
     timestamp: UTC ISO timestamp.
     frontend_cpu_s: calling-thread geometry and work-plan CPU seconds.
     estimated_cost_unit: label for relative family scheduling costs.
-    families: family name to merged Engine routing counters, CPU seconds and
+    families: family name to merged acquire routing counters, CPU seconds and
     optional OpenCL detection error. estimated_cpu_s is None when any
-    contributing estimate is unavailable.
+    contributing estimate is unavailable. Engine tableau diagnostics are not
+    persisted.
     Caller-supplied fields retain their AcquireTelemetry meanings.
     """
 
@@ -85,8 +85,23 @@ def _families(
     # Keep configuration imports independent of the numerical runtime.
     from zcu_tools.simulate.evolution import merge_path_diagnostics
 
+    # Declare the JSONL fields here so new Engine diagnostics do not expand the schema.
     return {
-        name: {**asdict(report), "actual_cpu_s": report.actual_cpu_s}
+        name: {
+            "rows": report.rows,
+            "prepare_cpu_s": report.prepare_cpu_s,
+            "apply_cpu_s": report.apply_cpu_s,
+            "cache_hits": report.cache_hits,
+            "rejected_rows": report.rejected_rows,
+            "estimated_cost": report.estimated_cost,
+            "estimated_cpu_s": report.estimated_cpu_s,
+            "prepare_builds": report.prepare_builds,
+            "admission_rows": report.admission_rows,
+            "duration_ns": report.duration_ns,
+            "opencl_rows": report.opencl_rows,
+            "opencl_detection_error": report.opencl_detection_error,
+            "actual_cpu_s": report.actual_cpu_s,
+        }
         for name, report in merge_path_diagnostics(paths).routing.items()
     }
 
