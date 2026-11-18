@@ -19,9 +19,9 @@ This notebook uses the F1-SQUID-F2 environment with a finite charge-drive pulse,
 
 ## Load the environment
 
-Copy `zcu_lab/simulation_envs/FTF/default.yaml` to `ftf.yaml` in the same directory before running. Run from the repository root, or supply an absolute YAML path below. This Notebook calls the public `ftf(...)` builder directly. It reserves two host CPUs and enables background numeric warmup.
+Copy `zcu_lab/simulation_envs/FTF/default.yaml` to `ftf.yaml` in the same directory before running. Run from the repository root, or supply an absolute YAML path below. This Notebook calls the public `ftf(...)` builder directly. It reserves two host CPUs and uses `warmup=True` to prepare common CPU paths and, when available, the OpenCL program for the configured model dimension.
 
-For the GUI, use `uv run --directory . --no-sync -- python -m apps.measure --script zcu_lab/simulation_envs/FTF/startup.py`. That trusted startup script reserves one host CPU, with at least one worker and no warmup, and installs resources through the GUI facets. See the [FTF startup instructions](../zcu_lab/simulation_envs/FTF/README.md) for project setup. Changing YAML requires restarting the GUI or rebuilding the Notebook environment. A bias change through the existing device controls does not reload YAML.
+For the GUI, use `uv run --directory . --no-sync -- python -m apps.measure --script zcu_lab/simulation_envs/FTF/startup.py`. That script reserves one host CPU, uses at least one worker, and starts the same CPU and GPU preparation in the background. It installs resources through the GUI facets. See the [FTF startup instructions](../zcu_lab/simulation_envs/FTF/README.md) for project setup. Changing YAML requires restarting the GUI or rebuilding the Notebook environment. A bias change through the existing device controls does not reload YAML.
 
 ```python
 import os
@@ -30,6 +30,7 @@ from pathlib import Path
 import yaml
 from zcu_tools.program import build_soccfg
 from zcu_tools.device.fake import FakeDevice
+from zcu_tools.experiment import simulation
 from zcu_tools.simulators.ftf.environment import ftf
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.utils.device import set_flux
@@ -42,7 +43,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 settings_path = Path("zcu_lab/simulation_envs/FTF/ftf.yaml").resolve()
 env = ftf(
     settings_path,
-    soccfg=build_soccfg(yaml.safe_load(Path("zcu_lab/simulation_envs/FTF/profile.yaml").read_text())),
+    soccfg=build_soccfg(yaml.safe_load(Path("zcu_lab/simulation_envs/profiles/qick_216_v2.yaml").read_text())),
     workers=max(1, (os.cpu_count() or 1) - 2),
     warmup=True,
 )
@@ -101,10 +102,11 @@ Use I/Q and ordinary analysis to find working points. Normal GUI/MCP metadata ex
 
 The YAML example supplies native/local/global dimensions and solver tolerances explicitly. Check larger fixed parent spaces, thermal-state coverage and segment refinement for your sample. This model uses weak dispersive readout, Markov/secular baths and exponential echo-characteristic dephasing. It does not guarantee arbitrary truncations or reproduce a full 1/f Ramsey/echo envelope.
 
-## Close the shared manager
+## Close the environment
 
-After synchronous work has finished, close the exact returned manager. In a longer notebook, put acquisition in a `try/finally` block so failures also release resources. The Notebook owns this manager throughout. The GUI startup instead transfers successfully registered drivers to the GUI and arranges cleanup with `on_close`.
+Run this final cell after the synchronous acquisitions finish. Leaving `closing_environment` waits for any remaining startup preparation, releases the Engine and closes the device manager even if backend cleanup fails. The GUI startup registers its own `on_close` callback because the GUI owns the successfully registered drivers.
 
 ```python
-env.devices.close_all_devices()
+with simulation.closing_environment(env):
+    pass
 ```

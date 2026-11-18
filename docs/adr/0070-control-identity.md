@@ -19,6 +19,7 @@ Measure 與 fluxdep 使用單一 holder。非 holder 不能送業務命令，hol
 `holder` 初始為 `gui`，Remote 為 `rpc:<label>`。`locked` 表示 Local 禁止 agent 取得；`online` 表示 holder 在線，Local 永遠在線。任一相同 label 的已初始化連線在線，Remote 就在線。`me` 只在呼叫 socket 是 owner mode 且 label 與 holder 相同時為 true。
 
 Label 是信任 LAN 上的控制身份，不是 authentication credential。同名 owner 連線共享控制權，不區分重連與同名競爭。Dispatch 從 socket 判定身份，不信任業務 params 自稱的 label。Token authentication、method exposure、輸入驗證與硬體授權照常適用。Event origin 只供歸因，不授權命令。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 既有 import contracts 約束依賴方向。`mcp-remote-only`（C13）限制 MCP 使用 GUI remote 契約，`layers`（C8）與 `top-level-acyclic`（C9）約束跨 package 分層及無循環。`session-no-app`（C2）與 `interactive-below-apps`（C17）禁止共用機制反向依賴 app policy。主視窗只投影 authority，不另維護 holder 規則。
 

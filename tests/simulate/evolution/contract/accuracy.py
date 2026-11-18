@@ -23,6 +23,7 @@ ALL_FAMILIES = (
     "multitone_rwa",
     "floquet",
     "dop853",
+    "dop853/opencl",
 )
 
 
@@ -30,7 +31,8 @@ ALL_FAMILIES = (
 class AccuracyMeasurement:
     """One case/family observation, independent of pytest outcome.
 
-    case is a printable input/route label; family is the executed kernel name.
+    case is a printable input/route label; family is the executed kernel name
+    with an optional /backend suffix.
     density_error is max absolute error over every point and density entry.
     reference_error is the coarse/fine convergence error for the same input.
     Both errors come from finite densities via reference.density_error.

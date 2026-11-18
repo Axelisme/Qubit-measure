@@ -40,6 +40,12 @@ Environment 顯式組合 population 轉換與 ADC；readout 的樣本加總仍�
 Builder 的 `families` 是整次 acquire 的候選白名單，不是逐段指定算法。每段仍由 dispatch 選路並驗證。固定候選可以略過成本捷徑，不能略過輸入前置條件或數值 guard。無可用候選時回報 domain 與受影響的點、段。
 這兩項控制不是物理 YAML、`AcquireRequest`、實驗 cfg 或 program binding 的欄位。不提供逐段 family 對照、callback、偏好順序或公開 kernel registry。詳細生命週期與失敗契約見 [evolution README](../../lib/zcu_tools/simulate/evolution/README.md#accuracy-failures-and-lifecycle)。
 
+### `Engine` 的 GPU backend
+
+2026-11-18，使用者對讓 `dop853` 提供 OpenCL 執行後端的方案答「A」。平台範圍與無可用 GPU 的行為遵循[〈跨平台，不綁作業系統〉](#跨平台不綁作業系統)與[〈GPU 是可選功能〉](#gpu-是可選功能)。
+
+`Engine(backend="auto"|"cpu"|"opencl")` 選的是 `dop853` 的執行裝置，不增加 family，也不讓呼叫端逐段選算法。預設 `"auto"` 在第一個合格 row 才偵測裝置，按成本選 CPU 或 GPU。測試、配對量測與逐位比對可用 `"cpu"` 固定 CPU。GPU 執行中出錯不靜默退回 CPU。安裝、適用範圍及失敗契約見 [GPU backend](../../lib/zcu_tools/simulate/evolution/README.md#gpu-backend)。
+
 ### 凍結數值輸入與參考解交接
 
 `simulate.evolution` 公開通用數值 codec 與 solver-free reference cache I/O。
@@ -173,6 +179,28 @@ Guard 在整個參數空間不放行最終誤差超過 `2e-3` 的結果。
 2026-11-18，使用者說：「我認為不同場景的預算分配確實不同，但模擬算法的衡量不應該改變預算，而是固定預算並找適合的場景」，並說：「還有對於depth 500這種超長序列，我能接受更多的誤差。」對長序列預算的選項答「A」。
 這條原則出自子空間約化在單 tone 與雙 qubit 序列上的比較。
 
+### 跨平台，不綁作業系統
+
+模擬器的算法與執行機制在 Windows 與 Linux 上都成立，不依賴單一作業系統的設定或行為。
+
+例：GPU dispatch 不按 Linux xe driver 的 `preempt_timeout_us=640000` 設定長度。程式量每批耗時，把每次送出控制在約 0.1 s。這個做法不需要修改 Linux driver 或 Windows 的 TDR 設定（預設 2 s）。
+
+邊界：某台機器沒有可用的 GPU 驅動時，可以改用 CPU。結果仍正確，只是較慢。macOS 不在支援範圍。
+
+2026-11-18，使用者說：「由于我会跨电脑平台使用，所以不要采用局限于特定 OS 系统的算法」，並確認：「只有 Windows 和 Linux，其餘採用建議」。
+這條原則出自 [`dop853` 的 OpenCL GPU backend](../discussions/2026-11-18-ftf-gpu-dop853-backend.md)。
+
+### GPU 是可選功能
+
+沒裝 GPU 套件或沒有可用 GPU 時，模擬器的行為與結果與沒有 GPU 功能時完全相同。
+
+例：Windows 筆電沒裝 `gpu` extra，執行同一份 FTF 腳本仍走 CPU，結果與加入 GPU 功能前逐位相同。
+
+邊界：只有使用者明示要求 GPU（`backend="opencl"`）時，找不到可用 GPU 才報錯。
+
+2026-11-18，使用者說：「也有可能在没有 GPU 的系统上使用，所以 GPU 功能确实是属于可选开启」，並說：「OpenCL 应该是没问题的」。
+這條原則出自 [`dop853` 的 OpenCL GPU backend](../discussions/2026-11-18-ftf-gpu-dop853-backend.md)。
+
 ### 快速算法先修好，不輕易放棄
 
 快速算法有誤差問題時，先查原因並試著修正，不先刪除或整個收窄。
@@ -228,6 +256,17 @@ Sampled multitone 過渡期的速度代價照樣用 benchmark 判斷，不以「
 對誰使用這組介面答：「可以，調試者應該就是模擬器維護者，我沒有意向去解耦合兩者責任」。
 對共通部分能帶什麼答：「中性的模擬知識是沒有問題的。場景特化的才不建議」。
 原始討論未入庫。
+
+### 優化優先於周邊約定；除錯靠 dump，不靠重算
+
+規則：模擬器優化的做法、門檻與效能，以使用者看得到的結果正確性為準，也就是完整 density 在誤差預算內。存檔格式、版本號、相容性與重現流程都配合優化調整。除錯需要的資訊寫進 debug capture manifest，缺資訊就擴充 manifest。
+
+例：數值 kernel 改動後，完整 density 通過精度預算就能落地。除錯時讀 manifest 裡的 Engine 輸入、逐列 routes、seed、每輪 DC、model identity 與有效設定。
+
+邊界：使用者看得到的結果正確性、GUI 與設定檔的使用介面、量測結果的語意維持原樣。它們與優化衝突時，由使用者裁決。
+
+2026-11-18，使用者說：「关于 replay 啊之类的其他成本，拜托你以优化的效率为优先，而不是这些其他的细枝末节的仪式、一些储存格式。你如果迁就它的话，优化很难做啊。」並說：「你需要的资讯应该本身就在 dump 的结果里了。如果你会需要 replace 多余的资讯、多余的算法，那就是你 dump 的资料不够多嘛。」對原則行答「好」。
+這條原則出自[移除 private replay](../discussions/2026-11-18-remove-private-replay.md)。
 
 ### 內部允許實質耦合，dispatch 擁有決策知識
 

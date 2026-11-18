@@ -10,7 +10,6 @@ from zcu_tools.simulators.ftf.environment.readout import (
     FTFReadoutConfig,
     FTFReceiverConfig,
 )
-from zcu_tools.simulators.ftf.environment.replay import replay_round
 from zcu_tools.simulators.ftf.environment.runtime import (
     FTFAcquire,
     FTFNumericUse,

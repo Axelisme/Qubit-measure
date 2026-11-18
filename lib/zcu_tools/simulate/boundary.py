@@ -252,7 +252,7 @@ class SamplingIdentity:
         environment (e.g. acquire,round,execution,read). Equal full identity and
         equal calls reproduce arrays; changing identity selects a new stream.
         NumPy SeedSequence((seed,*stream)) with PCG64 defines this implementation's
-        realization; cross-NumPy-version bitwise replay is not promised here.
+        realization; bitwise equality across NumPy versions is not promised.
     No acquire/round identity is guessed, and nothing is persisted by this tool.
     """
 
@@ -581,12 +581,11 @@ class AcquireRequest:
             the binding. An admitted failed or cancelled call consumes it;
             rejected reentry does not. It is not a software round index.
         rng_version: Binding-defined RNG/seed-derivation version string,
-            currently "PCG64/SeedSequence-v1/numpy-<version>". White noise uses
+            currently "PCG64/SeedSequence-v2/numpy-<version>". White noise uses
             SeedSequence([root_seed, sequence, round_index]) with PCG64.
 
-    root_seed, sequence and rng_version are private replay metadata, not normal
-    GUI/MCP metadata. Replay also requires the round snapshot and backend version;
-    equal seeds alone do not promise bit-exact results across library versions.
+    root_seed, sequence and rng_version are private sampling metadata, not
+    normal GUI/MCP metadata.
     Construction rejects noninteger scalar/array times with TypeError, time
     array shape mismatches, empty templates, negative body durations or
     nonpositive sample periods with ValueError, and
@@ -709,9 +708,9 @@ class EnvironmentSnapshot:
             is author-defined; the record does not sort or check unique names.
 
     The environment captures this snapshot immediately before round execution.
-    Authors retain any referenced model/calibration content for replay; this
-    record neither resolves references nor retains that content itself. All fields
-    are private replay inputs, not normal GUI/MCP metadata or public model truth.
+    This record describes the model/calibration identity without resolving it
+    or retaining the content. All fields are private numeric inputs, not
+    normal GUI/MCP metadata or public model truth.
     """
 
     version: str
@@ -734,7 +733,7 @@ class RoundRequest:
             and acquire.sequence to select this round's random stream.
         cancel: Optional read-only query checked between evolution chunks. None
             disables cancellation. Cancellation discards this round, not earlier
-            completed rounds. It is excluded from equality and replay identity.
+            completed rounds. It is excluded from equality.
     """
 
     acquire: AcquireRequest

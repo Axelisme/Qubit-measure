@@ -16,7 +16,7 @@ Compiled simulation 的 request 目前以浮點微秒傳遞時間。Frontend 與
 
 `simulate.boundary.TimeBase` 擁有公共有理數頻率與換算規則。Program 從 soccfg 擷取本次 tProc、已宣告 generator 的 fabric／envelope sample clocks 與已宣告 ADC 的 output clocks，再交給 TimeBase。未宣告 channel 不參與，TimeBase 屬於單一 request。TimeBase 不讀 soccfg，也不 import driver。額外宣告不影響既有事件的異質 clock channel 可以改變時基，但不能改變原 channel 的物理時間與模擬輸出。Frontend 的 ns 網格與 physical IQ 不變性已納入驗證。測試額外宣告 512 MHz fabric generator，時基由 43008 變為 172032 MHz，原 generator／ADC 的事件與 IQ bits 不變。
 
-TimeBase、request schema、compiled frontend、physical consumer 與 replay 已使用整數時間。Planner 以必填 time_base keyword 接收 request 的時基。TimelineTemplate 不重複保存時基。Plan 與 preparation cache key 納入時基。
+TimeBase、request schema、compiled frontend 與 physical consumer 使用整數時間。Planner 以必填 time_base keyword 接收 request 的時基。TimelineTemplate 不重複保存時基。Plan 與 preparation cache key 納入時基。
 
 ## 時間契約
 
@@ -31,7 +31,6 @@ TimeBase 的頻率為約分後的有理數 `F = num / den`，單位為 ticks/μs
 - Num 必須能在 float64 精確表示。Request 的時間輸入與中間結果須在 int64 範圍內，另限制 `abs(ticks * 1000 * den) <= 2**53`。超出範圍報 `OverflowError`，不截斷、不溢位回繞。
 - Relax delay 沿用 QICK 真正編譯時的 tProc-cycle 捨入，再映射到公共整數時基。它不以 raw 作者參數套用手建 fixture 的格點限制。
 - `program.shot_time.request_round_time_s` 擁有整數 request 的 round 時長公式，binding 只呼叫這個入口。它用 Python 整數加總各點、relax delay 與 reps，再由 `TimeBase.seconds` 以有理數換成秒。整輪總和不套用單一 request 的 int64 或 ns 精確界限，不因總時長而新拒絕長 acquisition。2026-10-31，advisor 依代理授權裁定此 owner 與範圍。既有 us API 與硬體路徑不變。
-- Resources 的 replay wire schema 明確保存正整數 num／den 與整數時間。Acquire 與 round 格式版本為 2，舊版本明確拒絕，不做相容轉換。
 
 Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envelope 週期為 100、112、140、7 ticks。ADC output 為 76.8 MHz 的 FTF 配置，其 ADC 週期為 560 ticks。
 
@@ -45,4 +44,4 @@ Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envel
 
 沿用 [[0072]] 的分層與 `.importlinter` C8、C9、C12、C19。Program 與 experiment 使用 `simulate.boundary` 的資料契約；`simulate-closed` contract 禁止 simulate import 其他 zcu_tools package。TimeBase 只使用標準庫與 NumPy。Compiled frontend 的入口與 snapshot owner 維持 [[0083]]。
 
-公開測試驗證兩組時鐘的整數週期、時間組合順序、scalar／array 的逐位正確捨入、非整數時基、格點拒絕及精確範圍邊界。文件與 replay 版本政策由直接審閱確認，不以靜態文字斷言測試。
+公開測試驗證兩組時鐘的整數週期、時間組合順序、scalar／array 的逐位正確捨入、非整數時基、格點拒絕及精確範圍邊界。文件由直接審閱確認，不以靜態文字斷言測試。

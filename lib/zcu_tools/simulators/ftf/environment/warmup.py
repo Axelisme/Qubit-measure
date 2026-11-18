@@ -6,9 +6,14 @@ specialization. Update inputs and remeasure compile events when routing changes.
 No YAML, device, acquisition binding, sampling or global RNG is involved.
 """
 
+from collections.abc import Callable, Collection
+from contextlib import closing
 from dataclasses import replace
 from functools import partial
+from importlib.util import find_spec
 from threading import Event, Lock
+from types import TracebackType
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -72,24 +77,117 @@ COVERAGE = (
     "statistics_copy",
 )
 
+_CPU_ONLY = "cpu-only"
 _lock = Lock()
-_startup: EnvironmentWarmup | None = None
+_startup: dict[int | Literal["cpu-only"], EnvironmentWarmup] = {}
+_compile_lock = Lock()
+_cpu_prepared: set[str] = set()
+_cpu_failures: dict[str, tuple[Exception, TracebackType | None]] = {}
 
 
-def startup_warmup() -> EnvironmentWarmup:
-    """Return process-wide single-flight preparation shared by all FTF bundles.
+def startup_warmup(
+    dimension: int, *, families: Collection[str] | None
+) -> EnvironmentWarmup:
+    """Return lazy preparation shared by FTF bundles with matching startup work.
 
-    Creation is lazy; the caller starts it after building its environment. All
-    work uses one numeric worker independent of production acquire parallelism.
-    Completed/failed results are retained for the process lifetime; no retries
-    or duplicate workers are created by opening another FTF environment.
+    dimension is the number of retained states (at least one, else ValueError).
+    When pyopencl is installed and families permits dop853 (None permits all),
+    a GPU item follows the CPU manifest. Completion means device detection
+    finished and the program was built if the device and dimension were usable.
+    An error after GPU detection succeeds fails the item. A CPU failure stops
+    the manifest before the GPU item. The caller starts the returned controller
+    after environment construction. CPU items and each GPU dimension run at
+    most once per process.
     """
-    global _startup
+    if dimension < 1:
+        raise ValueError("dimension must be at least one")
+    prepare_gpu = (families is None or "dop853" in families) and find_spec(
+        "pyopencl"
+    ) is not None
+    key = dimension if prepare_gpu else _CPU_ONLY
     with _lock:
-        if _startup is None:
-            items = tuple((name, partial(_prepare, name)) for name in COVERAGE)
-            _startup = EnvironmentWarmup(items)
-        return _startup
+        if key not in _startup:
+            items: list[tuple[str, Callable[[], None]]] = [
+                (name, partial(_prepare_cpu_once, name)) for name in COVERAGE
+            ]
+            if prepare_gpu:
+                items.append(("dop853_opencl", partial(_prepare_opencl, dimension)))
+            _startup[key] = EnvironmentWarmup(tuple(items))
+        return _startup[key]
+
+
+def _prepare_cpu_once(name: str) -> None:
+    # Shared across dimension-specific controllers. A separate lock keeps
+    # controller lookup free while a compiler is running.
+    with _compile_lock:
+        if name in _cpu_prepared:
+            return
+        if name in _cpu_failures:
+            error, traceback = _cpu_failures[name]
+            raise error.with_traceback(traceback)
+        try:
+            _prepare(name)
+        except Exception as error:
+            # Keep the original frames instead of accumulating each re-raise.
+            _cpu_failures[name] = (error, error.__traceback__)
+            raise
+        _cpu_prepared.add(name)
+
+
+def _prepare_opencl(dimension: int) -> None:
+    # Keep the device probe single-flight even for different model dimensions.
+    with _compile_lock:
+        _warm_opencl(dimension)
+
+
+def _warm_opencl(dimension: int) -> None:
+    with closing(Engine(1, families=("dop853",))) as engine:
+        if engine.detect_execution_device() == "cpu":
+            # The live Engine will report why detection failed on eligible work.
+            return
+        with closing(_opencl_source(dimension)) as source:
+            result = engine.evolve(source, (_opencl_batch(),), telemetry=True)
+        routing = result.paths.routing["dop853"]
+        if routing.opencl_detection_error is not None:
+            raise RuntimeError(routing.opencl_detection_error)
+        # No OpenCL rows without an error means auto did not admit this workload.
+
+
+def _opencl_source(dimension: int) -> ModelSource:
+    ladder = np.eye(dimension, k=1, dtype=complex)
+    drive = ladder + ladder.T
+    zeros = np.zeros((dimension, dimension), dtype=np.float64)
+    quadrature = np.zeros_like(drive)
+    model = SecularModel(
+        (0,),
+        "ftf-startup-opencl",
+        np.linspace(0.0, 0.13 * (dimension - 1), dimension),
+        np.eye(dimension, dtype=complex),
+        (
+            SecularDrive("drive", drive, quadrature),
+            SecularDrive("aux", drive, quadrature),
+        ),
+        zeros,
+        zeros,
+    )
+    density = np.zeros_like(drive)
+    density[0, 0] = 1
+    return ModelSource(density, lambda _: model)
+
+
+def _opencl_batch() -> TimelineBatch:
+    # Independent, distinct endpoints amortize dispatch even at small d.
+    # The saved program depends on d, not on these synthetic controls.
+    duration = 120.0
+    times = np.linspace(0, duration, 129)
+    envelope = EnvelopeSpec(
+        "sampled", np.sin(np.pi * times / duration).astype(complex), times
+    )
+    gains = np.linspace(0.05, 0.15, 16)
+    batch = _batch(np.full(len(gains), 0.13), gains, envelope, duration)
+    (first,) = batch.tracks
+    second = replace(first, port="aux", frequency_ghz=np.full(len(gains), 0.17))
+    return replace(batch, tracks=(first, second), end_ns=first.duration_ns)
 
 
 def _source() -> ModelSource:
@@ -269,7 +367,7 @@ def _multitone(name: str) -> None:
 
 
 def _evolve(source: ModelSource, batch: TimelineBatch, *, budget: float = 1e-3) -> None:
-    engine = Engine(1)
+    engine = Engine(1, backend="cpu")
     try:
         engine.evolve(source, (batch,), budget=budget, cancel=Event())
     finally:
@@ -293,7 +391,7 @@ def _floquet_probe_windows() -> None:
         np.zeros((2, 2)),
     )
     source = ModelSource(np.diag([0.8, 0.2]).astype(complex), lambda _: model)
-    engine = Engine(1)
+    engine = Engine(1, backend="cpu")
     try:
         for shift in (0.0, 0.004):
             batch = _batch(
@@ -415,7 +513,7 @@ def _joint_gate() -> None:
     companion = replace(
         batch.tracks[0], frequency_ghz=np.full(24, 2.0), phase_rad=np.full(24, 0.71)
     )
-    engine = Engine(1)
+    engine = Engine(1, backend="cpu")
     try:
         engine.evolve(
             _source(),
