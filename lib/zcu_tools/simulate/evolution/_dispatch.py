@@ -23,6 +23,7 @@ from ._multitone_dispatch import (
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
+from ._sampled_rwa_dispatch import prefer_sampled_rwa
 from ._shaped_dispatch import (
     populate_single_gate_plan,
     preference,
@@ -40,6 +41,7 @@ from .kernel import (
     RowPlan,
     SegmentTable,
 )
+from .kernels._multitone_spot import sampled_candidates
 from .kernels.common_frame import zero_mean_carrier
 from .kernels.dop853 import DOP853Kernel
 from .kernels.floquet import FloquetPlan
@@ -560,7 +562,15 @@ class _Classifier:
         self.accept("flux", rows[self.domains["flux"][rows]], ("flux_dop853",))
         self.classify_slow(rows[self.domains["slow"][rows]])
         # Group shaped and constant consumers together before any legacy prepare.
+        multiple = rows[self.domains["multiple"][rows]]
+        rwa = self.kernels.get("multitone_rwa")
+        sampled = (
+            np.isin(multiple, sampled_candidates(self.table, self.context))
+            if len(multiple) and isinstance(rwa, MultitoneRWAKernel)
+            else np.zeros(len(multiple), dtype=bool)
+        )
         common = self.domains["two"] | self.domains["multiple"]
+        common[multiple[sampled]] = False
         self.try_common_frame(rows[common[rows]])
         self.classify_plateau(rows[self.domains["plateau"][rows]])
         shaped = np.flatnonzero(self.domains["shaped"] & self.scope)
@@ -569,7 +579,9 @@ class _Classifier:
         two_tone = np.flatnonzero(self.domains["two"])
         if len(two_tone):
             self.classify_two_tone(two_tone)
-        self.classify_multiple(rows[self.domains["multiple"][rows]])
+        self.classify_multiple(multiple[~sampled])
+        if np.any(sampled) and isinstance(rwa, MultitoneRWAKernel):
+            self.classify_sampled(multiple[sampled], rwa)
         return self._result()
 
     def classify_slow(self, rows: NDArray[np.int64]) -> None:
@@ -625,14 +637,46 @@ class _Classifier:
         )
         return np.array([int(row) in direct for row in rows], dtype=bool)
 
-    def classify_multiple(self, rows: NDArray[np.int64]) -> None:
-        """Try reusable gates, then the cheaper admitted RWA/direct alternative."""
-        rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
+    def try_multitone_gate(self, rows: NDArray[np.int64]) -> NDArray[np.int64]:
+        """Offer the existing gate only on its preferred rows."""
         gate = self.kernels.get("multitone_gate")
         if gate is not None and len(rows):
             preferred = gate_preferred(self.table, rows, self.context)
             self.try_kernel(gate, rows[preferred])
-            rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
+        return rows[(self.names[rows] == "") & ~self.deferred[rows]]
+
+    def classify_sampled(
+        self, rows: NDArray[np.int64], rwa: MultitoneRWAKernel
+    ) -> None:
+        """Skip a losing sampled probe; keep numerical and allowlist fallbacks."""
+        complete = self.context.work_plan.complete_table
+        if complete is None:
+            raise RuntimeError("sampled RWA pricing requires complete geometry")
+        preferred = prefer_sampled_rwa(
+            complete, self.context, rwa, self.kernels.get("common_frame")
+        )
+        direct = ("dop853",) if "dop853" in self.kernels else ()
+        if preferred:
+            rows = self.try_multitone_gate(rows)
+            rows = self.try_kernel(rwa, rows)
+            rows = self.try_common_frame(rows)
+            # Retain attempted-family diagnostics for exhausted allowlists.
+            if self.context.families is not None:
+                direct = (rwa.name, *direct)
+        else:
+            rows = self.try_common_frame(rows)
+            rows = self.try_multitone_gate(rows)
+        self.accept(
+            "multiple",
+            rows,
+            direct,
+            cost_skipped=("common_frame", rwa.name, "multitone_gate"),
+        )
+
+    def classify_multiple(self, rows: NDArray[np.int64]) -> None:
+        """Try reusable gates, then the cheaper admitted RWA/direct alternative."""
+        rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
+        rows = self.try_multitone_gate(rows)
         preferred = self.expanded_direct(rows)
         rwa = ("multitone_rwa",) if "multitone_rwa" in self.kernels else ()
         self.accept(

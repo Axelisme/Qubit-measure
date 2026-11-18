@@ -203,7 +203,12 @@ class PrefixResolver:
                 trace=None if capture is None else capture.round(prefix),
             )
             schedule = Schedule(
-                prefix, dispatch, context, cancel, initial, capture=capture
+                prefix,
+                dispatch,
+                replace(context, opencl=None),
+                cancel,
+                initial,
+                capture=capture,
             )
             result = schedule.run(kernels, pool, chunks)
             inputs[group] = result.densities[0]

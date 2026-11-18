@@ -6,13 +6,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from ._multitone_dispatch import (
-    CONSTANT_KICK_PREPARE_S,
-    cheap_rwa_graph,
-    populate_multitone_inventory,
-)
+from ._multitone_dispatch import CONSTANT_KICK_PREPARE_S, populate_multitone_inventory
 from .kernel import KernelContext, SegmentTable
-from .kernels._multitone_spot import sampled_candidates
 from .kernels._rwa_numeric import multitone_retention
 from .kernels._workload_facts import envelope_bounds
 from .kernels.common_frame import (
@@ -194,18 +189,7 @@ def _cheap_rwa(
     inventory = populate_multitone_inventory(
         geometry, context.source, context.work_plan, context.budget
     )
-    cheap = np.isin(rows, inventory.cheap)
-    if np.all(table.constant_envelopes(rows)):
-        return cheap
-    sampled = np.flatnonzero(np.isin(rows, sampled_candidates(geometry, context)))
-    sampled = np.array(
-        [i for i in sampled if cheap_rwa_graph(table, int(rows[i]), context)],
-        dtype=np.int64,
-    )
-    if len(sampled):
-        with context.work_plan.routing.measure(rwa.name, "prepare"):
-            cheap[sampled] = rwa.guard(table, rows[sampled], context)
-    return cheap
+    return np.isin(rows, inventory.cheap)
 
 
 def preferred(
@@ -217,7 +201,8 @@ def preferred(
     """Price complete builds, reuse and rejection risk, never accuracy.
 
     Prefix/worker subsets borrow complete-group mean prices. A cheap admitted
-    unexpanded RWA graph wins before any common cost-feature construction.
+    unexpanded constant RWA graph wins before common cost-feature construction.
+    Sampled competition is priced separately, without running a sampled probe.
     Remaining rows price wasted cold builds using first-order SW strength,
     weighted by actual gains and envelope peaks. The empirical eighth-power
     risk near eta=.08 is a cost forecast, not an admission/accuracy veto.

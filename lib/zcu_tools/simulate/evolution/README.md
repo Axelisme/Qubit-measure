@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, sampled multitone RWA admission
+**Last updated:** 2026-11-18, sampled multitone RWA admission and pricing
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -307,7 +307,11 @@ See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
 `DispatchInspection` without evolving the user's timelines. It uses evolve's
 classifier, candidate ordering, guards and complete-inventory pricing.
 Guards can evolve their own probes: Floquet computes a one-period propagator,
-and sampled multitone RWA compares fixed probe endpoints.
+and sampled multitone RWA compares fixed probe endpoints. When OpenCL
+availability could change sampled RWA selection, inspection uses the same
+lazy DOP853 device check as evolve. The check can run a device self-test and
+write machine-level OpenCL detection and program caches. Inspection does not
+compile a workload point variant. CPU-only engines do not check a device.
 Source, batch, budget, cancellation and failure
 contracts match `evolve`; an exhausted candidate round raises `NoValidKernel`.
 
@@ -796,13 +800,19 @@ The [matrix instructions](../../../../tests/README.md#evolution-精度矩陣)
 own the command and report format.
 
 Sampled dual tones that pass the row proxies form one `multitone_rwa` candidate
-group. The guard selects the rows with greatest drive strength, peak-normalized
-envelope slope and peak-normalized curvature, with duplicate keys checked only once.
-The guard evolves the same fixed coherent probe with RWA and full-drive CPU
-`dop853` at the requested budget. Every probed row must have maximum absolute
-full-density difference ≤ 0.1 × B. If any fails, the entire group falls back
-to other candidates such as `common_frame` or `dop853`. The decision expires
-at the end of the call. This empirical check replaces the
+group. Dispatch prices the whole group, including RWA playback and the
+caller-thread cost of its spot checks. Each check charges a fresh RWA build
+and apply plus full-drive CPU DOP853. Dispatch skips the checks when an eligible
+alternative is at least as cheap. An RWA-only allowlist skips pricing, not the
+guard. Neither the price amortization nor the admission decision carries over
+to another evolve.
+
+The guard selects the rows with greatest drive strength, peak-normalized
+envelope slope and peak-normalized curvature. It compares each distinct row's
+fixed coherent probe in RWA and full-drive CPU DOP853 at the requested budget.
+The maximum absolute difference in the complete density must be ≤ 0.1 × B on
+every checked row. If any fails, the entire group falls back to other candidates
+such as `common_frame` or `dop853`. This empirical check replaces the
 [2026-11-14 interim rejection](../../../../docs/discussions/2026-11-14-sampled-multitone-interim.md)
 for sampled RWA, but does not certify arbitrary input states or accumulated
 sequence error. The matrix covers rejected phase-varied sequences and short
@@ -1044,7 +1054,7 @@ does not certify the adiabatic approximation.
   one family in one evolve. Floquet stores admissions and retained equations;
   the direct solvers store frame or chain decisions. Plans never enter
   persistent kernel state.
-- `KernelContext(source, budget, work_plan, opencl)` supplies preparation, key
+- `KernelContext(source, budget, work_plan, ...)` supplies preparation, key
   and guard calls with one evolve owner and an optional OpenCL backend.
   `ApplyContext(budget, plan, work_plan, opencl)` supplies the finite positive
   per-segment allowance, the family's plan and an optional runner for a batch

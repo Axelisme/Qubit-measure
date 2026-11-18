@@ -357,12 +357,26 @@ def test_sampled_multitone_rejects_the_complete_group(
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
     case = accuracy_case(name)
-    expected_rows = sum(len(spans) for spans in segment_spans(case.batch))
+    # Keep the piecewise-linear drive but add knot restarts to direct playback.
+    # These cases must pay for and fail the probe, not fall back on price alone.
+    tracks = []
+    for track in case.batch.tracks:
+        (envelope,) = track.envelopes
+        time = envelope.sample_ns
+        knots = np.interp(
+            np.linspace(0, len(time) - 1, (len(time) - 1) * 64 + 1),
+            np.arange(len(time)),
+            time,
+        )
+        dense = replace(envelope, sample_ns=knots, samples=envelope.values(knots))
+        tracks.append(replace(track, envelopes=(dense,)))
+    batch = replace(case.batch, tracks=tuple(tracks))
+    expected_rows = sum(len(spans) for spans in segment_spans(batch))
     with closing(
         Engine(1, families=("multitone_rwa", "dop853"), backend="cpu")
     ) as engine:
-        inspection = engine.inspect_dispatch(case.source, (case.batch,))
-        result = engine.evolve(case.source, (case.batch,), telemetry=True)
+        inspection = engine.inspect_dispatch(case.source, (batch,))
+        result = engine.evolve(case.source, (batch,), telemetry=True)
     assert len(inspection.rows) == expected_rows
     for row in inspection.rows:
         assert row.family == "dop853"

@@ -272,8 +272,9 @@ class KernelContext:
     Standalone callers supply a fresh WorkPlan and close it after use.
     families is the immutable acquire-wide family allowlist for dispatch;
     None preserves unrestricted selection. Kernels retain their original guards.
-    opencl borrows the Engine's DOP853 backend during ordinary timeline work;
-    None plans and runs CPU-only work (including shared prefixes).
+    opencl borrows the Engine's DOP853 backend for pricing and ordinary
+    timeline work; prefix execution drops this backend.
+    workers is the effective acquire-wide CPU width used to price sampled rows.
     """
 
     source: ModelSource
@@ -281,6 +282,7 @@ class KernelContext:
     work_plan: WorkPlan
     families: frozenset[str] | None = None
     opencl: OpenCLBackend | None = None
+    workers: int = 1
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:

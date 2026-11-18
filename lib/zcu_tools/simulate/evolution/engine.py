@@ -823,7 +823,9 @@ class Engine:
                 frontend_cpu_s = (
                     time.thread_time() - frontend_started if telemetry else 0.0
                 )
-                context = KernelContext(source, budget, work_plan, self._families)
+                context = KernelContext(
+                    source, budget, work_plan, self._families, self._opencl, workers
+                )
                 reuse_snapshot = self._routing_reuse.snapshot(
                     reuse_key, geometry.table, context
                 )
@@ -832,7 +834,6 @@ class Engine:
                     geometry = PrefixResolver(
                         geometry, kernels, context, cancel, capture=capture_run
                     ).resolve(pool, self._chunks)
-                    context = replace(context, opencl=self._opencl)
                     dispatch = classify(
                         geometry,
                         kernels,
@@ -878,8 +879,12 @@ class Engine:
         a driven prefix density report needs_prefix_input instead of computing
         the prefix. Guards may evolve their own probes: Floquet integrates its
         one-period propagator and sampled multitone RWA compares fixed probe
-        endpoints. Numerical preparation and model errors propagate, as in
-        evolve. A closed Engine or invalid budget
+        endpoints. If OpenCL availability could change sampled RWA pricing,
+        inspection uses DOP853's lazy device check, including its self-test
+        and machine-level detection/program caches. It does not compile a
+        workload point variant. CPU-only engines do not check a device.
+        Numerical preparation and model errors propagate, as in evolve.
+        A closed Engine or invalid budget
         raises before planning; cancellation raises Cancelled without a result.
         Callers serialize operations sharing a source/history, as for evolve.
         Does not modify routing history: usage, content membership and
@@ -912,7 +917,10 @@ class Engine:
                 )
             ) as work_plan:
                 # ADR-0078: expose observations, not a second dispatch entry point.
-                context = KernelContext(source, budget, work_plan, self._families)
+                workers = self._workers if len(geometry.points) > 1 else 1
+                context = KernelContext(
+                    source, budget, work_plan, self._families, self._opencl, workers
+                )
                 dispatch = classify(geometry, self._kernels, context, trace=trace)
                 if cancel.is_set():
                     raise Cancelled()

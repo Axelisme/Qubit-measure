@@ -484,6 +484,115 @@ def test_sampled_multitone_admission_is_independent_of_reuse(count: int) -> None
     assert density_error(result.densities, reference.density) <= 2e-3
 
 
+@pytest.mark.parametrize("count", [1, 16], ids=["unamortized", "amortized"])
+def test_sampled_multitone_prices_the_evolve_local_probe(count: int) -> None:
+    # Sixteen knot intervals make direct playback more expensive per row than
+    # RWA. The fitted serial costs cross between four and five consumers; one cannot
+    # repay a full-drive probe, and sixteen leave room for calibration error.
+    case = _joint_gate_case(count)
+    knots = np.linspace(0.0, 1.5, 17)
+    tracks = tuple(
+        replace(
+            track,
+            envelopes=(
+                EnvelopeSpec("sampled", track.envelopes[0].values(knots), knots),
+            ),
+        )
+        for track in case.batch.tracks
+    )
+    batch = replace(case.batch, tracks=tracks)
+    with closing(case.source), closing(Engine(1, backend="cpu")) as engine:
+        reference = converged_reference(case.source, batch)
+        for _ in range(2):
+            result = engine.evolve(case.source, (batch,), telemetry=True)
+            routes = result.paths.segments_by_kernel
+            if count == 1:
+                assert routes in ({"common_frame": count}, {"dop853": count})
+                rwa = result.paths.routing.get("multitone_rwa")
+                assert rwa is None or rwa.admission_rows == 0
+            else:
+                assert routes == {"multitone_rwa": count}
+                assert result.paths.routing["multitone_rwa"].admission_rows > 0
+            assert density_error(result.densities, reference.density) <= 2e-3
+
+
+@pytest.mark.parametrize("available", [False, True], ids=["cpu-only", "gpu-available"])
+def test_sampled_price_queries_reuse_only_a_decisive_device_check(
+    monkeypatch: pytest.MonkeyPatch, available: bool
+) -> None:
+    # No public injection exists for device discovery. Stub the external device,
+    # not the backend state, wave prices, guard, or any dispatch decisions.
+    from zcu_tools.simulate.evolution.kernels import _dop853_opencl
+
+    events: list[str] = []
+
+    class Device:
+        def check_device(self) -> None:
+            events.append("check")
+            if not available:
+                raise RuntimeError("No OpenCL device in this test")
+
+        def cached_build_failure(self, dimension: int) -> None:
+            events.append("cached")
+
+        def compile_variant(self, dimension: int) -> str:
+            events.append("compile")
+            return "no point program in the test device"
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(_dop853_opencl, "OpenCLDOP853", Device)
+    count = 12
+    case = _joint_gate_case(count)
+    knots = np.linspace(0.0, 100.0, 200)
+    envelope = EnvelopeSpec(
+        "sampled", np.linspace(0.8, 1.0, len(knots)).astype(complex), knots
+    )
+    batch = replace(
+        case.batch,
+        end_ns=np.full(count, 100.0),
+        tracks=tuple(
+            replace(track, duration_ns=np.full(count, 100.0), envelopes=(envelope,))
+            for track in case.batch.tracks
+        ),
+    )
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu")) as cpu,
+        closing(Engine(1, backend="auto")) as auto,
+    ):
+        assert {
+            row.family for row in cpu.inspect_dispatch(case.source, (batch,)).rows
+        } == {"multitone_rwa"}
+        # One consumer cannot repay even its CPU probe. A device cannot alter
+        # the family, so the query does not check hardware for this smaller group.
+        small = timeline(1, 100.0)
+        small = replace(
+            small,
+            tracks=tuple(
+                drive_track(
+                    small,
+                    envelope,
+                    port=t.port,
+                    frequency=float(t.frequency_ghz[0]),
+                    gain=float(t.amplitude[0]),
+                )
+                for t in batch.tracks
+            ),
+        )
+        assert auto.inspect_dispatch(case.source, (small,)).rows[0].family == "dop853"
+        assert not events
+        expected = "dop853" if available else "multitone_rwa"
+        for _ in range(2):
+            query = auto.inspect_dispatch(case.source, (batch,))
+            assert {row.family for row in query.rows} == {expected}
+        assert events == (["check", "cached"] if available else ["check"])
+        result = auto.evolve(case.source, (batch,))
+        assert result.paths.segments_by_kernel == {expected: count}
+        assert events.count("check") == 1
+
+
 def test_pinned_multitone_gate_below_cost_break_even() -> None:
     """Pinning does not bypass the independent multitone_gate rejection."""
     case = _joint_gate_case(19)

@@ -67,6 +67,13 @@ def spot_rows(
     gain sweep with one shape need not probe a second row. Remaining ties
     follow complete-table order.
     """
+    key = FactKey(("multitone-sampled-spots", TableIdentity(table), candidates), tuple)
+    return context.work_plan.fact(key, lambda: _spot_rows(table, candidates, context))
+
+
+def _spot_rows(
+    table: SegmentTable, candidates: tuple[int, ...], context: KernelContext
+) -> tuple[int, ...]:
     if not candidates:
         return ()
     bounds = envelope_bounds(table, context.work_plan)
