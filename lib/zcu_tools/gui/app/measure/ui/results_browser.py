@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import QDate, QEvent, QObject, QPoint, QPointF, Qt
+from qtpy.QtCore import QDate, QEvent, QObject, QPoint, QPointF, QSignalBlocker, Qt
 from qtpy.QtGui import QAction, QHideEvent, QImage, QMouseEvent, QPixmap, QResizeEvent
 from qtpy.QtWidgets import (
     QApplication,
@@ -21,6 +22,7 @@ from qtpy.QtWidgets import (
     QMenu,
     QPushButton,
     QSplitter,
+    QStatusBar,
     QStyle,
     QStyleOptionComboBox,
     QTabWidget,
@@ -33,6 +35,8 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.app.measure.registry import ExperimentResolution
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsIndex
+from zcu_tools.gui.app.measure.services.results_index_owner import ResultsScanState
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .results_comparison import ResultsComparison
@@ -108,7 +112,11 @@ class _CalendarDateEdit(QDateEdit):
 
 
 class ResultsBrowserWindow(QMainWindow):
-    """Retain one read-only results view; the measure window owns its lifetime."""
+    """Show the retained app-owned scan without doing filesystem I/O on construction.
+
+    Close hides this top-level window. MainWindow calls dispose at teardown
+    to detach the subscription before deleting the view (ADR-0067).
+    """
 
     def __init__(
         self, controller: Controller, parent: QMainWindow | None = None
@@ -117,7 +125,8 @@ class ResultsBrowserWindow(QMainWindow):
         self.setObjectName("results.browser")
         self.setWindowTitle("Results browser")
         self.resize(1400, 850)
-        index = controller.query_results()
+        index = ResultsIndex(Path(controller.get_project_root()).absolute(), ())
+        self._lifetime = LifetimeScope(self)
 
         def open_run(adapter: str, path: str) -> LoadTabResultOutcome:
             outcome = controller.tab_control.open_tab_from_file(adapter, path)
@@ -133,6 +142,39 @@ class ResultsBrowserWindow(QMainWindow):
             resolve_experiment=controller.resolve_experiment,
         )
         self.setCentralWidget(self._browser)
+        self._lifetime.add_cleanup(self._browser.dispose)
+        self._index_status = QStatusBar(self)
+        self._index_status.setObjectName("results.index_status")
+        self.setStatusBar(self._index_status)
+        self._lifetime.add_cleanup(
+            controller.watch_results_index(self._lifetime.callback(self._present_scan))
+        )
+
+    def _present_scan(self, state: ResultsScanState) -> None:
+        self._browser.present_index(state.index)
+        runs = len(state.index.runs)
+        match state.phase:
+            case "indexing":
+                message = (
+                    "Indexing results…"
+                    if state.total_entries is None
+                    else f"Indexing results: {state.completed_entries} / {state.total_entries} entries · {runs} runs"
+                )
+            case "ready":
+                issues = len(state.index.issues) + sum(
+                    len(run.issues) for run in state.index.runs
+                )
+                message = f"Index ready: {runs} runs · {issues} issues"
+            case "cancelled":
+                message = f"Index cancelled: {runs} runs"
+            case "failed":
+                message = f"Index failed: {state.error}"
+        self._index_status.showMessage(message)
+
+    def dispose(self) -> None:
+        """Retire the view and its index subscription without stopping the scan."""
+        self._lifetime.close()
+        self.close()
 
     def set_writable(self, *, writable: bool) -> None:
         """Gate new-tab commands while retaining read-only browsing and local pins."""
@@ -140,13 +182,16 @@ class ResultsBrowserWindow(QMainWindow):
 
 
 class ResultsBrowser(QWidget):
-    """Browse an immutable index without changing the opened entry or point.
+    """Browse delivered index snapshots without changing the opened entry or point.
 
+    index is the initial snapshot, often empty. present_index applies later
+    snapshots from the same scan; only delivered runs are browsable or openable.
     open_run accepts a resolved adapter name and native data path, returning the
     existing Load outcome or raising a user-facing error. resolve_experiment is
     the catalog owner's query, called only when Open is requested. Navigation,
     filters and saved documents use historical strings without catalog access.
-    All callbacks run on the Qt owner thread.
+    All callbacks run on the Qt owner thread. The owner calls dispose before
+    deleting the browser, not when hiding it.
     """
 
     def __init__(
@@ -158,8 +203,11 @@ class ResultsBrowser(QWidget):
         resolve_experiment: Callable[[str | None], ExperimentResolution],
     ) -> None:
         super().__init__(parent)
+        self.setObjectName("results.content")
+        self._lifetime = LifetimeScope(self)
         self._index = index
         self._resolve_experiment = resolve_experiment
+        self._dates_edited = False
         self.setStyleSheet("""
             QWidget { background: #f6f8fb; color: #1e293b; font-size: 12px; }
             QTreeWidget, QTableWidget, QPlainTextEdit, QLineEdit, QComboBox {
@@ -177,7 +225,7 @@ class ResultsBrowser(QWidget):
         self._focus = _Focus()
         self._history = [self._focus]
         self._history_position = 0
-        self._navigation: list[tuple[QTreeWidgetItem, _Focus]] = []
+        self._navigation: dict[_Focus, QTreeWidgetItem] = {}
         self._navigation_runs: tuple[ResultRun, ...] | None = None
         layout = QVBoxLayout(self)
         splitter = QSplitter()
@@ -216,6 +264,26 @@ class ResultsBrowser(QWidget):
         self._lightbox = ResultLightbox(self)
         self._render()
 
+    def dispose(self) -> None:
+        """Retire date edit callbacks before the owner deletes this view (ADR-0067)."""
+        self._lifetime.close()
+
+    def present_index(self, index: ResultsIndex) -> None:
+        """Show a newer snapshot of the same scan on the Qt owner thread.
+
+        New entries extend the existing sorted rows. Preserve current search,
+        filter, focus, pins and command feedback. Commands remain available on
+        already-delivered runs.
+        """
+        if self._index == index:
+            return
+        self._index = index
+        self._gallery.replace_index(index)
+        self.comparison.replace_index(index)
+        self._refresh_filter_choices()
+        self._show_item_issues()
+        self._render_filtered(self._filtered(update_feedback=False))
+
     def resizeEvent(self, a0: QResizeEvent | None) -> None:
         super().resizeEvent(a0)
         self._lightbox.setGeometry(self.rect())
@@ -235,10 +303,6 @@ class ResultsBrowser(QWidget):
         row.addWidget(self._group)
         self._experiment = QComboBox()
         self._experiment.setObjectName("results.experiment")
-        self._experiment.addItem("All experiments")
-        self._experiment.addItems(
-            sorted({self._experiment_name(run) for run in self._index.runs})
-        )
         self._experiment.currentIndexChanged.connect(self._render)
         row.insertWidget(0, self._experiment, 1)
         layout.addLayout(row)
@@ -251,40 +315,55 @@ class ResultsBrowser(QWidget):
         self._dates_enabled = QCheckBox("Filter by date (UTC)")
         self._dates_enabled.setObjectName("results.dates_enabled")
         dates.addWidget(self._dates_enabled)
-        known = sorted(run.at[:10] for run in self._index.runs if run.at)
-        self._date_from = self._date_filter(
-            "results.date_from", known[0] if known else "2000-01-01", dates
-        )
+        self._date_from = self._date_filter("results.date_from", "2000-01-01", dates)
         dates.addWidget(QLabel("to"))
         self._date_to = self._date_filter(
-            "results.date_to",
-            known[-1] if known else QDate.currentDate().toString("yyyy-MM-dd"),
-            dates,
+            "results.date_to", QDate.currentDate().toString("yyyy-MM-dd"), dates
         )
+        self._refresh_filter_choices()
         self._dates_enabled.toggled.connect(self._toggle_dates)
         layout.addLayout(dates)
         self._visible_count = QLabel()
         self._visible_count.setObjectName("results.visible_count")
         make_label_selectable(self._visible_count)
         layout.addWidget(self._visible_count)
-        issues = QLabel(
-            "Cannot index: "
-            + ", ".join(
-                sorted({issue.entry or "Database" for issue in self._index.issues})
-            )
-        )
-        issues.setObjectName("results.issues")
-        issues.setWordWrap(True)
-        issues.setToolTip(
+        self._issues_label = QLabel()
+        self._issues_label.setObjectName("results.issues")
+        self._issues_label.setWordWrap(True)
+        make_label_selectable(self._issues_label)
+        layout.addWidget(self._issues_label)
+        self._show_item_issues()
+        return layout
+
+    def _show_item_issues(self) -> None:
+        issues = self._index.issues
+        entries = ", ".join(sorted({issue.entry or "Database" for issue in issues}))
+        self._issues_label.setText(f"Cannot index: {entries}")
+        self._issues_label.setToolTip(
             "\n".join(
                 f"{issue.entry or 'Database'}: {issue.path}: {issue.reason}"
-                for issue in self._index.issues
+                for issue in issues
             )
         )
-        make_label_selectable(issues)
-        issues.setVisible(bool(self._index.issues))
-        layout.addWidget(issues)
-        return layout
+        self._issues_label.setVisible(bool(issues))
+
+    def _refresh_filter_choices(self) -> None:
+        selected = self._experiment.currentText()
+        names = sorted({self._experiment_name(run) for run in self._index.runs})
+        with QSignalBlocker(self._experiment):
+            self._experiment.clear()
+            self._experiment.addItem("All experiments")
+            self._experiment.addItems(names)
+            self._experiment.setCurrentText(selected)
+        if not self._dates_edited and not self._dates_enabled.isChecked():
+            dates = [run.at[:10] for run in self._index.runs if run.at]
+            if dates:
+                for field, value in (
+                    (self._date_from, min(dates)),
+                    (self._date_to, max(dates)),
+                ):
+                    with QSignalBlocker(field):
+                        field.setDate(QDate.fromString(value, "yyyy-MM-dd"))
 
     def _date_filter(self, name: str, initial: str, layout: QHBoxLayout) -> QDateEdit:
         edit = _CalendarDateEdit(QDate.fromString(initial, "yyyy-MM-dd"))
@@ -296,9 +375,13 @@ class ResultsBrowser(QWidget):
             "Enable Filter by date (UTC), then click the date text or right-hand arrow "
             "to choose a date. From / To are inclusive; runs without a UTC time are excluded."
         )
-        edit.dateChanged.connect(self._render)
+        self._lifetime.connect(edit.dateChanged, self._date_changed)
         layout.addWidget(edit)
         return edit
+
+    def _date_changed(self) -> None:
+        self._dates_edited = True
+        self._render()
 
     def _toggle_dates(self) -> None:
         enabled = self._dates_enabled.isChecked()
@@ -375,16 +458,19 @@ class ResultsBrowser(QWidget):
     def _experiment_name(self, run: ResultRun) -> str:
         return run.experiment or "Unknown experiment"
 
-    def _filtered(self) -> tuple[ResultRun, ...]:
+    def _filtered(self, *, update_feedback: bool = True) -> tuple[ResultRun, ...]:
         enabled = self._dates_enabled.isChecked()
         lower = self._date_from.date().toString("yyyy-MM-dd") if enabled else ""
         upper = self._date_to.date().toString("yyyy-MM-dd") if enabled else ""
-        if lower > upper:
+        invalid_dates = lower > upper
+        if update_feedback:
             self._feedback.setText(
                 "Invalid date filter: From date must not follow To date"
+                if invalid_dates
+                else ""
             )
+        if invalid_dates:
             return ()
-        self._feedback.clear()
         search = self._search.text().casefold().strip()
         experiment = (
             self._experiment.currentText() if self._experiment.currentIndex() else None
@@ -413,7 +499,9 @@ class ResultsBrowser(QWidget):
         )
 
     def _render(self) -> None:
-        filtered = self._filtered()
+        self._render_filtered(self._filtered())
+
+    def _render_filtered(self, filtered: tuple[ResultRun, ...]) -> None:
         runs = self._focused(filtered)
         self._visible_count.setText(f"{len(filtered)} / {len(self._index.runs)} runs")
         self._back.setEnabled(self._history_position > 0)
@@ -458,52 +546,73 @@ class ResultsBrowser(QWidget):
         )
 
     def _render_navigation(self, runs: tuple[ResultRun, ...]) -> None:
-        if self._navigation_runs != runs:
-            expanded = {focus for item, focus in self._navigation if item.isExpanded()}
-            self._tree.clear()
-            self._navigation.clear()
-            nodes: dict[_Focus, QTreeWidgetItem] = {}
-            counts: dict[_Focus, int] = {}
-            for run in runs:
-                parent = self._tree.invisibleRootItem()
-                for caption, focus in self._run_branch(run):
-                    if focus not in nodes:
-                        item = QTreeWidgetItem(parent, [caption])
-                        item.setExpanded(
-                            focus in expanded
-                            or (
-                                focus.run_key is None
-                                and (focus.point is None or focus.experiment is None)
-                            )
-                        )
-                        item.setToolTip(
-                            0,
-                            f"{run.entry} / {run.point or 'Global / unknown'}\n{run.experiment or 'Unknown experiment'}\n{run.run_path.name}\n{run.at or 'Unknown time'}\n{run.run_path}",
-                        )
-                        nodes[focus] = item
-                        self._navigation.append((item, focus))
-                    parent = nodes[focus]
-                    counts[focus] = counts.get(focus, 0) + 1
-            for focus, item in nodes.items():
-                if focus.run_key is None:
-                    item.setText(0, f"{item.text(0)}  ({counts[focus]})")
+        previous = self._navigation_runs
+        if previous != runs:
+            if (
+                previous
+                and len(previous) < len(runs)
+                and previous[-1].entry < runs[len(previous)].entry
+                and runs[: len(previous)] == previous
+            ):
+                # A new entry has its own branches. Keep existing branches and
+                # their expansion state instead of rebuilding the tree per batch.
+                self._add_navigation(runs[len(previous) :], set())
+            else:
+                expanded = {
+                    focus
+                    for focus, item in self._navigation.items()
+                    if item.isExpanded()
+                }
+                self._tree.clear()
+                self._navigation.clear()
+                self._add_navigation(runs, expanded)
             self._navigation_runs = runs
-        for item, focus in self._navigation:
-            if focus == replace(self._focus, figure=None):
-                self._tree.setCurrentItem(item)
-                break
-        else:
+        selected = self._navigation.get(replace(self._focus, figure=None))
+        if selected is None:
             self._tree.clearSelection()
+        else:
+            self._tree.setCurrentItem(selected)
+
+    def _add_navigation(
+        self, runs: tuple[ResultRun, ...], expanded: set[_Focus]
+    ) -> None:
+        nodes: dict[_Focus, QTreeWidgetItem] = {}
+        counts: dict[_Focus, int] = {}
+        for run in runs:
+            parent = self._tree.invisibleRootItem()
+            for caption, focus in self._run_branch(run):
+                if focus not in nodes:
+                    item = QTreeWidgetItem(parent, [caption])
+                    item.setExpanded(
+                        focus in expanded
+                        or (
+                            focus.run_key is None
+                            and (focus.point is None or focus.experiment is None)
+                        )
+                    )
+                    item.setToolTip(
+                        0,
+                        f"{run.entry} / {run.point or 'Global / unknown'}\n{run.experiment or 'Unknown experiment'}\n{run.run_path.name}\n{run.at or 'Unknown time'}\n{run.run_path}",
+                    )
+                    nodes[focus] = item
+                parent = nodes[focus]
+                counts[focus] = counts.get(focus, 0) + 1
+        for focus, item in nodes.items():
+            if focus.run_key is None:
+                item.setText(0, f"{item.text(0)}  ({counts[focus]})")
+        self._navigation.update(nodes)
 
     def _navigate(self, item: QTreeWidgetItem, _column: int) -> None:
-        for node, focus in self._navigation:
+        for focus, node in self._navigation.items():
             if node is item:
                 self._visit(focus)
                 break
 
     def _run_context_menu(self, point: QPoint) -> None:
         item = self._tree.itemAt(point)
-        focus = next((focus for node, focus in self._navigation if node is item), None)
+        focus = next(
+            (focus for focus, node in self._navigation.items() if node is item), None
+        )
         if focus is None or focus.run_key is None:
             return
         run = self._index.get_run(focus.run_key)

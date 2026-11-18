@@ -81,6 +81,10 @@ class ResultsComparison(QWidget):
         self._rows: dict[str, QLabel] = {}
         self._render()
 
+    def replace_index(self, index: ResultsIndex) -> None:
+        """Use a newer snapshot of the same scan without clearing existing pins."""
+        self._index = index
+
     def pin_run(self, run: ResultRun) -> None:
         """Pin an indexed run once; unknown keys raise KeyError without mutation."""
         run = self._index.get_run(run.key)

@@ -141,7 +141,11 @@ def visible(window: QWidget) -> VisibleObservation:
 
 def status(window: QWidget) -> StatusObservation:
     """Read the one visible status bar's message or selectable direct labels."""
-    bars = [bar for bar in window.findChildren(QStatusBar) if on_screen(bar)]
+    bars = [
+        bar
+        for bar in window.findChildren(QStatusBar)
+        if bar.window() is window.window() and on_screen(bar)
+    ]
     bar = unique("status bar", bars, [bar.objectName() for bar in bars])
     message = bar.currentMessage()
     if not message:

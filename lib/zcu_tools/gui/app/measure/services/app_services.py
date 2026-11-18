@@ -39,6 +39,7 @@ from .load import LoadService
 from .operation_control import OperationControlFacet
 from .operation_gate import OperationGate
 from .post_analyze import PostAnalyzeService
+from .results_index_owner import ResultsIndexOwner
 from .run import RunService
 from .run_analyze_control import RunAnalyzeControlFacet
 from .startup import StartupService
@@ -102,6 +103,7 @@ class AppServices:
     operation_control: OperationControlPort
     handles: OperationHandles
     background: BackgroundRunner
+    results_index: ResultsIndexOwner
     guard: GuardService
     tab: TabService
     tab_forms: TabFormResources
@@ -294,6 +296,9 @@ def build_app_services(  # noqa: PLR0913
         cache_root=Path(user_cache_dir("zcu_tools", "zcu_tools")) / "gui",
     )
     return AppServices(
+        results_index=ResultsIndexOwner(
+            Path(project_root), background, owner_scheduler
+        ),
         session=session,
         workflow=WorkflowControlFacet(state, session),
         startup=startup,

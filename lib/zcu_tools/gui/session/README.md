@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-11-17，global／point 文件選擇
+**Last updated:** 2026-11-19，Measure 背景收尾說明
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -141,8 +141,8 @@ Live rows 優先於同名 remembered rows，其他 remembered rows 不自動連�
 
 Host 在工作 drain 及 caller callbacks 完成後呼叫 `close_all_devices()`。Measure 透過 `finish_close()` 共用此順序，script callbacks 在 owner thread 反序執行一次，單一失敗記 log 後繼續。Drain 逾時不先消耗 callbacks 或關閉硬體。
 每台 driver 各嘗試一次，成功轉 MEMORY_ONLY，失敗保留 CONNECTED 與 error，最後
-拋彙整 ExceptionGroup。Measure 的 `Controller.close()` 只 drain，`close_hardware()`
-才逐台關閉並卸載 SoC。後者記錄關閉錯誤而不阻擋 GUI 結束，重呼不自動重試。
+拋彙整 ExceptionGroup。Measure 的 `Controller.close()` 收尾背景工作，不關閉硬體。
+`close_hardware()` 才逐台關閉並卸載 SoC。後者記錄關閉錯誤而不阻擋 GUI 結束，重呼不自動重試。
 使用者不能手動新增 FakeDevice。Add Device 類型選單只列硬體 driver，
 已登記 FakeDevice 仍使用專屬 panel。Adapter 的 `user_connectable=False` 只禁止
 手動 Add Device。可信 caller 透過 `register_device()`、`publish_initial_devices()` 或

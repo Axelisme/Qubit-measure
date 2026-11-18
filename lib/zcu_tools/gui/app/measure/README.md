@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-17，global／point 文件選擇
+**Last updated:** 2026-11-19，Results Browser 索引
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -127,7 +127,8 @@ rejects Done without closing input.
   各 operation 決定終局與觸發清理的時機。Run 與 Load 不依賴 WritebackService 來清理 draft。
   Analyze 回傳就發布結果，拋錯就 failed 並顯示原始訊息，不辨識例外型別。
   Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
-  `services.results_index.scan_results(project_root)` 供結果瀏覽器與 RPC 共用唯讀 `ResultsIndex`。它掃描各 Database entry 的 run 目錄，從 datafile.read_doc 讀保存 metadata，再以同名 Result entry 的 acquired 事件提供歷史身分，缺 ledger 仍列為未登錄。瀏覽投影容許 metadata 缺欄與額外欄位，不以目前 RunMetadata 型別擋住歷史內容；壞文件保留 run 與 issues。Cfg JSON 原樣讀取，不查 catalog 或驗證實驗 schema。Cfg／analysis 搜尋包含未出現在 roles 的 tone 名稱。文件與圖檔讀取只接受索引中的 run key 與成員檔名，讀取前重驗根目錄與 symlink 邊界。索引不建立檔案或 lock，也不改 opened entry。
+  結果瀏覽器與 RPC 共用 `services.results_index.scan_results(project_root)`。瀏覽器透過 `Controller.watch_results_index` 訂閱 app 擁有的背景索引，按 entry 收到已交付成果的唯讀快照。RPC 透過 `Controller.query_results` 每次做完整新掃描，不取瀏覽器快照。
+  掃描各 Database entry 的 run 目錄時，呼叫 datafile.read_docs 一次開檔讀保存的 metadata 與 cfg，再以同名 Result entry 的 acquired 事件提供歷史身分，缺 ledger 仍列為未登錄。瀏覽投影容許 metadata 缺欄與額外欄位，不以目前 RunMetadata 型別擋住歷史內容；壞文件保留 run 與 issues，不遮住同檔可讀的另一份文件。Cfg JSON 原樣讀取，不查 catalog 或驗證實驗 schema。Cfg／analysis 搜尋包含未出現在 roles 的 tone 名稱。文件與圖檔讀取只接受索引中的 run key 與成員檔名，讀取前重驗根目錄與 symlink 邊界。索引不建立檔案或 lock，也不改 opened entry。
   `services.results_comparison.build_comparison(index, run_keys)` 將保存的 summary JSON 投影為逐 run 的比較列。身分四欄後接葉節點點路徑，欄位依釘選與 JSON 順序取 union。物件 list 以索引多行呈現，不辨識實驗名稱或特定 key；parameters 不進表。檔案與 JSON 讀取仍委派 `ResultsIndex`，不換算單位或重新分析。
 - [`state.py`](state.py)：保存 tab/device/pane/path/version-table SSOT，限定在 owner thread 修改。
   每種 pane 只有一個被動交換入口，安裝備妥的 pane 與 artifacts，回傳退役資源。

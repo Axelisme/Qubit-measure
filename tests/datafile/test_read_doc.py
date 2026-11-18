@@ -1,4 +1,4 @@
-"""Single-document reads from native containers."""
+"""Selective document reads from native containers."""
 
 import json
 from pathlib import Path
@@ -33,6 +33,46 @@ def test_read_doc_returns_one_detached_object_without_loading_vars(
     actual = datafile.read_doc(document_file, "cfg")
     document_file.unlink()
     assert actual["values"] == {"label": "保留"}
+
+
+def test_read_docs_detaches_valid_documents_alongside_individual_failures(
+    document_file: Path,
+) -> None:
+    target = document_file.with_name("external.h5")
+    with h5py.File(target, "w") as file:
+        file.create_dataset("doc", data='{"outside":true}')
+    with h5py.File(document_file, "r+") as file:
+        file["docs/external"] = h5py.ExternalLink(str(target), "/doc")
+        file["docs/unrequested"] = h5py.ExternalLink(str(target), "/does-not-exist")
+
+    requested = ("cfg", "absent", "unrelated", "external", "metadata")
+    results = datafile.read_docs(document_file, requested)
+
+    for name, category in (
+        ("absent", KeyError),
+        ("unrelated", datafile.FormatError),
+        ("external", datafile.FormatError),
+    ):
+        with pytest.raises(category) as single:
+            datafile.read_doc(document_file, name)
+        assert isinstance(results[name], category)
+        assert str(results[name]) == str(single.value)
+    document_file.unlink()
+    assert tuple(results) == requested
+    assert results["cfg"] == {"values": {"label": "保留"}}
+    assert results["metadata"] == {"run_id": "historical"}
+
+
+def test_read_docs_bad_header_raises_same_path_qualified_error_as_read_doc(
+    document_file: Path,
+) -> None:
+    with h5py.File(document_file, "r+") as file:
+        file.attrs["format_version"] = "4.0"
+    with pytest.raises(datafile.FormatError) as single:
+        datafile.read_doc(document_file, "cfg")
+    with pytest.raises(datafile.FormatError) as batch:
+        datafile.read_docs(document_file, ("cfg", "metadata"))
+    assert str(batch.value) == str(single.value)
 
 
 def test_read_doc_ignores_invalid_unselected_document(document_file: Path) -> None:

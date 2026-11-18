@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-11-17，Entry 視窗識別
+**Last updated:** 2026-11-19，Results Browser 索引
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -78,9 +78,11 @@ Program acquisition observations are not part of this projection. This wire-cont
 ## Saved results
 
 `results.list()` returns `{runs: [...], issues: [...]}` from a fresh project-wide Database
-snapshot through `Controller.query_results() -> ResultsIndex`, the same query
-used by the results browser. It needs neither an opened entry nor a selected
-point and does not switch either. Missing Database returns empty runs and issues.
+snapshot through `Controller.query_results() -> ResultsIndex`. It uses the same
+scanner as the Results Browser but runs a new complete scan for each request,
+without using the browser's partial or retained index. It needs neither an opened
+entry nor a selected point and does not switch either. A missing Database returns
+empty runs and issues.
 Top-level issues contain `entry`, absolute `path` and `reason` for Database items
 that could not be safely enumerated. `entry` is null for a Database root error.
 Escaping paths are not followed and do not hide healthy entries. Global parameters and ledger

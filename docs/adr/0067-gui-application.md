@@ -207,7 +207,7 @@ Root 保留左側表單與 ledger、動作、訂閱、progress、splitter 寬度
 
 Measure 的 Results browser 是選單開啟的獨立頂層視窗，不是 dialog。它唯讀索引 Database 的 run 與 Result ledger，呈現保存的圖、metadata、cfg 與 analysis 文件。Cfg 另列 cfg_type 與 schema_version，values 內的欄位使用相對路徑。Analysis summary 使用相對路徑，parameters 另列。瀏覽器不回填表單、不重新分析，也不寫入結果資料；開到新 tab 仍由既有 Load owner 決定 admission。這是 [[0063]] 原先不新增 cfg 檢視入口的例外，不讓 GUI 探測 adapter 持有的 live cfg／result。
 
-Results browser 的分組、filter、圖庫、細節與比較只讀保存內容，不查 catalog。樹使用保存的 experiment 字串。Metadata 經 datafile.read_doc 讀為有限 JSON，再由 app 投影所需的可缺欄位；單 run 的錯誤留在 issues，不影響其他 runs。這是唯讀歷史展示，不取代 experiment 對 Load／Save 的 RunMetadata 驗證，也不做 cfg schema 遷移。只有按 Open 才由 catalog owner 解析 adapter，沿原 Load admission 開 tab，成功後選中新 tab 並 raise 主視窗。依賴沿用 C8、C9；沒有 framework → 使用者實驗定義的依賴。
+Results browser 的分組、filter、圖庫、細節與比較只讀保存內容，不查 catalog。樹使用保存的 experiment 字串。索引經 datafile.read_docs 同次開檔讀出 metadata 與 cfg，再由 app 投影 metadata 的可缺欄位並把 cfg 納入搜尋。單份文件的錯誤留在該 run 的 issues，不遮住同檔的另一份文件，也不影響其他 runs。這是唯讀歷史展示，不取代 experiment 對 Load／Save 的 RunMetadata 驗證，也不做 cfg schema 遷移。只有按 Open 才由 catalog owner 解析 adapter，沿原 Load admission 開 tab，成功後選中新 tab 並 raise 主視窗。依賴沿用 C8、C9；沒有 framework → 使用者實驗定義的依賴。
 
 使用者於 2026-10-24 裁定：「result browser應該與目前的實驗定義解耦，只是單純的解析cfg與顯示圖就好，就算cfg已經是舊版本version，或是實驗已經刪掉了，應該也不會影響使用。」
 
