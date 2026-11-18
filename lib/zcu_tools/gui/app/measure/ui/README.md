@@ -140,9 +140,11 @@ When space is short, the button moves into More ▾. The browser shows before
 the index scan completes. Its status bar shows entries scanned and runs found,
 then total runs and issues. Search, filters, pins and Load use the runs already
 delivered. New entries join the current search and filter without changing the
-opened entry or point. Closing the browser hides it; reopening shows its retained
-index without restarting the scan. Closing the measure window cancels and drains
-the scan before detaching the browser's subscription.
+opened entry, point or Load feedback. Closing the browser hides it; reopening
+shows its retained index without restarting the scan. On successful measure
+shutdown, the controller cancels and drains the scan before the window detaches
+the browser's subscription. After a drain timeout, the user can explicitly
+force teardown without a completed drain (ADR-0066).
 Unenumerable Database items appear beside the filters as Cannot index, with
 entry, rejected path and reason in the tooltip. They do not hide healthy runs.
 The navigation tree starts with entries, then experiment → point → run or

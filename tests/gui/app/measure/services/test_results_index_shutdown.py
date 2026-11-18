@@ -41,20 +41,23 @@ def test_close_drains_mid_entry_without_opening_the_rest(
     for file in files:
         file.parent.mkdir(parents=True)
         file.write_bytes(fixture_bytes)
-    middle = files[31]
-    in_flight, release = Event(), Event()
-    opened: list[Path] = []
+    in_flight, release, open_finished = Event(), Event(), Event()
+    opened = 0
     open_file = h5py.File
 
     def hold_middle(path: Path, mode: str) -> h5py.File:
-        opened.append(path)
-        if path == middle:
-            in_flight.set()
-            if not release.wait(timeout=15):
-                raise TimeoutError("test never released in-flight native read")
-        return open_file(path, mode)
+        nonlocal opened
+        opened += 1
+        if opened != len(files) // 2:
+            return open_file(path, mode)
+        in_flight.set()
+        if not release.wait(timeout=15):
+            raise TimeoutError("test never released in-flight native read")
+        handle = open_file(path, mode)
+        open_finished.set()
+        return handle
 
-    # Cancellation is requested while an actual native read is in flight.
+    # Entry snapshots cannot pause or count opens within an unfinished entry.
     monkeypatch.setattr(h5py, "File", hold_middle)
     ctrl = Controller(
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
@@ -70,12 +73,15 @@ def test_close_drains_mid_entry_without_opening_the_rest(
         try:
             qt_until(in_flight.is_set, label="scanner paused midway through one entry")
             assert ctrl.active_operation_count() == 0
+            reads_before_close = opened
+            assert 1 < reads_before_close < len(files)
             # Only the nested owner-loop drain can deliver this release. It runs
             # after close() has sent the cancellation request.
             QTimer.singleShot(0, release.set)
             ctrl.close()
             assert release.is_set()
-            assert opened == files[:32]
+            assert open_finished.is_set()
+            assert opened == reads_before_close
         finally:
             retire()
     finally:

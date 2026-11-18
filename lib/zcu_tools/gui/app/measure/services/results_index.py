@@ -206,8 +206,10 @@ def scan_results(
     ResultsIndex.issues, not synthetic runs. Never create files or locks.
 
     on_entry, if given, receives a detached batch on the calling thread after
-    each entry and before reading the next. Database root issues appear only
-    in the returned complete snapshot. Callback exceptions propagate.
+    each entry and before reading the next. Empty directories and entries with
+    item issues count toward progress; loose files and absent names do not.
+    Database root issues appear only in the returned complete snapshot.
+    Callback exceptions propagate.
 
     cancelled is a calling-thread predicate (for example Event.is_set). It is
     checked before scanning, between runs, and before publishing or returning.
@@ -255,14 +257,29 @@ def _database_entries(
         _inside(database, database)
         if not database.exists():
             return [], []
-        return (
-            sorted(set(entries))
+        candidates = (
+            [database / name for name in set(entries)]
             if entries is not None
-            else sorted(path.name for path in database.iterdir()),
-            [],
+            else list(database.iterdir())
         )
     except (OSError, ValueError) as error:
         return [], [ResultItemIssue(None, database, str(error))]
+
+    names: list[str] = []
+    for path in candidates:
+        try:
+            info = path.lstat()
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError:
+            # Let _scan_entry report access errors at the individual entry.
+            names.append(path.name)
+        else:
+            # Do not follow redirects here. _scan_entry checks containment and
+            # diagnoses unsafe entries before looking for runs.
+            if stat.S_ISDIR(info.st_mode) or _is_redirect(info):
+                names.append(path.name)
+    return sorted(names), []
 
 
 def _scan_entry(

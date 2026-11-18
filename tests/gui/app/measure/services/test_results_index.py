@@ -235,6 +235,34 @@ def test_entry_batches_arrive_before_scanning_the_next_entry(project: Path) -> N
     assert index.issues == tuple(issue for batch in batches for issue in batch.issues)
 
 
+@pytest.mark.parametrize("scoped", [False, True], ids=["all", "selected"])
+def test_entry_progress_excludes_loose_files_and_missing_names(
+    tmp_path: Path, scoped: bool
+) -> None:
+    database = tmp_path / "Database"
+    (database / "empty").mkdir(parents=True)
+    (database / "record.bak/runs/old").mkdir(parents=True)
+    (database / "loose.txt").write_text("not a Database entry", encoding="utf-8")
+    escaped = database / "unsafe"
+    escaped.symlink_to(tmp_path, target_is_directory=True)
+    entries = ("empty", "record.bak", "loose.txt", "unsafe", "absent")
+    batches: list[ResultEntryBatch] = []
+
+    index = scan_results(
+        tmp_path, entries=entries if scoped else None, on_entry=batches.append
+    )
+
+    assert [(b.entry, b.completed_entries, b.total_entries) for b in batches] == [
+        ("empty", 1, 3),
+        ("record.bak", 2, 3),
+        ("unsafe", 3, 3),
+    ]
+    assert not batches[0].runs
+    assert [run.key for run in index.runs] == ["record.bak/old"]
+    assert [issue.path for issue in batches[-1].issues] == [escaped]
+    assert index.issues == batches[-1].issues
+
+
 def test_cancel_discards_an_unfinished_entry_without_reading_later_runs(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -252,7 +280,7 @@ def test_cancel_discards_an_unfinished_entry_without_reading_later_runs(
             cancelled.set()
         return handle
 
-    # Trigger cancellation at the native read seam, inside an entry.
+    # Entry callbacks cannot request cancellation between reads of the same entry.
     monkeypatch.setattr(h5py, "File", request_cancel)
     with pytest.raises(ResultsScanCancelled):
         scan_results(project, on_entry=batches.append, cancelled=cancelled.is_set)
@@ -310,7 +338,7 @@ def test_scan_opens_each_native_file_once(
         paths.append(Path(path))
         return open_file(path, mode)
 
-    # scan_results exposes the projected rows, not its HDF5 opens.
+    # Public batches and the final snapshot describe rows, not how often HDF5 opens.
     monkeypatch.setattr(h5py, "File", count_open)
     index = scan_results(project)
 
@@ -593,7 +621,7 @@ def test_scan_rechecks_ancestor_before_more_reads(
         opened.append(path)
         return file
 
-    # Change the filesystem mid-scan at an I/O boundary after the first run was checked.
+    # Entry snapshots cannot interleave a path replacement just after the first open.
     monkeypatch.setattr(h5py, "File", open_and_replace_runs)
     index = scan_results(project, entries=("alpha",))
 

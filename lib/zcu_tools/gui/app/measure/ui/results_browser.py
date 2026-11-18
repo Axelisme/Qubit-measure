@@ -142,6 +142,7 @@ class ResultsBrowserWindow(QMainWindow):
             resolve_experiment=controller.resolve_experiment,
         )
         self.setCentralWidget(self._browser)
+        self._lifetime.add_cleanup(self._browser.dispose)
         self._index_status = QStatusBar(self)
         self._index_status.setObjectName("results.index_status")
         self.setStatusBar(self._index_status)
@@ -171,7 +172,7 @@ class ResultsBrowserWindow(QMainWindow):
         self._index_status.showMessage(message)
 
     def dispose(self) -> None:
-        """Retire the index subscription and hide this view, without stopping the scan."""
+        """Retire the view and its index subscription without stopping the scan."""
         self._lifetime.close()
         self.close()
 
@@ -189,7 +190,8 @@ class ResultsBrowser(QWidget):
     existing Load outcome or raising a user-facing error. resolve_experiment is
     the catalog owner's query, called only when Open is requested. Navigation,
     filters and saved documents use historical strings without catalog access.
-    All callbacks run on the Qt owner thread.
+    All callbacks run on the Qt owner thread. The owner calls dispose before
+    deleting the browser, not when hiding it.
     """
 
     def __init__(
@@ -202,6 +204,7 @@ class ResultsBrowser(QWidget):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("results.content")
+        self._lifetime = LifetimeScope(self)
         self._index = index
         self._resolve_experiment = resolve_experiment
         self._dates_edited = False
@@ -261,11 +264,16 @@ class ResultsBrowser(QWidget):
         self._lightbox = ResultLightbox(self)
         self._render()
 
+    def dispose(self) -> None:
+        """Retire date edit callbacks before the owner deletes this view (ADR-0067)."""
+        self._lifetime.close()
+
     def present_index(self, index: ResultsIndex) -> None:
         """Show a newer snapshot of the same scan on the Qt owner thread.
 
         New entries extend the existing sorted rows. Preserve current search,
-        filter, focus and pins and allow commands on already-delivered runs.
+        filter, focus, pins and command feedback. Commands remain available on
+        already-delivered runs.
         """
         if self._index == index:
             return
@@ -274,7 +282,7 @@ class ResultsBrowser(QWidget):
         self.comparison.replace_index(index)
         self._refresh_filter_choices()
         self._show_item_issues()
-        self._render()
+        self._render_filtered(self._filtered(update_feedback=False))
 
     def resizeEvent(self, a0: QResizeEvent | None) -> None:
         super().resizeEvent(a0)
@@ -295,10 +303,6 @@ class ResultsBrowser(QWidget):
         row.addWidget(self._group)
         self._experiment = QComboBox()
         self._experiment.setObjectName("results.experiment")
-        self._experiment.addItem("All experiments")
-        self._experiment.addItems(
-            sorted({self._experiment_name(run) for run in self._index.runs})
-        )
         self._experiment.currentIndexChanged.connect(self._render)
         row.insertWidget(0, self._experiment, 1)
         layout.addLayout(row)
@@ -311,16 +315,12 @@ class ResultsBrowser(QWidget):
         self._dates_enabled = QCheckBox("Filter by date (UTC)")
         self._dates_enabled.setObjectName("results.dates_enabled")
         dates.addWidget(self._dates_enabled)
-        known = sorted(run.at[:10] for run in self._index.runs if run.at)
-        self._date_from = self._date_filter(
-            "results.date_from", known[0] if known else "2000-01-01", dates
-        )
+        self._date_from = self._date_filter("results.date_from", "2000-01-01", dates)
         dates.addWidget(QLabel("to"))
         self._date_to = self._date_filter(
-            "results.date_to",
-            known[-1] if known else QDate.currentDate().toString("yyyy-MM-dd"),
-            dates,
+            "results.date_to", QDate.currentDate().toString("yyyy-MM-dd"), dates
         )
+        self._refresh_filter_choices()
         self._dates_enabled.toggled.connect(self._toggle_dates)
         layout.addLayout(dates)
         self._visible_count = QLabel()
@@ -375,7 +375,7 @@ class ResultsBrowser(QWidget):
             "Enable Filter by date (UTC), then click the date text or right-hand arrow "
             "to choose a date. From / To are inclusive; runs without a UTC time are excluded."
         )
-        edit.dateChanged.connect(self._date_changed)
+        self._lifetime.connect(edit.dateChanged, self._date_changed)
         layout.addWidget(edit)
         return edit
 
@@ -458,16 +458,19 @@ class ResultsBrowser(QWidget):
     def _experiment_name(self, run: ResultRun) -> str:
         return run.experiment or "Unknown experiment"
 
-    def _filtered(self) -> tuple[ResultRun, ...]:
+    def _filtered(self, *, update_feedback: bool = True) -> tuple[ResultRun, ...]:
         enabled = self._dates_enabled.isChecked()
         lower = self._date_from.date().toString("yyyy-MM-dd") if enabled else ""
         upper = self._date_to.date().toString("yyyy-MM-dd") if enabled else ""
-        if lower > upper:
+        invalid_dates = lower > upper
+        if update_feedback:
             self._feedback.setText(
                 "Invalid date filter: From date must not follow To date"
+                if invalid_dates
+                else ""
             )
+        if invalid_dates:
             return ()
-        self._feedback.clear()
         search = self._search.text().casefold().strip()
         experiment = (
             self._experiment.currentText() if self._experiment.currentIndex() else None
@@ -496,7 +499,9 @@ class ResultsBrowser(QWidget):
         )
 
     def _render(self) -> None:
-        filtered = self._filtered()
+        self._render_filtered(self._filtered())
+
+    def _render_filtered(self, filtered: tuple[ResultRun, ...]) -> None:
         runs = self._focused(filtered)
         self._visible_count.setText(f"{len(filtered)} / {len(self._index.runs)} runs")
         self._back.setEnabled(self._history_position > 0)

@@ -866,6 +866,7 @@ def test_browsing_only_resolves_the_experiment_when_open_is_clicked(
         )
         ui.screenshot(tmp_path / "open-only-resolution.png")
     finally:
+        browser.dispose()
         browser.close()
         browser.deleteLater()
         qapp.processEvents()

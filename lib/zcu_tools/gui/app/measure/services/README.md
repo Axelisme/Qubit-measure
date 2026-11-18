@@ -22,6 +22,7 @@ UI 與 remote 經 Controller／control facets 呼叫這些 owners，不各自建
 | `results_index_owner.py` | 為瀏覽器啟動一次背景索引，在 owner thread 交付每個 entry。 |
 
 Results index 隔離各 entry 的 global／ledger 與 run 成員讀取錯誤，保留其他成果。
+進度計入空目錄和有診斷的 entry，不計入 Database 下的普通檔案或不存在的指定名稱。
 ResultsIndexOwner 借用既有 executor 與 owner scheduler。索引不取得 operation handle 或 hardware lease。
 Controller 關閉時發出合作取消，再等背景工作與交付結束。掃描在每筆 run 之間檢查取消，不中斷已開始的檔案 I/O。
 Ledger 讀取使用 resources 的無 lock typed partial snapshot，只消費 acquired 身分／時間與 saved 成功路徑。未用的歷史 payload 或 attachment reference 不影響登錄；實際使用的壞值仍診斷並沿既有 entry 層級隔離。

@@ -113,8 +113,16 @@ class _ReadGate:
 
 
 @pytest.fixture
+def load_adapter_registered() -> bool:
+    return True
+
+
+@pytest.fixture
 def progress_browser(
-    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    load_adapter_registered: bool,
 ) -> Iterator[tuple[_BrowserScenario, _ReadGate, _ReadGate]]:
     first, second = _make_saved_rows(tmp_path, qapp)
     first_gate, second_gate = _ReadGate(), _ReadGate()
@@ -129,9 +137,11 @@ def progress_browser(
             gate.hold()
         return open_file(path, mode)
 
+    # Published batches cannot pause inside the next entry's native read.
     monkeypatch.setattr(h5py, "File", gated_read)
     registry = Registry()
-    registry.register("saving", AnalysisSavingAdapter)
+    if load_adapter_registered:
+        registry.register("saving", AnalysisSavingAdapter)
     ctrl = _CloseReleaseController(
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry,
@@ -160,8 +170,29 @@ def progress_browser(
         qapp.processEvents()
 
 
+def _load_first_run(
+    scenario: _BrowserScenario, browser: ComponentDriver, load_adapter_registered: bool
+) -> str:
+    browser.click(object_name="results.figure.0")
+    browser.click("Load into analysis tab")
+    feedback = browser.observe(object_name="results.feedback").text
+    if load_adapter_registered:
+        assert feedback.startswith("Loaded history:")
+        tabs = scenario.main.tabs("saving")
+        assert tabs.current == tabs.captions[-1]
+    else:
+        assert feedback.startswith("Cannot open analysis tab:")
+        assert "No load-capable adapter" in feedback
+    scenario.capture("07-open-during-scan")
+    return feedback
+
+
+@pytest.mark.parametrize(
+    "load_adapter_registered", [True, False], ids=["loaded", "rejected"]
+)
 def test_browse_open_and_reopen_while_indexing(
     progress_browser: tuple[_BrowserScenario, _ReadGate, _ReadGate],
+    load_adapter_registered: bool,
 ) -> None:
     scenario, first, second = progress_browser
     main = scenario.main
@@ -194,25 +225,19 @@ def test_browse_open_and_reopen_while_indexing(
     assert browser.tabs("Comparison (1)").current == "Comparison (1)"
     scenario.capture("04-filtered-and-pinned")
     browser.select_tab("Gallery")
-    browser.click(object_name="results.figure.0")
-    browser.click("Load into analysis tab")
-    assert browser.observe(object_name="results.feedback").text.startswith(
-        "Loaded history:"
-    )
-    assert main.tabs("saving").current == main.tabs("saving").captions[-1]
-    scenario.capture("05-open-during-scan")
-    browser.click("All results")
 
     browser.close_window()
     assert not browser.observe(object_name="results.browser").visible
-    scenario.capture("06-browser-hidden")
+    scenario.capture("05-browser-hidden")
     main.click("Results browser…")
     assert browser.observe(object_name="results.browser").visible
     assert browser.status().text == "Indexing results: 1 / 2 entries · 1 runs"
     assert browser.observe(object_name="results.search").text == "needle"
     assert browser.observe(object_name="results.experiment").text == "test/saving"
     assert "Comparison (1)" in browser.tabs("Gallery").captions
-    scenario.capture("07-browser-reopened")
+    scenario.capture("06-browser-reopened")
+
+    feedback = _load_first_run(scenario, browser, load_adapter_registered)
 
     second.release.set()
     qt_until(
@@ -222,11 +247,52 @@ def test_browse_open_and_reopen_while_indexing(
     assert browser.observe(object_name="results.visible_count").text == "2 / 3 runs"
     assert browser.observe(object_name="results.experiment").text == "test/saving"
     assert "Comparison (1)" in browser.tabs("Gallery").captions
+    assert browser.observe(object_name="results.feedback").text == feedback
     scenario.capture("08-second-entry-filtered")
+    browser.click("All results")
+    assert not browser.observe(object_name="results.feedback").text
     browser.press_key(Qt.Key.Key_Up, object_name="results.experiment")
     assert browser.observe(object_name="results.experiment").text == "aaa"
     assert browser.observe(object_name="results.visible_count").text == "1 / 3 runs"
     scenario.capture("09-new-filter-option")
+
+
+def test_appending_an_entry_keeps_a_collapsed_navigation_branch(
+    progress_browser: tuple[_BrowserScenario, _ReadGate, _ReadGate],
+) -> None:
+    scenario, first, second = progress_browser
+    scenario.main.click("Results browser…")
+    browser = scenario.browser()
+    qt_until(first.arrived.is_set, label="first native read held")
+    first.release.set()
+    qt_until(
+        lambda: browser.status().text == "Indexing results: 1 / 2 entries · 1 runs",
+        label="first entry visible before append",
+    )
+    navigation = "results.navigation"
+    original = ("original  (1)",)
+    assert any(
+        row.tree_name == navigation and row.path[:1] == original and len(row.path) > 1
+        for row in browser.visible().tree_rows
+    )
+    browser.select_tree_row(original, object_name=navigation)
+    browser.press_key(Qt.Key.Key_Left, object_name=navigation)
+    assert [
+        row.path for row in browser.visible().tree_rows if row.tree_name == navigation
+    ] == [original]
+    scenario.capture("01-before-append-collapsed")
+
+    second.release.set()
+    qt_until(
+        lambda: browser.status().text == "Index ready: 3 runs · 0 issues",
+        label="new entry appended",
+    )
+    paths = [
+        row.path for row in browser.visible().tree_rows if row.tree_name == navigation
+    ]
+    assert [path for path in paths if path[:1] == original] == [original]
+    assert any(path[0] == "zeta  (2)" and len(path) > 1 for path in paths)
+    scenario.capture("02-after-append-collapsed")
 
 
 def test_main_window_closes_without_confirmation_while_indexing(

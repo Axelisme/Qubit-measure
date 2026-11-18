@@ -200,6 +200,7 @@ def read_doc(path: Path, name: str) -> JsonObject:
         return _read_selected_doc(path, _document_group(path, file), name)
 
 
+# ADR-0080: Read selected documents without loading variables or opaque groups.
 def read_docs(
     path: Path, names: tuple[str, ...]
 ) -> dict[str, JsonObject | KeyError | FormatError | OSError]:
