@@ -273,7 +273,7 @@ Photon dephasing 使用 joint-state resonator pull 的完整差、total linewidt
 
 FTF acquire 預設使用 `simulate.evolution.Engine` 的快速分段算法。`experiment.ftf` 以模板陣列換算單位、取得 DC 模型，將一組 timeline 交給引擎。引擎切段、分類、去重，先建立共用 prepare，再以 joblib threading chunks 演化至 readout 起點。每個 `FTFSource` 持有一個引擎，跨 acquire 只保留 routing facts，數值 preparation 限一次 evolve。每次 evolve 自己建立及釋放 worker pool。
 
-離線 Intel OpenCL 建表、U-table library、archive/reuse/validation 發布流程與 persistent exact density records 已移除。FTF 不需要數值資料庫路徑，也沒有 `build_database.py` 或 `gpu` extra。引擎內部的週期表與 gate prepare 只在記憶體中重用，不是磁碟建庫機制。Routing-facts 預算不包含模型、solver、ADC、回傳 density 或仍被工作持有的資料，不是 process RAM 上限。
+離線 Intel OpenCL 建表、U-table library、archive/reuse/validation 發布流程與 persistent exact density records 已移除。FTF 不需要數值資料庫路徑，也沒有 `build_database.py`。選裝 `gpu` extra 可讓合格的 `dop853` rows 在 OpenCL GPU 上執行，見 [GPU backend](../../../lib/zcu_tools/simulate/evolution/README.md#gpu-backend)。這套執行 backend 不做離線建表。引擎內部的週期表與 gate prepare 只在記憶體中重用，不是磁碟建庫機制。Routing-facts 預算不包含模型、solver、ADC、回傳 density 或仍被工作持有的資料，不是 process RAM 上限。
 
 每 round 仍捕捉當下 snapshot。同一 acquire 內，snapshot 與上一 round 相同時，組合層重用 density 與條件響應；抽樣身份仍隨 round 改變。Snapshot 改變則重新演化，不跨獨立 shot 承接量子態或隨機輸出。
 
@@ -369,7 +369,7 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 - Program 提供具名環境 binding、compiled timeline 與 request／signal 契約。全部實驗使用 TimelineProgramV2，模擬取數使用 compiled frontend。舊 Module-tree simulation frontend 與 legacy program／module lifecycle 均已移除。指令效果的 admission 見上節。FTF startup 腳本先建 entry／point，再組裝環境，透過一般 facets 安裝 SoC、逐一 register drivers，留給使用者從 New Tab 開實驗。GUI 不載入 environment，也不持有模擬啟動模式。
 - Resources 提供 FTF YAML schema 與 checked JSON private replay 容器。Experiment 組合環境及單 round 重播；重播用相同數值與 RNG 版本重算，不引用已保存的 density。
 - Single、six、FTF 提供中途 projective readout、同 shot herald／終端關聯與部分 ADC 觀測。Rank-1 DC 投影及 CTMC 不回饋是模型近似，不代表正式規模數值驗收或 production 認證。
-- Evolution 提供預設快速分段算法及有界 routing facts。數值 preparation 只活在一次 evolve，見 [[0078]]。離線 U 表、Intel OpenCL、持久 exact records 及建庫入口已刪除。Routing 預算不是 process RAM 上限。
+- Evolution 提供預設快速分段算法及有界 routing facts。數值 preparation 只活在一次 evolve，見 [[0078]]。離線 Intel OpenCL 建表、U 表、持久 exact records 及建庫入口已刪除。Routing 預算不是 process RAM 上限。
 - 舊 TLS、隱式白雜訊及雙模式 mock API 已移除，Notebook 使用新環境。沒有相容層。參數化 make_mock_soccfg 仍支援離線編譯。
 
 I/Q-only 練習在原版本已跑通 F1、F2，conditional Ramsey 只取得一點。驗收採「能跑起來」，不代表全 16 點完成或原精度達標。歷史正式 workload 的完整 acquire 成本為 cold 平均 2.864 秒／point、warm direct-record 平均 0.457 秒／point，不能稱平均 1 秒已達標。這些數字不能代表現行分段引擎。

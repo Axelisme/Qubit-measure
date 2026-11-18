@@ -40,6 +40,12 @@ Environment 顯式組合 population 轉換與 ADC；readout 的樣本加總仍�
 Builder 的 `families` 是整次 acquire 的候選白名單，不是逐段指定算法。每段仍由 dispatch 選路並驗證。固定候選可以略過成本捷徑，不能略過輸入前置條件或數值 guard。無可用候選時回報 domain 與受影響的點、段。
 這兩項控制不是物理 YAML、`AcquireRequest`、實驗 cfg 或 program binding 的欄位。不提供逐段 family 對照、callback、偏好順序或公開 kernel registry。詳細生命週期與失敗契約見 [evolution README](../../lib/zcu_tools/simulate/evolution/README.md#accuracy-failures-and-lifecycle)。
 
+### `Engine` 的 GPU backend
+
+2026-11-18，使用者選「A」，並說「只有 Windows 和 Linux，其餘採用建議」。使用者給的理由是「由于我会跨电脑平台使用，所以不要采用局限于特定 OS 系统的算法」與「也有可能在没有 GPU 的系统上使用，所以 GPU 功能确实是属于可选开启」。
+
+`Engine(backend="auto"|"cpu"|"opencl")` 選的是 `dop853` 的執行裝置，不增加 family，也不讓呼叫端逐段選算法。預設 `"auto"` 在第一個合格 row 才偵測裝置，按成本選 CPU 或 GPU。Windows 筆電沒裝 `gpu` extra 時，原腳本不必改動，輸出與 CPU 逐位相同。測試與配對量測可用 `"cpu"` 固定 CPU；呼叫者明確指定 `"opencl"` 時，裝置不可用就報錯。GPU 執行中出錯不靜默退回 CPU。安裝、適用範圍及失敗契約見 [GPU backend](../../lib/zcu_tools/simulate/evolution/README.md#gpu-backend)。
+
 ### 凍結數值輸入與參考解交接
 
 `simulate.evolution` 公開通用數值 codec 與 solver-free reference cache I/O。

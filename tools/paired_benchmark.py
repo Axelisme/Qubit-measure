@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from tools.family_pareto_inputs import Scene
     from tools.family_pareto_reference import PreparedReference
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 """Wire and tools scene-declaration semantics; bump when either interpretation changes."""
 
 
@@ -184,7 +184,7 @@ class Observation(BaseModel):
     reference_error: float
     reference_key: str
     convergence_error: float
-    routing: dict[str, dict[str, int | float | None]]
+    routing: dict[str, dict[str, int | float | str | None]]
     aggregate: dict[str, int | float] | None
 
 
@@ -221,7 +221,8 @@ class SideConfig(BaseModel):
     shared defaults, without affecting identity. mode chooses process lifetime;
     cold uses the owner's first mode with a fresh empty Numba parent per child.
     workers fixes Engine width, families fixes its optional candidate whitelist,
-    and budget is the positive absolute evolve error allowance. No field grants
+    backend selects auto, CPU-only or explicit OpenCL execution, and budget is
+    the positive absolute evolve error allowance. No field grants
     CPU/exclusive admission, reference solving, scene creation or cache filling.
     """
 
@@ -233,6 +234,7 @@ class SideConfig(BaseModel):
     index: Path | None = None
     workers: int = Field(default=1, ge=1)
     families: tuple[str, ...] | None = None
+    backend: Literal["auto", "cpu", "opencl"] = "auto"
     budget: float = Field(default=1e-3, gt=0, allow_inf_nan=False)
 
 
@@ -286,7 +288,9 @@ def prepared_child(
         case = selected.input.build()
         with (
             closing(case.source),
-            closing(Engine(config.workers, families=config.families)) as engine,
+            closing(
+                Engine(config.workers, families=config.families, backend=config.backend)
+            ) as engine,
         ):
             yield Session(
                 lambda enabled: invocation(
@@ -640,9 +644,10 @@ def benchmark(
 ) -> BenchmarkReport:
     """Own both side clients and return a complete same-execution report.
 
-    Workload/mode/width/budget must match across baseline and candidate; only
-    paths may differ. blocks is frozen K>2. exclusive annotates caller-owned
-    admission and grants no resources. opener defaults to launch_child; replacing
+    Scenario, mode, worker width, families and budget must match across the
+    two sides. The worktree paths and Engine backend may differ. blocks is the
+    frozen K>2. exclusive annotates caller-owned admission and grants no
+    resources. opener defaults to launch_child; replacing
     it changes only the external process boundary, not protocol or statistics.
     Errors close both clients and propagate without retries or partial reports.
     Complete cross-density inspection occurs after child shutdown, untimed.
@@ -819,9 +824,13 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     commands = parser.add_subparsers(dest="command", required=True)
     child = commands.add_parser("child", help="internal serial measurement child")
     child.add_argument("--config", required=True)
-    run = commands.add_parser("run", help="compare two committed worktrees")
+    run = commands.add_parser("run", help="compare two sides in committed worktrees")
     run.add_argument("--baseline", type=Path, required=True)
     run.add_argument("--candidate", type=Path, required=True)
+    for side in ("baseline", "candidate"):
+        run.add_argument(
+            f"--{side}-backend", choices=("auto", "cpu", "opencl"), default="auto"
+        )
     run.add_argument("--scenario", required=True)
     run.add_argument("--index", type=Path)
     run.add_argument("--scene-cache", type=Path)
@@ -860,10 +869,18 @@ def _run_main(
         budget=args.budget,
     )
     baseline = SideConfig.model_validate(
-        {**common, "worktree": args.baseline.resolve()}
+        {
+            **common,
+            "worktree": args.baseline.resolve(),
+            "backend": args.baseline_backend,
+        }
     )
     candidate = SideConfig.model_validate(
-        {**common, "worktree": args.candidate.resolve()}
+        {
+            **common,
+            "worktree": args.candidate.resolve(),
+            "backend": args.candidate_backend,
+        }
     )
     report = benchmark(
         baseline, candidate, blocks=args.blocks, exclusive=args.exclusive, opener=opener
