@@ -21,7 +21,7 @@ from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET, reson
 from zcu_tools.simulators.ftf.environment.template import FTFModelFacts, FTFTemplatePlan
 from zcu_tools.simulators.ftf.physics.model import prefix_model_source
 
-# A single pilot amortizes over a sweep, not over a short sequence.
+# A short sequence does not amortize the dimension check over enough points.
 _MIN_POINTS = 8
 # Keep at least the smallest practical FTF evolution basis.
 _MIN_DIMENSION = 12
@@ -150,7 +150,7 @@ def _slice_batch(batch: TimelineBatch, rows: slice) -> TimelineBatch:
     )
 
 
-def _pilot_evolve(
+def _isolated_evolve(
     engine: Engine,
     source: ModelSource,
     batch: TimelineBatch,
@@ -193,29 +193,53 @@ def pilot_dimension(
     settings: FTFSettings,
     *,
     options: CavityEvolutionOptions,
-) -> tuple[DimensionSelection, ModelSource, EvolutionResult | None]:
+) -> tuple[DimensionSelection, ModelSource, EvolutionResult]:
     """Run one upper reference and at most one smaller verification.
 
-    Call for a pilot-eligible first round. Returns the selection and the model
-    source with the production routing history for the current live DC facts.
-    The third result is the reusable upper reference when the upper basis wins.
+    Call for a pilot-eligible first round. Returns the selection, the model
+    source for the remaining batch, and the upper result for the pilot point.
+    The smaller verification is never used as production output.
     """
     batches = tuple(plan.batch for plan in plans)
     index, row = _pilot_location(batches, facts.source)
     batch = _slice_batch(batches[index], slice(row, row + 1))
-    reference = _pilot_evolve(engine, facts.source, batch, options)
+    reference = _isolated_evolve(engine, facts.source, batch, options)
     upper = reference.densities[0]
     k, drop = _candidate(upper)
     if k == len(upper):
         return DimensionSelection(k, drop), facts.source, reference
     reduced = evolution_source(facts, settings, k)
-    estimate = _pilot_evolve(engine, reduced, batch, options).densities[0]
+    estimate = _isolated_evolve(engine, reduced, batch, options).densities[0]
     padded = np.zeros_like(upper)
     padded[:k, :k] = estimate
     error = float(np.max(np.abs(padded - upper)))
     if error <= EVOLUTION_BUDGET:
-        return DimensionSelection(k, drop, error), reduced, None
+        return DimensionSelection(k, drop, error), reduced, reference
     return DimensionSelection(len(upper), 0.0, error), facts.source, reference
+
+
+def replay_reference(
+    engine: Engine,
+    plans: tuple[FTFTemplatePlan, ...],
+    upper_source: ModelSource,
+    point: int,
+    *,
+    options: CavityEvolutionOptions,
+) -> EvolutionResult:
+    """Recompute a saved C-order point at the upper basis without selecting N.
+
+    Uses the same isolated evolution as the recording. A point absent from
+    the terminal-only plans or a plan requiring continuation raises ValueError.
+    """
+    if not can_pilot(plans):
+        raise ValueError("private replay pilot point requires terminal-only plans")
+    for plan in plans:
+        rows = np.flatnonzero(plan.batch.points == point)
+        if len(rows):
+            row = int(rows[0])
+            batch = _slice_batch(plan.batch, slice(row, row + 1))
+            return _isolated_evolve(engine, upper_source, batch, options)
+    raise ValueError(f"private replay pilot point {point} is missing from the plans")
 
 
 def _without_reference(
@@ -241,12 +265,14 @@ def evolve_terminal(
     plans: tuple[FTFTemplatePlan, ...],
     *,
     options: CavityEvolutionOptions,
+    upper: int,
     reference: EvolutionResult | None,
 ) -> EvolutionResult:
-    """Evolve terminal timelines, reusing a matching upper reference if supplied.
+    """Evolve terminal timelines with the selected source and embed in the upper basis.
 
-    reference must be the selected upper pilot's single result for these plans,
-    or None to play the full inventory. Points carry their original C-order IDs.
+    reference is the isolated upper result for one point, or None to solve the
+    whole batch. If supplied, solve only the other points before joining results.
+    Points keep their original C-order IDs.
     """
     batches = tuple(plan.batch for plan in plans)
     if reference is not None:
@@ -260,6 +286,7 @@ def evolve_terminal(
             telemetry=options.telemetry,
             capture=options.capture,
         )
+    result = embed_upper(result, upper)
     if reference is None:
         return result
     return EvolutionResult(

@@ -4,7 +4,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import override
+from typing import Literal, override
 
 import numpy as np
 import pytest
@@ -26,82 +26,20 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
-from zcu_tools.simulators.ftf.config import FTFSettings
 from zcu_tools.simulators.ftf.environment import FTFSource
 from zcu_tools.simulators.telemetry import RoutingTelemetry
 
 from tests.program._profiles import profile_soccfg
-from tests.simulators.ftf.environment._templates import (
-    expect_statistics,
-    request,
-    settings,
-    snapshot,
-    template,
+from tests.simulators.ftf.environment._dimension_cases import dimension_bypass
+from tests.simulators.ftf.environment._dimension_cases import (
+    dimension_request as _request,
 )
+from tests.simulators.ftf.environment._dimension_cases import (
+    dimension_settings as _settings,
+)
+from tests.simulators.ftf.environment._templates import expect_statistics, snapshot
 
 pytestmark = pytest.mark.sim
-
-
-def _settings(upper: int) -> FTFSettings:
-    base = settings()
-    numerics = base.numerics
-    truncation = numerics.truncation
-    # The 3x2x3 product supports an upper basis larger than the pilot minimum.
-    truncation = truncation.model_copy(
-        update={
-            "retained_levels": upper,
-            "f1": truncation.f1.model_copy(update={"levels": 3}),
-            "f2": truncation.f2.model_copy(update={"levels": 3}),
-        }
-    )
-    return base.model_copy(
-        update={"numerics": numerics.model_copy(update={"truncation": truncation})}
-    )
-
-
-def _request(points: int = 8) -> AcquireRequest:
-    # The highest-drive point is not first in C order or alone in its template.
-    base = template(tones=1)
-    templates = []
-    for index in range(0, points, 2):
-        rows = slice(0, min(2, points - index))
-        drives = (
-            replace(base.events[0], gain=np.array([0.1, 0.2 + index / 10])),
-            base.events[1],
-        )
-        templates.append(
-            replace(
-                base,
-                points=base.points[rows] + index,
-                events=tuple(
-                    replace(
-                        drive,
-                        start_ticks=drive.start_ticks[rows],
-                        duration_ticks=drive.duration_ticks[rows],
-                        frequency_mhz=drive.frequency_mhz[rows],
-                        phase_deg=drive.phase_deg[rows],
-                        gain=drive.gain[rows],
-                        envelope_index=drive.envelope_index[rows],
-                        active=drive.active[rows],
-                    )
-                    for drive in drives
-                ),
-                readouts=tuple(
-                    replace(
-                        read,
-                        trigger_ticks=read.trigger_ticks[rows],
-                        frequency_mhz=read.frequency_mhz[rows],
-                        phase_deg=read.phase_deg[rows],
-                        generator_channels=read.generator_channels[rows],
-                    )
-                    for read in base.readouts
-                ),
-                duration_ticks=base.duration_ticks[rows],
-            )
-        )
-    return replace(
-        request(templates=tuple(templates)), point_dims=(points,), loop_dims=(3, points)
-    )
 
 
 class PilotEngine(Engine):
@@ -144,6 +82,11 @@ class PilotEngine(Engine):
         else:
             rho = np.zeros((n, n), dtype=np.complex128)
             rho[min(12, n - 1), min(12, n - 1)] = 1
+        if len(points) == 1 and n == 13 and not self.bad_phase:
+            # Keep the verification within budget but give it a detectable
+            # population that the real upper reference lacks.
+            rho *= 1 - 4e-4
+            rho[1, 1] += 4e-4
         return EvolutionResult(
             points, np.repeat(rho[None], len(points), axis=0), PathDiagnostics()
         )
@@ -176,15 +119,19 @@ def test_pilot_keeps_a_state_with_small_population_but_large_coherence(
     tmp_path: Path,
 ) -> None:
     engine = PilotEngine()
-    acquire = _request()
+    acquire = replace(_request(), reps=32768, loop_dims=(32768, 8))
     result, extras = _sample(engine, acquire, 16, tmp_path)
-    assert engine.calls == [(16, (7,)), (13, (7,)), (13, tuple(range(8)))]
+    assert engine.calls == [(16, (7,)), (13, (7,)), (13, tuple(range(7)))]
     assert result.state_counts.shape == (8, 16)
-    np.testing.assert_array_equal(result.state_counts[:, 12], acquire.reps)
+    np.testing.assert_array_equal(result.state_counts[:7, 12], acquire.reps)
     np.testing.assert_array_equal(result.state_counts[:, 13:], 0)
+    # Recording the k-dimensional verification would populate state 1 on
+    # this seed; using the upper reference cannot.
+    assert result.state_counts[7, 1] == 0
+    assert result.state_counts[7, 0] > 32000
     assert extras["ftf.selected_dimension"] == 13
     assert extras["ftf.pilot_drop"] == 0.0
-    assert extras["ftf.pilot_error"] == 0.0
+    assert extras["ftf.pilot_error"] == pytest.approx(4e-4)
     duration = extras["ftf.pilot_wall_s"]
     assert isinstance(duration, float) and duration > 0.0
 
@@ -211,6 +158,26 @@ def test_upper_selection_reuses_the_reference_row_without_another_attempt(
         assert extras["ftf.pilot_error"] is None
 
 
+def test_equal_dc_replaces_the_split_preparation_before_reusing_full_batch() -> None:
+    engine = PilotEngine(extent=15)
+    acquire = _request()
+    source = FTFSource(
+        _settings(16), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=engine
+    )
+    try:
+        state = snapshot()
+        session = source.open_acquire(acquire)
+        first = expect_statistics(session.sample_round(state, 0))
+        second = expect_statistics(session.sample_round(state, 1))
+        third = expect_statistics(session.sample_round(state, 2))
+    finally:
+        source.close()
+
+    assert first.state_counts[7, 12] == 0
+    assert second.state_counts[7, 12] == third.state_counts[7, 12] == acquire.reps
+    assert engine.calls == [(16, (7,)), (16, tuple(range(7))), (16, tuple(range(8)))]
+
+
 @pytest.mark.parametrize(("upper", "points"), [(16, 7), (12, 8)])
 def test_small_acquire_uses_upper_without_a_pilot(
     tmp_path: Path, upper: int, points: int
@@ -229,6 +196,29 @@ def test_small_acquire_uses_upper_without_a_pilot(
     assert extras["ftf.pilot_error"] is None
 
 
+@pytest.mark.parametrize("kind", ["herald", "early_cavity"])
+def test_readout_continuation_uses_upper_across_whole_acquire(
+    kind: Literal["herald", "early_cavity"],
+) -> None:
+    acquire, readout = dimension_bypass(kind)
+    source = FTFSource(
+        _settings(16),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=Engine(1, backend="cpu"),
+        readout=readout,
+    )
+    try:
+        session = source.open_acquire(acquire)
+        result = expect_statistics(session.sample_round(snapshot(), 0))
+        assert session.dimension is not None
+        assert session.dimension.dimension == 16
+        assert session.dimension.drop is None
+        assert result.state_counts.shape[0] == 8
+    finally:
+        source.close()
+
+
 def test_round_keeps_the_selected_dimension_but_uses_live_dc() -> None:
     engine = PilotEngine()
     numeric = _settings(16)
@@ -242,9 +232,12 @@ def test_round_keeps_the_selected_dimension_but_uses_live_dc() -> None:
     before, after = snapshot(), snapshot(0.8)
     try:
         session = source.open_acquire(acquire)
-        session.sample_round(before, 0)
-        session.sample_round(before, 1)
-        session.sample_round(after, 2)
+        first = expect_statistics(session.sample_round(before, 0))
+        second = expect_statistics(session.sample_round(before, 1))
+        third = expect_statistics(session.sample_round(before, 2))
+        session.sample_round(after, 3)
+        assert first.state_counts[7, 12] == 0
+        assert second.state_counts[7, 12] == third.state_counts[7, 12] == acquire.reps
         upper = source.model_facts(after).source
         upper_model = upper.model((0, 0, 0))
         initial = upper.initial_density[:13, :13]
@@ -255,9 +248,10 @@ def test_round_keeps_the_selected_dimension_but_uses_live_dc() -> None:
     finally:
         source.close()
 
-    first_round = [(16, (7,)), (13, (7,)), (13, tuple(range(8)))]
-    assert engine.calls == [*first_round, (13, tuple(range(8))), *first_round]
-    reduced_model, reduced_initial = engine.round_models[3]
+    first_round = [(16, (7,)), (13, (7,)), (13, tuple(range(7)))]
+    full_round = (13, tuple(range(8)))
+    assert engine.calls == [*first_round, full_round, full_round, *first_round]
+    reduced_model, reduced_initial = engine.round_models[4]
     np.testing.assert_array_equal(
         reduced_model.energies_ghz, upper_model.energies_ghz[:13]
     )

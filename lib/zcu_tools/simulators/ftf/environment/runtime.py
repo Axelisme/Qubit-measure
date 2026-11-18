@@ -52,6 +52,7 @@ from zcu_tools.simulate.evolution import (
     CaptureBuffer,
     Engine,
     EvolutionResult,
+    ModelSource,
     PathDiagnostics,
     RoutingHistory,
     batch_populations,
@@ -68,11 +69,11 @@ from zcu_tools.simulators.ftf.environment.cavity import (
 from zcu_tools.simulators.ftf.environment.dimension import (
     DimensionSelection,
     can_pilot,
-    embed_upper,
     evolution_source,
     evolve_terminal,
     pilot_dimension,
     pilot_size,
+    replay_reference,
 )
 from zcu_tools.simulators.ftf.environment.drift import FTFCoherenceDrift
 from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET
@@ -85,7 +86,12 @@ from zcu_tools.simulators.ftf.environment.readout import (
     FTFReadoutConfig,
     readout_configuration,
 )
-from zcu_tools.simulators.ftf.environment.replay import BACKEND_VERSION, replay_versions
+from zcu_tools.simulators.ftf.environment.replay import (
+    BACKEND_VERSION,
+    ReplayShape,
+    pilot_manifest,
+    replay_versions,
+)
 from zcu_tools.simulators.ftf.environment.template import (
     FTFModelFacts,
     FTFTemplatePlan,
@@ -128,6 +134,7 @@ class _Prepared:
     reuse_keys: tuple[bytes, ...]
     projection_outcomes: tuple[int, ...]
     projection_pruned_weight: tuple[float, ...]
+    pilot_point: int | None
 
 
 def _readout_distribution(
@@ -262,7 +269,13 @@ class FTFAcquire:
     Both include elapsed work in failed calls and stay zero with telemetry off.
     """
 
-    def __init__(self, source: "FTFSource", request: AcquireRequest) -> None:
+    def __init__(
+        self,
+        source: "FTFSource",
+        request: AcquireRequest,
+        *,
+        replay: ReplayShape | None = None,
+    ) -> None:
         self._source = source
         self._active = True
         self.request = request
@@ -271,7 +284,10 @@ class FTFAcquire:
         self.routing: list[PathDiagnostics] = []
         self.evolve_wall_s = 0.0
         self.readout_wall_s = 0.0
-        self._dimension: DimensionSelection | None = None
+        self._replay = replay
+        self._dimension = (
+            None if replay is None else DimensionSelection(replay.dimension)
+        )
         self.pilot_wall_s = 0.0
 
     @property
@@ -337,7 +353,12 @@ class FTFAcquire:
         owner = self._source
         if not self._active:
             raise RuntimeError("FTF acquire session is no longer active")
-        if self._prepared is None or snapshot != self._snapshot:
+        if (
+            self._prepared is None
+            or snapshot != self._snapshot
+            or self._prepared.pilot_point is not None
+        ):
+            # The first round used a split solve; later rounds need the full batch.
             try:
                 prepared = self._reuse_or_prepare(snapshot, index, cancel=cancel)
             except Exception:
@@ -389,6 +410,10 @@ class FTFAcquire:
                     )
                 result = RoundSignals(tuple(channels))
         if owner.private_replay is not None:
+            if self._dimension is None:
+                raise RuntimeError(
+                    "FTF replay requires a completed dimension selection"
+                )
             save_replay(
                 owner.private_replay,
                 ReplayAcquire(
@@ -397,10 +422,12 @@ class FTFAcquire:
                     versions=replay_versions(
                         execution_device=prepared.paths.execution_device,
                         workers=owner.engine.workers,
+                        selected_dimension=self._dimension.dimension,
                     ),
                 ),
                 replace(snapshot, model_identity=owner.identity),
                 index,
+                numeric_manifest=pilot_manifest(prepared.pilot_point),
             )
         return result
 
@@ -417,9 +444,12 @@ class FTFAcquire:
         key = preparation_key(
             self.request, owner.readout, encoder=owner.envelope_encoder
         )
-        # A pilot is acquisition-local: its reference and selected dimension
-        # cannot be read from or saved to the cross-acquire preparation cache.
-        if self._dimension is not None and self._dimension.drop is not None:
+        # A pilot is acquisition-local. Neither its split preparation nor its
+        # selected dimension can be reused by another acquire. Replay uses only
+        # the recorded solve shape, not any prior preparation.
+        if self._replay is not None or (
+            self._dimension is not None and self._dimension.drop is not None
+        ):
             return self._prepare(snapshot, index, key=key, cancel=cancel)
         prepared = owner.preparation_cache.get(key)
         if prepared is None or not all(
@@ -449,32 +479,57 @@ class FTFAcquire:
             prepared.paths.warn_exceeded()
         return prepared
 
-    def _evolve(
+    def _round_model(
         self,
         plans: tuple[FTFTemplatePlan, ...],
         facts: FTFModelFacts,
         options: CavityEvolutionOptions,
-    ) -> tuple[EvolutionResult, tuple[bytes, ...], ProjectionEvolution | None]:
+    ) -> tuple[ModelSource, EvolutionResult | None]:
         owner = self._source
         settings = owner.effective_settings
         upper = len(facts.source.initial_density)
-        model = facts.source
-        reference = None
+        if self._replay is not None:
+            shape = self._replay
+            model = evolution_source(facts, settings, shape.dimension)
+            point = shape.pilot_point
+            reference = (
+                None
+                if point is None
+                else replay_reference(
+                    owner.engine, plans, facts.source, point, options=options
+                )
+            )
+            return model, reference
         if self._dimension is None:
             if pilot_size(prod(self.request.point_dims), upper) and can_pilot(plans):
                 with self._timing_pilot():
                     self._dimension, model, reference = pilot_dimension(
                         owner.engine, plans, facts, settings, options=options
                     )
-            else:
-                self._dimension = DimensionSelection(upper)
-        elif self._dimension.dimension < upper:
-            model = evolution_source(facts, settings, self._dimension.dimension)
-        if self._dimension.dimension < upper or reference is not None:
+                return model, reference
+            self._dimension = DimensionSelection(upper)
+        return evolution_source(facts, settings, self._dimension.dimension), None
+
+    def _evolve(
+        self,
+        plans: tuple[FTFTemplatePlan, ...],
+        facts: FTFModelFacts,
+        options: CavityEvolutionOptions,
+        model: ModelSource,
+        reference: EvolutionResult | None,
+    ) -> tuple[EvolutionResult, tuple[bytes, ...], ProjectionEvolution | None]:
+        owner = self._source
+        settings = owner.effective_settings
+        if model is not facts.source or reference is not None:
             evolved = evolve_terminal(
-                owner.engine, model, plans, options=options, reference=reference
+                owner.engine,
+                model,
+                plans,
+                options=options,
+                upper=len(facts.source.initial_density),
+                reference=reference,
             )
-            return embed_upper(evolved, upper), (), None
+            return evolved, (), None
         if any(any(plan.projective_reads) for plan in plans):
             projection = evolve_projective_plans(
                 owner.engine, plans, facts, settings, options=options
@@ -518,7 +573,10 @@ class FTFAcquire:
             evolving=self._evolving,
             reading=self._reading,
         )
-        evolved, reuse_keys, projection = self._evolve(plans, facts, options)
+        model, reference = self._round_model(plans, facts, options)
+        evolved, reuse_keys, projection = self._evolve(
+            plans, facts, options, model, reference
+        )
         if owner.telemetry is not None:
             self.routing.append(evolved.paths)
         # Retain solve diagnostics even when ADC preparation rejects a row.
@@ -590,6 +648,7 @@ class FTFAcquire:
             reuse_keys,
             outcome_counts,
             pruned_weight,
+            None if reference is None else int(reference.points[0]),
         )
 
 
@@ -793,9 +852,14 @@ class FTFSource:
             values.append((name, info.value))
         return EnvironmentSnapshot("ftf-v2", self.identity, tuple(values))
 
-    def open_acquire(self, request: AcquireRequest) -> FTFAcquire:
+    def open_acquire(
+        self, request: AcquireRequest, *, replay: ReplayShape | None = None
+    ) -> FTFAcquire:
         """Start a fixed template request, invalidating/releasing the previous session.
 
+        replay is for author-only single-round recomputation. It uses the
+        recorded dimension and optional isolated upper point instead of
+        selecting them. None enables normal acquire-local selection.
         Requires nonempty C1 templates and the current RNG stream version. Legacy
         execution timelines are not consumed. ValueError rejects unsupported
         inputs before the engine runs; a closed source raises RuntimeError.
@@ -806,6 +870,10 @@ class FTFSource:
         """
         if self._closed:
             raise RuntimeError("FTF source is closed")
+        if replay is not None and not (
+            1 <= replay.dimension <= self.settings.numerics.truncation.retained_levels
+        ):
+            raise ValueError("FTF replay dimension is outside the configured basis")
         if request.charge_requirements:
             raise ValueError("FTF charge drive requirements are not supported")
         if not request.templates:
@@ -826,7 +894,7 @@ class FTFSource:
         self._pending_acquire = False
         if self._session is not None:
             self._session.invalidate()
-        self._session = FTFAcquire(self, request)
+        self._session = FTFAcquire(self, request, replay=replay)
         self.evaluations = ()
         return self._session
 

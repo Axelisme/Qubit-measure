@@ -594,7 +594,9 @@ sampling tests live in the corresponding numeric owner directories.
 and public acquire/decimated composition. `test_ftf_templates.py` covers DC readout
 and the template engine contract. `test_dynamic_dimension.py` uses public FTF
 acquires, injected densities at the Engine boundary, and ADC state counts to
-check dimension selection, round DC and basis handoff.
+check dimension selection, round DC and basis handoff. `test_ftf_replay.py` uses
+the real CPU Engine and detached inputs to check both recording solve shapes
+through the public private-replay API.
 `tests/simulators/ftf/environment/test_projective_readout.py` covers public frontend mux heralding, retained
 outcome histories, pruning, partial ADC observations and terminal-only density,
 point-order and sampling-identity handoff to ADC using an injected non-evolving Engine.

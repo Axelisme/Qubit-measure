@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, acquire dimension
+**Last updated:** 2026-11-18, acquire dimension and private replay
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -116,7 +116,7 @@ remainder. Raw-shot materialization requested after acquire is outside this row.
 Dimension diagnostics live in `extras`. `ftf.selected_dimension` gives the
 chosen dimension, or null if no selection finished. `ftf.pilot_drop` is the
 largest magnitude of an upper-reference density entry outside the selected
-block. It is zero if the upper pilot was selected and null if no pilot finished.
+block. It is zero if the upper basis was selected and null if no pilot finished.
 `ftf.pilot_error` is the verification's full-density max absolute error, or null
 if no verification finished. `ftf.pilot_wall_s` gives total pilot time and is
 zero when skipped. It overlaps the pilot portion of `evolve_wall_s`.
@@ -312,20 +312,21 @@ reference by at most `1e-3` in every entry. Pilot accuracy is checked on that
 timeline; it is not a bound on untested sweep points.
 
 The reduced model projects the initial state onto the energy prefix and
-renormalizes it. The first successful selection fixes the dimension across
-software rounds, while every round keeps its own live DC model. FTF restores the
-upper basis with zero rows and columns before ADC. If the upper basis wins, the
-first round uses its saved reference for the pilot point. If a smaller model
-wins, FTF recomputes the pilot point in the full batch: the single-row and
-full-batch Engine routes need not share a family or preparation key. Pilot
-calls do not add to the production source's routing history.
+renormalizes it. The first successful selection fixes the batch dimension across
+software rounds. Each round builds its model from that round's live DC snapshot.
+In the pilot round, FTF uses the isolated upper solve for the pilot point and
+solves the rest as one batch at the selected dimension. The smaller verification
+never supplies output. Later rounds solve all points together at the selected
+dimension. FTF pads smaller densities with zero rows and columns before ADC.
+Isolated pilot solves do not add to the production source's routing history.
 
 ### Preparation reuse
 
 `open_acquire(request)` starts a session for a fixed request. Its
 `sample_round(snapshot, index)` reuses the preceding round's noiseless event
-populations and conditional response when the snapshot is equal. Every round
-draws a new stream.
+populations and conditional response when the snapshot and solve shape match.
+The split pilot round does not supply a preparation for the next full batch.
+Every round draws a new stream.
 Opening another acquire invalidates the old session and drops its references.
 Projection continuation densities exist only during span preparation. A later shot, round or acquire does not inherit a preceding
 outcome's terminal state or sampled herald result. Immutable outcome weights,
@@ -334,7 +335,7 @@ rules below. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-bounda
 A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sums,
 content mappings, path diagnostics and integrated sampling plans across acquires.
 An acquire that runs a pilot does not retain its preparation in the cross-acquire
-cache: a new acquire runs its own pilot. Equal consecutive rounds still reuse
+cache: a new acquire runs its own pilot. Equal consecutive full batches reuse
 one preparation. The LRU key reads full current C1 content, layout, mode, reps and
 readout values,
 including absolute phase origins. Physical settings/snapshot/numeric changes,
@@ -352,7 +353,7 @@ cumulative counts, so growing usage does not force a preparation-cache miss.
 Evolution counts each distinct acquire content's complete row inventory once;
 identical repeats do not invent additional numerical playback to amortize a gate.
 Other hits return the saved preparation without evolving. Equal consecutive
-software rounds remain one preparation. The public
+full-batch software rounds remain one preparation. The public
 `source.preparation_cache` reports cumulative `builds`, `hits` and `resident_bytes`.
 Its `max_bytes` can be adjusted between calls; zero disables residency. The budget
 counts Python containers/keys and whole ndarray allocations, including bases of
@@ -713,16 +714,24 @@ the recorded worker count. A different or unavailable GPU raises `ValueError`
 with both identities. pyopencl is not a global replay dependency. Archives
 missing either execution field fail the version check.
 The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v13`. Integrated raw and decimated traces resolve
-continuous CTMC jump times and cavity memory, with one physical path per shot
-shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v12`
-and earlier backends fail explicitly because they predate segment-boundary cavity
-field inheritance.
+The backend is `ftf-segment-v14`; v13 and earlier archives fail the version
+check. FTF adds the selected dimension to the acquire metadata. The round
+metadata records the C-order pilot point, or null for a full batch. Replay
+uses the target round's snapshot. It solves the recorded point alone at the
+upper dimension, if present, and solves the remaining points together at the
+selected dimension. It does not pick a pilot point or test a smaller basis.
+A missing or out-of-basis dimension or an out-of-range pilot point raises
+`ValueError`. The shared archive schema stays at v2.
+
+Integrated raw and decimated traces resolve continuous CTMC jump times and
+cavity memory, with one physical path per shot shared across mux carriers,
+ADCs and windows.
 Direct means retain conditional moments, their numeric values and their existing
 RNG stream. Raw getters do not advance that stream or shift shots to match a
 finite-shot direct mean. Each acquisition route reproduces itself for equal
-seed, inputs and recorded versions. Evolution uses `segment-engine-v9`.
-Old exact-record manifests also fail explicitly. Archives contain model truth and
+seed, inputs and routing conditions. Replay does not preserve caller-supplied
+routing history or family restrictions. Evolution uses `segment-engine-v9`.
+FTF rejects external numeric-record references. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.
 
