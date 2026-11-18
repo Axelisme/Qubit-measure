@@ -721,6 +721,45 @@ def test_short_reuse_loses_to_dop853_without_building_gate(
     assert gate is None or gate.prepare_cpu_s == 0
 
 
+@pytest.mark.parametrize(
+    ("duration", "count", "status", "family"),
+    [
+        pytest.param(25.0, 160, "selected", "dop853", id="short-direct-wins"),
+        pytest.param(100.0, 100, "deferred", None, id="long-gate-offered"),
+    ],
+)
+def test_gate_direct_price_compares_short_and_long_reuse(
+    duration: float, count: int, status: str, family: str | None
+) -> None:
+    """Short reuse loses on price; longer rows can justify offering the gate."""
+    case = _joint_gate_case(1, duration)
+    envelope = EnvelopeSpec(
+        "sampled",
+        np.array([0.2, 1, 0.3], complex),
+        np.array([0.0, duration / 2, duration]),
+    )
+    # One timeline defers its gate guard so inspection observes the price
+    # decision without building the gate or integrating any density.
+    work = replace(
+        case.batch,
+        end_ns=np.array([count * duration]),
+        tracks=tuple(
+            replace(track, start_ns=np.array([index * duration]), envelopes=(envelope,))
+            for index in range(count)
+            for track in case.batch.tracks
+        ),
+    )
+    with (
+        closing(case.source) as source,
+        closing(
+            Engine(1, families=("multitone_gate", "dop853"), backend="cpu")
+        ) as engine,
+    ):
+        query = engine.inspect_dispatch(source, (work,))
+    assert len(query.rows) == count
+    assert {(row.status, row.family) for row in query.rows} == {(status, family)}
+
+
 @pytest.mark.parametrize("shared", [False, True])
 def test_profitable_gate_is_offered_using_complete_inventory(shared: bool) -> None:
     """Local builders defer; a shared key runs its numerical guard in the caller."""

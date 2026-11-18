@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, full-drive gate admission, DP5(4), and debug capture
+**Last updated:** 2026-11-18, full-drive gate admission and CPU competitor pricing
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -783,12 +783,17 @@ expires after each evolve. RWA keeps its history-based cold price. Gate
 amortization never reads history.
 
 The estimator uses the raw full-drive work scale for gate endpoint and split
-terms and the grid size for Fourier and playback. Only the CPU DOP853 price
-that competes with the gate is calibrated from matched rows. Gate build and
-playback prices and the RWA comparison are unchanged. Insufficient current
-reuse can leave a numerically eligible gate unbuilt. These are CPU estimates,
-not wall-time guarantees. The split check does not certify arbitrary inputs
-or whole-sequence accuracy.
+terms and the grid size for Fourier and playback. Only the gate's CPU
+`dop853` competitor multiplies the raw scale by a duration factor: 0.12 through
+25 ns, then linear to 0.24 at 100 ns, and constant thereafter. Duration is a
+pricing proxy calibrated from six matched CPU DP5(4) cases at budget 1e-3.
+The factor does not depend on envelope or frame. It does not change gate build
+or playback prices, the RWA comparison, or the direct solver. See the
+[pricing discussion](../../../../docs/discussions/2026-11-18-gate-direct-duration-price.md).
+
+Insufficient current reuse can leave a numerically eligible gate unbuilt.
+These are CPU estimates, not wall-time guarantees. The split check does not
+certify arbitrary inputs or whole-sequence accuracy.
 
 Historical calibration note for [slow-envelope propagation](kernels/slow_envelope.py):
 the calibrated population tolerance is 1e-2, with about 1e-4 or less measured on
