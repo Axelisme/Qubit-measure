@@ -201,6 +201,45 @@ def test_multitone_gate_mixed_phase_keys_density(
         )
 
 
+def _with_gate_bath(case: AccuracyCase, factor: float) -> AccuracyCase:
+    model = case.source.model((0,))
+    return replace(
+        case,
+        source=coherent_source(
+            replace(
+                model,
+                rates_per_ns=factor * model.rates_per_ns,
+                dephasing_per_ns=factor * model.dephasing_per_ns,
+            )
+        ),
+    )
+
+
+def test_multitone_gate_rejects_large_split_defect() -> None:
+    """A stronger bath can make a phase-resolved gate unsuitable for playback."""
+    case = _with_gate_bath(multitone_phase_case("gaussian", 1), 4000)
+    with (
+        closing(Engine(1, families=("multitone_gate",))) as engine,
+        pytest.raises(NoValidKernel) as rejected,
+    ):
+        engine.evolve(case.source, (case.batch,))
+    assert "multitone_gate" in rejected.value.attempted
+
+
+def test_multitone_gate_split_admission_tightens_with_budget() -> None:
+    """The same dissipative key can fit the default budget but not a tighter one."""
+    case = _with_gate_bath(multitone_phase_case("gaussian", 7), 100)
+    with closing(Engine(1, families=("multitone_gate",))) as engine:
+        result = engine.evolve(case.source, (case.batch,))
+        require_families(result.paths, ("multitone_gate",))
+        reference = converged_reference(case.source, case.batch)
+        assert density_error(result.densities, reference.density) <= 2e-3
+
+        with pytest.raises(NoValidKernel) as rejected:
+            engine.evolve(case.source, (case.batch,), budget=1e-7)
+        assert "multitone_gate" in rejected.value.attempted
+
+
 def test_multitone_gate_rejects_unresolved_dual_phase_key() -> None:
     """Strong phase dependence fails validation even without a secular split error."""
     case = multitone_phase_case("gaussian", 1, gain=20)

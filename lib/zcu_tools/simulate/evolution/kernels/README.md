@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-18，雙相位 gate 與耗散 DC channel
+**Last updated:** 2026-11-18，雙相位 gate 的實測 split 判準
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -31,7 +31,10 @@ Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_ga
 `_multitone_gate_phase.py` 擁有網格與非格點驗證，`_gate_endpoints.py` 擁有批次積分與 polar retraction。
 所有 key 從 9×10、rtol/atol 2.75e-7/2.75e-9 起跳，不按包絡形狀或虛部分類。
 第一階驗證失敗才升到 13×13、1e-8/1e-10。每階節點與兩組共 64 個獨立 probe 同批積分。
-Guard 只放行每子段 full-unitary defect ≤ 1.9e-7 的 key，第二階仍失敗就拒收。
+Guard 要求每子段 full-unitary defect ≤ 1.9e-7，第二階仍失敗就拒收。
+通過相位驗證後，`_multitone_gate_split.py` 為四組相位與初始 density 呼叫完整 Lindblad 積分。
+Guard 比較積分與四子段 playback 的最大 density 元素差，超過當次 `Engine` budget 換算的門檻就拒收。
+這是抽樣檢查，不能限制未抽樣的相位、density 或整條序列的誤差。
 每個 key 保留自己的 active grid，混合階數的係數 padding 不參與 Fourier modes。
 Guard 將通過的數值產品交給 scheduler，只活一次 evolve。單 tone 的數值分支不變。
 其餘候選沿用既有定價，可能選到 `common_frame` 或 `dop853`。
