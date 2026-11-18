@@ -39,6 +39,8 @@ status: accepted
 
 放置新程式碼時，先找最貼近的類別；所有類別都不合，才放 `utils`。
 
+FTF 與 single_fluxonium 的除錯資訊由 debug capture 提供：開啟 `numerics.debug_capture` 時，manifest 記錄 Engine 輸入、逐列 routes、seed、每輪 DC、model identity 與該 identity 當時的有效設定。除錯需要新的資訊時，擴充 manifest 的內容。2026-11-18，使用者說：「你需要的资讯应该本身就在 dump 的结果里了。如果你会需要 replace 多余的资讯、多余的算法，那就是你 dump 的资料不够多嘛。」出處：[移除 private replay](../discussions/2026-11-18-remove-private-replay.md)。
+
 ### 框架機制與模型參數
 
 2026-11-01，使用者要求：「框架應該只有機制本身以及最簡單的範例，比如white_noise，絕對不可以hardcode參數」。
@@ -121,7 +123,7 @@ t1_curve 負責主模選取與診斷，使用者回答「對」。這個分工�
 漂移設定型別 `DriftParameter` 與 schema `CoherenceDrift` 由 `resources.single_fluxonium.schema` 擁有，single、six 與 FTF 共用；resources 不依賴 experiment。
 設定編排、acquisition 開始時的取值凍結與 truth log I/O 留在 experiment：`experiment.single_fluxonium.drift` 的 `LossRow` 與 `write_truth` 是 single、six、FTF 共用 truth JSONL 的唯一格式與寫入 owner，
 FTF 呼叫它而不複製格式；coupler 沒有的 q_ind／xqp 以 null 表達。每個環境自己組 effective settings 與 loss streams，FTF 不建 single settings 的 adapter。
-Truth 是模擬端 acquisition 的診斷資料，不進 Run record、GUI、MCP 或 Labber metadata。FTF 與 single-fluxonium 開啟 `numerics.debug_capture` 時，manifest 的 `metadata.effective_settings` 按已觀察的 round model identity 記錄當時的有效設定，包含取樣後的損耗。發布時不重新取時鐘或漂移。
+Truth 是模擬端 acquisition 的診斷資料，不進 Run record、GUI、MCP 或 Labber metadata。FTF 與 single-fluxonium 開啟 `numerics.debug_capture` 時，manifest 的 `metadata.effective_settings` 按已觀察的 round model identity 記錄當時的有效設定，包含取樣後的損耗。發布使用 round snapshot 對應的記錄。
 依賴方向沿用 C8、C9 的 experiment → simulate／resources，不新增 package edge。
 物理前提見 [[0078]]。使用者於 2026-10-27 提出漂移需求：「另外我想引入跨acquire的T1/T2漂移，這樣overnight量測才有意義」。
 Owner 分工是 advisor 於 2026-10-27 與 2026-10-28 依本篇 simulate 與 experiment 定位、以及使用者授權「B你可以自己開task，不用我看過」訂定。

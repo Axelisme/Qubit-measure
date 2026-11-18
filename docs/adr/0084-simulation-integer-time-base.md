@@ -18,8 +18,6 @@ Compiled simulation 的 request 目前以浮點微秒傳遞時間。Frontend 與
 
 TimeBase、request schema、compiled frontend 與 physical consumer 使用整數時間。Planner 以必填 time_base keyword 接收 request 的時基。TimelineTemplate 不重複保存時基。Plan 與 preparation cache key 納入時基。
 
-Private replay 已於 2026-11-18 移除，見 [ADR-0072〈模組定位〉](0072-module-boundaries.md#模組定位)。
-
 ## 時間契約
 
 TimeBase 的頻率為約分後的有理數 `F = num / den`，單位為 ticks/μs，也就是 MHz。一個 tick 為 `den / num` μs。
