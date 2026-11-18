@@ -21,6 +21,7 @@ from .container_models import (
     Variable,
 )
 from .container_nodes import (
+    find_doc,
     json_text,
     name_segment,
     root_attrs,
@@ -35,7 +36,7 @@ from .container_nodes import (
 from .container_nodes import (
     read_doc as read_document,
 )
-from .native_nodes import known_group, known_node
+from .native_nodes import known_group
 
 
 @dataclass(frozen=True)
@@ -196,16 +197,55 @@ def read_doc(path: Path, name: str) -> JsonObject:
     """
     name_segment(name)
     with h5.File(path, "r") as file:
-        try:
-            root_attrs(file)
-            documents = known_group(file, "docs")
-            if known_node(documents, name) is None:
-                raise KeyError(name)
-            return read_document(documents, name)
-        except KeyError as error:
-            raise KeyError(f"{path}: document {name!r} not found") from error
-        except ValueError as error:
-            raise FormatError(f"{path}: {error}") from error
+        return _read_selected_doc(path, _document_group(path, file), name)
+
+
+def read_docs(
+    path: Path, names: tuple[str, ...]
+) -> dict[str, JsonObject | KeyError | FormatError | OSError]:
+    """Read selected finite JSON objects from one opening of a major-3 file.
+
+    path is the exact container path. Each name follows read_doc's path segment
+    rules; invalid names raise ValueError before I/O. Duplicate names are read
+    once. Only the header, docs group and selected documents are validated.
+
+    File open/close errors propagate. Invalid headers or docs groups raise
+    path-qualified FormatError. Once those checks pass, each distinct name maps
+    to its detached JSON object or the KeyError, FormatError or OSError that
+    read_doc would raise for that document. A failed document does not hide the
+    others. The file is closed before returning.
+    """
+    for name in names:
+        name_segment(name)
+    results: dict[str, JsonObject | KeyError | FormatError | OSError] = {}
+    with h5.File(path, "r") as file:
+        documents = _document_group(path, file)
+        for name in dict.fromkeys(names):
+            try:
+                results[name] = _read_selected_doc(path, documents, name)
+            except (KeyError, FormatError, OSError) as error:
+                results[name] = error
+    return results
+
+
+def _document_group(path: Path, file: h5.File) -> h5.Group:
+    try:
+        root_attrs(file)
+        return known_group(file, "docs")
+    except ValueError as error:
+        raise FormatError(f"{path}: {error}") from error
+
+
+def _read_selected_doc(path: Path, documents: h5.Group, name: str) -> JsonObject:
+    try:
+        document = find_doc(documents, name)
+        if document is None:
+            raise KeyError(name)
+        return document
+    except KeyError as error:
+        raise KeyError(f"{path}: document {name!r} not found") from error
+    except ValueError as error:
+        raise FormatError(f"{path}: {error}") from error
 
 
 def inspect(path: Path) -> ContainerInfo:

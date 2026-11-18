@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+import h5py
 import pytest
 from zcu_tools.datafile import Container, ContainerAttrs, JsonObject, save
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
@@ -236,6 +237,55 @@ def test_indexed_documents_and_search_include_tones_missing_from_roles(
     assert index.read_figure(run.key, "readout.png") == b"\x89PNG\r\n\x1a\nsynthetic"
 
 
+def test_scan_opens_each_native_file_once(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths: list[Path] = []
+    open_file = h5py.File
+
+    def count_open(path: Path, mode: str) -> h5py.File:
+        paths.append(Path(path))
+        return open_file(path, mode)
+
+    # scan_results exposes the projected rows, not its HDF5 opens.
+    monkeypatch.setattr(h5py, "File", count_open)
+    index = scan_results(project)
+
+    assert sorted(paths) == sorted(run.data_path for run in index.runs if run.data_path)
+    assert len(paths) == 4
+    assert not index.issues
+    assert all(not run.issues for run in index.runs)
+
+
+@pytest.mark.parametrize("missing", ["cfg", "metadata"])
+def test_missing_document_does_not_hide_the_other_from_search(
+    tmp_path: Path, missing: str
+) -> None:
+    run = tmp_path / "Database/legacy-Axel.bak/runs/synthetic"
+    run.mkdir(parents=True)
+    data = run / "data.h5"
+    docs: dict[str, JsonObject] = {
+        "cfg": {"label": "Searchable-Tone"},
+        "metadata": {"experiment": "historical/pulse"},
+    }
+    del docs[missing]
+    save(data, Container({}, docs, {}, ContainerAttrs("3.0", "synthetic", None, {})))
+
+    index = scan_results(tmp_path)
+
+    row = index.get_run("legacy-Axel.bak/synthetic")
+    if missing == "cfg":
+        assert row.experiment == "historical/pulse"
+        assert "historical/pulse" in row.search_text
+    else:
+        assert row.experiment is None
+        assert "searchable-tone" in row.search_text
+    assert row.issues == (
+        f"{data}: {'cfg: ' if missing == 'cfg' else ''}"
+        f"\"{data}: document '{missing}' not found\"",
+    )
+
+
 def test_figure_only_acquisition_uses_ledger_identity(project: Path) -> None:
     data = _layout(project, "alpha", "mux/readout", _RUN1).run_path / "data.h5"
     data.unlink()
@@ -444,6 +494,57 @@ def test_member_symlink_escape_is_rejected_on_scan_and_read(project: Path) -> No
     assert any(str(figure) in issue and "escapes" in issue for issue in affected.issues)
     assert len(refreshed.runs) == 5
     assert all(not row.issues for row in refreshed.runs if row.entry != run.entry)
+
+
+def test_scan_preserves_in_run_symlink_members(project: Path) -> None:
+    run = _layout(project, "alpha", "mux/readout", _RUN1).run_path
+    figures = run / "figures"
+    archive = run / "saved-figures"
+    figures.rename(archive)
+    (archive / "alias.png").symlink_to("readout.png")
+    figures.symlink_to(archive.name, target_is_directory=True)
+
+    index = scan_results(project, entries=("alpha",))
+
+    row = index.get_run(f"alpha/{run.name}")
+    assert row.figure_paths == (figures / "alias.png", figures / "readout.png")
+    assert index.read_figure(row.key, "alias.png") == b"\x89PNG\r\n\x1a\nsynthetic"
+    assert not row.issues
+
+
+def test_scan_rechecks_ancestor_before_more_reads(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = _layout(project, "alpha", "mux/readout", _RUN1).run_path
+    second = _layout(project, "alpha", "mux/readout", _RUN2).run_path
+    runs = first.parent
+    detached = project / "detached"
+    opened: list[Path] = []
+    open_file = h5py.File
+
+    def open_and_replace_runs(path: Path, mode: str) -> h5py.File:
+        file = open_file(path, mode)
+        if path == first / "data.h5" and not opened:
+            runs.rename(detached)
+            runs.symlink_to(detached, target_is_directory=True)
+        opened.append(path)
+        return file
+
+    # Change the filesystem mid-scan at an I/O boundary after the first run was checked.
+    monkeypatch.setattr(h5py, "File", open_and_replace_runs)
+    index = scan_results(project, entries=("alpha",))
+
+    assert [row.run_path for row in index.runs] == [first]
+    row = index.runs[0]
+    assert row.analysis_paths == ()
+    assert '"frequency": 5100.0' not in row.search_text
+    assert any(
+        str(first / "analysis") in issue and "escapes" in issue for issue in row.issues
+    )
+    assert second / "data.h5" not in opened
+    assert len(index.issues) == 1
+    assert index.issues[0].path == second
+    assert "escapes" in index.issues[0].reason
 
 
 @pytest.mark.parametrize(

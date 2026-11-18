@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-18
 
 **讀者：** framework-dev。讀寫通用 HDF5 容器，或獨立轉出 Labber。
 
@@ -64,6 +64,11 @@ Caller 也可以用 `GroupSource(existing_path, "/subtree")` 提供自己的子�
 格式或文件非法 raise 指名來源檔的 `FormatError`，I/O 錯誤原樣傳遞。
 此入口與 load 都只接受 zcu.container 3.x。
 讀到合法文件不代表整份容器可由 load 成功載入。
+
+`read_docs(path, names)` 在一次開檔中讀取 tuple 指定的多份文件，關檔後回傳以名稱為 key 的 dict。
+每份文件的值是 detached `JsonObject` 或 `read_doc` 會為該份文件拋出的錯誤。
+名稱非法、無法開檔、header 或 docs group 無效時直接 raise，不回傳逐份結果。
+它不讀未指定的文件、vars 或 groups。
 
 `inspect(path)` 回傳 `ContainerInfo`，只讀 header、var schema 與 doc/group 名稱。
 它不載入數值或座標陣列，回傳 axes 的 values 為空陣列。
