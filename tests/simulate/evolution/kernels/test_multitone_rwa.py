@@ -224,17 +224,9 @@ def smooth() -> EnvelopeSpec:
     )
 
 
-def timeline(kind: str = "smooth", tones: int = 2) -> TimelineBatch:
+def timeline(tones: int = 2, *, second_frequency: float = -0.6) -> TimelineBatch:
     env = smooth()
-    if kind == "complex":
-        env = replace(env, samples=env.samples * (1 + 0.1j))
-    if kind == "rough":
-        env = replace(
-            env, samples=np.where(np.arange(129) % 2, 1.0, 0.0).astype(complex)
-        )
-    frequencies = [0.3, -0.6, 0.9][:tones]
-    if kind == "dc":
-        frequencies[1] = 0.0
+    frequencies = [0.3, second_frequency, 0.9][:tones]
     tracks = tuple(
         DriveTrack(
             "a" if slot == 0 else "b",
@@ -255,18 +247,6 @@ def timeline(kind: str = "smooth", tones: int = 2) -> TimelineBatch:
         FluxSchedule(np.array([0, 1]), np.array([0.0]), np.array([[0]])),
         np.array([135.0]),
     )
-
-
-def test_smooth_multiple_drives_route_with_explicit_admission():
-    routes = {}
-    with closing(Engine(1)) as engine:
-        for kind in ("smooth", "complex", "rough", "dc"):
-            result = engine.evolve(model_source(), (timeline(kind),), cancel=Event())
-            routes[kind] = dict(result.paths.segments_by_kernel)
-        result = engine.evolve(model_source(), (timeline(tones=3),), cancel=Event())
-        routes["three"] = dict(result.paths.segments_by_kernel)
-    expected = {kind: {"t4": 1, "dop853": 1} for kind in routes}
-    assert routes == expected
 
 
 @pytest.fixture
@@ -424,19 +404,11 @@ def test_same_port_constant_pair_retains_original_two_tone_routing(port):
     np.testing.assert_array_equal(result.densities, original.densities)
 
 
-@pytest.mark.parametrize("kind", ["smooth", "mixed", "same_port", "three"])
-def test_sampled_multitone_rows_reject_pinned_rwa(kind: str) -> None:
-    batch = timeline(tones=3 if kind == "three" else 2)
-    if kind == "same_port":
-        batch = replace(batch, tracks=tuple(replace(t, port="a") for t in batch.tracks))
-    elif kind == "mixed":
-        batch = replace(
-            batch,
-            tracks=(
-                replace(batch.tracks[0], envelopes=(EnvelopeSpec("constant"),)),
-                batch.tracks[1],
-            ),
-        )
+@pytest.mark.parametrize("tones,frequency", [(2, 0.0), (3, -0.6)])
+def test_sampled_multitone_rejects_outside_the_two_carrier_domain(
+    tones: int, frequency: float
+) -> None:
+    batch = timeline(tones, second_frequency=frequency)
     with (
         closing(Engine(1, families=("t4", "multitone_rwa"))) as engine,
         pytest.raises(NoValidKernel) as rejected,

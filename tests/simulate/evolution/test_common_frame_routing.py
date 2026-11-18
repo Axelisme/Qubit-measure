@@ -7,12 +7,14 @@ from threading import Event
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
     Engine,
     EnvelopeSpec,
     FamilyRouting,
     ModelSource,
     SecularDrive,
     SecularModel,
+    read_capture_metadata,
 )
 from zcu_tools.simulate.evolution.kernel import GuardResult
 
@@ -65,6 +67,29 @@ def test_shared_constant_coefficients_build_once_for_all_rows():
         assert report.prepare_builds == 1
         assert report.admission_rows == 4
         assert first.paths.frontend_cpu_s > 0
+
+
+@pytest.mark.parametrize("split_phase", [False, True])
+def test_sampled_price_hands_the_adopted_common_frame_to_apply(split_phase):
+    # A dense grid makes the serial RWA probe expensive, but the smooth
+    # envelope and nearby carriers remain eligible for common frame.
+    timeline = batch([80.0] * 4, gain=0.2)
+    knots = np.linspace(0.0, 80.0, 1200)
+    envelope = EnvelopeSpec(
+        "sampled", np.linspace(0.8, 1.0, len(knots)).astype(complex), knots
+    )
+    tracks = tuple(replace(t, envelopes=(envelope,)) for t in timeline.tracks)
+    if split_phase:
+        tracks = (
+            replace(tracks[0], phase_rad=np.array([0.37, 0.37, 0.51, 0.51])),
+            tracks[1],
+        )
+    timeline = replace(timeline, tracks=tracks)
+    with closing(model_source()) as source, closing(Engine(1, backend="cpu")) as engine:
+        result = engine.evolve(source, (timeline,), telemetry=True)
+    assert result.paths.segments_by_kernel == {"common_frame": 4}
+    assert result.paths.routing["common_frame"].prepare_builds == 1
+    assert result.paths.routing["common_frame"].admission_rows == 4
 
 
 @pytest.mark.parametrize("far,sampled", [(False, False), (True, False), (True, True)])
@@ -132,6 +157,51 @@ def test_constant_block_rwa_avoids_unprofitable_unique_common_builds(far, sample
     assert reused.paths.segments_by_kernel == {"common_frame": 24}
     assert reused.paths.routing["common_frame"].prepare_builds == 1
     assert reused.paths.routing["common_frame"].admission_rows == 24
+
+
+def test_shared_sampled_prefix_does_not_borrow_another_points_constant_route():
+    # Point zero has a cheap constant pair. The other points share a sampled
+    # pair up to the final pulse, which has different gains on the two points.
+    plateau = batch([12.0, 12.0, 12.0], gain=0.03)
+    sampled = batch([192.0] * 3, gain=0.2, frequency=0.295)
+    envelope = EnvelopeSpec(
+        "sampled", np.array([0.8, 1.0, 0.9], complex), np.array([0.0, 96.0, 192.0])
+    )
+    tail = replace(
+        plateau.tracks[0],
+        start_ns=np.full(3, 192.0),
+        duration_ns=np.full(3, 2.0),
+        amplitude=np.array([0.0, 0.1, 0.2]),
+        active=np.array([False, True, True]),
+    )
+    timeline = replace(
+        sampled,
+        end_ns=np.array([12.0, 194.0, 194.0]),
+        tracks=(
+            *(
+                replace(t, active=np.array([True, False, False]))
+                for t in plateau.tracks
+            ),
+            *(
+                replace(t, active=tail.active, envelopes=(envelope,))
+                for t in sampled.tracks
+            ),
+            tail,
+        ),
+    )
+    capture = CaptureBuffer()
+    with closing(model_source()) as source, closing(Engine(1, backend="cpu")) as engine:
+        engine.evolve(source, (timeline,), capture=capture)
+    metadata = read_capture_metadata(capture.records[0])
+    (prefix,) = metadata["prefix_runs"]
+    assert {row["point"] for row in prefix["adopters"]} == {1, 2}
+    assert any(
+        row["point"] == 0 and row["family"] == "multitone_rwa"
+        for row in metadata["routes"]
+    )
+    assert {row["family"] for row in metadata["routes"] if row["prefix_run"] == 0} == {
+        "common_frame"
+    }
 
 
 def test_common_frame_selection_and_results_are_row_order_invariant():

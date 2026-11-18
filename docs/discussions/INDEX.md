@@ -82,6 +82,7 @@
 - 2026-11-15 [t6 只保留 direct](2026-11-15-t6-channel-removal.md)：刪除或收窄。移除代表性工作負載未選用的 channel 做法與價格分支，保留 direct 與既有 family。
 
 - 2026-11-14 [Sampled multitone 的過渡期拒收](2026-11-14-sampled-multitone-interim.md)：收窄 admission。兩個 multitone family 暫停 sampled 列，保留 constant pairs 與既有 fallback 定價。
+- 2026-11-18 [Sampled multitone RWA 的實測放行](2026-11-18-sampled-multitone-rwa-admission.md)：實測放行。同形 sampled 雙 tone 列按群抽查並計價，24 點正例快 3.149 倍，拒收照原選路。
 
 - 2026-11-14 [RB 型相位序列作為固定量表輸入](2026-11-14-random-gate-sequence-workloads.md)：場景擴充。離線固定 phase prefix 與 recovery，constant／Gaussian 共用，不加入 runtime RB 代數。
 

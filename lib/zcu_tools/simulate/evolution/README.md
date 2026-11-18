@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, shaped fallback reuse and routing diagnostics
+**Last updated:** 2026-11-19, sampled RWA routing and spot-check boundary
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -40,7 +40,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Purpose | Exports |
 | --- | --- |
 | Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
-| Execution capture | `CaptureBuffer`, `CaptureMetadata`, `CaptureRoute`, `CaptureCandidate`, `CapturePrefixRun`, `CapturePosition`, `CaptureAdopter` |
+| Execution capture | `CaptureBuffer`, `CaptureMetadata`, `CaptureRoute`, `CaptureCandidate`, `CapturePrefixRun`, `CapturePosition`, `CaptureAdopter`, `CaptureSampledAdmission`, `CaptureSampledSpot`, `CaptureRowKey` |
 | Dispatch inspection | `DispatchInspection`, `DispatchRow`, `DispatchCandidate`, `RowKey` |
 | Engine model source and routing history | `ModelSource`, `SecularModel`, `SecularDrive`, `RoutingHistory` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
@@ -314,10 +314,17 @@ See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
 ## Dispatch inspection
 
 `Engine.inspect_dispatch(source, batches, *, budget=1e-3, cancel=None)` returns a
-`DispatchInspection` without evolving density. It uses evolve's classifier,
-candidate ordering, guards and complete-inventory pricing. Floquet admission
-still computes its one-period propagator. This method is not a no-computation
-shortcut or a second dispatcher. Source, batch, budget, cancellation and failure
+`DispatchInspection` without evolving the user's timelines. It uses evolve's
+classifier, candidate ordering, guards and complete-inventory pricing.
+Guards can evolve their own probes: Floquet computes a one-period propagator,
+and a sampled multitone RWA group that wins pricing compares fixed probe
+endpoints. When OpenCL availability could change a sampled group's selection,
+inspection uses the same lazy DOP853 device check as evolve. It reuses an
+existing result, including the check made by a forced OpenCL engine. The check
+can run a device self-test and write machine-level OpenCL detection and program
+caches. Inspection does not compile a workload point variant. CPU-only engines
+do not check a device.
+Source, batch, budget, cancellation and failure
 contracts match `evolve`; an exhausted candidate round raises `NoValidKernel`.
 
 `rows` follows input batch order, point order, then split-span order.
@@ -398,8 +405,8 @@ The [family query](kernels/multitone_rwa.py) and kernel guard project the same
 recomputing it. Each independent query closes its temporary plan before return;
 it does not evolve density, select a family, mutate history or cache facts across
 calls. This query covers constant pairs only, not sampled controls or moving
-flux. The family guard rejects sampled rows. The query does not change dispatch
-prices.
+flux. To inspect sampled admission, use `Engine.inspect_dispatch`. The
+constant-pair query does not change dispatch prices.
 
 ### Common-frame guard diagnostics
 
@@ -477,7 +484,8 @@ reports these observations and joins same-acquire telemetry without solving.
 `CaptureMetadata` defines the opaque JSON metadata. It contains `capture_id`,
 zero-based `batch_index`, `batch_count`, `budget`, sorted `families` or null,
 the frozen DC model's `source_identity`, `segment_numeric_version` as a string,
-`frozen_physical_version` as an integer, `complete`, `routes` and `prefix_runs`.
+`frozen_physical_version` as an integer, `complete`, `routes`, `prefix_runs` and
+`sampled_rwa_admissions`.
 Normal return marks all records for that call complete. Freezing, numerical and
 cancellation errors propagate unchanged. Already frozen batches retain
 `complete=false` and observed events; a batch that failed to freeze has no record.
@@ -488,7 +496,7 @@ or worker, `prefix_run` as an index or null, the selected `family` or null, and
 ordered `{family, guard}` candidates. Guards use the same four decisions as
 inspection, including `untested_after_short_circuit`. Caller deferral and worker
 resolution remain separate events. Capture does not rerun guards, call inspection
-or add `Kernel.cost` calls. It stores neither costs nor guard certificates.
+or add `Kernel.cost` calls. Route events contain neither costs nor guard certificates.
 
 Each `CapturePrefixRun` names the representative group row after a shared prefix
 and all adopting `{batch, point, segment}` rows, including itself. It lives in
@@ -497,6 +505,16 @@ events. Adopters reuse that input; they do not claim a second execution.
 Events list prefix runs in Engine order, then the main run. Within each run,
 caller events precede worker events. Each round follows input point order and
 segment order, independent of worker scheduling.
+
+`sampled_rwa_admissions` lists the sampled amplitude groups considered for
+RWA. Each entry lives in the first member's batch. Its `rows` and `spots` use
+`{batch, point, segment}` coordinates, even when a group spans batches.
+Each completed spot records `max_density_error`, the maximum elementwise
+absolute difference between the RWA and CPU DOP853 probe densities.
+`accepted` and `rejected` report the numerical guard, not the final route.
+If no comparison completed, `cost_skipped` reports a losing price and
+`not_probed` means the group could try RWA. Both have null spot errors.
+Capture records existing results, not probe densities.
 
 The physical codec preserves `batch.segment_shifts`, so reconstruction with
 `read_physical_input(record.physical)` restores those corrections. Engine
@@ -659,15 +677,19 @@ Full-map accuracy and wall measurements are separate validation work.
 an empty mapping. Telemetry does not write files. OpenCL device detection and
 program builds can access the simulator user cache. `paths.frontend_cpu_s` separately
 reports calling-thread geometry and WorkPlan CPU.
-Common-frame reports also count `prepare_builds` and `admission_rows`.
-Floquet's `prepare_builds` counts exact-key frame construction attempts,
-including invalid frames and frames whose rows are all refused. Other families
-leave those counters at zero. `prepare_key_builds` counts key slots passed to
-scheduled preparation or returned as guard products, including discarded guard
-products. Building the same key again counts again; a guard without a returned
-product does not count. Several key slots can share spectral work, so this
-counter does not count spectral constructions. Merge adds key builds, and
-result reuse reports zero.
+`prepare_builds` counts common-frame coefficient products or Floquet exact-key
+frame construction attempts, including invalid frames and frames whose rows
+are all refused. Other families leave `prepare_builds` at zero.
+`admission_rows` counts common-frame row indicator evaluations or completed
+sampled spot comparisons for `multitone_rwa`. Both count refused rows, but not
+apply or reuse hits. Sampled row proxies and cost skips do not count.
+Other families leave `admission_rows` at zero.
+
+`prepare_key_builds` counts key slots passed to scheduled preparation or returned
+as guard products, including discarded guard products. Building the same key
+again counts again; a guard without a returned product does not count. Several
+key slots can share spectral work, so this counter does not count spectral
+constructions. Merge adds key builds, and result reuse reports zero.
 These key counts are available in the Engine report; acquire JSONL keeps its
 [explicit field set](../../simulators/README.md#acquire-telemetry).
 Telemetry does not change guards, routes, densities or cancellation.
@@ -762,6 +784,7 @@ thresholds and algorithm details live with their owners:
 | Row domains, named candidate order and terminal routes | [dispatch](_dispatch.py); [kernel collection](kernels/__init__.py) instantiates implementations only |
 | Shaped and two-tone cold-cost choices | [shaped dispatch](_shaped_dispatch.py), [two-tone dispatch](_two_tone_dispatch.py) return family names, not positional indices or unnamed flags |
 | Multitone gate amortization | [multitone dispatch](_multitone_dispatch.py) owns the 20-use cost preference and complete-acquire canonical-key inventory |
+| Sampled multitone RWA pricing | [sampled RWA dispatch](_sampled_rwa_dispatch.py) compares the cost of each group's playback and fresh RWA/CPU DOP853 probes with DOP853 and eligible common frame |
 | Dissipative DC channel pricing | [slow dispatch](_slow_dispatch.py) compares M⁶ channel construction amortized over complete-acquire exact prepare keys with DOP853 |
 | Slow/plateau carrier boundary | [slow-envelope comparison](kernels/slow_envelope.py) owns the strict absolute-carrier comparison shared by dispatch and its guard |
 | Common-frame pricing and numerical construction | [common-frame dispatch](_common_frame_dispatch.py), [kernel](kernels/common_frame_kernel.py) |
@@ -772,9 +795,10 @@ thresholds and algorithm details live with their owners:
 | Direct integration and chronological chains | [DOP853 planning](_dop853_dispatch.py), [DOP853](kernels/dop853.py), [flux DOP853](kernels/flux_dop853.py) |
 
 Cold-cost choices use the complete acquire inventory rather than resident cache
-warmth. Prefix and worker subsets share those choices. Numerical approximations
-retain their own admission limits; they do not certify arbitrary-input or
-whole-sequence accuracy.
+warmth. Prefix and worker subsets use that inventory; shared prefixes only
+price CPU work. Sampled RWA charges each probe to its own amplitude group.
+A losing price skips the comparison. A pin to RWA still requires the numerical
+guard. Admission does not certify arbitrary-input or whole-sequence accuracy.
 
 Historical calibration note for [slow-envelope propagation](kernels/slow_envelope.py):
 the calibrated population tolerance is 1e-2, with about 1e-4 or less measured on
@@ -828,13 +852,28 @@ those runs measure the families actually selected, not every candidate.
 The [matrix instructions](../../../../tests/README.md#evolution-精度矩陣)
 own the command and report format.
 
-Sampled multitone rejection is the current admission contract, not a temporary
-route pending a numerical fix. It leaves candidate order and common-frame pricing
-unchanged. Rejected sampled rows fall back to the next admitted candidate,
-often `dop853`. Previously cheap sampled RWA graphs lose their exemption from
-common-frame pricing. The matrix's `cheap_sampled_nearby` and
-`cheap_sampled_separated` cases check both price branches, their empty/warm
-routes and final densities. This does not force every sampled row to DOP853.
+Sampled dual tones that pass the row proxies form `multitone_rwa` groups whose
+members differ only in each tone's amplitude. A group matches model, duration,
+ports, carriers, effective start phases and pulse-local offsets exactly.
+Sampled envelopes must share a native grid and have exactly proportional I/Q
+samples, with no phase rotation or tolerance. The guard probes the largest
+amplitude for each tone, checking a row only once if it has both maxima.
+
+Dispatch pricing includes RWA playback and caller-thread spot checks, each
+charging a fresh RWA build and apply plus full-drive CPU DOP853 at the fixed
+probe tableau. The direct playback alternative is priced with its production
+tableau. Dispatch skips the checks when an eligible alternative is at least
+as cheap. An RWA-only allowlist skips pricing, not the guard. Price
+amortization and guard decisions do not carry over to another evolve.
+
+The guard evolves the same fixed coherent probe with RWA and full-drive CPU
+`dop853` at the requested budget. Every probed row must have maximum absolute
+full-density difference ≤ 0.1 × B. If any fails, only its group falls back
+to other candidates such as `common_frame` or `dop853`. This empirical check replaces the
+[2026-11-14 interim rejection](../../../../docs/discussions/2026-11-14-sampled-multitone-interim.md)
+for sampled RWA, but does not certify arbitrary input states or accumulated
+sequence error. The matrix covers rejected phase-varied sequences and short
+32-level frequency scans.
 
 | Family and use | Dispatch domain | Approximation and numerical admission | Pinned accuracy cases | Full density ≤ 2e-3 |
 | --- | --- | --- | --- | --- |
@@ -851,8 +890,8 @@ routes and final densities. This does not force every sampled row to DOP853.
 | [`gate_cache`](kernels/gate_cache.py), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 9.296548e-3; strict xfail |
 | [`period_table`](kernels/period_table.py), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.0018/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at the new coherent guard edge |
-| [`multitone_gate`](kernels/multitone_gate.py), retained simultaneous RWA gate family | `multiple`, disabled | Rejects every row. The retained 20-use inventory cost preference cannot restore numerical admission at 19 or 20 uses; pinning cannot bypass rejection. Shared single-tone gate numerics are unchanged. | [19/20 and pinned rejection contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | NOT EXERCISED; no density error |
-| [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only | Exactly two constant envelopes, fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Sampled rows are rejected. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports its final metrics. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms. At each endpoint, the kernel sums all tones' kicks before acting on density. Row-local kick time equals the propagation duration; following idle rows do not extend it. Apply step ceiling is 16 ns. | [`joint_constant`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`multitone_gate`](kernels/multitone_gate.py), retained simultaneous RWA gate family | `multiple`, disabled | Rejects every row. The retained inventory cost preference and pinning cannot bypass rejection. Shared single-tone gate numerics are unchanged. | [pinned rejection contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | NOT EXERCISED; no density error |
+| [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two` for distinct-port constant pairs; two-tone `multiple` | Fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad, with retained real dimension ≤ 256. For sampled pairs, slope and curvature do not reject rows. For a group selected for comparison, choose the row with maximum `abs(gain) × envelope peak` for each tone, deduplicate rows and require agreement with full-drive `dop853` at ≤ 0.1 × B. Sampled rows have a 4 ns step ceiling and no kick. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle and use summed first-order endpoint kicks with a 16 ns step ceiling. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports the constant metrics. | [`joint_constant`, `joint_gate_inventory`, `cheap_sampled_nearby`, `sampled_multitone_short_sweep_32`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [sampled spot edge and phase sequence fallback](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py) | PASS for admitted rows; rejected groups use fallback |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. DOP853 local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B). CPU and [eligible OpenCL](#gpu-backend) rows with d ≤ 10,000 ns and B ≥ 1e-3 use DP5(4) at one third of both tolerances. Other rows use DOP853. | [`shaped_complex`, `two_carriers`, `joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [CPU and OpenCL DP5(4) cases](#cpu-dp54-accuracy) | PASS |
 
@@ -1094,7 +1133,10 @@ does not certify the adiabatic approximation.
   the direct solvers store frame or chain decisions. Plans never enter
   persistent kernel state.
 - `KernelContext` supplies preparation, key and guard calls with one evolve
-  owner. For OpenCL it also carries the backend and dispatch's tableau choice.
+  owner. It carries the CPU worker width for sampled pricing, the offset for
+  prefix row IDs, and optional capture. For ordinary timeline work it also
+  carries any OpenCL backend and dispatch's tableau choice. Shared prefixes
+  are priced and run on CPU.
   `ApplyContext` supplies the finite positive per-segment allowance and the
   family's CPU plan or, for admitted OpenCL rows, the runner and selected
   tableau. Floquet and both CPU direct solvers require their own plan; a missing
@@ -1109,10 +1151,11 @@ It neither slices nor interprets plans. A timeline worker resolves deferred
 neighbors before building its local plan and chains. It does not mutate the
 caller dispatch's shared decisions.
 
-Guards are row-local: splitting or reordering a guard call must preserve its
-acceptance mask. A guard may read the source initial density or an
-engine-computed certified prefix input, never a worker's evolving density.
-Guards do not evolve density. `guard_builds` identifies table-building guards;
+Splitting or reordering a guard call preserves its acceptance mask. A guard
+may read the source initial density or a certified prefix input, but it does not
+evolve them or inspect worker states. A measured guard can evolve its own
+fixed probes. Complete-group decisions are shared through the WorkPlan.
+`guard_builds` identifies table-building guards;
 `guard_prepared` hands accepted model-only products to apply without rebuilding.
 When `guard_builds` is true, the hook must return `GuardResult`, even for empty
 or rejected rows. Returning `None` raises rather than retrying `guard`.
@@ -1398,8 +1441,7 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v11`. This version includes the
-OpenCL DP5(4) route for eligible `dop853` rows. Engine captures and paired
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v12`. Engine captures and paired
 benchmark reports record the numeric version. Evolution does not persist
 densities or offline tables
 across processes or Engine lifetimes.

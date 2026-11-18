@@ -36,8 +36,11 @@ class FamilyRouting:
     prepare_key_builds: key slots passed to scheduled prepare calls or returned
         in guard preparations. Rebuilding a key counts again. Rejected guard
         products count if returned; guard-only checks without products do not.
-    admission_rows: common-frame row indicator evaluations, excluding apply and
-        caller-preparation hits. Other families currently leave this count zero.
+    admission_rows: common_frame counts row indicator evaluations; multitone_rwa
+        counts sampled rows with a completed RWA/full-drive spot comparison,
+        whether accepted or rejected. Neither counts apply or reuse hits.
+        For multitone_rwa, row proxies and cost skips do not count.
+        Other families leave this count zero.
     opencl_rows: physical endpoints executed by OpenCL within this family.
         Zero for CPU-only calls and reuse hits. The backend does not rename
         the family or change the logical row counts.
@@ -137,7 +140,7 @@ class RoutingCollector:
                 self._totals.setdefault(name, _Totals()).prepare_key_builds += count
 
     def admitted(self, name: str, count: int) -> None:
-        """Count row indicator evaluations, not apply calls or result hits."""
+        """Count actual numerical admission work, not apply or result hits."""
         if self.enabled and count:
             with self._lock:
                 self._totals.setdefault(name, _Totals()).admission_rows += count

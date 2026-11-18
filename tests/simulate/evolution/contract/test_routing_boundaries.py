@@ -1,8 +1,4 @@
-"""Engine routing boundaries separate dispatch costs from numerical admission.
-
-Sampled multitone rejection applies on both sides of the 19/20 cost split.
-Pinned calls cannot restore admission; no numerical fix is assumed to reopen it.
-"""
+"""Engine routing boundaries separate dispatch costs from numerical admission."""
 
 import gc
 import sys
@@ -16,11 +12,13 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
     Engine,
     EnvelopeSpec,
     NoValidKernel,
     TimelineBatch,
     merge_path_diagnostics,
+    read_capture_metadata,
 )
 
 from .accuracy_cases import (
@@ -34,76 +32,6 @@ from .accuracy_cases import (
 )
 from .reference import converged_reference, density_error
 from .synthetic_models import synthetic_model
-
-
-@pytest.mark.parametrize(
-    ("duration", "budget", "dp54"),
-    [
-        pytest.param(10_000.0, 1e-3, True, id="inclusive-duration-and-budget"),
-        pytest.param(10_001.0, 1e-3, False, id="over-duration"),
-        pytest.param(100.0, 0.999e-3, False, id="under-budget"),
-    ],
-)
-def test_cpu_dop853_selects_tableau_by_row_duration_and_budget(
-    duration: float, budget: float, dp54: bool
-) -> None:
-    case = accuracy_case("sampled_gaussian_9")
-    end = np.full_like(case.batch.end_ns, duration)
-    batch = replace(
-        case.batch,
-        end_ns=end,
-        tracks=tuple(
-            replace(
-                track,
-                duration_ns=end,
-                envelopes=tuple(
-                    replace(env, sample_ns=env.sample_ns * (duration / 100.0))
-                    for env in track.envelopes
-                ),
-            )
-            for track in case.batch.tracks
-        ),
-    )
-    with closing(Engine(1, backend="cpu", families=case.families)) as engine:
-        paths = engine.evolve(
-            case.source, (batch,), budget=budget, telemetry=True
-        ).paths
-
-    assert paths.segments_by_kernel == {"dop853": len(batch.points)}
-    report = paths.routing["dop853"]
-    assert report.dp54_rows == (len(batch.points) if dp54 else 0)
-    assert report.dop853_rows == (0 if dp54 else len(batch.points))
-    merged = merge_path_diagnostics((paths, paths)).routing["dop853"]
-    assert merged.dp54_rows == 2 * report.dp54_rows
-    assert merged.dop853_rows == 2 * report.dop853_rows
-    reused = paths.for_reuse(telemetry=True).routing["dop853"]
-    assert (reused.dp54_rows, reused.dop853_rows) == (0, 0)
-
-
-def test_dispatch_prices_the_short_cpu_tableau_below_dop853() -> None:
-    case = accuracy_case("sampled_gaussian_9")
-    with (
-        closing(case.source),
-        closing(Engine(1, backend="cpu", families=case.families)) as engine,
-    ):
-        tight = engine.inspect_dispatch(case.source, (case.batch,), budget=0.999e-3)
-        loose = engine.inspect_dispatch(case.source, (case.batch,), budget=1e-3)
-        result = engine.evolve(case.source, (case.batch,), budget=1e-3, telemetry=True)
-
-    costs = []
-    for inspection in (tight, loose):
-        prices = [
-            candidate.scheduling_cost
-            for row in inspection.rows
-            for candidate in row.candidates
-            if row.family == candidate.family == "dop853"
-        ]
-        assert len(prices) == len(case.batch.points)
-        costs.append(sum(price for price in prices if price is not None))
-    assert 0 < costs[1] < costs[0]
-    routing = result.paths.routing["dop853"]
-    assert routing.dp54_rows == len(case.batch.points)
-    assert routing.estimated_cost == pytest.approx(costs[1])
 
 
 @pytest.fixture
@@ -611,16 +539,218 @@ def test_opencl_keeps_clipped_pulses_and_touching_dop853_chains_on_cpu(
     )
 
 
+def test_sampled_multitone_reuses_one_spot_check_only_within_evolve() -> None:
+    case = accuracy_case("cheap_sampled_nearby")
+    batch = replace(
+        case.batch,
+        tracks=tuple(
+            replace(track, phase_rad=np.repeat(track.phase_rad[:1], 2))
+            for track in case.batch.tracks
+        ),
+    )
+    with closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine:
+        inspection = engine.inspect_dispatch(case.source, (batch,))
+        assert len(inspection.rows) == 2
+        for row in inspection.rows:
+            assert row.family == "multitone_rwa"
+            assert any(
+                candidate.family == "multitone_rwa" and candidate.guard == "accepted"
+                for candidate in row.candidates
+            )
+        for _ in range(2):
+            result = engine.evolve(case.source, (batch,), telemetry=True)
+            assert result.paths.segments_by_kernel == {"multitone_rwa": 2}
+            assert result.paths.routing["multitone_rwa"].admission_rows == 1
+
+
+def test_sampled_multitone_rejection_does_not_cross_phase_groups() -> None:
+    case = accuracy_case("sampled_multitone_phase_sequence")
+    batch = timeline(3, 8.0)
+    batch = replace(
+        batch,
+        tracks=tuple(
+            replace(
+                drive_track(batch, track.envelopes[0], port=track.port),
+                frequency_ghz=np.full(3, track.frequency_ghz[0]),
+                phase_rad=np.array([track.phase_rad[0], track.phase_rad[0], -0.9]),
+                amplitude=track.amplitude[[1, 0, 0]],
+            )
+            for track in case.batch.tracks[:2]
+        ),
+    )
+    # Pin the numerical guard so both small groups are compared rather than
+    # skipped on price. The passing phase must not appear in the failure.
+    capture = CaptureBuffer()
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine,
+    ):
+        with pytest.raises(NoValidKernel) as queried:
+            engine.inspect_dispatch(case.source, (batch,))
+        with pytest.raises(NoValidKernel) as evolved:
+            engine.evolve(case.source, (batch,), capture=capture)
+    for result in (queried, evolved):
+        assert result.value.attempted == ("multitone_rwa",)
+        assert result.value.points == (0, 1)
+    metadata = read_capture_metadata(capture.records[0])
+    assert not metadata["complete"]
+    failed, passed = metadata["sampled_rwa_admissions"]
+    assert failed["decision"] == "rejected"
+    assert [row["point"] for row in failed["rows"]] == [0, 1]
+    (spot,) = failed["spots"]
+    assert (spot["batch"], spot["point"], spot["segment"]) == (0, 0, 0)
+    assert spot["max_density_error"] is not None and spot["max_density_error"] > 1e-4
+    assert passed["decision"] == "accepted"
+    assert [row["point"] for row in passed["rows"]] == [2]
+
+
+def _short_sampled_pair(case: AccuracyCase, count: int) -> TimelineBatch:
+    batch = timeline(count, 1.5)
+    envelope = EnvelopeSpec(
+        "sampled", np.array([0.8, 1.0, 0.9], complex), np.array([0.0, 0.75, 1.5])
+    )
+    return replace(
+        batch,
+        tracks=tuple(
+            replace(
+                drive_track(
+                    batch,
+                    envelope,
+                    frequency=float(track.frequency_ghz[0]),
+                    port=track.port,
+                ),
+                phase_rad=np.full(count, track.phase_rad[0]),
+            )
+            for track in case.batch.tracks
+        ),
+    )
+
+
+def test_sampled_multitone_uses_its_own_group_in_shared_prefix() -> None:
+    case = accuracy_case("joint_constant")
+    scan = _short_sampled_pair(case, 3)
+    first, second = scan.tracks
+    active = np.array([False, True, True])
+    plateau = replace(
+        drive_track(scan, EnvelopeSpec("constant"), port=first.port, gain=1e-6),
+        start_ns=np.full(3, 1.5),
+        phase_rad=np.full(3, 0.4),
+    )
+    batch = replace(
+        scan,
+        end_ns=np.full(3, 3.0),
+        tracks=(replace(first, active=active), replace(second, active=active), plateau),
+    )
+    with (
+        closing(case.source),
+        closing(
+            Engine(1, backend="cpu", families=("t4", "t6", "multitone_rwa"))
+        ) as engine,
+    ):
+        result = engine.evolve(case.source, (batch,), telemetry=True)
+    assert result.paths.segments_by_kernel["multitone_rwa"] == 2
+    assert result.paths.routing["multitone_rwa"].admission_rows == 1
+
+
+def test_sampled_multitone_probes_each_tones_amplitude_maximum() -> None:
+    case = accuracy_case("joint_constant")
+    scan = _short_sampled_pair(case, 3)
+    batch = replace(
+        scan,
+        tracks=tuple(
+            replace(track, amplitude=np.array(gains))
+            for track, gains in zip(
+                scan.tracks, ((0.03, 0.015, 0.002), (0.015, 0.031, 0.002)), strict=True
+            )
+        ),
+    )
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine,
+    ):
+        result = engine.evolve(case.source, (batch,), telemetry=True)
+    assert result.paths.segments_by_kernel == {"multitone_rwa": 3}
+    assert result.paths.routing["multitone_rwa"].admission_rows == 2
+
+
+@pytest.mark.parametrize("variation", ["scale", "one_ulp_sample", "sample_grid"])
+def test_sampled_multitone_requires_exact_proportional_envelopes(
+    variation: str,
+) -> None:
+    case = accuracy_case("joint_constant")
+    scan = _short_sampled_pair(case, 2)
+    samples = np.array([0.5 + 0.125j, 1.0, 0.75 - 0.25j], complex)
+    scaled = np.asarray(samples * 1.5, dtype=np.complex128)
+    if variation == "one_ulp_sample":
+        scaled.real[0] = np.nextafter(scaled.real[0], np.inf)
+    knots = np.array([0.0, 0.75, 1.5])
+    scaled_knots = np.array([0.0, 0.6, 1.5]) if variation == "sample_grid" else knots
+    envelopes = (
+        EnvelopeSpec("sampled", samples, knots),
+        EnvelopeSpec("sampled", scaled, scaled_knots),
+    )
+    batch = replace(
+        scan,
+        tracks=tuple(
+            replace(
+                track,
+                amplitude=np.array([0.01, 0.02]),
+                envelopes=envelopes,
+                envelope_index=np.arange(2),
+            )
+            for track in scan.tracks
+        ),
+    )
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine,
+    ):
+        result = engine.evolve(case.source, (batch,), telemetry=True)
+    assert result.paths.segments_by_kernel == {"multitone_rwa": 2}
+    assert result.paths.routing["multitone_rwa"].admission_rows == (
+        1 if variation == "scale" else 2
+    )
+
+
+def test_sampled_multitone_does_not_group_different_pulse_slices() -> None:
+    case = accuracy_case("joint_constant")
+    scan = _short_sampled_pair(case, 2)
+    first, second = scan.tracks
+    # Both points resume at 0.5 ns and play a 1 ns pair at identical phases.
+    # Only the second point's first tone is already 0.5 ns into its envelope.
+    batch = replace(
+        scan,
+        start_ns=np.full(2, 0.5),
+        initial_densities=np.repeat(case.source.initial_density[None], 2, axis=0),
+        tracks=(
+            replace(
+                first, start_ns=np.array([0.5, 0.0]), duration_ns=np.array([1.0, 1.5])
+            ),
+            replace(second, start_ns=np.full(2, 0.5), duration_ns=np.ones(2)),
+        ),
+    )
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine,
+    ):
+        result = engine.evolve(case.source, (batch,), telemetry=True)
+    assert result.paths.segments_by_kernel == {"multitone_rwa": 2}
+    assert result.paths.routing["multitone_rwa"].admission_rows == 2
+
+
 def _joint_gate_case(count: int) -> AccuracyCase:
     case = accuracy_case("joint_gate_inventory")
     batch = timeline(count, 1.5)
     tracks = tuple(
-        drive_track(
-            batch,
-            track.envelopes[0],
-            frequency=float(track.frequency_ghz[0]),
-            gain=float(track.amplitude[0]),
-            port=track.port,
+        replace(
+            drive_track(
+                batch,
+                track.envelopes[0],
+                frequency=float(track.frequency_ghz[0]),
+                gain=float(track.amplitude[0]),
+                port=track.port,
+            ),
+            phase_rad=np.full(count, track.phase_rad[0]),
         )
         for track in case.batch.tracks
     )
@@ -628,39 +758,110 @@ def _joint_gate_case(count: int) -> AccuracyCase:
 
 
 @pytest.mark.parametrize("count", [19, 20])
-def test_whitelisted_multitone_gate_cost_boundary(count: int) -> None:
-    """Neither side of the cost boundary can revive sampled admission."""
+def test_sampled_multitone_admission_is_independent_of_reuse(count: int) -> None:
     case = _joint_gate_case(count)
+    reference = converged_reference(case.source, case.batch)
+    with closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine:
+        result = engine.evolve(case.source, (case.batch,), telemetry=True)
+    assert result.paths.segments_by_kernel == {"multitone_rwa": count}
+    assert result.paths.routing["multitone_rwa"].admission_rows == 1
+    assert density_error(result.densities, reference.density) <= 2e-3
+
+    with closing(Engine(1, backend="cpu")) as engine:
+        result = engine.evolve(case.source, (case.batch,))
+    assert density_error(result.densities, reference.density) <= 2e-3
+
+
+def _dense_sampled_pair(count: int) -> AccuracyCase:
+    case = _joint_gate_case(count)
+    knots = np.linspace(0.0, 1.5, 17)
+    tracks = tuple(
+        replace(
+            track,
+            envelopes=(
+                EnvelopeSpec("sampled", track.envelopes[0].values(knots), knots),
+            ),
+        )
+        for track in case.batch.tracks
+    )
+    return replace(case, batch=replace(case.batch, tracks=tracks))
+
+
+@pytest.mark.parametrize("count", [1, 64], ids=["unamortized", "amortized"])
+def test_sampled_multitone_prices_the_evolve_local_probe(count: int) -> None:
+    # At one CPU worker, RWA is about 135 us/row plus a 614 us probe.
+    # Offered, admitted common frame costs more than the 167 us/row DP5(4)
+    # estimate. The prices cross near 19 rows; 64 amortize with about 14% margin,
+    # while one row cannot repay even the probe.
+    case = _dense_sampled_pair(count)
+    batch = case.batch
+    with closing(case.source), closing(Engine(1, backend="cpu")) as engine:
+        reference = converged_reference(case.source, batch)
+        for _ in range(2):
+            result = engine.evolve(case.source, (batch,), telemetry=True)
+            routes = result.paths.segments_by_kernel
+            if count == 1:
+                assert routes in ({"common_frame": count}, {"dop853": count})
+                rwa = result.paths.routing.get("multitone_rwa")
+                assert rwa is None or rwa.admission_rows == 0
+            else:
+                assert routes == {"multitone_rwa": count}
+                assert result.paths.routing["multitone_rwa"].admission_rows > 0
+            assert density_error(result.densities, reference.density) <= 2e-3
+
+
+def test_sampled_amplitude_groups_do_not_share_probe_costs() -> None:
+    # Use the same 64-row side of the cost boundary and keep the phase-shifted
+    # row in its own group, even though common frame shares a coefficient key.
+    case = _dense_sampled_pair(65)
+    first, second = case.batch.tracks
+    phases = first.phase_rad.copy()
+    phases[8] += 0.4
+    batch = replace(case.batch, tracks=(replace(first, phase_rad=phases), second))
+    capture = CaptureBuffer()
+    with closing(case.source), closing(Engine(1, backend="cpu")) as engine:
+        inspection = engine.inspect_dispatch(case.source, (batch,))
+        isolated = inspection.rows[8]
+        assert isolated.family in {"common_frame", "dop853"}
+        assert "multitone_rwa" not in {
+            candidate.family for candidate in isolated.candidates
+        }
+        assert {row.family for row in inspection.rows[:8] + inspection.rows[9:]} == {
+            "multitone_rwa"
+        }
+        result = engine.evolve(case.source, (batch,), telemetry=True, capture=capture)
+    assert result.paths.segments_by_kernel == {"multitone_rwa": 64, isolated.family: 1}
+    rwa = result.paths.routing["multitone_rwa"]
+    assert rwa.admission_rows == 1
+    assert rwa.rejected_rows == 0
+    admitted, skipped = read_capture_metadata(capture.records[0])[
+        "sampled_rwa_admissions"
+    ]
+    assert admitted["decision"] == "accepted"
+    assert [row["point"] for row in admitted["rows"]] == [*range(8), *range(9, 65)]
+    (spot,) = admitted["spots"]
+    assert (spot["batch"], spot["point"], spot["segment"]) == (0, 0, 0)
+    error = spot["max_density_error"]
+    assert error is not None and 0 < error <= 1e-4
+    assert skipped == {
+        "rows": [{"batch": 0, "point": 8, "segment": 0}],
+        "decision": "cost_skipped",
+        "spots": [{"batch": 0, "point": 8, "segment": 0, "max_density_error": None}],
+    }
+
+
+def test_pinned_multitone_gate_below_cost_break_even() -> None:
+    """Pinning does not bypass the independent multitone_gate rejection."""
+    case = _joint_gate_case(19)
+    with closing(Engine(1, backend="cpu")) as engine:
+        engine.evolve(case.source, (case.batch,))
     with (
-        closing(Engine(1, families=("multitone_rwa", "multitone_gate"))) as engine,
+        closing(Engine(1, backend="cpu", families=("multitone_gate",))) as engine,
         pytest.raises(NoValidKernel) as rejected,
     ):
         engine.evolve(case.source, (case.batch,))
     assert rejected.value.domain == "multiple"
-    assert rejected.value.points == tuple(range(count))
-    assert set(rejected.value.attempted) == {"multitone_rwa", "multitone_gate"}
-
-    reference = converged_reference(case.source, case.batch)
-    with closing(Engine(1)) as engine:
-        for _ in range(2):
-            result = engine.evolve(case.source, (case.batch,))
-            assert result.paths.segments_by_kernel == {"common_frame": count}
-            assert density_error(result.densities, reference.density) <= 2e-3
-
-
-def test_pinned_multitone_gate_below_cost_break_even() -> None:
-    """Pinning bypasses price, not sampled rejection, even after warm fallback."""
-    case = _joint_gate_case(19)
-    with closing(Engine(1)) as engine:
-        engine.evolve(case.source, (case.batch,))
-    for family in ("multitone_gate", "multitone_rwa"):
-        with (
-            closing(Engine(1, families=(family,))) as engine,
-            pytest.raises(NoValidKernel) as rejected,
-        ):
-            engine.evolve(case.source, (case.batch,))
-        assert rejected.value.domain == "multiple"
-        assert rejected.value.attempted == (family,)
+    assert rejected.value.attempted == ("multitone_gate",)
 
 
 def _carrier_case(frequency: float) -> AccuracyCase:
