@@ -76,8 +76,14 @@ def test_family_report_counts_rejections_and_selected_work():
         assert routed["dyson"].rows == 0
         assert routed["dyson"].rejected_rows == 4
         assert routed["t6"].rows == 4
+        assert routed["t6"].prepare_key_builds == 1
+        assert routed["dyson"].prepare_key_builds == 0
         assert routed["t6"].estimated_cost == 4.0
         assert routed["t6"].estimated_cpu_s is None
+        reused = cold.paths.for_reuse(telemetry=True)
+        assert reused.routing["t6"].prepare_key_builds == 0
+        merged = merge_path_diagnostics((cold.paths, cold.paths, reused))
+        assert merged.routing["t6"].prepare_key_builds == 2
         for family in routed.values():
             assert type(family.prepare_cpu_s) is float
             assert type(family.apply_cpu_s) is float
