@@ -353,12 +353,15 @@ class DOP853Kernel:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
-        plan = context.plan
-        if context.opencl is None:
+        runner = context.opencl
+        cpu_plan = None
+        if runner is None:
+            plan = context.plan
             if plan is None:
                 raise ValueError("DOP853 requires a row plan")
             if not isinstance(plan, DOP853Plan):
                 raise TypeError("DOP853 requires its own row plan")
+            cpu_plan = plan
         budget = context.budget
         tolerances(budget)
         if not isinstance(prepared, DOP853Prepared):
@@ -376,12 +379,11 @@ class DOP853Kernel:
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
         data = EndpointData(prepared.models, packed_segments(table, context.work_plan))
-        runner = context.opencl
+        if cpu_plan is not None:
+            advance_endpoints(data, (rows, key_index), states, budget, cpu_plan)
         if runner is not None:
             states[:] = runner.advance(data, (rows, key_index), states, budget)
             context.work_plan.routing.ran_opencl(self.name, len(rows))
-        elif isinstance(plan, DOP853Plan):
-            advance_endpoints(data, (rows, key_index), states, budget, plan)
         return np.zeros(len(rows), dtype=np.bool_)
 
 

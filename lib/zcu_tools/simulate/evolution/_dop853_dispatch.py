@@ -8,6 +8,11 @@ from .kernels._dop853_opencl import ROWS_PER_BATCH
 from .kernels.dop853 import DOP853Plan
 from .kernels.flux_dop853 import FluxDOP853Plan
 
+_MAX_OPENCL_DIMENSION = 32
+_MAX_OPENCL_KNOTS = 960
+_MIN_OPENCL_DURATION_NS = 100.0
+_MAX_OPENCL_DURATION_NS = 10_000.0
+
 
 def opencl_rows(
     table: SegmentTable, plan: RowPlan | None, dimension: int
@@ -16,10 +21,12 @@ def opencl_rows(
 
     Supply the completed direct plan for this acquire or resolved timeline.
     Return a read-only mask, or None for unsupported models or no DOP853 plan.
+    Admission requires at most 32 levels, 100–10000 ns of full-support sampled
+    playback and at most 960 distinct sample knots across both tones.
     """
     if (
         not isinstance(plan, DOP853Plan)
-        or dimension > 32
+        or dimension > _MAX_OPENCL_DIMENSION
         or not len(table.complete_pulses)
     ):
         return None
@@ -27,8 +34,8 @@ def opencl_rows(
         (plan.frame == "interaction")
         & table.complete_pulses
         & (table.tones == 2)
-        & (table.duration_ns >= 100.0)
-        & (table.duration_ns <= 10_000.0)
+        & (table.duration_ns >= _MIN_OPENCL_DURATION_NS)
+        & (table.duration_ns <= _MAX_OPENCL_DURATION_NS)
         & np.all(table.level == 0, axis=1)
         & (table.shift_content == b"")
     )
@@ -37,21 +44,19 @@ def opencl_rows(
         eligible &= False if available is None else ~available[table.timeline]
     rows = np.flatnonzero(eligible)
     if len(rows):
-        # Envelope shape does not enter this guard. With FP64 step origins, the
-        # number of trials and knot intervals matters for FP32 drift, not shape.
-        sampled = np.array(
-            [
-                env.kind == "sampled" and len(env.sample_ns) <= 960
-                for env in table.envelopes
-            ]
-        )
-        eligible[rows] &= np.all(sampled[table.tone_envelope[rows, :2]], axis=1)
+        sampled = np.array([env.kind == "sampled" for env in table.envelopes])
+        both_sampled = np.all(sampled[table.tone_envelope[rows, :2]], axis=1)
+        eligible[rows] = False
+        rows = rows[both_sampled]
+        # Each knot in the union can restart the integrator. The runner can
+        # append the row end, giving at most one interval per sample knot.
+        eligible[rows] = _union_knots(table, rows) <= _MAX_OPENCL_KNOTS
     eligible.setflags(write=False)
     return eligible
 
 
-def _playback_knots(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.int64]:
-    """Count union knots before rectangular buffer padding."""
+def _union_knots(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.int64]:
+    """Count distinct sample times across both tones of each row."""
     pairs, inverse = np.unique(
         table.tone_envelope[rows, :2], axis=0, return_inverse=True
     )
@@ -62,8 +67,7 @@ def _playback_knots(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.
         ],
         dtype=np.int64,
     )
-    # The GPU appends the exact end. One extra knot covers a final held value.
-    return counts[inverse] + 1
+    return counts[inverse]
 
 
 def _batch_gpu_seconds(
@@ -97,7 +101,8 @@ def opencl_preferred(
     not Engine or disk cache warmth or measured wall time. Calibrated on Arc
     for d=3 sampled pulses and d=32 FTF simultaneous drive at 1, 4 and 24 points.
     """
-    knots = _playback_knots(table, rows)
+    # One extra knot covers a final held value before the appended row end.
+    knots = _union_knots(table, rows) + 1
     trials = np.maximum(1.4 * table.duration_ns[rows], 2.0 * (knots - 1))
     work = trials * 12 * (8 * dimension**3 + 40 * dimension**2)
     lanes = min(workers, len(rows))

@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import warnings
 from collections import Counter
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from contextlib import closing, nullcontext
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
@@ -386,10 +386,8 @@ class PathDiagnostics:
                     cache_hits=count,
                     estimated_cpu_s=0.0,
                     duration_ns=self.duration_ns_by_kernel[name],
-                    opencl_detection_error=(
-                        self.routing[name].opencl_detection_error
-                        if name in self.routing
-                        else None
+                    opencl_detection_error=_first_opencl_detection_error(
+                        (self.routing.get(name),)
                     ),
                 )
                 for name, count in self.segments_by_kernel.items()
@@ -526,14 +524,18 @@ def _merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
         prepare_builds=sum(part.prepare_builds for part in parts),
         admission_rows=sum(part.admission_rows for part in parts),
         opencl_rows=sum(part.opencl_rows for part in parts),
-        opencl_detection_error=next(
-            (
-                part.opencl_detection_error
-                for part in parts
-                if part.opencl_detection_error
-            ),
-            None,
+        opencl_detection_error=_first_opencl_detection_error(parts),
+    )
+
+
+def _first_opencl_detection_error(parts: Iterable[FamilyRouting | None]) -> str | None:
+    return next(
+        (
+            part.opencl_detection_error
+            for part in parts
+            if part is not None and part.opencl_detection_error
         ),
+        None,
     )
 
 
@@ -607,13 +609,15 @@ class Engine:
         checks OpenCL lazily at the first eligible DOP853 endpoint and uses
         it only when its batch price beats CPU. A failed device check leaves
         the Engine on CPU. A failed build for a selected dimension sends that
-        dimension to CPU. "opencl" skips those checks, but requires the gpu
-        extra and an OpenCL GPU with cl_khr_fp64; missing dependencies or
-        a GPU that cannot be initialized raise RuntimeError at construction.
+        dimension to CPU. "opencl" requires the gpu extra and an OpenCL GPU
+        with cl_khr_fp64 that passes the build and endpoint probe at construction.
+        Unavailable dependencies or a failed probe raise RuntimeError. Forced
+        mode bypasses batch pricing and automatic CPU fallback.
         A selected dop853 segment can use the GPU when it is an independent
         interaction-frame row at DC without a flux waveform or segment shift,
-        its dimension is at most 32, and two sampled tones (up to 960 knots
-        each) both cover the whole 100–10000 ns segment. Ineligible segments,
+        its dimension is at most 32, and two sampled tones both cover the whole
+        100–10000 ns segment with at most 960 distinct knots across their grids.
+        Ineligible segments,
         shared prefixes and other families use CPU. Program builds on first
         use of a dimension use the simulator user cache. Forced OpenCL build
         failures and all point execution errors propagate from evolve, without
@@ -935,4 +939,6 @@ class Engine:
             if not self._closed:
                 self._closed = True
                 self._routing_reuse.clear()
-                self._opencl = None
+                if self._opencl is not None:
+                    self._opencl.close()
+                    self._opencl = None

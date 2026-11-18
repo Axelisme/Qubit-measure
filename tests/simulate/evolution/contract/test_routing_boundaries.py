@@ -4,7 +4,9 @@ Sampled multitone rejection applies on both sides of the 19/20 cost split.
 Pinned calls cannot restore admission; no numerical fix is assumed to reopen it.
 """
 
+import gc
 import sys
+import weakref
 from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import replace
@@ -47,6 +49,25 @@ def test_explicit_opencl_raises_during_construction_without_a_device(
         monkeypatch.setattr(cl, "get_platforms", list)
     with pytest.raises(RuntimeError, match="cl_khr_fp64"):
         Engine(1, backend="opencl")
+
+
+@pytest.mark.requires_opencl
+def test_explicit_opencl_raises_during_construction_when_probe_build_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pyopencl as cl
+
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path))
+
+    def reject_build(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("injected probe compiler rejection")
+
+    monkeypatch.setattr(cl.Program, "build", reject_build)
+    with (
+        pytest.raises(RuntimeError, match="probe build failed.*compiler rejection"),
+        closing(Engine(1, backend="opencl")),
+    ):
+        pass
 
 
 def test_auto_probes_only_on_eligible_work_and_retains_cpu_fallback(
@@ -135,6 +156,44 @@ def test_auto_rejects_a_wrong_device_endpoint_and_remembers_the_failure(
     )
 
 
+@pytest.mark.requires_opencl
+def test_auto_keeps_gpu_when_the_detection_result_cannot_be_written(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pyopencl as cl
+
+    root = tmp_path / "cache"
+    displaced = tmp_path / "displaced-cache"
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(root))
+    build = cl.Program.build
+
+    def build_then_block_cache_writes(
+        program: cl.Program,
+        options: str | Sequence[str] | None = None,
+        devices: Sequence[cl.Device] | None = None,
+        cache_dir: str | None = None,
+    ) -> cl.Program:
+        built = build(program, options=options, devices=devices, cache_dir=cache_dir)
+        # Block filesystem writes only after compilation succeeds. A file in
+        # place of the root denies subdirectory creation even on Windows.
+        root.rename(displaced)
+        root.touch()
+        return built
+
+    source = coherent_source(synthetic_model(32))
+    batch = _dense_batch(1)
+    with closing(Engine(2, families=("dop853",))) as auto:
+        with monkeypatch.context() as driver:
+            driver.setattr(cl.Program, "build", build_then_block_cache_writes)
+            device = auto.detect_execution_device()
+        root.unlink()
+        displaced.rename(root)
+        assert device.startswith("opencl:")
+        result = auto.evolve(source, (batch,), telemetry=True)
+    assert result.paths.execution_device == device
+    assert result.paths.routing["dop853"].opencl_rows == 1
+
+
 def _dense_batch(count: int) -> TimelineBatch:
     dense = timeline(count, 100.0)
     knots = np.linspace(0, 100.0, 960)
@@ -204,6 +263,22 @@ def test_opencl_price_does_not_depend_on_engine_or_disk_warmth(
 
 
 @pytest.mark.requires_opencl
+def test_auto_routing_and_density_do_not_depend_on_chunk_count() -> None:
+    source = coherent_source(synthetic_model(32))
+    batch = _dense_batch(12)
+    with (
+        closing(Engine(2, chunks_per_worker=1, families=("dop853",))) as coarse,
+        closing(Engine(2, chunks_per_worker=6, families=("dop853",))) as fine,
+    ):
+        coarse_result = coarse.evolve(source, (batch,), telemetry=True)
+        fine_result = fine.evolve(source, (batch,), telemetry=True)
+    for result in (coarse_result, fine_result):
+        assert result.paths.routing["dop853"].opencl_rows == len(batch.points)
+    assert fine_result.paths.execution_device == coarse_result.paths.execution_device
+    assert fine_result.densities.tobytes() == coarse_result.densities.tobytes()
+
+
+@pytest.mark.requires_opencl
 def test_auto_isolates_a_failing_dimension_build(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -255,6 +330,62 @@ def test_auto_isolates_a_failing_dimension_build(
         pytest.raises(RuntimeError, match="injected d32 compiler rejection"),
     ):
         forced.evolve(source, (batch,))
+
+
+@pytest.mark.requires_opencl
+def test_opencl_engine_close_releases_its_context() -> None:
+    import pyopencl as cl
+
+    def contexts() -> set[weakref.ReferenceType[cl.Context]]:
+        return {
+            weakref.ref(obj) for obj in gc.get_objects() if isinstance(obj, cl.Context)
+        }
+
+    case = accuracy_case("sampled_gaussian_9")
+    before = contexts()
+    with closing(Engine(1, backend="opencl", families=case.families)) as gpu:
+        result = gpu.evolve(case.source, (case.batch,), telemetry=True)
+        assert result.paths.routing["dop853"].opencl_rows == len(case.batch.points)
+        created = contexts() - before
+        assert len(created) == 1
+    gc.collect()
+    assert all(context() is None for context in created)
+
+
+@pytest.mark.requires_opencl
+def test_opencl_limits_the_union_of_both_tone_grids() -> None:
+    case = accuracy_case("sampled_gaussian_9")
+    # The grids share only their endpoints. Each tone stays well below the
+    # limit, but their union reaches 960 knots and then exceeds it by one.
+    grid = np.linspace(0, 100.0, 481)
+    other = np.r_[0.0, (grid[:-2] + grid[1:-1]) / 2, 100.0]
+
+    def sampled(times: np.ndarray) -> EnvelopeSpec:
+        return EnvelopeSpec(
+            "sampled", np.sin(np.pi * times / 100).astype(np.complex128), times
+        )
+
+    first, second = case.batch.tracks
+    batches = tuple(
+        replace(
+            case.batch,
+            points=case.batch.points + 2 * i,
+            tracks=(
+                replace(first, envelopes=(sampled(grid),)),
+                replace(second, envelopes=(sampled(times),)),
+            ),
+        )
+        for i, times in enumerate((other, np.r_[other[:-1], 99.9, 100.0]))
+    )
+    with (
+        closing(Engine(1, backend="cpu", families=case.families)) as cpu,
+        closing(Engine(1, backend="opencl", families=case.families)) as gpu,
+    ):
+        expected = cpu.evolve(case.source, batches)
+        actual = gpu.evolve(case.source, batches, telemetry=True)
+    assert actual.paths.routing["dop853"].opencl_rows == len(case.batch.points)
+    assert actual.densities[2:].tobytes() == expected.densities[2:].tobytes()
+    assert density_error(actual.densities[:2], expected.densities[:2]) < 1e-3
 
 
 @pytest.mark.requires_opencl

@@ -166,8 +166,8 @@ class Dispatch:
         plans live only for this evolve.
     chain: global-row chain IDs; -1 for independent rows. A timeline worker
         replaces provisional decisions locally after its deferred guards finish.
-    opencl: read-only global-row mask routing ready DOP853 endpoints to OpenCL,
-        or None when no such routes are offered.
+    opencl_rows: read-only global-row mask offering ready DOP853 endpoints to
+        OpenCL, or None when no such routes are offered.
     """
 
     names: NDArray[np.str_]
@@ -184,7 +184,7 @@ class Dispatch:
     chain: NDArray[np.int64] = field(
         default_factory=lambda: np.empty(0, dtype=np.int64)
     )
-    opencl: NDArray[np.bool_] | None = None
+    opencl_rows: NDArray[np.bool_] | None = None
 
 
 def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics:
@@ -749,7 +749,7 @@ class _Classifier:
             self.two_tone_first,
             self.plans,
             chain,
-            opencl=gpu,
+            opencl_rows=gpu,
         )
 
 

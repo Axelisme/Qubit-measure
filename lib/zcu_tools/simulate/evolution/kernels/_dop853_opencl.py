@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import suppress
 from hashlib import sha256
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -29,6 +30,7 @@ _TARGET_DISPATCH_NS = 100_000_000
 # 32 trials took at most the work of 32 intervals in the dense prototype
 # (~30 ms for 24 d=32 rows on Intel Arc). Start here before any timing.
 _INITIAL_TRIALS = 32
+# The runner caps each device batch; dispatch prices work at the same cap.
 ROWS_PER_BATCH = 32
 # The production probe differed by 2.01e-6 on Intel Arc; 1e-5 leaves room for
 # compiler rounding without admitting large deviations from the CPU endpoint.
@@ -90,12 +92,17 @@ def _pack_playback(segments: Segments, rows: NDArray[np.int64]) -> _Playback:
 class OpenCLBackend:
     """Own one Engine's optional DOP853 runner and its detection outcome."""
 
+    forced: bool
+    """True for explicit OpenCL; False for price-based automatic routing."""
+
     def __init__(self, *, forced: bool) -> None:
         self.forced = forced
-        self._runner = OpenCLDOP853() if forced else None
+        self._runner: OpenCLDOP853 | None = None
         self._detect_lock = Lock()
         self._probe_failure: str | None = None
         self._build_failures: dict[int, str | None] = {}
+        if forced:
+            self._detect_device()
 
     def detect_execution_device(self) -> str:
         """Resolve this Engine's device, or return cpu if auto detection fails."""
@@ -112,7 +119,8 @@ class OpenCLBackend:
         """Detect on the first eligible row and read recorded variant failures.
 
         Workers can reach this together. Detection does not compile unpriced
-        point programs. A forced backend skips all auto availability checks.
+        point programs. A forced backend has already passed device detection
+        and does not consult cached compiler rejections for point programs.
         """
         if self.failure(dimension) is not None:
             return None
@@ -130,10 +138,15 @@ class OpenCLBackend:
     def _detect_device(self) -> None:
         if self._runner is not None or self._probe_failure is not None:
             return
+        runner = None
         try:
             runner = OpenCLDOP853()
             runner.check_device()
         except (RuntimeError, OSError, ValueError) as error:
+            if runner is not None:
+                runner.close()
+            if self.forced:
+                raise
             self._probe_failure = str(error)
         else:
             self._runner = runner
@@ -153,6 +166,14 @@ class OpenCLBackend:
             return None
         return runner
 
+    def close(self) -> None:
+        """Release the runner and detection state after the Engine joins workers."""
+        if self._runner is not None:
+            self._runner.close()
+            self._runner = None
+        self._build_failures.clear()
+        self._probe_failure = None
+
 
 class OpenCLDOP853:
     """Own the FP64-capable GPU, context and programs borrowed by one Engine.
@@ -160,8 +181,11 @@ class OpenCLDOP853:
     Construction loads the optional pyopencl dependency, finds a GPU with
     cl_khr_fp64 and creates a context; unavailable dependencies or devices
     raise RuntimeError. Programs build on demand. The Engine drains workers
-    before dropping this owner, which releases the retained OpenCL handles.
+    before closing this owner and releasing its retained OpenCL handles.
     """
+
+    execution_device: str
+    """GPU identity: opencl:<name>/<driver>/<kernel source hash>/<pyopencl version>."""
 
     def __init__(self) -> None:
         try:
@@ -203,8 +227,14 @@ class OpenCLDOP853:
             f"{cl.VERSION_TEXT}"
         )
 
+    def close(self) -> None:
+        """Drop the retained programs and context once, after the last borrow."""
+        # PyOpenCL releases these native handles when their wrappers are dropped.
+        self._programs.clear()
+        del self._context
+
     def check_device(self) -> None:
-        """Validate automatic admission using the persisted CPU/GPU comparison.
+        """Validate the device using the persisted CPU/GPU comparison.
 
         A matching cached result avoids both compilation and the numerical
         probe. A build or self-test failure, including a cached one, raises.
@@ -215,7 +245,9 @@ class OpenCLDOP853:
         record = _read_detection(path)
         if record is None:
             record = self._probe()
-            _write_detection(path, record)
+            # Persistence saves a later probe; it cannot change this result.
+            with suppress(OSError):
+                _write_detection(path, record)
         if record.startswith("failed\n"):
             raise RuntimeError(record.removeprefix("failed\n"))
 

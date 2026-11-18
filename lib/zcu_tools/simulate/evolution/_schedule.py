@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -69,6 +69,24 @@ class _ChunkResult:
 class _OpenCLWave:
     chunk: _Chunk
     slots: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class _ChunkProgress:
+    completed: list[_ChunkResult]
+    ready: list[_OpenCLWave]
+
+    @classmethod
+    def collect(cls, parts: Iterable[object]) -> _ChunkProgress:
+        completed: list[_ChunkResult] = []
+        ready: list[_OpenCLWave] = []
+        for part in parts:
+            # Joblib's result type also exposes its internal start signal.
+            if not isinstance(part, _ChunkProgress):
+                raise TypeError("executor returned an invalid chunk result")
+            completed.extend(part.completed)
+            ready.extend(part.ready)
+        return cls(completed, ready)
 
 
 def _deduplicate(
@@ -381,14 +399,12 @@ class Schedule:
         ordered = np.argsort(-cost, kind="stable")
         width = min(timeline_chunks, count)
         work = [ordered[i::width] for i in range(width)]
-        steps: list[_ChunkResult | _OpenCLWave | None] = []
-        for part in pool(
-            delayed(self.chunk)(points, entries, shared) for points in work
-        ):
-            if part is None:
-                raise RuntimeError("timeline job returned no densities")
-            steps.extend(part)
-        results = self._finish_waves(pool, steps)
+        results = self._finish_waves(
+            pool,
+            _ChunkProgress.collect(
+                pool(delayed(self.chunk)(points, entries, shared) for points in work)
+            ),
+        )
         output = np.empty(
             (count, *self.source.initial_density.shape), dtype=np.complex128
         )
@@ -400,34 +416,25 @@ class Schedule:
         return EvolutionResult(self.geometry.points, output, diagnostics)
 
     def _finish_waves(
-        self, pool: Executor, steps: list[_ChunkResult | _OpenCLWave | None]
+        self, pool: Executor, progress: _ChunkProgress
     ) -> list[_ChunkResult]:
-        results: list[_ChunkResult] = []
-        while True:
-            waves: list[_OpenCLWave] = []
-            for step in steps:
-                if step is None:
-                    raise RuntimeError("timeline job returned no densities")
-                if isinstance(step, _ChunkResult):
-                    results.append(step)
-                else:
-                    waves.append(step)
-            # Only the active waves need to retain worker-local preparations.
-            steps.clear()
-            if not waves:
-                return results
+        results = progress.completed
+        while progress.ready:
+            waves = progress.ready
             rows = np.concatenate([wave.chunk.cursor[wave.slots] for wave in waves])
             order = np.argsort(rows)
             runner = self._opencl_runner(rows[order])
-            if runner is not None:
+            if runner is None:
+                jobs = (
+                    delayed(wave.chunk.run_rejected_wave)(wave.slots) for wave in waves
+                )
+            else:
                 self._apply_opencl(waves, rows[order], order, runner)
                 self.execution_device = runner.execution_device
-            steps = list(
-                pool(
-                    delayed(wave.chunk.run)(wave.slots if runner is None else None)
-                    for wave in waves
-                )
-            )
+                jobs = (delayed(wave.chunk.run)() for wave in waves)
+            progress = _ChunkProgress.collect(pool(jobs))
+            results.extend(progress.completed)
+        return results
 
     def _opencl_runner(self, rows: NDArray[np.int64]) -> OpenCLDOP853 | None:
         backend = self.context.opencl
@@ -599,8 +606,8 @@ class Schedule:
         points: NDArray[np.int64],
         entries: Sequence[_Entries],
         shared: Sequence[_Binding],
-    ) -> list[_ChunkResult | _OpenCLWave]:
-        """Run CPU waves until each local timeline finishes or needs OpenCL."""
+    ) -> _ChunkProgress:
+        """Run CPU waves until each local timeline finishes or offers OpenCL work."""
         if self.cancel.is_set():
             raise Cancelled()
         selected = np.isin(self.table.timeline, points)
@@ -631,7 +638,9 @@ class Schedule:
             work = [point[None] for point in points[local_points]]
             if not local_points.all():
                 work.append(points[~local_points])
-            return [step for part in work for step in self.chunk(part, entries, shared)]
+            return _ChunkProgress.collect(
+                self.chunk(part, entries, shared) for part in work
+            )
         local_bindings, local_dispatch = (
             self.resolve_deferred(np.flatnonzero(deferred))
             if np.any(deferred)
@@ -662,7 +671,7 @@ class Schedule:
                 payload = _build(entry, unique, self.table, self.context, self.cancel)
                 local_bindings.append(_bind(entry, payload, local, local_dispatch))
         bindings = [*shared, *self.bind_inputs(local_bindings)]
-        return [_Chunk(self, points, selected, bindings, entries, local_dispatch).run()]
+        return _Chunk(self, points, selected, bindings, entries, local_dispatch).run()
 
 
 class _Chunk:
@@ -887,19 +896,18 @@ class _Chunk:
         self._basis(slots, self.table.level[self.cursor[slots]])
         return self.states[slots]
 
-    def run(
-        self, cpu_slots: NDArray[np.int64] | None = None
-    ) -> _ChunkResult | _OpenCLWave:
-        """Resume CPU work until done or until all pending slots offer OpenCL.
-
-        cpu_slots names the rejected ready wave to advance on CPU before later
-        ready rows are considered; None starts at the next undecided row.
-        """
+    def run_rejected_wave(self, slots: NDArray[np.int64]) -> _ChunkProgress:
+        """Advance a rejected OpenCL wave on CPU, then resume normal routing."""
         if self.schedule.cancel.is_set():
             raise Cancelled()
-        if cpu_slots is not None:
-            self._apply_slots(cpu_slots)
-        gpu = self.dispatch.opencl
+        self._apply_slots(slots)
+        return self.run()
+
+    def run(self) -> _ChunkProgress:
+        """Advance undecided CPU rows until done or ready to offer OpenCL work."""
+        if self.schedule.cancel.is_set():
+            raise Cancelled()
+        gpu = self.dispatch.opencl_rows
         backend = self.schedule.context.opencl
         while np.any(self.cursor < self.end):
             pending = np.flatnonzero(self.cursor < self.end)
@@ -910,11 +918,13 @@ class _Chunk:
                     and backend.candidate(self.states.shape[1]) is not None
                 ):
                     if waiting.all():
-                        return _OpenCLWave(self, pending)
+                        return _ChunkProgress([], [_OpenCLWave(self, pending)])
                     pending = pending[~waiting]
             self._apply_slots(pending)
         self._basis(np.arange(len(self.points)), np.zeros_like(self.level))
-        return _ChunkResult(self.points, self.states, self.exceeded)
+        return _ChunkProgress(
+            [_ChunkResult(self.points, self.states, self.exceeded)], []
+        )
 
     def _apply_slots(self, pending: NDArray[np.int64]) -> None:
         binding_ids = self.binding[self.cursor[pending]]

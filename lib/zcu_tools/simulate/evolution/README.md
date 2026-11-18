@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, DOP853 GPU backend
+**Last updated:** 2026-11-18, DOP853 GPU detection and admission
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -181,22 +181,25 @@ managed lanes can run GPU tests on machines with a compatible driver.
 | --- | --- |
 | `"auto"` (default) | Detects OpenCL on the first eligible row. For eligible DOP853 work, compares CPU and GPU cost, including warm program setup, transfers and batch size. |
 | `"cpu"` | Never probes or uses OpenCL. |
-| `"opencl"` | Requires a supported device at construction. Sends eligible DOP853 rows to that device without the automatic cost comparison. A missing device or a build failure raises. Other rows can still run on CPU. |
+| `"opencl"` | Requires a device that passes detection at construction. Sends eligible DOP853 rows to that device without price comparison or fallback. A dimension-specific build failure raises during evolve. Ineligible rows can still run on CPU. |
 
 Eligibility depends on structure, not envelope shape. The row must be an
 independent, unchained interaction-frame DOP853 endpoint at fixed DC, with no
 flux modulation or segment shift. It must last 100 ns to 10 µs and have at most
-32 retained levels. Two sampled tones must cover the whole row, with at most
-960 knots per tone. Other rows in the same timeline may run on CPU.
+32 retained levels. Two sampled tones must cover the whole row. The union of
+their sample grids can contain at most 960 knots, because the runner restarts
+integration at knots from either tone. Other rows in the same timeline may
+run on CPU.
 
-Automatic detection imports `pyopencl` on demand, finds an FP64 GPU, compiles
-a small program and checks a fixed endpoint against CPU. The maximum absolute
-entry difference must be at most `1e-5`. The Engine can reuse the stored probe
-result for the same device, driver and kernel. If detection fails, `auto` uses
-CPU with the same numerical result as `"cpu"`; if the program fails to build
-for one dimension before execution, only that dimension falls back. Read the
-reason in `opencl_detection_error` with routing telemetry enabled. Errors
-during GPU execution raise instead of retrying on CPU.
+Detection imports `pyopencl`, finds an FP64 GPU, compiles a small program and
+checks a fixed endpoint against CPU. The maximum absolute entry difference
+must be at most `1e-5`. The Engine can reuse the stored probe result for the
+same device, driver and kernel. Failure to write that result does not change
+the probe outcome. If detection fails, `opencl` raises during construction and
+`auto` uses CPU with the same numerical result as `"cpu"`. If a program fails
+to build for one dimension before execution, `auto` falls back only for that
+dimension. Read the reason in `opencl_detection_error` with routing telemetry
+enabled. Errors during GPU execution raise instead of retrying on CPU.
 
 One work-group integrates one row on device, using the CPU method's DOP853
 tableau, error norm, controller and budget-scaled tolerances. The GPU computes
@@ -1034,9 +1037,11 @@ does not certify the adiabatic approximation.
   one family in one evolve. Floquet stores admissions and retained equations;
   the direct solvers store frame or chain decisions. Plans never enter
   persistent kernel state.
-- `KernelContext(source, budget, work_plan)` supplies preparation, key and guard
-  calls with one evolve owner. `ApplyContext(budget, plan, work_plan)` supplies the finite positive per-segment allowance
-  and the family's plan. Floquet and both CPU direct solvers require their own
+- `KernelContext(source, budget, work_plan, opencl)` supplies preparation, key
+  and guard calls with one evolve owner and an optional OpenCL backend.
+  `ApplyContext(budget, plan, work_plan, opencl)` supplies the finite positive
+  per-segment allowance, the family's plan and an optional runner for a batch
+  of admitted OpenCL rows. Floquet and both CPU direct solvers require their own
   plan; a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
   Families without plans, including `single_tone_rwa`, `multitone_rwa`,
   `single_tone_gate` and `multitone_gate`, reject a non-`None` plan with `ValueError`.
