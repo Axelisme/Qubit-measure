@@ -12,9 +12,12 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import (
     Engine,
+    EnvelopeSpec,
     NoValidKernel,
     RoutingHistory,
     RWAGuardMetric,
+    SecularDrive,
+    SecularModel,
     common_frame_diagnostic,
     load_reference,
     multitone_rwa_diagnostic,
@@ -28,9 +31,11 @@ from .accuracy_cases import (
     AccuracyCase,
     accuracy_case,
     coherent_source,
+    drive_track,
     history_case,
     multisegment_case,
     multitone_phase_case,
+    timeline,
 )
 from .guard_edge_cases import (
     EDGE_FAMILIES,
@@ -237,6 +242,49 @@ def test_multitone_gate_split_admission_tightens_with_budget() -> None:
 
         with pytest.raises(NoValidKernel) as rejected:
             engine.evolve(case.source, (case.batch,), budget=1e-7)
+        assert "multitone_gate" in rejected.value.attempted
+
+
+def test_multitone_gate_can_match_less_accurate_direct_fallback() -> None:
+    """A phase-resolved gate can replace a direct solve of comparable accuracy."""
+    # Resonant circular drives accumulate direct integration error over several
+    # rotations. The weak bath gives a split defect above the fixed budget floor.
+    frequency, rate, duration = 0.1, 2e-5, 20.0
+    x = np.array([[0, 1], [1, 0]], dtype=complex)
+    y = np.array([[0, 1j], [-1j, 0]])
+    model = SecularModel(
+        (0,),
+        "accuracy-circular-dual-tone",
+        np.array([0.0, frequency]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("a", x, y), SecularDrive("b", x, y)),
+        np.array([[0.0, rate], [0.0, 0.0]]),
+        np.array([[0.0, rate], [rate, 0.0]]),
+    )
+    idle = timeline(1, duration)
+    envelope = EnvelopeSpec(
+        "sampled",
+        np.array([0.9, 1.0, 0.95], dtype=complex),
+        np.linspace(0, duration, 3),
+    )
+    tracks = tuple(
+        drive_track(idle, envelope, frequency=frequency, gain=gain, port=port)
+        for port, gain in (("a", 0.2), ("b", 0.003))
+    )
+    batch = replace(idle, tracks=tracks)
+    with (
+        closing(coherent_source(model)) as source,
+        closing(Engine(1, families=("multitone_gate",))) as engine,
+    ):
+        result = engine.evolve(source, (batch,), budget=3e-3)
+        require_families(result.paths, ("multitone_gate",))
+        reference = converged_reference(source, batch)
+        assert density_error(result.densities, reference.density) <= 2e-3
+
+        # Both budgets give the same floor; the more accurate fallback no
+        # longer justifies this gate's split defect at the smaller budget.
+        with pytest.raises(NoValidKernel) as rejected:
+            engine.evolve(source, (batch,), budget=1e-3)
         assert "multitone_gate" in rejected.value.attempted
 
 

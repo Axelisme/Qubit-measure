@@ -29,13 +29,15 @@ def advance_probes(
     model: SecularModel,
     table: SegmentTable,
     row: int,
-    states: NDArray[np.complex128],
-) -> None:
-    """Advance one independent fixed-flux density at each local phase pair.
+    initial: NDArray[np.complex128],
+    budget: float,
+) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
+    """Return tight-reference and Engine-budget DOP853 probe endpoints.
 
     Compact the representative into independent timelines at local zero.
-    Preserve both envelope clocks and use the same full drive and secular
-    dissipator as ordinary DOP853. Integration errors propagate.
+    Both solves start with the same probe densities and envelope clocks.
+    Use the ordinary isolated-row interaction frame and DOP853 budget policy.
+    The input densities are not modified. Integration errors propagate.
     """
     rows = np.arange(len(SPLIT_PHASES), dtype=np.int64)
     same_row = np.full_like(rows, row)
@@ -53,10 +55,10 @@ def advance_probes(
         tone_envelope_offset_ns=table.tone_envelope_offset_ns[same_row, :2],
         envelopes=tuple(table.envelopes[e] for e in table.tone_envelope[row, :2]),
     )
-    advance_endpoints(
-        EndpointData(pack_models([model]), pack_segments(probes)),
-        (rows, np.zeros_like(rows)),
-        states,
-        SPLIT_REFERENCE_BUDGET,
-        DOP853Plan(np.full(len(rows), "interaction"), np.full_like(rows, -1)),
-    )
+    data = EndpointData(pack_models([model]), pack_segments(probes))
+    row_models = (rows, np.zeros_like(rows))
+    plan = DOP853Plan(np.full(len(rows), "interaction"), np.full_like(rows, -1))
+    reference, fallback = initial.copy(), initial.copy()
+    advance_endpoints(data, row_models, reference, SPLIT_REFERENCE_BUDGET, plan)
+    advance_endpoints(data, row_models, fallback, budget, plan)
+    return reference, fallback

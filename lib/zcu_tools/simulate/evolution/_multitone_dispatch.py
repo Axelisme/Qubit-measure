@@ -145,15 +145,20 @@ def _price_gate(
     nodes = int(np.prod(PHASE_GRID))
     trajectories = nodes + 64
     direct = _direct_cost(table, row, context)
-    # Undo direct's tolerance multiplier: build precision is budget-independent.
+    # Undo direct's tolerance multiplier for the fixed-precision phase and reference work.
     baseline = direct / (1e-3 / context.budget) ** 0.125
     precision = (min(1e-4, 0.03e-3) / PHASE_RTOL) ** 0.125
     integrate = baseline * trajectories * 0.289 * precision
     fit = 2e-7 * 4 * nodes * np.log2(nodes) * (len(model.energies_ghz) / 16) ** 2
     split_precision = (1e-3 / SPLIT_REFERENCE_BUDGET) ** 0.125
-    split = baseline * len(SPLIT_PHASES) * split_precision * 0.155
+    reference = len(SPLIT_PHASES) * baseline * split_precision * 0.155
+    # The fallback probes run at the Engine budget; use the ordinary direct
+    # price per solve. Like the reference, this work is paid once per key.
+    fallback = len(SPLIT_PHASES) * direct
     apply = (2e-8 * 4 * nodes + 7.5e-6 * 4) * scale
-    return MultitoneCost(direct, float(integrate + fit + split), 2e-6 * scale, apply)
+    return MultitoneCost(
+        direct, float(integrate + fit + reference + fallback), 2e-6 * scale, apply
+    )
 
 
 @dataclass(frozen=True)

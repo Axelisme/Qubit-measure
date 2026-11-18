@@ -24,14 +24,8 @@ from ._rwa_gate import canonical_keys
 from ._secular import coherence_decay, split_step
 from ._workload_facts import fixed_flux
 
-# At budget 1e-3, reserve a tenth for this sampled split check. The fixed FTF
-# depth-500 Gaussian and sampled X90 pair keys (32 states, 100 ns) measure
-# 3.04e-5 and 3.64e-5 against tight full-Lindblad endpoints. Tightening the
-# reference budget from 1e-8 to 1e-9 changes either endpoint by less than 5e-10.
-# The 1e-4 threshold clears both, plus the small Gaussian 100x-bath control
-# (1.60e-5), but rejects the 4000x-bath control (5.41e-4). Tighter Engine
-# budgets scale the threshold down; larger budgets cannot relax it.
 _SPLIT_BUDGET_FRACTION = 0.1
+_SPLIT_FALLBACK_FACTOR = 1.5
 
 
 @dataclass(frozen=True)
@@ -81,20 +75,18 @@ def _play(coefficients, grid_sizes, baths, key_index, phases, states):
         states[row] = rho
 
 
-def _split_defect(
+def _split_defects(
     prepared: _Prepared, table: SegmentTable, row: int, context: KernelContext
-) -> float:
-    """Check actual four-quarter playback against direct Lindblad endpoints.
+) -> tuple[float, float]:
+    """Return max-entry defects of playback and fallback vs one tight reference.
 
-    Four physical initial densities cost four solves; a complete Hermitian
-    operator basis would cost M² solves per phase (4096 total at M=32) and
-    store an M⁴ channel per phase. The maximum absolute density-entry error
-    measures these samples, not a global bound over phases, inputs or sequences.
+    A complete Hermitian operator basis would cost M² solves and store an M⁴
+    channel per phase. Four physical densities instead sample these maps;
+    neither defect bounds other phases, inputs or complete sequences.
     """
     model = table.model(context.source, row)
     split = probe_densities(len(model.energies_ghz))
-    direct = split.copy()
-    advance_probes(model, table, row, direct)
+    reference, fallback = advance_probes(model, table, row, split, context.budget)
     _play(
         prepared.coefficients,
         prepared.grid_sizes,
@@ -103,7 +95,10 @@ def _split_defect(
         SPLIT_PHASES,
         split,
     )
-    return float(np.max(np.abs(split - direct)))
+    return (
+        float(np.max(np.abs(split - reference))),
+        float(np.max(np.abs(fallback - reference))),
+    )
 
 
 def _build(table: SegmentTable, row: int, context: KernelContext) -> _Prepared | None:
@@ -135,9 +130,9 @@ class MultitoneGateKernel:
     defect <=1.9e-7. Two failed stages refuse the key; solver failures propagate.
     Phase and absolute start are apply-only, not key fields. Guard preparations
     are handed to the scheduler and live only within one evolve (ADR-0078).
-    After phase admission, compare four-quarter playback with direct full
-    Lindblad integration at four phase/density pairs. Both checks sample the
-    key; neither certifies arbitrary sequences against the final density budget.
+    After phase admission, compare playback and Engine-budget DOP853 with
+    the same tight full-Lindblad endpoints at four phase/density pairs.
+    Neither sampled check certifies arbitrary sequences against the final density budget.
     No RWA or graph pruning is performed.
     """
 
@@ -202,8 +197,12 @@ class MultitoneGateKernel:
             prepared = _build(table, row, context)
             if prepared is None:
                 continue
-            defect = _split_defect(prepared, table, row, context)
-            if defect <= min(context.budget, 1e-3) * _SPLIT_BUDGET_FRACTION:
+            defect, fallback_defect = _split_defects(prepared, table, row, context)
+            # Stay comparable to the direct solver this gate replaces. Keep
+            # a budget-scaled allowance when the fallback is especially accurate.
+            floor = _SPLIT_BUDGET_FRACTION * min(context.budget, 1e-3)
+            threshold = max(floor, _SPLIT_FALLBACK_FACTOR * fallback_defect)
+            if defect <= threshold:
                 accepted[positions[inverse == index]] = True
                 products.append(GuardPreparation(keys[index : index + 1], prepared))
         return GuardResult(accepted, tuple(products))

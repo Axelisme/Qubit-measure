@@ -197,6 +197,7 @@ uv run --directory <worktree> --no-sync -- \
 `test_multitone_gate_mixed_phase_keys_density` 在同次 evolve 混合不同解析度的 key 與 constant+sampled pair。
 高 gain 案例移除 bath，從 `Engine.evolve` 驗終階相位解析仍不足時的 `NoValidKernel.attempted`。
 強 bath 案例驗 split 缺陷拒收。另一個 bath 案例用同一 key 驗預設 budget 放行、完整 density 符合 oracle，收緊 budget 時拒收。
+共振雙 tone 案例固定門檻下限，驗較大的 budget 下 gate 可取代精度相近的 DOP853，收緊 budget 後則拒收。
 這些小模型案例不代表長序列已通過精度或速度驗收。
 Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生誤差觀察值。
 各案例包含完整 complex coherence、relaxation 與 dephasing。模型尺寸依案例族區分：
