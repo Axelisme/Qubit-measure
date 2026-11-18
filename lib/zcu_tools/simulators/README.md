@@ -1,6 +1,6 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-17, optional acquire captures and telemetry correlation
+**Last updated:** 2026-11-18, OpenCL routing telemetry
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
@@ -77,7 +77,7 @@ boundary. `AcquireTelemetry` requires the first nine fields below.
 | `timestamp` | Writer-generated UTC ISO timestamp. |
 | `frontend_cpu_s` | Geometry and work-plan calling-thread CPU seconds. |
 | `estimated_cost_unit` | `relative scheduling units`, the label for family scheduling costs. |
-| `families` | Engine family names mapped to aggregated counters and CPU seconds. |
+| `families` | Engine family names mapped to merged routing counters, CPU seconds and optional OpenCL detection error. |
 
 All four wall fields are floats. A failed call retains elapsed time through its
 exception; a stage not entered contributes `0.0`. `complete` comes from the binding

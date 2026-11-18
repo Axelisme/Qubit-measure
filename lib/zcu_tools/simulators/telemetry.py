@@ -67,47 +67,28 @@ class RoutingRecord(AcquireTelemetry):
     timestamp: UTC ISO timestamp.
     frontend_cpu_s: calling-thread geometry and work-plan CPU seconds.
     estimated_cost_unit: label for relative family scheduling costs.
-    families: family name to summed Engine routing counters and CPU seconds;
-    estimated_cpu_s is None when any contributing estimate is unavailable.
+    families: family name to merged Engine routing counters, CPU seconds and
+    optional OpenCL detection error. estimated_cpu_s is None when any
+    contributing estimate is unavailable.
     Caller-supplied fields retain their AcquireTelemetry meanings.
     """
 
     timestamp: str
     frontend_cpu_s: float
     estimated_cost_unit: str
-    families: dict[str, dict[str, int | float | None]]
+    families: dict[str, dict[str, int | float | str | None]]
 
 
 def _families(
     paths: Sequence[PathDiagnostics],
-) -> dict[str, dict[str, int | float | None]]:
+) -> dict[str, dict[str, int | float | str | None]]:
     # Keep configuration imports independent of the numerical runtime.
-    from zcu_tools.simulate.evolution import FamilyRouting
+    from zcu_tools.simulate.evolution import merge_path_diagnostics
 
-    grouped: dict[str, list[FamilyRouting]] = {}
-    for report in paths:
-        for name, family in report.routing.items():
-            grouped.setdefault(name, []).append(family)
-    result = {}
-    for name, uses in grouped.items():
-        seconds = [f.estimated_cpu_s for f in uses]
-        total = FamilyRouting(
-            rows=sum(f.rows for f in uses),
-            prepare_cpu_s=sum(f.prepare_cpu_s for f in uses),
-            apply_cpu_s=sum(f.apply_cpu_s for f in uses),
-            cache_hits=sum(f.cache_hits for f in uses),
-            prepare_builds=sum(f.prepare_builds for f in uses),
-            admission_rows=sum(f.admission_rows for f in uses),
-            rejected_rows=sum(f.rejected_rows for f in uses),
-            estimated_cost=sum(f.estimated_cost for f in uses),
-            estimated_cpu_s=(
-                sum(s for s in seconds if s is not None)
-                if all(s is not None for s in seconds)
-                else None
-            ),
-        )
-        result[name] = {**asdict(total), "actual_cpu_s": total.actual_cpu_s}
-    return result
+    return {
+        name: {**asdict(report), "actual_cpu_s": report.actual_cpu_s}
+        for name, report in merge_path_diagnostics(paths).routing.items()
+    }
 
 
 class RoutingTelemetry:

@@ -728,13 +728,12 @@ class _Classifier:
             plans, chain = direct_plans(self.table, context, context_rows)
         else:
             plans, chain = direct_plans(self.table, self.names)
+        backend = self.context.opencl
+        dimension = self.context.source.initial_density.shape[0]
         gpu = (
-            opencl_rows(
-                self.table,
-                plans.get("dop853"),
-                self.context.source.initial_density.shape[0],
-            )
-            if self.context.opencl is not None
+            opencl_rows(self.table, plans.get("dop853"), dimension)
+            if backend is not None
+            and backend.failure(dimension) is None
             and isinstance(self.kernels.get("dop853"), DOP853Kernel)
             else None
         )

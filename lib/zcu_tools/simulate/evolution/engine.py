@@ -30,7 +30,7 @@ from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
 
 # Replay identity of the segment engine numerical algorithms, independent of records.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v8"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v9"
 
 
 @dataclass(frozen=True)
@@ -363,7 +363,8 @@ class PathDiagnostics:
 
         Enabled reports count each logical segment as a cache hit, with zero
         CPU, rejections and estimated work. Physical duration is preserved even
-        through a telemetry-disabled report. Disabled reports have no routing.
+        through a telemetry-disabled report. Any recorded detection failure is
+        preserved. Disabled reports have no routing.
         """
         return replace(
             self,
@@ -374,6 +375,11 @@ class PathDiagnostics:
                     cache_hits=count,
                     estimated_cpu_s=0.0,
                     duration_ns=self.duration_ns_by_kernel[name],
+                    opencl_detection_error=(
+                        self.routing[name].opencl_detection_error
+                        if name in self.routing
+                        else None
+                    ),
                 )
                 for name, count in self.segments_by_kernel.items()
             }
@@ -451,7 +457,8 @@ def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
     frontend_cpu_s are summed.
     max_trace_error is the maximum, or zero for empty parts. Routing sums each
     family's row counts, CPU times, hits, rejections, costs, builds,
-    admission rows and OpenCL endpoints;
+    admission rows and OpenCL endpoints. For each family, the first nonempty
+    OpenCL detection failure is retained in input order.
     estimated_cpu_s is None if any contributing family estimate is unknown.
     Reuse-hit diagnostics participate exactly as returned, without adding hits
     or replacing their counts. Empty parts returns empty PathDiagnostics.
@@ -503,6 +510,14 @@ def _merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
         prepare_builds=sum(part.prepare_builds for part in parts),
         admission_rows=sum(part.admission_rows for part in parts),
         opencl_rows=sum(part.opencl_rows for part in parts),
+        opencl_detection_error=next(
+            (
+                part.opencl_detection_error
+                for part in parts
+                if part.opencl_detection_error
+            ),
+            None,
+        ),
     )
 
 
@@ -573,17 +588,20 @@ class Engine:
         gate_cache, period_table, common_frame, multitone_gate, multitone_rwa,
         floquet, dop853. kernels remains an internal collaborator seam.
     backend: "cpu" always uses CPU and never loads OpenCL. "auto" (default)
-        currently also uses CPU. "opencl" requires the gpu extra and an OpenCL
-        GPU with cl_khr_fp64; missing dependencies or a GPU that cannot be
-        initialized raise RuntimeError at construction. With "opencl", a
-        selected dop853 segment uses the GPU when it is an independent
+        checks OpenCL lazily at the first eligible DOP853 endpoint and uses
+        it only when its batch price beats CPU. A failed device check leaves
+        the Engine on CPU. A failed build for a selected dimension sends that
+        dimension to CPU. "opencl" skips those checks, but requires the gpu
+        extra and an OpenCL GPU with cl_khr_fp64; missing dependencies or
+        a GPU that cannot be initialized raise RuntimeError at construction.
+        A selected dop853 segment can use the GPU when it is an independent
         interaction-frame row at DC without a flux waveform or segment shift,
         its dimension is at most 32, and two sampled tones (up to 960 knots
         each) both cover the whole 100–10000 ns segment. Ineligible segments,
         shared prefixes and other families use CPU. Program builds on first
-        use of a dimension use the simulator user cache; build and execution
-        errors propagate from evolve, without CPU retry. Unknown values raise
-        ValueError.
+        use of a dimension use the simulator user cache. Forced OpenCL build
+        failures and all point execution errors propagate from evolve, without
+        CPU retry. Unknown values raise ValueError.
     chunks_per_worker: optional positive fixed chunk multiplier. None selects
         timeline batching from the complete acquire inventory and keeps six
         prepare chunks per worker. Scheduling does not change numerical admission.
@@ -613,7 +631,7 @@ class Engine:
         """Create an Engine under the execution and family contract above."""
         from ._routing_reuse import RoutingReuse
         from .kernels import REGISTRY
-        from .kernels._dop853_opencl import OpenCLDOP853
+        from .kernels._dop853_opencl import OpenCLBackend
 
         if backend not in ("auto", "cpu", "opencl"):
             raise ValueError(f"unknown evolution backend: {backend!r}")
@@ -636,7 +654,9 @@ class Engine:
         self._lock = Lock()
         self._closed = False
         self._workers = workers
-        self._opencl = OpenCLDOP853() if backend == "opencl" else None
+        self._opencl = (
+            None if backend == "cpu" else OpenCLBackend(forced=backend == "opencl")
+        )
 
     def reuse(
         self,
@@ -690,8 +710,8 @@ class Engine:
         change; evolve does not verify the caller's digest. Registration does not
         change the numerical solve or its result. Facts use a separate LRU capped
         at routing_cache_bytes (default 4 MiB). Empty work,
-        disabled routing residency or oversized
-        facts may leave no entry. A later reuse() returns False after eviction or
+        disabled routing residency, oversized facts or the first auto GPU use
+        of a dimension may leave no entry. A later reuse() returns False after eviction or
         a route change; the caller must then evolve the full acquire again.
         budget: finite positive absolute population and low-four error allowance;
         otherwise raises ValueError. A closed engine raises RuntimeError.
@@ -771,8 +791,7 @@ class Engine:
                     geometry = PrefixResolver(
                         geometry, kernels, context, cancel, capture=capture_run
                     ).resolve(pool, self._chunks)
-                    if self._opencl is not None:
-                        context = replace(context, opencl=self._opencl)
+                    context = replace(context, opencl=self._opencl)
                     dispatch = classify(
                         geometry,
                         kernels,
@@ -789,7 +808,8 @@ class Engine:
                         kernels,
                         pool,
                         self._chunks,
-                        timeline_workers=workers if self._inventory_chunks else None,
+                        workers=workers,
+                        inventory_chunks=self._inventory_chunks,
                     )
             if telemetry:
                 result = replace(
@@ -798,8 +818,24 @@ class Engine:
             if cancel.is_set():
                 raise Cancelled()
             result.paths.warn_exceeded(stacklevel=3)
-            self._routing_reuse.add(reuse_key, reuse_snapshot)
+            if self._first_auto_gpu_use(
+                result.densities.shape[1], used=schedule.opencl_used
+            ):
+                # Prices for this dimension just changed. A cached result may
+                # have used CPU at the cold price, including an earlier wave here.
+                self._routing_reuse.clear()
+            else:
+                self._routing_reuse.add(reuse_key, reuse_snapshot)
             return result
+
+    def _first_auto_gpu_use(self, dimension: int, *, used: bool) -> bool:
+        backend = self._opencl
+        return (
+            used
+            and backend is not None
+            and not backend.forced
+            and backend.record_use(dimension)
+        )
 
     def inspect_dispatch(
         self,

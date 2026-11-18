@@ -20,7 +20,7 @@ from .secular import FluxWaveform, ModelSource
 from .workplan import WorkPlan
 
 if TYPE_CHECKING:
-    from .kernels._dop853_opencl import OpenCLDOP853
+    from .kernels._dop853_opencl import OpenCLBackend, OpenCLDOP853
 
 
 @dataclass(frozen=True)
@@ -272,7 +272,7 @@ class KernelContext:
     Standalone callers supply a fresh WorkPlan and close it after use.
     families is the immutable acquire-wide family allowlist for dispatch;
     None preserves unrestricted selection. Kernels retain their original guards.
-    opencl borrows the Engine's DOP853 runner during ordinary timeline work;
+    opencl borrows the Engine's DOP853 backend during ordinary timeline work;
     None plans and runs CPU-only work (including shared prefixes).
     """
 
@@ -280,7 +280,7 @@ class KernelContext:
     budget: float
     work_plan: WorkPlan
     families: frozenset[str] | None = None
-    opencl: OpenCLDOP853 | None = None
+    opencl: OpenCLBackend | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:

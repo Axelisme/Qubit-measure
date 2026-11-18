@@ -38,6 +38,10 @@ class FamilyRouting:
     opencl_rows: physical endpoints executed by OpenCL within this family.
         Zero for CPU-only calls and reuse hits. The backend does not rename
         the family or change the logical row counts.
+    opencl_detection_error: reason automatic DOP853 device detection or the
+        active dimension's compilation failed, or None when neither failed.
+        Populated only for DOP853. Merged reports retain the first nonempty
+        reason in input order.
     CPU values exclude dispatch, geometry, ADC and I/O. All values are
     nonnegative; actual_cpu_s is the sum of the two measured phases.
     """
@@ -53,6 +57,7 @@ class FamilyRouting:
     admission_rows: int = 0
     duration_ns: float = 0.0
     opencl_rows: int = 0
+    opencl_detection_error: str | None = None
 
     @property
     def actual_cpu_s(self) -> float:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
 import numpy as np
 from joblib import delayed
@@ -15,6 +16,7 @@ from zcu_tools.simulate.boundary import CancellationQuery
 from ._capture import CaptureRun
 from ._dispatch import Dispatch, Selection, classify, prepare
 from ._dispatch import diagnostics as dispatch_diagnostics
+from ._dop853_dispatch import opencl_preferred
 from ._gain_plan import admit_shared_builds
 from ._parallel import Executor
 from ._planning import Geometry
@@ -22,6 +24,9 @@ from ._prepare_keys import group_keys
 from .engine import Cancelled, EvolutionResult, PathDiagnostics
 from .kernel import ApplyContext, Kernel, KernelContext, Prepared, RowPlan, SegmentTable
 from .state import transform_density
+
+if TYPE_CHECKING:
+    from .kernels._dop853_opencl import OpenCLDOP853
 
 
 @dataclass(frozen=True)
@@ -150,6 +155,7 @@ class Schedule:
         self.source, self.budget = context.source, context.budget
         self.table = geometry.table
         self.batch_static_maps = False
+        self.opencl_used = False
         self.initial_density = (
             context.source.initial_density
             if initial_density is None
@@ -352,19 +358,20 @@ class Schedule:
         pool: Executor,
         chunks: int,
         *,
-        timeline_workers: int | None = None,
+        workers: int = 1,
+        inventory_chunks: bool = False,
     ) -> EvolutionResult:
         """Return point-ordered densities and aggregate post-apply diagnostics.
 
-        chunks fixes prepare partitioning. timeline_workers opts into complete-
-        inventory timeline batching; None retains the fixed chunks for both.
+        chunks fixes prepare partitioning. inventory_chunks opts into complete-
+        inventory timeline batching; False keeps fixed chunks for both.
+        workers is the available CPU width for timeline batching and pricing.
         """
         self.kernels = kernels
+        self.workers = workers
         entries = _deduplicate(self.table, self.dispatch, kernels, self.context)
         timeline_chunks = (
-            chunks
-            if timeline_workers is None
-            else self.timeline_chunks(timeline_workers, chunks)
+            self.timeline_chunks(workers, chunks) if inventory_chunks else chunks
         )
         shared = self.prepare_shared(entries, pool, chunks)
         count = len(self.geometry.points)
@@ -409,16 +416,52 @@ class Schedule:
             steps.clear()
             if not waves:
                 return results
-            self._apply_opencl(waves)
-            steps = list(pool(delayed(wave.chunk.run)() for wave in waves))
+            rows = np.concatenate([wave.chunk.cursor[wave.slots] for wave in waves])
+            order = np.argsort(rows)
+            runner = self._opencl_runner(rows[order])
+            if runner is not None:
+                self._apply_opencl(waves, rows[order], order, runner)
+                self.opencl_used = True
+            steps = list(
+                pool(
+                    delayed(wave.chunk.run)(wave.slots if runner is None else None)
+                    for wave in waves
+                )
+            )
 
-    def _apply_opencl(self, waves: Sequence[_OpenCLWave]) -> None:
-        # Workers have joined at the next GPU row (or at readout). Assemble
-        # ready inputs across chunks before borrowing the runner on this thread.
+    def _opencl_runner(self, rows: NDArray[np.int64]) -> OpenCLDOP853 | None:
+        backend = self.context.opencl
+        if backend is None:
+            raise RuntimeError(
+                "OpenCL candidates reached the scheduler without a backend"
+            )
         if self.cancel.is_set():
             raise Cancelled()
-        rows = np.concatenate([wave.chunk.cursor[wave.slots] for wave in waves])
-        states = np.concatenate([wave.chunk.states[wave.slots] for wave in waves])
+        dimension = self.initial_density.shape[0]
+        if not backend.forced and not opencl_preferred(
+            self.table,
+            rows,
+            dimension,
+            self.workers,
+            warm=self.opencl_used or backend.used_dimension(dimension),
+        ):
+            return None
+        return backend.prepare(dimension)
+
+    def _apply_opencl(
+        self,
+        waves: Sequence[_OpenCLWave],
+        rows: NDArray[np.int64],
+        order: NDArray[np.int64],
+        runner: OpenCLDOP853,
+    ) -> None:
+        # Stable global row order makes GPU batching independent of worker
+        # partitioning, even when a port pair spans more than one buffer batch.
+        if self.cancel.is_set():
+            raise Cancelled()
+        states = np.concatenate(
+            [wave.chunk.opencl_inputs(wave.slots) for wave in waves]
+        )[order]
         kernel = self.kernels["dop853"]
         keys, first, indices = np.unique(
             kernel.prepare_keys(self.table, rows, self.context),
@@ -437,16 +480,18 @@ class Schedule:
                     ApplyContext(
                         self.budget,
                         work_plan=self.context.work_plan,
-                        opencl=self.context.opencl,
+                        opencl=runner,
                     ),
                 )
         except RuntimeError as error:
             point = self.geometry.points[self.table.timeline[rows[0]]]
             raise RuntimeError(f"point {point} segment {rows[0]}: {error}") from error
+        wave_order = np.empty_like(states)
+        wave_order[order] = states
         offset = 0
         for wave in waves:
             end = offset + len(wave.slots)
-            wave.chunk.states[wave.slots] = states[offset:end]
+            wave.chunk.states[wave.slots] = wave_order[offset:end]
             wave.chunk.cursor[wave.slots] += 1
             offset = end
 
@@ -478,12 +523,21 @@ class Schedule:
                 exceeded.update(prefix.exceeded_by_kernel)
                 for name in prefix.points_by_class:
                     points.setdefault(name, set()).add(point)
+        routing = self.context.work_plan.routing.snapshot(segments, durations)
+        backend = self.context.opencl
+        failure = (
+            None if backend is None else backend.failure(self.initial_density.shape[0])
+        )
+        if failure is not None and "dop853" in routing:
+            routing["dop853"] = replace(
+                routing["dop853"], opencl_detection_error=failure
+            )
         return PathDiagnostics(
             segments,
             {name: len(timelines) for name, timelines in points.items()},
             exceeded,
             float(np.max(np.abs(np.trace(output, axis1=1, axis2=2) - 1))),
-            routing=self.context.work_plan.routing.snapshot(segments, durations),
+            routing=routing,
             duration_ns_by_kernel=durations,
             point_members={
                 name: tuple(sorted(int(self.geometry.points[i]) for i in timelines))
@@ -828,26 +882,46 @@ class _Chunk:
             self.binding[rows] = -1
             self.bindings.pop()
 
-    def run(self) -> _ChunkResult | _OpenCLWave:
-        """Run CPU rows until done or until every pending slot needs the GPU."""
+    def opencl_inputs(self, slots: NDArray[np.int64]) -> NDArray[np.complex128]:
+        """Convert ready rows to their model bases and return their GPU inputs."""
+        self._basis(slots, self.table.level[self.cursor[slots]])
+        return self.states[slots]
+
+    def run(
+        self, cpu_slots: NDArray[np.int64] | None = None
+    ) -> _ChunkResult | _OpenCLWave:
+        """Resume CPU work until done or until all pending slots offer OpenCL.
+
+        cpu_slots names the rejected ready wave to advance on CPU before later
+        ready rows are considered; None starts at the next undecided row.
+        """
         if self.schedule.cancel.is_set():
             raise Cancelled()
+        if cpu_slots is not None:
+            self._apply_slots(cpu_slots)
         gpu = self.dispatch.opencl
+        backend = self.schedule.context.opencl
         while np.any(self.cursor < self.end):
             pending = np.flatnonzero(self.cursor < self.end)
-            if gpu is not None:
+            if gpu is not None and backend is not None:
                 waiting = gpu[self.cursor[pending]]
-                if waiting.all():
-                    self._basis(pending, self.table.level[self.cursor[pending]])
-                    return _OpenCLWave(self, pending)
-                pending = pending[~waiting]
-            binding_ids = self.binding[self.cursor[pending]]
-            for index in np.unique(binding_ids):
-                slots = pending[binding_ids == index]
-                if index < 0:
-                    for slot in slots:
-                        self._apply_local(int(slot))
-                else:
-                    self._apply(int(index), slots)
+                if (
+                    waiting.any()
+                    and backend.candidate(self.states.shape[1]) is not None
+                ):
+                    if waiting.all():
+                        return _OpenCLWave(self, pending)
+                    pending = pending[~waiting]
+            self._apply_slots(pending)
         self._basis(np.arange(len(self.points)), np.zeros_like(self.level))
         return _ChunkResult(self.points, self.states, self.exceeded)
+
+    def _apply_slots(self, pending: NDArray[np.int64]) -> None:
+        binding_ids = self.binding[self.cursor[pending]]
+        for index in np.unique(binding_ids):
+            slots = pending[binding_ids == index]
+            if index < 0:
+                for slot in slots:
+                    self._apply_local(int(slot))
+            else:
+                self._apply(int(index), slots)

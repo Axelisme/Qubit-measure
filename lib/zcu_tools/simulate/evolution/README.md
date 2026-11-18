@@ -377,7 +377,7 @@ compares the remaining admissible families by price.
 `CaptureBuffer()` is a caller-owned in-memory recording. Pass it to
 `Engine.evolve(..., capture=buffer)` and read `buffer.records` after return or
 failure. The default `capture=None` does not freeze inputs or collect routes.
-Engine never writes a file. After all evolves return or raise, call
+Capture buffering does not write files. After all evolves return or raise, call
 `write_capture(buffer)` to publish the accumulated records. Explicit-path
 consumers can still use `write_frozen_manifest(path, buffer.records)`.
 
@@ -583,7 +583,8 @@ Full-map accuracy and wall measurements are separate validation work.
 
 `Engine.evolve(..., telemetry=True)` adds immutable `FamilyRouting` values to
 `result.paths.routing`. The default is False, with no thread CPU clock reads and
-an empty mapping. Evolution never writes files. `paths.frontend_cpu_s` separately
+an empty mapping. Telemetry does not write files. OpenCL device detection and
+program builds can access the simulator user cache. `paths.frontend_cpu_s` separately
 reports calling-thread geometry and WorkPlan CPU.
 Common-frame reports also count `prepare_builds` and `admission_rows`.
 Floquet's `prepare_builds` counts exact-key frame construction attempts,
@@ -606,7 +607,10 @@ Rejections count actual numerical guard refusals, not cost-based skips or planne
 feasibility probes. A shared prefix executes once although logical rows include
 all adopting timelines. Caller-retained complete preparation hits report logical
 rows as `cache_hits`, with zero CPU, rejected rows and estimated work.
-Engine evolves always execute numerical work.
+Engine evolves always execute numerical work. For `dop853`, `opencl_rows`
+counts endpoints computed on GPU and `opencl_detection_error` reports why
+automatic detection or the active dimension's compilation failed. It is
+`None` when neither failed.
 
 `estimated_cost` uses **relative scheduling units**, not seconds. The existing
 constant two-tone plan supplies seconds estimates for selected Floquet/DOP853
@@ -1271,8 +1275,8 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v8`. This revision replaces the
-single full-duration bath split for dissipative DC with a full Lindblad channel.
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v9`. With the default `backend="auto"`,
+eligible `dop853` rows can use the mixed-precision GPU solver.
 `simulators.ftf.environment` owns private replay and checks backend, model,
 numerical, RNG and dependency versions before
 recomputing a round. Evolution does not persist densities or offline tables

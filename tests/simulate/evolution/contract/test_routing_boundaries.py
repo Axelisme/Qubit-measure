@@ -5,13 +5,20 @@ Pinned calls cannot restore admission; no numerical fix is assumed to reopen it.
 """
 
 import sys
+from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, NoValidKernel
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EnvelopeSpec,
+    NoValidKernel,
+    TimelineBatch,
+)
 
 from .accuracy_cases import (
     AccuracyCase,
@@ -22,6 +29,7 @@ from .accuracy_cases import (
     timeline,
 )
 from .reference import converged_reference, density_error
+from .synthetic_models import synthetic_model
 
 
 def test_explicit_opencl_raises_during_construction_without_a_device(
@@ -38,6 +46,214 @@ def test_explicit_opencl_raises_during_construction_without_a_device(
         monkeypatch.setattr(cl, "get_platforms", list)
     with pytest.raises(RuntimeError, match="cl_khr_fp64"):
         Engine(1, backend="opencl")
+
+
+def test_auto_probes_only_on_eligible_work_and_retains_cpu_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    def no_platforms() -> list[object]:
+        nonlocal attempts
+        attempts += 1
+        return []
+
+    # Observe discovery at the third-party boundary, without requiring pyopencl.
+    monkeypatch.setitem(
+        sys.modules, "pyopencl", SimpleNamespace(get_platforms=no_platforms)
+    )
+    case = accuracy_case("sampled_gaussian_9")
+    clipped = replace(
+        case.batch,
+        tracks=tuple(
+            replace(track, duration_ns=track.duration_ns + 10)
+            for track in case.batch.tracks
+        ),
+    )
+    with (
+        closing(Engine(1, backend="cpu", families=case.families)) as cpu,
+        closing(Engine(2, families=case.families)) as auto,
+    ):
+        auto.evolve(case.source, (clipped,), telemetry=True)
+        expected = cpu.evolve(case.source, (case.batch,), telemetry=True)
+        assert attempts == 0
+        for _ in range(2):
+            actual = auto.evolve(case.source, (case.batch,), telemetry=True)
+            assert actual.densities.tobytes() == expected.densities.tobytes()
+            report = actual.paths.routing["dop853"]
+            assert report.opencl_rows == 0
+            assert report.opencl_detection_error is not None
+            assert "cl_khr_fp64" in report.opencl_detection_error
+    assert attempts == 1
+
+
+@pytest.mark.requires_opencl
+def test_auto_rejects_a_wrong_device_endpoint_and_remembers_the_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pyopencl as cl
+
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path))
+    case = accuracy_case("sampled_gaussian_9")
+    copy = cl.enqueue_copy
+
+    def corrupt_download(
+        queue: cl.CommandQueue,
+        dest: np.ndarray | cl.Buffer,
+        src: np.ndarray | cl.Buffer,
+        *,
+        is_blocking: bool,
+    ) -> cl.Event:
+        if isinstance(dest, cl.Buffer) and isinstance(src, np.ndarray):
+            return copy(queue, dest, src, is_blocking=is_blocking)
+        if isinstance(dest, np.ndarray) and isinstance(src, cl.Buffer):
+            event = copy(queue, dest, src, is_blocking=is_blocking)
+            if dest.dtype == np.complex64:
+                dest.fill(0)
+                dest[:, 0, 0] = 1
+            return event
+        raise AssertionError("expected host/device transfer")
+
+    with closing(Engine(1, backend="cpu", families=case.families)) as cpu:
+        expected = cpu.evolve(case.source, (case.batch,))
+    with monkeypatch.context() as driver:
+        driver.setattr(cl, "enqueue_copy", corrupt_download)
+        with closing(Engine(1, families=case.families)) as auto:
+            first = auto.evolve(case.source, (case.batch,), telemetry=True)
+    with closing(Engine(1, families=case.families)) as restarted:
+        second = restarted.evolve(case.source, (case.batch,), telemetry=True)
+    for result in (first, second):
+        report = result.paths.routing["dop853"]
+        assert report.opencl_detection_error is not None
+        assert "self-test" in report.opencl_detection_error
+        assert report.opencl_rows == 0
+        assert result.densities.tobytes() == expected.densities.tobytes()
+    assert (
+        first.paths.routing["dop853"].opencl_detection_error
+        == second.paths.routing["dop853"].opencl_detection_error
+    )
+
+
+def _dense_batch(count: int) -> TimelineBatch:
+    dense = timeline(count, 100.0)
+    knots = np.linspace(0, 100.0, 960)
+    envelope = EnvelopeSpec(
+        "sampled", np.sin(np.pi * knots / 100).astype(complex), knots
+    )
+    return replace(
+        dense,
+        tracks=(
+            drive_track(dense, envelope, frequency=0.129, gain=0.003),
+            drive_track(dense, envelope, frequency=0.17, gain=-0.007),
+        ),
+    )
+
+
+@pytest.mark.requires_opencl
+def test_auto_prices_small_and_wide_dense_acquires(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path))
+    small = accuracy_case("sampled_gaussian_9")
+    dense = _dense_batch(12)
+    source = coherent_source(synthetic_model(32))
+    with (
+        closing(Engine(2, backend="cpu", families=small.families)) as cpu,
+        closing(Engine(2, families=small.families)) as auto,
+    ):
+        small_cpu = cpu.evolve(small.source, (small.batch,))
+        small_auto = auto.evolve(small.source, (small.batch,), telemetry=True)
+        assert small_auto.paths.routing["dop853"].opencl_rows == 0
+        assert small_auto.paths.routing["dop853"].opencl_detection_error is None
+        assert small_auto.densities.tobytes() == small_cpu.densities.tobytes()
+        dense_cpu = cpu.evolve(source, (dense,))
+        dense_auto = auto.evolve(source, (dense,), telemetry=True)
+        assert dense_auto.paths.routing["dop853"].opencl_rows == len(dense.points)
+        assert density_error(dense_auto.densities, dense_cpu.densities) < 1e-3
+
+
+@pytest.mark.requires_opencl
+def test_disk_cache_does_not_replace_an_engines_opencl_price_history(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pyopencl as cl
+
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path))
+    source = coherent_source(synthetic_model(32))
+    narrow, wide = _dense_batch(1), _dense_batch(12)
+    with closing(Engine(2, families=("dop853",))) as auto:
+        cold = auto.evolve(source, (narrow,), telemetry=True, reuse_key=b"narrow")
+        assert auto.reuse(source, b"narrow")
+        auto.evolve(source, (wide,))
+        assert not auto.reuse(source, b"narrow")
+        warm = auto.evolve(source, (narrow,), telemetry=True)
+    assert cold.paths.routing["dop853"].opencl_rows == 0
+    assert warm.paths.routing["dop853"].opencl_rows == 1
+
+    def bad_launch(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("injected GPU execution failure")
+
+    monkeypatch.setattr(cl, "Kernel", bad_launch)
+    with closing(Engine(2, families=("dop853",))) as restarted:
+        again = restarted.evolve(source, (narrow,), telemetry=True)
+        assert again.paths.routing["dop853"].opencl_detection_error is None
+        assert again.paths.routing["dop853"].opencl_rows == 0
+        assert again.densities.tobytes() == cold.densities.tobytes()
+        with pytest.raises(RuntimeError, match="injected GPU execution failure"):
+            restarted.evolve(source, (wide,))
+
+
+@pytest.mark.requires_opencl
+def test_auto_isolates_a_failing_dimension_build(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pyopencl as cl
+
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path))
+    build = cl.Program.build
+    failures = 0
+
+    def build_device_program(
+        program: cl.Program,
+        options: str | Sequence[str] | None = None,
+        devices: Sequence[cl.Device] | None = None,
+        cache_dir: str | None = None,
+    ) -> cl.Program:
+        nonlocal failures
+        defines = options.split() if isinstance(options, str) else options or ()
+        if "-DD=32" in defines:
+            failures += 1
+            raise RuntimeError("injected d32 compiler rejection")
+        return build(program, options=options, devices=devices, cache_dir=cache_dir)
+
+    monkeypatch.setattr(cl.Program, "build", build_device_program)
+    source = coherent_source(synthetic_model(32))
+    good_source = coherent_source(synthetic_model(24))
+    batch = _dense_batch(12)
+    with (
+        closing(Engine(2, families=("dop853",))) as auto,
+        closing(Engine(2, families=("dop853",), backend="cpu")) as cpu,
+    ):
+        expected = cpu.evolve(source, (batch,))
+        declined = auto.evolve(source, (batch,), telemetry=True)
+        supported = auto.evolve(good_source, (_dense_batch(24),), telemetry=True)
+    with closing(Engine(2, families=("dop853",))) as restarted:
+        cached = restarted.evolve(source, (batch,), telemetry=True)
+    for result in (declined, cached):
+        assert result.densities.tobytes() == expected.densities.tobytes()
+        report = result.paths.routing["dop853"]
+        assert report.opencl_rows == 0
+        assert report.opencl_detection_error is not None
+        assert "dimension 32" in report.opencl_detection_error
+        assert "injected d32 compiler rejection" in report.opencl_detection_error
+    assert failures == 1
+    assert supported.paths.routing["dop853"].opencl_rows == 24
+    assert supported.paths.routing["dop853"].opencl_detection_error is None
+    with (
+        closing(Engine(2, families=("dop853",), backend="opencl")) as forced,
+        pytest.raises(RuntimeError, match="injected d32 compiler rejection"),
+    ):
+        forced.evolve(source, (batch,))
 
 
 @pytest.mark.requires_opencl
