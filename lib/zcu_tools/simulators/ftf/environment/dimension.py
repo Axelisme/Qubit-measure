@@ -31,13 +31,16 @@ _DROP_BUDGET = 0.5 * EVOLUTION_BUDGET
 
 @dataclass(frozen=True)
 class DimensionSelection:
-    """Selected state count, maximum discarded element and verification error.
+    """Selected state count and the diagnostics for that acquire's pilot.
 
-    drop is None if the pilot was skipped. error is None unless one smaller
-    model was verified. An upper-basis selection discards no elements.
+    pilot_point is the zero-based C-order point in the acquire, or None if
+    skipped. drop is the largest discarded density element magnitude, zero
+    at the upper basis and None without a pilot. error is the zero-padded
+    verification's maximum absolute density error, or None if not attempted.
     """
 
     dimension: int
+    pilot_point: int | None = None
     drop: float | None = None
     error: float | None = None
 
@@ -203,43 +206,26 @@ def pilot_dimension(
     batches = tuple(plan.batch for plan in plans)
     index, row = _pilot_location(batches, facts.source)
     batch = _slice_batch(batches[index], slice(row, row + 1))
+    point = int(batch.points[0])
     reference = _isolated_evolve(engine, facts.source, batch, options)
     upper = reference.densities[0]
     k, drop = _candidate(upper)
     if k == len(upper):
-        return DimensionSelection(k, drop), facts.source, reference
+        return (
+            DimensionSelection(k, pilot_point=point, drop=drop),
+            facts.source,
+            reference,
+        )
     reduced = evolution_source(facts, settings, k)
     estimate = _isolated_evolve(engine, reduced, batch, options).densities[0]
     padded = np.zeros_like(upper)
     padded[:k, :k] = estimate
     error = float(np.max(np.abs(padded - upper)))
     if error <= EVOLUTION_BUDGET:
-        return DimensionSelection(k, drop, error), reduced, reference
-    return DimensionSelection(len(upper), 0.0, error), facts.source, reference
-
-
-def replay_reference(
-    engine: Engine,
-    plans: tuple[FTFTemplatePlan, ...],
-    upper_source: ModelSource,
-    point: int,
-    *,
-    options: CavityEvolutionOptions,
-) -> EvolutionResult:
-    """Recompute a saved C-order point at the upper basis without selecting N.
-
-    Uses the same isolated evolution as the recording. A point absent from
-    the terminal-only plans or a plan requiring continuation raises ValueError.
-    """
-    if not can_pilot(plans):
-        raise ValueError("private replay pilot point requires terminal-only plans")
-    for plan in plans:
-        rows = np.flatnonzero(plan.batch.points == point)
-        if len(rows):
-            row = int(rows[0])
-            batch = _slice_batch(plan.batch, slice(row, row + 1))
-            return _isolated_evolve(engine, upper_source, batch, options)
-    raise ValueError(f"private replay pilot point {point} is missing from the plans")
+        selection = DimensionSelection(k, pilot_point=point, drop=drop, error=error)
+        return selection, reduced, reference
+    selection = DimensionSelection(len(upper), pilot_point=point, drop=0.0, error=error)
+    return selection, facts.source, reference
 
 
 def _without_reference(

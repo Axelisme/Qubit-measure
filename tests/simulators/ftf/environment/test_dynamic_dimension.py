@@ -92,6 +92,11 @@ class PilotEngine(Engine):
         )
 
 
+def _dimension_extras(logs: Path) -> dict[str, object]:
+    (summary,) = logs.glob("routing-*.jsonl")
+    return json.loads(summary.read_text())["extras"]
+
+
 def _sample(
     engine: Engine, acquire: AcquireRequest, upper: int, logs: Path
 ) -> tuple[RoundStatistics, dict[str, object]]:
@@ -111,8 +116,7 @@ def _sample(
     finally:
         source.close()
 
-    (summary,) = logs.glob("routing-*.jsonl")
-    return result, json.loads(summary.read_text())["extras"]
+    return result, _dimension_extras(logs)
 
 
 def test_pilot_keeps_a_state_with_small_population_but_large_coherence(
@@ -130,6 +134,7 @@ def test_pilot_keeps_a_state_with_small_population_but_large_coherence(
     assert result.state_counts[7, 1] == 0
     assert result.state_counts[7, 0] > 32000
     assert extras["ftf.selected_dimension"] == 13
+    assert extras["ftf.pilot_point"] == 7
     assert extras["ftf.pilot_drop"] == 0.0
     assert extras["ftf.pilot_error"] == pytest.approx(4e-4)
     duration = extras["ftf.pilot_wall_s"]
@@ -151,6 +156,7 @@ def test_upper_selection_reuses_the_reference_row_without_another_attempt(
     np.testing.assert_array_equal(result.state_counts[:7, 12], acquire.reps)
     assert result.state_counts[7, 12] == 0
     assert extras["ftf.selected_dimension"] == 16
+    assert extras["ftf.pilot_point"] == 7
     assert extras["ftf.pilot_drop"] == 0.0
     if eligible:
         assert extras["ftf.pilot_error"] == pytest.approx(1.0, abs=2e-6)
@@ -191,6 +197,7 @@ def test_small_acquire_uses_upper_without_a_pilot(
     )
     assert result.state_counts.shape == (points, upper)
     assert extras["ftf.selected_dimension"] == upper
+    assert extras["ftf.pilot_point"] is None
     assert extras["ftf.pilot_wall_s"] == 0.0
     assert extras["ftf.pilot_drop"] is None
     assert extras["ftf.pilot_error"] is None
@@ -219,14 +226,18 @@ def test_readout_continuation_uses_upper_across_whole_acquire(
         source.close()
 
 
-def test_round_keeps_the_selected_dimension_but_uses_live_dc() -> None:
+def test_round_keeps_the_selected_dimension_but_uses_live_dc(tmp_path: Path) -> None:
     engine = PilotEngine()
     numeric = _settings(16)
     numeric = numeric.model_copy(
         update={"chip": numeric.chip.model_copy(update={"temperature_k": 0.3})}
     )
     source = FTFSource(
-        numeric, DeviceManager(), soccfg=profile_soccfg("ftf"), engine=engine
+        numeric,
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=engine,
+        telemetry=RoutingTelemetry(tmp_path),
     )
     acquire = _request()
     before, after = snapshot(), snapshot(0.8)
@@ -241,6 +252,11 @@ def test_round_keeps_the_selected_dimension_but_uses_live_dc() -> None:
         upper = source.model_facts(after).source
         upper_model = upper.model((0, 0, 0))
         initial = upper.initial_density[:13, :13]
+        rounds = tuple(
+            RoundRequest(acquire, state, index)
+            for index, state in enumerate((before, before, before, after))
+        )
+        source.finish_acquire(AcquireOutcome(rounds, 1.0, 0.0, True))
         next_acquire = source.open_acquire(
             replace(acquire, sequence=acquire.sequence + 1)
         )
@@ -260,6 +276,9 @@ def test_round_keeps_the_selected_dimension_but_uses_live_dc() -> None:
     )
     assert initial.trace().real < 1.0
     np.testing.assert_array_equal(reduced_initial, initial / initial.trace().real)
+    extras = _dimension_extras(tmp_path)
+    assert extras["ftf.selected_dimension"] == 13
+    assert extras["ftf.pilot_point"] == 7
 
 
 def test_equal_drive_uses_the_far_carrier_endpoint(tmp_path: Path) -> None:
@@ -279,5 +298,6 @@ def test_equal_drive_uses_the_far_carrier_endpoint(tmp_path: Path) -> None:
         for index, plan in enumerate(acquire.templates)
     )
     engine = PilotEngine()
-    _sample(engine, replace(acquire, templates=templates), 16, tmp_path)
+    _, extras = _sample(engine, replace(acquire, templates=templates), 16, tmp_path)
     assert engine.calls[:2] == [(16, (0,)), (13, (0,))]
+    assert extras["ftf.pilot_point"] == 0

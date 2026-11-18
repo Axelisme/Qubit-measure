@@ -1,7 +1,6 @@
 """Author-opted persistent round replay through acquisition and detached inputs."""
 
 import sys
-from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
@@ -19,10 +18,9 @@ from zcu_tools.simulate.boundary import (
     AcquireRequest,
     PulseEnvelope,
     RoundRequest,
-    RoundSignals,
     RoundStatistics,
 )
-from zcu_tools.simulate.evolution import Engine, ModelSource, TimelineBatch
+from zcu_tools.simulate.evolution import Engine
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import (
     FTFAcquisitionOptions,
@@ -30,17 +28,12 @@ from zcu_tools.simulators.ftf.environment import (
     ftf,
     replay_round,
 )
-from zcu_tools.simulators.replay import read_replay, replay_paths, save_replay
+from zcu_tools.simulators.replay import read_replay, replay_paths
 
 from tests.core._simulation import ticks
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.simulators.ftf.config._data import ftf_document
-from tests.simulators.ftf.environment._dimension_cases import (
-    dimension_request,
-    dimension_settings,
-)
-from tests.simulators.ftf.environment._templates import snapshot
 
 pytestmark = pytest.mark.sim
 
@@ -332,7 +325,6 @@ def test_replay_freezes_drifted_settings_and_identity_without_clock(
         "ftf-segment-v10",
         "ftf-segment-v11",
         "ftf-segment-v12",
-        "ftf-segment-v13",
     ],
 )
 def test_replay_rejects_archive_from_obsolete_numeric_backend(
@@ -371,177 +363,11 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
     old_versions = tuple(
         (name, backend if name == "backend" else value)
         for name, value in saved.acquire.versions
-        if name != "selected_dimension"
     )
     legacy = saved.acquire.model_copy(update={"versions": old_versions})
     path = save_replay(tmp_path / "legacy", legacy, saved.round.snapshot, 0)
     with pytest.raises(ValueError, match="version mismatch"):
         replay_round(path, soccfg=profile_soccfg("ftf"))
-
-
-def _integrated(result: IntegratedRound | RoundSignals) -> IntegratedRound:
-    if not isinstance(result, IntegratedRound):
-        raise AssertionError("integrated FTF replay must retain raw shots")
-    return result
-
-
-@pytest.fixture
-def evolution_sizes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, int]]:
-    # Replay returns I/Q, not its Engine inputs. Observe the real call
-    # boundary to distinguish an identical draw from repeating the pilot.
-    calls: list[tuple[int, int]] = []
-    evolve = Engine.evolve
-
-    def observe(
-        engine: Engine, model: ModelSource, batches: Sequence[TimelineBatch], **kwargs
-    ):
-        calls.append(
-            (len(model.initial_density), sum(len(batch.points) for batch in batches))
-        )
-        return evolve(engine, model, batches, **kwargs)
-
-    monkeypatch.setattr(Engine, "evolve", observe)
-    return calls
-
-
-def _assert_integrated_bits(
-    actual: IntegratedRound, expected: IntegratedRound, acquire: AcquireRequest
-) -> None:
-    assert (
-        actual.statistics.state_counts.tobytes()
-        == expected.statistics.state_counts.tobytes()
-    )
-    for obtained, recorded in zip(
-        actual.statistics.channels, expected.statistics.channels, strict=True
-    ):
-        assert obtained.channel == recorded.channel
-        assert obtained.sums.tobytes() == recorded.sums.tobytes()
-    actual_raw = actual.raw.materialize(acquire.reps, acquire.avg_level)
-    expected_raw = expected.raw.materialize(acquire.reps, acquire.avg_level)
-    assert actual_raw.keys() == expected_raw.keys()
-    for channel in actual_raw:
-        assert actual_raw[channel].tobytes() == expected_raw[channel].tobytes()
-
-
-@pytest.mark.parametrize("index", [0, 1], ids=["first", "later"])
-def test_replay_keeps_round_shape_and_acquire_dimension_across_dc(
-    tmp_path: Path, evolution_sizes: list[tuple[int, int]], index: int
-) -> None:
-    soccfg = profile_soccfg("ftf")
-    settings = dimension_settings(16).with_telemetry(enabled=False)
-    settings = settings.model_copy(
-        update={"chip": settings.chip.model_copy(update={"temperature_k": 0.053})}
-    )
-    acquire = dimension_request()
-    before, after = snapshot(-1.0), snapshot(1.0)
-    archive = tmp_path / "archive"
-    with closing(
-        FTFSource(
-            settings, DeviceManager(), soccfg=soccfg, engine=Engine(1, backend="cpu")
-        )
-    ) as independent_source:
-        independent = independent_source.open_acquire(acquire)
-        independent.sample_round(after, 0)
-        assert independent.dimension is not None
-        independent_n = independent.dimension.dimension
-
-    with closing(
-        FTFSource(
-            settings,
-            DeviceManager(),
-            soccfg=soccfg,
-            engine=Engine(1, backend="cpu"),
-            acquisition=FTFAcquisitionOptions(private_replay=archive),
-        )
-    ) as source:
-        session = source.open_acquire(acquire)
-        first = _integrated(session.sample_round(before, 0))
-        assert session.dimension is not None
-        saved_n = session.dimension.dimension
-        assert saved_n < independent_n < settings.numerics.truncation.retained_levels
-        second = _integrated(session.sample_round(after, 1))
-    (target,) = [
-        path for path in replay_paths(archive) if read_replay(path).round.index == index
-    ]
-
-    evolution_sizes.clear()
-    actual = _integrated(replay_round(target, soccfg=soccfg))
-    expected_sizes = [(16, 1), (saved_n, 7)] if index == 0 else [(saved_n, 8)]
-    assert evolution_sizes == expected_sizes
-    _assert_integrated_bits(actual, (first, second)[index], acquire)
-
-
-def test_replay_first_round_at_upper_recomputes_the_recorded_split(
-    tmp_path: Path, evolution_sizes: list[tuple[int, int]]
-) -> None:
-    soccfg = profile_soccfg("ftf")
-    settings = dimension_settings(16).with_telemetry(enabled=False)
-    settings = settings.model_copy(
-        update={"chip": settings.chip.model_copy(update={"temperature_k": 0.3})}
-    )
-    acquire = dimension_request()
-    with closing(
-        FTFSource(
-            settings,
-            DeviceManager(),
-            soccfg=soccfg,
-            engine=Engine(1, backend="cpu"),
-            acquisition=FTFAcquisitionOptions(private_replay=tmp_path),
-        )
-    ) as source:
-        expected = _integrated(source.open_acquire(acquire).sample_round(snapshot(), 0))
-    assert evolution_sizes == [(16, 1), (16, 7)]
-    (path,) = replay_paths(tmp_path)
-
-    evolution_sizes.clear()
-    actual = _integrated(replay_round(path, soccfg=soccfg))
-    assert evolution_sizes == [(16, 1), (16, 7)]
-    _assert_integrated_bits(actual, expected, acquire)
-
-
-@pytest.mark.parametrize(
-    ("selected", "manifest", "error"),
-    [
-        (None, None, "missing selected dimension"),
-        ("3", None, "selected dimension exceeds"),
-        ("2", "ftf-v14:pilot-point:2", "pilot point.*out of range"),
-    ],
-)
-def test_v14_replay_rejects_invalid_dimension_or_pilot_point(
-    tmp_path: Path, selected: str | None, manifest: str | None, error: str
-) -> None:
-    from tests.simulators.ftf.environment._templates import request, settings
-
-    soccfg = profile_soccfg("ftf")
-    archive = tmp_path / "original"
-    with closing(
-        FTFSource(
-            settings().with_telemetry(enabled=False),
-            DeviceManager(),
-            soccfg=soccfg,
-            engine=Engine(1, backend="cpu"),
-            acquisition=FTFAcquisitionOptions(private_replay=archive),
-        )
-    ) as source:
-        source.open_acquire(request()).sample_round(snapshot(), 0)
-    (original,) = replay_paths(archive)
-    saved = read_replay(original)
-    versions = tuple(
-        (key, "ftf-segment-v14" if key == "backend" else value)
-        for key, value in saved.acquire.versions
-        if key != "selected_dimension"
-    )
-    if selected is not None:
-        versions = (*versions, ("selected_dimension", selected))
-    path = save_replay(
-        tmp_path / "modified",
-        saved.acquire.model_copy(update={"versions": versions}),
-        saved.round.snapshot,
-        saved.round.index,
-        numeric_manifest=manifest,
-    )
-    with pytest.raises(ValueError, match=error):
-        replay_round(path, soccfg=soccfg)
 
 
 def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) -> None:

@@ -73,7 +73,6 @@ from zcu_tools.simulators.ftf.environment.dimension import (
     evolve_terminal,
     pilot_dimension,
     pilot_size,
-    replay_reference,
 )
 from zcu_tools.simulators.ftf.environment.drift import FTFCoherenceDrift
 from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET
@@ -86,12 +85,7 @@ from zcu_tools.simulators.ftf.environment.readout import (
     FTFReadoutConfig,
     readout_configuration,
 )
-from zcu_tools.simulators.ftf.environment.replay import (
-    BACKEND_VERSION,
-    ReplayShape,
-    pilot_manifest,
-    replay_versions,
-)
+from zcu_tools.simulators.ftf.environment.replay import BACKEND_VERSION, replay_versions
 from zcu_tools.simulators.ftf.environment.template import (
     FTFModelFacts,
     FTFTemplatePlan,
@@ -134,7 +128,7 @@ class _Prepared:
     reuse_keys: tuple[bytes, ...]
     projection_outcomes: tuple[int, ...]
     projection_pruned_weight: tuple[float, ...]
-    pilot_point: int | None
+    split_pilot: bool
 
 
 def _readout_distribution(
@@ -269,13 +263,7 @@ class FTFAcquire:
     Both include elapsed work in failed calls and stay zero with telemetry off.
     """
 
-    def __init__(
-        self,
-        source: "FTFSource",
-        request: AcquireRequest,
-        *,
-        replay: ReplayShape | None = None,
-    ) -> None:
+    def __init__(self, source: "FTFSource", request: AcquireRequest) -> None:
         self._source = source
         self._active = True
         self.request = request
@@ -284,10 +272,7 @@ class FTFAcquire:
         self.routing: list[PathDiagnostics] = []
         self.evolve_wall_s = 0.0
         self.readout_wall_s = 0.0
-        self._replay = replay
-        self._dimension = (
-            None if replay is None else DimensionSelection(replay.dimension)
-        )
+        self._dimension: DimensionSelection | None = None
         self.pilot_wall_s = 0.0
 
     @property
@@ -356,7 +341,7 @@ class FTFAcquire:
         if (
             self._prepared is None
             or snapshot != self._snapshot
-            or self._prepared.pilot_point is not None
+            or self._prepared.split_pilot
         ):
             # The first round used a split solve; later rounds need the full batch.
             try:
@@ -410,10 +395,6 @@ class FTFAcquire:
                     )
                 result = RoundSignals(tuple(channels))
         if owner.private_replay is not None:
-            if self._dimension is None:
-                raise RuntimeError(
-                    "FTF replay requires a completed dimension selection"
-                )
             save_replay(
                 owner.private_replay,
                 ReplayAcquire(
@@ -422,12 +403,10 @@ class FTFAcquire:
                     versions=replay_versions(
                         execution_device=prepared.paths.execution_device,
                         workers=owner.engine.workers,
-                        selected_dimension=self._dimension.dimension,
                     ),
                 ),
                 replace(snapshot, model_identity=owner.identity),
                 index,
-                numeric_manifest=pilot_manifest(prepared.pilot_point),
             )
         return result
 
@@ -445,11 +424,8 @@ class FTFAcquire:
             self.request, owner.readout, encoder=owner.envelope_encoder
         )
         # A pilot is acquisition-local. Neither its split preparation nor its
-        # selected dimension can be reused by another acquire. Replay uses only
-        # the recorded solve shape, not any prior preparation.
-        if self._replay is not None or (
-            self._dimension is not None and self._dimension.drop is not None
-        ):
+        # selected dimension can be reused by another acquire.
+        if self._dimension is not None and self._dimension.pilot_point is not None:
             return self._prepare(snapshot, index, key=key, cancel=cancel)
         prepared = owner.preparation_cache.get(key)
         if prepared is None or not all(
@@ -461,7 +437,7 @@ class FTFAcquire:
             prepared = self._prepare(
                 snapshot, index, key=key, previous=prepared, cancel=cancel
             )
-            if self._dimension is not None and self._dimension.drop is None:
+            if self._dimension is not None and self._dimension.pilot_point is None:
                 owner.preparation_cache.put(key, prepared)
         else:
             self._dimension = DimensionSelection(len(facts.source.initial_density))
@@ -488,18 +464,6 @@ class FTFAcquire:
         owner = self._source
         settings = owner.effective_settings
         upper = len(facts.source.initial_density)
-        if self._replay is not None:
-            shape = self._replay
-            model = evolution_source(facts, settings, shape.dimension)
-            point = shape.pilot_point
-            reference = (
-                None
-                if point is None
-                else replay_reference(
-                    owner.engine, plans, facts.source, point, options=options
-                )
-            )
-            return model, reference
         if self._dimension is None:
             if pilot_size(prod(self.request.point_dims), upper) and can_pilot(plans):
                 with self._timing_pilot():
@@ -648,7 +612,7 @@ class FTFAcquire:
             reuse_keys,
             outcome_counts,
             pruned_weight,
-            None if reference is None else int(reference.points[0]),
+            reference is not None,
         )
 
 
@@ -852,14 +816,9 @@ class FTFSource:
             values.append((name, info.value))
         return EnvironmentSnapshot("ftf-v2", self.identity, tuple(values))
 
-    def open_acquire(
-        self, request: AcquireRequest, *, replay: ReplayShape | None = None
-    ) -> FTFAcquire:
+    def open_acquire(self, request: AcquireRequest) -> FTFAcquire:
         """Start a fixed template request, invalidating/releasing the previous session.
 
-        replay is for author-only single-round recomputation. It uses the
-        recorded dimension and optional isolated upper point instead of
-        selecting them. None enables normal acquire-local selection.
         Requires nonempty C1 templates and the current RNG stream version. Legacy
         execution timelines are not consumed. ValueError rejects unsupported
         inputs before the engine runs; a closed source raises RuntimeError.
@@ -870,10 +829,6 @@ class FTFSource:
         """
         if self._closed:
             raise RuntimeError("FTF source is closed")
-        if replay is not None and not (
-            1 <= replay.dimension <= self.settings.numerics.truncation.retained_levels
-        ):
-            raise ValueError("FTF replay dimension is outside the configured basis")
         if request.charge_requirements:
             raise ValueError("FTF charge drive requirements are not supported")
         if not request.templates:
@@ -894,7 +849,7 @@ class FTFSource:
         self._pending_acquire = False
         if self._session is not None:
             self._session.invalidate()
-        self._session = FTFAcquire(self, request, replay=replay)
+        self._session = FTFAcquire(self, request)
         self.evaluations = ()
         return self._session
 
@@ -929,7 +884,6 @@ class FTFSource:
         if session is None or session.request is not request:
             session = None
         paths = () if session is None else session.routing
-        dimension = None if session is None else session.dimension
         self.telemetry.write(
             {
                 "points": prod(request.point_dims) if request is not None else 0,
@@ -941,14 +895,7 @@ class FTFSource:
                 "complete": outcome.complete,
                 "capture_file": None if capture_file is None else capture_file.name,
                 "extras": {
-                    "ftf.selected_dimension": None
-                    if dimension is None
-                    else dimension.dimension,
-                    "ftf.pilot_drop": None if dimension is None else dimension.drop,
-                    "ftf.pilot_error": None if dimension is None else dimension.error,
-                    "ftf.pilot_wall_s": 0.0
-                    if session is None
-                    else session.pilot_wall_s,
+                    **_dimension_telemetry(session),
                     "ftf.projection_outcomes": list(
                         self.evaluations[-1].projection_outcomes
                         if paths and self.evaluations
@@ -976,6 +923,17 @@ class FTFSource:
         self.envelope_encoder.clear()
         self._closed = True
         self.engine.close()
+
+
+def _dimension_telemetry(session: FTFAcquire | None) -> dict[str, int | float | None]:
+    dimension = None if session is None else session.dimension
+    return {
+        "ftf.selected_dimension": None if dimension is None else dimension.dimension,
+        "ftf.pilot_point": None if dimension is None else dimension.pilot_point,
+        "ftf.pilot_drop": None if dimension is None else dimension.drop,
+        "ftf.pilot_error": None if dimension is None else dimension.error,
+        "ftf.pilot_wall_s": 0.0 if session is None else session.pilot_wall_s,
+    }
 
 
 def _routing_telemetry(settings: FTFSettings) -> RoutingTelemetry | None:

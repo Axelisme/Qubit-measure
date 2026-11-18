@@ -145,7 +145,9 @@ F1／F2 可選 `q_cap`、`xqp`、`aphi`；coupler 只有 `q_cap`、`aphi`，`q_i
 
 ## 演化與重播
 
-`retained_levels` 是耦合系統的維度上限。FTF 在符合條件的 acquire 用一條 pilot timeline 決定演化維度，讀出仍使用上限基底。少於 8 條 timeline、上限不超過 12 態、需要 projective herald 或含早期 cavity drive 時，整次 acquire 直接用上限。見 [pilot 規則](../../../lib/zcu_tools/simulators/ftf/environment/README.md#dimension-selection)。
+`retained_levels` 是耦合系統的維度上限。FTF 在符合條件的 acquire 用一條 pilot timeline 決定演化維度，讀出仍使用上限基底。
+少於 8 條 timeline、上限不超過 12 態、需要 projective herald 或含早期 cavity drive 時，整次 acquire 直接用上限。
+見 [pilot 規則](../../../lib/zcu_tools/simulators/ftf/environment/README.md#dimension-selection)與 [acquire 摘要欄位](../../../lib/zcu_tools/simulators/ftf/environment/README.md#routing-telemetry)。
 
 GUI startup 選擇 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核，至少使用一個 worker。八核主機使用七個 GUI workers。GUI 傳 `warmup=True`，在背景準備常用 CPU 路徑，並依 `retained_levels` 預編譯可用的 OpenCL 程式。準備成功後，第一次 acquisition 不必再等這些編譯。
 
@@ -159,7 +161,6 @@ Notebook 傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，保留�
 
 從 `zcu_tools.simulators.ftf.environment` 匯入 `FTFAcquisitionOptions`，再用 `ftf(..., acquisition=FTFAcquisitionOptions(private_replay=absolute_directory))` 保存私有輸入。
 同一模組的 `replay_round(round_path, soccfg=recording_profile)` 檢查數值、RNG 與相依套件版本，再重算一個已保存的 round。
-FTF v14 保存該次 acquire 的選定維度及當 round 的 pilot 索引，沒有 pilot 時記為空。重播照錄製的求解形狀重算，不再挑點或驗算；v13 和更早的私有檔案不支援。
 CPU 錄製一律用 CPU 重算；GPU 錄製要用相同 OpenCL 身分和錄製時的 worker 數。
 詳見 [FTF private replay](../../../lib/zcu_tools/simulators/ftf/environment/README.md#private-replay)。
 Archive 保存當次 effective settings，`drift=None`，因此重播不依賴時鐘，也不再抽漂移。

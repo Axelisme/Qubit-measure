@@ -212,8 +212,8 @@ For an offline physical smoke, use `ftf(configuration, workers=1)` with version 
 typed YAML. Its optional `readout.mux` section binds a separate generator and
 1..8 receivers, alongside named drive lines. The removed `readout.drive.kind`
 field raises a field-path error at YAML loading.
-Use replay archives for backend `ftf-segment-v14`. FTF rejects all earlier
-backend versions. See
+Use replay archives for backend `ftf-segment-v13`; archives from `ftf-segment-v12`
+and earlier backends are rejected. See
 [Readout and sampling](../../../../lib/zcu_tools/simulators/ftf/environment/README.md#readout-and-sampling)
 and [Private replay](../../../../lib/zcu_tools/simulators/ftf/environment/README.md#private-replay)
 in the FTF README.
