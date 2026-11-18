@@ -1,6 +1,7 @@
 """Coupled F1-SQUID-F2 circuit projected once at the round's DC point."""
 
-from dataclasses import dataclass
+from copy import copy
+from dataclasses import dataclass, replace
 from functools import partial
 from hashlib import sha256
 
@@ -134,6 +135,35 @@ class JointModel:
         self.dc_flux.setflags(write=False)
         self.energies_ghz.setflags(write=False)
         self.parent_vectors.setflags(write=False)
+
+    def energy_prefix(self, dimension: int) -> "JointModel":
+        """Use the first dimension states of this model's DC energy basis.
+
+        Requires 1 <= dimension <= the current dimension; otherwise raises
+        ValueError. Shares immutable parent/local inputs, not eigensystem or
+        bath caches. Does not diagonalize a new product Hamiltonian; non-DC
+        eigensystems are later calculated within the smaller fixed basis.
+        """
+        if not 1 <= dimension <= self.parameters.retained_levels:
+            raise ValueError("energy prefix dimension must be within the upper basis")
+        energies, vectors = self.eigensystem(self.dc_flux)
+        result = copy(self)
+        result.parameters = replace(self.parameters, retained_levels=dimension)
+        result.energies_ghz = energies[:dimension]
+        # Engine returns DC energy coordinates, including the upper model's
+        # eigenvector phases. Project through those same columns before truncating.
+        result.parent_vectors = self.parent_vectors @ vectors[:, :dimension]
+        result.parent_vectors.setflags(write=False)
+        result.basis = Basis(
+            self.basis.identity,
+            self.basis.labels[:dimension],
+            np.eye(dimension, dtype=complex),
+        )
+        result._eigensystems = {
+            self.dc_flux.tobytes(): (result.energies_ghz, result.basis.vectors)
+        }
+        result._rates = {}
+        return result
 
     def native_embedding(self) -> Matrix:
         """Return an owned dimensionless map from M to physical native coordinates.
@@ -669,6 +699,55 @@ def model_source(
         partial(secular_model, joint, sources=sources, resonators=resonators),
         flux_expansion(joint),
         history=history,
+    )
+
+
+def prefix_model_source(
+    joint: JointModel,
+    upper: ModelSource,
+    *,
+    resonators: tuple[Resonator, Resonator],
+) -> ModelSource:
+    """Declare evolution in the prefix joint previously derived from upper's basis.
+
+    upper is the original source for the same round; resonators are its photon
+    baths. Project and normalize the original Gibbs state. DC uses the exact
+    upper secular blocks; non-DC models diagonalize in the prefix coordinates.
+    The source borrows upper's routing history and has its own model cache.
+    """
+    size = joint.parameters.retained_levels
+    block = np.s_[:size, :size]
+    dc = upper.model((0, 0, 0))
+    drives = tuple(
+        SecularDrive(drive.name, drive.in_phase_ghz[block], drive.quadrature_ghz[block])
+        for drive in dc.drives
+    )
+    reduced_dc = SecularModel(
+        dc.level,
+        f"{dc.identity}:prefix:{size}",
+        dc.energies_ghz[:size],
+        joint.basis.vectors,
+        drives,
+        dc.rates_per_ns[block],
+        dc.dephasing_per_ns[block],
+    )
+    sources = tuple(
+        DriveSource(drive.name, drive.in_phase_ghz, drive.quadrature_ghz)
+        for drive in drives
+    )
+
+    def build(level: FluxLevel) -> SecularModel:
+        if level == dc.level:
+            return reduced_dc
+        return joint.secular_model(level, sources, resonators=resonators)
+
+    initial = upper.initial_density[block]
+    return ModelSource(
+        initial / initial.trace().real,
+        build,
+        joint.flux_expansion(),
+        slow_envelope_segments_per_period=upper.slow_envelope_segments_per_period,
+        history=upper.history,
     )
 
 

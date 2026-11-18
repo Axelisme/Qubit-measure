@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-18
+**Last updated:** 2026-11-18, FTF round reuse
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -320,10 +320,12 @@ scan lanes and emits numeric templates. Reps and rounds repeat
 the same controls. A timeline that depends on rep index fails fast with no
 per-shot fallback.
 
-For an unchanged environment snapshot, FTF evolves the initial density once and
-reuses the physical result across rounds. A changed snapshot requires a new
-evolution. Each readout state's conditional mean response is computed once per
-distinct readout content; populations combine these means linearly.
+FTF reuses a complete preparation across rounds with the same environment
+snapshot. If a round uses the pilot's upper-dimension result for one point, the
+next round evolves the whole batch before it can reuse a full-batch preparation.
+A changed snapshot requires a new evolution. See [FTF preparation reuse](../../../simulators/ftf/environment/README.md#preparation-reuse).
+Each readout state's conditional mean response is computed once per distinct
+readout content; populations combine these means linearly.
 
 Integrated statistics sample category counts that sum to reps at each point.
 The counts retain projection noise, but categories need not represent physical

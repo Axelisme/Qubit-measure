@@ -214,7 +214,8 @@ readout:
         noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
 
 numerics:
-  # Increase native/local/global dimensions independently to check convergence.
+  # Increase native/local dimensions and the joint upper bound independently
+  # to check convergence.
   projection_weight_floor: 1.0e-9
   truncation:
     f1:
@@ -226,6 +227,7 @@ numerics:
     f2:
       native_cutoff: 24
       levels: 4
+    # Joint-state upper bound. An acquire pilot may use a smaller energy prefix.
     retained_levels: 24
   solver:
     rtol: 0.00000001

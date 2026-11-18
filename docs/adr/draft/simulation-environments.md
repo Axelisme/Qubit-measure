@@ -4,7 +4,7 @@ status: draft
 
 # 模擬環境、FTF preset 與參數檔
 
-已核准方向的設計草稿。明確環境、FTF 分段引擎及重算式單 round 重播已交付，現行入口見各 owner README。F1／F2 校準已跑通，conditional Ramsey 取得一點，依「能跑起來」標準接受。這些歷史證據屬舊 backend，並非目前版本的精度或成本保證。本文保留使用者裁決原話，不以早期候選敘述替代現行 owner 契約。
+已核准方向的設計草稿。明確環境與 FTF 分段引擎已交付。早期單 round 重播已由 debug capture 取代，現行入口見各 owner README。F1／F2 校準已跑通，conditional Ramsey 取得一點，依「能跑起來」標準接受。這些歷史證據屬舊 backend，並非目前版本的精度或成本保證。本文保留使用者裁決原話，不以早期候選敘述替代現行 owner 契約。
 
 **關聯：** [[0064]] 啟動組裝、[[0068]] remote transport、[[0069]] 實驗核心與前端、[[0071]] coherence 單位、[模組定位](../0072-module-boundaries.md)。演化引擎的黑盒邊界與內部分工見 [[0078]]。模擬入口與責任以本文及各 owner README 為準，舊 TLS 遷移已完成。早期選項比較保留於[討論快照](../../discussions/2026-10-13-simulation-environment-ftf-preset.md)。
 
@@ -273,11 +273,13 @@ Photon dephasing 使用 joint-state resonator pull 的完整差、total linewidt
 
 ### 分段引擎與 debug capture
 
-FTF acquire 預設使用 `simulate.evolution.Engine` 的快速分段算法。`experiment.ftf` 以模板陣列換算單位、取得 DC 模型，將一組 timeline 交給引擎。引擎切段、分類、去重，先建立共用 prepare，再以 joblib threading chunks 演化至 readout 起點。每個 `FTFSource` 持有一個引擎，跨 acquire 只保留 routing facts，數值 preparation 限一次 evolve。每次 evolve 自己建立及釋放 worker pool。
+FTF acquire 使用 `simulate.evolution.Engine` 的分段算法。FTF 環境換算模板單位、取得 DC 模型，再把 timelines 交給引擎。引擎切段、分類、去重並建立本次演化的 preparation，再以 joblib threading chunks 演化至 readout 起點。引擎在呼叫間保留 routing facts，`FTFSource` 則可保留完整的讀出 preparation 與所選維度。兩者的記憶體預算與失效條件見 [FTF preparation reuse](../../../lib/zcu_tools/simulators/ftf/environment/README.md#preparation-reuse)。
 
 離線 Intel OpenCL 建表、U-table library、archive/reuse/validation 發布流程與 persistent exact density records 已移除。FTF 不需要數值資料庫路徑，也沒有 `build_database.py`。選裝 `gpu` extra 可讓合格的 `dop853` rows 在 OpenCL GPU 上執行，見 [GPU backend](../../../lib/zcu_tools/simulate/evolution/README.md#gpu-backend)。這套執行 backend 不做離線建表。引擎內部的週期表與 gate prepare 只在記憶體中重用，不是磁碟建庫機制。Routing-facts 預算不包含模型、solver、ADC、回傳 density 或仍被工作持有的資料，不是 process RAM 上限。
 
-每 round 仍捕捉當下 snapshot。同一 acquire 內，snapshot 與上一 round 相同時，組合層重用 density 與條件響應；抽樣身份仍隨 round 改變。Snapshot 改變則重新演化，不跨獨立 shot 承接量子態或隨機輸出。
+FTF 在符合條件的 acquire 以上限基底解一條 pilot，再從完整 density 選候選維度。只有剩餘 timelines 的預估節省超過驗算成本，FTF 才以候選維度驗算一次。估價不回本或驗算超過誤差預算都用上限。規則與估價欄位見 [FTF dimension selection](../../../lib/zcu_tools/simulators/ftf/environment/README.md#dimension-selection) 和 [routing telemetry](../../../lib/zcu_tools/simulators/ftf/environment/README.md#routing-telemetry)。
+
+每 round 捕捉當下 snapshot。相同 snapshot 的 round 重用完整的讀出 preparation；若上一 round 用 pilot 的上限結果填一點，本 round 先用選定維度演化整批。Snapshot 改變時重新演化。每 round 使用新的抽樣身份，獨立 shot 不承接量子態或隨機輸出。
 
 開啟 `numerics.debug_capture` 後，從 manifest 的 `inputs` 讀 Engine 輸入與每列實際 routes。FTF 與 single-fluxonium 的 `metadata` 保存 acquire 成敗、實際 seed／sequence、每輪 DC 與 model identity，以及已觀察 identity 的有效設定。沒有 round snapshot 時讀 admission settings。Telemetry 開啟時用 `capture_file` 找到同次 acquire 的 manifest。這些診斷資料不進一般 Run/native/RPC metadata。
 

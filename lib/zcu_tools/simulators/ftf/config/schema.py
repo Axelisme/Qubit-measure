@@ -362,7 +362,11 @@ class SquidTruncation(Values):
 
 
 class Truncation(Values):
-    """Local bases for f1/coupler/f2; retained_levels: system dimension <=product."""
+    """Local bases for f1/coupler/f2 and an upper bound on joint states.
+
+    retained_levels is at most the local dimension product. The acquire pilot
+    may use a smaller energy prefix for evolution; readout keeps the upper basis.
+    """
 
     f1: FluxoniumTruncation
     coupler: SquidTruncation
