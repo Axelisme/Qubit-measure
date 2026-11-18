@@ -28,6 +28,7 @@ from zcu_tools.simulate.boundary import (
     TimelineTemplate,
 )
 from zcu_tools.simulate.evolution import (
+    SEGMENT_NUMERIC_VERSION,
     EnvelopeSpec,
     FluxWaveform,
     ModelSource,
@@ -36,7 +37,6 @@ from zcu_tools.simulate.evolution import (
 )
 from zcu_tools.simulate.lines import DistortionTerm, FluxLine
 from zcu_tools.simulators.ftf.config import FTFSettings
-from zcu_tools.simulators.ftf.environment import replay
 from zcu_tools.simulators.ftf.environment.numeric import (
     dc_flux,
     drive_sources,
@@ -57,6 +57,9 @@ from zcu_tools.simulators.ftf.physics import (
     readout_model,
     schedule,
 )
+from zcu_tools.simulators.ftf.physics.model import prefix_model_source
+
+BACKEND_VERSION = "ftf-segment-v13"
 
 # Sample filtered fast-flux waveforms on the existing 2 ns DAC grid.
 _WAVEFORM_SAMPLE_NS = 2.0
@@ -84,13 +87,15 @@ class FTFModelFacts:
     ) -> None:
         self._settings_json = settings.model_dump_json()
         self._snapshot = snapshot
-        self._revision = (replay.BACKEND_VERSION, replay.SEGMENT_NUMERIC_VERSION)
+        self._revision = (BACKEND_VERSION, SEGMENT_NUMERIC_VERSION)
         self.joint = JointModel(
             joint_parameters(settings),
             dc_flux(settings, snapshot),
             temperature_k=settings.chip.temperature_k,
         )
         resonator_pair = resonators(settings)
+        self._resonators = resonator_pair
+        self._prefix_sources: dict[int, ModelSource] = {}
         self.source = model_source(
             self.joint,
             drive_sources(settings, self.joint),
@@ -99,12 +104,35 @@ class FTFModelFacts:
         )
         self.readout = readout_model(self.joint, resonator_pair)
 
+    def evolution_source(self, dimension: int) -> ModelSource:
+        """Return the stable routing source for the upper basis or its energy prefix.
+
+        dimension is a legal retained state count of this snapshot. Prefixes
+        share the upper source's routing history; equal dimensions reuse the
+        model source so Engine can validate their retained preparations.
+        """
+        if dimension == len(self.source.initial_density):
+            return self.source
+        if dimension not in self._prefix_sources:
+            self._prefix_sources[dimension] = prefix_model_source(
+                self.joint.energy_prefix(dimension),
+                self.source,
+                resonators=self._resonators,
+            )
+        return self._prefix_sources[dimension]
+
+    def close(self) -> None:
+        """Release upper and prefix model caches; keep any borrowed routing history."""
+        for source in self._prefix_sources.values():
+            source.close()
+        self._prefix_sources.clear()
+        self.source.close()
+
     def matches(self, settings: FTFSettings, snapshot: EnvironmentSnapshot) -> bool:
         """Whether the complete settings, snapshot and current revisions are equal."""
         return (
             self._snapshot == snapshot
-            and self._revision
-            == (replay.BACKEND_VERSION, replay.SEGMENT_NUMERIC_VERSION)
+            and self._revision == (BACKEND_VERSION, SEGMENT_NUMERIC_VERSION)
             and self._settings_json == settings.model_dump_json()
         )
 

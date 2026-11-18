@@ -1,6 +1,6 @@
 """One single-fluxonium acquire lifetime and ADC-owned round sampling."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from time import monotonic
 from typing import TYPE_CHECKING
 
@@ -23,8 +23,6 @@ from zcu_tools.simulate.boundary import (
     SamplingIdentity,
 )
 from zcu_tools.simulate.evolution import PathDiagnostics
-from zcu_tools.simulators.replay import ReplayAcquire, save_replay
-from zcu_tools.simulators.single_fluxonium.environment import replay
 from zcu_tools.simulators.single_fluxonium.environment.projection import (
     ProjectionDiagnostics,
 )
@@ -99,8 +97,7 @@ class SingleFluxoniumAcquire:
         """Evolve/read/sample this zero-based round, or propagate numeric errors.
 
         snapshot supplies detached native DC values. Negative indices raise
-        ValueError. An invalidated session raises RuntimeError. Private replay
-        writes finish before return; I/O failures propagate. No partial result
+        ValueError. An invalidated session raises RuntimeError. No partial result
         or failed preparation is retained. cancel is forwarded to evolution's
         chunk checkpoints; None disables cancellation. Pacing, completed-round
         retention and QICK normalization belong to the acquisition boundary.
@@ -152,17 +149,4 @@ class SingleFluxoniumAcquire:
                 result = RoundSignals(tuple(channels))
         finally:
             owner.readout_wall_s += monotonic() - started
-        if owner.private_replay is not None:
-            save_replay(
-                owner.private_replay,
-                ReplayAcquire(
-                    settings=owner.effective_settings,
-                    request=acquire,
-                    versions=replay.replay_versions(),
-                ),
-                replace(snapshot, model_identity=owner.identity)
-                if owner.settings.drift is not None
-                else snapshot,
-                index,
-            )
         return result

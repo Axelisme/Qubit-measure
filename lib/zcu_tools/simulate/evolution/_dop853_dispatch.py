@@ -1,17 +1,36 @@
 """Timeline-wide frame and chain decisions for the direct solvers."""
 
+from dataclasses import replace
+
 import numpy as np
 from numpy.typing import NDArray
 
-from .kernel import RowPlan, SegmentTable
-from .kernels._dop853_opencl import ROWS_PER_BATCH
-from .kernels.dop853 import DOP853Plan
+from .kernel import KernelContext, RowPlan, SegmentTable
+from .kernels._dop853 import DP54_MIN_BUDGET
+from .kernels._dop853_opencl import ROWS_PER_BATCH, OpenCLBackend
+from .kernels.dop853 import DOP853Plan, cpu_dp54_rows
 from .kernels.flux_dop853 import FluxDOP853Plan
 
 _MAX_OPENCL_DIMENSION = 32
 _MAX_OPENCL_KNOTS = 960
 _MIN_OPENCL_DURATION_NS = 100.0
 _MAX_OPENCL_DURATION_NS = 10_000.0
+# Arc d=24/d=32 simultaneous-drive medians were 0.68/0.61 of DOP853 wall.
+# Use the slower factor for matrix work, not for launch or per-trial floors.
+_DP54_GPU_WORK_SCALE = 0.68
+
+
+def with_opencl(context: KernelContext, backend: OpenCLBackend | None) -> KernelContext:
+    """Attach the optional timeline backend and choose its evolve-wide tableau.
+
+    OpenCL admission already caps every eligible row at 10 µs. Only the
+    budget distinguishes the tableaus on that backend (ADR-0078).
+    """
+    return replace(
+        context,
+        opencl=backend,
+        opencl_dp54=backend is not None and context.budget >= DP54_MIN_BUDGET,
+    )
 
 
 def opencl_rows(
@@ -92,6 +111,9 @@ def opencl_preferred(
     rows: NDArray[np.int64],
     dimension: int,
     workers: int,
+    *,
+    budget: float,
+    dp54: bool,
 ) -> bool:
     """Compare CPU and GPU wall prices for one acquire-wide ready wave.
 
@@ -100,6 +122,7 @@ def opencl_preferred(
     For an available device, the price uses the acquire work and worker width,
     not Engine or disk cache warmth or measured wall time. Calibrated on Arc
     for d=3 sampled pulses and d=32 FTF simultaneous drive at 1, 4 and 24 points.
+    budget prices the CPU alternative. dp54 is the selected OpenCL tableau.
     """
     # One extra knot covers a final held value before the appended row end.
     knots = _union_knots(table, rows) + 1
@@ -109,7 +132,12 @@ def opencl_preferred(
     # Dense CPU per-thread throughput falls from ~17 to ~9 GFLOP/s from
     # 1 to 7 workers; a 4 us per-trial floor accounts for small matrices.
     cpu_row = work * (1 + 0.15 * (lanes - 1)) / 17e9 + trials * 4e-6
+    # This model is in seconds, unlike the relative scheduling units. On the
+    # 960-knot FTF rows, measured DP5(4) CPU was 1.02–1.52 times the legacy
+    # CPU estimate (which underpredicted actual DOP853 CPU on this host).
+    cpu_row *= np.where(cpu_dp54_rows(table.duration_ns[rows], budget), 1.2, 1.0)
     cpu = max(float(cpu_row.sum()) / lanes, float(cpu_row.max()))
+    gpu_work = work * _DP54_GPU_WORK_SCALE if dp54 else work
     # Like routing history, replacing the Engine must not change the route.
     # Disk cache amortizes cold compilation per machine, driver, kernel and d;
     # charge only the resident-program overhead, regardless of cache state.
@@ -122,7 +150,7 @@ def opencl_preferred(
         for start in range(0, len(members), ROWS_PER_BATCH):
             batch = members[start : start + ROWS_PER_BATCH]
             gpu += _batch_gpu_seconds(
-                work[batch], trials[batch], int(knots[batch].max()), dimension
+                gpu_work[batch], trials[batch], int(knots[batch].max()), dimension
             )
     return gpu < cpu
 
@@ -131,6 +159,8 @@ def direct_plans(
     table: SegmentTable,
     names: NDArray[np.str_],
     rows: NDArray[np.int64] | None = None,
+    *,
+    budget: float,
 ) -> tuple[dict[str, RowPlan], NDArray[np.int64]]:
     """Plan direct rows from complete chronological timeline routing.
 
@@ -139,6 +169,8 @@ def direct_plans(
     just its deferred candidates. Empty names break chains. Returned decisions
     retain global-row indexing; frames outside the selected family are empty.
     A chain ID is its first global row, independent of payload/apply partition.
+    budget is the evolve allowance used to select the tableau for CPU endpoints;
+    OpenCL tableau selection is separate because admission bounds row duration.
     """
     size = len(table.timeline)
     if rows is None:
@@ -178,7 +210,13 @@ def direct_plans(
             # Chains retain lab endpoints for basis changes across row models.
             frame[rows[selected & ~members]] = "interaction"
             frame.setflags(write=False)
-            plans[name] = DOP853Plan(frame, chain)
+            dp54 = np.zeros(size, dtype=bool)
+            selected_rows = rows[selected]
+            dp54[selected_rows] = cpu_dp54_rows(
+                table.duration_ns[selected_rows], budget
+            )
+            dp54.setflags(write=False)
+            plans[name] = DOP853Plan(frame, chain, dp54)
         else:
             plans[name] = FluxDOP853Plan(chain)
     chain.setflags(write=False)

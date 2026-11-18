@@ -14,6 +14,7 @@ from zcu_tools.program.v2.simulation import AcquireOutcome
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
     CancellationQuery,
+    EnvironmentSnapshot,
     RoundRequest,
     RoundStatistics,
 )
@@ -23,11 +24,13 @@ from zcu_tools.simulate.evolution import (
     EvolutionResult,
     ModelSource,
     PathDiagnostics,
+    RoutingHistory,
     SecularModel,
     TimelineBatch,
 )
 from zcu_tools.simulators.ftf.environment import FTFSource
-from zcu_tools.simulators.telemetry import RoutingTelemetry
+from zcu_tools.simulators.ftf.environment import template as template_module
+from zcu_tools.simulators.telemetry import RoutingRecord, RoutingTelemetry
 
 from tests.program._profiles import profile_soccfg
 from tests.simulators.ftf.environment._dimension_cases import dimension_bypass
@@ -97,26 +100,165 @@ def _dimension_extras(logs: Path) -> dict[str, object]:
     return json.loads(summary.read_text())["extras"]
 
 
-def _sample(
-    engine: Engine, acquire: AcquireRequest, upper: int, logs: Path
-) -> tuple[RoundStatistics, dict[str, object]]:
-    source = FTFSource(
+def _dimension_source(engine: Engine, logs: Path, *, upper: int = 16) -> FTFSource:
+    return FTFSource(
         _settings(upper),
         DeviceManager(),
         soccfg=profile_soccfg("ftf"),
         engine=engine,
         telemetry=RoutingTelemetry(logs),
     )
+
+
+def _sample(
+    engine: Engine, acquire: AcquireRequest, upper: int, logs: Path
+) -> tuple[RoundStatistics, dict[str, object]]:
+    source = _dimension_source(engine, logs, upper=upper)
     try:
-        state = snapshot()
-        result = expect_statistics(source.open_acquire(acquire).sample_round(state, 0))
-        source.finish_acquire(
-            AcquireOutcome((RoundRequest(acquire, state, 0),), 1.0, 0.0, True)
-        )
+        result = _execute_acquire(source, acquire)
     finally:
         source.close()
 
     return result, _dimension_extras(logs)
+
+
+def _execute_acquire(
+    source: FTFSource, acquire: AcquireRequest, state: EnvironmentSnapshot | None = None
+) -> RoundStatistics:
+    round_request = RoundRequest(acquire, snapshot() if state is None else state, 0)
+    result = expect_statistics(source.execute(round_request))
+    source.finish_acquire(AcquireOutcome((round_request,), 1.0, 0.0, True))
+    return result
+
+
+def _acquire_rows(logs: Path) -> list[RoutingRecord]:
+    (summary,) = logs.glob("routing-*.jsonl")
+    return [json.loads(line) for line in summary.read_text().splitlines()]
+
+
+def test_equal_acquire_reuses_pilot_preparation_with_fresh_sampling(
+    tmp_path: Path,
+) -> None:
+    history = RoutingHistory()
+    source = FTFSource(
+        _settings(16),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=Engine(1, backend="cpu"),
+        history=history,
+        telemetry=RoutingTelemetry(tmp_path),
+    )
+    reference = FTFSource(
+        _settings(16),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=Engine(1, backend="cpu"),
+    )
+    try:
+        acquire = _request()
+        first = _execute_acquire(source, acquire)
+        hits = source.preparation_cache.hits
+        repeat = replace(acquire, sequence=acquire.sequence + 1)
+        second = _execute_acquire(source, repeat)
+        assert source.preparation_cache.hits == hits + 1
+        expected = _execute_acquire(reference, repeat)
+
+        # An unchanged content key cannot bypass Engine's route validation.
+        history.clear()
+        refreshed = replace(repeat, sequence=repeat.sequence + 1)
+        _execute_acquire(source, refreshed)
+        _execute_acquire(source, replace(refreshed, sequence=refreshed.sequence + 1))
+        assert source.preparation_cache.hits == hits + 3
+    finally:
+        source.close()
+        reference.close()
+    original, reused, repriced, reused_full = _acquire_rows(tmp_path)
+    original_extras = original["extras"]
+    pilot_wall = original_extras["ftf.pilot_wall_s"]
+    assert isinstance(pilot_wall, float) and pilot_wall > 0.0
+    dimension = original_extras["ftf.selected_dimension"]
+    assert isinstance(dimension, int) and dimension < 16
+    assert original_extras["ftf.dimension_reused"] is False
+    for row in (reused, repriced, reused_full):
+        extras = row["extras"]
+        assert extras["ftf.selected_dimension"] == dimension
+        assert extras["ftf.dimension_reused"] is True
+        assert extras["ftf.pilot_point"] is None
+        assert extras["ftf.pilot_wall_s"] == 0.0
+    assert reused["evolve_wall_s"] == reused_full["evolve_wall_s"] == 0.0
+    assert repriced["evolve_wall_s"] > 0.0
+    np.testing.assert_array_equal(second.state_counts, expected.state_counts)
+    np.testing.assert_array_equal(second.channels[0].sums, expected.channels[0].sums)
+    assert not np.array_equal(first.channels[0].sums, second.channels[0].sums)
+
+
+def test_evicted_pilot_preparation_evolves_the_full_selected_batch(
+    tmp_path: Path,
+) -> None:
+    engine = PilotEngine()
+    source = _dimension_source(engine, tmp_path)
+    acquire = _request()
+    try:
+        _execute_acquire(source, acquire)
+        assert source.preparation_cache.resident_bytes > 0
+        source.preparation_cache.max_bytes = 0
+        engine.calls.clear()
+        repeat = replace(acquire, sequence=acquire.sequence + 1)
+        second = _execute_acquire(source, repeat)
+        assert source.preparation_cache.resident_bytes == 0
+    finally:
+        source.close()
+
+    assert engine.calls == [(13, tuple(range(8)))]
+    np.testing.assert_array_equal(second.state_counts[:, 12], acquire.reps)
+    _, row = _acquire_rows(tmp_path)
+    extras = row["extras"]
+    assert extras["ftf.selected_dimension"] == 13
+    assert extras["ftf.dimension_reused"] is True
+    assert extras["ftf.pilot_point"] is None
+    assert extras["ftf.pilot_wall_s"] == 0.0
+    assert row["evolve_wall_s"] > 0.0
+
+
+@pytest.mark.parametrize(
+    "change", ["settings", "snapshot", "revision", "engine", "failure"]
+)
+def test_remembered_dimension_does_not_cross_preparation_invalidation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    engine = PilotEngine()
+    source = _dimension_source(engine, tmp_path)
+    acquire, state = _request(), snapshot()
+    try:
+        _execute_acquire(source, acquire, state)
+        if change == "settings":
+            chip = source.settings.chip.model_copy(update={"temperature_k": 0.3})
+            source.settings = source.settings.model_copy(update={"chip": chip})
+        elif change == "snapshot":
+            state = snapshot(0.8)
+        elif change == "revision":
+            # The author API has no revision setter. Change the numeric version
+            # supplied to the facts owner without inspecting its private cache.
+            monkeypatch.setattr(
+                template_module, "SEGMENT_NUMERIC_VERSION", "changed-numerics"
+            )
+        elif change == "engine":
+            engine.close()
+            engine = PilotEngine()
+            source.engine = engine
+        else:
+            invalid = replace(
+                acquire, templates=(replace(acquire.templates[0], events=()),)
+            )
+            with pytest.raises(ValueError, match="readout"):
+                _execute_acquire(source, invalid, state)
+        engine.calls.clear()
+        _execute_acquire(source, replace(acquire, sequence=acquire.sequence + 1), state)
+    finally:
+        source.close()
+
+    assert engine.calls == [(16, (7,)), (13, (7,)), (13, tuple(range(7)))]
+    assert _acquire_rows(tmp_path)[-1]["extras"]["ftf.dimension_reused"] is False
 
 
 def test_pilot_keeps_a_state_with_small_population_but_large_coherence(
@@ -246,21 +388,21 @@ def test_round_keeps_the_selected_dimension_but_uses_live_dc(tmp_path: Path) -> 
         first = expect_statistics(session.sample_round(before, 0))
         second = expect_statistics(session.sample_round(before, 1))
         third = expect_statistics(session.sample_round(before, 2))
-        session.sample_round(after, 3)
+        changed = expect_statistics(session.sample_round(after, 3))
+        reused = expect_statistics(session.sample_round(after, 4))
         assert first.state_counts[7, 12] == 0
         assert second.state_counts[7, 12] == third.state_counts[7, 12] == acquire.reps
+        np.testing.assert_array_equal(changed.state_counts[:, 12], acquire.reps)
+        np.testing.assert_array_equal(reused.state_counts, changed.state_counts)
         upper = source.model_facts(after).source
         upper_model = upper.model((0, 0, 0))
         initial = upper.initial_density[:13, :13]
         rounds = tuple(
             RoundRequest(acquire, state, index)
-            for index, state in enumerate((before, before, before, after))
+            for index, state in enumerate((before, before, before, after, after))
         )
         source.finish_acquire(AcquireOutcome(rounds, 1.0, 0.0, True))
-        next_acquire = source.open_acquire(
-            replace(acquire, sequence=acquire.sequence + 1)
-        )
-        next_acquire.sample_round(after, 0)
+        _execute_acquire(source, replace(acquire, sequence=acquire.sequence + 1), after)
     finally:
         source.close()
 
@@ -276,9 +418,11 @@ def test_round_keeps_the_selected_dimension_but_uses_live_dc(tmp_path: Path) -> 
     )
     assert initial.trace().real < 1.0
     np.testing.assert_array_equal(reduced_initial, initial / initial.trace().real)
-    extras = _dimension_extras(tmp_path)
-    assert extras["ftf.selected_dimension"] == 13
-    assert extras["ftf.pilot_point"] == 7
+    for row in _acquire_rows(tmp_path):
+        extras = row["extras"]
+        assert extras["ftf.selected_dimension"] == 13
+        assert extras["ftf.pilot_point"] == 7
+        assert extras["ftf.dimension_reused"] is False
 
 
 def test_equal_drive_uses_the_far_carrier_endpoint(tmp_path: Path) -> None:

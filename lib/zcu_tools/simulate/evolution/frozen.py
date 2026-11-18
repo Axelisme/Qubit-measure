@@ -270,17 +270,23 @@ def _unique_names(records: tuple[FrozenRecord, ...]) -> None:
         raise ValueError("duplicate frozen manifest name")
 
 
-def write_frozen_manifest(path: Path, records: Iterable[FrozenRecord]) -> None:
+def write_frozen_manifest(
+    path: Path,
+    records: Iterable[FrozenRecord],
+    *,
+    metadata: dict[str, object] | None = None,
+) -> None:
     """Write records with FROZEN_PHYSICAL_VERSION inside canonical stdlib gzip.
 
-    Calculate both physical hashes, reject duplicate/non-string names and keep
-    caller metadata opaque. gzip has mtime=0 and no filename, so identical inputs
-    produce identical bytes regardless of path. Create parents and replace the
+    Calculate both physical hashes and reject duplicate/non-string names.
+    Preserve opaque record metadata and, if supplied, write JSON-encodable
+    manifest metadata alongside the inputs. gzip has mtime=0 and no filename,
+    so identical inputs produce identical bytes regardless of path. Create parents and replace the
     destination. Serialization and I/O errors propagate. No model or solver runs.
     """
     records = tuple(records)
     _unique_names(records)
-    payload = {
+    payload: dict[str, object] = {
         "version": FROZEN_PHYSICAL_VERSION,
         "inputs": [
             {
@@ -293,6 +299,8 @@ def write_frozen_manifest(path: Path, records: Iterable[FrozenRecord]) -> None:
             for record in records
         ],
     }
+    if metadata is not None:
+        payload["metadata"] = metadata
     data = (canonical_json(payload) + "\n").encode("utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(gzip.compress(data, mtime=0))
@@ -302,7 +310,8 @@ def read_frozen_manifest(path: Path) -> tuple[FrozenRecord, ...]:
     """Read a gzip manifest, preserving order and opaque JSON metadata.
 
     Check FROZEN_PHYSICAL_VERSION, unique names and both physical hashes before
-    returning numeric records. Bad versions/hashes/duplicates raise ValueError.
+    returning numeric records. Top-level manifest metadata is not returned.
+    Bad versions/hashes/duplicates raise ValueError.
     Missing fields, invalid JSON/gzip and I/O errors propagate. Reconstruct a
     caller-owned source separately with read_physical_input(record.physical).
     """
