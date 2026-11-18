@@ -137,10 +137,12 @@ def _admit_key(
         defect, fallback_defect = _split_defects(prepared, table, row, context)
         floor = _SPLIT_BUDGET_FRACTION * min(context.budget, 1e-3)
         threshold = max(floor, _SPLIT_FALLBACK_FACTOR * fallback_defect)
-        if defect > threshold:
-            return _GateAdmission(None)
-        context.work_plan.routing.prepared_keys(MultitoneGateKernel.name, 1)
-        return _GateAdmission(GuardPreparation(np.array([key], dtype="V32"), prepared))
+        if defect <= threshold:
+            context.work_plan.routing.prepared_keys(MultitoneGateKernel.name, 1)
+            return _GateAdmission(
+                GuardPreparation(np.array([key], dtype="V32"), prepared)
+            )
+        return _GateAdmission(None)
 
     return context.work_plan.fact(
         FactKey(("full-drive-gate-admission", key.tobytes()), _GateAdmission), build
