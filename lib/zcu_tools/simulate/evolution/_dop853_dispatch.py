@@ -69,13 +69,15 @@ def opencl_rows(
         rows = rows[both_sampled]
         # Each knot in the union can restart the integrator. The runner can
         # append the row end, giving at most one interval per sample knot.
-        eligible[rows] = _union_knots(table, rows) <= _MAX_OPENCL_KNOTS
+        eligible[rows] = two_tone_knot_counts(table, rows) <= _MAX_OPENCL_KNOTS
     eligible.setflags(write=False)
     return eligible
 
 
-def _union_knots(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.int64]:
-    """Count distinct sample times across both tones of each row."""
+def two_tone_knot_counts(
+    table: SegmentTable, rows: NDArray[np.int64]
+) -> NDArray[np.int64]:
+    """Count distinct native-grid knots for each two-tone row in rows."""
     pairs, inverse = np.unique(
         table.tone_envelope[rows, :2], axis=0, return_inverse=True
     )
@@ -124,8 +126,28 @@ def opencl_preferred(
     for d=3 sampled pulses and d=32 FTF simultaneous drive at 1, 4 and 24 points.
     budget prices the CPU alternative. dp54 is the selected OpenCL tableau.
     """
+    cpu, gpu = opencl_wave_prices(
+        table, rows, dimension, workers, budget=budget, dp54=dp54
+    )
+    return gpu < cpu
+
+
+def opencl_wave_prices(
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    dimension: int,
+    workers: int,
+    *,
+    budget: float,
+    dp54: bool,
+) -> tuple[float, float]:
+    """Estimate CPU and GPU wall seconds for one wave of admitted OpenCL rows.
+
+    Return (CPU, OpenCL). Budget selects the CPU tableau; dp54 selects the
+    OpenCL tableau.
+    """
     # One extra knot covers a final held value before the appended row end.
-    knots = _union_knots(table, rows) + 1
+    knots = two_tone_knot_counts(table, rows) + 1
     trials = np.maximum(1.4 * table.duration_ns[rows], 2.0 * (knots - 1))
     work = trials * 12 * (8 * dimension**3 + 40 * dimension**2)
     lanes = min(workers, len(rows))
@@ -152,7 +174,7 @@ def opencl_preferred(
             gpu += _batch_gpu_seconds(
                 gpu_work[batch], trials[batch], int(knots[batch].max()), dimension
             )
-    return gpu < cpu
+    return float(cpu), gpu
 
 
 def direct_plans(

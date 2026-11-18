@@ -81,9 +81,9 @@ def populate_multitone_inventory(
 ) -> MultitoneInventory:
     """Record complete admission/usage once, independently of common selection.
 
-    This preserves cumulative fallback decisions for zero-cache and cached
-    Engines without building any RWA prepared coefficients or pricing rows
-    already handled by common frame.
+    This preserves cumulative constant-pair fallback decisions for zero-cache
+    and cached Engines. Sampled admission stays in the family guard and does
+    not enter the source-cumulative history.
     """
 
     def build() -> MultitoneInventory:
@@ -91,7 +91,10 @@ def populate_multitone_inventory(
             return MultitoneInventory((), (), ())
         context = KernelContext(source, budget, plan)
         kernel = MultitoneRWAKernel()
-        candidates = np.flatnonzero(table.tones >= 2)
+        pairs = np.flatnonzero(table.tones == 2)
+        # Sampled guard work is lazy: never integrate probes to price constants
+        # or to build caller-owned routing reuse facts.
+        candidates = pairs[table.constant_envelopes(pairs)]
         admitted = candidates[kernel.guard(table, candidates, context)]
         expanded, cheap = [], []
         for row in admitted:

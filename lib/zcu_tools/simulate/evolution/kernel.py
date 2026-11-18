@@ -20,6 +20,7 @@ from .secular import FluxWaveform, ModelSource
 from .workplan import WorkPlan
 
 if TYPE_CHECKING:
+    from ._capture import CaptureRun
     from .kernels._dop853_opencl import OpenCLBackend, OpenCLDOP853
 
 
@@ -272,10 +273,14 @@ class KernelContext:
     Standalone callers supply a fresh WorkPlan and close it after use.
     families is the immutable acquire-wide family allowlist for dispatch;
     None preserves unrestricted selection. Kernels retain their original guards.
-    opencl borrows the Engine's DOP853 backend during ordinary timeline work;
+    opencl borrows the Engine's DOP853 backend for pricing and timeline work;
     None plans and runs CPU-only work (including shared prefixes).
-    opencl_dp54 is dispatch's tableau decision: True for DP5(4), False for
-    DOP853. Unused without an OpenCL backend.
+    opencl_dp54 selects DP5(4) when True and DOP853 when False; unused without
+    an OpenCL backend.
+    workers is the effective acquire-wide CPU width used to price sampled rows.
+    complete_row_offset maps contiguous prefix-table rows back to complete-table
+    rows by addition. It is zero for complete geometry and standalone work.
+    capture optionally records debug observations in complete-table coordinates.
     """
 
     source: ModelSource
@@ -284,6 +289,9 @@ class KernelContext:
     families: frozenset[str] | None = None
     opencl: OpenCLBackend | None = None
     opencl_dp54: bool = False
+    workers: int = 1
+    complete_row_offset: int = 0
+    capture: CaptureRun | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:
@@ -395,15 +403,14 @@ class Kernel(Protocol):
     ) -> NDArray[np.bool_]:
         """Pure validity mask (len(rows),) at positive per-segment error budget.
 
-        Each row's mask depends only on that row's table data, source and
-        budget, never on other rows in the call. Splitting rows into arbitrary
-        segments, calling guard separately and concatenating results in the
-        original row order must match a whole call bit for bit, regardless of
-        call order.
+        Each decision depends on table data, source, budget and immutable
+        complete-acquire facts, never on the current subset. Splitting a call
+        and concatenating decisions in the original order preserves its mask.
 
         Known input means the source initial density or the engine-computed
-        density for this row's certified prefix group. Guard may read that
-        immutable input, but never evolve density or inspect worker states.
+        density for this row's certified prefix group. A guard may read that
+        input but may not evolve it or inspect worker states. A measured guard
+        can evolve its own fixed probes and publish the decision in WorkPlan.
         The engine owns branch order and cross-family cost comparisons. Family
         wrappers may also require immutable complete-acquire key counts, as
         multitone_gate does. Prefix and worker calls borrow those same counts;

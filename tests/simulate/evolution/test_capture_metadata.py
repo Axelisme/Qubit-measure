@@ -37,6 +37,7 @@ def metadata() -> CaptureMetadata:
                 "candidates": [{"family": "direct", "guard": "accepted"}],
             }
         ],
+        "sampled_rwa_admissions": [],
         "prefix_runs": [
             {
                 "representative": {"point": 4, "segment": 2},
