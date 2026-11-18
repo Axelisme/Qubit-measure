@@ -222,7 +222,7 @@ class ResultsBrowser(QWidget):
         self._focus = _Focus()
         self._history = [self._focus]
         self._history_position = 0
-        self._navigation: list[tuple[QTreeWidgetItem, _Focus]] = []
+        self._navigation: dict[_Focus, QTreeWidgetItem] = {}
         self._navigation_runs: tuple[ResultRun, ...] | None = None
         layout = QVBoxLayout(self)
         splitter = QSplitter()
@@ -541,52 +541,73 @@ class ResultsBrowser(QWidget):
         )
 
     def _render_navigation(self, runs: tuple[ResultRun, ...]) -> None:
-        if self._navigation_runs != runs:
-            expanded = {focus for item, focus in self._navigation if item.isExpanded()}
-            self._tree.clear()
-            self._navigation.clear()
-            nodes: dict[_Focus, QTreeWidgetItem] = {}
-            counts: dict[_Focus, int] = {}
-            for run in runs:
-                parent = self._tree.invisibleRootItem()
-                for caption, focus in self._run_branch(run):
-                    if focus not in nodes:
-                        item = QTreeWidgetItem(parent, [caption])
-                        item.setExpanded(
-                            focus in expanded
-                            or (
-                                focus.run_key is None
-                                and (focus.point is None or focus.experiment is None)
-                            )
-                        )
-                        item.setToolTip(
-                            0,
-                            f"{run.entry} / {run.point or 'Global / unknown'}\n{run.experiment or 'Unknown experiment'}\n{run.run_path.name}\n{run.at or 'Unknown time'}\n{run.run_path}",
-                        )
-                        nodes[focus] = item
-                        self._navigation.append((item, focus))
-                    parent = nodes[focus]
-                    counts[focus] = counts.get(focus, 0) + 1
-            for focus, item in nodes.items():
-                if focus.run_key is None:
-                    item.setText(0, f"{item.text(0)}  ({counts[focus]})")
+        previous = self._navigation_runs
+        if previous != runs:
+            if (
+                previous
+                and len(previous) < len(runs)
+                and previous[-1].entry < runs[len(previous)].entry
+                and runs[: len(previous)] == previous
+            ):
+                # A new entry has its own branches. Keep existing branches and
+                # their expansion state instead of rebuilding the tree per batch.
+                self._add_navigation(runs[len(previous) :], set())
+            else:
+                expanded = {
+                    focus
+                    for focus, item in self._navigation.items()
+                    if item.isExpanded()
+                }
+                self._tree.clear()
+                self._navigation.clear()
+                self._add_navigation(runs, expanded)
             self._navigation_runs = runs
-        for item, focus in self._navigation:
-            if focus == replace(self._focus, figure=None):
-                self._tree.setCurrentItem(item)
-                break
-        else:
+        selected = self._navigation.get(replace(self._focus, figure=None))
+        if selected is None:
             self._tree.clearSelection()
+        else:
+            self._tree.setCurrentItem(selected)
+
+    def _add_navigation(
+        self, runs: tuple[ResultRun, ...], expanded: set[_Focus]
+    ) -> None:
+        nodes: dict[_Focus, QTreeWidgetItem] = {}
+        counts: dict[_Focus, int] = {}
+        for run in runs:
+            parent = self._tree.invisibleRootItem()
+            for caption, focus in self._run_branch(run):
+                if focus not in nodes:
+                    item = QTreeWidgetItem(parent, [caption])
+                    item.setExpanded(
+                        focus in expanded
+                        or (
+                            focus.run_key is None
+                            and (focus.point is None or focus.experiment is None)
+                        )
+                    )
+                    item.setToolTip(
+                        0,
+                        f"{run.entry} / {run.point or 'Global / unknown'}\n{run.experiment or 'Unknown experiment'}\n{run.run_path.name}\n{run.at or 'Unknown time'}\n{run.run_path}",
+                    )
+                    nodes[focus] = item
+                parent = nodes[focus]
+                counts[focus] = counts.get(focus, 0) + 1
+        for focus, item in nodes.items():
+            if focus.run_key is None:
+                item.setText(0, f"{item.text(0)}  ({counts[focus]})")
+        self._navigation.update(nodes)
 
     def _navigate(self, item: QTreeWidgetItem, _column: int) -> None:
-        for node, focus in self._navigation:
+        for focus, node in self._navigation.items():
             if node is item:
                 self._visit(focus)
                 break
 
     def _run_context_menu(self, point: QPoint) -> None:
         item = self._tree.itemAt(point)
-        focus = next((focus for node, focus in self._navigation if node is item), None)
+        focus = next(
+            (focus for focus, node in self._navigation.items() if node is item), None
+        )
         if focus is None or focus.run_key is None:
             return
         run = self._index.get_run(focus.run_key)
