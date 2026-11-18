@@ -1,4 +1,4 @@
-"""Calibrated joint-energy-basis RWA for simultaneous smooth or dual constant drives."""
+"""Joint-energy-basis RWA for simultaneous sampled or constant pairs."""
 
 from contextlib import closing
 from dataclasses import dataclass
@@ -13,9 +13,10 @@ from scipy.linalg import expm
 from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
-from ..workplan import WorkPlan
+from ..workplan import FactKey, WorkPlan
 from ._dop853 import Tolerances, integrate, tolerances
 from ._dop853_data import Models, Segments, pack_models
+from ._multitone_spot import SPOT_POLICY, SampledGroup, probe_density, sampled_groups
 from ._rwa_fourier import (
     RWACoefficients,
     endpoint_kick,
@@ -36,7 +37,8 @@ from ._rwa_numeric import (
     retained_mask,
     rwa_coefficients,
 )
-from ._workload_facts import packed_segments
+from ._workload_facts import TableIdentity, packed_segments
+from .dop853 import DOP853Plan, EndpointData, advance_endpoints
 
 
 @dataclass(frozen=True)
@@ -379,11 +381,14 @@ def _run(data, row_models, states, controls):
 class MultitoneRWAKernel:
     """Joint RWA C5 family with omission-driven Fourier retention.
 
-    Admission requires exactly two constant envelopes on distinct ports,
-    fixed flux, each |f|>=0.05 GHz and budget >=1e-3. Sampled envelopes are
-    rejected because omission bounds do not certify their final whole-sequence
-    density error. Carrier spacing
-    does not veto admission: close or equal carriers use the same joint
+    Admission requires two envelopes, fixed flux, each |f|>=0.05 GHz and
+    budget >=1e-3. Constant pairs require distinct ports. Sampled candidates
+    share an evolve-local spot check against full-drive DOP853 on a fixed
+    coherent probe. Within each same-shape group, select the row with the
+    largest abs(gain) times envelope peak for each tone and probe each selected
+    row once. No additional slope or curvature probes are selected. All probes
+    must agree within 0.1 times the budget in maximum absolute density difference.
+    Carrier spacing does not veto admission: close or equal carriers use the same joint
     omission solver and retained-dimension limit. Full-operator/carrier and
     retained-norm phase caps do not apply here. Single-constant RWA and
     covariant gates keep their policies.
@@ -424,8 +429,8 @@ class MultitoneRWAKernel:
     256 halves the validated 512 ceiling. At dimension 256, build plus apply
     is faster than same-budget DOP853 in all four envelope/duration probes.
     These are empirical admission rules, not arbitrary-input or sequence error
-    certificates. Admitted constant rows use a 16 ns ceiling. Historical
-    sampled probes above do not grant sampled-envelope admission.
+    certificates. Admitted constant rows use a 16 ns ceiling. Sampled rows
+    use a 4 ns ceiling and no endpoint kick.
     Dispatch may prefer full-drive DOP853 even after numerical admission when
     restoring fast edges makes cold prepare/guard/apply more expensive. That
     choice does not change these omission bounds or the retained-dimension cap.
@@ -433,17 +438,80 @@ class MultitoneRWAKernel:
     """
 
     name = "multitone_rwa"
-    revision = (MULTITONE_GUARD_POLICY, "constant-dual-endpoint-kick-v1")
+    revision = (MULTITONE_GUARD_POLICY, "constant-dual-endpoint-kick-v1", SPOT_POLICY)
     guard_builds = False
 
     def guard(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.bool_]:
-        """Admit constant pairs under the calibrated policy; reject sampled rows."""
+        """Check constant proxies and borrow each sampled group's own decision.
+
+        rows index the supplied table. Sampled groups that intersect these
+        rows in the complete geometry compare their probes once per work plan.
+        Returns a row-aligned acceptance mask; numerical failures propagate.
+        """
         constant = table.constant_envelopes(rows)
         accepted = np.zeros(len(rows), dtype=np.bool_)
         accepted[constant] = admit_multitone_rows(table, rows[constant], context)
+        sampled = ~constant & (table.tones[rows] == 2)
+        if not np.any(sampled):
+            return accepted
+        complete = context.work_plan.complete_table
+        geometry = table if complete is None else complete
+        admission = sampled_groups(geometry, context)
+        membership = admission.by_row[rows + context.complete_row_offset]
+        pending = sampled & (membership >= 0)
+        needed = membership[pending]
+        passed = np.zeros(len(admission.groups), dtype=np.bool_)
+        for index in np.unique(needed):
+            passed[index] = self._spot_check(geometry, admission.groups[index], context)
+        accepted[pending] = passed[needed]
         return accepted
+
+    def _spot_check(
+        self, table: SegmentTable, group: SampledGroup, context: KernelContext
+    ) -> bool:
+        key = FactKey(
+            (SPOT_POLICY, TableIdentity(table), context.budget, group.rows[0]), bool
+        )
+
+        def build() -> bool:
+            rows = np.asarray(group.spot_rows, dtype=np.int64)
+            keys = self.prepare_keys(table, rows, context)
+            prepared = self.prepare(keys, table, rows, context)
+            size = prepared.models.energies.shape[1]
+            initial = np.repeat(probe_density(size)[None], len(rows), axis=0)
+            rwa, direct = initial.copy(), initial
+            indices = np.arange(len(rows), dtype=np.int64)
+            self.apply(
+                prepared,
+                indices,
+                table,
+                rows,
+                rwa,
+                ApplyContext(context.budget, work_plan=context.work_plan),
+            )
+            # These probes are independent endpoints, never a production chain.
+            plan = DOP853Plan(
+                np.full(len(table.timeline), "interaction"),
+                np.full(len(table.timeline), -1, dtype=np.int64),
+            )
+            data = EndpointData(
+                prepared.models, packed_segments(table, context.work_plan)
+            )
+            advance_endpoints(data, (rows, indices), direct, context.budget, plan)
+            context.work_plan.routing.admitted(self.name, len(rows))
+            difference = np.abs(rwa - direct)
+            accepted = bool(np.max(difference) <= SPOT_POLICY[1] * context.budget)
+            if context.capture is not None:
+                context.capture.sampled_group(
+                    group,
+                    "accepted" if accepted else "rejected",
+                    np.max(difference, axis=(1, 2)),
+                )
+            return accepted
+
+        return context.work_plan.fact(key, build)
 
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
@@ -494,7 +562,7 @@ class MultitoneRWAKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         context: KernelContext,
-    ) -> Prepared:
+    ) -> RWAPrepared:
         """Build retained Fourier edges and omitted-edge shifts for key-aligned rows.
 
         Uses the same compiled coefficient owner as rwa_coefficients. Apply

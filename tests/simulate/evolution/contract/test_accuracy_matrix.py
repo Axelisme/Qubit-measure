@@ -11,16 +11,20 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
     Engine,
     EnvelopeSpec,
+    ModelSource,
     NoValidKernel,
     RoutingHistory,
     RWAGuardMetric,
     SecularDrive,
     SecularModel,
+    TimelineBatch,
     common_frame_diagnostic,
     load_reference,
     multitone_rwa_diagnostic,
+    read_capture_metadata,
     segment_spans,
     write_reference,
 )
@@ -63,6 +67,8 @@ CASE_NAMES = (
     "nearby_carriers",
     "cheap_sampled_nearby",
     "cheap_sampled_separated",
+    "sampled_multitone_phase_sequence",
+    "sampled_multitone_short_sweep_32",
     "adiabatic_ramp",
     "single_tone_sideband",
     *DISSIPATIVE_DC_CASES,
@@ -86,7 +92,7 @@ def matrix_reference(
 
     Sources/history remain fresh per test; cached arrays contain only oracle
     results for these deterministic physical inputs, never routing products.
-    The long DC interaction references also persist in pytest's local cache,
+    Long DC and cheap sampled references also persist in pytest's local cache,
     keyed by complete physics, oracle source, tolerances and dependency versions.
     """
     oracle_code = b"".join(
@@ -97,25 +103,44 @@ def matrix_reference(
         version(name) for name in ("numpy", "scipy", "numba")
     )
     oracle_hash = sha256(oracle_code + dependencies.encode()).hexdigest()
-    cache = pytestconfig.cache.mkdir("interaction-reference") / oracle_hash
+    interaction_cache = pytestconfig.cache.mkdir("interaction-reference") / oracle_hash
+    sampled_cache = pytestconfig.cache.mkdir("sampled-reference") / oracle_hash
     results: dict[tuple[str, int], ReferenceResult] = {}
 
     def reference_for(case: AccuracyCase) -> ReferenceResult:
         key = case.name, len(case.batch.points)
         if key not in results:
             if case.name in DISSIPATIVE_DC_CASES:
-                try:
-                    result = load_reference(cache, case.source, case.batch)
-                except FileNotFoundError:
-                    result = interaction_reference(case.source, case.batch)
-                    write_reference(cache, case.source, case.batch, result)
-                assert result.convergence_error <= 2e-6
-                results[key] = result
+                results[key] = _persistent_reference(
+                    case, interaction_cache, interaction_reference
+                )
+            elif case.name in ("cheap_sampled_nearby", "cheap_sampled_separated"):
+                results[key] = _persistent_reference(
+                    case, sampled_cache, converged_reference
+                )
+            elif case.name == "sampled_multitone_short_sweep_32":
+                results[key] = interaction_reference(case.source, case.batch)
+                assert results[key].convergence_error <= 2e-6
             else:
                 results[key] = converged_reference(case.source, case.batch)
         return results[key]
 
     return reference_for
+
+
+def _persistent_reference(
+    case: AccuracyCase,
+    cache: Path,
+    solve: Callable[[ModelSource, TimelineBatch], ReferenceResult],
+) -> ReferenceResult:
+    try:
+        result = load_reference(cache, case.source, case.batch)
+    except FileNotFoundError:
+        result = solve(case.source, case.batch)
+        assert result.convergence_error <= 2e-6
+        write_reference(cache, case.source, case.batch, result)
+    assert result.convergence_error <= 2e-6
+    return result
 
 
 @pytest.mark.parametrize("name,family", PINNED)
@@ -128,7 +153,7 @@ def test_pinned_family_density(
     case = accuracy_case(name)
     reference = matrix_reference(case)
     families = (case.idle_family, family) if case.idle_family is not None else (family,)
-    with closing(Engine(1, families=families)) as engine:
+    with closing(Engine(1, families=families, backend="cpu")) as engine:
         result = engine.evolve(case.source, (case.batch,))
     require_families(result.paths, families)
     if case.idle_family is not None:
@@ -514,6 +539,58 @@ def test_constant_multitone_guard_edge_density(request: pytest.FixtureRequest) -
             )
 
 
+def test_sampled_multitone_spot_edge_density(request: pytest.FixtureRequest) -> None:
+    """A sampled pair just inside the measured spot limit passes full density."""
+    case = accuracy_case("joint_gate_inventory")
+    batch = timeline(1, 1.5)
+    envelope = EnvelopeSpec(
+        "sampled", np.array([0.8, 1.0, 0.9], complex), np.array([0.0, 0.75, 1.5])
+    )
+    tracks = tuple(
+        drive_track(
+            batch,
+            envelope,
+            frequency=float(track.frequency_ghz[0]),
+            gain=0.43,
+            port=track.port,
+        )
+        for track in case.batch.tracks
+    )
+    batch = replace(batch, tracks=tracks)
+    budget = 1e-3
+    capture = CaptureBuffer()
+    with (
+        closing(case.source),
+        closing(Engine(1, families=("multitone_rwa",), backend="cpu")) as engine,
+    ):
+        result = engine.evolve(case.source, (batch,), budget=budget, capture=capture)
+        require_families(result.paths, ("multitone_rwa",))
+        (admission,) = read_capture_metadata(capture.records[0])[
+            "sampled_rwa_admissions"
+        ]
+        assert admission["decision"] == "accepted"
+        (spot,) = admission["spots"]
+        probe_error = spot["max_density_error"]
+        assert probe_error is not None
+        assert 0.095 * budget < probe_error <= 0.1 * budget
+        reference = converged_reference(case.source, batch)
+    error = density_error(result.densities, reference.density)
+    request.node.user_properties.append(
+        measurement_property(
+            AccuracyMeasurement(
+                "guard_edge/sampled_multitone_rwa",
+                "multitone_rwa",
+                error,
+                reference.convergence_error,
+            )
+        )
+    )
+    request.node.user_properties.append(("sampled_multitone_spot_error", probe_error))
+    assert error <= 2e-3, (
+        f"sampled multitone spot-edge density error {error:.9g} > 2e-3"
+    )
+
+
 @pytest.mark.parametrize("name", CASE_NAMES)
 def test_default_empty_and_warm_history_density(
     name: str,
@@ -521,14 +598,10 @@ def test_default_empty_and_warm_history_density(
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
     case = accuracy_case(name)
-    with closing(Engine(1)) as engine:
+    with closing(Engine(1, backend="cpu")) as engine:
         for state in ("empty", "warm"):
             result = engine.evolve(case.source, (case.batch,))
             assert result.paths.segments_by_kernel
-            if name in ("cheap_sampled_nearby", "cheap_sampled_separated"):
-                assert result.paths.segments_by_kernel == {
-                    case.families[0]: len(case.batch.points)
-                }
             reference = matrix_reference(case)
             error = density_error(result.densities, reference.density)
             for family, count in result.paths.segments_by_kernel.items():
@@ -544,6 +617,69 @@ def test_default_empty_and_warm_history_density(
                         )
                     )
             assert error <= 2e-3, f"{name}/{state}: density error {error:.9g} > 2e-3"
+
+
+# Against CPU DP5(4), funding the same DOP853 probes takes three copies
+# of each isolated 384 ns phase and two copies of the two-amplitude sequence.
+@pytest.mark.parametrize(
+    "name, expected_spots, copies",
+    [("cheap_sampled_separated", 2, 3), ("sampled_multitone_phase_sequence", 6, 2)],
+)
+def test_sampled_multitone_rejects_each_failed_group(
+    name: str,
+    expected_spots: int,
+    copies: int,
+    request: pytest.FixtureRequest,
+    matrix_reference: Callable[[AccuracyCase], ReferenceResult],
+) -> None:
+    case = accuracy_case(name)
+    # Keep the piecewise-linear drive but add knot restarts to direct playback.
+    # These cases must pay for and fail the probe, not fall back on price alone.
+    tracks = []
+    for track in case.batch.tracks:
+        (envelope,) = track.envelopes
+        time = envelope.sample_ns
+        knots = np.interp(
+            np.linspace(0, len(time) - 1, (len(time) - 1) * 64 + 1),
+            np.arange(len(time)),
+            time,
+        )
+        dense = replace(envelope, sample_ns=knots, samples=envelope.values(knots))
+        tracks.append(replace(track, envelopes=(dense,)))
+    batch = replace(case.batch, tracks=tuple(tracks))
+    # One consumer cannot repay its own DOP853 probe. Duplicate each isolated
+    # phase where needed without changing its drive or independent reference.
+    stride = int(batch.points.max()) + 1
+    batches = tuple(
+        replace(batch, points=batch.points + index * stride) for index in range(copies)
+    )
+    expected_rows = copies * sum(len(spans) for spans in segment_spans(batch))
+    with closing(
+        Engine(1, families=("multitone_rwa", "dop853"), backend="cpu")
+    ) as engine:
+        inspection = engine.inspect_dispatch(case.source, batches)
+        result = engine.evolve(case.source, batches, telemetry=True)
+    assert len(inspection.rows) == expected_rows
+    for row in inspection.rows:
+        assert row.family == "dop853"
+        assert any(
+            candidate.family == "multitone_rwa" and candidate.guard == "rejected"
+            for candidate in row.candidates
+        )
+    assert result.paths.segments_by_kernel == {"dop853": expected_rows}
+    routing = result.paths.routing["multitone_rwa"]
+    assert routing.admission_rows == expected_spots
+    assert routing.rejected_rows == expected_rows
+    reference = matrix_reference(case)
+    error = density_error(result.densities, np.tile(reference.density, (copies, 1, 1)))
+    request.node.user_properties.append(
+        measurement_property(
+            AccuracyMeasurement(
+                name + "/spot_fallback", "dop853", error, reference.convergence_error
+            )
+        )
+    )
+    assert error <= 2e-3
 
 
 def test_multisegment_final_density(

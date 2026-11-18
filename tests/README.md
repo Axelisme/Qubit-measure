@@ -238,16 +238,24 @@ native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e
 
 這個案例允許超過〈測試成本〉每個測試 30 s 的預算：首次計算 18 態、約 760 ns 的兩級容差 lab-frame reference 是成本主體。保留原長度的理由是 joint dressed 模型是約化參數空間中其他案例不涵蓋的一軸，縮短序列會改變驗收的內容。它只在包含 `sim` 的選集執行；`worksteal` 把它的三個測試分到不同 worker 時，每個 worker 各算一次 reference。這是矩陣唯一具名的成本例外。之後新增或修改的案例在 `-n 0` 下超過 30 s 時，先依本節末的順序加本機 hash 快取，不新增第二個具名例外。
 
-`CASE_NAMES` 中的案例也保留預設選路的空歷史與暖歷史驗收。
-`joint_gate_inventory` 保留完整 20 點 sampled inventory，matrix 的 pinned density 驗 `dop853`。
-`joint_constant` 用相同模型和 inventory 保護 `multitone_rwa` 的 distinct-port constant 路徑。
-[`test_routing_boundaries.py`](simulate/evolution/contract/test_routing_boundaries.py) 驗證單次 pinned gate 的完整 density，另以原有 20 點共享輸入保留預設 `common_frame` 空／暖 history 的 density 驗收。
+每個案例也保留預設選路的空歷史與暖歷史驗收。
+`joint_gate_inventory` 的 20 點 sampled inventory 分別 pin `multitone_rwa` 與 `dop853`。
+`joint_constant` 用相同模型保護 distinct-port constant 路徑。
+[`test_routing_boundaries.py`](simulate/evolution/contract/test_routing_boundaries.py)
+驗證 19 與 20 次 inventory 都能通過 `multitone_rwa` guard，並用 telemetry 驗證同 key 的抽查只活在一次 evolve。
+`cheap_sampled_nearby` 通過抽查；`cheap_sampled_separated` 有兩個不同相位群，
+`sampled_multitone_phase_sequence` 有六個。這兩個案例逐群驗證抽查失敗後退回，對照獨立參考解。
+[`test_sampled_rwa_groups.py`](simulate/evolution/contract/test_sampled_rwa_groups.py)
+驗證振幅極值、樣本與切片的精確分群、共享前綴，以及拒收不影響不同相位的群。
+`sampled_multitone_short_sweep_32` 是 25 ns 的雙 tone 頻掃，用 32 能階與
+`interaction_reference` 驗證完整 density。
+
+同檔也驗證單次 pinned gate 的完整 density，並保留 20 點共享輸入的預設
+`common_frame` 空／暖 history 驗收。
 同檔從 `inspect_dispatch` 驗證逐 key 冷價的兩側。價格勝出的本地 key 回 `deferred`，共享 key 跑 guard，價格輸的 gate 回 `untested_after_short_circuit`。
 短 inventory 在空歷史和前次已執行同 key 的情況下都預測 DOP853；實際 evolve 確認選路與未付 gate prepare。長 inventory 驗證合格 key 可執行 gate，且不能攤提到另一個罕用 key。
 測試使用有冷價間距的輸入，不重算係數或鎖住 break-even 的精確位置。
-固定 `multitone_rwa` 仍拒收 sampled 輸入。固定 `multitone_gate` 可以略過成本比較，不能略過相位與 split 驗證。
-`cheap_sampled_nearby` 與 `cheap_sampled_separated` 使用非平坦 smooth samples，避免 planner 抽成 constant row。
-兩個案例分別驗證失去 cheap-RWA 豁免後的 `common_frame` 與 `dop853` 分支，包含空／暖 history 的路徑與完整 density。
+固定 `multitone_gate` 可以略過成本比較，不能略過相位與 split 驗證。
 多段案例量整條 timeline 的最終誤差。混合路徑的每個 family 列出同一個最終誤差，
 不是各段的局部誤差。
 歷史案例另外驗證八點 inventory 的結果，並比較兩點輸入在歷史改變前後的實際路徑。
@@ -277,10 +285,11 @@ OpenCL 與 CPU DP5(4) 案例用這個參考解。
 精度比較始終使用同一個獨立物理參考解，省時間只改變參考解何時計算，不改成與目前實作輸出比較。
 參考計算變慢時先讓同一案例在每個 pytest worker 的 session 內共用一次結果。仍不足時才加本機快取，以案例輸入與參考解程式碼的 hash 為 key，內容不進 repo。
 只有首次計算也慢到不能接受時，才提議將參考結果入庫，先取得使用者同意，並用 hash 核對輸入與參考程式版本。
-三個耗散 DC interaction-reference 案例另用 `.pytest_cache` 下的
-`interaction-reference` 本機快取。Key 包含完整物理輸入、兩級容差、參考解原始碼
-與 Python／NumPy／SciPy／Numba 版本。Cold miss 仍以同一個獨立 solver 求解，
-只在兩級容差收斂後寫入。刪除 `.pytest_cache` 就會重算。其餘案例只使用 session 共用。
+三個耗散 DC 案例使用 `.pytest_cache` 內的 `interaction-reference` 本機快取。
+`cheap_sampled_nearby` 與 `cheap_sampled_separated` 的 lab-frame 參考解首次求解約 30 s，
+存入同一目錄下的 `sampled-reference` 快取。Key 包含完整物理輸入、兩級容差、
+參考解原始碼與 Python／NumPy／SciPy／Numba 版本。沒有快取時用原 solver 求解，
+只在兩級容差收斂後寫入。刪除 `.pytest_cache` 就會重算。其餘案例只在 session 內共用。
 
 ### 怎麼跑比較快
 

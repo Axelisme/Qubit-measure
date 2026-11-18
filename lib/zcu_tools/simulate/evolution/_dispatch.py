@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from itertools import chain
 from typing import Literal
 
@@ -24,6 +25,7 @@ from ._multitone_dispatch import (
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import KeyGroups, group_keys
+from ._sampled_rwa_dispatch import prefer_sampled_rwa
 from ._shaped_dispatch import (
     populate_single_gate_plan,
     preference,
@@ -41,7 +43,9 @@ from .kernel import (
     RowPlan,
     SegmentTable,
 )
+from .kernels._multitone_spot import sampled_groups
 from .kernels.common_frame import zero_mean_carrier
+from .kernels.common_frame_kernel import CommonFrameKernel
 from .kernels.dop853 import DOP853Kernel
 from .kernels.floquet import FloquetPlan
 from .kernels.gate_cache import GateCacheKernel
@@ -268,26 +272,35 @@ def _guard_key(
     table: SegmentTable,
     context: KernelContext,
     rows: NDArray[np.int64],
+    handoff: GuardPreparation | None = None,
 ) -> _Guarded:
-    """Keep guard products only when this call has accepted consumers."""
+    """Keep guard products only when this call has accepted consumers.
+
+    A common-frame handoff can cover new row admissions without another build.
+    """
     routing = context.work_plan.routing
     with routing.measure(kernel.name, "prepare"):
-        result = kernel.guard_prepared(table, rows, context)
+        if handoff is None:
+            result = kernel.guard_prepared(table, rows, context)
+        elif isinstance(kernel, CommonFrameKernel):
+            result = kernel.admit_prepared(handoff.prepared, table, rows, context)
+        else:
+            raise TypeError("only common frame accepts a coefficient handoff")
     if result is None:
         raise RuntimeError(
             f"kernel {kernel.name} declares guard_builds without a handoff"
         )
-    if routing.enabled:
+    if routing.enabled and handoff is None:
         routing.prepared_keys(
             kernel.name, sum(len(p.keys) for p in result.preparations)
         )
     accepted = result.accepted
     selected = rows[accepted]
-    preparations = result.preparations if len(selected) else ()
+    preparations = (handoff,) if handoff is not None else result.preparations
     return _Guarded(
         selected,
         rows[~accepted],
-        preparations,
+        preparations if len(selected) else (),
         result.plan,
     )
 
@@ -385,7 +398,10 @@ class _Classifier:
         self.two_tone_first = (
             selection.two_tone_first if selection is not None else None
         )
-        self.preparations: dict[str, list[GuardPreparation]] = {}
+        self.preparations: dict[str, dict[int, GuardPreparation]] = {}
+        # This classifier alone owns tentative pricing handoffs. They do not
+        # enter Dispatch unless a later guard selects a consumer.
+        self.common_handoffs: dict[bytes, GuardPreparation] = {}
         self.rejected: dict[str, NDArray[np.bool_]] = {}
         self.guard_plans: dict[str, list[RowPlan]] = {}
         self.plans: dict[str, RowPlan] = {}
@@ -427,7 +443,7 @@ class _Classifier:
         eager_guard_rows: NDArray[np.int64] | None,
     ) -> Iterable[_Guarded | None]:
         """Guard shared keys and preserve batching for any advanced local Sambe keys."""
-        if self.selection is not None:
+        if self.selection is not None and not isinstance(kernel, CommonFrameKernel):
             # This worker owns one timeline. A single batch lets the kernel
             # reuse call-local work across distinct prepare keys, then drop it.
             return (_guard_key(kernel, self.table, self.context, rows),)
@@ -465,21 +481,23 @@ class _Classifier:
             (selected for index, selected in groups.selections() if per_key[index]),
             timeline_batches,
         )
+
+        def guard(selected: NDArray[np.int64]) -> _Guarded:
+            handoff = None
+            if self.common_handoffs and isinstance(kernel, CommonFrameKernel):
+                key = kernel.prepare_keys(self.table, selected[:1], self.context)[0]
+                handoff = self.common_handoffs.get(key.tobytes())
+            return _guard_key(kernel, self.table, self.context, selected, handoff)
+
         if (
             self.pool is not None
             and np.count_nonzero(per_key) + len(timeline_batches) >= 8
         ):
-            results = self.pool(
-                delayed(_guard_key)(kernel, self.table, self.context, selected)
-                for selected in selections
-            )
+            results = self.pool(delayed(guard)(selected) for selected in selections)
             if any(result is None for result in results):
                 raise RuntimeError("guard job returned no decision")
             return results
-        return (
-            _guard_key(kernel, self.table, self.context, selected)
-            for selected in selections
-        )
+        return (guard(selected) for selected in selections)
 
     def eligible_rows(
         self, kernel: Kernel, rows: NDArray[np.int64]
@@ -545,9 +563,12 @@ class _Classifier:
             if result.plan is not None:
                 self.guard_plans.setdefault(kernel.name, []).append(result.plan)
             if result.preparations:
-                self.preparations.setdefault(kernel.name, []).extend(
-                    result.preparations
-                )
+                adopted = self.preparations.setdefault(kernel.name, {})
+                for handoff in result.preparations:
+                    # Reused coefficients share one handoff and one schedule binding.
+                    adopted[id(handoff)] = handoff
+                    if isinstance(kernel, CommonFrameKernel):
+                        self.common_handoffs[handoff.keys[0].tobytes()] = handoff
         return rows[(self.names[rows] == "") & ~self.deferred[rows]]
 
     def candidate_order(
@@ -667,7 +688,17 @@ class _Classifier:
         self.accept("flux", rows[self.domains["flux"][rows]], ("flux_dop853",))
         self.classify_slow(rows[self.domains["slow"][rows]])
         # Group shaped and constant consumers together before any legacy prepare.
+        multiple = rows[self.domains["multiple"][rows]]
+        rwa = self.kernels.get("multitone_rwa")
+        sampled = np.zeros(len(multiple), dtype=bool)
+        if len(multiple) and isinstance(rwa, MultitoneRWAKernel):
+            complete = self.context.work_plan.complete_table
+            if complete is None:
+                raise RuntimeError("sampled RWA dispatch requires complete geometry")
+            full_rows = multiple + self.context.complete_row_offset
+            sampled = sampled_groups(complete, self.context).by_row[full_rows] >= 0
         common = self.domains["two"] | self.domains["multiple"]
+        common[multiple[sampled]] = False
         self.try_common_frame(rows[common[rows]])
         self.classify_plateau(rows[self.domains["plateau"][rows]])
         shaped = np.flatnonzero(self.domains["shaped"] & self.scope)
@@ -676,7 +707,9 @@ class _Classifier:
         two_tone = np.flatnonzero(self.domains["two"])
         if len(two_tone):
             self.classify_two_tone(two_tone)
-        self.classify_multiple(rows[self.domains["multiple"][rows]])
+        self.classify_multiple(multiple[~sampled])
+        if np.any(sampled) and isinstance(rwa, MultitoneRWAKernel):
+            self.classify_sampled(multiple[sampled], rwa)
         return self._result()
 
     def classify_slow(self, rows: NDArray[np.int64]) -> None:
@@ -732,16 +765,81 @@ class _Classifier:
         )
         return np.array([int(row) in direct for row in rows], dtype=bool)
 
-    def classify_multiple(self, rows: NDArray[np.int64]) -> None:
-        """Try reusable gates, then the cheaper admitted RWA/direct alternative."""
-        rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
+    def try_multitone_gate(self, rows: NDArray[np.int64]) -> NDArray[np.int64]:
+        """Offer the existing gate only on its preferred rows."""
         gate = self.kernels.get("multitone_gate")
         if gate is not None and len(rows):
             preferred = gate_preferred(
                 self.table, rows, self.context, tuple(self.kernels)
             )
             self.try_kernel(gate, rows[preferred])
-            rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
+        return rows[(self.names[rows] == "") & ~self.deferred[rows]]
+
+    def price_common_frame(
+        self, kernel: Kernel, table: SegmentTable, rows: NDArray[np.int64]
+    ) -> NDArray[np.bool_]:
+        """Guard sorted complete-table contenders and retain accepted handoffs.
+
+        Return the acceptance mask in contender order, without routing the rows.
+        The original guard handoff can serve later pricing or actual routing.
+        """
+        if not isinstance(kernel, CommonFrameKernel):
+            with self.context.work_plan.routing.measure(kernel.name, "prepare"):
+                return kernel.guard(table, rows, self.context)
+        accepted = np.zeros(len(rows), dtype=bool)
+        groups = group_keys(kernel, table, rows, self.context)
+        for index, selected in groups.selections():
+            key = groups.keys[index].tobytes()
+            result = _guard_key(
+                kernel, table, self.context, selected, self.common_handoffs.get(key)
+            )
+            accepted[np.searchsorted(rows, result.rows)] = True
+            if result.preparations:
+                (self.common_handoffs[key],) = result.preparations
+        return accepted
+
+    def classify_sampled(
+        self, rows: NDArray[np.int64], rwa: MultitoneRWAKernel
+    ) -> None:
+        """Skip a losing sampled probe; keep numerical and allowlist fallbacks."""
+        complete = self.context.work_plan.complete_table
+        if complete is None:
+            raise RuntimeError("sampled RWA pricing requires complete geometry")
+        direct_candidates = np.empty(0, dtype=np.int64)
+        if self.context.opencl is not None:
+            names = self.names
+            if self.selection is not None and self.selection.names is not None:
+                names = np.where(names == "", self.selection.names, names)
+            # Resolved non-direct neighbors and consumed prefixes break a chain.
+            direct_candidates = np.flatnonzero(
+                self.geometry.pending
+                & ((names == "dop853") | ((names == "") & (self.table.tones > 0)))
+            )
+        common = self.kernels.get("common_frame")
+        preferred = prefer_sampled_rwa(
+            complete,
+            rows + self.context.complete_row_offset,
+            self.context,
+            rwa,
+            None if common is None else partial(self.price_common_frame, common),
+            direct_candidates,
+        )
+        direct = ("dop853",) if "dop853" in self.kernels else ()
+        cost_skipped = ("common_frame", rwa.name, "multitone_gate")
+        probes = self.try_multitone_gate(rows[preferred])
+        probes = self.try_kernel(rwa, probes)
+        probes = self.try_common_frame(probes)
+        # Retain attempted-family diagnostics for exhausted allowlists.
+        fallback = (rwa.name, *direct) if self.context.families is not None else direct
+        self.accept("multiple", probes, fallback, cost_skipped=cost_skipped)
+        skipped = self.try_common_frame(rows[~preferred])
+        skipped = self.try_multitone_gate(skipped)
+        self.accept("multiple", skipped, direct, cost_skipped=cost_skipped)
+
+    def classify_multiple(self, rows: NDArray[np.int64]) -> None:
+        """Try reusable gates, then the cheaper admitted RWA/direct alternative."""
+        rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
+        rows = self.try_multitone_gate(rows)
         preferred = self.expanded_direct(rows)
         rwa = ("multitone_rwa",) if "multitone_rwa" in self.kernels else ()
         self.accept(
@@ -855,7 +953,7 @@ class _Classifier:
             self.names,
             diagnostics(self.table, self.names),
             self.costs,
-            {name: tuple(items) for name, items in self.preparations.items()},
+            {name: tuple(items.values()) for name, items in self.preparations.items()},
             self.deferred,
             self.shaped,
             self.rejected,

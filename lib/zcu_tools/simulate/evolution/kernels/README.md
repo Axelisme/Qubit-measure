@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-18，雙相位 gate 建構與 DP5(4)
+**Last updated:** 2026-11-18，雙相位 gate、sampled multitone RWA 與 DP5(4)
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -26,7 +26,14 @@ compiled `interaction_hamiltonian` 的 source location 也改到 `_rwa_fourier.p
 `multitone_rwa` 在每個 row 端點先加總所有 tone 的 kick，再作用於 density。
 末端 kick 與演化使用相同的 row duration；sampled row 不套用 kick。
 Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_gate.py`。
-`multitone_rwa` 的 family guard 只收 distinct-port constant pairs，拒收 sampled 多 tone 列。
+[`_multitone_spot.py`](_multitone_spot.py) 將通過 omission proxies 的 sampled 雙 tone 列按形狀分群。
+同群的 model、列長、port、carrier、起始相位、取樣網格與切片偏移都相同。
+每個 tone 的 I/Q 包絡樣本只可差一個正振幅倍率。每群抽查各 tone 振幅最大的列，重複列只比一次。
+Guard 以固定 coherent 初態呼叫 `dop853.advance_endpoints` 的 DOP853 路徑，把完整 density 和 RWA 比對。
+各抽查列差值須 ≤ 0.1 × budget，否則只有該群退回其餘候選。
+這取代 2026-11-14 的 sampled RWA 過渡期拒收，不改 distinct-port constant pairs 或
+`multitone_gate` 的 guard。頻掃、短脈衝與相位序列案例見 [kernel 表](../README.md#kernel-summary)。
+
 `multitone_gate` 用完整 drive 建四個 Hilbert 子段，在兩個起始相位上做 raw Fourier 展開。
 `_multitone_gate_phase.py` 用一張 5×6 網格擬合係數，不按包絡形狀或虛部分類。
 `_gate_endpoints.py` 以 rtol/atol 2.75e-7/2.75e-9 積分節點並做 polar retraction。
