@@ -73,6 +73,7 @@ group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此�
 由共用生成器處理。SweepCfg 使用 Range／Center 與 Expts／Step 的四個 tagged branches。Count 葉名為 n，步長葉名為 step。新表單選 Range + Expts。每個分支只保存 active 座標與採樣輸入。Center 的 span 是帶正負號的完整寬度，不保存另一份端點快取。
 持久 Spec 保留 child key，to_cfg 不從 library materialize 或改寫 key。
 未知 seed、受屏蔽 seed、缺必要 discriminator 與不支援的選項在入口報錯。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 需要條件或聚合邏輯來計算初值時，adapter 提供 `Form(Cfg, tree, initial_values=factory)`。
 Form 每次建立 fresh input，先建宣告 raw 初值，再呼叫 `factory(env, defaults)`。
@@ -120,6 +121,7 @@ Run 會覆寫的必填欄位由實驗 form 顯式宣告 `Hidden(合法值)`。�
 生成器不推導 sweep 與 module 的關係，不另設 hidden_paths，也不改 core input 型別或 Run。
 Bath reset phase 仍可編輯。這個入口不擴充 nested readonly，不複製共用 module 型別，
 也不另建局部 cfg 型別。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 使用者於 2026-10-20 裁定：「應該有更簡單的做法，比如就隨便填一個合法值，或是給adapter生成時說明哪些路徑不重要。」
 同日補充：「不只是onetone/freq有這個問題」。各實驗依自己的 Run 覆寫路徑宣告 Hidden，不靠欄位同名推定。
@@ -167,6 +169,7 @@ description 的 Option label、value 與 commands，不猜 union 或 library 結
 Option.fields 仍是作者宣告，不進選單回覆；查所選 path 才列直接 children。
 單一普通 wrapper 攤平一層，但完整 model-field path 不變。
 FormEditor 首次展開才建子表單，Inspect／New Entry／writeback 與 workflows 使用相同描述。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 Module／waveform 使用持久 Spec 與 FieldMeta。硬體專屬的不支援欄位由生成器屏蔽；
 Readout 的 `gen_ch` 與 `ro_ch` 必填且可編輯，`freq` 是唯一 generator／ADC 頻率。

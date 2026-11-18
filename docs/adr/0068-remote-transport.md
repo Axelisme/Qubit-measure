@@ -45,6 +45,7 @@ RPC `device.setup(name, cfg)` 只收完整 Info constructor cfg，不合併 cach
 固定 MCP `device_setup(name, cfg)` 接 partial patch。它讀 before Info，合併完整候選後送一次 RPC。Before Info 有 value_unit 欄位且 patch 含 value 時，caller 必須同時明填 value_unit，不借 before unit 或 constructor 推導代替意圖。這項規則依 Info 欄位判斷，不比對儀器名稱，FakeDevice 同樣適用。只改 output／rampstep 不需 unit。其他 model 規則仍由 RPC 驗證，不在 MCP 建第二份 validator。
 
 工具沒有 timeout 參數，最多等待 300 秒，逾時回 running 與已知 handle，不取消，caller 用 `wait(op)` 續等。回覆保留 pre_read、start、wait、post_read、native operation 和 before／after。Requested.cfg 在 before 讀取並完成合併前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時 pre_read failed；有 Info 但 disconnected 時沿 service 回 start failed，保完整候選與 before，after 為 null。工具不做 verification、單位換算、重連、retry 或 rollback。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 握手版本以 [wire_version.py](../../lib/zcu_tools/gui/app/measure/remote/wire_version.py) 的 WIRE_VERSION／GUI_VERSION 與 [server.py](../../lib/zcu_tools/mcp/measure/server.py) 的 MCP_VERSION 宣告為準。只有 wire 版本用於相容比對，其餘是程式版本投影。
 
