@@ -1,6 +1,6 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-17, optional acquire captures and telemetry correlation
+**Last updated:** 2026-11-18, OpenCL routing telemetry
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
@@ -77,7 +77,7 @@ boundary. `AcquireTelemetry` requires the first nine fields below.
 | `timestamp` | Writer-generated UTC ISO timestamp. |
 | `frontend_cpu_s` | Geometry and work-plan calling-thread CPU seconds. |
 | `estimated_cost_unit` | `relative scheduling units`, the label for family scheduling costs. |
-| `families` | Engine family names mapped to aggregated counters and CPU seconds. |
+| `families` | Engine family names mapped to merged routing counters, CPU seconds and optional OpenCL detection error. |
 
 All four wall fields are floats. A failed call retains elapsed time through its
 exception; a stage not entered contributes `0.0`. `complete` comes from the binding
@@ -91,8 +91,14 @@ Use extras keys such as `ftf.projection_outcomes`; the prefix names the simulato
 extension, not a row identity. Required extras keys are indexed directly by their
 consumer. The writer projects only declared fields and never modifies the caller's
 summary. It stores no numerical inputs or simulator identity.
-Family counters retain the [Engine report contract](../simulate/evolution/README.md#routing-telemetry).
-Family CPU excludes ADC, sampling and routing bookkeeping. It is not wall time.
+Each family entry contains `rows`, `duration_ns`, `prepare_cpu_s`, `apply_cpu_s`,
+`actual_cpu_s`, `cache_hits`, `rejected_rows`, `estimated_cost`, `estimated_cpu_s`,
+`prepare_builds`, `admission_rows`, `opencl_rows` and `opencl_detection_error`.
+These fields use the [Engine report's aggregation rules](../simulate/evolution/README.md#routing-telemetry).
+The writer lists the fields explicitly so new Engine diagnostics do not add JSONL keys.
+Acquire logs have no per-row method field and do not store the Engine's `dp54_rows`
+or `dop853_rows` endpoint counts. Family CPU excludes ADC, sampling and routing
+bookkeeping. It is not wall time.
 
 `numerics.telemetry.enabled` defaults to true in all three environments.
 Their default `numerics.telemetry.directory=null` selects the same project-root

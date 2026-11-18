@@ -9,6 +9,7 @@ Measure close 的背景 drain／逾時留窗已併入 [[0066]]，其餘保留未
 ## Shutdown 期限與背景工作
 
 核准目標：關閉時停止接受新工作，請求可取消工作停止，等待必要的 domain 終局與 executor cleanup。期限到達只回報未完成；共用預設不自動強制退出。若 app 提供強制退出，必須明示未保存結果、未完成寫入和資源未清理的風險。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 現況證據：`gui/session/services/shutdown.py` 的 tick 可以回報 TIMED_OUT；`gui/session/adapters/qt_shutdown_driver.py` 的 `_on_tick()` 對 WAITING 之外的狀態都呼叫完成 callback，包括 TIMED_OUT 和 tick 例外。這個共用 driver 尚未改為逾時留窗。
 

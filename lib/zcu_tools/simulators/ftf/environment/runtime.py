@@ -365,7 +365,10 @@ class FTFAcquire:
                 ReplayAcquire(
                     settings=owner.effective_settings,
                     request=acquire,
-                    versions=replay_versions(),
+                    versions=replay_versions(
+                        execution_device=prepared.paths.execution_device,
+                        workers=owner.engine.workers,
+                    ),
                 ),
                 replace(snapshot, model_identity=owner.identity),
                 index,
@@ -887,13 +890,17 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
     acquires, using workers (default 1) as its sole parallel width.
     Worker threads live only during multi-timeline evolve; dropping the environment
     releases its in-memory routing facts. FTFSource.close explicitly clears it.
-    warmup=False keeps direct callers/tests free of background CPU work. True
-    starts process-wide single-flight numeric preparation. The Notebook example
-    opts in and reserves two host CPUs; GUI startup reserves one host CPU,
-    using at least one worker without warmup. An explicit EnvironmentWarmup
-    supplies named preparation items instead. It must not
-    sample or mutate live devices. env.wait_ready() waits before caller timing;
-    acquire also waits automatically. Failure status permits on-demand compiling.
+    warmup=False starts no background work. True prepares common CPU paths, then
+    precompiles the OpenCL program for retained_levels if the device and dimension
+    are supported. No GPU item is scheduled without pyopencl or when families
+    excludes dop853. A CPU preparation failure stops the manifest before GPU work.
+    A failure after GPU detection succeeds also appears in the failed warmup
+    status. Neither failure blocks construction or prevents on-demand acquisition.
+    An explicit EnvironmentWarmup runs only the caller's items, which must not sample
+    or mutate live devices. env.wait_ready() waits before caller timing; acquire
+    also waits automatically.
+    After acquisitions drain, call env.close_backend to wait for startup work
+    and release numeric resources. The caller closes the device manager separately.
     time_scale overrides numerics.time_scale (default 1.0 = physical time)
     for binding rounds, including snapshot/execution time. None uses
     settings; finite nonnegative values override them. Zero disables pacing for
@@ -965,10 +972,20 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
         from zcu_tools.simulators.ftf.environment.warmup import startup_warmup
 
         preparation = (
-            startup_warmup()
+            startup_warmup(
+                settings.numerics.truncation.retained_levels,
+                families=families,
+            )
             if warmup is True
             else (warmup if isinstance(warmup, EnvironmentWarmup) else None)
         )
+
+        def close_backend() -> None:
+            # This callback owns only backend cleanup; readiness failures are status values.
+            if preparation is not None:
+                preparation.wait_ready()
+            coordinator.close()
+
         binding = SimulationBinding(
             coordinator.snapshot,
             coordinator.execute,
@@ -999,6 +1016,7 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
             devices,
             "FTF: independent shots, terminal shared-line readout, synchronous acquire/decimated",
             preparation,
+            close_backend=close_backend,
         )
         if preparation is not None:
             preparation.start()

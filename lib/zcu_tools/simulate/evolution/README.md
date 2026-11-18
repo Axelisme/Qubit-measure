@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, full-drive gate pricing and admission
+**Last updated:** 2026-11-18, full-drive gate admission and DP5(4) within dop853
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -12,6 +12,7 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 ## Contents
 
 - [Public entry points](#public-entry-points)
+- [GPU backend](#gpu-backend)
 - [Frozen numeric inputs and references](#frozen-numeric-inputs-and-references)
 - [Dispatch inspection](#dispatch-inspection)
 - [Engine capture](#engine-capture)
@@ -57,7 +58,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Solver-free reference storage | `SolverTolerances`, `ReferenceResult`, `reference_key`, `load_reference`, `write_reference` |
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
-routing_cache_bytes=4*1024**2)` owns immutable routing facts.
+routing_cache_bytes=4*1024**2, backend="auto")` owns immutable routing facts.
 Numerical preparations live only within one evolve. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
@@ -161,6 +162,73 @@ are admission proxies, not a certificate of final full-density accuracy.
 The 0.08 threshold has margin on the fixed acceptance set described below.
 It is not a maximum usable threshold or an accuracy guarantee for arbitrary
 inputs. Dispatch order and other families are unchanged.
+
+## GPU backend
+
+OpenCL is an execution backend for `dop853`, not an extra family. On Windows
+or Linux, install a GPU driver that exposes `cl_khr_fp64` and add the optional
+`gpu` extra. For a GUI checkout, run:
+
+```bash
+uv sync --directory <worktree> --locked --no-dev --extra gui --extra gpu
+```
+
+The extra installs `pyopencl` from `uv.lock`, not the driver. The `all` extra
+does not include `gpu`. The default development group includes `gpu` so
+managed lanes can run GPU tests on machines with a compatible driver.
+
+| `Engine(backend=...)` | Behavior |
+| --- | --- |
+| `"auto"` (default) | Detects OpenCL on the first eligible row. For eligible DOP853 work, compares CPU and GPU cost, including warm program setup, transfers and batch size. |
+| `"cpu"` | Never probes or uses OpenCL. |
+| `"opencl"` | Requires a device that passes detection at construction. Sends eligible DOP853 rows to that device without price comparison or fallback. A build failure for the selected dimension and tableau raises during evolve. Ineligible rows can still run on CPU. |
+
+Eligibility depends on structure, not envelope shape. The row must be an
+independent, unchained interaction-frame `dop853` endpoint at fixed DC, with no
+flux modulation or segment shift. It must last 100 ns to 10 µs and have at most
+32 retained levels. Two sampled tones must cover the whole row. The union of
+their sample grids can contain at most 960 knots, because the runner restarts
+integration at knots from either tone. Other rows in the same timeline may
+run on CPU.
+
+Detection imports `pyopencl`, finds an FP64 GPU and compiles both tableaux
+for a fixed three-level endpoint. Each result must differ from its CPU
+counterpart by at most `1e-5` per complex entry. The Engine can reuse the
+stored probe result for the same device, driver and kernel. Failure to write
+that result does not change the probe outcome. If detection fails, `opencl`
+raises during construction and `auto` uses CPU with the same numerical result
+as `"cpu"`. If a program fails to build before execution, `auto` falls back
+only for that dimension and tableau. Enable routing telemetry to read the
+reason in `opencl_detection_error`. GPU execution errors raise without a CPU retry.
+
+One work-group integrates one row on device. At budgets ≥ `1e-3`, eligible
+rows use DP5(4) with one third of the DOP853 local tolerances. Every eligible
+row is at most 10 µs, so it meets the same duration limit as CPU DP5(4).
+Tighter budgets retain DOP853. Dispatch selects the OpenCL tableau once per
+`evolve` call. Pricing, program lookup and build, execution and routing
+telemetry use that same choice. The GPU computes
+the starting interaction-frame phasor of each step in FP64 and uses FP32
+within the step. Before handing off the density, the runner returns it to the
+model eigenbasis, symmetrizes it and normalizes its trace. The scheduler
+batches ready rows across the acquire by dimension and model key. It uses
+measured dispatch times to target about 0.1 s per batch without reading OS or
+driver timeout settings.
+
+The CPU/GPU cost choice uses the ready rows, worker count and evolve budget.
+For DP5(4), the GPU estimate multiplies matrix work by 0.68 and keeps the
+launch, transfer and per-trial floors unchanged. The factor uses the slower
+of two warm 24-point `simultaneous_drive` measurements on Intel Arc.
+At d=24 the median fell from 0.303 s to 0.206 s (1.47×); at d=32 it fell from
+0.502 s to 0.308 s (1.63×). Maximum absolute complex-density errors against
+the independent reference were `3.04e-5` and `2.76e-5`, respectively.
+Disk cache warmth and measured batch times do not enter routing.
+Program builds and detection records use `<user-cache-root>/opencl/dop853/<digest>/`;
+the digest covers the kernel source and options, including dimension and tableau,
+plus the device and driver. The driver can also cache
+builds itself. The simulator's [cache root](../README.md#numba-machine-code-cache)
+can be set with an absolute `ZCU_TOOLS_CACHE_DIR`. A cold build populates the
+cache for later Engines and is not charged in the routing cost. The Engine
+owns the OpenCL context and releases it on `close()` after active work ends.
 
 ## Frozen numeric inputs and references
 
@@ -268,14 +336,17 @@ neither runs timeline workers nor computes prefix densities.
 An evaluated guard reports `accepted` or `rejected`. A local key reports
 `deferred`. Candidates after a stopped round report
 `untested_after_short_circuit`, unless an earlier round already evaluated them.
-A gate that loses the pre-build price comparison is not offered, so inspection
-does not run its table-building guard. Without `families=`, that skipped gate
-is absent from `candidates`. With an allowlist, a later fallback round can name
-it after another family has stopped the row; it then reports
-`untested_after_short_circuit`, not a guard rejection. Structurally inapplicable
-families remain absent unless offered. Candidate `scheduling_cost` is
-`Kernel.cost`'s nonnegative relative row work for chunk interleaving, not seconds or a numerical certificate;
-it cannot explain why a family was chosen. The cold-amortized estimate used to
+Structurally inapplicable and cost-skipped families are not listed unless
+offered. A gate that loses the pre-build comparison does not run its
+table-building guard. Without `families=`, the skipped gate is absent. With an
+allowlist, a later fallback round can name it after another family has stopped
+the row; the gate then reports `untested_after_short_circuit`, not rejection.
+
+Candidate `scheduling_cost` is `Kernel.cost`'s nonnegative relative row work for
+chunk interleaving, not seconds or a numerical certificate. It cannot explain
+why a family was chosen. For `dop853` this is the CPU fallback cost, reduced for
+rows eligible for CPU DP5(4). Backend selection happens when the scheduler has
+a ready wave. The cold-amortized estimate used to
 order candidates is not exposed. Short-circuited candidates have
 `scheduling_cost=None`; evaluated and deferred candidates include their value.
 
@@ -381,7 +452,7 @@ compares the remaining admissible families by price.
 `CaptureBuffer()` is a caller-owned in-memory recording. Pass it to
 `Engine.evolve(..., capture=buffer)` and read `buffer.records` after return or
 failure. The default `capture=None` does not freeze inputs or collect routes.
-Engine never writes a file. After all evolves return or raise, call
+Capture buffering does not write files. After all evolves return or raise, call
 `write_capture(buffer)` to publish the accumulated records. Explicit-path
 consumers can still use `write_frozen_manifest(path, buffer.records)`.
 
@@ -587,7 +658,8 @@ Full-map accuracy and wall measurements are separate validation work.
 
 `Engine.evolve(..., telemetry=True)` adds immutable `FamilyRouting` values to
 `result.paths.routing`. The default is False, with no thread CPU clock reads and
-an empty mapping. Evolution never writes files. `paths.frontend_cpu_s` separately
+an empty mapping. Telemetry does not write files. OpenCL device detection and
+program builds can access the simulator user cache. `paths.frontend_cpu_s` separately
 reports calling-thread geometry and WorkPlan CPU.
 Common-frame reports also count `prepare_builds` and `admission_rows`.
 Floquet's `prepare_builds` counts exact-key frame construction attempts,
@@ -610,7 +682,21 @@ Rejections count actual numerical guard refusals, not cost-based skips or planne
 feasibility probes. A shared prefix executes once although logical rows include
 all adopting timelines. Caller-retained complete preparation hits report logical
 rows as `cache_hits`, with zero CPU, rejected rows and estimated work.
-Engine evolves always execute numerical work.
+Engine evolves always execute numerical work. For `dop853`, `opencl_rows`
+counts endpoints computed on GPU and `opencl_detection_error` reports why
+automatic detection or compilation for the active dimension and tableau failed.
+It is `None` when neither failed. `dp54_rows` counts physical DP5(4) endpoints;
+`dop853_rows` counts physical DOP853 endpoints. Both counts include CPU and GPU.
+Both tableau counts add across merged reports and are zero on exact-result reuse.
+A shared prefix contributes one execution, not one execution per consumer.
+The paired benchmark reads these counts from Engine results. The
+[acquire routing JSONL](../../simulators/README.md#acquire-telemetry) does not store them.
+
+`PathDiagnostics.execution_device` is read-only and available with telemetry
+off. It is `cpu` if no row ran on GPU; otherwise it contains the OpenCL device
+name, driver version, kernel version and pyopencl version. Merging CPU and GPU
+parts keeps the GPU identity; merging different GPU identities raises
+`ValueError`. Exact-result reuse keeps the device that produced the result.
 
 `estimated_cost` uses **relative scheduling units**, not seconds. The existing
 constant two-tone plan supplies seconds estimates for selected Floquet/DOP853
@@ -768,28 +854,28 @@ routes and final densities. This does not force every sampled row to DOP853.
 | [`gate_cache`](kernels/gate_cache.py), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 9.296548e-3; strict xfail |
 | [`period_table`](kernels/period_table.py), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.0018/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at the new coherent guard edge |
-| [`multitone_gate`](kernels/multitone_gate.py), full-drive dual-phase gates | `multiple` | Two tones, fixed flux, positive duration, at least one sampled envelope. Four D(h/2)·U·D(h/2) quarters with complete drive, no RWA or pruning. Each key fits one 5×6 Fourier grid at endpoint rtol/atol 2.75e-7/2.75e-9. The guard compares playback and Engine-budget DOP853 with the same tight Lindblad endpoints at four phase/density pairs, three outside the grid. With DOP853 defect `e_dop`, playback must satisfy `max(0.1 × min(B, 1e-3), 1.5 × e_dop)` in maximum absolute density-entry error. This checks splitting and interpolation together, not other inputs or sequences. A refusal leaves routing to the other eligible families. Keys omit start and both phases. Cold pricing compares one build (endpoints, Fourier and both split solves) amortized over current-acquire uses plus apply against eligible alternatives before construction. Pinning bypasses price, never validation. | [Four envelopes, mixed waveform keys and split fallback](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py), [per-key routing](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | Small-model contracts; long-sequence qualification separate |
+| [`multitone_gate`](kernels/multitone_gate.py), full-drive dual-phase gates | `multiple` | Two tones, fixed flux, positive duration, at least one sampled envelope. Four D(h/2)·U·D(h/2) quarters with complete drive, no RWA or pruning. Each key fits one 5×6 Fourier grid at endpoint rtol/atol 2.75e-7/2.75e-9. The guard compares playback and a direct probe at the Engine budget with the same tight Lindblad endpoints at four phase/density pairs, three outside the grid. With budget-probe defect `e_dop`, playback must satisfy `max(0.1 × min(B, 1e-3), 1.5 × e_dop)` in maximum absolute density-entry error. This checks splitting and interpolation together, not other inputs or sequences. A refusal leaves routing to the other eligible families. Keys omit start and both phases. Cold pricing compares one build (endpoints, Fourier and both split solves) amortized over current-acquire uses plus apply against eligible alternatives before construction. Pinning bypasses price, never validation. | [Four envelopes, mixed waveform keys and split fallback](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py), [per-key routing](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | Small-model contracts; long-sequence qualification separate |
 | [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only | Exactly two constant envelopes, fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Sampled rows are rejected. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports its final metrics. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms. At each endpoint, the kernel sums all tones' kicks before acting on density. Row-local kick time equals the propagation duration; following idle rows do not extend it. Apply step ceiling is 16 ns. | [`joint_constant`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. DOP853 local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B). CPU and [eligible OpenCL](#gpu-backend) rows with d ≤ 10,000 ns and B ≥ 1e-3 use DP5(4) at one third of both tolerances. Other rows use DOP853. | [`shaped_complex`, `two_carriers`, `joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [CPU and OpenCL DP5(4) cases](#cpu-dp54-accuracy) | PASS |
 
 For dissipative DC rows, [slow dispatch](_slow_dispatch.py) charges channel
-construction as `1.71 * (M/32)^6` seconds, divided by the exact prepare key's
+construction as `3.8 * (M/32)^6` seconds, divided by the exact prepare key's
 use count in this acquire. It adds `0.000422 * (M/32)^4` seconds per application.
-The single-thread dense-expm measurements were 0.035, 1.71, 19.1 and 120 seconds
-at M=16, 32, 48 and 64. The key includes level, shift, port, carrier, gain,
-duration, phase and subdivision policy. Prior acquires and resident cache warmth
-do not subsidize construction. Dispatch compares this cold price with the
-existing DOP853 bandwidth/action estimate. Pinning either family preserves its
+The key includes level, shift, port, carrier, gain, duration, phase and
+subdivision policy. Prior acquires and resident cache warmth do not subsidize
+construction. Dispatch compares this cold price with a slow-domain calibration
+of the DOP853 bandwidth/action estimate. Pinning either family preserves its
 numerical guard. Bath-free DC and nonzero carriers keep `slow_envelope` first.
 `Kernel.cost` remains a relative chunk-scheduling weight, not this cold price.
 
-The price check uses a 32-level synthetic 100 ns DC segment and the three
-small dissipative DC matrix cases. Their default routes meet the 10% timing
-margin against the fastest admitted family with full-density error ≤2e-3.
-A 100-point shared-key check still selects `slow_envelope` but takes about
-2.25 seconds versus 1.10 seconds for DOP853. These prices do not establish a
-runtime bound or a complete dimension/duration/reuse calibration.
+The calibration covers 11 synthetic plateaus at M=16, 32 and 48 and durations
+of 40–350 ns. Estimates were 0.53–1.36 times measured single-thread wall time.
+The default route for a 32-level 100 ns DC segment and the three small
+dissipative DC matrix cases stays within 10% of the fastest admitted family,
+with full-density error ≤2e-3. The 100-point shared-key case now selects DOP853.
+Its paired wall-time ratio against the previous `slow_envelope` default is 0.44.
+These prices are not runtime bounds.
 
 The `common_frame` coherent limit is 0.0018. In the retained two-tone grid,
 14 admitted cells had coherent indicators at most 0.001469411 and historical
@@ -934,6 +1020,27 @@ local contribution. The separate
 checks both densities when accumulated inventory changes the default route from
 `shaped_sambe` to `single_tone_gate`.
 
+### CPU DP5(4) accuracy
+
+The `dop853` family uses DP5(4) on CPU for rows up to and including 10 µs
+when the evolve budget is at least `1e-3`. The spike covered durations up to
+10 µs at the default budget; it did not cover tighter budgets. Dividing both
+local tolerances by three kept all six spike cells below `1e-3` full-density
+error. At the default budget the uncapped DP5(4) tolerances are
+`rtol=1e-5`, `atol=1e-7`. Lab-frame chains retain their bare-phase cap
+before the division. DP5(4) uses a fifth-order controller exponent (`-1/5`).
+Both CPU tableaux share the adaptive loop, frames, workspace and knot stops.
+
+The [CPU matrix](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
+checks a 100 ns sampled row, a synthetic d=24 two-tone row with 960 knots per
+tone, and a sampled row exactly at 10 µs. It confirms DP5(4) through routing
+telemetry and compares every complex density entry at readout to the independent
+two-tolerance interaction-frame Lindblad reference. The OpenCL matrix shares
+the synthetic 960-knot case and duration edge, plus other sampled cases and a
+tighter-budget DOP853 control. It checks GPU row and tableau counts and compares
+full density to the same reference solver. The [FTF discussion](../../../../docs/discussions/2026-11-18-short-dop853-dp54.md)
+records the separate evidence from real FTF workloads.
+
 These measurements cover the linked inputs, not every input admitted by a
 guard. Historical population calibrations, omission proxies and local solver
 controls do not establish a whole-sequence full-density bound. In particular,
@@ -989,10 +1096,12 @@ does not certify the adiabatic approximation.
   one family in one evolve. Floquet stores admissions and retained equations;
   the direct solvers store frame or chain decisions. Plans never enter
   persistent kernel state.
-- `KernelContext(source, budget, work_plan)` supplies preparation, key and guard
-  calls with one evolve owner. `ApplyContext(budget, plan, work_plan)` supplies the finite positive per-segment allowance
-  and the family's plan. Floquet and both direct solvers require their own plan;
-  a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
+- `KernelContext` supplies preparation, key and guard calls with one evolve
+  owner. For OpenCL it also carries the backend and dispatch's tableau choice.
+  `ApplyContext` supplies the finite positive per-segment allowance and the
+  family's CPU plan or, for admitted OpenCL rows, the runner and selected
+  tableau. Floquet and both CPU direct solvers require their own plan; a missing
+  plan raises `ValueError`, and a wrong family type raises `TypeError`.
   Families without plans, including `single_tone_rwa`, `multitone_rwa`,
   `single_tone_gate` and `multitone_gate`, reject a non-`None` plan with `ValueError`.
 
@@ -1174,8 +1283,8 @@ class's methods.
 | Rates → population generator Q | [../baths.py](../baths.py), shared by evolution propagators, ADC conditional responses and fluxonium manifold modes. |
 | Secular coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
 | Density basis conversion | `transform_density` in [state.py](state.py), shared by population conversion, scheduler boundaries, Dyson input bounds and compiled DOP853 chains. Callers retain basis selection and traversal. |
-| Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
-| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. Ordinary DOP853 apply, `t6` direct rows, period fractional tails and the multitone-gate split check share this entry point, supplying explicit frames and budgets for local tolerances. Budget validation, knot stops and numerical failures are unchanged. |
+| Adaptive DOP853 and DP5(4) tableaux, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
+| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. CPU `dop853` rows, `t6` direct rows, period fractional tails and the multitone-gate split check share this entry point, supplying explicit frames and budgets. The CPU `dop853` plan selects DP5(4) and its tighter local tolerances for eligible rows. [OpenCL `dop853`](#gpu-backend) uses the same tableaux and tolerance rule in its device runner. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node, [adaptive single-phase](kernels/gate_phase.py) and [dual-phase](kernels/_multitone_gate_phase.py) builders. Single-tone integration is unchanged. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py) owns period builds and trajectories, with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. [kernels/_period_channel.py](kernels/_period_channel.py) owns complete secular-channel playback. Separate from two-tone Floquet frames. |
@@ -1236,19 +1345,19 @@ failing row group; later groups in the acquire have not been checked.
 Preparation and apply failures propagate; they do not restart candidate
 selection. Cancellation raises `Cancelled` without partial results.
 
-Calls on one Engine serialize. Joblib threading is the only parallel layer;
-kernels are single-threaded and do not open pools. Multi-timeline calls with
+Calls on one Engine serialize. Joblib provides host parallelism.
+CPU kernels are single-threaded and do not open pools. Multi-timeline calls with
 multiple workers create and close a pool per evolve; empty work, one timeline
 and one worker run inline. By default, complete-acquire row density and the
 fraction of cheap gate/no-drive rows select one or six timeline chunks per
 worker. Prepare retains six chunks per worker to spread cold key builds.
-An explicit `chunks_per_worker` fixes both stages. This choice occurs after
-classification and does not change admission, WorkPlan facts or RNG.
+An explicit `chunks_per_worker` fixes CPU prepare and timeline chunks. It does
+not split GPU batches. This choice does not change admission, WorkPlan facts or RNG.
 Cancellation is checked at chunk and preparation boundaries, and before return.
 Native BLAS stays at one thread throughout evolve. Overlapping engines share a
 process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.
-`close()` waits for active work, clears routing facts and is idempotent.
+`close()` is idempotent. It waits for active work, then clears routing facts and releases OpenCL resources.
 
 `RoutingHistory` owns distinct acquire content's complete row inventories,
 separate from resident preparations and numerical guards. Each numerical input digest
@@ -1292,8 +1401,8 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v8`. This revision replaces the
-single full-duration bath split for dissipative DC with a full Lindblad channel.
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v11`. It distinguishes the OpenCL
+DP5(4) rule from earlier results. The CPU tableau rule is unchanged.
 `simulators.ftf.environment` owns private replay and checks backend, model,
 numerical, RNG and dependency versions before
 recomputing a round. Evolution does not persist densities or offline tables

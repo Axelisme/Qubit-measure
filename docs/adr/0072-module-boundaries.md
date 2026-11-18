@@ -186,6 +186,7 @@ Lab 保留選項宣告、IQ 投影與實際窗口的圖形標示，不讓數值�
 窗口左右各取六個半高寬，鄰峰中點可裁切，但至少保留最近六點。
 例如廣掃同時包含強 transition 與高度不到它 0.2 的弱 transition 時，Expected center 可指定弱峰。
 Min SNR 仍可拒絕弱峰，失敗時回報候選數及門檻，不改擬合遠處強峰。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 此規則只適用 `twotone/freq`。`SpectrumFitOptions` 保留原欄位，`twotone/chain` 保留最近候選與中點窗口。
 Notebook fluxdep 與 workflow calibration 的獨立分析不改行為。
