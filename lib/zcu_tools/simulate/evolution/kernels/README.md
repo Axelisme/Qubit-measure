@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-18，雙相位 gate 的實測 split 判準
+**Last updated:** 2026-11-18，雙相位 gate 的單一建構路徑
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -28,18 +28,16 @@ compiled `interaction_hamiltonian` 的 source location 也改到 `_rwa_fourier.p
 Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_gate.py`。
 `multitone_rwa` 的 family guard 只收 distinct-port constant pairs，拒收 sampled 多 tone 列。
 `multitone_gate` 用完整 drive 建四個 Hilbert 子段，在兩個起始相位上做 raw Fourier 展開。
-`_multitone_gate_phase.py` 擁有網格與非格點驗證，`_gate_endpoints.py` 擁有批次積分與 polar retraction。
-所有 key 從 9×10、rtol/atol 2.75e-7/2.75e-9 起跳，不按包絡形狀或虛部分類。
-第一階驗證失敗才升到 13×13、1e-8/1e-10。每階節點與兩組共 64 個獨立 probe 同批積分。
-Guard 要求每子段 full-unitary defect ≤ 1.9e-7，第二階仍失敗就拒收。
-通過相位驗證後，`_multitone_gate_split.py` 對四組相位與初始 density 各做 tight reference 和當次 `Engine` budget 的 DOP853 積分。
+`_multitone_gate_phase.py` 用一張 5×6 網格擬合係數，不按包絡形狀或虛部分類。
+`_gate_endpoints.py` 以 rtol/atol 2.75e-7/2.75e-9 積分節點並做 polar retraction。
+`_multitone_gate_split.py` 對四組相位與初始 density 各做 tight reference 和當次 `Engine` budget 的 DOP853 積分。
+其中三組在網格外，同時檢查內插與耗散分割。
 四子段 playback 與 DOP853 都以同一份完整 Lindblad reference 量最大 density 元素誤差。
 Guard 放行 playback 誤差不超過 `max(0.1 × min(budget, 1e-3), 1.5 × e_dop)` 的 key，`e_dop` 是 DOP853 的誤差。
 門檻以被取代的 direct solver 精度為基準。DOP853 特別準時，budget 換算的下限仍容許小誤差。
 這是抽樣檢查，不能限制未抽樣的相位、density 或整條序列的誤差。
-每個 key 保留自己的 active grid，混合階數的係數 padding 不參與 Fourier modes。
-Guard 將通過的數值產品交給 scheduler，只活一次 evolve。單 tone 的數值分支不變。
-其餘候選沿用既有定價，可能選到 `common_frame` 或 `dop853`。
+建構前逐 key 比價。每個冷 key 的建構價只算一次端點、Fourier 與兩組 split 積分，按使用次數攤提，另計 apply。
+Guard 將通過的數值產品交給 scheduler，只活一次 evolve。拒收後不重建，交給其餘合格候選。單 tone 的數值分支不變。
 `dop853.advance_endpoints` 擁有旋轉座標 density 積分，`dop853` 與 `t6` direct
 沿用相同的每段 budget 容差規則。這是局部積分控制，不保證整條序列的最終誤差。
 `t6` 的每一列都走 direct，不依 key 重用數選算法，也不掃描完整 acquire inventory。

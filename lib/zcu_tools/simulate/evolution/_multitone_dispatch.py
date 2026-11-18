@@ -17,6 +17,9 @@ from .secular import ModelSource
 from .workplan import FactKey, WorkPlan
 
 _GATE_INVENTORY = FactKey(("multitone-gate-inventory", GATE_POLICY), tuple)
+# Six matched CPU rows at budget 1e-3 overpredicted DOP853 by 4.19–10.52×.
+# Calibrate only the gate competitor; build terms and RWA keep the raw scale.
+_GATE_DOP853_PRICE_SCALE = 0.15
 # Full M=16 constant-pair preparation measured 0.24--0.28 ms. This reserve
 # covers endpoint construction; the two dense applications stay in base work.
 CONSTANT_KICK_PREPARE_S = 0.0003
@@ -77,7 +80,11 @@ def gate_preferred(
         if not uses:
             continue
         cost = gate_cost(table, int(row), context)
-        alternative = cost.direct if "dop853" in competitors else np.inf
+        alternative = (
+            _GATE_DOP853_PRICE_SCALE * cost.direct
+            if "dop853" in competitors
+            else np.inf
+        )
         if canonical[row] in rwa_rows:
             representative = rwa_rows[canonical[row]]
             other = multitone_cost(geometry, representative, context)
@@ -91,42 +98,33 @@ def gate_preferred(
     return preferred
 
 
-def gate_cost(table: SegmentTable, row: int, context: KernelContext) -> "MultitoneCost":
-    """Estimate first-stage build and four-quarter phase playback in CPU seconds.
+@dataclass(frozen=True)
+class GateCost:
+    """Cold gate terms in estimated CPU seconds, independent of use count.
 
-    These usage-independent prices are amortized by gate_preferred using only
-    this acquire's complete canonical inventory, never RoutingHistory. Every
-    evolve pays for its own construction, even after a prior matching evolve.
+    direct is the uncalibrated full-drive work scale. endpoints, fourier,
+    tight_split and budget_split are one key's build; guard and apply are per use.
+    """
 
-    The density-to-Hilbert work coefficient 0.289 fits four first-stage builds
-    on tools/family_pareto_settings.FTF_MODEL, 32 states at flux .48/.20/.49.
-    Ordered f1_charge/f2_charge Gaussian and sampled X90 pairs last 100 ns,
-    at carriers .5989899500508908/.29771353219577534 GHz. Gains are
-    .6118698121/.7346289760 and .7781773395/.9345741322 respectively. Gaussian
-    uses 33 sampled knots, sigma 25 ns; sampled uses 32 smoothed seed-0 knots.
-    Two 25 ns CZ ramps use the same ordered ports, carrier 5.443720064991563 GHz,
-    equal gains .1587989411334408 and a 257-knot 200 ns flat-top envelope.
-    Warm compiled first-stage CPU times were 165.219/165.367/40.457/40.842 s.
-    The coefficient minimizes the worst relative build residual, rounded to
-    three decimals; estimates differ by approximately +4.5/+16.1/-15.0/-15.8%.
-    This is not full guard/apply timing or a bound for other physical inputs.
+    direct: float
+    endpoints: float
+    fourier: float
+    tight_split: float
+    budget_split: float
+    guard: float
+    apply: float
 
-    The same X90 pair keys calibrate the four fixed-precision Lindblad probes.
-    At reference budget 1e-8 they take 4.801/7.621 warm CPU seconds in total
-    (Gaussian/sampled). The split coefficient 0.155 minimizes the worst
-    relative residual of the budget-scaled direct estimate, rounded to three
-    decimals. The four Engine-budget DOP853 solves use the same probe inputs.
-    At budget 1e-3 they take 0.979/0.938 warm CPU seconds versus nominal direct
-    estimates of 8.633/9.595 for four solves. A 0.105 multiplier minimizes
-    their worst relative residual, rounded to three decimals. The two groups
-    are charged once per key, not once per row.
+    @property
+    def prepare(self) -> float:
+        """Return the combined estimate for one cold key."""
+        return self.endpoints + self.fourier + self.tight_split + self.budget_split
 
-    The tolerance ratios use the existing eighth-power work model. All first-stage
-    nodes and 64 validation trajectories integrate once. FFT fitting charges
-    an assumed 0.2 us per quarter/node/log2(node) at 16 levels, scaled
-    quadratically. Playback assumes 0.02 us per quarter/mode and 7.5 us per
-    D-U-D quarter at 16 levels; 2 us covers row guard/key work. These terms were
-    not measured separately. No upgrade is prepaid and no timing is retained.
+
+def gate_cost(table: SegmentTable, row: int, context: KernelContext) -> GateCost:
+    """Estimate one cold build and per-row work, once per key and budget.
+
+    Gate preference amortizes the build over complete current-acquire uses.
+    The estimate never reads time or RoutingHistory.
     """
     return context.work_plan.fact(
         FactKey(
@@ -135,32 +133,31 @@ def gate_cost(table: SegmentTable, row: int, context: KernelContext) -> "Multito
                 canonical_keys(table, context)[row],
                 context.budget,
             ),
-            MultitoneCost,
+            GateCost,
         ),
         lambda: _price_gate(table, row, context),
     )
 
 
-def _price_gate(
-    table: SegmentTable, row: int, context: KernelContext
-) -> "MultitoneCost":
+def _price_gate(table: SegmentTable, row: int, context: KernelContext) -> GateCost:
     model = table.model(context.source, row)
-    scale = (len(model.energies_ghz) / 16) ** 3
+    size_ratio = len(model.energies_ghz) / 16
+    scale = size_ratio**3
     nodes = int(np.prod(PHASE_GRID))
-    trajectories = nodes + 64
     direct = _direct_cost(table, row, context)
-    # Undo direct's tolerance multiplier for the fixed-precision phase and reference work.
+    # Charge only the current grid's endpoints, not a previous grid's build.
+    # The per-node model and both tolerance multipliers include the two split
+    # solves once; the per-use guard charge below is for key/row work only.
     baseline = direct / (1e-3 / context.budget) ** 0.125
-    precision = (min(1e-4, 0.03e-3) / PHASE_RTOL) ** 0.125
-    integrate = baseline * trajectories * 0.289 * precision
-    fit = 2e-7 * 4 * nodes * np.log2(nodes) * (len(model.energies_ghz) / 16) ** 2
+    precision = (3e-5 / PHASE_RTOL) ** 0.125
+    endpoints = baseline * nodes * 0.289 * precision
+    fourier = float(2e-7 * 4 * nodes * np.log2(nodes) * size_ratio**2)
     split_precision = (1e-3 / SPLIT_REFERENCE_BUDGET) ** 0.125
-    reference = len(SPLIT_PHASES) * baseline * split_precision * 0.155
-    # Scale the ordinary direct price for the warm isolated fallback probes.
-    fallback = len(SPLIT_PHASES) * direct * 0.105
+    tight_split = len(SPLIT_PHASES) * baseline * split_precision * 0.155
+    budget_split = len(SPLIT_PHASES) * direct * 0.105
     apply = (2e-8 * 4 * nodes + 7.5e-6 * 4) * scale
-    return MultitoneCost(
-        direct, float(integrate + fit + reference + fallback), 2e-6 * scale, apply
+    return GateCost(
+        direct, endpoints, fourier, tight_split, budget_split, 2e-6 * scale, apply
     )
 
 
@@ -327,7 +324,7 @@ def multitone_cost(
 
 
 def _direct_cost(table: SegmentTable, row: int, context: KernelContext) -> float:
-    """Existing full-drive density work estimate shared by both comparisons."""
+    """Raw full-drive work scale for gate construction and the RWA comparison."""
     model = table.model(context.source, row)
     size = len(model.energies_ghz)
     scale = (size / 16) ** 3

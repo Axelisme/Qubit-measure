@@ -191,12 +191,10 @@ uv run --directory <worktree> --no-sync -- \
 矩陣用 `Engine(1, families=(family,)).evolve(...)` 固定可用 family，
 再從 `paths.segments_by_kernel` 確認實際路徑。
 17 個 family 都有 pinned density 案例，預期 family 沒有執行任何 segment 時獨立失敗。
-`multitone_gate` 的 `test_multitone_gate_dual_phase_density` 驗 Gaussian、flat-top 與 DRAG。
-每種包絡跑 1 次或 7 次，重複時涵蓋固定與獨立變化的雙相位，完整 density 對同一 oracle。
-`test_multitone_gate_sampled_upgrade_density` 驗需要升級的任意實數取樣 key，重複 7 次且雙相位各自變化。
-`test_multitone_gate_mixed_phase_keys_density` 在同次 evolve 混合不同解析度的 key 與 constant+sampled pair。
-高 gain 案例移除 bath，從 `Engine.evolve` 驗終階相位解析仍不足時的 `NoValidKernel.attempted`。
-強 bath 案例驗 split 缺陷拒收。另一個 bath 案例用同一 key 驗預設 budget 放行、完整 density 符合 oracle，收緊 budget 時拒收。
+`multitone_gate` 的 `test_multitone_gate_dual_phase_density` 驗 Gaussian、sampled、flat-top 與 DRAG。
+每種包絡跑 1 次或 7 次，重複時涵蓋固定與獨立變化的雙相位，完整 density 對獨立參考解。
+`test_multitone_gate_mixed_phase_keys_density` 在同次 evolve 驗不同波形的 key，包含 constant+sampled pair。
+強 bath 案例驗 pinned split 缺陷拒收。另一案例讓比價勝出的 key 因 split 拒收，並實際執行合格的 DOP853。另一個 bath 案例用同一 key 驗預設 budget 放行、完整 density 符合 oracle，收緊 budget 時拒收。
 共振雙 tone 案例固定門檻下限，驗較大的 budget 下 gate 可取代精度相近的 DOP853，收緊 budget 後則拒收。
 這些小模型案例不代表長序列已通過精度或速度驗收。
 Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生誤差觀察值。
@@ -229,8 +227,9 @@ native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e
 `joint_gate_inventory` 保留完整 20 點 sampled inventory，matrix 的 pinned density 驗 `dop853`。
 `joint_constant` 用相同模型和 inventory 保護 `multitone_rwa` 的 distinct-port constant 路徑。
 [`test_routing_boundaries.py`](simulate/evolution/contract/test_routing_boundaries.py) 驗證單次 pinned gate 的完整 density，另以原有 20 點共享輸入保留預設 `common_frame` 空／暖 history 的 density 驗收。
-同檔從 `inspect_dispatch` 驗證逐 key 冷價的兩側。便宜的本地 key 回 `deferred`，共享 key 跑 guard，價格輸的 gate 回 `untested_after_short_circuit`。
-邊界探點距 owner 的邊界至少 10 倍，另保留 20 次短序列回歸。邊界來源與校準狀態寫在測試註解，不在測試重算價格。
+同檔從 `inspect_dispatch` 驗證逐 key 冷價的兩側。價格勝出的本地 key 回 `deferred`，共享 key 跑 guard，價格輸的 gate 回 `untested_after_short_circuit`。
+短 inventory 在空歷史和前次已執行同 key 的情況下都預測 DOP853；實際 evolve 確認選路與未付 gate prepare。長 inventory 驗證合格 key 可執行 gate，且不能攤提到另一個罕用 key。
+測試使用有冷價間距的輸入，不重算係數或鎖住 break-even 的精確位置。
 固定 `multitone_rwa` 仍拒收 sampled 輸入。固定 `multitone_gate` 可以略過成本比較，不能略過相位與 split 驗證。
 `cheap_sampled_nearby` 與 `cheap_sampled_separated` 使用非平坦 smooth samples，避免 planner 抽成 constant row。
 兩個案例分別驗證失去 cheap-RWA 豁免後的 `common_frame` 與 `dop853` 分支，包含空／暖 history 的路徑與完整 density。
