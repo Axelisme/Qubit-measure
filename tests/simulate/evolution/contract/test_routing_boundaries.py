@@ -857,11 +857,12 @@ def _dense_sampled_pair(count: int) -> AccuracyCase:
     return replace(case, batch=replace(case.batch, tracks=tracks))
 
 
-@pytest.mark.parametrize("count", [1, 16], ids=["unamortized", "amortized"])
+@pytest.mark.parametrize("count", [1, 64], ids=["unamortized", "amortized"])
 def test_sampled_multitone_prices_the_evolve_local_probe(count: int) -> None:
-    # Sixteen knot intervals make direct playback more expensive per row than
-    # RWA. The fitted serial costs cross between four and five consumers; one cannot
-    # repay a full-drive probe, and sixteen leave room for calibration error.
+    # At one CPU worker, RWA is about 135 us/row plus a 614 us probe.
+    # Offered, admitted common frame costs more than the 167 us/row DP5(4)
+    # estimate. The prices cross near 19 rows; 64 amortize with about 14% margin,
+    # while one row cannot repay even the probe.
     case = _dense_sampled_pair(count)
     batch = case.batch
     with closing(case.source), closing(Engine(1, backend="cpu")) as engine:
@@ -880,7 +881,9 @@ def test_sampled_multitone_prices_the_evolve_local_probe(count: int) -> None:
 
 
 def test_sampled_amplitude_groups_do_not_share_probe_costs() -> None:
-    case = _dense_sampled_pair(17)
+    # Use the same 64-row side of the cost boundary and keep the phase-shifted
+    # row in its own group, even though common frame shares a coefficient key.
+    case = _dense_sampled_pair(65)
     first, second = case.batch.tracks
     phases = first.phase_rad.copy()
     phases[8] += 0.4
@@ -897,7 +900,7 @@ def test_sampled_amplitude_groups_do_not_share_probe_costs() -> None:
             "multitone_rwa"
         }
         result = engine.evolve(case.source, (batch,), telemetry=True, capture=capture)
-    assert result.paths.segments_by_kernel == {"multitone_rwa": 16, isolated.family: 1}
+    assert result.paths.segments_by_kernel == {"multitone_rwa": 64, isolated.family: 1}
     rwa = result.paths.routing["multitone_rwa"]
     assert rwa.admission_rows == 1
     assert rwa.rejected_rows == 0
@@ -905,7 +908,7 @@ def test_sampled_amplitude_groups_do_not_share_probe_costs() -> None:
         "sampled_rwa_admissions"
     ]
     assert admitted["decision"] == "accepted"
-    assert [row["point"] for row in admitted["rows"]] == [*range(8), *range(9, 17)]
+    assert [row["point"] for row in admitted["rows"]] == [*range(8), *range(9, 65)]
     (spot,) = admitted["spots"]
     assert (spot["batch"], spot["point"], spot["segment"]) == (0, 0, 0)
     error = spot["max_density_error"]
