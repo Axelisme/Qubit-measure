@@ -7,10 +7,18 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec
 
-from .accuracy_cases import AccuracyCase, accuracy_case, drive_track, timeline
+from .accuracy_cases import (
+    AccuracyCase,
+    accuracy_case,
+    coherent_source,
+    drive_track,
+    timeline,
+)
 
 
-def _stub_device(monkeypatch: pytest.MonkeyPatch, *, available: bool) -> list[str]:
+def _stub_device(
+    monkeypatch: pytest.MonkeyPatch, *, available: bool, execute: bool = False
+) -> list[str]:
     # Device discovery has no public injection point. Stub the external device,
     # not the backend state, wave prices, guard, or any dispatch decisions.
     from zcu_tools.simulate.evolution.kernels import _dop853_opencl
@@ -18,6 +26,8 @@ def _stub_device(monkeypatch: pytest.MonkeyPatch, *, available: bool) -> list[st
     events: list[str] = []
 
     class Device:
+        execution_device = "opencl:stub/driver/kernel/pyopencl"
+
         def check_device(self) -> None:
             events.append("check")
             if not available:
@@ -26,9 +36,21 @@ def _stub_device(monkeypatch: pytest.MonkeyPatch, *, available: bool) -> list[st
         def cached_build_failure(self, dimension: int, *, dp54: bool) -> None:
             events.append("cached")
 
-        def compile_variant(self, dimension: int, *, dp54: bool) -> str:
+        def compile_variant(self, dimension: int, *, dp54: bool) -> str | None:
             events.append("compile")
-            return "no point program in the test device"
+            return None if execute else "no point program in the test device"
+
+        def advance(
+            self,
+            data: object,
+            row_models: object,
+            states: np.ndarray,
+            budget: float,
+            *,
+            dp54: bool,
+        ) -> np.ndarray:
+            # Only the selected execution lane is under test, not device numerics.
+            return states.copy()
 
         def close(self) -> None:
             pass
@@ -37,12 +59,14 @@ def _stub_device(monkeypatch: pytest.MonkeyPatch, *, available: bool) -> list[st
     return events
 
 
-def _long_sampled_pair(count: int = 12) -> AccuracyCase:
-    case = accuracy_case("joint_gate_inventory")
-    batch = timeline(count, 100.0)
-    knots = np.linspace(0.0, 100.0, 200)
+def _sampled_pair(
+    case: AccuracyCase, count: int, duration: float, knots: int
+) -> AccuracyCase:
+    batch = timeline(count, duration)
     envelope = EnvelopeSpec(
-        "sampled", np.linspace(0.8, 1.0, len(knots)).astype(complex), knots
+        "sampled",
+        np.linspace(0.8, 1.0, knots).astype(complex),
+        np.linspace(0.0, duration, knots),
     )
     tracks = tuple(
         replace(
@@ -58,6 +82,10 @@ def _long_sampled_pair(count: int = 12) -> AccuracyCase:
         for track in case.batch.tracks
     )
     return replace(case, batch=replace(batch, tracks=tracks))
+
+
+def _long_sampled_pair(count: int = 12) -> AccuracyCase:
+    return _sampled_pair(accuracy_case("joint_gate_inventory"), count, 100.0, 200)
 
 
 @pytest.mark.parametrize(
@@ -180,3 +208,31 @@ def test_default_eligible_opencl_wave_keeps_the_original_gpu_competition(
     assert {row.family for row in cpu_query.rows} == {"multitone_gate"}
     assert {row.family for row in gpu_query.rows} == {"dop853"}
     assert events == ["check", "cached"]
+
+
+def test_gate_offer_does_not_rebuild_a_refused_common_frame_on_gpu_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_device(monkeypatch, available=True, execute=True)
+    case = _sampled_pair(accuracy_case("cheap_sampled_nearby"), 24, 384.0, 30)
+    with closing(case.source):
+        model = case.source.model((0,))
+    # Linear drive and dephasing put the batch beyond common-frame admission,
+    # without removing its cold price offer or its independent direct endpoints.
+    model = replace(
+        model,
+        drives=tuple(
+            replace(d, quadrature_ghz=np.zeros_like(d.quadrature_ghz))
+            for d in model.drives
+        ),
+        dephasing_per_ns=2 * (np.ones((3, 3)) - np.eye(3)),
+    )
+    tracks = tuple(replace(t, amplitude=40 * t.amplitude) for t in case.batch.tracks)
+    batch = replace(case.batch, tracks=tracks)
+    legacy = ("multitone_rwa", "common_frame", "dop853")
+    with closing(coherent_source(model)) as source:
+        for families in (legacy, (*legacy, "multitone_gate")):
+            with closing(Engine(1, backend="auto", families=families)) as engine:
+                paths = engine.evolve(source, (batch,), telemetry=True).paths
+            assert paths.routing["dop853"].opencl_rows == 24
+            assert paths.routing["common_frame"].prepare_builds == 1

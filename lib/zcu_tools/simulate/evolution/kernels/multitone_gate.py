@@ -6,15 +6,13 @@ from hashlib import sha256
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
-from scipy.linalg import expm
 
-from ...baths import population_generator
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..workplan import FactKey
 from . import _multitone_gate_phase as phase
 from ._gate_endpoints import GATE_SUBSEGMENTS
 from ._rwa_gate import canonical_keys
-from ._secular import coherence_decay, split_step
+from ._secular import secular_half_step, split_step
 from ._workload_facts import fixed_flux
 
 
@@ -59,13 +57,8 @@ def _build(table: SegmentTable, row: int, context: KernelContext) -> _Prepared:
     model = table.model(context.source, row)
     coefficient = phase.build(model, table, row)
     half = float(table.duration_ns[row]) / (2 * GATE_SUBSEGMENTS)
-    arrays = (
-        coefficient[None],
-        np.asarray(
-            expm(half * population_generator(model.rates_per_ns)), dtype=np.float64
-        )[None],
-        np.exp(-half * coherence_decay(model))[None],
-    )
+    population, coherence = secular_half_step(model, half)
+    arrays = (coefficient[None], population[None], coherence[None])
     for array in arrays:
         array.setflags(write=False)
     return _Prepared(*arrays)

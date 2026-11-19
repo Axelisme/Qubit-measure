@@ -22,9 +22,8 @@ FULL_DRIVE_GATE_POLICY = (
 def build(model: SecularModel, table: SegmentTable, row: int) -> NDArray[np.complex128]:
     """Integrate a positive dual-tone row and return read-only (4,5,6,M,M) coefficients.
 
-    All keys use one grid and rtol/atol 2.75e-7/2.75e-9. The caller checks
-    playback at the density level, including phases outside the grid.
-    Integration failures propagate.
+    All keys use one grid and rtol/atol 2.75e-7/2.75e-9. The coefficients
+    support playback at arbitrary phases. Integration failures propagate.
     """
     axes = [np.arange(count) * (2 * np.pi / count) for count in PHASE_GRID]
     nodes = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1).reshape(-1, 2)

@@ -173,8 +173,8 @@ def build_multitone_endpoints(
 
     phases has shape (count,2), in radians at row-local zero. controls sets
     local DOP853 error and step limits. Both ordered ports, signed gains and
-    complex envelopes come from the row. All nodes and independent probes
-    share one batch integration, with time-only factors evaluated once per RHS.
+    complex envelopes come from the row. All phase nodes share one batch
+    integration, with time-only factors evaluated once per RHS.
     Restart at the union of envelope knots. Each quarter starts at identity
     and is polar-retracted independently. No RWA, pruning or density is used.
     Require two tones and positive duration; solver failures propagate.

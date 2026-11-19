@@ -7,9 +7,7 @@ from typing import NamedTuple
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
-from scipy.linalg import expm
 
-from ...baths import population_generator
 from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..workplan import FactKey
@@ -27,7 +25,7 @@ from ._rwa_numeric import (
     retained_mask,
     rwa_coefficients,
 )
-from ._secular import coherence_decay, split_step
+from ._secular import coherence_decay, secular_half_step, split_step
 from ._workload_facts import TableIdentity, envelope_bounds, fixed_flux
 
 _MIN_SUBSEGMENTS = 4
@@ -657,9 +655,10 @@ class CovariantGateKernel:
             unitaries.append(
                 np.pad(u, ((0, padding), (0, 0), (0, 0))) if padding else u
             )
-            half = table.duration_ns[row] / (2 * count)
-            populations.append(expm(population_generator(model.rates_per_ns) * half))
-            coherences.append(np.exp(-coherence_decay(model) * half))
+            half = float(table.duration_ns[row] / (2 * count))
+            population, coherence = secular_half_step(model, half)
+            populations.append(population)
+            coherences.append(coherence)
             charges.append(
                 np.pad(graph.charges, ((0, 0), (0, width - graph.charges.shape[1])))
             )

@@ -772,8 +772,20 @@ class Classifier:
                 self.context,
                 rwa if isinstance(rwa, MultitoneRWAKernel) else None,
             )
-            if np.any(preferred):
-                self.try_kernel(kernel, candidates[preferred])
+            offered = candidates[preferred]
+            # Sampled pricing may already have refused these exact rows. No
+            # handoff survives an all-refused key; do not rebuild it here.
+            offset = self.context.complete_row_offset
+            refused = np.fromiter(
+                (
+                    not self.common_prices.get(int(row) + offset, True)
+                    for row in offered
+                ),
+                dtype=bool,
+                count=len(offered),
+            )
+            self.record_rejection(kernel, offered[refused])
+            self.try_kernel(kernel, offered[~refused])
         return rows[(self.names[rows] == "") & ~self.deferred[rows]]
 
     def try_multitone_gate(

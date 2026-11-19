@@ -326,6 +326,13 @@ def _route_original(
         )
         router.reject("multiple", pending, attempted)
     router.accept("multiple", pending, direct)
+    gate = router.kernels.get("multitone_gate")
+    if gate is not None and router.context.families is not None:
+        router.observe(
+            gate,
+            pending[router.names[pending] == "dop853"],
+            "untested_after_short_circuit",
+        )
 
 
 def split_gate_outsiders(

@@ -31,7 +31,7 @@ from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
 
 # Numerical algorithm revision used by capture, reporting, and simulator caches.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v12"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v13"
 
 
 @dataclass(frozen=True)

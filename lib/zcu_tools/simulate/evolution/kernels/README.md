@@ -10,7 +10,7 @@
 每個算法將數值實作與專用 helpers 留在自己的模組。
 多個算法需要同一運算時，共用其數值 owner，不呼叫另一個 kernel class 的方法。
 例如 `simulate/baths.py` 擁有 rates 到 population generator 的換算，
-`_secular.py` 擁有 coherence decay，`evolution/state.py` 擁有 density 基底轉換。
+`_secular.py` 擁有 coherence decay 與三種 gate 共用的耗散半步映射，`evolution/state.py` 擁有 density 基底轉換。
 `slow_envelope` 的耗散 DC channel 重用 `_dyson_model.py` 的 row-major generator
 與 commutator，不改 secular bath 定義。非零載波仍使用 midpoint-held Strang steps。
 `_flux_expansion.py` 擁有連續 flux 的插值與 Hamiltonian 累加。

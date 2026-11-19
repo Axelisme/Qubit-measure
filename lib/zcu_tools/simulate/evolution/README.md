@@ -1382,7 +1382,7 @@ class's methods.
 | Flux-level and shift-content model keys | `model_keys` in [kernels/_workload_facts.py](kernels/_workload_facts.py), shared by Dyson preparation and flux DOP853 grouping. Dyson modal packing and model iteration remain in `_dyson_model.py`. |
 | Continuous flux waveform interpolation, term-kind interpretation and Hamiltonian accumulation | [kernels/_flux_expansion.py](kernels/_flux_expansion.py), shared by [adiabatic_map](kernels/adiabatic_map.py) and [flux_dop853](kernels/flux_dop853.py). Each kernel owns packing and integration. |
 | Rates → population generator Q | [../baths.py](../baths.py), shared by evolution propagators, ADC conditional responses and fluxonium manifold modes. |
-| Secular coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
+| Secular coherence decay and split-step maps | [kernels/_secular.py](kernels/_secular.py) provides decay to static, split, modal and direct propagators. `multitone_gate`, `gate_cache` and `single_tone_gate` use its population and coherence half-step maps with their own durations. |
 | Density basis conversion | `transform_density` in [state.py](state.py), shared by population conversion, scheduler boundaries, Dyson input bounds and compiled DOP853 chains. Callers retain basis selection and traversal. |
 | Adaptive DOP853 and DP5(4) tableaux, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
 | Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. CPU `dop853` rows, `t6` direct rows, period fractional tails and sampled multitone RWA probes share this entry point, supplying explicit frames and budgets. The CPU `dop853` plan selects DP5(4) and its tighter local tolerances for eligible rows. [OpenCL `dop853`](#gpu-backend) uses the same tableaux and tolerance rule in its device runner. |
@@ -1502,7 +1502,7 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v12`. Engine captures and paired
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v13`. Engine captures and paired
 benchmark reports record the numeric version. Evolution does not persist
 densities or offline tables across processes or Engine lifetimes.
 

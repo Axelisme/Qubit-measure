@@ -125,6 +125,23 @@ def test_gate_build_failure_aborts_evolve_without_affecting_inspection(
     assert raised.value is failure
 
 
+def test_inspection_reports_price_skipped_gate_only_with_allowlist() -> None:
+    case = _resonant_pair(1)
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu")) as default,
+        closing(Engine(1, backend="cpu", families=_CPU_FAMILIES)) as allowed,
+    ):
+        (normal,) = default.inspect_dispatch(case.source, (case.batch,)).rows
+        (restricted,) = allowed.inspect_dispatch(case.source, (case.batch,)).rows
+
+    assert normal.family == restricted.family == "dop853"
+    assert "multitone_gate" not in {candidate.family for candidate in normal.candidates}
+    assert {candidate.family: candidate.guard for candidate in restricted.candidates}[
+        "multitone_gate"
+    ] == "untested_after_short_circuit"
+
+
 def test_sampled_rwa_refusal_falls_through_to_gate_and_original_by_key() -> None:
     case = _resonant_pair(65, detuned=True)
     tracks = tuple(

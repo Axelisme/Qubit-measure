@@ -9,6 +9,7 @@ and leave time steps, Hamiltonian phases and frames to their callers.
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
+from scipy.linalg import expm
 
 from ...baths import population_generator
 from ..secular import SecularModel
@@ -34,6 +35,19 @@ def secular_operators(
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Return Q and total coherence loss for a model, both in inverse ns."""
     return population_generator(model.rates_per_ns), coherence_decay(model)
+
+
+def secular_half_step(
+    model: SecularModel, half_ns: float
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return new real population and coherence maps for a half-step in ns.
+
+    The caller chooses the half-step duration and owns the mutable arrays.
+    """
+    generator, decay = secular_operators(model)
+    return np.asarray(expm(half_ns * generator), dtype=np.float64), np.exp(
+        -half_ns * decay
+    )
 
 
 @njit(nogil=True, cache=True)

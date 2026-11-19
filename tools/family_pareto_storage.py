@@ -11,19 +11,22 @@ from zcu_tools.simulate.evolution import (
 )
 
 
+def _shared_directory(cwd: Path | None) -> Path:
+    common = subprocess.check_output(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=cwd,
+        text=True,
+    ).strip()
+    return Path(common).parent / ".agent_state" / "benchmark" / "family_pareto"
+
+
 def local_data_directory() -> Path:
     """Create shared benchmark storage located through Git's absolute common dir.
 
     All worktrees share the main repository's .agent_state/benchmark/family_pareto.
     Git or filesystem errors propagate; no references are solved here.
     """
-    common = Path(
-        subprocess.check_output(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            text=True,
-        ).strip()
-    )
-    directory = common.parent / ".agent_state" / "benchmark" / "family_pareto"
+    directory = _shared_directory(None)
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
@@ -39,15 +42,8 @@ def scene_cache_directory(override: Path | None = None) -> Path:
         if not override.is_absolute():
             raise ValueError("--scene-cache must be an absolute path")
         return override
-    common = subprocess.check_output(
-        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        cwd=Path(__file__).parent,
-        text=True,
-    ).strip()
     return (
-        Path(common).parent
-        / ".agent_state/benchmark/family_pareto/scenes"
-        / f"v{SCENE_CACHE_VERSION}"
+        _shared_directory(Path(__file__).parent) / "scenes" / f"v{SCENE_CACHE_VERSION}"
     )
 
 
