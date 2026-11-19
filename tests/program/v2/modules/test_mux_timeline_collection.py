@@ -41,16 +41,15 @@ def test_collection_requires_identity_emitted_in_nested_control(emitted, monkeyp
 
         def _body(self, cfg):
             with self.branch(by="choice", align_timeline=True) as cases:
-                with cases.case(0):
-                    pass
-                with cases.case(1), self.repeat("reads", 2):
-                    if emitted:
-                        self.emit(module)
+                for index in range(2):
+                    with cases.case(index), self.repeat(f"reads_{index}", 2):
+                        if emitted:
+                            self.emit(module)
 
     prog = Program(mux_soccfg())
-    acquired = [np.array([[[2.0, 3.0], [5.0, 7.0]]])] * 2
+    acquired = [np.array([[[2.0, 3.0], [5.0, 7.0]]] * 2)] * 2
     raw = [
-        np.full((1, 2, 1, 2), 11 * channel["length"], dtype=np.int64)
+        np.full((1, 2, 2, 2), 11 * channel["length"], dtype=np.int64)
         for channel in prog.ro_chs.values()
     ]
     monkeypatch.setattr(prog, "get_raw", lambda: raw)
@@ -65,7 +64,7 @@ def test_collection_requires_identity_emitted_in_nested_control(emitted, monkeyp
             [[[2, 3], [2, 3]], [[5, 7], [5, 7]]],
         )
         np.testing.assert_array_equal(
-            module.collect_raw_iq(prog), np.full((1, 2, 1, 2, 2), 11)
+            module.collect_raw_iq(prog), np.full((1, 2, 2, 2, 2), 11)
         )
 
 

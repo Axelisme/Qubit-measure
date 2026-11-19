@@ -26,9 +26,9 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     compiled loop order raises ValueError at construction.
     The label must select one PulseReadout emission inside one fixed Repeat
     of at least 16, with no other triggers on its ADC or conditional emission.
-    After build call prog.set_reads_per_shot(n) with the Repeat count, before
-    constructing the processor. Label/provenance/trigger/count mismatches raise
-    ValueError with expected and actual values, without changing prog.
+    The compiler supplies the per-shot ADC count. Label, provenance, trigger
+    and count mismatches raise ValueError with expected and actual values,
+    without changing prog.
     No pulse physics is checked. Discontinuities between reps do not affect
     lags; hidden discontinuities inside a rep cycle cannot be detected.
 

@@ -47,9 +47,7 @@ def read_program(env):
         builder.emit(readout.build("readout"))
         builder.timeline_inc(0.096)
     builder.delay_by_timeline()
-    program = builder.build()
-    program.set_reads_per_shot(2)
-    return program
+    return builder.build()
 
 
 def test_source_passes_cavity_spans_and_honors_engine_reuse_answer():

@@ -411,8 +411,7 @@ class PathState:
     selections: dict[str, SelectionProvenance]
     # Storage protected from reuse in addition to registers in live ends.
     pinned: set[str]
-    # Declared ADC channel to the current QICK source trigger count (>= 0).
-    # This is not the number executed at runtime by a Branch or Repeat.
+    # Declared ADC channel to reads executed so far on this path (>= 0).
     read_counts: dict[int, int]
 
     def channel_ends(self) -> dict[tuple[bool, int], Time]:
@@ -449,6 +448,7 @@ class TimelineBook:
         self.preparing = 0
         self.output_time: TimeExpression | None = None
         self.pinned: set[str] = set()
+        self.read_counts: dict[int, int] = {}
         self.runtime_gens: dict[int, RuntimeEnd] = {}
         self.runtime_ros: dict[int, RuntimeEnd] = {}
         self.unknown_native_adcs: set[int] = set()
@@ -494,7 +494,7 @@ class TimelineBook:
             defined=self.time_bounds.defined.copy(),
             selections=self.time_bounds.selection_at_position.copy(),
             pinned=self.pinned.copy(),
-            read_counts={ch: ro["trigs"] for ch, ro in prog.ro_chs.items()},
+            read_counts=self.read_counts.copy(),
         )
 
     def restore(self, prog: "TimelineProgramV2", state: PathState) -> None:
@@ -521,12 +521,12 @@ class TimelineBook:
         self.time_bounds.defined = state.defined.copy()
         self.time_bounds.selection_at_position = state.selections.copy()
         self.pinned = state.pinned.copy()
+        self.read_counts = state.read_counts.copy()
         # Restore QICK storage, not a newly observed TimelineProgramV2 event.
         for ch, value in state.gens.items():
             QickProgramV2.set_timestamp(prog, value, gen_ch=ch)
         for ch, value in state.ros.items():
             QickProgramV2.set_timestamp(prog, value, ro_ch=ch)
-            prog.ro_chs[ch]["trigs"] = state.read_counts[ch]
 
     def repeat_count(
         self, prog, iterations: int | str, minimum: int, maximum: int | None

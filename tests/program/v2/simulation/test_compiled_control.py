@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from qick.asm_v2 import QickRawParam, Trigger
+from qick.asm_v2 import QickRawParam
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
 from zcu_tools.program.v2.ir.instructions import MetaInst, TestInst, WaitInst
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
@@ -194,107 +194,22 @@ def test_native_branch_selects_each_lane_and_debits_runtime_external_timeline():
         ] == pytest.approx([0, env.soccfg.cycles2us(100)])
 
 
-@pytest.mark.parametrize("register_count", [False, True])
 @pytest.mark.parametrize("count", [0, 1, 3])
-def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
-    register_count, count
-):
-    loader = LoadValue("counts", [count, count], "shot", "count")
-
-    def initialize(p):
-        if register_count:
-            p.add_loop("shot", 2)
-            p.declare(loader)
-
+def test_fixed_repeat_acquires_without_a_manual_read_count(count):
     def body(p):
-        if register_count:
-            p.emit(loader)
-        p.delay_by_timeline()
-        with p.repeat(
-            "inner",
-            "count" if register_count else count,
-            **{"range_hint": (0, 3)} if register_count else {},
-        ):
-            p.append_macro(
-                Trigger(
-                    ros=[0],
-                    tts=None,
-                    pins=None,
-                    t=0,
-                    width=None,
-                    ddr4=False,
-                    mr=False,
-                    tag=None,
-                )
-            )
+        with p.repeat("inner", count):
+            p.trigger([0], timeline="default")
             p.pulse(0, "p", timeline="default")
+            p.timeline_inc(0.2)
             p.delay_by_timeline()
 
-    prog, env = program(body, initialize, trigger_time=None, reps=1)
-    static = prog.ro_chs[0]["trigs"]
-    if count == 1:
-        result = request(prog, env)
-        assert (
-            len(times_us(result.time_base, result.readouts[0].trigger_ticks))
-            == static
-            == 1
-        )
-        if register_count:
-            assert result.point_dims == (2,)
-            assert [
-                len(
-                    times_us(
-                        result.time_base,
-                        result.materialize_point(i).readouts[0].trigger_ticks,
-                    )
-                )
-                for i in range(2)
-            ] == [1, 1]
-    elif count == 0 and not register_count:
+    prog, env = program(body, trigger_time=None, reps=1)
+    if count == 0:
         with pytest.raises(ValueError, match="ADC 0.*zero-read"):
             request(prog, env)
     else:
-        with pytest.raises(
-            ValueError, match=rf"ADC 0: static={static}, actual={count} reads"
-        ):
-            request(prog, env)
-    assert prog.ro_chs[0]["trigs"] == static
-    assert env.soc.binding.last_request is None
-
-
-def test_register_repeat_rejects_point_dependent_adc_counts_against_static_layout():
-    loader = LoadValue("counts", [1, 3], "shot", "count")
-
-    def initialize(p):
-        p.add_loop("shot", 2)
-        p.declare(loader)
-
-    def body(p):
-        p.emit(loader)
-        p.delay_by_timeline()
-        with p.repeat("inner", "count", range_hint=(1, 3)):
-            p.append_macro(
-                Trigger(
-                    ros=[0],
-                    tts=None,
-                    pins=None,
-                    t=0,
-                    width=None,
-                    ddr4=False,
-                    mr=False,
-                    tag=None,
-                )
-            )
-            p.pulse(0, "p", timeline="default")
-            p.delay_by_timeline()
-
-    prog, env = program(body, initialize, trigger_time=None, reps=1)
-    static = prog.ro_chs[0]["trigs"]
-    with pytest.raises(ValueError, match=rf"ADC 0: static={static}, actual=3 reads"):
-        request(prog, env)
-    assert prog.ro_chs[0]["trigs"] == static
-    assert env.soc.binding.last_request is None
-    assert env.soc.binding.rounds == ()
+        result = request(prog, env)
+        assert len(result.readouts[0].trigger_ticks) == count
 
 
 def test_runtime_timeline_max_floor_fork_join_and_sync_use_selected_table_values():
@@ -327,54 +242,27 @@ def test_runtime_timeline_max_floor_fork_join_and_sync_use_selected_table_values
     ] == pytest.approx([env.soccfg.cycles2us(cycles) for cycles in (30, 30, 25)])
 
 
-@pytest.mark.parametrize("counts", [(2, 0), (0, 2)])
-def test_scan_total_cannot_mask_per_shot_adc_read_count_mismatch(counts):
-    loader = LoadValue("counts", counts, "scan", "count")
-
-    def initialize(p):
-        p.add_loop("scan", 2)
-        p.declare(loader)
-
-    def body(p):
-        p.emit(loader)
-        p.delay_by_timeline()
-        with p.repeat("inner", "count", range_hint=(0, 2)):
-            p.append_macro(
-                Trigger(
-                    ros=[0],
-                    tts=None,
-                    pins=None,
-                    t=0,
-                    width=None,
-                    ddr4=False,
-                    mr=False,
-                    tag=None,
-                )
-            )
-            p.pulse(0, "p", timeline="default")
-            p.delay_by_timeline()
-
-    prog, env = program(body, initialize, trigger_time=None)
-    assert prog.ro_chs[0]["trigs"] == 1
-    with pytest.raises(ValueError, match=rf"ADC 0: static=1, actual={counts[0]} reads"):
-        request(prog, env)
-    assert env.soc.binding.last_request is None
-
-
-def test_branch_validates_each_executed_lane_not_total_static_case_triggers():
+def test_simulator_checks_each_shot_for_triggers_emitted_by_raw_assembly():
     def body(p):
         p.trigger([0], t=0)
         p.pulse(0, "p", timeline="default")
-        with p.branch(by="scan", align_timeline=True) as branch, branch.case(0):
-            pulse_end = tproc_ceil(p.soccfg, generator_duration(p.soccfg, 0.1))
-            p.trigger([0], t=p.cycles2us(pulse_end))
-            p.pulse(0, "p")
+        with p.branch(by="scan", align_timeline=True) as branch, branch.case(1):
+            adc = p.soccfg["readouts"][0]
+            tick = p.us2cycles(0.25)
+            p.asm_inst(
+                {
+                    "CMD": "DPORT_WR",
+                    "DST": str(adc["trigger_port"]),
+                    "SRC": "imm",
+                    "DATA": str(1 << adc["trigger_bit"]),
+                    "TIME": f"@{tick}",
+                }
+            )
 
     prog, env = program(body, lambda p: p.add_loop("scan", 2), trigger_time=None)
-    # Lane zero has two reads, matching the two statically emitted triggers.
-    # Lane one has only one; admission must not return a partially valid request.
-    assert prog.ro_chs[0]["trigs"] == 2
-    with pytest.raises(ValueError, match="ADC 0: static=2, actual=1 reads"):
+    # Case zero matches the layout. Case one sends an uncounted ADC trigger.
+    assert prog.ro_chs[0]["trigs"] == 1
+    with pytest.raises(ValueError, match="ADC 0: static=1, actual=2 reads"):
         request(prog, env)
     assert env.soc.binding.last_request is None
 

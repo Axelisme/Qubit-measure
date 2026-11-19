@@ -155,8 +155,6 @@ def test_six_sources_write_one_acquire_record(
         builder.emit(PulseReadout("pulse", readout, freq=freq))
     builder.delay_by_timeline()
     program = builder.build()
-    if projective:
-        program.set_reads_per_shot(2)
     acquire = program.acquire_decimated if mode == "decimated" else program.acquire
     if failed:
         work_clock.fail, work_clock.fail_on = "evolve", 4

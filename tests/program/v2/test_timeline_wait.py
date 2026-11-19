@@ -806,7 +806,8 @@ class WaitRecipe:
     sweep_steps has one step per three-point axis. counts and branch_delays
     share axis0's index. pulse_samples holds the two native DAC lengths in
     fabric cycles; adc_samples uses ADC output-clock cycles. read_at selects the
-    trigger's position; tail subtracts from its timeline end, not its ADC end.
+    trigger's position; "before_runtime" reads just before the register Repeat,
+    which has no triggers. tail subtracts from the read's timeline end, not its ADC end.
     fixed_count and counts give the fixed and table-selected Repeat counts.
     """
 
@@ -817,7 +818,7 @@ class WaitRecipe:
     counts: tuple[int, ...]
     branch_delays: tuple[int, ...]
     loop_delay: int
-    read_at: Literal["before", "fixed", "runtime", "branch", "after"]
+    read_at: Literal["before", "fixed", "before_runtime", "branch", "after"]
     tail: int
 
 
@@ -833,7 +834,7 @@ def wait_recipes(seed: int) -> list[WaitRecipe]:
     1     all                 yes     both                  8..16
     2     before              no      neither               8..14
     2     branch              yes     neither               8..11
-    2     fixed/runtime/after no      both                 10..16
+    2     fixed/before_runtime/after  no  both              10..16
 
     Unrestricted recipes exhausted the same 16 slots and failed allocation 17
     both before and after the shell-WAIT changes. Capacity errors are not caught
@@ -843,7 +844,7 @@ def wait_recipes(seed: int) -> list[WaitRecipe]:
     recipes = []
     for repeat in range(3):
         for axes in (1, 2):
-            for read_at in ("before", "fixed", "runtime", "branch", "after"):
+            for read_at in ("before", "fixed", "before_runtime", "branch", "after"):
                 adc_samples = rng.choice((50, 100, 150))
                 sweep_steps = tuple(rng.randint(5, 30) for _ in range(axes))
                 fractional_samples = (rng.randint(20, 70), rng.randint(10, 50))
@@ -929,11 +930,10 @@ class MixedWaitProgram(TimelineProgramV2):
                     self.read()
                 self.timeline_inc(recipe.loop_delay / TPROC_MHZ)
                 self.delay_by_timeline()
+            if recipe.read_at == "before_runtime":
+                self.read()
             self.delay_by_timeline()
             with self.repeat("runtime", "count_cycles", range_hint=(0, 3)):
-                if recipe.read_at == "runtime":
-                    self.timeline_inc(recipe.tail / TPROC_MHZ)
-                    self.read()
                 self.timeline_inc(recipe.loop_delay / TPROC_MHZ)
                 self.delay_by_timeline()
 

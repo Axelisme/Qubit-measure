@@ -259,7 +259,6 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
                     builder.emit(readout)  # Ends at generator end plus post_delay.
                     builder.emit(pi_pulse)
                 prog = builder.build()
-                prog.set_reads_per_shot(READS_PER_REP)
                 step.run_acquire_summed(
                     prog,
                     context.soc,

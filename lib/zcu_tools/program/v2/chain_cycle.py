@@ -29,9 +29,8 @@ def chain_cycle_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     Multiple readout owners matching the label, pulse or mux, are ambiguous; a
     label whose one owner is a MuxReadout is rejected. The selected ADC must
     have 16 unrolled reads, or two source reads in a fixed Repeat of eight, and
-    no other triggers. Call prog.set_reads_per_shot(16) after build and before
-    this function. Construction does not change that declaration. Other ADCs
-    are ignored.
+    no other triggers. The compiler supplies the per-shot ADC count. Other
+    ADCs are ignored.
 
     The caller supplies a thermalised (D R R)^8 shot: read 2k follows operation
     D_k, read 2k+1 follows a read. Only read counts, owner and control structure
@@ -54,7 +53,7 @@ def chain_cycle_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     applied; acquire_summed adds completed rounds.
 
     Missing/ambiguous labels, unsupported read/control structure, extra
-    triggers, and declared or incoming read/IQ shape mismatches raise
+    triggers, and compiled read-count or incoming IQ shape mismatches raise
     ValueError with expected and actual values. Missing ADC input raises
     KeyError. The program must remain unmodified after resolution.
     """

@@ -40,9 +40,7 @@ def cycle_program(
                 tag = "sample" if tagged and block == read == 0 else None
                 builder.emit(readout, tag=tag)
                 builder.delay_auto()
-    prog = builder.build()
-    prog.set_reads_per_shot(16)
-    return prog
+    return builder.build()
 
 
 def reference_vector(stream: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -137,15 +135,6 @@ def test_read_label_requires_one_owner_and_lists_available_labels(ambiguous: boo
         v2.chain_cycle_sums(prog, label)
 
 
-@pytest.mark.parametrize("declared", [1, 15, 17])
-def test_declared_cycle_read_count_must_be_sixteen(declared: int):
-    prog = cycle_program(repeated=True)
-    prog.set_reads_per_shot(declared)
-    with pytest.raises(ValueError, match=rf"ADC 0.*expected 16.*actual {declared}"):
-        v2.chain_cycle_sums(prog, "readout")
-    assert prog.ro_chs[0]["trigs"] == declared
-
-
 @pytest.mark.parametrize(
     "reads,repeats", [(15, None), (17, None), (1, 16), (4, 4), (2, 7), (2, 9)]
 )
@@ -159,7 +148,6 @@ def test_source_reads_require_unrolled_cycle_or_two_reads_repeated_eight_times(
             builder.emit(readout)
             builder.delay_auto()
     prog = builder.build()
-    prog.set_reads_per_shot(16)
     with pytest.raises(
         ValueError, match=rf"ADC 0.*expected.*16 unrolled.*actual.*{reads}"
     ):
@@ -179,42 +167,9 @@ def test_cycle_rejects_other_triggers_on_its_adc(extra: str):
     else:
         builder.emit(cycle_readout("other"))
     prog = builder.build()
-    prog.set_reads_per_shot(16)
     with pytest.raises(
         ValueError, match="ADC 0.*expected 2.*source triggers.*actual 3"
     ):
-        v2.chain_cycle_sums(prog, "readout")
-
-
-def test_cycle_rejects_reads_in_branch_even_if_static_count_is_sixteen():
-    builder = v2.TimelineBuilder(load_soccfg())
-    builder.add_loop("point", 2)
-    readout = cycle_readout()
-    with builder.branch(by="point", align_timeline=True) as cases, cases.case(0):
-        for _ in range(16):
-            builder.emit(readout)
-            builder.timeline_inc(1.1)
-    prog = builder.build()
-    prog.set_reads_per_shot(16)
-    with pytest.raises(ValueError, match="ADC 0.*expected.*control.*actual.*Branch"):
-        v2.chain_cycle_sums(prog, "readout")
-
-
-def test_cycle_rejects_empty_branch_path_when_other_path_repeats_sixteen_reads():
-    builder = v2.TimelineBuilder(load_soccfg())
-    builder.add_loop("point", 2)
-    readout = cycle_readout()
-    with (
-        builder.branch(by="point", align_timeline=True) as cases,
-        cases.case(0),
-        builder.repeat("cycle", 8),
-    ):
-        for _ in range(2):
-            builder.emit(readout)
-            builder.timeline_inc(1.1)
-    prog = builder.build()
-    prog.set_reads_per_shot(16)
-    with pytest.raises(ValueError, match="ADC 0.*expected.*16 unrolled.*actual 0"):
         v2.chain_cycle_sums(prog, "readout")
 
 
@@ -245,7 +200,6 @@ def test_cycle_acquisition_adds_counts_across_points_reps_and_rounds(
                 builder.emit(readout)
                 builder.delay_auto()
         prog = builder.build()
-        prog.set_reads_per_shot(16)
         sums = prog.acquire_summed(
             env.soc,
             processor=v2.chain_cycle_sums(prog, "readout"),

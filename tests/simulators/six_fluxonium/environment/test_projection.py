@@ -119,9 +119,7 @@ def repeated_mux_program(env: SimulationEnvironment, *, reads=2, reps=4096):
         builder.emit(module)
         builder.timeline_inc(0.096)
     builder.delay_by_timeline()
-    program = builder.build()
-    program.set_reads_per_shot(reads)
-    return program
+    return builder.build()
 
 
 def test_two_cavity_heralds_keep_conditional_and_independent_shot_histories(
