@@ -337,10 +337,9 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         frequencies = sweep2array(config.frequency)
         # 2. Track target X/Y sigma for both spectator preparations across frequency.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
+        ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target ⟨σ⟩")
         viewer = live_line(ax, num_lines=4 * len(config.gate_count))
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -476,6 +475,19 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         )
 
         # 3. Compare contrast, phase and spectator slopes to inspect the unique per-gate pi crossing.
+        _, axes = plots.subplots(num="quadratures", figsize=(10, 5))
+        for (b, state), (q, projection), (j, n) in product(
+            enumerate(("g", "e")), enumerate(("X", "Y")), enumerate(data.gate_counts)
+        ):
+            axes.plot(
+                data.frequencies,
+                quadratures[b, q, j],
+                ".",
+                label=f"{state} {projection} n={n}",
+            )
+        axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target ⟨σ⟩")
+        axes.legend(fontsize="small", ncols=3)
+
         fig, _ = plots.subplots(
             num="phase", nrows=3, figsize=(10, 10), layout="constrained"
         )
@@ -499,7 +511,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                 label=f"{state} n={n}",
             )
         fig.axes[2].plot(
-            data.frequencies, conditional, ".-", label="Fitted slope_e − slope_g"
+            data.frequencies, conditional, "-", label="Fitted slope_e − slope_g"
         )
         for crossing in crossings.frequencies_mhz:
             fig.axes[2].plot(crossing, -180, "x", label="Per-gate π crossing")
@@ -514,25 +526,13 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         ):
             ax.set(xlabel="Common CZ frequency (MHz)", ylabel=label)
             ax.legend(fontsize="small", ncols=2)
-        fig, axes = plots.subplots(num="quadratures", figsize=(10, 5))
-        for (b, state), (q, projection), (j, n) in product(
-            enumerate(("g", "e")), enumerate(("X", "Y")), enumerate(data.gate_counts)
-        ):
-            axes.plot(
-                data.frequencies,
-                quadratures[b, q, j],
-                ".-",
-                label=f"{state} {projection} n={n}",
-            )
-        axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
-        axes.legend(fontsize="small", ncols=3)
         fig, axes = plots.subplots(num="slopes", figsize=(10, 5))
         for b, state in enumerate(("g", "e")):
             axes.errorbar(
                 data.frequencies,
                 fitted.slopes_deg[b],
                 yerr=fitted.errors_deg[b],
-                fmt=".-",
+                fmt="-",
                 label=f"Actual spectator {state}",
             )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")

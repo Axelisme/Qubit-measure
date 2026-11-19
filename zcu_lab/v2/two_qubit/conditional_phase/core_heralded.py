@@ -89,6 +89,32 @@ def restore_result(
     )
 
 
+def _plot_terminal_quadratures(
+    plots: Plots,
+    frequencies: NDArray[np.float64],
+    gate_counts: NDArray[np.int64],
+    name: str,
+    groups: dict[str, NDArray[np.float64]],
+    ylabel: str,
+) -> None:
+    """Draw named herald groups' X/Y sigma by spectator and gate count versus MHz."""
+    _, ax = plots.subplots(num=name, figsize=(11, 6), layout="constrained")
+    for (herald, quadratures), (b, state), (q, projection), (j, n) in product(
+        groups.items(),
+        enumerate(("g", "e")),
+        enumerate(("X", "Y")),
+        enumerate(gate_counts),
+    ):
+        ax.plot(
+            frequencies,
+            quadratures[b, q, j],
+            ".",
+            label=f"{herald} {state} {projection} n={n}",
+        )
+    ax.set(xlabel="Common CZ frequency (MHz)", ylabel=ylabel)
+    ax.legend(fontsize="x-small", ncols=3)
+
+
 class ConditionalPhaseHeraldedExp(
     Experiment[ConditionalPhaseHeraldedResult, ConditionalPhaseHeraldedCfg]
 ):
@@ -159,10 +185,9 @@ class ConditionalPhaseHeraldedExp(
         frequencies = sweep2array(config.frequency)
         # 2. Track gg-heralded target X/Y sigma for both spectator preparations across frequency.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma | herald (g,g)")
+        ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target ⟨σ⟩ | herald (g,g)")
         viewer = live_line(ax, num_lines=4 * len(config.gate_count))
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -334,6 +359,15 @@ class ConditionalPhaseHeraldedExp(
         )
 
         # 3. Compare shared gg/ee slopes with gg-only fits and inspect herald acceptance separately.
+        _plot_terminal_quadratures(
+            plots,
+            data.frequencies,
+            data.gate_counts,
+            "terminal_quadratures",
+            {"gg": gg_stats.values},
+            "Target ⟨σ⟩ | herald (g,g)",
+        )
+
         fig, _ = plots.subplots(
             num="phase", nrows=3, figsize=(11, 11), layout="constrained"
         )
@@ -364,11 +398,11 @@ class ConditionalPhaseHeraldedExp(
         fig.axes[2].plot(
             data.frequencies,
             conditional,
-            ".-",
+            "-",
             label="Joint slope_e − slope_g (writeback)",
         )
         fig.axes[2].plot(
-            data.frequencies, gg_conditional, "--", label="gg-only slope_e − slope_g"
+            data.frequencies, gg_conditional, "-", label="gg-only slope_e − slope_g"
         )
         for crossing in crossings.frequencies_mhz:
             fig.axes[2].plot(crossing, -180, "x", label="Joint per-gate π crossing")
@@ -391,26 +425,19 @@ class ConditionalPhaseHeraldedExp(
                 data.frequencies,
                 fit.slopes_deg[b],
                 yerr=fit.errors_deg[b],
-                fmt=".-",
+                fmt="-",
                 label=f"{name} actual spectator {state}",
             )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")
         axes.legend()
-        fig, axes = plots.subplots(num="quadratures", figsize=(11, 6))
-        for (herald, values), (b, state), (q, projection), (j, n) in product(
-            (("gg", gg_stats.values), ("ee sign-corrected", (-ee_stats.values))),
-            enumerate(("g", "e")),
-            enumerate(("X", "Y")),
-            enumerate(data.gate_counts),
-        ):
-            axes.plot(
-                data.frequencies,
-                values[b, q, j],
-                ".-",
-                label=f"{herald} {state} {projection} n={n}",
-            )
-        axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
-        axes.legend(fontsize="x-small", ncols=4)
+        _plot_terminal_quadratures(
+            plots,
+            data.frequencies,
+            data.gate_counts,
+            "quadratures",
+            {"gg": gg_stats.values, "ee sign-corrected": -ee_stats.values},
+            "Target ⟨σ⟩",
+        )
         fig, axes = plots.subplots(num="herald", figsize=(12, 5))
         image = axes.imshow(
             np.ma.masked_invalid(herald_matrix.reshape(-1, 9)),
@@ -428,6 +455,7 @@ class ConditionalPhaseHeraldedExp(
             ylabel="Scan row (spectator, projection, n, frequency)",
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
+        axes.grid(False)
         fig.colorbar(image, ax=axes, label="Herald probability")
         # 4. Propose only the unique joint-fit pi crossing; retain the reason when it is unresolved.
         return answer

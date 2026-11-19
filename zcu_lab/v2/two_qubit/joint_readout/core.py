@@ -7,7 +7,6 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -197,10 +196,13 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
 
         # 1. Show terminal gg probability for the four preparation branches.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Nominal preparation (gg, ge, eg, ee)", ylabel="Terminal P(g,g)")
+        ax.set(
+            xlabel="Nominal preparation",
+            ylabel="Terminal P(g,g)",
+            xticks=range(PREPARED_COUNT),
+            xticklabels=("gg", "ge", "eg", "ee"),
+        )
         viewer = live_line(ax)
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=PREPARED_COUNT))
-        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -278,6 +280,16 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
             ),
             acquired_shots=result.sums.sum(axis=(-2, -1)).reshape(PREPARED_COUNT),
         )
+        # Show the same nominal-branch probability as the live plot before the matrices.
+        _, ax = plots.subplots(num="terminal_gg", layout="constrained")
+        ax.plot(range(PREPARED_COUNT), answer.matrix[:, 0], ".")
+        ax.set(
+            xlabel="Nominal preparation",
+            ylabel="Terminal P(g,g)",
+            xticks=range(PREPARED_COUNT),
+            xticklabels=("gg", "ge", "eg", "ee"),
+        )
+
         # 2. Show all nine terminal classes for each nominal preparation.
         fig, axes = plots.subplots(num="matrix", figsize=(12, 5))
         image = axes.imshow(
@@ -306,6 +318,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
             ylabel="Nominal I/Xπ preparation; acquired shots",
             title="Preparation → observed outcome; includes preparation and readout effects",
         )
+        axes.grid(False)
         fig.colorbar(image, ax=axes, label="Row-normalized probability")
         fig.tight_layout()
         # 3. Return count and probability matrices for the saved analysis.

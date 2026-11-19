@@ -73,6 +73,33 @@ def restore_result(
     )
 
 
+def _plot_excitation(
+    plots: Plots,
+    dc: NDArray[np.float64],
+    frequencies: NDArray[np.float64],
+    gg: NDArray[np.float64],
+    ee: NDArray[np.float64],
+) -> None:
+    """Draw the gg/ee F1/F2 excitation overlay per actual state and DC point."""
+    # Show the same preparation-resolved overlay as the live plot.
+    for d, value in enumerate(dc):
+        for f1, f2 in np.ndindex(2, 2):
+            _, ax = plots.subplots(
+                num=f"excitation_dc_{d}_actual_{f1}_{f2}", layout="constrained"
+            )
+            excitation = np.column_stack((gg[d, f1, f2], ee[d, 1 - f1, 1 - f2]))
+            for values, label in zip(
+                excitation.T, ("gg F1", "gg F2", "ee F1", "ee F2"), strict=True
+            ):
+                ax.plot(frequencies, values, ".", label=label)
+            ax.set(
+                title=f"Actual initial state ({f1},{f2}) before probe · DC {value:g}",
+                xlabel="Common probe frequency (MHz)",
+                ylabel="Excited-state probability P_e",
+            )
+            ax.legend()
+
+
 class SpectroscopyHeraldedExp(
     Experiment[SpectroscopyHeraldedResult, SpectroscopyHeraldedCfg]
 ):
@@ -146,12 +173,18 @@ class SpectroscopyHeraldedExp(
                     )
                     ax.set(
                         xlabel="Common probe frequency (MHz)",
-                        ylabel="P_e (gg F1/F2, ee F1/F2)",
+                        ylabel="Excited-state probability P_e",
                         title=f"Actual initial state ({f1},{f2}) before probe · DC {dc:g}",
                     )
                     viewers[d, f1, f2] = live_line(ax, num_lines=4)
                     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-                    ax.grid(False)
+                    for line, label in zip(
+                        ax.get_lines(),
+                        ("gg F1", "gg F2", "ee F1", "ee F2"),
+                        strict=True,
+                    ):
+                        line.set_label(label)
+                    ax.legend()
                     fig.show()
 
         @context.plots.on_plot_thread
@@ -306,6 +339,8 @@ class SpectroscopyHeraldedExp(
         ee_counts = terminal_counts(data.sums, ("e", "e"))
         gg = summarize_spectra(gg_counts, acquired, cfg.reps * cfg.rounds)
         ee = summarize_spectra(ee_counts, acquired, cfg.reps * cfg.rounds)
+        _plot_excitation(plots, dc, frequencies, gg.excitation, ee.excitation)
+
         # 2. Overlay gg/ee spectra under the same actual initial state, including partial acquisitions.
         for d, value in enumerate(dc):
             for target, role in enumerate(("F1", "F2")):
@@ -326,11 +361,13 @@ class SpectroscopyHeraldedExp(
                     ax.plot(
                         frequencies,
                         gg.excitation[d, f1, f2, :, target],
+                        marker=".",
                         label=f"herald gg, nominal ({f1},{f2})",
                     )
                     ax.plot(
                         frequencies,
                         ee.excitation[d, 1 - f1, 1 - f2, :, target],
+                        marker=".",
                         linestyle="--",
                         label=f"herald ee, nominal ({1 - f1},{1 - f2})",
                     )
@@ -404,6 +441,7 @@ class SpectroscopyHeraldedExp(
                     yticks=range(9),
                     yticklabels=outcomes,
                 )
+                ax.grid(False)
                 fig.colorbar(image, ax=ax, label="Herald probability")
         if np.all(missing):
             return {

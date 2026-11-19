@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
-from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator
+from matplotlib.collections import QuadMesh
 from numpy.typing import NDArray
 from zcu_tools.experiment import (
     Experiment,
@@ -27,8 +26,6 @@ from zcu_tools.program.v2.modules import (
     MuxReadout,
     Reset,
 )
-
-from zcu_lab.v2.support import live_line
 
 from .._rabi_analysis import ReturnData
 from .._rabi_scan import RabiScanResult
@@ -136,6 +133,29 @@ def _plot_return(
     )
 
 
+def _live_return_map(
+    plots: Plots,
+    durations: NDArray[np.float64],
+    coordinates: NDArray[np.float64],
+) -> QuadMesh:
+    """Show an empty return map against duration and relative phase (deg) and return its mesh."""
+    fig, ax = plots.subplots(num="measurement", layout="constrained")
+    image = ax.pcolormesh(
+        durations,
+        coordinates,
+        np.full((len(coordinates), len(durations)), np.nan),
+        shading="nearest",
+        vmin=0,
+        vmax=1,
+        cmap="viridis",
+    )
+    ax.set(xlabel="Drive duration (us)", ylabel="F2 relative to F1 phase (deg)")
+    ax.grid(False)
+    fig.colorbar(image, ax=ax, label="Terminal P(g,g) | herald (g,g)")
+    fig.show()
+    return image
+
+
 class ConstructivePhaseHeraldedExp(
     Experiment[ConstructivePhaseHeraldedResult, ConstructivePhaseHeraldedCfg]
 ):
@@ -205,19 +225,14 @@ class ConstructivePhaseHeraldedExp(
         # 1. Pair relative-phase and duration axes for the two-drive return map.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
-        # 2. Track gg-heralded terminal P00 versus duration for each relative-phase slice.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
-        viewer = live_line(ax, num_lines=len(coordinates))
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
-        fig.show()
+        # 2. Show terminal gg-heralded return as a heatmap on the two sweep axes.
+        image = _live_return_map(context.plots, durations, coordinates)
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            ordered = sums
-            counts = terminal_counts(ordered, ("g", "g"))
-            return viewer.set(durations, joint_probabilities(counts)[..., 0, 0])
+        def update_view(sums: NDArray[np.float64]) -> tuple[QuadMesh, ...]:
+            counts = terminal_counts(sums, ("g", "g"))
+            image.set_array(joint_probabilities(counts)[..., 0, 0])
+            return (image,)
 
         class_shape = (3, 3, 3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
@@ -286,19 +301,14 @@ class ConstructivePhaseHeraldedExp(
         # 1. Keep the relative-phase grid fixed while sampled-envelope durations advance on the host.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
-        # 2. Track gg-heralded terminal P00 versus duration for each relative-phase slice.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
-        viewer = live_line(ax, num_lines=len(coordinates))
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
-        fig.show()
+        # 2. Show terminal gg-heralded return as a heatmap on the two sweep axes.
+        image = _live_return_map(context.plots, durations, coordinates)
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            ordered = sums.swapaxes(0, 1)
-            counts = terminal_counts(ordered, ("g", "g"))
-            return viewer.set(durations, joint_probabilities(counts)[..., 0, 0])
+        def update_view(sums: NDArray[np.float64]) -> tuple[QuadMesh, ...]:
+            counts = terminal_counts(sums.swapaxes(0, 1), ("g", "g"))
+            image.set_array(joint_probabilities(counts)[..., 0, 0])
+            return (image,)
 
         class_shape = (3, 3, 3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
@@ -415,8 +425,10 @@ class ConstructivePhaseHeraldedExp(
             shading="nearest",
             vmin=0,
             vmax=1,
+            cmap="viridis",
         )
-        fig.colorbar(image, ax=ax, label="Observed joint P00 after double Xπ")
+        ax.grid(False)
+        fig.colorbar(image, ax=ax, label="Terminal P(g,g) | herald (g,g)")
         ax.set(
             xlabel="Drive duration (us)",
             ylabel="F2 relative to F1 phase (deg)",
@@ -444,6 +456,7 @@ class ConstructivePhaseHeraldedExp(
                 vmin=0,
                 vmax=1,
             )
+            ax.grid(False)
             fig.colorbar(image, ax=ax, label="Herald probability")
             ax.set(
                 xlabel="Drive duration (us)",
@@ -460,6 +473,7 @@ class ConstructivePhaseHeraldedExp(
         image = ax.pcolormesh(
             durations, coordinates, ee_not_returned, shading="nearest", vmin=0, vmax=1
         )
+        ax.grid(False)
         fig.colorbar(image, ax=ax, label="Terminal not ee | herald (e,e)")
         ax.set(
             xlabel="Drive duration (us)",

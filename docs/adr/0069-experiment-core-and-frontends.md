@@ -155,6 +155,14 @@ Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 ex
 
 所有實驗與 caller 都使用這套核心與前端契約，不保留 pyplot 相容層或舊協議 fallback。Executor、動畫框架、acquisition、排程與硬體鎖機制不在本篇範圍。
 
+### Cfg 欄位改名與 schema 版本
+
+為了讓同一角色用同一名稱，可以改既有實驗的持久 cfg 欄位。改名時提升 `cfg_schema_version` 的 major，不遷移舊 cfg，也不提供 alias。只要舊 run 的 tag 與結果資料仍相容，Load 就保留 Result 與 metadata，令 `RunRecord.cfg=None`。需要 cfg 的分析不會改用新預設值繼續跑。
+
+例如 `two_qubit/local_z` 將掃描欄位 `gate_counts` 改為 `gate_count` 並提升 cfg schema major，Result 欄位與存檔軸維持原樣。若只改 guide、表單標籤或圖上的文字就能達到目的，保留 cfg 欄位與版本。若必須保留舊 run 依原 cfg 重新分析的能力，先不改名；相容方案要另外裁定。
+
+使用者在 2026-11-19 對以單數改名為先例、不提供 alias 的提案回覆「全采用建议」。選項與首批範圍見[實驗命名與顯示討論](../discussions/2026-11-20-experiment-naming-and-display.md)。
+
 ## 顯式 cfg 與裝置環境
 
 DeviceManager 的 registry、lock 與 close claims 屬於 instance，不提供預設 singleton。Notebook 與 GUI composition 持有或接收 manager；共享 driver 的 caller 共享同一 manager，不各自取得關閉權。既有 alias、close failure 與 driver lock 契約保留，不以 destructor 自動關閉，不把 disconnect 當作歸零或 RF off。

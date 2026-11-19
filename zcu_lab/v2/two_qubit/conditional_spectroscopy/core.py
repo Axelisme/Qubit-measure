@@ -203,6 +203,30 @@ def restore_result(data: GroupedLoadData[SpectroscopyCfg]) -> SpectroscopyResult
     )
 
 
+def _plot_excitation(
+    plots: Plots,
+    dc: NDArray[np.float64],
+    frequencies: NDArray[np.float64],
+    excitation: NDArray[np.float64],
+) -> None:
+    """Draw the F1/F2 excitation overlay per nominal preparation and DC point."""
+    # Show the same preparation-resolved overlay as the live plot.
+    for d, value in enumerate(dc):
+        for f1, f2 in np.ndindex(2, 2):
+            _, ax = plots.subplots(
+                num=f"excitation_dc_{d}_prep_{f1}_{f2}", layout="constrained"
+            )
+            preparation = excitation[d, f1, f2]
+            for values, label in zip(preparation.T, ("F1", "F2"), strict=True):
+                ax.plot(frequencies, values, ".", label=label)
+            ax.set(
+                title=f"Nominal preparation ({f1},{f2}) · DC {value:g}",
+                xlabel="Common probe frequency (MHz)",
+                ylabel="Excited-state probability P_e",
+            )
+            ax.legend()
+
+
 class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
     """Measure F1/F2 excitation versus common probe frequency in four branches."""
 
@@ -272,12 +296,14 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     )
                     ax.set(
                         xlabel="Common probe frequency (MHz)",
-                        ylabel="P_e (F1 line 1, F2 line 2)",
+                        ylabel="Excited-state probability P_e",
                         title=f"Nominal preparation ({f1},{f2}) · DC {dc:g}",
                     )
                     viewers[d, f1, f2] = live_line(ax, num_lines=2)
                     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-                    ax.grid(False)
+                    for line, label in zip(ax.get_lines(), ("F1", "F2"), strict=True):
+                        line.set_label(label)
+                    ax.legend()
                     fig.show()
 
         @context.plots.on_plot_thread
@@ -400,6 +426,8 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         answer = summarize_spectra(
             data.sums, data.sums.sum(axis=(-2, -1)), cfg.reps * cfg.rounds
         )
+        _plot_excitation(plots, dc, frequencies, answer.excitation)
+
         # 2. Compare preparation-resolved F1/F2 excitation and optional DC maps without fitting.
         for target, role in enumerate(("F1", "F2")):
             fig, _ = plots.subplots(
@@ -417,6 +445,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     ax.plot(
                         frequencies,
                         answer.excitation[d, f1, f2, :, target],
+                        marker=".",
                         label=f"DC {value:g} {cfg.dc_unit}"
                         if cfg.dc_device
                         else "DC inactive",
@@ -447,6 +476,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                         vmin=0,
                         vmax=1,
                     )
+                    ax.grid(False)
                     fig.colorbar(image, ax=ax, label=f"{role} P_e")
                     ax.set(
                         title=f"Nominal preparation ({f1},{f2})",

@@ -320,10 +320,11 @@ class RBExp(Experiment[RBResult, RBCfg]):
         """
         # 1. Compare reference and CZ-interleaved joint00 survival across Clifford depth.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Random Clifford depth", ylabel="Joint00 survival")
+        ax.set(
+            xlabel="Random Clifford depth", ylabel="Joint (g,g) survival probability"
+        )
         viewer = live_line(ax, num_lines=2)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -470,12 +471,24 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 sign = 1.0 if np.sum(fit.mean_signals * means) >= 0 else -1.0
                 curves = sign * fit.fit_signals
         # 3. Compare paired reference/interleaved mean survival and fitted probability curves with failure reasons.
+        # Show pooled counts as in the live plot before the equal-seed fit.
+        pooled = joint_probabilities(np.nansum(data.sums, axis=(1, 3)))
+        _, ax = plots.subplots(num="pooled_survival", layout="constrained")
+        for arm, label in enumerate(("Reference", "CZ interleaved")):
+            ax.plot(data.depths, pooled[:, arm, 0, 0], ".", label=label)
+        ax.set(
+            xlabel="Random Clifford depth", ylabel="Joint (g,g) survival probability"
+        )
+        ax.legend()
+
         fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(("Reference", "CZ interleaved")):
-            (line,) = ax.plot(data.depths, means[arm], "o", label=label)
+            (line,) = ax.plot(data.depths, means[arm], ".", label=label)
             if estimate is not None:
                 ax.plot(data.depths, curves[arm], color=line.get_color())
-        ax.set(xlabel="Random Clifford depth", ylabel="Same-shot joint00 survival")
+        ax.set(
+            xlabel="Random Clifford depth", ylabel="Joint (g,g) survival probability"
+        )
         ax.legend()
         if reason is not None:
             ax.set_title(f"No RB estimate: {reason}")
