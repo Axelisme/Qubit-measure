@@ -276,3 +276,11 @@ Two-qubit 實驗要排除初始化不在指定態的 shot 時，只能改用另�
   - `reset/mux_herald` 保留 F1、F2 兩個 tone 都是 g 的 shot。Result 是 float64 `(2, 1, 2, 2, 3, 3)`，和沒有 herald 時相同。每格計數等於改動前 `rb_heralded` 對同一批 shot 存的 gg herald 切片。
   - 兩個 depth、兩個 arm 的接受率在 58.40%–63.09%，joint00 存活率在 75.85%–78.60%。
   - 兩組 circle 是獨立 idle read 的合成分類區域，不是 GE 校準。這組結果不驗證實機或 gate fidelity。
+
+## 後記
+
+2026-11-20 land review 改了三處，現行規則見 [ADR-0074〈Herald reset 與逐 shot 遮罩〉](../adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)與 [ADR-0083〈Builder 與 Schedule 的職責〉](../adr/0083-program-macros-and-timelines.md#builder-與-schedule-的職責)：
+
+- `ShotReducer.start` 改為 `start(points)`。`points` 是不含 reps 的迴圈大小乘積，加總型 reducer 從第一輪前就持有 `(points, *axes)` 的零陣列。
+- 遮罩來源由 module 透過通用的 hook 在 body 組好後註冊，program 不再認得 herald 的型別。
+- plain `two_qubit/rb` 的終端讀取是 mux readout，所以只接受 `reset/mux_herald`。`reset/herald` 在 cfg 驗證時就被拒收。
