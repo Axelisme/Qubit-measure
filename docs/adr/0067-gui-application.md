@@ -209,6 +209,8 @@ Measure 的 Results browser 是選單開啟的獨立頂層視窗，不是 dialog
 
 Results browser 的分組、filter、圖庫、細節與比較只讀保存內容，不查 catalog。樹使用保存的 experiment 字串。索引經 datafile.read_docs 同次開檔讀出 metadata 與 cfg，再由 app 投影 metadata 的可缺欄位並把 cfg 納入搜尋。單份文件的錯誤留在該 run 的 issues，不遮住同檔的另一份文件，也不影響其他 runs。這是唯讀歷史展示，不取代 experiment 對 Load／Save 的 RunMetadata 驗證，也不做 cfg schema 遷移。只有按 Open 才由 catalog owner 解析 adapter，沿原 Load admission 開 tab，成功後選中新 tab 並 raise 主視窗。依賴沿用 C8、C9；沒有 framework → 使用者實驗定義的依賴。
 
+首次開啟時，Measure application 的索引 owner 用共用 executor 在背景掃描，逐個 Database entry 在 owner thread 交付。索引不是 operation：只有索引在跑時，關閉主視窗不跳 operation 確認，`Controller.close` 先取消索引再 drain。關閉瀏覽器只隱藏，重開沿用同一份索引。RPC 每次仍做完整新掃描。出處：[開窗加速討論](../discussions/2026-11-18-results-browser-open-speed.md)。2026-11-19 使用者覆核並核准這個關閉行為。
+
 使用者於 2026-10-24 裁定：「result browser應該與目前的實驗定義解耦，只是單純的解析cfg與顯示圖就好，就算cfg已經是舊版本version，或是實驗已經刪掉了，應該也不會影響使用。」
 
 使用者於 2026-10-23 裁定：「我傾向與可以在measure-gui中開啟，我考慮的是一個獨立視窗而不是dialog，因為這樣空間比較充足。」同次裁定納入原型的 cfg 身分、版本與相對欄位檢視回饋。GUI → experiment／resources 的依賴沿用 C8、C9 contracts；Result entry owner 提供不解析 component、不建立檔案或 lock 的歷史事件讀取。
