@@ -6,7 +6,7 @@ status: accepted
 
 使用者於 2026-10-16 以「都採用建議」確認歸檔。本篇記錄入口分層、recipe 與 workflow 的共用 async host、Ask 及取消契約。不新增工具、不改 method policy，也不授權硬體操作。
 
-**Last updated:** 2026-11-19，通用契約只有 ask 與正常結束
+**Last updated:** 2026-11-19，小功能要多次遇到才加
 
 **關聯：** [[0068]] 的 remote 與 measure 固定工具、[[0062]] 的 workflow run、[[0063]] 的保存權威、[[0069]] 的核心與前端；控制權見 [[0070]]，workflow engine 見 [[0062]]。
 
@@ -252,6 +252,14 @@ Measure／fluxdep 的 GUI 與 agent 共用同一份 application state，同時�
 ### 先做簡單設計，再按需加法
 
 第一版只實作能力清單所需的命令與回覆。覆寫、選項與細部欄位有具體需求才加入。Fluxdep 的摘要與組裝需求來自實際分析中逐點陣列、schema 與重讀的成本，不把成本估算當驗收門檻。
+
+原則：便利性的小功能，要等同一個問題多次出現才加；只出現一次的摩擦，先靠文件或既有操作解決。
+
+例：2026-11-19 的 FTF 任務中，reload 之後 tab 沿用舊 capture，只遇到一次，所以不加「來源已變更」標記。reload 後照既有規則以 Refresh 或 Reset 取新值。
+
+邊界：會給出錯誤結果、遺失資料或擋住流程的問題，第一次遇到就修。例如同一任務中的 heralded density 失敗與 RPC 參數錯誤訊息。
+
+2026-11-19，使用者：「我遇到很多這種小功能，單個看沒什麼問題，但累計起來維護很困難，我沒有多次遇到問題不太想加，讓程式儘可能簡單好維護。」討論見 [Point 與 library 資料流的摩擦](../discussions/2026-11-19-point-library-frictions.md)。
 
 ### 判讀依據放知識庫
 
