@@ -351,7 +351,7 @@ Storage 重用範圍由 advisor 同日依代理授權裁定，仍保留 16 個 d
 
 Timeline compiler 在 macro preprocess 時記錄 QICK 的每個 ADC trigger 增量。原生 trigger、module readout 和原生 macro 內部送出的 trigger 共用這條路徑。它把逐路徑累計值存進 `PathState`。
 
-Branch 的每個 case 從同一組入口計數開始。出口逐 ADC 比對所有 case，含省略的空 case。兩個 case 各讀一次時，本發只算一次；一個讀一次而另一個沒讀時，編譯報錯並列出各 case 的計數。同一 selector 後面再用另一個 Branch 補讀，不能抵銷前一次出口的差異。2026-11-20，使用者在互補寫法和每個 Branch 出口都對齊兩案中選後者。
+Branch 的每個 case 從同一組入口計數開始。出口逐 ADC 比對所有 case，含省略的空 case。兩個 case 各讀一次時，本發只算一次；一個讀一次而另一個沒讀時，編譯報錯並列出各 case 的計數。同一 selector 後面再用另一個 Branch 補讀，不能抵銷前一次出口的差異。2026-11-20，使用者在互補寫法和每個 Branch 出口都對齊兩案中選後者：「3-1」。討論見 [Timeline 編譯器推算每發 ADC 讀取數](../discussions/2026-11-20-timeline-read-counts.md)。
 
 固定 Repeat 的出口計數是入口加上迭代次數乘以單輪增量。`range_hint` 上下限相同的 register 次數也按固定次數計算；其餘 register 次數的 body 不得讀取 ADC。
 編譯器將每發計數寫入 QICK 的 `ro_chs[ch]["trigs"]`，不改 Branch 和 Repeat 的指令。`set_reads_per_shot` 只核對值，不再改配置。
