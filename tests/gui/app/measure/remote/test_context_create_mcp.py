@@ -214,10 +214,19 @@ def test_unsafe_point_label_returns_invalid_params_without_side_effects(
                 "'description' (string, optional), 'mode' (string, optional), "
                 "'clone_from' (string, optional)"
             )
+            assert failed["error"]["data"] == {
+                "params": [
+                    {"name": "label", "required": True, "type": "string"},
+                    {"name": "description", "required": False, "type": "string"},
+                    {"name": "mode", "required": False, "type": "string"},
+                    {"name": "clone_from", "required": False, "type": "string"},
+                ],
+                "unknown": [],
+            }
         else:
             assert failed["error"]["reason"] == "point_label_invalid"
             assert "single path component" in failed["error"]["message"]
-        assert failed["error"].get("data") is None
+            assert failed["error"].get("data") is None
         assert call(sock, "context.snapshot", {})["result"] == before
         assert call(sock, "point.list", {})["result"]["points"] == [
             {
