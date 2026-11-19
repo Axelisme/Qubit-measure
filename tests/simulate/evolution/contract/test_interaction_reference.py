@@ -1,7 +1,9 @@
 """Public density, convergence and input-domain contracts of the exact reference."""
 
 import json
+from contextlib import closing
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -13,14 +15,18 @@ from zcu_tools.simulate.evolution import (
     SecularDrive,
     SecularModel,
     TimelineBatch,
+    read_frozen_input,
+    write_frozen_input,
 )
 
+from . import interaction_reference as solver
 from .accuracy_cases import (
     AccuracyCase,
     accuracy_case,
     drive_track,
     history_case,
     multisegment_case,
+    multitone_phase_case,
     timeline,
 )
 from .guard_edge_cases import EDGE_FAMILIES, guard_edge_case
@@ -143,6 +149,36 @@ def test_continuation_keeps_absolute_carrier_and_local_envelope_time(
         initial_densities=initial,
     )
     _assert_lab_parity(case.source, batch, "continuation", request)
+
+
+def test_single_tolerance_chains_resume_from_frozen_density(tmp_path: Path) -> None:
+    case = multitone_phase_case("drag", 3, gain=20.0)
+    # Cut during the second pair, at a schedule boundary. Both sampled drives
+    # continue across it with their original origins and nonzero carrier phase.
+    cut = 5.5
+    batch = replace(case.batch, segment_boundaries=((cut,),))
+    first = replace(batch, end_ns=np.array([cut]))
+    paths = [tmp_path / f"{chain}.json" for chain in ("coarse", "fine")]
+    # Loose in this synthetic case so reusing the other chain's density is
+    # detectable, even though both solves land close to the converged reference.
+    tolerances = (SolverTolerances(1e-4, 1e-6), SolverTolerances(2e-12, 2e-14))
+    with closing(case.source):
+        for path, tolerance in zip(paths, tolerances, strict=True):
+            density = solver.interaction_density(case.source, first, tolerance)
+            continuation = replace(
+                batch, start_ns=np.array([cut]), initial_densities=density
+            )
+            write_frozen_input(path, case.source, continuation)
+        for path, tolerance in zip(paths, tolerances, strict=True):
+            expected = interaction_reference(
+                case.source, batch, coarse=tolerance, fine=tolerance
+            ).density
+            checkpoint = read_frozen_input(path)
+            with closing(checkpoint.source):
+                result = solver.interaction_density(
+                    checkpoint.source, checkpoint.batch, tolerance
+                )
+            np.testing.assert_allclose(result, expected, rtol=0, atol=1e-12)
 
 
 def test_nonzero_schedule_level_returns_density_in_dc_basis(

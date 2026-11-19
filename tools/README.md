@@ -718,7 +718,7 @@ route declarations. The compiled FTF scene retains its own joint-model compositi
 sequences, separately from program compilation. Its `numeric_gate_sequence`
 accepts a source, named ordered DriveTrack tuples, playback order and a constant
 flux level. It preserves absolute carrier phase and pulse-local envelope times.
-`make_gate_inputs` supplies fixed-model repeated pairs and depth500 declarations;
+`make_gate_inputs` supplies fixed-model repeated pairs and gate sequences;
 the scene producer CLI selects these through `make_real_inputs`. Source
 snapshots reuse `numeric_builder`; cache/index handling stays in the existing
 producer and storage owners.
@@ -1049,7 +1049,13 @@ uv run --directory "$PWD" --no-sync -- python -m tools.family_pareto_scenarios \
 
 `main(argv, *, inputs=...)` retains explicit producer declarations. Its default
 inventory includes the [DOP853 profile catalogue](#dedicated-dop853-segments).
-Adding those declarations does not populate the tracked indexes or shared cache.
+The staged `multitone_depth50_{gaussian,sampled,drag,flat_top}_max_pairs` prefixes
+and `multitone_depth500_{drag,flat_top}_max_pairs` inventories require explicit
+`--scenario` selection and a separate index and scene-cache directory. The four
+prefixes take the first 258 complete gates of the same seed-0 permutation of
+2,581 gates, not 50 circuit layers. The flat-top X90 uses the complete sampled
+pulse, including both ramps. Adding these declarations does not populate the
+tracked indexes or shared cache.
 `prepare_scenes(inputs, indexes, scene_cache, *, scenario=None, update_index=False)`
 owns preparation. `indexes` maps categories to explicit index paths.
 The producer fixes and logs OMP, OpenBLAS, MKL and Numba native thread settings
@@ -1109,6 +1115,13 @@ exactly one match across the explicitly supplied indexes before reading any
 payload. Zero or multiple matches fail before the solver. Other rows need no
 payload for this operation. Without a scenario, it retains batch preparation.
 `prepare_references(..., scenario=NAME)` offers the same selection for one index.
+For bounded interaction-reference runs, the tests-side `interaction_density`
+solves one tolerance at a time. Save the full DC-basis density and absolute end
+of each chunk separately for coarse and fine. On resume, use that density as
+`initial_densities` and that end as `start_ns`, without rebasing pulse start
+or carrier phase. Compare the two final matrices on the original timeline;
+only a difference of at most 2e-6 qualifies the fine density for its original
+reference key. An intermediate checkpoint is not a reference-cache entry.
 The reference producer reads names and physics; metadata never selects a solver.
 All selected numeric files must load before any solver runs. Missing scene files
 list the name, hashes and scene-producer command, then fail without rebuilding.

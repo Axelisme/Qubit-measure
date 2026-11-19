@@ -843,9 +843,10 @@ def overlapping_constant_tones_input() -> Input:
 def make_real_inputs(scenario: str | None = None) -> list[Input]:
     """Declare fixed scans, DOP853 profiles and FTF gates, or select one name.
 
-    scenario=None includes the DOP853 profile catalogue and FTF gates after the
-    fixed scans. A fixed or gate name selects only that input. Other names go to
-    profile_inputs for selected-only construction or ValueError.
+    scenario=None includes the DOP853 profile catalogue and indexed FTF gates
+    after the fixed scans. A fixed or gate name, including a staged gate scene,
+    selects only that input. Other names go to profile_inputs for selected-only
+    construction or ValueError.
     Unknown names do not construct models. Model construction failures propagate.
     Returned inputs own detached factories; callers close each built Scene.source.
     """
