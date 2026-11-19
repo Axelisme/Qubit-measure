@@ -1,4 +1,4 @@
-# Heralded conditional spectroscopy
+# Heralded Conditional spectroscopy
 
 **讀者：** operator、agent。本頁說明獨立實驗 `two_qubit/conditional_spectroscopy_heralded`。Probe、contrast、DC source、角色捕捉與校準步驟見 [普通版本](guide.md)。
 

@@ -1,4 +1,4 @@
-# Heralded paired RB
+# Heralded Two-qubit paired RB and CZ-interleaved RB
 
 **Readers:** operator, agent. Run heralded paired two-qubit RB and interpret gg/ee return survival alongside CZ-interleaved decay fits.
 

@@ -166,7 +166,7 @@ def _draw_return_survival(
     to caller-owned ax, return None and leave input arrays unchanged.
     """
     for arm, arm_label in enumerate(("Reference", "CZ interleaved")):
-        (line,) = ax.plot(depths, means[arm], "o", label=arm_label)
+        (line,) = ax.plot(depths, means[arm], ".", label=arm_label)
         ax.errorbar(
             depths, means[arm], yerr=errors[arm], fmt="none", ecolor=line.get_color()
         )
@@ -175,27 +175,55 @@ def _draw_return_survival(
     ax.legend()
 
 
-def _draw_herald_fractions(
-    ax: Axes,
+def _plot_herald_fractions(
+    plots: Plots,
     depths: NDArray[np.int64],
-    probabilities: NDArray[np.float64],
+    pooled: NDArray[np.float64],
 ) -> None:
-    """Draw the nine aggregated herald fractions and their legend on ax.
-
-    depths is the integer Clifford-depth axis; probabilities is (N,3,3), with
-    both herald axes ordered g/e/other. Add artists and axis labels without
-    filtering or changing the arrays. Return None; ax remains caller-owned.
-    """
+    """Draw nine depth-resolved herald probabilities per arm from pooled counts."""
+    aggregate = herald_probabilities(pooled)
     classes = ("g", "e", "other")
-    for f1 in range(3):
-        for f2 in range(3):
+    for arm, label in enumerate(("Reference", "CZ interleaved")):
+        fig, ax = plots.subplots(num=f"herald_{arm}", figsize=(10, 6))
+        for f1 in range(3):
+            for f2 in range(3):
+                ax.plot(
+                    depths,
+                    aggregate[:, arm, f1, f2],
+                    ".-",
+                    label=f"{classes[f1]},{classes[f2]}",
+                )
+        ax.set(xlabel="Random Clifford depth", ylabel="Herald probability")
+        ax.legend()
+        ax.set_title(f"{label}: (g,g) is pass fraction, not purity")
+        fig.tight_layout()
+
+
+def _plot_pooled_survival(
+    plots: Plots,
+    depths: NDArray[np.int64],
+    pooled: NDArray[np.float64],
+) -> None:
+    """Draw per-arm return probabilities from seed/round-pooled herald counts."""
+    _, ax = plots.subplots(num="pooled_survival", layout="constrained")
+    for cell, (herald, counts) in enumerate(
+        (
+            ("g,g", terminal_counts(pooled, ("g", "g"))),
+            ("e,e", terminal_counts(pooled, ("e", "e"))),
+        )
+    ):
+        probabilities = joint_probabilities(counts)
+        for arm, label in enumerate(("Reference", "CZ interleaved")):
             ax.plot(
                 depths,
-                probabilities[:, f1, f2],
-                "o-",
-                label=f"{classes[f1]},{classes[f2]}",
+                probabilities[:, arm, cell, cell],
+                ".",
+                label=f"{label} · {herald}",
             )
-    ax.set(xlabel="Random Clifford depth", ylabel="Herald probability")
+    ax.set(
+        xlabel="Random Clifford depth",
+        ylabel="Return probability | matching herald state",
+    )
     ax.legend()
 
 
@@ -257,10 +285,12 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         """
         # 1. Compare gg/ee return-to-herald survival for reference and CZ-interleaved arms across depth.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Random Clifford depth", ylabel="Return to herald state")
+        ax.set(
+            xlabel="Random Clifford depth",
+            ylabel="Return probability | matching herald state",
+        )
         viewer = live_line(ax, num_lines=4)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -423,7 +453,9 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                     for arm in range(2)
                 )
         # 3. Compare gg/ee survival fits and herald fractions separately from acquisition completeness.
-        aggregate = herald_probabilities(np.nansum(data.sums, axis=(1, 3)))
+        pooled = np.nansum(data.sums, axis=(1, 3))
+        _plot_pooled_survival(plots, data.depths, pooled)
+
         for herald, label in enumerate(("gg", "ee")):
             fig, ax = plots.subplots(num=f"fit_{label}", figsize=(9, 6))
             _draw_return_survival(
@@ -440,10 +472,6 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 else "d=4 joint decay; equal-seed means, statistical seed CI only"
             )
             fig.tight_layout()
-        for arm, label in enumerate(("Reference", "CZ interleaved")):
-            fig, ax = plots.subplots(num=f"herald_{arm}", figsize=(10, 6))
-            _draw_herald_fractions(ax, data.depths, aggregate[:, arm])
-            ax.set_title(f"{label}: (g,g) is pass fraction, not purity")
-            fig.tight_layout()
+        _plot_herald_fractions(plots, data.depths, pooled)
         # 4. Keep the shared-decay d=4 estimate and seed-bootstrap interval, or its numerical failure reason.
         return RBHeraldedAnalysis(estimate, quality, reason)

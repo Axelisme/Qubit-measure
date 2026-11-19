@@ -1,4 +1,4 @@
-# Conditional phase heralded
+# Heralded Conditional phase
 
 **Readers:** operator, agent. Run herald-conditioned conditional phase and inspect acceptance.
 

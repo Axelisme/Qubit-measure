@@ -1,4 +1,4 @@
-# Constructive relative phase with heralding
+# Heralded Constructive relative phase
 
 **Readers:** operator, agent. Run `two_qubit/constructive_phase_heralded` and interpret its count-derived return and phase proposals.
 
@@ -50,7 +50,7 @@ Reset can overwrite unsaved inputs.
 Analyze returns only `relative_phase_deg`, `reason` and `interference_quality`.
 Per-phase rates, populations and interference curves stay inside analysis for plotting.
 
-The live traces and interference map show P00 after double Xπ contrast.
+The live and Analyze interference maps show P00 after double Xπ contrast.
 Analysis first selects counts whose herald is classified as (g,g).
 Terminal P00 is then its (g,g) count divided by the selected terminal total.
 The separate herald figure shows all nine herald fractions at every scan point.

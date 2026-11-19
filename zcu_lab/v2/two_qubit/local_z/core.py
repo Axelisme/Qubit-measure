@@ -250,10 +250,9 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         """
         # 1. Track each target's X/Y sigma versus CZ gate count for local phase accumulation.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="CZ gate count", ylabel="Target sigma")
+        ax.set(xlabel="CZ gate count", ylabel="Target ⟨σ⟩")
         viewer = live_line(ax, num_lines=4)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -404,6 +403,18 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         summaries = tuple(map(summarize_fit, fits))
 
         # 3. Compare contrast, wrapped phase and weighted unwrapped fits to diagnose local-Z corrections.
+        _, axes = plots.subplots(num="quadratures", figsize=(10, 5))
+        for t in range(2):
+            for q, projection in enumerate(("X", "Y")):
+                axes.plot(
+                    data.gate_counts,
+                    quadratures[t, q],
+                    ".",
+                    label=f"F{t + 1} {projection}",
+                )
+        axes.set(xlabel="CZ gate count", ylabel="Target ⟨σ⟩")
+        axes.legend()
+
         fig, _ = plots.subplots(
             num="phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
         )
@@ -454,17 +465,6 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             ax.set_xlim(data.gate_counts[0], data.gate_counts[-1])
             if ax.get_legend_handles_labels()[0]:
                 ax.legend()
-        fig, axes = plots.subplots(num="quadratures", figsize=(10, 5))
-        for t in range(2):
-            for q, projection in enumerate(("X", "Y")):
-                axes.plot(
-                    data.gate_counts,
-                    quadratures[t, q],
-                    ".-",
-                    label=f"F{t + 1} {projection}",
-                )
-        axes.set(xlabel="CZ gate count", ylabel="Target sigma")
-        axes.legend()
 
         # 4. Keep each target's negative-slope correction and uncertainty, or its unresolved-fit reason.
         return LocalZAnalysis(summaries)

@@ -213,10 +213,9 @@ class JointReadoutHeraldedExp(
             xlabel="Nominal preparation",
             ylabel="Terminal P(g,g) | herald (g,g)",
             xticks=range(PREPARED_COUNT),
-            xticklabels=["gg", "ge", "eg", "ee"],
+            xticklabels=("gg", "ge", "eg", "ee"),
         )
-        (line,) = ax.plot([], [], marker="o", linestyle="none")
-        ax.grid(False)
+        (line,) = ax.plot([], [], marker=".", linestyle="none")
         fig.show()
 
         @context.plots.on_plot_thread
@@ -319,6 +318,16 @@ class JointReadoutHeraldedExp(
         selected_shots = counts.sum(axis=(-2, -1))
         herald_matrix = herald_probabilities(result.sums).reshape(PREPARED_COUNT, 3, 3)
         acquired_shots = result.sums.sum(axis=(-4, -3, -2, -1)).reshape(PREPARED_COUNT)
+
+        # Show the same nominal-branch probability as the live plot before the matrices.
+        _, ax = plots.subplots(num="terminal_gg", layout="constrained")
+        ax.plot(range(PREPARED_COUNT), matrices[0, :, 0], ".")
+        ax.set(
+            xlabel="Nominal preparation",
+            ylabel="Terminal P(g,g) | herald (g,g)",
+            xticks=range(PREPARED_COUNT),
+            xticklabels=("gg", "ge", "eg", "ee"),
+        )
 
         # The GUI saves a fixed 4:3 canvas. Stack the three four-row matrices
         # and reserve a separate column so colorbars never steal matrix space.

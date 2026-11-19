@@ -131,10 +131,9 @@ class CZAmplitudeHeraldedExp(
         scales = sweep2array(config.scale)
         # 2. Track gg-heralded joint gg return through the common gain sweep.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Common gain scale", ylabel="P(g,g) | herald (g,g)")
+        ax.set(xlabel="Common gain scale", ylabel="Terminal P(g,g) | herald (g,g)")
         viewer = live_line(ax)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -224,6 +223,11 @@ class CZAmplitudeHeraldedExp(
             acquired_shots=result.sums.sum(axis=(-4, -3, -2, -1)),
             expected_shots=cfg.reps * cfg.rounds,
         )
+        # Show the same return probability as in the live plot before all-class diagnostics.
+        _, ax = plots.subplots(num="terminal_gg", layout="constrained")
+        ax.plot(result.scales, terminal.data.probabilities[..., 0, 0], ".")
+        ax.set(xlabel="Common gain scale", ylabel="Terminal P(g,g) | herald (g,g)")
+
         # 2. Compare the gg return fit with ee disturbance and herald acceptance, not gate fidelity.
         _, ax = plots.subplots(
             num="joint_return", figsize=(10, 5), layout="constrained"
@@ -241,9 +245,7 @@ class CZAmplitudeHeraldedExp(
             title="B11 → CZ → Xπ⊗Xπ · classified return, not gate fidelity",
         )
         if np.any(np.isfinite(terminal.fit.curve)):
-            ax.plot(
-                result.scales, terminal.fit.curve, "k--", label="Zero-phase P00 fit"
-            )
+            ax.plot(result.scales, terminal.fit.curve, "k-", label="Zero-phase P00 fit")
         diagnostic = (
             terminal.fit.reason
             or f"First positive return scale = {terminal.fit.scale:.6g} ± {terminal.fit.error:.2g}"

@@ -1,4 +1,4 @@
-# Heralded conditional Ramsey 與 idle ZZ
+# Heralded Conditional Ramsey 與 idle ZZ
 
 **讀者：** operator、agent。設定 heralded idle ZZ，判讀條件式 Ramsey 與 herald 通過比例。
 
