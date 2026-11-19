@@ -113,6 +113,10 @@ def test_string_enum_rejects_non_member_after_type_validation():
     with pytest.raises(RemoteError, match="mode") as error:
         validate_params(specs, {"mode": "other"})
     assert error.value.code is ErrorCode.INVALID_PARAMS
+    assert error.value.data is not None
+    assert error.value.data["params"] == [
+        {"name": "mode", "type": "string", "required": True}
+    ]
 
 
 @pytest.mark.parametrize(
@@ -201,8 +205,38 @@ def test_json_accepts_serializable_rejects_not():
 
 
 def test_extra_undeclared_params_ignored():
-    out = validate_params(_spec(JsonType.STRING), {"x": "ok", "extra": 1})
-    assert out == {"x": "ok"}
+    specs = (ParamSpec("name", JsonType.STRING),)
+    assert validate_params(specs, {"name": "sample", "command": "typo"}) == {
+        "name": "sample"
+    }
+
+
+def test_missing_name_reports_unknown_params_with_close_suggestions():
+    specs = (
+        ParamSpec("tab_id", JsonType.STRING),
+        ParamSpec("path", JsonType.ARRAY),
+        ParamSpec("name", JsonType.STRING),
+    )
+    params = {
+        "tab_id": "tab-1",
+        "path": ["field"],
+        "command": "sample",
+        "tab_di": "tab-2",
+        "zz\nqq": True,
+    }
+    with pytest.raises(RemoteError) as error:
+        validate_params(specs, params)
+    assert error.value.code is ErrorCode.INVALID_PARAMS
+    assert error.value.data is not None
+    assert error.value.data["unknown"] == [
+        {"name": "command", "suggestion": "name"},
+        {"name": "tab_di", "suggestion": "tab_id"},
+        {"name": "zz\nqq"},
+    ]
+    assert "'command' -> 'name'" in error.value.message
+    assert "'tab_di' -> 'tab_id'" in error.value.message
+    assert r"'zz\nqq'" in error.value.message
+    assert len(error.value.message.splitlines()) == 1
 
 
 def test_build_input_schema_marks_required_and_types():
@@ -255,18 +289,32 @@ def test_non_json_schema_property_keeps_its_type():
     ],
     ids=["missing", "wrong-type"],
 )
-def test_validation_keeps_first_spec_failure_before_later_enum(
+def test_validation_reports_first_failure_with_the_complete_param_table(
     params: dict[str, object], message: str
 ):
     specs = (
         ParamSpec("first", JsonType.STRING),
         ParamSpec("mode", JsonType.STRING, enum=("fast", "careful")),
+        ParamSpec("preview", JsonType.BOOLEAN, required=False, nullable=True),
+        ParamSpec("payload", JsonType.JSON, required=False, mcp_hidden=True),
+        ParamSpec("vertices", JsonType.NUMBER_PAIRS, required=False),
     )
     with pytest.raises(RemoteError) as error:
         validate_params(specs, params)
     assert error.value.code is ErrorCode.INVALID_PARAMS
-    assert error.value.message == message
     assert error.value.__cause__ is None
+    assert error.value.data is not None
+    assert error.value.data["params"] == [
+        {"name": "first", "type": "string", "required": True},
+        {"name": "mode", "type": "string", "required": True},
+        {"name": "preview", "type": ["boolean", "null"], "required": False},
+        {"name": "payload", "type": "json", "required": False},
+        {"name": "vertices", "type": "array", "required": False},
+    ]
+    assert error.value.data["unknown"] == []
+    assert error.value.message.startswith(message)
+    for detail in ("preview", "boolean", "null", "optional", "required", "vertices"):
+        assert detail in error.value.message
 
 
 def test_optional_omission_can_be_distinguished_from_explicit_null() -> None:
