@@ -163,3 +163,4 @@
 - 2026-11-03 [讀出鏈的 trace 不變量：低 SNR 下比較 A 變化的通用指標](2026-11-03-readout-chain-trace-invariant.md)：連續讀出鏈存 lag 0…L 共變異，每點以 tr(C₀⁻¹C_ℓ) 的非迭代等比擬合輸出 Â 與 λ̂，不需校準、態數、參考或門檻；多態分析只留給 MIST 類特殊需求。指標形式已由 [讀出鏈的資訊上限](2026-11-04-readout-chain-information-limits.md) 取代。
 - 2026-11-04 [讀出鏈的資訊上限：λ 指標、記錄層與分析層的損失、自校準](2026-11-04-readout-chain-information-limits.md)：顯示只畫 λ；讀出已知時讀出鏈在等時間下全面勝過 relax 實驗，存 lag 0…4 只損失 ≤ 18%，損失集中在分析層；改走全域兩態、兩通道的自校準估計。
 - 2026-11-15 [Two-qubit RB 的兩組都同時打單 qubit gates](2026-11-15-two-qubit-rb-simultaneous-gates.md)：並行排程。普通與heralded兩版的reference／interleaved都用每qubit時間線，在CZ共同同步，保留原frame與reset政策。
+- 2026-11-20 [T1 二階矩實驗以 t1_cov 恢復](2026-11-20-t1-cov-restore.md)：恢復已刪除的概念。2026-11-09 誤刪的是二階矩方法，不是 post-selection；先恢復 T1，改稱 cov，讀出叫 pre_readout／post_readout，加可選脈衝 reset，舊資料不載入。
