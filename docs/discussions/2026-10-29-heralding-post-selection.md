@@ -91,3 +91,7 @@ FTF 模擬的雙 qubit 序列（conditional phase 等）受熱布居影響：Pe 
 - QICK 0.2.436：`qick_asm.py` 的 `finish_round`、`_average_buf`；`asm_v2.py` 的 `read_input`、`cond_jump`、`read_and_jump`、`Trigger.preprocess`。
 - repo：`lib/zcu_tools/program/acquisition.py`（`SingleShotMixin`）、`lib/zcu_tools/program/v2/simulation/README.md`、`lib/zcu_tools/experiment/ftf/README.md`、`lib/zcu_tools/simulate/evolution/secular.py`、`bitfiles/qick_216_v2.hwh`、`docs/reference/tprocv2-asm-notes.md`。
 - 調查與成本探針為未入庫的工作檔；本文已寫入結論與必要數字。
+
+## 後記
+
+2026-11-20：結論第 3 點（上層新增 `heralding/*` 實驗組）已被 [Herald 改為 reset 模塊與逐 shot 遮罩](2026-11-20-herald-reset-shot-masks.md) 推翻：herald 改成 reset 欄位可選的模塊。「讓底層支援 post-selection」與不做 active reset 兩點不變。
