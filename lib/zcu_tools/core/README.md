@@ -1,6 +1,6 @@
 # zcu_tools.core — shared stateless contracts
 
-**Last updated:** 2026-11-17，模擬邊界型別歸 simulate
+**Last updated:** 2026-11-20，波形樣本雜湊
 
 **讀者：** framework-dev。跨模組共用的無狀態資料與格式契約。
 
@@ -12,6 +12,6 @@
 - `chain_cycle_groups` 定義 (D R R)^8 cycle 的 same-read 三組與 pair 六組。Program 的 `chain_cycle_sums` 與 analysis 的 cycle 特徵表共用這份規則，不依賴 program 或 analysis。
 - `numeric_scalar.normalize_numpy_scalar` 將單一 numpy floating／integer scalar 投影為 Python float／int，供 AnalysisDocument 與 AcceptedWrite 共用。它不遞迴；finite 與 strict JSON 驗證留在各邊界。
 模擬 request、時基與 round 資料型別由 `simulate.boundary` 擁有，見 [simulate README](../simulate/README.md#acquisition-boundary)。
-- `waveform_format` 擁有 NPZ samples、opaque JSON recipe、codec 與單一格式錯誤。它不讀寫檔案，也不解讀公式。
-- Resources 負責 formula 語意、資產命名及檔案生命週期。Program 與 sim 播放 path 指定的 samples。
+- `waveform_format` 擁有 NPZ samples、樣本雜湊、opaque JSON recipe、codec 與單一格式錯誤。它不讀寫檔案，也不解讀公式。
+- Resources 負責 formula 語意、資產命名及檔案生命週期。Program 由 path 或記憶體樣本產生 envelope，模擬器使用編譯後的 envelope。
 - 配置模型由 `cfg_model` 擁有，格式版本由頂層 `format_version.py` 擁有。

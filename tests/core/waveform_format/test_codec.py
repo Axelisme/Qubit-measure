@@ -1,5 +1,6 @@
 """Public sample validation and NPZ bytes contract; no filesystem or formula owner."""
 
+from dataclasses import replace
 from io import BytesIO
 
 import numpy as np
@@ -11,6 +12,7 @@ from zcu_tools.core.waveform_format import (
     WaveformSamples,
     decode_npz,
     encode_npz,
+    hash_samples,
     validate_samples,
 )
 
@@ -55,6 +57,23 @@ def test_codec_round_trip_preserves_samples_and_opaque_recipe_text(recipe: str) 
     np.testing.assert_array_equal(result.samples.idata, source.samples.idata)
     np.testing.assert_array_equal(result.samples.qdata, source.samples.qdata)
     assert result.recipe_json == recipe
+
+
+def test_sample_hash_tracks_each_array_and_treats_zero_q_as_absent() -> None:
+    samples = WaveformSamples(
+        time=np.array([0.0, 0.2, 1.0]),
+        idata=np.array([0.0, 0.3, 0.5]),
+        qdata=np.array([0.0, 0.4, 0.0]),
+    )
+    equal = decode_npz(encode_npz(WaveformFile(samples))).samples
+    expected = hash_samples(samples)
+    assert hash_samples(equal) == expected
+    assert hash_samples(replace(samples, time=np.array([0.0, 0.3, 1.0]))) != expected
+    assert hash_samples(replace(samples, idata=np.array([0.0, 0.2, 0.5]))) != expected
+    assert hash_samples(replace(samples, qdata=np.array([0.0, 0.3, 0.0]))) != expected
+    absent = hash_samples(replace(samples, qdata=None))
+    assert absent != expected
+    assert hash_samples(replace(samples, qdata=np.zeros(3))) == absent
 
 
 def test_codec_encodes_required_zero_q_and_decodes_it_as_none() -> None:

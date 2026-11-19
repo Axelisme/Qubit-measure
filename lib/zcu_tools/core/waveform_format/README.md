@@ -1,13 +1,13 @@
 # waveform_format — samples and NPZ codec
 
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-20
 
 **讀者：** framework-dev。波形 samples、NPZ codec 與格式錯誤契約。
 
 [ADR-0072](../../../../docs/adr/0072-module-boundaries.md) 規定 core 的無狀態 codec 邊界。
 [ADR-0063](../../../../docs/adr/0063-persistence-ownership.md) 區分 samples／NPZ codec、resources 的 formula 語意與實體 I/O，以及 program／sim 的播放責任。
 
-此模組只接收值或 bytes。`WaveformSamples`、`WaveformFile`、`validate_samples`、`decode_npz` 與 `encode_npz` 是公開接縫。
+此模組只接收值或 bytes。`WaveformSamples`、`WaveformFile`、`validate_samples`、`hash_samples`、`decode_npz` 與 `encode_npz` 是公開接縫。
 
 - Reference time 使用 µs，從零嚴格遞增。I/Q 是有限的一維 float64，數量 2–1,000,001，magnitude 不超過 1。無 Q 或全零 Q 用 None 表示，NPZ 仍寫 qdata。
 - NPZ 必須含 time/idata/qdata，可含 scalar recipe_json，不接受其他 keys。Codec 使用 allow_pickle=False。

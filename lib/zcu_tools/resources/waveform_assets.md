@@ -1,6 +1,6 @@
 # `waveform_assets` 參考
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-20
 
 **讀者：** framework-dev。Arb 波形資產的格式、方法與 recipe 約束。
 
@@ -13,6 +13,9 @@
 - [`_waveform_npz.py`](_waveform_npz.py)：NPZ archive 讀寫與內嵌 recipe JSON 解碼，JSON 編碼沿用 Recipe 的方法。
 
 Formula 與 NPZ 重用 data 的驗證規則。Data 只以型別註記引用 Recipe，不在 runtime 載入 formula，避免循環依賴。
+
+候選波形用 [`InMemoryArbWaveformCfg`](../program/v2/modules/README.md#in-memory-arbitrary-waveforms) 播放。
+這些樣本只留在記憶體，不寫進資產庫。要保存選中的樣本，以 writeback 發布為 `arb` 資產，再用資產 key 更新 library 引用。
 
 ## `ArbWaveformDatabase`
 

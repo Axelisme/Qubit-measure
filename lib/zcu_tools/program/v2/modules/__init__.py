@@ -61,6 +61,7 @@ from .waveform import (
     FlatTopWaveformCfg,
     GaussWaveform,
     GaussWaveformCfg,
+    InMemoryArbWaveformCfg,
     WaveformCfg,
     WaveformCfgFactory,
 )

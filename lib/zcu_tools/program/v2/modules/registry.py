@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING
 from qick.asm_v2 import QickParam
 
 from ..table_param import TableParam
-from .waveform import ArbWaveformCfg, ConstWaveformCfg, FlatTopWaveformCfg
+from .waveform import (
+    ArbWaveformCfg,
+    ConstWaveformCfg,
+    FlatTopWaveformCfg,
+    InMemoryArbWaveformCfg,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -79,7 +84,13 @@ class PulseRegistry:
                 sorted_dict[key] = value
             return sorted_dict
 
-        cfg_dict = cfg.to_dict()
+        if isinstance(cfg.waveform, InMemoryArbWaveformCfg):
+            cfg_dict = cfg.model_dump(
+                mode="python", exclude={"waveform"}, exclude_none=True
+            )
+            cfg_dict["waveform"] = _memory_envelope_definition(cfg.waveform)
+        else:
+            cfg_dict = cfg.to_dict()
         filter_cfg = {
             k: cfg_dict.get(k) for k in PulseRegistry.HASH_KEYS if k in cfg_dict
         }
@@ -107,12 +118,13 @@ class PulseRegistry:
         # Flat-top ramps round to even clocks; the plateau adds no samples.
         flat_top = isinstance(waveform_cfg, FlatTopWaveformCfg)
         shape = waveform_cfg.raise_waveform if flat_top else waveform_cfg
-        # An arbitrary envelope reads samples from path, not the asset label.
-        definition = (
-            {"style": shape.style, "path": shape.path}
-            if isinstance(shape, ArbWaveformCfg)
-            else shape.to_dict()
-        )
+        if isinstance(shape, InMemoryArbWaveformCfg):
+            definition = _memory_envelope_definition(shape)
+        elif isinstance(shape, ArbWaveformCfg):
+            # File-backed playback reads the path, not the asset label.
+            definition = {"style": shape.style, "path": shape.path}
+        else:
+            definition = shape.to_dict()
         key = (cfg.ch, flat_top, json.dumps(definition, sort_keys=True))
         shared_name = self._envelopes.get(key)
         waveform = waveform_cfg.build(name if shared_name is None else shared_name)
@@ -154,3 +166,7 @@ class PulseRegistry:
         )
 
         return True
+
+
+def _memory_envelope_definition(cfg: InMemoryArbWaveformCfg) -> dict[str, str]:
+    return {"style": cfg.style, "sample_hash": cfg.sample_hash}

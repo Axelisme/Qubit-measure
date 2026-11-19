@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-19，generator envelope 共用
+**Last updated:** 2026-11-20，記憶體 arb 波形
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -245,7 +245,7 @@ accident. Mixer declaration receives the channel only when mixing is configured.
 Envelope samples have a separate identity on each program: the generator channel,
 waveform style and sampling parameters. A flat-top uses its ramp definition with
 rounding to even generator clocks; the plateau length stays in the pulse template.
-Arbitrary samples are identified by their playback path, not the asset label.
+File-backed arb envelopes are identified by their playback path, not the asset label.
 Pulses can share an envelope even when their phase, gain, frequency, mixer,
 ADC matching or explicit pulse IDs differ. Const waveforms store no envelope.
 
@@ -282,6 +282,15 @@ Centroid3 的第三類是 f，不是 circle 的 other。需要 Other 的 consume
   closing loads the next point from rotated dmem tables after every shot,
   including shots that do not play the readout. The final update restores the
   first point before the next outer repetition.
+
+## In-memory arbitrary waveforms
+
+To play candidate samples without writing an asset, pass
+`InMemoryArbWaveformCfg(samples=...)` from `zcu_tools.program.v2` as the pulse's
+waveform. It copies the `WaveformSamples` and plays their full duration without
+reading a file. Within one program, pulses on the same generator share the
+envelope when their sample hashes match. The `arb_memory` style cannot be
+serialized or included in a persistent Spec or a flat-top ramp.
 
 ## Pulse length tables and selected playback
 

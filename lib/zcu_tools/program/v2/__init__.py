@@ -13,6 +13,7 @@ from .modules import (
     ComputedPulse,
     Delay,
     DelayAuto,
+    InMemoryArbWaveformCfg,
     LoadValue,
     Module,
     ModuleCfg,

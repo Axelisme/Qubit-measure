@@ -7,6 +7,7 @@ formula recipes; program and simulation play the saved samples.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from io import BytesIO
@@ -172,6 +173,25 @@ def validate_samples(*, time: object, idata: object, qdata: object) -> WaveformS
     if qdata_arr is not None and not np.any(qdata_arr):
         qdata_arr = None
     return WaveformSamples(time=time_arr, idata=idata_arr, qdata=qdata_arr)
+
+
+def hash_samples(samples: WaveformSamples) -> str:
+    """Return SHA-256 hex for valid samples, independent of array layout.
+
+    Hash time, I, then Q as little-endian float64 bytes in sample order.
+    Missing and all-zero Q both contribute one zero byte instead of an array.
+    This does not validate the samples or include an asset path or recipe.
+    """
+    digest = hashlib.sha256()
+    digest.update(samples.time.astype("<f8", copy=False).tobytes())
+    digest.update(samples.idata.astype("<f8", copy=False).tobytes())
+    qdata = samples.qdata
+    digest.update(
+        b"\x00"
+        if qdata is None or not np.any(qdata)
+        else qdata.astype("<f8", copy=False).tobytes()
+    )
+    return digest.hexdigest()
 
 
 def decode_npz(payload: bytes) -> WaveformFile:
