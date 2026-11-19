@@ -78,6 +78,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：預設選路可以讓快場景多付一筆有上限的固定成本，換慢場景大幅加速；沒被採用時超過 main 的 1.2 倍才回報，見 [ADR-0078](0078-evolution-module-boundary.md#用快場景的小幅變慢換慢場景的大幅加速)。
 原則：kernel 的量測場景只有一段，重複就是同一段接 N 次，見 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)。
 原則：場景照約化參數軸宣告覆蓋，不為個別實驗加專屬場景，見 [ADR-0078](0078-evolution-module-boundary.md#場景覆蓋靠約化的參數空間)。
+原則：量測 agent 以量測取得初值與裁定；模擬器真值只在使用者為 debug 明確授權時讀，數字記為 debug 對照，見 [模擬環境草稿](draft/simulation-environments.md#固定訊號契約與重現)。
 
 - [0085 — 實驗數值工具的 fitting owner](0085-numerical-fitting-owners.md)：六組純數值工具由 fitting 持有，lab 保留選資料、herald、維度換算、live 與畫圖。
 
