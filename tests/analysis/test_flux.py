@@ -133,6 +133,200 @@ def test_device_units_match_exactly_without_conversion(
         assert repr(expected if expected is not None else "native") in message
 
 
+def test_joint_solve_reaches_unwrapped_targets_with_crosstalk() -> None:
+    frames = {
+        "F1": flux.FluxFrame(
+            0.25,
+            {
+                "bias1": flux.DevicePeriod(2, "A"),
+                "bias2": flux.DevicePeriod(8, "V"),
+                "coil": flux.DevicePeriod(-4, "A"),
+            },
+        ),
+        "F2": flux.FluxFrame(
+            -0.5,
+            {"bias2": flux.DevicePeriod(-4, "V"), "coil": flux.DevicePeriod(8, "A")},
+        ),
+        "coupler": flux.FluxFrame(
+            0.125,
+            {
+                "bias1": flux.DevicePeriod(16, "A"),
+                "bias2": flux.DevicePeriod(8, "V"),
+                "coil": flux.DevicePeriod(2, "A"),
+            },
+        ),
+    }
+    targets = {"coupler": 1.625, "F1": 1.25, "F2": 0.375}
+
+    values = flux.solve_device_values(
+        frames, targets, device_names=("coil", "bias1", "bias2"), fixed_values={}
+    )
+
+    assert values.keys() == {"bias1", "bias2", "coil"}
+    for name, frame in frames.items():
+        assert flux.flux_from_device_values(frame, values) == pytest.approx(
+            targets[name], abs=1e-12, rel=0
+        )
+
+
+@pytest.fixture
+def coupled_bias_frame() -> flux.FluxFrame:
+    return flux.FluxFrame(
+        0.5, {"bias": flux.DevicePeriod(2, "A"), "coil": flux.DevicePeriod(-4, "A")}
+    )
+
+
+def test_joint_solve_accounts_for_fixed_device(
+    coupled_bias_frame: flux.FluxFrame,
+) -> None:
+    target = -1.25
+    fixed = {"coil": 2.0}
+    values = flux.solve_device_values(
+        {"F1": coupled_bias_frame},
+        {"F1": target},
+        device_names=("bias",),
+        fixed_values=fixed,
+    )
+
+    assert values.keys() == {"bias"}
+    assert flux.flux_from_device_values(
+        coupled_bias_frame, {**fixed, **values}
+    ) == pytest.approx(target, abs=1e-12, rel=0)
+
+
+@pytest.mark.parametrize("device_names", [(), ("bias", "coil")])
+def test_joint_solve_requires_as_many_devices_as_targets(
+    coupled_bias_frame: flux.FluxFrame, device_names: tuple[str, ...]
+) -> None:
+    with pytest.raises(ValueError, match="one solve device per target component"):
+        flux.solve_device_values(
+            {"F1": coupled_bias_frame},
+            {"F1": 0.5},
+            device_names=device_names,
+            fixed_values={},
+        )
+
+
+@pytest.mark.parametrize("second_period", [1.0, 1.0 + 1e-13])
+def test_joint_solve_rejects_singular_and_nearly_singular_frames(
+    second_period: float,
+) -> None:
+    frames = {
+        "F1": flux.FluxFrame(
+            0, {"bias": flux.DevicePeriod(1), "coil": flux.DevicePeriod(1)}
+        ),
+        "F2": flux.FluxFrame(
+            0, {"bias": flux.DevicePeriod(1), "coil": flux.DevicePeriod(second_period)}
+        ),
+    }
+    with pytest.raises(ValueError, match="singular or nearly singular"):
+        flux.solve_device_values(
+            frames,
+            {"F1": 0.5, "F2": 0.5},
+            device_names=("bias", "coil"),
+            fixed_values={},
+        )
+
+
+def test_joint_solve_names_a_device_missing_its_fixed_value(
+    coupled_bias_frame: flux.FluxFrame,
+) -> None:
+    with pytest.raises(ValueError, match="F1.*coil.*fixed value"):
+        flux.solve_device_values(
+            {"F1": coupled_bias_frame},
+            {"F1": 0.5},
+            device_names=("bias",),
+            fixed_values={},
+        )
+
+
+@pytest.mark.parametrize(
+    ("device_names", "fixed_values"),
+    [(("bias", "coil"), {"trim": 0.0}), (("bias", "trim"), {"coil": 0.0})],
+)
+def test_joint_solve_requires_matching_units_for_each_shared_device(
+    coupled_bias_frame: flux.FluxFrame,
+    device_names: tuple[str, ...],
+    fixed_values: dict[str, float],
+) -> None:
+    frames = {
+        "F1": coupled_bias_frame,
+        "F2": flux.FluxFrame(
+            0, {"coil": flux.DevicePeriod(8, "mA"), "trim": flux.DevicePeriod(-2, "V")}
+        ),
+    }
+    with pytest.raises(ValueError, match="coil.*'mA'.*'A'"):
+        flux.solve_device_values(
+            frames,
+            {"F1": 0.5, "F2": 0.5},
+            device_names=device_names,
+            fixed_values=fixed_values,
+        )
+
+
+@pytest.mark.parametrize("bad", [True, float("nan"), float("inf"), 1j, "0.5"])
+@pytest.mark.parametrize("invalid_field", ["target", "fixed"])
+def test_joint_solve_rejects_nonfinite_or_nonreal_values(
+    coupled_bias_frame: flux.FluxFrame, invalid_field: str, bad: float
+) -> None:
+    target, fixed = (bad, 0.0) if invalid_field == "target" else (0.5, bad)
+    field = "target flux for 'F1'" if invalid_field == "target" else "device 'coil'"
+    with pytest.raises(ValueError, match=field + ".*finite"):
+        flux.solve_device_values(
+            {"F1": coupled_bias_frame},
+            {"F1": target},
+            device_names=("bias",),
+            fixed_values={"coil": fixed},
+        )
+
+
+def test_joint_solve_requires_matching_component_names(
+    coupled_bias_frame: flux.FluxFrame,
+) -> None:
+    with pytest.raises(ValueError, match="missing targets:.*F1.*missing frames:.*F2"):
+        flux.solve_device_values(
+            {"F1": coupled_bias_frame},
+            {"F2": 0.5},
+            device_names=("bias",),
+            fixed_values={"coil": 0.0},
+        )
+
+
+def test_joint_solve_rejects_duplicate_device_names(
+    coupled_bias_frame: flux.FluxFrame,
+) -> None:
+    frames = {"F1": coupled_bias_frame, "F2": coupled_bias_frame}
+    with pytest.raises(ValueError, match="duplicate.*bias"):
+        flux.solve_device_values(
+            frames,
+            {"F1": 0.5, "F2": 0.5},
+            device_names=("bias", "bias"),
+            fixed_values={"coil": 0.0},
+        )
+
+
+def test_joint_solve_with_no_targets_returns_no_device_values() -> None:
+    assert flux.solve_device_values({}, {}, device_names=(), fixed_values={}) == {}
+
+
+@pytest.mark.parametrize(
+    ("offset", "period", "target", "field"),
+    [
+        (0.0, 1e-320, 0.5, "coefficients"),
+        (-1e308, 1.0, 1e308, "remaining flux"),
+        (0.0, 1e308, 2.0, "device 'bias' solution"),
+    ],
+)
+def test_joint_solve_rejects_nonfinite_computed_values(
+    offset: float, period: float, target: float, field: str
+) -> None:
+    frames = {"F1": flux.FluxFrame(offset, {"bias": flux.DevicePeriod(period)})}
+    with pytest.raises(ValueError, match=field + ".*finite"):
+        flux.solve_device_values(
+            frames, {"F1": target}, device_names=("bias",), fixed_values={}
+        )
+
+
 def test_constant_frame_and_unknown_projection() -> None:
     frame = flux.FluxFrame(1.5, {})
     assert flux.flux_from_device_values(frame, {}) == 1.5
