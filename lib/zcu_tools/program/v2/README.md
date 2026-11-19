@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-20，Branch 的 ADC 結尾檢查
+**Last updated:** 2026-11-20，Branch 與 Repeat 共用編譯期狀態
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -35,6 +35,9 @@
 原生 `t=None` 無法定位 ADC 起點，會使後一個同 ADC timeline trigger 無法證明不重疊。此未知標記不捏造 shot 收尾的 runtime 結尾。
 Branch 的每個 case 從入口的 ADC 狀態開始編譯。任一 case 在出口的 ADC 結尾未知，Branch 後的同 ADC timeline trigger 就會在編譯時報錯。
 Builder 原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
+
+編譯時，`TimelineBook` 用 `PathState` 保存與還原具名結尾、實體 channel 時間和證明、producer 狀態與 register pins。
+Branch 用它隔離各 case，Repeat 用它保留入口與可能的零次路徑。兩者各自合併狀態；QICK 的 source trigger 計數規則不變。
 
 Case 與 Repeat 只可使用母結構允許的 timeline 及局部 fork，局部名字離開後失效。
 Case 內不得經 owner 推進 reference，包含巢狀 Repeat。TwoPulseReset／BathReset 的 children 也有此限制。

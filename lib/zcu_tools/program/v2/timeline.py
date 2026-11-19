@@ -125,7 +125,6 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     def __init__(self, *args, **kwargs):
         self._timeline_book = TimelineBook()
-        self._time_bounds = ProducerBounds()
         self._time_origin: Macro | None = None
         self._timeline_register_pool: list[str] = []
         self._timeline_math_active = False
@@ -142,6 +141,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._emission_scope: tuple[int, int] | None = None
         super().__init__(*args, **kwargs)
 
+    @property
+    def _time_bounds(self) -> ProducerBounds:
+        return self._timeline_book.time_bounds
+
     def _make_asm(self) -> None:
         loop_counts = {loop.name: loop.count for loop in self.sweep_loops}
         for wave in self.waves:
@@ -153,7 +156,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 reg.init.to_steps(loop_counts)
         self._timeline_register_pool = []
         self._timeline_book.output_time = None
-        self._time_bounds = ProducerBounds()
+        self._timeline_book.time_bounds = ProducerBounds()
         for macro in self.macro_list:
             self._observe_time_producers(macro)
         super()._make_asm()
