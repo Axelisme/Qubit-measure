@@ -206,7 +206,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             sched.run_acquire_summed(
                 program,
                 context.soc,
-                processor=shot_sums(program, [axis]),
+                reducer=shot_sums(program, [axis]),
                 rounds=cfg.rounds,
             )
         return T1WithToneResult(lengths=lengths, counts=buffer.array)
@@ -260,7 +260,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                     step.run_acquire_summed(
                         program,
                         context.soc,
-                        processor=shot_sums(program, [axis]),
+                        reducer=shot_sums(program, [axis]),
                         rounds=1,
                     )
         return T1WithToneResult(lengths=lengths, counts=_sum_rounds(buffer.array))

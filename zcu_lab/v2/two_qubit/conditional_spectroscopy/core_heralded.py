@@ -244,7 +244,7 @@ class SpectroscopyHeraldedExp(
                 step.run_acquire_summed(
                     prog,
                     context.soc,
-                    processor=shot_sums(
+                    reducer=shot_sums(
                         prog,
                         [
                             Classify("herald", config.roles.f1_tone),

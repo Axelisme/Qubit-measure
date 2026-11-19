@@ -588,6 +588,48 @@ def test_obsolete_nested_readout_is_reported_while_flat_readout_loads(
     assert not library.refresh()
 
 
+def test_mux_herald_roundtrips_library_keys_and_quoted_tone_positions(
+    library_path: Path,
+) -> None:
+    from zcu_tools import cfg_model
+
+    library = open_library(library_path)
+    readout = cfg_model.module_spec_from_raw(
+        {
+            "type": "readout/mux",
+            "gen_ch": 0,
+            "nqz": 1,
+            "mixer_freq": 1000.0,
+            "length": 0.5,
+            "ro_length": 0.4,
+            "tones": [{"freq": 1000.0, "gain": 0.1, "ro_ch": 4}],
+        }
+    )
+    herald = cfg_model.module_spec_from_raw(
+        {
+            "type": "reset/mux_herald",
+            "readout": "Q1.readout.mux",
+            "keep": {"0": "g"},
+            "prepare": "Q1.reset.cooldown",
+        }
+    )
+    with library.edit() as draft:
+        draft.set_waveform("Q1.waveforms.base", cfg_model.ConstWaveformCfg(length=0.2))
+        draft.set_module("Q1.readout.mux", readout)
+        draft.set_module(
+            "Q1.reset.cooldown", cfg_model.PulseResetSpec(pulse_cfg=pulse())
+        )
+        draft.set_module("Q1.reset.herald", herald)
+
+    snapshot = open_library(library_path).snapshot()
+    assert snapshot.module_spec("Q1.reset.herald") == herald
+    resolved = snapshot.get_module("Q1.reset.herald")
+    assert isinstance(resolved, cfg_model.MuxHeraldResetCfg)
+    assert resolved.keep == {0: "g"}
+    assert resolved.readout == snapshot.get_module("Q1.readout.mux")
+    assert resolved.prepare == snapshot.get_module("Q1.reset.cooldown")
+
+
 def test_mux_and_pulse_readouts_roundtrip_and_materialize_fixed_snapshot(
     library_path: Path,
 ) -> None:

@@ -15,7 +15,7 @@ from zcu_tools.experiment.v2.runtime import (
 )
 from zcu_tools.program.acquisition import (
     CancelFlagProtocol,
-    ShotSumProcessor,
+    ShotReducer,
     StoppedPartialAcquireError,
 )
 from zcu_tools.progress_bar import use_pbar_factory
@@ -24,6 +24,7 @@ from tests.experiment.v2.runtime._flow_fakes import (
     RecordingProgressBar,
     recording_pbar_factory,
 )
+from tests.program._shot_reduction import SumRounds
 
 Entry = Literal[
     "direct",
@@ -76,11 +77,11 @@ class Producer:
 
     acquire_decimated = acquire
 
-    def acquire_summed(
+    def acquire_summed[State](
         self,
         soc: object,
         *,
-        processor: ShotSumProcessor,
+        reducer: ShotReducer[State],
         rounds: int = 1,
         step_rounds: bool = False,
         **qick_options: Any,
@@ -114,7 +115,7 @@ def run_entry(
         return sched.run_acquire_summed(
             producer,
             object(),
-            processor=lambda iq: iq[0],
+            reducer=SumRounds(lambda iq: iq[0]),
             rounds=2,
             options=direct_sums,
         )
@@ -199,7 +200,7 @@ def test_reusing_run_options_does_not_replay_previous_stop(mode: str) -> None:
                 return sched.run_acquire_summed(
                     producer,
                     object(),
-                    processor=lambda iq: iq[0],
+                    reducer=SumRounds(lambda iq: iq[0]),
                     rounds=2,
                     options=sums_options,
                 )

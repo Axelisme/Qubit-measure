@@ -22,6 +22,7 @@ from zcu_tools.simulate.boundary import (
 from zcu_tools.simulate.evolution import Cancelled
 
 from tests.program._profiles import load_soccfg
+from tests.program._shot_reduction import SumRounds
 from tests.program._timeline import compile_modules
 from tests.program._timing_expectations import tproc_ceil
 from tests.program.v2.simulation.time_observations import time_us, times_us
@@ -93,7 +94,7 @@ def test_builder_program_acquires_and_sums_tagged_readouts():
         np.testing.assert_array_equal(averaged[0], 0)
         result = prog.acquire_summed(
             env.soc,
-            processor=shot_sums(prog, [IQ("herald"), IQ("signal")]),
+            reducer=shot_sums(prog, [IQ("herald"), IQ("signal")]),
             rounds=2,
             progress=False,
         )
@@ -127,7 +128,7 @@ def test_summed_simulation_materializes_joint_shots_and_retains_completed_rounds
             stop.set()
 
     result = prog.acquire_summed(
-        env.soc, processor=processor, rounds=3, round_hook=hook, progress=False
+        env.soc, reducer=SumRounds(processor), rounds=3, round_hook=hook, progress=False
     )
     np.testing.assert_array_equal(result, np.full((2, 2, 3), 6.0))
     np.testing.assert_array_equal(hooks[0], np.full((2, 2, 3), 3.0))
@@ -141,7 +142,7 @@ def test_summed_simulation_materializes_joint_shots_and_retains_completed_rounds
     stopped.set()
     with pytest.raises(StoppedPartialAcquireError):
         prog.acquire_summed(
-            env.soc, processor=processor, cancel_flag=stopped, progress=False
+            env.soc, reducer=SumRounds(processor), cancel_flag=stopped, progress=False
         )
 
 
@@ -165,7 +166,7 @@ def test_summed_simulation_discards_interrupted_round(completed):
         def acquire():
             return prog.acquire_summed(
                 env.soc,
-                processor=lambda iq: np.full((1, 3), 2.0),
+                reducer=SumRounds(lambda iq: np.full((1, 3), 2.0)),
                 rounds=3,
                 progress=False,
                 cancel_flag=stop,
@@ -459,7 +460,7 @@ def test_summed_conditional_hooks_means_and_cancellation(
     materialized = []
     hooks = []
     requests = []
-    processor = shot_sums(
+    reducer = shot_sums(
         prog,
         [
             Classify(
@@ -495,7 +496,7 @@ def test_summed_conditional_hooks_means_and_cancellation(
     def hook(count, data, flag):
         hooks.append((count, data.copy()))
         with pytest.raises(RuntimeError, match="active|reentr"):
-            prog.acquire_summed(env.soc, processor=processor, progress=False)
+            prog.acquire_summed(env.soc, reducer=reducer, progress=False)
         if cancel_at == "hook":
             flag.set()
 
@@ -504,7 +505,7 @@ def test_summed_conditional_hooks_means_and_cancellation(
         with pytest.raises(StoppedPartialAcquireError):
             prog.acquire_summed(
                 env.soc,
-                processor=processor,
+                reducer=reducer,
                 progress=False,
                 rounds=2,
                 cancel_flag=stop,
@@ -517,7 +518,7 @@ def test_summed_conditional_hooks_means_and_cancellation(
     else:
         result = prog.acquire_summed(
             env.soc,
-            processor=processor,
+            reducer=reducer,
             progress=False,
             rounds=2,
             cancel_flag=stop,
@@ -536,7 +537,7 @@ def test_summed_conditional_hooks_means_and_cancellation(
     # Stop/failure and reentry must release admission for the next call.
     stop.clear()
     cancel_at = "hook"
-    retried = prog.acquire_summed(env.soc, processor=processor, progress=False)
+    retried = prog.acquire_summed(env.soc, reducer=reducer, progress=False)
     assert retried is not None
     assert_conditional_sums(retried, 1)
 
@@ -582,7 +583,10 @@ def test_decimated_companion_raw_uses_same_trace_and_adc_order():
     [
         ("acquire", {}),
         ("acquire_decimated", {}),
-        ("acquire_summed", {"processor": lambda iq: iq[0][:, :, 0].sum(axis=1)}),
+        (
+            "acquire_summed",
+            {"reducer": SumRounds(lambda iq: iq[0][:, :, 0].sum(axis=1))},
+        ),
     ],
 )
 def test_step_rounds_rejected_before_consuming_sequence(mode, options):

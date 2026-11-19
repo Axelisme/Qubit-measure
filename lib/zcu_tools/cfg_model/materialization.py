@@ -14,8 +14,10 @@ from .dependencies import CfgValidationContext
 from .inputs import CfgInputMap
 from .module import (
     BathResetSpec,
+    HeraldResetSpec,
     ModuleCfg,
     ModuleSpec,
+    MuxHeraldResetSpec,
     MuxReadoutSpec,
     MuxReadoutTone,
     PulseCfg,
@@ -64,6 +66,8 @@ def _persistent_raw(value: object) -> object:
                 PulseResetSpec,
                 TwoPulseResetSpec,
                 BathResetSpec,
+                HeraldResetSpec,
+                MuxHeraldResetSpec,
                 FlatTopWaveformSpec,
                 ConstWaveformCfg,
                 CosineWaveformCfg,
@@ -155,30 +159,42 @@ def _expand_module(
             data["waveform"] = _isolated_raw(
                 _expand_waveform(data["waveform"], context, root, chain)
             )
-        elif kind == "reset/pulse" and "pulse_cfg" in data:
-            data["pulse_cfg"] = _isolated_raw(
-                _expand_module(
-                    data["pulse_cfg"], context, root, chain, expected="pulse"
-                )
-            )
-        elif kind in ("reset/two_pulse", "reset/bath"):
-            fields = (
-                ("pulse1_cfg", "pulse2_cfg")
-                if kind == "reset/two_pulse"
-                else ("cavity_tone_cfg", "qubit_tone_cfg", "pi2_cfg")
-            )
-            for field in fields:
-                if field in data:
-                    data[field] = _isolated_raw(
-                        _expand_module(
-                            data[field], context, root, chain, expected="pulse"
-                        )
-                    )
+        else:
+            _expand_module_children(data, context, root, chain)
         if expected == "pulse":
             return TypeAdapter(PulseCfg).validate_python(data, context=context)
         return TypeAdapter(ModuleCfg).validate_python(data, context=context)
     except ValidationError as exc:
         raise _resolution_error(root, chain, expected, str(exc)) from exc
+
+
+def _expand_module_children(
+    data: dict[str, object],
+    context: CfgValidationContext,
+    root: str,
+    chain: tuple[str, ...],
+) -> None:
+    match data.get("type"):
+        case "reset/pulse":
+            fields = ("pulse_cfg",)
+        case "reset/two_pulse":
+            fields = ("pulse1_cfg", "pulse2_cfg")
+        case "reset/bath":
+            fields = ("cavity_tone_cfg", "qubit_tone_cfg", "pi2_cfg")
+        case "reset/herald" | "reset/mux_herald":
+            for field in ("readout", "prepare"):
+                if (child := data.get(field)) is not None:
+                    data[field] = _isolated_raw(
+                        _expand_module(child, context, root, chain)
+                    )
+            return
+        case _:
+            return
+    for field in fields:
+        if field in data:
+            data[field] = _isolated_raw(
+                _expand_module(data[field], context, root, chain, expected="pulse")
+            )
 
 
 def module_spec_from_raw(raw: CfgInputMap | ModuleSpec) -> ModuleSpec:

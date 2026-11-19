@@ -20,6 +20,9 @@ from .pulse import Pulse, PulseCfg, PulseOverrides
 if TYPE_CHECKING:
     from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+    from .herald import HeraldResetCfg, MuxHeraldResetCfg
+    from .readout import MuxReadout, PulseReadout
+
 
 PulseOrRef: TypeAlias = Annotated[PulseCfg, BeforeValidator(resolve_module_ref)]
 
@@ -161,16 +164,26 @@ class ResetOverrides(PulseResetOverrides, BathResetOverrides, total=False):
 class Reset:
     """Dispatch cfg to its reset module; zcu_lab uses ``Reset.Cfg`` fields.
 
-    Calling Reset(name, cfg) returns cfg.build(name), not a Reset instance.
-    name labels the module.
+    Reset returns the runtime module, not a dispatcher instance. Reset.Cfg
+    includes only ordinary pulse-based variants; fields opt into herald explicitly.
     """
 
     Cfg: TypeAlias = ResetCfg
 
     def __new__(
-        cls, name: str, cfg: AbsResetCfg, **overrides: Unpack[ResetOverrides]
+        cls,
+        name: str,
+        cfg: AbsResetCfg | HeraldResetCfg | MuxHeraldResetCfg,
+        *,
+        terminal: PulseReadout | MuxReadout | None = None,
+        **overrides: Unpack[ResetOverrides],
     ) -> AbsReset:
-        """Build the reset with keyword-only overrides on a detached cfg.
+        """Build a named reset from a detached cfg with optional overrides.
+
+        terminal is the readout object also emitted at the end of the body.
+        Ordinary resets ignore it. For herald, omit it only when emitting
+        the reset's own shared readout as the terminal; program build rejects
+        a cfg or emission mismatch. Herald takes no overrides.
 
         Pulse reset accepts freq/gain/phase/length. Two-pulse reset accepts
         gain1/gain2/freq1/freq2/length. Bath reset accepts qub_gain/qub_freq/
@@ -192,7 +205,9 @@ class Reset:
             allowed = {}
         effective = deepcopy(cfg)
         apply_cfg_overrides(effective, overrides, allowed)
-        return effective.build(name)
+        if isinstance(effective, AbsResetCfg):
+            return effective.build(name)
+        return effective.build(name, terminal=terminal)
 
 
 class PulseReset(AbsReset):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import BeforeValidator, ConfigDict, Field, TypeAdapter, field_validator
 from qick.asm_v2 import QickParam
 
 from .base import ConfigBase
@@ -356,9 +356,88 @@ type ResetCfg = Annotated[
     PulseResetCfg | TwoPulseResetCfg | BathResetCfg,
     Field(discriminator="type"),
 ]
+type HeraldState = Literal["g", "e", "other"]
+type PrepareSpec = Annotated[PulseSpec | ResetSpec, Field(discriminator="type")]
+type PrepareCfg = Annotated[PulseCfg | ResetCfg, Field(discriminator="type")]
+
+
+class _HeraldResetFields[ReadoutT, PrepareT](_ModuleFields):
+    type: Literal["reset/herald"] = "reset/herald"
+    readout: ReadoutT
+    keep: HeraldState
+    prepare: PrepareT | None = None
+
+
+class HeraldResetSpec(_HeraldResetFields[str | PulseReadoutSpec, str | PrepareSpec]):
+    """Select one pulse-readout state. Readout and optional preparation are keys or inline Specs."""
+
+
+class _AbsHeraldResetCfg(AbsModuleCfg):
+    def set_param(self, name: str, value: float | QickParam) -> None:
+        """Reject every sweep knob; a herald reset has no tunable playback parameters."""
+        raise ValueError(f"{self.type} does not support parameter {name!r}={value!r}")
+
+
+class HeraldResetCfg(
+    _HeraldResetFields[PulseReadoutCfg, PrepareCfg], _AbsHeraldResetCfg
+):
+    """Use the resolved pulse readout; keep g/e/other. Run prepare first if present."""
+
+
+def _mux_tone_positions(value: object) -> dict[int, object]:
+    """Convert quoted decimal keys to positions without coercion or key collisions."""
+    positions: dict[int, object] = {}
+    for key, state in TypeAdapter(dict[object, object]).validate_python(value).items():
+        if type(key) is int and key >= 0:
+            index = key
+        elif isinstance(key, str) and key.isascii() and key.isdecimal():
+            index = int(key)
+        else:
+            raise ValueError(
+                f"keep tone {key!r}: expected a non-negative decimal string"
+            )
+        if index in positions:
+            raise ValueError(f"keep tone {key!r}: duplicate tone position {index}")
+        positions[index] = state
+    return positions
+
+
+type MuxHeraldKeep = Annotated[
+    dict[int, HeraldState], BeforeValidator(_mux_tone_positions)
+]
+type _DecimalPosition = Annotated[str, Field(pattern=r"^[0-9]+$")]
+
+
+class _MuxHeraldResetFields[ReadoutT, KeepT, PrepareT](_ModuleFields):
+    type: Literal["reset/mux_herald"] = "reset/mux_herald"
+    readout: ReadoutT
+    keep: KeepT
+    prepare: PrepareT | None = None
+
+
+class MuxHeraldResetSpec(
+    _MuxHeraldResetFields[
+        str | MuxReadoutSpec, dict[_DecimalPosition, HeraldState], str | PrepareSpec
+    ]
+):
+    """Keep states by quoted non-negative decimal tone positions; readout and prepare can be keys or inline Specs."""
+
+
+class MuxHeraldResetCfg(
+    _MuxHeraldResetFields[MuxReadoutCfg, MuxHeraldKeep, PrepareCfg], _AbsHeraldResetCfg
+):
+    """Use the resolved mux readout; keep maps full tone positions to g/e/other. Run prepare first if present."""
+
+
+type ResetWithHeraldSpec = Annotated[
+    ResetSpec | HeraldResetSpec | MuxHeraldResetSpec, Field(discriminator="type")
+]
+type ResetWithHeraldCfg = Annotated[
+    ResetCfg | HeraldResetCfg | MuxHeraldResetCfg, Field(discriminator="type")
+]
 type ModuleSpec = Annotated[
-    PulseSpec | ReadoutSpec | ResetSpec, Field(discriminator="type")
+    PulseSpec | ReadoutSpec | ResetWithHeraldSpec, Field(discriminator="type")
 ]
 type ModuleCfg = Annotated[
-    PulseCfg | ReadoutCfg | ResetCfg, Field(discriminator="type")
+    PulseCfg | ReadoutCfg | ResetWithHeraldCfg, Field(discriminator="type")
 ]

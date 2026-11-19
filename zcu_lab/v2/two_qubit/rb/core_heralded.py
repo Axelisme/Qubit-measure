@@ -31,13 +31,15 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
+from .._rb_scheduling import emit_sequence
+from .._rb_sequence import make_paired_sequences
 from .._sums import (
     herald_probabilities,
     joint_probabilities,
     terminal_counts,
 )
+from ._config import RBInputs
 from .core import (
-    RBCfg,
     RBEstimate,
     RBOptions,
     count_completion,
@@ -45,8 +47,6 @@ from .core import (
     paired_means,
     validate_axes,
 )
-from .scheduling import emit_sequence
-from .sequence import make_paired_sequences
 
 
 @dataclass(frozen=True)
@@ -79,7 +79,7 @@ class RBHeraldedAnalysis:
     reason: str | None
 
 
-class RBHeraldedCfg(RBCfg):
+class RBHeraldedCfg(RBInputs[Reset.Cfg]):
     """Optional reset → herald → paired sequence → terminal, per host round.
 
     Fields and units match RBCfg. Both reads share the saved full mux cfg and
@@ -308,7 +308,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                         )
                         builder.emit(readout, tag="terminal")
                         prog = builder.build()
-                        processor = shot_sums(
+                        reducer = shot_sums(
                             prog,
                             [
                                 Classify("herald", config.roles.f1_tone),
@@ -321,7 +321,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                             round_step.run_acquire_summed(
                                 prog,
                                 context.soc,
-                                processor=processor,
+                                reducer=reducer,
                                 rounds=1,
                                 options=RunOptions(),
                             )

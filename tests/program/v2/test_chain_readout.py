@@ -10,6 +10,7 @@ from zcu_tools.program import v2
 from zcu_tools.program.v2.modules import ConstWaveformCfg, PulseReadout
 
 from tests.program._profiles import load_soccfg
+from tests.program._shot_reduction import reduce_round
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 
 
@@ -55,13 +56,14 @@ def test_thermal_shot_columns_equal_shot_by_shot_random_iq_sums():
                 features.extend(np.outer(shot[early], shot[late]).ravel())
             expected[point] += np.array([1, *features])
 
-    actual = process({0: iq, 7: np.zeros((3, 23, 1, 2))})
+    actual = reduce_round(process, {0: iq, 7: np.zeros((3, 23, 1, 2))})
 
     assert actual.dtype == np.float64
     np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
     np.testing.assert_array_equal(iq, original)
     np.testing.assert_allclose(
-        process({0: iq[:, :10]}) + process({0: iq[:, 10:]}), actual
+        reduce_round(process, {0: iq[:, :10]}) + reduce_round(process, {0: iq[:, 10:]}),
+        actual,
     )
 
 
@@ -79,7 +81,7 @@ def test_thermal_acquisition_adds_shots_over_rounds(unrolled):
         prog = builder.build()
         sums = prog.acquire_summed(
             env.soc,
-            processor=v2.thermal_chain_sums(prog, "readout"),
+            reducer=v2.thermal_chain_sums(prog, "readout"),
             rounds=2,
             progress=False,
         )
@@ -121,7 +123,7 @@ def test_thermal_shot_requires_16_emitted_reads(emitted):
 def test_thermal_shot_rejects_incoming_shape_mismatch(shape):
     process = v2.thermal_chain_sums(block_program(16), "sample")
     with pytest.raises(ValueError, match=r"ADC 0.*expected.*16, 2.*actual"):
-        process({0: np.ones(shape)})
+        reduce_round(process, {0: np.ones(shape)})
 
 
 @pytest.mark.parametrize("shape", ["nested", "register"])
@@ -154,10 +156,12 @@ def test_thermal_shot_iq_offset_leaves_saved_score_unchanged():
     iq += np.arange(16)[None, None, :, None] * np.array([0.2, -0.3])
     axis = np.array([1.0, 2.0])
     baseline = thermal_chain_score(
-        ThermalChainSums.from_processor(axis, process({0: iq}))
+        ThermalChainSums.from_processor(axis, reduce_round(process, {0: iq}))
     )
     shifted = thermal_chain_score(
-        ThermalChainSums.from_processor(axis, process({0: iq + [1.5, -2.5]}))
+        ThermalChainSums.from_processor(
+            axis, reduce_round(process, {0: iq + [1.5, -2.5]})
+        )
     )
     for original, offset in zip(baseline.settings, shifted.settings, strict=True):
         np.testing.assert_allclose(
@@ -195,7 +199,9 @@ def test_thermal_saved_adjacent_pairs_reconstruct_weighted_matrix_contrast():
     scales = np.linspace(0.5, 1.8, 16)[None, None, :, None]
     iq = scales * latent + rng.normal(size=(2, 2500, 16, 2))
     iq += np.arange(16)[None, None, :, None] * [0.3, -0.4]
-    saved = ThermalChainSums.from_processor(np.array([1.0, 2.0]), process({0: iq}))
+    saved = ThermalChainSums.from_processor(
+        np.array([1.0, 2.0]), reduce_round(process, {0: iq})
+    )
     result = thermal_chain_score(saved)
     for point, shots in enumerate(iq):
         centred = shots - shots.mean(axis=0)

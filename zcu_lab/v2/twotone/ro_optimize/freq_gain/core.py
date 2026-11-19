@@ -18,15 +18,16 @@ from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
-from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    IQ,
     Pulse,
     PulseReadout,
     Readout,
     Reset,
     SweepCfg,
     TimelineBuilder,
+    shot_sums,
     sweep2param,
 )
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
@@ -114,7 +115,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         Return frequencies in MHz, gains in a.u. within [-1, 1] and moment-based SNR
         shaped (Nfreq, Ngain), optionally reduced by skew_penalty for distorted
         IQ distributions. This score is not assignment fidelity.
-        acquire_kwargs is forwarded to acquisition.
+        acquire_kwargs is forwarded to summed acquisition.
         """
         # 1. Prepare both readout axes on the pulse generator's hardware grid.
         soc, soccfg = context.soc, context.soccfg
@@ -161,7 +162,6 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             gain_sweep = cfg.gain
             gain_param = sweep2param("gain", gain_sweep)
             cfg.readout.set_param("gain", gain_param)
-            tracker = MomentTracker()
 
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -178,18 +178,17 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
                 builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
             builder.emit(Readout("readout", cfg.readout))
             program = builder.build()
-            sched.run_acquire(
+            sched.run_acquire_summed(
                 program,
                 soc,
+                reducer=shot_sums(program, [IQ("readout", order=3)]),
                 rounds=cfg.rounds,
                 options=RunOptions(
-                    converter=lambda _raw: snr_as_signal(
-                        [tracker],
-                        ge_axis=1,
+                    converter=lambda sums: snr_as_signal(
+                        sums,
                         skew_penalty=cfg.skew_penalty,
                     ),
                 ),
-                trackers=[tracker],
                 **(acquire_kwargs or {}),
             )
 

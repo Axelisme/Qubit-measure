@@ -1,6 +1,6 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-11-20，arb 資產寫回
+**Last updated:** 2026-11-20，arb 資產寫回與 herald reset cfg
 
 **讀者：** framework-dev。配置模型、持久 Spec 與 materialization 邊界速查。
 
@@ -28,9 +28,10 @@ Caller 從 package root import 公開名稱。
 - `ModuleCfg`／`WaveformCfg` 表示已展開的執行參數。它們只提供欄位驗證與 `set_param`，不建立 program runtime 物件。
 - `readout/pulse` 獨立持有平鋪的 generator／ADC 欄位與 waveform。唯一 `freq` 同時供 generator／ADC 使用，waveform 仍可引用 key。Readout 不引用 Pulse，也沒有 DirectReadout；Reset 的 Pulse 引用保持不變。Pulse cfg 不保存 `ro_ch`，ADC matching 由 program runtime 提供。
 - `readout/mux` 的持久 Spec 與數字 cfg 共用驗證。Module 明填 generator、Nyquist zone 與 mixer；有序的 1 至 8 筆 tones 各自保存頻率、gain、phase 與 logical ADC channel。每筆 tone 的選填 label 預設空字串，隨 Spec、cfg 與 library 保存，只作顯示且可重複。Tone 序號定義資料軸，program 不解讀 label。時間使用共用 const duration 與 ADC window，不含 waveform、逐 tone 引用或 sweep。整個 module 可透過固定 snapshot 的 key materialize；`set_param` 拒絕更新，caller 必須重建數字 cfg 與 program。
+- `reset/herald` 與 `reset/mux_herald` 的 Spec 保存 `readout` 和可選 `prepare` 的 inline Spec 或 library key。Mux `keep` 的 key 在 YAML 用加引號的十進位字串，materialization 轉成完整 tones 列表中的整數位置。普通 `ResetCfg` 不含 herald，`ResetWithHeraldCfg` 才接受兩種 herald。
 - `CfgInputMap`／`CfgInputValue` 是 factory 的未驗證唯讀輸入，接受 recursive mapping／sequence 與 `ConfigBase` token。具體 factory 仍按自己的 schema 驗證，不因 token 已是 model 就信任它。
 - 兩個 cfg factory 透過 `CfgValidationContext` 注入 `ModuleResolver` 與 `WaveformAssetInfo`。單次 materialization 共用引用鏈，錯誤保留 root、chain 與期望 family；既有 cfg child 也重新驗證。
-- `ReadoutClassifier` 以 `mode` 區分 `CircleClassifier`、`LinearClassifier` 與 `Centroid3Classifier`。Centroid3 保存有限且相異的 g/e/f 中心與必填有限 3×3 training confusion，rows 準備態、columns 量到的態，順序 g/e/f。Pulse readout 與每筆 mux tone 的 `classifier` 預設 None，表示尚無校準，欄位歸 Advanced 群組。中心、radius 與 threshold 使用原始積分 ADC 值除以積分長度的座標，不扣 IQ offset。Linear angle 使用 radians，以 `exp(1j*angle)` 旋轉。Circle radius 可缺，提供時須有限且 >0。Circle 與 linear 矩陣可缺，提供時只驗有限值與形狀（circle 3×3、linear 2×2）；rows 是真實／準備態，columns 是量到的態，順序為 g/e/other 或 g/e，不轉置、不限制值域或 row sum。Module 本身不使用分類器。
+- `ReadoutClassifier` 以 `mode` 區分 `CircleClassifier`、`LinearClassifier` 與 `Centroid3Classifier`。Centroid3 保存有限且相異的 g/e/f 中心與必填有限 3×3 training confusion，rows 準備態、columns 量到的態，順序 g/e/f。Pulse readout 與每筆 mux tone 的 `classifier` 預設 None，表示尚無校準，欄位歸 Advanced 群組。中心、radius 與 threshold 使用原始積分 ADC 值除以積分長度的座標，不扣 IQ offset。Linear angle 使用 radians，以 `exp(1j*angle)` 旋轉。Circle radius 可缺，提供時須有限且 >0。Circle 與 linear 矩陣可缺，提供時只驗有限值與形狀（circle 3×3、linear 2×2）；rows 是真實／準備態，columns 是量到的態，順序為 g/e/other 或 g/e，不轉置、不限制值域或 row sum。Readout 宣告和播放不執行分類。
 - Scalar leaf 由 Spec／Cfg 共用。純 Spec 驗證拒絕 composite runtime cfg、QICK sweep、array，以及已綁定資產的 arb leaf。複數只用於 classifier 的 g/e/f 中心，持久表示沿用 `core.complex_codec` 的 `{__complex__: [re, im]}` tag。Classifier model 會編解碼這個 tag；其他 Spec leaf 仍拒絕 Python complex。
 - `WaveformAssetInfo` 提供固定 scope 的 duration、samples 與 path_for。Path 查詢只驗 key 與檔存在，不讀 bytes。Provider 擁有 archive 驗證與 I/O，consumer 不重做這些工作。Arb binding 不序列化，cfg deepcopy 保留同一 owner，不凍結 bytes。
 

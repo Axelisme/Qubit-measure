@@ -13,11 +13,14 @@ from .modules import (
     ComputedPulse,
     Delay,
     DelayAuto,
+    HeraldReset,
+    HeraldResetCfg,
     InMemoryArbWaveformCfg,
     LoadValue,
     Module,
     ModuleCfg,
     ModuleCfgFactory,
+    MuxHeraldResetCfg,
     Pulse,
     PulseCfg,
     PulseReadout,
@@ -28,13 +31,21 @@ from .modules import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    ResetWithHeraldCfg,
     SoftDelay,
     TwoPulseReset,
     TwoPulseResetCfg,
     WaveformCfg,
     WaveformCfgFactory,
 )
-from .read_axes import IQ, Classify, shot_sums, split_sums
+from .read_axes import (
+    IQ,
+    Classify,
+    CubicIQMoments,
+    shot_sums,
+    split_cubic_sums,
+    split_sums,
+)
 from .rpi import rpi_sums
 from .sweep import SweepCfg
 from .table_param import TableParam, TableRawParam

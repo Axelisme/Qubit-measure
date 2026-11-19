@@ -110,8 +110,10 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         assert self.acquire_params is not None
         assert self.loop_dims is not None
         params = self.acquire_params
-        self._simulation_needs_raw = self._sum_processor is not None or any(
-            params.get(key) is not None for key in ("threshold", "trackers")
+        self._simulation_needs_raw = (
+            self.has_shot_mask_sources
+            or self._shot_reduction is not None
+            or params.get("threshold") is not None
         )
         self._simulation_normalization: list[tuple[int | None, float | None]] = []
         for ch, ro in self._program().ro_chs.items():
@@ -291,8 +293,10 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         """Return native averaged IQ, preserving ADC declaration order.
 
         QICK threshold/angle projects normalized shots into excited fraction I
-        and zero Q. Shot-sum processors use acquire_summed and materialize each
-        round's retained raw source through the same pipeline as hardware.
+        and zero Q. Registered shot masks hide consumed reads and mask-only
+        ADCs, use host shot averaging and reject native threshold projection.
+        Masks and shot reducers materialize each round's retained raw
+        source through the same pipeline as hardware.
         True step_rounds prepares hardware and returns None; SimulationSoc raises
         ValueError before admission. Extra positional options or a dynamic bool
         retain the list-or-None type. Errors and cancellation follow the normal
@@ -343,8 +347,8 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         True prepares hardware and returns None; SimulationSoc raises ValueError
         instead, before admission. Typing is precise with only soc positional;
         extra positional options or a dynamic bool retain the union.
-        Nonempty herald raises ValueError because post-selection needs integrated
-        shots.
+        Nonempty herald or registered shot mask sources raise ValueError
+        because post-selection needs integrated shots.
         Other acquisition errors and cancellation follow the normal pipeline.
         """
         if not isinstance(soc, SimulationSoc):

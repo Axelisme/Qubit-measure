@@ -17,6 +17,7 @@ from .base import AbsModuleCfg, Module, resolve_module_ref
 from .computed_pulse import ComputedPulse
 from .delay import Delay, DelayAuto, SoftDelay
 from .dmem import LoadValue
+from .herald import HeraldReset, HeraldResetCfg, MuxHeraldResetCfg, ResetWithHeraldCfg
 from .pulse import Pulse, PulseCfg, PulseOverrides
 from .readout import (
     AbsReadout,
@@ -71,7 +72,7 @@ from .waveform import (
 
 
 ModuleCfg: TypeAlias = Annotated[
-    ResetCfg | ReadoutCfg | PulseCfg,
+    ResetWithHeraldCfg | ReadoutCfg | PulseCfg,
     BeforeValidator(resolve_module_ref),
     Field(discriminator="type"),
 ]
@@ -124,7 +125,18 @@ class ModuleCfgFactory:
                 ),
                 pi2_cfg=_pulse_from_core(core_cfg.pi2_cfg, context=context),
             )
-        return TypeAdapter(ModuleCfg).validate_python(core_cfg.to_dict())
+        fields = core_cfg.to_dict()
+        if isinstance(
+            core_cfg, (core_cfgs.HeraldResetCfg, core_cfgs.MuxHeraldResetCfg)
+        ):
+            fields["readout"] = ModuleCfgFactory.from_core(
+                core_cfg.readout, context=context
+            )
+            if core_cfg.prepare is not None:
+                fields["prepare"] = ModuleCfgFactory.from_core(
+                    core_cfg.prepare, context=context
+                )
+        return TypeAdapter(ModuleCfg).validate_python(fields)
 
     @classmethod
     def from_raw(

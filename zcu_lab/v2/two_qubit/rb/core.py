@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Self
+from typing import Annotated, ClassVar, TypeAlias
 
 import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from pydantic import Field, model_validator
+from pydantic import Field
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import (
     FitQuality,
@@ -19,7 +19,7 @@ from zcu_tools.analysis.fitting import (
     compute_fit_quality,
 )
 from zcu_tools.analysis.fitting.shared import SharedFitResult
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -34,8 +34,9 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
-    Pulse,
+    MuxHeraldResetCfg,
     Reset,
+    ResetCfg,
     TimelineBuilder,
     shot_sums,
 )
@@ -43,15 +44,10 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._drive import DualLineCfg
-from .._readout import JointRoles
-from .._sums import (
-    joint_probabilities,
-    validate_classifiers,
-)
-from .program import CZPhasePair
-from .scheduling import emit_sequence
-from .sequence import make_paired_sequences
+from .._rb_scheduling import emit_sequence
+from .._rb_sequence import make_paired_sequences
+from .._sums import joint_probabilities
+from ._config import RBInputs
 
 
 @dataclass(frozen=True)
@@ -61,7 +57,8 @@ class RBResult:
     depths counts random Cliffords; seeds retains exact random.Random identities.
     The fixed arm axis [0,1] means reference/CZ-interleaved. rounds=[0..rounds-1] is a host
     acquisition axis. sums ends in (3,3), ordered g/e/other on each role.
-    Counts are unnormalized; a wholly unacquired round stays NaN.
+    Counts include only kept shots. A finished round with no kept shots is
+    all zero; an unacquired round stays NaN.
     """
 
     depths: NDArray[np.int64]
@@ -112,113 +109,32 @@ class RBAnalysis:
     """Fixed-size d=4 paired RB estimate and reference/interleaved fit quality.
 
     estimate is None with reason when no fit is identifiable. fit_quality holds
-    residual diagnostics for each arm, or None without a fit. Survival arrays,
-    round completeness and model curves are used only inside analyze.
+    residual diagnostics for each arm, or None without a fit. tail_warning
+    describes high paired reference joint00 survival at the deepest depth, or
+    is None when the measured survival does not trigger the warning. Survival
+    arrays, round completeness and model curves stay inside analyze.
     """
+
+    TAIL_SURVIVAL_THRESHOLD: ClassVar[float] = 0.2
 
     estimate: RBEstimate | None
     fit_quality: tuple[FitQuality, FitQuality] | None
     reason: str | None
+    tail_warning: str | None = None
 
 
-class RBCfg(ConfigBase):
+_RBResetCfg: TypeAlias = Annotated[
+    ResetCfg | MuxHeraldResetCfg, Field(discriminator="type")
+]
+
+
+class RBCfg(RBInputs[_RBResetCfg]):
     """Optional reset → paired random Clifford + own recovery → terminal read.
 
-    roles maps Q0 to F1 and Q1 to F2 at their original full mux tone positions.
-    phase_pair is required, ordered and component-named. Delays are us, pulse
-    frequency MHz and phase degrees. No DC device is driven. reset=None emits
-    no reset. F1/F2 need circle classifiers with radius from GE Post before Run.
-    depth counts random Cliffords, not primitive gates; nondecreasing
-    nonnegative integers. seed contains distinct integer random.Random identities
-    shared across depths/arms/rounds. The 31-bit bound preserves exact axes.
-    reps is shots per host round; rounds remains a separate saved axis.
+    Use None for no reset, an ordinary reset to prepare every shot, or
+    reset/mux_herald with the terminal readout settings to retain matching shots.
+    See RBInputs for acquisition and scan fields.
     """
-
-    reset: Annotated[
-        Reset.Cfg | None,
-        FieldMeta(
-            label="Reset", description="Optional reset at the start of every shot."
-        ),
-    ] = None
-    x90_f1: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ/2",
-            description="Calibrated F1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
-        ),
-    ]
-    x90_f2: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ/2",
-            description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
-        ),
-    ]
-    drive: Annotated[
-        DualLineCfg,
-        FieldMeta(
-            label="Dual-line drive",
-            description="F1/F2 charge-line CZ pulses from the calibrated coupler slots.",
-        ),
-    ]
-    readout: Annotated[
-        MuxReadout.Cfg,
-        FieldMeta(
-            label="Mux readout",
-            description="Full-group mux readout with calibrated frequencies, gains and timing.",
-        ),
-    ]
-    roles: JointRoles
-    phase_pair: CZPhasePair
-    depth: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
-        default_factory=lambda: [0, 1, 2, 3], min_length=1
-    )
-    seed: list[Annotated[int, Field(strict=True, ge=0, le=2**31 - 1)]] = Field(
-        default_factory=lambda: [0, 1], min_length=1
-    )
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = Field(gt=0)
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = Field(default=1, gt=0)
-    initial_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Initial delay",
-            unit="us",
-            description="Delay before the first repetition.",
-        ),
-    ] = 1.0
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ]
-
-    @model_validator(mode="after")
-    def validate_sequence_inputs(self) -> Self:
-        """Reject swapped phases, unordered depths, repeated seeds or wrong generators."""
-        validate_classifiers(self.readout, self.roles)
-        self.phase_pair.validate_roles(self.roles)
-        if self.depth != sorted(self.depth):
-            raise ValueError("RB depths must be increasing")
-        if len(set(self.seed)) != len(self.seed):
-            raise ValueError("RB seeds must be distinct complete integer identities")
-        for drive, x90 in (
-            (self.drive.f1, self.x90_f1),
-            (self.drive.f2, self.x90_f2),
-        ):
-            if drive.ch != x90.ch:
-                raise ValueError("CZ and X90 must use the same captured role generator")
-            if not isinstance(x90.phase, (int, float)) or not np.isfinite(x90.phase):
-                raise ValueError("X90 phase must be a finite scalar")
-        return self
 
 
 def estimate_d4(fit: IRBAnalysis) -> RBEstimate:
@@ -396,7 +312,9 @@ class RBExp(Experiment[RBResult, RBCfg]):
         """Acquire optional reset → concurrent per-qubit sequence → terminal counts.
 
         Each host round acquires reps shots with rounds=1, not a host average.
-        Return fixed raw count slots; cfg and saved sequence identities are unchanged.
+        A mux herald reset adds a read before the sequence and excludes rejected
+        shots from the terminal counts. Return fixed raw count slots; cfg and
+        saved sequence identities are unchanged.
 
         """
         # 1. Compare reference and CZ-interleaved joint00 survival across Clifford depth.
@@ -435,7 +353,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                         )
                         readout = MuxReadout("readout", config.readout)
                         if config.reset is not None:
-                            builder.emit(Reset("reset", config.reset))
+                            builder.emit(Reset("reset", config.reset, terminal=readout))
 
                         # Both arms overlap X90s within a Clifford and align at Clifford ends.
                         emit_sequence(
@@ -448,7 +366,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                         )
                         builder.emit(readout, tag="terminal")
                         prog = builder.build()
-                        processor = shot_sums(
+                        reducer = shot_sums(
                             prog,
                             [
                                 Classify("terminal", config.roles.f1_tone),
@@ -459,7 +377,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                             round_step.run_acquire_summed(
                                 prog,
                                 context.soc,
-                                processor=processor,
+                                reducer=reducer,
                                 rounds=1,
                                 options=RunOptions(),
                             )
@@ -482,21 +400,23 @@ class RBExp(Experiment[RBResult, RBCfg]):
         """Fit saved joint00 count ratios from complete paired seed/round curves.
 
         options controls deterministic paired-seed bootstrap, not acquisition.
+        Completed zero-count rounds have undefined survival. A fit requires
+        finite survival across both arms and all depths of a seed/round pair.
         Malformed counts raise ValueError. Missing cfg, AnalysisFailed or existing
         fit ValueError/RuntimeError failures return a reason with count diagnostics.
         Other exceptions propagate unchanged.
 
         """
-        # 1. Select seed/round pairs complete across every depth and both arms before fitting joint00 decay.
+        # 1. Select acquired pairs; a zero-total round still has undefined survival.
         data, cfg = source.result, source.cfg
         shape = (len(data.depths), len(data.seeds), 2, len(data.rounds))
         survival = np.full(shape, np.nan)
-        acquired = np.zeros(shape, dtype=np.bool_)
         means = np.full((2, len(data.depths)), np.nan)
         curves = means.copy()
         estimate = None
         quality = None
         reason = None
+        tail_warning = None
         if cfg is None:
             reason = "RB analysis requires saved cfg; current Form is not a substitute"
         else:
@@ -509,11 +429,16 @@ class RBExp(Experiment[RBResult, RBCfg]):
             counts = data.sums
             acquired = count_completion(counts, (-2, -1))
             joint00 = joint_probabilities(counts)[..., 0, 0]
-            paired = np.asarray(
-                (acquired & np.isfinite(joint00)).all(axis=(0, 2)), dtype=np.bool_
-            )
-            survival = np.where(paired[None, :, None, :], joint00, np.nan)
+            paired_acquired = np.asarray(acquired.all(axis=(0, 2)), dtype=np.bool_)
+            survival = np.where(paired_acquired[None, :, None, :], joint00, np.nan)
             means = paired_means(survival)
+            reference_at_max_depth = means[0, -1]
+            if reference_at_max_depth > RBAnalysis.TAIL_SURVIVAL_THRESHOLD:
+                tail_warning = (
+                    f"Reference joint00 survival at depth {data.depths[-1]} is "
+                    f"{reference_at_max_depth:.6g}. The decay tail is unresolved; "
+                    "fitted p may be biased high. Use deeper depths."
+                )
             # 2. Fit paired decay and bootstrap whole seeds before the d=4 error conversion.
             try:
                 fit = analyze_irb(
@@ -552,4 +477,4 @@ class RBExp(Experiment[RBResult, RBCfg]):
             ax.set_title("d=4 paired RB; classified ensemble, statistical seed CI only")
         fig.tight_layout()
         # 4. Keep the d=4 estimate and statistical seed uncertainty, or a failure without a calibration proposal.
-        return RBAnalysis(estimate, quality, reason)
+        return RBAnalysis(estimate, quality, reason, tail_warning=tail_warning)

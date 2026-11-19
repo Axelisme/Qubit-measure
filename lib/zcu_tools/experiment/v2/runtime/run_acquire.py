@@ -5,7 +5,15 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, Unpack
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    Protocol,
+    TypeVar,
+    Unpack,
+    runtime_checkable,
+)
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,7 +28,7 @@ from zcu_tools.experiment.v2.runtime.acquisition import (
     default_raw2signal_fn,
     require_positive_rounds,
 )
-from zcu_tools.program.acquisition import ShotSumProcessor
+from zcu_tools.program.acquisition import ShotReducer, ShotResult
 
 if TYPE_CHECKING:
     from zcu_tools.experiment.v2.runtime.schedule import Schedule, ScheduleStep
@@ -47,7 +55,8 @@ class RunOptions(Generic[T_Raw]):
     read per shot; decimated requires one ADC and retains all repetition/read/
     sample axes; summed writes sums unchanged. Ambiguous defaults raise ValueError
     requesting an explicit converter. run_acquire_shots instead returns retained
-    raw shots without a slot and rejects converter and stop_condition policies.
+    raw shots and their unapplied mask without a slot, and rejects converter
+    and stop_condition policies.
     Its rounds count must be one. Converter and live update exceptions
     propagate without retry or a failed acquisition outcome.
     on_stop optionally observes external cancellation once per cooperative return,
@@ -83,6 +92,20 @@ def _adapt_run_options(
     )
 
 
+@runtime_checkable
+class _ShotMaskPrecheck(Protocol):
+    """Reject decimated acquisition or native threshold when masks are registered.
+
+    Treat producers without this capability as having no mask sources. A
+    producer with sources raises ValueError for incompatible options at entry,
+    before acquisition or any retries.
+    """
+
+    def check_shot_mask_options(
+        self, *, threshold: object = None, decimated: bool = False
+    ) -> None: ...
+
+
 class IntegratedProgram(Protocol[T_Raw_co]):
     """Producer requiring only synchronous acquire, not other acquisition modes.
 
@@ -100,12 +123,11 @@ class IntegratedProgram(Protocol[T_Raw_co]):
 
 
 class ShotProgram(Protocol):
-    """Synchronous acquire producer retaining integer raw shots.
+    """Synchronous integrated producer retaining visible raw shots and a mask.
 
     acquire(soc, **kwargs) accepts SynchronousAcquireKeywords, returns averaged
     IQ data and follows IntegratedProgram's cancellation and failure contract.
-    get_raw() returns the retained per-ADC int64 shot buffers, or None when no
-    raw buffer is available. The runner returns those buffers without conversion.
+    The runner delivers get_shot_result() unchanged after successful acquisition.
     """
 
     def acquire(
@@ -114,8 +136,8 @@ class ShotProgram(Protocol):
         **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]],
     ) -> list[NDArray[np.float64]]: ...
 
-    def get_raw(self) -> list[NDArray[np.int64]] | None:
-        """Return retained per-ADC raw shots, or None if unavailable."""
+    def get_shot_result(self) -> ShotResult | None:
+        """Return visible raw shots and their mask, or None if no buffer is available."""
         ...
 
 
@@ -136,17 +158,17 @@ class DecimatedProgram(Protocol[T_Raw_co]):
 class SummedProgram(Protocol):
     """Producer requiring only joint-ADC acquire_summed.
 
-    processor maps normalized ADC-keyed (points, reps, reads, 2) IQ to float64
-    (points, *axes). Return cumulative unnormalized (*point_dims, *axes) sums,
+    reducer receives normalized visible ADC IQ and a (points, reps) keep mask.
+    Return the reducer's (*point_dims, *axes) output on the completed state,
     or None only in unsupported stepped mode. Round hooks, cancellation and
     failures follow IntegratedProgram's synchronous contract.
     """
 
-    def acquire_summed(
+    def acquire_summed[State](
         self,
         soc: object,
         *,
-        processor: ShotSumProcessor,
+        reducer: ShotReducer[State],
         rounds: int = 1,
         step_rounds: bool = False,
         **qick_options: object,
@@ -159,7 +181,7 @@ class RunAcquisitionMixin(ABC):
     Subclasses provide the existing owner via _acquisition_owner; this mixin owns
     no scope, slot or outcome state. Slot entrypoints write converted data and
     trigger live updates, with acquire-local data stops. run_acquire_shots
-    instead returns retained raw buffers without conversion or slot writes.
+    instead returns retained raw shots and a mask without conversion or slot writes.
     All entrypoints require an active Schedule and retry producer errors.
     Only slot entrypoints require a writable SignalBuffer slot. Cancellation
     returns partial slot data or None for shots; only a stopped Schedule token
@@ -197,8 +219,12 @@ class RunAcquisitionMixin(ABC):
         Native qick_options are forwarded. rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
         cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
-        Converter and update errors propagate without retry.
+        Converter and update errors propagate without retry. Registered shot masks
+        omit consumed reads and mask-only ADCs. Native QICK threshold projection
+        with registered masks raises ValueError before acquisition.
         """
+        if isinstance(program, _ShotMaskPrecheck):
+            program.check_shot_mask_options(threshold=qick_options.get("threshold"))
         owner = self._acquisition_owner
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         return AcquisitionRunner(owner, soc).run(
@@ -220,11 +246,12 @@ class RunAcquisitionMixin(ABC):
         *,
         options: RunOptions[list[NDArray[np.float64]]] | None = None,
         **qick_options: object,
-    ) -> list[NDArray[np.int64]] | None:
-        """Acquire once and return program.get_raw() without conversion or slot writes.
+    ) -> ShotResult | None:
+        """Acquire once and return visible raw shots and their unapplied mask.
 
-        program supplies synchronous acquire and retained int64 raw shots; soc
-        is its borrowed transport. Requires an active Schedule, not a buffer.
+        program supplies synchronous acquire and get_shot_result(); soc is its
+        borrowed transport. Requires an active Schedule, not a buffer. This
+        method does not convert the shots, write a slot, or apply the mask.
         options selects retry, native progress and on_stop. qick_options are
         forwarded to acquire. Return None on cooperative external cancellation;
         only a stopped Schedule token records a stopped Schedule outcome.
@@ -235,11 +262,13 @@ class RunAcquisitionMixin(ABC):
         external stop propagates unchanged after retry is exhausted.
         ValueError rejects negative retry, converter or stop_condition policies,
         and rounds other than the single positive integer 1. RuntimeError means
-        program.get_raw() provided no raw shot buffer after successful acquire.
+        program.get_shot_result() provided no raw shot buffer after successful acquire.
         Progress callback errors propagate unchanged without retry or marking
         acquisition failed, after acquire scope release and progress cleanup;
         they do not call on_stop. Neither raw-buffer access failures nor on_stop
-        failures are retried.
+        failures are retried. Registered mask sources omit consumed reads and
+        mask-only ADCs. Native QICK threshold projection cannot be combined
+        with registered mask sources.
         """
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         if selected.converter is not None or selected.stop_condition is not None:
@@ -253,7 +282,7 @@ class RunAcquisitionMixin(ABC):
         )
         if not completed:
             return None
-        shots = program.get_raw()
+        shots = program.get_shot_result()
         if shots is None:
             raise RuntimeError("program did not provide a raw shot buffer")
         return shots
@@ -280,8 +309,11 @@ class RunAcquisitionMixin(ABC):
         rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
         cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
-        Converter and update errors propagate without retry.
+        Converter and update errors propagate without retry. Registered shot mask
+        sources raise ValueError before acquisition because they need integrated IQ.
         """
+        if isinstance(program, _ShotMaskPrecheck):
+            program.check_shot_mask_options(decimated=True)
         owner = self._acquisition_owner
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         return AcquisitionRunner(owner, soc).run(
@@ -296,25 +328,25 @@ class RunAcquisitionMixin(ABC):
             acquire_kwargs=qick_options,
         )
 
-    def run_acquire_summed(
+    def run_acquire_summed[State](
         self,
         program: SummedProgram,
         soc: object,
         *,
-        processor: ShotSumProcessor,
+        reducer: ShotReducer[State],
         options: RunOptions[NDArray[np.float64]] | None = None,
         **qick_options: object,
     ) -> SignalArray:
-        """Acquire shot sums, write this scope's slot and trigger live updates.
+        """Reduce shot rounds, write this scope's slot and trigger live updates.
 
         Run means slot/live updates, automatic retry via options.retry, and
         data-driven stopping via options.stop_condition. Native program acquire
         only returns data; this method owns the Schedule run side effects.
         Requires an active Schedule and a writable default SignalBuffer slot.
-        program needs only acquire_summed; soc is its transport. processor maps
-        normalized ADC-keyed (points, reps, reads, 2) IQ to float64 (points, *axes).
+        program needs only acquire_summed; soc is its transport. Each completed
+        round updates reducer state with normalized visible ADC IQ and a keep mask.
         options selects retry/progress/stop and conversion; converter=None writes
-        cumulative and final sums directly without averaging. Native qick_options
+        reducer output directly without averaging. Native qick_options
         are forwarded. rounds defaults to one and must be a positive integer
         excluding bool. Return the live slot, retaining completed rounds on
         cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
@@ -333,5 +365,5 @@ class RunAcquisitionMixin(ABC):
             rounds=rounds,
             signal_fn=convert,
             options=acquire_options,
-            acquire_kwargs=dict(qick_options, processor=processor),
+            acquire_kwargs=dict(qick_options, reducer=reducer),
         )

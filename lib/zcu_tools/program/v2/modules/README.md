@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-20，記憶體 arb 波形
+**Last updated:** 2026-11-20，記憶體 arb 波形、herald 分派與 module 遮罩來源
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -216,8 +216,8 @@ ADC-named ValueError. Its normalized raw ADC coordinates retain IQ offset.
 axes. Labels use emit tags or untagged module names. Mux axes select the cfg tone position. Each Classify axis
 snapshots its explicit or cfg classifier. Circle emits g/e/other, linear g/e,
 and centroid3 g/e/f. Circle requires a GE Post radius.
-The processor sums ordered shot-vector outer products across reps, and
-`acquire_summed` adds completed rounds without normalization.
+The reducer sums ordered shot-vector outer products from kept shots across
+completed rounds without normalization.
 `split_sums` converts a final IQ axis into counts and complex means.
 Zero or unmeasured NaN counts give NaN means without divide warnings.
 
@@ -273,6 +273,27 @@ physical simulation support.
 `centroid3_classifier(cfg, ro_ch=...)` 由 native Pulse 或 Mux cfg 取得 detached g/e/f 校準。
 它依 ADC 編號查詢，不使用 tone 位置或 live library。Missing、錯型與未知 ADC 都 raise ValueError。
 Centroid3 的第三類是 f，不是 circle 的 other。需要 Other 的 consumer 須明確要求 circle。
+
+## Herald resets
+
+Use `ResetWithHeraldCfg` for a reset field that accepts `reset/herald` and
+`reset/mux_herald` as well as the ordinary resets. `Reset.Cfg` still accepts
+only the ordinary resets. Use `Reset("reset", reset_cfg, terminal=readout)` to
+build either kind of reset. The dispatcher ignores `terminal` for ordinary
+resets. Emit the reset, the experiment sequence, and then that same `readout`
+object. To let the module construct its own shared readout, call the herald
+cfg's `build("reset")` and emit the returned module's `readout` at the end.
+
+The reset emits its optional prepare pulse or ordinary reset, then a read using
+the terminal readout's own delays. Program build rejects a different terminal
+readout, a swept readout, or missing or incompatible calibration on selected
+tones. Pulse herald selects one state. Mux herald requires all selected tones
+to match; keys such as `'0'` are positions in the full tones list, not ADC
+channel numbers. Herald hides its read on every triggered ADC, including
+unselected mux tones. Acquisition applies the same shot mask to all remaining
+reads. Herald registers one source per emission through the generic
+`Module.register_shot_mask_sources(prog)` hook after body assembly. The program
+calls the hook for every declared module, including modules without sources.
 
 ## Readout table sweeps
 

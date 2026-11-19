@@ -18,6 +18,7 @@ from zcu_tools.simulate.boundary import (
 
 from tests.program._acquisition_soc import AcquisitionSoc
 from tests.program._profiles import load_soccfg
+from tests.program._shot_reduction import SumRounds
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import FixedRawShots, raw_of, request_of
 
@@ -133,10 +134,10 @@ def test_summed_materializes_retained_shots_matching_hardware(monkeypatch):
         ro["iq_offset"] = 7.0
     try:
         expected = hardware.acquire_summed(
-            soc, processor=processor, progress=False, rounds=2
+            soc, reducer=SumRounds(processor), progress=False, rounds=2
         )
         actual = prog.acquire_summed(
-            env.soc, processor=processor, progress=False, rounds=2
+            env.soc, reducer=SumRounds(processor), progress=False, rounds=2
         )
         assert expected is not None and actual is not None
         assert actual.shape == (2, 3, 3)
@@ -226,8 +227,7 @@ def test_averaged_statistics_preserve_layout_offsets_hooks_and_deferred_raw():
     assert len(records) == 2  # program and SoC getters must not rerun the backend
 
 
-@pytest.mark.parametrize("processing", ["threshold", "tracker"])
-def test_shot_processing_uses_materialized_statistics(processing):
+def test_threshold_uses_materialized_statistics():
     env = white_noise(
         load_soccfg(n_readouts=2),
         std_adc=0,
@@ -238,11 +238,6 @@ def test_shot_processing_uses_materialized_statistics(processing):
         env,
     )
     records = []
-    tracked = []
-
-    class Tracker:
-        def update(self, points):
-            tracked.append(points.copy())
 
     def execute(request):
         result = statistics(request)
@@ -250,23 +245,14 @@ def test_shot_processing_uses_materialized_statistics(processing):
         return result
 
     env.soc.binding.execute = execute
-    if processing == "threshold":
-        result = prog.acquire(env.soc, progress=False, threshold=12.5)
-    else:
-        result = prog.acquire(env.soc, progress=False, trackers=[Tracker(), Tracker()])
+    result = prog.acquire(env.soc, progress=False, threshold=12.5)
     assert result is not None
     request = request_of(env)
     raw = raw_of(prog)
     expected_raw = records[0].raw.materialize(request.reps, request.avg_level)
     np.testing.assert_array_equal(raw[0], expected_raw[1])
-    if processing == "threshold":
-        np.testing.assert_array_equal(result[0][0, ..., 0], [[0, 0, 0], [1, 1, 1]])
-        np.testing.assert_array_equal(result[0][..., 1], 0)
-    else:
-        assert len(tracked) == 2
-        expected = np.moveaxis(expected_raw[1], [-2, request.avg_level], [0, -2]) / 8
-        np.testing.assert_array_equal(tracked[0], expected)
-        np.testing.assert_array_equal(result[0][0, 0, 0], [10, -1])
+    np.testing.assert_array_equal(result[0][0, ..., 0], [[0, 0, 0], [1, 1, 1]])
+    np.testing.assert_array_equal(result[0][..., 1], 0)
 
 
 @pytest.mark.parametrize(

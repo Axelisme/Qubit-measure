@@ -253,11 +253,11 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             builder.join("pump", "stokes", into="default")
             builder.emit(PulseReadout("readout", cfg.readout))
             program = builder.build()
-            processor = shot_sums(program, [Classify("readout")])
+            reducer = shot_sums(program, [Classify("readout")])
             sched.run_acquire_summed(
                 program,
                 context.soc,
-                processor=processor,
+                reducer=reducer,
                 rounds=1,
                 charge_requirements=(
                     ChargeDriveRequirement("Pump", cfg.pump_ch),

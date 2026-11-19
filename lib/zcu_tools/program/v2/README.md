@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-20，每發 ADC 讀取數
+**Last updated:** 2026-11-20，module 遮罩來源與 reducer 初始化
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -140,24 +140,29 @@ Request、數值契約與環境組裝見 [simulation](simulation/README.md)，st
 
 `acquire(..., rounds=1)` 與 `acquire_decimated(..., rounds=1)` 接收軟體平均次數。
 `reps` 與 `rounds` 必須為正整數，bool 不算整數，無效值在編譯或 acquire admission 前 raise ValueError。
-`acquire_summed` 以單一 processor 處理所有 ADC 的正規化 IQ，跨 round 只加總。
+`TimelineBuilder.register_shot_mask_source(consumed_reads, source)` 記錄來源與它消耗的實體 ADC 讀取，並在 build 時轉交 program。
+手寫與 builder program 都在組裝 body 後呼叫已宣告 module 的 `register_shot_mask_sources(prog)`。Module 可解析自己的發射並註冊來源，預設不註冊。Program 在取數時呼叫這些來源。
+來源、布林遮罩與取數的契約見 [registered shot masks](../README.md#registered-shot-masks)。
+`acquire_summed` 每輪把可見 ADC 的正規化 IQ 與遮罩交給單一 reducer。
+框架用 `start(points)` 建立 state 並保存它；round hook 與最終結果都從 reducer 的 `output(state)` 取得。
 `shot_sums(prog, axes)` 在 compile 後以 emit tag 或未標記 module 名稱解析 `Classify` 與 `IQ` 軸。
+Label、讀取索引與讀取數以移除遮罩來源消耗的讀取後的資料為準。
 `chain_sweep_sums(prog, read)` 處理單一 fixed Repeat 內的 PulseReadout，回傳每點 12 × 12 augmented sums。
 `thermal_chain_sums(prog, read)` 處理同一 PulseReadout 的 16 次連讀，可展開或放在單一 fixed Repeat。
-每點回傳 108 欄：shot count 與 107 個 sums，跨 reps 與 rounds 只加總。
+每點回傳 108 欄：shot count 與 107 個 sums，跨保留的 reps 與已完成的 rounds 只加總。
 Sums 保留 R1..R16 的 I/Q means、R1 self moments、全部 15 個相鄰對與 (R1,R3)、(R1,R4)、(R1,R5)。
-每對保留 II′、IQ′、QI′、QQ′ 四個 components，processor 不套分析權重。
-Caller 安排熱平衡等待與沒有 drive 的連讀；processor 檢查 owner、read 數與同 ADC 沒有其他 triggers，不檢查 drive 或 timing 內容。
+每對保留 II′、IQ′、QI′、QQ′ 四個 components，reducer 不套分析權重。
+Caller 安排熱平衡等待與沒有 drive 的連讀；reducer 檢查 owner、read 數與同 ADC 沒有其他 triggers，不檢查 drive 或 timing 內容。
 `chain_cycle_sums(prog, read)` 處理每 rep 16 次 PulseReadout 的 cycle，回傳每點 66 × 66 augmented sums；D 排列由 caller 保證。
 `rpi_sums(prog, read)` 選一個 fixed Repeat（至少 16 reads）內的 PulseReadout，
 每個 rep 是獨立 cycle，lag 1..15 只在 cycle 內配對。
 多 setting 時必須將 reps 放在最內層。統計量跨 reps 與 rounds 累加，
 35 欄輸出保留完成的 cycle 數與 sums/counts，固定 H=1 的單段長度由總 reads／cycle 數恢復。
 Caller 負責 Rπ 排程與無 relax 等待。Rep 之間的斷流不影響 lag，
-processor 不檢查 π 校準，也無法偵測 cycle 內未觀察到的物理斷流。
+reducer 不檢查 π 校準，也無法偵測 cycle 內未觀察到的物理斷流。
 
-這些 processor 在編譯後解析 label；pulse 與 mux readout owners 一起判定唯一性。
-Processor 的 read-count 限制、外積總和與取消契約見 [summed acquisition](../README.md#summed-acquisition)。
+這些 reducer 在編譯後解析 label；pulse 與 mux readout owners 一起判定唯一性。
+Read-count 限制、外積總和與取消契約見 [summed acquisition](../README.md#summed-acquisition)。
 
 `readout_observation.observe_readouts(prog)` 由 program owner 解包 compiler wrappers，提供 readout provenance、Trigger 順序及控制 scope。
 它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。

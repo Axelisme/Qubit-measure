@@ -1,12 +1,15 @@
 """Reduce thermally reset 16-read shots to additive moment sums."""
 
-from collections.abc import Mapping
-
 import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import Trigger
 
-from zcu_tools.program.acquisition import ShotSumProcessor
+from zcu_tools.program.acquisition import ShotReducer
+from zcu_tools.program.shot_processing import (
+    AdditiveShotReducer,
+    ShotIQ,
+    zero_rejected_iq,
+)
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
@@ -19,27 +22,28 @@ from .readout_observation import (
 from .timeline import TimelineProgramV2
 
 
-def thermal_chain_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
+def thermal_chain_sums(
+    prog: TimelineProgramV2, read: str
+) -> ShotReducer[NDArray[np.float64]]:
     """Resolve one PulseReadout and reduce its 16-read shots to 108 columns.
 
     read is an emit tag or an untagged module name. All emissions of that
     owner must be 16 unrolled reads or one read in one fixed Repeat of 16,
     on every feasible setting path, including implicit empty branch cases.
     Other triggers on its ADC are forbidden. The compiler supplies the
-    per-shot ADC count. Missing/ambiguous labels, non-PulseReadout owners and
-    emitted/compiled
-    counts or control scopes outside this contract raise ValueError with
+    per-shot ADC count. Missing or ambiguous labels, non-PulseReadout owners,
+    and counts or control scopes outside this contract raise ValueError with
     expected and actual values. Construction does not modify prog.
 
     The caller arranges consecutive reads with no intervening drive or extra
     wait, followed by the thermal relaxation delay. Pulse/timing content is
     not checked. Every read supplies means and adjacent-pair moments.
 
-    The callable borrows ADC-keyed float64 (points, reps, 16, 2) IQ arrays,
+    The reducer borrows ADC-keyed float64 (points, reps, 16, 2) IQ arrays,
     without mutation. IQ is ADC integral / rounded integration length, without
     offset subtraction. Other ADCs are ignored; a missing selected ADC raises
     KeyError, and a shape mismatch raises ValueError. Output is float64
-    (points, 108), summed over shots, never averaged:
+    (points, 108), summed over kept shots, never averaged:
 
     * 0: shot count.
     * 1:33: I,Q of R1..R16, in read order.
@@ -48,22 +52,24 @@ def thermal_chain_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     * 96:108: II′,IQ′,QI′,QQ′ for (R1,R3),(R1,R4),(R1,R5).
 
     All cross components are preserved, including the middle adjacent pair.
-    No analysis weights are applied by this processor.
-
-    Reps and completed rounds add, including the shot count.
+    The reducer adds kept reps and completed rounds, including the shot count.
+    It applies no analysis weights.
     """
     ch = _resolve_block(prog, read, reads=16)
 
-    def process(iq: Mapping[int, NDArray[np.float64]]) -> NDArray[np.float64]:
+    width = 108
+
+    def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
         values = iq[ch]
         if values.ndim != 4 or values.shape[2:] != (16, 2):
             raise ValueError(
                 f"ADC {ch}: expected (points, reps, 16, 2); actual {values.shape}"
             )
-        points, reps = values.shape[:2]
+        values = zero_rejected_iq(values, mask)
+        points = values.shape[0]
         first_i, first_q = values[:, :, 0, 0], values[:, :, 0, 1]
-        sums = np.empty((points, 108), dtype=np.float64)
-        sums[:, 0] = reps
+        sums = np.empty((points, width), dtype=np.float64)
+        sums[:, 0] = mask.sum(axis=1)
         sums[:, 1:33] = values.sum(axis=1).reshape(points, 32)
         sums[:, 33:36] = np.stack(
             [first_i**2, first_i * first_q, first_q**2], axis=-1
@@ -76,7 +82,7 @@ def thermal_chain_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
         sums[:, 96:108] = early.reshape(points, 12)
         return sums
 
-    return process
+    return AdditiveShotReducer(round_sums, (width,))
 
 
 def _resolve_block(prog: TimelineProgramV2, read: str, reads: int) -> int:

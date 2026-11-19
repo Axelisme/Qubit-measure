@@ -33,7 +33,7 @@ from zcu_tools.cfg_model import (
     ModuleSpec,
     PulseSpec,
     ReadoutSpec,
-    ResetSpec,
+    ResetWithHeraldSpec,
     WaveformAssetInfo,
     WaveformCfg,
     WaveformCfgFactory,
@@ -56,7 +56,7 @@ MODULE_LIBRARY_VERSION = FormatVersion(2, 0)
 _YAML_MAP = TypeAdapter(YamlMap)
 _YAML_VALUE = TypeAdapter(YamlValue)
 _READOUT_SPEC = TypeAdapter(ReadoutSpec)
-_RESET_SPEC = TypeAdapter(ResetSpec)
+_RESET_SPEC = TypeAdapter(ResetWithHeraldSpec)
 
 
 class ComponentLibrary(BaseModel):
@@ -71,7 +71,7 @@ class ComponentLibrary(BaseModel):
 
     pulses: dict[str, PulseSpec] = Field(default_factory=dict)
     readout: dict[str, ReadoutSpec] = Field(default_factory=dict)
-    reset: dict[str, ResetSpec] = Field(default_factory=dict)
+    reset: dict[str, ResetWithHeraldSpec] = Field(default_factory=dict)
     waveforms: dict[str, WaveformSpec] = Field(default_factory=dict)
 
 

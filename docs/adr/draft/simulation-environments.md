@@ -122,7 +122,7 @@ SimulationAcquireMixin 由 program owner 提供，只在 MyProgramV2 共同基�
 - 同 program／模擬 SoC 只在呼叫期間防重入。拒絕在覆寫原工作前完成，不能進入會清掉原工作的新呼叫清理範圍。
 - 不新增 AcquireLifecycleMixin、abort 入口、跨方法分步使用權或整組 prepare／finish lifecycle wrapper。同步 callback 例外會回到外層 acquire。
 
-既有 Run／QICK round loop、hooks、tracker、分類、normalization 與 averaging 保留。EarlyStopMixin／cancel_flag 繼續擁有停止及部分結果語意，不承諾立即中斷同步 solver 或有界停止延遲；實測過久再評估合作式取消。
+Run／QICK round loop、hooks、分類、normalization 與 averaging 沿用取數管線。EarlyStopMixin／cancel_flag 繼續擁有停止及部分結果語意，不承諾立即中斷同步 solver 或有界停止延遲；實測過久再評估合作式取消。
 
 2026-10-28，使用者以「A我認為可以完整版。」授權三環境的中途 projective readout，取代初版僅末端讀出的限制。Single、six、FTF 都將帶 ADC trigger 的非終端 readout block 分類為 projective read。環境在 pulse start 以 retained DC 能量基底作 rank-1 對角投影，並續演化到下一次 read 或終端；FTF 保留各 outcome 權重，single／six 保留每個投影狀態的轉移列（[[0078]]）。未帶 trigger 的非終端 block 仍是 cavity drive，FTF 保留既有 cavity-drive 演化，single／six 在演化前拒絕。
 

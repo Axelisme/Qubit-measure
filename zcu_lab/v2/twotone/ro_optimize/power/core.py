@@ -194,12 +194,12 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                         builder.emit(qub_pulse if index & 1 else identity)
                         builder.emit(r2)
             prog = builder.build()
-            processor = shot_sums(prog, [IQ("r1"), IQ("r2")])
+            reducer = shot_sums(prog, [IQ("r1"), IQ("r2")])
             sched.run_acquire_summed(
                 prog,
                 context.soc,
                 rounds=cfg.rounds,
-                processor=processor,
+                reducer=reducer,
                 options=RunOptions(converter=np.copy),
                 **(acquire_kwargs or {}),
             )

@@ -87,3 +87,13 @@ class Module(ABC):
         raise NotImplementedError.
         """
         raise NotImplementedError(f"{type(self).__name__} has no timeline lowering")
+
+    def register_shot_mask_sources(self, prog: TimelineProgramV2) -> None:
+        """Optionally register this module's sources on the program after body assembly.
+
+        Called once per declared module per compile, in declaration order.
+        Inspect recorded emissions if needed and pass physical read indices
+        and callbacks to prog.register_shot_mask_source. The default adds no
+        sources. Raise ValueError for unsupported source read placement.
+        """
+        del prog

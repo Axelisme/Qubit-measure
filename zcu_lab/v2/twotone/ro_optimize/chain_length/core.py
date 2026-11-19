@@ -152,7 +152,7 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
                 step.run_acquire_summed(
                     prog,
                     context.soc,
-                    processor=thermal_chain_sums(prog, "readout"),
+                    reducer=thermal_chain_sums(prog, "readout"),
                     rounds=cfg.rounds,
                 )
 

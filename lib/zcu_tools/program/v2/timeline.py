@@ -312,6 +312,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             else PreparedTimelineMacro(self._timeline_book, macro)
             for macro in self.macro_list
         ]
+        # ADR-0083: module providers share the same path for native and builder programs.
+        for module in self._declared_modules:
+            module.register_shot_mask_sources(self)
 
     @property
     def timing_layout(self) -> TimingLayout:

@@ -19,7 +19,7 @@ from zcu_tools.experiment.v2.runtime.acquisition import (
 from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     CancelFlagProtocol,
-    ShotSumProcessor,
+    ShotReducer,
 )
 from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -32,6 +32,7 @@ from tests.experiment.v2.runtime._flow_fakes import (
 )
 from tests.program._acquisition_soc import make_chunk_acquisition
 from tests.program._profiles import load_soccfg
+from tests.program._shot_reduction import SumRounds
 from tests.program._timeline import compile_modules
 
 
@@ -85,11 +86,11 @@ def test_producer_failure_propagates_same_exception_after_explicit_retries(
             fail()
             return self.raw
 
-        def acquire_summed(
+        def acquire_summed[State](
             self,
             soc: object,
             *,
-            processor: ShotSumProcessor,
+            reducer: ShotReducer[State],
             rounds: int = 1,
             step_rounds: bool = False,
             **qick_options: object,
@@ -112,7 +113,7 @@ def test_producer_failure_propagates_same_exception_after_explicit_retries(
             sched.run_acquire_summed(
                 program,
                 object(),
-                processor=lambda _iq: np.ones((1,)),
+                reducer=SumRounds(lambda _iq: np.ones((1,))),
                 options=RunOptions(retry=retry),
             )
 
@@ -248,7 +249,7 @@ def test_run_summed_writes_raw_cumulative_sums_by_default(
 
     with Schedule(buffer, scope=Scope("run")) as schedule:
         result = schedule.run_acquire_summed(
-            program, env.soc, processor=count_shots, rounds=2
+            program, env.soc, reducer=SumRounds(count_shots), rounds=2
         )
         np.testing.assert_array_equal(result, [4.0])
         assert np.shares_memory(result, buffer.array)
@@ -304,7 +305,7 @@ def test_run_converter_is_selected_by_none_not_callable_truthiness(
             result = schedule.run_acquire_summed(
                 program,
                 env.soc,
-                processor=lambda iq: np.ones((1, 1)),
+                reducer=SumRounds(lambda iq: np.ones((1, 1))),
                 options=RunOptions(converter=Converter()),
             )
         np.testing.assert_array_equal(result, [-7.0])
@@ -367,7 +368,7 @@ def test_shot_overrun_restarts_all_rounds_and_discards_failed_attempts(
                     program,
                     soc,
                     rounds=2,
-                    processor=lambda iq: iq[0][..., 0, 0].sum(axis=1),
+                    reducer=SumRounds(lambda iq: iq[0][..., 0, 0].sum(axis=1)),
                     options=RunOptions(retry=retry),
                 )
         assert schedule.outcome.status == ("completed" if succeeds else "failed")
@@ -525,7 +526,7 @@ def test_run_rejects_invalid_rounds_before_acquisition(
                 schedule.run_acquire_summed,
                 program,
                 env.soc,
-                processor=lambda iq: np.ones((1, 1)),
+                reducer=SumRounds(lambda iq: np.ones((1, 1))),
             )
         with pytest.raises(ValueError, match="rounds must be a positive integer"):
             acquire(rounds=rounds)
@@ -551,7 +552,7 @@ def test_run_rejects_negative_retry(
                 schedule.run_acquire_summed,
                 program,
                 env.soc,
-                processor=lambda iq: np.ones((1, 1)),
+                reducer=SumRounds(lambda iq: np.ones((1, 1))),
             )
         with pytest.raises(ValueError, match="retry must be non-negative"):
             acquire(options=RunOptions(retry=-1))
