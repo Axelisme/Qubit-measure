@@ -343,6 +343,22 @@ class WritebackProposal:
     items: tuple[WritebackItem, ...]
 
 
+class InvalidWritebackSelectionError(ValueError):
+    """The responder or author selected candidates outside the helper contract.
+
+    Classified here by the helper producer (ADR-0068); C13 keeps the recipe
+    API independent of the GUI's internal expected-error types.
+    """
+
+
+class WritebackStageNotAnalyzedError(ValueError):
+    """The requested stage has no completed analysis for the current run.
+
+    Classified here by the helper producer (ADR-0068); C13 keeps the recipe
+    API independent of the GUI's internal expected-error types.
+    """
+
+
 class WritebackAnswer(Answer):
     """Decision about a captured writeback question; answering never writes.
 
@@ -372,11 +388,15 @@ class WritebackQuestion(Question[WritebackAnswer]):
         if not isinstance(answer, WritebackAnswer):
             raise TypeError("Writeback requires WritebackAnswer")
         if not answer.accepted and answer.items:
-            raise ValueError("Rejected writeback cannot select items")
-        if len({item.name for item in answer.items}) != len(answer.items):
-            raise ValueError("Duplicate writeback candidate")
+            raise InvalidWritebackSelectionError(
+                "Rejected writeback cannot select items"
+            )
+        if len({(item.stage, item.name) for item in answer.items}) != len(answer.items):
+            raise InvalidWritebackSelectionError("Duplicate writeback candidate")
         if any(item not in self.proposal.items for item in answer.items):
-            raise ValueError("Unknown or modified writeback candidate")
+            raise InvalidWritebackSelectionError(
+                "Unknown or modified writeback candidate"
+            )
 
 
 @dataclass(frozen=True)
@@ -629,19 +649,26 @@ class RecipeTab:
         """
         return self._runtime.save(self.tab)
 
-    async def ask_writeback(self) -> WritebackAnswer:
-        """Ask for validated choices; raise ScriptCancelled on script cancel.
+    async def ask_writeback(
+        self, *, stage: Literal["primary", "post"] | None = None
+    ) -> WritebackAnswer:
+        """Ask about existing candidates from stage, or all analyzed stages if None.
 
-        Reject unknown, changed or duplicate items before author continuation.
-        Answering never writes. Call accept_writeback explicitly to write.
+        A specified stage without a completed analysis for the current run
+        raises WritebackStageNotAnalyzedError before asking. Preview errors
+        propagate. Script cancellation raises ScriptCancelled.
+        Calls may be repeated in any order. Each ask replaces the tab's
+        proposal for accept_writeback. To write, explicitly accept items from
+        the latest proposal before asking again.
         """
-        proposal = self._runtime.writeback_proposal(self.tab)
+        proposal = self._runtime.writeback_proposal(self.tab, stage=stage)
         return await self._runtime.host.ask(WritebackQuestion(proposal=proposal))
 
     def accept_writeback(self, items: Sequence[WritebackItem]) -> WritebackReceipt:
         """Write selected IDs from current owner drafts, Primary then Post.
 
-        Unknown/duplicate candidates or author edits to captured items raise
+        Use items from the latest proposal for this tab. Stale, unknown,
+        duplicate or modified selections raise InvalidWritebackSelectionError
         before writing. Owner draft edits are accepted, including retargets.
         Return original captured candidates for confirmed IDs, not written-value
         snapshots. First failure leaves the successful prefix and diagnostic,

@@ -8,7 +8,10 @@ from pydantic.json_schema import GenerateJsonSchema
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.execution_reply import project_execution
-from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
+from zcu_tools.mcp.measure.recipe_api import (
+    InvalidWritebackSelectionError,
+    RecipeDeclaration,
+)
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 INITIAL_WAIT_SECONDS = 300.0
@@ -49,17 +52,30 @@ def answer(tools: MeasureToolContext, arguments: dict[str, object]) -> ToolReply
 
     request_id must identify the current question; stale/absent requests return
     accepted=False, reason and pending_request_id without consuming a question.
-    Invalid named answer fields raise and preserve the pending request. Accepted
-    answers wait up to 300 seconds for continuation; only authored writes apply.
+    Invalid writeback selections return an invalid_input error with the same
+    pending request ID. Invalid answer fields still raise without consuming
+    the request. Accepted answers wait up to 300 seconds for continuation;
+    only authored writes apply.
     """
     if set(arguments) != {"execution", "request_id", "answer"}:
         raise ValueError("Answers require exactly execution, request_id and answer")
     key = arguments["execution"]
     if not isinstance(key, str) or not key:
         raise ValueError("execution must be a non-empty execution ID")
-    reply = tools.session.recipes.get(key).answer(
-        {"request_id": arguments["request_id"], "answer": arguments["answer"]}
-    )
+    try:
+        reply = tools.session.recipes.get(key).answer(
+            {"request_id": arguments["request_id"], "answer": arguments["answer"]}
+        )
+    except InvalidWritebackSelectionError as error:
+        return ToolReply(
+            {
+                "accepted": False,
+                "reason": "invalid_input",
+                "message": str(error),
+                "pending_request_id": arguments["request_id"],
+            },
+            is_error=True,
+        )
     if reply.data.get("accepted") is False:
         return reply
     return ToolReply(
@@ -84,7 +100,7 @@ def build_recipe_tools(
     return {
         "answer": {
             "handler": partial(answer, context),
-            "description": "Answer a waiting recipe question. Use pending_question.request_id and answer_schema. Stale answers leave the question waiting and return accepted=false, reason and pending_request_id.",
+            "description": "Answer a waiting recipe question. Use pending_question.request_id and answer_schema. Stale answers leave the question waiting and return accepted=false, reason and pending_request_id. Invalid writeback selections also return a message; correct the selection and retry the same request.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
