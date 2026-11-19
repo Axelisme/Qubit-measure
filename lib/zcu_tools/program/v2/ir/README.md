@@ -1,6 +1,6 @@
 # IR architecture guide
 
-**Last updated:** 2026-11-02，查表 loop metadata 與可選 WMEM 分析
+**Last updated:** 2026-11-20，作者跳轉標記
 
 **讀者：** framework-dev。QICK ASM V2 的 IR 分層、分析與 lowering 契約。
 
@@ -95,9 +95,22 @@ The loop markers copy these resolved definitions rather than infer them from ASM
 
 `LOOP_BODY_START` follows native counter initialization; `LOOP_BODY_END` precedes
 native sweep updates/backedge; `LOOP_END` follows the complete closing shell.
+Author jumps and labels in the top-level timeline body add two zero-word
+structural markers:
+
+| Marker | `info` fields | Position |
+| --- | --- | --- |
+| `CONTROL_LABEL` | `label`: author label name (str) | Immediately before its machine label, at the same word address |
+| `CONTROL_JUMP` | `target`: author label name (str); `conditional`: bool; `test`: QICK test name (str) for a conditional jump or `None` otherwise | Immediately before the first instruction of the jump sequence |
+
+Machine labels can differ from the author names. A conditional sequence includes
+a flag-setting TEST. Large-PMEM lowering writes the target address to `s15` before
+the TEST, if present, and jumps through `s15`. Raw assembly emits no control markers.
+
 The compiler snapshots the full logical stream, then gives the optimizer a new
-sequence excluding exactly `SOURCE_START` / `SOURCE_END` and these four native
-loop annotations. It keeps all instructions and labels. Unflagged structured
+sequence without the two CONTROL markers, `SOURCE_START` / `SOURCE_END`, and the four
+native loop annotations. These annotations do not enter the binary. The optimizer
+receives all instructions and labels. Unflagged structured
 loops and branches still use the existing IR parser/lowering. Unknown metadata
 still fails there. `TIMING_BOUNDARY` continues through the anchor/link path;
 `body_start` / `body_end` exclude final QICK shot wait/delay operations.

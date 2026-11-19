@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-18, FTF round reuse
+**Last updated:** 2026-11-20, forward jump lanes
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -162,7 +162,22 @@ Body boundaries distinguish acquisition axes from body-local Repeat counters,
 including loops emitted during Module lowering after QICK loop discovery.
 Inner iterations produce separate slots and retain their nested coordinates.
 Branch dispatch follows compiled register/flag effects and only enters its selected
-marked case. Raw jumps inside case bodies remain unsupported.
+marked case.
+
+At a top-level `CONTROL_JUMP`, the builder uses the compiled TEST and JUMP
+condition to select active lanes. An unconditional jump selects all active lanes.
+Each selected lane waits until its own target `CONTROL_LABEL`; other lanes keep
+executing. Only active lanes change registers, memory, readout config FIFO,
+outputs and reference time. At a label, the live-in check keeps only definitions
+shared by every incoming path.
+
+Before building a request, the frontend checks that markers are outside
+body-local loops and branches, each author label is unique and at a machine
+label, and each marked jump matches its immediate direct or `s15` sequence,
+condition and later target. It rejects inconsistent positions, unmarked body
+jumps (even in skipped blocks), unknown markers, external flag tests `F` and
+`NF`, and conditions that read measurement results.
+
 Each ADC must execute its declared static trigger count in every point/shot;
 matching scan totals cannot compensate for a per-shot mismatch. A mismatch raises
 with ADC channel, static count and actual count before returning a request.

@@ -50,6 +50,16 @@ class TimelineJump(Macro):
         )
 
     def translate(self, prog: TimelineProgramV2) -> None:
+        conditional = isinstance(self.native, CondJump)
+        prog.record_meta(
+            "CONTROL_JUMP",
+            self.target.name,
+            {
+                "target": self.target.name,
+                "conditional": conditional,
+                "test": self.native.test if conditional else None,
+            },
+        )
         self.native.translate(prog)
 
 
@@ -166,6 +176,7 @@ class TimelineLabel(Label):
         self.book.time_bounds.merge_selections([state.selections for state in states])
 
     def translate(self, prog: TimelineProgramV2) -> None:
+        prog.record_meta("CONTROL_LABEL", self.target.name, {"label": self.target.name})
         super().translate(prog)
         self.book.output_time = None  # A taken edge need not have set the same s14.
         self.math.translate(prog)

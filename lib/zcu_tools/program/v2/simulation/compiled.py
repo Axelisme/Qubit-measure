@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from math import prod
 from typing import Any
@@ -42,7 +42,7 @@ from ..ir.io_instructions import (
 from ..ir.operands import ImmValue, Register, SrcKeyword
 from ._compiled_guard import guard_live_in
 from ._compiled_output import Outputs
-from ._compiled_state import IntArray, Machine, signed32
+from ._compiled_state import BoolArray, IntArray, Machine, signed32
 from ._compiled_stream import (
     DecodedInstruction,
     NativeLoop,
@@ -98,9 +98,7 @@ def _execute(record: DecodedInstruction, machine: Machine, outputs: Outputs) -> 
 
 
 def _failure(record: DecodedInstruction, cause: Exception) -> ValueError:
-    return ValueError(
-        f"{type(record.instruction).__name__} at preopt {record.position}, loops={record.loops}, cases={record.cases}, source={record.source!r}: {cause}"
-    )
+    return record.failure(str(cause))
 
 
 def _point_names(
@@ -574,7 +572,33 @@ def _run_body(
             _located_execute(record, machine, outputs)
             index += 1
 
-    run(*bounds)
+    _run_forward_segments(records, machine, bounds, run)
+
+
+def _run_forward_segments(
+    records: tuple[DecodedInstruction, ...],
+    machine: Machine,
+    bounds: tuple[int, int],
+    run: Callable[[int, int], None],
+) -> None:
+    first, last = bounds
+    waiting: dict[int, BoolArray] = {}
+    for index in range(first, last):
+        jump = records[index].jump
+        if jump is not None:
+            run(first, jump.end)
+            if np.any(machine.active):
+                taken = machine.condition(jump.condition)
+                waiting[jump.target] = waiting.get(jump.target, False) | taken
+                machine.active &= ~taken
+                machine.read_mask = machine.active.copy()
+            first = jump.end + 1
+        elif index in waiting:
+            run(first, index)
+            machine.active |= waiting.pop(index)
+            machine.read_mask = machine.active.copy()
+            first = index + 1
+    run(first, last)
 
 
 def _build_lanes(
@@ -669,7 +693,11 @@ def _finish_shell(
             and not inst.if_cond
             and not inst.wr
             and not inst.op
+            and not inst.uf
         ):
+            # QICK's direct End uses the pseudo-label HERE, not a linked name.
+            if str(inst.label) == "HERE":
+                continue
             target = (
                 machine.value(inst.addr)
                 if inst.label is None
