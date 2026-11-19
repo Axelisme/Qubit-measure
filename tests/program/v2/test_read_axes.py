@@ -79,6 +79,16 @@ def test_classified_and_mixed_axes_preserve_class_rules_and_axis_order(
     np.testing.assert_array_equal(reduce_round(process, iq), [[4, 0]])
 
 
+def test_shot_sums_starts_with_zero_state_in_point_and_read_axis_order() -> None:
+    prog = compile_modules(load_soccfg(), [readout()])
+    reducer = v2.shot_sums(prog, [v2.IQ("readout", order=3), v2.IQ("readout")])
+
+    state = reducer.start(3)
+
+    assert state.dtype == np.float64
+    np.testing.assert_array_equal(state, np.zeros((3, 10, 6)))
+
+
 def test_iq_third_order_appends_cubic_sums_without_changing_second_order() -> None:
     prog = compile_modules(load_soccfg(), [readout()])
     iq = {0: np.array([[[[2.0, -3.0]], [[-1.0, 4.0]]]])}

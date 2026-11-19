@@ -16,7 +16,7 @@ class SumRounds:
 
     round_sums: Callable[[_IQ], NDArray[np.float64]]
 
-    def start(self) -> NDArray[np.float64] | None:
+    def start(self, points: int) -> NDArray[np.float64] | None:
         return None
 
     def add(
@@ -33,5 +33,6 @@ class SumRounds:
 
 def reduce_round[State](reducer: ShotReducer[State], shots: _IQ) -> NDArray[np.float64]:
     """Exercise a reducer on one synthetic round with all shots kept."""
-    mask = np.ones(next(iter(shots.values())).shape[:2], dtype=np.bool_)
-    return reducer.output(reducer.add(reducer.start(), shots, mask))
+    points, reps = next(iter(shots.values())).shape[:2]
+    mask = np.ones((points, reps), dtype=np.bool_)
+    return reducer.output(reducer.add(reducer.start(points), shots, mask))

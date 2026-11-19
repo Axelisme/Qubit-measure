@@ -42,8 +42,9 @@ settings, repeat GE and Post before using the classifiers.
 
 Reset defaults to `None`. To emit a preparation pulse before each sequence,
 select an ordinary reset. To keep only shots classified as g on both role
-tones before the sequence, select a `reset/mux_herald` module in Reset. The
-module's `readout` must match the terminal Readout field, including the
+tones before the sequence, select a `reset/mux_herald` module in Reset.
+The Form does not offer `reset/herald`, which requires a pulse readout.
+The module's `readout` must match the terminal Readout field, including the
 classifiers and the full tone order. Reference the same library key in both
 fields. For F1 and F2 at positions 0 and 1 in the full tone list, the module is:
 

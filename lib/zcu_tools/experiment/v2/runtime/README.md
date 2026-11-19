@@ -124,7 +124,8 @@ Raw-shot 入口也要求 `get_shot_result()`。成功 acquire 後沒有 raw buff
 也看不到只供遮罩使用的 ADC。`run_acquire` 拒絕原生 QICK `threshold` 與遮罩並用。
 `run_acquire_summed` 每輪將可見讀取及遮罩交給 reducer，由 reducer 更新累積狀態。
 `run_acquire_shots` 也省略來源消耗的讀取與只供遮罩使用的 ADC。
-`run_acquire_decimated` 在開始取數前拒絕有遮罩來源的 program。
+`run_acquire` 與 `run_acquire_decimated` 在重試前使用 program 的 `check_shot_mask_options`。
+Program 在這個 precheck 拒絕帶遮罩來源的原生 `threshold` 或 decimated 取數。未提供 precheck 的 producer 視為沒有來源。
 
 `run_acquire_shots` 每次只執行一輪，`rounds` 省略或設為整數 1，其他值在入口拋出
 `ValueError`。多輪 raw shots 由 caller 的 host loop 重複呼叫。

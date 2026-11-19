@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar, TypeAlias
 
 import numpy as np
 from matplotlib.lines import Line2D
@@ -34,10 +34,9 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
-    HeraldResetCfg,
     MuxHeraldResetCfg,
     Reset,
-    ResetWithHeraldCfg,
+    ResetCfg,
     TimelineBuilder,
     shot_sums,
 )
@@ -119,7 +118,12 @@ class RBAnalysis:
     reason: str | None
 
 
-class RBCfg(RBInputs[ResetWithHeraldCfg]):
+_RBResetCfg: TypeAlias = Annotated[
+    ResetCfg | MuxHeraldResetCfg, Field(discriminator="type")
+]
+
+
+class RBCfg(RBInputs[_RBResetCfg]):
     """Optional reset → paired random Clifford + own recovery → terminal read.
 
     Use None for no reset, an ordinary reset to prepare every shot, or
@@ -343,11 +347,8 @@ class RBExp(Experiment[RBResult, RBCfg]):
                             relax_delay=config.relax_delay,
                         )
                         readout = MuxReadout("readout", config.readout)
-                        reset = config.reset
-                        if isinstance(reset, (HeraldResetCfg, MuxHeraldResetCfg)):
-                            builder.emit(reset.build("reset", terminal=readout))
-                        elif reset is not None:
-                            builder.emit(Reset("reset", reset))
+                        if config.reset is not None:
+                            builder.emit(Reset("reset", config.reset, terminal=readout))
 
                         # Both arms overlap X90s within a Clifford and align at Clifford ends.
                         emit_sequence(
@@ -360,7 +361,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                         )
                         builder.emit(readout, tag="terminal")
                         prog = builder.build()
-                        processor = shot_sums(
+                        reducer = shot_sums(
                             prog,
                             [
                                 Classify("terminal", config.roles.f1_tone),
@@ -371,7 +372,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                             round_step.run_acquire_summed(
                                 prog,
                                 context.soc,
-                                reducer=processor,
+                                reducer=reducer,
                                 rounds=1,
                                 options=RunOptions(),
                             )

@@ -54,7 +54,6 @@ from .ir.instructions import BaseInst, RegWriteInst
 from .macro.delay import DelayRegAuto
 from .macro.table import TableSelection
 from .modules.base import Module
-from .modules.herald import HeraldReset, register_herald_reads
 from .resources import ProgramResourcesMixin
 from .sweep import SweepCfg
 from .table_param import TableParam, TableRawParam
@@ -313,8 +312,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             else PreparedTimelineMacro(self._timeline_book, macro)
             for macro in self.macro_list
         ]
-        if any(isinstance(module, HeraldReset) for module in self._declared_modules):
-            register_herald_reads(self)
+        # ADR-0083: module providers share the same path for native and builder programs.
+        for module in self._declared_modules:
+            module.register_shot_mask_sources(self)
 
     @property
     def timing_layout(self) -> TimingLayout:

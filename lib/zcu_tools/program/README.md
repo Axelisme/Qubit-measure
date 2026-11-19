@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-20，逐 shot 遮罩與 Timeline 讀取數
+**Last updated:** 2026-11-20，遮罩來源與 reducer 初始化
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -104,6 +104,10 @@ read indices. For each completed round, the source receives only its declared
 reads as float64 `(points, reps, reads, 2)` IQ divided by integration length,
 without IQ-offset subtraction. It returns a bool `(points, reps)` array. Sources
 run in registration order, and a shot is kept only if every source returns True.
+Program registration rejects non-integer or negative indices. Builder records
+its explicit registrations and transfers them at build. A module can register
+its own sources through `Module.register_shot_mask_sources(prog)` after the
+program assembles the body.
 
 The integrated result and round hook omit consumed reads and any ADC with no
 remaining reads. They keep the other ADCs and reads in declaration and trigger
@@ -114,13 +118,17 @@ with all triggers. `get_shot_result()` instead returns the unfiltered integer IQ
 of visible reads in `(points, reps, reads, 2)` order, plus the round's bool mask.
 With no sources, the mask is all True and the native averaging path is unchanged.
 Native `threshold` projection and decimated acquisition reject programs with
-registered sources. Summed acquisition passes the mask to the reducer.
+registered sources. `check_shot_mask_options` applies the same rejection
+before a caller starts acquisition or retries. Summed acquisition passes the
+mask to the reducer.
 
 ## Summed acquisition
 
 Pass one `acquisition.ShotReducer[State]` as `reducer=` to
 `acquire_summed(soc, reducer=..., rounds=1, step_rounds=False, **qick_options)`.
-The framework calls `start()` once per acquire and stores its return value.
+The framework calls `start(points)` once per acquire and stores its return value.
+`points` is the product of the non-rep loop sizes, or 1 with no sweep. Additive
+reducers start with float64 zeros shaped `(points, *axes)`.
 Each completed round calls `add(state, shots, mask)` and replaces the state with
 the return value. The framework calls `output(state)` for round hooks and the
 final result, without averaging. It restores the point dimensions to give
@@ -177,6 +185,8 @@ selected ADC and rejects opaque triggers rather than guessing a read index.
 count, ΣI and ΣQ to return counts and complex conditional means. Other lengths
 raise ValueError. Zero counts stay zero, and unmeasured NaN counts stay NaN.
 Both give NaN means without divide warnings.
+`v2.split_cubic_sums(sums)` requires a ten-component IQ axis and returns the
+counts and uncentered per-shot moment arrays used by SNR analysis.
 
 `v2.chain_sweep_sums(prog, read)` selects a tagged or untagged `PulseReadout`
 inside one fixed body `repeat` of at least 16 reads. The selected ADC must

@@ -146,13 +146,14 @@ Caller 自行準備原生 projection 參數，readout 不提供缺少校準時�
 
 `acquire_summed` 與 Schedule 的 `run_acquire_summed` 以關鍵字 `reducer=` 接收單一 `ShotReducer[State]`。
 Reducer 是累加邏輯，state 是被累加的資料。State 由框架持有，reducer 本身不保存它。
-框架以 `start()` 建立 state，每輪完成後呼叫 `add(state, shots, mask)` 並保存回傳的新 state。
+框架在第一輪前以 `start(points)` 建立 state。`points` 是不含 reps 的迴圈大小乘積，沒有掃描時為 1。
+每輪完成後，框架呼叫 `add(state, shots, mask)` 並保存回傳的新 state。
 硬體與模擬用同一條路徑。取消時捨棄未完成的輪次，保留最後完成那一輪的 state。
 Round hook 與最終結果都取自 `output(state)` 的 float64 `(points, *axes)`。框架只還原點的維度，不另做總和或平均。
 Reducer 收到 ADC-keyed float64 `(points, reps, reads, 2)` IQ（已除以積分長度，未扣 IQ offset）和 bool `(points, reps)` 遮罩。
 來源消耗的讀取及只供遮罩使用的 ADC 不交給 reducer。沒有來源時遮罩全為 True。
 不可相加的統計（例如 KMeans）以自己的 state 表達，`add` 讀得到前面累積的 state。
-`shot_sums`、`chain_sweep_sums`、`thermal_chain_sums`、`chain_cycle_sums` 與 `rpi_sums` 都回傳 reducer，各自決定怎麼使用遮罩。
+`shot_sums`、`chain_sweep_sums`、`thermal_chain_sums`、`chain_cycle_sums` 與 `rpi_sums` 都從 `(points, *axes)` 的零陣列開始，各自決定怎麼使用遮罩。
 遮罩的來源與其他下游見 [Herald reset 與逐 shot 遮罩](#herald-reset-與逐-shot-遮罩)。
 
 讀出軸只有 `Classify` 與 `IQ`。
@@ -160,7 +161,7 @@ Classify 把一次讀出的分類結果轉成 k 維 one-hot。`IQ(read)` 預設�
 `IQ(read, order=3)` 加上 `(I³, I²Q, IQ², Q³)`，共十個分量。Readout 與 JPA optimization 的 live 與最終分數都從已完成 rounds 的總和計算，不另維護統計狀態。
 取數層沒有 tracker：`TrackerMixin`、`MomentTracker` 與 `KMeansTracker` 已刪除。
 原本用 tracker 的 9 處（jpa 4 個、`ro_optimize` 4 個、`calibration_acquire`）改用 `run_acquire_summed` 加 `IQ(read, order=3)`。
-`zcu_tools.experiment.v2.utils.snr.snr_as_signal` 從十個總和算出 sample covariance 與三階中心矩，再算 SNR 與 skew penalty。
+`read_axes.split_cubic_sums` 將十個總和解成計數與每發原始矩。`snr_as_signal` 用這些矩算出 sample covariance 與三階中心矩，再算 SNR 與 skew penalty。
 `shot_sums` 對每個掃描點計算 `Σ_kept v₁ ⊗ v₂ ⊗ …`，只加總遮罩保留的 shot，輸出形狀是 `(points, *axes)`。
 軸順序由作者列出的讀出軸決定。同一次讀出仍可列多次，以保存特徵的外積。
 所有 IQ 軸都取第 0 格時得到計數；只有 Classify 軸時，整個輸出就是各聯合類別的計數。
@@ -262,7 +263,7 @@ Experiment 使用 program 的取數能力，lab core 不依賴 GUI，framework �
 
 **選用。** 實驗沿用既有 `reset` 欄位選用 herald，不另加 herald 欄位或 `_heralded` 版本。
 `ResetWithHeraldCfg` 是普通 reset 加上 `reset/herald` 與 `reset/mux_herald` 的 union；`Reset.Cfg` 不含 herald 類型。
-目前只有 plain `two_qubit/rb` 的 reset 欄位使用 `ResetWithHeraldCfg`，其他實驗需要時再接。
+目前只有 plain `two_qubit/rb` 的 reset 欄位收 herald。它的終端讀取是 mux，因此只收普通 reset 與 `reset/mux_herald`。
 `twotone/t1_cov` 使用 `Reset.Cfg`，不收 herald：遮罩會改變它的聯合二階矩，而 cov 已用第一次讀取自校準。
 選用 herald 時，Result 的形狀與存檔欄位和沒有 herald 時相同。
 Herald reset 只留下通過的 shot，不保存被排除 shot 的類別。
@@ -275,7 +276,7 @@ Herald reset 只留下通過的 shot，不保存被排除 shot 的類別。
 | `reset/herald` | `readout/pulse` | 一個態，例如 `g` |
 | `reset/mux_herald` | `readout/mux` | tone 在完整 tones 中的位置 → 態；鍵是加引號的十進位字串，例如 `{'0': g, '2': g}` |
 
-- `readout` 是 library key 或 inline，設定必須和實驗的終端讀取完全相同。Herald 讀取與終端讀取由同一個 readout module 物件發射：caller 以 `build(name, terminal=readout)` 傳入終端讀取，或把 herald 建立的 `readout` 當作終端讀取發射。
+- `readout` 是 library key 或 inline，設定必須和實驗的終端讀取完全相同。Caller 用 `Reset(name, cfg, terminal=readout)` 時，herald 與終端發射共用傳入的 readout 物件，普通 reset 則忽略它。也可用 herald cfg 的 `build(name)` 建立模塊，並發射它的 `readout` 作為終端讀取。
 - 分類用 readout cfg 的 classifier。Circle 的態是 g、e、other，需要 radius；linear 的態是 g、e；centroid3 不能用於 herald。
 - `keep` 列出的每個 tone 都分類成指定的態，這一發才保留。所有 ro ch 一起保留或一起排除。
 - 可選的 `prepare` 是一個 `pulse`、`reset/pulse`、`reset/two_pulse` 或 `reset/bath`，library key 或 inline，不可以是 herald。
@@ -288,7 +289,7 @@ Herald reset 只留下通過的 shot，不保存被排除 shot 的類別。
 
 - 遮罩是 bool `(points, reps)`，每一輪算一次。所有 ro ch 共用同一個遮罩，對每個 ch 的 `(points, reps, reads_ch, 2)` 廣播；遮罩沒有讀取軸。
 - 遮罩機制屬於 `zcu_tools.program` 的取數層，和 round hook 同層，不屬於 module。Module 與作者只註冊遮罩來源，註冊位置與 owner 見 [[0083]] 的〈Builder 與 Schedule 的職責〉。
-- 每個來源逐 ADC 宣告自己消耗的實體讀取。每輪來源收到這些讀取已除以積分長度、未扣 IQ offset 的 IQ，回傳自己的遮罩。
+- 每個來源逐 ADC 宣告自己消耗的實體讀取。註冊拒絕負數與非整數索引，取數對照編譯後的讀取數檢查上界。每輪來源收到這些讀取已除以積分長度、未扣 IQ offset 的 IQ，回傳自己的遮罩。
 - 多個來源照註冊順序執行，以 AND 合併：所有來源都保留的 shot 才保留。
 - 沒有來源時遮罩全為 True，平均、reducer 與 shots 的輸出和沒有遮罩機制時逐位元相同。
 

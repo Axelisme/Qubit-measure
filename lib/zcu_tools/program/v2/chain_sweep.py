@@ -4,12 +4,12 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import Trigger
 
-from zcu_tools.program._shot_processing import (
+from zcu_tools.program.acquisition import ShotReducer
+from zcu_tools.program.shot_processing import (
     AdditiveShotReducer,
     ShotIQ,
     zero_rejected_iq,
 )
-from zcu_tools.program.acquisition import ShotReducer
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
@@ -45,6 +45,8 @@ def chain_sweep_sums(
     """
     ch, n = _resolve_chain(prog, read)
 
+    width = 12
+
     def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
         values = iq[ch]
         if values.ndim != 4 or values.shape[2:] != (n, 2):
@@ -53,7 +55,7 @@ def chain_sweep_sums(
             )
         values = zero_rejected_iq(values, mask)
         i, q = values[..., 0], values[..., 1]
-        vectors = np.empty((*values.shape[:2], 12), dtype=np.float64)
+        vectors = np.empty((*values.shape[:2], width), dtype=np.float64)
         vectors[..., 0] = mask
         vectors[..., 1:6] = np.stack(
             [
@@ -81,7 +83,7 @@ def chain_sweep_sums(
             vectors[..., start : start + 3] += correlations
         return np.einsum("pri,prj->pij", vectors, vectors)
 
-    return AdditiveShotReducer(round_sums)
+    return AdditiveShotReducer(round_sums, (width, width))
 
 
 def _resolve_chain(prog: TimelineProgramV2, read: str) -> tuple[int, int]:

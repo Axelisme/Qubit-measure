@@ -35,7 +35,7 @@ from .reset import AbsReset, ResetCfg
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ReadoutClassifier
 
-    from ..._shot_masks import ShotMaskSource
+    from ...acquisition import ShotMaskSource
     from ..timeline import TimelineProgramV2
 
 
@@ -153,6 +153,22 @@ class HeraldReset(AbsReset):
         prog.append_macro(_HeraldEmission(self, channels[0], tag, self._mask()))
         prog.emit(self.readout, timeline=timeline, tag=tag)
 
+    def register_shot_mask_sources(self, prog: TimelineProgramV2) -> None:
+        """Register each herald emission's fixed physical reads after body assembly.
+
+        Every feasible path must consume the same reads and end with the shared
+        terminal owner. Invalid placement raises ValueError before acquisition.
+        """
+        paths = iter(observe_readout_paths(prog))
+        reads = _path_herald_reads(next(paths), self)
+        for path in paths:
+            if _path_herald_reads(path, self) != reads:
+                raise ValueError(
+                    "herald readout must consume the same reads on every path"
+                )
+        for marker, channels in reads.values():
+            prog.register_shot_mask_source(channels, marker.mask)
+
     def _channels(self) -> list[int]:
         cfg = self._cfg.readout
         return (
@@ -243,14 +259,13 @@ class _HeraldEmission(ReadoutEmission):
         self, herald: HeraldReset, first_adc: int, tag: str | None, mask: ShotMaskSource
     ) -> None:
         super().__init__(herald, first_adc, tag)
-        self.herald = herald
         self.mask = mask
 
 
 type _HeraldReads = dict[int, tuple[_HeraldEmission, dict[int, tuple[int, ...]]]]
 
 
-def _path_herald_reads(path: ReadoutPath) -> _HeraldReads:
+def _path_herald_reads(path: ReadoutPath, herald: HeraldReset) -> _HeraldReads:
     """Find each herald's physical trigger indices and check the visible terminal owner."""
     counts: dict[int, int] = {}
     controlled: set[int] = set()
@@ -273,32 +288,16 @@ def _path_herald_reads(path: ReadoutPath) -> _HeraldReads:
                     raise ValueError(
                         "herald readout requires fixed physical read indices"
                     )
-                selected[id(pending)] = (
-                    pending,
-                    {ch: (counts.get(ch, 0),) for ch in source.ros},
-                )
+                if pending.owner is herald:
+                    selected[id(pending)] = (
+                        pending,
+                        {ch: (counts.get(ch, 0),) for ch in source.ros},
+                    )
                 pending = None
             for ch in source.ros:
                 counts[ch] = counts.get(ch, 0) + 1
-    for marker, _ in selected.values():
-        if terminal is not marker.herald.readout:
-            raise ValueError(
-                f"{marker.herald.name}: emit the shared herald readout as the terminal readout"
-            )
+    if selected and terminal is not herald.readout:
+        raise ValueError(
+            f"{herald.name}: emit the shared herald readout as the terminal readout"
+        )
     return selected
-
-
-def register_herald_reads(prog: TimelineProgramV2) -> None:
-    """Resolve completed body emissions and register one mask per herald occurrence.
-
-    Call during program assembly after all source macros exist. Heralds must
-    consume the same physical reads on each feasible path and share the last
-    visible readout declaration. Invalid placement or calibration raises ValueError.
-    """
-    paths = iter(observe_readout_paths(prog))
-    reads = _path_herald_reads(next(paths))
-    for path in paths:
-        if _path_herald_reads(path) != reads:
-            raise ValueError("herald readout must consume the same reads on every path")
-    for marker, channels in reads.values():
-        prog.register_shot_mask_source(channels, marker.mask)

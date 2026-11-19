@@ -9,15 +9,18 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import QickParam, Trigger
 
-from zcu_tools.cfg_model import ReadoutClassifier
-from zcu_tools.program._shot_processing import AdditiveShotReducer, ShotIQ
+from zcu_tools.cfg_model import LinearClassifier, ReadoutClassifier
 from zcu_tools.program.acquisition import ShotReducer
+from zcu_tools.program.shot_processing import AdditiveShotReducer, ShotIQ
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import MuxReadout, PulseReadout, classification_processor
 from .readout_labels import emission_label
 from .readout_observation import ReadoutPath, observe_readout_paths
 from .timeline import TimelineProgramV2
+
+_QUADRATIC_IQ_WIDTH = 6
+_CUBIC_IQ_WIDTH = 10
 
 
 @dataclass(frozen=True)
@@ -99,8 +102,10 @@ def shot_sums(
         for axis in axes:
             _check_path_read(axis, labels, other_labels, reference, path)
     counts = {
-        ch: prog.logical_read_count(ch, prog.ro_chs[ch]["trigs"])
-        for ch, _, _ in resolved
+        axis.channel: prog.logical_read_count(
+            axis.channel, prog.ro_chs[axis.channel]["trigs"]
+        )
+        for axis in resolved
     }
 
     def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
@@ -111,8 +116,8 @@ def shot_sums(
                     f"ADC {ch}: expected (points, reps, {count}, 2); actual {actual}"
                 )
         product = None
-        for ch, index, features in resolved:
-            vector = features(iq[ch][:, :, index])
+        for axis in resolved:
+            vector = axis.features(iq[axis.channel][:, :, axis.index])
             product = (
                 vector
                 if product is None
@@ -128,13 +133,18 @@ def shot_sums(
         kept = mask.reshape(*mask.shape, *((1,) * (product.ndim - 2)))
         return product.sum(axis=1, dtype=np.float64, where=kept)
 
-    return AdditiveShotReducer(round_sums)
+    return AdditiveShotReducer(round_sums, tuple(axis.size for axis in resolved))
 
 
 type _LabelReads = dict[str, list[tuple[PulseReadout | MuxReadout, dict[int, int]]]]
-type _ResolvedAxis = tuple[
-    int, int, Callable[[NDArray[np.float64]], NDArray[np.float64]]
-]
+
+
+@dataclass(frozen=True)
+class _ResolvedAxis:
+    channel: int
+    index: int
+    features: Callable[[NDArray[np.float64]], NDArray[np.float64]]
+    size: int
 
 
 def _iq_features(
@@ -168,7 +178,7 @@ def _resolve_path(
                     f"available labels: {list(labels)}"
                 )
             result = _resolve_axis(axis, matches[0], unsupported)
-            ch, _, _ = result
+            ch = result.channel
             compiled = prog.ro_chs[ch]["trigs"]
             if observed[ch] != compiled:
                 raise ValueError(
@@ -296,11 +306,21 @@ def _resolve_axis(
             f"ADC {ch}: trigger inside {unsupported[ch]} is unsupported for read labels"
         )
     if isinstance(axis, IQ):
-        return ch, indices[ch], partial(_iq_features, order=axis.order)
+        return _ResolvedAxis(
+            ch,
+            indices[ch],
+            partial(_iq_features, order=axis.order),
+            _QUADRATIC_IQ_WIDTH if axis.order == 2 else _CUBIC_IQ_WIDTH,
+        )
     classifier = axis.classifier if axis.classifier is not None else classifier
     if classifier is None:
         raise ValueError(f"label {axis.read!r}: classifier missing")
-    return ch, indices[ch], classification_processor(classifier)
+    return _ResolvedAxis(
+        ch,
+        indices[ch],
+        classification_processor(classifier),
+        2 if isinstance(classifier, LinearClassifier) else 3,
+    )
 
 
 def split_sums(
@@ -316,7 +336,7 @@ def split_sums(
     without divide warnings. NaN counts remain NaN.
     No input values are changed; counts are not normalized.
     """
-    if sums.ndim < 1 or sums.shape[-1] != 6:
+    if sums.ndim < 1 or sums.shape[-1] != _QUADRATIC_IQ_WIDTH:
         raise ValueError(
             f"split_sums expected final axis length 6; actual shape {sums.shape}"
         )
@@ -329,3 +349,38 @@ def split_sums(
         where=(counts != 0) & ~np.isnan(counts),
     )
     return counts, means
+
+
+@dataclass(frozen=True)
+class CubicIQMoments:
+    """Count and uncentered, per-shot moments from one cubic IQ axis.
+
+    counts borrows the shot count per cell. first, second and third are
+    detached arrays with one, two or three trailing length-two I/Q axes.
+    They are divided by counts and are NaN for nonpositive or NaN counts.
+    """
+
+    counts: NDArray[np.float64]
+    first: NDArray[np.float64]
+    second: NDArray[np.float64]
+    third: NDArray[np.float64]
+
+
+def split_cubic_sums(sums: NDArray[np.float64]) -> CubicIQMoments:
+    """Decode float64 IQ(order=3) sums into counts and normalized raw moments.
+
+    Preserve all leading axes. Raise ValueError unless the final axis has
+    the ten cubic IQ components. Do not mutate sums or center the moments.
+    """
+    if sums.ndim < 1 or sums.shape[-1] != _CUBIC_IQ_WIDTH:
+        raise ValueError(
+            f"Expected cubic IQ sums with final axis length 10, got {sums.shape}"
+        )
+    counts = sums[..., 0]
+    raw = sums / np.where(counts > 0, counts, np.nan)[..., None]
+    return CubicIQMoments(
+        counts=counts,
+        first=raw[..., 1:3],
+        second=raw[..., [[3, 4], [4, 5]]],
+        third=raw[..., [[[6, 7], [7, 8]], [[7, 8], [8, 9]]]],
+    )

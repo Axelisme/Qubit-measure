@@ -5,12 +5,12 @@ from numpy.typing import NDArray
 from qick.asm_v2 import Trigger
 
 from zcu_tools.core.chain_cycle_groups import pair_group, same_read_group
-from zcu_tools.program._shot_processing import (
+from zcu_tools.program.acquisition import ShotReducer
+from zcu_tools.program.shot_processing import (
     AdditiveShotReducer,
     ShotIQ,
     zero_rejected_iq,
 )
-from zcu_tools.program.acquisition import ShotReducer
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
@@ -64,6 +64,8 @@ def chain_cycle_sums(
     """
     ch = _resolve_cycle(prog, read)
 
+    width = 66
+
     def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
         values = iq[ch]
         if values.ndim != 4 or values.shape[2:] != (16, 2):
@@ -71,7 +73,7 @@ def chain_cycle_sums(
                 f"ADC {ch}: expected (points, reps, 16, 2); actual {values.shape}"
             )
         values = zero_rejected_iq(values, mask)
-        vectors = np.zeros((*values.shape[:2], 66), dtype=np.float64)
+        vectors = np.zeros((*values.shape[:2], width), dtype=np.float64)
         vectors[..., 0] = mask
         vectors[..., 1:33] = values.reshape(*values.shape[:2], 32)
         i, q = values[..., 0], values[..., 1]
@@ -99,7 +101,7 @@ def chain_cycle_sums(
                 )
         return np.einsum("pri,prj->pij", vectors, vectors)
 
-    return AdditiveShotReducer(round_sums)
+    return AdditiveShotReducer(round_sums, (width, width))
 
 
 def _resolve_cycle(prog: TimelineProgramV2, read: str) -> int:

@@ -4,12 +4,12 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import Trigger
 
-from zcu_tools.program._shot_processing import (
+from zcu_tools.program.acquisition import ShotReducer
+from zcu_tools.program.shot_processing import (
     AdditiveShotReducer,
     ShotIQ,
     zero_rejected_iq,
 )
-from zcu_tools.program.acquisition import ShotReducer
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
@@ -57,6 +57,8 @@ def thermal_chain_sums(
     """
     ch = _resolve_block(prog, read, reads=16)
 
+    width = 108
+
     def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
         values = iq[ch]
         if values.ndim != 4 or values.shape[2:] != (16, 2):
@@ -66,7 +68,7 @@ def thermal_chain_sums(
         values = zero_rejected_iq(values, mask)
         points = values.shape[0]
         first_i, first_q = values[:, :, 0, 0], values[:, :, 0, 1]
-        sums = np.empty((points, 108), dtype=np.float64)
+        sums = np.empty((points, width), dtype=np.float64)
         sums[:, 0] = mask.sum(axis=1)
         sums[:, 1:33] = values.sum(axis=1).reshape(points, 32)
         sums[:, 33:36] = np.stack(
@@ -80,7 +82,7 @@ def thermal_chain_sums(
         sums[:, 96:108] = early.reshape(points, 12)
         return sums
 
-    return AdditiveShotReducer(round_sums)
+    return AdditiveShotReducer(round_sums, (width,))
 
 
 def _resolve_block(prog: TimelineProgramV2, read: str, reads: int) -> int:

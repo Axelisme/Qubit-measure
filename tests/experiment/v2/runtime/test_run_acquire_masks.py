@@ -11,9 +11,15 @@ from zcu_tools.cfg_model import ModuleCfgFactory as CoreModuleCfgFactory
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
-from zcu_tools.program.v2 import IQ, Classify, TimelineBuilder, shot_sums
+from zcu_tools.program.v2 import (
+    IQ,
+    Classify,
+    TimelineBuilder,
+    TimelineProgramV2,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules import ModuleCfgFactory, PulseCfg
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.boundary import (
@@ -93,6 +99,44 @@ def deliver_rounds(
         delivery(index, channels) for index, channels in enumerate(rounds)
     )
     environment.soc.binding.execute = lambda _: next(deliveries)
+
+
+class PositiveReadMask(PulseReadout):
+    """Test module that consumes its leading read and keeps positive I."""
+
+    def register_shot_mask_sources(self, prog: TimelineProgramV2) -> None:
+        channel = self.cfg.ro_ch
+        prog.register_shot_mask_source(
+            {channel: [0]}, lambda iq: iq[channel][..., 0, 0] > 0
+        )
+
+
+def test_program_applies_mask_from_a_test_module(environment: SimulationEnvironment):
+    builder = TimelineBuilder(environment.soccfg, reps=2)
+    builder.add_loop("point", 1)
+    builder.emit(
+        PositiveReadMask(
+            "filter",
+            PulseReadoutCfg(
+                gen_ch=0,
+                nqz=1,
+                gain=0.1,
+                waveform=ConstWaveformCfg(length=0.1),
+                ro_ch=0,
+                ro_length=0.1,
+                post_delay=0.05,
+                freq=100.0,
+            ),
+        )
+    )
+    emit_readout(builder, "signal")
+    program = builder.build()
+    raw = np.array([[[[1, 0], [4, 6]], [[-1, 0], [90, 90]]]])
+    deliver_rounds(environment, {0: raw * program.ro_chs[0]["length"]})
+
+    with Schedule(SignalBuffer((1,)), scope=Scope("run")) as schedule:
+        result = schedule.run_acquire(program, environment.soc, remove_offset=False)
+        np.testing.assert_array_equal(result, [2 + 3j])
 
 
 def test_herald_reset_masks_terminal_average_and_classification(
@@ -404,7 +448,7 @@ def test_run_acquire_rejects_modes_incompatible_with_mask_sources(
 
 
 class _DigitReducer:
-    def start(self) -> int:
+    def start(self, points: int) -> int:
         return 0
 
     def add(

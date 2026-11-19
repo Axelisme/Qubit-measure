@@ -14,8 +14,8 @@ from tests.program._shot_reduction import SumRounds
 
 
 class _InPlaceCount:
-    def start(self) -> NDArray[np.float64]:
-        return np.zeros((1, 2), dtype=np.float64)
+    def start(self, points: int) -> NDArray[np.float64]:
+        return np.zeros((points, 2), dtype=np.float64)
 
     def add(
         self,

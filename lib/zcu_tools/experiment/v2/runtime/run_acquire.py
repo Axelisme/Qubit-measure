@@ -5,7 +5,15 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, Unpack
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    Protocol,
+    TypeVar,
+    Unpack,
+    runtime_checkable,
+)
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,11 +28,7 @@ from zcu_tools.experiment.v2.runtime.acquisition import (
     default_raw2signal_fn,
     require_positive_rounds,
 )
-from zcu_tools.program.acquisition import (
-    ImproveAcquireMixin,
-    ShotReducer,
-    ShotResult,
-)
+from zcu_tools.program.acquisition import ShotReducer, ShotResult
 
 if TYPE_CHECKING:
     from zcu_tools.experiment.v2.runtime.schedule import Schedule, ScheduleStep
@@ -88,9 +92,18 @@ def _adapt_run_options(
     )
 
 
-def _reject_shot_masks(program: object, operation: str) -> None:
-    if isinstance(program, ImproveAcquireMixin) and program.has_shot_mask_sources:
-        raise ValueError(f"{operation} does not support registered shot mask sources")
+@runtime_checkable
+class _ShotMaskPrecheck(Protocol):
+    """Reject decimated acquisition or native threshold when masks are registered.
+
+    Treat producers without this capability as having no mask sources. A
+    producer with sources raises ValueError for incompatible options at entry,
+    before acquisition or any retries.
+    """
+
+    def check_shot_mask_options(
+        self, *, threshold: object = None, decimated: bool = False
+    ) -> None: ...
 
 
 class IntegratedProgram(Protocol[T_Raw_co]):
@@ -210,8 +223,8 @@ class RunAcquisitionMixin(ABC):
         omit consumed reads and mask-only ADCs. Native QICK threshold projection
         with registered masks raises ValueError before acquisition.
         """
-        if qick_options.get("threshold") is not None:
-            _reject_shot_masks(program, "run_acquire with native QICK threshold")
+        if isinstance(program, _ShotMaskPrecheck):
+            program.check_shot_mask_options(threshold=qick_options.get("threshold"))
         owner = self._acquisition_owner
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         return AcquisitionRunner(owner, soc).run(
@@ -299,7 +312,8 @@ class RunAcquisitionMixin(ABC):
         Converter and update errors propagate without retry. Registered shot mask
         sources raise ValueError before acquisition because they need integrated IQ.
         """
-        _reject_shot_masks(program, "run_acquire_decimated")
+        if isinstance(program, _ShotMaskPrecheck):
+            program.check_shot_mask_options(decimated=True)
         owner = self._acquisition_owner
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         return AcquisitionRunner(owner, soc).run(

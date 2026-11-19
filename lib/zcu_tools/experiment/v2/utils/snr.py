@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 from scipy.signal import savgol_filter
 
 from zcu_tools.experiment.acquisition_facts import StopDecision
+from zcu_tools.program.v2.read_axes import CubicIQMoments, split_cubic_sums
 
 DEFAULT_SKEW_PENALTY = 0.0
 
@@ -101,13 +102,10 @@ def calc_snr(
 
 
 def _central_moments(
-    sums: NDArray[np.float64],
+    moments: CubicIQMoments,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    count = sums[..., 0]
-    raw = sums / np.where(count > 0, count, np.nan)[..., None]
-    mean = raw[..., 1:3]
-    second = raw[..., [[3, 4], [4, 5]]]
-    third = raw[..., [[[6, 7], [7, 8]], [[7, 8], [8, 9]]]]
+    count, mean = moments.counts, moments.first
+    second, third = moments.second, moments.third
 
     # Use sample covariance (zero for a single shot) and population third moment.
     cov = second - mean[..., :, None] * mean[..., None, :]
@@ -143,10 +141,11 @@ def snr_as_signal(
 
     Raise ValueError for an invalid sums shape, state axis or negative penalty.
     """
-    if sums.ndim < 2 or sums.shape[-1] != 10:
+    if sums.ndim < 2:
         raise ValueError(
             f"Expected cubic IQ sums with final axis length 10, got {sums.shape}"
         )
+    moments = split_cubic_sums(sums)
     if ge_axis < 0:
         ge_axis += sums.ndim
     if not 0 <= ge_axis < sums.ndim - 1:
@@ -155,7 +154,7 @@ def snr_as_signal(
         raise ValueError(
             f"Expected state axis length 2, got shape {sums.shape} with ge_axis={ge_axis}"
         )
-    mean, cov, third = _central_moments(sums)
+    mean, cov, third = _central_moments(moments)
     return np.asarray(
         calc_snr(mean, cov, third, ge_axis=ge_axis, skew_penalty=skew_penalty)
     )

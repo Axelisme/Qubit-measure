@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-20，每發 ADC 讀取數與遮罩來源
+**Last updated:** 2026-11-20，module 遮罩來源與 reducer 初始化
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -140,10 +140,11 @@ Request、數值契約與環境組裝見 [simulation](simulation/README.md)，st
 
 `acquire(..., rounds=1)` 與 `acquire_decimated(..., rounds=1)` 接收軟體平均次數。
 `reps` 與 `rounds` 必須為正整數，bool 不算整數，無效值在編譯或 acquire admission 前 raise ValueError。
-`TimelineBuilder.register_shot_mask_source(consumed_reads, source)` 記錄來源與它消耗的實體 ADC 讀取，編譯後由 program 在取數時呼叫。
+`TimelineBuilder.register_shot_mask_source(consumed_reads, source)` 記錄來源與它消耗的實體 ADC 讀取，並在 build 時轉交 program。
+手寫與 builder program 都在組裝 body 後呼叫已宣告 module 的 `register_shot_mask_sources(prog)`。Module 可解析自己的發射並註冊來源，預設不註冊。Program 在取數時呼叫這些來源。
 來源、布林遮罩與取數的契約見 [registered shot masks](../README.md#registered-shot-masks)。
 `acquire_summed` 每輪把可見 ADC 的正規化 IQ 與遮罩交給單一 reducer。
-框架保存 state，round hook 與最終結果都從 reducer 的 `output(state)` 取得。
+框架用 `start(points)` 建立 state 並保存它；round hook 與最終結果都從 reducer 的 `output(state)` 取得。
 `shot_sums(prog, axes)` 在 compile 後以 emit tag 或未標記 module 名稱解析 `Classify` 與 `IQ` 軸。
 Label、讀取索引與讀取數以移除遮罩來源消耗的讀取後的資料為準。
 `chain_sweep_sums(prog, read)` 處理單一 fixed Repeat 內的 PulseReadout，回傳每點 12 × 12 augmented sums。

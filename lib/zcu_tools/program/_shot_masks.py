@@ -9,12 +9,12 @@ type ShotMaskSource = Callable[[Mapping[int, NDArray[np.float64]]], NDArray[np.b
 
 
 def _validated_mask(
-    keep: object, shape: tuple[int, int], number: int
+    keep: object, shape: tuple[int, int], source_position: int
 ) -> NDArray[np.bool_]:
     if isinstance(keep, np.ndarray) and keep.shape == shape and keep.dtype == np.bool_:
         return keep
     raise ValueError(
-        f"shot mask source {number} must return a bool array of shape {shape}; "
+        f"shot mask source {source_position} must return a bool array of shape {shape}; "
         f"got shape {getattr(keep, 'shape', None)}, dtype {getattr(keep, 'dtype', None)}"
     )
 
@@ -31,6 +31,13 @@ class ShotMasks:
     ) -> None:
         """Snapshot physical ADC/read selections and append source in call order."""
         reads = {ch: tuple(indices) for ch, indices in consumed_reads.items()}
+        for ch, indices in reads.items():
+            for index in indices:
+                if type(index) is not int or index < 0:
+                    raise ValueError(
+                        f"shot mask source ADC {ch}: physical read index {index!r} "
+                        "must be a nonnegative integer"
+                    )
         self._sources.append((reads, source))
         for ch, indices in reads.items():
             self._hidden.setdefault(ch, set()).update(indices)
@@ -53,7 +60,7 @@ class ShotMasks:
             if ch not in counts:
                 raise ValueError(f"shot mask source consumes undeclared ADC {ch}")
             for index in indices:
-                if type(index) is not int or not 0 <= index < counts[ch]:
+                if index >= counts[ch]:
                     raise ValueError(
                         f"shot mask source ADC {ch}: physical read index {index!r} "
                         f"is outside [0, {counts[ch]})"
@@ -72,9 +79,9 @@ class ShotMasks:
         exceptions propagate.
         """
         mask = np.ones(shape, dtype=np.bool_)
-        for number, (consumed, source) in enumerate(self._sources, start=1):
+        for position, (consumed, source) in enumerate(self._sources, start=1):
             keep = source(
                 {ch: iq[ch][:, :, reads, :] for ch, reads in consumed.items()}
             )
-            mask &= _validated_mask(keep, shape, number)
+            mask &= _validated_mask(keep, shape, position)
         return mask

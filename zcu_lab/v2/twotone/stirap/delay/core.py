@@ -180,11 +180,11 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
                 builder.join("pump", "stokes", into="default")
                 builder.emit(PulseReadout("readout", cfg.readout))
                 program = builder.build()
-                processor = shot_sums(program, [Classify("readout")])
+                reducer = shot_sums(program, [Classify("readout")])
                 step.run_acquire_summed(
                     program,
                     context.soc,
-                    reducer=processor,
+                    reducer=reducer,
                     rounds=1,
                     options=RunOptions(
                         converter=lambda sums: sums.reshape(len(STATE_LABELS))

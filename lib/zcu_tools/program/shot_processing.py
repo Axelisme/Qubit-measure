@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from math import prod
 from typing import Protocol
 
 import numpy as np
@@ -18,8 +19,8 @@ class ShotReducer[State](Protocol):
     in add, but do not retain it on the reducer itself. Inputs are borrowed.
     """
 
-    def start(self) -> State:
-        """Return fresh state before the first round."""
+    def start(self, points: int) -> State:
+        """Return fresh state for points, the product of all non-rep loop sizes."""
         ...
 
     def add(self, state: State, shots: ShotIQ, mask: NDArray[np.bool_]) -> State:
@@ -40,44 +41,56 @@ class ShotReducer[State](Protocol):
         ...
 
 
-@dataclass(frozen=True)
-class RoundReduction:
-    """One acquisition's stateful callbacks, independent of the state type."""
+class RoundReduction(Protocol):
+    """One acquisition's running reduction, independent of the state type."""
 
-    add: Callable[[ShotIQ, NDArray[np.bool_], tuple[int, ...]], None]
-    output: Callable[[], NDArray[np.float64]]
+    def add(self, shots: ShotIQ, mask: NDArray[np.bool_]) -> None:
+        """Accumulate one complete round of normalized visible shots and its mask."""
+        ...
+
+    def output(self) -> NDArray[np.float64]:
+        """Detach the cumulative output as (*point_dims, *axes).
+
+        Invalid dtype, point count or a changed output shape raises ValueError.
+        """
+        ...
 
 
-def start_reduction[State](reducer: ShotReducer[State]) -> RoundReduction:
-    """Start a reducer and bind its state to the acquisition's round callbacks."""
-    state = reducer.start()
-    output_shape: tuple[int, ...] | None = None
-    point_dims: tuple[int, ...] = ()
-    points = 0
+def start_reduction[State](
+    reducer: ShotReducer[State], point_dims: tuple[int, ...]
+) -> RoundReduction:
+    """Start a reducer for the acquisition's non-rep loop sizes in loop order."""
+    return _RoundReduction(reducer, point_dims)
 
-    def add(shots: ShotIQ, mask: NDArray[np.bool_], dims: tuple[int, ...]) -> None:
-        nonlocal state, point_dims, points
-        state = reducer.add(state, shots, mask)
-        point_dims = dims
-        points = mask.shape[0]
 
-    def output() -> NDArray[np.float64]:
-        nonlocal output_shape
-        payload = _float64_output(reducer.output(state))
+class _RoundReduction[State]:
+    def __init__(
+        self, reducer: ShotReducer[State], point_dims: tuple[int, ...]
+    ) -> None:
+        self._reducer = reducer
+        self._point_dims = point_dims
+        self._points = prod(point_dims)
+        self._state = reducer.start(self._points)
+        self._output_shape: tuple[int, ...] | None = None
+
+    def add(self, shots: ShotIQ, mask: NDArray[np.bool_]) -> None:
+        self._state = self._reducer.add(self._state, shots, mask)
+
+    def output(self) -> NDArray[np.float64]:
+        payload = _float64_output(self._reducer.output(self._state))
+        expected = self._output_shape
         if (
             payload.ndim < 1
-            or payload.shape[0] != points
+            or payload.shape[0] != self._points
             or any(size < 1 for size in payload.shape[1:])
-            or (output_shape is not None and payload.shape != output_shape)
+            or (expected is not None and payload.shape != expected)
         ):
             raise ValueError(
-                f"reducer expected shape {output_shape or f'({points}, *positive_axes)'}; "
+                f"reducer expected shape {expected or f'({self._points}, *positive_axes)'}; "
                 f"actual shape {payload.shape}"
             )
-        output_shape = payload.shape
-        return payload.reshape(point_dims + payload.shape[1:]).copy()
-
-    return RoundReduction(add, output)
+        self._output_shape = payload.shape
+        return payload.reshape(self._point_dims + payload.shape[1:]).copy()
 
 
 def _float64_output(payload: object) -> NDArray[np.float64]:
@@ -91,21 +104,28 @@ def _float64_output(payload: object) -> NDArray[np.float64]:
 
 @dataclass(frozen=True)
 class AdditiveShotReducer:
-    """Sum one fixed-shape payload per round; the first payload sets the shape."""
+    """Accumulate fixed-shape float64 arrays from completed rounds.
+
+    round_sums computes one (points, *axes) array from normalized shots and a
+    keep mask. axes are the trailing dimension sizes, excluding points.
+    """
 
     round_sums: Callable[[ShotIQ, NDArray[np.bool_]], NDArray[np.float64]]
+    axes: tuple[int, ...]
 
-    def start(self) -> NDArray[np.float64]:
-        """Return an empty accumulator before round dimensions are known."""
-        return np.empty(0, dtype=np.float64)
+    def start(self, points: int) -> NDArray[np.float64]:
+        """Return fresh float64 zeros of shape (points, *axes)."""
+        return np.zeros((points, *self.axes), dtype=np.float64)
 
     def add(
         self, state: NDArray[np.float64], shots: ShotIQ, mask: NDArray[np.bool_]
     ) -> NDArray[np.float64]:
         """Compute and accumulate this round's per-point sums."""
         sums = self.round_sums(shots, mask)
-        if state.size == 0:
-            return sums
+        if sums.shape != state.shape:
+            raise ValueError(
+                f"reducer expected shape {state.shape}; actual {sums.shape}"
+            )
         state += sums
         return state
 

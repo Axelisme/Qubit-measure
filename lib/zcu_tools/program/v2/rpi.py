@@ -4,12 +4,12 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import Trigger
 
-from zcu_tools.program._shot_processing import (
+from zcu_tools.program.acquisition import ShotReducer
+from zcu_tools.program.shot_processing import (
     AdditiveShotReducer,
     ShotIQ,
     zero_rejected_iq,
 )
-from zcu_tools.program.acquisition import ShotReducer
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
@@ -39,8 +39,9 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotReducer[NDArray[np.float
     round: integer integrals / rounded integration length, without IQ-offset
     subtraction. Each rep at each setting is one segment of length reads.
     Lag 1..15 pairs stay within that cycle. The reducer accumulates sums
-    across kept reps and completed rounds. Rep, round and setting boundaries never contribute pairs. No inputs
-    are changed and other ADC inputs are ignored. Shape/dtype mismatches raise
+    across kept reps and completed rounds. Pairs never cross rep, round or
+    setting boundaries. Inputs are unchanged and other ADCs are ignored.
+    Shape or dtype mismatches raise
     ValueError with expected and actual values; a missing selected ADC raises
     KeyError. Points, reps and reads must match the compiled program.
 
@@ -51,9 +52,8 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotReducer[NDArray[np.float
     units for first moments and ADC units squared for square/products. Counts
     are integers encoded as float64. H=1 metadata recovers segment length L=N/S,
     not N itself; do not combine records with different L. Each kept segment adds
-    max(L-j, 0) pairs. Pass one
-    pooled record to RPiSums.from_processor in
-    analysis.readout_chain; no per-round normalization is applied here.
+    max(L-j, 0) pairs. This reducer does not normalize rounds. Decode a pooled
+    record with the analysis API `RPiSums.from_processor(record)`.
     """
     dims, avg = prog.loop_dims, prog.avg_level
     if dims is None or avg is None:
@@ -64,6 +64,8 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotReducer[NDArray[np.float
     ch, reads = _resolve_readout(prog, read)
     expected_shape = (points, dims[avg], reads, 2)
 
+    width = 35
+
     def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
         values = iq[ch]
         if values.shape != expected_shape or values.dtype != np.float64:
@@ -73,7 +75,7 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotReducer[NDArray[np.float
             )
         values = zero_rejected_iq(values, mask)
         cycles = mask.sum(axis=1)
-        sums = np.zeros((points, 35), dtype=np.float64)
+        sums = np.zeros((points, width), dtype=np.float64)
         sums[:, 0] = cycles
         sums[:, 1] = cycles * reads
         sums[:, 2:4] = values.sum(axis=(1, 2))
@@ -85,7 +87,7 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotReducer[NDArray[np.float
             sums[:, 19 + lag] = cycles * max(reads - lag, 0)
         return sums
 
-    return AdditiveShotReducer(round_sums)
+    return AdditiveShotReducer(round_sums, (width,))
 
 
 def _resolve_readout(prog: TimelineProgramV2, read: str) -> tuple[int, int]:
