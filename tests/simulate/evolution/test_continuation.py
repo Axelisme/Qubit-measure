@@ -91,6 +91,51 @@ def test_continuation_matches_one_shot_without_replaying_phase_or_envelope(shape
     np.testing.assert_allclose(densities, whole.densities, atol=1e-8)
 
 
+def test_cpu_dp54_ramp_from_pure_state_returns_density_fit_for_continuation():
+    operator = np.array([[-0.545328, 0.114124], [0.114124, 0.352509]], complex)
+    model = evolution.SecularModel(
+        (0,),
+        "pure-state ramp",
+        np.array([0.0, 0.1]),
+        np.eye(2, dtype=complex),
+        (evolution.SecularDrive("drive", operator, np.zeros((2, 2), complex)),),
+        np.zeros((2, 2)),
+        np.zeros((2, 2)),
+    )
+    ramp = evolution.EnvelopeSpec(
+        "sampled", np.array([0, 0.2, 0.55, 1], complex), np.linspace(0, 50, 4)
+    )
+    tone = replace(track(1, ramp, duration=50), amplitude=np.array([0.089494]))
+    driven = replace(batch(1, duration=50.0), tracks=(tone,))
+    with (
+        closing(
+            evolution.ModelSource(
+                np.diag([1, 0]).astype(complex),
+                lambda level: replace(model, level=level),
+            )
+        ) as src,
+        closing(
+            evolution.Engine(1, backend="cpu", families=("t4", "dop853"))
+        ) as engine,
+    ):
+        first = engine.evolve(src, (driven,), telemetry=True)
+        assert first.paths.routing["dop853"].dp54_rows == 1
+
+        suffix = replace(
+            driven,
+            end_ns=np.array([55.0]),
+            start_ns=np.array([50.0]),
+            initial_densities=first.densities,
+        )
+        result = engine.evolve(src, (suffix,))
+
+    # Five ns of free evolution at 0.1 GHz flips the coherence's sign.
+    phase_flip = np.array([[1, -1], [-1, 1]])
+    np.testing.assert_allclose(
+        result.densities, first.densities * phase_flip, atol=1e-12
+    )
+
+
 def test_continuation_omission_is_equivalent_and_memo_isolates_start_and_density():
     _require_continuation()
     source = _source()

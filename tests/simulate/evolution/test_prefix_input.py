@@ -345,17 +345,25 @@ def test_nested_shared_prefixes_use_their_own_known_input():
     assert result.paths.points_by_class == {"floquet_period": 2, "t4": 2, "dyson": 2}
 
 
-def test_diagonal_source_shared_output_keeps_its_bitwise_baseline():
-    """Mode pruning must not change the existing diagonal-input table output."""
-    b = replace(batch(), tracks=(track(0.0, 3.0, 0.4, 0.0005),), end_ns=np.full(2, 3.0))
-    with closing(engine(ObservedDyson())) as solver:
-        result = solver.evolve(source(), (b,), cancel=Event())
+def test_diagonal_source_shared_kernel_output_keeps_its_bitwise_baseline():
+    """Mode pruning preserves the diagonal-input table output before projection."""
     expected = np.array(
         [
             [1.0 + 0j, 1.030056647916492e-4 + 0.0004755282581475768j],
             [1.030056647916492e-4 - 0.0004755282581475768j, 0.0 + 0j],
         ]
     )
-    np.testing.assert_array_equal(
-        result.densities, np.repeat(expected[None], 2, axis=0)
-    )
+
+    class PinnedDyson(ObservedDyson):
+        def apply(self, prepared, key_index, table, rows, states, context):
+            mask = super().apply(prepared, key_index, table, rows, states, context)
+            np.testing.assert_array_equal(
+                states, np.broadcast_to(expected, states.shape)
+            )
+            return mask
+
+    b = replace(batch(), tracks=(track(0.0, 3.0, 0.4, 0.0005),), end_ns=np.full(2, 3.0))
+    with closing(source()) as src, closing(engine(PinnedDyson())) as solver:
+        result = solver.evolve(src, (b,), cancel=Event())
+    assert result.paths.segments_by_kernel == {"dyson": 2}
+    replace(b, start_ns=b.end_ns, initial_densities=result.densities)

@@ -26,12 +26,12 @@ from ._envelope import sample_values
 from ._inspection import DispatchCandidate, DispatchInspection
 from ._parallel import execution_pool, native_limit
 from ._timeline_selection import select_points
-from ._validation import density, integers, owned, shape
+from ._validation import density, integers, owned, project_readout_densities, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
 
 # Numerical algorithm revision used by capture, reporting, and simulator caches.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v13"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v14"
 
 
 @dataclass(frozen=True)
@@ -339,11 +339,11 @@ class PathDiagnostics:
         kernel that computed it. Its exceedances scale by the same rule.
     points_by_class: dispatch path-class name -> nonnegative point count.
     exceeded_by_kernel: kernel name -> post-apply accuracy exceedance segment
-        count, with only positive counts retained. Exceeded results remain
-        committed without correction or retry; these are not solver failures.
+        count, with only positive counts retained. These reports do not
+        trigger a retry or a change to the kernel's approximation.
     max_trace_error: maximum absolute complex trace-minus-one of final
-        readout densities; zero for an empty evolve. Report-only, with no
-        correction, rejection or readout-specific tolerance comparison.
+        readout densities before correction; zero for an empty evolve.
+        Report-only, without applying a readout tolerance.
     routing: optional family work reports, empty when telemetry is disabled.
         Timings describe this call only, never the call that populated a cache.
     All mappings default empty, own immutable copies and reject empty names
@@ -565,7 +565,8 @@ class EvolutionResult:
 
     points: unique nonnegative int64 (n,), union of input batch point indices.
     densities: finite complex128 (n,M,M), including basis conversion at end_ns
-        for timelines ending at another flux level. No clipping/normalization.
+        for timelines ending at another flux level. Engine outputs meet the
+        density invariants required by TimelineBatch.initial_densities.
     paths: author-only PathDiagnostics of segments and point classes.
     Arrays own read-only copies.
 
@@ -775,7 +776,8 @@ class Engine:
         returns False after eviction or a route change; the caller must then
         evolve the full acquire again.
         budget: finite positive absolute population and low-four error allowance;
-        otherwise raises ValueError. A closed engine raises RuntimeError.
+        otherwise raises ValueError. It also bounds the maximum absolute entry
+        change when repairing a readout density. A closed engine raises RuntimeError.
         cancel: read-only is_set query checked between chunks; None disables it;
         when set, raises Cancelled, without returning partial results.
         capture optionally appends frozen batch inputs, actual route events and
@@ -787,15 +789,17 @@ class Engine:
         lifetimes. OpenCL program builds may access the simulator user cache.
         telemetry enables per-family calling-thread CPU and routing accounting
         without I/O; False avoids CPU clock reads and returns empty routing.
-        Model ValueErrors propagate; numerical failure raises RuntimeError
-        naming the point and segment. Results do not depend on chunking or
+        Model ValueErrors propagate; a kernel numerical failure raises
+        RuntimeError naming the point and segment. Results do not depend on chunking or
         worker width except for floating-point rounding. Classification may
         borrow this call's worker pool for eight or more shared prepare keys.
         Local guards run in timeline workers and hand their tables to apply.
         Guard decisions remain independent of worker width and execution order.
-        Post-apply accuracy
-        exceedances stay in the result's paths.exceeded_by_kernel and produce
-        exactly one RuntimeWarning per call, without correction or retry.
+        Post-apply accuracy exceedances stay in paths.exceeded_by_kernel and
+        produce exactly one RuntimeWarning per call, without retry. Readout
+        densities must meet the same invariants as continuation inputs. The
+        engine projects invalid outputs after basis conversion, or raises
+        RuntimeError naming the point if the repair fails or exceeds budget.
         """
         from ._capture import CaptureRun
         from ._dispatch import classify, create_work_plan
@@ -874,20 +878,20 @@ class Engine:
                     schedule = Schedule(
                         geometry, dispatch, context, cancel, capture=capture_run
                     )
-                    result = schedule.run(
+                    output, paths = schedule.run(
                         kernels,
                         pool,
                         self._chunks,
                         workers=workers,
                         inventory_chunks=self._inventory_chunks,
                     )
+            project_readout_densities(output, geometry.points, budget)
             if telemetry:
-                result = replace(
-                    result, paths=replace(result.paths, frontend_cpu_s=frontend_cpu_s)
-                )
+                paths = replace(paths, frontend_cpu_s=frontend_cpu_s)
+            result = EvolutionResult(geometry.points, output, paths)
             if cancel.is_set():
                 raise Cancelled()
-            result.paths.warn_exceeded(stacklevel=3)
+            paths.warn_exceeded(stacklevel=3)
             self._routing_reuse.add(reuse_key, reuse_snapshot)
             return result
 

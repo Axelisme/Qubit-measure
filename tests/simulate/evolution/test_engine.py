@@ -655,8 +655,9 @@ def test_shared_dyson_is_bitwise_chunk_independent_and_source_local():
     assert np.max(abs(outputs[0][0] - outputs[0][1])) > 0.01
 
 
-@pytest.mark.parametrize("residual", [2.62e-8, 2e-3])
-def test_trace_diagnostics_report_maximum_without_correcting_kernel_output(residual):
+def test_trace_diagnostics_report_maximum_before_readout_density_correction():
+    residual = 2.62e-8
+
     class TraceResidualKernel(RecordingKernel):
         def apply(
             self, prepared, key_index, table, rows, states, context: ApplyContext
@@ -668,8 +669,9 @@ def test_trace_diagnostics_report_maximum_without_correcting_kernel_output(resid
     result = run(engine, source(), (batch(3),))
     expected = np.repeat(source().initial_density[None], 3, axis=0)
     expected[:, 0, 0] += residual * np.arange(1, 4)
+    expected /= np.trace(expected, axis1=1, axis2=2)[:, None, None]
     np.testing.assert_allclose(result.densities, expected, rtol=0, atol=1e-15)
-    assert getattr(result.paths, "max_trace_error", None) == pytest.approx(3 * residual)
+    assert result.paths.max_trace_error == pytest.approx(3 * residual)
 
 
 def test_empty_evolve_has_zero_trace_diagnostic():
@@ -882,10 +884,11 @@ def test_shared_shaped_prefix_supplies_one_input_to_probe_and_later_segments(bin
             self.known_inputs.append(source_initial.copy())
             return BoundPayload(source_initial) if bind else None
 
-    # A representative has low reuse and takes Sambe; the full batch's three
-    # shaped rows take the ordinary cost order. Both are valid approximations.
-    spectral = PrefixKernel("shaped_sambe", 0.05)
-    direct = PrefixKernel("dop853", 0.1)
+    # The approximate prefix is slightly non-positive, but only the public
+    # readout should be projected. The probe and suffix need the raw prefix.
+    delta = 5e-5
+    spectral = PrefixKernel("shaped_sambe", delta)
+    direct = PrefixKernel("dop853", delta)
     probe = ProbeKernel()
     idle = RecordingKernel("t4")
     shaped = EnvelopeSpec(
@@ -898,16 +901,20 @@ def test_shared_shaped_prefix_supplies_one_input_to_probe_and_later_segments(bin
             track(3, EnvelopeSpec("constant"), start=1, duration=1),
         ),
     )
-    src = source()
-    result = run(Engine(1, kernels=(spectral, direct, probe, idle)), src, (b,))
+    initial = np.diag([1.0, 0.0, 0.0]).astype(complex)
+    with (
+        closing(source()) as models,
+        closing(ModelSource(initial, models.model)) as src,
+    ):
+        result = run(Engine(1, kernels=(spectral, direct, probe, idle)), src, (b,))
     assert len(probe.known_inputs) == 1
     saved = probe.known_inputs[0]
-    assert np.max(abs(saved - src.initial_density)) > 0.01
+    np.testing.assert_array_equal(saved, np.diag([1 + delta, -delta, 0]))
     for _, _, received in (*probe.calls, *idle.calls):
         np.testing.assert_array_equal(
             received, np.repeat(saved[None], len(received), axis=0)
         )
-    np.testing.assert_array_equal(result.densities, np.repeat(saved[None], 3, axis=0))
+    np.testing.assert_array_equal(result.densities, np.repeat(initial[None], 3, axis=0))
     assert spectral.applied_rows + direct.applied_rows == 1, (
         "identical prefixes must be evolved once, not again in workers"
     )

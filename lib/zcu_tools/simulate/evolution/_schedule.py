@@ -21,7 +21,7 @@ from ._gain_plan import admit_shared_builds
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
-from .engine import Cancelled, EvolutionResult, PathDiagnostics
+from .engine import Cancelled, PathDiagnostics
 from .kernel import ApplyContext, Kernel, KernelContext, Prepared, RowPlan, SegmentTable
 from .state import transform_density
 
@@ -378,8 +378,8 @@ class Schedule:
         *,
         workers: int = 1,
         inventory_chunks: bool = False,
-    ) -> EvolutionResult:
-        """Return point-ordered densities and aggregate post-apply diagnostics.
+    ) -> tuple[NDArray[np.complex128], PathDiagnostics]:
+        """Return writable point-ordered densities and pre-repair diagnostics.
 
         chunks fixes prepare partitioning. inventory_chunks opts into complete-
         inventory timeline batching; False keeps fixed chunks for both.
@@ -412,8 +412,7 @@ class Schedule:
         for result in results:
             output[result.points] = result.states
             exceeded.update(result.exceeded_by_kernel)
-        diagnostics = self.diagnostics(output, exceeded)
-        return EvolutionResult(self.geometry.points, output, diagnostics)
+        return output, self.diagnostics(output, exceeded)
 
     def _finish_waves(
         self, pool: Executor, progress: _ChunkProgress
