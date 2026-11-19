@@ -212,6 +212,19 @@ wheels = [
 ]
 
 [[package]]
+name = "cma"
+version = "4.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/03/21/37ceb4618fb381b38e584ec91ee14a62cf544f917e59e771e44684b19cb3/cma-4.6.0.tar.gz", hash = "sha256:0445d917d17d0a67f32564ac3f5abfe31bf52bd94cda5a54826a6f13efa83a18", size = 345459, upload-time = "2026-11-15T20:22:31.233Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/68/d4/a591dd5ab88bd701cc6eb99cff506a9bf4a59844aec2a715dfc41b320e47/cma-4.6.0-py3-none-any.whl", hash = "sha256:96c76678756d36b600ce6150caa30a62933fc652b4e22cc987746a2b1561db6a", size = 357022, upload-time = "2026-11-15T20:22:29.669Z" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -2574,6 +2587,7 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
+    { name = "cma" },
     { name = "h5py" },
     { name = "iminuit" },
     { name = "ipykernel" },
@@ -2605,6 +2619,7 @@ all = [
     { name = "threadpoolctl" },
 ]
 client = [
+    { name = "cma" },
     { name = "h5py" },
     { name = "iminuit" },
     { name = "ipykernel" },
@@ -2636,6 +2651,7 @@ design = [
     { name = "quantum-metal", extra = ["ansys", "gui"], marker = "python_full_version < '3.13'" },
 ]
 development = [
+    { name = "cma" },
     { name = "h5py" },
     { name = "iminuit" },
     { name = "ipykernel" },
@@ -2670,6 +2686,7 @@ gpu = [
     { name = "pyopencl" },
 ]
 gui = [
+    { name = "cma" },
     { name = "h5py" },
     { name = "iminuit" },
     { name = "ipykernel" },
@@ -2721,6 +2738,7 @@ quality = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cma", marker = "extra == 'client'" },
     { name = "filelock", specifier = ">=4,<5" },
     { name = "h5py", marker = "extra == 'client'" },
     { name = "iminuit", marker = "extra == 'client'", specifier = ">=2.32,<3" },
