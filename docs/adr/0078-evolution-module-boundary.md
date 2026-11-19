@@ -251,6 +251,7 @@ Sampled multitone 過渡期的速度代價照樣用 benchmark 判斷，不以「
 它算不準的部分以警告說明是模擬器的限制，不因參數不當而報錯。
 
 例：projective read 改成 Markov chain 時，51 點、21 能階是合法參數，沒有被記憶體預算擋下（[Projective read 的輸出改成 Markov chain](../discussions/2026-11-17-projection-markov-chain-readout.md)）。
+例：FTF 的 cavity drive 使相鄰態能量順序反轉時，模擬照常用原色散模型計算，不重排狀態。一次 acquisition 對每組反轉的態發一次警告，列出首個受影響點及段、總點數與段數，並在固定 gain 比例與觀察到的腔場歷程下，給出 cavity drive gain 的共同縮放上限。超過上限的結果不在色散模型有效範圍內。見 [FTF cavity drives](../../lib/zcu_tools/simulators/ftf/environment/README.md#cavity-drives)。2026-11-19，使用者在「改成警告」與「保留報錯、補上限」兩案中選前者：「1cA」；比較見 [FTF cavity Stark 反轉：從報錯改成警告](../discussions/2026-11-20-ftf-stark-inversion-warning.md)。
 邊界：契約外的輸入（型別、範圍、維度錯）照舊在進入點 fast fail。
 數值近似的 guard 照〈先保證正確，再優化瓶頸〉不放行超標結果，因為那是算法算錯，不是參數造成的。
 

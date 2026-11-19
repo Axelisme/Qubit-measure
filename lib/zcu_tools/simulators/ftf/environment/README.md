@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, pricing the pilot verification
+**Last updated:** 2026-11-20, Stark inversion warnings
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -608,10 +608,17 @@ arrays and admission; `CavityDrive` only forwards the owner. Composition clears
 all resident content on return or exception. Neither Engine nor the long-lived
 source retains this owner. Shaped inputs and final branch fields stay uncached.
 
-A Stark shift that reverses state-energy order raises a point/segment-specific
-error because it exceeds the dispersive model's validity. States are not reordered.
-The linear dispersive cavity model has no measurement-induced state transitions
-and does not model MIST onset.
+When a cavity-drive Stark shift reverses two adjacent state energies, FTF
+continues with the same dispersive calculation and keeps the original state order.
+At acquire completion, it emits one `UserWarning` per reversed pair, naming the
+states, first point and segment, and total affected points and segments. Repeated
+observations of the same segment across rounds or projection histories count once.
+
+The warning gives the tightest upper limit on a common multiplier of the configured
+cavity-drive gain magnitudes. It holds gain ratios and the observed cavity histories
+fixed, including ringdown. Results above the limit are outside the dispersive
+model's validity. The model has no measurement-induced state transitions and does
+not model MIST onset.
 
 ### Readout and sampling
 

@@ -1,11 +1,14 @@
 """Acquire composition advances density and cavity memory at the public seam."""
 
+import re
+import warnings
 from dataclasses import replace
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.device import DeviceManager
+from zcu_tools.program.v2.simulation import SimulationBinding, SimulationCallbacks
 from zcu_tools.simulate.adc import cavity_field_average, cavity_fields
 from zcu_tools.simulate.boundary import PulseEnvelope
 from zcu_tools.simulate.evolution import (
@@ -20,6 +23,7 @@ from zcu_tools.simulators.ftf.environment import FTFSource, plan_template
 from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.program._profiles import profile_soccfg
 from tests.simulators.ftf.environment._templates import (
+    expect_statistics,
     herald_template,
     request,
     settings,
@@ -156,6 +160,80 @@ def test_acquire_continues_each_point_span_density_field_and_common_origin(shape
         source.open_acquire(replace(acquire, sequence=8)).sample_round(snapshot(), 1)
         assert len(engine.calls) == max(map(len, spans))
         assert source.preparation_cache.hits == 1
+    finally:
+        source.close()
+
+
+def test_acquire_warns_once_for_reversed_stark_order_and_reports_gain_limit(recwarn):
+    config = settings().with_telemetry(enabled=False)
+    # Keep nominal gains in range while driving this synthetic cavity hard.
+    readout = config.readout.model_copy(
+        update={
+            "drive": config.readout.drive.model_copy(
+                update={"input_per_gain": 40_000.0}
+            )
+        }
+    )
+    source = FTFSource(
+        config.model_copy(update={"readout": readout}),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=Engine(1),
+    )
+    binding = SimulationBinding(
+        snapshot,
+        source.execute,
+        backend_version="ftf-stark-test",
+        callbacks=SimulationCallbacks(
+            on_begin=source.begin_acquire, on_end=source.finish_acquire
+        ),
+    )
+    base = template()
+    drive = replace(
+        base.events[0],
+        start_ticks=tick_array(np.zeros(2)),
+        duration_ticks=tick_array(np.full(2, 0.002)),
+        gain=np.array([0.5, 1.0]),
+        envelopes=(None,),
+    )
+    warnings.simplefilter("always", UserWarning)
+
+    def acquire(scale: float) -> None:
+        driven = replace(
+            base, events=(replace(drive, gain=drive.gain * scale), *base.events)
+        )
+        with binding.acquire() as sequence:
+            inputs = replace(request(templates=(driven,)), sequence=sequence)
+            for index in range(2):
+                stats = expect_statistics(binding.sample_round(inputs, index))
+                np.testing.assert_array_equal(stats.state_counts.sum(axis=-1), [3, 3])
+                assert not recwarn.list
+
+    try:
+        acquire(1.0)
+        message = str(recwarn.pop(UserWarning).message)
+        assert not recwarn.list
+        assert "states 0 and 1" in message
+        assert "affected points: 2, affected segments: 4" in message
+        assert "first at point 0 segment [0, 2] ns" in message
+        assert "outside the dispersive model's validity" in message
+        scale = re.search(r"common gain scale factor of at most ([\d.e+-]+)", message)
+        assert scale is not None
+        limit = float(scale[1])
+        assert 0 < limit < 1
+
+        # An equal-content acquire also reports once, even when it reuses the solve.
+        acquire(1.0)
+        assert source.preparation_cache.hits == 1
+        assert str(recwarn.pop(UserWarning).message) == message
+        assert not recwarn.list
+
+        # Ringdown is included: the reported limit brackets warning onset.
+        acquire(0.99 * limit)
+        assert not recwarn.list
+        acquire(1.01 * limit)
+        assert recwarn.pop(UserWarning)
+        assert not recwarn.list
     finally:
         source.close()
 

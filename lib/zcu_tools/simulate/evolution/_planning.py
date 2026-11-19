@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from .engine import DriveTrack, EnvelopeSpec, PathDiagnostics, TimelineBatch
 from .kernel import SegmentTable
-from .secular import FluxWaveform, ModelSource, ShiftOrderingError
+from .secular import FluxWaveform, ModelSource, StarkOrderInversion
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,7 @@ class Geometry:
     prefix_paths maps computed prefix IDs to diagnostics adopted by timelines.
     initial_densities optionally supplies point-aligned DC input matrices; None
     uses the common source input and enables shared-prefix/input preparation.
+    stark_order_inversions records shifted segments outside dispersive validity.
     plan(source, batches) constructs geometry without evolving a density.
     """
 
@@ -30,6 +31,7 @@ class Geometry:
     flux_drive: NDArray[np.bool_]
     prefix_paths: Mapping[int, PathDiagnostics] = field(default_factory=dict)
     initial_densities: NDArray[np.complex128] | None = None
+    stark_order_inversions: tuple[StarkOrderInversion, ...] = ()
 
     @property
     def resume_rows(self) -> NDArray[np.int64]:
@@ -342,6 +344,7 @@ def _batch_geometry(
     )
     flux_drive |= _waveform_varies(batch, point, start, end)
     port, frequency, amplitude, theta, envelope_index, offset = columns
+    shift_content, inversions = _shift_contents(batch, point, start, level, source)
     table = SegmentTable(
         point,
         start,
@@ -356,31 +359,42 @@ def _batch_geometry(
         offset,
         envelopes,
         batch.flux_waveform,
-        shift_content=_shift_contents(batch, point, start, level, source),
+        shift_content=shift_content,
         complete_pulses=complete,
     )
-    return Geometry(table, batch.points, flux_drive)
+    return Geometry(table, batch.points, flux_drive, stark_order_inversions=inversions)
 
 
 def _shift_contents(batch, point, start, levels, source):
     contents = np.zeros(len(point), dtype="S64")
+    inversions: list[StarkOrderInversion] = []
     for index, shifts in enumerate(batch.segment_shifts):
         for shift in shifts:
             row = np.flatnonzero((point == index) & (start == shift.start_ns))
-            contents[row] = source.register_shift(shift)
+            content = source.register_shift(shift)
+            contents[row] = content
             for selected in row:
-                # Shape/order validation precedes any kernel preparation.
-                try:
-                    source.shifted_model(
-                        tuple(int(v) for v in levels[selected]),
-                        bytes(contents[selected]),
+                # Validate shapes before preparing kernels. Inversions are report-only.
+                level = tuple(int(v) for v in levels[selected])
+                shifted = source.shifted_model(level, content)
+                reversed_pairs = np.flatnonzero(np.diff(shifted.energies_ghz) < 0)
+                if not len(reversed_pairs):
+                    continue
+                base = source.model(level).energies_ghz
+                for state in reversed_pairs:
+                    inversions.append(
+                        StarkOrderInversion(
+                            (int(state), int(state + 1)),
+                            int(batch.points[index]),
+                            (shift.start_ns, shift.end_ns),
+                            float(base[state + 1] - base[state]),
+                            float(
+                                shift.energy_shift_ghz[state]
+                                - shift.energy_shift_ghz[state + 1]
+                            ),
+                        )
                     )
-                except ShiftOrderingError as error:
-                    raise ValueError(
-                        f"point {batch.points[index]} segment "
-                        f"[{shift.start_ns}, {shift.end_ns}] ns: {error}"
-                    ) from error
-    return contents
+    return contents, tuple(inversions)
 
 
 def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
@@ -408,8 +422,10 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
     envelopes: list[EnvelopeSpec] = []
     envelope_ids: dict[str, int] = {}
     timeline_base = 0
+    inversions: list[StarkOrderInversion] = []
     for geometry in geometries:
         table = geometry.table
+        inversions.extend(geometry.stark_order_inversions)
         remap = np.empty(len(table.envelopes), dtype=np.int64)
         for index, envelope in enumerate(table.envelopes):
             if envelope.identity not in envelope_ids:
@@ -471,6 +487,7 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
         points,
         np.concatenate([g.flux_drive for g in geometries]),
         initial_densities=initial,
+        stark_order_inversions=tuple(inversions),
     )
 
 

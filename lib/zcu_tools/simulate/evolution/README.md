@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-19, budgeted readout density projection
+**Last updated:** 2026-11-20, Stark inversion warnings
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -39,7 +39,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 
 | Purpose | Exports |
 | --- | --- |
-| Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
+| Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `StarkOrderInversion`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
 | Execution capture | `CaptureBuffer`, `CaptureMetadata`, `CaptureRoute`, `CaptureCandidate`, `CapturePrefixRun`, `CapturePosition`, `CaptureAdopter`, `CaptureSampledAdmission`, `CaptureSampledSpot`, `CaptureRowKey` |
 | Dispatch inspection | `DispatchInspection`, `DispatchRow`, `DispatchCandidate`, `RowKey` |
 | Engine model source and routing history | `ModelSource`, `SecularModel`, `SecularDrive`, `RoutingHistory` |
@@ -80,6 +80,15 @@ must match one queried span exactly; missing spans have zero shift. Shifts do
 not add boundaries, rotate bases or change physical `FluxLevel` values. Model,
 prepare and gate-usage identities include shift content. Without shifts,
 the original model source, initial state and reuse semantics remain unchanged.
+
+A shift may reverse the order of two adjacent physical state energies. Evolution
+keeps their original indices and uses the corrected energies. A standalone
+`Engine.evolve` issues one `UserWarning` per reversed pair, with the first point
+and segment, counts, and the tightest upper limit on the lower-minus-upper
+Stark shift difference in GHz. Equal energies do not warn. Callers that compose
+several evolves can use `Engine.defer_stark_order_warnings()` and report the
+observations in `PathDiagnostics.stark_order_inversions` together. Other
+validation and numerical failures still propagate.
 
 `TimelineBatch.start_ns` and `initial_densities` optionally continue each point
 from an existing DC-energy-basis density. Supply both or neither. Starts must

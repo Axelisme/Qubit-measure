@@ -92,6 +92,7 @@ from .secular import (
     SecularDrive,
     SecularModel,
     SegmentShift,
+    StarkOrderInversion,
 )
 from .state import Basis, DensityState, Populations, batch_populations, populations
 from .telemetry import FamilyRouting

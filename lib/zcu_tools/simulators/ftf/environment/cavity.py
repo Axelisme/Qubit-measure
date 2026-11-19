@@ -241,7 +241,7 @@ def _evolve_outcomes(
                 options.key + np.asarray(outcome.history, dtype=np.int64).tobytes()
             ).digest()
             key = _span_key(history_key, step, (batch,))
-            with options.evolving():
+            with options.evolving(), engine.defer_stark_order_warnings():
                 result = engine.evolve(
                     facts.source,
                     (batch,),
@@ -448,7 +448,7 @@ def _evolve_cavities(
         with options.reading():
             batches = tuple(timeline.advance(step) for timeline in timelines)
         reuse_key = _span_key(options.key, step, batches)
-        with options.evolving():
+        with options.evolving(), engine.defer_stark_order_warnings():
             result = engine.evolve(
                 facts.source,
                 batches,
