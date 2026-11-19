@@ -297,7 +297,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                             builder.emit(Reset("reset", config.reset))
                         builder.emit(readout, tag="herald")
 
-                        # Both arms keep per-role order, overlap X90s and meet at each CZ.
+                        # Both arms overlap X90s within a Clifford and align at Clifford ends.
                         emit_sequence(
                             builder,
                             sequence,
