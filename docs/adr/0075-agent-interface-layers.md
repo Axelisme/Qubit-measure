@@ -6,7 +6,7 @@ status: accepted
 
 使用者於 2026-10-16 以「都採用建議」確認歸檔。本篇記錄入口分層、recipe 與 workflow 的共用 async host、Ask 及取消契約。不新增工具、不改 method policy，也不授權硬體操作。
 
-**Last updated:** 2026-11-02，workflow 自有取數與 lib run_core 轉接
+**Last updated:** 2026-11-19，通用契約只有 ask 與正常結束
 
 **關聯：** [[0068]] 的 remote 與 measure 固定工具、[[0062]] 的 workflow run、[[0063]] 的保存權威、[[0069]] 的核心與前端；控制權見 [[0070]]，workflow engine 見 [[0062]]。
 
@@ -136,6 +136,16 @@ Recipe 本地樹在 MCP process，GUI Run 是另一棵樹。Schedule／acquire �
 2026-11-01 使用者裁定：「9我其實只要呈現error本身就好，比如就顯示ValueError()」，在 `repr(error)` 與「型別: 訊息」兩案中答「9a」。由例外產生的 operation 失敗結果，訊息一律是 `repr(error)`，例如 `ValueError()`、`ValueError('fit did not converge')`；`OperationOutcome.from_exception` 是唯一的轉換點。失敗結果在建構時拒絕缺少或空的訊息，GUI wire、MCP recipe 與 setup 不補預設文字。以字串原因建立的失敗維持原字串；event、UI 狀態與 log 的文字不受影響。repr 只決定顯示文字，不依例外型別分支，所以仍符合上述「框架不識別 raise 的原因」。
 
 Fitting owner 的 fit_func 把 optimizer 不收斂與已知自由參數數目下的資料不足轉為 AnalysisFailed，不再回初猜加 warning。Model callback 自己的例外原樣傳播。其餘 backend 的有效性或 fallback 契約不因此全改，已分類路徑見 fitting README。這些 frontend→experiment／analysis 依賴受既有 import contracts 約束。
+
+#### 通用契約只有 ask 與正常結束
+
+原則：recipe 與 workflow 腳本對 agent 的通用契約只有兩個協作式原語：`ask` 與正常結束。`tab.ask_writeback`、`WritebackQuestion` 等建在 `ask` 上的工具都是 helper，不限制提問的次數、順序或種類。Helper 不好用時修 helper，不擴充原語。根停止與取消是 host 的控制命令，見上節〈顯式 Scope 與取消出口〉，不屬於這份契約。
+
+例：mux GE 有 Primary 與 Post 兩次分析，兩筆候選都整筆替換同一個 mux readout module。舊 helper 把兩個 stage 的候選放進同一題，又只以 name 判斷重複，於是擋下合法的選擇。修正是讓 helper 依 stage 出題，recipe 在每次分析後各問一次，`ask` 不變。
+
+邊界：需求無法用 `ask` 加 helper 表達時，例如需要 agent 主動通知腳本，才回到原語層設計，並由使用者裁定。
+
+2026-11-19，使用者：「我记得 recipe 不管是 ask 什么，底层都是基于同一个 ask。我自己认为 recipe 的通用契约就只有 ask，还有正常结束。这是一种协作式的原语，在之上架的工具都属于 helper 的范围。那现在很明显就是你这个 helper 不好用。本来 recipe 可以问任意的东西，回答任意的结果，没有什么次数或者是种类限制。」討論見 [Recipe 的寫回 helper 與 ask 原語](../discussions/2026-11-19-recipe-ask-helpers.md)。
 
 ### 層與層之間以共享狀態交接
 
