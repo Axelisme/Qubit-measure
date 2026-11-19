@@ -631,8 +631,8 @@ def test_shot_sums_resolves_shared_read_after_the_jump_target():
     builder.label("read")
     builder.emit(readout(), tag="shared")
 
-    process = v2.shot_sums(builder.build(), [v2.IQ("shared")])
+    reducer = v2.shot_sums(builder.build(), [v2.IQ("shared")])
     iq = np.array([[[[2.0, 3.0]]], [[[4.0, 5.0]]]])
     np.testing.assert_array_equal(
-        process({0: iq}), [[1, 2, 3, 4, 6, 9], [1, 4, 5, 16, 20, 25]]
+        reduce_round(reducer, {0: iq}), [[1, 2, 3, 4, 6, 9], [1, 4, 5, 16, 20, 25]]
     )
