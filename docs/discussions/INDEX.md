@@ -150,6 +150,7 @@
 - 2026-11-17 [Aliases 綁檔物件的讀取、refresh 與候選准入](2026-11-17-alias-file-cached-observation.md)：公開契約語意。物件持有一次觀察，只有 refresh 讀檔；session 以 opener 開候選，語法通過才與表一起換上。
 - 2026-11-18 [Results Browser 開窗與背景索引](2026-11-18-results-browser-open-speed.md)：背景工作邊界。開窗逐批交付，隱藏不重掃；唯讀索引不算 operation，見 [Measure README](../../lib/zcu_tools/gui/app/measure/README.md#owners)。
 - 2026-11-19 [Point 與 library 資料流的摩擦](2026-11-19-point-library-frictions.md)：便利功能取捨。Ramsey 頻率寫回、回滾、過時 tab 都不改，crosstalk 只做純函式；小功能要多次遇到才加，原則見 [ADR-0075](../adr/0075-agent-interface-layers.md#先做簡單設計再按需加法)。
+- 2026-11-19 [單 qubit RB 與 IRB 合併成 twotone/rb](2026-11-19-single-qubit-rb-irb-merge.md)：實驗合併與資料格式。`target_gate=None` 只跑 reference，指定 gate 才跑兩臂；Result 改為 (round, seed, arm, depth)；`twotone/irb` 移除不留 alias，舊 run 只保留原檔。
 
 ## 量測策略
 
