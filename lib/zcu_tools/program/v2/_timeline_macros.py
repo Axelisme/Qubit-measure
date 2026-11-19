@@ -1221,7 +1221,10 @@ class BranchCases:
         start = len(self.prog.macro_list)
         name = f"{self.by}[{index}]"
         try:
-            with self.prog.timeline(name):
+            with (
+                self.prog._timeline_jumps.region(f"Branch {self.by!r} case {index}"),
+                self.prog.timeline(name),
+            ):
                 yield name
         finally:
             self.cases[index] = self.prog.macro_list[start:]

@@ -457,14 +457,13 @@ def test_unsupported_effect_inside_marked_case_retains_case_diagnostics(
             with branch.case(0):
                 p.pulse(0, "p", tag="drive")
                 if effect == "measurement":
-                    p.read_and_jump(0, "I", 0, ">=", "done")
-                    p.label("done")
+                    p.read_input(0)
                 elif effect == "wait":
                     p.wait(0.1)
                 elif effect == "clock":
                     p.write_reg("s1", "s11")
                 else:
-                    p.jump("HERE")
+                    p.asm_inst({"CMD": "JUMP", "LABEL": "HERE"})
             with branch.case(1):
                 p.pulse(0, "p")
 

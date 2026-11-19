@@ -24,6 +24,7 @@
 | `delay_by_timeline(timeline=...)` | 將 reference 推進到所選結尾，全部 timeline 扣除實際推進量並 floor 0。原生 delay／delay_auto 仍推進 reference，不受 timeline 範圍影響。 |
 | `with repeat(name, n, *, timeline=None, range_hint=None)` | 逐圈累積結尾，入口與回邊不自動同步。`n` 為非負整數或既有 count register 名稱。固定次數不接受 hint。 |
 | `with branch(by=..., align_timeline=..., timeline=None) as cases` | 依 sweep 的 zero-based index 選 `with cases.case(index)`。未宣告點執行空 case，重複、非整數或超界 index 報錯。必填 bool `align_timeline` 選全部 case 的 max 或實際 case 結尾，兩者都不推進 reference。 |
+| `label(label)`／`jump(label)`／`cond_jump(label, arg1, test, op=None, arg2=None)` | Program 與 builder 支援 `_body` 最外層往後跳。Label 名為非空字串，在 body 內唯一。條件跳轉對 register 做 `Z`／`NZ`／`S`／`NS` 測試；`arg2` 可為 register 或整數。Builder 在 build 時重播並報錯。 |
 | `pulse.pulse_name(prog)` | 取得該 program 的 pulse 宣告名稱。Pulse template 按硬體定義去重。相同 generator channel 與取樣定義共用 envelope，不影響 pulse template 的身分。 |
 | `timing_layout`／`ir.analyze_timing` | 從 linked boundary metadata 觀察逐點事件、body_end 與含外殼的 shot_end。DMEM lookup 傳公開 `compile_datamem()` 給 `CompiledTimingInput.dmem`。另傳 `ir.compiled_wmem(prog)` 給 `wmem` 可觀察每次 wave 輸出的六個硬體字。未傳時 `wave_words` 為 None。Resync 讀硬體 s11，analysis 明確拒絕。 |
 
@@ -42,7 +43,12 @@ Build 後 `ro_chs[ch]["trigs"]` 已是每發讀取數，不用再宣告。`set_r
 
 Case 與 Repeat 只可使用母結構允許的 timeline 及局部 fork，局部名字離開後失效。
 Case 內不得經 owner 推進 reference，包含巢狀 Repeat。TwoPulseReset／BathReset 的 children 也有此限制。
-Raw `asm_inst` 或自訂 `Macro.translate` 不經 timeline 記帳與 reference 守衛，結果由作者負責。
+`jump` 不保留 fall-through；只允許放 label，直到有可到達入邊的 label 為止。`cond_jump` 的跳走邊與 fall-through 都參與編譯期合併。
+目標必須在跳轉之後，不得放在 Repeat body 或 Branch case 內。`with timeline(name)` 內可以跳轉，它只切換預設 timeline。
+Label 只保留各入邊都有的 timeline 名稱。已知結尾取逐點最大值，執行期結尾必須相同；每個 ADC 的讀取數也必須相同。
+Label 不推進 reference。若各路徑須保留自己的時序，在跳轉或 fall-through 抵達 label 前呼叫 `delay_by_timeline`。
+`shot_sums` 不解析跳轉到目標 label 之間的 trigger，請將共用 readout 放在合併 label 後。
+`_body` 之外的 label 與跳轉沿用 QICK 行為。Raw `asm_inst` 或自訂 `Macro.translate` 不經 timeline 記帳與 reference 守衛，結果由作者負責。
 `DelayAuto` module 只在 timeline 範圍外且未指定 timeline 時包裝原生 delay_auto／delay_reg_auto；任何顯式或範圍選出的 timeline 都報錯。
 
 Generator／ADC 宣告沿用 QICK 的後宣告覆蓋規則，作者負責一致性，需要時讀 `gen_chs`／`ro_chs`。

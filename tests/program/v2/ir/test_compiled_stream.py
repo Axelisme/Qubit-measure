@@ -8,8 +8,8 @@ from dataclasses import FrozenInstanceError
 
 import numpy as np
 import pytest
+from qick.asm_v2 import Label, QickProgramV2, QickSweep1D
 from qick.asm_v2 import Pulse as NativePulse
-from qick.asm_v2 import QickProgramV2, QickSweep1D
 from qick.qick_asm import AbsQickProgram
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.base import MyProgramV2
@@ -265,9 +265,9 @@ def test_native_pulse_sources_use_call_ordinals_and_rebuild_stably():
 def test_snapshot_positions_keep_labels_boundaries_and_two_word_wait():
     class Program(TimelineProgramV2):
         def _body(self, cfg: None) -> None:
-            self.label("before_wait")
+            self.append_macro(Label(label="before_wait"))
             self.wait(t=0.2)
-            self.label("after_wait")
+            self.append_macro(Label(label="after_wait"))
             self.nop()
 
     prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)

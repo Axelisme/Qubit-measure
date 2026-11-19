@@ -10,7 +10,7 @@
 
 `acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，提供原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。`ProgramResourcesMixin` 提供 dmem 配置及 readout route 保護。
 
-`v2.builder.TimelineBuilder` 記錄宣告、線性動作與巢狀 repeat／branch。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。`SimulationSoc` acquisition 透過 compiled frontend 執行 TimelineProgramV2 的受支援 instruction effects。
+`v2.builder.TimelineBuilder` 記錄宣告、線性動作、巢狀 repeat／branch 與最外層往後跳轉。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。`SimulationSoc` acquisition 透過 compiled frontend 執行 TimelineProgramV2 的受支援 instruction effects。
 
 ## YAML compile profiles
 
@@ -135,12 +135,12 @@ timed macros. Branch paths may share an untagged module name when each selected
 read keeps the same ADC-local index, ADC channel, frequency, integration window,
 phase and cfg classifier. Generator gain and waveform may differ: a zero-gain
 `PulseReadout("r1", cfg, gain=0.0)` retains its generator time slot and ADC trigger.
-The timeline compiler requires equal counts on every ADC at each Branch exit and
-fills QICK's per-shot acquisition layout. Build the program, construct
-`shot_sums`, then acquire. Missing labels or unequal indices or ADC settings
-raise ValueError naming the cases and the differing item. Triggers inside
-Repeat remain unsupported on selected ADCs. Other ADCs may still use control
-flow. If an opaque macro emits a trigger the label resolver cannot see, the
+The timeline compiler requires equal counts on every ADC at each Branch exit
+and author label, then fills QICK's per-shot acquisition layout. Build the
+program, construct `shot_sums`, then acquire. Missing labels or unequal indices
+or ADC settings raise ValueError naming the cases and the differing item.
+Triggers in Repeat or between a jump and its target label are unsupported on
+selected ADCs. Other ADCs may still use control flow. If an opaque macro emits a trigger the label resolver cannot see, the
 processor rejects the label rather than guessing its read index.
 `v2.split_sums(sums)` requires a final six-component IQ axis and uses only
 count, ΣI and ΣQ to return counts and complex conditional means. Other lengths

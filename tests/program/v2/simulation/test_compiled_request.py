@@ -298,7 +298,7 @@ def test_body_clock_and_unstructured_effects_fail_with_preopt_context(
             elif effect == "resync":
                 p.resync(0.1)
             elif effect == "jump":
-                p.jump("HERE")
+                p.asm_inst({"CMD": "JUMP", "LABEL": "HERE"})
             else:
                 p.read_input(0)
 

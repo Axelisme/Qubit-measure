@@ -65,8 +65,8 @@ def shot_sums(
     selected ADC, read index, frequency (MHz), window (us), phase (degrees) and
     cfg classifier agree. Generator gain and waveform may differ. The compiler
     guarantees equal read counts across Branch cases.
-    Missing/ambiguous labels, unequal settings/indices and Repeat triggers on
-    selected ADCs raise ValueError naming Branch cases when present. Read labels
+    Missing/ambiguous labels, unequal settings/indices and triggers inside Repeat
+    or a forward jump range on selected ADCs raise ValueError. Read labels
     cannot be indexed across opaque macros whose triggers are not visible in
     the source path; the error reports the compiled and observed counts.
     QICK rejects duplicate explicit tags at compile time with RuntimeError.
