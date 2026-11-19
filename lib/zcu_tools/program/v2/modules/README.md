@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-02，原生查表掃描與 scalar lookup
+**Last updated:** 2026-11-19，generator envelope 共用
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -22,7 +22,7 @@ Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue�
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
 同一宣告物件可重複發射，也可宣告進不同的原生 program 或 builder。
-各 program 以 module 物件身分持有 pulse／waveform、runtime readout、table offset 與 loader 的宣告結果。
+各 program 以 module 物件身分持有 pulse 名稱、runtime readout、table offset 與 loader 的宣告結果。
 重新 compile 只重建該 program 的資源，不覆寫其他 program 的宣告。
 `Pulse.pulse_name(prog)` 回傳指定 program 的 pulse 名稱，供原生 QICK 呼叫使用。
 Tag 屬於每次 emit，不存於 module constructor。
@@ -241,6 +241,13 @@ initialization. It excludes ADC timing and does not replace runtime scheduling.
 is not a cfg field. `PulseRegistry` includes it in hardware-definition identity,
 so unpaired playback and ADC channels 0 and 1 cannot share a definition by
 accident. Mixer declaration receives the channel only when mixing is configured.
+
+Envelope samples have a separate identity on each program: the generator channel,
+waveform style and sampling parameters. A flat-top uses its ramp definition with
+rounding to even generator clocks; the plateau length stays in the pulse template.
+Arbitrary samples are identified by their playback path, not the asset label.
+Pulses can share an envelope even when their phase, gain, frequency, mixer,
+ADC matching or explicit pulse IDs differ. Const waveforms store no envelope.
 
 `MuxReadoutCfg` reuses the numeric cfg_model schema. `MuxReadout` declares fixed
 mixmux8 tones and explicit logical outputs on one static PFBv4, then plays one
