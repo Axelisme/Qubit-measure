@@ -116,7 +116,7 @@ def encode_form_value(value: object) -> YamlValue:
     """Encode a named Form value for the GUI RPC without evaluating it.
 
     Format authority: lib/zcu_tools/gui/form/README.md (FormInput/expression
-    and complex tags) and tab.describe_cfg RPC field descriptions. Accept
+    and complex tags) and tab.read_recipe_field RPC observations. Accept
     scalar values, Expr, BaseModel and nested string-keyed mappings/sequences.
     Models retain concrete subclass fields. Unsupported values or non-string
     mapping keys raise TypeError. Schema and source validation stay with GUI.

@@ -4,7 +4,15 @@ from dataclasses import replace
 from typing import Annotated
 
 import pytest
-from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta, Range
+from zcu_tools.cfg_model import (
+    ConfigBase,
+    Expr,
+    FieldMeta,
+    MuxReadoutCfg,
+    MuxReadoutSpec,
+    Range,
+    Slot,
+)
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
 )
@@ -207,9 +215,9 @@ def test_single_read_elements_keeps_sibling_drafts(form_rpc):
         assert any(
             error["path"] == ["tones", 0, "phase"] for error in rows[0]["errors"]
         )
-        assert {"path": ["tones", 1, "drive", "module", "gain"], "value": 0.3} in rows[
-            1
-        ]["values"]
+        assert {"path": ["tones", 1, "drive", "gain"], "value": 0.3} in rows[1][
+            "values"
+        ]
         assert owner.input.same_as(before)
         fixture.state.set_tab_running(tab, running=True)
         assert rpc.call("tab.read_elements", {"tab_id": tab, "path": ["tones"]})["ok"]
@@ -277,6 +285,88 @@ def test_aggregate_relative_fields_use_real_rpc_and_keep_owner_errors(form_rpc):
     finally:
         fixture.state.set_tab_running(tab, running=False)
         fixture.ctrl.tab_control.close_tab(tab)
+
+
+@pytest.fixture
+def nested_list_rpc(form_rpc):
+    class NestedListCfg(SampleCfg):
+        readout: MuxReadoutCfg
+
+    def make_form(_ctx: FormContext) -> Form[NestedListCfg]:
+        return Form(
+            NestedListCfg,
+            {
+                "readout": Slot("R.readout.mux", copy=True),
+                "sweep": Range(1, 2, expts=3),
+            },
+        )
+
+    fixture, _, rpc = form_rpc
+    context = fixture.ctrl.context_control
+    context.set_module(
+        capture_focus(context).target,
+        "R.readout.mux",
+        MuxReadoutSpec.model_validate(
+            {
+                "gen_ch": 0,
+                "nqz": 1,
+                "mixer_freq": 6000.0,
+                "length": 1.0,
+                "ro_length": 0.5,
+                "tones": [{"freq": 6000.0, "gain": 0.1, "ro_ch": 0}],
+            }
+        ),
+    )
+    fixture.registry.register(
+        "nested-list",
+        Adapter(
+            spec=replace(SampleAdapter.spec, cfg_type=NestedListCfg),
+            make_form=make_form,
+            run=SampleAdapter.run,
+            guide=None,
+        ),
+    )
+    tab = fixture.ctrl.tab_control.new_tab("nested-list")
+    try:
+        yield tab, rpc
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
+def test_read_elements_accepts_logical_path_below_inline_selector(nested_list_rpc):
+    tab, rpc = nested_list_rpc
+    path = ["readout", "tones"]
+    observed = rpc.call(
+        "tab.read_elements", {"tab_id": tab, "path": path, "fields": [["gain"]]}
+    )
+    assert observed["ok"], observed
+    assert observed["result"]["path"] == path
+    [row] = observed["result"]["elements"]
+    assert row["path"] == [*path, 0]
+    assert {"path": [*path, 0, "gain"], "value": 0.1} in row["values"]
+    assert row["fields"][0]["value"] == 0.1
+    canonical = ["readout", "module", "tones"]
+    rejected = rpc.call("tab.read_elements", {"tab_id": tab, "path": canonical})
+    assert rejected["error"]["data"]["form_path"] == canonical
+
+
+def test_logical_list_description_uses_logical_element_paths(nested_list_rpc):
+    tab, rpc = nested_list_rpc
+    path = ["readout", "tones"]
+    reply = rpc.call("tab.read_recipe_field", {"tab_id": tab, "path": path})
+    assert reply["ok"], reply
+    [item] = reply["result"]["description"]["target"]["elements"]
+    assert item["path"] == [*path, 0]
+
+
+@pytest.mark.parametrize("method", ["tab.reset_cfg", "tab.refresh_sources"])
+def test_recapture_returns_logical_form_paths(nested_list_rpc, method):
+    tab, rpc = nested_list_rpc
+    reply = rpc.call(method, {"tab_id": tab})
+    assert reply["ok"], reply
+    assert {"path": ["readout", "tones", 0, "gain"], "value": 0.1} in reply["result"][
+        "values"
+    ]
 
 
 def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -> None:

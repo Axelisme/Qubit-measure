@@ -7,6 +7,7 @@ from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -18,6 +19,7 @@ from zcu_tools.mcp.measure.recipe_api import (
 class RamanGFInputs(RecipeInputs):
     """Raman controls; omitted fields retain the Form, null goes to its owner."""
 
+    overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
         description="Readout library key with acquired centroid3 calibration.",
@@ -130,8 +132,7 @@ async def raman_gf(session: RecipeSession, inputs: RamanGFInputs) -> RamanGFRepo
     tab.set("gain.n", inputs.gain_n)
     tab.set("shots", inputs.shots)
     tab.set("relax_delay", inputs.relax_delay_us)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

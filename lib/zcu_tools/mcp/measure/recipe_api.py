@@ -11,7 +11,15 @@ from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from inspect import Parameter, iscoroutinefunction, signature
 from math import isfinite
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol, get_args, get_type_hints
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Literal,
+    Protocol,
+    Self,
+    get_args,
+    get_type_hints,
+)
 
 from pydantic import (
     BaseModel,
@@ -21,6 +29,7 @@ from pydantic import (
     GetJsonSchemaHandler,
     WithJsonSchema,
     field_validator,
+    model_validator,
 )
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import PydanticOmit, PydanticUndefined, core_schema
@@ -148,20 +157,47 @@ class FormField:
     fields: tuple[str, ...]
 
 
-class FieldEdit(BaseModel):
-    """One ordered override: dotted logical path and native Form input value.
+_OVERRIDE_OPERATIONS = ("value", "select", "command")
 
-    Decimal path segments address original full-list positions. None clears
-    nullable input. Overrides do not choose sources or perform conversions.
-    Apply each edit with tab.set after experiment values, without deduplication.
+
+class FieldEdit(BaseModel):
+    """One ordered override with a dotted logical path and exactly one operation.
+
+    Decimal segments address original full-list positions. Explicit null is a
+    value or selection, not omission. Apply with RecipeTab.apply_overrides.
     """
 
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(
+        extra="forbid",
+        allow_inf_nan=False,
+        json_schema_extra={
+            "oneOf": [{"required": [op]} for op in _OVERRIDE_OPERATIONS]
+        },
+    )
 
     path: str = Field(min_length=1, description="Nonempty dotted logical Form path.")
-    value: Annotated[FormValue, WithJsonSchema({})] = Field(
-        description='Native Form value in declared units; {"expr": ...} denotes an expression.'
+    value: Annotated[FormValue | Keep, WithJsonSchema({})] = Field(
+        default_factory=lambda: KEEP,
+        description='Native Form value in declared units; {"expr": ...} denotes an expression.',
     )
+    select: str | None | Keep = Field(
+        default_factory=lambda: KEEP,
+        description="Exact option label or captured library key; null clears a nullable selector.",
+    )
+    command: str | Keep = Field(
+        default_factory=lambda: KEEP,
+        description="Name of a command declared for the field, such as to_inline.",
+    )
+
+    @model_validator(mode="after")
+    def validate_operation(self) -> Self:
+        """Reject absent or conflicting operations, counting explicit null."""
+        operations = self.model_fields_set.intersection(_OVERRIDE_OPERATIONS)
+        if len(operations) != 1 or isinstance(
+            getattr(self, next(iter(operations))), Keep
+        ):
+            raise ValueError("Specify exactly one of value, select, command")
+        return self
 
     @field_validator("path")
     @classmethod
@@ -173,15 +209,23 @@ class FieldEdit(BaseModel):
         return path
 
 
+Overrides = Annotated[
+    list[FieldEdit],
+    Field(
+        default_factory=list,
+        description="Ordered Form edits after experiment values; omitted means no edits.",
+    ),
+]
+
+
 class RecipeInputs(BaseModel):
-    """Shared recipe controls and ordered Form overrides.
+    """Shared recipe controls for opening or resetting tabs.
 
     Subclass with experiment fields using T | None | Keep = KEEP. Omission
     retains Form values; null clears/disables nullable Form fields. Unknown
     fields and non-finite numbers fail admission before opening a tab.
     target and reuse_tab_id control Open/Reset rather than editing Form fields:
     omitted/null target keeps global aliases; omitted/null reuse opens a tab.
-    overrides defaults to an empty list and does not accept null.
     """
 
     model_config = ConfigDict(
@@ -199,10 +243,6 @@ class RecipeInputs(BaseModel):
     reuse_tab_id: str | None | Keep = Field(
         default_factory=lambda: KEEP,
         description="Idle matching tab to Reset; omission/null opens a new tab.",
-    )
-    overrides: list[FieldEdit] = Field(
-        default_factory=list,
-        description="Ordered Form edits after experiment values; omitted means no edits.",
     )
 
     @classmethod
@@ -510,8 +550,9 @@ class RecipeTab:
     """One GUI tab's Form edits and operations, with no calibration policy.
 
     Writes use nonempty dotted logical paths; decimal segments are original
-    full-list indexes. read uses the same dotted paths. All owner
-    admission and transport errors propagate without reconnect or retry.
+    full-list indexes. read uses the same dotted paths. Owner admission and
+    transport failures never trigger reconnect or retry. apply_overrides adds
+    the failing entry's index and path to the exception.
     """
 
     def __init__(self, runtime: RecipeRuntime, tab: str, adapter: str) -> None:
@@ -563,15 +604,31 @@ class RecipeTab:
         if not isinstance(option, Keep):
             self._runtime.select(self.tab, path, option)
 
-    def command(self, path: str, name: Literal["to_inline"]) -> None:
-        """Run the owner's to_inline command at a dotted logical selector path.
+    def command(self, path: str, name: str) -> None:
+        """Run a command declared by the owner at a dotted logical path.
 
-        Copies a reference from the fixed capture and preserves child keys.
-        An inline module succeeds without changing its draft. Missing source,
-        unavailable command, ref ancestry and readonly errors propagate without
-        mutation. This does not select fresh defaults or refresh the capture.
+        For example, to_inline copies a reference from the fixed capture and
+        preserves child keys. The owner rejects unavailable commands.
         """
         self._runtime.command(self.tab, path, name)
+
+    def apply_overrides(self, overrides: Sequence[FieldEdit]) -> None:
+        """Apply one owner operation per entry in order, without rollback.
+
+        On failure, raise RuntimeError with the zero-based index and dotted
+        path. Earlier successful operations remain installed; later ones are
+        not attempted.
+        """
+        for index, edit in enumerate(overrides):
+            try:
+                if not isinstance(edit.value, Keep):
+                    self.set(edit.path, edit.value)
+                elif not isinstance(edit.select, Keep):
+                    self.select(edit.path, edit.select)
+                elif not isinstance(edit.command, Keep):
+                    self.command(edit.path, edit.command)
+            except Exception as exc:
+                raise RuntimeError(f"overrides[{index}] ({edit.path}): {exc}") from exc
 
     def check_ready(self) -> None:
         """Validate the whole current Form and lowered cfg without mutation.

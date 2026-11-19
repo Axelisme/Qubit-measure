@@ -179,7 +179,7 @@ def test_nested_fixed_slots_allow_value_edits_and_module_branch_switches():
     assert form.module_input_kind(state.input, ("readout",)) == "ref"
     state.run_command(("readout",), "to_inline", env)
     assert form.module_input_kind(state.input, ("readout",)) == "inline"
-    assert len(form.read_elements(state.input, path, env).elements) == 1
+    assert len(form.read_elements(state.input, ("readout", "tones"), env).elements) == 1
     state.write({(*path, 0, "label"): "Copied and editable"}, env)
     with pytest.raises(FormInputRejected):
         state.write(

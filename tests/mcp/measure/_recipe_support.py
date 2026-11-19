@@ -15,16 +15,12 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
 )
-from zcu_tools.gui.app.measure.remote.form_description import (
-    describe_form,
-    recipe_field_wire,
-)
+from zcu_tools.gui.app.measure.remote.form_description import recipe_field_wire
 from zcu_tools.gui.app.measure.remote.form_errors import recipe_form_errors
-from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
+from zcu_tools.gui.app.measure.remote.form_observation import observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
-from zcu_tools.gui.form import FormEnv, FormPathError
+from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.form_adapter import Form, LogicalEdit
-from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import DocumentSetRef
 from zcu_tools.gui.session.types import DocumentSetCapture
@@ -271,24 +267,7 @@ class LookbackGui:
             },
         }
 
-    def _edit(self, params: dict[str, object]) -> None:
-        self.owner.write(form_writes(params["edits"]))
-        self.publication = dict(observe_form(self.owner))
-
-    def _describe(self, path: tuple[str, ...]) -> dict[str, Any]:
-        try:
-            return dict(describe_form(self.owner, path))
-        except FormPathError as error:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                str(error),
-                reason="form_path",
-                data={"form_path": list(error.path)},
-            ) from error
-
     def _recipe_rpc(self, method, params):
-        if method == "tab.describe_cfg":
-            return self._describe(tuple(params["path"]))
         if method == "tab.read_recipe_field":
             with recipe_form_errors():
                 return dict(
@@ -317,11 +296,7 @@ class LookbackGui:
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         observations = self._observations()
-        if method in (
-            "tab.describe_cfg",
-            "tab.read_recipe_field",
-            "tab.edit_recipe_fields",
-        ):
+        if method in ("tab.read_recipe_field", "tab.edit_recipe_fields"):
             observations[method] = self._recipe_rpc(method, params)
         if method == "tab.parameter_read":
             observations[method] = {
@@ -343,11 +318,9 @@ class LookbackGui:
             if method in expected:
                 assert params == expected[method]
             return deepcopy(observations[method])
-        if method in ("tab.get_cfg", "tab.edit_cfg", "tab.reset_cfg"):
+        if method in ("tab.get_cfg", "tab.reset_cfg"):
             if method == "tab.reset_cfg":
                 self.reset_form(params.get("aliases"))
-            elif method == "tab.edit_cfg":
-                self._edit(params)
             return deepcopy(self.publication)
         if method == "tab.run_start":
             assert params == {

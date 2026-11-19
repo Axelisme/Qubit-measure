@@ -6,6 +6,7 @@ from pydantic import Field, StrictInt
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -24,6 +25,7 @@ from .mux_helpers import (
 class MuxSingleshotGEInputs(RecipeInputs):
     """Omitted Form inputs retain values; null clears them; overrides apply last."""
 
+    overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
         description="Unique original tone indices in acquisition order.",
@@ -126,8 +128,7 @@ async def mux_singleshot_ge(
         "mux/singleshot_ge", target={"mux": inputs.target}, reuse=inputs.reuse_tab_id
     )
     tab.set("participants", inputs.participants)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

@@ -7,6 +7,7 @@ from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -20,6 +21,7 @@ from zcu_lab.v2.twotone.chain.gui import TwotoneChainSummary
 class TwotoneChainInputs(RecipeInputs):
     """Inputs for the readout-chain sweep; units and null policies are per field."""
 
+    overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
         description="Pulse readout library key. Sources are chosen by the Form.",
@@ -125,8 +127,7 @@ async def twotone_chain(
     tab.set("qub_pulse.waveform.length", inputs.pulse_length_us)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

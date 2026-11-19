@@ -6,6 +6,7 @@ from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -20,6 +21,7 @@ class SingleshotGEInputs(RecipeInputs):
     """Inputs for singleshot ge; all units and null policies are declared per
     field."""
 
+    overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
         description="Readout library key.",
@@ -118,8 +120,7 @@ async def singleshot_ge(
     tab.select("readout", inputs.readout_ref)
     tab.select("probe_pulse", inputs.pi_ref)
     tab.set("shots", inputs.shots)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

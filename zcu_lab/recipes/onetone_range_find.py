@@ -7,6 +7,7 @@ from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -26,6 +27,7 @@ class OnetoneRangeFindInputs(RecipeInputs):
     It affects dip selection, not the acquisition grid or hardware channels.
     """
 
+    overrides: Overrides
     freq: ToneRangeInputs = Field(
         description="Required absolute MHz start/stop, not mixer offsets. No frequency initial guess is inferred."
     )
@@ -105,8 +107,7 @@ async def onetone_range_find(
     tab.set("freq.n", inputs.n)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

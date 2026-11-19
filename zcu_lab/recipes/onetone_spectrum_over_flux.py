@@ -12,6 +12,7 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickResult
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -29,6 +30,7 @@ class OnetoneSpectrumOverFluxInputs(RecipeInputs):
     """Inputs for onetone spectrum over flux; all units and null policies are
     declared per field."""
 
+    overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
         description="Readout library key. Sources are chosen by the Form.",
@@ -142,8 +144,7 @@ async def onetone_spectrum_over_flux(
     tab.set("readout.gain", inputs.gain)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

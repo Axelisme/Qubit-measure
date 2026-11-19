@@ -352,7 +352,7 @@ def h_tab_refresh_sources(
     the new input/values/errors projection and follow the Run pane on success.
     """
     from ..form_errors import cfg_error_to_remote
-    from ..form_observation import observe_form
+    from ..form_observation import observe_recipe_form
 
     tab_id = str(params["tab_id"])
     try:
@@ -361,14 +361,14 @@ def h_tab_refresh_sources(
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     follow_tab(adapter, tab_id, "run")
-    return dict(observe_form(resource))
+    return dict(observe_recipe_form(resource))
 
 
 def h_tab_reset_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from ..form_errors import cfg_error_to_remote
-    from ..form_observation import observe_form
+    from ..form_observation import observe_recipe_form
 
     tab_id = str(params["tab_id"])
     try:
@@ -377,7 +377,7 @@ def h_tab_reset_cfg(
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     follow_tab(adapter, tab_id, "run")
-    return dict(observe_form(resource))
+    return dict(observe_recipe_form(resource))
 
 
 def h_tab_run_cfg_command(
@@ -461,7 +461,7 @@ def h_tab_edit_cfg(
             f"Selection paths: {hints['selection_paths']!r}. "
             "Use tab.select_recipe_option for module selection with logical paths; "
             "ref descendants require the to_inline recipe command first. "
-            "Use tab.describe_cfg to inspect canonical options and paths.",
+            "Use tab.read_recipe_field to inspect logical options and paths.",
             reason="form_errors",
             data=dict(hints),
         ) from exc
@@ -493,7 +493,7 @@ def h_tab_read_elements(
     from ..form_errors import recipe_form_errors
     from ..form_observation import observe_elements
 
-    path = module_path(params["path"])
+    path = _recipe_path(params["path"])
     with recipe_form_errors():
         raw_fields = params.get("fields", [])
         if not isinstance(raw_fields, list):

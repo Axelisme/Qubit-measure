@@ -286,7 +286,7 @@ unchanged. Qt's deferred close turn avoids reentrancy, not socket delivery races
 
 ## Fixed element paths
 
-`tab.describe_cfg` 與 `tab.edit_cfg` 接受 str 欄位名與 FixedList 的 int index，例如 `["tones", 1, "gain"]`。Description 的 elements 列出原始 index、captured name 與 typed path，非固定 list 時為 null。數字字串不當成 index。Unknown、inactive、越界與 bool index 由 Form 拒絕，describe 的 form_path 保留完整請求路徑。Read 不改 input，也不抓取來源。Wire 的 values、errors、command target／inputs 都保留 typed paths，不把 index 轉成字串。
+內部 `tab.describe_cfg` 與 `tab.edit_cfg` 接受 str 欄位名與 FixedList 的 int index，例如 `["tones", 1, "gain"]`。Description 的 elements 列出原始 index、captured name 與 typed path，非固定 list 時為 null。數字字串不當成 index。Unknown、inactive、越界與 bool index 由 Form 拒絕，describe 的 form_path 保留完整請求路徑。Read 不改 input，也不抓取來源。Wire 的 values、errors、command target／inputs 都保留 typed paths，不把 index 轉成字串。
 
 ## Library creation
 
@@ -298,9 +298,11 @@ unchanged. Qt's deferred close turn avoids reentrancy, not socket delivery races
 
 `tab.get_cfg` 與 `tab.describe_cfg` 的 `diagnostics` 都涵蓋完整表單，包括未參與或未在 picker 顯示的 tone。每列保存 canonical path、目前 message，以及原始 name／index。Seed_source 是初值 expression、slot、template 或作者來源說明。Seed_status 的 missing／available／literal 是 Open／Reset 的事實，Refresh 和手動補值不改寫它。Uncalibrated 只投影作者的 seed metadata，未宣告則為 null，不從缺值或數值推論。全表 diagnostics 合併 preview 與 lowered cfg errors，describe 的局部 errors 保持原契約。Owner 為 `Form.diagnostics` 與 `TabFormResource.diagnostics`，remote 不另建缺值規則。
 
-`tab.run_cfg_command(tab_id, path, name)` 呼叫目前 active path 公開的 Form command。Path 是既有 canonical model-field 字串陣列。Description 的掛載欄位 commands 帶 name、label、target 與 inputs，sweep 指令掛在 sweep row 而非座標或採樣葉欄位；remote 只投影，不求值或換算。成功回 input／values／errors，失敗不改 input。Unknown command 回 invalid_params/form_errors，inactive path 回 invalid_params/form_path。控制身份、busy、lifetime 與 mutation guard 沿既有 resource.run_command。任意 provider/declaration ValueError 不被重分類為 command rejection。
+內部 `tab.run_cfg_command(tab_id, path, name)` 在 canonical model-field path 執行 Form command。
+Description 的 commands 列出 name、label、target 與 inputs。Sweep 指令掛在 sweep 欄位，不掛在座標或採樣葉欄位。控制身份、busy、lifetime 與 mutation guard 沿用 `resource.run_command`。
 
-方法列在 live catalog，由 `rpc_call` 呼叫。to_inline 專用入口保持原契約。
+`tab.describe_cfg`、`tab.edit_cfg`、`tab.run_cfg_command` 仍可在 GUI 內部 dispatch，不出現在 agent 的 catalog，`rpc_call` 不接受這三個方法。
+`tab.get_cfg` 保留公開，提供 canonical 路徑與完整診斷。`tab.reset_cfg` 與 `tab.refresh_sources` 保留 authored input，values 與 errors 改用 logical 路徑。
 
 ## Recipe 欄位
 
@@ -309,9 +311,19 @@ unchanged. Qt's deferred close turn avoids reentrancy, not socket delivery races
 `tab.check_recipe_ready(tab_id)` 是 readonly 呼叫，以固定來源驗證完整 Form 與 lowered cfg。它回全部 logical path/message errors，不 mutation、不 Run、不重捕捉來源。Recipe 層把 errors 轉為 needs_parameters，不把這個檢查做成空 mutation batch。
 
 
-`tab.read_recipe_field` 與 `tab.edit_recipe_fields` 明確使用 typed logical path arrays，str 保留欄位名，int 保留完整 list 的原始位置。數字字串不轉 index，名稱不作位置查找。Handler 只解碼 carrier，由 owner 決定路徑是否可達。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約。真實的 modules 容器不省略，例如 mux readout 的 selector 是 `["modules", "readout"]`，與 recipe 相同。Edit 拒絕時列出目前的 canonical editable_paths 與 selection_paths。Ref 的子欄位要先用 `tab.run_recipe_command` 的 to_inline 才可編輯。
+`tab.read_recipe_field`、`tab.edit_recipe_fields`、`tab.select_recipe_option` 與 `tab.run_recipe_command` 使用 typed logical path arrays。
+字串是欄位名，整數是完整清單中的原始位置。數字字串不轉成索引，元素名稱不作位置查找。
+Logical path 省略生成的 wrapper，保留真實欄位名。Handler 只解碼路徑，由 owner 判定是否可達。
+`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。
+Description、errors 與 selector paths 使用 logical 路徑。編輯 ref 後代前先用 `tab.run_recipe_command` 的 `to_inline`。
 
-`tab.read_elements(path)` 在一次 readonly owner turn 回傳全部元素的 index、name、canonical path、authored input、可用 preview values 與定向 errors。Values 使用完整 canonical typed paths，不是 lowered native cfg。完整 Form errors 另列在最外層，包含 participants 錯誤。某個元素 invalid 不會隱藏其他元素。RPC 只序列化 owner 的 aggregate，不逐元素 describe/read 拼接，不改 picker、focus、capture 或草稿。Busy 與 observer reads 仍可用。可選 `fields` 是元素相對 logical typed paths，例如 `[["drive", "gain"], ["sweep", "start"]]`。每個 row 的 `fields` 按請求順序回同一 owner turn 的 RecipeFieldObservation，包含 FixedElements identity、ref source、value_status 與 errors。省略 fields 保留原 aggregate。錯誤 carrier/path 沿既有 Form 錯誤投影。
+`tab.read_elements(path)` 接受 authored model list 的 logical path，例如 `["readout", "tones"]`。
+一次 readonly owner turn 會回傳全部原始元素的 index、name、logical path、authored input、可用 preview values 及定向 errors。
+Row、selections、values 與 errors 的路徑都採 logical 欄位名與原始索引。完整 Form errors 另列在最外層。
+無效的元素不遮住其他元素。讀取不改 picker、focus、capture 或草稿，busy 和 observer 也能讀。
+可選的 `fields` 指定元素相對 logical paths，例如 `[["drive", "gain"], ["sweep", "start"]]`。
+每列按請求順序回傳 RecipeFieldObservation。這些觀察來自同次讀取，含 FixedElements identity、ref source、value_status 與 errors。
+Aggregate 不展開 ref 內的清單，個別欄位仍可用 `tab.read_recipe_field` 查固定來源。
 
 Read 使用一次 owner turn 的目前 input 與固定 capture。Value_status 區分 available、missing 與 unavailable，input_present/input 只觀察 authored draft。Selector 描述目標本身，source 識別最近 captured ref。`RecipeFieldObservation.readonly` 在 wire 上仍名為 `readonly`，表示穿過 ref 祖先，不表示宣告唯讀。公開 Recipe helper 的屬性命名由 MCP 層負責，wire 不改名。讀取不改 input、base、cfg version 或通知，也不授權寫入。
 

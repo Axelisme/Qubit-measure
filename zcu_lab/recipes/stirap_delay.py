@@ -5,6 +5,7 @@ from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -22,6 +23,7 @@ class StirapDelayInputs(RecipeInputs):
     options; overrides supply the selected waveform's parameters.
     """
 
+    overrides: Overrides
     start_us: float = Field(
         description="First Stokes lead in us; negative starts Pump first."
     )
@@ -113,8 +115,7 @@ async def stirap_delay(
     tab.set("stokes_lead.n", inputs.n)
     tab.set("shots", inputs.shots)
     tab.set("relax_delay", inputs.relax_delay_us)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

@@ -4,6 +4,7 @@ from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -15,6 +16,7 @@ class MistPowerTraceInputs(RecipeInputs):
     """Inputs for mist power trace; all units and null policies are declared per
     field."""
 
+    overrides: Overrides
     probe_ref: str | None | Keep = Field(
         KEEP,
         description="Probe library key.",
@@ -68,8 +70,7 @@ async def mist_power_trace(
     )
     tab.select("probe_pulse", inputs.probe_ref)
     tab.select("readout", inputs.readout_ref)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

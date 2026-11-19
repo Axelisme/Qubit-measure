@@ -12,8 +12,8 @@ Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的�
 [__init__.py](__init__.py) 的 `RECIPES` 明列宣告，不掃描目錄。
 每個模組用 `@recipe(name, description)` 裝飾
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
-每個 recipe 的 `Inputs` 繼承 `RecipeInputs`，只加實驗欄位，逐欄寫單位、預設與 null 政策。
-`RecipeInputs` 提供 target、reuse_tab_id 與 overrides，不提供通用 library／inline 輸入。
+每個 recipe 的 `Inputs` 繼承 `RecipeInputs`。實驗欄位逐欄寫單位、預設與 null 政策。
+`RecipeInputs` 提供 target 和 reuse_tab_id。接受最終欄位操作的 recipe 自己宣告 `overrides: Overrides`。
 可省略的實驗欄位宣告為 `T | None | Keep = KEEP`。省略保留 Form 值，明填 null 原樣交 owner。
 KEEP 是 Python 省略標記，不是 JSON 值。Schema 隱藏 Keep 分支與 KEEP default，欄位不列 required。
 Mux 的 participants 使用完整 tones 清單的原始 index，逐 tone 範圍清單保留原始順序，見下方 mux guide。
@@ -54,7 +54,7 @@ T2Ramsey／T2Echo 使用 `"detune_ratio"`；CPMG 的共用時間窗使用
 `tab.set(path, value)` 原樣替換欄位，不選來源、不自動 convert。
 `tab.select(path, option)` 使用 owner 的精確 option label 或 captured module key。
 單 kind 的 inline label 是 `"Inline"`，多 kind 是 `"Inline: <kind>"`。
-`tab.command(path, "to_inline")` 複製固定來源，保留原 module／waveform family。已 inline 時成功且不改草稿。
+`tab.command(path, name)` 執行該欄位宣告的 command。`to_inline` 複製固定來源，保留原 module／waveform family。已 inline 時成功且不改草稿。
 三者同步完成。Set／select 收到 KEEP 不發 mutation，None 原樣交 owner。
 Nullable selector 用 None 關閉，非 nullable 由 owner 拒絕，不用字串 `"off"`。
 
@@ -65,20 +65,24 @@ Center／span 必須成對提供或成對省略，缺一個就回 needs_paramete
 兩者省略不 set，不從現有 endpoints 或校準推算。Null 不參與算術，原樣交 owner。
 完整 tone 範圍清單必須與完整 tones 等長，缺少或多出的原始位置都要回報。
 
-`FieldEdit` 只含 dotted path 與 value。Value 與 set 同契約，object 與巢狀 list 保留內容，
-Expr 與具名 native model 也可用。Owner 驗證欄位 schema，selector 選項仍用 select。
-主體先設實驗值，再逐筆套 overrides，最後驗整份 Form／cfg：
+從 `recipe_api` 匯入 `Overrides` 並在 Inputs 宣告 `overrides: Overrides`。省略時是空列表，不接受 null。
+每筆填 dotted logical `path`，另填恰好一個操作：
+
+- `value` 呼叫 `tab.set`。巢狀物件、清單、Expr 與具名 native model 原樣交 owner 驗證。
+- `select` 呼叫 `tab.select`。可填精確選項標籤或 captured library key，null 清空可為空的 selector。
+- `command` 呼叫 `tab.command`。可填欄位宣告的指令，例如 `to_inline`。
+
+主體先設實驗值，再套 overrides，最後驗整份 Form／cfg：
 
 ```python
-for edit in inputs.overrides:
-    tab.set(edit.path, edit.value)
+tab.apply_overrides(inputs.overrides)
 tab.check_ready()
 ```
 
-Overrides 省略為空 list，不接受 null。重複路徑不去重，也不過濾 null。
-每次操作允許尚未 ready 的合法草稿，結構、來源與 readonly 錯誤立即拒絕。
-`check_ready` 唯讀、不 Run、不刷新 capture，缺值拋 `RecipeNeedsParameters` 並列全部 path／reason。
-先前成功編輯不回滾。Run admission 仍會再次驗證。
+`apply_overrides` 按列表順序逐筆執行，重複路徑不去重。失敗時錯誤含序號及路徑，例如 `overrides[1] (drive.gain)`。
+後面的操作不執行，先前成功的操作不回滾。
+`check_ready` 唯讀，不 Run 或刷新 capture。缺參時拋 `RecipeNeedsParameters`，列出全部路徑與原因。
+Run admission 仍會再次驗證。
 Lookback 不提供 reset／init_pulse 輸入，也不存取這兩個隱藏 selector。
 Analysis updates 直接傳 dict，例如 `updates={"dual_exp": inputs.dual_exp, "skip": inputs.skip}`。
 `tab.analyze` 送 owner 前略過 KEEP 項，明填 null 原樣交分析 owner。

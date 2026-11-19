@@ -5,6 +5,7 @@ from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -16,6 +17,7 @@ from zcu_tools.mcp.measure.recipe_api import (
 class StirapDetuningInputs(RecipeInputs):
     """Measured carriers, Cartesian MHz offsets and independent envelope references."""
 
+    overrides: Overrides
     pump_start_mhz: float | None | Keep = Field(
         default=KEEP,
         description="Pump detuning start in MHz, added to the measured carrier.",
@@ -153,8 +155,7 @@ async def stirap_detuning(
     tab.set("stokes_detuning.n", inputs.stokes_n)
     tab.set("shots", inputs.shots)
     tab.set("relax_delay", inputs.relax_delay_us)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

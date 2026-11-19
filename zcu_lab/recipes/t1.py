@@ -7,6 +7,7 @@ from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -20,6 +21,7 @@ from zcu_lab.v2.twotone.time_domain.t1.gui import T1Summary
 class T1Inputs(RecipeInputs):
     """Inputs for t1; all units and null policies are declared per field."""
 
+    overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
         description="Readout library key.",
@@ -103,8 +105,7 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
     tab.set("delay.n", inputs.points)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

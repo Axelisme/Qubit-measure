@@ -460,6 +460,16 @@ class TabFormResource:
             self._sources.env,
         )
 
+    def recipe_preview(self) -> FormPreview:
+        """Return current preview values and errors at logical paths."""
+        preview = self.preview()
+        input = self._state.input
+        env = self._sources.env
+        return FormPreview(
+            self._form.logical_paths(input, preview.values, env),
+            self._form.logical_errors(input, preview.errors, env),
+        )
+
     def recipe_errors(self) -> FormErrors | None:
         """Return complete logical Form preview errors, without cfg lowering.
 
@@ -484,7 +494,7 @@ class TabFormResource:
     ) -> ElementsObservation:
         """Return all original elements in one readonly turn using fixed sources.
 
-        path is a canonical model-list field. The Form owner returns detached
+        path is a logical model-list field. The Form owner returns detached
         authored input, partial values and directed errors for every element,
         independent of picker/participants. Busy and notification reads are
         allowed; revoked handles raise RESOURCE_GONE. Does not capture, convert,

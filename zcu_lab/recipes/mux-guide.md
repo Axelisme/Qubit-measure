@@ -18,7 +18,7 @@ participant and sweep contracts.
 | `model_type` | Resonator model: `hm`, `t` or `auto` | Keep analysis settings |
 | `fit_bg_amp_slope`, `fit_bg_phase_curvature` | Fit the background slope or phase curvature | Keep analysis settings |
 | `edelay` | Manual cable-delay seed in inverse MHz | Keep analysis settings |
-| `overrides` | Ordered final `{path, value}` edits using dotted paths | No extra edits |
+| `overrides` | Ordered dotted `path` with one of `value`, `select`, or `command` | No extra edits |
 
 Indices address the complete captured readout list, not display labels or
 current global aliases. Empty, duplicate, negative and out-of-range indices
@@ -253,7 +253,7 @@ All seven recipes accept the following controls and Form edits:
 | `target` | MuxGroup component name, such as `MG3`, for this Reset's `$mux` binding | Use global aliases |
 | `reuse_tab_id` | An idle matching tab to Reset | Open a new tab |
 | `participants` | Nonempty, unique original tone indices in measurement order | Keep Reset defaults |
-| `overrides` | Ordered `{path, value}` edits with dotted paths | No extra edits |
+| `overrides` | Ordered dotted `path` with one of `value`, `select`, or `command` | No extra edits |
 
 Explicit null clears a Form input. Null `participants` does not retain the
 selection; it produces a missing selection. Null `target` or `reuse_tab_id`
@@ -316,18 +316,25 @@ Use your entry's names and approved ranges. The Form chooses module sources;
 a broken source reports an error rather than falling back to calibration.
 There are no generic `library` or `inline` recipe inputs.
 
-To customize source selection, edit the recipe's setup before overrides.
-Use `tab.select` to choose an intentional module option.
-Before editing a scalar on the current source, call
-`tab.command("tones.2.drive", "to_inline")` to copy a reference first.
-Already-inline modules succeed without changing their draft.
-For nested waveform length, call
-`tab.command("tones.2.drive.waveform", "to_inline")` before setting the length.
-This preserves its family and other values rather than replacing it with a const waveform.
-Do not use a scalar override to edit through a reference.
+Use `select` with the exact option label or library key to change the source or waveform style.
+Use `select: null` to clear a nullable selector. To edit a reference without choosing a new style,
+copy it inline first. Each entry takes one operation. For example:
 
-`tab.describe_cfg` lists fields and commands. `tab.read_elements` lists complete
-tone identities. Pulse-scan ranges use `start` and `stop`, with common count
+```json
+[
+  {"path": "tones.2.drive", "command": "to_inline"},
+  {"path": "tones.2.drive.waveform", "select": "Inline: cosine"},
+  {"path": "tones.2.drive.waveform.length", "value": 0.1}
+]
+```
+
+To preserve the current waveform family instead, use `"command": "to_inline"` at the waveform path
+before setting its length. Already-inline fields accept the copy command without changing the draft.
+The recipe applies overrides with `tab.apply_overrides` before `check_ready`. If an entry fails,
+the error names its zero-based index and path. Earlier edits remain; later entries do not run.
+
+`tab.read_recipe_field` lists logical fields, options, and commands. `tab.read_elements` lists all
+tone identities at their original logical indexes. Pulse-scan ranges use `start` and `stop`, with common count
 `expts`. Delay-scan ranges retain their own common `start`, `stop` and `n`.
 Set individual leaves when changing part of a range. Container replacement does
 not merge with its previous value. An expression uses `{"expr": "..."}` and

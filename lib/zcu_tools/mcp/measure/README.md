@@ -165,23 +165,20 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.setu
 
 ## Tab cfg 協定
 
-經 `rpc_call` 呼叫 `tab.get_cfg`、`tab.edit_cfg`、`tab.reset_cfg` 與
-`tab.use_inline`，回覆是 Form 的 input／values／errors，不附整棵 schema。
-先用 `tab.describe_cfg(path=[])` 查 root，再以完整 model-field path 查一層
-metadata 與 direct children。Options 是 label／value 與 commands，不是 fields；
-依回覆順序讀 options，寫入整個 option value 選擇，不從 union 猜選項。
-Owner 回報 selected。單一普通 wrapper 可能在 children 扁平顯示，path 仍含 wrapper。
-Ref option 沒有 children，generated tag leaf 不是 recipe logical path。
+Agent 用 logical path 操作 tab。先用 `tab.read_recipe_field(path=[])` 讀根，再用回覆的子欄位路徑逐層查詢。
+路徑是欄位名字串與原始清單整數索引，例如 `["tones", 2, "drive", "gain"]`。
+Logical path 省略生成的 inline wrapper，不省略真實欄位名。
+`tab.read_elements` 一次讀全部元素，路徑與原始索引不受參與清單影響。
 
-Describe 的 input_present／input／value 與局部 Form preview errors 來自同一次 owner turn。
-Lowered cfg errors 看 get_cfg 或 Run admission。兩個 read 都回全表 diagnostics，
-包括原始 tone 的 name／index、seed_source、seed_status 與 uncalibrated。
-初值 provenance 不因補值重寫，缺值不代表未校準，詳見下方 Runtime 與回覆。
+- `tab.edit_recipe_fields` 接受一批 `{path, value}`。普通字串是 literal，expression 用 `{"expr": "text"}`，complex 用可逆 `__complex__` tag。部分更改 range 時分開寫葉欄位。
+- `tab.select_recipe_option` 接受精確選項標籤或 captured library key。可清空的 selector 接受 null。
+- `tab.run_recipe_command` 執行該欄位列出的 command。例如 `tab.run_recipe_command(tab_id=..., path=["drive"], name="to_inline")` 複製固定 Library 來源，再編輯原本唯讀的後代。
+- `tab.check_recipe_ready` 回傳整份 Form 與 lowered cfg 的 logical errors。不修改草稿或啟動 Run。
 
-普通字串是 literal，expression 用 `{"expr": "text"}`，complex 用可逆 `__complex__`
-tag。Library key 使用實際 key。編輯 model-field leaf；inline path 包含 module。
-Range 的 start／stop／n 分開寫。無效 input 保留供修正並附 errors。
-`tab.use_inline` 執行 owner 的 guarded to_inline command，來源是固定 Library capture。
+用 `tab.get_cfg` 查整份 canonical input、values、errors 與 diagnostics。
+需要修改時先用 logical read 確認欄位路徑。診斷含每個原始 tone 的 name／index、seed_source、seed_status 與 uncalibrated。
+補值不改寫初值來源，缺值也不代表未校準。
+`tab.reset_cfg` 與 `tab.refresh_sources` 回傳 authored input 及採用 logical 路徑的 values／errors。
 
 Open 與明確 Reset 各捕捉來源一次。Recipe 建立或重用 tab 後都先 Reset 再編輯。
 Reset 的 aliases 是單次來源覆寫，不改全域 aliases 或保存 input。
@@ -297,30 +294,28 @@ Run 未成功取得來源前不要進 Save finalizer，避免 Save 蓋掉原錯�
 
 ### 共用輸入與自訂步驟
 
-`RecipeInputs` 提供 target、reuse_tab_id 與 overrides，實驗輸入模型加自己的欄位。
-可省略的 Form 欄位使用 `T | None | Keep = KEEP`。
-JSON schema 不列 Keep、不輸出 KEEP default，欄位可省略。
-描述區分省略保留與 null 清空／關閉。數字仍拒絕非有限值。
-target／reuse_tab_id 是 Open／Reset 控制，不是 Form 欄位，null 語意依上節。
+`RecipeInputs` 提供 target 與 reuse_tab_id。實驗輸入使用 `T | None | Keep = KEEP` 宣告可省略欄位。
+JSON schema 不列 Keep 或 KEEP default。省略保留 Form 值，null 清空或關閉可為空的欄位。
+target／reuse_tab_id 是 Open／Reset 控制，不是 Form 欄位。
 
-`FieldEdit(path=..., value=...)` 只攜帶 dotted path 與原生值，供 overrides 使用。
-Wire schema 的 `value` 接受任意 JSON，expression 使用 `{"expr": "2 + 3"}`。
-這個欄位不展開 FormValue／YamlValue／Expr／BaseModel 的遞迴 `$defs`。
-Runtime 仍以 FormValue 驗證，再將原生值交給 GUI Form owner 驗證。
-JSON object 保留 expression tag、structured sweep 與巢狀內容。
-其他具名參數保留型別與 required。Recipe schema 省略自動產生的 property titles，
-作者明寫的 titles 仍保留。
-set 不接受以 object 替換 generated selector，選來源仍用 select。
-overrides 省略為空 list，不接受 null。主體在實驗值之後依序呼叫 set，
-重複路徑不去重，null 也會套用。全部操作完成後才 check_ready：
+需要最終編輯的 recipe 可宣告 `overrides: Overrides`。省略時是空列表，不接受 null。
+每筆 `FieldEdit` 填 dotted logical `path` 和下列其中一項。零項或多項在輸入驗證時拒絕。
+
+- `value` 原樣交給 `tab.set`。可填原生 Form JSON，expression 用 `{"expr": "2 + 3"}`。Value 不選來源或轉換選項。
+- `select` 交給 `tab.select`。可填精確選項標籤或 captured library key，null 清空可為空的 selector。
+- `command` 交給 `tab.command`。填該欄位宣告的名稱，例如 `to_inline` 或 sweep 的轉換指令。
+
+`apply_overrides` 從頭依序送出每筆操作，不去重。Owner 拒絕時，錯誤指出從 0 起算的序號與路徑。
+已完成的操作留在 tab，後續操作不執行。主體先設實驗值，套完 overrides 再檢查整份 Form：
 
 ```python
 from zcu_tools.mcp.measure.recipe_api import (
-    KEEP, Keep, RecipeInputs, RecipeReport, RecipeSession, recipe,
+    KEEP, Keep, Overrides, RecipeInputs, RecipeReport, RecipeSession, recipe,
 )
 
 
 class PulseInputs(RecipeInputs):
+    overrides: Overrides
     gain: float | None | Keep = KEEP
 
 
@@ -332,8 +327,7 @@ async def synthetic_pulse(session: RecipeSession, inputs: PulseInputs) -> Recipe
     if not isinstance(inputs.gain, Keep):
         tab.command("pulse", "to_inline")
     tab.set("pulse.gain", inputs.gain)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
     await tab.run()
     try:
@@ -498,7 +492,9 @@ Status 的 active_path 會讀 GUI 當前 scope，其餘 captured detail 不重�
 只讀 metadata，不建立 context observation。
 `ready.can_run` 只表示環境 readiness。它檢查 entry、active context、SoC 與至少一張 tab 是否存在，缺項列在 `ready.missing`。未 open entry 時 missing 包含 `entry`。它不驗證任何 tab 的表單，也不保證 holder、busy 或硬體 guard 會允許 Run。
 
-即使 `ready.can_run=true` 且 `ready.missing=[]`，表單仍可能缺必填值。Run 前用 `rpc_call(method="tab.get_cfg", params={"tab_id": "<tab id>"})` 讀目標 tab 的 `input`、`values` 與 `errors`。依 errors 的 path 補值，再讀一次確認；不要用環境 readiness 取代表單 validity。`tab.describe_cfg` 用來逐層查欄位能力。兩個入口另回全表 `diagnostics`，不受目前 tone picker 或 describe path 限制。每列有 canonical `path`、目前的 `message`、原始 `name`／`index`、`seed_source`、`seed_status` 與 `uncalibrated`。`message=null` 表示該列沒有目前錯誤。`seed_status` 的 missing／available／literal 描述 Open／Reset 的初值來源，之後補值不改寫這項來源事實。`uncalibrated` 只讀作者宣告，true 表示未校準候選，false 表示 measured，未知為 null。缺值不等於未校準。Describe 的局部 `errors` 仍只含 Form preview errors，全表 diagnostics 也包含 lowered cfg errors。Run admission 仍會檢查目前表單與動態條件。
+即使 `ready.can_run=true` 且 `ready.missing=[]`，表單仍可能缺必填值。Run 前用 `tab.check_recipe_ready` 讀 logical errors，再用 `tab.read_recipe_field` 查欄位能力。環境 readiness 不能代替表單驗證。
+`tab.get_cfg` 的 `diagnostics` 合併整份 Form preview 與 lowered cfg errors，不受 tone picker 限制。每列有 canonical `path`、目前的 `message`、原始 `name`／`index`、`seed_source`、`seed_status` 與 `uncalibrated`。
+`message=null` 表示該列沒有目前錯誤。`seed_status` 的 missing／available／literal 描述 Open／Reset 的初值來源，補值不改寫它。`uncalibrated` 只讀作者標註，true 表示未校準候選，false 表示 measured，未知為 null。Run admission 仍會檢查目前表單與動態條件。
 
 全域 status 列 GUI operations 與本 MCP session 非終態 executions。
 `terminal_count` 計算所有本地終態 execution，包含 standalone analysis。
@@ -684,7 +680,7 @@ GUI 在 owner dispatch 檢查目前 holder，不維護每連線 seen baseline。
 
 接手既有或重啟後的 GUI 時，按操作需要讀 tab、SoC、context 與 device snapshots，核對實際狀態，不是建立寫入許可。Context 可能包含大型敏感資料，不可序列化時完整讀取失敗。摘要與 resource counters 不代替內容。
 
-Cfg 使用 `tab.get_cfg` 的 Form input/values/errors。欄位能力用 `tab.describe_cfg` 逐層讀取，不下載整棵 schema。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 ref。Edit 作用於目前 input，Reset 重新捕捉來源及 defaults。Run 只接受目前有效值，並隔離執行值與 source provenance。後續編輯不改已接受 Run，轉移或斷線也不取消它。新 holder 可取消，observer 可 wait。
+Cfg 欄位用 `tab.read_recipe_field` 逐層讀取，用 `tab.edit_recipe_fields` 與 `tab.select_recipe_option` 修改。三者沿用 tab 固定來源。Reset 重新捕捉來源及 defaults。Run 只接受目前有效值，並隔離執行值與 source provenance。後續編輯不改已接受 Run，轉移或斷線也不取消它。新 holder 可取消，observer 可 wait。
 
 Admission 拒絕、斷線或 timeout 都不自動重送。傳輸失敗不證明 mutation 沒有副作用；先讀現況，再由 caller 決定下一步。
 

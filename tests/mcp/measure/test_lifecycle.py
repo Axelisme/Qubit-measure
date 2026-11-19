@@ -441,16 +441,15 @@ def test_unexpected_gui_eof_reconnects_same_port_without_replaying_mutation(
     gui_b: LoopbackGui | None = None
     try:
         old = client.call("connect", {"port": gui_a.port})["status"]["running"][0]["op"]
-        gui_a.close_on = "tab.edit_cfg"
+        gui_a.close_on = "tab.edit_recipe_fields"
         with pytest.raises((ConnectionError, OSError, RuntimeError)):
             client.call(
                 "rpc_call",
                 {
-                    "method": "tab.edit_cfg",
+                    "method": "tab.edit_recipe_fields",
                     "params": {
                         "tab_id": "t",
-                        "expected": {"cfg_id": "cfg-t", "revision": "0"},
-                        "edits": [],
+                        "edits": [{"path": ["gain"], "value": 0.4}],
                     },
                 },
             )
@@ -471,8 +470,8 @@ def test_unexpected_gui_eof_reconnects_same_port_without_replaying_mutation(
         assert getattr(error.value, "reason", None) == "unknown_op"
         assert client.call("wait", {"op": new})["status"] == "finished"
         assert client.call("cancel", {"op": new})["status"] == "finished"
-        assert gui_a.sent.count("tab.edit_cfg") == 1
-        assert "tab.edit_cfg" not in gui_b.sent
+        assert gui_a.sent.count("tab.edit_recipe_fields") == 1
+        assert "tab.edit_recipe_fields" not in gui_b.sent
         assert gui_b.sent.count("operation.await") == 1
         assert gui_b.sent.count("operation.cancel") == 1
     finally:

@@ -7,6 +7,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     FitQuality,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -25,6 +26,7 @@ from .mux_helpers import ToneRangeInputs
 class MuxOnetoneInputs(RecipeInputs):
     """Omitted Form inputs retain values; null clears them; overrides apply last."""
 
+    overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
         description="Original tone indices in execution order.",
@@ -123,8 +125,7 @@ async def mux_onetone(
     tab.set("df.n", inputs.n)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     names = TypeAdapter(list[str] | None).validate_python(

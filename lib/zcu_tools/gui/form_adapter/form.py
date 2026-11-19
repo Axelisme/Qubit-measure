@@ -284,12 +284,12 @@ class Form[C: ConfigBase]:
     ) -> ElementsObservation:
         """Read every model-list element once from one detached input and capture.
 
-        path is a nonempty canonical typed model-list path. Unknown, inactive
-        or non-list targets raise FormPathError preserving the request. Wrong
-        input model raises TypeError. Returns authored inputs, available preview
-        leaves and directed errors in original list order, even for invalid or
-        nonparticipating elements. References are not materialized. No converter,
-        source refresh, mutation, notification or focus occurs.
+        path is a nonempty logical typed path to an authored model list. Unknown,
+        inactive or non-list targets raise FormPathError preserving the request.
+        Returns authored inputs, logical preview paths and directed errors in
+        original list order, even for invalid or nonparticipating elements.
+        A list inside a ref has no authored rows. No converter, source refresh,
+        materialization, mutation, notification or focus occurs.
         fields optionally requests nonempty relative logical paths per element.
         Their observations (including refs and FixedElements identity) use this
         same detached input/env and preserve request order. Invalid paths raise
@@ -298,50 +298,58 @@ class Form[C: ConfigBase]:
         self._check_logical_input(input)
         if any(not field for field in fields):
             raise FormPathError(path, "Element fields must be nonempty relative paths")
+        canonical = _logical.authored_element_path(input, path, env)
         state = FormState(input)
-        target = state.describe(path, env).target
+        target = state.describe(canonical, env).target
         if target is None or target.elements is None:
             raise FormPathError(path, "Aggregate requires a model-list field")
         preview = state.preview(env)
         names = None
         if issubclass(input.model, FixedElementsForm):
             declaration = next(
-                (item for item in input.model.fixed_elements if item.list_path == path),
+                (
+                    item
+                    for item in input.model.fixed_elements
+                    if item.list_path == canonical
+                ),
                 None,
             )
             if declaration is not None:
                 names = declaration.names(input.data)
         elements: list[ElementObservation] = []
+        selections = self.logical_paths(input, input.selections, env)
+        values = self.logical_paths(input, preview.values, env)
+        errors = self.logical_errors(input, preview.errors, env)
         for item in target.elements:
+            row_path = (*path, item.index)
             raw = self._input_at(input.data, item.path)
             if not isinstance(raw, dict):
-                raise FormPathError(item.path, "Expected an authored model element")
+                raise FormPathError(row_path, "Expected an authored model element")
             name = names[item.index] if names is not None else item.name
-            errors = _logical.errors_for_path(preview.errors, item.path)
             elements.append(
                 ElementObservation(
                     item.index,
                     name if isinstance(name, str) else item.name,
-                    item.path,
+                    row_path,
                     raw,
                     {
                         key: value
-                        for key, value in input.selections.items()
-                        if key[: len(item.path)] == item.path
+                        for key, value in selections.items()
+                        if key[: len(row_path)] == row_path
                     },
                     {
                         key: value
-                        for key, value in preview.values.items()
-                        if key[: len(item.path)] == item.path
+                        for key, value in values.items()
+                        if key[: len(row_path)] == row_path
                     },
-                    errors,
+                    _logical.errors_for_path(errors, row_path),
                     tuple(
-                        self.read_logical_field(input, (*item.path, *field), env)
+                        self.read_logical_field(input, (*row_path, *field), env)
                         for field in fields
                     ),
                 )
             )
-        return ElementsObservation(path, tuple(elements), preview.errors)
+        return ElementsObservation(path, tuple(elements), errors)
 
     def prepare_logical_edits(
         self, input: FormInput[FormModel], edits: Sequence[LogicalEdit], env: FormEnv
@@ -461,6 +469,16 @@ class Form[C: ConfigBase]:
         """
         self._check_logical_input(input)
         return _logical.select(input, path, env, action="disable")
+
+    def logical_paths[V](
+        self,
+        input: FormInput[FormModel],
+        entries: Mapping[FormWritePath, V],
+        env: FormEnv,
+    ) -> dict[FormWritePath, V]:
+        """Translate path-keyed observations using the current authored input."""
+        self._check_logical_input(input)
+        return _logical.logical_paths(input, entries, env)
 
     def logical_errors(
         self, input: FormInput[FormModel], errors: FormErrors | None, env: FormEnv
