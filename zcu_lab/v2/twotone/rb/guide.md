@@ -1,33 +1,72 @@
-## Behavior
+# Single-qubit randomized benchmarking
 
-**Readers:** operator, agent. Single-qubit Clifford RB: each independent random seed supplies a shared prefix across depths, followed by its inverse and readout. Depth counts Cliffords. Each Clifford can contain several physical pulses. Z rotations are virtual. Runs one hardware program per seed, sweeping depth within it.
+**Readers:** operator, agent. Run reference RB or target-interleaved RB and read the decay fits.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-19
 
-## Parameter sources
+## Choose a target
 
-Depth starts in Log mode with max=128 and points=9, seed 42 and 20 sequences. Relax delay is 5 * qubit.t1 us. Other missing required calibration leaves the affected fields empty and Invalid.
+Open `twotone/rb`. Leave **Target gate** at None to measure the reference decay.
+Select X90, X180, Y90 or Y180 to measure the reference and interleaved decays in
+the same run. Both arms use the same random Clifford sequences. The interleaved
+arm inserts the target after every random Clifford. Each arm applies its own
+full inverse before readout. Depth counts random Cliffords, not physical pulses
+or inserted targets.
 
-Open and Reset capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 us, giving a 150 us wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+The board sweeps depth and runs the repetitions for each seed and arm. The host
+runs the rounds and reuses the compiled programs. With a target selected, it
+alternates which arm goes first across seeds and rounds to balance slow drift.
+The live plot shows one line per arm.
 
-## Module slots
+## Set the starting values
 
-Readout uses the qubit.module.readout slot captured at Open/Reset, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. Drive slots use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.05 us; missing required calibration remains Invalid.
+Calibrate qubit frequency, the X90 and X180 pulse amplitudes, and readout before
+Run. Open and Reset take the X90 and X180 pulses from the qubit's module slots
+and readout from the resonator's readout slot. If a slot is empty or points to a
+missing module, the form uses the corresponding `pi2_pulse`, `pi_pulse` or
+`readout` template. The templates use the captured frequency and wiring.
+The readout template uses the resonator's time of flight plus 0.05 us.
+Missing required calibration leaves the affected input Invalid. You can select
+a saved module instead. The reset module comes from the qubit's reset slot and
+stays off when that slot is empty.
 
-## Typical writeback
+Open and Reset set Relax delay to five times the captured qubit T1. If T1 or
+the capture is absent, the starting value is 150 us. An invalid stored T1
+leaves the input Invalid. Active reset does not change this wait. Check the
+modules, readout timing and relax delay before starting.
 
-Analysis reports results for review; calibration stays unchanged. Fits mean projected IQ to A*p**depth+B; reports epc=(1-p)/2 and fidelity=1-epc per Clifford.
+Depth starts in Log mode with max 128 and nine points:
+`[0, 1, 2, 4, 8, 16, 32, 64, 128]`. Log includes zero and max, and rounds
+and removes duplicate depths. Effective points displays the count after
+deduplication. Use List mode to enter distinct nonnegative integer depths in
+the order you want to run them. Switching back to Log may resample the list.
 
-## Depth input
+The form starts at seed 42 with 20 sequences. Start with a short run to check
+execution. For analysis, use at least four distinct depths that span the decay
+and aim for 20 or more independent seeds. Reuse the seed to reproduce the
+random sequences.
 
-The depth input is a nonempty ordered list of unique nonnegative integers.
-New Log forms produce [0,1,2,4,8,16,32,64,128]. Points includes zero and
-must be at least 2. Log always includes 0 and max; two points yields [0,max].
-Log rounds and deduplicates geometric samples. Effective points shows the actual
-count when rounding collapses samples. Switch to List to edit the entire list.
-Switching back fills max and points from the list and may resample it.
-When loading older data, the stored IQ and depth axis remain readable. Re-enter depths in Log or List mode to rerun the experiment.
+## Read the result
 
-## Recommended
+Native data stores repetition-averaged IQ in `(round, seed, arm, depth)` order.
+Arm 0 is reference. Arm 1 is present only when a target is selected. Stopping
+keeps measured IQ and leaves unmeasured slots as NaN. Analyze takes complete
+rounds for each seed. In the two-arm run, a round contributes only if both arms
+are complete for that seed. Analyze averages those rounds before weighting the
+seeds equally. It needs at least two usable seeds.
 
-Calibrate frequency and pulse amplitudes first. Start with few seeds and shallow depths to verify execution, then use independent seeds and depths spanning the decay. Seed controls reproducibility. Review residuals and seed variation before interpreting fidelity.
+Analyze fits `A * p**depth + B` on one IQ projection and plots the observations
+and fitted curves. Reference-only mode reports decay `p`, error per Clifford
+`(1 - p) / 2` and its 95% seed-bootstrap interval. In paired mode it reports
+both decays, reference error per Clifford and the target error estimate
+`(1 - p_interleaved / p_reference) / 2`. The target fidelity is one minus that
+error, with a 95% paired-seed bootstrap interval.
+
+These intervals describe seed variation. They do not account for bias from
+gate-dependent or coherent noise. A negative target error or fidelity above one
+remains visible. Review the curves and interval before using the estimate.
+Analyze does not write back calibration.
+
+Previous standalone RB and IRB runs remain in their original files. This
+experiment does not convert them. Re-enter the settings and run again to produce
+data in the combined format.

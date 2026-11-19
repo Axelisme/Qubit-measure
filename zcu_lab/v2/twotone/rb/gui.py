@@ -19,7 +19,7 @@ RBRunResult: TypeAlias = RunRecord[RBCfg, RB_Result]
 
 
 def _RB_analyze(req: AnalyzeRequest[RBRunResult, None], *, plots: Plots) -> RBAnalysis:
-    """Fit the saved run's mean IQ decay and publish its fit figure."""
+    """Fit the saved reference or paired IQ and publish its fit figure."""
     return RB_Exp().analyze(req.run_result, None, plots=plots)
 
 
@@ -29,7 +29,7 @@ def _RB_make_form(ctx: FormContext) -> Form[RBCfg]:
 
 
 def _run(cfg: RBCfg, *, context: RunContext) -> RunRecord[RBCfg, RB_Result]:
-    """Acquire a trace and retain the experiment configuration with its result."""
+    """Acquire each configured arm and retain the run's configuration."""
     return RunRecord(cfg=cfg, result=RB_Exp().run(cfg, context=context))
 
 

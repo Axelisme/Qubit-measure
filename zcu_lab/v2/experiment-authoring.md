@@ -429,24 +429,23 @@ KMeansTracker 線上維護 (..., 2) IQ 群統計，支援 leading dims 與 share
 
 ## Twotone RB 測量策略
 
-RB 採「每個 seed 一個 program」，板上以 sweep index 遍歷 depth，host 只掃 seed，rounds 交原生 acquire。
+`twotone/rb` 同時涵蓋 reference RB 與 IRB。`target_gate=None` 只跑 reference，arm 軸長度為 1；選 X90／X180／Y90／Y180 時另跑 interleaved arm，arm 0=reference、1=interleaved，使用校準 X90／X180。
+兩種模式都保存 `(round, seed, arm, depth)` IQ。
+
+每個 seed／arm 一個 program，板上以 sweep index 遍歷 depth 與 reps。Host 遍歷 round／seed／arm，快取各 seed／arm program，固定 rounds=1；有兩個 arm 時，arm 順序隨 round／seed 交替。
 Recovery 是 24-element Clifford group 的完整 inverse，以 6-state permutation 程式化生成 CAYLEY／INVERSE_INDEX。
 `CAYLEY[i][j]` 是先 C_j 再 C_i，累積為 `acc = CAYLEY[next][acc]`，兩處註解同步維護。
 Random prefix 長度與 recovery id 用 LoadValue 從 dmem 查，random 段用 register-driven repeat，固定 n="rand_len"。
 空 random 序列交 LoadValue(values=[]) no-op。
 Recovery 最多兩個 physical pulses，用 recovery_gate_0／1 兩個 ComputedPulse slot，共用完整 gate_pulses candidates。
 不足處用 BasicGate.Id、gain=0 補位，保持 recovery 時長與 depth 無關。
+Interleaved arm 與 reference 共用 random seed，每個 random Clifford 後插 target，相鄰 gates 保持分開，各算完整 inverse 並延續 virtual-Z frame。
+序列表 owner 是 twotone/_rb_sequence.py。
 
-IRB 獨立保存 `(round, seed, arm, depth)` IQ，arm 0=reference、1=interleaved。
-GUI 預設 X90，支援 X90／X180／Y90／Y180，使用校準 X90／X180。
-兩 arm 共 random seed，每個 random Clifford 後插 target，相鄰 gates 保持分開，各算完整 inverse 並延續 virtual-Z frame。
-共用序列表 owner 是 twotone/_rb_sequence.py，兩個實驗各自在自己的 core.py 建立 program。
-Host 遍歷 round／seed／arm，快取各 seed／arm program，固定 rounds=1，板上做 depth／reps，arm 順序隨 round／seed 交替。
-原 RB 二維存檔與 program 內 rounds 維持原樣。
-IRB 只選完整 round／seed pairs，先平均同 seed rounds，再等權平均 seeds，共 IQ 投影軸並各 fit A*p**depth+B。
-Target error=(1-p_interleaved/p_reference)/2，負值保持原值。
-95% interval 對整條 paired seed curves bootstrap，不包含 gate-dependent／coherent noise 系統誤差。
-中止保留 raw 與未完成 slot 的 NaN，少於兩個 paired seeds 或四個 distinct depths 時分析失敗。
+分析只選完整 round／seed，先平均同 seed rounds，再等權平均 seeds，所有 arm 共用一條 IQ 投影軸，各 fit A*p**depth+B。
+Reference 回報 error per Clifford=(1-p_reference)/2；有 interleaved arm 時另報 target error=(1-p_interleaved/p_reference)/2，負值保持原值。
+95% interval 對整條 seed curves bootstrap，不包含 gate-dependent／coherent noise 系統誤差。
+中止保留 raw 與未完成 slot 的 NaN；少於兩個 seed 或四個 distinct depths 時分析失敗。
 
 ## 寫新 Experiment 時的檢查清單
 

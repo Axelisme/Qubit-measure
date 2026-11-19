@@ -138,7 +138,6 @@ from zcu_lab.v2.twotone.ckp.gui import DEFINITION as CKP_DEFINITION
 from zcu_lab.v2.twotone.dispersive.gui import DEFINITION as DISPERSIVE_DEFINITION
 from zcu_lab.v2.twotone.fluxdep.gui import DEFINITION as FLUX_DEP_DEFINITION
 from zcu_lab.v2.twotone.freq.gui import DEFINITION as FREQ_DEFINITION
-from zcu_lab.v2.twotone.irb.gui import DEFINITION as IRB_DEFINITION
 from zcu_lab.v2.twotone.power_dep.gui import DEFINITION as POWER_DEP_DEFINITION
 from zcu_lab.v2.twotone.rabi.amp_rabi.gui import DEFINITION as AMP_RABI_DEFINITION
 from zcu_lab.v2.twotone.rabi.len_rabi.gui import DEFINITION as LEN_RABI_DEFINITION
@@ -269,7 +268,6 @@ ADAPTERS: dict[str, object] = {
     "twotone/zigzag_scan/gain": ZIG_ZAG_SCAN_GAIN_DEFINITION,
     "twotone/zigzag_scan/freq": ZIG_ZAG_SCAN_FREQ_DEFINITION,
     "twotone/rb": RB_DEFINITION,
-    "twotone/irb": IRB_DEFINITION,
     "twotone/ro_optimize/freq": RO_OPT_FREQ_DEFINITION,
     "twotone/ro_optimize/power": RO_OPT_POWER_DEFINITION,
     "twotone/ro_optimize/length": RO_OPT_LENGTH_DEFINITION,
