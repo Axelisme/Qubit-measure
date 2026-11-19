@@ -183,4 +183,6 @@ Pulse、slot 與 phase rows 都可獨立 Apply。部分套用後，檢查下一�
 
 取得第一個 IRB 結果後，依論文 §5.3.3 掃 CZ 的 cosine 寬度。長閘的誤差由被驅動非計算態的 T1 主導，短閘由同調 leakage 主導，最佳寬度在兩者之間（論文裝置為 85 ns）。每個寬度重做 4 → 5 → 6 與 IRB。最短寬度受驅動強度限制，先由實測 Rabi rate 換算 gain 1 時的 2π 週期；非 const 波形的最大振幅只有 const 的一半。
 
+要調整已校準 CZ 的 I/Q 形狀，依[每輪優化與驗收](cz_optimize/guide.md#每輪優化與驗收)操作。優化、寫回，再用 plain RB 的新 seeds 做 paired IRB。驗收的 gate error 仍有改善才 Reset Form，從寫回值開始下一輪。
+
 所有 FTF 資料保存未正規化 sums、準備態／spectator／sweep 座標與本次 cfg，cfg 保留完整 tone 順序。取消時保存已取得計數，未量點為 NaN。Phase 依各實驗的完整性規則分析 X/Y；RB／IRB 只用完整配對。診斷型 joint readout 與 conditional spectroscopy 可顯示已完成 rounds 的分布及每點 shot 數。寄生抵消需另行研究，各校準由操作員逐項執行。

@@ -124,6 +124,7 @@
 - 2026-11-20 [Two-qubit RB 在板上掃 depth：提早結束本發與控制結構的完備性](2026-11-20-early-exit-and-control-flow-completeness.md)：控制結構完備性。現有 repeat／branch 無法結束本發；spike 用 CondJump 加手抄狀態可行但脆弱，改為抽出 Branch 與 Repeat 共用的編譯期狀態，再補「提早結束本發」，方向見 [草稿](../adr/draft/control-flow-completeness.md)。
 - 2026-11-20 [Timeline 共用的編譯期狀態：PathState 與 capture／restore](2026-11-20-timeline-path-state.md)：共用抽象。Branch 與 Repeat 改用 frozen `PathState`，capture／restore 一次處理全部隨路徑變化的狀態，合併規則留在各結構；不按 timeline 切，也不用指標切換，因為狀態屬於路徑且 QICK macro 就地讀寫 program 狀態。
 - 2026-11-20 [Timeline 編譯器推算每發 ADC 讀取數](2026-11-20-timeline-read-counts.md)：路徑會合規則。編譯器在 macro 包裝層計數 ADC trigger，每個 Branch 出口逐 ADC 要求各 case 相同，固定 Repeat 乘次數，變動次數 Repeat 不能讀；自動寫入每發讀取數，`set_reads_per_shot` 只核對；否決逐條路徑比對整發總數。
+- 2026-11-20 [CZ 優化候選用記憶體 arb 播放](2026-11-20-in-memory-arb-waveforms.md)：執行期波形。候選直接交 I/Q 樣本給 program，不寫檔；永久保存仍用既有 arb 資產。
 - 2026-11-20 [Timeline 往後跳轉與 two-qubit RB 分塊](2026-11-20-timeline-forward-jumps.md)：控制流範圍。跳轉限於 body 最外層，label 合併路徑狀態；RB 採板上分塊掃 depth，由 agent 代裁，待使用者覆核。
 
 ## Cfg 與表單
@@ -159,6 +160,7 @@
 - 2026-11-18 [Results Browser 開窗與背景索引](2026-11-18-results-browser-open-speed.md)：背景工作邊界。開窗逐批交付，隱藏不重掃；唯讀索引不算 operation，見 [Measure README](../../lib/zcu_tools/gui/app/measure/README.md#owners)。
 - 2026-11-19 [Point 與 library 資料流的摩擦](2026-11-19-point-library-frictions.md)：便利功能取捨。Ramsey 頻率寫回、回滾、過時 tab 都不改，crosstalk 只做純函式；小功能要多次遇到才加，原則見 [ADR-0075](../adr/0075-agent-interface-layers.md#先做簡單設計再按需加法)。
 - 2026-11-19 [單 qubit RB 與 IRB 合併成 twotone/rb](2026-11-19-single-qubit-rb-irb-merge.md)：實驗合併與資料格式。`target_gate=None` 只跑 reference，指定 gate 才跑兩臂；Result 改為 (round, seed, arm, depth)；`twotone/irb` 移除不留 alias，舊 run 只保留原檔。
+- 2026-11-20 [用 writeback 發布 CZ 的 arb 資產](2026-11-20-arb-asset-writeback.md)：資產發布。Apply 先發布不覆寫的 entry 資產，再寫引用該 key 的 library 提案。
 
 ## 量測策略
 

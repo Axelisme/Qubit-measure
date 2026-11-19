@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+from typing_extensions import TypedDict
 
 from zcu_tools.cfg_model import WaveformAssetInfo
 from zcu_tools.core.waveform_format import WaveformSamples
@@ -32,6 +35,27 @@ from ._waveform_formula import (
 from ._waveform_npz import load_npz, write_npz
 
 _DATA_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+type ArbPublishStatus = Literal["created", "existing"]
+"""A newly installed NPZ or an unchanged asset with identical samples."""
+
+type ArbAssetUpdateStatus = Literal["absent", "identical", "different"]
+"""The stored asset is missing, matches the proposed time/I/Q, or differs."""
+
+
+class ArbSampleSummary(TypedDict, closed=True):
+    """Number of time samples and the final reference time in microseconds."""
+
+    sample_count: int
+    duration_us: float
+
+
+def arb_sample_summary(samples: WaveformSamples) -> ArbSampleSummary:
+    """Summarize reference time for previews and receipts without storing arrays."""
+    return {
+        "sample_count": int(samples.time.size),
+        "duration_us": float(samples.time[-1]),
+    }
 
 
 class ArbWaveformDatabase:
@@ -76,9 +100,7 @@ class ArbWaveformDatabase:
         Invalid key grammar raises ArbWaveformError. Native conversion uses
         WaveformAssetInfo.path_for instead, which also checks file existence.
         """
-        db_path = self._root
-        _validate_data_key(data_key)
-        return db_path / f"{data_key}.npz"
+        return _asset_path(self._root, data_key)
 
     def exists(self, data_key: str) -> bool:
         return self.path_for(data_key).exists()
@@ -152,6 +174,73 @@ class ArbWaveformDatabase:
         """
         qdata_save = np.zeros_like(idata) if qdata is None else qdata
         self.import_data(name, idata=idata, qdata=qdata_save, time=time, overwrite=True)
+
+    def publish_batch(
+        self, assets: Mapping[str, WaveformSamples]
+    ) -> Iterator[ArbPublishStatus]:
+        """Publish key/sample pairs in mapping order with no replacement.
+
+        Validate every key and sample set and check for conflicts at call time.
+        A conflict or invalid asset raises ArbWaveformError before any asset file
+        is written. Iterate the returned iterator to publish and receive each
+        confirmed status in order. An I/O error stops iteration and leaves any
+        files already installed intact.
+        """
+        planned: list[tuple[Path, ArbWaveformData | None]] = []
+        for key, samples in assets.items():
+            path = self.path_for(key)
+            planned.append((path, self._prepare_publish(path, samples)))
+
+        def publish_planned() -> Iterator[ArbPublishStatus]:
+            for path, data in planned:
+                if data is None:
+                    yield "existing"
+                else:
+                    write_npz(path, data, replace=False)
+                    yield "created"
+
+        return publish_planned()
+
+    @staticmethod
+    def publication_status_at(
+        directory: Path, data_key: str, samples: WaveformSamples
+    ) -> ArbAssetUpdateStatus:
+        """Compare a publication with the asset at directory without writing.
+
+        directory is the asset root, not the entry database root. The comparison
+        uses the batch's key and sample validation and exact time/I/Q equality.
+        No directory is created. Invalid keys, samples, files and I/O raise.
+        """
+        path = _asset_path(directory.resolve(), data_key)
+        try:
+            data = ArbWaveformDatabase._prepare_publish(path, samples)
+        except ArbWaveformError as exc:
+            if exc.reason != "data_key_exists":
+                raise
+            return "different"
+        return "identical" if data is None else "absent"
+
+    @staticmethod
+    def _prepare_publish(
+        path: Path, samples: WaveformSamples
+    ) -> ArbWaveformData | None:
+        data = validate_payload(
+            idata=samples.idata, qdata=samples.qdata, time=samples.time, recipe=None
+        )
+        if path.exists() or path.is_symlink():
+            stored = load_npz(path)
+            if (
+                np.array_equal(stored.time, data.time)
+                and np.array_equal(stored.idata, data.idata)
+                and np.array_equal(stored.qdata, data.qdata)
+            ):
+                return None
+            raise ArbWaveformError(
+                f"Arbitrary waveform {path.stem!r} already exists with different samples",
+                reason="data_key_exists",
+                data={"data_key": path.stem},
+            )
+        return data
 
     def import_data(
         self,
@@ -267,6 +356,11 @@ class ArbWaveformDatabase:
         old_path.rename(new_path)
 
 
+def _asset_path(directory: Path, data_key: str) -> Path:
+    validate_arb_data_key(data_key)
+    return directory / f"{data_key}.npz"
+
+
 def _load_asset(path: Path) -> ArbWaveformData:
     """Read a validated-key asset path, preserving owner missing-key errors."""
     if not path.exists():
@@ -298,6 +392,14 @@ class _BoundWaveformAssetInfo:
         """Read current asset duration in microseconds, propagating read errors."""
         return float(self.samples(data_key).time[-1])
 
+    def exists(self, data_key: str) -> bool:
+        """Check for a valid key's file without opening it; invalid keys are absent."""
+        try:
+            path = _asset_path(self.directory, data_key)
+        except ArbWaveformError:
+            return False
+        return path.exists()
+
     def path_for(self, data_key: str) -> Path:
         """Return the existing asset path in this binding's absolute directory.
 
@@ -305,16 +407,14 @@ class _BoundWaveformAssetInfo:
         recipe. Raise ArbWaveformError for an invalid/missing key; propagate
         filesystem errors. Other repositories do not affect this path.
         """
-        _validate_data_key(data_key)
-        path = self.directory / f"{data_key}.npz"
+        path = _asset_path(self.directory, data_key)
         if not path.exists():
             raise _asset_not_found(data_key, path)
         return path
 
     def samples(self, data_key: str) -> WaveformSamples:
         """Read validated, isolated arrays from this binding's fixed directory."""
-        _validate_data_key(data_key)
-        data = _load_asset(self.directory / f"{data_key}.npz")
+        data = _load_asset(_asset_path(self.directory, data_key))
         return WaveformSamples(
             time=data.time,
             idata=data.idata,
@@ -322,7 +422,11 @@ class _BoundWaveformAssetInfo:
         )
 
 
-def _validate_data_key(data_key: object) -> None:
+def validate_arb_data_key(data_key: object) -> None:
+    """Raise ArbWaveformError unless data_key is an ASCII letter followed by letters, digits or underscores.
+
+    This checks key syntax only; it does not access the filesystem.
+    """
     if not isinstance(data_key, str) or not _DATA_KEY_RE.fullmatch(data_key):
         raise ArbWaveformError(
             "Arbitrary waveform data key must match "
@@ -335,6 +439,9 @@ def _validate_data_key(data_key: object) -> None:
 __all__ = [
     "ARB_WAVEFORM_RENDER_SAMPLES_PER_US",
     "MAX_ARB_WAVEFORM_SAMPLES",
+    "ArbAssetUpdateStatus",
+    "ArbPublishStatus",
+    "ArbSampleSummary",
     "ArbWaveformData",
     "ArbWaveformDatabase",
     "ArbWaveformError",
@@ -344,7 +451,9 @@ __all__ = [
     "FormulaRecipe",
     "FormulaSegment",
     "FormulaValidationResult",
+    "arb_sample_summary",
     "prepare_preview_series",
     "render_formula_recipe",
+    "validate_arb_data_key",
     "validate_payload",
 ]

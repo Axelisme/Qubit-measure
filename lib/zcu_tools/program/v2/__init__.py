@@ -15,6 +15,7 @@ from .modules import (
     DelayAuto,
     HeraldReset,
     HeraldResetCfg,
+    InMemoryArbWaveformCfg,
     LoadValue,
     Module,
     ModuleCfg,

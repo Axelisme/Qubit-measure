@@ -19,14 +19,23 @@ from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.entry import document_unit
 from zcu_tools.resources.entry import writeback as concrete
 from zcu_tools.resources.entry.ledger_models import AcceptedWrite, JsonObject
+from zcu_tools.resources.waveform_assets import validate_arb_data_key
 
-from .contracts import UNCHANGED, WritebackApplied
+from .assets import concrete_arb_asset, preview_arb_asset, require_arb_references
+from .contracts import UNCHANGED, WritebackApplied, WritebackKind
 from .contracts import WritebackAcceptance as WritebackAcceptance
 from .contracts import WritebackEdit as WritebackEdit
 from .contracts import WritebackSelection as WritebackSelection
 from .contracts import WritebackValues as WritebackValues
 from .contracts import WritebackWritten as WritebackWritten
-from .items import ModuleWriteback, ParameterWriteback, RecordWriteback, WritebackItem
+from .items import (
+    ArbAssetWriteback,
+    ModuleWriteback,
+    ParameterWriteback,
+    RecordWriteback,
+    WritebackItem,
+    writeback_kind,
+)
 from .values import (
     applied_values,
     destination_path,
@@ -37,14 +46,16 @@ from .values import (
 logger = logging.getLogger(__name__)
 
 _GUI_ORIGIN = CommandOrigin("gui")
+_DOCUMENT_WRITE_GROUPS = ("parameter", "ml_modules", "records")
 
 
 # Kind prefixes are deliberately draft-local. Two independent drafts can both
 # expose ``param-1`` without sharing any Form or mutable item state.
-_KIND_PREFIX = {
-    ParameterWriteback: "param",
-    ModuleWriteback: "ml",
-    RecordWriteback: "record",
+_KIND_PREFIX: dict[WritebackKind, str] = {
+    "parameter": "param",
+    "module": "ml",
+    "record": "record",
+    "arb_asset": "arb",
 }
 
 
@@ -99,8 +110,9 @@ class WritebackDraftApplication:
 
     applied_ids lists confirmed committed IDs: draft order on full success,
     committed-group order on partial failure.
-    written groups all prepared destination paths by parameter/ml_modules/records;
-    it describes the requested writes, including uncommitted paths after failure.
+    written groups all prepared destination paths by parameter/ml_modules/records.
+    It also includes arb_assets when the request has asset writes. Paths describe
+    all requested writes, including uncommitted paths after failure.
     error is the original write failure after a confirmed prefix, or None.
     values contains detached actual values and fixed destinations for committed
     IDs when receipt capture was requested, otherwise an empty tuple.
@@ -273,6 +285,9 @@ class WritebackDraft:
         values: dict[str, WritebackValues] = {}
         for item in items:
             path = destination_path(item, parameters)
+            if isinstance(item, ArbAssetWriteback):
+                values[item.session_id] = preview_arb_asset(item, path, current)
+                continue
             if isinstance(item, RecordWriteback):
                 proposed = item.record
             elif isinstance(item, ParameterWriteback):
@@ -302,15 +317,14 @@ class WritebackDraft:
         parameters = self.parameters
         return DocumentSetCapture.empty() if parameters is None else parameters
 
-    def _current_target(self) -> DocumentSetRef:
-        target = self._write.read_context(
-            point=self._write.current_point_label()
-        ).target
+    def _current_destination(self) -> tuple[DocumentSetRef, DocumentSetCapture]:
+        current = self._write.read_context(point=self._write.current_point_label())
+        target = current.target
         if target is None:
             raise FailedPreconditionError(
                 "Open an entry first", reason_code="no_context"
             )
-        return target
+        return target, current
 
     def edit(
         self,
@@ -323,8 +337,10 @@ class WritebackDraft:
     ) -> None:
         """Apply one draft-local edit, in the order selection, target, value, edits.
 
-        selected only changes the GUI default apply selection. target_name
-        retargets any item. proposed_value replaces a parameter proposal; other
+        selected only changes the GUI default apply selection. An arb asset
+        only accepts selection; target_name, proposed_value or edits raise
+        InvalidInputError without changes. For other items, target_name retargets the item.
+        proposed_value replaces a parameter proposal; other
         items raise InvalidInputError. edits writes one batch into a module
         item's Form with FormState.write semantics: the batch installs whole,
         ordinary invalid values stay in the Form and are reported by preview
@@ -337,6 +353,14 @@ class WritebackDraft:
         self._require_active()
         entry = self._find_draft_entry(session_id)
         item = entry.item
+        if isinstance(item, ArbAssetWriteback) and (
+            target_name is not None
+            or proposed_value is not UNCHANGED
+            or edits is not None
+        ):
+            raise InvalidInputError(
+                f"{session_id!r} is an arb asset proposal; it cannot be edited or retargeted"
+            )
         if selected is not None and selected != item.selected:
             item.selected = selected
         if target_name is not None and target_name != item.target_name:
@@ -452,29 +476,28 @@ class WritebackDraft:
         """
         return self._apply_draft(item_ids=item_ids, origin=origin, capture_values=True)
 
-    def _apply_draft(
-        self,
-        *,
-        item_ids: tuple[str, ...] | None,
-        origin: CommandOrigin,
-        capture_values: bool = False,
-    ) -> WritebackDraftApplication:
-        self._require_active()
-        selected_entries = self._selected_entries(item_ids)
-        written: dict[str, list[str]] = {
-            "parameter": [],
-            "ml_modules": [],
-            "records": [],
-        }
-        if not selected_entries:
-            return WritebackDraftApplication((), written)
-        target = self._current_target()
+    def _prepare_writes(
+        self, entries: list[_DraftEntry], current: DocumentSetCapture
+    ) -> tuple[tuple[concrete.WritebackItem, ...], dict[str, list[str]]]:
+        """Lower selected Forms and check destinations and arb references without writing."""
         parameters = self._require_parameters()
+        written: dict[str, list[str]] = {key: [] for key in _DOCUMENT_WRITE_GROUPS}
+        selected_assets = {
+            entry.item.target_name
+            for entry in entries
+            if isinstance(entry.item, ArbAssetWriteback)
+        }
         destinations: set[str] = set()
         items: list[concrete.WritebackItem] = []
-        for entry in selected_entries:
+        for entry in entries:
             item = entry.item
-            if isinstance(item, RecordWriteback):
+            if isinstance(item, ArbAssetWriteback):
+                validate_arb_data_key(item.target_name)
+                asset = concrete_arb_asset(item)
+                path = asset.path
+                items.append(asset)
+                written.setdefault("arb_assets", []).append(path)
+            elif isinstance(item, RecordWriteback):
                 path = item.target_name
                 items.append(concrete.RecordWriteback(path, item.record))
                 written["records"].append(path)
@@ -494,15 +517,39 @@ class WritebackDraft:
                 written["parameter"].append(path)
             else:
                 path = destination_path(item, parameters)
-                items.append(concrete.ModuleWriteback(path, self._module_spec(entry)))
+                spec = self._module_spec(entry)
+                require_arb_references(
+                    spec,
+                    current.library,
+                    selected_assets,
+                    session_id=item.session_id,
+                    target=path,
+                )
+                items.append(concrete.ModuleWriteback(path, spec))
                 written["ml_modules"].append(path)
             if path in destinations:
                 raise InvalidInputError(f"duplicate writeback destination: {path!r}")
             destinations.add(path)
+        return tuple(items), written
+
+    def _apply_draft(
+        self,
+        *,
+        item_ids: tuple[str, ...] | None,
+        origin: CommandOrigin,
+        capture_values: bool = False,
+    ) -> WritebackDraftApplication:
+        selected_entries = self._selected_entries(item_ids)
+        if not selected_entries:
+            return WritebackDraftApplication(
+                (), {key: [] for key in _DOCUMENT_WRITE_GROUPS}
+            )
+        target, current = self._current_destination()
+        items, written = self._prepare_writes(selected_entries, current)
         try:
             outcome = self._write.apply_writeback(
                 target,
-                tuple(items),
+                items,
                 evidence=concrete.WritebackEvidence(
                     origin=origin.origin,
                     run_id=self.run_id,
@@ -585,7 +632,8 @@ class WritebackDraft:
                 self._module_spec(entry)
             items.append(entry.item)
         paths = [destination_path(item, parameters) for item in items]
-        current = self._write.read_target(self._current_target())
+        target, _ = self._current_destination()
+        current = self._write.read_target(target)
         before = [
             read_destination_value(self._write, self, item, current, path)
             for item, path in zip(items, paths, strict=True)
@@ -625,12 +673,7 @@ class WritebackDraft:
 
     @staticmethod
     def _kind_prefix(item: WritebackItem) -> str:
-        for item_type, prefix in _KIND_PREFIX.items():
-            if isinstance(item, item_type):
-                return prefix
-        raise InvalidInputError(
-            f"unsupported writeback item type: {type(item).__name__}"
-        )
+        return _KIND_PREFIX[writeback_kind(item)]
 
     @staticmethod
     def _next_session_id(entries: list[_DraftEntry], prefix: str) -> str:
@@ -848,7 +891,18 @@ class WritebackService:
         if parameters is not None and any(
             isinstance(item, ModuleWriteback) for item in proposals
         ):
-            arb_names = tuple(self._arb_names())
+            arb_names = tuple(
+                dict.fromkeys(
+                    (
+                        *self._arb_names(),
+                        *(
+                            item.target_name
+                            for item in proposals
+                            if isinstance(item, ArbAssetWriteback)
+                        ),
+                    )
+                )
+            )
         return WritebackDraft(
             self,
             self._write,

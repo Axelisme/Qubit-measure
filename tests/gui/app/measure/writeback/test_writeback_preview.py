@@ -3,25 +3,47 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 from pydantic import Field
-from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.cfg_model import (
+    ArbWaveformCfg,
+    ConstWaveformCfg,
+    FlatTopWaveformSpec,
+    PulseSpec,
+)
+from zcu_tools.core.waveform_format import WaveformSamples
+from zcu_tools.experiment import RunRecord
+from zcu_tools.gui.app.measure.adapter import WritebackRequest
 from zcu_tools.gui.app.measure.writeback import (
+    ArbAssetWriteback,
     ModuleWriteback,
     ParameterWriteback,
+    WritebackEdit,
     WritebackService,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.resources.entry import ComponentSchema, ResultEntry, RoleSpec
-from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase, ArbWaveformError
 
 from tests.gui._context_reads import capture_focus
+from tests.gui.app.measure._record_support import require_target
+from tests.gui.app.measure._synthetic import (
+    ARB_PROPOSAL_KEY,
+    MODULE_PROPOSAL_TARGET,
+    MODULE_PROPOSAL_WAVEFORM,
+    ArbProposalAdapter,
+    SampleAnalysis,
+    SampleCfg,
+    SampleResult,
+)
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 from tests.resources.entry.view_support import registered_model
 
@@ -56,6 +78,189 @@ def session(tmp_path: Path, component_kinds):
     control.add_component("Q1", "fake/drive/a", {}, point=control.current_point_label())
     service = WritebackService(control, arb_names=lambda: ())
     return entry, control, service
+
+
+@pytest.fixture
+def make_arb_draft(session):
+    _entry, control, service = session
+
+    def create():
+        run = RunRecord(
+            SampleCfg(sweep=SweepCfg(start=0.0, stop=1.0, expts=2, step=1.0)),
+            SampleResult(np.array([0.3])),
+        )
+        return service.create_draft(
+            ArbProposalAdapter.get_writeback_items(
+                WritebackRequest(
+                    run, SampleAnalysis(peak=0.3), control.get_session_env()
+                )
+            ),
+            parameters=capture_focus(control),
+            experiment_name="synthetic/arb",
+        )
+
+    return create
+
+
+def test_module_form_accepts_arb_key_proposed_later_in_same_draft(make_arb_draft):
+    draft = make_arb_draft()
+    assert draft.get_item_form("ml-1").spec().to_dict()["waveform"] == {
+        "style": "arb",
+        "data": ARB_PROPOSAL_KEY,
+    }
+    assert [item.session_id for item in draft.preview()] == ["ml-1", "arb-1"]
+
+
+def test_unchecked_arb_publish_blocks_dependent_module_before_acceptance(
+    session, make_arb_draft
+):
+    entry, control, _service = session
+    draft = make_arb_draft()
+    draft.edit("arb-1", selected=False)
+    with pytest.raises(InvalidInputError, match=r"ml-1.*Q1\.pulses\.tuned.*optimized"):
+        draft.apply()
+    assert entry.ledger.events() == ()
+    assert MODULE_PROPOSAL_TARGET not in capture_focus(control).library.module_keys()
+    assert not (entry.database_path / "arb_waveforms" / "optimized.npz").exists()
+
+
+def test_all_selected_arb_asset_commits_before_the_referencing_library_item(
+    session, make_arb_draft
+):
+    entry, control, _service = session
+    draft = make_arb_draft()
+    result = draft.accept(("ml-1", "arb-1"))
+    assert result.error is None
+    assert [(row.id, row.kind) for row in result.values] == [
+        ("arb-1", "arb_asset"),
+        ("ml-1", "module"),
+    ]
+    stored = ArbWaveformDatabase.info_at(entry.database_path / "arb_waveforms")
+    np.testing.assert_array_equal(
+        stored.samples(ARB_PROPOSAL_KEY).qdata, [0.0, 0.4, 0.0]
+    )
+    saved = capture_focus(control).library.entry_value(
+        MODULE_PROPOSAL_TARGET, kind="module"
+    )
+    assert saved["waveform"] == {"style": "arb", "data": ARB_PROPOSAL_KEY}
+
+
+def test_apply_checks_arb_reference_in_active_library_not_creation_capture(session):
+    entry, control, service = session
+    target = require_target(capture_focus(control))
+    control.set_waveform(target, MODULE_PROPOSAL_WAVEFORM, ConstWaveformCfg(length=0.1))
+    captured = capture_focus(control)
+    draft = service.create_draft(
+        [
+            ModuleWriteback(
+                MODULE_PROPOSAL_TARGET,
+                "pulse",
+                PulseSpec(
+                    ch=0,
+                    nqz=1,
+                    freq=5000.0,
+                    gain=0.2,
+                    waveform=MODULE_PROPOSAL_WAVEFORM,
+                ),
+            )
+        ],
+        parameters=captured,
+        experiment_name="synthetic/arb",
+    )
+    control.set_waveform(
+        target,
+        MODULE_PROPOSAL_WAVEFORM,
+        FlatTopWaveformSpec(length=1.0, raise_waveform=ArbWaveformCfg(data="missing")),
+    )
+    with pytest.raises(InvalidInputError, match=r"ml-1.*Q1\.pulses\.tuned.*missing"):
+        draft.apply()
+    assert entry.ledger.events() == ()
+    repository = ArbWaveformDatabase(entry.database_path / "arb_waveforms")
+    repository.save("missing", idata=[0.0, 0.4], time=[0.0, 0.25])
+    draft.apply()
+    assert (
+        capture_focus(control).library.entry_value(
+            MODULE_PROPOSAL_TARGET, kind="module"
+        )["waveform"]
+        == MODULE_PROPOSAL_WAVEFORM
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        WritebackEdit("arb-1", target_name="renamed"),
+        WritebackEdit("arb-1", proposed_value={}),
+        WritebackEdit("arb-1", edits={}),
+    ],
+    ids=["retarget", "replace-value", "form-edit"],
+)
+def test_arb_publish_refuses_edits_before_writing(session, make_arb_draft, change):
+    entry, _control, _service = session
+    draft = make_arb_draft()
+    with pytest.raises(
+        InvalidInputError, match=r"arb-1.*arb asset.*cannot be edited or retargeted"
+    ):
+        draft.writeback_write((change,))
+    assert draft.preview()[1].target_name == ARB_PROPOSAL_KEY
+    assert entry.ledger.events() == ()
+
+
+def test_rejected_arb_edit_keeps_default_selection(make_arb_draft):
+    draft = make_arb_draft()
+    with pytest.raises(InvalidInputError, match="cannot be edited or retargeted"):
+        draft.edit("arb-1", selected=False, target_name="renamed")
+
+    asset = draft.preview()[1]
+    assert asset.selected
+    assert asset.target_name == ARB_PROPOSAL_KEY
+
+
+def test_invalid_arb_key_rejects_draft_before_ledger_append(session):
+    entry, control, service = session
+    draft = service.create_draft(
+        [
+            ArbAssetWriteback(
+                "bad-key",
+                "Invalid asset key",
+                samples=WaveformSamples(
+                    np.array([0.0, 0.25]), np.array([0.0, 0.4]), None
+                ),
+            )
+        ],
+        parameters=capture_focus(control),
+        experiment_name="synthetic/arb",
+    )
+
+    with pytest.raises(ArbWaveformError, match="data key must match"):
+        draft.apply()
+
+    assert entry.ledger.events() == ()
+    assert not (entry.database_path / "arb_waveforms").exists()
+
+
+def test_arb_preview_compares_live_samples_without_creating_or_overwriting_assets(
+    session, make_arb_draft
+):
+    entry, _control, _service = session
+    draft = make_arb_draft()
+    root = entry.database_path / "arb_waveforms"
+
+    def preview():
+        return draft.preview_values(session_id="arb-1")["arb-1"]
+
+    assert preview().current == "absent"
+    assert not root.exists()
+    repository = ArbWaveformDatabase(root)
+    repository.save(
+        ARB_PROPOSAL_KEY, [0.0, 0.3, -0.0], [0.0, 0.25, 0.75], [0.0, 0.4, 0.0]
+    )
+    assert preview().current == "identical"
+    repository.save(ARB_PROPOSAL_KEY, [0.0, 0.4, 0.0], [0.0, 0.25, 0.75])
+    facts = preview()
+    assert facts.current == "different"
+    assert facts.warning is not None and "Apply will fail" in facts.warning
+    assert entry.ledger.events() == ()
 
 
 def test_static_unit_facts_follow_selected_point_and_captured_path_without_conversion(

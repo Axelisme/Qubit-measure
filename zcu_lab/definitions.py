@@ -110,6 +110,7 @@ from zcu_lab.v2.two_qubit.cz_amplitude.gui import DEFINITION as CZAMPLITUDE_DEFI
 from zcu_lab.v2.two_qubit.cz_amplitude.gui_heralded import (
     DEFINITION as CZAMPLITUDE_HERALDED_DEFINITION,
 )
+from zcu_lab.v2.two_qubit.cz_optimize.gui import DEFINITION as CZOPTIMIZE_DEFINITION
 from zcu_lab.v2.two_qubit.idle_zz.gui import DEFINITION as IDLE_ZZ_DEFINITION
 from zcu_lab.v2.two_qubit.idle_zz.gui_heralded import (
     DEFINITION as IDLE_ZZ_HERALDED_DEFINITION,
@@ -319,6 +320,7 @@ ADAPTERS: dict[str, object] = {
     "two_qubit/chevron_heralded": CHEVRON_HERALDED_DEFINITION,
     "two_qubit/cz_amplitude": CZAMPLITUDE_DEFINITION,
     "two_qubit/cz_amplitude_heralded": CZAMPLITUDE_HERALDED_DEFINITION,
+    "two_qubit/cz_optimize": CZOPTIMIZE_DEFINITION,
     "two_qubit/conditional_phase": CONDITIONAL_PHASE_DEFINITION,
     "two_qubit/conditional_phase_heralded": CONDITIONAL_PHASE_HERALDED_DEFINITION,
     "two_qubit/local_z": LOCAL_Z_DEFINITION,

@@ -3,6 +3,7 @@
 # Session-core value types are part of the adapter callback vocabulary, so
 # authors can import them alongside the value declarations.
 from zcu_tools.gui.app.measure.writeback import (
+    ArbAssetWriteback,
     ModuleWriteback,
     ParameterWriteback,
     RecordWriteback,

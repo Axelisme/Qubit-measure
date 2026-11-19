@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-11-19，recipe 分階段寫回問答與離線 flux 設定
+**Last updated:** 2026-11-20，arb 資產寫回
 
 **讀者：** agent、framework-dev。查閱量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -624,6 +624,9 @@ Recipe 的 typed T 驗證不會補資料或更改這份 owner summary。
 `apply_writeback(tab, items=None, stage=None)` 按當前 preview 的穩定 target_name 選項目。
 `stage="primary"` 或 `"post"` 只讀寫該 stage，另一 stage 列為 skipped。
 省略或 null 讀寫兩個 stage。同 target 跨 stage 時仍回 ambiguous，訊息列出可選 stage。
+Arb 資產提案的 kind 是 `arb_asset`；以資產 key 選取，不能改 key 或樣本。
+Preview 只送 `sample_count`、`duration_us`、`peak_abs` 摘要。若已選 module 引用不存在的 arb key，
+必須同時選同一 stage 的資產提案。收據的 `after` 回提交狀態、樣本數與微秒長度。
 Record proposal 的 kind 是 `record`，ID 是 `record-<n>`，逐目的地清單使用 `written.records`。
 Record JSON 由 adapter 組裝，框架只補 provenance 信封。Wire 123 不接受舊 sample 名稱。
 items 省略或 null 寫所選 stage 的全部項目，[] 寫零項，不看 GUI 勾選，也不回答 recipe。

@@ -11,6 +11,7 @@ from zcu_tools.gui.session.arb_waveform import (
     ArbWaveformPreviewResult,
     ArbWaveformWriteStatus,
 )
+from zcu_tools.resources.document_names import ARB_WAVEFORMS_DIRNAME
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformDatabase,
@@ -107,7 +108,7 @@ def try_resolve_arb_waveform_root(ctx: SessionEnv) -> Path | None:
 
     if not ctx.database_path:
         return None
-    return Path(ctx.database_path) / "arb_waveforms"
+    return Path(ctx.database_path) / ARB_WAVEFORMS_DIRNAME
 
 
 def render_preview_png(

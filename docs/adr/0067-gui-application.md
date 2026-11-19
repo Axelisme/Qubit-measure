@@ -61,9 +61,12 @@ WritebackDraft 先以分析來源的固定 capture 解析與 lower 全部選定 
 
 Preview 顯示當下作用中位置，Apply 從當下 read_context().target 重新取得 `DocumentSetRef`，不從歷史 capture 決定目的地。此入口驗證目標、綁定資源並交 resources 共用 executor。未開 entry 時仍可預覽合法 draft，destination_context 的 entry_name、point 與各項 current 為 null；非空 Apply 在 append 前以 no_context 拒絕。Global 的 point 為 null，已提交 receipt 的 entry_name 必為字串，destination 不含 kind。空歷史環境不構成拒絕寫回的理由；底層 context 仍拒絕其他 entry 的 target。
 
-Executor 追加 accepted 後依序提交 parameters 組、library 組與逐筆 records，組內保留提案順序。任一項無效整組不寫，首錯停止，保留已提交組與事件，不提供跨檔 rollback 或 retry。Context owner 每個成功的 parameters／library 組發布一次。GUI 以 committed 的供應序 index 關聯 draft item ID，分組順序與成功項目數不能用來切供應序前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。
+Executor 先追加 accepted；提交順序和失敗邊界見 [[0063]]。
+Context owner 每個成功的 parameters／library 組發布一次。資產組完成或留下已確認前綴時，共用 `arb_waveforms` 版本加一。
+GUI 以 committed 的供應序 index 關聯 draft item ID，分組順序與成功項目數不能用來切供應序前綴。
+GUI 標記已確認項目後原樣拋 producer cause，保留既有 wire 分類。
 
-Parameter 的 metadata 整份替換為 `{stderr: x}`，沒有 stderr 時為 `{}`，不寫 source、kind、run_id 或時間。Module 只保存 Spec，不保存 per-leaf stderr 或來源。Parameter／Module／Sample proposal、Form draft 與 selected Apply 的契約見 [[0008]]、[[0065]]；子模組搬遷不改成功前綴、權限、busy admission、欄位驗證或錯誤分類。
+Parameter 的 metadata 整份替換為 `{stderr: x}`，沒有 stderr 時為 `{}`，不寫 source、kind、run_id 或時間。Module 只保存 Spec，不保存 per-leaf stderr 或來源。Parameter／Module／Record／ArbAsset proposals、Form draft 與 selected Apply 的契約見 [[0008]]、[[0065]]；子模組搬遷不改成功前綴、權限、busy admission、欄位驗證或錯誤分類。
 
 2026-10-28 使用者裁決：「我其實沒有要知道來源的需求，這功能純屬於錦上添花」「來源我一直以為只是metadata，沒想要解析」。Library 移除模組來源；accepted 事件與 record 的事件引用仍保留，見 [[0063]]。
 
@@ -236,7 +239,7 @@ LoadService 擁有 native 讀檔與 tag 比對，再呼叫 adapter.restore(store
 
 GUI handover 與 Qt-free experiment 核心分層，依 GUI → experiment → datafile／resources 的 C8、C9 contracts；共用核心另由 artifacts-core-no-ui 禁止 GUI／Qt 依賴。2026-10-15 以「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」確認 Load 不回填與兩個子模組一併實作。
 
-Measure 的 `writeback` package 擁有 Parameter／Module／Sample proposals、具名 `WritebackDraft`、
+Measure 的 `writeback` package 擁有 Parameter／Module／Record／ArbAsset proposals、具名 `WritebackDraft`、
 service、control 與 Qt widget。Adapter 公開入口再匯出 proposal 型別；resources.entry
 executor 與 remote handler／wire types 留在原 owner。`artifacts` 與 `writeback` 不直接
 互相 import，由 app composition 協調，仍可共用 State、events 與 context。

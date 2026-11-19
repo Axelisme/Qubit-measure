@@ -39,6 +39,7 @@ client = [
   "numba",
   "psutil",
   "scikit-optimize",
+  "cma",
   "qick==0.2.436",
   "pyyaml",
   "pyvisa",

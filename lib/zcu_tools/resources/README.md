@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-11-18
+**Last updated:** 2026-11-20
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
@@ -60,11 +60,11 @@ Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 
 
 各 owner 各自管理 scope、schema、commit 與失敗政策：
 
-- `ResultEntry` 只以 Result 構成條目，Database root 只設定輸出位置。Create／open 不檢查或建立 Database，首次 Save 才建立所需目錄。Rename 只移動 Result，舊 Database 輸出不動。Entry 與 point 各有 parameters、library、aliases 文件組，point 不逐名稱回退 entry。Entry 組同時供 global 工作與新 point 繼承；ModuleLibrary 可綁任一層。缺 library 或 aliases 都當空、revision 為 None，讀取不建檔；缺參數文件仍是錯誤。
+- `ResultEntry` 只以 Result 構成條目，Database root 只設定輸出位置。Create／open 不檢查或建立 Database；Save writer 與資產 owner 各自按需建立輸出目錄。Rename 只移動 Result，舊 Database 輸出不動。Entry 與 point 各有 parameters、library、aliases 文件組，point 不逐名稱回退 entry。Entry 組同時供 global 工作與新 point 繼承；ModuleLibrary 可綁任一層。缺 library 或 aliases 都當空、revision 為 None，讀取不建檔；缺參數文件仍是錯誤。
 - `ModuleLibrary` 綁定 entry 或 point 的 module 與 waveform 文件。參數與 point 身分由 `entry/` 管理。
 - `QubitParams` 擁有 result scope 層級的 `params.json`，跨多個 point 共用。
 - `ResultEntry.records(component)` 綁定元件 JSONL 樣本歷史。v2 座標協定保持 opt-in。
-- `ArbWaveformDatabase` 是 qubit-scoped 的 asset repository，與 context 分開。
+- `ArbWaveformDatabase` 綁定一個明確的 asset 目錄。Measure 使用作用中 entry 的 `arb_waveforms` 目錄。
 
 `DocumentStore` 擁有單檔交易，不換算數值。Caller 提供文件 model 與整份文件的 validation。Entry 另以 `read_validate` 選擇結構讀取，`content()` 保留未消費的欄位，`snapshot()`、edit 與 strict refresh 仍驗完整 model。其他 consumer 不啟用這個選項，維持既有完整驗證。參數容器的檔案與視圖使用相同工作單位；值與 metadata 都不經 SI 投影。不同 store 不共用快照；任一欄位衝突會拒絕整筆交易。通知失敗獨立回報，不撤銷已完成的提交。它不提供跨檔掉電保證，也不自動監看檔案。
 

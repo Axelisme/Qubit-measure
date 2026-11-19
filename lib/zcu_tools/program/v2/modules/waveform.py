@@ -8,6 +8,7 @@ from typing import (
     Any,
     Literal,
     NotRequired,
+    Self,
     TypeAlias,
     TypedDict,
 )
@@ -16,17 +17,28 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import (
     BeforeValidator,
+    ConfigDict,
     Field,
+    InstanceOf,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
     TypeAdapter,
     ValidationInfo,
     field_validator,
+    model_serializer,
+    model_validator,
 )
 from qick.asm_v2 import QickParam, QickProgramV2
 
 from zcu_tools import cfg_model as core_cfgs
 from zcu_tools.cfg_model import CfgValidationContext, ConfigBase
 from zcu_tools.cfg_model import WaveformCfg as CoreWaveformCfg
-from zcu_tools.core.waveform_format import decode_npz
+from zcu_tools.core.waveform_format import (
+    WaveformSamples,
+    decode_npz,
+    hash_samples,
+    validate_samples,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.resources.context import LibrarySnapshot
@@ -163,6 +175,89 @@ class ArbWaveformCfg(AbsWaveformCfg):
         )
 
 
+# Pydantic shares a schema between __init__ and raw validation. Only __init__ may create arb_memory.
+_MEMORY_ARB_CONSTRUCTOR = object()
+
+
+class InMemoryArbWaveformCfg(AbsWaveformCfg):
+    """Native arb_memory waveform from normalized I/Q samples in microseconds.
+
+    samples is a detached, read-only snapshot of the supplied WaveformSamples.
+    Invalid sample arrays raise WaveformFormatError. The cfg has no sweepable
+    parameters, asset key or path and cannot be parsed or serialized.
+    """
+
+    model_config = ConfigDict(frozen=True)
+    style: Literal["arb_memory"] = "arb_memory"
+    samples: InstanceOf[WaveformSamples]
+    _sample_hash: str = PrivateAttr()
+
+    def __init__(self, *, samples: WaveformSamples) -> None:
+        snapshot = self._snapshot(samples)
+        self.__pydantic_validator__.validate_python(
+            {"samples": snapshot}, self_instance=self, context=_MEMORY_ARB_CONSTRUCTOR
+        )
+        self._sample_hash = hash_samples(snapshot)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _require_constructor(
+        cls,
+        value: object,
+        handler: ModelWrapValidatorHandler[Self],
+        info: ValidationInfo,
+    ) -> Self:
+        if not isinstance(value, cls) and info.context is not _MEMORY_ARB_CONSTRUCTOR:
+            raise ValueError(
+                "Construct arb_memory directly with a WaveformSamples instance"
+            )
+        return handler(value)
+
+    @model_serializer
+    def _reject_serialization(self) -> dict[str, object]:
+        raise ValueError("arb_memory only exists in memory and cannot be serialized")
+
+    @staticmethod
+    def _snapshot(samples: object) -> WaveformSamples:
+        if not isinstance(samples, WaveformSamples):
+            raise ValueError("arb_memory requires a WaveformSamples instance")
+        validated = validate_samples(
+            time=samples.time, idata=samples.idata, qdata=samples.qdata
+        )
+
+        def readonly(array: NDArray[np.float64]) -> NDArray[np.float64]:
+            # An immutable bytes buffer prevents callers from re-enabling writes.
+            return np.frombuffer(array.tobytes(), dtype=np.float64)
+
+        return WaveformSamples(
+            time=readonly(validated.time),
+            idata=readonly(validated.idata),
+            qdata=None if validated.qdata is None else readonly(validated.qdata),
+        )
+
+    def __deepcopy__(
+        self, memo: dict[int, object] | None = None
+    ) -> InMemoryArbWaveformCfg:
+        # Keep the immutable arrays; ndarray deepcopy would make them writable.
+        return self.__copy__()
+
+    @property
+    def sample_hash(self) -> str:
+        """Return the cached SHA-256 hex digest of the playback samples."""
+        return self._sample_hash
+
+    @property
+    def length(self) -> float:
+        """Return the final reference time in µs."""
+        return float(self.samples.time[-1])
+
+    def build(self, name: str) -> ArbWaveform:
+        return ArbWaveform(name, self)
+
+    def set_param(self, name: str, value: float | QickParam) -> None:
+        raise ValueError(f"arb_memory has no sweepable parameters: {name}={value}")
+
+
 def resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
     if isinstance(value, str):
         if info.context is None:
@@ -200,6 +295,7 @@ WaveformCfg: TypeAlias = Annotated[
     | GaussWaveformCfg
     | DragWaveformCfg
     | ArbWaveformCfg
+    | InMemoryArbWaveformCfg
     | FlatTopWaveformCfg,
     BeforeValidator(resolve_waveform_ref),
     Field(discriminator="style"),
@@ -389,18 +485,20 @@ class DragWaveform(AbsWaveform):
 
 
 class ArbWaveform(AbsWaveform):
-    """Build a native envelope from settings declared as ``ArbWaveform.Cfg``."""
+    """Play arbitrary samples supplied by a local NPZ path or native memory cfg."""
 
     Cfg: TypeAlias = ArbWaveformCfg
 
-    def __init__(self, name: str, waveform_cfg: ArbWaveformCfg) -> None:
+    def __init__(
+        self, name: str, waveform_cfg: ArbWaveformCfg | InMemoryArbWaveformCfg
+    ) -> None:
         self.name = name
         self.waveform_cfg = waveform_cfg
 
     @property
     def length(self) -> float:
         cfg = self.waveform_cfg
-        assert isinstance(cfg, ArbWaveformCfg)
+        assert isinstance(cfg, (ArbWaveformCfg, InMemoryArbWaveformCfg))
         return cfg.length
 
     def create(self, prog: QickProgramV2, ch: int, **kwargs) -> None:
@@ -410,7 +508,7 @@ class ArbWaveform(AbsWaveform):
     def make_iqdata(
         self, ch: int, prog: QickProgramV2, *, even_length: bool = False
     ) -> tuple[NDArray[np.float64], NDArray[np.float64] | None]:
-        """Read cfg.path samples and interpolate at the channel's timing grid.
+        """Interpolate the cfg's samples at the channel's timing grid.
 
         ch selects prog.soccfg generator scale and samples per clock. Scale
         normalized samples by get_maxv(ch) and return I/Q arrays; zero Q is
@@ -419,14 +517,16 @@ class ArbWaveform(AbsWaveform):
         length. File/codec failures propagate; no repository lookup occurs.
         """
         cfg = self.waveform_cfg
-        assert isinstance(cfg, ArbWaveformCfg)
-        samples = decode_npz(Path(cfg.path).read_bytes()).samples
+        if isinstance(cfg, InMemoryArbWaveformCfg):
+            samples = cfg.samples
+        else:
+            assert isinstance(cfg, ArbWaveformCfg)
+            samples = decode_npz(Path(cfg.path).read_bytes()).samples
         idata_raw, qdata_raw, time_raw = samples.idata, samples.qdata, samples.time
 
         maxv = prog.soccfg.get_maxv(ch)
         samps_per_clk = prog.soccfg["gens"][ch]["samps_per_clk"]
-        raw_end = float(time_raw[-1])
-        length = raw_end
+        length = float(time_raw[-1])
 
         if even_length:
             n_clks = 2 * prog.us2cycles(gen_ch=ch, us=length / 2)

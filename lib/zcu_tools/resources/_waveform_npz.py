@@ -57,11 +57,12 @@ def load_npz(path: Path) -> ArbWaveformData:
     )
 
 
-def write_npz(path: Path, data: ArbWaveformData) -> None:
-    """Replace an NPZ path with validated data and its optional recipe JSON.
+def write_npz(path: Path, data: ArbWaveformData, *, replace: bool = True) -> None:
+    """Publish validated data and optional recipe JSON to an NPZ path.
 
-    Create the parent directory and use a same-directory temporary file. On
-    write failure remove that temporary file and propagate the original error.
+    Stage in the parent directory and publish atomically. With replace=False,
+    an existing destination raises FileExistsError without changing its bytes.
+    Clean up the temporary file and propagate I/O failures.
     """
     try:
         payload = encode_npz(
@@ -88,8 +89,11 @@ def write_npz(path: Path, data: ArbWaveformData) -> None:
         ) as tmp:
             tmp_name = tmp.name
             tmp.write(payload)
-        atomic_replace(Path(tmp_name), path)
-    except Exception:
+        if replace:
+            atomic_replace(Path(tmp_name), path)
+        else:
+            # The completed archive becomes visible without clobbering a late arrival.
+            path.hardlink_to(Path(tmp_name))
+    finally:
         if tmp_name is not None:
             Path(tmp_name).unlink(missing_ok=True)
-        raise

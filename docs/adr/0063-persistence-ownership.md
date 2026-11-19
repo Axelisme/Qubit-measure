@@ -27,7 +27,9 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Rec
 使用者 2026-10-25：「我認為框架應該對SampleWriteback保持中立無知，可能可以叫RecordWriteback也說不定，行為就是append一個格式不拘的json到紀錄的jsonl中，格式由adapter間的隱式policy決定，資訊也尤其組裝，當然文檔與註解要寫這個policy好讓人維護」。
 同日確認完整改名：「我認為sample可以遷移到新名字，稱現在還沒有真實測量的時間遷是最安全的」。
 Wire kind、written key 與 session prefix 使用 `record`、`records` 與 `record-<n>`。舊 API 名稱不保留。
-- Waveform asset 擁有播放 arrays、reference time axis 和 duration。Core waveform_format 驗證 samples 與編解碼 NPZ，只驗 recipe JSON 語法。Resources 管理 formula 語意、命名與實體 I/O。ModuleLibrary Spec 只保存 asset key。Native arb cfg 保存 key 與必填本機絕對 path，不另存播放長度或 provider。Program/sim 讀 path 的 samples，在完整 asset duration 取樣，不解讀 formula，也不查 global DB。
+- Waveform asset 擁有播放 arrays、reference time axis 和 duration。`resources.waveform_assets.ArbWaveformDatabase` 擁有資產命名、formula 語意與實體 I/O。Writeback 使用 entry 的 `<database_path>/arb_waveforms`，global 與各 point 共用。`core.waveform_format` 驗證 samples、編解碼 NPZ，只驗 recipe 的 JSON 語法。ModuleLibrary 的 `arb` Spec 只保存 asset key。Native `arb` cfg 帶 key 與必填本機絕對 path；native `arb_memory` cfg 直接帶樣本，沒有 key 或 path。Program 依這兩種來源取樣，都使用完整的樣本時長。播放不解讀 formula、不查 global DB。模擬器使用編譯後的 envelope。`arb_memory` 不能序列化，持久 Spec 不接受它，見 [[0072]]。
+
+2026-11-19，使用者對永久保存格式裁定：「波形我觉得存 arbitrary 就好了，arbitrary 就是拿来存这种特别的东西的。其他采用建议。」候選的執行期樣本與永久資產分開，見 [記憶體 arb 討論](../discussions/2026-11-20-in-memory-arb-waveforms.md)。
 
 ### 設定快照與 acquired 事實
 
@@ -52,7 +54,7 @@ MCP call log 是 best-effort 除錯紀錄，可以截斷、清除或停用，不
 新格式根目錄統一為 `result/`，與 GUI runtime 一致，不另設 `results/`。`.gitignore` 保留 `result/`，移除 `/results/`。
 使用者於 2026-10-20 裁決：「好，統一result，那gitignore也做處理」。
 
-Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條目名稱、UTC 建立時間、exact Result path、Database 輸出位置與 scoped ledger。`create`／`open` 只檢查 Result，不檢查或建立 `Database/<name>/`。第一次 Save 才由 writer 建立所需的 Database 目錄，已有的同名 Database 照用，不另加混雜偵測。
+Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條目名稱、UTC 建立時間、exact Result path、Database 輸出位置與 scoped ledger。`create`／`open` 只檢查 Result，不檢查或建立 `Database/<name>/`。Save writer 按需建立量測輸出目錄；資產 owner 按需建立 arb 資產目錄。已有的同名 Database 照用，不另加混雜偵測。
 
 同一 Result root 下，entry 歸屬由資料夾名稱決定，不產生或使用 entry UUID。Global／point 的舊 entry_id 即使格式不合法也忽略，讀取不改 bytes，明確寫入時移除。新 ledger 事件與 RunSnapshot 不含 entry_id，舊事件的該欄位不參與讀取或追加。Run ID 與 event ID 不變。Role capture 仍核對 point source 與 owning roots。Clone 使用來源位置當下的內容。缺 records 時 ledger 讀取回空且不建目錄，第一次 append 才建立。
 
@@ -285,7 +287,18 @@ Lab 擁有目前版本、步驟與真實舊文件形狀。`scripts/upgrade_param
 
 ### 失敗、路徑與遷移邊界
 
-2026-10-23 使用者對同一份文件一次 edit 的方案裁定：「同意」。Run accept 先追加一筆 accepted，再依目的地文件分組提交，組內順序保留。提交順序為 parameters 一組、library module／waveform 一組、樣本逐筆。Parameters 與 library 各使用一次 edit，任一項無效整組不寫。Executor 回 `WritebackResult`，含 accepted event_id 與逐項 committed values。組失敗以 `WritebackApplyError.result` 保留已提交組的全部項目，並公開 event_id、applied 與原始 cause，保留前組與事件，停止後組。applied 仍計項目數，失敗組計零。Notebook 直接看到此錯誤；GUI context owner 發布實際成功前綴，GUI service 標記前綴後原樣拋 cause，wire 不改原 producer 分類。
+2026-10-23 使用者對同一份文件一次 edit 的方案裁定：「同意」。Run accept 先追加一筆 accepted，再依目的地分組提交，組內順序保留。
+
+提交順序為 arb 資產一組、parameters 一組、library module／waveform 一組、records 逐筆。
+資產先提交，讓同批 library 可以引用新 key。資產 owner 在寫檔前檢查整組。同 key 的 time、I、Q 相同時回 `existing`，保留原檔與 recipe。全零 Q 與缺席 Q 視為相同。同 key 的樣本不同則整組不寫。新 key 建立不帶 recipe 的 NPZ，回 `created`。發布從不覆寫。Ledger 只記資產路徑、樣本數與時長，不存 arrays。
+Parameters 與 library 各使用一次 edit，任一項無效整組不寫。
+
+2026-11-19，使用者在比較 writeback 與 recipe 寫檔後，對維持 Apply 發布新 key、不覆寫舊資產的方案答：「可以」。提案與接受邊界見 [[0008]]，兩種做法的差別見 [arb 資產寫回討論](../discussions/2026-11-20-arb-asset-writeback.md)。
+
+Executor 回 `WritebackResult`，含 accepted event_id 與逐項 committed values。
+組失敗以 `WritebackApplyError.result` 保留已提交項目，並公開 event_id、applied 與原始 cause。
+資產組發生 I/O 錯誤時也保留已確認的前綴。保留前組與事件，停止後組；applied 計已確認的項目數。
+Notebook 直接收到此錯誤。GUI context owner 發布實際成功前綴，GUI service 標記前綴後原樣拋 cause，wire 不改原 producer 分類。
 
 GUI writeback 接受當下作用中文件組的 `DocumentSetRef`，不自動建 point。Global 的 acquired ledger 與 record row 都可保存 point=null，沿既有 nullable 欄位契約，不新增格式版本。這取代原本 GUI 禁止 point=null 樣本的限制。
 

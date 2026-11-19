@@ -1,6 +1,6 @@
 # `waveform_assets` 參考
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-20
 
 **讀者：** framework-dev。Arb 波形資產的格式、方法與 recipe 約束。
 
@@ -13,6 +13,9 @@
 - [`_waveform_npz.py`](_waveform_npz.py)：NPZ archive 讀寫與內嵌 recipe JSON 解碼，JSON 編碼沿用 Recipe 的方法。
 
 Formula 與 NPZ 重用 data 的驗證規則。Data 只以型別註記引用 Recipe，不在 runtime 載入 formula，避免循環依賴。
+
+候選波形用 [`InMemoryArbWaveformCfg`](../program/v2/modules/README.md#in-memory-arbitrary-waveforms) 播放。
+這些樣本只留在記憶體，不寫進資產庫。要保存選中的樣本，以 writeback 發布為 `arb` 資產，再用資產 key 更新 library 引用。
 
 ## `ArbWaveformDatabase`
 
@@ -48,10 +51,17 @@ data = repository.load("my_pulse")
 | `list_entries()` | 列出 data key 加檔案 `mtime` / `file_size` |
 | `inspect(data_key)` | 載入單筆 asset 並即時計算 duration、sample count、peak Abs、recipe summary |
 | `load(data_key)` / `get(name)` | `load` 取得 `ArbWaveformData`；`get` 回傳 `(idata, qdata, time)`，Q channel 全為 0 時 `qdata` 為 `None` |
+| `publication_status_at(directory, data_key, samples)` | 依發布規則比較樣本，回 `absent`、`identical` 或 `different`，不寫檔或建立目錄 |
+| `publish_batch(assets)` | 呼叫時檢查整組 `WaveformSamples`；迭代回傳值才發布不含 recipe 的 NPZ，依 mapping 順序產出 `created` 或 `existing` |
 | `save(name, idata, time, qdata=None)` | Notebook 用的 raw 寫入；一律覆寫同名 asset，不寫 recipe（`qdata` 省略時存成全 0）。需要 collision 檢查時改用 `import_data(..., overwrite=False)` |
 | `create_from_formula(data_key, recipe, *, overwrite=False)` / `update_formula(data_key, recipe)` | 渲染 formula recipe，並把 arrays 與 recipe 寫進同一個 `.npz`。`create_from_formula` 在 key 已存在且 `overwrite=False` 時拋 `data_key_exists`；`update_formula` 只更新已存在的 asset，不存在時拋 not found。建立新 recipe 或依 recipe 重新渲染，只能經這兩個方法；`import_file` 例外，會原樣保存來源 `.npz` 已有的 recipe |
 | `import_file(data_key, source_path, *, overwrite=False)` / `import_data(data_key, *, idata, qdata, time, overwrite=False)` | `import_file` 只接受 `.npz`，原檔若含 recipe 會一併保留；`import_data` 接受記憶體中的三條 1D array，不寫 recipe。兩者在 key 已存在且 `overwrite=False` 時拋 `data_key_exists` |
 | `delete(...)` / `rename(...)` | 只操作 asset 檔案，不掃描 `ModuleLibrary` references |
+
+`publish_batch` 不覆寫。Time、I、Q 逐值相同時回 `existing`，保留原 bytes 與 recipe；缺席的 Q 與全零 Q 等價。
+同 key 樣本不同時，`publish_batch` 在回傳 iterator 前拋 `ArbWaveformError`，不寫任何資產檔。
+新檔先寫同目錄的暫存檔，再原子建立目的檔名。若檔名在檢查後被占用，發布失敗且不覆寫。
+I/O 失敗時保留已發布的前綴，不重試或 rollback，見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md#失敗路徑與遷移邊界)。
 
 Formula 寫入方法 `create_from_formula`／`update_formula` 完成寫入後返回 `None`。
 需要 metadata 時，caller 另呼叫 `inspect`；讀取失敗時已完成的寫入仍保留。
@@ -71,9 +81,9 @@ Formula 寫入方法 `create_from_formula`／`update_formula` 完成寫入後返
 
 ## 資產與 recipe 約束
 
-Data key 符合 `^[A-Za-z][A-Za-z0-9_]*$`，單一檔案為 `<data_key>.npz`。
+Data key 符合 `^[A-Za-z][A-Za-z0-9_]*$`，單一檔案為 `<data_key>.npz`。`validate_arb_data_key(key)` 只檢查語法，不合規時拋 `ArbWaveformError`。
 `core.waveform_format` 擁有 NPZ keys、arrays 與 JSON 語法驗證。Resources 管理實體 I/O 與 formula 語意，將格式錯誤轉成既有 ArbWaveformError，保留 reason、diagnostics 與 cause。Program/sim 只播放 samples，不重新驗 formula。
-`bound_info().path_for(key)` 回傳 capture-bound 絕對路徑，只驗 key 與檔存在。操作其他 repository 或切換 session context 不改這個 capability。`duration`／`samples` 每次讀取原目錄的現在 bytes，不凍結 samples；刪檔後依既有 missing-key 契約失敗。Native arb 透過 from_core 取得必填 path，序列化 key/path，不保留 provider、不附帶 NPZ、不凍結 bytes。
+`bound_info().path_for(key)` 回傳 capture-bound 絕對路徑，只驗 key 與檔存在。`bound_info().exists(key)` 不讀樣本，key 不合法或檔案不存在時回傳 False。操作其他 repository 或切換 session context 不改這個 capability。`duration`／`samples` 每次讀取原目錄的現在 bytes，不凍結 samples；刪檔後依既有 missing-key 契約失敗。Native arb 透過 from_core 取得必填 path，序列化 key/path，不保留 provider、不附帶 NPZ、不凍結 bytes。
 載入拒絕未知 key；`recipe_json` 解析失敗時回報格式錯誤。
 三條 playback array 同長且長度介於 2 與 `MAX_ARB_WAVEFORM_SAMPLES = 1_000_001`；
 匯入 raw `.npz` 的 time 軸可不等距，但必須從 0 開始並嚴格遞增。

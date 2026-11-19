@@ -2,7 +2,12 @@
 
 from collections.abc import Mapping
 
-from .materialization import module_spec_from_raw, waveform_spec_from_raw
+from .dependencies import ModuleResolver
+from .materialization import (
+    module_spec_from_raw,
+    reset_pulse_fields,
+    waveform_spec_from_raw,
+)
 from .module import (
     BathResetSpec,
     ModuleSpec,
@@ -11,7 +16,48 @@ from .module import (
     PulseSpec,
     TwoPulseResetSpec,
 )
-from .waveform import FlatTopWaveformSpec, WaveformSpec
+from .waveform import ArbWaveformCfg, FlatTopWaveformSpec, WaveformSpec
+
+
+def module_arb_keys(spec: ModuleSpec, resolver: ModuleResolver) -> frozenset[str]:
+    """Find arb asset keys in a persistent module and its resolvable typed children.
+
+    resolver supplies the library whose child Specs would be used. Missing or
+    invalid library references do not contribute keys; this is not full module
+    materialization or validation. No asset is read and no model is changed.
+    """
+    if isinstance(spec, (PulseSpec, PulseReadoutSpec)):
+        return _waveform_arb_keys(spec.waveform, resolver)
+
+    keys: set[str] = set()
+    for field in reset_pulse_fields(spec.type):
+        child: object = getattr(spec, field, None)
+        if isinstance(child, str):
+            try:
+                child = resolver.module_spec(child)
+            except (KeyError, ValueError):
+                continue
+        if isinstance(child, PulseSpec):
+            keys.update(module_arb_keys(child, resolver))
+    return frozenset(keys)
+
+
+def _waveform_arb_keys(
+    waveform: str | WaveformSpec, resolver: ModuleResolver
+) -> frozenset[str]:
+    try:
+        if isinstance(waveform, str):
+            waveform = resolver.waveform_spec(waveform)
+        if isinstance(waveform, FlatTopWaveformSpec):
+            ramp = waveform.raise_waveform
+            waveform = resolver.waveform_spec(ramp) if isinstance(ramp, str) else ramp
+    except (KeyError, ValueError):
+        return frozenset()
+    return (
+        frozenset({waveform.data})
+        if isinstance(waveform, ArbWaveformCfg)
+        else frozenset()
+    )
 
 
 def remap_waveform_references(

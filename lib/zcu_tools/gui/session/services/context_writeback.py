@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from datetime import datetime
 
     from zcu_tools.format_version import YamlMap, YamlValue
@@ -12,7 +13,11 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.context import ContextService
     from zcu_tools.resources.entry import ResultEntry
     from zcu_tools.resources.entry.ledger_models import JsonObject
-    from zcu_tools.resources.entry.writeback import LibraryUpdate, ParameterUpdate
+    from zcu_tools.resources.entry.writeback import (
+        ArbAssetWriteback,
+        LibraryUpdate,
+        ParameterUpdate,
+    )
 
 
 class ContextWritebackTarget:
@@ -38,9 +43,11 @@ class ContextWritebackTarget:
     nothing. Same-entry nonselected destinations stay unselected. Methods must
     run on context's owner thread; thread violations propagate.
 
+    publish_arb_assets uses the bound entry's shared assets and publishes the
+    shared version once for a confirmed group or an I/O failure prefix.
     append_record delegates validation and append-only storage to the bound
     entry's JsonlRecordTable. No method appends an accepted event itself or
-    provides a transaction across parameter, library and record files.
+    provides a cross-file transaction.
     """
 
     def __init__(
@@ -52,6 +59,17 @@ class ContextWritebackTarget:
         self._entry = entry
         self.ledger = entry.ledger
         self.point = target.point
+
+    def publish_arb_assets(
+        self, items: tuple[ArbAssetWriteback, ...]
+    ) -> Iterator[YamlMap]:
+        """Validate distinct keys in the bound entry's asset root before returning.
+
+        Iterate on the owner thread to publish assets and receive receipts.
+        The context publishes the shared version. Target, validation and I/O
+        errors propagate.
+        """
+        return self._context.publish_arb_assets(self._target, items)
 
     def set_parameters(
         self, updates: tuple[ParameterUpdate, ...]

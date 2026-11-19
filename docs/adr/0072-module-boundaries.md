@@ -20,13 +20,13 @@ status: accepted
 |---|---|---|
 | `datafile` | 量測資料檔的儲存工具：Labber、`data.h5`、streaming、grouped。包括版面慣例、讀回時依 schema 驗證、通道型別與 metadata 編碼 | 存檔位置與批次（見 ADR-0063）；實驗語意 |
 | `device` | 各 pyvisa 儀器的定義與控制介面 | 實驗流程 |
-| `program` | 控制 ZCU216 與底層 QICK 的工具和類別，包括由呼叫端 profile mapping 建 QickConfig 的 `build_soccfg` 與模擬 SoC binding；時脈、channel 型別與數量等硬體 profile 數值不留在 lib | 參數與資產的保存 |
+| `program` | 控制 ZCU216 與底層 QICK 的工具和類別，包括由呼叫端 profile mapping 建 QickConfig 的 `build_soccfg`、模擬 SoC binding，以及從路徑或記憶體樣本建立 arb envelope；時脈、channel 型別與數量等硬體 profile 數值不留在 lib | 參數與資產的保存 |
 | `analysis` | 分析工具；模型自己的公開 renderer，使用與客製化由 caller 決定 | 檔案讀寫；實驗的圖形政策 |
 | `plotting` | 具名 Figure、owner 更新機制與共用診斷圖 | 分析計算；lab 的 live 工具與格式 |
 | `simulate` | 數值模擬、通用數值輸入與參考解 codec | 讀取量測資料容器、裝置佈局或使用者環境參數；模型數值由呼叫端提供 |
 | `simulators` | 具體物理模擬器（FTF、single_fluxonium、six_fluxonium）的模型與 environment | 通用演化、ADC、bath、元件 Hamiltonian 等機制，留在 `simulate` |
 | `resources` | 實驗領域資料容器與 YAML、JSON、CSV 的讀寫；waveform 資產的命名、formula 語意與 NPZ 實體 I/O | 量測資料檔；program 的執行機制；重複 waveform codec |
-| `core` | 共用的無狀態型別與格式。`core.waveform_format` 驗證 samples、編解碼 NPZ 與 opaque JSON recipe | 檔案 I/O、formula 語意、GUI、資源 scope 或硬體 |
+| `core` | 共用的無狀態型別與格式。`core.waveform_format` 驗證與雜湊 samples、編解碼 NPZ 與 opaque JSON recipe | 檔案 I/O、formula 語意、GUI、資源 scope 或硬體 |
 | `cfg_model` | 配置 schema 與注入依賴契約，見下節。搬進 core 尚未排定 | 執行行為與 I/O |
 | `utils` | 無法歸入任何其他類別的雜項 | 任何能歸入其他類別的東西 |
 | `progress_bar`、`qick_remote` | 照字面 | — |
@@ -500,7 +500,7 @@ Package 初始化不把專用依賴帶進無關工具。`analysis` 在選用 `fl
 
 ### 共享核心 core 與 cfg_model
 
-`zcu_tools.core` 只依賴標準庫、外部函式庫與 repo 的 utils。`core.waveform_format` 擁有 WaveformSamples、NPZ codec 及單一 WaveformFormatError。它只驗 recipe 的 JSON 語法。Resources 解讀 formula 與管理檔案，program/sim 播放 path 指定的 samples。
+`zcu_tools.core` 只依賴標準庫、外部函式庫與 repo 的 utils。`core.waveform_format` 擁有 `WaveformSamples`、`hash_samples`、NPZ codec 與單一 `WaveformFormatError`。它只驗 recipe 的 JSON 語法。Resources 解讀 formula 與管理檔案。Program 用檔案或記憶體樣本建立 envelope，模擬器使用編譯後的 envelope。
 
 `core.numeric_scalar.normalize_numpy_scalar` 擁有 AnalysisDocument 與 AcceptedWrite 共用的無狀態 numpy scalar 表示轉換。
 它不遞迴，finite 與 strict JSON 驗證仍由各邊界負責。
@@ -516,7 +516,11 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 
 使用者於 2026-10-15 裁決：「只是改Module而已真的需要升Library版本嗎？就像加一個Component原件定義，不應該讓舊版本不能讀對吧」「不要一次驗證，而是best-effort」「1可以，2A，3保留2.0」。Library 逐條驗證既有資料，合法條目不因另一筆 Spec 過時而失去可讀性。無效 Spec 的略過與原因查詢，以及讀取不改檔的規則由 [[0063]] 規定。
 
-`program` 以 `type`／`style` 對應到執行用的 Module builder，取代 cfg 上的 `build()`。`resources` 的 module library 以核心 schema 作為 DocumentStore 的 model，並實作核心的 Protocol。驗證 context 注入固定 library 與 asset capability。Program 的 ModuleCfgFactory.from_core 集中轉換成 native cfg，透過 assets.path_for 取得絕對路徑。Native arb 只保留 data key 與必填 path，不保留 provider，不查 global DB。
+`program` 以 `type`／`style` 對應到執行用的 Module builder，取代 cfg 上的 `build()`。`resources` 的 module library 以核心 schema 作為 DocumentStore 的 model，並實作核心的 Protocol。驗證 context 注入固定 library 與 asset capability。Program 的 `ModuleCfgFactory.from_core` 集中轉換成 native cfg。將持久 `arb` Spec 轉成檔案 arb 時，它透過 `assets.path_for` 取得本機絕對路徑。檔案 arb 保留 data key 與必填 path，不保留 provider，不查 global DB。
+
+Program 也擁有只供執行時使用的 native `InMemoryArbWaveformCfg`，style 是 `arb_memory`。它持有唯讀的樣本快照，不帶 key 或 path，也不能序列化。`cfg_model` 的持久 Spec 不接受這個 style。兩種 native arb 共用 envelope 取樣規則。檔案 arb 依 channel 和 path 共用 envelope，記憶體 arb 依 channel 和樣本雜湊共用。
+
+2026-11-19，使用者要求「我不希望的一个情况是，随机演算法中途的波形被存到永久的资产库里」，比較暫存 NPZ 與 program 直接收樣本後答：「可以」。CZ 優化用這個入口播放候選，最佳波形仍用既有 arb 資產格式保存。推導見 [記憶體 arb 討論](../discussions/2026-11-20-in-memory-arb-waveforms.md)。
 
 ### 分析 app 的 entry/component owner
 

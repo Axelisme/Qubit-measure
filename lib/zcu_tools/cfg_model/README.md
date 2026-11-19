@@ -1,6 +1,6 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-11-20，herald reset cfg
+**Last updated:** 2026-11-20，arb 資產存在查詢與 herald reset cfg
 
 **讀者：** framework-dev。配置模型、持久 Spec 與 materialization 邊界速查。
 
@@ -21,6 +21,7 @@ Caller 從 package root import 公開名稱。
 - Pulse 與 Pulse readout 依模型宣告結構排列主要欄位，順序為 Waveform、Gen ch、Frequency、Gain。Pulse、pulse readout 與 mux tone 的 Frequency 單位為 MHz，Gain 單位為 a.u.，表示 DAC full-scale fraction，範圍為 [-1, 1]。`Gain` 以欄位的 ge／le 限制驗證固定值。QICK sweep gain 不在 cfg 層檢查範圍。Form 不另設前端排序表。Pulse 的持久欄位仍為 `ch`，Pulse readout 仍為 `gen_ch`；儲存形狀與驗證不因排版改變。Mux readout 沒有 waveform，不新增該欄位。
 - `Range(start, stop, expts)` 的端點接受數值、`Expr`、expression 字串或 `None`。字串在建構時轉成 `Expr`，不當場求值。`None` 表示 Form 中可見空白且必填的端點，不是 0／1 或可執行預設。即使對應 input key 缺席，生成 model 仍要求操作員填入數字才能提交。另一端點與 `expts` 不受影響。Literal 與 `Expr` 端點沿用既有語意。
 - `WaveformSamples` 由 core.waveform_format 擁有。它攜帶一次 asset 讀取的 reference time axis 與 normalized I/Q samples，不從 cfg_model re-export。
+- `module_arb_keys(spec, resolver)` 沿能解析的 typed child refs 取得 arb data key。不讀資產，也不 materialize module。
 - `ModuleSpec`／`WaveformSpec` 表示持久候選，保留具體 key 的 child 引用。兩個 `spec_from_raw` 入口驗證持久值，不查 library 或 assets，不將 runtime 資訊轉成字串。
 - `partition_module_spec(raw)` 與 `partition_waveform_spec(raw)` 接受現行欄名與 discriminator 的 JSON mapping，回傳 `SpecPartition(spec, unrecognized)`。它們把巢狀未知欄位分出來，保留原名原值，已支援的 leaf 不另存。List 中的未知欄位保持原 index，沒有未知欄位的元素以空 object 佔位。缺少或非法的已知欄位、未知 family 仍 raise ValueError。輸出 Spec 再經普通 strict reader 驗證，runtime 不接受 extra。這兩個介面不處理舊 type、欄名或單位，也不解析引用。
 - `spec_types` 集中持久 Spec union 的展開。`concrete_spec_types` 供 TemplateDef 檢查宣告中的具體型別；`is_module_spec_type`／`is_waveform_spec_type` 供 library consumer 判定 family，接受已宣告型別及其 subclass。
@@ -32,7 +33,7 @@ Caller 從 package root import 公開名稱。
 - 兩個 cfg factory 透過 `CfgValidationContext` 注入 `ModuleResolver` 與 `WaveformAssetInfo`。單次 materialization 共用引用鏈，錯誤保留 root、chain 與期望 family；既有 cfg child 也重新驗證。
 - `ReadoutClassifier` 以 `mode` 區分 `CircleClassifier`、`LinearClassifier` 與 `Centroid3Classifier`。Centroid3 保存有限且相異的 g/e/f 中心與必填有限 3×3 training confusion，rows 準備態、columns 量到的態，順序 g/e/f。Pulse readout 與每筆 mux tone 的 `classifier` 預設 None，表示尚無校準，欄位歸 Advanced 群組。中心、radius 與 threshold 使用原始積分 ADC 值除以積分長度的座標，不扣 IQ offset。Linear angle 使用 radians，以 `exp(1j*angle)` 旋轉。Circle radius 可缺，提供時須有限且 >0。Circle 與 linear 矩陣可缺，提供時只驗有限值與形狀（circle 3×3、linear 2×2）；rows 是真實／準備態，columns 是量到的態，順序為 g/e/other 或 g/e，不轉置、不限制值域或 row sum。Readout 宣告和播放不執行分類。
 - Scalar leaf 由 Spec／Cfg 共用。純 Spec 驗證拒絕 composite runtime cfg、QICK sweep、array，以及已綁定資產的 arb leaf。複數只用於 classifier 的 g/e/f 中心，持久表示沿用 `core.complex_codec` 的 `{__complex__: [re, im]}` tag。Classifier model 會編解碼這個 tag；其他 Spec leaf 仍拒絕 Python complex。
-- `WaveformAssetInfo` 提供固定 scope 的 duration、samples 與 path_for。Path 查詢只驗 key 與檔存在，不讀 bytes。Provider 擁有 archive 驗證與 I/O，consumer 不重做這些工作。Arb binding 不序列化，cfg deepcopy 保留同一 owner，不凍結 bytes。
+- `WaveformAssetInfo` 提供固定 scope 的 duration、samples、exists 與 path_for。Existence 和 path 查詢只驗 key 與檔存在，不讀 bytes。Provider 擁有 archive 驗證與 I/O，consumer 不重做這些工作。Arb binding 不序列化，cfg deepcopy 保留同一 owner，不凍結 bytes。
 
 本 package 只依賴外部函式庫、utils、core.waveform_format 與 core.complex_codec，不 import `program`、`resources` 或 GUI。
 Asset provider 固定目錄，不凍結 bytes。每次讀取都反映該目錄內的當下內容。

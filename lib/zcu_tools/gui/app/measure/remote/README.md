@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-11-19，Results Browser 索引
+**Last updated:** 2026-11-20，arb 資產寫回
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -37,7 +37,7 @@ Neither method returns a kind discriminator.
 
 ## Context snapshot
 
-`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 140、GUI_VERSION 173。Entry 視窗在 `open_dialogs` 回報 `entry`，不接受舊視窗值。Target 統一為 `{entry_name, point}`，global 的 point 是 null，不再傳 kind。Source binding 的文件種類使用 `global`、`point` 與 `module_cfg`，不接受舊種類值。MCP 的 handshake pin 直接 import 同一個 WIRE_VERSION，因此同步拒絕舊 GUI。133／166 涵蓋 global／point 的作用中三筆 files、EMPTY／GLOBAL／POINT readiness、point.use 的必填 nullable label 與無 kind 回覆，以及 writeback preview／receipt 只報 entry_name、point 的目的地。Entry 與 point 共用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；前次檔名統一對應的版本是 132／165。
+`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 141、GUI_VERSION 174。Entry 視窗在 `open_dialogs` 回報 `entry`，不接受舊視窗值。Target 統一為 `{entry_name, point}`，global 的 point 是 null，不再傳 kind。Source binding 的文件種類使用 `global`、`point` 與 `module_cfg`，不接受舊種類值。MCP 的 handshake pin 直接 import 同一個 WIRE_VERSION，因此同步拒絕舊 GUI。133／166 涵蓋 global／point 的作用中三筆 files、EMPTY／GLOBAL／POINT readiness、point.use 的必填 nullable label 與無 kind 回覆，以及 writeback preview／receipt 只報 entry_name、point 的目的地。Entry 與 point 共用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；前次檔名統一對應的版本是 132／165。
 
 省略 path 與 summaries 時，owner 驗證完整 schema，wire encoder 再驗證所有輸出值。`path` 使用 dotted keys 與 canonical 非負 list indices，只由 owner 讀驗所選部分，並優先於 summaries。選整個 component 或 subtree 時，該層的完整投影契約仍適用。未選 sibling 的壞 schema、nonfinite 或 library source fault 不再擋住正常 point leaf。Invalid path 保留第一個不可讀 segment，不先驗其他 sibling。
 
@@ -114,6 +114,8 @@ creates files or locks, writes results, or changes entry/point selection.
 `tab.writeback_preview` 回 owner 當下的 draft 候選，不帶 revision。
 `destination_context` 只含當下的 `{entry_name, point}`。Global 的 point 為 null，未開 entry 時兩欄皆為 null。
 未開 entry 仍可預覽合法 tab，current 值為 null。Apply 仍以 no_context 拒絕。
+Arb 資產提案的 kind 是 `arb_asset`。Preview 回樣本數、微秒長度、峰值與現有資產的比較結果，不回樣本陣列。
+提交收據回資產 owner 確認的 `status`、`sample_count` 與 `duration_us`，不是 preview 摘要。
 `tab.writeback_accept(tab_id, stages)` 接受有序的 `{subtab_id, ids}` 清單，不帶 `expected_revision`。
 Owner 在同一次 dispatch 核對 Primary／Post 全部選定 IDs，unknown／duplicate 在第一筆寫入前拒絕。
 通過後按 Primary、Post、各 pane 的候選順序寫入 owner 當下 draft 的值與目的地，不還原捕捉時的 proposal。

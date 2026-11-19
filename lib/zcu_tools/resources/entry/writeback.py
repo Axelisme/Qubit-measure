@@ -1,11 +1,12 @@
-"""Ordered accepted writes over point and library single-file transactions."""
+"""Ordered accepted writes to arb assets, point parameters, library and records."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
@@ -20,7 +21,16 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
 from zcu_tools.format_version import YamlMap, YamlValue
-from zcu_tools.resources.document_names import LIBRARY_FILENAME, PARAMETERS_FILENAME
+from zcu_tools.resources.document_names import (
+    ARB_WAVEFORMS_DIRNAME,
+    LIBRARY_FILENAME,
+    PARAMETERS_FILENAME,
+)
+from zcu_tools.resources.waveform_assets import (
+    ArbAssetUpdateStatus,
+    ArbWaveformDatabase,
+    arb_sample_summary,
+)
 
 from .ledger import RecordsLedger
 from .ledger_models import (
@@ -42,6 +52,7 @@ from .views import (
 )
 
 if TYPE_CHECKING:
+    from zcu_tools.core.waveform_format import WaveformSamples
     from zcu_tools.resources.context.library import ModuleLibrary
 
 
@@ -107,8 +118,29 @@ class RecordWriteback:
     value: Mapping[str, object]
 
 
+@dataclass(frozen=True)
+class ArbAssetWriteback:
+    """Publish WaveformSamples at a validated entry-scoped arb asset key.
+
+    key matches ^[A-Za-z][A-Za-z0-9_]*$. samples hold the reference time in
+    microseconds and normalized I/Q. Publication never replaces an asset.
+    """
+
+    key: str
+    samples: WaveformSamples
+
+    @property
+    def path(self) -> str:
+        """Return this asset's entry-relative ledger and receipt path (no I/O)."""
+        return f"{ARB_WAVEFORMS_DIRNAME}/{self.key}"
+
+
 type WritebackItem = (
-    ParameterWriteback | ModuleWriteback | WaveformWriteback | RecordWriteback
+    ParameterWriteback
+    | ModuleWriteback
+    | WaveformWriteback
+    | RecordWriteback
+    | ArbAssetWriteback
 )
 
 
@@ -142,6 +174,8 @@ def _normalize_record_value(value: object) -> object:
 
 
 def _accepted_write(item: WritebackItem) -> AcceptedWrite:
+    if isinstance(item, ArbAssetWriteback):
+        return AcceptedWrite(path=item.path, value={**arb_sample_summary(item.samples)})
     if isinstance(item, ParameterWriteback) and item.metadata is not None:
         TypeAdapter(YamlMap).validate_python(item.metadata, strict=True)
     if isinstance(item, ParameterWriteback):
@@ -190,10 +224,11 @@ class LibraryUpdate:
 class CommittedWrite:
     """One confirmed item at its concrete path, detached at commit time.
 
-    index is this item's zero-based position in the supplied apply_writeback
-    tuple, not its commit position. path is a point path, library key or record
-    component and need not be unique. value is the owner's actual working-unit
-    value, including record metadata.
+    index is the item's zero-based position in the supplied apply_writeback
+    tuple, not its commit position. path is an entry-relative arb asset key
+    (arb_waveforms/<key>), a point path, library key or record component.
+    value is the owner's actual working-unit value, including record metadata,
+    or the asset's status (created/existing), sample count and duration in us.
     It never borrows a proposal or a later destination snapshot.
     """
 
@@ -207,9 +242,9 @@ class WritebackResult:
     """One accepted event and detached items in document commit order.
 
     event_id identifies the single accepted ledger event. committed contains
-    point items, then library items, then records, preserving supplied order
-    within each group. On failure it includes only fully committed groups (each
-    record is a group). Each item's index identifies its supplied position.
+    arb assets, point items, library items, then records, in supplied order
+    within each group. On failure it includes committed groups and any asset
+    prefix confirmed before an I/O error. Each index identifies the supplied position.
     """
 
     event_id: str
@@ -220,8 +255,8 @@ class WritebackApplyError(RuntimeError):
     """An accepted group failed; prior groups and the accepted event remain.
 
     event_id identifies the already-appended accepted event. applied counts the
-    items in fully committed groups, not groups or attempted items. result retains the same
-    event ID and each detached committed value. __cause__ is the original
+    confirmed items in result, including an asset prefix after an I/O error.
+    result retains the same event ID and detached values. __cause__ is the original
     item failure. Ledger append failures occur before this error boundary and
     propagate unchanged. No rollback, automatic retry or recovery is provided.
     """
@@ -245,8 +280,8 @@ class WritebackTarget(Protocol):
     after that command's validation so later overwrites do not alter receipts.
     Values are returned only after the entire batch commits. ParameterUpdate
     and LibraryUpdate describe value and metadata contracts.
-    Publication belongs to the context owner, not this protocol or executor. append_record accepts a
-    safe component segment, producer fields and separate accepted run_id/UTC
+    Publication belongs to the context owner, not this protocol or executor.
+    append_record accepts a safe component segment, producer fields and separate accepted run_id/UTC
     at/event source; it records this target's point label through the record owner.
     """
 
@@ -255,6 +290,17 @@ class WritebackTarget(Protocol):
     @property
     def point(self) -> str | None:
         """Return the bound point label, or None for entry-level writes."""
+        ...
+
+    def publish_arb_assets(
+        self, items: tuple[ArbAssetWriteback, ...]
+    ) -> Iterator[YamlMap]:
+        """Validate nonempty, distinct keys for the bound entry's asset root.
+
+        Preflight raises on a conflict before returning. Iterate to publish
+        without replacement and receive confirmed statuses and summaries in
+        order. An I/O failure during iteration leaves the confirmed prefix intact.
+        """
         ...
 
     def set_parameters(
@@ -338,6 +384,37 @@ def commit_library_updates(
     return tuple(actual)
 
 
+def arb_asset_update_status(
+    database_path: Path, item: ArbAssetWriteback
+) -> ArbAssetUpdateStatus:
+    """Preview an entry-scoped publication without creating files or a directory.
+
+    database_path is the entry database root. Use the same sample comparison
+    as publication; invalid keys, samples, assets and I/O errors propagate.
+    """
+    return ArbWaveformDatabase.publication_status_at(
+        database_path / ARB_WAVEFORMS_DIRNAME, item.key, item.samples
+    )
+
+
+def publish_arb_asset_updates(
+    database_path: Path, items: tuple[ArbAssetWriteback, ...]
+) -> Iterator[YamlMap]:
+    """Validate samples for the entry's database_path/arb_waveforms directory.
+
+    Items must have distinct keys. Keys, samples and conflicts are checked
+    before returning. Iterate to publish and receive each item's detached
+    status, sample count and duration in input order. I/O failure leaves the
+    confirmed prefix intact.
+    """
+    repository = ArbWaveformDatabase(database_path / ARB_WAVEFORMS_DIRNAME)
+    statuses = repository.publish_batch({item.key: item.samples for item in items})
+    return (
+        {"status": status, **arb_sample_summary(item.samples)}
+        for item, status in zip(items, statuses, strict=True)
+    )
+
+
 class BoundDocumentWritebackTarget:
     """Write to one bound view's parameter document and adjacent library.
 
@@ -348,8 +425,9 @@ class BoundDocumentWritebackTarget:
     captured label, or None for global. Parameter/library batches each validate
     and commit one file and return detached actual values. The adjacent library
     opens lazily, creating a missing file only on its first nonempty edit.
-    Records append through the captured entry owner. Schema, conflict and I/O
-    failures propagate; accepted events and earlier groups are not rolled back.
+    Assets publish to the captured entry database, and records append through
+    the captured entry owner. Schema, conflict and I/O failures propagate;
+    accepted events and earlier commits are not rolled back.
     """
 
     def __init__(self, view: ParameterView, storage: StorageBinding) -> None:
@@ -369,6 +447,12 @@ class BoundDocumentWritebackTarget:
         self.ledger = storage.ledger
         self.point = storage.point
         self._library_handle: ModuleLibrary | None = None
+
+    def publish_arb_assets(
+        self, items: tuple[ArbAssetWriteback, ...]
+    ) -> Iterator[YamlMap]:
+        """Validate assets now; iterate to publish to the captured entry, not the point."""
+        return publish_arb_asset_updates(self._storage.database_path, items)
 
     def set_parameter(
         self, path: str, value: JsonValue, metadata: YamlMap | None
@@ -446,38 +530,63 @@ def _append_accepted_record(
     )
 
 
+def _indexed_assets(items: tuple[WritebackItem, ...]) -> dict[int, ArbAssetWriteback]:
+    assets: dict[int, ArbAssetWriteback] = {}
+    keys: set[str] = set()
+    for index, item in enumerate(items):
+        if isinstance(item, ArbAssetWriteback):
+            if item.key in keys:
+                raise ValueError(f"Duplicate arb asset key: {item.key!r}")
+            keys.add(item.key)
+            assets[index] = item
+    return assets
+
+
+def _append_asset_receipts(
+    assets: dict[int, ArbAssetWriteback],
+    writes: tuple[AcceptedWrite, ...],
+    target: WritebackTarget,
+    committed: list[CommittedWrite],
+) -> None:
+    """Publish assets and report each confirmation before any later I/O error."""
+    if assets:
+        receipts = target.publish_arb_assets(tuple(assets.values()))
+        for index, value in zip(assets, receipts, strict=True):
+            committed.append(CommittedWrite(index, writes[index].path, value))
+
+
 def apply_writeback(
     items: tuple[WritebackItem, ...],
     *,
     target: WritebackTarget,
     evidence: WritebackEvidence,
 ) -> WritebackResult:
-    """Validate values, append accepted, then commit point/library/record groups.
+    """Validate values, append accepted, then commit assets, point, library and records.
 
     target binds the destination and its entry ledger; callers resolve roles
-    before this entry. Nonempty items, strict JSON/Spec values, parameter
-    metadata representation and record
-    run_id are validated before append. Record dict/list values first normalize
-    numpy floating/integer scalars to Python numbers without mutating producers;
-    non-finite results and other non-JSON values remain invalid. Target owners
-    validate paths, schema and transactions within each group draft. Parameters commit the
-    caller's metadata unchanged, or keep existing metadata when it is None; no
+    before this entry. Check for empty input, duplicate asset keys, invalid
+    JSON/Spec values, invalid parameter metadata and missing record run_id before
+    append. Asset ledger writes contain only the path, sample count and duration.
+    Record dict/list values first normalize numpy floating/integer scalars to
+    Python numbers without mutating producers; non-finite results and other
+    non-JSON values remain invalid. Target owners validate paths and schemas.
+    Parameters commit the caller's metadata unchanged, or keep it when None; no
     event, source or time is added to it. Library items store only Specs.
     Records receive run_id, saved point, UTC at and accepted source;
     producer device fields are preserved, not inferred. Return WritebackResult
     with the accepted event ID and each owner's confirmed committed value.
 
     Accepted payload writes retain supplied order. Committed results instead
-    follow point group, library group, then individual records; supplied order
-    is preserved within each group. Each CommittedWrite.index maps back to the
-    supplied tuple even when paths repeat. Point and library each use one edit;
-    a failing item leaves its entire group unwritten. Receipts capture each
-    validated draft value and are released only after that group commits.
+    follow the asset group, point group, library group, then individual records.
+    Each group preserves supplied order; CommittedWrite.index maps back to
+    the supplied tuple even when paths repeat. An asset conflict leaves the
+    whole asset group unwritten. Point and library each use one edit; receipts
+    capture validated draft values and are released only after that group commits.
 
     Ledger append failures propagate unchanged, with no writes. A group failure
     raises WritebackApplyError(result) from its original cause, stops later
-    groups and retains fully committed groups and the event. applied counts
-    their items, not groups. No cross-file rollback or automatic retry occurs.
+    groups and retains the accepted event, committed groups and any asset
+    prefix confirmed before the I/O error. No cross-file rollback or retry occurs.
     """
     if not items:
         raise ValueError("writeback items must be nonempty")
@@ -485,6 +594,7 @@ def apply_writeback(
         evidence.run_id is None or not evidence.run_id.strip()
     ):
         raise ValueError("record writeback requires a nonempty run_id")
+    assets = _indexed_assets(items)
     writes = tuple(_accepted_write(item) for item in items)
     event = LedgerEvent(
         id=str(uuid4()),
@@ -495,6 +605,7 @@ def apply_writeback(
             writes=writes, run_id=evidence.run_id, source=evidence.source
         ),
     )
+    # ADR-0063: acceptance precedes writes; no group rolls back another.
     target.ledger.append(event)
     parameters: list[ParameterUpdate] = []
     parameter_indices: list[int] = []
@@ -511,12 +622,13 @@ def apply_writeback(
             parameter_indices.append(index)
         elif isinstance(item, RecordWriteback):
             record_indices.append(index)
-        else:
+        elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
             library.append(LibraryUpdate(item))
             library_indices.append(index)
 
     committed: list[CommittedWrite] = []
     try:
+        _append_asset_receipts(assets, writes, target, committed)
         if parameters:
             values = target.set_parameters(tuple(parameters))
             committed.extend(

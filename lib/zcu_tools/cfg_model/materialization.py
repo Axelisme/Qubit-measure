@@ -168,29 +168,32 @@ def _expand_module(
         raise _resolution_error(root, chain, expected, str(exc)) from exc
 
 
+def reset_pulse_fields(kind: object) -> tuple[str, ...]:
+    """Return direct pulse-field names of an ordinary reset kind, or no fields."""
+    match kind:
+        case "reset/pulse":
+            return ("pulse_cfg",)
+        case "reset/two_pulse":
+            return ("pulse1_cfg", "pulse2_cfg")
+        case "reset/bath":
+            return ("cavity_tone_cfg", "qubit_tone_cfg", "pi2_cfg")
+        case _:
+            return ()
+
+
 def _expand_module_children(
     data: dict[str, object],
     context: CfgValidationContext,
     root: str,
     chain: tuple[str, ...],
 ) -> None:
-    match data.get("type"):
-        case "reset/pulse":
-            fields = ("pulse_cfg",)
-        case "reset/two_pulse":
-            fields = ("pulse1_cfg", "pulse2_cfg")
-        case "reset/bath":
-            fields = ("cavity_tone_cfg", "qubit_tone_cfg", "pi2_cfg")
-        case "reset/herald" | "reset/mux_herald":
-            for field in ("readout", "prepare"):
-                if (child := data.get(field)) is not None:
-                    data[field] = _isolated_raw(
-                        _expand_module(child, context, root, chain)
-                    )
-            return
-        case _:
-            return
-    for field in fields:
+    kind = data.get("type")
+    if kind in ("reset/herald", "reset/mux_herald"):
+        for field in ("readout", "prepare"):
+            if (child := data.get(field)) is not None:
+                data[field] = _isolated_raw(_expand_module(child, context, root, chain))
+        return
+    for field in reset_pulse_fields(kind):
         if field in data:
             data[field] = _isolated_raw(
                 _expand_module(data[field], context, root, chain, expected="pulse")

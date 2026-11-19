@@ -21,6 +21,10 @@ class AssetInfo:
             raise ValueError(f"Missing asset: {data_key}")
         return self.current_duration
 
+    def exists(self, data_key: str) -> bool:
+        """Return whether this in-memory fixture serves the requested key."""
+        return data_key == self._data_key
+
     def path_for(self, data_key: str) -> Path:
         """Reject native conversion: these in-memory samples have no file."""
         raise ValueError("In-memory assets have no playback path")

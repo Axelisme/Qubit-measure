@@ -1,10 +1,10 @@
 # `gui.app.measure.writeback`
 
-**Last updated:** 2026-11-16，parameter create_kind 與作用中目的地 upsert
+**Last updated:** 2026-11-20，arb 資產提案
 
 **讀者：** framework-dev。寫回提案、review widget 與逐項 Apply 契約。
 
-本模組擁有 parameter、module 與 record 的 proposal、draft、service、control 與 Qt review widget。
+本模組擁有 parameter、module、record 與 arb 資產的 proposal、draft、service、control 與 Qt review widget。
 `items.py` 定義 adapter 的可變 proposals；`contracts.py` 定義 owner 的 edit、preview 與 submission records。
 `service.py` 的 `WritebackDraft` 擁有每份 draft 的 entries、Forms、固定來源、summaries、applied state 與操作。
 `WritebackService` 只建立 draft、注入既有 context 寫入能力，並協調跨 draft 的 `accept_drafts`。
@@ -74,6 +74,23 @@ Append owner 加入 `component`、`run_id`、`point`、`at` 與 `source` provena
 記錄放在 `records/components/<target>.jsonl`，事件放在 `records/ledger.jsonl`。
 Wire kind、session prefix 與 written key 分別為 `record`、`record-<n>` 與 `records`，不讀舊名稱或路徑。
 
+## Arb 資產列
+
+`ArbAssetWriteback(target_name, description, samples=...)` 提議把已驗證的 I/Q 樣本發布到 entry 資產庫。
+`target_name` 是資產 key。Draft ID 為 `arb-<n>`，wire kind 為 `arb_asset`。
+GUI 的目標欄顯示 `<key> · arb asset`。可改勾選，不能編輯樣本或改目標。
+Current 比較作用中 entry 的樣本，顯示 `absent`、`identical` 或 `different`。
+同 key 的樣本不同時，Current 的提示與 wire 的 `warning` 說明 Apply 會失敗。
+Proposed 顯示樣本數、微秒長度與峰值。Copy 與 wire 的 `proposed_value` 使用相同的
+`{sample_count, duration_us, peak_abs}` JSON 摘要，不帶樣本陣列。
+
+Module Form 的 arb data 選項是建立 draft 時的資產 key，加上同份 draft 的資產提案 key。
+即使取消勾選，key 仍在 Form 選項中。每份 draft 提交前，Apply 沿作用中 library 的
+typed child references 檢查已選 module 所用的 arb key。Key 必須已存在於作用中 entry，
+或有同份 draft 的已選資產提案；找不到的 library child 維持既有行為。
+選中的資產 key 語法無效，或 module 引用不存在的資產時，Apply 在 append ledger 前拒絕。缺資產時，錯誤列出 module 提案和 key。
+GUI、MCP 和 recipe 都使用這項檢查。Primary 與 Post 仍各自提交。
+
 ## Apply
 
 `WritebackDraft` 從自己的固定 Run／Load capture 解析選定提案與 module Form，
@@ -88,7 +105,8 @@ Adapter 可指定 registered kind，Apply 才建立缺少的元件，填入提�
 Preview 的 current 缺值維持 None，remote parameter 列另回傳 create_kind；勾選與 item ID 規則不變，見 ADR-0008。
 Record 的 point 跟隨提交位置，global 樣本保存 null。
 全部提案通過輸入驗證後，共用 executor 先追加一筆 accepted
-ledger event，再依序提交 point 參數組、library 組與逐筆 Record，組內保留提案順序。
+ledger event，再依序提交 arb 資產組、point 參數組、library 組與逐筆 Record，組內保留提案順序。
+資產組先檢查全部 key 才寫檔。樣本相同保留原檔；樣本不同拒絕整組。
 Parameter 與 library 各用一次單檔交易，組內任一項無效整組不寫，Record 各列追加樣本。
 第一個失敗會停止後組，保留 accepted event 與已提交組，並標記已成功的 draft 列。
 Ledger append 失敗時不提交任何列。Apply 不提供跨列 rollback 或自動 retry。

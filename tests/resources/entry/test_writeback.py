@@ -6,7 +6,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 from pydantic import ValidationError
-from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.cfg_model import ArbWaveformCfg, ConstWaveformCfg, PulseSpec
+from zcu_tools.core.waveform_format import validate_samples
 from zcu_tools.resources.entry import (
     AcceptedPayload,
     ParameterView,
@@ -18,6 +19,7 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.storage import bind_record_table
 from zcu_tools.resources.entry.writeback import (
+    ArbAssetWriteback,
     BoundDocumentWritebackTarget,
     ModuleWriteback,
     ParameterUpdate,
@@ -29,6 +31,7 @@ from zcu_tools.resources.entry.writeback import (
     apply_writeback,
     commit_parameter_updates,
 )
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase, ArbWaveformError
 
 
 @pytest.fixture
@@ -373,6 +376,123 @@ def test_invalid_parameter_rolls_back_whole_group_and_metadata(
     assert point.Q1.duration == 10.0
     assert point.meta("Q1.duration") == {"stderr": 0.5, "comment": "kept"}
     assert point.description is None
+
+
+def test_publish_asset_with_referencing_module_and_parameter(
+    point: ParameterView,
+) -> None:
+    writer = target(point)
+    storage = capture_storage(point)
+    root = storage.database_path / "arb_waveforms"
+    asset = ArbAssetWriteback(
+        "optimized",
+        validate_samples(
+            time=[0.0, 0.25, 0.75], idata=[0.0, 0.4, 0.0], qdata=[0.0, -0.2, 0.0]
+        ),
+    )
+    module = ModuleWriteback(
+        "Q1.pulses.pi",
+        PulseSpec(
+            ch=0, nqz=1, freq=100.0, gain=0.2, waveform=ArbWaveformCfg(data=asset.key)
+        ),
+    )
+    result = apply_writeback(
+        (module, ParameterWriteback("Q1.rate", 6100.0), asset),
+        target=writer,
+        evidence=evidence(),
+    )
+
+    assert (root / "optimized.npz").is_file()
+    stored = ArbWaveformDatabase.info_at(root).samples("optimized")
+    np.testing.assert_array_equal(stored.time, [0.0, 0.25, 0.75])
+    np.testing.assert_array_equal(stored.idata, [0.0, 0.4, 0.0])
+    np.testing.assert_array_equal(stored.qdata, [0.0, -0.2, 0.0])
+    assert point.Q1.rate == 6100.0
+    entry = ResultEntry.open(
+        storage.entry_name,
+        result_root=storage.result_path.parent,
+        database_root=storage.database_path.parent,
+    )
+    saved_module = (
+        entry.library(storage.point)
+        .snapshot()
+        .entry_value("Q1.pulses.pi", kind="module")
+    )
+    assert saved_module["waveform"] == {"style": "arb", "data": "optimized"}
+    assert [write.index for write in result.committed] == [2, 1, 0]
+    assert [write.path for write in result.committed] == [
+        "arb_waveforms/optimized",
+        "Q1.rate",
+        "Q1.pulses.pi",
+    ]
+    assert result.committed[0].value == {
+        "status": "created",
+        "sample_count": 3,
+        "duration_us": 0.75,
+    }
+    accepted = writer.ledger.get(result.event_id).event.payload
+    assert isinstance(accepted, AcceptedPayload)
+    assert accepted.writes[2].path == "arb_waveforms/optimized"
+    assert accepted.writes[2].value == {"sample_count": 3, "duration_us": 0.75}
+
+
+def test_repeat_asset_is_existing_but_duplicate_keys_fail_before_acceptance(
+    point: ParameterView,
+) -> None:
+    writer = target(point)
+    root = capture_storage(point).database_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(root)
+    repository.save("pulse", idata=[0.0, 0.4], time=[0.0, 0.75])
+    path = repository.path_for("pulse")
+    original = path.read_bytes()
+    asset = ArbAssetWriteback("pulse", repository.bound_info().samples("pulse"))
+
+    result = apply_writeback((asset,), target=writer, evidence=evidence())
+    assert result.committed[0].value == {
+        "status": "existing",
+        "sample_count": 2,
+        "duration_us": 0.75,
+    }
+    assert path.read_bytes() == original
+    accepted = writer.ledger.events()
+
+    with pytest.raises(ValueError, match="Duplicate.*pulse"):
+        apply_writeback((asset, asset), target=writer, evidence=evidence())
+    assert writer.ledger.events() == accepted
+
+
+def test_asset_conflict_stops_whole_group_and_later_document_writes(
+    point: ParameterView,
+) -> None:
+    writer = target(point)
+    root = capture_storage(point).database_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(root)
+    repository.save("taken", idata=[0.0, 0.4], time=[0.0, 0.75])
+    original = repository.path_for("taken").read_bytes()
+    proposed = validate_samples(time=[0.0, 0.75], idata=[0.0, 0.3], qdata=None)
+    library_path = source_path(point).parent / "library.yaml"
+    library_before = library_path.read_bytes()
+    parameters_before = source_path(point).read_bytes()
+
+    with pytest.raises(WritebackApplyError) as caught:
+        apply_writeback(
+            (
+                ArbAssetWriteback("new_asset", proposed),
+                ParameterWriteback("Q1.rate", 6100.0),
+                WaveformWriteback("Q1.waveforms.base", ConstWaveformCfg(length=0.1)),
+                ArbAssetWriteback("taken", proposed),
+            ),
+            target=writer,
+            evidence=evidence(),
+        )
+
+    assert caught.value.result.committed == ()
+    assert isinstance(caught.value.__cause__, ArbWaveformError)
+    assert writer.ledger.get(caught.value.event_id).event.kind == "accepted"
+    assert repository.list() == ["taken"]
+    assert repository.path_for("taken").read_bytes() == original
+    assert source_path(point).read_bytes() == parameters_before
+    assert library_path.read_bytes() == library_before
 
 
 def test_group_order_preserves_accepted_order_and_per_item_receipts(

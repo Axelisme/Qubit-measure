@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-19，Results Browser 索引
+**Last updated:** 2026-11-20，arb 資產寫回
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -144,7 +144,7 @@ rejects Done without closing input.
 - [`artifacts/`](artifacts/handover.py)：tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover`。
   保存中心在全部 artifact 都是 SAVED 時停用 Save All 與各列 Save。
   任一 artifact 不是 SAVED 時恢復啟用，但仍須符合 idle、可寫與 active context 條件。
-- [`writeback/`](writeback/service.py)：parameter／module／record proposals、draft、service、control 與 Qt review widget。
+- [`writeback/`](writeback/service.py)：parameter／module／record／arb 資產 proposals、draft、service、control 與 Qt review widget。
 - [`ui/`](ui/main_window.py)：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   feedback widgets；writeback view 由 `writeback/` 擁有，generic cfg form不屬於app package。
   Footer 訊息在可用寬度內換行，不以長錯誤文字撐大視窗；tooltip 與 view snapshot 保留完整文字。

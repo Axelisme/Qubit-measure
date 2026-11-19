@@ -22,6 +22,10 @@ class InMemoryWaveformAsset:
         """Return the reference duration in microseconds for this key."""
         return float(self.samples(data_key).time[-1])
 
+    def exists(self, data_key: str) -> bool:
+        """Return whether this in-memory fixture serves the requested key."""
+        return data_key == self.data_key
+
     def path_for(self, data_key: str) -> Path:
         """Reject native conversion: this case-local asset has no backing file."""
         raise ValueError("In-memory assets have no playback path")

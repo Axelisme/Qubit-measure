@@ -23,7 +23,9 @@ Form 的狀態可以 Invalid。Preview 只供呈現，不是 Apply 許可。Libr
 
 ## Writeback proposal 與提交
 
-Adapter 的 `ModuleWriteback` 直接提供持久 `ModuleSpec`，不提供舊編輯樹或 editor identity。Child library key 保持 key。沒有現存 producer 的 waveform writeback 不保留；parameter 與 sample proposals 沿各自既有契約。
+Adapter 可提供 `ParameterWriteback`、`ModuleWriteback`、`RecordWriteback` 與 `ArbAssetWriteback`。`ModuleWriteback` 直接提供持久 `ModuleSpec`，不提供舊編輯樹或 editor identity。Child library key 保持 key。`ArbAssetWriteback` 帶資產 key 與樣本，不是 library waveform Spec 的提案。Draft 可改它的勾選狀態，不能改 key 或樣本。Module Form 的 arb 選項是建立 draft 時的資產 key，加上同份 draft 的資產提案 key，不論有沒有勾選。
+
+2026-11-19，使用者說：「然后发布 arbitrary 资产这是可以的，但是我其实觉得 recipe 内想要写档案也是没有问题的。」Writeback 可供 GUI 與 MCP 共用，recipe 寫檔只有 MCP 途徑。使用者比較兩案後，對維持 writeback 答：「可以」。比較與發布理由見 [討論紀錄](../discussions/2026-11-20-arb-asset-writeback.md)。
 
 `gui.app.measure.writeback.calibrated_module_writeback` 擁有中立的完整 module proposal 建構。
 Caller 提供固定 DocumentSetCapture、Run 的 native module cfg、目標與精確欄位路徑及新值。
@@ -42,7 +44,11 @@ Setter 與 projection reader 共用 index 驗證，cfg_model 在產生 proposal 
 
 Analysis 與 Post-Analysis 各保存自己的 opaque draft。Remote 以 `(tab_id, subtab_id)` 定址 pane，再以 item session id 選項目。這個 id 只屬於 draft，不是 editor handle。`tab.writeback_set` 的 module edits 使用 Form 路徑陣列，回同一項目的 schema、input、values 與 errors。結構錯誤拒絕該 Form batch，普通 invalid 值留在 draft，Apply 與 `tab.writeback_write` 拒絕提交。
 
-Selected Apply 先準備所有選中項目的值與目的地。任一 module form Invalid 時，不 append accepted、不寫 target。準備成功後，既有 Context write owner 先 append accepted，再依目的地文件分組提交：parameters 一組、library 一組、樣本逐筆，組內順序保留。任一項無效整組不寫，首錯停止，保留 accepted evidence 與已提交組；不回復前組，也不保證跨檔 crash transaction。`tab.writeback_write` 依序調整 draft；後項失敗可保留前項 draft 修改，這不等於已寫入 target。
+Selected Apply 先準備所有選中項目的值與目的地。任一 module Form Invalid 時，不 append accepted、不寫 target。每個選中 module 的 arb key 必須已存在於作用中 entry，或有同份 draft 的已選資產提案。缺少資產時在 append accepted 前拒絕該次 draft 的 Apply，錯誤指出 module 與 key。只檢查 module Spec 直接引用的 key 與沿作用中 library 可解析的 child 引用。無法解析的 library child 維持既有行為，這個邊界是 2026-11-20 的 agent 代裁，待使用者覆核。GUI、MCP 與 recipe 用同一項檢查。Primary 與 Post 依序各自提交，後面的 draft 不能替前面的 draft 提供尚未發布的 key。
+
+準備成功後，Context write owner 交 executor 先 append accepted，再依序提交：arb 資產一組、parameters 一組、library 一組、records 逐筆，組內順序保留。資產不覆寫。首錯停止，保留 accepted evidence 與已確認提交，不 rollback，也不保證跨檔交易，見 [[0063]]。
+
+`tab.writeback_write` 依序調整 draft；後項失敗可保留前項 draft 修改，這不等於已寫入 target。
 
 Draft 固定來源的 run_id 與參數環境，來源可以沒有持久 target。後來切 point、改 alias 或切換 pane 不改歷史求值內容。Preview 顯示當下作用中的位置，Apply 重新取得作用中文件組，不取歷史來源。GLOBAL 的目的地是 global 文件組，POINT 則是選定 point 文件組。未開 entry 仍可預覽合法 draft，current 為 None；非空 Apply 以 no_context 拒絕。空歷史環境不構成拒絕理由。
 
