@@ -174,6 +174,18 @@ Guard 在整個參數空間不放行最終誤差超過 `2e-3` 的結果。
 
 2026-11-19，使用者說：「我应该说过，不要因为听度而回退。比价的时候决定好就不要再改了，就算结果超标也是能接受。我不想白付时间去尝试错误的路径」（「听度」即精度），並把範圍限定在 `multitone_gate`。
 
+### Evolution 輸出合法 density
+
+`Engine.evolve` 回傳的每個 readout density 都滿足 continuation 輸入的條件：Hermitian、trace 為 1、最小特徵值 ≥ −1e−8。
+積分器的輸出不合法時，engine 取它的 Hermitian 部分，把負特徵值截為 0，再重新正規化。
+投影前後的最大元素絕對差不超過該次呼叫的 budget 才採用，否則以 RuntimeError 指出 point。
+Continuation 檢查的容差與各 kernel 的選路都不變。
+
+例：FTF heralded 把 density 投影成純態，接著一段 50 ns 的高 gain 雙 tone 段走 CPU DP5(4)，輸出的最小特徵值是 −2.4e−6。這個誤差符合 `2e-3` 的精度目標，但下一段的 continuation 檢查拒收。改為投影後，兩個重現案例都通過，修正耗時約占 evolve 總時間的 0.05%–0.09%。
+邊界：修正量超過 budget 表示積分器本身不準，照數值失敗回報，不放行。
+
+2026-11-19，使用者看過診斷與四個選項後選 A，回覆「其余采用建议」。討論見 [Evolution 輸出合法 density](../discussions/2026-11-19-evolution-valid-density.md)。
+
 ### 固定預算，找適合的場景
 
 評估模擬算法時，精度預算固定為使用者對該場景宣告的需求，預設是完整 density 對參考解 ≤ `2e-3`。
