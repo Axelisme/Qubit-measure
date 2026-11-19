@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-19，generator envelope 共用
+**Last updated:** 2026-11-20，Branch 的 ADC 結尾檢查
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -33,6 +33,7 @@
 `pulse_by_reg` 選到 timeline 時，須提供配對的 `selection` metadata。
 同 generator 的 pulse 重疊不能靠另一條 timeline 豁免。帶 timeline 的後一個 trigger 必須證明不與同 ADC 前一視窗重疊，否則在 build 時報錯。
 原生 `t=None` 無法定位 ADC 起點，會使後一個同 ADC timeline trigger 無法證明不重疊。此未知標記不捏造 shot 收尾的 runtime 結尾。
+Branch 的每個 case 從入口的 ADC 狀態開始編譯。任一 case 在出口的 ADC 結尾未知，Branch 後的同 ADC timeline trigger 就會在編譯時報錯。
 Builder 原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
 
 Case 與 Repeat 只可使用母結構允許的 timeline 及局部 fork，局部名字離開後失效。
