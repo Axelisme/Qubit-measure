@@ -1,6 +1,6 @@
 # `zcu_tools.gui.remote` — shared remote adapter
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-11-19
 
 **讀者：** framework-dev。共用 NDJSON RPC 傳輸、排程與連線契約。
 
@@ -42,10 +42,21 @@ Response failure or timeout can follow a committed command. Transport neither
 rolls back domain effects nor retries requests. Controller diagnostics retain
 their independent broadcast and queue/backpressure behavior.
 
+`validate_params` ignores undeclared parameters when validation succeeds.
+When a declared parameter is missing or invalid, `invalid_params` reports the
+first failure and appends the following details to its one-line message:
+
+- `error.data.params` lists each declared wire parameter as
+  `{name, type, required}` in declaration order. `type` is the JSON Schema type
+  (a list for nullable types) or `"json"` when any JSON value is accepted.
+- `error.data.unknown` lists undeclared parameters as `{name}` in request order.
+  An entry includes `suggestion` if a declared name is close enough. The list
+  is empty when the request has no undeclared parameters.
+
 `ParamSpec.minimum` / `maximum` project inclusive numeric JSON-schema limits.
 These declarations do not add generic range admission: domain owners validate
 ranges and provide the same constants to schemas, including dependent limits
-in descriptions. Undeclared-field behavior stays unchanged.
+in descriptions.
 
 `ParamSpec.nullable=True` admits explicit null as `None`, independently of
 whether the key is required. Schemas retain required keys and add `"null"` to

@@ -25,6 +25,7 @@ import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from difflib import SequenceMatcher, get_close_matches
 from enum import Enum
 from typing import Literal, NotRequired, TypedDict
 
@@ -267,8 +268,8 @@ def _coerce_scalar_param(spec: ParamSpec, value: object) -> str | int | float | 
 def _coerce_param(spec: ParamSpec, value: object, *, present: bool) -> object:
     """Apply omission/default rules, then coerce the supplied declared wire value.
 
-    Missing required or malformed values raise RemoteError; JSON and float
-    conversion errors retain their causes. Enum membership belongs to the caller.
+    Missing required, malformed or out-of-enum values raise RemoteError.
+    JSON and float conversion errors retain their causes.
     """
     if not present:
         if spec.required:
@@ -280,7 +281,13 @@ def _coerce_param(spec: ParamSpec, value: object, *, present: bool) -> object:
         if spec.required:
             raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{spec.name}'")
         return spec.default
-    return _coerce_supplied_value(spec, value)
+    decoded = _coerce_supplied_value(spec, value)
+    if spec.enum is not None and decoded not in spec.enum:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"'{spec.name}' must be one of {spec.enum!r}",
+        )
+    return decoded
 
 
 def _coerce_supplied_value(spec: ParamSpec, value: object) -> object:
@@ -332,25 +339,82 @@ def validate_params(
 ) -> dict[str, object]:
     """Validate ``params`` against ``specs``; return a name -> typed-value dict.
 
-    Only declared params are surfaced. Required-but-missing or type-mismatched
-    params raise ``RemoteError(INVALID_PARAMS)``. NUMBER values outside the
-    float conversion range also raise INVALID_PARAMS, preserving the conversion
-    error as the cause. Extra undeclared params are ignored (the wire stays
-    forward-compatible).
+    Only declared params are returned. A missing required, malformed, or
+    out-of-enum value raises ``RemoteError(INVALID_PARAMS)`` with the method's
+    parameter table (``data["params"]``) and undeclared names with any close
+    suggestions (``data["unknown"]``). The message includes the same details.
+    Conversion failures retain their cause. Undeclared names do not affect success.
     """
     out: dict[str, object] = {}
     for spec in specs:
         present = spec.name in params
         if spec.omit_when_missing and not present:
             continue
-        value = _coerce_param(spec, params.get(spec.name), present=present)
-        if spec.enum is not None and value is not None and value not in spec.enum:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                f"'{spec.name}' must be one of {spec.enum!r}",
-            )
-        out[spec.name] = value
+        value = params.get(spec.name)
+        try:
+            out[spec.name] = _coerce_param(spec, value, present=present)
+        except RemoteError as exc:
+            if exc.code is not ErrorCode.INVALID_PARAMS:
+                raise
+            raise _param_error_with_details(exc, specs, params) from exc.__cause__
     return out
+
+
+def _param_error_with_details(
+    error: RemoteError, specs: tuple[ParamSpec, ...], params: Mapping[str, object]
+) -> RemoteError:
+    """Attach declared parameters and unknown-name hints to the first error."""
+    table: list[dict[str, object]] = []
+    entries: list[str] = []
+    for spec in specs:
+        kind = schema_property(spec).get("type", "json")
+        table.append({"name": spec.name, "type": kind, "required": spec.required})
+        type_label = " | ".join(kind) if isinstance(kind, list) else kind
+        required_label = "required" if spec.required else "optional"
+        entries.append(f"{spec.name!r} ({type_label}, {required_label})")
+    declared = tuple(spec.name for spec in specs)
+    unknown: list[dict[str, str]] = []
+    hints: list[str] = []
+    for name in params:
+        if name in declared:
+            continue
+        suggestion = _suggest_param_name(name, declared)
+        if suggestion is None:
+            unknown.append({"name": name})
+            hints.append(repr(name))
+        else:
+            unknown.append({"name": name, "suggestion": suggestion})
+            hints.append(f"{name!r} -> {suggestion!r}")
+    message = f"{error.message}; params: {', '.join(entries)}"
+    if hints:
+        message += f"; unknown params: {', '.join(hints)}"
+    return RemoteError(
+        error.code,
+        message,
+        reason=error.reason,
+        data={**(error.data or {}), "params": table, "unknown": unknown},
+    )
+
+
+def _suggest_param_name(name: str, declared: tuple[str, ...]) -> str | None:
+    """Prefer a spelling match, then try substantial reordered letter overlap."""
+    matches = get_close_matches(name, declared, n=1)
+    if matches:
+        return matches[0]
+    if len(name) < 4:
+        return None
+    # Compare reordered letters for cases like "command" vs "name". Requiring
+    # four-letter names and more than half overlap avoids one- or two-letter hits.
+    letters = sorted(name)
+    score, candidate = max(
+        (
+            (SequenceMatcher(None, letters, sorted(option)).ratio(), option)
+            for option in declared
+            if len(option) >= 4
+        ),
+        default=(0.0, ""),
+    )
+    return candidate if score > 0.5 else None
 
 
 def schema_property(spec: ParamSpec) -> SchemaProperty:
