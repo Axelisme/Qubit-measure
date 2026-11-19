@@ -1,4 +1,4 @@
-**讀者：** operator、agent。準備雙線 CZ 的起點，在 GUI 或 MCP 執行形狀優化並判讀結果。
+**讀者：** operator、agent。準備雙線 CZ 的起點，在 GUI 或 MCP 優化、寫回並用 IRB 驗收。
 
 # CZ 形狀優化
 
@@ -41,8 +41,27 @@ Run 把候選樣條放在記憶體內播放，不為候選建立 library 資產�
 
 Stop 保留已取得的計數，不把未完成的世代回報給 CMA。Save 記錄本次 cfg、各次評估的 14 個參數、峰值及每個 seed 的 3×3 終端計數。未取得的計數為 NaN。結果檔沒有候選波形樣本。保留 cfg 所用的起點資產及原有 path，之後 Load 再 Analyze 會使用該資產的時長。
 
-## Analyze 與驗收
+## Analyze 與寫回
 
 用 Analyze 讀取目前 Run 或 Load 的結果。圖 `fit` 左側顯示實測的目標和最高點，略過不可行或未完成的評估。右側疊加最佳及起點的 normalized I、Q，橫軸是 µs。摘要列出最佳序號、最佳及起點的目標，以及依 I1… I6、Q1… Q6、F1／F2 local Z 排序的 14 個數字。若缺少 cfg 或沒有可用評估，摘要回報原因，不選最佳。
 
-最高的單次 survival 會因多次比較而偏樂觀。判斷 gate 是否改善，要用 [two_qubit/rb](../rb/guide.md) 重測 paired RB／IRB。使用與優化不重疊的 seeds 及至少 3 個 depths，依驗收的 gate error 與不確定度判斷，不用優化曲線的最高點代替。
+有可用的最佳評估時，writeback pane 會列出六筆提案：
+
+| 筆數 | 提案 | Apply 結果 |
+| --- | --- | --- |
+| 1 | `cz_opt_<hash>` arb 資產 | 發布最佳 I/Q 樣本。`<hash>` 是樣本雜湊的前 12 個十六進位字元。 |
+| 2 | `$coupler.pulses.cz_f1`、`$coupler.pulses.cz_f2` | 把 Run 的兩支 pulse 換成新資產，保留各自的 generator、gain、載波、相位與延遲。 |
+| 2 | `$coupler.module.cz_f1`、`$coupler.module.cz_f2` | 將兩個 slot 指向本次捕捉所解析的 pulse library keys。 |
+| 1 | `$coupler.ext.cz_phase` | 保存 F1、F2 的元件名稱與最佳 local Z 角度，單位是 deg。 |
+
+最佳存活率高於評估 0 時，六筆提案全部預選。持平或無法比較時，所有列預設不勾選，note 會說明原因。沒有可用的最佳評估時不提案。Load 之後，寫回仍要求 F1、F2、coupler 與 mux 的身分與保存的 cfg 一致。
+
+先核對 Apply 的目的 entry、point、兩個 pulse 及兩個 local Z 角度。接受結果時，在**同一次 Apply** 選取六筆，讓兩個 slot 和 local Z 跟新波形一起更新。Analyze 不寫入資產或校準。相同 key 與樣本重新 Apply 時，資產回報 `existing`，其餘選取的列照常寫入。Apply 中途出錯時不回滾已完成的寫入。先檢查實際提交的列，再決定是否重試，不要用只寫入一部分的 cfg 驗收。
+
+## 每輪優化與驗收
+
+1. Run 優化，Analyze 並檢查六筆提案。接受這組結果才 Apply 並保存本輪 cfg 與資料。優化在同一組 seeds 上比較多個候選，最高的存活率可能偏高，不能當 gate error。
+2. 開啟 plain [`two_qubit/rb`](../rb/guide.md)。若 tab 已開，先 Reset Form，確認兩支 CZ pulse 與 `cz_phase` 都是剛寫入的值。換一組與本輪優化不重疊的 seeds，並選遞增 depths。三個 depths 可檢查取數流程，估計 gate error 則至少需要四個 depths 和兩個完整的 paired seeds。
+3. 讀出可區分 g/e 時，可在 RB 選 `reset/mux_herald`。使用完整 mux readout，將 F1、F2 對應的 tone 位置設為 g，例如兩者是 tone 0、1 時填 `{"0": "g", "1": "g"}`。SNR 低時改用脈衝 reset 或不設 reset。優化也遵循同一個 SNR 判斷，低 SNR 時用未 heralded 的終端計數。
+4. 比較本輪與前一輪驗收的 gate error 和不確定度，不用優化曲線的最高點代替。若擬合沒有估計值，先排除分析回報的原因，不以該結果判定進步。驗收的 gate error 不再改善時停止。
+5. 若驗收仍有改善，回到 `two_qubit/cz_optimize` 按 Reset Form，讀入寫回的 CZ 與 `cz_phase`。評估 0 的 12 個控制點是上一輪最佳波形的控制點，兩個 local Z 取自保存的 `cz_phase`。以這組值開始下一輪。

@@ -91,6 +91,16 @@ class CZOptimizeAnalysis:
     start_target: float | None
     best_params: tuple[float, ...]
 
+    def render_best(self, cfg: CZOptimizeCfg) -> WaveformSamples:
+        """Render the best I/Q spline at the analyzed Run cfg's arb duration.
+
+        Reuse the candidate playback grid and preserve all 12 knot values.
+        Missing or unreadable baseline samples raise their file or format error.
+        This reads the original arb but does not publish the rendered samples.
+        """
+        duration = float(_read_baseline(cfg).time[-1])
+        return _render_samples(np.asarray(self.best_params, dtype=np.float64), duration)
+
 
 @dataclass(frozen=True)
 class CZOptimizeUnavailable:
