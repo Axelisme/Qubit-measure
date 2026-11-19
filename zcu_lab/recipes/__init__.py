@@ -36,6 +36,7 @@ from .stirap_amplitude import DEFINITION as STIRAP_AMPLITUDE
 from .stirap_delay import DEFINITION as STIRAP_DELAY
 from .stirap_detuning import DEFINITION as STIRAP_DETUNING
 from .t1 import DEFINITION as T1
+from .t1_cov import DEFINITION as T1_COV
 from .t2echo import DEFINITION as T2ECHO
 from .t2ramsey import DEFINITION as T2RAMSEY
 from .time_rabi import DEFINITION as TIME_RABI
@@ -55,6 +56,7 @@ RECIPES = (
     T2ECHO,
     CPMG,
     T1,
+    T1_COV,
     AMPLITUDE_RABI,
     TIME_RABI,
     TWOTONE_SPECTRUM,

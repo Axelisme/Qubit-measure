@@ -212,6 +212,7 @@ from zcu_lab.v2.twotone.stirap.detuning.gui import (
 )
 from zcu_lab.v2.twotone.time_domain.cpmg.gui import DEFINITION as CPMG_DEFINITION
 from zcu_lab.v2.twotone.time_domain.t1.gui import DEFINITION as T1_DEFINITION
+from zcu_lab.v2.twotone.time_domain.t1_cov.gui import DEFINITION as T1_COV_DEFINITION
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import DEFINITION as T2_ECHO_DEFINITION
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import (
     DEFINITION as T2_RAMSEY_DEFINITION,
@@ -240,6 +241,7 @@ ADAPTERS: dict[str, object] = {
     "twotone/rabi/amp_rabi": AMP_RABI_DEFINITION,
     "twotone/raman_gf": RAMAN_GF_DEFINITION,
     "twotone/t1": T1_DEFINITION,
+    "twotone/t1_cov": T1_COV_DEFINITION,
     "twotone/t2ramsey": T2_RAMSEY_DEFINITION,
     "twotone/t2echo": T2_ECHO_DEFINITION,
     "chain/amp_rabi": CHAIN_AMP_RABI_DEFINITION,
