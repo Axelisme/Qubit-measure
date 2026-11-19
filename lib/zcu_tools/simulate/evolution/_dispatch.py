@@ -242,14 +242,15 @@ def prepare(
 ) -> Prepared:
     """Select a key-level builder and prepare an aligned batch of representatives.
 
-    Called at the scheduler's normal build point. Gate keys
-    with duration in (0, 30] ns try phase-adaptive preparation; all other gate
-    keys use sixteen nodes. Failed phase probes fall back inside the numerical
-    build. Other families use their ordinary prepare entry point unchanged.
-    Keys, representatives, budget and failure semantics follow Kernel.prepare.
+    Gate-cache keys with duration in (0, 30] ns try phase-adaptive preparation;
+    all other gate-cache keys use sixteen nodes. Failed phase probes fall back
+    inside that build. Keys, representatives, budget and failure semantics
+    follow Kernel.prepare.
     """
     routing = context.work_plan.routing
-    routing.prepared_keys(kernel.name, len(keys))
+    # The multitone gate counts only the producer of each evolve-local key.
+    if not isinstance(kernel, MultitoneGateKernel):
+        routing.prepared_keys(kernel.name, len(keys))
     with routing.measure(kernel.name, "prepare"):
         if isinstance(kernel, GateCacheKernel):
             duration = keys["duration"]
@@ -291,11 +292,7 @@ def _guard_key(
         raise RuntimeError(
             f"kernel {kernel.name} declares guard_builds without a handoff"
         )
-    if (
-        routing.enabled
-        and handoff is None
-        and not isinstance(kernel, MultitoneGateKernel)
-    ):
+    if routing.enabled and handoff is None:
         routing.prepared_keys(
             kernel.name, sum(len(p.keys) for p in result.preparations)
         )
@@ -458,7 +455,7 @@ class Classifier:
         groups = group_keys(kernel, self.table, rows, self.context)
         # A common refusal must reach the caller's complete legacy key groups.
         # Deferring a unique common key can otherwise split one shared Floquet
-        # (or RWA/gate) build into one build per timeline after the refusal.
+        # (or RWA) build into one build per timeline after the refusal.
         per_key = (
             np.ones(len(groups.keys), dtype=bool)
             if kernel.name == "common_frame"
@@ -538,12 +535,8 @@ class Classifier:
         kernel: Kernel,
         rows: NDArray[np.int64],
         eager_sambe_rows: NDArray[np.int64] | None,
-        *,
-        resolve_guard: bool,
     ) -> Iterable[_Guarded | None]:
         """Evaluate non-build guards and eager group decisions in this scope."""
-        if resolve_guard:
-            return (_guard_key(kernel, self.table, self.context, rows),)
         if kernel.guard_builds:
             return self.guard_keys(kernel, rows, eager_sambe_rows)
         with self.context.work_plan.routing.measure(kernel.name, "prepare"):
@@ -556,15 +549,12 @@ class Classifier:
         rows: NDArray[np.int64],
         *,
         eager_guard_rows: NDArray[np.int64] | None = None,
-        resolve_guard: bool = False,
     ) -> NDArray[np.int64]:
         """Guard rows once; advance Sambe groups needed for shared fallbacks."""
         eligible = self.eligible_rows(kernel, rows)
         if not len(eligible):
             return rows
-        for result in self.guard_outcomes(
-            kernel, eligible, eager_guard_rows, resolve_guard=resolve_guard
-        ):
+        for result in self.guard_outcomes(kernel, eligible, eager_guard_rows):
             if result is None:
                 raise RuntimeError("guard job returned no decision")
             self.names[result.rows] = kernel.name

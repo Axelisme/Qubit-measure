@@ -28,7 +28,6 @@ from .accuracy_cases import (
     cpu_dp54_case,
     drive_track,
     linear_drive_model,
-    multitone_phase_case,
     timeline,
 )
 from .reference import converged_reference, density_error
@@ -704,7 +703,7 @@ def test_shared_sampled_gate_beats_an_admitted_original_common_frame() -> None:
 
 
 def test_pinned_multitone_gate_below_cost_break_even() -> None:
-    """Pinning bypasses price, not validation; RWA still checks its carriers."""
+    """A structurally eligible gate can be pinned; RWA still checks its carriers."""
     case = _rwa_ineligible_gate_case()
     with closing(Engine(1)) as engine:
         engine.evolve(case.source, (case.batch,))
@@ -776,7 +775,7 @@ def test_short_reuse_loses_to_dop853_without_building_gate(
         }
     assert result.paths.segments_by_kernel == {"dop853": count}
     gate = result.paths.routing.get("multitone_gate")
-    assert gate is None or gate.prepare_cpu_s == 0
+    assert gate is None or gate.prepare_key_builds == 0
 
 
 @pytest.mark.parametrize(
@@ -786,8 +785,10 @@ def test_short_reuse_loses_to_dop853_without_building_gate(
         pytest.param(
             25.0, 205, "selected", "dop853", id="short-more-reuse-still-direct"
         ),
-        pytest.param(100.0, 60, "deferred", None, id="long-less-reuse-gate-offered"),
-        pytest.param(100.0, 100, "deferred", None, id="long-gate-offered"),
+        pytest.param(
+            100.0, 60, "selected", "multitone_gate", id="long-less-reuse-gate"
+        ),
+        pytest.param(100.0, 100, "selected", "multitone_gate", id="long-gate"),
     ],
 )
 def test_gate_direct_price_compares_short_and_long_reuse(
@@ -800,8 +801,8 @@ def test_gate_direct_price_compares_short_and_long_reuse(
         np.array([0.2, 1, 0.3], complex),
         np.array([0.0, duration / 2, duration]),
     )
-    # One timeline defers its gate guard so inspection observes the price
-    # decision without building the gate or integrating any density.
+    # Inspection selects from the complete inventory without building the gate
+    # or integrating any density.
     work = replace(
         case.batch,
         end_ns=np.array([count * duration]),
@@ -824,7 +825,7 @@ def test_gate_direct_price_compares_short_and_long_reuse(
 
 @pytest.mark.parametrize("shared", [False, True])
 def test_profitable_gate_is_offered_using_complete_inventory(shared: bool) -> None:
-    """Local builders defer; a shared key runs its numerical guard in the caller."""
+    """Both local and shared gate keys can be selected before preparation."""
     count = _PROFITABLE_GATE_USES
     duration = _PRICE_CASE_DURATION_NS
     case = _joint_gate_case(count if shared else 1, duration)
@@ -843,13 +844,9 @@ def test_profitable_gate_is_offered_using_complete_inventory(shared: bool) -> No
         query = engine.inspect_dispatch(case.source, (work,))
     assert len(query.rows) == count
     for row in query.rows:
-        guards = {candidate.family: candidate.guard for candidate in row.candidates}
-        if shared:
-            assert guards["multitone_gate"] in ("accepted", "rejected")
-        else:
-            assert row.status == "deferred"
-            assert row.family is None
-            assert guards["multitone_gate"] == "deferred"
+        assert row.status == "selected"
+        assert row.family == "multitone_gate"
+        assert row.candidates[0].guard == "accepted"
 
 
 def test_profitable_gate_reuse_pays_only_its_own_build() -> None:
@@ -868,7 +865,7 @@ def test_profitable_gate_reuse_pays_only_its_own_build() -> None:
         result = engine.evolve(case.source, (case.batch, rare), telemetry=True)
         query = engine.inspect_dispatch(case.source, (case.batch, rare))
     assert result.paths.segments_by_kernel == {"multitone_gate": count, "dop853": 1}
-    assert result.paths.routing["multitone_gate"].rejected_rows == 0
+    assert result.paths.routing["multitone_gate"].prepare_key_builds == 1
     rare_rows = [row for row in query.rows if row.key.batch == 1]
     assert len(rare_rows) == 1
     assert rare_rows[0].family == "dop853"
@@ -876,18 +873,6 @@ def test_profitable_gate_reuse_pays_only_its_own_build() -> None:
         "dop853": "accepted",
         "multitone_gate": "untested_after_short_circuit",
     }
-
-
-def test_pinned_multitone_gate_still_checks_split_defect() -> None:
-    case = multitone_phase_case("flat_top", 1, gain=0.55)
-    with (
-        closing(case.source),
-        closing(Engine(1, backend="cpu", families=("multitone_gate",))) as engine,
-        pytest.raises(NoValidKernel) as rejected,
-    ):
-        engine.evolve(case.source, (case.batch,))
-    assert rejected.value.domain == "multiple"
-    assert rejected.value.attempted == ("multitone_gate",)
 
 
 def _carrier_case(frequency: float) -> AccuracyCase:
