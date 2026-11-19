@@ -175,6 +175,13 @@ Root seed 可指定或生成。各 acquire 使用獨立抽樣流，round／point
 
 Acquire 與 round 記錄可引用去重，但模型、waveform、設定內容必須保留且可解析，不能只留下可被覆寫的路徑。正常 GUI／MCP 只取得 I/Q、分析、控制值與公開 provenance；private truth／重播資料分開，不以模型真值幫操作者校準。這是介面界線，不是對本機檔案權限的 sandbox。
 
+量測 agent 同樣以量測取得初值、估計與裁定。模擬器真值是 preset YAML 的模型參數（例如 FTF `ftf.yaml` 的 chip 與 dc_bias），以及由它們推出的頻譜與矩陣元素。只有使用者為 debug 明確授權的任務才讀真值，讀到的數字記為 debug 對照，不寫成量測結果。
+
+例：2026-11-19 的 FTF CZ 任務經使用者授權讀 `ftf.yaml`，模型給出 CZ 躍遷 5799.662 MHz，只用來對照；量測上的共振由 2π 回返 gain 對頻率的掃描定為 5800.007 ± 0.015 MHz。
+邊界：模擬器維護者核對模型與量測是否一致時照舊讀真值，這屬於 [[0078]] 調試介面的用途。
+
+2026-11-19，使用者在該任務後的討論中說：「這次偷看只是為了debug，實際使用不能偷看」。原始討論未入庫。
+
 ### 固定讀出線背景
 
 FTF、single_fluxonium 與 six_fluxonium 共用 `simulate.adc.Receiver.background(f)`。
