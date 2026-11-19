@@ -20,9 +20,72 @@ from zcu_tools.cfg_model import (
     TwoPulseResetCfg,
     TwoPulseResetSpec,
     WaveformCfgFactory,
+    module_spec_from_raw,
 )
 
 from ._support import AssetInfo, Resolver
+
+
+def test_herald_spec_materializes_readout_key_and_inline_prepare():
+    resolver = Resolver()
+    readout = module_spec_from_raw(
+        {
+            "type": "readout/pulse",
+            "gen_ch": 0,
+            "nqz": 1,
+            "freq": 100.0,
+            "gain": 0.1,
+            "ro_ch": 0,
+            "ro_length": 0.1,
+            "waveform": {"style": "const", "length": 0.1},
+        }
+    )
+    resolver.modules["ro"] = readout
+    spec = module_spec_from_raw(
+        {
+            "type": "reset/herald",
+            "readout": "ro",
+            "keep": "other",
+            "prepare": {
+                "type": "pulse",
+                "ch": 1,
+                "nqz": 1,
+                "freq": 200.0,
+                "gain": 0.2,
+                "waveform": {"style": "const", "length": 0.2},
+            },
+        }
+    )
+
+    cfg = ModuleCfgFactory.from_raw(
+        spec, context=CfgValidationContext(modules=resolver)
+    )
+    assert spec.to_dict()["readout"] == "ro"
+    assert cfg.to_dict()["readout"] == readout.to_dict()
+    assert cfg.to_dict()["prepare"]["type"] == "pulse"
+    assert cfg.to_dict()["keep"] == "other"
+
+
+def test_mux_herald_keeps_string_spec_keys_and_resolves_native_tone_positions():
+    spec = module_spec_from_raw(
+        {
+            "type": "reset/mux_herald",
+            "readout": {
+                "type": "readout/mux",
+                "gen_ch": 0,
+                "nqz": 1,
+                "mixer_freq": 1000.0,
+                "length": 0.5,
+                "ro_length": 0.4,
+                "tones": [{"freq": 1000.0, "gain": 0.1, "ro_ch": 4}],
+            },
+            "keep": {"0": "g"},
+        }
+    )
+
+    cfg = ModuleCfgFactory.from_raw(spec)
+    assert spec.to_dict()["keep"] == {"0": "g"}
+    assert cfg.to_dict()["keep"] == {0: "g"}
 
 
 def test_waveform_adapter_rejects_unknown_style():

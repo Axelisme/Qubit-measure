@@ -6,10 +6,13 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from zcu_tools.cfg_model import CircleClassifier, LinearClassifier
+from zcu_tools.cfg_model import ModuleCfgFactory as CoreModuleCfgFactory
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
-from zcu_tools.program.v2 import IQ, TimelineBuilder, shot_sums
+from zcu_tools.program.v2 import IQ, Classify, TimelineBuilder, shot_sums
+from zcu_tools.program.v2.modules import ModuleCfgFactory, PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
@@ -20,6 +23,7 @@ from zcu_tools.simulate.boundary import (
 )
 
 from tests.program._profiles import load_soccfg
+from tests.program.v2._mux_support import mux_soccfg, native_mux
 
 
 @dataclass(frozen=True)
@@ -89,6 +93,142 @@ def deliver_rounds(
         delivery(index, channels) for index, channels in enumerate(rounds)
     )
     environment.soc.binding.execute = lambda _: next(deliveries)
+
+
+def test_herald_reset_masks_terminal_average_and_classification(
+    environment: SimulationEnvironment,
+) -> None:
+    terminal = PulseReadoutCfg(
+        gen_ch=0,
+        nqz=1,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_ch=0,
+        ro_length=0.1,
+        post_delay=0.05,
+        freq=100.0,
+        classifier=LinearClassifier(angle=0.0, threshold=0.0),
+    ).build("terminal")
+    cfg = ModuleCfgFactory.from_core(
+        CoreModuleCfgFactory.from_raw(
+            {
+                "type": "reset/herald",
+                "readout": terminal.cfg.to_dict(),
+                "keep": "g",
+                "prepare": {
+                    "type": "pulse",
+                    "ch": 1,
+                    "nqz": 1,
+                    "freq": 150.0,
+                    "gain": 0.1,
+                    "waveform": {"style": "const", "length": 0.1},
+                },
+            }
+        ),
+        context=None,
+    )
+    assert cfg.type == "reset/herald"
+    builder = TimelineBuilder(environment.soccfg, reps=3)
+    builder.add_loop("point", 1)
+    builder.emit(cfg.build("herald", terminal=terminal), tag="filter")
+    builder.emit(
+        PulseCfg(
+            ch=1, nqz=1, freq=250.0, gain=0.1, waveform=ConstWaveformCfg(length=0.1)
+        ).build("drive")
+    )
+    builder.emit(terminal, tag="signal")
+    program = builder.build()
+    normalized = np.array(
+        [[[[1, 0], [100, 100]], [[-2, 0], [-4, 3]], [[0, 0], [10, 0]]]],
+        dtype=np.int64,
+    )
+    raw = normalized * program.ro_chs[0]["length"]
+    deliver_rounds(environment, {0: raw}, {0: raw})
+    with Schedule(SignalBuffer((1,)), scope=Scope("run", "herald")) as schedule:
+        averaged = schedule.run_acquire(program, environment.soc, remove_offset=False)
+        np.testing.assert_array_equal(averaged, [2 + 1j])
+    with Schedule(
+        SignalBuffer((1, 2), dtype=np.float64), scope=Scope("run", "herald")
+    ) as schedule:
+        counts = schedule.run_acquire_summed(
+            program, environment.soc, reducer=shot_sums(program, [Classify("signal")])
+        )
+        np.testing.assert_array_equal(counts, [[1, 1]])
+    with pytest.raises(ValueError, match="filter"):
+        shot_sums(program, [IQ("filter")])
+    request = environment.soc.binding.last_request
+    assert request is not None
+    timeline = request.materialize_point(0)
+    prepare, herald, drive, terminal_pulse = timeline.events
+    (window,) = timeline.readouts
+    herald_tick, terminal_tick = window.trigger_ticks
+    assert (prepare.gen_ch, herald.gen_ch, drive.gen_ch, terminal_pulse.gen_ch) == (
+        1,
+        0,
+        1,
+        0,
+    )
+    assert prepare.start_ticks < herald_tick < drive.start_ticks < terminal_tick
+
+
+def test_mux_herald_intersects_selected_tones_and_hides_every_herald_read() -> None:
+    env = white_noise(mux_soccfg(), std_adc=0, seed=13, routes=((0, 4), (0, 1), (0, 6)))
+    try:
+        readout = native_mux((4, 1, 6), post_delay=0.1)
+        readout.tones[0].classifier = CircleClassifier(
+            g_center=0j, e_center=5 + 0j, radius=1.0
+        )
+        readout.tones[2].classifier = LinearClassifier(angle=0.0, threshold=0.0)
+        terminal = readout.build("terminal")
+        cfg = ModuleCfgFactory.from_raw(
+            {
+                "type": "reset/mux_herald",
+                "readout": readout,
+                "keep": {"0": "g", "2": "e"},
+            }
+        )
+        assert cfg.type == "reset/mux_herald"
+        builder = TimelineBuilder(env.soccfg, reps=4)
+        builder.add_loop("point", 1)
+        builder.emit(cfg.build("herald", terminal=terminal), tag="filter")
+        builder.emit(terminal, tag="signal")
+        program = builder.build()
+        reads = {
+            4: [[0, 5], [5, 100], [0, 100], [2, 100]],
+            1: [[99, 12], [99, 100], [99, 100], [99, 100]],
+            6: [[3, 16], [3, 100], [-1, 100], [3, 100]],
+        }
+        raw = {
+            ch: np.stack([values, np.zeros((4, 2), dtype=np.int64)], axis=-1)[None]
+            * program.ro_chs[ch]["length"]
+            for ch, values in reads.items()
+        }
+        deliver_rounds(env, raw, raw)
+        with Schedule(
+            SignalBuffer((3, 1, 1, 2), dtype=np.float64), scope=Scope("run")
+        ) as schedule:
+            averaged = schedule.run_acquire(
+                program,
+                env.soc,
+                options=RunOptions(converter=np.stack),
+                remove_offset=False,
+            )
+            np.testing.assert_array_equal(
+                averaged, [[[[1.25, 0]]], [[[3, 0]]], [[[4, 0]]]]
+            )
+        with Schedule(
+            SignalBuffer((1, 3, 2), dtype=np.float64), scope=Scope("run")
+        ) as schedule:
+            counts = schedule.run_acquire_summed(
+                program,
+                env.soc,
+                reducer=shot_sums(
+                    program, [Classify("signal", tone=0), Classify("signal", tone=2)]
+                ),
+            )
+            np.testing.assert_array_equal(counts, [[[0, 0], [0, 1], [0, 0]]])
+    finally:
+        env.devices.close_all_devices()
 
 
 def test_run_acquire_averages_only_kept_iq_over_all_shots_and_completed_rounds(

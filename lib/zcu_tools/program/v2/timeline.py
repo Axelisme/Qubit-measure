@@ -54,6 +54,7 @@ from .ir.instructions import BaseInst, RegWriteInst
 from .macro.delay import DelayRegAuto
 from .macro.table import TableSelection
 from .modules.base import Module
+from .modules.herald import HeraldReset, register_herald_reads
 from .resources import ProgramResourcesMixin
 from .sweep import SweepCfg
 from .table_param import TableParam, TableRawParam
@@ -287,6 +288,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             else PreparedTimelineMacro(self._timeline_book, macro)
             for macro in self.macro_list
         ]
+        if any(isinstance(module, HeraldReset) for module in self._declared_modules):
+            register_herald_reads(self)
 
     @property
     def timing_layout(self) -> TimingLayout:
