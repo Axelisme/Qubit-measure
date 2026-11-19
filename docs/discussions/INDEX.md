@@ -15,6 +15,7 @@
 - 2026-10-21 [Workflow 定位、承載與執行基底](2026-10-21-workflow-positioning-and-hosting.md)：Recipe 操作 GUI tab，workflow 跑實驗核心並由 measure-gui 承載，現行分工見 [ADR-0062](../adr/0062-experiment-workflow.md) 與 [ADR-0075](../adr/0075-agent-interface-layers.md)。
 - 2026-10-22 [Workflow 改為單一 generator：取消、Signal、step 模型與回退](2026-10-22-workflow-single-generator.md)：單一 generator 與 Pause／Resume 的歷史設計已由 [ADR-0062](../adr/0062-experiment-workflow.md) 與 [ADR-0075](../adr/0075-agent-interface-layers.md) 取代。
 - 2026-10-22 [中斷 scope 成為顯式的 core 契約](2026-10-22-explicit-scope-contract.md)：中斷由顯式 Scope 區分目標並保證作用域，決策見 [ADR-0075](../adr/0075-agent-interface-layers.md)。
+- 2026-11-19 [Recipe 的寫回 helper 與 ask 原語](2026-11-19-recipe-ask-helpers.md)：原語與 helper。通用契約只有 ask 與正常結束；寫回 helper 依 stage 出題，原則見 [ADR-0075](../adr/0075-agent-interface-layers.md#通用契約只有-ask-與正常結束)。
 
 ## 模擬量測環境
 

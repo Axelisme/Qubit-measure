@@ -41,6 +41,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Remote / Transport
 
+原則：recipe 與 workflow 對 agent 的通用契約只有 `ask` 與正常結束，其上的工具都是 helper；helper 不好用時修 helper，不擴充原語，見 [ADR-0075](0075-agent-interface-layers.md#通用契約只有-ask-與正常結束)。
+
 - [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch、RPC／MCP 與事件錯誤投影。
 - [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：Measure／fluxdep 單一 holder、固定連線身份、控制權交接與 Measure 診斷呈現。
 - [0075 — Agent 介面分層](0075-agent-interface-layers.md)：Agent 介面分層、共用 async host、顯式 Scope 與跨層 writeback。
