@@ -11,10 +11,10 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import Pulse
 from zcu_tools.program.v2.modules import MuxReadout
 
+from .._cz_phase import CZPhasePair
 from .._drive import DualLineCfg
 from .._readout import JointRoles
 from .._sums import validate_classifiers
-from .program import CZPhasePair
 
 
 class RBInputs[ResetT](ConfigBase):

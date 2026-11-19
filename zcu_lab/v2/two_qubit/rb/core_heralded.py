@@ -31,6 +31,8 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
+from .._rb_scheduling import emit_sequence
+from .._rb_sequence import make_paired_sequences
 from .._sums import (
     herald_probabilities,
     joint_probabilities,
@@ -45,8 +47,6 @@ from .core import (
     paired_means,
     validate_axes,
 )
-from .scheduling import emit_sequence
-from .sequence import make_paired_sequences
 
 
 @dataclass(frozen=True)
