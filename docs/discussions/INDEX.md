@@ -19,6 +19,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-19 [Evolution 輸出合法 density](2026-11-19-evolution-valid-density.md)：數值保證。純態經 DP5(4) 短段後最小特徵值為 −2.4e−6；engine 在 budget 內投影回合法 density，超出照數值失敗回報。
+
 - 2026-11-18 [Full-drive gate 的 CPU 競品估價](2026-11-18-gate-direct-duration-price.md)：價格重校。原六組加上已量的 DRAG lab 窗重校 duration 端點，原 flat-top lab 連段仍未量測。
 
 - 2026-11-18 [成形脈衝的 fallback 共用與 prepare key 計數](2026-11-18-shaped-fallback-key-reuse.md)：公開診斷。Engine 計入已丟棄的 guard 產品，提前解析保留 timeline 內的 Sambe spectral 共用與跨 timeline 的 period table 共用。
