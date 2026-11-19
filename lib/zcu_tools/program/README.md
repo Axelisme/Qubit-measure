@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-20，逐 shot 遮罩與平均
+**Last updated:** 2026-11-20，逐 shot 遮罩、平均與回傳
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -110,7 +110,9 @@ remaining reads. They keep the other ADCs and reads in declaration and trigger
 order. Each point is the sum of the kept length-normalized IQ, after the usual
 `remove_offset` correction, divided by all reps across completed rounds, not
 the number of kept shots. `get_raw()` still returns physical integer buffers
-with all triggers. With no sources, the native averaging path is unchanged.
+with all triggers. `get_shot_result()` instead returns the unfiltered integer IQ
+of visible reads in `(points, reps, reads, 2)` order, plus the round's bool mask.
+With no sources, the mask is all True and the native averaging path is unchanged.
 Native `threshold` projection, decimated acquisition and the summed processor
 interface reject programs with registered sources.
 

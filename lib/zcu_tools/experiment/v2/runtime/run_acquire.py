@@ -20,7 +20,11 @@ from zcu_tools.experiment.v2.runtime.acquisition import (
     default_raw2signal_fn,
     require_positive_rounds,
 )
-from zcu_tools.program.acquisition import ImproveAcquireMixin, ShotSumProcessor
+from zcu_tools.program.acquisition import (
+    ImproveAcquireMixin,
+    ShotResult,
+    ShotSumProcessor,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.experiment.v2.runtime.schedule import Schedule, ScheduleStep
@@ -47,7 +51,8 @@ class RunOptions(Generic[T_Raw]):
     read per shot; decimated requires one ADC and retains all repetition/read/
     sample axes; summed writes sums unchanged. Ambiguous defaults raise ValueError
     requesting an explicit converter. run_acquire_shots instead returns retained
-    raw shots without a slot and rejects converter and stop_condition policies.
+    raw shots and their unapplied mask without a slot, and rejects converter
+    and stop_condition policies.
     Its rounds count must be one. Converter and live update exceptions
     propagate without retry or a failed acquisition outcome.
     on_stop optionally observes external cancellation once per cooperative return,
@@ -105,12 +110,11 @@ class IntegratedProgram(Protocol[T_Raw_co]):
 
 
 class ShotProgram(Protocol):
-    """Synchronous acquire producer retaining integer raw shots.
+    """Synchronous integrated producer retaining visible raw shots and a mask.
 
     acquire(soc, **kwargs) accepts SynchronousAcquireKeywords, returns averaged
     IQ data and follows IntegratedProgram's cancellation and failure contract.
-    get_raw() returns the retained per-ADC int64 shot buffers, or None when no
-    raw buffer is available. The runner returns those buffers without conversion.
+    The runner delivers get_shot_result() unchanged after successful acquisition.
     """
 
     def acquire(
@@ -119,8 +123,8 @@ class ShotProgram(Protocol):
         **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]],
     ) -> list[NDArray[np.float64]]: ...
 
-    def get_raw(self) -> list[NDArray[np.int64]] | None:
-        """Return retained per-ADC raw shots, or None if unavailable."""
+    def get_shot_result(self) -> ShotResult | None:
+        """Return visible raw shots and their mask, or None if no buffer is available."""
         ...
 
 
@@ -164,7 +168,7 @@ class RunAcquisitionMixin(ABC):
     Subclasses provide the existing owner via _acquisition_owner; this mixin owns
     no scope, slot or outcome state. Slot entrypoints write converted data and
     trigger live updates, with acquire-local data stops. run_acquire_shots
-    instead returns retained raw buffers without conversion or slot writes.
+    instead returns retained raw shots and a mask without conversion or slot writes.
     All entrypoints require an active Schedule and retry producer errors.
     Only slot entrypoints require a writable SignalBuffer slot. Cancellation
     returns partial slot data or None for shots; only a stopped Schedule token
@@ -229,11 +233,12 @@ class RunAcquisitionMixin(ABC):
         *,
         options: RunOptions[list[NDArray[np.float64]]] | None = None,
         **qick_options: object,
-    ) -> list[NDArray[np.int64]] | None:
-        """Acquire once and return program.get_raw() without conversion or slot writes.
+    ) -> ShotResult | None:
+        """Acquire once and return visible raw shots and their unapplied mask.
 
-        program supplies synchronous acquire and retained int64 raw shots; soc
-        is its borrowed transport. Requires an active Schedule, not a buffer.
+        program supplies synchronous acquire and get_shot_result(); soc is its
+        borrowed transport. Requires an active Schedule, not a buffer. This
+        method does not convert the shots, write a slot, or apply the mask.
         options selects retry, native progress and on_stop. qick_options are
         forwarded to acquire. Return None on cooperative external cancellation;
         only a stopped Schedule token records a stopped Schedule outcome.
@@ -244,14 +249,14 @@ class RunAcquisitionMixin(ABC):
         external stop propagates unchanged after retry is exhausted.
         ValueError rejects negative retry, converter or stop_condition policies,
         and rounds other than the single positive integer 1. RuntimeError means
-        program.get_raw() provided no raw shot buffer after successful acquire.
+        program.get_shot_result() provided no raw shot buffer after successful acquire.
         Progress callback errors propagate unchanged without retry or marking
         acquisition failed, after acquire scope release and progress cleanup;
         they do not call on_stop. Neither raw-buffer access failures nor on_stop
-        failures are retried. Registered shot mask sources raise ValueError
-        before acquire; this raw-return interface does not carry a mask.
+        failures are retried. Registered mask sources omit consumed reads and
+        mask-only ADCs. Native QICK threshold projection cannot be combined
+        with registered mask sources.
         """
-        _reject_shot_masks(program, "run_acquire_shots")
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         if selected.converter is not None or selected.stop_condition is not None:
             raise ValueError("run_acquire_shots does not convert or apply data stop")
@@ -264,7 +269,7 @@ class RunAcquisitionMixin(ABC):
         )
         if not completed:
             return None
-        shots = program.get_raw()
+        shots = program.get_shot_result()
         if shots is None:
             raise RuntimeError("program did not provide a raw shot buffer")
         return shots
