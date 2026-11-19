@@ -177,7 +177,7 @@ Pulse、slot 與 phase rows 都可獨立 Apply。部分套用後，檢查下一�
 
 ## Paired RB／IRB 與資料解讀
 
-[Two-qubit RB／IRB](rb/guide.md) 使用配對的 two-qubit Clifford reference／CZ-interleaved sequences、各自完整 inverse、實際雙線 CZ 與 local frames。它與單 qubit `twotone/irb` 分別量不同的控制序列。
+[Two-qubit RB／IRB](rb/guide.md) 使用配對的 two-qubit Clifford reference／CZ-interleaved sequences、各自完整 inverse、實際雙線 CZ 與 local frames。它與[單 qubit RB／IRB](../twotone/rb/guide.md) 分別量不同的控制序列。
 
 保留相同 seed 的配對資料與 round 軸，從終端 joint g,g 計數算 survival。Heralded 另以終端回到各自 herald g,g／e,e 的比例作 survival，依各組有效 seed／round 聯合擬合。使用 d=4 的 error estimate，保留負值及 paired-seed bootstrap interval。熱 population、準備／讀出效果與模型假設均須納入判讀，物理 gate 表現需由實際量測確認。
 

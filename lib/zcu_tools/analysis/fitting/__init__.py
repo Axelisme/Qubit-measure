@@ -32,7 +32,10 @@ from .irb import (
     IRBAnalysis,
     IRBFitResult,
     IRBProjection,
+    RBAnalysis,
+    RBFitResult,
     analyze_irb,
+    analyze_reference_rb,
     project_arm_means,
 )
 from .multi_decay import fit_transition_rates

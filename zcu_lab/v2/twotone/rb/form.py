@@ -34,6 +34,7 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "seed": 42,
             "n_seeds": 20,
+            "target_gate": None,
             "reps": 1000,
             "rounds": 10,
         },

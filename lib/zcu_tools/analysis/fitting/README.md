@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-16，頻譜局部選峰與六半寬窗口
+**Last updated:** 2026-11-19，單 qubit reference RB 與 paired IRB
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -28,7 +28,12 @@ All three APIs use degrees; each result documents its axes, units and failure
 fields. Callers retain count reduction, slice selection, completeness policy,
 calibration correction signs and plots. No numerical fitter imports lab types.
 
-## Paired randomized benchmarking
+## Randomized benchmarking
+
+`irb.analyze_reference_rb` 接受 depths 與 `(round,seed,1,depth)` IQ。
+它先平均各 seed 的完整 rounds，再等權平均 seeds。`RBFitResult` 保存一條
+reference 的 IQ 投影與擬合曲線，`RBAnalysis` 回報 reference decay、error per
+Clifford 與 95% seed-bootstrap interval。摘要沒有 interleaved 欄位。
 
 `irb.analyze_irb` 接受 depths 與 `(round,seed,2,depth)` IQ，保留完整成對 round，
 先平均每個 seed 的 rounds，再以相同權重平均 seeds。它回傳 `IRBFitResult` 的共同投影、
@@ -36,7 +41,7 @@ calibration correction signs and plots. No numerical fitter imports lab types.
 負 error 與超出 [0,1] 的 fidelity／CI 原樣保留。主入口至少需要四個不同 depth、兩個
 成對 seed 與 100 次 bootstrap；少於 90% 成功 draws 時 raise `AnalysisFailed`。
 `irb.project_arm_means` 另回傳 `IRBProjection`，讓即時圖在資料未完整時使用同一個
-IQ 軸與 reference 下降方向，不呼叫主 fitter 或 bootstrap。
+IQ 軸與 reference 下降方向。投影接受一臂或兩臂，不呼叫主 fitter 或 bootstrap。
 
 `rb.seed_statistics` 接受 `(depth,seed,2,round)` survival／totals，回傳
 `RBSeedStatistics` 的 seed means／variances 與 equal-seed means／errors。

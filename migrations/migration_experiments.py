@@ -80,11 +80,9 @@ from zcu_lab.v2.twotone.ckp import core as twotone_ckp
 from zcu_lab.v2.twotone.dispersive import core as twotone_dispersive
 from zcu_lab.v2.twotone.fluxdep import core as twotone_fluxdep
 from zcu_lab.v2.twotone.freq import core as twotone_freq
-from zcu_lab.v2.twotone.irb import core as twotone_irb
 from zcu_lab.v2.twotone.power_dep import core as twotone_power_dep
 from zcu_lab.v2.twotone.rabi.amp_rabi import core as twotone_rabi_amp_rabi
 from zcu_lab.v2.twotone.rabi.len_rabi import core as twotone_rabi_len_rabi
-from zcu_lab.v2.twotone.rb import core as twotone_rb
 from zcu_lab.v2.twotone.reset.bath.freq import core as twotone_reset_bath_freq
 from zcu_lab.v2.twotone.reset.bath.length import core as twotone_reset_bath_length
 from zcu_lab.v2.twotone.reset.bath.phase import core as twotone_reset_bath_phase
@@ -253,11 +251,9 @@ MIGRATION_EXPERIMENTS = (
     _declaration(twotone_dispersive.DispersiveExp.AXES_SPEC),
     _declaration(twotone_fluxdep.FreqFluxExp.AXES_SPEC),
     _declaration(twotone_freq.FreqExp.AXES_SPEC),
-    _declaration(twotone_irb.IRB_Exp.AXES_SPEC),
     _declaration(twotone_power_dep.PowerExp.AXES_SPEC),
     _declaration(twotone_rabi_amp_rabi.AmpRabiExp.AXES_SPEC),
     _declaration(twotone_rabi_len_rabi.LenRabiExp.AXES_SPEC),
-    _declaration(twotone_rb.RB_Exp.AXES_SPEC),
     _declaration(twotone_reset_bath_freq.FreqGainExp.AXES_SPEC),
     _declaration(twotone_reset_bath_length.LengthExp.AXES_SPEC),
     _declaration(twotone_reset_bath_phase.PhaseExp.AXES_SPEC),

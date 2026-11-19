@@ -1,4 +1,4 @@
-"""Public paired-IQ decay recovery and whole-seed uncertainty contracts."""
+"""Public single- and paired-arm IQ decay and whole-seed uncertainty contracts."""
 
 from importlib import import_module
 
@@ -36,6 +36,31 @@ def test_recovers_two_decays_on_one_iq_axis_and_discards_incomplete_pairs() -> N
     assert fit.summary.gate_fidelity == pytest.approx(fidelity, abs=2e-7)
     assert fit.summary.fidelity_ci_low == pytest.approx(fidelity, abs=2e-7)
     assert fit.summary.fidelity_ci_high == pytest.approx(fidelity, abs=2e-7)
+
+
+def test_reference_decay_weights_complete_seeds_equally_and_bootstraps_epc() -> None:
+    depths = np.array([1, 4, 9, 16, 25, 40], dtype=np.int64)
+    slow = 0.4 * 0.98**depths + 0.3
+    fast = 0.4 * 0.94**depths + 0.3
+    signals = np.full((2, 2, 1, len(depths)), np.nan, dtype=np.complex128)
+    direction = 0.6 + 0.8j
+    signals[:, 0, 0] = slow * direction
+    signals[0, 1, 0] = fast * direction
+    signals[1, 1, 0, 0] = 100j  # Incomplete round must not distort the projection.
+
+    fit = owner.analyze_reference_rb(depths, signals, bootstrap_samples=100)
+
+    np.testing.assert_allclose(fit.mean_signals, [(slow + fast) / 2], atol=1e-14)
+    assert fit.fit_signals.shape == (1, len(depths))
+    assert 0.94 < fit.summary.p_reference < 0.98
+    assert fit.summary.reference_epc == pytest.approx((1 - fit.summary.p_reference) / 2)
+    # With two seeds, each homogeneous resample has 25% probability. The 95%
+    # interval reaches the per-seed EPCs; resampling rounds/depths would differ.
+    assert fit.summary.epc_ci_low == pytest.approx(0.01, abs=2e-7)
+    assert fit.summary.epc_ci_high == pytest.approx(0.03, abs=2e-7)
+    assert fit.summary.n_seeds == 2
+    assert fit.summary.n_complete_rounds == 3
+    assert fit.summary.bootstrap_successes == 100
 
 
 def test_seed_bootstrap_is_reproducible_and_retains_negative_error_ci() -> None:
@@ -87,6 +112,16 @@ def test_unidentifiable_or_incomplete_inputs_fail_explicitly(problem: str) -> No
         ValueError, match="Expected IQ shape|Need at least|no measurable contrast"
     ):
         owner.analyze_irb(depths, signals, bootstrap_samples=samples)
+
+
+def test_live_projection_preserves_a_single_reference_arm() -> None:
+    signals = np.full((2, 2, 1, 4), np.nan, dtype=np.complex128)
+    signals[0, 0, 0, :2] = [-3 - 4j, -1.8 - 2.4j]
+    signals[1, 1, 0, [0, 3]] = [-4.2 - 5.6j, -0.6 - 0.8j]
+
+    means = owner.project_arm_means(signals).mean_signals
+
+    np.testing.assert_allclose(means, [[6, 3, np.nan, 1]], atol=1e-14)
 
 
 def test_live_projection_uses_available_samples_one_direction_and_nan_slots() -> None:
