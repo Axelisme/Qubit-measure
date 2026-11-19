@@ -12,6 +12,7 @@ from ._dispatch import classify
 from ._parallel import Executor
 from ._planning import Geometry
 from ._schedule import Schedule
+from ._validation import owned
 from .engine import Cancelled
 from .kernel import Kernel, KernelContext, PrefixOpenCLQuote, SegmentTable
 from .secular import FluxWaveform
@@ -232,9 +233,9 @@ class PrefixResolver:
                 initial,
                 capture=capture,
             )
-            result = schedule.run(kernels, pool, chunks)
-            inputs[group] = result.densities[0]
-            paths[group] = result.paths
+            output, diagnostics = schedule.run(kernels, pool, chunks)
+            inputs[group] = owned(output[0], np.complex128, "prefix density")
+            paths[group] = diagnostics
         return replace(
             geometry, table=replace(table, prefix_inputs=inputs), prefix_paths=paths
         )

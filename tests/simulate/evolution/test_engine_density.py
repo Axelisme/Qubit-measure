@@ -8,8 +8,40 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
 
-from ._engine import batch, track
+from ._engine import RecordingKernel, batch, source, track
 from .contract.kernel_suite import synthetic_model
+
+
+@pytest.mark.parametrize("budget", [2e-6, 5e-7], ids=["within-budget", "over-budget"])
+def test_evolve_checks_readout_density_correction_against_budget(budget: float) -> None:
+    expected = np.array([[0.5, 0.5j, 0], [-0.5j, 0.5, 0], [0, 0, 0]])
+    invalid = expected.copy()
+    invalid[0, 1] += 1e-6j
+    invalid[1, 0] -= 1e-6j
+
+    class EndpointKernel(RecordingKernel):
+        def apply(self, prepared, key_index, table, rows, states, context):
+            states[:] = invalid
+            return np.zeros(len(rows), dtype=np.bool_)
+
+    timeline = replace(batch(1), points=np.array([17]))
+    with (
+        closing(source()) as src,
+        closing(Engine(1, kernels=(EndpointKernel("t4"),))) as engine,
+    ):
+        if budget < 1e-6:
+            with pytest.raises(
+                RuntimeError, match=r"point 17.*density.*exceeds budget"
+            ):
+                engine.evolve(src, (timeline,), budget=budget)
+            return
+
+        result = engine.evolve(src, (timeline,), budget=budget)
+
+    # Building a continuation runs the unchanged density input validator.
+    replace(timeline, start_ns=timeline.end_ns, initial_densities=result.densities)
+    np.testing.assert_allclose(result.densities[0], expected, rtol=0, atol=1e-14)
+    assert np.max(np.abs(result.densities[0] - invalid)) == pytest.approx(1e-6)
 
 
 @pytest.mark.parametrize("coherent", [False, True], ids=["mixed", "coherent"])

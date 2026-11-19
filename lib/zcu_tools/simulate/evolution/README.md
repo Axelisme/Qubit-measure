@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-19, full-drive gate summary
+**Last updated:** 2026-11-19, budgeted readout density projection
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -94,7 +94,8 @@ point IDs. `merge_path_diagnostics(parts)` unions these memberships, sums work
 and CPU, and takes the maximum trace error. Reuse diagnostics participate as
 returned. These diagnostics remain author-only, separate from acquisition data.
 
-`EvolutionResult` contains densities at readout start in the DC eigenbasis.
+`Engine.evolve` returns `EvolutionResult` densities at readout start in the DC
+energy eigenbasis. Every returned density can serve as a continuation input.
 The environment explicitly converts them to populations, then calls ADC's
 normalization and sampling tools. Evolution neither imports ADC nor produces
 I/Q. ADC owns its probability tolerance and readout sums; see the
@@ -1127,6 +1128,10 @@ error. At the default budget the uncapped DP5(4) tolerances are
 `rtol=1e-5`, `atol=1e-7`. Lab-frame chains retain their bare-phase cap
 before the division. DP5(4) uses a fifth-order controller exponent (`-1/5`).
 Both CPU tableaux share the adaptive loop, frames, workspace and knot stops.
+DP5(4) can put a nearly pure state outside the positivity tolerance. At
+readout, CPU and OpenCL use the same [budgeted density projection](#accuracy-failures-and-lifecycle)
+as every other kernel. Tableau selection and the continuation input tolerance
+are unchanged.
 
 The [CPU matrix](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
 checks a 100 ns sampled row, a synthetic d=24 two-tone row with 960 knots per
@@ -1418,19 +1423,30 @@ samples retain linear interpolation, including positive-duration event bridges.
 certified global error bound. Guards combine analytic bounds and calibrated
 approximations. In particular, retained-sideband Floquet admission does not
 certify aliasing beyond the Fourier grid, full finite-Fourier contractivity,
-global ODE error or directed rounding of norms and eigensystems. Evolution does
-not clip or renormalize density.
+global ODE error or directed rounding of norms and eigensystems.
 
-A post-apply exceedance keeps the uncorrected approximation. It does not trigger
-a retry or reclassification. `PathDiagnostics.exceeded_by_kernel` counts those
-segments by family, and one `RuntimeWarning` reports the evolve call's total.
+After converting to the DC basis, evolution passes through densities that are
+Hermitian within `1e-10`, have trace one within `1e-8` and have no eigenvalue
+below `-1e-8`. For an invalid finite density, it takes the Hermitian part, clips
+negative eigenvalues to zero and normalizes the remaining weights to sum to one.
+The largest absolute change to any complex entry must be at most the supplied
+`budget` for that evolve call (default `1e-3`). This uses the same max-entry
+metric as full-density reference comparisons (ADR-0078), but bounds the repair,
+not the error against a reference solution. If the budget is exceeded or no
+positive weight can be normalized, `evolve` raises `RuntimeError` naming the point.
+It does not retry or reclassify the row. Projection happens only on returned
+densities, not at internal segment or prefix boundaries.
+
+A kernel's post-apply accuracy exceedance does not trigger a retry or
+reclassification. `PathDiagnostics.exceeded_by_kernel` counts those segments
+by family, and one `RuntimeWarning` reports the evolve call's total.
 `PathDiagnostics.warn_exceeded()` owns the aggregation and warning text, so callers
 reusing a result can report the same exceedances without changing it.
 All routing diagnostics use family names, not builder or frame variants. Shared
 prefix counts and exceedances scale by the adopting timelines.
-`max_trace_error` reports the maximum absolute complex trace-minus-one over final
-readout densities, or zero for empty work. It never rejects output or applies
-ADC's tolerance.
+`max_trace_error` reports the maximum absolute complex trace-minus-one over
+readout densities before projection, or zero for empty work. The diagnostic
+itself never rejects output or applies ADC's tolerance.
 
 Invalid inputs fail at construction or entry. Missing required registry entries
 raise with segment and family context. An exhausted candidate round raises
@@ -1506,7 +1522,7 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v13`. Engine captures and paired
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v14`. Engine captures and paired
 benchmark reports record the numeric version. Evolution does not persist
 densities or offline tables across processes or Engine lifetimes.
 
