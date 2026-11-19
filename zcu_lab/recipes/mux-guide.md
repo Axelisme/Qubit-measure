@@ -511,23 +511,25 @@ Post rows contain `ge_radius`. Inspect the probe-off/on traces in `measurement`,
 Primary `fit_i` plots and Post `post_i` diagnostics. Check shot count and pulse
 selections in the fixed Run conditions.
 
-The recipe fits Primary and Post before asking about Apply. It then saves raw shots and completed artifacts.
-Each phase proposes one complete readout module replacement. Primary updates
+The recipe fits Primary and asks whether to apply its candidate before running Post.
+It then fits Post, asks separately about that candidate and saves raw shots and completed artifacts.
+You can skip Primary and still accept Post. The report lists confirmed writes in
+`primary_writeback_applied` and `post_writeback_applied`.
+Each stage proposes one complete readout module replacement. Primary updates
 successful tones with center-only circle classifiers; Post includes radius and
 the 3×3 confusion matrix. Failed tones keep their library classifier. One Apply
 batch accepts Primary before Post. Separate Apply calls use the last complete
 replacement; Primary after Post removes radius and matrix. Fidelity and sigma
 remain analysis diagnostics, not point values. This is not a four-state joint
 assignment calibration.
-Review cluster separation and both analysis stages before
-[Apply](#save-review-and-apply).
+Review the available diagnostics before each [Apply](#save-review-and-apply).
 [The GE guide](../v2/mux/singleshot_ge/guide.md) explains the diagnostics.
 
 ## Save, review and Apply
 
 After Run, each recipe analyzes Primary and asks for a writeback decision.
-GE also analyzes Post before asking. On acceptance it applies the selected
-captured items. A single synchronous Save then writes raw data and all completed
+On acceptance it applies the selected captured items. GE then analyzes Post
+and asks for a second decision. A single synchronous Save writes raw data and all completed
 artifacts before returning. The Run's `finally` also saves available output if
 analysis or review raises. Analyze does not save automatically.
 Inspect each output's save status and error in `runs`. Recipe completion alone does not
@@ -544,9 +546,10 @@ acquired rows do not produce candidates.
 The pending question includes its request id and captured candidates. Answer
 with that request id, `accepted: true` and the selected unchanged `items`, or
 with `accepted: false` and an empty item list. The host rejects stale request
-ids and changed, unknown or duplicate candidates. Answering alone does not write.
-The recipe explicitly applies accepted items, Primary then Post. Analysis,
-preview and waiting for an answer do not write calibrations.
+IDs and changed, unknown or duplicate candidates. If the selection is invalid,
+correct it and answer again with the same request ID. Answering alone does not write.
+The recipe explicitly applies each stage's accepted items. Analysis, preview and
+waiting for an answer do not write calibrations.
 
 `cancel(execution=..., scope="run")` stops only acquisition and retains partial
 data for subsequent analysis and Save. With no Run in progress it is a no-op.

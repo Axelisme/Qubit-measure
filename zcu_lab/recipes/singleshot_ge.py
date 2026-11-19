@@ -81,6 +81,12 @@ class SingleshotGEReport(RecipeReport):
     confusion: list[list[float | None]] = Field(
         description="Post-analysis confusion matrix in state order; nonfinite entries are null."
     )
+    primary_writeback_applied: bool = Field(
+        default=False, description="Primary receipt confirmed one or more writes."
+    )
+    post_writeback_applied: bool = Field(
+        default=False, description="Post receipt confirmed one or more writes."
+    )
 
 
 @recipe(
@@ -95,8 +101,8 @@ async def singleshot_ge(
     Apply optional reset/init pulses, then acquire shots without and with the
     calibrated pi probe before readout. Primary estimates IQ rotation,
     threshold, cloud width and discrimination fidelity; Post adds classification
-    radius and confusion diagnostics. Ask before applying their calibration
-    proposals in Primary-to-Post order, then save raw shots and both analyses.
+    radius and confusion diagnostics. Ask about each stage's calibration
+    after its analysis, then save raw shots and both analyses.
 
     No n → expts input: shots sets the probe-off/on cloud size.
     Analysis controls: initial_state, backend, logscale, align_t1, length_ratio. Omission retains each analysis value; null is passed to its owner.
@@ -139,32 +145,42 @@ async def singleshot_ge(
                 writeback_applied=False,
                 analysis_failure=primary.reason,
             )
-        analysis = await tab.analyze("post", result=GEPostSummary)
-        if analysis.result is None:
+        primary_writeback_applied = False
+        primary_answer = await tab.ask_writeback(stage="primary")
+        if primary_answer.accepted:
+            receipt = tab.accept_writeback(primary_answer.items)
+            receipt.raise_for_error()
+            primary_writeback_applied = bool(receipt.items)
+
+        post = await tab.analyze("post", result=GEPostSummary)
+        if post.result is None:
             return SingleshotGEReport(
                 fidelity=report_number(primary.result.fidelity),
                 theta=report_number(primary.result.theta),
                 threshold=report_number(primary.result.threshold),
                 ge_radius=None,
                 confusion=[],
-                writeback_applied=False,
-                analysis_failure=analysis.reason,
+                writeback_applied=primary_writeback_applied,
+                primary_writeback_applied=primary_writeback_applied,
+                analysis_failure=post.reason,
             )
 
-        decision = await tab.ask_writeback()
-        writeback_applied = False
-        if decision.accepted:
-            receipt = tab.accept_writeback(decision.items)
+        post_writeback_applied = False
+        post_answer = await tab.ask_writeback(stage="post")
+        if post_answer.accepted:
+            receipt = tab.accept_writeback(post_answer.items)
             receipt.raise_for_error()
-            writeback_applied = bool(receipt.items)
+            post_writeback_applied = bool(receipt.items)
 
         return SingleshotGEReport(
             fidelity=report_number(primary.result.fidelity),
             theta=report_number(primary.result.theta),
             threshold=report_number(primary.result.threshold),
-            ge_radius=report_number(analysis.result.confusion.radius),
-            confusion=analysis.result.confusion.matrix,
-            writeback_applied=writeback_applied,
+            ge_radius=report_number(post.result.confusion.radius),
+            confusion=post.result.confusion.matrix,
+            writeback_applied=primary_writeback_applied or post_writeback_applied,
+            primary_writeback_applied=primary_writeback_applied,
+            post_writeback_applied=post_writeback_applied,
         )
     finally:
         tab.save()

@@ -10,6 +10,7 @@ from zcu_tools.gui.app.measure.writeback import ParameterWriteback
 from zcu_tools.gui.app.measure.writeback.submissions import WritebackCompleted
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.mcp.measure.recipe_api import (
+    InvalidWritebackSelectionError,
     RecipeSession,
     WritebackReceipt,
     recipe,
@@ -29,6 +30,182 @@ from ._script_recipe_support import (
     start,
 )
 from ._support import make_client
+
+
+class TwoStageWritebackGui(SyntheticGui):
+    """Offer a candidate at the same target in two separate analysis drafts."""
+
+    def respond(self, method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.get_post_analyze_result":
+            return {"summary": {"estimate": 4.5}, "invalid": []}
+        return super().respond(method, params)
+
+
+def test_ask_writeback_can_select_either_analyzed_stage(tmp_path: Path) -> None:
+    @recipe("synthetic", "Review Post and Primary separately")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        await tab.analyze("post", result=Fit)
+        await tab.ask_writeback(stage="post")
+        await tab.ask_writeback(stage="primary")
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, TwoStageWritebackGui().respond, recipes=(synthetic,))
+    try:
+        reply = client.call("synthetic", {"count": 9})
+        key = reply.data["execution"]
+        for stage in ("post", "primary"):
+            assert reply.data["status"] == "waiting", reply.data
+            pending = reply.data["pending_question"]
+            items = pending["question"]["proposal"]["items"]
+            assert [(item["stage"], item["name"]) for item in items] == [
+                (stage, "Q1.freq")
+            ]
+            reply = client.call(
+                "answer",
+                {
+                    "execution": key,
+                    "request_id": pending["request_id"],
+                    "answer": {"accepted": False, "items": []},
+                },
+            )
+        assert reply.data["status"] == "completed"
+    finally:
+        client.context.session.close()
+
+
+def test_accept_writeback_rejects_candidates_from_an_earlier_question(
+    tmp_path: Path,
+) -> None:
+    @recipe("synthetic", "Use the latest proposal only")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        await tab.analyze("post", result=Fit)
+        earlier = await tab.ask_writeback(stage="post")
+        await tab.ask_writeback(stage="primary")
+        tab.accept_writeback(earlier.items)
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, TwoStageWritebackGui().respond, recipes=(synthetic,))
+    try:
+        pending_post = client.call("synthetic", {"count": 9}).data
+        key = pending_post["execution"]
+        post = pending_post["pending_question"]
+        pending_primary = client.call(
+            "answer",
+            {
+                "execution": key,
+                "request_id": post["request_id"],
+                "answer": {
+                    "accepted": True,
+                    "items": post["question"]["proposal"]["items"],
+                },
+            },
+        ).data
+        reply = client.call(
+            "answer",
+            {
+                "execution": key,
+                "request_id": pending_primary["pending_question"]["request_id"],
+                "answer": {"accepted": False, "items": []},
+            },
+        )
+        assert reply.data["status"] == "failed"
+        detail = client.call("status", {"execution": key, "detail": "full"})
+        assert detail["error"]["type"] == "InvalidWritebackSelectionError"
+        assert "latest proposal" in detail["error"]["message"]
+        assert "Ask again for stage 'post'" in detail["error"]["message"]
+        assert not any(
+            method == "tab.writeback_begin" for method, _ in client.transport.sent
+        )
+    finally:
+        client.context.session.close()
+
+
+def test_ask_writeback_fails_before_preview_for_unanalyzed_stage(
+    tmp_path: Path,
+) -> None:
+    @recipe("synthetic", "Require a completed Post analysis")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        await tab.ask_writeback(stage="post")
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
+    try:
+        reply = client.call("synthetic", {"count": 9})
+        assert reply.data["status"] == "failed"
+        detail = client.call(
+            "status", {"execution": reply.data["execution"], "detail": "full"}
+        )
+        assert detail["error"]["type"] == "WritebackStageNotAnalyzedError"
+        assert "post" in detail["error"]["message"]
+        assert detail["pending_question"] is None
+        assert not any(
+            method == "tab.writeback_preview" for method, _ in client.transport.sent
+        )
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize(
+    ("problem", "message"),
+    [
+        ("duplicate", "Duplicate writeback candidate"),
+        ("rejected", "Rejected writeback cannot select items"),
+        ("unknown", "Unknown or modified writeback candidate"),
+    ],
+)
+def test_invalid_writeback_selection_can_be_corrected_on_same_request(
+    tmp_path: Path, problem: str, message: str
+) -> None:
+    @recipe("synthetic", "Review Primary before continuing")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        await tab.ask_writeback()
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
+    try:
+        waiting = client.call("synthetic", {"count": 9}).data
+        pending = waiting["pending_question"]
+        (item,) = pending["question"]["proposal"]["items"]
+        items = (
+            [item, item]
+            if problem == "duplicate"
+            else [{**item, "name": "Q2.freq"}]
+            if problem == "unknown"
+            else [item]
+        )
+        request = {
+            "execution": waiting["execution"],
+            "request_id": pending["request_id"],
+        }
+        rejected = client.call(
+            "answer",
+            {**request, "answer": {"accepted": problem != "rejected", "items": items}},
+        )
+        assert rejected.is_error is True
+        assert rejected.data == {
+            "accepted": False,
+            "reason": "invalid_input",
+            "message": message,
+            "pending_request_id": pending["request_id"],
+        }
+        corrected = client.call(
+            "answer", {**request, "answer": {"accepted": True, "items": [item]}}
+        )
+        assert corrected.data["status"] == "completed"
+    finally:
+        client.context.session.close()
 
 
 def test_recipe_timeout_retains_owner_submission_for_receipt_query(
@@ -217,6 +394,56 @@ def test_owner_submission_receipt_retains_prefix_and_rejects_duplicate_commit(
     with pytest.raises(RemoteError, match="already submitted"):
         gui.respond("tab.writeback_accept", params)
     assert gui.read_context().value("general.ext.first") == 20.0
+
+
+def test_accept_same_target_across_stages_writes_primary_before_post(
+    tmp_path: Path, writeback_gui: Callable[[bool, bool], WritebackGui]
+) -> None:
+    gui = writeback_gui(False, False)
+    gui.owner.submit(
+        gui.writeback_control.set_writeback_item_for_pane,
+        "tab-1",
+        "post_analysis",
+        "param-1",
+        target_name="general.ext.first",
+    ).result()
+
+    @recipe("synthetic", "Write two stages at the same target")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        await tab.analyze("post", result=Fit)
+        decision = await tab.ask_writeback()
+        tab.accept_writeback(decision.items).raise_for_error()
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
+    try:
+        waiting = client.call("synthetic", {"count": 9}).data
+        pending = waiting["pending_question"]
+        items = pending["question"]["proposal"]["items"]
+        assert [(item["stage"], item["name"]) for item in items] == [
+            ("primary", "general.ext.first"),
+            ("post", "general.ext.first"),
+        ]
+        accepted = client.call(
+            "answer",
+            {
+                "execution": waiting["execution"],
+                "request_id": pending["request_id"],
+                "answer": {"accepted": True, "items": items[::-1]},
+            },
+        )
+        assert accepted.data["status"] == "completed"
+        detail = client.call(
+            "status", {"execution": waiting["execution"], "detail": "full"}
+        )
+        (receipt,) = detail["details"][0]["writeback_receipts"]
+        assert [item["stage"] for item in receipt["items"]] == ["primary", "post"]
+        assert gui.read_context().value("general.ext.first") == 30.0
+    finally:
+        client.context.session.close()
 
 
 @pytest.mark.parametrize("edit", ["target", "value", "module", "replacement"])
@@ -458,7 +685,6 @@ def test_mutated_nested_proposal_is_rejected_without_owner_write(
     tmp_path: Path,
 ) -> None:
     gui = MappingWritebackGui()
-    rejected: list[str] = []
 
     @recipe("synthetic", "Reject author edits to captured module values")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
@@ -467,10 +693,11 @@ def test_mutated_nested_proposal_is_rejected_without_owner_write(
         await tab.analyze("primary", result=Fit)
         proposal = await tab.ask_writeback()
         change_gain(proposal.items[0].value, 0.9)
-        try:
+        with pytest.raises(
+            InvalidWritebackSelectionError,
+            match="Unknown or modified writeback candidate",
+        ):
             tab.accept_writeback(proposal.items)
-        except ValueError as error:
-            rejected.append(str(error))
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
@@ -478,7 +705,6 @@ def test_mutated_nested_proposal_is_rejected_without_owner_write(
         execution = start(client, "synthetic")
         answer_writeback(execution)
         assert gui.writes == 0
-        assert rejected == ["Unknown, duplicate or modified writeback candidate"]
         snapshot = execution.snapshot()
         assert snapshot.status == "completed"
         proposal = snapshot.details[0].writeback

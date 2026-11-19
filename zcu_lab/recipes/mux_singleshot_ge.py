@@ -95,6 +95,12 @@ class MuxSingleshotGEReport(RecipeReport):
     post_tones: list[MuxGEPostToneReport] = Field(
         description="Post radius estimates or failures in native order."
     )
+    primary_writeback_applied: bool = Field(
+        default=False, description="Primary receipt confirmed one or more writes."
+    )
+    post_writeback_applied: bool = Field(
+        default=False, description="Post receipt confirmed one or more writes."
+    )
 
 
 @recipe(
@@ -111,7 +117,8 @@ async def mux_singleshot_ge(
     readout identities remain required for every tone.
     Set the IQ-cloud sample count with a shots override; there is no sweep n.
     Indices are original tone positions.
-    Fit Primary GE separation and Post radius, then ask before writeback.
+    Ask about Primary writeback after fitting GE separation. Then fit Post
+    radius and ask about its writeback separately.
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.
     """
@@ -144,28 +151,37 @@ async def mux_singleshot_ge(
                 analysis_failure=primary.reason,
             )
 
+        primary_writeback_applied = False
+        primary_answer = await tab.ask_writeback(stage="primary")
+        if primary_answer.accepted:
+            receipt = tab.accept_writeback(primary_answer.items)
+            receipt.raise_for_error()
+            primary_writeback_applied = bool(receipt.items)
+
         # Post uses the adopted Primary fit for radius and confusion diagnostics.
         post = await tab.analyze("post", result=MuxGEPostSummary)
         if post.result is None:
             return MuxSingleshotGEReport(
                 tones=_primary_tone_reports(primary.result),
                 post_tones=[],
-                writeback_applied=False,
+                writeback_applied=primary_writeback_applied,
+                primary_writeback_applied=primary_writeback_applied,
                 analysis_failure=post.reason,
             )
 
-        # Asking does not write; only an accepted answer applies calibration items.
-        answer = await tab.ask_writeback()
-        writeback_applied = False
-        if answer.accepted:
-            receipt = tab.accept_writeback(answer.items)
+        post_writeback_applied = False
+        post_answer = await tab.ask_writeback(stage="post")
+        if post_answer.accepted:
+            receipt = tab.accept_writeback(post_answer.items)
             receipt.raise_for_error()
-            writeback_applied = bool(receipt.items)
+            post_writeback_applied = bool(receipt.items)
 
         return MuxSingleshotGEReport(
             tones=_primary_tone_reports(primary.result),
             post_tones=_post_tone_reports(post.result),
-            writeback_applied=writeback_applied,
+            writeback_applied=primary_writeback_applied or post_writeback_applied,
+            primary_writeback_applied=primary_writeback_applied,
+            post_writeback_applied=post_writeback_applied,
         )
     finally:
         tab.save()

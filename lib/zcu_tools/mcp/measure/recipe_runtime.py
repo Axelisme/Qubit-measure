@@ -39,6 +39,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     FormField,
     FormSource,
     FormValue,
+    InvalidWritebackSelectionError,
     RecipeRun,
     RecipeTab,
     RunResult,
@@ -47,6 +48,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     WritebackItem,
     WritebackProposal,
     WritebackReceipt,
+    WritebackStageNotAnalyzedError,
 )
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
@@ -668,12 +670,27 @@ class RecipeRuntime:
             encoded = TypeAdapter(str).validate_python(reply["png_b64"])
             self._images.append(validated_png(base64.b64decode(encoded, validate=True)))
 
-    def writeback_proposal(self, tab: str) -> WritebackProposal:
-        """Capture candidates and preview-time location, without authorizing Apply."""
+    def writeback_proposal(
+        self, tab: str, *, stage: Literal["primary", "post"] | None = None
+    ) -> WritebackProposal:
+        """Capture candidates for one completed stage or all if stage is None.
+
+        Raise WritebackStageNotAnalyzedError for an explicit unfinished stage.
+        A preview error propagates. Capturing does not write or authorize Apply.
+        """
         with self._failure_phase("writeback_read"):
+            if stage is not None and (tab, stage) not in self._analysis_ops:
+                raise WritebackStageNotAnalyzedError(
+                    f"Complete {stage} analysis before requesting its writeback candidates"
+                )
             retained: list[tuple[WritebackItem, str]] = []
-            for stage, pane in (("primary", "analysis"), ("post", "post_analysis")):
-                op = self._analysis_ops.get((tab, stage))
+            for candidate_stage, pane in (
+                ("primary", "analysis"),
+                ("post", "post_analysis"),
+            ):
+                if stage is not None and candidate_stage != stage:
+                    continue
+                op = self._analysis_ops.get((tab, candidate_stage))
                 if op is None:
                     continue
                 preview = _Preview.model_validate(
@@ -693,7 +710,7 @@ class RecipeRuntime:
                         ),
                         candidate.proposed,
                         None,
-                        "primary" if stage == "primary" else "post",
+                        "primary" if candidate_stage == "primary" else "post",
                     )
                     retained.append((item, candidate.id))
             # Author-visible YamlValue mappings must not edit retained acceptance evidence.
@@ -709,17 +726,24 @@ class RecipeRuntime:
     def accept_writeback(
         self, tab: str, items: Sequence[WritebackItem]
     ) -> WritebackReceipt:
-        """Select captured IDs, then write current owner draft values/destinations.
+        """Write IDs from the latest tab proposal using current owner drafts.
 
-        Receipt items are the original captured candidates for confirmed IDs,
-        not snapshots of actual written values. Preserve confirmed stage prefixes.
+        InvalidWritebackSelectionError rejects duplicate or unmatched items
+        before any write. Receipt items are the original captured candidates
+        for confirmed IDs, not written-value snapshots. Preserve confirmed prefixes.
         """
         captured = self._candidates.get(tab, ())
         chosen = tuple(items)
-        if len({item.name for item in chosen}) != len(chosen) or any(
-            item not in tuple(item for item, _ in captured) for item in chosen
-        ):
-            raise ValueError("Unknown, duplicate or modified writeback candidate")
+        if len({(item.stage, item.name) for item in chosen}) != len(chosen):
+            raise InvalidWritebackSelectionError("Duplicate writeback candidate")
+        available = tuple(item for item, _ in captured)
+        for item in chosen:
+            if item not in available:
+                raise InvalidWritebackSelectionError(
+                    f"Unknown or modified writeback candidate from {item.stage!r}; "
+                    "accept_writeback uses the latest proposal for the tab. "
+                    f"Ask again for stage {item.stage!r} and use that question's items."
+                )
         stages: list[dict[str, object]] = []
         for stage, pane in (("primary", "analysis"), ("post", "post_analysis")):
             ids = [

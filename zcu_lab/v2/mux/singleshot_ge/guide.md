@@ -160,6 +160,12 @@ before Post. Separate Applies use the last complete replacement: Post then
 Primary removes radius/matrix, and radius consumers require GE Post again.
 Review cluster separation, quality, confusion diagnostics and destination.
 
+In MCP, `mux_singleshot_ge` analyzes Primary, asks about its candidate and
+applies it if selected and accepted. It then analyzes Post and asks about
+that candidate separately. You may skip Primary and still accept Post.
+The report lists confirmed writes in `primary_writeback_applied` and
+`post_writeback_applied`.
+
 Changing readout settings does not clear or automatically invalidate stored tone classifiers.
 Re-run mux GE and Post-Analysis for the affected tones, then Apply their new calibration before using classification.
 The proposal's settings comparison protects the new writeback, not the validity of existing classifiers.

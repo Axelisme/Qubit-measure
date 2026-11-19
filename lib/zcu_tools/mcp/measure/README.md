@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-11-10，writeback stage 選擇
+**Last updated:** 2026-11-19，recipe 分階段寫回問答
 
 **讀者：** agent、framework-dev。查閱量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -246,10 +246,21 @@ Analyze 用 TypeAdapter 將 owner summary 驗證為 T，不補欄位或修資料
 `interactive=True` 明確開啟互動交接，公開 `PendingAnalysis(tab, stage, op)`。
 Status／wait 提前回 `status="interactive"`，GUI 完成同一 operation 後原 await 繼續，不建第二個 runner。
 
-`ask_writeback()` 捕捉 completed stages 的候選，再等待經 evidence 驗證的 `WritebackAnswer`。
-回答不寫入。
+`ask_writeback(stage="primary")` 或 `ask_writeback(stage="post")` 只詢問指定階段目前的候選。
+省略 stage 或傳 `None` 會詢問所有已分析階段的候選。
+指定階段尚未完成分析時，helper 在讀取候選前向 recipe 作者拋出 `WritebackStageNotAnalyzedError`。
+Recipe 可按任意順序多次詢問；這不改變通用 `ask`／`answer` 的契約。
+單 qubit 與 mux GE recipes 都在 Primary 分析後先詢問並處理該階段的寫回，再分析 Post 並詢問 Post 的寫回。
+
+回答不寫入。同名的 Primary 與 Post 候選是兩筆；同一 `(stage, name)` 不能重複選。
+拒絕卻選了候選、重複選擇或候選不存在／被修改時，helper 拋出 `InvalidWritebackSelectionError`。
+MCP `answer` 回 `reason="invalid_input"`、`message` 與原 `pending_request_id`，caller 可用同一 request ID 重答。
+這兩種錯誤由 helper 依 ADR-0068 的 producer 分類規則宣告在 MCP，因 C13 禁止 MCP import `gui.expected_error`。
+
 只有 `tab.accept_writeback(decision.items)` 寫入選定 IDs 對應的 owner 當下 draft 值與目的地。
-Unknown、重複或經作者修改的 captured 項目在第一筆寫入前拒絕。
+每次詢問都替換該 tab 的 proposal。作者只可接受最新 proposal 的候選。
+不在最新 proposal、重複或經作者修改的候選會在第一筆寫入前拋出 `InvalidWritebackSelectionError`。
+要接受已不在最新 proposal 的候選，先重新詢問其 stage。
 Recipe 將選定 IDs 一次交給 `tab.writeback_accept`，不帶 `expected_revision`，preview 也不回 revision。
 Owner 在同一提交核對 Primary／Post 全部選定 IDs。問答期間的 draft 編輯或替換不觸發 stale 拒絕，也不還原舊 proposal。
 這沿用 GUI／MCP 的所有權模型，見 ADR-0075 的 2026-10-23 使用者裁定。
