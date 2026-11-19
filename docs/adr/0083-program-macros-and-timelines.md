@@ -100,6 +100,12 @@ Schedule 與 scan step 的 `run_acquire`、`run_acquire_summed`、`run_acquire_d
 Builder 產生的 program 與手寫 program 使用相同入口；program 自身的 `acquire*` 只取數並回傳。
 序列組裝不需知道這些執行政策，作者也不必為手寫 program 另做 retry 與停止邏輯。
 
+逐 shot 遮罩的來源註冊在 program 上，由 program 的取數層（`ImproveAcquireMixin`）持有，每完成一輪由 program 自己的 `acquire`／`acquire_summed` 呼叫。
+作者在 builder 呼叫 `TimelineBuilder.register_shot_mask_source(consumed_reads, source)` 時，builder 只記錄，`build()` 產生的 program 在 `_initialize` 依記錄順序轉交 program 的同名方法；手寫 program 直接呼叫該方法。
+Herald reset 不經 builder 註冊。它在 lowering 時留下 herald 讀取的標記；`TimelineProgramV2` 組裝完 body 後從 readout 觀察路徑解析每次 herald 的實體讀取索引，為每次 herald 註冊一個來源。
+Schedule 與 scan step 不呼叫來源，也不套用遮罩。`run_acquire_decimated` 與帶 `threshold` 的 `run_acquire` 收到帶來源的 program 時報錯，其他入口照常把 program 交給取數。
+遮罩與下游的契約見 [[0074]] 的〈Herald reset 與逐 shot 遮罩〉與 [program README](../../lib/zcu_tools/program/README.md#registered-shot-masks)；遮罩屬於取數層、不屬於 module 的使用者裁決也記在 [[0074]]。
+
 使用者於 2026-10-30 提出：「我認為builder也許該專注於build program，能與sched解偶就解偶，讓acquire由sched提供方法而不是builder」。
 確認職責切分時，使用者補充：「採用，除此之外，builder應該不用with寫法，他沒有要管理生命周期的需求吧？program可以顯式呼叫構建，」。
 同日，對 module 以物件身分宣告、資源由各家族共用的方案，使用者回答：「採用建議」。
