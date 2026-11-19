@@ -5,7 +5,13 @@ from typing import Any
 
 from qick.asm_v2 import QickProgramV2
 
-from .compiled_stream import CompiledStream
+from .compiled_stream import (
+    CONTROL_JUMP,
+    CONTROL_LABEL,
+    SOURCE_END,
+    SOURCE_START,
+    CompiledStream,
+)
 from .instructions import MetaInst
 from .linker import IRLinker
 from .pipeline import make_default_pipeline
@@ -97,6 +103,7 @@ class IRCompileMixin(QickProgramV2):
         dmem_base = len(getattr(self, "_dmem_buffer", []))
 
         pipeline = make_default_pipeline(pmem_capacity=self.tproccfg["pmem_size"])
+        # Source scopes and author transfers annotate the snapshot only.
         # QICK owns native sweep increments/resets. These artifact annotations
         # must not ask IRParser to discard and rebuild that control shell.
         optimizer_insts = [
@@ -105,7 +112,7 @@ class IRCompileMixin(QickProgramV2):
             if not (
                 isinstance(inst, MetaInst)
                 and (
-                    inst.type in {"SOURCE_START", "SOURCE_END"}
+                    inst.type in {SOURCE_START, SOURCE_END, CONTROL_JUMP, CONTROL_LABEL}
                     or (
                         inst.type
                         in {

@@ -13,7 +13,12 @@ from ..ir.io_instructions import (
 )
 from ..ir.operands import AluExpr, AluOp, Immediate, MemAddr, Register, SrcKeyword
 from ._compiled_state import Machine
-from ._compiled_stream import DecodedInstruction, NativeLoop, StructuredBranch
+from ._compiled_stream import (
+    DecodedInstruction,
+    NativeLoop,
+    StructuredBranch,
+    forward_segments,
+)
 
 
 def _register_effects(inst: BaseInst) -> tuple[set[str], set[str]]:
@@ -40,6 +45,21 @@ def _register_effects(inst: BaseInst) -> tuple[set[str], set[str]]:
 
 
 type _AddressValue = int | str | tuple[int, int, str]
+type _Path = tuple[set[str], dict[str, _AddressValue]]
+"""Definitely defined names, then symbolic register values for address analysis."""
+
+
+def _join_paths(paths: list[_Path], location: str) -> _Path:
+    written, candidates = zip(*paths, strict=True)
+    values = {}
+    for name in {name for candidate in candidates for name in candidate}:
+        first = candidates[0].get(name, "?")
+        values[name] = (
+            first
+            if all(path.get(name, "?") == first for path in candidates)
+            else f"?{name}@{location}"
+        )
+    return set.intersection(*written), values
 
 
 def _address_value(
@@ -184,20 +204,13 @@ class _LiveInAnalysis:
     ) -> set[str]:
         if branch.compare not in defined:
             self.inputs.setdefault(branch.compare, self.records[branch.start])
-        paths = []
-        candidates = []
-        for a, b in branch.cases:
-            selected = values.copy()
-            paths.append(self._walk(a + 1, b, defined.copy(), selected))
-            candidates.append(selected)
-        for name in {name for candidate in candidates for name in candidate}:
-            first = candidates[0].get(name, "?")
-            values[name] = (
-                first
-                if all(path.get(name, "?") == first for path in candidates)
-                else f"?{name}@branch-{branch.start}"
-            )
-        return defined | set.intersection(*paths)
+        paths = [
+            self._segment(a + 1, b, (defined.copy(), values.copy()))
+            for a, b in branch.cases
+        ]
+        joined, merged_values = _join_paths(paths, f"branch-{branch.start}")
+        values.update(merged_values)
+        return joined
 
     def _loop(
         self, loop: NativeLoop, defined: set[str], values: dict[str, _AddressValue]
@@ -258,8 +271,31 @@ class _LiveInAnalysis:
                 index += 1
         return defined
 
+    def _segment(self, first: int, last: int, path: _Path) -> _Path:
+        defined, values = path
+        return self._walk(first, last, defined, values), values
+
+    def _walk_forward(self, bounds: tuple[int, int]) -> None:
+        live: _Path | None = (set(), self.constants.copy())
+        incoming: dict[int, list[_Path]] = {}
+        for segment in forward_segments(self.records, bounds, incoming):
+            if live is not None:
+                live = self._segment(segment.first, segment.stop, live)
+            if (index := segment.resume) is not None:
+                paths = incoming.pop(index)
+                if live is not None:
+                    paths.append(live)
+                live = _join_paths(paths, f"label-{index}")
+            if (jump := segment.jump) is not None and live is not None:
+                defined, values = live
+                incoming.setdefault(jump.target, []).append(
+                    (defined.copy(), values.copy())
+                )
+                if jump.condition is None:
+                    live = None
+
     def check(self, bounds: tuple[int, int], *, reject_carry: bool) -> set[str]:
-        self._walk(*bounds, set(), self.constants.copy())
+        self._walk_forward(bounds)
         carried = sorted(
             name
             for name in self.inputs

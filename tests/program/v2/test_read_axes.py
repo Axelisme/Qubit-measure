@@ -606,3 +606,33 @@ def test_iq_axis_sums_and_repeated_read_second_order_features():
     assert actual.shape == (2, 6, 6)
     np.testing.assert_array_equal(actual, expected)
     assert actual.dtype == np.float64
+
+
+def test_shot_sums_rejects_read_within_a_forward_jump_scope():
+    builder = v2.TimelineBuilder(load_soccfg())
+    builder.add_loop("depth", 2)
+    builder.cond_jump("alternate", "depth", "Z")
+    builder.emit(readout(), tag="first")
+    builder.jump("join")
+    builder.label("alternate")
+    builder.emit(readout(), tag="second")
+    builder.label("join")
+
+    error = "ADC 0: trigger inside Jump 'join' is unsupported for read labels"
+    with pytest.raises(ValueError, match=f"^{error}$"):
+        v2.shot_sums(builder.build(), [v2.IQ("first")])
+
+
+def test_shot_sums_resolves_shared_read_after_the_jump_target():
+    builder = v2.TimelineBuilder(load_soccfg())
+    builder.add_loop("depth", 2)
+    builder.cond_jump("read", "depth", "Z")
+    builder.timeline_inc(0.2)
+    builder.label("read")
+    builder.emit(readout(), tag="shared")
+
+    reducer = v2.shot_sums(builder.build(), [v2.IQ("shared")])
+    iq = np.array([[[[2.0, 3.0]]], [[[4.0, 5.0]]]])
+    np.testing.assert_array_equal(
+        reduce_round(reducer, {0: iq}), [[1, 2, 3, 4, 6, 9], [1, 4, 5, 16, 20, 25]]
+    )

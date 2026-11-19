@@ -11,10 +11,12 @@ from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.operands import AluExpr, AluOp, Immediate, Register
 from zcu_tools.program.v2.modules import LoadValue
 
+from tests.program._profiles import load_soccfg
 from tests.program._timing_expectations import generator_duration, tproc_ceil
 from tests.program.v2.simulation._compiled_support import program, request
 from tests.program.v2.simulation.support import request_of
 from tests.program.v2.simulation.time_observations import time_us, times_us
+from tests.program.v2.wave_observations import analyze
 
 
 @pytest.mark.parametrize("align_timeline", [True, False])
@@ -50,6 +52,197 @@ def test_public_acquire_skips_undeclared_branch_points_without_padding(align_tim
         assert points[1].events[0].gain == pytest.approx(0.2, abs=1e-4)
     finally:
         env.devices.close_all_devices()
+
+
+@pytest.mark.parametrize("pmem_size", [2048, 4096])
+def test_forward_cond_jump_uses_each_sweep_lanes_reference_time(pmem_size):
+    def body(p):
+        p.cond_jump("scan", "scan", "Z", "-", 0)
+        p.pulse(0, "p", t=0, tag="fall-through")
+        p.delay(0.4)
+        p.label("scan")  # Also the name of the native loop.
+        p.pulse(0, "p", t=0, tag="joined")
+        p.trigger([0], t=0)
+
+    profile = load_soccfg(n_gens=2, n_readouts=1)
+    profile["tprocs"][0]["pmem_size"] = pmem_size
+    prog, env = program(
+        body,
+        lambda p: p.add_loop("scan", 2),
+        trigger_time=None,
+        soccfg=profile,
+    )
+    result = request(prog, env)
+    step = result.time_base.period_ticks(prog.tproccfg["f_time"])
+    for i, (sources, shot) in enumerate(
+        zip(
+            [["joined"], ["fall-through", "joined"]],
+            analyze(prog).shots[:2],
+            strict=True,
+        )
+    ):
+        point = result.materialize_point(i)
+        assert [event.source for event in point.events] == sources
+        assert [event.start_ticks for event in point.events] == [
+            (event.cycle - shot.start_cycle) * step
+            for event in shot.events
+            if event.kind == "wave" and event.port == prog.soccfg["gens"][0]["tproc_ch"]
+        ]
+        adc = prog.soccfg["readouts"][0]
+        adc_bit = 1 << adc["trigger_bit"] if adc["trigger_type"] == "dport" else 1
+        assert tuple(point.readouts[0].trigger_ticks) == tuple(
+            (event.cycle - shot.start_cycle) * step
+            for event in shot.events
+            if event.port == adc["trigger_port"]
+            and event.kind == ("data" if adc["trigger_type"] == "dport" else "trigger")
+            and (event.value or 0) & adc_bit
+        )
+
+
+def test_lanes_wait_for_their_own_label_including_an_unconditional_jump():
+    def body(p):
+        p.cond_jump("first", "scan", "Z")
+        p.cond_jump("second", "scan", "Z", "-", 1)
+        p.jump("join")
+        p.label("first")
+        p.pulse(0, "p", t=0, tag="first")
+        p.delay(0.4)
+        p.jump("join")
+        p.label("second")
+        p.pulse(0, "p", t=0, tag="second")
+        p.delay(0.8)
+        p.label("join")
+        p.pulse(0, "p", t=0, tag="joined")
+
+    prog, env = program(body, lambda p: p.add_loop("scan", 3))
+    result = request(prog, env)
+    assert [
+        [event.source for event in result.materialize_point(i).events] for i in range(3)
+    ] == [["first", "joined"], ["second", "joined"], ["joined"]]
+
+
+def test_jump_lanes_each_deliver_the_compiled_trigger_count():
+    def body(p):
+        p.cond_jump("short", "scan", "Z")
+        p.pulse(0, "p", t=0)
+        p.trigger([0], t=0, timeline="default")
+        p.jump("join")
+        p.label("short")
+        p.pulse(0, "p", t=0.1)
+        p.trigger([0], t=0.1, timeline="default")
+        p.label("join")
+
+    prog, env = program(body, lambda p: p.add_loop("scan", 2), trigger_time=None)
+    assert prog.ro_chs[0]["trigs"] == 1
+    result = request(prog, env)
+    step = result.time_base.period_ticks(prog.tproccfg["f_time"])
+    assert [
+        tuple(result.materialize_point(i).readouts[0].trigger_ticks) for i in range(2)
+    ] == [(tproc_ceil(prog.soccfg, 0.1) * step,), (0,)]
+
+
+@pytest.mark.parametrize(
+    "defect,reason",
+    [
+        ("target", "target label"),
+        ("condition", "condition"),
+        ("jump-position", "position"),
+        ("label-position", "position"),
+        ("F", "external flag"),
+        ("NF", "external flag"),
+    ],
+)
+def test_forward_jump_snapshot_mismatch_is_rejected(defect, reason):
+    def transform(snapshot):
+        records = list(snapshot.records)
+        for i, record in enumerate(records):
+            inst = record.instruction
+            if not isinstance(inst, MetaInst):
+                continue
+            if inst.type == "CONTROL_JUMP":
+                if defect == "target":
+                    inst = replace(inst, info=inst.info | {"target": "other"})
+                elif defect in ("condition", "F", "NF"):
+                    test = "NZ" if defect == "condition" else defect
+                    inst = replace(inst, info=inst.info | {"test": test})
+                elif defect == "jump-position":
+                    records[i] = CompiledRecord(inst, record.p_addr + 1)
+                    break
+                else:
+                    continue
+            elif inst.type != "CONTROL_LABEL" or defect != "label-position":
+                continue
+            records[i] = CompiledRecord(
+                inst, record.p_addr + (defect == "label-position")
+            )
+            break
+        return CompiledStream(tuple(records))
+
+    def body(p):
+        p.cond_jump("join", "scan", "Z")
+        p.pulse(0, "p", t=0)
+        p.label("join")
+        p.pulse(0, "p", t=0.4)
+        p.label("other")
+
+    prog, env = program(
+        body,
+        lambda p: p.add_loop("scan", 2),
+        stream_transform=transform,
+        trigger_time=0.4,
+    )
+    with pytest.raises(
+        ValueError, match=rf"MetaInst.*preopt.*loops=.*CONTROL_.*{reason}"
+    ):
+        request(prog, env)
+
+
+def test_unmarked_body_jump_keeps_its_rejection_even_when_all_lanes_skip_it():
+    def body(p):
+        p.cond_jump("join", "s0", "Z")
+        p.asm_inst({"CMD": "JUMP", "LABEL": "HERE"})
+        p.label("join")
+        p.pulse(0, "p")
+
+    prog, env = program(body)
+    with pytest.raises(
+        ValueError,
+        match=r"JumpInst at preopt \d+, loops=.*cases=\(\), source='': unsupported instruction effect",
+    ):
+        request(prog, env)
+
+
+@pytest.mark.parametrize("skip", [False, True])
+def test_condition_on_measurement_register_is_rejected_without_executing_feedback(skip):
+    def body(p):
+        if skip:
+            p.cond_jump("join", "s0", "Z")
+        p.cond_jump("join", "s_port_l", "Z")
+        p.label("join")
+        p.pulse(0, "p")
+
+    prog, env = program(body)
+    with pytest.raises(ValueError, match=r"TestInst at preopt.*undefined register s8"):
+        request(prog, env)
+
+
+def test_skipping_a_definition_does_not_hide_a_cross_shot_live_in():
+    def initialize(p):
+        p.add_loop("scan", 2)
+        p.add_reg("carry", init=QickRawParam("carry", 0, {}))
+
+    def body(p):
+        p.cond_jump("join", "scan", "Z")
+        p.write_reg("carry", 12)
+        p.label("join")
+        p.write_reg("s1", "carry")
+        p.pulse(0, "p")
+
+    prog, env = program(body, initialize)
+    with pytest.raises(
+        ValueError, match=r"RegWriteInst at preopt.*cross-shot.*live-in"
+    ):
+        request(prog, env)
 
 
 @pytest.mark.parametrize("sync_at_end", [False, True])
@@ -457,14 +650,13 @@ def test_unsupported_effect_inside_marked_case_retains_case_diagnostics(
             with branch.case(0):
                 p.pulse(0, "p", tag="drive")
                 if effect == "measurement":
-                    p.read_and_jump(0, "I", 0, ">=", "done")
-                    p.label("done")
+                    p.read_input(0)
                 elif effect == "wait":
                     p.wait(0.1)
                 elif effect == "clock":
                     p.write_reg("s1", "s11")
                 else:
-                    p.jump("HERE")
+                    p.asm_inst({"CMD": "JUMP", "LABEL": "HERE"})
             with branch.case(1):
                 p.pulse(0, "p")
 

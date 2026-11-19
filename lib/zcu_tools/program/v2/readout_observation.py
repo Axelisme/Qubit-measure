@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from qick.asm_v2 import Macro, Trigger
 
+from ._timeline_jumps import TimelineJump, TimelineLabel
 from ._timeline_macros import (
     ModuleEmission,
     PreparedTimelineMacro,
@@ -31,8 +32,9 @@ class ReadoutObservation:
     identity; callers must not mutate it or its owner.
     control_scope is None for provenance markers and ordinary triggers. For
     controlled triggers it is "Repeat", "Repeat <name repr>" or
-    "Branch <name repr>", using the innermost timeline scope when present,
-    otherwise the native QICK readout control scope. In case-aware traversal,
+    "Branch <name repr>", or "Jump <target repr>". The latest open jump range
+    takes precedence, then the innermost timeline scope, then native QICK
+    scope. In case-aware traversal,
     timeline Branch choices instead appear in ReadoutPath.cases.
     repeat_counts lists enclosing timeline Repeat counts, outermost first, for
     both provenance markers and triggers. Integers are fixed iteration counts;
@@ -64,7 +66,9 @@ def observe_readouts(prog: TimelineProgramV2) -> Iterator[ReadoutObservation]:
             yield ReadoutObservation(source, None, repeats)
         elif isinstance(source, Trigger):
             yield ReadoutObservation(
-                source, scope or readout_control_scope(prefix), repeats
+                source,
+                str(scope) if scope is not None else readout_control_scope(prefix),
+                repeats,
             )
         prefix.append(source)
 
@@ -108,14 +112,27 @@ def observe_readout_paths(prog: TimelineProgramV2) -> Iterator[ReadoutPath]:
             elif isinstance(source, Trigger):
                 observations.append(
                     ReadoutObservation(
-                        source, scope or readout_control_scope(prefix), repeats
+                        source,
+                        str(scope)
+                        if scope is not None
+                        else readout_control_scope(prefix),
+                        repeats,
                     )
                 )
             prefix.append(source)
         yield ReadoutPath(cases, tuple(observations))
 
 
-type _Sources = list[tuple[Macro, str | None, tuple[int | str, ...]]]
+@dataclass(frozen=True)
+class _JumpScope:
+    target: str
+
+    def __str__(self) -> str:
+        return f"Jump {self.target!r}"
+
+
+type _Scope = _JumpScope | str | None
+type _Sources = list[tuple[Macro, _Scope, tuple[int | str, ...]]]
 type _Choices = tuple[tuple[str, int], ...]
 
 
@@ -127,18 +144,35 @@ def _repeat_iterations(macros: Sequence[Macro]) -> dict[int, int | str]:
     }
 
 
+def _jump_scopes(
+    macros: Sequence[Macro], scope: _Scope
+) -> Iterator[tuple[Macro, _JumpScope | None]]:
+    inherited = scope if isinstance(scope, _JumpScope) else None
+    active: dict[str, _JumpScope] = {}
+    for macro in macros:
+        source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
+        if isinstance(source, (TimelineJump, TimelineLabel)):
+            name = source.target.name
+            # Reopening a target makes it the newest range, even if it was already open.
+            active.pop(name, None)
+            if isinstance(source, TimelineJump):
+                active[name] = _JumpScope(name)
+        latest_target = next(reversed(active), None)
+        yield source, active[latest_target] if latest_target is not None else inherited
+
+
 def _source_paths(
     macros: Sequence[Macro],
     choices: _Choices,
-    scope: str | None = None,
+    scope: _Scope = None,
     repeats: tuple[int | str, ...] = (),
 ) -> Iterator[tuple[_Choices, _Sources]]:
     paths: list[tuple[_Choices, _Sources]] = [(choices, [])]
     iterations = _repeat_iterations(macros)
     scopes = [scope]
     repeat_stack = [repeats]
-    for macro in macros:
-        source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
+    for source, jump_scope in _jump_scopes(macros, scope):
+        control = jump_scope or scopes[-1]
         if isinstance(source, RepeatLoweringEnter):
             scopes.append("Repeat")
             repeat_stack.append((*repeat_stack[-1], iterations[id(source)]))
@@ -161,33 +195,33 @@ def _source_paths(
                         expanded.extend(
                             (cases, prefix + body)
                             for cases, body in _source_paths(
-                                case, next_choices, scopes[-1], repeat_stack[-1]
+                                case, next_choices, control, repeat_stack[-1]
                             )
                         )
                 else:
                     expanded.extend(
                         (cases, prefix + body)
                         for cases, body in _source_paths(
-                            source.macros, selected, scopes[-1], repeat_stack[-1]
+                            source.macros, selected, control, repeat_stack[-1]
                         )
                     )
             paths = expanded
         else:
             for _, body in paths:
-                body.append((source, scopes[-1], repeat_stack[-1]))
+                body.append((source, control, repeat_stack[-1]))
     yield from paths
 
 
 def _source_macros(
     macros: Sequence[Macro],
-    scope: str | None = None,
+    scope: _Scope = None,
     repeats: tuple[int | str, ...] = (),
-) -> Iterator[tuple[Macro, str | None, tuple[int | str, ...]]]:
+) -> Iterator[tuple[Macro, _Scope, tuple[int | str, ...]]]:
     iterations = _repeat_iterations(macros)
     scopes = [scope]
     repeat_stack = [repeats]
-    for macro in macros:
-        source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
+    for source, jump_scope in _jump_scopes(macros, scope):
+        control = jump_scope or scopes[-1]
         if isinstance(source, RepeatLoweringEnter):
             scopes.append("Repeat")
             repeat_stack.append((*repeat_stack[-1], iterations[id(source)]))
@@ -197,9 +231,9 @@ def _source_macros(
         elif isinstance(source, TimelineBranch):
             for case in source.cases:
                 yield from _source_macros(
-                    case, f"Branch {source.name!r}", repeat_stack[-1]
+                    case, jump_scope or f"Branch {source.name!r}", repeat_stack[-1]
                 )
         elif isinstance(source, (ModuleEmission, TimeProducer)):
-            yield from _source_macros(source.macros, scopes[-1], repeat_stack[-1])
+            yield from _source_macros(source.macros, control, repeat_stack[-1])
         else:
-            yield source, scopes[-1], repeat_stack[-1]
+            yield source, control, repeat_stack[-1]

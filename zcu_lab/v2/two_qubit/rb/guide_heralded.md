@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run heralded paired two-qubit RB and interpret gg/ee return survival alongside CZ-interleaved decay fits.
 
-**Last updated:** 2026-11-20
+**Last updated:** 2026-11-20 (on-board depth scan)
 
 Cfg sweep fields use `depth` / `seed`. This experiment uses cfg schema 2.0. Loading a run from an older major version retains Result and metadata, sets cfg to None and emits `CfgUnavailableWarning`. These old runs cannot be reanalyzed. No cfg migration or field alias is provided.
 
@@ -56,11 +56,22 @@ show that it cancels.
 Herald filtering and optional reset are unchanged. Post-selection is not
 physical reset and does not prove a particular initial-state purity.
 
+For each seed and arm, the host first tries to compile all requested depths
+into one program. If the program exceeds PMEM, the host splits the depth list
+in half, with the extra point in the first half, and retries each half. The
+smallest chunk is one depth. If that depth still exceeds PMEM, or any chunk
+exceeds WMEM or DMEM, Run reports the error. Chunking changes only the number
+of programs and the acquisition order.
+
 ## Counts and complete rounds
 
-Depth, seed and arm stay on the host because each changes the gate sequence.
-Each depth/seed/arm compiles once. The host acquires `rounds` separate rounds,
-each using `rounds=1` and `reps` shots. Result `sums` has float64 shape
+The host loops over seed, then arm, then depth chunk, then round. It visits
+chunks in increasing depth order and reuses each program across rounds. Within each
+`rounds=1` acquisition, QICK visits the chunk's depths in increasing order
+once per repetition, then starts again at the first depth. Each depth gets
+`reps` shots in its saved round slot.
+
+Result `sums` has float64 shape
 `(Nd, Nseed, 2, Nround, 3, 3, 3, 3)`. The trailing axes are herald F1,
 herald F2, terminal F1 and terminal F2. Each is ordered g, e, other.
 Save retains all 81 unnormalized class counts. Storage does not grow with

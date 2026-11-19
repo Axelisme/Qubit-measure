@@ -2,7 +2,13 @@
 
 import pytest
 from qick.qick_asm import AbsQickProgram
-from zcu_tools.program.v2.ir.instructions import MetaInst, WaitInst
+from zcu_tools.program.v2.ir.instructions import (
+    JumpInst,
+    LabelInst,
+    MetaInst,
+    TestInst,
+    WaitInst,
+)
 from zcu_tools.program.v2.ir.io_instructions import PortWriteInst
 from zcu_tools.program.v2.modules import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -155,6 +161,42 @@ def test_timeline_branch_preserves_order_compare_register_and_body_shell_boundar
     ]
     assert len(waits) == 2
     assert boundaries["body_start"] <= waits[0] < boundaries["body_end"] <= waits[1]
+
+
+def test_author_control_is_marked_at_linked_positions_only_in_snapshot():
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg: None) -> None:
+            self.add_loop("scan", 2)
+
+        def _body(self, cfg: None) -> None:
+            self.cond_jump("next", "scan", "Z")
+            self.jump("done")
+            self.label("next")
+            self.delay(0.1)
+            self.label("done")
+
+    profile = load_soccfg()
+    profile["tprocs"][0]["pmem_size"] = 2048
+    prog = Program(profile)
+    records = prog.compiled_stream.records
+    controls = [
+        (i, inst.type, inst.info)
+        for i, record in enumerate(records)
+        if isinstance(inst := record.instruction, MetaInst)
+        and inst.type.startswith("CONTROL_")
+    ]
+    assert [(kind, info) for _, kind, info in controls] == [
+        ("CONTROL_JUMP", {"target": "next", "conditional": True, "test": "Z"}),
+        ("CONTROL_JUMP", {"target": "done", "conditional": False, "test": None}),
+        ("CONTROL_LABEL", {"label": "next"}),
+        ("CONTROL_LABEL", {"label": "done"}),
+    ]
+    for (i, _, _), lowered in zip(
+        controls, (TestInst, JumpInst, LabelInst, LabelInst), strict=True
+    ):
+        assert isinstance(records[i + 1].instruction, lowered)
+        assert records[i].p_addr == records[i + 1].p_addr
+    assert "CONTROL_" not in prog.asm()
 
 
 @pytest.mark.parametrize("timeline", [None, "default"])

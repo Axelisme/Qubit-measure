@@ -9,6 +9,12 @@ from dataclasses import dataclass, field
 from .instructions import Instruction
 from .linker import IRLinker
 
+# Zero-word annotations retained in the snapshot but omitted from optimization.
+SOURCE_START = "SOURCE_START"
+SOURCE_END = "SOURCE_END"
+CONTROL_JUMP = "CONTROL_JUMP"
+CONTROL_LABEL = "CONTROL_LABEL"
+
 
 @dataclass(frozen=True, init=False)
 class CompiledRecord:
