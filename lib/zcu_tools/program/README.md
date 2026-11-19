@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-20，三階 IQ 總和
+**Last updated:** 2026-11-20，逐 shot 遮罩與平均
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -8,7 +8,7 @@
 
 ## Program 層定位
 
-`acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，提供原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。`ProgramResourcesMixin` 提供 dmem 配置及 readout route 保護。
+`acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、逐 shot 遮罩、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，提供原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。`ProgramResourcesMixin` 提供 dmem 配置及 readout route 保護。
 
 `v2.builder.TimelineBuilder` 記錄宣告、線性動作與巢狀 repeat／branch。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。`SimulationSoc` acquisition 透過 compiled frontend 執行 TimelineProgramV2 的受支援 instruction effects。
 
@@ -95,6 +95,24 @@ Host classification uses `acquire_summed` with read axes, not an acquire option.
 `centroid3_classifier(cfg, ro_ch=...)` returns detached g/e/f calibration
 from native Pulse or Mux cfg by ADC number. Missing calibration, wrong type and
 unknown ADC raise ValueError. It never reads the live library.
+
+## Registered shot masks
+
+Use `register_shot_mask_source(consumed_reads, source)` on a program or
+`TimelineBuilder`. The declaration maps ADC channel numbers to zero-based physical
+read indices. For each completed round, the source receives only its declared
+reads as float64 `(points, reps, reads, 2)` IQ divided by integration length,
+without IQ-offset subtraction. It returns a bool `(points, reps)` array. Sources
+run in registration order, and a shot is kept only if every source returns True.
+
+The integrated result and round hook omit consumed reads and any ADC with no
+remaining reads. They keep the other ADCs and reads in declaration and trigger
+order. Each point is the sum of the kept length-normalized IQ, after the usual
+`remove_offset` correction, divided by all reps across completed rounds, not
+the number of kept shots. `get_raw()` still returns physical integer buffers
+with all triggers. With no sources, the native averaging path is unchanged.
+Native `threshold` projection, decimated acquisition and the summed processor
+interface reject programs with registered sources.
 
 ## Summed acquisition
 
@@ -244,7 +262,7 @@ shots.
   - `finish_acquire()` 負責 rounds 聚合（accumulated 或 decimated）。
 - 擴充掛點：
   - `RoundHookMixin.finish_round()`：每 completed round 呼叫 `round_hook`，輸入增量摘要資料與同一個 stop flag。
-  - `ImproveAcquireMixin._process_accumulated()`：明傳單一 sum processor 時處理每點總和，其餘委派原生 IQ／threshold 路徑。
+  - `ImproveAcquireMixin._process_accumulated()`：處理每點總和或逐 shot 遮罩平均，其餘委派原生 IQ／threshold 路徑。
 - 相容性關鍵：
   - 擴充層維持 `AcquireMixin` 的 `extra_args` 傳遞模式，避免破壞原生 acquire 參數流。
 

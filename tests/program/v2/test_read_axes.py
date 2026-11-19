@@ -303,6 +303,28 @@ def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
     np.testing.assert_array_equal(result, expected)
 
 
+def test_shot_sums_resolves_labels_after_mask_sources_remove_physical_reads() -> None:
+    builder = v2.TimelineBuilder(load_soccfg(), reps=2)
+    ro = readout()
+    builder.emit(ro, tag="reference")
+    builder.timeline_inc(1.0)
+    builder.emit(ro, tag="mask_input")
+    builder.timeline_inc(1.0)
+    builder.emit(ro, tag="signal")
+    builder.register_shot_mask_source({0: [1]}, lambda iq: iq[0][..., 0, 0] > 0)
+    program = builder.build()
+
+    sums = v2.shot_sums(program, [v2.IQ("signal")])
+    logical_iq = {
+        0: np.array([[[[99.0, 99.0], [2.0, 3.0]], [[98.0, 98.0], [5.0, 7.0]]]])
+    }
+    np.testing.assert_array_equal(sums(logical_iq), [[2, 7, 10, 29, 41, 58]])
+    with pytest.raises(
+        ValueError, match=r"label 'mask_input'.*available labels.*signal"
+    ):
+        v2.shot_sums(program, [v2.IQ("mask_input")])
+
+
 @pytest.mark.parametrize("timeline", [True])
 def test_empty_axes_fail_when_constructing_processor(timeline):
     prog = (

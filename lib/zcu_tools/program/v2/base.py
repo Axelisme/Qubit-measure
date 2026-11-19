@@ -113,6 +113,7 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         super()._init_declarations()
         # QICK rebuilds pulse declarations; deduplication belongs to that build.
         self.pulse_registry = PulseRegistry()
+        self._shot_masks = None
 
     def _initialize(self, cfg: None) -> None: ...
 

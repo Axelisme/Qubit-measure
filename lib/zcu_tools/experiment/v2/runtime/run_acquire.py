@@ -20,7 +20,7 @@ from zcu_tools.experiment.v2.runtime.acquisition import (
     default_raw2signal_fn,
     require_positive_rounds,
 )
-from zcu_tools.program.acquisition import ShotSumProcessor
+from zcu_tools.program.acquisition import ImproveAcquireMixin, ShotSumProcessor
 
 if TYPE_CHECKING:
     from zcu_tools.experiment.v2.runtime.schedule import Schedule, ScheduleStep
@@ -81,6 +81,11 @@ def _adapt_run_options(
             on_stop=selected.on_stop,
         ),
     )
+
+
+def _reject_shot_masks(program: object, operation: str) -> None:
+    if isinstance(program, ImproveAcquireMixin) and program.has_shot_mask_sources:
+        raise ValueError(f"{operation} does not support registered shot mask sources")
 
 
 class IntegratedProgram(Protocol[T_Raw_co]):
@@ -197,8 +202,12 @@ class RunAcquisitionMixin(ABC):
         Native qick_options are forwarded. rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
         cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
-        Converter and update errors propagate without retry.
+        Converter and update errors propagate without retry. Registered shot masks
+        omit consumed reads and mask-only ADCs. Native QICK threshold projection
+        with registered masks raises ValueError before acquisition.
         """
+        if qick_options.get("threshold") is not None:
+            _reject_shot_masks(program, "run_acquire with native QICK threshold")
         owner = self._acquisition_owner
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         return AcquisitionRunner(owner, soc).run(
@@ -239,8 +248,10 @@ class RunAcquisitionMixin(ABC):
         Progress callback errors propagate unchanged without retry or marking
         acquisition failed, after acquire scope release and progress cleanup;
         they do not call on_stop. Neither raw-buffer access failures nor on_stop
-        failures are retried.
+        failures are retried. Registered shot mask sources raise ValueError
+        before acquire; this raw-return interface does not carry a mask.
         """
+        _reject_shot_masks(program, "run_acquire_shots")
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         if selected.converter is not None or selected.stop_condition is not None:
             raise ValueError("run_acquire_shots does not convert or apply data stop")
@@ -280,8 +291,10 @@ class RunAcquisitionMixin(ABC):
         rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
         cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
-        Converter and update errors propagate without retry.
+        Converter and update errors propagate without retry. Registered shot mask
+        sources raise ValueError before acquisition because they need integrated IQ.
         """
+        _reject_shot_masks(program, "run_acquire_decimated")
         owner = self._acquisition_owner
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         return AcquisitionRunner(owner, soc).run(
@@ -319,7 +332,10 @@ class RunAcquisitionMixin(ABC):
         excluding bool. Return the live slot, retaining completed rounds on
         cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
         None producer results, conversion and update failures propagate without retry.
+        Registered shot mask sources raise ValueError before acquire because the
+        processor interface does not receive a mask.
         """
+        _reject_shot_masks(program, "run_acquire_summed")
         owner = self._acquisition_owner
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
 

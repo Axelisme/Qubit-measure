@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-20, summed SNR acquisition
+**Last updated:** 2026-11-20, host shot masks
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -453,9 +453,11 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   hit. Certificates live with the SoC and do not cross the acquisition/backend boundary.
   Fixed request layouts and integrated normalization metadata are prepared once
   per acquire; this never freezes snapshots or certifies later backend values.
-  Without a processor or threshold,
-  it divides totals by reps and readout length, removes QICK offsets and moves reads first,
-  without allocating `acc_buf`. Hooks receive the running mean of completed rounds.
+  Without registered shot masks, a processor or a threshold, it divides totals
+  by reps and readout length, removes QICK offsets and moves reads first without
+  allocating `acc_buf`. Registered sources materialize raw IQ for each completed
+  round and use the same [host masked average](../../README.md#registered-shot-masks)
+  as hardware. Hooks receive the running mean of completed rounds.
   Every `acquire_summed` round materializes retained raw shots and uses the
   same joint-ADC processor and accumulation path as hardware. The processor
   receives ADC-keyed float64 `(points, reps, reads, 2)` normalized IQ without

@@ -14,11 +14,7 @@ from zcu_tools.program.acquisition import ShotSumProcessor
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import MuxReadout, PulseReadout, classification_processor
-from .readout_labels import (
-    emission_label,
-    resolve_readout_label,
-    validate_declared_reads,
-)
+from .readout_labels import emission_label, validate_declared_reads
 from .readout_observation import ReadoutPath, observe_readout_paths
 from .timeline import TimelineProgramV2
 
@@ -73,8 +69,9 @@ def shot_sums(
     in output-axis order. IQ includes all moments through its requested order;
     repeated reads form outer products of those features. Empty axes raise
     ValueError before read-label resolution or acquisition. Timeline labels are
-    emit tags, or module names when untagged.
-    Each label must identify one emission on every feasible Branch path.
+    emit tags, or module names when untagged. Labels and ADC indices refer to
+    logical reads after removing reads consumed by registered mask sources.
+    Each label must identify one visible emission on every feasible Branch path.
     Mutually exclusive untagged emissions may share a module name when their
     selected ADC, read index, frequency (MHz), window (us), phase (degrees) and
     cfg classifier agree. Generator gain and waveform may differ. Every path
@@ -86,8 +83,8 @@ def shot_sums(
     Classify snapshots its override or cfg classifier; missing
     calibration, missing circle radius and invalid tone selection raise ValueError.
     The returned processor accepts ADC-keyed float64 arrays shaped
-    (points, reps, reads, 2) and returns (points, *axes), summing outer products
-    over reps. IQ NaNs propagate through their moments. It borrows inputs without
+    (points, reps, logical_reads, 2) and returns (points, *axes), summing outer
+    products over reps. IQ NaNs propagate through their moments. It borrows inputs without
     mutation and rejects read-count changes; neither construction nor processing
     modifies the program's declared reads_per_shot.
     """
@@ -161,16 +158,13 @@ def _resolve_path(
     try:
         resolved = []
         for axis in axes:
-            owner = resolve_readout_label(path.observations, axis.read)
-            matches = labels[axis.read]
+            matches = labels.get(axis.read, [])
             if len(matches) != 1:
                 raise ValueError(
                     f"label {axis.read!r}: expected one emission, actual {len(matches)}; "
                     f"available labels: {list(labels)}"
                 )
-            resolved.append(
-                _resolve_axis(prog, axis, (owner, matches[0][1]), counts, unsupported)
-            )
+            resolved.append(_resolve_axis(prog, axis, matches[0], counts, unsupported))
         return resolved
     except ValueError as error:
         if not path.cases:
@@ -227,7 +221,7 @@ def _collect_reads(
     prog: TimelineProgramV2,
     path: ReadoutPath,
 ) -> tuple[_LabelReads, dict[int, int], dict[int, str]]:
-    """Resolve labels and ADC-local trigger indices along one feasible source path."""
+    """Collect visible labels and logical ADC counts along one feasible source path."""
     counts = dict.fromkeys(prog.ro_chs, 0)
     labels: _LabelReads = {}
     unsupported: dict[int, str] = {}
@@ -242,17 +236,23 @@ def _collect_reads(
                 if isinstance(owner, PulseReadout)
                 else [tone.ro_ch for tone in owner.cfg.tones]
             )
-            label = emission_label(macro)
-            labels.setdefault(label, []).append(
-                (owner, {ch: counts[ch] for ch in channels})
-            )
+            indices = {
+                ch: index
+                for ch in channels
+                if (index := prog.logical_read_index(ch, counts[ch])) is not None
+            }
+            if indices:
+                labels.setdefault(emission_label(macro), []).append((owner, indices))
         if isinstance(macro, Trigger):
             control = observation.control_scope
             for ch in macro.ros:
                 if control is not None:
                     unsupported[ch] = control
                 counts[ch] += 1
-    return labels, counts, unsupported
+    logical_counts = {
+        ch: prog.logical_read_count(ch, count) for ch, count in counts.items()
+    }
+    return labels, logical_counts, unsupported
 
 
 def _resolve_axis(
@@ -281,6 +281,10 @@ def _resolve_axis(
             )
         tone = owner.cfg.tones[tone_index]
         ch, classifier = tone.ro_ch, tone.classifier
+    if ch not in indices:
+        raise ValueError(
+            f"label {axis.read!r}: ADC {ch} read is consumed by a shot mask source"
+        )
     if ch in unsupported:
         raise ValueError(
             f"ADC {ch}: trigger inside {unsupported[ch]} is unsupported for read labels"

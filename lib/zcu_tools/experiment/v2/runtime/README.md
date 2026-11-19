@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-11-01，raw-shot acquisition 入口與共用 runner
+**Last updated:** 2026-11-20，逐 shot 遮罩平均
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -116,6 +116,12 @@ with Schedule(signals, scope=context.scope) as sched:
 不做轉換、不寫 slot，也不需要預建 buffer。四個方法都不建立 program。
 Caller 可傳入手寫或 TimelineBuilder 產生的 program，只需提供對應的同步 acquire 方法。
 Raw-shot 入口還要求 `get_raw()`；成功 acquire 後沒有 raw buffer 時拋出 `RuntimeError`。
+
+有[註冊遮罩來源](../../../program/README.md#registered-shot-masks)時，`run_acquire`
+將保留 shot 的 IQ 加總，再除以已完成輪次的總 shot 數。Converter 和 live update 都看不到來源消耗的讀取，
+也看不到只供遮罩使用的 ADC。`run_acquire` 拒絕原生 QICK `threshold` 與遮罩並用。
+`run_acquire_decimated` 需要沒有遮罩來源的 program；目前的 `run_acquire_summed` 與
+`run_acquire_shots` 介面不交付遮罩，也拒絕有來源的 program。這些錯誤在開始取數前拋出。
 
 `run_acquire_shots` 每次只執行一輪，`rounds` 省略或設為整數 1，其他值在入口拋出
 `ValueError`。多輪 raw shots 由 caller 的 host loop 重複呼叫。

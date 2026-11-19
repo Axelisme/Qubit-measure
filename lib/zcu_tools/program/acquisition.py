@@ -17,6 +17,7 @@ from qick.qick_asm import (
     obtain,  # pyright: ignore[reportAttributeAccessIssue]
 )
 
+from zcu_tools.program._shot_masks import ShotMasks, ShotMaskSource
 from zcu_tools.program._shot_processing import validated_sums
 from zcu_tools.progress_bar import make_pbar
 
@@ -26,6 +27,7 @@ __all__ = [
     "StoppedPartialAcquireError",
     "AcquisitionContractError",
     "ShotSumProcessor",
+    "ShotMaskSource",
 ]
 
 
@@ -422,8 +424,7 @@ class RoundHookMixin(TypedAcquireMixin):
             )
             return self._summarize_accumulated(rounds_buf)
 
-        assert isinstance(self, qick_asm.AbsQickProgram)
-        n_ro_chs = len(self.ro_chs)
+        n_ro_chs = len(rounds_buf[0])
 
         assert self.rounds_buf is not None
         if self._inc_sum_state is None:  # first round
@@ -511,6 +512,42 @@ class RoundHookMixin(TypedAcquireMixin):
 class ImproveAcquireMixin(RoundHookMixin, EarlyStopMixin):
     _sum_processor: ShotSumProcessor | None = None
     _summed_stepped: bool = False
+    _shot_masks: ShotMasks | None = None
+
+    def register_shot_mask_source(
+        self, consumed_reads: Mapping[int, Sequence[int]], source: ShotMaskSource
+    ) -> None:
+        """Register a callback before acquisition.
+
+        consumed_reads maps ADC channels to zero-based physical read indices in
+        callback order. Each completed round passes only those reads as float64
+        (points, reps, reads, 2) arrays of length-normalized IQ without offset
+        subtraction. The callback returns bool (points, reps), True to keep a
+        shot. Sources run in registration order and their masks are ANDed.
+        Consumed reads are hidden from the averaged result; ADCs with no
+        remaining reads are omitted. Invalid selections and masks raise
+        ValueError on acquire. Callback exceptions propagate.
+        """
+        if self._shot_masks is None:
+            self._shot_masks = ShotMasks()
+        self._shot_masks.register(consumed_reads, source)
+
+    @property
+    def has_shot_mask_sources(self) -> bool:
+        """Whether integrated acquisition requires host shot selection."""
+        return self._shot_masks is not None
+
+    def logical_read_count(self, channel: int, physical_count: int) -> int:
+        """Count unconsumed reads among the first physical_count triggers of an ADC."""
+        if self._shot_masks is None:
+            return physical_count
+        return len(self._shot_masks.visible_reads(channel, physical_count))
+
+    def logical_read_index(self, channel: int, physical_index: int) -> int | None:
+        """Translate an ADC's zero-based physical read index, or None if consumed."""
+        if self._shot_masks is None:
+            return physical_index
+        return self._shot_masks.logical_index(channel, physical_index)
 
     def acquire(
         self,
@@ -523,7 +560,13 @@ class ImproveAcquireMixin(RoundHookMixin, EarlyStopMixin):
         acquire_summed supplies the reserved _sum_processor option. QICK options,
         round hooks, cancellation and stepped ownership follow the native
         pipeline; each new acquire resets processor output dimensions.
+        Registered mask sources instead average selected shots on the host;
+        native threshold projection cannot be combined with them.
         """
+        if self.has_shot_mask_sources and kwargs.get("threshold") is not None:
+            raise ValueError(
+                "acquire with native QICK threshold does not support registered shot mask sources"
+            )
         self._sum_processor = _sum_processor
         self._sum_shape: tuple[int, ...] | None = None
         self._summed_stepped = _sum_processor is not None and kwargs.get(
@@ -539,9 +582,14 @@ class ImproveAcquireMixin(RoundHookMixin, EarlyStopMixin):
         prepares only (None). Synchronous/finish_acquire results are ADC-ordered
         float64 trace arrays. Native QICK timing, lookback, remove_offset,
         round_hook and cancel_flag options pass through unchanged. Nonempty
-        herald raises ValueError. Cancellation retains completed rounds or raises
-        StoppedPartialAcquireError if none completed; transport errors propagate.
+        herald or registered shot mask sources raise ValueError. Cancellation
+        retains completed rounds or raises StoppedPartialAcquireError if none
+        completed; transport errors propagate.
         """
+        if self.has_shot_mask_sources:
+            raise ValueError(
+                "acquire_decimated does not support registered shot mask sources"
+            )
         self._sum_processor = None
         self._summed_stepped = False
         return super().acquire_decimated(*args, **kwargs)
@@ -570,7 +618,13 @@ class ImproveAcquireMixin(RoundHookMixin, EarlyStopMixin):
         step_rounds=True prepares hardware only and returns None; finish_round /
         prepare_round drive rounds, and finish_acquire returns the final ndarray.
         Simulation retains its existing rejection of stepped acquisition.
+        Registered shot mask sources raise ValueError because the processor
+        interface does not receive a mask.
         """
+        if self.has_shot_mask_sources:
+            raise ValueError(
+                "acquire_summed does not support registered shot mask sources"
+            )
         for option in ("threshold", "angle", "herald"):
             if option in qick_options:
                 raise ValueError(
@@ -611,6 +665,11 @@ class ImproveAcquireMixin(RoundHookMixin, EarlyStopMixin):
                 np.asarray(
                     np.sum([data[0] for data in rounds_buf], axis=0, dtype=np.float64)
                 )
+            ]
+        if self.has_shot_mask_sources:
+            return [
+                np.asarray(np.mean(channel_rounds, axis=0))
+                for channel_rounds in zip(*rounds_buf, strict=True)
             ]
         return super()._summarize_accumulated(rounds_buf)
 
@@ -653,7 +712,43 @@ class ImproveAcquireMixin(RoundHookMixin, EarlyStopMixin):
             )
         return [payload.reshape(point_dims + payload.shape[1:]).copy()]
 
+    def _process_masked_average(
+        self, acc_buf: Sequence[NDArray[np.float64] | NDArray[np.int64]]
+    ) -> list[NDArray[np.float64]]:
+        assert isinstance(self, qick_asm.AbsQickProgram)
+        assert self.loop_dims is not None and self.avg_level is not None
+        assert self.acquire_params is not None and self._shot_masks is not None
+        masks = self._shot_masks
+        point_dims = tuple(
+            n for i, n in enumerate(self.loop_dims) if i != self.avg_level
+        )
+        points = int(np.prod(point_dims))
+        reps = self.loop_dims[self.avg_level]
+        normalized = {
+            ch: np.moveaxis(raw / ro["length"], self.avg_level, -3).reshape(
+                points, reps, ro["trigs"], 2
+            )
+            for raw, (ch, ro) in zip(acc_buf, self.ro_chs.items(), strict=True)
+        }
+        masks.validate_read_counts({ch: ro["trigs"] for ch, ro in self.ro_chs.items()})
+        mask = masks.evaluate(normalized, (points, reps))
+        averaged = []
+        for ch, ro in self.ro_chs.items():
+            visible = masks.visible_reads(ch, ro["trigs"])
+            if not visible:
+                continue
+            iq = normalized[ch][:, :, visible, :]
+            if self.acquire_params["remove_offset"]:
+                iq -= self._ro_offset(ch, ro.get("ro_config"))
+            means = np.sum(iq, axis=1, where=mask[..., None, None]) / reps
+            averaged.append(
+                np.moveaxis(means.reshape(*point_dims, len(visible), 2), -2, 0)
+            )
+        return averaged
+
     def _process_accumulated(self, acc_buf) -> list[NDArray[np.float64]]:
         if self._sum_processor is not None:
             return self._process_summed(acc_buf)
+        if self.has_shot_mask_sources:
+            return self._process_masked_average(acc_buf)
         return super()._process_accumulated(acc_buf)

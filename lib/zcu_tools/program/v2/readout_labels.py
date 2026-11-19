@@ -47,13 +47,13 @@ def resolve_readout_label(
 
 
 def validate_declared_reads(prog: TimelineProgramV2, ch: int, expected: int) -> None:
-    """Check compiled ADC ch's declared reads against the caller's emitted count.
+    """Check compiled ADC ch's declared logical reads against its observed count.
 
-    prog is a compiled program; ch is a declared ADC and expected is its per-shot
-    trigger count under the caller's control-flow rules. Raise ValueError on a
-    mismatch, reporting expected and actual counts. No declaration is changed.
+    prog is a compiled program; ch is a declared ADC and expected is its logical
+    per-shot read count under the caller's control-flow rules. Consumed reads do
+    not count. Raise ValueError on mismatch; no declaration is changed.
     """
-    declared = prog.ro_chs[ch]["trigs"]
+    declared = prog.logical_read_count(ch, prog.ro_chs[ch]["trigs"])
     if declared != expected:
         raise ValueError(
             f"ADC {ch}: expected {expected} reads per shot; actual {declared}; "
