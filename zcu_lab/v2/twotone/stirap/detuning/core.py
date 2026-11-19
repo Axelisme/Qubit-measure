@@ -245,7 +245,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
             sched.run_acquire_summed(
                 program,
                 context.soc,
-                processor=shot_sums(program, [Classify("readout")]),
+                reducer=shot_sums(program, [Classify("readout")]),
                 options=RunOptions(
                     converter=lambda sums: sums.reshape(
                         len(ys), len(xs), len(STATE_LABELS)

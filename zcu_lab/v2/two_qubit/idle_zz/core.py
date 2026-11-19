@@ -326,7 +326,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 step.run_acquire_summed(
                     prog,
                     context.soc,
-                    processor=shot_sums(prog, axes),
+                    reducer=shot_sums(prog, axes),
                     rounds=config.rounds,
                     options=RunOptions(),
                 )

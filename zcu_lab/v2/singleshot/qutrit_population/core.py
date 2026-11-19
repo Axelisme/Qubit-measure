@@ -133,7 +133,7 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
                 )
                 if shots is None:
                     break
-                buffer[step].set(raw_shots_to_signal(program))
+                buffer[step].set(raw_shots_to_signal(shots, program)[0])
         result = QutritPopulationResult(
             signals=buffer.array,
             shot_indices=np.arange(cfg.shots, dtype=np.int64),

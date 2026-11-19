@@ -18,9 +18,16 @@ from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
-from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, PulseReadout, Reset, SweepCfg, TimelineBuilder
+from zcu_tools.program.v2 import (
+    IQ,
+    Pulse,
+    PulseReadout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+)
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
 
 from zcu_lab.v2.support import live_line
@@ -103,7 +110,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         0.11 us throughout the scan. Return lengths and moment-based SNR
         shaped (Nlength,), optionally reduced by skew_penalty for distorted
         IQ distributions. SNR is not assignment fidelity.
-        acquire_kwargs is forwarded to acquisition.
+        acquire_kwargs is forwarded to summed acquisition.
         """
         # 1. Quantize integration windows on the ADC clock, not the generator clock.
         soc, soccfg = context.soc, context.soccfg
@@ -140,7 +147,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             for _, step in sched.scan("length", lengths.tolist()):
                 cfg.readout.set_param("ro_length", step.value)
                 cfg.readout.set_param("length", lengths.max() + 0.11)
-                tracker = MomentTracker()
 
                 builder = TimelineBuilder(
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -155,18 +161,17 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                     builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
                 builder.emit(PulseReadout("readout", cfg.readout))
                 program = builder.build()
-                step.run_acquire(
+                step.run_acquire_summed(
                     program,
                     soc,
+                    reducer=shot_sums(program, [IQ("readout", order=3)]),
                     rounds=cfg.rounds,
                     options=RunOptions(
-                        converter=lambda _raw, tracker=tracker: snr_as_signal(
-                            [tracker],
-                            ge_axis=1,
+                        converter=lambda sums: snr_as_signal(
+                            sums,
                             skew_penalty=cfg.skew_penalty,
                         )
                     ),
-                    trackers=[tracker],
                     **(acquire_kwargs or {}),
                 )
 

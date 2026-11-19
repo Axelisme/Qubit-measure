@@ -1,6 +1,6 @@
 # `zcu_tools.resources.context` global and point module libraries
 
-**Last updated:** 2026-11-16，統一 library 開檔與 revision 查詢
+**Last updated:** 2026-11-20，herald reset Specs
 
 **讀者：** framework-dev。Global 與 point module library 的讀取、編輯與來源契約。
 
@@ -25,6 +25,7 @@ Library owner 先驗 header、容器與可定址名稱，再逐 root 驗證 Spec
 現行分組為 pulses、readout、reset 與 waveforms，key 是 `Q1.pulses.pi` 這類具體三段路徑。
 文件存持久 ModuleSpec／WaveformSpec，保留 inline child 或具體 key 引用，不存 provider 或 asset bytes。
 Readout 使用平鋪的 `readout/pulse` Spec，見 ADR-0074。舊 nested readout 依無效 Spec 政策略過。
+Herald Spec 存在 `reset` 分組。`reset/mux_herald.keep` 的 tone 位置在 YAML 寫成加引號的十進位字串，如 `{'0': g, '2': g}`。
 
 `LibrarySnapshot` 是不讀檔的隔離投影，也是 core factory 的 ModuleResolver。
 Spec 查詢不展開引用；成品查詢使用固定 snapshot 與顯式 asset capability。

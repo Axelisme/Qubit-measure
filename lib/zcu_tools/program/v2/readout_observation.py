@@ -92,8 +92,9 @@ class ReadoutPath:
 def observe_readout_paths(prog: TimelineProgramV2) -> Iterator[ReadoutPath]:
     """Yield feasible readout paths of an unmodified, compiled timeline program.
 
-    prog must have compiled successfully. Enumerate each combination of timeline
-    Branch choices, including implicit empty cases, in zero-based case order.
+    prog must have finished recording all source macros. Enumerate each
+    combination of timeline Branch choices, including implicit empty cases,
+    in zero-based case order.
     Repeated selectors keep the same index. Each result borrows original source
     macros and includes Repeat bodies once, irrespective of their count.
     No labels, ADC settings, read counts or times are validated, and no program

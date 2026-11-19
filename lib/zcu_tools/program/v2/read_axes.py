@@ -1,25 +1,34 @@
 """Compile read labels into joint shot-vector outer-product sums."""
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import partial
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import QickParam, Trigger
 
-from zcu_tools.cfg_model import ReadoutClassifier
-from zcu_tools.program.acquisition import ShotSumProcessor
+from zcu_tools.cfg_model import LinearClassifier, ReadoutClassifier
+from zcu_tools.program.acquisition import ShotReducer
+from zcu_tools.program.shot_processing import AdditiveShotReducer, ShotIQ
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import MuxReadout, PulseReadout, classification_processor
-from .readout_labels import emission_label, resolve_readout_label
+from .readout_labels import emission_label
 from .readout_observation import ReadoutPath, observe_readout_paths
 from .timeline import TimelineProgramV2
+
+_QUADRATIC_IQ_WIDTH = 6
+_CUBIC_IQ_WIDTH = 10
 
 
 @dataclass(frozen=True)
 class IQ:
-    """An unclassified read axis with vector (1, I, Q, I², IQ, Q²).
+    """Unclassified read axis (1, I, Q, I², IQ, Q²), with optional cubics.
+
+    order=2 (default) uses the six components above. order=3 appends
+    (I³, I²Q, IQ², Q³). Other orders raise ValueError.
 
     read names one logical compiled readout, present once on each Branch path.
     tone is None for PulseReadout or a zero-based MuxReadout cfg tone position.
@@ -30,6 +39,11 @@ class IQ:
 
     read: str
     tone: int | None = None
+    order: Literal[2, 3] = 2
+
+    def __post_init__(self) -> None:
+        if self.order not in (2, 3):
+            raise ValueError(f"IQ order must be 2 or 3, got {self.order!r}")
 
 
 @dataclass(frozen=True)
@@ -52,15 +66,16 @@ class Classify:
 
 def shot_sums(
     prog: TimelineProgramV2, axes: Sequence[Classify | IQ]
-) -> ShotSumProcessor:
-    """Resolve compiled read labels and return a per-point shot-sum processor.
+) -> ShotReducer[NDArray[np.float64]]:
+    """Resolve compiled read labels and return a per-point shot-sum reducer.
 
     prog is a compiled TimelineProgramV2. axes lists vectors
-    in output-axis order. IQ includes all moments through second order; repeated
-    reads form outer products of those features. Empty axes raise
+    in output-axis order. IQ includes all moments through its requested order;
+    repeated reads form outer products of those features. Empty axes raise
     ValueError before read-label resolution or acquisition. Timeline labels are
-    emit tags, or module names when untagged.
-    Each label must identify one emission on every feasible Branch path.
+    emit tags, or module names when untagged. Labels and ADC indices refer to
+    logical reads after removing reads consumed by registered mask sources.
+    Each label must identify one visible emission on every feasible Branch path.
     Mutually exclusive untagged emissions may share a module name when their
     selected ADC, read index, frequency (MHz), window (us), phase (degrees) and
     cfg classifier agree. Generator gain and waveform may differ. The compiler
@@ -72,11 +87,10 @@ def shot_sums(
     QICK rejects duplicate explicit tags at compile time with RuntimeError.
     Classify snapshots its override or cfg classifier; missing
     calibration, missing circle radius and invalid tone selection raise ValueError.
-    The returned processor accepts ADC-keyed float64 arrays shaped
-    (points, reps, reads, 2) and returns (points, *axes), summing outer products
-    over reps. IQ NaNs propagate through their moments. It borrows inputs without
-    mutation and rejects read-count changes; neither construction nor processing
-    modifies the program's compiled read counts.
+    The reducer borrows ADC-keyed float64 (points, reps, logical_reads, 2)
+    arrays and accumulates (points, *axes) outer-product sums of kept shots.
+    IQ NaNs in kept shots propagate. The reducer rejects read-count changes
+    and does not modify its input or the program's compiled read counts.
     """
     if not axes:
         raise ValueError("axes must contain at least one read")
@@ -87,9 +101,14 @@ def shot_sums(
         other_labels, _ = _resolve_path(prog, axes, path)
         for axis in axes:
             _check_path_read(axis, labels, other_labels, reference, path)
-    counts = {ch: prog.ro_chs[ch]["trigs"] for ch, _, _ in resolved}
+    counts = {
+        axis.channel: prog.logical_read_count(
+            axis.channel, prog.ro_chs[axis.channel]["trigs"]
+        )
+        for axis in resolved
+    }
 
-    def process(iq: Mapping[int, NDArray[np.float64]]) -> NDArray[np.float64]:
+    def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
         for ch, count in counts.items():
             actual = iq[ch].shape
             if len(actual) != 4 or actual[2] != count or actual[-1] != 2:
@@ -97,23 +116,8 @@ def shot_sums(
                     f"ADC {ch}: expected (points, reps, {count}, 2); actual {actual}"
                 )
         product = None
-        for ch, index, classify in resolved:
-            values = iq[ch][:, :, index]
-            vector = (
-                np.stack(
-                    [
-                        np.ones(values.shape[:-1]),
-                        values[..., 0],
-                        values[..., 1],
-                        values[..., 0] ** 2,
-                        values[..., 0] * values[..., 1],
-                        values[..., 1] ** 2,
-                    ],
-                    axis=-1,
-                )
-                if classify is None
-                else classify(values)
-            )
+        for axis in resolved:
+            vector = axis.features(iq[axis.channel][:, :, axis.index])
             product = (
                 vector
                 if product is None
@@ -124,15 +128,34 @@ def shot_sums(
             )
         if product is None:
             raise ValueError("axes must contain at least one read")
-        return product.sum(axis=1, dtype=np.float64)
+        if mask.all():
+            return product.sum(axis=1, dtype=np.float64)
+        kept = mask.reshape(*mask.shape, *((1,) * (product.ndim - 2)))
+        return product.sum(axis=1, dtype=np.float64, where=kept)
 
-    return process
+    return AdditiveShotReducer(round_sums, tuple(axis.size for axis in resolved))
 
 
 type _LabelReads = dict[str, list[tuple[PulseReadout | MuxReadout, dict[int, int]]]]
-type _ResolvedAxis = tuple[
-    int, int, Callable[[NDArray[np.float64]], NDArray[np.float64]] | None
-]
+
+
+@dataclass(frozen=True)
+class _ResolvedAxis:
+    channel: int
+    index: int
+    features: Callable[[NDArray[np.float64]], NDArray[np.float64]]
+    size: int
+
+
+def _iq_features(
+    values: NDArray[np.float64], *, order: Literal[2, 3]
+) -> NDArray[np.float64]:
+    i, q = values[..., 0], values[..., 1]
+    ii, qq = i**2, q**2
+    components = [np.ones(values.shape[:-1]), i, q, ii, i * q, qq]
+    if order == 3:
+        components.extend((ii * i, ii * q, i * qq, qq * q))
+    return np.stack(components, axis=-1)
 
 
 def _path_description(path: ReadoutPath) -> str:
@@ -148,15 +171,14 @@ def _resolve_path(
     try:
         resolved = []
         for axis in axes:
-            owner = resolve_readout_label(path.observations, axis.read)
-            matches = labels[axis.read]
+            matches = labels.get(axis.read, [])
             if len(matches) != 1:
                 raise ValueError(
                     f"label {axis.read!r}: expected one emission, actual {len(matches)}; "
                     f"available labels: {list(labels)}"
                 )
-            result = _resolve_axis(axis, (owner, matches[0][1]), unsupported)
-            ch, _, _ = result
+            result = _resolve_axis(axis, matches[0], unsupported)
+            ch = result.channel
             compiled = prog.ro_chs[ch]["trigs"]
             if observed[ch] != compiled:
                 raise ValueError(
@@ -220,8 +242,8 @@ def _collect_reads(
     prog: TimelineProgramV2,
     path: ReadoutPath,
 ) -> tuple[_LabelReads, dict[int, int], dict[int, str]]:
-    """Resolve labels and ADC-local trigger indices along one feasible source path."""
-    indices = dict.fromkeys(prog.ro_chs, 0)
+    """Collect logical label indices and physical trigger counts on one source path."""
+    counts = dict.fromkeys(prog.ro_chs, 0)
     labels: _LabelReads = {}
     unsupported: dict[int, str] = {}
     for observation in path.observations:
@@ -235,25 +257,28 @@ def _collect_reads(
                 if isinstance(owner, PulseReadout)
                 else [tone.ro_ch for tone in owner.cfg.tones]
             )
-            label = emission_label(macro)
-            labels.setdefault(label, []).append(
-                (owner, {ch: indices[ch] for ch in channels})
-            )
+            indices = {
+                ch: index
+                for ch in channels
+                if (index := prog.logical_read_index(ch, counts[ch])) is not None
+            }
+            if indices:
+                labels.setdefault(emission_label(macro), []).append((owner, indices))
         if isinstance(macro, Trigger):
             control = observation.control_scope
             for ch in macro.ros:
                 if control is not None:
                     unsupported[ch] = control
-                indices[ch] += 1
-    return labels, indices, unsupported
+                counts[ch] += 1
+    return labels, counts, unsupported
 
 
 def _resolve_axis(
     axis: Classify | IQ,
     read: tuple[PulseReadout | MuxReadout, dict[int, int]],
     unsupported: dict[int, str],
-) -> tuple[int, int, Callable[[NDArray[np.float64]], NDArray[np.float64]] | None]:
-    """Validate a label/tone and snapshot its optional classifier before acquisition."""
+) -> _ResolvedAxis:
+    """Validate a label/tone and bind its feature conversion before acquisition."""
     owner, indices = read
     if isinstance(owner, PulseReadout):
         if axis.tone is not None:
@@ -272,17 +297,30 @@ def _resolve_axis(
             )
         tone = owner.cfg.tones[tone_index]
         ch, classifier = tone.ro_ch, tone.classifier
+    if ch not in indices:
+        raise ValueError(
+            f"label {axis.read!r}: ADC {ch} read is consumed by a shot mask source"
+        )
     if ch in unsupported:
         raise ValueError(
             f"ADC {ch}: trigger inside {unsupported[ch]} is unsupported for read labels"
         )
-    classify = None
-    if isinstance(axis, Classify):
-        classifier = axis.classifier if axis.classifier is not None else classifier
-        if classifier is None:
-            raise ValueError(f"label {axis.read!r}: classifier missing")
-        classify = classification_processor(classifier)
-    return ch, indices[ch], classify
+    if isinstance(axis, IQ):
+        return _ResolvedAxis(
+            ch,
+            indices[ch],
+            partial(_iq_features, order=axis.order),
+            _QUADRATIC_IQ_WIDTH if axis.order == 2 else _CUBIC_IQ_WIDTH,
+        )
+    classifier = axis.classifier if axis.classifier is not None else classifier
+    if classifier is None:
+        raise ValueError(f"label {axis.read!r}: classifier missing")
+    return _ResolvedAxis(
+        ch,
+        indices[ch],
+        classification_processor(classifier),
+        2 if isinstance(classifier, LinearClassifier) else 3,
+    )
 
 
 def split_sums(
@@ -298,7 +336,7 @@ def split_sums(
     without divide warnings. NaN counts remain NaN.
     No input values are changed; counts are not normalized.
     """
-    if sums.ndim < 1 or sums.shape[-1] != 6:
+    if sums.ndim < 1 or sums.shape[-1] != _QUADRATIC_IQ_WIDTH:
         raise ValueError(
             f"split_sums expected final axis length 6; actual shape {sums.shape}"
         )
@@ -311,3 +349,38 @@ def split_sums(
         where=(counts != 0) & ~np.isnan(counts),
     )
     return counts, means
+
+
+@dataclass(frozen=True)
+class CubicIQMoments:
+    """Count and uncentered, per-shot moments from one cubic IQ axis.
+
+    counts borrows the shot count per cell. first, second and third are
+    detached arrays with one, two or three trailing length-two I/Q axes.
+    They are divided by counts and are NaN for nonpositive or NaN counts.
+    """
+
+    counts: NDArray[np.float64]
+    first: NDArray[np.float64]
+    second: NDArray[np.float64]
+    third: NDArray[np.float64]
+
+
+def split_cubic_sums(sums: NDArray[np.float64]) -> CubicIQMoments:
+    """Decode float64 IQ(order=3) sums into counts and normalized raw moments.
+
+    Preserve all leading axes. Raise ValueError unless the final axis has
+    the ten cubic IQ components. Do not mutate sums or center the moments.
+    """
+    if sums.ndim < 1 or sums.shape[-1] != _CUBIC_IQ_WIDTH:
+        raise ValueError(
+            f"Expected cubic IQ sums with final axis length 10, got {sums.shape}"
+        )
+    counts = sums[..., 0]
+    raw = sums / np.where(counts > 0, counts, np.nan)[..., None]
+    return CubicIQMoments(
+        counts=counts,
+        first=raw[..., 1:3],
+        second=raw[..., [[3, 4], [4, 5]]],
+        third=raw[..., [[[6, 7], [7, 8]], [[7, 8], [8, 9]]]],
+    )

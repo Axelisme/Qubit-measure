@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-20，Timeline 自動推算讀取數
+**Last updated:** 2026-11-20，遮罩來源與 reducer 初始化
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -8,7 +8,7 @@
 
 ## Program 層定位
 
-`acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，提供原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。`ProgramResourcesMixin` 提供 dmem 配置及 readout route 保護。
+`acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、逐 shot 遮罩、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，提供原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。`ProgramResourcesMixin` 提供 dmem 配置及 readout route 保護。
 
 `v2.builder.TimelineBuilder` 記錄宣告、線性動作、巢狀 repeat／branch 與最外層往後跳轉。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。`SimulationSoc` acquisition 透過 compiled frontend 執行 TimelineProgramV2 的受支援 instruction effects。
 
@@ -96,17 +96,51 @@ Host classification uses `acquire_summed` with read axes, not an acquire option.
 from native Pulse or Mux cfg by ADC number. Missing calibration, wrong type and
 unknown ADC raise ValueError. It never reads the live library.
 
+## Registered shot masks
+
+Use `register_shot_mask_source(consumed_reads, source)` on a program or
+`TimelineBuilder`. The declaration maps ADC channel numbers to zero-based physical
+read indices. For each completed round, the source receives only its declared
+reads as float64 `(points, reps, reads, 2)` IQ divided by integration length,
+without IQ-offset subtraction. It returns a bool `(points, reps)` array. Sources
+run in registration order, and a shot is kept only if every source returns True.
+Program registration rejects non-integer or negative indices. Builder records
+its explicit registrations and transfers them at build. A module can register
+its own sources through `Module.register_shot_mask_sources(prog)` after the
+program assembles the body.
+
+The integrated result and round hook omit consumed reads and any ADC with no
+remaining reads. They keep the other ADCs and reads in declaration and trigger
+order. Each point is the sum of the kept length-normalized IQ, after the usual
+`remove_offset` correction, divided by all reps across completed rounds, not
+the number of kept shots. `get_raw()` still returns physical integer buffers
+with all triggers. `get_shot_result()` instead returns the unfiltered integer IQ
+of visible reads in `(points, reps, reads, 2)` order, plus the round's bool mask.
+With no sources, the mask is all True and the native averaging path is unchanged.
+Native `threshold` projection and decimated acquisition reject programs with
+registered sources. `check_shot_mask_options` applies the same rejection
+before a caller starts acquisition or retries. Summed acquisition passes the
+mask to the reducer.
+
 ## Summed acquisition
 
-`acquire_summed(soc, processor=..., rounds=1, step_rounds=False, **qick_options)`
-passes every declared ADC to one `acquisition.ShotSumProcessor`. Each float64
-array has shape `(points, reps, reads, 2)`: integer ADC integrals divided by the
-rounded integration length, without IQ-offset subtraction. Non-reps loops are
-flattened in C order. The processor returns float64 `(points, *axes)` per-point
-sums. The framework snapshots each completed round and adds its sums without
-averaging reps or rounds. Final data and round hooks have shape
-`(*point_dims, *axes)`. Invalid dtype, point count, zero-length output axes or
-changing output shape raises ValueError with expected and actual values.
+Pass one `acquisition.ShotReducer[State]` as `reducer=` to
+`acquire_summed(soc, reducer=..., rounds=1, step_rounds=False, **qick_options)`.
+The framework calls `start(points)` once per acquire and stores its return value.
+`points` is the product of the non-rep loop sizes, or 1 with no sweep. Additive
+reducers start with float64 zeros shaped `(points, *axes)`.
+Each completed round calls `add(state, shots, mask)` and replaces the state with
+the return value. The framework calls `output(state)` for round hooks and the
+final result, without averaging. It restores the point dimensions to give
+`(*point_dims, *axes)` and detaches the array from the reducer's state.
+
+The `shots` mapping keys are ADC channel numbers. Consumed reads and mask-only
+ADCs are omitted. Each float64 array has shape `(points, reps, reads, 2)`. Values
+are integer ADC integrals divided by the integration length, without IQ-offset
+subtraction. Non-reps loops are flattened in C order. The bool `(points, reps)`
+mask marks kept shots and is all True when no sources are registered.
+Reducer outputs must be float64 `(points, *axes)` with a fixed shape and no
+empty axes. Invalid outputs raise ValueError with expected and actual values.
 
 Hardware and simulation share this processing and accumulation path. Cancellation
 discards incomplete rounds and preserves completed sums; no completed round raises
@@ -117,8 +151,11 @@ its existing stepped-acquisition rejection. Explicit `threshold`, `angle` and
 
 `v2.shot_sums(prog, axes)` resolves reads after compilation. Each `v2.Classify`
 axis contributes a one-hot vector, while `v2.IQ` contributes
-`(1, I, Q, I², IQ, Q²)` in that order. The processor sums their ordered outer
-products over reps. Two IQ axes give a `(points, 6, 6)` array, including each
+`(1, I, Q, I², IQ, Q²)` in that order by default. `v2.IQ(read, order=3)`
+appends `(I³, I²Q, IQ², Q³)` for a ten-component axis. Use one cubic axis
+on the terminal read to compute g/e separation SNR and skew from the same
+completed-round sums used for live updates. The reducer sums ordered outer
+products over kept shots. The first IQ component counts those shots. Two default IQ axes give a `(points, 6, 6)` array, including each
 read's second moments and their cross moments. Classify uses a detached explicit
 classifier or the readout cfg's classifier. Both `Classify` and `IQ` with `tone=None` select a pulse
 readout or their mux readout's only tone. Multi-tone mux requires a zero-based cfg
@@ -136,54 +173,58 @@ read keeps the same ADC-local index, ADC channel, frequency, integration window,
 phase and cfg classifier. Generator gain and waveform may differ: a zero-gain
 `PulseReadout("r1", cfg, gain=0.0)` retains its generator time slot and ADC trigger.
 The timeline compiler requires equal counts on every ADC at each Branch exit
-and author label, then fills QICK's per-shot acquisition layout. Build the
-program, construct `shot_sums`, then acquire. Missing labels or unequal indices
-or ADC settings raise ValueError naming the cases and the differing item.
-Triggers in Repeat or between a jump and its target label are unsupported on
-selected ADCs. Other ADCs may still use control flow. If an opaque macro emits a trigger the label resolver cannot see, the
-processor rejects the label rather than guessing its read index.
+and author label. It fills QICK's per-shot acquisition layout with physical
+counts, including reads consumed by mask sources. Build the program, construct
+`shot_sums`, then acquire. The reducer uses logical indices and counts after
+those reads are removed. Missing labels or unequal indices or ADC settings
+raise ValueError naming the cases and the differing item. Triggers in Repeat or
+between a jump and its target label remain unsupported on selected ADCs. Other
+ADCs may still use control flow. The reducer checks source trigger coverage
+against the physical layout on each selected ADC and rejects opaque triggers
+rather than guessing a read index.
 `v2.split_sums(sums)` requires a final six-component IQ axis and uses only
 count, ΣI and ΣQ to return counts and complex conditional means. Other lengths
 raise ValueError. Zero counts stay zero, and unmeasured NaN counts stay NaN.
 Both give NaN means without divide warnings.
+`v2.split_cubic_sums(sums)` requires a ten-component IQ axis and returns the
+counts and uncentered per-shot moment arrays used by SNR analysis.
 
 `v2.chain_sweep_sums(prog, read)` selects a tagged or untagged `PulseReadout`
 inside one fixed body `repeat` of at least 16 reads. The selected ADC must
-have no other triggers. The processor reduces
-each dwell to running moment sums for readout-chain analysis; `acquire_summed`
-adds them across rounds. Feature definitions, array layout and validation are in
-the [`chain_sweep_sums` docstring](v2/chain_sweep.py).
+have no other triggers. The reducer sums moments from kept dwells across
+rounds. Feature definitions, array layout and validation are in the
+[`chain_sweep_sums` docstring](v2/chain_sweep.py).
 
 `v2.thermal_chain_sums(prog, read)` selects exactly 16 consecutive reads of
 one PulseReadout, unrolled or in one fixed Repeat. Its 108 columns
 contain shot count and 107 sums: all 16 I/Q read means, R1 self moments,
 all 15 adjacent pairs and the three early long-lag pairs (R1,R3..R5).
-Each pair retains all four cross components; the processor applies no analysis
-weights. Reps and rounds add without averaging. The caller owns thermal
+Each pair retains all four cross components. The reducer sums kept reps across
+completed rounds without averaging or applying analysis weights. The caller owns thermal
 relaxation and the absence of drives or extra waits within the shot. The three
 thermal-chain ro_optimize experiments set K through relax_delay and retain every
-adjacent pair for offline scoring; the processor does not choose the best setting.
+adjacent pair for offline scoring; the reducer does not choose the best setting.
 
 `v2.chain_cycle_sums(prog, read)` selects one `PulseReadout` owner whose 16 reads
 per shot form one thermalised `(D R R)^8` cycle per rep, either unrolled or as two
 reads in a fixed Repeat of eight. The selected ADC must have no other triggers.
-The processor reduces each cycle to 65 numbers and returns their per-point augmented
-sums; `acquire_summed` adds them across rounds. Slot layout and validation are in
+The reducer maps each kept cycle to 65 numbers and accumulates their per-point
+augmented sums across rounds. Slot layout and validation are in
 the [`chain_cycle_sums` docstring](v2/chain_cycle.py).
 
 `v2.rpi_sums(prog, read)` 將每個 rep 當作一個獨立 Rπ cycle，
-每個完整 round 回傳 35 欄的可加摘要。Lag 1..15 只在 cycle 內配對，
+只加總保留的 cycle，回傳 35 欄摘要。Lag 1..15 只在 cycle 內配對，
 統計量跨 reps 與 rounds 累加。多 setting 必須使用 `reps_innermost=True`。
 Caller 排程 Rπ、設定 `relax_delay=0` 並校準 π。Rep 之間的斷流不影響 lag，
-processor 無法偵測 cycle 內未出現在輸入的物理斷流。
+reducer 無法偵測 cycle 內未出現在輸入的物理斷流。
 固定 H=1 的 metadata 由總 reads／segment 次數恢復單段長度，不能合併不同長度。
 欄位與建構限制見 [`rpi_sums` docstring](v2/rpi.py)。
 
 Build first, then resolve labels and call
-`sched.run_acquire_summed(program, soc, processor=..., rounds=...,
+`sched.run_acquire_summed(program, soc, reducer=..., rounds=...,
 options=RunOptions(converter=...))`.
-The optional converter receives both cumulative and final sums.
-It owns any normalization and signal-slot shape. Without a converter, sums are written unchanged.
+The optional converter receives both cumulative and final reducer outputs.
+It owns any normalization and signal-slot shape. Without a converter, Schedule writes the output unchanged.
 Retry, progress and stop conditions follow the other Schedule run methods.
 
 ## Shot time
@@ -204,8 +245,8 @@ module may be emitted twice with distinct emit tags. Every herald class is kept:
 ```python
 from zcu_tools.program.v2 import Classify, IQ, shot_sums, split_sums
 
-processor = shot_sums(prog, [Classify("herald"), IQ("terminal")])
-sums = prog.acquire_summed(soc, processor=processor, rounds=2, progress=False)
+reducer = shot_sums(prog, [Classify("herald"), IQ("terminal")])
+sums = prog.acquire_summed(soc, reducer=reducer, rounds=2, progress=False)
 counts, means = split_sums(sums)
 ground_counts = counts[..., 0]
 conditional_iq = means[..., 0]
@@ -226,11 +267,10 @@ shots.
 
 - `ImproveAcquireMixin` 直接擴充 `qick.qick_asm.AcquireMixin`，是 `program` 層最核心的 QICK 接點。
 - Accumulated acquire 在寫入 chunk 前拒絕超過預期的累計 shots，拋出 `program.acquisition.AcquisitionContractError`。訊息包含預期 shots、先前已收 shots、本次 shots、各 channel 的 IQ 列數與從 0 起算的 round index。錯誤 chunk 不寫入、不裁切，先前 raw chunks 保留，不發布未完成的 round。
-- 主要加值分成四類：
+- 主要加值分成三類：
   - 型別友善封裝（`TypedAcquireMixin`）：補強 `acquire()` / `acquire_decimated()` / `get_raw()` 等回傳型別。
-  - 統計追蹤（`TrackerMixin`）：在 `finish_round()` 內注入 tracker 更新流程。
   - 提前停止（`EarlyStopMixin`）：透過單一 `cancel_flag` 在 `finish_round()` 內中止後續 rounds；accumulated acquisition的內部reps進度走共用`progress_bar.make_pbar` factory，GUI ambient factory與terminal fallback使用同一生命週期，正常或停止都會close並移除暫時進度項。
-  - 每輪 callback（`RoundHookMixin`）與 joint-ADC shot sums（`ImproveAcquireMixin`）。`round_hook(round_count, raw, cancel_flag)` 只收到 completed round，可呼叫 `cancel_flag.set()` 表示不開始下一 round。
+  - 每輪 callback（`RoundHookMixin`）與 joint-ADC shot reduction（`ImproveAcquireMixin`）。`round_hook(round_count, raw, cancel_flag)` 只收到 completed round，可呼叫 `cancel_flag.set()` 表示不開始下一 round。
 
 ## `AcquireMixin` 行為對照（常見踩點）
 
@@ -238,12 +278,10 @@ shots.
   - `acquire()`/`acquire_decimated()` 先建立 `acquire_params`，再進入 `prepare_round()` + `finish_round()` 迴圈。
   - `finish_acquire()` 負責 rounds 聚合（accumulated 或 decimated）。
 - 擴充掛點：
-  - `TrackerMixin.finish_round()`：利用原生 `self.acc_buf`、`self.ro_chs`、`self.avg_level` 更新 tracker。
   - `RoundHookMixin.finish_round()`：每 completed round 呼叫 `round_hook`，輸入增量摘要資料與同一個 stop flag。
-  - `ImproveAcquireMixin._process_accumulated()`：明傳單一 sum processor 時處理每點總和，其餘委派原生 IQ／threshold 路徑。
+  - `ImproveAcquireMixin._process_accumulated()`：更新 shot reducer state 或計算遮罩平均，其餘委派原生 IQ／threshold 路徑。
 - 相容性關鍵：
   - 擴充層維持 `AcquireMixin` 的 `extra_args` 傳遞模式，避免破壞原生 acquire 參數流。
-  - 若非 `accumulated` 或有 threshold 時，部分統計路徑會顯式 `NotImplementedError`，這是刻意防呆。
 
 ## soccfg 摘要顯示（`describe_soc`）
 
@@ -304,4 +342,4 @@ Pulse、ConfigReadout、Trigger 在 preprocess 後以 `t_regs['t'] = 's_out_time
   - `finish_round()` 回傳語意（是否仍為「還有下一 round」）
   - `_average_buf()` 的輸入 shape 假設
 - `EarlyStopMixin._finish_accumulated_round` 鏡射 QICK `AcquireMixin.finish_round` 的 accumulated branch，因為上游 loop 沒有提前退出的 seam。QICK 升版時，維護者須人工對照上游 `AcquireMixin.finish_round` 並移植相關變更。維護者也須透過現有公開介面的測試驗證 acquisition 與 early-stop 行為。
-- mixin 疊加順序有語意。`tests/program/test_acquire_mro.py` 保留既有 `finish_round()` 解析鏈與 `MyProgramV2` 相對順序測試；新增 mixin 時，以 `tests/program/test_acquisition.py` 的公開 acquisition 案例驗證加權、round hook 與取消行為，不固定完整 MRO 排列。
+- 改變 mixin 組合時，以 `tests/program/test_acquisition.py` 的公開取數案例驗證完成輪次、round hook 與取消行為。

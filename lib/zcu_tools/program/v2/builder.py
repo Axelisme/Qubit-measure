@@ -1,11 +1,13 @@
 """Record timeline actions without acquiring data or touching hardware."""
 
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from typing import Literal, TypedDict, Unpack, override
 
 from qick import QickConfig
 from qick.asm_v2 import QickParam
+
+from zcu_tools.program.acquisition import ShotMaskSource
 
 from .modules.base import Module
 from .sweep import SweepCfg
@@ -369,6 +371,21 @@ class TimelineBuilder:
         self._ensure_recording()
         self._declare(module)
         self._record(lambda prog: prog.emit(module, timeline=timeline, tag=tag))
+
+    def register_shot_mask_source(
+        self, consumed_reads: Mapping[int, Sequence[int]], source: ShotMaskSource
+    ) -> None:
+        """Record a mask callback without executing it; raise ValueError after build.
+
+        consumed_reads maps ADCs to zero-based physical reads in callback
+        order. On acquisition, source takes those length-normalized IQ arrays
+        and returns bool (points, reps). See the program's registration method.
+        """
+        self._ensure_recording()
+        recorded = {ch: tuple(reads) for ch, reads in consumed_reads.items()}
+        self._initialize_actions.append(
+            lambda prog: prog.register_shot_mask_source(recorded, source)
+        )
 
     def _declare(self, module: Module) -> None:
         if not any(module is declared for declared in self._modules):

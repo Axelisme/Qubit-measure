@@ -310,7 +310,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
                 )
                 if shots is None:
                     break
-                signals_buffer[step].set(raw_shots_to_signal(program))
+                signals_buffer[step].set(raw_shots_to_signal(shots, program)[0])
         signals = signals_buffer.array
 
         # 2. Keep acquisition order; physical G/E mapping belongs to analysis.

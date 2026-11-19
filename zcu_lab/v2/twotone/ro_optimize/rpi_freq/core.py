@@ -247,7 +247,7 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
             sched.run_acquire_summed(
                 prog,
                 context.soc,
-                processor=rpi_sums(prog, "readout"),
+                reducer=rpi_sums(prog, "readout"),
                 rounds=cfg.rounds,
             )
 

@@ -1,12 +1,15 @@
 """Compile a repeated readout into per-dwell augmented moment sums."""
 
-from collections.abc import Mapping
-
 import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import Trigger
 
-from zcu_tools.program.acquisition import ShotSumProcessor
+from zcu_tools.program.acquisition import ShotReducer
+from zcu_tools.program.shot_processing import (
+    AdditiveShotReducer,
+    ShotIQ,
+    zero_rejected_iq,
+)
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
@@ -19,7 +22,9 @@ from .readout_observation import observe_readouts
 from .timeline import TimelineProgramV2
 
 
-def chain_sweep_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
+def chain_sweep_sums(
+    prog: TimelineProgramV2, read: str
+) -> ShotReducer[NDArray[np.float64]]:
     """Resolve a compiled pulse readout label and sum chain statistics over reps.
 
     read is an emit tag, or the module name of an untagged PulseReadout. Its ADC
@@ -30,25 +35,28 @@ def chain_sweep_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     incoming read counts that differ from the Repeat raise ValueError with
     expected and actual values. Other ADC inputs are ignored.
 
-    The returned processor borrows ADC-keyed float64 (points, reps, n, 2) arrays
-    without mutation and returns float64 (points, 12, 12) augmented sums Σ z zᵀ.
+    The reducer borrows ADC-keyed float64 (points, reps, n, 2) arrays.
+    It accumulates float64 (points, 12, 12) augmented sums Σ z zᵀ of kept shots.
     z contains 1, mean I/Q, mean I²/IQ/Q², lag-1 II/(IQ+QI)/QQ means, then the
     sums of those three lag means over lags 2–15. Lag k uses n-k pairs inside
     each shot, never across reps. Entry [0,0] counts dwells, [0,1:] holds the
     eleven sums and [1:,1:] holds their products. No normalization over reps or
-    rounds is applied; acquire_summed adds completed rounds.
+    rounds is applied. The reducer adds completed rounds.
     """
     ch, n = _resolve_chain(prog, read)
 
-    def process(iq: Mapping[int, NDArray[np.float64]]) -> NDArray[np.float64]:
+    width = 12
+
+    def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
         values = iq[ch]
         if values.ndim != 4 or values.shape[2:] != (n, 2):
             raise ValueError(
                 f"ADC {ch}: expected (points, reps, {n}, 2); actual {values.shape}"
             )
+        values = zero_rejected_iq(values, mask)
         i, q = values[..., 0], values[..., 1]
-        vectors = np.empty((*values.shape[:2], 12), dtype=np.float64)
-        vectors[..., 0] = 1
+        vectors = np.empty((*values.shape[:2], width), dtype=np.float64)
+        vectors[..., 0] = mask
         vectors[..., 1:6] = np.stack(
             [
                 i.mean(axis=2),
@@ -75,7 +83,7 @@ def chain_sweep_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
             vectors[..., start : start + 3] += correlations
         return np.einsum("pri,prj->pij", vectors, vectors)
 
-    return process
+    return AdditiveShotReducer(round_sums, (width, width))
 
 
 def _resolve_chain(prog: TimelineProgramV2, read: str) -> tuple[int, int]:

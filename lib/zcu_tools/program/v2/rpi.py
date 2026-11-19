@@ -1,12 +1,15 @@
 """Stationary R-pi readout sums over complete acquisition rounds."""
 
-from collections.abc import Mapping
-
 import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import Trigger
 
-from zcu_tools.program.acquisition import ShotSumProcessor
+from zcu_tools.program.acquisition import ShotReducer
+from zcu_tools.program.shot_processing import (
+    AdditiveShotReducer,
+    ShotIQ,
+    zero_rejected_iq,
+)
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
@@ -15,7 +18,7 @@ from .readout_observation import observe_readout_paths, observe_readouts
 from .timeline import TimelineProgramV2
 
 
-def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
+def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotReducer[NDArray[np.float64]]:
     """Resolve a compiled R-pi readout and reduce a complete round to sums.
 
     read is an emit tag or untagged PulseReadout name. The caller owns the Rπ
@@ -32,28 +35,25 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     No pulse physics is checked. Discontinuities between reps do not affect
     lags; hidden discontinuities inside a rep cycle cannot be detected.
 
-    Each call borrows ADC float64 (points, reps, reads, 2) IQ for one complete
+    Each round borrows ADC float64 (points, reps, reads, 2) IQ for one complete
     round: integer integrals / rounded integration length, without IQ-offset
     subtraction. Each rep at each setting is one segment of length reads.
-    Lag 1..15 pairs stay within that cycle; sums accumulate across reps and
-    rounds. Rep, round and setting boundaries never contribute pairs. No inputs
-    are changed and other ADC inputs are ignored. Shape/dtype mismatches raise
+    Lag 1..15 pairs stay within that cycle. The reducer accumulates sums
+    across kept reps and completed rounds. Pairs never cross rep, round or
+    setting boundaries. Inputs are unchanged and other ADCs are ignored.
+    Shape or dtype mismatches raise
     ValueError with expected and actual values; a missing selected ADC raises
     KeyError. Points, reps and reads must match the compiled program.
-    The processor has no state between calls; acquire_summed sums completed
-    rounds and discards incomplete
-    rounds using its existing cancellation contract.
 
     Return float64 (points, 35) additive records, with Python column indices:
-    0: completed cycle count S (reps per round); 1: read count N = reps * reads;
+    0: kept cycle count S; 1: read count N = S * reads;
     2:4: ΣI, ΣQ; 4: Σ(I²+Q²); 5:20: lag dot-product sums j=1..15;
     20:35: actual integer pair counts C_j. These are 18 moment sums, in ADC
     units for first moments and ADC units squared for square/products. Counts
     are integers encoded as float64. H=1 metadata recovers segment length L=N/S,
-    not N itself; do not combine records with different L. Each segment adds
-    max(L-j, 0) pairs, so each round adds reps * max(reads-j, 0). Pass one
-    pooled record to RPiSums.from_processor in
-    analysis.readout_chain; no per-round normalization is applied here.
+    not N itself; do not combine records with different L. Each kept segment adds
+    max(L-j, 0) pairs. This reducer does not normalize rounds. Decode a pooled
+    record with the analysis API `RPiSums.from_processor(record)`.
     """
     dims, avg = prog.loop_dims, prog.avg_level
     if dims is None or avg is None:
@@ -64,27 +64,30 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     ch, reads = _resolve_readout(prog, read)
     expected_shape = (points, dims[avg], reads, 2)
 
-    def process(iq: Mapping[int, NDArray[np.float64]]) -> NDArray[np.float64]:
+    width = 35
+
+    def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
         values = iq[ch]
         if values.shape != expected_shape or values.dtype != np.float64:
             raise ValueError(
                 f"ADC {ch}: expected float64 {expected_shape}; actual "
                 f"{values.dtype} {values.shape}"
             )
-        reps = values.shape[1]
-        sums = np.zeros((points, 35), dtype=np.float64)
-        sums[:, 0] = reps
-        sums[:, 1] = reps * reads
+        values = zero_rejected_iq(values, mask)
+        cycles = mask.sum(axis=1)
+        sums = np.zeros((points, width), dtype=np.float64)
+        sums[:, 0] = cycles
+        sums[:, 1] = cycles * reads
         sums[:, 2:4] = values.sum(axis=(1, 2))
         sums[:, 4] = np.einsum("prti,prti->p", values, values)
         for lag in range(1, 16):
             early = values[:, :, :-lag]
             late = values[:, :, lag:]
             sums[:, 4 + lag] = np.einsum("prti,prti->p", early, late)
-            sums[:, 19 + lag] = reps * max(reads - lag, 0)
+            sums[:, 19 + lag] = cycles * max(reads - lag, 0)
         return sums
 
-    return process
+    return AdditiveShotReducer(round_sums, (width,))
 
 
 def _resolve_readout(prog: TimelineProgramV2, read: str) -> tuple[int, int]:

@@ -40,15 +40,31 @@ The saved readout cfg must supply circle g/e centers and radius at
 linear or radius-free classifiers and requests GE Post. After changing readout
 settings, repeat GE and Post before using the classifiers.
 
-Set `reset` to an accepted reset cfg to emit it before every sequence.
-The default `None` emits no reset. The independent
-[`two_qubit/rb_heralded`](guide_heralded.md) experiment adds a herald read
-between optional reset and the sequence. Both versions use the same paired
-sequence construction. The heralded version jointly fits gg and ee return survival.
+Reset defaults to `None`. To emit a preparation pulse before each sequence,
+select an ordinary reset. To keep only shots classified as g on both role
+tones before the sequence, select a `reset/mux_herald` module in Reset.
+The Form does not offer `reset/herald`, which requires a pulse readout.
+The module's `readout` must match the terminal Readout field, including the
+classifiers and the full tone order. Reference the same library key in both
+fields. For F1 and F2 at positions 0 and 1 in the full tone list, the module is:
+
+```yaml
+type: reset/mux_herald
+readout: MG12.readout.main
+keep: {'0': g, '1': g}
+```
+
+Use the actual F1 and F2 tone positions, not ADC numbers. Quote both keys.
+An optional `prepare` emits one ordinary reset or pulse before the herald read.
+The mux readout's delays apply to both reads. RB saves only terminal counts
+from shots that pass both herald classifications. To preserve all herald
+outcomes and fit gg and ee return survival jointly, use the separate
+[`two_qubit/rb_heralded`](guide_heralded.md) experiment.
 
 ## Sequences and cost
 
-`depth` is an increasing list of distinct nonnegative Clifford counts.
+`depth` is a strictly increasing list of nonnegative Clifford counts.
+Duplicate depth values are listed in the configuration error before build.
 `seed` is a list of distinct nonnegative 31-bit integers. Each seed fixes the
 random Clifford draws. Keep these values with the data. Reusing a seed at
 shallower depths keeps the same random Clifford prefix.
@@ -96,17 +112,19 @@ Each depth/seed/arm has one compiled program and `rounds` host acquisitions of
 `reps` shots. Every host acquisition uses `rounds=1` to preserve its own slot.
 Without reset, the nominal B00 start leaves the thermal initial population in
 place. Terminal F1/F2 classification happens during acquisition. Circle outcomes
-are g, e and other; radius boundaries and equidistant points are other.
-The live plot shows joint00 from counts accumulated over seeds and rounds
-in each arm. This count-weighted view is not the equal-seed decay fit.
+are g, e and other. Radius boundaries and equidistant points are other.
+The live plot shows joint00 from accepted counts accumulated over seeds and
+rounds in each arm. This count-weighted view is not the equal-seed decay fit.
 
 ## Save, cancel and analyze
 
 Result `sums` is float64 with axes `depth, seed, arm, round, F1 class, F2 class`
 and shape `(Nd, Nseed, 2, Nround, 3, 3)`. Arm 0 is reference and arm 1 is
 CZ-interleaved. Each class axis is ordered g, e, other. Counts preserve joint
-outcomes from the same shot. They are not marginal products or probabilities.
-There are no saved shot or tone axes, and storage does not grow with `reps`.
+outcomes from the same accepted shot. They are not marginal products or probabilities.
+Heralding adds no saved axis or field, and storage does not grow with `reps`.
+At each depth, seed and arm with all rounds finished, sum the class counts over
+rounds and divide by `reps × rounds` to obtain the herald acceptance fraction.
 
 Cooperative Stop preserves completed whole rounds in fixed slots. Unfinished
 rounds stay NaN. `stop_requested` records a stop request, not data completeness.
@@ -116,21 +134,23 @@ Save counts and cfg before closing the source. Native Load restores that
 source for Analyze and leaves the current Form unchanged. Old per-shot IQ
 files are rejected because they lack `sums`; there is no conversion fallback.
 
-Analyze derives each round's joint00 survival as `N_gg/N_total`.
-Other outcomes stay in the denominator. It does not classify IQ again.
-Zero-total rounds give NaN survival. Malformed or partially populated count
-rounds cause an error.
+Analyze divides each round's terminal gg count by the sum of accepted counts,
+including other. It does not classify IQ again. A point is complete once every
+round has run, even if some rounds accepted no shots. A zero-acceptance round
+has undefined survival, so the fit excludes that seed/round pair if either arm
+has zero acceptance at any depth. Malformed or partially populated count rounds
+cause an error.
 
-Only round/seed pairs complete across both arms and every requested depth enter
-the decay analysis. Analyze averages complete rounds within each seed and then
-weights seeds equally. It requires at least two paired seeds and four distinct
-depths. An incomplete run may meet those conditions, but it must retain the
-same source identities and complete curves.
+The decay fit uses only seed/round pairs with finite survival across both arms
+and every requested depth. Analyze averages those rounds within each seed and
+then weights seeds equally. It requires at least two paired seeds and four
+distinct depths. An incomplete run can meet those requirements if it retains
+enough complete curves.
 
 ## Interpreting the result
 
-Analyze returns only `estimate`, `fit_quality` and `reason`. Per-depth survival,
-round masks and fitted curves stay inside analysis for plotting.
+Analyze reports `estimate`, `fit_quality`, `reason` and `tail_warning`.
+Per-depth survival, round masks and fitted curves stay inside analysis for plotting.
 
 Paired decay analysis fits each arm to `A*p**depth+B`.
 The two-qubit dimension is 4. The reported quantities are
@@ -146,6 +166,11 @@ uncertainty requires a different model. The summary reports paired seed/round
 counts and valid bootstrap fits. The default is 1,000 deterministic resamples with bootstrap seed 42.
 
 The fit plot shows equal-seed paired means and available fitted decays.
+When the measured reference arm joint00 survival at the deepest depth is above
+0.2, `tail_warning` reports the paired mean and depth. The decay tail is
+unresolved, so the fitted `p` may be biased high. Add deeper depths and rerun.
+This is an advisory threshold on measured survival, not a test against an
+assumed 0.25 asymptote, which can be lower for a thermal ensemble.
 The summary includes each arm's R² and normalized residual RMS. Parameter
 covariance and marginal parameter errors are unavailable; use the paired-seed interval and residual diagnostics for manual model review.
 Insufficient data, absent saved cfg, flat decay, invalid fits or unstable bootstrap

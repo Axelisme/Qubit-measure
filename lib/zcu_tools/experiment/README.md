@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-18
+**Last updated:** 2026-11-20
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -237,7 +237,7 @@ Schedule acquisition 的 retry 與 data-driven early stop 改由日誌提供診�
   `ConfigBase` 提供欄位驗證、`with_updates` 和 `to_dict`；native restore 集中處理歷史 cfg 不相容的 warning 與 cfg=None。
 - `cfg_assembler.py` 提供 `ExperimentScalar` 與 `ExperimentCfgValue`，描述 Run 接縫的 mapping 值型別。GUI Form 完成 module materialization 與 sweep 轉換並驗證 adapter 輸入。Adapter.run 將輸入轉成實際實驗 cfg 並回傳 RunRecord，host 保留該 record。Notebook caller 直接提供 typed cfg。
 - `config.py` 提供繪圖尺寸 `figsize`；cfg model 與組裝由各自 owner 負責。
-- `utils/` 提供 cfg 到 datafile comment codec 的 mapping 與規則 sweep 建構。Comment envelope 的 JSON 編解碼與 Labber reader 的 labels／units／shape／numeric container 驗證由 datafile 擁有；experiment 保留 typed cfg validation、memory units 與 generated coordinate 語意。儀器角色與單位政策由使用者套件的 helpers 擁有。Sweep helper 使用 program/v2 的 `SweepCfg`。`experiment.utils.make_sweep` 是 core 與 Notebook 共用的 sweep 建構入口。它與 [v2/utils](v2/README.md#v2-工具與實驗輔助) 的硬體量化、SNR 和 tracker 工具分開。
+- `utils/` 提供 cfg 到 datafile comment codec 的 mapping 與規則 sweep 建構。Comment envelope 的 JSON 編解碼與 Labber reader 的 labels／units／shape／numeric container 驗證由 datafile 擁有；experiment 保留 typed cfg validation、memory units 與 generated coordinate 語意。儀器角色與單位政策由使用者套件的 helpers 擁有。Sweep helper 使用 program/v2 的 `SweepCfg`。`experiment.utils.make_sweep` 是 core 與 Notebook 共用的 sweep 建構入口。它與 [v2/utils](v2/README.md#v2-工具與實驗輔助) 的硬體量化與 SNR 工具分開。
 
 ## Device 操作邊界
 
@@ -251,4 +251,4 @@ Package root 保留公開 exports，只有存取對應名稱時才載入其 owne
 
 GUI 的 Library、Inspect 與 module writeback 共用 `gui.form` 與 `gui.form_adapter`，直接提交持久 Spec，不經 experiment 的第二套編輯樹。ModuleWriteback 的 proposal 是 ModuleSpec；experiment 仍只接收執行用 typed cfg。跨宿主契約見 ADR-0065、ADR-0008。
 
-- [v2](v2/README.md)：program/v2 的通用 runtime 與量化、SNR、tracker 工具。[runtime](v2/runtime/README.md) 說明 Schedule、buffer、run_acquire 與 executor 的執行機制。具體實驗與前端附件由使用者套件提供，組合根注入 catalog，不由框架反向載入。
+- [v2](v2/README.md)：program/v2 的通用 runtime、量化與 SNR 工具。[runtime](v2/runtime/README.md) 說明 Schedule、buffer、run_acquire 與 executor 的執行機制。具體實驗與前端附件由使用者套件提供，組合根注入 catalog，不由框架反向載入。

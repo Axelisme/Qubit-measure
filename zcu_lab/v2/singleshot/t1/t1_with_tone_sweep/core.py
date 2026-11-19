@@ -372,7 +372,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                     program,
                     soc,
                     options=RunOptions(retry=cfg.acquire_retry),
-                    processor=shot_sums(program, [axis]),
+                    reducer=shot_sums(program, [axis]),
                     rounds=cfg.rounds,
                 )
 
