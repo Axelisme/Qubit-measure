@@ -5,8 +5,9 @@ from __future__ import annotations
 import time
 import warnings
 from collections import Counter
-from collections.abc import Collection, Iterable, Mapping, Sequence
-from contextlib import closing, nullcontext
+from collections.abc import Collection, Generator, Mapping, Sequence
+from contextlib import closing, contextmanager, nullcontext
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from threading import Event, Lock
@@ -27,8 +28,19 @@ from ._inspection import DispatchCandidate, DispatchInspection
 from ._parallel import execution_pool, native_limit
 from ._timeline_selection import select_points
 from ._validation import density, integers, owned, project_readout_densities, shape
-from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
-from .telemetry import FamilyRouting
+from .secular import (
+    FluxSchedule,
+    FluxWaveform,
+    ModelSource,
+    SegmentShift,
+    StarkOrderInversion,
+)
+from .telemetry import (
+    FamilyRouting,
+    first_opencl_detection_error,
+    merge_family,
+    warn_stark_order,
+)
 
 # Numerical algorithm revision used by capture, reporting, and simulator caches.
 SEGMENT_NUMERIC_VERSION = "segment-engine-v14"
@@ -386,6 +398,9 @@ class PathDiagnostics:
     the identity of the device that computed the cached result.
     """
 
+    stark_order_inversions: tuple[StarkOrderInversion, ...] = ()
+    """Adjacent state inversions from applied shifts, even with telemetry off."""
+
     def for_reuse(self, *, telemetry: bool) -> PathDiagnostics:
         """Preserve routes but report no kernel calls for an exact-result hit.
 
@@ -403,7 +418,7 @@ class PathDiagnostics:
                     cache_hits=count,
                     estimated_cpu_s=0.0,
                     duration_ns=self.duration_ns_by_kernel[name],
-                    opencl_detection_error=_first_opencl_detection_error(
+                    opencl_detection_error=first_opencl_detection_error(
                         (self.routing.get(name),)
                     ),
                 )
@@ -483,8 +498,9 @@ def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
     frontend_cpu_s are summed.
     max_trace_error is the maximum, or zero for empty parts. Routing sums each
     family's row counts, CPU times, hits, rejections, costs, builds,
-    admission rows and endpoints by tableau and OpenCL. For each family, the first nonempty
-    OpenCL detection failure is retained in input order.
+    admission rows and endpoints by tableau and OpenCL. Stark-order observations
+    concatenate in input order, including repeated spans in distinct outcomes.
+    Routing keeps each family's first nonempty OpenCL detection failure.
     estimated_cpu_s is None if any contributing family estimate is unknown.
     Reuse-hit diagnostics participate exactly as returned, without adding hits
     or replacing their counts. Empty parts returns empty PathDiagnostics.
@@ -512,50 +528,14 @@ def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
         {name: len(indices) for name, indices in members.items()},
         exceeded,
         max((part.max_trace_error for part in parts), default=0.0),
-        {name: _merge_family(reports) for name, reports in routing.items()},
+        {name: merge_family(reports) for name, reports in routing.items()},
         sum(part.frontend_cpu_s for part in parts),
         {name: tuple(sorted(indices)) for name, indices in members.items()},
         duration_ns_by_kernel=durations,
+        stark_order_inversions=tuple(
+            entry for part in parts for entry in part.stark_order_inversions
+        ),
         execution_device=next(iter(devices), "cpu"),
-    )
-
-
-def _merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
-    return FamilyRouting(
-        rows=sum(part.rows for part in parts),
-        duration_ns=sum(part.duration_ns for part in parts),
-        prepare_cpu_s=sum(part.prepare_cpu_s for part in parts),
-        apply_cpu_s=sum(part.apply_cpu_s for part in parts),
-        cache_hits=sum(part.cache_hits for part in parts),
-        rejected_rows=sum(part.rejected_rows for part in parts),
-        estimated_cost=sum(part.estimated_cost for part in parts),
-        estimated_cpu_s=(
-            sum(
-                part.estimated_cpu_s
-                for part in parts
-                if part.estimated_cpu_s is not None
-            )
-            if all(part.estimated_cpu_s is not None for part in parts)
-            else None
-        ),
-        prepare_builds=sum(part.prepare_builds for part in parts),
-        prepare_key_builds=sum(part.prepare_key_builds for part in parts),
-        admission_rows=sum(part.admission_rows for part in parts),
-        opencl_rows=sum(part.opencl_rows for part in parts),
-        dp54_rows=sum(part.dp54_rows for part in parts),
-        dop853_rows=sum(part.dop853_rows for part in parts),
-        opencl_detection_error=_first_opencl_detection_error(parts),
-    )
-
-
-def _first_opencl_detection_error(parts: Iterable[FamilyRouting | None]) -> str | None:
-    return next(
-        (
-            part.opencl_detection_error
-            for part in parts
-            if part is not None and part.opencl_detection_error
-        ),
-        None,
     )
 
 
@@ -694,6 +674,7 @@ class Engine:
         self._inventory_chunks = chunks_per_worker is None
         self._lock = Lock()
         self._closed = False
+        self._defer_stark_order = ContextVar("defer_stark_order", default=False)
         self._workers = workers
         self._opencl = (
             None if backend == "cpu" else OpenCLBackend(forced=backend == "opencl")
@@ -749,6 +730,20 @@ class Engine:
                 raise Cancelled()
             return self._routing_reuse.reuse(key, source, budget)
 
+    @contextmanager
+    def defer_stark_order_warnings(self) -> Generator[None]:
+        """Leave Stark-order reporting to a caller composing several evolves.
+
+        Within this scope, evolve on this Engine in the caller's context still
+        returns paths.stark_order_inversions but does not warn about them.
+        Other warnings and contexts are unchanged. Exiting restores reporting.
+        """
+        token = self._defer_stark_order.set(True)
+        try:
+            yield
+        finally:
+            self._defer_stark_order.reset(token)
+
     def evolve(  # noqa: PLR0913  # tolerated: capture is an independent per-call recording option; bundling it into an options type would hide it
         self,
         source: ModelSource,
@@ -795,6 +790,9 @@ class Engine:
         borrow this call's worker pool for eight or more shared prepare keys.
         Local guards run in timeline workers and hand their tables to apply.
         Guard decisions remain independent of worker width and execution order.
+        A shifted segment with reversed adjacent energies keeps its input state
+        order. Inversions remain in paths.stark_order_inversions and produce a
+        UserWarning per affected pair on success unless the caller defers reporting.
         Post-apply accuracy exceedances stay in paths.exceeded_by_kernel and
         produce exactly one RuntimeWarning per call, without retry. Readout
         densities must meet the same invariants as continuation inputs. The
@@ -828,6 +826,7 @@ class Engine:
             content_key = input_key(source, batches, budget)
             frontend_started = time.thread_time() if telemetry else 0.0
             geometry = plan(source, batches)
+            inversions = geometry.stark_order_inversions
             capture_run = (
                 None if captured is None else CaptureRun(geometry, batches, captured)
             )
@@ -886,12 +885,18 @@ class Engine:
                         inventory_chunks=self._inventory_chunks,
                     )
             project_readout_densities(output, geometry.points, budget)
-            if telemetry:
-                paths = replace(paths, frontend_cpu_s=frontend_cpu_s)
+            if telemetry or inversions:
+                paths = replace(
+                    paths,
+                    frontend_cpu_s=frontend_cpu_s,
+                    stark_order_inversions=inversions,
+                )
             result = EvolutionResult(geometry.points, output, paths)
             if cancel.is_set():
                 raise Cancelled()
             paths.warn_exceeded(stacklevel=3)
+            if inversions and not self._defer_stark_order.get():
+                warn_stark_order(inversions)
             self._routing_reuse.add(reuse_key, reuse_snapshot)
             return result
 

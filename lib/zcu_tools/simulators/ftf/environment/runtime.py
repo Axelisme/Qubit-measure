@@ -4,12 +4,13 @@
 """FTF round snapshots, persistent engine ownership and compact readout sampling."""
 
 import time
+import warnings
 from collections import OrderedDict
 from collections.abc import Collection, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from hashlib import sha256
-from math import prod
+from math import prod, sqrt
 from pathlib import Path
 from weakref import ReferenceType, ref
 
@@ -291,6 +292,9 @@ class FTFAcquire:
         self._snapshot: EnvironmentSnapshot | None = None
         self._prepared: _Prepared | None = None
         self.routing: list[PathDiagnostics] = []
+        self._stark_limits: dict[
+            tuple[int, int], dict[tuple[int, float, float], float]
+        ] = {}
         self.evolve_wall_s = 0.0
         self.readout_wall_s = 0.0
         self._dimension: DimensionSelection | None = None
@@ -340,6 +344,39 @@ class FTFAcquire:
         self._active = False
         self._prepared = None
         self.routing.clear()
+        self._stark_limits.clear()
+
+    def _record_stark_order(self, paths: PathDiagnostics) -> None:
+        for entry in paths.stark_order_inversions:
+            # Scaling all cavity gains (and inherited fields) by x scales the
+            # differential Stark shift by x², for the observed branch history.
+            limit = sqrt(entry.max_shift_difference_ghz / entry.shift_difference_ghz)
+            sites = self._stark_limits.setdefault(entry.states, {})
+            site = (entry.point, *entry.span_ns)
+            sites[site] = min(sites.get(site, 1.0), limit)
+
+    def warn_stark_order(self) -> None:
+        """Report and clear the Stark limits from this acquire's preparations.
+
+        Each reversed state pair emits one UserWarning, with distinct point
+        and span counts and the tightest gain limit across rounds and histories.
+        Calling again without further preparation emits nothing.
+        """
+        limits, self._stark_limits = self._stark_limits, {}
+        for (lower, upper), sites in limits.items():
+            first, start, end = next(iter(sites))
+            points = len({point for point, _, _ in sites})
+            warnings.warn(
+                f"FTF Stark shift reverses energy ordering of states {lower} and {upper} "
+                f"(affected points: {points}, affected segments: {len(sites)}); first at "
+                f"point {first} segment [{start:g}, {end:g}] ns. "
+                f"Use a common gain scale factor of at most {min(sites.values())} on "
+                "the configured cavity drives, holding gain ratios and observed "
+                "cavity histories fixed. Results above this limit are outside the "
+                "dispersive model's validity.",
+                UserWarning,
+                stacklevel=3,
+            )
 
     def sample_round(
         self,
@@ -380,6 +417,7 @@ class FTFAcquire:
                 self._snapshot = None
                 raise
             self._prepared, self._snapshot = prepared, snapshot
+            self._record_stark_order(prepared.paths)
         elif owner.telemetry is not None:
             self.routing.append(self._prepared.paths.for_reuse(telemetry=True))
         prepared = self._prepared
@@ -908,12 +946,12 @@ class FTFSource:
         )
 
     def finish_acquire(self, outcome: AcquireOutcome) -> None:
-        """Write the binding outcome as one best-effort acquire summary.
+        """Warn about Stark inversions and write a best-effort acquire summary.
 
         outcome retains captured round inputs (including failed attempts), wall
         seconds including pacing, builder seconds and normal-return status.
-        Only the matching current session contributes routing work. Direct callers
-        may supply their own outcome after the final round and cleanup. Debug capture
+        Only the matching current session contributes warnings and routing work.
+        Direct callers may supply their own outcome after the final round and cleanup. Debug capture
         keeps detached rounds but omits settings for identities it did not observe.
         The buffer publishes before summary construction, even with telemetry disabled.
         capture_file is the successful basename or None when recording is off or
@@ -924,13 +962,15 @@ class FTFSource:
         capture_file = None
         if self.capture is not None and capture_settings is not None:
             capture_file = capture_settings.write(self.capture, outcome)
-        if self.telemetry is None:
-            return
         rounds = outcome.rounds
         request = rounds[0].acquire if rounds else None
         session = self._session
         if session is None or session.request is not request:
             session = None
+        if session is not None:
+            session.warn_stark_order()
+        if self.telemetry is None:
+            return
         paths = () if session is None else session.routing
         self.telemetry.write(
             {

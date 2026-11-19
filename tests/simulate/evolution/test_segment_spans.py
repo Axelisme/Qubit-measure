@@ -148,8 +148,10 @@ def test_shifts_follow_exact_query_spans_with_zero_gaps_and_repeat_density():
     )
 
 
-@pytest.mark.parametrize("excited_shift", [-0.2, -0.1])
-def test_shifted_energy_ordering_reports_context_without_reordering(excited_shift):
+@pytest.mark.parametrize("excited_shift", [-0.18, -0.1, -0.05])
+def test_shifted_energy_ordering_reports_context_without_reordering(
+    excited_shift, recwarn
+):
     shift = evolution.SegmentShift(2, 6, np.array([0, excited_shift]), np.zeros((2, 2)))
     model = evolution.SecularModel(
         (0,),
@@ -169,16 +171,19 @@ def test_shifted_energy_ordering_reports_context_without_reordering(excited_shif
         segment_shifts=((shift,),),
     )
     with closing(evolution.Engine(1)) as engine:
-        if excited_shift < -0.1:
-            with pytest.raises(
-                ValueError, match="point 17.*segment.*Stark.*ordering.*dispersive"
-            ):
-                engine.evolve(src, (timeline,), cancel=Event())
-        else:
-            result = engine.evolve(src, (timeline,), cancel=Event())
-            np.testing.assert_allclose(
-                result.densities[0, 0, 1], 0.5 * np.exp(2j * np.pi * 0.2), atol=1e-12
-            )
+        result = engine.evolve(src, (timeline,), cancel=Event())
+    if excited_shift < -0.1:
+        message = str(recwarn.pop(UserWarning).message)
+        assert "point 17 segment [2, 6] ns" in message
+        assert "states 0 and 1" in message
+        assert "Stark shift difference upper limit: 0.1 GHz" in message
+        assert "outside the dispersive model's validity" in message
+    assert not recwarn.list
+    # The signed shifted gap acts for 4 ns, after 2 ns at the original gap.
+    phase_cycles = 0.2 + 4 * (0.1 + excited_shift)
+    np.testing.assert_allclose(
+        result.densities[0, 0, 1], 0.5 * np.exp(2j * np.pi * phase_cycles), atol=1e-12
+    )
 
 
 @pytest.mark.parametrize("span", [(0, 12), (1, 2), (2, 7), (12, 14)])
