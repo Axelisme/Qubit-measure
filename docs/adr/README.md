@@ -72,8 +72,10 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：有誤差問題的快速算法先查原因並修正，修不好的範圍才收 guard，見 [ADR-0078](0078-evolution-module-boundary.md#快速算法先修好不輕易放棄)。
 原則：支援範圍由物理與介面決定，不看使用頻率；頻率只排優化先後，見 [ADR-0078](0078-evolution-module-boundary.md#支援範圍不看使用頻率)。
 原則：實驗參數不當時模擬器照常給結果並警告，契約外輸入照舊 fast fail，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器不替使用者擋實驗參數)。
+原則：模擬器的選路、精度與維度不依程式內容被辨認成哪種實驗或架構切換；精度由使用者宣告，數值指標可以決定選路，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器不從程式內容推斷實驗類型或硬體架構)。
 原則：每個模擬器提供同一組調試介面，定位與驗證工具只依賴它；共通部分有型別，模擬器特有的值放 dict，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器帶通用調試介面)。
 原則：模擬器優化以使用者看得到的結果正確性為準，存檔格式、版本與相容性配合優化；除錯資訊寫進 debug capture manifest，見 [ADR-0078](0078-evolution-module-boundary.md#優化優先於周邊約定除錯靠-dump不靠重算)。
+原則：預設選路可以讓快場景多付一筆有上限的固定成本，換慢場景大幅加速；沒被採用時超過 main 的 1.2 倍才回報，見 [ADR-0078](0078-evolution-module-boundary.md#用快場景的小幅變慢換慢場景的大幅加速)。
 原則：kernel 的量測場景只有一段，重複就是同一段接 N 次，見 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)。
 原則：場景照約化參數軸宣告覆蓋，不為個別實驗加專屬場景，見 [ADR-0078](0078-evolution-module-boundary.md#場景覆蓋靠約化的參數空間)。
 

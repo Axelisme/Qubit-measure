@@ -53,3 +53,5 @@ Results Browser 顯示後，Measure app 逐個 Database entry 交付清單。關
   - 開窗到首次 Paint 由 16.519 秒降到 0.040 秒。
   - 開窗當次的掃描為基線的 53.64%，畫面與縮圖同時在跑，只記錄。
   - 驗收口徑由 designer 代裁：50% 門檻判無 UI 的完整掃描，2 秒門檻判首次 Paint。首次 Paint 是 offscreen Qt 事件，不是實體螢幕延遲。
+
+後記（2026-11-19）：使用者覆核 designer 代裁的關閉邊界，答「A」接受；規則寫入 ADR-0067〈Results browser 唯讀檢視〉。
