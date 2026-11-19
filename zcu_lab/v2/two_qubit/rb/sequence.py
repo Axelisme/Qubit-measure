@@ -5,10 +5,10 @@ Qubit 0 is the left tensor factor: basis |q0 q1> = |00>, |01>, |10>,
 qubit; CZ = diag(1, 1, 1, -1). Gate tuples are in playback order, so
 (g0, g1) has matrix U_g1 @ U_g0. Equality ignores global phase.
 
-The full group is generated lazily using exact signed-Pauli actions. A
-breadth-first search stores one shortest word in these five generators per
-Clifford, not a dense multiplication table. Composition and inverse use the
-faithful Pauli action, then select that Clifford's bounded decomposition.
+The full group is generated lazily using exact signed-Pauli actions.
+Breadth-first traversal fixes the Clifford indices. Decomposition minimizes
+CZ count first (1.5 CZs per Clifford on average), then X90 count. Virtual
+Z90s are free. Composition and inverse use the faithful Pauli action.
 No pulses, virtual frames, device bindings or acquisition state live here.
 
 Call make_paired_sequences(depth=50, seed=7), then translate each arm's
@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from functools import cache
+from heapq import heappop, heappush
 from random import Random
 from types import MappingProxyType
 
@@ -154,26 +155,68 @@ def _generator_actions() -> tuple[_PauliAction, ...]:
     return tuple(actions)
 
 
+def _minimal_words(
+    successors: list[tuple[int, ...]],
+) -> tuple[tuple[TwoQubitGate, ...], ...]:
+    """Find minimum (CZ, X90) words from identity using the generator edges.
+
+    successors[index] lists the targets of appending each gate in declaration
+    order. Dijkstra's search compares total costs lexicographically.
+    """
+    gate_costs = tuple(
+        (
+            gate,
+            int(gate is TwoQubitGate.CZ),
+            int(gate in (TwoQubitGate.X90_Q0, TwoQubitGate.X90_Q1)),
+        )
+        for gate in TwoQubitGate
+    )
+    costs = {0: (0, 0)}
+    words: list[tuple[TwoQubitGate, ...]] = [()] * len(successors)
+    pending = [(0, 0, 0)]
+    while pending:
+        cz, x90, index = heappop(pending)
+        if (cz, x90) != costs[index]:
+            continue
+        for target, (gate, gate_cz, gate_x90) in zip(
+            successors[index], gate_costs, strict=True
+        ):
+            cost = (cz + gate_cz, x90 + gate_x90)
+            previous = costs.get(target)
+            # Strict improvement also prevents revisiting zero-cost cycles.
+            if previous is None or cost < previous:
+                costs[target] = cost
+                words[target] = (*words[index], gate)
+                heappush(pending, (*cost, target))
+    return tuple(words)
+
+
 @cache
 def _group() -> _CliffordGroup:
-    """Build once, then share only immutable group data across calls."""
+    """Assign indices in BFS order, then cache their minimum-cost words."""
     actions = [_IDENTITY]
-    words: list[tuple[TwoQubitGate, ...]] = [()]
     indices = {_IDENTITY: 0}
+    successors: list[tuple[int, ...]] = []
     pending = deque([0])
-    generators = tuple(zip(TwoQubitGate, _generator_actions(), strict=True))
+    generators = _generator_actions()
     while pending:
         index = pending.popleft()
-        for gate, action in generators:
+        targets: list[int] = []
+        for action in generators:
             product = _compose_actions(action, actions[index])
-            if product not in indices:
-                indices[product] = len(actions)
-                pending.append(len(actions))
+            target = indices.get(product)
+            if target is None:
+                target = len(actions)
+                indices[product] = target
+                pending.append(target)
                 actions.append(product)
-                words.append((*words[index], gate))
+            targets.append(target)
+        successors.append(tuple(targets))
     if len(actions) != NUM_CLIFFORDS:
         raise RuntimeError(f"Expected {NUM_CLIFFORDS} Cliffords, got {len(actions)}")
-    return _CliffordGroup(tuple(actions), tuple(words), MappingProxyType(indices))
+    return _CliffordGroup(
+        tuple(actions), _minimal_words(successors), MappingProxyType(indices)
+    )
 
 
 def clifford_group() -> tuple[Clifford, ...]:
@@ -186,10 +229,10 @@ def clifford_group() -> tuple[Clifford, ...]:
 
 
 def decompose_clifford(clifford: Clifford) -> tuple[TwoQubitGate, ...]:
-    """Return a shortest generator word in playback order (identity: ()).
+    """Return a minimum-(CZ, X90) word in playback order (identity: ()).
 
-    Raises TypeError for a non-Clifford argument. Words contain at most 14
-    generators, fixed by this finite group, not by the depth of an RB sequence.
+    Minimize CZ count first, then X90 count. Z90 adds no cost. Word length
+    is bounded independently of RB depth. Raises TypeError for a non-Clifford.
     """
     _require_clifford(clifford)
     return _group().decompositions[clifford.index]
@@ -231,9 +274,9 @@ def make_paired_sequences(depth: int, seed: int) -> PairedRBSequences:
     A private random.Random(seed) draws each index with randrange(11520),
     independently and with replacement, not via a primitive random walk.
     Identical depth/seed reproduce identical pairs; shorter depths are prefixes
-    of longer ones with the same seed. Reproduction assumes this generator
-    ordering and Python's Random implementation, not a cross-version archive
-    format. Global random state is untouched.
+    of longer ones with the same seed. The draws assume this Clifford index
+    ordering and Python's Random implementation. Primitive gate words also
+    depend on the decomposition in use. Global random state is untouched.
 
     Every shared Clifford is decomposed without merging boundaries. Only the
     interleaved body appends CZ after each such block, including identity blocks.
