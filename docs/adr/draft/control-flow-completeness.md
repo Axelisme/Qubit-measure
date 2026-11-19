@@ -11,17 +11,29 @@ status: draft
 2026-11-20，評估 two-qubit RB 在板上掃 depth 時，使用者判斷：「我觉得这算是旧有的机制出现的不完备性，而不是新的需求需要新的机制。所以我们可能要讨论一下如何完善旧机制。」
 對三個完善方案，使用者選 K1：「K1，我關注怎麼設計這個共用機制與結構，使其容易維護，可讀性高，有專業術語對應，寫法又自然。」
 
-- Branch 與 Repeat 改用一個共用的編譯期狀態物件，提供存、還原、合併三個操作，行為不變。
-- 補上第四種結構「提早結束本發」：沒跳走的路徑從進入區塊前的狀態接著編，跳走的路徑在本發收尾匯合。
-- 模擬器多認一種有限的結構 metadata，延續 ADR-0083〈Compiled snapshot 與 simulation 入口〉只擴充有限 metadata、不採 generic payload 的做法。
-- 提早結束路徑的每發讀取數由 lib 計算，作者不手動宣告。
+同日，使用者否決了第一版提案：在 builder 上加專用的 `exit_shot` 區塊。原話是：「首先也是基于 builder 设计语法，但事实上 builder 只是 helper，你应该要基于 timeline program 设计。再来，exit shot 有一点太局部了，呃，而不是通用的资质、机制。真正通用的机制应该是 condition jump 跟 label。」
+之後的提案改為下列規則。使用者先接受第 1 條，回覆「可以接受统一只能往后跳」，再回「都采用建议」接受其餘各條。
 
-選項比較與術語對應見 [Two-qubit RB 在板上掃 depth：提早結束本發與控制結構的完備性](../../discussions/2026-11-20-early-exit-and-control-flow-completeness.md)。
+- **共用的編譯期狀態。** 抽出 `PathState`，收齊後續 placement 依賴的所有狀態：具名 timeline 的 end、QICK channel 的 timestamp 與執行期 tail、source／native 表達式與 unknown ADC、producer 的 defined 與 selection、Repeat frame 的 guard、每個 ADC 的讀取數。`TimelineBook` 提供 capture 與 restore，各結構用自己的規則合併。Branch 與 Repeat 改用它，行為不變。
+- **通用的跳轉。** `TimelineProgramV2` 的 `cond_jump`、`jump`、`label` 改成認得 timeline 的版本，和它改寫 QICK 的 `pulse`、`trigger`、`delay_*` 是同一個做法。
+  - `cond_jump(target, ...)` 把當下的 `PathState` 記成 target 的一條入邊；沒跳的路徑帶著同一份狀態繼續往下編。
+  - `jump(target)` 記一條入邊。之後到下一個 label 之間的位置不可到達，在那裡放任何 macro 都報錯。
+  - `label(name)` 合併所有入邊與 fall-through 的狀態，不可到達的路徑不算入。
+  - 這對應 MLIR `cf.br`／`cf.cond_br` 的 block arguments：每條邊把狀態帶給目標 block，由目標 block 合併。
+  - Shell 在本發收尾的 sync 之前提供一個 label，作為「提早結束本發」的目標。Builder 只是 helper，不另立專用結構。
+- **第一版規則：**
+  1. 只能往前跳：目標 label 必須在 jump 之後。往回跳等於迴圈，照舊用 Repeat 或 sweep。
+  2. Jump 與 label 只能放在 shot body 的最外層，不能跨進或跨出 Repeat body 或 Branch case。
+  3. Label 的合併規則分兩種。編譯期已知的值取最大，和 Branch `align_timeline=True` 相同。執行期才知道、且各邊不同的值，直接報錯，要作者在 jump 前加 sync。之後若要放寬，可以在邊上寫 register（phi move）。
+  4. 每個 ADC 的讀取數放進 `PathState`，一個 label 的所有入邊讀取數必須相同。每發的讀取數由 lib 算出，作者不再手動 `set_reads_per_shot`。
+  5. 模擬器多認兩種有限的 metadata：帶目標的 JUMP，以及 LABEL。跳走的 lane 暫停，到目標 label 才恢復。沒有標記的 raw jump 照舊拒收，延續 ADR-0083〈Compiled snapshot 與 simulation 入口〉只擴充有限 metadata 的做法。
+- **順序：** 先修 Branch 還原 case 時遺失 unknown ADC 的缺陷，再抽 `PathState`，最後加跳轉。
+
+選項比較與術語對應見 [Two-qubit RB 在板上掃 depth：提早結束本發與控制結構的完備性](../../discussions/2026-11-20-early-exit-and-control-flow-completeness.md)。那篇紀錄的是改為通用跳轉之前的提案。
 
 ## 尚未決定
 
-- 共用狀態物件的介面與命名。
-- 提早結束的第一版限制：exit 區塊長度在編譯期可知、只放在 shot 最外層、跳走前自動 sync。
+- Branch 是否改寫成跳轉與 label 上的固定用法：由 selector 分派，加上它自己的 select 合併。Repeat 是往回的邊，要做迭代的 fold，保留自己的結構。
 - 第一個使用者 two-qubit RB 是否改成在板上掃 depth。
 
-開始實作前，先把以上各項帶回使用者裁決。
+跳轉實作完成後，再把以上兩項帶回使用者裁決。
