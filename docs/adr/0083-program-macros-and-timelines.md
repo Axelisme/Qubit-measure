@@ -27,7 +27,7 @@ Compiled snapshot 的存取形式、routes 與 FIFO 細則由 advisor 依下述 
 2026-11-01，使用者裁定：「不要留Join」，並要求：「ModularProgram連同Join/Branch/Repeat/ScanWith都刪掉，全面用新的TimelineProgram，我應該早就這樣要求了」。
 全部實驗使用 `TimelineBuilder`／`TimelineProgramV2`。`ModularProgramV2`、`BaseCustomProgramV2`、`ProgramBuilder`、`Schedule.prog_builder` 與 control module `Join`／`Branch`／`Repeat`／`ScanWith` 已移除。
 Module 的 legacy `init`／`run`／`block_mode`／`tag` 與 `set_param` 不再是作者介面。Tag 由每次 emit 指定，數值覆寫由 constructor keyword 指定。
-並行只用 builder／program 的 `fork`／`join`，分支用 `branch`／`case`，迴圈用 `repeat()`。這不移除原生 program 的分支與迴圈能力。
+並行只用 builder／program 的 `fork`／`join`，按 sweep 點選 case 用 `branch`／`case`，迴圈用 `repeat()`。這不移除原生 program 的分支與迴圈能力。
 使用者同日選擇「B, 我要睡了，預期起來後我規劃都落地」，將 Schedule 移除 cfg 與實驗 cfg 寫法慣例納入遷移。
 
 ### Program 基底與 module owner
@@ -353,12 +353,45 @@ Shot 收尾、join、fork、delay_by_timeline 本來需要的 selected-end／deb
 2026-11-01，對取消外部 timeline 的 wait-only 拒絕、從實際結尾繼續放事件的方案，使用者回答：「1B」。
 Storage 重用範圍由 advisor 同日依代理授權裁定，仍保留 16 個 data register 上限與不用時間 DMEM 的限制。
 
+#### 往後跳轉與 label 合併
+
+Branch、Repeat 與作者 label 共用不可變的 `PathState`。它記錄後續放置需要的狀態，包括 timeline 與實體 channel 的結尾、ADC 讀取數與時間證明。
+`TimelineBook` 負責擷取與還原；各控制結構定義自己的合併規則。
+
+`TimelineProgramV2` 在錄製 `_body` 時將 QICK 的 `label(label)`、`jump(label)`、`cond_jump(label, arg1, test, op=None, arg2=None)` 改成認得 timeline 的動作。
+`TimelineBuilder` 只記錄同名動作，在 build 時呼叫 program 的方法。
+這些方法在 `_body` 外維持 QICK 原行為。Raw `asm_inst` 跳轉不經 timeline 記帳，由作者負責。
+
+作者 label 在 `_body` 內用非空、唯一的字串命名。編譯器配置不與其他機器 label 衝突的名稱。
+這三個動作只允許出現在 `_body` 最外層，不得放在 Repeat body 或 Branch case。 `with timeline(name)` 只切換預設 timeline，不限制跳轉。
+目標必須在跳轉之後；迭代用 Repeat 或 sweep。重複定義、缺少目標、往回跳或位置不合法都在 build 報錯，訊息包含相關 label。
+條件跳轉只接受 `Z`、`NZ`、`S`、`NS` 的 register 測試，不接受硬體 peripheral flag。
+
+`cond_jump` 把當下的狀態存為目標的一條入邊，原路繼續編譯。編譯器不求值條件，兩條路都算可到達。
+`jump` 存好入邊後，將 fall-through 標為不可到達。到下一個有入邊的 label 前，放任何 label 以外的動作都會報錯。
+Label 合併所有可到達的跳轉入邊與 fall-through。沒有可到達的前驅時，這個 label 不會重新打開後續路徑。
+
+- 具名 timeline 與每個 generator／ADC 的編譯期結尾取最大，沿用 Branch 的 `align_timeline=True`。Sweep 表達式交叉時，編譯器用 sweep register 重建逐點最大值。
+- 執行期結尾各邊相同才保留。不同時，build 報錯並列出 label、timeline 或 channel，以及入邊。編譯器不在入邊加 register 寫入來合併不同結尾。
+- Timeline 名字只保留各邊共有的名字。結尾未知的 ADC 取聯集。Producer 的定義取交集，selection 證明沿用 Branch 的合併規則。Source 表達式各邊都有且相同才保留。其餘欄位沿用 Branch 的規則，沒有合併規則的欄位要求各邊相同。
+- 每個 ADC 的讀取數在各邊都要相同，見[每發 ADC 讀取數](#每發-adc-讀取數)。
+
+取最大值決定 label 後動作與 shot 收尾的放置時間。編譯器不替作者加同步。若要保留各路徑自己的結尾時間，先在入邊用 `delay_by_timeline` 同步到各路徑的結尾，再進入 label。
+要提早結束本發的 body，可以跳到 `_body` 最後的作者 label；shot 外殼仍會收尾。迴圈的 continue／break 尚未實作，設計留在[草稿](draft/control-flow-completeness.md)。
+
+`shot_sums` 等讀取 label consumer 不沿跳轉邊列舉讀取。它們拒絕位於跳轉與目標 label 之間的 trigger，指出該目標。放在所有跳轉範圍之外的共用讀取照常解析。這不改變 `trigs`，也不限制 raw IQ 取數。
+
+2026-11-20，使用者把介面放在 Timeline program，而不是 builder 的專用 `exit_shot`，並說：「真正通用的机制应该是 condition jump 跟 label。」
+同日，使用者接受只往後跳：「可以接受统一只能往后跳」，並以「都采用建议」接受其餘第一版規則。
+Agent 依授權保留最外層限制，並補定合併與拒收細節，待使用者覆核。理由見[往後跳轉與 RB 分塊的討論紀錄](../discussions/2026-11-20-timeline-forward-jumps.md)。
+
 ### 每發 ADC 讀取數
 
 Timeline compiler 在 macro preprocess 時記錄 QICK 的每個 ADC trigger 增量。原生 trigger、module readout 和原生 macro 內部送出的 trigger 共用這條路徑。它把逐路徑累計值存進 `PathState`。
 
 Branch 的每個 case 從同一組入口計數開始。出口逐 ADC 比對所有 case，含省略的空 case。兩個 case 各讀一次時，本發只算一次；一個讀一次而另一個沒讀時，編譯報錯並列出各 case 的計數。同一 selector 後面再用另一個 Branch 補讀，不能抵銷前一次出口的差異。2026-11-20，使用者在互補寫法和每個 Branch 出口都對齊兩案中選後者：「3-1」。討論見 [Timeline 編譯器推算每發 ADC 讀取數](../discussions/2026-11-20-timeline-read-counts.md)。
 
+作者 label 同樣逐 ADC 比對所有可到達的入邊，包含可到達的 fall-through。不同時，build 報錯並列出 label、ADC 與各邊的讀取數。
 固定 Repeat 的出口計數是入口加上迭代次數乘以單輪增量。`range_hint` 上下限相同的 register 次數也按固定次數計算；其餘 register 次數的 body 不得讀取 ADC。
 編譯器將每發計數寫入 QICK 的 `ro_chs[ch]["trigs"]`，不改 Branch 和 Repeat 的指令。`set_reads_per_shot` 只核對值，不再改配置。
 直接以 raw ASM 送出 ADC 觸發不經此記帳。CPU 模擬器仍逐發比對實際觸發數與 `trigs`。
@@ -391,7 +424,17 @@ Simulation frontend 核對 metadata 與實際指令，不從 jump 或仿射 shel
 不一致在建立 request 前拒絕。
 來源名稱由 producer 擁有，分工見 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#design-boundaries)。
 
+Timeline 跳轉只新增兩種固定欄位的結構標記，不帶 `kind`、`region` 或通用 payload。標記留在 snapshot，不寫入 binary。
+`CONTROL_LABEL` 記作者的 `label`，與對應的機器 label 同位置。
+`CONTROL_JUMP` 放在指令序列之前，記作者目標 `target`、布林值 `conditional` 與 QICK 的 `test`。無條件跳轉的 `test` 為 `None`。
+Frontend 驗證標記在 body 最外層，目標 label 唯一且在後方，指令的目標與條件和標記相符。
+它驗證 direct JUMP 與 `WriteLabel(s15)` 加間接 JUMP 兩種序列，條件跳轉還必須有對應的 TEST。Lowering 沿用 [QICK big-jump 閾值](../../lib/zcu_tools/program/v2/README.md#big-jump-閾值)。
+Body 內沒有結構標記涵蓋的 raw JUMP 照舊拒收。依硬體 flag 或量測回填 register 的跳轉也拒收。
+
 Sweep points 是獨立向量 lanes，reps 只保留在 request metadata，不執行。
+條件跳轉依各 active lane 的 TEST 結果分流，無條件跳轉則選全部 active lanes。
+被選中的 lane 等到目標 label 才恢復；其餘 lane 繼續執行。等待中的 lane 不更新時間、register、memory、FIFO 或輸出事件。
+跳轉只往後，frontend 依指令順序走一遍就能安排各 lane 的跳轉。取數仍逐 lane 核對實際 trigger 數與 `trigs`。
 Shot 內的非 sweep loops 依標記順序迭代，以 active masks 處理零次、固定與 register 次數，不展開指令流。
 跨 point／rep 的 register、memory、readout config FIFO 與 pending update 延續在建立 request 前拒絕，同值或輸出不變也不豁免。
 Prologue 後不再寫入的常數與 config 可用，沒有 ordered engine 或 fallback。
@@ -410,7 +453,7 @@ Builder 讀 snapshot，輸出 detached numeric requests；physical backend 仍�
 2026-10-30，使用者描述執行模型：「每個內部迴圈都當作獨立點向量化模擬，但內部非sweep迴圈會視為一個shot內部的order，但不會單純的展開」。
 對獨立 shot 與拒絕跨 shot carry 的提案，使用者回答：「採用建議」。
 同日，通用標記暫緩後，使用者回答：「那採用建議做法」。
-現行方案只擴充有限 LOOP metadata，不採 generic payload。
+這個裁決先用於有限的 LOOP metadata，也適用於上述兩種跳轉標記。
 
 ### IR analysis 與驗收責任
 
