@@ -36,7 +36,7 @@
 | Local Z | [`two_qubit/local_z`](two_qubit/local_z/guide.md) | [`two_qubit/local_z_heralded`](two_qubit/local_z/guide_heralded.md) |
 | Paired RB／IRB | [`two_qubit/rb`](two_qubit/rb/guide.md) | [`two_qubit/rb_heralded`](two_qubit/rb/guide_heralded.md) |
 
-非 heralded 保存 terminal F1/F2 的 9 類計數。Heralded 加一次讀出，保存 herald F1/F2、terminal F1/F2 的 81 類計數，分析 herald g,g 與 e,e 兩組。兩版都可設 `reset`，預設 None。Herald pass fraction 是 g,g 接受率，不是 ground-state purity。採樣與保存量的計算見 [FTF guide](two_qubit/guide.md#採樣數與成本)。
+一般入口保存 terminal F1/F2 的 9 類計數。`two_qubit/rb` 可用 `reset/mux_herald` 在序列前讀出並篩選 shot，仍只保存通過篩選的 9 類終端計數。`_heralded` 入口保存 herald F1/F2、terminal F1/F2 的 81 類計數，分析 herald g,g 與 e,e 兩組。兩版的 `reset` 預設 None。Herald pass fraction 是 g,g 接受率，不是 ground-state purity。採樣與保存量見 [FTF guide](two_qubit/guide.md#採樣數與成本)。
 
 ## 套件邊界
 

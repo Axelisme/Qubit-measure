@@ -65,7 +65,7 @@ Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`ro
 
 | 版本 | 每 shot 的 mux 讀出 | 每掃描點的類別數 | `sums` 陣列大小，不含座標與 cfg |
 | --- | --- | --- | --- |
-| 非 heralded | 1 次 terminal | `3×3=9` | `P × 9 × 8 = 72P bytes`。RB 為 `72P × rounds bytes`。 |
+| 一般入口 | 1 次 terminal。RB 選 `reset/mux_herald` 時加 1 次 herald。 | `3×3=9` | `P × 9 × 8 = 72P bytes`。RB 為 `72P × rounds bytes`。 |
 | Heralded | 1 次 herald＋1 次 terminal | `3×3×3×3=81` | `P × 81 × 8 = 648P bytes`。RB 為 `648P × rounds bytes`。 |
 
 例如 chevron 的 25×101 點，非 heralded 的 `sums` 是 181,800 bytes，heralded 是 1,636,200 bytes。這兩個數字不隨 reps 或 rounds 增長。以 reps=1000、rounds=10 計，兩版各取得 25,250,000 shots，分別發射 25,250,000 與 50,500,000 次 mux 讀出。完整 mux 的其他 tones 仍照設定讀出，Result 只保存 F1/F2 的聯合類別。
@@ -78,7 +78,7 @@ Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`ro
 
 九個實驗各有兩個獨立入口。非 heralded 用 `two_qubit/<name>`，heralded 用 `two_qubit/<name>_heralded`。每版有自己的 cfg、Result、GUI 與 guide，入口清單見 [v2 README](../README.md#two-qubit-實驗清單)。
 
-非 heralded 每 shot 做可選 reset、原本序列與 terminal 讀出。Heralded 在可選 reset 後先做 herald 讀出，再做原本序列與 terminal 讀出。兩次讀出使用同一個 mux module，gain、積分窗口與 classifier 相同。Herald 之後的等待是 readout 的 post_delay，不另加 herald delay。
+一般入口每 shot 做可選 reset、原本序列與 terminal 讀出。只有 [`two_qubit/rb`](rb/guide.md#before-run) 可由 `reset/mux_herald` 在序列前加一次讀出，並只保存通過篩選的 shot 的終端計數。`_heralded` 入口在可選 reset 後先做 herald 讀出，再做原本序列與 terminal 讀出。兩次讀出使用同一個 mux module，gain、積分窗口與 classifier 相同。Herald 之後的等待是 readout 的 post_delay，不另加 herald delay。
 
 兩版的 `reset` 都預設 None，表示不發射 reset。需要時填入已校準的 reset cfg，它會在每 shot 開始時執行。Herald 讀出本身不做 reset，表單 Reset 則只是重新捕捉初值。
 

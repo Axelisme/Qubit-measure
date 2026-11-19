@@ -9,15 +9,17 @@ from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
 from .._measure import captured_roles
 from .core import RBCfg
+from .core_heralded import RBHeraldedCfg
 
-T_Cfg = TypeVar("T_Cfg", bound=RBCfg)
+T_Cfg = TypeVar("T_Cfg", bound=RBCfg | RBHeraldedCfg)
 
 
 def rb_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     """Capture role identities, X90/CZ/readout slots and required named phase pair.
 
     Missing pulse/readout slots or correction fields stay Invalid, never zero
-    or simulator defaults. Circle centers and radii come from the saved role-tone readout classifiers.
+    or simulator defaults. Circle centers and radii come from the saved role-tone
+    readout classifiers. Reset choices follow the passed cfg's accepted module types.
     All pulse and correction initial values remain operator-overridable; Run
     uses the accepted fixed capture, not current aliases or library.
     """
@@ -56,5 +58,5 @@ def rb_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
 
 
 def make_form(ctx: FormContext) -> Form[RBCfg]:
-    """Capture paired RB inputs with optional reset initially disabled."""
+    """Capture paired RB inputs; the disabled Reset can select a mux herald."""
     return rb_form(ctx, RBCfg)

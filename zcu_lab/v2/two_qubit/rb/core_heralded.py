@@ -36,8 +36,8 @@ from .._sums import (
     joint_probabilities,
     terminal_counts,
 )
+from ._config import RBInputs
 from .core import (
-    RBCfg,
     RBEstimate,
     RBOptions,
     count_completion,
@@ -79,7 +79,7 @@ class RBHeraldedAnalysis:
     reason: str | None
 
 
-class RBHeraldedCfg(RBCfg):
+class RBHeraldedCfg(RBInputs[Reset.Cfg]):
     """Optional reset → herald → paired sequence → terminal, per host round.
 
     Fields and units match RBCfg. Both reads share the saved full mux cfg and
