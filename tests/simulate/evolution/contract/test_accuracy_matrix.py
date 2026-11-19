@@ -18,8 +18,6 @@ from zcu_tools.simulate.evolution import (
     NoValidKernel,
     RoutingHistory,
     RWAGuardMetric,
-    SecularDrive,
-    SecularModel,
     TimelineBatch,
     common_frame_diagnostic,
     load_reference,
@@ -36,7 +34,6 @@ from .accuracy_cases import (
     OPENCL_CASES,
     AccuracyCase,
     accuracy_case,
-    coherent_source,
     cpu_dp54_case,
     drive_track,
     history_case,
@@ -299,121 +296,15 @@ def test_multitone_gate_mixed_phase_keys_density(
         for point, case in enumerate(cases)
     )
     with closing(Engine(1, families=("multitone_gate",))) as engine:
-        result = engine.evolve(cases[0].source, batches)
+        result = engine.evolve(cases[0].source, batches, telemetry=True)
     require_families(result.paths, ("multitone_gate",))
+    assert result.paths.routing["multitone_gate"].prepare_key_builds == len(batches)
     for point, case in enumerate(cases):
         reference = matrix_reference(case)
         assert (
             density_error(result.densities[point : point + 1], reference.density)
             <= 2e-3
         )
-
-
-def _with_gate_bath(case: AccuracyCase, factor: float) -> AccuracyCase:
-    model = case.source.model((0,))
-    return replace(
-        case,
-        source=coherent_source(
-            replace(
-                model,
-                rates_per_ns=factor * model.rates_per_ns,
-                dephasing_per_ns=factor * model.dephasing_per_ns,
-            )
-        ),
-    )
-
-
-def test_multitone_gate_rejects_large_split_defect() -> None:
-    """A stronger bath can make a phase-resolved gate unsuitable for playback."""
-    case = _with_gate_bath(multitone_phase_case("gaussian", 1), 4000)
-    with (
-        closing(Engine(1, families=("multitone_gate",))) as engine,
-        pytest.raises(NoValidKernel) as rejected,
-    ):
-        engine.evolve(case.source, (case.batch,))
-    assert "multitone_gate" in rejected.value.attempted
-
-
-def test_multitone_gate_split_refusal_executes_the_direct_fallback() -> None:
-    """A reused shaped key can lose on density admission, not on cold price."""
-    repeats = 768  # Amortize the build so this case reaches numerical admission.
-    case = multitone_phase_case("flat_top", repeats, gain=0.55)
-    with (
-        closing(Engine(1, families=("multitone_gate", "dop853"))) as engine,
-        closing(Engine(1, families=("dop853",))) as direct,
-    ):
-        result = engine.evolve(case.source, (case.batch,), telemetry=True)
-        expected = direct.evolve(case.source, (case.batch,))
-    assert result.paths.segments_by_kernel == {"dop853": repeats}
-    assert result.paths.routing["multitone_gate"].rejected_rows == repeats
-    assert density_error(result.densities, expected.densities) <= 1e-9
-
-
-def test_multitone_gate_split_admission_tightens_with_budget() -> None:
-    """The same dissipative key can fit the default budget but not a tighter one."""
-    case = _with_gate_bath(multitone_phase_case("gaussian", 7), 100)
-    with closing(Engine(1, families=("multitone_gate",))) as engine:
-        result = engine.evolve(case.source, (case.batch,))
-        require_families(result.paths, ("multitone_gate",))
-        reference = converged_reference(case.source, case.batch)
-        assert density_error(result.densities, reference.density) <= 2e-3
-
-        with pytest.raises(NoValidKernel) as rejected:
-            engine.evolve(case.source, (case.batch,), budget=1e-7)
-        assert "multitone_gate" in rejected.value.attempted
-
-
-@pytest.mark.parametrize(
-    "rate,accepted_budget,rejected_budget",
-    [
-        pytest.param(2e-5, 3e-3, 1e-3, id="same-tableau"),
-        pytest.param(8e-6, 2e-3, 0.999e-3, id="cpu-dp54-boundary"),
-    ],
-)
-def test_multitone_gate_can_match_less_accurate_direct_fallback(
-    rate: float, accepted_budget: float, rejected_budget: float
-) -> None:
-    """A phase-resolved gate can replace a direct solve of comparable accuracy."""
-    # Resonant circular drives accumulate direct integration error over several
-    # rotations. In the boundary case the split defect (1.90e-4) is above the
-    # floor and the old budget probe's limit but below the DP5(4) limit (2.72e-4).
-    frequency, duration = 0.1, 20.0
-    x = np.array([[0, 1], [1, 0]], dtype=complex)
-    y = np.array([[0, 1j], [-1j, 0]])
-    model = SecularModel(
-        (0,),
-        "accuracy-circular-dual-tone",
-        np.array([0.0, frequency]),
-        np.eye(2, dtype=complex),
-        (SecularDrive("a", x, y), SecularDrive("b", x, y)),
-        np.array([[0.0, rate], [0.0, 0.0]]),
-        np.array([[0.0, rate], [rate, 0.0]]),
-    )
-    idle = timeline(1, duration)
-    envelope = EnvelopeSpec(
-        "sampled",
-        np.array([0.9, 1.0, 0.95], dtype=complex),
-        np.linspace(0, duration, 3),
-    )
-    tracks = tuple(
-        drive_track(idle, envelope, frequency=frequency, gain=gain, port=port)
-        for port, gain in (("a", 0.2), ("b", 0.001))
-    )
-    batch = replace(idle, tracks=tracks)
-    with (
-        closing(coherent_source(model)) as source,
-        closing(Engine(1, families=("multitone_gate",), backend="cpu")) as engine,
-    ):
-        result = engine.evolve(source, (batch,), budget=accepted_budget)
-        require_families(result.paths, ("multitone_gate",))
-        reference = converged_reference(source, batch)
-        assert density_error(result.densities, reference.density) <= 2e-3
-
-        # The more accurate fallback no longer justifies this gate's split
-        # defect at the smaller budget.
-        with pytest.raises(NoValidKernel) as rejected:
-            engine.evolve(source, (batch,), budget=rejected_budget)
-        assert rejected.value.attempted == ("multitone_gate",)
 
 
 @pytest.mark.parametrize("family", EDGE_FAMILIES)

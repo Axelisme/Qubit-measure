@@ -10,7 +10,6 @@ from numpy.typing import NDArray
 
 from .kernel import Kernel, KernelContext, SegmentTable
 from .kernels._multitone_gate_phase import PHASE_GRID, PHASE_RTOL
-from .kernels._multitone_gate_split import SPLIT_PHASES, SPLIT_REFERENCE_BUDGET
 from .kernels._rwa_gate import GATE_POLICY, canonical_keys
 from .kernels._rwa_numeric import multitone_retention
 from .kernels.multitone_rwa import MultitoneRWAKernel
@@ -59,7 +58,7 @@ def gate_preferred(
     Only complete current-acquire canonical inventory counts amortize gate
     construction; the gate price never reads RoutingHistory.
     Eligible RWA retains its source-history cold price. An absent competitor
-    cannot veto a pinned gate; numerical admission still belongs to its guard.
+    cannot veto a pinned gate; the structural guard still checks eligibility.
     """
     plan = context.work_plan
     geometry = table if plan.complete_table is None else plan.complete_table
@@ -99,23 +98,21 @@ class GateCost:
     """Cold gate terms in estimated CPU seconds, independent of use count.
 
     direct is the uncalibrated full-drive work scale. dop853_competitor is
-    the calibrated CPU alternative for this comparison only. endpoints, fourier,
-    tight_split and budget_split are one key's build; guard and apply are per use.
+    the calibrated CPU alternative for this comparison only. endpoints and fourier
+    are one key's build; guard (key/row bookkeeping) and apply are per use.
     """
 
     direct: float
     dop853_competitor: float
     endpoints: float
     fourier: float
-    tight_split: float
-    budget_split: float
     guard: float
     apply: float
 
     @property
     def prepare(self) -> float:
         """Return the combined estimate for one cold key."""
-        return self.endpoints + self.fourier + self.tight_split + self.budget_split
+        return self.endpoints + self.fourier
 
 
 def gate_cost(table: SegmentTable, row: int, context: KernelContext) -> GateCost:
@@ -143,16 +140,11 @@ def _price_gate(table: SegmentTable, row: int, context: KernelContext) -> GateCo
     scale = size_ratio**3
     nodes = int(np.prod(PHASE_GRID))
     direct = _direct_cost(table, row, context)
-    # Charge only the current grid's endpoints, not a previous grid's build.
-    # The per-node model and both tolerance multipliers include the two split
-    # solves once; the per-use guard charge below is for key/row work only.
+    # Price the current grid at its endpoint tolerance, independent of budget.
     baseline = direct / (1e-3 / context.budget) ** 0.125
     precision = (3e-5 / PHASE_RTOL) ** 0.125
     endpoints = baseline * nodes * 0.289 * precision
     fourier = float(2e-7 * 4 * nodes * np.log2(nodes) * size_ratio**2)
-    split_precision = (1e-3 / SPLIT_REFERENCE_BUDGET) ** 0.125
-    tight_split = len(SPLIT_PHASES) * baseline * split_precision * 0.155
-    budget_split = len(SPLIT_PHASES) * direct * 0.105
     apply = (2e-8 * 4 * nodes + 7.5e-6 * 4) * scale
     # Duration is a CPU pricing proxy, not a solver or frame selection rule.
     duration_ns = float(table.duration_ns[row])
@@ -162,8 +154,6 @@ def _price_gate(table: SegmentTable, row: int, context: KernelContext) -> GateCo
         (0.0891 + (0.412 - 0.0891) * fraction) * direct,
         endpoints,
         fourier,
-        tight_split,
-        budget_split,
         2e-6 * scale,
         apply,
     )

@@ -41,7 +41,7 @@ def test_query_matches_evolve_and_maps_split_rows_to_batches_and_points():
 
 
 def test_later_short_circuit_keeps_an_earlier_guard_rejection():
-    count = 4096
+    count = 2
     pulse = track(
         count,
         EnvelopeSpec("sampled", np.array([0.2, 1.0]), np.array([0.0, 20.0])),
@@ -55,7 +55,7 @@ def test_later_short_circuit_keeps_an_earlier_guard_rejection():
     with (
         closing(source()) as src,
         closing(
-            Engine(1, families=("multitone_gate", "multitone_rwa", "dop853"))
+            Engine(1, families=("multitone_rwa", "dop853"), backend="cpu")
         ) as engine,
     ):
         query = engine.inspect_dispatch(src, (timeline,))
@@ -63,7 +63,6 @@ def test_later_short_circuit_keeps_an_earlier_guard_rejection():
     for row in query.rows:
         assert row.family == "dop853"
         assert {c.family: c.guard for c in row.candidates} == {
-            "multitone_gate": "rejected",
             "multitone_rwa": "rejected",
             "dop853": "accepted",
         }

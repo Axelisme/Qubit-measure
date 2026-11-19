@@ -1,4 +1,4 @@
-"""Dispatch the sampled dual-tone overlap without changing either guard."""
+"""Compare sampled dual-tone costs while preserving the RWA spot checks."""
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
@@ -15,7 +15,7 @@ from ._sampled_rwa_dispatch import (
     sampled_common_prices,
     sampled_rwa_cpu_seconds,
 )
-from .kernel import Kernel, KernelContext, SegmentTable
+from .kernel import KernelContext, SegmentTable
 from .kernels._multitone_spot import SampledGroup, sampled_groups
 from .kernels._rwa_gate import canonical_keys
 from .kernels.multitone_gate import MultitoneGateKernel, gate_candidates
@@ -217,25 +217,25 @@ def _legacy_groups(
     return nonoverlap
 
 
-def _guard_complete(
+def _probe_rwa(
     router: "Classifier",
     competition: _Competition,
-    kernel: Kernel,
+    kernel: MultitoneRWAKernel,
     rows: NDArray[np.int64],
     scope: NDArray[np.int64],
 ) -> NDArray[np.int64]:
-    """Resolve one proposal across its complete rows and adopt local consumers."""
+    """Resolve complete sampled groups before adopting local RWA consumers."""
     if not len(rows):
         return rows
     offset = router.context.complete_row_offset
     visible = rows[np.isin(rows, scope)] - offset
     if len(visible) == len(rows):
-        router.try_kernel(kernel, visible, resolve_guard=kernel.guard_builds)
+        router.try_kernel(kernel, visible)
         return rows[router.names[visible] == kernel.name]
     context = competition.context
     with context.work_plan.routing.measure(kernel.name, "prepare"):
         accepted = kernel.guard(competition.table, rows, context)
-    router.try_kernel(kernel, visible, resolve_guard=kernel.guard_builds)
+    router.try_kernel(kernel, visible)
     return rows[accepted]
 
 
@@ -270,7 +270,7 @@ def _attempt_gate_groups(
     rwa: MultitoneRWAKernel,
     gate: MultitoneGateKernel,
 ) -> Counter[bytes]:
-    """Resolve planned RWA probes first, then try each still-profitable gate key."""
+    """Resolve planned RWA probes first, then route each still-profitable gate key."""
     context, table = competition.context, competition.table
     offset = router.context.complete_row_offset
     scope = rows + offset
@@ -284,21 +284,21 @@ def _attempt_gate_groups(
                 context.capture.sampled_group(
                     offer.group, "not_probed" if offer.rwa_first else "cost_skipped"
                 )
-    taken = _guard_complete(router, competition, rwa, first, scope)
+    taken = _probe_rwa(router, competition, rwa, first, scope)
     membership = sampled_groups(table, context).by_row
     gate_rows = _gate_rows(
         offers, set(membership[scope]), membership, taken, competition
     )
-    # One member's success decides whether the rest of its group may try RWA.
-    # Resolve all of these keys before a prefix or worker sees a partial group.
-    accepted = _guard_complete(router, competition, gate, gate_rows, scope)
-    successful = set(membership[accepted])
+    # A group's price winners are decided across its complete rows, even if
+    # this prefix or worker only uses one of those rows.
+    router.try_kernel(gate, rows[np.isin(scope, gate_rows)])
+    groups_with_gate = set(membership[gate_rows])
     fallback = {
         row
         for offer in offers
         if not offer.rwa_first
         and offer.rwa_beats_original
-        and membership[offer.group.rows[0]] not in successful
+        and membership[offer.group.rows[0]] not in groups_with_gate
         for row in offer.group.rows
     }
     router.try_kernel(rwa, rows[np.isin(scope, tuple(fallback))])

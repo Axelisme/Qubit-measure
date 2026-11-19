@@ -1,4 +1,4 @@
-"""Full-drive simultaneous gates with checked raw dual-phase playback."""
+"""Full-drive simultaneous gates with raw dual-phase playback."""
 
 from dataclasses import dataclass
 from hashlib import sha256
@@ -9,24 +9,13 @@ from numpy.typing import NDArray
 from scipy.linalg import expm
 
 from ...baths import population_generator
-from ..kernel import (
-    ApplyContext,
-    GuardPreparation,
-    GuardResult,
-    KernelContext,
-    Prepared,
-    SegmentTable,
-)
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..workplan import FactKey
 from . import _multitone_gate_phase as phase
 from ._gate_endpoints import GATE_SUBSEGMENTS
-from ._multitone_gate_split import SPLIT_PHASES, advance_probes, probe_densities
 from ._rwa_gate import canonical_keys
 from ._secular import coherence_decay, split_step
 from ._workload_facts import fixed_flux
-
-_SPLIT_BUDGET_FRACTION = 0.1
-_SPLIT_FALLBACK_FACTOR = 1.5
 
 
 @dataclass(frozen=True)
@@ -66,31 +55,6 @@ def _play(coefficients, baths, key_index, phases, states):
         states[row] = rho
 
 
-def _split_defects(
-    prepared: _Prepared, table: SegmentTable, row: int, context: KernelContext
-) -> tuple[float, float]:
-    """Return max-entry defects of playback and fallback vs one tight reference.
-
-    A complete Hermitian operator basis would cost M² solves and store an M⁴
-    channel per phase. Four physical densities instead sample these maps;
-    neither defect bounds other phases, inputs or complete sequences.
-    """
-    model = table.model(context.source, row)
-    split = probe_densities(len(model.energies_ghz))
-    reference, fallback = advance_probes(model, table, row, split, context.budget)
-    _play(
-        prepared.coefficients,
-        (prepared.populations, prepared.coherences),
-        np.zeros(len(SPLIT_PHASES), dtype=np.int64),
-        SPLIT_PHASES,
-        split,
-    )
-    return (
-        float(np.max(np.abs(split - reference))),
-        float(np.max(np.abs(fallback - reference))),
-    )
-
-
 def _build(table: SegmentTable, row: int, context: KernelContext) -> _Prepared:
     model = table.model(context.source, row)
     coefficient = phase.build(model, table, row)
@@ -110,8 +74,7 @@ def _build(table: SegmentTable, row: int, context: KernelContext) -> _Prepared:
 def gate_candidates(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.int64]:
     """Return fixed-flux, positive-duration, sampled dual-tone candidate rows.
 
-    Indices are local to table. No phase products are built or validated here;
-    split admission still belongs to the numerical guard.
+    Indices are local to table. This check does not build phase products.
     """
     selected = rows[(table.tones[rows] == 2) & (table.duration_ns[rows] > 0)]
     selected = selected[~table.constant_envelopes(selected)]
@@ -122,54 +85,31 @@ def gate_candidates(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.
     )
 
 
-@dataclass(frozen=True)
-class _GateAdmission:
-    handoff: GuardPreparation | None
-
-
-def _admit_key(
-    table: SegmentTable, row: int, context: KernelContext, key: np.void
-) -> _GateAdmission:
-    """Build and validate exactly once per evolve and canonical prepare key."""
-
-    def build() -> _GateAdmission:
-        prepared = _build(table, row, context)
-        defect, fallback_defect = _split_defects(prepared, table, row, context)
-        floor = _SPLIT_BUDGET_FRACTION * min(context.budget, 1e-3)
-        threshold = max(floor, _SPLIT_FALLBACK_FACTOR * fallback_defect)
-        if defect <= threshold:
-            context.work_plan.routing.prepared_keys(MultitoneGateKernel.name, 1)
-            return _GateAdmission(
-                GuardPreparation(np.array([key], dtype="V32"), prepared)
-            )
-        return _GateAdmission(None)
-
-    return context.work_plan.fact(
-        FactKey(("full-drive-gate-admission", key.tobytes()), _GateAdmission), build
-    )
-
-
 class MultitoneGateKernel:
     """Prepare one full-drive key for arbitrary joint density and two phases.
 
     Require two tones, at least one sampled envelope, fixed flux and positive
     duration. Fit one 5x6 phase grid at rtol/atol 2.75e-7/2.75e-9.
-    Compare playback and a CPU fallback probe at the Engine budget against
-    tight Lindblad endpoints at four phase/density pairs, three outside the
-    grid. This checks interpolation and splitting, not whole-sequence error.
-    Return a rejected guard on excess defect without rebuilding.
-    Numerical failures propagate. Phase and absolute start are apply-only.
-    Guard products live only within one evolve (ADR-0078). No RWA or pruning.
+    Build after selection and propagate numerical failures. Phase and absolute
+    start are apply-only. Products live only within one evolve (ADR-0078).
+    No RWA or pruning.
     """
 
     name = "multitone_gate"
-    guard_builds = True
+    guard_builds = False
 
     def guard(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.bool_]:
-        """Return row-local admission, discarding built products without handoff."""
-        return self.guard_prepared(table, rows, context).accepted
+        """Check only the row's structural eligibility."""
+        del context
+        return np.isin(rows, gate_candidates(table, rows))
+
+    def guard_prepared(
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
+    ) -> None:
+        """Structural eligibility does not require a prepared product."""
+        del table, rows, context
 
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
@@ -189,33 +129,6 @@ class MultitoneGateKernel:
         del table
         return np.full(len(rows), float(GATE_SUBSEGMENTS))
 
-    def guard_prepared(
-        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
-    ) -> GuardResult:
-        """Return checked key products once, aligned to all admitted consumers.
-
-        Numerical products remain in GuardPreparation, never on this kernel or
-        in routing-history facts. Reordering/subsetting rows preserves admission.
-        """
-        accepted = np.zeros(len(rows), dtype=bool)
-        selected = gate_candidates(table, rows)
-        if not len(selected):
-            return GuardResult(accepted)
-        positions = np.flatnonzero(np.isin(rows, selected))
-        keys, representatives, inverse = np.unique(
-            self.prepare_keys(table, selected, context),
-            return_index=True,
-            return_inverse=True,
-        )
-        products = []
-        for index, representative in enumerate(representatives):
-            row = int(selected[representative])
-            result = _admit_key(table, row, context, keys[index])
-            if result.handoff is not None:
-                accepted[positions[inverse == index]] = True
-                products.append(result.handoff)
-        return GuardResult(accepted, tuple(products))
-
     def prepare(
         self,
         keys: NDArray[np.void],
@@ -223,20 +136,19 @@ class MultitoneGateKernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> Prepared:
-        """Build checked representatives if no guard handoff exists; refuse invalid keys."""
+        """Prepare selected keys in order, reusing builds across all evolve consumers."""
         if len(keys) != len(rows) or not np.array_equal(
             keys, self.prepare_keys(table, rows, context)
         ):
             raise ValueError("full-drive gate representatives must match keys")
-        result = self.guard_prepared(table, rows, context)
-        if not result.accepted.all():
-            raise ValueError("full-drive gate requires validated dual-tone keys")
-        by_key: dict[bytes, _Prepared] = {}
-        for entry in result.preparations:
-            if not isinstance(entry.prepared, _Prepared):
-                raise TypeError("full-drive gate requires its own preparation")
-            by_key[entry.keys[0].tobytes()] = entry.prepared
-        ordered = [by_key[key.tobytes()] for key in keys]
+        if not self.guard(table, rows, context).all():
+            raise ValueError("full-drive gate requires eligible dual-tone keys")
+        ordered = [
+            self._prepare_key(table, int(row), context, key)
+            for key, row in zip(keys, rows, strict=True)
+        ]
+        if len(ordered) == 1:
+            return ordered[0]
         arrays = (
             np.concatenate([product.coefficients for product in ordered]),
             np.concatenate([product.populations for product in ordered]),
@@ -245,6 +157,18 @@ class MultitoneGateKernel:
         for array in arrays:
             array.setflags(write=False)
         return _Prepared(*arrays)
+
+    def _prepare_key(
+        self, table: SegmentTable, row: int, context: KernelContext, key: np.void
+    ) -> _Prepared:
+        def build() -> _Prepared:
+            payload = _build(table, row, context)
+            context.work_plan.routing.prepared_keys(self.name, 1)
+            return payload
+
+        return context.work_plan.fact(
+            FactKey(("full-drive-gate-preparation", key.tobytes()), _Prepared), build
+        )
 
     def bind_input(
         self,

@@ -208,9 +208,6 @@ Lindblad solver 比對完整 density。960-knot 案例在測試內建構 24 能�
 `multitone_gate` 的 `test_multitone_gate_dual_phase_density` 驗 Gaussian、sampled、flat-top 與 DRAG。
 每種包絡跑 1 次或 7 次，重複時涵蓋固定與獨立變化的雙相位，完整 density 對獨立參考解。
 `test_multitone_gate_mixed_phase_keys_density` 在同次 evolve 驗不同波形的 key，包含 constant+sampled pair。
-強 bath 案例驗 pinned split 缺陷拒收。另一案例讓比價勝出的 key 因 split 拒收，並實際執行合格的 DOP853。另一個 bath 案例用同一 key 驗預設 budget 放行、完整 density 符合 oracle，收緊 budget 時拒收。
-共振雙 tone 案例驗 gate 可取代精度相近的 CPU fallback，收緊 budget 後則拒收。
-其中一組在 DP5(4) 適用時通過，固定用 DOP853 的舊探針會拒收。
 這些小模型案例不代表長序列已通過精度或速度驗收。
 Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生誤差觀察值。
 各案例包含完整 complex coherence、relaxation 與 dephasing。模型尺寸依案例族區分：
@@ -252,12 +249,11 @@ native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e
 
 同檔也驗證單次 pinned gate 的完整 density，並保留 20 點共享輸入的預設
 `common_frame` 空／暖 history 驗收。
-同檔從 `inspect_dispatch` 驗證逐 key 冷價的兩側。價格勝出的本地 key 回 `deferred`，共享 key 跑 guard，價格輸的 gate 回 `untested_after_short_circuit`。
-短 inventory 在空歷史和前次已執行同 key 的情況下都預測 DOP853；實際 evolve 確認選路與未付 gate prepare。長 inventory 驗證合格 key 可執行 gate，且不能攤提到另一個罕用 key。
-測試使用有冷價間距的輸入，不重算係數或鎖住 break-even 的精確位置。
-固定 `multitone_gate` 可以略過成本比較，不能略過相位與 split 驗證。
+同檔從 `inspect_dispatch` 驗證逐 key 冷價的兩側。價格勝出的 gate 回 `selected`，即使只有一條 timeline 使用該 key。價格輸的 gate 若列入候選，回 `untested_after_short_circuit`。
+實際 evolve 用 telemetry 驗證短 inventory 走 DOP853 且不建 gate。前次執行同 key 不影響這次比價。長 inventory 的建構成本不能攤提到另一個罕用 key。
+固定 `multitone_gate` 略過成本比較，仍檢查結構。
 [共同選路測試](simulate/evolution/contract/test_shared_multitone_routing.py)
-從 `Engine.inspect_dispatch` 檢查重疊群的價格順序、拒收後的 family 和跨相位群的重核。
+用公開 inspect 與 evolve 檢查重疊群比價、RWA 拒收、gate 數值失敗及跨相位群、prefix 和 worker 的實際建構次數。
 舊的 RWA 群價格與 OpenCL lazy check 測試以多家白名單排除 gate。
 多段案例量整條 timeline 的最終誤差。混合路徑的每個 family 列出同一個最終誤差，
 不是各段的局部誤差。
