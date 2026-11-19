@@ -49,16 +49,20 @@ sequence construction. The heralded version jointly fits gg and ee return surviv
 ## Sequences and cost
 
 `depth` is an increasing list of distinct nonnegative Clifford counts.
-`seed` is a list of distinct nonnegative 31-bit integers. Each integer is the
-complete random-sequence identity. Keep these values with the data.
-Each seed independently defines its random sequence. Reusing a
-seed at shallower depths keeps the same random Clifford prefix.
+`seed` is a list of distinct nonnegative 31-bit integers. Each seed fixes the
+random Clifford draws. Keep these values with the data. Reusing a seed at
+shallower depths keeps the same random Clifford prefix.
 
-Both arms draw from all 11,520 two-qubit Cliffords. Interleaved inserts one CZ
-after each random Clifford. Reference already contains CZs inside the Clifford
-decompositions. Each arm gets its own full-product inverse, including all
-inserted CZs. Depth counts Cliffords; physical CZ and pulse counts depend on
-the selected decompositions and arm.
+Both arms draw from all 11,520 two-qubit Cliffords. The decomposition minimizes
+CZ count first, then X90 count. Z90 only updates the frame and has no cost.
+The uniform average is 1.5 CZs per Clifford, before interleaving and recovery.
+The same seed still draws the same Cliffords as with the previous decomposition,
+but their pulse sequences can differ.
+
+Interleaved inserts one CZ after each random Clifford. Reference already
+contains CZs inside the Clifford decompositions. Each arm gets its own
+full-product inverse, including all inserted CZs. Depth counts Cliffords;
+physical CZ and pulse counts depend on the selected decompositions and arm.
 Check representative compiled sequences for memory use and duration before a run.
 A shallow depth can still contain several long CZ pulses.
 
