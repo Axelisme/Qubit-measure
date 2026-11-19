@@ -5,7 +5,13 @@ from typing import Any
 
 from qick.asm_v2 import QickProgramV2
 
-from .compiled_stream import CompiledStream
+from .compiled_stream import (
+    CONTROL_JUMP,
+    CONTROL_LABEL,
+    SOURCE_END,
+    SOURCE_START,
+    CompiledStream,
+)
 from .instructions import MetaInst
 from .linker import IRLinker
 from .pipeline import make_default_pipeline
@@ -106,8 +112,7 @@ class IRCompileMixin(QickProgramV2):
             if not (
                 isinstance(inst, MetaInst)
                 and (
-                    inst.type
-                    in {"SOURCE_START", "SOURCE_END", "CONTROL_JUMP", "CONTROL_LABEL"}
+                    inst.type in {SOURCE_START, SOURCE_END, CONTROL_JUMP, CONTROL_LABEL}
                     or (
                         inst.type
                         in {

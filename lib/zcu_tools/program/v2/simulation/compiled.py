@@ -47,6 +47,7 @@ from ._compiled_stream import (
     DecodedInstruction,
     NativeLoop,
     StructuredBranch,
+    forward_segments,
     predecode,
 )
 from .binding import SimulationBinding
@@ -97,10 +98,6 @@ def _execute(record: DecodedInstruction, machine: Machine, outputs: Outputs) -> 
         raise ValueError("unsupported instruction effect")
 
 
-def _failure(record: DecodedInstruction, cause: Exception) -> ValueError:
-    return record.failure(str(cause))
-
-
 def _point_names(
     records: tuple[DecodedInstruction, ...], loops: dict[str, NativeLoop]
 ) -> tuple[str, ...]:
@@ -137,13 +134,11 @@ def _validate_loop(records: tuple[DecodedInstruction, ...], loop: NativeLoop) ->
         if isinstance(r.instruction, JumpInst)
     ]
     if len(closing) != 1:
-        raise _failure(
-            records[loop.start], ValueError("missing/ambiguous loop backedge")
-        )
+        raise records[loop.start].failure("missing/ambiguous loop backedge")
     record = closing[0]
     jump = record.instruction
     if not isinstance(jump, JumpInst):
-        raise _failure(record, ValueError("missing loop backedge"))
+        raise record.failure("missing loop backedge")
     info = _loop_info(records, loop)
     n = info["n"]
     if loop.native:
@@ -160,9 +155,7 @@ def _validate_loop(records: tuple[DecodedInstruction, ...], loop: NativeLoop) ->
             or jump.wr.dst.canonical_name != loop.counter
             or str(jump.op) != f"{loop.counter} + #1"
         ):
-            raise _failure(
-                record, ValueError("loop counter/count disagrees with marker")
-            )
+            raise record.failure("loop counter/count disagrees with marker")
         labels = [
             r.instruction
             for r in records[loop.body_end + 1 : loop.end]
@@ -177,7 +170,7 @@ def _validate_loop(records: tuple[DecodedInstruction, ...], loop: NativeLoop) ->
             else ""
         )
         if target != loop.name:
-            raise _failure(record, ValueError("loop backedge disagrees with marker"))
+            raise record.failure("loop backedge disagrees with marker")
     else:
         _validate_inner_loop(records, loop, jump)
 
@@ -227,9 +220,8 @@ def _validate_inner_loop(
         or labels.get(target) != records[loop.body_start].position
         or len(initial) != 1
     ):
-        raise _failure(
-            records[loop.start],
-            ValueError("inner loop counter/count/backedge disagrees with marker"),
+        raise records[loop.start].failure(
+            "inner loop counter/count/backedge disagrees with marker"
         )
 
 
@@ -262,9 +254,9 @@ def _shell_compute(record: DecodedInstruction, machine: Machine) -> None:
     if not isinstance(
         inst, (RegWriteInst, DmemReadInst, WmemWriteInst, TestInst, TimeInst)
     ):
-        raise _failure(record, ValueError("unsupported acquisition shell effect"))
+        raise record.failure("unsupported acquisition shell effect")
     if isinstance(inst, (RegWriteInst, WmemWriteInst)) and inst.wp is not None:
-        raise _failure(record, ValueError("output inside acquisition shell"))
+        raise record.failure("output inside acquisition shell")
     machine.execute(inst, record.position)
 
 
@@ -356,9 +348,7 @@ def _validate_native_sweeps(
                 _shell_compute(record, actual)
             _check_update(info, before, actual, -(info["n"] - 1), scratch)
         except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise _failure(
-                records[loop.start], ValueError(f"sweep shell disagrees: {exc}")
-            ) from exc
+            raise records[loop.start].failure(f"sweep shell disagrees: {exc}") from exc
 
 
 def _timing_writes(records: Sequence[DecodedInstruction]) -> set[str]:
@@ -430,9 +420,7 @@ def _validate_hooks(
                 if isinstance(inst, RegWriteInst) and inst.wp is None:
                     actual.writes.update(inst.reg_write)
                 else:
-                    raise _failure(
-                        record, ValueError("undeclared acquisition shell effect")
-                    )
+                    raise record.failure("undeclared acquisition shell effect")
             memory_writes = {
                 name for name in actual.writes if name.startswith(("DMEM[", "WMEM["))
             }
@@ -445,8 +433,8 @@ def _validate_hooks(
             if "s12" in live:
                 raise ValueError("cross-shot live-in s12 is updated by the shot shell")
         except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise _failure(
-                records[loop.start], ValueError(f"table/shot shell disagrees: {exc}")
+            raise records[loop.start].failure(
+                f"table/shot shell disagrees: {exc}"
             ) from exc
 
 
@@ -497,9 +485,8 @@ def _apply_sweeps(
                     machine.wmem[address][:, field] %= 2 ** (32 if field != 5 else 16)
             _apply_tables(info, machine, indexes)
         except (KeyError, TypeError, IndexError, ValueError) as exc:
-            raise _failure(
-                records[loop.start],
-                ValueError(f"invalid loop sweep/table definition: {exc}"),
+            raise records[loop.start].failure(
+                f"invalid loop sweep/table definition: {exc}"
             ) from exc
 
 
@@ -529,7 +516,7 @@ def _run_body(
                     else np.full(machine.size, count, dtype=np.int64)
                 )
                 if np.any(machine.active & (n < 0)):
-                    raise _failure(record, ValueError("negative loop count"))
+                    raise record.failure("negative loop count")
                 outer = machine.active.copy()
                 iterations = outputs.iterations
                 machine.write(
@@ -558,9 +545,7 @@ def _run_body(
                 selector = machine.value(Register(branch.compare))
                 outer = machine.active.copy()
                 if np.any(outer & ((selector < 0) | (selector >= len(branch.cases)))):
-                    raise _failure(
-                        record, ValueError("branch selector has no marked case")
-                    )
+                    raise record.failure("branch selector has no marked case")
                 for case, (a, b) in enumerate(branch.cases):
                     machine.active = outer & (selector == case)
                     machine.read_mask = machine.active.copy()
@@ -581,24 +566,17 @@ def _run_forward_segments(
     bounds: tuple[int, int],
     run: Callable[[int, int], None],
 ) -> None:
-    first, last = bounds
     waiting: dict[int, BoolArray] = {}
-    for index in range(first, last):
-        jump = records[index].jump
-        if jump is not None:
-            run(first, jump.end)
-            if np.any(machine.active):
-                taken = machine.condition(jump.condition)
-                waiting[jump.target] = waiting.get(jump.target, False) | taken
-                machine.active &= ~taken
-                machine.read_mask = machine.active.copy()
-            first = jump.end + 1
-        elif index in waiting:
-            run(first, index)
-            machine.active |= waiting.pop(index)
+    for segment in forward_segments(records, bounds, waiting):
+        run(segment.first, segment.stop)
+        if (jump := segment.jump) is not None and np.any(machine.active):
+            taken = machine.condition(jump.condition)
+            waiting[jump.target] = waiting.get(jump.target, False) | taken
+            machine.active &= ~taken
             machine.read_mask = machine.active.copy()
-            first = index + 1
-    run(first, last)
+        elif segment.resume is not None:
+            machine.active |= waiting.pop(segment.resume)
+            machine.read_mask = machine.active.copy()
 
 
 def _build_lanes(
@@ -719,7 +697,7 @@ def _located_execute(
             machine.read_mask = machine.active.copy()
         _execute(record, machine, outputs)
     except (ValueError, KeyError, IndexError) as exc:
-        raise _failure(record, exc) from exc
+        raise record.failure(str(exc)) from exc
     finally:
         machine.active = outer
         machine.read_mask = outer.copy()

@@ -66,7 +66,9 @@ def observe_readouts(prog: TimelineProgramV2) -> Iterator[ReadoutObservation]:
             yield ReadoutObservation(source, None, repeats)
         elif isinstance(source, Trigger):
             yield ReadoutObservation(
-                source, scope or readout_control_scope(prefix), repeats
+                source,
+                str(scope) if scope is not None else readout_control_scope(prefix),
+                repeats,
             )
         prefix.append(source)
 
@@ -110,14 +112,27 @@ def observe_readout_paths(prog: TimelineProgramV2) -> Iterator[ReadoutPath]:
             elif isinstance(source, Trigger):
                 observations.append(
                     ReadoutObservation(
-                        source, scope or readout_control_scope(prefix), repeats
+                        source,
+                        str(scope)
+                        if scope is not None
+                        else readout_control_scope(prefix),
+                        repeats,
                     )
                 )
             prefix.append(source)
         yield ReadoutPath(cases, tuple(observations))
 
 
-type _Sources = list[tuple[Macro, str | None, tuple[int | str, ...]]]
+@dataclass(frozen=True)
+class _JumpScope:
+    target: str
+
+    def __str__(self) -> str:
+        return f"Jump {self.target!r}"
+
+
+type _Scope = _JumpScope | str | None
+type _Sources = list[tuple[Macro, _Scope, tuple[int | str, ...]]]
 type _Choices = tuple[tuple[str, int], ...]
 
 
@@ -130,24 +145,26 @@ def _repeat_iterations(macros: Sequence[Macro]) -> dict[int, int | str]:
 
 
 def _jump_scopes(
-    macros: Sequence[Macro], scope: str | None
-) -> Iterator[tuple[Macro, str | None]]:
-    inherited = scope if scope and scope.startswith("Jump ") else None
-    active: dict[str, str] = {}
+    macros: Sequence[Macro], scope: _Scope
+) -> Iterator[tuple[Macro, _JumpScope | None]]:
+    inherited = scope if isinstance(scope, _JumpScope) else None
+    active: dict[str, _JumpScope] = {}
     for macro in macros:
         source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
         if isinstance(source, (TimelineJump, TimelineLabel)):
             name = source.target.name
+            # Reopening a target makes it the newest range, even if it was already open.
             active.pop(name, None)
             if isinstance(source, TimelineJump):
-                active[name] = f"Jump {name!r}"
-        yield source, active[next(reversed(active))] if active else inherited
+                active[name] = _JumpScope(name)
+        latest_target = next(reversed(active), None)
+        yield source, active[latest_target] if latest_target is not None else inherited
 
 
 def _source_paths(
     macros: Sequence[Macro],
     choices: _Choices,
-    scope: str | None = None,
+    scope: _Scope = None,
     repeats: tuple[int | str, ...] = (),
 ) -> Iterator[tuple[_Choices, _Sources]]:
     paths: list[tuple[_Choices, _Sources]] = [(choices, [])]
@@ -197,9 +214,9 @@ def _source_paths(
 
 def _source_macros(
     macros: Sequence[Macro],
-    scope: str | None = None,
+    scope: _Scope = None,
     repeats: tuple[int | str, ...] = (),
-) -> Iterator[tuple[Macro, str | None, tuple[int | str, ...]]]:
+) -> Iterator[tuple[Macro, _Scope, tuple[int | str, ...]]]:
     iterations = _repeat_iterations(macros)
     scopes = [scope]
     repeat_stack = [repeats]

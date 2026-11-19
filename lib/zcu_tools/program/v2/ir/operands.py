@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, TypeAlias
 
-from .hw_semantics import GENERAL_REGS, VOLATILE_REGS, WAVE_REGS
+from .hw_semantics import (
+    GENERAL_REGS,
+    PORT_RESULT_HIGH_REG,
+    PORT_RESULT_LOW_REG,
+    VOLATILE_REGS,
+    WAVE_REGS,
+)
 
 if TYPE_CHECKING:
     from .labels import Label, LabelRef
@@ -96,8 +102,8 @@ _REG_ALIAS: dict[str, str] = {
     "s_div_r": "s5",
     "s_core_r1": "s6",
     "s_core_r2": "s7",
-    "s_port_l": "s8",
-    "s_port_h": "s9",
+    "s_port_l": PORT_RESULT_LOW_REG,
+    "s_port_h": PORT_RESULT_HIGH_REG,
     "s_status": "s10",
     "s_usr_time": "s11",
     "s_core_w1": "s12",

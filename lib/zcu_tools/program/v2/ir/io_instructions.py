@@ -6,7 +6,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Any
 
-from .hw_semantics import STATUS_REG, TIMED_BASE_REG
+from .hw_semantics import PORT_RESULT_REGS, STATUS_REG, TIMED_BASE_REG
 from .instruction_fields import (
     VALID_TRIG_SRCS,
     CondCode,
@@ -377,7 +377,7 @@ class DportReadInst(BaseInst):
 
     @property
     def reg_write(self) -> frozenset[str]:
-        return frozenset({"s8", "s9"})
+        return PORT_RESULT_REGS
 
     def to_dict(self) -> dict[str, Any]:
         d = {

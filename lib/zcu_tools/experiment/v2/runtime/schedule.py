@@ -581,7 +581,8 @@ class Schedule(RunAcquisitionMixin, Generic[T_Env]):
                 "Schedule default acquire target requires exactly one SignalBuffer"
             )
         if not all(
-            isinstance(part, int) or isinstance(part, slice) and part.step in (None, 1)
+            isinstance(part, int)
+            or (isinstance(part, slice) and part.step in (None, 1))
             for part in owner.path
         ):
             raise ValueError(

@@ -14,6 +14,9 @@ from ._cz_phase import CZPhasePair
 from ._drive import DualLineCfg
 from ._rb_sequence import RBSequence, TwoQubitGate
 
+_RB_TIMELINES = ("rb_f1_time", "rb_f2_time")
+_DEPTH_LOOP = "depth"
+
 
 def emit_sequence(
     builder: TimelineBuilder,
@@ -38,6 +41,7 @@ def emit_sequence(
     Reserve rb_f1_time/rb_f2_time and gate-indexed CZ timeline names in builder;
     compilation errors propagate, and unknown gates raise ValueError.
     """
+    builder.fork("default", into=list(_RB_TIMELINES))
     playback = _CliffordPlayback(builder, (x90_f1, x90_f2), drive, phase_pair)
     frames = (0.0, 0.0)
     for block in sequence.clifford_blocks:
@@ -53,9 +57,6 @@ class _CliffordPlayback:
     drive: DualLineCfg
     phase_pair: CZPhasePair
     next_gate: int = 0
-
-    def __post_init__(self) -> None:
-        self.builder.fork("default", into=list(_RB_TIMELINES))
 
     def emit_clifford(
         self, block: tuple[TwoQubitGate, ...], initial_frames: tuple[float, float]
@@ -116,9 +117,6 @@ class _CliffordPlayback:
         return frames[0], frames[1]
 
 
-_RB_TIMELINES = ("rb_f1_time", "rb_f2_time")
-
-
 def emit_depth_sweep(
     builder: TimelineBuilder,
     sequences: Sequence[RBSequence],
@@ -137,7 +135,8 @@ def emit_depth_sweep(
     emit_sequence. Reserve the depth loop, rb_recovery_* and rb_terminal labels,
     and emit_sequence's timeline names. Compilation errors propagate at build.
     """
-    builder.add_loop("depth", len(sequences))
+    builder.add_loop(_DEPTH_LOOP, len(sequences))
+    builder.fork("default", into=list(_RB_TIMELINES))
     playback = _CliffordPlayback(builder, (x90_f1, x90_f2), drive, phase_pair)
     checkpoints = _emit_prefix(playback, sequences)
     for point, (sequence, frames) in enumerate(
@@ -145,7 +144,7 @@ def emit_depth_sweep(
     ):
         builder.label(f"rb_recovery_{point}")
         playback.emit_clifford(sequence.recovery_gates, frames)
-        # Merge only after moving reference to the end of this path's recovery.
+        # ADR-0083: sync each path before the label merges its timeline ends.
         builder.delay_by_timeline(timeline="default")
         if point < len(sequences) - 1:
             builder.jump("rb_terminal")
@@ -167,7 +166,13 @@ def _emit_prefix(
         start = end
         checkpoints.append(frames)
         if point < last:
-            playback.builder.cond_jump(f"rb_recovery_{point}", "depth", "Z", "-", point)
+            playback.builder.cond_jump(
+                label=f"rb_recovery_{point}",
+                arg1=_DEPTH_LOOP,
+                test="Z",
+                op="-",
+                arg2=point,
+            )
     if last > 0:
         playback.builder.jump(f"rb_recovery_{last}")
     return checkpoints
@@ -197,6 +202,7 @@ def build_depth_chunks(
         else:
             chunks.append((slice(start, stop), program))
             return
+        # Retry outside the handler so later failures do not chain to this overflow.
         compile_range(start, middle)
         compile_range(middle, stop)
 

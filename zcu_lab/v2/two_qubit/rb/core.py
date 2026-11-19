@@ -381,6 +381,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                                 Classify("terminal", config.roles.f2_tone),
                             ],
                         )
+                        # The result buffer is indexed by (depth, seed, arm, round).
                         point_step = replace(
                             chunk_step, path=(depth_slice, *arm_step.path)
                         )

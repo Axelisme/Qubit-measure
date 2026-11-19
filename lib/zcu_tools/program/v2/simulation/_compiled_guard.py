@@ -13,7 +13,12 @@ from ..ir.io_instructions import (
 )
 from ..ir.operands import AluExpr, AluOp, Immediate, MemAddr, Register, SrcKeyword
 from ._compiled_state import Machine
-from ._compiled_stream import DecodedInstruction, NativeLoop, StructuredBranch
+from ._compiled_stream import (
+    DecodedInstruction,
+    NativeLoop,
+    StructuredBranch,
+    forward_segments,
+)
 
 
 def _register_effects(inst: BaseInst) -> tuple[set[str], set[str]]:
@@ -41,6 +46,7 @@ def _register_effects(inst: BaseInst) -> tuple[set[str], set[str]]:
 
 type _AddressValue = int | str | tuple[int, int, str]
 type _Path = tuple[set[str], dict[str, _AddressValue]]
+"""Definitely defined names, then symbolic register values for address analysis."""
 
 
 def _join_paths(paths: list[_Path], location: str) -> _Path:
@@ -270,28 +276,23 @@ class _LiveInAnalysis:
         return self._walk(first, last, defined, values), values
 
     def _walk_forward(self, bounds: tuple[int, int]) -> None:
-        first, last = bounds
         live: _Path | None = (set(), self.constants.copy())
         incoming: dict[int, list[_Path]] = {}
-        for index in range(first, last):
-            if index in incoming:
+        for segment in forward_segments(self.records, bounds, incoming):
+            if live is not None:
+                live = self._segment(segment.first, segment.stop, live)
+            if (index := segment.resume) is not None:
                 paths = incoming.pop(index)
                 if live is not None:
-                    paths.append(self._segment(first, index, live))
+                    paths.append(live)
                 live = _join_paths(paths, f"label-{index}")
-                first = index + 1
-            jump = self.records[index].jump
-            if jump is not None and live is not None:
-                live = self._segment(first, jump.end, live)
+            if (jump := segment.jump) is not None and live is not None:
                 defined, values = live
                 incoming.setdefault(jump.target, []).append(
                     (defined.copy(), values.copy())
                 )
                 if jump.condition is None:
                     live = None
-                first = jump.end + 1
-        if live is not None:
-            self._segment(first, last, live)
 
     def check(self, bounds: tuple[int, int], *, reject_carry: bool) -> set[str]:
         self._walk_forward(bounds)

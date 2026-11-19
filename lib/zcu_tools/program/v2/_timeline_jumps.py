@@ -5,13 +5,15 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from qick.asm_v2 import CondJump, Jump, Label, Macro
 
 from ._timeline_expression import choose_time
 from ._timeline_runtime import RuntimeEnd, RuntimeMath, Time
 from ._timeline_state import PathState, TimelineBook
+from .ir.compiled_stream import CONTROL_JUMP, CONTROL_LABEL
+from .ir.instruction_fields import VALID_COND_CODES
 from .ir.labels import PSEUDO_LABELS, make_label
 
 if TYPE_CHECKING:
@@ -32,13 +34,28 @@ def _capture(prog: TimelineProgramV2, book: TimelineBook) -> PathState:
 
 
 class TimelineJump(Macro):
-    def __init__(self, flow: TimelineJumps, target: _Target, native: Jump | CondJump):
+    """One recorded transfer to a later author label.
+
+    flow owns this body's edges. target is the author-label identity shared
+    with the destination. native emits the QICK transfer. kind names the
+    author action (jump or cond_jump). state is the incoming path snapshot,
+    available after preprocessing.
+    """
+
+    def __init__(
+        self,
+        flow: TimelineJumps,
+        target: _Target,
+        native: Jump | CondJump,
+        kind: Literal["jump", "cond_jump"],
+    ):
         self.flow = flow
         self.target = target
         self.native = native
-        self.kind = "jump" if isinstance(native, Jump) else "cond_jump"
+        self.kind = kind
 
     def preprocess(self, prog: TimelineProgramV2) -> None:
+        """Save the current path and keep its runtime-end registers live."""
         self.state = _capture(prog, self.flow.book)
         self.flow.live.setdefault(self.target, set()).update(
             value.register
@@ -50,9 +67,10 @@ class TimelineJump(Macro):
         )
 
     def translate(self, prog: TimelineProgramV2) -> None:
-        conditional = isinstance(self.native, CondJump)
+        """Emit the snapshot annotation followed by the native transfer."""
+        conditional = self.kind == "cond_jump"
         prog.record_meta(
-            "CONTROL_JUMP",
+            CONTROL_JUMP,
             self.target.name,
             {
                 "target": self.target.name,
@@ -64,6 +82,14 @@ class TimelineJump(Macro):
 
 
 class TimelineLabel(Label):
+    """A native label with the timeline state joined from its incoming edges.
+
+    flow owns the body graph and book is its timeline state. target is the
+    identity shared with jumps to this label. incoming lists those jumps in
+    source order. fallthrough adds the preceding path as the last edge. math
+    holds the runtime operations for the join after preprocessing.
+    """
+
     def __init__(
         self,
         flow: TimelineJumps,
@@ -80,6 +106,7 @@ class TimelineLabel(Label):
         self.fallthrough = fallthrough
 
     def preprocess(self, prog: TimelineProgramV2) -> None:
+        """Restore and merge reachable edges, rejecting incompatible states."""
         self.math = RuntimeMath(prog)
         states = [jump.state for jump in self.incoming]
         if self.fallthrough:
@@ -94,13 +121,18 @@ class TimelineLabel(Label):
         self, states: list[PathState], edges: list[str], where: str
     ) -> None:
         first = states[0]
-        for field in ("used", "repeat_frames", "pinned"):
-            if any(
-                getattr(state, field) != getattr(first, field) for state in states[1:]
-            ):
-                raise ValueError(
-                    f"{where}: incompatible {field} across incoming edges ({', '.join(edges)})"
-                )
+        others = states[1:]
+        field = None
+        if any(state.used != first.used for state in others):
+            field = "used"
+        elif any(state.repeat_frames != first.repeat_frames for state in others):
+            field = "repeat_frames"
+        elif any(state.pinned != first.pinned for state in others):
+            field = "pinned"
+        if field is not None:
+            raise ValueError(
+                f"{where}: incompatible {field} across incoming edges ({', '.join(edges)})"
+            )
         for ch in first.read_counts:
             counts = [state.read_counts[ch] for state in states]
             if len(set(counts)) != 1:
@@ -176,14 +208,23 @@ class TimelineLabel(Label):
         self.book.time_bounds.merge_selections([state.selections for state in states])
 
     def translate(self, prog: TimelineProgramV2) -> None:
-        prog.record_meta("CONTROL_LABEL", self.target.name, {"label": self.target.name})
+        """Emit the label, its snapshot annotation and the runtime join work."""
+        prog.record_meta(CONTROL_LABEL, self.target.name, {"label": self.target.name})
         super().translate(prog)
         self.book.output_time = None  # A taken edge need not have set the same s14.
         self.math.translate(prog)
 
 
 class TimelineJumps:
-    """Record and validate one body's graph; its macros own edge snapshots."""
+    """Record and validate one body's forward jumps (ADR-0083).
+
+    book is the current timeline state. regions holds enclosing descriptions in
+    nesting order, empty at the top level. pending maps unresolved author names
+    to their incoming jumps in source order. live maps unresolved destinations
+    to runtime-end registers still needed by saved edges during preprocessing.
+    defined holds author names already recorded. unreachable_after is the target
+    of the latest unconditional jump when no fall-through is reachable, or None.
+    """
 
     def __init__(self, book: TimelineBook):
         self.book = book
@@ -196,6 +237,7 @@ class TimelineJumps:
 
     @contextmanager
     def region(self, description: str) -> Generator[None]:
+        """Reject author jumps and labels within the named nested body scope."""
         self.regions.append(description)
         try:
             yield
@@ -203,6 +245,7 @@ class TimelineJumps:
             self.regions.pop()
 
     def require_reachable(self) -> None:
+        """Raise ValueError if an unconditional jump ended the current path."""
         if self.unreachable_after is not None:
             raise ValueError(
                 f"unreachable timeline action after unconditional jump to {self.unreachable_after!r}; "
@@ -219,6 +262,11 @@ class TimelineJumps:
             raise ValueError(f"timeline {action} {name!r} requires a nonempty string")
 
     def label(self, name: str) -> TimelineLabel:
+        """Resolve pending jumps to name and make their paths reachable here.
+
+        name must be nonempty, unique in the body and recorded at top level,
+        otherwise raise ValueError.
+        """
         self._check("label", name)
         if name in self.defined:
             raise ValueError(f"timeline label {name!r} is defined twice in _body")
@@ -235,7 +283,13 @@ class TimelineJumps:
         return source
 
     def jump(self, name: str, native: Jump | CondJump) -> TimelineJump:
-        kind = "jump" if isinstance(native, Jump) else "cond_jump"
+        """Record a native jump to a later author label named by a nonempty string.
+
+        Reject nesting, unreachable actions, backward targets and unsupported
+        tests with ValueError. An unconditional jump ends the current path.
+        """
+        conditional = isinstance(native, CondJump)
+        kind = "cond_jump" if conditional else "jump"
         self._check(f"{kind} to", name)
         self.require_reachable()
         if name in self.defined:
@@ -243,25 +297,27 @@ class TimelineJumps:
                 f"timeline jump to {name!r} is backward; general jumps must target a later label "
                 "(use Repeat or a sweep for iteration)"
             )
-        if isinstance(native, CondJump):
+        if conditional:
             if native.test in ("F", "NF"):
                 raise ValueError(
                     f"timeline cond_jump to {name!r}: peripheral-flag test {native.test!r} is unsupported in _body"
                 )
-            if native.test not in ("Z", "NZ", "S", "NS"):
+            # Keep the diagnostic for malformed, unhashable tests as well.
+            if native.test not in tuple(VALID_COND_CODES):
                 raise ValueError(
                     f"timeline cond_jump to {name!r}: test {native.test!r} must be Z, NZ, S or NS in _body"
                 )
         incoming = self.pending.setdefault(name, [])
         target = incoming[0].target if incoming else _Target(name)
         native.label = target
-        source = TimelineJump(self, target, native)
+        source = TimelineJump(self, target, native, kind)
         incoming.append(source)
-        if kind == "jump":
+        if not conditional:
             self.unreachable_after = name
         return source
 
     def finish(self) -> None:
+        """Raise ValueError for the first undefined target after recording the body."""
         if self.pending:
             name = next(iter(self.pending))
             raise ValueError(f"timeline jump target {name!r} is never defined in _body")

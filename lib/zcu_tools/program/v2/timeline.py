@@ -589,7 +589,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             yield
         finally:
             self._timeline_default = previous
-            # Repeat distinguishes lexical from direct tail sync.
+            # A sync inside this scope is not a direct final action of a Repeat.
             if self._timeline_jumps.regions:
                 self.append_macro(_TimelineScope(self._timeline_book, name))
 

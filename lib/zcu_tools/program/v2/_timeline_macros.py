@@ -1221,6 +1221,7 @@ class BranchCases:
         start = len(self.prog.macro_list)
         name = f"{self.by}[{index}]"
         try:
+            # Share the program's region stack to report the innermost illegal jump scope.
             with (
                 self.prog._timeline_jumps.region(f"Branch {self.by!r} case {index}"),
                 self.prog.timeline(name),

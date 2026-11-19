@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from typing import NoReturn
 
 from ..base import MyProgramV2
+from ..ir.compiled_stream import CONTROL_JUMP, CONTROL_LABEL, SOURCE_END, SOURCE_START
+from ..ir.hw_semantics import PORT_RESULT_REGS
 from ..ir.instruction_fields import CondCode, parse_cond_code
 from ..ir.instructions import (
     BaseInst,
@@ -59,6 +62,43 @@ class DecodedInstruction:
             f"{type(self.instruction).__name__} at preopt {self.position}, "
             f"loops={self.loops}, cases={self.cases}, source={self.source!r}: {reason}"
         )
+
+
+@dataclass(frozen=True)
+class ForwardSegment:
+    """Run records in [first, stop), then transfer or resume, if requested.
+
+    jump describes a transfer after its setup instructions. resume indexes a
+    destination marker with waiting paths. At most one is set; neither is set
+    on the final segment of the body.
+    """
+
+    first: int
+    stop: int
+    jump: ForwardJump | None = None
+    resume: int | None = None
+
+
+def forward_segments(
+    records: tuple[DecodedInstruction, ...],
+    bounds: tuple[int, int],
+    waiting: Mapping[int, object],
+) -> Iterator[ForwardSegment]:
+    """Split a validated body at jumps and at labels with waiting paths.
+
+    bounds is the half-open body range. The caller updates waiting by label
+    index after each yielded segment. A jump segment includes its marker and
+    setup but not the JUMP itself. A resume segment stops before the label marker.
+    """
+    first, last = bounds
+    for index in range(first, last):
+        if (jump := records[index].jump) is not None:
+            yield ForwardSegment(first, jump.end, jump=jump)
+            first = jump.end + 1
+        elif index in waiting:
+            yield ForwardSegment(first, index, resume=index)
+            first = index + 1
+    yield ForwardSegment(first, last)
 
 
 @dataclass(frozen=True)
@@ -192,9 +232,9 @@ class _Scopes:
     complete_branches: list[StructuredBranch] = field(default_factory=list)
 
     def consume(self, inst: MetaInst, index: int) -> None:
-        if inst.type == "SOURCE_START":
+        if inst.type == SOURCE_START:
             self.sources.append(inst.name)
-        elif inst.type == "SOURCE_END":
+        elif inst.type == SOURCE_END:
             if not self.sources or self.sources.pop() != inst.name:
                 raise ValueError("unbalanced source marker")
         elif inst.type == "TIMING_BOUNDARY":
@@ -212,7 +252,7 @@ class _Scopes:
             self.branch(inst, index)
         elif inst.type.startswith("LOOP_"):
             self.native_loop(inst, index)
-        elif inst.type not in {"CONTROL_JUMP", "CONTROL_LABEL"}:
+        elif inst.type not in {CONTROL_JUMP, CONTROL_LABEL}:
             raise ValueError(f"unknown or unsupported marker {inst.type}")
 
     def check_control(self, record: DecodedInstruction, marker: str) -> None:
@@ -437,7 +477,7 @@ def _control_labels(
     labels = {}
     for i, record in enumerate(records):
         inst = record.instruction
-        if not isinstance(inst, MetaInst) or inst.type != "CONTROL_LABEL":
+        if not isinstance(inst, MetaInst) or inst.type != CONTROL_LABEL:
             continue
         label = inst.info.get("label")
         next_inst = records[i + 1].instruction if i + 1 < len(records) else None
@@ -478,7 +518,7 @@ def _require_jump_test(record: DecodedInstruction) -> None:
     inst = record.instruction
     if not isinstance(inst, TestInst) or not inst.uf:
         raise record.failure("CONTROL_JUMP must be followed by a flag-setting TEST")
-    measurement = inst.reg_read & {"s8", "s9"}
+    measurement = inst.reg_read & PORT_RESULT_REGS
     if measurement:
         raise record.failure(f"undefined register {min(measurement)}")
 
@@ -497,8 +537,8 @@ def _decode_jump(
     target, label = labels[name]
     setup = start + 1
     first = records[setup].instruction
-    big = isinstance(first, RegWriteInst)
-    end = setup + int(big) + int(condition is not None)
+    indirect = isinstance(first, RegWriteInst)
+    end = setup + int(indirect) + int(condition is not None)
     if target <= end:
         raise record.failure("CONTROL_JUMP must be followed by a forward JUMP")
     if condition is not None:
@@ -511,12 +551,12 @@ def _decode_jump(
     if jump.if_cond != condition:
         raise record.failure("CONTROL_JUMP condition disagrees with instruction")
     expected = JumpInst(
-        label=None if big else label,
-        addr=Register("s15") if big else None,
+        label=None if indirect else label,
+        addr=Register("s15") if indirect else None,
         if_cond=condition,
     )
     if jump != expected or (
-        big
+        indirect
         and first
         != RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=label)
     ):
@@ -535,7 +575,7 @@ def _decode_control(records: list[DecodedInstruction]) -> None:
             )
         if isinstance(inst, BaseInst):
             position += inst.addr_inc
-        elif isinstance(inst, MetaInst) and inst.type == "CONTROL_JUMP":
+        elif isinstance(inst, MetaInst) and inst.type == CONTROL_JUMP:
             records[i] = replace(record, jump=_decode_jump(records, i, inst, labels))
 
 
@@ -556,7 +596,9 @@ def _validate_body_jumps(
         marked.update(range(first + 1, branch.end))
     for i, record in enumerate(records):
         if record.body and isinstance(record.instruction, JumpInst) and i not in marked:
-            raise record.failure("unsupported instruction effect")
+            raise record.failure(
+                f"unsupported instruction effect: {record.instruction}"
+            )
 
 
 def predecode(
@@ -593,8 +635,8 @@ def predecode(
             ),
         )
         if isinstance(inst, MetaInst) and inst.type in {
-            "CONTROL_JUMP",
-            "CONTROL_LABEL",
+            CONTROL_JUMP,
+            CONTROL_LABEL,
         }:
             scopes.check_control(decoded, inst.type)
             has_control = True

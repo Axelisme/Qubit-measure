@@ -6,6 +6,7 @@ from typing import Any, Literal, Optional, Union
 
 from qick.asm_v2 import AsmV2, ConfigReadout, Pulse, QickParam, QickProgramV2
 
+from ..ir.compiled_stream import SOURCE_END, SOURCE_START
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
 from .loop import CloseInnerLoop, OpenInnerLoop
@@ -54,13 +55,13 @@ class AdditionalMacroMixin(QickProgramV2):
         artifact-only annotations; native pulse fallbacks are suppressed inside
         a scope and those calls do not consume native pulse ordinals.
         """
-        self.meta_macro("SOURCE_START", name)
+        self.meta_macro(SOURCE_START, name)
         self._source_names.append(name)
         try:
             yield
         finally:
             self._source_names.pop()
-            self.meta_macro("SOURCE_END", name)
+            self.meta_macro(SOURCE_END, name)
 
     def _make_asm(self) -> None:
         # QICK resets its low-level program (registers, prog_list) at the
