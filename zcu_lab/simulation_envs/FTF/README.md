@@ -102,6 +102,18 @@ MCP 先呼叫 `predictor.list_files` 發現檔案，再使用
 
 ## 工作副本與調參
 
+要練習低 SNR 讀出，先備份既有工作副本，再把 [low-snr.yaml](low-snr.yaml) 複製成 `ftf.yaml` 並重建環境。
+它與 [default.yaml](default.yaml) 的唯一差別是把 pulse ADC 和兩個 mux receiver 的 `noise_psd_adc2_ns` 矩陣各乘 **84,000**。
+離線校準以 `singleshot/ge` 的 g/e 峰距除以沿兩峰連線的單一 blob 標準差。
+把兩份樣板在同一設定與 seed 下取得的 IQ 逐發相減，確認接收雜訊的 I/Q 共變異形狀與 PSD 一致。
+預設雜訊的 g 峰核心沿連心線有額外展寬，因此用 PSD 形狀將垂直方向的寬度換算到連心線方向。
+Q1 的 entry pulse readout 測得 SNR 由 110.97 降到 0.38。
+`ro_optimize/auto_optimize` 在 7189.78–7190.22 MHz、gain 0.10–0.25、RF 脈衝長度 5–10 us 內取樣，ADC 積分窗固定為 0.9 us。
+用 GE 複測校準候選後，最高 SNR 出現在 7189.8049 MHz、gain 0.24882、RF 脈衝長度 8.505 us，從 289.92 降到 1.01。
+用新樣板重跑 optimizer，另在其分數最高的設定複測得 SNR 1.02。
+這些結果只涵蓋上述範圍內量過的 Q1 pulse readout 設定，不是其他設定或通道的上限。
+`default.yaml` 改動時同步更新低 SNR 樣板；若變更影響讀出或雜訊，重跑校準。
+
 `default.yaml` 使用 `format: zcu.ftf`、整數 `version: 2`。V1 文件不能載入，不自動轉換既有工作副本，也不自動更新既有 entry。三個 DC 電源與校準位於 `dc_bias.sources`，樣板使用 A。環境每 round 讀取 live DC snapshot，保留靜態磁通掃描。`drive_lines` 的每條線以 `operator: charge | flux` 選電荷或固定 DC 小訊號磁通導數，省略為 charge。Flux operator 不是逐時重算 Hamiltonian 的大振幅 fast-flux 控制。
 
 序列內的 flux pulse 另以 `flux_lines` 宣告，不放在 `drive_lines`。`f1`、`coupler`、`f2` 各可選填一條 single-fluxonium 格式的 `FluxLine`，填入 `name`、`gen_ch`、`flux_phi0_per_gain`，再依需求設定 ns 單位的延遲與濾波。Flux 線的 generator 不可與另一 flux loop、任一 drive line、pulse readout 或可選 mux readout 重複。載入失敗時，錯誤會列出兩端綁定的欄位路徑與 channel。省略或填 `{}` 保留原本設定，各迴路省略或填 `null` 停用該線。`default.yaml` 只附註解範例，不預設啟用 pulsed flux，entry 範本也不預填快速 flux channel。欄位與單位見 [Flux lines](field-guide.md#flux-lines序列內磁通校準與濾波)。
