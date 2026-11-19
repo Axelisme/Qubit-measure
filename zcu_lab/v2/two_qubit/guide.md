@@ -2,9 +2,11 @@
 
 **讀者：** operator、agent。從 GUI 或 MCP 準備 F1、F2 並校準 microwave-activated CZ。
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-19，引用參考校準流程
 
 F1、F2 是兩個 fluxonium，coupler 是這一對共用的 transmon。CZ 由兩條 fluxonium charge line 同頻、相鎖地驅動，coupler 只設 DC bias。
+
+本指南的順序對應 Leon Ding, *Novel Gates with Superconducting Fluxonium Qubits*（MIT 物理博士論文，2023） 的校準流程：§4.1.3 以 heralding 初始化，§4.3.2 校準單 qubit gate，§5.3.2–5.3.5 校準 CZ。偏離該流程時，在量測紀錄寫明原因。
 
 ## 校準前確認
 
@@ -106,6 +108,13 @@ Rabi 的 module 與 slot rows 可分開 Apply。確認 x180/x90 指向這次接�
 
 記錄 GE 的 readout route、gain、frequency、積分窗口與其他讀出條件。Joint 分類只取 saved mux readout cfg 中角色 tone 的 circle centers 與 radius，不從單 qubit point 校準搬值。改讀出條件後要重跑 mux GE 及 GE Post。未啟用 reset 的非 heralded 版從熱 ensemble 開始；heralded 版另依 herald 結果分組。兩版都保存全部類別總和。單 qubit Rabi／T1／T2 使用上述既有實驗入口。
 
+進 CZ 前，依論文 §4.3.2 逐顆精校單 qubit gate：
+
+1. 在候選 bias 附近取多個 DC 點量 [T2 Ramsey](../twotone/time_domain/t2ramsey/guide.md)，把 fringe 頻率對 bias 擬合拋物線，頂點就是 sweet spot。兩顆都在 sweet spot 後再往下做。
+2. 在 sweet spot 重做 [mux GE](../mux/singleshot_ge/guide.md)，更新 centers 與 radius。
+3. 用 cosine 包絡的 x180，以 [zig-zag](../twotone/zigzag/guide.md) 的奇數 π 脈衝串精定振幅。
+4. 用 [single-qubit RB](../twotone/rb/guide.md) 逐顆驗收 gate。論文另做 DRAG 與兩顆同時 RB；本 repo 目前沒有這兩個實驗。
+
 ## FTF 的四個角色與 tone 對應
 
 | Scalar alias | 指向（kickstart／simulation 新 entry 的綁定） | 用途 |
@@ -171,5 +180,7 @@ Pulse、slot 與 phase rows 都可獨立 Apply。部分套用後，檢查下一�
 [Two-qubit RB／IRB](rb/guide.md) 使用配對的 two-qubit Clifford reference／CZ-interleaved sequences、各自完整 inverse、實際雙線 CZ 與 local frames。它與單 qubit `twotone/irb` 分別量不同的控制序列。
 
 保留相同 seed 的配對資料與 round 軸，從終端 joint g,g 計數算 survival。Heralded 另以終端回到各自 herald g,g／e,e 的比例作 survival，依各組有效 seed／round 聯合擬合。使用 d=4 的 error estimate，保留負值及 paired-seed bootstrap interval。熱 population、準備／讀出效果與模型假設均須納入判讀，物理 gate 表現需由實際量測確認。
+
+取得第一個 IRB 結果後，依論文 §5.3.3 掃 CZ 的 cosine 寬度。長閘的誤差由被驅動非計算態的 T1 主導，短閘由同調 leakage 主導，最佳寬度在兩者之間（論文裝置為 85 ns）。每個寬度重做 4 → 5 → 6 與 IRB。最短寬度受驅動強度限制，先由實測 Rabi rate 換算 gain 1 時的 2π 週期；非 const 波形的最大振幅只有 const 的一半。
 
 所有 FTF 資料保存未正規化 sums、準備態／spectator／sweep 座標與本次 cfg，cfg 保留完整 tone 順序。取消時保存已取得計數，未量點為 NaN。Phase 依各實驗的完整性規則分析 X/Y；RB／IRB 只用完整配對。診斷型 joint readout 與 conditional spectroscopy 可顯示已完成 rounds 的分布及每點 shot 數。寄生抵消需另行研究，各校準由操作員逐項執行。
