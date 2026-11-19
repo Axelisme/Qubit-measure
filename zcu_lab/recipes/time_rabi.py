@@ -7,6 +7,7 @@ from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -20,6 +21,7 @@ from zcu_lab.v2.twotone.rabi.len_rabi.gui import TimeRabiSummary
 class TimeRabiInputs(RecipeInputs):
     """Inputs for time rabi; all units and null policies are declared per field."""
 
+    overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
         description="Readout library key. Sources are chosen by the Form.",
@@ -122,8 +124,7 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
     tab.set("length.n", inputs.points)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

@@ -7,6 +7,7 @@ from zcu_tools.cfg_model import DeviceName
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -21,6 +22,7 @@ class MistFluxDepInputs(RecipeInputs):
     """Inputs for mist flux dep; all units and null policies are declared per
     field."""
 
+    overrides: Overrides
     flux_device: DeviceName = Field(
         description="Registered flux-device name; read only its cached snapshot, without connecting."
     )
@@ -105,8 +107,7 @@ async def mist_flux_dep(
     tab.set("gain.start", inputs.gain_range[0])
     tab.set("gain.stop", inputs.gain_range[1])
     tab.set("gain.n", inputs.points)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

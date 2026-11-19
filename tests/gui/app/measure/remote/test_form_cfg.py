@@ -359,9 +359,37 @@ def test_describe_cfg_path_errors_keep_request_path(form_rpc) -> None:
     assert reply["error"]["data"] == {"form_path": path}
 
 
-def test_describe_cfg_root_is_single_layer_and_readable_through_mcp(
-    form_rpc, tmp_path
+def test_canonical_cfg_methods_dispatch_internally_but_are_not_agent_methods(
+    form_rpc,
+    tmp_path,
 ) -> None:
+    from contextlib import closing
+
+    from zcu_tools.mcp.measure.session import GuiRpcError
+
+    from tests.mcp.measure._support import make_client
+
+    _, tab, rpc = form_rpc
+    operations = {
+        "tab.describe_cfg": {"path": []},
+        "tab.edit_cfg": {"edits": [{"path": ["gain"], "value": 0.75}]},
+        "tab.run_cfg_command": {"path": ["sweep"], "name": "to_step"},
+    }
+    client = make_client(tmp_path)
+    with closing(client.context.session):
+        methods = {row["method"] for row in client.call("rpc_list", {})["methods"]}
+        assert "tab.get_cfg" in methods
+        assert methods.isdisjoint(operations)
+        for method, extra in operations.items():
+            params = {"tab_id": tab, **extra}
+            with pytest.raises(GuiRpcError) as caught:
+                client.call("rpc_call", {"method": method, "params": params})
+            assert caught.value.reason == "unknown_method"
+            reply = rpc.call(method, params)
+            assert reply["ok"], reply
+
+
+def test_read_recipe_field_root_is_single_layer_through_mcp(form_rpc, tmp_path) -> None:
     from contextlib import closing
 
     from tests.mcp.measure._support import make_client
@@ -375,10 +403,9 @@ def test_describe_cfg_root_is_single_layer_and_readable_through_mcp(
 
     client = make_client(tmp_path, respond)
     with closing(client.context.session):
-        assert "tab.describe_cfg" in client.context.gui.catalog
         reply = client.call(
             "rpc_call",
-            {"method": "tab.describe_cfg", "params": {"tab_id": tab, "path": []}},
+            {"method": "tab.read_recipe_field", "params": {"tab_id": tab, "path": []}},
         )
         observed = reply
         assert observed["description"]["target"] is None
@@ -390,64 +417,6 @@ def test_describe_cfg_root_is_single_layer_and_readable_through_mcp(
         assert fields["gain"]["can_expand"] is False
         assert fields["gain"]["selection_fixed"] is False
         assert fields["sweep"]["can_expand"] is True
-
-
-@pytest.mark.parametrize("author_failure", [False, True])
-def test_describe_cfg_mcp_preserves_path_and_internal_error_boundary(
-    form_rpc, tmp_path, author_failure: bool
-) -> None:
-    from contextlib import closing
-
-    from zcu_tools.gui.remote.errors import RemoteError
-    from zcu_tools.mcp.measure.session import GuiRpcError
-
-    from tests.mcp.measure._support import make_client
-
-    fixture, _, rpc = form_rpc
-    fixture.registry.register("failing-options", FailingOptionsAdapter)
-    tab = fixture.ctrl.tab_control.new_tab("failing-options")
-    path = ["extras"] if author_failure else ["gain", "child"]
-
-    def respond(method, params):
-        reply = rpc.call(method, params)
-        if not reply["ok"]:
-            error = reply["error"]
-            raise RemoteError(
-                error["code"],
-                error["message"],
-                reason=error.get("reason"),
-                data=error.get("data"),
-            )
-        return reply["result"]
-
-    try:
-        FailingOptionsExtras.broken = author_failure
-        client = make_client(tmp_path, respond)
-        with closing(client.context.session):
-            with pytest.raises(GuiRpcError) as caught:
-                client.call(
-                    "rpc_call",
-                    {
-                        "method": "tab.describe_cfg",
-                        "params": {"tab_id": tab, "path": path},
-                    },
-                )
-            assert caught.value.code == (
-                "controller_error" if author_failure else "invalid_params"
-            )
-            if not author_failure:
-                assert caught.value.reason == "form_path"
-                assert caught.value.data == {"form_path": path}
-                assert client.call(
-                    "rpc_call",
-                    {
-                        "method": "tab.describe_cfg",
-                        "params": {"tab_id": tab, "path": ["gain"]},
-                    },
-                )["description"]["path"] == ["gain"]
-    finally:
-        FailingOptionsExtras.broken = False
-        fixture.ctrl.tab_control.close_tab(tab)
 
 
 def test_edit_cfg_commits_leaf_batch_and_returns_invalid_input_errors(form_rpc) -> None:
@@ -541,7 +510,10 @@ def test_reset_aliases_fixes_parameter_reads_until_next_reset(form_rpc) -> None:
         frozen = rpc.call("tab.parameter_read", query)
         assert frozen["ok"], frozen
         assert frozen["result"] == {"values": {"$qubit.rate": 20.0}, "modules": {}}
-        assert rpc.call("tab.get_cfg", {"tab_id": tab})["result"] == reset["result"]
+        assert (
+            rpc.call("tab.get_cfg", {"tab_id": tab})["result"]["input"]
+            == reset["result"]["input"]
+        )
         assert context.get_alias_rows(point=context.current_point_label()) == rows
         reset = rpc.call("tab.reset_cfg", {"tab_id": tab, "aliases": {"qubit": "Q1"}})
         assert reset["ok"], reset

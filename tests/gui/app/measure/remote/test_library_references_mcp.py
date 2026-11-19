@@ -170,7 +170,7 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
         reset = invoke(
             "rpc_call", {"method": "tab.reset_cfg", "params": {"tab_id": tab_id}}
         )
-        assert reset != before
+        assert reset["input"] != before["input"]
         captured = owner.env.library
         if captured is None:
             raise TypeError("Expected Reset library")
@@ -182,7 +182,7 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
         again = invoke(
             "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
         )
-        assert again == reset
+        assert again["input"] == reset["input"]
     finally:
         bridge.disconnect()
         fx.stop()

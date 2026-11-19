@@ -7,6 +7,7 @@ from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeSession,
     recipe,
     report_number,
@@ -34,6 +35,7 @@ class MuxTwotoneFluxLocalInputs(MuxTwotoneFluxInputs):
     flux_n is shared by zipped local lines, not a Cartesian product.
     """
 
+    overrides: Overrides
     flux_sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
         description="Native local DC start/stop for every tone in original order. No per-tone point count.",
@@ -104,8 +106,7 @@ async def mux_twotone_flux_local(
             )
     tab.set("flux_expts", inputs.flux_n)
     tab.set("flux_unit", inputs.flux_unit)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     updates = mux_flux_analysis_updates(tab, inputs)

@@ -6,7 +6,7 @@
 
 本 package 是 GUI 的 Qt-free 前端框架。它把輸入型別與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的輸入物件。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
-儀器名稱在 core 用 `cfg_model.DeviceName` 宣告，nullable 用 `DeviceName | None`。這是普通字串加中立標記，不查裝置、不增加 cfg 驗證。生成器將標記投影為 `InputSuggestions`，選項只取表單 Open／Reset 捕捉的 `FormEnv.devices` 名稱，nullable 另列 None。手寫 `FormModel` 使用本 package 的 `DeviceName` alias，自動附加同一建議 provider，不必逐表單寫 options hook。預設下拉保留清單外目前值，欄位右鍵或 `tab.run_cfg_command` 的 `toggle_text` 可切換文字輸入。模式不改 cfg、不保存。
+儀器名稱在 core 用 `cfg_model.DeviceName` 宣告，nullable 用 `DeviceName | None`。這是普通字串加中立標記，不查裝置、不增加 cfg 驗證。生成器將標記投影為 `InputSuggestions`，選項只取表單 Open／Reset 捕捉的 `FormEnv.devices` 名稱，nullable 另列 None。手寫 `FormModel` 使用本 package 的 `DeviceName` alias，自動附加同一建議 provider，不必逐表單寫 options hook。預設下拉保留清單外目前值，欄位右鍵或 `tab.run_recipe_command(path=[...], name="toggle_text")` 可切換文字輸入。模式不改 cfg、不保存。
 
 主要生成入口如下：
 
@@ -102,7 +102,13 @@ Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/007
 
 宣告者另外提供 `Display(element_label=name_field)` 作 picker label，名稱欄位的 `Display(readonly=True)` 則由 Form core 強制唯讀。同值寫入通過，不同值拒絕；父層或批次寫入不能繞過唯讀名稱。名稱若不接受 expression，可用既有 `InputPolicy(expression=False)` 明訂 literal input。
 
-`Form.read_elements(input, path, env)` 以一次 preview 回傳所有原始位置的 authored input、可用 canonical leaf values 與定向錯誤。名稱取自 FixedElements 宣告，普通 model list 則用 description label。未參與元素仍在結果中。Refs 保留欄位值，明確 materialization 使用支援 indexed path 的 `Form.read_module`。Tab resource 提供同名 `read_elements(path)`，不觸發 converter、capture 或 UI focus。可選的 `fields=(("drive", "gain"), ("sweep", "start"))` 指定元素相對 logical paths。Owner 在同一份 input/env 中回傳每個元素的 `fields` observations，順序與請求相同，並附 FixedElements identity。Refs 仍讀固定 captured Spec，不 materialize。Unknown path 直接拒絕，invalid leaf 保留 value_status 與定向 errors。
+`Form.read_elements(input, path, env)` 與 tab resource 的 `read_elements(path)` 接受 authored model list 的 logical path。
+一次 preview 回傳所有原始位置，即使沒有參與量測。名稱取自 FixedElements 宣告或 description label。
+Authored input 保留原樣，row、selection、preview 與 error 路徑使用 logical paths。
+可選的 `fields=(("drive", "gain"), ("sweep", "start"))` 指定元素相對 logical paths。
+Owner 在同一份 input/env 依請求順序回傳 fields，包含宣告的 FixedElements identity。
+Aggregate 不展開 ref 內的清單。個別欄位可讀固定 Spec，明確 materialization 使用 `Form.read_module`。
+讀取不觸發 converter、capture 或 UI focus。Unknown path 拒絕，invalid leaf 保留 value_status 與定向 errors。
 
 ### Native model lists
 

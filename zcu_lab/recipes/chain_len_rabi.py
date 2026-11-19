@@ -8,6 +8,7 @@ from zcu_tools.analysis.readout_chain import CycleCheck
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -21,6 +22,7 @@ from zcu_lab.v2.chain.len_rabi.gui import ChainLenRabiSummary
 class ChainLenRabiInputs(RecipeInputs):
     """Inputs for chain length Rabi; units and null policies are per field."""
 
+    overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
         description="Pulse readout library key. Sources are chosen by the Form.",
@@ -122,8 +124,7 @@ async def chain_len_rabi(
     tab.set("length.n", inputs.points)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

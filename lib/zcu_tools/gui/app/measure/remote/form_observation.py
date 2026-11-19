@@ -81,8 +81,8 @@ class EditPathHints(TypedDict):
     """Active canonical leaves and selectors for correcting a rejected cfg edit.
 
     editable_paths excludes hidden, fixed and readonly subtrees. selection_paths
-    identifies active option fields; module choices use select_recipe_module
-    with logical paths rather than replacing them with a key string.
+    identifies active option fields; tab.select_recipe_option takes logical
+    paths to select a module rather than replacing the selector with a key.
     """
 
     editable_paths: list[list[str | int]]
@@ -123,8 +123,15 @@ def observe_form(resource: TabFormResource) -> FormObservation:
     return observed
 
 
+def observe_recipe_form(resource: TabFormResource) -> FormObservation:
+    """Project a recaptured draft with logical preview and cfg error paths."""
+    return _observation(
+        resource.input.data, resource.recipe_preview(), resource.recipe_ready_errors()
+    )
+
+
 class ElementObservationWire(TypedDict):
-    """One original element with canonical input, preview and directed errors.
+    """One original element with authored input and logical observation paths.
 
     fields, when requested, contains same-turn logical observations in relative
     path request order. Each observation carries the owner-captured identity.
@@ -156,7 +163,7 @@ def observe_elements(
 ) -> ElementsObservationWire:
     """Serialize the owner's single aggregate; never assemble per-element reads.
 
-    path is the canonical model-list path. All rows retain original indexes,
+    path is the logical model-list path. All rows retain original indexes,
     authored input, available preview leaves and directed errors. Reads do not
     lower cfg, capture sources, mutate state or focus a widget. fields optionally
     requests nonempty relative logical paths in each element, in request order.
@@ -221,7 +228,7 @@ def entry_invalid_to_remote(exc: LibraryEntryInvalid) -> RemoteError:
 def _observation(
     data: dict[str, JsonValue],
     preview: FormPreview,
-    result: ConfigBase | FormErrors,
+    result: ConfigBase | FormErrors | None,
 ) -> FormObservation:
     errors = dict(preview.errors.messages) if preview.errors is not None else {}
     if isinstance(result, FormErrors):

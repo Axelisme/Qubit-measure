@@ -283,15 +283,37 @@ def _shell(target: Field) -> tuple[type[FormModel], dict[str, JsonValue]]:
     return model, data
 
 
-def _metadata(position: _Position, root: type[FormModel]) -> FormFieldDescription:
-    description = describe_field(
-        position.target, roots=(root, position.target.level.model)
+def _metadata(
+    position: _Position, root: type[FormModel], env: FormEnv
+) -> FormFieldDescription:
+    level = position.target.level
+    description = describe_field(position.target, roots=(root, level.model))
+    path = position.path
+    return replace(
+        description,
+        path=path,
+        name=str(path[-1]),
+        elements=None
+        if description.elements is None
+        else tuple(
+            replace(item, path=(*path, item.index)) for item in description.elements
+        ),
+        commands=tuple(
+            replace(
+                command,
+                target=path,
+                inputs=tuple(
+                    (*path[:-1], *_logical_path(level, entry[len(level.prefix) :], env))
+                    for entry in command.inputs
+                ),
+            )
+            for command in description.commands
+        ),
     )
-    return replace(description, path=position.path, name=str(position.path[-1]))
 
 
 def _children(
-    level: Level | None, prefix: FormWritePath, root: type[FormModel]
+    level: Level | None, prefix: FormWritePath, root: type[FormModel], env: FormEnv
 ) -> tuple[FormFieldDescription, ...]:
     if level is None:
         return ()
@@ -300,7 +322,7 @@ def _children(
         target = level.field(name)
         if target.pinned:
             continue
-        metadata = _metadata(_Position(target, (*prefix, name)), root)
+        metadata = _metadata(_Position(target, (*prefix, name)), root, env)
         if not metadata.hidden:
             result.append(metadata)
     return tuple(result)
@@ -453,7 +475,7 @@ def _read_reference(
     )
     return LogicalFieldObservation(
         FormDescription(
-            path, replace(metadata, can_expand=True), _children(level, path, root)
+            path, replace(metadata, can_expand=True), _children(level, path, root, env)
         ),
         input_present,
         raw,
@@ -475,7 +497,7 @@ def read(
         level = root_level(input.model, input.data, env, input.selections)
         value, errors = _ordinary_level(level, env)
         observed = LogicalFieldObservation(
-            FormDescription((), None, _children(level, (), root)),
+            FormDescription((), None, _children(level, (), root, env)),
             True,
             input.data,
             "available",
@@ -488,7 +510,7 @@ def read(
         return _with_input_errors(input, observed, env)
     position = _resolve(input, path, env)
     target, marker = position.target, position.marker
-    metadata = _metadata(position, input.model)
+    metadata = _metadata(position, input.model, env)
     selector = _selector(target, marker, env) if marker is not None else None
     authored = position.source is None
     input_present = authored and target.name in target.level.data
@@ -518,7 +540,7 @@ def read(
         else "missing"
     )
     observed = LogicalFieldObservation(
-        FormDescription(path, metadata, _children(level, path, root)),
+        FormDescription(path, metadata, _children(level, path, root, env)),
         input_present,
         raw,
         status,
@@ -649,8 +671,9 @@ def select(
         raise LogicalEditError(
             "Not a generated module selector", reason_code="module_selector", path=path
         )
-    description = _metadata(position, input.model)
-    selector = _selector(position.target, marker, env)
+    target = position.target
+    description = describe_field(target, roots=(input.model, target.level.model))
+    selector = _selector(target, marker, env)
     if action == "copy" and selector.mode == "inline":
         return LogicalEditCandidate(
             FormInput(input.model, input.data, selections=input.selections), False
@@ -762,44 +785,58 @@ def command(
     return LogicalEditCandidate(state.input, not state.input.same_as(input))
 
 
+def authored_element_path(
+    input: FormInput[FormModel], path: FormWritePath, env: FormEnv
+) -> FormWritePath:
+    position = _resolve(input, path, env)
+    if position.source is not None:
+        raise FormPathError(path, "Aggregate requires an authored model-list field")
+    return position.target.path
+
+
+def _logical_path(root: Level, canonical: FormPath, env: FormEnv) -> FormPath:
+    level = root
+    logical: list[str | int] = []
+    index = 0
+    while index < len(canonical):
+        name = canonical[index]
+        if not level.has(name):
+            break
+        logical.append(name)
+        target = level.field(name)
+        marker = _marker(target.info)
+        index += 1
+        if marker is not None:
+            if index < len(canonical) and canonical[index] in ("kind", "name"):
+                return tuple(logical)
+            if index < len(canonical) and canonical[index] == marker.inline_field:
+                index += 1
+            position = _Position(target, tuple(logical))
+            raw = level.value(name)
+            child, _ = (
+                _content(position, env, position.path, writing=False)
+                if isinstance(raw, dict) and raw.get("kind") == "inline"
+                else (None, None)
+            )
+        else:
+            child = target.children(env)
+        if child is None:
+            break
+        level = child
+    return (*logical, *canonical[index:])
+
+
+def logical_paths[V](
+    input: FormInput[FormModel], entries: Mapping[FormPath, V], env: FormEnv
+) -> dict[FormPath, V]:
+    if not entries:
+        return {}
+    root = root_level(input.model, input.data, env, input.selections)
+    return {_logical_path(root, path, env): value for path, value in entries.items()}
+
+
 def logical_errors(
     input: FormInput[FormModel], errors: FormErrors | None, env: FormEnv
 ) -> FormErrors | None:
-    if errors is None:
-        return None
-    result: dict[FormPath, str] = {}
-    for canonical, message in errors.messages.items():
-        level = root_level(input.model, input.data, env, input.selections)
-        logical: list[str | int] = []
-        index = 0
-        while index < len(canonical):
-            name = canonical[index]
-            if not isinstance(name, str) or name not in level.model.model_fields:
-                logical.extend(canonical[index:])
-                break
-            logical.append(name)
-            target = level.field(name)
-            marker = _marker(target.info)
-            index += 1
-            if marker is not None:
-                if index < len(canonical) and canonical[index] in ("kind", "name"):
-                    break
-                if index < len(canonical) and canonical[index] == marker.inline_field:
-                    index += 1
-                position = _Position(
-                    target, tuple(part for part in logical if isinstance(part, str))
-                )
-                raw = target.level.data.get(name)
-                child, _ = (
-                    _content(position, env, position.path, writing=False)
-                    if isinstance(raw, dict) and raw.get("kind") == "inline"
-                    else (None, None)
-                )
-            else:
-                child = target.children(env)
-            if child is None:
-                logical.extend(canonical[index:])
-                break
-            level = child
-        result[tuple(logical)] = message
-    return FormErrors(result) if result else None
+    messages = logical_paths(input, errors.messages, env) if errors else {}
+    return FormErrors(messages) if messages else None

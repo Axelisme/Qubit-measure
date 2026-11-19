@@ -72,7 +72,6 @@ def test_recipe_input_admission_rejects_invalid_values_before_measurement(
                 "gain": value,
                 "target": None,
                 "reuse_tab_id": None,
-                "overrides": [],
             },
         )
         accepted.join()

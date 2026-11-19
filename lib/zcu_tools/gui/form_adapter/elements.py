@@ -14,13 +14,12 @@ from .logical import LogicalFieldObservation
 class ElementObservation:
     """One element in original list order, independent of participants or picker.
 
-    index is its zero-based original position; path is its absolute canonical
+    index is its zero-based original position; path is its absolute logical
     typed path. name is the owner's literal identity, or the description label
     for ordinary lists. input is detached authored JSON, including invalid
-    expressions and missing fields. selections maps absolute canonical paths to
+    expressions and missing fields. selections maps absolute logical paths to
     explicit authored selector values, independently of the raw branch.
-    values maps absolute canonical leaf paths
-    to available ordinary preview values, not lowered native cfg. References
+    values maps logical paths to available preview values, not native cfg. References
     remain authored ref fields; use read_module for explicit materialization.
     fields holds requested relative logical observations in request order, with
     same-input FixedElements identity; empty when none were requested.

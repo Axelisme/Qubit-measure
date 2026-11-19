@@ -5,6 +5,7 @@ from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -22,6 +23,7 @@ class StirapAmplitudeInputs(RecipeInputs):
     Omitted optional fields retain Form values; null is passed to the owner.
     """
 
+    overrides: Overrides
     pump_freq_mhz: float = Field(description="Measured Pump 0–3 carrier in MHz.")
     stokes_freq_mhz: float = Field(description="Measured Stokes 3–2 carrier in MHz.")
     pump_start: float = Field(
@@ -122,8 +124,7 @@ async def stirap_amplitude(
     tab.set("stokes_lead", inputs.stokes_lead_us)
     tab.set("shots", inputs.shots)
     tab.set("relax_delay", inputs.relax_delay_us)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

@@ -47,6 +47,10 @@ class PrimitiveCfg(ConfigBase):
     tones: list[ReadTone] = Field(default_factory=lambda: [ReadTone(), ReadTone()])
 
 
+class OverrideInputs(api.RecipeInputs):
+    overrides: api.Overrides
+
+
 class WireEdit(BaseModel):
     path: tuple[str | int, ...]
     value: JsonValue
@@ -364,6 +368,25 @@ def test_override_paths_reject_malformed_dotted_input(path: str) -> None:
         api.FieldEdit(path=path, value=1)
 
 
+@pytest.mark.parametrize(
+    "operation",
+    [{}, {"value": 1, "select": None}, {"select": "Inline", "command": "to_inline"}],
+)
+def test_override_admission_requires_exactly_one_operation(
+    operation: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError, match="exactly one of value, select, command"):
+        api.FieldEdit.model_validate({"path": "pulse", **operation})
+
+
+def test_override_admission_distinguishes_null_selection_from_omission() -> None:
+    selection = api.FieldEdit.model_validate({"path": "pulse", "select": None})
+    value = api.FieldEdit.model_validate({"path": "label", "value": None})
+
+    assert selection.model_dump(exclude_unset=True) == {"path": "pulse", "select": None}
+    assert value.model_dump(exclude_unset=True) == {"path": "label", "value": None}
+
+
 def test_json_overrides_preserve_expression_sweep_nested_objects_and_null(
     tmp_path: Path,
     form_owner: tuple[TabFormResource, Responder],
@@ -371,10 +394,9 @@ def test_json_overrides_preserve_expression_sweep_nested_objects_and_null(
     _owner, respond = form_owner
 
     @api.recipe("synthetic", "Pass structured JSON inputs intact to the Form owner")
-    async def synthetic(session: api.RecipeSession, inputs: api.RecipeInputs) -> Report:
+    async def synthetic(session: api.RecipeSession, inputs: OverrideInputs) -> Report:
         tab = session.open_tab("synthetic")
-        for edit in inputs.overrides:
-            tab.set(edit.path, edit.value)
+        tab.apply_overrides(inputs.overrides)
         assert tab.read("count").value == 5
         assert tab.read("sweep").value == {
             "kind": "linrange",
@@ -391,7 +413,12 @@ def test_json_overrides_preserve_expression_sweep_nested_objects_and_null(
     try:
         schema = client.tools["synthetic"]["inputSchema"]
         edit_schema = schema["$defs"]["FieldEdit"]
-        assert edit_schema["required"] == ["path", "value"]
+        assert edit_schema["required"] == ["path"]
+        assert edit_schema["oneOf"] == [
+            {"required": ["value"]},
+            {"required": ["select"]},
+            {"required": ["command"]},
+        ]
         assert set(edit_schema["properties"]["value"]) == {"description"}
         reply = client.call(
             "synthetic",
@@ -417,6 +444,56 @@ def test_json_overrides_preserve_expression_sweep_nested_objects_and_null(
         client.context.session.close()
 
 
+def test_apply_overrides_stops_on_owner_error_and_keeps_successful_prefix(
+    tmp_path: Path,
+    form_owner: tuple[TabFormResource, Responder],
+) -> None:
+    _owner, respond = form_owner
+    edits = TypeAdapter(list[api.FieldEdit]).validate_python(
+        [
+            {"path": "pulse", "select": "Q.pulses.drive"},
+            {"path": "pulse", "command": "to_inline"},
+            {"path": "pulse.gain", "value": 0.7},
+            {"path": "mode", "select": "unknown"},
+            {"path": "pulse", "select": None},
+        ]
+    )
+
+    @api.recipe("synthetic", "Apply mixed overrides without rollback")
+    async def synthetic(session: api.RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        with pytest.raises(
+            RuntimeError,
+            match=r"overrides\[3\] \(mode\): .*Unknown or ambiguous Form option",
+        ):
+            tab.apply_overrides(edits)
+        assert tab.read("pulse.gain").value == 0.7
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.join()
+        assert execution.snapshot().status == "completed", execution.snapshot()
+        assert [
+            method
+            for method, _ in client.transport.sent
+            if method
+            in {
+                "tab.select_recipe_option",
+                "tab.run_recipe_command",
+                "tab.edit_recipe_fields",
+            }
+        ] == [
+            "tab.select_recipe_option",
+            "tab.run_recipe_command",
+            "tab.edit_recipe_fields",
+            "tab.select_recipe_option",
+        ]
+    finally:
+        client.context.session.close()
+
+
 def test_structured_overrides_cannot_replace_generated_selectors(
     tmp_path: Path,
     form_owner: tuple[TabFormResource, Responder],
@@ -425,10 +502,9 @@ def test_structured_overrides_cannot_replace_generated_selectors(
     before = owner.input.to_json()
 
     @api.recipe("synthetic", "Leave selector admission with the Form owner")
-    async def synthetic(session: api.RecipeSession, inputs: api.RecipeInputs) -> Report:
+    async def synthetic(session: api.RecipeSession, inputs: OverrideInputs) -> Report:
         tab = session.open_tab("synthetic")
-        for edit in inputs.overrides:
-            tab.set(edit.path, edit.value)
+        tab.apply_overrides(inputs.overrides)
         return Report(count=1)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
@@ -531,10 +607,14 @@ def test_read_parameter_only_allows_owner_missing_leaves(
 
 
 def test_keep_defaults_are_omittable_but_null_reaches_the_form(tmp_path: Path) -> None:
-    class DraftInputs(api.RecipeInputs):
+    class DraftInputs(OverrideInputs):
         gain: float | None | api.Keep = Field(default=api.KEEP, description="Gain")
 
-    assert DraftInputs().gain is api.KEEP
+    omitted = DraftInputs.model_validate({})
+    assert omitted.gain is api.KEEP
+    assert omitted.overrides == []
+    with pytest.raises(ValidationError):
+        DraftInputs.model_validate({"overrides": None})
     assert DraftInputs.model_validate({"gain": None}).gain is None
     schema = DraftInputs.model_json_schema()
     assert "gain" not in schema.get("required", [])
@@ -555,8 +635,7 @@ def test_keep_defaults_are_omittable_but_null_reaches_the_form(tmp_path: Path) -
         )
         tab.set("gain", inputs.gain)
         tab.select("pulse", api.KEEP)
-        for edit in inputs.overrides:
-            tab.set(edit.path, edit.value)
+        tab.apply_overrides(inputs.overrides)
         return Report(count=1)
 
     client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))

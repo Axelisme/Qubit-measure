@@ -6,6 +6,7 @@ from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -17,6 +18,7 @@ class MistDriveFrequencyInputs(RecipeInputs):
     """Inputs for mist drive frequency; all units and null policies are declared
     per field."""
 
+    overrides: Overrides
     freq_range: list[float] = Field(
         min_length=2, max_length=2, description="Two frequency endpoints in MHz."
     )
@@ -64,8 +66,7 @@ async def mist_drive_frequency(
     tab.set("gain.start", inputs.gain_range[0])
     tab.set("gain.stop", inputs.gain_range[1])
     tab.set("gain.n", inputs.points)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

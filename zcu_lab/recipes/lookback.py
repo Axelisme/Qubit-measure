@@ -4,6 +4,7 @@ from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -17,6 +18,7 @@ from zcu_lab.v2.lookback.gui import LookbackSummary
 class LookbackInputs(RecipeInputs):
     """Inputs for lookback; all units and null policies are declared per field."""
 
+    overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
         description="Readout library key. Sources are chosen by the Form.",
@@ -91,8 +93,7 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
     tab.set("readout.ro_length", inputs.readout_length_us)
     tab.set("readout.trig_offset", inputs.trigger_offset_us)
     tab.set("rounds", inputs.rounds)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

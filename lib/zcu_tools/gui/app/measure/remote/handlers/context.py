@@ -125,8 +125,8 @@ def h_context_ml_edit(
 ) -> Mapping[str, object]:
     """Write one atomic Form edit batch to a library entry; reply {valid, errors}.
 
-    Edits use tab.edit_cfg paths and values. Values carrying the retired
-    __kind tags are rejected with the expression form before any write.
+    Edits use the library editor's canonical Form paths and values. Values
+    carrying retired __kind tags are rejected before any write.
     """
     from ..form_observation import form_writes
 

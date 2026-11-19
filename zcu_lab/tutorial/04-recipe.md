@@ -28,12 +28,14 @@ GUI cfg、Form 初值與量測序列仍由原實驗擁有，不在 recipe 再建
 from pydantic import Field
 
 from zcu_tools.mcp.measure.recipe_api import (
-    RecipeInputs, RecipeReport, RecipeSession, recipe,
+    Overrides, RecipeInputs, RecipeReport, RecipeSession, recipe,
 )
 
 
 class PowerMapInputs(RecipeInputs):
     """Use the captured Form with optional target, reuse and ordered overrides."""
+
+    overrides: Overrides
 
 
 class PowerMapReport(RecipeReport):
@@ -62,8 +64,7 @@ async def power_map(
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     # Only enter the Save finalizer once a Run source exists.
@@ -92,9 +93,11 @@ Report 是作者選擇的具名 model，不需要 SummaryParameter、SummaryEsti
 
 加入可省略的 Form 欄位時，從 recipe_api import `KEEP, Keep`，宣告 `T | None | Keep = KEEP`。
 省略保留 Form 值，明填 null 原樣交 owner。KEEP 不是 JSON 值，schema 不列 Keep 或 KEEP default。
-主體先明寫選 module 與逐欄 set，再依序 set overrides，最後 check_ready。
+主體先明寫選 module 與逐欄 set，再用 `tab.apply_overrides` 依序套 overrides，最後 check_ready。
+`RecipeInputs` 不含 overrides；接受 overrides 的 recipe 在輸入 class 宣告 `overrides: Overrides`。
 例如 `tab.set("freq.n", inputs.points)`，寫入與 FieldEdit 用 dotted string。
-Overrides 只含 path／value，省略是空 list，不接受 null，不去重或過濾 null。
+每筆 override 是 `{path, value}`、`{path, select}`、`{path, command}` 三選一，`select: null` 清空可清空的 selector。
+Overrides 省略是空 list，不接受 null，不去重。某筆失敗時報出它的索引與 path，前面已套用的保留，不 rollback。
 `tab.read("qub_pulse")` 用 dotted string，回 FormField。
 明填 scalar 前直接 command to_inline，再 set。已 inline 時 command 不改值。
 單 kind module 與巢狀 waveform 同規則，保留原 family，不強選 const。

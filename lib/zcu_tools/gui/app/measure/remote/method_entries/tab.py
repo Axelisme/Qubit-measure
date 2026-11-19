@@ -72,6 +72,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("name"),
             ),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "tab.read_recipe_field",
@@ -95,7 +96,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Atomically edit ordered typed logical path/value leaves (str names/int indexes). Generated selectors "
-            "require select_recipe_module; no content write crosses ref ancestors. "
+            "require tab.select_recipe_option; no content write crosses ref ancestors. "
             "Structural/source/guard rejection commits no prefix. Returns changed "
             "and complete logical Form preview errors; invalid ordinary drafts "
             "remain installed by default. require_valid=true preflights the complete "
@@ -251,6 +252,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
             readonly=True,
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "tab.refresh_sources",
@@ -259,7 +261,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Capture current sources once, optionally overriding named aliases "
             "for this Refresh only. Preserve all input, expression drafts and "
-            "explicit selections; return revalidated input, values and errors. "
+            "explicit selections; return revalidated input, logical values and errors. "
             "Overrides do not change global aliases. Busy, revoked and "
             "notification-reentrant mutations are rejected. Capture/factory "
             "failure preserves the previous form. Does not reset defaults or results.",
@@ -281,7 +283,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Capture current sources once, optionally overriding named aliases "
             "for this Reset only, and restore fresh adapter Form defaults. "
-            "Returns input, values and errors. Overrides are not persisted "
+            "Returns input, logical values and errors. Overrides are not persisted "
             "or written to global aliases. Busy and notification-reentrant "
             "resets are rejected. Does not clear results or save artifacts.",
             (
@@ -317,6 +319,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "tab.read_elements",
@@ -324,12 +327,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Read every model-list element in one owner turn: original index, name, "
-            "authored input, available canonical preview leaves and directed errors. "
+            "authored input, available logical preview leaves and directed errors. "
             "Invalid elements never hide siblings. Independent of participants/picker; "
             "no converter, source refresh, cfg lowering or UI focus. Readonly and busy-safe.",
             (
                 required_string("tab_id"),
-                required_json("path", "Nonempty typed model-list path"),
+                required_json(
+                    "path", "Nonempty typed logical path to an authored model list"
+                ),
                 ParamSpec(
                     "fields",
                     JsonType.JSON,

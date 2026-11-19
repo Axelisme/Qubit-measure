@@ -9,6 +9,7 @@ from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -23,6 +24,7 @@ class AmplitudeRabiInputs(RecipeInputs):
     """Inputs for amplitude rabi; all units and null policies are declared per
     field."""
 
+    overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
         description="Readout library key. Sources are chosen by the Form.",
@@ -127,8 +129,7 @@ async def amplitude_rabi(
     tab.set("gain.n", inputs.points)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()

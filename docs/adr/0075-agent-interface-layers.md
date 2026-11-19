@@ -55,6 +55,8 @@ L3 workflow 由作者決定在哪裡交還控制權。一次執行跨越多次�
 
 以上保留 2026-10-21 的討論原話。當時的 `Wait`／`Ask`／`Signal` 與 yield 描述已由下節的 async host 契約取代，env.run 也由 Scope.call 與 lib run_core 的分工取代。Recipe 的公開契約見 [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution)，workflow 的作者面見 [workflow README](../../lib/zcu_tools/experiment/workflows/README.md)。
 
+Overrides 是 recipe 的慣例欄位，不在基底。`RecipeInputs` 只提供 target 與 reuse_tab_id；便利層提供 `Overrides` 欄位型別與 `RecipeTab.apply_overrides`，接受 overrides 的 recipe 在輸入 class 自己宣告 `overrides: Overrides`。每筆 override 是 path 加上 `value`、`select`、`command` 其中一個，依序套用；失敗時報出索引與 path，前面已套用的保留，不回復。2026-11-19，使用者問：「為什麼overrides不能作為慣例存在？不作為base class屬性，但幾乎每個recipe都會宣告他，這樣不就沒問題了嗎？」2026-11-20 以「好，我沒問題了，全部採用建議」採用各 recipe 自行宣告、lib 提供型別的寫法。這延續上面「overrides不該出現在base class中」的裁決，不放寬基底的範圍。推導見 [logical cfg 路徑與 recipe overrides](../discussions/2026-11-20-logical-cfg-paths-and-overrides.md)。
+
 跨實驗整合分析與 workflow 同屬 L3，但不由 workflow 決定 yield。Fluxdep 是獨立、可選的分析 app，不併入 measure 或 workflows。Agent 在資料可用性、對齊、採樣、躍遷假設、驗收與剔除六個決策點介入，各步可以重做。程式處理前置條件、計算與發布；agent 判讀證據並選下一步。人與 agent 共駕同一份 application state，寫入由 [[0070]] 的 holder 控制。
 
 上層不重做下層的工作。Recipe 經由 L1 的 owner 操作 GUI。Workflow 經實驗 runtime 執行並自行保存，分工見 [[0062]]。跨實驗分析讀取下層已保存的資料。

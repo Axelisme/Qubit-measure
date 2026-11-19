@@ -60,11 +60,10 @@ def test_tab_get_mcp_preserves_complete_publication_without_focusing(mcp_tab):
 
 def test_tab_edit_mcp_writes_range_leaves_in_one_observation(mcp_tab):
     _, tab_id, invoke, sock = mcp_tab
-    call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
     result = invoke(
         "rpc_call",
         {
-            "method": "tab.edit_cfg",
+            "method": "tab.edit_recipe_fields",
             "params": {
                 "tab_id": tab_id,
                 "edits": [
@@ -75,23 +74,24 @@ def test_tab_edit_mcp_writes_range_leaves_in_one_observation(mcp_tab):
             },
         },
     )
-    assert result["errors"] == []
-    assert result["input"]["sweep"] == {
+    assert result == {"changed": True, "errors": []}
+    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["input"][
+        "sweep"
+    ] == {
         "kind": "linrange",
         "start": 2.0,
         "stop": 8.0,
         "n": 4,
     }
-    assert result == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
 
 
 def test_reset_mcp_restores_gui_defaults(mcp_tab):
     _, tab_id, invoke, sock = mcp_tab
-    defaults = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
+    defaults = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["input"]
     invoke(
         "rpc_call",
         {
-            "method": "tab.edit_cfg",
+            "method": "tab.edit_recipe_fields",
             "params": {
                 "tab_id": tab_id,
                 "edits": [{"path": ["gain"], "value": 0.75}],
@@ -108,8 +108,8 @@ def test_reset_mcp_restores_gui_defaults(mcp_tab):
             },
         },
     )
-    assert reset == defaults
-    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == reset
+    assert reset["input"] == defaults
+    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["input"] == defaults
 
     unchanged = invoke(
         "rpc_call",
@@ -120,7 +120,7 @@ def test_reset_mcp_restores_gui_defaults(mcp_tab):
             },
         },
     )
-    assert unchanged == defaults
+    assert unchanged == reset
 
 
 def test_reset_during_active_run_preserves_the_publication(live_tab, monkeypatch):
@@ -167,7 +167,7 @@ def test_tab_edit_mcp_rejection_preserves_entire_previous_publication(mcp_tab):
         invoke(
             "rpc_call",
             {
-                "method": "tab.edit_cfg",
+                "method": "tab.edit_recipe_fields",
                 "params": {
                     "tab_id": tab_id,
                     "edits": [
@@ -178,7 +178,7 @@ def test_tab_edit_mcp_rejection_preserves_entire_previous_publication(mcp_tab):
             },
         )
     assert raised.value.code == "invalid_params"
-    assert raised.value.reason == "form_errors"
+    assert raised.value.reason == "form_path"
     assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
 
 
@@ -212,23 +212,22 @@ def test_cfg_edit_requires_authentication(tmp_path, qapp):
 
 def test_invalid_publication_is_success_but_cannot_run(mcp_tab):
     fixture, tab_id, invoke, sock = mcp_tab
-    call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
     invalid = invoke(
         "rpc_call",
         {
-            "method": "tab.edit_cfg",
+            "method": "tab.edit_recipe_fields",
             "params": {
                 "tab_id": tab_id,
                 "edits": [{"path": ["gain"], "value": {"expr": "1 / 0"}}],
             },
         },
     )
-    assert invalid["input"]["gain"] == {"expr": "1 / 0"}
+    assert invalid["changed"] is True
     assert invalid["errors"][0]["path"] == ["gain"]
-    assert (
-        invoke("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
-        == invalid
+    published = invoke(
+        "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
     )
+    assert published["input"]["gain"] == {"expr": "1 / 0"}
     observe_run_inputs(
         fixture, tab_id, lambda name, params: call(sock, name, params)["result"]
     )

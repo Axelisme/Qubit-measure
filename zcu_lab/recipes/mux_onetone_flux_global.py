@@ -7,6 +7,7 @@ from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
+    Overrides,
     RecipeSession,
     recipe,
     report_number,
@@ -30,6 +31,7 @@ class MuxOnetoneFluxGlobalInputs(MuxOnetoneFluxInputs):
     flux_n is the common positive DC point count.
     """
 
+    overrides: Overrides
     flux: ToneRangeInputs | None | Keep = Field(
         default=KEEP,
         description="Native coil start/stop. No unit conversion.",
@@ -75,8 +77,7 @@ async def mux_onetone_flux_global(
         tab.set("flux.stop", None)
     tab.set("flux.n", inputs.flux_n)
     tab.set("flux_unit", inputs.flux_unit)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     updates = mux_flux_analysis_updates(tab, inputs)

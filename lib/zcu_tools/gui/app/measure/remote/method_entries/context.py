@@ -122,7 +122,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:h_context_ml_edit",
         MethodSpec(
             10.0,
-            "Edit one ModuleLibrary entry as one atomic Form batch, like tab.edit_cfg. "
+            "Edit one ModuleLibrary entry as one atomic library Form batch. "
             "Each edit has path: [model-field segments] and value: Form input JSON. "
             "Paths use generated Form wrappers, not YAML: pulse duration is "
             "['waveform', 'module', 'length']; waveform selection uses "
