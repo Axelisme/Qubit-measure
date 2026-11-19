@@ -187,7 +187,7 @@ Recipe 放在 [`../recipes/`](../recipes/README.md)。撰寫時遵守以下六�
 [程式碼品質](../../docs/code-quality.md#zcu_lab-審查裁決)：
 
 1. 主體直接寫開 tab、改欄位、Run、Analyze、問答、寫回及 Save 的順序。
-   選 module、設值、逐筆套 overrides 與 check_ready 都明寫，不藏進 helper。
+   選 module、設值、`tab.apply_overrides` 與 check_ready 都明寫，不藏進 helper。
 2. 分析結果引用 owner 匯出的型別，不另寫 FitQuality、QualityIssue 或 summary 鏡像 model。
 3. Recipe class 只宣告實驗輸入與報告，不為步驟再建 runner 或 pipeline class。
 4. Helper 只做數字呈現等機械格式化。選脈衝、掃描範圍、重測與寫回判斷留在主體。
@@ -198,20 +198,22 @@ Recipe 放在 [`../recipes/`](../recipes/README.md)。撰寫時遵守以下六�
 
 以下骨架使用 `recipe_api` 的真實介面與 twotone owner 的具名 summary。
 輸入繼承 `RecipeInputs`，報告繼承 `RecipeReport`。
-RecipeInputs 只提供 target、reuse_tab_id 與 overrides，不提供通用 library／inline 輸入。
+RecipeInputs 只提供 target 與 reuse_tab_id，不提供通用 library／inline 輸入。
+接受 overrides 的 recipe 在輸入 class 自己宣告 `overrides: Overrides`。
 可省略的實驗欄位用 `T | None | Keep = KEEP`，省略保留，null 原樣交 owner。
 以下例子的掃描端點與 pulse length 都必填，分析選項可省略。
 
 骨架先對 drive 與 waveform command to_inline。已 inline 時 command 不改值。
 這樣改長度會保留既有 waveform family，不固定換成 const，單 kind module 也照此處理。
-每欄 set 完才逐筆套 overrides，最後 check_ready。中間可插入自己的步驟：
+每欄 set 完才用 `tab.apply_overrides` 套 overrides，最後 check_ready。中間可插入自己的步驟：
 
 ```python
 from typing import Literal
 
 from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
-    KEEP, Keep, RecipeInputs, RecipeReport, RecipeSession, recipe, report_number,
+    KEEP, Keep, Overrides, RecipeInputs, RecipeReport, RecipeSession, recipe,
+    report_number,
 )
 from zcu_lab.v2.twotone.freq.gui import TwotoneSpectrumSummary
 
@@ -219,6 +221,7 @@ from zcu_lab.v2.twotone.freq.gui import TwotoneSpectrumSummary
 class Inputs(RecipeInputs):
     """Drive sweep bounds in MHz and a custom constant-pulse duration in us."""
 
+    overrides: Overrides
     start_mhz: float = Field(description="Drive sweep start in MHz.")
     stop_mhz: float = Field(description="Drive sweep stop in MHz.")
     n: int = Field(ge=2, description="Sweep sample count, mapped to GUI Expts.")
@@ -252,8 +255,7 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
     tab.set("freq.stop", inputs.stop_mhz)
     tab.set("freq.n", inputs.n)
     tab.set("qub_pulse.waveform.length", inputs.pulse_length_us)
-    for edit in inputs.overrides:
-        tab.set(edit.path, edit.value)
+    tab.apply_overrides(inputs.overrides)
     tab.check_ready()
 
     await tab.run()
@@ -278,8 +280,8 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
         tab.save()
 ```
 
-`FieldEdit` 只含 dotted path 與 value，不帶 source。Overrides 省略為空 list，不接受 null。
-逐筆 set 不去重、不過濾 null，也不提供整批 rollback。每次操作允許尚未 ready 的合法草稿。
+`FieldEdit` 是 dotted path 加上 `value`、`select`、`command` 其中一個，不帶 source；`select: null` 清空可清空的 selector。Overrides 省略為空 list，不接受 null。
+`tab.apply_overrides` 依序執行、不去重；某筆失敗時報出索引與 path，前面已套用的保留，不 rollback。每次操作允許尚未 ready 的合法草稿。
 `check_ready` 唯讀驗完整 Form／cfg，缺值回 needs_parameters 與所有 path／reason。
 結構、來源與 readonly 錯誤仍在 mutation 時立即拒絕。
 讀取與寫入都用 dotted string，數字段是完整清單的原始位置，不按 participants 重編。
@@ -290,7 +292,7 @@ Center／span 成對提供或成對省略，不從目前 endpoints 或校準補�
 全 KEEP 等同不帶 updates。Null 原樣交分析 owner 判定，不在 recipe 偷換成省略。
 參數讀取用 `tab.read_parameter`，裝置快取單位用 `session.device_unit`，不使用 RPC models。
 
-`select`、`set`、`command`、`check_ready`、`run`、`analyze`、問答、寫回與 `save` 沿用 RecipeTab 的公開介面。
+`select`、`set`、`command`、`apply_overrides`、`check_ready`、`run`、`analyze`、問答、寫回與 `save` 沿用 RecipeTab 的公開介面。
 `run` 成功後才進入 Save 的 `finally`，分析失敗仍保存 raw data 與已完成產物。
 不要把整段改成無法插入步驟的 `run_all`。需要換分析時，就在 `analyze` 呼叫處換 stage、
 owner 型別或分析參數，不必先修改基底。

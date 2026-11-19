@@ -30,7 +30,7 @@ Open 或表單的 Reset 會固定捕捉當時的 aliases、參數與 module libr
 
 ## Run 前的表單與環境檢查
 
-MCP `status` 的 `ready.can_run` 只檢查 entry、active context、SoC 與至少一張 tab 是否存在。它不表示這張 FTF 表單有效。即使回覆 `can_run=true`、`missing=[]`，仍先用 `tab.get_cfg` 讀目標 tab 的 `input`、`values`、`errors`，補齊必填值並重新檢查。查單一欄位的 metadata 用 `tab.describe_cfg`。呼叫方式見 [MCP 連線與觀察](../../../lib/zcu_tools/mcp/measure/README.md#連線與觀察)。
+MCP `status` 的 `ready.can_run` 只檢查 entry、active context、SoC 與至少一張 tab 是否存在。它不表示這張 FTF 表單有效。即使回覆 `can_run=true`、`missing=[]`，仍先用 `tab.get_cfg` 讀目標 tab 的 `input`、`values`、`errors`，補齊必填值並重新檢查。查單一欄位的 metadata 用 `tab.read_recipe_field`，路徑是 logical path。呼叫方式見 [MCP 連線與觀察](../../../lib/zcu_tools/mcp/measure/README.md#連線與觀察)。
 
 表單有效只表示 cfg 通過驗證，不表示初值已校準、硬體操作已獲授權或 Run 一定能取得控制權。先核對實際接線、安全範圍與量測來源，再 Run。
 
