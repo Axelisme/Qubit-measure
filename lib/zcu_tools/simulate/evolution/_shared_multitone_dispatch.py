@@ -10,14 +10,16 @@ from numpy.typing import NDArray
 
 from ._multitone_dispatch import gate_cost
 from ._sampled_rwa_dispatch import (
+    confirmed_gpu_sampled_groups,
     gpu_sampled_groups,
     prefer_sampled_rwa,
     sampled_common_prices,
     sampled_rwa_cpu_seconds,
 )
 from .kernel import KernelContext, SegmentTable
-from .kernels._multitone_spot import SampledGroup, sampled_groups
+from .kernels._multitone_spot import SampledAdmission, SampledGroup, sampled_groups
 from .kernels._rwa_gate import canonical_keys
+from .kernels.dop853 import DOP853Kernel
 from .kernels.multitone_gate import MultitoneGateKernel, gate_candidates
 from .kernels.multitone_rwa import MultitoneRWAKernel
 
@@ -217,6 +219,46 @@ def _legacy_groups(
     return nonoverlap
 
 
+def _prefix_gpu_groups(
+    router: "Classifier",
+    competition: _Competition,
+    offers: dict[int, _Offer],
+    common: NDArray[np.int64],
+    outside: NDArray[np.int64],
+    rwa: MultitoneRWAKernel,
+) -> set[int]:
+    """Exclude only unambiguous GPU consumers of a potentially winning prefix gate."""
+    quote = router.context.prefix_opencl
+    if quote is None or not isinstance(router.kernels.get("dop853"), DOP853Kernel):
+        return set()
+    offset = router.context.complete_row_offset
+    scope = range(offset, offset + len(router.table.timeline))
+    keys = competition.keys
+    prefix_keys = {
+        keys[row]
+        for offer in offers.values()
+        if any(row in scope for row in offer.group.rows)
+        for row in offer.gate_rows
+    }
+    prefix_keys.update(keys[row + offset] for row in outside)
+    if not prefix_keys:
+        return set()
+    groups = {
+        i: offer.group
+        for i, offer in offers.items()
+        if any(keys[row] in prefix_keys for row in offer.group.rows)
+        and np.all(np.isin(offer.group.rows, quote.suffix_direct))
+        and not np.any(np.isin(offer.group.rows, common))
+    }
+    return confirmed_gpu_sampled_groups(
+        competition.table,
+        replace(competition.context, opencl=quote.backend),
+        groups,
+        quote.suffix_direct,
+        rwa,
+    )
+
+
 def _probe_rwa(
     router: "Classifier",
     competition: _Competition,
@@ -359,6 +401,25 @@ def split_gate_outsiders(
     return rows[~mask], rows[mask]
 
 
+def _shared_offers(
+    competition: _Competition,
+    admission: SampledAdmission,
+    relevant: dict[int, SampledGroup],
+    excluded: set[int],
+) -> tuple[_Competition, dict[int, _Offer]]:
+    """Requote only the groups and key uses still in CPU competition."""
+    selected = competition.inventory
+    if excluded:
+        selected = selected[~np.isin(admission.by_row[selected], tuple(excluded))]
+        competition = replace(competition, inventory=selected)
+    counts = Counter(competition.keys[row] for row in selected)
+    return competition, {
+        i: competition.offer(group, counts)
+        for i, group in relevant.items()
+        if i not in excluded
+    }
+
+
 def route_sampled(
     router: "Classifier",
     rows: NDArray[np.int64],
@@ -397,20 +458,15 @@ def route_sampled(
     )
     original, common, refused_common = _original_prices(router, table, context, quoted)
     competition = _Competition(table, context, keys, selected, original)
-    counts = Counter(keys[row] for row in selected)
-    offers = {i: competition.offer(group, counts) for i, group in relevant.items()}
-    legacy = _legacy_groups(router, competition, offers, common, direct, rwa)
+    competition, offers = _shared_offers(competition, admission, relevant, set())
+    suffix_gpu = _prefix_gpu_groups(router, competition, offers, common, outside, rwa)
+    legacy = (
+        _legacy_groups(router, competition, offers, common, direct, rwa) | suffix_gpu
+    )
     legacy_mask = np.isin(admission.by_row[rows + offset], tuple(legacy))
     _legacy_route(router, table, rows[legacy_mask], rwa, direct)
     if legacy:
-        selected = selected[~np.isin(admission.by_row[selected], tuple(legacy))]
-        competition = replace(competition, inventory=selected)
-        counts = Counter(keys[row] for row in selected)
-        offers = {
-            i: competition.offer(group, counts)
-            for i, group in relevant.items()
-            if i not in legacy
-        }
+        competition, offers = _shared_offers(competition, admission, relevant, legacy)
     shared_rows = rows[~legacy_mask]
     common_kernel = router.kernels.get("common_frame")
     if common_kernel is not None:
@@ -420,4 +476,6 @@ def route_sampled(
         router, competition, list(offers.values()), shared_rows, rwa, gate
     )
     _route_original(router, shared_rows, common)
+    # Delayed group-external prefix rows use the same reduced key inventory.
+    diverted.update(keys[row] for i in suffix_gpu for row in relevant[i].rows)
     return diverted

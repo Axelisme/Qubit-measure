@@ -13,7 +13,7 @@ from ._parallel import Executor
 from ._planning import Geometry
 from ._schedule import Schedule
 from .engine import Cancelled
-from .kernel import Kernel, KernelContext, SegmentTable
+from .kernel import Kernel, KernelContext, PrefixOpenCLQuote, SegmentTable
 from .secular import FluxWaveform
 
 
@@ -140,6 +140,27 @@ def _representative(geometry: Geometry, first: int, stop: int) -> Geometry:
     )
 
 
+def _cpu_context(geometry: Geometry, context: KernelContext) -> KernelContext:
+    """Keep prefix execution CPU-only while quoting possible suffix endpoints."""
+    if context.opencl is None:
+        return context
+    table = geometry.table
+    certified = np.array(
+        [i for i, group in enumerate(table.prefix_group or ()) if group is not None],
+        dtype=np.int64,
+    )
+    latest = np.full(len(geometry.points), -1, dtype=np.int64)
+    np.maximum.at(latest, table.timeline[certified], certified)
+    suffix = np.arange(len(table.timeline)) >= latest[table.timeline]
+    possible_direct = np.flatnonzero(suffix & (table.tones > 0) & ~geometry.flux_drive)
+    possible_direct.setflags(write=False)
+    return replace(
+        context,
+        opencl=None,
+        prefix_opencl=PrefixOpenCLQuote(context.opencl, possible_direct),
+    )
+
+
 class PrefixResolver:
     """One evolve's chronological prefix evaluation with ordinary scheduling."""
 
@@ -160,8 +181,6 @@ class PrefixResolver:
     def resolve(self, pool: Executor, chunks: int) -> Geometry:
         """Resolve nested groups in time order with evolve-local input ownership."""
         geometry, kernels, cancel = self.geometry, self.kernels, self.cancel
-        context = self.context
-        source = context.source
         table = geometry.table
         representatives: dict[int, int] = {}
         for row, group in enumerate(table.prefix_group or ()):
@@ -169,6 +188,8 @@ class PrefixResolver:
                 representatives.setdefault(group, row)
         if not representatives:
             return geometry
+        context = _cpu_context(geometry, self.context)
+        source = context.source
         inputs = {}
         paths = {}
         for group, row in sorted(

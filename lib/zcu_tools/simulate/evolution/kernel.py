@@ -264,6 +264,19 @@ class RowPlan(Protocol):
 
 
 @dataclass(frozen=True)
+class PrefixOpenCLQuote:
+    """Borrow a backend and conservative complete suffix rows for gate pricing.
+
+    suffix_direct contains all possible driven DOP853 rows outside shared
+    prefixes, before the remaining timeline routes are known. The quote
+    does not authorize OpenCL in prefix execution.
+    """
+
+    backend: OpenCLBackend
+    suffix_direct: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
 class KernelContext:
     """Model source, allowance and shared ownership for one evolve call.
 
@@ -274,9 +287,11 @@ class KernelContext:
     families is the immutable acquire-wide family allowlist for dispatch;
     None preserves unrestricted selection. Kernels retain their original guards.
     opencl borrows the Engine's DOP853 backend for pricing and timeline work;
-    None plans and runs CPU-only work (including shared prefixes).
-    opencl_dp54 selects DP5(4) when True and DOP853 when False; unused without
-    an OpenCL backend.
+    None runs CPU-only work (including shared prefixes).
+    prefix_opencl optionally prices remaining suffix work while executing a
+    shared prefix on CPU. It is never used for execution of a prefix.
+    opencl_dp54 selects DP5(4) when True and DOP853 when False for either
+    the timeline backend or a prefix's suffix quote.
     workers is the effective acquire-wide CPU width used to price sampled rows.
     complete_row_offset maps contiguous prefix-table rows back to complete-table
     rows by addition. It is zero for complete geometry and standalone work.
@@ -292,6 +307,7 @@ class KernelContext:
     workers: int = 1
     complete_row_offset: int = 0
     capture: CaptureRun | None = None
+    prefix_opencl: PrefixOpenCLQuote | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:

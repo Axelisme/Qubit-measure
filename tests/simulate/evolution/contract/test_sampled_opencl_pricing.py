@@ -5,7 +5,12 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, EnvelopeSpec
+from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
+    Engine,
+    EnvelopeSpec,
+    read_capture_metadata,
+)
 
 from .accuracy_cases import (
     AccuracyCase,
@@ -236,3 +241,59 @@ def test_gate_offer_does_not_rebuild_a_refused_common_frame_on_gpu_route(
                 paths = engine.evolve(source, (batch,), telemetry=True).paths
             assert paths.routing["dop853"].opencl_rows == 24
             assert paths.routing["common_frame"].prepare_builds == 1
+
+
+@pytest.mark.parametrize("available", [True, False], ids=["gpu", "cpu-fallback"])
+def test_gpu_consumers_do_not_repay_the_cpu_prefix_gate(
+    monkeypatch: pytest.MonkeyPatch, available: bool
+) -> None:
+    events = _stub_device(monkeypatch, available=available, execute=True)
+    case = _long_sampled_pair(160)
+    batch = case.batch
+    prefix = batch.select_points((0, 1))
+    tail = replace(
+        drive_track(prefix, EnvelopeSpec("constant"), port=prefix.tracks[0].port),
+        start_ns=prefix.end_ns,
+        duration_ns=np.ones(2),
+    )
+    prefix = replace(prefix, end_ns=prefix.end_ns + 1, tracks=(*prefix.tracks, tail))
+    independent = batch.select_points(tuple(range(2, 160)))
+    independent = replace(
+        independent,
+        tracks=tuple(
+            replace(track, phase_rad=track.phase_rad + 0.42)
+            for track in independent.tracks
+        ),
+    )
+    batches = (prefix, independent)
+    capture = CaptureBuffer()
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu")) as cpu,
+        closing(Engine(1, backend="auto")) as accelerated,
+    ):
+        cpu_result = cpu.evolve(case.source, batches, telemetry=True)
+        auto_result = accelerated.evolve(
+            case.source, batches, telemetry=True, capture=capture
+        )
+
+    cpu_paths, auto_paths = cpu_result.paths, auto_result.paths
+    assert cpu_paths.segments_by_kernel["multitone_gate"] == 160
+    assert cpu_paths.routing["multitone_gate"].prepare_key_builds == 1
+    if not available:
+        assert auto_paths.segments_by_kernel == cpu_paths.segments_by_kernel
+        assert auto_paths.routing["multitone_gate"].prepare_key_builds == 1
+        np.testing.assert_array_equal(auto_result.densities, cpu_result.densities)
+        assert events == ["check"]
+        return
+    assert auto_paths.routing["dop853"].opencl_rows == 158
+    assert events == ["check", "cached", "compile"]
+    prefix_record = read_capture_metadata(capture.records[0])
+    assert [
+        route["family"]
+        for route in prefix_record["routes"]
+        if route["prefix_run"] is not None
+    ] == ["dop853"]
+    assert auto_paths.segments_by_kernel["dop853"] == 160
+    gate = auto_paths.routing.get("multitone_gate")
+    assert gate is None or gate.prepare_key_builds == 0

@@ -835,7 +835,11 @@ when allowed. The RWA offer includes one set of spot checks and all group
 playback. The gate offer takes the cheaper of the gate and original costs for
 each key. Each gate key charges its group a share of the build proportional to
 that group's uses. The denominator includes eligible uses in other phase
-groups and outside sampled RWA groups.
+groups and outside sampled RWA groups. While pricing a CPU prefix, dispatch
+excludes a suffix-only group if its independent DOP853 waves win the legacy
+GPU comparison even with unresolved driven neighbors treated as direct. It
+uses the normal lazy device check. Groups spanning prefix and suffix, or
+requiring neighbor routes to be resolved first, retain their existing counts.
 
 Dispatch runs probes for the groups that select RWA first. Before building a
 gate, it rechecks the full build against the remaining uses. An RWA refusal

@@ -178,6 +178,8 @@ def _gpu_seconds(
     direct: NDArray[np.float64],
     mask: NDArray[np.bool_],
     context: KernelContext,
+    *,
+    whole_group: bool = False,
 ) -> float:
     backend = context.opencl
     if backend is None:
@@ -202,7 +204,7 @@ def _gpu_seconds(
         if backend.forced or gpu_wave < cpu_wave:
             gpu += gpu_wave
             remaining[indices] = False
-    if np.all(remaining):
+    if np.all(remaining) or (whole_group and np.any(remaining)):
         return np.inf
     return gpu + _parallel_seconds(
         table, rows[remaining], direct[remaining], context.workers
@@ -297,6 +299,40 @@ def _prefer(
             is None
         )
     return rwa_cost < cpu_cost
+
+
+def confirmed_gpu_sampled_groups(
+    table: SegmentTable,
+    context: KernelContext,
+    groups: Mapping[int, SampledGroup],
+    direct_candidates: NDArray[np.int64],
+    rwa: MultitoneRWAKernel,
+) -> set[int]:
+    """Quote groups whose every wave goes to OpenCL under Step 9 prices.
+
+    The caller supplies groups with no admitted common-frame row and a
+    superset of all possible suffix direct neighbors. A chain in this
+    superset is ambiguous and cannot qualify. No RWA probe or routing
+    fact is recorded. Check the device only for a decisive price quote.
+    """
+    backend = context.opencl
+    if backend is None or not groups:
+        return set()
+    eligible = _gpu_eligible_mask(table, direct_candidates, context)
+    selected = set()
+    for index, group in groups.items():
+        rows = np.asarray(group.rows, dtype=np.int64)
+        gpu = _gpu_seconds(
+            table, rows, np.zeros(len(rows)), eligible, context, whole_group=True
+        )
+        if np.isfinite(gpu) and not _prefer(
+            table, group, context, rwa, None, lambda: eligible
+        ):
+            selected.add(index)
+    dimension = context.source.initial_density.shape[0]
+    if selected and backend.candidate(dimension, dp54=context.opencl_dp54) is not None:
+        return selected
+    return set()
 
 
 def prefer_sampled_rwa(
