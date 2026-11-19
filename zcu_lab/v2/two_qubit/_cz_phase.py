@@ -8,7 +8,7 @@ from typing import Annotated, Self
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 
-from .._readout import JointRoles
+from ._readout import JointRoles
 
 
 class CZPhasePair(ConfigBase):
