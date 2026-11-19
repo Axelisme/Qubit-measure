@@ -120,6 +120,7 @@
 
 - 2026-10-31 [Timeline 編譯：變數模型、通用 join 與 s14 事件時間](2026-10-31-timeline-variable-model.md)：Timeline 合流採共用 join，範圍證明改用 Abs 表示，現行決策見 [ADR-0083](../adr/0083-program-macros-and-timelines.md)。
 - 2026-11-20 [Two-qubit RB 在板上掃 depth：提早結束本發與控制結構的完備性](2026-11-20-early-exit-and-control-flow-completeness.md)：控制結構完備性。現有 repeat／branch 無法結束本發；spike 用 CondJump 加手抄狀態可行但脆弱，改為抽出 Branch 與 Repeat 共用的編譯期狀態，再補「提早結束本發」，方向見 [草稿](../adr/draft/control-flow-completeness.md)。
+- 2026-11-20 [Timeline 共用的編譯期狀態：PathState 與 capture／restore](2026-11-20-timeline-path-state.md)：共用抽象。Branch 與 Repeat 改用 frozen `PathState`，capture／restore 一次處理全部隨路徑變化的狀態，合併規則留在各結構；不按 timeline 切，也不用指標切換，因為狀態屬於路徑且 QICK macro 就地讀寫 program 狀態。
 
 ## Cfg 與表單
 
