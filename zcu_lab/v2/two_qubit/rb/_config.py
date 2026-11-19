@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Annotated, Self
 
 import numpy as np
@@ -23,7 +24,7 @@ class RBInputs[ResetT](ConfigBase):
     phase_pair is required, ordered and component-named. Delays are us, pulse
     frequency MHz and phase degrees. No DC device is driven. reset=None emits
     no reset. F1/F2 need circle classifiers with radius from GE Post before Run.
-    depth counts random Cliffords, not primitive gates; nondecreasing
+    depth counts random Cliffords, not primitive gates; strictly increasing
     nonnegative integers. seed contains distinct integer random.Random identities
     shared across depths/arms/rounds. The 31-bit bound preserves exact axes.
     reps is shots per host round; rounds remains a separate saved axis.
@@ -98,11 +99,17 @@ class RBInputs[ResetT](ConfigBase):
 
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:
-        """Reject swapped phases, unordered depths, repeated seeds or wrong generators."""
+        """Reject swapped phases, non-increasing depths, repeated seeds or wrong generators."""
         validate_classifiers(self.readout, self.roles)
         self.phase_pair.validate_roles(self.roles)
+        depth_counts = Counter(self.depth)
+        duplicates = sorted(depth for depth, count in depth_counts.items() if count > 1)
+        if duplicates:
+            raise ValueError(
+                f"RB depths must be strictly increasing; duplicate values: {duplicates}"
+            )
         if self.depth != sorted(self.depth):
-            raise ValueError("RB depths must be increasing")
+            raise ValueError("RB depths must be strictly increasing")
         if len(set(self.seed)) != len(self.seed):
             raise ValueError("RB seeds must be distinct complete integer identities")
         for drive, x90 in (

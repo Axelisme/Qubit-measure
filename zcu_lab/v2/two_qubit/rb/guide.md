@@ -63,7 +63,8 @@ outcomes and fit gg and ee return survival jointly, use the separate
 
 ## Sequences and cost
 
-`depth` is an increasing list of distinct nonnegative Clifford counts.
+`depth` is a strictly increasing list of nonnegative Clifford counts.
+Duplicate depth values are listed in the configuration error before build.
 `seed` is a list of distinct nonnegative 31-bit integers. Each seed fixes the
 random Clifford draws. Keep these values with the data. Reusing a seed at
 shallower depths keeps the same random Clifford prefix.
@@ -148,8 +149,8 @@ enough complete curves.
 
 ## Interpreting the result
 
-Analyze returns only `estimate`, `fit_quality` and `reason`. Per-depth survival,
-round masks and fitted curves stay inside analysis for plotting.
+Analyze reports `estimate`, `fit_quality`, `reason` and `tail_warning`.
+Per-depth survival, round masks and fitted curves stay inside analysis for plotting.
 
 Paired decay analysis fits each arm to `A*p**depth+B`.
 The two-qubit dimension is 4. The reported quantities are
@@ -165,6 +166,11 @@ uncertainty requires a different model. The summary reports paired seed/round
 counts and valid bootstrap fits. The default is 1,000 deterministic resamples with bootstrap seed 42.
 
 The fit plot shows equal-seed paired means and available fitted decays.
+When the measured reference arm joint00 survival at the deepest depth is above
+0.2, `tail_warning` reports the paired mean and depth. The decay tail is
+unresolved, so the fitted `p` may be biased high. Add deeper depths and rerun.
+This is an advisory threshold on measured survival, not a test against an
+assumed 0.25 asymptote, which can be lower for a thermal ensemble.
 The summary includes each arm's R² and normalized residual RMS. Parameter
 covariance and marginal parameter errors are unavailable; use the paired-seed interval and residual diagnostics for manual model review.
 Insufficient data, absent saved cfg, flat decay, invalid fits or unstable bootstrap

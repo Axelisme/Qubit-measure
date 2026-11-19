@@ -9,8 +9,9 @@ Cfg sweep fields use `depth` / `seed`. This experiment uses cfg schema 2.0. Load
 Select `two_qubit/rb_heralded`. Calibrate the X90 pulses, full mux readout,
 dual-line CZ pulses and ordered local-Z corrections as described in the
 [ordinary RB guide](guide.md). The same component roles, sequence seeds,
-depths, bootstrap settings and d=4 error interpretation apply here.
-Open or Reset captures sources. Refresh preserves authored inputs.
+depths, bootstrap settings and d=4 error interpretation apply here. Supply
+strictly increasing `depth` values; duplicates are listed in the configuration
+error before build. Open or Reset captures sources. Refresh preserves authored inputs.
 
 ## Shot sequence
 
@@ -102,6 +103,7 @@ statistical seed variation, not readout errors or model systematics.
 The d=4 estimates are `reference_epc=3/4*(1-p_reference)` and
 `gate_error=3/4*(1-p_interleaved/p_reference)`. Negative error estimates
 remain negative. Analyze returns only `estimate`, `fit_quality` and `reason`.
+This analysis does not report ordinary RB's joint00 tail warning.
 Fit quality retains residual diagnostics for gg reference/interleaved and ee
 reference/interleaved. The estimate's paired seed and round counts refer to
 the union. Per-herald pair masks, survival, curves and herald fractions stay
