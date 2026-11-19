@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-12，mux gain 範圍由欄位限制
+**Last updated:** 2026-11-19，generator envelope 共用
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -24,7 +24,7 @@
 | `delay_by_timeline(timeline=...)` | 將 reference 推進到所選結尾，全部 timeline 扣除實際推進量並 floor 0。原生 delay／delay_auto 仍推進 reference，不受 timeline 範圍影響。 |
 | `with repeat(name, n, *, timeline=None, range_hint=None)` | 逐圈累積結尾，入口與回邊不自動同步。`n` 為非負整數或既有 count register 名稱。固定次數不接受 hint。 |
 | `with branch(by=..., align_timeline=..., timeline=None) as cases` | 依 sweep 的 zero-based index 選 `with cases.case(index)`。未宣告點執行空 case，重複、非整數或超界 index 報錯。必填 bool `align_timeline` 選全部 case 的 max 或實際 case 結尾，兩者都不推進 reference。 |
-| `pulse.pulse_name(prog)` | 取得該 program 的 pulse 宣告名稱。Pulse 按定義去重，同名不同 cfg 使用不同 waveform 名稱。 |
+| `pulse.pulse_name(prog)` | 取得該 program 的 pulse 宣告名稱。Pulse template 按硬體定義去重。相同 generator channel 與取樣定義共用 envelope，不影響 pulse template 的身分。 |
 | `timing_layout`／`ir.analyze_timing` | 從 linked boundary metadata 觀察逐點事件、body_end 與含外殼的 shot_end。DMEM lookup 傳公開 `compile_datamem()` 給 `CompiledTimingInput.dmem`。另傳 `ir.compiled_wmem(prog)` 給 `wmem` 可觀察每次 wave 輸出的六個硬體字。未傳時 `wave_words` 為 None。Resync 讀硬體 s11，analysis 明確拒絕。 |
 
 每條 timeline 保存相對 reference 的結尾，`default` 不是 reference。

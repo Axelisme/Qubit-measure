@@ -11,17 +11,21 @@ from typing import TYPE_CHECKING
 from qick.asm_v2 import QickParam
 
 from ..table_param import TableParam
+from .waveform import ArbWaveformCfg, ConstWaveformCfg, FlatTopWaveformCfg
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from qick.asm_v2 import QickProgramV2
+
     from .pulse import PulseCfg
+    from .waveform import QickWaveformKwargs
 
 logger = logging.getLogger(__name__)
 
 
 class PulseRegistry:
-    """A registry to manage and share pulse configurations within a program."""
+    """Share pulse definitions and sampled envelopes within one program build."""
 
     HASH_KEYS = [
         "waveform",
@@ -35,6 +39,7 @@ class PulseRegistry:
 
     def __init__(self) -> None:
         self._pulses: dict[str, tuple[str, PulseCfg]] = {}
+        self._envelopes: dict[tuple[int, bool, str], str] = {}
 
     @property
     def count(self) -> int:
@@ -83,6 +88,38 @@ class PulseRegistry:
         hash_name = hashlib.sha256(cfg_json.encode("utf-8")).hexdigest()
 
         return f"pulse_{hash_name[:16]}"
+
+    def declare_waveform(
+        self, prog: QickProgramV2, cfg: PulseCfg, *, pulse_id: str
+    ) -> QickWaveformKwargs:
+        """Return QICK pulse kwargs after declaring or reusing envelope samples.
+
+        prog owns this registry and must have declared cfg.ch. cfg.waveform
+        supplies the shape and playback length. pulse_id names a newly stored
+        envelope; later pulses with the same sample definition reuse its name.
+        Const stores no samples. QICK and asset errors propagate.
+        """
+        waveform_cfg = cfg.waveform
+        name = f"{pulse_id}_waveform"
+        if isinstance(waveform_cfg, ConstWaveformCfg):
+            return waveform_cfg.build(name).to_wav_kwargs()
+
+        # Flat-top ramps round to even clocks; the plateau adds no samples.
+        flat_top = isinstance(waveform_cfg, FlatTopWaveformCfg)
+        shape = waveform_cfg.raise_waveform if flat_top else waveform_cfg
+        # An arbitrary envelope reads samples from path, not the asset label.
+        definition = (
+            {"style": shape.style, "path": shape.path}
+            if isinstance(shape, ArbWaveformCfg)
+            else shape.to_dict()
+        )
+        key = (cfg.ch, flat_top, json.dumps(definition, sort_keys=True))
+        shared_name = self._envelopes.get(key)
+        waveform = waveform_cfg.build(name if shared_name is None else shared_name)
+        if shared_name is None:
+            waveform.create(prog, cfg.ch)
+            self._envelopes[key] = name
+        return waveform.to_wav_kwargs()
 
     def register(self, name: str, cfg: PulseCfg, *, ro_ch: int | None = None) -> bool:
         """Capture cfg with runtime ADC matching; return False for a reused definition.

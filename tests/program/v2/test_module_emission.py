@@ -13,7 +13,12 @@ from zcu_tools.program.v2.modules.reset import (
     PulseResetCfg,
     TwoPulseResetCfg,
 )
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, CosineWaveformCfg
+from zcu_tools.program.v2.modules.waveform import (
+    ConstWaveformCfg,
+    CosineWaveformCfg,
+    FlatTopWaveformCfg,
+    WaveformCfg,
+)
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
@@ -26,6 +31,7 @@ from tests.program._timing_expectations import (
 )
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
+from tests.program.v2.wave_observations import executed_words
 
 PROFILE = load_soccfg(3, 1)
 PULSE_END = tproc_ceil(PROFILE, generator_duration(PROFILE, 0.1))
@@ -73,8 +79,8 @@ def _program(
     return Program(load_soccfg(3, 1), reps=2, initial_delay=0, relax_delay=0)
 
 
-def _envelope_shapes(prog: TimelineProgramV2) -> list[tuple[int, ...]]:
-    envelopes = prog.envelopes[0]["envs"]
+def _envelope_shapes(prog: TimelineProgramV2, ch: int = 0) -> list[tuple[int, ...]]:
+    envelopes = prog.envelopes[ch]["envs"]
     if not isinstance(envelopes, dict):
         raise TypeError("QICK envelope declarations must be a mapping")
     return [envelope["data"].shape for envelope in envelopes.values()]
@@ -101,6 +107,47 @@ def test_same_named_distinct_pulses_keep_distinct_envelopes():
     assert actual.prog_list == fresh.prog_list
     assert len(_envelope_shapes(actual)) == 2
     assert _envelope_shapes(actual) == _envelope_shapes(fresh)
+
+
+def _enveloped_pulse(waveform: WaveformCfg, *, phase: float = 0, ch: int = 0) -> Pulse:
+    return Pulse(
+        "drive",
+        PulseCfg(ch=ch, nqz=1, freq=1000, gain=0.5, phase=phase, waveform=waveform),
+    )
+
+
+def test_distinct_pulse_phases_reference_a_shared_cosine_envelope():
+    waveform = CosineWaveformCfg(length=0.1)
+    first = _enveloped_pulse(waveform)
+    second = _enveloped_pulse(waveform, phase=90)
+    prog = _program([first, second])
+
+    assert len(_envelope_shapes(prog)) == 1
+    assert first.pulse_name(prog) != second.pulse_name(prog)
+    (first_wave, second_wave) = executed_words(prog)[0]
+    assert first_wave[2] == second_wave[2]  # Envelope address in generator clocks.
+    assert first_wave[1] != second_wave[1]  # Phase word.
+
+
+def test_flat_top_phases_use_no_more_envelope_samples_than_one_pulse():
+    waveform = FlatTopWaveformCfg(
+        length=0.25, raise_waveform=CosineWaveformCfg(length=0.1)
+    )
+    pulses = [_enveloped_pulse(waveform, phase=phase * 15) for phase in range(20)]
+
+    single = _program(pulses[:1])
+    multiple = _program(pulses)
+
+    assert sum(shape[0] for shape in _envelope_shapes(multiple)) == sum(
+        shape[0] for shape in _envelope_shapes(single)
+    )
+
+
+def test_identical_waveforms_on_different_generators_each_have_an_envelope():
+    waveform = CosineWaveformCfg(length=0.1)
+    prog = _program([_enveloped_pulse(waveform), _enveloped_pulse(waveform, ch=1)])
+
+    assert len(_envelope_shapes(prog, 0)) == len(_envelope_shapes(prog, 1)) == 1
 
 
 def test_shared_pulse_definitions_deduplicate_in_each_program():

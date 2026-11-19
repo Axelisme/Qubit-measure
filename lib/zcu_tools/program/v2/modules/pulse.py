@@ -8,11 +8,7 @@ from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam
 
 from .base import AbsModuleCfg, Module, apply_cfg_overrides
-from .waveform import (
-    AbsWaveform,
-    WaveformCfg,
-    resolve_waveform_ref,
-)
+from .waveform import WaveformCfg, resolve_waveform_ref
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.timeline import TimelineProgramV2
@@ -68,10 +64,9 @@ class PulseOverrides(TypedDict, total=False):
 
 @dataclass(frozen=True)
 class _PulseDeclaration:
-    """Program-local QICK pulse name and its built envelope (including length)."""
+    """Program-local QICK pulse name."""
 
     pulse_id: str
-    waveform: AbsWaveform
 
 
 class Pulse(Module):
@@ -92,7 +87,8 @@ class Pulse(Module):
 
         ro_ch is None for unpaired playback or an ADC channel number. It affects
         QICK frequency rounding, mixer declaration and pulse registry identity.
-        cfg is copied; None emits no pulse. Explicit pulse_id disables sharing.
+        cfg is copied; None emits no pulse. Explicit pulse_id names a separate
+        pulse template; matching envelope samples are shared even then.
         freq (MHz), gain (normalized), phase (degrees) and length (us) override
         the copied cfg via set_param; None keeps cfg. Waveform length restrictions
         apply, including ValueError for unsupported sweeps. With cfg=None,
@@ -105,12 +101,7 @@ class Pulse(Module):
         self._requested_pulse_id = pulse_id
         self.ro_ch = ro_ch
 
-    def _add_pulse(
-        self,
-        prog: TimelineProgramV2,
-        pulse_id: str,
-        waveform: AbsWaveform,
-    ) -> None:
+    def _add_pulse(self, prog: TimelineProgramV2, pulse_id: str) -> None:
         cfg = self.cfg
         assert cfg is not None
 
@@ -122,7 +113,9 @@ class Pulse(Module):
             ro_ch=ro_ch,
         )
 
-        waveform.create(prog, cfg.ch)
+        waveform_kwargs = prog.pulse_registry.declare_waveform(
+            prog, cfg, pulse_id=pulse_id
+        )
         prog.add_pulse(
             cfg.ch,
             pulse_id,
@@ -130,7 +123,7 @@ class Pulse(Module):
             freq=cfg.freq,
             phase=cfg.phase,
             gain=cfg.gain,
-            **waveform.to_wav_kwargs(),
+            **waveform_kwargs,
         )
 
     def declare(self, prog: TimelineProgramV2) -> None:
@@ -143,10 +136,9 @@ class Pulse(Module):
             create = prog.pulse_registry.register(self.name, self.cfg, ro_ch=self.ro_ch)
         else:
             create = True
-        waveform = self.cfg.waveform.build(f"{pulse_id}_waveform")
-        prog.set_module_state(self, _PulseDeclaration(pulse_id, waveform))
         if create:
-            self._add_pulse(prog, pulse_id, waveform)
+            self._add_pulse(prog, pulse_id)
+        prog.set_module_state(self, _PulseDeclaration(pulse_id))
 
     def pulse_name(self, prog: TimelineProgramV2) -> str:
         """Return the pulse identifier declared on prog for native QICK calls.
