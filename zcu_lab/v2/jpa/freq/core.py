@@ -16,9 +16,16 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
-from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
+from zcu_tools.program.v2 import (
+    IQ,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+)
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_rf_frequency
@@ -144,7 +151,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                     set_rf_frequency(context.devices[cfg.jpa_rf_dev], jpa_freq * 1e6)
 
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
-                tracker = MomentTracker()
                 builder = TimelineBuilder(
                     soccfg,
                     reps=cfg.reps,
@@ -163,17 +169,16 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 builder.delay_by_timeline()
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
-                step.run_acquire(
+                step.run_acquire_summed(
                     prog,
                     soc,
+                    reducer=shot_sums(prog, [IQ("readout", order=3)]),
                     options=RunOptions(
-                        converter=lambda _raw, tracker=tracker: snr_as_signal(
-                            [tracker],
-                            ge_axis=1,
+                        converter=lambda sums: snr_as_signal(
+                            sums,
                             skew_penalty=cfg.skew_penalty,
                         ),
                     ),
-                    trackers=[tracker],
                     rounds=cfg.rounds,
                 )
 

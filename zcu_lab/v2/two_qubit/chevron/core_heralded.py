@@ -205,7 +205,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             sched.run_acquire_summed(
                 prog,
                 context.soc,
-                processor=shot_sums(prog, axes),
+                reducer=shot_sums(prog, axes),
                 rounds=config.rounds,
                 options=RunOptions(),
             )
@@ -288,7 +288,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
                 step.run_acquire_summed(
                     prog,
                     context.soc,
-                    processor=shot_sums(prog, axes),
+                    reducer=shot_sums(prog, axes),
                     rounds=config.rounds,
                     options=RunOptions(),
                 )

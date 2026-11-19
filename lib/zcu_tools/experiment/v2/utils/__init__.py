@@ -1,4 +1,3 @@
-import zcu_tools.experiment.v2.utils.tracker as tracker
 from zcu_tools.experiment.v2.utils.helper import Result, merge_result_list
 from zcu_tools.experiment.v2.utils.round_zcu import (
     round_sweep_dict,
@@ -18,7 +17,6 @@ from zcu_tools.experiment.v2.utils.t1_sampling import (
 
 __all__ = [
     # module
-    "tracker",
     # helper
     "Result",
     "merge_result_list",

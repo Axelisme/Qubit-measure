@@ -28,15 +28,16 @@ from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
-from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    IQ,
     Pulse,
     PulseReadout,
     Readout,
     Reset,
     SweepCfg,
     TimelineBuilder,
+    shot_sums,
 )
 
 from zcu_lab.v2.support import live_line
@@ -368,7 +369,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         continuous bounds, not a Cartesian grid; num_points is the budget.
         Return params shaped (Npoint, 3) in MHz, gain in a.u. within [-1, 1] and us, plus
         SNR shaped (Npoint,). Unvisited rows remain NaN. SNR is not assignment
-        fidelity. acquire_kwargs is forwarded to acquisition.
+        fidelity. acquire_kwargs is forwarded to summed acquisition.
         """
         # 1. Prepare the bounded search and preserve one parameter row per candidate.
         run_cfg = deepcopy(cfg)
@@ -416,7 +417,6 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                 run_cfg.readout.set_param("freq", cur_params[0])
                 run_cfg.readout.set_param("gain", cur_params[1])
                 run_cfg.readout.set_param("length", cur_params[2])
-                tracker = MomentTracker()
 
                 # Compare pulse-off/on preparations at this candidate's readout settings.
                 builder = TimelineBuilder(
@@ -432,18 +432,17 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                     builder.emit(Pulse("qub_pulse", run_cfg.qub_pulse))
                 builder.emit(Readout("readout", run_cfg.readout))
                 program = builder.build()
-                step.run_acquire(
+                step.run_acquire_summed(
                     program,
                     soc,
+                    reducer=shot_sums(program, [IQ("readout", order=3)]),
                     rounds=run_cfg.rounds,
                     options=RunOptions(
-                        converter=lambda _raw, tracker=tracker: snr_as_signal(
-                            [tracker],
-                            ge_axis=1,
+                        converter=lambda sums: snr_as_signal(
+                            sums,
                             skew_penalty=run_cfg.skew_penalty,
                         )
                     ),
-                    trackers=[tracker],
                     **(acquire_kwargs or {}),
                 )
 

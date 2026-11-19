@@ -165,7 +165,7 @@ def run_ge(cfg: GE_Cfg, *, context: RunContext) -> GE_Result:
             )
             if shots is None:
                 break
-            signals_buffer[step].set(raw_shots_to_signal(program))
+            signals_buffer[step].set(raw_shots_to_signal(shots, program)[0])
     signals = signals_buffer.array
 
     # Keep acquisition order; physical G/E mapping belongs to analysis.

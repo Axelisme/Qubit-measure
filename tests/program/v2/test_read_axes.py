@@ -8,6 +8,7 @@ from zcu_tools.program import v2
 from zcu_tools.program.v2.modules import ConstWaveformCfg, Pulse, PulseReadout
 
 from tests.program._profiles import load_soccfg
+from tests.program._shot_reduction import reduce_round
 from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.timing_support import shots
@@ -56,22 +57,48 @@ def test_classified_and_mixed_axes_preserve_class_rules_and_axis_order(
         )
     }
     np.testing.assert_array_equal(
-        v2.shot_sums(prog, [v2.Classify("readout")])(iq), [counts]
+        reduce_round(v2.shot_sums(prog, [v2.Classify("readout")]), iq), [counts]
     )
-    mixed = v2.shot_sums(prog, [v2.Classify("readout"), v2.IQ("readout")])(iq)
+    mixed = reduce_round(
+        v2.shot_sums(prog, [v2.Classify("readout"), v2.IQ("readout")]), iq
+    )
     expected_i = [[-1, 4], [-1, 1, 3], [-1, 1, 3]][
         ["linear", "circle", "centroid3"].index(classifier.mode)
     ]
     np.testing.assert_array_equal(mixed[0, :, 0], counts)
     np.testing.assert_array_equal(mixed[0, :, 1], expected_i)
     np.testing.assert_array_equal(mixed[0, :, 2], 0)
-    reverse = v2.shot_sums(prog, [v2.IQ("readout"), v2.Classify("readout")])(iq)
+    reverse = reduce_round(
+        v2.shot_sums(prog, [v2.IQ("readout"), v2.Classify("readout")]), iq
+    )
     np.testing.assert_array_equal(reverse, mixed.transpose(0, 2, 1))
     # Explicit calibration overrides cfg, and the processor keeps a snapshot.
     override = LinearClassifier(angle=0.0, threshold=10.0)
     process = v2.shot_sums(prog, [v2.Classify("readout", classifier=override)])
     override.threshold = -10.0
-    np.testing.assert_array_equal(process(iq), [[4, 0]])
+    np.testing.assert_array_equal(reduce_round(process, iq), [[4, 0]])
+
+
+def test_shot_sums_starts_with_zero_state_in_point_and_read_axis_order() -> None:
+    prog = compile_modules(load_soccfg(), [readout()])
+    reducer = v2.shot_sums(prog, [v2.IQ("readout", order=3), v2.IQ("readout")])
+
+    state = reducer.start(3)
+
+    assert state.dtype == np.float64
+    np.testing.assert_array_equal(state, np.zeros((3, 10, 6)))
+
+
+def test_iq_third_order_appends_cubic_sums_without_changing_second_order() -> None:
+    prog = compile_modules(load_soccfg(), [readout()])
+    iq = {0: np.array([[[[2.0, -3.0]], [[-1.0, 4.0]]]])}
+
+    third = reduce_round(v2.shot_sums(prog, [v2.IQ("readout", order=3)]), iq)
+    np.testing.assert_array_equal(third, [[2, 1, 1, 5, -10, 25, 7, -8, 2, 37]])
+
+    default = reduce_round(v2.shot_sums(prog, [v2.IQ("readout")]), iq)
+    expected = np.array([[2, 1, 1, 5, -10, 25]], dtype=np.float64)
+    np.testing.assert_array_equal(default.view(np.uint64), expected.view(np.uint64))
 
 
 @pytest.mark.parametrize(
@@ -114,7 +141,7 @@ def test_classified_sums_keep_boundary_rules_and_detached_cfg(
         ro.cfg.classifier.f_center = 99j
     iq = np.array(values, dtype=np.float64).reshape(-1, 1, 1, 2)
     original = iq.copy()
-    result = process({0: iq})
+    result = reduce_round(process, {0: iq})
     np.testing.assert_array_equal(result, expected)
     assert result.dtype == np.float64
     np.testing.assert_array_equal(iq, original)
@@ -155,7 +182,7 @@ def test_branch_cases_share_read_labels_with_zero_gain_first_read(swept):
     process = v2.shot_sums(prog, [v2.IQ("r1"), v2.IQ("r2")])
     points = 16 if swept else 8
     iq = np.tile(np.array([[[[2.0, 3.0], [5.0, 7.0]]]]), (points, 2, 1, 1))
-    result = process({0: iq})
+    result = reduce_round(process, {0: iq})
     assert result.shape == (points, 6, 6)
     np.testing.assert_array_equal(result[:, 0, 0], 2)
     np.testing.assert_array_equal(result[:, 3, 0], 8)
@@ -223,8 +250,9 @@ def test_branch_generator_waveform_can_differ_with_identical_adc_settings():
     first = readout("selected")
     other = PulseReadout("selected", first.cfg, gain=0.0, length=0.2)
     prog = _branch_program([[first], [other]])
-    result = v2.shot_sums(prog, [v2.IQ("selected")])(
-        {0: np.array([[[[2.0, 3.0]]], [[[5.0, 7.0]]]])}
+    result = reduce_round(
+        v2.shot_sums(prog, [v2.IQ("selected")]),
+        {0: np.array([[[[2.0, 3.0]]], [[[5.0, 7.0]]]])},
     )
     np.testing.assert_array_equal(result, [[1, 2, 3, 4, 6, 9], [1, 5, 7, 25, 35, 49]])
 
@@ -259,11 +287,35 @@ def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
     }
     if mux:
         iq[4] *= -1  # The requested tone position 1 is ADC 1, not first ADC 4.
-    result = v2.shot_sums(prog, axes)(iq)
+    result = reduce_round(v2.shot_sums(prog, axes), iq)
     herald = np.array([[1, 2, 3, 4, 6, 9], [1, 11, 13, 121, 143, 169]])
     signal = np.array([[1, 5, 7, 25, 35, 49], [1, 17, 19, 289, 323, 361]])
     expected = (herald.T @ signal)[None, ...]
     np.testing.assert_array_equal(result, expected)
+
+
+def test_shot_sums_resolves_labels_after_mask_sources_remove_physical_reads() -> None:
+    builder = v2.TimelineBuilder(load_soccfg(), reps=2)
+    ro = readout()
+    builder.emit(ro, tag="reference")
+    builder.timeline_inc(1.0)
+    builder.emit(ro, tag="mask_input")
+    builder.timeline_inc(1.0)
+    builder.emit(ro, tag="signal")
+    builder.register_shot_mask_source({0: [1]}, lambda iq: iq[0][..., 0, 0] > 0)
+    program = builder.build()
+
+    sums = v2.shot_sums(program, [v2.IQ("signal")])
+    logical_iq = {
+        0: np.array([[[[99.0, 99.0], [2.0, 3.0]], [[98.0, 98.0], [5.0, 7.0]]]])
+    }
+    np.testing.assert_array_equal(
+        reduce_round(sums, logical_iq), [[2, 7, 10, 29, 41, 58]]
+    )
+    with pytest.raises(
+        ValueError, match=r"label 'mask_input'.*available labels.*signal"
+    ):
+        v2.shot_sums(program, [v2.IQ("mask_input")])
 
 
 @pytest.mark.parametrize("timeline", [True])
@@ -282,7 +334,7 @@ def test_processor_rejects_adc_read_count_mismatch(reads):
     prog = compile_modules(load_soccfg(), [readout()])
     process = v2.shot_sums(prog, [v2.IQ("readout")])
     with pytest.raises(ValueError, match=rf"ADC 0.*expected.*1.*actual.*{reads}"):
-        process({0: np.zeros((1, 2, reads, 2), dtype=np.float64)})
+        reduce_round(process, {0: np.zeros((1, 2, reads, 2), dtype=np.float64)})
 
 
 @pytest.mark.parametrize(
@@ -341,11 +393,12 @@ def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
     builder.emit(selected)
     prog = builder.build()
     process = v2.shot_sums(prog, [v2.IQ("readout")])
-    result = process(
+    result = reduce_round(
+        process,
         {
             0: np.array([[[[4.0, 5.0]]]]),
             1: np.zeros((1, 1, 2 if control == "Repeat" else 1, 2), dtype=np.float64),
-        }
+        },
     )
     np.testing.assert_array_equal(result, [[1, 4, 5, 16, 20, 25]])
 
@@ -470,7 +523,7 @@ def test_parallel_readout_emissions_keep_labels_without_changing_admission():
     process = v2.shot_sums(prog, [v2.IQ("first"), v2.IQ("second")])
     iq = {ch: np.full((1, 2, 1, 2), ch + 1.0) for ch in (0, 1)}
     expected = 2 * np.outer([1, 1, 1, 1, 1, 1], [1, 2, 2, 4, 4, 4])
-    np.testing.assert_array_equal(process(iq), expected[None, ...])
+    np.testing.assert_array_equal(reduce_round(process, iq), expected[None, ...])
 
 
 @pytest.mark.parametrize("tone", [None, 0])
@@ -484,7 +537,7 @@ def test_single_tone_mux_classify_resolves_implicit_and_explicit_tone(tone):
         )
     }
     process = v2.shot_sums(prog, [v2.Classify("readout", tone=tone)])
-    np.testing.assert_array_equal(process(iq), [[3, 1]])
+    np.testing.assert_array_equal(reduce_round(process, iq), [[3, 1]])
 
 
 def test_single_tone_mux_iq_resolves_implicit_and_explicit_tone():
@@ -495,8 +548,8 @@ def test_single_tone_mux_iq_resolves_implicit_and_explicit_tone():
             [[[[2, 3]], [[4, 5]]], [[[-1, 2]], [[1, -2]]]], dtype=np.float64
         )
     }
-    implicit = v2.shot_sums(prog, [v2.IQ("readout")])(iq)
-    explicit = v2.shot_sums(prog, [v2.IQ("readout", 0)])(iq)
+    implicit = reduce_round(v2.shot_sums(prog, [v2.IQ("readout")]), iq)
+    explicit = reduce_round(v2.shot_sums(prog, [v2.IQ("readout", 0)]), iq)
     np.testing.assert_array_equal(
         implicit, [[2, 6, 8, 20, 26, 34], [2, 0, 0, 2, -4, 8]]
     )
@@ -532,7 +585,7 @@ def test_mux_classify_only_axes_produce_joint_counts():
     process = v2.shot_sums(
         prog, [v2.Classify("readout", tone=0), v2.Classify("readout", tone=1)]
     )
-    np.testing.assert_array_equal(process(iq), [[[1, 2], [1, 0]]])
+    np.testing.assert_array_equal(reduce_round(process, iq), [[[1, 2], [1, 0]]])
 
 
 def test_iq_axis_sums_and_repeated_read_second_order_features():
@@ -545,10 +598,10 @@ def test_iq_axis_sums_and_repeated_read_second_order_features():
         ]
     )
     np.testing.assert_array_equal(
-        v2.shot_sums(prog, [v2.IQ("readout")])(iq),
+        reduce_round(v2.shot_sums(prog, [v2.IQ("readout")]), iq),
         [[2, 6, 8, 20, 26, 34], [2, 0, 0, 2, -4, 8]],
     )
-    actual = v2.shot_sums(prog, [v2.IQ("readout"), v2.IQ("readout")])(iq)
+    actual = reduce_round(v2.shot_sums(prog, [v2.IQ("readout"), v2.IQ("readout")]), iq)
     expected = np.stack([point.T @ point for point in features])
     assert actual.shape == (2, 6, 6)
     np.testing.assert_array_equal(actual, expected)

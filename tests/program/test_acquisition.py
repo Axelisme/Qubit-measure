@@ -14,6 +14,16 @@ from zcu_tools.simulate.boundary import ChargeDriveRequirement
 from tests.program._acquisition_soc import make_chunk_acquisition
 
 
+def test_invalid_shot_mask_index_fails_at_registration():
+    _, program = make_chunk_acquisition()
+
+    # bool is an int subtype but not a physical read index.
+    with pytest.raises(ValueError, match="physical read index True"):
+        program.register_shot_mask_source({0: [True]}, lambda iq: iq[0][..., 0, 0] > 0)
+
+    assert not program.has_shot_mask_sources
+
+
 def test_hardware_acquire_does_not_forward_or_validate_charge_requirements():
     soc, program = make_chunk_acquisition(reps=2, reads=1)
     actual = program.acquire(

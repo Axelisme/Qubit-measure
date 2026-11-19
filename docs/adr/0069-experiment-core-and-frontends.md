@@ -60,7 +60,7 @@ StopSignal 只承載停止請求與不解析的自由文字 reason，release 只
 
 Scope 是 experiment 的共用控制與生命週期契約。作者看 scope.cancelled，底層只借 stop bit。Kind/name 路徑、fork status、selector 歧義與根 ScriptCancelled 的出口規則見 [[0075]]。2026-10-22 使用者要求「signal scope應該搭配有作用域保證的with以及for來規範scope範圍」。Host 與 caller 都不得以 latest child 或 callable 反射補 parent/name。Workflow 根及所有 child 具有相同 conveniences；scope.dir 鏡射 scope 路徑，scope.commit 每個 scope 只能一次，commit 當下保存 record 快照。Reader 走目錄樹並按 commit 序號排序。
 
-Load／analyze 不要求硬體；run 在缺少必要 handles 或 binding 時拒絕，不自行查找或建立資源。單次 buffer、tracker 與 cache 歸 run。NotebookExperiment 每次 run 從已綁定的 manager 取得一次 driver mapping，再建立 context；同次 run 不重查 registry。建構入口不讀裝置資訊，load／analyze／save 也不查裝置。同一 manager 更新 registry 後，下次 run 使用新綁定；重新賦值 caller 變數不重綁既有入口。GUI 的 RunService 與 workflow RunSession 仍各自在 operation 邊界建立 context。
+Load／analyze 不要求硬體；run 在缺少必要 handles 或 binding 時拒絕，不自行查找或建立資源。單次 buffer 與 cache 歸 run。NotebookExperiment 每次 run 從已綁定的 manager 取得一次 driver mapping，再建立 context；同次 run 不重查 registry。建構入口不讀裝置資訊，load／analyze／save 也不查裝置。同一 manager 更新 registry 後，下次 run 使用新綁定；重新賦值 caller 變數不重綁既有入口。GUI 的 RunService 與 workflow RunSession 仍各自在 operation 邊界建立 context。
 
 影響 acquisition 的實驗選項全部進 typed config，包括 T1 uniform。核心擁有設定驗證及環境無關預設；GUI 擁有編輯表示、標籤、expression 與 md／module library seed。核心分析不讀 live GUI 狀態。Hardware handles 不進 cfg 或 record。
 

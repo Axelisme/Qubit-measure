@@ -16,7 +16,7 @@ One program sweeps `prepared_f1` outside `prepared_f2`, each with 0=g (I) and 1=
 
 `reps` counts shots per round per preparation. `rounds` adds completed rounds during acquisition, without a host round axis.
 
-The processor saves all 81 joint classes as float64 `sums` shaped `(2,2,3,3,3,3)`. Result stores integer axes `prepared_f1=[0,1]` and `prepared_f2=[0,1]` (0=g, 1=e), with F1 outside F2. The remaining axes are herald F1, herald F2, terminal F1, terminal F2. Each class axis is g/e/other. Counts remain unnormalized, including rejected herald classes. Native persistence generates class coordinates and retains the actual run cfg. No per-shot IQ survives in Result.
+The reducer counts all 81 joint classes as float64 `sums` shaped `(2,2,3,3,3,3)`. Result stores integer axes `prepared_f1=[0,1]` and `prepared_f2=[0,1]` (0=g, 1=e), with F1 outside F2. The remaining axes are herald F1, herald F2, terminal F1, terminal F2. Each class axis is g/e/other. Counts remain unnormalized, including rejected herald classes. Native persistence generates class coordinates and retains the actual run cfg. No per-shot IQ survives in Result.
 
 The live plot selects the herald g,g slice and shows its terminal P(g,g). Cancel keeps completed rounds and leaves unmeasured branches NaN. The caller still reports acquisition errors as failures. Old files without summed counts or with a single preparation axis fail Load; no compatibility conversion runs.
 

@@ -359,12 +359,12 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 )
                 if shots is None:
                     break
-                raw = raw_shots_to_signal(program)
-                if raw.shape != (cfg.reps, gains.size):
+                raw = raw_shots_to_signal(shots, program)
+                if raw.shape != (gains.size, cfg.reps):
                     raise ValueError(
-                        f"Amp Rabi raw IQ shape mismatch: expected {(cfg.reps, gains.size)}, got {raw.shape}"
+                        f"Amp Rabi raw IQ shape mismatch: expected {(gains.size, cfg.reps)}, got {raw.shape}"
                     )
-                buffer[step].set(raw.T)
+                buffer[step].set(raw)
 
         # 3. Join round/shot axes only; unacquired rounds remain NaN.
         return AmpRabiResult(

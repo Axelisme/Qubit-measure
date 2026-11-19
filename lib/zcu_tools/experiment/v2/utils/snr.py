@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from scipy.signal import savgol_filter
 
 from zcu_tools.experiment.acquisition_facts import StopDecision
-from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
+from zcu_tools.program.v2.read_axes import CubicIQMoments, split_cubic_sums
 
 DEFAULT_SKEW_PENALTY = 0.0
 
@@ -101,45 +101,62 @@ def calc_snr(
     return snr / (1.0 + skew_penalty * shape_cost)
 
 
+def _central_moments(
+    moments: CubicIQMoments,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    count, mean = moments.counts, moments.first
+    second, third = moments.second, moments.third
+
+    # Use sample covariance (zero for a single shot) and population third moment.
+    cov = second - mean[..., :, None] * mean[..., None, :]
+    cov *= (count / np.maximum(count - 1, 1))[..., None, None]
+    mi = mean[..., :, None, None]
+    mj = mean[..., None, :, None]
+    mk = mean[..., None, None, :]
+    centered_third = (
+        third
+        - mi * second[..., None, :, :]
+        - mj * second[..., :, None, :]
+        - mk * second[..., :, :, None]
+        + 2 * mi * mj * mk
+    )
+    return mean, cov, centered_third
+
+
 def snr_as_signal(
-    raw: Sequence[MomentTracker],
-    ge_axis: int = 1,
+    sums: NDArray[np.float64],
+    ge_axis: int = 0,
     *,
     skew_penalty: float = DEFAULT_SKEW_PENALTY,
 ) -> NDArray[np.float64]:
-    """Compute SNR from ``raw[0]``, removing its single readout axis.
+    """Convert a single ``IQ(read, order=3)`` shot-sum axis to g/e SNR.
 
-    The tracker's mean has shape ``(1, ..., 2)``: axis 0 is the readout,
-    the final axis is IQ, and ``ge_axis`` selects a length-2 g/e state axis
-    between them. Negative axes are relative to this mean shape. Other
-    leading axes are sweep axes and retain their order in the returned
-    float64 array. With no sweep axes, the return shape is ``()``.
+    The last axis of sums contains ten raw sums, starting with the count.
+    ge_axis selects the length-2 g/e axis among the preceding axes; negative
+    indices are relative to sums. Remaining sweep axes keep their order in
+    the float64 result. With no sweep axes, return a zero-dimensional array.
+    Use sample covariance and population third central moments for the
+    pooled-sigma SNR and shape penalty described in calc_snr. A zero or
+    missing count in either state yields NaN for that sweep point.
 
-    Raise ValueError if the readout axis has length other than 1, ge_axis
-    points to the readout or IQ axis, or the state axis has length other
-    than 2. The tracker must have received samples through ``update``.
-    ``skew_penalty`` has the same non-negative meaning as in ``calc_snr``.
+    Raise ValueError for an invalid sums shape, state axis or negative penalty.
     """
-    tracker = raw[0]
-    mean_d = tracker.mean
-    cov_d = tracker.covariance
-    m3_d = tracker.third_moment
-    assert mean_d is not None
-    assert cov_d is not None
-    assert m3_d is not None
-    if mean_d.shape[0] != 1:
-        raise ValueError(f"Expected one readout on axis 0, got shape {mean_d.shape}")
-    if ge_axis < 0:
-        ge_axis += mean_d.ndim
-    if not 1 <= ge_axis < mean_d.ndim - 1:
-        raise ValueError("ge_axis must select a state axis, not the readout or IQ axis")
-    if mean_d.shape[ge_axis] != 2:
+    if sums.ndim < 2:
         raise ValueError(
-            f"Expected state axis length 2, got shape {mean_d.shape} with ge_axis={ge_axis}"
+            f"Expected cubic IQ sums with final axis length 10, got {sums.shape}"
         )
-    return np.squeeze(
-        calc_snr(mean_d, cov_d, m3_d, ge_axis=ge_axis, skew_penalty=skew_penalty),
-        axis=0,
+    moments = split_cubic_sums(sums)
+    if ge_axis < 0:
+        ge_axis += sums.ndim
+    if not 0 <= ge_axis < sums.ndim - 1:
+        raise ValueError("ge_axis must select a state axis, not the final IQ sums axis")
+    if sums.shape[ge_axis] != 2:
+        raise ValueError(
+            f"Expected state axis length 2, got shape {sums.shape} with ge_axis={ge_axis}"
+        )
+    mean, cov, third = _central_moments(moments)
+    return np.asarray(
+        calc_snr(mean, cov, third, ge_axis=ge_axis, skew_penalty=skew_penalty)
     )
 
 

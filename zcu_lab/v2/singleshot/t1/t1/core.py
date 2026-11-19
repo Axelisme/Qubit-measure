@@ -185,7 +185,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             sched.run_acquire_summed(
                 program,
                 context.soc,
-                processor=shot_sums(program, [axis]),
+                reducer=shot_sums(program, [axis]),
                 rounds=cfg.rounds,
             )
         return T1Result(lengths=lengths, counts=buffer.array)
@@ -224,7 +224,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             sched.run_acquire_summed(
                 program,
                 context.soc,
-                processor=shot_sums(program, [axis]),
+                reducer=shot_sums(program, [axis]),
                 rounds=cfg.rounds,
             )
         return T1Result(lengths=lengths, counts=buffer.array)

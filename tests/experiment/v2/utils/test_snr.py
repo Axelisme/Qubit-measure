@@ -1,4 +1,4 @@
-"""Tests for MomentTracker-based readout SNR helpers."""
+"""Tests for readout SNR from IQ moments and curve-based early stop."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.v2.runtime import SignalBuffer
 from zcu_tools.experiment.v2.utils.snr import calc_snr, snr_as_signal, snr_checker
-from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 
 
 def _moments(
@@ -101,17 +100,39 @@ def test_negative_skew_penalty_is_rejected() -> None:
         calc_snr(mean, cov, m3, skew_penalty=-0.1)
 
 
-def _readout_tracker(
-    separations: NDArray[np.float64], *, ge_axis: int = 1
-) -> MomentTracker:
-    # Four symmetric shots give I variance 2/3 for g, 8/3 for e, and zero skew.
-    shots = np.array([[-1.0, 0.0], [1.0, 0.0], [0.0, -1.0], [0.0, 1.0]])
-    ground = np.broadcast_to(shots, separations.shape + shots.shape)
-    excited = 2.0 * ground + separations[..., None, None] * np.array([1.0, 0.0])
-    states = np.stack([ground, excited], axis=0)
-    tracker = MomentTracker()
-    tracker.update(np.moveaxis(states[None, ...], 1, ge_axis))
-    return tracker
+@pytest.mark.parametrize("penalty", [0.0, 0.75])
+def test_snr_from_cubic_sums_projects_covariance_and_skew(penalty: float) -> None:
+    # (I, Q) = (2, -3) + t*(3, 4), with g t=(-1, 0, 1) and e t=(2, 2, 5).
+    sums = np.array(
+        [
+            [3, 6, -9, 30, 6, 59, 132, 6, -26, -369],
+            [3, 33, 27, 417, 369, 339, 5937, 5553, 5313, 5163],
+        ],
+        dtype=np.float64,
+    )
+    # The common scale 5 cancels. Along t, the means differ by 3, sample
+    # variances are 1 and 3, and population third central moments are 0 and 2.
+    expected = (3 / np.sqrt(2)) / (
+        1 + penalty * (np.log(np.sqrt(3)) ** 2 + (2 / (3 * np.sqrt(3))) ** 2)
+    )
+    assert snr_as_signal(sums, ge_axis=0, skew_penalty=penalty).item() == pytest.approx(
+        expected
+    )
+
+
+def _symmetric_readout_sums(
+    separation: NDArray[np.float64], *, ge_axis: int = 0
+) -> NDArray[np.float64]:
+    # g has four shots at (±1, 0), (0, ±1); e is scaled by 2 and shifted in I.
+    result = np.zeros((2, *separation.shape, 10), dtype=np.float64)
+    result[..., 0] = 4
+    result[0, ..., 3] = result[0, ..., 5] = 2
+    result[1, ..., 1] = 4 * separation
+    result[1, ..., 3] = 8 + 4 * separation**2
+    result[1, ..., 5] = 8
+    result[1, ..., 6] = 24 * separation + 4 * separation**3
+    result[1, ..., 8] = 8 * separation
+    return np.moveaxis(result, 0, ge_axis)
 
 
 @pytest.mark.parametrize("sweep_shape", [(), (1,), (3,), (1, 3), (2, 3)])
@@ -121,57 +142,44 @@ def test_snr_as_signal_returns_only_sweep_axes(
     sweep_shape: tuple[int, ...], skew_penalty: float, use_default_axis: bool
 ) -> None:
     separations = np.arange(1.0, np.prod(sweep_shape) + 1.0).reshape(sweep_shape)
-    tracker = _readout_tracker(separations)
+    sums = _symmetric_readout_sums(separations)
 
     if use_default_axis:
-        out = snr_as_signal([tracker], skew_penalty=skew_penalty)
+        out = snr_as_signal(sums, skew_penalty=skew_penalty)
     else:
-        out = snr_as_signal([tracker], ge_axis=1, skew_penalty=skew_penalty)
+        out = snr_as_signal(sums, ge_axis=0, skew_penalty=skew_penalty)
 
     assert out.shape == sweep_shape
     assert out.dtype == np.dtype(np.float64)
     expected = separations / np.sqrt(5.0 / 3.0)
     expected /= 1.0 + skew_penalty * np.log(0.5) ** 2
     np.testing.assert_allclose(out, expected)
-    previous = calc_snr(
-        tracker.mean,
-        tracker.covariance,
-        tracker.third_moment,
-        ge_axis=1,
-        skew_penalty=skew_penalty,
-    )
-    np.testing.assert_array_equal(out, previous[0])
 
 
 @pytest.mark.parametrize(
-    ("leading_shape", "ge_axis", "message"),
+    ("shape", "ge_axis", "message"),
     [
-        ((0, 2), 1, "readout"),
-        ((2, 2), 1, "readout"),
-        ((1, 2), 0, "ge_axis"),
-        ((1, 2), -3, "ge_axis"),
-        ((1, 2), -1, "ge_axis"),
-        ((1, 2), 3, "ge_axis"),
-        ((1, 3), 1, "state"),
+        ((2, 6), 0, "length 10"),
+        ((10,), 0, "length 10"),
+        ((2, 10), 1, "ge_axis"),
+        ((2, 10), -1, "ge_axis"),
+        ((2, 10), -3, "ge_axis"),
+        ((3, 10), 0, "state"),
     ],
 )
-def test_snr_as_signal_rejects_invalid_readout_or_state_axis(
-    leading_shape: tuple[int, ...], ge_axis: int, message: str
+def test_snr_as_signal_rejects_invalid_sums_or_state_axis(
+    shape: tuple[int, ...], ge_axis: int, message: str
 ) -> None:
-    tracker = MomentTracker()
-    tracker.update(np.zeros(leading_shape + (4, 2)))
-
     with pytest.raises(ValueError, match=message):
-        snr_as_signal([tracker], ge_axis=ge_axis)
+        snr_as_signal(np.zeros(shape), ge_axis=ge_axis)
 
 
-@pytest.mark.parametrize("ge_axis", [2, -2])
+@pytest.mark.parametrize("ge_axis", [1, -2])
 def test_snr_as_signal_accepts_an_explicit_nondefault_state_axis(ge_axis: int) -> None:
-    tracker = _readout_tracker(np.array([1.0, 2.0, 4.0]))
-    transposed = _readout_tracker(np.array([1.0, 2.0, 4.0]), ge_axis=2)
+    sums = _symmetric_readout_sums(np.array([1.0, 2.0, 4.0]))
 
     np.testing.assert_array_equal(
-        snr_as_signal([transposed], ge_axis=ge_axis), snr_as_signal([tracker])
+        snr_as_signal(sums.swapaxes(0, 1), ge_axis=ge_axis), snr_as_signal(sums)
     )
 
 

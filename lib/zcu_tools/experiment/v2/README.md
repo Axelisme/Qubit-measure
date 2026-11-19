@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2`
 
-**Last updated:** 2026-11-11
+**Last updated:** 2026-11-20
 
 **讀者：** framework-dev。實驗 runtime、硬體量化與共用工具入口。
 
@@ -12,7 +12,10 @@
 
 ## v2 工具與實驗輔助
 
-`utils/` 擁有 sweep2array、round_zcu_*、merge_result_list、SNR、T1 sampling 與 tracker。硬體量化後的 sweep 必須保持有效點數與順序，collision 直接失敗。`tracker/` 提供 KMeansTracker 與 MomentTracker。
+`utils/` 提供 sweep2array、round_zcu_*、merge_result_list、SNR 與 T1 sampling。
+硬體量化後的 sweep 必須保持有效點數與順序，collision 直接失敗。
+`snr_as_signal` 從 `IQ(read, order=3)` 的十個總和分量計算 g/e pooled-sigma SNR。
+它保留 sweep 軸並移除 g/e 軸與總和分量軸。正值 `skew_penalty` 降低投影寬度不等或合計偏態較大的候選分數。
 
 Time sweep 座標使用 QICK 自身的 start/span 量化與 signed step 計算；scalar time 則使用
 所選 clock 的最近 cycle。不能用同一個 floor 近似兩者，否則 start 會偏一個 cycle，

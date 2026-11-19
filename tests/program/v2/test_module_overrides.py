@@ -57,7 +57,7 @@ def _reset_module(
     cfg: AbsResetCfg, overrides: dict[str, float | QickParam | None], use_factory: bool
 ):
     if use_factory:
-        return Reset("reset", cfg, **overrides)
+        return Reset("reset", cfg, terminal=None, **overrides)
     if isinstance(cfg, PulseResetCfg):
         return PulseReset("reset", cfg, **overrides)
     if isinstance(cfg, TwoPulseResetCfg):

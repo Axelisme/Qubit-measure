@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-11-01，raw-shot acquisition 入口與共用 runner
+**Last updated:** 2026-11-20，逐 shot 遮罩平均與回傳
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -110,12 +110,22 @@ with Schedule(signals, scope=context.scope) as sched:
 ### Schedule run acquisition
 
 `Schedule` 與 scan step 提供 `run_acquire(program, soc, ...)`、
-`run_acquire_summed(program, soc, processor=..., ...)` 與
+`run_acquire_summed(program, soc, reducer=..., ...)` 與
 `run_acquire_decimated(program, soc, ...)`，把轉換後的資料寫進 slot。
-`run_acquire_shots(program, soc, ...)` 則回傳 `program.get_raw()` 的逐 shot int64 buffers，
-不做轉換、不寫 slot，也不需要預建 buffer。四個方法都不建立 program。
-Caller 可傳入手寫或 TimelineBuilder 產生的 program，只需提供對應的同步 acquire 方法。
-Raw-shot 入口還要求 `get_raw()`；成功 acquire 後沒有 raw buffer 時拋出 `RuntimeError`。
+`run_acquire_shots(program, soc, ...)` 回傳 `ShotResult`，不轉換資料、不寫 slot，也不需要預建 buffer。
+`ShotResult.shots` 以 ADC channel 為 key，每個值是 `(points, reps, reads, 2)` 的 int64 IQ。
+`ShotResult.mask` 是 `(points, reps)` 的 bool 陣列，`True` 表示保留。沒有來源時全部為 `True`。
+取數不套用遮罩。Caller 決定怎麼處理被拒的 shot。
+四個方法都不建立 program。Caller 可傳入手寫或 TimelineBuilder 產生的 program，供應對應的同步 acquire 方法。
+Raw-shot 入口也要求 `get_shot_result()`。成功 acquire 後沒有 raw buffer 時拋出 `RuntimeError`。
+
+有[註冊遮罩來源](../../../program/README.md#registered-shot-masks)時，`run_acquire`
+將保留 shot 的 IQ 加總，再除以已完成輪次的總 shot 數。Converter 和 live update 都看不到來源消耗的讀取，
+也看不到只供遮罩使用的 ADC。`run_acquire` 拒絕原生 QICK `threshold` 與遮罩並用。
+`run_acquire_summed` 每輪將可見讀取及遮罩交給 reducer，由 reducer 更新累積狀態。
+`run_acquire_shots` 也省略來源消耗的讀取與只供遮罩使用的 ADC。
+`run_acquire` 與 `run_acquire_decimated` 在重試前使用 program 的 `check_shot_mask_options`。
+Program 在這個 precheck 拒絕帶遮罩來源的原生 `threshold` 或 decimated 取數。未提供 precheck 的 producer 視為沒有來源。
 
 `run_acquire_shots` 每次只執行一輪，`rounds` 省略或設為整數 1，其他值在入口拋出
 `ValueError`。多輪 raw shots 由 caller 的 host loop 重複呼叫。
@@ -133,7 +143,7 @@ program 層無前綴的 `acquire*` 只取數並回傳，不承擔 slot/live upda
 Schedule stop_condition。
 Integrated 的預設 converter 只接受單一 ADC、每 shot 單一 read，並將 IQ 轉成複數。
 多 ADC 或多 read 時拋出 `ValueError`，訊息列出 ADC 數與各 ADC 的 read 數，要求提供
-`RunOptions(converter=...)`。Summed 直接寫入累積總和。Decimated 的預設 converter
+`RunOptions(converter=...)`。Summed 直接寫入 reducer 的輸出。Decimated 的預設 converter
 只接受單一 ADC，將 IQ 轉成複數並保留全部 repetition／read／sample 軸；多 ADC 時
 拋出 `ValueError`，訊息列出 ADC 數並要求提供 converter。
 
@@ -194,7 +204,8 @@ Data stop 是正常完成，不設 scope event，也不標記 partial。
 
 `test_run_acquire.py` 經 Schedule 公開入口覆蓋三種 acquisition 的 simulator 路徑、
 slot/live update、converter、retry、data stop、取消、部分 round 與 callback 錯誤。
-`test_run_acquire_shots.py` 經 Schedule／ScheduleStep 覆蓋 raw buffer 回傳、無 slot 取數、
+`test_run_acquire_masks.py` 在模擬 SoC 上驗證讀取隱藏，以及回傳遮罩但不過濾 raw shot。
+`test_run_acquire_shots.py` 經 Schedule／ScheduleStep 覆蓋 `ShotResult` 回傳、無 slot 取數、
 native keyword 轉送、取消與 child release、stop observer 清理順序、retry、原始例外傳播，
 以及拒絕 slot policy、多輪與缺少 raw buffer 的失敗契約。
 `test_run_timeline.py` 以 deterministic transport 跑 emit program 的一般 QICK

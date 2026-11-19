@@ -19,13 +19,14 @@ from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal, snr_checker
-from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.program.v2 import (
+    IQ,
     Pulse,
     Readout,
     Reset,
     TimelineBuilder,
     TimelineProgramV2,
+    shot_sums,
     sweep2param,
 )
 from zcu_tools.utils.process import minus_background, rotate2real
@@ -390,7 +391,6 @@ def run_freq_gain(
         gain_sweep = cfg.gain
         gain_param = sweep2param("gain", gain_sweep)
         cfg.readout.set_param("gain", gain_param)
-        tracker = MomentTracker()
 
         builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
         builder.add_loop("ge", 2)
@@ -405,19 +405,18 @@ def run_freq_gain(
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
         builder.emit(Readout("readout", cfg.readout))
         program = builder.build()
-        sched.run_acquire(
+        sched.run_acquire_summed(
             program,
             soc,
+            reducer=shot_sums(program, [IQ("readout", order=3)]),
             rounds=cfg.rounds,
             options=RunOptions(
                 retry=retry,
-                converter=lambda _raw: snr_as_signal(
-                    [tracker],
-                    ge_axis=1,
+                converter=lambda sums: snr_as_signal(
+                    sums,
                     skew_penalty=cfg.skew_penalty,
                 ),
             ),
-            trackers=[tracker],
         )
 
     # Return the moment-derived score; raw shots and IQ moments are not retained.

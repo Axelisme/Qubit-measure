@@ -95,7 +95,7 @@ Linear 輸出 [g,e]，旋轉後實部大於 threshold 判 excited，等於時判
 Centroid3 輸出 [g,e,f]，每 shot 選 Euclidean 距離最近的中心，等距時依 g/e/f 順序選第一個，沒有拒判區。
 F 不代表 circle 的 other。
 普通 `acquire` 保留原生 IQ 與 QICK threshold／angle，不提供 host classify 或 herald option。
-分類取數的 processor、累加與保存分工見下節 [Shot sums 與 heralding](#shot-sums-與-heralding)。
+分類取數的 reducer、累加與保存分工見下節 [Shot sums 與 heralding](#shot-sums-與-heralding)。
 使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 三態 reference 只用 acquired IQ 與 preparation labels 建立中心及 training confusion。
@@ -106,11 +106,11 @@ Training confusion 包含準備污染，correction 回到 preparation-label 座�
 STIRAP 的 [delay](../../zcu_lab/v2/twotone/stirap/delay/guide.md)、[amplitude](../../zcu_lab/v2/twotone/stirap/amplitude/guide.md)、[detuning](../../zcu_lab/v2/twotone/stirap/detuning/guide.md) 與單頻 [g↔f Raman](../../zcu_lab/v2/twotone/raman_gf/guide.md) 從該次 run 保存的 readout cfg 要求 centroid3。
 缺少 classifier、型別不符或未知 ADC 明確失敗，不退回 circle、不從 live library 補值、不讀 simulator truth。
 校準沿 Spec、native cfg、library 與 data.h5 的 run cfg 保存，不另建 experiment calibration storage。
-Reference 分析與 centroid3 processor 共用 `utils.shot_classification` 的最近中心規則。
+Reference 分析與 centroid3 分類共用 `utils.shot_classification` 的最近中心規則。
 
 2026-10-29，使用者對三態校準交接選 A，答「3A」：新增 readout classifier 型別，由三態 reference Apply 到 library，後續實驗讀 saved run cfg。
 同日，對沿用 QICK 的 float64 I/Q 分量或先轉成 complex128 的選項，使用者回答：「我想推進Program設計一致性，選A」。
-Processor 接收 I/Q 分量，需要複數運算時自行轉換。`acquire_decimated` 不變。
+Reducer 接收 I/Q 分量，需要複數運算時自行轉換。`acquire_decimated` 不變。
 原先每 ADC 一個 processor、單一 payload 軸與框架取平均的方案，由 2026-10-30 的 shot-sums 契約取代。
 
 單 qubit GE Primary 提出只有中心的 circle，Post 提出含中心、radius 與 matrix 的完整 circle。
@@ -144,25 +144,35 @@ Caller 自行準備原生 projection 參數，readout 不提供缺少校準時�
 
 ### Shot sums 與 heralding
 
-`acquire_summed` 接受單一 processor，同時交付所有已宣告 ADC 的正規化 IQ。
-輸入以 ADC channel 為 key，每個陣列是 float64 `(points, reps, reads, 2)`。
-Processor 每點回傳一個總和陣列，框架只累加已完成 round 的回傳值，不除以 reps 或 rounds。
-硬體與模擬使用同一條 processor 與累加路徑。
+`acquire_summed` 與 Schedule 的 `run_acquire_summed` 以關鍵字 `reducer=` 接收單一 `ShotReducer[State]`。
+Reducer 是累加邏輯，state 是被累加的資料。State 由框架持有，reducer 本身不保存它。
+框架在第一輪前以 `start(points)` 建立 state。`points` 是不含 reps 的迴圈大小乘積，沒有掃描時為 1。
+每輪完成後，框架呼叫 `add(state, shots, mask)` 並保存回傳的新 state。
+硬體與模擬用同一條路徑。取消時捨棄未完成的輪次，保留最後完成那一輪的 state。
+Round hook 與最終結果都取自 `output(state)` 的 float64 `(points, *axes)`。框架只還原點的維度，不另做總和或平均。
+Reducer 收到 ADC-keyed float64 `(points, reps, reads, 2)` IQ（已除以積分長度，未扣 IQ offset）和 bool `(points, reps)` 遮罩。
+來源消耗的讀取及只供遮罩使用的 ADC 不交給 reducer。沒有來源時遮罩全為 True。
+不可相加的統計（例如 KMeans）以自己的 state 表達，`add` 讀得到前面累積的 state。
+`shot_sums`、`chain_sweep_sums`、`thermal_chain_sums`、`chain_cycle_sums` 與 `rpi_sums` 都從 `(points, *axes)` 的零陣列開始，各自決定怎麼使用遮罩。
+遮罩的來源與其他下游見 [Herald reset 與逐 shot 遮罩](#herald-reset-與逐-shot-遮罩)。
 
 讀出軸只有 `Classify` 與 `IQ`。
-Classify 把一次讀出的分類結果轉成 k 維 one-hot；IQ 把一次未分類讀出轉成 `(1, I, Q, I², IQ, Q²)`。
-IQ 的六個分量直接保存二階矩，不需重複同一次讀出來取得二階特徵。
-Processor 對每個掃描點計算 `Σ_shots v₁ ⊗ v₂ ⊗ …`，輸出形狀是 `(points, *axes)`。
+Classify 把一次讀出的分類結果轉成 k 維 one-hot。`IQ(read)` 預設將一次未分類讀出轉成 `(1, I, Q, I², IQ, Q²)`，不需重複同一次讀出來取得二階特徵。
+`IQ(read, order=3)` 加上 `(I³, I²Q, IQ², Q³)`，共十個分量。Readout 與 JPA optimization 的 live 與最終分數都從已完成 rounds 的總和計算，不另維護統計狀態。
+取數層沒有 tracker：`TrackerMixin`、`MomentTracker` 與 `KMeansTracker` 已刪除。
+原本用 tracker 的 9 處（jpa 4 個、`ro_optimize` 4 個、`calibration_acquire`）改用 `run_acquire_summed` 加 `IQ(read, order=3)`。
+`read_axes.split_cubic_sums` 將十個總和解成計數與每發原始矩。`snr_as_signal` 用這些矩算出 sample covariance 與三階中心矩，再算 SNR 與 skew penalty。
+`shot_sums` 對每個掃描點計算 `Σ_kept v₁ ⊗ v₂ ⊗ …`，只加總遮罩保留的 shot，輸出形狀是 `(points, *axes)`。
 軸順序由作者列出的讀出軸決定。同一次讀出仍可列多次，以保存特徵的外積。
 所有 IQ 軸都取第 0 格時得到計數；只有 Classify 軸時，整個輸出就是各聯合類別的計數。
 
 讀出以字串 label 指定，不要求作者計算 ADC 的 read index。
 `shot_sums(prog, axes)` 在 compile 後、取數前解析 label。
 Timeline 發射用 emit tag，未標記的發射以 module 名稱識別。
-Label 必須唯一指向一次讀出發射，否則在取數前報錯。
+Label 與 ADC read index 只在可見的讀取中解析。Label 必須唯一指向一次可見的發射，否則在取數前報錯。
 Classifier 取自該 readout 的 cfg 或作者明確提供的 override，不查 live library。
 
-Result 原樣保存 processor 的 float64 總和，不在 run 中換成平均或比例。
+Result 原樣保存 reducer 的 float64 總和，不在 run 中換成平均或比例。
 分析與繪圖從計數和總和計算比例、平均 IQ 或條件平均。
 Schedule 的 `run_acquire_summed` 讓 caller 以 `RunOptions(converter=...)` 選擇 live signal；未提供 converter 時原樣寫入總和，不把類別計數當作 IQ。
 搬遷後的實驗拒絕缺少 counts／sums 的舊格式，不從舊比例推算計數，也不加相容路徑。
@@ -186,7 +196,7 @@ Classify 與雙 qubit heralded 實驗保留原分類契約。
 2026-11-09 註：單 qubit heralding 的五個實驗、對應 recipes 與 `zcu_tools.analysis.herald_transfer` 已移除。
 上兩段的自校準、C 指標、即時圖與存檔軸是歷史記錄，catalog 不再提供單 qubit heralding。
 使用者於 2026-11-09 說：「舊 heralding 我完全沒用過也沒讀過，可以直接刪掉。」
-`IQ` 六分量讀出軸、`shot_sums`、`split_sums` 與 Classify 的契約不變，雙 qubit heralded 實驗保留原分類契約。
+當時保留 `IQ` 六分量讀出軸、`shot_sums`、`split_sums` 與 Classify，雙 qubit heralded 實驗保留原分類契約。
 
 使用者於 2026-10-30 要求單一 processor：「H1 , 我認為processor就不要每個adc分開給，統一只給一個就行」。
 同日明定分類時機：「分類請不要在analyze裡做，浪費記憶體，分類請在processor裡做，將nread, 2的資料轉成M維資料」。
@@ -203,8 +213,8 @@ Result 改存所有 herald 類別的總和，通過比例改由計數衍生，�
 1. IQ 使用 `(1, I, Q, I², IQ, Q²)` 六個分量。
    使用者提出：「讓iq模式的維度變成[1,i1,q1,1i,1q,ii,iq,qi,qq]就好了」。
    對將重複的一階與 IQ／QI 分量去重成六個分量的建議，使用者答「a」。
-2. IQ 特徵固定二階，不預先加入三階。
-   使用者裁決：「先固定2階，3階有需要再考慮支援」。
+2. IQ 特徵預設二階，維持六分量的形狀。
+   2026-11-02 使用者裁決：「先固定2階，3階有需要再考慮支援」。三階偏態校正需要額外分量，因此 SNR caller 明填 `order=3`。
    這裡的階數不是態數，`n_states=2/3` 契約不變。
 3. IQ 與 Classify 保留為兩種軸，不合併成 Classify。
    使用者裁決：「實作上，我考慮你的簡單方案，因為使用IQ與Classify的實驗似乎都分開了？至少在使用時就知道。」
@@ -230,6 +240,9 @@ T1、Amp Rabi、Len Rabi、Ramsey 與 Echo 沿用普通版 writeback 目標與�
 這五份 guide 已於 `188409d1d`（Remove single-qubit heralding experiments and herald_transfer）隨實驗刪除。
 上方第 4 至 6 項中只適用單 qubit heralding 的自校準與 C 指標規則，目前沒有實驗使用。
 
+2026-11-20 註：2026-10-29「上層使用新實驗組」的放置選擇已推翻。Post-selection 改由既有 `reset` 欄位選用 herald reset 模塊，見下方 [Herald reset 與逐 shot 遮罩](#herald-reset-與逐-shot-遮罩)。
+同句的「讓底層支援post-selection」與不做 active reset 仍有效。
+
 2026-11-20 註：單 qubit T1 的二階矩方法以 `twotone/t1_cov` 恢復，上方的自校準、C 指標與第 4 至 6 項規則重新適用於這個實驗。
 二階矩方法改稱 cov；heralding 只指分類後的 post-selection。
 兩次讀出改名為 `pre_readout` 與 `post_readout`，存檔軸是 `pre_readout_features` 與 `post_readout_features`，tag 是 `twotone/ge/t1_cov`。上文的 herald／signal 名稱是歷史記錄。
@@ -243,6 +256,87 @@ T1、Amp Rabi、Len Rabi、Ramsey 與 Echo 沿用普通版 writeback 目標與�
 依賴沿用 [[0072]] 的分層與 `.importlinter` C8、C15、C16。
 Experiment 使用 program 的取數能力，lab core 不依賴 GUI，framework 不反向載入 lab。
 本次修改不改變真實 acquire 與模擬的執行邊界，也不新增依賴方向。
+
+#### Herald reset 與逐 shot 遮罩
+
+本段的 heralding 只指分類後的 post-selection，命名見上方 2026-11-20 的 t1_cov 註。
+
+**選用。** 實驗沿用既有 `reset` 欄位選用 herald，不另加 herald 欄位或 `_heralded` 版本。
+`ResetWithHeraldCfg` 是普通 reset 加上 `reset/herald` 與 `reset/mux_herald` 的 union；`Reset.Cfg` 不含 herald 類型。
+目前只有 plain `two_qubit/rb` 的 reset 欄位收 herald。它的終端讀取是 mux，因此只收普通 reset 與 `reset/mux_herald`。
+`twotone/t1_cov` 使用 `Reset.Cfg`，不收 herald：遮罩會改變它的聯合二階矩，而 cov 已用第一次讀取自校準。
+選用 herald 時，Result 的形狀與存檔欄位和沒有 herald 時相同。
+Herald reset 只留下通過的 shot，不保存被排除 shot 的類別。
+雙 qubit 的 9 個 `_heralded` 實驗保留，它們存 herald 加終端讀取的 81 類計數，供需要全部 herald 類別的條件分析使用。
+
+**Herald 模塊。**
+
+| type | readout | `keep` |
+| --- | --- | --- |
+| `reset/herald` | `readout/pulse` | 一個態，例如 `g` |
+| `reset/mux_herald` | `readout/mux` | tone 在完整 tones 中的位置 → 態；鍵是加引號的十進位字串，例如 `{'0': g, '2': g}` |
+
+- `readout` 是 library key 或 inline，設定必須和實驗的終端讀取完全相同。Caller 用 `Reset(name, cfg, terminal=readout)` 時，herald 與終端發射共用傳入的 readout 物件，普通 reset 則忽略它。也可用 herald cfg 的 `build(name)` 建立模塊，並發射它的 `readout` 作為終端讀取。
+- 分類用 readout cfg 的 classifier。Circle 的態是 g、e、other，需要 radius；linear 的態是 g、e；centroid3 不能用於 herald。
+- `keep` 列出的每個 tone 都分類成指定的態，這一發才保留。所有 ro ch 一起保留或一起排除。
+- 可選的 `prepare` 是一個 `pulse`、`reset/pulse`、`reset/two_pulse` 或 `reset/bath`，library key 或 inline，不可以是 herald。
+- Herald 沒有自己的 `post_delay`，herald 讀取沿用 readout 的 `pre_delay` 與 `post_delay`。
+- 播放順序是 `prepare` → herald 讀取 → 實驗序列 → 終端讀取。
+- Mux `keep` 的鍵不是非負十進位字串時，cfg 驗證報錯。
+- 以下情況在 build 報錯並寫出原因：readout 與終端不同、herald readout 參數有掃描、`keep` 指到不存在的 tone、tone 沒有 classifier、circle 缺 radius、`keep` 的態不屬於該 classifier、herald 在各可行路徑上消耗的實體讀取不同。
+
+**遮罩。**
+
+- 遮罩是 bool `(points, reps)`，每一輪算一次。所有 ro ch 共用同一個遮罩，對每個 ch 的 `(points, reps, reads_ch, 2)` 廣播；遮罩沒有讀取軸。
+- 遮罩機制屬於 `zcu_tools.program` 的取數層，和 round hook 同層，不屬於 module。Module 與作者只註冊遮罩來源，註冊位置與 owner 見 [[0083]] 的〈Builder 與 Schedule 的職責〉。
+- 每個來源逐 ADC 宣告自己消耗的實體讀取。註冊拒絕負數與非整數索引，取數對照編譯後的讀取數檢查上界。每輪來源收到這些讀取已除以積分長度、未扣 IQ offset 的 IQ，回傳自己的遮罩。
+- 多個來源照註冊順序執行，以 AND 合併：所有來源都保留的 shot 才保留。
+- 沒有來源時遮罩全為 True，平均、reducer 與 shots 的輸出和沒有遮罩機制時逐位元相同。
+
+**下游。**
+
+- 平均（`acquire`、`run_acquire` 與 round hook）：每點輸出 `Σ m·x / N`，m 以 0／1 計。x 是逐 shot 除以積分長度、扣 IQ offset 後的值，N 是 reps 乘以已完成的 rounds。有來源時平均改在 host 上逐 shot 算。接受率留在平均值的幅度裡，不另外存。
+- Reducer：每輪收到遮罩，見本節開頭。`shot_sums` 只加總保留的 shot。
+- 分類計數：機率除以計數總和，是「通過 herald 的 shot 裡」的條件機率。例如 RB 的 joint00 存活率是 herald 兩個 tone 都是 g 時的存活率。接受率等於計數總和除以 reps×rounds，不另外存。點的完整性是每一輪都跑完。目前只有 plain `two_qubit/rb` 的分析用這條規則，其他 plain two-qubit 實驗接上 herald 時再改。
+- `run_acquire_shots` 回傳 `ShotResult`：`shots` 是可見讀取的原始 int64 積分 IQ `(points, reps, reads, 2)`，`mask` 是 bool `(points, reps)`。框架不套用遮罩，被排除的 shot 仍在 `shots` 裡，用法由實驗決定。
+
+**Herald 讀取對實驗隱藏。**
+
+- 硬體觸發次數照實計算，包含 herald 讀取。
+- Mux herald 讀取觸發該 readout 每個 tone 的 ro ch，`keep` 沒列出的 tone 也一樣。每個 ch 都拿掉這一次讀取。
+- Readout label、讀取索引與 `shot_sums` 的讀取數檢查都在拿掉來源讀取後的邏輯讀取上解析。實驗的 converter、label 與讀取索引不用改。
+- 平均、reducer 與 `ShotResult` 都不含來源消耗的讀取。某個 ADC 的讀取全被消耗時，這些輸出省略這個 ADC。`get_raw()` 仍回傳含全部 trigger 的實體 buffer。
+
+**不支援的組合。** Program 有遮罩來源時，decimated 取數報錯，因為時間軌跡沒有逐 shot 的積分值可分類。
+`acquire` 與 `run_acquire` 收到 QICK 原生 `threshold` 時在進入點報錯；沒有來源時 `threshold` 照舊。
+Herald readout 參數有掃描時在 build 報錯，因為 classifier 只在一組設定下校準過。
+
+**模擬。** FTF 沿用逐 shot 的 IQ 抽樣。量子演化照舊按 projective outcome 分支算一次，herald 與終端讀取共用同一發的 outcome 歷史。
+有遮罩來源或 reducer 時，模擬器每輪產生逐 shot IQ，交給和硬體相同的遮罩、平均與 reducer 路徑。
+
+**裁決。**
+
+- 放置：2026-11-19，使用者說：「H我自己的想法是，如果是reset模塊，那就放棄可以取得多餘的資訊，比如說把分類非g的shot值都設定成0來使其對平均沒有貢獻。對於想要利用更多資訊的實驗，保持分化是合理的。」2026-11-20，使用者對整批建議回答：「好，我沒問題了，全部採用建議」。
+  這推翻 2026-10-29「上層使用新實驗組，比如heralding/*」的放置選擇。一般實驗不必再各做一個 herald 版本；9 個 `_heralded` 實驗保留，因為改成 reset 模塊會失去 81 類 herald×終端組合的條件分析。
+- 遮罩在取數層、所有下游統一收：2026-11-19，「我傾向統一的處理方式，統一知道權重的存在，而也代表權重的Mixin要在比較底層，作為通用底層功能存在，而不屬於Module層級。」
+- 多個來源與 0／1 值：2026-11-20，「2我認為可以支援多次register_shot_weights，照順序執行，並合併mask，考慮這這個機制，我傾向mask先只有0/1就好，用int?目前沒想出用float的需求，看你的想法。」型別 bool 是 agent 依「看你的想法」做的選擇：值只有兩種，合併直接用 `&`，乘上 IQ 時自動轉型。
+- 遮罩形狀：2026-11-20，使用者提出：「關於mask，我擔心的是mux與多個ro ch的多次readout，據我所知，不同ro ch儲存欄位是分開的，那mask的形狀就需要討論一下。」對以 shot 為單位、所有 ro ch 共用的選項，使用者回答「M1」。
+- 平均公式：2026-11-19，「比如說把分類非g的shot值都設定成0來使其對平均沒有貢獻。」「由於掃flux本來就會正規化，所以都沒差……2我認為先不用存，但平均就能分析出來。」「平均公式可以調查一下設計張力，沒問題就採用。」張力調查的結論是：在長度正規化與扣 offset 之後才記 0，結果不受影響；在原始積分上記 0，扣 offset 後會變成 −offset。
+- 條件計數：2026-11-19，對機率除以計數總和的選項，使用者回答「5a」。除以 reps×rounds 會讓機率含接受率，現有分析的分母都要改。
+- Shots 帶遮罩：2026-11-19，「run_acquire_shots我傾向遮罩，應該說，怎麼使用遮罩應該是各實驗的自由。」
+- 讀取隱藏與各下游的透明：2026-11-19，「3希望能設計的乾淨些，實作前請與我討論具體細節。」「6為什麼不支援run_acquire_shots？為什麼不支援tracker？作為一個獨立於processor的機制，我希望能保持彼此透明，如果不能，我希望瞭解原因。」2026-11-20，使用者確認契約：「herald spec 的測試接縫和 contracts 我確認」。
+  ADC 讀取全被消耗時省略該 ADC、帶來源時拒收 `threshold` 這兩條補充，使用者回答「B, 我傾向一次就設計完整。23可以」（2026-11-20），其中「2」同意這兩條。
+- Herald cfg：「也許herald cfg可以設定要留哪種。」（2026-11-19）「關於reset/herald，post_delay不是已經在readout裡就有了嗎？pre_reset是為什麼需要呢？……mux與一般的readout要用同一個module type還是不同的？我以為通常都是不同的。mux的module通常都是特化。」（2026-11-19）「pre_reset應該可以不只是reset type，普通的qubit pulse或onetone pulse應該都可以達到穩定ge分佈的效果。」（2026-11-20）對只放一個 `prepare` 的選項：「C，目前沒想到需要多個prepare的場景，那就先簡單做法。」（2026-11-20）
+- Mux `keep` 的鍵：library 為了和 JSON 相容，mapping 的鍵只收字串。對鍵加引號的寫法，使用者回答「2-1」（2026-11-20）。
+- 刪除 tracker、改用顯式 reducer 與 state：2026-11-20 的語音輸入原樣保留，「城市」讀作「程式」，「stage」讀作 state，「显示」讀作「顯式」。
+  「Jiki 基本没问题，但我有发现一个设计上的取舍。我发现有 processor 机制之后，我好像不需要 tracker 机制，后者是不是可以删掉了？」
+  「但这两个东西的定位重复了，我不是很想要重复定位的东西出现在城市里，这对于使用者跟维护者来说都是负担。无单调缺可，就必须放弃。一些不可加的统计能力，比如说 K-means，K-means，所以这是我烦恼的。」
+  「那我觉得还是用比较显示的方法比较好，也就是一个 reducer，然后再一个 stage，然后者是状态，前者是累加器，这个抽象会比较合理一点，比较自然一点。」
+  對在本任務一起做與關鍵字由 `processor=` 改為 `reducer=` 兩項建議，使用者回答「采用建议」。
+  「Jiki」讀作「幾題」，表示拆票時的三題都接受建議，其中一題是分析只先改 plain `two_qubit/rb`。
+- 模擬：2026-11-19，使用者要求：「7不要逐shot模擬，太慢了，請使用一些統計手段來等效生成」。實測顯示，FTF 預設參數下讀取窗口內至少躍遷一次的機率約 21%，只用高斯會讓三階矩與誤判率失真；逐 shot 路徑在 100000 reps 暖機後約 0.2 s。使用者看過數字後回答：「shot抽樣就e吧」（2026-11-20）。
+
+選項比較與被否決的做法見 [Herald 改為 reset 模塊與逐 shot 遮罩](../discussions/2026-11-20-herald-reset-shot-masks.md)。
 
 ### Owner 不變，caller 不重建舊配置
 

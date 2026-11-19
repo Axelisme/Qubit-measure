@@ -7,7 +7,12 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.experiment.scope import Scope
-from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import (
+    RunOptions,
+    Schedule,
+    ShotResult,
+    SignalBuffer,
+)
 from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     CancelFlagProtocol,
@@ -25,9 +30,10 @@ class ShotProducer:
     """Expose distinct averaged and retained shot data at the producer boundary."""
 
     def __init__(self) -> None:
-        self.shots: list[NDArray[np.int64]] | None = [
-            np.array([[11, -3], [7, 5]], dtype=np.int64)
-        ]
+        self.shots: ShotResult | None = ShotResult(
+            shots={0: np.array([[[[11, -3]], [[7, 5]]]], dtype=np.int64)},
+            mask=np.array([[False, True]]),
+        )
         self.calls = 0
         self.raw_reads = 0
         self.action: Callable[[CancelFlagProtocol], None] | None = None
@@ -56,7 +62,7 @@ class ShotProducer:
         round_hook(1, averaged, cancel_flag)
         return averaged
 
-    def get_raw(self) -> list[NDArray[np.int64]] | None:
+    def get_shot_result(self) -> ShotResult | None:
         self.raw_reads += 1
         return self.shots
 

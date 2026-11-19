@@ -310,7 +310,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                     break
 
                 # Write a full shot cloud only after this point finishes.
-                raw_iq = raw_shots_to_signal(program)
+                raw_iq = raw_shots_to_signal(shots, program)[0]
                 expected_point_shape = (cfg.shots,)
                 if raw_iq.shape != expected_point_shape:
                     raise ValueError(

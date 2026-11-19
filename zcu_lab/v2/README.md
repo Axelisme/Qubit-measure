@@ -36,7 +36,7 @@
 | Local Z | [`two_qubit/local_z`](two_qubit/local_z/guide.md) | [`two_qubit/local_z_heralded`](two_qubit/local_z/guide_heralded.md) |
 | Paired RB／IRB | [`two_qubit/rb`](two_qubit/rb/guide.md) | [`two_qubit/rb_heralded`](two_qubit/rb/guide_heralded.md) |
 
-非 heralded 保存 terminal F1/F2 的 9 類計數。Heralded 加一次讀出，保存 herald F1/F2、terminal F1/F2 的 81 類計數，分析 herald g,g 與 e,e 兩組。兩版都可設 `reset`，預設 None。Herald pass fraction 是 g,g 接受率，不是 ground-state purity。採樣與保存量的計算見 [FTF guide](two_qubit/guide.md#採樣數與成本)。
+一般入口保存 terminal F1/F2 的 9 類計數。`two_qubit/rb` 可用 `reset/mux_herald` 在序列前讀出並篩選 shot，仍只保存通過篩選的 9 類終端計數。`_heralded` 入口保存 herald F1/F2、terminal F1/F2 的 81 類計數，分析 herald g,g 與 e,e 兩組。兩版的 `reset` 預設 None。Herald pass fraction 是 g,g 接受率，不是 ground-state purity。採樣與保存量見 [FTF guide](two_qubit/guide.md#採樣數與成本)。
 
 ## 套件邊界
 
@@ -75,7 +75,7 @@ Amp/Len Rabi、Echo 與 Ramsey 的 core 直接呼叫 first-read 數值 fitter，
 五個 core 各自在 `run()` 建立及更新 all-number 與 first-read 的 live 曲線。
 [chain/\_cycle.py](chain/_cycle.py) 保留共用的 CycleSums 存檔變數、IQ 投影與檢查文字格式，模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
 
-`v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
+`v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化與 SNR 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 
 Save／MCP 透過單一 `summarize_analysis` 轉換 native 結果，不使用已退休的實驗 serializer 或結果 base。
 結果根為 dataclass、pydantic model 或字串 key 的 Mapping，summary 是 strict JSON object，key 沿用原生欄位名。

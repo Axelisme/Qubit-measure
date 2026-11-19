@@ -7,10 +7,11 @@ import pytest
 from numpy.typing import NDArray
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program import v2
-from zcu_tools.program.acquisition import ShotSumProcessor
+from zcu_tools.program.acquisition import ShotReducer
 from zcu_tools.program.v2.modules import ConstWaveformCfg, PulseReadout
 
 from tests.program._profiles import load_soccfg
+from tests.program._shot_reduction import reduce_round
 
 
 def chain_readout() -> PulseReadout:
@@ -38,7 +39,9 @@ def chain_program(n: int, *, reps: int = 1, points: int = 1) -> v2.TimelineProgr
     return builder.build()
 
 
-def processor(prog: v2.TimelineProgramV2, read: str = "sample") -> ShotSumProcessor:
+def processor(
+    prog: v2.TimelineProgramV2, read: str = "sample"
+) -> ShotReducer[NDArray[np.float64]]:
     return v2.chain_sweep_sums(prog, read)
 
 
@@ -91,7 +94,7 @@ def test_chain_statistics_match_within_dwell_reference_and_augmented_sums(n: int
             reference_vector(iq[0, 0])[:9],
             [1, 7.5, 16, 77.5, 162.5, 341, 224 / 3, 941 / 3, 989 / 3],
         )
-    actual = processor(prog)({0: iq})
+    actual = reduce_round(processor(prog), {0: iq})
     assert actual.shape == (2, 12, 12)
     assert actual.dtype == np.float64
     np.testing.assert_allclose(actual, expected, rtol=1e-13)
@@ -110,7 +113,7 @@ def test_chain_requires_at_least_sixteen_reads_at_construction(n: int):
 def test_processor_rejects_changed_read_count_or_iq_shape(shape: tuple[int, ...]):
     process = processor(chain_program(16))
     with pytest.raises(ValueError, match=r"ADC 0.*expected.*16, 2.*actual"):
-        process({0: np.ones(shape, dtype=np.float64)})
+        reduce_round(process, {0: np.ones(shape, dtype=np.float64)})
 
 
 def test_missing_read_label_lists_expected_actual_and_available_labels():
@@ -146,7 +149,7 @@ def test_repeat_chain_acquisition_adds_dwell_counts_across_points_reps_and_round
             builder.delay_auto()
         prog = builder.build()
         sums = prog.acquire_summed(
-            env.soc, processor=processor(prog, "readout"), rounds=2, progress=False
+            env.soc, reducer=processor(prog, "readout"), rounds=2, progress=False
         )
         expected = np.zeros((2, 12, 12), dtype=np.float64)
         expected[:, 0, 0] = 6
