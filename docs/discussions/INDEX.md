@@ -125,6 +125,7 @@
 - 2026-11-20 [Timeline 共用的編譯期狀態：PathState 與 capture／restore](2026-11-20-timeline-path-state.md)：共用抽象。Branch 與 Repeat 改用 frozen `PathState`，capture／restore 一次處理全部隨路徑變化的狀態，合併規則留在各結構；不按 timeline 切，也不用指標切換，因為狀態屬於路徑且 QICK macro 就地讀寫 program 狀態。
 - 2026-11-20 [Timeline 編譯器推算每發 ADC 讀取數](2026-11-20-timeline-read-counts.md)：路徑會合規則。編譯器在 macro 包裝層計數 ADC trigger，每個 Branch 出口逐 ADC 要求各 case 相同，固定 Repeat 乘次數，變動次數 Repeat 不能讀；自動寫入每發讀取數，`set_reads_per_shot` 只核對；否決逐條路徑比對整發總數。
 - 2026-11-20 [CZ 優化候選用記憶體 arb 播放](2026-11-20-in-memory-arb-waveforms.md)：執行期波形。候選直接交 I/Q 樣本給 program，不寫檔；永久保存仍用既有 arb 資產。
+- 2026-11-20 [Timeline 往後跳轉與 two-qubit RB 分塊](2026-11-20-timeline-forward-jumps.md)：控制流範圍。跳轉限於 body 最外層，label 合併路徑狀態；RB 採板上分塊掃 depth，由 agent 代裁，待使用者覆核。
 
 ## Cfg 與表單
 

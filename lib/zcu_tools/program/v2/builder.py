@@ -457,6 +457,40 @@ class TimelineBuilder:
         """
         self._record(lambda prog: prog.join(*sources, into=into))
 
+    def label(self, label: str) -> None:
+        """Record a unique nonempty label at the current top-level body position.
+
+        Build merges incoming paths here. Duplicate names, incompatible states
+        and placement in Repeat or Branch raise ValueError at build. Recording
+        after build raises ValueError immediately.
+        """
+        self._record(lambda prog: prog.label(label))
+
+    def jump(self, label: str) -> None:
+        """Record an unconditional transfer to a later top-level body label.
+
+        Missing/backward targets, unreachable actions and nested transfers raise
+        ValueError at build. Recording after build raises ValueError immediately.
+        """
+        self._record(lambda prog: prog.jump(label))
+
+    def cond_jump(
+        self,
+        label: str,
+        arg1: str,
+        test: str,
+        op: str | None = None,
+        arg2: str | int | None = None,
+    ) -> None:
+        """Record a conditional transfer to a later top-level body label.
+
+        arg1 names a register. Optionally apply op (+, -, >>, &) with arg2,
+        a register name or integer literal. test is Z, NZ, S or NS. Build checks
+        both edges and raises ValueError for other tests, missing or backward
+        labels and nested transfers. After build, recording raises ValueError.
+        """
+        self._record(lambda prog: prog.cond_jump(label, arg1, test, op, arg2))
+
     def delay_by_timeline(self, *, timeline: str | None = None) -> None:
         """Record reference advance to the selected end; unknown names fail at build.
 

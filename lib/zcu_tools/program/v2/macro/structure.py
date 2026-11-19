@@ -12,6 +12,7 @@ from qick.asm_v2 import (
     WriteWmem,
 )
 
+from ..ir.compiled_stream import SOURCE_END, SOURCE_START
 from ..table_param import TableRawParam
 
 _WAVE_FIELDS = ("freq", "phase", "env", "gain", "length", "conf")
@@ -26,9 +27,9 @@ class SourcePulse(Pulse):
     """
 
     def translate(self, prog) -> None:
-        prog.record_meta(type="SOURCE_START", name=self.source_name)
+        prog.record_meta(type=SOURCE_START, name=self.source_name)
         super().translate(prog)
-        prog.record_meta(type="SOURCE_END", name=self.source_name)
+        prog.record_meta(type=SOURCE_END, name=self.source_name)
 
 
 class MarkedOpenLoop(OpenLoop):

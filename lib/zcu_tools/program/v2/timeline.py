@@ -7,7 +7,9 @@ from typing import TypedDict, override
 
 from qick.asm_v2 import (
     AsmV2,
+    CondJump,
     ConfigReadout,
+    Jump,
     Macro,
     OpenLoop,
     Pulse,
@@ -17,6 +19,12 @@ from qick.asm_v2 import (
 )
 
 from ._timeline_bounds import CycleBounds, FixedLoopIndex, ProducerBounds
+from ._timeline_jumps import (
+    TimelineJump,
+    TimelineJumps,
+    TimelineLabel,
+    link_author_labels,
+)
 from ._timeline_macros import (
     BranchCases,
     FixedRepeatLoop,
@@ -136,7 +144,6 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._building_body = False
         self._timeline_default: str | None = None
         self._branch_serial = 0
-        self._branch_cases: list[BranchCases] = []
         self._emission_serial = 0
         self._emission_scope: tuple[int, int] | None = None
         super().__init__(*args, **kwargs)
@@ -161,6 +168,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         for macro in self.macro_list:
             self._observe_time_producers(macro)
         super()._make_asm()
+        link_author_labels(self)
         self._time_bounds.audit(self)
         for ch, count in self._timeline_book.read_counts.items():
             self.ro_chs[ch]["trigs"] = count
@@ -198,9 +206,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         ]
         for frame in self._timeline_book.repeats:
             values.extend(frame.external.values())
-        return self._timeline_book.pinned | {
-            value.register for value in values if isinstance(value, RuntimeEnd)
-        }
+        return self._timeline_book.pinned.union(
+            (value.register for value in values if isinstance(value, RuntimeEnd)),
+            *self._timeline_jumps.live.values(),
+        )
 
     def _observe_time_producers(self, macro: Macro) -> None:
         if isinstance(macro, PreparedTimelineMacro):
@@ -250,9 +259,67 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         inputs, including pulses supplied directly rather than through pulse().
         Other macros pass through unchanged.
         """
+        if self._building_body and not isinstance(macro, (TimelineJump, TimelineLabel)):
+            self._timeline_jumps.require_reachable()
         if isinstance(macro, Pulse) and not isinstance(macro, TimelineObservedPulse):
             macro = TimelineObservedPulse(self._timeline_book, macro)
         super().append_macro(macro)
+
+    @override
+    def extend_macros(self, asm: AsmV2) -> None:
+        """Append a native ASM snippet, rejecting actions in unreachable body code."""
+        if self._building_body and asm.macro_list:
+            self._timeline_jumps.require_reachable()
+        super().extend_macros(asm)
+
+    @override
+    def label(self, label: str) -> None:
+        """Define a unique nonempty label at the current top-level body position.
+
+        Forward transfers to label and reachable fall-through merge here. Build
+        raises ValueError for an invalid position, duplicate or incompatible ends
+        or ADC counts. Outside _body this is the native QICK label.
+        """
+        if self._building_body:
+            self.append_macro(self._timeline_jumps.label(label))
+        else:
+            super().label(label)
+
+    @override
+    def jump(self, label: str) -> None:
+        """Transfer unconditionally to a later top-level body label by name.
+
+        Only labels may follow until a reachable label. Missing/backward targets
+        or placement in Repeat or Branch raise ValueError at build. Outside
+        _body this is the native QICK jump.
+        """
+        if self._building_body:
+            self.append_macro(self._timeline_jumps.jump(label, Jump(label=label)))
+        else:
+            super().jump(label)
+
+    @override
+    def cond_jump(
+        self,
+        label: str,
+        arg1: str,
+        test: str,
+        op: str | None = None,
+        arg2: str | int | None = None,
+    ) -> None:
+        """Transfer to a later top-level body label when the native test passes.
+
+        arg1 is a register name. Optionally apply op (+, -, >>, &) with arg2,
+        a register name or integer literal. test is Z, NZ, S or NS; both edges
+        enter build-time analysis. Other tests, missing or backward labels and
+        placement in Repeat/Branch raise ValueError at build. Outside _body this
+        is the native QICK conditional jump.
+        """
+        if self._building_body:
+            native = CondJump(label=label, arg1=arg1, test=test, op=op, arg2=arg2)
+            self.append_macro(self._timeline_jumps.jump(label, native))
+        else:
+            super().cond_jump(label, arg1, test, op, arg2)
 
     def make_program(self) -> None:
         """Build the QICK shell with linked body markers and all-timeline closure.
@@ -264,6 +331,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         # QICK 0.2.436 provides no public shell boundary hooks.
         self._reset_resources()
+        self._timeline_jumps = TimelineJumps(self._timeline_book)
         self._timeline_default = None
         self._emission_serial = 0
         self._emission_scope = None
@@ -290,6 +358,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self._body(None)
         finally:
             self._building_body = False
+        self._timeline_jumps.finish()
         self.append_macro(TimelineSync(self._timeline_book, None, close_adc=True))
         self.append_macro(TimelineBoundary(self._timeline_book, "body_end"))
         self.append_macro(TimelineShellWait(self._timeline_book, self.final_wait))
@@ -512,14 +581,17 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         if not self._building_body:
             raise ValueError("timeline must be called in _body")
-        self.append_macro(_TimelineScope(self._timeline_book, name))
+        if self._timeline_jumps.unreachable_after is None:
+            self.append_macro(_TimelineScope(self._timeline_book, name))
         previous = self._timeline_default
         self._timeline_default = name
         try:
             yield
         finally:
             self._timeline_default = previous
-            self.append_macro(_TimelineScope(self._timeline_book, name))
+            # A sync inside this scope is not a direct final action of a Repeat.
+            if self._timeline_jumps.regions:
+                self.append_macro(_TimelineScope(self._timeline_book, name))
 
     def emit(
         self, module: Module, *, timeline: str | None = None, tag: str | None = None
@@ -542,7 +614,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._emission_scope = (self._emission_serial, 0)
         self._emission_serial += 1
         try:
-            with self.source_scope(module.name):
+            with (
+                self.source_scope(module.name),
+                self._timeline_jumps.region(f"module {module.name!r}"),
+            ):
                 module.lower(self, timeline=timeline, tag=tag)
             macros = self.macro_list[start:]
         finally:
@@ -623,7 +698,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         words retain their bit-pattern contract for non-time consumers.
         """
         start = len(self.macro_list)
-        yield
+        with self._timeline_jumps.region(f"time producer {register!r}"):
+            yield
         macros = self.macro_list[start:]
         del self.macro_list[start:]
         if any(
@@ -826,11 +902,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         name = f"_timeline_branch_{self._branch_serial}"
         self._branch_serial += 1
         start = len(self.macro_list)
-        self._branch_cases.append(cases)
-        try:
+        self._timeline_jumps.require_reachable()
+        with self._timeline_jumps.region(f"Branch {by!r}"):
             yield cases
-        finally:
-            self._branch_cases.pop()
         if any(
             not isinstance(macro, _TimelineScope) for macro in self.macro_list[start:]
         ):
@@ -887,7 +961,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         selected = timeline if timeline is not None else self._timeline_default
         parent = selected if selected is not None else "default"
+        self._timeline_jumps.require_reachable()
         minimum = _repeat_minimum(name, n, range_hint)
+        region = f"Repeat {name!r} body"
         start = len(self.macro_list)
         previous = self._timeline_default
         self._timeline_default = parent
@@ -895,7 +971,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         # Do not require producers from empty tables on that unreachable path.
         if n == 0 or range_hint == (0, 0):
             try:
-                yield
+                with self._timeline_jumps.region(region):
+                    yield
             finally:
                 self._timeline_default = previous
                 del self.macro_list[start:]
@@ -915,7 +992,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self.append_macro(RepeatTimelineBody(entry))
         body_start = len(self.macro_list)
         try:
-            yield
+            with self._timeline_jumps.region(region):
+                yield
         finally:
             self._timeline_default = previous
             body = self.macro_list[body_start:]

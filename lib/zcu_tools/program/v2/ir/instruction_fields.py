@@ -29,7 +29,7 @@ from .operands import (
 
 # QICK IF condition codes.
 CondCode = Literal["Z", "S", "NZ", "NS"]
-_VALID_COND_CODES: frozenset[CondCode] = frozenset({"Z", "S", "NZ", "NS"})
+VALID_COND_CODES: frozenset[CondCode] = frozenset({"Z", "S", "NZ", "NS"})
 
 # TIME.C_OP timing-reference operations.
 TimeCOp = Literal["inc_ref", "set_ref", "updt", "rst"]
@@ -122,9 +122,9 @@ def parse_cond_code(val: str | None) -> CondCode | None:
     """Return a QICK IF code, preserve None, or raise ValueError for an unknown code."""
     if val is None:
         return None
-    if not is_valid_literal(val, _VALID_COND_CODES):
+    if not is_valid_literal(val, VALID_COND_CODES):
         raise ValueError(
-            f"IF: {val!r} is not a valid condition code, expected one of {sorted(_VALID_COND_CODES)}"
+            f"IF: {val!r} is not a valid condition code, expected one of {sorted(VALID_COND_CODES)}"
         )
     return val
 

@@ -12,6 +12,9 @@ TIMED_BASE_REG = (
 USR_TIME_REG = "s11"  # read by WAIT time / TIME updt
 STATUS_REG = "s10"  # read by WAIT port_dt / div_rdy / div_dt / qpa_*
 ADDR_REG = "s15"  # big-PMEM jump target / dispatch base
+PORT_RESULT_LOW_REG = "s8"
+PORT_RESULT_HIGH_REG = "s9"
+PORT_RESULT_REGS = frozenset({PORT_RESULT_LOW_REG, PORT_RESULT_HIGH_REG})
 
 WAVE_REGS = frozenset({"w0", "w1", "w2", "w3", "w4", "w5"})
 

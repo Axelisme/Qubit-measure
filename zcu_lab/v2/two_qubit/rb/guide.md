@@ -4,7 +4,7 @@
 
 Cfg sweep fields use `depth` / `seed`. This experiment uses cfg schema 5.0. Loading a run from an older major version retains Result and metadata, sets cfg to None and emits `CfgUnavailableWarning`. These old runs cannot be reanalyzed. No cfg migration or field alias is provided.
 
-**Last updated:** 2026-11-20
+**Last updated:** 2026-11-20 (on-board depth scan)
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -108,8 +108,19 @@ the concurrent schedule that allowed overlap across Clifford boundaries.
 Overlap within a Clifford can still produce crosstalk in both arms; the
 comparison does not show that it cancels.
 
-Each depth/seed/arm has one compiled program and `rounds` host acquisitions of
-`reps` shots. Every host acquisition uses `rounds=1` to preserve its own slot.
+For each seed and arm, the host first tries to compile all requested depths
+into one program. If the program exceeds PMEM, the host splits the depth list
+in half, with the extra point in the first half, and retries each half. The
+smallest chunk is one depth. If that depth still exceeds PMEM, or any chunk
+exceeds WMEM or DMEM, Run reports the error. Chunking changes only the number
+of programs and the acquisition order.
+
+The host loops over seed, then arm, then depth chunk, then round. It visits
+chunks in increasing depth order and reuses each program across rounds. Within each
+`rounds=1` acquisition, QICK visits the chunk's depths in increasing order
+once per repetition, then starts again at the first depth. Each depth gets
+`reps` shots in its saved round slot.
+
 Without reset, the nominal B00 start leaves the thermal initial population in
 place. Terminal F1/F2 classification happens during acquisition. Circle outcomes
 are g, e and other. Radius boundaries and equidistant points are other.

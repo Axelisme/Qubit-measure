@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, field, replace
 from typing import NoReturn
 
 from ..base import MyProgramV2
-from ..ir.instruction_fields import CondCode
+from ..ir.compiled_stream import CONTROL_JUMP, CONTROL_LABEL, SOURCE_END, SOURCE_START
+from ..ir.hw_semantics import PORT_RESULT_REGS
+from ..ir.instruction_fields import CondCode, parse_cond_code
 from ..ir.instructions import (
     BaseInst,
     Instruction,
@@ -21,6 +24,20 @@ from ..ir.operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 
 
 @dataclass(frozen=True)
+class ForwardJump:
+    """Transfer at a CONTROL_JUMP marker in the decoded stream.
+
+    end indexes the actual JUMP, after its setup instructions. target indexes
+    the destination CONTROL_LABEL. condition is the JUMP's Z/S test or None
+    for an unconditional transfer.
+    """
+
+    end: int
+    target: int
+    condition: CondCode | None
+
+
+@dataclass(frozen=True)
 class DecodedInstruction:
     """One retained IR instruction and its pre-optimization diagnostic context.
 
@@ -28,6 +45,7 @@ class DecodedInstruction:
     offset. source is the innermost source name or empty. body excludes the QICK
     shot shell. loops lists enclosing loop names from outermost inward. cases
     lists enclosing branch names and zero-based case indices, outermost first.
+    jump is set only on a validated CONTROL_JUMP marker.
     """
 
     instruction: Instruction
@@ -36,6 +54,51 @@ class DecodedInstruction:
     body: bool
     loops: tuple[str, ...]
     cases: tuple[str, ...]
+    jump: ForwardJump | None = None
+
+    def failure(self, reason: str) -> ValueError:
+        """Report a rejected instruction or marker with its snapshot location."""
+        return ValueError(
+            f"{type(self.instruction).__name__} at preopt {self.position}, "
+            f"loops={self.loops}, cases={self.cases}, source={self.source!r}: {reason}"
+        )
+
+
+@dataclass(frozen=True)
+class ForwardSegment:
+    """Run records in [first, stop), then transfer or resume, if requested.
+
+    jump describes a transfer after its setup instructions. resume indexes a
+    destination marker with waiting paths. At most one is set; neither is set
+    on the final segment of the body.
+    """
+
+    first: int
+    stop: int
+    jump: ForwardJump | None = None
+    resume: int | None = None
+
+
+def forward_segments(
+    records: tuple[DecodedInstruction, ...],
+    bounds: tuple[int, int],
+    waiting: Mapping[int, object],
+) -> Iterator[ForwardSegment]:
+    """Split a validated body at jumps and at labels with waiting paths.
+
+    bounds is the half-open body range. The caller updates waiting by label
+    index after each yielded segment. A jump segment includes its marker and
+    setup but not the JUMP itself. A resume segment stops before the label marker.
+    """
+    first, last = bounds
+    for index in range(first, last):
+        if (jump := records[index].jump) is not None:
+            yield ForwardSegment(first, jump.end, jump=jump)
+            first = jump.end + 1
+        elif index in waiting:
+            yield ForwardSegment(first, index, resume=index)
+            first = index + 1
+    yield ForwardSegment(first, last)
 
 
 @dataclass(frozen=True)
@@ -169,9 +232,9 @@ class _Scopes:
     complete_branches: list[StructuredBranch] = field(default_factory=list)
 
     def consume(self, inst: MetaInst, index: int) -> None:
-        if inst.type == "SOURCE_START":
+        if inst.type == SOURCE_START:
             self.sources.append(inst.name)
-        elif inst.type == "SOURCE_END":
+        elif inst.type == SOURCE_END:
             if not self.sources or self.sources.pop() != inst.name:
                 raise ValueError("unbalanced source marker")
         elif inst.type == "TIMING_BOUNDARY":
@@ -189,8 +252,12 @@ class _Scopes:
             self.branch(inst, index)
         elif inst.type.startswith("LOOP_"):
             self.native_loop(inst, index)
-        else:
+        elif inst.type not in {CONTROL_JUMP, CONTROL_LABEL}:
             raise ValueError(f"unknown or unsupported marker {inst.type}")
+
+    def check_control(self, record: DecodedInstruction, marker: str) -> None:
+        if not self.body or self.local_loops.intersection(self.loops) or self.branches:
+            raise record.failure(f"{marker} must be at the top level of the body")
 
     def branch(self, inst: MetaInst, index: int) -> None:
         if inst.type == "BRANCH_START":
@@ -404,6 +471,136 @@ def _validate_branch(
         matches(effects(last + 1, stop), exits)
 
 
+def _control_labels(
+    records: list[DecodedInstruction],
+) -> dict[str, tuple[int, LabelRef]]:
+    labels = {}
+    for i, record in enumerate(records):
+        inst = record.instruction
+        if not isinstance(inst, MetaInst) or inst.type != CONTROL_LABEL:
+            continue
+        label = inst.info.get("label")
+        next_inst = records[i + 1].instruction if i + 1 < len(records) else None
+        if (
+            inst.info.keys() != {"label"}
+            or not isinstance(label, str)
+            or not label
+            or not isinstance(next_inst, LabelInst)
+        ):
+            raise record.failure("CONTROL_LABEL must identify a machine label")
+        if label in labels:
+            raise record.failure(f"duplicate CONTROL_LABEL {label!r}")
+        labels[label] = (i, LabelRef(next_inst.name))
+    return labels
+
+
+def _jump_condition(record: DecodedInstruction, marker: MetaInst) -> CondCode | None:
+    if marker.info.keys() != {"target", "conditional", "test"}:
+        raise record.failure(
+            "CONTROL_JUMP requires target, conditional and test fields"
+        )
+    conditional, test = marker.info["conditional"], marker.info["test"]
+    if conditional is False and test is None:
+        return None
+    if conditional is not True or not isinstance(test, str):
+        raise record.failure(
+            "CONTROL_JUMP condition disagrees with conditional/test fields"
+        )
+    if test in ("F", "NF"):
+        raise record.failure(f"CONTROL_JUMP external flag test {test!r} is unsupported")
+    try:
+        return parse_cond_code(test)
+    except ValueError as exc:
+        raise record.failure(f"CONTROL_JUMP condition is invalid: {exc}") from exc
+
+
+def _require_jump_test(record: DecodedInstruction) -> None:
+    inst = record.instruction
+    if not isinstance(inst, TestInst) or not inst.uf:
+        raise record.failure("CONTROL_JUMP must be followed by a flag-setting TEST")
+    measurement = inst.reg_read & PORT_RESULT_REGS
+    if measurement:
+        raise record.failure(f"undefined register {min(measurement)}")
+
+
+def _decode_jump(
+    records: list[DecodedInstruction],
+    start: int,
+    marker: MetaInst,
+    labels: dict[str, tuple[int, LabelRef]],
+) -> ForwardJump:
+    record = records[start]
+    condition = _jump_condition(record, marker)
+    name = marker.info["target"]
+    if not isinstance(name, str) or name not in labels:
+        raise record.failure("CONTROL_JUMP has no matching CONTROL_LABEL")
+    target, label = labels[name]
+    setup = start + 1
+    first = records[setup].instruction
+    indirect = isinstance(first, RegWriteInst)
+    end = setup + int(indirect) + int(condition is not None)
+    if target <= end:
+        raise record.failure("CONTROL_JUMP must be followed by a forward JUMP")
+    if condition is not None:
+        _require_jump_test(records[end - 1])
+    jump = records[end].instruction
+    if not isinstance(jump, JumpInst):
+        raise record.failure(
+            "CONTROL_JUMP must be immediately followed by its jump sequence"
+        )
+    if jump.if_cond != condition:
+        raise record.failure("CONTROL_JUMP condition disagrees with instruction")
+    expected = JumpInst(
+        label=None if indirect else label,
+        addr=Register("s15") if indirect else None,
+        if_cond=condition,
+    )
+    if jump != expected or (
+        indirect
+        and first
+        != RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=label)
+    ):
+        raise record.failure("CONTROL_JUMP sequence disagrees with target label")
+    return ForwardJump(end, target, condition)
+
+
+def _decode_control(records: list[DecodedInstruction]) -> None:
+    labels = _control_labels(records)
+    position = 0
+    for i, record in enumerate(records):
+        inst = record.instruction
+        if record.position != position:
+            raise record.failure(
+                "CONTROL_* snapshot record has an inconsistent position"
+            )
+        if isinstance(inst, BaseInst):
+            position += inst.addr_inc
+        elif isinstance(inst, MetaInst) and inst.type == CONTROL_JUMP:
+            records[i] = replace(record, jump=_decode_jump(records, i, inst, labels))
+
+
+def _validate_body_jumps(
+    records: tuple[DecodedInstruction, ...],
+    loops: dict[str, NativeLoop],
+    branches: list[StructuredBranch],
+) -> None:
+    marked = {r.jump.end for r in records if r.jump is not None}
+    for loop in loops.values():
+        marked.update(range(loop.start + 1, loop.body_start))
+        marked.update(range(loop.body_end + 1, loop.end))
+    for branch in branches:
+        first = branch.start
+        for a, b in branch.cases:
+            marked.update(range(first + 1, a))
+            first = b
+        marked.update(range(first + 1, branch.end))
+    for i, record in enumerate(records):
+        if record.body and isinstance(record.instruction, JumpInst) and i not in marked:
+            raise record.failure(
+                f"unsupported instruction effect: {record.instruction}"
+            )
+
+
 def predecode(
     prog: MyProgramV2,
 ) -> tuple[
@@ -417,6 +614,7 @@ def predecode(
     """
     scopes = _Scopes()
     records = []
+    has_control = False
     for record in prog.compiled_stream.records:
         inst = record.instruction
         try:
@@ -426,22 +624,28 @@ def predecode(
             raise ValueError(
                 f"MetaInst {inst.type if isinstance(inst, MetaInst) else ''} at preopt {record.p_addr}, loops={scopes.loops}, source={scopes.sources}: {exc}"
             ) from exc
-        records.append(
-            DecodedInstruction(
-                inst,
-                record.p_addr,
-                scopes.sources[-1] if scopes.sources else "",
-                scopes.body,
-                tuple(scopes.loops),
-                tuple(
-                    f"{b.name}:case-{len(b.cases) - 1}"
-                    for b in scopes.branches
-                    if b.active
-                ),
-            )
+        decoded = DecodedInstruction(
+            inst,
+            record.p_addr,
+            scopes.sources[-1] if scopes.sources else "",
+            scopes.body,
+            tuple(scopes.loops),
+            tuple(
+                f"{b.name}:case-{len(b.cases) - 1}" for b in scopes.branches if b.active
+            ),
         )
+        if isinstance(inst, MetaInst) and inst.type in {
+            CONTROL_JUMP,
+            CONTROL_LABEL,
+        }:
+            scopes.check_control(decoded, inst.type)
+            has_control = True
+        records.append(decoded)
     loops = scopes.finish(prog)
+    if has_control:
+        _decode_control(records)
     decoded = tuple(records)
     for branch in scopes.complete_branches:
         _validate_branch(decoded, branch)
+    _validate_body_jumps(decoded, loops, scopes.complete_branches)
     return decoded, loops, tuple(scopes.complete_branches)

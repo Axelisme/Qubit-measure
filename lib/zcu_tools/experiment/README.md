@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-20
+**Last updated:** 2026-11-20，Schedule 建構範例
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -24,7 +24,7 @@ Scope.dir 第一次使用才建目錄，按 kind／作者 label 與六位 sequen
 
 `scope.cancel(selector)` 搜尋整棵存活子樹，唯一匹配後設定 stop。Selector 可用 kind、kind#N、operation:name 或完整葉路徑。多筆命中回 reason="ambiguous" 與 candidates，不任選最新 child。`scope.cancelled` 表示自身停止，`scope.stop` 供低層 bit API 使用。StopSignal 負責出生繼承與向下停止。release 只解除父子關係。Host 不追蹤子孫取消來判定資料完整度。
 
-`Schedule(cfg, buffer, scope=..., name=None)` 在 context 入口建立 schedule child，每次 acquire 建立 acquire child，退出時 release。`RunContext.scope` 將當次 run 或 operation 的顯式 scope 交給 core；底層 driver、clock 與 program builder 仍只接 stop bit。
+`Schedule(buffer, scope=..., name=None)` 在 context 入口建立 schedule child，每次 acquire 建立 acquire child，退出時 release。`RunContext.scope` 將當次 run 或 operation 的顯式 scope 交給 core；底層 driver、clock 與 program builder 仍只接 stop bit。
 
 Recipe 與 workflow 都使用此 host，作者以原生 async／await 等待，不使用 generator protocol 或 ScriptDriver。Workflow 在作者 finally 與 executor drain 後嘗試關閉所有 progress bars，再發布終態。Cleanup 失敗保留原始執行錯誤並附 note；沒有執行錯誤時，cleanup 失敗使 run failed。
 
