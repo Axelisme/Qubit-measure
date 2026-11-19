@@ -2,6 +2,8 @@
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -23,7 +25,10 @@ from .timeline import TimelineProgramV2
 
 @dataclass(frozen=True)
 class IQ:
-    """An unclassified read axis with vector (1, I, Q, I², IQ, Q²).
+    """Unclassified read axis (1, I, Q, I², IQ, Q²), with optional cubics.
+
+    order=2 (default) uses the six components above. order=3 appends
+    (I³, I²Q, IQ², Q³). Other orders raise ValueError.
 
     read names one logical compiled readout, present once on each Branch path.
     tone is None for PulseReadout or a zero-based MuxReadout cfg tone position.
@@ -34,6 +39,11 @@ class IQ:
 
     read: str
     tone: int | None = None
+    order: Literal[2, 3] = 2
+
+    def __post_init__(self) -> None:
+        if self.order not in (2, 3):
+            raise ValueError(f"IQ order must be 2 or 3, got {self.order!r}")
 
 
 @dataclass(frozen=True)
@@ -60,8 +70,8 @@ def shot_sums(
     """Resolve compiled read labels and return a per-point shot-sum processor.
 
     prog is a compiled TimelineProgramV2. axes lists vectors
-    in output-axis order. IQ includes all moments through second order; repeated
-    reads form outer products of those features. Empty axes raise
+    in output-axis order. IQ includes all moments through its requested order;
+    repeated reads form outer products of those features. Empty axes raise
     ValueError before read-label resolution or acquisition. Timeline labels are
     emit tags, or module names when untagged.
     Each label must identify one emission on every feasible Branch path.
@@ -102,23 +112,8 @@ def shot_sums(
                     f"ADC {ch}: expected (points, reps, {count}, 2); actual {actual}"
                 )
         product = None
-        for ch, index, classify in resolved:
-            values = iq[ch][:, :, index]
-            vector = (
-                np.stack(
-                    [
-                        np.ones(values.shape[:-1]),
-                        values[..., 0],
-                        values[..., 1],
-                        values[..., 0] ** 2,
-                        values[..., 0] * values[..., 1],
-                        values[..., 1] ** 2,
-                    ],
-                    axis=-1,
-                )
-                if classify is None
-                else classify(values)
-            )
+        for ch, index, features in resolved:
+            vector = features(iq[ch][:, :, index])
             product = (
                 vector
                 if product is None
@@ -136,8 +131,19 @@ def shot_sums(
 
 type _LabelReads = dict[str, list[tuple[PulseReadout | MuxReadout, dict[int, int]]]]
 type _ResolvedAxis = tuple[
-    int, int, Callable[[NDArray[np.float64]], NDArray[np.float64]] | None
+    int, int, Callable[[NDArray[np.float64]], NDArray[np.float64]]
 ]
+
+
+def _iq_features(
+    values: NDArray[np.float64], *, order: Literal[2, 3]
+) -> NDArray[np.float64]:
+    i, q = values[..., 0], values[..., 1]
+    ii, qq = i**2, q**2
+    components = [np.ones(values.shape[:-1]), i, q, ii, i * q, qq]
+    if order == 3:
+        components.extend((ii * i, ii * q, i * qq, qq * q))
+    return np.stack(components, axis=-1)
 
 
 def _path_description(path: ReadoutPath) -> str:
@@ -255,8 +261,8 @@ def _resolve_axis(
     read: tuple[PulseReadout | MuxReadout, dict[int, int]],
     counts: dict[int, int],
     unsupported: dict[int, str],
-) -> tuple[int, int, Callable[[NDArray[np.float64]], NDArray[np.float64]] | None]:
-    """Validate a label/tone and snapshot its optional classifier before acquisition."""
+) -> _ResolvedAxis:
+    """Validate a label/tone and bind its feature conversion before acquisition."""
     owner, indices = read
     if isinstance(owner, PulseReadout):
         if axis.tone is not None:
@@ -280,13 +286,12 @@ def _resolve_axis(
             f"ADC {ch}: trigger inside {unsupported[ch]} is unsupported for read labels"
         )
     validate_declared_reads(prog, ch, counts[ch])
-    classify = None
-    if isinstance(axis, Classify):
-        classifier = axis.classifier if axis.classifier is not None else classifier
-        if classifier is None:
-            raise ValueError(f"label {axis.read!r}: classifier missing")
-        classify = classification_processor(classifier)
-    return ch, indices[ch], classify
+    if isinstance(axis, IQ):
+        return ch, indices[ch], partial(_iq_features, order=axis.order)
+    classifier = axis.classifier if axis.classifier is not None else classifier
+    if classifier is None:
+        raise ValueError(f"label {axis.read!r}: classifier missing")
+    return ch, indices[ch], classification_processor(classifier)
 
 
 def split_sums(

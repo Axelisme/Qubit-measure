@@ -135,7 +135,7 @@ Scale 定義為 `disk = memory * scale`，MHz→Hz 用 1e6，us→s 用 1e-6，�
 Z 各維度須匹配軸長，固定軸也計入；load 不將固定值寫進 Result。
 `GroupedAxesSpec` 的 `VariableAxisSpec` 全用 keyword，`VariableZSpec` 只有 field_name 可用位置參數。
 `VariableAxisSpec.generated_arange(label=..., unit=...)` 也用 keyword。
-單變數映射見 `twotone/power_dep/core.py:67-77`，二維硬體掃描見 `twotone/ro_optimize/freq_gain/core.py:91-101`。
+單變數映射見 `twotone/power_dep/core.py:67-77`，二維硬體掃描見 `twotone/ro_optimize/freq_gain/core.py` 的 `FreqGainExp.AXES_SPEC`。
 
 ### 分析選項自行驗證，fit 結果用屬性讀取
 
@@ -308,7 +308,7 @@ Scheduled timing analysis 不驗證 CPU 等待或跨 shot 實機排程。
 
 ### Builder 與 module 的生命週期
 
-一維序列與取數見 `twotone/rabi/amp_rabi/core.py:144-166`，二維 branch 見 `twotone/ro_optimize/freq_gain/core.py:165-179`。
+一維序列與取數見 `twotone/rabi/amp_rabi/core.py:144-166`，以 branch 比較 g/e 的二維掃描見 `twotone/ro_optimize/freq_gain/core.py` 的 `FreqGainExp.run`。
 Builder 明傳 reps、relax_delay 與需要的 initial_delay，取數時另傳 rounds。
 `add_sweep` 同時宣告 loop 並回 QickParam，獨立成行，loops 按宣告順序外到內。
 `add_loop` 搭 LoadValue 用於整數 selector 或候選 pulse 選擇。
@@ -413,19 +413,18 @@ Sweep 座標參考 `twotone/rabi/amp_rabi/core.py:121-125`，量化契約由 [ro
 量化後多點 step 為零或相鄰碰撞時 fast-fail，要求加大 span 或減少 expts。
 `merge_result_list` 將 list[dict[name, ndarray]] 遞迴堆成 dict，原外層 list 成新最外維。
 ResultTree.measurement_result(name) 只 merge 並 cache 該 measurement，其他 measurement 的更新互不影響。
-`estimate_snr` 搭 snr_checker 作 early stop；snr_as_signal 從 MomentTracker 的 g/e IQ moments 計算 pooled-sigma separation。
-Skew_penalty=0 是純 SNR，正值用連續 rational penalty 降低 projected skew／g/e shape mismatch 候選分數，供 RO 與 JPA optimization 共用。
+`snr_checker` 用 `estimate_snr` 判斷 sweep 曲線是否達到 early stop 門檻。
+RO 與 JPA optimization 用 `run_acquire_summed` 與 `shot_sums(prog, [IQ("readout", order=3)])`。
+把 `snr_as_signal` 接到 `RunOptions(converter=...)`，即時圖與最終結果都使用已完成 rounds 的總和。
+`snr_as_signal` 預設 g/e 是第一軸，只回傳剩餘的掃描軸。`skew_penalty=0` 回傳 pooled-sigma SNR，正值降低投影寬度不等或合計偏態較大的候選分數。
 Comment 與 sweep helpers 見 [父層 utils](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。
 
-## Lookback & Tracker
+## Lookback
 
 Lookback Result 是 us time axis 與 complex signals，cfg 由 RunRecord 保存，run 用 decimated Schedule。
 LookbackAnalyzeOptions 預設 ratio=0.3、smooth=None，先對 complex signals 作 Gaussian smoothing，再從 magnitude 峰向前找最後低於門檻的 sample。
 Analyze 可接受 cfg=None，回只有 predict_offset 的 LookbackAnalysis，發布 fit；預設 saver 拒絕缺 cfg。
 Time 盤上仍為 seconds，Notebook 使用共用 NotebookAdapter，以 RunRecord 保存結果。
-KMeansTracker 線上維護 (..., 2) IQ 群統計，支援 leading dims 與 share_axis。
-各群提供 cluster_mean、cluster_covariance、cluster_center、cluster_weight。
-它以增量矩取代保存 raw，singleshot 可用 cluster 統計估 SNR。
 
 ## Twotone RB 測量策略
 

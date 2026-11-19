@@ -1,4 +1,4 @@
-from .acquisition import ImproveAcquireMixin, TrackerProtocol
+from .acquisition import ImproveAcquireMixin
 from .profile import build_soccfg
 from .shot_time import request_round_time_s, shot_time_s
 from .soc_summary import describe_soc
@@ -10,8 +10,6 @@ __all__ = [
     "ImproveAcquireMixin",
     # sweep
     "SweepCfg",
-    # trackers
-    "TrackerProtocol",
     # shot time
     "shot_time_s",
     "request_round_time_s",

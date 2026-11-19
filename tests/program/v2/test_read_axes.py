@@ -74,6 +74,18 @@ def test_classified_and_mixed_axes_preserve_class_rules_and_axis_order(
     np.testing.assert_array_equal(process(iq), [[4, 0]])
 
 
+def test_iq_third_order_appends_cubic_sums_without_changing_second_order() -> None:
+    prog = compile_modules(load_soccfg(), [readout()])
+    iq = {0: np.array([[[[2.0, -3.0]], [[-1.0, 4.0]]]])}
+
+    third = v2.shot_sums(prog, [v2.IQ("readout", order=3)])(iq)
+    np.testing.assert_array_equal(third, [[2, 1, 1, 5, -10, 25, 7, -8, 2, 37]])
+
+    default = v2.shot_sums(prog, [v2.IQ("readout")])(iq)
+    expected = np.array([[2, 1, 1, 5, -10, 25]], dtype=np.float64)
+    np.testing.assert_array_equal(default.view(np.uint64), expected.view(np.uint64))
+
+
 @pytest.mark.parametrize(
     ("classifier", "values", "expected"),
     [

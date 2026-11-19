@@ -18,15 +18,16 @@ from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
-from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    IQ,
     Pulse,
     PulseReadout,
     Readout,
     Reset,
     SweepCfg,
     TimelineBuilder,
+    shot_sums,
     sweep2param,
 )
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
@@ -111,7 +112,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         returned frequencies are absolute RF.
         skew_penalty optionally reduces scores for distorted IQ distributions.
         This score is not assignment fidelity. acquire_kwargs is forwarded
-        to acquisition.
+        to summed acquisition.
         """
         # 1. Quantize absolute RF on the common generator/ADC grid, including mixer.
         soc, soccfg = context.soc, context.soccfg
@@ -152,7 +153,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             freq_sweep = cfg.freq
             freq_param = sweep2param("freq", freq_sweep)
             cfg.readout.set_param("freq", freq_param)
-            tracker = MomentTracker()
 
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -168,18 +168,17 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
             builder.emit(Readout("readout", cfg.readout))
             program = builder.build()
-            sched.run_acquire(
+            sched.run_acquire_summed(
                 program,
                 soc,
+                processor=shot_sums(program, [IQ("readout", order=3)]),
                 rounds=cfg.rounds,
                 options=RunOptions(
-                    converter=lambda _raw: snr_as_signal(
-                        [tracker],
-                        ge_axis=1,
+                    converter=lambda sums: snr_as_signal(
+                        sums,
                         skew_penalty=cfg.skew_penalty,
                     )
                 ),
-                trackers=[tracker],
                 **(acquire_kwargs or {}),
             )
 

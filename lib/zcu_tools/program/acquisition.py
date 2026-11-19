@@ -25,7 +25,6 @@ __all__ = [
     "CancelFlagProtocol",
     "StoppedPartialAcquireError",
     "AcquisitionContractError",
-    "TrackerProtocol",
     "ShotSumProcessor",
 ]
 
@@ -401,76 +400,6 @@ class EarlyStopMixin(TypedAcquireMixin):
         )
 
 
-class TrackerProtocol(Protocol):
-    def update(self, points: NDArray[np.float64]) -> None:
-        """points shape: (*sweep, reps, 2)"""
-
-
-class TrackerMixin(TypedAcquireMixin):
-    """
-    Add statistic information for acquired method to the AcquireMixin class
-    """
-
-    def finish_round(self) -> bool:
-        completed_rounds = self._completed_round_count()
-        not_finish = super().finish_round()
-        if self._completed_round_count() == completed_rounds:
-            return not_finish
-
-        assert self.acquire_params is not None
-
-        # tolerated(cast): QICK's extra_args update erases the typed acquire trackers list; retain the original objects for completed-round updates.
-        trackers = cast(
-            list[TrackerProtocol] | None, self.acquire_params.get("trackers")
-        )
-        if trackers is not None:
-            assert self.acc_buf is not None
-            if self.acquire_params["type"] != "accumulated":
-                raise NotImplementedError(
-                    "Tracker is not implemented for type other than accumulated"
-                )
-
-            if self.acquire_params["threshold"] is not None:
-                raise NotImplementedError(
-                    "Tracker is not implemented for thresholded data"
-                )
-
-            assert isinstance(self, qick_asm.AbsQickProgram)
-            ro_chs = self.ro_chs
-
-            if len(trackers) != len(self.acc_buf):
-                raise ValueError(
-                    f"Number of tracker ({len(trackers)}) must match number of readout channels ({len(self.acc_buf)})"
-                )
-
-            assert isinstance(ro_chs, dict)
-            assert len(self.acc_buf) == len(ro_chs)
-            for d_rep, tracker, ro in zip(
-                self.acc_buf, trackers, ro_chs.values(), strict=False
-            ):
-                assert self.avg_level is not None
-                d_rep = np.moveaxis(d_rep, [-2, self.avg_level], [0, -2])
-
-                if not ro["edge_counting"]:
-                    d_rep = d_rep / ro["length"]
-                # tolerated(cast): The tracker protocol requires float64, but QICK edge-counting buffers stay int64; preserve this no-conversion handoff.
-                d_rep = cast(NDArray[np.float64], d_rep)
-
-                tracker.update(d_rep)  # (..., m, 2)
-
-        return not_finish
-
-    def acquire(
-        self,
-        *args,
-        trackers: list[TrackerProtocol] | None = None,
-        **kwargs,
-    ):
-        extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(trackers=trackers)
-        return super().acquire(*args, extra_args=extra_args, **kwargs)
-
-
 class RoundHookMixin(TypedAcquireMixin):
     """
     Add round hook functionality to the AcquireMixin class
@@ -579,7 +508,7 @@ class RoundHookMixin(TypedAcquireMixin):
         return cancel_flag
 
 
-class ImproveAcquireMixin(RoundHookMixin, TrackerMixin, EarlyStopMixin):
+class ImproveAcquireMixin(RoundHookMixin, EarlyStopMixin):
     _sum_processor: ShotSumProcessor | None = None
     _summed_stepped: bool = False
 

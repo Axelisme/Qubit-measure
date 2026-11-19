@@ -226,8 +226,7 @@ def test_averaged_statistics_preserve_layout_offsets_hooks_and_deferred_raw():
     assert len(records) == 2  # program and SoC getters must not rerun the backend
 
 
-@pytest.mark.parametrize("processing", ["threshold", "tracker"])
-def test_shot_processing_uses_materialized_statistics(processing):
+def test_threshold_uses_materialized_statistics():
     env = white_noise(
         load_soccfg(n_readouts=2),
         std_adc=0,
@@ -238,11 +237,6 @@ def test_shot_processing_uses_materialized_statistics(processing):
         env,
     )
     records = []
-    tracked = []
-
-    class Tracker:
-        def update(self, points):
-            tracked.append(points.copy())
 
     def execute(request):
         result = statistics(request)
@@ -250,23 +244,14 @@ def test_shot_processing_uses_materialized_statistics(processing):
         return result
 
     env.soc.binding.execute = execute
-    if processing == "threshold":
-        result = prog.acquire(env.soc, progress=False, threshold=12.5)
-    else:
-        result = prog.acquire(env.soc, progress=False, trackers=[Tracker(), Tracker()])
+    result = prog.acquire(env.soc, progress=False, threshold=12.5)
     assert result is not None
     request = request_of(env)
     raw = raw_of(prog)
     expected_raw = records[0].raw.materialize(request.reps, request.avg_level)
     np.testing.assert_array_equal(raw[0], expected_raw[1])
-    if processing == "threshold":
-        np.testing.assert_array_equal(result[0][0, ..., 0], [[0, 0, 0], [1, 1, 1]])
-        np.testing.assert_array_equal(result[0][..., 1], 0)
-    else:
-        assert len(tracked) == 2
-        expected = np.moveaxis(expected_raw[1], [-2, request.avg_level], [0, -2]) / 8
-        np.testing.assert_array_equal(tracked[0], expected)
-        np.testing.assert_array_equal(result[0][0, 0, 0], [10, -1])
+    np.testing.assert_array_equal(result[0][0, ..., 0], [[0, 0, 0], [1, 1, 1]])
+    np.testing.assert_array_equal(result[0][..., 1], 0)
 
 
 @pytest.mark.parametrize(

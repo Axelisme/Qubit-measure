@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-18, FTF round reuse
+**Last updated:** 2026-11-20, summed SNR acquisition
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -78,7 +78,7 @@ caller's readout `buf_maxlen`, matching QICK's buffer driver. QICK still checks
 the total sample count across reads and executions. Integrated readout length is
 not limited by raw-buffer capacity. QICK retains first-compilation ownership.
 Hardware and decimated paths keep their original configuration. Shot processing,
-hooks, tracker, normalization, averaging and Stop still belong to that pipeline.
+hooks, normalization, averaging and Stop still belong to that pipeline.
 
 `SimulationBinding(..., timing=SimulationTiming(clock=SimulationClock(...)))` optionally tracks physical
 time independently of pacing speed. One environment shares one clock. It adds
@@ -453,7 +453,7 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   hit. Certificates live with the SoC and do not cross the acquisition/backend boundary.
   Fixed request layouts and integrated normalization metadata are prepared once
   per acquire; this never freezes snapshots or certifies later backend values.
-  Without processors, threshold or trackers,
+  Without a processor or threshold,
   it divides totals by reps and readout length, removes QICK offsets and moves reads first,
   without allocating `acc_buf`. Hooks receive the running mean of completed rounds.
   Every `acquire_summed` round materializes retained raw shots and uses the
@@ -464,7 +464,8 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   Herald and terminal reads retain paired outcome histories. Read-axis labels
   and classifiers follow the [program contract](../../README.md#summed-acquisition).
   Round hooks and the Schedule converter receive accumulated sums, not averages.
-  Threshold, trackers and `get_raw()` materialize deterministic
+  Readout optimization uses the same `acquire_summed` path with third-order IQ sums.
+  Thresholding and `get_raw()` also materialize deterministic
   int64 shots from the retained last-round source. The environment owns signal,
   noise, rounding and loop layout. Every source call returns fresh arrays with
   shape `(*loop_dims, reads, 2)`, keyed by requested ADC indices. Sources retain

@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-18，雙相位 gate 與 CPU／OpenCL DP5(4) 精度矩陣
+**Last updated:** 2026-11-20，三階 IQ 總和的 SNR 測試
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -585,7 +585,8 @@ child-module spy hook 或刻意注入錯誤的案例。
 
 ### SNR scorer helpers
 
-`tests/experiment/v2/utils/test_snr.py` 用解析的 g/e `mean` / `covariance` / `third_moment` fixture 測 `snr_as_signal` 與 `skew_penalty`，不靠隨機 samples 或 Monte Carlo 閾值；這能直接驗證 pooled-sigma SNR、shape mismatch penalty 與 one-sided skew penalty 的公式語意。
+`tests/experiment/v2/utils/test_snr.py` 用解析的 g/e 三階 IQ 總和驗證 `snr_as_signal`，另用中央矩 fixture 驗證 `calc_snr` 的計分。
+兩個接縫都不使用隨機 samples 或 Monte Carlo 閾值。
 
 ### Experiment v2 Schedule runtime tests
 

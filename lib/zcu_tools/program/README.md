@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-10，Rπ 逐 cycle 累加
+**Last updated:** 2026-11-20，三階 IQ 總和
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -117,8 +117,11 @@ its existing stepped-acquisition rejection. Explicit `threshold`, `angle` and
 
 `v2.shot_sums(prog, axes)` resolves reads after compilation. Each `v2.Classify`
 axis contributes a one-hot vector, while `v2.IQ` contributes
-`(1, I, Q, I², IQ, Q²)` in that order. The processor sums their ordered outer
-products over reps. Two IQ axes give a `(points, 6, 6)` array, including each
+`(1, I, Q, I², IQ, Q²)` in that order by default. `v2.IQ(read, order=3)`
+appends `(I³, I²Q, IQ², Q³)` for a ten-component axis. Use one cubic axis
+on the terminal read to compute g/e separation SNR and skew from the same
+completed-round sums used for live updates. The processor sums ordered outer
+products over reps. Two default IQ axes give a `(points, 6, 6)` array, including each
 read's second moments and their cross moments. Classify uses a detached explicit
 classifier or the readout cfg's classifier. Both `Classify` and `IQ` with `tone=None` select a pulse
 readout or their mux readout's only tone. Multi-tone mux requires a zero-based cfg
@@ -229,9 +232,8 @@ shots.
 
 - `ImproveAcquireMixin` 直接擴充 `qick.qick_asm.AcquireMixin`，是 `program` 層最核心的 QICK 接點。
 - Accumulated acquire 在寫入 chunk 前拒絕超過預期的累計 shots，拋出 `program.acquisition.AcquisitionContractError`。訊息包含預期 shots、先前已收 shots、本次 shots、各 channel 的 IQ 列數與從 0 起算的 round index。錯誤 chunk 不寫入、不裁切，先前 raw chunks 保留，不發布未完成的 round。
-- 主要加值分成四類：
+- 主要加值分成三類：
   - 型別友善封裝（`TypedAcquireMixin`）：補強 `acquire()` / `acquire_decimated()` / `get_raw()` 等回傳型別。
-  - 統計追蹤（`TrackerMixin`）：在 `finish_round()` 內注入 tracker 更新流程。
   - 提前停止（`EarlyStopMixin`）：透過單一 `cancel_flag` 在 `finish_round()` 內中止後續 rounds；accumulated acquisition的內部reps進度走共用`progress_bar.make_pbar` factory，GUI ambient factory與terminal fallback使用同一生命週期，正常或停止都會close並移除暫時進度項。
   - 每輪 callback（`RoundHookMixin`）與 joint-ADC shot sums（`ImproveAcquireMixin`）。`round_hook(round_count, raw, cancel_flag)` 只收到 completed round，可呼叫 `cancel_flag.set()` 表示不開始下一 round。
 
@@ -241,12 +243,10 @@ shots.
   - `acquire()`/`acquire_decimated()` 先建立 `acquire_params`，再進入 `prepare_round()` + `finish_round()` 迴圈。
   - `finish_acquire()` 負責 rounds 聚合（accumulated 或 decimated）。
 - 擴充掛點：
-  - `TrackerMixin.finish_round()`：利用原生 `self.acc_buf`、`self.ro_chs`、`self.avg_level` 更新 tracker。
   - `RoundHookMixin.finish_round()`：每 completed round 呼叫 `round_hook`，輸入增量摘要資料與同一個 stop flag。
   - `ImproveAcquireMixin._process_accumulated()`：明傳單一 sum processor 時處理每點總和，其餘委派原生 IQ／threshold 路徑。
 - 相容性關鍵：
   - 擴充層維持 `AcquireMixin` 的 `extra_args` 傳遞模式，避免破壞原生 acquire 參數流。
-  - 若非 `accumulated` 或有 threshold 時，部分統計路徑會顯式 `NotImplementedError`，這是刻意防呆。
 
 ## soccfg 摘要顯示（`describe_soc`）
 
@@ -307,4 +307,4 @@ Pulse、ConfigReadout、Trigger 在 preprocess 後以 `t_regs['t'] = 's_out_time
   - `finish_round()` 回傳語意（是否仍為「還有下一 round」）
   - `_average_buf()` 的輸入 shape 假設
 - `EarlyStopMixin._finish_accumulated_round` 鏡射 QICK `AcquireMixin.finish_round` 的 accumulated branch，因為上游 loop 沒有提前退出的 seam。QICK 升版時，維護者須人工對照上游 `AcquireMixin.finish_round` 並移植相關變更。維護者也須透過現有公開介面的測試驗證 acquisition 與 early-stop 行為。
-- mixin 疊加順序有語意。`tests/program/test_acquire_mro.py` 保留既有 `finish_round()` 解析鏈與 `MyProgramV2` 相對順序測試；新增 mixin 時，以 `tests/program/test_acquisition.py` 的公開 acquisition 案例驗證加權、round hook 與取消行為，不固定完整 MRO 排列。
+- 改變 mixin 組合時，以 `tests/program/test_acquisition.py` 的公開取數案例驗證完成輪次、round hook 與取消行為。

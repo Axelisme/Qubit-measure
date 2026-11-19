@@ -75,7 +75,7 @@ Amp/Len Rabi、Echo 與 Ramsey 的 core 直接呼叫 first-read 數值 fitter，
 五個 core 各自在 `run()` 建立及更新 all-number 與 first-read 的 live 曲線。
 [chain/\_cycle.py](chain/_cycle.py) 保留共用的 CycleSums 存檔變數、IQ 投影與檢查文字格式，模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
 
-`v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
+`v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化與 SNR 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 
 Save／MCP 透過單一 `summarize_analysis` 轉換 native 結果，不使用已退休的實驗 serializer 或結果 base。
 結果根為 dataclass、pydantic model 或字串 key 的 Mapping，summary 是 strict JSON object，key 沿用原生欄位名。
