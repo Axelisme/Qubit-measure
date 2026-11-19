@@ -230,6 +230,16 @@ T1、Amp Rabi、Len Rabi、Ramsey 與 Echo 沿用普通版 writeback 目標與�
 這五份 guide 已於 `188409d1d`（Remove single-qubit heralding experiments and herald_transfer）隨實驗刪除。
 上方第 4 至 6 項中只適用單 qubit heralding 的自校準與 C 指標規則，目前沒有實驗使用。
 
+2026-11-20 註：單 qubit T1 的二階矩方法以 `twotone/t1_cov` 恢復，上方的自校準、C 指標與第 4 至 6 項規則重新適用於這個實驗。
+二階矩方法改稱 cov；heralding 只指分類後的 post-selection。
+兩次讀出改名為 `pre_readout` 與 `post_readout`，存檔軸是 `pre_readout_features` 與 `post_readout_features`，tag 是 `twotone/ge/t1_cov`。上文的 herald／signal 名稱是歷史記錄。
+自校準 helper 是 `zcu_tools.analysis.cov_transfer.selfcal_transfer`，行為與已移除的 `herald_transfer` 相同。
+實驗只收單 tone `readout/pulse`，可選脈衝類 reset，播放順序是 reset、`pre_readout`、π pulse、delay、`post_readout`。
+舊 `heralding/t1` 資料沒有載入路徑，也沒有 alias。Amp Rabi、Len Rabi、Ramsey 與 Echo 不恢復，需要時再加。
+使用者於 2026-11-19 說明：「可以加回來，應該說，我刪掉的不是cov版，而是heralding版」，並要求改名：「把前一种基于共变因素的实验，把它纠正其义，不要再叫其 hurdling，呃，改成加上什么 COV 的 postfit 之类的。」
+2026-11-20，對先恢復 T1 的選項，使用者回答「舊題都採用建議」；對名稱、readout 與 reset，使用者回答：「關於t1_cov，1A，名字叫pre_readout/post_readout比較明確。2採用建議。3我認為可以加可選reset，作為穩定ge分佈使用。」
+選項比較見 [T1 二階矩實驗以 t1_cov 恢復](../discussions/2026-11-20-t1-cov-restore.md)。
+
 依賴沿用 [[0072]] 的分層與 `.importlinter` C8、C15、C16。
 Experiment 使用 program 的取數能力，lab core 不依賴 GUI，framework 不反向載入 lab。
 本次修改不改變真實 acquire 與模擬的執行邊界，也不新增依賴方向。

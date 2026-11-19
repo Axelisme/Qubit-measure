@@ -372,6 +372,12 @@ Confusion correction 只讀 saved cfg；缺 cfg／classifier／matrix 就略過�
 Amp Rabi 串接各 round 的 raw IQ，reset-check 累加各 round 的 class counts。
 舊比例檔案缺少 counts 變數時拒絕載入，不補造計數。
 
+[`twotone/t1_cov`](twotone/time_domain/t1_cov/guide.md) 共用單 tone `PulseReadout.Cfg`，
+以 `shot_sums(prog, [IQ("pre_readout"), IQ("post_readout")])` 加總未分類的 IQ 特徵外積。
+Result 保存 float64 `sums`，形狀為（delay, pre, post）。Grouped spec 從內層軸宣告，
+所以先列 `post_readout_features`，再列 `pre_readout_features` 與時間。
+Live 投影與 Analyze 擬合都用狀態改變機率，只有 Analyze 提出 `$qubit.t1` 寫回。
+
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
 此選擇不屬於量測cfg，不改變len Rabi的raw-IQ acquisition。
 `singleshot/amp_rabi`共用Len Rabi的raw-IQ joint fit，固定無衰減／零相位，提供Initial State與相同的IQ校準writeback。

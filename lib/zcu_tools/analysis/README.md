@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-19，聯合求解多 device flux
+**Last updated:** 2026-11-20，雙讀出矩的自校準
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -31,6 +31,12 @@ prominence／noise 的中點。候選不足或剛好 N 個時使用現有最低�
 `failure.AnalysisFailed` 表示數值 owner 已辨識的無法產出分析結果，與任意程式錯誤分開。
 Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交付 failed 值。
 分類範圍由各數值 owner 文件列明，不以 ValueError／RuntimeError 的文字猜測。
+
+## 雙讀出矩的自校準
+
+[`cov_transfer.selfcal_transfer`](cov_transfer.py) 接收兩次讀出的 float64 `(N, 6, 6)`
+特徵外積總和。它從共用的 IQ 中心與 Gaussian 寬度估計狀態聯合機率，回傳轉移矩陣、
+狀態改變機率及辨識診斷。它不分類，也不擬合延遲曲線。總和格式見 ADR-0074。
 
 ## Singleshot 初態與 joint fit
 
