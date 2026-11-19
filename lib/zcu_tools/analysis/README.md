@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-11，GE confusion matrix 數值 owner
+**Last updated:** 2026-11-19，聯合求解多 device flux
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -161,6 +161,8 @@ Boolean 不算數值。無效 offset、period、unit 或使用中的值會拋出
 三個入口都將沒有值的儀器視為不貢獻，忽略未校準的額外儀器。
 投影不使用選定儀器的當下值。輸入保持不變。
 Record 到這些型別的轉換由 resources 負責，Notebook 副軸使用同一投影入口。
+
+- `solve_device_values(frames, targets, device_names=..., fixed_values=...)` 依 ADR-0082 的 flux 公式，聯合求解多台儀器的原生值；未求解但出現在 frame 的儀器須明填固定值，目標不做 mod 1。
 
 `require_matching_device_unit(device_name, actual_unit, expected_unit)` 集中儀器單位的精確比對。
 缺單位以 None 表示，視為 native；native 只等於 native，mA 與 A 不換算。

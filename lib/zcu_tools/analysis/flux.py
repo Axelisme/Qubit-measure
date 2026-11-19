@@ -1,10 +1,13 @@
 """Linear multi-device flux coordinates, independent of records and components."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
 from numbers import Real
 from types import MappingProxyType
+
+import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import validate_device_name
 
@@ -111,6 +114,91 @@ def device_value_at_flux(
     return frame.devices[device_name].period * (target - other_flux)
 
 
+def solve_device_values(
+    frames: Mapping[str, FluxFrame],
+    targets: Mapping[str, float],
+    *,
+    device_names: Sequence[str],
+    fixed_values: Mapping[str, float],
+) -> dict[str, float]:
+    """Jointly solve the linear flux equations for the requested devices.
+
+    frames maps component names to FluxFrame calibrations. targets maps the
+    same names to fluxes in Phi0. Each target is used as written, not folded
+    modulo 1 or moved to a different branch.
+
+    device_names lists one distinct device name per target component. A
+    device absent from an individual frame has zero coupling to that component.
+    fixed_values maps every other device appearing in a frame to a value in
+    its native unit. Entries for solved devices or devices outside all frames
+    do not contribute. A device must have exactly the same unit string in
+    all frames that include it. All supplied values must be finite real
+    numbers; booleans are not numbers here.
+
+    Return only the solved device names and their native-unit values. Combine
+    them with the fixed values to evaluate flux_from_device_values. No inputs
+    change, and an empty system returns {}.
+
+    Raise ValueError for mismatched component keys or counts, duplicate solve
+    devices, missing fixed values, conflicting units, invalid numbers, or
+    failed numerical solves. The system is rejected as singular or nearly
+    singular if the 2-norm condition number of its native-unit coefficient
+    matrix (signed reciprocal periods, with zeros for absent devices) is
+    nonfinite or greater than 1e12.
+    """
+    if len(targets) != len(device_names):
+        raise ValueError(
+            f"expected one solve device per target component, got "
+            f"{len(device_names)} devices and {len(targets)} targets"
+        )
+    if frames.keys() != targets.keys():
+        missing_targets = sorted(frames.keys() - targets.keys())
+        missing_frames = sorted(targets.keys() - frames.keys())
+        raise ValueError(
+            f"frames and targets must name the same components "
+            f"(missing targets: {missing_targets}; missing frames: {missing_frames})"
+        )
+    solve_devices = set(device_names)
+    if len(solve_devices) != len(device_names):
+        raise ValueError(f"duplicate names in solve devices: {list(device_names)}")
+    _require_joint_frame_devices(frames, solve_devices.union(fixed_values))
+    fixed = {
+        name: _finite_value(value, field=f"device {name!r} fixed value")
+        for name, value in fixed_values.items()
+    }
+    for name in device_names:
+        fixed.pop(name, None)
+    if not device_names:
+        return {}
+
+    # ADR-0082: Each signed reciprocal period is a coupling in Phi0 per native unit.
+    coefficients = np.array(
+        [
+            [
+                1.0 / float(frame.devices[name].period)
+                if name in frame.devices
+                else 0.0
+                for name in device_names
+            ]
+            for frame in frames.values()
+        ],
+        dtype=np.float64,
+    )
+    remaining_flux = np.array(
+        [
+            _finite_value(targets[name], field=f"target flux for {name!r}")
+            - flux_from_device_values(frame, fixed)
+            for name, frame in frames.items()
+        ],
+        dtype=np.float64,
+    )
+    values = _solve_flux_equations(coefficients, remaining_flux)
+    return {
+        name: _finite_value(value, field=f"device {name!r} solution")
+        for name, value in zip(device_names, values, strict=True)
+    }
+
+
 def offset_for_flux(
     devices: Mapping[str, DevicePeriod],
     values: Mapping[str, float],
@@ -153,6 +241,46 @@ def require_matching_device_unit(
             f"Device {device_name!r} unit {actual!r} does not match "
             f"expected unit {expected!r}"
         )
+
+
+def _require_joint_frame_devices(
+    frames: Mapping[str, FluxFrame], covered_devices: set[str]
+) -> None:
+    """Require a value source and consistent native unit for each frame device."""
+    units: dict[str, str] = {}
+    for component, frame in frames.items():
+        for name, device in frame.devices.items():
+            if name not in covered_devices:
+                raise ValueError(
+                    f"component {component!r} device {name!r} needs a fixed value"
+                )
+            if name in units:
+                require_matching_device_unit(name, device.unit, units[name])
+            else:
+                units[name] = device.unit
+
+
+def _solve_flux_equations(
+    coefficients: NDArray[np.float64], remaining_flux: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Solve a finite, well-conditioned square system or raise ValueError."""
+    if not np.isfinite(coefficients).all():
+        raise ValueError("flux coefficients must be finite; check device periods")
+    if not np.isfinite(remaining_flux).all():
+        raise ValueError(
+            "remaining flux after applying offsets and fixed values must be finite"
+        )
+    try:
+        condition = float(np.linalg.cond(coefficients))
+        if not isfinite(condition) or condition > 1e12:
+            raise ValueError(
+                f"flux equations are singular or nearly singular (condition {condition:g})"
+            )
+        return np.asarray(
+            np.linalg.solve(coefficients, remaining_flux), dtype=np.float64
+        )
+    except np.linalg.LinAlgError as exc:
+        raise ValueError(f"could not solve flux equations: {exc}") from exc
 
 
 def _require_unit(value: object) -> None:

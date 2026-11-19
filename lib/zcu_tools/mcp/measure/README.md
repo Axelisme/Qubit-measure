@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-11-19，recipe 分階段寫回問答
+**Last updated:** 2026-11-19，recipe 分階段寫回問答與離線 flux 設定
 
 **讀者：** agent、framework-dev。查閱量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -120,6 +120,14 @@ Expression 使用 `{"expr": "<text>"}`。GUI 先把 edits 套到 template input�
 `recipe_guide(adapter)` 以明填的 adapter 名查詢 GUI `adapter.guide`，回傳 adapter 與 `guide: {markdown, resource_dir}`。Recipe 可以操作多個 adapter，工具不推測 recipe 到 adapter 的 mapping。Markdown 保留全文；resource_dir 是 GUI host 的絕對目錄字串，未宣告 guide 時是 null。Guide 中的圖片使用相對路徑，agent 需要時自行從該目錄讀取。工具不讀圖、不附圖；跨機 agent 可能無法存取這個路徑。全域 status 不讀或投影 installed predictor。
 
 `device_setup(name, cfg)` 接受 partial Info patch。工具先讀 before snapshot，合併 before.info 與 caller patch，再送一次完整 `device.setup(name, cfg)` RPC。Before Info 有 value_unit 欄位且 patch 含 value 時，caller 必須明填 value_unit，不能借 before 的 unit。這項規則同樣適用於 FakeDevice。只改 output／rampstep 不需要 unit。欄位必填、extra、mode/unit 與 limits 由 RPC 的同一 Info model validator 拒絕，connected admission 由 GUI DeviceService 擁有。儀器名稱、flux 規則與單位由 caller 和裝置 owner 決定。
+
+換工作點時，從目標 point 的 `parameters.yaml` 取各元件的 `components.<name>.flux`，使用 `offset` 與帶號的 `period`。
+離線腳本用 `from zcu_tools.analysis.flux import DevicePeriod, FluxFrame, solve_device_values`。
+為各元件建立 `FluxFrame(offset, {device: DevicePeriod(period, unit), ...})`，其中 `unit` 是該 period 的校準單位。
+以元件名為鍵組成 `frames` 與目標 Φ0 的 `targets`，再呼叫 `solve_device_values(frames, targets, device_names=..., fixed_values=...)`。
+`device_names` 列出要解的儀器名，台數須等於目標數；其餘有 period 的儀器須在 `fixed_values` 明填不變的原生值。
+若取值於 `device.snapshot` 的 `snapshot.info.value`，先確認該值使用校準單位。
+解算不寫硬體。核對回傳的儀器值與單位後，逐台呼叫 `device_setup(name, cfg)`，在 `cfg` 傳入解出的 `value`；若 Info 有 `value_unit`，一併明填校準單位。
 
 Raw RPC 以完整 cfg 非同步執行 setup。Caller 先讀 `device.snapshot`，修改完整 Info cfg，呼叫 `device.setup`，用 `wait(op)` 等待，再讀 snapshot。全部 model-required 欄位必須提供，default 欄位沿 Info constructor。YOKO mode 必填；raw RPC 可省略 value_unit，由 Info 依 mode 產生。這不取代固定工具對 value patch 的明填要求。
 
