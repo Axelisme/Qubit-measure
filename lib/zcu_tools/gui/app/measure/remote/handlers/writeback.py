@@ -11,11 +11,13 @@ from pydantic import TypeAdapter, ValidationError
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.services import TabAction
 from zcu_tools.gui.app.measure.writeback import (
+    ArbAssetWriteback,
     ModuleWriteback,
     ParameterWriteback,
     RecordWriteback,
     WritebackEdit,
     WritebackItem,
+    WritebackValues,
 )
 from zcu_tools.gui.app.measure.writeback.control import CapturedWritebackPane
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -55,7 +57,9 @@ def _writeback_wire_value(value: object) -> object:
         ) from exc
 
 
-def _writeback_item_wire(item: WritebackItem) -> dict[str, object]:
+def _writeback_item_wire(
+    item: WritebackItem, values: WritebackValues
+) -> dict[str, object]:
     base: dict[str, object] = {
         "id": item.session_id,
         "target_name": item.target_name,
@@ -68,6 +72,11 @@ def _writeback_item_wire(item: WritebackItem) -> dict[str, object]:
         base["kind"] = "parameter"
         base["create_kind"] = item.create_kind
         base["proposed_value"] = _writeback_wire_value(item.proposed_value)
+    elif isinstance(item, ArbAssetWriteback):
+        base["kind"] = "arb_asset"
+        base["proposed_value"] = _writeback_wire_value(values.proposed)
+        if values.warning is not None:
+            base["warning"] = values.warning
     elif isinstance(item, RecordWriteback):
         base["kind"] = "record"
         base["proposed_value"] = _writeback_wire_value(item.record)
@@ -140,7 +149,7 @@ def h_tab_writeback_preview(
         "has_draft": pane.has_writeback_draft,
         "items": [
             {
-                **_writeback_item_wire(item),
+                **_writeback_item_wire(item, values[item.session_id]),
                 "actual_path": values[item.session_id].actual_path,
                 "stderr": item.stderr,
                 "note": item.note,

@@ -33,9 +33,16 @@ from zcu_tools.gui.widgets import (
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
+from .contracts import ArbAssetValues
 from .edit_dialogs import WritebackEditDialogs, is_scalar_value, module_changes
 from .foregrounds import ThemedForegrounds
-from .items import ModuleWriteback, ParameterWriteback, RecordWriteback, WritebackItem
+from .items import (
+    ArbAssetWriteback,
+    ModuleWriteback,
+    ParameterWriteback,
+    RecordWriteback,
+    WritebackItem,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -253,7 +260,7 @@ class _WritebackRow(QFrame):
         self.arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._change.addWidget(self._cur, 2)
         self._change.addWidget(self.arrow)
-        self._change.addWidget(self._prop, 2)
+        self._change.addWidget(self._prop, 3 if proposed.wordWrap() else 2)
         self._outer.addLayout(self._heading)
         self._outer.addLayout(self._change)
         self._outer.addWidget(self._actual_path)
@@ -618,7 +625,7 @@ class WritebackWidget(QWidget):
         proposed_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
-        proposed_label.setWordWrap(False)
+        proposed_label.setWordWrap(isinstance(item, ArbAssetWriteback))
         if isinstance(item, RecordWriteback):
             proposed_label.setTextFormat(Qt.TextFormat.PlainText)
         table = None
@@ -636,7 +643,7 @@ class WritebackWidget(QWidget):
                 button.clicked, lambda _=False, it=item: self._edit_item(it)
             )
             return button
-        if isinstance(item, RecordWriteback) or (
+        if isinstance(item, (ArbAssetWriteback, RecordWriteback)) or (
             isinstance(item, ParameterWriteback)
             and not is_scalar_value(self._values[item.session_id].proposed)
         ):
@@ -725,11 +732,11 @@ class WritebackWidget(QWidget):
         self, item: WritebackItem, checkbox: QCheckBox
     ) -> None:
         applied = self._applied_states.get(item.session_id, False)
-        target = (
-            f"{item.target_name} · record"
-            if isinstance(item, RecordWriteback)
-            else item.target_name
-        )
+        target = item.target_name
+        if isinstance(item, RecordWriteback):
+            target += " · record"
+        elif isinstance(item, ArbAssetWriteback):
+            target += " · arb asset"
         checkbox.setText(target if applied else f"{target}*")
         font = checkbox.font()
         font.setBold(not applied)
@@ -747,12 +754,16 @@ class WritebackWidget(QWidget):
         if item.session_id in self._invalid_modules:
             return "Unavailable (invalid configuration)"
         values = self._values[item.session_id]
+        if isinstance(values, ArbAssetValues):
+            text = values.current or "—"
+            return (
+                f"{text}\n{values.warning}" if not compact and values.warning else text
+            )
         if isinstance(item, RecordWriteback):
             return "entry record"
         if isinstance(item, ModuleWriteback):
-            if not compact:
-                return self._module_tooltip(item)
-            return "new entry" if values.current is None else "library entry"
+            text = "new entry" if values.current is None else "library entry"
+            return text if compact else self._module_tooltip(item)
         if values.current is None:
             return "\u2014"
         current = (
@@ -767,15 +778,20 @@ class WritebackWidget(QWidget):
         if item.session_id in self._invalid_modules:
             return "Invalid configuration"
         values = self._values[item.session_id]
+        if isinstance(values, ArbAssetValues):
+            summary = values.proposed
+            return (
+                f"{summary['sample_count']} samples · {summary['duration_us']:.6g} µs"
+                f" · peak {summary['peak_abs']:.6g}"
+            )
         if isinstance(item, RecordWriteback):
             return _record_summary(item, compact=compact)
         if isinstance(item, ModuleWriteback):
             if not compact:
                 return self._module_tooltip(item)
             count = len(module_changes(values.current, values.proposed))
-            if count == 1:
-                return "1 change"
-            return f"{count} changes" if count else "no changes"
+            noun = "change" if count == 1 else "changes"
+            return f"{count} {noun}" if count else "no changes"
         proposed = (
             _compact_value(values.proposed) if compact else _full_value(values.proposed)
         )

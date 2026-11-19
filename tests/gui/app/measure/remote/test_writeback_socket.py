@@ -39,8 +39,10 @@ from tests.gui.app.measure._native_save_support import (
 )
 from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import (
+    ARB_PROPOSAL_KEY,
     MODULE_PROPOSAL_TARGET,
     MODULE_PROPOSAL_WAVEFORM,
+    ArbProposalAdapter,
     ModuleProposalAdapter,
     SampleAdapter,
     SampleAnalysis,
@@ -240,8 +242,10 @@ def _stored_pulse(**changes: object) -> PulseSpec:
     return PulseSpec.model_validate(fields | changes)
 
 
-def _analyzed_module_tab(fx: Fixture, sock) -> str:
-    tab = fx.ctrl.tab_control.new_tab("synthetic/module_writeback")
+def _analyzed_module_tab(
+    fx: Fixture, sock, name: str = "synthetic/module_writeback"
+) -> str:
+    tab = fx.ctrl.tab_control.new_tab(name)
     for operation in (
         lambda: fx.ctrl.run_analyze_control.start_run(tab),
         lambda: fx.ctrl.run_analyze_control.analyze(tab, SampleParams()),
@@ -283,6 +287,43 @@ def test_apply_writeback_tool_writes_module_proposal_by_id(
     assert receipt["status"] == "finished", receipt
     library = capture_focus(module_fixture.ctrl.context_control).library
     assert library.module_spec(MODULE_PROPOSAL_TARGET) == _stored_pulse(gain=0.3)
+
+
+def test_arb_writeback_preview_and_mcp_apply_by_asset_key(
+    module_fixture: Fixture, tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    fx = module_fixture
+    name = "synthetic/arb_writeback"
+    fx.registry.register(name, ArbProposalAdapter)
+    with open_client(fx.service.port) as sock:
+        tab = _analyzed_module_tab(fx, sock, name)
+        preview = call(
+            sock, "tab.writeback_preview", {"tab_id": tab, "subtab_id": "analysis"}
+        )
+    assert preview["ok"], preview
+    _, asset = preview["result"]["items"]
+    assert (asset["id"], asset["kind"], asset["target_name"]) == (
+        "arb-1",
+        "arb_asset",
+        ARB_PROPOSAL_KEY,
+    )
+    assert asset["current"] == "absent"
+    summary = {"sample_count": 3, "duration_us": 0.75, "peak_abs": 0.5}
+    assert asset["proposed_value"] == asset["proposed"] == summary
+    assert not {"samples", "time", "idata", "qdata"} & asset.keys()
+
+    _, invoke = mcp_client(fx.service.port, tmp_path, request=request)
+    invoke("connect", {"port": fx.service.port})
+    receipt = invoke("apply_writeback", {"tab": tab, "items": [ARB_PROPOSAL_KEY]})
+    assert receipt["status"] == "finished", receipt
+    (written,) = receipt["completed"][0]["written"]
+    assert written == {
+        "id": "arb-1",
+        "kind": "arb_asset",
+        "target": f"arb_waveforms/{ARB_PROPOSAL_KEY}",
+        "before": "absent",
+        "after": {"status": "created", "sample_count": 3, "duration_us": 0.75},
+    }
 
 
 def test_live_preview_and_explicit_apply_preserve_other_gui_selection(

@@ -96,6 +96,11 @@ class WaveformSamples:
     idata: NDArray[np.float64]
     qdata: NDArray[np.float64] | None
 
+    @property
+    def peak_abs(self) -> float:
+        """Return max |I + iQ| on the reference samples, treating absent Q as zero."""
+        return _peak_abs(self.idata, self.qdata)
+
 
 @dataclass(frozen=True)
 class WaveformFile:
@@ -160,10 +165,7 @@ def validate_samples(*, time: object, idata: object, qdata: object) -> WaveformS
             "time array must be strictly increasing",
             reason="time_not_strictly_increasing",
         )
-    magnitude = (
-        np.abs(idata_arr) if qdata_arr is None else np.hypot(idata_arr, qdata_arr)
-    )
-    peak = float(np.max(magnitude))
+    peak = _peak_abs(idata_arr, qdata_arr)
     if peak > 1.0:
         raise WaveformFormatError(
             f"waveform magnitude peak ({peak:.6g}) exceeds 1.0",
@@ -173,6 +175,10 @@ def validate_samples(*, time: object, idata: object, qdata: object) -> WaveformS
     if qdata_arr is not None and not np.any(qdata_arr):
         qdata_arr = None
     return WaveformSamples(time=time_arr, idata=idata_arr, qdata=qdata_arr)
+
+
+def _peak_abs(idata: NDArray[np.float64], qdata: NDArray[np.float64] | None) -> float:
+    return float(np.max(np.abs(idata) if qdata is None else np.hypot(idata, qdata)))
 
 
 def hash_samples(samples: WaveformSamples) -> str:

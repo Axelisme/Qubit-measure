@@ -153,6 +153,7 @@ Global target 的 point 為 None，參數與 library 編輯不改既有 point。
 Executor 不加入事件、來源或時間。Module／waveform 項目只交 Spec 給 library owner，不保存 per-leaf stderr 或來源。
 
 `ArbAssetWriteback(key, samples)` 發布 `WaveformSamples` 到 entry 的 `<database_path>/arb_waveforms`。
+`arb_asset_update_status(database_path, item)` 使用同一比較規則讀取當下狀態，不建立目錄或寫入。
 同一批的重複 key 在追加 accepted 前拒絕。Ledger 只記 `arb_waveforms/<key>` 和
 `{sample_count, duration_us}`；committed value 另含 `status`（`created` 或 `existing`）。
 [資產 owner](../waveform_assets.md) 在寫任何檔案前檢查整組。樣本相同保留原檔；同 key 樣本不同拒絕整組。

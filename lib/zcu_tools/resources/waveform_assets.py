@@ -81,9 +81,7 @@ class ArbWaveformDatabase:
         Invalid key grammar raises ArbWaveformError. Native conversion uses
         WaveformAssetInfo.path_for instead, which also checks file existence.
         """
-        db_path = self._root
-        _validate_data_key(data_key)
-        return db_path / f"{data_key}.npz"
+        return _asset_path(self._root, data_key)
 
     def exists(self, data_key: str) -> bool:
         return self.path_for(data_key).exists()
@@ -177,9 +175,10 @@ class ArbWaveformDatabase:
         ArbWaveformError. Then yield each confirmed status in order. An I/O
         error stops iteration and leaves any files already installed intact.
         """
-        planned = tuple(
-            self._prepare_publish(key, samples) for key, samples in assets.items()
-        )
+        planned: list[tuple[Path, ArbWaveformData | None]] = []
+        for key, samples in assets.items():
+            path = self.path_for(key)
+            planned.append((path, self._prepare_publish(path, samples)))
         for path, data in planned:
             if data is None:
                 yield "existing"
@@ -187,10 +186,29 @@ class ArbWaveformDatabase:
                 write_npz(path, data, replace=False)
                 yield "created"
 
+    @staticmethod
+    def publication_status_at(
+        directory: Path, data_key: str, samples: WaveformSamples
+    ) -> Literal["absent", "identical", "different"]:
+        """Compare a publication with the asset at directory without writing.
+
+        directory is the asset root, not the entry database root. The comparison
+        uses publish's key and sample validation and exact time/I/Q equality.
+        No directory is created. Invalid keys, samples, files and I/O raise.
+        """
+        path = _asset_path(directory.resolve(), data_key)
+        try:
+            data = ArbWaveformDatabase._prepare_publish(path, samples)
+        except ArbWaveformError as exc:
+            if exc.reason != "data_key_exists":
+                raise
+            return "different"
+        return "identical" if data is None else "absent"
+
+    @staticmethod
     def _prepare_publish(
-        self, data_key: str, samples: WaveformSamples
-    ) -> tuple[Path, ArbWaveformData | None]:
-        path = self.path_for(data_key)
+        path: Path, samples: WaveformSamples
+    ) -> ArbWaveformData | None:
         data = validate_payload(
             idata=samples.idata, qdata=samples.qdata, time=samples.time, recipe=None
         )
@@ -201,13 +219,13 @@ class ArbWaveformDatabase:
                 and np.array_equal(stored.idata, data.idata)
                 and np.array_equal(stored.qdata, data.qdata)
             ):
-                return path, None
+                return None
             raise ArbWaveformError(
-                f"Arbitrary waveform {data_key!r} already exists with different samples",
+                f"Arbitrary waveform {path.stem!r} already exists with different samples",
                 reason="data_key_exists",
-                data={"data_key": data_key},
+                data={"data_key": path.stem},
             )
-        return path, data
+        return data
 
     def import_data(
         self,
@@ -321,6 +339,11 @@ class ArbWaveformDatabase:
                 data={"data_key": new_data_key},
             )
         old_path.rename(new_path)
+
+
+def _asset_path(directory: Path, data_key: str) -> Path:
+    _validate_data_key(data_key)
+    return directory / f"{data_key}.npz"
 
 
 def _load_asset(path: Path) -> ArbWaveformData:

@@ -51,6 +51,7 @@ data = repository.load("my_pulse")
 | `list_entries()` | 列出 data key 加檔案 `mtime` / `file_size` |
 | `inspect(data_key)` | 載入單筆 asset 並即時計算 duration、sample count、peak Abs、recipe summary |
 | `load(data_key)` / `get(name)` | `load` 取得 `ArbWaveformData`；`get` 回傳 `(idata, qdata, time)`，Q channel 全為 0 時 `qdata` 為 `None` |
+| `publication_status_at(directory, data_key, samples)` | 依發布規則比較樣本，回 `absent`、`identical` 或 `different`，不寫檔或建立目錄 |
 | `publish(data_key, samples)` / `publish_batch(assets)` | 以 `WaveformSamples` 發布 raw NPZ，不存 recipe。單筆回 `created` 或 `existing`；批次依 mapping 順序產出狀態 |
 | `save(name, idata, time, qdata=None)` | Notebook 用的 raw 寫入；一律覆寫同名 asset，不寫 recipe（`qdata` 省略時存成全 0）。需要 collision 檢查時改用 `import_data(..., overwrite=False)` |
 | `create_from_formula(data_key, recipe, *, overwrite=False)` / `update_formula(data_key, recipe)` | 渲染 formula recipe，並把 arrays 與 recipe 寫進同一個 `.npz`。`create_from_formula` 在 key 已存在且 `overwrite=False` 時拋 `data_key_exists`；`update_formula` 只更新已存在的 asset，不存在時拋 not found。建立新 recipe 或依 recipe 重新渲染，只能經這兩個方法；`import_file` 例外，會原樣保存來源 `.npz` 已有的 recipe |

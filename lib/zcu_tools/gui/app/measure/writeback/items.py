@@ -10,6 +10,7 @@ from zcu_tools.core.element import ElementIdentity
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec
+    from zcu_tools.core.waveform_format import WaveformSamples
     from zcu_tools.resources.entry.ledger_models import JsonObject
 
 
@@ -86,3 +87,16 @@ class RecordWriteback(WritebackItem):
     """
 
     record: JsonObject
+
+
+@dataclass
+class ArbAssetWriteback(WritebackItem):
+    """Publish validated time/I/Q samples as the entry's arb asset target_name.
+
+    samples hold the reference time in microseconds and normalized I/Q. The
+    key can be referenced by module proposals in the same draft. Review can
+    change selection but cannot edit the key or samples. Apply never replaces
+    an existing asset.
+    """
+
+    samples: WaveformSamples

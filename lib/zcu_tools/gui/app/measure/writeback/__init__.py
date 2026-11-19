@@ -8,6 +8,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 from .items import (
+    ArbAssetWriteback,
     ModuleWriteback,
     ParameterWriteback,
     RecordWriteback,
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from .widget import WritebackWidget
 
 __all__ = [
+    "ArbAssetWriteback",
     "ModuleWriteback",
     "calibrated_module_writeback",
     "ParameterWriteback",

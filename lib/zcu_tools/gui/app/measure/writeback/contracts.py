@@ -33,19 +33,21 @@ class WritebackEdit:
     edits: Mapping[FormWritePath, JsonValue] | None = None
 
 
+type WritebackKind = Literal["parameter", "module", "record", "arb_asset"]
+
+
 @dataclass(frozen=True)
 class WritebackWritten:
     """Actual destination values around a successful context write.
 
-    id is the draft-local item ID. kind identifies parameter/module/record.
-    target is a concrete point path, library key or record component. before is
-    the latest stored value before application, or None when absent. after is the
-    value read after successful application. Record values are complete JSONL
-    rows, including accepted metadata, not the producer-only proposal fields.
+    id is the draft-local item ID. kind identifies the write owner. target is a
+    concrete destination. before is the preview of that destination before
+    application; for assets it is the sample comparison, not the samples.
+    after is the committed value. Record values are complete JSONL rows.
     """
 
     id: str
-    kind: Literal["parameter", "module", "record"]
+    kind: WritebackKind
     target: str
     before: object
     after: object
@@ -62,13 +64,31 @@ class WritebackValues:
     the creation capture and dumped in the same shape as a stored library
     entry. unit is the resources-provided static schema label for display only,
     or None for destinations without one (including ext and module items).
-    Values never convert.
+    Values never convert. warning gives any known Apply conflict; None means
+    no preview warning.
     """
 
     actual_path: str
     current: object
     proposed: object
     unit: str | None
+    warning: str | None = None
+
+
+class ArbAssetSummary(TypedDict):
+    """Sample count, reference duration (µs) and maximum |I + iQ|; no arrays."""
+
+    sample_count: int
+    duration_us: float
+    peak_abs: float
+
+
+@dataclass(frozen=True)
+class ArbAssetValues(WritebackValues):
+    """Arb asset preview with a typed summary instead of raw sample arrays."""
+
+    current: Literal["absent", "identical", "different"] | None
+    proposed: ArbAssetSummary
 
 
 @dataclass(frozen=True)
@@ -98,14 +118,14 @@ class WritebackDestination(TypedDict):
 class WritebackApplied:
     """One confirmed write captured at submission, never a later preview.
 
-    id is draft-local; kind is parameter/module/record. target is the concrete
-    path or record component. value is the actual stored value after the write.
+    id is draft-local; kind identifies the write owner. target is the concrete
+    destination. value is the owner's committed value, including asset status.
     destination identifies the fixed entry name within the current result root
     and the point that received it.
     """
 
     id: str
-    kind: Literal["parameter", "module", "record"]
+    kind: WritebackKind
     target: str
     value: object
     destination: WritebackDestination

@@ -6,7 +6,8 @@ from typing import Annotated, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase, PulseSpec, Range
+from zcu_tools.cfg_model import ArbWaveformCfg, ConfigBase, PulseSpec, Range
+from zcu_tools.core.waveform_format import validate_samples
 from zcu_tools.experiment import AxesSpec, ZSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -14,6 +15,7 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
+    ArbAssetWriteback,
     ModuleWriteback,
     ParameterWriteback,
     ParamMeta,
@@ -140,6 +142,48 @@ ModuleProposalAdapter = Adapter(
         writeback=ModuleProposalAdapter_get_writeback_items,
     ),
     post_analysis=SampleAdapter.post_analysis,
+)
+
+
+ARB_PROPOSAL_KEY = "optimized"
+
+
+def ArbProposalAdapter_get_writeback_items(
+    req: WritebackRequest[SampleRun, SampleAnalysis],
+) -> Sequence[WritebackItem]:
+    return [
+        ModuleWriteback(
+            MODULE_PROPOSAL_TARGET,
+            "Tuned pulse",
+            PulseSpec(
+                ch=0,
+                nqz=1,
+                freq=5000.0,
+                gain=req.analyze_result.peak,
+                waveform=ArbWaveformCfg(data=ARB_PROPOSAL_KEY),
+            ),
+        ),
+        ArbAssetWriteback(
+            ARB_PROPOSAL_KEY,
+            "Publish optimized I/Q",
+            validate_samples(
+                time=[0.0, 0.25, 0.75], idata=[0.0, 0.3, 0.0], qdata=[0.0, 0.4, 0.0]
+            ),
+        ),
+    ]
+
+
+ArbProposalAdapter = Adapter(
+    spec=SampleAdapter.spec,
+    make_form=SampleAdapter.make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=Analysis(
+        fn=SampleAdapter.analyze,
+        options=lambda source, env: SampleParams(),
+        writeback=ArbProposalAdapter_get_writeback_items,
+    ),
+    post_analysis=None,
 )
 
 

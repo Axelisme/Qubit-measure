@@ -53,7 +53,11 @@ from .module import (
     TwoPulseResetSpec,
 )
 from .partition import SpecPartition, partition_module_spec, partition_waveform_spec
-from .references import remap_module_references, remap_waveform_references
+from .references import (
+    module_arb_keys,
+    remap_module_references,
+    remap_waveform_references,
+)
 from .spec_types import (
     concrete_spec_types,
     is_module_spec_type,
@@ -115,6 +119,7 @@ __all__ = [
     "SpecPartition",
     "partition_module_spec",
     "partition_waveform_spec",
+    "module_arb_keys",
     "remap_module_references",
     "remap_waveform_references",
     "AbsModuleCfg",

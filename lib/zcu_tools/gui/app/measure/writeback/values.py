@@ -9,10 +9,11 @@ from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import DocumentSetRef
 from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.entry import document_value
-from zcu_tools.resources.entry.writeback import WritebackResult
+from zcu_tools.resources.entry import writeback as concrete
 
-from .contracts import WritebackApplied
-from .items import ParameterWriteback, RecordWriteback, WritebackItem
+from .assets import arb_asset_current
+from .contracts import WritebackApplied, WritebackKind
+from .items import ArbAssetWriteback, ParameterWriteback, RecordWriteback, WritebackItem
 
 if TYPE_CHECKING:
     from .service import WritebackDraft
@@ -25,6 +26,8 @@ def destination_path(item: WritebackItem, parameters: DocumentSetCapture) -> str
     target. Concrete parameter paths and module roots need no historical source;
     the destination owner validates them on read or application.
     """
+    if isinstance(item, ArbAssetWriteback):
+        return concrete.ArbAssetWriteback(item.target_name, item.samples).path
     if isinstance(item, RecordWriteback):
         return item.target_name
     if isinstance(item, ParameterWriteback):
@@ -72,6 +75,8 @@ def read_destination_value(
     be concrete. Records read the draft's run-specific row, not a module.
     Missing persistent targets and I/O errors propagate.
     """
+    if isinstance(item, ArbAssetWriteback):
+        return arb_asset_current(item, current)
     if isinstance(item, RecordWriteback) and draft.run_id is not None:
         target = current.target
         if target is None:
@@ -83,7 +88,7 @@ def read_destination_value(
 def applied_values(
     target: DocumentSetRef,
     items: tuple[WritebackItem, ...],
-    result: WritebackResult,
+    result: concrete.WritebackResult,
 ) -> tuple[WritebackApplied, ...]:
     """Associate the owner's ordered committed prefix with draft IDs/destination.
 
@@ -99,11 +104,7 @@ def applied_values(
         values.append(
             WritebackApplied(
                 id=item.session_id,
-                kind="record"
-                if isinstance(item, RecordWriteback)
-                else "parameter"
-                if isinstance(item, ParameterWriteback)
-                else "module",
+                kind=_item_kind(item),
                 target=committed.path,
                 value=deepcopy(committed.value),
                 destination={
@@ -113,3 +114,13 @@ def applied_values(
             )
         )
     return tuple(values)
+
+
+def _item_kind(item: WritebackItem) -> WritebackKind:
+    if isinstance(item, ArbAssetWriteback):
+        return "arb_asset"
+    if isinstance(item, RecordWriteback):
+        return "record"
+    if isinstance(item, ParameterWriteback):
+        return "parameter"
+    return "module"

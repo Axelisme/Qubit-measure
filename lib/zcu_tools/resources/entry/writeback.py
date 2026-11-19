@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -121,6 +121,11 @@ class ArbAssetWriteback:
     key: str
     samples: WaveformSamples
 
+    @property
+    def path(self) -> str:
+        """Return this asset's entry-relative ledger and receipt path (no I/O)."""
+        return f"arb_waveforms/{self.key}"
+
 
 type WritebackItem = (
     ParameterWriteback
@@ -169,9 +174,7 @@ def _asset_summary(item: ArbAssetWriteback) -> YamlMap:
 
 def _accepted_write(item: WritebackItem) -> AcceptedWrite:
     if isinstance(item, ArbAssetWriteback):
-        return AcceptedWrite(
-            path=f"arb_waveforms/{item.key}", value=_asset_summary(item)
-        )
+        return AcceptedWrite(path=item.path, value=_asset_summary(item))
     if isinstance(item, ParameterWriteback) and item.metadata is not None:
         TypeAdapter(YamlMap).validate_python(item.metadata, strict=True)
     if isinstance(item, ParameterWriteback):
@@ -378,6 +381,19 @@ def commit_library_updates(
                 kind = "waveform"
             actual.append(draft.snapshot().entry_value(item.path, kind=kind))
     return tuple(actual)
+
+
+def arb_asset_update_status(
+    database_path: Path, item: ArbAssetWriteback
+) -> Literal["absent", "identical", "different"]:
+    """Preview an entry-scoped publication without creating files or a directory.
+
+    database_path is the entry database root. Use the same sample comparison
+    as publication; invalid keys, samples, assets and I/O errors propagate.
+    """
+    return ArbWaveformDatabase.publication_status_at(
+        database_path / "arb_waveforms", item.key, item.samples
+    )
 
 
 def publish_arb_asset_updates(
