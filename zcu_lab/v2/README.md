@@ -22,7 +22,7 @@
 
 ## Two-qubit 實驗清單
 
-下表列出 18 個 GUI／MCP registry keys，與 `zcu_lab/definitions.py` 的明列註冊相同。每個連結指向該版 guide。兩版各有 cfg、Result、run 與 analyze，不用 mode 切換。
+下表列出九組成對的 GUI／MCP registry keys。每個連結指向該版 guide。兩版各有 cfg、Result、run 與 analyze，不用 mode 切換。另有單一入口 [`two_qubit/cz_optimize`](two_qubit/cz_optimize/guide.md)，以固定 depth 的 interleaved RB 存活率搜尋 CZ 的 I/Q 形狀與 local Z。該入口的 `reset` 欄位可選 mux herald。
 
 | 實驗 | 非 heralded key／guide | Heralded key／guide |
 | --- | --- | --- |
