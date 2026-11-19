@@ -200,7 +200,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 prog,
                 context.soc,
                 rounds=cfg.rounds,
-                processor=processor,
+                reducer=processor,
                 options=RunOptions(converter=np.copy),
                 **(acquire_kwargs or {}),
             )

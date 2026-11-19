@@ -110,7 +110,7 @@ with Schedule(signals, scope=context.scope) as sched:
 ### Schedule run acquisition
 
 `Schedule` 與 scan step 提供 `run_acquire(program, soc, ...)`、
-`run_acquire_summed(program, soc, processor=..., ...)` 與
+`run_acquire_summed(program, soc, reducer=..., ...)` 與
 `run_acquire_decimated(program, soc, ...)`，把轉換後的資料寫進 slot。
 `run_acquire_shots(program, soc, ...)` 則回傳 `program.get_raw()` 的逐 shot int64 buffers，
 不做轉換、不寫 slot，也不需要預建 buffer。四個方法都不建立 program。
@@ -120,8 +120,8 @@ Raw-shot 入口還要求 `get_raw()`；成功 acquire 後沒有 raw buffer 時�
 有[註冊遮罩來源](../../../program/README.md#registered-shot-masks)時，`run_acquire`
 將保留 shot 的 IQ 加總，再除以已完成輪次的總 shot 數。Converter 和 live update 都看不到來源消耗的讀取，
 也看不到只供遮罩使用的 ADC。`run_acquire` 拒絕原生 QICK `threshold` 與遮罩並用。
-`run_acquire_decimated` 需要沒有遮罩來源的 program；目前的 `run_acquire_summed` 與
-`run_acquire_shots` 介面不交付遮罩，也拒絕有來源的 program。這些錯誤在開始取數前拋出。
+`run_acquire_summed` 每輪將可見讀取及遮罩交給 reducer，由 reducer 更新累積狀態。
+`run_acquire_decimated` 與目前的 `run_acquire_shots` 不交付遮罩，在取數前拒絕有來源的 program。
 
 `run_acquire_shots` 每次只執行一輪，`rounds` 省略或設為整數 1，其他值在入口拋出
 `ValueError`。多輪 raw shots 由 caller 的 host loop 重複呼叫。
@@ -139,7 +139,7 @@ program 層無前綴的 `acquire*` 只取數並回傳，不承擔 slot/live upda
 Schedule stop_condition。
 Integrated 的預設 converter 只接受單一 ADC、每 shot 單一 read，並將 IQ 轉成複數。
 多 ADC 或多 read 時拋出 `ValueError`，訊息列出 ADC 數與各 ADC 的 read 數，要求提供
-`RunOptions(converter=...)`。Summed 直接寫入累積總和。Decimated 的預設 converter
+`RunOptions(converter=...)`。Summed 直接寫入 reducer 的輸出。Decimated 的預設 converter
 只接受單一 ADC，將 IQ 轉成複數並保留全部 repetition／read／sample 軸；多 ADC 時
 拋出 `ValueError`，訊息列出 ADC 數並要求提供 converter。
 

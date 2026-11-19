@@ -170,7 +170,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 step.run_acquire_summed(
                     prog,
                     soc,
-                    processor=shot_sums(prog, [IQ("readout", order=3)]),
+                    reducer=shot_sums(prog, [IQ("readout", order=3)]),
                     options=RunOptions(
                         converter=lambda sums: snr_as_signal(
                             sums,

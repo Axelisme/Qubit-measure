@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-19，generator envelope 共用
+**Last updated:** 2026-11-20，generator envelope 共用
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -216,8 +216,8 @@ ADC-named ValueError. Its normalized raw ADC coordinates retain IQ offset.
 axes. Labels use emit tags or untagged module names. Mux axes select the cfg tone position. Each Classify axis
 snapshots its explicit or cfg classifier. Circle emits g/e/other, linear g/e,
 and centroid3 g/e/f. Circle requires a GE Post radius.
-The processor sums ordered shot-vector outer products across reps, and
-`acquire_summed` adds completed rounds without normalization.
+The reducer sums ordered shot-vector outer products from kept shots across
+completed rounds without normalization.
 `split_sums` converts a final IQ axis into counts and complex means.
 Zero or unmeasured NaN counts give NaN means without divide warnings.
 

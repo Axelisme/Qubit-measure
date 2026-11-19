@@ -20,7 +20,7 @@ from zcu_tools.experiment.v2.runtime.acquisition import (
     default_raw2signal_fn,
     require_positive_rounds,
 )
-from zcu_tools.program.acquisition import ImproveAcquireMixin, ShotSumProcessor
+from zcu_tools.program.acquisition import ImproveAcquireMixin, ShotReducer
 
 if TYPE_CHECKING:
     from zcu_tools.experiment.v2.runtime.schedule import Schedule, ScheduleStep
@@ -141,17 +141,17 @@ class DecimatedProgram(Protocol[T_Raw_co]):
 class SummedProgram(Protocol):
     """Producer requiring only joint-ADC acquire_summed.
 
-    processor maps normalized ADC-keyed (points, reps, reads, 2) IQ to float64
-    (points, *axes). Return cumulative unnormalized (*point_dims, *axes) sums,
+    reducer receives normalized visible ADC IQ and a (points, reps) keep mask.
+    Return the reducer's (*point_dims, *axes) output on the completed state,
     or None only in unsupported stepped mode. Round hooks, cancellation and
     failures follow IntegratedProgram's synchronous contract.
     """
 
-    def acquire_summed(
+    def acquire_summed[State](
         self,
         soc: object,
         *,
-        processor: ShotSumProcessor,
+        reducer: ShotReducer[State],
         rounds: int = 1,
         step_rounds: bool = False,
         **qick_options: object,
@@ -309,33 +309,30 @@ class RunAcquisitionMixin(ABC):
             acquire_kwargs=qick_options,
         )
 
-    def run_acquire_summed(
+    def run_acquire_summed[State](
         self,
         program: SummedProgram,
         soc: object,
         *,
-        processor: ShotSumProcessor,
+        reducer: ShotReducer[State],
         options: RunOptions[NDArray[np.float64]] | None = None,
         **qick_options: object,
     ) -> SignalArray:
-        """Acquire shot sums, write this scope's slot and trigger live updates.
+        """Reduce shot rounds, write this scope's slot and trigger live updates.
 
         Run means slot/live updates, automatic retry via options.retry, and
         data-driven stopping via options.stop_condition. Native program acquire
         only returns data; this method owns the Schedule run side effects.
         Requires an active Schedule and a writable default SignalBuffer slot.
-        program needs only acquire_summed; soc is its transport. processor maps
-        normalized ADC-keyed (points, reps, reads, 2) IQ to float64 (points, *axes).
+        program needs only acquire_summed; soc is its transport. Each completed
+        round updates reducer state with normalized visible ADC IQ and a keep mask.
         options selects retry/progress/stop and conversion; converter=None writes
-        cumulative and final sums directly without averaging. Native qick_options
+        reducer output directly without averaging. Native qick_options
         are forwarded. rounds defaults to one and must be a positive integer
         excluding bool. Return the live slot, retaining completed rounds on
         cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
         None producer results, conversion and update failures propagate without retry.
-        Registered shot mask sources raise ValueError before acquire because the
-        processor interface does not receive a mask.
         """
-        _reject_shot_masks(program, "run_acquire_summed")
         owner = self._acquisition_owner
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
 
@@ -349,5 +346,5 @@ class RunAcquisitionMixin(ABC):
             rounds=rounds,
             signal_fn=convert,
             options=acquire_options,
-            acquire_kwargs=dict(qick_options, processor=processor),
+            acquire_kwargs=dict(qick_options, reducer=reducer),
         )

@@ -112,7 +112,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         params = self.acquire_params
         self._simulation_needs_raw = (
             self.has_shot_mask_sources
-            or self._sum_processor is not None
+            or self._shot_reduction is not None
             or params.get("threshold") is not None
         )
         self._simulation_normalization: list[tuple[int | None, float | None]] = []
@@ -295,7 +295,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         QICK threshold/angle projects normalized shots into excited fraction I
         and zero Q. Registered shot masks hide consumed reads and mask-only
         ADCs, use host shot averaging and reject native threshold projection.
-        Masks and shot-sum processors materialize each round's retained raw
+        Masks and shot reducers materialize each round's retained raw
         source through the same pipeline as hardware.
         True step_rounds prepares hardware and returns None; SimulationSoc raises
         ValueError before admission. Extra positional options or a dynamic bool

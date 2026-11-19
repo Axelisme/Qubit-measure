@@ -208,7 +208,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             sched.run_acquire_summed(
                 program,
                 soc,
-                processor=shot_sums(program, [axis]),
+                reducer=shot_sums(program, [axis]),
                 rounds=cfg.rounds,
             )
             sched.trigger_update(flush=True)

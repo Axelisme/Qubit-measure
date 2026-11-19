@@ -18,6 +18,7 @@ from zcu_tools.simulate.boundary import (
 
 from tests.program._acquisition_soc import AcquisitionSoc
 from tests.program._profiles import load_soccfg
+from tests.program._shot_reduction import SumRounds
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import FixedRawShots, raw_of, request_of
 
@@ -133,10 +134,10 @@ def test_summed_materializes_retained_shots_matching_hardware(monkeypatch):
         ro["iq_offset"] = 7.0
     try:
         expected = hardware.acquire_summed(
-            soc, processor=processor, progress=False, rounds=2
+            soc, reducer=SumRounds(processor), progress=False, rounds=2
         )
         actual = prog.acquire_summed(
-            env.soc, processor=processor, progress=False, rounds=2
+            env.soc, reducer=SumRounds(processor), progress=False, rounds=2
         )
         assert expected is not None and actual is not None
         assert actual.shape == (2, 3, 3)

@@ -10,19 +10,38 @@ from numpy.typing import NDArray
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 
 from tests.program._acquisition_soc import make_chunk_acquisition
+from tests.program._shot_reduction import SumRounds
 
 
-def test_summed_snapshots_reused_processor_output_buffers() -> None:
-    soc, prog = make_chunk_acquisition()
-    payload = np.zeros((1, 2), dtype=np.float64)
+class _InPlaceCount:
+    def start(self) -> NDArray[np.float64]:
+        return np.zeros((1, 2), dtype=np.float64)
 
-    def processor(iq):
-        payload[:] += 1
-        return payload
+    def add(
+        self,
+        state: NDArray[np.float64],
+        shots: Mapping[int, NDArray[np.float64]],
+        mask: NDArray[np.bool_],
+    ) -> NDArray[np.float64]:
+        state += mask.sum()
+        return state
 
-    np.testing.assert_array_equal(
-        prog.acquire_summed(soc, processor=processor, rounds=2, progress=False), [3, 3]
+    def output(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        return state
+
+
+def test_summed_snapshots_reused_reducer_output_buffers() -> None:
+    soc, prog = make_chunk_acquisition(reps=2)
+    hooks = []
+    result = prog.acquire_summed(
+        soc,
+        reducer=_InPlaceCount(),
+        rounds=2,
+        progress=False,
+        round_hook=lambda count, data, stop: hooks.append(data),
     )
+    np.testing.assert_array_equal(hooks, [[2, 2], [4, 4]])
+    np.testing.assert_array_equal(result, [4, 4])
 
 
 def test_unswept_scalar_sums_and_later_decimated_acquisition(
@@ -30,7 +49,7 @@ def test_unswept_scalar_sums_and_later_decimated_acquisition(
 ) -> None:
     soc, prog = make_chunk_acquisition(reps=2)
     result = prog.acquire_summed(
-        soc, processor=lambda iq: np.array([2.0]), rounds=2, progress=False
+        soc, reducer=SumRounds(lambda iq: np.array([2.0])), rounds=2, progress=False
     )
     np.testing.assert_array_equal(result, np.array(4.0))
     monkeypatch.setattr(
@@ -74,7 +93,7 @@ def test_summed_discards_incomplete_round_and_keeps_completed_rounds(
     def acquire():
         result = prog.acquire_summed(
             soc,
-            processor=lambda iq: iq[0][:, :, 0].sum(axis=1),
+            reducer=SumRounds(lambda iq: iq[0][:, :, 0].sum(axis=1)),
             rounds=2,
             progress=False,
             step_rounds=stepped,
@@ -109,13 +128,13 @@ def test_summed_discards_incomplete_round_and_keeps_completed_rounds(
         [[1.0]],
     ],
 )
-def test_summed_rejects_invalid_processor_outputs_without_hooks(payload) -> None:
+def test_summed_rejects_invalid_reducer_outputs_without_hooks(payload) -> None:
     soc, prog = make_chunk_acquisition()
     hooks = []
     with pytest.raises(ValueError, match="expected.*actual"):
         prog.acquire_summed(
             soc,
-            processor=lambda iq: payload,
+            reducer=SumRounds(lambda iq: payload),
             progress=False,
             round_hook=lambda count, data, stop: hooks.append(count),
         )
@@ -135,26 +154,34 @@ def test_summed_rejects_qick_processing_options(options: _RejectedOptions) -> No
     soc, prog = make_chunk_acquisition()
     option = next(iter(options))
     with pytest.raises(ValueError, match=rf"expected.*{option}.*actual"):
-        prog.acquire_summed(soc, processor=lambda iq: np.ones((1, 2)), **options)
+        prog.acquire_summed(
+            soc, reducer=SumRounds(lambda iq: np.ones((1, 2))), **options
+        )
 
 
 def test_summed_rejects_shape_changes_and_resets_on_next_acquire() -> None:
-    soc, prog = make_chunk_acquisition()
-    outputs = iter([np.ones((1, 2)), np.ones((1, 3))])
+    soc, prog = make_chunk_acquisition(reps=1)
+
+    class ChangingOutput(_InPlaceCount):
+        def output(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+            return np.ones((1, 2 if state[0, 0] == 1 else 3))
+
     hooks = []
     with pytest.raises(
         ValueError, match=r"expected shape \(1, 2\).*actual shape \(1, 3\)"
     ):
         prog.acquire_summed(
             soc,
-            processor=lambda iq: next(outputs),
+            reducer=ChangingOutput(),
             rounds=2,
             progress=False,
             round_hook=lambda count, data, stop: hooks.append(count),
         )
     assert hooks == [1]
     np.testing.assert_array_equal(
-        prog.acquire_summed(soc, processor=lambda iq: np.ones((1, 3)), progress=False),
+        prog.acquire_summed(
+            soc, reducer=SumRounds(lambda iq: np.ones((1, 3))), progress=False
+        ),
         [1, 1, 1],
     )
 
@@ -181,7 +208,7 @@ def test_summed_normalizes_moves_reps_and_adds_rounds(
 
     result = prog.acquire_summed(
         soc,
-        processor=process,
+        reducer=SumRounds(process),
         rounds=2,
         progress=False,
         round_hook=lambda count, data, stop: hooks.append((count, data.copy())),

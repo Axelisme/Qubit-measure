@@ -1,6 +1,6 @@
 """Compile read labels into joint shot-vector outer-product sums."""
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Literal
@@ -10,7 +10,8 @@ from numpy.typing import NDArray
 from qick.asm_v2 import QickParam, Trigger
 
 from zcu_tools.cfg_model import ReadoutClassifier
-from zcu_tools.program.acquisition import ShotSumProcessor
+from zcu_tools.program._shot_processing import AdditiveShotReducer, ShotIQ
+from zcu_tools.program.acquisition import ShotReducer
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import MuxReadout, PulseReadout, classification_processor
@@ -62,8 +63,8 @@ class Classify:
 
 def shot_sums(
     prog: TimelineProgramV2, axes: Sequence[Classify | IQ]
-) -> ShotSumProcessor:
-    """Resolve compiled read labels and return a per-point shot-sum processor.
+) -> ShotReducer[NDArray[np.float64]]:
+    """Resolve compiled read labels and return a per-point shot-sum reducer.
 
     prog is a compiled TimelineProgramV2. axes lists vectors
     in output-axis order. IQ includes all moments through its requested order;
@@ -82,11 +83,10 @@ def shot_sums(
     QICK rejects duplicate explicit tags at compile time with RuntimeError.
     Classify snapshots its override or cfg classifier; missing
     calibration, missing circle radius and invalid tone selection raise ValueError.
-    The returned processor accepts ADC-keyed float64 arrays shaped
-    (points, reps, logical_reads, 2) and returns (points, *axes), summing outer
-    products over reps. IQ NaNs propagate through their moments. It borrows inputs without
-    mutation and rejects read-count changes; neither construction nor processing
-    modifies the program's declared reads_per_shot.
+    The reducer borrows ADC-keyed float64 (points, reps, logical_reads, 2)
+    arrays and accumulates (points, *axes) outer-product sums of kept shots.
+    IQ NaNs in kept shots propagate. The reducer rejects read-count changes
+    and does not modify its input or the program's declared reads_per_shot.
     """
     if not axes:
         raise ValueError("axes must contain at least one read")
@@ -101,7 +101,7 @@ def shot_sums(
             _check_path_read(axis, labels, other_labels, reference, path)
     counts = {ch: counts[ch] for ch, _, _ in resolved}
 
-    def process(iq: Mapping[int, NDArray[np.float64]]) -> NDArray[np.float64]:
+    def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
         for ch, count in counts.items():
             actual = iq[ch].shape
             if len(actual) != 4 or actual[2] != count or actual[-1] != 2:
@@ -121,9 +121,12 @@ def shot_sums(
             )
         if product is None:
             raise ValueError("axes must contain at least one read")
-        return product.sum(axis=1, dtype=np.float64)
+        if mask.all():
+            return product.sum(axis=1, dtype=np.float64)
+        kept = mask.reshape(*mask.shape, *((1,) * (product.ndim - 2)))
+        return product.sum(axis=1, dtype=np.float64, where=kept)
 
-    return process
+    return AdditiveShotReducer(round_sums)
 
 
 type _LabelReads = dict[str, list[tuple[PulseReadout | MuxReadout, dict[int, int]]]]

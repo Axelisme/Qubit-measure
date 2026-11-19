@@ -171,7 +171,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             sched.run_acquire_summed(
                 program,
                 soc,
-                processor=shot_sums(program, [IQ("readout", order=3)]),
+                reducer=shot_sums(program, [IQ("readout", order=3)]),
                 rounds=cfg.rounds,
                 options=RunOptions(
                     converter=lambda sums: snr_as_signal(

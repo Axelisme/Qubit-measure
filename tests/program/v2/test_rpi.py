@@ -12,6 +12,7 @@ from zcu_tools.program.v2.modules import ConstWaveformCfg
 
 from tests.program._acquisition_soc import AcquisitionSoc
 from tests.program._profiles import load_soccfg
+from tests.program._shot_reduction import reduce_round
 
 
 def rpi_builder(*, reps: int = 3, points: int = 2, reps_innermost: bool = True):
@@ -88,7 +89,7 @@ def test_rep_cycles_match_each_pair_without_mutation(reads: int):
     iq += np.array([10.0, -30.0, 70.0])[None, :, None, None]
     original = iq.copy()
     process = v2.rpi_sums(rpi_program(reads=reads), "sample")
-    actual = process({0: iq})
+    actual = reduce_round(process, {0: iq})
     expected = np.stack([pair_oracle(list(point)) for point in iq])
     assert actual.shape == (2, 35)
     assert actual.dtype == np.float64
@@ -107,8 +108,9 @@ def test_producer_summary_can_analyze_seeded_alternating_iq():
     signs = np.cumprod(np.where(rng.random(length) < 0.875, -1.0, 1.0))
     iq = rng.normal(size=(length, 2))
     iq[:, 0] += 3 * signs
-    record = v2.rpi_sums(rpi_program(reps=4096, points=1), "sample")(
-        {0: iq.reshape(1, 4096, 16, 2)}
+    record = reduce_round(
+        v2.rpi_sums(rpi_program(reps=4096, points=1), "sample"),
+        {0: iq.reshape(1, 4096, 16, 2)},
     )
     result = rpi_analysis(RPiSums.from_processor(record[0]))
     assert result.valid, result.invalid_reasons
@@ -120,7 +122,9 @@ def test_pooled_rounds_decode_to_saved_summary_and_public_analysis():
     rng = np.random.default_rng(938)
     rounds = [rng.normal(size=(2, 3, 16, 2)) for _ in range(2)]
     process = v2.rpi_sums(rpi_program(), "sample")
-    pooled = process({0: rounds[0]}) + process({0: rounds[1]})
+    pooled = reduce_round(process, {0: rounds[0]}) + reduce_round(
+        process, {0: rounds[1]}
+    )
     original = pooled.copy()
     for point in range(2):
         expected = pair_oracle([rep for iq in rounds for rep in iq[point]])
@@ -164,7 +168,9 @@ def test_compiled_loop_order_requires_innermost_reps_only_for_multiple_settings(
         with pytest.raises(ValueError, match="reps_innermost=True"):
             v2.rpi_sums(prog, "sample")
     else:
-        result = v2.rpi_sums(prog, "sample")({0: np.ones((points, 3, 16, 2))})
+        result = reduce_round(
+            v2.rpi_sums(prog, "sample"), {0: np.ones((points, 3, 16, 2))}
+        )
         np.testing.assert_array_equal(result[:, 1], np.full(points, 48))
         np.testing.assert_array_equal(result[:, 20], np.full(points, 45))
 
@@ -204,7 +210,7 @@ def test_compiled_readout_provenance_requires_one_fixed_complete_chain(mismatch:
 def test_processor_rejects_incoming_round_shape_or_dtype_mismatch(shape, dtype):
     process = v2.rpi_sums(rpi_program(), "sample")
     with pytest.raises(ValueError, match="ADC 0.*expected.*actual"):
-        process({0: np.ones(shape, dtype=dtype)})
+        reduce_round(process, {0: np.ones(shape, dtype=dtype)})
 
 
 def test_read_label_and_selected_adc_are_required_without_mutating_declarations():
@@ -213,10 +219,11 @@ def test_read_label_and_selected_adc_are_required_without_mutating_declarations(
         v2.rpi_sums(prog, "absent")
     process = v2.rpi_sums(prog, "sample")
     with pytest.raises(KeyError, match="0"):
-        process({1: np.zeros((2, 3, 16, 2))})
+        reduce_round(process, {1: np.zeros((2, 3, 16, 2))})
     selected = np.ones((2, 3, 16, 2))
     np.testing.assert_array_equal(
-        process({0: selected, 1: selected * 100}), process({0: selected})
+        reduce_round(process, {0: selected, 1: selected * 100}),
+        reduce_round(process, {0: selected}),
     )
     assert prog.ro_chs[0]["trigs"] == 16
 
@@ -259,7 +266,7 @@ def test_acquire_summed_transport_chunks_and_round_resets_preserve_completed_cyc
     hooks = []
     result = prog.acquire_summed(
         soc,
-        processor=v2.rpi_sums(prog, "sample"),
+        reducer=v2.rpi_sums(prog, "sample"),
         rounds=2,
         step_rounds=stepped,
         progress=False,
@@ -315,7 +322,7 @@ def test_rpi_cancel_before_first_completed_round_has_no_saved_summary(
     def acquire():
         prog.acquire_summed(
             soc,
-            processor=v2.rpi_sums(prog, "sample"),
+            reducer=v2.rpi_sums(prog, "sample"),
             rounds=1,
             step_rounds=stepped,
             progress=False,

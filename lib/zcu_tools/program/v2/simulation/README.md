@@ -453,19 +453,19 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   hit. Certificates live with the SoC and do not cross the acquisition/backend boundary.
   Fixed request layouts and integrated normalization metadata are prepared once
   per acquire; this never freezes snapshots or certifies later backend values.
-  Without registered shot masks, a processor or a threshold, it divides totals
+  Without registered shot masks, a reducer or a threshold, it divides totals
   by reps and readout length, removes QICK offsets and moves reads first without
   allocating `acc_buf`. Registered sources materialize raw IQ for each completed
   round and use the same [host masked average](../../README.md#registered-shot-masks)
   as hardware. Hooks receive the running mean of completed rounds.
   Every `acquire_summed` round materializes retained raw shots and uses the
-  same joint-ADC processor and accumulation path as hardware. The processor
-  receives ADC-keyed float64 `(points, reps, reads, 2)` normalized IQ without
-  IQ-offset subtraction. It returns `(points, *axes)` sums; completed rounds
-  add without normalization. Compact totals do not determine these sums.
+  same stateful reducer as hardware. Each round supplies visible ADCs as
+  float64 `(points, reps, reads, 2)` IQ without offset subtraction, along with
+  the bool `(points, reps)` keep mask. Compact totals alone do not determine
+  either the normalized per-shot IQ or the mask.
   Herald and terminal reads retain paired outcome histories. Read-axis labels
   and classifiers follow the [program contract](../../README.md#summed-acquisition).
-  Round hooks and the Schedule converter receive accumulated sums, not averages.
+  Round hooks and the Schedule converter receive reducer outputs without averaging.
   Readout optimization uses the same `acquire_summed` path with third-order IQ sums.
   Thresholding and `get_raw()` also materialize deterministic
   int64 shots from the retained last-round source. The environment owns signal,

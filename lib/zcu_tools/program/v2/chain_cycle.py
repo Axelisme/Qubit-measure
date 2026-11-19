@@ -1,13 +1,16 @@
 """Per-cycle augmented moment sums for sixteen ordered pulse reads."""
 
-from collections.abc import Mapping
-
 import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import Trigger
 
 from zcu_tools.core.chain_cycle_groups import pair_group, same_read_group
-from zcu_tools.program.acquisition import ShotSumProcessor
+from zcu_tools.program._shot_processing import (
+    AdditiveShotReducer,
+    ShotIQ,
+    zero_rejected_iq,
+)
+from zcu_tools.program.acquisition import ShotReducer
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
@@ -20,7 +23,9 @@ from .readout_observation import (
 from .timeline import TimelineProgramV2
 
 
-def chain_cycle_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
+def chain_cycle_sums(
+    prog: TimelineProgramV2, read: str
+) -> ShotReducer[NDArray[np.float64]]:
     """Resolve one pulse-readout owner and sum 65 cycle statistics over reps.
 
     prog is a built TimelineProgramV2. read is an emit tag, or the module name
@@ -38,9 +43,9 @@ def chain_cycle_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     are checked here, not D placement or thermalisation. A different operation
     order gives the following sums a different meaning.
 
-    The processor borrows ADC-keyed float64 (points, reps, 16, 2) IQ arrays,
-    without mutation, and returns float64 (points, 66, 66) sums of z zᵀ over
-    reps, where z = (1, s) and s has these zero-based slots:
+    The reducer borrows ADC-keyed float64 (points, reps, 16, 2) IQ arrays.
+    It accumulates float64 (points, 66, 66) sums of z zᵀ over kept reps,
+    where z = (1, s) and s has these zero-based slots:
 
     * 0:32: I,Q for each read in time order.
     * 32:41: I²,IQ,Q² summed over read 0; reads 2,4,...,14; reads 1,3,...,15.
@@ -51,7 +56,7 @@ def chain_cycle_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
 
     Output [0,0] counts cycles, [0,1:] contains the 65 sums, and [1:,1:]
     contains their product sums. No within-group or rep normalization is
-    applied; acquire_summed adds completed rounds.
+    applied. The reducer adds completed rounds.
 
     Missing/ambiguous labels, unsupported read/control structure, extra
     triggers, and declared or incoming read/IQ shape mismatches raise
@@ -60,14 +65,15 @@ def chain_cycle_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     """
     ch = _resolve_cycle(prog, read)
 
-    def process(iq: Mapping[int, NDArray[np.float64]]) -> NDArray[np.float64]:
+    def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
         values = iq[ch]
         if values.ndim != 4 or values.shape[2:] != (16, 2):
             raise ValueError(
                 f"ADC {ch}: expected (points, reps, 16, 2); actual {values.shape}"
             )
+        values = zero_rejected_iq(values, mask)
         vectors = np.zeros((*values.shape[:2], 66), dtype=np.float64)
-        vectors[..., 0] = 1
+        vectors[..., 0] = mask
         vectors[..., 1:33] = values.reshape(*values.shape[:2], 32)
         i, q = values[..., 0], values[..., 1]
         for group in range(3):
@@ -94,7 +100,7 @@ def chain_cycle_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
                 )
         return np.einsum("pri,prj->pij", vectors, vectors)
 
-    return process
+    return AdditiveShotReducer(round_sums)
 
 
 def _resolve_cycle(prog: TimelineProgramV2, read: str) -> int:

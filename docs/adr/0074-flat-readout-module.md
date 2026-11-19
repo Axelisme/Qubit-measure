@@ -95,7 +95,7 @@ Linear 輸出 [g,e]，旋轉後實部大於 threshold 判 excited，等於時判
 Centroid3 輸出 [g,e,f]，每 shot 選 Euclidean 距離最近的中心，等距時依 g/e/f 順序選第一個，沒有拒判區。
 F 不代表 circle 的 other。
 普通 `acquire` 保留原生 IQ 與 QICK threshold／angle，不提供 host classify 或 herald option。
-分類取數的 processor、累加與保存分工見下節 [Shot sums 與 heralding](#shot-sums-與-heralding)。
+分類取數的 reducer、累加與保存分工見下節 [Shot sums 與 heralding](#shot-sums-與-heralding)。
 使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 三態 reference 只用 acquired IQ 與 preparation labels 建立中心及 training confusion。
@@ -106,11 +106,11 @@ Training confusion 包含準備污染，correction 回到 preparation-label 座�
 STIRAP 的 [delay](../../zcu_lab/v2/twotone/stirap/delay/guide.md)、[amplitude](../../zcu_lab/v2/twotone/stirap/amplitude/guide.md)、[detuning](../../zcu_lab/v2/twotone/stirap/detuning/guide.md) 與單頻 [g↔f Raman](../../zcu_lab/v2/twotone/raman_gf/guide.md) 從該次 run 保存的 readout cfg 要求 centroid3。
 缺少 classifier、型別不符或未知 ADC 明確失敗，不退回 circle、不從 live library 補值、不讀 simulator truth。
 校準沿 Spec、native cfg、library 與 data.h5 的 run cfg 保存，不另建 experiment calibration storage。
-Reference 分析與 centroid3 processor 共用 `utils.shot_classification` 的最近中心規則。
+Reference 分析與 centroid3 分類共用 `utils.shot_classification` 的最近中心規則。
 
 2026-10-29，使用者對三態校準交接選 A，答「3A」：新增 readout classifier 型別，由三態 reference Apply 到 library，後續實驗讀 saved run cfg。
 同日，對沿用 QICK 的 float64 I/Q 分量或先轉成 complex128 的選項，使用者回答：「我想推進Program設計一致性，選A」。
-Processor 接收 I/Q 分量，需要複數運算時自行轉換。`acquire_decimated` 不變。
+Reducer 接收 I/Q 分量，需要複數運算時自行轉換。`acquire_decimated` 不變。
 原先每 ADC 一個 processor、單一 payload 軸與框架取平均的方案，由 2026-10-30 的 shot-sums 契約取代。
 
 單 qubit GE Primary 提出只有中心的 circle，Post 提出含中心、radius 與 matrix 的完整 circle。
@@ -144,25 +144,27 @@ Caller 自行準備原生 projection 參數，readout 不提供缺少校準時�
 
 ### Shot sums 與 heralding
 
-`acquire_summed` 接受單一 processor，同時交付所有已宣告 ADC 的正規化 IQ。
-輸入以 ADC channel 為 key，每個陣列是 float64 `(points, reps, reads, 2)`。
-Processor 每點回傳一個總和陣列，框架只累加已完成 round 的回傳值，不除以 reps 或 rounds。
-硬體與模擬使用同一條 processor 與累加路徑。
+2026-11-20，逐輪回傳總和的介面改為單一 `ShotReducer[State]`。
+框架以 `start()` 建立 state，每輪完成後呼叫 `add(state, shots, mask)` 並保存新 state。
+硬體與模擬用同一條路徑。取消時只保留完成輪次的 state。
+Round hook 與最終結果都取自 `output(state)`，框架不另做總和或平均。
+Reducer 收到 ADC-keyed float64 `(points, reps, reads, 2)` 正規化 IQ 和 bool `(points, reps)` 遮罩。
+來源消耗的讀取及只供遮罩使用的 ADC 不交給 reducer。沒有來源時遮罩全為 True。
 
 讀出軸只有 `Classify` 與 `IQ`。
 Classify 把一次讀出的分類結果轉成 k 維 one-hot。`IQ(read)` 預設將一次未分類讀出轉成 `(1, I, Q, I², IQ, Q²)`，不需重複同一次讀出來取得二階特徵。
 `IQ(read, order=3)` 加上 `(I³, I²Q, IQ², Q³)`，共十個分量。Readout 與 JPA optimization 的 live 與最終分數都從已完成 rounds 的總和計算，不另維護統計狀態。
-Processor 對每個掃描點計算 `Σ_shots v₁ ⊗ v₂ ⊗ …`，輸出形狀是 `(points, *axes)`。
+`shot_sums` 對每個掃描點計算 `Σ_kept v₁ ⊗ v₂ ⊗ …`，只加總遮罩保留的 shot，輸出形狀是 `(points, *axes)`。
 軸順序由作者列出的讀出軸決定。同一次讀出仍可列多次，以保存特徵的外積。
 所有 IQ 軸都取第 0 格時得到計數；只有 Classify 軸時，整個輸出就是各聯合類別的計數。
 
 讀出以字串 label 指定，不要求作者計算 ADC 的 read index。
 `shot_sums(prog, axes)` 在 compile 後、取數前解析 label。
 Timeline 發射用 emit tag，未標記的發射以 module 名稱識別。
-Label 必須唯一指向一次讀出發射，否則在取數前報錯。
+Label 與 ADC read index 只在可見的讀取中解析。Label 必須唯一指向一次可見的發射，否則在取數前報錯。
 Classifier 取自該 readout 的 cfg 或作者明確提供的 override，不查 live library。
 
-Result 原樣保存 processor 的 float64 總和，不在 run 中換成平均或比例。
+Result 原樣保存 reducer 的 float64 總和，不在 run 中換成平均或比例。
 分析與繪圖從計數和總和計算比例、平均 IQ 或條件平均。
 Schedule 的 `run_acquire_summed` 讓 caller 以 `RunOptions(converter=...)` 選擇 live signal；未提供 converter 時原樣寫入總和，不把類別計數當作 IQ。
 搬遷後的實驗拒絕缺少 counts／sums 的舊格式，不從舊比例推算計數，也不加相容路徑。
@@ -186,7 +188,7 @@ Classify 與雙 qubit heralded 實驗保留原分類契約。
 2026-11-09 註：單 qubit heralding 的五個實驗、對應 recipes 與 `zcu_tools.analysis.herald_transfer` 已移除。
 上兩段的自校準、C 指標、即時圖與存檔軸是歷史記錄，catalog 不再提供單 qubit heralding。
 使用者於 2026-11-09 說：「舊 heralding 我完全沒用過也沒讀過，可以直接刪掉。」
-`IQ` 六分量讀出軸、`shot_sums`、`split_sums` 與 Classify 的契約不變，雙 qubit heralded 實驗保留原分類契約。
+當時保留 `IQ` 六分量讀出軸、`shot_sums`、`split_sums` 與 Classify，雙 qubit heralded 實驗保留原分類契約。
 
 使用者於 2026-10-30 要求單一 processor：「H1 , 我認為processor就不要每個adc分開給，統一只給一個就行」。
 同日明定分類時機：「分類請不要在analyze裡做，浪費記憶體，分類請在processor裡做，將nread, 2的資料轉成M維資料」。

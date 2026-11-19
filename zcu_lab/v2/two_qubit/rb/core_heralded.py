@@ -321,7 +321,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                             round_step.run_acquire_summed(
                                 prog,
                                 context.soc,
-                                processor=processor,
+                                reducer=processor,
                                 rounds=1,
                                 options=RunOptions(),
                             )

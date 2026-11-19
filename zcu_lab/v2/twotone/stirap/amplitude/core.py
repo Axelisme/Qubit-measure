@@ -257,7 +257,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             sched.run_acquire_summed(
                 program,
                 context.soc,
-                processor=processor,
+                reducer=processor,
                 rounds=1,
                 charge_requirements=(
                     ChargeDriveRequirement("Pump", cfg.pump_ch),

@@ -25,7 +25,7 @@ The program forks directly into F1 and F2 timelines after optional reset, withou
 
 `reps` is shots per acquisition round per branch. `rounds` accumulates completed rounds at acquisition. Initial and relaxation delays use µs.
 
-The processor classifies F1/F2 on each shot and sums the nine joint classes. Each role has g, e and other. Circle boundaries and equidistant points count as other. The experiment does not save per-shot IQ and does not multiply separate qubit probabilities.
+The reducer classifies F1/F2 on each shot and sums the nine joint classes. Each role has g, e and other. Circle boundaries and equidistant points count as other. The experiment does not save per-shot IQ and does not multiply separate qubit probabilities.
 
 The live plot shows terminal P(g,g) from accumulated counts for each nominal branch. Cancel preserves completed rounds. Unmeasured branches stay NaN. A failed acquisition remains an operation failure even when partial counts survive.
 

@@ -10,6 +10,7 @@ from zcu_tools.program import v2
 from zcu_tools.program.v2.modules import ConstWaveformCfg, PulseReadout
 
 from tests.program._profiles import load_soccfg
+from tests.program._shot_reduction import reduce_round
 
 
 def cycle_readout(name: str = "readout") -> PulseReadout:
@@ -108,8 +109,9 @@ def test_cycle_moments_and_products_match_direct_reference(
         reference_vector(streams[0, 0])[33:42],
         [0, 0, 1, 560, 1176, 2471, 680, 1424, 2984],
     )
-    actual = v2.chain_cycle_sums(prog, "sample" if tagged else "readout")(
-        {0: streams, 1: np.zeros((2, 2, 3, 2))}
+    actual = reduce_round(
+        v2.chain_cycle_sums(prog, "sample" if tagged else "readout"),
+        {0: streams, 1: np.zeros((2, 2, 3, 2))},
     )
     assert actual.shape == (2, 66, 66)
     assert actual.dtype == np.float64
@@ -224,7 +226,7 @@ def test_cycle_rejects_empty_branch_path_when_other_path_repeats_sixteen_reads()
 def test_cycle_processor_rejects_incoming_read_or_iq_shape(shape: tuple[int, ...]):
     process = v2.chain_cycle_sums(cycle_program(repeated=False), "readout")
     with pytest.raises(ValueError, match="ADC 0.*expected.*16, 2.*actual"):
-        process({0: np.ones(shape, dtype=np.float64)})
+        reduce_round(process, {0: np.ones(shape, dtype=np.float64)})
 
 
 @pytest.mark.parametrize("repeated", [False, True])
@@ -248,7 +250,7 @@ def test_cycle_acquisition_adds_counts_across_points_reps_and_rounds(
         prog.set_reads_per_shot(16)
         sums = prog.acquire_summed(
             env.soc,
-            processor=v2.chain_cycle_sums(prog, "readout"),
+            reducer=v2.chain_cycle_sums(prog, "readout"),
             rounds=2,
             progress=False,
         )

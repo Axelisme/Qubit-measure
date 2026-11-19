@@ -459,7 +459,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                             round_step.run_acquire_summed(
                                 prog,
                                 context.soc,
-                                processor=processor,
+                                reducer=processor,
                                 rounds=1,
                                 options=RunOptions(),
                             )

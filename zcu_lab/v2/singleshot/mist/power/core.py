@@ -171,7 +171,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             sched.run_acquire_summed(
                 prog,
                 soc,
-                processor=shot_sums(prog, [read_axis]),
+                reducer=shot_sums(prog, [read_axis]),
                 rounds=cfg.rounds,
             )
 

@@ -111,20 +111,26 @@ order. Each point is the sum of the kept length-normalized IQ, after the usual
 `remove_offset` correction, divided by all reps across completed rounds, not
 the number of kept shots. `get_raw()` still returns physical integer buffers
 with all triggers. With no sources, the native averaging path is unchanged.
-Native `threshold` projection, decimated acquisition and the summed processor
-interface reject programs with registered sources.
+Native `threshold` projection and decimated acquisition reject programs with
+registered sources. Summed acquisition passes the mask to the reducer.
 
 ## Summed acquisition
 
-`acquire_summed(soc, processor=..., rounds=1, step_rounds=False, **qick_options)`
-passes every declared ADC to one `acquisition.ShotSumProcessor`. Each float64
-array has shape `(points, reps, reads, 2)`: integer ADC integrals divided by the
-rounded integration length, without IQ-offset subtraction. Non-reps loops are
-flattened in C order. The processor returns float64 `(points, *axes)` per-point
-sums. The framework snapshots each completed round and adds its sums without
-averaging reps or rounds. Final data and round hooks have shape
-`(*point_dims, *axes)`. Invalid dtype, point count, zero-length output axes or
-changing output shape raises ValueError with expected and actual values.
+Pass one `acquisition.ShotReducer[State]` as `reducer=` to
+`acquire_summed(soc, reducer=..., rounds=1, step_rounds=False, **qick_options)`.
+The framework calls `start()` once per acquire and stores its return value.
+Each completed round calls `add(state, shots, mask)` and replaces the state with
+the return value. The framework calls `output(state)` for round hooks and the
+final result, without averaging. It restores the point dimensions to give
+`(*point_dims, *axes)` and detaches the array from the reducer's state.
+
+The `shots` mapping keys are ADC channel numbers. Consumed reads and mask-only
+ADCs are omitted. Each float64 array has shape `(points, reps, reads, 2)`. Values
+are integer ADC integrals divided by the integration length, without IQ-offset
+subtraction. Non-reps loops are flattened in C order. The bool `(points, reps)`
+mask marks kept shots and is all True when no sources are registered.
+Reducer outputs must be float64 `(points, *axes)` with a fixed shape and no
+empty axes. Invalid outputs raise ValueError with expected and actual values.
 
 Hardware and simulation share this processing and accumulation path. Cancellation
 discards incomplete rounds and preserves completed sums; no completed round raises
@@ -138,8 +144,8 @@ axis contributes a one-hot vector, while `v2.IQ` contributes
 `(1, I, Q, I², IQ, Q²)` in that order by default. `v2.IQ(read, order=3)`
 appends `(I³, I²Q, IQ², Q³)` for a ten-component axis. Use one cubic axis
 on the terminal read to compute g/e separation SNR and skew from the same
-completed-round sums used for live updates. The processor sums ordered outer
-products over reps. Two default IQ axes give a `(points, 6, 6)` array, including each
+completed-round sums used for live updates. The reducer sums ordered outer
+products over kept shots. The first IQ component counts those shots. Two default IQ axes give a `(points, 6, 6)` array, including each
 read's second moments and their cross moments. Classify uses a detached explicit
 classifier or the readout cfg's classifier. Both `Classify` and `IQ` with `tone=None` select a pulse
 readout or their mux readout's only tone. Multi-tone mux requires a zero-based cfg
@@ -162,7 +168,7 @@ the differing item. Triggers inside Repeat remain unsupported on selected ADCs.
 Other ADCs may still use control flow. After building a program with Branch
 readouts, call `prog.set_reads_per_shot(count)` with the per-shot count, then
 construct `shot_sums`, then acquire. QICK counts the source triggers across all
-cases; neither the processor nor its construction changes that declaration.
+cases; neither the reducer nor its construction changes that declaration.
 `v2.split_sums(sums)` requires a final six-component IQ axis and uses only
 count, ΣI and ΣQ to return counts and complex conditional means. Other lengths
 raise ValueError. Zero counts stay zero, and unmeasured NaN counts stay NaN.
@@ -171,43 +177,42 @@ Both give NaN means without divide warnings.
 `v2.chain_sweep_sums(prog, read)` selects a tagged or untagged `PulseReadout`
 inside one fixed body `repeat` of at least 16 reads. After building, call
 `prog.set_reads_per_shot(n)` with the repeat count before constructing the
-processor; the selected ADC must have no other triggers. The processor reduces
-each dwell to running moment sums for readout-chain analysis; `acquire_summed`
-adds them across rounds. Feature definitions, array layout and validation are in
+reducer; the selected ADC must have no other triggers. The reducer reduces
+kept dwells to running moment sums for readout-chain analysis. Feature definitions, array layout and validation are in
 the [`chain_sweep_sums` docstring](v2/chain_sweep.py).
 
 `v2.thermal_chain_sums(prog, read)` selects exactly 16 consecutive reads of
 one PulseReadout, unrolled or in one fixed Repeat. After build, declare
-`prog.set_reads_per_shot(16)` before constructing the processor. Its 108 columns
+`prog.set_reads_per_shot(16)` before constructing the reducer. Its 108 columns
 contain shot count and 107 sums: all 16 I/Q read means, R1 self moments,
 all 15 adjacent pairs and the three early long-lag pairs (R1,R3..R5).
-Each pair retains all four cross components; the processor applies no analysis
-weights. Reps and rounds add without averaging. The caller owns thermal
+Each pair retains all four cross components. The reducer sums kept reps across
+completed rounds without averaging or applying analysis weights. The caller owns thermal
 relaxation and the absence of drives or extra waits within the shot. The three
 thermal-chain ro_optimize experiments set K through relax_delay and retain every
-adjacent pair for offline scoring; the processor does not choose the best setting.
+adjacent pair for offline scoring; the reducer does not choose the best setting.
 
 `v2.chain_cycle_sums(prog, read)` selects one `PulseReadout` owner whose 16 reads
 per shot form one thermalised `(D R R)^8` cycle per rep, either unrolled or as two
 reads in a fixed Repeat of eight. After building, call `prog.set_reads_per_shot(16)`
-before constructing the processor; the selected ADC must have no other triggers.
-The processor reduces each cycle to 65 numbers and returns their per-point augmented
+before constructing the reducer; the selected ADC must have no other triggers.
+The reducer reduces each cycle to 65 numbers and returns their per-point augmented
 sums; `acquire_summed` adds them across rounds. Slot layout and validation are in
 the [`chain_cycle_sums` docstring](v2/chain_cycle.py).
 
 `v2.rpi_sums(prog, read)` 將每個 rep 當作一個獨立 Rπ cycle，
-每個完整 round 回傳 35 欄的可加摘要。Lag 1..15 只在 cycle 內配對，
+只加總保留的 cycle，回傳 35 欄摘要。Lag 1..15 只在 cycle 內配對，
 統計量跨 reps 與 rounds 累加。多 setting 必須使用 `reps_innermost=True`。
 Caller 排程 Rπ、設定 `relax_delay=0` 並校準 π。Rep 之間的斷流不影響 lag，
-processor 無法偵測 cycle 內未出現在輸入的物理斷流。
+reducer 無法偵測 cycle 內未出現在輸入的物理斷流。
 固定 H=1 的 metadata 由總 reads／segment 次數恢復單段長度，不能合併不同長度。
 欄位與建構限制見 [`rpi_sums` docstring](v2/rpi.py)。
 
 Build first, then resolve labels and call
-`sched.run_acquire_summed(program, soc, processor=..., rounds=...,
+`sched.run_acquire_summed(program, soc, reducer=..., rounds=...,
 options=RunOptions(converter=...))`.
-The optional converter receives both cumulative and final sums.
-It owns any normalization and signal-slot shape. Without a converter, sums are written unchanged.
+The optional converter receives both cumulative and final reducer outputs.
+It owns any normalization and signal-slot shape. Without a converter, Schedule writes the output unchanged.
 Retry, progress and stop conditions follow the other Schedule run methods.
 
 ## Shot time
@@ -228,8 +233,8 @@ module may be emitted twice with distinct emit tags. Every herald class is kept:
 ```python
 from zcu_tools.program.v2 import Classify, IQ, shot_sums, split_sums
 
-processor = shot_sums(prog, [Classify("herald"), IQ("terminal")])
-sums = prog.acquire_summed(soc, processor=processor, rounds=2, progress=False)
+reducer = shot_sums(prog, [Classify("herald"), IQ("terminal")])
+sums = prog.acquire_summed(soc, reducer=reducer, rounds=2, progress=False)
 counts, means = split_sums(sums)
 ground_counts = counts[..., 0]
 conditional_iq = means[..., 0]
@@ -253,7 +258,7 @@ shots.
 - 主要加值分成三類：
   - 型別友善封裝（`TypedAcquireMixin`）：補強 `acquire()` / `acquire_decimated()` / `get_raw()` 等回傳型別。
   - 提前停止（`EarlyStopMixin`）：透過單一 `cancel_flag` 在 `finish_round()` 內中止後續 rounds；accumulated acquisition的內部reps進度走共用`progress_bar.make_pbar` factory，GUI ambient factory與terminal fallback使用同一生命週期，正常或停止都會close並移除暫時進度項。
-  - 每輪 callback（`RoundHookMixin`）與 joint-ADC shot sums（`ImproveAcquireMixin`）。`round_hook(round_count, raw, cancel_flag)` 只收到 completed round，可呼叫 `cancel_flag.set()` 表示不開始下一 round。
+  - 每輪 callback（`RoundHookMixin`）與 joint-ADC shot reduction（`ImproveAcquireMixin`）。`round_hook(round_count, raw, cancel_flag)` 只收到 completed round，可呼叫 `cancel_flag.set()` 表示不開始下一 round。
 
 ## `AcquireMixin` 行為對照（常見踩點）
 
@@ -262,7 +267,7 @@ shots.
   - `finish_acquire()` 負責 rounds 聚合（accumulated 或 decimated）。
 - 擴充掛點：
   - `RoundHookMixin.finish_round()`：每 completed round 呼叫 `round_hook`，輸入增量摘要資料與同一個 stop flag。
-  - `ImproveAcquireMixin._process_accumulated()`：處理每點總和或逐 shot 遮罩平均，其餘委派原生 IQ／threshold 路徑。
+  - `ImproveAcquireMixin._process_accumulated()`：更新 shot reducer state 或計算遮罩平均，其餘委派原生 IQ／threshold 路徑。
 - 相容性關鍵：
   - 擴充層維持 `AcquireMixin` 的 `extra_args` 傳遞模式，避免破壞原生 acquire 參數流。
 

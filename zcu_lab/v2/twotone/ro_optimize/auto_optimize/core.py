@@ -435,7 +435,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                 step.run_acquire_summed(
                     program,
                     soc,
-                    processor=shot_sums(program, [IQ("readout", order=3)]),
+                    reducer=shot_sums(program, [IQ("readout", order=3)]),
                     rounds=run_cfg.rounds,
                     options=RunOptions(
                         converter=lambda sums: snr_as_signal(

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
-from zcu_tools.program.v2 import TimelineBuilder
+from zcu_tools.program.v2 import IQ, TimelineBuilder, shot_sums
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
@@ -189,27 +189,91 @@ def test_run_acquire_rejects_modes_incompatible_with_mask_sources(
             run(program, environment.soc, options=options, **kwargs)
 
 
-@pytest.mark.parametrize("mode", ["shots", "summed"])
-def test_unmigrated_run_modes_reject_mask_sources(
-    environment: SimulationEnvironment, mode: str
+class _DigitReducer:
+    def start(self) -> int:
+        return 0
+
+    def add(
+        self,
+        state: int,
+        shots: Mapping[int, NDArray[np.float64]],
+        mask: NDArray[np.bool_],
+    ) -> int:
+        digit = int(shots[0][mask, 0, 0].sum())
+        return 10 * state + digit
+
+    def output(self, state: int) -> NDArray[np.float64]:
+        return np.array([state**2], dtype=np.float64)
+
+
+def test_run_acquire_summed_keeps_reducer_state_through_last_completed_round(
+    environment: SimulationEnvironment,
 ) -> None:
-    """Remove each case when that Schedule mode starts accepting shot masks."""
+    builder = TimelineBuilder(environment.soccfg, reps=2)
+    builder.add_loop("point", 1)
+    emit_readout(builder, "signal")
+    program = builder.build()
+    length = program.ro_chs[0]["length"]
+    first = np.array([[[[1, 0]], [[2, 0]]]]) * length
+    second = np.array([[[[2, 0]], [[3, 0]]]]) * length
+    deliver_rounds(environment, {0: first}, {0: second})
+    updates = []
+    signals = SignalBuffer(
+        (1,),
+        dtype=np.float64,
+        on_update=lambda data: updates.append(data.copy()),
+        update_interval=1,
+    )
+    with Schedule(signals, scope=Scope("run", "reduced")) as schedule:
+        result = schedule.run_acquire_summed(
+            program,
+            environment.soc,
+            reducer=_DigitReducer(),
+            rounds=3,
+            options=RunOptions(stop_condition=lambda: len(updates) == 2),
+        )
+        np.testing.assert_array_equal(result, [1225.0])
+    np.testing.assert_array_equal(updates, [[9.0], [1225.0], [1225.0]])
+
+
+def test_run_acquire_summed_counts_only_kept_shots_from_visible_reads(
+    environment: SimulationEnvironment,
+) -> None:
+    builder = TimelineBuilder(environment.soccfg, reps=3)
+    builder.add_loop("point", 2)
+    emit_readout(builder, "filter", "signal")
+    builder.register_shot_mask_source({0: [0]}, lambda iq: iq[0][..., 0, 0] > 0)
+    program = builder.build()
+    raw = (
+        np.array(
+            [
+                [[[1, 0], [2, 1]], [[-1, 0], [99, 99]], [[1, 0], [3, -1]]],
+                [[[-1, 0], [99, 99]], [[-1, 0], [99, 99]], [[-1, 0], [99, 99]]],
+            ]
+        )
+        * program.ro_chs[0]["length"]
+    )
+    deliver_rounds(environment, {0: raw})
+    with Schedule(
+        SignalBuffer((2, 6), dtype=np.float64), scope=Scope("run")
+    ) as schedule:
+        result = schedule.run_acquire_summed(
+            program, environment.soc, reducer=shot_sums(program, [IQ("signal")])
+        )
+        np.testing.assert_array_equal(
+            result, [[2.0, 5.0, 0.0, 13.0, -1.0, 2.0], [0.0] * 6]
+        )
+
+
+def test_run_acquire_shots_rejects_mask_sources(
+    environment: SimulationEnvironment,
+) -> None:
     builder = TimelineBuilder(environment.soccfg, reps=2)
     emit_readout(builder, "filter", "signal")
     builder.register_shot_mask_source({0: [0]}, lambda iq: iq[0][..., 0, 0] >= 0)
     program = builder.build()
-    with Schedule(SignalBuffer((), dtype=np.float64), scope=Scope("run")) as schedule:
-        if mode == "shots":
-            with pytest.raises(
-                ValueError, match=r"run_acquire_shots.*shot mask source"
-            ):
-                schedule.run_acquire_shots(program, environment.soc)
-        else:
-            with pytest.raises(
-                ValueError, match=r"run_acquire_summed.*shot mask source"
-            ):
-                schedule.run_acquire_summed(
-                    program,
-                    environment.soc,
-                    processor=lambda iq: np.ones(iq[0].shape[0]),
-                )
+    with (
+        Schedule(SignalBuffer((), dtype=np.float64), scope=Scope("run")) as schedule,
+        pytest.raises(ValueError, match=r"run_acquire_shots.*shot mask source"),
+    ):
+        schedule.run_acquire_shots(program, environment.soc)

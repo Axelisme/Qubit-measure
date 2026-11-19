@@ -281,7 +281,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             sched.run_acquire_summed(
                 prog,
                 context.soc,
-                processor=chain_sweep_sums(prog, "readout"),
+                reducer=chain_sweep_sums(prog, "readout"),
                 rounds=cfg.rounds,
             )
 

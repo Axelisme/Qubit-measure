@@ -196,7 +196,7 @@ class T1CovExp(Experiment[T1CovResult, T1CovCfg]):
                 prog,
                 context.soc,
                 rounds=cfg.rounds,
-                processor=shot_sums(prog, [IQ("pre_readout"), IQ("post_readout")]),
+                reducer=shot_sums(prog, [IQ("pre_readout"), IQ("post_readout")]),
             )
         return T1CovResult(times=times, sums=buffer.array)
 

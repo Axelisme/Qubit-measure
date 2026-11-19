@@ -184,7 +184,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
                 step.run_acquire_summed(
                     program,
                     context.soc,
-                    processor=processor,
+                    reducer=processor,
                     rounds=1,
                     options=RunOptions(
                         converter=lambda sums: sums.reshape(len(STATE_LABELS))

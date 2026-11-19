@@ -195,7 +195,7 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
             sched.run_acquire_summed(
                 prog,
                 context.soc,
-                processor=chain_cycle_sums(prog, "readout"),
+                reducer=chain_cycle_sums(prog, "readout"),
                 rounds=cfg.rounds,
             )
 

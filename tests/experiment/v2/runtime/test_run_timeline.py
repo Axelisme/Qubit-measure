@@ -13,6 +13,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._acquisition_soc import make_acquisition_soc
+from tests.program._shot_reduction import SumRounds
 
 
 def _make_readout() -> PulseReadout:
@@ -76,7 +77,7 @@ def test_cfg_optional_schedule_acquires_into_root_scan_and_child_buffers(
             )
         if target == "root":
             result = schedule.run_acquire_summed(
-                program, soc, rounds=2, processor=_sum_iq
+                program, soc, rounds=2, reducer=SumRounds(_sum_iq)
             )
             np.testing.assert_array_equal(result, [12.0, 16.0])
         else:
@@ -85,7 +86,7 @@ def test_cfg_optional_schedule_acquires_into_root_scan_and_child_buffers(
                     step = step.child(0)
                     step.buffer((2,), dtype=np.float64)
                 result = step.run_acquire_summed(
-                    program, soc, rounds=2, processor=_sum_iq
+                    program, soc, rounds=2, reducer=SumRounds(_sum_iq)
                 )
                 np.testing.assert_array_equal(result, [12.0, 16.0])
         assert schedule.outcome.status == "completed"
@@ -138,7 +139,7 @@ def test_timeline_acquires_through_schedule_and_real_qick_pipeline(
             expected = np.array(3 + 4j)
         elif mode == "summed":
             result = schedule.run_acquire_summed(
-                program, soc, rounds=2, processor=_sum_iq
+                program, soc, rounds=2, reducer=SumRounds(_sum_iq)
             )
             expected = np.array([12.0, 16.0])
         else:
