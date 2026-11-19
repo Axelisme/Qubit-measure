@@ -109,6 +109,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 - [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：模擬環境與 FTF preset 的草稿及歷史驗證範圍，compiler owner 見 [[0083]]。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
+- [Timeline 控制結構的完備性](draft/control-flow-completeness.md)：Branch 與 Repeat 共用編譯期狀態，補上「提早結束本發」；介面、第一版限制與 RB 是否採用未定，現行規則見 [[0083]]。
 
 ## Retired
 
