@@ -1,4 +1,4 @@
-# Rabi chevron with heralding
+# Heralded Rabi chevron
 
 **Readers:** operator, agent. Run `two_qubit/chevron_heralded` and interpret its count-derived return.
 
@@ -49,7 +49,7 @@ Reset can overwrite unsaved inputs.
 Analyze publishes these figures and returns `None`. Per-frequency rates, counts
 and curves stay inside analysis; frequency and duration selection remain manual.
 
-The live traces and chevron map show P00 after double Xπ contrast.
+The live and Analyze chevron maps show P00 after double Xπ contrast.
 Analysis first selects counts whose herald is classified as (g,g).
 Terminal P00 is then its (g,g) count divided by the selected terminal total.
 The separate herald figure shows all nine herald fractions at every scan point.

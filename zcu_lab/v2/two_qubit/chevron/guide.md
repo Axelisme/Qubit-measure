@@ -52,7 +52,7 @@ Reset can overwrite unsaved inputs.
 Analyze publishes these figures and returns `None`. Per-frequency rates, counts
 and curves stay inside analysis; frequency and duration selection remain manual.
 
-The live traces and chevron map show P00 after double Xπ contrast.
+The live and Analyze chevron maps show P00 after double Xπ contrast.
 P00 is the terminal (g,g) count divided by all nine terminal class counts.
 The return figure shows all nine g/e/other joint outcomes.
 These figures include preparation and readout errors.

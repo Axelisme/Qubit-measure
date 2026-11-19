@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator
+from matplotlib.collections import QuadMesh
 from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.analysis.fitting.phase_modulation import (
@@ -42,8 +41,6 @@ from zcu_tools.program.v2.modules import (
     MuxReadoutCfg,
     Reset,
 )
-
-from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg
 from .._rabi_analysis import (
@@ -308,6 +305,29 @@ def _plot_return(
     )
 
 
+def _live_return_map(
+    plots: Plots,
+    durations: NDArray[np.float64],
+    coordinates: NDArray[np.float64],
+) -> QuadMesh:
+    """Show an empty return map against duration and relative phase (deg) and return its mesh."""
+    fig, ax = plots.subplots(num="measurement", layout="constrained")
+    image = ax.pcolormesh(
+        durations,
+        coordinates,
+        np.full((len(coordinates), len(durations)), np.nan),
+        shading="nearest",
+        vmin=0,
+        vmax=1,
+        cmap="viridis",
+    )
+    ax.set(xlabel="Drive duration (us)", ylabel="F2 relative to F1 phase (deg)")
+    ax.grid(False)
+    fig.colorbar(image, ax=ax, label="Terminal P(g,g)")
+    fig.show()
+    return image
+
+
 class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhaseCfg]):
     """Acquire and persist the ordinary constructive_phase count scan."""
 
@@ -374,19 +394,14 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         # 1. Pair relative-phase and duration axes for the two-drive return map.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
-        # 2. Track terminal P00 versus duration for each relative-phase slice.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
-        viewer = live_line(ax, num_lines=len(coordinates))
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
-        fig.show()
+        # 2. Show terminal return as a heatmap on the two sweep axes.
+        image = _live_return_map(context.plots, durations, coordinates)
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            ordered = sums
-            counts = ordered
-            return viewer.set(durations, joint_probabilities(counts)[..., 0, 0])
+        def update_view(sums: NDArray[np.float64]) -> tuple[QuadMesh, ...]:
+            counts = sums
+            image.set_array(joint_probabilities(counts)[..., 0, 0])
+            return (image,)
 
         class_shape = (3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
@@ -452,19 +467,14 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         # 1. Keep the relative-phase grid fixed while sampled-envelope durations advance on the host.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
-        # 2. Track terminal P00 versus duration for each relative-phase slice.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
-        viewer = live_line(ax, num_lines=len(coordinates))
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
-        fig.show()
+        # 2. Show terminal return as a heatmap on the two sweep axes.
+        image = _live_return_map(context.plots, durations, coordinates)
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            ordered = sums.swapaxes(0, 1)
-            counts = ordered
-            return viewer.set(durations, joint_probabilities(counts)[..., 0, 0])
+        def update_view(sums: NDArray[np.float64]) -> tuple[QuadMesh, ...]:
+            counts = sums.swapaxes(0, 1)
+            image.set_array(joint_probabilities(counts)[..., 0, 0])
+            return (image,)
 
         class_shape = (3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
@@ -575,8 +585,10 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             shading="nearest",
             vmin=0,
             vmax=1,
+            cmap="viridis",
         )
-        fig.colorbar(image, ax=ax, label="Observed joint P00 after double Xπ")
+        ax.grid(False)
+        fig.colorbar(image, ax=ax, label="Terminal P(g,g)")
         ax.set(
             xlabel="Drive duration (us)",
             ylabel="F2 relative to F1 phase (deg)",

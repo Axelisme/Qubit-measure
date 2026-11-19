@@ -132,6 +132,7 @@
 - 2026-10-13 [表單選項的分層：生成器給選項，widget 照清單畫](2026-10-13-form-options-layering.md)：生成器給選項而 widget 只呈現，現行分工見 [ADR-0065](../adr/0065-cfg-editing.md) 與 [ADR-0073](../adr/0073-measure-form-derivation.md)。
 - 2026-10-17 [Measure Form 的校準初值與 sweep 模式切換](2026-10-17-measure-form-initial-values-and-sweep-mode.md)：校準初值在開 Form 時算成數字，缺值、無效值與故障分流，決策見 [ADR-0073](../adr/0073-measure-form-derivation.md)。
 - 2026-10-29 [Singleshot 分類參數放進 readout cfg](2026-10-29-readout-classifier.md)：Classifier 隨 readout cfg 保存，作者明確傳入 acquisition，決策見 [ADR-0074](../adr/0074-flat-readout-module.md)。
+- 2026-11-20 [v2 實驗命名與顯示：先對齊 two_qubit 的圖](2026-11-20-experiment-naming-and-display.md)：命名取捨。全 v2 共用分類，先定使用者看得到的名字；第一批只對齊 two_qubit 的圖與 guide 首標，不改 key、tag 或 cfg。
 
 ## 模組邊界
 
