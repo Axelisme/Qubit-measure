@@ -1,13 +1,11 @@
 """Preprocess timeline operations and translate their flag-free cycle plans."""
 
-# tolerated(file-size): Branch/Repeat preparation shares TimelineBook frame and
-# provenance state; snapshot/restore wiring must follow the same preparation order.
+# tolerated(file-size): Timeline macros share one native preparation and translation order.
 
 import warnings
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
-from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from fractions import Fraction
 
 from qick.asm_v2 import (
@@ -27,7 +25,7 @@ from qick.asm_v2 import (
 
 from ._timeline_axis import CycleAxis
 from ._timeline_bounds import CycleBounds, FixedLoopIndex, SelectionProvenance
-from ._timeline_expression import time_variables
+from ._timeline_expression import select_time, time_variables
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
 from ._timeline_outputs import (
@@ -52,7 +50,7 @@ from ._timeline_runtime import (
 )
 from ._timeline_selected import TimelineSelectedPulse
 from ._timeline_state import (
-    BranchProvenance,
+    PathState,
     RepeatFrame,
     RepeatFrameSnapshot,
     TimelineBook,
@@ -193,7 +191,6 @@ class TimelineBoundary(Macro):
             self.book.table_ends.clear()
             self.book.cycle_axes.clear()
             self.book.source_expressions.clear()
-            self.book.branch_provenance.clear()
             self.book.shell_wait_bound = None
             self.book.repeats.clear()
             self.book.loop_timelines.clear()
@@ -515,39 +512,29 @@ class TimelineSync(Delay):
         return operations
 
 
-class ZeroEntryReferenceEnter(Macro):
+class ZeroEntryReferenceEnter:
     """Isolate the constant-zero loop namespace without moving reference."""
-
-    def __repr__(self) -> str:
-        # QICK eagerly formats macros even when debug logging is disabled.
-        return f"{type(self).__name__}()"
 
     def __init__(self, book: TimelineBook, timeline: str, counter: str | None = None):
         self.book = book
         self.timeline = timeline
         self.counter = counter
 
-    def preprocess(self, prog) -> None:
+    def prepare(self, prog, entry: PathState) -> None:
+        """Start reference debits and guards for the loop entered at entry."""
         if self.counter is not None:
             prog.add_reg(self.counter)
         parent = self.timeline
-        external = self.book.ends.copy()
+        external = entry.ends.copy()
         del external[parent]
-        initial_external = external.copy()
         self.book.repeats.append(
             RepeatFrame(
                 parent,
                 external,
-                {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
-                {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
+                entry,
+                self.book.snapshot_native_expressions(prog),
                 pulse_guards={ch: _PulseGuard(ch) for ch in prog.gen_chs},
-                defined=prog._time_bounds.defined.copy(),
-                initial_external=initial_external,
                 entry_math=self.book.math,
-                initial_runtime_gens=self.book.runtime_gens.copy(),
-                initial_runtime_ros=self.book.runtime_ros.copy(),
-                initial_native_expressions=self.book.snapshot_native_expressions(prog),
-                initial_source_expressions=self.book.source_expressions.copy(),
             )
         )
         self.book.ends = {parent: 0.0}
@@ -580,7 +567,7 @@ class ZeroEntryReferenceExit(Macro):
     def preprocess(self, prog) -> None:
         frame = self.book.repeats.pop()
         if self.count == 0:
-            prog._time_bounds.defined.intersection_update(frame.defined)
+            prog._time_bounds.defined.intersection_update(frame.entry_state.defined)
         self._check_pulse_guards(frame)
         if self.maximum is None or self.maximum >= 2:
             self.book.check_reference_adc_backedge(prog, frame)
@@ -619,7 +606,7 @@ class ZeroEntryReferenceExit(Macro):
         runtime: dict[str, Time] = {}
         for name, end in self.book.ends.items():
             if isinstance(end, RuntimeEnd):
-                limits = optional_time_bounds(prog, frame.initial_external[name])
+                limits = optional_time_bounds(prog, frame.entry_state.ends[name])
                 debit = _bounds(frame.advance)[0] * self.count
                 upper = (
                     None
@@ -653,7 +640,7 @@ class ZeroEntryReferenceExit(Macro):
                 repeated = _PulseGuard(ch, unbounded=True)
             else:
                 repeated = guard.repeated(self.count, self.maximum)
-                repeated.require((frame.native_gens[ch],), repeated.limits)
+                repeated.require((frame.entry_state.gens[ch],), repeated.limits)
             if self.book.repeats:
                 self.book.repeats[-1].pulse_guards[ch].then(repeated)
 
@@ -661,14 +648,14 @@ class ZeroEntryReferenceExit(Macro):
         for tails, initial, current, written, generator in (
             (
                 frame.tail_gens,
-                frame.initial_runtime_gens,
+                frame.entry_state.runtime_gens,
                 self.book.runtime_gens,
                 frame.written_gens,
                 True,
             ),
             (
                 frame.tail_ros,
-                frame.initial_runtime_ros,
+                frame.entry_state.runtime_ros,
                 self.book.runtime_ros,
                 frame.written_ros,
                 False,
@@ -727,7 +714,7 @@ class RepeatLoweringEnter(Macro):
         self.counter_writers: tuple[Macro, ...] = ()
 
     def preprocess(self, prog) -> None:
-        self.defined = prog._time_bounds.defined.copy()
+        self.state = self.book.capture(prog)
         self.selections = prog._time_bounds.enter_selection_loop()
         if self.counter is not None:
             maximum = self.maximum
@@ -759,9 +746,9 @@ class RepeatLoweringEnter(Macro):
                 stacklevel=2,
             )
         if self.constant:
-            self.reference.preprocess(prog)
+            self.reference.prepare(prog, self.state)
         else:
-            self.accumulator.preprocess(prog)
+            self.accumulator.prepare(prog, self.state)
 
     def translate(self, prog) -> None:
         pass
@@ -835,6 +822,7 @@ class RepeatLoweringExit(Macro):
         self.iterations = iterations
         self.minimum = minimum
         self.maximum = maximum
+        self.axis = axis
         self.accumulator = LoopTimelineExit(
             entry.accumulator, iterations, minimum, maximum
         )
@@ -849,15 +837,29 @@ class RepeatLoweringExit(Macro):
         )
 
     def preprocess(self, prog) -> None:
+        self._count_reads()
         if self.entry.constant:
             self.reference.preprocess(prog)
         else:
             self.accumulator.preprocess(prog)
         if self.minimum == 0:
-            prog._time_bounds.defined.intersection_update(self.entry.defined)
+            prog._time_bounds.defined.intersection_update(self.entry.state.defined)
         prog._time_bounds.exit_selection_loop(
             self.entry.selections, self.minimum, self.maximum
         )
+
+    def _count_reads(self) -> None:
+        counts = self.entry.book.read_counts
+        for ch, initial in self.entry.state.read_counts.items():
+            per_iteration = counts[ch] - initial
+            if self.minimum == self.maximum:
+                counts[ch] = initial + self.minimum * per_iteration
+            elif per_iteration:
+                raise ValueError(
+                    f"Repeat {self.axis!r}: ADC {ch} has {per_iteration} reads per iteration "
+                    f"with variable count register {self.iterations!r} "
+                    f"(entry -> {initial}, after one iteration -> {counts[ch]})"
+                )
 
     def translate(self, prog) -> None:
         pass
@@ -1060,7 +1062,7 @@ class PreparedTimelineMacro(TimedMacro):
         self.book.preparing += 1
         try:
             prog._time_origin = self.source
-            self.source.preprocess(prog)
+            self._preprocess_source(prog)
             timing_source = (
                 self.source.source
                 if isinstance(
@@ -1085,6 +1087,16 @@ class PreparedTimelineMacro(TimedMacro):
             self.book.preparing -= 1
             if previous is not None:
                 self.book.math = previous
+
+    def _preprocess_source(self, prog) -> None:
+        # ADR-0083: count QICK's trigger increments, including unwrapped triggers
+        # inside native macros. Restore the counter so nested wrappers do not
+        # count the same trigger twice.
+        before = {ch: ro["trigs"] for ch, ro in prog.ro_chs.items()}
+        self.source.preprocess(prog)
+        for ch, ro in prog.ro_chs.items():
+            self.book.read_counts[ch] += ro["trigs"] - before[ch]
+            ro["trigs"] = before[ch]
 
     def translate(self, prog) -> None:
         previous = prog._time_origin
@@ -1230,32 +1242,6 @@ def _same_times(values: Sequence[Time]) -> bool:
     )
 
 
-@dataclass
-class BranchCaseState:
-    """Retain one prepared path for timeline/native end and proof merging.
-
-    ends maps live timeline names to reference-relative ends; used contains
-    names accessed by this case. runtime_gens
-    and runtime_ros hold runtime native channel tails, while gens and ros hold
-    their static QICK timestamps. provenance pairs register/channel expressions.
-    frames captures active Repeat guard and advance state. defined contains
-    registers with certified producers at this case exit. selections retains
-    reaching table relations for consumer auditing. All containers are
-    detached snapshots; native times use us and RuntimeEnd stores cycle bounds.
-    """
-
-    ends: dict[str, Time]
-    used: set[str]
-    runtime_gens: dict[int, RuntimeEnd]
-    runtime_ros: dict[int, RuntimeEnd]
-    gens: dict[int, float | QickParam]
-    ros: dict[int, float | QickParam]
-    provenance: BranchProvenance
-    frames: list[RepeatFrameSnapshot]
-    defined: set[str]
-    selections: dict[str, SelectionProvenance]
-
-
 class TimelineBranch(Macro):
     def __repr__(self) -> str:
         # QICK eagerly formats macros even when debug logging is disabled.
@@ -1296,56 +1282,38 @@ class TimelineBranch(Macro):
         self.book.end(self.timeline)
         initial = self.book.ends.copy()
         self._capture_entry(prog, initial)
-        self.book.begin_branch_sources(prog)
-        initial_gens = {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs}
-        initial_ros = {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs}
-        runtime_gens, runtime_ros = (
-            self.book.runtime_gens.copy(),
-            self.book.runtime_ros.copy(),
-        )
+        entry = self._capture_path(prog)
         outer_used = self.book.used
-        initial_defined = prog._time_bounds.defined.copy()
-        initial_selections = prog._time_bounds.selection_at_position.copy()
-        saved_pins = self.book.pinned.copy()
-        self.book.pinned.update(prog._timeline_live_registers())
-        self.book.pinned.update(
+        pins = prog._timeline_live_registers() | {
             value.register
             for value in [*self.entry_inputs.values(), *self.captured_ends]
-        )
-        frames = self._save_frames()
-        states: list[BranchCaseState] = []
+        }
+        states: list[PathState] = []
         self.prepared = []
         for index, case in enumerate(self.cases):
-            self._restore_frames(frames)
-            prog._time_bounds.defined = initial_defined.copy()
-            prog._time_bounds.selection_at_position = initial_selections.copy()
-            self.book.runtime_gens, self.book.runtime_ros = (
-                runtime_gens.copy(),
-                runtime_ros.copy(),
-            )
-            for ch, value in initial_gens.items():
-                self.book.native_timestamp(prog, value, gen_ch=ch)
-            for ch, value in initial_ros.items():
-                self.book.native_timestamp(prog, value, ro_ch=ch)
+            # Keep registers live across separately compiled cases, but restart
+            # path-local timing and read counts from the Branch entry.
+            self.book.restore(prog, replace(entry, pinned=pins))
             self.prepared.append(self._prepare_case(prog, case, index, initial))
-            states.append(self._capture_case(prog))
-            self.book.pinned.update(prog._timeline_live_registers())
-        states = self._record_case_sources(prog, states)
+            states.append(self._capture_path(prog))
+            pins = prog._timeline_live_registers()
+        self._check_read_counts(states)
+        self.book.restore(prog, replace(states[-1], pinned=pins))
+        used = set().union(
+            *((state.used or set()) & initial.keys() for state in states)
+        )
         if outer_used is not None:
-            outer_used.update(
-                set.union(*(state.used & initial.keys() for state in states))
-            )
-        self._merge_frames(prog, [state.frames for state in states])
+            outer_used.update(used)
+        self._merge_frames(prog, [state.repeat_frames for state in states])
         prog._time_bounds.defined = set.intersection(
             *(state.defined for state in states)
         )
         prog._time_bounds.merge_selections([state.selections for state in states])
         results = [{name: state.ends[name] for name in initial} for state in states]
-        self.book.finish_branch_sources(prog, self.by)
+        self._merge_expressions(prog, states)
         self.book.used = outer_used
         self.tails = [RuntimeMath(prog) for _ in results]
         self.result_math = RuntimeMath(prog)
-        used = set.union(*(state.used & initial.keys() for state in states))
         self._merge_ends(prog, initial, results, used)
         self._merge_native(
             prog,
@@ -1359,7 +1327,18 @@ class TimelineBranch(Macro):
             results,
             generator=False,
         )
-        self.book.pinned = saved_pins
+        self.book.pinned = entry.pinned.copy()
+
+    def _check_read_counts(self, states: list[PathState]) -> None:
+        for ch, count in states[0].read_counts.items():
+            if any(state.read_counts[ch] != count for state in states[1:]):
+                cases = ", ".join(
+                    f"case {index} -> {state.read_counts[ch]}"
+                    for index, state in enumerate(states)
+                )
+                raise ValueError(
+                    f"Branch {self.by!r}: ADC {ch} reads differ across cases: {cases}"
+                )
 
     def _capture_entry(self, prog, initial: dict[str, Time]) -> None:
         self.entry_math = RuntimeMath(prog)
@@ -1439,44 +1418,33 @@ class TimelineBranch(Macro):
         self.book.used = {self.timeline}
         return prepared
 
-    def _capture_case(self, prog) -> BranchCaseState:
-        return BranchCaseState(
-            self.book.ends.copy(),
-            (self.book.used or set()).copy(),
-            self.book.runtime_gens.copy(),
-            self.book.runtime_ros.copy(),
-            {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
-            {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
-            self.book.snapshot_branch_provenance(prog),
-            self._save_frames(),
-            prog._time_bounds.defined.copy(),
-            prog._time_bounds.selection_at_position.copy(),
+    def _capture_path(self, prog) -> PathState:
+        # The join needs an expression on every declared channel of every path.
+        return replace(
+            self.book.capture(prog),
+            native_expressions=self.book.snapshot_native_expressions(prog),
         )
 
-    def _record_case_sources(
-        self, prog, states: list[BranchCaseState]
-    ) -> list[BranchCaseState]:
-        finished = []
-        for state in states:
-            self._restore_case(prog, state)
-            self.book.record_branch_sources(prog)
-            finished.append(self._capture_case(prog))
-        return finished
-
-    def _restore_case(self, prog, state: BranchCaseState) -> None:
-        self._restore_frames(state.frames)
-        self.book.ends = state.ends.copy()
-        self.book.used = state.used.copy()
-        self.book.runtime_gens = state.runtime_gens.copy()
-        self.book.runtime_ros = state.runtime_ros.copy()
-        prog._time_bounds.defined = state.defined.copy()
-        prog._time_bounds.selection_at_position = state.selections.copy()
-        for ch, value in state.gens.items():
-            self.book.native_timestamp(prog, value, gen_ch=ch)
-        for ch, value in state.ros.items():
-            self.book.native_timestamp(prog, value, ro_ch=ch)
-        self.book.source_expressions = state.provenance.sources.copy()
-        self.book.native_expressions = state.provenance.native.copy()
+    def _merge_expressions(self, prog, states: list[PathState]) -> None:
+        self.book.unknown_native_adcs = set().union(
+            *(state.unknown_native_adcs for state in states)
+        )
+        self.book.native_expressions = {
+            key: select_time(
+                source_expression(prog, self.by),
+                tuple(state.native_expressions[key] for state in states),
+            )
+            for key in states[0].native_expressions
+        }
+        self.book.source_expressions = {
+            name: select_time(
+                source_expression(prog, self.by),
+                tuple(state.source_expressions[name] for state in states),
+            )
+            for name in set.intersection(
+                *(set(state.source_expressions) for state in states)
+            )
+        }
 
     def _merge_values(self, prog, values: list[Time], *, force: bool = False) -> Time:
         if not force and _same_times(values):
@@ -1544,30 +1512,7 @@ class TimelineBranch(Macro):
                 ro_ch=None if generator else ch,
             )
 
-    def _save_frames(self) -> list[RepeatFrameSnapshot]:
-        return [
-            RepeatFrameSnapshot(
-                advance=frame.advance,
-                variable=frame.variable,
-                written_gens=frame.written_gens.copy(),
-                written_ros=frame.written_ros.copy(),
-                pulse_guards=deepcopy(frame.pulse_guards),
-                expression_advance=frame.expression_advance,
-            )
-            for frame in self.book.repeats
-        ]
-
-    def _restore_frames(self, snapshots: list[RepeatFrameSnapshot]) -> None:
-        self.book.restore_branch_sources()
-        for frame, snapshot in zip(self.book.repeats, snapshots, strict=True):
-            frame.advance = snapshot.advance
-            frame.expression_advance = snapshot.expression_advance
-            frame.variable = snapshot.variable
-            frame.written_gens = snapshot.written_gens.copy()
-            frame.written_ros = snapshot.written_ros.copy()
-            frame.pulse_guards = deepcopy(snapshot.pulse_guards)
-
-    def _merge_frames(self, prog, paths: list[list[RepeatFrameSnapshot]]) -> None:
+    def _merge_frames(self, prog, paths: list[tuple[RepeatFrameSnapshot, ...]]) -> None:
         for index, frame in enumerate(self.book.repeats):
             snapshots = [path[index] for path in paths]
             frame.merge_expression_advance(prog, self.by, snapshots)

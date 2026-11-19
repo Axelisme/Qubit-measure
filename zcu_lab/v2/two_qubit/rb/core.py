@@ -349,7 +349,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                         elif reset is not None:
                             builder.emit(Reset("reset", reset))
 
-                        # Both arms keep per-role order, overlap X90s and meet at each CZ.
+                        # Both arms overlap X90s within a Clifford and align at Clifford ends.
                         emit_sequence(
                             builder,
                             sequence,

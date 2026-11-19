@@ -65,3 +65,7 @@ Simultaneous single-qubit RB與單qubit heralding是否另開，留待使用者�
 - [原序列產生與recovery](../../zcu_lab/v2/two_qubit/rb/sequence.py)不變；播放排程由同資料夾的[scheduling.py](../../zcu_lab/v2/two_qubit/rb/scheduling.py)擁有。
 - [Magesan et al., Efficient Measurement of Quantum Gate Error by Interleaved Randomized Benchmarking](https://doi.org/10.1103/PhysRevLett.109.080505)，2012。
 - [Gambetta et al., Characterization of Addressability by Simultaneous Randomized Benchmarking](https://doi.org/10.1103/PhysRevLett.109.240504)，2012。
+
+## 後記
+
+2026-11-20：本篇「Reference與interleaved使用相同單qubit排法」一句，在 Clifford 邊界上不成立。Interleaved 組每個 random Clifford 後的 CZ 讓兩條時間線在邊界對齊，reference 組沒有，相鄰 Clifford 可以重疊。使用者同日改為兩組都在 Clifford 邊界對齊，見 [Two-qubit RB 在 Clifford 邊界對齊兩條時間線](2026-11-20-rb-clifford-barrier.md)。

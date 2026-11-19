@@ -965,12 +965,13 @@ def test_builder_register_repeat_forwards_bounds_and_preserves_remaining_end(
     builder.add_loop("scan", 2)
     loader = v2.LoadValue("count", [2, 3], idx_reg="scan", val_reg="n")
     readout = _readout(post_delay=0.1)
+    drive = _pulse("drive", ch=0)
     builder.emit(loader)
     builder.fork("default", into="external")
     builder.timeline_inc(2.0, timeline="external")
     builder.delay_by_timeline()
     with builder.repeat("body", "n", range_hint=(2, 3)):
-        builder.emit(readout)
+        builder.emit(drive)
         builder.delay_by_timeline()
     builder.join("external", into="default")
     builder.emit(readout)
@@ -980,6 +981,7 @@ def test_builder_register_repeat_forwards_bounds_and_preserves_remaining_end(
         def _initialize(self, cfg):
             self.add_loop("scan", 2)
             self.declare(loader)
+            self.declare(drive)
             self.declare(readout)
 
         def _body(self, cfg):
@@ -988,7 +990,7 @@ def test_builder_register_repeat_forwards_bounds_and_preserves_remaining_end(
             self.timeline_inc(2.0, timeline="external")
             self.delay_by_timeline()
             with self.repeat("body", "n", range_hint=(2, 3)):
-                self.emit(readout)
+                self.emit(drive)
                 self.delay_by_timeline()
             self.join("external", into="default")
             self.emit(readout)

@@ -169,7 +169,6 @@ def test_branch_cases_share_read_labels_with_zero_gain_first_read(swept):
                     builder.emit(drive)
                 builder.emit(r2)
     prog = builder.build()
-    prog.set_reads_per_shot(2)
     process = v2.shot_sums(prog, [v2.IQ("r1"), v2.IQ("r2")])
     points = 16 if swept else 8
     iq = np.tile(np.array([[[[2.0, 3.0], [5.0, 7.0]]]]), (points, 2, 1, 1))
@@ -194,7 +193,7 @@ def test_branch_cases_share_read_labels_with_zero_gain_first_read(swept):
     assert prog.ro_chs[0]["trigs"] == 2
 
 
-def _branch_program(case_modules, *, reads=1):
+def _branch_program(case_modules):
     builder = v2.TimelineBuilder(load_soccfg(n_readouts=2))
     builder.add_loop("choice", len(case_modules))
     with builder.branch(by="choice", align_timeline=True) as cases:
@@ -203,9 +202,7 @@ def _branch_program(case_modules, *, reads=1):
                 for module in modules:
                     builder.emit(module)
                     builder.timeline_inc(1.5)
-    prog = builder.build()
-    prog.set_reads_per_shot(reads)
-    return prog
+    return builder.build()
 
 
 @pytest.mark.parametrize(
@@ -222,24 +219,21 @@ def test_branch_adc_setting_mismatch_names_cases_and_field(field, value):
     first = readout("selected")
     cfg = first.cfg.model_copy(update={field: value})
     other = PulseReadout("selected", cfg)
-    prog = _branch_program([[first], [other]])
+    if field == "ro_ch":
+        # Keep one read per ADC in each case; only the label changes ADC.
+        case_modules = [[first, readout("pad1", ch=1)], [other, readout("pad0")]]
+    else:
+        case_modules = [[first], [other]]
+    prog = _branch_program(case_modules)
     with pytest.raises(ValueError, match=rf"choice\[0\].*choice\[1\].*{field}"):
         v2.shot_sums(prog, [v2.IQ("selected")])
 
 
 def test_branch_read_index_mismatch_is_rejected_even_with_equal_counts():
     selected, auxiliary = readout("selected"), readout("auxiliary")
-    prog = _branch_program([[selected, auxiliary], [auxiliary, selected]], reads=2)
+    prog = _branch_program([[selected, auxiliary], [auxiliary, selected]])
     with pytest.raises(ValueError, match=r"choice\[0\].*choice\[1\].*read index"):
         v2.shot_sums(prog, [v2.IQ("selected")])
-
-
-def test_branch_read_count_mismatch_names_case_and_declared_and_emitted_counts():
-    selected, auxiliary = readout("selected"), readout("auxiliary")
-    prog = _branch_program([[selected, auxiliary], [selected]], reads=2)
-    with pytest.raises(ValueError, match=r"choice\[1\].*declares 2.*emitted 1"):
-        v2.shot_sums(prog, [v2.IQ("selected")])
-    assert prog.ro_chs[0]["trigs"] == 2
 
 
 def test_branch_generator_waveform_can_differ_with_identical_adc_settings():
@@ -251,25 +245,6 @@ def test_branch_generator_waveform_can_differ_with_identical_adc_settings():
         {0: np.array([[[[2.0, 3.0]]], [[[5.0, 7.0]]]])},
     )
     np.testing.assert_array_equal(result, [[1, 2, 3, 4, 6, 9], [1, 5, 7, 25, 35, 49]])
-
-
-def test_correlated_branches_keep_one_selector_choice_for_the_whole_path():
-    selected = readout("selected")
-    builder = v2.TimelineBuilder(load_soccfg())
-    builder.add_loop("choice", 2)
-    for index in (0, 1):
-        with (
-            builder.branch(by="choice", align_timeline=True) as cases,
-            cases.case(index),
-        ):
-            builder.trigger([0], t=0)
-            builder.timeline_inc(1.5)
-    builder.emit(selected)
-    prog = builder.build()
-    prog.set_reads_per_shot(2)
-    process = v2.shot_sums(prog, [v2.IQ("selected")])
-    result = reduce_round(process, {0: np.array([[[[99.0, 99.0], [5.0, 7.0]]]])})
-    np.testing.assert_array_equal(result, [[1, 5, 7, 25, 35, 49]])
 
 
 @pytest.mark.parametrize("timeline", [True])
@@ -362,60 +337,31 @@ def test_tone_must_match_readout_type(mux, tone):
         v2.shot_sums(prog, [v2.IQ("readout", tone=tone)])
 
 
-def test_declared_reads_must_match_actual_triggers():
-    prog = compile_modules(load_soccfg(), [readout()])
-    prog.set_reads_per_shot(2)
-    with pytest.raises(ValueError, match="ADC 0.*2.*1"):
-        v2.shot_sums(prog, [v2.IQ("readout")])
-
-
-@pytest.mark.parametrize("timeline", [True])
-@pytest.mark.parametrize("control", ["Repeat", "Branch"])
 @pytest.mark.parametrize("inside", [False, True])
-def test_repeated_or_unbalanced_triggers_on_selected_adc_are_rejected(
-    timeline, control, inside
-):
+def test_repeated_triggers_on_selected_adc_are_rejected(inside):
     ro = readout()
 
     class Program(v2.TimelineProgramV2):
         def _initialize(self, cfg):
             self.declare(ro)
-            self.add_loop("choice", 2)
 
         def _body(self, cfg):
             if not inside:
                 self.emit(ro, tag="selected")
                 # Clear the 1-us ADC window before entering controlled triggers.
                 self.timeline_inc(1.0)
-            if control == "Repeat":
+            self.delay_by_timeline()
+            with self.repeat("repeat_scope", 2):
+                if inside:
+                    self.emit(ro, tag="selected")
+                else:
+                    self.trigger([0], t=0, timeline="default")
+                self.timeline_inc(1.0)
                 self.delay_by_timeline()
-                with self.repeat("repeat_scope", 2):
-                    if inside:
-                        self.emit(ro, tag="selected")
-                    else:
-                        self.trigger([0], t=0, timeline="default")
-                    # Repeat iterations must also clear the 1-us ADC window.
-                    self.timeline_inc(1.0)
-                    self.delay_by_timeline()
-            else:
-                with self.branch(by="choice", align_timeline=True) as branch:
-                    with branch.case(0):
-                        if inside:
-                            self.emit(ro, tag="selected")
-                        else:
-                            self.trigger([0], t=0)
-                    with branch.case(1):
-                        pass
 
     prog = Program(load_soccfg())
-    label = "selected"
-    message = (
-        r"Branch cases choice\[1\].*(ADC 0.*emitted|label 'selected')"
-        if control == "Branch"
-        else r"ADC 0.*Repeat"
-    )
-    with pytest.raises(ValueError, match=message):
-        v2.shot_sums(prog, [v2.IQ(label)])
+    with pytest.raises(ValueError, match=r"ADC 0.*Repeat"):
+        v2.shot_sums(prog, [v2.IQ("selected")])
 
 
 @pytest.mark.parametrize("control", ["Repeat", "Branch"])
@@ -430,11 +376,10 @@ def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
             # ADC 1 integrates for 1 us independently of the selected ADC 0.
             builder.timeline_inc(1.0)
     else:
-        with (
-            builder.branch(by="choice", align_timeline=True) as cases,
-            cases.case(0),
-        ):
-            builder.emit(other)
+        with builder.branch(by="choice", align_timeline=True) as cases:
+            for index in range(2):
+                with cases.case(index):
+                    builder.emit(other)
     builder.emit(selected)
     prog = builder.build()
     process = v2.shot_sums(prog, [v2.IQ("readout")])
@@ -442,7 +387,7 @@ def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
         process,
         {
             0: np.array([[[[4.0, 5.0]]]]),
-            1: np.zeros((1, 1, 1, 2), dtype=np.float64),
+            1: np.zeros((1, 1, 2 if control == "Repeat" else 1, 2), dtype=np.float64),
         },
     )
     np.testing.assert_array_equal(result, [[1, 4, 5, 16, 20, 25]])
@@ -458,24 +403,21 @@ def test_nested_branch_and_repeat_still_reject_repeated_adc_trigger(inner):
     builder.timeline_inc(1.0)
     if inner == "Repeat":
         with builder.branch(by="choice", align_timeline=True) as cases:
-            with cases.case(0):
-                pass
-            with cases.case(1), builder.repeat("reads", 2):
-                builder.emit(ro)
-                builder.timeline_inc(1.0)
+            for index in range(2):
+                with cases.case(index), builder.repeat(f"reads_{index}", 2):
+                    builder.emit(ro)
+                    builder.timeline_inc(1.0)
     else:
         with builder.repeat("reads", 2):
-            with (
-                builder.branch(by="choice", align_timeline=True) as cases,
-                cases.case(1),
-            ):
-                builder.emit(ro)
-                builder.timeline_inc(1.0)
+            with builder.branch(by="choice", align_timeline=True) as cases:
+                for index in range(2):
+                    with cases.case(index):
+                        builder.emit(ro)
+                        builder.timeline_inc(1.0)
             # Clear each iteration before reentering the conditional read.
             builder.delay_by_timeline()
     prog = builder.build()
-    prog.set_reads_per_shot(1)
-    with pytest.raises(ValueError, match=r"Branch.*choice\[1\].*ADC 0.*Repeat"):
+    with pytest.raises(ValueError, match=r"Branch.*choice\[0\].*ADC 0.*Repeat"):
         v2.shot_sums(prog, [v2.IQ("selected")])
 
 

@@ -1,4 +1,4 @@
-"""Shared label ownership and declared-read checks for compiled readouts."""
+"""Shared label ownership and reducer count contracts for compiled readouts."""
 
 from collections.abc import Sequence
 
@@ -47,15 +47,13 @@ def resolve_readout_label(
 
 
 def validate_declared_reads(prog: TimelineProgramV2, ch: int, expected: int) -> None:
-    """Check compiled ADC ch's declared logical reads against its observed count.
+    """Require the reducer's expected logical reads on ADC ch of compiled prog.
 
-    prog is a compiled program; ch is a declared ADC and expected is its logical
-    per-shot read count under the caller's control-flow rules. Consumed reads do
-    not count. Raise ValueError on mismatch; no declaration is changed.
+    Exclude reads consumed by shot mask sources. Raise ValueError with the
+    expected and actual logical counts if they differ, without changing prog.
     """
-    declared = prog.logical_read_count(ch, prog.ro_chs[ch]["trigs"])
-    if declared != expected:
+    actual = prog.logical_read_count(ch, prog.ro_chs[ch]["trigs"])
+    if actual != expected:
         raise ValueError(
-            f"ADC {ch}: expected {expected} reads per shot; actual {declared}; "
-            f"declares {declared} reads per shot but emitted {expected} triggers"
+            f"ADC {ch}: expected {expected} reads per shot; actual {actual}"
         )

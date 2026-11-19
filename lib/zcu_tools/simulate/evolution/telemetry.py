@@ -1,7 +1,8 @@
-"""Named routing reports and evolve-local, thread-CPU accounting; no I/O."""
+"""Routing reports, evolve-local CPU accounting and validity warnings."""
 
 import time
-from collections.abc import Generator, Mapping
+import warnings
+from collections.abc import Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from threading import Lock
@@ -9,6 +10,8 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
+
+from .secular import StarkOrderInversion
 
 
 @dataclass(frozen=True)
@@ -78,6 +81,69 @@ class FamilyRouting:
     def actual_cpu_s(self) -> float:
         """Measured prepare plus apply calling-thread CPU seconds."""
         return self.prepare_cpu_s + self.apply_cpu_s
+
+
+def merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
+    """Combine observed work for the same family across evolves."""
+    return FamilyRouting(
+        rows=sum(part.rows for part in parts),
+        duration_ns=sum(part.duration_ns for part in parts),
+        prepare_cpu_s=sum(part.prepare_cpu_s for part in parts),
+        apply_cpu_s=sum(part.apply_cpu_s for part in parts),
+        cache_hits=sum(part.cache_hits for part in parts),
+        rejected_rows=sum(part.rejected_rows for part in parts),
+        estimated_cost=sum(part.estimated_cost for part in parts),
+        estimated_cpu_s=(
+            sum(
+                part.estimated_cpu_s
+                for part in parts
+                if part.estimated_cpu_s is not None
+            )
+            if all(part.estimated_cpu_s is not None for part in parts)
+            else None
+        ),
+        prepare_builds=sum(part.prepare_builds for part in parts),
+        prepare_key_builds=sum(part.prepare_key_builds for part in parts),
+        admission_rows=sum(part.admission_rows for part in parts),
+        opencl_rows=sum(part.opencl_rows for part in parts),
+        dp54_rows=sum(part.dp54_rows for part in parts),
+        dop853_rows=sum(part.dop853_rows for part in parts),
+        opencl_detection_error=first_opencl_detection_error(parts),
+    )
+
+
+def warn_stark_order(inversions: Sequence[StarkOrderInversion]) -> None:
+    """Report one UserWarning per reversed pair in a standalone evolve."""
+    # ADR-0078: report the model limit without rejecting experiment parameters.
+    by_pair: dict[tuple[int, int], list[StarkOrderInversion]] = {}
+    for entry in inversions:
+        by_pair.setdefault(entry.states, []).append(entry)
+    for (lower, upper), entries in by_pair.items():
+        first = entries[0]
+        start, end = first.span_ns
+        points = len({entry.point for entry in entries})
+        limit = min(entry.max_shift_difference_ghz for entry in entries)
+        warnings.warn(
+            f"Stark shift reverses energy ordering of states {lower} and {upper} "
+            f"(affected points: {points}, affected segments: {len(entries)}); first at "
+            f"point {first.point} segment [{start:g}, {end:g}] ns. "
+            f"Lower-minus-upper Stark shift difference upper limit: {limit} GHz. "
+            "Results above this limit are outside the dispersive model's validity.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
+def first_opencl_detection_error(parts: Iterable[FamilyRouting | None]) -> str | None:
+    """Return the first recorded device detection error in report order."""
+    return next(
+        (
+            part.opencl_detection_error
+            for part in parts
+            if part is not None and part.opencl_detection_error
+        ),
+        None,
+    )
 
 
 @dataclass

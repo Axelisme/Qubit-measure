@@ -36,9 +36,7 @@ def chain_program(n: int, *, reps: int = 1, points: int = 1) -> v2.TimelineProgr
     with builder.repeat("chain", n):
         builder.emit(readout, tag="sample")
         builder.delay_auto()
-    prog = builder.build()
-    prog.set_reads_per_shot(n)
-    return prog
+    return builder.build()
 
 
 def processor(
@@ -109,15 +107,6 @@ def test_chain_requires_at_least_sixteen_reads_at_construction(n: int):
         processor(chain_program(n))
 
 
-@pytest.mark.parametrize("declared", [1, 15, 17])
-def test_declared_read_count_must_match_fixed_repeat(declared: int):
-    prog = chain_program(16)
-    prog.set_reads_per_shot(declared)
-    with pytest.raises(ValueError, match=rf"ADC 0.*expected.*16.*actual.*{declared}"):
-        processor(prog)
-    assert prog.ro_chs[0]["trigs"] == declared
-
-
 @pytest.mark.parametrize(
     "shape", [(1, 2, 15, 2), (1, 2, 17, 2), (1, 2, 16, 3), (1, 16, 2)]
 )
@@ -143,7 +132,6 @@ def test_ambiguous_untagged_readout_label_reports_two_emissions():
         builder.emit(readout)
         builder.delay_auto()
     prog = builder.build()
-    prog.set_reads_per_shot(32)
     with pytest.raises(ValueError, match=r"label 'readout'.*expected one.*actual 2"):
         processor(prog, "readout")
 
@@ -160,7 +148,6 @@ def test_repeat_chain_acquisition_adds_dwell_counts_across_points_reps_and_round
             builder.emit(chain_readout())
             builder.delay_auto()
         prog = builder.build()
-        prog.set_reads_per_shot(16)
         sums = prog.acquire_summed(
             env.soc, reducer=processor(prog, "readout"), rounds=2, progress=False
         )

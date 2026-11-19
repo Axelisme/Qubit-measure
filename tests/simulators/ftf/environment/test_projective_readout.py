@@ -258,10 +258,7 @@ def herald_program(env, *, reads=2, reps=256):
         builder.emit(mux.build("joint"))
         builder.timeline_inc(0.020)
     builder.delay_by_timeline()
-    prog = builder.build()
-    # QICK counts the trigger macro once; Repeat executes it once per event.
-    prog.set_reads_per_shot(reads)
-    return prog
+    return builder.build()
 
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])

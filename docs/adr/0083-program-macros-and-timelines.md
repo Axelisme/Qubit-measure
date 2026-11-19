@@ -157,6 +157,7 @@ Delay 與 SoftDelay 都只加結尾，不推進 reference。
 兩種 readout config 是瞬時事件，結尾更新到 E+t，不加 config length 或其他 ADC window。
 同 generator 可證明的 pulse 重疊在編譯期報錯，另一條 timeline 不能豁免此檢查。
 後一個 trigger 帶 timeline 時，必須證明起點不早於同 ADC 前一視窗結尾。重疊或無法證明時在編譯期報錯。
+原生 `t=None` trigger 的 ADC 結尾不可定位。Branch 的各 case 從同一入口狀態編譯；任何 case 到出口仍有不可定位的結尾時，合流後的同 ADC timeline trigger 仍報錯。
 純原生的後一個 trigger 保留 QICK 行為。每個 shot 收尾仍等待全部 ADC。
 2026-11-01，使用者裁定：「18b請用gen的就好，adc讓其在獨立timeline不join，因為adc目前不影響後續pulse」。
 對編譯期報錯方式，使用者同日回答：「B」。
@@ -345,6 +346,16 @@ Branch／Repeat 之後可直接在外部 timeline 放 pulse／trigger／config�
 Shot 收尾、join、fork、delay_by_timeline 本來需要的 selected-end／debit storage 可直接重用，不另配事件時間 register。
 2026-11-01，對取消外部 timeline 的 wait-only 拒絕、從實際結尾繼續放事件的方案，使用者回答：「1B」。
 Storage 重用範圍由 advisor 同日依代理授權裁定，仍保留 16 個 data register 上限與不用時間 DMEM 的限制。
+
+### 每發 ADC 讀取數
+
+Timeline compiler 在 macro preprocess 時記錄 QICK 的每個 ADC trigger 增量。原生 trigger、module readout 和原生 macro 內部送出的 trigger 共用這條路徑。它把逐路徑累計值存進 `PathState`。
+
+Branch 的每個 case 從同一組入口計數開始。出口逐 ADC 比對所有 case，含省略的空 case。兩個 case 各讀一次時，本發只算一次；一個讀一次而另一個沒讀時，編譯報錯並列出各 case 的計數。同一 selector 後面再用另一個 Branch 補讀，不能抵銷前一次出口的差異。2026-11-20，使用者在互補寫法和每個 Branch 出口都對齊兩案中選後者：「3-1」。討論見 [Timeline 編譯器推算每發 ADC 讀取數](../discussions/2026-11-20-timeline-read-counts.md)。
+
+固定 Repeat 的出口計數是入口加上迭代次數乘以單輪增量。`range_hint` 上下限相同的 register 次數也按固定次數計算；其餘 register 次數的 body 不得讀取 ADC。
+編譯器將每發計數寫入 QICK 的 `ro_chs[ch]["trigs"]`，不改 Branch 和 Repeat 的指令。`set_reads_per_shot` 只核對值，不再改配置。
+直接以 raw ASM 送出 ADC 觸發不經此記帳。CPU 模擬器仍逐發比對實際觸發數與 `trigs`。
 
 ### 並行序列與 reference 守衛
 

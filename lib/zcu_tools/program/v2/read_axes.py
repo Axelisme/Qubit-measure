@@ -15,7 +15,7 @@ from zcu_tools.program.acquisition import ShotReducer
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import MuxReadout, PulseReadout, classification_processor
-from .readout_labels import emission_label, validate_declared_reads
+from .readout_labels import emission_label
 from .readout_observation import ReadoutPath, observe_readout_paths
 from .timeline import TimelineProgramV2
 
@@ -75,31 +75,33 @@ def shot_sums(
     Each label must identify one visible emission on every feasible Branch path.
     Mutually exclusive untagged emissions may share a module name when their
     selected ADC, read index, frequency (MHz), window (us), phase (degrees) and
-    cfg classifier agree. Generator gain and waveform may differ. Every path
-    must emit the declared number of reads on each selected ADC. After build,
-    authors must set_reads_per_shot to the per-path count, not the sum of cases.
-    Missing/ambiguous labels, unequal settings/indices/counts and Repeat triggers
-    on selected ADCs raise ValueError naming Branch cases when present.
+    cfg classifier agree. Generator gain and waveform may differ. The compiler
+    guarantees equal read counts across Branch cases.
+    Missing/ambiguous labels, unequal settings/indices and Repeat triggers on
+    selected ADCs raise ValueError naming Branch cases when present. Read labels
+    cannot be indexed across opaque macros whose triggers are not visible in
+    the source path; the error reports the compiled and observed counts.
     QICK rejects duplicate explicit tags at compile time with RuntimeError.
     Classify snapshots its override or cfg classifier; missing
     calibration, missing circle radius and invalid tone selection raise ValueError.
     The reducer borrows ADC-keyed float64 (points, reps, logical_reads, 2)
     arrays and accumulates (points, *axes) outer-product sums of kept shots.
     IQ NaNs in kept shots propagate. The reducer rejects read-count changes
-    and does not modify its input or the program's declared reads_per_shot.
+    and does not modify its input or the program's compiled read counts.
     """
     if not axes:
         raise ValueError("axes must contain at least one read")
     paths = iter(observe_readout_paths(prog))
     reference = next(paths)
-    labels, counts, unsupported = _collect_reads(prog, reference)
-    resolved = _resolve_path(prog, axes, reference, labels, counts, unsupported)
+    labels, resolved = _resolve_path(prog, axes, reference)
     for path in paths:
-        other_labels, other_counts, other_unsupported = _collect_reads(prog, path)
-        _resolve_path(prog, axes, path, other_labels, other_counts, other_unsupported)
+        other_labels, _ = _resolve_path(prog, axes, path)
         for axis in axes:
             _check_path_read(axis, labels, other_labels, reference, path)
-    counts = {ch: counts[ch] for ch, _, _ in resolved}
+    counts = {
+        ch: prog.logical_read_count(ch, prog.ro_chs[ch]["trigs"])
+        for ch, _, _ in resolved
+    }
 
     def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
         for ch, count in counts.items():
@@ -154,10 +156,8 @@ def _resolve_path(
     prog: TimelineProgramV2,
     axes: Sequence[Classify | IQ],
     path: ReadoutPath,
-    labels: _LabelReads,
-    counts: dict[int, int],
-    unsupported: dict[int, str],
-) -> list[_ResolvedAxis]:
+) -> tuple[_LabelReads, list[_ResolvedAxis]]:
+    labels, observed, unsupported = _collect_reads(prog, path)
     try:
         resolved = []
         for axis in axes:
@@ -167,8 +167,16 @@ def _resolve_path(
                     f"label {axis.read!r}: expected one emission, actual {len(matches)}; "
                     f"available labels: {list(labels)}"
                 )
-            resolved.append(_resolve_axis(prog, axis, matches[0], counts, unsupported))
-        return resolved
+            result = _resolve_axis(axis, matches[0], unsupported)
+            ch, _, _ = result
+            compiled = prog.ro_chs[ch]["trigs"]
+            if observed[ch] != compiled:
+                raise ValueError(
+                    f"ADC {ch}: compiled {compiled} reads, observed {observed[ch]} "
+                    "source triggers; cannot resolve read labels across opaque triggers"
+                )
+            resolved.append(result)
+        return labels, resolved
     except ValueError as error:
         if not path.cases:
             raise
@@ -224,7 +232,7 @@ def _collect_reads(
     prog: TimelineProgramV2,
     path: ReadoutPath,
 ) -> tuple[_LabelReads, dict[int, int], dict[int, str]]:
-    """Collect visible labels and logical ADC counts along one feasible source path."""
+    """Collect logical label indices and physical trigger counts on one source path."""
     counts = dict.fromkeys(prog.ro_chs, 0)
     labels: _LabelReads = {}
     unsupported: dict[int, str] = {}
@@ -252,17 +260,12 @@ def _collect_reads(
                 if control is not None:
                     unsupported[ch] = control
                 counts[ch] += 1
-    logical_counts = {
-        ch: prog.logical_read_count(ch, count) for ch, count in counts.items()
-    }
-    return labels, logical_counts, unsupported
+    return labels, counts, unsupported
 
 
 def _resolve_axis(
-    prog: TimelineProgramV2,
     axis: Classify | IQ,
     read: tuple[PulseReadout | MuxReadout, dict[int, int]],
-    counts: dict[int, int],
     unsupported: dict[int, str],
 ) -> _ResolvedAxis:
     """Validate a label/tone and bind its feature conversion before acquisition."""
@@ -292,7 +295,6 @@ def _resolve_axis(
         raise ValueError(
             f"ADC {ch}: trigger inside {unsupported[ch]} is unsupported for read labels"
         )
-    validate_declared_reads(prog, ch, counts[ch])
     if isinstance(axis, IQ):
         return ch, indices[ch], partial(_iq_features, order=axis.order)
     classifier = axis.classifier if axis.classifier is not None else classifier

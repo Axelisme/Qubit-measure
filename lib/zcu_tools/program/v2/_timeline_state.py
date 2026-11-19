@@ -1,12 +1,14 @@
 """Relative timeline state, native channel tails and repeat scope bookkeeping."""
 
 import warnings
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from qick.asm_v2 import QickParam, WriteReg
+from qick.asm_v2 import QickParam, QickProgramV2, WriteReg
 
 from ._timeline_axis import CycleAxis, CycleProducer, TimeVariable
+from ._timeline_bounds import ProducerBounds, SelectionProvenance
 from ._timeline_expression import (
     TimeExpression,
     add_time,
@@ -55,6 +57,7 @@ class RepeatFrameSnapshot:
     advance is reference movement in us; variable marks path-dependent movement.
     written_gens and written_ros contain channel IDs touched on the path.
     pulse_guards holds independent per-generator playback guards for that path.
+    expression_advance is the same reference movement symbolically in tProc cycles.
     """
 
     advance: float | QickParam
@@ -69,8 +72,8 @@ class RepeatFrameSnapshot:
 class RepeatFrame:
     parent: str
     external: dict[str, Time]
-    native_gens: dict[int, float | QickParam]
-    native_ros: dict[int, float | QickParam]
+    entry_state: "PathState"
+    initial_native_expressions: dict[tuple[bool, int], TimeExpression]
     advance: float | QickParam = 0.0
     variable: bool = False
     written_gens: set[int] = field(default_factory=set)
@@ -80,19 +83,11 @@ class RepeatFrame:
     adc_starts: list[tuple[str, int, TimeExpression, tuple[tuple[str, int], ...]]] = (
         field(default_factory=list)
     )
-    defined: set[str] = field(default_factory=set)
-    initial_external: dict[str, Time] = field(default_factory=dict)
     entry_math: RuntimeMath | None = None
     debits: list[tuple[RuntimeMath, Time]] = field(default_factory=list)
     tail_gens: dict[int, RuntimeEnd] = field(default_factory=dict)
     tail_ros: dict[int, RuntimeEnd] = field(default_factory=dict)
-    initial_runtime_gens: dict[int, RuntimeEnd] = field(default_factory=dict)
-    initial_runtime_ros: dict[int, RuntimeEnd] = field(default_factory=dict)
     expression_advance: TimeExpression = field(default_factory=TimeVariable)
-    initial_native_expressions: dict[tuple[bool, int], TimeExpression] = field(
-        default_factory=dict
-    )
-    initial_source_expressions: dict[str, TimeExpression] = field(default_factory=dict)
 
     def restore_expressions(
         self,
@@ -119,7 +114,8 @@ class RepeatFrame:
                 outer.expression_advance,
                 add_time(total, scale_time(self.expression_advance, -1)),
             )
-        for name, initial in self.initial_external.items():
+        for name in self.external:
+            initial = self.entry_state.ends[name]
             current = book.ends[name]
             if isinstance(current, RuntimeEnd):
                 expression = choose_time(
@@ -129,15 +125,15 @@ class RepeatFrame:
                 book.ends[name] = replace(current, expression=expression)
         for native, initial_runtime, current, generated, written in (
             (
-                self.native_gens,
-                self.initial_runtime_gens,
+                self.entry_state.gens,
+                self.entry_state.runtime_gens,
                 book.runtime_gens,
                 generated_gens,
                 self.written_gens,
             ),
             (
-                self.native_ros,
-                self.initial_runtime_ros,
+                self.entry_state.ros,
+                self.entry_state.runtime_ros,
                 book.runtime_ros,
                 generated_ros,
                 self.written_ros,
@@ -184,8 +180,9 @@ class RepeatFrame:
     ) -> None:
         """Keep entry values at zero iterations, otherwise the last body write."""
         limits = None if unbounded_time(count) else projected_expression_bounds(count)
+        initial = self.entry_state.source_expressions
         if limits is not None and limits.maximum == 0:
-            book.source_expressions = self.initial_source_expressions.copy()
+            book.source_expressions = initial.copy()
             return
         executed = choose_time(TimeVariable(1), count, maximum=False)
         restored = {}
@@ -193,12 +190,10 @@ class RepeatFrame:
             if axis in expression_axes(expression):
                 expression = reduce_loop_time(expression, axis, last=True)
             if limits is None or limits.minimum == 0:
-                if name not in self.initial_source_expressions:
+                if name not in initial:
                     # A body-only definition is not available on the zero path.
                     continue
-                expression = select_time(
-                    executed, (self.initial_source_expressions[name], expression)
-                )
+                expression = select_time(executed, (initial[name], expression))
             restored[name] = expression
         book.source_expressions = restored
 
@@ -227,10 +222,13 @@ class RepeatFrame:
             if limits is None or limits[1] > 1e-12:
                 self.external[name] = self._store(prog, end)
         self.tail_gens = self._native_stores(
-            prog, self.native_gens, self.initial_runtime_gens, self.written_gens
+            prog,
+            self.entry_state.gens,
+            self.entry_state.runtime_gens,
+            self.written_gens,
         )
         self.tail_ros = self._native_stores(
-            prog, self.native_ros, self.initial_runtime_ros, self.written_ros
+            prog, self.entry_state.ros, self.entry_state.runtime_ros, self.written_ros
         )
         stores = {
             end.register: end
@@ -289,12 +287,15 @@ class RepeatFrame:
             match = next(
                 (
                     name
-                    for name, candidate in self.initial_external.items()
-                    if candidate is end
-                    or (
-                        not isinstance(candidate, RuntimeEnd)
-                        and not isinstance(end, RuntimeEnd)
-                        and all(abs(v) < 1e-12 for v in bounds(candidate - end))
+                    for name, candidate in self.entry_state.ends.items()
+                    if name != self.parent
+                    and (
+                        candidate is end
+                        or (
+                            not isinstance(candidate, RuntimeEnd)
+                            and not isinstance(end, RuntimeEnd)
+                            and all(abs(v) < 1e-12 for v in bounds(candidate - end))
+                        )
                     )
                 ),
                 None,
@@ -315,10 +316,12 @@ class RepeatFrame:
         """Debit external timestamps, preserving tails generated in the last iteration."""
         generated_gens = {ch: prog.get_timestamp(gen_ch=ch) for ch in self.written_gens}
         generated_ros = {ch: prog.get_timestamp(ro_ch=ch) for ch in self.written_ros}
-        for ch, end in self.native_gens.items():
-            prog.set_timestamp(end, gen_ch=ch)
-        for ch, end in self.native_ros.items():
-            prog.set_timestamp(end, ro_ch=ch)
+        book = prog._timeline_book
+        body = book.capture(prog)
+        # Start the native debit at entry, retaining the body's other facts.
+        book.restore(
+            prog, replace(body, gens=self.entry_state.gens, ros=self.entry_state.ros)
+        )
         prog.decrement_timestamps(self.advance * count)
         for ch, end in generated_gens.items():
             # With a zero minimum the body may not execute. Retain the later
@@ -336,9 +339,9 @@ class LoopTimelineFrame:
 
     parent is the visible loop timeline. external restores outer names.
     entry is its incoming end; origin adds an opaque iteration-progress identity.
-    initial_channels/native retain incoming physical tails and their provenance.
-    entry_math initializes shot-local storage before the loop. pinned restores
-    register liveness at exit. starts records managed generator starts and branch
+    entry_state captures incoming path state. initial_channels/native retain
+    incoming physical tails and their resolved provenance. entry_math initializes
+    shot-local storage before the loop. starts records managed generator starts and branch
     paths for the backedge proof, in relative integer cycles. adc_starts records
     (timeline, ADC channel, start cycles, branch selector/index path) for the same
     proof on independent ADC tails. advance is cumulative
@@ -360,7 +363,7 @@ class LoopTimelineFrame:
     initial_channels: dict[tuple[bool, int], Time]
     initial_native: dict[tuple[bool, int], TimeExpression]
     entry_math: RuntimeMath
-    pinned: set[str]
+    entry_state: "PathState"
     starts: list[tuple[int, TimeExpression, tuple[tuple[str, int], ...]]] = field(
         default_factory=list
     )
@@ -375,39 +378,60 @@ class LoopTimelineFrame:
 
 
 @dataclass(frozen=True)
-class BranchProvenance:
-    """Register and channel expressions captured at the same branch position.
+class PathState:
+    """Compiler state at one position, detached from the live containers.
 
-    sources maps register names to integer tProc-cycle expressions. native maps
-    (is_generator, channel_id) to relative integer-cycle tails. Both mappings
-    are detached snapshots, so preparing another case cannot mutate this path.
-    unknown_adcs contains channels last triggered with native t=None; those tails
-    cannot prove ordering for a later managed trigger and do not alter closure.
+    Times retain their identities: RuntimeEnd values may name live storage and
+    carry exact-end table provenance. Reaching selection nodes also retain their
+    identities so Repeat can close the backedge in the producer proof graph.
     """
 
-    sources: dict[str, TimeExpression]
-    native: dict[tuple[bool, int], TimeExpression]
-    unknown_adcs: frozenset[int]
+    # Live timeline names to reference-relative ends (us or runtime cycles).
+    ends: dict[str, Time]
+    # Timeline names used by the current case, or None outside usage tracking.
+    used: set[str] | None
+    # Declared generator/ADC channels to QICK timestamps in us (scalar or swept).
+    gens: dict[int, float | QickParam]
+    ros: dict[int, float | QickParam]
+    # Channels whose precise end is kept in runtime storage, in tProc cycles.
+    runtime_gens: dict[int, RuntimeEnd]
+    runtime_ros: dict[int, RuntimeEnd]
+    # Register names to symbolic tProc-cycle values when known to the compiler.
+    source_expressions: dict[str, TimeExpression]
+    # Explicit channel tail expressions in tProc cycles, keyed by (is_gen, ch).
+    # An absent key derives its expression from the corresponding channel end.
+    native_expressions: dict[tuple[bool, int], TimeExpression]
+    # ADCs whose last native trigger supplies no ordering proof (t=None).
+    unknown_native_adcs: frozenset[int]
+    # Path-local advances, writes and pulse guards of active reference Repeats,
+    # ordered outermost first. Backedge event evidence spans all compiled cases.
+    repeat_frames: tuple[RepeatFrameSnapshot, ...]
+    # Definitely initialized producer registers and reaching table relations.
+    defined: set[str]
+    selections: dict[str, SelectionProvenance]
+    # Storage protected from reuse in addition to registers in live ends.
+    pinned: set[str]
+    # Declared ADC channel to reads executed so far on this path (>= 0).
+    read_counts: dict[int, int]
 
-
-@dataclass
-class BranchProvenanceFrame:
-    """One active branch's entry snapshot and completed case snapshots.
-
-    entry restores both provenance domains before each case. paths stores one
-    paired snapshot per completed case, in selector order. A single stack frame
-    owns their common begin/restore/record/finish lifetime, including nesting.
-    """
-
-    entry: BranchProvenance
-    paths: list[BranchProvenance] = field(default_factory=list)
+    def channel_ends(self) -> dict[tuple[bool, int], Time]:
+        """Return declared channel ends, using runtime storage over QICK bounds."""
+        return {
+            (generator, ch): runtime.get(ch, value)
+            for generator, native, runtime in (
+                (True, self.gens, self.runtime_gens),
+                (False, self.ros, self.runtime_ros),
+            )
+            for ch, value in native.items()
+        }
 
 
 class TimelineBook:
-    """Store only relative ends, including the ordinary default timeline."""
+    """Own relative timeline ends and compile-time placement state."""
 
     def __init__(self):
         self.ends: dict[str, Time] = {"default": 0.0}
+        self.time_bounds = ProducerBounds()
         # RuntimeEnd compares by value, but provenance belongs to this exact end.
         # Keep the end alive with its table so its id cannot be reused. A new
         # non-table end has no entry; saved immutable ends retain their source.
@@ -420,11 +444,11 @@ class TimelineBook:
             tuple[int, tuple[tuple[str, int], ...]], RuntimeEnd
         ] = {}
         self.source_expressions: dict[str, TimeExpression] = {}
-        self.branch_provenance: list[BranchProvenanceFrame] = []
         self.math: RuntimeMath
         self.preparing = 0
         self.output_time: TimeExpression | None = None
         self.pinned: set[str] = set()
+        self.read_counts: dict[int, int] = {}
         self.runtime_gens: dict[int, RuntimeEnd] = {}
         self.runtime_ros: dict[int, RuntimeEnd] = {}
         self.unknown_native_adcs: set[int] = set()
@@ -438,6 +462,71 @@ class TimelineBook:
         self.native_only = False
         self.reference_guards = 0
         self.used: set[str] | None = None
+
+    def capture(self, prog: "TimelineProgramV2") -> PathState:
+        """Read placement state for prog at the current preprocessing position.
+
+        Capture does not resolve implicit channel expressions, allocate registers,
+        or record operations. Region stacks, accumulated backedge evidence, and
+        compile-wide proof/translation plans are not rewound between paths.
+        """
+        return PathState(
+            ends=self.ends.copy(),
+            used=None if self.used is None else self.used.copy(),
+            gens={ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
+            ros={ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
+            runtime_gens=self.runtime_gens.copy(),
+            runtime_ros=self.runtime_ros.copy(),
+            source_expressions=self.source_expressions.copy(),
+            native_expressions=self.native_expressions.copy(),
+            unknown_native_adcs=frozenset(self.unknown_native_adcs),
+            repeat_frames=tuple(
+                RepeatFrameSnapshot(
+                    advance=frame.advance,
+                    variable=frame.variable,
+                    written_gens=frame.written_gens.copy(),
+                    written_ros=frame.written_ros.copy(),
+                    pulse_guards=deepcopy(frame.pulse_guards),
+                    expression_advance=frame.expression_advance,
+                )
+                for frame in self.repeats
+            ),
+            defined=self.time_bounds.defined.copy(),
+            selections=self.time_bounds.selection_at_position.copy(),
+            pinned=self.pinned.copy(),
+            read_counts=self.read_counts.copy(),
+        )
+
+    def restore(self, prog: "TimelineProgramV2", state: PathState) -> None:
+        """Write a captured or joined state at prog's current region depth.
+
+        This emits no operations and does not mark new channel writes. The active
+        reference Repeat frames must match the snapshot's depth or zip raises
+        ValueError. Construct owners decide which values to retain across paths.
+        """
+        for frame, saved in zip(self.repeats, state.repeat_frames, strict=True):
+            frame.advance = saved.advance
+            frame.variable = saved.variable
+            frame.written_gens = saved.written_gens.copy()
+            frame.written_ros = saved.written_ros.copy()
+            frame.pulse_guards = deepcopy(saved.pulse_guards)
+            frame.expression_advance = saved.expression_advance
+        self.ends = state.ends.copy()
+        self.used = None if state.used is None else state.used.copy()
+        self.runtime_gens = state.runtime_gens.copy()
+        self.runtime_ros = state.runtime_ros.copy()
+        self.source_expressions = state.source_expressions.copy()
+        self.native_expressions = state.native_expressions.copy()
+        self.unknown_native_adcs = set(state.unknown_native_adcs)
+        self.time_bounds.defined = state.defined.copy()
+        self.time_bounds.selection_at_position = state.selections.copy()
+        self.pinned = state.pinned.copy()
+        self.read_counts = state.read_counts.copy()
+        # Restore QICK storage, not a newly observed TimelineProgramV2 event.
+        for ch, value in state.gens.items():
+            QickProgramV2.set_timestamp(prog, value, gen_ch=ch)
+        for ch, value in state.ros.items():
+            QickProgramV2.set_timestamp(prog, value, ro_ch=ch)
 
     def repeat_count(
         self, prog, iterations: int | str, minimum: int, maximum: int | None
@@ -479,52 +568,6 @@ class TimelineBook:
             source_expression(prog, selector),
             tuple(time_expression(prog, v) for v in values),
         )
-
-    def begin_branch_sources(self, prog) -> None:
-        """Save incoming source/channel expressions before collecting branch cases."""
-        self.branch_provenance.append(
-            BranchProvenanceFrame(self.snapshot_branch_provenance(prog))
-        )
-
-    def restore_branch_sources(self) -> None:
-        """Start a case with the same incoming source values as its siblings."""
-        entry = self.branch_provenance[-1].entry
-        self.source_expressions = entry.sources.copy()
-        self.native_expressions = entry.native.copy()
-        self.unknown_native_adcs = set(entry.unknown_adcs)
-
-    def record_branch_sources(self, prog) -> None:
-        """Capture source/channel values after this case's local timeline closure."""
-        self.branch_provenance[-1].paths.append(self.snapshot_branch_provenance(prog))
-
-    def snapshot_branch_provenance(self, prog) -> BranchProvenance:
-        """Copy current register sources and all declared native channel tails."""
-        return BranchProvenance(
-            self.source_expressions.copy(),
-            self.snapshot_native_expressions(prog),
-            frozenset(self.unknown_native_adcs),
-        )
-
-    def finish_branch_sources(self, prog, selector: str) -> None:
-        """Select channel tails and register sources defined on every branch path."""
-        frame = self.branch_provenance.pop()
-        self.unknown_native_adcs = set().union(
-            *(path.unknown_adcs for path in frame.paths)
-        )
-        self.native_expressions = {
-            key: select_time(
-                source_expression(prog, selector),
-                tuple(path.native[key] for path in frame.paths),
-            )
-            for key in frame.paths[0].native
-        }
-        self.source_expressions = {
-            name: select_time(
-                source_expression(prog, selector),
-                tuple(path.sources[name] for path in frame.paths),
-            )
-            for name in set.intersection(*(set(path.sources) for path in frame.paths))
-        }
 
     def observe_write(self, prog, macro) -> None:
         """Keep current producer identities and known arithmetic points in sync."""

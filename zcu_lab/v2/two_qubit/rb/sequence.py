@@ -12,8 +12,8 @@ Z90s are free. Composition and inverse use the faithful Pauli action.
 No pulses, virtual frames, device bindings or acquisition state live here.
 
 Call make_paired_sequences(depth=50, seed=7), then translate each arm's
-``gates`` tuple to pulses. The shared ``random_cliffords`` retain block
-boundaries; each arm also exposes ``body``, ``recovery`` and ``recovery_gates``.
+``clifford_blocks`` to pulses. Each arm also exposes flattened ``body`` and
+``gates`` tuples, plus ``recovery`` and ``recovery_gates``.
 """
 
 from collections import deque
@@ -64,14 +64,25 @@ class Clifford:
 class RBSequence:
     """One arm, with immutable playback body and its full-product inverse.
 
-    body contains primitive gates before recovery, including inserted CZs for
-    the interleaved arm. recovery is a single Clifford, not a reversed body.
+    body_blocks holds one primitive gate tuple per random Clifford, with a
+    separate singleton for each inserted CZ in the interleaved arm. Identity
+    blocks are empty. recovery is a single Clifford, not a reversed body.
     This record describes logical gates only; every pulse translation must
     start its own frame at zero and preserve the complete logical product.
     """
 
-    body: tuple[TwoQubitGate, ...]
+    body_blocks: tuple[tuple[TwoQubitGate, ...], ...]
     recovery: Clifford
+
+    @property
+    def body(self) -> tuple[TwoQubitGate, ...]:
+        """Flatten the primitive gates before recovery in playback order."""
+        return tuple(gate for block in self.body_blocks for gate in block)
+
+    @property
+    def clifford_blocks(self) -> tuple[tuple[TwoQubitGate, ...], ...]:
+        """Return all playback blocks, ending with the recovery gate tuple."""
+        return (*self.body_blocks, self.recovery_gates)
 
     @property
     def recovery_gates(self) -> tuple[TwoQubitGate, ...]:
@@ -288,22 +299,22 @@ def make_paired_sequences(depth: int, seed: int) -> PairedRBSequences:
     random_cliffords = tuple(
         Clifford(rng.randrange(NUM_CLIFFORDS)) for _ in range(depth)
     )
-    reference_body: list[TwoQubitGate] = []
-    interleaved_body: list[TwoQubitGate] = []
+    reference_blocks: list[tuple[TwoQubitGate, ...]] = []
+    interleaved_blocks: list[tuple[TwoQubitGate, ...]] = []
     reference_product = Clifford(0)
     interleaved_product = Clifford(0)
     group = _group()
     cz = Clifford(group.index_by_action[_generator_actions()[-1]])
     for clifford in random_cliffords:
         gates = decompose_clifford(clifford)
-        reference_body.extend(gates)
-        interleaved_body.extend((*gates, TwoQubitGate.CZ))
+        reference_blocks.append(gates)
+        interleaved_blocks.extend((gates, (TwoQubitGate.CZ,)))
         reference_product = compose_cliffords(clifford, reference_product)
         interleaved_product = compose_cliffords(
             cz, compose_cliffords(clifford, interleaved_product)
         )
     return PairedRBSequences(
         random_cliffords,
-        RBSequence(tuple(reference_body), inverse_clifford(reference_product)),
-        RBSequence(tuple(interleaved_body), inverse_clifford(interleaved_product)),
+        RBSequence(tuple(reference_blocks), inverse_clifford(reference_product)),
+        RBSequence(tuple(interleaved_blocks), inverse_clifford(interleaved_product)),
     )

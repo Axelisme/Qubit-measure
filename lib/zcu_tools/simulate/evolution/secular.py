@@ -1,10 +1,10 @@
 """Secular models and quantized flux in ns/GHz, independent of model builders."""
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from hashlib import sha256
 from threading import Lock
-from typing import Literal
+from typing import ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -31,9 +31,9 @@ class SegmentShift:
     dephasing_per_ns: nonnegative symmetric float64 (M,M), zero diagonal,
         additive coherence-pair decay in ns^-1, without another 2*pi.
     Arrays own immutable copies. No basis rotation or state reordering occurs.
-    Shifted energies must stay nondecreasing (equal adjacent energies are valid).
-    Engine.evolve rejects inversions with ValueError naming the point/segment:
-    cavity-drive Stark shifts then exceed the dispersive model's validity.
+    Engine.evolve reports inversions of adjacent state energies without changing
+    state order. For cavity-drive Stark shifts an inversion marks results outside
+    the dispersive model's validity. Equal adjacent energies do not invert.
     Shape must match the source model there. Invalid inputs raise
     ValueError before numerical work. Complete positivity is caller-owned.
     """
@@ -80,8 +80,22 @@ class ModelIdentity:
     shift_content: bytes = b""
 
 
-class ShiftOrderingError(ValueError):
-    """A segment shift inverts the physical model state order."""
+@dataclass(frozen=True)
+class StarkOrderInversion:
+    """One reversed adjacent state pair in a shifted segment.
+
+    states: zero-based physical model indices, in unshifted energy order.
+    point: caller's TimelineBatch point index. span_ns: absolute start/end in ns.
+    max_shift_difference_ghz: unshifted gap, the largest lower-minus-upper
+        Stark shift difference that leaves the pair in order.
+    shift_difference_ghz: applied lower-minus-upper Stark shift difference.
+    """
+
+    states: tuple[int, int]
+    point: int
+    span_ns: tuple[float, float]
+    max_shift_difference_ghz: float
+    shift_difference_ghz: float
 
 
 @dataclass(frozen=True)
@@ -118,7 +132,9 @@ class SecularModel:
     level: quantized flux, one integer per loop; zero is round DC.
     identity: nonempty content key including level and all model parameters;
         equal identities promise numerically identical data.
-    energies_ghz: float64 (M,), ascending H0/h eigenvalues in cycles/ns.
+    energies_ghz: float64 (M,), H0/h eigenvalues in cycles/ns. A physical
+        model must be ascending. ModelSource.shifted_model keeps the physical
+        indices even when its corrected energies no longer ascend.
     eigenvectors: complex128 (M,M) unitary columns in fixed DC coordinates;
         overlap from basis b to a is V_a.conj().T @ V_b.
     drives: uniquely named ports in this eigenbasis, all of dimension M.
@@ -144,9 +160,15 @@ class SecularModel:
     rates_per_ns: NDArray[np.float64]
     dephasing_per_ns: NDArray[np.float64]
 
+    _requires_ascending_energies: ClassVar[bool] = True
+
     def __post_init__(self) -> None:
         energies = owned(self.energies_ghz, np.float64, "energies")
-        if energies.ndim != 1 or not len(energies) or np.any(np.diff(energies) < 0):
+        if (
+            energies.ndim != 1
+            or not len(energies)
+            or (self._requires_ascending_energies and np.any(np.diff(energies) < 0))
+        ):
             raise ValueError("energies must be a nonempty ascending vector")
         if not self.identity or not self.level:
             raise ValueError("model requires an identity and flux level")
@@ -176,6 +198,12 @@ class SecularModel:
             ("dephasing_per_ns", gamma),
         ):
             object.__setattr__(self, name, value)
+
+
+class _ShiftedSecularModel(SecularModel):
+    """A segment correction can change gaps but keeps the physical basis order."""
+
+    _requires_ascending_energies = False
 
 
 @dataclass(frozen=True)
@@ -400,10 +428,9 @@ class ModelSource:
 
         Builder errors propagate unchanged, before content lookup. Unregistered
         nonempty content raises KeyError. Incompatible correction/model shapes
-        or invalid resulting SecularModel data raise ValueError. Energy-order
-        inversion raises ValueError indicating that the cavity-drive Stark
-        shift exceeds dispersive validity; equal adjacent energies are valid.
-        Failed shifted models are not cached; the physical model may be cached.
+        or invalid resulting data raise ValueError. The shifted energies need
+        not be ascending. Failed shifted models are not cached; the physical
+        model may be cached.
         """
         model = self.model(level)
         if not content:
@@ -413,16 +440,13 @@ class ModelSource:
             if identity not in self._shift_models:
                 shift = self._shifts[content]
                 shape(shift.energy_shift_ghz, model.energies_ghz.shape, "energy shift")
-                energies = model.energies_ghz + shift.energy_shift_ghz
-                if np.any(np.diff(energies) < 0):
-                    raise ShiftOrderingError(
-                        "cavity-drive Stark shift reverses energy ordering; "
-                        "outside dispersive model validity"
-                    )
-                self._shift_models[identity] = replace(
-                    model,
+                self._shift_models[identity] = _ShiftedSecularModel(
+                    level=model.level,
                     identity=model.identity + ":shift:" + content.decode(),
-                    energies_ghz=energies,
+                    energies_ghz=model.energies_ghz + shift.energy_shift_ghz,
+                    eigenvectors=model.eigenvectors,
+                    drives=model.drives,
+                    rates_per_ns=model.rates_per_ns,
                     dephasing_per_ns=model.dephasing_per_ns + shift.dephasing_per_ns,
                 )
             return self._shift_models[identity]

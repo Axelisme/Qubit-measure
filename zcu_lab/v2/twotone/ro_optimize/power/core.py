@@ -194,7 +194,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                         builder.emit(qub_pulse if index & 1 else identity)
                         builder.emit(r2)
             prog = builder.build()
-            prog.set_reads_per_shot(2)
             processor = shot_sums(prog, [IQ("r1"), IQ("r2")])
             sched.run_acquire_summed(
                 prog,

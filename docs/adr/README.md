@@ -60,6 +60,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Experiment runtime / Readout / Workflows
 
+原則：Timeline 編譯器推算每發 ADC 讀取數，每個 Branch 出口逐 ADC 對齊，見 [ADR-0083](0083-program-macros-and-timelines.md#每發-adc-讀取數)。
+
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：Async workflow、operation、Ask、停止、live tunables 與作者保存責任。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。
 - [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 配置、classifier、逐 shot sums、雙 qubit heralded 分類、單 qubit cov 自校準與 QICK projection。
@@ -109,7 +111,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 - [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：模擬環境與 FTF preset 的草稿及歷史驗證範圍，compiler owner 見 [[0083]]。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
-- [Timeline 控制結構的完備性](draft/control-flow-completeness.md)：Branch 與 Repeat 共用編譯期狀態，補上「提早結束本發」；介面、第一版限制與 RB 是否採用未定，現行規則見 [[0083]]。
+- [Timeline 控制結構的完備性](draft/control-flow-completeness.md)：Branch 與 Repeat 共用編譯期狀態 `PathState`；`TimelineProgramV2` 的 `cond_jump`／`jump`／`label` 改成認得 timeline 的版本，只能往前跳；迴圈的 continue／break 只留設計、不實作；Branch 是否改寫成跳轉與 RB 是否採用未定，現行規則見 [[0083]]。
 
 ## Retired
 

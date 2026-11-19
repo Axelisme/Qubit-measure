@@ -20,6 +20,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-20 [FTF cavity Stark 反轉：從報錯改成警告](2026-11-20-ftf-stark-inversion-warning.md)：放寬或拒絕。依 ADR-0078 先例，Stark 位移讓相鄰態反轉時照原模型繼續算，每組反轉發一次警告並給 gain 共同縮放上限；反轉後模型仍算得出數字，所以否決保留報錯。
+
 - 2026-11-19 [Evolution 輸出合法 density](2026-11-19-evolution-valid-density.md)：數值保證。純態經 DP5(4) 短段後最小特徵值為 −2.4e−6；engine 在 budget 內投影回合法 density，超出照數值失敗回報。
 
 - 2026-11-18 [Full-drive gate 的 CPU 競品估價](2026-11-18-gate-direct-duration-price.md)：價格重校。原六組加上已量的 DRAG lab 窗重校 duration 端點，原 flat-top lab 連段仍未量測。
@@ -120,6 +122,8 @@
 
 - 2026-10-31 [Timeline 編譯：變數模型、通用 join 與 s14 事件時間](2026-10-31-timeline-variable-model.md)：Timeline 合流採共用 join，範圍證明改用 Abs 表示，現行決策見 [ADR-0083](../adr/0083-program-macros-and-timelines.md)。
 - 2026-11-20 [Two-qubit RB 在板上掃 depth：提早結束本發與控制結構的完備性](2026-11-20-early-exit-and-control-flow-completeness.md)：控制結構完備性。現有 repeat／branch 無法結束本發；spike 用 CondJump 加手抄狀態可行但脆弱，改為抽出 Branch 與 Repeat 共用的編譯期狀態，再補「提早結束本發」，方向見 [草稿](../adr/draft/control-flow-completeness.md)。
+- 2026-11-20 [Timeline 共用的編譯期狀態：PathState 與 capture／restore](2026-11-20-timeline-path-state.md)：共用抽象。Branch 與 Repeat 改用 frozen `PathState`，capture／restore 一次處理全部隨路徑變化的狀態，合併規則留在各結構；不按 timeline 切，也不用指標切換，因為狀態屬於路徑且 QICK macro 就地讀寫 program 狀態。
+- 2026-11-20 [Timeline 編譯器推算每發 ADC 讀取數](2026-11-20-timeline-read-counts.md)：路徑會合規則。編譯器在 macro 包裝層計數 ADC trigger，每個 Branch 出口逐 ADC 要求各 case 相同，固定 Repeat 乘次數，變動次數 Repeat 不能讀；自動寫入每發讀取數，`set_reads_per_shot` 只核對；否決逐條路徑比對整發總數。
 
 ## Cfg 與表單
 
@@ -165,3 +169,4 @@
 - 2026-11-04 [讀出鏈的資訊上限：λ 指標、記錄層與分析層的損失、自校準](2026-11-04-readout-chain-information-limits.md)：顯示只畫 λ；讀出已知時讀出鏈在等時間下全面勝過 relax 實驗，存 lag 0…4 只損失 ≤ 18%，損失集中在分析層；改走全域兩態、兩通道的自校準估計。
 - 2026-11-15 [Two-qubit RB 的兩組都同時打單 qubit gates](2026-11-15-two-qubit-rb-simultaneous-gates.md)：並行排程。普通與heralded兩版的reference／interleaved都用每qubit時間線，在CZ共同同步，保留原frame與reset政策。
 - 2026-11-20 [T1 二階矩實驗以 t1_cov 恢復](2026-11-20-t1-cov-restore.md)：恢復已刪除的概念。2026-11-09 誤刪的是二階矩方法，不是 post-selection；先恢復 T1，改稱 cov，讀出叫 pre_readout／post_readout，加可選脈衝 reset，舊資料不載入。
+- 2026-11-20 [Two-qubit RB 在 Clifford 邊界對齊兩條時間線](2026-11-20-rb-clifford-barrier.md)：排程修正。2026-11-15 的並行排程只在 CZ 同步，reference 組相鄰 Clifford 會重疊，interleaved 組不會；改為兩組都在 Clifford 邊界 join，interleaved 時序不變、reference 變長，新舊資料不混比。

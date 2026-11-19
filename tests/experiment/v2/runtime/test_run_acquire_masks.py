@@ -171,7 +171,7 @@ def test_herald_reset_masks_terminal_average_and_classification(
     assert prepare.start_ticks < herald_tick < drive.start_ticks < terminal_tick
 
 
-def test_mux_herald_intersects_selected_tones_and_hides_every_herald_read() -> None:
+def test_mux_herald_hides_its_reads_after_a_balanced_branch() -> None:
     env = white_noise(mux_soccfg(), std_adc=0, seed=13, routes=((0, 4), (0, 1), (0, 6)))
     try:
         readout = native_mux((4, 1, 6), post_delay=0.1)
@@ -189,7 +189,11 @@ def test_mux_herald_intersects_selected_tones_and_hides_every_herald_read() -> N
         )
         assert cfg.type == "reset/mux_herald"
         builder = TimelineBuilder(env.soccfg, reps=4)
-        builder.add_loop("point", 1)
+        builder.add_loop("point", 2)
+        with builder.branch(by="point", align_timeline=True) as branch:
+            for case in range(2):
+                with branch.case(case):
+                    builder.emit(terminal)
         builder.emit(cfg.build("herald", terminal=terminal), tag="filter")
         builder.emit(terminal, tag="signal")
         program = builder.build()
@@ -198,14 +202,14 @@ def test_mux_herald_intersects_selected_tones_and_hides_every_herald_read() -> N
             1: [[99, 12], [99, 100], [99, 100], [99, 100]],
             6: [[3, 16], [3, 100], [-1, 100], [3, 100]],
         }
-        raw = {
-            ch: np.stack([values, np.zeros((4, 2), dtype=np.int64)], axis=-1)[None]
-            * program.ro_chs[ch]["length"]
-            for ch, values in reads.items()
-        }
+        raw = {}
+        for ch, values in reads.items():
+            i = np.column_stack((np.full(4, 20), values))
+            iq = np.stack((i, np.zeros_like(i)), axis=-1)
+            raw[ch] = np.stack((iq, iq)) * program.ro_chs[ch]["length"]
         deliver_rounds(env, raw, raw)
         with Schedule(
-            SignalBuffer((3, 1, 1, 2), dtype=np.float64), scope=Scope("run")
+            SignalBuffer((3, 2, 2, 2), dtype=np.float64), scope=Scope("run")
         ) as schedule:
             averaged = schedule.run_acquire(
                 program,
@@ -214,10 +218,15 @@ def test_mux_herald_intersects_selected_tones_and_hides_every_herald_read() -> N
                 remove_offset=False,
             )
             np.testing.assert_array_equal(
-                averaged, [[[[1.25, 0]]], [[[3, 0]]], [[[4, 0]]]]
+                averaged,
+                [
+                    [[[5, 0], [5, 0]], [[1.25, 0], [1.25, 0]]],
+                    [[[5, 0], [5, 0]], [[3, 0], [3, 0]]],
+                    [[[5, 0], [5, 0]], [[4, 0], [4, 0]]],
+                ],
             )
         with Schedule(
-            SignalBuffer((1, 3, 2), dtype=np.float64), scope=Scope("run")
+            SignalBuffer((2, 3, 2), dtype=np.float64), scope=Scope("run")
         ) as schedule:
             counts = schedule.run_acquire_summed(
                 program,
@@ -226,7 +235,9 @@ def test_mux_herald_intersects_selected_tones_and_hides_every_herald_read() -> N
                     program, [Classify("signal", tone=0), Classify("signal", tone=2)]
                 ),
             )
-            np.testing.assert_array_equal(counts, [[[0, 0], [0, 1], [0, 0]]])
+            np.testing.assert_array_equal(
+                counts, [[[0, 0], [0, 1], [0, 0]], [[0, 0], [0, 1], [0, 0]]]
+            )
     finally:
         env.devices.close_all_devices()
 

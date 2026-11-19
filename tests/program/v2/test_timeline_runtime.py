@@ -462,28 +462,26 @@ def test_unknown_branch_local_adc_tail_closes_at_runtime_with_constant_shell_wai
 
     def body(prog):
         prog.read_dmem("duration", 0)
-        with (
-            prog.branch(by="scan", align_timeline=False) as branch,
-            branch.case(0) as case_timeline,
-        ):
-            prog.fork(case_timeline, into="local")
-            prog.timeline_inc("duration", timeline="local")
-            prog.trigger([0], width=1 / TPROC_MHZ, timeline="local")
-            if synchronize:
-                prog.join("local", into=case_timeline)
+        with prog.branch(by="scan", align_timeline=False) as branch:
+            with branch.case(0) as case_timeline:
+                prog.fork(case_timeline, into="local")
+                prog.timeline_inc("duration", timeline="local")
+                prog.trigger([0], width=1 / TPROC_MHZ, timeline="local")
+                if synchronize:
+                    prog.join("local", into=case_timeline)
+            for index in (1, 2):
+                with branch.case(index):
+                    prog.trigger([0], width=1 / TPROC_MHZ)
 
     prog = program(body, reps=2, initialize=initialize)
     result = shots(prog)
     assert [
         [e.cycle - s.start_cycle for e in s.events if e.kind == "data" and e.value]
         for s in result
-    ] == [[40], [], []] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [
-        40 + ADC_END,
-        0,
-        0,
-    ] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [40 + ADC_END, 0, 0] * 2
+    ] == [[40], [0], [0]] * 2
+    expected_ends = [40 + ADC_END, ADC_END, ADC_END] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == expected_ends
+    assert [s.end_cycle - s.start_cycle for s in result] == expected_ends
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
     assert wait["TIME"] == "@0"
 

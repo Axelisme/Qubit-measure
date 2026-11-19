@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-20，三階 IQ 總和的 SNR 測試
+**Last updated:** 2026-11-20，逐發 ADC 讀取數與三階 IQ 總和
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -643,8 +643,9 @@ numeric propagation with Engine answers. Six keeps six independent model sources
 Engine density accuracy stays in `tests/simulate/evolution/contract/`, rather than
 in program-to-acquire parity or fixed-I/Q numerical baselines. Cavity field continuation
 stays in the same directory's `test_cavity_continuation.py`; acquisition-frozen losses stay in
-`test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
-`set_reads_per_shot` count, since QICK counts the trigger macro once.
+`test_drift.py`. Repeated frontend readouts use fixed `builder.repeat(...)`. The
+timeline compiler supplies the per-shot count; the compiled frontend checks it
+against the number of triggers each shot actually executes.
 The former TLS engine/frontend and tests serving only that implementation are
 retired. Framework Window/RPC tests continue to use synthetic registered
 experiments, not lab definitions or model-truth calibration oracles.

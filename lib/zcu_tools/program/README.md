@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-20，逐 shot 遮罩、平均與回傳
+**Last updated:** 2026-11-20，逐 shot 遮罩與 Timeline 讀取數
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -164,28 +164,28 @@ timed macros. Branch paths may share an untagged module name when each selected
 read keeps the same ADC-local index, ADC channel, frequency, integration window,
 phase and cfg classifier. Generator gain and waveform may differ: a zero-gain
 `PulseReadout("r1", cfg, gain=0.0)` retains its generator time slot and ADC trigger.
-Every path must have the same read count on each selected ADC. Missing labels or
-unequal counts, indices or ADC settings raise ValueError with case indices and
-the differing item. Triggers inside Repeat remain unsupported on selected ADCs.
-Other ADCs may still use control flow. After building a program with Branch
-readouts, call `prog.set_reads_per_shot(count)` with the per-shot count, then
-construct `shot_sums`, then acquire. QICK counts the source triggers across all
-cases; neither the reducer nor its construction changes that declaration.
+The timeline compiler requires equal counts on every ADC at each Branch exit.
+It fills QICK's per-shot acquisition layout with physical counts, including
+reads consumed by mask sources. Build the program, construct `shot_sums`, then
+acquire. The reducer uses logical indices and counts after those reads are
+removed. Missing labels or unequal indices or ADC settings raise ValueError
+naming the cases and the differing item. Triggers inside Repeat remain
+unsupported on selected ADCs. Other ADCs may still use control flow.
+The reducer checks source trigger coverage against the physical layout on each
+selected ADC and rejects opaque triggers rather than guessing a read index.
 `v2.split_sums(sums)` requires a final six-component IQ axis and uses only
 count, ΣI and ΣQ to return counts and complex conditional means. Other lengths
 raise ValueError. Zero counts stay zero, and unmeasured NaN counts stay NaN.
 Both give NaN means without divide warnings.
 
 `v2.chain_sweep_sums(prog, read)` selects a tagged or untagged `PulseReadout`
-inside one fixed body `repeat` of at least 16 reads. After building, call
-`prog.set_reads_per_shot(n)` with the repeat count before constructing the
-reducer; the selected ADC must have no other triggers. The reducer reduces
-kept dwells to running moment sums for readout-chain analysis. Feature definitions, array layout and validation are in
-the [`chain_sweep_sums` docstring](v2/chain_sweep.py).
+inside one fixed body `repeat` of at least 16 reads. The selected ADC must
+have no other triggers. The reducer sums moments from kept dwells across
+rounds. Feature definitions, array layout and validation are in the
+[`chain_sweep_sums` docstring](v2/chain_sweep.py).
 
 `v2.thermal_chain_sums(prog, read)` selects exactly 16 consecutive reads of
-one PulseReadout, unrolled or in one fixed Repeat. After build, declare
-`prog.set_reads_per_shot(16)` before constructing the reducer. Its 108 columns
+one PulseReadout, unrolled or in one fixed Repeat. Its 108 columns
 contain shot count and 107 sums: all 16 I/Q read means, R1 self moments,
 all 15 adjacent pairs and the three early long-lag pairs (R1,R3..R5).
 Each pair retains all four cross components. The reducer sums kept reps across
@@ -196,10 +196,9 @@ adjacent pair for offline scoring; the reducer does not choose the best setting.
 
 `v2.chain_cycle_sums(prog, read)` selects one `PulseReadout` owner whose 16 reads
 per shot form one thermalised `(D R R)^8` cycle per rep, either unrolled or as two
-reads in a fixed Repeat of eight. After building, call `prog.set_reads_per_shot(16)`
-before constructing the reducer; the selected ADC must have no other triggers.
-The reducer reduces each cycle to 65 numbers and returns their per-point augmented
-sums; `acquire_summed` adds them across rounds. Slot layout and validation are in
+reads in a fixed Repeat of eight. The selected ADC must have no other triggers.
+The reducer maps each kept cycle to 65 numbers and accumulates their per-point
+augmented sums across rounds. Slot layout and validation are in
 the [`chain_cycle_sums` docstring](v2/chain_cycle.py).
 
 `v2.rpi_sums(prog, read)` 將每個 rep 當作一個獨立 Rπ cycle，
