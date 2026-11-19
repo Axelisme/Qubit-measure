@@ -141,7 +141,7 @@ _Avoid_: fluxdep widget, spectrum editor, point-picking UI
 _Avoid_: GUI predictor service, dispersive tuning widget, plot overlay
 
 **Arbitrary Waveform Asset**:
-可被 arbitrary waveform cfg 引用的 qubit-scoped samples 資產。它一定有播放資料，也可以內嵌可編輯的 Formula Recipe。
+可由 arbitrary waveform cfg 引用的 entry-scope samples 資產。同一 entry 的 global 與各 point 共用，不按 qubit 分庫。資產一定有播放資料，也可以內嵌可編輯的 Formula Recipe。
 _Avoid_: waveform cfg, formula file, arbitrary pulse
 
 **Arbitrary Waveform Data Key**:
