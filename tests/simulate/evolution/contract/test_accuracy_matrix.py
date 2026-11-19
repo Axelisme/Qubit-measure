@@ -38,6 +38,7 @@ from .accuracy_cases import (
     drive_track,
     history_case,
     multisegment_case,
+    multitone_phase_case,
     timeline,
 )
 from .guard_edge_cases import (
@@ -170,6 +171,38 @@ def test_pinned_family_density(
     assert error <= 2e-3, f"{name}/{family}: density error {error:.9g} > 2e-3"
 
 
+@pytest.mark.parametrize(
+    "shape,gain",
+    [("gaussian", 0.6), ("sampled", 0.6), ("flat_top", 0.5), ("drag", 0.5)],
+)
+@pytest.mark.parametrize("repeats,varying_phases", [(1, True), (7, False), (7, True)])
+def test_multitone_gate_dual_phase_density(
+    shape: str,
+    gain: float,
+    repeats: int,
+    varying_phases: bool,
+    request: pytest.FixtureRequest,
+    matrix_reference: Callable[[AccuracyCase], ReferenceResult],
+) -> None:
+    """A checked full-drive key plays once or repeatedly at independent phases."""
+    case = multitone_phase_case(
+        shape, repeats, varying_phases=varying_phases, gain=gain
+    )
+    reference = matrix_reference(case)
+    with closing(Engine(1, families=("multitone_gate",))) as engine:
+        result = engine.evolve(case.source, (case.batch,))
+    require_families(result.paths, ("multitone_gate",))
+    error = density_error(result.densities, reference.density)
+    request.node.user_properties.append(
+        measurement_property(
+            AccuracyMeasurement(
+                case.name, "multitone_gate", error, reference.convergence_error
+            )
+        )
+    )
+    assert error <= 2e-3
+
+
 @pytest.mark.parametrize("name", CPU_DP54_CASES)
 def test_cpu_dp54_density(name: str, request: pytest.FixtureRequest) -> None:
     case = cpu_dp54_case(name)
@@ -247,6 +280,31 @@ def test_opencl_dop853_density(
     )
     assert error <= 2e-3
     assert density_error(densities, cpu.densities) < 1e-3
+
+
+def test_multitone_gate_mixed_phase_keys_density(
+    matrix_reference: Callable[[AccuracyCase], ReferenceResult],
+) -> None:
+    """One evolve plays distinct waveform keys, including a constant+sampled pair."""
+    cases = (
+        multitone_phase_case("gaussian", 7),
+        multitone_phase_case("sampled", 7),
+        multitone_phase_case("constant_sampled", 7, gain=0.5),
+    )
+    batches = tuple(
+        replace(case.batch, points=np.array([point]))
+        for point, case in enumerate(cases)
+    )
+    with closing(Engine(1, families=("multitone_gate",))) as engine:
+        result = engine.evolve(cases[0].source, batches, telemetry=True)
+    require_families(result.paths, ("multitone_gate",))
+    assert result.paths.routing["multitone_gate"].prepare_key_builds == len(batches)
+    for point, case in enumerate(cases):
+        reference = matrix_reference(case)
+        assert (
+            density_error(result.densities[point : point + 1], reference.density)
+            <= 2e-3
+        )
 
 
 @pytest.mark.parametrize("family", EDGE_FAMILIES)

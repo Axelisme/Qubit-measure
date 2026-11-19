@@ -36,6 +36,8 @@ class FamilyRouting:
     prepare_key_builds: key slots passed to scheduled prepare calls or returned
         in guard preparations. Rebuilding a key counts again. Rejected guard
         products count if returned; guard-only checks without products do not.
+        For multitone_gate, counts completed numerical builds, not subsequent
+        prepare calls reusing a key within the same evolve.
     admission_rows: common_frame counts row indicator evaluations; multitone_rwa
         counts sampled rows with a completed RWA/full-drive spot comparison,
         whether accepted or rejected. Neither counts apply or reuse hits.

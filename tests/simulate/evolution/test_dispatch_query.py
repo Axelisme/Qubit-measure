@@ -41,28 +41,28 @@ def test_query_matches_evolve_and_maps_split_rows_to_batches_and_points():
 
 
 def test_later_short_circuit_keeps_an_earlier_guard_rejection():
+    count = 2
     pulse = track(
-        20,
+        count,
         EnvelopeSpec("sampled", np.array([0.2, 1.0]), np.array([0.0, 20.0])),
         duration=20.0,
     )
     # A low carrier rejects RWA independent of the sampled spot comparison.
     timeline = replace(
-        batch(20, duration=20.0),
-        tracks=(pulse, replace(pulse, frequency_ghz=np.full(20, 0.03))),
+        batch(count, duration=20.0),
+        tracks=(pulse, replace(pulse, frequency_ghz=np.full(count, 0.03))),
     )
     with (
         closing(source()) as src,
         closing(
-            Engine(1, families=("multitone_gate", "multitone_rwa", "dop853"))
+            Engine(1, families=("multitone_rwa", "dop853"), backend="cpu")
         ) as engine,
     ):
         query = engine.inspect_dispatch(src, (timeline,))
-    assert len(query.rows) == 20
+    assert len(query.rows) == count
     for row in query.rows:
         assert row.family == "dop853"
         assert {c.family: c.guard for c in row.candidates} == {
-            "multitone_gate": "rejected",
             "multitone_rwa": "rejected",
             "dop853": "accepted",
         }

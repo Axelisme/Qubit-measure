@@ -7,13 +7,12 @@ from typing import NamedTuple
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
-from scipy.linalg import expm
 
-from ...baths import population_generator
 from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..workplan import FactKey
 from ._dop853 import Tolerances, integrate, tolerances
+from ._multitone_gate_phase import FULL_DRIVE_GATE_POLICY
 from ._rwa_fourier import RWACoefficients, interaction_hamiltonian
 from ._rwa_graph import RWA_GRAPH_POLICY, PhaseGraph, phase_graph, pruning_admitted
 from ._rwa_numeric import (
@@ -26,7 +25,7 @@ from ._rwa_numeric import (
     retained_mask,
     rwa_coefficients,
 )
-from ._secular import coherence_decay, split_step
+from ._secular import coherence_decay, secular_half_step, split_step
 from ._workload_facts import TableIdentity, envelope_bounds, fixed_flux
 
 _MIN_SUBSEGMENTS = 4
@@ -83,17 +82,22 @@ class GatePrepared:
 
 
 def canonical_key(table: SegmentTable, row: int, context: KernelContext) -> bytes:
-    """Hash canonical gate physics, omitting only covariant start and theta.
+    """Hash gate physics without start/theta, absorbed by phase expansion.
 
-    Model identity, level, bath, ordered carriers, gains, waveform, offsets,
-    duration, final retained mask and graph/integration policy distinguish products.
-    Guard admission is required before using this equivalence for playback.
+    Dual-tone full-drive keys include the Fourier/validation policy, not an RWA
+    graph. Single-tone keys retain their covariant RWA policy and retained mask.
+    Model identity, level, bath, ordered carriers, gains, waveform, offsets and
+    duration distinguish products. Guard admission is required before playback.
     """
     count = table.tones[row]
     model = table.model(context.source, row)
     retention = _row_retention(table, row, context)
     policy = SINGLE_GATE_POLICY if retention is not None else GATE_POLICY
+    if count == 2:
+        policy = FULL_DRIVE_GATE_POLICY
     digest = sha256(repr((policy, model.identity, model.level)).encode())
+    if count == 2:
+        digest.update(table.shift(row))
     if retention is not None:
         digest.update(
             retained_mask(
@@ -651,9 +655,10 @@ class CovariantGateKernel:
             unitaries.append(
                 np.pad(u, ((0, padding), (0, 0), (0, 0))) if padding else u
             )
-            half = table.duration_ns[row] / (2 * count)
-            populations.append(expm(population_generator(model.rates_per_ns) * half))
-            coherences.append(np.exp(-coherence_decay(model) * half))
+            half = float(table.duration_ns[row] / (2 * count))
+            population, coherence = secular_half_step(model, half)
+            populations.append(population)
+            coherences.append(coherence)
             charges.append(
                 np.pad(graph.charges, ((0, 0), (0, width - graph.charges.shape[1])))
             )

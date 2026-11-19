@@ -85,7 +85,13 @@ def test_sampled_price_hands_the_adopted_common_frame_to_apply(split_phase):
             tracks[1],
         )
     timeline = replace(timeline, tracks=tracks)
-    with closing(model_source()) as source, closing(Engine(1, backend="cpu")) as engine:
+    # Exercise the common-frame handoff after it wins against sampled RWA and
+    # direct integration. The full-drive gate has its own routing contracts.
+    families = ("multitone_rwa", "common_frame", "dop853")
+    with (
+        closing(model_source()) as source,
+        closing(Engine(1, backend="cpu", families=families)) as engine,
+    ):
         result = engine.evolve(source, (timeline,), telemetry=True)
     assert result.paths.segments_by_kernel == {"common_frame": 4}
     assert result.paths.routing["common_frame"].prepare_builds == 1
@@ -189,8 +195,23 @@ def test_shared_sampled_prefix_does_not_borrow_another_points_constant_route():
             tail,
         ),
     )
+    # Keep common frame in competition with the original pair routes. This
+    # fixture tests prefix isolation, not whether the gate wins sampled pricing.
+    families = (
+        "multitone_rwa",
+        "common_frame",
+        "dop853",
+        "floquet",
+        "single_tone_rwa",
+        "floquet_period",
+        "dyson",
+        "t6",
+    )
     capture = CaptureBuffer()
-    with closing(model_source()) as source, closing(Engine(1, backend="cpu")) as engine:
+    with (
+        closing(model_source()) as source,
+        closing(Engine(1, backend="cpu", families=families)) as engine,
+    ):
         engine.evolve(source, (timeline,), capture=capture)
     metadata = read_capture_metadata(capture.records[0])
     (prefix,) = metadata["prefix_runs"]

@@ -31,7 +31,7 @@ from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
 
 # Numerical algorithm revision used by capture, reporting, and simulator caches.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v12"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v13"
 
 
 @dataclass(frozen=True)
@@ -857,11 +857,11 @@ class Engine:
                     reuse_key, geometry.table, context
                 )
                 kernels = self._kernels
+                context = with_opencl(context, self._opencl)
                 with execution_pool(workers) as pool:
                     geometry = PrefixResolver(
                         geometry, kernels, context, cancel, capture=capture_run
                     ).resolve(pool, self._chunks)
-                    context = with_opencl(context, self._opencl)
                     dispatch = classify(
                         geometry,
                         kernels,

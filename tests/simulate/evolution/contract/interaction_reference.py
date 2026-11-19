@@ -50,6 +50,35 @@ def interaction_reference(
     failure. ModelSource model-building and missing-port errors propagate.
     No acquisition, production propagation, clipping or normalization runs.
     """
+    approximate = interaction_density(source, batch, coarse, max_step_ns=max_step_ns)
+    density = interaction_density(source, batch, fine, max_step_ns=max_step_ns)
+    error = float(np.max(np.abs(approximate - density), initial=0.0))
+    if error > 2e-6:
+        raise AssertionError(
+            f"reference did not converge: density error {error:.9g} > 2e-6"
+        )
+    return ReferenceResult(density, error)
+
+
+def interaction_density(
+    source: ModelSource,
+    batch: TimelineBatch,
+    tolerances: SolverTolerances,
+    *,
+    max_step_ns: float = 0.05,
+) -> NDArray[np.complex128]:
+    """Integrate one tolerance chain and return all final DC-basis densities.
+
+    Use the same full-drive static-schedule inputs, units, initial-state rules
+    and failure modes as interaction_reference, except there is no convergence
+    check. tolerances supplies DOP853 rtol/atol; max_step_ns is its positive step
+    ceiling in ns. Return complex128 densities (points,M,M) without clipping or
+    normalization; the caller owns source.
+    To continue, supply these matrices as TimelineBatch.initial_densities with
+    each previous end_ns as the new start_ns. Keep track origins and phase at
+    the common absolute origin unchanged. Check convergence only after both
+    independent tolerance chains have finished the original timeline.
+    """
     if batch.flux_waveform is not None:
         raise ValueError(
             "continuous flux waveform is unsupported: a single schedule level is required"
@@ -63,22 +92,6 @@ def interaction_reference(
         levels = batch.flux.level[first:last]
         if np.any(levels != levels[0]):
             raise ValueError("DC flux changes within shot")
-    approximate = _solve_batch(source, batch, coarse, max_step_ns)
-    density = _solve_batch(source, batch, fine, max_step_ns)
-    error = float(np.max(np.abs(approximate - density), initial=0.0))
-    if error > 2e-6:
-        raise AssertionError(
-            f"reference did not converge: density error {error:.9g} > 2e-6"
-        )
-    return ReferenceResult(density, error)
-
-
-def _solve_batch(
-    source: ModelSource,
-    batch: TimelineBatch,
-    tolerances: SolverTolerances,
-    max_step_ns: float,
-) -> NDArray[np.complex128]:
     dc = source.model((0,) * batch.flux.level.shape[1])
     results = []
     for point in range(len(batch.points)):

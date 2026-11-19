@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-18，sampled multitone RWA admission 與 DP5(4)
+**Last updated:** 2026-11-19，雙相位 gate 的建構時機
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -10,7 +10,7 @@
 每個算法將數值實作與專用 helpers 留在自己的模組。
 多個算法需要同一運算時，共用其數值 owner，不呼叫另一個 kernel class 的方法。
 例如 `simulate/baths.py` 擁有 rates 到 population generator 的換算，
-`_secular.py` 擁有 coherence decay，`evolution/state.py` 擁有 density 基底轉換。
+`_secular.py` 擁有 coherence decay 與三種 gate 共用的耗散半步映射，`evolution/state.py` 擁有 density 基底轉換。
 `slow_envelope` 的耗散 DC channel 重用 `_dyson_model.py` 的 row-major generator
 與 commutator，不改 secular bath 定義。非零載波仍使用 midpoint-held Strang steps。
 `_flux_expansion.py` 擁有連續 flux 的插值與 Hamiltonian 累加。
@@ -31,8 +31,16 @@ Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_ga
 每個 tone 的 I/Q 包絡樣本只可差一個正振幅倍率。每群抽查各 tone 振幅最大的列，重複列只比一次。
 Guard 以固定 coherent 初態呼叫 `dop853.advance_endpoints` 的 DOP853 路徑，把完整 density 和 RWA 比對。
 各抽查列差值須 ≤ 0.1 × budget，否則只有該群退回其餘候選。
-這取代 2026-11-14 的 sampled RWA 過渡期拒收，不改 distinct-port constant pairs 或
-`multitone_gate` 的 guard。頻掃、短脈衝與相位序列案例見 [kernel 表](../README.md#kernel-summary)。
+這取代 2026-11-14 的 sampled RWA 過渡期拒收，不改 distinct-port constant pairs。
+頻掃、短脈衝與相位序列案例見 [kernel 表](../README.md#kernel-summary)。
+
+`multitone_gate` 用完整 drive 建四個 Hilbert 子段，在兩個起始相位上做 raw Fourier 展開。
+`_multitone_gate_phase.py` 用一張 5×6 網格擬合係數，不按包絡形狀或虛部分類。
+`_gate_endpoints.py` 以 rtol/atol 2.75e-7/2.75e-9 積分節點並做 polar retraction。
+Playback 以 secular 耗散半步包住各 Hilbert 子段。
+[Dispatch](../README.md#decision-graph) 在建構前逐 key 比價。每個冷 key 的端點和 Fourier 成本按使用次數攤提，另計 apply。
+Scheduler 只建構獲選的 key。Key 不含起始相位，同一次 evolve 的不同相位群、prefix 和 worker 共用產品。
+建構不跑密度精度探針。數值失敗向呼叫端拋出，不改用其他 family。
 
 `dop853.advance_endpoints` 擁有旋轉座標 density 積分。
 `dop853` 的 CPU row 和符合 [OpenCL 條件](../README.md#gpu-backend)的 row，在時長 ≤10 µs 且 budget ≥1e-3 時走 DP5(4)，兩個局部容差都除以三。

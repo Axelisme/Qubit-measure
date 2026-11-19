@@ -42,8 +42,8 @@ class DispatchCandidate:
     """One family offered by the shared classifier for a row.
 
     family: production family name (or internal injected kernel name).
-    guard: accepted/rejected for an evaluated numerical guard, deferred when a
-        local prepare key must wait for its worker, or
+    guard: accepted/rejected for an evaluated guard (structural or numerical),
+        deferred when a local prepare key must wait for its worker, or
         untested_after_short_circuit when an earlier candidate stopped the round.
     scheduling_cost: nonnegative relative row work for chunk interleaving,
         from Kernel.cost. Evaluated and deferred candidates include this value;

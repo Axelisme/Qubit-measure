@@ -5,13 +5,11 @@ from dataclasses import dataclass
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
-from scipy.linalg import expm
 
-from ...baths import population_generator
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from . import gate_phase
 from ._gate_endpoints import GATE_SUBSEGMENTS, build_endpoints
-from ._secular import coherence_decay, split_step
+from ._secular import secular_half_step, split_step
 from ._shaped import drive_bounds
 from ._workload_facts import envelope_bounds
 
@@ -193,8 +191,7 @@ class GateCacheKernel:
         for row, adaptive in zip(rows, phase_adaptive, strict=True):
             model = table.model(source, row)
             half_step = float(table.duration_ns[row]) / (2 * GATE_SUBSEGMENTS)
-            population = expm(half_step * population_generator(model.rates_per_ns))
-            coherence = np.exp(-half_step * coherence_decay(model))
+            population, coherence = secular_half_step(model, half_step)
             coefficient = None
             if adaptive:
                 coefficient = gate_phase.build(model, table, int(row), budget)

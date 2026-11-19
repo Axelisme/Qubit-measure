@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-18，OpenCL DP5(4) 精度矩陣選集
+**Last updated:** 2026-11-18，雙相位 gate 與 CPU／OpenCL DP5(4) 精度矩陣
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -154,6 +154,16 @@ uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contra
 
 `--converged` 與 `--interaction` 可重複指定。Producer 只讀 record 的 name、physical，既有 key 命中就讀取，只有 missing key 才用指定 solver 求解。
 它不讀 metadata、不維護場景名稱清單，也不在失敗後換 solver。
+
+Interaction solver 適用於每個 shot 只有一個 schedule level 的靜態 schedule，各 point 的 level 可以不同。
+它在明示的 schedule 段邊界、drive 起訖與 sampled envelope knots 分段積分，以上一段的終點 density 繼續下一段。
+各段保留絕對 carrier phase 與 pulse-local envelope time，不在邊界重設載波或包絡。
+它用完整 drive 與精確 H0 interaction transform，不做 RWA。
+兩次求解沿用 `rtol/atol=2e-10/2e-12` 與 `2e-12/2e-14`，完整 density 的最大絕對差須不超過 `2e-6`。
+Solver 拒絕 continuous flux waveform、shot 內 schedule level 改變與 segment shifts。
+分段是 solver 的內部做法，不需要另一份清單、producer 入口或旗標。
+Reference key 不含 solver 身份，分段不改 key，既有 cache 命中時仍直接讀取。
+
 加 `--scenario NAME` 時，producer 先在所有明確提供的清單中選取恰好一筆同名列，再讀該列 payload。
 零筆會列合法名稱，多筆會列來源，兩者都在讀 payload 或呼叫 solver 前失敗。
 未選列不需要 payload，也不會求解。不帶 scenario 時維持整批處理。
@@ -194,14 +204,16 @@ Lindblad solver 比對完整 density。960-knot 案例在測試內建構 24 能�
 
 矩陣用 `Engine(1, families=(family,)).evolve(...)` 固定可用 family，
 再從 `paths.segments_by_kernel` 確認實際路徑。
-16 個 active family 都有 pinned 案例，預期 family 沒有執行任何 segment 時獨立失敗。
-`multitone_gate` 拒收所有列，矩陣不替它建立 density 案例，表中顯示 `NOT EXERCISED`。
-它的 sampled 拒收由 routing boundary 契約驗證，不填 error=0，也不報 PASS。
+17 個 family 都有 pinned density 案例，預期 family 沒有執行任何 segment 時獨立失敗。
+`multitone_gate` 的 `test_multitone_gate_dual_phase_density` 驗 Gaussian、sampled、flat-top 與 DRAG。
+每種包絡跑 1 次或 7 次，重複時涵蓋固定與獨立變化的雙相位，完整 density 對獨立參考解。
+`test_multitone_gate_mixed_phase_keys_density` 在同次 evolve 驗不同波形的 key，包含 constant+sampled pair。
+這些小模型案例不代表長序列已通過精度或速度驗收。
 Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生誤差觀察值。
 各案例包含完整 complex coherence、relaxation 與 dephasing。模型尺寸依案例族區分：
 
 - 兩能階：`low_carrier`、`linear_shaped`、`linear_plateau`、`nearby_carriers`、`adiabatic_ramp` 與 `history_gate`。
-- 三能階：`idle_coherence`、`weak_plateau`、`strong_plateau`、`shaped_complex`、`two_carriers`、`continuous_flux`、`cheap_sampled_*` 與 `multisegment/final`。
+- 三能階：`idle_coherence`、`weak_plateau`、`strong_plateau`、`shaped_complex`、`two_carriers`、`continuous_flux`、`cheap_sampled_*`、`multisegment/final` 與 `dual_phase/*`。
 - 四能階：`joint_gate_inventory` 與 `joint_constant`。
 
 | 案例 | 固定的 family | 輸入 |
@@ -230,9 +242,19 @@ native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e
 驗證 19 與 20 次 inventory 都能通過 `multitone_rwa` guard，並用 telemetry 驗證同 key 的抽查只活在一次 evolve。
 `cheap_sampled_nearby` 通過抽查；`cheap_sampled_separated` 有兩個不同相位群，
 `sampled_multitone_phase_sequence` 有六個。這兩個案例逐群驗證抽查失敗後退回，對照獨立參考解。
-Routing boundary 另驗證振幅極值、樣本與切片的精確分群，以及拒收不影響不同相位的群。
+[`test_sampled_rwa_groups.py`](simulate/evolution/contract/test_sampled_rwa_groups.py)
+驗證振幅極值、樣本與切片的精確分群、共享前綴，以及拒收不影響不同相位的群。
 `sampled_multitone_short_sweep_32` 是 25 ns 的雙 tone 頻掃，用 32 能階與
 `interaction_reference` 驗證完整 density。
+
+同檔也驗證單次 pinned gate 的完整 density，並保留 20 點共享輸入的預設
+`common_frame` 空／暖 history 驗收。
+同檔從 `inspect_dispatch` 驗證逐 key 冷價的兩側。價格勝出的 gate 回 `selected`，即使只有一條 timeline 使用該 key。價格輸的 gate 若列入候選，回 `untested_after_short_circuit`。
+實際 evolve 用 telemetry 驗證短 inventory 走 DOP853 且不建 gate。前次執行同 key 不影響這次比價。長 inventory 的建構成本不能攤提到另一個罕用 key。
+固定 `multitone_gate` 略過成本比較，仍檢查結構。
+[共同選路測試](simulate/evolution/contract/test_shared_multitone_routing.py)
+用公開 inspect 與 evolve 檢查重疊群比價、RWA 拒收、gate 數值失敗及跨相位群、prefix 和 worker 的實際建構次數。
+舊的 RWA 群價格與 OpenCL lazy check 測試以多家白名單排除 gate。
 多段案例量整條 timeline 的最終誤差。混合路徑的每個 family 列出同一個最終誤差，
 不是各段的局部誤差。
 歷史案例另外驗證八點 inventory 的結果，並比較兩點輸入在歷史改變前後的實際路徑。

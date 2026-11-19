@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-18 (paired Engine backend selection)
+**Last updated:** 2026-11-18 (FTF gate scenes and paired Engine backend selection)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -352,7 +352,7 @@ without importing the scene producer or rebuilding device models. Each returned
 
 By default it reads `tools/data/family_pareto/frozen-synthetic.index.json` and
 `frozen-real.index.json`. With neither `--index` nor `--scenario`, it requires
-and selects the 33 names in `PARETO_DEFAULT_NAMES` beside `select_inputs`.
+and selects the 49 names in `PARETO_DEFAULT_NAMES` beside `select_inputs`.
 It rejects missing default names after checking all indexes for duplicates,
 before reading any payload or reference. Other rows may share those indexes;
 the default selection does not read their payloads or references.
@@ -713,7 +713,21 @@ not one apply call's cost. Missing diagnostics are errors, not zeros.
 `family_pareto_scenarios.py` owns curated core pulse sequences and the scene
 producer CLI. `family_pareto_scene_builders.py` owns shared single/integer model
 construction, public program compilation, source detachment and support-based
-route declarations. The FTF scene retains its own joint-model composition.
+route declarations. The compiled FTF scene retains its own joint-model composition.
+`family_pareto_gate_scenes.py` owns numeric FTF gate templates and contiguous
+sequences, separately from program compilation. Its `numeric_gate_sequence`
+accepts a source, named ordered DriveTrack tuples, playback order and a constant
+flux level. It preserves absolute carrier phase and pulse-local envelope times.
+`make_gate_inputs` supplies fixed-model repeated pairs and gate sequences;
+the scene producer CLI selects these through `make_real_inputs`. Source
+snapshots reuse `numeric_builder`; cache/index handling stays in the existing
+producer and storage owners.
+`family_pareto_storage.py` owns benchmark and scene-cache locations, plus
+cross-index selection policy. Its `local_data_directory()` queries Git from the
+process working directory and creates the shared benchmark directory. Git and
+filesystem errors propagate. `scene_cache_directory()` instead queries Git from
+the tool's worktree, accepts an absolute override, and creates no directory.
+`family_pareto.py` imports the benchmark resolver directly from this owner.
 `single_model_input(name, emit, manifest, families)` in the builders module is
 the public single-model construction entry point.
 `family_pareto_settings.py` owns fixed single-fluxonium, integer-fluxonium, FTF and board inputs,
@@ -754,6 +768,34 @@ not at the end of that window.
 | S-long `long_shaped_gate_sequence` | S's Gaussian X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same Gaussian 100 ns gates, sigma 20 ns and gain .1 as S | Public compiled support partition, including alignment gaps and readout lead | Checks shaped-gate reuse at long sequence lengths without replacing S. |
 | O1 `overlapping_constant_tones` | Fully overlapping constant Pump/Stokes pair, terminal readout | Pump fixed at DC E1−E0; Stokes scans that center ±50 MHz | Both 1000 ns; gains .02/.002 | 2 | A carrier slice of the dual-tone reset scan on one qubit, without a cavity drive. |
 | O2 `overlapping_shaped_tones` | Stokes-first Gaussian pair on one qubit, terminal readout | Stokes lead .3 to 0 us | Both supports .3 us, sigma .05 us; Pump 7241.848921606473 MHz/gain .030001831166453; Stokes 3111.1686681315896 MHz/gain .100006103888177 | Public support partition includes single-tone, overlap and idle spans | Uses the STIRAP delay sequence without artificial inventory repeats. |
+
+The numeric FTF gate declarations use the same fixed model at flux
+F1/coupler/F2 = .48/.20/.49 Phi0, local4x4x4 and 32 retained joint states.
+Gaussian, DRAG, sampled and flat-top X90 pairs last 100 ns.
+`multitone_gate_{gaussian,sampled,drag,flat_top}_n{1,21,100}` repeats one aligned
+pair, for 12 kernel scenes. A sequence tail uses the same role's pulse.
+`multitone_depth500_{gaussian,sampled}_{min_pairs,max_pairs}` mixes aligned pairs,
+alternating-role single-tone tails and 200 ns dual-charge-line CZ representatives
+with a fixed seed0 permutation. The two inventories contain respectively
+537/1232/1436 and 661/988/932 pair/tail/CZ supports. They represent the minimum
+and maximum aligned-pair counts from a three-seed, two-arm simultaneous RB
+inventory, rather than replaying a lab experiment.
+
+The gate producer records all four envelope recipes and role-specific gains
+in its source. DRAG uses 33 knots, sigma25 ns and Q=-dG/dt/alpha with role-local
+anharmonicities, zero Q endpoints and complex maxabs normalization, without a
+2*pi conversion. The kernel flat-top uses 33 knots, 25 ns ramps with sigma6.25 ns,
+a 50 ns platform and forced zero endpoints, then peak normalization without
+baseline subtraction. It does not use the CZ's 257-knot envelope.
+The gains target single-tone dressed population .5 from joint ground with loss
+off. The actual scenes retain joint Gibbs density and fixed baths/dephasing.
+The original spike working files were not committed. The CZ scale comes from
+the public drive operators' coherent matrix element and the flat-top area. This
+is not a calibrated CZ and does not establish conditional phase or fidelity.
+The real index and default Pareto name set include all 16 gate scenes. Their
+metadata omits the acquisition-only `numerics.debug_capture` setting. The index
+pins identities, not local cache availability, reference convergence or
+whole-sequence speed. Reference production requires its own compute approval.
 
 `carrier_sweep_bias045_input()` and `gate_sequence_bias045_input()` keep the
 fixed single-fluxonium physical and board values from the source commit above.
@@ -808,9 +850,9 @@ Changes to the fixed controls require review. New seed/depth sequences require o
 
 `long_gate_sequence_input()` and `long_shaped_gate_sequence_input()` compile
 N-long and S-long through the same public program and single-fluxonium model
-path as N and S. The default fixed inventory includes both three-point scans,
-both bias045 scans and both random-phase scans alongside the original nine
-scenarios, for fifteen total.
+path as N and S. The compiled-scan inventory includes both three-point scans, both bias045 scans
+and both random-phase scans alongside the original nine scenarios, for fifteen
+compiled scans. The numeric gate scenes are additional inputs.
 Only the requested gate counts change for the long scans.
 The model and board values retain source commit
 `303074e166d1a563addfab4fd94717d958a7dd56`; DC bias, initial density, carrier,
@@ -833,8 +875,11 @@ gain .1, a 1 us pulse/window and zero flight time.
 The lead uses a table sweep so each requested value is quantized independently.
 The endpoints remain separated and fully overlapping. Each shot has one pair;
 changing the relative lead changes overlap support, rather than repeating a
-canonical gate 20 times for `multitone_gate`'s default cost preference.
-Pinning `multitone_gate` bypasses that preference, not its numerical guards.
+canonical gate to increase reuse. Default routing amortizes the cold endpoint
+and Fourier build over eligible uses in the current evolve, then adds per-row
+bookkeeping and playback costs. Pinning `multitone_gate` bypasses pricing,
+not structural eligibility. Once selected, the gate builds and runs without
+an admission probe.
 
 O1 takes its overlap sequence from `twotone/reset/dual_tone/freq` and its
 ±50 MHz scan range from that experiment's Form. The Form's actual reset
@@ -1005,7 +1050,13 @@ uv run --directory "$PWD" --no-sync -- python -m tools.family_pareto_scenarios \
 
 `main(argv, *, inputs=...)` retains explicit producer declarations. Its default
 inventory includes the [DOP853 profile catalogue](#dedicated-dop853-segments).
-Adding those declarations does not populate the tracked indexes or shared cache.
+The staged `multitone_depth50_{gaussian,sampled,drag,flat_top}_max_pairs` prefixes
+and `multitone_depth500_{drag,flat_top}_max_pairs` inventories require explicit
+`--scenario` selection and a separate index and scene-cache directory. The four
+prefixes take the first 258 complete gates of the same seed-0 permutation of
+2,581 gates, not 50 circuit layers. The flat-top X90 uses the complete sampled
+pulse, including both ramps. Adding these declarations does not populate the
+tracked indexes or shared cache.
 `prepare_scenes(inputs, indexes, scene_cache, *, scenario=None, update_index=False)`
 owns preparation. `indexes` maps categories to explicit index paths.
 The producer fixes and logs OMP, OpenBLAS, MKL and Numba native thread settings
@@ -1065,6 +1116,13 @@ exactly one match across the explicitly supplied indexes before reading any
 payload. Zero or multiple matches fail before the solver. Other rows need no
 payload for this operation. Without a scenario, it retains batch preparation.
 `prepare_references(..., scenario=NAME)` offers the same selection for one index.
+For bounded interaction-reference runs, the tests-side `interaction_density`
+solves one tolerance at a time. Save the full DC-basis density and absolute end
+of each chunk separately for coarse and fine. On resume, use that density as
+`initial_densities` and that end as `start_ns`, without rebasing pulse start
+or carrier phase. Compare the two final matrices on the original timeline;
+only a difference of at most 2e-6 qualifies the fine density for its original
+reference key. An intermediate checkpoint is not a reference-cache entry.
 The reference producer reads names and physics; metadata never selects a solver.
 All selected numeric files must load before any solver runs. Missing scene files
 list the name, hashes and scene-producer command, then fail without rebuilding.

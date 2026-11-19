@@ -25,6 +25,7 @@ from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import FTFSource, ftf, plan_template
 
 from tools.dop853_segment import profile_inputs
+from tools.family_pareto_gate_scenes import GATE_SCENES, make_gate_inputs
 from tools.family_pareto_inputs import (
     MULTITONE_PRICE_SCENES,
     Input,
@@ -840,14 +841,17 @@ def overlapping_constant_tones_input() -> Input:
 
 
 def make_real_inputs(scenario: str | None = None) -> list[Input]:
-    """Build fixed and profile inputs, or only scenario before any model work.
+    """Declare fixed scans, DOP853 profiles and FTF gates, or select one name.
 
-    scenario=None includes the declared DOP853 profile catalogue after the fixed
-    scans. A fixed name builds only that scan; other names go to profile_inputs
-    for selected-only construction or ValueError listing legal profile names.
+    scenario=None includes the DOP853 profile catalogue and indexed FTF gates
+    after the fixed scans. A fixed or gate name, including a staged gate scene,
+    selects only that input. Other names go to profile_inputs for selected-only
+    construction or ValueError.
     Unknown names do not construct models. Model construction failures propagate.
     Returned inputs own detached factories; callers close each built Scene.source.
     """
+    if scenario in GATE_SCENES:
+        return make_gate_inputs(scenario)
     builders = {
         "carrier_sweep": carrier_sweep_input,
         "gain_sweep": gain_sweep_input,
@@ -866,7 +870,11 @@ def make_real_inputs(scenario: str | None = None) -> list[Input]:
         "random_shaped_gate_sequence": random_shaped_gate_sequence_input,
     }
     if scenario is None:
-        return [*[build() for build in builders.values()], *profile_inputs()]
+        return [
+            *[build() for build in builders.values()],
+            *profile_inputs(),
+            *make_gate_inputs(),
+        ]
     if scenario in builders:
         return [builders[scenario]()]
     return profile_inputs(scenario)
