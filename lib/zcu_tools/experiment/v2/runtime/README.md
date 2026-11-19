@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-11-20，逐 shot 遮罩平均與回傳
+**Last updated:** 2026-11-20，連續範圍的取數 slot
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -93,6 +93,8 @@ with Schedule(signals, scope=context.scope) as sched:
   `StopSignal`，需要刷新 liveplot 時由 caller 呼叫相關 buffer 的 `trigger_update()`。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
   依 owner path 自動寫入對應 slot。
+  使用 root `SignalBuffer` 時，可用 `dataclasses.replace(step, path=(slice(start, stop), index))`
+  改寫 result 路徑，不改 host step 的 index 或 value。路徑只接受整數與連續 slice（step 省略或為 1）。取數直接寫入 array view。
 - `with Schedule(result_buffer, scope=context.scope) as sched` 可編排任何實作 `BufferProtocol` 的 result
   tree；root result buffer 目前最多一個，多 root buffer 會 fast-fail。
   `step.child("field").buffer(shape)` 會建立 child-local default

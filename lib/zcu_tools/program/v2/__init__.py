@@ -1,5 +1,5 @@
 from . import modules, utils
-from .base import MyProgramV2
+from .base import MyProgramV2, TProcMemoryError
 from .builder import BuilderBranchCases, TimelineBuilder
 from .chain_cycle import chain_cycle_sums
 from .chain_readout import thermal_chain_sums

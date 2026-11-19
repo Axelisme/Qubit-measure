@@ -1,6 +1,7 @@
 """Paired RB with gg/ee herald groups and shared return-survival decays."""
 
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from typing import ClassVar
 
 import numpy as np
@@ -24,15 +25,21 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Classify, Reset, TimelineBuilder, shot_sums
+from zcu_tools.program.v2 import (
+    Classify,
+    Reset,
+    TimelineBuilder,
+    TimelineProgramV2,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._rb_scheduling import emit_sequence
-from .._rb_sequence import make_paired_sequences
+from .._rb_scheduling import build_depth_chunks, emit_depth_sweep
+from .._rb_sequence import RBSequence, make_paired_sequences
 from .._sums import (
     herald_probabilities,
     joint_probabilities,
@@ -249,8 +256,8 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
     def run(self, config: RBHeraldedCfg, *, context: RunContext) -> RBHeraldedResult:
         """Acquire optional reset → herald → concurrent per-qubit sequence → terminal.
 
-        Compile once per depth/seed/arm. Each host round acquires reps shots with
-        rounds=1 and saves all 81 counts. Unfinished slots stay NaN; cfg remains
+        Scan each depth chunk on board. Each host round acquires reps shots per
+        depth and saves all 81 counts. Unfinished slots stay NaN; cfg remains
         unchanged. Acquisition exceptions propagate unchanged. The stop signal
         carries only stop requests and reason text.
 
@@ -273,41 +280,47 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 curves.extend(joint_probabilities(totals)[..., cell, cell].T)
             return viewer.set(np.array(config.depth), np.array(curves))
 
-        # 2. Compile herald/paired-sequence/terminal programs per depth/seed/arm and reuse them across host rounds.
+        # 2. Compile depth chunks per seed and arm, then reuse each chunk across rounds.
         buffer = SignalBuffer(
             (len(config.depth), len(config.seed), 2, config.rounds, 3, 3, 3, 3),
             dtype=np.float64,
             on_update=update_view,
         )
-        with Schedule(buffer, scope=context.scope) as sched:
-            # Host depth/seed/arm change the gate sequence. Host rounds preserve paired slots.
-            for depth, depth_step in sched.scan("depth", config.depth):
-                for seed, seed_step in depth_step.scan("seed", config.seed):
-                    pair = make_paired_sequences(depth, seed)
-                    for arm, arm_step in seed_step.scan("arm", [0, 1]):
-                        sequence = (pair.reference, pair.interleaved)[arm]
-                        builder = TimelineBuilder(
-                            context.soccfg,
-                            reps=config.reps,
-                            initial_delay=config.initial_delay,
-                            relax_delay=config.relax_delay,
-                        )
-                        readout = MuxReadout("readout", config.readout)
-                        if config.reset is not None:
-                            builder.emit(Reset("reset", config.reset))
-                        builder.emit(readout, tag="herald")
 
-                        # Both arms overlap X90s within a Clifford and align at Clifford ends.
-                        emit_sequence(
-                            builder,
-                            sequence,
-                            x90_f1=config.x90_f1,
-                            x90_f2=config.x90_f2,
-                            drive=config.drive,
-                            phase_pair=config.phase_pair,
-                        )
-                        builder.emit(readout, tag="terminal")
-                        prog = builder.build()
+        def build_chunk(sequences: Sequence[RBSequence]) -> TimelineProgramV2:
+            builder = TimelineBuilder(
+                context.soccfg,
+                reps=config.reps,
+                initial_delay=config.initial_delay,
+                relax_delay=config.relax_delay,
+            )
+            readout = MuxReadout("readout", config.readout)
+            if config.reset is not None:
+                builder.emit(Reset("reset", config.reset))
+            builder.emit(readout, tag="herald")
+            emit_depth_sweep(
+                builder,
+                sequences,
+                x90_f1=config.x90_f1,
+                x90_f2=config.x90_f2,
+                drive=config.drive,
+                phase_pair=config.phase_pair,
+            )
+            builder.emit(readout, tag="terminal")
+            return builder.build()
+
+        with Schedule(buffer, scope=context.scope) as sched:
+            for seed, seed_step in sched.scan("seed", config.seed):
+                pairs = [make_paired_sequences(depth, seed) for depth in config.depth]
+                arms = (
+                    [pair.reference for pair in pairs],
+                    [pair.interleaved for pair in pairs],
+                )
+                for sequences, arm_step in seed_step.scan("arm", arms):
+                    chunks = build_depth_chunks(sequences, build_chunk)
+                    for (depth_slice, prog), chunk_step in arm_step.scan(
+                        "depth chunk", chunks
+                    ):
                         reducer = shot_sums(
                             prog,
                             [
@@ -317,13 +330,12 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                                 Classify("terminal", config.roles.f2_tone),
                             ],
                         )
-                        for _, round_step in arm_step.repeat("round", config.rounds):
+                        point_step = replace(
+                            chunk_step, path=(depth_slice, *arm_step.path)
+                        )
+                        for _, round_step in point_step.repeat("round", config.rounds):
                             round_step.run_acquire_summed(
-                                prog,
-                                context.soc,
-                                reducer=reducer,
-                                rounds=1,
-                                options=RunOptions(),
+                                prog, context.soc, reducer=reducer, rounds=1
                             )
         buffer.trigger_update(flush=True)
         # 3. Preserve all 81 class counts and paired round identities; unfinished slots stay NaN.

@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-20，module 遮罩來源與 reducer 初始化
+**Last updated:** 2026-11-20，tProc 記憶體容量例外
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -50,6 +50,9 @@ Label 不推進 reference。若各路徑須保留自己的時序，在跳轉或 
 `shot_sums` 不解析跳轉到目標 label 之間的 trigger，請將共用 readout 放在合併 label 後。
 `_body` 之外的 label 與跳轉沿用 QICK 行為。Raw `asm_inst` 或自訂 `Macro.translate` 不經 timeline 記帳與 reference 守衛，結果由作者負責。
 `DelayAuto` module 只在 timeline 範圍外且未指定 timeline 時包裝原生 delay_auto／delay_reg_auto；任何顯式或範圍選出的 timeline 都報錯。
+
+編譯產物超過 tProc 記憶體時，program 拋出 `TProcMemoryError`，它是 `RuntimeError` 的子類。
+從 `zcu_tools.program.v2` 匯入。`memory` 是 `pmem`、`wmem` 或 `dmem`，`used` 與 `capacity` 分別是使用量與容量，單位都是 word。
 
 Generator／ADC 宣告沿用 QICK 的後宣告覆蓋規則，作者負責一致性，需要時讀 `gen_chs`／`ro_chs`。
 Timeline module 不自動保護 route，明確呼叫 `protect_readout_routes` 才啟用保護。

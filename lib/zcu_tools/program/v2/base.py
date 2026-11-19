@@ -18,6 +18,25 @@ from .utils import is_qick_param
 logger = logging.getLogger(__name__)
 
 
+class TProcMemoryError(RuntimeError):
+    """A compiled binary exceeds one tProc memory's capacity.
+
+    ``memory`` names the memory (pmem, wmem or dmem); ``used`` and
+    ``capacity`` are the compiled size and board limit in words.
+    """
+
+    def __init__(
+        self, memory: Literal["pmem", "wmem", "dmem"], used: int, capacity: int
+    ) -> None:
+        self.memory = memory
+        self.used = used
+        self.capacity = capacity
+        super().__init__(
+            f"compiled program uses {used} words of {memory}, "
+            f"but the size of that tProc memory is only {capacity}"
+        )
+
+
 def _require_positive_integer(value: object, name: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ValueError(f"{name} must be a positive integer")
@@ -120,8 +139,18 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
     def _body(self, cfg: None) -> None: ...
 
     def _make_binprog(self) -> None:
-        """Build QICK binaries with a NumPy-version-independent dmem payload."""
-        super()._make_binprog()
+        """Build QICK binaries, check capacities, and normalize dmem words."""
+        # Use QICK's encoders, but own the capacity check rather than parsing its error.
+        self.binprog = {}
+        self.binprog["pmem"] = self._compile_prog()
+        self.binprog["wmem"] = self._compile_waves()
+        self.binprog["dmem"] = self.compile_datamem()
+        for memory in ("pmem", "wmem", "dmem"):
+            binary = self.binprog[memory]
+            used = 0 if binary is None else len(binary)
+            capacity = self.tproccfg[f"{memory}_size"]
+            if used > capacity:
+                raise TProcMemoryError(memory, used, capacity)
 
         dmem = self.binprog["dmem"]
         if dmem is None:

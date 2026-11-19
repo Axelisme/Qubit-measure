@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Annotated, ClassVar, TypeAlias
 
 import numpy as np
@@ -30,7 +30,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
@@ -38,14 +38,15 @@ from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
     TimelineBuilder,
+    TimelineProgramV2,
     shot_sums,
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._rb_scheduling import emit_sequence
-from .._rb_sequence import make_paired_sequences
+from .._rb_scheduling import build_depth_chunks, emit_depth_sweep
+from .._rb_sequence import RBSequence, make_paired_sequences
 from .._sums import joint_probabilities
 from ._config import RBInputs
 
@@ -311,7 +312,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
     def run(self, config: RBCfg, *, context: RunContext) -> RBResult:
         """Acquire optional reset → concurrent per-qubit sequence → terminal counts.
 
-        Each host round acquires reps shots with rounds=1, not a host average.
+        Each host round acquires reps shots per depth in an on-board chunk.
         A mux herald reset adds a read before the sequence and excludes rejected
         shots from the terminal counts. Return fixed raw count slots; cfg and
         saved sequence identities are unchanged.
@@ -332,40 +333,46 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 np.array(config.depth), joint_probabilities(totals)[..., 0, 0].T
             )
 
-        # 2. Compile each paired depth/seed/arm sequence once and keep individual host-round count slots.
+        # 2. Compile depth chunks per seed and arm, then reuse each chunk across rounds.
         buffer = SignalBuffer(
             (len(config.depth), len(config.seed), 2, config.rounds, 3, 3),
             dtype=np.float64,
             on_update=update_view,
         )
-        with Schedule(buffer, scope=context.scope) as sched:
-            # Host depth/seed/arm change the gate sequence. Host rounds preserve paired slots.
-            for depth, depth_step in sched.scan("depth", config.depth):
-                for seed, seed_step in depth_step.scan("seed", config.seed):
-                    pair = make_paired_sequences(depth, seed)
-                    for arm, arm_step in seed_step.scan("arm", [0, 1]):
-                        sequence = (pair.reference, pair.interleaved)[arm]
-                        builder = TimelineBuilder(
-                            context.soccfg,
-                            reps=config.reps,
-                            initial_delay=config.initial_delay,
-                            relax_delay=config.relax_delay,
-                        )
-                        readout = MuxReadout("readout", config.readout)
-                        if config.reset is not None:
-                            builder.emit(Reset("reset", config.reset, terminal=readout))
 
-                        # Both arms overlap X90s within a Clifford and align at Clifford ends.
-                        emit_sequence(
-                            builder,
-                            sequence,
-                            x90_f1=config.x90_f1,
-                            x90_f2=config.x90_f2,
-                            drive=config.drive,
-                            phase_pair=config.phase_pair,
-                        )
-                        builder.emit(readout, tag="terminal")
-                        prog = builder.build()
+        def build_chunk(sequences: Sequence[RBSequence]) -> TimelineProgramV2:
+            builder = TimelineBuilder(
+                context.soccfg,
+                reps=config.reps,
+                initial_delay=config.initial_delay,
+                relax_delay=config.relax_delay,
+            )
+            readout = MuxReadout("readout", config.readout)
+            if config.reset is not None:
+                builder.emit(Reset("reset", config.reset, terminal=readout))
+            emit_depth_sweep(
+                builder,
+                sequences,
+                x90_f1=config.x90_f1,
+                x90_f2=config.x90_f2,
+                drive=config.drive,
+                phase_pair=config.phase_pair,
+            )
+            builder.emit(readout, tag="terminal")
+            return builder.build()
+
+        with Schedule(buffer, scope=context.scope) as sched:
+            for seed, seed_step in sched.scan("seed", config.seed):
+                pairs = [make_paired_sequences(depth, seed) for depth in config.depth]
+                arms = (
+                    [pair.reference for pair in pairs],
+                    [pair.interleaved for pair in pairs],
+                )
+                for sequences, arm_step in seed_step.scan("arm", arms):
+                    chunks = build_depth_chunks(sequences, build_chunk)
+                    for (depth_slice, prog), chunk_step in arm_step.scan(
+                        "depth chunk", chunks
+                    ):
                         reducer = shot_sums(
                             prog,
                             [
@@ -373,13 +380,12 @@ class RBExp(Experiment[RBResult, RBCfg]):
                                 Classify("terminal", config.roles.f2_tone),
                             ],
                         )
-                        for _, round_step in arm_step.repeat("round", config.rounds):
+                        point_step = replace(
+                            chunk_step, path=(depth_slice, *arm_step.path)
+                        )
+                        for _, round_step in point_step.repeat("round", config.rounds):
                             round_step.run_acquire_summed(
-                                prog,
-                                context.soc,
-                                reducer=reducer,
-                                rounds=1,
-                                options=RunOptions(),
+                                prog, context.soc, reducer=reducer, rounds=1
                             )
         buffer.trigger_update(flush=True)
         # 3. Preserve paired sequence identities and raw terminal counts; unfinished round slots stay NaN.

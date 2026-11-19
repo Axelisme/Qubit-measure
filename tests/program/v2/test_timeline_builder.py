@@ -37,6 +37,48 @@ from tests.program.v2.simulation.time_observations import time_us
 from tests.program.v2.timing_support import recompile, shots, waves
 
 
+@pytest.mark.parametrize("memory,capacity", [("pmem", 4), ("wmem", 0), ("dmem", 0)])
+def test_build_reports_tproc_memory_overflow(memory, capacity):
+    def build(profile):
+        builder = v2.TimelineBuilder(profile)
+        builder.add_loop("point", 2)
+        builder.emit(v2.LoadValue("word", [1, 2], "point", "word"))
+        builder.emit(
+            v2.Pulse(
+                "probe",
+                v2.Pulse.Cfg(
+                    ch=1,
+                    nqz=1,
+                    freq=200,
+                    gain=0.1,
+                    waveform=ConstWaveformCfg(length=0.04),
+                ),
+            )
+        )
+        return builder.build()
+
+    profile = load_soccfg()
+    # Keep the encoder in direct-jump mode, including for the tiny PMEM case.
+    profile["tprocs"][0]["pmem_size"] = 2048
+    binary = build(profile).binprog[memory]
+    assert binary is not None
+    used = len(binary)
+    profile["tprocs"][0][f"{memory}_size"] = capacity
+    with pytest.raises(RuntimeError, match="compiled program uses") as caught:
+        build(profile)
+    assert type(caught.value) is not RuntimeError, "overflow lacks a typed exception"
+    assert isinstance(caught.value, v2.TProcMemoryError)
+    assert (caught.value.memory, caught.value.used, caught.value.capacity) == (
+        memory,
+        used,
+        capacity,
+    )
+    assert str(caught.value) == (
+        f"compiled program uses {used} words of {memory}, "
+        f"but the size of that tProc memory is only {capacity}"
+    )
+
+
 @pytest.mark.parametrize("tail_sync", [False, True])
 def test_zero_bound_register_repeat_skips_empty_selector_and_preserves_readout(
     tail_sync,
