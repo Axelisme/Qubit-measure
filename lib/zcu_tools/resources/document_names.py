@@ -1,8 +1,9 @@
-"""Canonical entry/point document filenames and explicit offline rename pairs."""
+"""Canonical entry/point storage names and explicit offline rename pairs."""
 
 PARAMETERS_FILENAME = "parameters.yaml"
 LIBRARY_FILENAME = "library.yaml"
 ALIASES_FILENAME = "aliases.yaml"
+ARB_WAVEFORMS_DIRNAME = "arb_waveforms"
 
 LEGACY_SETUP_FILENAME = "setup.yaml"
 LEGACY_POINT_FILENAME = "point.yaml"

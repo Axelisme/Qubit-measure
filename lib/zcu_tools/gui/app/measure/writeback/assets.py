@@ -1,25 +1,30 @@
 """Measure's preview and selected-Apply policy for arb asset proposals."""
 
-from typing import Literal
-
 from zcu_tools.cfg_model import ModuleSpec, module_arb_keys
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.context.library import LibrarySnapshot
 from zcu_tools.resources.entry import writeback as concrete
-from zcu_tools.resources.waveform_assets import ArbWaveformError
+from zcu_tools.resources.waveform_assets import (
+    ArbAssetUpdateStatus,
+    arb_sample_summary,
+)
 
-from .contracts import ArbAssetValues
+from .contracts import ArbAssetSummary, ArbAssetValues
 from .items import ArbAssetWriteback
+
+
+def concrete_arb_asset(item: ArbAssetWriteback) -> concrete.ArbAssetWriteback:
+    """Lower the proposed asset key and samples to an entry writeback item."""
+    return concrete.ArbAssetWriteback(item.target_name, item.samples)
 
 
 def arb_asset_current(
     item: ArbAssetWriteback, current: DocumentSetCapture
-) -> Literal["absent", "identical", "different"]:
+) -> ArbAssetUpdateStatus:
     """Compare samples in the current entry without modifying its asset files."""
     return concrete.arb_asset_update_status(
-        current.capture_storage().database_path,
-        concrete.ArbAssetWriteback(item.target_name, item.samples),
+        current.capture_storage().database_path, concrete_arb_asset(item)
     )
 
 
@@ -32,11 +37,9 @@ def preview_arb_asset(
     return ArbAssetValues(
         actual_path=path,
         current=status,
-        proposed={
-            "sample_count": int(samples.time.size),
-            "duration_us": float(samples.time[-1]),
-            "peak_abs": samples.peak_abs,
-        },
+        proposed=ArbAssetSummary(
+            **arb_sample_summary(samples), peak_abs=samples.peak_abs
+        ),
         unit=None,
         warning=(
             f"Apply will fail: arb asset {item.target_name!r} has different samples."
@@ -62,14 +65,8 @@ def require_arb_references(
     """
     assets = library.validation_context().assets
     for key in sorted(module_arb_keys(spec, library) - selected_assets):
-        if assets is not None:
-            try:
-                assets.path_for(key)
-            except ArbWaveformError as exc:
-                if exc.reason not in {"data_key_not_found", "invalid_data_key"}:
-                    raise
-            else:
-                continue
+        if assets is not None and assets.exists(key):
+            continue
         raise InvalidInputError(
             f"Module proposal {session_id!r} ({target}) requires arb asset {key!r}; "
             "publish it in the same draft or select an existing asset"

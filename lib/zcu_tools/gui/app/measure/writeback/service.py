@@ -19,9 +19,10 @@ from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.entry import document_unit
 from zcu_tools.resources.entry import writeback as concrete
 from zcu_tools.resources.entry.ledger_models import AcceptedWrite, JsonObject
+from zcu_tools.resources.waveform_assets import validate_arb_data_key
 
-from .assets import preview_arb_asset, require_arb_references
-from .contracts import UNCHANGED, WritebackApplied
+from .assets import concrete_arb_asset, preview_arb_asset, require_arb_references
+from .contracts import UNCHANGED, WritebackApplied, WritebackKind
 from .contracts import WritebackAcceptance as WritebackAcceptance
 from .contracts import WritebackEdit as WritebackEdit
 from .contracts import WritebackSelection as WritebackSelection
@@ -33,6 +34,7 @@ from .items import (
     ParameterWriteback,
     RecordWriteback,
     WritebackItem,
+    writeback_kind,
 )
 from .values import (
     applied_values,
@@ -49,11 +51,11 @@ _DOCUMENT_WRITE_GROUPS = ("parameter", "ml_modules", "records")
 
 # Kind prefixes are deliberately draft-local. Two independent drafts can both
 # expose ``param-1`` without sharing any Form or mutable item state.
-_KIND_PREFIX = {
-    ParameterWriteback: "param",
-    ModuleWriteback: "ml",
-    RecordWriteback: "record",
-    ArbAssetWriteback: "arb",
+_KIND_PREFIX: dict[WritebackKind, str] = {
+    "parameter": "param",
+    "module": "ml",
+    "record": "record",
+    "arb_asset": "arb",
 }
 
 
@@ -108,8 +110,9 @@ class WritebackDraftApplication:
 
     applied_ids lists confirmed committed IDs: draft order on full success,
     committed-group order on partial failure.
-    written groups all prepared destination paths by parameter/ml_modules/records;
-    it describes the requested writes, including uncommitted paths after failure.
+    written groups all prepared destination paths by parameter/ml_modules/records.
+    It also includes arb_assets when the request has asset writes. Paths describe
+    all requested writes, including uncommitted paths after failure.
     error is the original write failure after a confirmed prefix, or None.
     values contains detached actual values and fixed destinations for committed
     IDs when receipt capture was requested, otherwise an empty tuple.
@@ -336,7 +339,7 @@ class WritebackDraft:
 
         selected only changes the GUI default apply selection. An arb asset
         only accepts selection; target_name, proposed_value or edits raise
-        InvalidInputError. For other items, target_name retargets the item.
+        InvalidInputError without changes. For other items, target_name retargets the item.
         proposed_value replaces a parameter proposal; other
         items raise InvalidInputError. edits writes one batch into a module
         item's Form with FormState.write semantics: the batch installs whole,
@@ -350,8 +353,6 @@ class WritebackDraft:
         self._require_active()
         entry = self._find_draft_entry(session_id)
         item = entry.item
-        if selected is not None and selected != item.selected:
-            item.selected = selected
         if isinstance(item, ArbAssetWriteback) and (
             target_name is not None
             or proposed_value is not UNCHANGED
@@ -360,6 +361,8 @@ class WritebackDraft:
             raise InvalidInputError(
                 f"{session_id!r} is an arb asset proposal; it cannot be edited or retargeted"
             )
+        if selected is not None and selected != item.selected:
+            item.selected = selected
         if target_name is not None and target_name != item.target_name:
             item.target_name = target_name
             self._mark_unapplied(entry)
@@ -489,7 +492,8 @@ class WritebackDraft:
         for entry in entries:
             item = entry.item
             if isinstance(item, ArbAssetWriteback):
-                asset = concrete.ArbAssetWriteback(item.target_name, item.samples)
+                validate_arb_data_key(item.target_name)
+                asset = concrete_arb_asset(item)
                 path = asset.path
                 items.append(asset)
                 written.setdefault("arb_assets", []).append(path)
@@ -669,12 +673,7 @@ class WritebackDraft:
 
     @staticmethod
     def _kind_prefix(item: WritebackItem) -> str:
-        for item_type, prefix in _KIND_PREFIX.items():
-            if isinstance(item, item_type):
-                return prefix
-        raise InvalidInputError(
-            f"unsupported writeback item type: {type(item).__name__}"
-        )
+        return _KIND_PREFIX[writeback_kind(item)]
 
     @staticmethod
     def _next_session_id(entries: list[_DraftEntry], prefix: str) -> str:

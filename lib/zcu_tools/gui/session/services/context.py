@@ -51,6 +51,7 @@ from zcu_tools.gui.session.value_lookup import (
     resolve_value_ref,
 )
 from zcu_tools.resources.context.library import ModuleLibrary
+from zcu_tools.resources.document_names import ARB_WAVEFORMS_DIRNAME
 from zcu_tools.resources.entry import (
     DestinationExistsError,
     ResultEntry,
@@ -157,7 +158,7 @@ class ContextService:
         self._owner.assert_owner()
         global_parameters = entry.parameters()
         points = self._load_points(entry)
-        assets = self._bind_assets(entry.database_path / "arb_waveforms")
+        assets = self._bind_assets(entry.database_path / ARB_WAVEFORMS_DIRNAME)
         library = entry.library(assets=assets)
         documents = DocumentSet(global_parameters, library, entry.aliases())
         parameters = DocumentSetCapture.from_set(
@@ -592,7 +593,7 @@ class ContextService:
         """
         self._owner.assert_owner()
         entry = self._require_write_target(target)
-        assets = self._bind_assets(entry.database_path / "arb_waveforms")
+        assets = self._bind_assets(entry.database_path / ARB_WAVEFORMS_DIRNAME)
         library = entry.library(target.point, assets=assets)
         parameters = (
             self._fresh_entry().parameters()
@@ -664,23 +665,29 @@ class ContextService:
     def publish_arb_assets(
         self, target: DocumentSetRef, items: tuple[ArbAssetWriteback, ...]
     ) -> Iterator[YamlMap]:
-        """Commit distinct asset keys to the target's opened entry on the owner thread.
+        """Validate distinct asset keys for the target's opened entry on the owner thread.
 
-        Iterate on the owner thread to receive each status and summary in
-        order. Bump the shared asset version once when there is a confirmed
-        prefix, even if later asset I/O fails. A preflight failure yields no
-        receipts and does not bump. Target, validation and I/O errors propagate.
+        Iterate on the owner thread to publish and receive each status and
+        summary in order. Bump the asset version once for a confirmed prefix,
+        even if later I/O fails. Target, validation and I/O errors propagate.
+        Preflight failures do not bump the version.
         """
         self._owner.assert_owner()
         entry = self._require_write_target(target)
-        confirmed = False
-        try:
-            for receipt in publish_arb_asset_updates(entry.database_path, items):
-                confirmed = True
-                yield receipt
-        finally:
-            if confirmed:
-                self._state.version.bump(ARB_WAVEFORMS_VERSION_KEY)
+        receipts = publish_arb_asset_updates(entry.database_path, items)
+
+        def publish_and_notify() -> Iterator[YamlMap]:
+            self._owner.assert_owner()
+            confirmed = False
+            try:
+                for receipt in receipts:
+                    confirmed = True
+                    yield receipt
+            finally:
+                if confirmed:
+                    self._state.version.bump(ARB_WAVEFORMS_VERSION_KEY)
+
+        return publish_and_notify()
 
     def set_parameter(
         self,
@@ -952,7 +959,7 @@ class ContextService:
     ]:
         if self._global_set is None:
             raise RuntimeError("Opened entry has no global binding")
-        assets = self._bind_assets(entry.database_path / "arb_waveforms")
+        assets = self._bind_assets(entry.database_path / ARB_WAVEFORMS_DIRNAME)
         library = entry.library(label, assets=assets)
         documents = DocumentSet(point, library, entry.aliases(label))
         parameters = DocumentSetCapture.from_set(

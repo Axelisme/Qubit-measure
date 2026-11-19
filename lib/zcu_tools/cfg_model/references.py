@@ -3,7 +3,11 @@
 from collections.abc import Mapping
 
 from .dependencies import ModuleResolver
-from .materialization import module_spec_from_raw, waveform_spec_from_raw
+from .materialization import (
+    module_spec_from_raw,
+    reset_pulse_fields,
+    waveform_spec_from_raw,
+)
 from .module import (
     BathResetSpec,
     ModuleSpec,
@@ -25,17 +29,9 @@ def module_arb_keys(spec: ModuleSpec, resolver: ModuleResolver) -> frozenset[str
     if isinstance(spec, (PulseSpec, PulseReadoutSpec)):
         return _waveform_arb_keys(spec.waveform, resolver)
 
-    match spec:
-        case PulseResetSpec(pulse_cfg=pulse):
-            children = (pulse,)
-        case TwoPulseResetSpec(pulse1_cfg=first, pulse2_cfg=second):
-            children = (first, second)
-        case BathResetSpec(cavity_tone_cfg=cavity, qubit_tone_cfg=qubit, pi2_cfg=pi2):
-            children = (cavity, qubit, pi2)
-        case _:
-            return frozenset()
     keys: set[str] = set()
-    for child in children:
+    for field in reset_pulse_fields(spec.type):
+        child: object = getattr(spec, field, None)
         if isinstance(child, str):
             try:
                 child = resolver.module_spec(child)

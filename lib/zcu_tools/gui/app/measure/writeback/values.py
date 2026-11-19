@@ -11,9 +11,15 @@ from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.entry import document_value
 from zcu_tools.resources.entry import writeback as concrete
 
-from .assets import arb_asset_current
-from .contracts import WritebackApplied, WritebackKind
-from .items import ArbAssetWriteback, ParameterWriteback, RecordWriteback, WritebackItem
+from .assets import arb_asset_current, concrete_arb_asset
+from .contracts import WritebackApplied
+from .items import (
+    ArbAssetWriteback,
+    ParameterWriteback,
+    RecordWriteback,
+    WritebackItem,
+    writeback_kind,
+)
 
 if TYPE_CHECKING:
     from .service import WritebackDraft
@@ -27,7 +33,7 @@ def destination_path(item: WritebackItem, parameters: DocumentSetCapture) -> str
     the destination owner validates them on read or application.
     """
     if isinstance(item, ArbAssetWriteback):
-        return concrete.ArbAssetWriteback(item.target_name, item.samples).path
+        return concrete_arb_asset(item).path
     if isinstance(item, RecordWriteback):
         return item.target_name
     if isinstance(item, ParameterWriteback):
@@ -104,7 +110,7 @@ def applied_values(
         values.append(
             WritebackApplied(
                 id=item.session_id,
-                kind=_item_kind(item),
+                kind=writeback_kind(item),
                 target=committed.path,
                 value=deepcopy(committed.value),
                 destination={
@@ -114,13 +120,3 @@ def applied_values(
             )
         )
     return tuple(values)
-
-
-def _item_kind(item: WritebackItem) -> WritebackKind:
-    if isinstance(item, ArbAssetWriteback):
-        return "arb_asset"
-    if isinstance(item, RecordWriteback):
-        return "record"
-    if isinstance(item, ParameterWriteback):
-        return "parameter"
-    return "module"

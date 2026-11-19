@@ -63,10 +63,11 @@ class ContextWritebackTarget:
     def publish_arb_assets(
         self, items: tuple[ArbAssetWriteback, ...]
     ) -> Iterator[YamlMap]:
-        """Yield confirmed receipts for distinct keys in the bound entry's asset root.
+        """Validate distinct keys in the bound entry's asset root before returning.
 
-        The context checks entry membership and publishes the shared version.
-        Iterate on its owner thread; target, validation and I/O errors propagate.
+        Iterate on the owner thread to publish assets and receive receipts.
+        The context publishes the shared version. Target, validation and I/O
+        errors propagate.
         """
         return self._context.publish_arb_assets(self._target, items)
 

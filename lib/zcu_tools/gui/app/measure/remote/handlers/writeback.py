@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.writeback import (
     WritebackEdit,
     WritebackItem,
     WritebackValues,
+    writeback_kind,
 )
 from zcu_tools.gui.app.measure.writeback.control import CapturedWritebackPane
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -65,27 +66,21 @@ def _writeback_item_wire(
         "target_name": item.target_name,
         "description": item.description,
         "selected": bool(item.selected),
+        "kind": writeback_kind(item),
     }
     if item.element is not None:
         base["element"] = item.element.copy()
     if isinstance(item, ParameterWriteback):
-        base["kind"] = "parameter"
         base["create_kind"] = item.create_kind
         base["proposed_value"] = _writeback_wire_value(item.proposed_value)
     elif isinstance(item, ArbAssetWriteback):
-        base["kind"] = "arb_asset"
         base["proposed_value"] = _writeback_wire_value(values.proposed)
         if values.warning is not None:
             base["warning"] = values.warning
     elif isinstance(item, RecordWriteback):
-        base["kind"] = "record"
         base["proposed_value"] = _writeback_wire_value(item.record)
-    elif isinstance(item, ModuleWriteback):
-        base["kind"] = "module"
-        if item.role_id is not None:
-            base["role_id"] = item.role_id
-    else:
-        base["kind"] = "unknown"
+    elif isinstance(item, ModuleWriteback) and item.role_id is not None:
+        base["role_id"] = item.role_id
     return base
 
 

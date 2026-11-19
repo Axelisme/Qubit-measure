@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -21,8 +21,16 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
 from zcu_tools.format_version import YamlMap, YamlValue
-from zcu_tools.resources.document_names import LIBRARY_FILENAME, PARAMETERS_FILENAME
-from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+from zcu_tools.resources.document_names import (
+    ARB_WAVEFORMS_DIRNAME,
+    LIBRARY_FILENAME,
+    PARAMETERS_FILENAME,
+)
+from zcu_tools.resources.waveform_assets import (
+    ArbAssetUpdateStatus,
+    ArbWaveformDatabase,
+    arb_sample_summary,
+)
 
 from .ledger import RecordsLedger
 from .ledger_models import (
@@ -124,7 +132,7 @@ class ArbAssetWriteback:
     @property
     def path(self) -> str:
         """Return this asset's entry-relative ledger and receipt path (no I/O)."""
-        return f"arb_waveforms/{self.key}"
+        return f"{ARB_WAVEFORMS_DIRNAME}/{self.key}"
 
 
 type WritebackItem = (
@@ -165,16 +173,9 @@ def _normalize_record_value(value: object) -> object:
     return normalize_numpy_scalar(value)
 
 
-def _asset_summary(item: ArbAssetWriteback) -> YamlMap:
-    return {
-        "sample_count": int(item.samples.time.size),
-        "duration_us": float(item.samples.time[-1]),
-    }
-
-
 def _accepted_write(item: WritebackItem) -> AcceptedWrite:
     if isinstance(item, ArbAssetWriteback):
-        return AcceptedWrite(path=item.path, value=_asset_summary(item))
+        return AcceptedWrite(path=item.path, value={**arb_sample_summary(item.samples)})
     if isinstance(item, ParameterWriteback) and item.metadata is not None:
         TypeAdapter(YamlMap).validate_python(item.metadata, strict=True)
     if isinstance(item, ParameterWriteback):
@@ -294,11 +295,11 @@ class WritebackTarget(Protocol):
     def publish_arb_assets(
         self, items: tuple[ArbAssetWriteback, ...]
     ) -> Iterator[YamlMap]:
-        """Iterate to publish nonempty, distinct keys to the bound entry's asset root.
+        """Validate nonempty, distinct keys for the bound entry's asset root.
 
-        Validate the group before writing. Yield each confirmed status and
-        summary in order. A preflight conflict yields nothing; an I/O error
-        stops iteration after any confirmed prefix. Never replace assets.
+        Preflight raises on a conflict before returning. Iterate to publish
+        without replacement and receive confirmed statuses and summaries in
+        order. An I/O failure during iteration leaves the confirmed prefix intact.
         """
         ...
 
@@ -385,30 +386,33 @@ def commit_library_updates(
 
 def arb_asset_update_status(
     database_path: Path, item: ArbAssetWriteback
-) -> Literal["absent", "identical", "different"]:
+) -> ArbAssetUpdateStatus:
     """Preview an entry-scoped publication without creating files or a directory.
 
     database_path is the entry database root. Use the same sample comparison
     as publication; invalid keys, samples, assets and I/O errors propagate.
     """
     return ArbWaveformDatabase.publication_status_at(
-        database_path / "arb_waveforms", item.key, item.samples
+        database_path / ARB_WAVEFORMS_DIRNAME, item.key, item.samples
     )
 
 
 def publish_arb_asset_updates(
     database_path: Path, items: tuple[ArbAssetWriteback, ...]
 ) -> Iterator[YamlMap]:
-    """Publish samples under the entry's database_path/arb_waveforms directory.
+    """Validate samples for the entry's database_path/arb_waveforms directory.
 
-    Items must have distinct keys. The asset owner checks the whole batch
-    before writing. Yield each item's detached status, sample count and
-    duration in input order; I/O failure leaves the confirmed prefix intact.
+    Items must have distinct keys. Keys, samples and conflicts are checked
+    before returning. Iterate to publish and receive each item's detached
+    status, sample count and duration in input order. I/O failure leaves the
+    confirmed prefix intact.
     """
-    repository = ArbWaveformDatabase(database_path / "arb_waveforms")
+    repository = ArbWaveformDatabase(database_path / ARB_WAVEFORMS_DIRNAME)
     statuses = repository.publish_batch({item.key: item.samples for item in items})
-    for item, status in zip(items, statuses, strict=True):
-        yield {"status": status, **_asset_summary(item)}
+    return (
+        {"status": status, **arb_sample_summary(item.samples)}
+        for item, status in zip(items, statuses, strict=True)
+    )
 
 
 class BoundDocumentWritebackTarget:
@@ -447,7 +451,7 @@ class BoundDocumentWritebackTarget:
     def publish_arb_assets(
         self, items: tuple[ArbAssetWriteback, ...]
     ) -> Iterator[YamlMap]:
-        """Publish assets in the captured entry's database directory, not the point."""
+        """Validate assets now; iterate to publish to the captured entry, not the point."""
         return publish_arb_asset_updates(self._storage.database_path, items)
 
     def set_parameter(
@@ -538,15 +542,17 @@ def _indexed_assets(items: tuple[WritebackItem, ...]) -> dict[int, ArbAssetWrite
     return assets
 
 
-def _commit_arb_assets(
+def _append_asset_receipts(
     assets: dict[int, ArbAssetWriteback],
     writes: tuple[AcceptedWrite, ...],
     target: WritebackTarget,
-) -> Iterator[CommittedWrite]:
+    committed: list[CommittedWrite],
+) -> None:
+    """Publish assets and report each confirmation before any later I/O error."""
     if assets:
         receipts = target.publish_arb_assets(tuple(assets.values()))
         for index, value in zip(assets, receipts, strict=True):
-            yield CommittedWrite(index, writes[index].path, value)
+            committed.append(CommittedWrite(index, writes[index].path, value))
 
 
 def apply_writeback(
@@ -622,9 +628,7 @@ def apply_writeback(
 
     committed: list[CommittedWrite] = []
     try:
-        # Append as each asset is confirmed so an I/O error retains the prefix.
-        for receipt in _commit_arb_assets(assets, writes, target):
-            committed.append(receipt)
+        _append_asset_receipts(assets, writes, target, committed)
         if parameters:
             values = target.set_parameters(tuple(parameters))
             committed.extend(

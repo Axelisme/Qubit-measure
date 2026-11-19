@@ -13,6 +13,7 @@ from .items import (
     ParameterWriteback,
     RecordWriteback,
     WritebackItem,
+    writeback_kind,
 )
 
 if TYPE_CHECKING:
@@ -53,6 +54,7 @@ __all__ = [
     "WritebackValues",
     "WritebackWritten",
     "WritebackWidget",
+    "writeback_kind",
 ]
 
 _EXPORT_MODULES = {

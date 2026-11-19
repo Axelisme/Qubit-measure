@@ -12,9 +12,11 @@ from zcu_tools.cfg_model import (
     FlatTopWaveformSpec,
     PulseSpec,
 )
+from zcu_tools.core.waveform_format import WaveformSamples
 from zcu_tools.experiment import RunRecord
 from zcu_tools.gui.app.measure.adapter import WritebackRequest
 from zcu_tools.gui.app.measure.writeback import (
+    ArbAssetWriteback,
     ModuleWriteback,
     ParameterWriteback,
     WritebackEdit,
@@ -29,7 +31,7 @@ from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.resources.entry import ComponentSchema, ResultEntry, RoleSpec
-from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase, ArbWaveformError
 
 from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
@@ -202,6 +204,39 @@ def test_arb_publish_refuses_edits_before_writing(session, make_arb_draft, chang
         draft.writeback_write((change,))
     assert draft.preview()[1].target_name == ARB_PROPOSAL_KEY
     assert entry.ledger.events() == ()
+
+
+def test_rejected_arb_edit_keeps_default_selection(make_arb_draft):
+    draft = make_arb_draft()
+    with pytest.raises(InvalidInputError, match="cannot be edited or retargeted"):
+        draft.edit("arb-1", selected=False, target_name="renamed")
+
+    asset = draft.preview()[1]
+    assert asset.selected
+    assert asset.target_name == ARB_PROPOSAL_KEY
+
+
+def test_invalid_arb_key_rejects_draft_before_ledger_append(session):
+    entry, control, service = session
+    draft = service.create_draft(
+        [
+            ArbAssetWriteback(
+                "bad-key",
+                "Invalid asset key",
+                samples=WaveformSamples(
+                    np.array([0.0, 0.25]), np.array([0.0, 0.4]), None
+                ),
+            )
+        ],
+        parameters=capture_focus(control),
+        experiment_name="synthetic/arb",
+    )
+
+    with pytest.raises(ArbWaveformError, match="data key must match"):
+        draft.apply()
+
+    assert entry.ledger.events() == ()
+    assert not (entry.database_path / "arb_waveforms").exists()
 
 
 def test_arb_preview_compares_live_samples_without_creating_or_overwriting_assets(

@@ -17,8 +17,10 @@ class WaveformAssetInfo(Protocol):
     """Asset reads bound to one explicit scope, without caching asset bytes.
 
     Keys identify assets in the bound scope, not paths or GUI roles. duration
-    and samples read current bytes; path_for only checks key and file existence. Missing or invalid assets and I/O failures raise an
-    owner-defined exception; no empty data or duration fallback is permitted.
+    and samples read current bytes. exists and path_for only check key syntax
+    and file existence. Missing or invalid assets raise an owner-defined
+    exception except in exists. I/O failures propagate; no empty data or
+    duration fallback is permitted.
     Copying a consumer must not rebind this dependency to another scope.
     """
 
@@ -28,6 +30,13 @@ class WaveformAssetInfo(Protocol):
 
     def samples(self, data_key: str) -> waveform_format.WaveformSamples:
         """Read isolated, validated I/Q samples and their reference time axis."""
+        ...
+
+    def exists(self, data_key: str) -> bool:
+        """Return whether a valid key exists in this scope, without reading samples.
+
+        Missing or malformed keys return False. Other filesystem errors propagate.
+        """
         ...
 
     def path_for(self, data_key: str) -> Path:

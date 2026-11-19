@@ -71,6 +71,7 @@ class CZOptimizeResult:
     14), ordered [I1..I6, Q1..Q6, Z_F1 (deg), Z_F2 (deg)]. peak is float64
     (evaluation,), the largest normalized |I+iQ| on the render grid. sums is
     float64 (evaluation, seed, 3, 3), with F1/F2 axes each ordered g, e, other.
+    duration is the baseline arb duration in us, measured at Run start.
     Unmeasured entries and counts for skipped shapes stay NaN.
     """
 
@@ -78,28 +79,30 @@ class CZOptimizeResult:
     params: NDArray[np.float64]
     peak: NDArray[np.float64]
     sums: NDArray[np.float64]
+    duration: float
 
 
 @dataclass(frozen=True)
 class CZOptimizeAnalysis:
     """Best measured evaluation index, its target, evaluation 0's target if
-    available, and the best vector in Result parameter order.
+    available, the best vector in Result parameter order, and the saved
+    baseline envelope duration in us.
     """
 
     best_evaluation: int
     best_target: float
     start_target: float | None
     best_params: tuple[float, ...]
+    duration: float
 
-    def render_best(self, cfg: CZOptimizeCfg) -> WaveformSamples:
-        """Render the best I/Q spline at the analyzed Run cfg's arb duration.
+    def render_best(self) -> WaveformSamples:
+        """Render the best I/Q spline at the saved duration without asset I/O.
 
         Reuse the candidate playback grid and preserve all 12 knot values.
-        Missing or unreadable baseline samples raise their file or format error.
-        This reads the original arb but does not publish the rendered samples.
         """
-        duration = float(_read_baseline(cfg).time[-1])
-        return _render_samples(np.asarray(self.best_params, dtype=np.float64), duration)
+        return _render_samples(
+            np.asarray(self.best_params, dtype=np.float64), self.duration
+        )
 
 
 @dataclass(frozen=True)
@@ -239,6 +242,7 @@ def _restore_result(data: GroupedLoadData[CZOptimizeCfg]) -> CZOptimizeResult:
         params=data.variable("params").z.astype(np.float64),
         peak=data.variable("peak").z.astype(np.float64),
         sums=sums.z.astype(np.float64),
+        duration=float(data.variable("duration").z.item()),
     )
 
 
@@ -262,6 +266,81 @@ def _make_strategy(
             "verbose": -9,
         },
     )
+
+
+@dataclass(frozen=True)
+class _CandidateCZ:
+    """In-memory physical pulse pair and its matching logical Z corrections."""
+
+    drive: DualLineCfg  # Physical CZ lines sharing one in-memory envelope.
+    phases: CZPhasePair  # Logical Z corrections in degrees for those lines.
+
+
+def _candidate_cfg(
+    baseline: CZOptimizeCfg, samples: WaveformSamples, params: NDArray[np.float64]
+) -> _CandidateCZ:
+    """Replace only the two shapes and local Z angles, without modifying the saved cfg."""
+    waveform = InMemoryArbWaveformCfg(samples=samples)
+    drive = DualLineCfg(
+        f1=baseline.drive.f1.model_copy(update={"waveform": waveform}),
+        f2=baseline.drive.f2.model_copy(update={"waveform": waveform}),
+    )
+    phase_pair = baseline.phase_pair.model_copy(
+        update={
+            "correction_f1_deg": float(params[-2]),
+            "correction_f2_deg": float(params[-1]),
+        }
+    )
+    return _CandidateCZ(drive, phase_pair)
+
+
+def _measure_candidate(
+    cfg: CZOptimizeCfg,
+    context: RunContext,
+    step: ScheduleStep[int],
+    sequences: dict[int, RBSequence],
+    candidate: _CandidateCZ,
+) -> float:
+    """Write one terminal count table per seed and return mean survival or NaN on stop.
+
+    cfg supplies the fixed readout, X90s and acquisition settings. sequences
+    maps each seed to its interleaved arm. A zero-shot seed raises.
+    """
+    for seed, seed_step in step.scan("seed", cfg.seed):
+        builder = TimelineBuilder(
+            context.soccfg,
+            reps=cfg.reps,
+            initial_delay=cfg.initial_delay,
+            relax_delay=cfg.relax_delay,
+        )
+        readout = MuxReadout("readout", cfg.readout)
+        if cfg.reset is not None:
+            builder.emit(Reset("reset", cfg.reset, terminal=readout))
+        emit_sequence(
+            builder,
+            sequences[seed],
+            x90_f1=cfg.x90_f1,
+            x90_f2=cfg.x90_f2,
+            drive=candidate.drive,
+            phase_pair=candidate.phases,
+        )
+        builder.emit(readout, tag="terminal")
+        prog = builder.build()
+        reducer = shot_sums(
+            prog,
+            [
+                Classify("terminal", cfg.roles.f1_tone),
+                Classify("terminal", cfg.roles.f2_tone),
+            ],
+        )
+        counts = seed_step.run_acquire_summed(
+            prog, context.soc, reducer=reducer, rounds=1
+        )
+        if counts.sum() == 0.0:
+            raise ValueError(
+                f"Seed {seed}: no accepted shots (herald acceptance rate 0/{cfg.reps}); check reset keep and readout calibration."
+            )
+    return float(joint_probabilities(step.array_data)[..., 0, 0].mean())
 
 
 class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
@@ -309,6 +388,17 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
                     axes=(_EVALUATION_AXIS,),
                     z=VariableZSpec(
                         "peak", label="Envelope peak", unit="", dtype=np.float64
+                    ),
+                ),
+                VariableSpec(
+                    variable="duration",
+                    axes=(),
+                    z=VariableZSpec(
+                        "duration",
+                        label="Baseline duration",
+                        unit="s",
+                        scale=1e-6,
+                        dtype=np.float64,
                     ),
                 ),
             ),
@@ -403,7 +493,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
                         strategy.tell(population, losses)
 
         return CZOptimizeResult(
-            np.array(cfg.seed, dtype=np.int64), params, peak, buffer.array
+            np.array(cfg.seed, dtype=np.int64), params, peak, buffer.array, duration
         )
 
     @override
@@ -419,7 +509,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
         Pass None for options: there are no analysis settings. Requires the
         run's saved cfg and at least one complete, feasible row.
         Missing cfg or no usable rows returns a reason instead of selecting a CZ.
-        The shared arb path supplies the baseline duration; I/O errors propagate.
+        Shape plots use the duration captured in the Result, without asset I/O.
         """
         # 1. Select the best complete, feasible evaluation, with the earliest row winning ties.
         if source.cfg is None:
@@ -434,7 +524,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
         index = int(np.nanargmax(targets))
         best_params = source.result.params[index]
         start_params = source.result.params[0]
-        duration = float(_read_baseline(source.cfg).time[-1])
+        duration = source.result.duration
 
         # 2. Compare measured objectives and overlay the rendered I/Q envelopes.
         fig, _ = plots.subplots(1, 2, num="fit", figsize=(10, 4), layout="constrained")
@@ -474,79 +564,5 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
             best_target=float(targets[index]),
             start_target=float(targets[0]) if np.isfinite(targets[0]) else None,
             best_params=tuple(float(value) for value in best_params),
+            duration=duration,
         )
-
-
-@dataclass(frozen=True)
-class _CandidateCZ:
-    """In-memory physical pulse pair and its matching logical Z corrections."""
-
-    drive: DualLineCfg
-    phases: CZPhasePair
-
-
-def _candidate_cfg(
-    baseline: CZOptimizeCfg, samples: WaveformSamples, params: NDArray[np.float64]
-) -> _CandidateCZ:
-    """Replace only the two shapes and local Z angles, without modifying the saved cfg."""
-    waveform = InMemoryArbWaveformCfg(samples=samples)
-    drive = DualLineCfg(
-        f1=baseline.drive.f1.model_copy(update={"waveform": waveform}),
-        f2=baseline.drive.f2.model_copy(update={"waveform": waveform}),
-    )
-    phase_pair = baseline.phase_pair.model_copy(
-        update={
-            "correction_f1_deg": float(params[-2]),
-            "correction_f2_deg": float(params[-1]),
-        }
-    )
-    return _CandidateCZ(drive, phase_pair)
-
-
-def _measure_candidate(
-    cfg: CZOptimizeCfg,
-    context: RunContext,
-    step: ScheduleStep[int],
-    sequences: dict[int, RBSequence],
-    candidate: _CandidateCZ,
-) -> float:
-    """Write one terminal count table per seed and return mean survival or NaN on stop.
-
-    cfg supplies the fixed readout, X90s and acquisition settings. sequences
-    maps each seed to its interleaved arm. A zero-shot seed raises.
-    """
-    for seed, seed_step in step.scan("seed", cfg.seed):
-        builder = TimelineBuilder(
-            context.soccfg,
-            reps=cfg.reps,
-            initial_delay=cfg.initial_delay,
-            relax_delay=cfg.relax_delay,
-        )
-        readout = MuxReadout("readout", cfg.readout)
-        if cfg.reset is not None:
-            builder.emit(Reset("reset", cfg.reset, terminal=readout))
-        emit_sequence(
-            builder,
-            sequences[seed],
-            x90_f1=cfg.x90_f1,
-            x90_f2=cfg.x90_f2,
-            drive=candidate.drive,
-            phase_pair=candidate.phases,
-        )
-        builder.emit(readout, tag="terminal")
-        prog = builder.build()
-        reducer = shot_sums(
-            prog,
-            [
-                Classify("terminal", cfg.roles.f1_tone),
-                Classify("terminal", cfg.roles.f2_tone),
-            ],
-        )
-        counts = seed_step.run_acquire_summed(
-            prog, context.soc, reducer=reducer, rounds=1
-        )
-        if counts.sum() == 0.0:
-            raise ValueError(
-                f"Seed {seed}: no accepted shots (herald acceptance rate 0/{cfg.reps}); check reset keep and readout calibration."
-            )
-    return float(joint_probabilities(step.array_data)[..., 0, 0].mean())

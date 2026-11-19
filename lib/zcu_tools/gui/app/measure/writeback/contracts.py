@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 from pydantic import JsonValue
 
 from zcu_tools.gui.form import FormWritePath
+from zcu_tools.resources.waveform_assets import ArbAssetUpdateStatus
 
 if TYPE_CHECKING:
     from .service import WritebackDraft
@@ -87,7 +88,7 @@ class ArbAssetSummary(TypedDict):
 class ArbAssetValues(WritebackValues):
     """Arb asset preview with a typed summary instead of raw sample arrays."""
 
-    current: Literal["absent", "identical", "different"] | None
+    current: ArbAssetUpdateStatus | None
     proposed: ArbAssetSummary
 
 

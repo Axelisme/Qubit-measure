@@ -64,7 +64,7 @@ def test_publish_creates_raw_samples_but_never_replaces_existing_asset(
     samples = validate_samples(time=[0.0, 0.75], idata=[0.0, 0.4], qdata=None)
     changed = validate_samples(time=[0.0, 0.75], idata=[0.0, 0.4], qdata=[0.0, 0.1])
 
-    assert repository.publish("pulse", samples) == "created"
+    assert tuple(repository.publish_batch({"pulse": samples})) == ("created",)
     path = repository.path_for("pulse")
     before = path.read_bytes()
     os.utime(path, (1, 1))
@@ -72,9 +72,9 @@ def test_publish_creates_raw_samples_but_never_replaces_existing_asset(
     assert repository.load_recipe("pulse") is None
     assert repository.bound_info().samples("pulse").qdata is None
 
-    assert repository.publish("pulse", samples) == "existing"
+    assert tuple(repository.publish_batch({"pulse": samples})) == ("existing",)
     with pytest.raises(ArbWaveformError, match="different samples"):
-        repository.publish("pulse", changed)
+        repository.publish_batch({"pulse": changed})
     assert path.read_bytes() == before
     assert path.stat().st_mtime_ns == mtime
 

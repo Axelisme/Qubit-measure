@@ -50,7 +50,7 @@ def _get_writeback_items(
         raise ValueError("CZ optimization writeback requires a Run/Load capture")
     _check_source_roles(cfg, parameters)
 
-    samples = best.render_best(cfg)
+    samples = best.render_best()
     key = f"cz_opt_{hash_samples(samples)[:12]}"
     selected = best.start_target is not None and best.best_target > best.start_target
     note = None
@@ -111,6 +111,7 @@ def _get_writeback_items(
 
 
 def _check_source_roles(cfg: CZOptimizeCfg, parameters: DocumentSetCapture) -> None:
+    """Reject writeback if a captured role differs from the saved run identity."""
     for role, identity in (
         ("f1", cfg.roles.f1),
         ("f2", cfg.roles.f2),

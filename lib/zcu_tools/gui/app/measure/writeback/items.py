@@ -7,11 +7,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.core.element import ElementIdentity
+from zcu_tools.gui.expected_error import InvalidInputError
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec
     from zcu_tools.core.waveform_format import WaveformSamples
     from zcu_tools.resources.entry.ledger_models import JsonObject
+
+    from .contracts import WritebackKind
 
 
 @dataclass
@@ -100,3 +103,19 @@ class ArbAssetWriteback(WritebackItem):
     """
 
     samples: WaveformSamples
+
+
+_ITEM_KINDS: dict[type[WritebackItem], WritebackKind] = {
+    ParameterWriteback: "parameter",
+    ModuleWriteback: "module",
+    RecordWriteback: "record",
+    ArbAssetWriteback: "arb_asset",
+}
+
+
+def writeback_kind(item: WritebackItem) -> WritebackKind:
+    """Return the proposal's shared draft and receipt kind, rejecting unknown types."""
+    for item_type, kind in _ITEM_KINDS.items():
+        if isinstance(item, item_type):
+            return kind
+    raise InvalidInputError(f"unsupported writeback item type: {type(item).__name__}")

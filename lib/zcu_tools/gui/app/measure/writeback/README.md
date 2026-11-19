@@ -88,7 +88,7 @@ Module Form 的 arb data 選項是建立 draft 時的資產 key，加上同份 d
 即使取消勾選，key 仍在 Form 選項中。每份 draft 提交前，Apply 沿作用中 library 的
 typed child references 檢查已選 module 所用的 arb key。Key 必須已存在於作用中 entry，
 或有同份 draft 的已選資產提案；找不到的 library child 維持既有行為。
-缺資產時，Apply 在 append ledger 前拒絕，列出 module 提案和 key。
+選中的資產 key 語法無效，或 module 引用不存在的資產時，Apply 在 append ledger 前拒絕。缺資產時，錯誤列出 module 提案和 key。
 GUI、MCP 和 recipe 都使用這項檢查。Primary 與 Post 仍各自提交。
 
 ## Apply
