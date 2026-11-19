@@ -1,0 +1,238 @@
+# Illustrative F1-coupler-F2 settings. Truncation convergence is not guaranteed.
+# Circuit energies, couplings and resonator frequencies: Device A, Table 5.1,
+# Chapter 5, FTF Architecture for Quantum Computing. Other values are local settings.
+format: zcu.ftf
+version: 2
+
+chip:
+  f1:
+    ej_ghz: 6.27
+    ec_ghz: 1.41
+    el_ghz: 0.80
+    q_cap: 1000000.0
+    q_ind: 100000000.0
+    xqp: 0.0000002
+    aphi: 0.000002
+  coupler:
+    ejmax_ghz: 16.4 # EJ1 + EJ2 = 3.4 + 13 GHz
+    ec_ghz: 0.32
+    asymmetry: 0.58536585 # abs(EJ1 - EJ2) / (EJ1 + EJ2)
+    ng: 0.0
+    q_cap: 1000000.0
+    aphi: 0.000002
+    # Charge/flux line losses are disabled when their parameters are omitted.
+  f2:
+    ej_ghz: 5.71
+    ec_ghz: 1.30
+    el_ghz: 0.59
+    q_cap: 1000000.0
+    q_ind: 100000000.0
+    xqp: 0.0000002
+    aphi: 0.000002
+  g_f1_coupler_ghz: 0.157
+  g_f2_coupler_ghz: 0.156
+  g_f1_f2_ghz: 0.055
+  temperature_k: 0.05
+
+# Optional acquisition-frozen drift. Uncomment to enable; omitted/null drift is off.
+# Every selected chip loss above must be positive, not null or zero.
+# sigma is the stationary standard deviation of ln(loss); tau_s is in seconds.
+# The first acquisition uses chip values; later acquisitions follow independent log-OU streams.
+# Omitted loops/targets stay constant. q_ind never drifts; coupler has no xqp.
+# drift:
+#   f1:
+#     q_cap: {sigma: 0.1, tau_s: 300.0}
+#     xqp: {sigma: 0.2, tau_s: 600.0}
+#     aphi: {sigma: 0.1, tau_s: 300.0}
+#   coupler:
+#     q_cap: {sigma: 0.1, tau_s: 300.0}
+#     aphi: {sigma: 0.1, tau_s: 300.0}
+#   f2:
+#     q_cap: {sigma: 0.1, tau_s: 300.0}
+#     xqp: {sigma: 0.2, tau_s: 600.0}
+#     aphi: {sigma: 0.1, tau_s: 300.0}
+
+# Author's design guesses, not simulator truth or calibrated measurement values.
+# Native flux-source units; all affine values are independent nominal inputs.
+design:
+  Q1:
+    ej_ghz: 6.1
+    ec_ghz: 1.45
+    el_ghz: 0.78
+    flux_unit: A
+    flux_half: 0.0002
+    flux_period: 0.008
+    flux_bias: 0.0
+  Q2:
+    ej_ghz: 5.6
+    ec_ghz: 1.35
+    el_ghz: 0.60
+    flux_unit: A
+    flux_half: 0.0001
+    flux_period: 0.0084
+    flux_bias: 0.0
+
+dc_bias:
+  offset_phi0: { f1: 0.48, coupler: 0.2, f2: 0.49 }
+  # Loop flux = offset + sum(source current * flux_per_unit).
+  # Approximate main-loop periods: f1 7.8 mA, coupler 8.0 mA, f2 8.2 mA.
+  # Signed DC calibration in Phi0/A, including crosstalk.
+  sources:
+    f1_bias:
+      unit: A
+      limits: [-0.02, 0.02] # -20 to +20 mA
+      initial: 0.0
+      ramp_step: 0.000001 # A, equivalent to 0.001 mA
+      flux_per_unit: { f1: 128.2, coupler: 2, f2: -1 }
+    coupler_bias:
+      unit: A
+      limits: [-0.02, 0.02]
+      initial: 0.0
+      ramp_step: 0.000001
+      flux_per_unit: { f1: 1.5, coupler: 125.0, f2: -1.5 }
+    f2_bias:
+      unit: A
+      limits: [-0.02, 0.02]
+      initial: 0.0
+      ramp_step: 0.000001
+      flux_per_unit: { f1: -1, coupler: 2, f2: 122.0 }
+
+drive_lines:
+  # Illustrative simulation assumptions, not measured line calibrations.
+  f1_charge:
+    gen_ch: 2
+    operator: charge
+    # GHz/gain multiplying full charge n, not normalized n01.
+    charge_drive_ghz_per_gain:
+      f1: { real: 0.1, imag: 0.0 }
+      coupler: { real: 0.01, imag: 0.0 }
+      f2: { real: 0.0, imag: 0.0 }
+  f2_charge:
+    gen_ch: 3
+    operator: charge
+    charge_drive_ghz_per_gain:
+      f1: { real: 0.0, imag: 0.0 }
+      coupler: { real: 0.01, imag: 0.0 }
+      f2: { real: 0.1, imag: 0.0 }
+
+# Optional fast-flux routes, separate from linearized drive_lines operator: flux.
+# Omitted or {} leaves pulsed flux disabled. Each loop is optional/null.
+# Flux gen_ch must differ from other flux loops, drive_lines and pulse/mux readout.
+# Illustrative calibration only; entry fast-flux wiring is not prefilled.
+# flux_lines:
+#   f1:
+#     name: f1_flux
+#     gen_ch: 1 # Unbound v6 generator on the shared v2 board.
+#     flux_phi0_per_gain: 0.02 # Signed Phi0 per program gain.
+#     delay_ns: 0.0
+#     tau_ns: 0.0 # Instantaneous base response.
+#     distortion_terms: [] # Optional {amplitude: signed weight, tau_ns: positive}.
+#   coupler: null
+#   f2: null
+
+readout:
+  drive:
+    gen_ch: 0
+    input_per_gain: 10.0 # sqrt(photons/ns)/gain
+  resonators:
+    r1:
+      frequency_ghz: 7.19
+      charge_coefficients_ghz: { f1: 0.03, coupler: 0.005, f2: 0.0 }
+      kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
+      kappa_internal_mhz: 0.1
+      mismatch_phase_rad: 0.2 # Scattered field relative to direct transmission.
+      thermal_occupation: 0.0 # Use null for Bose(common temperature, bare frequency).
+    r2:
+      frequency_ghz: 7.08
+      charge_coefficients_ghz: { f1: 0.0, coupler: 0.005, f2: 0.03 }
+      kappa_external_mhz: 1.0
+      kappa_internal_mhz: 0.1
+      mismatch_phase_rad: -0.15
+      thermal_occupation: 0.0
+  adc:
+    ro_ch: 0
+    gain: 100.0 # ADC sample units / sqrt(photons/ns)
+    phase_deg: 0.0
+    time_of_flight_ns: 400.0 # Total line delay, including electronic-delay phase.
+    background:
+      ripple_depth: 0.088
+      ripple_period_mhz: 68.0
+      ripple_phase_deg: 0.0
+      slope_db_per_ghz: -4.0
+      pivot_ghz: 7.0
+      extra_ripples:
+        - {depth: 0.066, period_mhz: 44.0, phase_deg: 25.0}
+        - {depth: 0.044, period_mhz: 308.0, phase_deg: -40.0}
+        - {depth: 0.043, period_mhz: 52.6, phase_deg: 113.0}
+      roughness: {amplitude: 0.02, correlation_mhz: 50.0, seed: 82}
+      band_edges:
+        low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
+    offset_adc: [0.0, 0.0] # I, Q
+    # Two-sided white PSD in ADC^2*ns. Sample covariance = PSD / dt_ns.
+    noise_psd_adc2_ns: [[84000.0, 16800.0], [16800.0, 84000.0]]
+  mux:
+    gen_ch: 7
+    input_per_gain: 10.0 # sqrt(photons/ns)/gain
+    adc:
+      - ro_ch: 2
+        gain: 100.0
+        phase_deg: 0.0
+        time_of_flight_ns: 400.0
+        background:
+          ripple_depth: 0.088
+          ripple_period_mhz: 68.0
+          ripple_phase_deg: 0.0
+          slope_db_per_ghz: -4.0
+          pivot_ghz: 7.0
+          extra_ripples:
+            - {depth: 0.066, period_mhz: 44.0, phase_deg: 25.0}
+            - {depth: 0.044, period_mhz: 308.0, phase_deg: -40.0}
+            - {depth: 0.043, period_mhz: 52.6, phase_deg: 113.0}
+          roughness: {amplitude: 0.02, correlation_mhz: 50.0, seed: 82}
+          band_edges:
+            low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
+        offset_adc: [0.0, 0.0]
+        noise_psd_adc2_ns: [[84000.0, 16800.0], [16800.0, 84000.0]]
+      - ro_ch: 3
+        gain: 100.0
+        phase_deg: 0.0
+        time_of_flight_ns: 400.0
+        background:
+          ripple_depth: 0.088
+          ripple_period_mhz: 68.0
+          ripple_phase_deg: 0.0
+          slope_db_per_ghz: -4.0
+          pivot_ghz: 7.0
+          extra_ripples:
+            - {depth: 0.066, period_mhz: 44.0, phase_deg: 25.0}
+            - {depth: 0.044, period_mhz: 308.0, phase_deg: -40.0}
+            - {depth: 0.043, period_mhz: 52.6, phase_deg: 113.0}
+          roughness: {amplitude: 0.02, correlation_mhz: 50.0, seed: 82}
+          band_edges:
+            low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
+        offset_adc: [0.0, 0.0]
+        noise_psd_adc2_ns: [[84000.0, 16800.0], [16800.0, 84000.0]]
+
+numerics:
+  # Increase native/local dimensions and the joint upper bound independently
+  # to check convergence.
+  projection_weight_floor: 1.0e-9
+  truncation:
+    f1:
+      native_cutoff: 24
+      levels: 4
+    coupler:
+      charge_cutoff: 8
+      levels: 4
+    f2:
+      native_cutoff: 24
+      levels: 4
+    # Joint-state upper bound. An acquire pilot may use a smaller energy prefix.
+    retained_levels: 24
+  solver:
+    rtol: 0.00000001
+    atol: 0.0000000001
+    max_step_ns: 0.1
+    bath_segment_ns: 2.0 # nearest 2 ns, at least one tick
+  seed: 123
+  time_scale: 1.0
