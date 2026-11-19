@@ -52,7 +52,7 @@ MCP call log 是 best-effort 除錯紀錄，可以截斷、清除或停用，不
 新格式根目錄統一為 `result/`，與 GUI runtime 一致，不另設 `results/`。`.gitignore` 保留 `result/`，移除 `/results/`。
 使用者於 2026-10-20 裁決：「好，統一result，那gitignore也做處理」。
 
-Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條目名稱、UTC 建立時間、exact Result path、Database 輸出位置與 scoped ledger。`create`／`open` 只檢查 Result，不檢查或建立 `Database/<name>/`。第一次 Save 才由 writer 建立所需的 Database 目錄，已有的同名 Database 照用，不另加混雜偵測。
+Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條目名稱、UTC 建立時間、exact Result path、Database 輸出位置與 scoped ledger。`create`／`open` 只檢查 Result，不檢查或建立 `Database/<name>/`。Save writer 按需建立量測輸出目錄；資產 owner 按需建立 arb 資產目錄。已有的同名 Database 照用，不另加混雜偵測。
 
 同一 Result root 下，entry 歸屬由資料夾名稱決定，不產生或使用 entry UUID。Global／point 的舊 entry_id 即使格式不合法也忽略，讀取不改 bytes，明確寫入時移除。新 ledger 事件與 RunSnapshot 不含 entry_id，舊事件的該欄位不參與讀取或追加。Run ID 與 event ID 不變。Role capture 仍核對 point source 與 owning roots。Clone 使用來源位置當下的內容。缺 records 時 ledger 讀取回空且不建目錄，第一次 append 才建立。
 
@@ -285,7 +285,16 @@ Lab 擁有目前版本、步驟與真實舊文件形狀。`scripts/upgrade_param
 
 ### 失敗、路徑與遷移邊界
 
-2026-10-23 使用者對同一份文件一次 edit 的方案裁定：「同意」。Run accept 先追加一筆 accepted，再依目的地文件分組提交，組內順序保留。提交順序為 parameters 一組、library module／waveform 一組、樣本逐筆。Parameters 與 library 各使用一次 edit，任一項無效整組不寫。Executor 回 `WritebackResult`，含 accepted event_id 與逐項 committed values。組失敗以 `WritebackApplyError.result` 保留已提交組的全部項目，並公開 event_id、applied 與原始 cause，保留前組與事件，停止後組。applied 仍計項目數，失敗組計零。Notebook 直接看到此錯誤；GUI context owner 發布實際成功前綴，GUI service 標記前綴後原樣拋 cause，wire 不改原 producer 分類。
+2026-10-23 使用者對同一份文件一次 edit 的方案裁定：「同意」。Run accept 先追加一筆 accepted，再依目的地分組提交，組內順序保留。
+提交順序為 arb 資產一組、parameters 一組、library module／waveform 一組、樣本逐筆。
+資產先提交，讓同批 library 可以引用新 key。資產 owner 在寫入前檢查整組；樣本不同的同名資產使整組失敗。
+發布不覆寫，相同 samples 視為已存在。Ledger 只記資產路徑和樣本摘要，不存 arrays。
+Parameters 與 library 各使用一次 edit，任一項無效整組不寫。
+
+Executor 回 `WritebackResult`，含 accepted event_id 與逐項 committed values。
+組失敗以 `WritebackApplyError.result` 保留已提交項目，並公開 event_id、applied 與原始 cause。
+資產組發生 I/O 錯誤時也保留已確認的前綴。保留前組與事件，停止後組；applied 計已確認的項目數。
+Notebook 直接收到此錯誤。GUI context owner 發布實際成功前綴，GUI service 標記前綴後原樣拋 cause，wire 不改原 producer 分類。
 
 GUI writeback 接受當下作用中文件組的 `DocumentSetRef`，不自動建 point。Global 的 acquired ledger 與 record row 都可保存 point=null，沿既有 nullable 欄位契約，不新增格式版本。這取代原本 GUI 禁止 point=null 樣本的限制。
 

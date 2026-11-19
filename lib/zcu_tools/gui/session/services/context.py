@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -34,6 +34,7 @@ from zcu_tools.gui.session.events import (
     MlChangedPayload,
 )
 from zcu_tools.gui.session.parameters import DocumentSet
+from zcu_tools.gui.session.services.arb_waveform import ARB_WAVEFORMS_VERSION_KEY
 from zcu_tools.gui.session.services.context_writeback import ContextWritebackTarget
 from zcu_tools.gui.session.services.file_sync import FileSync
 from zcu_tools.gui.session.types import (
@@ -66,6 +67,7 @@ from zcu_tools.resources.entry.schema import (
 )
 from zcu_tools.resources.entry.storage import StorageBinding, capture_storage
 from zcu_tools.resources.entry.writeback import (
+    ArbAssetWriteback,
     LibraryUpdate,
     ModuleWriteback,
     ParameterUpdate,
@@ -76,6 +78,7 @@ from zcu_tools.resources.entry.writeback import (
     apply_writeback,
     commit_library_updates,
     commit_parameter_updates,
+    publish_arb_asset_updates,
 )
 
 if TYPE_CHECKING:
@@ -630,17 +633,19 @@ class ContextService:
 
         Validate opened entry membership and the captured parameter resource
         before append. Resource load errors propagate. The executor appends
-        accepted, then commits one parameter group, one library group and
-        individual records, preserving each group's order. point=None writes
-        global files; a label writes that point's files even when another
-        scope is selected. Parameter/library setters require an opened context,
+        accepted, then commits assets, parameters, library and individual records,
+        preserving each group's order. Assets are shared within the target entry.
+        point=None writes global files; a label writes that point's files even
+        when another scope is selected. Parameter/library setters require an opened context,
         not a point selection. Record validation belongs to its resource owner.
         Each committed document publishes once; detached writes never select it.
         Return the accepted event ID and actual committed values. Item failures
         raise WritebackApplyError with committed indices and original cause.
-        A failed group writes nothing; earlier groups and accepted event remain.
-        Ledger append errors propagate unchanged. Cross-entry targets fail before
-        append. No point creation, retry or cross-file rollback occurs.
+        An asset I/O error may leave a confirmed prefix; a preflight conflict
+        or failed parameter/library group writes nothing in its group.
+        Earlier groups and accepted event remain. Ledger append errors propagate
+        unchanged. Cross-entry targets fail before append.
+        No point creation, retry or cross-file rollback occurs.
         """
         self._owner.assert_owner()
         if not items:
@@ -655,6 +660,27 @@ class ContextService:
             target=ContextWritebackTarget(self, target, entry),
             evidence=evidence,
         )
+
+    def publish_arb_assets(
+        self, target: DocumentSetRef, items: tuple[ArbAssetWriteback, ...]
+    ) -> Iterator[YamlMap]:
+        """Commit distinct asset keys to the target's opened entry on the owner thread.
+
+        Iterate on the owner thread to receive each status and summary in
+        order. Bump the shared asset version once when there is a confirmed
+        prefix, even if later asset I/O fails. A preflight failure yields no
+        receipts and does not bump. Target, validation and I/O errors propagate.
+        """
+        self._owner.assert_owner()
+        entry = self._require_write_target(target)
+        confirmed = False
+        try:
+            for receipt in publish_arb_asset_updates(entry.database_path, items):
+                confirmed = True
+                yield receipt
+        finally:
+            if confirmed:
+                self._state.version.bump(ARB_WAVEFORMS_VERSION_KEY)
 
     def set_parameter(
         self,

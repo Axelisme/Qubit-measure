@@ -77,6 +77,7 @@ from .views import (
     source_path,
 )
 from .writeback import (
+    ArbAssetWriteback,
     BoundDocumentWritebackTarget,
     CommittedWrite,
     ModuleWriteback,

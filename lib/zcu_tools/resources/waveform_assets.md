@@ -51,10 +51,16 @@ data = repository.load("my_pulse")
 | `list_entries()` | 列出 data key 加檔案 `mtime` / `file_size` |
 | `inspect(data_key)` | 載入單筆 asset 並即時計算 duration、sample count、peak Abs、recipe summary |
 | `load(data_key)` / `get(name)` | `load` 取得 `ArbWaveformData`；`get` 回傳 `(idata, qdata, time)`，Q channel 全為 0 時 `qdata` 為 `None` |
+| `publish(data_key, samples)` / `publish_batch(assets)` | 以 `WaveformSamples` 發布 raw NPZ，不存 recipe。單筆回 `created` 或 `existing`；批次依 mapping 順序產出狀態 |
 | `save(name, idata, time, qdata=None)` | Notebook 用的 raw 寫入；一律覆寫同名 asset，不寫 recipe（`qdata` 省略時存成全 0）。需要 collision 檢查時改用 `import_data(..., overwrite=False)` |
 | `create_from_formula(data_key, recipe, *, overwrite=False)` / `update_formula(data_key, recipe)` | 渲染 formula recipe，並把 arrays 與 recipe 寫進同一個 `.npz`。`create_from_formula` 在 key 已存在且 `overwrite=False` 時拋 `data_key_exists`；`update_formula` 只更新已存在的 asset，不存在時拋 not found。建立新 recipe 或依 recipe 重新渲染，只能經這兩個方法；`import_file` 例外，會原樣保存來源 `.npz` 已有的 recipe |
 | `import_file(data_key, source_path, *, overwrite=False)` / `import_data(data_key, *, idata, qdata, time, overwrite=False)` | `import_file` 只接受 `.npz`，原檔若含 recipe 會一併保留；`import_data` 接受記憶體中的三條 1D array，不寫 recipe。兩者在 key 已存在且 `overwrite=False` 時拋 `data_key_exists` |
 | `delete(...)` / `rename(...)` | 只操作 asset 檔案，不掃描 `ModuleLibrary` references |
+
+`publish` 不覆寫。Time、I、Q 逐值相同時回 `existing`，保留原 bytes 與 recipe；缺席的 Q 與全零 Q 等價。
+同 key 樣本不同時拋 `ArbWaveformError`。迭代 `publish_batch` 先檢查整組；發現衝突時不寫任何檔案。
+新檔先寫同目錄的暫存檔，再原子建立目的檔名。若檔名在檢查後被占用，發布失敗且不覆寫。
+I/O 失敗時保留已發布的前綴，不重試或 rollback，見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md#失敗路徑與遷移邊界)。
 
 Formula 寫入方法 `create_from_formula`／`update_formula` 完成寫入後返回 `None`。
 需要 metadata 時，caller 另呼叫 `inspect`；讀取失敗時已完成的寫入仍保留。

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.core.waveform_format import validate_samples
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformDatabase,
@@ -53,6 +55,28 @@ def test_root_bound_repositories_isolate_interleaved_writes_and_captures(
     first.delete("pulse")
     assert first.list() == []
     np.testing.assert_array_equal(second.load("renamed").idata, [0.0, 0.8])
+
+
+def test_publish_creates_raw_samples_but_never_replaces_existing_asset(
+    tmp_path: Path,
+) -> None:
+    repository = ArbWaveformDatabase(tmp_path)
+    samples = validate_samples(time=[0.0, 0.75], idata=[0.0, 0.4], qdata=None)
+    changed = validate_samples(time=[0.0, 0.75], idata=[0.0, 0.4], qdata=[0.0, 0.1])
+
+    assert repository.publish("pulse", samples) == "created"
+    path = repository.path_for("pulse")
+    before = path.read_bytes()
+    os.utime(path, (1, 1))
+    mtime = path.stat().st_mtime_ns
+    assert repository.load_recipe("pulse") is None
+    assert repository.bound_info().samples("pulse").qdata is None
+
+    assert repository.publish("pulse", samples) == "existing"
+    with pytest.raises(ArbWaveformError, match="different samples"):
+        repository.publish("pulse", changed)
+    assert path.read_bytes() == before
+    assert path.stat().st_mtime_ns == mtime
 
 
 def test_import_data_uses_single_file_layout_and_runtime_get(tmp_path):

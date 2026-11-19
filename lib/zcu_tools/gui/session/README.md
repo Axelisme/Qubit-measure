@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-11-19，Measure 背景收尾說明
+**Last updated:** 2026-11-20，arb 資產 writeback 版本
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -19,7 +19,12 @@ Availability 不作為 use_point、Load、Save 或其他讀取的額外前置條
 
 三個 target setter 都經 resources owner 驗證。`set_parameter` 驗 value schema 與 metadata 的 YAML 保存表示；metadata 是 caller 的 opaque mapping，setter 不解讀 key，也不查來源。`set_module`／`set_waveform` 驗 library spec，不建立模組來源，也不查 ledger。`DocumentSetRef(entry_name, point=None)` 指向 global 文件，point 有 label 時指向該 point。這個位置值不含 kind、handle 或 session generation，兩種 scope 使用同一套單檔交易。目前 target 成功寫入後先安裝固定投影與版本，再發一個 MD／ML fact，保留焦點與 binding ID。同 entry 的非作用中目標可獨立寫入，不改目前投影；舊 capture 保持隔離。
 
-`ContextService.apply_writeback` 是底層 accept 入口。它驗證 caller 明示的 entry／point target，再綁定資源交共用 executor。Executor 先 append accepted event，再依序呼叫 `set_parameters` 提交參數組、`set_modules` 提交混合 module／waveform library 組，最後逐筆追加 records。每組保留供應順序。參數與 library 各用一次 edit，任一項無效整組不寫。`set_parameter`、`set_module`、`set_waveform` 與 `apply_library_change` 共用這些 target 規則。Global 的參數與 library 不要求選 point。Detached target 不改目前 selection。成功前綴與 accepted event 保留，首錯停止，不自動建點、回滾或重試。每個已提交文件只發布一次。Receipt 的 committed index 保留供應位置，不用成功項目數切供應序前綴。Record 的欄位驗證與 JSONL append 仍由 resource owner 負責。Application 的 proposal、目的地與 receipt 契約見 [writeback owner](../app/measure/writeback/README.md)。
+`ContextService.apply_writeback` 驗證 caller 明示的 entry／point target，再綁定資源交 [共用 executor](../../resources/entry/README.md#records-ledger)。
+Executor 追加 accepted 後依序提交資產、參數、library 與逐筆 records。成功前綴與 accepted event 保留，首錯停止，不自動建點、回滾或重試。
+每個已提交文件只發布一次。資產組共用 entry 的 `arb_waveforms` 版本，完成整組或 I/O 失敗但留下已確認前綴時加一。
+Global 寫入不要求選 point；detached target 不改目前 selection。
+Receipt 的 committed index 保留供應位置，不用成功項目數切供應序前綴。
+Application 的 proposal、目的地與 receipt 契約見 [writeback owner](../app/measure/writeback/README.md)。
 
 模板綁定由呼叫端在 `Template.bindings` 明填。
 Inspect 的 New 使用所選 Destination 的固定 capture，以其中的同名 alias 解析目標填入 bindings。缺少、無法解析或綁定清單的 placeholder 顯示單一名稱綁定錯誤並停用 Create，切換範本重新載入。
@@ -100,7 +105,7 @@ session/
 │   ├── predictor.py — Independent simulator queries and entry predictor file listing/loading through resources.predictor_file.
 │   ├── context.py      — ContextService：owner-thread entry/point binding、固定 parameter capture、全域 alias、source facts 與目前 entry 的 ledger capability。current_point_label 只讀已安裝的 selection，未選時回 None，不做 I/O。reload_file 驗證單檔候選，安裝後才發布 FILE_CHANGED；作用中文件另發布內容 fact。非法候選只發布 error，未獲 admission 的 watcher 只發布 pending，兩者都不改資源或既有 capture
 │   ├── file_sync.py — FileSync：集中已安裝版本與磁碟 hash 的比較、草稿 revision 檢查及觀察狀態。reload 比對 installed base；check_file_revision 比對磁碟。資源格式驗證與安裝仍由 ContextService 決定，切 point 清除舊觀察
-│   ├── context_writeback.py — ContextWritebackTarget：把 ContextService commands 綁到既有有序 writeback 執行介面，不增加交易或重試
+│   ├── context_writeback.py — ContextWritebackTarget：把固定 entry／point 綁到有序 writeback，資產組共用 entry 的 arb_waveforms 版本，不增加交易或重試
 │   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳；connect/disconnect終局用`DeviceOperationFinishedPayload`，setup重用`DeviceSetupFinishedPayload`，無Qt）；`get_device_unit` 讀有效 YOKO／Fake cached Info 的 `value_unit`，分別為 A／V 與 native；缺 Info 的 UI／snapshot 標 none，不按 type 推測單位；strict binding 缺 Info 拋指名 device 的 `DeviceRegistrationError`，這些查詢不讀硬體、不改 connected／offline 狀態；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/connect/disconnect skip，setup/ramp 允許 current-value refresh；單次讀失敗吞掉，不寫 State 於 worker）
 │   ├── project_settings.py — ProjectSettingsService：以明確 result/Database roots 呼叫 ResultEntry.open/create，再交 ContextService.install_entry；記住的 entry/connection/device preferences 不證明來源已開啟。App Controller 直接向此 service 查詢記住的左面板寬度
 │   ├── progress.py     — ProgressService（per-operation pbar 容器 + bound factory，吃 ProgressTransport；**共用**，非 app-held；owner listener 例外逐一 log 並隔離，壞 listener 會 detach，不阻斷其他 listener 或 terminal cleanup）

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -32,6 +34,9 @@ from ._waveform_formula import (
 from ._waveform_npz import load_npz, write_npz
 
 _DATA_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+type ArbPublishStatus = Literal["created", "existing"]
+"""A newly installed NPZ or an unchanged asset with identical samples."""
 
 
 class ArbWaveformDatabase:
@@ -152,6 +157,57 @@ class ArbWaveformDatabase:
         """
         qdata_save = np.zeros_like(idata) if qdata is None else qdata
         self.import_data(name, idata=idata, qdata=qdata_save, time=time, overwrite=True)
+
+    def publish(self, data_key: str, samples: WaveformSamples) -> ArbPublishStatus:
+        """Create a raw asset for data_key, or keep one with identical time/I/Q.
+
+        An existing asset's recipe and bytes are left untouched. Invalid keys,
+        samples, unreadable assets or different samples raise ArbWaveformError.
+        I/O errors propagate, including a filename taken before atomic creation.
+        """
+        return next(self.publish_batch({data_key: samples}))
+
+    def publish_batch(
+        self, assets: Mapping[str, WaveformSamples]
+    ) -> Iterator[ArbPublishStatus]:
+        """Publish key/sample pairs in mapping order with no replacement.
+
+        Iterate to validate every key and sample set and check for conflicts
+        before writing any file. A conflict or invalid asset raises
+        ArbWaveformError. Then yield each confirmed status in order. An I/O
+        error stops iteration and leaves any files already installed intact.
+        """
+        planned = tuple(
+            self._prepare_publish(key, samples) for key, samples in assets.items()
+        )
+        for path, data in planned:
+            if data is None:
+                yield "existing"
+            else:
+                write_npz(path, data, replace=False)
+                yield "created"
+
+    def _prepare_publish(
+        self, data_key: str, samples: WaveformSamples
+    ) -> tuple[Path, ArbWaveformData | None]:
+        path = self.path_for(data_key)
+        data = validate_payload(
+            idata=samples.idata, qdata=samples.qdata, time=samples.time, recipe=None
+        )
+        if path.exists() or path.is_symlink():
+            stored = load_npz(path)
+            if (
+                np.array_equal(stored.time, data.time)
+                and np.array_equal(stored.idata, data.idata)
+                and np.array_equal(stored.qdata, data.qdata)
+            ):
+                return path, None
+            raise ArbWaveformError(
+                f"Arbitrary waveform {data_key!r} already exists with different samples",
+                reason="data_key_exists",
+                data={"data_key": data_key},
+            )
+        return path, data
 
     def import_data(
         self,
@@ -335,6 +391,7 @@ def _validate_data_key(data_key: object) -> None:
 __all__ = [
     "ARB_WAVEFORM_RENDER_SAMPLES_PER_US",
     "MAX_ARB_WAVEFORM_SAMPLES",
+    "ArbPublishStatus",
     "ArbWaveformData",
     "ArbWaveformDatabase",
     "ArbWaveformError",

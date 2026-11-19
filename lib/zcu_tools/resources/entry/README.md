@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-11-17，global／point 文件選擇
+**Last updated:** 2026-11-20，arb 資產 writeback
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
@@ -18,7 +18,7 @@ Runtime 不讀舊名。需要內容升級時先改名，再跑 components，見[
 
 `parameters(point=...)` 只要求 `parameters.yaml`。缺少它時回報公開 `MissingPointError`，它保留 `FileNotFoundError` 繼承關係。缺少 `library.yaml` 不阻擋選取，point library 為空且 revision=None，讀取不建檔。Schema、permission、其他 I/O 與額外引用檔缺失不歸類為 point 缺失。
 
-兩個入口都不檢查或建立 Database，只有 Result 也能開啟。第一次 Save 才建立所需輸出目錄；既有同名 Database 照用，混雜不另處理，見 [ADR-0063](../../../../docs/adr/0063-persistence-ownership.md#run-輸出位置與-writer-權責)。
+兩個入口都不檢查或建立 Database，只有 Result 也能開啟。Save 按需建立量測輸出目錄；發布資產按需建立資產目錄。既有同名 Database 照用，混雜不另處理，見 [ADR-0063](../../../../docs/adr/0063-persistence-ownership.md#run-輸出位置與-writer-權責)。
 
 `predictors_path` 是 Result 條目下 `predictors/` 的唯讀路徑。讀取 property 不建立目錄，也不列檔或驗證內容。`resources.predictor_file` 擁有其中 predictor JSON 的格式與讀寫。
 
@@ -139,9 +139,36 @@ Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交
 只用該項提案欄位建立元件，其餘使用 registered model defaults。既有元件只更新指定欄位。
 Kind 與欄位由 caller 註冊，框架不指定實驗 kind。任一筆驗證失敗，建立、值與 metadata 整組不寫，見 ADR-0008。
 
-`writeback` 提供共用 parameter／module／waveform／record 項目與 `apply_writeback`。RecordWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、目的地 point、accepted 時間與事件 source。Global target 的 point 為 None，ledger 與 record row 都可保存 null。
+`writeback` 提供共用 arb asset／parameter／module／waveform／record 項目與 `apply_writeback`。RecordWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、目的地 point、accepted 時間與事件 source。Global target 的 point 為 None，ledger 與 record row 都可保存 null。
 
-Writeback 入口遞迴將 dict／list 內的 numpy floating／integer scalar 轉為 Python float／int，不修改 producer 的資料。Float 沿用 Python rounding，integer 保留精確值；非有限結果與其他非 JSON 值仍在追加 accepted 前拒絕。Ledger 與 record sink 使用同一份正規化 JSON；dev 欄位選填，caller 單位不轉換。Caller 傳入固定文件的 write target、已解析的具體路徑，以及具名 evidence，包含 run_id、origin 與可選 source。`BoundDocumentWritebackTarget(view, storage)` 綁一份 global／point 參數文件與相鄰 library。建構時比對完整來源與 Result／Database 路徑，不同 entry、scope 或 roots 皆報 ValueError。Global target 的 point 為 None，參數與 library 編輯不改既有 point。ParameterWriteback 的 metadata 為 None 時保留該 path 既有 metadata，mapping 則在同筆參數 commit 整份替換；executor 不加入事件、來源或時間。Module／waveform 項目只交 Spec 給 library owner，不保存 per-leaf stderr 或來源。流程追加一筆 accepted 後依序提交綁定參數文件一組、library module／waveform 一組與逐筆 records，組內保留供應順序。Parameters 與 library 各用一次 edit；任一項無效整組不寫，首錯停止。成功回 `WritebackResult(event_id, committed)`，每筆 committed value 由實際 setter 在逐項 draft 驗證後捕捉，只有整組 commit 成功才回傳，record 使用 append 回傳的完整 row。Committed 依實際提交順序，accepted payload writes 依供應順序；CommittedWrite.index 保留供應 tuple 的位置，重複 path 也可逐項關聯。項目失敗拋 `WritebackApplyError(result)`，同份 result 只保留已提交組的全部項目，event_id／applied 與原始 cause 仍可查，前組與事件保留。applied 仍計項目數，失敗組計零。GUI 不在整批後重讀目的地，因此父／子路徑後項覆寫不改首筆 receipt。Ledger append 失敗原樣傳播，不寫值。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨文件交易或回復框架。Notebook 與 GUI 共用 executor。GUI context owner 綁定公開批次 setters，每個成功文件發布一次；GUI service 標記該前綴 applied 後原樣拋 cause，保持既有 wire 錯誤分類。
+Writeback 入口遞迴將 record dict／list 內的 numpy floating／integer scalar 轉為 Python float／int，不修改 producer 的資料。
+Float 沿用 Python rounding，integer 保留精確值；非有限結果與其他非 JSON 值在追加 accepted 前拒絕。
+Ledger 與 record sink 使用同一份正規化 JSON。Dev 欄位選填，caller 單位不轉換。
+
+Caller 傳入固定文件的 write target、已解析的具體路徑，以及具名 evidence，包含 run_id、origin 與可選 source。
+`BoundDocumentWritebackTarget(view, storage)` 綁 global／point 參數、相鄰 library 和 entry 資產目錄。
+建構時比對完整來源與 Result／Database 路徑，不同 entry、scope 或 roots 皆報 ValueError。
+Global target 的 point 為 None，參數與 library 編輯不改既有 point。
+`ParameterWriteback` 的 metadata 為 None 時保留原值；mapping 在同筆參數 commit 整份替換。
+Executor 不加入事件、來源或時間。Module／waveform 項目只交 Spec 給 library owner，不保存 per-leaf stderr 或來源。
+
+`ArbAssetWriteback(key, samples)` 發布 `WaveformSamples` 到 entry 的 `<database_path>/arb_waveforms`。
+同一批的重複 key 在追加 accepted 前拒絕。Ledger 只記 `arb_waveforms/<key>` 和
+`{sample_count, duration_us}`；committed value 另含 `status`（`created` 或 `existing`）。
+[資產 owner](../waveform_assets.md) 在寫任何檔案前檢查整組。樣本相同保留原檔；同 key 樣本不同拒絕整組。
+
+Executor 先追加一筆 accepted，再依序提交資產、參數、library module／waveform 與逐筆 records（ADR-0063）。
+各組保留供應順序。Parameters 與 library 各用一次 edit，任一項無效整組不寫。
+Setter 捕捉各項驗證後的值，整組成功才回傳；後項覆寫不改前項的 receipt。
+Record 直接使用 append 回傳的完整 row。Library 到首次執行 library 項目才開啟，key、family 與 Spec 由 library owner 驗證。
+
+`WritebackResult(event_id, committed)` 依實際提交順序排列；accepted payload writes 依供應順序排列。
+`CommittedWrite.index` 保留供應 tuple 的位置，即使 path 重複也可逐項關聯。
+Ledger append 失敗原樣傳播，不寫資產、文件或 records。組失敗拋 `WritebackApplyError(result)`，停止後組並保留事件與已提交項目。
+資產組內的 I/O 錯誤也保留已確認的前綴；`applied` 計已確認的項目數，不計組。沒有跨文件交易、retry 或 rollback。
+
+Notebook 與 GUI 共用 executor。GUI context owner 發布每份成功文件，並在資產組完成或 I/O 中斷但留下已確認前綴時更新一次共用資產版本。
+GUI 不事後重讀目的地。GUI service 標記已確認前綴後原樣拋 cause，保持既有 wire 錯誤分類。
 
 ## 輸出位置
 

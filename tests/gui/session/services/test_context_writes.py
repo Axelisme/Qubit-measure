@@ -11,6 +11,7 @@ from typing import Literal
 import pytest
 from pydantic import ValidationError
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.core.waveform_format import validate_samples
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -818,6 +819,53 @@ def test_grouped_writeback_publishes_one_fact_per_committed_document(
     assert session.state.version.get("context") == before + 2
     assert [item.value for item in result.committed[:2]] == [{"gain": 0.1}, 0.2]
     assert capture_focus(session.control).value("general.ext.fit.gain") == 0.2
+
+
+@pytest.mark.parametrize("late_collision", [False, True], ids=["complete", "prefix"])
+def test_arb_writeback_publishes_shared_version_once_for_confirmed_assets(
+    session: _Session, monkeypatch: pytest.MonkeyPatch, late_collision: bool
+) -> None:
+    target = _select(session, "a")
+    version = session.state.version
+    before = version.get("arb_waveforms")
+    root = session.entry.database_path / "arb_waveforms"
+    if late_collision:
+        link = Path.hardlink_to
+
+        def publish_with_race(destination: Path, source: Path) -> None:
+            if destination.name == "second.npz":
+                destination.write_bytes(b"external writer")
+            link(destination, source)
+
+        # Introduce an external file after preflight; there is no public I/O hook.
+        monkeypatch.setattr(Path, "hardlink_to", publish_with_race)
+
+    observed: list[int] = []
+    session.bus.subscribe(
+        MdChangedPayload, lambda _: observed.append(version.get("arb_waveforms"))
+    )
+    samples = validate_samples(time=[0.0, 0.75], idata=[0.0, 0.4], qdata=None)
+    items = (
+        writeback.ArbAssetWriteback("first", samples),
+        writeback.ParameterWriteback("general.description", "updated"),
+        writeback.ArbAssetWriteback("second", samples),
+    )
+    evidence = writeback.WritebackEvidence(origin="gui")
+    if late_collision:
+        with pytest.raises(writeback.WritebackApplyError) as caught:
+            session.control.apply_writeback(target, items, evidence=evidence)
+        assert isinstance(caught.value.__cause__, FileExistsError)
+        assert [item.path for item in caught.value.result.committed] == [
+            "arb_waveforms/first"
+        ]
+        assert (root / "second.npz").read_bytes() == b"external writer"
+        assert observed == []
+    else:
+        session.control.apply_writeback(target, items, evidence=evidence)
+        assert (root / "second.npz").is_file()
+        assert observed == [before + 1]
+    assert (root / "first.npz").is_file()
+    assert version.get("arb_waveforms") == before + 1
 
 
 def test_shared_writeback_entry_uses_detached_saved_target(
