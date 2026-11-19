@@ -109,13 +109,18 @@ class RBAnalysis:
     """Fixed-size d=4 paired RB estimate and reference/interleaved fit quality.
 
     estimate is None with reason when no fit is identifiable. fit_quality holds
-    residual diagnostics for each arm, or None without a fit. Survival arrays,
-    round completeness and model curves are used only inside analyze.
+    residual diagnostics for each arm, or None without a fit. tail_warning
+    describes high paired reference joint00 survival at the deepest depth, or
+    is None when the measured survival does not trigger the warning. Survival
+    arrays, round completeness and model curves stay inside analyze.
     """
+
+    TAIL_SURVIVAL_THRESHOLD: ClassVar[float] = 0.2
 
     estimate: RBEstimate | None
     fit_quality: tuple[FitQuality, FitQuality] | None
     reason: str | None
+    tail_warning: str | None = None
 
 
 _RBResetCfg: TypeAlias = Annotated[
@@ -411,6 +416,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         estimate = None
         quality = None
         reason = None
+        tail_warning = None
         if cfg is None:
             reason = "RB analysis requires saved cfg; current Form is not a substitute"
         else:
@@ -426,6 +432,13 @@ class RBExp(Experiment[RBResult, RBCfg]):
             paired_acquired = np.asarray(acquired.all(axis=(0, 2)), dtype=np.bool_)
             survival = np.where(paired_acquired[None, :, None, :], joint00, np.nan)
             means = paired_means(survival)
+            reference_at_max_depth = means[0, -1]
+            if reference_at_max_depth > RBAnalysis.TAIL_SURVIVAL_THRESHOLD:
+                tail_warning = (
+                    f"Reference joint00 survival at depth {data.depths[-1]} is "
+                    f"{reference_at_max_depth:.6g}. The decay tail is unresolved; "
+                    "fitted p may be biased high. Use deeper depths."
+                )
             # 2. Fit paired decay and bootstrap whole seeds before the d=4 error conversion.
             try:
                 fit = analyze_irb(
@@ -464,4 +477,4 @@ class RBExp(Experiment[RBResult, RBCfg]):
             ax.set_title("d=4 paired RB; classified ensemble, statistical seed CI only")
         fig.tight_layout()
         # 4. Keep the d=4 estimate and statistical seed uncertainty, or a failure without a calibration proposal.
-        return RBAnalysis(estimate, quality, reason)
+        return RBAnalysis(estimate, quality, reason, tail_warning=tail_warning)
