@@ -40,6 +40,8 @@ Environment 顯式組合 population 轉換與 ADC；readout 的樣本加總仍�
 Builder 的 `families` 是整次 acquire 的候選白名單，不是逐段指定算法。每段仍由 dispatch 選路並驗證。固定候選可以略過成本捷徑，不能略過輸入前置條件或數值 guard。無可用候選時回報 domain 與受影響的點、段。
 這兩項控制不是物理 YAML、`AcquireRequest`、實驗 cfg 或 program binding 的欄位。不提供逐段 family 對照、callback、偏好順序或公開 kernel registry。詳細生命週期與失敗契約見 [evolution README](../../lib/zcu_tools/simulate/evolution/README.md#accuracy-failures-and-lifecycle)。
 
+白名單或 pin 不略過結構檢查。`multitone_gate` 沒有建構後的精度檢查，這是它本身的規則，不是 pin 略過 guard。
+
 ### `Engine` 的 GPU backend
 
 2026-11-18，使用者對讓 `dop853` 提供 OpenCL 執行後端的方案答「A」。平台範圍與無可用 GPU 的行為遵循[〈跨平台，不綁作業系統〉](#跨平台不綁作業系統)與[〈GPU 是可選功能〉](#gpu-是可選功能)。
@@ -167,6 +169,10 @@ Guard 在整個參數空間不放行最終誤差超過 `2e-3` 的結果。
 
 2026-11-14，使用者問「模拟器不应该是覆盖所有可能范围吗？」，並說：「我预期就是首先先确保能全覆盖，然后再来是对于瓶颈场景做优化。」對過渡期的邊界選項答「A」。
 這條原則出自 `multitone_rwa` 適用範圍的討論，原始討論未入庫。
+
+例外：`multitone_gate` 由比價選中後就建構、就使用，不在建構後另做精度檢查，也不因精度退回 `dop853`；數值失敗照常直接回報。其他 family 的 guard、sampled `multitone_rwa` 的抽查與動態維度的 pilot 驗算不適用這條例外。
+
+2026-11-19，使用者說：「我应该说过，不要因为听度而回退。比价的时候决定好就不要再改了，就算结果超标也是能接受。我不想白付时间去尝试错误的路径」（「听度」即精度），並把範圍限定在 `multitone_gate`。
 
 ### 固定預算，找適合的場景
 
