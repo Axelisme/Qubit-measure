@@ -376,10 +376,12 @@ Summed 先 build，再 `shot_sums(prog, [IQ("terminal")])`，將 count／sum I�
 Decimated 不用 sweep，caller 按 rounded readout window 配 trace buffer，shape 匹配 backend repetitions／samples，可附 on_update。
 Readout 設定不變可重用 module，各 program 仍各自持有宣告。
 
-`run_acquire_shots` 要已進 context 的 Schedule，不需預建 buffer，只取一輪並回 raw，不轉換或更新 live。
+`run_acquire_shots` 要已進 context 的 Schedule，不需預建 buffer，只取一輪，不轉換或更新 live。
+它回傳 `ShotResult`。從 `.shots[adc_channel]` 讀取 `(points, reps, reads, 2)` 的 int64 IQ；讀取軸不含遮罩來源消耗的讀取。
+`.mask` 是 `(points, reps)` 的 bool 陣列。取數不刪除或歸零被拒的 shot，由實驗決定如何用遮罩。
 Rounds 省略或為整數 1，其他值 raise ValueError；多輪由 host 重複呼叫。
 接受 RunOptions 的 retry、progress、on_stop，converter／stop_condition 非 None 時 raise ValueError。
-成功後 get_raw() 為 None 時 raise RuntimeError；外部取消回 None，且不讀 raw buffer。
+成功取數後沒有 raw buffer 時 raise RuntimeError；外部取消回 None，且不讀 raw buffer。
 Acquire-only cancel 不改父 outcome，下次 acquire 可繼續；只有父 stop token 已設才記 stopped。
 Producer 失敗用同 retry 預算，raw-shot 無 slot 還原；raw-buffer 讀取失敗直接傳出。
 SNR early stop 用三個 slot 入口的 `RunOptions(stop_condition=snr_checker(...))`。

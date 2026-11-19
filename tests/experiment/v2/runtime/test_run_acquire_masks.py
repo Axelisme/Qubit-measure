@@ -166,6 +166,69 @@ def test_run_acquire_intersects_sources_in_order_and_omits_mask_only_adc(
     assert calls == [(1,), (0,)]
 
 
+def test_run_acquire_shots_returns_visible_iq_and_the_unapplied_round_mask(
+    environment: SimulationEnvironment,
+) -> None:
+    builder = TimelineBuilder(environment.soccfg, reps=3)
+    builder.add_loop("point", 2)
+    emit_readout(builder, "first", "filter0", "second")
+    emit_readout(builder, "filter1", channel=1)
+    first_adc = np.array(
+        [
+            [
+                [[11, 1], [1, 0], [12, 2]],
+                [[21, 3], [-1, 0], [22, 4]],
+                [[31, 5], [1, 0], [32, 6]],
+            ],
+            [
+                [[41, 7], [-1, 0], [42, 8]],
+                [[51, 9], [1, 0], [52, 10]],
+                [[61, 11], [1, 0], [62, 12]],
+            ],
+        ],
+        dtype=np.int64,
+    )
+    second_adc = np.array(
+        [[[[1, 0]], [[1, 0]], [[-1, 0]]], [[[1, 0]], [[1, 0]], [[1, 0]]]],
+        dtype=np.int64,
+    )
+    builder.register_shot_mask_source({0: [1]}, lambda iq: iq[0][..., 0, 0] > 0)
+    builder.register_shot_mask_source({1: [0]}, lambda iq: iq[1][..., 0, 0] > 0)
+    program = builder.build()
+    deliver_rounds(environment, {0: first_adc, 1: second_adc})
+
+    with Schedule(scope=Scope("run")) as schedule:
+        result = schedule.run_acquire_shots(program, environment.soc)
+        assert result is not None
+        assert set(result.shots) == {0}
+        visible = result.shots[0]
+        assert visible.shape == (2, 3, 2, 2)
+        assert visible.dtype == np.int64
+        np.testing.assert_array_equal(visible, first_adc[:, :, [0, 2], :])
+        assert result.mask.dtype == np.bool_
+        np.testing.assert_array_equal(
+            result.mask, [[True, False, False], [False, True, True]]
+        )
+
+
+def test_run_acquire_shots_returns_an_all_true_mask_without_sources(
+    environment: SimulationEnvironment,
+) -> None:
+    builder = TimelineBuilder(environment.soccfg, reps=2)
+    builder.add_loop("point", 1)
+    emit_readout(builder, "signal", channel=1)
+    program = builder.build()
+    raw = np.array([[[[-4, 5]], [[6, -7]]]], dtype=np.int64)
+    deliver_rounds(environment, {1: raw})
+
+    with Schedule(scope=Scope("run")) as schedule:
+        result = schedule.run_acquire_shots(program, environment.soc)
+        assert result is not None
+        assert set(result.shots) == {1}
+        np.testing.assert_array_equal(result.shots[1], raw)
+        np.testing.assert_array_equal(result.mask, np.array([[True, True]]))
+
+
 @pytest.mark.parametrize(
     ("mode", "reason"),
     [("decimated", "decimated"), ("threshold", "threshold")],
@@ -263,17 +326,6 @@ def test_run_acquire_summed_counts_only_kept_shots_from_visible_reads(
         np.testing.assert_array_equal(
             result, [[2.0, 5.0, 0.0, 13.0, -1.0, 2.0], [0.0] * 6]
         )
-
-
-def test_run_acquire_shots_rejects_mask_sources(
-    environment: SimulationEnvironment,
-) -> None:
-    builder = TimelineBuilder(environment.soccfg, reps=2)
-    emit_readout(builder, "filter", "signal")
-    builder.register_shot_mask_source({0: [0]}, lambda iq: iq[0][..., 0, 0] >= 0)
-    program = builder.build()
-    with (
-        Schedule(SignalBuffer((), dtype=np.float64), scope=Scope("run")) as schedule,
-        pytest.raises(ValueError, match=r"run_acquire_shots.*shot mask source"),
-    ):
-        schedule.run_acquire_shots(program, environment.soc)
+    shots = program.get_shot_result()
+    assert shots is not None
+    np.testing.assert_array_equal(shots.mask, [[True, False, True], [False] * 3])

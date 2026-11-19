@@ -105,7 +105,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
                 program, soc, options=RunOptions(progress=True)
             )
             if shots is not None:
-                signals_buffer.set(raw_shots_to_signal(program))
+                signals_buffer.set(raw_shots_to_signal(shots, program)[0])
         signals = signals_buffer.array
 
         shots = np.arange(cfg.shots, dtype=np.int64)
