@@ -44,7 +44,6 @@ from zcu_tools.utils.process import rotate2real
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
-    READS_PER_CYCLE,
     checks_text,
     cycle_sums_variables,
     first_read_iq,
@@ -223,7 +222,6 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
                 builder.delay_auto()
 
             prog = builder.build()
-            prog.set_reads_per_shot(READS_PER_CYCLE)
             sched.run_acquire_summed(
                 prog,
                 context.soc,

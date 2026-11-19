@@ -23,11 +23,10 @@ def chain_sweep_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     """Resolve a compiled pulse readout label and sum chain statistics over reps.
 
     read is an emit tag, or the module name of an untagged PulseReadout. Its ADC
-    supplies all reads of a shot in time order. The caller must declare the chain
-    length with prog.set_reads_per_shot(n) after build and before this call.
-    The selected ADC must have exactly one trigger inside that single fixed
-    Repeat, with n >= 16, and no other triggers. Missing/ambiguous labels,
-    unsupported readout/control structure, fewer than 16 reads, and declared or
+    supplies all reads of a shot in time order. The compiler supplies the
+    per-shot ADC count. The selected ADC must have exactly one trigger inside
+    a single fixed Repeat, with n >= 16, and no other triggers. Missing/ambiguous
+    labels, unsupported readout/control structure, fewer than 16 reads, and compiled or
     incoming read counts that differ from the Repeat raise ValueError with
     expected and actual values. Other ADC inputs are ignored.
 

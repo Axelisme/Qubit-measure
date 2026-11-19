@@ -149,7 +149,6 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
                     builder.emit(readout)
                     builder.delay_auto()
                 prog = builder.build()
-                prog.set_reads_per_shot(READS_PER_SHOT)
                 step.run_acquire_summed(
                     prog,
                     context.soc,

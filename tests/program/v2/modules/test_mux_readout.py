@@ -300,8 +300,6 @@ def raw_buffer_program(preparations=4):
             self.delay_by_timeline()
 
     prog = Program(mux_soccfg(), reps=3)
-    # QICK counts a trigger macro once even when Repeat executes it twice.
-    prog.set_reads_per_shot(2)
     # Each loop/read has a distinct sentinel. The unrelated channel deliberately
     # has an irrelevant shape; it must not constrain the selected tones.
     sentinels = np.arange(3 * preparations * 2 * 2 * 2, dtype=np.int64).reshape(

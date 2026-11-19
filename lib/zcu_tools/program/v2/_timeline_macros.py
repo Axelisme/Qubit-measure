@@ -822,6 +822,7 @@ class RepeatLoweringExit(Macro):
         self.iterations = iterations
         self.minimum = minimum
         self.maximum = maximum
+        self.axis = axis
         self.accumulator = LoopTimelineExit(
             entry.accumulator, iterations, minimum, maximum
         )
@@ -836,6 +837,7 @@ class RepeatLoweringExit(Macro):
         )
 
     def preprocess(self, prog) -> None:
+        self._count_reads()
         if self.entry.constant:
             self.reference.preprocess(prog)
         else:
@@ -845,6 +847,19 @@ class RepeatLoweringExit(Macro):
         prog._time_bounds.exit_selection_loop(
             self.entry.selections, self.minimum, self.maximum
         )
+
+    def _count_reads(self) -> None:
+        counts = self.entry.book.read_counts
+        for ch, initial in self.entry.state.read_counts.items():
+            per_iteration = counts[ch] - initial
+            if self.minimum == self.maximum:
+                counts[ch] = initial + self.minimum * per_iteration
+            elif per_iteration:
+                raise ValueError(
+                    f"Repeat {self.axis!r}: ADC {ch} has {per_iteration} reads per iteration "
+                    f"with variable count register {self.iterations!r} "
+                    f"(entry -> {initial}, after one iteration -> {counts[ch]})"
+                )
 
     def translate(self, prog) -> None:
         pass
@@ -1047,7 +1062,7 @@ class PreparedTimelineMacro(TimedMacro):
         self.book.preparing += 1
         try:
             prog._time_origin = self.source
-            self.source.preprocess(prog)
+            self._preprocess_source(prog)
             timing_source = (
                 self.source.source
                 if isinstance(
@@ -1072,6 +1087,16 @@ class PreparedTimelineMacro(TimedMacro):
             self.book.preparing -= 1
             if previous is not None:
                 self.book.math = previous
+
+    def _preprocess_source(self, prog) -> None:
+        # ADR-0083: count QICK's trigger increments, including unwrapped triggers
+        # inside native macros. Restore the counter so nested wrappers do not
+        # count the same trigger twice.
+        before = {ch: ro["trigs"] for ch, ro in prog.ro_chs.items()}
+        self.source.preprocess(prog)
+        for ch, ro in prog.ro_chs.items():
+            self.book.read_counts[ch] += ro["trigs"] - before[ch]
+            ro["trigs"] = before[ch]
 
     def translate(self, prog) -> None:
         previous = prog._time_origin
@@ -1263,18 +1288,16 @@ class TimelineBranch(Macro):
             value.register
             for value in [*self.entry_inputs.values(), *self.captured_ends]
         }
-        reads = entry.read_counts
         states: list[PathState] = []
         self.prepared = []
         for index, case in enumerate(self.cases):
-            # Register liveness and QICK source trigger counts accumulate across
-            # compiled cases, not just along the path selected at runtime.
-            self.book.restore(prog, replace(entry, pinned=pins, read_counts=reads))
+            # Keep registers live across separately compiled cases, but restart
+            # path-local timing and read counts from the Branch entry.
+            self.book.restore(prog, replace(entry, pinned=pins))
             self.prepared.append(self._prepare_case(prog, case, index, initial))
-            state = self._capture_path(prog)
-            states.append(state)
+            states.append(self._capture_path(prog))
             pins = prog._timeline_live_registers()
-            reads = state.read_counts
+        self._check_read_counts(states)
         self.book.restore(prog, replace(states[-1], pinned=pins))
         used = set().union(
             *((state.used or set()) & initial.keys() for state in states)
@@ -1305,6 +1328,17 @@ class TimelineBranch(Macro):
             generator=False,
         )
         self.book.pinned = entry.pinned.copy()
+
+    def _check_read_counts(self, states: list[PathState]) -> None:
+        for ch, count in states[0].read_counts.items():
+            if any(state.read_counts[ch] != count for state in states[1:]):
+                cases = ", ".join(
+                    f"case {index} -> {state.read_counts[ch]}"
+                    for index, state in enumerate(states)
+                )
+                raise ValueError(
+                    f"Branch {self.by!r}: ADC {ch} reads differ across cases: {cases}"
+                )
 
     def _capture_entry(self, prog, initial: dict[str, Time]) -> None:
         self.entry_math = RuntimeMath(prog)

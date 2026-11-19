@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 import pytest
-from qick.asm_v2 import QickSweep1D, Trigger
+from qick.asm_v2 import QickSweep1D
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
@@ -27,24 +27,12 @@ def test_register_data_triggers_keep_each_adc_lanes_actual_window():
     def body(p):
         p.pulse(0, "long", t=0)
         p.delay_by_timeline()
-        with p.repeat("inner", 2):
-            p.write_reg_op("mask", "scan", "XOR", "inner")
-            bit = p.soccfg["readouts"][0]["trigger_bit"]
-            p.write_reg_op("mask", "mask", "SL", bit)
-            p.write_reg_op("when", "inner", "SL", 7)
-            p.append_macro(
-                Trigger(
-                    ros=[0],
-                    tts=None,
-                    pins=None,
-                    t=0,
-                    width=None,
-                    ddr4=False,
-                    mr=False,
-                    tag=None,
-                )
-            )
-            p.delay_by_timeline()
+        p.write_reg_op("mask", "scan", "OR", 1)
+        bit = p.soccfg["readouts"][0]["trigger_bit"]
+        p.write_reg_op("mask", "mask", "SL", bit)
+        p.write_reg_op("when", "scan", "XOR", 1)
+        p.write_reg_op("when", "when", "SL", 7)
+        p.trigger([0], t=0)
 
     def transform(snapshot):
         records = []

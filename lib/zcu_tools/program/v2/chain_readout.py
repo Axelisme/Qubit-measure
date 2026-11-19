@@ -25,9 +25,9 @@ def thermal_chain_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     read is an emit tag or an untagged module name. All emissions of that
     owner must be 16 unrolled reads or one read in one fixed Repeat of 16,
     on every feasible setting path, including implicit empty branch cases.
-    Other triggers on its ADC are forbidden. Build prog, then call
-    prog.set_reads_per_shot(16) before constructing this processor.
-    Missing/ambiguous labels, non-PulseReadout owners and emitted/declared
+    Other triggers on its ADC are forbidden. The compiler supplies the
+    per-shot ADC count. Missing/ambiguous labels, non-PulseReadout owners and
+    emitted/compiled
     counts or control scopes outside this contract raise ValueError with
     expected and actual values. Construction does not modify prog.
 

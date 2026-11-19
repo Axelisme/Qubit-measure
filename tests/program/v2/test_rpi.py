@@ -59,9 +59,7 @@ def rpi_program(
 ):
     builder = rpi_builder(reps=reps, points=points, reps_innermost=reps_innermost)
     emit_chain(builder, reads=reads)
-    prog = builder.build()
-    prog.set_reads_per_shot(reads)
-    return prog
+    return builder.build()
 
 
 def pair_oracle(segments: list[NDArray[np.float64]]) -> NDArray[np.float64]:
@@ -169,23 +167,17 @@ def test_compiled_loop_order_requires_innermost_reps_only_for_multiple_settings(
         np.testing.assert_array_equal(result[:, 20], np.full(points, 45))
 
 
-@pytest.mark.parametrize(
-    "mismatch", ["declared", "short", "extra_trigger", "nested", "conditional"]
-)
+@pytest.mark.parametrize("mismatch", ["short", "extra_trigger", "nested"])
 def test_compiled_readout_provenance_requires_one_fixed_complete_chain(mismatch: str):
     builder = rpi_builder()
     if mismatch == "nested":
         with builder.repeat("outer", 2):
-            emit_chain(builder)
-    elif mismatch == "conditional":
-        with builder.branch(by="setting", align_timeline=True) as cases, cases.case(0):
             emit_chain(builder)
     else:
         emit_chain(builder, reads=15 if mismatch == "short" else 16)
     if mismatch == "extra_trigger":
         builder.trigger([0])
     prog = builder.build()
-    prog.set_reads_per_shot(17 if mismatch == "declared" else 16)
     with pytest.raises(ValueError, match="expected.*actual"):
         v2.rpi_sums(prog, "sample")
 

@@ -310,8 +310,10 @@ def test_adc_overlap_is_rejected_across_control_flow(control):
             with prog.repeat("outer", 2), prog.repeat("inner", 1):
                 trigger(prog)
         elif control == "branch_then_trigger":
-            with prog.branch(by="scan", align_timeline=False) as cases, cases.case(0):
-                trigger(prog, None)
+            with prog.branch(by="scan", align_timeline=False) as cases:
+                for index in range(2):
+                    with cases.case(index):
+                        trigger(prog, None)
             prog.trigger([0], timeline="default")
         else:
             trigger(prog)
@@ -449,11 +451,12 @@ def test_unlocatable_native_adc_window_rejects_trigger_after_branch(align_timeli
         if align_timeline is None:
             prog.append_macro(native_trigger)
         else:
-            with (
-                prog.branch(by="scan", align_timeline=align_timeline) as cases,
-                cases.case(0),
-            ):
-                prog.append_macro(native_trigger)
+            with prog.branch(by="scan", align_timeline=align_timeline) as cases:
+                with cases.case(0):
+                    prog.append_macro(native_trigger)
+                with cases.case(1):
+                    prog.trigger([0])
+                    prog.timeline_inc(1.0)
         prog.trigger([0], timeline="default")
 
     with pytest.raises(ValueError, match=UNKNOWN_ADC_TAIL):
@@ -477,9 +480,9 @@ def test_branch_sibling_does_not_inherit_unlocatable_native_adc_window():
     _program(body, initialize)
 
 
-@pytest.mark.parametrize("maximum", [0, 1], ids=["skipped", "possibly-executed"])
-def test_unlocatable_native_adc_window_after_repeat_depends_on_reachability(maximum):
-    counts = LoadValue("counts", [0, maximum], idx_reg="scan", val_reg="count")
+@pytest.mark.parametrize("count", [0, 1], ids=["skipped", "executed"])
+def test_unlocatable_native_adc_window_after_repeat_depends_on_reachability(count):
+    counts = LoadValue("counts", [count, count], idx_reg="scan", val_reg="count")
 
     def initialize(prog):
         prog.add_loop("scan", 2)
@@ -488,11 +491,11 @@ def test_unlocatable_native_adc_window_after_repeat_depends_on_reachability(maxi
     def body(prog):
         prog.emit(counts)
         native_trigger = _take_native_adc_trigger(prog)
-        with prog.repeat("reads", "count", range_hint=(0, maximum)):
+        with prog.repeat("reads", "count", range_hint=(count, count)):
             prog.append_macro(native_trigger)
         prog.trigger([0], timeline="default")
 
-    if maximum == 0:
+    if count == 0:
         _program(body, initialize)
     else:
         with pytest.raises(ValueError, match=UNKNOWN_ADC_TAIL):

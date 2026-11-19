@@ -157,10 +157,32 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._timeline_register_pool = []
         self._timeline_book.output_time = None
         self._timeline_book.time_bounds = ProducerBounds()
+        self._timeline_book.read_counts = dict.fromkeys(self.ro_chs, 0)
         for macro in self.macro_list:
             self._observe_time_producers(macro)
         super()._make_asm()
         self._time_bounds.audit(self)
+        for ch, count in self._timeline_book.read_counts.items():
+            self.ro_chs[ch]["trigs"] = count
+
+    @override
+    def set_reads_per_shot(self, reads_per_shot: int | Sequence[int]) -> None:
+        """Check the compiled counts without changing the acquisition layout.
+
+        Pass one count for all declared ADCs, or one per ADC in declaration
+        order. A mismatch raises ValueError with the requested and compiled counts.
+        """
+        compiled = tuple(ro["trigs"] for ro in self.ro_chs.values())
+        requested = (
+            (reads_per_shot,) * len(compiled)
+            if isinstance(reads_per_shot, int)
+            else tuple(reads_per_shot)
+        )
+        if requested != compiled:
+            raise ValueError(
+                f"reads_per_shot: requested {reads_per_shot!r}; "
+                f"compiled {dict(zip(self.ro_chs, compiled, strict=True))!r} (ADC -> count)"
+            )
 
     def _pop_native[T: Macro](self, expected: type[T]) -> T:
         source = self.macro_list.pop()
@@ -787,6 +809,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Repeat may accumulate inside cases; its body obeys the same reference
         prohibition. Branch inside Repeat is supported. Unconditional actions inside this context
         raise ValueError; put them before or after the with block.
+        All cases, including omitted points, must read each ADC the same number
+        of times or compilation raises ValueError with the case counts.
         Duplicate, non-integer/out-of-range indices and measurement selectors
         raise ValueError. Register exhaustion propagates QICK errors unchanged.
         Call only while building _body.
@@ -844,6 +868,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Optional range_hint guarantees a closed nonnegative integer count range,
         without runtime checks. Fixed counts forbid hints. Zero or a zero-maximum
         hint discards the body, including producer checks for unreachable playback.
+        A register count with unequal or absent hint bounds cannot repeat ADC reads.
         Unhinted register counts skip generator backedge bounds proofs only.
         ADC backedges still require proof that the next ADC window starts at or
         after the previous window ends; overlap or an unprovable gap raises

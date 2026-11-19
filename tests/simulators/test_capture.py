@@ -107,9 +107,7 @@ def capture_program(name, env):
         builder.emit(readout.build("readout"))
         builder.timeline_inc(0.096)
     builder.delay_by_timeline()
-    program = builder.build()
-    program.set_reads_per_shot(2)
-    return program
+    return builder.build()
 
 
 def metadata_of(record):
