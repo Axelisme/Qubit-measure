@@ -151,10 +151,9 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         """
         # 1. Track gg-heralded X/Y sigma for both targets versus CZ gate count.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="CZ gate count", ylabel="Target sigma | herald (g,g)")
+        ax.set(xlabel="CZ gate count", ylabel="Target ⟨σ⟩ | herald (g,g)")
         viewer = live_line(ax, num_lines=4)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -345,6 +344,17 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         herald_matrix = herald_probabilities(data.sums)
 
         # 3. Compare independent gg/ee phase slopes and herald fractions; only gg supplies corrections.
+        _, ax = plots.subplots(num="terminal_quadratures", layout="constrained")
+        for t, (q, projection) in product(range(2), enumerate(("X", "Y"))):
+            ax.plot(
+                cfg.gate_count,
+                sigma(gg[t], "f1" if t == 0 else "f2")[q],
+                ".",
+                label=f"F{t + 1} {projection}",
+            )
+        ax.set(xlabel="CZ gate count", ylabel="Target ⟨σ⟩ | herald (g,g)")
+        ax.legend()
+
         fig, _ = plots.subplots(
             num="phase", nrows=3, figsize=(10, 10), layout="constrained"
         )
@@ -422,6 +432,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             ylabel="Scan row (target, projection, n)",
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
+        axes.grid(False)
         fig.colorbar(image, ax=axes, label="Herald probability")
         # 4. Keep gg corrections, ee fits and ee-minus-gg slope differences as distinct diagnostics.
         return LocalZHeraldedAnalysis(

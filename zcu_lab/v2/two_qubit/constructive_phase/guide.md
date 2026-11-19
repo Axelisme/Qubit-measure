@@ -53,7 +53,7 @@ Reset can overwrite unsaved inputs.
 Analyze returns only `relative_phase_deg`, `reason` and `interference_quality`.
 Per-phase rates, populations and interference curves stay inside analysis for plotting.
 
-The live traces and interference map show P00 after double Xπ contrast.
+The live and Analyze interference maps show P00 after double Xπ contrast.
 P00 is the terminal (g,g) count divided by all nine terminal class counts.
 The return figure shows three fractions: both qubits in g, both in e, and
 anything else (the other seven joint outcomes). They add up to one at each

@@ -74,6 +74,31 @@ def restore_result(data: GroupedLoadData[IdleZZHeraldedCfg]) -> IdleZZHeraldedRe
     )
 
 
+def _plot_ramsey_overview(
+    plots: Plots,
+    delays: NDArray[np.float64],
+    dc_values: NDArray[np.float64],
+    dc_label: str,
+    gg_traces: NDArray[np.float64],
+    ee_traces: NDArray[np.float64],
+) -> None:
+    """Draw measured gg and sign-corrected ee Ramsey traces at every DC point before fit diagnostics."""
+    # Mirror the live traces across DC before the individual fit diagnostics.
+    _, ax = plots.subplots(num="ramsey_overview", layout="constrained")
+    fringe_groups = (("gg", gg_traces), ("−ee", ee_traces))
+    for d, value in enumerate(dc_values):
+        for branch, traces in fringe_groups:
+            for state, name in enumerate(("g", "e")):
+                ax.plot(
+                    delays,
+                    traces[d, state],
+                    ".",
+                    label=f"{branch}, spectator {name} · {value:g}",
+                )
+    ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩ (gg, −ee; actual spectator g/e)")
+    ax.legend(title=dc_label, fontsize="small", ncols=2)
+
+
 class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
     """Estimate conditional fringe differences using classified gg and ee heralds."""
 
@@ -138,7 +163,6 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩ (gg, −ee; actual spectator g/e)")
         viewer = live_line(ax, num_lines=len(dc_values) * 4)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -259,6 +283,15 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             if cfg.dc_device is None
             else f"{cfg.dc_device} ({cfg.dc_unit})"
         )
+        _plot_ramsey_overview(
+            plots,
+            result.delays,
+            dc_values,
+            dc_label,
+            sigma(gg, cfg.target),
+            -sigma(ee, cfg.target),
+        )
+
         for dc_index, dc_value in enumerate(dc_values):
             fig, ax = plots.subplots(num=f"ramsey_{dc_index}", figsize=(10, 7))
             reasons = []
@@ -285,7 +318,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             subtitle = f"ζ={zeta:.5g} MHz" if zeta is not None else "ζ unavailable"
             ax.set(
                 xlabel="Delay (us)",
-                ylabel="Target ⟨σ⟩ (gg; −ee)",
+                ylabel="Target ⟨σ⟩ (gg, −ee; actual spectator g/e)",
                 title=f"Target {cfg.target}; {dc_label}={dc_value:g}; {subtitle}\nShared frequency/decay by actual spectator; ee displayed inverted",
             )
             ax.text(
@@ -297,7 +330,6 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                 fontsize=8,
             )
             ax.legend()
-            ax.grid(True)
             fig.tight_layout()
         # 2. Show fitted spectator-frequency differences and all herald fractions without claiming pure ZZ.
         fig, ax = plots.subplots(num="zeta", figsize=(8, 5))

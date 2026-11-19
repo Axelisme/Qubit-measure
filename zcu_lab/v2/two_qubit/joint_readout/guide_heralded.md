@@ -1,4 +1,4 @@
-# Heralded four-branch joint readout
+# Heralded Four-branch joint readout
 
 **Readers:** operator, agent. Run `two_qubit/joint_readout_heralded` and read its accepted terminal distribution and herald pass fraction.
 

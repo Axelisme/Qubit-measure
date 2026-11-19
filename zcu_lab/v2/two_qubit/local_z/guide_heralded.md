@@ -1,4 +1,4 @@
-# Local Z heralded
+# Heralded Local Z
 
 **Readers:** operator, agent. Run herald-conditioned local-Z correction and inspect acceptance.
 
