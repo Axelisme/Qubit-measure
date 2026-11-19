@@ -2,7 +2,7 @@
 
 import pytest
 from qick.asm_v2 import QickSweep1D, Trigger
-from zcu_tools.program.v2 import ir
+from zcu_tools.program.v2 import LoadValue, ir
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import RO_MHZ, TPROC_MHZ, load_soccfg
@@ -17,6 +17,10 @@ from .timing_support import shots as _shots
 PROFILE = load_soccfg(2, 1)
 PULSE_END = tproc_ceil(PROFILE, generator_duration(PROFILE, 0.1))
 ADC_TOUCH = tproc_ceil(PROFILE, readout_duration(PROFILE, 100 / RO_MHZ))
+UNKNOWN_ADC_TAIL = (
+    r"^default: channel 0 ADC overlap; cannot locate previous native "
+    r"trigger \(t=None\); overlap cycles unknown$"
+)
 
 
 def _program(body, initialize=None):
@@ -424,6 +428,75 @@ def test_unlocatable_native_adc_window_rejects_later_named_trigger(control):
         match=r"channel 0.*cannot locate previous native trigger.*cycles unknown",
     ):
         _program(body, initialize)
+
+
+def _take_native_adc_trigger(prog: TimelineProgramV2):
+    # Record before entering a scope, where trigger() would use the named timeline.
+    prog.write_reg("s_out_time", 0)
+    prog.trigger([0], t=None)
+    return prog.macro_list.pop()
+
+
+@pytest.mark.parametrize(
+    "align_timeline", [None, False, True], ids=["flat", "path", "max"]
+)
+def test_unlocatable_native_adc_window_rejects_trigger_after_branch(align_timeline):
+    def initialize(prog):
+        prog.add_loop("scan", 2)
+
+    def body(prog):
+        native_trigger = _take_native_adc_trigger(prog)
+        if align_timeline is None:
+            prog.append_macro(native_trigger)
+        else:
+            with (
+                prog.branch(by="scan", align_timeline=align_timeline) as cases,
+                cases.case(0),
+            ):
+                prog.append_macro(native_trigger)
+        prog.trigger([0], timeline="default")
+
+    with pytest.raises(ValueError, match=UNKNOWN_ADC_TAIL):
+        _program(body, initialize)
+
+
+def test_branch_sibling_does_not_inherit_unlocatable_native_adc_window():
+    def initialize(prog):
+        prog.add_loop("scan", 2)
+        # Allow shell WAIT slack from the case-dependent ADC window.
+        prog.relax_delay = 1.0
+
+    def body(prog):
+        native_trigger = _take_native_adc_trigger(prog)
+        with prog.branch(by="scan", align_timeline=False) as cases:
+            with cases.case(0):
+                prog.append_macro(native_trigger)
+            with cases.case(1):
+                prog.trigger([0])
+
+    _program(body, initialize)
+
+
+@pytest.mark.parametrize("maximum", [0, 1], ids=["skipped", "possibly-executed"])
+def test_unlocatable_native_adc_window_after_repeat_depends_on_reachability(maximum):
+    counts = LoadValue("counts", [0, maximum], idx_reg="scan", val_reg="count")
+
+    def initialize(prog):
+        prog.add_loop("scan", 2)
+        prog.declare(counts)
+
+    def body(prog):
+        prog.emit(counts)
+        native_trigger = _take_native_adc_trigger(prog)
+        with prog.repeat("reads", "count", range_hint=(0, maximum)):
+            prog.append_macro(native_trigger)
+        prog.trigger([0], timeline="default")
+
+    if maximum == 0:
+        _program(body, initialize)
+    else:
+        with pytest.raises(ValueError, match=UNKNOWN_ADC_TAIL):
+            _program(body, initialize)
 
 
 def test_known_native_adc_window_replaces_unlocatable_predecessor():

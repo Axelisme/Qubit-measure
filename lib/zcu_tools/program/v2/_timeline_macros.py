@@ -1477,6 +1477,7 @@ class TimelineBranch(Macro):
             self.book.native_timestamp(prog, value, ro_ch=ch)
         self.book.source_expressions = state.provenance.sources.copy()
         self.book.native_expressions = state.provenance.native.copy()
+        self.book.unknown_native_adcs = set(state.provenance.unknown_adcs)
 
     def _merge_values(self, prog, values: list[Time], *, force: bool = False) -> Time:
         if not force and _same_times(values):

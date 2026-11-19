@@ -157,6 +157,7 @@ Delay 與 SoftDelay 都只加結尾，不推進 reference。
 兩種 readout config 是瞬時事件，結尾更新到 E+t，不加 config length 或其他 ADC window。
 同 generator 可證明的 pulse 重疊在編譯期報錯，另一條 timeline 不能豁免此檢查。
 後一個 trigger 帶 timeline 時，必須證明起點不早於同 ADC 前一視窗結尾。重疊或無法證明時在編譯期報錯。
+原生 `t=None` trigger 的 ADC 結尾不可定位。Branch 的各 case 從同一入口狀態編譯；任何 case 到出口仍有不可定位的結尾時，合流後的同 ADC timeline trigger 仍報錯。
 純原生的後一個 trigger 保留 QICK 行為。每個 shot 收尾仍等待全部 ADC。
 2026-11-01，使用者裁定：「18b請用gen的就好，adc讓其在獨立timeline不join，因為adc目前不影響後續pulse」。
 對編譯期報錯方式，使用者同日回答：「B」。
