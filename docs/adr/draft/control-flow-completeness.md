@@ -4,7 +4,7 @@ status: draft
 
 # Timeline 控制結構的完備性
 
-已核准、尚未實作的方向。現行的 timeline、Branch、Repeat 與模擬器入口規則在 [ADR-0083](../0083-program-macros-and-timelines.md)。
+已核准的方向：共用編譯期狀態已實作，跳轉尚未實作。現行的 timeline、Branch、Repeat 與模擬器入口規則在 [ADR-0083](../0083-program-macros-and-timelines.md)。
 
 ## 方向
 
@@ -14,7 +14,7 @@ status: draft
 同日，使用者否決了第一版提案：在 builder 上加專用的 `exit_shot` 區塊。原話是：「首先也是基于 builder 设计语法，但事实上 builder 只是 helper，你应该要基于 timeline program 设计。再来，exit shot 有一点太局部了，呃，而不是通用的资质、机制。真正通用的机制应该是 condition jump 跟 label。」
 之後的提案改為下列規則。使用者先接受第 1 條，回覆「可以接受统一只能往后跳」，再回「都采用建议」接受其餘各條。
 
-- **共用的編譯期狀態。** 抽出 `PathState`，收齊後續 placement 依賴的所有狀態：具名 timeline 的 end、QICK channel 的 timestamp 與執行期 tail、source／native 表達式與 unknown ADC、producer 的 defined 與 selection、Repeat frame 的 guard、每個 ADC 的讀取數。`TimelineBook` 提供 capture 與 restore，各結構用自己的規則合併。Branch 與 Repeat 改用它，行為不變。
+- **共用的編譯期狀態。** 抽出 `PathState`，收齊後續 placement 依賴的所有狀態：具名 timeline 的 end、QICK channel 的 timestamp 與執行期 tail、source／native 表達式與 unknown ADC、producer 的 defined 與 selection、Repeat frame 的 guard、每個 ADC 的 QICK source trigger 計數。`TimelineBook` 提供 capture 與 restore，各結構用自己的規則合併。Branch 與 Repeat 已改用它；編譯器尚不推算每發執行的讀取數。
 - **通用的跳轉。** `TimelineProgramV2` 的 `cond_jump`、`jump`、`label` 改成認得 timeline 的版本，和它改寫 QICK 的 `pulse`、`trigger`、`delay_*` 是同一個做法。
   - `cond_jump(target, ...)` 把當下的 `PathState` 記成 target 的一條入邊；沒跳的路徑帶著同一份狀態繼續往下編。
   - `jump(target)` 記一條入邊。之後到下一個 label 之間的位置不可到達，在那裡放任何 macro 都報錯。

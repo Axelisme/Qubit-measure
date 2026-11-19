@@ -27,7 +27,7 @@ from ._timeline_runtime import (
     runtime_expression,
     time_expression,
 )
-from ._timeline_state import LoopTimelineFrame, TimelineBook
+from ._timeline_state import LoopTimelineFrame, PathState, TimelineBook
 from .macro.write_reg import WriteRegOp
 from .modules.util import get_fclk
 
@@ -52,12 +52,8 @@ class _ReferenceSummary:
     last_entry: TimeExpression
 
 
-class LoopTimelineEnter(Macro):
+class LoopTimelineEnter:
     """Initialize one loop accumulator at its execution position, not prologue."""
-
-    def __repr__(self) -> str:
-        # QICK eagerly formats macros even when debug logging is disabled.
-        return f"{type(self).__name__}()"
 
     def __init__(self, book: TimelineBook, parent: str, counter: str | None):
         self.book = book
@@ -66,9 +62,10 @@ class LoopTimelineEnter(Macro):
         self.simple = False
         self.post_operations: list[Macro] = []
 
-    def preprocess(self, prog) -> None:
+    def prepare(self, prog, state: PathState) -> None:
+        """Start the loop accumulator from state, retaining entry tails for n=0."""
         book = self.book
-        entry = book.end(self.parent)
+        entry = state.ends[self.parent]
         if self.counter is not None:
             prog.add_reg(self.counter)
         storage = book.math.snapshot(book.math.cycles(entry))
@@ -82,12 +79,7 @@ class LoopTimelineEnter(Macro):
                 time_expression(prog, entry), TimeVariable(terms=((progress, 1),))
             ),
         )
-        channels = {
-            (generator, ch): book.channel_end(prog, ch, generator=generator)
-            for generator, ids in ((True, prog.gen_chs), (False, prog.ro_chs))
-            for ch in ids
-        }
-        external = book.ends.copy()
+        external = state.ends.copy()
         del external[self.parent]
         self.frame = LoopTimelineFrame(
             self.parent,
@@ -95,18 +87,15 @@ class LoopTimelineEnter(Macro):
             entry,
             origin,
             progress,
-            channels,
+            state.channel_ends(),
             book.snapshot_native_expressions(prog),
             book.math,
-            book.pinned.copy(),
+            state,
         )
         book.loop_timelines.append(self.frame)
         book.pinned.update(prog._timeline_live_registers())
         book.pinned.add(storage.register)
         book.ends = {self.parent: origin}
-
-    def translate(self, prog) -> None:
-        pass
 
 
 class LoopTimelineExit(Macro):
@@ -212,7 +201,7 @@ class LoopTimelineExit(Macro):
         if book.repeats and not book.loop_timelines:
             self._publish_reference_guards(prog, frame)
         book.ends = {**frame.external, frame.parent: result}
-        book.pinned = frame.pinned
+        book.pinned = frame.entry_state.pinned.copy()
 
     def _pointer_body(self, prog, frame: LoopTimelineFrame, finish: Time) -> bool:
         """Lower already-prepared straight-line plans without per-iteration storage."""
@@ -341,7 +330,7 @@ class LoopTimelineExit(Macro):
         if book.repeats and not book.loop_timelines:
             self._publish_reference_guards(prog, frame)
         book.ends = {**external, frame.parent: result}
-        book.pinned = frame.pinned
+        book.pinned = frame.entry_state.pinned.copy()
 
     def _reference_summary(
         self, prog, frame: LoopTimelineFrame, finish: Time
