@@ -1,18 +1,17 @@
-"""Tests for the shared GUI logging-setup helper (Phase 157).
-
-The regression at the heart of this phase: a file handler attached at an app
-sub-namespace silently missed a sibling namespace (event_bus). These tests pin
-that the helper attaches at the whole ``zcu_tools.gui`` namespace so sibling
-records propagate to the file, plus the per-session file creation and retention.
-"""
+"""Verify session log routing, warning and exception records, and file retention."""
 
 from __future__ import annotations
 
 import logging
+import sys
+import threading
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.measure.utils.error_handler import install_global_exception_hook
 from zcu_tools.gui.logging_setup import (
     purge_old_logs,
     session_log_path,
@@ -45,8 +44,10 @@ def _snapshot(names: tuple[str, ...]) -> dict[str, list[logging.Handler]]:
 _WATCHED = (
     "",  # root
     "zcu_tools.gui",
+    "zcu_tools.gui.runtime",
     "zcu_tools.experiment.v2_gui",
     "zcu_tools.program.v2",
+    "py.warnings",
 )
 
 
@@ -59,6 +60,25 @@ def fixture_restore_logger_levels() -> Iterator[None]:
         logging.getLogger(name).setLevel(level)
 
 
+@pytest.fixture(autouse=True, name="_restore_warning_capture")
+def fixture_restore_warning_capture() -> Iterator[None]:
+    with warnings.catch_warnings():
+        original_showwarning = warnings.showwarning
+        # Detect prior capture even if pytest replaced its warning hook.
+        marker = MagicMock()
+        warnings.showwarning = marker
+        logging.captureWarnings(False)
+        previous_capture = warnings.showwarning
+        warnings.showwarning = original_showwarning
+        try:
+            yield
+        finally:
+            logging.captureWarnings(False)
+            if previous_capture is not marker:
+                warnings.showwarning = previous_capture
+                logging.captureWarnings(True)
+
+
 def test_session_log_path_is_under_logs_group_app(tmp_path: Path) -> None:
     path = session_log_path(tmp_path, "gui", "measure")
     assert path.parent == tmp_path / "logs" / "gui" / "measure"
@@ -66,7 +86,7 @@ def test_session_log_path_is_under_logs_group_app(tmp_path: Path) -> None:
     assert path.suffix == ".log"
 
 
-def test_setup_creates_per_session_file_and_attaches_at_gui(tmp_path: Path) -> None:
+def test_setup_creates_per_session_file(tmp_path: Path) -> None:
     snap = _snapshot(_WATCHED)
     try:
         target = setup_gui_logging(
@@ -77,11 +97,80 @@ def test_setup_creates_per_session_file_and_attaches_at_gui(tmp_path: Path) -> N
         assert target is not None
         assert target.exists()
         assert target.parent == tmp_path / "logs" / "gui" / "measure"
+    finally:
+        _detach(snap)
 
-        gui_handlers = logging.getLogger("zcu_tools.gui").handlers
-        assert any(isinstance(h, logging.FileHandler) for h in gui_handlers)
-        extra_handlers = logging.getLogger("zcu_tools.experiment.v2_gui").handlers
-        assert any(isinstance(h, logging.FileHandler) for h in extra_handlers)
+
+def test_file_logging_uses_namespace_thresholds(tmp_path: Path) -> None:
+    snap = _snapshot(_WATCHED)
+    try:
+        target = setup_gui_logging(
+            app_name="measure",
+            log_root=tmp_path,
+            extra_namespaces=("zcu_tools.program.v2", "zcu_tools.gui.runtime"),
+        )
+        assert target is not None
+
+        external = logging.getLogger("zcu_tools.simulators.example")
+        external.warning("external warning marker")
+        external.debug("external debug marker")
+        logging.getLogger("zcu_tools.gui.runtime").debug("gui debug marker")
+        logging.getLogger("zcu_tools.program.v2").debug("extra debug marker")
+        logging.getLogger("zcu_tools.program.v20").debug("lookalike debug marker")
+
+        contents = target.read_text(encoding="utf-8")
+        assert contents.count("external warning marker") == 1
+        assert "external debug marker" not in contents
+        assert contents.count("gui debug marker") == 1
+        assert contents.count("extra debug marker") == 1
+        assert "lookalike debug marker" not in contents
+    finally:
+        _detach(snap)
+
+
+def test_python_warning_reaches_file_and_stderr_once(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    snap = _snapshot(_WATCHED)
+    try:
+        target = setup_gui_logging(app_name="measure", log_root=tmp_path)
+        assert target is not None
+        with warnings.catch_warnings():
+            warnings.simplefilter("always", UserWarning)
+            warnings.warn("python warning marker", UserWarning, stacklevel=1)
+
+        marker = "UserWarning: python warning marker"
+        assert target.read_text(encoding="utf-8").count(marker) == 1
+        assert capsys.readouterr().err.count(marker) == 1
+    finally:
+        _detach(snap)
+
+
+def test_main_thread_exception_reaches_log_and_presenter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snap = _snapshot(_WATCHED)
+    try:
+        target = setup_gui_logging(app_name="measure", log_root=tmp_path)
+        assert target is not None
+        presenter = MagicMock()
+        previous_hook = MagicMock()
+        monkeypatch.setattr(sys, "excepthook", previous_hook)
+        monkeypatch.setattr(threading, "excepthook", threading.excepthook)
+        install_global_exception_hook(presenter)
+
+        try:
+            raise ValueError("unhandled main-thread marker")
+        except ValueError as error:
+            args = (type(error), error, error.__traceback__)
+        sys.excepthook(*args)
+
+        presenter.assert_called_once_with(*args)
+        previous_hook.assert_called_once_with(*args)
+        contents = target.read_text(encoding="utf-8")
+        assert "[ERROR" in contents
+        assert "Traceback (most recent call last):" in contents
+        assert "ValueError: unhandled main-thread marker" in contents
     finally:
         _detach(snap)
 
@@ -101,8 +190,6 @@ def test_sibling_namespace_record_reaches_file(tmp_path: Path) -> None:
             "zcu_tools.gui.session.services.connection",
         ):
             logging.getLogger(sibling).error("marker-%s", sibling)
-        for handler in logging.getLogger("zcu_tools.gui").handlers:
-            handler.flush()
         contents = target.read_text(encoding="utf-8")
         assert "marker-zcu_tools.gui.event_bus" in contents
         assert "marker-zcu_tools.gui.plotting.host" in contents
@@ -123,9 +210,6 @@ def test_extra_namespace_record_reaches_file(tmp_path: Path) -> None:
         assert target is not None
 
         logging.getLogger("zcu_tools.program.v2.sim.engine").error("sim-marker")
-        for handler in logging.getLogger("zcu_tools.program.v2").handlers:
-            handler.flush()
-
         contents = target.read_text(encoding="utf-8")
         assert "sim-marker" in contents
     finally:
@@ -144,6 +228,7 @@ def test_no_file_when_to_file_false(tmp_path: Path) -> None:
 
 def test_setup_replaces_managed_handlers_instead_of_stacking(
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     snap = _snapshot(_WATCHED)
     first = tmp_path / "first.log"
@@ -157,34 +242,14 @@ def test_setup_replaces_managed_handlers_instead_of_stacking(
         )
         setup_gui_logging(app_name="measure", log_root=tmp_path, log_file=second)
 
-        root_new = [
-            h
-            for h in logging.getLogger().handlers
-            if h not in snap[""]
-            and isinstance(h, logging.StreamHandler)
-            and not isinstance(h, logging.FileHandler)
-        ]
-        gui_new = [
-            h
-            for h in logging.getLogger("zcu_tools.gui").handlers
-            if h not in snap["zcu_tools.gui"] and isinstance(h, logging.FileHandler)
-        ]
-        old_extra_new = [
-            h
-            for h in logging.getLogger("zcu_tools.program.v2").handlers
-            if h not in snap["zcu_tools.program.v2"]
-            and isinstance(h, logging.FileHandler)
-        ]
-
-        assert len(root_new) == 1
-        assert len(gui_new) == 1
-        assert old_extra_new == []
-
         logging.getLogger("zcu_tools.gui.runtime").error("single-marker")
-        for handler in logging.getLogger("zcu_tools.gui").handlers:
-            handler.flush()
+        logging.getLogger("zcu_tools.program.v2").debug("expired debug marker")
+
+        assert first.read_text(encoding="utf-8") == ""
         contents = second.read_text(encoding="utf-8")
         assert contents.count("single-marker") == 1
+        assert "expired debug marker" not in contents
+        assert capsys.readouterr().err.count("single-marker") == 1
     finally:
         _detach(snap)
 

@@ -18,10 +18,10 @@ def install_global_exception_hook(
 ) -> None:
     """Install process-level exception hooks with an injected presenter.
 
-    Unexpected exceptions reaching ``sys.excepthook`` are presented and then
-    delegated to the prior hook. Worker-thread exceptions are logged and delegated;
-    they never call the presenter from a foreign thread. KeyboardInterrupt always
-    bypasses presentation and logging.
+    Unexpected exceptions reaching ``sys.excepthook`` are logged with their
+    traceback, presented, and delegated to the prior hook. Worker-thread
+    exceptions are logged and delegated without calling the presenter.
+    KeyboardInterrupt always bypasses presentation and logging.
 
     ``show_dialog`` is the required presentation port; Qt composition injects its
     QMessageBox adapter while tests pass a recording fake.
@@ -36,6 +36,10 @@ def install_global_exception_hook(
         if issubclass(exc_type, KeyboardInterrupt):
             original_excepthook(exc_type, exc_value, exc_traceback)
             return
+        logger.error(
+            "Unhandled main-thread exception",
+            exc_info=(exc_type, exc_value, exc_traceback),
+        )
         show_dialog(exc_type, exc_value, exc_traceback)
         original_excepthook(exc_type, exc_value, exc_traceback)
 
