@@ -65,3 +65,7 @@ RB 每塊先播共用前綴。除最後一點外，各點在自己的檢查點�
 - [前一篇控制結構討論](2026-11-20-early-exit-and-control-flow-completeness.md)保留 HW3 原型、PMEM 數據與最初的提早結束本發提案。
 - Repo `5051ab6f8` 的 [跳轉與合併](../../lib/zcu_tools/program/v2/_timeline_jumps.py)、[compiled request builder](../../lib/zcu_tools/program/v2/simulation/README.md#compiled-request-builder) 與 [快照格式](../../lib/zcu_tools/program/v2/ir/README.md#pre-optimization-compile-snapshot)記錄已實作的契約。
 - 原始設計與裁決工作檔未入庫。上文保留採用的規則、取捨與數字。
+
+## 後記
+
+2026-11-20，使用者覆核後保留板上掃 depth，取消 PMEM 對半分塊。RB 改成每個 seed、arm 一支 program，將 recovery 放在各點的 Clifford 前綴後，只跳一次到共用 readout；最深點不跳。比較與新裁決見[板上 RB 程式改寫](2026-11-20-rb-depth-program.md)。通用往後跳轉與 label 合併規則不變。

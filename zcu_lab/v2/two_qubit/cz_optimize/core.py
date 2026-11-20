@@ -51,8 +51,8 @@ from zcu_lab.v2.support import live_line
 
 from .._cz_phase import CZPhasePair
 from .._drive import DualLineCfg
-from .._rb_scheduling import emit_sequence
-from .._rb_sequence import RBSequence, make_paired_sequences
+from .._rb_scheduling import emit_sequence, validate_x_pulses
+from .._rb_sequence import RBArm, make_rb_arms
 from .._readout import JointRoles
 from .._sums import joint_probabilities, validate_classifiers
 
@@ -133,7 +133,7 @@ def _targets(result: CZOptimizeResult) -> NDArray[np.float64]:
 
 
 class CZOptimizeCfg(ConfigBase):
-    """Calibrated X90, shared-arb dual-line CZ, named local Z and full mux readout.
+    """Calibrated X90/X180, shared-arb two-line CZ, local Z and full mux readout.
 
     roles identifies the ordered F1/F2 components and their full-group tone
     positions. Corrections are degrees. Each evaluation repeats the same 3–5
@@ -147,6 +147,8 @@ class CZOptimizeCfg(ConfigBase):
     ] = None
     x90_f1: Annotated[Pulse.Cfg, FieldMeta(description="Calibrated F1 X90 pulse.")]
     x90_f2: Annotated[Pulse.Cfg, FieldMeta(description="Calibrated F2 X90 pulse.")]
+    x180_f1: Annotated[Pulse.Cfg, FieldMeta(description="Calibrated F1 X180 pulse.")]
+    x180_f2: Annotated[Pulse.Cfg, FieldMeta(description="Calibrated F2 X180 pulse.")]
     drive: Annotated[
         DualLineCfg,
         FieldMeta(description="Calibrated CZ pulses sharing one arb asset."),
@@ -219,11 +221,9 @@ class CZOptimizeCfg(ConfigBase):
             raise ValueError(
                 "CZ optimization seeds must be distinct integer identities"
             )
-        for drive, x90 in ((self.drive.f1, self.x90_f1), (self.drive.f2, self.x90_f2)):
-            if drive.ch != x90.ch:
-                raise ValueError("CZ and X90 must use the same captured role generator")
-            if not isinstance(x90.phase, (int, float)) or not math.isfinite(x90.phase):
-                raise ValueError("X90 phase must be a finite scalar")
+        validate_x_pulses(
+            (self.x90_f1, self.x90_f2), (self.x180_f1, self.x180_f2), self.drive
+        )
         return self
 
 
@@ -298,13 +298,13 @@ def _measure_candidate(
     cfg: CZOptimizeCfg,
     context: RunContext,
     step: ScheduleStep[int],
-    sequences: dict[int, RBSequence],
+    arms: dict[int, RBArm],
     candidate: _CandidateCZ,
 ) -> float:
     """Write one terminal count table per seed and return mean survival or NaN on stop.
 
-    cfg supplies the fixed readout, X90s and acquisition settings. sequences
-    maps each seed to its interleaved arm. A zero-shot seed raises.
+    cfg supplies the fixed readout, local X pulses and shot settings. arms maps
+    each seed to its interleaved arm. A zero-shot seed raises.
     """
     for seed, seed_step in step.scan("seed", cfg.seed):
         builder = TimelineBuilder(
@@ -318,11 +318,11 @@ def _measure_candidate(
             builder.emit(Reset("reset", cfg.reset, terminal=readout))
         emit_sequence(
             builder,
-            sequences[seed],
-            x90_f1=cfg.x90_f1,
-            x90_f2=cfg.x90_f2,
-            drive=candidate.drive,
-            phase_pair=candidate.phases,
+            arms[seed],
+            cfg.depth,
+            x90=(cfg.x90_f1, cfg.x90_f2),
+            x180=(cfg.x180_f1, cfg.x180_f2),
+            cz=(candidate.drive, candidate.phases),
         )
         builder.emit(readout, tag="terminal")
         prog = builder.build()
@@ -404,7 +404,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
             ),
             result_type=CZOptimizeResult,
             cfg_type=CZOptimizeCfg,
-            cfg_schema_version="1.0",
+            cfg_schema_version="2.0",
             tag="two_qubit/cz_optimize",
             result_builder=_restore_result,
         )
@@ -434,10 +434,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
         ]
         strategy = _make_strategy(cfg, start)
         # ADR-0072: share the sequence, not RB's acquisition or analysis.
-        sequences = {
-            seed: make_paired_sequences(cfg.depth, seed).interleaved
-            for seed in cfg.seed
-        }
+        arms = {seed: make_rb_arms(seed, [cfg.depth])[1] for seed in cfg.seed}
         evaluations = 1 + cfg.generations * cfg.popsize
         buffer = SignalBuffer((evaluations, len(cfg.seed), 3, 3), dtype=np.float64)
         params = np.full((evaluations, _PARAM_COUNT), np.nan)
@@ -479,9 +476,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
                 target = 0.0
                 if peak[index] <= 1.0:
                     candidate = _candidate_cfg(cfg, samples, params[index])
-                    target = _measure_candidate(
-                        cfg, context, step, sequences, candidate
-                    )
+                    target = _measure_candidate(cfg, context, step, arms, candidate)
                     if not np.isfinite(target):
                         break  # Stop before a complete row; keep any counts already acquired.
                     best_target = float(np.fmax(best_target, target))

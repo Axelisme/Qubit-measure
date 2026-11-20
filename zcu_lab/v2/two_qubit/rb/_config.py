@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from typing import Annotated, Self
 
-import numpy as np
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import Pulse
 from zcu_tools.program.v2.modules import MuxReadout
 
 from .._cz_phase import CZPhasePair
 from .._drive import DualLineCfg
+from .._rb_scheduling import validate_x_pulses
 from .._readout import JointRoles
 from .._sums import validate_classifiers
 
@@ -24,9 +23,10 @@ class RBInputs[ResetT](ConfigBase):
     phase_pair is required, ordered and component-named. Delays are us, pulse
     frequency MHz and phase degrees. No DC device is driven. reset=None emits
     no reset. F1/F2 need circle classifiers with radius from GE Post before Run.
-    depth counts random Cliffords, not primitive gates; strictly increasing
-    nonnegative integers. seed contains distinct integer random.Random identities
-    shared across depths/arms/rounds. The 31-bit bound preserves exact axes.
+    depth counts random Cliffords, not primitive gates. seed gives integer
+    random.Random identities shared across depths/arms/rounds. Both lists are
+    deduplicated and sorted before use or saving. The 31-bit seed bound
+    preserves exact axes.
     reps is shots per host round; rounds remains a separate saved axis.
     """
 
@@ -49,6 +49,14 @@ class RBInputs[ResetT](ConfigBase):
             label="F2 Xπ/2",
             description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
+    ]
+    x180_f1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(label="F1 Xπ", description="Calibrated F1 X180 pulse."),
+    ]
+    x180_f2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(label="F2 Xπ", description="Calibrated F2 X180 pulse."),
     ]
     drive: Annotated[
         DualLineCfg,
@@ -97,27 +105,18 @@ class RBInputs[ResetT](ConfigBase):
         ),
     ]
 
+    @field_validator("depth", "seed")
+    @classmethod
+    def sort_unique(cls, values: list[int]) -> list[int]:
+        """Return sorted unique values so the saved cfg matches the data axes."""
+        return sorted(set(values))
+
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:
-        """Reject swapped phases, non-increasing depths, repeated seeds or wrong generators."""
+        """Reject mismatched roles, classifiers, pulse phases and generators."""
         validate_classifiers(self.readout, self.roles)
         self.phase_pair.validate_roles(self.roles)
-        depth_counts = Counter(self.depth)
-        duplicates = sorted(depth for depth, count in depth_counts.items() if count > 1)
-        if duplicates:
-            raise ValueError(
-                f"RB depths must be strictly increasing; duplicate values: {duplicates}"
-            )
-        if self.depth != sorted(self.depth):
-            raise ValueError("RB depths must be strictly increasing")
-        if len(set(self.seed)) != len(self.seed):
-            raise ValueError("RB seeds must be distinct complete integer identities")
-        for drive, x90 in (
-            (self.drive.f1, self.x90_f1),
-            (self.drive.f2, self.x90_f2),
-        ):
-            if drive.ch != x90.ch:
-                raise ValueError("CZ and X90 must use the same captured role generator")
-            if not isinstance(x90.phase, (int, float)) or not np.isfinite(x90.phase):
-                raise ValueError("X90 phase must be a finite scalar")
+        validate_x_pulses(
+            (self.x90_f1, self.x90_f2), (self.x180_f1, self.x180_f2), self.drive
+        )
         return self

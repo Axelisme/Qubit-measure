@@ -2,28 +2,26 @@
 
 **Readers:** operator, agent. Run paired two-qubit RB and CZ-interleaved RB through the GUI or MCP and interpret their error estimates.
 
-Cfg sweep fields use `depth` / `seed`. This experiment uses cfg schema 5.0. Loading a run from an older major version retains Result and metadata, sets cfg to None and emits `CfgUnavailableWarning`. These old runs cannot be reanalyzed. No cfg migration or field alias is provided.
+Cfg schema 6.0 requires `x180_f1` and `x180_f2`. Load retains compatible older Results and metadata, sets cfg to None and emits `CfgUnavailableWarning` for old cfgs. Those runs cannot be reanalyzed without their cfg. There is no cfg migration.
 
-**Last updated:** 2026-11-20 (on-board depth scan)
+**Last updated:** 2026-11-20, one program per seed and arm
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
 ## Before run
 
-Both Forms list reset, X90, dual-line drive and mux readout first.
-Captured roles and the phase pair follow. The host scan inputs appear as outer
-`depth`, then inner `seed`. Acquisition settings come last.
-
-Select `two_qubit/rb` after calibrating the F1/F2 X90 pulses, complete mux readout,
+Select `two_qubit/rb` after calibrating the F1/F2 X90 and X180 pulses, complete mux readout,
 two charge-line CZ pulses and their local-Z corrections. Bind scalar aliases
 `f1`, `f2`, `coupler` and `mux`, then Open or Reset the Form. The fixed capture
 maps logical Q0 to F1 and Q1 to F2. Their tone positions come from the captured
 MuxGroup `qubits` order. Use those positions to identify the roles.
 
 Readout references `$mux.module.readout`, preserving the library's complete tones and scalar settings. A missing readout slot stays Invalid.
-The Form copies `$f1.module.x90`, `$f2.module.x90`,
-`$coupler.module.cz_f1` and `$coupler.module.cz_f2`. Missing pulse slots stay Invalid.
-Supply measured calibration for every required slot. The ordinary
+The Form copies `$f1.module.x90`, `$f1.module.x180`, `$f2.module.x90`,
+`$f2.module.x180`, `$coupler.module.cz_f1` and `$coupler.module.cz_f2`.
+Missing pulse slots stay Invalid. Each X pulse uses the generator of its
+role's CZ line and a finite scalar phase. Supply measured calibration for
+every required slot. The ordinary
 CZ pulses use independent generators, the same frequency and envelope duration,
 and a common start. Their individual gains and constructive relative phase
 remain unchanged throughout a sequence.
@@ -63,63 +61,53 @@ outcomes and fit gg and ee return survival jointly, use the separate
 
 ## Sequences and cost
 
-`depth` is a strictly increasing list of nonnegative Clifford counts.
-Duplicate depth values are listed in the configuration error before build.
-`seed` is a list of distinct nonnegative 31-bit integers. Each seed fixes the
-random Clifford draws. Keep these values with the data. Reusing a seed at
-shallower depths keeps the same random Clifford prefix.
+Enter a nonempty list of nonnegative Clifford counts in `depth`, and a
+nonempty list of nonnegative 31-bit integers in `seed`. The cfg removes
+duplicates and sorts both lists before Run, so the saved cfg matches the data
+axes. Each seed draws one random sequence up to the largest depth. Both arms
+use the same draw, and shallower depths use its prefixes.
 
-Both arms draw from all 11,520 two-qubit Cliffords. The decomposition minimizes
-CZ count first, then X90 count. Z90 only updates the frame and has no cost.
-The uniform average is 1.5 CZs per Clifford, before interleaving and recovery.
-The same seed still draws the same Cliffords as with the previous decomposition,
-but their pulse sequences can differ.
+The draw is uniform over all 11,520 two-qubit Cliffords, with replacement.
+The decomposition minimizes CZ count first, then the number of physical X
+pulses. X90 and X180 each count as one pulse, and Z90 only updates the
+frame. The uniform average is 1.5 CZs per Clifford before interleaving and
+recovery. A seed still draws the same Clifford identities as before.
 
 Interleaved inserts one CZ after each random Clifford. Reference already
-contains CZs inside the Clifford decompositions. Each arm gets its own
-full-product inverse, including all inserted CZs. Depth counts Cliffords;
-physical CZ and pulse counts depend on the selected decompositions and arm.
-Check representative compiled sequences for memory use and duration before a run.
-A shallow depth can still contain several long CZ pulses.
+contains CZs inside the Clifford decompositions. At each depth, each arm plays
+one recovery Clifford that inverts the full prefix, including its inserted CZs.
+Even a shallow depth can contain several CZ pulses.
 
-Every depth/seed/arm starts with zero logical frames. Positive logical Z90
-changes a later X90's programmed phase by minus 90 degrees. CZ playback
-keeps its two charge phases fixed while logical frames evolve separately.
-After CZ, the two named logical corrections advance the respective frames.
-Virtual Z updates the logical frame only. Computational-basis readout is
-invariant to terminal Z frames.
+Each shot starts with zero logical frames. Z90 adds 90 degrees to one frame.
+X90 and X180 play at their configured phase minus that frame. CZ keeps the
+two charge-line phases fixed and advances each frame by its local-Z correction.
+Terminal Z frames do not affect computational-basis readout.
 
-Since 2026-11-20, both arms in this experiment and the heralded variant align
-the two qubit timelines at every Clifford boundary, including before recovery.
-The next Clifford starts only after both timelines finish their pulses and
-configured delays. Within a Clifford, each qubit keeps its X90 and virtual Z
-order and plays X90s as soon as its own timeline allows. With zero X90 delays,
-`X90_Q0, Z90_Q1, X90_Q1, X90_Q0, CZ` starts the first Q0 and Q1 X90s together.
-Q0's second X90 follows its first.
-CZ still waits for both qubits and starts both charge-line pulses together.
-Both qubits resume at the later CZ end, including delays. Terminal readout
-waits for both qubits after recovery.
+Both arms align the two qubit timelines at each Clifford boundary, including
+before recovery. Within a Clifford, each qubit plays its own pulses and virtual
+Zs in order. Pulses on different qubits can overlap. At CZ, both qubits wait,
+the two charge-line pulses start together, and both qubits resume at the later
+CZ end, including delays. X180 can change pulse timing in either arm. Do not
+pool decay estimates with older runs that used two X90s or overlapped
+neighboring Cliffords.
 
-The inserted CZs already aligned the interleaved arm at these boundaries, so
-its pulse times are unchanged. The reference arm no longer overlaps
-neighboring Cliffords and can take longer. Do not directly pool or compare
-error estimates from this schedule with those from older schedules, including
-the concurrent schedule that allowed overlap across Clifford boundaries.
-Overlap within a Clifford can still produce crosstalk in both arms; the
-comparison does not show that it cancels.
+Run compiles every seed and arm before taking data. Each program contains
+one copy of the deepest Clifford sequence. At each requested depth, the
+matching board-loop index plays its recovery, waits until it ends, then jumps
+to the common terminal readout. Shots for larger depths skip that recovery.
+The deepest shot plays its recovery and continues straight to readout.
 
-For each seed and arm, the host first tries to compile all requested depths
-into one program. If the program exceeds PMEM, the host splits the depth list
-in half, with the extra point in the first half, and retries each half. The
-smallest chunk is one depth. If that depth still exceeds PMEM, or any chunk
-exceeds WMEM or DMEM, Run reports the error. Chunking changes only the number
-of programs and the acquisition order.
+If a program exceeds PMEM, Run stops without acquiring shots. The error gives
+the seed, arm, depth point count, largest depth, words used and board limit.
+Reduce the largest depth or use fewer points. On a 4,096-word profile with
+synthetic pulses, no reset and seed 7, 201 points from 0 to 200 took
+3,728 words for reference and 4,114 for interleaved, so the sweep did not fit.
+The same fixture fit 21 points from 0 to 400 at 2,777 and 3,586 words.
+These numbers are compile examples, not limits for every pulse or reset setup.
 
-The host loops over seed, then arm, then depth chunk, then round. It visits
-chunks in increasing depth order and reuses each program across rounds. Within each
-`rounds=1` acquisition, QICK visits the chunk's depths in increasing order
-once per repetition, then starts again at the first depth. Each depth gets
-`reps` shots in its saved round slot.
+The host loops over seed, arm and round. In each round, QICK visits the
+depths in increasing order once per repetition. Each depth gets `reps` shots
+in its saved round slot.
 
 Without reset, the nominal B00 start leaves the thermal initial population in
 place. Terminal F1/F2 classification happens during acquisition. Circle outcomes
@@ -219,7 +207,7 @@ The adapter owns the run record and plots for each operation.
 
 ## Calibration order and field units
 
-Calibrate each role's Xπ/2 slot with amplitude and length Rabi before using it.
+Calibrate each role's Xπ/2 and Xπ slots with amplitude and length Rabi before using them.
 Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
 Use lookback to set mux timing, then mux onetone to set frequencies and gains.
 Confirm readout timing in us and gains in [-1, 1].

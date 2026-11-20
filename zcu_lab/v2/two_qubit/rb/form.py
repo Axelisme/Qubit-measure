@@ -15,7 +15,7 @@ T_Cfg = TypeVar("T_Cfg", bound=RBCfg | RBHeraldedCfg)
 
 
 def rb_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
-    """Capture role identities, X90/CZ/readout slots and required named phase pair.
+    """Capture role identities, X90/X180/CZ/readout slots and named phase pair.
 
     Missing pulse/readout slots or correction fields stay Invalid, never zero
     or simulator defaults. Circle centers and radii come from the saved role-tone
@@ -43,6 +43,8 @@ def rb_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
             "reset": None,
             "x90_f1": Slot("$f1.module.x90", copy=True),
             "x90_f2": Slot("$f2.module.x90", copy=True),
+            "x180_f1": Slot("$f1.module.x180", copy=True),
+            "x180_f2": Slot("$f2.module.x180", copy=True),
             "readout": readout,
             "drive": {
                 "f1": Slot("$coupler.module.cz_f1", copy=True),
