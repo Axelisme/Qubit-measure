@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from qtpy.QtCore import QCoreApplication, QEvent
+from qtpy.QtCore import QCoreApplication, QEvent, Qt
 from qtpy.QtWidgets import QApplication, QVBoxLayout, QWidget
 from zcu_tools.cfg_model import (
     ConfigBase,
@@ -265,6 +265,7 @@ def exercise_writeback(app: QApplication, output: Path) -> None:
         driver.click("Edit")
         capture(driver, output, "writeback-02-dialog")
         driver.click(object_name="form.fold.group.Advanced")
+        driver.press_key(Qt.Key.Key_PageDown, object_name="form.fold.group.Advanced")
         capture(driver, output, "writeback-03-none")
         assert driver.observe(object_name="form.input.classifier").text == "None"
         driver.choose_option(object_name="form.input.classifier", value="linear")

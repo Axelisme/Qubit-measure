@@ -44,15 +44,15 @@ class _PulseFields[WaveformT](_ModuleFields):
     type: Literal["pulse"] = "pulse"
     waveform: Annotated[WaveformT, FieldMeta(label="Waveform")]
     ch: Annotated[int, FieldMeta(label="Gen ch")]
-    nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
     freq: Annotated[
         float | QickParam, FieldMeta(label="Frequency", unit="MHz", decimals=3)
     ]
+    gain: Annotated[Gain | QickParam, FieldMeta(label="Gain", unit="a.u.", decimals=4)]
+    nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
     phase: Annotated[
         float | QickParam,
         FieldMeta(label="Phase", unit="deg", decimals=2, group="Advanced"),
     ] = 0.0
-    gain: Annotated[Gain | QickParam, FieldMeta(label="Gain", unit="a.u.", decimals=4)]
     pre_delay: Annotated[
         float | QickParam,
         FieldMeta(label="Pre-delay", unit="us", decimals=3, group="Advanced"),
@@ -102,17 +102,24 @@ class _PulseReadoutFields[WaveformT](_ModuleFields):
     calibration is available. The readout module does not apply classification.
     """
 
-    classifier: Annotated[
-        ReadoutClassifier | None, FieldMeta(label="Classifier", group="Advanced")
-    ] = None
     type: Literal["readout/pulse"] = "readout/pulse"
     waveform: Annotated[WaveformT, FieldMeta(label="Waveform")]
     gen_ch: Annotated[int, FieldMeta(label="Gen ch")]
-    nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
     freq: Annotated[
         float | QickParam, FieldMeta(label="Frequency", unit="MHz", decimals=3)
     ]
     gain: Annotated[Gain | QickParam, FieldMeta(label="Gain", unit="a.u.", decimals=4)]
+    ro_ch: Annotated[int, FieldMeta(label="RO ch")]
+    ro_length: Annotated[
+        float | QickParam, FieldMeta(label="RO length", unit="us", decimals=3)
+    ]
+    trig_offset: Annotated[
+        float | QickParam, FieldMeta(label="Trig offset", unit="us", decimals=3)
+    ] = 0.0
+    classifier: Annotated[
+        ReadoutClassifier | None, FieldMeta(label="Classifier", group="Advanced")
+    ] = None
+    nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
     phase: Annotated[
         float | QickParam,
         FieldMeta(label="Phase", unit="deg", decimals=2, group="Advanced"),
@@ -128,13 +135,6 @@ class _PulseReadoutFields[WaveformT](_ModuleFields):
     post_delay: Annotated[
         float | QickParam,
         FieldMeta(label="Post-delay", unit="us", decimals=3, group="Advanced"),
-    ] = 0.0
-    ro_ch: Annotated[int, FieldMeta(label="RO ch")]
-    ro_length: Annotated[
-        float | QickParam, FieldMeta(label="RO length", unit="us", decimals=3)
-    ]
-    trig_offset: Annotated[
-        float | QickParam, FieldMeta(label="Trig offset", unit="us", decimals=3)
     ] = 0.0
 
 

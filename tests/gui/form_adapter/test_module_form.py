@@ -581,6 +581,34 @@ def test_generated_model_nests_in_module_inline_with_host_choices() -> None:
     assert isinstance(cfg, PulseSpec) and cfg.ch == 3 and cfg.waveform == "w"
 
 
+@pytest.mark.parametrize(
+    ("spec_type", "path", "draft"),
+    [
+        (PulseSpec, (), {}),
+        (PulseReadoutSpec, (), {}),
+        (MuxReadoutSpec, ("tones", 0), {"tones": [{"freq": 6000.0}]}),
+    ],
+    ids=["pulse", "pulse-readout", "mux-readout-tone"],
+)
+def test_module_form_places_advanced_after_ordinary_fields(
+    spec_type: type[PulseSpec] | type[PulseReadoutSpec] | type[MuxReadoutSpec],
+    path: FormWritePath,
+    draft: dict[str, JsonValue],
+) -> None:
+    form = form_adapter.module_form(spec_type)
+    state = FormState(FormInput(form.model, draft))
+    fields = [
+        field for field in state.describe(path, FormEnv()).children if not field.hidden
+    ]
+    ordinary = [field.title for field in fields if field.group != "Advanced"]
+    advanced = [field.title for field in fields if field.group == "Advanced"]
+
+    assert ordinary and advanced
+    assert [field.title for field in fields] == ordinary + advanced
+    if not path:
+        assert ordinary[:4] == ["Waveform", "Gen ch", "Frequency", "Gain"]
+
+
 @pytest.mark.parametrize("spec_type", [PulseSpec, PulseReadoutSpec])
 def test_spec_field_meta_reaches_generated_description(
     spec_type: type[PulseSpec] | type[PulseReadoutSpec],
