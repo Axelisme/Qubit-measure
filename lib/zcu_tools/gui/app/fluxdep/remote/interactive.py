@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -32,7 +32,7 @@ from zcu_tools.plotting.fluxdep.onetone import make_onetone_pick_figure
 from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
 from zcu_tools.plotting.fluxdep.twotone import make_twotone_pick_figure
 
-from ..event_bus import FollowDisplayPayload
+from ..event_bus import FollowDisplayPayload, InteractiveKind
 from .dto import (
     ContextReplyBase,
     InteractiveContextReply,
@@ -341,6 +341,11 @@ def h_interactive_read(
     )
 
 
+def _spectrum_stage(kind: InteractiveKind) -> Literal["align", "sample"]:
+    assert kind != "selection"  # Filter has no spectrum stage.
+    return "align" if kind == "line" else "sample"
+
+
 def h_spectrum_interactive_open(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> InteractiveReply:
@@ -375,9 +380,8 @@ def h_spectrum_interactive_open(
         )
     reply = _reply(owner, active)
     if previous is not None and previous.context is not context:
-        reply["discarded"] = "align" if previous.kind == "line" else "sample"
-    stage = "align" if active.kind == "line" else "sample"
-    adapter.ctrl.bus.emit(FollowDisplayPayload(stage, name))
+        reply["discarded"] = _spectrum_stage(previous.kind)
+    adapter.ctrl.bus.emit(FollowDisplayPayload(_spectrum_stage(active.kind), name))
     return reply
 
 
@@ -470,8 +474,9 @@ def _command(
     elif context["closed"]:
         follow = FollowDisplayPayload("preview", context["spectrum_name"])
     else:
-        stage = "align" if context["kind"] == "line" else "sample"
-        follow = FollowDisplayPayload(stage, context["spectrum_name"])
+        follow = FollowDisplayPayload(
+            _spectrum_stage(context["kind"]), context["spectrum_name"]
+        )
     adapter.ctrl.bus.emit(follow)
     return reply
 

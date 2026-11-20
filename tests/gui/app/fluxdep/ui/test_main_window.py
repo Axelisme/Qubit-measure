@@ -12,9 +12,12 @@ import numpy as np
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.text import Text
+from PyQt6 import sip
+from qtpy.QtCore import QCoreApplication, QEvent
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.event_bus import InteractiveChangedPayload
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 
@@ -59,6 +62,30 @@ def window(qapp, ctrl):
 
 def test_window_builds_empty(window):
     assert spectra_list(window).count() == 0
+
+
+def test_interactive_delivery_skips_window_closed_during_emit(qapp, ctrl, caplog):
+    def close_window(_payload: InteractiveChangedPayload) -> None:
+        assert win.close()
+        win.deleteLater()
+        QCoreApplication.sendPostedEvents(win, QEvent.Type.DeferredDelete.value)
+
+    # Close from an earlier subscriber while the same event is still in flight.
+    subscription = ctrl.bus.subscribe(InteractiveChangedPayload, close_window)
+    win = MainWindow(ctrl)
+    try:
+        ctrl.bus.emit(InteractiveChangedPayload(1, "line", "a", "opened"))
+        assert sip.isdeleted(win)
+        assert not [
+            record
+            for record in caplog.records
+            if record.name == "zcu_tools.gui.event_bus" and record.exc_info is not None
+        ]
+    finally:
+        subscription.unsubscribe()
+        if not sip.isdeleted(win):
+            win.close()
+            win.deleteLater()
 
 
 def test_shell_exposes_top_bar_commands_and_two_pages(window):

@@ -132,9 +132,7 @@ class MainWindow(QMainWindow):
             search_runner.setParent(self)
         if interactive_runner is not None:
             interactive_runner.setParent(self)
-        self._bus_subs = EventSubscriptions()
         self._event_scope = LifetimeScope(self)
-        self._event_scope.add_cleanup(self._bus_subs.unsubscribe_all)
         self._routing_editor = False
         self._routing_page = False
         self._editor_context_id: int | None = None
@@ -197,8 +195,9 @@ class MainWindow(QMainWindow):
             self._shutdown_application = None
 
     def deleteLater(self) -> None:
-        """Retire watches before direct Qt deletion, without domain shutdown."""
+        """Retire view callbacks before direct Qt deletion, without domain shutdown."""
         self.dispose_control_watches()
+        self._event_scope.close()
         super().deleteLater()
 
     def _build_ui(self) -> None:
@@ -325,31 +324,25 @@ class MainWindow(QMainWindow):
 
     def _subscribe_events(self) -> None:
         bus = self._ctrl.bus
-        self._bus_subs.subscribe(bus, SpectrumAddedPayload, self._on_spectrum_added)
-        self._bus_subs.subscribe(bus, SpectrumRemovedPayload, self._on_spectrum_removed)
-        self._bus_subs.subscribe(bus, SpectrumChangedPayload, self._on_spectrum_changed)
-        self._bus_subs.subscribe(
-            bus, ActiveSpectrumChangedPayload, self._on_active_changed
+        subs = EventSubscriptions()
+        self._event_scope.add_cleanup(subs.unsubscribe_all)
+        callback = self._event_scope.callback
+        subs.subscribe(bus, SpectrumAddedPayload, callback(self._on_spectrum_added))
+        subs.subscribe(bus, SpectrumRemovedPayload, callback(self._on_spectrum_removed))
+        subs.subscribe(bus, SpectrumChangedPayload, callback(self._on_spectrum_changed))
+        subs.subscribe(
+            bus, ActiveSpectrumChangedPayload, callback(self._on_active_changed)
         )
-        self._bus_subs.subscribe(
-            bus, InteractiveChangedPayload, self._on_interactive_changed
+        subs.subscribe(
+            bus, InteractiveChangedPayload, callback(self._on_interactive_changed)
         )
-        self._bus_subs.subscribe(
-            bus,
-            FollowDisplayPayload,
-            self._event_scope.callback(self._on_follow_display),
-        )
-        self._bus_subs.subscribe(bus, ProjectChangedPayload, self._on_project_changed)
+        subs.subscribe(bus, FollowDisplayPayload, callback(self._on_follow_display))
+        subs.subscribe(bus, ProjectChangedPayload, callback(self._on_project_changed))
         # Filter publication changes the per-spectrum excluded counts in the list.
-        self._bus_subs.subscribe(
-            bus, SelectionChangedPayload, self._on_selection_changed
+        subs.subscribe(
+            bus, SelectionChangedPayload, callback(self._on_selection_changed)
         )
-        self._bus_subs.subscribe(
-            bus,
-            SearchChangedPayload,
-            self._event_scope.callback(self._on_search_changed),
-        )
-        self.destroyed.connect(self._bus_subs.unsubscribe_all)
+        subs.subscribe(bus, SearchChangedPayload, callback(self._on_search_changed))
 
     def _on_interactive_changed(self, payload: InteractiveChangedPayload) -> None:
         if payload.phase == "updated":
