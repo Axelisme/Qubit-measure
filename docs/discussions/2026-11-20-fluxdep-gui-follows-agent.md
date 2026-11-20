@@ -14,7 +14,7 @@ basis:
 
 ## 結論
 
-2026-11-20，使用者回答：「關於fluxdep gui，1A 2A」。他選擇讓 fluxdep GUI 跟隨 agent 操作的譜、主頁與階段。成功的非唯讀命令會跟隨，未編輯就按 Finish 或 Cancel 也一樣。唯讀命令不切換。跟隨不轉移控制權，沒有控制權的人只能檢視。決策見 [ADR-0075〈Tool 即意圖〉](../adr/0075-agent-interface-layers.md#tool-即意圖)。
+2026-11-20，使用者回答：「關於fluxdep gui，1A 2A」。使用者選擇讓 fluxdep GUI 跟隨 agent 操作的譜、主頁與階段。成功的非唯讀命令會跟隨，未編輯就按 Finish 或 Cancel 也一樣。唯讀命令不切換。跟隨不轉移控制權，沒有控制權的人只能檢視。決策見 [ADR-0075〈Tool 即意圖〉](../adr/0075-agent-interface-layers.md#tool-即意圖)。
 
 Agent 根據命令的目標決定四個細節。移除目前選中的譜時清空選取，不替使用者挑下一張。還原時選清單的第一張。搜尋成功完成時切到 Show。`project.setup` 只更新一直可見的專案標頭，不切頁。完整對照見 [fluxdep README〈跟隨遠端操作〉](../../lib/zcu_tools/gui/app/fluxdep/README.md#跟隨遠端操作)。
 
