@@ -2,14 +2,14 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-11-20，two-qubit CZ amplitude
+**Last updated:** 2026-11-20，two-qubit conditional phase
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
 
 ## 宣告與註冊
 
-[__init__.py](__init__.py) 的 `RECIPES` 明列 44 個 recipe，不掃描目錄。
+[__init__.py](__init__.py) 的 `RECIPES` 明列 46 個 recipe，不掃描目錄。
 每個模組用 `@recipe(name, description)` 裝飾
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
 每個 recipe 的 `Inputs` 繼承 `RecipeInputs`。實驗欄位逐欄寫單位、預設與 null 政策。
@@ -211,6 +211,8 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | `chain_t2echo` | `chain/t2echo` | 掃總 echo 等待，`max_delay_us`（總長）、`points`。每個 block 是 (π/2, x/2, π, x/2, π/2, 讀, 讀)。起點取自 `twotone/t2echo` 的第一讀擬合。回報 T2 echo、第三態衰減時間與 Wald 誤差、三項檢查，不提出 writeback。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 | [`two_qubit_cz_amplitude`](two-qubit-guide.md#two_qubit_cz_amplitude) | `two_qubit/cz_amplitude` | `scale_range`、`scale_points` 掃兩路共同 gain 倍率。回報第一個 return scale 與擬合診斷。有候選才問 Primary 寫回；完成 Run 後保存。 |
+| [`two_qubit_conditional_phase`](two-qubit-guide.md#two_qubit_conditional_phase) | `two_qubit/conditional_phase` | 用 `ramsey_role` 選相位量測的 qubit，並設定 `gate_count`、`frequency_range` 與 `frequency_points`。回報唯一的 π 交點，或 null 與原因。有交點才問 Primary 頻率寫回；完成 Run 後保存。 |
+| [`two_qubit_conditional_phase_heralded`](two-qubit-guide.md#two_qubit_conditional_phase_heralded) | `two_qubit/conditional_phase_heralded` | 掃描輸入同上。每發先做 mux herald，用 joint gg/ee 斜率找唯一的 π 交點；沒有交點不問寫回。完成 Run 後保存。 |
 
 有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
 CPMG report 回傳 `t2_1_us`、`t2_1_err_us`、`gamma`、`gamma_err` 與 `fit_rows`。可加權列少於三列時四個擬合值為 null，仍保存圖與原始資料；分析失敗時 `fit_rows=0` 並附原因。
