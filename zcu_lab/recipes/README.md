@@ -2,14 +2,14 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-11-20，two-qubit CZ amplitude、local Z 與 constructive phase
+**Last updated:** 2026-11-20，two-qubit CZ amplitude、local Z、constructive phase 與 conditional phase
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
 
 ## 宣告與註冊
 
-[__init__.py](__init__.py) 的 `RECIPES` 明列 46 個 recipe，不掃描目錄。
+[__init__.py](__init__.py) 的 `RECIPES` 明列 48 個 recipe，不掃描目錄。
 每個模組用 `@recipe(name, description)` 裝飾
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
 每個 recipe 的 `Inputs` 繼承 `RecipeInputs`。實驗欄位逐欄寫單位、預設與 null 政策。
@@ -213,6 +213,8 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | [`two_qubit_cz_amplitude`](two-qubit-guide.md#two_qubit_cz_amplitude) | `two_qubit/cz_amplitude` | `scale_range`、`scale_points` 掃兩路共同 gain 倍率。回報第一個 return scale 與擬合診斷。有候選才問 Primary 寫回；完成 Run 後保存。 |
 | [`two_qubit_local_z`](two-qubit-guide.md#two_qubit_local_z) | `two_qubit/local_z` | 掃 `gate_count`，分別回報 F1、F2 的相位擬合。兩條擬合都給出 correction 才詢問寫回校正對。 |
 | [`two_qubit_constructive_phase`](two-qubit-guide.md#two_qubit_constructive_phase) | `two_qubit/constructive_phase` | 掃 F2 相對相位和兩路共同脈衝長度。回報最大擬合速率的相位與干涉擬合診斷。有可辨識相位才詢問 F2 脈衝和 slot 寫回。 |
+| [`two_qubit_conditional_phase`](two-qubit-guide.md#two_qubit_conditional_phase) | `two_qubit/conditional_phase` | 用 `ramsey_role` 選相位量測的 qubit，並設定 `gate_count`、`frequency_range` 與 `frequency_points`。回報唯一的 π 交點，或 null 與原因。有交點才問 Primary 頻率寫回；完成 Run 後保存。 |
+| [`two_qubit_conditional_phase_heralded`](two-qubit-guide.md#two_qubit_conditional_phase_heralded) | `two_qubit/conditional_phase_heralded` | 掃描輸入同上。每發先做 mux herald，用 joint gg/ee 斜率找唯一的 π 交點；沒有交點不問寫回。完成 Run 後保存。 |
 
 有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
 CPMG report 回傳 `t2_1_us`、`t2_1_err_us`、`gamma`、`gamma_err` 與 `fit_rows`。可加權列少於三列時四個擬合值為 null，仍保存圖與原始資料；分析失敗時 `fit_rows=0` 並附原因。

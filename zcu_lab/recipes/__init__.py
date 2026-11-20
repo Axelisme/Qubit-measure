@@ -40,6 +40,10 @@ from .t1_cov import DEFINITION as T1_COV
 from .t2echo import DEFINITION as T2ECHO
 from .t2ramsey import DEFINITION as T2RAMSEY
 from .time_rabi import DEFINITION as TIME_RABI
+from .two_qubit_conditional_phase import DEFINITION as TWO_QUBIT_CONDITIONAL_PHASE
+from .two_qubit_conditional_phase_heralded import (
+    DEFINITION as TWO_QUBIT_CONDITIONAL_PHASE_HERALDED,
+)
 from .two_qubit_constructive_phase import DEFINITION as TWO_QUBIT_CONSTRUCTIVE_PHASE
 from .two_qubit_cz_amplitude import DEFINITION as TWO_QUBIT_CZ_AMPLITUDE
 from .two_qubit_local_z import DEFINITION as TWO_QUBIT_LOCAL_Z
@@ -94,4 +98,6 @@ RECIPES = (
     TWO_QUBIT_CZ_AMPLITUDE,
     TWO_QUBIT_LOCAL_Z,
     TWO_QUBIT_CONSTRUCTIVE_PHASE,
+    TWO_QUBIT_CONDITIONAL_PHASE,
+    TWO_QUBIT_CONDITIONAL_PHASE_HERALDED,
 )

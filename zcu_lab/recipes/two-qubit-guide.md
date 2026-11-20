@@ -91,3 +91,40 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 
 相位可辨識時，Primary 提出 F2 脈衝的 phase 更新和 coupler 的 F2 slot 兩筆候選。兩筆可獨立選取。
 F2 的新 phase 是來源 F1 phase 加上擬合的相對相位。參見 [候選目的地與 Apply 規則](../v2/two_qubit/constructive_phase/guide.md#review-and-apply-phase-proposals)。
+
+## two_qubit_conditional_phase
+
+`two_qubit_conditional_phase` 執行一次 `two_qubit/conditional_phase`。
+先依 [adapter 的準備說明](../v2/two_qubit/conditional_phase/guide.md#prepare-the-inputs) 確認兩顆 qubit 的脈衝與 mux 分類器。
+`ramsey_role` 填 `"f1"` 或 `"f2"`，寫入 Form 的 `target`，另一顆是 spectator。
+四角色的 recipe `target` 仍用來綁定 aliases。
+`gate_count` 填至少兩個不重複的正整數。
+`frequency_range: [start, stop]` 填遞增的 MHz 端點，`frequency_points` 設定 Expts。
+省略具名欄位會保留 Reset 值。Reset 沒有預填頻率端點，需用具名欄位或 overrides 提供。
+
+```json
+{
+  "target": {"f1": "F1", "f2": "F2", "coupler": "C0", "mux": "MG12"},
+  "ramsey_role": "f2",
+  "gate_count": [1, 2, 3],
+  "frequency_range": [5799.8, 5800.2],
+  "frequency_points": 21,
+  "reps": 1000,
+  "rounds": 10
+}
+```
+
+`frequency_mhz` 是掃描範圍內唯一的 π 交點。沒有唯一交點時，`frequency_mhz` 為 null，`frequency_reason` 轉交分析的原因，不詢問寫回。
+`fit_quality` 為 null。
+有交點時，Primary 提出兩筆 CZ 脈衝頻率更新和兩筆 coupler slot 更新。
+[脈衝與 slot 各自套用](../v2/two_qubit/conditional_phase/guide.md#select-a-frequency-and-apply)，回答前請確認兩路需要更新的項目。
+
+## two_qubit_conditional_phase_heralded
+
+`two_qubit_conditional_phase_heralded` 執行一次 `two_qubit/conditional_phase_heralded`。
+使用同一組輸入欄位。Gate count 的間距須符合 [heralded adapter 的輸入條件](../v2/two_qubit/conditional_phase/guide_heralded.md#inputs-and-sequence)，例如 `[1, 2, 3]`。
+每發都在相位序列前做 mux herald。兩個 conditional phase adapter 的 `reset` 只接受一般 reset，不能套用上文的 mux-herald reset override。
+
+`frequency_mhz` 來自 [joint gg/ee 斜率的 π 交點](../v2/two_qubit/conditional_phase/guide_heralded.md#counts-and-plots)，不以只有 gg 的交點替代。
+沒有唯一交點時同樣回 null 與 `frequency_reason`，不詢問寫回。
+有交點時，候選同樣是兩筆脈衝頻率和兩筆 slot 更新。
