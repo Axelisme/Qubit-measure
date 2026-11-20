@@ -1,0 +1,32 @@
+# Source: FTF CZ recalibration simulation, ftf-demo/initial, copied 2026-11-21.
+# Keep only the Q1/R1 components used by the single-resonator Form.
+format: zcu.parameter-container
+schema_version: 3
+format_version: '2.0'
+general:
+  created_at: '2026-11-20T11:22:09.131514Z'
+components:
+  Q1:
+    kind: qubit/fluxonium
+    ext: {}
+    module: {}
+    wiring:
+      ch: 2
+    freq:
+    flux:
+      offset: 0.48
+      period:
+        f1_bias: 0.0078003120124804995
+    resonator: R1
+    flux_dev: f1_bias
+  R1:
+    kind: resonator
+    ext: {}
+    module: {}
+    wiring:
+      ch: 0
+      ro_ch: 0
+    freq: 7190.0
+    kappa: 1.1
+    time_of_fly: 0.4
+metadata: {}

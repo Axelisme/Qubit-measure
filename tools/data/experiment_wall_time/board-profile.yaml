@@ -1,0 +1,268 @@
+# Source: zcu_lab/simulation_envs/profiles/qick_216_v2.yaml, copied 2026-11-21.
+# Source: bitfiles/qick_216_v2.hwh, interpreted with QICK 0.2.436 driver rules.
+# Generator/readout types and clock formulas follow the HWH. Channel counts,
+# indices and wiring serve the simulation environments, not a hardware inventory.
+# Generators 0..6 are v6: pulse readout on 0 and six charge drives on 1..6.
+# Generator 7 is mixmux8; its wave port is shared with both dyn readouts,
+# selected by tmux_ch 0/1/2. PFB outputs share one ADC and use tport triggers.
+# Generator samps_per_clk, maxlen, complex_env and maxv_scale retain the
+# compile placeholders for mixmux8. RF clock groups and tProc pins remain
+# untraced placeholders.
+# PFB decimation 2 is user-confirmed (HWH C_ADC_Decimation_Mode21=2).
+board: ZCU216
+sw_version: 0.2.436
+fw_timestamp: 'Tue Sep 10 16:13:40 2024'
+refclk_freq: 245.76
+extra_description: []
+tprocs:
+  - type: qick_processor
+    revision: 21
+    f_time: 430.08
+    f_core: 200.0
+    pmem_size: 4096
+    wmem_size: 1024
+    dmem_size: 4096
+    dreg_qty: 16
+    # Placeholders: these HWH pin nets have not been traced.
+    output_pins: []
+    start_pin: none
+    stop_pin: none
+generators:
+  - &generators0
+    type: axis_signal_gen_v6
+    fs_mult: 39
+    fs_div: 1
+    interpolation: 1
+    fabric_div: 16
+    rf_fabric_div: 16
+    samps_per_clk: 16
+    b_dds: 32
+    b_phase: 32
+    maxlen: 16384
+    complex_env: true
+    has_dds: true
+    has_mixer: false
+    maxv: 32766
+    maxv_scale: 1.0
+    dac: '00'
+    tproc_ch: 0
+    tmux_ch: null
+  - &generators1
+    type: axis_signal_gen_v6
+    fs_mult: 39
+    fs_div: 1
+    interpolation: 1
+    fabric_div: 16
+    rf_fabric_div: 16
+    samps_per_clk: 16
+    b_dds: 32
+    b_phase: 32
+    maxlen: 4096
+    complex_env: true
+    has_dds: true
+    has_mixer: false
+    maxv: 32766
+    maxv_scale: 1.0
+    dac: '01'
+    tproc_ch: 1
+    tmux_ch: null
+  - &generators2
+    type: axis_signal_gen_v6
+    fs_mult: 39
+    fs_div: 1
+    interpolation: 1
+    fabric_div: 16
+    rf_fabric_div: 16
+    samps_per_clk: 16
+    b_dds: 32
+    b_phase: 32
+    maxlen: 8192
+    complex_env: true
+    has_dds: true
+    has_mixer: false
+    maxv: 32766
+    maxv_scale: 1.0
+    dac: '02'
+    tproc_ch: 2
+    tmux_ch: null
+  - <<: *generators1
+    dac: '03'
+    tproc_ch: 3
+    tmux_ch: null
+  - <<: *generators1
+    dac: '04'
+    tproc_ch: 4
+    tmux_ch: null
+  - <<: *generators1
+    dac: '05'
+    tproc_ch: 5
+    tmux_ch: null
+  - <<: *generators1
+    dac: '06'
+    tproc_ch: 6
+    tmux_ch: null
+  - type: axis_sg_mixmux8_v1
+    fs_mult: 56
+    fs_div: 2
+    interpolation: 4
+    fabric_div: 16
+    rf_fabric_div: 16
+    samps_per_clk: 1
+    b_dds: 32
+    b_phase: 32
+    maxlen: 8192
+    complex_env: true
+    has_dds: true
+    has_mixer: true
+    maxv: 32766
+    maxv_scale: 0.9
+    dac: '12'
+    tproc_ch: 7
+    tmux_ch: 0
+readouts:
+  - &readouts0
+    type: axis_dyn_readout_v1
+    ro_type: axis_dyn_readout_v1
+    fs_mult: 40
+    fs_div: 4
+    decimation: 1
+    samps_per_clk: 8
+    b_dds: 32
+    buf_maxlen: 4096
+    avg_maxlen: 8192
+    avgbuf_type: axis_avg_buffer
+    avgbuf_version: '1.0'
+    has_edge_counter: false
+    has_weights: false
+    has_outsel: true
+    iq_offset: 0.0
+    coupling: AC
+    adc: '20'
+    tproc_ctrl: 7
+    tmux_ch: 1
+    trigger_type: tport
+    trigger_port: 10
+    trigger_bit: 0
+    tproc_ch: 0
+    b_phase: 32
+  - <<: *readouts0
+    adc: '22'
+    tproc_ctrl: 7
+    tmux_ch: 2
+    trigger_type: tport
+    trigger_port: 11
+    trigger_bit: 0
+    tproc_ch: 1
+    b_phase: 32
+  - &readouts1
+    type: axis_pfb_readout_v4
+    ro_type: axis_pfb_readout_v4
+    fs_mult: 40
+    fs_div: 4
+    decimation: 2
+    samps_per_clk: 4
+    b_dds: 32
+    buf_maxlen: 1024
+    avg_maxlen: 8192
+    avgbuf_type: axis_avg_buffer
+    avgbuf_version: '1.0'
+    has_edge_counter: false
+    has_weights: false
+    has_outsel: false
+    iq_offset: -0.5
+    coupling: AC
+    adc: '21'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: tport
+    trigger_port: 12
+    trigger_bit: 0
+    tproc_ch: 2
+    b_phase: 32
+  - <<: *readouts1
+    adc: '21'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: tport
+    trigger_port: 13
+    trigger_bit: 0
+    tproc_ch: 3
+    b_phase: 32
+  - <<: *readouts1
+    adc: '21'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: tport
+    trigger_port: 14
+    trigger_bit: 0
+    tproc_ch: 4
+    b_phase: 32
+  - <<: *readouts1
+    adc: '21'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: tport
+    trigger_port: 15
+    trigger_bit: 0
+    tproc_ch: 5
+    b_phase: 32
+  - <<: *readouts1
+    adc: '21'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: tport
+    trigger_port: 16
+    trigger_bit: 0
+    tproc_ch: 6
+    b_phase: 32
+  - <<: *readouts1
+    adc: '21'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: tport
+    trigger_port: 17
+    trigger_bit: 0
+    tproc_ch: 7
+    b_phase: 32
+  - <<: *readouts1
+    adc: '21'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: tport
+    trigger_port: 18
+    trigger_bit: 0
+    tproc_ch: -1
+    b_phase: 32
+  - <<: *readouts1
+    adc: '21'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: tport
+    trigger_port: 19
+    trigger_bit: 0
+    tproc_ch: -1
+    b_phase: 32
+rf:
+  # HWH C_DAC_VOP_Mode=0 and C_DAC_Output_Current=0 select 20 mA.
+  dac_power: 20mA
+  # Placeholder: HWH clock nets have not been traced.
+  clk_groups: []
+mux:
+  - gen_ch: 7
+    ro_chs: [2, 3, 4, 5, 6, 7, 8, 9]
+    generator:
+      type: axis_sg_mixmux8_v1
+      has_mixer: true
+      n_tones: 8
+      has_gain: true
+      has_phase: true
+      interpolation: 4
+    readout:
+      type: axis_pfb_readout_v4
+      ro_type: axis_pfb_readout_v4
+      ro_fullpath: axis_pfb_readout_v4_0
+      pfb_nout: 8
+      pfb_nch: 64
+      pfb_ch_offset: 32
+      pfb_dds_on_output: true
+      has_outsel: false

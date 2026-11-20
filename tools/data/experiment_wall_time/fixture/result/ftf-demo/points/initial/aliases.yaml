@@ -1,0 +1,6 @@
+# Source: FTF CZ recalibration simulation, ftf-demo/initial, copied 2026-11-21.
+format: zcu.aliases
+format_version: '1.0'
+aliases:
+  qubit: Q1
+  resonator: $qubit.resonator

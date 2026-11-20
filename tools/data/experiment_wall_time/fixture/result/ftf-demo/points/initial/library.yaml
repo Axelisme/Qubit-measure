@@ -1,0 +1,44 @@
+# Source: FTF CZ recalibration simulation, ftf-demo/initial, copied 2026-11-21.
+format: zcu.module-library
+format_version: '2.0'
+components:
+  R1:
+    readout:
+      readout_rf:
+        type: readout/pulse
+        desc:
+        classifier:
+          mode: circle
+          g_center:
+            __complex__:
+            - 19.65473552528706
+            - 9.093232998504856
+          e_center:
+            __complex__:
+            - 36.350473545537795
+            - -58.38402008864197
+          radius: 48.180684213760934
+          confusion_matrix:
+          - - 0.9965424762668922
+            - 0.0024765934456462534
+            - 0.0009809302874615761
+          - - 0.007392874292957135
+            - 0.9926071257070428
+            - 0.0
+          - - 0.0
+            - 0.0
+            - 1.0
+        waveform:
+          style: const
+          length: 2.100801351175282
+        gen_ch: 0
+        nqz: 2
+        freq: 7189.980642392195
+        gain: 0.15
+        phase: 0.0
+        mixer_freq:
+        pre_delay: 0.0
+        post_delay: 0.0
+        ro_ch: 0
+        ro_length: 0.99
+        trig_offset: 1.110801351175282

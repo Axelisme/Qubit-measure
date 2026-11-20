@@ -45,8 +45,14 @@ class AcquireInput(BaseModel):
 
 
 @dataclass
-class _WallSummary:
-    """Keep measured-only totals and coverage counts for one complete group."""
+class AcquireWallTotals:
+    """Measured-only totals and coverage counts for a caller's group of acquires.
+
+    included counts records with all four wall measurements; excluded counts
+    the others. wall_s is total acquire wall seconds. compile_wall_s,
+    evolve_wall_s and readout_wall_s sum the corresponding stages in seconds.
+    remainder_s is acquire wall seconds not accounted for by those stages.
+    """
 
     included: int = 0
     excluded: int = 0
@@ -151,7 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for path in args.paths:
         files.update(path.glob("routing-*.jsonl") if path.is_dir() else (path,))
     families: dict[str, FamilySummary] = {}
-    wall_by_complete: dict[str, _WallSummary] = {}
+    wall_by_complete: dict[str, AcquireWallTotals] = {}
     records = skipped = 0
     for path in sorted(files):
         with path.open(encoding="utf-8") as stream:
@@ -173,7 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if record.complete
                     else "raised"
                 )
-                wall_by_complete.setdefault(group, _WallSummary()).add(record)
+                wall_by_complete.setdefault(group, AcquireWallTotals()).add(record)
                 for name, family in record.families.items():
                     families.setdefault(name, FamilySummary()).add(family)
     total_rows = sum(f.rows for f in families.values())

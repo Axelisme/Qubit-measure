@@ -46,6 +46,7 @@
 | `inspect_simulator_capture.py` | `tools/inspect_simulator_capture.py [path] --telemetry-directory DIRECTORY` | 0 完成，壞資料或讀檔失敗時非零 | 否 |
 | `family_pareto.py` | `-m tools.family_pareto --scenario <name>` | 0 完成，輸入或量測失敗時非零 | 否 |
 | `paired_benchmark.py` | `-m tools.paired_benchmark run --baseline A --candidate B --scenario NAME --reference-cache DIR --blocks K --exclusive --output FILE` | 0 完成；1 輸入、cache 或 child 失敗；2 用法錯誤 | 否，需外層 exclusive runner |
+| `experiment_wall_time.py` | `-m tools.experiment_wall_time [--output DIR]` | 0 寫完報表，Open／Run 或讀寫失敗時非零 | 否，只記耗時 |
 
 Usage 錯誤由 argparse 以 2 結束；未轉譯的 Git、讀檔或其他執行錯誤仍會傳出例外，不能當作檢查通過。
 模擬器量測與重計算的授權、排隊和收據要求見後續各節。表中的命令不提供執行授權。
@@ -150,6 +151,30 @@ write_snapshot(
 符合容差但非完全相同時顯示 `WITHIN TOL`，PNG 仍須像素相同。
 輸出差異的 exit 1 優先於輸入差異的 exit 3。Exit 3 需要人工判讀，不表示通過或失敗。
 比較結果不宣稱是 regression；模擬器或環境改動本來就可能改變結果。仍須逐張看圖驗收。
+
+## 實驗 Run 牆鐘
+
+`tools.experiment_wall_time` 目前只跑一列 `onetone/freq`。使用有 Qt 與 QICK 的 worktree 環境。它用 offscreen Qt 事件迴圈驅動 `Controller(view=None)`，不開視窗、遠端服務或硬體連線。它從 lab assembly 註冊元件與 adapter，再從[工具自己的輸入](data/experiment_wall_time/)載入 FTF、board profile 與校準 point，不讀 lab 的模擬環境 YAML。Run 使用 Open 的表單預設，不改參數。
+
+先切換到該 worktree。以下用非排他 runner 跑一次診斷。先把 `output` 設成尚未存在的絕對路徑：
+
+```bash
+scratch="$(dirname "$output")"
+mkdir -p "$scratch/no-opencl"
+OCL_ICD_VENDORS="$scratch/no-opencl" \
+ZCU_TOOLS_CACHE_DIR="$scratch/cache" NUMBA_CACHE_DIR="$scratch/numba" \
+uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
+  --wait-limit 60 --log "$output.log" 120 -- \
+  python -m tools.experiment_wall_time --output "$output" > "$output.receipt.json"
+```
+
+Linux 上，空的 ICD 目錄讓這次診斷不使用 OpenCL；cache 目錄放在診斷路徑旁。省略工具的 `--output` 時，工具在 `.agent_state/benchmark/wall-time/` 下建立有時間戳的新目錄。指定的目錄已存在時，工具會拒絕執行，不混用上次的 telemetry。
+
+`report.json` 記錄 Git commit、每份輸入檔各自的 SHA-256、RunRecord 的 UTC 時戳與 guide 路徑。`summary.md` 摘錄一列。Run 秒數由 monotonic clock 計算，從送出 Run 到 Controller 發布終態。Open、環境組裝、Analyze 與 Save 不計。工具不呼叫 Analyze 或 Save。
+
+`telemetry/` 留下這次 Run 的 acquire 記錄。Compile、evolve、readout 與 remainder 加總 acquire 內的牆鐘資料；remainder 不包含 acquire 外的 Run 開銷。沒有記錄或記錄缺牆鐘欄位時標「分項缺」，分項寫 `null`，Run 秒數照記。`project/` 保留這次 Run 用的 fixture 副本與 acquired ledger，不寫回入庫輸入。
+
+非排他的秒數只用於診斷，不作正式比較。這個工具不檢查精度，也不執行 kernel 比較；見 [ADR-0078](../docs/adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 
 ## Simulator benchmark
 

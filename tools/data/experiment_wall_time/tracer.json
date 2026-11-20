@@ -1,0 +1,6 @@
+{
+  "adapter": "onetone/freq",
+  "guide": "zcu_lab/v2/onetone/freq/guide.md",
+  "entry": "ftf-demo",
+  "point": "initial"
+}

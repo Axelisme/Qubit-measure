@@ -84,16 +84,19 @@ Solver 由清單與 solver 的顯式對應決定，不讀 tools metadata，也�
 
 ### 模擬器的測試與量測分層，不做 e2e
 
-模擬器的測試與量測工具只依賴模擬器，按層分開驗證：
+模擬器的測試與 kernel／family 比較只依賴模擬器，按層分開驗證：
 - Kernel：一段輸入，`Engine.evolve` 以 `families=` 固定候選，對獨立參考解量誤差與耗時。
 - Dispatch：rows → 選中的 family、guard 判定與排程工作量，不演化 density。Guard 走與 evolve 相同的路徑，包括它自己需要的 ODE，所以測試用小模型。入口是 `Engine.inspect_dispatch`。
 - 序列：手寫多段 `TimelineBatch`，在 `Engine.evolve` 上量最終 density 誤差與總耗時。「合格只比耗時」用的最終誤差、整體沒變慢與 family 去留都在這一層量。序列場景照約化軸（gate 種類 × 個數）宣告，不逐實驗加。
 - 前端：program → 編譯後的訊號，不演化。
 - Environment：給定 density，驗讀出。
 
-不做 program → 編譯 → 演化 → I/Q 一次跑完的測試或量測，入庫的 program → acquire benchmark 因此退休，計時只包 `Engine.evolve`。
-例：成對計時在序列層比兩個 checkout 的 `Engine.evolve`，不經 acquire；FTF environment 測試注入不演化的 Engine 替身驗讀出交接，演化精度只在 evolution 的契約測試驗。
-邊界：除錯例外。使用者回報的錯在各層都重現不出來時，可以跑一次 e2e 定位；腳本不入庫，也不當驗收門檻。
+不做 program → 編譯 → 演化 → I/Q 一次跑完的 e2e 測試。演化精度仍在序列層驗，kernel／family 比較的計時只包 `Engine.evolve`。
+例如，成對計時在序列層比兩個 checkout 的 `Engine.evolve`，不經 acquire。FTF environment 測試用不演化的 Engine 替身驗讀出交接。
+
+整實驗牆鐘只有 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 這支工具可以入庫執行完整實驗。它用固定模擬輸入，在 `time_scale=0` 下記錄正常參數的 Run 耗時與分項。它不作測試、gate 或精度證據。2026-11-20，使用者問：「為什麼要用不入庫的 scratch 腳本量?而不是入庫的？」2026-11-21 對以整個 Run 牆鐘作優化指標、工具入庫但不當 gate 的建議答「都採用建議」。取捨見[實驗 Run 牆鐘工具](../discussions/2026-11-21-experiment-run-wall-time.md)。
+
+除錯例外不變。使用者回報的錯在各層都重現不出來時，可以跑一次 e2e 定位。腳本不入庫，也不當驗收門檻。
 
 2026-11-15，使用者說：「我會預期模擬器測試腳本只會依賴模擬器模塊，後端與前端分開測，kernel與dispatch也分開測，不該有e2e的測試需求」。對「整條序列的最終誤差放哪一層」答「A」，即加序列層，不只留 kernel 與 dispatch，也不保留 acquire e2e 只記耗時；對除錯邊界答「我選B」，即除錯時可以跑 e2e，腳本不入庫、不當門檻。
 選項比較見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
