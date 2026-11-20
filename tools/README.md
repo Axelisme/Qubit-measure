@@ -46,7 +46,7 @@
 | `inspect_simulator_capture.py` | `tools/inspect_simulator_capture.py [path] --telemetry-directory DIRECTORY` | 0 完成，壞資料或讀檔失敗時非零 | 否 |
 | `family_pareto.py` | `-m tools.family_pareto --scenario <name>` | 0 完成，輸入或量測失敗時非零 | 否 |
 | `paired_benchmark.py` | `-m tools.paired_benchmark run --baseline A --candidate B --scenario NAME --reference-cache DIR --blocks K --exclusive --output FILE` | 0 完成；1 輸入、cache 或 child 失敗；2 用法錯誤 | 否，需外層 exclusive runner |
-| `experiment_wall_time.py` | `-m tools.experiment_wall_time [--output DIR]` | 0 寫完報表，Open／Run 或讀寫失敗時非零 | 否，只記耗時 |
+| `experiment_wall_time.py` | `-m tools.experiment_wall_time [--select FAMILY_OR_ADAPTER ...] [--output DIR]` | 0 寫完報表，非預期的 Open／Run 或讀寫錯誤時非零 | 否，只記耗時 |
 
 Usage 錯誤由 argparse 以 2 結束；未轉譯的 Git、讀檔或其他執行錯誤仍會傳出例外，不能當作檢查通過。
 模擬器量測與重計算的授權、排隊和收據要求見後續各節。表中的命令不提供執行授權。
@@ -154,9 +154,19 @@ write_snapshot(
 
 ## 實驗 Run 牆鐘
 
-`tools.experiment_wall_time` 目前只跑一列 `onetone/freq`。使用有 Qt 與 QICK 的 worktree 環境。它用 offscreen Qt 事件迴圈驅動 `Controller(view=None)`，不開視窗、遠端服務或硬體連線。它從 lab assembly 註冊元件與 adapter，再從[工具自己的輸入](data/experiment_wall_time/)載入 FTF、board profile 與校準 point，不讀 lab 的模擬環境 YAML。Run 使用 Open 的表單預設，不改參數。
+`tools.experiment_wall_time` 預設為 lab assembly 註冊的每個 adapter 產生一列。`--select` 接受完整的 adapter key 或第一段家族名。例如 `--select onetone/freq` 選一個實驗，`--select mux` 選整個家族。可以重複指定，重疊的實驗只跑一次。省略 `--output` 時，工具在 `.agent_state/benchmark/wall-time/` 下建立有時間戳的新目錄。指定的目錄必須尚未存在。
 
-先切換到該 worktree。以下用非排他 runner 跑一次診斷。先把 `output` 設成尚未存在的絕對路徑：
+使用有 Qt 與 QICK 的 worktree 環境。工具用 `Controller(view=None)` 和 Qt 事件迴圈，不開視窗、遠端服務或硬體連線。工具只讀[自持的 FTF 設定、board profile 和校準 point](data/experiment_wall_time/)。FTF 的 `time_scale` 是 0，初始虛擬電流是 fixture 的校準工作點。每個案例有獨立的模擬環境和 project 副本。工具用 Open 建立表單，接著透過表單介面套用[覆寫表](data/experiment_wall_time/overrides.json)中該 adapter 的欄位。每筆覆寫記 adapter key、表單 cfg 路徑、JSON 值與依據。路徑使用欄位名及從 0 開始的清單索引，例如 `['delay', 'n']` 是線性掃描的點數。
+
+正式批次在該 worktree 用 `tools/run_heavy.py --exclusive`。先設定 `output` 為新的絕對路徑、`budget_s` 為整批 payload 的秒數預算：
+
+```bash
+uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
+  --exclusive --wait-limit 120 --log "$output.log" "$budget_s" -- \
+  python -m tools.experiment_wall_time --output "$output" > "$output.receipt.json"
+```
+
+單列 CPU 診斷可用非排他 runner。Linux 上，空的 ICD 目錄停用 OpenCL。cache 留在診斷路徑旁；非排他的秒數不用於正式比較。
 
 ```bash
 scratch="$(dirname "$output")"
@@ -165,16 +175,16 @@ OCL_ICD_VENDORS="$scratch/no-opencl" \
 ZCU_TOOLS_CACHE_DIR="$scratch/cache" NUMBA_CACHE_DIR="$scratch/numba" \
 uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
   --wait-limit 60 --log "$output.log" 120 -- \
-  python -m tools.experiment_wall_time --output "$output" > "$output.receipt.json"
+  python -m tools.experiment_wall_time --select onetone/freq --output "$output" > "$output.receipt.json"
 ```
 
-Linux 上，空的 ICD 目錄讓這次診斷不使用 OpenCL；cache 目錄放在診斷路徑旁。省略工具的 `--output` 時，工具在 `.agent_state/benchmark/wall-time/` 下建立有時間戳的新目錄。指定的目錄已存在時，工具會拒絕執行，不混用上次的 telemetry。
+`report.json` 記錄 Git HEAD、每份輸入的 SHA-256、RunRecord 的 UTC 時戳與 adapter 宣告的 guide 路徑。從乾淨 checkout 執行，才能用報表的 commit 找回執行時的程式。`summary.md` 用未四捨五入的 Run 秒數列出嚴格大於 180 秒的實驗。Run 由 monotonic clock 計算，從送出 Run 到 Controller 發布終態。環境組裝、Open 與覆寫不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。
 
-`report.json` 記錄 Git commit、每份輸入檔各自的 SHA-256、RunRecord 的 UTC 時戳與 guide 路徑。`summary.md` 摘錄一列。Run 秒數由 monotonic clock 計算，從送出 Run 到 Controller 發布終態。Open、環境組裝、Analyze 與 Save 不計。工具不呼叫 Analyze 或 Save。
+每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留 fixture 副本與 acquired ledger，不寫回入庫輸入。Compile、evolve、readout 與 remainder 加總該目錄中的 acquire 牆鐘。Remainder 不含 acquire 外的 Run 開銷。若沒有 acquire 記錄或分項不全，`missing_breakdown` 保留 Run 秒數，分項寫 `null`。
 
-`telemetry/` 留下這次 Run 的 acquire 記錄。Compile、evolve、readout 與 remainder 加總 acquire 內的牆鐘資料；remainder 不包含 acquire 外的 Run 開銷。沒有記錄或記錄缺牆鐘欄位時標「分項缺」，分項寫 `null`，Run 秒數照記。`project/` 保留這次 Run 用的 fixture 副本與 acquired ledger，不寫回入庫輸入。
+Open 加上覆寫後仍缺欄位或 slot 時，`missing_defaults` 列出表單的錯誤，不送出 Run。[案例宣告](data/experiment_wall_time/case-inputs.json)列出這個 FTF 環境無法執行的 adapter；這些 `not_runnable` 列寫原因，不建立 case 目錄。環境組裝、檔案讀取、telemetry 格式及未分類的 Run 失敗會中止指令，不轉成案例狀態。
 
-非排他的秒數只用於診斷，不作正式比較。這個工具不檢查精度，也不執行 kernel 比較；見 [ADR-0078](../docs/adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
+兩份報表都用完整 inventory 檢查 guide，不限於選中的實驗。盤點掃描 `zcu_lab/v2/` 的 `guide.md`、`guide.*.md` 和 `guide_*.md`，不讀內容。報表分開列出沒有宣告的 adapter、宣告路徑未入盤點的 adapter，以及沒有 adapter 宣告的 guide。工具不檢查精度，也不執行 kernel 比較。見 [ADR-0078](../docs/adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 
 ## Simulator benchmark
 

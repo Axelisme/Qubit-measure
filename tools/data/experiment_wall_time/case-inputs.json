@@ -1,0 +1,12 @@
+{
+  "entry": "ftf-demo",
+  "point": "initial",
+  "ftf_exclusions": {
+    "jpa/auto_optimize": "FTF does not model a JPA and has no JPA pump RF or flux device.",
+    "jpa/check": "FTF does not model a JPA or expose an RF device to toggle its pump.",
+    "jpa/flux": "FTF does not model a JPA or expose a JPA flux device.",
+    "jpa/flux_onetone": "FTF does not model a JPA or expose a JPA flux device.",
+    "jpa/freq": "FTF has no pump RF device or JPA response to pump frequency.",
+    "jpa/power": "FTF has no pump RF device or JPA response to pump power."
+  }
+}

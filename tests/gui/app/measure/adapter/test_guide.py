@@ -28,6 +28,7 @@ def test_guide_reads_utf8_markdown_and_keeps_resource_directory(tmp_path: Path) 
 
 
 def test_undeclared_guide_reports_unwritten_and_no_resources() -> None:
+    assert SampleAdapter.guide_path is None
     guide = SampleAdapter.guide()
     assert guide.markdown == "(no guide written yet)"
     assert guide.resource_dir is None
@@ -43,5 +44,6 @@ def test_declared_missing_guide_raises_instead_of_using_default(tmp_path: Path) 
         post_analysis=SampleAdapter.post_analysis,
     )
 
+    assert MissingGuideAdapter.guide_path == tmp_path / "missing.md"
     with pytest.raises(FileNotFoundError):
         MissingGuideAdapter.guide()

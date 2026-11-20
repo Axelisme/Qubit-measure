@@ -1,0 +1,4 @@
+# Source project: ftf-cz-recalibration-20261120 (FTF simulation); copied 2026-11-21.
+# Entry: ftf-demo; source document revision (SHA-256): d80a4effecf5343fa1a575e61e7cfca15115ccb1f08b39471fc92a1adf3d9a89
+format: zcu.module-library
+format_version: '2.0'

@@ -94,7 +94,7 @@ Solver 由清單與 solver 的顯式對應決定，不讀 tools metadata，也�
 不做 program → 編譯 → 演化 → I/Q 一次跑完的 e2e 測試。演化精度仍在序列層驗，kernel／family 比較的計時只包 `Engine.evolve`。
 例如，成對計時在序列層比兩個 checkout 的 `Engine.evolve`，不經 acquire。FTF environment 測試用不演化的 Engine 替身驗讀出交接。
 
-整實驗牆鐘只有 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 這支工具可以入庫執行完整實驗。它用固定模擬輸入，在 `time_scale=0` 下記錄正常參數的 Run 耗時與分項。它不作測試、gate 或精度證據。2026-11-20，使用者問：「為什麼要用不入庫的 scratch 腳本量?而不是入庫的？」2026-11-21 對以整個 Run 牆鐘作優化指標、工具入庫但不當 gate 的建議答「都採用建議」。取捨見[實驗 Run 牆鐘工具](../discussions/2026-11-21-experiment-run-wall-time.md)。
+整實驗牆鐘只有 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 這支工具可以入庫執行完整實驗。它用固定模擬輸入，在 `time_scale=0` 下記錄正常參數的 Run 耗時與分項。它只計送出 Run 到終態，不呼叫 Analyze 或 Save。它不作測試、gate 或精度證據。2026-11-20，使用者問：「為什麼要用不入庫的 scratch 腳本量?而不是入庫的？」2026-11-21 對以整個 Run 牆鐘作優化指標、工具入庫但不當 gate 的建議答「都採用建議」。取捨見[實驗 Run 牆鐘工具](../discussions/2026-11-21-experiment-run-wall-time.md)。
 
 除錯例外不變。使用者回報的錯在各層都重現不出來時，可以跑一次 e2e 定位。腳本不入庫，也不當驗收門檻。
 

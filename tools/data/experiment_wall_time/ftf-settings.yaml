@@ -1,5 +1,7 @@
 # Source: zcu_lab/simulation_envs/FTF/low-snr.yaml, copied 2026-11-21.
 # Keep the physical and readout settings. Omit the unused design guesses.
+# Initial DC currents: ftf-cz-recalibration-20261120, Round 05 joint working
+# point (2026-11-20): F1 156.63 uA, F2 83.34 uA, coupler 0 uA.
 # Illustrative F1-coupler-F2 settings. Truncation convergence is not guaranteed.
 # Circuit energies, couplings and resonator frequencies: Device A, Table 5.1,
 # Chapter 5, FTF Architecture for Quantum Computing. Other values are local settings.
@@ -45,7 +47,7 @@ dc_bias:
     f1_bias:
       unit: A
       limits: [-0.02, 0.02] # -20 to +20 mA
-      initial: 0.0
+      initial: 0.00015663
       ramp_step: 0.000001 # A, equivalent to 0.001 mA
       flux_per_unit: { f1: 128.2, coupler: 2, f2: -1 }
     coupler_bias:
@@ -57,7 +59,7 @@ dc_bias:
     f2_bias:
       unit: A
       limits: [-0.02, 0.02]
-      initial: 0.0
+      initial: 0.00008334
       ramp_step: 0.000001
       flux_per_unit: { f1: -1, coupler: 2, f2: 122.0 }
 
