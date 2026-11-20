@@ -69,3 +69,7 @@ basis:
 - 合併前的程式：`f5e742a26` 的 `zcu_lab/v2/twotone/rb/core.py` 與 `zcu_lab/v2/twotone/irb/core.py`。
 - 合併後的 Result 宣告：`zcu_lab/v2/twotone/rb/core.py` 的 `AXES_SPEC`。分析：`lib/zcu_tools/analysis/fitting/irb.py`。
 - 測量策略：`zcu_lab/v2/experiment-authoring.md` 的〈Twotone RB 測量策略〉。
+
+## 後記
+
+2026-11-20，[RB 取數歸約](2026-11-20-rb-round-reduction-and-fit-quality.md)移除了 round 軸與 arm 順序交替。取數平均已完成 rounds，Result 的軸為 (seed, arm, depth)。Load 不接受本文所述帶 round 軸的舊檔。

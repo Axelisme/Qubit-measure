@@ -2,9 +2,9 @@
 
 **Readers:** operator, agent. Run paired two-qubit RB and CZ-interleaved RB through the GUI or MCP and interpret their error estimates.
 
-Cfg schema 6.0 requires `x180_f1` and `x180_f2`. Load retains compatible older Results and metadata, sets cfg to None and emits `CfgUnavailableWarning` for old cfgs. Those runs cannot be reanalyzed without their cfg. There is no cfg migration.
+**Last updated:** 2026-11-20, acquisition rounds and decay uncertainty
 
-**Last updated:** 2026-11-20, one program per seed and arm
+Cfg schema 6.0 requires `x180_f1` and `x180_f2`.
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -105,9 +105,10 @@ synthetic pulses, no reset and seed 7, 201 points from 0 to 200 took
 The same fixture fit 21 points from 0 to 400 at 2,777 and 3,586 words.
 These numbers are compile examples, not limits for every pulse or reset setup.
 
-The host loops over seed, arm and round. In each round, QICK visits the
-depths in increasing order once per repetition. Each depth gets `reps` shots
-in its saved round slot.
+Run acquires each seed/arm program once. `rounds` is the number of acquisition
+rounds per program. QICK visits each depth once per repetition, giving `reps`
+shots per depth per round. The acquisition reducer adds counts from finished
+rounds.
 
 Without reset, the nominal B00 start leaves the thermal initial population in
 place. Terminal F1/F2 classification happens during acquisition. Circle outcomes
@@ -117,39 +118,34 @@ rounds in each arm. This count-weighted view is not the equal-seed decay fit.
 
 ## Save, cancel and analyze
 
-Result `sums` is float64 with axes `depth, seed, arm, round, F1 class, F2 class`
-and shape `(Nd, Nseed, 2, Nround, 3, 3)`. Arm 0 is reference and arm 1 is
-CZ-interleaved. Each class axis is ordered g, e, other. Counts preserve joint
-outcomes from the same accepted shot. They are not marginal products or probabilities.
-Heralding adds no saved axis or field, and storage does not grow with `reps`.
-At each depth, seed and arm with all rounds finished, sum the class counts over
-rounds and divide by `reps × rounds` to obtain the herald acceptance fraction.
+Result `sums` is float64 with shape `(Nseed, 2, Nd, 3, 3)` and axes
+(seed, arm, depth, F1 class, F2 class). Arm 0 is reference and arm 1 is
+CZ-interleaved. Each class axis is ordered g, e, other. Counts preserve
+joint outcomes from each kept shot. Neither the round count nor heralding
+adds a Result axis. On a full run, divide the total counts in a cell by
+`reps × rounds` to estimate the herald acceptance fraction.
 
-Cooperative Stop preserves completed whole rounds in fixed slots. Unfinished
-rounds stay NaN. `stop_requested` records a stop request, not data completeness.
-Acquisition exceptions propagate unchanged from Run. A failed Run publishes no
-new record and leaves the previous successful record unchanged, even after Stop.
-Save counts and cfg before closing the source. Native Load restores that
-source for Analyze and leaves the current Form unchanged. Old per-shot IQ
-files are rejected because they lack `sums`; there is no conversion fallback.
+Stop keeps the sum of completed rounds for the current seed and arm, even
+when fewer than `rounds` finish. Cells with no completed rounds stay NaN.
+`stop_requested` records a stop request, not data completeness. Acquisition
+exceptions propagate from Run and leave the previous successful record
+unchanged. Save counts and cfg before closing the source. Load restores the
+saved source without changing the current Form. Load rejects files with a
+round axis (wrong number of axes) or older raw-IQ files without `sums`.
+It does not convert them.
 
-Analyze divides each round's terminal gg count by the sum of accepted counts,
-including other. It does not classify IQ again. A point is complete once every
-round has run, even if some rounds accepted no shots. A zero-acceptance round
-has undefined survival, so the fit excludes that seed/round pair if either arm
-has zero acceptance at any depth. Malformed or partially populated count rounds
-cause an error.
-
-The decay fit uses only seed/round pairs with finite survival across both arms
-and every requested depth. Analyze averages those rounds within each seed and
-then weights seeds equally. It requires at least two paired seeds and four
-distinct depths. An incomplete run can meet those requirements if it retains
-enough complete curves.
+Analyze divides each cell's terminal gg count by that cell's total accepted
+count, including other. Zero accepted shots give NaN survival; a finite
+count cell from fewer rounds remains usable if the total is positive.
+Malformed or partially populated cells cause an error. The fit uses only
+seeds with finite survival in both arms at every requested depth. It weights
+these seeds equally and requires at least two paired seeds and four distinct
+depths.
 
 ## Interpreting the result
 
-Analyze reports `estimate`, `fit_quality`, `reason` and `tail_warning`.
-Per-depth survival, round masks and fitted curves stay inside analysis for plotting.
+Analyze reports `estimate`, `fit_quality` and `reason`. Per-depth survival
+and fitted curves stay inside analysis for plotting.
 
 Paired decay analysis fits each arm to `A*p**depth+B`.
 The two-qubit dimension is 4. The reported quantities are
@@ -161,17 +157,20 @@ while retaining the reported value.
 
 The 95% interval resamples entire paired seed curves, preserving depth and arm
 correlations. It describes statistical seed variation; independent-shot
-uncertainty requires a different model. The summary reports paired seed/round
-counts and valid bootstrap fits. The default is 1,000 deterministic resamples with bootstrap seed 42.
+uncertainty requires a different model. The summary reports the number of
+paired seeds and valid bootstrap fits. The default is 1,000 deterministic resamples with bootstrap seed 42.
 
-The fit plot shows equal-seed paired means and available fitted decays.
-When the measured reference arm joint00 survival at the deepest depth is above
-0.2, `tail_warning` reports the paired mean and depth. The decay tail is
-unresolved, so the fitted `p` may be biased high. Add deeper depths and rerun.
-This is an advisory threshold on measured survival, not a test against an
-assumed 0.25 asymptote, which can be lower for a thermal ensemble.
-The summary includes each arm's R² and normalized residual RMS. Parameter
-covariance and marginal parameter errors are unavailable; use the paired-seed interval and residual diagnostics for manual model review.
+The fit plot shows equal-seed paired means and fitted decays. For each arm,
+read `fit_quality.relative_parameter_errors["decay_time"]`. This number is
+the fitted 1/e length's standard error divided by that length. A large
+relative error can mean that the deepest point does not reach the tail and
+the fit cannot separate the decay length from the offset. Add deeper points
+and check the relative error again.
+
+For example, with 11 synthetic depths, p = 0.98 and noise σ = 0.01, maximum
+depths 30, 50, 80 and 200 gave relative errors 0.30, 0.14, 0.08 and 0.035.
+R² was 0.993, 0.997, 0.998 and 0.999, so even the shortest sweep looked close
+to its fitted curve. See the [comparison record](../../../../docs/discussions/2026-11-20-rb-round-reduction-and-fit-quality.md).
 Insufficient data, absent saved cfg, flat decay, invalid fits or unstable bootstrap
 stop estimation and retain the failure reason. Preserve that result and review
 the data before deciding to remeasure. Statistical diagnostics and physical

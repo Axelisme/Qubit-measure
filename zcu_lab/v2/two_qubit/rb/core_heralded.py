@@ -12,6 +12,7 @@ from qick import QickConfig
 from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
+    decay_time_bounds,
     fit_joint_decay,
     seed_statistics,
 )
@@ -49,36 +50,35 @@ from ._config import RBInputs
 from .core import (
     RBEstimate,
     RBOptions,
-    count_completion,
     estimate_joint_d4,
-    paired_means,
     validate_axes,
+    validate_counts,
 )
 
 
 @dataclass(frozen=True)
 class RBHeraldedResult:
-    """Raw float64 sums (depth,seed,arm,round,3,3,3,3), NaN when unacquired.
+    """Raw float64 sums (seed,arm,depth,3,3,3,3), NaN when unacquired.
 
-    depths, seeds, arms and rounds have the same meanings as RBResult.
-    Trailing axes are herald F1/F2 then terminal F1/F2, each ordered g/e/other.
-    All herald outcomes remain saved; counts are not normalized or filtered.
+    depths counts random Cliffords, seeds stores RNG identities, and arm 0/1
+    is reference/CZ-interleaved. Trailing axes are herald F1/F2 then terminal
+    F1/F2, each ordered g/e/other. All herald outcomes from finished rounds
+    remain saved; counts are not normalized or filtered.
     """
 
     depths: NDArray[np.int64]
     seeds: NDArray[np.int64]
-
-    rounds: NDArray[np.int64]
     sums: NDArray[np.float64]
 
 
 @dataclass(frozen=True)
 class RBHeraldedAnalysis:
-    """Joint gg/ee d=4 estimate and fixed residual diagnostics.
+    """Joint gg/ee d=4 estimate and diagnostics of shared arm decays.
 
     estimate is None with reason when unavailable. fit_quality is ordered gg
     reference, gg interleaved, ee reference, ee interleaved, or None without a
-    fit. Per-depth survival, counts and herald fractions stay in analyze.
+    fit. Its decay_time relative error is shared across the two herald groups
+    for each arm. Per-depth survival and counts stay in analyze.
     """
 
     estimate: RBEstimate | None
@@ -87,16 +87,16 @@ class RBHeraldedAnalysis:
 
 
 class RBHeraldedCfg(RBInputs[Reset.Cfg]):
-    """Optional reset → herald → paired sequence → terminal, per host round.
+    """Optional reset → herald → paired sequence → terminal, per shot.
 
     Fields and units match RBCfg. Both reads share the saved full mux cfg and
     circle radii. Its post_delay supplies the wait after herald. reset=None
-    emits no reset; rounds stays a host axis rather than an acquisition average.
+    emits no reset. The reducer sums finished acquisition rounds.
     """
 
 
 def restore_result(data: GroupedLoadData[RBHeraldedCfg]) -> RBHeraldedResult:
-    """Restore all 81 class counts; old per-shot IQ files fail without sums.
+    """Restore 81-class counts from saved (seed, arm, depth, ...) arrays.
 
     data supplies the grouped sums variable and its persisted scan axes. Return
     this experiment's Result with float64 class counts and its original axis
@@ -105,9 +105,8 @@ def restore_result(data: GroupedLoadData[RBHeraldedCfg]) -> RBHeraldedResult:
     """
     sums = data.variable("sums")
     return RBHeraldedResult(
-        depths=sums.axes[7].astype(np.int64),
+        depths=sums.axes[4].astype(np.int64),
         seeds=sums.axes[6].astype(np.int64),
-        rounds=sums.axes[4].astype(np.int64),
         sums=sums.z.astype(np.float64),
     )
 
@@ -122,16 +121,16 @@ def bootstrap_joint_error(
 ) -> tuple[float, float, int]:
     """Bootstrap the 95% d=4 ratio CI; raise ValueError below 90% valid fits.
 
-    Inputs are (herald,depth,seed,arm,round), survival masked to paired
-    rounds and totals in shot counts. NaN denotes unavailable survival. Draw from
-    their valid identity union; each herald retains only its valid draws,
+    Inputs are (herald,seed,arm,depth), with totals in shot counts. NaN denotes
+    unavailable survival. Draw from the union of complete seed identities;
+    each herald retains only its valid draws,
     including multiplicity. Both arms/depths travel together. Fewer than two
     retained draws in either group fails that resample, never fills missing data.
     depths is the shared integer Clifford-depth axis. samples is the number of
     resamples and seed initializes a local RNG. Return (low, high, valid fits)
     without changing inputs, global random state or plots.
     """
-    available = np.isfinite(survival).all(axis=(1, 3)).any(axis=-1)
+    available = np.isfinite(survival).all(axis=(2, 3))
     identities = np.flatnonzero(available.any(axis=0))
     rng = np.random.default_rng(seed)
     errors = []
@@ -140,8 +139,8 @@ def bootstrap_joint_error(
         try:
             statistics = [
                 seed_statistics(
-                    np.take(survival[h], draw, axis=1),
-                    np.take(totals[h], draw, axis=1),
+                    survival[h, draw],
+                    totals[h, draw],
                 )
                 for h in range(2)
             ]
@@ -196,7 +195,7 @@ def _plot_herald_fractions(
             for f2 in range(3):
                 ax.plot(
                     depths,
-                    aggregate[:, arm, f1, f2],
+                    aggregate[arm, :, f1, f2],
                     ".-",
                     label=f"{classes[f1]},{classes[f2]}",
                 )
@@ -211,7 +210,7 @@ def _plot_pooled_survival(
     depths: NDArray[np.int64],
     pooled: NDArray[np.float64],
 ) -> None:
-    """Draw per-arm return probabilities from seed/round-pooled herald counts."""
+    """Draw per-arm return probabilities from seed-pooled herald counts."""
     _, ax = plots.subplots(num="pooled_survival", layout="constrained")
     for cell, (herald, counts) in enumerate(
         (
@@ -223,7 +222,7 @@ def _plot_pooled_survival(
         for arm, label in enumerate(("Reference", "CZ interleaved")):
             ax.plot(
                 depths,
-                probabilities[:, arm, cell, cell],
+                probabilities[arm, :, cell, cell],
                 ".",
                 label=f"{label} · {herald}",
             )
@@ -266,7 +265,7 @@ def build_program(
 
 
 class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
-    """Paired RB with separate gg/ee complete rounds and shared arm decays."""
+    """Paired RB with separate gg/ee complete seeds and shared arm decays."""
 
     AXES_SPEC: ClassVar[GroupedAxesSpec[RBHeraldedResult, RBHeraldedCfg]] = (
         GroupedAxesSpec(
@@ -279,19 +278,16 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                         VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
                         VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
                         VariableAxisSpec(
-                            label="Round", unit="", field_name="rounds", dtype=np.int64
+                            label="Clifford depth",
+                            unit="",
+                            field_name="depths",
+                            dtype=np.int64,
                         ),
                         VariableAxisSpec(
                             label="Arm", unit="", values=(0, 1), dtype=np.int64
                         ),
                         VariableAxisSpec(
                             label="Seed", unit="", field_name="seeds", dtype=np.int64
-                        ),
-                        VariableAxisSpec(
-                            label="Clifford depth",
-                            unit="",
-                            field_name="depths",
-                            dtype=np.int64,
                         ),
                     ),
                     z=VariableZSpec(
@@ -316,8 +312,8 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         """Acquire optional reset → herald → concurrent per-qubit sequence → terminal.
 
         Compile one board program per seed and arm before acquiring. Each
-        host round acquires reps shots at every depth in that program. Save
-        all 81 counts per point on the original axes; unfinished slots stay NaN.
+        round acquires reps shots at every depth in the program. Save all 81
+        counts per cell summed across finished rounds; unacquired cells stay NaN.
         """
         # 1. Compare gg/ee return-to-herald survival for reference and CZ-interleaved arms across depth.
         fig, ax = context.plots.subplots(num="measurement")
@@ -335,7 +331,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             for cell, counts in enumerate(
                 (terminal_counts(sums, ("g", "g")), terminal_counts(sums, ("e", "e")))
             ):
-                totals = np.nansum(counts, axis=(0, 2))  # Sum seeds and rounds.
+                totals = np.nansum(counts, axis=0)  # Pool seeds.
                 curves.extend(joint_probabilities(totals)[..., cell, cell])
             return viewer.set(np.array(config.depth), np.array(curves))
 
@@ -348,9 +344,9 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             for seed in config.seed
         ]
 
-        # 3. Acquire in (seed, arm, round, depth) order, then restore the saved axes.
+        # 3. ADR-0083: The reducer sums completed rounds in one acquire per seed and arm.
         buffer = SignalBuffer(
-            (len(config.seed), 2, config.rounds, len(config.depth), 3, 3, 3, 3),
+            (len(config.seed), 2, len(config.depth), 3, 3, 3, 3),
             dtype=np.float64,
             on_update=update_view,
         )
@@ -366,16 +362,14 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                             Classify("terminal", config.roles.f2_tone),
                         ],
                     )
-                    for _, round_step in arm_step.repeat("round", config.rounds):
-                        round_step.run_acquire_summed(
-                            program, context.soc, reducer=reducer, rounds=1
-                        )
+                    arm_step.run_acquire_summed(
+                        program, context.soc, reducer=reducer, rounds=config.rounds
+                    )
         buffer.trigger_update(flush=True)
         return RBHeraldedResult(
             np.array(config.depth, dtype=np.int64),
             np.array(config.seed, dtype=np.int64),
-            np.arange(config.rounds, dtype=np.int64),
-            np.moveaxis(buffer.array, 3, 0),
+            buffer.array,
         )
 
     def analyze(
@@ -387,58 +381,52 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
     ) -> RBHeraldedAnalysis:
         """Fit gg/ee return survival with a shared decay per arm.
 
-        Select complete (seed,round) independently per herald across every depth
-        and both arms. Average rounds, then seeds equally. Zero accepted shots
-        mean unavailable survival, not an unacquired round. Whole seed identity
-        bootstrap draws preserve correlations across arms, depths and heralds.
+        Select seeds with finite survival across both arms and every depth,
+        independently per herald. Weight them equally and derive binomial errors
+        from each cell's actual accepted shot count. Zero accepted shots mean
+        unavailable survival. Bootstrap whole seeds across arms, depths and heralds.
+        Malformed counts or mismatched axes raise ValueError; missing cfg or
+        failed fits return a reason instead of an estimate.
 
         """
-        # 1. Select complete paired seed/round curves independently for gg and ee, not by acceptance size.
+        # 1. Normalize each herald's cells by its own acquired shots.
         data, cfg = source.result, source.cfg
-        shape = (len(data.depths), len(data.seeds), 2, len(data.rounds))
+        shape = (len(data.seeds), 2, len(data.depths))
         if data.sums.shape != (*shape, 3, 3, 3, 3):
-            raise ValueError("Expected heralded RB sums (depth,seed,2,round,3,3,3,3)")
-        acquired = count_completion(data.sums, (-4, -3, -2, -1))
+            raise ValueError("Expected heralded RB sums (seed,2,depth,3,3,3,3)")
+        validate_counts(data.sums, (-4, -3, -2, -1))
         survival = np.full((2, *shape), np.nan)
-        paired = np.zeros((2, len(data.seeds), len(data.rounds)), dtype=np.bool_)
+        paired = np.zeros((2, len(data.seeds)), dtype=np.bool_)
         means = np.full((2, 2, len(data.depths)), np.nan)
         errors = np.full_like(means, np.nan)
         curves = np.full_like(means, np.nan)
         totals = np.full_like(survival, np.nan)
-        estimate, fit, quality = None, None, None
+        estimate, quality = None, None
         reason = None
         if cfg is None:
             reason = "RB analysis requires saved cfg; current Form is not a substitute"
         else:
-            validate_axes(
-                (data.depths, data.seeds, np.arange(2, dtype=np.int64), data.rounds),
-                (cfg.depth, cfg.seed, [0, 1], np.arange(cfg.rounds)),
-            )
+            validate_axes((data.seeds, data.depths), (cfg.seed, cfg.depth))
             for herald, counts in enumerate(
                 (
                     terminal_counts(data.sums, ("g", "g")),
                     terminal_counts(data.sums, ("e", "e")),
                 )
             ):
-                total = counts.sum(axis=(-2, -1))
+                totals[herald] = counts.sum(axis=(-2, -1))
                 returns = joint_probabilities(counts)[..., herald, herald]
-                paired[herald] = (acquired & np.isfinite(returns)).all(axis=(0, 2))
-                survival[herald] = np.where(
-                    paired[herald][None, :, None, :], returns, np.nan
-                )
-                means[herald] = paired_means(survival[herald])
-                totals[herald] = total
+                survival[herald] = returns
+                paired[herald] = np.isfinite(returns).all(axis=(1, 2))
+                if np.any(paired[herald]):
+                    means[herald] = returns[paired[herald]].mean(axis=0)
             # 2. Use equal-seed means and a shared decay per arm; bootstrap whole paired seed identities.
             try:
                 if len(np.unique(data.depths)) < 4:
-                    raise ValueError(
-                        "Need at least four distinct depths and 100 bootstrap samples"
-                    )
+                    raise ValueError("Need at least four distinct depths")
                 for herald in range(2):
                     statistics = seed_statistics(survival[herald], totals[herald])
                     means[herald], errors[herald] = statistics.means, statistics.errors
                 joint_fit = fit_joint_decay(data.depths, means, errors)
-                fit, fitted = joint_fit.fit, joint_fit.curves
                 low, high, successes = bootstrap_joint_error(
                     data.depths,
                     survival,
@@ -447,27 +435,31 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                     seed=options.bootstrap_seed,
                 )
             except (ValueError, RuntimeError) as exc:
-                fit = None
                 reason = str(exc)
             else:
-                curves = fitted
-                # Union counts describe available paired identities, not an intersection.
-                union = np.asarray(paired.any(axis=0), dtype=np.bool_)
+                curves = joint_fit.curves
                 estimate = estimate_joint_d4(
-                    fit,
+                    joint_fit.fit,
                     ci_low=low,
                     ci_high=high,
                     bootstrap_successes=successes,
-                    paired_seeds=int(union.any(axis=1).sum()),
-                    paired_rounds=int(union.sum()),
+                    paired_seeds=int(paired.any(axis=0).sum()),
                 )
+                decays = [joint_fit.decay_time_and_variance(arm) for arm in range(2)]
+                bounds = decay_time_bounds(data.depths.astype(np.float64))
                 quality = tuple(
-                    compute_fit_quality(means[h, arm], curves[h, arm], {}, None)
+                    compute_fit_quality(
+                        means[h, arm],
+                        curves[h, arm],
+                        {"decay_time": tau},
+                        np.array([[variance]]),
+                        decay_bounds=bounds,
+                    )
                     for h in range(2)
-                    for arm in range(2)
+                    for arm, (tau, variance) in enumerate(decays)
                 )
         # 3. Compare gg/ee survival fits and herald fractions separately from acquisition completeness.
-        pooled = np.nansum(data.sums, axis=(1, 3))
+        pooled = np.nansum(data.sums, axis=0)
         _plot_pooled_survival(plots, data.depths, pooled)
 
         for herald, label in enumerate(("gg", "ee")):

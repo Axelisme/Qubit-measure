@@ -46,7 +46,7 @@ Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`ro
 | Qubit spectroscopy，twotone freq | 301 個頻率，reps=1000、rounds=10 | 每頻率 10,000 次，共 3,010,000 次。 |
 | GE single-shot | shots=100000，probe off／on 各一分支 | 每分支 100,000 shots，共 200,000 shots。此入口內部使用 reps=shots、rounds=1，不再乘一組平均次數。 |
 
-兩 qubit FTF 表單 Open／Reset 的初值為 reps=1000、rounds=10，每座標、每準備或 projection 分支取得 10,000 個 joint shots。這個數量不代表擬合或校準已有足夠統計。一般實驗由取數端累加 rounds；RB 由 host 逐 round 取數，保留 round 軸。
+兩 qubit FTF 表單 Open／Reset 的初值為 reps=1000、rounds=10，每座標、每準備或 projection 分支取得 10,000 個 joint shots。這個數量不代表擬合或校準已有足夠統計。RB 的 `rounds` 交給取數端，reducer 加總已完成 rounds。
 
 下表的 P 是掃描點數，已包含準備態、spectator 與 projection 軸。DC sweep 關閉時 DC 點數取 1。每版一次完整 Run 的總 shots 都是 `P × reps × rounds`。
 
@@ -59,14 +59,14 @@ Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`ro
 | CZ amplitude | `scale 點數`。 |
 | Conditional phase | `frequency 點數 × gate-count 個數 × 2 spectator states × 2 projections`。 |
 | Local Z | `gate-count 個數 × 2 targets × 2 projections`。 |
-| Paired RB／IRB | `depth 點數 × seed 個數 × 2 arms`。每點保留各 round，不能先跨 round 合併。 |
+| Paired RB／IRB | `depth 點數 × seed 個數 × 2 arms`。每點保存已完成 rounds 的計數總和。 |
 
 兩版都在取數時使用含 radius 的 circle classifier，把 F1、F2 分成 g／e／other。缺 radius 或使用 linear classifier 時，Run 前會要求先做 GE Post。Result 的 `sums` 保存 float64 未正規化總和，未量點為 NaN。Other 留在機率與 `⟨σ⟩=(N_e−N_g)/N_total` 的分母。不保存逐 shot IQ，舊逐 shot 格式不轉換成新 Result。
 
 | 版本 | 每 shot 的 mux 讀出 | 每掃描點的類別數 | `sums` 陣列大小，不含座標與 cfg |
 | --- | --- | --- | --- |
-| 一般入口 | 1 次 terminal。RB 選 `reset/mux_herald` 時加 1 次 herald。 | `3×3=9` | `P × 9 × 8 = 72P bytes`。RB 為 `72P × rounds bytes`。 |
-| Heralded | 1 次 herald＋1 次 terminal | `3×3×3×3=81` | `P × 81 × 8 = 648P bytes`。RB 為 `648P × rounds bytes`。 |
+| 一般入口 | 1 次 terminal。RB 選 `reset/mux_herald` 時加 1 次 herald。 | `3×3=9` | `P × 9 × 8 = 72P bytes`。|
+| Heralded | 1 次 herald＋1 次 terminal | `3×3×3×3=81` | `P × 81 × 8 = 648P bytes`。|
 
 例如 chevron 的 25×101 點，非 heralded 的 `sums` 是 181,800 bytes，heralded 是 1,636,200 bytes。這兩個數字不隨 reps 或 rounds 增長。以 reps=1000、rounds=10 計，兩版各取得 25,250,000 shots，分別發射 25,250,000 與 50,500,000 次 mux 讀出。完整 mux 的其他 tones 仍照設定讀出，Result 只保存 F1/F2 的聯合類別。
 
@@ -179,7 +179,11 @@ Pulse、slot 與 phase rows 都可獨立 Apply。部分套用後，檢查下一�
 
 [Two-qubit RB／IRB](rb/guide.md) 使用配對的 two-qubit Clifford reference／CZ-interleaved sequences、各自完整 inverse、實際雙線 CZ 與 local frames。它與[單 qubit RB／IRB](../twotone/rb/guide.md) 分別量不同的控制序列。
 
-保留相同 seed 的配對資料與 round 軸，從終端 joint g,g 計數算 survival。Heralded 另以終端回到各自 herald g,g／e,e 的比例作 survival，依各組有效 seed／round 聯合擬合。使用 d=4 的 error estimate，保留負值及 paired-seed bootstrap interval。熱 population、準備／讀出效果與模型假設均須納入判讀，物理 gate 表現需由實際量測確認。
+Result 依 (seed, arm, depth) 排列，再接 F1／F2 分類軸。Heralded 在終端分類軸前多兩個 herald 分類軸。Stop 保留已完成 rounds 的計數，未量格子是 NaN。舊檔有 round 軸，Load 因軸數不合而拒絕。
+
+Plain RB 從終端 joint g,g 計數算 survival。Heralded 另以終端回到各自 herald g,g／e,e 的比例作 survival，依各組完整 seeds 聯合擬合。使用 d=4 的 error estimate，保留負值及 paired-seed bootstrap interval。熱 population、準備／讀出效果與模型假設均須納入判讀，物理 gate 表現需由實際量測確認。
+
+若最大 depth 太淺，擬合可以貼合資料但無法確定衰減長度。用 `fit_quality.relative_parameter_errors["decay_time"]` 檢查各臂。在[合成例子](rb/guide.md#interpreting-the-result)中，最大 depth 30 時 R² 是 0.993、相對誤差是 0.30；量到 depth 200 後相對誤差降為 0.035。
 
 取得第一個 IRB 結果後，依論文 §5.3.3 掃 CZ 的 cosine 寬度。長閘的誤差由被驅動非計算態的 T1 主導，短閘由同調 leakage 主導，最佳寬度在兩者之間（論文裝置為 85 ns）。每個寬度重做 4 → 5 → 6 與 IRB。最短寬度受驅動強度限制，先由實測 Rabi rate 換算 gain 1 時的 2π 週期；非 const 波形的最大振幅只有 const 的一半。
 

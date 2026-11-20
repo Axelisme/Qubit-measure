@@ -431,9 +431,9 @@ Time 盤上仍為 seconds，Notebook 使用共用 NotebookAdapter，以 RunRecor
 ## Twotone RB 測量策略
 
 `twotone/rb` 同時涵蓋 reference RB 與 IRB。`target_gate=None` 只跑 reference，arm 軸長度為 1；選 X90／X180／Y90／Y180 時另跑 interleaved arm，arm 0=reference、1=interleaved，使用校準 X90／X180。
-兩種模式都保存 `(round, seed, arm, depth)` IQ。
+兩種模式都保存 `(seed, arm, depth)` IQ。
 
-每個 seed／arm 一個 program，板上以 sweep index 遍歷 depth 與 reps。Host 遍歷 round／seed／arm，快取各 seed／arm program，固定 rounds=1；有兩個 arm 時，arm 順序隨 round／seed 交替。
+每個 seed／arm 一個 program，板上以 sweep index 遍歷 depth 與 reps。Host 依 seed 跑 reference，再跑可選的 interleaved，分別呼叫 `run_acquire(..., rounds=cfg.rounds)`。取數回傳已完成 rounds 的平均 IQ；沒有已完成 round 的格子維持 NaN。
 Recovery 是 24-element Clifford group 的完整 inverse，以 6-state permutation 程式化生成 CAYLEY／INVERSE_INDEX。
 `CAYLEY[i][j]` 是先 C_j 再 C_i，累積為 `acc = CAYLEY[next][acc]`，兩處註解同步維護。
 Random prefix 長度與 recovery id 用 LoadValue 從 dmem 查，random 段用 register-driven repeat，固定 n="rand_len"。
@@ -443,7 +443,7 @@ Recovery 最多兩個 physical pulses，用 recovery_gate_0／1 兩個 ComputedP
 Interleaved arm 與 reference 共用 random seed，每個 random Clifford 後插 target，相鄰 gates 保持分開，各算完整 inverse 並延續 virtual-Z frame。
 序列表 owner 是 twotone/_rb_sequence.py。
 
-分析只選完整 round／seed，先平均同 seed rounds，再等權平均 seeds，所有 arm 共用一條 IQ 投影軸，各 fit A*p**depth+B。
+分析只選所有 arm、depth 均為有限值的 seeds，等權平均。所有 arm 共用一條 IQ 投影軸，各擬合 A*p**depth+B。舊檔帶 round 軸，Load 會因軸數不合拒絕。
 Reference 回報 error per Clifford=(1-p_reference)/2；有 interleaved arm 時另報 target error=(1-p_interleaved/p_reference)/2，負值保持原值。
 95% interval 對整條 seed curves bootstrap，不包含 gate-dependent／coherent noise 系統誤差。
 中止保留 raw 與未完成 slot 的 NaN；少於兩個 seed 或四個 distinct depths 時分析失敗。

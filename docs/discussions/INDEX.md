@@ -127,6 +127,7 @@
 - 2026-11-20 [CZ 優化候選用記憶體 arb 播放](2026-11-20-in-memory-arb-waveforms.md)：執行期波形。候選直接交 I/Q 樣本給 program，不寫檔；永久保存仍用既有 arb 資產。
 - 2026-11-20 [Timeline 往後跳轉與 two-qubit RB 分塊](2026-11-20-timeline-forward-jumps.md)：控制流範圍。跳轉限於 body 最外層，label 合併路徑狀態；RB 分塊的代裁後來由使用者取消。
 - 2026-11-20 [板上 RB 程式改寫](2026-11-20-rb-depth-program.md)：刪除或收窄。每個 seed、arm 保留一支 program，recovery 內嵌，PMEM 超量就報錯。
+- 2026-11-20 [RB 取數歸約與衰減擬合品質](2026-11-20-rb-round-reduction-and-fit-quality.md)：資料格式。取數端歸約 rounds，Result 以 (seed, arm, depth) 開頭，two-qubit fit quality 回報衰減長度相對誤差。
 
 ## Cfg 與表單
 

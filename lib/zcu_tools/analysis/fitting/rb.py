@@ -1,4 +1,4 @@
-"""Paired-round binomial statistics and two-group shared RB decays."""
+"""Paired-seed binomial statistics and two-group shared RB decays."""
 
 from dataclasses import dataclass
 
@@ -10,14 +10,14 @@ from .shared import FitTrace, ParameterSpec, SharedFitResult, fit_shared
 
 @dataclass(frozen=True)
 class RBSeedStatistics:
-    """Equal-round seed statistics and their equal-seed aggregate.
+    """Per-seed survival and binomial variance with their equal-seed aggregate.
 
     All arrays are float64 and unitless; unavailable seed curves are NaN.
     Means preserve seed multiplicity and never use inverse-count weights.
     """
 
     seed_means: NDArray[np.float64]
-    """Round-averaged survival, shape (seed,2,depth), arms reference/interleaved."""
+    """Per-cell survival, shape (seed,2,depth), arms reference/interleaved."""
     seed_variances: NDArray[np.float64]
     """Propagated binomial variance of seed_means, same shape, probability²."""
     means: NDArray[np.float64]
@@ -30,55 +30,35 @@ def seed_statistics(
     survival: NDArray[np.float64],
     totals: NDArray[np.float64],
 ) -> RBSeedStatistics:
-    """Reduce paired rounds to equal-weight seeds, then aggregate the seeds.
+    """Aggregate complete seeds equally from their per-cell survival and totals.
 
-    survival is (depth,seed,arm,round), already masked to whole paired rounds.
-    Binomial variance propagates through the arithmetic round average. The
-    finite-shot variance floor 1/(4*N**2) keeps all-success/all-failure points
-    usable without assigning zero error. Counts affect errors, never seed means.
-    Arrays are float64 probabilities/counts, shape (depth,seed,2,round).
-    A non-two-arm survival or mismatched totals shape raises ValueError.
-    A round/seed contributes only when both arms at every depth are finite.
-    Unavailable seeds remain NaN in the seed arrays. At least two complete
-    seeds are required; otherwise raise ValueError. totals must match survival
-    and be finite and positive for contributing entries, or raise ValueError.
-    Totals in unavailable paired rounds are ignored. Inputs are not modified.
+    Both arrays have shape (seed,2,depth), arms reference/interleaved. A seed
+    contributes only when both arms at every depth are finite. At least two
+    complete seeds are required. Their totals must be finite, positive counts.
+    The finite-shot variance floor 1/(4*N**2) keeps all-success/all-failure
+    points usable. Counts affect errors, never seed weights. Invalid shape or
+    contributing totals raise ValueError. Unavailable seeds are wholly NaN in
+    the returned seed arrays. Inputs are not modified.
     """
-    if survival.shape[2] != 2 or totals.shape != survival.shape:
+    if survival.ndim != 3 or survival.shape[1] != 2 or totals.shape != survival.shape:
         raise ValueError(
-            f"Expected survival shape (depth,seed,2,round) and matching totals; "
+            f"Expected survival shape (seed,2,depth) and matching totals; "
             f"got survival shape {survival.shape}, totals shape {totals.shape}"
         )
-    complete = np.asarray(np.isfinite(survival).all(axis=(0, 2)), dtype=np.bool_)
-    nrounds = complete.sum(axis=1)
-    valid = complete[None, :, None, :]
-    if np.any(valid & (~np.isfinite(totals) | (totals <= 0))):
+    complete = np.isfinite(survival).all(axis=(1, 2))
+    counts = totals[complete]
+    if not np.all(np.isfinite(counts) & (counts > 0)):
         raise ValueError("Contributing totals must be finite and strictly positive")
-    means = np.full(survival.shape[:-1], np.nan)
-    variances = np.full_like(means, np.nan)
-    variance = np.full_like(survival, np.nan)
-    np.divide(
-        np.maximum(survival * (1 - survival), 0.25 / np.maximum(totals, 1)),
-        totals,
-        out=variance,
-        where=totals > 0,
+    probabilities = survival[complete]
+    means = np.full_like(survival, np.nan)
+    variances = np.full_like(survival, np.nan)
+    means[complete] = probabilities
+    variances[complete] = (
+        np.maximum(probabilities * (1 - probabilities), 0.25 / np.maximum(counts, 1))
+        / counts
     )
-    np.divide(
-        np.where(valid, survival, 0).sum(axis=-1),
-        nrounds[None, :, None],
-        out=means,
-        where=nrounds[None, :, None] > 0,
-    )
-    np.divide(
-        np.where(valid, variance, 0).sum(axis=-1),
-        nrounds[None, :, None] ** 2,
-        out=variances,
-        where=nrounds[None, :, None] > 0,
-    )
-    seed_means = means.transpose(1, 2, 0)
-    seed_variances = variances.transpose(1, 2, 0)
-    aggregate, errors = _aggregate_seeds(seed_means, seed_variances)
-    return RBSeedStatistics(seed_means, seed_variances, aggregate, errors)
+    aggregate, errors = _aggregate_seeds(means, variances)
+    return RBSeedStatistics(means, variances, aggregate, errors)
 
 
 def _aggregate_seeds(
@@ -111,6 +91,18 @@ class RBJointDecayFit:
     """
     curves: NDArray[np.float64]
     """A*p**depth+B, float64 (2,2,depth), group/arm/depth probability axes."""
+
+    def decay_time_and_variance(self, arm: int) -> tuple[float, float]:
+        """Return the shared arm's 1/e length (Cliffords) and variance (Cliffords²).
+
+        arm is 0 for reference or 1 for interleaved. Propagate the fitted p
+        covariance through tau = -1/log(p) to first order. An unknown arm
+        raises KeyError.
+        """
+        name = f"p_{arm}"
+        p = self.fit.values[name]
+        tau = float(-1 / np.log(p))
+        return tau, (tau**2 / p) ** 2 * self.fit.variance(name)
 
 
 def _decay_model(

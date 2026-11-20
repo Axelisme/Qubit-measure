@@ -2,11 +2,9 @@
 
 **Readers:** operator, agent. Run heralded paired two-qubit RB and interpret gg/ee return survival alongside CZ-interleaved decay fits.
 
-**Last updated:** 2026-11-20, one program per seed and arm
+**Last updated:** 2026-11-20, acquisition rounds and decay uncertainty
 
-Cfg schema 3.0 requires `x180_f1` and `x180_f2`. Load retains compatible older
-Results and metadata, sets cfg to None and emits `CfgUnavailableWarning` for old
-cfgs. Those runs cannot be reanalyzed without their cfg. There is no cfg migration.
+Cfg schema 3.0 requires `x180_f1` and `x180_f2`.
 
 Select `two_qubit/rb_heralded`. Calibrate X90 and X180 on both roles, full mux
 readout, both CZ pulses and ordered local-Z corrections as described in the
@@ -53,34 +51,35 @@ synthetic pulses and no reset, the [ordinary RB program](guide.md#sequences-and-
 did not fit both arms for 201 points from 0 to 200, but fit both for 21 points
 from 0 to 400. Compile with your own settings; this version also emits herald.
 
-## Counts and complete rounds
+## Counts and complete seeds
 
-The host loops over seed, arm and round. In each round, QICK visits the
-depths in increasing order once per repetition. Each depth gets `reps` shots
-in its saved round slot.
+Run acquires each seed/arm program once. `rounds` is the number of acquisition
+rounds per program. QICK visits each depth once per repetition, giving `reps`
+shots per depth per round. The acquisition reducer adds the counts from
+finished rounds.
 
-Result `sums` has float64 shape
-`(Nd, Nseed, 2, Nround, 3, 3, 3, 3)`. The trailing axes are herald F1,
-herald F2, terminal F1 and terminal F2. Each is ordered g, e, other.
-Save retains all 81 unnormalized class counts. Storage does not grow with
-`reps`. Unfinished rounds remain NaN. Stop retains completed slots;
-acquisition errors still need resolution. Native Load preserves the saved
-source without changing the current Form. Old raw-IQ files lack `sums`
-and are rejected.
+Result `sums` has float64 shape `(Nseed, 2, Nd, 3, 3, 3, 3)`. The axes are
+seed, arm, depth, herald F1, herald F2, terminal F1 and terminal F2. Arm 0 is
+reference and arm 1 is CZ-interleaved. Each class axis is ordered g, e, other.
+Save keeps all 81 unnormalized class counts per cell. Neither `reps` nor
+`rounds` adds to the storage size.
 
-Analysis uses two herald slices. gg survival is terminal gg divided by
-all terminal counts accepted as herald gg. ee survival is terminal ee divided
-by all terminal counts accepted as herald ee. Terminal other remains in
-both denominators. Zero accepted counts give NaN survival, even in an acquired
-round. `acquired_rounds` records whole acquired 81-class slots independently
-of this survival availability.
+Stop keeps counts from finished rounds for the current seed and arm. A cell
+with none stays NaN. Native Load restores the saved run without changing the
+current Form. Load rejects files with a round axis (wrong number of axes) or
+older raw-IQ files without `sums`. It does not convert them.
 
-Each herald selects its own complete seed/round pairs across both arms and
-every requested depth. The two selections need not intersect.
-Complete rounds average within each seed, then seeds receive equal weight.
-Counts determine binomial point errors, not the relative weights of seeds.
-Errors propagate through both averages. All-success or all-failure points
-use a finite-shot variance floor of `1/(4*N**2)` before averaging.
+For each cell, gg survival is the terminal gg count divided by all terminal
+counts for herald gg. The ee ratio uses terminal ee and all terminal counts
+for herald ee. Terminal other remains in both denominators. A cell with
+zero accepted shots has NaN survival even if acquisition ran. A cell with a
+positive count from fewer rounds is usable.
+
+Each herald group uses only seeds with finite survival in both arms at all
+requested depths. The groups need not use the same seeds. The fit weights
+seeds equally and uses each cell's actual accepted shot count to calculate
+the binomial point errors. All-success or all-failure points use a
+finite-shot variance floor of `1/(4*N**2)` before averaging.
 
 ## Joint decay and uncertainty
 
@@ -102,11 +101,17 @@ statistical seed variation, not readout errors or model systematics.
 The d=4 estimates are `reference_epc=3/4*(1-p_reference)` and
 `gate_error=3/4*(1-p_interleaved/p_reference)`. Negative error estimates
 remain negative. Analyze returns only `estimate`, `fit_quality` and `reason`.
-This analysis does not report ordinary RB's joint00 tail warning.
-Fit quality retains residual diagnostics for gg reference/interleaved and ee
-reference/interleaved. The estimate's paired seed and round counts refer to
-the union. Per-herald pair masks, survival, curves and herald fractions stay
-inside analysis for plotting. Missing saved cfg,
+Fit quality reports separate diagnostics for gg reference/interleaved and ee
+reference/interleaved. For each arm, both heralds report the same value in
+`fit_quality.relative_parameter_errors["decay_time"]` because they share a
+fitted 1/e length. A large value can mean the deepest point does not reach
+the tail. Increase the maximum depth and check again. In the [synthetic
+comparison](guide.md#interpreting-the-result), increasing the maximum depth
+from 30 to 200 lowered relative error from 0.30 to 0.035, although R² was
+already 0.993 at depth 30.
+
+The paired seed count refers to the union. Per-herald survival, model curves
+and herald fractions stay inside analysis for plotting. Missing saved cfg,
 insufficient paired data, flat decay, invalid fits or unstable bootstrap
 leave an explicit reason and no estimate. A finite error remains a
 model-dependent diagnostic, not physical calibration acceptance.
@@ -114,9 +119,8 @@ model-dependent diagnostic, not physical calibration acceptance.
 ## Herald fractions
 
 The herald figures show all nine herald proportions for each arm and depth,
-aggregated over seeds and rounds. All herald ge, eg and other outcomes remain
-saved, but do not enter the joint fit. The analysis also retains per-round
-herald proportions and pass fraction. Pass fraction is herald gg counts
+from counts pooled across seeds. All herald ge, eg and other outcomes remain
+saved, but do not enter the joint fit. Pass fraction is herald gg counts
 divided by all herald counts. It measures classified acceptance, not
 ground-state purity. Readout errors can accept excited states and reject
 ground states. Post-selection reduces the available shot count.
