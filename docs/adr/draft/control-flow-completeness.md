@@ -9,7 +9,7 @@ status: draft
 
 ## 已定的範圍
 
-- 作者 label 與跳轉只在 `_body` 最外層，不放寬到 Repeat body 或 Branch case。Agent 於 2026-11-20 依授權保留第一版範圍，待使用者覆核。
+- 作者 label 與跳轉只在 `_body` 最外層，不放寬到 Repeat body 或 Branch case。Agent 於 2026-11-20 依授權保留第一版範圍，使用者同日覆核時回覆「確認」。
 - Two-qubit RB 的 plain 與 heralded 兩版仍在板上掃 depth，但不再分塊。每個 seed、arm 編一支 program，PMEM 放不下就報錯。現行裁決見 [ADR-0083](../0083-program-macros-and-timelines.md#量測能力不抵可讀性成本時不加分支)。
 
 跳轉範圍的理由與授權見[往後跳轉的討論紀錄](../../discussions/2026-11-20-timeline-forward-jumps.md)。
