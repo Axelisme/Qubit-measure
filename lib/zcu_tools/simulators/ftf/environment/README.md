@@ -604,11 +604,22 @@ fields. Templates with neither cavity drives nor projective reads retain their
 original single-evolve path.
 
 Projective continuation sends one point's ready histories through its current
-absolute span in one `Engine.evolve` call. FTF assigns an Engine row ID to each
-original point and ordered history, even if two points have identical numerical
-inputs. The same point and history keep their ID across spans and rounds. The
-result returns to its history by ID before the next span starts. Engine row order
-does not change the original order of histories used for sampling.
+absolute span in one `Engine.evolve` call. FTF derives a nonnegative 63-bit Engine
+row ID from the SHA-256 hash of the original point and its ordered history. The
+same pair keeps its ID across spans, rounds and preparations. Within one
+preparation, FTF checks for collisions across all points and spans, including
+points with identical numerical inputs. If two different pairs produce the same
+ID, FTF raises `ValueError` naming the colliding pair, without merging the rows
+or returning a partial result.
+
+FTF does not check for collisions across preparations. Such a collision can
+cause Engine to skip counting a batch's routing usage only if two different
+pairs share an ID and the rest of their batches' Engine inputs match bit for bit.
+A lower usage count can change the selected kernel. The same density accuracy
+budget still applies.
+
+The result returns to its history by ID before the next span starts. Engine row
+order does not change the original order of histories used for sampling.
 
 `FTFNumericUse.projective_spans` gives each solved span's row IDs and histories,
 Engine path class membership, and Stark inversions. Aggregate path classes and
