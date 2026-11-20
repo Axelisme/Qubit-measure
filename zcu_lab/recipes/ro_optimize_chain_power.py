@@ -10,6 +10,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     Overrides,
     RecipeInputs,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
     report_number,
 )
@@ -22,6 +24,8 @@ from .ro_optimize_chain_helpers import ChainSweepReport, chain_report_fields
 class RoOptimizeChainPowerInputs(RecipeInputs):
     """Inputs for the readout-chain gain sweep; units and null policies are per field."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,

@@ -11,6 +11,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -22,6 +24,8 @@ class MistFluxDepInputs(RecipeInputs):
     """Inputs for mist flux dep; all units and null policies are declared per
     field."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     flux_device: DeviceName = Field(
         description="Registered flux-device name; read only its cached snapshot, without connecting."

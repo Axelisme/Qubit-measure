@@ -11,6 +11,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
     report_number,
 )
@@ -19,6 +21,8 @@ from zcu_tools.mcp.measure.recipe_api import (
 class RamanGFInputs(RecipeInputs):
     """Raman controls; omitted fields retain the Form, null goes to its owner."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,

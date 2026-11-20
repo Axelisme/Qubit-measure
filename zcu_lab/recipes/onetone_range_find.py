@@ -11,6 +11,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
 )
 
@@ -27,6 +29,8 @@ class OnetoneRangeFindInputs(RecipeInputs):
     It affects dip selection, not the acquisition grid or hardware channels.
     """
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     freq: ToneRangeInputs = Field(
         description="Required absolute MHz start/stop, not mixer offsets. No frequency initial guess is inferred."

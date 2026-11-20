@@ -9,6 +9,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     Keep,
     Overrides,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
     report_number,
 )
@@ -31,6 +33,8 @@ class MuxOnetoneFluxGlobalInputs(MuxOnetoneFluxInputs):
     flux_n is the common positive DC point count.
     """
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     flux: ToneRangeInputs | None | Keep = Field(
         default=KEEP,

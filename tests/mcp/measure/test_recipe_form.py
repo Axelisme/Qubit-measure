@@ -48,6 +48,8 @@ class PrimitiveCfg(ConfigBase):
 
 
 class OverrideInputs(api.RecipeInputs):
+    target: api.SingleTarget
+    reuse_tab_id: api.ReuseTabId
     overrides: api.Overrides
 
 
@@ -531,12 +533,27 @@ def test_structured_overrides_cannot_replace_generated_selectors(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("reuse", [None, "tab-1"])
+@pytest.mark.parametrize(
+    ("arguments", "aliases", "opens_tab"),
+    [
+        ({"target": "Q2", "reuse_tab_id": None}, {"qubit": "Q2"}, True),
+        ({"target": "Q2", "reuse_tab_id": "tab-1"}, {"qubit": "Q2"}, False),
+        ({}, {}, True),
+        ({"target": None}, {}, True),
+    ],
+)
 def test_open_tab_named_controls_reset_with_local_target(
-    tmp_path: Path, reuse: str | None
+    tmp_path: Path,
+    arguments: dict[str, object],
+    aliases: dict[str, str],
+    opens_tab: bool,
 ) -> None:
+    class OpenInputs(api.RecipeInputs):
+        target: api.SingleTarget
+        reuse_tab_id: api.ReuseTabId
+
     @api.recipe("synthetic", "Bind a local target and optionally reuse a tab")
-    async def synthetic(session: api.RecipeSession, inputs: api.RecipeInputs) -> Report:
+    async def synthetic(session: api.RecipeSession, inputs: OpenInputs) -> Report:
         session.open_tab(
             "synthetic",
             target={"qubit": inputs.target, "kept": api.KEEP, "global": None},
@@ -547,16 +564,62 @@ def test_open_tab_named_controls_reset_with_local_target(
     client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
     try:
         execution = client.context.session.recipes.start(
-            client.context, "synthetic", {"target": "Q2", "reuse_tab_id": reuse}
+            client.context, "synthetic", arguments
         )
         execution.join()
         assert execution.snapshot().status == "completed", execution.snapshot()
-        assert [p for m, p in client.transport.sent if m == "tab.reset_cfg"] == [
-            {"tab_id": "tab-1", "aliases": {"qubit": "Q2"}},
-        ]
-        assert sum(m == "tab.new" for m, _p in client.transport.sent) == (
-            1 if reuse is None else 0
+        reset = (
+            {"tab_id": "tab-1", "aliases": aliases} if aliases else {"tab_id": "tab-1"}
         )
+        assert [p for m, p in client.transport.sent if m == "tab.reset_cfg"] == [reset]
+        assert sum(m == "tab.new" for m, _p in client.transport.sent) == int(opens_tab)
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize(
+    ("target", "aliases"),
+    [
+        (
+            {"f1": "Q3", "f2": "Q5", "coupler": "C0", "mux": "MUX2"},
+            {"f1": "Q3", "f2": "Q5", "coupler": "C0", "mux": "MUX2"},
+        ),
+        ({"f1": "Q3", "f2": None, "mux": "MUX2"}, {"f1": "Q3", "mux": "MUX2"}),
+    ],
+)
+def test_open_tab_resets_all_provided_roles_together(
+    tmp_path: Path, target: dict[str, str | None], aliases: dict[str, str]
+) -> None:
+    class RoleTargets(BaseModel):
+        f1: str | None = None
+        f2: str | None = None
+        coupler: str | None = None
+        mux: str | None = None
+
+    class RoleInputs(api.RecipeInputs):
+        target: RoleTargets
+
+    @api.recipe("synthetic", "Set four local aliases in one Reset")
+    async def synthetic(session: api.RecipeSession, inputs: RoleInputs) -> Report:
+        roles = inputs.target
+        session.open_tab(
+            "synthetic",
+            target={
+                "f1": roles.f1,
+                "f2": roles.f2,
+                "coupler": roles.coupler,
+                "mux": roles.mux,
+            },
+        )
+        return Report(count=1)
+
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
+    try:
+        reply = client.call("synthetic", {"target": target}).data
+        assert reply["status"] == "completed", reply
+        assert [p for m, p in client.transport.sent if m == "tab.reset_cfg"] == [
+            {"tab_id": "tab-1", "aliases": aliases},
+        ]
     finally:
         client.context.session.close()
 

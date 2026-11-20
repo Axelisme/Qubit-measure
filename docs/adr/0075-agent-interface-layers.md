@@ -55,7 +55,11 @@ L3 workflow 由作者決定在哪裡交還控制權。一次執行跨越多次�
 
 以上保留 2026-10-21 的討論原話。當時的 `Wait`／`Ask`／`Signal` 與 yield 描述已由下節的 async host 契約取代，env.run 也由 Scope.call 與 lib run_core 的分工取代。Recipe 的公開契約見 [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution)，workflow 的作者面見 [workflow README](../../lib/zcu_tools/experiment/workflows/README.md)。
 
-Overrides 是 recipe 的慣例欄位，不在基底。`RecipeInputs` 只提供 target 與 reuse_tab_id；便利層提供 `Overrides` 欄位型別與 `RecipeTab.apply_overrides`，接受 overrides 的 recipe 在輸入 class 自己宣告 `overrides: Overrides`。每筆 override 是 path 加上 `value`、`select`、`command` 其中一個，依序套用；失敗時報出索引與 path，前面已套用的保留，不回復。2026-11-19，使用者問：「為什麼overrides不能作為慣例存在？不作為base class屬性，但幾乎每個recipe都會宣告他，這樣不就沒問題了嗎？」2026-11-20 以「好，我沒問題了，全部採用建議」採用各 recipe 自行宣告、lib 提供型別的寫法。這延續上面「overrides不該出現在base class中」的裁決，不放寬基底的範圍。推導見 [logical cfg 路徑與 recipe overrides](../discussions/2026-11-20-logical-cfg-paths-and-overrides.md)。
+`target`、`reuse_tab_id` 與 `overrides` 是 recipe 的慣例欄位，由各 recipe 按需宣告。`RecipeInputs` 不宣告欄位，只拒絕未知欄位和非有限數，並保留 `T | None | Keep = KEEP` 的省略語意。Lib 提供 `SingleTarget`、`ReuseTabId` 與 `Overrides` 欄位型別。Recipe 可定義自己的 target model，並把多個角色的對照表交給 `open_tab`。框架不從 inputs 讀取這兩個 Open／Reset 欄位。
+
+便利層提供 `RecipeTab.apply_overrides`。每筆 override 是 path 加上 `value`、`select`、`command` 其中一個，依序套用。失敗時報出索引與 path，前面已套用的保留，不回復。2026-11-19，使用者問：「為什麼overrides不能作為慣例存在？不作為base class屬性，但幾乎每個recipe都會宣告他，這樣不就沒問題了嗎？」2026-11-20 以「好，我沒問題了，全部採用建議」採用各 recipe 自行宣告、lib 提供型別的寫法。推導見 [logical cfg 路徑與 recipe overrides](../discussions/2026-11-20-logical-cfg-paths-and-overrides.md)。
+
+2026-11-20，使用者同意讓 recipe 自行宣告 `target`，並追問基底的內容：「1B 2A 3A,目前共通RecipeInputs到底有什麼？ 4A」。確認基底原有兩個欄位後，再裁決：「那reused也從基底移除好了」。推導見 [Two-qubit MCP recipes 的首版範圍與輸入](../discussions/2026-11-20-two-qubit-recipes.md)。
 
 跨實驗整合分析與 workflow 同屬 L3，但不由 workflow 決定 yield。Fluxdep 是獨立、可選的分析 app，不併入 measure 或 workflows。Agent 在資料可用性、對齊、採樣、躍遷假設、驗收與剔除六個決策點介入，各步可以重做。程式處理前置條件、計算與發布；agent 判讀證據並選下一步。人與 agent 共駕同一份 application state，寫入由 [[0070]] 的 holder 控制。
 

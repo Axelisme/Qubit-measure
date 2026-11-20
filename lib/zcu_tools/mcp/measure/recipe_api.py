@@ -218,14 +218,29 @@ Overrides = Annotated[
 ]
 
 
-class RecipeInputs(BaseModel):
-    """Shared recipe controls for opening or resetting tabs.
+SingleTarget = Annotated[
+    str | None | Keep,
+    Field(
+        default_factory=lambda: KEEP,
+        description="Concrete target for this Reset; omission/null keeps global aliases.",
+    ),
+]
 
-    Subclass with experiment fields using T | None | Keep = KEEP. Omission
-    retains Form values; null clears/disables nullable Form fields. Unknown
-    fields and non-finite numbers fail admission before opening a tab.
-    target and reuse_tab_id control Open/Reset rather than editing Form fields:
-    omitted/null target keeps global aliases; omitted/null reuse opens a tab.
+ReuseTabId = Annotated[
+    str | None | Keep,
+    Field(
+        default_factory=lambda: KEEP,
+        description="Idle matching tab to Reset; omission/null opens a new tab.",
+    ),
+]
+
+
+class RecipeInputs(BaseModel):
+    """Fieldless validation base for authored recipe inputs.
+
+    Unknown fields and non-finite numbers fail admission before a tab opens.
+    Declare omittable Form fields as T | None | Keep = KEEP. Omission retains
+    Form values; null clears or disables nullable Form fields.
     """
 
     model_config = ConfigDict(
@@ -234,15 +249,6 @@ class RecipeInputs(BaseModel):
         json_schema_extra={
             "description": "Optional Form inputs: omission keeps the Form value; null clears or disables it."
         },
-    )
-
-    target: str | None | Keep = Field(
-        default_factory=lambda: KEEP,
-        description="Concrete target for this Reset; omission/null keeps global aliases.",
-    )
-    reuse_tab_id: str | None | Keep = Field(
-        default_factory=lambda: KEEP,
-        description="Idle matching tab to Reset; omission/null opens a new tab.",
     )
 
     @classmethod

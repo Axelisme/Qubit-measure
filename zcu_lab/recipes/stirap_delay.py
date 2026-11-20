@@ -8,6 +8,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
     report_number,
 )
@@ -24,6 +26,8 @@ class StirapDelayInputs(RecipeInputs):
     options; overrides supply the selected waveform's parameters.
     """
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     start_us: float = Field(
         description="First Stokes lead in us; negative starts Pump first."

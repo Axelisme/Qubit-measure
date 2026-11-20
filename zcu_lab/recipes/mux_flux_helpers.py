@@ -10,6 +10,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeTab,
+    ReuseTabId,
+    SingleTarget,
 )
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
@@ -22,6 +24,9 @@ from .mux_helpers import ToneRangeInputs
 class MuxFluxInputs(RecipeInputs):
     """Omitted Form inputs retain values; null clears them; overrides apply last."""
 
+    # Keep these first in the schema when concrete flux recipes declare them.
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
         description="Unique original mux readout tone indices in acquisition order.",

@@ -10,6 +10,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
 )
 
@@ -18,6 +20,8 @@ class MistDriveFrequencyInputs(RecipeInputs):
     """Inputs for mist drive frequency; all units and null policies are declared
     per field."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     freq_range: list[float] = Field(
         min_length=2, max_length=2, description="Two frequency endpoints in MHz."

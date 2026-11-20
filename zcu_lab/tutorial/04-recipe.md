@@ -28,13 +28,16 @@ GUI cfg、Form 初值與量測序列仍由原實驗擁有，不在 recipe 再建
 from pydantic import Field
 
 from zcu_tools.mcp.measure.recipe_api import (
-    Overrides, RecipeInputs, RecipeReport, RecipeSession, recipe,
+    Overrides, RecipeInputs, RecipeReport, RecipeSession, ReuseTabId,
+    SingleTarget, recipe,
 )
 
 
 class PowerMapInputs(RecipeInputs):
     """Use the captured Form with optional target, reuse and ordered overrides."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
 
 
@@ -94,7 +97,7 @@ Report 是作者選擇的具名 model，不需要 SummaryParameter、SummaryEsti
 加入可省略的 Form 欄位時，從 recipe_api import `KEEP, Keep`，宣告 `T | None | Keep = KEEP`。
 省略保留 Form 值，明填 null 原樣交 owner。KEEP 不是 JSON 值，schema 不列 Keep 或 KEEP default。
 主體先明寫選 module 與逐欄 set，再用 `tab.apply_overrides` 依序套 overrides，最後 check_ready。
-`RecipeInputs` 不含 overrides；接受 overrides 的 recipe 在輸入 class 宣告 `overrides: Overrides`。
+`RecipeInputs` 不宣告欄位。`target`、`reuse_tab_id` 與 `overrides` 都由 recipe 按需宣告。
 例如 `tab.set("freq.n", inputs.points)`，寫入與 FieldEdit 用 dotted string。
 每筆 override 是 `{path, value}`、`{path, select}`、`{path, command}` 三選一，`select: null` 清空可清空的 selector。
 Overrides 省略是空 list，不接受 null，不去重。某筆失敗時報出它的索引與 path，前面已套用的保留，不 rollback。
