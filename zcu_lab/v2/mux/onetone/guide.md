@@ -122,6 +122,8 @@ Quality 供操作員審閱；是否提出候選值依成功擬合結果判定。
 Inactive 或失敗 tone 保留原值，全部失敗時省略 module 候選。
 固定 target 是 `$mux.readout.readout_rf`，描述列出 active tone 的頻率變化或失敗。
 
+FIT 不校準 module 的 `post_delay`。提案保留輸入的值，新建 module 預設為 0 µs。用這份 module 做 heralded 實驗前，請依[雙 qubit 指南的 herald 等待估算與驗證](../../two_qubit/guide.md#herald-reset-與獨立-heralded-入口)設定 `post_delay`。用逐 resonator 的 `kappa` 估算腔場衰減時間，再比較 herald 後的名目 Xπ 在所選等待與更長等待下的翻轉比例。
+
 有 Run／Load 參數來源時，另一列候選將 `$mux.module.readout` 指向同份來源解析的 module root。
 Apply 模組列與 slot 列後，library 保存擬合後的 readout，slot 指向該 root。
 下次開表單沿 slot 讀取該 library 模組。請分別選取要套用的列。

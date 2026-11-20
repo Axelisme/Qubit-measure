@@ -17,15 +17,37 @@ matches the data axes. Refresh preserves authored inputs.
 Each shot emits optional reset, herald, the paired Clifford sequence with
 its own recovery, then terminal readout. Set `reset=None` to omit reset.
 Herald and terminal emit the same full mux module with tags `herald` and
-`terminal`. Readout `post_delay` is the wait after herald. The two reads
-cannot use different gains or integration lengths. The recovered sequence
-has net logical identity. A herald gg state should return to gg, and an ee
-state should return to ee.
+`terminal`. The two reads cannot use different gains or integration lengths.
+The recovered sequence has net logical identity. A herald gg state should
+return to gg, and an ee state should return to ee.
 
 Both F1 and F2 tones require circle classifiers with radius from GE Post.
 Missing calibration, missing radius or linear classification fails before Run.
 Repeat GE and Post after changing readout settings. Classification happens
 during acquisition for both tagged reads, with g, e and other outcomes.
+
+## Wait after herald
+
+Set the readout's `post_delay` before Run so photons in the resonator can
+decay before the qubit drive. Herald and terminal readout share this value
+([ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)).
+The wait starts when the readout generator waveform ends, without waiting for
+the ADC integration window to end
+([ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)).
+No experiment calibrates this field. New mux readout modules default to 0 µs.
+
+If the wait is too short, leftover photons shift the qubit transition
+frequency. A nominal Xπ after herald may barely flip the qubit, and a
+conditional-phase scan may show no π crossing. In one low-SNR FTF example,
+the nominal F2 Xπ flip fraction was 11.6% at 0 µs and 92.9% at 2 µs.
+The 2 µs value is an example, not a minimum or an optimum.
+
+The resonator's `kappa` is the full width at half maximum (FWHM) in MHz.
+The cavity field decay time is about `1 / (π · FWHM)` in µs. Start with a wait
+several times that estimate. Measure the nominal Xπ flip fraction after
+herald, then change only the wait and repeat at a longer value. If the
+longer wait still improves the flip fraction, adjust `post_delay` before
+running RB.
 
 ## Sequences and cost
 

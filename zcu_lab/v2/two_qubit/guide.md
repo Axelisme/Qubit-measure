@@ -78,7 +78,13 @@ Chevron 的 25×101 點保存 181,800 bytes 的 `sums`。選 mux herald 不改�
 
 只有 RB 與 conditional phase 另有 `_heralded` 入口。兩者保存 81 類，分析同時使用 herald g,g 與 e,e 的終端計數。本次移除的七個獨立入口改在對應的一般入口用 reset 選擇 herald。入口清單見 [v2 README](../README.md#two-qubit-實驗清單)。
 
-在支援的入口選 `reset/mux_herald`，用與終端相同的完整 mux readout。F1、F2 在 tone 位置 0、1 時，用 `keep: {'0': g, '1': g}`。Herald 在序列前讀出一次，兩次讀出之間沿用 readout 的 post_delay。Result 只保留通過篩選的終端計數。
+在支援的入口選 `reset/mux_herald`，用與終端相同的完整 mux readout。F1、F2 在 tone 位置 0、1 時，用 `keep: {'0': g, '1': g}`。Herald 在序列前讀出一次。Result 只保留通過篩選的終端計數。
+
+使用 herald 前，先設定 readout 的 `post_delay`，讓腔內光子在後續 qubit drive 前衰減。Herald 讀出和終端讀出共用這個值（[ADR-0074](../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)）。等待從 readout generator 的波形結束算起，不等 ADC 積分窗結束（[ADR-0083](../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)）。沒有實驗會校準這個欄位，新 mux readout module 預設為 0 µs。
+
+等待太短時，殘留的腔光子會改變 qubit 轉移頻率。Herald 後打名目 Xπ 可能幾乎不翻轉，conditional phase 掃描也可能找不到 π 交點。FTF 的一個低 SNR 例子中，名目 F2 Xπ 的翻轉比例在 0 µs 時是 11.6%，在 2 µs 時是 92.9%。2 µs 不是最短或最佳等待，只是這次比較用的值。
+
+用 resonator 線寬 `kappa`（半高全寬 FWHM，單位 MHz）估算腔場衰減時間 `1 / (π · FWHM)`，結果的單位是 µs。先把 `post_delay` 設為衰減時間的數倍。量測 herald 後名目 Xπ 的翻轉比例，只延長等待再重測，比較兩次結果。若延長等待還能提高翻轉比例，先調整 `post_delay`，再跑 heralded 掃描。
 
 `reset` 預設 None，不發射 reset。脈衝 reset 每 shot 開始時發射。表單 Reset 只重新捕捉初值。
 
