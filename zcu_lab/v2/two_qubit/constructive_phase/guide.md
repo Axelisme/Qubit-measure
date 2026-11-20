@@ -98,7 +98,7 @@ Old raw-IQ files without `sums` are rejected; there is no format fallback.
 
 FIT proposes only F2's ordinary charge pulse and its independent coupler slot.
 The writeback targets remain `<coupler>.pulses.cz_f2` and
-`<coupler>.module.cz_f2` in both versions.
+`<coupler>.module.cz_f2`.
 F2.phase becomes saved F1.phase plus the fitted relative phase.
 F2 frequency, signed gain, waveform and timing stay as measured.
 F1 stays the phase reference. Missing cfg or an unresolved phase gives no proposal.

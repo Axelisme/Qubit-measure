@@ -69,3 +69,5 @@ Simultaneous single-qubit RB與單qubit heralding是否另開，留待使用者�
 ## 後記
 
 2026-11-20：本篇「Reference與interleaved使用相同單qubit排法」一句，在 Clifford 邊界上不成立。Interleaved 組每個 random Clifford 後的 CZ 讓兩條時間線在邊界對齊，reference 組沒有，相鄰 Clifford 可以重疊。使用者同日改為兩組都在 Clifford 邊界對齊，見 [Two-qubit RB 在 Clifford 邊界對齊兩條時間線](2026-11-20-rb-clifford-barrier.md)。
+
+2026-11-20，使用者收窄本篇沿用的九個獨立 heralded 入口。RB 的衰減參數不受 gg、ee 準備誤差影響，因此 `rb_heralded` 保留；排程裁決不因這次取捨而變。見[只為共用參數保留獨立 heralded 實驗](2026-11-20-heralded-experiment-pruning.md)。

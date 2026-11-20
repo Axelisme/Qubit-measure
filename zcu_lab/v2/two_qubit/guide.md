@@ -48,7 +48,7 @@ Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`ro
 
 兩 qubit FTF 表單 Open／Reset 的初值為 reps=1000、rounds=10，每座標、每準備或 projection 分支取得 10,000 個 joint shots。這個數量不代表擬合或校準已有足夠統計。一般實驗由取數端累加 rounds；RB 由 host 逐 round 取數，保留 round 軸。
 
-下表的 P 是掃描點數，已包含準備態、spectator 與 projection 軸。DC sweep 關閉時 DC 點數取 1。每版一次完整 Run 的總 shots 都是 `P × reps × rounds`。
+下表的 P 是掃描點數，已包含準備態、spectator 與 projection 軸。DC sweep 關閉時 DC 點數取 1。一次完整 Run 的總 shots 都是 `P × reps × rounds`。
 
 | FTF 入口 | P |
 | --- | --- |
@@ -74,9 +74,9 @@ Chevron 的 25×101 點保存 181,800 bytes 的 `sums`。選 mux herald 不改�
 
 要縮短操作診斷時，明確減少點數或採樣數並保存該次 cfg，標記為「診斷、非校準」。Open／Reset 會恢復 reps=1000、rounds=10。低採樣圖只能用來排查接線、流程與掃描窗口，接受校準前仍須取得可判讀的資料與 uncertainty。
 
-## 兩版實驗、reset 與 pass fraction
+## Herald reset 與獨立 heralded 入口
 
-只有 RB 與 conditional phase 另有 `_heralded` 入口。兩者保存 81 類，分析同時使用 herald g,g 與 e,e 的終端計數。其他實驗在一般入口用 reset 選擇 herald。入口清單見 [v2 README](../README.md#two-qubit-實驗清單)。
+只有 RB 與 conditional phase 另有 `_heralded` 入口。兩者保存 81 類，分析同時使用 herald g,g 與 e,e 的終端計數。本次移除的七個獨立入口改在對應的一般入口用 reset 選擇 herald。入口清單見 [v2 README](../README.md#two-qubit-實驗清單)。
 
 在支援的入口選 `reset/mux_herald`，用與終端相同的完整 mux readout。F1、F2 在 tone 位置 0、1 時，用 `keep: {'0': g, '1': g}`。Herald 在序列前讀出一次，兩次讀出之間沿用 readout 的 post_delay。Result 只保留通過篩選的終端計數。
 
@@ -132,7 +132,7 @@ F1 的 tone 是 `$f1` component 在 Open／Reset 所固定的 `$mux.qubits` 中�
 
 ## Joint readout 到 local Z 的校準路線
 
-以下以 0a 的 pulses、readout 與已記錄 bias 為起點，表格連到非 heralded guide。`B(ab)` 表示對 F1/F2 分別施加 I 或 Xπ，a 對應 F1，b 對應 F2。未啟用 reset 時，非 heralded 的 `B(11)` 仍是熱 ensemble；heralded 則依 g,g／e,e 初態解讀準備。
+以下以 0a 的 pulses、readout 與已記錄 bias 為起點，表格連到一般入口的 guide。`B(ab)` 表示對 F1/F2 分別施加 I 或 Xπ，a 對應 F1，b 對應 F2。未啟用 reset 時，`B(11)` 仍是熱 ensemble；選 mux herald 並保留 g,g 時，從通過該篩選的 shots 解讀準備。
 
 | 次序 | 操作與圖 | 判讀與後續動作 |
 | --- | --- | --- |
