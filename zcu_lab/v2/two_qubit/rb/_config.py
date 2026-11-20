@@ -27,7 +27,7 @@ class RBInputs[ResetT](ConfigBase):
     random.Random identities shared across depths/arms/rounds. Both lists are
     deduplicated and sorted before use or saving. The 31-bit seed bound
     preserves exact axes.
-    reps is shots per host round; rounds remains a separate saved axis.
+    reps is shots per acquisition round; rounds sets how many rounds to sum.
     """
 
     reset: Annotated[
@@ -85,7 +85,10 @@ class RBInputs[ResetT](ConfigBase):
     ] = Field(gt=0)
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            description="Number of acquisition rounds to sum per seed and arm.",
+        ),
     ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,

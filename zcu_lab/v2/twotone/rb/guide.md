@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run reference RB or target-interleaved RB and read the decay fits.
 
-**Last updated:** 2026-11-19
+**Last updated:** 2026-11-20, acquisition rounds
 
 ## Choose a target
 
@@ -13,10 +13,10 @@ arm inserts the target after every random Clifford. Each arm applies its own
 full inverse before readout. Depth counts random Cliffords, not physical pulses
 or inserted targets.
 
-The board sweeps depth and runs the repetitions for each seed and arm. The host
-runs the rounds and reuses the compiled programs. With a target selected, it
-alternates which arm goes first across seeds and rounds to balance slow drift.
-The live plot shows one line per arm.
+The board sweeps depth and runs the repetitions for each seed and arm.
+`rounds` is the number of acquisition rounds per program. Acquisition
+averages IQ across `reps` and finished rounds. Each seed runs reference first,
+then the optional interleaved arm. The live plot shows one line per arm.
 
 ## Set the starting values
 
@@ -48,12 +48,11 @@ random sequences.
 
 ## Read the result
 
-Native data stores repetition-averaged IQ in `(round, seed, arm, depth)` order.
-Arm 0 is reference. Arm 1 is present only when a target is selected. Stopping
-keeps measured IQ and leaves unmeasured slots as NaN. Analyze takes complete
-rounds for each seed. In the two-arm run, a round contributes only if both arms
-are complete for that seed. Analyze averages those rounds before weighting the
-seeds equally. It needs at least two usable seeds.
+Native data stores averaged IQ `signals` in (seed, arm, depth) order. Arm 0 is
+reference. Arm 1 is present only when a target is selected. Stop keeps the
+average of completed rounds for the current seed and arm. Cells without any
+completed round stay NaN. Analyze keeps seeds with finite IQ in all arms
+at every depth. It weights them equally and needs at least two complete seeds.
 
 Analyze fits `A * p**depth + B` on one IQ projection and plots the observations
 and fitted curves. Reference-only mode reports decay `p`, error per Clifford
@@ -67,6 +66,12 @@ gate-dependent or coherent noise. A negative target error or fidelity above one
 remains visible. Review the curves and interval before using the estimate.
 Analyze does not write back calibration.
 
-Previous standalone RB and IRB runs remain in their original files. This
-experiment does not convert them. Re-enter the settings and run again to produce
-data in the combined format.
+Check that the deepest points approach the fitted offset before using the
+decay estimate. This experiment does not report fit quality. The
+[two-qubit RB guide](../../two_qubit/rb/guide.md#interpreting-the-result)
+shows how a short scan can have R² of 0.993 while the decay length has 30%
+relative error.
+
+Load rejects older files with a round axis (wrong number of axes). It does
+not convert these files or previous standalone RB and IRB runs. Re-enter the
+settings and Run to save the current format.

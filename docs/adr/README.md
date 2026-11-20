@@ -60,6 +60,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Experiment runtime / Readout / Workflows
 
+原則：一般實驗由取數端加總或平均已完成 rounds，Result 不留 round 軸；這是建議，需要逐輪資料時可把 round 迴圈放在最外層，見 [ADR-0083](0083-program-macros-and-timelines.md#round-在取數端歸約)。
+
 原則：實驗 cfg 可為統一命名改欄位；改名升 schema major，不遷移、不留 alias，舊 run 在結果仍相容時保留 Result 與 metadata，見 [ADR-0069](0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。
 
 原則：只有準備誤差不移動 gg、ee 兩組共用的參數時，才保留獨立 heralded 實驗，見 [ADR-0074](0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)。

@@ -31,7 +31,6 @@ from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
     TimelineBuilder,
-    TimelineProgramV2,
 )
 
 from zcu_lab.v2.support import live_line
@@ -43,23 +42,21 @@ from .._rb_sequence import TargetGate, make_seed_tables
 class RB_Result:
     """Raw RB axes and IQ, including NaNs for unfinished acquisitions."""
 
-    rounds: NDArray[np.int64]
-    """Zero-based host pass IDs."""
     sub_seeds: NDArray[np.int64]
-    """Independent RNG seeds reused across rounds and any interleaved arm."""
+    """Independent RNG seeds shared with the interleaved arm, if present."""
     arms: NDArray[np.int64]
     """[0] for reference only; [0, 1] for reference followed by interleaved."""
     depths: NDArray[np.int64]
     """Number of random Cliffords; interleaved also inserts this many targets."""
     signals: NDArray[np.complex128]
-    """Repetition-averaged IQ, shape (round, seed, arm, depth)."""
+    """IQ averaged over reps and completed rounds, shape (seed, arm, depth)."""
 
 
 RBAnalysis: TypeAlias = ReferenceRBAnalysis | IRBAnalysis
 
 
 class RBCfg(ConfigBase):
-    """Single-qubit RB settings; depth counts random Cliffords and rounds are host passes."""
+    """Single-qubit RB settings: depth counts random Cliffords, rounds sets acquisition rounds."""
 
     reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
     I_pulse: Annotated[PulseCfg | None, FieldMeta(label="Identity Pulse")] = None
@@ -80,7 +77,10 @@ class RBCfg(ConfigBase):
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            description="Number of acquisition rounds to average per seed and arm.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
@@ -139,7 +139,6 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 dtype=np.int64,
             ),
             AxesSpec.Axis("sub_seeds", label="Seed", unit="", dtype=np.int64),
-            AxesSpec.Axis("rounds", label="Round", unit="", dtype=np.int64),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=RB_Result,
@@ -153,9 +152,9 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
 
         Reset, play each random Clifford (with a target after it in arm 1),
         apply that arm's full inverse in two recovery slots, then read out.
-        Return repetition-averaged IQ in (round, seed, arm, depth) order.
-        Each seed/arm program is cached, with hardware depth/reps and host rounds.
-        Unfinished slots remain NaN; acquisition errors are recorded on context.scope.stop.
+        Acquire each seed/arm program once, sweeping depth and reps on board.
+        Return IQ averaged over reps and completed rounds in (seed, arm, depth)
+        order. Cells without a completed round remain NaN.
         """
         # 1. Prepare the arms, reproducible seeds and depth axis.
         run_cfg = deepcopy(cfg)
@@ -170,146 +169,123 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         )
         update = _live_plot(context.plots, depths, len(arms))
         buffer = SignalBuffer(
-            (run_cfg.rounds, len(seeds), len(arms), len(depths)),
+            (len(seeds), len(arms), len(depths)),
             on_update=update,
         )
-        cache: dict[tuple[int, int], TimelineProgramV2] = {}
-        arm_indices = range(len(arms))
-        # 2. Alternate which arm runs first to balance drift when interleaving.
+        # 2. Acquire reference first, then the optional interleaved arm for each seed.
         with Schedule(buffer, scope=context.scope) as sched:
-            for round_index, round_step in sched.repeat("round", run_cfg.rounds):
-                for seed_index, (seed, seed_step) in enumerate(
-                    round_step.scan("seed", seeds.tolist())
-                ):
-                    order = (
-                        arm_indices
-                        if (round_index + seed_index) % 2 == 0
-                        else arm_indices[::-1]
+            for seed, seed_step in sched.scan("seed", seeds.tolist()):
+                for arm, arm_step in seed_step.scan("arm", arms.tolist()):
+                    builder = TimelineBuilder(
+                        context.soccfg,
+                        reps=run_cfg.reps,
+                        relax_delay=run_cfg.relax_delay,
                     )
-                    for arm in order:
-                        if sched.is_stop():
-                            break
-                        arm_step = seed_step.child(arm)
-                        key = (seed_index, arm)
-                        if key not in cache:
-                            builder = TimelineBuilder(
-                                context.soccfg,
-                                reps=run_cfg.reps,
-                                relax_delay=run_cfg.relax_delay,
-                            )
-                            # 3. Realize reference or target-interleaved Cliffords with calibrated rotations.
-                            tables = make_seed_tables(
-                                seed, depths, run_cfg.target_gate if arm == 1 else None
-                            )
-                            (
-                                rand_gate_seq,
-                                prefix_len_by_depth,
-                                recovery_gate0_by_depth,
-                                recovery_gate1_by_depth,
-                            ) = tables
-                            max_rand_len = max(prefix_len_by_depth, default=0)
+                    # 3. Realize reference or target-interleaved Cliffords with calibrated rotations.
+                    tables = make_seed_tables(
+                        seed, depths, run_cfg.target_gate if arm == 1 else None
+                    )
+                    (
+                        rand_gate_seq,
+                        prefix_len_by_depth,
+                        recovery_gate0_by_depth,
+                        recovery_gate1_by_depth,
+                    ) = tables
+                    max_rand_len = max(prefix_len_by_depth, default=0)
 
-                            Id_pulse = run_cfg.I_pulse
-                            X90_pulse = run_cfg.X90_pulse
-                            X180_pulse = run_cfg.X180_pulse
-                            MX90_pulse = X90_pulse.with_updates(
-                                phase=X90_pulse.phase + 180.0
-                            )
-                            Y90_pulse = X90_pulse.with_updates(
-                                phase=X90_pulse.phase + 90.0
-                            )
-                            Y180_pulse = X180_pulse.with_updates(
-                                phase=X180_pulse.phase + 90.0
-                            )
-                            MY90_pulse = X90_pulse.with_updates(
-                                phase=X90_pulse.phase - 90.0
-                            )
+                    Id_pulse = run_cfg.I_pulse
+                    X90_pulse = run_cfg.X90_pulse
+                    X180_pulse = run_cfg.X180_pulse
+                    MX90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 180.0)
+                    Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
+                    Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90.0)
+                    MY90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase - 90.0)
 
-                            if Id_pulse is None:
-                                Id_pulse = X90_pulse.with_updates(gain=0.0)
+                    if Id_pulse is None:
+                        Id_pulse = X90_pulse.with_updates(gain=0.0)
 
-                            gate_pulses = [
-                                Id_pulse,
-                                X90_pulse,
-                                X180_pulse,
-                                MX90_pulse,
-                                Y90_pulse,
-                                Y180_pulse,
-                                MY90_pulse,
-                            ]
+                    gate_pulses = [
+                        Id_pulse,
+                        X90_pulse,
+                        X180_pulse,
+                        MX90_pulse,
+                        Y90_pulse,
+                        Y180_pulse,
+                        MY90_pulse,
+                    ]
 
-                            # 4. Play this arm's prefix and its own full inverse.
-                            builder.add_loop("depth", len(prefix_len_by_depth))
-                            builder.emit(
-                                LoadValue(
-                                    "load_rand_len",
-                                    values=prefix_len_by_depth,
-                                    idx_reg="depth",
-                                    val_reg="rand_len",
-                                )
+                    # 4. Play this arm's prefix and its own full inverse.
+                    builder.add_loop("depth", len(prefix_len_by_depth))
+                    builder.emit(
+                        LoadValue(
+                            "load_rand_len",
+                            values=prefix_len_by_depth,
+                            idx_reg="depth",
+                            val_reg="rand_len",
+                        )
+                    )
+                    builder.emit(
+                        LoadValue(
+                            "load_recovery_gate_0",
+                            values=recovery_gate0_by_depth,
+                            idx_reg="depth",
+                            val_reg="recovery_gate_0",
+                        )
+                    )
+                    builder.emit(
+                        LoadValue(
+                            "load_recovery_gate_1",
+                            values=recovery_gate1_by_depth,
+                            idx_reg="depth",
+                            val_reg="recovery_gate_1",
+                        )
+                    )
+                    if run_cfg.reset is not None:
+                        builder.emit(Reset("reset", run_cfg.reset))
+                    builder.delay_by_timeline()
+                    with builder.repeat(
+                        "rand_gate_idx",
+                        "rand_len",
+                        range_hint=(0, max_rand_len),
+                    ):
+                        builder.emit(
+                            LoadValue(
+                                "load_rand_gate",
+                                values=rand_gate_seq,
+                                idx_reg="rand_gate_idx",
+                                val_reg="gate_idx",
                             )
-                            builder.emit(
-                                LoadValue(
-                                    "load_recovery_gate_0",
-                                    values=recovery_gate0_by_depth,
-                                    idx_reg="depth",
-                                    val_reg="recovery_gate_0",
-                                )
+                        )
+                        builder.emit(
+                            ComputedPulse(
+                                "basic_gate",
+                                val_reg="gate_idx",
+                                pulses=gate_pulses,
                             )
-                            builder.emit(
-                                LoadValue(
-                                    "load_recovery_gate_1",
-                                    values=recovery_gate1_by_depth,
-                                    idx_reg="depth",
-                                    val_reg="recovery_gate_1",
-                                )
-                            )
-                            if run_cfg.reset is not None:
-                                builder.emit(Reset("reset", run_cfg.reset))
-                            builder.delay_by_timeline()
-                            with builder.repeat(
-                                "rand_gate_idx",
-                                "rand_len",
-                                range_hint=(0, max_rand_len),
-                            ):
-                                builder.emit(
-                                    LoadValue(
-                                        "load_rand_gate",
-                                        values=rand_gate_seq,
-                                        idx_reg="rand_gate_idx",
-                                        val_reg="gate_idx",
-                                    )
-                                )
-                                builder.emit(
-                                    ComputedPulse(
-                                        "basic_gate",
-                                        val_reg="gate_idx",
-                                        pulses=gate_pulses,
-                                    )
-                                )
-                                builder.delay_by_timeline()
-                            # Both recovery slots retain the complete candidate set for fixed timing.
-                            builder.emit(
-                                ComputedPulse(
-                                    "recovery_gate_0",
-                                    val_reg="recovery_gate_0",
-                                    pulses=gate_pulses,
-                                )
-                            )
-                            builder.emit(
-                                ComputedPulse(
-                                    "recovery_gate_1",
-                                    val_reg="recovery_gate_1",
-                                    pulses=gate_pulses,
-                                )
-                            )
-                            builder.emit(Readout("readout", run_cfg.readout))
-                            cache[key] = builder.build()
-                        # 5. Store one round's mean IQ; reuse programs next round.
-                        arm_step.run_acquire(cache[key], context.soc, rounds=1)
+                        )
+                        builder.delay_by_timeline()
+                    # Both recovery slots retain the complete candidate set for fixed timing.
+                    builder.emit(
+                        ComputedPulse(
+                            "recovery_gate_0",
+                            val_reg="recovery_gate_0",
+                            pulses=gate_pulses,
+                        )
+                    )
+                    builder.emit(
+                        ComputedPulse(
+                            "recovery_gate_1",
+                            val_reg="recovery_gate_1",
+                            pulses=gate_pulses,
+                        )
+                    )
+                    builder.emit(Readout("readout", run_cfg.readout))
+                    # 5. ADR-0083: Average finished rounds in acquisition.
+                    arm_step.run_acquire(
+                        builder.build(), context.soc, rounds=run_cfg.rounds
+                    )
             sched.trigger_update(flush=True)
         return RB_Result(
-            rounds=np.arange(run_cfg.rounds, dtype=np.int64),
             sub_seeds=seeds,
             arms=arms,
             depths=depths,

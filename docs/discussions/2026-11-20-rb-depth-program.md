@@ -47,3 +47,7 @@ Plain 與 heralded two-qubit RB 每個 seed、arm 編一支板上 depth program�
 - 前一版 program 與 cfg 以 repo `c333da7d8` 為基準。[普通 RB guide](../../zcu_lab/v2/two_qubit/rb/guide.md#sequences-and-cost) 描述新 program 與操作方式。
 - 同一份無 reset 合成設定、seed 7 下，201 點 depth 0–200 的 reference／interleaved 用量從 3750／4145 降到 3728／4114 words。21 點 depth 0–400 從 2803／3612 降到 2777／3586 words。兩組條件都以記憶體內提高上限的方式取得超量用量。
 - 原始草稿與編譯量測工作檔未入庫。上文保留裁決、條件與比較數字。
+
+## 後記
+
+2026-11-20，[RB 取數歸約](2026-11-20-rb-round-reduction-and-fit-quality.md)保留本文的板上 depth program，改由 acquire 加總各程式已完成的 rounds。兩個 two-qubit RB Result 都不再保存 round 軸，Load 不接受帶 round 軸的舊檔。
