@@ -17,15 +17,48 @@ matches the data axes. Refresh preserves authored inputs.
 Each shot emits optional reset, herald, the paired Clifford sequence with
 its own recovery, then terminal readout. Set `reset=None` to omit reset.
 Herald and terminal emit the same full mux module with tags `herald` and
-`terminal`. Readout `post_delay` is the wait after herald. The two reads
-cannot use different gains or integration lengths. The recovered sequence
-has net logical identity. A herald gg state should return to gg, and an ee
-state should return to ee.
+`terminal`. The two reads cannot use different gains or integration lengths.
+The recovered sequence has net logical identity. A herald gg state should
+return to gg, and an ee state should return to ee.
 
 Both F1 and F2 tones require circle classifiers with radius from GE Post.
 Missing calibration, missing radius or linear classification fails before Run.
 Repeat GE and Post after changing readout settings. Classification happens
 during acquisition for both tagged reads, with g, e and other outcomes.
+
+## Wait after herald
+
+Set the readout's `post_delay` before Run so photons in the resonator can
+decay before the qubit drive. Herald and terminal readout share this value
+([ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)).
+The wait starts when the readout generator waveform ends, without waiting for
+the ADC integration window to end
+([ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)).
+No experiment calibrates this field. New mux readout modules default to 0 µs.
+
+If the wait is too short, leftover photons shift the qubit transition
+frequency and cause dephasing. A nominal Xπ after herald may barely flip
+the qubit. A separate conditional-phase scan may show no π crossing; RB
+does not measure that crossing.
+In one low-SNR FTF example, after gg herald and a nominal F2 Xπ, the F2
+terminal e fraction was 11.6% at 0 µs and 92.9% at 2 µs. These fractions do
+not subtract the I baseline. The 2 µs value is an example, not a minimum
+or an optimum.
+
+Use each resonator's `kappa` from the `mux/onetone` FIT. It is the full
+width at half maximum (FWHM) in MHz. Estimate the cavity field decay time as
+`1 / (π · FWHM)` in µs. Start with a wait several times that estimate.
+
+In `two_qubit/joint_readout`, choose `reset/mux_herald` in Reset. Set
+`keep` to g for both role tones, keyed by their positions in the full readout.
+Use the same full mux readout for herald and terminal. After Run, inspect the
+4×9 row-normalized probability matrix in FIT. Find the row with nominal Xπ
+on the target and I on the other qubit.
+Sum the columns where the target's terminal class is e. Compare with the
+gg row for an I baseline if needed. This is the terminal e fraction among
+shots that passed gg herald, not gate fidelity. Lengthen only `post_delay`
+and repeat Run and FIT. If the longer wait still raises the terminal e
+fraction, adjust `post_delay` before running RB.
 
 ## Sequences and cost
 
