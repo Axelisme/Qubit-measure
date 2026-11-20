@@ -20,6 +20,29 @@ class OwnerSummary:
     quality: FitQuality
 
 
+@pytest.mark.parametrize("field", ["target", "reuse_tab_id"])
+def test_recipe_rejects_undeclared_open_controls_before_opening_tab(
+    tmp_path: Path, field: str
+) -> None:
+    class Inputs(api.RecipeInputs):
+        pass
+
+    @api.recipe("synthetic", "Open a tab without exposing open controls")
+    async def synthetic(session: api.RecipeSession, inputs: Inputs) -> Report:
+        session.open_tab("synthetic")
+        return Report(count=1)
+
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
+    try:
+        reply = client.call("synthetic", {field: "not-declared"}).data
+        assert reply["status"] == "failed", reply
+        assert field in reply["failure"]["reason"]
+        assert "extra_forbidden" in reply["failure"]["reason"]
+        assert not any(method.startswith("tab.") for method, _ in client.transport.sent)
+    finally:
+        client.context.session.close()
+
+
 @pytest.mark.parametrize(
     ("arguments", "error_kind", "value"),
     [
@@ -33,6 +56,8 @@ def test_recipe_input_admission_rejects_invalid_values_before_measurement(
     tmp_path: Path, arguments: dict[str, object], error_kind: str, value: float | None
 ) -> None:
     class Inputs(api.RecipeInputs):
+        target: api.SingleTarget
+        reuse_tab_id: api.ReuseTabId
         gain: float | None = None
 
     gui = SyntheticGui()
@@ -89,7 +114,8 @@ def test_recipe_input_admission_rejects_invalid_values_before_measurement(
 
 def test_owner_analysis_diagnostics_flow_into_recipe_report(tmp_path: Path) -> None:
     class Inputs(api.RecipeInputs):
-        pass
+        target: api.SingleTarget
+        reuse_tab_id: api.ReuseTabId
 
     class OwnerReport(api.RecipeReport):
         estimate: float | None

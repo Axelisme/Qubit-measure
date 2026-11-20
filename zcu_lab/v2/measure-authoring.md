@@ -197,9 +197,9 @@ Recipe 放在 [`../recipes/`](../recipes/README.md)。撰寫時遵守以下六�
    明列 `n → expts` 或 `points → expts`，不要用框架術語取代實驗說明。
 
 以下骨架使用 `recipe_api` 的真實介面與 twotone owner 的具名 summary。
-輸入繼承 `RecipeInputs`，報告繼承 `RecipeReport`。
-RecipeInputs 只提供 target 與 reuse_tab_id，不提供通用 library／inline 輸入。
-接受 overrides 的 recipe 在輸入 class 自己宣告 `overrides: Overrides`。
+輸入繼承 `RecipeInputs`，報告繼承 `RecipeReport`。`RecipeInputs` 不宣告欄位。
+Recipe 可按需宣告 `target: SingleTarget`、`reuse_tab_id: ReuseTabId` 與 `overrides: Overrides`。
+多角色可以改用自己的 target model。基底也不提供通用 library／inline 輸入。
 可省略的實驗欄位用 `T | None | Keep = KEEP`，省略保留，null 原樣交 owner。
 以下例子的掃描端點與 pulse length 都必填，分析選項可省略。
 
@@ -212,8 +212,8 @@ from typing import Literal
 
 from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
-    KEEP, Keep, Overrides, RecipeInputs, RecipeReport, RecipeSession, recipe,
-    report_number,
+    KEEP, Keep, Overrides, RecipeInputs, RecipeReport, RecipeSession,
+    ReuseTabId, SingleTarget, recipe, report_number,
 )
 from zcu_lab.v2.twotone.freq.gui import TwotoneSpectrumSummary
 
@@ -221,6 +221,8 @@ from zcu_lab.v2.twotone.freq.gui import TwotoneSpectrumSummary
 class Inputs(RecipeInputs):
     """Drive sweep bounds in MHz and a custom constant-pulse duration in us."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     start_mhz: float = Field(description="Drive sweep start in MHz.")
     stop_mhz: float = Field(description="Drive sweep stop in MHz.")

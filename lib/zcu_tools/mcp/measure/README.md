@@ -294,9 +294,13 @@ Run 未成功取得來源前不要進 Save finalizer，避免 Save 蓋掉原錯�
 
 ### 共用輸入與自訂步驟
 
-`RecipeInputs` 提供 target 與 reuse_tab_id。實驗輸入使用 `T | None | Keep = KEEP` 宣告可省略欄位。
-JSON schema 不列 Keep 或 KEEP default。省略保留 Form 值，null 清空或關閉可為空的欄位。
-target／reuse_tab_id 是 Open／Reset 控制，不是 Form 欄位。
+`RecipeInputs` 不宣告欄位。它在開 tab 前拒絕未知欄位、NaN 與 infinity。
+實驗輸入使用 `T | None | Keep = KEEP` 宣告可省略欄位。JSON schema 不列 Keep 或 KEEP default。
+省略保留 Form 值，null 清空或關閉可為空的欄位。
+
+接受 Open／Reset 控制的 recipe 自己宣告 `target` 與 `reuse_tab_id`。這兩個欄位不編輯 Form。
+單目標可用 `target: SingleTarget`。多角色 recipe 可定義自己的 target model，再把角色對照表交給 `open_tab`。
+省略或 null 的角色沿用全域 alias。`reuse_tab_id: ReuseTabId` 指定同 adapter 的 idle tab；省略或 null 開新 tab。
 
 需要最終編輯的 recipe 可宣告 `overrides: Overrides`。省略時是空列表，不接受 null。
 每筆 `FieldEdit` 填 dotted logical `path` 和下列其中一項。零項或多項在輸入驗證時拒絕。
@@ -310,11 +314,14 @@ target／reuse_tab_id 是 Open／Reset 控制，不是 Form 欄位。
 
 ```python
 from zcu_tools.mcp.measure.recipe_api import (
-    KEEP, Keep, Overrides, RecipeInputs, RecipeReport, RecipeSession, recipe,
+    KEEP, Keep, Overrides, RecipeInputs, RecipeReport, RecipeSession,
+    ReuseTabId, SingleTarget, recipe,
 )
 
 
 class PulseInputs(RecipeInputs):
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     gain: float | None | Keep = KEEP
 

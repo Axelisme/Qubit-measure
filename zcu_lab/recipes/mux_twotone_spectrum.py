@@ -13,6 +13,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
     report_number,
 )
@@ -33,6 +35,8 @@ from .mux_helpers import (
 class MuxTwotoneSpectrumInputs(RecipeInputs):
     """Omitted Form inputs retain values; null clears them; overrides apply last."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,

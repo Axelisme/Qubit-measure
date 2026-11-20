@@ -16,6 +16,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
 )
 
@@ -25,6 +27,8 @@ from zcu_lab.v2.twotone.time_domain.cpmg.core import CPMGAnalysis
 class CPMGInputs(RecipeInputs):
     """Inputs for cpmg; all units and null policies are declared per field."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,

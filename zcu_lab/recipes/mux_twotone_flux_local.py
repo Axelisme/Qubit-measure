@@ -9,6 +9,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     Keep,
     Overrides,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
     report_number,
 )
@@ -35,6 +37,8 @@ class MuxTwotoneFluxLocalInputs(MuxTwotoneFluxInputs):
     flux_n is shared by zipped local lines, not a Cartesian product.
     """
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     flux_sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,

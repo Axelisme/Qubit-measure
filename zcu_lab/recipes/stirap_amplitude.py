@@ -8,6 +8,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
     report_number,
 )
@@ -24,6 +26,8 @@ class StirapAmplitudeInputs(RecipeInputs):
     Omitted optional fields retain Form values; null is passed to the owner.
     """
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     pump_freq_mhz: float = Field(description="Measured Pump 0–3 carrier in MHz.")
     stokes_freq_mhz: float = Field(description="Measured Stokes 3–2 carrier in MHz.")

@@ -8,6 +8,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
     report_number,
 )
@@ -18,6 +20,8 @@ from zcu_lab.v2.twotone.stirap.detuning.core import StirapDetuningSummary
 class StirapDetuningInputs(RecipeInputs):
     """Measured carriers, Cartesian MHz offsets and independent envelope references."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     pump_start_mhz: float | None | Keep = Field(
         default=KEEP,

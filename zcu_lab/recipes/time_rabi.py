@@ -11,6 +11,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
     report_number,
 )
@@ -21,6 +23,8 @@ from zcu_lab.v2.twotone.rabi.len_rabi.gui import TimeRabiSummary
 class TimeRabiInputs(RecipeInputs):
     """Inputs for time rabi; all units and null policies are declared per field."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,

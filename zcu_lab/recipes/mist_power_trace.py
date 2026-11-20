@@ -8,6 +8,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
 )
 
@@ -16,6 +18,8 @@ class MistPowerTraceInputs(RecipeInputs):
     """Inputs for mist power trace; all units and null policies are declared per
     field."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     probe_ref: str | None | Keep = Field(
         KEEP,

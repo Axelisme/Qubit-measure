@@ -11,6 +11,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
     report_number,
 )
@@ -21,6 +23,8 @@ from zcu_lab.v2.twotone.time_domain.t1_cov.core import T1CovAnalysis
 class T1CovInputs(RecipeInputs):
     """Inputs for t1_cov. Omitted controls keep their Form or analysis values."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,

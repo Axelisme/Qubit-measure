@@ -8,6 +8,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeInputs,
     RecipeReport,
     RecipeSession,
+    ReuseTabId,
+    SingleTarget,
     recipe,
     report_number,
 )
@@ -18,6 +20,8 @@ from zcu_lab.v2.lookback.gui import LookbackSummary
 class LookbackInputs(RecipeInputs):
     """Inputs for lookback; all units and null policies are declared per field."""
 
+    target: SingleTarget
+    reuse_tab_id: ReuseTabId
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,

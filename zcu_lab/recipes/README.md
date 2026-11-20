@@ -13,7 +13,9 @@ Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的�
 每個模組用 `@recipe(name, description)` 裝飾
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
 每個 recipe 的 `Inputs` 繼承 `RecipeInputs`。實驗欄位逐欄寫單位、預設與 null 政策。
-`RecipeInputs` 提供 target 和 reuse_tab_id。接受最終欄位操作的 recipe 自己宣告 `overrides: Overrides`。
+`RecipeInputs` 不宣告欄位。接受 Open／Reset 控制的 recipe 自己宣告 `target` 與 `reuse_tab_id`。
+單目標用 `target: SingleTarget`，多角色可宣告自己的 target model。重用既有 tab 用 `reuse_tab_id: ReuseTabId`。
+接受最終欄位操作的 recipe 自己宣告 `overrides: Overrides`。這三個共用型別從 `recipe_api` 匯入。
 可省略的實驗欄位宣告為 `T | None | Keep = KEEP`。省略保留 Form 值，明填 null 原樣交 owner。
 KEEP 是 Python 省略標記，不是 JSON 值。Schema 隱藏 Keep 分支與 KEEP default，欄位不列 required。
 Mux 的 participants 使用完整 tones 清單的原始 index，逐 tone 範圍清單保留原始順序，見下方 mux guide。
