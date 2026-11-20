@@ -2,7 +2,9 @@
 
 import re
 import warnings
+from collections.abc import Sequence
 from dataclasses import replace
+from typing import override
 
 import numpy as np
 import pytest
@@ -10,8 +12,9 @@ from numpy.typing import NDArray
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationCallbacks
 from zcu_tools.simulate.adc import cavity_field_average, cavity_fields
-from zcu_tools.simulate.boundary import PulseEnvelope
+from zcu_tools.simulate.boundary import CancellationQuery, PulseEnvelope
 from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
     Engine,
     EvolutionResult,
     ModelSource,
@@ -22,6 +25,7 @@ from zcu_tools.simulators.ftf.environment import FTFSource, plan_template
 
 from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.program._profiles import profile_soccfg
+from tests.simulators._engine import EngineDouble
 from tests.simulators.ftf.environment._templates import (
     expect_statistics,
     herald_template,
@@ -238,8 +242,73 @@ def test_acquire_warns_once_for_reversed_stark_order_and_reports_gain_limit(recw
         source.close()
 
 
-def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
-    engine = ObservingEngine()
+class ShiftSensitiveEngine(EngineDouble):
+    """At terminal evolution, distinguish equal pure states by their input shifts."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.shifts: dict[tuple[float, float], tuple[NDArray[np.float64], ...]] = {}
+        self.terminal_calls: list[tuple[tuple[float, float], set[tuple[int, int]]]] = []
+
+    @override
+    def evolve(
+        self,
+        source: ModelSource,
+        batches: Sequence[TimelineBatch],
+        *,
+        budget: float = 1e-3,
+        cancel: CancellationQuery | None = None,
+        telemetry: bool = False,
+        reuse_key: bytes | None = None,
+        capture: CaptureBuffer | None = None,
+    ) -> EvolutionResult:
+        result = super().evolve(
+            source,
+            batches,
+            budget=budget,
+            cancel=cancel,
+            telemetry=telemetry,
+            reuse_key=reuse_key,
+            capture=capture,
+        )
+        rows = [(batch, row) for batch in batches for row in range(len(batch.points))]
+        densities = result.densities.copy()
+        terminal = set()
+        span = None
+        for i, (batch, row) in enumerate(rows):
+            assert batch.start_ns is not None
+            bounds = (float(batch.start_ns[row]), float(batch.end_ns[row]))
+            if bounds in self.shifts:
+                # A repeated projected state can only be identified by the
+                # shift inherited from the first herald's cavity field.
+                (shift,) = batch.segment_shifts[row]
+                assert (shift.start_ns, shift.end_ns) == bounds
+                (first_state,) = (
+                    state
+                    for state, expected in enumerate(self.shifts[bounds])
+                    if np.allclose(
+                        shift.energy_shift_ghz, expected, rtol=1e-10, atol=1e-15
+                    )
+                )
+                second_state = int(densities[i, 1, 1].real == 1.0)
+                np.testing.assert_array_equal(
+                    densities[i], np.diag(np.eye(2)[second_state])
+                )
+                terminal.add((first_state, second_state))
+                assert span is None or span == bounds
+                span = bounds
+                densities[i] = np.diag(np.eye(2)[first_state])
+            elif bounds[1] in {start for start, _ in self.shifts}:
+                # Both next states must remain reachable after each first state.
+                densities[i] = np.diag([0.5, 0.5])
+        if span is not None:
+            assert len(rows) == 4
+            self.terminal_calls.append((span, terminal))
+        return EvolutionResult(result.points[::-1], densities[::-1], result.paths)
+
+
+def test_projective_results_follow_history_when_equal_states_have_different_shifts():
+    engine = ShiftSensitiveEngine()
     base, readout = herald_template()
     # A second herald gives cavity memory a projected continuation boundary.
     terminal = tuple(
@@ -278,7 +347,6 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
             "chip": numeric.chip.model_copy(
                 update={
                     "temperature_k": 1.0,
-                    "f1": numeric.chip.f1.model_copy(update={"q_cap": 10.0}),
                 }
             )
         }
@@ -301,14 +369,6 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
             facts=facts,
             time_base=TIME_BASE,
         )
-        source.open_acquire(request(templates=(driven,))).sample_round(snapshot(), 0)
-        calls = [
-            batches[0] for _, batches, _ in engine.calls if batches[0].points[0] == 0
-        ]
-        assert len(calls) == 6
-        pulses = tuple(
-            pulse for read in plan.projective_reads[0] for pulse in read.pulses
-        )
         model = facts.readout
         bare = np.array(
             [
@@ -317,29 +377,45 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
             ]
         )
         chi = model.frequencies_ghz - bare
-        for index, batch in enumerate(calls[2:]):
-            first_state, second_state = divmod(index, 2)
-            initial = np.zeros((1, 2, 2), complex)
-            initial[0, second_state, second_state] = 1
-            np.testing.assert_array_equal(batch.initial_densities, initial)
+        for reads, end in zip(plan.projective_reads, plan.batch.end_ns, strict=True):
+            first, second = reads
+            pulses = (*first.pulses, *second.pulses)
             fields = cavity_fields(
-                model, pulses, np.array([0.0, 8.0]), initial_time_ns=0.0
+                model,
+                pulses,
+                np.array([first.start_ns, second.start_ns]),
+                initial_time_ns=first.start_ns,
             )
-            memory = fields[-1, first_state]
-            average = cavity_field_average(
-                model, pulses, 8.0, 20.0, initial_field=memory, initial_time_ns=8.0
-            )
-            shift = batch.segment_shifts[0][0]
-            np.testing.assert_allclose(
-                shift.energy_shift_ghz,
-                (chi * average.photons).sum(axis=-1),
-                rtol=1e-10,
-                atol=1e-15,
-            )
-        assert not np.array_equal(
-            calls[2].segment_shifts[0][0].energy_shift_ghz,
-            calls[4].segment_shifts[0][0].energy_shift_ghz,
+            shifts = []
+            for memory in fields[-1]:
+                average = cavity_field_average(
+                    model,
+                    pulses,
+                    second.start_ns,
+                    end,
+                    initial_field=memory,
+                    initial_time_ns=second.start_ns,
+                )
+                shifts.append((chi * average.photons).sum(axis=-1))
+            ground_shift, excited_shift = shifts
+            assert not np.allclose(ground_shift, excited_shift, rtol=1e-10, atol=1e-15)
+            engine.shifts[second.start_ns, float(end)] = (ground_shift, excited_shift)
+
+        acquire = replace(request(templates=(driven,)), reps=1024)
+        stats = expect_statistics(
+            source.open_acquire(acquire).sample_round(snapshot(), 0)
         )
+        assert len(engine.terminal_calls) == 2
+        assert dict(engine.terminal_calls) == {
+            span: {(0, 0), (0, 1), (1, 0), (1, 1)} for span in engine.shifts
+        }
+        # C-order axes: original point, first herald, second herald, terminal state.
+        # All four histories must be sampled, and the terminal state follows
+        # the first herald's field even for histories sharing a second state.
+        counts = stats.state_counts.reshape(2, 2, 2, 2)
+        assert np.all(counts.sum(axis=-1) > 0)
+        np.testing.assert_array_equal(counts[:, 0, :, 1], 0)
+        np.testing.assert_array_equal(counts[:, 1, :, 0], 0)
     finally:
         source.close()
 

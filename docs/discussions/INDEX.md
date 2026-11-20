@@ -23,6 +23,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-21 [FTF projective 列身分與失敗定位](2026-11-21-ftf-projective-row-provenance.md)：識別作用域。FTF 給原點和 history 穩定的列 ID，在單次 preparation 內檢查碰撞，並用 capture ID 串起逐列來源。
+
 - 2026-11-20 [FTF cavity Stark 反轉：從報錯改成警告](2026-11-20-ftf-stark-inversion-warning.md)：放寬或拒絕。依 ADR-0078 先例，Stark 位移讓相鄰態反轉時照原模型繼續算，每組反轉發一次警告並給 gain 共同縮放上限；反轉後模型仍算得出數字，所以否決保留報錯。
 
 - 2026-11-19 [Evolution 輸出合法 density](2026-11-19-evolution-valid-density.md)：數值保證。純態經 DP5(4) 短段後最小特徵值為 −2.4e−6；engine 在 budget 內投影回合法 density，超出照數值失敗回報。
