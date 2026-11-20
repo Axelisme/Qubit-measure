@@ -1,23 +1,14 @@
-"""Shared GUI logging setup (Phase 157).
+"""Shared logging setup for GUI launchers and the measure MCP server.
 
-One place that decides *how* every GUI entry point (the three repo-root ``apps``
-composition roots) and the measure MCP server configure file logging, so a new sibling
-namespace is never silently left out of the log again.
+One root file handler writes DEBUG and above from ``zcu_tools.gui`` and
+caller-provided namespaces, including their descendants. It writes WARNING and
+above from other loggers that propagate to root. Attaching the handler only to
+root keeps overlapping namespaces from writing a record twice.
 
-Design decisions baked in here:
-
-- The file handler is attached at the whole ``zcu_tools.gui`` namespace (plus any
-  caller-provided ``extra_namespaces`` an entry point needs). Attaching at the package root — not each app
-  sub-namespace — means cross-cutting subpackages (``event_bus``, ``plotting``,
-  ``remote``, ``session``) always reach the file. The root cause of the event
-  this phase addresses was an app sub-namespace handler that missed a sibling.
-- Per-session timestamped files under ``<root>/logs/<group>/<app>/``: each launch
-  writes its own file, so a previous session's evidence is never overwritten
-  (the old ``mode="w"`` fixed-file scheme discarded it). Retention purges all but
-  the newest ``retain`` files in that directory on startup.
-- The file handler stays at DEBUG; the stderr handler stays at WARNING. High-
-  frequency bookkeeping logs at DEBUG so it can be filtered later without code
-  changes.
+Python warnings enter logging through ``py.warnings``. The root stderr handler
+writes WARNING and above. Session logs use timestamped files under
+``<root>/logs/<group>/<app>/``. On startup, retention keeps the newest ``retain``
+existing files before the new log is opened.
 """
 
 from __future__ import annotations
@@ -113,7 +104,7 @@ def setup_gui_logging(  # noqa: PLR0913
     group: str = "gui",
     retain: int = _DEFAULT_RETAIN,
 ) -> Path | None:
-    """Configure logging for a GUI entry point: DEBUG to file, WARNING to stderr.
+    """Configure file and stderr logging for a GUI or MCP entry point.
 
     ``app_name`` names the per-app log directory (``measure``/``fluxdep``/...).
     ``log_root`` is the repo root the per-session ``logs/`` tree hangs under.
@@ -122,9 +113,11 @@ def setup_gui_logging(  # noqa: PLR0913
     omitted, a timestamped per-session file is created and old files are purged
     down to ``retain``.
 
-    The file handler is attached at ``zcu_tools.gui`` plus every name in
-    ``extra_namespaces``. Returns the resolved log file path, or ``None`` when
-    ``to_file`` is False.
+    The file receives DEBUG and above from ``zcu_tools.gui``,
+    ``extra_namespaces``, and their descendants, and WARNING and above from
+    other loggers that propagate to root. Python warnings are routed through
+    logging. Stderr receives WARNING and above even when ``to_file`` is False.
+    Returns the resolved log file path, or ``None`` when ``to_file`` is False.
     """
     _remove_managed_handlers()
 
@@ -136,6 +129,7 @@ def setup_gui_logging(  # noqa: PLR0913
     stderr_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
     _mark_managed(stderr_handler, "stderr")
     root.addHandler(stderr_handler)
+    logging.captureWarnings(True)
 
     if not to_file:
         return None
@@ -147,15 +141,25 @@ def setup_gui_logging(  # noqa: PLR0913
         target = session_log_path(log_root, group, app_name)
         purge_old_logs(target.parent, retain)
 
+    debug_namespaces = ("zcu_tools.gui", *extra_namespaces)
+    debug_prefixes = tuple(f"{name}." for name in debug_namespaces)
+
+    def include_record(record: logging.LogRecord) -> bool:
+        return (
+            record.levelno >= logging.WARNING
+            or record.name in debug_namespaces
+            or record.name.startswith(debug_prefixes)
+        )
+
     file_handler = logging.FileHandler(target, mode="w", encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
+    file_handler.addFilter(include_record)
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
     _mark_managed(file_handler, "file")
 
-    for name in ("zcu_tools.gui", *extra_namespaces):
-        log = logging.getLogger(name)
-        log.addHandler(file_handler)
-        log.setLevel(logging.DEBUG)
+    for name in debug_namespaces:
+        logging.getLogger(name).setLevel(logging.DEBUG)
+    root.addHandler(file_handler)
 
     print(f"[{app_name}] Logging DEBUG output to: {target}", file=sys.stderr)
     return target

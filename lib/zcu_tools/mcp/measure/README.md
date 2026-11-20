@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-11-20，arb 資產寫回
+**Last updated:** 2026-11-20，arb 資產寫回與 session log
 
 **讀者：** agent、framework-dev。查閱量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -688,6 +688,11 @@ Cfg 欄位用 `tab.read_recipe_field` 逐層讀取，用 `tab.edit_recipe_fields
 Admission 拒絕、斷線或 timeout 都不自動重送。傳輸失敗不證明 mutation 沒有副作用；先讀現況，再由 caller 決定下一步。
 
 ## 傳輸與關閉
+
+Measure MCP server 啟動 stdio loop 時，透過[共用 logging helper](../../gui/README.md#logging-logging_setuppy)
+設定 `logs/mcp/measure/` 下的 session log。此檔收錄 `zcu_tools.gui` 與 `zcu_tools.mcp`
+及其子 logger 的 DEBUG 以上訊息，也收錄傳到 root 的其他 WARNING 以上訊息與 Python warnings。
+Logger 不寫 stdout，tool call log 維持獨立。
 
 Shared SocketTransport 以 shared framing 限制每個 frame 為 8 MiB UTF-8 bytes，不含換行，不分批。超大 request 在送出前拒絕，連線仍可用。超大 response 關閉連線並回 `message_too_large`，不能假定 mutation 未執行。重新連線會初始化身份並重載 catalog，舊 handle 不跨連線使用。
 
