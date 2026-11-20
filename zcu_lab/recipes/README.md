@@ -2,14 +2,14 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-11-20，two-qubit CZ amplitude 與 paired RB
+**Last updated:** 2026-11-20，two-qubit CZ amplitude、local Z、constructive phase、conditional phase 與 paired RB
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
 
 ## 宣告與註冊
 
-[__init__.py](__init__.py) 的 `RECIPES` 明列 46 個 recipe，不掃描目錄。
+[__init__.py](__init__.py) 的 `RECIPES` 明列 50 個 recipe，不掃描目錄。
 每個模組用 `@recipe(name, description)` 裝飾
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
 每個 recipe 的 `Inputs` 繼承 `RecipeInputs`。實驗欄位逐欄寫單位、預設與 null 政策。
@@ -211,6 +211,10 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | `chain_t2echo` | `chain/t2echo` | 掃總 echo 等待，`max_delay_us`（總長）、`points`。每個 block 是 (π/2, x/2, π, x/2, π/2, 讀, 讀)。起點取自 `twotone/t2echo` 的第一讀擬合。回報 T2 echo、第三態衰減時間與 Wald 誤差、三項檢查，不提出 writeback。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 | [`two_qubit_cz_amplitude`](two-qubit-guide.md#two_qubit_cz_amplitude) | `two_qubit/cz_amplitude` | `scale_range`、`scale_points` 掃兩路共同 gain 倍率。回報第一個 return scale 與擬合診斷。有候選才問 Primary 寫回；完成 Run 後保存。 |
+| [`two_qubit_local_z`](two-qubit-guide.md#two_qubit_local_z) | `two_qubit/local_z` | 掃 `gate_count`，分別回報 F1、F2 的相位擬合。兩條擬合都給出 correction 才詢問寫回校正對。 |
+| [`two_qubit_constructive_phase`](two-qubit-guide.md#two_qubit_constructive_phase) | `two_qubit/constructive_phase` | 掃 F2 相對相位和兩路共同脈衝長度。回報最大擬合速率的相位與干涉擬合診斷。有可辨識相位才詢問 F2 脈衝和 slot 寫回。 |
+| [`two_qubit_conditional_phase`](two-qubit-guide.md#two_qubit_conditional_phase) | `two_qubit/conditional_phase` | 用 `ramsey_role` 選相位量測的 qubit，並設定 `gate_count`、`frequency_range` 與 `frequency_points`。回報唯一的 π 交點，或 null 與原因。有交點才問 Primary 頻率寫回；完成 Run 後保存。 |
+| [`two_qubit_conditional_phase_heralded`](two-qubit-guide.md#two_qubit_conditional_phase_heralded) | `two_qubit/conditional_phase_heralded` | 掃描輸入同上。每發先做 mux herald，用 joint gg/ee 斜率找唯一的 π 交點；沒有交點不問寫回。完成 Run 後保存。 |
 | [`two_qubit_rb`](two-qubit-guide.md#two_qubit_rb) | `two_qubit/rb` | `depths` 和 `seeds` 設定成對序列。回報 CZ 誤差、信賴區間和兩臂擬合診斷。保存，不詢問寫回。 |
 | [`two_qubit_rb_heralded`](two-qubit-guide.md#two_qubit_rb_heralded) | `two_qubit/rb_heralded` | 每 shot 先做 herald readout。回報 joint gg/ee 估計和四組擬合診斷。保存，不詢問寫回。 |
 
