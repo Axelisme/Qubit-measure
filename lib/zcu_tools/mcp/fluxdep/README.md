@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-20
 
 **讀者：** agent。Fluxdep MCP 的控制流程、工具與診斷契約。
 
@@ -57,7 +57,9 @@ The server exposes 13 analysis tools, 3 control tools and 3 lifecycle tools, for
 
 Command parameters, numeric ranges and transition formulas are in each tool's
 description. The agent does not manage open/cancel, context IDs, search tokens or
-active display.
+active display. The GUI [follows accepted write commands](../../gui/app/fluxdep/README.md#跟隨遠端操作)
+to the target spectrum and stage. Reads leave the view where it is. Opening
+project context updates the header without opening a dialog or changing views.
 
 ## Authority and lifecycle
 

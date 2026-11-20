@@ -10,7 +10,6 @@ from zcu_tools.gui.app.fluxdep.app import FluxDepGuiBehavior
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
-from zcu_tools.gui.event_bus import EventOrigin
 
 from tests._lab import synthetic_lab
 from tests.gui._qt_waits import qt_until
@@ -20,6 +19,7 @@ from tests.gui.app.fluxdep._window import (
     spectra_list,
     stage_button,
 )
+from tests.gui.app.fluxdep.remote._route_harness import remote_owner
 
 
 @pytest.fixture
@@ -45,21 +45,21 @@ def test_agent_follows_named_draft_and_remote_user_can_switch_display(
     view = MainWindow(ctrl)
     try:
         first = ctrl.interactive.begin_line_pick("one")
-        ctrl.control_identity.connect("agent-link", "agent", "owner")
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            second = ctrl.interactive.begin_line_pick("other")
-        assert ctrl.state.active_spectrum == "other", (
-            "GUI must follow the named agent draft"
-        )
-        spectra = spectra_list(view)
-        assert spectra.isEnabled()
-        spectra.setCurrentRow(0)
-        assert ctrl.state.active_spectrum == "one"
-        first.session.ensure_input_open()
-        second.session.ensure_input_open()
-        displayed = editor(view)
-        assert isinstance(displayed, LinePickerWidget)
-        assert not picker_button(displayed, "finish").isEnabled()
+        with remote_owner(ctrl) as (route, link):
+            assert route.request(
+                link, "spectrum.interactive.open", name="other", kind="line"
+            )["ok"]
+            assert ctrl.state.active_spectrum == "other"
+            spectra = spectra_list(view)
+            assert spectra.isEnabled()
+            spectra.setCurrentRow(0)
+            assert ctrl.state.active_spectrum == "one"
+            first.session.ensure_input_open()
+            second = ctrl.interactive.inspect("other")
+            assert second is not None
+            displayed = editor(view)
+            assert isinstance(displayed, LinePickerWidget)
+            assert not picker_button(displayed, "finish").isEnabled()
     finally:
         ctrl.control_identity.reclaim_local()
         view.close()
@@ -68,28 +68,27 @@ def test_agent_follows_named_draft_and_remote_user_can_switch_display(
 
 
 @pytest.mark.parametrize("spec_type", ["OneTone", "TwoTone"])
-def test_agent_reopens_completed_point_picker_and_gui_uses_same_session(
+def test_local_reopens_completed_point_picker_and_gui_uses_same_session(
     composition, spectrum_hdf5, qapp, spec_type
 ):
     import numpy as np
     from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
     from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
-    from zcu_tools.gui.event_bus import EventOrigin
 
     ctrl, window = composition
     name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type=spec_type)
     ctrl.set_active_spectrum(name)
     ctrl.set_alignment(name, 0.0, 1.0)
     ctrl.set_points(name, np.array([0.0]), np.array([5.0]))
-    with ctrl.bus.origin(EventOrigin(kind="agent")):
-        if spec_type == "OneTone":
-            context = ctrl.interactive.begin_onetone_pick(name)
-            context.plugin.execute_command(
-                context.session, "set_threshold", {"threshold": 0.5}
-            )
-        else:
-            context = ctrl.interactive.begin_twotone_pick(name)
-            context.plugin.execute_command(context.session, "clear", {})
+    stage_button(window, "sample").click()
+    if spec_type == "OneTone":
+        context = ctrl.interactive.begin_onetone_pick(name)
+        context.plugin.execute_command(
+            context.session, "set_threshold", {"threshold": 0.5}
+        )
+    else:
+        context = ctrl.interactive.begin_twotone_pick(name)
+        context.plugin.execute_command(context.session, "clear", {})
     widget = editor(window)
     if spec_type == "OneTone":
         assert isinstance(widget, OneToneWidget)

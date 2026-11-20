@@ -162,6 +162,51 @@ def _start(case: SearchCase, client: ClientLink) -> int:
     return token
 
 
+@pytest.mark.parametrize("cancel", [False, True])
+def test_remote_search_follows_acceptance_cancel_and_successful_result(
+    search_case: SearchCase, shown_window, tmp_path: Path, cancel: bool
+) -> None:
+    h = search_case.harness
+    with shown_window(h.ctrl) as driver:
+        client = h.client()
+        driver.screenshot(tmp_path / "01-before-search.png")
+        token = _start(search_case, client)
+        try:
+            driver.screenshot(tmp_path / "02-search-accepted.png")
+            assert driver.tabs("Fit").current == "Fit"
+            assert driver.observe(object_name="fluxdep.fit.stage.search").checked
+            driver.select_tab("Spectra")
+            driver.screenshot(tmp_path / "03-away-on-spectra.png")
+            assert (
+                _result(h.request(client, "operation.await", token=token, timeout=0))[
+                    "reason"
+                ]
+                == "timeout"
+            )
+            driver.screenshot(tmp_path / "04-await-stays-on-spectra.png")
+            assert driver.tabs("Spectra").current == "Spectra"
+            if cancel:
+                search_case.failure = SearchCancelled("requested")
+                _result(h.request(client, "operation.cancel", token=token))
+                driver.screenshot(tmp_path / "05-cancel-follows-search.png")
+                assert driver.tabs("Fit").current == "Fit"
+                assert driver.observe(object_name="fluxdep.fit.stage.search").checked
+        finally:
+            search_case.release.set()
+            receipt = _result(
+                h.request(client, "operation.await", token=token, timeout=30)
+            )
+        driver.screenshot(tmp_path / "06-search-terminal.png")
+        assert receipt["outcome"] == {
+            "status": "cancelled" if cancel else "finished",
+            "error": None,
+        }
+        assert driver.tabs("Fit").current == "Fit"
+        assert driver.observe(
+            object_name=f"fluxdep.fit.stage.{'search' if cancel else 'show'}"
+        ).checked
+
+
 def test_search_observation_is_per_client_and_operation_reads_do_not_unlock(
     search_case: SearchCase,
 ) -> None:

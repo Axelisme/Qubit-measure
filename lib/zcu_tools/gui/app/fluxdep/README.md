@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-11-16，global 參數開檔
+**Last updated:** 2026-11-20
 
 **讀者：** framework-dev。通量頻譜分析 GUI 的狀態、互動與搜尋分工。
 
@@ -171,6 +171,22 @@ EventBus 供 app 內部事件使用，不提供業務事件的 RPC 訂閱；cont
 `Controller.control_identity` 是控制身份的唯一 owner。
 Fluxdep 沒有硬體緊急 Stop，使用者必須先點燈收回再取消。
 
+### 跟隨遠端操作
+
+依 [ADR-0075](../../../../../docs/adr/0075-agent-interface-layers.md#tool-即意圖)，視窗顯示成功 RPC 命令的目標：
+
+| 命令 | 顯示 |
+| --- | --- |
+| `spectrum.load`、`spectrum.load_processed` | Spectra，選中新譜或還原清單的第一張，顯示已發布預覽。 |
+| `spectrum.remove`、`export.spectrums` | Spectra。移除選中的譜時清空選取，不另選其他譜；匯出不改選取。 |
+| `spectrum.interactive.open`／`command` | Spectra，選中命令指定的譜並顯示其 Align／Sample picker。Finish 或 Cancel 後顯示該譜的已發布預覽。 |
+| `selection.interactive.open`／`command` | Fit → Filter，含 Finish 與 Cancel。 |
+| `fit.set_params`、`fit.search`、`operation.cancel` | Fit → Search。遠端搜尋成功完成後切到 Show；失敗或取消不切到 Show。 |
+| `fit.export_params` | Fit → Show。 |
+
+切換不取消其他譜的草稿，不開啟 dialog，也不轉移控制權。Local 未持有控制權時只能檢視。
+唯讀呼叫與被拒絕的命令不切換。 `project.setup` 只更新視窗上方的 Entry 標籤。
+
 ### Database search 的 app ownership
 
 `database.py` 擁有 search HDF5 的 metadata reader，讀 ranges、參數表與 energies 維度，不讀 energy values，也不建立 search cache。這是 fluxdep 專用資料，不屬於通用 datafile 容器。FitService 與 remote dispatch 共用此 reader。
@@ -188,7 +204,7 @@ Hide 或 detach 不取消，重新 activate 讀 owner snapshot。
 
 Processed restore 是採點後的 checkpoint，包含零點完成譜。
 Export 保存所有已採點，Filter 遮罩留在 Session。
-Export 保持 State 原狀。失敗保留已成功的輸出，後續清理由 caller 決定。
+Export 不變更分析資料或版本。失敗保留已成功的輸出，後續清理由 caller 決定。
 
 [Load service](services/load.py) · [Export service](services/export.py) · [匯出收據](services/fit.py)
 

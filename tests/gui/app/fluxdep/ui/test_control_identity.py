@@ -58,7 +58,11 @@ from tests.gui.app.fluxdep._window import (
     spectra_list,
     stage_button,
 )
-from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, copy_sources
+from tests.gui.app.fluxdep.remote._route_harness import (
+    RouteHarness,
+    copy_sources,
+    remote_owner,
+)
 
 
 def button(widget, text):
@@ -233,45 +237,23 @@ def test_remote_viewer_show_display_is_disabled_but_toolbar_zooms_until_reclaim(
 
 def test_remote_page_switch_keeps_agent_filter_session(window):
     view, ctrl = window
-    ctrl.control_identity.connect("a", "flux-agent", "owner")
-    with ctrl.bus.origin(EventOrigin(kind="agent")):
-        context = ctrl.interactive.begin_cross_selection()
-    # The agent's Filter waits on the Fit page; the viewer stays on Spectra.
-    assert current_page(view) == "spectra"
-    show_page(view, "fit")
-    panel = fit_panel(view)
-    assert panel is not None and panel.current_tab == "filter"
-    assert panel.findChild(SelectorWidget) is not None
-    active = ctrl.interactive.inspect_selection()
-    assert active is not None and active.context is context
-    show_page(view, "spectra")
-    # Leaving Fit retires the Filter view (deferred Qt deletion) but not its input.
-    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    assert panel.findChild(SelectorWidget) is None
-    assert ctrl.interactive.inspect_selection() == active
-    show_page(view, "fit")
-    assert panel.current_tab == "filter"
-    assert panel.findChild(SelectorWidget) is not None
-    assert ctrl.interactive.inspect_selection() == active
-
-
-def test_ended_agent_filter_no_longer_routes_the_next_fit_entry(window):
-    view, ctrl = window
-    show_page(view, "fit")
-    panel = fit_panel(view)
-    assert panel is not None
-    panel.show_tab("search")
-    show_page(view, "spectra")
-    ctrl.control_identity.connect("a", "flux-agent", "owner")
-    with ctrl.bus.origin(EventOrigin(kind="agent")):
-        ctrl.interactive.begin_cross_selection()
-        ctrl.interactive.cancel_selection()
-    indicator(view).click()
-    assert ctrl.control_identity.status().holder == "gui"
-    show_page(view, "fit")
-    # The agent's Filter has ended, so its event no longer picks the tab.
-    assert panel.current_tab == "search"
-    assert ctrl.interactive.current_cross_selection() is None
+    with remote_owner(ctrl) as (route, link):
+        assert route.request(link, "selection.interactive.open")["ok"]
+        assert current_page(view) == "fit"
+        panel = fit_panel(view)
+        assert panel is not None and panel.current_tab == "filter"
+        assert panel.findChild(SelectorWidget) is not None
+        active = ctrl.interactive.inspect_selection()
+        assert active is not None
+        show_page(view, "spectra")
+        # Leaving Fit retires the Filter view (deferred Qt deletion) but not its input.
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        assert panel.findChild(SelectorWidget) is None
+        assert ctrl.interactive.inspect_selection() == active
+        show_page(view, "fit")
+        assert panel.current_tab == "filter"
+        assert panel.findChild(SelectorWidget) is not None
+        assert ctrl.interactive.inspect_selection() == active
 
 
 @pytest.mark.parametrize("owner", ["load", "export", "result"])
@@ -436,8 +418,8 @@ def test_remote_viewer_sees_stages_locked_while_the_agent_filter_runs(
 def test_agent_mounts_new_remote_picker_without_enabling_controls_or_pointer(window):
     view, ctrl = window
     ctrl.control_identity.connect("a", "flux-agent", "owner")
-    with ctrl.bus.origin(EventOrigin(kind="agent")):
-        context = ctrl.interactive.begin_line_pick("a")
+    context = ctrl.interactive.begin_line_pick("a")
+    stage_button(view, "align").click()
     picker = view.findChild(LinePickerWidget)
     assert picker is not None
     assert not picker_button(picker, "swap").isEnabled()

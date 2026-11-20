@@ -1,6 +1,6 @@
 # Fluxdep UI
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-20
 
 **讀者：** framework-dev、agent。查找 fluxdep 的 Qt 呈現 owner，以及 widget 與分析命令的接縫。
 
@@ -14,6 +14,9 @@
 `interactive/` 擁有定線、OneTone、TwoTone 與預覽的 Qt widgets 和 canvas。
 Widget 連接 `FluxDepInteractiveOwner` 的 live context，不以畫面是否可見決定草稿是否存在。
 Active spectrum 只決定顯示，切譜不退休其他 spectrum 的草稿。
+`MainWindow` 收到 RPC 的顯示 intent 後切換主頁與 editor。`AnalyzePanelWidget` 切換 Fit 階段，
+只掛載既有草稿或已發布資料；成功的遠端搜尋完成後顯示 Show。切換不改控制權，Local 未持有控制權時沿用唯讀掛載。
+[命令與畫面的對應](../README.md#跟隨遠端操作)遵循 ADR-0075，不開啟或切換 dialog。
 Owner 與完整 pipeline 見 [fluxdep README](../README.md#architecture-and-owners)。
 
 ## 命令、結果與拆除

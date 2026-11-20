@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep.remote` — Fluxdep driving adapter
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-20
 
 **讀者：** framework-dev。Fluxdep RPC 的控制權、方法宣告與結果投影契約。
 
@@ -18,6 +18,13 @@ Business methods require holder unless explicitly readonly. Pipeline writes,
 search cancellation and interactive commands retain domain validation and busy
 checks. Readonly queries and bounded search waits remain available to observers.
 Reads do not establish per-connection version guards.
+
+After a successful mutation, app dispatch emits an internal display intent with
+the request origin and the [target view](../README.md#跟隨遠端操作). The window
+applies it without changing the holder or altering the RPC receipt. Rejected
+commands and readonly queries emit no display intent. `project.setup` is exempt:
+the project header is already visible and setup does not open or focus a dialog
+([ADR-0075](../../../../../../docs/adr/0075-agent-interface-layers.md#不遷就-gui-的操作方式)).
 
 Each spectrum retains its own draft and Undo; Filter has one global context.
 Interactive context IDs bind commands to the owning session and named target.

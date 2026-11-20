@@ -31,7 +31,6 @@ from tests.gui.app.fluxdep._search_result import (
 )
 from tests.gui.app.fluxdep._window import (
     click_fit_stage,
-    current_page,
     filter_button,
     fit_panel,
     fit_stage_button,
@@ -333,22 +332,6 @@ def test_non_holder_filter_restores_publication_after_external_close(
     assert [(axis.xlabel, axis.ylabel) for axis in driver.plots().axes] == [
         ("Flux", "Frequency (GHz)")
     ]
-
-
-def test_agent_filter_on_the_shown_fit_page_switches_only_its_stage(window):
-    view, ctrl = window
-    ctrl.set_selection(np.array([True, True, True, True]))
-    show_page(view, "fit")
-    panel = fit_panel(view)
-    assert panel is not None
-    click_fit_stage(panel, "search")
-    with ctrl.bus.origin(EventOrigin(kind="agent")):
-        context = ctrl.interactive.begin_cross_selection()
-    assert current_page(view) == "fit"
-    assert panel.current_tab == "filter"
-    (selector,) = _selectors(panel)
-    assert ctrl.interactive.current_cross_selection() is context
-    assert selector.get_result().selected.all()
 
 
 def test_edit_without_points_stays_disabled(qapp):

@@ -29,6 +29,7 @@ class FluxDepEvent(str, Enum):
     SEARCH_CHANGED = "search_changed"  # app-owned search activity changed
     FIT_CHANGED = "fit_changed"  # the database-search fit inputs or result changed
     INTERACTIVE_CHANGED = "interactive_changed"  # a live interactive context changed
+    FOLLOW_DISPLAY = "follow_display"  # a successful remote command chose a view
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,23 @@ class InteractiveChangedPayload(Payload):
     kind: InteractiveKind
     spectrum_name: str | None
     phase: Literal["opened", "updated", "closed"]
+
+
+@dataclass(frozen=True)
+class FollowDisplayPayload(Payload):
+    """Display intent for a successful remote command; EventMeta carries its origin.
+
+    `align`, `sample` and `preview` target a named spectrum. `spectra` shows
+    the collection without choosing a spectrum. `filter`, `search` and `show`
+    target the corresponding Fit stage. `spectrum_name` is None for unnamed views.
+    `search_token` is set only for a newly accepted, still-pending remote search;
+    it identifies the search whose successful completion should show the result.
+    """
+
+    EVENT: ClassVar[FluxDepEvent] = FluxDepEvent.FOLLOW_DISPLAY
+    stage: Literal["align", "sample", "preview", "spectra", "filter", "search", "show"]
+    spectrum_name: str | None = None
+    search_token: int | None = None
 
 
 EventBus = BaseEventBus

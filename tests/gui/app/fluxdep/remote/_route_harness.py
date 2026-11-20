@@ -10,7 +10,8 @@ from __future__ import annotations
 import copy
 import json
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Literal, NotRequired, TypeAlias, TypedDict, TypeVar
 
@@ -152,6 +153,25 @@ class RouteHarness:
         for link in self.links.copy():
             self.disconnect(link)
         self.ctrl.interactive.dispose()
+
+
+@contextmanager
+def remote_owner(ctrl: Controller) -> Generator[tuple[RouteHarness, ClientLink]]:
+    """Attach one owner link to an existing test window's Controller on its thread.
+
+    Disconnects the link without disposing the externally owned Controller.
+    Only for synchronous commands; use PumpedRouteHarness for an off-owner wait.
+    """
+    scheduler = ImmediateOwnerScheduler()
+    service = RemoteControlAdapter(
+        ctrl, ControlOptions(port=0), owner_scheduler=scheduler
+    )
+    route = RouteHarness(ctrl, service)
+    client = route.client()
+    try:
+        yield route, client
+    finally:
+        route.disconnect(client)
 
 
 def copy_sources(harness: RouteHarness, ctrl: Controller) -> RouteHarness:

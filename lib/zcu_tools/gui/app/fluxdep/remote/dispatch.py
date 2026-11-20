@@ -1,10 +1,12 @@
 """Method dispatcher for the fluxdep RemoteControlAdapter.
 
-Every handler is a pure synchronous function ``(adapter, params) -> dict`` that
+Every handler is a synchronous function ``(adapter, params) -> dict`` that
 runs on the State owner except operation.await, which only waits on a
 thread-safe SearchOwner handle off-owner. Shared dispatch owns marshalling;
 handlers must not touch threading or Qt directly. Handlers reach the fluxdep
-command façade via ``adapter.ctrl`` (a ``Controller``).
+command façade via ``adapter.ctrl`` (a ``Controller``). Mutations emit the
+app's display intent after success, except project setup, which just updates
+the visible header (ADR-0075).
 
 Adding a method:
   1. Implement ``def _h_<dotted_name>(adapter, params): ...`` (returns wire dict).
@@ -39,6 +41,7 @@ from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.plotting.fluxdep.spectrum import make_spectrum_figure
 
 from ..database import read_fluxdep_database_info
+from ..event_bus import FollowDisplayPayload
 from .dto import (
     AxisSnapshot,
     DatabaseInfoReply,
@@ -229,6 +232,7 @@ def _h_spectrum_load(
         transpose_axes=transpose_axes,
         selection=selection,
     )
+    adapter.ctrl.bus.emit(FollowDisplayPayload("preview", name))
     return {"name": name}
 
 
@@ -237,7 +241,14 @@ def _h_spectrum_load_processed(
 ) -> NamesReply:
     filepath = params["filepath"]
     assert isinstance(filepath, str)  # ParamSpec validated the nonempty path.
-    return {"names": adapter.ctrl.load_processed_spectrums(filepath)}
+    names = adapter.ctrl.load_processed_spectrums(filepath)
+    follow = (
+        FollowDisplayPayload("preview", names[0])
+        if names
+        else FollowDisplayPayload("spectra")
+    )
+    adapter.ctrl.bus.emit(follow)
+    return {"names": names}
 
 
 def _h_spectrum_remove(
@@ -246,6 +257,7 @@ def _h_spectrum_remove(
     name = params["name"]
     assert isinstance(name, str)  # ParamSpec validated the nonempty literal name.
     adapter.ctrl.remove_spectrum(name)
+    adapter.ctrl.bus.emit(FollowDisplayPayload("spectra"))
     return {"name": name, "removed": True}
 
 
@@ -441,14 +453,26 @@ def _h_fit_set_params(
     adapter.ctrl.set_fit_params(
         search_db, ParamBounds(EJ=EJb, EC=ECb, EL=ELb), transitions, r_f, sample_f
     )
-    return {"fit": _h_fit_result(adapter, {})}
+    result = _h_fit_result(adapter, {})
+    adapter.ctrl.bus.emit(FollowDisplayPayload("search"))
+    return {"fit": result}
 
 
 def _h_fit_search(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> OperationStartedReply:
     del params
-    return {"token": adapter.ctrl.search.start()}
+    token = adapter.ctrl.search.start()
+    outcome = adapter.ctrl.search.outcome(token)
+    if outcome is not None and outcome.status == "finished":
+        # An inline executor can publish the result before start() returns.
+        follow = FollowDisplayPayload("show")
+    else:
+        follow = FollowDisplayPayload(
+            "search", search_token=token if outcome is None else None
+        )
+    adapter.ctrl.bus.emit(follow)
+    return {"token": token}
 
 
 def _h_operation_cancel(
@@ -457,6 +481,7 @@ def _h_operation_cancel(
     token = params["token"]
     assert isinstance(token, int)
     adapter.ctrl.search.cancel(token)
+    adapter.ctrl.bus.emit(FollowDisplayPayload("search"))
     return {"token": token, "cancel_requested": True}
 
 
@@ -497,11 +522,9 @@ def _h_export_spectrums(
     # modes are exposed, not arbitrary h5py modes.
     assert filepath is None or isinstance(filepath, str)
     assert isinstance(overwrite, bool)
-    return {
-        "filepath": adapter.ctrl.export_spectrums(
-            filepath, mode="w" if overwrite else "x"
-        )
-    }
+    saved = adapter.ctrl.export_spectrums(filepath, mode="w" if overwrite else "x")
+    adapter.ctrl.bus.emit(FollowDisplayPayload("spectra"))
+    return {"filepath": saved}
 
 
 def _h_fit_export_params(
@@ -510,6 +533,7 @@ def _h_fit_export_params(
     del params
     receipt = adapter.ctrl.export_params_receipt()
     EJ, EC, EL = receipt.params
+    adapter.ctrl.bus.emit(FollowDisplayPayload("show"))
     return {
         "savepath": receipt.savepath,
         "params": {"EJ": EJ, "EC": EC, "EL": EL},
