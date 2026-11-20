@@ -295,7 +295,9 @@ class RecipeRuntime:
             handle = self.host.control(lambda: self._run_handle)
         except RuntimeError:
             return {}  # A finished host no longer accepts control requests.
-        return {} if handle is None else read_operation_progress(self._tools.gui, handle)
+        return (
+            {} if handle is None else read_operation_progress(self._tools.gui, handle)
+        )
 
     def scope_status(self) -> ScopeProjection:
         """Read the local tree and project descendants of its exact GUI Run.
