@@ -31,7 +31,11 @@ from zcu_tools.mcp.measure.analysis_execution import (
     ExecutionPhase,
     InvalidAnalysisValue,
 )
-from zcu_tools.mcp.measure.operation_wait import require_operation_failure_message
+from zcu_tools.mcp.measure.operation_wait import (
+    OperationProgress,
+    read_operation_progress,
+    require_operation_failure_message,
+)
 from zcu_tools.mcp.measure.raw_save import RawDataState, SaveReport
 from zcu_tools.mcp.measure.recipe_api import (
     AnalysisResult,
@@ -284,6 +288,21 @@ class RecipeRuntime:
         """Read detached per-Run owner evidence; never query, analyze, write or save."""
         with self._lock:
             return deepcopy(tuple(self._details))
+
+    def run_progress(self) -> OperationProgress:
+        """Read progress of this recipe's current GUI Run, not later operations.
+
+        No active Run returns no fields. Read on the recipe's bound connection
+        using the handle captured on the host control sequence.
+        """
+        try:
+            handle = self.host.control(lambda: self._run_handle)
+        except RuntimeError:
+            # A finished host no longer accepts control requests.
+            return {}
+        if handle is None:
+            return {}
+        return read_operation_progress(self._tools.gui, handle)
 
     def scope_status(self) -> ScopeProjection:
         """Read the local tree and project descendants of its exact GUI Run.

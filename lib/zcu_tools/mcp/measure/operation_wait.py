@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from threading import Condition, Event
-from typing import Literal
+from typing import Any, Literal, TypedDict
 
 from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError
 
@@ -23,6 +23,34 @@ class OperationCompletion:
 
     status: Literal["finished", "failed", "cancelled"]
     native: Mapping[str, object]
+
+
+class OperationProgress(TypedDict, total=False):
+    """Live progress fields; both are absent when the owner reports inactive."""
+
+    progress: list[dict[str, Any]]
+    """The GUI's bar objects, unchanged."""
+    eta_s: float
+    """Maximum remaining seconds among bars with an ETA; omitted if none."""
+
+
+def read_operation_progress(
+    connection: GuiConnection, handle: int
+) -> OperationProgress:
+    """Read live progress for an opaque handle on its bound GUI connection.
+
+    Inactive operations return no fields. Connection and RPC errors propagate;
+    the query does not wait for completion, reconnect, or cancel the operation.
+    """
+    reply = connection.read_internal("operation.progress", {}, operation_handle=handle)
+    if not reply["active"]:
+        return {}
+    bars = reply["bars"]
+    estimates = [bar["eta_s"] for bar in bars if bar.get("eta_s") is not None]
+    progress: OperationProgress = {"progress": bars}
+    if estimates:
+        progress["eta_s"] = max(estimates)
+    return progress
 
 
 def require_operation_failure_message(message: object) -> str:

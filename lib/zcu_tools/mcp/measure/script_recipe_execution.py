@@ -22,6 +22,7 @@ from zcu_tools.experiment.script_host import ScriptStatus
 from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.analysis_execution import AnalysisRecovery, ExecutionPhase
+from zcu_tools.mcp.measure.operation_wait import OperationProgress
 from zcu_tools.mcp.measure.recipe_api import (
     RecipeDeclaration,
     RecipeOutcome,
@@ -238,6 +239,14 @@ class ScriptRecipeExecution:
                 "pending_request_id": pending_request_id,
             }
         )
+
+    def run_progress(self) -> OperationProgress:
+        """Read live acquisition fields, or none outside a current Run."""
+        with self._condition:
+            host = self._host
+            if host is None or self._progress.status != "running":
+                return {}
+        return host.runtime.run_progress()
 
     def scope_status(self) -> ScopeProjection:
         """Read composite active_path and structured live_paths without driving code."""

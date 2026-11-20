@@ -8,7 +8,7 @@ import pytest
 from zcu_tools.experiment import Scope
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 
-from ._script_recipe_support import Inputs, Report, SyntheticGui, start
+from ._script_recipe_support import Fit, Inputs, Report, SyntheticGui, start
 from ._support import make_client
 
 
@@ -89,3 +89,94 @@ def test_recipe_projects_fork_leaves_candidates_and_exact_selector(
         released.set()
         execution.join()
         client.context.session.close()
+
+
+def test_execution_projects_only_the_current_run_progress(tmp_path: Path) -> None:
+    gui = SyntheticGui()
+    run_waiting, release_run = Event(), Event()
+    analysis_waiting, release_analysis = Event(), Event()
+    bars = [
+        {"label": "schedule", "percent": 25.0, "eta_s": 20.0},
+        {"label": "read", "percent": 50.0, "eta_s": 8.0},
+        {"label": "shots", "percent": None, "eta_s": None},
+    ]
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "operation.status_scope":
+            return {"active_path": "run", "live_paths": ["run"]}
+        if method == "operation.await" and params["operation_id"] == 1:
+            run_waiting.set()
+            if not release_run.is_set():
+                return {"reason": "timeout"}
+        if method == "operation.await" and params["operation_id"] == 100:
+            analysis_waiting.set()
+            if not release_analysis.is_set():
+                return {"reason": "timeout"}
+        if method == "operation.progress":
+            if params["operation_id"] == 1:
+                return {"active": True, "bars": bars}
+            # Analysis telemetry also exists on the wire; it is not Run progress.
+            return {"active": True, "bars": [{"label": "fit", "eta_s": 3.0}]}
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Run, analyze, then ask for a writeback decision")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        await tab.ask_writeback()
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    execution = start(client, "synthetic")
+    selector = {"execution": execution.snapshot().execution}
+    try:
+        assert run_waiting.wait(3)
+        status = client.call("status", {**selector, "detail": "full"})
+        op = status["details"][0]["op"]
+        operation = client.call("wait", {"op": op, "timeout": 0})
+        assert operation["progress"] == bars
+        assert operation["eta_s"] == 20.0
+        replies = (
+            status,
+            client.call("status", selector),
+            client.call("wait", {**selector, "timeout": 0}).data,
+        )
+        for reply in replies:
+            assert reply["progress"] == operation["progress"]
+            assert reply["eta_s"] == operation["eta_s"]
+
+        release_run.set()
+        assert analysis_waiting.wait(3)
+        after_run = (
+            client.call("status", selector),
+            client.call("wait", {**selector, "timeout": 0}).data,
+        )
+        release_analysis.set()
+        waiting = client.call("wait", {**selector, "timeout": 3}).data
+        assert waiting["status"] == "waiting"
+        waiting_status = client.call("status", selector)
+        client.call(
+            "answer",
+            {
+                **selector,
+                "request_id": waiting["pending_question"]["request_id"],
+                "answer": {"accepted": False, "items": []},
+            },
+        )
+        terminal = client.call("wait", {**selector, "timeout": 3}).data
+        assert terminal["status"] == "completed"
+        for reply in (
+            *after_run,
+            waiting,
+            waiting_status,
+            terminal,
+            client.call("status", selector),
+        ):
+            assert "progress" not in reply
+            assert "eta_s" not in reply
+    finally:
+        release_run.set()
+        release_analysis.set()
+        client.context.session.close()
+        execution.join()

@@ -81,6 +81,8 @@ class SyntheticGui:
                 if self.cancelled.is_set() and params["operation_id"] != 100
                 else "finished",
             }
+        if method == "operation.progress":
+            return {"active": False, "bars": []}
         if method in {"tab.cancel", "tab.analyze_cancel", "operation.cancel"}:
             self.cancelled.set()
             return {"status": "requested"}
