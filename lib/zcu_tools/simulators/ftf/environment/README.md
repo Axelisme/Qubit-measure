@@ -73,6 +73,15 @@ in `effective_settings`. Each attempted round retains its DC values, even if
 execution failed after its snapshot. If no snapshot was taken, read
 `admission_settings` instead. `sampling` shows the actual seed and sequence
 when a round snapshot exists.
+
+FTF owns `metadata.ftf.projective_spans`. Join an input record's Engine
+`capture_id` to this map, then use its Engine point ID (a decimal-string key in
+`histories`) to find the ordered projected states. Each entry gives the original
+C-order acquisition `point`, absolute `span_ns`, and software `round_index`.
+Use the capture ID rather than the Engine point ID alone: the same row identity
+can appear in several spans and rounds. Recorded failed calls have the same
+lookup. A reused preparation issues no new evolve and adds no entry.
+
 When telemetry is enabled, use `capture_file` in `routing-*.jsonl` to match the
 manifest to its acquire row. The row shows family totals, stage timings and
 projection outcomes and pruned weights. Capture writes run before summary
@@ -595,10 +604,20 @@ fields. Templates with neither cavity drives nor projective reads retain their
 original single-evolve path.
 
 Projective continuation sends one point's ready histories through its current
-absolute span in one `Engine.evolve` call. Each history has a unique ID within
-that call. The result returns to its history by ID before the next span starts.
-Capture records the batch-local IDs. Runtime attributes path classes and Stark
-warnings to the original point, so a point counts once per class across the acquire.
+absolute span in one `Engine.evolve` call. FTF assigns an Engine row ID to each
+original point and ordered history, even if two points have identical numerical
+inputs. The same point and history keep their ID across spans and rounds. The
+result returns to its history by ID before the next span starts. Engine row order
+does not change the original order of histories used for sampling.
+
+`FTFNumericUse.projective_spans` gives each solved span's row IDs and histories,
+Engine path class membership, and Stark inversions. Aggregate path classes and
+Stark warnings still refer to the original point. Each point counts once per
+class across the acquire. If Engine rejects rows with `NoValidKernel`, FTF reports
+the original point, absolute span, and rejected histories, with the Engine
+exception as the cause. Other Engine exceptions retain their type and an FTF
+note for the batch; cancellation is unchanged. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#黑盒邊界是-simulateevolution)
+and [Debug capture](#debug-capture).
 
 Each cavity-driven preparation retains all span reuse keys. Cache hits check
 every key through `Engine.reuse`. Projective continuation keys identify the

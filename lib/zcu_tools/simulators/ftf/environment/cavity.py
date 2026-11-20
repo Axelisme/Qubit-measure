@@ -1,8 +1,8 @@
 """Sequential FTF density and dominant-branch cavity memory composition."""
 
-from collections.abc import Callable
-from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Generator, Mapping
+from contextlib import AbstractContextManager, contextmanager, nullcontext
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 
 import numpy as np
@@ -15,21 +15,57 @@ from zcu_tools.simulate.adc import (
 )
 from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
+    Cancelled,
     CaptureBuffer,
     Engine,
     EvolutionResult,
     FluxSchedule,
     FluxWaveform,
+    NoValidKernel,
     PathDiagnostics,
     SegmentShift,
+    StarkOrderInversion,
     TimelineBatch,
     merge_path_diagnostics,
+    read_capture_metadata,
     segment_spans,
 )
 from zcu_tools.simulators.ftf.config import FTFSettings
 from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET, resonators
 from zcu_tools.simulators.ftf.environment.template import FTFModelFacts, FTFTemplatePlan
 from zcu_tools.simulators.ftf.physics import CavityDrive
+
+
+class ProjectiveCapture:
+    """FTF-owned provenance alongside a single acquire's Engine recordings."""
+
+    def __init__(self, buffer: CaptureBuffer) -> None:
+        self._buffer = buffer
+        self.spans: dict[str, object] = {}
+
+    @contextmanager
+    def recording(
+        self,
+        round_index: int,
+        point: int,
+        span: tuple[float, float],
+        histories: tuple[tuple[int, tuple[int, ...]], ...],
+    ) -> Generator[None]:
+        before = len(self._buffer.records)
+        try:
+            yield
+        finally:
+            records = self._buffer.records
+            if len(records) > before:
+                capture_id = read_capture_metadata(records[before])["capture_id"]
+                self.spans[capture_id] = {
+                    "round_index": round_index,
+                    "point": point,
+                    "span_ns": span,
+                    "histories": {
+                        str(row_id): history for row_id, history in histories
+                    },
+                }
 
 
 @dataclass(frozen=True)
@@ -52,6 +88,8 @@ class CavityEvolutionOptions:
     cancel: CancellationQuery | None = None
     evolving: Callable[[], AbstractContextManager[None]] = nullcontext
     reading: Callable[[], AbstractContextManager[None]] = nullcontext
+    round_index: int = 0
+    projective_capture: ProjectiveCapture | None = None
 
 
 @dataclass
@@ -130,6 +168,29 @@ class _Outcome:
 
 
 @dataclass(frozen=True)
+class ProjectiveSpan:
+    """One solved absolute span and its rows in caller and Engine coordinates.
+
+    point is the original acquisition point. histories pairs each Engine point
+    ID with its ordered projected states. Membership and Stark inversions use
+    those same Engine IDs, independently of batch or result row order.
+    """
+
+    point: int
+    span_ns: tuple[float, float]
+    histories: tuple[tuple[int, tuple[int, ...]], ...]
+    point_members: Mapping[str, tuple[int, ...]]
+    stark_order_inversions: tuple[StarkOrderInversion, ...]
+
+
+@dataclass(frozen=True)
+class _ProjectiveSpanResult:
+    key: bytes
+    paths: PathDiagnostics
+    diagnostic: ProjectiveSpan
+
+
+@dataclass(frozen=True)
 class ProjectionEvolution:
     """FTF outcome continuation products in result.points order.
 
@@ -139,6 +200,7 @@ class ProjectionEvolution:
     reuse_keys: all engine continuation digests, including projected densities.
     outcomes: retained history count per point, including zeros when floor=0.
     pruned_weight: cumulative removed probability per point before redistribution.
+    spans: author diagnostics for every completed span, with Engine row IDs.
     """
 
     result: EvolutionResult
@@ -146,6 +208,7 @@ class ProjectionEvolution:
     reuse_keys: tuple[bytes, ...]
     outcomes: tuple[int, ...]
     pruned_weight: tuple[float, ...]
+    spans: tuple[ProjectiveSpan, ...]
 
 
 def _point_batch(batch: TimelineBatch, point: int) -> TimelineBatch:
@@ -220,19 +283,39 @@ def _project_outcomes(
     return expanded, removed
 
 
-def _point_paths(paths: PathDiagnostics, point: int) -> PathDiagnostics:
-    """Count histories as work, but attribute their diagnostics to the caller point."""
+def _point_paths(
+    paths: PathDiagnostics, identities: dict[int, tuple[int, tuple[int, ...]]]
+) -> PathDiagnostics:
+    """Attribute row membership and warnings to acquisition points, not histories."""
     members = {
-        name: (point,) if ids else () for name, ids in paths.point_members.items()
+        name: tuple(sorted({identities[row_id][0] for row_id in ids}))
+        for name, ids in paths.point_members.items()
     }
     return replace(
         paths,
         points_by_class={name: len(ids) for name, ids in members.items()},
         point_members=members,
         stark_order_inversions=tuple(
-            replace(entry, point=point) for entry in paths.stark_order_inversions
+            replace(entry, point=identities[entry.point][0])
+            for entry in paths.stark_order_inversions
         ),
     )
+
+
+@dataclass
+class _ProjectionState:
+    floor: float
+    identities: dict[int, tuple[int, tuple[int, ...]]] = field(default_factory=dict)
+
+    def row_id(self, point: int, history: tuple[int, ...]) -> int:
+        # Keep all history lengths representable without truncating state indices.
+        identity = np.asarray((point, *history), dtype="<i8")
+        digest = sha256(b"ftf-projective-row\0" + identity.tobytes()).digest()
+        row_id = int.from_bytes(digest[:8], "little") >> 1
+        key = (point, history)
+        if self.identities.setdefault(row_id, key) != key:
+            raise ValueError(f"FTF projective row ID collision for {key}")
+        return row_id
 
 
 def _evolve_outcomes(
@@ -240,51 +323,97 @@ def _evolve_outcomes(
     outcomes: list[_Outcome],
     facts: FTFModelFacts,
     read_starts: tuple[float, ...],
+    projection: _ProjectionState,
     *,
     options: CavityEvolutionOptions,
-    floor: float,
-) -> tuple[list[_Outcome], list[PathDiagnostics], list[bytes], float]:
-    paths = []
-    keys = []
+) -> tuple[list[_Outcome], list[_ProjectiveSpanResult], float]:
+    results = []
     survival = 1.0
     point = int(outcomes[0].timeline.batch.points[0])
-    for step, (start, _) in enumerate(outcomes[0].timeline.spans[0]):
+    for step, span in enumerate(outcomes[0].timeline.spans[0]):
+        start, end = span
         if start in read_starts:
             with options.reading():
-                outcomes, removed = _project_outcomes(outcomes, floor)
+                outcomes, removed = _project_outcomes(outcomes, projection.floor)
             survival *= 1 - removed
-        # Each outcome is ready at this point's current absolute span. IDs are
-        # local to the evolve call; the outcome list keeps its sampling order.
+        # Engine owns routing usage and results (ADR-0078). Rows have caller
+        # identities; the outcome list keeps its original sampling order.
+        rows: dict[int, _Outcome] = {}
         with options.reading():
-            batches = tuple(
-                outcome.timeline.advance(step, points=np.array([index], dtype=np.int64))
-                for index, outcome in enumerate(outcomes)
-            )
-        histories = np.asarray(
-            [outcome.history for outcome in outcomes], dtype=np.int64
-        )
+            batches = []
+            for outcome in outcomes:
+                row_id = projection.row_id(point, outcome.history)
+                rows[row_id] = outcome
+                batches.append(
+                    outcome.timeline.advance(
+                        step, points=np.array([row_id], dtype=np.int64)
+                    )
+                )
+        histories = tuple((row_id, outcome.history) for row_id, outcome in rows.items())
+        history_bytes = np.asarray(
+            [history for _, history in histories], dtype=np.int64
+        ).tobytes()
         point_key = sha256(
             b"ftf-projective-span\0"
             + options.key
             + point.to_bytes(8, "little")
-            + histories.tobytes()
+            + history_bytes
         ).digest()
-        key = _span_key(point_key, step, batches)
-        with options.evolving(), engine.defer_stark_order_warnings():
-            result = engine.evolve(
-                facts.source,
-                batches,
-                budget=EVOLUTION_BUDGET,
-                cancel=options.cancel,
-                telemetry=options.telemetry,
-                capture=options.capture,
-                reuse_key=key,
+        key = _span_key(point_key, step, tuple(batches))
+        recording = (
+            nullcontext()
+            if options.projective_capture is None
+            else options.projective_capture.recording(
+                options.round_index, point, span, histories
             )
-        for index, density in zip(result.points, result.densities, strict=True):
-            outcomes[index].timeline.density = density[None]
-        paths.append(_point_paths(result.paths, point))
-        keys.append(key)
-    return outcomes, paths, keys, 1 - survival
+        )
+        with recording, options.evolving(), engine.defer_stark_order_warnings():
+            try:
+                result = engine.evolve(
+                    facts.source,
+                    batches,
+                    budget=EVOLUTION_BUDGET,
+                    cancel=options.cancel,
+                    telemetry=options.telemetry,
+                    capture=options.capture,
+                    reuse_key=key,
+                )
+            except Cancelled:
+                raise
+            except NoValidKernel as error:
+                rejected = [
+                    rows[row_id].history for row_id in error.points if row_id in rows
+                ]
+                raise NoValidKernel(
+                    f"FTF projective point {point} span [{start:g}, {end:g}] ns "
+                    f"histories {rejected}: {error}",
+                    domain=error.domain,
+                    points=(point,),
+                    segments=error.segments,
+                    attempted=error.attempted,
+                ) from error
+            except Exception as error:
+                error.add_note(
+                    f"FTF projective point {point} span [{start:g}, {end:g}] ns "
+                    f"batch histories {[history for _, history in histories]}"
+                )
+                raise
+        for row_id, density in zip(result.points, result.densities, strict=True):
+            rows[row_id].timeline.density = density[None]
+        results.append(
+            _ProjectiveSpanResult(
+                key,
+                result.paths,
+                ProjectiveSpan(
+                    point,
+                    span,
+                    histories,
+                    result.paths.point_members,
+                    result.paths.stark_order_inversions,
+                ),
+            )
+        )
+    return outcomes, results, 1 - survival
 
 
 def evolve_projective_plans(
@@ -306,18 +435,19 @@ def evolve_projective_plans(
     Low-weight histories are pruned at settings.numerics.projection_weight_floor
     and retained weights redistributed proportionally after each projection.
     A zero floor retains even zero-weight histories. Removing every outcome
-    raises ValueError naming its point and floor. Engine and population validation
-    errors propagate without returning a partial result. Each evolve batches the
-    current absolute span of one point, with one unique batch-local ID per retained
-    history. Densities return to those histories by ID before the next span.
+    raises ValueError naming its point and floor. Engine failures include the
+    original point, absolute span, and history context. Cancellation and errors
+    return no partial result. Each evolve batches the
+    current absolute span of one point. A row ID identifies the original point
+    and history across spans and rounds. Densities return by ID before the next span.
     One acquire-local flat cavity-average cache is cleared on success or failure.
     """
     points = np.concatenate([plan.batch.points for plan in plans])
     count = facts.source.initial_density.shape[0]
     rows = []
-    paths = []
-    keys = []
+    spans = []
     pruned = []
+    projection = _ProjectionState(settings.numerics.projection_weight_floor)
     cache = CavityAverageCache()
     try:
         pair = resonators(settings)
@@ -336,17 +466,16 @@ def evolve_projective_plans(
                     facts.source.initial_density[None].copy(),
                     np.zeros((1, 2), dtype=np.complex128),
                 )
-                outcomes, reports, digests, removed = _evolve_outcomes(
+                outcomes, results, removed = _evolve_outcomes(
                     engine,
                     [_Outcome(timeline, 1.0, ())],
                     facts,
                     tuple(read.start_ns for read in reads),
+                    projection,
                     options=options,
-                    floor=settings.numerics.projection_weight_floor,
                 )
                 rows.append(outcomes)
-                paths.extend(reports)
-                keys.extend(digests)
+                spans.extend(results)
                 pruned.append(removed)
     finally:
         cache.clear()
@@ -367,12 +496,16 @@ def evolve_projective_plans(
                     outcome.timeline.density[0].diagonal().real
                 )
             densities[point] += outcome.weight * outcome.timeline.density[0]
+    paths = _point_paths(
+        merge_path_diagnostics([span.paths for span in spans]), projection.identities
+    )
     return ProjectionEvolution(
-        EvolutionResult(points, densities, merge_path_diagnostics(paths)),
+        EvolutionResult(points, densities, paths),
         ProjectionReadout(weights, tuple(populations)),
-        tuple(keys),
+        tuple(span.key for span in spans),
         tuple(map(len, rows)),
         tuple(pruned),
+        tuple(span.diagnostic for span in spans),
     )
 
 
