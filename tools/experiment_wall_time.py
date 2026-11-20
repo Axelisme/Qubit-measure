@@ -681,9 +681,11 @@ def main(
     from a fresh CLI process). read_commit supplies the checkout revision before
     Run; by default read Git HEAD. Input, Run and output errors propagate. Bad
     CLI arguments exit with usage status. --report-only rebuilds both reports
-    without running experiments. --resume-from retains resolved rows from a
-    journal with matching commit and input hashes, and runs only missing
-    selected cases. Return 0 after reporting, or 124 if a timed-out
+    without running experiments. For an unmatched Run start with no recorded
+    batch end, --ended-at supplies the interruption time or a conservative
+    earlier bound, not the runner's finish time after cleanup. --resume-from
+    retains resolved rows from a journal with matching commit and input hashes,
+    and runs only missing selected cases. Return 0 after reporting, or 124 if a timed-out
     Run prevented continuation. KeyboardInterrupt writes a partial report and
     returns 130.
     """
@@ -723,7 +725,10 @@ def _main(
         "--ended-at",
         type=_ended_at,
         metavar="ISO8601",
-        help="batch receipt's finish time (with UTC offset), for --report-only after a hard stop",
+        help=(
+            "batch interruption time or conservative earlier bound (with UTC offset), "
+            "for --report-only after a hard stop; not the runner's post-cleanup finish time"
+        ),
     )
     parser.add_argument(
         "--resume-from",

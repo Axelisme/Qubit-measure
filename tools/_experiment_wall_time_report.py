@@ -317,7 +317,9 @@ def _uncommitted_row(
         return new_row(adapter, guide, None, "not_run", None)
     start = TypeAdapter(RunStart).validate_json(data)
     if ended is None:
-        raise ValueError("an incomplete Run requires --ended-at from the batch receipt")
+        raise ValueError(
+            "an incomplete Run requires --ended-at for the batch interruption"
+        )
     if ended["monotonic_s"] is not None:
         elapsed_s = ended["monotonic_s"] - start["monotonic_s"]
     else:

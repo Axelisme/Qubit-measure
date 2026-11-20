@@ -105,7 +105,7 @@ Runner 遇到用法錯誤、非 Linux、不在已提交的 Git worktree、少於
 | `exclusive`、`slot` | 一般模式為 `false` 與取得的 slot 編號；獨占模式為 `true` 與 `null` |
 | `cpus`、`env` | 記錄子程序的 CPU affinity 清單與 runner 固定設定的環境變數。獨占模式的 `cpus` 是兩 slot 的聯集 |
 | `wait_seconds` | 記錄啟動前的等待秒數 |
-| `started_utc`、`finished_utc`、`elapsed_seconds` | 記錄命令開始與結束的 UTC 時間，以及執行秒數 |
+| `started_utc`、`finished_utc`、`elapsed_seconds` | Runner 啟動子程序前與清理流程結束後的 UTC 時刻，以及這段期間的 monotonic 秒數 |
 | `exit_code`、`timed_out` | 記錄 runner 的 exit status，超時時將 `timed_out` 設為 `true` |
 | `residual_killed` | 直接子程序結束後仍找到同 process group 的存活程序時設為 `true`，超時本身的整組清理只記在 `timed_out` |
 | `log` | 記錄命令輸出 log 的路徑 |
@@ -188,12 +188,28 @@ Open 加上覆寫後仍缺欄位或 slot 時，`missing_defaults` 列出表單�
 
 外層中斷時，有 `start.json` 但沒有 `row.json` 的列記為 `incomplete`，以開始到批次中斷的秒數作下限。沒有開始也沒有結果的列記為 `not_run`。`timeout`、`incomplete` 和 `not_run` 不算 FTF 不支援。全表需要涵蓋所有註冊的 adapter，且沒有 `incomplete` 或 `not_run`。
 
-若程序被強制結束，兩份報表可能沒有寫完。用既有目錄的 journal 重建，不會派送 Run。若工具沒記下批次結束時間，從外層 receipt 取 `finished_utc` 傳給 `--ended-at`。此時 `incomplete` 的下限使用 UTC 時戳相減：
+若程序被強制結束，兩份報表可能沒有寫完。用 `--report-only --output "$output"`
+從原目錄的 journal 重建，不會派送 Run。有 `batch-end.json` 時以它為準；
+沒有任何一列只寫了 `start.json` 而未寫 `row.json` 時，也不必加 `--ended-at`。
+
+若有 `start.json` 沒有 `row.json`，且沒有 `batch-end.json`，
+以 `--ended-at` 傳入批次中斷時刻，格式為含 UTC offset 的 ISO 8601。
+工具從這個時刻扣掉 `start.json` 的 `started_at`，得到 Run 秒數下限。
+不要用收據的 `finished_utc`，因為 runner 在清理 process group 後才記下它。
+
+若同批 `run_heavy.py` 收據確認 `timed_out: true`，且 UTC 時鐘未跳變、批次也沒有更早中斷，
+可用 `started_utc` 加上當次傳給 runner 的 `<timeout-seconds>`。
+Runner 在啟動子程序前記 `started_utc`，在啟動後才開始限時等待，因此這個值不晚於 timeout 觸發時刻。
+例如 `started_utc` 是 `2026-11-21T12:00:00+00:00`，payload 上限是 720 秒，
+則把 `ended_at` 設為 `2026-11-21T12:12:00+00:00`：
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
-  --report-only --output "$output" --ended-at "$finished_utc"
+  --report-only --output "$output" --ended-at "$ended_at"
 ```
+
+若算出的時刻早於該列的 `started_at`，或無法取得可信的中斷時刻，不要補填時間。
+保留 journal，用下方的續跑方式留用已落盤列並重跑缺列。
 
 續跑使用新的 `--output`，以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。新報表併入來源中已落盤的判定列；`--select` 只派送所選範圍內尚未判定的列。`timeout` 是已判定列，`incomplete` 和 `not_run` 不是。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`：
 
