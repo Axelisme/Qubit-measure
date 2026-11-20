@@ -6,7 +6,7 @@ import json
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from pydantic import TypeAdapter
 
@@ -54,6 +54,7 @@ type RowStatus = Literal[
     "not_run",
     "incomplete",
     "timeout",
+    "run_failed",
 ]
 
 
@@ -67,8 +68,10 @@ class Row(TypedDict):
     incomplete or timed-out Runs. Breakdown is complete, partial, missing, or
     None if not attempted. Acquires counts observed records; the four stage
     fields are measured seconds or None. Status distinguishes complete, missing
-    data/defaults, unsupported, timed-out and uncompleted rows. Reason explains
-    an exclusion or unresolved defaults, when applicable. cold_start is true
+    data/defaults, unsupported, failed, timed-out and uncompleted rows. Reason
+    explains an exclusion, unresolved defaults or a failure, when applicable.
+    failure_record is present on failed Runs and names the diagnostic relative
+    to case_directory. cold_start is true
     for the first dispatch in its process, false for later Runs and None for
     unstarted rows. reused is true when this batch retained another batch's row.
     """
@@ -88,6 +91,7 @@ class Row(TypedDict):
     remainder_s: float | None
     status: RowStatus
     reason: str | None
+    failure_record: NotRequired[str]
     cold_start: bool | None
     reused: bool
 
@@ -143,6 +147,7 @@ def _summary_row(row: Row) -> str:
         "not_run": "not_run",
         "incomplete": "incomplete",
         "timeout": "timeout",
+        "run_failed": "run_failed",
     }[row["status"]]
     if row["status"] == "timeout":
         status += "（部分）" if row["breakdown"] == "partial" else "（分項缺）"
@@ -170,7 +175,9 @@ def _summary_row(row: Row) -> str:
     return f"| {row['adapter']} | {wall} | {times} | {acquires} | {status} | {guide} | {source} |\n"
 
 
-def _write_report(output: Path, rows: list[Row], plan: BatchPlan) -> None:
+def _write_report(
+    output: Path, rows: list[Row], plan: BatchPlan, resolved: int
+) -> None:
     guides_by_adapter = plan["adapters"]
     guide_paths = plan["guides"]
     no_guide = sorted(
@@ -189,7 +196,6 @@ def _write_report(output: Path, rows: list[Row], plan: BatchPlan) -> None:
         if row["status"] == "timeout"
         or ((wall := row["wall_s"]) is not None and wall > RUN_TARGET_S)
     ]
-    resolved = sum(_resolved(row) for row in rows)
     write_json(
         output / "report.json",
         {
@@ -209,10 +215,12 @@ def _write_report(output: Path, rows: list[Row], plan: BatchPlan) -> None:
     (output / "summary.md").write_text(
         f"Coverage: {resolved}/{len(rows)} selected rows resolved; "
         f"{len(guides_by_adapter)} registered adapters.\n\n"
-        "| Experiment | Run (s) | Compile (s) | Evolve (s) | Readout (s) | Remainder (s) | Acquires | Status | Guide | Source |\n"
+        + _run_summary(rows)
+        + "| Experiment | Run (s) | Compile (s) | Evolve (s) | Readout (s) | Remainder (s) | Acquires | Status | Guide | Source |\n"
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |\n"
         + "".join(map(_summary_row, rows))
         + f"\nRun >{RUN_TARGET_S:g} s: {_format_names(over_target)}\n"
+        + _failure_list(rows)
         + f"\nAdapters without declared guides: {_format_names(no_guide)}\n"
         + "\nDeclared guides not in inventory: "
         + (
@@ -222,6 +230,24 @@ def _write_report(output: Path, rows: list[Row], plan: BatchPlan) -> None:
         + f"\n\nGuides without adapters: {_format_names(no_adapter)}\n",
         encoding="utf-8",
     )
+
+
+def _run_summary(rows: list[Row]) -> str:
+    timed = sum(row["status"] in {"ok", "missing_breakdown"} for row in rows)
+    timeouts = sum(row["status"] == "timeout" for row in rows)
+    failures = sum(row["status"] == "run_failed" for row in rows)
+    return f"Runs: {timed} timed, {timeouts} timeout, {failures} run_failed.\n\n"
+
+
+def _failure_list(rows: list[Row]) -> str:
+    failures: list[str] = []
+    for row in rows:
+        if row["status"] == "run_failed":
+            reason = row["reason"]
+            if not reason:
+                raise ValueError(f"Run failure for {row['adapter']!r} lacks a reason")
+            failures.append(f"- `{row['adapter']}`: {' '.join(reason.splitlines())}\n")
+    return "\nRun failures:\n" + ("".join(failures) if failures else "—\n")
 
 
 def write_json(path: Path, value: object) -> None:
@@ -256,17 +282,26 @@ def read_row(location: Path) -> Row | None:
     return TypeAdapter(Row).validate_json(data)
 
 
+class JournalUsageError(ValueError):
+    """The supplied arguments cannot recover or reuse a wall-time journal."""
+
+
 def reusable_rows(source: Path, plan: BatchPlan) -> dict[str, Row]:
     """Read resolved rows for a new plan with the same commit and input hashes.
 
-    Paths in the retained rows refer to the original artifacts. Raise ValueError
-    for different provenance; missing or malformed journals propagate errors.
+    Paths in the retained rows refer to the original artifacts. Raise
+    JournalUsageError for different provenance; missing or malformed journals
+    propagate errors.
     """
     previous = read_plan(source)
     if previous["commit"] != plan["commit"]:
-        raise ValueError("resume source commit differs from the current Git HEAD")
+        raise JournalUsageError(
+            "resume source commit differs from the current Git HEAD"
+        )
     if previous["inputs"] != plan["inputs"]:
-        raise ValueError("resume source input SHA-256 differs from the current inputs")
+        raise JournalUsageError(
+            "resume source input SHA-256 differs from the current inputs"
+        )
     rows: dict[str, Row] = {}
     for adapter, directory in previous["cases"].items():
         row = read_row(source / directory)
@@ -286,11 +321,12 @@ def _resolved(row: Row) -> bool:
     return row["status"] not in {"incomplete", "not_run"}
 
 
-def assemble_report(output: Path, plan: BatchPlan, ended: BatchEnd | None) -> None:
-    """Render both reports from disk; ended supplies the bounds for unmatched Starts.
+def assemble_report(output: Path, plan: BatchPlan, ended: BatchEnd | None) -> bool:
+    """Render both reports from disk and return whether every reported row is resolved.
 
-    Raises ValueError if an incomplete Run lacks a batch end or if that end is
-    before the persisted start. Malformed or unreadable journal data propagate.
+    ended supplies the bounds for unmatched starts. Raises JournalUsageError
+    if an incomplete Run lacks a batch end or that end precedes its persisted
+    start. Malformed or unreadable journal data propagate.
     """
     rows = []
     for adapter, directory in plan["cases"].items():
@@ -301,7 +337,9 @@ def assemble_report(output: Path, plan: BatchPlan, ended: BatchEnd | None) -> No
                 adapter, plan["adapters"][adapter], directory, location, ended
             )
         rows.append(row)
-    _write_report(output, rows, plan)
+    resolved = sum(_resolved(row) for row in rows)
+    _write_report(output, rows, plan, resolved)
+    return resolved == len(rows)
 
 
 def _uncommitted_row(
@@ -317,7 +355,7 @@ def _uncommitted_row(
         return new_row(adapter, guide, None, "not_run", None)
     start = TypeAdapter(RunStart).validate_json(data)
     if ended is None:
-        raise ValueError(
+        raise JournalUsageError(
             "an incomplete Run requires --ended-at for the batch interruption"
         )
     if ended["monotonic_s"] is not None:
@@ -327,7 +365,7 @@ def _uncommitted_row(
         began = datetime.fromisoformat(start["started_at"])
         elapsed_s = (end - began).total_seconds()
     if elapsed_s < 0:
-        raise ValueError(f"batch end precedes Run start for {adapter!r}")
+        raise JournalUsageError(f"batch end precedes Run start for {adapter!r}")
     row = new_row(adapter, guide, directory, "incomplete", None)
     row.update(
         started_at=start["started_at"],

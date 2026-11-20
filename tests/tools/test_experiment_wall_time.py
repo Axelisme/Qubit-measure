@@ -13,7 +13,13 @@ from pydantic import ValidationError
 from zcu_tools.gui.form import FormErrors
 
 from tools import experiment_wall_time
-from tools.experiment_wall_time import Inventory, RunTiming, WallTimeCase, main
+from tools.experiment_wall_time import (
+    Inventory,
+    RunFailure,
+    RunTiming,
+    WallTimeCase,
+    main,
+)
 
 if TYPE_CHECKING:
     from tools.experiment_wall_time import Run
@@ -60,8 +66,29 @@ class _CompletedRun:
     def cancel(self) -> None:
         pytest.fail("a completed Run should not be cancelled")
 
+    def failure(self) -> RunFailure | None:
+        return None
+
+    def is_idle(self) -> bool:
+        return True
+
     def timing(self, _wall_s: float) -> RunTiming:
         return self.record
+
+
+class _FailedRun(_CompletedRun):
+    def __init__(self, failure: RunFailure, idle: Callable[[], bool]) -> None:
+        self.outcome = failure
+        self.check_idle = idle
+
+    def failure(self) -> RunFailure:
+        return self.outcome
+
+    def is_idle(self) -> bool:
+        return self.check_idle()
+
+    def timing(self, _wall_s: float) -> RunTiming:
+        pytest.fail("a failed Run must not produce a measured duration")
 
 
 def _inventory(
@@ -190,7 +217,7 @@ def test_main_keeps_committed_rows_when_interrupted_before_the_next_run(
             discover=lambda: _inventory(_ADAPTERS, [_GUIDE], measure),
             read_commit=lambda: "abc",
         )
-        == 130
+        == 3
     )
     report = json.loads((output / "report.json").read_text(encoding="utf-8"))
     assert [(row["adapter"], row["status"]) for row in report["rows"]] == [
@@ -231,6 +258,12 @@ def test_interrupted_run_has_a_persisted_start_and_a_monotonic_lower_bound(
             nonlocal now
             now = 182.5
 
+        def failure(self) -> RunFailure | None:
+            pytest.fail("interruption cannot publish a terminal outcome")
+
+        def is_idle(self) -> bool:
+            return False
+
         def timing(self, _wall_s: float) -> RunTiming:
             pytest.fail("interruption cannot publish a completed RunRecord")
 
@@ -251,7 +284,7 @@ def test_interrupted_run_has_a_persisted_start_and_a_monotonic_lower_bound(
             discover=lambda: Inventory(_FREQUENCY, [_GUIDE], measure),
             read_commit=lambda: "abc",
         )
-        == 130
+        == 3
     )
     report = json.loads((output / "report.json").read_text(encoding="utf-8"))
     [row] = report["rows"]
@@ -307,7 +340,7 @@ def test_report_only_recovers_from_persisted_facts_after_a_hard_stop(
                 "report-only must use the batch's revision"
             ),
         )
-        == 0
+        == 3
     )
     report = json.loads((output / "report.json").read_text(encoding="utf-8"))
     assert report["commit"] == "abc"
@@ -317,6 +350,37 @@ def test_report_only_recovers_from_persisted_facts_after_a_hard_stop(
     assert incomplete["wall_s_lower_bound"] == 25.0
     assert unstarted["status"] == "not_run"
     assert report["coverage"] == {"resolved": 1, "selected": 3, "registered": 3}
+
+
+@pytest.mark.parametrize("recover", ["report-only", "resume-from"])
+def test_malformed_row_journal_is_a_tool_error_not_a_usage_error(
+    tmp_path: Path, data_dir: Path, recover: str
+) -> None:
+    source = tmp_path / "original"
+
+    def measure(_case: WallTimeCase, _data_dir: Path, _telemetry: Path) -> RunTiming:
+        return RunTiming("start", "finish", 2.0)
+
+    def discover() -> Inventory:
+        return _inventory(_FREQUENCY, [_GUIDE], measure)
+
+    assert (
+        main(
+            ["--output", str(source)],
+            data_dir=data_dir,
+            discover=discover,
+            read_commit=lambda: "abc",
+        )
+        == 0
+    )
+    (source / "cases/001/row.json").write_text("not JSON", encoding="utf-8")
+    argv = (
+        ["--report-only", "--output", str(source)]
+        if recover == "report-only"
+        else ["--resume-from", str(source), "--output", str(tmp_path / "continued")]
+    )
+    with pytest.raises(ValidationError, match="Invalid JSON"):
+        main(argv, data_dir=data_dir, discover=discover, read_commit=lambda: "abc")
 
 
 @pytest.mark.parametrize("change", [None, "commit", "input"])
@@ -341,7 +405,7 @@ def test_resume_reuses_only_matching_committed_rows_and_marks_the_first_new_run_
             discover=lambda: _inventory(_ADAPTERS, [_GUIDE], original),
             read_commit=lambda: "abc",
         )
-        == 130
+        == 3
     )
     (source / "report.json").unlink()  # Resume from rows, not the rendered report.
     ran = []
@@ -440,6 +504,12 @@ def test_timeout_dumps_before_cancelling_and_requires_idle_to_continue(
             assert "(most recent call first)" in dump.read_text(encoding="utf-8")
             events.append("cancel")
 
+        def failure(self) -> RunFailure | None:
+            pytest.fail("deadline takes precedence over the terminal outcome")
+
+        def is_idle(self) -> bool:
+            return settled_idle
+
         def timing(self, _wall_s: float) -> RunTiming:
             pytest.fail("a timed-out Run must not report an exact duration")
 
@@ -463,7 +533,7 @@ def test_timeout_dumps_before_cancelling_and_requires_idle_to_continue(
         data_dir=data_dir,
         discover=lambda: Inventory(_ADAPTERS, [_GUIDE], measure),
         read_commit=lambda: "abc",
-    ) == (0 if settled_idle else 124)
+    ) == (0 if settled_idle else 3)
     report = json.loads((output / "report.json").read_text(encoding="utf-8"))
     timeout, following = report["rows"]
     assert timeout["status"] == "timeout"
@@ -477,6 +547,122 @@ def test_timeout_dumps_before_cancelling_and_requires_idle_to_continue(
     summary = (output / "summary.md").read_text(encoding="utf-8")
     assert "Run >180 s: `fake/frequency`" in summary
     assert ">180.0" in summary
+    assert f"Runs: {int(settled_idle)} timed, 1 timeout, 0 run_failed." in summary
+
+
+@pytest.mark.parametrize(
+    ("selection", "settled_idle", "expected_exit"),
+    [("fake", True, 0), ("fake", False, 3), ("fake/frequency", False, 0)],
+)
+def test_failed_run_is_journaled_before_idle_check_and_never_timed(
+    tmp_path: Path,
+    data_dir: Path,
+    selection: str,
+    expected_exit: int,
+    *,
+    settled_idle: bool,
+) -> None:
+    output = tmp_path / "output"
+    reason = "ValueError('envelope upload exceeded the buffer')"
+    failed_at = "2026-11-21T00:00:07+00:00"
+    dispatched: list[str] = []
+
+    def check_idle(location: Path) -> bool:
+        committed = json.loads((location / "row.json").read_text())
+        assert committed["status"] == "run_failed"
+        diagnostic = location / committed["failure_record"]
+        assert json.loads(diagnostic.read_text())["reason"] == reason
+        return settled_idle
+
+    def measure(
+        case: WallTimeCase,
+        _data_dir: Path,
+        telemetry: Path,
+        attempt: Callable[[Run | FormErrors], None],
+    ) -> None:
+        dispatched.append(case.adapter)
+        if case.adapter == "fake/frequency":
+            attempt(
+                _FailedRun(
+                    RunFailure(failed_at, reason), lambda: check_idle(telemetry.parent)
+                )
+            )
+        else:
+            attempt(_CompletedRun(RunTiming("start", "finish", 2.0)))
+
+    code = main(
+        ["--output", str(output), "--select", selection],
+        data_dir=data_dir,
+        discover=lambda: Inventory(_ADAPTERS, [_GUIDE], measure),
+        read_commit=lambda: "abc",
+    )
+
+    assert code == expected_exit
+    assert dispatched == (
+        ["fake/frequency", "fake/power"] if settled_idle else ["fake/frequency"]
+    )
+    report = json.loads((output / "report.json").read_text())
+    failed, *following = report["rows"]
+    assert failed["status"] == "run_failed"
+    assert failed["reason"] == reason
+    start = json.loads((output / failed["case_directory"] / "start.json").read_text())
+    assert failed["started_at"] == start["started_at"]
+    assert failed["finished_at"] == failed_at
+    assert failed["wall_s"] is None and failed["wall_s_lower_bound"] is None
+    assert [row["status"] for row in following] == (
+        ["missing_breakdown" if settled_idle else "not_run"]
+        if selection == "fake"
+        else []
+    )
+    assert report["coverage"]["resolved"] == (2 if settled_idle else 1)
+    summary = (output / "summary.md").read_text()
+    assert f"Runs: {int(settled_idle)} timed, 0 timeout, 1 run_failed." in summary
+    assert "Run >180 s: —" in summary
+    failures = summary.split("Run failures:\n", 1)[1]
+    assert f"`fake/frequency`: {reason}" in failures
+
+
+def test_resume_keeps_a_failed_run_and_its_original_diagnostic_without_retrying(
+    tmp_path: Path, data_dir: Path
+) -> None:
+    source, resumed = tmp_path / "source", tmp_path / "resumed"
+
+    def measure(
+        _case: WallTimeCase,
+        _data_dir: Path,
+        _telemetry: Path,
+        attempt: Callable[[Run | FormErrors], None],
+    ) -> None:
+        failure = RunFailure("2026-11-21T00:00:07+00:00", "ValueError('bad pulse')")
+        attempt(_FailedRun(failure, lambda: True))
+
+    def run_at(output: Path, discover: Callable[[], Inventory], *options: str) -> int:
+        return main(
+            ["--output", str(output), "--select", "fake/frequency", *options],
+            data_dir=data_dir,
+            discover=discover,
+            read_commit=lambda: "abc",
+        )
+
+    assert run_at(source, lambda: Inventory(_FREQUENCY, [_GUIDE], measure)) == 0
+
+    def no_retry(*_args: object) -> None:
+        pytest.fail("an already resolved Run must not be prepared")
+
+    assert (
+        run_at(
+            resumed,
+            lambda: Inventory(_FREQUENCY, [_GUIDE], no_retry),
+            "--resume-from",
+            str(source),
+        )
+        == 0
+    )
+    [row] = json.loads((resumed / "report.json").read_text())["rows"]
+    assert row["status"] == "run_failed" and row["reused"] is True
+    diagnostic = resumed / row["case_directory"] / row["failure_record"]
+    assert diagnostic.is_relative_to(source)
+    assert json.loads(diagnostic.read_text())["reason"] == "ValueError('bad pulse')"
 
 
 @pytest.mark.parametrize("seconds", ["179.9", "nan", "inf", "-inf", "2147483.648"])

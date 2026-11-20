@@ -46,7 +46,7 @@
 | `inspect_simulator_capture.py` | `tools/inspect_simulator_capture.py [path] --telemetry-directory DIRECTORY` | 0 完成，壞資料或讀檔失敗時非零 | 否 |
 | `family_pareto.py` | `-m tools.family_pareto --scenario <name>` | 0 完成，輸入或量測失敗時非零 | 否 |
 | `paired_benchmark.py` | `-m tools.paired_benchmark run --baseline A --candidate B --scenario NAME --reference-cache DIR --blocks K --exclusive --output FILE` | 0 完成；1 輸入、cache 或 child 失敗；2 用法錯誤 | 否，需外層 exclusive runner |
-| `experiment_wall_time.py` | `-m tools.experiment_wall_time`，參數見[實驗 Run 牆鐘](#實驗-run-牆鐘) | 0 寫完報表；124 取消未能續跑；130／143 收到 SIGINT／SIGTERM；其他執行錯誤非零 | 否，只記耗時 |
+| `experiment_wall_time.py` | `-m tools.experiment_wall_time`，參數見[實驗 Run 牆鐘](#實驗-run-牆鐘) | 0 所選列均已判定；3 已出報表但仍有未完列；1 工具或環境錯誤；2 用法錯誤 | 否，只記耗時 |
 
 Usage 錯誤由 argparse 以 2 結束；未轉譯的 Git、讀檔或其他執行錯誤仍會傳出例外，不能當作檢查通過。
 模擬器量測與重計算的授權、排隊和收據要求見後續各節。表中的命令不提供執行授權。
@@ -182,11 +182,24 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
 
 Run 由 monotonic clock 計算，從送出 Run 到 Controller 發布終態。環境組裝、Open 與覆寫不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留 fixture 副本與 acquired ledger，不寫回入庫輸入。Compile、evolve、readout 與 remainder 加總該目錄中的 acquire 牆鐘。Remainder 不含 acquire 外的 Run 開銷。若沒有 acquire 記錄或分項不全，`missing_breakdown` 保留 Run 秒數，分項寫 `null`。
 
-`--row-timeout SECONDS` 從送出 Run 起算，預設 360 秒。只接受有限且介於 180 到 2,147,483.647 秒的值，兩端都可用。到期時先把所有 Python 執行緒的 stack 寫到該列的 `timeout-stack.txt`，再請 Controller 取消。`timeout` 的精確 `wall_s` 是 `null`，`wall_s_lower_bound` 表示 Run 大於期限。能加總的 acquire 分項標「部分」，沒有可用分項時標「分項缺」。摘要以未四捨五入的 Run 秒數列出嚴格大於 180 秒的實驗，也列入所有 `timeout`。取消後 30 秒內，Run 到終態且 Controller idle 才繼續。否則保留報表、把其餘未派送列記為 `not_run`，並以 124 結束。
+`--row-timeout SECONDS` 從送出 Run 起算，預設 360 秒。只接受有限且介於 180 到 2,147,483.647 秒的值，兩端都可用。到期時先把所有 Python 執行緒的 stack 寫到該列的 `timeout-stack.txt`，再請 Controller 取消。`timeout` 的精確 `wall_s` 是 `null`，`wall_s_lower_bound` 表示 Run 大於期限。能加總的 acquire 分項標「部分」，沒有可用分項時標「分項缺」。摘要以未四捨五入的 Run 秒數列出嚴格大於 180 秒的實驗，也列入所有 `timeout`。取消後 30 秒內，Run 到終態且 Controller idle 才繼續。否則停止派送，保留報表，將尚未開始的列記為 `not_run`。
 
-Open 加上覆寫後仍缺欄位或 slot 時，`missing_defaults` 列出表單的錯誤，不送出 Run。[案例宣告](data/experiment_wall_time/case-inputs.json)列出這個 FTF 環境無法執行的 adapter；這些 `not_runnable` 列只寫原因，不複製 project 或啟動 Run。環境組裝、檔案讀取、telemetry 格式及未分類的 Run 失敗會中止指令，不轉成案例狀態。
+Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`，再落盤 `run_failed` 列。該列記 Run 起點、收到失敗事件的時刻，以及 Controller 提供的錯誤類型與訊息。`failure_record` 是相對於該列 `case_directory` 的診斷檔路徑。失敗列不填 Run 秒數，也不列入 `Run >180 s`。工具寫完該列才檢查 Controller 是否 idle；若仍有活動中的操作，就停止派送。摘要分別計數成功計時、`timeout` 與 `run_failed`。`Run failures` 另列出失敗的 adapter 與原因，供維護者判斷該查模擬器能力、表單預設或程式缺陷。
 
-外層中斷時，有 `start.json` 但沒有 `row.json` 的列記為 `incomplete`，以開始到批次中斷的秒數作下限。沒有開始也沒有結果的列記為 `not_run`。`timeout`、`incomplete` 和 `not_run` 不算 FTF 不支援。全表需要涵蓋所有註冊的 adapter，且沒有 `incomplete` 或 `not_run`。
+Open 加上覆寫後仍缺欄位或 slot 時，`missing_defaults` 列出表單的錯誤，不送出 Run。[案例宣告](data/experiment_wall_time/case-inputs.json)列出這個 FTF 環境無法執行的 adapter；這些 `not_runnable` 列只寫原因，不複製 project 或啟動 Run。工具例外、未知 Run outcome、環境組裝、journal 錯誤與 telemetry 格式錯誤會中止指令，不轉成案例狀態。
+
+外層中斷時，有 `start.json` 但沒有 `row.json` 的列記為 `incomplete`，以開始到批次中斷的秒數作下限。沒有開始也沒有結果的列記為 `not_run`。全表需要每個註冊的 adapter 都有成功計時、`timeout`、`run_failed`、`missing_defaults` 或 `not_runnable` 的結果。`incomplete` 和 `not_run` 不算已判定。
+
+量測和 `--report-only` 使用同一套 exit status：
+
+| Exit status | 意義 |
+| --- | --- |
+| `0` | 報表已寫，所選列均已判定。可以含 `timeout` 或 `run_failed`。 |
+| `3` | 報表已寫，但含 `incomplete` 或 `not_run`。收到 SIGINT 或 SIGTERM 後若能寫出部分報表，也適用此規則。 |
+| `1` | 工具或環境錯誤，包含讀寫或解析 journal 失敗。 |
+| `2` | 用法錯誤，例如無效的選擇、期限或不相符的續跑來源。 |
+
+這些是牆鐘工具的 exit status。`run_heavy.py` 強制結束 payload 時，外層收據仍依 runner 的規則回報。
 
 若程序被強制結束，兩份報表可能沒有寫完。用 `--report-only --output "$output"`
 從原目錄的 journal 重建，不會派送 Run。有 `batch-end.json` 時以它為準；
@@ -211,12 +224,14 @@ uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
 若算出的時刻早於該列的 `started_at`，或無法取得可信的中斷時刻，不要補填時間。
 保留 journal，用下方的續跑方式留用已落盤列並重跑缺列。
 
-續跑使用新的 `--output`，以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。新報表併入來源中已落盤的判定列；`--select` 只派送所選範圍內尚未判定的列。`timeout` 是已判定列，`incomplete` 和 `not_run` 不是。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`：
+續跑使用新的 `--output`，以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。新報表併入來源中已落盤的判定列；`--select` 只派送所選範圍內尚未判定的列。`timeout` 和 `run_failed` 都是已判定列，不會自動重跑。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`：
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
   --resume-from "$output" --select mux --output "$continued_output"
 ```
+
+若要重跑已判定的失敗列，用 `--select` 指定該 adapter，另開新的 `--output`，不要帶入包含該列的 `--resume-from`。若已換 commit，使用新 commit 開新批次，不留用舊列。
 
 兩份報表都用完整 inventory 檢查 guide，不限於選中的實驗。盤點掃描 `zcu_lab/v2/` 的 `guide.md`、`guide.*.md` 和 `guide_*.md`，不讀內容。報表分開列出沒有宣告的 adapter、宣告路徑未入盤點的 adapter，以及沒有 adapter 宣告的 guide。工具不檢查精度，也不執行 kernel 比較。見 [ADR-0078](../docs/adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 
