@@ -65,3 +65,59 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 有回返時，Primary 提出兩筆 CZ 脈衝 gain 更新和兩筆 coupler slot 更新。
 脈衝和 slot 是獨立候選。需要設定 slot 時，請一併選取對應的脈衝與 slot。
 檢查 [候選目的地與 Apply 規則](../v2/two_qubit/cz_amplitude/guide.md#preview-and-selected-apply) 再回答。
+
+## two_qubit_rb
+
+`two_qubit_rb` 執行一次 `two_qubit/rb`，量測 reference 與 CZ-interleaved 兩臂。
+按 [adapter 的準備說明](../v2/two_qubit/rb/guide.md#before-run) 校準脈衝、mux readout 和 local Z。
+Form 從 `$coupler.ext.cz_phase` 讀取角色名稱和 Z 修正。角色順序要與該組修正相符。
+
+`depths` 填非負整數，單位是每個序列的隨機 Clifford 數，不含 recovery。
+`seeds` 填 0 到 2147483647 的整數序列 ID，兩臂共用同一批 ID。
+省略時保留 Reset 值。明填 null 由 Form 驗證，不會改用預設。
+兩份清單由 Form 去重並排序。範例：
+
+```json
+{"depths": [0, 2, 4, 8, 12, 16, 24, 32, 48], "seeds": [101, 102, 103, 104]}
+```
+
+### 長序列改用 const 波形
+
+若長序列用光 waveform buffer，可在 `overrides` 把波形換成不佔 buffer 的 const。
+先將 pulse 轉為 inline，再選 `Inline: const` 波形並設長度。以下在 tab 內換掉兩路 CZ 波形：
+
+```json
+{
+  "overrides": [
+    {"path": "drive.f1", "command": "to_inline"},
+    {"path": "drive.f1.waveform", "select": "Inline: const"},
+    {"path": "drive.f1.waveform.length", "value": 2.0},
+    {"path": "drive.f2", "command": "to_inline"},
+    {"path": "drive.f2.waveform", "select": "Inline: const"},
+    {"path": "drive.f2.waveform.length", "value": 2.0}
+  ]
+}
+```
+
+`length` 的單位是 µs。兩路 CZ 必須同長；換波形後，請用重校的 gain 和 local-Z 修正。
+如需更換 X90 或 X180 波形，同樣對 `x90_f1`、`x90_f2`、`x180_f1` 或 `x180_f2` 的 pulse 路徑和其 `.waveform` 操作。
+這些覆寫不改 library。
+
+報告轉交 `p_reference`、`p_interleaved`、`reference_epc`、`gate_error`、
+`error_ci_low`、`error_ci_high`、`n_paired_seeds`、`bootstrap_successes` 和 `warning`。
+用 [adapter 的報告判讀](../v2/two_qubit/rb/guide.md#interpreting-the-result) 檢查誤差和兩臂的衰減。
+兩臂診斷各在 `reference_fit_quality` 和 `interleaved_fit_quality`。基底 `fit_quality` 為 null。
+沒有估計時，估計欄位為 null，`reason` 說明原因。分析拋錯時，執行回失敗與原錯誤。
+完成 Run 後即使分析失敗也保存。不詢問寫回。
+
+## two_qubit_rb_heralded
+
+`two_qubit_rb_heralded` 執行一次 `two_qubit/rb_heralded`。
+每個 shot 自帶 [herald readout](../v2/two_qubit/rb/guide_heralded.md#shot-sequence)。
+`reset` 只接受一般 reset，不選 `reset/mux_herald`。
+沿用 [RB 的輸入](#two_qubit_rb)。長序列也可用上面的 [const 波形覆寫](#長序列改用-const-波形)。
+
+估計欄位和失敗原因與 RB 相同，但衰減來自 [gg/ee 聯合擬合](../v2/two_qubit/rb/guide_heralded.md#joint-decay-and-uncertainty)。
+`n_paired_seeds` 計算兩組有效 seed 的聯集。
+四欄診斷依序是 `gg_reference_fit_quality`、`gg_interleaved_fit_quality`、`ee_reference_fit_quality`、`ee_interleaved_fit_quality`。
+基底 `fit_quality` 為 null。完成 Run 後即使分析失敗也保存。不詢問寫回。

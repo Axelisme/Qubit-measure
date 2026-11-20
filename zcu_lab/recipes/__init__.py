@@ -41,6 +41,8 @@ from .t2echo import DEFINITION as T2ECHO
 from .t2ramsey import DEFINITION as T2RAMSEY
 from .time_rabi import DEFINITION as TIME_RABI
 from .two_qubit_cz_amplitude import DEFINITION as TWO_QUBIT_CZ_AMPLITUDE
+from .two_qubit_rb import DEFINITION as TWO_QUBIT_RB
+from .two_qubit_rb_heralded import DEFINITION as TWO_QUBIT_RB_HERALDED
 from .twotone_chain import DEFINITION as TWOTONE_CHAIN
 from .twotone_flux_dep import DEFINITION as TWOTONE_FLUX_DEP
 from .twotone_spectrum import DEFINITION as TWOTONE_SPECTRUM
@@ -90,4 +92,6 @@ RECIPES = (
     RO_OPTIMIZE_CHAIN_FREQ,
     RO_OPTIMIZE_CHAIN_LENGTH,
     TWO_QUBIT_CZ_AMPLITUDE,
+    TWO_QUBIT_RB,
+    TWO_QUBIT_RB_HERALDED,
 )
