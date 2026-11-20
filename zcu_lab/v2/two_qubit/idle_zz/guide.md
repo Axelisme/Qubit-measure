@@ -1,6 +1,6 @@
 # Conditional Ramsey 與 idle ZZ
 
-**讀者：** operator、agent。設定非 heralded conditional Ramsey，判讀 idle ZZ 擬合頻差與限制。
+**讀者：** operator、agent。設定 conditional Ramsey，判讀 idle ZZ 擬合頻差與限制。
 
 Cfg 掃描欄位使用 `dc`，此實驗的 cfg schema 為 6.0。載入舊主版本的 run 時保留 Result 與 metadata，cfg 為 None，並發出 `CfgUnavailableWarning`。這些舊 run 不支援重新分析，也不提供 cfg 遷移或欄位 alias。
 
@@ -16,7 +16,7 @@ Refresh 更新來源與選項，保留已填輸入。修改來源或 aliases 後
 
 ## 設定與 Run
 
-普通版與 heralded 表單先列 reset、Xπ、X90 與 mux readout，再列角色與 target。
+表單先列 reset、Xπ、X90 與 mux readout，再列角色與 target。
 外層 DC 的 device、unit、values 在內層 delay 前。Detune 接在 delay 後，取數欄位在最後。
 
 1. 選 target `f1` 或 `f2`，另一個是 spectator。需要 reset 時填入已校準的 reset cfg。
@@ -47,11 +47,17 @@ Detune 為 0、點數不足、span 非正、無 Ramsey contrast、非有限不�
 
 Result 的 sums 是 float64 `DC × spectator_states × delay × 3 × 3` 原始計數。spectator_states 存整數 [0, 1]，分別是 spectator I、Xπ。末兩軸是 terminal F1/F2，各為 g/e/other。Rounds 在取數端累加，不除以 reps 或 rounds，不保存個別 shots 或 IQ。
 
-取消保留已完成 rounds 的計數，未量點保持 NaN。Live 可見部分曲線，fit 只接受所有 delay 都完成要求 rounds 的分支。兩支 fit 可用時才算 ζ。總數為 0 的比例是 NaN。
+取消保留已完成 rounds 的計數，未量點保持 NaN。Live 可見部分曲線，fit 要求分支上的每個 delay 都至少取到一輪，且有 shot 通過篩選。兩支 fit 可用時才算 ζ。總數為 0 的比例是 NaN。
 
 Save 保存 sums、全部座標與本次 cfg。Native Load 不改目前表單。Analyze 只用所載 cfg，不用目前 library；缺 cfg 時拒絕分析。普通版 cfg schema 為 5.0，target 的舊大寫值不作相容轉換。舊 raw-IQ 檔缺少 sums 時明確報錯。
 
 本實驗不寫回 calibration，也不自動調整 detune 或 DC。
+
+## 用 mux herald 篩選 shot
+
+Reset 選 `reset/mux_herald`，readout 與終端讀取用同一份設定。F1、F2 位於完整 readout 的第 0、1 個 tone 時，填 `keep: {'0': g, '1': g}`。用原始 tone 位置，不用 ADC 編號。
+
+機率是通過 herald 的 shot 裡的條件機率，分母是該格的計數總和。接受率等於計數總和除以 reps × rounds，不代表基態純度。沒有 shot 通過時，該格機率為 NaN。中途停止仍可用已完成 rounds 的計數。原本獨立 heralded 實驗的存檔已無法載入。
 
 ## Notebook
 

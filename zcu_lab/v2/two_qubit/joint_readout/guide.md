@@ -15,7 +15,7 @@ Provide calibrated `$f1.module.x180` and `$f2.module.x180` pulses on different c
 
 F1 and F2 each require a circle classifier **with radius** in their readout tone. Run mux singleshot GE and apply GE Post under the actual readout conditions. Missing calibration, linear or centroid3 mode, and missing radius make the cfg invalid with a GE Post prompt. Other tones need no classifier for this experiment. Changing readout settings does not invalidate old calibration automatically. Recalibrate after changing them.
 
-`reset` starts as None. Leave it None to omit reset, or supply a calibrated reset configuration to emit it at the start of every shot. Reset is separate from heralding. This version has no herald read. Set DC devices externally before Run.
+`reset` starts as None. Leave it None to omit reset, or supply a calibrated reset configuration to emit it at the start of every shot. Set DC devices externally before Run.
 
 ## Sequence and acquisition
 
@@ -39,11 +39,19 @@ The matrix includes initial populations, preparation errors and readout effects.
 
 Old raw-IQ files lack `sums` and fail Load explicitly. Files with the old single preparation axis also fail Load. There is no conversion from saved IQ or old probabilities. Analyze uses only saved counts and needs no current library or cfg lookup.
 
-## Heralded alternative
+## Select shots with mux herald
 
-Open `two_qubit/joint_readout_heralded` for a separate experiment with its own cfg and saved Result. It adds a full mux herald read before preparation, saves all 81 herald/terminal class combinations, and aligns terminal distributions from herald g,g and e,e by actual preparation. It also adds their counts before normalizing a combined matrix. See the [heralded guide](guide_heralded.md).
+Choose `reset/mux_herald` in Reset. Use the same mux readout as the terminal
+readout. Set `keep: {'0': g, '1': g}` if F1 and F2 occupy positions 0 and 1.
+Use their original tone positions from the full readout, not their ADC numbers.
 
-Herald pass fraction measures classified acceptance, not ground-state purity. Neither version claims hardware calibration from offline checks. Continue physical calibration with the [FTF bring-up guide](../guide.md).
+Probabilities are conditional on passing herald. Divide each terminal class
+count by the point's total count. Acceptance is the total divided by
+reps × rounds, not ground-state purity. A point with no accepted shots has
+NaN probabilities. Completed rounds remain usable when Run stops early.
+Files saved under the former separate heralded experiment no longer load.
+
+Continue physical calibration with the [FTF bring-up guide](../guide.md).
 
 ## Notebook
 

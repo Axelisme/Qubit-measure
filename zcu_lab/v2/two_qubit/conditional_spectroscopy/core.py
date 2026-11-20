@@ -38,7 +38,7 @@ from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
 from .._drive import DualLineCfg
-from .._readout import JointRoles
+from .._readout import JointRoles, MuxResetCfg
 from .._sums import (
     marginal_probabilities,
     validate_classifiers,
@@ -64,11 +64,11 @@ class SpectroscopyResult:
 class SpectroscopyAnalysis:
     """Count-derived spectra on (DC, prepared_f1, prepared_f2, frequency).
 
-    excitation adds a final F1/F2 axis. acquired_shots is the per-point total,
-    before herald selection when applicable. complete omits frequency and marks
-    preparations with every requested reps × rounds. Partial counts enter P_e;
-    zero counts give NaN. Other remains in the denominator. These probabilities
-    are not confusion-corrected energy-state populations.
+    excitation adds a final F1/F2 axis. acquired_shots is the per-point sum
+    after any herald selection. complete marks DC/preparation rows with at
+    least one completed round at every frequency. Zero totals give NaN
+    excitation. Other stays in the denominator; probabilities are not
+    corrected for state-preparation or readout error.
     """
 
     excitation: NDArray[np.float64]
@@ -88,7 +88,7 @@ class SpectroscopyCfg(ConfigBase):
     """
 
     reset: Annotated[
-        Reset.Cfg | None,
+        MuxResetCfg | None,
         FieldMeta(
             label="Reset", description="Optional reset at the start of every shot."
         ),
@@ -152,31 +152,22 @@ class SpectroscopyCfg(ConfigBase):
         return self
 
 
-def summarize_spectra(
-    counts: NDArray[np.float64],
-    acquired_shots: NDArray[np.float64],
-    requested_shots: int,
-) -> SpectroscopyAnalysis:
-    """Compute F1/F2 P_e and completeness; raise ValueError for invalid counts.
+def summarize_spectra(counts: NDArray[np.float64]) -> SpectroscopyAnalysis:
+    """Compute F1/F2 excitation, accepted totals and all-frequency coverage.
 
-    counts ends in terminal (3,3), with g/e/other on each axis. acquired_shots
-    matches the preceding scan axes and counts all shots before selection.
-    Whole missing points may be NaN. Invalid or partly missing counts raise
-    ValueError. Zero totals give NaN without warnings; partial counts are used.
-
-    requested_shots is reps*rounds at each scan coordinate. Return excitation,
-    acquired shots and the all-frequencies complete mask. Do not mutate inputs,
-    acquire or draw.
+    counts ends in terminal (3,3), with g/e/other on each axis and frequency
+    immediately before them. Counts accumulate over completed rounds. Whole
+    missing points may be NaN. Invalid counts or partly missing points raise
+    ValueError. Zero totals yield NaN excitation.
     """
-    if counts.shape[-2:] != (3, 3) or counts.shape[:-2] != acquired_shots.shape:
-        raise ValueError("Terminal counts and acquired shot coordinates must match")
+    if counts.ndim < 3 or counts.shape[-2:] != (3, 3):
+        raise ValueError("Expected a frequency axis and terminal class axes (3,3)")
     finite = np.all(np.isfinite(counts) & (counts >= 0), axis=(-2, -1))
     missing = np.all(np.isnan(counts), axis=(-2, -1))
     if not np.all(finite | missing):
         raise ValueError("Spectroscopy contains invalid or partially missing counts")
-    if not np.all(
-        np.isnan(acquired_shots) | (np.isfinite(acquired_shots) & (acquired_shots >= 0))
-    ):
+    acquired_shots = counts.sum(axis=(-2, -1))
+    if not np.all(np.isfinite(acquired_shots) | missing):
         raise ValueError("Acquired shots must be nonnegative totals or NaN")
     excitation = np.stack(
         [marginal_probabilities(counts, target)[..., 1] for target in ("f1", "f2")],
@@ -185,7 +176,7 @@ def summarize_spectra(
     return SpectroscopyAnalysis(
         excitation,
         acquired_shots,
-        np.all(acquired_shots >= requested_shots, axis=-1),
+        np.all(finite, axis=-1),
     )
 
 
@@ -348,7 +339,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 x180_f2 = Pulse("prepare_f2", config.x180_f2)
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
-                    builder.emit(Reset("reset", config.reset))
+                    builder.emit(Reset("reset", config.reset, terminal=readout))
                 builder.fork("default", into=["f1", "f2"])
                 with (
                     builder.branch(
@@ -423,9 +414,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             raise ValueError(
                 "Spectroscopy requires saved axes and sums (DC,2,2,frequency,3,3)"
             )
-        answer = summarize_spectra(
-            data.sums, data.sums.sum(axis=(-2, -1)), cfg.reps * cfg.rounds
-        )
+        answer = summarize_spectra(data.sums)
         _plot_excitation(plots, dc, frequencies, answer.excitation)
 
         # 2. Compare preparation-resolved F1/F2 excitation and optional DC maps without fitting.
@@ -496,11 +485,11 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         for f1, f2 in np.ndindex(2, 2):
             ax = fig.axes[2 * f1 + f2]
             for d, value in enumerate(dc):
-                ax.plot(
-                    frequencies,
-                    answer.acquired_shots[d, f1, f2],
-                    label=f"DC {value:g}; complete={answer.complete[d, f1, f2]}",
-                )
+                shots = answer.acquired_shots[d, f1, f2]
+                label = f"DC {value:g}; complete={answer.complete[d, f1, f2]}"
+                if np.any(shots == 0):
+                    label += "; no accepted shots at some frequencies"
+                ax.plot(frequencies, shots, label=label)
             ax.axhline(
                 cfg.reps * cfg.rounds,
                 color="gray",

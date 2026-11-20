@@ -38,7 +38,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg
-from .._readout import JointRoles
+from .._readout import JointRoles, MuxResetCfg
 from .._sums import (
     joint_probabilities,
     validate_classifiers,
@@ -66,9 +66,9 @@ class CZAmplitudeResult:
 class CZReturnData:
     """counts/probabilities are (Ns,3,3), F1/F2 classes ordered g/e/other.
 
-    complete marks scales with every requested shot acquired and nonzero accepted
-    counts. acquired_shots includes all herald classes; analyzed_shots is the
-    selected terminal total, including other. Zero totals give NaN probabilities.
+    complete marks scales with finite, positive counts from completed rounds.
+    acquired_shots and analyzed_shots are the saved terminal totals, including
+    other. Zero totals give NaN probabilities.
     """
 
     counts: NDArray[np.float64]
@@ -124,7 +124,7 @@ class CZAmplitudeCfg(ConfigBase):
     """
 
     reset: Annotated[
-        Reset.Cfg | None,
+        MuxResetCfg | None,
         FieldMeta(
             label="Reset", description="Optional reset at the start of every shot."
         ),
@@ -228,32 +228,27 @@ def summarize_return(fit: CZReturnFit) -> CZAmplitudeAnalysis:
 def analyze_return(
     scales: NDArray[np.float64],
     counts: NDArray[np.float64],
-    *,
-    acquired_shots: NDArray[np.float64],
-    expected_shots: int,
 ) -> CZAmplitudeData:
     """Fit P00 retaining other counts; raise ValueError for wrong count/axis shapes.
 
-    counts is (Ns,3,3), optionally already selected on herald (g,g).
-    acquired_shots is the total before selection; expected_shots is reps*rounds.
-    Fit only the contiguous fully acquired prefix with accepted shots, preserving
-    first-cycle proposal policy. Partial scales remain visible but not fit.
+    counts is (Ns,3,3), accumulated over completed rounds after any herald
+    selection. An unmeasured scale has NaN counts.
+    Fit only the contiguous prefix of measured scales with accepted shots, preserving
+    first-cycle proposal policy.
     Wrong count/axis shapes raise ValueError. No cfg/library mutation occurs.
 
     scales is the dimensionless amplitude multiplier axis. Return CZAmplitudeData
     containing probabilities, accepted totals, completeness and the return fit;
     leave all input arrays unchanged and draw nothing.
     """
-    if counts.shape != (len(scales), 3, 3) or acquired_shots.shape != scales.shape:
-        raise ValueError(
-            "CZ return requires scales (Ns,), counts (Ns,3,3) and shot totals (Ns,)"
-        )
+    if counts.shape != (len(scales), 3, 3):
+        raise ValueError("CZ return requires scales (Ns,) and counts (Ns,3,3)")
     accepted = counts.sum(axis=(-2, -1))
     data = CZReturnData(
         counts=counts,
         probabilities=joint_probabilities(counts),
-        complete=(acquired_shots == expected_shots) & (accepted > 0),
-        acquired_shots=acquired_shots,
+        complete=np.isfinite(accepted) & (accepted > 0),
+        acquired_shots=accepted,
         analyzed_shots=accepted,
     )
     fit = fit_return(scales, data.probabilities[:, 0, 0], data.complete, accepted)
@@ -344,7 +339,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         )
         readout = MuxReadout("readout", config.readout)
         if config.reset is not None:
-            builder.emit(Reset("reset", config.reset))
+            builder.emit(Reset("reset", config.reset, terminal=readout))
         builder.fork("default", into=["prepare_f1_time", "prepare_f2_time"])
         builder.emit(Pulse("prepare_f1", config.x180_f1), timeline="prepare_f1_time")
         builder.emit(Pulse("prepare_f2", config.x180_f2), timeline="prepare_f2_time")
@@ -395,12 +390,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             raise ValueError("CZ return analysis requires saved cfg")
         if not np.array_equal(result.scales, sweep2array(cfg.scale)):
             raise ValueError("CZ return scales must match saved cfg")
-        terminal = analyze_return(
-            result.scales,
-            result.sums,
-            acquired_shots=result.sums.sum(axis=(-2, -1)),
-            expected_shots=cfg.reps * cfg.rounds,
-        )
+        terminal = analyze_return(result.scales, result.sums)
 
         # Show the same return probability as in the live plot before all-class diagnostics.
         _, ax = plots.subplots(num="terminal_gg", layout="constrained")
@@ -429,6 +419,8 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             terminal.fit.reason
             or f"First positive return scale = {terminal.fit.scale:.6g} ± {terminal.fit.error:.2g}"
         )
+        if np.any(terminal.data.analyzed_shots == 0):
+            diagnostic += "\nNo accepted shots at one or more scales"
         ax.text(
             0.02,
             0.02,

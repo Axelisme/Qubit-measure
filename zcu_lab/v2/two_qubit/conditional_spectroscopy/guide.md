@@ -1,6 +1,6 @@
 # Conditional spectroscopy
 
-**讀者：** operator、agent。本頁說明 `two_qubit/conditional_spectroscopy`。需要先判 herald 再分析的版本，請開啟 [heralded spectroscopy](guide_heralded.md)。
+**讀者：** operator、agent。設定 two-qubit conditional spectroscopy 並判讀四種名目準備態的頻譜。
 
 Cfg 掃描欄位使用 `dc`，此實驗的 cfg schema 為 6.0。載入舊主版本的 run 時保留 Result 與 metadata，cfg 為 None，並發出 `CfgUnavailableWarning`。這些舊 run 不支援重新分析，也不提供 cfg 遷移或欄位 alias。
 
@@ -20,7 +20,7 @@ F1/F2 tone 都必須有 circle classifier 與 radius。缺少校準或使用 lin
 
 ## 設定與 Run
 
-普通版與 heralded 表單先列 reset、Xπ、雙線 drive 與 mux readout，再列角色與 contrast。
+表單先列 reset、Xπ、雙線 drive 與 mux readout，再列角色與 contrast。
 外層 DC 的 device、unit、values 在內層 frequency 前。取數欄位在最後。
 
 1. 核對兩顆 qubit 的 preparation Xπ pulses。每條 probe 使用同角色的 charge generator，F1/F2 generator 必須不同。
@@ -39,7 +39,7 @@ Analyze 只發布圖並回傳 `None`。激發機率、每點 shot 數與完整�
 
 Live 每個 DC／branch 顯示兩條 P_e 曲線，第一條為 F1，第二條為 F2。曲線由當下累計計數更新。FIT 分別提供 F1、F2 的四分支頻譜，各 DC 一條線。啟用 DC source 時，另有各 qubit 的四分支 DC × frequency 熱圖。
 
-P_e 等於該 qubit 判為 e 的計數除以全部 terminal 計數，other 留在分母。零計數或未量點為 NaN。已完成 rounds 的部分資料仍可分析，分析內的 `acquired_shots` 記錄每點計數，`complete` 表示該 DC／準備態的所有頻率都取得要求的 reps × rounds。Shots 圖列出各頻率的實際 shot 數與要求值，部分資料不會偽裝成完整掃描。
+P_e 等於該 qubit 判為 e 的計數除以全部 terminal 計數，other 留在分母。零計數或未量點為 NaN。`complete` 表示該 DC／準備態的每個頻率都至少取到一輪。Shots 圖列出各頻率保留的 shot 數、要求值與零接受計數的診斷。
 
 這些圖顯示分類後的激發機率。它們不直接給出高階態 population、leakage、Hamiltonian 或 CZ frequency。峰的位置與下一步 probe 窗口由 operator 判讀。
 
@@ -48,6 +48,12 @@ P_e 等於該 qubit 判為 e 的計數除以全部 terminal 計數，other 留�
 Result 保存 float64 `sums`，形狀為 `DC × prepared_f1[2] × prepared_f2[2] × frequency × 3 × 3`。最後兩軸為 terminal F1、F2，順序皆為 g、e、other。數值是總和，不是比例，檔案大小不隨 reps 或 rounds 增長。
 
 取消保留已完成 rounds，未量點維持 NaN。StopSignal 只承載停止請求與 reason，不承載錯誤。取數失敗由 Run 直接拋出例外；停止請求後正常返回的結果可以是合法 partial。Save 保存座標、計數與本次 cfg。Load 不改目前表單，Analyze 只讀保存的 cfg 與 sums。舊 per-shot IQ 與單一 branch 軸格式會明確拒絕載入，不做自動轉換。
+
+## 用 mux herald 篩選 shot
+
+Reset 選 `reset/mux_herald`，readout 與終端讀取用同一份設定。F1、F2 位於完整 readout 的第 0、1 個 tone 時，填 `keep: {'0': g, '1': g}`。用原始 tone 位置，不用 ADC 編號。
+
+機率是通過 herald 的 shot 裡的條件機率，分母是該格的計數總和。接受率等於計數總和除以 reps × rounds，不代表基態純度。沒有 shot 通過時，該格機率為 NaN。中途停止仍可用已完成 rounds 的計數。原本獨立 heralded 實驗的存檔已無法載入。
 
 ## Notebook
 

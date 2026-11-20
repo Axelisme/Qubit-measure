@@ -6,7 +6,7 @@ Cfg 掃描欄位使用 `gate_count`，此實驗的 cfg schema 為 5.0。載入�
 
 ## Run 前
 
-普通版與 heralded 表單先列 reset、X90、雙線 drive 與 mux readout，再列角色。
+表單先列 reset、X90、雙線 drive 與 mux readout，再列角色。
 接著設定外層 `gate_count`，最後填取數欄位。
 
 選 `two_qubit/local_z`。綁定 scalar aliases `f1`、`f2`、`coupler`、`mux`。F1/F2 必須是不同 fluxonium。Coupler 是 transmon，mux 的 qubits 必須包含兩者。
@@ -31,7 +31,7 @@ Form 複製兩角色 X90 與 `$coupler.module.cz_f1`／`cz_f2`。缺 CZ slot 時
 
 每個 projection 的 `sigma=(N_e-N_g)/N_total`，other 留在分母。Logical phase 是 `atan2(sigma_Y,sigma_X)`，degree wrap 到 `[-180,180)`。Contrast 是兩個 sigma 的向量長度。分析不再線性投影 IQ。
 
-每個 phase 要求 X/Y 兩個 projection 各自完成預定的全部 rounds。分析以全部分類計數總和是否等於來源 cfg 的 reps × rounds 判定完整性。未完成 rounds 的點不產生 phase，即使 partial 計數有限也不做 fit 或 writeback。空或缺失 projection、零 contrast 都保留原因，不猜 phase。每個 target 必須有整列 phase 才做 unwrap 與 fit。微弱但非零 contrast 仍可分析，操作員須看 quadratures 與 contrast 判斷是否重測。
+每個 phase 要求 X/Y 兩個 projection 都有已完成 rounds 的計數，且總和大於零。空或缺失 projection、零 contrast 都保留原因，不猜 phase。每個 target 必須有整列 phase 才做 unwrap 與 fit。微弱但非零 contrast 仍可分析，操作員須看 quadratures 與 contrast 判斷是否重測。
 
 分析沿 n 做相鄰主值 unwrap，再用含 intercept 的計數加權最小平方擬合 `phase_deg=intercept+slope*n`。兩 target 各自擬合。Slope 是每 CZ 的 logical Bloch phase accrual，correction 是它的負值，不重新 wrap。零 slope 可以有效，缺失 correction 維持缺失。
 
@@ -47,7 +47,13 @@ Form 複製兩角色 X90 與 `$coupler.module.cz_f1`／`cz_f2`。缺 CZ slot 時
 
 Correction 用於後續 single-qubit virtual-Z frame。Pulse phase 正負須依既有 convention 核對。Apply 只更新 phase pair，不改 CZ constructive relative phase、pulse 或 slot。修改 amplitude、frequency、duration、waveform、relative phase 或 DC 後，要重測 local Z。
 
-Herald 版是獨立的 `two_qubit/local_z_heralded` 入口。完整校準順序見 [FTF bring-up guide](../guide.md)。
+完整校準順序見 [FTF bring-up guide](../guide.md)。
+
+## 用 mux herald 篩選 shot
+
+Reset 選 `reset/mux_herald`，readout 與終端讀取用同一份設定。F1、F2 位於完整 readout 的第 0、1 個 tone 時，填 `keep: {'0': g, '1': g}`。用原始 tone 位置，不用 ADC 編號。
+
+機率是通過 herald 的 shot 裡的條件機率，分母是該格的計數總和。接受率等於計數總和除以 reps × rounds，不代表基態純度。沒有 shot 通過時，該格機率為 NaN。中途停止仍可用已完成 rounds 的計數。原本獨立 heralded 實驗的存檔已無法載入。
 
 
 ## Notebook

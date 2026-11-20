@@ -284,3 +284,5 @@ Two-qubit 實驗要排除初始化不在指定態的 shot 時，只能改用另�
 - `ShotReducer.start` 改為 `start(points)`。`points` 是不含 reps 的迴圈大小乘積，加總型 reducer 從第一輪前就持有 `(points, *axes)` 的零陣列。
 - 遮罩來源由 module 透過通用的 hook 在 body 組好後註冊，program 不再認得 herald 的型別。
 - plain `two_qubit/rb` 的終端讀取是 mux readout，所以只接受 `reset/mux_herald`。`reset/herald` 在 cfg 驗證時就被拒收。
+
+2026-11-20，使用者推翻保留全部九個獨立入口的裁決。只保留 RB 與 conditional phase 的獨立 heralded 入口，其餘七個在一般入口選 `reset/mux_herald`。取數遮罩與 reset 的放置不變。分析只看已完成 rounds 的計數，不要求跑完所有指定 rounds，見 [ADR-0074〈分類計數〉](../adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)。分化入口的判斷依據見[只為共用參數保留獨立 heralded 實驗](2026-11-20-heralded-experiment-pruning.md)。

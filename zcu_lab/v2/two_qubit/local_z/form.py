@@ -1,7 +1,5 @@
 """Fixed-capture inputs for a two-target local-Z experiment."""
 
-from typing import TypeVar
-
 from zcu_tools.cfg_model import Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -12,16 +10,9 @@ from zcu_lab.v2.support.measure.mux_forms import (
 from .._measure import captured_roles
 from .core import LocalZCfg
 
-CfgT = TypeVar("CfgT", bound=LocalZCfg)
-
 
 def make_form(ctx: FormContext) -> Form[LocalZCfg]:
-    """Capture roles and seed the ordinary classified phase experiment."""
-    return phase_form(ctx, LocalZCfg)
-
-
-def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
-    """Capture role identities and seed calibrated pulses for either variant.
+    """Capture role identities and seed calibrated pulses.
 
     Missing CZ slots stay required. Both role tones need circle + radius from
     GE Post before Run. No other experiment Form or simulator truth supplies inputs.
@@ -30,7 +21,7 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
     roles = captured_roles(ctx)
     readout = mux_readout_initial(ctx)
     return Form(
-        cfg_type,
+        LocalZCfg,
         tree={
             "reps": 1000,
             "rounds": 10,
