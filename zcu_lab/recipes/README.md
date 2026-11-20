@@ -2,14 +2,14 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-11-20，分析報告與 Run 進度
+**Last updated:** 2026-11-20，two-qubit CZ amplitude
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
 
 ## 宣告與註冊
 
-[__init__.py](__init__.py) 的 `RECIPES` 明列宣告，不掃描目錄。
+[__init__.py](__init__.py) 的 `RECIPES` 明列 44 個 recipe，不掃描目錄。
 每個模組用 `@recipe(name, description)` 裝飾
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
 每個 recipe 的 `Inputs` 繼承 `RecipeInputs`。實驗欄位逐欄寫單位、預設與 null 政策。
@@ -32,6 +32,7 @@ Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須�
 掃描端點、flux 範圍與裝置單位檢查直接寫在 recipe 主體，不另設選源 helper。
 數字回報使用 lib 的 `report_number`，不改單位或精度。
 `mux_helpers.py` 只共用 tone 範圍輸入與報告欄位，不組裝 Form edits。
+[`two_qubit_helpers.py`](two_qubit_helpers.py) 共用四角色 target、選定候選的寫回與收據處理，並說明如何轉交 owner 報告。Recipe 主體決定何時詢問寫回。
 `ro_optimize_chain_helpers.py` 共用三個 readout-chain ro_optimize recipe 的報告欄位，並複製最佳 setting 的 score、QND、M 與模型近似誤差尺度。
 `mux_flux_helpers.py` 共用四個 flux recipe 的輸入、報告與逐 Q 分析 updates。
 Updates helper 只把完整 tones 的原始位置與 Q 名對應到分析參數，不改量測設定或選來源。
@@ -175,6 +176,7 @@ Runtime 回覆 `status="cancelled"`、`report=null` 與各次 `runs`。
 用 `recipe_guide(adapter="twotone/t1")` 依 adapter 名查 operator guide。
 Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 十二個 mux 的輸入、原始 tone 位置與報告見 [mux guide](mux-guide.md)。
+Two-qubit 的角色、herald reset 與寫回見 [two-qubit guide](two-qubit-guide.md)。
 
 三個 thermal-chain ro_optimize recipe 以 K 等待熱平衡，再無 drive 連讀 16 次。
 `relax_delay` 設 K，單位 us。K 後熱態不同於 readout-driven steady state。
@@ -208,6 +210,7 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | `chain_t2ramsey` | `chain/t2ramsey` | 掃 Ramsey 等待，`max_delay_us`、`points`、`detune_mhz`（第二個 π/2 的相位斜率）。每個 block 是 (π/2, 等待, 反相 π/2, 讀, 讀)。起點取自 `twotone/t2ramsey` 的第一讀擬合。回報 T2、fringe 頻率、第三態衰減時間與 Wald 誤差、R、三項檢查，不提出 writeback。 |
 | `chain_t2echo` | `chain/t2echo` | 掃總 echo 等待，`max_delay_us`（總長）、`points`。每個 block 是 (π/2, x/2, π, x/2, π/2, 讀, 讀)。起點取自 `twotone/t2echo` 的第一讀擬合。回報 T2 echo、第三態衰減時間與 Wald 誤差、三項檢查，不提出 writeback。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
+| [`two_qubit_cz_amplitude`](two-qubit-guide.md#two_qubit_cz_amplitude) | `two_qubit/cz_amplitude` | `scale_range`、`scale_points` 掃兩路共同 gain 倍率。回報第一個 return scale 與擬合診斷。有候選才問 Primary 寫回；完成 Run 後保存。 |
 
 有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
 CPMG report 回傳 `t2_1_us`、`t2_1_err_us`、`gamma`、`gamma_err` 與 `fit_rows`。可加權列少於三列時四個擬合值為 null，仍保存圖與原始資料；分析失敗時 `fit_rows=0` 並附原因。
