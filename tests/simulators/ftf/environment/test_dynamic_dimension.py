@@ -399,6 +399,12 @@ def test_readout_continuation_uses_upper_across_whole_acquire(
     kind: Literal["herald", "early_cavity"],
 ) -> None:
     acquire, readout = dimension_bypass(kind)
+    terminal_ends_ns = {
+        end
+        for plan in acquire.templates
+        for end in acquire.time_base.ns(plan.events[-1].start_ticks)
+    }
+    assert len(terminal_ends_ns) == 8
     engine = EngineDouble(backend="cpu")
     source = FTFSource(
         _settings(16),
@@ -417,11 +423,15 @@ def test_readout_continuation_uses_upper_across_whole_acquire(
             assert session.dimension.pilot_point is None
             assert session.dimension.drop is None
             assert result.state_counts.shape[0] == 8
-            seen_points = set()
+            # Projective row IDs are batch-local. Observe each physical point
+            # via the positive-length span reaching its terminal readout.
+            evolved_ends_ns = set()
             for model, batches in engine.calls:
                 assert model.initial_density.shape == (16, 16)
-                seen_points.update(int(p) for batch in batches for p in batch.points)
-            assert seen_points == set(range(8))
+                for batch in batches:
+                    start = 0.0 if batch.start_ns is None else batch.start_ns
+                    evolved_ends_ns.update(batch.end_ns[batch.end_ns > start])
+            assert terminal_ends_ns <= evolved_ends_ns
     finally:
         source.close()
 
