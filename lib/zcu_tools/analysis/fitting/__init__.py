@@ -48,6 +48,7 @@ from .rb import (
     analyze_reference_rb,
     fit_joint_decay,
     project_arm_means,
+    seed_standard_deviation,
     seed_statistics,
 )
 from .resonance import HangerModel, TransmissionModel, get_proper_model

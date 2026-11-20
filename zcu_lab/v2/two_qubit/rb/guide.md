@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run paired two-qubit RB and CZ-interleaved RB through the GUI or MCP and interpret their error estimates.
 
-**Last updated:** 2026-11-20, acquisition rounds and decay uncertainty
+**Last updated:** 2026-11-20, per-depth seed spread
 
 Cfg schema 6.0 requires `x180_f1` and `x180_f2`.
 
@@ -160,7 +160,16 @@ correlations. It describes statistical seed variation; independent-shot
 uncertainty requires a different model. The summary reports the number of
 paired seeds and valid bootstrap fits. The default is 1,000 deterministic resamples with bootstrap seed 42.
 
-The fit plot shows equal-seed paired means and fitted decays. For each arm,
+The live and pooled-survival plots center each bar on the count-weighted point.
+The fit plot centers each bar on the equal-seed mean of the complete pairs.
+Each bar extends one sample standard deviation (`ddof=1`) across seeds on either
+side at that depth. A point with only one seed has no bar. The spread includes
+sequence-to-sequence variation and shot noise. For survival probability `P` and
+`N` shots contributing to a seed's estimate, shot noise is about `√(P(1−P)/N)`.
+It grows as `P` falls from near one toward one-half, so a bar that grows with
+depth does not by itself identify coherent error.
+
+For each arm,
 read `fit_quality.relative_parameter_errors["decay_time"]`. This number is
 the fitted 1/e length's standard error divided by that length. A large
 relative error can mean that the deepest point does not reach the tail and

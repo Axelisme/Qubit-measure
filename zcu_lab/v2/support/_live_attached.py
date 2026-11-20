@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.collections import PathCollection
+from matplotlib.collections import LineCollection, PathCollection
 from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 from numpy.typing import NDArray
@@ -139,6 +139,77 @@ class AttachedLine:
         """
         data = line_data(xs, signals, self._num_lines)
         return self._format.update(self._axes, data.xs, data.signals)
+
+
+class AttachedErrorbar:
+    """Live lines and vertical error bars on caller-owned axes.
+
+    Construct before display. Update inside @plots.on_plot_thread after display.
+    Neither operation dispatches, refreshes, presents or changes labels or title.
+    No axes-claim check is made. Removing an artist or its axes makes set raise
+    RuntimeError. Matplotlib errors propagate without rolling back mutations.
+    """
+
+    def __init__(self, axes: Axes, *, num_lines: int = 1) -> None:
+        """Add num_lines empty lines with error bars; reject counts below one."""
+        if num_lines < 1:
+            raise ValueError("Line count must be positive")
+        self._axes = axes
+        self._series: list[tuple[Line2D, LineCollection]] = []
+        for _ in range(num_lines):
+            (line,) = axes.plot([], [], marker=".", linestyle="-", markersize=5)
+            bars = LineCollection([], colors=line.get_color())
+            axes.add_collection(bars)
+            self._series.append((line, bars))
+
+    def set(
+        self,
+        xs: NDArray[np.float64],
+        signals: NDArray[np.float64],
+        yerr: NDArray[np.float64],
+    ) -> tuple[Line2D | LineCollection, ...]:
+        """Replace points and symmetric y-errors; autoscale and return artists.
+
+        xs is real 1D; signals and yerr are real (num_lines, len(xs)), or
+        1D for a single line. Error lengths are nonnegative. NaN means missing:
+        a finite point with NaN error stays visible without a bar. Invalid shape,
+        complex data or negative errors raise ValueError before mutation.
+        """
+        data = line_data(xs, signals, len(self._series))
+        errors = line_data(xs, yerr, len(self._series)).signals
+        if np.any(errors < 0):
+            raise ValueError("Error lengths must be nonnegative")
+        ax = self._axes
+        figure = ax.get_figure()
+        if (
+            figure is None
+            or ax not in figure.axes
+            or any(
+                line not in ax.lines or bars not in ax.collections
+                for line, bars in self._series
+            )
+        ):
+            raise RuntimeError("Live error bar artists were removed")
+        changed: list[Line2D | LineCollection] = []
+        endpoints = []
+        for (line, bars), y, error in zip(
+            self._series, data.signals, errors, strict=True
+        ):
+            line.set_data(data.xs, y)
+            visible = np.isfinite(data.xs) & np.isfinite(y) & np.isfinite(error)
+            x, y, error = data.xs[visible], y[visible], error[visible]
+            segments = np.stack(
+                (np.column_stack((x, y - error)), np.column_stack((x, y + error))),
+                axis=1,
+            )
+            bars.set_segments(list(segments))
+            endpoints.append(segments.reshape(-1, 2))
+            changed.extend((line, bars))
+        ax.relim(visible_only=True)
+        # Matplotlib relim does not include LineCollections on every supported version.
+        ax.update_datalim(np.concatenate(endpoints))
+        ax.autoscale_view()
+        return tuple(changed)
 
 
 class AttachedHeatmap:

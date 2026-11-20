@@ -26,6 +26,9 @@ def test_seed_statistics_keep_equal_seed_weights_and_binomial_floor() -> None:
     assert np.isnan(statistics.seed_means[2]).all()
     assert np.isnan(statistics.seed_variances[2]).all()
     np.testing.assert_array_equal(statistics.means, [[0.125, 0.625], [0.875, 0.375]])
+    np.testing.assert_allclose(
+        statistics.seed_std, np.nanstd(statistics.seed_means, axis=0, ddof=1)
+    )
     np.testing.assert_allclose(statistics.errors, np.sqrt(0.011875) / 2)
 
 
@@ -156,6 +159,7 @@ def test_recovers_two_decays_on_one_iq_axis_and_discards_incomplete_pairs() -> N
     assert fit.summary.bootstrap_successes == 100
     # Unit IQ direction gives a baseline projection of 0.4, not abs(IQ).
     np.testing.assert_allclose(fit.mean_signals, curves + 0.4, atol=1e-14)
+    np.testing.assert_allclose(fit.seed_std, np.full_like(curves, np.sqrt(2) * 0.1))
     np.testing.assert_allclose(fit.fit_signals, curves + 0.4, atol=1e-7)
     fidelity = (1 + 0.96 / 0.98) / 2
     assert fit.summary.gate_fidelity == pytest.approx(fidelity, abs=2e-7)
@@ -176,6 +180,8 @@ def test_reference_decay_weights_complete_seeds_equally_and_bootstraps_epc() -> 
     fit = owner.analyze_reference_rb(depths, signals, bootstrap_samples=100)
 
     np.testing.assert_allclose(fit.mean_signals, [(slow + fast) / 2], atol=1e-14)
+    projected = np.stack([slow, fast])[:, None, :]
+    np.testing.assert_allclose(fit.seed_std, projected.std(axis=0, ddof=1))
     assert fit.fit_signals.shape == (1, len(depths))
     assert 0.94 < fit.summary.p_reference < 0.98
     assert fit.summary.reference_epc == pytest.approx((1 - fit.summary.p_reference) / 2)
@@ -238,14 +244,33 @@ def test_unidentifiable_or_incomplete_inputs_fail_explicitly(problem: str) -> No
         owner.analyze_irb(depths, signals, bootstrap_samples=samples)
 
 
+def test_live_projection_reports_sample_std_on_the_common_iq_axis() -> None:
+    direction = -0.6 - 0.8j
+    perpendicular = direction * 1j
+    depths = np.array([[8.0, 6.0, 4.0], [7.0, 5.0, 3.0]])
+    variation = np.array([[0.2, 0.4, 0.8], [0.1, 0.3, 0.5]])
+    projected = depths + np.array([-1.0, 0.0, 1.0])[:, None, None] * variation
+    signals = projected * direction
+    signals[0] += 10 * perpendicular
+    signals[2] -= 10 * perpendicular
+
+    projection = owner.project_arm_means(signals)
+
+    np.testing.assert_allclose(projection.mean_signals, depths)
+    np.testing.assert_allclose(projection.seed_std, projected.std(axis=0, ddof=1))
+
+
 def test_live_projection_preserves_a_single_reference_arm() -> None:
     signals = np.full((2, 1, 4), np.nan, dtype=np.complex128)
     signals[0, 0, :2] = [-3 - 4j, -1.8 - 2.4j]
     signals[1, 0, [0, 3]] = [-4.2 - 5.6j, -0.6 - 0.8j]
 
-    means = owner.project_arm_means(signals).mean_signals
+    projection = owner.project_arm_means(signals)
 
-    np.testing.assert_allclose(means, [[6, 3, np.nan, 1]], atol=1e-14)
+    np.testing.assert_allclose(projection.mean_signals, [[6, 3, np.nan, 1]], atol=1e-14)
+    np.testing.assert_allclose(
+        projection.seed_std, [[np.sqrt(2), np.nan, np.nan, np.nan]]
+    )
 
 
 def test_live_projection_uses_available_samples_one_direction_and_nan_slots() -> None:

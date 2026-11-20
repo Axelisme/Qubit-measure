@@ -30,6 +30,10 @@ IRB 即時圖會傳入尚未完整的資料，不能呼叫要求四個不同 dep
 
 RB 與 IRB 的數值工具同置於 [`analysis.fitting.rb`](../../lib/zcu_tools/analysis/fitting/rb.py)，由 `analysis.fitting` 匯出既有入口與結果型別。2026-11-20，使用者對合併模組的選項答「A」。
 
+### RB 圖上的 seed 間標準差
+
+Fitting 計算各臂各 depth 的 seed 間樣本標準差。IQ 路徑先把每個 seed 投影到與均值相同的軸。即時圖用各點已有的 seeds，擬合圖只用擬合所選的完整 seeds。不足兩個 seed 時不畫棒。這個量只供畫圖，不加入實驗 Analyze 回傳，也不取代 heralded 的 binomial 擬合權重。使用者在 2026-11-20 對顯示量、參考線和回傳的三題答「1A 2B 3A」。比較見 [RB 誤差棒](../discussions/2026-11-20-rb-errorbars.md)。
+
 ## 實驗保留的責任
 
 Lab 選擇資料、解讀保存軸、建立完整度遮罩，並持有 herald 的 g/g、e/e 符號與逐列接受門檻。雙比特 RB 的 d=4 error／CI 換算仍由實驗解讀。IRB 主入口保留既有 d=2 ratio 與未裁切的負 error，不默默套用另一個維度。

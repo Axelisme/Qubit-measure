@@ -5,7 +5,6 @@ from typing import ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from qick import QickConfig
@@ -14,6 +13,7 @@ from zcu_tools.analysis.fitting import (
     compute_fit_quality,
     decay_time_bounds,
     fit_joint_decay,
+    seed_standard_deviation,
     seed_statistics,
 )
 from zcu_tools.experiment import (
@@ -37,7 +37,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 from .._rb_scheduling import compile_depth_sweep, emit_depth_sweep
 from .._rb_sequence import RBArm, make_rb_arms
@@ -160,21 +160,22 @@ def _draw_return_survival(
     ax: Axes,
     depths: NDArray[np.int64],
     means: NDArray[np.float64],
-    errors: NDArray[np.float64],
+    seed_std: NDArray[np.float64],
     curves: NDArray[np.float64],
     label: str,
 ) -> None:
     """Draw selected arm means, error bars and fitted curves on ax.
 
-    depths is the integer Clifford-depth axis; means, errors and curves are
-    (2,N) reference/interleaved return probabilities on that axis. label names
-    the selected gg/ee herald and return class. Add artists, labels and a legend
-    to caller-owned ax, return None and leave input arrays unchanged.
+    depths is the integer Clifford-depth axis. means, seed_std and curves are
+    (2,N) reference/interleaved means, seed spread and fitted return probabilities
+    on that axis. label names the selected gg/ee herald and return class.
+    Add artists, labels and a legend to caller-owned ax. Return None without
+    modifying the input arrays.
     """
     for arm, arm_label in enumerate(("Reference", "CZ interleaved")):
         (line,) = ax.plot(depths, means[arm], ".", label=arm_label)
         ax.errorbar(
-            depths, means[arm], yerr=errors[arm], fmt="none", ecolor=line.get_color()
+            depths, means[arm], yerr=seed_std[arm], fmt="none", ecolor=line.get_color()
         )
         ax.plot(depths, curves[arm], color=line.get_color())
     ax.set(xlabel="Random Clifford depth", ylabel=f"Return to {label} | herald {label}")
@@ -321,19 +322,24 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             xlabel="Random Clifford depth",
             ylabel="Return probability | matching herald state",
         )
-        viewer = live_line(ax, num_lines=4)
+        viewer = live_errorbar(ax, num_lines=4)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         fig.show()
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
+        def update_view(sums: NDArray[np.float64]):
             curves = []
+            deviations = []
             for cell, counts in enumerate(
                 (terminal_counts(sums, ("g", "g")), terminal_counts(sums, ("e", "e")))
             ):
-                totals = np.nansum(counts, axis=0)  # Pool seeds.
+                totals = np.nansum(counts, axis=0)  # Pool seeds for the markers.
+                returns = joint_probabilities(counts)[..., cell, cell]
                 curves.extend(joint_probabilities(totals)[..., cell, cell])
-            return viewer.set(np.array(config.depth), np.array(curves))
+                deviations.extend(seed_standard_deviation(returns))
+            return viewer.set(
+                np.array(config.depth), np.array(curves), np.array(deviations)
+            )
 
         # 2. Compile all arms before acquiring any shots.
         programs = [
@@ -399,6 +405,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         paired = np.zeros((2, len(data.seeds)), dtype=np.bool_)
         means = np.full((2, 2, len(data.depths)), np.nan)
         errors = np.full_like(means, np.nan)
+        seed_std = np.full_like(means, np.nan)
         curves = np.full_like(means, np.nan)
         totals = np.full_like(survival, np.nan)
         estimate, quality = None, None
@@ -426,6 +433,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 for herald in range(2):
                     statistics = seed_statistics(survival[herald], totals[herald])
                     means[herald], errors[herald] = statistics.means, statistics.errors
+                    seed_std[herald] = statistics.seed_std
                 joint_fit = fit_joint_decay(data.depths, means, errors)
                 low, high, successes = bootstrap_joint_error(
                     data.depths,
@@ -436,6 +444,10 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 )
             except (ValueError, RuntimeError) as exc:
                 reason = str(exc)
+                for herald in range(2):
+                    seed_std[herald] = seed_standard_deviation(
+                        survival[herald, paired[herald]]
+                    )
             else:
                 curves = joint_fit.curves
                 estimate = estimate_joint_d4(
@@ -468,7 +480,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 ax,
                 data.depths,
                 means[herald],
-                errors[herald],
+                seed_std[herald],
                 curves[herald],
                 label,
             )

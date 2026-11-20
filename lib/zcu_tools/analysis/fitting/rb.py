@@ -13,6 +13,25 @@ from .results import DecayFit
 from .shared import FitTrace, ParameterSpec, SharedFitResult, fit_shared
 
 
+def seed_standard_deviation(curves: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Return sample standard deviation (ddof=1) across seeds at each cell.
+
+    curves is float64 (seed, arm, depth) in the units to plot. Only finite
+    values contribute to each cell; the float64 (arm, depth) result has NaN
+    where fewer than two seeds contribute. Invalid rank raises ValueError.
+    Inputs are not modified.
+    """
+    if curves.ndim != 3:
+        raise ValueError("Expected seed curves with shape (seed, arm, depth)")
+    finite = np.isfinite(curves)
+    enough = finite.sum(axis=0) >= 2
+    deviations = np.full(curves.shape[1:], np.nan)
+    deviations[enough] = np.std(
+        curves[:, enough], axis=0, ddof=1, where=finite[:, enough]
+    )
+    return deviations
+
+
 @dataclass(frozen=True)
 class RBSeedStatistics:
     """Per-seed survival and binomial variance with their equal-seed aggregate.
@@ -29,6 +48,8 @@ class RBSeedStatistics:
     """Equal-seed average survival, shape (2,depth), probability units."""
     errors: NDArray[np.float64]
     """Standard error from summed seed variances / seed_count², shape (2,depth)."""
+    seed_std: NDArray[np.float64]
+    """Sample std across seed_means, shape (2,depth), in probability units."""
 
 
 def seed_statistics(
@@ -41,9 +62,10 @@ def seed_statistics(
     contributes only when both arms at every depth are finite. At least two
     complete seeds are required. Their totals must be finite, positive counts.
     The finite-shot variance floor 1/(4*N**2) keeps all-success/all-failure
-    points usable. Counts affect errors, never seed weights. Invalid shape or
-    contributing totals raise ValueError. Unavailable seeds are wholly NaN in
-    the returned seed arrays. Inputs are not modified.
+    points usable. Counts affect errors, never seed weights. The per-depth
+    sample standard deviation describes seed spread, not fit weights. Invalid
+    shape or contributing totals raise ValueError. The returned seed arrays
+    use NaN for all cells of an unavailable seed. Inputs are not modified.
     """
     if survival.ndim != 3 or survival.shape[1] != 2 or totals.shape != survival.shape:
         raise ValueError(
@@ -63,7 +85,9 @@ def seed_statistics(
         / counts
     )
     aggregate, errors = _aggregate_seeds(means, variances)
-    return RBSeedStatistics(means, variances, aggregate, errors)
+    return RBSeedStatistics(
+        means, variances, aggregate, errors, seed_standard_deviation(means)
+    )
 
 
 def _aggregate_seeds(
@@ -201,6 +225,8 @@ class RBFitResult:
     """Reference-only estimates with a 95% seed-bootstrap interval."""
     mean_signals: NDArray[np.float64]
     """Float64 (1, depth) in ADC units, reference arm only."""
+    seed_std: NDArray[np.float64]
+    """Float64 (1, depth) sample std across the fitted seeds, in ADC units."""
     fit_signals: NDArray[np.float64]
     """A*p**depth+B in ADC units, float64 (1, depth), reference arm only."""
 
@@ -239,6 +265,8 @@ class IRBFitResult:
     """Unitless d=2 decay-ratio estimates and paired-seed bootstrap interval."""
     mean_signals: NDArray[np.float64]
     """Float64 (2,depth) in ADC units; arms reference/interleaved."""
+    seed_std: NDArray[np.float64]
+    """Float64 (2, depth) sample std across the fitted seed pairs, in ADC units."""
     fit_signals: NDArray[np.float64]
     """A*p**depth+B in ADC units, float64 (2,depth), reference/interleaved."""
     arm_fits: tuple[DecayFit, ...]
@@ -247,23 +275,46 @@ class IRBFitResult:
 
 @dataclass(frozen=True)
 class IRBProjection:
-    """Available-sample means projected onto a common oriented IQ direction."""
+    """Available-sample means and spread on a common oriented IQ direction."""
 
     mean_signals: NDArray[np.float64]
     """Float64 (arm, depth) in input ADC units; NaN where no sample is available."""
+    seed_std: NDArray[np.float64]
+    """Float64 (arm, depth) sample std across projected seeds, in input ADC units.
+
+    Nonnegative, or NaN where fewer than two seeds contribute to the cell.
+    """
 
 
 def project_arm_means(signals: NDArray[np.complex128]) -> IRBProjection:
-    """Average IQ over seeds, then project all arms onto one PCA axis.
+    """Project IQ means and measure seed spread on the same PCA axis.
 
     signals is complex128 (seed, arm, depth) in ADC units. The arm axis
     holds reference alone or reference followed by interleaved. Finite samples
     contribute independently to live means; missing slots remain NaN. With
     fewer than two available means return their real parts. Otherwise orient the
     PCA axis so reference first-to-last decreases when the difference is finite.
-    The returned projection is not centered. Inputs are not modified. Shape
-    errors raise ValueError; SVD failures propagate as numpy.linalg.LinAlgError.
+    The returned projection is not centered. Each cell's spread is the sample
+    standard deviation of its finite seeds projected onto that same axis.
+    Inputs are not modified. Shape errors raise ValueError; SVD failures
+    propagate as numpy.linalg.LinAlgError.
     """
+    means, direction = _project_means(signals)
+    available = np.asarray(
+        np.where(np.isfinite(signals), signals, np.nan), dtype=np.complex128
+    )
+    projected = (
+        available.real
+        if direction is None
+        else available.real * direction[0] + available.imag * direction[1]
+    )
+    return IRBProjection(means, seed_standard_deviation(projected))
+
+
+def _project_means(
+    signals: NDArray[np.complex128],
+) -> tuple[NDArray[np.float64], NDArray[np.float64] | None]:
+    """Return projected means and their axis; None means real-part fallback."""
     if signals.ndim != 3 or signals.shape[1] not in (1, 2):
         raise ValueError("Expected IQ shape (seed, 1 or 2 arms, depth)")
     finite = np.isfinite(signals)
@@ -277,7 +328,7 @@ def project_arm_means(signals: NDArray[np.complex128]) -> IRBProjection:
     )
     available = mean[np.isfinite(mean)]
     if available.size < 2:
-        return IRBProjection(mean.real)
+        return mean.real, None
     centered = available - available.mean()
     _, _, vectors = np.linalg.svd(
         np.column_stack((centered.real, centered.imag)), full_matrices=False
@@ -287,7 +338,7 @@ def project_arm_means(signals: NDArray[np.complex128]) -> IRBProjection:
     delta = mean[0, 0] - mean[0, -1]
     if np.isfinite(delta) and delta.real * direction[0] + delta.imag * direction[1] < 0:
         direction = -direction
-    return IRBProjection(mean.real * direction[0] + mean.imag * direction[1])
+    return mean.real * direction[0] + mean.imag * direction[1], direction
 
 
 def _fit_arms(
@@ -311,7 +362,7 @@ def _fit_arms(
 @dataclass(frozen=True)
 class _ArmFit:
     ps: NDArray[np.float64]
-    mean_signals: NDArray[np.float64]
+    projection: IRBProjection
     arm_fits: tuple[DecayFit, ...]
     n_seeds: int
     bootstrap_successes: int
@@ -332,15 +383,17 @@ def _analyze_arms(
     if np.count_nonzero(complete) < 2:
         raise ValueError("Need at least two seeds with complete curves in all arms")
     seed_curves = signals[complete]
-    means = project_arm_means(seed_curves).mean_signals
+    projection = project_arm_means(seed_curves)
     xs = depths.astype(np.float64)
-    ps, arm_fits = _fit_arms(xs, means)
+    ps, arm_fits = _fit_arms(xs, projection.mean_signals)
     rng = np.random.default_rng(bootstrap_seed)
     estimates: list[float] = []
     for _ in range(bootstrap_samples):
         sample = seed_curves[rng.integers(0, len(seed_curves), len(seed_curves))]
         try:
-            boot_ps, _ = _fit_arms(xs, project_arm_means(sample).mean_signals)
+            # Resampled fits need the means, not the per-depth plot error bars.
+            boot_means, _ = _project_means(sample)
+            boot_ps, _ = _fit_arms(xs, boot_means)
         except AnalysisFailed:
             # A failed resample is reported in the success count, never replaced.
             continue
@@ -352,7 +405,7 @@ def _analyze_arms(
     low, high = np.quantile(estimates, [0.025, 0.975])
     return _ArmFit(
         ps=ps,
-        mean_signals=means,
+        projection=projection,
         arm_fits=arm_fits,
         n_seeds=len(seed_curves),
         bootstrap_successes=len(estimates),
@@ -401,7 +454,12 @@ def analyze_reference_rb(
         n_seeds=fit.n_seeds,
         bootstrap_successes=fit.bootstrap_successes,
     )
-    return RBFitResult(summary, fit.mean_signals, fit.arm_fits[0].curve[None, :])
+    return RBFitResult(
+        summary,
+        fit.projection.mean_signals,
+        fit.projection.seed_std,
+        fit.arm_fits[0].curve[None, :],
+    )
 
 
 def analyze_irb(
@@ -455,7 +513,8 @@ def analyze_irb(
     )
     return IRBFitResult(
         summary,
-        fit.mean_signals,
+        fit.projection.mean_signals,
+        fit.projection.seed_std,
         np.stack([arm.curve for arm in fit.arm_fits]),
         fit.arm_fits,
     )

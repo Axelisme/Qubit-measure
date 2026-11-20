@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-20，RB 與 IRB 共用數值模組
+**Last updated:** 2026-11-20，RB 與 IRB 的 seed 間標準差
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -41,11 +41,15 @@ interval。摘要沒有 interleaved 欄位。
 負 error 與超出 [0,1] 的 fidelity／CI 原樣保留。主入口至少需要四個不同 depth、兩個
 成對 seed 與 100 次 bootstrap。少於 90% 成功 draws 時 raise `AnalysisFailed`。
 `rb.project_arm_means` 用各格已有的 IQ 更新即時圖。它接受一臂或兩臂，兩臂共用
-reference 下降方向的同一 IQ 軸，不呼叫 fitter 或 bootstrap。
+reference 下降方向的同一 IQ 軸，不呼叫 fitter 或 bootstrap。`IRBProjection.seed_std`
+沿同一軸計算各格已到的 seeds 的樣本標準差（`ddof=1`），不足兩個 seed 時為 NaN。
+`RBFitResult.seed_std` 與 `IRBFitResult.seed_std` 只用進入擬合的完整 seeds。
 
 `rb.seed_statistics` 接受 `(seed,2,depth)` survival／totals。各格的實際計數決定
 binomial variance，不改變 seed 的權重。它回傳 `RBSeedStatistics`，只聚合兩臂全 depth
-有限的 seeds，至少需要兩個完整 seeds。`rb.fit_joint_decay` 接受 depths 與
+有限的 seeds，至少需要兩個完整 seeds。`seed_std` 只供繪圖，`errors` 仍是擬合權重
+使用的 binomial 標準誤。`rb.seed_standard_deviation` 也能從未齊全的 `(seed,arm,depth)`
+實數曲線計算各格 seed 間的樣本標準差。`rb.fit_joint_decay` 接受 depths 與
 `(2,2,depth)` means／errors，回傳 `RBJointDecayFit` 的 global `SharedFitResult` 與曲線。
 第一軸是兩組資料，各 arm 共用 decay，各 group 保留自己的 amplitude／offset。Covariance
 以 reduced chi-square 縮放。結果可把每臂的 p 和 covariance 換成 1/e 衰減長度與變異數。
