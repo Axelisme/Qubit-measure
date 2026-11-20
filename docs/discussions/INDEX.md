@@ -19,6 +19,7 @@
 - 2026-11-20 [Agent 只用 logical cfg 路徑；recipe overrides 支援 value、select、command](2026-11-20-logical-cfg-paths-and-overrides.md)：介面收窄。Agent 只看 logical 路徑，canonical 方法改 internal；overrides 由各 recipe 宣告，決策見 [ADR-0068](../adr/0068-remote-transport.md) 與 [ADR-0075](../adr/0075-agent-interface-layers.md)。
 - 2026-11-20 [Recipe 報告與執行進度](2026-11-20-recipe-report-polish.md)：介面回報。轉出 owner 的 fit quality 與 STIRAP 網格峰值；取數中的 execution 顯示 Run 進度。
 - 2026-11-20 [Two-qubit MCP recipes 的首版範圍與輸入](2026-11-20-two-qubit-recipes.md)：介面設計。首版選七個實驗，每個 recipe 跑一輪，由各 recipe 宣告 Open／Reset 欄位。
+- 2026-11-20 [fluxdep GUI 跟隨 agent 操作](2026-11-20-fluxdep-gui-follows-agent.md)：顯示跟隨。成功的非唯讀操作切到目標譜、主頁與階段，不轉移控制權。
 
 ## 模擬量測環境
 

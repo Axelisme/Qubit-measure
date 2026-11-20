@@ -322,13 +322,9 @@ def test_failed_publication_releases_admission(search_case):
     assert ctrl.search.start() != token
 
 
-@pytest.mark.parametrize("origin", ["user", "agent"])
-def test_search_start_reveals_only_agent_pending_without_opening_filter(
-    qapp, search_case, origin
-):
+def test_native_search_activity_does_not_switch_pages_or_open_filter(qapp, search_case):
     from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
-    from zcu_tools.gui.event_bus import EventOrigin
 
     ctrl, bg, _owner, _progress, _result = search_case
     window = MainWindow(ctrl)
@@ -336,18 +332,9 @@ def test_search_start_reveals_only_agent_pending_without_opening_filter(
     try:
         original = current_page(window)
         assert window.findChild(AnalyzePanelWidget) is None
-        with ctrl.bus.origin(EventOrigin(kind=origin)):
-            token = ctrl.search.start()
-        # Neither origin moves the user's page; the agent's pending search
-        # waits on the Fit page for the next entry.
+        token = ctrl.search.start()
         assert current_page(window) == original
-        if origin == "agent":
-            show_page(window, "fit")
-            panel = fit_panel(window)
-            assert panel is not None
-            assert panel.current_tab == "search"
-        else:
-            assert window.findChild(AnalyzePanelWidget) is None
+        assert window.findChild(AnalyzePanelWidget) is None
         assert ctrl.interactive.inspect() is None
 
         ctrl.set_active_spectrum("b")

@@ -2,14 +2,40 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
 import pytest
 from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.fluxdep._components import skip_calibration
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, copy_sources
+
+
+@pytest.fixture
+def shown_window(
+    qapp,
+) -> Callable[[Controller], AbstractContextManager[ComponentDriver]]:
+    """Show the real window for a route scenario; the caller settles search before exit."""
+
+    @contextmanager
+    def show(ctrl: Controller) -> Generator[ComponentDriver]:
+        window = MainWindow(ctrl)
+        window.show()
+        driver = ComponentDriver(window)
+        driver.resize_window(1100, 800)
+        try:
+            yield driver
+        finally:
+            ctrl.control_identity.reclaim_local()
+            assert window.close()
+            window.deleteLater()
+            qapp.processEvents()
+
+    return show
 
 
 @pytest.fixture

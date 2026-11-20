@@ -7,9 +7,8 @@ import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from zcu_tools.analysis.fluxdep.processing import cast2real_and_norm
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
-from zcu_tools.gui.event_bus import EventOrigin
 
-from tests.gui.app.fluxdep._window import editor
+from tests.gui.app.fluxdep._window import editor, stage_button
 
 
 def _background(widget) -> tuple[np.ndarray, tuple[float, float]]:
@@ -27,14 +26,11 @@ def test_onetone_line_picker_draws_the_sample_picker_background(
     ctrl = onetone_controller
     win = MainWindow(ctrl)
     try:
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            ctrl.interactive.begin_sample_pick("one")
-        sample = editor(win)
+        sample = editor(win)  # the window opens the aligned spectrum for sampling
         assert isinstance(sample, OneToneWidget)
         expected, expected_clim = _background(sample)
         ctrl.interactive.cancel("one")
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            ctrl.interactive.begin_line_pick("one")
+        stage_button(win, "align").click()
         lines = editor(win)
         assert isinstance(lines, LinePickerWidget)
         background, clim = _background(lines)
@@ -108,8 +104,7 @@ def test_twotone_line_picker_keeps_the_phase_projection_of_its_preview(
     win = MainWindow(ctrl)
     try:
         ctrl.interactive.cancel("two")  # the window opened the sample picker
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            ctrl.interactive.begin_line_pick("two")
+        stage_button(win, "align").click()
         lines = editor(win)
         assert isinstance(lines, LinePickerWidget)
         background = _background_at_coordinates(

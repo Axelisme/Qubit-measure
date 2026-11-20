@@ -9,7 +9,6 @@ from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
-from zcu_tools.gui.event_bus import EventOrigin
 
 from tests.gui.app.fluxdep._window import (
     current_page,
@@ -18,6 +17,7 @@ from tests.gui.app.fluxdep._window import (
     fit_panel,
     show_page,
 )
+from tests.gui.app.fluxdep.remote._route_harness import remote_owner
 
 
 def _selectors(panel):
@@ -34,100 +34,51 @@ def apply_button(widget):
     )
 
 
-def test_agent_picker_reveals_same_session_while_reads_and_user_edits_do_not(
-    qapp, cross_controller
-):
-    ctrl = cross_controller
-    window = MainWindow(ctrl)
-    window.show()
-    try:
-        show_page(window, "fit")
-        panel = fit_panel(window)
-        assert panel is not None
-        panel.show_tab("search")
-
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            context = ctrl.interactive.begin_line_pick("a")
-        # Agent work updates the Spectra page; the user stays on Fit.
-        assert current_page(window) == "fit"
-        assert panel.current_tab == "search"
-        picker = editor(window)
-        assert isinstance(picker, LinePickerWidget)
-        active = ctrl.interactive.inspect()
-        assert active is not None and active.context is context
-        assert ctrl.state.spectrums["a"].points_completed
-
-        show_page(window, "fit")
-        assert fit_panel(window) is panel
-        assert ctrl.interactive.inspect() == active
-        context.plugin.actions.swap.execute(context.session, None)
-        assert current_page(window) == "fit"
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            assert ctrl.interactive.inspect() == active
-        assert current_page(window) == "fit"
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            context.plugin.execute_command(context.session, "swap_lines", {})
-        assert current_page(window) == "fit"
-        shown = editor(window)
-        assert isinstance(shown, LinePickerWidget)
-        assert shown.get_result() == (
-            context.session.snapshot().flux_half,
-            context.session.snapshot().flux_int,
-        )
-        assert ctrl.interactive.inspect() == active
-        assert context.session.can_undo()
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            context.session.undo()
-        assert editor(window) is shown
-        assert not context.session.can_undo()
-
-        ctrl.interactive.cancel()
-        assert ctrl.interactive.inspect() is None
-        assert editor(window) is not shown
-    finally:
-        window.close()
-        window.deleteLater()
-        qapp.processEvents()
-
-
 def test_agent_selection_updates_reuse_filter_view_and_undo(qapp, cross_controller):
     ctrl = cross_controller
     window = MainWindow(ctrl)
     window.show()
     try:
-        assert window.findChild(AnalyzePanelWidget) is None
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            context = ctrl.interactive.begin_cross_selection()
-        # The agent's Filter waits on the Fit page until the user enters it.
-        assert current_page(window) == "spectra"
-        show_page(window, "fit")
-        panel = fit_panel(window)
-        assert panel is not None
-        assert panel.current_tab == "filter"
-        selector = panel.findChild(SelectorWidget)
-        assert selector is not None
-        active = ctrl.interactive.inspect()
-        assert active is not None and active.kind == "selection"
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            context.plugin.clear.execute(context.session, None)
-        assert ctrl.interactive.inspect() == active
-        assert panel.findChild(SelectorWidget) is selector
-        assert not context.session.snapshot().selected.any()
-        assert context.session.can_undo()
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            context.session.undo()
-        assert context.session.snapshot().selected.all()
-        assert not context.session.can_undo()
-        assert panel.findChild(SelectorWidget) is selector
-        panel.show_tab("search")
-        assert panel.current_tab == "search"
-        # Leaving Filter only retires its view; the Session stays open.
-        assert _selectors(panel) == []
-        assert ctrl.interactive.inspect() == active
-        panel.show_tab("filter")
-        assert ctrl.interactive.inspect() == active
-        assert len(_selectors(panel)) == 1
+        with remote_owner(ctrl) as (route, link):
+            assert window.findChild(AnalyzePanelWidget) is None
+            opened = route.request(link, "selection.interactive.open")
+            assert opened["ok"]
+            assert current_page(window) == "fit"
+            panel = fit_panel(window)
+            assert panel is not None and panel.current_tab == "filter"
+            selector = panel.findChild(SelectorWidget)
+            assert selector is not None
+            context = ctrl.interactive.current_cross_selection()
+            active = ctrl.interactive.inspect_selection()
+            assert context is not None and active is not None
+            assert route.request(
+                link,
+                "selection.interactive.command",
+                context_id=active.context_id,
+                command="clear",
+            )["ok"]
+            assert ctrl.interactive.inspect_selection() == active
+            assert panel.findChild(SelectorWidget) is selector
+            assert not context.session.snapshot().selected.any()
+            assert context.session.can_undo()
+            assert route.request(
+                link,
+                "selection.interactive.command",
+                context_id=active.context_id,
+                command="undo",
+            )["ok"]
+            assert context.session.snapshot().selected.all()
+            assert not context.session.can_undo()
+            assert panel.findChild(SelectorWidget) is selector
+            panel.show_tab("search")
+            # Leaving Filter only retires its view; the Session stays open.
+            assert _selectors(panel) == []
+            assert ctrl.interactive.inspect_selection() == active
+            panel.show_tab("filter")
+            assert ctrl.interactive.inspect_selection() == active
+            assert len(_selectors(panel)) == 1
     finally:
+        ctrl.control_identity.reclaim_local()
         window.close()
         window.deleteLater()
         qapp.processEvents()
@@ -258,23 +209,21 @@ def test_agent_filter_reveals_beside_spectrum_named_selection_draft(
     window = MainWindow(ctrl)
     window.show()
     try:
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            draft = ctrl.interactive.begin_line_pick("selection")
-        assert window.findChild(LinePickerWidget) is not None
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            ctrl.interactive.begin_cross_selection()
-        # The agent's Filter waits on the Fit page; the spectrum's own draft
-        # stays in the Spectra editor.
-        assert current_page(window) == "spectra"
-        assert isinstance(editor(window), LinePickerWidget)
-        show_page(window, "fit")
-        panel = fit_panel(window)
-        assert panel is not None
-        assert panel.current_tab == "filter"
-        assert panel.findChild(SelectorWidget) is not None
-        named = ctrl.interactive.inspect("selection")
-        assert named is not None and named.context is draft
+        with remote_owner(ctrl) as (route, link):
+            assert route.request(
+                link, "spectrum.interactive.open", name="selection", kind="line"
+            )["ok"]
+            draft = ctrl.interactive.inspect("selection")
+            assert draft is not None
+            assert isinstance(editor(window), LinePickerWidget)
+            assert route.request(link, "selection.interactive.open")["ok"]
+            assert current_page(window) == "fit"
+            panel = fit_panel(window)
+            assert panel is not None and panel.current_tab == "filter"
+            assert panel.findChild(SelectorWidget) is not None
+            assert ctrl.interactive.inspect("selection") == draft
     finally:
+        ctrl.control_identity.reclaim_local()
         window.close()
         window.deleteLater()
         qapp.processEvents()

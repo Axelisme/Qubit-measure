@@ -231,6 +231,8 @@ RPC 提供簡單、基礎、通用的控制，回完整資料，出圖使用獨�
 
 Fluxdep 對某個對象送階段工具，就進入該階段。Agent 不管理 open、cancel 或 context id。階段以編輯命令與 finish 組成；finish 接受並回證據圖，未編輯直接 finish 表示照原樣接受。切換顯示不取消別的對象草稿，GUI 跟隨 agent 操作的對象。Context lifetime 與同對象換階段的草稿處理仍由 GUI owner 決定。這不取消 measure 的 recipe cancel 入口。
 
+2026-11-20 使用者裁決「關於fluxdep gui，1A 2A」：成功的非唯讀命令讓 fluxdep GUI 切到目標譜、主頁（Spectra 或 Fit）與階段，不轉移控制權；`project.setup` 的對象是一直可見的標頭，不切頁（見[討論紀錄](../discussions/2026-11-20-fluxdep-gui-follows-agent.md)）。
+
 ### 命令直接表達動作
 
 模式是命令的參數，不另設隱藏模式。能由其他命令表達的操作不另設命令。Fluxdep 的每個編輯階段以 finish 結束。它的 move_line 明填角色、位置與 conjugate；MCP 不暴露 swap_lines、set_tool、perform_on_all、clear 或 cancel。

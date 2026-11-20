@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -32,6 +32,7 @@ from zcu_tools.plotting.fluxdep.onetone import make_onetone_pick_figure
 from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
 from zcu_tools.plotting.fluxdep.twotone import make_twotone_pick_figure
 
+from ..event_bus import FollowDisplayPayload, InteractiveKind
 from .dto import (
     ContextReplyBase,
     InteractiveContextReply,
@@ -340,6 +341,11 @@ def h_interactive_read(
     )
 
 
+def _spectrum_stage(kind: InteractiveKind) -> Literal["align", "sample"]:
+    assert kind != "selection"  # Filter has no spectrum stage.
+    return "align" if kind == "line" else "sample"
+
+
 def h_spectrum_interactive_open(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> InteractiveReply:
@@ -374,7 +380,8 @@ def h_spectrum_interactive_open(
         )
     reply = _reply(owner, active)
     if previous is not None and previous.context is not context:
-        reply["discarded"] = "align" if previous.kind == "line" else "sample"
+        reply["discarded"] = _spectrum_stage(previous.kind)
+    adapter.ctrl.bus.emit(FollowDisplayPayload(_spectrum_stage(active.kind), name))
     return reply
 
 
@@ -397,7 +404,9 @@ def h_selection_interactive_open(
             "opened context retired during GUI reaction",
             reason_code="interactive_context_changed",
         )
-    return _reply(owner, active)
+    reply = _reply(owner, active)
+    adapter.ctrl.bus.emit(FollowDisplayPayload("filter"))
+    return reply
 
 
 def _command_envelope(
@@ -457,7 +466,19 @@ def _command(
             "reserved command has invalid params or target kind",
             reason_code="invalid_interactive_command",
         )
-    return _reply(owner, active, command, command_params)
+    reply = _reply(owner, active, command, command_params)
+    context = reply["context"]
+    assert context is not None  # Successful commands return the retained identity.
+    if context["kind"] == "selection":
+        follow = FollowDisplayPayload("filter")
+    elif context["closed"]:
+        follow = FollowDisplayPayload("preview", context["spectrum_name"])
+    else:
+        follow = FollowDisplayPayload(
+            _spectrum_stage(context["kind"]), context["spectrum_name"]
+        )
+    adapter.ctrl.bus.emit(follow)
+    return reply
 
 
 def h_spectrum_interactive_command(

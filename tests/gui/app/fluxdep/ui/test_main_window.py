@@ -12,12 +12,14 @@ import numpy as np
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.text import Text
+from PyQt6 import sip
+from qtpy.QtCore import QCoreApplication, QEvent
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.event_bus import InteractiveChangedPayload
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
-from zcu_tools.gui.event_bus import EventOrigin
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.fluxdep._search_result import (
@@ -60,6 +62,30 @@ def window(qapp, ctrl):
 
 def test_window_builds_empty(window):
     assert spectra_list(window).count() == 0
+
+
+def test_interactive_delivery_skips_window_closed_during_emit(qapp, ctrl, caplog):
+    def close_window(_payload: InteractiveChangedPayload) -> None:
+        assert win.close()
+        win.deleteLater()
+        QCoreApplication.sendPostedEvents(win, QEvent.Type.DeferredDelete.value)
+
+    # Close from an earlier subscriber while the same event is still in flight.
+    subscription = ctrl.bus.subscribe(InteractiveChangedPayload, close_window)
+    win = MainWindow(ctrl)
+    try:
+        ctrl.bus.emit(InteractiveChangedPayload(1, "line", "a", "opened"))
+        assert sip.isdeleted(win)
+        assert not [
+            record
+            for record in caplog.records
+            if record.name == "zcu_tools.gui.event_bus" and record.exc_info is not None
+        ]
+    finally:
+        subscription.unsubscribe()
+        if not sip.isdeleted(win):
+            win.close()
+            win.deleteLater()
 
 
 def test_shell_exposes_top_bar_commands_and_two_pages(window):
@@ -720,7 +746,7 @@ def test_spectrum_work_does_not_replace_the_fit_page(
         qapp.processEvents()
 
 
-def test_agent_display_change_keeps_the_users_page(qapp, cross_controller):
+def test_display_selection_alone_keeps_the_users_page(qapp, cross_controller):
     from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
         ResultPreviewWidget,
     )
@@ -730,92 +756,12 @@ def test_agent_display_change_keeps_the_users_page(qapp, cross_controller):
     try:
         show_page(win, "fit")
         before = editor(win)
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            ctrl.set_active_spectrum("b")
+        ctrl.set_active_spectrum("b")
         assert current_page(win) == "fit"
         shown = editor(win)
         assert isinstance(shown, ResultPreviewWidget) and shown is not before
         assert ctrl.state.active_spectrum == "b"
     finally:
-        win.close()
-        win.deleteLater()
-        qapp.processEvents()
-
-
-def test_agent_spectrum_work_updates_spectra_page_while_user_stays_on_fit(
-    qapp, cross_controller
-):
-    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
-
-    ctrl = cross_controller
-    win = MainWindow(ctrl)
-    win.show()
-    try:
-        show_page(win, "fit")
-        panel = fit_panel(win)
-        assert panel is not None
-        panel.show_tab("search")
-        ctrl.control_identity.connect("agent-link", "agent", "owner")
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            context = ctrl.interactive.begin_line_pick("b")
-            context.plugin.execute_command(context.session, "swap_lines", {})
-        assert current_page(win) == "fit"
-        assert panel.current_tab == "search"
-        assert ctrl.state.active_spectrum == "b"
-        shown = editor(win)
-        assert isinstance(shown, LinePickerWidget)
-        assert shown.get_result() == (
-            context.session.snapshot().flux_half,
-            context.session.snapshot().flux_int,
-        )
-        assert "align draft" in list_labels(win)[2]
-        # The stage bar follows the agent's draft without switching pages.
-        assert stage_status(win, "align") == "draft"
-        assert stage_status(win, "sample") == "done"
-        assert current_stage(win) == "align"
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            ctrl.interactive.cancel("b")
-            sampling = ctrl.interactive.begin_sample_pick("b")
-            sampling.plugin.execute_command(sampling.session, "clear", {})
-        assert current_page(win) == "fit"
-        assert stage_status(win, "align") == "done"
-        assert stage_status(win, "sample") == "draft"
-        assert current_stage(win) == "sample"
-    finally:
-        ctrl.control_identity.reclaim_local()
-        win.close()
-        win.deleteLater()
-        qapp.processEvents()
-
-
-def test_agent_cancel_of_the_shown_draft_shows_the_published_preview(
-    qapp, cross_controller
-):
-    from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
-    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
-        ResultPreviewWidget,
-    )
-
-    ctrl = cross_controller
-    win = MainWindow(ctrl)
-    win.show()
-    try:
-        ctrl.control_identity.connect("agent-link", "agent", "owner")
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            ctrl.interactive.begin_sample_pick("a")
-        assert isinstance(editor(win), FindPointsWidget)
-        show_page(win, "fit")
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            ctrl.interactive.cancel("a")
-        qapp.processEvents()
-        qapp.processEvents()
-        assert isinstance(editor(win), ResultPreviewWidget)
-        assert current_page(win) == "fit"
-        assert ctrl.interactive.inspect("a") is None
-        assert stage_status(win, "sample") == "done"
-        assert current_stage(win) is None
-    finally:
-        ctrl.control_identity.reclaim_local()
         win.close()
         win.deleteLater()
         qapp.processEvents()
@@ -866,8 +812,8 @@ def test_non_holder_stage_click_views_without_opening_a_picker(qapp, cross_contr
             assert ctrl.interactive.inspect("a") is None
             assert isinstance(editor(win), ResultPreviewWidget)
             assert current_stage(win) is None
-        with ctrl.bus.origin(EventOrigin(kind="agent")):
-            agent_draft = ctrl.interactive.begin_sample_pick("a")
+        agent_draft = ctrl.interactive.begin_sample_pick("a")
+        stage_button(win, "sample").click()
         assert isinstance(editor(win), FindPointsWidget)
         assert stage_status(win, "sample") == "draft"
         # Align shows the published preview; the agent's draft stays untouched.

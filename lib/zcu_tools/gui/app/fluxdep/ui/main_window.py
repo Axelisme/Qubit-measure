@@ -18,9 +18,9 @@ draft under a stage bar; clicking a stage opens that stage's picker. A
 widget's ``finished`` signal writes its result back through the Controller,
 which advances the stage and re-triggers the swap. A GUI Add opens the new
 spectrum's line picker. The Fit page hosts the AnalyzePanel singleton
-(Filter -> Search -> Show stages). Spectrum work never replaces the Fit page. Pages
-switch only on human intent: a tab click, or a GUI Add / Restore (back to
-Spectra). Agent-origin events update the content of the page they concern.
+(Filter -> Search -> Show stages). Accepted remote commands show the page and
+stage they acted on, without opening input, changing authority or raising the
+window (ADR-0075).
 """
 
 from __future__ import annotations
@@ -58,6 +58,7 @@ from zcu_tools.gui.app.fluxdep.controller import (
 )
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
+    FollowDisplayPayload,
     InteractiveChangedPayload,
     ProjectChangedPayload,
     SearchChangedPayload,
@@ -67,7 +68,6 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumRemovedPayload,
 )
 from zcu_tools.gui.app.fluxdep.interactive import (
-    ActiveInteractiveContext,
     CrossSelectionContext,
     LinePickContext,
     OneTonePickContext,
@@ -81,8 +81,9 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPrevie
 from zcu_tools.gui.app.fluxdep.ui.spectrum_list import SpectrumListWidget
 from zcu_tools.gui.app.fluxdep.ui.stage_bar import StageBar, stage_status
 from zcu_tools.gui.control_identity import ControlStatus
-from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
+from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
 from zcu_tools.gui.widgets.dialog_presenter import (
@@ -131,15 +132,13 @@ class MainWindow(QMainWindow):
             search_runner.setParent(self)
         if interactive_runner is not None:
             interactive_runner.setParent(self)
-        self._bus_subs = EventSubscriptions()
+        self._event_scope = LifetimeScope(self)
         self._routing_editor = False
         self._routing_page = False
         self._editor_context_id: int | None = None
         # The stage whose picker the editing area shows; None for a preview.
         self._editor_stage: PendingKind | None = None
-        # The stage an agent's Filter / Search leaves for the user's next Fit
-        # entry; a waiting Filter is dropped when its context closes.
-        self._fit_entry_tab: AnalyzeTab | None = None
+        self._follow_search_token: int | None = None
         self.setWindowTitle("fluxdep-gui")
         self.resize(1100, 700)
 
@@ -196,8 +195,9 @@ class MainWindow(QMainWindow):
             self._shutdown_application = None
 
     def deleteLater(self) -> None:
-        """Retire watches before direct Qt deletion, without domain shutdown."""
+        """Retire view callbacks before direct Qt deletion, without domain shutdown."""
         self.dispose_control_watches()
+        self._event_scope.close()
         super().deleteLater()
 
     def _build_ui(self) -> None:
@@ -324,79 +324,71 @@ class MainWindow(QMainWindow):
 
     def _subscribe_events(self) -> None:
         bus = self._ctrl.bus
-        self._bus_subs.subscribe(bus, SpectrumAddedPayload, self._on_spectrum_added)
-        self._bus_subs.subscribe(bus, SpectrumRemovedPayload, self._on_spectrum_removed)
-        self._bus_subs.subscribe(bus, SpectrumChangedPayload, self._on_spectrum_changed)
-        self._bus_subs.subscribe(
-            bus, ActiveSpectrumChangedPayload, self._on_active_changed
+        subs = EventSubscriptions()
+        self._event_scope.add_cleanup(subs.unsubscribe_all)
+        callback = self._event_scope.callback
+        subs.subscribe(bus, SpectrumAddedPayload, callback(self._on_spectrum_added))
+        subs.subscribe(bus, SpectrumRemovedPayload, callback(self._on_spectrum_removed))
+        subs.subscribe(bus, SpectrumChangedPayload, callback(self._on_spectrum_changed))
+        subs.subscribe(
+            bus, ActiveSpectrumChangedPayload, callback(self._on_active_changed)
         )
-        self._bus_subs.subscribe_with_meta(
-            bus, InteractiveChangedPayload, self._on_interactive_changed
+        subs.subscribe(
+            bus, InteractiveChangedPayload, callback(self._on_interactive_changed)
         )
-        self._bus_subs.subscribe(bus, ProjectChangedPayload, self._on_project_changed)
+        subs.subscribe(bus, FollowDisplayPayload, callback(self._on_follow_display))
+        subs.subscribe(bus, ProjectChangedPayload, callback(self._on_project_changed))
         # Filter publication changes the per-spectrum excluded counts in the list.
-        self._bus_subs.subscribe(
-            bus, SelectionChangedPayload, self._on_selection_changed
+        subs.subscribe(
+            bus, SelectionChangedPayload, callback(self._on_selection_changed)
         )
-        self._bus_subs.subscribe_with_meta(
-            bus, SearchChangedPayload, self._on_search_changed
-        )
-        self.destroyed.connect(self._bus_subs.unsubscribe_all)
+        subs.subscribe(bus, SearchChangedPayload, callback(self._on_search_changed))
 
-    def _on_interactive_changed(
-        self, payload: InteractiveChangedPayload, meta: EventMeta
-    ) -> None:
-        if payload.phase != "updated":
-            self._refresh_list()  # a draft opened or closed changes its row
-        if payload.phase == "closed":
-            if payload.context_id == self._editor_context_id:
-                self._clear_editor()
-                # The owner is still emitting; refill once this event returns.
-                QTimer.singleShot(0, self._show_after_closed_draft)
-            if payload.kind == "selection" and self._fit_entry_tab == "filter":
-                # An agent's Filter routes the next Fit entry only while live.
-                self._fit_entry_tab = None
-            self._refresh_stage_bar()  # the closed draft's mark and current stage
+    def _on_interactive_changed(self, payload: InteractiveChangedPayload) -> None:
+        if payload.phase == "updated":
             return
-        if payload.phase == "opened":
-            self._refresh_stage_bar()  # an opened draft marks its stage
-        if meta.origin.kind != "agent" or self._routing_editor:
-            return
-        active = (
-            self._ctrl.interactive.inspect_selection()
-            if payload.spectrum_name is None
-            else self._ctrl.interactive.inspect(payload.spectrum_name)
-        )
-        if active is not None and active.context_id == payload.context_id:
-            self._present_context(active)
-
-    def _present_context(self, active: ActiveInteractiveContext) -> None:
-        self._routing_editor = True
-        try:
-            if isinstance(active.context, CrossSelectionContext):
-                self._follow_fit_tab("filter")
-                return
-            if active.spectrum_name != self._ctrl.state.active_spectrum:
-                self._ctrl.set_active_spectrum(active.spectrum_name)
-                self._clear_editor()
-                self._mount_picker(active.context)
-            elif active.context_id == self._editor_context_id:
-                if self._current_editor is not None:
-                    self._editor_stack.setCurrentWidget(self._current_editor)
-            else:
-                self._clear_editor()
-                self._mount_picker(active.context)
-        finally:
-            self._routing_editor = False
+        self._refresh_list()  # a draft opened or closed changes its row
+        if payload.phase == "closed" and payload.context_id == self._editor_context_id:
+            self._clear_editor()
+            # The owner is still emitting; refill once this event returns.
+            QTimer.singleShot(
+                0, self._event_scope.callback(self._show_after_closed_draft)
+            )
         self._refresh_stage_bar()
 
-    def _on_search_changed(
-        self, payload: SearchChangedPayload, meta: EventMeta
-    ) -> None:
-        if meta.origin.kind == "agent" and payload.status == "pending":
-            activity = self._ctrl.search.current
-            if activity is not None and activity.token == payload.token:
-                self._follow_fit_tab("search")
+    def _on_follow_display(self, payload: FollowDisplayPayload) -> None:
+        if payload.search_token is not None:
+            self._follow_search_token = payload.search_token
+        stage = payload.stage
+        if stage in ("filter", "search", "show"):
+            self._show_fit_page(stage)
+        else:
+            if payload.spectrum_name is not None:
+                self._follow_spectrum(
+                    payload.spectrum_name, preview_only=stage == "preview"
+                )
+            self._show_spectra_page()
+
+    def _follow_spectrum(self, name: str, *, preview_only: bool) -> None:
+        if self._ctrl.state.active_spectrum != name:
+            self._routing_editor = True
+            try:
+                self._ctrl.set_active_spectrum(name)
+            finally:
+                self._routing_editor = False
+        active = self._ctrl.interactive.inspect(name)
+        if (
+            preview_only
+            or active is None
+            or active.context_id != self._editor_context_id
+        ):
+            self._rebuild_editor(preview_only=preview_only)
+
+    def _on_search_changed(self, payload: SearchChangedPayload) -> None:
+        if payload.token == self._follow_search_token and payload.status != "pending":
+            self._follow_search_token = None
+            if payload.status == "finished":
+                self._show_fit_page("show")
 
     def _on_project_changed(self, _payload: ProjectChangedPayload) -> None:
         self._refresh_project()
@@ -480,38 +472,31 @@ class MainWindow(QMainWindow):
             return
         self._rebuild_editor()
 
-    def _rebuild_editor(self, *, open_picker: bool = False) -> None:
-        """Show an existing draft or published data without creating input.
+    def _rebuild_editor(
+        self, *, open_picker: bool = False, preview_only: bool = False
+    ) -> None:
+        """Show an existing draft or published data; preview_only skips drafts.
 
         open_picker marks a separate Local write intention, gated by writable:
         the window opening, a GUI Add, or a published stage advance. That
         intention may open the current stage picker. Display-change events,
-        list picks and observer RPCs never request it.
+        list picks and RPC follow intents never request it.
         """
-        # begin_* emits synchronously; this stage route already mounts its context.
-        self._routing_editor = True
-        try:
-            self._clear_editor()
-            name = self._ctrl.state.active_spectrum
-            if name is None:
-                return
+        self._clear_editor()
+        name = self._ctrl.state.active_spectrum
+        if name is not None:
             entry = self._ctrl.state.spectrums[name]
-
-            active = self._ctrl.interactive.inspect(name)
+            active = None if preview_only else self._ctrl.interactive.inspect(name)
             if active is not None:
-                context = active.context
-                if not isinstance(context, CrossSelectionContext):
-                    self._mount_picker(context)
+                if not isinstance(active.context, CrossSelectionContext):
+                    self._mount_picker(active.context)
             elif open_picker and self._writable and not entry.aligned:
                 self._mount_stage(name, "align")
             elif open_picker and self._writable and not entry.points_completed:
                 self._mount_stage(name, "sample")
             else:
                 self._mount(ResultPreviewWidget(entry))
-        finally:
-            self._routing_editor = False
-            # The bar follows whatever the editing area now shows.
-            self._refresh_stage_bar()
+        self._refresh_stage_bar()
 
     def _mount(self, widget: QWidget) -> None:
         self._current_editor = widget
@@ -671,13 +656,8 @@ class MainWindow(QMainWindow):
         self._switch_stage(name, stage)
 
     def _switch_stage(self, name: str, stage: PendingKind) -> None:
-        # begin_* emits synchronously; this route already mounts its context.
-        self._routing_editor = True
-        try:
-            self._clear_editor()
-            self._mount_stage(name, stage)
-        finally:
-            self._routing_editor = False
+        self._clear_editor()
+        self._mount_stage(name, stage)
         self._refresh_stage_bar()
 
     # --- pages -----------------------------------------------------------
@@ -695,24 +675,11 @@ class MainWindow(QMainWindow):
     def _show_spectra_page(self) -> None:
         self._pages.setCurrentWidget(self._spectra_page)
 
-    def _follow_fit_tab(self, tab: AnalyzeTab) -> None:
-        """Follow an agent's Filter or Search on the Fit page, never leaving pages.
-
-        A shown Fit page switches to stage tab now; otherwise tab waits for the
-        user's next entry into Fit. A waiting Filter lasts only while a Filter
-        context is live, so a finished agent Filter no longer picks the stage.
-        """
-        if self._pages.currentWidget() is self._fit_page:
-            self._show_fit_page(tab)
-        else:
-            self._fit_entry_tab = tab
-
     def _show_fit_page(self, tab: AnalyzeTab | None) -> None:
-        """Show the Fit page and its singleton panel on stage tab.
+        """Show the Fit page on tab, or keep its current stage if tab is None.
 
-        None takes the stage an agent event left waiting, else keeps the
-        current one. Entering Filter never opens input: it reattaches a live
-        Filter context, such as an agent's, or shows the published masks.
+        Entering Filter reattaches any live context or shows the published
+        masks; it never opens input.
         """
         from .analyze_panel import AnalyzePanelWidget
 
@@ -721,15 +688,12 @@ class MainWindow(QMainWindow):
             self._analyze_panel.set_writable(writable=self._writable)
             self._fit_layout.addWidget(self._analyze_panel)
         panel = self._analyze_panel
-        if tab is None:
-            tab = self._fit_entry_tab or panel.current_tab
-        self._fit_entry_tab = None
         self._routing_page = True
         try:
             self._pages.setCurrentWidget(self._fit_page)
         finally:
             self._routing_page = False
-        panel.show_tab(tab)
+        panel.show_tab(tab if tab is not None else panel.current_tab)
 
     def _on_load_clicked(self) -> None:
         if not self._writable:
@@ -963,7 +927,7 @@ class MainWindow(QMainWindow):
         self._ctrl.interactive.dispose()
         if self._interactive_runner is not None:
             self._interactive_runner.quiesce()
-        self._bus_subs.unsubscribe_all()
+        self._event_scope.close()
         if isinstance(self._current_editor, LinePickerWidget):
             self._current_editor.teardown()
         if isinstance(self._current_editor, FindPointsWidget):
