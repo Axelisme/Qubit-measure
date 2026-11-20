@@ -1,7 +1,5 @@
 """Fixed-capture roles and editable calibration inputs for joint readout."""
 
-from typing import TypeVar
-
 from zcu_tools.cfg_model import Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -10,12 +8,9 @@ from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
 from .._measure import captured_roles
 from .core import JointReadoutCfg
-from .core_heralded import JointReadoutHeraldedCfg
-
-T_Cfg = TypeVar("T_Cfg", JointReadoutCfg, JointReadoutHeraldedCfg)
 
 
-def joint_readout_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
+def make_form(ctx: FormContext) -> Form[JointReadoutCfg]:
     """Require captured F1/F2 fluxoniums, transmon coupler and full mux binding.
 
     Resolve roles and original tone positions once at Open/Reset, locking them
@@ -34,7 +29,7 @@ def joint_readout_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
         Template("readout/mux:blank"),
     )
     return Form(
-        cfg_type,
+        JointReadoutCfg,
         tree={
             "reps": 1000,
             "rounds": 10,
@@ -46,8 +41,3 @@ def joint_readout_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
             "readout": readout,
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))
-
-
-def make_form(ctx: FormContext) -> Form[JointReadoutCfg]:
-    """Capture full mux roles and seed editable pulses/readout; reset starts None."""
-    return joint_readout_form(ctx, JointReadoutCfg)

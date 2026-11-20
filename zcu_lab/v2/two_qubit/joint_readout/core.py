@@ -33,7 +33,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._readout import JointRoles
+from .._readout import JointRoles, MuxResetCfg
 from .._sums import (
     joint_probabilities,
     validate_classifiers,
@@ -89,7 +89,7 @@ class JointReadoutCfg(ConfigBase):
     """
 
     reset: Annotated[
-        Reset.Cfg | None,
+        MuxResetCfg | None,
         FieldMeta(
             label="Reset", description="Optional reset at the start of every shot."
         ),
@@ -227,7 +227,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
             x180_f1 = Pulse("x180_f1", config.x180_f1)
             x180_f2 = Pulse("x180_f2", config.x180_f2)
             if config.reset is not None:
-                builder.emit(Reset("reset", config.reset))
+                builder.emit(Reset("reset", config.reset, terminal=readout))
             builder.fork("default", into=["f1", "f2"])
             with (
                 builder.branch(

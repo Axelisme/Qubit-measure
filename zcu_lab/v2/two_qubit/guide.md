@@ -61,30 +61,30 @@ Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`ro
 | Local Z | `gate-count 個數 × 2 targets × 2 projections`。 |
 | Paired RB／IRB | `depth 點數 × seed 個數 × 2 arms`。每點保留各 round，不能先跨 round 合併。 |
 
-兩版都在取數時使用含 radius 的 circle classifier，把 F1、F2 分成 g／e／other。缺 radius 或使用 linear classifier 時，Run 前會要求先做 GE Post。Result 的 `sums` 保存 float64 未正規化總和，未量點為 NaN。Other 留在機率與 `⟨σ⟩=(N_e−N_g)/N_total` 的分母。不保存逐 shot IQ，舊逐 shot 格式不轉換成新 Result。
+取數使用含 radius 的 circle classifier，把 F1、F2 分成 g／e／other。缺 radius 或使用 linear classifier 時，Run 前會要求先做 GE Post。Result 的 `sums` 保存 float64 未正規化總和，未量點為 NaN。Other 留在機率與 `⟨σ⟩=(N_e−N_g)/N_total` 的分母。不保存逐 shot IQ，舊逐 shot 格式不轉換成新 Result。
 
 | 版本 | 每 shot 的 mux 讀出 | 每掃描點的類別數 | `sums` 陣列大小，不含座標與 cfg |
 | --- | --- | --- | --- |
-| 一般入口 | 1 次 terminal。RB 選 `reset/mux_herald` 時加 1 次 herald。 | `3×3=9` | `P × 9 × 8 = 72P bytes`。RB 為 `72P × rounds bytes`。 |
+| 一般入口 | 1 次 terminal。若選 `reset/mux_herald`，再加 1 次 herald。 | `3×3=9` | `P × 9 × 8 = 72P bytes`。RB 為 `72P × rounds bytes`。 |
 | Heralded | 1 次 herald＋1 次 terminal | `3×3×3×3=81` | `P × 81 × 8 = 648P bytes`。RB 為 `648P × rounds bytes`。 |
 
-例如 chevron 的 25×101 點，非 heralded 的 `sums` 是 181,800 bytes，heralded 是 1,636,200 bytes。這兩個數字不隨 reps 或 rounds 增長。以 reps=1000、rounds=10 計，兩版各取得 25,250,000 shots，分別發射 25,250,000 與 50,500,000 次 mux 讀出。完整 mux 的其他 tones 仍照設定讀出，Result 只保存 F1/F2 的聯合類別。
+Chevron 的 25×101 點保存 181,800 bytes 的 `sums`。選 mux herald 不改欄位大小。以 reps=1000、rounds=10 計，不選 herald 發射 25,250,000 次 mux 讀出。選 herald 發射 50,500,000 次。完整 mux 的其他 tones 照設定讀出；Result 只保存 F1/F2 的終端聯合計數。
 
-估算硬體序列時間時，逐座標加總 `shots × 該點每 shot 序列時間`。序列時間包含可選 reset、herald、preparation、drive、terminal readout 與等待。Heralded 多一次讀出及其 post_delay，不能直接當成牆鐘時間加倍。編譯、資料傳輸、round 交接、DC ramp／settle、繪圖與保存另計。這裡沒有實測牆鐘效能，不由類別數或保存量推論加速比。
+估算硬體序列時間時，逐座標加總 `shots × 該點每 shot 序列時間`。序列時間包含可選 reset、herald、preparation、drive、terminal readout 與等待。使用 herald 多一次讀出及其 post_delay，不能直接當成牆鐘時間加倍。編譯、資料傳輸、round 交接、DC ramp／settle、繪圖與保存另計。這裡沒有實測牆鐘效能，不由類別數或保存量推論加速比。
 
 要縮短操作診斷時，明確減少點數或採樣數並保存該次 cfg，標記為「診斷、非校準」。Open／Reset 會恢復 reps=1000、rounds=10。低採樣圖只能用來排查接線、流程與掃描窗口，接受校準前仍須取得可判讀的資料與 uncertainty。
 
 ## 兩版實驗、reset 與 pass fraction
 
-九個實驗各有兩個獨立入口。非 heralded 用 `two_qubit/<name>`，heralded 用 `two_qubit/<name>_heralded`。每版有自己的 cfg、Result、GUI 與 guide，入口清單見 [v2 README](../README.md#two-qubit-實驗清單)。
+只有 RB 與 conditional phase 另有 `_heralded` 入口。兩者保存 81 類，分析同時使用 herald g,g 與 e,e 的終端計數。其他實驗在一般入口用 reset 選擇 herald。入口清單見 [v2 README](../README.md#two-qubit-實驗清單)。
 
-一般入口每 shot 做可選 reset、原本序列與 terminal 讀出。只有 [`two_qubit/rb`](rb/guide.md#before-run) 可由 `reset/mux_herald` 在序列前加一次讀出，並只保存通過篩選的 shot 的終端計數。`_heralded` 入口在可選 reset 後先做 herald 讀出，再做原本序列與 terminal 讀出。兩次讀出使用同一個 mux module，gain、積分窗口與 classifier 相同。Herald 之後的等待是 readout 的 post_delay，不另加 herald delay。
+在支援的入口選 `reset/mux_herald`，用與終端相同的完整 mux readout。F1、F2 在 tone 位置 0、1 時，用 `keep: {'0': g, '1': g}`。Herald 在序列前讀出一次，兩次讀出之間沿用 readout 的 post_delay。Result 只保留通過篩選的終端計數。
 
-兩版的 `reset` 都預設 None，表示不發射 reset。需要時填入已校準的 reset cfg，它會在每 shot 開始時執行。Herald 讀出本身不做 reset，表單 Reset 則只是重新捕捉初值。
+`reset` 預設 None，不發射 reset。脈衝 reset 每 shot 開始時發射。表單 Reset 只重新捕捉初值。
 
-Heralded 保存全部 81 類，分析同時取 herald 判為 g,g 與 e,e 的終端計數。準備中的 Xπ 會翻轉各自的實際初態。Joint readout 與 spectroscopy 依實際初態並列，conditional phase、idle ZZ 與 RB 在共享物理參數時聯合擬合。Local Z 分開報告兩組 slope，以 g,g 提案。Chevron、constructive phase 與 CZ amplitude 的 e,e 路徑作對照，後兩者仍以 g,g 提案。各自 guide 說明擬合與完整性條件。
+用 mux herald 時，分析將每格計數除以該格總和。接受率是該格總和除以 reps × rounds。這是分類後保留的比例，不是基態純度。
 
-Herald 九類比例圖的 **pass fraction** 是 herald g,g 計數除以全部已取得 shots。它不是 ground-state purity，也不是 g,g 與 e,e 合計的接受率。分類錯誤與初始 population 都會改變它。Herald 為 ge、eg 或含 other 的計數仍保存，但不進這兩組終端分析。Pass fraction 低時，先看每組接受 shot 數與 uncertainty，不把選取後的差異直接解讀為 gate fidelity。
+兩個 `_heralded` 入口的 **pass fraction** 是 herald g,g 計數除以全部已取得 shots。它不含 e,e 的接受數。先核對各組 shot 數與 uncertainty，再判讀選取後的差異。
 
 ## 分別準備 F1 與 F2，實驗 0a
 
@@ -106,7 +106,7 @@ F1/F2 drive 分別填入各自的 charge-line pulse，包含 frequency、signed 
 
 Rabi 的 module 與 slot rows 可分開 Apply。確認 x180/x90 指向這次接受的 keys；只更新 module 時，slot 可能仍指向舊 pulse。Ramsey 更新 qubit frequency 後，也須核對後續實際 pulse frequency，scalar 與 library pulse 是獨立設定。
 
-記錄 GE 的 readout route、gain、frequency、積分窗口與其他讀出條件。Joint 分類只取 saved mux readout cfg 中角色 tone 的 circle centers 與 radius，不從單 qubit point 校準搬值。改讀出條件後要重跑 mux GE 及 GE Post。未啟用 reset 的非 heralded 版從熱 ensemble 開始；heralded 版另依 herald 結果分組。兩版都保存全部類別總和。單 qubit Rabi／T1／T2 使用上述既有實驗入口。
+記錄 GE 的 readout route、gain、frequency、積分窗口與其他讀出條件。Joint 分類只取 saved mux readout cfg 中角色 tone 的 circle centers 與 radius，不從單 qubit point 校準搬值。改讀出條件後要重跑 mux GE 及 GE Post。未啟用 reset 的一般入口從熱 ensemble 開始。使用 mux herald 時先篩選 shot，再累加終端計數。單 qubit Rabi／T1／T2 使用上述既有實驗入口。
 
 進 CZ 前，依論文 §4.3.2 逐顆精校單 qubit gate：
 

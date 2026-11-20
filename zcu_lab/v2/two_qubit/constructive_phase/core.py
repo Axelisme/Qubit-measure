@@ -49,7 +49,7 @@ from .._rabi_analysis import (
     fit_duration_rates,
 )
 from .._rabi_scan import RabiScanResult
-from .._readout import JointRoles
+from .._readout import JointRoles, MuxResetCfg
 from .._sums import (
     joint_probabilities,
     validate_classifiers,
@@ -110,7 +110,7 @@ class ConstructivePhaseCfg(ConfigBase):
     """
 
     reset: Annotated[
-        Reset.Cfg | None,
+        MuxResetCfg | None,
         FieldMeta(
             label="Reset",
             description="Optional reset before each shot's reads and preparation.",
@@ -429,7 +429,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             contrast_f2 = Pulse("contrast_f2", config.x180_f2)
             readout = MuxReadout("readout", config.readout)
             if config.reset is not None:
-                builder.emit(Reset("reset", config.reset))
+                builder.emit(Reset("reset", config.reset, terminal=readout))
             builder.fork("default", into=["prepare_f1_time", "prepare_f2_time"])
             builder.emit(prepare_f1, timeline="prepare_f1_time")
             builder.emit(prepare_f2, timeline="prepare_f2_time")
@@ -505,7 +505,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
                 contrast_f2 = Pulse("contrast_f2", config.x180_f2)
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
-                    builder.emit(Reset("reset", config.reset))
+                    builder.emit(Reset("reset", config.reset, terminal=readout))
                 builder.fork("default", into=["prepare_f1_time", "prepare_f2_time"])
                 builder.emit(prepare_f1, timeline="prepare_f1_time")
                 builder.emit(prepare_f2, timeline="prepare_f2_time")
@@ -549,7 +549,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         reason, not zero rates. No IQ classification or automatic write occurs.
 
         """
-        # 1. Use saved axes and all terminal classes to distinguish complete traces from partial counts.
+        # 1. Use saved axes and the counts accumulated in completed acquisition rounds.
         del options
         if source.cfg is None:
             raise ValueError(
@@ -570,9 +570,8 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         totals = counts.sum(axis=(-2, -1))
         answer = ReturnData(
             joint_probabilities(counts).reshape(len(coordinates), len(durations), 9),
-            (totals == cfg.reps * cfg.rounds) & (totals > 0),
+            np.isfinite(totals) & (totals > 0),
             totals,
-            None,
         )
         # 2. Show phase-dependent return and leakage before extracting identifiable duration-slice rates.
         fig, ax = plots.subplots(

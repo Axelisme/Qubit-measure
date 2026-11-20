@@ -17,17 +17,14 @@ from zcu_tools.analysis.fitting import (
 )
 from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
 
-from .._sums import sigma
-
 
 @dataclass(frozen=True)
 class IdleBranchFit:
     """One spectator state at one DC coordinate.
 
-    dc_index/branch select DC and state 0/1. Ordinary state means nominal I/Xπ;
-    joint fits use actual spectator g/e. acquired_shots
-    counts accepted shots over all delays; complete requires all expected rounds
-    before herald selection. trace is the T-point target (N_e-N_g)/N_total,
+    dc_index/branch selects DC and nominal spectator I/Xπ. acquired_shots
+    counts accepted shots across all delays. complete marks branches with
+    acquired counts at every delay. trace is the T-point target (N_e-N_g)/N_total,
     retaining NaN at unmeasured or zero-acceptance points. fit_curve is the decay-cosine
     model or None when unavailable. magnitude_mhz is nonnegative; signed_mhz
     assumes both branches stay on the side selected by the operator's detune.
@@ -58,9 +55,8 @@ class IdleBranchFit:
 class IdleZZAnalysis:
     """DC-major state-0/state-1 fits and one conditional difference per DC.
 
-    Ordinary states mean I/Xπ; heralded joint fits use actual spectator g/e.
-    zeta_mhz is f_Xπ−f_I, or actual f_e−f_g, using signed frequencies, never a bare
-    magnitude difference. zeta_error_mhz propagates independent branch covariance
+    States mean nominal spectator I/Xπ. zeta_mhz is f_Xπ−f_I using signed
+    frequencies, never a bare magnitude difference. zeta_error_mhz propagates independent branch covariance
     errors in quadrature. Missing/unidentifiable branches leave both None and a
     zeta_reasons explanation. This is a nominal-branch single-model estimate,
     not a purified Hamiltonian ZZ or a writeback/calibration proposal.
@@ -73,16 +69,15 @@ class IdleZZAnalysis:
 
 
 def complete_points(sums: NDArray[np.float64], expected: int) -> NDArray[np.bool_]:
-    """Validate class counts and return full-round points before herald selection.
+    """Validate counts and mark points with at least one completed round.
 
-    sums has DC, spectator, delay then two or four 3-class axes. All-NaN points
-    are unmeasured. Finite nonnegative counts may be partial, but cannot exceed
-    expected shots. Return the DC × spectator × delay completeness mask.
+    sums has DC, spectator, delay and two terminal class axes. All-NaN points
+    are unmeasured. Finite nonnegative counts cannot exceed expected shots.
+    A measured delay with zero accepted shots is complete but has no contrast.
     """
-    nclass = sums.ndim - 3
-    if nclass not in (2, 4) or sums.shape[3:] != (3,) * nclass:
-        raise ValueError("Idle ZZ requires DC × spectator × delay × 9/81 classes")
-    axes = tuple(range(3, sums.ndim))
+    if sums.shape[3:] != (3, 3):
+        raise ValueError("Idle ZZ requires DC × spectator × delay × 9 classes")
+    axes = (-2, -1)
     finite = np.all(np.isfinite(sums) & (sums >= 0), axis=axes)
     missing = np.all(np.isnan(sums), axis=axes)
     total = sums.sum(axis=axes)
@@ -90,7 +85,7 @@ def complete_points(sums: NDArray[np.float64], expected: int) -> NDArray[np.bool
         raise ValueError(
             "Idle ZZ counts must be nonnegative, within requested shots, or all NaN"
         )
-    return finite & (total == expected)
+    return finite
 
 
 def sigma_errors(
@@ -285,41 +280,3 @@ def validate_axes(
         raise ValueError(
             "Idle ZZ requires saved DC × spectator_states [0,1] × distinct delay axes"
         )
-
-
-def fit_count_traces(
-    delays: NDArray[np.float64],
-    counts: tuple[NDArray[np.float64], ...],
-    complete: tuple[NDArray[np.bool_], ...],
-    target: Literal["f1", "f2"],
-    detune: float,
-) -> tuple[tuple[IdleBranchFit, ...], ...]:
-    """Fit aligned DC × actual-state × delay class-count datasets jointly.
-
-    Caller aligns each dataset and its completeness mask by actual spectator
-    state. Frequency/decay are shared only across datasets at the same DC/state.
-    Return dataset-major tuples of DC-major g/e fits. No plotting or selection.
-    """
-    results: list[list[IdleBranchFit]] = [[] for _ in counts]
-    traces = [sigma(c, target) for c in counts]
-    for dc_index in range(counts[0].shape[0]):
-        for state in range(2):
-            fits = tuple(
-                IdleBranchFit(
-                    dc_index,
-                    state,
-                    int(np.nansum(c[dc_index, state])),
-                    bool(np.all(mask[dc_index, state])),
-                    trace[dc_index, state],
-                )
-                for c, mask, trace in zip(counts, complete, traces, strict=True)
-            )
-            fitted = fit_traces(
-                fits,
-                tuple(sigma_errors(c[dc_index, state], target) for c in counts),
-                delays=delays,
-                detune=detune,
-            )
-            for result, fit in zip(results, fitted, strict=True):
-                result.append(fit)
-    return tuple(tuple(result) for result in results)

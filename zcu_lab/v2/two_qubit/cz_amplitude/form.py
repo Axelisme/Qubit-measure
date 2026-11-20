@@ -1,7 +1,6 @@
 """Fixed-capture two-line CZ amplitude inputs, never borrowed from another Form."""
 
 from dataclasses import replace
-from typing import TypeVar
 
 from zcu_tools.cfg_model import Expr, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -14,14 +13,11 @@ from zcu_lab.v2.support.measure.mux_forms import (
 from .._measure import captured_roles
 from .core import CZAmplitudeCfg
 
-T_Cfg = TypeVar("T_Cfg", bound=CZAmplitudeCfg)
 
-
-def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
+def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
     """Capture roles and editable calibrated pulses/readout once.
 
     F1/F2 require circle classifiers with radius from GE Post. Reset starts None.
-    cfg_type selects the ordinary or heralded experiment's independent cfg.
 
     Coupler CZ slots supply ordinary pulse templates when present. Otherwise
     explicit cosine inputs require operator frequency/gain/duration/Nyquist zone;
@@ -52,7 +48,7 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
         drive[role] = node
     readout = mux_readout_initial(ctx)
     return Form(
-        cfg_type,
+        CZAmplitudeCfg,
         tree={
             "reps": 1000,
             "rounds": 10,
@@ -66,8 +62,3 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
             "scale": Range(None, None, expts=101),
         },
     )
-
-
-def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
-    """Capture roles and seed the ordinary CZ amplitude calibration inputs."""
-    return amplitude_form(ctx, CZAmplitudeCfg)

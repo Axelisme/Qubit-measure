@@ -40,7 +40,7 @@ from zcu_tools.program.v2.modules import (
 from .._drive import DualLineCfg
 from .._rabi_analysis import ReturnData, fit_duration_rates
 from .._rabi_scan import RabiScanResult
-from .._readout import JointRoles
+from .._readout import JointRoles, MuxResetCfg
 from .._sums import (
     joint_probabilities,
     validate_classifiers,
@@ -71,7 +71,7 @@ class ChevronCfg(ConfigBase):
     """
 
     reset: Annotated[
-        Reset.Cfg | None,
+        MuxResetCfg | None,
         FieldMeta(
             label="Reset",
             description="Optional reset before each shot's reads and preparation.",
@@ -294,7 +294,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             contrast_f2 = Pulse("contrast_f2", config.x180_f2)
             readout = MuxReadout("readout", config.readout)
             if config.reset is not None:
-                builder.emit(Reset("reset", config.reset))
+                builder.emit(Reset("reset", config.reset, terminal=readout))
             builder.fork("default", into=["prepare_f1_time", "prepare_f2_time"])
             builder.emit(prepare_f1, timeline="prepare_f1_time")
             builder.emit(prepare_f2, timeline="prepare_f2_time")
@@ -369,7 +369,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
                 contrast_f2 = Pulse("contrast_f2", config.x180_f2)
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
-                    builder.emit(Reset("reset", config.reset))
+                    builder.emit(Reset("reset", config.reset, terminal=readout))
                 builder.fork("default", into=["prepare_f1_time", "prepare_f2_time"])
                 builder.emit(prepare_f1, timeline="prepare_f1_time")
                 builder.emit(prepare_f2, timeline="prepare_f2_time")
@@ -413,7 +413,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         reason, not zero rates. No IQ classification or automatic write occurs.
 
         """
-        # 1. Use saved axes and all terminal classes to distinguish complete traces from partial counts.
+        # 1. Use saved axes and the counts accumulated in completed acquisition rounds.
         del options
         if source.cfg is None:
             raise ValueError(
@@ -432,12 +432,10 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             )
         counts = result.sums
         totals = counts.sum(axis=(-2, -1))
-        acquired = result.sums.sum(axis=(-2, -1))
         answer = ReturnData(
             joint_probabilities(counts).reshape(len(coordinates), len(durations), 9),
-            (acquired == cfg.reps * cfg.rounds) & (totals > 0),
+            np.isfinite(totals) & (totals > 0),
             totals,
-            None,
         )
         # 2. Show the return chevron and all terminal populations before fitting duration-slice rates.
         fig, ax = plots.subplots(num="chevron", figsize=(9, 6), layout="constrained")
