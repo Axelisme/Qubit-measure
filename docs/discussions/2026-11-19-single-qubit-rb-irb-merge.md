@@ -73,3 +73,5 @@ basis:
 ## 後記
 
 2026-11-20，[RB 取數歸約](2026-11-20-rb-round-reduction-and-fit-quality.md)移除了 round 軸與 arm 順序交替。取數平均已完成 rounds，Result 的軸為 (seed, arm, depth)。Load 不接受本文所述帶 round 軸的舊檔。
+
+2026-11-20，本文所述的 IRB 分析模組併入 [`analysis.fitting.rb`](../../lib/zcu_tools/analysis/fitting/rb.py)，`zcu_tools.analysis.fitting` 的匯出名稱不變。

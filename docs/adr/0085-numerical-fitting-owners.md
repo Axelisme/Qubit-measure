@@ -28,6 +28,8 @@ date: 2026-11-12
 
 IRB 即時圖會傳入尚未完整的資料，不能呼叫要求四個不同 depth、兩個完整成對 seed、至少 100 次 bootstrap 的主入口。共同 IQ 投影因此另設公開入口，主 fitter 和 live callback 共用同一份實作。這是介面責任的釐清，不是放寬主擬合的接受條件。
 
+RB 與 IRB 的數值工具同置於 [`analysis.fitting.rb`](../../lib/zcu_tools/analysis/fitting/rb.py)，由 `analysis.fitting` 匯出既有入口與結果型別。2026-11-20，使用者對合併模組的選項答「A」。
+
 ## 實驗保留的責任
 
 Lab 選擇資料、解讀保存軸、建立完整度遮罩，並持有 herald 的 g/g、e/e 符號與逐列接受門檻。雙比特 RB 的 d=4 error／CI 換算仍由實驗解讀。IRB 主入口保留既有 d=2 ratio 與未裁切的負 error，不默默套用另一個維度。

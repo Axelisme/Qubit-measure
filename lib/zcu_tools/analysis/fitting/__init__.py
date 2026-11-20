@@ -28,16 +28,6 @@ from .decay import (
     fit_ge_decay,
 )
 from .gaussian_fringe import fit_gauss_decay_fringe
-from .irb import (
-    IRBAnalysis,
-    IRBFitResult,
-    IRBProjection,
-    RBAnalysis,
-    RBFitResult,
-    analyze_irb,
-    analyze_reference_rb,
-    project_arm_means,
-)
 from .multi_decay import fit_transition_rates
 from .peaks import PeakCandidate, detect_peaks
 from .phase_line import PhaseLineFit, fit_phase_line
@@ -46,7 +36,20 @@ from .phase_slopes import PhaseSlopeFit, fit_phase_slopes
 from .quality import FitQuality, QualityIssue, compute_fit_quality, decay_time_bounds
 from .qubfreq import fit_qubit_freq
 from .rabi import fit_rabi
-from .rb import RBJointDecayFit, RBSeedStatistics, fit_joint_decay, seed_statistics
+from .rb import (
+    IRBAnalysis,
+    IRBFitResult,
+    IRBProjection,
+    RBAnalysis,
+    RBFitResult,
+    RBJointDecayFit,
+    RBSeedStatistics,
+    analyze_irb,
+    analyze_reference_rb,
+    fit_joint_decay,
+    project_arm_means,
+    seed_statistics,
+)
 from .resonance import HangerModel, TransmissionModel, get_proper_model
 from .results import (
     DecayFit,
