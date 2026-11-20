@@ -16,7 +16,7 @@ from zcu_lab.v2.mux.t1.gui import MuxT1Summary
 from zcu_lab.v2.support.measure.mux_results import MuxSummaryFailure
 
 from .mux_helpers import (
-    MuxToneReport,
+    MuxFitToneReport,
 )
 
 
@@ -26,7 +26,7 @@ class MuxT1Inputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order.",
+        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
     )
 
     dual_exp: bool | None | Keep = Field(
@@ -39,7 +39,7 @@ class MuxT1Inputs(RecipeInputs):
     )
 
 
-class MuxT1ToneReport(MuxToneReport):
+class MuxT1ToneReport(MuxFitToneReport):
     """One captured tone's estimates and one-sigma errors, or its fit failure.
 
     Nullable estimates retain absent or nonfinite native summary values as null.
@@ -126,6 +126,11 @@ async def mux_t1(session: RecipeSession, inputs: MuxT1Inputs) -> MuxT1Report:
                     MuxT1ToneReport(
                         index=outcome.index,
                         name=name,
+                        fit_quality=(
+                            None
+                            if outcome.fit.fit_quality is None
+                            else outcome.fit.fit_quality["fit"]
+                        ),
                         t1=report_number(outcome.fit.t1),
                         t1_err=report_number(outcome.fit.t1_err),
                         t1b=report_number(outcome.fit.t1b),

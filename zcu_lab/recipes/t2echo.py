@@ -139,6 +139,11 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
             writeback_applied = bool(receipt.items)
 
         return T2EchoReport(
+            fit_quality=(
+                None
+                if analysis.result.fit_quality is None
+                else analysis.result.fit_quality["fit"]
+            ),
             t2echo_us=report_number(analysis.result.t2e),
             t2echo_err_us=report_number(analysis.result.t2e_err),
             writeback_applied=writeback_applied,

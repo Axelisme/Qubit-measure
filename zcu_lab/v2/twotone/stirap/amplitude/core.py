@@ -36,6 +36,7 @@ from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
+from .._population_peak import first_finite_peak
 from .._pulses import drive_pulse
 
 STATE_LABELS = ("g", "e", "f")
@@ -53,6 +54,19 @@ class StirapAmplitudeResult:
     pump_gains: NDArray[np.float64]
     stokes_gains: NDArray[np.float64]
     counts: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class StirapAmplitudeSummary(Centroid3Summary):
+    """Saved confusion diagnostics and the largest finite corrected f population.
+
+    The population estimate is dimensionless and unclipped, not fidelity.
+    Peak coordinates are Pump and Stokes gains (a.u.). With no finite value, all peak fields are None.
+    """
+
+    f_population_estimate: float | None
+    pump_gain: float | None
+    stokes_gain: float | None
 
 
 class StirapAmplitudeCfg(ConfigBase):
@@ -274,11 +288,11 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> Centroid3Summary:
+    ) -> StirapAmplitudeSummary:
         """Plot raw and unclipped corrected g/e/f maps on both gain axes in a.u.
 
-        Use only the run's saved readout confusion. Return training confusion,
-        condition number and minimum singular value, not fidelity. Missing
+        Use only the run's saved readout confusion. Return training confusion
+        diagnostics and the corrected f peak, not fidelity. Missing
         cfg/classifier, incomplete or empty counts and singular confusion fail
         explicitly; no current calibration is read.
         """
@@ -330,4 +344,22 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             f"Saved readout: condition={result.condition_number:.4g}, minimum singular value={result.minimum_singular_value:.4g}\nPreparation-label estimates, not fidelity"
         )
         figure.show()
-        return summarize_centroid3(result)
+        confusion = summarize_centroid3(result)
+        corrected_f = result.corrected_populations[..., 2]
+        peak = first_finite_peak(corrected_f)
+        pump_gain = None
+        stokes_gain = None
+        if peak is not None:
+            pump_index, stokes_index = divmod(peak, corrected_f.shape[1])
+            pump_gain = float(source.result.pump_gains[pump_index])
+            stokes_gain = float(source.result.stokes_gains[stokes_index])
+        return StirapAmplitudeSummary(
+            confusion_matrix=confusion.confusion_matrix,
+            condition_number=confusion.condition_number,
+            minimum_singular_value=confusion.minimum_singular_value,
+            f_population_estimate=(
+                None if peak is None else float(corrected_f.flat[peak])
+            ),
+            pump_gain=pump_gain,
+            stokes_gain=stokes_gain,
+        )

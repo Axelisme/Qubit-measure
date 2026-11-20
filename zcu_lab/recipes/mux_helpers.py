@@ -1,6 +1,7 @@
 """Author-owned selector inputs and scalar report mechanics for mux recipes."""
 
 from pydantic import Field, model_validator
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.gui.form import FormModel
 
 
@@ -37,4 +38,12 @@ class MuxToneReport(FormModel):
     name: str | None = Field(description="Captured qubit name, or null without names.")
     failure: str | None = Field(
         default=None, description="Native fit failure reason, if any."
+    )
+
+
+class MuxFitToneReport(MuxToneReport):
+    """One tone's outcome and its primary fit diagnostics."""
+
+    fit_quality: FitQuality | None = Field(
+        default=None, description="Owner fit diagnostics; null when unavailable."
     )

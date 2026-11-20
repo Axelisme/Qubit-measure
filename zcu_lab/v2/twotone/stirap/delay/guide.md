@@ -53,6 +53,11 @@ The vertical axis is dimensionless population fraction.
 Corrected fractions are not clipped to [0, 1].
 
 The summary contains the training confusion matrix, its condition number and its minimum singular value.
+The summary and recipe report give `f_population_estimate`, the largest finite
+corrected f population on this grid, and `stokes_lead_us`.
+Ties go to the first acquired point. If no finite value is available, the peak
+and its coordinates are null. The estimate is unclipped and does not identify
+a global optimum.
 A large condition number warns that correction can amplify count noise.
 These diagnostics do not measure transfer fidelity or prove state purity.
 Missing saved cfg, missing calibration, no completed points or a singular matrix makes analysis fail.

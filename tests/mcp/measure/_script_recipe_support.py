@@ -87,6 +87,8 @@ class SyntheticGui:
         return self._snapshots(method, params)
 
     def _snapshots(self, method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "operation.progress":
+            return {"active": False, "bars": []}
         if method == "tab.snapshot":
             return {
                 "tabs": [

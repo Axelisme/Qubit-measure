@@ -1,6 +1,7 @@
 """Measure mux Ramsey fringes, save the decay fits and review calibrations."""
 
 from pydantic import Field, StrictInt
+from zcu_tools.analysis.fitting.sampling import FringeSamplingQuality
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -18,7 +19,7 @@ from zcu_lab.v2.support.measure.mux_results import (
 )
 
 from .mux_helpers import (
-    MuxToneReport,
+    MuxFitToneReport,
 )
 
 
@@ -28,7 +29,7 @@ class MuxT2RamseyInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order.",
+        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
     )
 
     fit_fringe: bool | None | Keep = Field(
@@ -41,13 +42,17 @@ class MuxT2RamseyInputs(RecipeInputs):
     )
 
 
-class MuxT2RamseyToneReport(MuxToneReport):
+class MuxT2RamseyToneReport(MuxFitToneReport):
     """One captured tone's estimates and one-sigma errors, or its fit failure.
 
     Nullable estimates retain absent or nonfinite native summary values as null.
     Identity uses the original tone position, never the participant row offset.
     """
 
+    sampling_quality: FringeSamplingQuality | None = Field(
+        default=None,
+        description="Owner diagnostic for delay sampling of the fitted fringe; null when unavailable.",
+    )
     t2: float | None = Field(
         default=None, description="Fitted Ramsey coherence time T2* in us."
     )
@@ -133,6 +138,8 @@ async def mux_t2ramsey(
                     MuxT2RamseyToneReport(
                         index=outcome.index,
                         name=name,
+                        fit_quality=outcome.quality,
+                        sampling_quality=outcome.sampling_quality,
                         t2=report_number(outcome.t2),
                         t2_err=report_number(outcome.t2_err),
                         detune=report_number(outcome.detune),

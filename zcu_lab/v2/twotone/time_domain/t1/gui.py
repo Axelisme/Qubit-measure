@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
@@ -42,6 +43,10 @@ T1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 
 class T1Summary(BaseModel):
     """Recipe JSON inputs in native units; null means an unavailable estimate."""
+
+    fit_quality: Mapping[str, FitQuality] | None = Field(
+        description='Owner fit diagnostics under "fit"; null when unavailable.'
+    )
 
     t1: float | None = Field(
         description="Owner t1 in us; null retains an unavailable estimate."

@@ -157,6 +157,11 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
             writeback_applied = bool(receipt.items)
 
         return TimeRabiReport(
+            fit_quality=(
+                None
+                if analysis.result.fit_quality is None
+                else analysis.result.fit_quality["fit"]
+            ),
             pi_length_us=report_number(analysis.result.pi_len),
             pi_length_err_us=report_number(analysis.result.pi_len_err),
             pi2_length_us=report_number(analysis.result.pi2_len),

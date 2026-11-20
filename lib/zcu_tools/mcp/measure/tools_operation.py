@@ -15,7 +15,10 @@ from zcu_tools.mcp.measure.execution_reply import (
     project_control,
     project_execution,
 )
-from zcu_tools.mcp.measure.operation_wait import require_operation_failure_message
+from zcu_tools.mcp.measure.operation_wait import (
+    read_operation_progress,
+    require_operation_failure_message,
+)
 from zcu_tools.mcp.measure.script_recipe_execution import (
     ScriptRecipeExecution,
     ScriptRecipeSnapshot,
@@ -35,6 +38,7 @@ def _execution_status(
         return {
             **project_execution(snapshot, detail=detail),
             **paths,
+            **(execution.run_progress() if snapshot["status"] == "running" else {}),
         }
     return project_execution(
         asdict(ctx.session.executions.get(key).snapshot()),
@@ -200,10 +204,13 @@ def _wait_tool(
         )
         reply = execution.wait(timeout)
         data = project_execution(reply.data)
+        if isinstance(execution, ScriptRecipeExecution):
+            if reply.data["status"] == "running":
+                data.update(execution.run_progress())
+        else:
+            data["elapsed_s"] = max(0.0, time.monotonic() - start)
         return ToolReply(
-            data
-            if key.startswith("recipe-")
-            else {**data, "elapsed_s": max(0.0, time.monotonic() - start)},
+            data,
             reply.images,
             # Accepted failures remain outcome data; interactive delivery errors
             # still flag the failed handoff without rewriting the native outcome.
@@ -246,13 +253,7 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     if reply["reason"] != "timeout":
         raise ValueError(f"unexpected operation await reason: {reply['reason']!r}")
     result["status"] = "running"
-    progress = ctx.gui.read_internal("operation.progress", {}, operation_handle=op)
-    if progress["active"]:
-        bars = progress["bars"]
-        result["progress"] = bars
-        estimates = [bar["eta_s"] for bar in bars if bar.get("eta_s") is not None]
-        if estimates:
-            result["eta_s"] = max(estimates)
+    result.update(read_operation_progress(ctx.gui, op))
     return result
 
 
@@ -349,6 +350,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
                         "default": 60,
                         "minimum": 0,
                         "maximum": 300,
+                        "description": "Seconds (default 60, max 300). Timeout returns current status without cancelling work.",
                     },
                 },
                 "oneOf": [

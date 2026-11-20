@@ -2,13 +2,12 @@
 
 from pathlib import Path
 
-from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.plotting.plots import Plots
 
-from .core import StirapDelayCfg, StirapDelayExp, StirapDelayResult
+from .core import StirapDelayCfg, StirapDelayExp, StirapDelayResult, StirapDelaySummary
 from .form import make_form
 
 
@@ -22,7 +21,7 @@ def _analyze(
     req: AnalyzeRequest[RunRecord[StirapDelayCfg, StirapDelayResult], None],
     *,
     plots: Plots,
-) -> Centroid3Summary:
+) -> StirapDelaySummary:
     return StirapDelayExp().analyze(req.run_result, plots=plots)
 
 

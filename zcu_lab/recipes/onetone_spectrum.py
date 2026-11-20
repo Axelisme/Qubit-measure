@@ -160,6 +160,7 @@ async def onetone_spectrum(
             writeback_applied = bool(receipt.items)
 
         return OnetoneSpectrumReport(
+            fit_quality=analysis.result.fit_quality,
             frequency_mhz=report_number(analysis.result.freq),
             linewidth_mhz=report_number(analysis.result.fwhm),
             writeback_applied=writeback_applied,

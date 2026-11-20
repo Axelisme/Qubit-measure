@@ -25,7 +25,7 @@ from zcu_lab.v2.mux.len_rabi.gui import MuxLenRabiSummary
 from zcu_lab.v2.support.measure.mux_results import MuxSummaryFailure
 
 from .mux_helpers import (
-    MuxToneReport,
+    MuxFitToneReport,
     ToneRangeInputs,
 )
 
@@ -36,7 +36,7 @@ class MuxLenRabiInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order.",
+        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
     )
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
@@ -57,7 +57,7 @@ class MuxLenRabiInputs(RecipeInputs):
     )
 
 
-class MuxLenRabiToneReport(MuxToneReport):
+class MuxLenRabiToneReport(MuxFitToneReport):
     """One captured tone's estimates and one-sigma errors, or its fit failure.
 
     Nullable estimates retain absent or nonfinite native summary values as null.
@@ -177,6 +177,7 @@ async def mux_len_rabi(
                     MuxLenRabiToneReport(
                         index=outcome.index,
                         name=name,
+                        fit_quality=outcome.quality,
                         pi_len=report_number(outcome.pi_len),
                         pi_len_err=report_number(outcome.pi_len_err),
                         pi2_len=report_number(outcome.pi2_len),

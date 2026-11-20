@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-11-20，arb 資產寫回與 session log
+**Last updated:** 2026-11-20，recipe execution Run 進度
 
 **讀者：** agent、framework-dev。查閱量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -503,6 +503,9 @@ Status 的 active_path 會讀 GUI 當前 scope，其餘 captured detail 不重�
 包含 completed、failed、cancelled 與 needs_parameters。索引不含 standalone analysis。
 超出最近 10 筆的 recipe 仍可按 ID 查詢；全域回覆保留 query_hint。
 `wait(op)` 只觀察 GUI operation，`wait(execution)` 等本地後續處理與當次 image 交付。
+Recipe 正在 Run 取數時，`status(execution)` 與 `wait(execution)` 交付和 `wait(op)` 相同的 `progress` bars 投影。若有 ETA，`eta_s` 取各 bar 的最大秒數。
+沒有 Run 正在取數時（例如分析、等回答或終態），兩欄都省略，不回 null。
+`wait.timeout` 單位為秒，預設 60，上限 300。逾時回目前狀態，不取消工作。
 Execution ID 是 session-local，不是持久恢復機制；query 不建立新的寫回授權。
 
 ### 作者 await 邊界

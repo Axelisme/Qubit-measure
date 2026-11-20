@@ -1,7 +1,6 @@
 """Run, analyze and save an independent STIRAP Stokes-lead scan."""
 
 from pydantic import Field
-from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -12,6 +11,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     recipe,
     report_number,
 )
+
+from zcu_lab.v2.twotone.stirap.delay.core import StirapDelaySummary
 
 
 class StirapDelayInputs(RecipeInputs):
@@ -68,7 +69,16 @@ class StirapDelayInputs(RecipeInputs):
 
 
 class StirapDelayReport(RecipeReport):
-    """Saved confusion diagnostics, not transfer fidelity or population arrays."""
+    """Saved readout diagnostics and the peak within the measured scan grid."""
+
+    f_population_estimate: float | None = Field(
+        default=None,
+        description="Largest finite corrected f population (unitless, unclipped) on this grid, not fidelity or a global optimum. Null when unavailable.",
+    )
+    stokes_lead_us: float | None = Field(
+        default=None,
+        description="Stokes lead in us at the grid peak; null when unavailable.",
+    )
 
     condition_number: float | None = Field(
         default=None,
@@ -120,10 +130,12 @@ async def stirap_delay(
 
     await tab.run()
     try:
-        analysis = await tab.analyze("primary", result=Centroid3Summary)
+        analysis = await tab.analyze("primary", result=StirapDelaySummary)
         if analysis.result is None:
             return StirapDelayReport(analysis_failure=analysis.reason)
         return StirapDelayReport(
+            f_population_estimate=analysis.result.f_population_estimate,
+            stokes_lead_us=analysis.result.stokes_lead_us,
             condition_number=report_number(analysis.result.condition_number),
             minimum_singular_value=report_number(
                 analysis.result.minimum_singular_value

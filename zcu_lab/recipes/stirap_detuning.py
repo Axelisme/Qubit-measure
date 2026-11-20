@@ -1,7 +1,6 @@
 """Acquire STIRAP detuning with independent envelopes and saved-readout analysis."""
 
 from pydantic import Field
-from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -12,6 +11,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     recipe,
     report_number,
 )
+
+from zcu_lab.v2.twotone.stirap.detuning.core import StirapDetuningSummary
 
 
 class StirapDetuningInputs(RecipeInputs):
@@ -93,7 +94,20 @@ class StirapDetuningInputs(RecipeInputs):
 
 
 class StirapDetuningReport(RecipeReport):
-    """Saved-readout matrix quality; population arrays remain in analysis artifacts."""
+    """Saved readout diagnostics and the peak within the measured scan grid."""
+
+    f_population_estimate: float | None = Field(
+        default=None,
+        description="Largest finite corrected f population (unitless, unclipped) on this grid, not fidelity or a global optimum. Null when unavailable.",
+    )
+    pump_detuning_mhz: float | None = Field(
+        default=None,
+        description="Pump offset from the measured carrier in MHz at the grid peak; null when unavailable.",
+    )
+    stokes_detuning_mhz: float | None = Field(
+        default=None,
+        description="Stokes offset from the measured carrier in MHz at the grid peak; null when unavailable.",
+    )
 
     condition_number: float | None = Field(
         default=None,
@@ -160,10 +174,13 @@ async def stirap_detuning(
 
     await tab.run()
     try:
-        analysis = await tab.analyze("primary", result=Centroid3Summary)
+        analysis = await tab.analyze("primary", result=StirapDetuningSummary)
         if analysis.result is None:
             return StirapDetuningReport(analysis_failure=analysis.reason)
         return StirapDetuningReport(
+            f_population_estimate=analysis.result.f_population_estimate,
+            pump_detuning_mhz=analysis.result.pump_detuning_mhz,
+            stokes_detuning_mhz=analysis.result.stokes_detuning_mhz,
             condition_number=report_number(analysis.result.condition_number),
             minimum_singular_value=report_number(
                 analysis.result.minimum_singular_value

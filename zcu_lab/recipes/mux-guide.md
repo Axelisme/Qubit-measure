@@ -252,12 +252,19 @@ All seven recipes accept the following controls and Form edits:
 | --- | --- | --- |
 | `target` | MuxGroup component name, such as `MG3`, for this Reset's `$mux` binding | Use global aliases |
 | `reuse_tab_id` | An idle matching tab to Reset | Open a new tab |
-| `participants` | Nonempty, unique original tone indices in measurement order | Keep Reset defaults |
+| `participants` | Nonempty, unique original tone indices in measurement order. Selects active drives and their corresponding mux readout tones. | Keep Reset defaults |
 | `overrides` | Ordered dotted `path` with one of `value`, `select`, or `command` | No extra edits |
 
 Explicit null clears a Form input. Null `participants` does not retain the
 selection; it produces a missing selection. Null `target` or `reuse_tab_id`
 retains the Open/Reset control behavior shown above. `overrides` cannot be null.
+
+Selecting just one participant removes the other drives and their readout tones.
+To keep the readout and turn off only a drive, keep the participant and set its
+drive gain to zero. For Amp Rabi, set the swept gain bounds to zero, since the
+sweep sets the pulse gain. For Echo, zero both the x90 and x180 gains without
+changing their lengths, as in the [Echo control](../v2/mux/t2echo/guide.md#multi-tone-readout-control).
+The onetone recipes have no qubit drives to select.
 
 Analysis inputs go to the same Primary operation, not the measurement Form.
 Omission retains that tab's analysis setting. Explicit null goes to the analysis
@@ -366,7 +373,9 @@ in participants order. Individual `measurement_i` and analysis `fit_i` plots use
 the original index `i`. Pulse scans show each qubit's actual scan coordinates.
 Delay scans show the common requested delay. GE shows probe-off/on shot traces.
 
-A failed fit reports its reason; the owner summary retains quality diagnostics.
+A failed fit reports its reason. When the owner exposes fit diagnostics, the
+report row carries its primary `fit_quality` unchanged, or null when unavailable.
+Ramsey rows also carry the owner's `sampling_quality` when available.
 Nullable report estimates remain null when absent or nonfinite, never zero.
 Full replies also contain the native analysis summary. Saved results keep the measured configuration and
 names. Later Form edits, Reset or alias changes do not rewrite earlier reports.
@@ -404,7 +413,11 @@ fits Rabi oscillations to estimate pi and pi/2 gains.
 
 Choose each `tones[i].drive`. Set `tones[i].gain.start` and `stop` in native
 gain units, or supply the full `sweeps` list and one shared `n`.
-Copy a referenced drive inline before editing its fields.
+Follow [Choose inputs](#choose-inputs) to edit a drive:
+1. Read the logical fields, options, and commands at `tones.<i>.drive`.
+2. In order, use `command: "to_inline"` to copy the drive, `select` to change the waveform choice, then `value` to set its fields.
+3. Do not add the YAML `module` wrapper to logical paths.
+
 Each scan point applies the corresponding
 gain to all participants before mux readout.
 
@@ -514,6 +527,8 @@ shots per preparation. An optional init pulse runs in both preparations.
 The Form fixes reps and rounds at one. Shot pairing across tones remains intact.
 
 Primary report rows contain `fidelity`, `theta`, `threshold` and `ge_s`.
+They carry the joint histogram's `fit_quality` and the individual
+`ground_fit_quality` and `excited_fit_quality`.
 Post rows contain `ge_radius`. Inspect the probe-off/on traces in `measurement`,
 Primary `fit_i` plots and Post `post_i` diagnostics. Check shot count and pulse
 selections in the fixed Run conditions.
