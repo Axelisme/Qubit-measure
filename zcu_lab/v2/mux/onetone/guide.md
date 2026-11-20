@@ -144,6 +144,16 @@ Run 固定捕捉 module alias 與 resonator 資料，其後修改全域 aliases�
 缺少分析參數來源的 Load 可以純計算並列 module 候選；選取非空候選後 Apply 會報錯。
 套用前檢查目的地、頻率變化與 fit quality。
 
+## Herald 後的等待
+
+FIT 不校準 `post_delay`，其他實驗也不校準。Module 提案保留輸入的值，新建 mux readout module 預設為 0 µs。用這份 readout 做 heralded 實驗前，先設定 `post_delay`，讓腔內光子在後續 qubit drive 前衰減。Herald 和 terminal 共用這個值（[ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)）。等待從 readout generator 的波形結束算起，不等 ADC 積分窗結束（[ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)）。
+
+等待太短時，殘留的腔光子會讓 qubit 轉移頻率偏移並造成退相干。Herald 後的名目 Xπ 可能幾乎不翻轉，conditional phase 掃描也可能找不到 π 交點。FTF 的一個低 SNR 例子中，gg herald 後打名目 F2 Xπ，F2 的 terminal e 比例在 0 µs 時為 11.6%，在 2 µs 時為 92.9%。這兩個比例沒有扣除 I 基線。2 µs 只是這次比較用的值，不是最短或最佳等待。
+
+用 FIT 得到的各 resonator 線寬 `kappa`（半高全寬 FWHM，單位 MHz）估算腔場衰減時間 `1 / (π · FWHM)`，結果的單位是 µs。先把 `post_delay` 設為衰減時間的數倍。
+
+在 `two_qubit/joint_readout` 的 Reset 欄位選 `reset/mux_herald`，在 `keep` 用 F1、F2 的 role tone 在完整 readout 中的位置作鍵，兩個值都填 g。Herald 和 terminal 使用同一份完整 mux readout。Run 後看 FIT 的 4×9 列正規化機率矩陣。取目標 qubit 打名目 Xπ、另一顆打 I 的那一列，把目標 qubit 的 terminal 分類為 e 的欄位加總。也可與兩顆都打 I 的 gg 列比較。這是通過 gg herald 的 shots 中，目標 qubit 的 terminal e 比例，不是 gate fidelity。只延長 `post_delay`，其餘設定不變，再 Run 和 FIT。若比例仍隨等待延長而上升，先調整等待再跑 heralded 掃描。
+
 ## MCP recipe
 
 呼叫 `mux_onetone`，`target` 可指定這次 Reset 的 mux alias，`reuse_tab_id` 可重用 idle matching tab。
