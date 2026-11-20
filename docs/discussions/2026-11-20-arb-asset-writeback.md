@@ -51,3 +51,7 @@ Analyze 提出 `ArbAssetWriteback`，不寫檔。使用者可在 GUI 或 MCP 接
 當時的設計比較與原始工作檔未入庫。實作可核對 [resources executor](../../lib/zcu_tools/resources/entry/writeback.py)、[資產發布規則](../../lib/zcu_tools/resources/waveform_assets.md) 與 [Measure 的 draft 與 Apply](../../lib/zcu_tools/gui/app/measure/writeback/README.md)。
 
 代裁依使用者 2026-11-20 的授權：「STDO:我去睡了，我看過目前規劃方向沒有問題，請你之後幫我代裁設計與推進任務，都不需要問我，你自己決定」。
+
+## 後記
+
+2026-11-20，使用者覆核上文兩項代裁。agent 提議全部確認，使用者回覆「確認」。Apply 前檢查 arb key 能否解析，以及 `cz_opt_` 資產 key 加 12 碼雜湊，都維持原決定。

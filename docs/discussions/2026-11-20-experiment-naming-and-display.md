@@ -48,3 +48,7 @@ basis:
 - `6536e2d32` 包含第一批實作與[風格指南](../../zcu_lab/v2/experiment-style.md#4-live-plot-與-analyze-圖)的變更。[`Registry.resolve_experiment`](../../lib/zcu_tools/gui/app/measure/registry.py)是上述 key 和 tag 的查找入口。
 - 原始命名與顯示盤點未入庫。盤點讀的是程式碼，不是 GUI 截圖，也沒有比較像素。
 - 另用 CPU 上的 FTF 模擬逐一跑 18 個 key 的 Run 與 Analyze，不開 GUI、不接硬體。13 個 key 首輪完成，5 個 heralded key 用剪枝重試完成。逐張檢視 124 張 PNG，核對軸標與單位、格線、marker 與擬合線、colormap、Analyze 首圖。原始 probe 紀錄未入庫；剪枝設定只用於看圖，不作校準。
+
+## 後記
+
+2026-11-20，使用者覆核本文的代裁。agent 提議全部確認，使用者回覆「確認」。第一批只改 `two_qubit` 的圖與 guide 首標，維持原決定。

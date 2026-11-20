@@ -393,7 +393,7 @@ Label 合併所有可到達的跳轉入邊與 fall-through。沒有可到達的�
 
 2026-11-20，使用者把介面放在 Timeline program，而不是 builder 的專用 `exit_shot`，並說：「真正通用的机制应该是 condition jump 跟 label。」
 同日，使用者接受只往後跳：「可以接受统一只能往后跳」，並以「都采用建议」接受其餘第一版規則。
-Agent 依授權保留最外層限制，並補定合併與拒收細節，待使用者覆核。理由見[往後跳轉的討論紀錄](../discussions/2026-11-20-timeline-forward-jumps.md)。
+Agent 依授權保留最外層限制，並補定合併與拒收細節。使用者 2026-11-20 覆核時回覆「確認」。理由見[往後跳轉的討論紀錄](../discussions/2026-11-20-timeline-forward-jumps.md)。
 
 #### 量測能力不抵可讀性成本時不加分支
 

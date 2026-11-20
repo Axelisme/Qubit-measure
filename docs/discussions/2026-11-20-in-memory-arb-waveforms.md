@@ -45,3 +45,7 @@ CZ 優化會反覆試播新的樣本，當時的 native `arb` 每次建 envelope
 當時的設計比較與原始工作檔未入庫。實作可核對 [program 的波形設定](../../lib/zcu_tools/program/v2/modules/waveform.py)、[envelope registry](../../lib/zcu_tools/program/v2/modules/registry.py) 與 [core 的樣本雜湊](../../lib/zcu_tools/core/waveform_format/__init__.py)。
 
 代裁依使用者 2026-11-20 的授權：「STDO:我去睡了，我看過目前規劃方向沒有問題，請你之後幫我代裁設計與推進任務，都不需要問我，你自己決定」。
+
+## 後記
+
+2026-11-20，使用者覆核上文的代裁。agent 提議全部確認，使用者回覆「確認」。雜湊把全零 Q 與未提供 Q 視為相同，維持原決定。
