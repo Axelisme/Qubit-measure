@@ -37,17 +37,28 @@ the ADC integration window to end
 No experiment calibrates this field. New mux readout modules default to 0 µs.
 
 If the wait is too short, leftover photons shift the qubit transition
-frequency. A nominal Xπ after herald may barely flip the qubit, and a
-conditional-phase scan may show no π crossing. In one low-SNR FTF example,
-the nominal F2 Xπ flip fraction was 11.6% at 0 µs and 92.9% at 2 µs.
-The 2 µs value is an example, not a minimum or an optimum.
+frequency and cause dephasing. A nominal Xπ after herald may barely flip
+the qubit. A separate conditional-phase scan may show no π crossing; RB
+does not measure that crossing.
+In one low-SNR FTF example, after gg herald and a nominal F2 Xπ, the F2
+terminal e fraction was 11.6% at 0 µs and 92.9% at 2 µs. These fractions do
+not subtract the I baseline. The 2 µs value is an example, not a minimum
+or an optimum.
 
-The resonator's `kappa` is the full width at half maximum (FWHM) in MHz.
-The cavity field decay time is about `1 / (π · FWHM)` in µs. Start with a wait
-several times that estimate. Measure the nominal Xπ flip fraction after
-herald, then change only the wait and repeat at a longer value. If the
-longer wait still improves the flip fraction, adjust `post_delay` before
-running RB.
+Use each resonator's `kappa` from the `mux/onetone` FIT. It is the full
+width at half maximum (FWHM) in MHz. Estimate the cavity field decay time as
+`1 / (π · FWHM)` in µs. Start with a wait several times that estimate.
+
+In `two_qubit/joint_readout`, choose `reset/mux_herald` in Reset. Set
+`keep` to g for both role tones, keyed by their positions in the full readout.
+Use the same full mux readout for herald and terminal. After Run, inspect the
+4×9 row-normalized probability matrix in FIT. Find the row with nominal Xπ
+on the target and I on the other qubit.
+Sum the columns where the target's terminal class is e. Compare with the
+gg row for an I baseline if needed. This is the terminal e fraction among
+shots that passed gg herald, not gate fidelity. Lengthen only `post_delay`
+and repeat Run and FIT. If the longer wait still raises the terminal e
+fraction, adjust `post_delay` before running RB.
 
 ## Sequences and cost
 
