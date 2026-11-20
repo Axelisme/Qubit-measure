@@ -17,6 +17,8 @@ basis:
 
 三個 RB 實驗把 round 數傳給 acquire。兩個 two-qubit 實驗加總計數，單 qubit 實驗平均 IQ。Result 一律以 (seed, arm, depth) 開頭，不保存 round 軸。兩個 two-qubit 分析回報衰減長度的相對誤差，不再用尾端存活率門檻發警告。取數原則見 [ADR-0083](../adr/0083-program-macros-and-timelines.md#round-在取數端歸約)。
 
+這條原則是建議。使用者補充：「這是建議而不強制，如果有強烈的trace by trace平均需求，實驗作者當然可以將round做在最外面，但一般實驗使用acquire內建的rounds就好了」（2026-11-20）。
+
 ## 問題
 
 舊版主機每個 round 呼叫一次 acquire，並把結果寫入 round 軸。分析先丟掉不完整的 seed／round 配對，再對每個 seed 平均 round。兩個 two-qubit 實驗以 depth 開頭，單 qubit 實驗以 round 開頭。

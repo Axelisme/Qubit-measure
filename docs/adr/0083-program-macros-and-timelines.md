@@ -113,11 +113,12 @@ Schedule 與 scan step 不呼叫來源，也不套用遮罩。`run_acquire_decim
 
 #### Round 在取數端歸約
 
-把 round 數傳給 acquire，由取數端的 reducer 加總或平均已完成 rounds。實驗不在主機端重複迴圈，Result 不留 round 軸。
+一般實驗把 round 數傳給 acquire，由取數端的 reducer 加總或平均已完成 rounds。實驗不在主機端重複迴圈，Result 不留 round 軸。這是建議，不是強制。
 例如 `two_qubit/rb` 與 `two_qubit/rb_heralded` 加總分類計數，`twotone/rb` 平均 IQ。三者都只呼叫每支 seed／arm program 一次。
-只有 round 之間需要主機改變狀態才用主機迴圈，例如每輪改外部儀器設定。
+實驗確實需要逐輪資料（trace by trace 平均）時，作者可以把 round 迴圈放在最外層。
 
 2026-11-20，使用者說：「其实结果的 round 的轴是多余的，我想应该是之前实做的人的瑕疵。round 的轴应该在 round 函数内就已经被平均掉了，而且呢，这个平均应该是 reducer。负责的吧？」
+同日補充適用邊界：「這是建議而不強制，如果有強烈的trace by trace平均需求，實驗作者當然可以將round做在最外面，但一般實驗使用acquire內建的rounds就好了」
 比較與結果見[討論紀錄](../discussions/2026-11-20-rb-round-reduction-and-fit-quality.md)。
 
 ### 查表掃描與 QICK 協定
