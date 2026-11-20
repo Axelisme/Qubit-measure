@@ -9,7 +9,12 @@ bind a Plots lifetime; removed artists make subsequent set calls fail.
 
 from matplotlib.axes import Axes
 
-from ._live_attached import AttachedHeatmap, AttachedLine, AttachedScatter
+from ._live_attached import (
+    AttachedErrorbar,
+    AttachedHeatmap,
+    AttachedLine,
+    AttachedScatter,
+)
 
 
 def live_line(axes: Axes, *, num_lines: int = 1) -> AttachedLine:
@@ -20,6 +25,16 @@ def live_line(axes: Axes, *, num_lines: int = 1) -> AttachedLine:
     Labels, title, ticks and grid remain unchanged.
     """
     return AttachedLine(axes, num_lines=num_lines)
+
+
+def live_errorbar(axes: Axes, *, num_lines: int = 1) -> AttachedErrorbar:
+    """Attach num_lines lines with vertical error bars to axes.
+
+    num_lines must be positive. AttachedErrorbar.set(xs, signals, yerr)
+    updates the points and symmetric error lengths and returns changed artists.
+    NaN errors omit the bar, not the point. No refresh or dispatch is performed.
+    """
+    return AttachedErrorbar(axes, num_lines=num_lines)
 
 
 def live_scatter(axes: Axes) -> AttachedScatter:

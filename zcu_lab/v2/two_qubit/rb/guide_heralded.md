@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run heralded paired two-qubit RB and interpret gg/ee return survival alongside CZ-interleaved decay fits.
 
-**Last updated:** 2026-11-20, acquisition rounds and decay uncertainty
+**Last updated:** 2026-11-20, per-depth seed spread
 
 Cfg schema 3.0 requires `x180_f1` and `x180_f2`.
 
@@ -86,8 +86,17 @@ finite-shot variance floor of `1/(4*N**2)` before averaging.
 Reference and interleaved each have one fitted decay shared by gg and ee.
 Each herald and arm has its own amplitude A and offset B in
 `A*p**depth+B`. The two fit figures show each herald's equal-seed means,
-propagated binomial error bars and joint decay curves. The live plot instead
-shows count-weighted gg and ee return survival in both arms.
+seed-spread error bars and joint decay curves. The live plot still shows
+count-weighted gg and ee return survival in both arms.
+
+At each depth, the live and fit bars extend one sample standard deviation
+(`ddof=1`) across seeds on either side of the point. A point with only one
+seed has no bar. The spread includes sequence-to-sequence variation and shot
+noise. For survival probability `P` and `N` accepted shots for that seed and
+herald, shot noise is about `√(P(1−P)/N)`. It grows as `P` falls from near one
+toward one-half, so increasing spread with depth does not by itself identify
+coherent error. The fit still uses the propagated binomial standard errors
+as weights, not the plotted seed spread.
 
 The fit requires at least four distinct depths and at least two valid paired
 seeds per herald. The 95% interval resamples seed identities from the union

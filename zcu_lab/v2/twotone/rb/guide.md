@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run reference RB or target-interleaved RB and read the decay fits.
 
-**Last updated:** 2026-11-20, acquisition rounds
+**Last updated:** 2026-11-20, per-depth seed spread
 
 ## Choose a target
 
@@ -60,6 +60,14 @@ and fitted curves. Reference-only mode reports decay `p`, error per Clifford
 both decays, reference error per Clifford and the target error estimate
 `(1 - p_interleaved / p_reference) / 2`. The target fidelity is one minus that
 error, with a 95% paired-seed bootstrap interval.
+
+Each live and fit point shows one sample standard deviation (`ddof=1`) across
+seeds on either side, measured at that depth on the same IQ axis as the point.
+A point with only one seed has no bar. The spread combines sequence-to-sequence
+variation and shot noise. For a survival probability `P` estimated from `N`
+shots, the shot-noise scale is about `√(P(1−P)/N)`. It grows as `P` falls from
+near one toward one-half. Growing spread with depth alone does not identify
+coherent error.
 
 These intervals describe seed variation. They do not account for bias from
 gate-dependent or coherent noise. A negative target error or fidelity above one

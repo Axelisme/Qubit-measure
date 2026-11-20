@@ -33,7 +33,7 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
 )
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 from .._rb_sequence import TargetGate, make_seed_tables
 
@@ -110,7 +110,7 @@ def _live_plot(
     ax.set(xlabel="Random Clifford depth", ylabel="Signal (a.u.)")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
     ax.grid()
-    viewer = live_line(ax, num_lines=n_arms)
+    viewer = live_errorbar(ax, num_lines=n_arms)
     labels = ("Reference", "Interleaved")[:n_arms]
     for line, label in zip(ax.lines, labels, strict=True):
         line.set_label(label)
@@ -120,7 +120,8 @@ def _live_plot(
 
     @plots.on_plot_thread
     def update(data: NDArray[np.complex128]):
-        return viewer.set(xs, project_arm_means(data).mean_signals)
+        projection = project_arm_means(data)
+        return viewer.set(xs, projection.mean_signals, projection.seed_std)
 
     fig.show()
     return update
@@ -335,6 +336,13 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(labels):
             (line,) = ax.plot(result.depths, fit.mean_signals[arm], "o", label=label)
+            ax.errorbar(
+                result.depths,
+                fit.mean_signals[arm],
+                yerr=fit.seed_std[arm],
+                fmt="none",
+                ecolor=line.get_color(),
+            )
             ax.plot(result.depths, fit.fit_signals[arm], color=line.get_color())
         ax.set(
             xlabel="Random Clifford depth",

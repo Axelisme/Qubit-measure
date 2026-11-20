@@ -58,7 +58,7 @@ Show 前可先呼叫，修改只保留在 artists，不呈現、不 refresh、�
 後續 `fig.show()` 或 `finish(present=True)` 顯示最新內容。回傳混合的圖時只刷新已呈現者，
 但未呈現的外來圖仍拒絕。Decorator 不登記或佔用 axes，本體只應改回傳 artists 所屬的圖。
 
-Lab 的 `live_line(ax)`、`live_heatmap(ax)` 與 `live_scatter(ax)` 是可選的本地 artist 工具。
+Lab 的 `live_line(ax)`、`live_errorbar(ax)`、`live_heatmap(ax)` 與 `live_scatter(ax)` 是可選的本地 artist 工具。
 它們的 `set(...)` 回傳 changed artists，可直接在裝飾後的本體中回傳。
 它們不切執行緒、不 refresh、不 present，也不檢查 axes 佔用。
 

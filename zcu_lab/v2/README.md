@@ -101,7 +101,7 @@ Host 路徑在回傳前對可用 rounds 取平均，未取數的點保留 NaN，
 
 ## 即時圖工具
 
-`zcu_lab.v2.support` 匯出 `live_line`、`live_scatter` 與 `live_heatmap`。
+`zcu_lab.v2.support` 匯出 `live_line`、`live_errorbar`、`live_scatter` 與 `live_heatmap`。
 顯示、owner 更新與 artist 回傳規則見[圖的建立、顯示與更新](experiment-authoring.md#圖的建立顯示與更新)。
 
 ```python
@@ -120,6 +120,7 @@ fig.show()
 
 `support/live.py` 提供掛到 axes 的工具，`_live_attached.py` 擁有資料檢查與 artists，
 `_live_format.py` 處理格式。`support.live.AttachedLine` 可用於作者的型別標註。
+`live_errorbar(ax).set(xs, signals, yerr)` 更新點與對稱誤差棒；NaN 誤差只省略誤差棒，保留資料點。
 作者直接在 axes 設 ticks、顏色與標題。掃描歷史線由作者在另一個 axes 建立並更新。
 Reference marker 與動畫錄影不在這些工具中。
 

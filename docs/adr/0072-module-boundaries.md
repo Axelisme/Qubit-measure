@@ -219,9 +219,9 @@ Lib 保留 Plots、FigureCollection 與 PlotHost。2026-11-01，通用更新已�
 使用者於 2026-10-30 裁定：「畫圖採用建議，但名字叫live不太好懂」、
 「@plots.on_plot_thread好了，隱藏執行線程的機制資訊可能在某些時候造成難以發現的bug」。
 
-三個 live helpers、typed 工具 handle 與線圖、熱圖、非均勻熱圖、scatter 格式放在 lab
+Live helpers、typed 工具 handle 與線圖、熱圖、非均勻熱圖、scatter 格式放在 lab
 共用支援套件的直接層。實驗作者可以直接修改或擴充，不另建 plotting 子套件。
-`live_line(ax)`、`live_heatmap(ax)` 與 `live_scatter(ax)` 是本地選用工具，只掛在給定 axes，
+`live_line(ax)`、`live_errorbar(ax)`、`live_heatmap(ax)` 與 `live_scatter(ax)` 是本地選用工具，只掛在給定 axes，
 在 caller thread 修改並回傳 changed artists。不建圖、不設標籤與標題、不切換執行緒、
 不 refresh、不 present。作者可在 decorator 本體內回傳 `line.set(xs, signals)`。
 這些工具與 decorator 不登記 axes，不檢查彼此的佔用。

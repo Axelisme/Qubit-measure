@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, TypeAlias
 
 import numpy as np
-from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -17,6 +16,7 @@ from zcu_tools.analysis.fitting import (
     FitQuality,
     IRBAnalysis,
     analyze_irb,
+    seed_standard_deviation,
 )
 from zcu_tools.analysis.fitting.shared import SharedFitResult
 from zcu_tools.cfg_model import ConfigBase
@@ -43,7 +43,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 from .._rb_scheduling import compile_depth_sweep, emit_depth_sweep
 from .._rb_sequence import RBArm, make_rb_arms
@@ -314,15 +314,18 @@ class RBExp(Experiment[RBResult, RBCfg]):
         ax.set(
             xlabel="Random Clifford depth", ylabel="Joint (g,g) survival probability"
         )
-        viewer = live_line(ax, num_lines=2)
+        viewer = live_errorbar(ax, num_lines=2)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         fig.show()
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            totals = np.nansum(sums, axis=0)  # Pool seeds.
+        def update_view(sums: NDArray[np.float64]):
+            totals = np.nansum(sums, axis=0)  # Pool seeds for the markers.
+            survival = joint_probabilities(sums)[..., 0, 0]
             return viewer.set(
-                np.array(config.depth), joint_probabilities(totals)[..., 0, 0]
+                np.array(config.depth),
+                joint_probabilities(totals)[..., 0, 0],
+                seed_standard_deviation(survival),
             )
 
         # 2. Compile all arms before acquiring any shots.
@@ -380,19 +383,21 @@ class RBExp(Experiment[RBResult, RBCfg]):
         # 1. Normalize each cell by its own acquired shots.
         data, cfg = source.result, source.cfg
         shape = (len(data.seeds), 2, len(data.depths), 3, 3)
+        if cfg is not None:
+            validate_axes((data.seeds, data.depths), (cfg.seed, cfg.depth))
+            if data.sums.shape != shape:
+                raise ValueError("Expected RB sums shape (seed,arm,depth,3,3)")
+            validate_counts(data.sums, (-2, -1))
+        survival = joint_probabilities(data.sums)[..., 0, 0]
         means = np.full((2, len(data.depths)), np.nan)
         curves = means.copy()
+        seed_std = means.copy()
         estimate = None
         quality = None
         reason = None
         if cfg is None:
             reason = "RB analysis requires saved cfg; current Form is not a substitute"
         else:
-            validate_axes((data.seeds, data.depths), (cfg.seed, cfg.depth))
-            if data.sums.shape != shape:
-                raise ValueError("Expected RB sums shape (seed,arm,depth,3,3)")
-            validate_counts(data.sums, (-2, -1))
-            survival = joint_probabilities(data.sums)[..., 0, 0]
             complete = np.isfinite(survival).all(axis=(1, 2))
             if np.any(complete):
                 means = survival[complete].mean(axis=0)
@@ -407,7 +412,9 @@ class RBExp(Experiment[RBResult, RBCfg]):
             except (AnalysisFailed, ValueError, RuntimeError) as exc:
                 # Isolate model failure while retaining measured count diagnostics.
                 reason = str(exc)
+                seed_std = seed_standard_deviation(survival[complete])
             else:
+                seed_std = fit.seed_std
                 estimate = estimate_d4(fit.summary)
                 quality = (fit.arm_fits[0].quality, fit.arm_fits[1].quality)
                 # Restore probability coordinates, not the decay ratio.
@@ -416,9 +423,16 @@ class RBExp(Experiment[RBResult, RBCfg]):
         # 3. Compare paired reference/interleaved mean survival and fitted probability curves with failure reasons.
         # Show pooled counts as in the live plot before the equal-seed fit.
         pooled = joint_probabilities(np.nansum(data.sums, axis=0))
+        pooled_std = seed_standard_deviation(survival)
         _, ax = plots.subplots(num="pooled_survival", layout="constrained")
         for arm, label in enumerate(("Reference", "CZ interleaved")):
-            ax.plot(data.depths, pooled[arm, :, 0, 0], ".", label=label)
+            ax.errorbar(
+                data.depths,
+                pooled[arm, :, 0, 0],
+                yerr=pooled_std[arm],
+                fmt=".",
+                label=label,
+            )
         ax.set(
             xlabel="Random Clifford depth", ylabel="Joint (g,g) survival probability"
         )
@@ -427,6 +441,13 @@ class RBExp(Experiment[RBResult, RBCfg]):
         fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(("Reference", "CZ interleaved")):
             (line,) = ax.plot(data.depths, means[arm], ".", label=label)
+            ax.errorbar(
+                data.depths,
+                means[arm],
+                yerr=seed_std[arm],
+                fmt="none",
+                ecolor=line.get_color(),
+            )
             if estimate is not None:
                 ax.plot(data.depths, curves[arm], color=line.get_color())
         ax.set(
