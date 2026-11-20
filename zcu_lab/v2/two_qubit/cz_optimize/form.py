@@ -34,6 +34,8 @@ def make_form(ctx: FormContext) -> Form[CZOptimizeCfg]:
             "reset": None,
             "x90_f1": Slot("$f1.module.x90", copy=True),
             "x90_f2": Slot("$f2.module.x90", copy=True),
+            "x180_f1": Slot("$f1.module.x180", copy=True),
+            "x180_f2": Slot("$f2.module.x180", copy=True),
             "drive": {
                 "f1": Slot("$coupler.module.cz_f1", copy=True),
                 "f2": Slot("$coupler.module.cz_f2", copy=True),

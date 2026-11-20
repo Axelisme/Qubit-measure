@@ -2,13 +2,13 @@
 
 # CZ 形狀優化
 
-`two_qubit/cz_optimize` 以固定 depth 的 interleaved RB 搜尋 CZ 形狀。每個隨機 Clifford 後接 CZ，最後播放整條 interleaved 序列的 inverse。每次評估重用相同的 seeds，目標是在終端讀到 F1、F2 都是 g 的比例，先按 seed 計算，再對 seeds 平均。
+`two_qubit/cz_optimize` 以固定 depth 的 interleaved RB 搜尋 CZ 形狀。Run 按 seed 抽一次該 depth 的 Clifford，之後各候選都重用這組序列。每發依序播放可選的 reset、每個 Clifford 和其後的 CZ、整條序列的 recovery、終端讀取；沒有板上 depth 跳轉。目標是終端 F1、F2 都為 g 的比例，先按 seed 計算，再對 seeds 平均。
 
 CMA-ES 調 I、Q 各 6 個內部控制點，以及 F1、F2 各一個 local Z 角度。雙線播放同一個 shape。各線的帶號 gain、載波頻率、相位與延遲都不變。流程參考 Leon Ding, *Novel Gates with Superconducting Fluxonium Qubits*（2023）§5.3.4。
 
 ## First-round preparation（第一輪準備）
 
-1. 依 [two-qubit 校準指南](../guide.md) 準備 F1／F2 的 X90、完整 mux readout、兩個 role tone 的 GE circle classifier 與 radius，以及雙線 CZ。核對 `f1`、`f2`、`coupler`、`mux` 四個 alias。Tone 位置由 mux group 的 qubit 順序決定。
+1. 依 [two-qubit 校準指南](../guide.md) 準備 F1／F2 的 X90 和 X180、完整 mux readout、兩個 role tone 的 GE circle classifier 與 radius，以及雙線 CZ。核對 `f1`、`f2`、`coupler`、`mux` 四個 alias。Tone 位置由 mux group 的 qubit 順序決定。
 2. 在 GUI 的 arb 波形對話框，用已校準的 CZ 形狀和時長建立一個 arb 資產。Preview 核對 I、Q、時長與 normalize 設定。把 `cz_f1` 與 `cz_f2` 都設成 `arb` 並選同一份資產，保留其他 pulse 欄位。兩個 slot 指向同一個形狀的兩線 pulse，不是把兩線指向同一個 pulse。
 3. 用該 arb 重跑 [CZ amplitude](../cz_amplitude/guide.md) 與 [local Z](../local_z/guide.md)。確認 `$coupler.ext.cz_phase` 裡 F1、F2 的名稱和 correction 都屬於這次校準。
 4. Open `two_qubit/cz_optimize`。若 tab 已開啟，按 Reset Form 重新捕捉。核對各 slot、mux tone 順序與 local Z。兩線指向不同的 asset path 時，即使樣本相同，表單也會拒絕執行。
@@ -19,7 +19,8 @@ CMA-ES 調 I、Q 各 6 個內部控制點，以及 F1、F2 各一個 local Z 角
 
 | 欄位 | 設定與效果 |
 | --- | --- |
-| `x90_f1`、`x90_f2` | 分別捕捉 `$f1.module.x90`、`$f2.module.x90`。每個 X90 使用與同角色 CZ pulse 相同的 generator。 |
+| `x90_f1`、`x90_f2` | 分別捕捉 `$f1.module.x90`、`$f2.module.x90`。 |
+| `x180_f1`、`x180_f2` | 分別捕捉 `$f1.module.x180`、`$f2.module.x180`。 |
 | `drive`、`phase_pair` | 捕捉 `$coupler.module.cz_f1`、`$coupler.module.cz_f2` 與 `$coupler.ext.cz_phase`。 |
 | `readout`、`roles` | 捕捉 `$mux.module.readout` 的完整 tones 與 F1／F2 的原始 tone 位置。 |
 | `reset` | 預設不設。可選脈衝 reset。若選 `reset/mux_herald`，用同一份完整 mux readout，並把 F1、F2 的 tone 位置都設為 g，例如 `{"0": "g", "1": "g"}`。 |
@@ -31,6 +32,8 @@ CMA-ES 調 I、Q 各 6 個內部控制點，以及 F1、F2 各一個 local Z 角
 | `cma_seed` | 控制 CMA 候選抽樣的非負整數。它和選 Clifford 序列的 `seed` 是不同設定。 |
 | `reps`、`initial_delay`、`relax_delay` | 每次評估每個 seed 的 shots、第一發前的等待和每發後的等待。時間單位是 µs。 |
 
+每支 X90 和 X180 都要使用同角色 CZ pulse 的 generator，並提供有限的 scalar phase。Clifford 分解先最少 CZ，再最少實體 X 脈衝；一個 X180 算一支校準脈衝。播放相位為設定值減去該角色的 virtual-Z frame。
+
 低 SNR 時用脈衝 reset 或不設 reset，避免 herald 的分群錯誤影響篩選。有 herald 時，各 seed 的分母是通過篩選的 shots。沒有 herald 時，分母是全部 shots。分母都包含終端分類落在 other 的 shots。若某個 seed 沒有通過 herald 的 shots，Run 會報出 seed 和接受數。先核對 tone 位置、keep 與讀出分群，再調整設定。
 
 ## 成本、停止與保存
@@ -40,6 +43,8 @@ CMA-ES 調 I、Q 各 6 個內部控制點，以及 F1、F2 各一個 local Z 角
 Run 把候選樣條放在記憶體內播放，不為候選建立 library 資產。如果樣本的最大 `|I+iQ|` 大於 1，跳過取數並將目標 0 回報給 CMA。Live 圖的橫軸是評估序號，圓點是本次目標，虛線是到目前為止最佳的**實測**目標。跳過的候選顯示為 0，但不進入最佳值。
 
 Stop 保留已取得的計數，不把未完成的世代回報給 CMA。Save 記錄本次 cfg、各次評估的 14 個參數、峰值、每個 seed 的 3×3 終端計數，以及 Run 開始時讀到的起點資產時長。未取得的計數為 NaN。結果檔不含候選波形樣本。Load 後，Analyze 和寫回提案用保存的時長重建形狀，不讀起點波形檔。若要用原 cfg 再 Run，仍需要起點資產。
+
+Cfg schema 2.0 要求兩支 X180。Load 保留相容的舊 Result 和 metadata，但對舊 major cfg 發出 `CfgUnavailableWarning`，並將 cfg 設為 None。沒有 cfg 時，Analyze 不選最佳，也不提供寫回。舊 cfg 不遷移。
 
 ## Analyze 與寫回
 
