@@ -4,10 +4,7 @@
 
 ## Choose the experiment
 
-Open `two_qubit/cz_amplitude` for an unconditioned return scan.
-Open `two_qubit/cz_amplitude_heralded` to condition the analysis on a preceding
-herald classified as ground for both qubits. Both versions accept optional
-`reset`. Leave it null to emit no reset.
+Open `two_qubit/cz_amplitude` for a return scan. Leave `reset` unset to omit reset.
 
 Bind `f1` and `f2` to distinct fluxoniums, `coupler` to their transmon,
 and `mux` to a MuxGroup containing both qubits. Open or Reset captures aliases,
@@ -62,7 +59,7 @@ A high return alone does not establish a π conditional phase.
 
 Analyze returns `fit`, the first-return fit summary.
 It contains `scale`, `period`, `error`, `offset`, `contrast`, `fit_quality` and
-`reason`. Counts, probabilities, curves and herald fractions stay inside analysis
+`reason`. Counts, probabilities and curves stay inside analysis
 for plotting.
 
 FIT sends P00 to the fixed-zero-phase model
@@ -71,7 +68,7 @@ the measured first positive return, `period`.
 
 Measure scale=0 and continue through at least one full cycle.
 FIT uses the contiguous prefix with all requested shots acquired.
-It stops that prefix at the first incomplete scale.
+It stops that prefix at the first unmeasured scale or scale with zero accepted shots.
 A cancelled suffix after a full first cycle still allows a proposal.
 Partial scales remain visible but do not enter the fit.
 Use enough points to resolve the oscillation; sparse sampling can alias a faster one.
@@ -124,7 +121,17 @@ Old per-shot IQ files without sums are rejected; there is no automatic conversio
 Acquisition exceptions propagate unchanged from Run. A failed Run publishes no
 new record and leaves the previous successful record unchanged, even after Stop.
 
-See the [heralded guide](guide_heralded.md) for post-selection and pass fraction.
+## Select shots with mux herald
+
+Choose `reset/mux_herald` in Reset. Use the same mux readout as the terminal
+readout. Set `keep: {'0': g, '1': g}` if F1 and F2 occupy positions 0 and 1.
+Use their original tone positions from the full readout, not their ADC numbers.
+
+Probabilities are conditional on passing herald. Divide each terminal class
+count by the point's total count. Acceptance is the total divided by
+reps × rounds, not ground-state purity. A point with no accepted shots has
+NaN probabilities. Completed rounds remain usable when Run stops early.
+Files saved under the former separate heralded experiment no longer load.
 
 ## Notebook
 

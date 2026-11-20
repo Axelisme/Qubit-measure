@@ -18,16 +18,13 @@ class ReturnData:
     """Count-derived terminal probabilities and fit eligibility.
 
     populations is (Nc,Nd,9), flattened F1/F2 g/e/other order, with P00 first.
-    complete marks fully acquired points with nonempty selected counts.
-    acquired_shots is their total (Nc,Nd), NaN for unmeasured points.
-    herald_matrix is (Nc,Nd,3,3) or None for ordinary acquisition.
-    Its (g,g) cell is pass fraction, not ground-state purity.
+    complete marks points with finite, positive counts from completed rounds.
+    acquired_shots is the accepted total (Nc,Nd), NaN for unmeasured points.
     """
 
     populations: NDArray[np.float64]
     complete: NDArray[np.bool_]
     acquired_shots: NDArray[np.float64]
-    herald_matrix: NDArray[np.float64] | None
 
 
 @dataclass(frozen=True)
@@ -88,7 +85,11 @@ def _fit_duration_rate(
     *,
     complete: bool,
 ) -> RabiRate:
-    reason = _duration_fit_reason(durations, values, complete=complete)
+    reason = (
+        "No accepted shots at one or more durations"
+        if np.any(shots == 0)
+        else _duration_fit_reason(durations, values, complete=complete)
+    )
     if reason:
         return RabiRate(None, None, reason, None, None)
     try:

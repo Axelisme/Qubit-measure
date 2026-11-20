@@ -37,7 +37,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
-from .._readout import JointRoles
+from .._readout import JointRoles, MuxResetCfg
 from .._sums import sigma, validate_classifiers
 from ._analysis import (
     IdleBranchFit,
@@ -82,7 +82,7 @@ class IdleZZCfg(ConfigBase):
     """
 
     reset: Annotated[
-        Reset.Cfg | None,
+        MuxResetCfg | None,
         FieldMeta(label="Reset", description="Optional reset before every shot."),
     ] = None
     x180_f1: Annotated[
@@ -329,7 +329,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 )
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
-                    builder.emit(Reset("reset", config.reset))
+                    builder.emit(Reset("reset", config.reset, terminal=readout))
                 with (
                     builder.branch(by="spectator_states", align_timeline=True) as cases,
                     cases.case(1),
@@ -363,12 +363,12 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
     ) -> None:
         """Fit full saved delay axes and plot signed frequency differences.
 
-        Every required delay must contain all requested rounds. Other remains
+        Every required delay must have at least one accepted shot. Other remains
         in the sigma denominator. Count errors weight the fringe fit.
         No calibration or DC writeback occurs.
 
         """
-        # 1. Fit only full-delay, full-round Ramsey branches with count-error weights and other in the denominator.
+        # 1. Fit full-delay branches with count-error weights and other in the denominator.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:

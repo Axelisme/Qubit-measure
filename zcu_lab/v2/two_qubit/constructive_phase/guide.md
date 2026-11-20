@@ -7,7 +7,6 @@
 Scan F2 minus F1 relative phase in degrees and common envelope duration in us.
 Each shot emits optional reset, nominal B11 preparation, simultaneous two-line
 drive, double Xπ contrast and one terminal mux readout.
-The ordinary version retains every classified shot without herald selection.
 `reset=None` emits no reset. Set a reset cfg only after reviewing its pulse
 and timing against the authorized limits. The Form's Reset action recaptures
 inputs; it does not emit a reset pulse.
@@ -88,7 +87,7 @@ Every class axis is ordered g, e, other.
 Rounds accumulate during acquisition without normalization.
 File size does not grow with repetitions or rounds.
 Completed rounds survive cancellation; unmeasured points remain NaN.
-Partial rounds remain visible.
+A point with counts from at least one completed round can enter the fit if it has accepted shots.
 Fits require all requested shots at every point of a duration trace.
 Always check the execution status before accepting partial results.
 
@@ -99,7 +98,7 @@ Old raw-IQ files without `sums` are rejected; there is no format fallback.
 
 FIT proposes only F2's ordinary charge pulse and its independent coupler slot.
 The writeback targets remain `<coupler>.pulses.cz_f2` and
-`<coupler>.module.cz_f2` in both versions.
+`<coupler>.module.cz_f2`.
 F2.phase becomes saved F1.phase plus the fitted relative phase.
 F2 frequency, signed gain, waveform and timing stay as measured.
 F1 stays the phase reference. Missing cfg or an unresolved phase gives no proposal.
@@ -107,7 +106,17 @@ Inspect the captured destination and waveform before Apply.
 The pulse and slot rows apply independently; review partial selections.
 Only an applied proposal becomes calibration for later Forms.
 
-Use `two_qubit/constructive_phase_heralded` for the version conditioned on a ground-ground herald.
+## Select shots with mux herald
+
+Choose `reset/mux_herald` in Reset. Use the same mux readout as the terminal
+readout. Set `keep: {'0': g, '1': g}` if F1 and F2 occupy positions 0 and 1.
+Use their original tone positions from the full readout, not their ADC numbers.
+
+Probabilities are conditional on passing herald. Divide each terminal class
+count by the point's total count. Acceptance is the total divided by
+reps × rounds, not ground-state purity. A point with no accepted shots has
+NaN probabilities. Completed rounds remain usable when Run stops early.
+Files saved under the former separate heralded experiment no longer load.
 After amplitude/frequency selection, measure conditional phase and local Z.
 Repeat calibration after changing pulse shapes or the pair's working point.
 Validate the actual FTF control chain separately from offline compile checks.

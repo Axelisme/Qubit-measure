@@ -1,11 +1,17 @@
-"""Captured full-tone FTF role binding shared by two-qubit runs."""
+"""Readout roles and reset configuration shared by two-qubit runs."""
 
 from __future__ import annotations
 
-from typing import Annotated, Self
+from typing import Annotated, Self, TypeAlias
 
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta, MuxReadoutCfg
+from zcu_tools.program.v2.modules import MuxHeraldResetCfg, ResetCfg
+
+# ADR-0074: select shot masking through the existing reset field.
+MuxResetCfg: TypeAlias = Annotated[
+    ResetCfg | MuxHeraldResetCfg, Field(discriminator="type")
+]
 
 
 class JointRoles(ConfigBase):

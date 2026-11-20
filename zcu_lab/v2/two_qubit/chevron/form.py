@@ -1,7 +1,6 @@
 """Fixed-capture duration scan with explicit two-line drive and GE calibration inputs."""
 
 from dataclasses import replace
-from typing import TypeVar
 
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -14,10 +13,8 @@ from zcu_lab.v2.support.measure.mux_forms import (
 from .._measure import captured_roles
 from .core import ChevronCfg
 
-T_Cfg = TypeVar("T_Cfg", bound=ChevronCfg)
 
-
-def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
+def make_form(ctx: FormContext) -> Form[ChevronCfg]:
     """Capture roles and pulses; scan endpoints require operator input.
 
     Existing CZ slots are editable source pairs, not certified gate settings.
@@ -49,7 +46,7 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
         drive[role] = node
     readout = mux_readout_initial(ctx)
     return Form(
-        cfg_type,
+        ChevronCfg,
         tree={
             "reps": 1000,
             "rounds": 10,
@@ -64,8 +61,3 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
             "duration": Range(None, None, expts=101),
         },
     )
-
-
-def make_form(ctx: FormContext) -> Form[ChevronCfg]:
-    """Capture roles and seed ordinary scan inputs; optional reset starts None."""
-    return scan_form(ctx, ChevronCfg)

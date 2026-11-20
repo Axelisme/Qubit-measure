@@ -72,10 +72,11 @@ Result 用複數名，如 `delays`、`gains`、`freqs`、`depths`；沒有自然
 只有單一計數 N、由它推導 0 到 N 的軸時，cfg 用 `n_<軸名>`，軸與 loop 用該量的名字。
 此軸包含 0 與 N，共 N+1 點，`add_loop` 與 Result 使用相同軸名。
 
-以下五個家族的普通與 heralded 版本，共 10 個實驗，已將 cfg 改為單數並各自提升 schema major。
+下表的五個一般入口，以及 conditional phase 和 RB 保留的獨立 heralded 入口，已將 cfg 掃描欄位改為單數並各自提升 schema major。
 Result 欄位、儲存軸名與 label／unit 維持原樣。
-舊 major 的 run 保留 Result 與 metadata，cfg 為 None 並發出 `CfgUnavailableWarning`。
+這些入口載入舊 major 的 run 時保留 Result 與 metadata，cfg 為 None 並發出 `CfgUnavailableWarning`。
 舊 cfg 不遷移、不提供 alias，也不支援重新分析，避免忽略舊 key 後靜默套用新預設值。
+已移除的獨立 heralded 入口不載入舊 run。現有入口見 [two-qubit 實驗清單](README.md#two-qubit-實驗清單)。
 
 | 實驗 | 舊 cfg 欄位 | 目前欄位 |
 | --- | --- | --- |

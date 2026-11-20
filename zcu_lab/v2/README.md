@@ -11,7 +11,7 @@
 
 - 寫或改實驗：讀 [實驗寫法指南](experiment-style.md)，從其中的範本開始寫。
 - [FTF bring-up 與 CZ 校準](two_qubit/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
-  - 九個實驗各有非 heralded 與 heralded 入口，均在取數時分類並保存計數，見下方[完整清單](#two-qubit-實驗清單)。
+  - 一般入口用 reset 選擇 herald。只有 RB 與 conditional phase 另有 g,g／e,e 聯合分析入口，見下方[完整清單](#two-qubit-實驗清單)。
 - [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與三項檢查。
 - [`twotone/t1_cov`](twotone/time_domain/t1_cov/guide.md) 用兩次單 tone 讀出的二階矩自校準，擬合狀態改變機率以估計 T1。可選脈衝 reset，不需 classifier。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records 與資料形狀，新實驗從[寫法慣例](experiment-authoring.md#寫法慣例)選 cfg、分析與圖 API 的寫法。
@@ -22,21 +22,21 @@
 
 ## Two-qubit 實驗清單
 
-下表列出九組成對的 GUI／MCP registry keys。每個連結指向該版 guide。兩版各有 cfg、Result、run 與 analyze，不用 mode 切換。另有單一入口 [`two_qubit/cz_optimize`](two_qubit/cz_optimize/guide.md)，以固定 depth 的 interleaved RB 存活率搜尋 CZ 的 I/Q 形狀與 local Z。該入口的 `reset` 欄位可選 mux herald。
+下表列出 two-qubit 的 GUI／MCP registry keys。每個連結指向該入口的 guide。另有 [`two_qubit/cz_optimize`](two_qubit/cz_optimize/guide.md)，以固定 depth 的 interleaved RB 搜尋 CZ 的 I/Q 形狀與 local Z。
 
-| 實驗 | 非 heralded key／guide | Heralded key／guide |
+| 實驗 | 一般 key／guide | Heralded key／guide |
 | --- | --- | --- |
-| Joint readout | [`two_qubit/joint_readout`](two_qubit/joint_readout/guide.md) | [`two_qubit/joint_readout_heralded`](two_qubit/joint_readout/guide_heralded.md) |
+| Joint readout | [`two_qubit/joint_readout`](two_qubit/joint_readout/guide.md) | — |
 | Conditional phase | [`two_qubit/conditional_phase`](two_qubit/conditional_phase/guide.md) | [`two_qubit/conditional_phase_heralded`](two_qubit/conditional_phase/guide_heralded.md) |
-| Chevron | [`two_qubit/chevron`](two_qubit/chevron/guide.md) | [`two_qubit/chevron_heralded`](two_qubit/chevron/guide_heralded.md) |
-| Conditional spectroscopy | [`two_qubit/conditional_spectroscopy`](two_qubit/conditional_spectroscopy/guide.md) | [`two_qubit/conditional_spectroscopy_heralded`](two_qubit/conditional_spectroscopy/guide_heralded.md) |
-| Constructive phase | [`two_qubit/constructive_phase`](two_qubit/constructive_phase/guide.md) | [`two_qubit/constructive_phase_heralded`](two_qubit/constructive_phase/guide_heralded.md) |
-| CZ amplitude | [`two_qubit/cz_amplitude`](two_qubit/cz_amplitude/guide.md) | [`two_qubit/cz_amplitude_heralded`](two_qubit/cz_amplitude/guide_heralded.md) |
-| Idle ZZ | [`two_qubit/idle_zz`](two_qubit/idle_zz/guide.md) | [`two_qubit/idle_zz_heralded`](two_qubit/idle_zz/guide_heralded.md) |
-| Local Z | [`two_qubit/local_z`](two_qubit/local_z/guide.md) | [`two_qubit/local_z_heralded`](two_qubit/local_z/guide_heralded.md) |
+| Chevron | [`two_qubit/chevron`](two_qubit/chevron/guide.md) | — |
+| Conditional spectroscopy | [`two_qubit/conditional_spectroscopy`](two_qubit/conditional_spectroscopy/guide.md) | — |
+| Constructive phase | [`two_qubit/constructive_phase`](two_qubit/constructive_phase/guide.md) | — |
+| CZ amplitude | [`two_qubit/cz_amplitude`](two_qubit/cz_amplitude/guide.md) | — |
+| Idle ZZ | [`two_qubit/idle_zz`](two_qubit/idle_zz/guide.md) | — |
+| Local Z | [`two_qubit/local_z`](two_qubit/local_z/guide.md) | — |
 | Paired RB／IRB | [`two_qubit/rb`](two_qubit/rb/guide.md) | [`two_qubit/rb_heralded`](two_qubit/rb/guide_heralded.md) |
 
-一般入口保存 terminal F1/F2 的 9 類計數。`two_qubit/rb` 可用 `reset/mux_herald` 在序列前讀出並篩選 shot，仍只保存通過篩選的 9 類終端計數。`_heralded` 入口保存 herald F1/F2、terminal F1/F2 的 81 類計數，分析 herald g,g 與 e,e 兩組。兩版的 `reset` 預設 None。Herald pass fraction 是 g,g 接受率，不是 ground-state purity。採樣與保存量見 [FTF guide](two_qubit/guide.md#採樣數與成本)。
+一般入口保存 terminal F1/F2 的 9 類計數。除了 `conditional_phase`，表內一般入口可用 `reset/mux_herald` 在序列前篩選 shot，仍只保存這 9 類終端計數。RB 與 conditional phase 的 `_heralded` 入口保存 81 類 herald × 終端計數，讓分析同時使用 herald g,g 與 e,e 組。採樣與保存量見 [FTF guide](two_qubit/guide.md#採樣數與成本)。
 
 ## 套件邊界
 
@@ -62,7 +62,7 @@ mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
 AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/resonance.py)。
 Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
-[\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩版各自在 `analyze()` 畫自己的圖，
+[\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩個實驗各自在 `analyze()` 畫自己的圖，
 [\_sums.py](two_qubit/_sums.py) 只負責分類計數的數值換算。
 Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
 並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。

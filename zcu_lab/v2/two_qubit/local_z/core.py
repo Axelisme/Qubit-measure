@@ -40,7 +40,7 @@ from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg
 from .._phase import QuadraturePhase, count_phase, phase_variance, sigma_variance
-from .._readout import JointRoles
+from .._readout import JointRoles, MuxResetCfg
 from .._sums import sigma, validate_classifiers
 
 
@@ -92,7 +92,7 @@ class LocalZCfg(ConfigBase):
     """
 
     reset: Annotated[
-        Reset.Cfg | None,
+        MuxResetCfg | None,
         FieldMeta(label="Reset", description="Optional reset before each shot."),
     ] = None
     x90_f1: Annotated[
@@ -294,7 +294,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                 )
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
-                    builder.emit(Reset("reset", config.reset))
+                    builder.emit(Reset("reset", config.reset, terminal=readout))
                 with builder.branch(by="target", align_timeline=True) as cases:
                     with cases.case(0):
                         builder.emit(prepare_f1)
@@ -366,13 +366,8 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         variances = np.stack(
             (sigma_variance(counts[0], "f1"), sigma_variance(counts[1], "f2"))
         )
-        # Both projections must contain every planned round before phase/fit.
-        complete = np.isclose(
-            counts.sum(axis=(-2, -1)),
-            cfg.reps * cfg.rounds,
-            rtol=8 * np.finfo(float).eps,
-            atol=0,
-        )
+        totals = counts.sum(axis=(-2, -1))
+        complete = np.isfinite(totals) & (totals > 0)
         quadratures = np.where(complete, quadratures, np.nan)
         targets: list[tuple[QuadraturePhase, ...]] = []
         phase_rows: list[NDArray[np.float64]] = []
@@ -386,8 +381,13 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             values = [p.logical_phase_deg for p in points]
             targets.append(points)
             phase_rows.append(np.array(values, dtype=np.float64))
+            reason = (
+                "No accepted shots at one or more quadratures"
+                if np.any(totals[t] == 0)
+                else "Incomplete phase row"
+            )
             fits.append(
-                PhaseLineFit(reason="Incomplete phase row")
+                PhaseLineFit(reason=reason)
                 if None in values
                 else fit_phase_line(
                     np.array(cfg.gate_count, dtype=np.float64),

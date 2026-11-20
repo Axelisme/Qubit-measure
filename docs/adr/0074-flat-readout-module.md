@@ -120,8 +120,8 @@ Reducer 接收 I/Q 分量，需要複數運算時自行轉換。`acquire_decimat
 舊 cfg 沒有 classifier 時，T1 分析略過 confusion 修正，不讀 point 校準。
 GE 以 run 的 readout slot 解析目標，proposal builder 與 materialized 比對契約見 [[0008]]。
 Mux GE 每個 phase 合成一個完整 proposal，只更新成功 tone 的精確 classifier 路徑。
-雙 qubit 的 9 個實驗各有 ordinary 與 heralded 兩版，兩版都在 Run 前要求兩個角色 tone 的 circle 與 GE Post 的 radius，缺少或非 circle 時 cfg 驗證報錯。
-取數端以 shot sums 分類：ordinary 存終端讀出的 9 類計數，heralded 存 herald 加終端的 81 類計數；Result 保存原 float64 總和，不再保存逐 shot IQ，也不在 analyze 分類。
+雙 qubit 分類實驗在 Run 前要求兩個角色 tone 的 circle 與 GE Post 的 radius，缺少或非 circle 時 cfg 驗證報錯。
+取數端以 shot sums 分類：一般入口存終端讀出的 9 類計數，獨立 heralded 入口存 herald 加終端的 81 類計數。Result 保存原 float64 總和，不保存逐 shot IQ，也不在 analyze 分類。
 2026-10-30 使用者裁定：「不要再有逐shot記錄的實驗了，除了singleshot/ge這種本來就是用於生成分類參數的實驗，其他都請在平均時分類」。gg／ee 分析與 writeback 細節由 `zcu_lab/v2/two_qubit/guide.md` 擁有。
 Readout owner 的單 ADC circle lookup 不理解 lab 角色，也不讀 live library。
 其餘 singleshot population consumers 使用 shot-sums 分類取數，confusion correction 只讀 saved cfg。
@@ -261,13 +261,13 @@ Experiment 使用 program 的取數能力，lab core 不依賴 GUI，framework �
 
 本段的 heralding 只指分類後的 post-selection，命名見上方 2026-11-20 的 t1_cov 註。
 
-**選用。** 實驗沿用既有 `reset` 欄位選用 herald，不另加 herald 欄位或 `_heralded` 版本。
+**選用。** 只需要篩選初態時，實驗沿用既有 `reset` 欄位選用 herald，不另加 herald 欄位或 `_heralded` 版本。
 `ResetWithHeraldCfg` 是普通 reset 加上 `reset/herald` 與 `reset/mux_herald` 的 union；`Reset.Cfg` 不含 herald 類型。
-目前只有 plain `two_qubit/rb` 的 reset 欄位收 herald。它的終端讀取是 mux，因此只收普通 reset 與 `reset/mux_herald`。
+一般入口的 RB、chevron、constructive phase、CZ amplitude、conditional spectroscopy、local Z、idle ZZ 與 joint readout 使用 mux 終端讀取，因此只收普通 reset 與 `reset/mux_herald`。
 `twotone/t1_cov` 使用 `Reset.Cfg`，不收 herald：遮罩會改變它的聯合二階矩，而 cov 已用第一次讀取自校準。
 選用 herald 時，Result 的形狀與存檔欄位和沒有 herald 時相同。
 Herald reset 只留下通過的 shot，不保存被排除 shot 的類別。
-雙 qubit 的 9 個 `_heralded` 實驗保留，它們存 herald 加終端讀取的 81 類計數，供需要全部 herald 類別的條件分析使用。
+只有 `two_qubit/rb_heralded` 與 `two_qubit/conditional_phase_heralded` 保留獨立入口。兩者保存 herald 加終端讀取的 81 類計數。
 
 **Herald 模塊。**
 
@@ -297,7 +297,7 @@ Herald reset 只留下通過的 shot，不保存被排除 shot 的類別。
 
 - 平均（`acquire`、`run_acquire` 與 round hook）：每點輸出 `Σ m·x / N`，m 以 0／1 計。x 是逐 shot 除以積分長度、扣 IQ offset 後的值，N 是 reps 乘以已完成的 rounds。有來源時平均改在 host 上逐 shot 算。接受率留在平均值的幅度裡，不另外存。
 - Reducer：每輪收到遮罩，見本節開頭。`shot_sums` 只加總保留的 shot。
-- 分類計數：機率除以計數總和，是「通過 herald 的 shot 裡」的條件機率。例如 RB 的 joint00 存活率是 herald 兩個 tone 都是 g 時的存活率。接受率等於計數總和除以 reps×rounds，不另外存。點的完整性是每一輪都跑完。目前只有 plain `two_qubit/rb` 的分析用這條規則，其他 plain two-qubit 實驗接上 herald 時再改。
+- 分類計數：機率除以該格計數總和，是通過 herald 的 shot 裡的條件機率。例如 RB 的 joint00 存活率是 herald 兩個 tone 都是 g 時的存活率。接受率等於計數總和除以 reps×rounds，不另外存。取數只累加已完成的 rounds，因此計數有限的格子視為完整。中途停止、少跑幾輪的格子仍可用，統計誤差按實際計數計算。未量的格子維持 NaN。已量的格子若總和為零，機率為 NaN，分析附上原因。一般入口的 RB、chevron、constructive phase、CZ amplitude、conditional spectroscopy、local Z、idle ZZ 與 joint readout 都依這條規則判讀分類計數。
 - `run_acquire_shots` 回傳 `ShotResult`：`shots` 是可見讀取的原始 int64 積分 IQ `(points, reps, reads, 2)`，`mask` 是 bool `(points, reps)`。框架不套用遮罩，被排除的 shot 仍在 `shots` 裡，用法由實驗決定。
 
 **Herald 讀取對實驗隱藏。**
@@ -317,7 +317,7 @@ Herald readout 參數有掃描時在 build 報錯，因為 classifier 只在一�
 **裁決。**
 
 - 放置：2026-11-19，使用者說：「H我自己的想法是，如果是reset模塊，那就放棄可以取得多餘的資訊，比如說把分類非g的shot值都設定成0來使其對平均沒有貢獻。對於想要利用更多資訊的實驗，保持分化是合理的。」2026-11-20，使用者對整批建議回答：「好，我沒問題了，全部採用建議」。
-  這推翻 2026-10-29「上層使用新實驗組，比如heralding/*」的放置選擇。一般實驗不必再各做一個 herald 版本；9 個 `_heralded` 實驗保留，因為改成 reset 模塊會失去 81 類 herald×終端組合的條件分析。
+  這推翻 2026-10-29「上層使用新實驗組，比如heralding/*」的放置選擇。獨立入口的保留條件見下一節。
 - 遮罩在取數層、所有下游統一收：2026-11-19，「我傾向統一的處理方式，統一知道權重的存在，而也代表權重的Mixin要在比較底層，作為通用底層功能存在，而不屬於Module層級。」
 - 多個來源與 0／1 值：2026-11-20，「2我認為可以支援多次register_shot_weights，照順序執行，並合併mask，考慮這這個機制，我傾向mask先只有0/1就好，用int?目前沒想出用float的需求，看你的想法。」型別 bool 是 agent 依「看你的想法」做的選擇：值只有兩種，合併直接用 `&`，乘上 IQ 時自動轉型。
 - 遮罩形狀：2026-11-20，使用者提出：「關於mask，我擔心的是mux與多個ro ch的多次readout，據我所知，不同ro ch儲存欄位是分開的，那mask的形狀就需要討論一下。」對以 shot 為單位、所有 ro ch 共用的選項，使用者回答「M1」。
@@ -337,6 +337,14 @@ Herald readout 參數有掃描時在 build 報錯，因為 classifier 只在一�
 - 模擬：2026-11-19，使用者要求：「7不要逐shot模擬，太慢了，請使用一些統計手段來等效生成」。實測顯示，FTF 預設參數下讀取窗口內至少躍遷一次的機率約 21%，只用高斯會讓三階矩與誤判率失真；逐 shot 路徑在 100000 reps 暖機後約 0.2 s。使用者看過數字後回答：「shot抽樣就e吧」（2026-11-20）。
 
 選項比較與被否決的做法見 [Herald 改為 reset 模塊與逐 shot 遮罩](../discussions/2026-11-20-herald-reset-shot-masks.md)。
+
+#### 保留獨立 heralded 實驗的條件
+
+分析要在 gg 和 ee 兩組共用一個參數，而且準備誤差只進各組自己的振幅或偏移、不移動共用參數時，才保留獨立的 heralded 實驗。例如 RB 的衰減參數 `p`，兩組各自擬合振幅與偏移。Conditional phase 只用 π 交點寫回；兩組在 π 交點相符，不代表離開 π 時也等效。
+
+準備誤差若會拉動共用參數，或分析根本不共用參數，就用 `reset/mux_herald` 只保留 gg。例如 idle ZZ 的 ζ 會受準備污染拉動，joint readout 的混淆矩陣直接包含準備誤差。
+
+2026-11-20，使用者說：「有一些实验呢，它天生不在意 GG 还是 EE，它在意的是 GE 的交换，或者是保留在 GGEE 的属性。这种情况下，利用 hurdling 去。诶，具体来说，用交叉矩以及 hurdling 这两种方案去分析，有助于提高拟合可信度。那其他实验就用 reset 模块就好了。」使用者追問 gg 與 ee 是否等效，核對後同意保留 RB 和 conditional phase，並將準則寫入本 ADR。語音用詞、數值與選項比較見[只為共用參數保留獨立 heralded 實驗](../discussions/2026-11-20-heralded-experiment-pruning.md)。
 
 ### Owner 不變，caller 不重建舊配置
 

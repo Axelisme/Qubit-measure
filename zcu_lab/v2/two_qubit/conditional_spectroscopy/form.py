@@ -1,7 +1,6 @@
 """Fixed-capture thermal spectroscopy Form with explicit two-line probe inputs."""
 
 from dataclasses import replace
-from typing import TypeVar
 
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -14,10 +13,8 @@ from zcu_lab.v2.support.measure.mux_forms import (
 from .._measure import captured_roles
 from .core import SpectroscopyCfg
 
-T_Cfg = TypeVar("T_Cfg", bound=SpectroscopyCfg)
 
-
-def spectroscopy_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
+def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
     """Capture roles, preparation/readout and available ordinary CZ pulse slots.
 
     Existing coupler CZ slots are editable starting points, not assumed weak
@@ -52,7 +49,7 @@ def spectroscopy_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
         drive[role] = node
     readout = mux_readout_initial(ctx)
     return Form(
-        cfg_type,
+        SpectroscopyCfg,
         tree={
             "reps": 1000,
             "rounds": 10,
@@ -68,8 +65,3 @@ def spectroscopy_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
             "dc": Range(0, 0, expts=1),
         },
     )
-
-
-def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
-    """Capture spectroscopy inputs with optional reset disabled."""
-    return spectroscopy_form(ctx, SpectroscopyCfg)
