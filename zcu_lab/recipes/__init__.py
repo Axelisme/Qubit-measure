@@ -40,7 +40,9 @@ from .t1_cov import DEFINITION as T1_COV
 from .t2echo import DEFINITION as T2ECHO
 from .t2ramsey import DEFINITION as T2RAMSEY
 from .time_rabi import DEFINITION as TIME_RABI
+from .two_qubit_constructive_phase import DEFINITION as TWO_QUBIT_CONSTRUCTIVE_PHASE
 from .two_qubit_cz_amplitude import DEFINITION as TWO_QUBIT_CZ_AMPLITUDE
+from .two_qubit_local_z import DEFINITION as TWO_QUBIT_LOCAL_Z
 from .twotone_chain import DEFINITION as TWOTONE_CHAIN
 from .twotone_flux_dep import DEFINITION as TWOTONE_FLUX_DEP
 from .twotone_spectrum import DEFINITION as TWOTONE_SPECTRUM
@@ -90,4 +92,6 @@ RECIPES = (
     RO_OPTIMIZE_CHAIN_FREQ,
     RO_OPTIMIZE_CHAIN_LENGTH,
     TWO_QUBIT_CZ_AMPLITUDE,
+    TWO_QUBIT_LOCAL_Z,
+    TWO_QUBIT_CONSTRUCTIVE_PHASE,
 )

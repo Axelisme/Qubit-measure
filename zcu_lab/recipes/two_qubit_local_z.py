@@ -1,0 +1,108 @@
+"""Fit each role's local Z phase and review the correction pair."""
+
+from dataclasses import replace
+from typing import Annotated
+
+from pydantic import Field
+from zcu_tools.mcp.measure.recipe_api import (
+    KEEP,
+    Keep,
+    Overrides,
+    RecipeInputs,
+    RecipeReport,
+    RecipeSession,
+    ReuseTabId,
+    recipe,
+    report_number,
+)
+
+from zcu_lab.v2.two_qubit.local_z.core import LocalZAnalysis, LocalZFit
+
+from .two_qubit_helpers import TwoQubitTarget, apply_selected_writeback
+
+
+class LocalZInputs(RecipeInputs):
+    """Four-role target and gate-count scan. Overrides apply after named edits."""
+
+    target: TwoQubitTarget | None = Field(
+        default=None,
+        description="Role bindings for this Reset. Omitted or null roles keep the current aliases.",
+    )
+    reuse_tab_id: ReuseTabId
+    overrides: Overrides
+    gate_count: list[Annotated[int, Field(strict=True, ge=0)]] | None | Keep = Field(
+        KEEP, description="Consecutive nonnegative CZ gate counts to measure."
+    )
+    reps: int | None | Keep = Field(
+        KEEP, description="Repetitions per point per round."
+    )
+    rounds: int | None | Keep = Field(KEEP, description="Acquisition round count.")
+
+
+class LocalZReport(RecipeReport):
+    """Owner's phase-line fits by role, with no shared fit quality."""
+
+    f1: LocalZFit | None = Field(
+        default=None,
+        description="F1's fit or fit reason; null if Analyze returned no summary.",
+    )
+    f2: LocalZFit | None = Field(
+        default=None,
+        description="F2's fit or fit reason; null if Analyze returned no summary.",
+    )
+
+
+def _report_fit(fit: LocalZFit) -> LocalZFit:
+    return replace(
+        fit,
+        intercept_deg=report_number(fit.intercept_deg),
+        slope_deg=report_number(fit.slope_deg),
+        correction_deg=report_number(fit.correction_deg),
+        slope_error_deg=report_number(fit.slope_error_deg),
+    )
+
+
+@recipe(
+    "two_qubit_local_z",
+    description="Fit local Z phase for F1 and F2, review the correction pair and save.",
+)
+async def two_qubit_local_z(
+    session: RecipeSession, inputs: LocalZInputs
+) -> LocalZReport:
+    """Sweep CZ gate counts and fit one phase line in degrees for each role.
+
+    See [Phase and slope](../v2/two_qubit/local_z/guide.md#phase-與-slope).
+    Set gate_count as a list of consecutive nonnegative integers. Omission
+    keeps the Reset value; explicit null passes to the Form. Use overrides for
+    pulses, readout and reset. Ask about the Primary correction pair only if
+    both fits give corrections. Save after a completed Run, even without a pair.
+    """
+    tab = session.open_tab(
+        "two_qubit/local_z",
+        target=inputs.target.aliases() if inputs.target is not None else None,
+        reuse=inputs.reuse_tab_id,
+    )
+    tab.set("gate_count", inputs.gate_count)
+    tab.set("reps", inputs.reps)
+    tab.set("rounds", inputs.rounds)
+    tab.apply_overrides(inputs.overrides)
+    tab.check_ready()
+
+    await tab.run()
+    try:
+        analysis = await tab.analyze("primary", result=LocalZAnalysis)
+        if analysis.result is None:
+            return LocalZReport(analysis_failure=analysis.reason)
+
+        f1, f2 = map(_report_fit, analysis.result.fits)
+        applied = False
+        if f1.correction_deg is not None and f2.correction_deg is not None:
+            decision = await tab.ask_writeback(stage="primary")
+            applied = apply_selected_writeback(tab, decision)
+
+        return LocalZReport(f1=f1, f2=f2, writeback_applied=applied)
+    finally:
+        tab.save()
+
+
+DEFINITION = two_qubit_local_z

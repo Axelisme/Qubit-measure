@@ -65,3 +65,29 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 有回返時，Primary 提出兩筆 CZ 脈衝 gain 更新和兩筆 coupler slot 更新。
 脈衝和 slot 是獨立候選。需要設定 slot 時，請一併選取對應的脈衝與 slot。
 檢查 [候選目的地與 Apply 規則](../v2/two_qubit/cz_amplitude/guide.md#preview-and-selected-apply) 再回答。
+
+## two_qubit_local_z
+
+`two_qubit_local_z` 執行一次 `two_qubit/local_z`。
+量測前依 [adapter 的準備說明](../v2/two_qubit/local_z/guide.md#run-前) 檢查兩顆 qubit 的 Xπ/2 脈衝與 CZ 脈衝。
+`gate_count` 填連續的非負整數，至少三個，例如 `[0, 1, 2, 3, 4]`。省略就保留 Reset 值；填 null 將 null 交給 Form 驗證。
+
+報告的 `f1` 和 `f2` 各有 `intercept_deg`、`slope_deg`、`correction_deg`、`slope_error_deg`、`reason` 和 `fit_quality`。
+`slope_deg` 和它的 1σ 不確定度 `slope_error_deg` 都按每個 CZ gate 計。`correction_deg` 是不重新 wrap 的負斜率。
+頂層 `fit_quality` 為 null。任一角色擬合不可用時，該角色的 `reason` 說明原因，另一角色的結果仍會回報。
+
+兩條擬合都給出 correction 才詢問是否寫入 `$coupler.ext.cz_phase`。這是一筆包含 F1/F2 身分和兩個校正值的候選。
+寫回不改脈衝或 slot。參見 [擬合解讀](../v2/two_qubit/local_z/guide.md#phase-與-slope) 和 [候選內容](../v2/two_qubit/local_z/guide.md#preview-與-apply)。
+
+## two_qubit_constructive_phase
+
+`two_qubit_constructive_phase` 執行一次 `two_qubit/constructive_phase`。
+依 [adapter 的準備說明](../v2/two_qubit/constructive_phase/guide.md#prepare-the-form) 確認兩路脈衝的共同頻率與掃描範圍。
+`relative_phase_range: [start, stop]` 填 F2 減 F1 的相位範圍，單位 deg。`duration_range: [start, stop]` 填兩路共同脈衝長度，單位 us，兩端都必須大於零。
+`relative_phase_points` 和 `duration_points` 寫入各自的 Form Expts。省略保留 Reset 值；Reset 未預填兩軸端點，須用具名欄位或 overrides 提供。
+
+報告的 `relative_phase_deg` 是最大擬合速率對應的相對相位。找不到相位時，此欄為 null，`reason` 說明原因。
+頂層 `fit_quality` 轉交速率平方的干涉擬合診斷，不回報個別脈衝長度曲線的擬合品質。
+
+相位可辨識時，Primary 提出 F2 脈衝的 phase 更新和 coupler 的 F2 slot 兩筆候選。兩筆可獨立選取。
+F2 的新 phase 是來源 F1 phase 加上擬合的相對相位。參見 [候選目的地與 Apply 規則](../v2/two_qubit/constructive_phase/guide.md#review-and-apply-phase-proposals)。
