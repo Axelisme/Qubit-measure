@@ -3,7 +3,6 @@
 import re
 from collections.abc import Callable, Iterator
 from contextlib import nullcontext
-from dataclasses import replace
 from functools import partial
 from typing import Unpack
 
@@ -231,30 +230,6 @@ def test_run_integrated_writes_scan_slot_and_notifies_live_buffer(
     rounds_bars = [bar for bar in bars if bar.desc == "rounds"]
     assert len(rounds_bars) == 2
     assert all(not bar.leave and bar.closed for bar in rounds_bars)
-
-
-def test_run_acquire_writes_contiguous_range_and_keeps_completed_data_on_stop():
-    updates = []
-    buffer = SignalBuffer((4, 2, 2), on_update=lambda data: updates.append(data.copy()))
-    program = RawProgram([np.array([[[1.0, 0.0], [2.0, 0.0]]])])
-    acquired = []
-
-    with Schedule(buffer, scope=Scope("run")) as schedule:
-        for _, arm in schedule.scan("arm", [0, 1]):
-            for _, step in arm.repeat("round", 2):
-                selected = replace(step, path=(slice(1, 3), *step.path))
-                result = selected.run_acquire(program, object())
-                acquired.append(result)
-                selected.set_stop()
-
-    assert schedule.outcome.status == "stopped"
-    assert len(acquired) == 1
-    np.testing.assert_array_equal(acquired[0], [1.0, 2.0])
-    assert np.shares_memory(acquired[0], buffer.array)
-    expected = np.full((4, 2, 2), np.nan, dtype=np.complex128)
-    expected[1:3, 0, 0] = [1, 2]
-    np.testing.assert_array_equal(buffer.array, expected)
-    np.testing.assert_array_equal(updates[-1], expected)
 
 
 def test_run_summed_writes_raw_cumulative_sums_by_default(

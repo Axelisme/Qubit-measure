@@ -66,6 +66,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：Timeline 編譯器推算每發 ADC 讀取數，每個 Branch 出口與作者 label 都逐 ADC 對齊，見 [ADR-0083](0083-program-macros-and-timelines.md#每發-adc-讀取數)。
 原則：Timeline program 提供通用跳轉，builder 只轉交同名動作。只往後跳，迭代用 Repeat 或 sweep。見 [ADR-0083](0083-program-macros-and-timelines.md#往後跳轉與-label-合併)。
+原則：增加的量測能力不抵第二條路徑的可讀性成本時，保留一條路徑，超限就報錯。見 [ADR-0083](0083-program-macros-and-timelines.md#量測能力不抵可讀性成本時不加分支)。
 
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：Async workflow、operation、Ask、停止、live tunables 與作者保存責任。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。

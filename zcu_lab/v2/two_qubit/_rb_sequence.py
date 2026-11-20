@@ -6,22 +6,26 @@ qubit; CZ = diag(1, 1, 1, -1). Gate tuples are in playback order, so
 (g0, g1) has matrix U_g1 @ U_g0. Equality ignores global phase.
 
 The full group is generated lazily using exact signed-Pauli actions.
-Breadth-first traversal fixes the Clifford indices. Decomposition minimizes
-CZ count first (1.5 CZs per Clifford on average), then X90 count. Virtual
-Z90s are free. Composition and inverse use the faithful Pauli action.
+Breadth-first traversal over the original X90/Z90/CZ generators fixes the
+Clifford indices. Decomposition minimizes CZ count first (1.5 per Clifford on
+average), then counts X90 and X180 as one physical pulse each. Virtual Z90s
+are free. The search visits (CZ count, physical X count, Clifford index) in
+heap order and keeps the first equal-cost word it finds in the original
+X90/Z90/CZ generator order, then X180_Q0 and X180_Q1. Composition and inverse
+use the faithful Pauli action.
 No pulses, virtual frames, device bindings or acquisition state live here.
 
-Call make_paired_sequences(depth=50, seed=7), then translate each arm's
-``clifford_blocks`` to pulses. Each arm also exposes flattened ``body`` and
-``gates`` tuples, plus ``recovery`` and ``recovery_gates``.
+Call make_rb_arms(seed=7, depths=[0, 1, 50]) for both arms. For depth d,
+play the arm's first d Clifford blocks, followed by its recovery at d.
 """
 
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from functools import cache
 from heapq import heappop, heappush
+from itertools import pairwise
 from random import Random
 from types import MappingProxyType
 
@@ -33,7 +37,8 @@ class TwoQubitGate(Enum):
 
     X90_Q0/X90_Q1 are positive quarter-turn X rotations. Z90_Q0/Z90_Q1
     are positive quarter-turn Z rotations (logical gates, not frame state).
-    CZ acts on both qubits. Identity is an empty gate tuple.
+    X180_Q0/X180_Q1 are half-turn X rotations. CZ acts on both qubits.
+    Identity is an empty gate tuple.
     """
 
     X90_Q0 = "X90_q0"
@@ -41,6 +46,8 @@ class TwoQubitGate(Enum):
     X90_Q1 = "X90_q1"
     Z90_Q1 = "Z90_q1"
     CZ = "CZ"
+    X180_Q0 = "X180_q0"
+    X180_Q1 = "X180_q1"
 
 
 @dataclass(frozen=True)
@@ -48,7 +55,7 @@ class Clifford:
     """One projective two-qubit Clifford, identified by index in [0, 11520).
 
     Index 0 is identity. Other indices follow breadth-first traversal in
-    TwoQubitGate declaration order. Use decompose_clifford for playback.
+    the original X90/Z90/CZ order. Use decompose_clifford for playback.
     Construction rejects non-integer (including bool) or out-of-range indices.
     """
 
@@ -61,52 +68,21 @@ class Clifford:
 
 
 @dataclass(frozen=True)
-class RBSequence:
-    """One arm, with immutable playback body and its full-product inverse.
+class RBArm:
+    """One seed's reference or CZ-interleaved arm at the requested depths.
 
-    body_blocks holds one primitive gate tuple per random Clifford, with a
-    separate singleton for each inserted CZ in the interleaved arm. Identity
-    blocks are empty. recovery is a single Clifford, not a reversed body.
-    This record describes logical gates only; every pulse translation must
-    start its own frame at zero and preserve the complete logical product.
+    seed identifies the random.Random draw. interleaved says whether CZ
+    follows each random Clifford. depths is nonempty and strictly increasing.
+    cliffords contains one playback word per draw, with the trailing CZ
+    included for interleaved arms. At depth d, play cliffords[:d], then
+    recoveries[d]: a single Clifford word that inverts that prefix.
     """
 
-    body_blocks: tuple[tuple[TwoQubitGate, ...], ...]
-    recovery: Clifford
-
-    @property
-    def body(self) -> tuple[TwoQubitGate, ...]:
-        """Flatten the primitive gates before recovery in playback order."""
-        return tuple(gate for block in self.body_blocks for gate in block)
-
-    @property
-    def clifford_blocks(self) -> tuple[tuple[TwoQubitGate, ...], ...]:
-        """Return all playback blocks, ending with the recovery gate tuple."""
-        return (*self.body_blocks, self.recovery_gates)
-
-    @property
-    def recovery_gates(self) -> tuple[TwoQubitGate, ...]:
-        """Bounded decomposition of recovery, independent of sequence depth."""
-        return decompose_clifford(self.recovery)
-
-    @property
-    def gates(self) -> tuple[TwoQubitGate, ...]:
-        """Complete playback tuple: body followed by recovery gates."""
-        return self.body + self.recovery_gates
-
-
-@dataclass(frozen=True)
-class PairedRBSequences:
-    """Immutable reference/CZ-interleaved pair for one depth and seed.
-
-    random_cliffords is the shared uniformly drawn group-element tuple, one
-    entry per depth step. reference and interleaved each carry their own
-    recovery; only interleaved inserts CZ after every random Clifford.
-    """
-
-    random_cliffords: tuple[Clifford, ...]
-    reference: RBSequence
-    interleaved: RBSequence
+    seed: int
+    interleaved: bool
+    depths: tuple[int, ...]
+    cliffords: tuple[tuple[TwoQubitGate, ...], ...]
+    recoveries: Mapping[int, tuple[TwoQubitGate, ...]]
 
 
 # A Pauli label 4*a+b denotes P_a tensor P_b, with (I, X, Y, Z).
@@ -114,6 +90,8 @@ class PairedRBSequences:
 # This action is faithful modulo global phase, including Pauli sign flips.
 _PauliAction = tuple[int, ...]
 _IDENTITY: _PauliAction = tuple(range(1, 16))
+# CZ sends XI to XZ and IX to ZX. Products fix the signs.
+_CZ_ACTION: _PauliAction = (13, 14, 3, 7, 10, -9, 4, 11, -6, 5, 8, 12, 1, 2, 15)
 
 
 @dataclass(frozen=True)
@@ -143,7 +121,7 @@ def _compose_actions(after: _PauliAction, before: _PauliAction) -> _PauliAction:
 
 
 def _generator_actions() -> tuple[_PauliAction, ...]:
-    """Exact images in TwoQubitGate order; no floating-point group matching."""
+    """Exact images in X90/Z90/CZ BFS order; no floating-point matching."""
     actions: list[_PauliAction] = []
     # Local conjugation: Rx maps (X,Y,Z) to (X,Z,-Y), Rz to (Y,-X,Z).
     for qubit, images in (
@@ -160,16 +138,13 @@ def _generator_actions() -> tuple[_PauliAction, ...]:
             target = 4 * abs(image) + right if qubit == 0 else 4 * left + abs(image)
             action.append(sign * target)
         actions.append(tuple(action))
-    # CZ: XI -> XZ, IX -> ZX, ZI -> ZI, IZ -> IZ. Products fix
-    # the signs, notably XX -> YY, XY -> -YX, YX -> -XY, YY -> XX.
-    actions.append((13, 14, 3, 7, 10, -9, 4, 11, -6, 5, 8, 12, 1, 2, 15))
-    return tuple(actions)
+    return (*actions, _CZ_ACTION)
 
 
 def _minimal_words(
     successors: list[tuple[int, ...]],
 ) -> tuple[tuple[TwoQubitGate, ...], ...]:
-    """Find minimum (CZ, X90) words from identity using the generator edges.
+    """Find minimum (CZ, physical X) words from identity using generator edges.
 
     successors[index] lists the targets of appending each gate in declaration
     order. Dijkstra's search compares total costs lexicographically.
@@ -178,7 +153,9 @@ def _minimal_words(
         (
             gate,
             int(gate is TwoQubitGate.CZ),
-            int(gate in (TwoQubitGate.X90_Q0, TwoQubitGate.X90_Q1)),
+            int(
+                gate not in (TwoQubitGate.Z90_Q0, TwoQubitGate.Z90_Q1, TwoQubitGate.CZ)
+            ),
         )
         for gate in TwoQubitGate
     )
@@ -186,13 +163,13 @@ def _minimal_words(
     words: list[tuple[TwoQubitGate, ...]] = [()] * len(successors)
     pending = [(0, 0, 0)]
     while pending:
-        cz, x90, index = heappop(pending)
-        if (cz, x90) != costs[index]:
+        cz, x_pulses, index = heappop(pending)
+        if (cz, x_pulses) != costs[index]:
             continue
-        for target, (gate, gate_cz, gate_x90) in zip(
+        for target, (gate, gate_cz, gate_x) in zip(
             successors[index], gate_costs, strict=True
         ):
-            cost = (cz + gate_cz, x90 + gate_x90)
+            cost = (cz + gate_cz, x_pulses + gate_x)
             previous = costs.get(target)
             # Strict improvement also prevents revisiting zero-cost cycles.
             if previous is None or cost < previous:
@@ -225,6 +202,12 @@ def _group() -> _CliffordGroup:
         successors.append(tuple(targets))
     if len(actions) != NUM_CLIFFORDS:
         raise RuntimeError(f"Expected {NUM_CLIFFORDS} Cliffords, got {len(actions)}")
+    # Add decomposition edges only after the original generators assign indices.
+    x180s = tuple(_compose_actions(generators[i], generators[i]) for i in (0, 2))
+    for i, action in enumerate(actions):
+        successors[i] += tuple(
+            indices[_compose_actions(x180, action)] for x180 in x180s
+        )
     return _CliffordGroup(
         tuple(actions), _minimal_words(successors), MappingProxyType(indices)
     )
@@ -240,10 +223,11 @@ def clifford_group() -> tuple[Clifford, ...]:
 
 
 def decompose_clifford(clifford: Clifford) -> tuple[TwoQubitGate, ...]:
-    """Return a minimum-(CZ, X90) word in playback order (identity: ()).
+    """Return a minimum-(CZ, physical X) playback word (identity: ()).
 
-    Minimize CZ count first, then X90 count. Z90 adds no cost. Word length
-    is bounded independently of RB depth. Raises TypeError for a non-Clifford.
+    Minimize CZ count first, then X90 and X180 pulse count. Z90 adds no cost.
+    Word length is bounded independently of RB depth. Raises TypeError for a
+    non-Clifford.
     """
     _require_clifford(clifford)
     return _group().decompositions[clifford.index]
@@ -275,46 +259,51 @@ def inverse_clifford(clifford: Clifford) -> Clifford:
     return Clifford(group.index_by_action[tuple(inverse)])
 
 
-def make_paired_sequences(depth: int, seed: int) -> PairedRBSequences:
-    """Draw depth uniform group elements and build paired, fully recovered arms.
+def make_rb_arms(seed: int, depths: Sequence[int]) -> tuple[RBArm, RBArm]:
+    """Draw one deepest sequence and return (reference, interleaved) arms.
 
-    depth and seed must be nonnegative Python ints, excluding bool. Wrong
-    types raise TypeError; negative values raise ValueError, before generation.
-    depth=0 returns empty bodies and identity recoveries for both arms.
+    A private random.Random(seed) draws max(depths) uniform Clifford indices
+    with replacement. Both arms use the same draws, and each requested depth
+    uses a prefix and its own recovery. Only the interleaved arm appends a CZ
+    to each random Clifford. The global random state is unchanged.
 
-    A private random.Random(seed) draws each index with randrange(11520),
-    independently and with replacement, not via a primitive random walk.
-    Identical depth/seed reproduce identical pairs; shorter depths are prefixes
-    of longer ones with the same seed. The draws assume this Clifford index
-    ordering and Python's Random implementation. Primitive gate words also
-    depend on the decomposition in use. Global random state is untouched.
-
-    Every shared Clifford is decomposed without merging boundaries. Only the
-    interleaved body appends CZ after each such block, including identity blocks.
-    Each arm's recovery inverts its own complete product, including those CZs.
+    seed and all depths must be nonnegative Python ints (TypeError for other
+    types, including bool). Empty, negative, repeated or unsorted depths and
+    negative seeds raise ValueError.
     """
-    _require_nonnegative_int(depth, "depth")
     _require_nonnegative_int(seed, "seed")
+    for depth in depths:
+        _require_nonnegative_int(depth, "depth")
+    if not depths or any(a >= b for a, b in pairwise(depths)):
+        raise ValueError("RB depths must be nonempty and strictly increasing")
     rng = Random(seed)
-    random_cliffords = tuple(
-        Clifford(rng.randrange(NUM_CLIFFORDS)) for _ in range(depth)
+    drawn = tuple(Clifford(rng.randrange(NUM_CLIFFORDS)) for _ in range(depths[-1]))
+    return (
+        _build_arm(seed, drawn, tuple(depths), interleaved=False),
+        _build_arm(seed, drawn, tuple(depths), interleaved=True),
     )
-    reference_blocks: list[tuple[TwoQubitGate, ...]] = []
-    interleaved_blocks: list[tuple[TwoQubitGate, ...]] = []
-    reference_product = Clifford(0)
-    interleaved_product = Clifford(0)
-    group = _group()
-    cz = Clifford(group.index_by_action[_generator_actions()[-1]])
-    for clifford in random_cliffords:
-        gates = decompose_clifford(clifford)
-        reference_blocks.append(gates)
-        interleaved_blocks.extend((gates, (TwoQubitGate.CZ,)))
-        reference_product = compose_cliffords(clifford, reference_product)
-        interleaved_product = compose_cliffords(
-            cz, compose_cliffords(clifford, interleaved_product)
-        )
-    return PairedRBSequences(
-        random_cliffords,
-        RBSequence(tuple(reference_blocks), inverse_clifford(reference_product)),
-        RBSequence(tuple(interleaved_blocks), inverse_clifford(interleaved_product)),
+
+
+def _build_arm(
+    seed: int,
+    drawn: tuple[Clifford, ...],
+    depths: tuple[int, ...],
+    *,
+    interleaved: bool,
+) -> RBArm:
+    cz = Clifford(_group().index_by_action[_CZ_ACTION])
+    cliffords: list[tuple[TwoQubitGate, ...]] = []
+    products = [
+        Clifford(0)
+    ]  # products[d] combines the first d Cliffords (and inserted CZs).
+    for clifford in drawn:
+        gates, step = decompose_clifford(clifford), clifford
+        if interleaved:
+            gates += (TwoQubitGate.CZ,)
+            step = compose_cliffords(cz, clifford)
+        cliffords.append(gates)
+        products.append(compose_cliffords(step, products[-1]))
+    recoveries = {d: decompose_clifford(inverse_clifford(products[d])) for d in depths}
+    return RBArm(
+        seed, interleaved, depths, tuple(cliffords), MappingProxyType(recoveries)
     )

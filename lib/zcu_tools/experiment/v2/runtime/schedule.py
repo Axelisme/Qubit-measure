@@ -569,8 +569,8 @@ class Schedule(RunAcquisitionMixin, Generic[T_Env]):
         """Resolve the writable acquire slot for an owner in this active schedule.
 
         Prefer its registered local buffer. Otherwise require one SignalBuffer
-        root and an owner path of integers or contiguous slices, raising
-        ValueError if unavailable. The owner must belong to this schedule. The
+        root and an integer-indexed owner path, raising ValueError if
+        unavailable. The owner must belong to this schedule. The
         slot retains its buffer's update hook, including child-to-root synchronization.
         """
         self.ensure_active()
@@ -580,13 +580,9 @@ class Schedule(RunAcquisitionMixin, Generic[T_Env]):
             raise ValueError(
                 "Schedule default acquire target requires exactly one SignalBuffer"
             )
-        if not all(
-            isinstance(part, int)
-            or (isinstance(part, slice) and part.step in (None, 1))
-            for part in owner.path
-        ):
+        if not all(isinstance(part, int) for part in owner.path):
             raise ValueError(
-                "Schedule default acquire target requires integers or contiguous slices; "
+                "Schedule default acquire target requires an integer-indexed path; "
                 "register a child-local buffer for other paths"
             )
         return self._buffers[0].at(*owner.path)
@@ -597,9 +593,8 @@ class ScheduleStep(RunAcquisitionMixin, Generic[T_Value, T_Env]):
     """Host-loop coordinate with its schedule, env and writable result path.
 
     child(addr) extends this coordinate with a result address.
-    Acquisition uses the result path and a caller-owned program. With a root
-    SignalBuffer, replace the step's path with integer indices or contiguous
-    slices to target a writable view without changing the host-loop coordinate.
+    Acquisition uses the result path and a caller-owned program. The
+    root SignalBuffer's default acquisition slot uses only integer indices.
     """
 
     schedule: Schedule[T_Env]

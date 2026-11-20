@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Annotated, ClassVar, TypeAlias
 
 import numpy as np
@@ -11,6 +11,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from qick import QickConfig
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import (
     FitQuality,
@@ -45,8 +46,8 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._rb_scheduling import build_depth_chunks, emit_depth_sweep
-from .._rb_sequence import RBSequence, make_paired_sequences
+from .._rb_scheduling import compile_depth_sweep, emit_depth_sweep
+from .._rb_sequence import RBArm, make_rb_arms
 from .._sums import joint_probabilities
 from ._config import RBInputs
 
@@ -266,6 +267,34 @@ def restore_result(data: GroupedLoadData[RBCfg]) -> RBResult:
     )
 
 
+def build_program(config: RBCfg, soccfg: QickConfig, arm: RBArm) -> TimelineProgramV2:
+    """Compile one seed and arm: optional reset, every depth on board, then readout.
+
+    Use config's pulse calibrations and shot settings on soccfg. The arm supplies
+    seed and depths. Raise ValueError with the board limit if the program exceeds
+    PMEM capacity; other compile errors propagate unchanged.
+    """
+    builder = TimelineBuilder(
+        soccfg,
+        reps=config.reps,
+        initial_delay=config.initial_delay,
+        relax_delay=config.relax_delay,
+    )
+    readout = MuxReadout("readout", config.readout)
+    if config.reset is not None:
+        builder.emit(Reset("reset", config.reset, terminal=readout))
+    emit_depth_sweep(
+        builder,
+        arm,
+        x90=(config.x90_f1, config.x90_f2),
+        x180=(config.x180_f1, config.x180_f2),
+        drive=config.drive,
+        phase_pair=config.phase_pair,
+    )
+    builder.emit(readout, tag="terminal")
+    return compile_depth_sweep(builder, arm)
+
+
 class RBExp(Experiment[RBResult, RBCfg]):
     """Paired RB counts, native IO and complete-round joint00 analysis."""
 
@@ -302,7 +331,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         ),
         result_type=RBResult,
         cfg_type=RBCfg,
-        cfg_schema_version="5.0",
+        cfg_schema_version="6.0",
         tag="two_qubit/rb",
         result_builder=restore_result,
     )
@@ -312,11 +341,10 @@ class RBExp(Experiment[RBResult, RBCfg]):
     def run(self, config: RBCfg, *, context: RunContext) -> RBResult:
         """Acquire optional reset → concurrent per-qubit sequence → terminal counts.
 
-        Each host round acquires reps shots per depth in an on-board chunk.
-        A mux herald reset adds a read before the sequence and excludes rejected
-        shots from the terminal counts. Return fixed raw count slots; cfg and
-        saved sequence identities are unchanged.
-
+        Compile one board program per seed and arm before acquiring. Each host
+        round acquires reps shots per depth in that program. A mux herald reset
+        adds a read before the sequence and excludes rejected terminal shots.
+        Return raw counts on the saved (depth, seed, arm, round, F1, F2) axes.
         """
         # 1. Compare reference and CZ-interleaved joint00 survival across Clifford depth.
         fig, ax = context.plots.subplots(num="measurement")
@@ -329,73 +357,46 @@ class RBExp(Experiment[RBResult, RBCfg]):
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            totals = np.nansum(sums, axis=(1, 3))
+            totals = np.nansum(sums, axis=(0, 2))  # Sum seeds and rounds.
             return viewer.set(
-                np.array(config.depth), joint_probabilities(totals)[..., 0, 0].T
+                np.array(config.depth), joint_probabilities(totals)[..., 0, 0]
             )
 
-        # 2. Compile depth chunks per seed and arm, then reuse each chunk across rounds.
+        # 2. Compile all arms before acquiring any shots.
+        programs = [
+            [
+                build_program(config, context.soccfg, arm)
+                for arm in make_rb_arms(seed, config.depth)
+            ]
+            for seed in config.seed
+        ]
+
+        # 3. Acquire in (seed, arm, round, depth) order, then restore the saved axes.
         buffer = SignalBuffer(
-            (len(config.depth), len(config.seed), 2, config.rounds, 3, 3),
+            (len(config.seed), 2, config.rounds, len(config.depth), 3, 3),
             dtype=np.float64,
             on_update=update_view,
         )
-
-        def build_chunk(sequences: Sequence[RBSequence]) -> TimelineProgramV2:
-            builder = TimelineBuilder(
-                context.soccfg,
-                reps=config.reps,
-                initial_delay=config.initial_delay,
-                relax_delay=config.relax_delay,
-            )
-            readout = MuxReadout("readout", config.readout)
-            if config.reset is not None:
-                builder.emit(Reset("reset", config.reset, terminal=readout))
-            emit_depth_sweep(
-                builder,
-                sequences,
-                x90_f1=config.x90_f1,
-                x90_f2=config.x90_f2,
-                drive=config.drive,
-                phase_pair=config.phase_pair,
-            )
-            builder.emit(readout, tag="terminal")
-            return builder.build()
-
         with Schedule(buffer, scope=context.scope) as sched:
-            for seed, seed_step in sched.scan("seed", config.seed):
-                pairs = [make_paired_sequences(depth, seed) for depth in config.depth]
-                arms = (
-                    [pair.reference for pair in pairs],
-                    [pair.interleaved for pair in pairs],
-                )
-                for sequences, arm_step in seed_step.scan("arm", arms):
-                    chunks = build_depth_chunks(sequences, build_chunk)
-                    for (depth_slice, prog), chunk_step in arm_step.scan(
-                        "depth chunk", chunks
-                    ):
-                        reducer = shot_sums(
-                            prog,
-                            [
-                                Classify("terminal", config.roles.f1_tone),
-                                Classify("terminal", config.roles.f2_tone),
-                            ],
+            for seed_programs, seed_step in sched.scan("seed", programs):
+                for program, arm_step in seed_step.scan("arm", seed_programs):
+                    reducer = shot_sums(
+                        program,
+                        [
+                            Classify("terminal", config.roles.f1_tone),
+                            Classify("terminal", config.roles.f2_tone),
+                        ],
+                    )
+                    for _, round_step in arm_step.repeat("round", config.rounds):
+                        round_step.run_acquire_summed(
+                            program, context.soc, reducer=reducer, rounds=1
                         )
-                        # The result buffer is indexed by (depth, seed, arm, round).
-                        point_step = replace(
-                            chunk_step, path=(depth_slice, *arm_step.path)
-                        )
-                        for _, round_step in point_step.repeat("round", config.rounds):
-                            round_step.run_acquire_summed(
-                                prog, context.soc, reducer=reducer, rounds=1
-                            )
         buffer.trigger_update(flush=True)
-        # 3. Preserve paired sequence identities and raw terminal counts; unfinished round slots stay NaN.
         return RBResult(
             np.array(config.depth, dtype=np.int64),
             np.array(config.seed, dtype=np.int64),
             np.arange(config.rounds, dtype=np.int64),
-            buffer.array,
+            np.moveaxis(buffer.array, 3, 0),
         )
 
     def analyze(
