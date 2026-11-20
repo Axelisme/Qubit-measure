@@ -302,10 +302,13 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
             time_base=TIME_BASE,
         )
         source.open_acquire(request(templates=(driven,))).sample_round(snapshot(), 0)
-        calls = [
-            batches[0] for _, batches, _ in engine.calls if batches[0].points[0] == 0
+        (second_span,) = [
+            batches for _, batches, _ in engine.calls if batches[0].end_ns[0] == 20.0
         ]
-        assert len(calls) == 6
+        histories = [
+            (batch, row) for batch in second_span for row in range(len(batch.points))
+        ]
+        assert len(histories) == 4
         pulses = tuple(
             pulse for read in plan.projective_reads[0] for pulse in read.pulses
         )
@@ -317,11 +320,13 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
             ]
         )
         chi = model.frequencies_ghz - bare
-        for index, batch in enumerate(calls[2:]):
+        shifts = []
+        for index, (batch, row) in enumerate(histories):
             first_state, second_state = divmod(index, 2)
-            initial = np.zeros((1, 2, 2), complex)
-            initial[0, second_state, second_state] = 1
-            np.testing.assert_array_equal(batch.initial_densities, initial)
+            initial = np.zeros((2, 2), complex)
+            initial[second_state, second_state] = 1
+            assert batch.initial_densities is not None
+            np.testing.assert_array_equal(batch.initial_densities[row], initial)
             fields = cavity_fields(
                 model, pulses, np.array([0.0, 8.0]), initial_time_ns=0.0
             )
@@ -329,17 +334,15 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
             average = cavity_field_average(
                 model, pulses, 8.0, 20.0, initial_field=memory, initial_time_ns=8.0
             )
-            shift = batch.segment_shifts[0][0]
+            (shift,) = batch.segment_shifts[row]
             np.testing.assert_allclose(
                 shift.energy_shift_ghz,
                 (chi * average.photons).sum(axis=-1),
                 rtol=1e-10,
                 atol=1e-15,
             )
-        assert not np.array_equal(
-            calls[2].segment_shifts[0][0].energy_shift_ghz,
-            calls[4].segment_shifts[0][0].energy_shift_ghz,
-        )
+            shifts.append(shift.energy_shift_ghz)
+        assert not np.array_equal(shifts[0], shifts[2])
     finally:
         source.close()
 

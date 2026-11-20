@@ -64,7 +64,10 @@ class _CavityTimeline:
     density: NDArray[np.complex128]
     fields: NDArray[np.complex128]
 
-    def advance(self, step: int) -> TimelineBatch:
+    def advance(
+        self, step: int, *, points: NDArray[np.int64] | None = None
+    ) -> TimelineBatch:
+        """Build this span's inputs and advance fields; points can label the solve."""
         starts = self.batch.end_ns.copy()
         ends = self.batch.end_ns.copy()
         shifts = []
@@ -95,6 +98,7 @@ class _CavityTimeline:
         )
         return replace(
             self.batch,
+            points=self.batch.points if points is None else points,
             start_ns=starts,
             end_ns=ends,
             initial_densities=self.density,
@@ -216,6 +220,21 @@ def _project_outcomes(
     return expanded, removed
 
 
+def _point_paths(paths: PathDiagnostics, point: int) -> PathDiagnostics:
+    """Count histories as work, but attribute their diagnostics to the caller point."""
+    members = {
+        name: (point,) if ids else () for name, ids in paths.point_members.items()
+    }
+    return replace(
+        paths,
+        points_by_class={name: len(ids) for name, ids in members.items()},
+        point_members=members,
+        stark_order_inversions=tuple(
+            replace(entry, point=point) for entry in paths.stark_order_inversions
+        ),
+    )
+
+
 def _evolve_outcomes(
     engine: Engine,
     outcomes: list[_Outcome],
@@ -228,32 +247,43 @@ def _evolve_outcomes(
     paths = []
     keys = []
     survival = 1.0
+    point = int(outcomes[0].timeline.batch.points[0])
     for step, (start, _) in enumerate(outcomes[0].timeline.spans[0]):
         if start in read_starts:
             with options.reading():
                 outcomes, removed = _project_outcomes(outcomes, floor)
             survival *= 1 - removed
-        for outcome in outcomes:
-            with options.reading():
-                batch = outcome.timeline.advance(step)
-            # Histories can end in the same density with different cavity memory.
-            history_key = sha256(
-                options.key + np.asarray(outcome.history, dtype=np.int64).tobytes()
-            ).digest()
-            key = _span_key(history_key, step, (batch,))
-            with options.evolving(), engine.defer_stark_order_warnings():
-                result = engine.evolve(
-                    facts.source,
-                    (batch,),
-                    budget=EVOLUTION_BUDGET,
-                    cancel=options.cancel,
-                    telemetry=options.telemetry,
-                    capture=options.capture,
-                    reuse_key=key,
-                )
-            outcome.timeline.density = result.densities
-            paths.append(result.paths)
-            keys.append(key)
+        # Each outcome is ready at this point's current absolute span. IDs are
+        # local to the evolve call; the outcome list keeps its sampling order.
+        with options.reading():
+            batches = tuple(
+                outcome.timeline.advance(step, points=np.array([index], dtype=np.int64))
+                for index, outcome in enumerate(outcomes)
+            )
+        histories = np.asarray(
+            [outcome.history for outcome in outcomes], dtype=np.int64
+        )
+        point_key = sha256(
+            b"ftf-projective-span\0"
+            + options.key
+            + point.to_bytes(8, "little")
+            + histories.tobytes()
+        ).digest()
+        key = _span_key(point_key, step, batches)
+        with options.evolving(), engine.defer_stark_order_warnings():
+            result = engine.evolve(
+                facts.source,
+                batches,
+                budget=EVOLUTION_BUDGET,
+                cancel=options.cancel,
+                telemetry=options.telemetry,
+                capture=options.capture,
+                reuse_key=key,
+            )
+        for index, density in zip(result.points, result.densities, strict=True):
+            outcomes[index].timeline.density = density[None]
+        paths.append(_point_paths(result.paths, point))
+        keys.append(key)
     return outcomes, paths, keys, 1 - survival
 
 
@@ -277,9 +307,10 @@ def evolve_projective_plans(
     and retained weights redistributed proportionally after each projection.
     A zero floor retains even zero-weight histories. Removing every outcome
     raises ValueError naming its point and floor. Engine and population validation
-    errors propagate. Every evolve contains one unique caller point, so repeated
-    point IDs across outcomes never share a WorkPlan. One acquire-local flat
-    cavity-average cache is cleared on success or failure.
+    errors propagate without returning a partial result. Each evolve batches the
+    current absolute span of one point, with one unique batch-local ID per retained
+    history. Densities return to those histories by ID before the next span.
+    One acquire-local flat cavity-average cache is cleared on success or failure.
     """
     points = np.concatenate([plan.batch.points for plan in plans])
     count = facts.source.initial_density.shape[0]

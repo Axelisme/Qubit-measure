@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-20, Stark inversion warnings
+**Last updated:** 2026-11-21, projective continuation batches
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -594,13 +594,16 @@ origin. Within a span, evolution uses the averages rather than instantaneous
 fields. Templates with neither cavity drives nor projective reads retain their
 original single-evolve path.
 
+Projective continuation sends one point's ready histories through its current
+absolute span in one `Engine.evolve` call. Each history has a unique ID within
+that call. The result returns to its history by ID before the next span starts.
+Capture records the batch-local IDs. Runtime attributes path classes and Stark
+warnings to the original point, so a point counts once per class across the acquire.
+
 Each cavity-driven preparation retains all span reuse keys. Cache hits check
-every key through `Engine.reuse`. Projection history, initial density and span
-shifts enter continuation digests. Runtime evolves each point/outcome separately,
-so one Engine call never contains duplicate point IDs. Evolution's
-`merge_path_diagnostics` combines
-span work and unions class membership by caller point index, so each point counts
-once per class across the acquire.
+every key through `Engine.reuse`. Projective continuation keys identify the
+original point, ordered histories, initial densities and span shifts. A failed
+or cancelled batch publishes no partial preparation.
 
 One ADC `CavityAverageCache` serves the cavity span composition of an acquire.
 All g/e points share its 64 MiB budget through serialized calls. ADC owns keys,
