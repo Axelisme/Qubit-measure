@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import CircleClassifier
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -56,6 +57,9 @@ class GEAnalyzeParams:
 class GESummary(BaseModel):
     """Decode consumed scalar JSON fields; null retains an unavailable estimate."""
 
+    fit_quality: dict[str, FitQuality] | None = Field(
+        description="Owner joint, ground and excited fit diagnostics; null when unavailable."
+    )
     fidelity: float | None = Field(
         description="Owner fidelity in dimensionless; null retains an unavailable estimate."
     )

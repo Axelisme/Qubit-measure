@@ -65,6 +65,11 @@ Analyze uses only the readout classifier saved in that Run.
 It shows six heatmaps, raw g/e/f above corrected g/e/f.
 Correction is not clipped to the interval 0 to 1.
 The summary contains the saved training confusion matrix, its condition number and its minimum singular value.
+The summary and recipe report give `f_population_estimate`, the largest finite
+corrected f population on this grid, and `pump_detuning_mhz` and `stokes_detuning_mhz`, offsets from the measured carriers.
+Ties go to the first acquired point. If no finite value is available, the peak
+and its coordinates are null. The estimate is unclipped and does not identify
+a global optimum.
 These are preparation-label estimates, not transfer fidelity or an intermediate-state measurement.
 Nonfinite or empty counts and singular confusion matrices fail analysis.
 There is no calibration writeback.

@@ -48,6 +48,11 @@ An interrupted acquisition without a complete round leaves counts as NaN.
 Analyze uses only the readout calibration saved with this Run.
 The top row shows raw g/e/f maps. The bottom row shows confusion-corrected g/e/f maps without clipping.
 The title reports the training confusion matrix's condition number and minimum singular value.
+The summary and recipe report give `f_population_estimate`, the largest finite
+corrected f population on this grid, and `pump_gain` and `stokes_gain` in a.u..
+Ties go to the first acquired point. If no finite value is available, the peak
+and its coordinates are null. The estimate is unclipped and does not identify
+a global optimum.
 Missing calibration, incomplete or empty counts, and singular confusion prevent analysis.
 A large condition number warns that correction amplifies uncertainty. Corrected fractions can fall outside [0, 1].
 These are preparation-label estimates, not transfer fidelity or a measurement of the intermediate state.

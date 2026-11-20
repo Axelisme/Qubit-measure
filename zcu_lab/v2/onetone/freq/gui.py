@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 import numpy as np
 from pydantic import BaseModel, Field, JsonValue
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -96,6 +97,9 @@ class OnetoneSpectrumSummary(BaseModel):
     params: dict[str, JsonValue] = Field(
         description="Native model parameters, with non-finite numbers represented by null."
     )
+    fit_quality: FitQuality = Field(
+        description="Owner diagnostics for the fitted resonator."
+    )
     edelay: float | None = Field(description="Fitted electrical delay in us.")
     edelay_source: EDelaySource = Field(
         description="Delay seed source: global, calibrated, or manual."
@@ -107,9 +111,12 @@ class OnetoneSpectrumSummary(BaseModel):
 
 @dataclass
 class OneToneFreqAnalyzeResult:
+    """Fitted resonator result with owner diagnostics and the electrical-delay policy."""
+
     freq: float
     fwhm: float
     params: dict[str, Any]
+    fit_quality: FitQuality
     edelay: float | None = None
     edelay_source: EDelaySource = "global"
     edelay_persistable: bool = False
@@ -191,6 +198,7 @@ def _analyze(
         freq=answer.freq,
         fwhm=answer.fwhm,
         params=answer.params,
+        fit_quality=answer.fit_quality,
         edelay=edelay,
         edelay_source=edelay_source,
         edelay_persistable=(

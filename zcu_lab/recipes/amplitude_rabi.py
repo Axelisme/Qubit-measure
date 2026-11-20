@@ -157,6 +157,11 @@ async def amplitude_rabi(
             writeback_applied = bool(receipt.items)
 
         return AmplitudeRabiReport(
+            fit_quality=(
+                None
+                if analysis.result.fit_quality is None
+                else analysis.result.fit_quality["fit"]
+            ),
             pi_gain=report_number(analysis.result.pi_amp),
             pi_gain_err=report_number(analysis.result.pi_amp_err),
             pi2_gain=report_number(analysis.result.pi2_amp),

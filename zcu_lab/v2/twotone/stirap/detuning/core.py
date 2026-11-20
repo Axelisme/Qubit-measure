@@ -40,6 +40,7 @@ from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
+from .._population_peak import first_finite_peak
 from .._pulses import drive_pulse
 
 STATE_LABELS = ("g", "e", "f")
@@ -58,6 +59,19 @@ class StirapDetuningResult:
     x_values: NDArray[np.float64]
     y_values: NDArray[np.float64]
     counts: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class StirapDetuningSummary(Centroid3Summary):
+    """Saved confusion diagnostics and the largest finite corrected f population.
+
+    The population estimate is dimensionless and unclipped, not fidelity.
+    Peak coordinates are Pump and Stokes offsets from measured carriers (MHz). With no finite value, all peak fields are None.
+    """
+
+    f_population_estimate: float | None
+    pump_detuning_mhz: float | None
+    stokes_detuning_mhz: float | None
 
 
 class StirapDetuningCfg(ConfigBase):
@@ -285,13 +299,13 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> Centroid3Summary:
+    ) -> StirapDetuningSummary:
         """Normalize acquired counts and correct with the saved readout confusion.
 
         Require source.cfg and its saved ADC classifier; missing/wrong-type
         calibration fails explicitly. No current Form, library or simulator
         truth is consulted. Plot raw/unclipped corrected g/e/f fractions;
-        return training confusion and its condition/minimum singular value. Plot
+        return training confusion diagnostics and the corrected f peak. Plot
         requested scan coordinates; preparation-label estimates are not fidelity.
         Incomplete/nonfinite or empty counts and singular confusion fail explicitly.
         """
@@ -351,4 +365,22 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
 
         populations(None)
         figure.show()
-        return summarize_centroid3(result)
+        confusion = summarize_centroid3(result)
+        corrected_f = result.corrected_populations[..., 2]
+        peak = first_finite_peak(corrected_f)
+        pump_detuning_mhz = None
+        stokes_detuning_mhz = None
+        if peak is not None:
+            stokes_index, pump_index = divmod(peak, corrected_f.shape[1])
+            pump_detuning_mhz = float(source.result.x_values[pump_index])
+            stokes_detuning_mhz = float(source.result.y_values[stokes_index])
+        return StirapDetuningSummary(
+            confusion_matrix=confusion.confusion_matrix,
+            condition_number=confusion.condition_number,
+            minimum_singular_value=confusion.minimum_singular_value,
+            f_population_estimate=(
+                None if peak is None else float(corrected_f.flat[peak])
+            ),
+            pump_detuning_mhz=pump_detuning_mhz,
+            stokes_detuning_mhz=stokes_detuning_mhz,
+        )

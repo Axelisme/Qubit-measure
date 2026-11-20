@@ -3,6 +3,7 @@
 from typing import Literal
 
 from pydantic import Field
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -67,6 +68,15 @@ class SingleshotGEInputs(RecipeInputs):
 
 class SingleshotGEReport(RecipeReport):
     """Single-shot GE results and failure reason; cancellation returns no report."""
+
+    ground_fit_quality: FitQuality | None = Field(
+        default=None,
+        description="Owner ground histogram fit diagnostics; null when unavailable.",
+    )
+    excited_fit_quality: FitQuality | None = Field(
+        default=None,
+        description="Owner excited histogram fit diagnostics; null when unavailable.",
+    )
 
     fidelity: float | None = Field(
         description="Ground/excited discrimination fidelity; null means not estimable."
@@ -146,6 +156,7 @@ async def singleshot_ge(
                 writeback_applied=False,
                 analysis_failure=primary.reason,
             )
+        quality = primary.result.fit_quality
         primary_writeback_applied = False
         primary_answer = await tab.ask_writeback(stage="primary")
         if primary_answer.accepted:
@@ -156,6 +167,9 @@ async def singleshot_ge(
         post = await tab.analyze("post", result=GEPostSummary)
         if post.result is None:
             return SingleshotGEReport(
+                fit_quality=None if quality is None else quality["joint"],
+                ground_fit_quality=None if quality is None else quality["ground"],
+                excited_fit_quality=None if quality is None else quality["excited"],
                 fidelity=report_number(primary.result.fidelity),
                 theta=report_number(primary.result.theta),
                 threshold=report_number(primary.result.threshold),
@@ -174,6 +188,9 @@ async def singleshot_ge(
             post_writeback_applied = bool(receipt.items)
 
         return SingleshotGEReport(
+            fit_quality=None if quality is None else quality["joint"],
+            ground_fit_quality=None if quality is None else quality["ground"],
+            excited_fit_quality=None if quality is None else quality["excited"],
             fidelity=report_number(primary.result.fidelity),
             theta=report_number(primary.result.theta),
             threshold=report_number(primary.result.threshold),

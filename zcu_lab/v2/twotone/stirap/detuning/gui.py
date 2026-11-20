@@ -2,13 +2,17 @@
 
 from pathlib import Path
 
-from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.plotting.plots import Plots
 
-from .core import StirapDetuningCfg, StirapDetuningExp, StirapDetuningResult
+from .core import (
+    StirapDetuningCfg,
+    StirapDetuningExp,
+    StirapDetuningResult,
+    StirapDetuningSummary,
+)
 from .form import make_form
 
 
@@ -22,7 +26,7 @@ def _analyze(
     req: AnalyzeRequest[RunRecord[StirapDetuningCfg, StirapDetuningResult], None],
     *,
     plots: Plots,
-) -> Centroid3Summary:
+) -> StirapDetuningSummary:
     return StirapDetuningExp().analyze(req.run_result, None, plots=plots)
 
 

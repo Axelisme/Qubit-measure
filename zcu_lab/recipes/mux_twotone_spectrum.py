@@ -25,7 +25,7 @@ from zcu_lab.v2.mux.twotone_spectrum.gui import MuxTwotoneSpectrumSummary
 from zcu_lab.v2.support.measure.mux_results import MuxSummaryFailure
 
 from .mux_helpers import (
-    MuxToneReport,
+    MuxFitToneReport,
     ToneRangeInputs,
 )
 
@@ -36,7 +36,7 @@ class MuxTwotoneSpectrumInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order.",
+        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
     )
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
@@ -53,7 +53,7 @@ class MuxTwotoneSpectrumInputs(RecipeInputs):
     )
 
 
-class MuxTwotoneSpectrumToneReport(MuxToneReport):
+class MuxTwotoneSpectrumToneReport(MuxFitToneReport):
     """One captured tone's estimates and one-sigma errors, or its fit failure.
 
     Nullable estimates retain absent or nonfinite native summary values as null.
@@ -165,6 +165,7 @@ async def mux_twotone_spectrum(
                     MuxTwotoneSpectrumToneReport(
                         index=outcome.index,
                         name=name,
+                        fit_quality=outcome.quality,
                         freq=report_number(outcome.freq),
                         freq_err=report_number(outcome.freq_err),
                         fwhm=report_number(outcome.fwhm),

@@ -9,7 +9,7 @@ import numpy as np
 from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import model_validator
-from zcu_tools.analysis.fitting import HangerModel, TransmissionModel
+from zcu_tools.analysis.fitting import FitQuality, HangerModel, TransmissionModel
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -43,9 +43,12 @@ SamplingMode = Literal["linear", "homophasal"]
 
 @dataclass(frozen=True)
 class FreqAnalysis:
+    """Resonator center and width in MHz, model parameters and native fit diagnostics."""
+
     freq: float
     fwhm: float
     params: dict[str, Any]
+    fit_quality: FitQuality
 
 
 def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -277,5 +280,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 fit_bg_phase_curvature=options.fit_bg_phase_curvature,
             )
         return FreqAnalysis(
-            freq=answer.freq, fwhm=answer.fwhm, params=dict(answer.params)
+            freq=answer.freq,
+            fwhm=answer.fwhm,
+            params=dict(answer.params),
+            fit_quality=answer.fit_quality,
         )

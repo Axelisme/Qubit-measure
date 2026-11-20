@@ -1,7 +1,6 @@
 """Run, analyze and save an independent Pump-by-Stokes gain hardware sweep."""
 
 from pydantic import Field
-from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -12,6 +11,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     recipe,
     report_number,
 )
+
+from zcu_lab.v2.twotone.stirap.amplitude.core import StirapAmplitudeSummary
 
 
 class StirapAmplitudeInputs(RecipeInputs):
@@ -78,7 +79,20 @@ class StirapAmplitudeInputs(RecipeInputs):
 
 
 class StirapAmplitudeReport(RecipeReport):
-    """Saved-readout diagnostics, not a transfer fidelity or writeback proposal."""
+    """Saved readout diagnostics and the peak within the measured scan grid."""
+
+    f_population_estimate: float | None = Field(
+        default=None,
+        description="Largest finite corrected f population (unitless, unclipped) on this grid, not fidelity or a global optimum. Null when unavailable.",
+    )
+    pump_gain: float | None = Field(
+        default=None,
+        description="Pump gain in a.u. at the grid peak; null when unavailable.",
+    )
+    stokes_gain: float | None = Field(
+        default=None,
+        description="Stokes gain in a.u. at the grid peak; null when unavailable.",
+    )
 
     condition_number: float | None = Field(
         description="Saved training confusion condition number; null if analysis is unavailable."
@@ -129,7 +143,7 @@ async def stirap_amplitude(
 
     await tab.run()
     try:
-        analysis = await tab.analyze("primary", result=Centroid3Summary)
+        analysis = await tab.analyze("primary", result=StirapAmplitudeSummary)
         if analysis.result is None:
             return StirapAmplitudeReport(
                 condition_number=None,
@@ -137,6 +151,9 @@ async def stirap_amplitude(
                 analysis_failure=analysis.reason,
             )
         return StirapAmplitudeReport(
+            f_population_estimate=analysis.result.f_population_estimate,
+            pump_gain=analysis.result.pump_gain,
+            stokes_gain=analysis.result.stokes_gain,
             condition_number=report_number(analysis.result.condition_number),
             minimum_singular_value=report_number(
                 analysis.result.minimum_singular_value

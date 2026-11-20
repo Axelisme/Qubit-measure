@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
@@ -35,6 +36,10 @@ LenRabiRunResult: TypeAlias = RunRecord[LenRabiCfg, LenRabiResult]
 
 class TimeRabiSummary(BaseModel):
     """Recipe JSON inputs in native units; null means an unavailable estimate."""
+
+    fit_quality: Mapping[str, FitQuality] | None = Field(
+        description='Owner fit diagnostics under "fit"; null when unavailable.'
+    )
 
     pi_len: float | None = Field(
         description="Owner pi_len in us; null retains an unavailable estimate."

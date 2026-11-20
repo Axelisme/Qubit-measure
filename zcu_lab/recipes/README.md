@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-11-16，range find 具名頻率 upsert
+**Last updated:** 2026-11-20，分析報告與 Run 進度
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -20,7 +20,10 @@ Mux 的 participants 使用完整 tones 清單的原始 index，逐 tone 範圍�
 框架從這個 model 產生 MCP JSON schema，不另維護手寫 schema。
 Recipe inputs 只作 JSON schema／pydantic 驗證，不渲染 GUI Form。
 每個 recipe 的 `Report` 繼承 `RecipeReport`，只加實驗的回報量。
-基底提供 writeback_applied、analysis_failure、fit_quality 與 diagnostics，作者明填 owner 事實。
+基底提供 `writeback_applied`、`analysis_failure`、`fit_quality` 與 `diagnostics`。
+單目標的 `fit_quality` 轉出 owner 已計算的主擬合診斷。Mux 把這個欄位放在各 tone，頂層不做合併。
+沒有可轉出的診斷就回 null，不新增品質門檻或改變 writeback。Mux Ramsey 也轉出各 tone 的 `sampling_quality`。
+GE 的 `fit_quality` 是 joint 擬合診斷，另用 `ground_fit_quality`、`excited_fit_quality` 回報各 histogram 的擬合。Mux GE 在 Primary 的各 tone 回報這三份診斷。
 各模組的 `DEFINITION` 指向裝飾後的宣告。組合根把 `RECIPES` 注入框架。
 Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須重啟 MCP server。
 
@@ -208,8 +211,17 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 CPMG report 回傳 `t2_1_us`、`t2_1_err_us`、`gamma`、`gamma_err` 與 `fit_rows`。可加權列少於三列時四個擬合值為 null，仍保存圖與原始資料；分析失敗時 `fit_rows=0` 並附原因。
 STIRAP 與 Raman 沒有 writeback proposal，不詢問寫回。
 它們回報 saved confusion matrix 的 condition number 與 minimum singular value。
-Analysis summary 只保留 training confusion matrix 與這兩個診斷，逐點 g/e/f raw/corrected fractions 只畫在圖中。
-分析失敗仍 Save g/e/f counts。三態 reference 不另加工具。
+STIRAP 另回 `f_population_estimate`，即本次網格內最大有限的 corrected f population。同值取最早取數的點。
+它不裁切到 [0, 1]，不是 fidelity，也不代表全域最佳脈衝。逐點 g/e/f fractions 仍只畫在圖中。
+
+| STIRAP recipe | 峰值座標 |
+| --- | --- |
+| `stirap_delay` | `stokes_lead_us` |
+| `stirap_detuning` | `pump_detuning_mhz`、`stokes_detuning_mhz`，相對量得載波的 offset |
+| `stirap_amplitude` | `pump_gain`、`stokes_gain`，a.u. |
+
+沒有有限值或 Analyze 無結果時，回報的峰值與座標都是 null。
+Analyze 拋錯仍保留原錯誤，且成功 Run 後仍 Save g/e/f counts。三態 reference 不另加工具。
 `stirap_delay`、`stirap_amplitude` 與 `stirap_detuning` 使用各自獨立的 adapter 與表單。
 舊合併實驗的 run 不做遷移，也不支援載入。
 

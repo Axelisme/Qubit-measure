@@ -290,19 +290,12 @@ class RecipeRuntime:
             return deepcopy(tuple(self._details))
 
     def run_progress(self) -> OperationProgress:
-        """Read progress of this recipe's current GUI Run, not later operations.
-
-        No active Run returns no fields. Read on the recipe's bound connection
-        using the handle captured on the host control sequence.
-        """
+        """Read this recipe's bound GUI Run progress, or {} with no active Run."""
         try:
             handle = self.host.control(lambda: self._run_handle)
         except RuntimeError:
-            # A finished host no longer accepts control requests.
-            return {}
-        if handle is None:
-            return {}
-        return read_operation_progress(self._tools.gui, handle)
+            return {}  # A finished host no longer accepts control requests.
+        return {} if handle is None else read_operation_progress(self._tools.gui, handle)
 
     def scope_status(self) -> ScopeProjection:
         """Read the local tree and project descendants of its exact GUI Run.

@@ -17,6 +17,7 @@
 - 2026-10-22 [中斷 scope 成為顯式的 core 契約](2026-10-22-explicit-scope-contract.md)：中斷由顯式 Scope 區分目標並保證作用域，決策見 [ADR-0075](../adr/0075-agent-interface-layers.md)。
 - 2026-11-19 [Recipe 的寫回 helper 與 ask 原語](2026-11-19-recipe-ask-helpers.md)：原語與 helper。通用契約只有 ask 與正常結束；寫回 helper 依 stage 出題，原則見 [ADR-0075](../adr/0075-agent-interface-layers.md#通用契約只有-ask-與正常結束)。
 - 2026-11-20 [Agent 只用 logical cfg 路徑；recipe overrides 支援 value、select、command](2026-11-20-logical-cfg-paths-and-overrides.md)：介面收窄。Agent 只看 logical 路徑，canonical 方法改 internal；overrides 由各 recipe 宣告，決策見 [ADR-0068](../adr/0068-remote-transport.md) 與 [ADR-0075](../adr/0075-agent-interface-layers.md)。
+- 2026-11-20 [Recipe 報告與執行進度](2026-11-20-recipe-report-polish.md)：介面回報。轉出 owner 的 fit quality 與 STIRAP 網格峰值；取數中的 execution 顯示 Run 進度。
 
 ## 模擬量測環境
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
 from typing import TypeAlias
@@ -44,6 +44,10 @@ T2EchoRunResult: TypeAlias = RunRecord[T2EchoCfg, T2EchoResult]
 
 class T2EchoSummary(BaseModel):
     """Recipe JSON inputs in native units; null means an unavailable estimate."""
+
+    fit_quality: Mapping[str, FitQuality] | None = Field(
+        description='Owner fit diagnostics under "fit"; null when unavailable.'
+    )
 
     t2e: float | None = Field(
         description="Owner t2e in us; null retains an unavailable estimate."

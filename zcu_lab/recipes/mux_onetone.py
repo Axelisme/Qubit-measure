@@ -29,7 +29,7 @@ class MuxOnetoneInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Original tone indices in execution order.",
+        description="Original mux readout tone indices in execution order.",
     )
     df: ToneRangeInputs | None | Keep = Field(
         default=KEEP,

@@ -53,6 +53,8 @@ Load uses the parameter and library content saved in data.h5, without reading th
 Writeback resolves the Run's `$resonator.module.readout` slot to its library module. Primary proposes a circle classifier with g/e centers. Post proposes centers, radius and the 3x3 prepared-to-measured confusion matrix. Centers and radius use raw ADC sums divided by integration length without IQ-offset subtraction. Fidelity and sigma are not stored. The proposal preserves waveform keys and rejects readout settings that differ from the captured library module, apart from classifier. Equal materialized settings are accepted even if the Run used an inline copy or another key.
 
 In MCP, `singleshot_ge` analyzes Primary and asks about its candidates before starting Post. It applies the selected Primary candidates if accepted, then analyzes Post and asks about its candidates separately. You may skip Primary and still accept Post. The report lists confirmed writes in `primary_writeback_applied` and `post_writeback_applied`.
+The report's `fit_quality` comes from the joint histogram fit.
+`ground_fit_quality` and `excited_fit_quality` come from the individual fits.
 
 A batch applies Primary before Post and leaves the complete classifier. Separate Apply calls use the last replacement. Applying Primary after Post clears radius and matrix; apply Post again before a measurement that needs radius. Old point calibration values are not read or migrated. Re-run GE after this update.
 

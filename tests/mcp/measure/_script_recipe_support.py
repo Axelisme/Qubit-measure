@@ -81,14 +81,14 @@ class SyntheticGui:
                 if self.cancelled.is_set() and params["operation_id"] != 100
                 else "finished",
             }
-        if method == "operation.progress":
-            return {"active": False, "bars": []}
         if method in {"tab.cancel", "tab.analyze_cancel", "operation.cancel"}:
             self.cancelled.set()
             return {"status": "requested"}
         return self._snapshots(method, params)
 
     def _snapshots(self, method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "operation.progress":
+            return {"active": False, "bars": []}
         if method == "tab.snapshot":
             return {
                 "tabs": [

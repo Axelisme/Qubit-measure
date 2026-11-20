@@ -44,6 +44,10 @@ T2RamseyRunResult: TypeAlias = RunRecord[T2RamseyCfg, T2RamseyResult]
 class T2RamseySummary(BaseModel):
     """Recipe JSON inputs in native units; null means an unavailable estimate."""
 
+    fit_quality: Mapping[str, FitQuality] | None = Field(
+        description='Owner fit diagnostics under "fit"; null when unavailable.'
+    )
+
     t2r: float | None = Field(
         description="Owner t2r in us; null retains an unavailable estimate."
     )

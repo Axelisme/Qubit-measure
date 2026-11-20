@@ -350,7 +350,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
                         "default": 60,
                         "minimum": 0,
                         "maximum": 300,
-                        "description": "Wait budget in seconds. Default 60; maximum 300. Expiry returns the current status without cancelling work.",
+                        "description": "Seconds (default 60, max 300). Timeout returns current status without cancelling work.",
                     },
                 },
                 "oneOf": [

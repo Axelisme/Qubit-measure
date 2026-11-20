@@ -3,6 +3,7 @@
 from typing import Literal
 
 from pydantic import Field, StrictInt
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -18,6 +19,7 @@ from zcu_lab.v2.mux.singleshot_ge.gui import MuxGEPostSummary, MuxGESummary
 from zcu_lab.v2.support.measure.mux_results import MuxSummaryFailure
 
 from .mux_helpers import (
+    MuxFitToneReport,
     MuxToneReport,
 )
 
@@ -28,7 +30,7 @@ class MuxSingleshotGEInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order.",
+        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
     )
 
     initial_state: Literal["ground", "excited"] | None | Keep = Field(
@@ -53,7 +55,7 @@ class MuxSingleshotGEInputs(RecipeInputs):
     )
 
 
-class MuxGEToneReport(MuxToneReport):
+class MuxGEToneReport(MuxFitToneReport):
     """One captured qubit's GE separation estimates, or its Primary fit failure.
 
     Scalars use the GE owner's normalized ADC coordinates; theta is in radians.
@@ -61,6 +63,14 @@ class MuxGEToneReport(MuxToneReport):
     position, never the participant row offset.
     """
 
+    ground_fit_quality: FitQuality | None = Field(
+        default=None,
+        description="Owner ground histogram fit diagnostics; null when unavailable.",
+    )
+    excited_fit_quality: FitQuality | None = Field(
+        default=None,
+        description="Owner excited histogram fit diagnostics; null when unavailable.",
+    )
     fidelity: float | None = Field(
         default=None, description="GE assignment fidelity, dimensionless."
     )
@@ -201,8 +211,12 @@ def _primary_tone_reports(result: MuxGESummary) -> list[MuxGEToneReport]:
                 MuxGEToneReport(index=outcome.index, name=name, failure=outcome.reason)
             )
         else:
+            quality = outcome.primary.fit_quality
             tones.append(
                 MuxGEToneReport(
+                    fit_quality=None if quality is None else quality["joint"],
+                    ground_fit_quality=None if quality is None else quality["ground"],
+                    excited_fit_quality=None if quality is None else quality["excited"],
                     index=outcome.index,
                     name=name,
                     fidelity=report_number(outcome.primary.fidelity),

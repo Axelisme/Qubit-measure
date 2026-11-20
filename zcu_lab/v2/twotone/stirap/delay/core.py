@@ -31,6 +31,7 @@ from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
 from zcu_lab.v2.support import live_line
 
+from .._population_peak import first_finite_peak
 from .._pulses import drive_pulse
 
 STATE_LABELS = ("g", "e", "f")
@@ -45,6 +46,18 @@ class StirapDelayResult:
 
     stokes_leads: NDArray[np.float64]
     counts: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class StirapDelaySummary(Centroid3Summary):
+    """Saved confusion diagnostics and the largest finite corrected f population.
+
+    The population estimate is dimensionless and unclipped, not fidelity.
+    Peak coordinates use Stokes lead (us). With no finite value, all peak fields are None.
+    """
+
+    f_population_estimate: float | None
+    stokes_lead_us: float | None
 
 
 class StirapDelayCfg(ConfigBase):
@@ -202,15 +215,16 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         options: None = None,
         *,
         plots: Plots,
-    ) -> Centroid3Summary:
+    ) -> StirapDelaySummary:
         """Plot measured and corrected g/e/f fractions against lead in us.
 
         options is None; there are no analysis controls. Use only the source's
         saved centroid3 centers and training confusion matrix, never live
         calibration. Skip unfinished/zero-count points and retain unclipped
         corrected estimates. Publish one populations figure and return the
-        fixed-size confusion diagnostics. Missing cfg/calibration or no usable
-        points raises ValueError; singular confusion raises LinAlgError.
+        fixed-size confusion diagnostics and the corrected f peak. Missing
+        cfg/calibration or no usable points raises ValueError; singular confusion
+        raises LinAlgError.
         """
         # 1. Correct completed timing points with the saved g/e/f readout calibration.
         del options
@@ -255,4 +269,15 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         ax.legend()
         ax.grid()
         fig.tight_layout()
-        return summarize_centroid3(result)
+        confusion = summarize_centroid3(result)
+        corrected_f = result.corrected_populations[..., 2]
+        peak = first_finite_peak(corrected_f)
+        return StirapDelaySummary(
+            confusion_matrix=confusion.confusion_matrix,
+            condition_number=confusion.condition_number,
+            minimum_singular_value=confusion.minimum_singular_value,
+            f_population_estimate=(
+                None if peak is None else float(corrected_f.flat[peak])
+            ),
+            stokes_lead_us=None if peak is None else float(leads[peak]),
+        )

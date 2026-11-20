@@ -136,6 +136,11 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
             writeback_applied = bool(receipt.items)
 
         return T1Report(
+            fit_quality=(
+                None
+                if analysis.result.fit_quality is None
+                else analysis.result.fit_quality["fit"]
+            ),
             t1_us=report_number(analysis.result.t1),
             t1_err_us=report_number(analysis.result.t1_err),
             t1b_us=report_number(analysis.result.t1b),

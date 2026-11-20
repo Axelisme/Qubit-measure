@@ -24,7 +24,7 @@ class MuxFluxInputs(RecipeInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order.",
+        description="Unique original mux readout tone indices in acquisition order.",
     )
     flux_unit: Literal["A", "V", "native"] | None | Keep = Field(
         default=KEEP,
@@ -60,6 +60,10 @@ class MuxOnetoneFluxInputs(MuxFluxInputs):
 class MuxTwotoneFluxInputs(MuxFluxInputs):
     """Absolute MHz drive bounds for every original tone; n → expts."""
 
+    participants: list[StrictInt] | None | Keep = Field(
+        default=KEEP,
+        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
+    )
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
         description="Absolute MHz start/stop for every original tone, including nonparticipants. No per-tone n.",

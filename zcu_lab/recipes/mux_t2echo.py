@@ -20,7 +20,7 @@ from zcu_lab.v2.support.measure.mux_results import (
 )
 
 from .mux_helpers import (
-    MuxToneReport,
+    MuxFitToneReport,
 )
 
 
@@ -30,7 +30,7 @@ class MuxT2EchoInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order.",
+        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
     )
 
     fit_method: Literal["fringe", "decay"] | None | Keep = Field(
@@ -43,7 +43,7 @@ class MuxT2EchoInputs(RecipeInputs):
     )
 
 
-class MuxT2EchoToneReport(MuxToneReport):
+class MuxT2EchoToneReport(MuxFitToneReport):
     """One captured tone's estimates and one-sigma errors, or its fit failure.
 
     Nullable estimates retain absent or nonfinite native summary values as null.
@@ -135,6 +135,7 @@ async def mux_t2echo(
                     MuxT2EchoToneReport(
                         index=outcome.index,
                         name=name,
+                        fit_quality=outcome.quality,
                         t2=report_number(outcome.t2),
                         t2_err=report_number(outcome.t2_err),
                         detune=report_number(outcome.detune),
