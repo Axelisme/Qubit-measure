@@ -84,13 +84,14 @@
 
 ## 4. 量測
 
-**4.1 按層量，不做 e2e。** Kernel 層量一段輸入：`Engine.evolve` 以 `families=` 固定候選；測重複就是同一段接 N 次；一次只改一個約化軸；誤差與耗時在同一組座標上量。
+**4.1 分層做測試與 kernel 比較。** Kernel 層量一段輸入：`Engine.evolve` 以 `families=` 固定候選；測重複就是同一段接 N 次；一次只改一個約化軸；誤差與耗時在同一組座標上量。
 序列層用手寫的多段 `TimelineBatch`，量最終誤差、整體耗時與 family 去留。
 選路用 `Engine.inspect_dispatch` 檢查。查詢可演化 guard 自己的探針，不跑使用者 timeline。
-使用者回報的錯在各層都重現不出來時，才跑一次 e2e 定位；腳本不入庫，也不當門檻。
+整個實驗 Run 的耗時由[牆鐘工具](../../../tools/README.md#實驗-run-牆鐘)記錄，不作精度證據、測試或 gate。
+使用者回報的錯在各層都重現不出來時，可以跑一次 e2e 定位。腳本不入庫，也不當門檻。
 
 - 依據：ADR-0078〈[模擬器的測試與量測分層，不做 e2e](../../../docs/adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)〉〈[每個 kernel 的量測場景只有一段](../../../docs/adr/0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)〉；[Simulator benchmark](../../../tools/README.md#simulator-benchmark)。
-- 自查：量測腳本只呼叫 `Engine.evolve` 或 `Engine.inspect_dispatch`，不經 program 編譯或 acquire。
+- 自查：kernel／family 比較只計時 `Engine.evolve`，不經 program 編譯或 acquire。
 
 **4.2 場景照約化軸宣告。** 不為單一實驗加專屬場景。
 把輸入約化成 kernel 與 guard 實際看到的物理量（耦合、失諧、時長、包絡形狀、tone 間距），事先宣告格點；每個實驗只核它的座標落在已覆蓋的區域。
