@@ -11,6 +11,7 @@ import subprocess
 import sys
 import traceback
 from collections.abc import Callable, Collection, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -46,6 +47,7 @@ from tools._experiment_wall_time_report import (
     RUN_TARGET_S,
     BatchEnd,
     BatchPlan,
+    JournalUsageError,
     Row,
     RunStart,
     assemble_report,
@@ -127,6 +129,18 @@ class RunTiming:
     wall_s: float
 
 
+@dataclass(frozen=True)
+class RunFailure:
+    """A Controller-reported failure, not an exception from the tool.
+
+    finished_at is the UTC ISO-8601 timestamp when the owner observed the
+    failed event. reason is the Controller diagnostic with error type and message.
+    """
+
+    finished_at: str
+    reason: str
+
+
 class Run(Protocol):
     """One prepared, viewless Run; call on its owner thread.
 
@@ -152,11 +166,19 @@ class Run(Protocol):
         """Request Controller cancellation. This does not mean Run has stopped."""
         ...
 
-    def timing(self, wall_s: float, /) -> RunTiming:
-        """Read the terminal RunRecord's timestamps and attach measured wall_s.
+    def failure(self) -> RunFailure | None:
+        """Read the on-time terminal outcome: failure facts or None on success.
 
-        Raise if the Run failed or did not publish a native RunRecord.
+        Raise for a missing or unexpected outcome or unreadable diagnostics.
         """
+        ...
+
+    def is_idle(self) -> bool:
+        """Return whether the Controller has no live operations."""
+        ...
+
+    def timing(self, wall_s: float, /) -> RunTiming:
+        """Read a successful RunRecord and attach wall_s; raise if unavailable."""
         ...
 
 
@@ -283,24 +305,27 @@ class _ControllerRun:
         self.loop = QEventLoop(app)
         self.terminal: RunFinishedPayload | None = None
         self.observed_s: float | None = None
+        self.failed_at: str | None = None
         self.wake: Callable[[], None] | None = None
-        self.dispatched = False
+        self.token: int | None = None
 
     def finished(self, event: RunFinishedPayload) -> None:
         if event.tab_id == self.tab:
             self.observed_s = perf_counter()
             self.terminal = event
+            if event.outcome == "failed":
+                self.failed_at = datetime.now(UTC).isoformat()
             if self.wake is not None:
                 self.wake()
 
     def start(self) -> None:
-        self.ctrl.run_analyze_control.start_run(self.tab)
-        self.dispatched = True
+        self.token = self.ctrl.run_analyze_control.start_run(self.tab)
+
+    def is_idle(self) -> bool:
+        return self.ctrl.active_operation_count() == 0
 
     def safe_to_close(self) -> bool:
-        return self.ctrl.active_operation_count() == 0 and (
-            not self.dispatched or self.terminal is not None
-        )
+        return self.is_idle() and (self.token is None or self.terminal is not None)
 
     def wait_until(
         self, deadline: float, interrupted: Callable[[], bool], *, idle: bool = False
@@ -308,9 +333,7 @@ class _ControllerRun:
         from qtpy.QtCore import Qt, QTimer
 
         def terminal_time() -> float | None:
-            if idle and (
-                perf_counter() > deadline or self.ctrl.active_operation_count()
-            ):
+            if idle and (perf_counter() > deadline or not self.is_idle()):
                 return None
             return self.observed_s
 
@@ -335,6 +358,12 @@ class _ControllerRun:
                 self.wake = None
                 poll.stop()
                 timer.stop()
+        if self.terminal is not None and self.terminal.outcome not in {
+            "finished",
+            "failed",
+            "cancelled",
+        }:
+            raise RuntimeError(f"Unknown Run outcome: {self.terminal.outcome!r}")
         observed = terminal_time()
         if observed is not None or interrupted() or perf_counter() >= deadline:
             return observed
@@ -343,15 +372,32 @@ class _ControllerRun:
     def cancel(self) -> None:
         self.ctrl.run_analyze_control.cancel_run()
 
-    def timing(self, wall_s: float) -> RunTiming:
-        outcome = self.terminal
-        if outcome is None:
+    def failure(self) -> RunFailure | None:
+        terminal = self.terminal
+        if terminal is None:
             raise RuntimeError("Run did not publish a terminal event")
-        if outcome.outcome != "finished":
-            adapter = self.ctrl.tab_control.get_tab_adapter_name(self.tab)
+        if terminal.outcome == "finished":
+            return None
+        if terminal.outcome != "failed" or self.token is None or self.failed_at is None:
+            raise RuntimeError(f"Unexpected Run outcome: {terminal.outcome!r}")
+        # ADR-0066: the Run settles its handle before publishing the event. The
+        # off-owner read cannot wait for an owner callback or for a live Run.
+        await_operation = self.ctrl.operation_control.await_operation
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            result = executor.submit(await_operation, self.token, 0).result()
+        outcome = result.outcome
+        if (
+            result.reason != "completed"
+            or outcome is None
+            or outcome.status != "failed"
+            or not outcome.error
+        ):
             raise RuntimeError(
-                f"{adapter}: Run {outcome.outcome}: {outcome.error_message}"
+                f"Failed Run event disagrees with operation {self.token}"
             )
+        return RunFailure(self.failed_at, outcome.error)
+
+    def timing(self, wall_s: float) -> RunTiming:
         return _read_run_timing(self.ctrl, self.tab, wall_s)
 
 
@@ -508,8 +554,8 @@ def _select_adapters(adapters: Collection[str], selectors: Sequence[str]) -> lis
     return sorted(selected if selectors else adapters)
 
 
-class _CancellationDidNotSettle(Exception):
-    """A timed-out Run did not reach terminal and Controller idle by grace end."""
+class _RunCannotContinue(Exception):
+    """A failed or timed-out Run was journaled but the Controller is not ready."""
 
 
 class _InterruptedBatch(Exception):
@@ -519,14 +565,14 @@ class _InterruptedBatch(Exception):
 @dataclass
 class _Interruption:
     end: BatchEnd | None = None
-    exit_code: int = 0
 
-    def request(self, signum: int, _frame: FrameType | None = None) -> None:
+    def request(
+        self, _signum: int | None = None, _frame: FrameType | None = None
+    ) -> None:
         if self.end is None:
             self.end = BatchEnd(
                 ended_at=datetime.now(UTC).isoformat(), monotonic_s=perf_counter()
             )
-            self.exit_code = 128 + signum
 
     def requested(self) -> bool:
         return self.end is not None
@@ -549,9 +595,34 @@ def _finish_timeout(run: Run, location: Path, row: Row, stop: _Interruption) -> 
     if stop.requested():
         raise _InterruptedBatch
     if settled is None or settled > deadline:
-        raise _CancellationDidNotSettle
+        raise _RunCannotContinue
     _add_breakdown(row, summarize_acquires(telemetry), partial=True)
     write_json(location / "row.json", row)
+
+
+def _finish_failed_run(
+    run: Run, location: Path, row: Row, start: RunStart, failure: RunFailure
+) -> None:
+    path = location / "run-failure.json"
+    write_json(
+        path,
+        {
+            "adapter": row["adapter"],
+            "started_at": start["started_at"],
+            "finished_at": failure.finished_at,
+            "reason": failure.reason,
+        },
+    )
+    row.update(
+        status="run_failed",
+        reason=failure.reason,
+        started_at=start["started_at"],
+        finished_at=failure.finished_at,
+        failure_record=path.name,
+    )
+    write_json(location / "row.json", row)
+    if not run.is_idle():
+        raise _RunCannotContinue
 
 
 def _case_row(
@@ -604,7 +675,7 @@ def _measure_attempt(run: Run, location: Path, row: Row, batch: _Batch) -> None:
         run.start()
         observed_s = run.wait_until(deadline, batch.stop.requested)
     except KeyboardInterrupt:
-        batch.stop.request(signal.SIGINT)
+        batch.stop.request()
         run.cancel()
         raise _InterruptedBatch from None
     if batch.stop.before(deadline if observed_s is None else min(observed_s, deadline)):
@@ -617,6 +688,10 @@ def _measure_attempt(run: Run, location: Path, row: Row, batch: _Batch) -> None:
             wall_s_lower_bound=batch.timeout_s,
         )
         _finish_timeout(run, location, row, batch.stop)
+        return
+    failure = run.failure()
+    if failure is not None:
+        _finish_failed_run(run, location, row, start, failure)
         return
     timing = run.timing(observed_s - dispatched_s)
     row.update(
@@ -654,13 +729,15 @@ def _recover_report(
         None if end is None else BatchEnd(ended_at=end.isoformat(), monotonic_s=None)
     )
     try:
-        assemble_report(output, plan, recorded or supplied)
-    except ValueError as error:
+        all_resolved = assemble_report(output, plan, recorded or supplied)
+    except JournalUsageError as error:
+        if recorded is not None:
+            raise
         parser.error(str(error))
     if recorded is None and supplied is not None:
         write_json(output / "batch-end.json", supplied)
     print(output)
-    return 0
+    return 0 if all_resolved else 3
 
 
 def main(
@@ -685,9 +762,10 @@ def main(
     batch end, --ended-at supplies the interruption time or a conservative
     earlier bound, not the runner's finish time after cleanup. --resume-from
     retains resolved rows from a journal with matching commit and input hashes,
-    and runs only missing selected cases. Return 0 after reporting, or 124 if a timed-out
-    Run prevented continuation. KeyboardInterrupt writes a partial report and
-    returns 130.
+    and runs only missing selected cases. Return 0 if all reported rows are
+    resolved (including timeout and run_failed), or 3 if the report contains
+    incomplete or not_run rows. KeyboardInterrupt stops the batch and reports
+    from its journal under the same exit status rule.
     """
     return _main(argv, data_dir, discover, read_commit, _Interruption())
 
@@ -769,7 +847,7 @@ def _main(
         reused = (
             {} if args.resume_from is None else reusable_rows(args.resume_from, plan)
         )
-    except ValueError as exc:
+    except JournalUsageError as exc:
         parser.error(str(exc))
     adapters = sorted(set(selected) | reused.keys())
     plan["cases"] = {
@@ -807,7 +885,6 @@ def _run_batch(
     batch: _Batch,
 ) -> int:
     output = batch.output
-    exit_code = 0
     try:
         for adapter, directory in batch.plan["cases"].items():
             if batch.stop.requested():
@@ -830,16 +907,14 @@ def _run_batch(
                 )
                 _case_row(inventory, case, data_dir, batch, directory)
     except KeyboardInterrupt:
-        batch.stop.request(signal.SIGINT)
-    except _InterruptedBatch:
+        batch.stop.request()
+    except (_InterruptedBatch, _RunCannotContinue):
         pass
-    except _CancellationDidNotSettle:
-        exit_code = 124
     if batch.stop.end is not None:
         write_json(output / "batch-end.json", batch.stop.end)
-    assemble_report(output, batch.plan, batch.stop.end)
+    all_resolved = assemble_report(output, batch.plan, batch.stop.end)
     print(output)
-    return batch.stop.exit_code or exit_code
+    return 0 if all_resolved else 3
 
 
 def _exit_with_live_workers(code: int) -> None:
