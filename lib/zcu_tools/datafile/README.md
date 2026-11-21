@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-11-18
+**Last updated:** 2026-11-22
 
 **讀者：** framework-dev。讀寫通用 HDF5 容器，或獨立轉出 Labber。
 
@@ -85,7 +85,7 @@ Reader 接受 major 3 的任何 minor。`load` 回傳來源版本，`save` 原�
 
 cfg、metadata、analysis、source 都是生產者的文件命名約定，不是容器的保留槽位。
 Experiment 擁有 run 型別與 cfg 驗證。Artifacts 擁有 analysis JSON 信封，見
-[experiment](../experiment/README.md)。
+[experiment〈實驗介面與資料〉](../experiment/README.md#實驗介面與資料)。
 
 ## Labber
 

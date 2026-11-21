@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-21，模擬編譯拒絕無具名來源的 ADC 頻率字
+**Last updated:** 2026-11-22，取數 sums 與分析接縫
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -173,6 +173,8 @@ reducer 不檢查 π 校準，也無法偵測 cycle 內未觀察到的物理斷�
 
 這些 reducer 在編譯後解析 label；pulse 與 mux readout owners 一起判定唯一性。
 Read-count 限制、外積總和與取消契約見 [summed acquisition](../README.md#summed-acquisition)。
+`shot_sums` 等 reducer 回傳的 sums 與 moments 是分析輸入，不是誤差估計。
+框架不提供通用的 uncertainty estimator；各分析 consumer 依模型選擇估計方法，見[分析子模組](../../analysis/README.md#子模組)。
 
 `readout_observation.observe_readouts(prog)` 由 program owner 解包 compiler wrappers，提供 readout provenance、Trigger 順序及控制 scope。
 它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。

@@ -329,7 +329,8 @@ def metadata_from_container(container: Container) -> RunMetadata:
 def read_run_metadata(path: Path) -> RunMetadata:
     """Read typed run metadata without loading arrays, cfg or the whole container.
 
-    path is the exact major-3 container or legacy native major-2 source path.
+    This reader accepts only zcu.container 3.x files (ADR-0080), not legacy
+    zcu.experiment-data 2.x files.
     This is an explicit complete projection using the full RunMetadata schema;
     unlike restore_run it validates every metadata field.
     Invalid metadata/format raises path-qualified ValueError; missing documents
