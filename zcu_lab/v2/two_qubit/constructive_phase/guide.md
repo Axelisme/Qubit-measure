@@ -55,9 +55,11 @@ Use Defaults to replace unsaved input with initial values from the new source.
 Analyze returns only `relative_phase_deg`, `reason` and `interference_quality`.
 Per-phase rates, populations and interference curves stay inside analysis for plotting.
 
-The live and Analyze interference maps show P00 after double Xπ contrast.
-P00 is the terminal (g,g) count divided by all nine terminal class counts.
-The return figure shows three fractions: both qubits in g, both in e, and
+Use the live and Analyze interference maps to locate the fastest oscillation.
+Both show terminal P(g,g) after the final double Xπ, divided by all nine
+terminal class counts. The live title shows acquisition progress. Use the
+return figure to check classification at one phase. It shows three fractions:
+both qubits in g, both in e, and
 anything else (the other seven joint outcomes). They add up to one at each
 duration. It shows the measured phase closest to the proposed relative phase,
 or the first measured phase when no proposal is available. The title gives the
@@ -70,8 +72,13 @@ There are no mean-IQ diagnostics or saved IQ clouds.
 Each fully acquired duration trace with nonzero selected counts uses an
 undamped cosine fit.
 Rates below 1 divided by the saved duration span are unresolved.
-Failed or degenerate fits report a reason rather than a zero rate.
-Compare the measured return traces with the fitted curves.
+Duration-fit rates distinguish unresolved fitted rates from identifiable rates.
+A failed or degenerate fit shows a reason, not a zero rate. Use Duration slices
+to compare measured duration points with the dense cosine fit.
+The duration points and the grouped terminal probabilities show ±1 shot SEM
+from the corresponding class indicator and that point's retained count.
+This is counting noise, not the uncertainty of the fitted rate. The 2D map
+has no per-cell bars.
 Choose spacing so the expected rate is below `1/(2 × duration spacing)`.
 Check aliasing manually. Thermal mixtures may contain more than one rate.
 
@@ -79,7 +86,10 @@ Identifiable rates use `rate² = A + B cosφ + C sinφ`.
 The proposed relative phase is `atan2(C,B)` in degrees, the maximum-rate branch.
 More than three identifiable phase slices and full-rank phase coverage are
 needed for finite uncertainty. Zero modulation or nonfinite uncertainty prevents
-a proposal. This phase is not a logical local-Z correction.
+a proposal. The interference plot shows the dense rate-squared fit and its
+maximum. R² is the fraction of measured rate-squared variation explained by
+the fit; it has no additional selection threshold. This phase is not a logical
+local-Z correction.
 
 ## Save and load
 

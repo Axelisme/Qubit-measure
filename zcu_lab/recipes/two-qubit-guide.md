@@ -47,7 +47,7 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 
 `two_qubit_cz_amplitude` 執行一次 `two_qubit/cz_amplitude`。
 量測前依 [adapter 的準備說明](../v2/two_qubit/cz_amplitude/guide.md#preparation-and-inputs) 確認 Xπ 脈衝、兩路 CZ 脈衝與 mux readout。
-`scale_range: [start, stop]` 填無單位的共同 gain 倍率範圍。`scale_points` 寫入 Form 的 Expts。
+`scale_range: [start, stop]` 對應 Form 的 Common CZ gain multiplier → Start、Stop（a.u.）。`scale_points` 寫入該掃描的 Expts；`reps`、`rounds` 分別對應 Reps、Rounds。
 要估計第一個正回返，從 0 掃到涵蓋至少一個完整週期。
 省略掃描欄位保留 Reset 值；Reset 沒有預填端點，需用具名欄位或 overrides 提供。
 
@@ -74,7 +74,7 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 
 `two_qubit_local_z` 執行一次 `two_qubit/local_z`。`target` 用 `qubit1`、`qubit2`、`coupler`、`mux` 綁定本次 Open／Reset。
 量測前依 [adapter 的準備說明](../v2/two_qubit/local_z/guide.md#run-前) 檢查兩顆 qubit 的 Xπ/2 脈衝與 CZ 脈衝。
-`gate_count` 填連續的非負整數，至少三個，例如 `[0, 1, 2, 3, 4]`。省略就保留 Reset 值；填 null 將 null 交給 Form 驗證。
+`gate_count` 對應 Form 的 CZ gates per shot，填連續的非負整數，至少三個，例如 `[0, 1, 2, 3, 4]`。省略就保留 Reset 值；填 null 將 null 交給 Form 驗證。
 
 報告的 `qubit1` 和 `qubit2` 各有 `intercept_deg`、`slope_deg`、`correction_deg`、`slope_error_deg`、`reason` 和 `fit_quality`。
 `slope_deg` 和它的 1σ 不確定度 `slope_error_deg` 都按每個 CZ gate 計。`correction_deg` 是不重新 wrap 的負斜率。
@@ -87,7 +87,7 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 
 `two_qubit_constructive_phase` 執行一次 `two_qubit/constructive_phase`。
 依 [adapter 的準備說明](../v2/two_qubit/constructive_phase/guide.md#prepare-the-form) 確認兩路脈衝的共同頻率與掃描範圍。
-`relative_phase_range: [start, stop]` 填 Qubit2 減 Qubit1 的相位範圍，單位 deg。`duration_range: [start, stop]` 填兩路共同脈衝長度，單位 us，兩端都必須大於零。
+`relative_phase_range: [start, stop]` 設定 Form 的 Qubit2 relative to Qubit1 drive phase（deg）。`duration_range: [start, stop]` 設定 Common waveform envelope duration（µs），兩端都必須大於零。
 `relative_phase_points` 和 `duration_points` 寫入各自的 Form Expts。省略保留 Reset 值；Reset 未預填兩軸端點，須用具名欄位或 overrides 提供。
 
 報告的 `relative_phase_deg` 是最大擬合速率對應的相對相位。找不到相位時，此欄為 null，`reason` 說明原因。
@@ -100,10 +100,10 @@ Qubit2 的新 phase 是來源 Qubit1 phase 加上擬合的相對相位。參見 
 
 `two_qubit_conditional_phase` 執行一次 `two_qubit/conditional_phase`。
 先依 [adapter 的準備說明](../v2/two_qubit/conditional_phase/guide.md#prepare-the-inputs) 確認兩顆 qubit 的脈衝與 mux 分類器。
-`ramsey_role` 填 `"qubit1"` 或 `"qubit2"`，寫入 Form 的 `target`，另一顆是 spectator。
+`ramsey_role` 填 `"qubit1"` 或 `"qubit2"`，寫入 Form 的 Ramsey target，另一顆是 spectator。
 Recipe 的 `target` 物件仍用來綁定 aliases。
-`gate_count` 填至少兩個不重複的正整數。
-`frequency_range: [start, stop]` 填遞增的 MHz 端點，`frequency_points` 設定 Expts。
+`gate_count` 對應 Form 的 CZ gates per shot，填至少兩個不重複的正整數，差值的 gcd 必須為 1。
+`frequency_range: [start, stop]` 設定 Common CZ drive frequency 的遞增端點（MHz），`frequency_points` 設定該掃描的 Expts。
 省略具名欄位會保留 Reset 值。Reset 沒有預填頻率端點，需用具名欄位或 overrides 提供。
 
 ```json

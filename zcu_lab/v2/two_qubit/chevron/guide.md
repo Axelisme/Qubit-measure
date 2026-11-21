@@ -57,18 +57,25 @@ Use Defaults to replace unsaved input with initial values from the new source.
 Analyze publishes these figures and returns `None`. Per-frequency rates, counts
 and curves stay inside analysis; frequency and duration selection remain manual.
 
-The live and Analyze chevron maps show P00 after double Xπ contrast.
-P00 is the terminal (g,g) count divided by all nine terminal class counts.
-The return figure shows all nine g/e/other joint outcomes.
+Use the live and Analyze chevron maps to locate a return valley. Both show
+terminal P(g,g) after the final double Xπ; the live title reports how many
+cells have completed. P(g,g) divides the terminal (g,g) count by all nine
+terminal class counts. The terminal-outcome panels show the same map for
+each joint g/e/other outcome. The color scale is a probability, not IQ.
 These figures include preparation and readout errors.
 They do not measure gate fidelity or resolve physical leakage by themselves.
 There are no mean-IQ diagnostics or saved IQ clouds.
 
 Each fully acquired duration trace with nonzero selected counts uses an
 undamped cosine fit.
-Rates below 1 divided by the saved duration span are unresolved.
+Use Duration-fit rates to compare frequencies. Rates below 1 divided by the
+saved duration span are unresolved; the rate chart marks them separately.
 Failed or degenerate fits report a reason rather than a zero rate.
-Compare the measured return traces with the fitted curves.
+Use Duration slices to check measured points against the dense cosine fit.
+At a measured point, the bar is one shot SEM from the binomial (g,g)
+indicator, using only the retained shots at that point. The bar measures
+counting noise, not the uncertainty of the fitted rate. The 2D maps have
+no per-cell bars.
 Choose spacing so the expected rate is below `1/(2 × duration spacing)`.
 Check aliasing manually. Thermal mixtures may contain more than one rate.
 

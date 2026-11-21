@@ -31,12 +31,16 @@ class LocalZInputs(RecipeInputs):
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     gate_count: list[Annotated[int, Field(strict=True, ge=0)]] | None | Keep = Field(
-        KEEP, description="Consecutive nonnegative CZ gate counts to measure."
+        KEEP,
+        description="Form CZ gates per shot: consecutive nonnegative train lengths, including zero.",
     )
     reps: int | None | Keep = Field(
-        KEEP, description="Repetitions per point per round."
+        KEEP,
+        description="Form Reps: attempted shots per gate count and projection in one round.",
     )
-    rounds: int | None | Keep = Field(KEEP, description="Acquisition round count.")
+    rounds: int | None | Keep = Field(
+        KEEP, description="Form Rounds: acquisitions accumulated at each sweep point."
+    )
 
 
 class LocalZReport(RecipeReport):
@@ -44,11 +48,11 @@ class LocalZReport(RecipeReport):
 
     qubit1: LocalZFit | None = Field(
         default=None,
-        description="Qubit1's fit or fit reason; null if Analyze returned no summary.",
+        description="Analyze fits[0]: Qubit1 phase slope, opposite-sign correction, fit quality or failure reason.",
     )
     qubit2: LocalZFit | None = Field(
         default=None,
-        description="Qubit2's fit or fit reason; null if Analyze returned no summary.",
+        description="Analyze fits[1]: Qubit2 phase slope, opposite-sign correction, fit quality or failure reason.",
     )
 
 

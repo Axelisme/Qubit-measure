@@ -32,15 +32,16 @@ class RabiRate:
     """One complete duration-slice cosine fit in MHz, or an explicit failure.
 
     rate is None when unresolved; reason explains why. uncertainty is the finite
-    frequency standard error, not an acceptance threshold. fitted contains model
-    values at all saved durations, or None on failure. quality reports the actual
-    fit observations/parameters/covariance, including rejected low-rate fits.
+    frequency standard error, not an acceptance threshold. parameters holds the
+    cosine's offset, signed contrast, frequency (MHz), and phase (deg), or None
+    on failure. It retains a finite rejected low-rate fit for display. quality
+    reports diagnostics calculated on the actual fit observations.
     """
 
     rate: float | None
     uncertainty: float | None
     reason: str | None
-    fitted: NDArray[np.float64] | None
+    parameters: tuple[float, float, float, float] | None
     quality: FitQuality | None
 
 
@@ -151,11 +152,22 @@ def _fit_duration_rate(
             None,
             quality,
         )
-    if abs(frequency) < 1 / np.ptp(durations):
+    model = (
+        float(parameters[0]),
+        float(parameters[1]),
+        frequency,
+        float(parameters[3]),
+    )
+    minimum_rate = 1 / np.ptp(durations)
+    if abs(frequency) < minimum_rate:
         return RabiRate(
-            None, None, "Rate below 1/duration span: unresolved", fitted, quality
+            None,
+            None,
+            f"Fitted rate {abs(frequency):.4g} MHz < {minimum_rate:.4g} MHz (inverse duration span)",
+            model,
+            quality,
         )
-    return RabiRate(abs(frequency), error, None, fitted, quality)
+    return RabiRate(abs(frequency), error, None, model, quality)
 
 
 def cosine(

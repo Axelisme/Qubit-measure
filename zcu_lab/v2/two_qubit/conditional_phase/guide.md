@@ -36,7 +36,14 @@ slopes, crossings, counts and herald fractions stay inside analysis for plotting
 
 For each target projection, `sigma=(N_e-N_g)/N_total`. Other remains in the denominator. Contrast is `hypot(sigma_X,sigma_Y)`; phase is `atan2(sigma_Y,sigma_X)` in degrees, wrapped to `[-180,180)`. Analysis does not project mean IQ or reclassify shots.
 
-The phase plot shows contrast and logical phase for each spectator state and gate count. The quadratures plot shows classified X/Y sigma. The slopes plot shows the fitted phase per gate for actual spectator g and e.
+Use the live X/Y panels to check contrast for the current CZ train as the
+completed-point count advances. Each gate count has its own Analyze quadrature
+figure and its own contrast/wrapped-phase figure. Read X and Y by the nominal
+spectator preparation. Their bars are ±1 shot SEM from the classified
+(e-g) indicator with other contributing zero. The denominator is the measured
+count at that point. The Slopes figure shows the fitted phase per CZ and its
+fit standard error, not shot SEM. Use the π crossing figure to choose the
+common frequency.
 
 The fit uses X=A cos(n·slope+φ) and Y=A sin(n·slope+φ), with one amplitude A and phase offset φ per spectator and frequency. There is no quadrature DC offset. Count-derived sigma variances weight the fit. Other counts remain in the denominator. Zero contrast has no diagnostic phase, and unmeasured points block the corresponding slope fit.
 

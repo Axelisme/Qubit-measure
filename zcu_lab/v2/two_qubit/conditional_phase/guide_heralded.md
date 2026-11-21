@@ -60,7 +60,17 @@ Analysis uses both herald (g,g) and (e,e). In the ee group, target sigma reverse
 
 Count-derived sigma variances weight both groups, with other in each denominator. Zero acceptance and unavailable positive variances remove points. Each group must retain at least two gate counts with difference gcd=1. Unmeasured axes or aliased groups retain diagnostic phases and a reason, but do not authorize joint writeback. Never combine two herald groups' gate-count sets to hide an alias. Odd-only counts such as [1,3,5] are rejected before Run.
 
-The phase and quadratures plots show gg and sign-corrected ee by actual spectator. Slopes and conditional-phase plots compare the joint fit with the independent gg fit. Writeback uses only the joint slope_e−slope_g crossing. A missing, flat, ambiguous or nonunique crossing prevents a proposal; there is no gg fallback. Frequency interpolation supplies no uncertainty.
+The live quadratures show herald (g,g) for the current CZ train and identify
+the actual spectator state. Analyze splits (g,g) and sign-corrected (e,e)
+quadratures into separate figures for each gate count. The X/Y bars are ±1
+shot SEM of the classified target (e-g) indicator. Only shots in the
+displayed herald group contribute to its SEM; neither other herald classes
+nor attempted shots enter that denominator. Other terminal outcomes within
+the displayed herald group contribute zero to the indicator. Negating the
+(e,e) signal does not change its SEM. Contrast and wrapped phase have a
+separate figure per gate count. Slopes show the joint and independent (g,g)
+fit estimates with fit standard errors, not shot SEM. Use the π crossing
+figure to compare the fits. Writeback uses only the joint slope_e−slope_g crossing. A missing, flat, ambiguous or nonunique crossing prevents a proposal; there is no gg fallback. Frequency interpolation supplies no uncertainty.
 
 The herald figure shows all nine herald fractions for each scan row. Its (g,g) cell is pass fraction, not ground-state purity. A low pass fraction reduces accepted sample size. Inspect it alongside contrast and fit diagnostics before applying calibration.
 

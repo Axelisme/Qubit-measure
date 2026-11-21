@@ -33,13 +33,21 @@ Both pulses need matching frequency, duration and pre-delay on independent
 generators. Their post-delays may differ; the sequence waits for both.
 Only the two charge lines are driven. The coupler stays DC-biased.
 
-Both Forms list reset, Qubit1/Qubit2 Xπ, dual-line drive and mux readout first.
-The `scale` sweep and acquisition settings follow.
-Enter a finite, nonnegative, strictly increasing common gain-scale range in `scale`.
-The scan multiplies both original signed gains by that scale.
-Frequency, waveform, duration, relative phase and signed gain ratio stay fixed.
-Set Reps, Rounds and relaxation time for the acquisition budget.
-Rounds accumulate counts at acquisition, without a host round loop.
+The Form lists Reset, Qubit1/Qubit2 Xπ, Two-line CZ drive and Mux readout
+before the sweep and acquisition fields. Use the calibrated pulse library
+entries or inspect the Inline fields. Gen ch is the wired generator channel.
+Frequency is the RF carrier; Mixer freq is the digital mixer offset, if set.
+Keep NQZ, the Nyquist zone, from the source pulse or confirm it for the wired
+channel. Waveform Length is the envelope duration, not the delays. Phase sets
+the carrier angle. Pre-delay and Post-delay place the pulse in the sequence.
+Keep the relative CZ phase when varying the scale.
+
+For Common CZ gain multiplier, enter nonnegative Start and Stop and choose
+Expts, the number of points including both endpoints. The scan multiplies
+both signed gains by each scale. It does not change RF, relative phase or
+waveform length. Reps is the attempted shot count at each scale per round;
+Rounds repeats and accumulates complete sweeps. Initial delay waits before
+the first shot and Relaxation delay waits after each shot.
 
 ## Run and inspect
 
@@ -48,9 +56,18 @@ The ordinary sequence is
 B11 applies both Xπ pulses to the initial population. Without reset, thermal
 population remains in the ensemble.
 
-The live figure shows P00 from accumulated terminal counts.
-FIT displays all nine same-shot joint probabilities over g, e and other.
-P00 is the g,g count divided by the total of all nine classes.
+The live figure shows terminal P(g,g) and marks how many rounds have
+completed. Use the final live figure to check coverage before Analyze.
+P(g,g) divides the terminal (g,g) count by the total of all nine classes.
+Analyze shows the measured P(g,g) points and the first-return fit on one
+figure. The joint-outcome panels show all nine terminal probabilities over
+g, e and other; use them to tell which outcomes gain population as
+P(g,g) falls.
+Each measured probability bar is ±1 shot SEM from the retained classified
+shots at that scale: √[p(1−p)/(N−1)] for at least two retained shots. For
+mux herald, N counts only the shots that passed. The fit uses Jeffreys-smoothed weights at endpoints; these
+weights are not the plotted bars. Period standard error is a separate fit
+uncertainty.
 No per-shot IQ or mean-IQ diagnostic is stored or plotted.
 
 The return is a leakage proxy, not physical gate fidelity.
@@ -78,7 +95,12 @@ Use enough points to resolve the oscillation; sparse sampling can alias a faster
 
 The figure overlays the fit and labels the candidate or failure reason.
 The summary includes offset, contrast, period, period standard error and
-`fit_quality`. Numeric failure, zero contrast, a degenerate model,
+fit quality. R² is the fraction of the measured return variation explained
+by the fit. Normalized RMS is the root mean square of the fit residuals
+divided by the observed probability span. Each relative fit SE is that
+parameter's standard error divided by its absolute fitted value. These
+metrics have no separate numeric selection threshold.
+Numeric failure, zero contrast, a degenerate model,
 nonfinite uncertainty or incomplete coverage stops the proposal.
 
 Finite identifiable fits remain eligible with low nonzero contrast.

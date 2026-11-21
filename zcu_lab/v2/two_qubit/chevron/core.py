@@ -4,9 +4,14 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
+from matplotlib.artist import Artist
+from matplotlib.axes import Axes
+from matplotlib.cm import ScalarMappable
 from matplotlib.collections import QuadMesh
+from matplotlib.colors import Normalize
 from numpy.typing import NDArray
 from pydantic import model_validator
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -38,7 +43,7 @@ from zcu_tools.program.v2.modules import (
 )
 
 from .._drive import QubitDriveCfg
-from .._rabi_analysis import ReturnData, fit_duration_rates
+from .._rabi_analysis import RabiRate, ReturnData, cosine, fit_duration_rates
 from .._rabi_scan import RabiScanResult
 from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
 from .._sums import (
@@ -95,14 +100,14 @@ class ChevronCfg(ConfigBase):
         QubitDriveCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="填入 Qubit1/Qubit2 charge-line pulses，先以 conditional spectroscopy 選頻，再確認 cz_qubit1／cz_qubit2 slots。",
+            description="Set the two charge-line pulses. The scan varies their common frequency and envelope duration.",
         ),
     ]
     readout: Annotated[
         MuxReadoutCfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot，先用 lookback 取得 timing us，再做 mux onetone。 "
+            description="Use the terminal mux pulse and its GE Post classifiers to measure joint return. "
             + POINT_ALIAS_DESCRIPTION,
         ),
     ]
@@ -124,40 +129,49 @@ class ChevronCfg(ConfigBase):
         SweepCfg,
         FieldMeta(
             unit="MHz",
-            label="Common drive frequency",
-            description="Set the common drive frequency sweep endpoints in MHz; review the scan window before Run.",
+            label="Common CZ drive frequency",
+            description="Sweep the shared RF carrier of both CZ drives around the expected resonance.",
         ),
     ]
 
     duration: Annotated[
         SweepCfg,
         FieldMeta(
-            unit="us",
-            label="Duration",
-            description="Common duration sweep for both charge-line pulses in us.",
+            unit="µs",
+            label="Common waveform envelope duration",
+            description="Sweep the full waveform envelope length of both CZ drives; this is not the flat-top plateau alone.",
         ),
     ]
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Attempted shots per sweep point in one round, before herald selection.",
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of acquisitions accumulated at each sweep point.",
+        ),
     ] = 1
     initial_delay: Annotated[
         float,
         FieldMeta(
             label="Initial delay",
-            unit="us",
+            unit="µs",
             description="Delay before the first repetition.",
         ),
     ] = 1.0
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
-            unit="us",
+            label="Relaxation delay",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -192,27 +206,62 @@ def restore_result(data: GroupedLoadData[ChevronCfg]) -> ChevronResult:
     )
 
 
+_DURATION_LABEL = "Common waveform envelope duration (µs)"
+_COORDINATE_LABEL = "Common CZ drive frequency (MHz)"
+_RETURN_LABEL = "P(g,g) after double Xπ"
+_MAP_TITLE = "CZ chevron · Qubit1 / Qubit2"
+
+
+def _return_map(
+    ax: Axes,
+    durations: NDArray[np.float64],
+    coordinates: NDArray[np.float64],
+    values: NDArray[np.float64],
+) -> QuadMesh:
+    """Draw the duration-by-coordinate probability on the supplied axes."""
+    image = ax.pcolormesh(
+        durations, coordinates, values, shading="nearest", cmap="viridis"
+    )
+    ax.set(xlabel=_DURATION_LABEL, ylabel=_COORDINATE_LABEL)
+    ax.grid(False)
+    return image
+
+
 def _live_return_map(
     plots: Plots,
     durations: NDArray[np.float64],
     coordinates: NDArray[np.float64],
-) -> QuadMesh:
-    """Show an empty return map against duration and frequency (MHz) and return its mesh."""
+) -> tuple[Axes, QuadMesh]:
+    """Show an empty return heatmap with the same axes and color map as Analyze."""
     fig, ax = plots.subplots(num="measurement", layout="constrained")
-    image = ax.pcolormesh(
-        durations,
-        coordinates,
-        np.full((len(coordinates), len(durations)), np.nan),
-        shading="nearest",
-        vmin=0,
-        vmax=1,
-        cmap="viridis",
+    image = _return_map(
+        ax, durations, coordinates, np.full((len(coordinates), len(durations)), np.nan)
     )
-    ax.set(xlabel="Drive duration (us)", ylabel="Common drive frequency (MHz)")
-    ax.grid(False)
-    fig.colorbar(image, ax=ax, label="Terminal P(g,g)")
+    ax.set_title(f"{_MAP_TITLE}\nWaiting for shots")
+    fig.colorbar(image, ax=ax, label=_RETURN_LABEL)
     fig.show()
-    return image
+    return ax, image
+
+
+def _update_return_map(
+    ax: Axes, image: QuadMesh, counts: NDArray[np.float64]
+) -> tuple[Artist, ...]:
+    """Display measured pixels and the finite points' retained shot range."""
+    probabilities = joint_probabilities(counts)[..., 0, 0]
+    image.set_array(probabilities)
+    valid = np.isfinite(probabilities)
+    totals = counts.sum(axis=(-2, -1))
+    measured = totals[np.isfinite(totals)]
+    if valid.any():
+        lo, hi = float(probabilities[valid].min()), float(probabilities[valid].max())
+        if lo == hi:
+            lo, hi = (max(0, lo - 0.01), min(1, hi + 0.01))
+        image.set_clim(lo, hi)
+    if measured.size:
+        ax.set_title(
+            f"{_MAP_TITLE}\n{measured.size}/{totals.size} points · {int(measured.min())}–{int(measured.max())} retained shots/point"
+        )
+    return image, ax.title
 
 
 class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
@@ -278,13 +327,11 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
         # 2. Show terminal return as a heatmap on the two sweep axes.
-        image = _live_return_map(context.plots, durations, coordinates)
+        ax, image = _live_return_map(context.plots, durations, coordinates)
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[QuadMesh, ...]:
-            counts = sums
-            image.set_array(joint_probabilities(counts)[..., 0, 0])
-            return (image,)
+        def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
+            return _update_return_map(ax, image, sums)
 
         class_shape = (3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
@@ -352,13 +399,11 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
         # 2. Show terminal return as a heatmap on the two sweep axes.
-        image = _live_return_map(context.plots, durations, coordinates)
+        ax, image = _live_return_map(context.plots, durations, coordinates)
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[QuadMesh, ...]:
-            counts = sums.swapaxes(0, 1)
-            image.set_array(joint_probabilities(counts)[..., 0, 0])
-            return (image,)
+        def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
+            return _update_return_map(ax, image, sums.swapaxes(0, 1))
 
         class_shape = (3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
@@ -450,8 +495,14 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         coordinates = sweep2array(cfg.frequency)
         durations = sweep2array(cfg.duration)
         if (
-            not np.array_equal(result.coordinates, coordinates)
-            or not np.array_equal(result.durations, durations)
+            coordinates.shape != result.coordinates.shape
+            or durations.shape != result.durations.shape
+            or not np.allclose(
+                result.coordinates, coordinates, rtol=2 * np.finfo(float).eps, atol=0
+            )
+            or not np.allclose(
+                result.durations, durations, rtol=2 * np.finfo(float).eps, atol=0
+            )
             or result.sums.shape != (len(coordinates), len(durations), 3, 3)
         ):
             raise ValueError(
@@ -464,85 +515,134 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             np.isfinite(totals) & (totals > 0),
             totals,
         )
-        # 2. Show the return chevron and all terminal populations before fitting duration-slice rates.
-        fig, ax = plots.subplots(num="chevron", figsize=(9, 6), layout="constrained")
-        image = ax.pcolormesh(
-            result.durations,
-            result.coordinates,
-            answer.populations[..., 0],
-            shading="nearest",
-            vmin=0,
-            vmax=1,
-            cmap="viridis",
-        )
-        ax.grid(False)
-        fig.colorbar(image, ax=ax, label="Terminal P(g,g)")
-        ax.set(
-            xlabel="Drive duration (us)",
-            ylabel="Common drive frequency (MHz)",
-            title="Nominal B11 return proxy · not gate fidelity",
-        )
-        labels = tuple(
-            f"({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other")
-        )
+        fig, ax = plots.subplots(num="chevron", figsize=(7, 5), layout="constrained")
+        image = _return_map(ax, durations, coordinates, answer.populations[..., 0])
+        ax.set_title(_MAP_TITLE)
+        fig.colorbar(image, ax=ax, label=_RETURN_LABEL)
+        usable = np.isfinite(answer.populations[..., 0])
+        row = len(coordinates) // 2
+        if usable.any():
+            row, col = np.unravel_index(
+                np.nanargmin(answer.populations[..., 0]), usable.shape
+            )
+            ax.plot(durations[col], coordinates[row], "w+", markersize=10)
+        _plot_population_maps(plots, durations, coordinates, answer.populations)
+        rates = fit_duration_rates(durations, answer)
+        _plot_duration_rates(plots, coordinates, rates)
+        indices = sorted({0, int(row), len(coordinates) - 1})
+        _plot_duration_traces(plots, result, answer, rates, indices)
+
+
+def _plot_population_maps(
+    plots: Plots,
+    durations: NDArray[np.float64],
+    coordinates: NDArray[np.float64],
+    populations: NDArray[np.float64],
+) -> None:
+    """Compare the remaining outcomes on shared 0–1 heatmap scales."""
+    labels = tuple(
+        f"P({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other")
+    )
+    for start in (1, 5):
         fig, _ = plots.subplots(
-            num="return",
-            nrows=3,
-            ncols=3,
-            figsize=(13, 10),
-            squeeze=False,
+            num=f"return_{start}",
+            nrows=2,
+            ncols=2,
+            figsize=(8, 6.5),
+            sharex=True,
+            sharey=True,
             layout="constrained",
         )
-        for outcome, ax in enumerate(fig.axes):
-            for coordinate, values in zip(
-                result.coordinates, answer.populations, strict=True
-            ):
-                ax.plot(
-                    result.durations, values[:, outcome], ".-", label=f"{coordinate:g}"
-                )
-            ax.set(
-                xlabel="Drive duration (us)",
-                ylabel=f"Observed P{labels[outcome]}",
-                title=f"Terminal {labels[outcome]} · other retained in denominator",
-            )
-            ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
-        # 3. Fit complete duration traces with undamped cosines; exclude rates below inverse span.
-        rates = fit_duration_rates(durations, answer)
-        _, ax = plots.subplots(num="rabi_rate", figsize=(10, 6), layout="constrained")
+        fig.suptitle(f"{_MAP_TITLE}\nTerminal outcomes after double Xπ")
+        for outcome, ax in enumerate(fig.axes, start):
+            image = _return_map(ax, durations, coordinates, populations[..., outcome])
+            image.set_clim(0, 1)
+            ax.set_title(labels[outcome])
+        key = ScalarMappable(norm=Normalize(0, 1), cmap="viridis")
+        fig.colorbar(key, ax=fig.axes, label="Joint probability (0–1)")
+
+
+def _plot_duration_rates(
+    plots: Plots,
+    coordinates: NDArray[np.float64],
+    rates: tuple[RabiRate, ...],
+) -> None:
+    """Show identifiable rates and mark finite fits rejected by the duration span."""
+    fig, ax = plots.subplots(num="rabi_rate", figsize=(7, 5.1), layout="constrained")
+    values = [rate.rate if rate.rate is not None else np.nan for rate in rates]
+    errors = [
+        rate.uncertainty if rate.uncertainty is not None else np.nan for rate in rates
+    ]
+    ax.errorbar(
+        coordinates,
+        values,
+        yerr=errors,
+        fmt=".",
+        color="C0",
+        label="Selected rates ± fit SE",
+    )
+    rejected = [
+        (x, abs(rate.parameters[2]))
+        for x, rate in zip(coordinates, rates, strict=True)
+        if rate.rate is None and rate.parameters is not None
+    ]
+    if rejected:
+        x, y = zip(*rejected, strict=True)
+        ax.plot(x, y, "x", color="C3", label="Below inverse duration span")
+    missing = sum(rate.rate is None and rate.parameters is None for rate in rates)
+    fig.suptitle(f"{_MAP_TITLE}\nDuration-fit rates")
+    ax.set(
+        xlabel=_COORDINATE_LABEL,
+        ylabel="Rabi rate (MHz)",
+        title=f"{missing} scan slices without a usable fit" if missing else "",
+    )
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
+
+
+def _plot_duration_traces(
+    plots: Plots,
+    result: ChevronResult,
+    data: ReturnData,
+    rates: tuple[RabiRate, ...],
+    indices: list[int],
+) -> None:
+    """Show representative measured duration slices with their fitted cosine and quality."""
+    fig, _ = plots.subplots(
+        num="rabi_traces",
+        nrows=len(indices),
+        sharex=True,
+        figsize=(7, 8),
+        layout="constrained",
+    )
+    fig.suptitle(f"{_MAP_TITLE}\nDuration slices")
+    durations, coordinates = result.durations, result.coordinates
+    xs = np.linspace(durations[0], durations[-1], 401)
+    for ax, i in zip(fig.axes, indices, strict=True):
+        rate = rates[i]
+        covariance = class_probability_covariance(result.sums[i].reshape(-1, 9))
         ax.errorbar(
-            coordinates,
-            [rate.rate if rate.rate is not None else np.nan for rate in rates],
-            yerr=[
-                rate.uncertainty if rate.uncertainty is not None else np.nan
-                for rate in rates
-            ],
-            fmt="o",
+            durations,
+            data.populations[i, :, 0],
+            yerr=np.sqrt(covariance[:, 0, 0]),
+            fmt=".",
             color="C0",
+            label="Measured ± shot SEM",
         )
-        ax.text(
-            0.02,
-            0.98,
-            "\n".join(
-                f"{coordinate:g}: {rate.reason}"
-                for coordinate, rate in zip(coordinates, rates, strict=True)
-                if rate.reason
-            ),
-            va="top",
-            transform=ax.transAxes,
-            fontsize="small",
+        if rate.parameters is not None:
+            ax.plot(xs, cosine(xs, *rate.parameters), "k-", label="Cosine fit")
+        title = f"{coordinates[i]:g} MHz · "
+        title += (
+            f"Rabi rate = {rate.rate:.4g} ± {rate.uncertainty:.2g} MHz"
+            if rate.rate is not None
+            else (rate.reason or "Rate unavailable")
         )
-        ax.set(
-            xlabel="Common drive frequency (MHz)",
-            ylabel="Rabi rate (MHz)",
-            title="Undamped cosine model · rates below 1/duration span excluded",
-        )
-        _, ax = plots.subplots(num="rabi_traces", figsize=(10, 6), layout="constrained")
-        for coordinate, rate in zip(coordinates, rates, strict=True):
-            if rate.fitted is not None:
-                ax.plot(durations, rate.fitted, label=f"{coordinate:g}")
-        ax.set(
-            xlabel="Drive duration (us)",
-            ylabel="Fitted joint P00",
-            title="Duration cosine fits · inspect model against measured return curves",
-        )
-        ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
+        quality = rate.quality
+        if (
+            quality is not None
+            and quality.r2 is not None
+            and quality.normalized_residual_rms is not None
+        ):
+            title += f"\nR² = {quality.r2:.3g} · Normalized RMS = {quality.normalized_residual_rms:.3g}"
+        ax.set(title=title, ylabel=_RETURN_LABEL)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
+    fig.axes[-1].set_xlabel(_DURATION_LABEL)

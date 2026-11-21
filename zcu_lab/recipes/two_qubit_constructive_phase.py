@@ -33,23 +33,26 @@ class ConstructivePhaseInputs(RecipeInputs):
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
     ) = Field(
         KEEP,
-        description="Start and stop of the Qubit2 minus Qubit1 phase sweep, in deg.",
+        description="Start and Stop (deg) of Form Qubit2 relative to Qubit1 drive phase.",
     )
     relative_phase_points: int | None | Keep = Field(
-        KEEP, description="Number of relative phase samples, mapped to Form Expts."
+        KEEP, description="Expts under Form Qubit2 relative to Qubit1 drive phase."
     )
     duration_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
     ) = Field(
-        KEEP, description="Start and stop of the common pulse duration sweep, in us."
+        KEEP,
+        description="Start and Stop (µs) of Form Common waveform envelope duration.",
     )
     duration_points: int | None | Keep = Field(
-        KEEP, description="Number of common duration samples, mapped to Form Expts."
+        KEEP, description="Expts under Form Common waveform envelope duration."
     )
     reps: int | None | Keep = Field(
-        KEEP, description="Repetitions per point per round."
+        KEEP, description="Form Reps: attempted shots per sweep point in one round."
     )
-    rounds: int | None | Keep = Field(KEEP, description="Acquisition round count.")
+    rounds: int | None | Keep = Field(
+        KEEP, description="Form Rounds: acquisitions accumulated at each sweep point."
+    )
 
 
 class ConstructivePhaseReport(RecipeReport):
@@ -57,11 +60,11 @@ class ConstructivePhaseReport(RecipeReport):
 
     relative_phase_deg: float | None = Field(
         default=None,
-        description="Maximum-rate Qubit2 minus Qubit1 phase, in deg; null if unavailable.",
+        description="Analyze relative_phase_deg: Qubit2 minus Qubit1 drive phase at the rate maximum (deg).",
     )
     reason: str | None = Field(
         default=None,
-        description="Owner reason when no relative phase can be identified.",
+        description="Analyze reason for no relative-phase proposal.",
     )
 
 
