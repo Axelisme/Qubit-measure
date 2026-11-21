@@ -165,16 +165,20 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                        VariableAxisSpec.generated_arange(
+                            label="terminal_qubit2", unit=""
+                        ),
+                        VariableAxisSpec.generated_arange(
+                            label="terminal_qubit1", unit=""
+                        ),
                         VariableAxisSpec(
-                            label="Prepared F2 (0=g, 1=e)",
+                            label="Prepared Qubit2 (0=g, 1=e)",
                             unit="",
                             values=(0, 1),
                             dtype=np.int64,
                         ),
                         VariableAxisSpec(
-                            label="Prepared F1 (0=g, 1=e)",
+                            label="Prepared Qubit1 (0=g, 1=e)",
                             unit="",
                             values=(0, 1),
                             dtype=np.int64,

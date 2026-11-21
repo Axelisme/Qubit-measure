@@ -28,13 +28,13 @@ The live plot shows terminal P(g,g) from accumulated counts for each nominal bra
 
 ## Saved data and analysis
 
-Saved data include integer preparation axes with values `[0,1]` (0=g, 1=e) and float64 `sums` with shape `(2,2,3,3)`. Qubit1 is the outer preparation axis. The last axes hold the terminal classes of Qubit1 and Qubit2, each ordered g/e/other. Counts remain unnormalized. Native persistence generates the class coordinates and saves the actual run cfg. File size does not grow with the shot count.
+The HDF5 file stores unnormalized float64 counts in `/vars/sums` with shape `(2,2,3,3)`. Its first two axes are `Prepared Qubit1 (0=g, 1=e)` and `Prepared Qubit2 (0=g, 1=e)`, each with coordinates `[0, 1]`. The last two axes are `terminal_qubit1` and `terminal_qubit2`; coordinates `[0, 1, 2]` mean g, e and other. The file also stores the cfg used for the run. File size does not grow with shot count.
 
 FIT shows a 4×9 count and row-normalized probability matrix. Columns are Qubit1-major joint classes from g,g through other,other. Every class, including other, contributes to the denominator. Zero-count and unmeasured rows give NaN probabilities. Partial acquisitions can still provide distributions from their completed rounds. Each row label shows its acquired shot count.
 
 The matrix includes initial populations, preparation errors and readout effects. It is not a pure-state assignment matrix. FIT offers no correction or writeback. Do not infer gate fidelity or invert this matrix without separate calibration evidence.
 
-Old raw-IQ files lack `sums` and fail Load explicitly. Files with the old single preparation axis also fail Load. There is no conversion from saved IQ or old probabilities. Analyze uses only saved counts and needs no current library or cfg lookup.
+Load rejects files whose `/vars/sums` axis names do not match, including files saved with the former F1/F2 axis names. Keep the original file unchanged and open it with the corresponding older software version. Load also rejects old raw-IQ files without `sums` and files with a single preparation axis. Analyze uses the saved counts without looking up the current library or cfg.
 
 ## Select shots with mux herald
 
