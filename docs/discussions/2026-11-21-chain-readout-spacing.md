@@ -6,6 +6,7 @@ related:
   - ../adr/0083-program-macros-and-timelines.md
   - ../adr/0073-measure-form-derivation.md
   - ../../zcu_lab/v2/twotone/ro_optimize/chain_length/guide.md
+  - 2026-11-21-readout-timing-defaults.md
 basis:
   repo_commit: 32c7db0b57a71d503d2eca6ef29430416e9654cb
   external_sources: none
@@ -50,6 +51,6 @@ R1 fixture 的 `post_delay` 是 0 µs。新間隔下，前一個 ADC window 最�
 - [ADR-0083](../adr/0083-program-macros-and-timelines.md) 的 readout tail 與 ADC overlap 規則。
 - [實驗離線環境契約](../../lib/zcu_tools/experiment/README.md#explicit-simulation-environments) 記錄 FTF 使用的 block 檢查。
 
-## 後記
+## 後記（2026-11-21）
 
-使用者同日以[固定長度差](2026-11-21-chain-length-fixed-margin.md)取代上述長度公式與唯讀飛行時間欄位。九個 chain 實驗不另等 ADC 關窗的間隔規則不變。
+使用者以[固定長度差](2026-11-21-readout-timing-defaults.md)取代上述含 0.11 µs 緩衝的 pulse 長度公式，並移除唯讀飛行時間欄位。九個 chain 實驗不另等 ADC 關窗的間隔規則不變。

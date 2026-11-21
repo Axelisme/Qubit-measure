@@ -156,6 +156,7 @@
 - 2026-11-20 [v2 實驗命名與顯示：先對齊 two_qubit 的圖](2026-11-20-experiment-naming-and-display.md)：命名取捨。全 v2 共用分類，先定使用者看得到的名字；第一批只對齊 two_qubit 的圖與 guide 首標，不改 key、tag 或 cfg。
 - 2026-11-21 [表單預設超過板子限制，錯誤解析放知識庫](2026-11-21-form-board-limits.md)：文件邊界。指南描述實驗行為，知識庫說明板子限制與錯誤；修正 `reset_check` 的 gain 和 CPMG 的 Minimum time 預設值，決策見 [ADR-0073](../adr/0073-measure-form-derivation.md)、[ADR-0075](../adr/0075-agent-interface-layers.md#判讀依據放知識庫)。
 - 2026-11-21 [Gain 固定範圍：表單只驗純量，掃描留給 Run](2026-11-21-form-gain-range.md)：刪除或收窄。表單以既有 annotation 限制純量 gain；一般掃描保留 `SweepCfg`，超界點在 acquisition 前被拒。
+- 2026-11-21 [readout 時序預設：固定長度差與光子衰減等待](2026-11-21-readout-timing-defaults.md)：初值與預設值。範本前後各留 0.015 µs，chain／Rπ length 改用可編輯長度差（schema 6.0／4.0），mux post_delay 種子取 5/(2π·κ)；範本差值讀注入的 catalog。
 
 ## 模組邊界
 
