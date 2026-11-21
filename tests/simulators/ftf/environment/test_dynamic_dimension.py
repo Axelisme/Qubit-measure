@@ -249,10 +249,12 @@ def test_remembered_dimension_does_not_cross_preparation_invalidation(
             engine = PilotEngine()
             source.engine = engine
         else:
-            invalid = replace(
-                acquire, templates=(replace(acquire.templates[0], events=()),)
-            )
-            with pytest.raises(ValueError, match="readout"):
+            first, *others = acquire.templates
+            window = first.readouts[0]
+            early = replace(window, trigger_ticks=window.trigger_ticks - 1)
+            invalid_first = replace(first, readouts=(early,))
+            invalid = replace(acquire, templates=(invalid_first, *others))
+            with pytest.raises(ValueError, match="trigger must not precede"):
                 _execute_acquire(source, invalid, state)
         engine.solve_shapes.clear()
         _execute_acquire(source, replace(acquire, sequence=acquire.sequence + 1), state)
