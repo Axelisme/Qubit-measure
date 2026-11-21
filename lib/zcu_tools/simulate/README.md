@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-21, cooperative cancellation
+**Last updated:** 2026-11-21, cooperative cancellation in planning and required raw sampling
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -163,12 +163,13 @@ ODE is accepted within 1e-2; the 21-level Q1 calibration measured about 1e-4 or
 less. This is not a bound for arbitrary gains, durations or coherences.
 Carriers at or above 30 MHz keep the existing dispatch.
 
-Numeric work checks the acquisition's Stop query at cooperative checkpoints,
-including after geometry planning, between evolution chunks, and before
-advancing each FTF projective outcome. When a check observes Stop, it raises
-`Cancelled` without a partial result. Acquisition discards the interrupted
-round and retains earlier completed rounds. These checks do not guarantee a
-fixed Stop latency. Startup warmup has no acquire cancel query.
+Numeric work checks the acquisition's Stop query at cooperative checkpoints.
+These include geometry batches, WorkPlan population, evolution chunks, FTF
+projective outcome advances and sampling of raw shots required by the current
+round. A check that observes Stop raises `simulate.boundary.Cancelled` without a
+partial result. The program discards the interrupted round and retains earlier
+completed rounds. These checks do not guarantee a fixed Stop latency. Startup
+warmup has no acquire cancel query. See [ADR-0078](../../../docs/adr/0078-evolution-module-boundary.md#ftf-stop-用合作式檢查點設計上-5-秒內).
 
 `ControlSequence`, `Envelope` and `NumericModel` remain inputs to independent
 continuous-flux and model tools. They do not define an acquisition backend.

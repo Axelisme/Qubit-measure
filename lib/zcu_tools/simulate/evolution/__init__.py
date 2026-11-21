@@ -8,6 +8,7 @@ implementation details, not a second integration interface.
 """
 
 from .. import _numba_cache  # Bootstrap before any dispatcher is created.
+from ..boundary import Cancelled
 from ._capture import (
     CaptureAdopter,
     CaptureBuffer,
@@ -26,7 +27,6 @@ from .capture_writer import capture_directory, write_capture
 from .controls import ControlPulse, ControlSequence, Envelope, PhaseEvent, quantize_ns
 from .engine import (
     SEGMENT_NUMERIC_VERSION,
-    Cancelled,
     DriveTrack,
     Engine,
     EnvelopeSpec,

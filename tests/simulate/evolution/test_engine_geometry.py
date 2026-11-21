@@ -198,7 +198,8 @@ def test_waveform_time_and_complex_samples_remain_distinct_in_one_acquire():
     )
 
 
-def test_stop_during_geometry_does_not_record_routing_usage():
+@pytest.mark.parametrize("entry", ["evolve", "inspect_dispatch"])
+def test_stop_during_geometry_skips_later_batches(entry):
     cancel = Event()
     model = synthetic_model()
     recorded: list[dict[bytes, int]] = []
@@ -211,6 +212,8 @@ def test_stop_during_geometry_does_not_record_routing_usage():
             return super().record_gate_usage(inventory, content=content)
 
     def build(level):
+        if level == (2,):
+            pytest.fail("Stop must prevent requesting the next batch's model")
         if level == (1,):
             cancel.set()  # The driven, non-DC row requests this model during geometry.
         return replace(model, level=level)
@@ -223,12 +226,17 @@ def test_stop_during_geometry_does_not_record_routing_usage():
         tracks=(track(1, shaped),),
         flux=FluxSchedule(np.array([0, 1]), np.array([0.0]), np.array([[1]])),
     )
+    later = replace(
+        driven,
+        points=np.array([1]),
+        flux=FluxSchedule(np.array([0, 1]), np.array([0.0]), np.array([[2]])),
+    )
     with (
         closing(ModelSource(np.diag([1.0, 0.0, 0.0]), build, history=History())) as src,
         closing(Engine(1, backend="cpu")) as engine,
         pytest.raises(Cancelled),
     ):
-        engine.evolve(src, (driven,), cancel=cancel)
+        getattr(engine, entry)(src, (driven, later), cancel=cancel)
 
     assert not recorded
 

@@ -87,6 +87,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：Timeline 編譯器推算每發 ADC 讀取數，每個 Branch 出口與作者 label 都逐 ADC 對齊，見 [ADR-0083](0083-program-macros-and-timelines.md#每發-adc-讀取數)。
 原則：Timeline program 提供通用跳轉，builder 只轉交同名動作。只往後跳，迭代用 Repeat 或 sweep。見 [ADR-0083](0083-program-macros-and-timelines.md#往後跳轉與-label-合併)。
 原則：增加的量測能力不抵第二條路徑的可讀性成本時，保留一條路徑，超限就報錯。見 [ADR-0083](0083-program-macros-and-timelines.md#量測能力不抵可讀性成本時不加分支)。
+原則：模擬的零輪中斷由 Program 的 `EarlyStopMixin` 統一判定；simulation mixin 只回報中斷，見 [ADR-0083](0083-program-macros-and-timelines.md#compiled-snapshot-與-simulation-入口)。
 
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：Async workflow、operation、Ask、停止、live tunables 與作者保存責任。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。
@@ -112,6 +113,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：場景照約化參數軸宣告覆蓋，不為個別實驗加專屬場景，見 [ADR-0078](0078-evolution-module-boundary.md#場景覆蓋靠約化的參數空間)。
 原則：量測 agent 以量測取得初值與裁定；模擬器真值只在使用者為 debug 明確授權時讀，數字記為 debug 對照，見 [模擬環境草稿](draft/simulation-environments.md#固定訊號契約與重現)。
 原則：ADC 擁有 `t−τ` 的 ADC 時間至裝置時間的換算；planner 逐窗以裝置時間和 block interval 配對，最後相交 block 為 owner。grid 與投影時間不移動。同 ADC、同 owner 的有場事件使用各窗交集 blocks 的 pulse 聯集（designer 代裁，使用者未覆核），見 [ADR-0078](0078-evolution-module-boundary.md#ftf-讀出窗依裝置時間配對)。
+原則：FTF Stop 採合作式檢查點，正常參數下以相鄰檢查區段 5 秒內作放點依據，不設硬上限或延遲 gate，見 [ADR-0078](0078-evolution-module-boundary.md#ftf-stop-用合作式檢查點設計上-5-秒內)。
+原則（designer 代裁，使用者未覆核）：FTF 只有在當輪需要 raw 時才借用取消查詢；SoC 驗證 raw 並通過最後查詢後才入帳、發佈和前移輪次，見 [ADR-0078](0078-evolution-module-boundary.md#integrated-raw-由環境生成介面由-program-擁有)與 [ADR-0083](0083-program-macros-and-timelines.md#compiled-snapshot-與-simulation-入口)。
 
 - [0085 — 實驗數值工具的 fitting owner](0085-numerical-fitting-owners.md)：六組純數值工具由 fitting 持有，lab 保留選資料、herald、維度換算、live 與畫圖。
 

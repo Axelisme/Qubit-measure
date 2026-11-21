@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, readout pulse history, approximation measurements, shared ADC span memo and timing telemetry
+**Last updated:** 2026-11-21, device-time readout pairing, shared ADC span reuse and FTF Stop
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -30,6 +30,7 @@ and source-owned history. These controls are not physical YAML or program cfg.
 ## Contents
 
 - [Round pacing](#round-pacing)
+- [Cooperative Stop](#cooperative-stop)
 - [Debug capture](#debug-capture)
 - [Routing telemetry](#routing-telemetry)
 - [Numeric source](#numeric-source)
@@ -54,7 +55,8 @@ acquisition modes. It defaults to 1.0; 0.1 runs ten times faster and zero skips
 waiting. Each round targets `time_scale * reps * sum(timeline duration + relax_delay)`,
 with timeline us converted to seconds. Readout and pre/post delays are included.
 Snapshot capture and numeric execution consume this budget; only the positive
-remainder sleeps. Slow rounds and failures add no wait. Stop interrupts pacing
+remainder sleeps. Slow rounds and failures during numeric execution add no wait.
+Raw materialization is outside the pacing budget. Stop interrupts pacing
 at checkpoints at most 10 ms apart. Integrated acquisition discards that round;
 decimated acquisition keeps the completed trace and stops before the next round.
 Startup preparation, program construction and round hooks are outside this
@@ -62,6 +64,23 @@ budget. No GUI field is added; final plot-buffer flushing is unchanged.
 
 Profiling overrides and the caller's board-loading example belong to
 [environment setup](../../../../../zcu_lab/simulation_envs/README.md#關閉補等與-telemetry).
+
+## Cooperative Stop
+
+FTF reads the acquire's Stop query before advancing each projective outcome.
+[Evolution](../../../simulate/evolution/README.md#accuracy-failures-and-lifecycle)
+checks during geometry and WorkPlan construction and at execution boundaries.
+When the current integrated round requires raw shots, [ADC](../../../simulate/adc/README.md)
+checks while sampling and before handing the shots back. The
+[program adapter](../../../program/v2/simulation/README.md#numeric-contract-and-extension-points)
+handles publication and retains completed rounds on Stop.
+
+[ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#ftf-stop-用合作式檢查點設計上-5-秒內)
+sets five seconds as the design target between checks under normal parameters,
+not a deadline or a gate. Waiting for startup warmup does not check Stop and
+can take longer with empty caches. Cold raw sampling can also exceed the target
+between the first event check and the first point-group check. A single-point
+sample does not cover larger sweeps or more retained projection outcomes.
 
 ## Debug capture
 

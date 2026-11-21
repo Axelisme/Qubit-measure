@@ -178,13 +178,19 @@ Label 名非空且唯一，編譯器避免撞到機器 label。位置不合法�
 
 **邊界。** 支援與否看 instruction effect，不按 macro 類別或來源白名單。Frontend 不從 raw JUMP、仿射 shell 或 module tree 猜結構，metadata 與指令不符、無標記的 body JUMP、依硬體 flag 或量測回填 register 的跳轉，都在送 request／呼叫 backend 前拒絕。結構標記沒有通用 payload、`kind` 或 `region`。各 sweep point 獨立，reps 只在 metadata，不執行；非 sweep loop 依標記與 active mask 迭代，不展開。同值或輸出不變也不能讓 register、memory、readout config FIFO 或 pending update 跨 point／rep；prologue 後未再寫的常數或 config 可用。它保留 shot-local 運算、記憶體與 FIFO 時序，逐 lane 核對實際讀取數，不做回饋或 tProc latency 模擬，不提供 ordered engine 或 legacy fallback。[IR snapshot](../../lib/zcu_tools/program/v2/ir/README.md#pre-optimization-compile-snapshot)記存取、複製、recompile 與位址；[Simulation README](../../lib/zcu_tools/program/v2/simulation/README.md#compiled-request-builder)記 admission、routes、FIFO 與指令效果；[module owner](../../lib/zcu_tools/program/v2/modules/README.md#design-boundaries)擁有來源名稱。
 
-`SimulationSoc` 在 request 生命週期持有取消查詢。`install_request` 收下該次 acquire 的旗標，`release_request` 清除，`run_round()` 把同一查詢交給 backend 和 pacing。QICK 0.2.436 的 decimated round 入口是 `start_tproc()`，accumulated 是 `start_readout()`；兩個入口都經 `run_round()`。QICK 簽名不改，旗標不放進 `AcquireRequest`。Backend 只讀查詢，不寫 caller 的旗標。Backend 拋 `Cancelled` 時，`SimulationAcquireMixin` 在 round 邊界清理中斷輪，不留下該輪資料。零完成輪拋 `StoppedPartialAcquireError`；已有完成輪則照 QICK finalize 回傳其平均。實機路徑不變。
+`SimulationSoc` 在 request 生命週期持有取消查詢。`install_request` 收下該次 acquire 的旗標，`release_request` 清除，`run_round()` 把同一查詢交給 backend 和 pacing。QICK 0.2.436 的 decimated round 入口是 `start_tproc()`，accumulated 是 `start_readout()`；兩個入口都經 `run_round()`。QICK 簽名不改，旗標不放進 `AcquireRequest`。Backend 只讀查詢，不寫 caller 的旗標。
+
+`run_round()` 預設不要求 integrated raw；一般 integrated acquisition 使用 compact statistics，decimated acquisition 保留 `RoundSignals`。當 Program 明示本輪需要 raw，或 QICK `start_readout()` 要求 accumulated transport 時，SoC 先驗證並 detach backend 結果，再 materialize required raw；支援 `CancellableRawShots` 的來源在該次呼叫借用同一個 read-only query，不支援的兩參數來源由 SoC 在同步呼叫前與交付前查詢。`sample_round()` 保留原 snapshot／execute／pacing elapsed window 與既有時基；required raw 的驗證與 materialization 不加進該 elapsed window。Raw materialization telemetry 仍按原契約單次計時：acquire 內失敗的 materialize 也計入，且不含下游 shot processing；延遲 getter 成功 materialize 時才可用原 acquire identity 發出補充紀錄。只有最後查詢通過後，binding 才入帳該輪 clock credit，接著 SoC 發佈 source 與 transport buffers 並前移 index。Stop、`Cancelled` 或 raw 驗證／抽樣錯誤在發佈前發生時，保留上一個完成輪，不入帳、不前移 index，也不把中斷輪交給 Program。SoC 與 Program 使用獨立可寫的 raw buffers；成功抽樣不重抽。QICK `poll_data()` 只在 `start_readout()` 成功後取得該輪資料，簽名與 poll 格式不變。
+
+已完成輪的 deferred getter（包括 round hook 內的 getter）不帶該輪 Stop query，仍可依 retained source 重建 raw。required-raw 的 `Cancelled` 由 `SimulationAcquireMixin` 在 round 取數邊界接住，再呼叫 `EarlyStopMixin` 的中斷回報方法；模擬 mixin 不設 caller flag，也不重做零輪判定。`EarlyStopMixin` 擁有本次 acquire 的中斷狀態、清理與零輪 `StoppedPartialAcquireError` 判定。發佈後才觀察到的 Stop 不回滾 transport；成功處理的輪照計、不開始下一輪。processor／hook 錯誤及非取消 raw 錯誤維持原失敗語意。實機與 decimated 行為不變。
 
 **依據。**
 - 2026-10-29，使用者：「優化是一定要做的，你可以安排流程」。對 compiled frontend 答「A, 不是瓶頸就好」，對舊 frontend 答「舊前端不留，第二題你決定」，對運算支援答「運算的採用建議」。以指令效果判定，取代早期 runtime 運算禁令，早期範圍見[原型討論](../discussions/2026-10-29-module-to-macro.md#模擬器的範圍)。
 - 2026-10-30，使用者：「每個內部迴圈都當作獨立點向量化模擬，但內部非sweep迴圈會視為一個shot內部的order，但不會單純的展開」。對獨立 shot 與拒絕跨 shot carry 答「採用建議」；通用標記暫緩後答「那採用建議做法」，用有限的 LOOP metadata，跳轉也用有限標記。Snapshot 存取、routes 與 FIFO 細節是 designer 依 compiled frontend 授權代裁，使用者未覆核。上述 compiled 選項的原始問答未入庫，交付見 Git `182b9bede`。
 - 2026-11-20 的跳轉標記與 lanes 行為是 designer 代裁，使用者 2026-11-20 追認：「確認」。見[往後跳轉的討論後記](../discussions/2026-11-20-timeline-forward-jumps.md#後記)。
-- 2026-11-21，使用者答「3C，但設計上5秒內」，選擇讓 decimated 的取消進入 FTF 求解。取消傳輸與零輪轉換由 designer 依授權代裁，使用者未覆核。見 [FTF Stop 討論](../discussions/2026-11-21-ftf-stop-checkpoints.md)與 [simulation acquisition 契約](../../lib/zcu_tools/program/v2/simulation/README.md)。
+- 2026-11-21，使用者對 Stop 上限答「3C，但設計上5秒內」，並說「我认为能及时中断也是一个挺重要的功能。」見 [FTF Stop 討論](../discussions/2026-11-21-ftf-stop-checkpoints.md)。
+- 2026-11-21，使用者確認零輪判定由 `EarlyStopMixin` 擁有，原話：「好吧，那就先保留。但这个东西应该属于 early stop mixing 的内容，而不只是模拟器或者是一些其他的模块的内容。其他模块应该只是利用这个机制而已。」模擬器只回報中斷；實機路徑不變。原始簡短問答未入庫；本 ADR 保留使用者原話與現行 owner 契約。
+- 2026-11-21，當輪 required raw 的 optional cancellation、SoC publish、clock credit、QICK `start_readout()` 與 deferred getter 界線是 **designer 代裁，使用者未覆核（Review: pending）**。此代理裁決受先前使用者的 5 秒放點方向約束，不宣稱量測達標。比較與限制見 [FTF Stop required raw 討論](../discussions/2026-11-21-required-raw-stop-publication.md)。
 
 ### IR analysis 與驗收責任
 
