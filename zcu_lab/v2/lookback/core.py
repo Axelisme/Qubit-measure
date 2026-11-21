@@ -195,9 +195,11 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         offset = float(Ts[offset_idx])
 
         adc = f"ADC {source.cfg.readout.ro_ch}" if source.cfg is not None else "ADC"
-        _, ax = plots.subplots(num="fit", figsize=config.figsize, layout="tight")
+        fig, ax = plots.subplots(
+            num="fit", figsize=config.figsize, layout="constrained"
+        )
         ax.set(
-            title=f"Lookback · {adc} · Readout magnitude",
+            title=f"Lookback · {adc}\nReadout magnitude",
             xlabel=_TIME_LABEL,
             ylabel=_MAGNITUDE_LABEL,
         )
@@ -230,19 +232,19 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
                 zorder=4,
                 label=f"{label} = {offset:.4f} µs",
             )
-        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
+        fig.legend(loc="outside lower center")
 
-        # The signed components separate phase changes from changes in magnitude.
-        _, iq_ax = plots.subplots(
-            num="quadratures", figsize=config.figsize, layout="tight"
+        # 4. The signed components separate phase changes from changes in magnitude.
+        iq_fig, iq_ax = plots.subplots(
+            num="quadratures", figsize=config.figsize, layout="constrained"
         )
         iq_ax.set(
-            title=f"Lookback · {adc} · Readout quadratures",
+            title=f"Lookback · {adc}\nReadout quadratures",
             xlabel=_TIME_LABEL,
             ylabel="Mean IQ (a.u.)",
         )
         iq_ax.plot(Ts, np.real(signals), color="C0", label="I (in-phase)")
         iq_ax.plot(Ts, np.imag(signals), color="C1", label="Q (quadrature)")
-        iq_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
+        iq_fig.legend(loc="outside lower center", ncols=2)
 
         return LookbackAnalysis(predict_offset=offset)
