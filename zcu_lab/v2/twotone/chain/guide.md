@@ -10,6 +10,8 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 `twotone/chain` sweeps the qubit drive frequency like `twotone/freq`, but each dwell at one frequency is a chain of reads instead of one read.
 A dwell is one shot: Reset, Init Pulse, then 48 cycles of the frequency-swept Probe Pulse followed by a readout, with no reset between cycles.
+The next Probe Pulse starts after the readout pulse ends and the readout's `post_delay` plus the probe's own pre-delay have elapsed.
+The probe can start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
 The experiment fixes the 48 cycles per dwell; the Form does not offer it.
 The frequency loop runs outside the chain. One fast sweep visits every frequency once.
 Reps sets the fast sweeps per round, and Rounds sets the number of rounds.

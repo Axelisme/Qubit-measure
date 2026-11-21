@@ -33,7 +33,7 @@ class RoOptimizeChainLengthInputs(RecipeInputs):
     )
     length_start_us: float | None | Keep = Field(
         KEEP,
-        description="Shortest ADC window in us; each pulse is its window plus 0.11 us.",
+        description="Shortest ADC window in us.",
     )
     length_stop_us: float | None | Keep = Field(
         KEEP,
@@ -67,7 +67,7 @@ class RoOptimizeChainLengthReport(ChainSweepReport):
 
 @recipe(
     "ro_optimize_chain_length",
-    description="Sweep the readout ADC window, with the pulse 0.11 us longer, in thermally reset 16-read shots; score each window by the thermal-chain score, save sums and analysis.",
+    description="Sweep the ADC window in thermally reset 16-read shots. Set the pulse length for each window using trigger offset and flight time, then score each window and save the sums and analysis.",
 )
 async def ro_optimize_chain_length(
     session: RecipeSession, inputs: RoOptimizeChainLengthInputs
@@ -80,7 +80,8 @@ async def ro_optimize_chain_length(
     identifiable physical leakage). Errors do not affect selection.
     Save keeps shot counts, all 107 sums and analysis. No writeback is proposed.
 
-    points → expts sets the ADC window sample count. Windows are us; each pulse is window + 0.11 us.
+    points → expts sets the number of ADC windows. In us, each pulse lasts
+    trig_offset minus time_of_fly plus the window and 0.11 us.
     relax_delay sets K in us. Omission retains the Form value; null goes to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """

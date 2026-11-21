@@ -13,7 +13,8 @@ A cycle waits Relax delay, then plays eight blocks of Pi/2 Pulse, the swept Dela
 The second Pi/2 Pulse has the first one's phase plus 180 degrees, so at zero delay it undoes the first and returns the qubit to its start.
 Its phase also advances by 360 × Detune × delay degrees, which adds Detune fringes per us of delay without changing the drive frequency.
 Relax delay is the thermalisation wait K, including before the first cycle. Set it to at least 5 T1 for the model's thermal-equilibrium start.
-Each read waits for the previous ADC window to close, so the second read of a block starts after the first and the next Pi/2 Pulse starts after the second.
+After a readout pulse ends, its `post_delay` sets the wait before the second readout or the next Pi/2 Pulse.
+The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
 The delay loop runs outside the cycle. Reps sets the cycles at every delay in one round, and Rounds sets the number of rounds.
 
 The host reduces each cycle to 65 numbers: the IQ of the 16 reads, their I², IQ, Q² summed over three read groups, and IQ products between read pairs summed over six groups set by the number of Ramsey blocks and reads between them.
