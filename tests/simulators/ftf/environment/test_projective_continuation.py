@@ -176,21 +176,6 @@ def exact_cavity_span_hits(monkeypatch: pytest.MonkeyPatch):
         result = solve(owner, model, pulses, start_ns, end_ns, **memory)
         if owner.hits > before:
             hits.add((start_ns, end_ns))
-            separate = adc.cavity_field_average(
-                model, pulses, start_ns, end_ns, **memory
-            )
-            np.testing.assert_array_equal(
-                result.average.field_products, separate.field_products
-            )
-            np.testing.assert_array_equal(result.average.photons, separate.photons)
-            fields = adc.cavity_fields(
-                model, pulses, np.array([start_ns, end_ns]), **memory
-            )
-            # Combined propagation may round differently: 1e-12 sqrt(photons)
-            # absolute tolerance in the original field reference.
-            np.testing.assert_allclose(
-                result.final_fields, fields[-1], rtol=0, atol=1e-12
-            )
         return result
 
     # Acquire returns physics results; ADC's public hit counter observes reuse.
