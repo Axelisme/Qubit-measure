@@ -12,7 +12,7 @@ basis:
 
 ## 結論
 
-`mist/flux_dep` 在正常參數下的 FTF Run，從 281.5 s 降到 163.3 s。做法是讓 ADC 既有的腔場 memo owner 也收錄 flat span 求解出的各 state 端點場，不再只收二階矩。FTF 照舊選態、建 Stark／dephasing shift，並把場傳給下一段，不組 ADC 的 key。這放寬了 ADR-0078「末態場不進 memo」的一部分；主分支選擇、shaped／callable 路徑與 projective 路徑仍不進 memo。
+`mist/flux_dep` 在正常參數下的 FTF Run，從 281.5 s 降到 163.3 s。做法是讓 ADC 既有的腔場 memo owner 也收錄 flat span 求解出的各 state 端點場，不再只收二階矩。FTF 照舊選態、建 Stark／dephasing shift，並把場傳給下一段，不組 ADC 的 key。這放寬了 ADR-0078「末態場不進 memo」的一部分；主分支選擇與 shaped／callable 路徑仍不進 memo，projective 路徑沿用既有的二階矩 memo，不收錄端點場。
 
 這是 designer 依使用者授權（「我授权你的范围除了 push 还有真实硬体之外都可以做」）做的代裁，使用者尚未覆核。
 
@@ -64,7 +64,7 @@ ADC 公開的入口只有平均值，FTF 沒辦法在不複製 ADC 規則的情�
 | Readout | 246.1067 | 127.2003 |
 | Evolve | 25.1233 | 25.5915 |
 
-兩次 Run 在不同 commit 上，差異不能全部歸因於快取。審查時補上兩個無法證明等價的情況，這兩種情況都照舊分別求解、不收錄：不同的實際 carrier 改用數值型別與位元編碼來區分；窄精度時間造成 ringdown 端點不同。
+兩次 Run 在不同 commit 上，差異不能全部歸因於快取。審查時補了兩處。第一，不同的實際 carrier 以數值型別與位元編碼分成不同的 key，不會誤命中；它們照常收錄。第二，窄精度時間讓 ringdown 端點不同、無法證明等價時，照舊分別求解、不收錄。
 
 ## 留下的問題
 
