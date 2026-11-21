@@ -51,7 +51,7 @@ RunContext 提供 devices、cancel_signal 等能力，不提供儀器設定方�
 State 的 owner loop 可用 Qt queued signal 或 headless queue，不要求 core 依賴 Qt 主線程。`pane_commit` 擁有 Measure 的 pane 提交、artifact 規劃、版本、退役清理與未發布 plots 的 discard。State 只交換已備妥的資料並回傳退役資源；唯讀 preview 與 swap 共用退役選擇，不改 State 或清理。Service／control 轉接失效事實，remote 只投影既有 wire 字串與順序。GuardService 判 domain admission，gate 裁 hardware exclusion，operation owner 保留終局、取消及觸發清理的時機。Run、Analyze、PostAnalyze、Load 與 Tab 不各自管理清理。提交順序及失效關係見 [Measure owners](../../lib/zcu_tools/gui/app/measure/README.md#owners)、[[0066]]。這不改 C8／C9 或 artifacts／writeback 分隔契約。
 
 **依據。**
-- 2026-10-29，使用者授權評估及選擇窄 port 的實作：「候選8，需要評估trade-off, 候選11可以做，都允許你自己決定」。由 designer 在授權下代裁，讓 owner services 直接滿足窄 port。未見使用者覆核紀錄。原始討論未入庫，見 Git `14d72247e`。
+- 2026-10-29，使用者授權評估及選擇窄 port 的實作：「候選8，需要評估trade-off, 候選11可以做，都允許你自己決定」。由 designer 在授權下代裁，讓 owner services 直接滿足窄 port。使用者 2026-11-21 追認：「前两个代材可以」。原始討論未入庫，見 Git `14d72247e`。
 - 2026-10-20，使用者裁定：「我規劃將soc連線與顯示的邏輯從setup dialog獨立出來，成為獨立的dialog並有獨立入口按鈕，新setup dialog的working points移到原本soc區域的右側。」原裁決未附入庫討論，見 Git `602ddda77`。2026-11-16，使用者要求「不要再有setup這個名詞與屬性了」，因此視窗與程式識別都改名 Entry。
 - 2026-10-29，使用者提出：「沒有激活point就用全域的parameter.yaml/module_cfg/alias，有激活就用point內的，每個都是write-through」。對整組切換答「A，我目前先設計成整個作用域換成point，沒有個別的fallback邏輯」。2026-11-16，對「三檔合稱文件組、由 session 持有、每種檔一個形狀相同的開檔入口」答：「A不錯」。文件組與命名的推導及覆核見 [Global／point 參數型別收斂與文件組](../discussions/2026-11-17-global-point-parameter-types-and-document-set.md)。
 - 2026-10-28，使用者說：「我其實沒有要知道來源的需求，這功能純屬於錦上添花」「來源我一直以為只是metadata，沒想要解析」。見 [移除 module provenance 的格式變更](../storage-format-history/2026-10-28-remove-module-provenance.md)。
@@ -91,7 +91,7 @@ State 的 owner loop 可用 Qt queued signal 或 headless queue，不要求 core
 **依據。**
 - 2026-10-20，使用者裁定：「框架內支援的fluxonium/transmon是理論上的兩種qubit，有自己定義的參數，與用戶定義的component解偶」。檔案交接：「我認為還有一個最簡單的，不轉。讓fluxdep的工具寫preditor要用的格式檔，而不是component的欄位。」對 entry 層檔案、格式與 dialog 答：「1先entry吧。2可以。3可以。」原裁決未附入庫討論，見 Git `5b14a43e7`。
 - 2026-10-19，使用者裁決：「採 B，只限 PredictorDialog。依 repo 規則，新 class 有理由：它們各自隱藏真實的控件與局部 state 協調（參數編輯、曲線互動），不是轉接層。照你列的硬邊界（PredictorControlPort／ModelParams／物理 owner 不變、public 行為與文字版面不變、無 Protocol/factory/mixin、callers/tests 同票）。外觀不得改變；ComponentDriver 情境＋逐步 PNG 你親看即可，不需交使用者。」原裁決未附入庫討論，見 Git `28fe32144`。
-- 2026-10-29，使用者授權移動試算狀態與規則：「候選11可以做，都允許你自己決定」。由 designer 在授權下代裁，將試算移到 Qt-free trial。未見使用者覆核紀錄。原始討論未入庫，實作見 Git `73e00b1f3` 和上述 Session README。
+- 2026-10-29，使用者授權移動試算狀態與規則：「候選11可以做，都允許你自己決定」。由 designer 在授權下代裁，將試算移到 Qt-free trial。使用者 2026-11-21 追認：「前两个代材可以」。原始討論未入庫，實作見 Git `73e00b1f3` 和上述 Session README。
 
 ## Experiment figure area
 
