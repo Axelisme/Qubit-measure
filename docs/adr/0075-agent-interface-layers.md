@@ -6,7 +6,7 @@ status: accepted
 
 使用者於 2026-10-16 以「都採用建議」確認歸檔。本篇記錄入口分層、recipe 與 workflow 的共用 async host、Ask 及取消契約。不新增工具、不改 method policy，也不授權硬體操作。
 
-**Last updated:** 2026-11-19，小功能要多次遇到才加
+**Last updated:** 2026-11-21，guide 與知識庫的分工
 
 **關聯：** [[0068]] 的 remote 與 measure 固定工具、[[0062]] 的 workflow run、[[0063]] 的保存權威、[[0069]] 的核心與前端；控制權見 [[0070]]，workflow engine 見 [[0062]]。
 
@@ -272,6 +272,14 @@ Measure／fluxdep 的 GUI 與 agent 共用同一份 application state，同時�
 ### 判讀依據放知識庫
 
 Skill 放流程與完成條件，每個決策點保留最小判準，並指向知識庫入口。完整判讀依據、反例與圖例放 measure_knowledge，不由單一前端擁有。GUI、MCP 與 Notebook 的 skill 可以共用它；skill 在沒有知識庫時仍能依最小判準運作。
+
+實驗 guide 寫給懂物理、沒看過實作的讀者。Guide 介紹實驗，描述它量什麼、怎麼操作、初值怎麼來、結果怎麼讀。板子限制與底層報錯（QICK、program build、upload 的訊息）不寫進 guide，不帶數字的中性說法也不寫。這些訊息的判讀、單位換算與改法放 measure_knowledge 的 judge 條目，訊息本身列在知識庫 routing 的症狀表。Guide 不連到知識庫裡的檔案，因為知識庫是 gitignored 的獨立 Git。
+
+例：`singleshot/len_rabi` 的 guide 寫掃描上限的初值是 4 × x180 長度，不寫 drive generator 的 envelope 容量。Run 報 `generator 2: buffer length must be 8192 samples or less.` 時，讀者從症狀表進入 judge 條目，查到 samples 換成 µs 的算法、要改的 `Length → Stop`，以及改用 flat_top 前要確認的事。
+
+邊界：操作員開表單或看結果時直接看到的行為仍寫進 guide，即使它來自固定的數值上限。例如 `singleshot/reset_check` 的 guide 寫 Gain Stop 初值取 4 × x180 gain 與 1.0 中較小者，`twotone/cpmg` 的 guide 寫 Minimum time 的初值公式與欄位何時留空。
+
+2026-11-21，使用者先要求：「然後guide請不要包含取決於板子資訊的內容，其應該是中性的說明，要提供錯誤解析，應該放知識沉澱的疑難排解」。同日再定下 guide 的讀者與範圍：「Guide的定位是給只有物理知識，完全沒看過實作的使用者角度看的，寫太多實作細節沒有意義，所以板子限制不要放guide，guide是介紹這個實驗，與其行為描述的說明，底層qick抱錯屬於疑難雜症，進知識沉澱的judge」。比較見[表單預設超過板子限制，錯誤解析放知識庫](../discussions/2026-11-21-form-board-limits.md)。
 
 ### Fluxdep 的依賴模型不是跨 app 原則
 

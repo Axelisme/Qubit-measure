@@ -185,9 +185,7 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
             with builder.repeat("cycle", BLOCKS_PER_CYCLE):
                 builder.emit(rabi_pulse)
                 builder.emit(readout)
-                builder.delay_auto()
                 builder.emit(readout)
-                builder.delay_auto()
 
             prog = builder.build()
             sched.run_acquire_summed(
