@@ -18,13 +18,13 @@ from zcu_tools.mcp.measure.recipe_api import (
 
 from zcu_lab.v2.two_qubit.local_z.core import LocalZAnalysis, LocalZFit
 
-from .two_qubit_helpers import TwoQubitTarget, apply_selected_writeback
+from .two_qubit_helpers import TwoQubitPositionTarget, apply_selected_writeback
 
 
 class LocalZInputs(RecipeInputs):
     """Four-role target and gate-count scan. Overrides apply after named edits."""
 
-    target: TwoQubitTarget | None = Field(
+    target: TwoQubitPositionTarget | None = Field(
         default=None,
         description="Role bindings for this Reset. Omitted or null roles keep the current aliases.",
     )
@@ -42,13 +42,13 @@ class LocalZInputs(RecipeInputs):
 class LocalZReport(RecipeReport):
     """Owner's phase-line fits by role, with no shared fit quality."""
 
-    f1: LocalZFit | None = Field(
+    qubit1: LocalZFit | None = Field(
         default=None,
-        description="F1's fit or fit reason; null if Analyze returned no summary.",
+        description="Qubit1's fit or fit reason; null if Analyze returned no summary.",
     )
-    f2: LocalZFit | None = Field(
+    qubit2: LocalZFit | None = Field(
         default=None,
-        description="F2's fit or fit reason; null if Analyze returned no summary.",
+        description="Qubit2's fit or fit reason; null if Analyze returned no summary.",
     )
 
 
@@ -64,7 +64,7 @@ def _report_fit(fit: LocalZFit) -> LocalZFit:
 
 @recipe(
     "two_qubit_local_z",
-    description="Fit local Z phase for F1 and F2, review the correction pair and save.",
+    description="Fit local Z phase for Qubit1 and Qubit2, review the correction pair and save.",
 )
 async def two_qubit_local_z(
     session: RecipeSession, inputs: LocalZInputs
@@ -94,13 +94,13 @@ async def two_qubit_local_z(
         if analysis.result is None:
             return LocalZReport(analysis_failure=analysis.reason)
 
-        f1, f2 = map(_report_fit, analysis.result.fits)
+        qubit1, qubit2 = map(_report_fit, analysis.result.fits)
         applied = False
-        if f1.correction_deg is not None and f2.correction_deg is not None:
+        if qubit1.correction_deg is not None and qubit2.correction_deg is not None:
             decision = await tab.ask_writeback(stage="primary")
             applied = apply_selected_writeback(tab, decision)
 
-        return LocalZReport(f1=f1, f2=f2, writeback_applied=applied)
+        return LocalZReport(qubit1=qubit1, qubit2=qubit2, writeback_applied=applied)
     finally:
         tab.save()
 

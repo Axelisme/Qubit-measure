@@ -68,15 +68,15 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 
 ## two_qubit_local_z
 
-`two_qubit_local_z` 執行一次 `two_qubit/local_z`。
+`two_qubit_local_z` 執行一次 `two_qubit/local_z`。`target` 用 `qubit1`、`qubit2`、`coupler`、`mux` 綁定本次 Open／Reset。
 量測前依 [adapter 的準備說明](../v2/two_qubit/local_z/guide.md#run-前) 檢查兩顆 qubit 的 Xπ/2 脈衝與 CZ 脈衝。
 `gate_count` 填連續的非負整數，至少三個，例如 `[0, 1, 2, 3, 4]`。省略就保留 Reset 值；填 null 將 null 交給 Form 驗證。
 
-報告的 `f1` 和 `f2` 各有 `intercept_deg`、`slope_deg`、`correction_deg`、`slope_error_deg`、`reason` 和 `fit_quality`。
+報告的 `qubit1` 和 `qubit2` 各有 `intercept_deg`、`slope_deg`、`correction_deg`、`slope_error_deg`、`reason` 和 `fit_quality`。
 `slope_deg` 和它的 1σ 不確定度 `slope_error_deg` 都按每個 CZ gate 計。`correction_deg` 是不重新 wrap 的負斜率。
 頂層 `fit_quality` 為 null。任一角色擬合不可用時，該角色的 `reason` 說明原因，另一角色的結果仍會回報。
 
-兩條擬合都給出 correction 才詢問是否寫入 `$coupler.ext.cz_phase`。這是一筆包含 F1/F2 身分和兩個校正值的候選。
+兩條擬合都給出 correction 才詢問是否寫入 `$coupler.ext.cz_phase`。候選的 `qubit1`、`qubit2` 是同次 Run 捕捉的元件名，兩個校正值是 `correction_qubit1_deg`、`correction_qubit2_deg`。
 寫回不改脈衝或 slot。參見 [擬合解讀](../v2/two_qubit/local_z/guide.md#phase-與-slope) 和 [候選內容](../v2/two_qubit/local_z/guide.md#preview-與-apply)。
 
 ## two_qubit_constructive_phase
@@ -133,7 +133,8 @@ F2 的新 phase 是來源 F1 phase 加上擬合的相對相位。參見 [候選�
 
 `two_qubit_rb` 執行一次 `two_qubit/rb`，量測 reference 與 CZ-interleaved 兩臂。
 按 [adapter 的準備說明](../v2/two_qubit/rb/guide.md#before-run) 校準脈衝、mux readout 和 local Z。
-Form 從 `$coupler.ext.cz_phase` 讀取角色名稱和 Z 修正。角色順序要與該組修正相符。
+`target` 用 `qubit1`、`qubit2`、`coupler`、`mux` 綁定本次 Open／Reset。
+Form 檢查 `$coupler.ext.cz_phase` 的元件名是否依序符合 `qubit1`、`qubit2`。不符就指出位置，符合才帶入兩個修正角度。
 
 `depths` 填非負整數，單位是每個序列的隨機 Clifford 數，不含 recovery。
 `seeds` 填 0 到 2147483647 的整數序列 ID，兩臂共用同一批 ID。
@@ -152,18 +153,18 @@ Form 從 `$coupler.ext.cz_phase` 讀取角色名稱和 Z 修正。角色順序�
 ```json
 {
   "overrides": [
-    {"path": "drive.f1", "command": "to_inline"},
-    {"path": "drive.f1.waveform", "select": "Inline: const"},
-    {"path": "drive.f1.waveform.length", "value": 2.0},
-    {"path": "drive.f2", "command": "to_inline"},
-    {"path": "drive.f2.waveform", "select": "Inline: const"},
-    {"path": "drive.f2.waveform.length", "value": 2.0}
+    {"path": "drive.qubit1", "command": "to_inline"},
+    {"path": "drive.qubit1.waveform", "select": "Inline: const"},
+    {"path": "drive.qubit1.waveform.length", "value": 2.0},
+    {"path": "drive.qubit2", "command": "to_inline"},
+    {"path": "drive.qubit2.waveform", "select": "Inline: const"},
+    {"path": "drive.qubit2.waveform.length", "value": 2.0}
   ]
 }
 ```
 
 `length` 的單位是 µs。兩路 CZ 必須同長；換波形後，請用重校的 gain 和 local-Z 修正。
-如需更換 X90 或 X180 波形，同樣對 `x90_f1`、`x90_f2`、`x180_f1` 或 `x180_f2` 的 pulse 路徑和其 `.waveform` 操作。
+如需更換 X90 或 X180 波形，同樣對 `x90_qubit1`、`x90_qubit2`、`x180_qubit1` 或 `x180_qubit2` 的 pulse 路徑和其 `.waveform` 操作。
 這些覆寫不改 library。
 
 報告轉交 `p_reference`、`p_interleaved`、`reference_epc`、`gate_error`、

@@ -16,13 +16,13 @@ from zcu_tools.mcp.measure.recipe_api import (
 
 from zcu_lab.v2.two_qubit.rb.core import RBEstimate
 
-from .two_qubit_helpers import TwoQubitTarget
+from .two_qubit_helpers import TwoQubitPositionTarget
 
 
 class RBRecipeInputs(RecipeInputs):
     """Paired RB scan inputs; overrides apply after the named fields."""
 
-    target: TwoQubitTarget | None = Field(
+    target: TwoQubitPositionTarget | None = Field(
         default=None,
         description="Role bindings for this Reset. Omitted or null roles keep the current aliases.",
     )

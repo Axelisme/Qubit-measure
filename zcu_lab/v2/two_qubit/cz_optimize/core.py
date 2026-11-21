@@ -50,11 +50,10 @@ from zcu_tools.program.v2.modules import ArbWaveformCfg, MuxReadout
 from zcu_lab.v2.support import live_line
 
 from .._cz_phase import CZPhasePair
-from .._drive import DualLineCfg
+from .._drive import QubitDriveCfg
 from .._rb_scheduling import emit_sequence, validate_x_pulses
 from .._rb_sequence import RBArm, make_rb_arms
-from .._readout import JointRoles
-from .._sums import joint_probabilities, validate_classifiers
+from .._sums import joint_probabilities, validate_qubit_tones
 
 _KNOTS_PER_CHANNEL = 6
 _KNOT_STRIDE = 16
@@ -68,9 +67,9 @@ class CZOptimizeResult:
     """Native evaluation log, with evaluation 0 reserved for the starting CZ.
 
     seeds is int64 (seed,), in measurement order. params is float64 (evaluation,
-    14), ordered [I1..I6, Q1..Q6, Z_F1 (deg), Z_F2 (deg)]. peak is float64
+    14), ordered [I1..I6, Q1..Q6, Z_Qubit1 (deg), Z_Qubit2 (deg)]. peak is float64
     (evaluation,), the largest normalized |I+iQ| on the render grid. sums is
-    float64 (evaluation, seed, 3, 3), with F1/F2 axes each ordered g, e, other.
+    float64 (evaluation, seed, 3, 3), with Qubit1/Qubit2 axes each ordered g, e, other.
     duration is the baseline arb duration in us, measured at Run start.
     Unmeasured entries and counts for skipped shapes stay NaN.
     """
@@ -135,8 +134,7 @@ def _targets(result: CZOptimizeResult) -> NDArray[np.float64]:
 class CZOptimizeCfg(ConfigBase):
     """Calibrated X90/X180, shared-arb two-line CZ, local Z and full mux readout.
 
-    roles identifies the ordered F1/F2 components and their full-group tone
-    positions. Corrections are degrees. Each evaluation repeats the same 3–5
+    Tone indices refer to the full mux group. Logical Z corrections are degrees. Each evaluation repeats the same 3–5
     seeds, with one fixed Clifford depth and reps shots per seed. A mux herald
     retains only matching shots. Each full CMA generation has popsize candidates.
     """
@@ -145,21 +143,39 @@ class CZOptimizeCfg(ConfigBase):
         ResetWithHeraldCfg | None,
         FieldMeta(description="Optional reset or mux herald before each sequence."),
     ] = None
-    x90_f1: Annotated[Pulse.Cfg, FieldMeta(description="Calibrated F1 X90 pulse.")]
-    x90_f2: Annotated[Pulse.Cfg, FieldMeta(description="Calibrated F2 X90 pulse.")]
-    x180_f1: Annotated[Pulse.Cfg, FieldMeta(description="Calibrated F1 X180 pulse.")]
-    x180_f2: Annotated[Pulse.Cfg, FieldMeta(description="Calibrated F2 X180 pulse.")]
+    x90_qubit1: Annotated[
+        Pulse.Cfg, FieldMeta(description="Calibrated Qubit1 X90 pulse.")
+    ]
+    x90_qubit2: Annotated[
+        Pulse.Cfg, FieldMeta(description="Calibrated Qubit2 X90 pulse.")
+    ]
+    x180_qubit1: Annotated[
+        Pulse.Cfg, FieldMeta(description="Calibrated Qubit1 X180 pulse.")
+    ]
+    x180_qubit2: Annotated[
+        Pulse.Cfg, FieldMeta(description="Calibrated Qubit2 X180 pulse.")
+    ]
     drive: Annotated[
-        DualLineCfg,
+        QubitDriveCfg,
         FieldMeta(description="Calibrated CZ pulses sharing one arb asset."),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
-        FieldMeta(description="Full mux readout with F1/F2 classifiers."),
+        FieldMeta(description="Full mux readout with Qubit1/Qubit2 classifiers."),
     ]
-    roles: Annotated[
-        JointRoles,
-        FieldMeta(description="Captured component names and tone positions."),
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based position in the full mux readout.",
+        ),
     ]
     phase_pair: Annotated[
         CZPhasePair, FieldMeta(description="Ordered local Z corrections in degrees.")
@@ -204,32 +220,33 @@ class CZOptimizeCfg(ConfigBase):
 
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:
-        """Reject mismatched arb paths, bad classifiers, roles, seeds or generators."""
-        f1, f2 = self.drive.f1.waveform, self.drive.f2.waveform
+        """Reject mismatched arb paths, tone indices, classifiers, seeds or generators."""
+        qubit1, qubit2 = self.drive.qubit1.waveform, self.drive.qubit2.waveform
         if (
-            not isinstance(f1, ArbWaveformCfg)
-            or not isinstance(f2, ArbWaveformCfg)
-            or f1.path != f2.path
+            not isinstance(qubit1, ArbWaveformCfg)
+            or not isinstance(qubit2, ArbWaveformCfg)
+            or qubit1.path != qubit2.path
         ):
             raise ValueError(
                 "Both CZ lines must use the same arb asset path; see First-round preparation "
                 "in the two_qubit/cz_optimize guide."
             )
-        validate_classifiers(self.readout, self.roles)
-        self.phase_pair.validate_roles(self.roles)
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
         if len(set(self.seed)) != len(self.seed):
             raise ValueError(
                 "CZ optimization seeds must be distinct integer identities"
             )
         validate_x_pulses(
-            (self.x90_f1, self.x90_f2), (self.x180_f1, self.x180_f2), self.drive
+            (self.x90_qubit1, self.x90_qubit2),
+            (self.x180_qubit1, self.x180_qubit2),
+            self.drive,
         )
         return self
 
 
 def _read_baseline(cfg: CZOptimizeCfg) -> WaveformSamples:
     """Read the validated shared arb path once; propagate file and format errors."""
-    waveform = cfg.drive.f1.waveform
+    waveform = cfg.drive.qubit1.waveform
     assert isinstance(waveform, ArbWaveformCfg)  # Validated when constructing the cfg.
     return decode_npz(Path(waveform.path).read_bytes()).samples
 
@@ -272,7 +289,7 @@ def _make_strategy(
 class _CandidateCZ:
     """In-memory physical pulse pair and its matching logical Z corrections."""
 
-    drive: DualLineCfg  # Physical CZ lines sharing one in-memory envelope.
+    drive: QubitDriveCfg  # Physical CZ lines sharing one in-memory envelope.
     phases: CZPhasePair  # Logical Z corrections in degrees for those lines.
 
 
@@ -281,14 +298,14 @@ def _candidate_cfg(
 ) -> _CandidateCZ:
     """Replace only the two shapes and local Z angles, without modifying the saved cfg."""
     waveform = InMemoryArbWaveformCfg(samples=samples)
-    drive = DualLineCfg(
-        f1=baseline.drive.f1.model_copy(update={"waveform": waveform}),
-        f2=baseline.drive.f2.model_copy(update={"waveform": waveform}),
+    drive = QubitDriveCfg(
+        qubit1=baseline.drive.qubit1.model_copy(update={"waveform": waveform}),
+        qubit2=baseline.drive.qubit2.model_copy(update={"waveform": waveform}),
     )
     phase_pair = baseline.phase_pair.model_copy(
         update={
-            "correction_f1_deg": float(params[-2]),
-            "correction_f2_deg": float(params[-1]),
+            "correction_qubit1_deg": float(params[-2]),
+            "correction_qubit2_deg": float(params[-1]),
         }
     )
     return _CandidateCZ(drive, phase_pair)
@@ -320,8 +337,8 @@ def _measure_candidate(
             builder,
             arms[seed],
             cfg.depth,
-            x90=(cfg.x90_f1, cfg.x90_f2),
-            x180=(cfg.x180_f1, cfg.x180_f2),
+            x90=(cfg.x90_qubit1, cfg.x90_qubit2),
+            x180=(cfg.x180_qubit1, cfg.x180_qubit2),
             cz=(candidate.drive, candidate.phases),
         )
         builder.emit(readout, tag="terminal")
@@ -329,8 +346,8 @@ def _measure_candidate(
         reducer = shot_sums(
             prog,
             [
-                Classify("terminal", cfg.roles.f1_tone),
-                Classify("terminal", cfg.roles.f2_tone),
+                Classify("terminal", cfg.qubit1_tone),
+                Classify("terminal", cfg.qubit2_tone),
             ],
         )
         counts = seed_step.run_acquire_summed(
@@ -354,10 +371,16 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
                     variable="sums",
                     axes=(
                         VariableAxisSpec(
-                            label="F2 class", unit="", values=(0, 1, 2), dtype=np.int64
+                            label="Qubit2 class",
+                            unit="",
+                            values=(0, 1, 2),
+                            dtype=np.int64,
                         ),
                         VariableAxisSpec(
-                            label="F1 class", unit="", values=(0, 1, 2), dtype=np.int64
+                            label="Qubit1 class",
+                            unit="",
+                            values=(0, 1, 2),
+                            dtype=np.int64,
                         ),
                         VariableAxisSpec(
                             label="Seed", unit="", field_name="seeds", dtype=np.int64
@@ -404,7 +427,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
             ),
             result_type=CZOptimizeResult,
             cfg_type=CZOptimizeCfg,
-            cfg_schema_version="2.0",
+            cfg_schema_version="3.0",
             tag="two_qubit/cz_optimize",
             result_builder=_restore_result,
         )
@@ -429,8 +452,8 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
             np.zeros(_KNOTS_PER_CHANNEL)
             if baseline.qdata is None
             else np.interp(knot_times, baseline.time, baseline.qdata),
-            cfg.phase_pair.correction_f1_deg,
-            cfg.phase_pair.correction_f2_deg,
+            cfg.phase_pair.correction_qubit1_deg,
+            cfg.phase_pair.correction_qubit2_deg,
         ]
         strategy = _make_strategy(cfg, start)
         # ADR-0072: share the sequence, not RB's acquisition or analysis.

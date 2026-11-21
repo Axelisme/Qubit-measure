@@ -1,11 +1,12 @@
 """Fixed-capture calibration and editable inputs for CZ optimization."""
 
-from zcu_tools.cfg_model import Expr, Slot
+from zcu_tools.cfg_model import Hidden, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
-from .._measure import captured_roles
+from .._cz_phase_form import captured_phase_pair
+from .._measure import captured_qubits
 from .core import CZOptimizeCfg
 
 
@@ -15,36 +16,25 @@ def make_form(ctx: FormContext) -> Form[CZOptimizeCfg]:
     Missing sources remain invalid, and the optional reset starts unset.
     Operators fill the fixed depth, sequence seeds and CMA settings before Run.
     """
-    names: dict[str, str] = {}
-    if ctx.parameters is not None:
-        for role in ("f1", "f2"):
-            path = f"$coupler.ext.cz_phase.{role}"
-            captured = ctx.parameters.lookup(path)
-            if captured.present:
-                if not isinstance(captured.value, str):
-                    raise ValueError(f"{path} must contain a component name")
-                names[role] = captured.value
+    qubits = captured_qubits(ctx, require_coupler=True)
     readout = Slot("$mux.module.readout")
     return Form(
         CZOptimizeCfg,
         tree={
             "reps": 1000,
             "relax_delay": 1.0,
-            "roles": captured_roles(ctx),
+            "qubit1_tone": Hidden(qubits.qubit1_tone),
+            "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
-            "x90_f1": Slot("$f1.module.x90", copy=True),
-            "x90_f2": Slot("$f2.module.x90", copy=True),
-            "x180_f1": Slot("$f1.module.x180", copy=True),
-            "x180_f2": Slot("$f2.module.x180", copy=True),
+            "x90_qubit1": Slot("$qubit1.module.x90", copy=True),
+            "x90_qubit2": Slot("$qubit2.module.x90", copy=True),
+            "x180_qubit1": Slot("$qubit1.module.x180", copy=True),
+            "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
             "drive": {
-                "f1": Slot("$coupler.module.cz_f1", copy=True),
-                "f2": Slot("$coupler.module.cz_f2", copy=True),
+                "qubit1": Slot("$coupler.module.cz_qubit1", copy=True),
+                "qubit2": Slot("$coupler.module.cz_qubit2", copy=True),
             },
             "readout": readout,
-            "phase_pair": {
-                **names,
-                "correction_f1_deg": Expr("$coupler.ext.cz_phase.correction_f1_deg"),
-                "correction_f2_deg": Expr("$coupler.ext.cz_phase.correction_f2_deg"),
-            },
+            "phase_pair": captured_phase_pair(ctx, qubits),
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))
