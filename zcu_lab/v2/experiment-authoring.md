@@ -368,10 +368,12 @@ Mux Len Rabi 同 point loop 中每個參與者有自己的 length 表。
 ### 用 run_acquire* 寫入與停止
 
 SignalBuffer 接完整 array 的 on_update，Schedule 接 scope=context.scope 並把轉換資料寫入 slot。
-一維接線見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)，它把同批 shots 的校正 IQ 矩用於 live update、SNR 停止條件和最終結果。buffer、retry、partial 與 lifecycle 見 [runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md)。
+一維接線見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)。它把同一份校正 IQ 矩用於 live update、SNR 停止條件和最終結果。
+Buffer、retry、partial 與 lifecycle 見 [runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md)。
 Integrated、summed、decimated 三個 slot 入口用 RunOptions(converter=...) 轉形狀或算 conditional mean。
-Summed 先 build，再 `shot_sums(prog, [IQ("terminal")])`，將 count／sum I／sum Q 寫入 float64 slot。
-分類軸與 split_sums 見 [summed acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition)。
+Summed 先 build，再 `shot_sums(prog, [IQ("terminal")])`，將 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]` 寫入 float64 slot。
+若與 native 平均 IQ 共用零點，且符合單 ADC、單積分讀出與無 mask 的前提，傳 `IQ("terminal", offset_corrected=True)`。
+分類軸、校正的前置條件與 split_sums 見 [summed acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition)。
 多 ADC mux 須提供符合 slot shape 的 converter；`MuxReadout.collect_raw_iq(prog)` 在 completed-round hook 讀 raw buffers。
 逐 shot IQ 必須來自 raw buffer，不能以累積 averaged IQ 代替。
 Decimated 不用 sweep，caller 按 rounded readout window 配 trace buffer，shape 匹配 backend repetitions／samples，可附 on_update。

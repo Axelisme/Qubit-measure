@@ -35,11 +35,12 @@ Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交�
 ## 逐點 shot SEM
 
 [`shot_uncertainty`](shot_uncertainty.py) 依來源提供兩種估計。`iq_shot_sem` 接收
-ADR-0074 的單次讀出 IQ 總和 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]`。它把樣本標準差投影到
-指定的 IQ 軸，再除以 √N。`class_probability_covariance` 以每點保留的類別計數估計機率共變異，
-對角元素開根號就是各類的二項 SEM。兩者都不以設定的 reps×rounds 取代實際保留的 shot 數，
-也不估計輪間散布、RB 的 seed 散布或擬合參數誤差。少於兩發或缺測（NaN）使該點的誤差未定。
-負、非整數或無窮計數，以及計數加總溢位，都直接報錯。IQ 估計也拒絕無窮矩與超過捨入誤差的負投影中心平方和。
+ADR-0074 的單次讀出 IQ 總和 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]`。它取指定 IQ 投影的樣本標準差，再除以 √N。
+`class_probability_covariance` 用保留 shots 的 one-hot 樣本共變異除以 N 估計平均機率的共變異。
+對角元素開根號就是各類的二項 SEM。比例為 0 或 1 時樣本變異數為 0，不代表信賴區間。
+兩者都以實際保留的 shots 為分母，不估計輪間散布、RB 的 seed 散布或擬合參數誤差。
+少於兩發或缺測（NaN）時，該點誤差未定。負、非整數、無窮計數及其加總溢位會報錯。
+IQ 估計也拒絕無窮矩、超過捨入誤差的負中心平方和，以及不可能的中心共變異，不受選定的投影方向影響。
 
 ## 雙讀出矩的自校準
 

@@ -47,9 +47,25 @@ Copies the source drive pulse into captured qubit.pulses.pi_amp and pi2_amp, rep
 
 Analysis takes a 'Skip points' count (default 0) to drop leading low-gain sweep points before the cosine fit; raise it only if the first few points are distorted. A gain sweep spanning roughly two pi amplitudes captures at least a full oscillation; widen it if no full period is visible.
 
-## Point error bars
+## Reading the plots
 
-The live plot and Analyze draw one standard error of the mean (SEM) above and below each point with at least two retained shots. Run saves the mean IQ and the shot sums from the same completed rounds, after removing the ADC offset. Each error bar divides the sample standard deviation along the displayed IQ axis by the square root of the retained shot count. It shows the expected uncertainty of the point's mean, not the spread of single shots or round averages. It does not include uncertainty in the axis or the fit and does not weight the fit. Missing shot statistics leave a point without a bar. Files with mean IQ only, including calibration workflow files, still load and fit without point error bars.
+Both plots show the mean IQ projected along the principal direction of the IQ trace, in a.u.
+If the trace does not define a rotation, the plot uses the real component I.
+The projection is readout contrast, not a calibrated population.
+
+The live title shows the retained shots per point from completed rounds. It shows a range if the counts differ across points.
+Run saves the mean IQ and the shot sums of those same shots after removing the ADC offset.
+At each point, the error bar extends one standard error of the mean (SEM) above and below the point.
+SEM is the sample standard deviation along the displayed IQ axis divided by the square root of the retained shot count.
+It estimates uncertainty in the point mean, not the spread of individual shots or the variation between rounds.
+It does not include uncertainty in the axis or fit and does not weight the fit.
+A point with fewer than two retained shots or missing statistics has no bar.
+Files with mean IQ only, including calibration workflow files, still load and fit without point error bars.
+
+Analyze overlays the fitted cosine and marks the π and π/2 gains with their fit standard errors.
+The legend shows the fitter's R² for the included points, or marks it unavailable when undefined.
+R² compares the cosine residual with the variation of those points about their mean. Closer to 1 means a smaller relative residual.
+It is not a gain acceptance threshold or a measure of gate fidelity.
 
 ## Four starting situations
 

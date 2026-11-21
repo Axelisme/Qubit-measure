@@ -94,10 +94,13 @@ def shot_sums(
     The reducer borrows ADC-keyed float64 (points, reps, logical_reads, 2)
     arrays and accumulates (points, *axes) outer-product sums of kept shots.
     IQ NaNs in kept shots propagate. Corrected IQ uses the selected compiled
-    logical read's native offset (including the static PFB policy). Unsupported
-    ADC/read counts, edge counting, masks or additional axes raise ValueError.
-    The reducer rejects read-count changes and does not modify its input or
-    the program's compiled read counts.
+    logical read's native offset. For a static PFB, QICK must configure the
+    selected ADC's ro_config (including pfb_ch) for the current acquisition
+    before the reducer consumes a round; missing registers raise RuntimeError
+    at that point, not at reducer construction. Unsupported ADC/read counts,
+    edge counting, masks or additional axes raise ValueError. The reducer
+    rejects read-count changes and does not modify its input or the program's
+    compiled read counts.
     """
     if not axes:
         raise ValueError("axes must contain at least one read")

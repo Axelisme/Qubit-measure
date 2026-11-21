@@ -41,30 +41,57 @@ def test_iq_sem_leaves_missing_points_undefined_but_rejects_infinite_moments() -
 def test_iq_sem_clips_only_rounding_scale_negative_centered_sums() -> None:
     rounded = np.array([2, 2, 0, np.nextafter(2.0, 0.0), 0, 0])
     assert shot_uncertainty.iq_shot_sem(rounded, direction=(1, 0)) == 0
-    with pytest.raises(ValueError, match="negative centered"):
+    with pytest.raises(ValueError, match="centered"):
         shot_uncertainty.iq_shot_sem(
             np.array([2, 0, 0, 2, 4, 2]), direction=(0.5, -0.5)
         )
+
+
+@pytest.mark.parametrize(
+    "moments",
+    [
+        [2.0, 0.0, 4.0, 2.0, 0.0, 2.0],  # Q has a negative centered sum.
+        [2.0, 2.0, 2.0, 4.0, -1.0, 4.0],  # Centered cross sum -3 exceeds 2.
+    ],
+)
+def test_iq_sem_rejects_impossible_statistics_even_off_projection(
+    moments: list[float],
+) -> None:
+    with pytest.raises(ValueError, match="centered"):
+        shot_uncertainty.iq_shot_sem(np.array(moments), direction=(1, 0))
+
+
+def test_iq_sem_accepts_rounding_in_unprojected_statistics() -> None:
+    # Two shots (0, -2) and (2, -2) have zero Q variance and zero covariance.
+    moments = np.array(
+        [2, 2, -4, 4, np.nextafter(-4.0, -np.inf), np.nextafter(8.0, 0.0)]
+    )
+    assert shot_uncertainty.iq_shot_sem(moments, direction=(1, 0)) == pytest.approx(1)
+
+
+def test_iq_sem_keeps_large_finite_rank_one_moments_accurate() -> None:
+    # Shots (4e153, 4e153) and (1e154, 1e154). The raw sum squared and the
+    # product of centered diagonal sums overflow even though the SEM is finite.
+    moments = np.array([2, 1.4e154, 1.4e154, 1.16e308, 1.16e308, 1.16e308])
+    assert shot_uncertainty.iq_shot_sem(moments, direction=(1, 0)) == pytest.approx(
+        3e153
+    )
 
 
 def test_class_counts_give_binomial_sem_and_multinomial_cross_covariance() -> None:
     binary = shot_uncertainty.class_probability_covariance(
         np.array([1, 3], dtype=np.int64)
     )
-    np.testing.assert_allclose(np.sqrt(np.diag(binary)), [0.21650635094610965] * 2)
+    # A one-hot sample with three successes and one failure has sample SD 0.5.
+    np.testing.assert_allclose(np.sqrt(np.diag(binary)), [0.25, 0.25])
 
     # Identical fractions, but twice as many retained shots at the second point.
     counts = np.array([[2, 1, 1], [4, 2, 2], [0, 0, 0]], dtype=np.float64)
     covariance = shot_uncertainty.class_probability_covariance(counts)
-    expected = np.array(
-        [
-            [0.0625, -0.03125, -0.03125],
-            [-0.03125, 0.046875, -0.015625],
-            [-0.03125, -0.015625, 0.046875],
-        ]
-    )
-    np.testing.assert_allclose(covariance[0], expected)
-    np.testing.assert_allclose(covariance[1], expected / 2)
+    one_hot = np.eye(3)[[0, 0, 1, 2]]
+    np.testing.assert_allclose(covariance[0], np.cov(one_hot, rowvar=False) / 4)
+    doubled = np.repeat(one_hot, 2, axis=0)
+    np.testing.assert_allclose(covariance[1], np.cov(doubled, rowvar=False) / 8)
     assert np.isnan(covariance[2]).all()
 
 

@@ -45,6 +45,7 @@ from tests.experiment._grouped_layout_support import (
 from tests.experiment._optional_variables_support import (
     diagnostic_record,
     diagnostic_spec,
+    invalid_diagnostic_export_spec,
 )
 from tests.experiment._saving_support import SavingCfg, SavingCore, saving_figure
 
@@ -279,6 +280,50 @@ def test_artifact_data_projects_labber_without_losing_native_diagnostic(
     assert exported.data.name == "data"
     np.testing.assert_array_equal(exported.z, [1 + 2j, 3 - 4j])
     np.testing.assert_allclose(exported.axes[0].values, [1e-6, 2e-6])
+
+
+def test_artifact_save_isolates_invalid_unselected_variable(tmp_path: Path) -> None:
+    spec = invalid_diagnostic_export_spec()
+    metadata, layout, ledger = storage(tmp_path)
+    metadata = metadata.model_copy(update={"experiment": spec.tag})
+    source = replace(
+        diagnostic_record(present=True), metadata=metadata.model_dump(mode="json")
+    )
+    report = save_artifacts(
+        (
+            SaveArtifact(
+                ArtifactRef("run", "measurement_data"),
+                (
+                    DataItem.from_run(
+                        ArtifactKey("run", "measurement_data", "data"),
+                        source,
+                        spec=spec,
+                        comment="invalid excluded diagnostic",
+                    ),
+                    FigureItem(
+                        ArtifactKey("run", "measurement_data", "figure", "fit"),
+                        saving_figure(),
+                    ),
+                ),
+            ),
+        ),
+        layout=layout,
+        record=source,
+        ledger=ledger,
+        origin="notebook",
+    )
+
+    failed = [item for item in report.outputs if item.status == "failed"]
+    assert {item.output.format for item in failed} == {"data_h5", "labber"}
+    for item in failed:
+        assert item.error is not None
+        assert f"{spec.tag}: /vars/diagnostics: duplicate axis" in item.error
+        assert not item.output.path.exists()
+    figures = [item for item in report.outputs if item.output.format == "png"]
+    assert figures
+    for item in figures:
+        assert item.status == "saved", item.error
+        assert item.output.path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])

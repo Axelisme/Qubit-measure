@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-11-18
+**Last updated:** 2026-11-22，單一 Variable 的寫前檢查
 
 **讀者：** framework-dev。讀寫通用 HDF5 容器，或獨立轉出 Labber。
 
@@ -23,6 +23,12 @@
 同一 variable 的軸名稱不能重複。不同命名空間可以重用名稱。
 每個 var 的 `values` dataset 以 dimension scales 連到 `axes/<axis-name>`。
 數值陣列可以包含 NaN；JSON 不能包含 NaN 或 Infinity。
+
+從 `zcu_tools.datafile` 匯入 `validate_variable(variable)`，在不寫檔的情況下檢查單一 Variable。
+它與 writer 共用結構檢查：數值 dtype、rank 與軸數、合法且唯一的軸名，以及一維座標長度。
+Scalar 不帶軸。違規拋 `ValueError`，不改陣列。它不驗變數的外層 key、整份容器、Labber 網格、
+有限值、單位或統計語意，也不保證後續修改陣列後仍有效或寫檔成功。
+
 `json_text(document)` 不做 I/O，使用 writer 同一 encoder 驗證並編碼完整有限 JSON object。
 Caller 可在建立輸出目錄前使用它，非法值在任意深度都會 raise `ValueError`，原文件不變。
 

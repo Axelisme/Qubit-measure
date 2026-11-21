@@ -11,7 +11,7 @@ from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
-from zcu_tools.analysis.fitting import FitQuality, fit_rabi
+from zcu_tools.analysis.fitting import FitQuality, cosfunc, fit_rabi
 from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
@@ -45,6 +45,9 @@ from zcu_tools.utils.process import find_rotate_angle
 
 from zcu_lab.v2.support import live_errorbar
 
+_PULSE_GAIN_LABEL = "Pulse gain (a.u.)"
+_IQ_PROJECTION_LABEL = "IQ projection (a.u.)"
+
 
 @dataclass(frozen=True)
 class AmpRabiResult:
@@ -75,6 +78,7 @@ class AmpRabiAnalysis:
 
 
 def _rabi_rotation(signals: NDArray[np.complex128]) -> complex | None:
+    """Return the rotation aligning mean complex IQ with the real axis, or None."""
     try:
         angle = find_rotate_angle(signals)
     except ValueError:
@@ -85,6 +89,7 @@ def _rabi_rotation(signals: NDArray[np.complex128]) -> complex | None:
 def _project_real(
     signals: NDArray[np.complex128], rotation: complex | None
 ) -> NDArray[np.float64]:
+    """Return the real component after rotation, or the original I if absent."""
     return signals.real if rotation is None else (signals * rotation).real
 
 
@@ -94,13 +99,19 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 def _mean_iq(moments: NDArray[np.float64]) -> NDArray[np.complex128]:
-    # Counts remain in the moments for the SEM; decode only the mean here.
+    """Decode the mean complex IQ per gain from cumulative six-column shot sums."""
     return split_sums(moments)[1]
 
 
 def _contrast_with_sem(
     signals: NDArray[np.complex128], moments: NDArray[np.float64]
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return projected mean IQ and SEM from the matching six-column shot sums.
+
+    Both use the same direction (I when the rotation is undefined). Points
+    with fewer than two shots or missing sums have NaN SEM. Invalid moments
+    raise ValueError. Neither array is changed.
+    """
     rotation = _rabi_rotation(signals)
     direction = (1.0, 0.0) if rotation is None else (rotation.real, -rotation.imag)
     return _project_real(signals, rotation), iq_shot_sem(moments, direction=direction)
@@ -155,6 +166,11 @@ _MOMENT_COLUMNS = (0, 1, 2, 3, 4, 5)
 
 
 def _build_result(data: GroupedLoadData[AmpRabiCfg]) -> AmpRabiResult:
+    """Restore mean IQ with optional moments from the loaded native variables.
+
+    Reuse the loaded arrays. Present moments must share the mean's gain
+    coordinates and carry the declared column order, or raise ValueError.
+    """
     signal = data.variable("data")
     gains = signal.axes[0]
     moments = data.variables.get(DataVariable("iq_moments"))
@@ -206,14 +222,11 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         *,
         context: RunContext,
     ) -> AmpRabiResult:
-        """Measure Rabi oscillations versus qubit drive gain at fixed duration.
+        """Apply the configured reset and init pulse, sweep qubit drive gain at fixed duration, and read out.
 
-        Reset, apply the optional init pulse, play the gain-swept qubit
-        pulse, then read out. Return gains, offset-corrected mean complex IQ
-        and the moments of the same shots. Requires one integrated ADC read
-        per shot without masking. Show the real contrast and its shot SEM.
-        earlystop_snr checks the mean curve at completed-round boundaries.
-        None disables SNR early stop.
+        The configured readout must supply one integrated ADC read per shot without masking.
+        Show projected IQ and shot SEM and, if configured, check early-stop SNR after completed rounds.
+        Return gains, offset-corrected mean IQ and the moments of those same shots.
         """
         # 1. Quantize drive gains for rotation-amplitude calibration.
         cfg = deepcopy(cfg)
@@ -227,20 +240,23 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
         # 2. Monitor Rabi contrast as the rotation amplitude changes.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse gain (a.u.)", ylabel="Amplitude (a.u.)")
+        ax.set(xlabel=_PULSE_GAIN_LABEL, ylabel=_IQ_PROJECTION_LABEL)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
         viewer = live_errorbar(ax)
 
         @context.plots.on_plot_thread
         def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
-            """Refresh contrast and shot SEM from the cumulative (gain, 6) sums."""
+            """Update the live trace, shot SEM and retained counts; return changed artists."""
             contrast, sem = _contrast_with_sem(_mean_iq(moments), moments)
-            return viewer.set(gains, contrast, sem)
+            counts = moments[:, 0]
+            low, high = counts.min(), counts.max()
+            retained = f"{low:.0f}" if low == high else f"{low:.0f}–{high:.0f}"
+            title = ax.set_title(f"Retained shots / point: {retained}")
+            return (*viewer.set(gains, contrast, sem), title)
 
         fig.show()
         moments_buffer = SignalBuffer(
-            (len(gains), 6), dtype=np.float64, on_update=update
+            (len(gains), len(_MOMENT_COLUMNS)), dtype=np.float64, on_update=update
         )
 
         # 3. Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
@@ -312,39 +328,35 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             init_phase = 180.0
 
         fit = fit_rabi(gains, real_signals, decay=False, init_phase=init_phase)
-        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, y_fit = (
-            fit.pi_x,
-            fit.pi_x_err,
-            fit.pi2_x,
-            fit.pi2_x_err,
-            fit.curve,
-        )
+        pi_amp, pi_amp_err = fit.pi_x, fit.pi_x_err
+        pi2_amp, pi2_amp_err = fit.pi2_x, fit.pi2_x_err
 
         # 2. Assess the oscillation fit and uncertainty of the calibrated rotation gains.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         if sem is None:
-            ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
+            ax.plot(gains, real_signals, ".-", label="Measured", markersize=5)
         else:
             ax.errorbar(
-                gains, real_signals, yerr=sem, label="meas", fmt="o-", markersize=3
+                gains, real_signals, yerr=sem, label="Measured", fmt=".-", markersize=5
             )
-        ax.plot(gains, y_fit, label="fit")
+        fit_gains = np.linspace(gains.min(), gains.max(), 200)
+        r2 = fit.quality.r2
+        fit_label = "Fit (R² unavailable)" if r2 is None else f"Fit (R² = {r2:.3f})"
+        ax.plot(fit_gains, cosfunc(fit_gains, *fit.params), "-", label=fit_label)
         ax.axvline(
-            pi_amp, ls="--", c="red", label=f"pi = {pi_amp:.3g} ± {pi_amp_err:.2g}"
+            pi_amp, ls="--", c="red", label=f"π = {pi_amp:.3g} ± {pi_amp_err:.2g} a.u."
         )
         ax.axvspan(pi_amp - pi_amp_err, pi_amp + pi_amp_err, color="red", alpha=0.2)
         ax.axvline(
             pi2_amp,
             ls="--",
             c="red",
-            label=f"pi/2 = {pi2_amp:.3g} ± {pi2_amp_err:.2g}",
+            label=f"π/2 = {pi2_amp:.3g} ± {pi2_amp_err:.2g} a.u.",
         )
         ax.axvspan(pi2_amp - pi2_amp_err, pi2_amp + pi2_amp_err, color="red", alpha=0.2)
-        ax.set_xlabel("Pulse gain (a.u.)")
-        ax.set_ylabel("Signal Real (a.u.)")
-        ax.legend(loc=4)
-        ax.grid(True)
+        ax.set(xlabel=_PULSE_GAIN_LABEL, ylabel=_IQ_PROJECTION_LABEL)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
 
         fig.tight_layout()
 

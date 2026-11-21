@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-22，Run 頁 Defaults
+**Last updated:** 2026-11-22，Run 頁 Defaults 與 Analysis 來源
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -71,7 +71,10 @@ cleanup together. Data activation refreshes previews before switching pages,
 then reflows the visible gallery. The tab's overridable public figure reader
 remains the preview source; each failed pane read leaves only that preview empty.
 Figure/container methods on the tab delegate to this owner. Results and Save
-policy stay with their existing owners.
+policy stay with their existing owners. When Primary has a result, the left
+Analysis panel shows the adapter name and the published Run ID if available.
+It clears that source label when the result is cleared. The label is separate
+from the adapter summary lines shared with MCP.
 
 Run, Analysis, Post-Analysis and Workflow share a two-column tiled layout with
 up to four figures per page. Larger sets show Previous page and Next page controls

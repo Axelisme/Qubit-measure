@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-22，Run 頁 Defaults 與 Analyze 摘要
+**Last updated:** 2026-11-22，Analyze 結果來源與摘要
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -43,7 +43,10 @@ a separate task.
 
 Both primary declarations accept `summary_lines(source) -> tuple[str, ...]`.
 Use the retained RunRecord to write ordered operator text. Return `()` if no
-lines apply. Keep estimates and recipe fields in the native analysis result.
+lines apply. GUI and MCP display the same lines. The GUI shows the completed
+result's adapter name and any recorded Run ID separately. Neither source label
+nor adapter lines belong in the native analysis summary, which keeps estimates
+and recipe fields.
 
 The private primary-stage base hides only Interactive's state type S.
 Interactive passes its typed plugin to the host's generic SessionFactory, then

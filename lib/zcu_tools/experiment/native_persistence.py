@@ -20,9 +20,9 @@ from zcu_tools.datafile import (
     load,
     read_doc,
     save,
+    validate_variable,
     write_labber,
 )
-from zcu_tools.datafile.container_nodes import validate_variable
 
 from .axes_spec import (
     AxesSpec,
@@ -160,10 +160,13 @@ def prepare_run_data(
     """Prepare SI variables/cfg and raw Labber comment from one typed record.
 
     cfg must be present and match spec.cfg_type; result must match result_type.
-    Validate shapes/dtypes and the grouped result validator. Preserve the spec's
-    Labber layout without adding common-grid restrictions. Metadata may be absent
-    during preparation; native saving requires it. Bad inputs raise TypeError,
-    ValueError or AttributeError. No I/O, live capture or source mutation occurs.
+    Run the grouped result validator, then validate every mapped SI variable's
+    structure with the datafile validator before selecting any Labber subset.
+    Variable errors identify the experiment tag and /vars/<name>. Preserve the
+    declared Labber layout without checking common-grid compatibility here.
+    Metadata may be absent during preparation; native saving requires it.
+    Bad inputs raise TypeError, ValueError or AttributeError. No I/O, live
+    capture or source mutation occurs.
     """
     if source.cfg is None:
         raise ValueError("RunRecord.cfg is None; cannot save without configuration")
@@ -220,10 +223,12 @@ def save_labber(
     """Export a record to the caller's Labber-normalized local path.
 
     cfg must be present. comment is appended to the cfg JSON envelope; tag
-    overrides spec.tag. Grouped exports follow spec.labber_variables and
-    spec.labber_layout, requiring a common grid unless independent is declared.
-    Invalid arrays or cfg raise ValueError/TypeError; existing paths raise FileExistsError and I/O
-    errors propagate. No native file, path reservation or live capture occurs.
+    overrides spec.tag. Validate all present mapped SI variables, even those
+    excluded from Labber. Then apply spec.labber_variables and spec.labber_layout
+    for grouped exports, requiring a common grid unless independent is declared.
+    Invalid arrays or cfg raise ValueError/TypeError; existing paths raise
+    FileExistsError. I/O errors propagate. No native file, path reservation
+    or live capture occurs.
     """
     prepared = prepare_run_data(source, spec=spec, comment=comment or "")
     write_labber(

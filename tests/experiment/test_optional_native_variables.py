@@ -6,11 +6,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.datafile import load
-from zcu_tools.experiment import restore_run, save_run
+from zcu_tools.experiment import restore_run, save_labber, save_run
 
 from tests.experiment._optional_variables_support import (
     diagnostic_record,
     diagnostic_spec,
+    invalid_diagnostic_export_spec,
 )
 
 
@@ -36,6 +37,17 @@ def test_optional_variable_round_trip_and_resave(
         assert restored.record.result.diagnostics is None
     save_run(restored.record, path, spec=spec, replace=True)
     assert set(load(path).vars) == set(keys)
+
+
+def test_save_labber_rejects_invalid_unselected_variable(tmp_path: Path) -> None:
+    destination = tmp_path / "invalid.hdf5"
+    spec = invalid_diagnostic_export_spec()
+    with pytest.raises(
+        ValueError,
+        match=r"test/optional-diagnostics: /vars/diagnostics: duplicate axis",
+    ):
+        save_labber(diagnostic_record(present=True), destination, spec=spec)
+    assert not list(tmp_path.iterdir())
 
 
 def test_grouped_declaration_requires_at_least_one_required_variable() -> None:

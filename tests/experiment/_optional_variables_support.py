@@ -1,6 +1,6 @@
 """Synthetic sweep with an optional diagnostic on a separate grid."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from zcu_tools.cfg_model import ConfigBase
@@ -57,6 +57,21 @@ def diagnostic_spec() -> GroupedAxesSpec[DiagnosticResult, DiagnosticCfg]:
         cfg_type=DiagnosticCfg,
         tag="test/optional-diagnostics",
         result_builder=build_diagnostic,
+    )
+
+
+def invalid_diagnostic_export_spec() -> GroupedAxesSpec[
+    DiagnosticResult, DiagnosticCfg
+]:
+    """Select data for export but keep a present diagnostic with duplicate axes."""
+    spec = diagnostic_spec()
+    data, diagnostic = spec.variables
+    statistic, points = diagnostic.axes
+    repeated_label = replace(statistic, label=points.label)
+    return replace(
+        spec,
+        variables=(data, replace(diagnostic, axes=(repeated_label, points))),
+        labber_variables=("data",),
     )
 
 

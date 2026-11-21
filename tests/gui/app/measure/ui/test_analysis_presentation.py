@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication
+from zcu_tools.datafile import load, save
 from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis
@@ -13,7 +14,9 @@ from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.context_types import EntryRequest
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui._qt_waits import qt_until
@@ -25,6 +28,7 @@ from tests.gui.app.measure._native_save_support import (
     PaneParams,
 )
 from tests.gui.app.measure.remote._form_rpc import FormRpc
+from tests.gui.app.measure.ui._qt_interactions import modal_action
 from tests.mcp.measure._support import make_client
 
 
@@ -55,7 +59,9 @@ def live_registry() -> Registry:
     return registry
 
 
-def _native_sources(tmp_path: Path, session: NativeSaveSession) -> tuple[Path, Path]:
+def _native_sources(
+    tmp_path: Path, session: NativeSaveSession
+) -> tuple[Path, Path, Path]:
     source_path = tmp_path / "source.h5"
     quiet_path = tmp_path / "summary-free.h5"
     for path, cfg in ((source_path, SavingCfg()), (quiet_path, SavingCfg(gain=0.0))):
@@ -65,7 +71,12 @@ def _native_sources(tmp_path: Path, session: NativeSaveSession) -> tuple[Path, P
             metadata=session.metadata.model_dump(mode="json"),
         )
         save_run(source, path, spec=SavingCore.AXES_SPEC)
-    return source_path, quiet_path
+    # Historical metadata can omit unused fields that new Run saves require.
+    container = load(quiet_path)
+    del container.docs["metadata"]["run_id"]
+    no_id_path = tmp_path / "without-run-id.h5"
+    save(no_id_path, container)
+    return source_path, quiet_path, no_id_path
 
 
 def _rpc_result(
@@ -76,27 +87,15 @@ def _rpc_result(
     return reply["result"]
 
 
-def test_analysis_shows_mcp_summary_lines_for_the_same_run(
-    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+def _check_mcp_summary(
+    ctrl: Controller,
+    tab_id: str,
+    ui: ComponentDriver,
     tmp_path: Path,
-    qapp: QApplication,
+    run_id: str,
+    quiet_path: Path,
 ) -> None:
-    session, ctrl, window, tab_id = live_ui
-    source_path, quiet_path = _native_sources(tmp_path, session)
-    ctrl.run_analyze_control.load_tab_result(tab_id, str(source_path))
-    window.show()
-    qapp.processEvents()
-    ui = ComponentDriver(window)
-    ui.screenshot(tmp_path / "01-run.png")
-    ui.select_tab("Analysis")
-    ui.screenshot(tmp_path / "02-analysis-ready.png")
-    ui.press_key(Qt.Key.Key_Space, "Analyze")
-    qt_until(
-        lambda: ui.observe(object_name="analysis.summary_lines").visible,
-        label="local analysis summary visible",
-    )
-    ui.screenshot(tmp_path / "03-local-analysis.png")
-
+    """Compare GUI and MCP summaries, then release control for the next UI step."""
     remote = RemoteControlAdapter(ctrl, ControlOptions(port=0), QtOwnerScheduler())
     with ThreadPoolExecutor() as worker:
         connected = worker.submit(FormRpc, remote)
@@ -110,19 +109,20 @@ def test_analysis_shows_mcp_summary_lines_for_the_same_run(
             completed = worker.submit(client.call, "tab_analyze", {"tab": tab_id})
             qt_until(completed.done)
             reply = completed.result()
-            ui.screenshot(tmp_path / "04-mcp-analysis.png")
-            assert reply.data["status"] == "finished", reply.data
+            assert reply.data["status"] == "finished", reply.data.get("error")
             primary = reply.data["analysis"]["primary"]
-            assert primary["summary"] == {"mean": 3.0}
             presentation = primary["presentation"]
-            assert presentation["run_id"] == session.metadata.run_id
+            assert presentation["run_id"] == run_id
+            ui.screenshot(tmp_path / "03-mcp-analysis.png")
+            assert primary["summary"] == {"mean": 3.0}
             assert presentation.get("summary_lines") == [
                 "Source gain: 1",
                 "Applied setting: 0 MHz",
             ]
+            summary = "analysis.summary_lines"
             assert (
-                ui.observe(object_name="analysis.summary_lines").text.splitlines()
-                == (presentation["summary_lines"])
+                ui.observe(object_name=summary).text.splitlines()
+                == presentation["summary_lines"]
             )
 
             loaded = worker.submit(
@@ -133,19 +133,79 @@ def test_analysis_shows_mcp_summary_lines_for_the_same_run(
             )
             qt_until(loaded.done)
             assert loaded.result()["data_path"] == str(quiet_path)
-            ui.screenshot(tmp_path / "05-loaded-summary-free.png")
-            assert not ui.observe(object_name="analysis.summary_lines").visible
-
+            assert not ui.observe(object_name=summary).visible
             analyzed = worker.submit(client.call, "tab_analyze", {"tab": tab_id})
             qt_until(analyzed.done)
-            quiet_reply = analyzed.result()
-            ui.screenshot(tmp_path / "06-analyzed-summary-free.png")
-            assert quiet_reply.data["status"] == "finished", quiet_reply.data
-            assert (
-                "summary_lines"
-                not in quiet_reply.data["analysis"]["primary"]["presentation"]
-            )
-            assert not ui.observe(object_name="analysis.summary_lines").visible
+            quiet = analyzed.result().data
+            assert quiet["status"] == "finished", quiet.get("error")
+            assert "summary_lines" not in quiet["analysis"]["primary"]["presentation"]
+            ui.screenshot(tmp_path / "03b-mcp-summary-free.png")
+            assert not ui.observe(object_name=summary).visible
+            released = worker.submit(rpc.call, "control.release", {})
+            qt_until(released.done)
+            assert released.result()["ok"]
         finally:
             client.context.session.close()
             remote.on_client_close(rpc.link, on_owner_thread=True)
+
+
+def test_analysis_shows_source_and_mcp_summary_lines_for_the_same_run(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+    tmp_path: Path,
+    qapp: QApplication,
+) -> None:
+    session, ctrl, window, tab_id = live_ui
+    source_path, quiet_path, no_id_path = _native_sources(tmp_path, session)
+    ctrl.entry_control.open_entry(EntryRequest("original"))
+    ctrl.run_analyze_control.load_tab_result(tab_id, str(source_path))
+    window.show()
+    qapp.processEvents()
+    ui = ComponentDriver(window)
+    ui.select_tab("Analysis")
+    ui.screenshot(tmp_path / "01-analysis-ready.png")
+    source = "analysis.source"
+    summary = "analysis.summary_lines"
+    assert not ui.observe(object_name=source).visible
+    assert not ui.observe(object_name=summary).visible
+    ui.press_key(Qt.Key.Key_Space, "Analyze")
+    qt_until(
+        lambda: ui.observe(object_name=summary).visible,
+        label="local analysis summary visible",
+    )
+    ui.screenshot(tmp_path / "02-local-analysis.png")
+    assert ui.observe(object_name=source).visible
+    assert ui.observe(object_name=source).text.splitlines() == [
+        "Source: saving",
+        f"Run ID: {session.metadata.run_id}",
+    ]
+
+    _check_mcp_summary(ctrl, tab_id, ui, tmp_path, session.metadata.run_id, quiet_path)
+
+    ui.select_tab("Data")
+    assert ui.observe("Load Data").enabled
+    modal_action(
+        qapp,
+        lambda: ui.click("Load Data"),
+        [
+            (
+                RunLoadDialog,
+                lambda dialog: ComponentDriver(dialog).choose_file(
+                    "File…", no_id_path, evidence=tmp_path / "04-file-picker.png"
+                ),
+            )
+        ],
+    )
+    assert ui.status().text == f"Loaded data from {no_id_path}"
+    ui.select_tab("Analysis")
+    ui.screenshot(tmp_path / "05-source-replaced.png")
+    assert not ui.observe(object_name=source).visible
+    assert not ui.observe(object_name=summary).visible
+
+    ui.press_key(Qt.Key.Key_Space, "Analyze")
+    qt_until(
+        lambda: ui.observe(object_name=source).visible,
+        label="analysis source visible without run ID",
+    )
+    ui.screenshot(tmp_path / "06-no-run-id.png")
+    assert ui.observe(object_name=source).text == "Source: saving"
+    assert not ui.observe(object_name=summary).visible

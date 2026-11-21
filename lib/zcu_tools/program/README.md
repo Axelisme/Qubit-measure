@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-21，零輪停止的責任分界
+**Last updated:** 2026-11-22，校正 IQ 矩與 static PFB 前置條件
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -171,8 +171,9 @@ g/e/other; linear emits g/e; centroid3 emits g/e/f. Classification boundaries ma
 `v2.IQ(read, offset_corrected=True)` subtracts the same QICK DC offset from I
 and Q after normalization, before forming the six quadratic components.
 Use it as the only axis for one Pulse or single-tone Mux read, with one ADC
-and one integrated read per shot. Static PFB correction uses the registers
-that QICK sets for the active acquire. Edge counting, extra axes, cubic
+and one integrated read per shot. For a static PFB, QICK must configure the
+ADC registers for the active acquire. If they are missing when the reducer
+consumes a round, it raises `RuntimeError`. Edge counting, extra axes, cubic
 moments and shot masks are rejected. Other axes and native `acquire` are unchanged.
 
 Timeline read labels use emit tags, falling back to module names for untagged
