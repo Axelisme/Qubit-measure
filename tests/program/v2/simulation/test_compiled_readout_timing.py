@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 import pytest
-from qick.asm_v2 import QickSweep1D
+from qick.asm_v2 import QickSweep1D, Waveform
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
@@ -380,6 +380,47 @@ def test_raw_adc_frequency_folds_without_borrowing_carrier_or_matching_config():
         read = request(prog, env).materialize_point(0).readouts[0]
         assert read.frequency_mhz == pytest.approx((-0.2 * dds_mhz,), abs=1e-5)
         assert read.frequency_images == (DDSCongruence(period_ghz=dds_mhz / 1000),)
+    finally:
+        env.devices.close_all_devices()
+
+
+def test_native_raw_adc_wmem_wave_folds_without_borrowing_the_carrier():
+    soccfg = load_soccfg(n_gens=2, n_readouts=1)
+    dds_mhz = soccfg["readouts"][0]["f_dds"]
+    carrier_mhz = 2.8 * dds_mhz
+
+    def initialize(p):
+        word = p.soccfg.freq2reg_adc(carrier_mhz, ro_ch=0)
+        if p.FLIP_DOWNCONVERSION:
+            word = -word
+        p.add_raw_pulse("raw_adc", [Waveform(word, 2**30, 0, 0, 3, 0)], ro_ch=0)
+        p.add_pulse(
+            0, "carrier", style="const", freq=carrier_mhz, phase=0, gain=0.1, length=0.3
+        )
+
+    def body(p):
+        p.send_readoutconfig(0, "raw_adc", t=0)
+        p.pulse(0, "carrier", t=0)
+
+    prog, env = program(body, initialize, reps=1, config_time=None, soccfg=soccfg)
+    try:
+        read = request(prog, env).materialize_point(0).readouts[0]
+        assert read.frequency_mhz == pytest.approx((-0.2 * dds_mhz,), abs=1e-5)
+        assert read.phase_deg == (90,)
+        assert read.frequency_images == (DDSCongruence(period_ghz=dds_mhz / 1000),)
+    finally:
+        env.devices.close_all_devices()
+
+
+def test_unused_raw_dac_library_entry_does_not_block_named_readout():
+    def initialize(p):
+        p.add_raw_pulse("dummypulse", ["dummy"], gen_ch=0)
+
+    prog, env = program(lambda p: p.pulse(0, "p", t=0), initialize, reps=1)
+    try:
+        read = request(prog, env).materialize_point(0).readouts[0]
+        assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
+        assert read.frequency_images == ExplicitImage()
     finally:
         env.devices.close_all_devices()
 

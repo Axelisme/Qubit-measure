@@ -382,8 +382,8 @@ class ReadoutWindow:
             PointTimeline windows populate this even when all reads use one route.
             gen_ch retains the final route for the fixed ADC shape descriptor.
         frequency_images: Frequency meaning per trigger in emission order.
-            A single ExplicitImage applies to all reads. A tuple carries
-            per-trigger meaning for a point with raw DDS frequencies.
+            A single ExplicitImage applies to all reads. Otherwise the tuple
+            must contain one image per trigger.
     """
 
     channel: int
@@ -480,8 +480,8 @@ class ReadoutSlot:
     phase_deg: Demodulation phase per trigger, relative to execution zero.
     generator_channels: int64 generator route per trigger.
     frequency_images: Meaning of each frequency in (points, reads) order.
-        A single ExplicitImage applies to every trigger; otherwise each trigger
-        has its own ExplicitImage or DDSCongruence.
+        A single ExplicitImage applies to every trigger. Otherwise the outer
+        tuple has one row per point and each row has one image per read.
     """
 
     channel: int
@@ -574,7 +574,7 @@ def _check_tick_scalar(ticks: int) -> None:
     _check_int64(int(ticks))
 
 
-def _validate_window_times(base: TimeBase, window: ReadoutWindow) -> None:
+def _validate_window_layout(base: TimeBase, window: ReadoutWindow) -> None:
     base.validate_ticks(window.sample_period_ticks)
     if window.sample_period_ticks <= 0:
         raise ValueError("ADC sample period must be positive")
@@ -583,9 +583,12 @@ def _validate_window_times(base: TimeBase, window: ReadoutWindow) -> None:
     for start in window.trigger_ticks:
         base.validate_ticks(start)
         base.validate_ticks(int(start) + duration)
+    images = window.frequency_images
+    if isinstance(images, tuple) and len(images) != window.reads:
+        raise ValueError("window frequency_images must contain one image per trigger")
 
 
-def _validate_template_times(base: TimeBase, template: TimelineTemplate) -> None:
+def _validate_template_layout(base: TimeBase, template: TimelineTemplate) -> None:
     size = len(template.points)
     base.validate_ticks(template.duration_ticks)
     if template.duration_ticks.shape != (size,):
@@ -615,6 +618,12 @@ def _validate_template_times(base: TimeBase, template: TimelineTemplate) -> None
         if readout.trigger_ticks.ndim != 2 or readout.trigger_ticks.shape[0] != size:
             raise ValueError("trigger time shape must be (points, reads)")
         base.validate_ticks(readout.trigger_ticks + duration)
+        images = readout.frequency_images
+        if isinstance(images, tuple) and (
+            len(images) != size
+            or any(len(row) != readout.trigger_ticks.shape[1] for row in images)
+        ):
+            raise ValueError("slot frequency_images shape must be (points, reads)")
 
 
 @dataclass(frozen=True)
@@ -675,8 +684,8 @@ class AcquireRequest:
     root_seed, sequence and rng_version are private sampling metadata, not
     normal GUI/MCP metadata.
     Construction rejects noninteger scalar/array times with TypeError, time
-    array shape mismatches, empty templates, negative body durations or
-    nonpositive sample periods with ValueError, and
+    array or frequency image shape mismatches, empty templates, negative body
+    durations or nonpositive sample periods with ValueError, and
     times or derived event/ADC/envelope ends outside TimeBase bounds with
     OverflowError. Arrays are borrowed and must not be mutated during use.
     """
@@ -709,9 +718,9 @@ class AcquireRequest:
         if self.relax_delay_ticks < 0:
             raise ValueError("relax delay must be nonnegative")
         for window in self.readouts:
-            _validate_window_times(self.time_base, window)
+            _validate_window_layout(self.time_base, window)
         for template in self.templates:
-            _validate_template_times(self.time_base, template)
+            _validate_template_layout(self.time_base, template)
 
     def materialize_point(self, point: int) -> PointTimeline:
         """Expand a flat C-order point into detached diagnostic controls.

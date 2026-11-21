@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from qick.asm_v2 import QickParam
 
 from ..base import MyProgramV2
 from ..ir.instructions import ArithInst, DivInst, RegWriteInst, TestInst, TimeInst
@@ -65,12 +66,12 @@ def readout_references(
     shape = tuple(point_loops.values())
     references = {}
     for name, pulse in prog.pulses.items():
-        if pulse.ro_chs is None:
+        if not pulse.ro_chs or "freq" not in prog.list_pulse_params(name):
             continue
-        frequency = pulse.params["freq"].get_rounded()
-        values = np.asarray(
-            frequency.to_array(point_loops, all_loops=True), dtype=np.float64
-        )
+        frequency = prog.get_pulse_param(name, "freq")
+        if isinstance(frequency, QickParam):
+            frequency = frequency.to_array(point_loops, all_loops=True)
+        values = np.asarray(frequency, dtype=np.float64)
         gen = pulse.params.get("gen_ch")
         if not prog.ABSOLUTE_FREQS and gen is not None:
             values = values + float(

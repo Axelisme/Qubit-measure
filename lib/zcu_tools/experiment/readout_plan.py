@@ -587,7 +587,8 @@ def logical_event_contents(
     deduplication and phases. Projective plans use point-local contents with
     identity inverse maps. Pass a partition previously classified from the same
     template, drive and time base, or let this function classify with defaults.
-    No densities or ADC responses are constructed.
+    Receiver-only partitions cannot enter the joint terminal/projective path;
+    they raise ValueError. No densities or ADC responses are constructed.
     """
     if partition is None:
         partition = classify_readout(template, drive, memo, time_base=time_base)

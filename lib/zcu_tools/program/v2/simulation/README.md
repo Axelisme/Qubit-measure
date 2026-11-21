@@ -147,9 +147,10 @@ Runtime readout WPORT commands are instantaneous config updates.
 Each readout channel's FIFO uses the maximum of the command timestamp and its
 previous effective time, without
 wave duration or pipeline delays. Each read uses the last update effective at its
-window start. A different frequency or phase inside the open window raises before
-request construction; an equal update is accepted. Missing start-time config also
-raises. Shot-local configuration writes must supply every read on that port and
+window start. An update inside the open window raises before request construction
+if it changes the DDS frequency word or phase word. The comparison uses hardware
+words, not the named physical frequency image. An equal-word update is accepted.
+Missing start-time config also raises. Shot-local configuration writes must supply every read on that port and
 drain before the next shot. A port configured only in the prologue can remain
 constant. A read cannot use a prologue or previous-shot config once its port is
 mutable in the shot, even when later updates have equal values. Pending FIFO

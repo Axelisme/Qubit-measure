@@ -120,6 +120,30 @@ def template_request():
     )
 
 
+def test_request_rejects_fixed_frequency_images_not_aligned_with_triggers():
+    request = template_request()
+    window = replace(
+        request.readouts[0], frequency_images=(simulation.ExplicitImage(),)
+    )
+
+    with pytest.raises(ValueError, match="frequency_images.*trigger"):
+        replace(request, readouts=(window,))
+
+
+@pytest.mark.parametrize("row_lengths", [(2,), (2, 1)], ids=["points", "reads"])
+def test_request_rejects_template_frequency_images_not_aligned_with_points_and_reads(
+    row_lengths: tuple[int, ...],
+):
+    request = template_request()
+    first, other = request.templates
+    images = tuple((simulation.ExplicitImage(),) * size for size in row_lengths)
+    slot = replace(first.readouts[0], frequency_images=images)
+    template = replace(first, readouts=(slot,))
+
+    with pytest.raises(ValueError, match=r"frequency_images.*\(points, reads\)"):
+        replace(request, templates=(template, other))
+
+
 @pytest.mark.parametrize("name", ["", "   "])
 def test_charge_requirement_rejects_empty_diagnostic_name(name):
     with pytest.raises(ValueError, match="name"):
