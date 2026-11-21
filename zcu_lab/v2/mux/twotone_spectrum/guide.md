@@ -72,9 +72,10 @@ Analyze center marker sits on a resolved peak or dip. Compare the reported
 linewidth with the scan spacing and span before using the center as the next
 drive frequency.
 
-Live points show a principal-axis projection of mean IQ. Analyze fits the
-same projection after subtracting its estimated background. Neither view is
-a calibrated population. R² measures explained variation and normalized
+Live points and the Lorentzian analysis show the magnitude of mean IQ after
+subtracting its background. Sinc analysis uses a signed principal-axis
+projection of that background-subtracted IQ to distinguish the sidelobes.
+Neither view is a calibrated population. R² measures explained variation and normalized
 residual RMS measures mismatch relative to the signal range. The ± values
 belong to the fitted parameters. This scan locates a spectral feature, so it
 does not show per-point shot SEM.

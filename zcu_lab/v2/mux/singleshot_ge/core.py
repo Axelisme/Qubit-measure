@@ -390,7 +390,7 @@ def _mark_ge_fit(ax: Axes, fit: GEAnalysis) -> None:
                 )
                 parts.append(f"{name}: R² {r2}, normalized RMS {rms}")
         if parts:
-            title += "\n" + " · ".join(parts)
+            title += "\n" + "\n".join(parts)
     ax.set_title(title, fontsize=10)
 
 

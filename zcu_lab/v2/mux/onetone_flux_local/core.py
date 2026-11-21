@@ -188,7 +188,7 @@ def _plot_flux_maps_and_make_updater(
         )
         heat_ax.set(xlabel=f"DC bias ({unit})", ylabel=rf_label)
         heat_ax.grid(False)
-        line_ax.set(xlabel=rf_label, ylabel=iq_label)
+        line_ax.set(xlabel="Readout RF (MHz)", ylabel=iq_label)
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         heatmap = live_heatmap(heat_ax, uniform=False)
         fig.colorbar(heat_ax.images[0], ax=heat_ax, label=iq_label)
