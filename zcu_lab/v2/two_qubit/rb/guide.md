@@ -66,4 +66,4 @@ saved = exp.save_run(point_view, source=record)
 
 ## Calibration order and field units
 
-Calibrate Xπ/2 and Xπ with Rabi and the mux timing with Lookback. Tune mux frequencies and gains with mux Onetone before GE and GE Post. Locate the two-line CZ with conditional spectroscopy and chevron, then measure Local Z. Check the matching pulse slots and corrections under [Before run](#before-run).
+Calibrate Xπ/2 and Xπ with Rabi and the mux timing with Lookback. Tune mux frequencies and gains with mux Onetone before GE and GE Post. Locate the two-line CZ with conditional spectroscopy and chevron, then measure Local Z. Check the matching pulse slots and corrections under [Before run](#before-run). The [expanded pulse and readout field reference](guide_heralded.md#expanded-pulse-and-readout-fields) applies to both RB Forms.

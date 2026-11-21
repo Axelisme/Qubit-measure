@@ -4,6 +4,14 @@
 
 Select `two_qubit/rb_heralded`. Use the calibrated point, bindings, pulses and Local Z pair in [Before run](guide.md#before-run). The Form fields and their initial values are the same as in ordinary RB except for Reset. Leave Reset blank to omit preparation, or select an ordinary reset. Heralded RB always performs its own herald read and does not accept a herald reset module. Open and Defaults reload the captured settings. Refresh keeps the draft and checks it against the new capture.
 
+## Expanded pulse and readout fields
+
+Frequency and Mixer freq are absolute frequencies in MHz, not offsets from the mixer. Gain is a fraction of DAC full scale; Phase is in degrees. Gen ch selects a DAC generator, NQZ its Nyquist zone, and Ro ch selects an ADC channel. Tone order in the saved Mux readout, not ADC channel order, determines the positions used by the bound qubits. Keep the waveform, channel routing and mixer settings from the calibrations. A blank drive Mixer freq leaves it unspecified.
+
+Pulse Length is the envelope duration. Pre-delay and Post-delay wait before and after that pulse. In Mux readout, Length is the readout pulse duration and RO length is the ADC integration window. Pre-delay sets when the DAC pulse starts and Trig offset sets when the ADC window starts, both from the start of the readout step. All these times are in µs. A tone Label is an optional display name, not a qubit binding.
+
+Use GE and GE Post for each tone's circle classifier. The G and E centers are complex IQ coordinates in normalized ADC units (integrated ADC value divided by integration length, without offset subtraction). Radius uses the same units. The classifier picks the closer center if the distance is less than Radius. Equal distances or neither center within Radius give other. The optional confusion matrix records calibration results; RB does not use it to correct counts.
+
 ## Shot sequence
 
 Each shot uses optional reset → joint herald readout → random Clifford prefix → recovery Clifford → joint terminal readout. Both reads use the same Mux readout, timing and classifiers. Both qubit tones need calibrated circle centers and radii from GE and GE Post. Repeat those calibrations after changing readout settings.
