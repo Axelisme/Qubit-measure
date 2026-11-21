@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-18, round settings in debug capture
+**Last updated:** 2026-11-21, receiver flight time in readout planning
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -70,7 +70,7 @@ analysis setup and file budget are described in the
 
 ## Complete timelines
 
-`plan_template(settings, snapshot, template, *, time_base, readout_kind="pulse")` returns a `SingleFluxoniumPlan`.
+`plan_template(settings, snapshot, template, *, time_base, readout_kind="pulse", receiver_delays_ns=None)` returns a `SingleFluxoniumPlan`.
 `readout_kind="mux"` accepts coherent terminal tones on the same physical cavity.
 A null or omitted `settings.flux_line` keeps flux fixed at the live DC value.
 It binds no fast-flux generator and rejects foreign controls.
@@ -104,9 +104,9 @@ The planner never forces the endpoint back to DC.
 A nonterminal readout block with an ADC trigger causes one projective read at
 its pulse start. Repeated triggers on that block share one projection and CTMC
 path. The shared [readout planner](../../../experiment/README.md#explicit-simulation-environments)
-binds triggers from this block's start until the next block starts, including
-ringdown after pulse end. The last nonterminal sample must precede the next
-block start; violations name the block and trigger.
+uses each receiver's calibrated flight time to pair its window with intersecting
+block intervals, including ringdown after pulse end. The last intersecting
+block owns the window; its start is unchanged.
 `SingleFluxoniumPlan.read_events` retains projective blocks followed by
 terminal, with common-origin phases and channel-local grids. An unobserved
 terminal block has empty grids but still ends evolution and contributes its

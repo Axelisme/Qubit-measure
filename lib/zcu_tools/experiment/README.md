@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-21，讀出 block 到達時間、明示頻率與 receiver-only event
+**Last updated:** 2026-11-21，ADC 視窗按裝置時間配對
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -82,16 +82,19 @@ settings or circuit physics. `drive_track` detaches microwave slots with the
 same support, carrier-phase and envelope semantics across the three environments.
 `classify_readout` separates terminal blocks, triggered nonterminal projective
 reads and untriggered cavity drives at each point. Projective reads group the
-coherent tones and bound receiver triggers at one projection time. A block owns
-triggers from its start until the next block start, including ringdown after
-pulse end. By default, nonterminal sampling must finish before the next block
-starts. When the environment supplies receiver flight times, the planner includes
-later pulses that reach a receiver by its last sample in that receiver's event.
+coherent tones and bound receiver triggers at one projection time. The planner
+uses the ADC conversion to subtract the receiver's flight time from the window
+endpoints without moving the sample grid. A block's pairing interval starts at
+emission and includes ringdown until the next block starts or the point ends.
+All blocks intersecting the converted window contribute pulses to its event.
+The latest intersecting block owns the window. An earlier-than-all-blocks
+window uses an unobserved event for its receiver baseline. If none is available,
+planning rejects the layout without adding a projection.
 `ReadoutPartition.terminal_pulses` retains terminal tones even when no ADC observes
 them. Projective block counts and each ADC's per-event grid counts must match
 across points; classification rejects differences with the point and counts.
-`read_event_contents` detaches and deduplicates each trigger's own pulse/grid
-contents. `readout_contents` retains the terminal-only planning contract.
+`read_event_contents` detaches each trigger's matched pulses and grid.
+`readout_contents` detaches terminal pulses and ADC grids without pairing.
 Callers can opt in to `allow_receiver_only` on `classify_readout` and
 `readout_contents`. If the selected generator has no active pulses at any point,
 classification returns no pulse blocks and contents retain the bound ADC grids

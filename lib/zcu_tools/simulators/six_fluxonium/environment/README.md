@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-21, nearest-cavity routing for explicit frequencies
+**Last updated:** 2026-11-21, receiver flight time in readout routing
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -130,9 +130,10 @@ losing their logical event identity. ADCs observing the same event share its
 CTMC path. Independent cavities keep separate histories and sampling streams.
 Projection uses rank-1 DC energy states, not groups inferred from IQ separation.
 ADC jumps during herald affect IQ but do not feed back into later evolution.
-This does not add MIST or data-dependent feedback for active reset. Trigger
-pairing and nonterminal sample-window rejection follow the shared
-[readout planner](../../../experiment/README.md#explicit-simulation-environments).
+This does not add MIST or data-dependent feedback for active reset. The shared
+[readout planner](../../../experiment/README.md#explicit-simulation-environments)
+pairs each ADC window with block intervals using that receiver's calibrated
+flight time.
 Each qubit's `numerics.projection_prune_floor` controls continuation at each point.
 It requires a finite `0 <= floor < 1`; the example supplies `1e-9`.
 A source state below the floor at a point uses an identity transition row there,

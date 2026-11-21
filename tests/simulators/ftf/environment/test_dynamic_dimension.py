@@ -251,10 +251,14 @@ def test_remembered_dimension_does_not_cross_preparation_invalidation(
         else:
             first, *others = acquire.templates
             window = first.readouts[0]
-            early = replace(window, trigger_ticks=window.trigger_ticks - 1)
-            invalid_first = replace(first, readouts=(early,))
+            wrong_gen = replace(
+                window, generator_channels=window.generator_channels + 1
+            )
+            invalid_first = replace(first, readouts=(wrong_gen,))
             invalid = replace(acquire, templates=(invalid_first, *others))
-            with pytest.raises(ValueError, match="trigger must not precede"):
+            with pytest.raises(
+                ValueError, match="ADC timing and its bound readout generator"
+            ):
                 _execute_acquire(source, invalid, state)
         engine.solve_shapes.clear()
         _execute_acquire(source, replace(acquire, sequence=acquire.sequence + 1), state)

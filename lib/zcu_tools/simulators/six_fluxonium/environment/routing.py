@@ -1,5 +1,6 @@
 """Observed per-point routing partitions, without Cartesian state expansion."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from math import prod
 
@@ -7,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.experiment.readout_plan import ReadoutDrive, classify_readout
+from zcu_tools.resources.simulation_schema import Receiver
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
     EventSlot,
@@ -74,16 +76,36 @@ def _event_rows(
     )
 
 
+def receiver_calibration(settings: SixFluxoniumSettings, channel: int) -> Receiver:
+    """Return the calibration addressed by a six-fluxonium ADC channel.
+
+    The dedicated pulse ADC shares Q1's calibration. Mux ADCs use their own
+    configured calibration. An unknown channel raises ValueError.
+    """
+    qubits = settings.qubits.ordered()
+    if channel == settings.pulse_ro_ch:
+        return qubits[0].readout.adc.model_copy(update={"ro_ch": channel})
+    for qubit in qubits:
+        adc = qubit.readout.adc
+        if adc.ro_ch == channel:
+            return adc
+    raise ValueError(f"unbound six-fluxonium receiver {channel}")
+
+
 def _route_template(
     template: TimelineTemplate,
-    channels: tuple[int, ...],
+    receiver_delays_ns: Mapping[int, float],
     gen: int,
     bare: NDArray[np.float64],
     time_base: TimeBase,
     drive_channels: tuple[int, ...],
 ) -> _TemplateRoutes:
     partition = classify_readout(
-        template, ReadoutDrive(gen, 1, "mux"), {}, time_base=time_base
+        template,
+        ReadoutDrive(gen, 1, "mux"),
+        {},
+        time_base=time_base,
+        receiver_delays_ns=receiver_delays_ns,
     )
     if any(partition.cavity_drives):
         raise ValueError("six fluxonium does not support untriggered cavity drives")
@@ -91,7 +113,7 @@ def _route_template(
         if event.gen_ch not in (gen, *drive_channels):
             raise ValueError(f"unbound six-fluxonium generator {event.gen_ch}")
     receivers = []
-    for channel in channels:
+    for channel in receiver_delays_ns:
         window = next(w for w in template.readouts if w.channel == channel)
         selected = _nearest_cavity(window.frequency_mhz, bare)
         if np.any(selected != selected[:, :1]):
@@ -171,6 +193,20 @@ def _project_template(
     return tuple(templates)
 
 
+def _readout_path(
+    settings: SixFluxoniumSettings, channels: tuple[int, ...]
+) -> tuple[int, dict[int, float]]:
+    pulse = channels == (settings.pulse_ro_ch,)
+    mux_channels = tuple(q.readout.adc.ro_ch for q in settings.qubits.ordered())
+    if not pulse and any(ch not in mux_channels for ch in channels):
+        raise ValueError("pulse and mux ADC routes must be acquired separately")
+    gen = settings.pulse_gen_ch if pulse else settings.mux_gen_ch
+    return gen, {
+        channel: receiver_calibration(settings, channel).time_of_flight_ns
+        for channel in channels
+    }
+
+
 def route_request(
     settings: SixFluxoniumSettings, request: AcquireRequest
 ) -> tuple[RoutedGroup, ...]:
@@ -195,17 +231,13 @@ def route_request(
     channels = tuple(w.channel for w in request.readouts)
     if not channels or not request.templates:
         raise ValueError("six fluxonium requires readout templates")
-    pulse = channels == (settings.pulse_ro_ch,)
+    gen, receiver_delays = _readout_path(settings, channels)
     qubits = settings.qubits.ordered()
-    mux_channels = tuple(q.readout.adc.ro_ch for q in qubits)
-    if not pulse and any(ch not in mux_channels for ch in channels):
-        raise ValueError("pulse and mux ADC routes must be acquired separately")
-    gen = settings.pulse_gen_ch if pulse else settings.mux_gen_ch
     routing = np.empty((prod(request.point_dims), len(channels)), dtype=np.int64)
     templates = tuple(
         _route_template(
             t,
-            channels,
+            receiver_delays,
             gen,
             bare,
             request.time_base,

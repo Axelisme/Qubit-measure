@@ -259,21 +259,6 @@ def test_ringdown_trigger_belongs_to_previous_block_until_next_start(
     np.testing.assert_array_equal(contents[0].end_ns, [10, 10])
 
 
-@pytest.mark.parametrize("trigger_us", [0.018, 0.019])
-def test_nonterminal_samples_must_finish_strictly_before_next_block(trigger_us) -> None:
-    base = template(
-        (pulse(0.030), pulse(0.010), pulse(0.020)), (trigger_us, 0.021, 0.031)
-    )
-    with pytest.raises(ValueError, match="last sample.*must precede") as rejection:
-        readout_plan.classify_readout(
-            base, readout_plan.ReadoutDrive(0, 1.0), {}, time_base=TIME_BASE
-        )
-    message = str(rejection.value)
-    assert "block start=10 ns" in message
-    assert "ADC 2 trigger index=0" in message
-    assert "next block start=20 ns" in message
-
-
 def test_trigger_at_next_start_pairs_with_that_block_not_the_previous_one() -> None:
     base = template((pulse(0.010), pulse(0.020), pulse(0.030)), (0.020, 0.030))
     drive = readout_plan.ReadoutDrive(0, 1.0)
@@ -290,12 +275,39 @@ def test_trigger_at_next_start_pairs_with_that_block_not_the_previous_one() -> N
     np.testing.assert_array_equal(contents[1].end_ns, [30, 30])
 
 
-def test_trigger_before_any_incident_pulse_is_rejected_at_classification() -> None:
-    base = template((pulse(0.010), pulse(0.030)), (0.009, 0.031))
-    with pytest.raises(ValueError, match="trigger"):
-        readout_plan.classify_readout(
-            base, readout_plan.ReadoutDrive(0, 1.0), {}, time_base=TIME_BASE
-        )
+@pytest.mark.parametrize(
+    ("events", "trigger_us", "samples", "delay_ns", "owner_ns", "members_ns"),
+    [
+        ((pulse(0.010),), 0.009, 3, 0.0, 10, (10,)),
+        ((pulse(0.010), pulse(0.020), pulse(0.040)), 0.023, 9, 10.0, 20, (10, 20)),
+        ((pulse(0.010), pulse(0.020), pulse(0.040)), 0.020, 3, 0.0, 20, (20,)),
+        ((pulse(0.010), pulse(0.020), pulse(0.040)), 0.018, 3, 0.0, 20, (10, 20)),
+        ((pulse(0.010), pulse(0.020), pulse(0.040)), 0.021, 3, 10.0, 10, (10,)),
+    ],
+    ids=("lookback", "in-flight", "disjoint", "crossing-from-ringdown", "short-window"),
+)
+def test_planner_pairs_the_adc_window_in_device_time(
+    events, trigger_us, samples, delay_ns, owner_ns, members_ns
+) -> None:
+    terminal_trigger = 0.051 if delay_ns else 0.041
+    trigger = (trigger_us,) if len(events) == 1 else (trigger_us, terminal_trigger)
+    base = template(events, trigger)
+    window = replace(base.readouts[0], samples=samples)
+    base = replace(base, readouts=(window,))
+    drive = readout_plan.ReadoutDrive(0, 1.0)
+    memo = {}
+    partition = readout_plan.classify_readout(
+        base, drive, memo, time_base=TIME_BASE, receiver_delays_ns={2: delay_ns}
+    )
+    contents = readout_plan.logical_event_contents(
+        base, drive, window, memo, time_base=TIME_BASE, partition=partition
+    )
+    for point in range(2):
+        (owner,) = (c for c in contents if 0 in c.read_indices[c.inverse[point]])
+        index = owner.inverse[point]
+        assert owner.end_ns[point] == owner_ns
+        assert tuple(sorted(p.start_ns for p in owner.pulses[index])) == members_ns
+        assert owner.grids[index][0].times_ns[0] == pytest.approx(trigger_us * 1000)
 
 
 @pytest.mark.parametrize("kind", ["pulse", "mux"])

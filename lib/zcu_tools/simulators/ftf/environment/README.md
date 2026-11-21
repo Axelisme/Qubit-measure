@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, explicit ADC frequencies and cross-block cavity-field limit
+**Last updated:** 2026-11-21, device-time ADC window pairing
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -550,12 +550,13 @@ large-excursion device accuracy.
 
 At each point, the latest active readout-channel block is terminal. The planner
 classifies earlier blocks with ADC triggers as projective reads and earlier blocks
-without triggers as cavity drives. A block owns triggers from its start until the
-next block starts, including ringdown after pulse end. A sampling window may
-extend past the next block's emission start. The planner adds each receiver's
-flight time to the later block's start. A later pulse that arrives by the last
-sample contributes coherently to that ADC event. The timeline compiler still
-rejects overlapping windows for successive timeline triggers on the same ADC
+without owned windows as cavity drives. For pairing, the shared planner uses
+the receiver's flight time to convert the ADC window to device time. A block's
+pairing interval includes ringdown up to the next block or the point end.
+The last intersecting block owns the window. Every intersecting block
+contributes its pulses without shifting their emission or projection times.
+The timeline compiler still rejects overlapping windows for successive
+timeline triggers on the same ADC
 ([ADR-0083](../../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)).
 
 `FTFTemplatePlan.projective_reads` retains each point's ordered projection times,
@@ -731,12 +732,12 @@ only the configured pulse and mux readout paths route to ADCs, while drive and f
 `plan_template` and `FTFSource` accept an explicit `readout=` override. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
 Each batch retains the same chronological logical-event axis. An event retains
-that ADC's observed grids. FTF pairs triggers with pulse blocks by emission
-start, not arrival time. An event holds the block's incident pulses and any later
-pulses that reach that receiver by its last sample. If an omitted pulse's emission
-interval shifted by the receiver's flight time overlaps the window's sampling
-interval, planning raises `ValueError` before returning IQ. The error names the
-ADC, window, generator and emission time.
+that ADC's observed grids in ADC time. It holds the union of pulse blocks
+matched to those windows in device time. A window entirely before the first
+block can use an otherwise unobserved event on that ADC. This event produces
+only receiver offset and noise without adding a projection or solving a cavity
+field. If every event already has a physical observation on the same ADC,
+planning identifies the ADC and trigger that cannot be placed.
 
 Separately, the event does not inherit the cavity field left by the previous block.
 When `post_delay` is shorter than several field decay times, the samples omit
@@ -750,7 +751,7 @@ fields across blocks into ADC events.
 Empty grids mean the ADC does not observe the event or emit a read column. All ADCs may omit
 terminal observations; the terminal event and evolution endpoint remain in the
 plan. Each ADC must still observe at least one event. Projective plans retain
-point-local event contents. Templates without projective reads deduplicate
+point-local event contents. Ordinary terminal-only plans deduplicate
 terminal contents. Integrated flat,
 common-start mux batches use ADC's carrier-wise linear sums. Each carrier keeps
 the guarded direct-sum or constant-field/full-exponential route. Delay, mismatch,

@@ -248,6 +248,7 @@ def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> Non
             replace(window, trigger_ticks=window.trigger_ticks + ticks(0.020))
             for window in herald.readouts
         ),
+        duration_ticks=herald.duration_ticks + ticks(0.020),
     )
     cavity = replace(
         shifted.events[0],
@@ -263,6 +264,7 @@ def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> Non
         replace(
             template(),
             events=(flux_slot(4, 0.2), *shifted.events[-2:]),
+            duration_ticks=shifted.duration_ticks,
             readouts=tuple(
                 replace(
                     window,
