@@ -72,6 +72,38 @@ GUI 插件自行定義 typed 成功輸出的欄位。插件決定是否輸出選
 
 實驗跨入 zcu_tools 時使用公開絕對 import，預設置頂。只有具體重型依賴或初始化限制才延遲，不藉此外移模組或建立設定式 discovery。
 
+### 身分、定位與顯示
+
+#### 綁定身分留在 adapter
+
+**規則。** GUI adapter 從固定 capture 解析角色綁定的元件名。Run metadata 保存該次來源，寫回時由 adapter 核對元件名及順序。量測 cfg 與表單欄位不保存角色身分。Adapter 把位置推導成普通數值填進 cfg。需要顯示元件名的實驗以自己的 analyze `options` 接收標籤，GUI adapter 從同次 capture 提供顯示預設。Core 與分析不解析角色身分。
+
+**例子。** `$qubit1` 綁 QA，QA 在完整 mux readout 的第二個位置，adapter 把 `qubit1_tone=1` 交給 core。Local Z 分析只印出 options 裡的 QA，寫回則由 adapter 用來源身分比對而不用圖例。
+
+**邊界。** Notebook 使用者以自己的上下文綁定元件，手動提供同樣的 tone index、校準值與標籤。不透過 adapter 也能呼叫 core。標籤不是身分，不用來決定寫回目標。
+
+**依據。** 2026-11-20，使用者答「A」，並說「我目前姑且的想法是，可能 analyze 开放一个参数接口，可以让 adapter 填之类的。」「其實gui顯示的options與core要的options是解耦的」。見[身分與中性位置的討論](../discussions/2026-11-22-two-qubit-identity-and-neutral-positions.md)。
+
+#### 只驗實驗所需的能力
+
+**規則。** 實驗不因範例樣品而限制元件的物理子種類。需要驗證物理種類時，先指出序列或分析依賴的能力，再由該實驗的表單推導拒絕不相容的種類。
+
+**例子。** Two-qubit 不要求 fluxonium 或 transmon。兩個位置須是 `$mux.qubits` 中不同的成員，並遵守 [ADR-0072 的有序 mux 綁定](0072-module-boundaries.md#mux-group-是實驗室的-component-定義)。Open／Reset 檢查 owner 大類、對應順序與已綁 readout；提交時再用同一次 capture 核對實際 readout 的完整 tone 數。需要 CZ 校準時才要求 coupler 綁定，不要求特定 coupler 種類。
+
+**邊界。** Owner 大類、連結存在與順序是 mux 拓撲契約，不是物理子種類限制。相同 tone 數不能證明 readout 的物理順序，仍由操作員核對。沒有固定 group 的 core 不猜測這項關係。
+
+**依據。** 2026-11-21，使用者答「1a，沒有理由限制就不要限制 2a」。同日追認種類中性化的共用規則：「啊，其余大部分都没有问题啊，整批追认。」Two-qubit 的兩次驗證由 designer 於 2026-11-22 代裁，使用者未覆核。見[身分與中性位置](../discussions/2026-11-22-two-qubit-identity-and-neutral-positions.md)及[mux 綁定檢查](../discussions/2026-11-22-two-qubit-mux-binding-checks.md)。
+
+#### 同一位置不跨層翻譯
+
+**規則。** 同一位置從 alias、recipe、cfg、表單到預設顯示只用一個名字。衍生欄位沿用該位置名，不為了在兩套名稱間對照而加轉換。
+
+**例子。** Two-qubit 使用 repo 已有的 `qubit1`、`qubit2`。第一個位置的 tone index 叫 `qubit1_tone`，配對的 CZ slot 叫 `cz_qubit1`，預設圖例叫 Qubit1。
+
+**邊界。** GUI point aliases 與 Notebook 內建角色名稱相同，綁定仍獨立。位置名不是實際元件名，顯示時可用 options 換成元件名。變長的 mux 選取沿用既有 index 契約。舊 point 按[操作指南](../../zcu_lab/v2/two_qubit/guide.md#重綁舊-point)一次重綁，不設舊名 alias。
+
+**依據。** 2026-11-21，使用者追認 designer 代裁：「策零零七一追认代采」。沿 [ADR-0079](0079-form-field-transitions.md#remote-與-recipe) 2026-10-18 的原話：「既然核心是用index，那就用適合核心的方案，不要加一堆難維護的轉換邏輯」。見[身分與中性位置的討論](../discussions/2026-11-22-two-qubit-identity-and-neutral-positions.md)。
+
 ### Notebook 中斷與部分結果
 
 NotebookAdapter 在 main thread 執行 core.run 期間替換 SIGINT handler。第一次中斷設定 stop 與 reason，並啟動計時器。Core 在期限內正常返回就取消計時器並照常發布；到期或真的收到第二次中斷時，handler 拋 KeyboardInterrupt，不發布 record。Schedule 與 AcquisitionRunner 不吞 KeyboardInterrupt，作者自行決定如何組成可返回的資料。
@@ -178,6 +210,16 @@ Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 ex
 例如 `two_qubit/local_z` 將掃描欄位 `gate_counts` 改為 `gate_count` 並提升 cfg schema major，Result 欄位與存檔軸維持原樣。若只改 guide、表單標籤或圖上的文字就能達到目的，保留 cfg 欄位與版本。若必須保留舊 run 依原 cfg 重新分析的能力，先不改名；相容方案要另外裁定。
 
 使用者在 2026-11-19 對以單數改名為先例、不提供 alias 的提案回覆「全采用建议」。選項與首批範圍見[實驗命名與顯示討論](../discussions/2026-11-20-experiment-naming-and-display.md)。
+
+#### 只有模擬測試資料時的舊結果格式
+
+**規則。** 確認只有模擬器測試資料的家族更改 native 結果格式時，不為不相容的舊 layout 新增 reader。保留原檔，不改寫或遷移。相容 layout 仍沿用既有 cfg fallback。
+
+**例子。** Two-qubit joint readout 的新檔使用 `terminal_qubit1`、`terminal_qubit2`。舊軸與現行宣告不符時 Load 拒絕，要讀原檔使用對應的舊版。
+
+**邊界。** 有實機資料的家族沿用本 ADR 的載入相容規則。不確定某家族有沒有實機資料，先問使用者。這項例外不授權刪除舊檔，也不要求其他家族改格式。
+
+**依據。** 2026-11-22，使用者答「我沒有舊資料，可以直接換到新格式」，並補充「像是chain/herald/two_qubit等實驗，我都沒在真實硬體上跑過，只有測試用的模擬器數據，後者不重要，所以這些都不用在意舊格式數據的載入問題」。見[two-qubit native 軸名討論](../discussions/2026-11-22-two-qubit-native-axis-cutover.md)。
 
 ## 顯式 cfg 與裝置環境
 

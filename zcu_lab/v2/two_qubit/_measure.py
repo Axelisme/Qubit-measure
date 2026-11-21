@@ -28,10 +28,12 @@ class TwoQubitForm[C: ConfigBase](Form[C]):
         self._readout_of = readout_of
 
     def to_cfg(self, value: FormModel, env: FormEnv) -> C | FormErrors:
-        """Lower a result in its fixed Form environment, without modifying its draft.
+        """Lower the draft without modifying it.
 
-        Preserve ordinary lowering errors. If the validated terminal readout
-        is not the size of the captured group, return an error at readout.
+        First use normal Form lowering for value in env and forward any
+        FormErrors unchanged. Compare the resulting readout tone count with
+        the full group in the same capture. On a count mismatch, return
+        FormErrors at readout with the expected and actual counts.
         """
         cfg = super().to_cfg(value, env)
         if isinstance(cfg, FormErrors):
