@@ -28,11 +28,11 @@ class MistPowerTraceInputs(RecipeInputs):
     overrides: Overrides
     probe_ref: str | None | Keep = Field(
         KEEP,
-        description="Select Resonator probe by library key. Omit to keep the Form selection; null is invalid.",
+        description="Resonator probe library key. Omit to keep the selection. Recipe parses null; Form rejects it.",
     )
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Select Readout by library key. Omit to keep the Form selection; null is invalid.",
+        description="Readout library key. Omit to keep the selection. Recipe parses null; Form rejects it.",
     )
 
     g0: str | None | Keep = Field(
@@ -67,6 +67,10 @@ async def mist_power_trace(
     session: RecipeSession, inputs: MistPowerTraceInputs
 ) -> MistPowerTraceReport:
     """Probe across gain, save mean complex IQ and plot its displacement.
+
+    Omit probe_ref or readout_ref to keep the corresponding Form selection.
+    Recipe input parsing accepts explicit null and passes it unchanged to the Form.
+    The Form requires both modules and rejects null before Run.
 
     Probe gain sweep supplies Start, Stop and Expts. Use overrides for a different grid or averaging count.
     The Analyze inputs change the displayed reference or axes, not the acquisition.
