@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from numpy.testing import assert_allclose
+from numpy.testing import assert_allclose, assert_array_equal
 from scipy.linalg import expm
 from zcu_tools.simulate import adc
 from zcu_tools.simulate.boundary import SamplingIdentity
@@ -486,6 +486,26 @@ def test_response_cache_distinguishes_receiver_delay_and_each_mismatch(parameter
     assert not np.allclose(before.sums, after.sums)
     assert_allclose(after.sums, fresh.sums, atol=0, rtol=0)
     assert_allclose(reader.responses(inputs).sums, before.sums, atol=0, rtol=0)
+
+
+def test_adc_to_device_time_shifts_scalar_and_array_samples():
+    shift = adc.adc_to_device_time_ns
+    scalar = shift(np.float32(62.5), time_of_flight_ns=80.0)
+    assert type(scalar) is float
+    assert scalar == -17.5
+
+    adc_times = np.array([[0.0, 79.0], [80.0, 120.5]])
+    device_times = shift(adc_times, time_of_flight_ns=80.0)
+    assert device_times.dtype == np.dtype(np.float64)
+    assert_array_equal(device_times, [[-80.0, -1.0], [0.0, 40.5]])
+    assert not np.shares_memory(device_times, adc_times)
+    assert_array_equal(adc_times, [[0.0, 79.0], [80.0, 120.5]])
+
+
+@pytest.mark.parametrize("delay", [-1.25, float("nan"), float("inf")])
+def test_adc_to_device_time_rejects_invalid_delay(delay):
+    with pytest.raises(ValueError, match=rf"time_of_flight_ns.*{delay}"):
+        adc.adc_to_device_time_ns(62.5, time_of_flight_ns=delay)
 
 
 @pytest.mark.parametrize("value", [-1.0, float("nan"), float("inf")])

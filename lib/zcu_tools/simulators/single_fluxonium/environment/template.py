@@ -1,5 +1,6 @@
 """Compiled-template planning for one fluxonium without density propagation."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -16,7 +17,6 @@ from zcu_tools.experiment.readout_plan import (
 )
 from zcu_tools.simulate.adc import ReadoutPulse
 from zcu_tools.simulate.boundary import (
-    ChargeDriveRequirement,
     EnvironmentSnapshot,
     TimeBase,
     TimelineTemplate,
@@ -202,7 +202,7 @@ def plan_template(
     *,
     time_base: TimeBase,
     readout_kind: Literal["pulse", "mux"] = "pulse",
-    charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
+    receiver_delays_ns: Mapping[int, float] | None = None,
 ) -> SingleFluxoniumPlan:
     """Convert one complete QICK template to evolution and logical read events.
 
@@ -220,7 +220,9 @@ def plan_template(
     occupy one batch, even when their readout times differ. Engine owns segmenting.
 
     The configured receiver must occur once in the complete observation set.
-    Other receivers retain their triggers for shared projective classification.
+    receiver_delays_ns must map all observed ADC channels to their flight times
+    in ns; classify_readout raises KeyError for missing channels. None uses
+    the configured standalone receiver's calibration.
     One terminal pulse block per point is required.
     Triggered nonterminal blocks become ordered projective reads. Unobserved
     terminal blocks retain pulses and empty grids. Projective starts enter batch
@@ -230,22 +232,14 @@ def plan_template(
     Earlier readout pulses are retained separately, not treated as microwaves.
     Unbound generators/receivers, invalid DC, crossing readout blocks or invalid
     numeric records raise ValueError. No ADC solver, density or RNG is used.
-    charge_requirements names generators that must bind to charge drive_lines,
-    even if already bound to flux or readout. Mismatches raise ValueError naming
-    the request and channel before waveform construction or evolution.
     Returned contents are detached; input buffers may subsequently be reused.
     """
     drive_names = {line.gen_ch: line.name for line in settings.drive_lines.values()}
-    for requirement in charge_requirements:
-        if requirement.gen_ch not in drive_names:
-            raise ValueError(
-                f"{requirement.name}: generator {requirement.gen_ch} requires a "
-                "declared charge drive line"
-            )
+    adc = settings.readout.adc
+    if receiver_delays_ns is None:
+        receiver_delays_ns = {adc.ro_ch: adc.time_of_flight_ns}
     windows = tuple(
-        window
-        for window in template.readouts
-        if window.channel == settings.readout.adc.ro_ch
+        window for window in template.readouts if window.channel == adc.ro_ch
     )
     if len(windows) != 1:
         raise ValueError("single fluxonium requires its configured receiver once")
@@ -256,9 +250,15 @@ def plan_template(
         settings.readout.drive.input_per_gain,
         readout_kind,
     )
-    partition = classify_readout(template, drive, memo, time_base=time_base)
+    partition = classify_readout(
+        template,
+        drive,
+        memo,
+        time_base=time_base,
+        receiver_delays_ns=receiver_delays_ns,
+    )
     read_events = logical_event_contents(
-        template, drive, windows[0], memo, time_base=time_base
+        template, drive, windows[0], memo, time_base=time_base, partition=partition
     )
     contents = read_events[-1]
     microwave, fast_flux = [], []

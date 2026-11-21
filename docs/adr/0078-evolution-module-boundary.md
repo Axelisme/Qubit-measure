@@ -178,9 +178,9 @@ status: accepted
 
 **規則。** 就實驗參數而言，模擬器只拒絕實機也會拒絕的程式。程式合法但參數不合理時，照算物理上預期的結果。模型算不準的部分用警告說明，不因參數不當報錯。
 
-**例子。** FTF 規劃 ADC window 時，若整個 template 沒有 readout pulse，event 只有 receiver offset 與雜訊，不報「沒有 generator 候選」。下一個 pulse 在 window 內抵達且已配到這個 event 時，兩個 pulse 相干相加。若抵達的 pulse 漏配，規劃就報錯，指出 ADC、window 和 pulse，不回傳缺訊號的 I/Q。見 [FTF readout and sampling](../../lib/zcu_tools/simulators/ftf/environment/README.md#readout-and-sampling)。
+**例子。** FTF 規劃 ADC window 時，若整個 template 沒有 readout pulse，event 只有 receiver offset 與雜訊，不報「沒有 generator 候選」。ADC window 與 block 的配對在裝置時間進行；同一 ADC、同一 owner 的 window 可在同一事件中觀測聯集 pulse 留下的場。細節見[FTF 讀出配對](#ftf-讀出窗依裝置時間配對)及 [FTF readout and sampling](../../lib/zcu_tools/simulators/ftf/environment/README.md#readout-and-sampling)。
 
-**邊界。** 型別、範圍、維度等契約外輸入仍在進入點 fast fail。模擬器缺少決定結果所需資訊的合法程式，在編譯時精確拒絕。例如 window 起點生效的 ADC 頻率字沒有具名來源時，模擬器不知道它代表哪個 DDS image，訊息請作者改用具名 ADC config。模擬器未實作的情況不能回傳缺訊號的結果；FTF 仍按發射時間配對 ADC trigger，在途漏配由規劃守門攔下。算法數值近似仍受[精度 guard](#先保證正確再優化瓶頸)約束。
+**邊界。** 型別、範圍、維度等契約外輸入仍在進入點 fast fail。模擬器缺少決定結果所需資訊的合法程式，在編譯時精確拒絕。例如 window 起點生效的 ADC 頻率字沒有具名來源時，模擬器不知道它代表哪個 DDS image，訊息請作者改用具名 ADC config。FTF 的讀出成員與 owner 依[裝置時間配對規則](#ftf-讀出窗依裝置時間配對)。無法表示的事件配置在規劃時拒絕，不回傳缺訊號的 I/Q。算法數值近似仍受[精度 guard](#先保證正確再優化瓶頸)約束。
 
 FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重排狀態。警告指出受影響範圍與 gain 共同縮放上限；超限結果不在色散模型有效範圍內。計數方式與上限假設見 [FTF cavity drives](../../lib/zcu_tools/simulators/ftf/environment/README.md#cavity-drives)。
 
@@ -189,6 +189,20 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 - 2026-11-19，使用者同意 cavity Stark 反轉照算並警告，答「1cA」。2026-11-20，designer 依授權代裁共同縮放上限的表示，使用者未覆核。見 [FTF cavity Stark 反轉：從報錯改成警告](../discussions/2026-11-20-ftf-stark-inversion-warning.md)。
 - 2026-11-21，使用者定下「只拒絕實機也會拒絕的程式」這條規則，原話是「模擬器要給出合法的預期結果，只要合法，不因為不合理就抱錯」。FTF 的 receiver-only event、相干相加與在途漏配拒絕是 designer 代裁，使用者未覆核。見 [FTF 合法讀出時序](../discussions/2026-11-21-ftf-legal-readout-timing.md)。同日稍後，使用者在「保留 raw 字的 DDS 同餘機制」與「raw 字編譯時拒絕」之間改選後者，答「S」；先前選保留的理由（「那我选，K 吧，……解读弱智的问题。」）經 onetone homophasal 回歸測試證實不成立，table sweep 保留具名來源。見 [raw ADC 頻率字改成編譯時拒絕](../discussions/2026-11-21-raw-adc-word-reject.md)。
 - 51 點、21 能階的合法輸入不受 projection 記憶體預算阻擋。案例與驗收見 [Projective read 的輸出改成 Markov chain](../discussions/2026-11-17-projection-markov-chain-readout.md)。
+
+### FTF 讀出窗依裝置時間配對
+
+**規則。** ADC 負責 ADC 時間轉換至裝置時間的單一換算。`simulate.adc` 匯出 `adc_to_device_time_ns(adc_time_ns, *, time_of_flight_ns)`，計算 `t−τ`；ADC solver 與共用 planner 呼叫同一函式。ADC 保留原始 sample grid、demodulation phase 與 trigger 順序。Planner 對每個 receiver 換算 window 端點，再以裝置時間和 block interval `[start,next_start)` 判交集，並包含 ringdown。最後相交的 block 擁有該 window；最後一個 block 延伸至 point 結束。每個 point、ADC、owner 的有場 event，使用其任一 window 相交 blocks 的聯集；每個 block 的 pulses 只收一次。每個 window 保留自己的交集集合。其他 ADC 或 owner 的 pulse 不會進入此 event 的聯集。
+
+**例子。** 若同一 owner 的前窗與 blocks 62、63 相交，後窗只與 block 63 相交，兩窗仍各自保留交集與輸出 column；同一 ADC／owner event 以 blocks 62、63 的 pulses 建立一段場歷史，因此 block 62 的場可以延續到後窗。這不是跨 ADC 共用 pulse list。各 ADC 仍按自己的 receiver delay、grids 與 pulse union 讀出。
+
+**邊界。** Projective collapse 仍在 readout pulse 的裝置時間起點，不隨 ADC delay 移動。跨投影 window 整窗使用最後相交 block 的 owner state，這是事件層近似；FTF 每個 ADC event 仍從 vacuum 起始，不帶入前一事件的殘場。兩項近似及量得的 I/Q 比較見 [FTF 已知近似](../../lib/zcu_tools/simulators/ftf/environment/README.md#known-approximations)。整窗早於第一個 block 的 ADC window 保留 receiver-only grid，只輸出 receiver offset 與 noise，不新增 projection；planner 把 grid 放到該 ADC 沒有 field grids 的既有 event，以維持跨點布局。若現有 event topology 無法表示該 grid，planner 精確指出 ADC、trigger 與原因後 fast fail。FTF 目前沒有 active reset；若新增依賴讀出結果的即時回饋，必須重新評估去程與回程延遲對 qubit 的影響。
+
+**依據。**
+- 2026-11-21，使用者授權 designer 處理細節，條件是計算正確、機制統一、好維護、知道近似且不造成 bug。原話：「读书时间，这种东西，你只要能确保计算是正确的，然后机制是统一的，好维护，你知道存在这个东西，而且不会造成什么 bug 之类的就好了。那具体上做细节，我没什么意见。」
+- 2026-11-21，使用者選擇 window 跨投影時沿用單一 owner state，並確認投影時刻不移動：「R5 的话，这个算是模拟的一种误差。老实说，我不确定这是不是可以低成本解决的问题。比如说，可能只记录剩余光指数之类的，我不是很确定有没有好解法。 然后跨2个投影点的话，我觉得 A 就好了。没错，投影时刻只影响 ADC。 Qubit 不影响，这个是合理的，因为就算去程到 Qubit 有 delay， 那对于非 active reset 的操作来说是没有差的。我目前也没有设计 active reset。」
+- 同 ADC／owner window 的 event pulse union 是 designer 依上述授權補定，**代裁，使用者未覆核（Review: pending）**。依據與選項比較見[同 owner 的讀出窗共用脈衝歷史](../discussions/2026-11-21-shared-owner-readout-membership.md)。
+- 整體裝置時間模型、單一 owner 近似與 R5 延後見 [FTF 讀出窗依裝置時間配對](../discussions/2026-11-21-ftf-readout-device-time-pairing.md)。ADC 獨立 timeline 的既有邊界見 [ADR-0083](0083-program-macros-and-timelines.md)。
 
 ### 模擬器不從程式內容推斷實驗類型或硬體架構
 

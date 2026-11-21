@@ -161,8 +161,10 @@ class FTFTemplatePlan:
     batch: ns/GHz/rad microwave tracks and three-loop fast-flux schedule,
         with continuous samples for filtered/varying flux, ending at terminal start.
     readouts: per-ADC pulse/grid contents at DC, in declaration order. Every ADC
-        retains the same ordered logical event axis, with empty grids for events
-        it does not observe. An event contains only its own block's pulses.
+        retains the same ordered logical event axis. An observed event contains
+        the union of pulses from the blocks matched to its device-time windows,
+        filtered by PFB channel for mux readout. A receiver-only event has no
+        pulses. An unobserved event retains its owner's pulses and has no grids.
     cavity_drives: tuple in batch.points order, each containing the earlier active
         untriggered readout-generator ReadoutPulse inputs in template slot order. Supports are
         absolute ns, carriers GHz, phases pulse-local radians in the neutral DC
@@ -370,7 +372,7 @@ def _cavity_batch(
     return replace(batch, segment_boundaries=boundaries)
 
 
-def _projective_contents(
+def _logical_contents(
     template: TimelineTemplate,
     drive: ReadoutDrive,
     memo: dict[int, EnvelopeSpec],
@@ -384,47 +386,13 @@ def _projective_contents(
         )
         for window in template.readouts
     )
-    reference = channels[0][-1].pulses[0][0].frequency_ghz
+    reference = next(
+        (pulses[0].frequency_ghz for pulses in channels[0][-1].pulses if pulses),
+        partition.terminal_pulses[0][0].frequency_ghz,
+    )
     return tuple(
         map_readout_events(contents, reference) for contents in channels
     ), reference
-
-
-def _reject_omitted_arrivals(
-    partition: ReadoutPartition,
-    content: ReadoutMapping,
-    adc: FTFReceiverConfig,
-    gen_ch: int,
-) -> None:
-    """Check physical block coverage in assembled events before PFB selection."""
-    delay = adc.time_of_flight_ns
-    for point, row in enumerate(content.inverse):
-        pulses = (
-            *partition.cavity_drives[point],
-            *(p for read in partition.projective_reads[point] for p in read.pulses),
-            *partition.terminal_pulses[point],
-        )
-        # The mapping's permutation goes from trigger order to flattened grids.
-        windows = iter(np.argsort(content.output_order[row]))
-        for event in content.events[row]:
-            # Pairing includes whole emission blocks, including all mux tones.
-            included_starts = {pulse.start_ns for pulse in event.pulses}
-            omitted = tuple(p for p in pulses if p.start_ns not in included_starts)
-            for grid in event.grids:
-                window = next(windows)
-                for pulse in omitted:
-                    arrival_start = pulse.start_ns + delay
-                    arrival_end = pulse.end_ns + delay
-                    if (
-                        arrival_start < arrival_end
-                        and arrival_start <= grid.times_ns[-1]
-                        and grid.times_ns[0] < arrival_end
-                    ):
-                        raise ValueError(
-                            f"FTF ADC {adc.ro_ch} window {window} at point {point}: "
-                            f"omitted gen {gen_ch} pulse emitted at {pulse.start_ns:.12g} ns "
-                            "arrives during sampling; FTF pairs triggers by emission time"
-                        )
 
 
 def _mux_channel_contents(
@@ -472,11 +440,11 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     nearest 2 ns, ties even, without changing the common carrier origin. The
     latest active readout-generator block per point ends evolution. Earlier
     readout blocks with their own triggers are projective reads; untriggered
-    blocks are cavity drives. A block owns triggers until the next block starts,
-    including ringdown. Later pulses that reach a receiver by its last sample
-    are included in that ADC event without moving the projection time. If an
-    event omits a pulse whose delayed support overlaps its sampling interval,
-    raise ValueError naming the receiver, window, generator and emission time.
+    blocks are cavity drives. Convert each ADC window to device time for
+    pairing with block intervals, including ringdown. The last intersecting
+    block owns the window. All intersecting blocks contribute their pulses.
+    A window entirely before all pulse blocks can use an unobserved event
+    for receiver-only output without creating a projection.
     Bound fast-flux generators pass through per-loop delay and multi-exponential
     filtering, with 2 ns waveform samples and 1e-3 Phi0 midpoint bath levels.
     Ideal constant platforms omit continuous samples to retain sudden switching.
@@ -510,9 +478,11 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     Projective block counts and each ADC's per-event grid counts must match across
     points; differences raise ValueError naming the point and differing counts.
     Missing routes, invalid DC values or invalid readout pulse blocks raise
-    ValueError. Terminal-only contents deduplicate point rows; projective plans
-    retain point-local contents. Earlier cavity pulses detach once per active
-    point/slot. No per-point evolution planner is called.
+    ValueError. Terminal-only ADC contents deduplicate rows when all points use
+    only their owner block, or all have empty pulses. Earlier member blocks,
+    mixed field/receiver-only rows or projective events retain point-local
+    contents. Earlier cavity pulses detach once per active point/slot. No
+    per-point evolution planner is called.
     """
     config = readout_configuration(settings) if readout is None else readout
     path = _readout_path(settings, config, template)
@@ -541,7 +511,7 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
         allow_receiver_only=not path.multiplexed,
     )
     cavity_drives = partition.cavity_drives
-    if any(partition.projective_reads):
+    if partition.terminal_slots:
         end_ns = np.max(
             [
                 np.where(e.active, time_base.ns(e.start_ticks), -np.inf)
@@ -549,14 +519,13 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
             ],
             axis=0,
         )
-        event_contents, reference_frequency_ghz = _projective_contents(
+        event_contents, reference_frequency_ghz = _logical_contents(
             template, drive, memo, time_base, partition
         )
     else:
-        terminal_template = replace(template, events=partition.terminal_slots)
         contents = tuple(
             readout_contents(
-                terminal_template,
+                template,
                 drive,
                 window,
                 memo,
@@ -580,7 +549,6 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     readouts = []
     for window, content in zip(template.readouts, event_contents, strict=True):
         adc = receivers[window.channel]
-        _reject_omitted_arrivals(partition, content, adc, drive.gen_ch)
         if path.multiplexed:
             content = _mux_channel_contents(content, soccfg, window.channel)
         dt = time_base.ns(window.sample_period_ticks)

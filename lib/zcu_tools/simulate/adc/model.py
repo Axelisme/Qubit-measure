@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
 
+from ._time import valid_time_of_flight_ns
+
 RealArray = NDArray[np.float64]
 
 
@@ -236,7 +238,7 @@ class Receiver:
             raise ValueError("ripple_depth must be in [0, 1)")
         if self.ripple_period_ghz <= 0:
             raise ValueError("ripple_period_ghz must be positive")
-        if not np.isfinite(self.time_of_flight_ns) or self.time_of_flight_ns < 0:
+        if not valid_time_of_flight_ns(self.time_of_flight_ns):
             raise ValueError("time_of_flight_ns must be finite and nonnegative")
         offset = readonly_array(self.offset, "receiver offset")
         covariance = readonly_array(self.noise_covariance, "noise covariance")

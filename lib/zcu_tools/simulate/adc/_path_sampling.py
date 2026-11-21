@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from ._integrated_paths import IntegratedPaths
 from ._jump_paths import JumpPaths
 from ._noise import noise_root
+from ._time import adc_to_device_time_ns
 from .model import RealArray
 from .projection import ProjectionChain, ProjectionReadout
 
@@ -85,7 +86,10 @@ def physical_shots(
             end = max(
                 max(observer.end for _, observer in observers),
                 max(
-                    float(grid.times_ns[-1]) - batch.model.receiver.time_of_flight_ns
+                    adc_to_device_time_ns(
+                        float(grid.times_ns[-1]),
+                        time_of_flight_ns=batch.model.receiver.time_of_flight_ns,
+                    )
                     for (_, batch), content in zip(batches, key, strict=True)
                     for grid in batch.events[content][event_index].grids
                 ),

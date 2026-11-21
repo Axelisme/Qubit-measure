@@ -75,6 +75,53 @@ def test_routing_rejects_unsupported_charge_requirements_before_preparation():
         route_request(settings, requested)
 
 
+def test_pulse_routing_uses_q1_receiver_delay_even_for_q2_tones() -> None:
+    document = six_document()
+    document["qubits"]["Q1"]["readout"]["adc"]["time_of_flight_ns"] = 5.0
+    settings = parse_six_fluxonium(document)
+    gen, channel = settings.pulse_gen_ch, settings.pulse_ro_ch
+    window = ReadoutWindow(
+        channel,
+        gen,
+        4,
+        TIME_BASE.period_ticks(1000),
+        tick_tuple((0.025, 0.031)),
+        frequency_mhz=(6925.0, 6925.0),
+        phase_deg=(0, 0),
+        generator_channels=(gen, gen),
+    )
+    timeline = PointTimeline(
+        (),
+        tuple(
+            PulseEvent(gen, ticks(start), ticks(0.004), 6925, 0, 0.1)
+            for start in (0.016, 0.024)
+        ),
+        (window,),
+        ticks(0.040),
+        time_base=TIME_BASE,
+    )
+    request = AcquireRequest(
+        "integrated",
+        (1,),
+        0,
+        (window,),
+        123,
+        0,
+        "test",
+        templates=(single_point_template(timeline),),
+        time_base=TIME_BASE,
+    )
+    # The first grid ends at 23 ns on the device. With zero delay neither
+    # trigger owns the first pulse, so routing rejects it as a cavity drive.
+    (group,) = route_request(settings, request)
+    assert (group.cavity, group.channels, group.gen_ch) == (1, (channel,), gen)
+    (routed,) = group.templates
+    assert [TIME_BASE.ns(event.start_ticks[0]) for event in routed.events] == [16, 24]
+    np.testing.assert_array_equal(
+        routed.readouts[0].trigger_ticks, [[ticks(0.025), ticks(0.031)]]
+    )
+
+
 @pytest.fixture
 def projection_environment() -> Generator[
     tuple[SimulationEnvironment, SixFluxoniumSource]

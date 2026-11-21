@@ -6,6 +6,7 @@ from fractions import Fraction
 import numpy as np
 import pytest
 from zcu_tools.experiment import readout_plan
+from zcu_tools.simulate import adc
 from zcu_tools.simulate.boundary import (
     EventSlot,
     PulseEnvelope,
@@ -215,6 +216,47 @@ def test_partition_rejects_point_with_different_logical_event_topology(
         )
 
 
+def test_early_window_uses_an_unobserved_projection_to_match_other_points() -> None:
+    base = template((pulse(0.010), pulse(0.030)), (0.011,))
+    adc_b = replace(base.readouts[0], channel=3)
+    adc_a = replace(base.readouts[0], trigger_ticks=tick_array([[0.001], [0.011]]))
+    base = replace(base, readouts=(adc_a, adc_b))
+    drive = readout_plan.ReadoutDrive(0, 1.0)
+    memo = {}
+    partition = readout_plan.classify_readout(base, drive, memo, time_base=TIME_BASE)
+    assert [
+        [read.start_ns for read in point] for point in partition.projective_reads
+    ] == [[10], [10]]
+    for window, expected_first_ns in ((adc_a, (1, 11)), (adc_b, (11, 11))):
+        contents = readout_plan.logical_event_contents(
+            base, drive, window, memo, time_base=TIME_BASE, partition=partition
+        )
+        np.testing.assert_array_equal(contents[0].end_ns, [10, 10])
+        np.testing.assert_array_equal(contents[1].end_ns, [30, 30])
+        mapped = readout_plan.map_readout_events(contents, 6.0)
+        np.testing.assert_array_equal(mapped.output_order[mapped.inverse], [[0], [0]])
+        for point, index in enumerate(mapped.inverse):
+            herald, terminal = mapped.events[index]
+            (grid,) = herald.grids
+            np.testing.assert_array_equal(
+                grid.times_ns, expected_first_ns[point] + np.arange(3)
+            )
+            assert terminal.grids == ()
+            assert tuple(p.start_ns for p in herald.pulses) == (
+                () if window is adc_a and point == 0 else (10,)
+            )
+
+
+def test_early_window_rejected_if_every_existing_event_has_field_grids() -> None:
+    base = template((pulse(0.010), pulse(0.030)), (0.001, 0.011, 0.031))
+    with pytest.raises(
+        ValueError, match=r"ADC 2 trigger index=0.*needs an unobserved event"
+    ):
+        readout_plan.classify_readout(
+            base, readout_plan.ReadoutDrive(0, 1.0), {}, time_base=TIME_BASE
+        )
+
+
 def test_terminal_only_event_contents_preserve_late_triggers_and_deduplication() -> (
     None
 ):
@@ -259,21 +301,6 @@ def test_ringdown_trigger_belongs_to_previous_block_until_next_start(
     np.testing.assert_array_equal(contents[0].end_ns, [10, 10])
 
 
-@pytest.mark.parametrize("trigger_us", [0.018, 0.019])
-def test_nonterminal_samples_must_finish_strictly_before_next_block(trigger_us) -> None:
-    base = template(
-        (pulse(0.030), pulse(0.010), pulse(0.020)), (trigger_us, 0.021, 0.031)
-    )
-    with pytest.raises(ValueError, match="last sample.*must precede") as rejection:
-        readout_plan.classify_readout(
-            base, readout_plan.ReadoutDrive(0, 1.0), {}, time_base=TIME_BASE
-        )
-    message = str(rejection.value)
-    assert "block start=10 ns" in message
-    assert "ADC 2 trigger index=0" in message
-    assert "next block start=20 ns" in message
-
-
 def test_trigger_at_next_start_pairs_with_that_block_not_the_previous_one() -> None:
     base = template((pulse(0.010), pulse(0.020), pulse(0.030)), (0.020, 0.030))
     drive = readout_plan.ReadoutDrive(0, 1.0)
@@ -290,12 +317,134 @@ def test_trigger_at_next_start_pairs_with_that_block_not_the_previous_one() -> N
     np.testing.assert_array_equal(contents[1].end_ns, [30, 30])
 
 
-def test_trigger_before_any_incident_pulse_is_rejected_at_classification() -> None:
-    base = template((pulse(0.010), pulse(0.030)), (0.009, 0.031))
-    with pytest.raises(ValueError, match="trigger"):
-        readout_plan.classify_readout(
-            base, readout_plan.ReadoutDrive(0, 1.0), {}, time_base=TIME_BASE
+@pytest.mark.parametrize(
+    ("events", "trigger_us", "samples", "delay_ns", "owner_ns", "members_ns"),
+    [
+        ((pulse(0.010),), 0.009, 3, 0.0, 10, (10,)),
+        ((pulse(0.010), pulse(0.020), pulse(0.040)), 0.023, 9, 10.0, 20, (10, 20)),
+        ((pulse(0.010), pulse(0.020), pulse(0.040)), 0.020, 3, 0.0, 20, (20,)),
+        ((pulse(0.010), pulse(0.020), pulse(0.040)), 0.018, 3, 0.0, 20, (10, 20)),
+        ((pulse(0.010), pulse(0.020), pulse(0.040)), 0.021, 3, 10.0, 10, (10,)),
+    ],
+    ids=("lookback", "in-flight", "disjoint", "crossing-from-ringdown", "short-window"),
+)
+def test_planner_pairs_the_adc_window_in_device_time(
+    events, trigger_us, samples, delay_ns, owner_ns, members_ns
+) -> None:
+    terminal_trigger = 0.051 if delay_ns else 0.041
+    trigger = (trigger_us,) if len(events) == 1 else (trigger_us, terminal_trigger)
+    base = template(events, trigger)
+    window = replace(base.readouts[0], samples=samples)
+    base = replace(base, readouts=(window,))
+    drive = readout_plan.ReadoutDrive(0, 1.0)
+    memo = {}
+    partition = readout_plan.classify_readout(
+        base, drive, memo, time_base=TIME_BASE, receiver_delays_ns={2: delay_ns}
+    )
+    contents = readout_plan.logical_event_contents(
+        base, drive, window, memo, time_base=TIME_BASE, partition=partition
+    )
+    for point in range(2):
+        (owner,) = (c for c in contents if 0 in c.read_indices[c.inverse[point]])
+        index = owner.inverse[point]
+        assert owner.end_ns[point] == owner_ns
+        assert tuple(sorted(p.start_ns for p in owner.pulses[index])) == members_ns
+        assert owner.grids[index][0].times_ns[0] == pytest.approx(trigger_us * 1000)
+
+
+def test_same_owner_windows_keep_own_intersections_and_share_member_pulse_history() -> (
+    None
+):
+    # ADC A emits the later terminal read first. In device time its terminal
+    # grids are [31, 33] and [28, 30]; B's grid [19, 31] also sees block 10.
+    disjoint, herald, b_only, earlier, terminal = (
+        pulse(t) for t in (0.002, 0.010, 0.020, 0.026, 0.030)
+    )
+    base = template(
+        (disjoint, herald, b_only, earlier, terminal), (0.039, 0.019, 0.036)
+    )
+    adc_a = base.readouts[0]
+    adc_b = replace(
+        adc_a.subset(reads=slice(0, 1)),
+        channel=3,
+        samples=13,
+        trigger_ticks=tick_array([[0.027], [0.027]]),
+    )
+    base = replace(base, readouts=(adc_a, adc_b))
+    drive = readout_plan.ReadoutDrive(0, 1.0)
+    model = adc.ReadoutModel(
+        "fixed-state",
+        ("g",),
+        np.array([[6.0]]),
+        6.0,
+        np.array([0.1]),
+        np.array([0.02]),
+        np.zeros((1, 1)),
+        receiver=adc.Receiver(time_of_flight_ns=8.0),
+        mismatch_phase_rad=np.zeros(1),
+    )
+    solver = adc.ConditionalReadout(model)
+
+    def plan(compiled: TimelineTemplate):
+        memo = {}
+        partition = readout_plan.classify_readout(
+            compiled, drive, memo, time_base=TIME_BASE, receiver_delays_ns={2: 8, 3: 8}
         )
+        a, b = (
+            readout_plan.logical_event_contents(
+                compiled, drive, window, memo, time_base=TIME_BASE, partition=partition
+            )
+            for window in compiled.readouts
+        )
+        return partition, a, b, readout_plan.map_readout_events(a, 6.0)
+
+    partition, a, b, mapped = plan(base)
+    for point, index in enumerate(mapped.inverse):
+        (projection,) = partition.projective_reads[point]
+        assert projection.start_ns == 10
+        assert [t.read_index for t in projection.triggers] == [1]
+        assert [
+            (t.channel, t.read_index, t.incident_starts_ns)
+            for t in partition.terminal_triggers[point]
+        ] == [(2, 0, (30,)), (2, 2, (26, 30)), (3, 0, (10, 20, 26, 30))]
+        np.testing.assert_array_equal(mapped.output_order[index], [1, 0, 2])
+        assert a[-1].end_ns[point] == b[-1].end_ns[point] == 30
+        assert sorted(p.start_ns for p in b[-1].pulses[b[-1].inverse[point]]) == [
+            10,
+            20,
+            26,
+            30,
+        ]
+        projective_event, terminal_event = mapped.events[index]
+        assert tuple(p.start_ns for p in projective_event.pulses) == (10,)
+        assert sorted(p.start_ns for p in terminal_event.pulses) == [26, 30]
+        (herald_grid,) = projective_event.grids
+        later_grid, crossing_grid = terminal_event.grids
+        np.testing.assert_array_equal(herald_grid.times_ns, [19, 20, 21])
+        np.testing.assert_array_equal(later_grid.times_ns, [39, 40, 41])
+        np.testing.assert_array_equal(crossing_grid.times_ns, [36, 37, 38])
+
+    def later_iq(mapping: readout_plan.ReadoutMapping):
+        batch = adc.ReadoutBatch(
+            model, mapping.events, mapping.inverse, output_order=mapping.output_order
+        )
+        result = solver.responses(batch)
+        assert result.event_indices == (0, 1, 1)
+        assert result.sums.shape == (2, 3, 1, 2)
+        # Output column zero is the grid that only intersects terminal.
+        return result.sums[mapping.inverse, result.column_order[mapping.inverse, 0], 0]
+
+    quiet_earlier = replace(earlier, gain=np.zeros(2))
+    quiet_disjoint = replace(disjoint, gain=np.zeros(2))
+    _, _, _, without_tail = plan(
+        replace(base, events=(disjoint, herald, b_only, quiet_earlier, terminal))
+    )
+    _, _, _, changed_nonmember = plan(
+        replace(base, events=(quiet_disjoint, herald, b_only, earlier, terminal))
+    )
+    original = later_iq(mapped)
+    assert np.all(np.linalg.norm(original - later_iq(without_tail), axis=-1) > 1e-4)
+    np.testing.assert_array_equal(original, later_iq(changed_nonmember))
 
 
 @pytest.mark.parametrize("kind", ["pulse", "mux"])

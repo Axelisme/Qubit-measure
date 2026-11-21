@@ -65,6 +65,7 @@ from zcu_tools.simulators.six_fluxonium.environment.results import (
 )
 from zcu_tools.simulators.six_fluxonium.environment.routing import (
     RoutedGroup,
+    receiver_calibration,
     route_request,
 )
 from zcu_tools.simulators.telemetry import RoutingTelemetry
@@ -85,16 +86,9 @@ def _single_settings(
     gen: int,
     flux_phi0: float,
 ) -> SingleFluxoniumSettings:
-    qubits = settings.qubits.ordered()
-    qubit = qubits[cavity]
+    qubit = settings.qubits.ordered()[cavity]
     dc = qubit.dc_bias.source
-    # The pulse receiver uses Q1's calibration; mux receivers follow YAML IDs.
-    receiver = (
-        qubits[0]
-        if channel == settings.pulse_ro_ch
-        else next(q for q in qubits if q.readout.adc.ro_ch == channel)
-    )
-    adc = receiver.readout.adc.model_copy(update={"ro_ch": channel})
+    adc = receiver_calibration(settings, channel)
     return SingleFluxoniumSettings(
         format=qubit.format,
         version=qubit.version,
