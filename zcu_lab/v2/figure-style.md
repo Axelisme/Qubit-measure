@@ -1,4 +1,4 @@
-**讀者：** lab-author、agent。用這份指南設計實驗圖，並檢查操作員能否只靠實驗的呈現判讀結果。
+**讀者：** lab-author、agent。用這份指南撰寫表單、guide 和 recipe 說明、設計實驗圖，並檢查操作員能否只靠這些內容判讀結果。
 
 # 實驗呈現指南
 
@@ -169,3 +169,77 @@ Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二�
 | 計數用 `count`，寫出在數什麼 | `Shots (None)` 或只給數字 | `累積 shots = 8192 count`、`掃描點數 (count)`。 |
 
 可見單位不顯示 `dimensionless`、`None` 或空字串。沒有單位的機率直接用具名機率，如 `P(g,g)`。
+
+## 表單文字
+
+### F1：label 用操作員的物理用語
+
+用量或脈衝的名稱，不用 cfg key 或內部名稱。只改顯示 label，保留 cfg key 及 `qubit1`、`qubit2` 等位置名。欄位名若和 GUI 按鈕撞名，只改 label 來區分。
+
+- 壞例：Ramsey 的重置模組欄位和表單重設按鈕都叫 `Reset`。
+- 好例：把欄位 label 寫成 `Reset method`，cfg key 仍是 `reset`，按鈕仍叫 Reset。
+
+### F2：數值欄位標單位
+
+每個數值欄位都標單位，統一的顯示詞彙以[單位表](#單位)為準。計數與比例要說清楚數的是什麼、比的是什麼。
+
+- 壞例：CZ amplitude 表單的 `Pre-delay` 沒標時間單位，`Scale` 沒說倍率乘在哪裡。
+- 好例：寫「CZ 脈衝前等待 (µs)」及「兩路 CZ 驅動增益倍率 (a.u.)」，並說明倍率 1 代表保留兩路原本的增益。
+
+### F3：description 用一句填寫說明
+
+用一句短句寫填什麼、單位（如適用）與來源（如前置實驗），必填欄位用「填入 …」開頭。只在 label 看不出來時補寫效果，例如頻率是 RF、IF 還是相對量，選項開關做什麼，或留空代表什麼。推導、理由和操作步驟留在 guide。
+
+- 壞例：`Frequency` 的說明只寫「頻率」；`Mixer freq` 的說明沒有交代留空的意思。
+- 好例：Ramsey 的必填 `Pi/2 Pulse` 寫「填入經 Rabi 校準的 π/2 脈衝。」two-tone 的 RF 掃描起點寫「填入驅動 RF 頻率 (MHz)。」可選的 `Mixer freq` 寫「指定混頻器頻率 (MHz)，留空表示不經 mixer。」
+
+### F4：module 與 slot 寫出序列中的角色
+
+在 description 說明 module 或 slot 代表哪個脈衝或讀出。表單能否顯示由 slot 解析出的參數，由框架另行評估。
+
+- 壞例：joint readout 的 `Mux readout` 欄位只列 library 路徑，沒說何時讀出。
+- 好例：「填入已校準的 mux 讀出模組，用於每個 shot 完成準備後的聯合讀出。」
+
+## Operator guide
+
+### Gd1：guide 內容檢查表
+
+用下列項目檢查內容，章節不必照這個順序編排：
+
+- 量什麼，用什麼脈衝序列。用文字示意序列，必要時附圖。
+- 每個參數的作用，以及每張圖支援的判斷（[R1](#r1一張圖支援一個判斷)）。
+- 怎麼判讀、下一步做什麼。需要調參時，寫出怎麼算出方向和改多少。
+- 適用範圍只寫物理假設、observable 和結果能辨識什麼。板子限制與 QICK 等底層問題不放 guide，見 [ADR-0075〈判讀依據放知識庫〉](../../docs/adr/0075-agent-interface-layers.md#判讀依據放知識庫)。
+
+- 壞例：Ramsey guide 只寫「擬合後按需要調整 qubit 頻率」，不說圖上的 detune 是什麼，也沒給修正式。
+- 好例：Ramsey 量自由演化的相干時間，序列是 π/2 → 等待 → 相位隨等待時間改變的 π/2 → 讀出。掃描終點控制能觀察多久的衰減；detune ratio 設定第二個 π/2 的相位每一步改變幾個週期。第一張擬合圖用來讀 T2* 和條紋頻率。要改 `qubit.freq`，用「π/2 來源頻率 + 實際施加的 detune − 擬合條紋頻率」。擬合值若比施加值高 0.002 MHz，就把來源頻率下調 0.002 MHz；若低 0.002 MHz，就上調 0.002 MHz。若只量到衰減的一小段，T2* 主要靠模型外推。
+
+### Gd2：引用博論的版式，說明差異
+
+Ding 博論有相近的圖時，以「版式參考」引圖號和印刷頁碼。寫出 observable、掃描軸或準備態有何不同，不把相近的圖當成同一種實驗。
+
+- 壞例：「CZ amplitude 照 Ding 圖 5-9 量同一個布居。」這沒有指出哪個 panel，也把兩種讀出當成同一量。
+- 好例：「版式參考：Ding 圖 5-9(a,d)（頁 152），把序列畫在資料 panel 上方，並用垂直線標出候選振幅。論文掃驅動電壓 (V)，畫 `|101⟩` 的布居。本實驗掃兩路共同的增益倍率 (a.u.)，圖上是雙 Xπ 序列後的 P(g,g) 回返機率。」
+
+### Gd3：解釋誤差棒與 fit 品質
+
+依 [R11](#r11對數值大小敏感的一維資料畫-error-bar) 寫明 error bar 的來源。依 [R3b](#r3b結果旁寫-fit-品質) 解釋 core 或分析已回傳的品質指標。有既有判準才列出判準，guide 不另訂門檻。
+
+- 壞例：「誤差如圖，R² 越大越好。」讀者不知道誤差棒來自哪裡，也不知道分析如何使用 R²。
+- 好例：reference RB 寫「每個 Clifford depth 的誤差棒是跨 seeds 的一個樣本標準差，不是平均值的標準誤。」T2 Echo 可寫「R² 是擬合所用量測點的決定係數；R² 低於 0.9 時，寫回候選不會預先勾選，須人工審查。這是既有的選取條件之一。」
+
+## Recipe 說明
+
+### S1：input 指明對應的表單欄位
+
+對應表單量測參數的 input，description 用與表單相同的 label 與單位，並寫出它設定哪個欄位。若同名欄位出現在多處，連同上層 label 一起寫。控制欄位如 `target`、`reuse_tab_id` 與 `overrides` 說明自己的作用，見[Recipe 撰寫](measure-authoring.md#recipe-撰寫)。
+
+- 壞例：Ramsey 的 `max_delay_us` 只寫「掃描上限」，沒有指出是時間掃描或對應哪一欄。
+- 好例：若表單的 `Delay › Stop` 標 µs，description 就寫「設定 Delay › Stop (µs)，即自由演化時間掃描的終點。」若 recipe 的 `points` 設的是 `Delay › Expts`，就寫「設定 Delay › Expts (count)，即延遲掃描的點數。」
+
+### S2：report 的數值沿用 Analyze 摘要名稱
+
+Report 的數值帶名稱與單位。和 [Analyze 摘要](#r10圖放理論重點採集設定放摘要)語意相同的量用同一個名稱。摘要 key 以 core 結果的欄位名為準，不另造 summary model。
+
+- 壞例：Ramsey report 寫 `detune = 0.402`，摘要把這個值叫條紋頻率，讀者可能誤認成施加的 detune。
+- 好例：report 和 Analyze 摘要都把這個量標為「擬合條紋頻率 = 0.402 MHz」。摘要 key 沿用 core 的 `detune`，不另造 `fringe_freq`。若摘要也列施加值，另用「實際施加的 detune」區分。
