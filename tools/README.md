@@ -194,7 +194,9 @@ Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆�
 
 Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`，再落盤 `run_failed` 列。該列記 Run 起點、收到失敗事件的時刻，以及 Controller 提供的錯誤類型與訊息。`failure_record` 是相對於該列 `case_directory` 的診斷檔路徑。失敗列不填 Run 或核心秒數。工具寫完該列才檢查 Controller 是否 idle；若仍有活動中的操作，就停止派送。摘要分別計數成功計時、`timeout` 與 `run_failed`。`Run failures` 按完全相同的 Controller 診斷分組，每組列出 adapter key 與診斷檔路徑。工具不推斷根因。
 
-Open 加上覆寫後仍缺欄位或 slot 時，`missing_defaults` 列出表單的錯誤，不送出 Run。[案例宣告](data/experiment_wall_time/case-inputs.json)列出這個 FTF 環境無法執行的 adapter；這些 `not_runnable` 列只寫原因，不複製 project 或啟動 Run。工具例外、未知 Run outcome、環境組裝、journal 錯誤與 telemetry 格式錯誤會中止指令，不轉成案例狀態。重建與續跑都拒絕 adapter key 不符的結果列，以及沒有有效 Run 秒數的 `ok` 或 `missing_breakdown` 列。
+Open 加上覆寫後仍缺欄位或 slot 時，`missing_defaults` 列出表單的錯誤，不送出 Run。[案例宣告](data/experiment_wall_time/case-inputs.json)列出本批固定環境與輸入下無法執行的 adapter。這些 `not_runnable` 列只寫原因，不複製 project、不開表也不啟動 Run。「FTF 不能跑」包含兩類原因：六個 JPA 入口沒有模型或裝置；`two_qubit/rb`、`two_qubit/rb_heralded`、`two_qubit/cz_optimize` 在固定 `ftf-demo/initial` 缺 Open 所需的 Q1／Q2 有序 Local Z 配對 `$coupler.ext.cz_phase`。後三列需上游校準，未計時，不表示 FTF 不支援這些實驗。
+
+工具例外、未知 Run outcome、環境組裝、journal 錯誤與 telemetry 格式錯誤會中止指令，不轉成案例狀態。重建與續跑都拒絕 adapter key 不符的結果列，以及沒有有效 Run 秒數的 `ok` 或 `missing_breakdown` 列。
 
 批次中斷時，有 `start.json` 但沒有 `row.json` 的列記為 `incomplete`。這種列的 `started_at` 是派送前記下的時刻，不代表 Run 已送出。兩份紀錄都沒有的列記為 `not_run`。兩種列的 Run 秒數和下限都寫 `null`，摘要的 Run 欄顯示「—」。全表需要每個註冊的 adapter 都有成功計時、`timeout`、`run_failed`、`missing_defaults` 或 `not_runnable` 的結果。`incomplete` 和 `not_run` 不算已記錄結果。
 

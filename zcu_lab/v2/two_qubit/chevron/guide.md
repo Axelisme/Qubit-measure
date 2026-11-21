@@ -8,10 +8,10 @@ Scan common drive frequency in MHz and common envelope duration in us.
 Each shot emits optional reset, nominal B11 preparation, simultaneous two-line
 drive, double Xπ contrast and one terminal mux readout.
 `reset=None` emits no reset. Set a reset cfg only after reviewing its pulse
-and timing against the authorized limits. Defaults recaptures
+and timing against the authorized limits. The Defaults button recaptures
 inputs; it does not emit a reset pulse.
 
-Both role tones require circle classifiers with g/e centers and radius.
+Both qubit tones require circle classifiers with g/e centers and radius.
 Run mux singleshot GE Post under these readout conditions before Run.
 Missing classifiers, linear classifiers and missing radii make the cfg invalid.
 Classification happens during acquisition, not during analysis.
@@ -19,16 +19,23 @@ The three classes are g, e and other. Other stays in the denominator.
 
 ## Prepare the Form
 
-Bind `f1`, `f2`, `coupler` and `mux`, then open the tab or choose Defaults.
-Review the captured identities and original tone positions from the mux group.
+In the point's Aliases table, bind `$qubit1` and `$qubit2` to distinct components.
+Bind `$mux` to their mux group and `$coupler` to the component that stores
+the pair's CZ pulses. Rebind older points in the same table. GUI aliases
+and Notebook's built-in roles of the same names are separate.
+Opening the tab or choosing Defaults uses `$mux.qubits` to set two hidden tone indices.
+If the capture has no `$coupler` binding, the form reports it before Run.
 Check both Xπ pulses and all mux tones, ADC routes and scalar timing.
 Readout references `$mux.module.readout` when present. Otherwise fill the blank
 mux template, including classifiers. Missing sources remain required inputs.
 
-The coupler's `cz_f1` and `cz_f2` slots seed editable ordinary charge pulses.
-Without slots, fill both cosine templates, including signed gain, frequency,
-envelope length and Nyquist zone. Channels come from captured role wiring.
-Only F1/F2 charge lines play the drive; the coupler stays DC-biased.
+The coupler's `cz_qubit1` and `cz_qubit2` slots seed editable charge pulses
+in `drive.qubit1` and `drive.qubit2`. On an older point, set these slot names
+and use the same new names for their pulse library keys.
+If a slot is missing, enter signed gain, envelope length and Nyquist zone in
+the cosine template. The channel comes from that qubit's captured wiring.
+The common scan sets both frequencies.
+Only Qubit1/Qubit2 charge lines play the drive; the coupler stays DC-biased.
 Both source frequencies, envelope lengths and pre-delays must match.
 The sequence waits for both drive pulses, including their individual post-delays.
 Keep the signed gain ratio fixed.
@@ -37,14 +44,13 @@ Individual phases remain fixed; choose relative phase with constructive_phase fi
 Only common envelope duration changes within each trace.
 
 The Form lists reset, Xπ preparation pulses, dual-line drive and readout in
-playback order, followed by captured roles. Set the outer common frequency
-sweep before the inner duration sweep. Repetitions, rounds and acquisition
+playback order. Set the outer common frequency sweep before the inner
+duration sweep. Repetitions, rounds and acquisition
 delays appear last.
 Enter finite scan endpoints and strictly positive durations.
 Review repetitions, rounds, optional reset and timing before Run.
-Refresh updates choices without overwriting authored inputs.
-After changing the parameter source, use Defaults to recapture inputs.
-Defaults can overwrite unsaved inputs.
+Refresh keeps authored inputs and rechecks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
+Use Defaults to replace unsaved input with initial values from the new source.
 
 ## Read the figures
 
@@ -73,7 +79,7 @@ window for later amplitude and phase calibration.
 
 Native save keeps the complete source cfg, coordinate and duration axes, and
 float64 `sums` with shape `(Nc,Nd,3,3)`.
-Class axes are terminal F1, terminal F2.
+Class axes are terminal Qubit1, terminal Qubit2.
 Every class axis is ordered g, e, other.
 Rounds accumulate during acquisition without normalization.
 File size does not grow with repetitions or rounds.
@@ -82,13 +88,15 @@ A point with counts from at least one completed round can enter the fit if it ha
 Fits require all requested shots at every point of a duration trace.
 Always check the execution status before accepting partial results.
 
-Load leaves the current Form unchanged. Analysis uses the saved cfg and counts.
-Old raw-IQ files without `sums` are rejected; there is no format fallback.
+Cfg schema is 5.0. Load leaves the current form unchanged, and analysis uses the
+saved cfg and counts. The current Load rejects older files whose axis names no
+longer match. Use the matching older version to read the original file. No cfg
+or file conversion runs on Load.
 
 ## Select shots with mux herald
 
 Choose `reset/mux_herald` in Reset. Use the same mux readout as the terminal
-readout. Set `keep: {'0': g, '1': g}` if F1 and F2 occupy positions 0 and 1.
+readout. Set `keep: {'0': g, '1': g}` if Qubit1 and Qubit2 occupy positions 0 and 1.
 Use their original tone positions from the full readout, not their ADC numbers.
 
 Probabilities are conditional on passing herald. Divide each terminal class
@@ -102,7 +110,8 @@ Validate the actual FTF control chain separately from offline compile checks.
 
 ## Notebook
 
-Use the adapter with a complete saved or operator-reviewed cfg.
+Supply a complete cfg. Set `qubit1_tone` and `qubit2_tone` to zero-based
+positions in the full readout.
 `point_view` is the bound ParameterView for the save destination.
 
 ```python
@@ -125,7 +134,7 @@ Jeffreys-smoothed variance so observations at zero or one retain finite weight.
 
 ## Calibration order and field units
 
-Calibrate each role's Xπ slot with amplitude and length Rabi before using it.
+Calibrate each qubit's Xπ slot with amplitude and length Rabi before using it.
 Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
 Use conditional spectroscopy to choose the charge-line frequency.
 The operator must confirm the common duration range in us before Run.

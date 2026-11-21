@@ -10,24 +10,26 @@ from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
 )
 
-from .._measure import captured_roles
+from .._measure import TwoQubitForm, captured_qubits
 from .core import SpectroscopyCfg
 
 
 def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
-    """Capture roles, preparation/readout and available ordinary CZ pulse slots.
+    """Seed spectroscopy from GUI aliases $qubit1, $qubit2 and $mux.
 
-    Existing coupler CZ slots are editable starting points, not assumed weak
-    probes. Without a slot, offer an explicit cosine envelope on the role's
-    captured wiring channel; gain, duration and Nyquist zone remain required
-    operator inputs. Run supplies both drive frequencies from the common scan.
+    The fixed capture seeds hidden tone indices; no $coupler binding is needed.
+    Notebook bindings of the same names are separate. Missing or inconsistent
+    qubit/mux bindings raise ValueError. Available coupler CZ slots are editable
+    starting points, not assumed weak probes. Without a slot, offer a cosine
+    on the qubit's captured channel; gain, duration and Nyquist zone remain
+    required. Run supplies both drive frequencies from the common scan.
     No model truth or safe-drive defaults are supplied. The frequency scan must
     be entered. Optional DC starts disabled.
     """
-    roles = captured_roles(ctx)
+    qubits = captured_qubits(ctx)
     drive = {}
-    for role in ("f1", "f2"):
-        slot = f"$coupler.module.cz_{role}"
+    for position in ("qubit1", "qubit2"):
+        slot = f"$coupler.module.cz_{position}"
         # The run overrides both pulse frequencies with the common sweep.
         node = source(
             ctx,
@@ -35,7 +37,7 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
             Template(
                 "pulse:blank",
                 set={
-                    "ch": Expr(f"${role}.wiring.ch"),
+                    "ch": Expr(f"${position}.wiring.ch"),
                     "nqz": None,
                     "freq": Hidden(0.0),
                     "gain": None,
@@ -46,18 +48,20 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
         )
         if isinstance(node, Slot):
             node = replace(node, copy=True, set={"freq": Hidden(0.0)})
-        drive[role] = node
+        drive[position] = node
     readout = mux_readout_initial(ctx)
-    return Form(
+    return TwoQubitForm(
         SpectroscopyCfg,
+        readout_of=lambda cfg: cfg.readout,
         tree={
             "reps": 1000,
             "rounds": 10,
             "relax_delay": 1.0,
-            "roles": roles,
+            "qubit1_tone": Hidden(qubits.qubit1_tone),
+            "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
-            "x180_f1": Slot("$f1.module.x180", copy=True),
-            "x180_f2": Slot("$f2.module.x180", copy=True),
+            "x180_qubit1": Slot("$qubit1.module.x180", copy=True),
+            "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
             "readout": readout,
             "drive": drive,
             "frequency": Range(None, None, expts=101),

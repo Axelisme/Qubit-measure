@@ -4,13 +4,15 @@
 
 **Last updated:** 2026-11-20, per-depth seed spread
 
-Cfg schema 3.0 requires `x180_f1` and `x180_f2`.
+Cfg schema 4.0 uses `qubit1` and `qubit2` positions.
 
 Select `two_qubit/rb_heralded`. Calibrate X90 and X180 on both roles, full mux
 readout, both CZ pulses and ordered local-Z corrections as described in the
-[ordinary RB guide](guide.md). Opening the tab or choosing Defaults captures the same module slots.
+[ordinary RB guide](guide.md). Follow its rebinding steps for an older point.
+Opening the tab or choosing Defaults captures the same module slots and checks that the local-Z pair names match the two captured components in order.
 The cfg deduplicates and sorts both `depth` and `seed` so that the saved cfg
-matches the data axes. Refresh preserves authored inputs.
+matches the data axes. As in ordinary RB, Refresh keeps the draft and rechecks the
+[mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
 
 ## Shot sequence
 
@@ -21,7 +23,7 @@ Herald and terminal emit the same full mux module with tags `herald` and
 The recovered sequence has net logical identity. A herald gg state should
 return to gg, and an ee state should return to ee.
 
-Both F1 and F2 tones require circle classifiers with radius from GE Post.
+Both Qubit1 and Qubit2 tones require circle classifiers with radius from GE Post.
 Missing calibration, missing radius or linear classification fails before Run.
 Repeat GE and Post after changing readout settings. Classification happens
 during acquisition for both tagged reads, with g, e and other outcomes.
@@ -49,7 +51,7 @@ decay times and the same formula used for the ring-up seed. For a shared
 
 In a low-SNR FTF example, R2's linewidth was about 1.2 MHz. Five photon
 decay times are about 0.66 µs, and 2 µs is about 15 times one photon decay
-time. After gg herald and a nominal F2 Xπ, F2's terminal e fraction was
+time. After gg herald and a nominal Qubit2 Xπ, Qubit2's terminal e fraction was
 11.6% at 0 µs and 92.9% at 2 µs. These fractions do not subtract the I
 baseline. The 2 µs value was a comparison point, not a minimum or an optimum.
 
@@ -96,7 +98,7 @@ shots per depth per round. The acquisition reducer adds the counts from
 finished rounds.
 
 Result `sums` has float64 shape `(Nseed, 2, Nd, 3, 3, 3, 3)`. The axes are
-seed, arm, depth, herald F1, herald F2, terminal F1 and terminal F2. Arm 0 is
+seed, arm, depth, herald Qubit1, herald Qubit2, terminal Qubit1 and terminal Qubit2. Arm 0 is
 reference and arm 1 is CZ-interleaved. Each class axis is ordered g, e, other.
 Save keeps all 81 unnormalized class counts per cell. Neither `reps` nor
 `rounds` adds to the storage size.
@@ -104,7 +106,7 @@ Save keeps all 81 unnormalized class counts per cell. Neither `reps` nor
 Stop keeps counts from finished rounds for the current seed and arm. A cell
 with none stays NaN. Native Load restores the saved run without changing the
 current Form. Load rejects files with a round axis (wrong number of axes) or
-older raw-IQ files without `sums`. It does not convert them.
+older raw-IQ files without `sums`. It also rejects results with incompatible axis names. To read the original file, use the corresponding older release. Load does not convert or modify the file.
 
 For each cell, gg survival is the terminal gg count divided by all terminal
 counts for herald gg. The ee ratio uses terminal ee and all terminal counts
@@ -176,8 +178,7 @@ appearance. Those require the separate offline validation.
 
 ## Notebook
 
-Use a validated `RBHeraldedCfg` as `cfg`. Supply the notebook's existing
-hardware handles, device manager and destination `point_view`.
+Use a validated `RBHeraldedCfg` as `cfg` and set the two tone indices in the full readout. Notebook roles use `qubit1` and `qubit2`, but are separate from GUI aliases and do not bind them automatically. Supply the notebook's existing hardware handles, device manager and destination `point_view`.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter

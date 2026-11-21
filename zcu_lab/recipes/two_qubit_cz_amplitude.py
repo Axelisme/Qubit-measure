@@ -25,7 +25,7 @@ class CZAmplitudeInputs(RecipeInputs):
 
     target: TwoQubitTarget | None = Field(
         default=None,
-        description="Role bindings for this Reset. Omitted or null roles keep the current aliases.",
+        description="Position bindings for this Reset. Omitted or null positions keep the current aliases.",
     )
     reuse_tab_id: ReuseTabId
     overrides: Overrides

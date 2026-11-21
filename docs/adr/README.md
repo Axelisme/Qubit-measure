@@ -82,6 +82,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：實驗 cfg 可為統一命名改欄位；改名升 schema major，不遷移、不留 alias，舊 run 在結果仍相容時保留 Result 與 metadata，見 [ADR-0069](0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。
 
+原則：adapter 解析元件身分，cfg 收位置數值，分析 options 收顯示名。同一位置不跨層翻譯，實驗只驗所需能力，見 [ADR-0069](0069-experiment-core-and-frontends.md#身分定位與顯示)。
+
 原則：懂物理的操作員不讀程式碼就能判讀實驗。圖只放判讀所需資訊，實際採集設定放摘要，見 [ADR-0069](0069-experiment-core-and-frontends.md#呈現規範)。
 
 原則：只有準備誤差不移動 gg、ee 兩組共用的參數時，才保留獨立 heralded 實驗，見 [ADR-0074](0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)。

@@ -6,32 +6,35 @@
 
 Open `two_qubit/cz_amplitude` for a return scan. Leave `reset` unset to omit reset.
 
-Bind `f1` and `f2` to distinct fluxoniums, `coupler` to their transmon,
-and `mux` to a MuxGroup containing both qubits. Opening the tab or choosing Defaults captures aliases,
-parameters and library once. Refresh preserves authored inputs.
+Bind `qubit1` and `qubit2` to distinct qubits and `mux` to a group containing both.
+Bind `coupler` to the component that stores their CZ pulses.
+Notebook uses the same built-in position names, but does not bind the GUI aliases.
+For an existing point, bind the new aliases. Rename both CZ slots and their library keys to
+`cz_qubit1` and `cz_qubit2`. Make each slot point to its renamed key.
+Opening the tab or choosing Defaults captures aliases, parameters and library once. Refresh keeps the draft and checks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
 After changing bindings or calibrations, choose Defaults and check the whole Form again.
 
 ## Preparation and inputs
 
-Supply calibrated `$f1.module.x180`, `$f2.module.x180`, and the complete mux
+Supply calibrated `$qubit1.module.x180`, `$qubit2.module.x180`, and the complete mux
 readout. Readout references `$mux.module.readout` when present.
 Without that slot, fill every required field in the blank mux template.
-Keep all tones in their original order. F1/F2 use their captured tone positions.
+Keep all tones in their original order. Opening the tab or choosing Defaults sets hidden tone indices from `$mux.qubits`.
 
-Both role tones require circle classifiers with radius. Missing classifiers,
+Both qubit tones require circle classifiers with radius. Missing classifiers,
 linear classifiers and missing radii make the cfg invalid before Run.
 Run GE Post under the same readout conditions first.
 Classification produces g, e and other. Other stays in the probability denominator.
 
-The two ordinary CZ pulses start from `$coupler.module.cz_f1` and `cz_f2` when
+The two ordinary CZ pulses start from `$coupler.module.cz_qubit1` and `cz_qubit2` when
 available. Without those slots, enter frequency, signed gain, Nyquist zone and
 cosine duration. Generator fields come from captured wiring.
 Both pulses need matching frequency, duration and pre-delay on independent
 generators. Their post-delays may differ; the sequence waits for both.
 Only the two charge lines are driven. The coupler stays DC-biased.
 
-Both Forms list reset, F1/F2 Xπ, dual-line drive and mux readout first.
-Captured roles, the `scale` sweep and acquisition settings follow.
+Both Forms list reset, Qubit1/Qubit2 Xπ, dual-line drive and mux readout first.
+The `scale` sweep and acquisition settings follow.
 Enter a finite, nonnegative, strictly increasing common gain-scale range in `scale`.
 The scan multiplies both original signed gains by that scale.
 Frequency, waveform, duration, relative phase and signed gain ratio stay fixed.
@@ -89,18 +92,19 @@ Both versions propose the same four independent rows:
 
 | Target | Proposal |
 | --- | --- |
-| `$coupler.pulses.cz_f1` | Source F1 pulse with gain multiplied by the fitted scale. |
-| `$coupler.module.cz_f1` | Concrete key for that pulse in the Run/Load capture. |
-| `$coupler.pulses.cz_f2` | Source F2 pulse with gain multiplied by the same scale. |
-| `$coupler.module.cz_f2` | Concrete key for that pulse in the same capture. |
+| `$coupler.pulses.cz_qubit1` | Source Qubit1 pulse with gain multiplied by the fitted scale. |
+| `$coupler.module.cz_qubit1` | Concrete key for that pulse in the Run/Load capture. |
+| `$coupler.pulses.cz_qubit2` | Source Qubit2 pulse with gain multiplied by the same scale. |
+| `$coupler.module.cz_qubit2` | Concrete key for that pulse in the same capture. |
 
 Only the gains change. Preview the destination, generator, signed gain,
-frequency, relative phase and waveform. Proposals use the saved run cfg and
-require matching captured role identities.
+frequency, relative phase and waveform. Pulses come from the saved run cfg.
+The original Run or Load capture supplies the coupler, even if you change aliases afterward.
+Writeback fails without that capture.
 
 Select the rows you accept, then press Apply Selected.
 Pulse rows and slot rows apply independently. Apply each required slot explicitly.
-Choose Defaults in other open tabs to capture accepted calibrations.
+Choose Defaults in other open forms to capture accepted calibrations.
 Alternate amplitude and conditional-phase/frequency manually.
 After changing pulse shape, duration, phase, gain, frequency or bias,
 recheck CZ and remeasure both local-Z corrections.
@@ -108,13 +112,14 @@ recheck CZ and remeasure both local-Z corrections.
 ## Save, load and partial data
 
 Save stores the source cfg and float64 `sums` with shape `Ns × 3 × 3`.
-Class axes are terminal F1 then terminal F2, each g, e, other.
+Class axes are terminal Qubit1 then terminal Qubit2, each g, e, other.
 Counts remain unnormalized. Storage does not grow with the shot count.
 Unmeasured scales are NaN. Cancellation retains completed rounds.
 
 Native Load restores the saved counts and cfg without changing current Form inputs.
-The cfg schema is 5.0. Older cfgs using `scales` do not restore.
-Their saved counts and axes still load and can be plotted, but fitting requires cfg.
+The cfg schema is 6.0. Native Load rejects older results whose axis names do not match this layout.
+Keep the original file and use the matching older version to read it.
+If the result layout matches but the cfg major does not, Load retains Result and metadata without cfg. Fitting requires cfg.
 Analysis never looks up current calibrations. Missing saved cfg prevents the fit.
 Old per-shot IQ files without sums are rejected; there is no automatic conversion.
 `stop_requested` records a stop request, not data completeness.
@@ -124,7 +129,7 @@ new record and leaves the previous successful record unchanged, even after Stop.
 ## Select shots with mux herald
 
 Choose `reset/mux_herald` in Reset. Use the same mux readout as the terminal
-readout. Set `keep: {'0': g, '1': g}` if F1 and F2 occupy positions 0 and 1.
+readout. Set `keep: {'0': g, '1': g}` if Qubit1 and Qubit2 occupy positions 0 and 1.
 Use their original tone positions from the full readout, not their ADC numbers.
 
 Probabilities are conditional on passing herald. Divide each terminal class
@@ -156,9 +161,9 @@ Jeffreys-smoothed variance so observations at zero or one retain finite weight.
 
 ## Calibration order and field units
 
-Calibrate each role's Xπ slot with amplitude and length Rabi before using it.
+Calibrate each qubit's Xπ slot with amplitude and length Rabi before using it.
 Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
 Use lookback to set mux timing, then mux onetone to set frequencies and gains.
 Confirm readout timing in us and gains in [-1, 1], then repeat GE Post under those conditions.
-Choose the dual-line CZ pulse with chevron and confirm the coupler's `cz_f1` and `cz_f2` slots.
+Choose the dual-line CZ pulse with chevron and confirm the coupler's `cz_qubit1` and `cz_qubit2` slots.
 The operator must confirm the common gain-scale range before Run.

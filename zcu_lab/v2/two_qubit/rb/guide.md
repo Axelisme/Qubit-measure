@@ -4,21 +4,22 @@
 
 **Last updated:** 2026-11-20, per-depth seed spread
 
-Cfg schema 6.0 requires `x180_f1` and `x180_f2`.
+Cfg schema 7.0 uses `qubit1` and `qubit2` positions.
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+Refresh keeps authored input and rechecks it against the new capture, including the [mux tone count](../guide.md#綁定位置與讀出-tones). Use Defaults to replace unsaved input with initial values from the new source.
 
 ## Before run
 
-Select `two_qubit/rb` after calibrating the F1/F2 X90 and X180 pulses, complete mux readout,
+Select `two_qubit/rb` after calibrating the Qubit1/Qubit2 X90 and X180 pulses, complete mux readout,
 two charge-line CZ pulses and their local-Z corrections. Bind scalar aliases
-`f1`, `f2`, `coupler` and `mux`, then open the tab or choose Defaults. The fixed capture
-maps logical Q0 to F1 and Q1 to F2. Their tone positions come from the captured
-MuxGroup `qubits` order. Use those positions to identify the roles.
+`qubit1`, `qubit2`, `coupler` and `mux`, then open the tab or choose Defaults. The fixed capture
+maps logical Q0 to Qubit1 and Q1 to Qubit2. Their tone positions come from the captured
+`$mux.qubits` list. Bind the two positions to distinct components listed there.
+When reusing an older point, bind the new qubit aliases and rename the CZ slots and pulse library keys to `cz_qubit1` and `cz_qubit2`. Rerun [local Z](../local_z/guide.md) and apply its proposal to populate the new pair keys below.
 
 Readout references `$mux.module.readout`, preserving the library's complete tones and scalar settings. A missing readout slot stays Invalid.
-The Form copies `$f1.module.x90`, `$f1.module.x180`, `$f2.module.x90`,
-`$f2.module.x180`, `$coupler.module.cz_f1` and `$coupler.module.cz_f2`.
+The Form copies `$qubit1.module.x90`, `$qubit1.module.x180`, `$qubit2.module.x90`,
+`$qubit2.module.x180`, `$coupler.module.cz_qubit1` and `$coupler.module.cz_qubit2`.
 Missing pulse slots stay Invalid. Each X pulse uses the generator of its
 role's CZ line and a finite scalar phase. Supply measured calibration for
 every required slot. The ordinary
@@ -26,15 +27,14 @@ CZ pulses use independent generators, the same frequency and envelope duration,
 and a common start. Their individual gains and constructive relative phase
 remain unchanged throughout a sequence.
 
-The required `$coupler.ext.cz_phase` input contains `f1`, `f2`,
-`correction_f1_deg` and `correction_f2_deg`. Names must match the ordered source
-F1/F2 components. Swapping the roles invalidates the pair. Corrections are
+The required `$coupler.ext.cz_phase` input contains `qubit1`, `qubit2`,
+`correction_qubit1_deg` and `correction_qubit2_deg`. Opening the tab or choosing Defaults checks the names against the captured components in order and reports the mismatched position. The cfg keeps only the angles. Corrections are
 logical Z angles in degrees, normally minus the corresponding measured local-Z
 slope. Missing angles remain invalid. Review any operator override against measured
 calibration before Run; model hypotheses only describe assumed behavior.
 
 The saved readout cfg must supply circle g/e centers and radius at
-`roles.f1_tone` and `roles.f2_tone`, not by ADC sorting. Run rejects missing,
+`qubit1_tone` and `qubit2_tone`, not by ADC sorting. Opening the tab or choosing Defaults fills these hidden fields. Run rejects missing,
 linear or radius-free classifiers and requests GE Post. After changing readout
 settings, repeat GE and Post before using the classifiers.
 
@@ -44,7 +44,7 @@ tones before the sequence, select a `reset/mux_herald` module in Reset.
 The Form does not offer `reset/herald`, which requires a pulse readout.
 The module's `readout` must match the terminal Readout field, including the
 classifiers and the full tone order. Reference the same library key in both
-fields. For F1 and F2 at positions 0 and 1 in the full tone list, the module is:
+fields. For Qubit1 and Qubit2 at positions 0 and 1 in the full tone list, the module is:
 
 ```yaml
 type: reset/mux_herald
@@ -52,7 +52,7 @@ readout: MG12.readout.main
 keep: {'0': g, '1': g}
 ```
 
-Use the actual F1 and F2 tone positions, not ADC numbers. Quote both keys.
+Use the actual Qubit1 and Qubit2 tone positions, not ADC numbers. Quote both keys.
 An optional `prepare` emits one ordinary reset or pulse before the herald read.
 The mux readout's delays apply to both reads. RB saves only terminal counts
 from shots that pass both herald classifications. To preserve all herald
@@ -111,7 +111,7 @@ shots per depth per round. The acquisition reducer adds counts from finished
 rounds.
 
 Without reset, the nominal B00 start leaves the thermal initial population in
-place. Terminal F1/F2 classification happens during acquisition. Circle outcomes
+place. Terminal Qubit1/Qubit2 classification happens during acquisition. Circle outcomes
 are g, e and other. Radius boundaries and equidistant points are other.
 The live plot shows joint00 from accepted counts accumulated over seeds and
 rounds in each arm. This count-weighted view is not the equal-seed decay fit.
@@ -119,7 +119,7 @@ rounds in each arm. This count-weighted view is not the equal-seed decay fit.
 ## Save, cancel and analyze
 
 Result `sums` is float64 with shape `(Nseed, 2, Nd, 3, 3)` and axes
-(seed, arm, depth, F1 class, F2 class). Arm 0 is reference and arm 1 is
+(seed, arm, depth, Qubit1 class, Qubit2 class). Arm 0 is reference and arm 1 is
 CZ-interleaved. Each class axis is ordered g, e, other. Counts preserve
 joint outcomes from each kept shot. Neither the round count nor heralding
 adds a Result axis. On a full run, divide the total counts in a cell by
@@ -132,7 +132,7 @@ exceptions propagate from Run and leave the previous successful record
 unchanged. Save counts and cfg before closing the source. Load restores the
 saved source without changing the current Form. Load rejects files with a
 round axis (wrong number of axes) or older raw-IQ files without `sums`.
-It does not convert them.
+It also rejects results with incompatible axis names. To read the original file, use the corresponding older release. Load does not convert or modify the file.
 
 Analyze divides each cell's terminal gg count by that cell's total accepted
 count, including other. Zero accepted shots give NaN survival; a finite
@@ -197,8 +197,7 @@ physical calibration acceptance is manual.
 
 ## Notebook
 
-Use a validated `RBCfg` as `cfg`. Supply the notebook's existing hardware
-handles, device manager and destination `point_view`.
+Use a validated `RBCfg` as `cfg` and set the two tone indices in the full readout. Notebook roles use `qubit1` and `qubit2`, but are separate from GUI aliases and do not bind them automatically. Supply the notebook's existing hardware handles, device manager and destination `point_view`.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter
@@ -220,4 +219,4 @@ Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
 Use lookback to set mux timing, then mux onetone to set frequencies and gains.
 Confirm readout timing in us and gains in [-1, 1].
 Locate the dual-line CZ pulse with conditional spectroscopy and chevron.
-Confirm the coupler's `cz_f1` and `cz_f2` slots before copying them into the Form.
+Confirm the coupler's `cz_qubit1` and `cz_qubit2` slots before copying them into the Form.
