@@ -39,10 +39,9 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._drive import DualLineCfg
-from .._phase import QuadraturePhase, count_phase, sigma_variance
-from .._readout import JointRoles
-from .._sums import sigma, validate_classifiers
+from .._drive import QubitDriveCfg
+from .._phase import QuadraturePhase, count_phase, qubit_sigma_variance
+from .._sums import qubit_sigma, validate_qubit_tones
 from .crossing import PhaseCrossings, phase_crossings
 
 
@@ -51,7 +50,7 @@ class ConditionalPhaseResult:
     """Summed counts with branch × quadrature × n × frequency leading axes.
 
     Fixed spectator states [0,1] denote I/Xπ; quadratures [0,1] denote X/Y.
-    sums is float64 with terminal F1/F2 g/e/other class axes, each length 3.
+    sums is float64 with terminal Qubit1/Qubit2 g/e/other class axes, each length 3.
     Rounds add without averaging. Unmeasured points remain NaN.
     """
 
@@ -85,51 +84,51 @@ class ConditionalPhaseAnalysis:
 
 
 class ConditionalPhaseCfg(ConfigBase):
-    """Independent X/Y projections with acquisition-side F1/F2 classification.
+    """Independent X/Y projections with acquisition-side Qubit1/Qubit2 classification.
 
     Frequencies are MHz, phases degrees and delays us. reps is shots per round;
-    rounds accumulate counts at acquisition. F1/F2 require circle classifiers
+    rounds accumulate counts at acquisition. Qubit1/Qubit2 require circle classifiers
     with GE Post radii. reset=None skips reset; otherwise reset starts each shot.
-    target is lowercase f1/f2; gate_count contains unique positive train lengths.
+    target is lowercase qubit1/qubit2; gate_count contains unique positive train lengths.
     """
 
     reset: Annotated[
         Reset.Cfg | None,
         FieldMeta(label="Reset", description="Optional reset before each shot."),
     ] = None
-    x180_f1: Annotated[
+    x180_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F1 Xπ",
-            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit1 Xπ",
+            description="Calibrated Qubit1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
-    x180_f2: Annotated[
+    x180_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F2 Xπ",
-            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit2 Xπ",
+            description="Calibrated Qubit2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
-    x90_f1: Annotated[
+    x90_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F1 Xπ/2",
-            description="Calibrated F1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit1 Xπ/2",
+            description="Calibrated Qubit1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
-    x90_f2: Annotated[
+    x90_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F2 Xπ/2",
-            description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit2 Xπ/2",
+            description="Calibrated Qubit2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     drive: Annotated[
-        DualLineCfg,
+        QubitDriveCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="F1/F2 charge-line CZ pulses from the calibrated coupler slots.",
+            description="Qubit1/Qubit2 charge-line CZ pulses from the calibrated coupler slots.",
         ),
     ]
     readout: Annotated[
@@ -139,8 +138,21 @@ class ConditionalPhaseCfg(ConfigBase):
             description="Full-group mux readout with calibrated frequencies, gains and timing.",
         ),
     ]
-    roles: JointRoles
-    target: Literal["f1", "f2"] = "f1"
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based Qubit1 position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based Qubit2 position in the full mux readout.",
+        ),
+    ]
+    target: Literal["qubit1", "qubit2"] = "qubit1"
     gate_count: list[Annotated[int, Field(strict=True, ge=1)]] = Field(
         default_factory=lambda: [1, 2, 3], min_length=2
     )
@@ -179,16 +191,14 @@ class ConditionalPhaseCfg(ConfigBase):
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
-        """Reject mismatched role generators, nonfinite frequencies and repeated n."""
-        validate_classifiers(self.readout, self.roles)
+        """Reject mismatched qubit generators, nonfinite frequencies and repeated n."""
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
         for drive, x180, x90 in (
-            (self.drive.f1, self.x180_f1, self.x90_f1),
-            (self.drive.f2, self.x180_f2, self.x90_f2),
+            (self.drive.qubit1, self.x180_qubit1, self.x90_qubit1),
+            (self.drive.qubit2, self.x180_qubit2, self.x90_qubit2),
         ):
             if drive.ch != x180.ch or drive.ch != x90.ch:
-                raise ValueError(
-                    "CZ, Xπ and X90 must use the same captured role generator"
-                )
+                raise ValueError("CZ, Xπ and X90 must use the same qubit generator")
             if not isinstance(x90.phase, (int, float)) or not np.isfinite(x90.phase):
                 raise ValueError("X90 phase must be a finite scalar")
         frequency = sweep2array(self.frequency)
@@ -201,17 +211,17 @@ class ConditionalPhaseCfg(ConfigBase):
 
 def count_quadratures(
     counts: NDArray[np.float64],
-    target: Literal["f1", "f2"],
+    target: Literal["qubit1", "qubit2"],
 ) -> CountQuadratures:
     """Reduce terminal (...,3,3) counts to sigma, variance and shot totals.
 
-    counts holds g/e/other terminal shot totals; target selects the f1 or f2
+    counts holds g/e/other terminal shot totals; target selects the qubit1 or qubit2
     marginal. Return CountQuadratures on the preceding scan axes, leaving counts
     unchanged. No acquisition or plotting occurs.
     """
     return CountQuadratures(
-        sigma(counts, target),
-        sigma_variance(counts, target),
+        qubit_sigma(counts, target),
+        qubit_sigma_variance(counts, target),
         counts.sum(axis=(-2, -1)),
     )
 
@@ -281,8 +291,8 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit1", unit=""),
                     VariableAxisSpec(
                         label="Common CZ frequency",
                         unit="Hz",
@@ -319,7 +329,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         ),
         result_type=ConditionalPhaseResult,
         cfg_type=ConditionalPhaseCfg,
-        cfg_schema_version="6.0",
+        cfg_schema_version="7.0",
         tag="two_qubit/conditional_phase",
         result_builder=restore_result,
     )
@@ -345,7 +355,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             counts = np.moveaxis(sums, 0, 2)
-            values = sigma(counts, config.target)
+            values = qubit_sigma(counts, config.target)
             return viewer.set(frequencies, values.reshape(-1, len(frequencies)))
 
         # 3. Rebuild each host gate train; sweep spectator, quadrature and frequency in hardware.
@@ -354,8 +364,10 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             dtype=np.float64,
             on_update=update_view,
         )
-        target = config.x90_f1 if config.target == "f1" else config.x90_f2
-        spectator = config.x180_f2 if config.target == "f1" else config.x180_f1
+        target = config.x90_qubit1 if config.target == "qubit1" else config.x90_qubit2
+        spectator = (
+            config.x180_qubit2 if config.target == "qubit1" else config.x180_qubit1
+        )
         with Schedule(buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
             for n, step in sched.scan("gate_count", config.gate_count):
@@ -376,8 +388,8 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                     "projection", target, phase=target.phase + quadrature
                 )
                 drive = (
-                    Pulse("cz_f1", config.drive.f1, freq=frequency),
-                    Pulse("cz_f2", config.drive.f2, freq=frequency),
+                    Pulse("cz_qubit1", config.drive.qubit1, freq=frequency),
+                    Pulse("cz_qubit2", config.drive.qubit2, freq=frequency),
                 )
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
@@ -391,13 +403,16 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                 for gate_index in range(n):
                     builder.fork(
                         "default",
-                        into=[f"drive_f1_{gate_index}", f"drive_f2_{gate_index}"],
+                        into=[
+                            f"drive_qubit1_{gate_index}",
+                            f"drive_qubit2_{gate_index}",
+                        ],
                     )
-                    builder.emit(drive[0], timeline=f"drive_f1_{gate_index}")
-                    builder.emit(drive[1], timeline=f"drive_f2_{gate_index}")
+                    builder.emit(drive[0], timeline=f"drive_qubit1_{gate_index}")
+                    builder.emit(drive[1], timeline=f"drive_qubit2_{gate_index}")
                     builder.join(
-                        f"drive_f1_{gate_index}",
-                        f"drive_f2_{gate_index}",
+                        f"drive_qubit1_{gate_index}",
+                        f"drive_qubit2_{gate_index}",
                         into="default",
                     )
                 builder.emit(projection)
@@ -409,8 +424,8 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                     reducer=shot_sums(
                         prog,
                         [
-                            Classify("terminal", config.roles.f1_tone),
-                            Classify("terminal", config.roles.f2_tone),
+                            Classify("terminal", config.qubit1_tone),
+                            Classify("terminal", config.qubit2_tone),
                         ],
                     ),
                     rounds=config.rounds,
@@ -491,7 +506,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         fig, _ = plots.subplots(
             num="phase", nrows=3, figsize=(10, 10), layout="constrained"
         )
-        fig.suptitle(f"{cfg.target.upper()} target · actual spectator g/e")
+        fig.suptitle(f"{cfg.target.capitalize()} target · actual spectator g/e")
         for (b, state), (j, n) in product(
             enumerate(("g (I)", "e (Xπ)")), enumerate(data.gate_counts)
         ):

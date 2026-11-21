@@ -17,19 +17,19 @@ from zcu_tools.mcp.measure.recipe_api import (
 
 from zcu_lab.v2.two_qubit.conditional_phase.core import ConditionalPhaseAnalysis
 
-from .two_qubit_helpers import TwoQubitTarget, apply_selected_writeback
+from .two_qubit_helpers import TwoQubitPositionTarget, apply_selected_writeback
 
 
 class ConditionalPhaseInputs(RecipeInputs):
     """Scan inputs shared by both variants. Overrides apply after named edits."""
 
-    target: TwoQubitTarget | None = Field(
+    target: TwoQubitPositionTarget | None = Field(
         default=None,
-        description="Role bindings for this Reset. Omitted or null roles keep the current aliases.",
+        description="Position bindings for this Reset. Omitted or null positions keep the current aliases.",
     )
     reuse_tab_id: ReuseTabId
     overrides: Overrides
-    ramsey_role: Literal["f1", "f2"] | None | Keep = Field(
+    ramsey_role: Literal["qubit1", "qubit2"] | None | Keep = Field(
         KEEP, description="Qubit that measures phase, assigned to Form target."
     )
     gate_count: list[Annotated[int, Field(strict=True, ge=1)]] | None | Keep = Field(

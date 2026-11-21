@@ -213,7 +213,7 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 | [`two_qubit_cz_amplitude`](two-qubit-guide.md#two_qubit_cz_amplitude) | `two_qubit/cz_amplitude` | `scale_range`、`scale_points` 掃兩路共同 gain 倍率。回報第一個 return scale 與擬合診斷。有候選才問 Primary 寫回；完成 Run 後保存。 |
 | [`two_qubit_local_z`](two-qubit-guide.md#two_qubit_local_z) | `two_qubit/local_z` | 掃 `gate_count`，分別回報 F1、F2 的相位擬合。兩條擬合都給出 correction 才詢問寫回校正對。 |
-| [`two_qubit_constructive_phase`](two-qubit-guide.md#two_qubit_constructive_phase) | `two_qubit/constructive_phase` | 掃 F2 相對相位和兩路共同脈衝長度。回報最大擬合速率的相位與干涉擬合診斷。有可辨識相位才詢問 F2 脈衝和 slot 寫回。 |
+| [`two_qubit_constructive_phase`](two-qubit-guide.md#two_qubit_constructive_phase) | `two_qubit/constructive_phase` | 掃 Qubit2 相對相位和兩路共同脈衝長度。回報最大擬合速率的相位與干涉擬合診斷。有可辨識相位才詢問 Qubit2 脈衝和 slot 寫回。 |
 | [`two_qubit_conditional_phase`](two-qubit-guide.md#two_qubit_conditional_phase) | `two_qubit/conditional_phase` | 用 `ramsey_role` 選相位量測的 qubit，並設定 `gate_count`、`frequency_range` 與 `frequency_points`。回報唯一的 π 交點，或 null 與原因。有交點才問 Primary 頻率寫回；完成 Run 後保存。 |
 | [`two_qubit_conditional_phase_heralded`](two-qubit-guide.md#two_qubit_conditional_phase_heralded) | `two_qubit/conditional_phase_heralded` | 掃描輸入同上。每發先做 mux herald，用 joint gg/ee 斜率找唯一的 π 交點；沒有交點不問寫回。完成 Run 後保存。 |
 | [`two_qubit_rb`](two-qubit-guide.md#two_qubit_rb) | `two_qubit/rb` | `depths` 和 `seeds` 設定成對序列。回報 CZ 誤差、信賴區間和兩臂擬合診斷。保存，不詢問寫回。 |
