@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpa
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam
 
+from zcu_tools.cfg_model import Gain
+
 from .base import AbsModuleCfg, Module, apply_cfg_overrides
 from .waveform import WaveformCfg, resolve_waveform_ref
 
@@ -18,10 +20,11 @@ class PulseCfg(AbsModuleCfg):
     """Native generator pulse; ADC matching is a Pulse runtime input.
 
     ch selects the generator, nqz is Nyquist zone 1 or 2. freq/mixer_freq are
-    MHz; phase is degrees; gain is normalized. waveform is the native envelope;
-    pre_delay/post_delay are us. Frequency, phase, gain and delays accept QICK
-    sweeps. mixer_freq optionally configures mixing. desc is optional prose;
-    type is pulse.
+    MHz; phase is degrees; scalar gain must be a DAC full-scale fraction in
+    [-1, 1]. waveform is the native envelope; pre_delay/post_delay are us.
+    Frequency, phase, gain and delays accept QICK sweeps; swept gain is checked
+    at compile time. mixer_freq optionally configures mixing. desc is optional
+    prose; type is pulse.
     """
 
     type: Literal["pulse"] = "pulse"
@@ -30,7 +33,7 @@ class PulseCfg(AbsModuleCfg):
     nqz: Literal[1, 2]
     freq: float | QickParam
     phase: float | QickParam = 0.0
-    gain: float | QickParam
+    gain: Gain | QickParam
     pre_delay: float | QickParam = 0.0
     post_delay: float | QickParam = 0.0
 
@@ -91,8 +94,9 @@ class Pulse(Module):
         pulse template; matching envelope samples are shared even then.
         freq (MHz), gain (normalized), phase (degrees) and length (us) override
         the copied cfg via set_param; None keeps cfg. Waveform length restrictions
-        apply, including ValueError for unsupported sweeps. With cfg=None,
-        non-None overrides raise ValueError because there is no pulse to update.
+        apply, including ValueError for unsupported sweeps. Scalar gain outside
+        [-1, 1] raises ValidationError. With cfg=None, non-None overrides raise
+        ValueError because there is no pulse to update.
         Unknown override keys or nonnumeric values raise TypeError.
         """
         self.name = name
