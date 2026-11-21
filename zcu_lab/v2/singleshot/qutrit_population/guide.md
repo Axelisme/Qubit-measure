@@ -49,7 +49,7 @@ It does not create a missing library target or choose one from the current Form.
 Analyze reports a failure if the Run had no captured target, the slot is unresolved, or any non-classifier setting differs from the captured library module.
 Save and bind the intended settings, then Run again to fix those failures.
 
-After Apply, Open or Reset [STIRAP delay](../../twotone/stirap/delay/guide.md),
+After Apply, open or choose Defaults in [STIRAP delay](../../twotone/stirap/delay/guide.md),
 [STIRAP amplitude](../../twotone/stirap/amplitude/guide.md),
 [STIRAP detuning](../../twotone/stirap/detuning/guide.md) or
 [Raman](../../twotone/raman_gf/guide.md) to capture the new library calibration.

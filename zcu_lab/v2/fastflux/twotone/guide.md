@@ -17,7 +17,7 @@ separate work.
 ## Before Run
 
 Bind `qubit` and `resonator` to the intended components before Open.
-Reset captures their current values again.
+Defaults captures their current values again.
 The probe starts from `$qubit.freq` and `$qubit.wiring.ch`.
 The frequency sweep initially spans three linewidths around `$qubit.freq`.
 Readout uses `$resonator.module.readout` when available, otherwise the readout template.

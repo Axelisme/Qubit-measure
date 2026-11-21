@@ -12,7 +12,7 @@ Captured roles and target follow. Set the outer `gate_count` before the inner
 
 Bind `f1` and `f2` to distinct fluxoniums, `coupler` to their transmon, and `mux` to a MuxGroup containing both qubits. Calibrate Xπ, X90 and the complete mux readout first. Each role tone needs a circle classifier with radius from mux singleshot GE Post. Missing calibration, linear classification or missing radius stops Run with a GE Post prompt. Other mux tones need no classifier.
 
-Readout references `$mux.module.readout` when present. Without a slot, fill all required fields in the blank mux template. Open or Reset captures identities, calibrated pulses and original tone positions. Refresh preserves authored inputs. After changing sources, use Reset and check the inputs again.
+Readout references `$mux.module.readout` when present. Without a slot, fill all required fields in the blank mux template. Opening the tab or choosing Defaults captures identities, calibrated pulses and original tone positions. Refresh preserves authored inputs. After changing sources, use Defaults and check the inputs again.
 
 The Form copies `$coupler.module.cz_f1` and `cz_f2` into editable pulses. Missing CZ slots remain required. CZ, Xπ and X90 must use their captured role generator. The two CZ lines require different generators, equal finite frequency, equal envelope duration and equal pre-delay. Signed gains, relative phase, waveform and individual post-delays remain explicit. Playback starts both lines together and waits for both to finish. The coupler stays DC-biased.
 
@@ -43,7 +43,7 @@ Use at least two distinct gate counts whose differences have gcd=1. The default 
 
 Conditional phase is the fitted per-gate slope_e−slope_g, not the total phase of a selected train. Analysis unwraps adjacent frequency points and interpolates its π modulo 2π crossings inside the scan. This assumes sufficiently fine frequency sampling. A missing slope, no crossing, multiple crossings, a flat π segment or an ambiguous adjacent half-turn prevents a proposal. An endpoint crossing counts once. The interpolation does not assign a frequency uncertainty.
 
-FIT proposes source pulses at `$coupler.pulses.cz_f1` and `cz_f2`, replacing only their common frequency. Gains, phases, waveforms and timing stay unchanged. Separate `$coupler.module.cz_f1` and `cz_f2` slot rows point to these keys in the fixed capture. Preview each row before Apply Selected. Rows apply independently, so partial selection can update one line only. Reset the next Form to capture accepted pulses.
+FIT proposes source pulses at `$coupler.pulses.cz_f1` and `cz_f2`, replacing only their common frequency. Gains, phases, waveforms and timing stay unchanged. Separate `$coupler.module.cz_f1` and `cz_f2` slot rows point to these keys in the fixed capture. Preview each row before Apply Selected. Rows apply independently, so partial selection can update one line only. Choose Defaults in the next tab to capture accepted pulses.
 
 Amplitude and local-Z calibration remain separate steps. Recalibrate after changing shape or operating point.
 

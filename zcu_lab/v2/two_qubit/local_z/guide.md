@@ -13,7 +13,7 @@ Cfg 掃描欄位使用 `gate_count`，此實驗的 cfg schema 為 5.0。載入�
 
 先校準 X90、CZ 與完整 mux readout。F1/F2 的原 tone 都需要 circle classifier 與 GE Post radius。缺 classifier、非 circle 或缺 radius 時，Run 會要求先做 GE Post。其他 tone 不需要 classifier。修改 readout 設定後，重新校準。
 
-Readout 有 `$mux.module.readout` slot 時引用完整 library 設定。缺 slot 時手填 blank mux 範本的必要欄位。Open／Reset 捕捉角色、library 與 tone 位置。Refresh 保留已填輸入，換來源後要 Reset 並核對輸入。
+Readout 有 `$mux.module.readout` slot 時引用完整 library 設定。缺 slot 時手填 blank mux 範本的必要欄位。Open／Defaults 捕捉角色、library 與 tone 位置。Refresh 保留已填輸入，換來源後要按 Defaults 並核對輸入。
 
 Form 複製兩角色 X90 與 `$coupler.module.cz_f1`／`cz_f2`。缺 CZ slot 時必須補填。兩 CZ pulses 用不同 generator，frequency、duration、pre-delay 必須相同。保留 signed gain 比例、relative phase 與 waveform。X90 generator 必須對應自己的角色。幅度與 frequency 選定後再量 local Z。
 

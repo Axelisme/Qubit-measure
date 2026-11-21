@@ -15,9 +15,9 @@ probabilities.
 
 ## Sources and defaults
 
-Open and Reset capture the current aliases, parameter sources and module
-selections. Reset discards edits and captures sources again. Run uses the
-displayed configuration. Open or Reset again to apply alias changes.
+Open and Defaults capture the current aliases, parameter sources and module
+selections. Defaults discards edits and captures sources again. Run uses the
+displayed configuration. Reopen the tab or choose Defaults to apply alias changes.
 
 - Optional reset and initialization use `$qubit.module.reset` and
   `$qubit.module.x180`. Missing slots leave these modules disabled.
@@ -67,11 +67,11 @@ measurement.
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Enter the frequency/gain rectangle and verify probe/readout timing. Supply GE calibration where the Form requests it.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `mist_drive_frequency` after inspecting the same Form errors.
    freq_range and gain_range are required pairs. points maps to Expts on both axes. Analysis has no operator parameters.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

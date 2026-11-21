@@ -20,8 +20,8 @@ Arbitrary duration comes from the selected asset. Constant and flat-top envelope
 The Form starts both envelopes as Gaussian with sigma 0.05 us and length 0.3 us.
 The core cfg requires both envelopes explicitly.
 
-After changing aliases, component parameters or the module library, use Reset to seed the Form from a new capture.
-Reset may overwrite unsaved input. Refresh only updates sources and choices; it keeps the current input.
+After changing aliases, component parameters or the module library, use Defaults to seed the Form from a new capture.
+Defaults may overwrite unsaved input. Refresh only updates sources and choices; it keeps the current input.
 
 ## Lead and acquisition
 

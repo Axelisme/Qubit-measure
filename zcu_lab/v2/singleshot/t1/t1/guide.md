@@ -12,7 +12,7 @@ Live plots and Analyze divide each row by its total count before displaying popu
 
 ## Parameter sources
 
-Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay and delay stop are 5 * `$qubit.t1`.
+Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay and delay stop are 5 * `$qubit.t1`.
 
 Readout accepts only the pulse family.
 A mux readout in the library is incompatible.
@@ -27,13 +27,13 @@ Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$reso
 
 The ordinary T1 sweep stop is 5 times the same time scale, initially 150 us when T1 is missing.
 
-T1-derived defaults use the Open/Reset snapshot. A missing or null T1, or an unavailable snapshot, uses 30 us, so the 5*T1 wait starts at 150 us. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 us, so the 5*T1 wait starts at 150 us. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
 
 These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
 
 ## Module slots
 
-Pi pulse uses `$qubit.module.x180` or pi_pulse. Reset is optional; readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Reset snapshot.
+Pi pulse uses `$qubit.module.x180` or pi_pulse. Reset is optional; readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Defaults snapshot.
 
 ## Typical writeback
 
@@ -41,6 +41,6 @@ T1 appears in the plot title; calibration parameters stay unchanged. Use 'single
 
 ## Recommended
 
-Run 'singleshot/ge', apply Primary and Post to the readout module, then Reset this Form to capture that calibration. A delay sweep reaching ~5*T1 lets the decay flatten. Missing T1 starts delay stop and relax delay at 150 us; stored invalid T1 leaves both required and empty. Set 'sampling="linear"' to sweep linearly; leave 'sampling="decay"' to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
+Run 'singleshot/ge', apply Primary and Post to the readout module, then choose Defaults in this tab to capture that calibration. A delay sweep reaching ~5*T1 lets the decay flatten. Missing T1 starts delay stop and relax delay at 150 us; stored invalid T1 leaves both required and empty. Set 'sampling="linear"' to sweep linearly; leave 'sampling="decay"' to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
 
 **Last updated:** 2026-10-29

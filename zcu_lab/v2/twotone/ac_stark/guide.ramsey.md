@@ -6,7 +6,7 @@
 
 ## 設定與量測
 
-先完成 readout、qubit frequency 與 pi/2 pulse 校準。確認 `qubit`、`resonator` aliases、接線及各 module。Open／Reset 捕捉來源建立初值，Run 使用表單上的設定。
+先完成 readout、qubit frequency 與 pi/2 pulse 校準。確認 `qubit`、`resonator` aliases、接線及各 module。Open／Defaults 捕捉來源建立初值，Run 使用表單上的設定。
 
 - Stark resonator tone 使用 `res_probe` 範本，頻率取 `$resonator.freq`，起始長度為 10 us。這個長度在 Ramsey delay 掃描中保持固定。
 - Ramsey pi/2 pulse 優先使用 `$qubit.module.x90`，沒有時使用可編輯的 `pi2_pulse` 範本。請確認其 gain、frequency 與 waveform。
@@ -17,7 +17,7 @@
 
 每點先 reset，再同時執行 Stark tone 與 Ramsey 序列。Ramsey 序列依序為 settling delay、pi/2、掃描 delay、pi/2。兩者都完成後才 readout。請設定 Stark 長度，使它覆蓋所需的 Ramsey 區段，並檢查 pulse 的 pre/post delay。10 us 是可編輯的固定初值；請自行設定足以覆蓋序列的安全時長。
 
-核對表單設定，再按 Run。Measurement 圖顯示平均 IQ 的共同旋轉投影及 current trace。Reset 重新捕捉來源並以初值取代手改值。真實硬體 Run 前仍需審核功率及時序。
+核對表單設定，再按 Run。Measurement 圖顯示平均 IQ 的共同旋轉投影及 current trace。Defaults 重新捕捉來源並以初值取代手改值。真實硬體 Run 前仍需審核功率及時序。
 
 ## FFT 分析
 

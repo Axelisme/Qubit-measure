@@ -13,7 +13,7 @@ The board scans probe gain; probe frequency and duration stay fixed. Use
 
 ## Starting configuration
 
-Open and Reset capture aliases, parameter sources and module selections.
+Open and Defaults capture aliases, parameter sources and module selections.
 Reset and initialization use optional `$qubit.module.reset` and
 `$qubit.module.x180` slots.
 Missing optional slots stay disabled. Disable initialization for ground-state
@@ -73,11 +73,11 @@ measurement.
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Set probe gain endpoints and verify probe/readout timing. Supply GE calibration where the Form requests it.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `mist_power_trace` after inspecting the same Form errors.
    The captured Form supplies gain Expts. probe_ref/readout_ref select modules. g0, e0 and ac_coeff update the existing display analysis.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

@@ -299,9 +299,11 @@ class ExpTabWidget(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         bar_layout.addWidget(self.refresh_btn, stretch=15)
-        self.reset_btn = QPushButton("Reset")
+        self.reset_btn = QPushButton("Defaults")
         self.reset_btn.setObjectName("resetButton")
-        self.reset_btn.setToolTip("Recapture sources and restore adapter defaults")
+        self.reset_btn.setToolTip(
+            "Discard edits and reload defaults from current sources."
+        )
         self.reset_btn.setFixedHeight(30)
         self.reset_btn.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed

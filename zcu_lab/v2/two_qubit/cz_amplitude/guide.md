@@ -7,9 +7,9 @@
 Open `two_qubit/cz_amplitude` for a return scan. Leave `reset` unset to omit reset.
 
 Bind `f1` and `f2` to distinct fluxoniums, `coupler` to their transmon,
-and `mux` to a MuxGroup containing both qubits. Open or Reset captures aliases,
+and `mux` to a MuxGroup containing both qubits. Opening the tab or choosing Defaults captures aliases,
 parameters and library once. Refresh preserves authored inputs.
-After changing bindings or calibrations, Reset and check the whole Form again.
+After changing bindings or calibrations, choose Defaults and check the whole Form again.
 
 ## Preparation and inputs
 
@@ -100,7 +100,7 @@ require matching captured role identities.
 
 Select the rows you accept, then press Apply Selected.
 Pulse rows and slot rows apply independently. Apply each required slot explicitly.
-Reset other open forms to capture accepted calibrations.
+Choose Defaults in other open tabs to capture accepted calibrations.
 Alternate amplitude and conditional-phase/frequency manually.
 After changing pulse shape, duration, phase, gain, frequency or bias,
 recheck CZ and remeasure both local-Z corrections.

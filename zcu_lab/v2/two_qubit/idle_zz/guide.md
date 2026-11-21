@@ -10,9 +10,9 @@ Cfg 掃描欄位使用 `dc`，此實驗的 cfg schema 為 6.0。載入舊主版�
 
 先依 [FTF bring-up 指南](../guide.md) 校準 F1/F2 的 Xπ、Xπ/2 與 mux readout。Aliases `f1`、`f2` 指向不同 fluxonium，`coupler` 指向本對 transmon，`mux` 指向含 F1/F2 的 MuxGroup。Group 的有序 qubits 與 resonators 必須逐項對應。
 
-Open／Reset 固定捕捉角色與原始 tone 位置。每個角色的 Xπ 與 Xπ/2 使用同一 generator，F1/F2 使用不同 generator。Readout 引用完整 `$mux.module.readout` slot，缺 slot 時手填 blank mux 範本。F1/F2 必須有含 radius 的 circle classifier，缺少時先完成 GE Post。其他 tone 保留原順序，不要求 classifier。
+Open／Defaults 固定捕捉角色與原始 tone 位置。每個角色的 Xπ 與 Xπ/2 使用同一 generator，F1/F2 使用不同 generator。Readout 引用完整 `$mux.module.readout` slot，缺 slot 時手填 blank mux 範本。F1/F2 必須有含 radius 的 circle classifier，缺少時先完成 GE Post。其他 tone 保留原順序，不要求 classifier。
 
-Refresh 更新來源與選項，保留已填輸入。修改來源或 aliases 後按 Reset 重新取得初值，並核對角色、pulses 與 tone 對應。Reset 可能覆蓋尚未保存的輸入。
+Refresh 更新來源與選項，保留已填輸入。修改來源或 aliases 後按 Defaults 重新取得初值，並核對角色、pulses 與 tone 對應。Defaults 可能覆蓋尚未保存的輸入。
 
 ## 設定與 Run
 

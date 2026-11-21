@@ -6,7 +6,7 @@ Cfg sweep fields use `gate_count`. This experiment uses cfg schema 3.0. Loading 
 
 ## Inputs and sequence
 
-Choose `two_qubit/conditional_phase_heralded`. This is a separate experiment from `two_qubit/conditional_phase`, with its own saved cfg and Result. Bind f1, f2, coupler and mux; calibrate the same pulses and full mux readout described in the [ordinary guide](guide.md). Both role tones need a circle classifier with a GE Post radius before Run. Other tones need no classifier. Reset the Form after changing captured sources.
+Choose `two_qubit/conditional_phase_heralded`. This is a separate experiment from `two_qubit/conditional_phase`, with its own saved cfg and Result. Bind f1, f2, coupler and mux; calibrate the same pulses and full mux readout described in the [ordinary guide](guide.md). Both role tones need a circle classifier with a GE Post radius before Run. Other tones need no classifier. Choose Defaults after changing captured sources.
 
 Every shot emits optional reset, herald mux readout, the original preparation/CZ/projection sequence, then terminal mux readout. Set reset=None to skip reset. Herald and terminal use the same mux object, tones, gain, integration and classifier settings.
 

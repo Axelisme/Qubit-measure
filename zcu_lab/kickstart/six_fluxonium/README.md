@@ -42,7 +42,7 @@ Entry 已存在時，腳本只重開並選取 `initial`，保留元件與 aliase
 每顆 Qi 引用同序號 Ri，`flux_dev` 指向自己的 `Qi_bias`。
 Mux group 的 `flux_dev` 指向 `coil_bias`。
 局部線用來調整對應 qubit 的工作點，global coil 用來調整六顆 qubit 的工作點。
-Scalar flux 表單在 Open／Reset 從 `$qubit.flux_dev` 取得局部線名稱，不需要 flux 裝置 alias，也不指向 global coil。
+Scalar flux 表單在 Open／Defaults 從 `$qubit.flux_dev` 取得局部線名稱，不需要 flux 裝置 alias，也不指向 global coil。
 `qubit` alias 只選 scalar 表單的目標，不改變 mux group 的六顆順序。
 Mux 表單從 group wiring 取得 generator 與各 tone ADC，不從 resonator 的 pulse wiring 取得。
 
@@ -61,13 +61,13 @@ Global coil 來源仍是 group 的 `flux_dev: coil_bias`。
 舊 entry 須先經[長期升級入口](../../../docs/parameter-upgrades.md)轉換，startup 不自動升級。
 
 範本不含 module library、readout 校準、qubit pulse 校準或已填好的量測序列。
-缺 readout slot 的 mux 表單在 Open／Reset 時，從 group 取得 gen_ch、ro_ch 與 mixer_freq。
+缺 readout slot 的 mux 表單在 Open／Defaults 時，從 group 取得 gen_ch、ro_ch 與 mixer_freq。
 Timing 不會因此完成校準，pulse length 等必填空白仍須補齊。
 `mux/onetone` 的 trigger 與 pulse length 留白，ADC window 會先填 1.0 us。
 `mux/t1` 的 trigger 會先填 0.0 us，pulse length 與 ADC window 留白。
 這些表單預設值都不是量測得到的校準值，使用前須確認。
 已有 readout slot 時，表單沿用該 slot 的 mixer 與 timing 規則。
-修改元件或 aliases 後，要重開或 Reset 表單才會更新初值。
+修改元件或 aliases 後，要重開或按 Defaults 才會更新初值。
 
 建議順序為 lookback → range_find → mux/onetone → twotone → rabi → T1／T2。
 量測前先核對接線與儀器設定，再填入每顆 qubit 的有效參數並連線所需硬體。

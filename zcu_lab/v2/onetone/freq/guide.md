@@ -6,7 +6,7 @@ The measurement runs on real hardware. It sweeps readout frequency and fits the 
 
 **Last updated:** 2026-10-25
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Parameter sources
 
@@ -27,7 +27,7 @@ Enter absolute MHz sweep endpoints. The range-find Form does not infer a scan wi
 
 Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
 
-For a file from the same opened entry, Load reads the current persisted values at the file's historical point, using its role assignments. It does not use the tab's Open/Reset aliases or restore an unsaved historical parameter version. Files from another entry or without a point have no parameter source for analysis or writeback. Analysis that needs no such source remains available. Existing proposals stay attached to their captured destination when point or focus changes.
+For a file from the same opened entry, Load reads the current persisted values at the file's historical point, using its role assignments. It does not use the tab's Open/Defaults aliases or restore an unsaved historical parameter version. Files from another entry or without a point have no parameter source for analysis or writeback. Analysis that needs no such source remains available. Existing proposals stay attached to their captured destination when point or focus changes.
 
 Analysis proposes fitted values for `resonator.freq`, `resonator.kappa`, and `resonator.ext.theta0`. The selected result's parameter source identifies the destination resonator when that source is available. When the run includes pulse-readout settings, analysis also proposes a `resonator.readout.readout_rf` library module based on those settings. It changes the pulse/readout frequency and preserves gain, lengths, channels, and trigger timing.
 
@@ -45,7 +45,7 @@ Supply `center_mhz` and `span_mhz` together to set numeric endpoints at center Â
 
 Analysis defaults to the hanger-model fit, `hm`, with multiplicative amplitude-background fitting on. A sweep spanning a few linewidths around the known resonator frequency usually captures the dip cleanly. Widen it if the resonator has drifted.
 
-Use Homophasal after a fit has written `theta0` when you want equal resonator-circle phase spacing. Select Homophasal to view the saved calibration values and fill any missing fields before Run. The Sampling mode selector controls this directly. Linear uses a linear frequency grid and removes the homophasal fields from the submitted settings. Switching back to Homophasal resets those fields to defaults from the saved parameters, replacing previous edits. To use changed source parameters, reopen the tab or press Reset.
+Use Homophasal after a fit has written `theta0` when you want equal resonator-circle phase spacing. Select Homophasal to view the saved calibration values and fill any missing fields before Run. The Sampling mode selector controls this directly. Linear uses a linear frequency grid and removes the homophasal fields from the submitted settings. Switching back to Homophasal resets those fields to defaults from the saved parameters, replacing previous edits. To use changed source parameters, reopen the tab or press Defaults.
 
 ## Analysis controls
 
@@ -58,11 +58,11 @@ Leave the delay blank to use a finite route-matched calibration as the branch se
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Supply a resonator frequency or an explicit center, plus a positive linewidth or explicit span. Check readout timing.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `onetone_spectrum` after inspecting the same Form errors.
    points maps to frequency Expts. Supply center_mhz/span_mhz together or omit both to retain the Form sweep. Analysis controls are model_type, fit_bg_amp_slope, fit_bg_phase_curvature and edelay.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

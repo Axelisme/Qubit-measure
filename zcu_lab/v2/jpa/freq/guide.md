@@ -4,9 +4,9 @@
 
 ## Parameter sources
 
-Uses the qubit (`qubit/*`), resonator and jpa (`amplifier/jpa`) aliases. The pump-frequency bounds use `$jpa.pump_freq`. Opening or resetting the form reads the RF default from `$jpa.rf_source`; a missing source leaves the optional field empty. The direct device name remains editable. Select the connected JPA RF device in the form. Missing required aliases or calibration marks the form Invalid.
+Uses the qubit (`qubit/*`), resonator and jpa (`amplifier/jpa`) aliases. The pump-frequency bounds use `$jpa.pump_freq`. Opening the tab or choosing Defaults reads the RF default from `$jpa.rf_source`; a missing source leaves the optional field empty. The direct device name remains editable. Select the connected JPA RF device in the form. Missing required aliases or calibration marks the form Invalid.
 
-Relax delay starts at 1*T1 using the parameters captured when you open or reset the form. T1 must be a finite positive real number; Boolean values count as invalid. Missing/null T1 or an unavailable parameter snapshot gives a 30 us initial delay. An invalid stored T1 leaves the required wait field empty, and parameter-source failures report an error. Edit the delay in the form as needed; the stored T1 stays unchanged.
+Relax delay starts at 1*T1 using the parameters captured when you open the tab or choose Defaults. T1 must be a finite positive real number; Boolean values count as invalid. Missing/null T1 or an unavailable parameter snapshot gives a 30 us initial delay. An invalid stored T1 leaves the required wait field empty, and parameter-source failures report an error. Edit the delay in the form as needed; the stored T1 stays unchanged.
 
 ## Module slots
 

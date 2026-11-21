@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-21，guide 路徑宣告
+**Last updated:** 2026-11-22，Run 頁 Defaults
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -382,6 +382,8 @@ release both groups without destroying retained Figures.
 Hosting decisions and their reasons are in ADR-0067 and ADR-0068.
 
 ## Sources and workflow
+
+On the Run page, **Defaults** asks for confirmation before discarding form edits and rebuilding defaults from current sources. The corresponding RPC remains `tab.reset_cfg`.
 
 `Session.cfg` owns one `TabFormResource`. The resource owns one `FormState`
 and captures parameters, library and cached device infos on Open, Refresh and Reset. Preview, result and Run use that capture until the next explicit source action. Refresh preserves all authored data and explicit selections, including expression drafts and previously resolved direct defaults. Reset recaptures sources and computes fresh defaults. Capture and factory failures preserve the previous form.

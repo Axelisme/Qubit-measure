@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-11-10
 
-After changing a parameter source, use Reset to recapture initial values. Refresh updates sources and choices while preserving authored inputs. Reset can overwrite unsaved inputs.
+After changing a parameter source, use Defaults to recapture initial values. Refresh updates sources and choices while preserving authored inputs. Defaults can overwrite unsaved inputs.
 
 ## Shot and parameters
 

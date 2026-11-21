@@ -8,7 +8,7 @@ Scan F2 minus F1 relative phase in degrees and common envelope duration in us.
 Each shot emits optional reset, nominal B11 preparation, simultaneous two-line
 drive, double Xπ contrast and one terminal mux readout.
 `reset=None` emits no reset. Set a reset cfg only after reviewing its pulse
-and timing against the authorized limits. The Form's Reset action recaptures
+and timing against the authorized limits. Defaults recaptures
 inputs; it does not emit a reset pulse.
 
 Both role tones require circle classifiers with g/e centers and radius.
@@ -19,7 +19,7 @@ The three classes are g, e and other. Other stays in the denominator.
 
 ## Prepare the Form
 
-Bind `f1`, `f2`, `coupler` and `mux`, then Open or Reset.
+Bind `f1`, `f2`, `coupler` and `mux`, then open the tab or choose Defaults.
 Review the captured identities and original tone positions from the mux group.
 Check both Xπ pulses and all mux tones, ADC routes and scalar timing.
 Readout references `$mux.module.readout` when present. Otherwise fill the blank
@@ -44,8 +44,8 @@ delays appear last.
 Enter finite scan endpoints and strictly positive durations.
 Review repetitions, rounds, optional reset and timing before Run.
 Refresh updates choices without overwriting authored inputs.
-After changing the parameter source, use the Form's Reset to recapture inputs.
-Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture inputs.
+Defaults can overwrite unsaved inputs.
 
 ## Read the figures
 

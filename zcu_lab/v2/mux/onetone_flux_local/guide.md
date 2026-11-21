@@ -13,8 +13,8 @@ Choose `flux_unit` to match the driver's stored native unit. No unit conversion,
 mode change or output enabling occurs. Confirm limits, wiring, power and output
 before running on hardware.
 
-Open or Reset captures identities, aliases and library values. Later edits to
-the Library or aliases do not change the captured form. Reset discards form
+Opening the tab or choosing Defaults captures identities, aliases and library values. Later edits to
+the Library or aliases do not change the captured form. Defaults discards form
 edits and captures sources again.
 
 ## Form
@@ -37,7 +37,7 @@ edits and captures sources again.
   firmware cannot sweep tone frequencies in hardware. `participants` supplies
   the original tone selection to that inner scan.
 
-Open and Reset use the [mux onetone timing policy](../onetone/guide.md#無-readout-slot-的候選來源).
+Open and Defaults use the [mux onetone timing policy](../onetone/guide.md#無-readout-slot-的候選來源).
 The shared wait is `5 / (2π · min κ)` µs, where κ is the resonator linewidth
 in MHz from the captured group.
 
@@ -60,7 +60,7 @@ counts for an offline smoke.
 ## Recipe input semantics
 
 Omitted Form inputs retain captured values. Explicit null clears a field or
-range bounds. The Form chooses sources at Open/Reset; recipes do not offer
+range bounds. The Form chooses sources at Open/Defaults; recipes do not offer
 separate library/inline input lists. Overrides use dotted paths, run in order
 and run last. Decimal indices keep their original complete-list positions.
 The recipe calls `check_ready()` before acquisition and reports all owner paths
@@ -72,14 +72,14 @@ and reasons without rolling back edits. Analysis null goes to the picker owner.
    the six distinct local sources. Missing DC calibration leaves each local bounds
    required and blank. Enter deliberate native-unit bounds before Run.
    Fill any missing resonator frequency, mixer, trigger and pulse duration. Ringup timing needs every resonator linewidth and the group flight time; without them enter timing explicitly.
-2. **Frequencies without a readout slot.** Open or Reset to capture updated
+2. **Frequencies without a readout slot.** Open the tab or choose Defaults to capture updated
    frequencies. The readout template takes generator/ADCs from group wiring.
    The ADC window candidate is 1 us. Trigger and pulse duration remain blank when linewidth or group flight time is missing.
    Review gain 0.1 and the DC bounds rather than treating seeds as calibrations.
-3. **Captured readout slot.** Open or Reset after assigning the group readout.
+3. **Captured readout slot.** Open the tab or choose Defaults after assigning the group readout.
    The form copies it, rebuilds full group tones and adds ringup to its trigger while preserving its mixer and ADC window.
    Confirm frequency and DC scan bounds. Refresh preserves your edits and the
-   original seed provenance while recapturing validation sources. Reset
+   original seed provenance while recapturing validation sources. Defaults
    discards edits and captures sources again.
 4. **Agent recipe.** Use `mux_onetone_flux_local` with explicit
    missing DC bounds. Its inputs must describe the same full identities,
@@ -93,14 +93,14 @@ and reasons without rolling back edits. Analysis null goes to the picker owner.
 
 Python cfg and saved cfg share a flat layout. There is no `spectrum` wrapper.
 Set `participants: list[int]`, full `tones`, `reset`, `readout` and `df` at top level.
-Open/Reset fills selected tones' per-tone DC sweep defaults and sets
+Open/Defaults fills selected tones' per-tone DC sweep defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
-Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
+Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
 and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
 Alias list elements may use `$` links. A missing, unbound or empty row selects all
-original indices in order. An unbound element in a nonempty list rejects Open/Reset.
+original indices in order. An unbound element in a nonempty list rejects Open/Defaults.
 An out-of-group name stays visible as an invalid Participants draft until corrected.
-Changing aliases requires Reset or reopening; ordinary participant edits keep tone values.
+Changing aliases requires Defaults or reopening; ordinary participant edits keep tone values.
 
 Editing participants preserves every tone value. Fill any newly selected tone's
 missing settings at the indicated tone path. Removing a tone keeps its values.

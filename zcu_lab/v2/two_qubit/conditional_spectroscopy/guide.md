@@ -14,9 +14,9 @@ F1/F2 的 terminal 讀出在取數時分成 g、e、other，保存每個聯合�
 
 先依 [FTF bring-up 指南](../guide.md) 校準 F1/F2 的 Xπ pulses 與 mux readout。綁定 `f1`、`f2` 到不同 fluxonium，`coupler` 到本對 transmon，`mux` 到包含兩者的 MuxGroup。Group 的 qubits 與 resonators 必須有序對應。
 
-Open／Reset 固定捕捉角色、tone mapping 與 pulse 初值。有 `$mux.module.readout` 時引用完整 library readout。缺 slot 時須填妥 blank mux。完整 tone 順序保持不變，F1/F2 之外的 tone 不參與本實驗的 P_e 分析。
+Open／Defaults 固定捕捉角色、tone mapping 與 pulse 初值。有 `$mux.module.readout` 時引用完整 library readout。缺 slot 時須填妥 blank mux。完整 tone 順序保持不變，F1/F2 之外的 tone 不參與本實驗的 P_e 分析。
 
-F1/F2 tone 都必須有 circle classifier 與 radius。缺少校準或使用 linear 時，Run 前會要求先做 GE Post。改動讀出設定後須重新校準，不可直接沿用舊 radius。修改 aliases 或 library 後重新 Reset，再核對 cfg。Refresh 不會覆蓋已填輸入。
+F1/F2 tone 都必須有 circle classifier 與 radius。缺少校準或使用 linear 時，Run 前會要求先做 GE Post。改動讀出設定後須重新校準，不可直接沿用舊 radius。修改 aliases 或 library 後按 Defaults，再核對 cfg。Refresh 不會覆蓋已填輸入。
 
 ## 設定與 Run
 

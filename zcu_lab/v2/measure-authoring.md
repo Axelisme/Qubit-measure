@@ -74,7 +74,7 @@ Adapter 以 `guide=Path(__file__).with_name("guide.md")` 宣告 operator guide�
 不需轉換時也在本地宣告 run 並配對同次 cfg 與 Result。額外驗證放在 run 開頭，硬體 I/O 前失敗。
 Run 不重新讀目前的 point、library 或 alias。所有 Run 都需要 SoC，框架不提供額外 preflight hook。
 
-Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Refresh 也重建 Form 定義，
+Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Run 頁的按鈕叫 Defaults，RPC 仍叫 `tab.reset_cfg`。Refresh 也重建 Form 定義，
 但保留 authored input、explicit selections 與既有初值，不重新套 defaults。
 `ctx.has(ref)` 用固定來源選 Slot 或 Template，缺參照回 False，來源故障 raise。
 單音 readout module 與 `module.readout` slot 由 resonator 擁有。單 qubit 表單透過 `resonator: $qubit.resonator` alias 讀取 `$resonator.module.readout`，沒有 slot 時使用 `Template("readout")`，不讀 qubit 上的舊 slot。
@@ -151,7 +151,7 @@ Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
 1. Kickstart entry 只有接線與 nominal values，沒有 module slot。
    記錄哪些欄位有 seed、哪些欄位必填空白，以及 uncalibrated 候選。
 2. 加入必要 frequency，仍不加入 readout slot。
-   比較 Open、Refresh、Reset；Refresh 保留舊輸入，Reset 依新 capture 重新取初值。
+   比較 Open、Refresh、Defaults。Refresh 保留舊輸入，Defaults 依新 capture 重新取初值。
 3. 使用包含 readout slot 的 project 副本。
    分開列出 slot 是否存在，以及表單尚缺哪些 pulse、drive、timing 或 GE calibration。
 4. 核對對應的 agent recipe。
@@ -159,11 +159,10 @@ Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
    沒有 recipe 的表單在 guide 說明使用 GUI／RPC，不假設 recipe 覆蓋所有實驗。
 
 每個 GUI 情境保存 get_cfg 的 input、values、errors、diagnostics 與實際欄位順序。
-用 ComponentDriver 操作 Open／Refresh／Reset，保存截圖並審閱可見 label、單位與錯誤。
+用 ComponentDriver 開啟 tab、操作 Refresh 與 Defaults，保存截圖並審閱可見 label、單位與錯誤。
 在 guide 寫出各情境的起手步驟與仍需取得的校準。
 預演不呼叫 Run、不連硬體，也不操作使用者正在使用的桌面 GUI，除非另有明確授權。
-Guide 必須提醒來源修改後需 Reset；Refresh 只更新 source／choice，
-Reset 可能覆蓋尚未儲存的輸入。
+Guide 必須提醒操作員：來源修改後，按 Defaults 重取初值，確認後會丟棄表單編輯。Refresh 只更新 source／choice，保留輸入。
 
 ## Recipe 撰寫
 

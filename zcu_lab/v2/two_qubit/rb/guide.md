@@ -6,13 +6,13 @@
 
 Cfg schema 6.0 requires `x180_f1` and `x180_f2`.
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Before run
 
 Select `two_qubit/rb` after calibrating the F1/F2 X90 and X180 pulses, complete mux readout,
 two charge-line CZ pulses and their local-Z corrections. Bind scalar aliases
-`f1`, `f2`, `coupler` and `mux`, then Open or Reset the Form. The fixed capture
+`f1`, `f2`, `coupler` and `mux`, then open the tab or choose Defaults. The fixed capture
 maps logical Q0 to F1 and Q1 to F2. Their tone positions come from the captured
 MuxGroup `qubits` order. Use those positions to identify the roles.
 

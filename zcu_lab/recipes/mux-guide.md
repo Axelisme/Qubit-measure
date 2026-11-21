@@ -116,7 +116,7 @@ center using its period rule. Review its actual committed state.
    Complete required resonator frequencies, mixer and readout timing using
    Form selectors and final overrides. Wiring and nominal values alone do not make
    the Form valid. Do not infer bounds from simulator internals.
-2. With frequencies but no readout slot, Open or Reset creates the captured
+2. With frequencies but no readout slot, opening the tab or choosing Defaults creates the captured
    template. Onetone seeds ADC window 1 us and gain 0.1. Missing linewidths or
    group flight time leave trigger and pulse length required. Twotone requires
    readout pulse length and ADC duration; it also requires every drive and MHz
@@ -132,9 +132,9 @@ center using its period rule. Review its actual committed state.
    than retrying Run unchanged. Inspect `get_cfg` input, values, errors and
    diagnostics to distinguish missing calibration from an invalid source.
 
-Open and Reset capture fresh sources. Refresh preserves authored inputs,
+Open and Defaults capture fresh sources. Refresh preserves authored inputs,
 explicit selections and resolved seeds; it does not refill defaults. After
-changing aliases, library or calibrations, Reset to use them. Reset discards
+changing aliases, library or calibrations, choose Defaults to use them. Defaults discards
 unsaved Form edits. All four forms show participants, tone identities, modules,
 frequency/DC scans, averaging, then timing. Frequency labels use MHz, timing
 uses us except settle in s, and DC coordinates use the chosen flux_unit.
@@ -220,7 +220,7 @@ length, save the new numeric pulse module and select it for later experiments.
 Changing only the pulse frequency does not calibrate its gain or length.
 Pulse modules can come from calibration writeback, New with a template, or
 `ml_edit`. Library entries store numbers; creation-time expressions do not stay
-bound to future calibration changes. Reset downstream tabs to capture the new
+bound to future calibration changes. Choose Defaults in downstream tabs to capture the new
 module selection. Historical Run/Load sources retain their original pulses.
 
 Check the group's readout module, drive channels and power before running.

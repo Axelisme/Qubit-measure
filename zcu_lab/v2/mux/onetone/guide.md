@@ -7,22 +7,22 @@
 每個 sweep 點的名目頻率是原始 tone 的 base frequency 加上共同 offset。
 圖與擬合都使用這個名目座標，DDS 實際量化頻率可能有差異。
 
-修改 parameter source 後，按 Reset 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Reset 可能覆蓋尚未儲存的輸入。
+修改 parameter source 後，按 Defaults 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Defaults 可能覆蓋尚未儲存的輸入。
 
 ## 準備輸入
 
 1. 在 Inspect 的 Parameters 建立 `kind: group/mux` 元件，例如 `MG12`。設定有序 `resonators: [R1, R2, R3]`、mux generator `wiring.gen_ch`，以及同序的各 tone ADC `wiring.ro_ch`。若已有 `readout/mux` library key，可把 module 槽 `module.readout` 指向它。完整 tones[i] 對應 resonators[i]，綁定依據是位置。
-2. 在 Aliases 設定 scalar alias `mux = MG12`。Open／Reset 時，Readout 複製 `$mux.module.readout` 的 scalar 設定，tones 由 group resonators 校準值產生。缺 slot 時使用 blank mux 範本加 group tones，generator 取自 `$mux.wiring.gen_ch`，第 i 個 tone 的 ADC 從固定 capture 的 `group.wiring.ro_ch[i]` 取整數初值，各 tone gain 填 0.1。這些是可編輯的初值，不代表硬體設定已確認。有 slot 時，共同 trigger 在原值上增加最小已設 kappa 對應的五倍 ringup 等待，pulse 至少涵蓋 ADC window。缺 slot 的 mixer／timing 候選來源見下表。
+2. 在 Aliases 設定 scalar alias `mux = MG12`。Open／Defaults 時，Readout 複製 `$mux.module.readout` 的 scalar 設定，tones 由 group resonators 校準值產生。缺 slot 時使用 blank mux 範本加 group tones，generator 取自 `$mux.wiring.gen_ch`，第 i 個 tone 的 ADC 從固定 capture 的 `group.wiring.ro_ch[i]` 取整數初值，各 tone gain 填 0.1。這些是可編輯的初值，不代表硬體設定已確認。有 slot 時，共同 trigger 在原值上增加最小已設 kappa 對應的五倍 ringup 等待，pulse 至少涵蓋 ADC window。缺 slot 的 mixer／timing 候選來源見下表。
 3. 核對 generator、mixer、每個 tone 的 ADC channel、frequency、gain，以及共用播放長度、ADC window 和 trigger timing。範本的 scalar 初值只供編輯。Run 前由操作員確認硬體安全值。
 4. 可選已有的 readout/mux key，或用 Convert to inline 複製內容再修改。Tones 是單行 JSON，例如 `[{"freq":5980,"gain":0.1,"ro_ch":4,"label":"R1"},{"freq":6020,"gain":0.1,"ro_ch":5,"label":"R2"},{"freq":6040,"gain":0.1,"ro_ch":6}]`。此例只示範格式，硬體值須另行確認。
-5. Participants 輸入原始序號 JSON list。Open／Reset 將 Aliases 的 `participants: [R3, R1]` 依同次捕捉的 `$mux.resonators` 位置轉成 `[2, 0]`。清單元素可用 `$` 軟連結。缺列、未綁或空清單預設全部原始序號；非空清單內的未綁元素報錯，不退回全部。外群名稱保留在標紅的 Participants 草稿，改成合法索引後清錯。例如 `[0,2]` 量第一及第三個 tone，`[2,0]` 則依第三、第一的順序執行、畫圖與保存 columns。序號須為唯一、有效範圍內的整數。空 list、重複、越界、bool 或非整數會在 Run 診斷中報錯並阻擋執行。請查看診斷內容判斷問題欄位。
+5. Participants 輸入原始序號 JSON list。Open／Defaults 將 Aliases 的 `participants: [R3, R1]` 依同次捕捉的 `$mux.resonators` 位置轉成 `[2, 0]`。清單元素可用 `$` 軟連結。缺列、未綁或空清單預設全部原始序號；非空清單內的未綁元素報錯，不退回全部。外群名稱保留在標紅的 Participants 草稿，改成合法索引後清錯。例如 `[0,2]` 量第一及第三個 tone，`[2,0]` 則依第三、第一的順序執行、畫圖與保存 columns。序號須為唯一、有效範圍內的整數。空 list、重複、越界、bool 或非整數會在 Run 診斷中報錯並阻擋執行。請查看診斷內容判斷問題欄位。
 6. 設定 Frequency offset 的 Start、Stop、Expts，以及 Reps、Rounds、Relax delay。執行前確認所有欄位有效。
 
 ### 無 readout slot 的候選來源
 
-Open／Reset 固定填入 `ro_length = 1.0 us`，不依賴 `kappa`。
+Open／Defaults 固定填入 `ro_length = 1.0 us`，不依賴 `kappa`。
 Mixer 從 group 的 `mixer_freq` 取初值，不依賴 `kappa` 或 tone frequency。
-所有 group resonators 都有有效 `kappa` 時，Open／Reset 估算五個光子衰減時間。Group 的 `time_of_fly` 另用於 trigger 與 pulse 長度。
+所有 group resonators 都有有效 `kappa` 時，Open／Defaults 估算五個光子衰減時間。Group 的 `time_of_fly` 另用於 trigger 與 pulse 長度。
 `kappa` 與 tone frequency 的單位為 MHz，時間的單位為 us。
 
 | 欄位 | 初值來源 |
@@ -38,7 +38,7 @@ Group 的 `time_of_fly` 缺失或 null 時，只讓 `trig_offset` 與 `length` �
 `readout/mux:blank` 本身不預填 `trig_offset`，缺少推導來源時不會退回 0。
 上述缺值情境仍填入 `ro_length = 1.0 us`。
 已設的 kappa 須為有限正數，mixer 頻率須為有限數，group time_of_fly 須為有限非負數。
-無效的已設來源會讓 Open／Reset 報錯。
+無效的已設來源會讓 Open／Defaults 報錯。
 本節逐項列出這些來源。
 候選**未經裝置確認**，不是 mux route timing 校準，也不保證所有 tone 符合硬體通帶。
 Run 邊界沿既有 capability 檢查拒絕不支援的 generator、ADC 或頻率設定。
@@ -50,8 +50,8 @@ Trigger 仍在 slot 原值上加最小已設 kappa 對應的 ringup 等待，pul
 
 Group 可選填 `qubits: [Q1, Q2, Q3]`。省略或 null 適用於 resonator bring-up。
 提供時，qubits 必須與完整 resonators 等長，且每個 qubit 唯一。
-Open／Reset 檢查每個元件是否存在、kind 是否正確，以及 `Q1.resonator == R1` 等逐項對應。
-缺失或 null 元件會報錯。錯誤列出欄位、index 與實際值，修正來源後重新開啟或 Reset。
+Open／Defaults 檢查每個元件是否存在、kind 是否正確，以及 `Q1.resonator == R1` 等逐項對應。
+缺失或 null 元件會報錯。錯誤列出欄位、index 與實際值，修正來源後重新開啟或按 Defaults。
 配對保留原始順序。Resonators 可以重複。
 
 需要 `kind: group/mux` 元件與指向它的 scalar alias `mux`。
@@ -74,9 +74,9 @@ FTF 的編譯與快取可能主導時間，不能假設成本與 reps 成正比�
 
 ## Run 與圖形
 
-Run 使用 tab 在 Open 或 Reset 時捕捉的參數來源。
+Run 使用 tab 在 Open 或 Defaults 時捕捉的參數來源。
 其後修改 aliases、group resonators 或 library，現有 draft 仍保留原來源。
-需要新來源時執行 Reset 或重新 Open，這會重建初值。Participants 只決定本次量測範圍，完整 readout 保留全部 tones。一般編輯 Participants 不重設任何 tone 值。
+需要新來源時按 Defaults 或重新開啟 tab，這會重建初值。Participants 只決定本次量測範圍，完整 readout 保留全部 tones。一般編輯 Participants 不重設任何 tone 值。
 
 Live 圖以共同 offset 為橫軸，每個 active tone 各有一張 `measurement_i` magnitude 圖。
 標題使用原始 tone 序號與 label，空 label 顯示例如 `tone 2`。Label 可以重複。
@@ -147,7 +147,7 @@ Run 固定捕捉 module alias 與 resonator 資料，其後修改全域 aliases�
 
 ## Herald 後的等待
 
-Open／Reset 給 `post_delay` 初值，FIT 不校準這段等待。Module 提案保留 Run 輸入的值。Apply module 與 readout slot 後，後續實驗會使用保存的值。用這份 readout 做 heralded 實驗前，先設定 `post_delay`，讓腔內光子在後續 qubit drive 前衰減。Herald 和 terminal 共用這個值（[ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)）。等待從 readout generator 的波形結束算起，不等 ADC 積分窗結束（[ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)）。
+Open／Defaults 給 `post_delay` 初值，FIT 不校準這段等待。Module 提案保留 Run 輸入的值。Apply module 與 readout slot 後，後續實驗會使用保存的值。用這份 readout 做 heralded 實驗前，先設定 `post_delay`，讓腔內光子在後續 qubit drive 前衰減。Herald 和 terminal 共用這個值（[ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)）。等待從 readout generator 的波形結束算起，不等 ADC 積分窗結束（[ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)）。
 
 用 FIT 取得各 resonator 的 `kappa`，也就是以 MHz 記的半高全寬。從 `5 / (2π · κ)` µs 開始，這是五個光子衰減時間，也是表單估算 ring-up 等待的公式。共用一個 `post_delay` 時，用最小的 κ，讓線寬最窄的腔有時間放空。
 
@@ -166,7 +166,7 @@ Open／Reset 給 `post_delay` 初值，FIT 不校準這段等待。Module 提案
 `df:{start,stop}` 是所有 tone 共用的 MHz offset，`n` 是共用點數，不是絕對頻率。
 `reps`、`rounds` 可覆寫 acquisition 次數。省略保留表單值，null 清空欄位。
 省略分析輸入保留設定，明填 null 交分析 owner 處理。
-Form 在 Open／Reset 選來源，recipe 不再提供通用 `library` 或 `inline` 輸入。
+Form 在 Open／Defaults 選來源，recipe 不再提供通用 `library` 或 `inline` 輸入。
 `overrides` 最後逐筆執行。Path 用點分字串，例如 `"df.start"`。
 十進位索引指完整 tone 清單的原始位置，不依 participants 重編。
 Run 前呼叫 `check_ready()`，缺值列出欄位路徑與原因，不回滾先前編輯。

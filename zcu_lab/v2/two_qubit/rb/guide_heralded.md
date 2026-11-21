@@ -8,7 +8,7 @@ Cfg schema 3.0 requires `x180_f1` and `x180_f2`.
 
 Select `two_qubit/rb_heralded`. Calibrate X90 and X180 on both roles, full mux
 readout, both CZ pulses and ordered local-Z corrections as described in the
-[ordinary RB guide](guide.md). Open or Reset captures the same module slots.
+[ordinary RB guide](guide.md). Opening the tab or choosing Defaults captures the same module slots.
 The cfg deduplicates and sorts both `depth` and `seed` so that the saved cfg
 matches the data axes. Refresh preserves authored inputs.
 

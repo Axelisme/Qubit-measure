@@ -132,7 +132,7 @@ Amp／Len Rabi 在各自的 core 畫 joint-fit population、histogram 與 confus
 
 ## Mux readout 與表單初值
 
-有 reps／rounds 欄位的表單在 Open／Reset 時填入 1000／10，初值可編輯。
+有 reps／rounds 欄位的表單在 Open／Defaults 時填入 1000／10，初值可編輯。
 Lookback 只有 rounds，初值為 10，core 固定 reps=1。
 以 shots 控制的 singleshot 表單不改 shots，也不增加 reps／rounds 欄位。
 Mux twotone spectrum 的 relax_delay 初值固定為 1.0 µs，不取 captured T1。
@@ -157,7 +157,7 @@ Tone label 是可重複的顯示文字，不是 component 名稱，也不改變�
 有 readout slot 時以副本保留 scalar 初值，再套用 ringup timing。
 缺 slot 時使用 blank mux 範本，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。
 ADC window 固定填入 1.0 us，mixer 取 group 的 `mixer_freq`。初值來源及缺值處理見 [mux onetone guide](mux/onetone/guide.md#無-readout-slot-的候選來源)。
-`participants` 是非空、唯一的原始整數 index list，按輸入順序量測。Open／Reset 將 alias `$participants` 的名稱依 `$mux.resonators` 位置轉成 indices；缺列、未綁或空清單預設全部。之後改 aliases 不更新現有輸入，需 Reset 或重新 Open。
+`participants` 是非空、唯一的原始整數 index list，按輸入順序量測。Open／Defaults 將 alias `$participants` 的名稱依 `$mux.resonators` 位置轉成 indices；缺列、未綁或空清單預設全部。之後改 aliases 不更新現有輸入，需按 Defaults 或重新開啟 tab。
 Lab 將 subset 交 program，不改完整 cfg。
 RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
 Adapter 提供 K 條 active live 曲線及 K 張 `fit_i` 圖，i 是原始 tone 序號。
@@ -168,7 +168,7 @@ Core 的 `analyze` 自己持有 Figure，選擇既有 lib model 的公開 render
 Module proposal 只更新成功 active tone 的頻率，保留其他完整設定，固定寫到 `$mux.readout.readout_rf`。
 單一參數從 Run／Load capture 的 `$mux.resonators` 依完整原始序號對應。Resonators 數不等於完整 tone 數時，保留 readout module 與 capture 可解析的 readout slot 提案，省略逐 resonator scalar，summary 顯示原因。
 MuxGroup 可不填 qubits 做 resonator bring-up，readout 各欄位仍可編輯，不增加完整 qubit 綁定門檻。
-填了則由 model 檢查等長與重複 qubit。Form 在 Open／Reset 呼叫
+填了則由 model 檢查等長與重複 qubit。Form 在 Open／Defaults 呼叫
 `support.measure.mux_bindings.validate_mux_bindings(ctx.parameters)`，以固定 capture
 檢查 component 存在、kind 及逐項 qubit.resonator 對應，無效就拒絕來源。
 其他 mux／FTF Forms 共用此入口，精確 import 與呼叫例見
@@ -207,7 +207,7 @@ Pulse 的 Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay 與 Mixer f
 四實驗的 cfg schema 為 5.0。Load 舊 major 時保留資料與 metadata，cfg 為 None，不轉換舊設定。
 Onetone 的 `df` 是共用 MHz offset；twotone 的單一 `tones` 清單保存各 Q 的 drive 與 MHz 範圍，
 `expts` 是共用硬體點數。
-Guide 說明 kickstart、已有頻率、已有 readout slot 與 recipe 的起手步驟，以及 Open／Reset／Refresh 的差異。
+Guide 說明 kickstart、已有頻率、已有 readout slot 與 recipe 的起手步驟，以及 Open／Defaults／Refresh 的差異。
 `participants` 保存原始 tone index 與執行順序，index 始終對應完整 group 的原始序號。
 Stop 保留已完成的 flux 點，未完成點留 NaN。Analyze 每次用原始 `tone` index 選一個 participant，
 沿既有 half／integer line picker 校準。Local 與 global 分開提出該 Q 的 `flux.period.<被掃 device>` 與預設勾選的 `flux.offset`，

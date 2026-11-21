@@ -8,7 +8,7 @@
 
 Use this experiment after readout and the qubit X90 pulse are calibrated at the
 working flux. Bind the qubit and resonator aliases before opening the tab.
-Open and Reset capture the current sources. After changing aliases, use Reset
+Open and Defaults capture the current sources. After changing aliases, use Defaults
 to refresh the displayed inputs.
 
 The form selects `$qubit.module.x90` and `$resonator.module.readout` when present.

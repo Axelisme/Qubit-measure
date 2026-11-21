@@ -13,7 +13,7 @@ The tested reset preset uses `reset/pulse` on `$qubit.wiring.lo_flux_ch`, with f
 Its fixed gain starts from `$qubit.ext.flux_reset_gain` through the `flux_reset` template.
 Review that gain from the gain scan before calibrating duration. A gain proposal alone does not prove effective reset.
 Missing required sources remain Invalid. Enter a fixed gain if it has not been saved.
-Open and Reset capture the module sources and fill editable starting values.
+Open and Defaults capture the module sources and fill editable starting values.
 Pi pulse uses `$qubit.module.x180` when present, otherwise the pi-pulse template. Verify its calibration before Run.
 Optional reset uses `$qubit.module.reset`; a missing slot leaves it disabled.
 Readout uses `$resonator.module.readout`, or the readout template if that slot is absent.

@@ -11,7 +11,7 @@ CMA-ES 調 I、Q 各 6 個內部控制點，以及 F1、F2 各一個 local Z 角
 1. 依 [two-qubit 校準指南](../guide.md) 準備 F1／F2 的 X90 和 X180、完整 mux readout、兩個 role tone 的 GE circle classifier 與 radius，以及雙線 CZ。核對 `f1`、`f2`、`coupler`、`mux` 四個 alias。Tone 位置由 mux group 的 qubit 順序決定。
 2. 在 GUI 的 arb 波形對話框，用已校準的 CZ 形狀和時長建立一個 arb 資產。Preview 核對 I、Q、時長與 normalize 設定。把 `cz_f1` 與 `cz_f2` 都設成 `arb` 並選同一份資產，保留其他 pulse 欄位。兩個 slot 指向同一個形狀的兩線 pulse，不是把兩線指向同一個 pulse。
 3. 用該 arb 重跑 [CZ amplitude](../cz_amplitude/guide.md) 與 [local Z](../local_z/guide.md)。確認 `$coupler.ext.cz_phase` 裡 F1、F2 的名稱和 correction 都屬於這次校準。
-4. Open `two_qubit/cz_optimize`。若 tab 已開啟，按 Reset Form 重新捕捉。核對各 slot、mux tone 順序與 local Z。兩線指向不同的 asset path 時，即使樣本相同，表單也會拒絕執行。
+4. Open `two_qubit/cz_optimize`。若 tab 已開啟，按 Defaults 重新捕捉。核對各 slot、mux tone 順序與 local Z。兩線指向不同的 asset path 時，即使樣本相同，表單也會拒絕執行。
 
 評估 0 不由 CMA 抽樣。它以 arb 的相同時長為準，在等距的 6 個內部節點從資產線性內插 I、Q 值，並使用捕捉到的 local Z 角度。再用 natural cubic spline 連接這些點與兩端的零值。這條樣條不是原始資產的複本。即使沒有改控制點，兩端及節點之間的形狀也可能和資產不同。
 
@@ -66,7 +66,7 @@ Cfg schema 2.0 要求兩支 X180。Load 保留相容的舊 Result 和 metadata�
 ## 每輪優化與驗收
 
 1. Run 優化，Analyze 並檢查六筆提案。接受這組結果才 Apply 並保存本輪 cfg 與資料。優化在同一組 seeds 上比較多個候選，最高的存活率可能偏高，不能當 gate error。
-2. 開啟 plain [`two_qubit/rb`](../rb/guide.md)。若 tab 已開，先 Reset Form，確認兩支 CZ pulse 與 `cz_phase` 都是剛寫入的值。換一組與本輪優化不重疊的 seeds，並選遞增 depths。三個 depths 可檢查取數流程，估計 gate error 則至少需要四個 depths 和兩個完整的 paired seeds。
+2. 開啟 plain [`two_qubit/rb`](../rb/guide.md)。若 tab 已開，先按 Defaults，確認兩支 CZ pulse 與 `cz_phase` 都是剛寫入的值。換一組與本輪優化不重疊的 seeds，並選遞增 depths。三個 depths 可檢查取數流程，估計 gate error 則至少需要四個 depths 和兩個完整的 paired seeds。
 3. 讀出可區分 g/e 時，可在 RB 選 `reset/mux_herald`。使用完整 mux readout，將 F1、F2 對應的 tone 位置設為 g，例如兩者是 tone 0、1 時填 `{"0": "g", "1": "g"}`。SNR 低時改用脈衝 reset 或不設 reset。優化也遵循同一個 SNR 判斷，低 SNR 時用未 heralded 的終端計數。
 4. 比較本輪與前一輪驗收的 gate error 和不確定度，不用優化曲線的最高點代替。若擬合沒有估計值，先排除分析回報的原因，不以該結果判定進步。驗收的 gate error 不再改善時停止。
-5. 若驗收仍有改善，回到 `two_qubit/cz_optimize` 按 Reset Form，讀入寫回的 CZ 與 `cz_phase`。評估 0 的 12 個控制點是上一輪最佳波形的控制點，兩個 local Z 取自保存的 `cz_phase`。以這組值開始下一輪。
+5. 若驗收仍有改善，回到 `two_qubit/cz_optimize` 按 Defaults，讀入寫回的 CZ 與 `cz_phase`。評估 0 的 12 個控制點是上一輪最佳波形的控制點，兩個 local Z 取自保存的 `cz_phase`。以這組值開始下一輪。

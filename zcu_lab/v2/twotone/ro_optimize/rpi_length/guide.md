@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-11-21
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Behavior
 
@@ -33,7 +33,7 @@ Calibrate the readout frequency and the π pulse first. The Form cannot check th
 Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template that reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly`. The template starts at gain 0.1, which is an uncalibrated value to confirm.
 Pi pulse uses the captured `$qubit.module.x180` slot, or a fresh `pi_pulse` template.
 Run sets both lengths at each sweep point, so the Form hides them in the readout module.
-On Open or Reset, **Length margin** starts at the captured module’s pulse length minus its ADC window. Without a captured readout, it uses the `readout` template’s difference as an uncalibrated starting value. The stock template gives 0.03 us. If either length cannot be resolved, the margin stays blank and required. Confirm or edit this finite, nonnegative time in us before Run. Check that the pulse covers the intended ADC window at the receiver with the selected trigger offset.
+When you open the tab or choose Defaults, **Length margin** starts at the captured module’s pulse length minus its ADC window. Without a captured readout, it uses the `readout` template’s difference as an uncalibrated starting value. The stock template gives 0.03 us. If either length cannot be resolved, the margin stays blank and required. Confirm or edit this finite, nonnegative time in us before Run. Check that the pulse covers the intended ADC window at the receiver with the selected trigger offset.
 **ADC window** starts at 11 points from 0.2 to 2.2 us.
 Reps starts at 250 and Rounds at 20. Each window has 5 000 cycles of 64 reads, or 320 000 reads in total.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.

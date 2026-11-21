@@ -30,8 +30,8 @@ Confirm this delay for the device before Run.
 
 Source changes do not refill an open Form.
 Refresh updates sources and choices while preserving input.
-Reset captures new sources and may replace unsaved edits.
-Reset or reopen after applying a new readout classifier.
+Defaults captures new sources and may replace unsaved edits.
+Choose Defaults or reopen the tab after applying a new readout classifier.
 
 ## Select the envelopes and scan
 
