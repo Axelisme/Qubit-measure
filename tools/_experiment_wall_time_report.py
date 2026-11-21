@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from datetime import datetime
 from pathlib import Path
-from typing import Literal, NotRequired, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
-from pydantic import TypeAdapter
+from pydantic import Field, TypeAdapter
 
 RUN_TARGET_S = 180.0
 
@@ -36,16 +35,6 @@ class RunStart(TypedDict):
     cold_start: bool
 
 
-class BatchEnd(TypedDict):
-    """The UTC ISO-8601 and monotonic seconds at the batch interruption.
-
-    monotonic_s is None when the end was only observed by the outer runner.
-    """
-
-    ended_at: str
-    monotonic_s: float | None
-
-
 type RowStatus = Literal[
     "ok",
     "missing_breakdown",
@@ -65,8 +54,9 @@ class Row(TypedDict):
     case_directory is relative to the output (or absolute for retained evidence),
     or None when there are no case artifacts. Timestamps are UTC ISO-8601 strings;
     wall_s is exact measured seconds, and wall_s_lower_bound is used instead for
-    incomplete or timed-out Runs. Breakdown is complete, partial, missing, or
-    None if not attempted. Acquires counts observed records; the four stage
+    timed-out Runs. An incomplete row has only the pre-dispatch started_at and
+    neither duration. Breakdown is complete, partial, missing, or None if not
+    attempted. Acquires counts observed records; the four stage
     fields are measured seconds or None. Status distinguishes complete, missing
     data/defaults, unsupported, failed, timed-out and uncompleted rows. Reason
     explains an exclusion, unresolved defaults or a failure, when applicable.
@@ -81,7 +71,7 @@ class Row(TypedDict):
     case_directory: str | None
     started_at: str | None
     finished_at: str | None
-    wall_s: float | None
+    wall_s: Annotated[float, Field(strict=True, ge=0, allow_inf_nan=False)] | None
     wall_s_lower_bound: float | None
     breakdown: Literal["complete", "partial", "missing"] | None
     acquires: int | None
@@ -159,8 +149,7 @@ def _summary_row(row: Row) -> str:
     lower_bound = row["wall_s_lower_bound"]
     wall = _seconds(row["wall_s"])
     if lower_bound is not None:
-        operator = ">" if row["status"] == "timeout" else "≥"
-        wall = f"{operator}{lower_bound}"
+        wall = f">{lower_bound}"
     source = (
         ", ".join(
             note
@@ -240,14 +229,24 @@ def _run_summary(rows: list[Row]) -> str:
 
 
 def _failure_list(rows: list[Row]) -> str:
-    failures: list[str] = []
+    by_reason: dict[str, list[str]] = {}
     for row in rows:
-        if row["status"] == "run_failed":
-            reason = row["reason"]
-            if not reason:
-                raise ValueError(f"Run failure for {row['adapter']!r} lacks a reason")
-            failures.append(f"- `{row['adapter']}`: {' '.join(reason.splitlines())}\n")
-    return "\nRun failures:\n" + ("".join(failures) if failures else "—\n")
+        if row["status"] != "run_failed":
+            continue
+        reason = row["reason"]
+        directory = row["case_directory"]
+        record = row.get("failure_record")
+        if not reason or directory is None or not record:
+            raise ValueError(f"Run failure for {row['adapter']!r} lacks diagnostics")
+        record = (Path(directory) / record).as_posix()
+        by_reason.setdefault(reason, []).append(
+            f"  - `{row['adapter']}` — `{record}`\n"
+        )
+    groups = (
+        f"- {' '.join(reason.splitlines())}\n{''.join(entries)}"
+        for reason, entries in by_reason.items()
+    )
+    return "\nRun failures:\n" + ("".join(groups) or "—\n")
 
 
 def write_json(path: Path, value: object) -> None:
@@ -264,22 +263,20 @@ def read_plan(output: Path) -> BatchPlan:
     return TypeAdapter(BatchPlan).validate_json((output / "batch.json").read_bytes())
 
 
-def read_batch_end(output: Path) -> BatchEnd | None:
-    """Return the recorded stop time, or None if no stop has been recorded yet."""
+def _read_row(location: Path, adapter: str) -> Row | None:
+    path = location / "row.json"
     try:
-        data = (output / "batch-end.json").read_bytes()
+        data = path.read_bytes()
     except FileNotFoundError:
         return None
-    return TypeAdapter(BatchEnd).validate_json(data)
-
-
-def read_row(location: Path) -> Row | None:
-    """Load a committed row from its journal directory, or None if not committed."""
-    try:
-        data = (location / "row.json").read_bytes()
-    except FileNotFoundError:
-        return None
-    return TypeAdapter(Row).validate_json(data)
+    row = TypeAdapter(Row).validate_json(data)
+    if row["adapter"] != adapter:
+        raise ValueError(
+            f"{path}: expected adapter {adapter!r}, got {row['adapter']!r}"
+        )
+    if row["status"] in {"ok", "missing_breakdown"} and row["wall_s"] is None:
+        raise ValueError(f"{path}: {row['status']} requires Run seconds (wall_s)")
+    return row
 
 
 class JournalUsageError(ValueError):
@@ -304,7 +301,7 @@ def reusable_rows(source: Path, plan: BatchPlan) -> dict[str, Row]:
         )
     rows: dict[str, Row] = {}
     for adapter, directory in previous["cases"].items():
-        row = read_row(source / directory)
+        row = _read_row(source / directory, adapter)
         if row is not None and _resolved(row):
             if adapter not in plan["adapters"]:
                 raise ValueError(
@@ -321,20 +318,19 @@ def _resolved(row: Row) -> bool:
     return row["status"] not in {"incomplete", "not_run"}
 
 
-def assemble_report(output: Path, plan: BatchPlan, ended: BatchEnd | None) -> bool:
-    """Render both reports from disk and return whether every reported row is resolved.
+def assemble_report(output: Path, plan: BatchPlan) -> bool:
+    """Render both reports from the batch journal in output.
 
-    ended supplies the bounds for unmatched starts. Raises JournalUsageError
-    if an incomplete Run lacks a batch end or that end precedes its persisted
-    start. Malformed or unreadable journal data propagate.
+    Return whether every planned row is resolved. Unmatched starts do not
+    establish a Run duration. Malformed or unreadable journal data propagate.
     """
     rows = []
     for adapter, directory in plan["cases"].items():
         location = output / directory
-        row = read_row(location)
+        row = _read_row(location, adapter)
         if row is None:
             row = _uncommitted_row(
-                adapter, plan["adapters"][adapter], directory, location, ended
+                adapter, plan["adapters"][adapter], directory, location
             )
         rows.append(row)
     resolved = sum(_resolved(row) for row in rows)
@@ -347,29 +343,15 @@ def _uncommitted_row(
     guide: str | None,
     directory: str,
     location: Path,
-    ended: BatchEnd | None,
 ) -> Row:
     try:
         data = (location / "start.json").read_bytes()
     except FileNotFoundError:
         return new_row(adapter, guide, None, "not_run", None)
     start = TypeAdapter(RunStart).validate_json(data)
-    if ended is None:
-        raise JournalUsageError(
-            "an incomplete Run requires --ended-at for the batch interruption"
-        )
-    if ended["monotonic_s"] is not None:
-        elapsed_s = ended["monotonic_s"] - start["monotonic_s"]
-    else:
-        end = datetime.fromisoformat(ended["ended_at"])
-        began = datetime.fromisoformat(start["started_at"])
-        elapsed_s = (end - began).total_seconds()
-    if elapsed_s < 0:
-        raise JournalUsageError(f"batch end precedes Run start for {adapter!r}")
     row = new_row(adapter, guide, directory, "incomplete", None)
     row.update(
         started_at=start["started_at"],
-        wall_s_lower_bound=elapsed_s,
         cold_start=start["cold_start"],
     )
     return row

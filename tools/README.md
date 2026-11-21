@@ -156,7 +156,7 @@ write_snapshot(
 
 `tools.experiment_wall_time` 預設為 lab assembly 註冊的每個 adapter 產生一列。`--select` 接受完整的 adapter key 或第一段家族名。例如 `--select onetone/freq` 選一個實驗，`--select mux` 選整個家族。可以重複指定，重疊的實驗只跑一次。省略 `--output` 時，工具在 `.agent_state/benchmark/wall-time/` 下建立有時間戳的新目錄。量測時，指定的目錄必須尚未存在。
 
-使用有 Qt 與 QICK 的 worktree 環境。工具用 `Controller(view=None)` 和 Qt 事件迴圈，不開視窗、遠端服務或硬體連線。工具只讀[自持的 FTF 設定、board profile 和校準 point](data/experiment_wall_time/)。FTF 的 `time_scale` 是 0，初始虛擬電流是 fixture 的校準工作點。每個案例有獨立的模擬環境和 project 副本。工具用 Open 建立表單，接著透過表單介面套用[覆寫表](data/experiment_wall_time/overrides.json)中該 adapter 的欄位。每筆覆寫記 adapter key、表單 cfg 路徑、JSON 值與依據。路徑使用欄位名及從 0 開始的清單索引，例如 `['delay', 'n']` 是線性掃描的點數。
+使用有 Qt 與 QICK 的 worktree 環境。工具用 `Controller(view=None)` 和 Qt 事件迴圈，不開視窗、遠端服務或硬體連線。工具只讀[自持的 FTF 設定、board profile 和校準 point](data/experiment_wall_time/)。FTF 的 `time_scale` 是 0，初始虛擬電流是 fixture 的校準工作點。每個案例有獨立的模擬環境和 project 副本。工具用 Open 建立表單，接著透過表單介面套用[覆寫表](data/experiment_wall_time/overrides.json)中該 adapter 的欄位。每筆覆寫記 adapter key、表單 cfg 路徑與 JSON 值。`basis` 記供人閱讀的覆寫依據，不影響執行。路徑使用欄位名及從 0 開始的清單索引，例如 `['delay', 'n']` 是線性掃描的點數。
 
 正式批次在該 worktree 用 `tools/run_heavy.py --exclusive`。先設定 `output` 為新的絕對路徑、`budget_s` 為整批 payload 的秒數預算：
 
@@ -180,15 +180,15 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
 
 `batch.json` 記錄本批選中的 adapter、Git HEAD、每份輸入的 SHA-256 和 guide 盤點。從乾淨 checkout 執行，才能用 commit 找回執行時的程式。每列在送出 Run 前先寫 `start.json`，記 UTC 時刻與 monotonic 秒數。Run 到終態後，工具在清理該列資源前寫 `row.json`。`report.json` 和 `summary.md` 從這些落盤紀錄組成，列出已判定列數、本批涵蓋列數及全 inventory 列數。
 
-Run 由 monotonic clock 計算，從送出 Run 到 Controller 發布終態。環境組裝、Open 與覆寫不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留 fixture 副本與 acquired ledger，不寫回入庫輸入。Compile、evolve、readout 與 remainder 加總該目錄中的 acquire 牆鐘。Remainder 不含 acquire 外的 Run 開銷。若沒有 acquire 記錄或分項不全，`missing_breakdown` 保留 Run 秒數，分項寫 `null`。
+工具在送出 Run 及收到 Controller 終態事件時各取一次時間。Run 秒數取兩次 monotonic clock 的差，UTC 時刻供閱讀。環境組裝、Open、覆寫及派送前落盤都不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留 fixture 副本與 acquired ledger，不寫回入庫輸入。Compile、evolve、readout 與 remainder 加總該目錄中的 acquire 牆鐘。Remainder 不含 acquire 外的 Run 開銷。若沒有 acquire 記錄或分項不全，`missing_breakdown` 保留 Run 秒數，分項寫 `null`。
 
-`--row-timeout SECONDS` 從送出 Run 起算，預設 360 秒。只接受有限且介於 180 到 2,147,483.647 秒的值，兩端都可用。到期時先把所有 Python 執行緒的 stack 寫到該列的 `timeout-stack.txt`，再請 Controller 取消。`timeout` 的精確 `wall_s` 是 `null`，`wall_s_lower_bound` 表示 Run 大於期限。能加總的 acquire 分項標「部分」，沒有可用分項時標「分項缺」。摘要以未四捨五入的 Run 秒數列出嚴格大於 180 秒的實驗，也列入所有 `timeout`。取消後 30 秒內，Run 到終態且 Controller idle 才繼續。否則停止派送，保留報表，將尚未開始的列記為 `not_run`。
+`--row-timeout SECONDS` 從送出 Run 起算，預設 360 秒。只接受有限且介於 180 到 2,147,483.647 秒的值，兩端都可用。到期時先把所有 Python 執行緒的 stack 寫到該列的 `timeout-stack.txt`，再請 Controller 取消。`timeout` 的精確 `wall_s` 是 `null`，`wall_s_lower_bound` 表示 Run 大於期限。能加總的 acquire 分項標「部分」，沒有可用分項時標「分項缺」。摘要以未四捨五入的 Run 秒數列出嚴格大於 180 秒的實驗，也列入所有 `timeout`。取消後 30 秒內，工具觀察到 Run 終態且 Controller idle 才繼續。否則停止派送，保留報表，將尚未開始的列記為 `not_run`。
 
-Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`，再落盤 `run_failed` 列。該列記 Run 起點、收到失敗事件的時刻，以及 Controller 提供的錯誤類型與訊息。`failure_record` 是相對於該列 `case_directory` 的診斷檔路徑。失敗列不填 Run 秒數，也不列入 `Run >180 s`。工具寫完該列才檢查 Controller 是否 idle；若仍有活動中的操作，就停止派送。摘要分別計數成功計時、`timeout` 與 `run_failed`。`Run failures` 另列出失敗的 adapter 與原因，供維護者判斷該查模擬器能力、表單預設或程式缺陷。
+Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`，再落盤 `run_failed` 列。該列記 Run 起點、收到失敗事件的時刻，以及 Controller 提供的錯誤類型與訊息。`failure_record` 是相對於該列 `case_directory` 的診斷檔路徑。失敗列不填 Run 秒數，也不列入 `Run >180 s`。工具寫完該列才檢查 Controller 是否 idle；若仍有活動中的操作，就停止派送。摘要分別計數成功計時、`timeout` 與 `run_failed`。`Run failures` 按完全相同的 Controller 診斷分組，每組列出 adapter key 與診斷檔路徑。工具不推斷根因。
 
-Open 加上覆寫後仍缺欄位或 slot 時，`missing_defaults` 列出表單的錯誤，不送出 Run。[案例宣告](data/experiment_wall_time/case-inputs.json)列出這個 FTF 環境無法執行的 adapter；這些 `not_runnable` 列只寫原因，不複製 project 或啟動 Run。工具例外、未知 Run outcome、環境組裝、journal 錯誤與 telemetry 格式錯誤會中止指令，不轉成案例狀態。
+Open 加上覆寫後仍缺欄位或 slot 時，`missing_defaults` 列出表單的錯誤，不送出 Run。[案例宣告](data/experiment_wall_time/case-inputs.json)列出這個 FTF 環境無法執行的 adapter；這些 `not_runnable` 列只寫原因，不複製 project 或啟動 Run。工具例外、未知 Run outcome、環境組裝、journal 錯誤與 telemetry 格式錯誤會中止指令，不轉成案例狀態。重建與續跑都拒絕 adapter key 不符的結果列，以及沒有有效 Run 秒數的 `ok` 或 `missing_breakdown` 列。
 
-外層中斷時，有 `start.json` 但沒有 `row.json` 的列記為 `incomplete`，以開始到批次中斷的秒數作下限。沒有開始也沒有結果的列記為 `not_run`。全表需要每個註冊的 adapter 都有成功計時、`timeout`、`run_failed`、`missing_defaults` 或 `not_runnable` 的結果。`incomplete` 和 `not_run` 不算已判定。
+批次中斷時，有 `start.json` 但沒有 `row.json` 的列記為 `incomplete`。這種列的 `started_at` 是派送前記下的時刻，不代表 Run 已送出。兩份紀錄都沒有的列記為 `not_run`。兩種列的 Run 秒數和下限都寫 `null`，摘要的 Run 欄顯示「—」。全表需要每個註冊的 adapter 都有成功計時、`timeout`、`run_failed`、`missing_defaults` 或 `not_runnable` 的結果。`incomplete` 和 `not_run` 不算已判定。
 
 量測和 `--report-only` 使用同一套 exit status：
 
@@ -201,28 +201,14 @@ Open 加上覆寫後仍缺欄位或 slot 時，`missing_defaults` 列出表單�
 
 這些是牆鐘工具的 exit status。`run_heavy.py` 強制結束 payload 時，外層收據仍依 runner 的規則回報。
 
-若程序被強制結束，兩份報表可能沒有寫完。用 `--report-only --output "$output"`
-從原目錄的 journal 重建，不會派送 Run。有 `batch-end.json` 時以它為準；
-沒有任何一列只寫了 `start.json` 而未寫 `row.json` 時，也不必加 `--ended-at`。
-
-若有 `start.json` 沒有 `row.json`，且沒有 `batch-end.json`，
-以 `--ended-at` 傳入批次中斷時刻，格式為含 UTC offset 的 ISO 8601。
-工具從這個時刻扣掉 `start.json` 的 `started_at`，得到 Run 秒數下限。
-不要用收據的 `finished_utc`，因為 runner 在清理 process group 後才記下它。
-
-若同批 `run_heavy.py` 收據確認 `timed_out: true`，且 UTC 時鐘未跳變、批次也沒有更早中斷，
-可用 `started_utc` 加上當次傳給 runner 的 `<timeout-seconds>`。
-Runner 在啟動子程序前記 `started_utc`，在啟動後才開始限時等待，因此這個值不晚於 timeout 觸發時刻。
-例如 `started_utc` 是 `2026-11-21T12:00:00+00:00`，payload 上限是 720 秒，
-則把 `ended_at` 設為 `2026-11-21T12:12:00+00:00`：
+若程序被強制結束，兩份報表可能沒有寫完。以下指令只讀原目錄的 journal，不探索 adapter，也不派送 Run：
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
-  --report-only --output "$output" --ended-at "$ended_at"
+  --report-only --output "$output"
 ```
 
-若算出的時刻早於該列的 `started_at`，或無法取得可信的中斷時刻，不要補填時間。
-保留 journal，用下方的續跑方式留用已落盤列並重跑缺列。
+批次起迄與外層逾時看 `run_heavy.py` 的收據，不用來推算 Run 耗時。要補未判定列，使用下方的續跑方式。
 
 續跑使用新的 `--output`，以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。新報表併入來源中已落盤的判定列；`--select` 只派送所選範圍內尚未判定的列。`timeout` 和 `run_failed` 都是已判定列，不會自動重跑。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`：
 
