@@ -470,6 +470,8 @@ certify full-density accuracy. The coherent limit is 0.0018; the bath limit
 remains 0.01. A rejected pinned row raises `NoValidKernel`. Default dispatch
 compares the remaining admissible families by price.
 
+For matrix coverage of shifted spans, see [Reference solver limits](#reference-solver-limits).
+
 To read recorded routes and guard decisions (search term `inspect-dp54-summary`),
 use the [simulator capture inspector](../../../../tools/README.md#simulator-capture-inspection).
 A recorded `rejected` decision does not include the reason. The inspector does
@@ -925,11 +927,7 @@ The same named inputs also run with
 [default empty and warm routing history](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py);
 those runs measure the families actually selected, not every candidate.
 The [matrix instructions](../../../../tests/README.md#evolution-精度矩陣)
-own the command and report format. Both independent timeline solvers,
-[lab-frame `reference_timeline`](../../../../tests/simulate/evolution/contract/reference.py)
-and [interaction-picture `interaction_density`](../../../../tests/simulate/evolution/contract/interaction_reference.py),
-reject batches with `segment_shifts`. The matrix does not certify shifted spans.
-For the FTF producer and guard query, see [Common-frame guard diagnostics](#common-frame-guard-diagnostics).
+own the command and report format.
 
 Sampled dual tones that pass the row proxies form `multitone_rwa` groups whose
 members differ only in each tone's amplitude. A group matches model, duration,
@@ -1018,6 +1016,14 @@ Its coherent indicator is 0.0017999982, one part per million inside the new
 limit. The matrix checks the complete complex density against a two-tolerance
 full-Hamiltonian Lindblad reference with the unchanged 2e-3 acceptance bound.
 The earlier 8.066669e-3 edge is replaced, not retained as an expected failure.
+
+### Reference solver limits
+
+Both independent timeline solvers,
+[lab-frame `reference_timeline`](../../../../tests/simulate/evolution/contract/reference.py)
+and [interaction-picture `interaction_density`](../../../../tests/simulate/evolution/contract/interaction_reference.py),
+reject batches with `segment_shifts`. The matrix does not certify shifted spans.
+For the FTF producer and guard query, see [Common-frame guard diagnostics](#common-frame-guard-diagnostics).
 
 ### Constant-pair guard evidence
 

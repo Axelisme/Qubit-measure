@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-22，逐點 shot SEM
+**Last updated:** 2026-11-22，逐點 shot SEM、`shot_sums` 的分析用途
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 

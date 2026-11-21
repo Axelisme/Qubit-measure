@@ -161,7 +161,7 @@ GUI application 持有結果與具名圖集合，保存不反向依賴 Qt widget
 
 **規則。** [實驗呈現指南](../../zcu_lab/v2/figure-style.md)定義圖、表單文字、guide 與 recipe 說明的寫法。R0 是共同的驗收原則。懂物理但不熟悉實作的操作員，只看表單、guide、liveplot 與 Analyze 圖，就能說出實驗量什麼、每個參數做什麼、每個圖形元素代表什麼，以及如何判讀結果。
 
-圖只放物理量、模型、擬合結果與判讀所需的標註。Run 身分放在可見的 Analyze 摘要，不印在圖上。Adapter 用該次 cfg 的 Reps×Rounds 與實驗已回傳的實際施加值提供摘要行。GUI 與 MCP 的 [`AnalysisPresentation`](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation) 顯示同一份行，不各自組裝。摘要行不經 [ADR-0062 的 workflow operation wire](0062-experiment-workflow.md#一個-run-的-operation)。圖的標題與圖例由各實驗 core 編寫，不建立共用 formatter。R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Run 頁的按鈕名為 `Defaults`，表單的物理欄位仍用 `Reset`。
+圖只放物理量、模型、擬合結果與判讀所需的標註。Run 身分放在可見的 Analyze 摘要，不印在圖上。Adapter 用該次 cfg 的 Reps×Rounds 與實驗已回傳的實際施加值提供摘要行。GUI 與 MCP 的 [`AnalysisPresentation`](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation) 顯示同一份行，不各自組裝。摘要行不經 [[0062]]〈一個 run 的 operation〉的 workflow operation wire。圖的標題與圖例由各實驗 core 編寫，不建立共用 formatter。R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Run 頁的按鈕名為 `Defaults`，表單的物理欄位仍用 `Reset`。
 
 對數值大小敏感的一維資料點畫 shot SEM；看峰位的 spectrum 和二維圖不畫逐點 error bar。Shot SEM 是每發樣本標準差除以保留 shot 數的平方根，表示該點平均值的預期誤差。顯示用時間寫 `µs`，gain、amplitude 與倍率寫 `a.u.`，機率寫出機率名稱，計數寫 `count`。存檔單位照[保存、發現與範圍](#保存發現與範圍)，不受顯示詞彙影響。
 

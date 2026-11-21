@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-22，校正 IQ 軸的取數前置條件
+**Last updated:** 2026-11-22，校正 IQ 軸的取數前置條件、`shot_sums` 的分析用途
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 

@@ -76,8 +76,7 @@ See [ADR-0062](../../../../../../docs/adr/0062-experiment-workflow.md#一個-run
 The operation wire carries neither [Analyze summary lines](#analysis-presentation)
 nor program acquisition observations. The runtime logs data-driven early stops
 as described in [Stop and Retry](../../../../experiment/v2/runtime/README.md#stop-與-retry).
-The change that removed acquisition observations advanced `WIRE_VERSION` to 125
-and `GUI_VERSION` to 158 under the rule in `wire_version.py`.
+See [Wire contract](#wire-contract) for the current wire and GUI versions.
 
 ## Saved results
 

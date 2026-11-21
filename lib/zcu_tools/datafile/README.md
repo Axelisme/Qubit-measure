@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-11-22，單一 Variable 的寫前檢查
+**Last updated:** 2026-11-22，單一 Variable 的寫前檢查、容器 3.x 與 run metadata 讀取入口
 
 **讀者：** framework-dev。讀寫通用 HDF5 容器，或獨立轉出 Labber。
 

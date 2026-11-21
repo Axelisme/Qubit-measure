@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-11-22，Analyze 摘要
+**Last updated:** 2026-11-22，Analyze 摘要、RecipeReport 討論紀錄與 workflow 表單欄位描述
 
 **讀者：** agent、framework-dev。查閱量測 MCP 的啟動、表單、operation 與寫回契約。
 

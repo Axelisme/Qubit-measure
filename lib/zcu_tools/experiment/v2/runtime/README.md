@@ -158,6 +158,8 @@ Data stop 是正常完成，不設 scope event，也不標記 partial。
 
 ## Stop 與 Retry
 
+停止訊號、取數重試與前端完成狀態的責任邊界見 [ADR-0069〈核心與前端〉](../../../../../docs/adr/0069-experiment-core-and-frontends.md#核心與前端)。
+
 - `Scope` 擁有具名父子鏈與選擇器，`StopSignal` 只擁有向下停止請求與不解析的 reason。Caller 每次 run 建立根 Scope，
   透過 `Schedule(..., scope=context.scope)` 傳入。Schedule 在進入 context 時建立 schedule child，退出時 release。每次 acquire attempt 建立 acquire child，結束時 release。取消 child 不停止父 scope，後續 acquire 或 operation 可繼續。
 - Child release 只解除父子關係，不上交停止、資料完整度或錯誤。已完成 child 從 active tree 移除，不隨 run 長度累積。
