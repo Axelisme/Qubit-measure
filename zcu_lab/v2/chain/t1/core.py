@@ -193,9 +193,11 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
                 builder.timeline_inc(delay)
                 builder.delay_by_timeline()
                 builder.emit(readout)
-                builder.delay_auto()
                 builder.emit(readout)
-                builder.delay_auto()
+                # Advance to the readout pulse end plus post_delay, not ADC close.
+                # The compiler needs this to prove that windows on the same ADC
+                # do not overlap across the hardware repeat back edge (ADR-0083).
+                builder.delay_by_timeline()
 
             prog = builder.build()
             sched.run_acquire_summed(

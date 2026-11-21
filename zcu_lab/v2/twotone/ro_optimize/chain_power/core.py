@@ -139,7 +139,6 @@ class ChainPowerExp(Experiment[ThermalChainSums, ChainPowerCfg]):
             readout = PulseReadout("readout", cfg.readout, gain=gain)
             with builder.repeat("read", READS_PER_SHOT):
                 builder.emit(readout)
-                builder.delay_auto()
             prog = builder.build()
             sched.run_acquire_summed(
                 prog,

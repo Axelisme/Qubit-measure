@@ -10,8 +10,8 @@ After changing a parameter source, use Reset to recapture initial values. Refres
 
 `twotone/ro_optimize/chain_freq` sweeps readout frequency in MHz.
 Each shot reads one PulseReadout 16 times without a drive or reset.
-Each read starts after the previous pulse, ADC window and readout `post_delay` have all ended.
-Adjacent reads keep the readout's own `post_delay` as the photon decay gap.
+After a readout pulse ends, the readout's `post_delay` gives cavity photons time to decay before the next readout starts.
+The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
 The relax delay K follows each shot. Every shot after the first starts K after the previous shot.
 Set `relax_delay` in us long enough to return to thermal equilibrium.
 The Form seeds it from 5·T1. The first shot relies on the state before Run.
@@ -19,7 +19,7 @@ There is no additional wait inside the chain beyond the readout's own timing.
 
 Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template.
 The template uses the resonator frequency, wiring and time of flight.
-Frequency starts at 11 points around `$resonator.freq`, with span `$resonator.kappa`. Run replaces both generator and ADC frequency, so the Form hides readout frequency.
+By default, the sweep uses 11 points from one linewidth below the resonator frequency to one linewidth above it. Run replaces both generator and ADC frequency, so the Form hides readout frequency.
 Reps defaults to 2000 shots per setting per round. Rounds defaults to 320, giving 640 000 shots per setting.
 Missing or invalid sources leave fields Invalid. Supply them before Run.
 

@@ -150,7 +150,6 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
             readout = PulseReadout("readout", cfg.readout, freq=freq)
             with builder.repeat("read", READS_PER_SHOT):
                 builder.emit(readout)
-                builder.delay_auto()
             prog = builder.build()
             sched.run_acquire_summed(
                 prog,

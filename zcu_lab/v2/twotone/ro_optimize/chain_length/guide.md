@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run the no-drive ADC window sweep and read its heuristic score, QND and correlation-growth diagnostic.
 
-**Last updated:** 2026-11-10
+**Last updated:** 2026-11-21
 
 After changing a parameter source, use Reset to recapture initial values. Refresh updates sources and choices while preserving authored inputs. Reset can overwrite unsaved inputs.
 
@@ -10,8 +10,8 @@ After changing a parameter source, use Reset to recapture initial values. Refres
 
 `twotone/ro_optimize/chain_length` sweeps readout ADC window in us.
 Each shot reads one PulseReadout 16 times without a drive or reset.
-Each read starts after the previous pulse, ADC window and readout `post_delay` have all ended.
-Adjacent reads keep the readout's own `post_delay` as the photon decay gap.
+After a readout pulse ends, the readout's `post_delay` gives cavity photons time to decay before the next readout starts.
+The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
 The relax delay K follows each shot. Every shot after the first starts K after the previous shot.
 Set `relax_delay` in us long enough to return to thermal equilibrium.
 The Form seeds it from 5·T1. The first shot relies on the state before Run.
@@ -19,9 +19,15 @@ There is no additional wait inside the chain beyond the readout's own timing.
 
 Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template.
 The template uses the resonator frequency, wiring and time of flight.
-ADC window starts at 11 points from 0.2 to 2.2 us. Run rebuilds the program for each window and sets the pulse length to window + 0.11 us. The Form hides both lengths in the readout module.
+ADC window starts at 11 points from 0.2 to 2.2 us. Run rebuilds the program at each point and sets its pulse length to `trig_offset − time_of_fly + window + 0.11 us`.
+Subtracting the flight time accounts for propagation to the ADC. The extra 0.11 us lets the pulse end reach the ADC after the window closes.
+For the pulse to cover the whole window, the ADC must open no earlier than the pulse reaches it (`trigger offset ≥ pre-delay + time of flight`). An earlier opening leaves the start of the window without a readout pulse.
+
+The Form hides the two lengths that Run sets. It shows **Time of flight (µs)** as a read-only, required field.
+Open and Reset capture it from `$resonator.time_of_fly`. Refresh keeps the value already shown.
+If the field is blank, correct the missing or invalid calibration at the source, then Reset before Run.
 Reps defaults to 2000 shots per setting per round. Rounds defaults to 320, giving 640 000 shots per setting.
-Missing or invalid sources leave fields Invalid. Supply them before Run.
+Supply any other missing or invalid sources before Run.
 
 This experiment needs thermal g/e contrast, not a calibrated π pulse.
 The state after K is not the readout-driven steady state. A measured 60:40 readout-driven population does not specify the population before the first read.
@@ -93,7 +99,7 @@ The record is ThermalChainSums with the sweep axis, shot count and 107 float64 s
 It keeps I/Q sums of R1..R16, R1 I²/IQ/Q², all four cross components of all 15 adjacent pairs, and the R1,R3 through R1,R5 pairs.
 No weighted M aggregate replaces those pairs.
 Native save and restore preserve the moments for reanalysis of score, M and best setting.
-The tag is `twotone/ro_optimize/chain_length` and cfg schema is `4.0`. There is no earlier-schema compatibility path.
+The tag is `twotone/ro_optimize/chain_length` and cfg schema is `5.0`. An older run can still load its saved moments for analysis, but its cfg is not restored.
 
 `ro_optimize_chain_length` accepts optional `length_start_us` and `length_stop_us` in us, `points`, `relax_delay`, `reps` and `rounds`.
 `points` maps to sweep Expts. Omission keeps the Form value; null passes to the field owner.
