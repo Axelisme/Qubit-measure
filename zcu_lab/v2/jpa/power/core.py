@@ -45,23 +45,49 @@ class PowerAnalysis:
 
 
 class PowerCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select a qubit reset before readout; leave empty to skip it.",
+        ),
+    ] = None
+    pi_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit π pulse",
+            description="Select the calibrated g→e pulse for the excited preparation only.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Select the calibrated resonator pulse and IQ integration for both preparations.",
+        ),
+    ]
     jpa_rf_dev: Annotated[
         DeviceName,
         FieldMeta(
-            label="JPA RF device",
-            description="Connected RF device driven by the pump-power sweep.",
+            label="JPA pump RF source",
+            description="Select the RF source whose JPA pump power is swept.",
         ),
     ] = ""
-    jpa_power: Annotated[SweepCfg, FieldMeta(label="JPA pump power", unit="dBm")]
+    jpa_power: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="JPA pump source power",
+            unit="dBm",
+            description="Enter Start and Stop in pump source dBm and Expts as the number of power samples (count).",
+        ),
+    ]
     skew_penalty: Annotated[
         float,
         FieldMeta(
-            label="Skew penalty",
+            label="IQ shape penalty",
+            unit="a.u.",
             decimals=3,
-            description="Nonnegative SNR skew penalty.",
+            description="Enter a nonnegative weight for unequal IQ widths and skew; 0 uses separation SNR alone.",
         ),
     ] = Field(default=0.0, ge=0.0)
     seed: Annotated[
@@ -69,15 +95,17 @@ class PowerCfg(ConfigBase):
         FieldMeta(
             label="Scan-order seed",
             description=(
-                "Fixes the shuffled order of interior powers; empty draws a new "
-                "order each run."
+                "Enter a nonnegative integer to repeat the shuffled interior order; "
+                "leave blank for a new order."
             ),
         ),
     ] = None
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per preparation at each setting in one round.",
         ),
     ]
     rounds: Annotated[
@@ -85,16 +113,16 @@ class PowerCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of acquisition rounds per setting.",
         ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Relaxation wait",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the wait after readout for relaxation before the next shot (µs).",
         ),
     ]
 
@@ -129,10 +157,16 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         # Show independent points rather than connecting randomized settings.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Power (dBm)", ylabel="g/e SNR (a.u.)")
+        title = "JPA sweep · pump power · g/e separation score"
+        ax.set(
+            title=title,
+            xlabel="JPA pump source power (dBm)",
+            ylabel="g/e separation score (a.u.)",
+        )
+        ax.ticklabel_format(axis="x", style="plain", useOffset=False)
         line = live_line(ax)
-        ax.lines[0].set_linestyle("None")
-        ax.lines[0].set_marker("o")
+        ax.lines[0].set(linestyle="None", marker="o", markersize=4, color="C0")
+        retained_shots = np.zeros(len(jpa_powers), dtype=np.int64)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> Iterable[Artist]:
@@ -141,7 +175,11 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             Read the scan-shaped data without changing it. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            return line.set(jpa_powers, np.abs(data))
+            progress = ax.set_title(
+                f"{title}\n{np.count_nonzero(np.isfinite(data))}/{len(jpa_powers)} settings sampled"
+                f" · {retained_shots.sum():,} retained shots"
+            )
+            return (*line.set(jpa_powers, np.abs(data)), progress)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -152,7 +190,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         # 2. Set the external pump power for each host-side point.
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            for jpa_power, step in sched.scan("power (dBm)", jpa_powers.tolist()):
+            for index, (jpa_power, step) in enumerate(
+                sched.scan("Pump source power", jpa_powers.tolist())
+            ):
                 set_rf_power(context.devices[cfg.jpa_rf_dev], jpa_power)
 
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
@@ -174,16 +214,19 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 builder.delay_by_timeline()
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
+
+                def score(
+                    sums: NDArray[np.float64], *, point: int = index
+                ) -> NDArray[np.float64]:
+                    """Track cumulative retained shots from both preparations and return SNR."""
+                    retained_shots[point] = int(sums[..., 0].sum())
+                    return snr_as_signal(sums, skew_penalty=cfg.skew_penalty)
+
                 step.run_acquire_summed(
                     prog,
                     soc,
                     reducer=shot_sums(prog, [IQ("readout", order=3)]),
-                    options=RunOptions(
-                        converter=lambda sums: snr_as_signal(
-                            sums,
-                            skew_penalty=cfg.skew_penalty,
-                        ),
-                    ),
+                    options=RunOptions(converter=score),
                     rounds=cfg.rounds,
                 )
 
@@ -212,18 +255,20 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         best_jpa_power = jpa_powers[max_idx]
 
         # 2. Mark the best power without connecting randomized pump settings.
-        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-        ax.scatter(jpa_powers, snrs, label="Measured g/e SNR", s=1)
+        _, ax = plots.subplots(num="fit", figsize=config.figsize)
+        ax.set(
+            title="JPA sweep · pump power · g/e separation score",
+            xlabel="JPA pump source power (dBm)",
+            ylabel="g/e separation score (a.u.)",
+        )
+        ax.ticklabel_format(axis="x", style="plain", useOffset=False)
+        ax.plot(jpa_powers, snrs, "o", color="C0", markersize=4, label="Measured")
         ax.axvline(
             best_jpa_power,
-            color="r",
-            ls="--",
-            label=f"best JPA power = {best_jpa_power:.1f} dBm",
+            color="C3",
+            linestyle="--",
+            label=f"Peak pump source power = {best_jpa_power:.2f} dBm",
         )
-        ax.set_xlabel("Power (dBm)")
-        ax.set_ylabel("g/e SNR (a.u.)")
-        ax.legend()
-        ax.grid(True)
-        fig.tight_layout()
-
+        ax.margins(y=0.25)
+        ax.legend(loc="upper center")
         return PowerAnalysis(best_power=float(best_jpa_power))

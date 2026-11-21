@@ -29,34 +29,55 @@ class OneToneFluxResult:
 
 
 class OneToneFluxCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select a qubit reset before readout; leave empty to skip it.",
+        ),
+    ] = None
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Frequency-swept readout",
+            description="Select the resonator pulse and IQ integration; the sweep sets the RF frequency.",
+        ),
+    ]
     jpa_flux_dev: Annotated[
         DeviceName,
         FieldMeta(
-            label="JPA flux device",
-            description="Connected flux device driven by the survey.",
+            label="JPA flux-bias source",
+            description="Select the DC source that sets the JPA bias.",
         ),
     ]
     flux_unit: Annotated[
         Literal["A", "V", "native"],
         FieldMeta(
-            label="Flux unit",
-            description="Working unit for the selected flux driver; no conversion.",
+            label="JPA bias unit",
+            description="Match the source unit: amps, volts, or its native coordinate; the sweep values are not converted.",
         ),
     ]
     jpa_flux: Annotated[
         SweepCfg,
         FieldMeta(
-            label="JPA flux device value",
-            description="Flux bounds in flux_unit coordinates.",
+            label="JPA flux-bias value",
+            description="Enter the bounds and step in JPA bias unit and the number of bias points.",
         ),
     ]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Readout RF frequency",
+            unit="MHz",
+            description="Enter Start and Stop in absolute probe RF MHz and Expts as the number of frequency samples (count).",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per frequency at each bias in one round.",
         ),
     ]
     rounds: Annotated[
@@ -64,16 +85,16 @@ class OneToneFluxCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of acquisition rounds per bias.",
         ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Relaxation wait",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the wait after readout for relaxation before the next shot (µs).",
         ),
     ]
 
@@ -119,15 +140,26 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
             allow_array=True,
         )
 
-        fig, _ = context.plots.subplots(1, 2, num="measurement")
+        fig, _ = context.plots.subplots(2, 1, num="measurement", figsize=(7, 7))
         heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel="JPA Flux value (a.u.)", ylabel="Readout frequency (MHz)")
-        line_ax.set(xlabel="Readout frequency (MHz)", ylabel="Magnitude (a.u.)")
+        title = "JPA bias survey · readout resonator · reflection"
+        fig.suptitle(title)
+        unit = "a.u." if cfg.flux_unit == "native" else cfg.flux_unit
+        heat_ax.set(
+            xlabel=f"JPA flux-bias value ({unit})", ylabel="Readout RF frequency (MHz)"
+        )
+        heat_ax.ticklabel_format(axis="y", style="plain", useOffset=False)
+        heat_ax.grid(False)
+        line_ax.set(
+            title="Latest bias spectrum",
+            xlabel="Readout RF frequency (MHz)",
+            ylabel="Magnitude of mean IQ (a.u.)",
+        )
+        line_ax.ticklabel_format(axis="x", style="plain", useOffset=False)
         heatmap = live_heatmap(heat_ax, uniform=True)
-        lines = live_line(line_ax, num_lines=5)
-        for artist in line_ax.lines[:-1]:
-            artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        fig.colorbar(heat_ax.images[0], ax=heat_ax, label="Magnitude of mean IQ (a.u.)")
+        line = live_line(line_ax)
+        line_ax.lines[0].set(marker="o", markersize=4, color="C0")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
@@ -138,11 +170,17 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
             """
             real = np.abs(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
-            current = int(valid[-1]) if valid.size else -1
-            history = np.full((5, len(freqs)), np.nan)
-            for offset in range(min(5, current + 1)):
-                history[-offset - 1] = real[current - offset]
-            return (*heatmap.set(jpa_fluxs, freqs, real), *lines.set(freqs, history))
+            progress = fig.suptitle(
+                f"{title}\n{len(valid)}/{len(jpa_fluxs)} bias spectra sampled"
+            )
+            image = heatmap.set(jpa_fluxs, freqs, real)
+            if not valid.size:
+                return (*image, progress)
+            current = int(valid[-1])
+            spectrum = line_ax.set_title(
+                f"Latest bias spectrum: {jpa_fluxs[current]:.6g} {unit}"
+            )
+            return (*image, *line.set(freqs, real[current]), progress, spectrum)
 
         fig.show()
         signals_buffer = SignalBuffer(
