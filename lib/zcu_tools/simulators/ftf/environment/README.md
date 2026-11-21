@@ -828,7 +828,7 @@ without qubit evolution, ADC jumps, sampled noise or rounding.
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `chain/t1`, second read, `post_delay = 0 µs` | g→g | +355.3 | −767.6 | 845.8 | 22,572 | 3,961 | 3.75% | 0.214 |
 | `chain/t1`, second read, `post_delay = 5/κ ≈ 0.723 µs` | g→g | −23.5 | −65.4 | 69.5 | 21,168 | 3,961 | 0.328% | 0.0175 |
-| `rpi_length`, first default sweep point, 62 windows crossing a projection | e→g, column 61 (zero-based) | −250.9 | +1,099.6 | 1,127.9 | 117.2 | 1,774 | 9.62× | 0.636 |
+| `rpi_length`, first sweep point with the original fixed 0.11 µs margin, 62 windows crossing a projection | e→g, column 61 (zero-based) | −250.9 | +1,099.6 | 1,127.9 | 117.2 | 1,774 | 9.62× | 0.636 |
 
 The signed differences are approximation minus reference. The table gives the
 largest Euclidean I/Q difference in each comparison. Signal, difference, g/e
@@ -845,8 +845,10 @@ a projection.
 
 The `rpi_length` comparison (G3) changes the state at the projection in the
 reference and uses the owner state throughout the window in the approximation.
-Both sides use the same pulses and start from vacuum. Each 0.2 µs nominal
-crossing window has 25 samples before projection and 36 at or after it. The
+Both sides use the same pulses and start from vacuum. The comparison uses the
+original fixed 0.11 µs length margin, not the margin now seeded from the readout
+module. Each 0.2 µs nominal crossing window has 25 samples before projection
+and 36 at or after it. The
 other two windows cross no projection and serve as controls. The ratio exceeds
 one because the short post-projection segment gives a small g/e separation in
 this fixture.

@@ -126,7 +126,7 @@ Run／QICK round loop、hooks、分類、normalization 與 averaging 沿用取�
 
 2026-10-28，使用者以「A我認為可以完整版。」授權三環境的中途 projective readout，取代初版僅末端讀出的限制。Single、six、FTF 都將帶 ADC trigger 的非終端 readout block 分類為 projective read。環境在 pulse start 以 retained DC 能量基底作 rank-1 對角投影，並續演化到下一次 read 或終端；FTF 保留各 outcome 權重，single／six 保留每個投影狀態的轉移列（[[0078]]）。未帶 trigger 的非終端 block 仍是 cavity drive，FTF 保留既有 cavity-drive 演化，single／six 在演化前拒絕。
 
-Block 接受從自身 start 到下一個 block start 之前的 triggers，pulse 結束後的 ringdown trigger 仍屬原 block。非終端取樣窗的最後一個 sample 必須早於下一個 block start，否則錯誤指名 block 與 trigger。同一 template 跨 point、同一 numeric preparation 跨 template 的 projective block 數與各 ADC/event grid 數必須一致。Six 以每個 routed source 為單位，先完成所有 source 的 preflight，再開始任何演化或取樣。
+讀出視窗的裝置時間配對、block owner 與跨投影規則見 [ADR-0078](../0078-evolution-module-boundary.md#ftf-讀出窗依裝置時間配對)。同一 template 跨 point、同一 numeric preparation 跨 template 的 projective block 數與各 ADC/event grid 數必須一致。Six 以每個 routed source 為單位，先完成所有 source 的 preflight，再開始任何演化或取樣。
 
 所有 ADC 與 projection populations 共用 logical-event 軸。ADC 未觀測的 event 保留空 grids，不產生 read 欄。允許所有 ADC 都略過終端觀測，終態仍進 integrated counts；每個 ADC 至少觀測一個 event。Single 的公開 `preflight`／`prepare_readouts` 接收同 cavity 的完整 ADC 集合，six 不逐 ADC 重建投影。
 

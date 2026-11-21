@@ -111,6 +111,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：kernel 的量測場景只有一段，重複就是同一段接 N 次，見 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)。
 原則：場景照約化參數軸宣告覆蓋，不為個別實驗加專屬場景，見 [ADR-0078](0078-evolution-module-boundary.md#場景覆蓋靠約化的參數空間)。
 原則：量測 agent 以量測取得初值與裁定；模擬器真值只在使用者為 debug 明確授權時讀，數字記為 debug 對照，見 [模擬環境草稿](draft/simulation-environments.md#固定訊號契約與重現)。
+原則：ADC 擁有 `t−τ` 的 ADC 時間至裝置時間的換算；planner 逐窗以裝置時間和 block interval 配對，最後相交 block 為 owner。grid 與投影時間不移動。同 ADC、同 owner 的有場事件使用各窗交集 blocks 的 pulse 聯集（designer 代裁，使用者未覆核），見 [ADR-0078](0078-evolution-module-boundary.md#ftf-讀出窗依裝置時間配對)。
 
 - [0085 — 實驗數值工具的 fitting owner](0085-numerical-fitting-owners.md)：六組純數值工具由 fitting 持有，lab 保留選資料、herald、維度換算、live 與畫圖。
 
