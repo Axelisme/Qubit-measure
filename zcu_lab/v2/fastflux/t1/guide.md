@@ -12,9 +12,9 @@ The gain and pulse-length sweeps produce complex IQ shaped (gain, length).
 Gain is normalized DAC amplitude. Converting it to flux requires a separate
 calibration. Length and fitted T1 use µs.
 
-## Open and Reset
+## Open and Defaults
 
-Open and Reset capture the current aliases and library. The pi pulse uses
+Open and Defaults capture the current aliases and library. The pi pulse uses
 `$qubit.module.x180` when available, otherwise the `pi_pulse` template.
 Readout uses `$resonator.module.readout` or the `readout` template. Missing reset
 disables that optional module. Missing required calibration leaves fields Invalid.
@@ -40,8 +40,8 @@ Check the minimum duration and sweep spacing on the actual generator's clock gri
 Relax delay uses the same endpoint. Missing or null T1 uses a 30 µs time scale,
 giving 150 µs. Stored invalid T1 leaves the derived fields empty.
 These editable timing estimates affect this form only; stored calibration retains
-its values. Reps start at 1000 and rounds at 10. Reset refreshes sources and
-discards edits. After editing aliases, use Reset to refresh an already open form.
+its values. Reps start at 1000 and rounds at 10. Defaults refreshes sources and
+discards edits. After editing aliases, use Defaults to refresh an already open form.
 
 ## Run and analyze
 

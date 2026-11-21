@@ -102,6 +102,7 @@ class RunPaneState:
 class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     """Primary result and its owned resources.
 
+    summary_lines are the authored display lines for this publication, or ().
     params is the editable input or None; result is the completed payload or None
     for figures-only output. plots owns presentation, or None without figures.
     writeback_draft is the creating service's draft, or None without proposals.
@@ -118,6 +119,7 @@ class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     result_params: T_AnalyzeParams | None = None
     # Whether this publication replaced this Run's previous nonempty pane plots.
     figures_replaced: bool = False
+    summary_lines: tuple[str, ...] = ()
 
 
 @dataclass

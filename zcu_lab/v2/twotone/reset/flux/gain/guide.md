@@ -10,7 +10,7 @@ The saved complex IQ has axes before pi, after pi, gain, in that order.
 
 The tested reset preset uses `reset/pulse` on `$qubit.wiring.lo_flux_ch`, with frequency 0 MHz and a const waveform.
 The gain scan uses a.u.; it does not convert gain to flux.
-Open and Reset capture the module sources and fill editable starting values.
+Open and Defaults capture the module sources and fill editable starting values.
 Pi pulse uses `$qubit.module.x180` when present, otherwise the pi-pulse template. Verify its calibration before Run.
 Optional reset uses `$qubit.module.reset`; a missing slot leaves it disabled.
 Readout uses `$resonator.module.readout`, or the readout template if that slot is absent.

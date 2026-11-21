@@ -8,7 +8,7 @@ Scan common drive frequency in MHz and common envelope duration in us.
 Each shot emits optional reset, nominal B11 preparation, simultaneous two-line
 drive, double Xπ contrast and one terminal mux readout.
 `reset=None` emits no reset. Set a reset cfg only after reviewing its pulse
-and timing against the authorized limits. The Form's Reset action recaptures
+and timing against the authorized limits. The Defaults button recaptures
 inputs; it does not emit a reset pulse.
 
 Both qubit tones require circle classifiers with g/e centers and radius.
@@ -23,7 +23,7 @@ In the point's Aliases table, bind `$qubit1` and `$qubit2` to distinct component
 Bind `$mux` to their mux group and `$coupler` to the component that stores
 the pair's CZ pulses. Rebind older points in the same table. GUI aliases
 and Notebook's built-in roles of the same names are separate.
-Open or Reset uses `$mux.qubits` to set two hidden tone indices.
+Opening the tab or choosing Defaults uses `$mux.qubits` to set two hidden tone indices.
 If the capture has no `$coupler` binding, the form reports it before Run.
 Check both Xπ pulses and all mux tones, ADC routes and scalar timing.
 Readout references `$mux.module.readout` when present. Otherwise fill the blank
@@ -50,7 +50,7 @@ delays appear last.
 Enter finite scan endpoints and strictly positive durations.
 Review repetitions, rounds, optional reset and timing before Run.
 Refresh keeps authored inputs and rechecks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
-Use Reset to replace unsaved input with initial values from the new source.
+Use Defaults to replace unsaved input with initial values from the new source.
 
 ## Read the figures
 

@@ -14,9 +14,9 @@ Qubit1/Qubit2 的 terminal 讀出在取數時分成 g、e、other，保存每個
 
 在目前 point 的 Aliases 表綁定 `$qubit1`、`$qubit2` 到不同元件，並綁定 `$mux` 到包含兩者的 MuxGroup。舊 point 也要新增這兩個位置 alias；不會自動重綁。GUI aliases 與 Notebook 的同名內建角色分開設定。 不需要綁定 `$coupler`。依 [校準步驟](../guide.md) 準備兩顆的 Xπ 與 mux readout。
 
-Open／Reset 根據有序的 `$mux.qubits` 設定隱藏的 tone index，並帶入 pulse 初值。有 `$mux.module.readout` 時引用完整 library readout。缺 slot 時須填妥 blank mux。完整 tone 順序保持不變，Qubit1/Qubit2 之外的 tone 不參與本實驗的 P_e 分析。
+Open／Defaults 根據有序的 `$mux.qubits` 設定隱藏的 tone index，並帶入 pulse 初值。有 `$mux.module.readout` 時引用完整 library readout。缺 slot 時須填妥 blank mux。完整 tone 順序保持不變，Qubit1/Qubit2 之外的 tone 不參與本實驗的 P_e 分析。
 
-Qubit1/Qubit2 tone 都必須有 circle classifier 與 radius。缺少校準或使用 linear 時，Run 前會要求先做 GE Post。改動讀出設定後須重新校準，不可直接沿用舊 radius。Refresh 保留原稿，並用新 capture [核對完整 tone 數](../guide.md#綁定位置與讀出-tones)。要按新 aliases 或 library 重填初值時，按 Reset 並核對 cfg。
+Qubit1/Qubit2 tone 都必須有 circle classifier 與 radius。缺少校準或使用 linear 時，Run 前會要求先做 GE Post。改動讀出設定後須重新校準，不可直接沿用舊 radius。Refresh 保留原稿，並用新 capture [核對完整 tone 數](../guide.md#綁定位置與讀出-tones)。要按新 aliases 或 library 重填初值時，按 Defaults 並核對 cfg。
 
 ## 設定與 Run
 

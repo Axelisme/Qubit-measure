@@ -14,8 +14,8 @@ It does not compile or acquire separately at each coordinate.
 - Select a pulse readout with a saved `centroid3` calibration. The calibration must contain distinct g/e/f IQ centers and a training confusion matrix. Obtain it separately before this experiment.
 - Set the two gain ranges in a.u. Both sweeps accept negative, zero and positive gains. The Form accepts endpoints outside [-1, 1], but Run rejects them during program compilation before acquisition.
 
-After changing aliases, component parameters or the module library, use Reset to seed the Form from a new capture.
-Reset may overwrite unsaved input. Refresh only updates sources and choices; it keeps the current input.
+After changing aliases, component parameters or the module library, use Defaults to seed the Form from a new capture.
+Defaults may overwrite unsaved input. Refresh only updates sources and choices; it keeps the current input.
 
 ## Controls and sequence
 

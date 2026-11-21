@@ -35,8 +35,9 @@ from __future__ import annotations
 # Context targets use entry_name/nullable point; global sources report kind="global".
 # Named Entry windows now report their "entry" identifier in open_dialogs.
 # Arb asset writeback previews and receipts expose the arb_asset kind.
-WIRE_VERSION = 141
+# Primary analysis presentations include optional adapter-authored summary lines.
+WIRE_VERSION = 142
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 174
+GUI_VERSION = 175

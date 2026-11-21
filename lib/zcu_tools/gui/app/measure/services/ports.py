@@ -64,6 +64,7 @@ class AnalysisPaneSnapshot:
 
     has_result is the State-owned presence fact, including figures-only results
     and published empty figure collections. It is independent of admission.
+    summary_lines are the published operator lines, or () if none apply.
     """
 
     params: object | None
@@ -78,6 +79,7 @@ class AnalysisPaneSnapshot:
     unavailable_reasons: tuple[str, ...] = ()
     # This publication replaced a nonempty collection in this Run's same pane.
     figures_replaced: bool = False
+    summary_lines: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

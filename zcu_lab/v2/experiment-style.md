@@ -37,7 +37,7 @@
 
 **掃描。** QICK 能掃的參數用 `builder.add_sweep`，在同一個 program 裡掃完：頻率、gain、const 與 flat-top 的長度。硬體每個 round 把所有點輪一遍，慢漂移會被平均掉，也不必每點重新編譯。電腦端迴圈（`sched.scan`）用在硬體掃不了的參數，或需要逐列更新即時圖的外層，例如 `power_dep` 的 gain。
 
-**Cfg 欄位的 description。** 用一句短語說明欄位作用。它會顯示在 GUI 表單上，操作的人照它填值。操作步驟、推導與理由寫在實驗的 `guide.md`。新實驗從上方範本沿用命名。既有 cfg 欄位改名時，依[單數改名先例](experiment-authoring.md#cfg-名稱順序與取數欄位)提升 cfg schema major，不遷移舊 cfg，也不提供 alias。舊 run 仍可載入 Result 與 metadata，但 cfg 為 None，不能重新分析。範例（`twotone/rabi/amp_rabi/core.py:61`）：
+**Cfg 欄位的 description。** 用一句短語說明欄位作用。它會顯示在 GUI 表單上，操作的人照它填值。操作步驟、推導與理由寫在實驗的 `guide.md`。新實驗從上方範本沿用命名。既有 cfg 欄位改名時，依[單數改名先例](experiment-authoring.md#cfg-名稱順序與取數欄位)提升 cfg schema major，不遷移舊 cfg，也不提供 alias。舊 run 仍可載入 Result 與 metadata，但 cfg 為 None，不能重新分析。範例見 [`AmpRabiCfg.init_pulse`](twotone/rabi/amp_rabi/core.py)：
 
 ```python
 description="Fixed preparation pulse before each gain-swept Rabi pulse; None skips preparation."
@@ -86,7 +86,7 @@ Cfg 的建構驗證與 `run`／`analyze` 的使用分開。不要在 `run`／`an
 
 只轉傳參數的包裝、本體 5 行以內的 helper，一律內聯。被當成 callback 傳出去的函式、有兩個以上呼叫者的函式不適用這套內聯規則，例如 `run` 與 `analyze` 都用的 `*_signal2real`。已內聯且沒有跨過品質門檻的區塊維持現狀，不為了內聯新增 suppression 或改門檻。CPMG 的加權 log-log 回歸與 `t1_with_tone_sweep` 的批次 transition-rate 擬合保留為各自 core 的 helper。
 
-**Docstring 與註解。** `run` 的 docstring 用二到四句：播放什麼序列、回傳什麼、使用時要注意什麼（`twotone/rabi/amp_rabi/core.py:110-116`）。保留的 helper 一定有 docstring，交代輸入、輸出與副作用。
+**Docstring 與註解。** `run` 的 docstring 用二到四句：播放什麼序列、回傳什麼、使用時要注意什麼。範例見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)。保留的 helper 一定有 docstring，交代輸入、輸出與副作用。
 
 內聯進來的區塊開頭寫一行段落註解。所有實驗 core 的 `run` 與 `analyze` 都用編號段落註解分段，格式是 `# 1. ...`。每段一行寫目的，不重述程式碼。
 
