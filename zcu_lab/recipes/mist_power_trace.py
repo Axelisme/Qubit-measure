@@ -1,6 +1,6 @@
 """Acquire and save an averaged-IQ MIST probe-gain trace."""
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -17,16 +17,22 @@ from zcu_tools.mcp.measure.recipe_api import (
 class MistPowerTraceInputs(RecipeInputs):
     """Choose the MIST gain trace target, pulse modules and Analyze display."""
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Omit Form inputs to keep their values. Null works only as described for each input."
+        }
+    )
+
     target: SingleTarget
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     probe_ref: str | None | Keep = Field(
         KEEP,
-        description="Select the Resonator probe module by library key. Omit to retain the Form selection; null clears it.",
+        description="Select Resonator probe by library key. Omit to keep the Form selection; null is invalid.",
     )
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Select the Readout module by library key. Omit to retain the Form selection; null clears it.",
+        description="Select Readout by library key. Omit to keep the Form selection; null is invalid.",
     )
 
     g0: str | None | Keep = Field(
