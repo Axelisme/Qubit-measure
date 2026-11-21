@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from matplotlib.lines import Line2D
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -31,9 +32,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.support import live_line
-
-from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
+from .._readout import MuxResetCfg
 from .._sums import joint_probabilities, validate_qubit_tones
 
 PREPARED_STATES = (("g", "g"), ("g", "e"), ("e", "g"), ("e", "e"))
@@ -90,29 +89,29 @@ class JointReadoutCfg(ConfigBase):
     reset: Annotated[
         MuxResetCfg | None,
         FieldMeta(
-            label="Reset", description="Optional reset at the start of every shot."
+            label="Reset",
+            description="Select a preparation reset or herald filter before each shot; leave blank to omit it.",
         ),
     ] = None
     x180_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="Qubit1 Xπ",
-            description="Calibrated Qubit1 x180 pulse on its charge generator.",
+            description="Enter the Rabi-calibrated pulse that flips Qubit1 in its nominal e preparation.",
         ),
     ]
     x180_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="Qubit2 Xπ",
-            description="Calibrated Qubit2 x180 pulse on its charge generator.",
+            description="Enter the Rabi-calibrated pulse that flips Qubit2 in its nominal e preparation.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full mux readout; Qubit1 and Qubit2 need circle radii from GE Post. "
-            + POINT_ALIAS_DESCRIPTION,
+            description="Enter the full mux module used immediately after preparation, with GE Post circle radii for both qubits.",
         ),
     ]
     qubit1_tone: Annotated[
@@ -129,10 +128,39 @@ class JointReadoutCfg(ConfigBase):
             description="Zero-based Qubit2 position in the full mux readout.",
         ),
     ]
-    reps: Annotated[int, FieldMeta(label="Reps")] = Field(gt=0)
-    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
-    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
-    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us", decimals=3)]
+    reps: Annotated[
+        int,
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Enter attempted shots per preparation per round.",
+        ),
+    ] = Field(gt=0)
+    rounds: Annotated[
+        int,
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Enter how many times to repeat the four-preparation acquisition.",
+        ),
+    ] = Field(default=1, gt=0)
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial wait",
+            unit="µs",
+            description="Enter the wait before the first shot of each round.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relaxation wait",
+            unit="µs",
+            decimals=3,
+            description="Enter the wait after each shot before the next preparation.",
+        ),
+    ]
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
@@ -155,6 +183,45 @@ def restore_result(data: GroupedLoadData[JointReadoutCfg]) -> JointReadoutResult
             "Joint readout requires two preparation axes and sums (2,2,3,3)"
         )
     return JointReadoutResult(sums=sums.z.astype(np.float64))
+
+
+def _draw_distributions(fig: Figure, counts: NDArray[np.float64]) -> None:
+    """Draw the same outcome bars and count-derived shot SEM in Run and Analyze."""
+    rows = counts.reshape(PREPARED_COUNT, OUTCOME_COUNT)
+    probabilities = joint_probabilities(counts).reshape(PREPARED_COUNT, OUTCOME_COUNT)
+    errors = np.sqrt(
+        np.diagonal(class_probability_covariance(rows), axis1=-2, axis2=-1)
+    )
+    xs = np.arange(OUTCOME_COUNT)
+    for ax, prepared, row, sem in zip(
+        fig.axes, PREPARED_LABELS, probabilities, errors, strict=True
+    ):
+        ax.clear()
+        ax.bar(
+            xs,
+            row,
+            yerr=sem,
+            color=[
+                "C0" if outcome == prepared else "0.65" for outcome in OUTCOME_LABELS
+            ],
+            error_kw={"ecolor": "0.15", "capsize": 2},
+        )
+        ax.set(
+            title=f"Nominal preparation: {prepared}",
+            ylabel="Terminal class probability",
+            ylim=(0, 1.05),
+        )
+        ax.set_xticks(xs, OUTCOME_LABELS, rotation=35, ha="right")
+        ax.set_xlabel("Terminal class (Qubit1, Qubit2)")
+        if not np.any(np.isfinite(row)):
+            ax.text(
+                0.5,
+                0.5,
+                "No retained shots",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
 
 
 class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
@@ -211,23 +278,20 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
 
         """
 
-        # 1. Show terminal gg probability for the four preparation branches.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(
-            xlabel="Nominal preparation",
-            ylabel="Terminal P(g,g)",
-            xticks=range(PREPARED_COUNT),
-            xticklabels=("gg", "ge", "eg", "ee"),
+        # 1. Show the nine terminal classes for each nominal preparation.
+        fig, _ = context.plots.subplots(
+            num="measurement", nrows=2, ncols=2, figsize=(11, 8), layout="constrained"
         )
-        viewer = live_line(ax)
+        title = "Joint readout · Qubit1 / Qubit2 · Terminal distribution"
+        fig.suptitle(f"{title}\nRetained shots: 0 count total")
+        _draw_distributions(fig, np.full(SUMS_SHAPE, np.nan))
         fig.show()
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            return viewer.set(
-                np.arange(PREPARED_COUNT, dtype=np.float64),
-                joint_probabilities(sums)[..., 0, 0].reshape(PREPARED_COUNT),
-            )
+        def update_view(sums: NDArray[np.float64]) -> tuple[Figure, ...]:
+            _draw_distributions(fig, sums)
+            fig.suptitle(f"{title}\nRetained shots: {np.nansum(sums):,.0f} count total")
+            return (fig,)
 
         # 2. Accumulate classified rounds without normalizing away shot totals.
         buffer = SignalBuffer(SUMS_SHAPE, dtype=np.float64, on_update=update_view)
@@ -297,46 +361,50 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
             ),
             acquired_shots=result.sums.sum(axis=(-2, -1)).reshape(PREPARED_COUNT),
         )
-        # Show the same nominal-branch probability as the live plot before the matrices.
-        _, ax = plots.subplots(num="terminal_gg", layout="constrained")
-        ax.plot(range(PREPARED_COUNT), answer.matrix[:, 0], ".")
-        ax.set(
-            xlabel="Nominal preparation",
-            ylabel="Terminal P(g,g)",
-            xticks=range(PREPARED_COUNT),
-            xticklabels=("gg", "ge", "eg", "ee"),
+        fig, _ = plots.subplots(
+            num="terminal_distribution",
+            nrows=2,
+            ncols=2,
+            figsize=(11, 8),
+            layout="constrained",
         )
+        fig.suptitle("Joint readout · Qubit1 / Qubit2 · Terminal distribution")
+        _draw_distributions(fig, result.sums)
 
-        # 2. Show all nine terminal classes for each nominal preparation.
-        fig, axes = plots.subplots(num="matrix", figsize=(12, 5))
-        image = axes.imshow(
-            np.ma.masked_invalid(answer.matrix), vmin=0, vmax=1, cmap="Blues"
+        # 2. Put the counts and probabilities side by side across preparations.
+        fig, ax = plots.subplots(num="matrix", figsize=(12, 5), layout="constrained")
+        image = ax.imshow(
+            np.ma.masked_invalid(answer.matrix),
+            vmin=0,
+            vmax=1,
+            cmap="Blues",
+            aspect="auto",
         )
-        for row in range(PREPARED_COUNT):
-            for col in range(OUTCOME_COUNT):
-                value = answer.matrix[row, col]
-                label = (
-                    f"{value:.3f}\nn={answer.counts[row, col]:g}"
-                    if np.isfinite(value)
-                    else "No shots"
+        for row, col in np.ndindex(answer.matrix.shape):
+            value = answer.matrix[row, col]
+            if np.isfinite(value):
+                ax.text(
+                    col,
+                    row,
+                    f"{value:.3f}\n{answer.counts[row, col]:,.0f} count",
+                    ha="center",
+                    va="center",
+                    color="white" if value >= 0.6 else "black",
                 )
-                axes.text(col, row, label, ha="center", va="center", fontsize=8)
-        axes.set(
+            elif col == OUTCOME_COUNT // 2:
+                ax.text(col, row, "No retained shots", ha="center", va="center")
+        ax.set(
             xticks=range(OUTCOME_COUNT),
             xticklabels=OUTCOME_LABELS,
             yticks=range(PREPARED_COUNT),
-            yticklabels=[
-                f"{label}; n={shots:g}"
-                for label, shots in zip(
-                    PREPARED_LABELS, answer.acquired_shots, strict=True
-                )
-            ],
-            xlabel="Observed terminal class (Qubit1, Qubit2)",
-            ylabel="Nominal I/Xπ preparation; acquired shots",
-            title="Preparation → observed outcome; includes preparation and readout effects",
+            yticklabels=PREPARED_LABELS,
+            xlabel="Terminal class (Qubit1, Qubit2)",
+            ylabel="Nominal preparation",
+            title="Joint readout · Qubit1 / Qubit2 · Probability and count matrix",
         )
-        axes.grid(False)
-        fig.colorbar(image, ax=axes, label="Row-normalized probability")
-        fig.tight_layout()
+        ax.grid(False)
+        fig.colorbar(
+            image, ax=ax, label="Terminal class probability", ticks=np.linspace(0, 1, 6)
+        )
         # 3. Return count and probability matrices for the saved analysis.
         return answer

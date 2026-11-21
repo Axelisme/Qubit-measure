@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from textwrap import fill
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
-from matplotlib.lines import Line2D
+from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -34,10 +36,10 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.device import set_flux
 
-from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
+from .._readout import MuxResetCfg
 from .._sums import qubit_sigma, validate_qubit_tones
 from ._analysis import (
     IdleBranchFit,
@@ -83,42 +85,44 @@ class IdleZZCfg(ConfigBase):
 
     reset: Annotated[
         MuxResetCfg | None,
-        FieldMeta(label="Reset", description="Optional reset before every shot."),
+        FieldMeta(
+            label="Reset",
+            description="Select a preparation reset or herald filter before each shot; leave blank to omit it.",
+        ),
     ] = None
     x180_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="Qubit1 Xπ",
-            description="Calibrated Qubit1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            description="Enter the Rabi-calibrated Qubit1 flip used when Qubit1 is the spectator.",
         ),
     ]
     x180_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="Qubit2 Xπ",
-            description="Calibrated Qubit2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            description="Enter the Rabi-calibrated Qubit2 flip used when Qubit2 is the spectator.",
         ),
     ]
     x90_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="Qubit1 Xπ/2",
-            description="Calibrated Qubit1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            description="Enter the Rabi-calibrated Qubit1 π/2 pulse for the Ramsey pair when Qubit1 is the target.",
         ),
     ]
     x90_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="Qubit2 Xπ/2",
-            description="Calibrated Qubit2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            description="Enter the Rabi-calibrated Qubit2 π/2 pulse for the Ramsey pair when Qubit2 is the target.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full-group mux readout with calibrated frequencies, gains and timing. "
-            + POINT_ALIAS_DESCRIPTION,
+            description="Enter the full mux module used after the second π/2 pulse, with GE Post circle radii for both qubits.",
         ),
     ]
     qubit1_tone: Annotated[
@@ -135,56 +139,82 @@ class IdleZZCfg(ConfigBase):
             description="Zero-based Qubit2 position in the full mux readout.",
         ),
     ]
-    target: Literal["qubit1", "qubit2"] = "qubit1"
+    target: Annotated[
+        Literal["qubit1", "qubit2"],
+        FieldMeta(
+            label="Ramsey target",
+            description="Select the qubit that receives both π/2 pulses; the other qubit is the spectator.",
+        ),
+    ] = "qubit1"
     dc_device: Annotated[
         DeviceName | None,
         FieldMeta(
             label="Coupler DC source",
-            description="Direct device name; None disables the DC sweep.",
+            description="Select the connected coupler-bias source by name; leave blank to keep all sources unchanged.",
         ),
     ] = None
     dc_unit: Annotated[
-        Literal["A", "V", "native"], FieldMeta(label="DC source working unit")
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="DC source unit",
+            description="Select amperes, volts or the selected source's native unit for the bias sweep.",
+        ),
     ] = "native"
     dc: Annotated[
         SweepCfg,
         FieldMeta(
-            label="DC source values",
-            description="Inactive when source is None; no conversion or Qubit1/Qubit2 compensation.",
+            label="Coupler DC bias sweep",
+            description="Enter the sweep in DC source unit (A, V or native); leave the source blank to ignore this sweep.",
         ),
     ] = Field(default_factory=lambda: SweepCfg(start=0, stop=0, step=0, expts=1))
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Ramsey free-evolution delay",
+            unit="µs",
+            description="Enter the time sweep between the target's two π/2 pulses.",
+        ),
+    ]
     detune: Annotated[
         float,
         Field(allow_inf_nan=False),
         FieldMeta(
-            label="Detune",
+            label="Programmed Ramsey detuning",
             unit="MHz",
-            description="Signed artificial phase ramp in MHz, exceeding expected |ζ| plus frequency error.",
+            description="Enter the signed phase ramp (MHz) of the second π/2 pulse; its magnitude must exceed the expected conditional shift plus frequency error.",
         ),
     ]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Enter attempted shots per branch and delay per round.",
+        ),
     ] = Field(gt=0)
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Enter repeated delay scans at each DC bias point.",
+        ),
     ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
-            label="Initial delay",
-            unit="us",
-            description="Delay before the first repetition.",
+            label="Initial wait",
+            unit="µs",
+            description="Enter the wait before the first shot of each round.",
         ),
     ] = 1.0
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
-            unit="us",
+            label="Relaxation wait",
+            unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the wait after each shot before the next preparation.",
         ),
     ]
 
@@ -221,26 +251,59 @@ def restore_result(data: GroupedLoadData[IdleZZCfg]) -> IdleZZResult:
     )
 
 
-def _plot_ramsey_overview(
-    plots: Plots,
-    delays: NDArray[np.float64],
-    dc_values: NDArray[np.float64],
-    dc_label: str,
-    traces: NDArray[np.float64],
-) -> None:
-    """Draw measured Ramsey traces at every DC point before fit diagnostics."""
-    # Mirror the live traces across DC before the individual fit diagnostics.
-    _, ax = plots.subplots(num="ramsey_overview", layout="constrained")
-    for d, value in enumerate(dc_values):
-        for state, name in enumerate(("I", "Xπ")):
-            ax.plot(
-                delays,
-                traces[d, state],
-                ".",
-                label=f"Spectator {name} · {value:g}",
+_BRANCH_NAMES = ("I", "Xπ")
+
+
+def _shot_sem(
+    counts: NDArray[np.float64], target: Literal["qubit1", "qubit2"]
+) -> NDArray[np.float64]:
+    """Project terminal probability covariance onto the target's e-minus-g contrast."""
+    marginal = counts.sum(axis=-1 if target == "qubit1" else -2)
+    cov = class_probability_covariance(marginal)
+    return np.sqrt(np.maximum(cov[..., 0, 0] + cov[..., 1, 1] - 2 * cov[..., 0, 1], 0))
+
+
+def _label_ramsey(fig: Figure, cfg: IdleZZCfg, index: int) -> str:
+    """Label the shared Run/Analyze data axes and return the figure title."""
+    target = cfg.target.capitalize()
+    ax = fig.axes[0]
+    ax.set(
+        xlabel="Ramsey free-evolution delay (µs)",
+        ylabel=f"{target} contrast P(e) − P(g)",
+    )
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=6))
+    title = f"Idle ZZ · {target} · Ramsey contrast"
+    if cfg.dc_device is not None:
+        title += f" · Bias sweep point {index + 1}"
+    return title
+
+
+def _fit_note(fit: IdleBranchFit) -> str:
+    """Describe the existing fit estimate, diagnostics and sign decision for one branch."""
+    lines = [f"Spectator {_BRANCH_NAMES[fit.branch]}"]
+    if fit.magnitude_mhz is not None:
+        frequency = fit.signed_mhz if fit.signed_mhz is not None else fit.magnitude_mhz
+        name = "f" if fit.signed_mhz is not None else "|f|"
+        error = f" ± {fit.error_mhz:.3g}" if fit.error_mhz is not None else ""
+        lines.append(f"{name} = {frequency:.5g}{error} MHz")
+    quality = fit.fit_quality
+    if quality is not None:
+        if quality.r2 is not None:
+            lines.append(f"R² = {quality.r2:.3f}")
+        if quality.normalized_residual_rms is not None:
+            lines.append(
+                f"Normalized residual RMS = {quality.normalized_residual_rms:.3g}"
             )
-    ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩")
-    ax.legend(title=dc_label, fontsize="small", ncols=2)
+        relative = quality.relative_parameter_errors.get("frequency")
+        if relative is not None:
+            lines.append(f"Relative frequency error = {relative:.2%}")
+    if fit.reason:
+        lines.append(
+            fill(fit.reason.replace("2*abs(detune)", "twice |detuning|"), width=44)
+        )
+        if fit.resolution_mhz is not None:
+            lines.append(f"Sign resolution = {fit.resolution_mhz:.4g} MHz")
+    return "\n".join(lines)
 
 
 class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
@@ -293,18 +356,34 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
-        # 2. Compare target Ramsey sigma for spectator I/Xpi at each DC setting.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩")
-        viewer = live_line(ax, num_lines=len(dc_values) * 2)
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        fig.show()
+        # 2. Compare the same two spectator branches at each bias point.
+        views = []
+        for index in range(len(dc_values)):
+            fig, ax = context.plots.subplots(
+                num=f"ramsey_{index}", figsize=(9, 5), layout="constrained"
+            )
+            title = _label_ramsey(fig, config, index)
+            viewer = live_errorbar(ax, num_lines=2)
+            for line, name in zip(ax.get_lines(), _BRANCH_NAMES, strict=True):
+                line.set(label=f"Spectator {name} data", linestyle="none")
+            fig.legend(loc="outside lower center", ncols=2)
+            fig.suptitle(f"{title}\n0/{2 * len(delays)} branch-delay points sampled")
+            views.append((fig, viewer, title))
+            fig.show()
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            return viewer.set(
-                delays, qubit_sigma(sums, config.target).reshape(-1, len(delays))
-            )
+        def update_view(sums: NDArray[np.float64]) -> tuple[Figure, ...]:
+            traces = qubit_sigma(sums, config.target)
+            errors = _shot_sem(sums, config.target)
+            totals = sums.sum(axis=(-1, -2))
+            for index, (fig, viewer, title) in enumerate(views):
+                viewer.set(delays, traces[index], errors[index])
+                sampled = np.isfinite(totals[index])
+                fig.suptitle(
+                    f"{title}\n{np.count_nonzero(sampled)}/{sampled.size} branch-delay points sampled"
+                    f" · {np.nansum(totals[index]):,.0f} retained shots (count)"
+                )
+            return tuple(fig for fig, _, _ in views)
 
         # 3. Set DC on the host; sweep spectator preparation and detuned target Ramsey delay in hardware.
         buffer = SignalBuffer(
@@ -424,71 +503,78 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                     )
                 )
         answer = summarize(tuple(fits))
-        dc_label = (
-            "DC not swept (inactive coordinate)"
-            if cfg.dc_device is None
-            else f"{cfg.dc_device} ({cfg.dc_unit})"
-        )
-        _plot_ramsey_overview(plots, result.delays, dc_values, dc_label, traces)
-
-        for dc_index, dc_value in enumerate(dc_values):
-            fig, ax = plots.subplots(num=f"ramsey_{dc_index}", figsize=(9, 6))
-            reasons = []
+        errors = _shot_sem(result.sums, cfg.target)
+        for dc_index in range(len(dc_values)):
+            fig, _ = plots.subplots(
+                num=f"ramsey_{dc_index}",
+                nrows=2,
+                height_ratios=(3, 1.6),
+                figsize=(10, 7),
+                layout="constrained",
+            )
+            ax, notes = fig.axes
+            fig.suptitle(_label_ramsey(fig, cfg, dc_index))
+            notes.set_axis_off()
             for fit in answer.branches[2 * dc_index : 2 * dc_index + 2]:
-                label = "I" if fit.branch == 0 else "Xπ"
-                ax.plot(
+                name = _BRANCH_NAMES[fit.branch]
+                color = f"C{fit.branch}"
+                ax.errorbar(
                     result.delays,
                     fit.trace,
-                    ".",
-                    label=f"Spectator {label} ({fit.acquired_shots} shots)",
+                    yerr=errors[dc_index, fit.branch],
+                    color=color,
+                    marker=".",
+                    linestyle="none",
+                    label=f"Spectator {name} data",
                 )
-                if fit.fit_curve is not None:
+                if fit.dense_curve is not None:
                     ax.plot(
-                        result.delays,
-                        fit.fit_curve,
-                        label=f"{label} fit: |f|={fit.magnitude_mhz:.5g} MHz",
+                        *fit.dense_curve, color=color, label=f"Spectator {name} fit"
                     )
-                if fit.reason:
-                    reasons.append(f"{label}: {fit.reason}")
-                elif fit.signed_mhz is not None:
-                    reasons.append(f"{label}: signed f={fit.signed_mhz:.5g} MHz")
-            zeta = answer.zeta_mhz[dc_index]
-            subtitle = f"ζ={zeta:.5g} MHz" if zeta is not None else "ζ unavailable"
-            ax.set(
-                xlabel="Delay (us)",
-                ylabel="Target ⟨σ⟩",
-                title=f"Target {cfg.target.capitalize()}, detune={cfg.detune:g} MHz; {dc_label}={dc_value:g}\n{subtitle}; single-frequency model estimate\nNominal branches; mixture not excluded",
-            )
-            ax.text(
-                0.01,
-                -0.25,
-                "\n".join(reasons),
-                transform=ax.transAxes,
-                va="top",
-                fontsize=8,
-            )
-            ax.legend()
-            fig.tight_layout()
-        # 2. Show signed Xpi-minus-I frequency differences versus DC without claiming a pure ZZ coupling.
-        fig, ax = plots.subplots(num="zeta", figsize=(8, 5))
-        for index, (value, error) in enumerate(
-            zip(answer.zeta_mhz, answer.zeta_error_mhz, strict=True)
-        ):
-            if value is not None:
-                ax.errorbar(
-                    result.dc_values[index], value, yerr=error, marker="o", color="C0"
+                notes.text(
+                    0.03 + 0.50 * fit.branch,
+                    0.95,
+                    _fit_note(fit),
+                    transform=notes.transAxes,
+                    va="top",
+                    color=color,
                 )
-        if not any(value is not None for value in answer.zeta_mhz):
-            ax.text(
-                0.5,
-                0.5,
-                "ζ unavailable: see branch reasons",
-                transform=ax.transAxes,
-                ha="center",
+            zeta = answer.zeta_mhz[dc_index]
+            error = answer.zeta_error_mhz[dc_index]
+            estimate = (
+                f"ζ = f(Xπ) − f(I) = {zeta:.5g} ± {error:.3g} MHz"
+                if zeta is not None and error is not None
+                else "ζ unavailable: see branch diagnostics"
             )
-        ax.set(
-            xlabel=dc_label,
-            ylabel="ζ = f_Xπ − f_I (MHz)",
-            title="Single-frequency model fit difference\nThermal mixture not excluded; not pure ZZ",
-        )
-        fig.tight_layout()
+            notes.text(0.5, 0.03, estimate, transform=notes.transAxes, ha="center")
+            fig.legend(loc="outside lower center", ncols=2)
+
+        # A sweep needs a bias-axis view; a single setting only needs the fit annotation.
+        if cfg.dc_device is not None and len(dc_values) > 1:
+            _, ax = plots.subplots(num="zeta", figsize=(8, 5), layout="constrained")
+            for index, (bias, value, error) in enumerate(
+                zip(dc_values, answer.zeta_mhz, answer.zeta_error_mhz, strict=True),
+                start=1,
+            ):
+                if value is not None:
+                    ax.errorbar(bias, value, yerr=error, marker="o", color="C0")
+                    ax.annotate(
+                        str(index),
+                        (bias, value),
+                        xytext=(5, 5),
+                        textcoords="offset points",
+                    )
+            if not any(value is not None for value in answer.zeta_mhz):
+                ax.text(
+                    0.5,
+                    0.5,
+                    "ζ unavailable: see branch diagnostics",
+                    transform=ax.transAxes,
+                    ha="center",
+                )
+            bias_unit = "native unit" if cfg.dc_unit == "native" else cfg.dc_unit
+            ax.set(
+                xlabel=f"Coupler DC bias · {cfg.dc_device} ({bias_unit})",
+                ylabel="ζ = f(Xπ) − f(I) (MHz)",
+                title=f"Idle ZZ · {cfg.target.capitalize()} · Conditional fringe shift",
+            )
