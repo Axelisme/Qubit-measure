@@ -13,8 +13,8 @@
 ## Open 與設定
 
 先完成 readout 與 qubit pulse 校準，再開啟這個實驗。
-Open 與 Reset 讀取當時的 `$qubit` 與 `$resonator` alias。
-修改 alias 後，按 Reset 重新取初值。Reset 會捨棄目前編輯。
+Open 與 Defaults 讀取當時的 `$qubit` 與 `$resonator` alias。
+修改 alias 後，按 Defaults 重新取初值。Defaults 會捨棄目前編輯。
 
 - Reset 與 init pulse 分別使用 `$qubit.module.reset`、`$qubit.module.x180`。
   缺來源時停用，可手動選取 library module 或保持停用。

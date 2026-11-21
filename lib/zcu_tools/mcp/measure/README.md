@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-11-22，Workflow Form 與 RecipeReport 入口
+**Last updated:** 2026-11-22，Analyze 摘要
 
 **讀者：** agent、framework-dev。查閱量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -590,6 +590,8 @@ run_id 在保存前已存在，saved 只在 measurement_data 全部保存時為 
 
 Operation-bound analysis 回覆附 `presentation`，記錄來源 `run_id`、
 `stage`（primary／post）、目前 pane 的 `figure_names` 與 `figures_replaced`。
+Primary 的 `presentation.summary_lines` 是 GUI Analysis 同次顯示的 adapter 文字。
+沒有可顯示的行時省略此欄位。文字不在原生 `summary` 或 execution `actual`。
 Standalone summary 放在 `analysis.<stage>.presentation`，full 放在
 `result.presentation`；recipe full 放在 `details[].analyses[].presentation`。
 `figures_replaced=true` 表示同 Run、同 pane 原有非空圖集合已被這次分析替換，

@@ -47,24 +47,27 @@ def _get_writeback_items(
     """
     cfg, parameters = req.run_result.cfg, req.ctx.parameters
     frequency = req.analyze_result.frequency_mhz
-    if cfg is None or parameters is None or frequency is None:
+    if parameters is None:
+        raise ValueError("Conditional phase writeback requires captured parameters")
+    if cfg is None or frequency is None:
         return []
+    coupler = parameters.resolve_path("$coupler")
     items: list[WritebackItem] = []
-    for role, pulse in (("f1", cfg.drive.f1), ("f2", cfg.drive.f2)):
-        root = f"$coupler.pulses.cz_{role}"
+    for role, pulse in (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2)):
+        root = f"{coupler}.pulses.cz_{role}"
         items.append(
             module_writeback(
                 pulse,
                 target=root,
-                description=f"CZ {role.upper()} source pulse with fitted common frequency (MHz)",
+                description=f"CZ {role.capitalize()} source pulse with fitted common frequency (MHz)",
                 field_updates=(("freq", frequency),),
             )
         )
         items.append(
             ParameterWriteback(
-                target_name=f"$coupler.module.cz_{role}",
-                description=f"Select captured coupler CZ {role.upper()} pulse",
-                proposed_value=parameters.resolve_path(root),
+                target_name=f"{coupler}.module.cz_{role}",
+                description=f"Select captured coupler CZ {role.capitalize()} pulse",
+                proposed_value=parameters.library_key(root),
             )
         )
     return items

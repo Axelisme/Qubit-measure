@@ -51,6 +51,7 @@ from zcu_tools.gui.widgets import (
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
+from ..remote.analysis_types import AnalysisPresentation, project_analysis_presentation
 from ..writeback import WritebackWidget
 from .experiment_figure_area import ExperimentFigureArea
 from .experiment_ledger import (
@@ -299,9 +300,11 @@ class ExpTabWidget(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         bar_layout.addWidget(self.refresh_btn, stretch=15)
-        self.reset_btn = QPushButton("Reset")
+        self.reset_btn = QPushButton("Defaults")
         self.reset_btn.setObjectName("resetButton")
-        self.reset_btn.setToolTip("Recapture sources and restore adapter defaults")
+        self.reset_btn.setToolTip(
+            "Discard edits and reload defaults from current sources."
+        )
         self.reset_btn.setFixedHeight(30)
         self.reset_btn.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -338,6 +341,22 @@ class ExpTabWidget(QWidget):
             # per availability/busy and retains blue primary when idle.
             self.analyze_btn = primary_action_button("Analyze")
             analysis_layout.addWidget(self.analyze_btn)
+
+            self._analysis_source = QLabel()
+            self._analysis_source.setObjectName("analysis.source")
+            self._analysis_source.setTextFormat(Qt.TextFormat.PlainText)
+            self._analysis_source.setWordWrap(True)
+            make_label_selectable(self._analysis_source)
+            self._analysis_source.hide()
+            analysis_layout.addWidget(self._analysis_source)
+
+            self._analysis_summary = QLabel()
+            self._analysis_summary.setObjectName("analysis.summary_lines")
+            self._analysis_summary.setTextFormat(Qt.TextFormat.PlainText)
+            self._analysis_summary.setWordWrap(True)
+            make_label_selectable(self._analysis_summary)
+            self._analysis_summary.hide()
+            analysis_layout.addWidget(self._analysis_summary)
 
             self.writeback_section = LedgerSection("Writeback preview", collapsed=False)
             self.writeback_widget = WritebackWidget(
@@ -977,6 +996,8 @@ class ExpTabWidget(QWidget):
         """
         writeback = self._ctrl.admit(self.tab_id, TabAction.WRITEBACK)
         if self._has_analysis:
+            presentation = project_analysis_presentation(snapshot, "primary")
+            self._render_analysis_summary(snapshot, presentation)
             analyze = self._ctrl.admit(self.tab_id, TabAction.ANALYZE)
             self.analyze_btn.setToolTip(analyze.message)
             self.analyze_btn.setEnabled(
@@ -1009,6 +1030,21 @@ class ExpTabWidget(QWidget):
                 and snapshot.post_analysis.has_result
             )
             self.post_writeback_widget.setToolTip(writeback.message)
+
+    def _render_analysis_summary(
+        self, snapshot: TabSnapshot, presentation: AnalysisPresentation
+    ) -> None:
+        """Show the completed source separately from the adapter's summary lines."""
+        has_result = snapshot.analysis is not None and snapshot.analysis.has_result
+        source = f"Source: {snapshot.adapter_name}" if has_result else ""
+        if has_result and (run_id := presentation["run_id"]):
+            source += f"\nRun ID: {run_id}"
+        self._analysis_source.setText(source)
+        self._analysis_source.setVisible(has_result)
+
+        lines = presentation.get("summary_lines", [])
+        self._analysis_summary.setText("\n".join(lines))
+        self._analysis_summary.setVisible(bool(lines))
 
     def _update_run_admission(
         self,

@@ -2,9 +2,9 @@
 
 **Readers:** operator, agent. Sweep drive-pulse gain at a measured carrier and fixed duration, then fit the oscillation to find pi and pi/2 gains. Use with the selected hardware or simulator environment.
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-11-22
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Parameter sources
 
@@ -12,11 +12,11 @@ Gain runs -0.3 to 1.0 over 51 points; Run overwrites drive gain. Relax delay is 
 
 The gain sweep runs from -0.3 to 1.0 regardless of calibration. For an x180 pulse with a stored numeric waveform length, the editable copy starts at length = 1.5*pi_len*pi_gain µs. Here pi_len is the calibrated x180 length and pi_gain its gain. Enter a finite positive pi_len and a finite pi_gain in (0, 1]; missing or invalid values leave length required and empty. A finite invalid gain stays visible; a nonfinite gain leaves both gain and length empty. If x180 is absent, qub_probe starts at gain=1 and length=1 µs. An arbitrary-waveform x180 keeps its saved module, shape and data. Switch waveform type first to edit duration.
 
-Open and Reset capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 
 ## Module slots
 
-Readout uses the `$resonator.module.readout` slot captured at Open/Reset; an unset slot, missing module or unbound alias uses a fresh 'readout' template. That fallback still needs its required parameter sources. Reset uses qubit.module.reset and stays disabled when absent. The drive uses the sources described above, with qubit.module.x180 when present and qub_probe when absent. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
+Readout uses the `$resonator.module.readout` slot captured at Open/Defaults; an unset slot, missing module or unbound alias uses a fresh 'readout' template. That fallback still needs its required parameter sources. Reset uses qubit.module.reset and stays disabled when absent. The drive uses the sources described above, with qubit.module.x180 when present and qub_probe when absent. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
 
 ## Prepared-state amplitude Rabi
 
@@ -47,16 +47,36 @@ Copies the source drive pulse into captured qubit.pulses.pi_amp and pi2_amp, rep
 
 Analysis takes a 'Skip points' count (default 0) to drop leading low-gain sweep points before the cosine fit; raise it only if the first few points are distorted. A gain sweep spanning roughly two pi amplitudes captures at least a full oscillation; widen it if no full period is visible.
 
+## Reading the plots
+
+Both plots show the mean IQ projected along the principal direction of the IQ trace, in a.u.
+If the trace does not define a rotation, the plot uses the real component I.
+The projection is readout contrast, not a calibrated population.
+
+The live title shows the retained shots per point from completed rounds. It shows a range if the counts differ across points.
+Run saves the mean IQ and the shot sums of those same shots after applying the [QICK offset correction](../../../../../docs/adr/0074-flat-readout-module.md#選用校正後的-iq-矩).
+At each point, the error bar extends one standard error of the mean (SEM) above and below the point.
+SEM is the sample standard deviation along the displayed IQ axis divided by the square root of the retained shot count.
+It estimates uncertainty in the point mean, not the spread of individual shots or the variation between rounds.
+It does not include uncertainty in the axis or fit and does not weight the fit.
+A point with fewer than two retained shots or missing statistics has no bar.
+Files with mean IQ only, including calibration workflow files, still load and fit without point error bars.
+
+Analyze overlays the fitted cosine and marks the π and π/2 gains with their fit standard errors.
+The legend shows the fitter's R² for the included points, or marks it unavailable when undefined.
+R² compares the cosine residual with the variation of those points about their mean. Closer to 1 means a smaller relative residual.
+It is not a gain acceptance threshold or a measure of gate fidelity.
+
 ## Four starting situations
 
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Set a fixed drive frequency and pulse duration, plus readout timing. A prior pi calibration is not required for this sweep.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `amplitude_rabi` after inspecting the same Form errors.
    points maps to gain Expts; gain_range supplies native endpoints. frequency_mhz and pulse_length_us override the fixed drive. skip changes only the existing analysis fit.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

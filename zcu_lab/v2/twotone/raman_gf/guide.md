@@ -46,7 +46,7 @@ A kickstart entry supplies wiring and nominal readout candidates, not pulse or
 readout timing calibration. A blank carrier or required timing keeps Run disabled.
 An arb waveform also needs its asset before Run becomes available.
 Entering a spectroscopy carrier alone does not complete the readout.
-An existing readout slot is used on Open or Reset; its presence does not prove
+An existing readout slot is used on Open or Defaults; its presence does not prove
 that its settings or classifier remain calibrated.
 
 The modes use the following ranges:
@@ -77,7 +77,7 @@ Stop retains completed rows and leaves unfinished rows as NaN.
 Save keeps counts, actual detuning and gain together with this run's cfg.
 It does not copy a later library change into an existing result.
 
-After changing source parameters or library bindings, Reset captures them again
+After changing source parameters or library bindings, Defaults captures them again
 and may replace unsaved input. Refresh updates source choices but preserves
 authored input and previously resolved defaults.
 Reload experiments rebuilds the adapter and restores the existing tab.

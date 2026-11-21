@@ -11,7 +11,7 @@
 
 - 寫或改實驗：讀 [實驗寫法指南](experiment-style.md)，從其中的範本開始寫。
 - 設計 liveplot 與 Analyze 圖、檢查操作員能否判讀：讀 [實驗呈現指南](figure-style.md)。
-- [FTF bring-up 與 CZ 校準](two_qubit/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
+- [Two-qubit bring-up 與 CZ 校準](two_qubit/guide.md) 說明 Qubit1、Qubit2 的單 qubit 校準、位置綁定、舊 point 重綁與資料保存。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
   - 一般入口用 reset 選擇 herald。只有 RB 與 conditional phase 另有 g,g／e,e 聯合分析入口，見下方[完整清單](#two-qubit-實驗清單)。
 - [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與三項檢查。
 - [`twotone/t1_cov`](twotone/time_domain/t1_cov/guide.md) 用兩次單 tone 讀出的二階矩自校準，擬合狀態改變機率以估計 T1。可選脈衝 reset，不需 classifier。
@@ -22,6 +22,8 @@
 - [Framework runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 擁有 Schedule、buffer、acquire 與 stop lifecycle。
 
 ## Two-qubit 實驗清單
+
+Open／Defaults 使用 point aliases `qubit1`、`qubit2` 和 `mux`。表單不限制 qubit 的物理子種類或 coupler 的種類，仍要求 `group/mux` 並檢查有序的 qubit／resonator 綁定。兩個位置須綁不同元件，且都在 `$mux.qubits` 中。`joint_readout`、`idle_zz`、`conditional_spectroscopy` 不要求 `$coupler`。其餘入口須綁 `$coupler`，它是這對 qubit 的 CZ 校準來源或寫回目標。
 
 下表列出 two-qubit 的 GUI／MCP registry keys。每個連結指向該入口的 guide。另有 [`two_qubit/cz_optimize`](two_qubit/cz_optimize/guide.md)，以固定 depth 的 interleaved RB 搜尋 CZ 的 I/Q 形狀與 local Z。
 
@@ -37,7 +39,7 @@
 | Local Z | [`two_qubit/local_z`](two_qubit/local_z/guide.md) | — |
 | Paired RB／IRB | [`two_qubit/rb`](two_qubit/rb/guide.md) | [`two_qubit/rb_heralded`](two_qubit/rb/guide_heralded.md) |
 
-一般入口保存 terminal F1/F2 的 9 類計數。除了 `conditional_phase`，表內一般入口可用 `reset/mux_herald` 在序列前篩選 shot，仍只保存這 9 類終端計數。RB 與 conditional phase 的 `_heralded` 入口保存 81 類 herald × 終端計數，讓分析同時使用 herald g,g 與 e,e 組。採樣與保存量見 [FTF guide](two_qubit/guide.md#採樣數與成本)。
+一般入口保存兩個位置的 9 類 terminal 聯合計數。除了 `conditional_phase`，表內一般入口可用 `reset/mux_herald` 在序列前篩選 shot，仍只保存這 9 類終端計數。RB 與 conditional phase 的 `_heralded` 入口保存 81 類 herald × 終端計數，讓分析同時使用 herald g,g 與 e,e 組。採樣與保存量見 [two-qubit guide](two_qubit/guide.md#採樣數與成本)。
 
 ## 套件邊界
 
@@ -64,7 +66,7 @@ AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/res
 Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
 [\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩個實驗各自在 `analyze()` 畫自己的圖，
-[\_sums.py](two_qubit/_sums.py) 只負責分類計數的數值換算。
+[\_sums.py](two_qubit/_sums.py) 檢查分類校準並換算計數，不讀 alias 或元件。
 Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
 並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。
 [\_chain_common.py](twotone/ro_optimize/_chain_common.py) 只保留保存映射、完成點篩選與最佳 setting 摘要型別。
@@ -132,7 +134,7 @@ Amp／Len Rabi 在各自的 core 畫 joint-fit population、histogram 與 confus
 
 ## Mux readout 與表單初值
 
-有 reps／rounds 欄位的表單在 Open／Reset 時填入 1000／10，初值可編輯。
+有 reps／rounds 欄位的表單在 Open／Defaults 時填入 1000／10，初值可編輯。
 Lookback 只有 rounds，初值為 10，core 固定 reps=1。
 以 shots 控制的 singleshot 表單不改 shots，也不增加 reps／rounds 欄位。
 Mux twotone spectrum 的 relax_delay 初值固定為 1.0 µs，不取 captured T1。
@@ -157,7 +159,7 @@ Tone label 是可重複的顯示文字，不是 component 名稱，也不改變�
 有 readout slot 時以副本保留 scalar 初值，再套用 ringup timing。
 缺 slot 時使用 blank mux 範本，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。
 ADC window 固定填入 1.0 µs，mixer 取 group 的 `mixer_freq`。初值來源及缺值處理見 [mux onetone guide](mux/onetone/guide.md#無-readout-slot-的候選來源)。
-`participants` 是非空、唯一的原始整數 index list，按輸入順序量測。Open／Reset 將 alias `$participants` 的名稱依 `$mux.resonators` 位置轉成 indices；缺列、未綁或空清單預設全部。之後改 aliases 不更新現有輸入，需 Reset 或重新 Open。
+`participants` 是非空、唯一的原始整數 index list，按輸入順序量測。Open／Defaults 將 alias `$participants` 的名稱依 `$mux.resonators` 位置轉成 indices；缺列、未綁或空清單預設全部。之後改 aliases 不更新現有輸入，需按 Defaults 或重新開啟 tab。
 Lab 將 subset 交 program，不改完整 cfg。
 RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
 Adapter 提供 K 條 active live 曲線及 K 張 `fit_i` 圖，i 是原始 tone 序號。
@@ -168,11 +170,11 @@ Core 的 `analyze` 自己持有 Figure，選擇既有 lib model 的公開 render
 Module proposal 只更新成功 active tone 的頻率，保留其他完整設定，固定寫到 `$mux.readout.readout_rf`。
 單一參數從 Run／Load capture 的 `$mux.resonators` 依完整原始序號對應。Resonators 數不等於完整 tone 數時，保留 readout module 與 capture 可解析的 readout slot 提案，省略逐 resonator scalar，summary 顯示原因。
 MuxGroup 可不填 qubits 做 resonator bring-up，readout 各欄位仍可編輯，不增加完整 qubit 綁定門檻。
-填了則由 model 檢查等長與重複 qubit。Form 在 Open／Reset 呼叫
+填了則由 model 檢查等長與重複 qubit。Form 在 Open／Defaults 呼叫
 `support.measure.mux_bindings.validate_mux_bindings(ctx.parameters)`，以固定 capture
 檢查 component 存在、kind 及逐項 qubit.resonator 對應，無效就拒絕來源。
-其他 mux／FTF Forms 共用此入口，精確 import 與呼叫例見
-[Measure support](support/measure/README.md#mux-綁定驗證)。
+其他 mux Forms 共用此入口，呼叫例見 [Measure support](support/measure/README.md#mux-綁定驗證)。
+Two-qubit Forms 用 [`captured_qubits`](two_qubit/_measure.py) 要求完整的有序 mux 綁定，從 `$mux.qubits` 找出兩個位置並核對已綁 readout 的類別與 tone 數。這不限制 qubit 的物理子種類或 coupler 的種類。正常 lowering 後，`TwoQubitForm.to_cfg` 用同次 capture 核對實際 ref／inline readout 的完整 tone 數。Refresh 保留草稿，以新 capture 重建 Form 和 hidden indices。操作員仍須核對 tone 順序，見 [Two-qubit guide](two_qubit/guide.md#綁定位置與讀出-tones)。
 Module 可整組引用或 inline 編輯，tones 使用 picker 逐項編輯。
 七個 mux qubit Forms 有 readout slot 時引用 library，完整 tones 與 scalar 設定取自該模組。
 缺 slot 時從 blank mux 範本加 group tones，填入 resonator 校準頻率與名稱 label。
@@ -207,7 +209,7 @@ Pulse 的 Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay 與 Mixer f
 四實驗的 cfg schema 為 5.0。Load 舊 major 時保留資料與 metadata，cfg 為 None，不轉換舊設定。
 Onetone 的 `df` 是共用 MHz offset；twotone 的單一 `tones` 清單保存各 Q 的 drive 與 MHz 範圍，
 `expts` 是共用硬體點數。
-Guide 說明 kickstart、已有頻率、已有 readout slot 與 recipe 的起手步驟，以及 Open／Reset／Refresh 的差異。
+Guide 說明 kickstart、已有頻率、已有 readout slot 與 recipe 的起手步驟，以及 Open／Defaults／Refresh 的差異。
 `participants` 保存原始 tone index 與執行順序，index 始終對應完整 group 的原始序號。
 Stop 保留已完成的 flux 點，未完成點留 NaN。Analyze 每次用原始 `tone` index 選一個 participant，
 沿既有 half／integer line picker 校準。Local 與 global 分開提出該 Q 的 `flux.period.<被掃 device>` 與預設勾選的 `flux.offset`，

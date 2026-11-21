@@ -158,7 +158,15 @@ def write_attrs(file: h5.File, attrs: ContainerAttrs) -> None:
 
 
 def validate_variable(variable: Variable) -> None:
-    """Validate numeric dtype, ordered axes and shape without changing arrays."""
+    """Check the current structure of one Variable without I/O or mutation.
+
+    Values and axis coordinates must have numeric dtypes. The values' rank
+    must match the number of axes; a scalar has none. Each axis must have a
+    legal, unique path-segment name and a 1D coordinate of the matching length.
+    Violations raise ValueError. This does not check a container or variable key,
+    a Labber grid, units, finiteness, or the meaning of the values. Passing
+    does not guarantee that a later save or a mutated array is valid.
+    """
     shape = variable.values.shape
     if variable.values.dtype.kind not in "iufc":
         raise ValueError("variable dtype must be numeric")

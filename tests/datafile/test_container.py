@@ -24,6 +24,40 @@ def _container() -> datafile.Container:
     )
 
 
+def test_validate_variable_accepts_numeric_axes_and_scalar_without_mutation() -> None:
+    values = np.array([1 + 2j, complex(np.nan, 0)])
+    points = np.array([0.0, 1.0])
+    variable = datafile.Variable(values, (datafile.Axis("x", "", points),), "V")
+
+    assert datafile.validate_variable(variable) is None
+    assert datafile.validate_variable(datafile.Variable(np.array(3), (), "")) is None
+    np.testing.assert_array_equal(values, [1 + 2j, complex(np.nan, 0)])
+    np.testing.assert_array_equal(points, [0.0, 1.0])
+
+
+@pytest.mark.parametrize(
+    ("values", "axes", "message"),
+    [
+        (np.array(["3"]), (datafile.Axis("x", "", np.array([0])),), "dtype"),
+        (np.ones(1), (), "shape"),
+        (np.ones(1), (datafile.Axis("x/y", "", np.array([0])),), "name"),
+        (np.ones(1), (datafile.Axis("x", "", np.array(["0"])),), "axis dtype"),
+        (np.ones(1), (datafile.Axis("x", "", np.array([[0]])),), "axis shape"),
+        (np.ones(2), (datafile.Axis("x", "", np.array([0])),), "axis shape"),
+        (
+            np.ones((1, 1)),
+            (datafile.Axis("x", "", np.array([0])),) * 2,
+            "duplicate axis",
+        ),
+    ],
+)
+def test_validate_variable_rejects_invalid_current_structure(
+    values: np.ndarray, axes: tuple[datafile.Axis, ...], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        datafile.validate_variable(datafile.Variable(values, axes, ""))
+
+
 def test_namespaces_roundtrip_and_detached_groups(tmp_path: Path) -> None:
     source = tmp_path / "source.h5"
     with h5py.File(source, "w") as file:

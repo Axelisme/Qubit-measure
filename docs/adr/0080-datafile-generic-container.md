@@ -42,16 +42,23 @@ related: [0063, 0072]
 
 ### 介面
 
-公開面收斂為一個模組層級的 API，型別只用 datafile 自己的：
+公開面收斂在 package root `zcu_tools.datafile`，型別只用 datafile 自己的。`datafile.container` 與 `container_nodes` 不是公開匯入路徑。
 
 - `save(path, container: Container, *, replace: bool = False)`：寫到呼叫者的精確路徑，同目錄 temp 加 atomic replace。讀寫共用 `Container(vars, docs, groups, attrs)`，caller 可以直接修改 load 的結果再寫回，不另行拆出 header 參數。
 - `load(path) -> Container`：`groups` 是 detached opaque handle，只供寫回，原檔關閉或刪除後仍可使用。`attrs` 是 frozen `ContainerAttrs(format_version: str, producer: str, kind: str | None, extra: Mapping[str, JsonScalar])`。新檔由 caller 指定 3.0 與 producer，kind 可為 None。讀回的同 major 來源 minor 與未知根屬性 extra 在 save 保留，不降版。`format` 固定為 zcu.container，不接受 extra 覆寫 header keys。extra 只接受有限 JSON scalar，null 以 HDF5 null-dataspace attribute 表示。
 - `read_doc(path, name) -> JsonObject`：只讀指定的有限 JSON object，不讀 vars、其他 docs 或 opaque groups。只接受與 load 相同的 zcu.container 3.x。缺文件 raise 指名來源檔與文件名的 KeyError；格式或文件非法 raise 指名來源檔的 FormatError。壞 vars 不阻礙合法文件讀取。
 - `read_docs(path, names)`：在一次開檔中讀取指定名稱，關檔後依名稱回傳 detached JSON 或該份文件的錯誤。只驗 header、docs group 與指定文件。檔案 I/O 或共用格式檢查失敗時 raise；一份文件失敗不遮住其他文件。不指定或解釋任何生產者的文件名稱。
 - `inspect(path) -> ContainerInfo`：只讀根屬性與 var schema、doc/group 名稱，不解碼 docs，也不載陣列。
+- `validate_variable(variable: Variable) -> None`：重用 native 與 Labber writer 的單一變數結構檢查，不做 I/O。檢查數值 dtype、rank 與軸數、合法且唯一的軸名、一維數值座標、座標長度與對應維度一致。Scalar 不帶軸。違規時拋 `ValueError`，不修改陣列。
 - `Variable(values, axes: tuple[Axis, ...], unit)`、`Axis(name, unit, values)`：axes 按 NumPy 維度順序排列。`VariableSchema` 回報 inspect 的形狀、軸、dtype 與單位。`ContainerInfo` 的 axes 不載座標值。另提供 `JsonObject`、`JsonScalar` 與 `FormatError`。
 
 Labber 轉出保留為 datafile 內的獨立模組。`write_labber` 消費 Container.vars，不解釋 docs，LabberMetadata 由 caller 明傳。`read_labber` 回傳 `(Container, LabberMetadata)`，原始子樹與 timestamps 放在 opaque groups/labber。既有低層 readers 仍可直接取得 timestamps。Labber independent 的多 Log_N 版面由內部 helper 直接寫，不經中介檔。
+
+**例子。** 二維 Variable 的兩個軸都叫 `Gain` 時，`validate_variable` 在開檔前即拒絕。實驗先驗所有 native 變數再投影 Labber，即使該 Variable 不匯出也會報錯，見 [[0069]]。
+
+**邊界。** `validate_variable` 不檢查外層 key、整份 Container、Labber 網格、單位、有限值或統計語意。成功只代表這個 Variable 當下符合結構，不保證陣列修改後仍有效，也不保證寫檔成功。不改 `Variable` 建構、writer 或 reader。
+
+**依據。** 2026-11-22，designer 代裁共用既有檢查，使用者未覆核。選項與驗收見 [Amp Rabi 的 shot moments](../discussions/2026-11-22-amp-rabi-shot-moments.md)。
 
 ### 獨立性
 

@@ -17,7 +17,7 @@
 確認 readout generator／ADC、qubit generator 與接線相符。
 量測期間 flux 保持固定，readout 與 x180 使用已完成的前置校準。
 
-## Open 與 Reset
+## Open 與 Defaults
 
 1. 在 New Tab 選單選 `twotone` → `dispersive`，開啟實驗。
 2. Qubit preparation pulse 優先使用 `$qubit.module.x180`；沒有時提供可編輯的 pi-pulse template。
@@ -27,7 +27,7 @@
 6. Relax delay 初值為五倍 T1；未存 T1 時使用 30 µs 時間尺度，即 150 µs。已存但無效的 T1 會使相關必填欄位保持空白。
 
 Template 的功率與時序須經硬體安全審核。缺少校準或 channels 時，必須補齊欄位才能 Run。
-Open／Reset 捕捉當下來源。變更 aliases、儲存的 module 或校準後，按 Reset 才重新取初值；Reset 會捨棄目前輸入。
+Open／Defaults 捕捉當下來源。變更 aliases、儲存的 module 或校準後，按 Defaults 才重新取初值；Defaults 會捨棄目前輸入。
 
 ## Run 與 Analyze
 

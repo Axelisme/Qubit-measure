@@ -2,19 +2,26 @@
 
 **Readers:** operator, agent. T2 Ramsey: two pi/2 pulses separated by a swept free-evolution delay; fits the decaying fringe to extract the Ramsey coherence time T2* and the qubit-drive detuning. Runs on real hardware. Run after a pi/2 pulse is calibrated; a small deliberate detuning produces the fringe whose frequency reads out the true qubit frequency offset.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-22
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Parameter sources
 
 Delay runs 0 to 1.5 * qubit.t2r µs over 101 points. Detune ratio is fringes per sweep step; native MHz detune is ratio / step. Relax delay is 5 * qubit.t1 µs. Other missing required calibration leaves the affected fields empty and Invalid.
 
-Open and Reset capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 
 ## Module slots
 
-Readout uses the qubit.module.readout slot captured at Open/Reset, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. The drive uses qubit.module.x90 with a pi2_pulse template fallback. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
+Readout uses the qubit.module.readout slot captured at Open/Defaults, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. The drive uses qubit.module.x90 with a pi2_pulse template fallback. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
+
+## Analyze summary
+
+After Analyze, the GUI Analysis pane and MCP show the source configuration's
+Reps × Rounds. `Applied detune` is the phase-ramp frequency after hardware
+rounding, not the fitted fringe frequency. Loading native data still allows
+Analyze. The file does not save the applied detune, so the summary omits that line.
 
 ## Typical writeback
 
@@ -27,7 +34,7 @@ Changing only its frequency does not produce a calibrated pulse.
 Calibration writeback, New from a template and `ml_edit` can create numeric
 library modules. Template expressions read calibration when the module is
 created; saved modules do not follow later frequency changes.
-Reset downstream tabs after selecting the new module to capture it.
+Choose Defaults in downstream tabs after selecting the new module to capture it.
 Historical Run/Load sources keep their original pulses.
 
 ## Recommended
@@ -39,11 +46,11 @@ Fit phase offset is enabled by default to fit a free fringe phase. Disable it to
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Obtain a calibrated pi/2 pulse. Confirm the delay window, detune_ratio and readout timing.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `t2ramsey` after inspecting the same Form errors.
    points maps to delay Expts; max_delay_us sets the stop. fit_fringe and fit_phase change only analysis.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
