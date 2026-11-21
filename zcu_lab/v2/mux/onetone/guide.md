@@ -155,7 +155,7 @@ Open／Reset 給 `post_delay` 初值，FIT 不校準這段等待。Module 提案
 
 在 FTF 的低 SNR 例子中，R2 的線寬約 1.2 MHz。五個光子衰減時間約 0.66 µs；2 µs 約是單個光子衰減時間的 15 倍。gg herald 後打名目 F2 Xπ，等待 0 µs 時，F2 的終端 e 比例為 11.6%；等待 2 µs 時為 92.9%。比例未扣除 I 基線。2 µs 只是當時的比較值，不是最短或最佳等待。
 
-在 `two_qubit/joint_readout` 的 Reset 欄位選 `reset/mux_herald`，在 `keep` 用 F1、F2 的 role tone 在完整 readout 中的位置作鍵，兩個值都填 g。Herald 和 terminal 使用同一份完整 mux readout。Run 後看 FIT 的 4×9 列正規化機率矩陣。取目標 qubit 打名目 Xπ、另一顆打 I 的那一列，把目標 qubit 的 terminal 分類為 e 的欄位加總。也可與兩顆都打 I 的 gg 列比較。這是通過 gg herald 的 shots 中，目標 qubit 的 terminal e 比例，不是 gate fidelity。只延長 `post_delay`，其餘設定不變，再 Run 和 FIT。若比例仍隨等待延長而上升，先調整等待再跑 heralded 掃描。
+在 `two_qubit/joint_readout` 的 Reset 欄位選 `reset/mux_herald`。在 `keep` 用 `qubit1`、`qubit2` 在完整 mux readout 的 tone index 作鍵，兩個值都填 g。Herald 和 terminal 使用同一份完整 mux readout。Run 後看 FIT 的 4×9 列正規化機率矩陣。取目標 qubit 打名目 Xπ、另一顆打 I 的那一列，把目標 qubit 的 terminal 分類為 e 的欄位加總。也可與兩顆都打 I 的 gg 列比較。這是通過 gg herald 的 shots 中，目標 qubit 的 terminal e 比例，不是 gate fidelity。只延長 `post_delay`，其餘設定不變，再 Run 和 FIT。若比例仍隨等待延長而上升，先調整等待再跑 heralded 掃描。
 
 ## MCP recipe
 

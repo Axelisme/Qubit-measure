@@ -1,5 +1,6 @@
 # Source project: ftf-cz-recalibration-20261120 (FTF simulation); copied 2026-11-21.
 # Point: ftf-demo/initial; source document revision (SHA-256): 987fd256619eb4b4cc2d8d7fcbe3246d2f99b882908936aafcff32052a7dc58a
+# Fixture uses cz_qubit1/cz_qubit2 pulse keys in place of cz_f1/cz_f2.
 format: zcu.module-library
 format_version: '2.0'
 components:
@@ -211,7 +212,7 @@ components:
         trig_offset: 1.1677958648385653
   coupler:
     pulses:
-      cz_f2:
+      cz_qubit2:
         type: pulse
         desc:
         waveform:
@@ -225,7 +226,7 @@ components:
         pre_delay: 0.0
         post_delay: 0.0
         mixer_freq:
-      cz_f1:
+      cz_qubit1:
         type: pulse
         desc:
         waveform:

@@ -1,4 +1,4 @@
-"""Relative F2 minus F1 phase scan in degrees at fixed common frequency."""
+"""Relative Qubit2 minus Qubit1 phase scan in degrees at fixed common frequency."""
 
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
@@ -42,25 +42,25 @@ from zcu_tools.program.v2.modules import (
     Reset,
 )
 
-from .._drive import DualLineCfg
+from .._drive import QubitDriveCfg
 from .._rabi_analysis import (
     RabiRate,
     ReturnData,
     fit_duration_rates,
 )
 from .._rabi_scan import RabiScanResult
-from .._readout import JointRoles, MuxResetCfg
+from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
 from .._sums import (
     joint_probabilities,
-    validate_classifiers,
+    validate_qubit_tones,
 )
 
 
 @dataclass(frozen=True)
 class ConstructivePhaseResult(RabiScanResult):
-    """F2 relative to F1 phase coordinates, durations in us and (Nc,Nd,3,3) counts.
+    """Qubit2 relative to Qubit1 phase coordinates, durations in us and (Nc,Nd,3,3) counts.
 
-    Terminal class axes are F1/F2, each g/e/other. Unmeasured points are NaN.
+    Terminal class axes are Qubit1/Qubit2, each g/e/other. Unmeasured points are NaN.
     Counts are float64 totals, not normalized probabilities.
     """
 
@@ -96,14 +96,14 @@ class ConstructivePhaseAnalysis:
 
 
 class ConstructivePhaseCfg(ConfigBase):
-    """Relative F2 minus F1 phase scan in degrees at fixed common frequency.
+    """Relative Qubit2 minus Qubit1 phase scan in degrees at fixed common frequency.
 
-    Each coordinate sets F2.phase to F1.phase plus the requested phase. Signed gains and source waveforms remain fixed.
-    Optional reset precedes preparation. F1/F2 classifiers require GE Post radii.
+    Each coordinate sets Qubit2.phase to Qubit1.phase plus the requested phase. Signed gains and source waveforms remain fixed.
+    Optional reset precedes preparation. Qubit1/Qubit2 classifiers require GE Post radii.
     duration sets both positive envelope lengths in us; scalar length-settable
     envelopes are required. drive carries common MHz frequency, signed gains,
-    phases in degrees and timing. roles retains the captured full-tone mapping.
-    Preparation and contrast use x180_f1/x180_f2 on the drive generators.
+    phases in degrees and timing. The two tone indices address the full mux readout.
+    Preparation and contrast use x180_qubit1/x180_qubit2 on the drive generators.
     Acquisition sums repetitions across rounds without storing individual shots.
     initial_delay precedes the first repetition; relax_delay follows each one.
     Invalid routes, classifiers, durations or unscalable waveforms raise ValueError.
@@ -116,41 +116,55 @@ class ConstructivePhaseCfg(ConfigBase):
             description="Optional reset before each shot's reads and preparation.",
         ),
     ] = None
-    x180_f1: Annotated[
+    x180_qubit1: Annotated[
         PulseCfg,
         FieldMeta(
-            label="F1 Xπ",
-            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit1 Xπ",
+            description="Calibrated Qubit1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
-    x180_f2: Annotated[
+    x180_qubit2: Annotated[
         PulseCfg,
         FieldMeta(
-            label="F2 Xπ",
-            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit2 Xπ",
+            description="Calibrated Qubit2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     drive: Annotated[
-        DualLineCfg,
+        QubitDriveCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="填入 F1/F2 charge-line pulses，先以 conditional spectroscopy 選頻，再確認 cz_f1／cz_f2 slots。",
+            description="填入 Qubit1/Qubit2 charge-line pulses，先以 conditional spectroscopy 選頻，再確認 cz_qubit1／cz_qubit2 slots。",
         ),
     ]
     readout: Annotated[
         MuxReadoutCfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot，先用 lookback 取得 timing us，再做 mux onetone。",
+            description="填入 full-group mux readout slot，先用 lookback 取得 timing us，再做 mux onetone。 "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
-    roles: JointRoles
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based Qubit1 position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based Qubit2 position in the full mux readout.",
+        ),
+    ]
     relative_phase: Annotated[
         SweepCfg,
         FieldMeta(
             unit="deg",
-            label="F2 relative to F1 phase",
-            description="Set the f2 relative to f1 phase sweep endpoints in deg; review the scan window before Run.",
+            label="Qubit2 relative to Qubit1 phase",
+            description="Set the qubit2 relative to qubit1 phase sweep endpoints in deg; review the scan window before Run.",
         ),
     ]
 
@@ -191,9 +205,12 @@ class ConstructivePhaseCfg(ConfigBase):
     @model_validator(mode="after")
     def validate_duration_scan(self) -> Self:
         """Reject invalid tones, routes and nonpositive durations."""
-        validate_classifiers(self.readout, self.roles)
-        if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
-            raise ValueError("Each drive must use its role's calibrated Xπ generator")
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
+        if (
+            self.drive.qubit1.ch != self.x180_qubit1.ch
+            or self.drive.qubit2.ch != self.x180_qubit2.ch
+        ):
+            raise ValueError("Each drive must use its qubit's calibrated Xπ generator")
         durations = sweep2array(self.duration)
         if np.any(durations <= 0):
             raise ValueError("Drive durations must be positive")
@@ -321,7 +338,7 @@ def _live_return_map(
         vmax=1,
         cmap="viridis",
     )
-    ax.set(xlabel="Drive duration (us)", ylabel="F2 relative to F1 phase (deg)")
+    ax.set(xlabel="Drive duration (us)", ylabel="Qubit2 relative to Qubit1 phase (deg)")
     ax.grid(False)
     fig.colorbar(image, ax=ax, label="Terminal P(g,g)")
     fig.show()
@@ -338,8 +355,8 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit1", unit=""),
                     VariableAxisSpec(
                         label="Drive duration",
                         unit="s",
@@ -347,7 +364,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
                         scale=1e-6,
                     ),
                     VariableAxisSpec(
-                        label="F2 relative to F1 phase",
+                        label="Qubit2 relative to Qubit1 phase",
                         unit="deg",
                         field_name="coordinates",
                         scale=1.0,
@@ -363,7 +380,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         ),
         result_type=ConstructivePhaseResult,
         cfg_type=ConstructivePhaseCfg,
-        cfg_schema_version="4.0",
+        cfg_schema_version="5.0",
         tag="two_qubit/constructive_phase",
         result_builder=restore_result,
     )
@@ -381,7 +398,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         # 1. Use hardware duration sweeps only when both drives are constant or flat-top.
         if all(
             isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
-            for pulse in (config.drive.f1, config.drive.f2)
+            for pulse in (config.drive.qubit1, config.drive.qubit2)
         ):
             return self._run_hardware_duration(config, context=context)
         # 2. Rebuild sampled drive envelopes on the host while keeping the other axis in hardware.
@@ -416,37 +433,39 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             )
             coordinate = builder.add_sweep("relative_phase", config.relative_phase)
             length = builder.add_sweep("duration", config.duration)
-            drive_f1 = Pulse("drive_f1", config.drive.f1, length=length)
-            drive_f2 = Pulse(
-                "drive_f2",
-                config.drive.f2,
+            drive_qubit1 = Pulse("drive_qubit1", config.drive.qubit1, length=length)
+            drive_qubit2 = Pulse(
+                "drive_qubit2",
+                config.drive.qubit2,
                 length=length,
-                phase=float(config.drive.f1.phase) + coordinate,
+                phase=float(config.drive.qubit1.phase) + coordinate,
             )
-            prepare_f1 = Pulse("prepare_f1", config.x180_f1)
-            prepare_f2 = Pulse("prepare_f2", config.x180_f2)
-            contrast_f1 = Pulse("contrast_f1", config.x180_f1)
-            contrast_f2 = Pulse("contrast_f2", config.x180_f2)
+            prepare_qubit1 = Pulse("prepare_qubit1", config.x180_qubit1)
+            prepare_qubit2 = Pulse("prepare_qubit2", config.x180_qubit2)
+            contrast_qubit1 = Pulse("contrast_qubit1", config.x180_qubit1)
+            contrast_qubit2 = Pulse("contrast_qubit2", config.x180_qubit2)
             readout = MuxReadout("readout", config.readout)
             if config.reset is not None:
                 builder.emit(Reset("reset", config.reset, terminal=readout))
-            builder.fork("default", into=["prepare_f1_time", "prepare_f2_time"])
-            builder.emit(prepare_f1, timeline="prepare_f1_time")
-            builder.emit(prepare_f2, timeline="prepare_f2_time")
-            builder.join("prepare_f1_time", "prepare_f2_time", into="default")
-            builder.fork("default", into=["drive_f1_time", "drive_f2_time"])
-            builder.emit(drive_f1, timeline="drive_f1_time")
-            builder.emit(drive_f2, timeline="drive_f2_time")
-            builder.join("drive_f1_time", "drive_f2_time", into="default")
-            builder.fork("default", into=["contrast_f1_time", "contrast_f2_time"])
-            builder.emit(contrast_f1, timeline="contrast_f1_time")
-            builder.emit(contrast_f2, timeline="contrast_f2_time")
-            builder.join("contrast_f1_time", "contrast_f2_time", into="default")
+            builder.fork("default", into=["prepare_qubit1_time", "prepare_qubit2_time"])
+            builder.emit(prepare_qubit1, timeline="prepare_qubit1_time")
+            builder.emit(prepare_qubit2, timeline="prepare_qubit2_time")
+            builder.join("prepare_qubit1_time", "prepare_qubit2_time", into="default")
+            builder.fork("default", into=["drive_qubit1_time", "drive_qubit2_time"])
+            builder.emit(drive_qubit1, timeline="drive_qubit1_time")
+            builder.emit(drive_qubit2, timeline="drive_qubit2_time")
+            builder.join("drive_qubit1_time", "drive_qubit2_time", into="default")
+            builder.fork(
+                "default", into=["contrast_qubit1_time", "contrast_qubit2_time"]
+            )
+            builder.emit(contrast_qubit1, timeline="contrast_qubit1_time")
+            builder.emit(contrast_qubit2, timeline="contrast_qubit2_time")
+            builder.join("contrast_qubit1_time", "contrast_qubit2_time", into="default")
             builder.emit(readout, tag="terminal")
             prog = builder.build()
             axes = [
-                Classify("terminal", config.roles.f1_tone),
-                Classify("terminal", config.roles.f2_tone),
+                Classify("terminal", config.qubit1_tone),
+                Classify("terminal", config.qubit2_tone),
             ]
             sched.run_acquire_summed(
                 prog,
@@ -492,37 +511,45 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
                 )
                 coordinate = builder.add_sweep("relative_phase", config.relative_phase)
                 length = duration
-                drive_f1 = Pulse("drive_f1", config.drive.f1, length=length)
-                drive_f2 = Pulse(
-                    "drive_f2",
-                    config.drive.f2,
+                drive_qubit1 = Pulse("drive_qubit1", config.drive.qubit1, length=length)
+                drive_qubit2 = Pulse(
+                    "drive_qubit2",
+                    config.drive.qubit2,
                     length=length,
-                    phase=float(config.drive.f1.phase) + coordinate,
+                    phase=float(config.drive.qubit1.phase) + coordinate,
                 )
-                prepare_f1 = Pulse("prepare_f1", config.x180_f1)
-                prepare_f2 = Pulse("prepare_f2", config.x180_f2)
-                contrast_f1 = Pulse("contrast_f1", config.x180_f1)
-                contrast_f2 = Pulse("contrast_f2", config.x180_f2)
+                prepare_qubit1 = Pulse("prepare_qubit1", config.x180_qubit1)
+                prepare_qubit2 = Pulse("prepare_qubit2", config.x180_qubit2)
+                contrast_qubit1 = Pulse("contrast_qubit1", config.x180_qubit1)
+                contrast_qubit2 = Pulse("contrast_qubit2", config.x180_qubit2)
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset, terminal=readout))
-                builder.fork("default", into=["prepare_f1_time", "prepare_f2_time"])
-                builder.emit(prepare_f1, timeline="prepare_f1_time")
-                builder.emit(prepare_f2, timeline="prepare_f2_time")
-                builder.join("prepare_f1_time", "prepare_f2_time", into="default")
-                builder.fork("default", into=["drive_f1_time", "drive_f2_time"])
-                builder.emit(drive_f1, timeline="drive_f1_time")
-                builder.emit(drive_f2, timeline="drive_f2_time")
-                builder.join("drive_f1_time", "drive_f2_time", into="default")
-                builder.fork("default", into=["contrast_f1_time", "contrast_f2_time"])
-                builder.emit(contrast_f1, timeline="contrast_f1_time")
-                builder.emit(contrast_f2, timeline="contrast_f2_time")
-                builder.join("contrast_f1_time", "contrast_f2_time", into="default")
+                builder.fork(
+                    "default", into=["prepare_qubit1_time", "prepare_qubit2_time"]
+                )
+                builder.emit(prepare_qubit1, timeline="prepare_qubit1_time")
+                builder.emit(prepare_qubit2, timeline="prepare_qubit2_time")
+                builder.join(
+                    "prepare_qubit1_time", "prepare_qubit2_time", into="default"
+                )
+                builder.fork("default", into=["drive_qubit1_time", "drive_qubit2_time"])
+                builder.emit(drive_qubit1, timeline="drive_qubit1_time")
+                builder.emit(drive_qubit2, timeline="drive_qubit2_time")
+                builder.join("drive_qubit1_time", "drive_qubit2_time", into="default")
+                builder.fork(
+                    "default", into=["contrast_qubit1_time", "contrast_qubit2_time"]
+                )
+                builder.emit(contrast_qubit1, timeline="contrast_qubit1_time")
+                builder.emit(contrast_qubit2, timeline="contrast_qubit2_time")
+                builder.join(
+                    "contrast_qubit1_time", "contrast_qubit2_time", into="default"
+                )
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 axes = [
-                    Classify("terminal", config.roles.f1_tone),
-                    Classify("terminal", config.roles.f2_tone),
+                    Classify("terminal", config.qubit1_tone),
+                    Classify("terminal", config.qubit2_tone),
                 ]
                 step.run_acquire_summed(
                     prog,
@@ -590,7 +617,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         fig.colorbar(image, ax=ax, label="Terminal P(g,g)")
         ax.set(
             xlabel="Drive duration (us)",
-            ylabel="F2 relative to F1 phase (deg)",
+            ylabel="Qubit2 relative to Qubit1 phase (deg)",
             title="Nominal B11 return proxy · not gate fidelity",
         )
         # 3. Fit complete duration traces, then regress identifiable rates squared against relative phase.
@@ -620,7 +647,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             fontsize="small",
         )
         ax.set(
-            xlabel="F2 relative to F1 phase (deg)",
+            xlabel="Qubit2 relative to Qubit1 phase (deg)",
             ylabel="Rabi rate (MHz)",
             title="Undamped cosine model · rates below 1/duration span excluded",
         )
@@ -633,7 +660,9 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             ylabel="Fitted joint P00",
             title="Duration cosine fits · inspect model against measured return curves",
         )
-        ax.legend(title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2)
+        ax.legend(
+            title="Qubit2 relative to Qubit1 phase (deg)", fontsize="x-small", ncols=2
+        )
 
         # 4. Summarize terminal outcomes at the measured phase nearest the proposed maximum.
         _plot_return(
@@ -668,7 +697,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
                 label="Maximum rate phase",
             )
             ax.set(
-                xlabel="F2 relative to F1 phase (deg)",
+                xlabel="Qubit2 relative to Qubit1 phase (deg)",
                 ylabel="Rabi rate² (MHz²)",
                 title="Constructive phase · fixed signed gain ratio",
             )

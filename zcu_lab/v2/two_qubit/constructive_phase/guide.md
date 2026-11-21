@@ -4,14 +4,14 @@
 
 ## Sequence and calibration
 
-Scan F2 minus F1 relative phase in degrees and common envelope duration in us.
+Scan Qubit2 minus Qubit1 relative phase in degrees and common envelope duration in us.
 Each shot emits optional reset, nominal B11 preparation, simultaneous two-line
 drive, double Xπ contrast and one terminal mux readout.
 `reset=None` emits no reset. Set a reset cfg only after reviewing its pulse
 and timing against the authorized limits. The Form's Reset action recaptures
 inputs; it does not emit a reset pulse.
 
-Both role tones require circle classifiers with g/e centers and radius.
+Both qubit tones require circle classifiers with g/e centers and radius.
 Run mux singleshot GE Post under these readout conditions before Run.
 Missing classifiers, linear classifiers and missing radii make the cfg invalid.
 Classification happens during acquisition, not during analysis.
@@ -19,33 +19,36 @@ The three classes are g, e and other. Other stays in the denominator.
 
 ## Prepare the Form
 
-Bind `f1`, `f2`, `coupler` and `mux`, then Open or Reset.
-Review the captured identities and original tone positions from the mux group.
+Bind `qubit1` and `qubit2` to distinct qubits and `mux` to a group containing both.
+Bind `coupler` to the component that stores their CZ pulses.
+Notebook uses the same built-in position names, but does not bind the GUI aliases.
+For an existing point, bind the new aliases. Rename both CZ slots and their library keys to
+`cz_qubit1` and `cz_qubit2`. Make each slot point to its renamed key.
+Open or Reset to set the hidden tone indices from `$mux.qubits`.
 Check both Xπ pulses and all mux tones, ADC routes and scalar timing.
 Readout references `$mux.module.readout` when present. Otherwise fill the blank
 mux template, including classifiers. Missing sources remain required inputs.
 
-The coupler's `cz_f1` and `cz_f2` slots seed editable ordinary charge pulses.
+The coupler's `cz_qubit1` and `cz_qubit2` slots seed editable ordinary charge pulses.
 Without slots, fill both cosine templates, including signed gain, frequency,
-envelope length and Nyquist zone. Channels come from captured role wiring.
-Only F1/F2 charge lines play the drive; the coupler stays DC-biased.
+envelope length and Nyquist zone. Channels come from captured qubit wiring.
+Only Qubit1/Qubit2 charge lines play the drive; the coupler stays DC-biased.
 Both source frequencies, envelope lengths and pre-delays must match.
 The sequence waits for both drive pulses, including their individual post-delays.
 Keep the signed gain ratio fixed.
-Each phase coordinate sets F2.phase to saved F1.phase plus that coordinate.
-The common frequency and F1 phase remain fixed. Choose the transition using
+Each phase coordinate sets Qubit2.phase to saved Qubit1.phase plus that coordinate.
+The common frequency and Qubit1 phase remain fixed. Choose the transition using
 conditional spectroscopy and the duration window using chevron.
 Only common envelope duration changes within each trace.
 
 The Form lists reset, Xπ preparation pulses, dual-line drive and readout in
-playback order, followed by captured roles. Set the outer relative phase
+playback order. Set the outer relative phase
 sweep before the inner duration sweep. Repetitions, rounds and acquisition
 delays appear last.
 Enter finite scan endpoints and strictly positive durations.
 Review repetitions, rounds, optional reset and timing before Run.
-Refresh updates choices without overwriting authored inputs.
-After changing the parameter source, use the Form's Reset to recapture inputs.
-Reset can overwrite unsaved inputs.
+Refresh keeps authored inputs and rechecks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
+Use Reset to replace unsaved input with initial values from the new source.
 
 ## Read the figures
 
@@ -82,7 +85,7 @@ a proposal. This phase is not a logical local-Z correction.
 
 Native save keeps the complete source cfg, coordinate and duration axes, and
 float64 `sums` with shape `(Nc,Nd,3,3)`.
-Class axes are terminal F1, terminal F2.
+Class axes are terminal Qubit1, terminal Qubit2.
 Every class axis is ordered g, e, other.
 Rounds accumulate during acquisition without normalization.
 File size does not grow with repetitions or rounds.
@@ -91,17 +94,19 @@ A point with counts from at least one completed round can enter the fit if it ha
 Fits require all requested shots at every point of a duration trace.
 Always check the execution status before accepting partial results.
 
-Load leaves the current Form unchanged. Analysis uses the saved cfg and counts.
-Old raw-IQ files without `sums` are rejected; there is no format fallback.
+Load leaves the current Form unchanged. Analysis uses the saved cfg (schema 5.0) and counts.
+Native Load rejects older results whose axis names do not match this layout. Keep the original file and use the matching older version to read it.
+If the result layout matches but the cfg major does not, Load retains Result and metadata without cfg. Fitting requires cfg.
 
 ## Review and apply phase proposals
 
-FIT proposes only F2's ordinary charge pulse and its independent coupler slot.
-The writeback targets remain `<coupler>.pulses.cz_f2` and
-`<coupler>.module.cz_f2`.
-F2.phase becomes saved F1.phase plus the fitted relative phase.
-F2 frequency, signed gain, waveform and timing stay as measured.
-F1 stays the phase reference. Missing cfg or an unresolved phase gives no proposal.
+FIT proposes only Qubit2's ordinary charge pulse and its independent coupler slot.
+The targets are `<coupler>.pulses.cz_qubit2` and `<coupler>.module.cz_qubit2`.
+The original Run or Load capture supplies the coupler, even if you change aliases afterward.
+Writeback fails without that capture.
+Qubit2.phase becomes saved Qubit1.phase plus the fitted relative phase.
+Qubit2 frequency, signed gain, waveform and timing stay as measured.
+Qubit1 stays the phase reference. Missing cfg or an unresolved phase gives no proposal.
 Inspect the captured destination and waveform before Apply.
 The pulse and slot rows apply independently; review partial selections.
 Only an applied proposal becomes calibration for later Forms.
@@ -109,7 +114,7 @@ Only an applied proposal becomes calibration for later Forms.
 ## Select shots with mux herald
 
 Choose `reset/mux_herald` in Reset. Use the same mux readout as the terminal
-readout. Set `keep: {'0': g, '1': g}` if F1 and F2 occupy positions 0 and 1.
+readout. Set `keep: {'0': g, '1': g}` if Qubit1 and Qubit2 occupy positions 0 and 1.
 Use their original tone positions from the full readout, not their ADC numbers.
 
 Probabilities are conditional on passing herald. Divide each terminal class
@@ -146,7 +151,7 @@ Jeffreys-smoothed variance so observations at zero or one retain finite weight.
 
 ## Calibration order and field units
 
-Calibrate each role's Xπ slot with amplitude and length Rabi before using it.
+Calibrate each qubit's Xπ slot with amplitude and length Rabi before using it.
 Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
 Use conditional spectroscopy to choose the charge-line frequency.
 The operator must confirm the common duration range in us before Run.

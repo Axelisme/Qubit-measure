@@ -10,19 +10,19 @@ from zcu_tools.program.v2 import Pulse
 from zcu_tools.program.v2.modules import MuxReadout
 
 from .._cz_phase import CZPhasePair
-from .._drive import DualLineCfg
+from .._drive import QubitDriveCfg
 from .._rb_scheduling import validate_x_pulses
-from .._readout import JointRoles
-from .._sums import validate_classifiers
+from .._readout import POINT_ALIAS_DESCRIPTION
+from .._sums import validate_qubit_tones
 
 
 class RBInputs[ResetT](ConfigBase):
     """Shared RB inputs, parameterized by the experiment's accepted reset cfg.
 
-    roles maps Q0 to F1 and Q1 to F2 at their original full mux tone positions.
-    phase_pair is required, ordered and component-named. Delays are us, pulse
+    The tone indices map Q0 to Qubit1 and Q1 to Qubit2 in the full mux group.
+    phase_pair supplies the required logical Z angles in that order. Delays are us, pulse
     frequency MHz and phase degrees. No DC device is driven. reset=None emits
-    no reset. F1/F2 need circle classifiers with radius from GE Post before Run.
+    no reset. Qubit1/Qubit2 need circle classifiers with radius from GE Post before Run.
     depth counts random Cliffords, not primitive gates. seed gives integer
     random.Random identities shared across depths/arms/rounds. Both lists are
     deduplicated and sorted before use or saving. The 31-bit seed bound
@@ -36,43 +36,57 @@ class RBInputs[ResetT](ConfigBase):
             label="Reset", description="Optional reset at the start of every shot."
         ),
     ] = None
-    x90_f1: Annotated[
+    x90_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F1 Xπ/2",
-            description="Calibrated F1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit1 Xπ/2",
+            description="Calibrated Qubit1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
-    x90_f2: Annotated[
+    x90_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F2 Xπ/2",
-            description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit2 Xπ/2",
+            description="Calibrated Qubit2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
-    x180_f1: Annotated[
+    x180_qubit1: Annotated[
         Pulse.Cfg,
-        FieldMeta(label="F1 Xπ", description="Calibrated F1 X180 pulse."),
+        FieldMeta(label="Qubit1 Xπ", description="Calibrated Qubit1 X180 pulse."),
     ]
-    x180_f2: Annotated[
+    x180_qubit2: Annotated[
         Pulse.Cfg,
-        FieldMeta(label="F2 Xπ", description="Calibrated F2 X180 pulse."),
+        FieldMeta(label="Qubit2 Xπ", description="Calibrated Qubit2 X180 pulse."),
     ]
     drive: Annotated[
-        DualLineCfg,
+        QubitDriveCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="F1/F2 charge-line CZ pulses from the calibrated coupler slots.",
+            description="Qubit1/Qubit2 charge-line CZ pulses from the calibrated coupler slots.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full-group mux readout with calibrated frequencies, gains and timing.",
+            description="Full-group mux readout with calibrated frequencies, gains and timing. "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
-    roles: JointRoles
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based position in the full mux readout.",
+        ),
+    ]
     phase_pair: CZPhasePair
     depth: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
         default_factory=lambda: [0, 1, 2, 3], min_length=1
@@ -116,10 +130,11 @@ class RBInputs[ResetT](ConfigBase):
 
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:
-        """Reject mismatched roles, classifiers, pulse phases and generators."""
-        validate_classifiers(self.readout, self.roles)
-        self.phase_pair.validate_roles(self.roles)
+        """Reject invalid tone indices, classifiers, pulse phases and generators."""
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
         validate_x_pulses(
-            (self.x90_f1, self.x90_f2), (self.x180_f1, self.x180_f2), self.drive
+            (self.x90_qubit1, self.x90_qubit2),
+            (self.x180_qubit1, self.x180_qubit2),
+            self.drive,
         )
         return self

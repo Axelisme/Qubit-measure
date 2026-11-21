@@ -16,8 +16,9 @@ def startup(ctx: StartupContext) -> None:
     Use its project roots, not the shell cwd. A new entry gets the adjacent
     entry-template.yaml components in global documents, then an initial point with those
     components and persisted aliases. Existing FTF/initial is opened unchanged.
-    The template binds f1=Q1, f2=Q2, coupler=coupler and mux=MG12 for FTF
-    forms. Existing entries keep their aliases; add missing roles in Aliases.
+    The template binds qubit1=Q1, qubit2=Q2, coupler=coupler and mux=MG12
+    for two-qubit forms. Existing entries keep their aliases; update the point's
+    Aliases if the current bindings are missing.
     The template seeds MG12 mux gen1 and ADCs [1, 2] in resonator order.
     No SoC or device commands run, and no close callback is registered.
 

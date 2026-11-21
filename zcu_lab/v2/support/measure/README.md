@@ -114,30 +114,30 @@ Mux readout 初值與 `require_mux_qubits` 共用此查詢。缺 capture、alias
 此要求不改變下列可選 qubit 配對驗證的 bring-up 政策。
 
 `mux_bindings.validate_mux_bindings(parameters: DocumentSetCapture | None) -> None`
-集中 onetone、mux qubit 與 FTF two-qubit Forms 共用的跨 component 驗證。
+集中 onetone 與 mux qubit Forms 的跨 component 驗證。
 它只讀借用的固定 capture，不刷新來源、不讀 live 檔案或裝置，也不 materialize library assets。
 有 qubits 時，它驗證完整有序清單的 component 存在、kind 與逐項 qubit.resonator 對應。
-錯誤保留欄位、原始 index 及實際值。`require_mux_group` 與 `validate_mux_bindings` 經 `DocumentSetCapture.component()` 完整投影指定 group，執行 MuxGroup 的名稱、等長與重複 qubit 檢查。FTF `captured_roles` 也用這個投影讀 group。Kind 與 resonator 關係讀取只要求對應 leaf，不預驗其他元件。
+錯誤保留欄位、原始 index 及實際值。`require_mux_group` 與 `validate_mux_bindings` 經 `DocumentSetCapture.component()` 完整投影指定 group，執行 MuxGroup 的名稱、等長與重複 qubit 檢查。Kind 與 resonator 關係讀取只要求對應 leaf，不預驗其他元件。
 
 None、未綁 mux、不存在或非 MuxGroup 的 target、沒有 qubits 都不增加 bring-up 門檻。
-其他 alias 錯誤與來源故障照常傳遞。FTF caller 自行要求 group、qubits 及 F1/F2；
-新 mux qubit caller 自行要求完整 tone 數對齊與 active drive。共用函式不選 tone、不猜角色、不寫回。
+其他 alias 錯誤與來源故障照常傳遞。Mux qubit caller 自行要求完整 tone 數對齊與 active drive。
+共用函式不選 tone、不猜角色、不寫回。Two-qubit 的 [`captured_qubits`](../../two_qubit/_measure.py) 呼叫 `require_mux_qubits` 驗證完整有序綁定，再定位兩個 alias 並核對已綁 readout 的類別與 tone 數。不限制 qubit 的物理子種類或 coupler 的種類。
 
 在 concrete `form.py` 使用下列 import，並在自己的 `make_form(ctx)` 建立 Form 前呼叫。
-`TwoQubitCfg` 是該 caller 的既有 core cfg；範例省略 caller 自己的角色要求與 tree 內容。
+`MuxCfg` 是該 caller 的既有 core cfg；範例省略 caller 自己的綁定要求與 tree 內容。
 
 ```python
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.mux_bindings import validate_mux_bindings
 
-from .core import TwoQubitCfg
+from .core import MuxCfg
 
 
-def make_form(ctx: FormContext) -> Form[TwoQubitCfg]:
+def make_form(ctx: FormContext) -> Form[MuxCfg]:
     validate_mux_bindings(ctx.parameters)
-    # Enforce this caller's required group, qubits and F1/F2 here.
-    return Form(TwoQubitCfg, tree={})
+    # Enforce this caller's required bindings here.
+    return Form(MuxCfg, tree={})
 ```
 
 ## Flux form defaults
