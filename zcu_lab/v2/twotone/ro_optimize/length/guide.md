@@ -20,7 +20,7 @@ Use **Defaults** after changing the qubit or resonator source to recapture these
 
 ## Read the figures and choose a setting
 
-Both plots show g/e IQ separation SNR versus ADC window (µs). Live counts scored settings. Analyze retains measured points, overlays the selection SNR when it differs and marks the selected window. No pointwise shot SEM is shown: the score is a ratio of several estimated IQ moments, and the saved result contains only the score.
+Both plots show g/e IQ separation SNR versus ADC window (µs). Live counts scored settings. Analyze retains measured points, overlays the selection SNR when it differs and marks the selected window. The score is a ratio of estimated IQ moments, not a shot mean. The plot shows neither shot SEM nor another pointwise score uncertainty. Re-run nearby windows if small score differences would change the choice.
 
 **Smooth method** selects wavelet denoising or Gaussian smoothing. **Smooth strength** scales the wavelet threshold or sets the Gaussian width in sample steps, respectively. Analyze marks the maximum of the resulting selection data, not a fit or a sub-step estimate. The selection uses zero for any missing SNR before smoothing, so do not adopt a candidate from an incomplete sweep without checking the measured points.
 

@@ -55,7 +55,7 @@ Live and Analyze share the same three panels:
 - **Estimated QND** shows the model's QND estimate, without clipping to 0–1. Use it to check the trade-off at the selected frequency.
 - The diagnostics compare **correlation growth M** and **first-pair |ρ|**. Compare them to see whether correlation growth reduces the score.
 
-The bars on score and QND are model error scales, not shot SEM. The axes include the displayed bars. The live heading counts settings with completed data and shows the minimum shots per acquired setting. Analyze labels the selected frequency; the summary reports the source run's Reps × Rounds when its cfg is available.
+The bars on score and QND are approximate error scales conditional on the model, not shot SEM. Overlapping bars do not determine whether settings tie; the ranking uses only the scores. The axes include the displayed bars. The live heading counts settings with completed data and shows the minimum shots per acquired setting. Analyze labels the selected frequency; the summary reports the source run's Reps × Rounds when its cfg is available.
 Stop keeps settings with a completed round. A stop before any completed round raises an error.
 
 Analysis has no options and can use saved sums without cfg or hardware.

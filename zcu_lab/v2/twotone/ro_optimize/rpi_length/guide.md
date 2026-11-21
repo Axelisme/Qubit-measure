@@ -53,7 +53,7 @@ Both Analyze figures use **ADC window (µs)** on the x axis.
 - **Alternating contrast:** the top panel keeps the valid live score points. The red dashed line and heading identify the best window in µs and its score. The lower panel marks each rejected window at every applicable reason.
 - **Correlation diagnostics:** effective retention Qeff includes π errors. The other panels show amplitude-to-noise ratio q, alternating amplitude in a.u.² and one-quadrature noise variance in a.u.². The red dashed line shows the selected window. Look for consistent estimates across nearby settings before using it.
 
-Rejected settings appear only in the reasons panel. The score is a nonlinear estimate from correlated reads, not a shot mean. No panel shows a shot SEM. The Analyze summary includes the source run's Reps × Rounds if its cfg is available.
+Rejected settings appear only in the reasons panel. The score is a nonlinear estimate from correlated reads, not a shot mean. No panel shows shot SEM or another uncertainty bar for the score. Nearly tied settings may change order on a repeat. The Analyze summary includes the source run's Reps × Rounds if its cfg is available.
 
 The summary reports:
 
@@ -75,7 +75,7 @@ The score is the alternating-contrast score, 交替對比分數:
 
 `score = (T − 3.719 √V₀) / r₀`
 
-`T` is the alternating contrast of the fixed lags 1 to 15. `V₀` is its variance under a white-noise model. `r₀` is the same-read variance divided by 2.
+`T` is the alternating contrast of the fixed lags 1 to 15. `V₀` is the variance of `T` under the white-noise null. Its square root sets the gate penalty in the score, not an error bar on the measured score. `r₀` is the same-read variance divided by 2.
 The best window is the valid window with the largest score. The analysis applies one score and no second selection threshold. `Q_eff`, `a` and `σ²` only decide validity and serve as diagnostics. They do not enter the score.
 
 The score is a heuristic utility. It is not Fisher information, QND fidelity or MIST. In this guide MIST means leakage out of g and e only.
