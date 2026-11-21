@@ -9,8 +9,11 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
+    Analysis,
+    AnalyzeRequest,
 )
 from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.zigzag.core import ZigZagCfg, ZigZagExp, ZigZagResult
 
@@ -29,9 +32,21 @@ def _run(cfg: ZigZagCfg, *, context: RunContext) -> RunRecord[ZigZagCfg, ZigZagR
     return RunRecord(cfg=cfg, result=ZigZagExp().run(cfg, context=context))
 
 
+def _analyze(req: AnalyzeRequest[ZigZagRunResult, None], *, plots: Plots) -> None:
+    """Redraw the selected source without analysis options or writeback."""
+    ZigZagExp().analyze(req.run_result, req.analyze_params, plots=plots)
+
+
+def _summary_lines(source: ZigZagRunResult) -> tuple[str, ...]:
+    """Show the recorded acquisition settings only when the source has a cfg."""
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=ZigZagExp.AXES_SPEC,
     make_form=_ZigZag_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

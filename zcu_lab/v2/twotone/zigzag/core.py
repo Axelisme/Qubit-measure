@@ -16,12 +16,14 @@ from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
+    RunRecord,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
     LoadValue,
@@ -247,3 +249,39 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
             signals=split_sums(signals_buffer.array)[1],
             iq_moments=signals_buffer.array,
         )
+
+    def analyze(
+        self, source: RunRecord[ZigZagCfg, ZigZagResult], options: None, *, plots: Plots
+    ) -> None:
+        """Redraw the source trace against gate repetition count without a fit.
+
+        Pass None for options. The measurement figure shows projected mean IQ
+        and, when retained moments are available, shot SEM along the same axis.
+        Missing points stay missing. A source without cfg omits the pulse label.
+        """
+        # 1. Project the stored IQ and any retained shot moments on the Live axis.
+        del options
+        result = source.result
+        i, q = _direction(result.signals)
+        projected = result.signals.real * i + result.signals.imag * q
+        title = "ZigZag"
+        if source.cfg is not None:
+            gate = "X90 pairs" if source.cfg.repeat_on == "X90_pulse" else "X180"
+            title = f"{title} · {gate}"
+        if result.iq_moments is None:
+            sem = np.full(projected.shape, np.nan)
+        else:
+            counts, _ = split_sums(result.iq_moments)
+            retained = np.nanmax(counts, initial=0)
+            title = f"{title} · {retained:.0f} retained shots/point"
+            sem = iq_shot_sem(result.iq_moments, direction=(i, q))
+
+        # 2. Redraw the terminal view without presenting it or estimating a calibration.
+        _, ax = plots.subplots(num="measurement")
+        ax.set(
+            title=title,
+            xlabel="Gate repetitions (count)",
+            ylabel="IQ projection (a.u.)",
+        )
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        live_errorbar(ax).set(result.times.astype(np.float64), projected, sem)

@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Zig-zag: applies an X90 pulse, then repeats the chosen pulse 0..n_times times before readout, amplifying small pulse-amplitude errors into a growing zig-zag of the signal versus repetition count. Runs on real hardware. Run after amplitude Rabi has calibrated the pi and pi/2 pulses.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-22
 
 ## Parameter sources
 
@@ -16,7 +16,7 @@ Readout uses the qubit.module.readout slot captured at Open/Defaults, or a reado
 
 ## Typical writeback
 
-Review the measured trace manually; calibration stays unchanged. Preparation coherence, contrast, and drive history can also change the trace; compare controls before changing gate calibration.
+Decide from the trace whether to adjust the pulse. Analyze does not fit the trace, estimate a correction, or propose a writeback. Preparation coherence, contrast, and drive history can also change the trace; compare controls before changing gate calibration.
 
 ## Recommended
 
@@ -24,4 +24,8 @@ Repeat on X180_pulse to check the pi pulse; repeat on X90_pulse (applied in pair
 
 ## Reading the plots
 
-The live x axis is repetition count: one count adds one X180 or a pair of X90 pulses, as stated in the title. The y axis is mean IQ projected along the trace's principal axis (a.u.), not a population. Each bar shows one shot SEM along the same axis, using the sample standard deviation divided by the square root of the retained shot count. The title reports retained shots per point. Legacy mean-only files still load. Plain ZigZag has no separate Analyze fit: use the live trace to check for count-dependent contrast, then choose the gain or frequency sweep to locate a tuning minimum.
+After Run or a successful Load, click **Analyze** to redraw that trace. Load alone does not open the plot. The summary lists the source run's Reps × Rounds when its settings are available.
+
+The x axis is repetition count: one count adds one X180 or a pair of X90 pulses. The title names the pulse when the source settings are available. The y axis is mean IQ projected along the trace's principal axis (a.u.), not a population. Each bar shows one shot SEM along the same axis: the sample standard deviation divided by the square root of that point's retained shot count. When shot statistics are available, the title reports the largest retained shot count across all points. Mean-only files show the trace without bars. Unmeasured counts appear as gaps.
+
+Look for alternating contrast that grows with repetition count. If you need to locate a tuning minimum, use the zig-zag gain or frequency scan.
