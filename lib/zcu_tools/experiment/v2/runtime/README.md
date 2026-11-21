@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-11-20，預設取數 slot 使用整數索引
+**Last updated:** 2026-11-22，取數與 GUI 的停止來源
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -158,6 +158,8 @@ Data stop 是正常完成，不設 scope event，也不標記 partial。
 
 ## Stop 與 Retry
 
+停止訊號、取數重試與前端完成狀態的責任邊界見 [ADR-0069〈核心與前端〉](../../../../../docs/adr/0069-experiment-core-and-frontends.md#核心與前端)。
+
 - `Scope` 擁有具名父子鏈與選擇器，`StopSignal` 只擁有向下停止請求與不解析的 reason。Caller 每次 run 建立根 Scope，
   透過 `Schedule(..., scope=context.scope)` 傳入。Schedule 在進入 context 時建立 schedule child，退出時 release。每次 acquire attempt 建立 acquire child，結束時 release。取消 child 不停止父 scope，後續 acquire 或 operation 可繼續。
 - Child release 只解除父子關係，不上交停止、資料完整度或錯誤。已完成 child 從 active tree 移除，不隨 run 長度累積。
@@ -176,6 +178,8 @@ Data stop 是正常完成，不設 scope event，也不標記 partial。
 - Data condition 讓 acquire 在設定 rounds 前正常結束時，Runner 寫一行 info，包含 stop value 與 completed rounds。
   條件可回 bool 或 `experiment.acquisition_facts.StopDecision`。有限 scalar 才記入日誌，未提供或非有限時記 None。
   External stop、failure 與最後一輪才命中都不記 early-stop info。
+  `stop_condition` 的判斷只屬於本次 acquire。[GUI 的 `completion`](../../../gui/app/measure/README.md#owners) 為 `stopped` 時記的是前端停止請求，不是這裡的取數診斷。
+  [Workflow operation wire](../../../gui/app/measure/remote/README.md#workflow-operation-facts) 也不投影這些診斷。
 - `Schedule.outcome` 記錄作者工具的 run 結果（資料保留不等於 operation 成功）：`completed`、`stopped` 或
   `failed`。Stop 或 acquire 失敗會設定 `StopSignal`，KeyboardInterrupt 只向外傳播。
   Program build、raw conversion 與 update callback 的一般例外直接向 caller 傳播，不標記為 acquire 失敗。

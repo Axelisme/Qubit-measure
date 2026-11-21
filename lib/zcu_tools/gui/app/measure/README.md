@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-22，Analyze 結果來源與摘要
+**Last updated:** 2026-11-22，Analyze 摘要通道與 Run 停止來源
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -134,8 +134,10 @@ rejects Done without closing input.
 - [`services/`](services/app_services.py)：app service layer。Run、Analyze、PostAnalyze、Load 與 Tab 將 pane 提交及退役資源清理交給 `pane_commit`。
   GuardService 統一 domain admission，啟動時的 hardware exclusion 由 gate 裁決。
   各 operation 決定終局與觸發清理的時機。Run 與 Load 不依賴 WritebackService 來清理 draft。
+  Run metadata 的 `completion` 為 `stopped`，只表示前端在 core 返回前發出 Stop 或接受 scope cancel 請求。
+  這個欄位不說明結果是否完整，也不記錄 [runtime 的 `stop_condition`](../../../experiment/v2/runtime/README.md#stop-與-retry) 是否命中。
   Primary Analyze 提交時從來源 RunRecord 擷取 adapter 摘要行。GUI Analysis 與 MCP 共用
-  [AnalysisPresentation](remote/README.md#analysis-presentation)，不將文字寫入原生分析結果。
+  [AnalysisPresentation](remote/README.md#analysis-presentation)。這些行依 [R10](../../../../../zcu_lab/v2/figure-style.md#r10圖放理論重點採集設定放摘要) 呈現，不寫入原生分析結果或 [workflow operation wire](remote/README.md#workflow-operation-facts)。
   Analyze 回傳並完成發布準備才提交；拋錯就 failed 並顯示原始訊息，不辨識例外型別。
   Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
   結果瀏覽器與 RPC 共用 `services.results_index.scan_results(project_root)`。瀏覽器透過 `Controller.watch_results_index` 訂閱 app 擁有的背景索引，按 entry 收到已交付成果的唯讀快照。RPC 透過 `Controller.query_results` 每次做完整新掃描，不取瀏覽器快照。
