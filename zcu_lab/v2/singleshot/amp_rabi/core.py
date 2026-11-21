@@ -300,7 +300,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         viewer = None
         if classifier is not None:
             figure, ax = context.plots.subplots(num="measurement")
-            ax.set(xlabel="Pulse gain (a.u.)", ylabel="State probability")
+            ax.set(xlabel="Pulse gain (a.u.)", ylabel="P(g), P(e), P(other)")
             viewer = live_line(ax, num_lines=3)
             ax.set_ylim(-0.02, 1.02)
             for line, kwargs in zip(
@@ -308,9 +308,9 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 [
                     {"label": label, "color": color}
                     for label, color in (
-                        ("Ground", "blue"),
-                        ("Excited", "red"),
-                        ("Other", "green"),
+                        ("P(g)", "blue"),
+                        ("P(e)", "red"),
+                        ("P(other)", "green"),
                     )
                 ],
                 strict=True,
@@ -452,7 +452,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         else:
             ax.set_title("Rabi joint fit invalid")
         ax.set_xlabel("Pulse gain (a.u.)")
-        ax.set_ylabel("State probability")
+        ax.set_ylabel("P(0), P(1), P(L)")
         ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)

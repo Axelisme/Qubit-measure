@@ -103,7 +103,7 @@ class StirapDelayCfg(ConfigBase):
     ]
     readout: PulseReadout.Cfg
     stokes_lead: Annotated[SweepCfg, FieldMeta(label="Stokes lead", unit="µs")]
-    shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
+    shots: Annotated[int, FieldMeta(label="Shots per point", unit="count")] = Field(
         default=4096, ge=1
     )
     relax_delay: Annotated[float, FieldMeta(unit="µs")] = Field(ge=0)

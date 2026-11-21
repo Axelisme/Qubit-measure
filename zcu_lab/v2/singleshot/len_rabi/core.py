@@ -257,12 +257,10 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         viewer = None
         if classifier is not None:
             figure, ax = context.plots.subplots(num="measurement")
-            ax.set(xlabel="Length (µs)", ylabel="State probability")
+            ax.set(xlabel="Length (µs)", ylabel="P(g), P(e), P(other)")
             viewer = live_line(ax, num_lines=3)
             ax.set_ylim(0.0, 1.0)
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
+            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
             ax.legend()
             figure.show()
@@ -391,7 +389,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         else:
             ax.set_title("Rabi joint fit invalid")
         ax.set_xlabel("Pulse length (µs)")
-        ax.set_ylabel("State probability")
+        ax.set_ylabel("P(0), P(1), P(L)")
         ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)

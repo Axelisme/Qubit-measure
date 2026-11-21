@@ -128,7 +128,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Test tone gain (a.u.)", ylabel="Time (µs)")
-        line_ax.set(xlabel="Time (µs)", ylabel="Signal (a.u.)")
+        line_ax.set(xlabel="Time (µs)", ylabel="Rotated IQ real (a.u.)")
         formatter = ScalarFormatter(useMathText=True)
         formatter.set_powerlimits((-2, 2))
         heat_ax.xaxis.set_major_formatter(formatter)

@@ -48,7 +48,7 @@ class TimeRabiInputs(RecipeInputs):
     )
     max_length_us: float | None | Keep = Field(
         KEEP,
-        description="Pulse-length sweep stop in µs.",
+        description="Set Duration › Stop (µs), the pulse-length sweep endpoint.",
     )
     points: int | None | Keep = Field(
         KEEP,

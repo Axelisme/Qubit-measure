@@ -142,7 +142,7 @@ class StirapDetuningCfg(ConfigBase):
     ]
     pump_detuning: Annotated[SweepCfg, FieldMeta(label="Pump detuning", unit="MHz")]
     stokes_detuning: Annotated[SweepCfg, FieldMeta(label="Stokes detuning", unit="MHz")]
-    shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
+    shots: Annotated[int, FieldMeta(label="Shots per point", unit="count")] = Field(
         default=4096, ge=1
     )
     relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="µs")] = Field(
@@ -352,7 +352,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                         values[..., label],
                         shading="nearest",
                     )
-                    figure.colorbar(image, ax=ax)
+                    figure.colorbar(image, ax=ax, label=f"P({state})")
                     ax.set(
                         xlabel="Pump detuning (MHz)",
                         ylabel="Stokes detuning (MHz)",

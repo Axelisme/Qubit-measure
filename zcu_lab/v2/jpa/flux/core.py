@@ -132,7 +132,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         jpa_fluxs = sweep2array(cfg.jpa_flux, allow_array=True)
 
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="JPA Flux value (a.u.)", ylabel="Signal Difference (a.u.)")
+        ax.set(xlabel="JPA Flux value (a.u.)", ylabel="g/e SNR (a.u.)")
         line = live_line(ax)
 
         @context.plots.on_plot_thread
@@ -223,7 +223,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
 
         # 2. Mark the selected bias on the smoothed SNR trace.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-        ax.plot(jpa_fluxs, snrs, label="signal difference")
+        ax.plot(jpa_fluxs, snrs, label="Smoothed g/e SNR")
         ax.axvline(
             best_jpa_flux,
             color="r",
@@ -231,7 +231,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
             label=f"best JPA flux = {best_jpa_flux:#.3g} a.u.",
         )
         ax.set_xlabel("JPA Flux value (a.u.)")
-        ax.set_ylabel("Signal Difference (a.u.)")
+        ax.set_ylabel("g/e SNR (a.u.)")
         ax.legend()
         ax.grid(True)
         fig.tight_layout()

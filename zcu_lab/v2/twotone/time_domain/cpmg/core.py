@@ -104,13 +104,7 @@ class CPMG_Cfg(ConfigBase):
     ]
     delay: SweepCfg | list[SweepCfg]  # Each pulse count can use its own delay sweep.
     detune_ratio: Annotated[
-        float,
-        FieldMeta(
-            label="Detune ratio",
-            unit="a.u.",
-            description="Fringes per step.",
-            decimals=3,
-        ),
+        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
     ] = 0.0
     reps: Annotated[
         int,

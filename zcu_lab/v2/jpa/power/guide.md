@@ -1,6 +1,6 @@
 ## Behavior
 
-**Readers:** operator, agent. Calibrate the JPA pump power from the GUI or MCP using g/e readout contrast. A pi pulse switches the qubit preparation between g and e. The run sweeps pump power in dBm and measures the g/e signal difference to find the power that maximizes readout contrast. WARNING: this run commands the selected JPA RF device on real hardware. Review that device and the power sweep before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
+**Readers:** operator, agent. Calibrate the JPA pump power from the GUI or MCP using g/e readout SNR. A pi pulse switches the qubit preparation between g and e. The run sweeps pump power in dBm and measures the g/e SNR (a.u.) to find the power with the highest SNR. WARNING: this run commands the selected JPA RF device on real hardware. Review that device and the power sweep before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
 
 ## Parameter sources
 
@@ -14,10 +14,10 @@ Module slots use `$qubit.module.x180`, `$resonator.module.readout` and optional 
 
 ## Typical writeback
 
-Analysis proposes the signal-maximizing JPA pump power as a draft for `$jpa.pump_power` in dBm. Accept the draft to update the stored parameter. Writeback changes stored calibration only; device settings and the current-source value stay unchanged.
+Analysis proposes the SNR-maximizing JPA pump power as a draft for `$jpa.pump_power` in dBm. Accept the draft to update the stored parameter. Writeback changes stored calibration only; device settings and the current-source value stay unchanged.
 
 ## Recommended
 
-Review the selected RF device and power sweep bounds before every run. The seeded range is a conservative low-power survey and only a starting point. Analysis picks the peak of the absolute signal difference.
+Review the selected RF device and power sweep bounds before every run. The seeded range is a conservative low-power survey and only a starting point. Analyze selects the sampled setting with the highest g/e SNR.
 
 **Last updated:** 2026-10-21

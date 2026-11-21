@@ -6,6 +6,8 @@
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
+The live trace and Analyze fit plot the real component of rotated mean IQ (a.u.), not a classified state probability.
+
 ## Parameter sources
 
 Delay runs 0 to 5 * qubit.t1 µs over 101 points. Relax delay is 5 * qubit.t1 µs. Other missing required calibration leaves the affected fields empty and Invalid.
@@ -16,7 +18,7 @@ Open and Reset capture the T1 used for starting values. A missing or null T1, or
 
 ## Tone-driven T1 gain scan
 
-The Python experiment `ScanT1WithToneExp` scans test-tone gain on the host and tone duration on the board. Its `gain` accepts one `SweepCfg` in normalized gain units, not an explicit list. `length` supplies the duration `SweepCfg` in µs. The result keeps gain × duration complex IQ.
+The Python experiment `ScanT1WithToneExp` scans test-tone gain on the host and tone duration on the board. Its `gain` accepts one `SweepCfg` in normalized gain units, not an explicit list. `length` supplies the duration `SweepCfg` in µs. The result keeps gain × duration complex IQ. The live history traces show its rotated real component (a.u.), not a classified state probability.
 
 The gain-only sweep schema is 4.0. Loading a schema 3.0 file leaves cfg unavailable and reports `cfg_issue`; its data arrays remain available for plotting and analysis. No cfg conversion is performed.
 

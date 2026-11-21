@@ -64,7 +64,7 @@ class T1Analysis:
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
+    """Rotate mean complex IQ and return its real component for the plot."""
     return rotate2real(signals).real  # (times, signals)
 
 
@@ -146,7 +146,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         # 2. Monitor relaxation contrast during uniform-delay averaging.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (µs)", ylabel="Amplitude (a.u.)")
+        ax.set(xlabel="Time (µs)", ylabel="Rotated IQ real (a.u.)")
         ax.set_title("T1 relaxation")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
@@ -198,7 +198,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lengths = table.times_us
         # 2. Monitor relaxation contrast at the nonuniform sampled delays.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (µs)", ylabel="Amplitude (a.u.)")
+        ax.set(xlabel="Time (µs)", ylabel="Rotated IQ real (a.u.)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
@@ -291,7 +291,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             title = f"$T_1$ = {t1_str}"
         ax.set_title(title, fontsize=14)
         ax.set_xlabel("Delay Time (µs)", fontsize=14)
-        ax.set_ylabel("Signal (a.u.)", fontsize=14)
+        ax.set_ylabel("Rotated IQ real (a.u.)", fontsize=14)
         ax.legend(loc="upper right")
         ax.grid(True)
 

@@ -122,10 +122,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         axes = figure.axes
         lines = [live_line(ax, num_lines=POPULATION_COUNT) for ax in axes]
         for ax in axes:
-            ax.set(xlabel="Time (µs)", ylabel="State probability", ylim=(0.0, 1.0))
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
+            ax.set(xlabel="Time (µs)", ylabel="P(g), P(e), P(other)", ylim=(0.0, 1.0))
+            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
             ax.legend()
 
@@ -353,7 +351,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             markersize=3,
         )
         ax2.set_xlabel("Time (µs)")
-        ax2.set_ylabel("State probability")
+        ax2.set_ylabel("P(g), P(e), P(other)")
         ax2.legend(loc=4)
         ax2.grid(True)
 

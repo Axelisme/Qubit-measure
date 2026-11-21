@@ -1,6 +1,6 @@
 ## Behavior
 
-**Readers:** operator, agent. Calibrate the JPA flux device value from the GUI or MCP using g/e readout contrast. A pi pulse switches the qubit preparation between g and e. The run sweeps the JPA flux device value and measures the g/e signal difference to find the value that maximizes readout contrast. WARNING: this run commands the selected flux device on real hardware. Review that device and the sweep before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
+**Readers:** operator, agent. Calibrate the JPA flux device value from the GUI or MCP using g/e readout SNR. A pi pulse switches the qubit preparation between g and e. The run sweeps the JPA flux device value and measures the g/e SNR (a.u.) to find the value with the highest SNR. WARNING: this run commands the selected flux device on real hardware. Review that device and the sweep before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
 
 ## Parameter sources
 
@@ -16,10 +16,10 @@ Module slots use `$qubit.module.x180`, `$resonator.module.readout` and optional 
 
 ## Typical writeback
 
-Analysis proposes the signal-maximizing JPA flux device value as a draft for `$jpa.flux`, in `$jpa.flux_unit` coordinates. Accept the draft to update the stored parameter. Writeback changes stored calibration only; device settings and the current-source value stay unchanged.
+Analysis proposes the SNR-maximizing JPA flux device value as a draft for `$jpa.flux`, in `$jpa.flux_unit` coordinates. Accept the draft to update the stored parameter. Writeback changes stored calibration only; device settings and the current-source value stay unchanged.
 
 ## Recommended
 
-Review the selected flux device and sweep bounds before every run. The seeded range around the current centre is only a starting point. Analysis picks the peak of the absolute signal difference.
+Review the selected flux device and sweep bounds before every run. The seeded range around the current centre is only a starting point. Analyze smooths the g/e SNR with a Gaussian of one-sample standard deviation and selects the sampled bias at its peak.
 
 **Last updated:** 2026-11-01

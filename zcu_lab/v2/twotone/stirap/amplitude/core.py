@@ -121,7 +121,7 @@ class StirapAmplitudeCfg(ConfigBase):
             description="Fill the inner signed Stokes gain range in a.u. and point count from the intended drive settings.",
         ),
     ]
-    shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
+    shots: Annotated[int, FieldMeta(label="Shots per point", unit="count")] = Field(
         default=4096, ge=1
     )
     relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="µs")] = Field(

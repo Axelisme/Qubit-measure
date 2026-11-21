@@ -277,13 +277,11 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         for column, ax in enumerate(cells[6:]):
             ax.set(
                 xlabel="Time (µs)",
-                ylabel="State probability" if column == 0 else "",
+                ylabel="P(g), P(e), P(other)" if column == 0 else "",
                 ylim=(0.0, 1.0),
             )
             lines.append(live_line(ax, num_lines=3))
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
+            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
             ax.legend()
         figure.show()

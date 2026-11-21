@@ -95,7 +95,7 @@ class RamanGFCfg(ConfigBase):
     ] = "frequency_gain"
     detuning: Annotated[SweepCfg, FieldMeta(label="Two-photon detuning", unit="MHz")]
     gain: Annotated[SweepCfg, FieldMeta(label="Drive gain", unit="a.u.")]
-    shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
+    shots: Annotated[int, FieldMeta(label="Shots per point", unit="count")] = Field(
         default=1024, ge=6
     )
     relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="µs")] = Field(

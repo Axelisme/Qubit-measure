@@ -23,9 +23,8 @@ class T2RamseyInput(ConfigBase):
     detune_ratio: Annotated[
         float,
         FieldMeta(
-            label="Detune ratio",
-            unit="a.u.",
-            description="Fringes per step.",
+            label="Detune ratio (fringes/step)",
+            description="Enter the number of fringes per delay step for the final-pulse phase ramp.",
             decimals=3,
         ),
     ] = 0.05

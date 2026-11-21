@@ -139,10 +139,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # 3. Show the measured G/E/Other fractions in classifier order.
 
         figure, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse gain (a.u.)", ylabel="State probability")
+        ax.set(xlabel="Pulse gain (a.u.)", ylabel="P(g), P(e), P(other)")
         viewer = live_line(ax, num_lines=POPULATION_COUNT)
         ax.set_ylim(0.0, 1.0)
-        for line, label in zip(ax.lines, ("Ground", "Excited", "Other"), strict=True):
+        for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
             line.set_label(label)
         ax.legend()
 
@@ -228,7 +228,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             xs,
             populations[:, 0],
             color="blue",
-            label="Ground",
+            label="P(g)",
             ls="-",
             marker="o",
             markersize=1,
@@ -237,7 +237,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             xs,
             populations[:, 1],
             color="red",
-            label="Excited",
+            label="P(e)",
             ls="-",
             marker="o",
             markersize=1,
@@ -246,13 +246,14 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             xs,
             populations[:, 2],
             color="green",
-            label="Other",
+            label="P(other)",
             ls="-",
             marker="o",
             markersize=1,
         )
         ax.set_xlabel(xlabel, fontsize=14)
-        ax.set_ylabel("State probability", fontsize=14)
+        ax.set_ylabel("P(g), P(e), P(other)", fontsize=14)
+        ax.legend()
         ax.grid(True)
         ax.tick_params(axis="both", which="major", labelsize=12)
         ax.set_ylim(0, 1)

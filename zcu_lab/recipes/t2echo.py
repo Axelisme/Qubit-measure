@@ -50,7 +50,7 @@ class T2EchoInputs(RecipeInputs):
     )
     detune_ratio: float | None | Keep = Field(
         KEEP,
-        description="Final-pulse phase-ramp ratio (a.u.).",
+        description="Set Detune ratio (fringes/step) for the final-pulse phase ramp.",
     )
     points: int | None | Keep = Field(
         KEEP,

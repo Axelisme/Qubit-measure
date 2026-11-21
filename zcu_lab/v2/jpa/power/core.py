@@ -129,7 +129,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         # Show independent points rather than connecting randomized settings.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Power (dBm)", ylabel="Signal Difference (a.u.)")
+        ax.set(xlabel="Power (dBm)", ylabel="g/e SNR (a.u.)")
         line = live_line(ax)
         ax.lines[0].set_linestyle("None")
         ax.lines[0].set_marker("o")
@@ -213,7 +213,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         # 2. Mark the best power without connecting randomized pump settings.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-        ax.scatter(jpa_powers, snrs, label="signal difference", s=1)
+        ax.scatter(jpa_powers, snrs, label="Measured g/e SNR", s=1)
         ax.axvline(
             best_jpa_power,
             color="r",
@@ -221,7 +221,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             label=f"best JPA power = {best_jpa_power:.1f} dBm",
         )
         ax.set_xlabel("Power (dBm)")
-        ax.set_ylabel("Signal Difference (a.u.)")
+        ax.set_ylabel("g/e SNR (a.u.)")
         ax.legend()
         ax.grid(True)
         fig.tight_layout()

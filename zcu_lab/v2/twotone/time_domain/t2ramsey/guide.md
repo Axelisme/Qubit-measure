@@ -32,7 +32,7 @@ Historical Run/Load sources keep their original pulses.
 
 ## Recommended
 
-Fit phase offset is enabled by default to fit a free fringe phase. Disable it to fix the phase at 0/180 degrees using the near-zero-delay signal. This option applies to fringe fits only. Set the 'Detune ratio (a.u.)' input to a small deliberate offset (default 0.05). This is the number of fringe periods per delay-sweep step; the absolute detune (MHz) applied to the second pi/2 pulse phase is detune_ratio / sweep step, so the Ramsey signal oscillates at that detuning. The analysis 'Fit fringe' option (on by default, matching the nonzero default ratio) fits the fringe frequency to read back the true qubit-frequency offset and write qubit.freq. Set the ratio to 0 and turn 'Fit fringe' off for a pure decay fit when driving on resonance. A delay sweep reaching a few T2* captures enough fringe periods and decay.
+Fit phase offset is enabled by default to fit a free fringe phase. Disable it to fix the phase at 0/180 degrees using the near-zero-delay signal. This option applies to fringe fits only. Set the 'Detune ratio (fringes/step)' input to a small deliberate offset (default 0.05). This is the number of fringe periods per delay-sweep step; the absolute detune (MHz) applied to the second pi/2 pulse phase is detune_ratio / sweep step, so the Ramsey signal oscillates at that detuning. The analysis 'Fit fringe' option (on by default, matching the nonzero default ratio) fits the fringe frequency to read back the true qubit-frequency offset and write qubit.freq. Set the ratio to 0 and turn 'Fit fringe' off for a pure decay fit when driving on resonance. A delay sweep reaching a few T2* captures enough fringe periods and decay.
 
 ## Four starting situations
 

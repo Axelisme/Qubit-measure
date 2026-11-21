@@ -33,11 +33,11 @@ class LookbackInputs(RecipeInputs):
     )
     readout_length_us: float | None | Keep = Field(
         KEEP,
-        description="ADC acquisition window in µs.",
+        description="Set Readout › RO length (µs), the ADC acquisition window.",
     )
     trigger_offset_us: float | None | Keep = Field(
         KEEP,
-        description="ADC trigger offset in µs.",
+        description="Set Readout › Trig offset (µs), the ADC trigger offset.",
     )
     rounds: int | None | Keep = Field(
         KEEP,

@@ -1,6 +1,6 @@
 ## Behavior
 
-**Readers:** operator, agent. Calibrate the JPA pump frequency from the GUI or MCP using g/e readout contrast. A pi pulse switches the qubit preparation between g and e. The run sweeps pump frequency and measures the g/e signal difference to find the frequency that maximizes readout contrast. WARNING: this run commands the selected JPA RF device on real hardware. Review that device and the pump sweep before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
+**Readers:** operator, agent. Calibrate the JPA pump frequency from the GUI or MCP using g/e readout SNR. A pi pulse switches the qubit preparation between g and e. The run sweeps pump frequency and measures the g/e SNR (a.u.) to find the frequency with the highest SNR. WARNING: this run commands the selected JPA RF device on real hardware. Review that device and the pump sweep before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
 
 ## Parameter sources
 
@@ -14,10 +14,10 @@ Module slots use `$qubit.module.x180`, `$resonator.module.readout` and optional 
 
 ## Typical writeback
 
-Analysis proposes the signal-maximizing JPA pump frequency as a draft for `$jpa.pump_freq` in MHz. Accept the draft to update the stored parameter. Writeback changes stored calibration only; the current-source value stays unchanged.
+Analysis proposes the SNR-maximizing JPA pump frequency as a draft for `$jpa.pump_freq` in MHz. Accept the draft to update the stored parameter. Writeback changes stored calibration only; the current-source value stays unchanged.
 
 ## Recommended
 
-Review the selected RF device and sweep bounds before every run. The seeded range around `$jpa.pump_freq` is only a starting point. Analysis picks the peak of the absolute signal difference.
+Review the selected RF device and sweep bounds before every run. The seeded range around `$jpa.pump_freq` is only a starting point. Analyze selects the sampled setting with the highest g/e SNR.
 
 **Last updated:** 2026-10-21

@@ -144,10 +144,12 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         # 3. Show the measured G/E/Other fractions in classifier order.
 
         figure, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Preparation pulse frequency (MHz)", ylabel="State probability")
+        ax.set(
+            xlabel="Preparation pulse frequency (MHz)", ylabel="P(g), P(e), P(other)"
+        )
         viewer = live_line(ax, num_lines=POPULATION_COUNT)
         ax.set_ylim(0.0, 1.0)
-        for line, label in zip(ax.lines, ("Ground", "Excited", "Other"), strict=True):
+        for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
             line.set_label(label)
         ax.legend()
 
@@ -226,7 +228,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             freqs,
             populations[:, 0],
             color="blue",
-            label="Ground",
+            label="P(g)",
             ls="-",
             marker="o",
             markersize=1,
@@ -235,7 +237,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             freqs,
             populations[:, 1],
             color="red",
-            label="Excited",
+            label="P(e)",
             ls="-",
             marker="o",
             markersize=1,
@@ -244,13 +246,14 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             freqs,
             populations[:, 2],
             color="green",
-            label="Other",
+            label="P(other)",
             ls="-",
             marker="o",
             markersize=1,
         )
         ax.set_xlabel("Frequency (MHz)", fontsize=14)
-        ax.set_ylabel("State probability", fontsize=14)
+        ax.set_ylabel("P(g), P(e), P(other)", fontsize=14)
+        ax.legend()
         ax.grid(True)
         ax.tick_params(axis="both", which="major", labelsize=12)
         ax.set_ylim(0, 1)

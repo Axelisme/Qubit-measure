@@ -130,7 +130,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # Show independent points because neighboring samples need not be nearby.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="JPA Frequency (MHz)", ylabel="Signal Difference (a.u.)")
+        ax.set(xlabel="JPA Frequency (MHz)", ylabel="g/e SNR (a.u.)")
         line = live_line(ax)
         ax.lines[0].set_linestyle("None")
         ax.lines[0].set_marker("o")
@@ -216,7 +216,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # 2. Mark the best frequency without connecting randomized pump settings.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-        ax.scatter(jpa_freqs, real_signals, label="signal difference", s=2)
+        ax.scatter(jpa_freqs, real_signals, label="Measured g/e SNR", s=2)
         ax.axvline(
             best_jpa_freq,
             color="r",
@@ -225,7 +225,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
         ax.set_xlabel("JPA Frequency (MHz)")
         ax.ticklabel_format(axis="x", useOffset=False)
-        ax.set_ylabel("Signal Difference (a.u.)")
+        ax.set_ylabel("g/e SNR (a.u.)")
         ax.legend()
         ax.grid(True)
         fig.tight_layout()

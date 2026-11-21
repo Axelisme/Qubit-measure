@@ -137,10 +137,8 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         axes = figure.axes
         lines = [live_line(ax, num_lines=POPULATION_COUNT) for ax in axes]
         for ax in axes:
-            ax.set(xlabel="Time (µs)", ylabel="State probability", ylim=(0.0, 1.0))
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
+            ax.set(xlabel="Time (µs)", ylabel="P(g), P(e), P(other)", ylim=(0.0, 1.0))
+            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
             ax.legend()
 
@@ -326,7 +324,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         ax1.scatter(lens, populations1[:, 0], color="blue", label="Ground", s=1)
         ax1.scatter(lens, populations1[:, 1], color="red", label="Excited", s=1)
         ax1.scatter(lens, populations1[:, 2], color="green", label="Other", s=1)
-        ax1.set_ylabel("State probability")
+        ax1.set_ylabel("P(g), P(e), P(other)")
         ax1.legend(loc=4)
         ax1.set_ylim(0, 1)
         ax1.grid(True)
@@ -338,7 +336,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         ax2.scatter(lens, populations2[:, 1], color="red", label="Excited", s=1)
         ax2.scatter(lens, populations2[:, 2], color="green", label="Other", s=1)
         ax2.set_xlabel("Time (µs)")
-        ax2.set_ylabel("State probability")
+        ax2.set_ylabel("P(g), P(e), P(other)")
         ax2.legend(loc=4)
         ax2.set_ylim(0, 1)
         ax2.grid(True)
