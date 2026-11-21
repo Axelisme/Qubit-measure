@@ -250,10 +250,7 @@ def test_distinct_demodulation_frequencies_produce_distinct_iq(include_traces):
     response = adc.ConditionalReadout(model).responses(
         adc.ReadoutBatch(
             model,
-            tuple(
-                (adc.ReadoutEvent((pulse,), (grid,)),)
-                for grid in (declared, other)
-            ),
+            tuple((adc.ReadoutEvent((pulse,), (grid,)),) for grid in (declared, other)),
             np.arange(2, dtype=np.int64),
             include_traces,
         )
