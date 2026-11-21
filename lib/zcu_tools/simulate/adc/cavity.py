@@ -1,5 +1,6 @@
 """State-conditioned coherent fields before scattering and calibration."""
 
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from struct import pack
@@ -165,32 +166,36 @@ class CavityAverageCache:
         """Return owned second moments and all-state fields at the interval end.
 
         Inputs have the same units, fixed state order and history as average().
+        The endpoints must also be valid for cavity_fields as float64 query
+        times: finite, strictly increasing and not before initial_time_ns.
+        Rounding can make distinct endpoints coincide and raise ValueError.
+
         For a nonempty flat pulse tuple starting from memory at start_ns, one
-        solve supplies both products. Pulses that start at or after end_ns keep
-        their original timing, carrier and phase but their amplitudes do not
-        affect reuse. Empty, shaped and earlier-history inputs use the separate
-        average and field solvers without admission, as do endpoints that
-        change on conversion to the field solver's float64 times and opposite
-        signed zero origins. Invalid inputs or solver failures raise as in
-        average(); no partial result enters the cache.
+        solve supplies both products when the solvers use the same boundaries
+        and the inputs have an exact key. Pulses starting at or after end_ns
+        keep their original timing, carrier and phase but their amplitudes do
+        not affect reuse. Other inputs use separate solvers without admission.
+        Invalid input or solver failures propagate without a partial result.
         """
         initial = _average_initial(
             model, start_ns, end_ns, initial_field, initial_time_ns
         )
-        times = np.array([start_ns, end_ns], dtype=np.float64)
         if (
             not pulses
             or any(p.envelope is not None for p in pulses)
-            or initial_time_ns != start_ns
-            or np.signbit(initial_time_ns) != np.signbit(start_ns)
-            or (float(times[0]), float(times[1])) != (start_ns, end_ns)
+            or not _same_flat_timeline(start_ns, end_ns, initial_time_ns)
         ):
             return _uncached_span(
                 model, pulses, start_ns, end_ns, initial, initial_time_ns
             )
-        key = _flat_key(
-            model, pulses, (start_ns, end_ns, initial_time_ns), initial, span=True
+        # ADR-0078: ADC owns the exact content key and both solver products.
+        key = _flat_span_key(
+            model, pulses, (start_ns, end_ns, initial_time_ns), initial
         )
+        if key is None:
+            return _uncached_span(
+                model, pulses, start_ns, end_ns, initial, initial_time_ns
+            )
         cached = self._results.get(key)
         if isinstance(cached, _FlatSpan):
             self.hits += 1
@@ -203,6 +208,7 @@ class CavityAverageCache:
             near, converted, start_ns, end_ns, memory, initial_time_ns
         )
         # Use the same two query times and rotation as cavity_fields applies.
+        times = np.array([start_ns, end_ns], dtype=np.float64)
         delta = near.reference_frequency_ghz - model.reference_frequency_ghz
         final = solved.final.copy()
         final *= _reference_rotation(delta, times)[-1]
@@ -279,6 +285,19 @@ class CavityAverageCache:
             self.resident_bytes = resident
 
 
+def _same_flat_timeline(start: float, end: float, origin: float) -> bool:
+    # Both flat solvers must build the same boundaries. Narrow NumPy scalars
+    # can round differences in the integral before the field query uses float64.
+    return (
+        all(
+            type(t) in (float, np.float64, int) and float(t) == t
+            for t in (start, end, origin)
+        )
+        and origin == start
+        and np.signbit(origin) == np.signbit(start)
+    )
+
+
 def _uncached_span(
     model: ReadoutModel,
     pulses: tuple[ReadoutPulse, ...],
@@ -340,6 +359,7 @@ def cavity_field_average(
     if pulses or np.any(initial):
         near, pulses, initial = _near_carrier(model, pulses, initial, initial_time_ns)
         if all(pulse.envelope is None for pulse in pulses):
+            # The integrator advances fields to accumulate moments; only span returns them.
             products = _flat_integral(
                 near, pulses, start_ns, end_ns, initial, initial_time_ns
             ).products
@@ -396,26 +416,119 @@ def _flat_key(
     pulses: tuple[ReadoutPulse, ...],
     times: tuple[float, float, float],
     initial: NDArray[np.complex128],
-    *,
-    span: bool = False,
 ) -> bytes:
-    # Span keys use the original inputs; average-only keys use the converted ones.
-    start, end, origin = times
-    parts = [
-        b"cavity-flat-span-v1\0" if span else b"cavity-flat-average-v1\0",
-        pack("!QQ", len(model.state_labels), len(pulses)),
-    ]
-    for text in (model.identity, *model.state_labels):
-        encoded = text.encode("utf-8")
-        parts.extend((pack("!Q", len(encoded)), encoded))
+    # Keep the legacy average-only key over the carrier-converted inputs.
     receiver = model.receiver
-    # Frozen numeric records have lossless scalar reprs; spectral arrays are
-    # derived from roughness parameters and deliberately excluded from repr.
     background = repr(
         (receiver.extra_ripples, receiver.roughness, receiver.band_edges)
     ).encode("ascii")
-    parts.extend((pack("!Q", len(background)), background))
-    scalars = (
+    return b"".join(
+        (
+            b"cavity-flat-average-v1\0",
+            _flat_model_labels(model, len(pulses)),
+            pack("!Q", len(background)),
+            background,
+            pack("!12d", *_model_scalars(model), *times),
+            _flat_model_arrays(model, initial),
+            *(_flat_pulse_key(pulse) for pulse in pulses),
+        )
+    )
+
+
+def _flat_span_key(
+    model: ReadoutModel,
+    pulses: tuple[ReadoutPulse, ...],
+    times: tuple[float, float, float],
+    initial: NDArray[np.complex128],
+) -> bytes | None:
+    # Subclasses may change solver behavior without changing the recorded data.
+    if type(model) is not ReadoutModel or any(
+        type(p) is not ReadoutPulse for p in pulses
+    ):
+        return None
+    parts = [
+        b"cavity-flat-span-v2\0",
+        _flat_model_labels(model, len(pulses)),
+        _flat_model_arrays(model, initial),
+    ]
+    for value in _span_scalars(model, pulses, times):
+        encoded = _scalar_bits(value)
+        if encoded is None:
+            return None
+        parts.append(encoded)
+    return b"".join(parts)
+
+
+def _span_scalars(
+    model: ReadoutModel,
+    pulses: tuple[ReadoutPulse, ...],
+    times: tuple[float, float, float],
+) -> Iterator[object]:
+    yield from _model_scalars(model)
+    yield from times
+    receiver = model.receiver
+    yield len(receiver.extra_ripples)
+    for wave in receiver.extra_ripples:
+        yield from (wave.depth, wave.period_mhz, wave.phase_deg)
+    roughness = receiver.roughness
+    yield roughness is not None
+    if roughness is not None:
+        # The spectral arrays are derived from the seed.
+        yield from (roughness.amplitude, roughness.correlation_mhz, roughness.seed)
+    edges = receiver.band_edges
+    yield edges is not None
+    if edges is not None:
+        for edge in (edges.low, edges.high):
+            yield edge is not None
+            if edge is not None:
+                yield from (edge.corner_ghz, edge.rolloff_db_per_ghz)
+    for pulse in pulses:
+        # Future amplitudes cannot contribute. Keep their carriers and corners.
+        yield from (
+            pulse.start_ns,
+            pulse.end_ns,
+            0j if pulse.start_ns >= times[1] else pulse.amplitude,
+            pulse.frequency_ghz,
+            pulse.phase_rad,
+            len(pulse.breakpoints_ns),
+            *pulse.breakpoints_ns,
+        )
+
+
+def _scalar_bits(value: object) -> bytes | None:
+    # Type tags distinguish scalars that compare equal but promote differently.
+    if type(value) is float:
+        return b"f" + pack("!d", value)
+    if type(value) is complex:
+        return b"c" + pack("!2d", value.real, value.imag)
+    if type(value) is int:
+        size = (value.bit_length() + 8) // 8
+        return b"i" + pack("!Q", size) + value.to_bytes(size, "big", signed=True)
+    if type(value) is bool:
+        return b"b" + bytes((value,))
+    if isinstance(value, (np.bool_, np.integer, np.floating, np.complexfloating)):
+        dtype = value.dtype
+        # Unrecognized subclasses and extended floats with padding bypass reuse.
+        if (
+            type(value) is dtype.type
+            and dtype.kind in "biufc"
+            and dtype.char not in {"g", "G"}
+        ):
+            return b"n" + pack("!B", dtype.num) + value.tobytes()
+    return None
+
+
+def _flat_model_labels(model: ReadoutModel, pulse_count: int) -> bytes:
+    parts = [pack("!QQ", len(model.state_labels), pulse_count)]
+    for text in (model.identity, *model.state_labels):
+        encoded = text.encode("utf-8")
+        parts.extend((pack("!Q", len(encoded)), encoded))
+    return b"".join(parts)
+
+
+def _model_scalars(model: ReadoutModel) -> tuple[float, ...]:
+    receiver = model.receiver
+    return (
         model.reference_frequency_ghz,
         receiver.gain,
         receiver.phase_rad,
@@ -425,11 +538,12 @@ def _flat_key(
         receiver.ripple_phase_rad,
         receiver.slope_db_per_ghz,
         receiver.pivot_ghz,
-        start,
-        end,
-        origin,
     )
-    parts.append(_raw_scalar_key(scalars) if span else pack("!12d", *scalars))
+
+
+def _flat_model_arrays(model: ReadoutModel, initial: NDArray[np.complex128]) -> bytes:
+    receiver = model.receiver
+    parts: list[bytes] = []
     for array in (
         model.frequencies_ghz,
         model.kappa_internal_per_ns,
@@ -449,33 +563,20 @@ def _flat_key(
                 array.tobytes(),
             )
         )
-    parts.extend(_flat_pulse_key(pulse, end, span=span) for pulse in pulses)
     return b"".join(parts)
 
 
-def _flat_pulse_key(pulse: ReadoutPulse, end: float, *, span: bool) -> bytes:
-    # No interval's left endpoint reaches a future pulse. Its carrier and
-    # boundaries are still part of the original solver inputs.
-    amplitude = 0j if span and pulse.start_ns >= end else pulse.amplitude
-    values = (
+def _flat_pulse_key(pulse: ReadoutPulse) -> bytes:
+    return pack(
+        "!6dQ",
         pulse.start_ns,
         pulse.end_ns,
-        amplitude.real,
-        amplitude.imag,
+        pulse.amplitude.real,
+        pulse.amplitude.imag,
         pulse.frequency_ghz,
         pulse.phase_rad,
-    )
-    if span:
-        return _raw_scalar_key((values, pulse.breakpoints_ns))
-    return pack("!6dQ", *values, len(pulse.breakpoints_ns)) + pack(
-        f"!{len(pulse.breakpoints_ns)}d", *pulse.breakpoints_ns
-    )
-
-
-def _raw_scalar_key(values: tuple[object, ...]) -> bytes:
-    # Keep the finite scalar representations, including signed zeros and
-    # integers not exactly representable in binary64. NUL delimits each tuple.
-    return repr(values).encode("ascii") + b"\0"
+        len(pulse.breakpoints_ns),
+    ) + pack(f"!{len(pulse.breakpoints_ns)}d", *pulse.breakpoints_ns)
 
 
 def _initial_field(

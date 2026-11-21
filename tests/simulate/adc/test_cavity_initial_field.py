@@ -1,5 +1,6 @@
 """Shared nonzero cavity memory at the public ADC boundary."""
 
+from contextlib import nullcontext
 from dataclasses import replace
 from inspect import signature
 
@@ -241,6 +242,44 @@ def test_flat_span_does_not_reuse_different_complete_inputs():
         _assert_span_matches_separate_solves(result, m, p, left, right, field, left)
 
 
+@pytest.mark.parametrize("carrier_type", [np.float32, np.float64])
+def test_span_distinguishes_carriers_with_the_same_display(carrier_type):
+    model = _model()
+    pulse = adc.ReadoutPulse(0, 10, 0.3j, 6.1, 0.2)
+    other = replace(pulse, frequency_ghz=carrier_type(6.1))
+    start, end = 5.0, 15.0
+    initial = np.array([0.2 + 0.1j, -0.3j])
+    cache = adc.CavityAverageCache()
+    # NumPy 1.26 already uses the display style NumPy 2 calls legacy 1.25.
+    legacy = (
+        np.printoptions(legacy="1.25")
+        if np.lib.NumpyVersion(np.__version__) >= "2.0.0"
+        else nullcontext()
+    )
+    with legacy:
+        for drive in (pulse, other):
+            actual = cache.span(
+                model,
+                (drive,),
+                start,
+                end,
+                initial_field=initial,
+                initial_time_ns=start,
+            )
+            _assert_span_matches_separate_solves(
+                actual, model, (drive,), start, end, initial, start
+            )
+        assert cache.hits == 0 and cache.misses == 2
+
+    actual = cache.span(
+        model, (other,), start, end, initial_field=initial, initial_time_ns=start
+    )
+    _assert_span_matches_separate_solves(
+        actual, model, (other,), start, end, initial, start
+    )
+    assert cache.hits == 1 and cache.misses == 2
+
+
 @pytest.mark.parametrize(
     "unsupported", ["historical-origin", "shaped", "empty", "signed-origin"]
 )
@@ -264,6 +303,25 @@ def test_span_preserves_separate_solvers_without_admission(unsupported):
         )
         _assert_span_matches_separate_solves(
             result, model, pulses, start, end, initial, origin
+        )
+    assert cache.resident_bytes == cache.hits == cache.misses == 0
+
+
+def test_span_preserves_ringdown_endpoint_with_float32_times():
+    model = _model()
+    pulses = (adc.ReadoutPulse(-1, 0, 0.3j, 6.01, 0.2),)
+    # In float32, end - start rounds to 1; the field query subtracts in float64.
+    start, end = np.float32(2**-25), np.float32(1)
+    initial = np.array([0.2 + 0.1j, -0.3j])
+    cache = adc.CavityAverageCache()
+    # Bind the public call with its real runtime scalar types, without conversion.
+    query = signature(cache.span).bind(
+        model, pulses, start, end, initial_field=initial, initial_time_ns=start
+    )
+    for _ in range(2):
+        actual = cache.span(*query.args, **query.kwargs)
+        _assert_span_matches_separate_solves(
+            actual, model, pulses, start, end, initial, start
         )
     assert cache.resident_bytes == cache.hits == cache.misses == 0
 

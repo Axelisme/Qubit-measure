@@ -120,6 +120,7 @@ class CavityDrive:
         if values.shape != (len(self._chi),) or not np.isfinite(values).all():
             raise ValueError("cavity populations must be a finite (state,) vector")
         if self._span_cache is not None:
+            # ADR-0078: ADC owns reuse; FTF turns moments and populations into a response.
             span = self._span_cache.span(
                 self._model,
                 self._pulses,
@@ -128,24 +129,23 @@ class CavityDrive:
                 initial_field=initial_field,
                 initial_time_ns=start_ns,
             )
-            return (
-                self._response_for_moments(span.average),
-                span.final_fields[int(np.argmax(values))].copy(),
+            average = self._response_for_moments(span.average)
+            final_fields = span.final_fields
+        else:
+            average = self.average(
+                start_ns,
+                end_ns,
+                initial_field=initial_field,
+                initial_time_ns=start_ns,
             )
-        average = self.average(
-            start_ns,
-            end_ns,
-            initial_field=initial_field,
-            initial_time_ns=start_ns,
-        )
-        fields = cavity_fields(
-            self._model,
-            self._pulses,
-            np.array([start_ns, end_ns]),
-            initial_field=initial_field,
-            initial_time_ns=start_ns,
-        )
-        return average, fields[-1, int(np.argmax(values))].copy()
+            final_fields = cavity_fields(
+                self._model,
+                self._pulses,
+                np.array([start_ns, end_ns]),
+                initial_field=initial_field,
+                initial_time_ns=start_ns,
+            )[-1]
+        return average, final_fields[int(np.argmax(values))].copy()
 
     def average(
         self,

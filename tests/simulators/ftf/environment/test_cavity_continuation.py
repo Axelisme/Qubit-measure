@@ -22,12 +22,14 @@ from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
     ModelSource,
+    PathDiagnostics,
     TimelineBatch,
     segment_spans,
 )
 from zcu_tools.simulators.ftf.environment import FTFSource, plan_template
 from zcu_tools.simulators.ftf.environment.numeric import resonators
 from zcu_tools.simulators.ftf.physics import CavityDrive
+from zcu_tools.simulators.ftf.physics.model import readout_model
 
 from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.program._profiles import profile_soccfg
@@ -89,11 +91,26 @@ def _assert_preserved_controls(batch, original, density):
     np.testing.assert_array_equal(batch.initial_densities, density)
 
 
+def _prescribed_evolution(points, initial_densities):
+    # Point 0 ties ground and excited; point 1 selects the excited branch.
+    densities = np.zeros_like(initial_densities)
+    densities[0, 0, 0] = densities[0, 1, 1] = 0.5
+    densities[1, 1, 1] = 1.0
+    return EvolutionResult(points, densities, PathDiagnostics())
+
+
+def _assert_cavity_shift(shift, response):
+    assert shift.energy_shift_ghz.tobytes() == response.stark_shift_ghz.tobytes()
+    assert shift.dephasing_per_ns.tobytes() == response.dephasing_per_ns.tobytes()
+    if shift.start_ns == 6:  # No drive remains; cavity memory supplies the shift.
+        assert np.any(shift.energy_shift_ghz)
+
+
 @pytest.mark.parametrize("shaped", [False, True], ids=["flat", "shaped"])
 def test_acquire_continues_each_point_span_density_field_and_common_origin(
     shaped, cavity_span_owners
 ):
-    engine = ObservingEngine()
+    engine = EngineDouble()
     source = FTFSource(
         settings().with_telemetry(enabled=False),
         DeviceManager(),
@@ -119,21 +136,22 @@ def test_acquire_continues_each_point_span_density_field_and_common_origin(
             time_base=TIME_BASE,
         )
         spans = segment_spans(plan.batch)
+        facts = source.model_facts(snapshot())
+        density = np.tile(facts.source.initial_density, (2, 1, 1))
+        prescribed = _prescribed_evolution(plan.batch.points, density)
+        engine.result = prescribed
         acquire = request(templates=(driven,))
         source.open_acquire(acquire).sample_round(snapshot(), 0)
         assert len(engine.calls) == max(map(len, spans)), (
             "cavity drives must evolve spans sequentially, not one vacuum-start timeline"
         )
-        facts = source.model_facts(snapshot())
         pair = resonators(source.settings)
+        model = readout_model(facts.joint, pair)
         uncached = [
             CavityDrive(facts.joint, pair, pulses) for pulses in plan.cavity_drives
         ]
         memory = np.zeros((2, 2), complex)
-        density: NDArray[np.complex128] = np.tile(
-            facts.source.initial_density, (2, 1, 1)
-        )
-        for step, (numeric_source, batches, result) in enumerate(engine.calls):
+        for step, (numeric_source, batches) in enumerate(engine.calls):
             assert numeric_source is facts.source
             assert len(batches) == 1
             batch = batches[0]
@@ -154,22 +172,20 @@ def test_acquire_continues_each_point_span_density_field_and_common_origin(
                     continue
                 (shift,) = batch.segment_shifts[point]
                 assert (shift.start_ns, shift.end_ns) == (start, end)
-                response, memory[point] = uncached[point].advance(
-                    start, end, density[point].diagonal().real, memory[point]
+                response = uncached[point].average(
+                    start, end, initial_field=memory[point], initial_time_ns=start
                 )
-                assert (
-                    shift.energy_shift_ghz.tobytes()
-                    == response.stark_shift_ghz.tobytes()
+                fields = cavity_fields(
+                    model,
+                    plan.cavity_drives[point],
+                    np.array([start, end]),
+                    initial_field=memory[point],
+                    initial_time_ns=start,
                 )
-                assert (
-                    shift.dephasing_per_ns.tobytes()
-                    == response.dephasing_per_ns.tobytes()
-                )
-                if (
-                    start == 6
-                ):  # No drive remains in the final span; memory supplies the shift.
-                    assert np.any(shift.energy_shift_ghz)
-            density = result.densities
+                # The first span uses the source's initial ground state.
+                memory[point] = fields[-1, 0 if step == 0 else point]
+                _assert_cavity_shift(shift, response)
+            density = prescribed.densities
         assert sum(owner.hits for owner in cavity_span_owners) == (
             0 if shaped else 2
         ), "two flat prefixes should share second moments and endpoints across gains"

@@ -44,12 +44,15 @@ field integrals; consumers project them into their own Stark or dephasing models
 
 `CavityAverageCache.average` reuses flat second moments. `CavityAverageCache.span`
 returns both second moments and final fields for all states in the original model
-reference. It shares the original flat propagation when the initial time equals
-the span start. Its exact key keeps model content, initial field bits, and pulse
-order, timing, carrier, phase and breakpoints. Pulse amplitudes starting at or
-after the span end cannot affect either product and do not distinguish span keys.
-Shaped/callable pulses, an empty pulse tuple and earlier pulse history use the
-separate solvers rather than the span memo.
+reference. It shares flat propagation when the initial time equals the span
+start and both solvers use the same time boundaries. Its exact key keeps model
+content, initial field bits, and pulse order, timing, carrier, phase and
+breakpoints. It distinguishes numeric scalar types and bits without using their
+display format. Pulse amplitudes starting at or after the span end do not
+distinguish span keys. Shaped/callable pulses, an empty pulse tuple, earlier
+history and inputs with unproven equivalence use separate solvers without
+admission. The field solver must accept the endpoints as float64 query times;
+rounding that makes them coincide raises `ValueError`.
 
 The two entry points share one byte budget (64 MiB by default). Results are
 writable copies independent of resident arrays. Full capacity declines new

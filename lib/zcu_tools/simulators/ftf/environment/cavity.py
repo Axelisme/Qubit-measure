@@ -552,6 +552,7 @@ def evolve_plans(
                 capture=options.capture,
                 reuse_key=options.key,
             ), (options.key,)
+    # ADR-0078: this composition alone owns the ADC memo's lifetime.
     cache = CavityAverageCache()
     try:
         pair = resonators(settings)
