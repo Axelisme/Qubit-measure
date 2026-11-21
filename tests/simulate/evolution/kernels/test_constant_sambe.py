@@ -46,28 +46,29 @@ def sambe_case():
 def test_low_carrier_uses_sambe_and_preserves_translated_coherent_tail():
     case = sambe_case()
     kernel = FloquetPeriodKernel()
-    context = KernelContext(
-        case.source, case.budget, create_work_plan(case.table, case.source)
-    )
-    rows = np.arange(2)
-    for row in rows:
-        assert (
-            period_builder(
-                case.source.model((0,)),
-                0,
-                float(case.table.tone_frequency_ghz[row, 0]),
-                float(case.table.tone_amplitude[row, 0]),
-            ).kind
-            == "sambe"
+    with create_work_plan(case.table, case.source) as plan:
+        context = KernelContext(case.source, case.budget, plan)
+        rows = np.arange(2)
+        for row in rows:
+            assert (
+                period_builder(
+                    case.source.model((0,)),
+                    0,
+                    float(case.table.tone_frequency_ghz[row, 0]),
+                    float(case.table.tone_amplitude[row, 0]),
+                ).kind
+                == "sambe"
+            )
+        prepared = kernel.prepare(
+            kernel.prepare_keys(case.table, rows, context),
+            case.table,
+            rows,
+            context,
         )
-    prepared = kernel.prepare(
-        kernel.prepare_keys(case.table, rows, context),
-        case.table,
-        rows,
-        context,
-    )
-    actual = case.states.copy()
-    kernel.apply(prepared, rows, case.table, rows, actual, ApplyContext(case.budget))
+        actual = case.states.copy()
+        kernel.apply(
+            prepared, rows, case.table, rows, actual, ApplyContext(case.budget)
+        )
     for row in rows:
         np.testing.assert_allclose(
             actual[row], reference(case, int(row), case.states[row]), atol=1e-4, rtol=0
@@ -89,16 +90,17 @@ def test_unresolved_cutoff_falls_back_to_independent_cf4():
     table = replace(case.table, tone_amplitude=np.ones((2, 1)))
     rows = np.array([0])
     kernel = FloquetPeriodKernel()
-    context = KernelContext(source, 0.001, create_work_plan(table, source))
-    assert period_builder(model, 0, 0.05, 1.0).kind == "sambe"
-    prepared = kernel.prepare(
-        kernel.prepare_keys(table, rows, context),
-        table,
-        rows,
-        context,
-    )
-    actual = case.states[:1].copy()
-    kernel.apply(prepared, np.array([0]), table, rows, actual, ApplyContext(1e-3))
+    with create_work_plan(table, source) as plan:
+        context = KernelContext(source, 0.001, plan)
+        assert period_builder(model, 0, 0.05, 1.0).kind == "sambe"
+        prepared = kernel.prepare(
+            kernel.prepare_keys(table, rows, context),
+            table,
+            rows,
+            context,
+        )
+        actual = case.states[:1].copy()
+        kernel.apply(prepared, np.array([0]), table, rows, actual, ApplyContext(1e-3))
     # Independent exact solution for commuting diagonal H(t), tighter than a
     # numerical strict reference and with no integration-step assumptions.
     duration = table.duration_ns[0]
@@ -119,18 +121,17 @@ def test_high_carrier_keeps_existing_builder():
         assert period_builder(case.source.model((0,)), 0, frequency, 0.01).kind == kind
         table = replace(case.table, tone_frequency_ghz=np.full((2, 1), frequency))
         kernel = FloquetPeriodKernel()
-        context = KernelContext(
-            case.source, case.budget, create_work_plan(table, case.source)
-        )
-        rows = np.arange(2)
-        prepared = kernel.prepare(
-            kernel.prepare_keys(table, rows, context),
-            table,
-            rows,
-            context,
-        )
-        actual = case.states.copy()
-        kernel.apply(prepared, rows, table, rows, actual, ApplyContext(case.budget))
+        with create_work_plan(table, case.source) as plan:
+            context = KernelContext(case.source, case.budget, plan)
+            rows = np.arange(2)
+            prepared = kernel.prepare(
+                kernel.prepare_keys(table, rows, context),
+                table,
+                rows,
+                context,
+            )
+            actual = case.states.copy()
+            kernel.apply(prepared, rows, table, rows, actual, ApplyContext(case.budget))
         high = replace(case, table=table)
         np.testing.assert_allclose(
             actual[0], reference(high, 0, case.states[0]), atol=1e-4, rtol=0
@@ -143,41 +144,46 @@ def test_sambe_selection_and_playback_ignore_worker_and_key_order():
     case = sambe_case()
     rows = np.arange(2)
     kernel = FloquetPeriodKernel()
-    context = KernelContext(
-        case.source, case.budget, create_work_plan(case.table, case.source)
-    )
-    prepared = kernel.prepare(
-        kernel.prepare_keys(case.table, rows, context),
-        case.table,
-        rows,
-        context,
-    )
-    expected = case.states.copy()
-    kernel.apply(prepared, rows, case.table, rows, expected, ApplyContext(case.budget))
-    other = FloquetPeriodKernel()
-    other_context = KernelContext(
-        case.source, case.budget, create_work_plan(case.table, case.source)
-    )
-    actual = case.states.copy()
-
-    def play(row):
-        subset = np.array([row])
-        payload = other.prepare(
-            other.prepare_keys(case.table, subset, other_context),
+    with create_work_plan(case.table, case.source) as plan:
+        context = KernelContext(case.source, case.budget, plan)
+        prepared = kernel.prepare(
+            kernel.prepare_keys(case.table, rows, context),
             case.table,
-            subset,
-            other_context,
+            rows,
+            context,
         )
-        state = case.states[subset].copy()
-        other.apply(
-            payload, np.array([0]), case.table, subset, state, ApplyContext(case.budget)
+        expected = case.states.copy()
+        kernel.apply(
+            prepared, rows, case.table, rows, expected, ApplyContext(case.budget)
         )
-        actual[subset] = state
+    other = FloquetPeriodKernel()
+    actual = case.states.copy()
+    with create_work_plan(case.table, case.source) as plan:
+        other_context = KernelContext(case.source, case.budget, plan)
 
-    # The main thread and a distinct worker prepare in reverse order.
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        pool.submit(play, 1).result(timeout=25)
-    play(0)
+        def play(row):
+            subset = np.array([row])
+            payload = other.prepare(
+                other.prepare_keys(case.table, subset, other_context),
+                case.table,
+                subset,
+                other_context,
+            )
+            state = case.states[subset].copy()
+            other.apply(
+                payload,
+                np.array([0]),
+                case.table,
+                subset,
+                state,
+                ApplyContext(case.budget),
+            )
+            actual[subset] = state
+
+        # The main thread and a distinct worker prepare in reverse order.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(play, 1).result(timeout=25)
+        play(0)
     np.testing.assert_array_equal(actual, expected)
 
 
@@ -193,16 +199,17 @@ def test_sambe_subperiods_preserve_secular_dissipation():
     table = replace(case.table, tone_amplitude=np.full((2, 1), 0.1))
     case = replace(case, source=source, table=table)
     kernel = FloquetPeriodKernel()
-    context = KernelContext(source, 0.001, create_work_plan(table, source))
-    rows = np.arange(2)
-    prepared = kernel.prepare(
-        kernel.prepare_keys(table, rows, context),
-        table,
-        rows,
-        context,
-    )
-    actual = case.states.copy()
-    kernel.apply(prepared, rows, table, rows, actual, ApplyContext(case.budget))
+    with create_work_plan(table, source) as plan:
+        context = KernelContext(source, 0.001, plan)
+        rows = np.arange(2)
+        prepared = kernel.prepare(
+            kernel.prepare_keys(table, rows, context),
+            table,
+            rows,
+            context,
+        )
+        actual = case.states.copy()
+        kernel.apply(prepared, rows, table, rows, actual, ApplyContext(case.budget))
     np.testing.assert_allclose(
         actual[1], reference(case, 1, case.states[1]), atol=case.budget, rtol=0
     )

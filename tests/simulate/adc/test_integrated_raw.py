@@ -279,6 +279,35 @@ def test_raw_stop_does_not_observe_later_events(stop_at):
     assert cancel.is_set()
 
 
+def test_raw_stop_at_receiver_only_group_prevents_later_path_sampling():
+    class StopDuringFirstGroup:
+        def __init__(self):
+            self.checkpoints = iter(("entry", "event"))
+
+        def is_set(self):
+            # Entry and the logical event precede point groups. Stop becomes
+            # pending after entering the event, before leaving its first group.
+            return next(self.checkpoints, None) is None
+
+    # Only the second group has a physical path. Its rate makes the first
+    # transition shorter than the floating-point resolution at pulse start.
+    content = batch(model(np.array([[0, 0, 0], [1e24, 0, 0], [0, 0, 0]])))
+    (event,) = content.events[0]
+    content = replace(
+        content,
+        events=((replace(event, pulses=()),), (event,)),
+        content_index=np.array([0, 1], dtype=np.int64),
+    )
+    source = prepare(np.array([[1.0, 0, 0], [1.0, 0, 0]]), {0: content}, reps=1).bind(
+        SamplingIdentity(1)
+    )
+
+    with pytest.raises(ValueError, match="transition times.*resolution"):
+        source.materialize(1, 0)
+    with pytest.raises(Cancelled):
+        source.materialize_cancellable(1, 0, cancel=StopDuringFirstGroup())
+
+
 def test_raw_stop_before_empty_delivery_returns_no_arrays():
     class StopAfterEntry:
         def __init__(self):

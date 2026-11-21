@@ -1,12 +1,13 @@
 """Evolve-local publication and ownership through injected kernel collaborators."""
 
+from collections.abc import Mapping
 from contextlib import closing
 from dataclasses import dataclass, replace
 from threading import Barrier, Event, Lock
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Cancelled, Engine, EnvelopeSpec
+from zcu_tools.simulate.evolution import Cancelled, Engine, EnvelopeSpec, RoutingHistory
 from zcu_tools.simulate.evolution.kernel import KernelContext
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
@@ -124,15 +125,16 @@ def test_stop_during_work_plan_releases_geometry_without_counting_gate_usage(
 
     # The Engine exposes neither a Stop trigger nor the owned plan in this phase.
     monkeypatch.setattr(_dispatch, "populate_gate_inventory", request_stop)
-    dc = source()
-    recorded = []
-    original_record = dc.history.record_gate_usage
+    recorded: list[bytes] = []
 
-    def count_usage(inventory, *, content):
-        recorded.append(content)
-        return original_record(inventory, content=content)
+    class RecordingHistory(RoutingHistory):
+        def record_gate_usage(
+            self, inventory: Mapping[bytes, int], *, content: bytes
+        ) -> dict[bytes, int]:
+            recorded.append(content)
+            return super().record_gate_usage(inventory, content=content)
 
-    monkeypatch.setattr(dc.history, "record_gate_usage", count_usage)
+    dc = source(history=RecordingHistory())
     shaped = EnvelopeSpec("sampled", np.array([0, 0.3, 0.6]), np.array([0, 1, 3]))
     timeline = replace(batch(1), tracks=(track(1, shaped),))
     with (

@@ -401,12 +401,15 @@ class SimulationBinding:
         """Yield a paced integrated result for transport validation and raw work.
 
         request, index and read-only cancel have the same meaning as in
-        sample_round, but the request must be integrated. After the caller's
+        sample_round. A non-integrated request raises ValueError before
+        snapshot capture, round recording, execution or pacing. After the caller's
         synchronous validation and required shot work, raise Cancelled if the
         query is set. Credit the clock only on successful exit and use the same
         elapsed window as sample_round, excluding validation and raw work.
         The caller publishes completed buffers only after this scope succeeds.
         """
+        if request.mode != "integrated":
+            raise ValueError("required raw shots need an integrated request")
         result, started = self._sample_and_pace(request, index, cancel)
         if not isinstance(result, IntegratedRound):
             raise ValueError("required raw shots need an integrated round")

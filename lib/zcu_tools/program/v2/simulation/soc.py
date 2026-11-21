@@ -76,7 +76,7 @@ class SimulationSoc(QickConfig):
         self._round_index = 0
         self._accumulated: dict[int, NDArray[np.int64]] | None = {}
         self._decimated = {}
-        self._poll_done = True
+        self._poll_pending = False
         self._statistics: IntegratedRound | None = None
         self._statistics_copier = StatisticsCopier()
         self._raw_request: AcquireRequest | None = None
@@ -110,13 +110,13 @@ class SimulationSoc(QickConfig):
         self._cancel = cancel
         self.binding.last_request = request
         self._round_index = 0
-        self._poll_done = True
+        self._poll_pending = False
 
     def release_request(self) -> None:
         """Clear the installed controls and cancellation query, keeping results."""
         self._request = None
         self._cancel = None
-        self._poll_done = True
+        self._poll_pending = False
 
     def run_round(self, *, require_raw: bool = False) -> IntegratedRound | RoundSignals:
         """Execute the next installed round and detach/validate its numeric result.
@@ -147,7 +147,7 @@ class SimulationSoc(QickConfig):
                 self._accumulated, self._decimated = pack_signals(request, result)
                 self._statistics = None
                 self._raw_request = None
-        self._poll_done = True
+        self._poll_pending = False
         self._round_index += 1
         return result
 
@@ -197,6 +197,17 @@ class SimulationSoc(QickConfig):
         self.run_round()
 
     def start_readout(self, total_shots, counter_addr, ch_list, reads_per_shot) -> None:
+        """Run one integrated round synchronously, including required raw shots.
+
+        total_shots must equal the product of the installed request's loop
+        dimensions. ch_list and reads_per_shot must match its ADC channels and
+        per-channel read counts in request order. counter_addr is ignored.
+
+        On success poll_data can collect the round. No installed request raises
+        RuntimeError; a wrong mode, layout or invalid backend data raises
+        ValueError. Stop before publication raises Cancelled. Backend and raw
+        sampling errors propagate without replacing the last completed round.
+        """
         if self._request is None:
             raise RuntimeError("simulation has no active acquisition request")
         expected = [(w.channel, w.reads) for w in self._request.readouts]
@@ -207,13 +218,21 @@ class SimulationSoc(QickConfig):
             raise ValueError("QICK readout layout differs from simulation request")
         del counter_addr
         self.run_round(require_raw=True)
-        self._poll_done = False
+        self._poll_pending = True
 
     def poll_data(self, totaltime=0.1, timeout=None):
+        """Collect a pending start_readout result once without waiting.
+
+        totaltime and timeout are ignored. Return [] if there is no pending
+        result for the installed request. Otherwise return one
+        (total_shots, (arrays, {})) tuple inside a list, where arrays are
+        writable int64 IQ copies in request ADC order, shaped
+        (total_shots * reads_per_shot, 2) for each channel.
+        """
         del totaltime, timeout
-        if self._poll_done or self._request is None:
+        if not self._poll_pending or self._request is None:
             return []
-        self._poll_done = True
+        self._poll_pending = False
         assert self._accumulated is not None
         return [
             (

@@ -167,6 +167,41 @@ def test_simulation_clock_does_not_credit_cancelled_or_failed_rounds(clock: Cloc
         assert sim_clock.now() == pytest.approx(0.05)
 
 
+def test_required_raw_rejects_decimated_request_before_sampling(clock: Clock):
+    calls = []
+
+    def monotonic():
+        calls.append("clock")
+        return clock.monotonic()
+
+    def capture():
+        calls.append("snapshot")
+        return EnvironmentSnapshot("synthetic", "test", ())
+
+    def execute(_request):
+        calls.append("execute")
+        return RoundSignals(())
+
+    sim_clock = SimulationClock(monotonic=monotonic)
+    binding = SimulationBinding(
+        capture,
+        execute,
+        backend_version="test",
+        timing=SimulationTiming(time_scale=0.5, clock=sim_clock),
+    )
+    with binding.acquire() as sequence:
+        request = request_for(binding, sequence)
+        with (
+            pytest.raises(ValueError, match="integrated"),
+            binding.sampling_required_raw(request, 0, cancel=None),
+        ):
+            pytest.fail("a decimated request cannot yield an integrated round")
+        assert calls == []
+        assert binding.rounds == ()
+        assert clock.waits == []
+        assert sim_clock.now() == 0.0
+
+
 @pytest.mark.parametrize("stop_before_publish", [False, True])
 def test_required_raw_gets_credit_only_after_acceptance(
     clock: Clock, stop_before_publish

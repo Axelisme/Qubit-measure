@@ -421,6 +421,7 @@ def test_stop_after_required_raw_publication_does_not_skip_processing(
             raise Cancelled("processor failure")
         return np.array([[3.0]])
 
+    # Backend and raw callbacks run before publication; the processor is already too late.
     monkeypatch.setattr(soc, "run_round", stop_after_delivery)
 
     def run():

@@ -1,5 +1,7 @@
 """Synthetic engine batches and recording C5 collaborators shared by tests."""
 
+from collections.abc import Generator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
 from threading import Event
 
@@ -11,6 +13,7 @@ from zcu_tools.simulate.evolution import (
     EnvelopeSpec,
     FluxSchedule,
     ModelSource,
+    RoutingHistory,
     TimelineBatch,
 )
 from zcu_tools.simulate.evolution._dispatch import populate_work_plan
@@ -26,19 +29,21 @@ from zcu_tools.simulate.evolution.workplan import WorkPlan
 from .contract.kernel_suite import synthetic_model
 
 
-def source() -> ModelSource:
+def source(*, history: RoutingHistory | None = None) -> ModelSource:
     model = synthetic_model()
     return ModelSource(
         np.diag([0.2, 0.3, 0.5]).astype(complex),
         lambda level: replace(model, level=level),
+        history=history,
     )
 
 
-def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
-    """Prepare complete cold facts for direct kernel tests."""
-    plan = WorkPlan(complete_table=table)
-    populate_work_plan(table, source, plan)
-    return plan
+@contextmanager
+def create_work_plan(table: SegmentTable, source: ModelSource) -> Generator[WorkPlan]:
+    """Own complete cold facts for one direct kernel test scope."""
+    with closing(WorkPlan(complete_table=table)) as plan:
+        populate_work_plan(table, source, plan)
+        yield plan
 
 
 def batch(n: int = 12, *, duration: float = 3.0) -> TimelineBatch:

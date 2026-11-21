@@ -84,31 +84,31 @@ def physical_shots(
                 for (channel, _), content in zip(batches, key, strict=True)
                 if (channel, content) in plans
             ]
-            if not observers:
-                continue
-            # Receiver-only windows still bound the shared physical event.
-            # Retuning one ADC must not shorten paths or shift receiver-noise draws.
-            end = max(
-                max(observer.end for _, observer in observers),
-                max(
-                    float(grid.times_ns[-1]) - batch.model.receiver.time_of_flight_ns
-                    for (_, batch), content in zip(batches, key, strict=True)
-                    for grid in batch.events[content][event_index].grids
-                ),
-            )
-            paths = JumpPaths(
-                states[points].ravel(),
-                min(observer.start for _, observer in observers),
-                end,
-                batches[0][1].model.rates_per_ns,
-                rng,
-            )
-            for channel, observer in observers:
-                values = np.stack(observer.evaluate(paths, traces=traces), axis=1)
-                offset = offsets[channel]
-                output[channel][points, :, offset : offset + values.shape[1]] = (
-                    values.reshape((len(points), reps, *values.shape[1:]))
+            if observers:
+                # Receiver-only windows still bound the shared physical event.
+                # Retuning one ADC must not shorten paths or shift receiver-noise draws.
+                end = max(
+                    max(observer.end for _, observer in observers),
+                    max(
+                        float(grid.times_ns[-1])
+                        - batch.model.receiver.time_of_flight_ns
+                        for (_, batch), content in zip(batches, key, strict=True)
+                        for grid in batch.events[content][event_index].grids
+                    ),
                 )
+                paths = JumpPaths(
+                    states[points].ravel(),
+                    min(observer.start for _, observer in observers),
+                    end,
+                    batches[0][1].model.rates_per_ns,
+                    rng,
+                )
+                for channel, observer in observers:
+                    values = np.stack(observer.evaluate(paths, traces=traces), axis=1)
+                    offset = offsets[channel]
+                    output[channel][points, :, offset : offset + values.shape[1]] = (
+                        values.reshape((len(points), reps, *values.shape[1:]))
+                    )
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
         for channel, batch in batches:
