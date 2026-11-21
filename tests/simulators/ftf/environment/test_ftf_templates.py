@@ -22,7 +22,11 @@ from zcu_tools.simulate.evolution import (
     ModelSource,
     TimelineBatch,
 )
-from zcu_tools.simulators.ftf.environment import FTFTemplatePlan
+from zcu_tools.simulators.ftf.environment import (
+    FTFReadoutConfig,
+    FTFReceiverConfig,
+    FTFTemplatePlan,
+)
 
 from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.program._profiles import profile_soccfg
@@ -399,7 +403,7 @@ def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
 
 
 @pytest.mark.parametrize("trigger_ticks", [ticks(0.008) - 1, 0])
-def test_readout_rejects_trigger_without_an_incident_pulse_window(
+def test_readout_rejects_trigger_before_an_active_pulse_block(
     trigger_ticks,
 ) -> None:
     from zcu_tools.simulators.ftf import environment as ftf
@@ -413,6 +417,23 @@ def test_readout_rejects_trigger_without_an_incident_pulse_window(
             settings(),
             snapshot(),
             replace(base, readouts=(window,)),
+            soccfg=profile_soccfg("ftf"),
+            time_base=TIME_BASE,
+        )
+
+
+def test_readout_rejects_missing_pulse_at_only_some_points() -> None:
+    from zcu_tools.simulators.ftf import environment as ftf
+
+    base = template()
+    pulse = replace(base.events[0], active=np.array([False, True]))
+    with pytest.raises(
+        ValueError, match="requires one terminal readout pulse per point"
+    ):
+        ftf.plan_template(
+            settings(),
+            snapshot(),
+            replace(base, events=(pulse,)),
             soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
@@ -532,6 +553,75 @@ class ResidualEngine(Engine):
         points = np.concatenate([batch.points for batch in batches])
         densities = np.repeat(np.diag(self.populations)[None], len(points), axis=0)
         return EvolutionResult(points, densities, PathDiagnostics())
+
+
+@pytest.mark.parametrize("inactive_slot", [False, True])
+def test_pulseless_readout_samples_only_receiver_offset_and_noise(
+    inactive_slot: bool,
+) -> None:
+    from zcu_tools.simulators.ftf import environment as ftf
+
+    base = template(tones=1)
+    control, readout = base.events
+    events = (control,)
+    if inactive_slot:
+        events += (replace(readout, active=np.zeros(2, dtype=bool)),)
+    pulseless = replace(base, events=events)
+    offset = (11.0, -7.0)
+    noise_psd = ((4.0, 0.5), (0.5, 2.0)) if inactive_slot else ((0.0, 0.0), (0.0, 0.0))
+    config = FTFReadoutConfig(
+        FTFReceiverConfig(
+            0,
+            1000.0,
+            noise_psd,
+            offset_adc=offset,
+            ripple_period_mhz=1000.0,
+            pivot_ghz=0.0,
+        )
+    )
+    numeric = settings()
+    dc = snapshot()
+    soccfg = profile_soccfg("ftf")
+    plan = ftf.plan_template(
+        numeric, dc, pulseless, soccfg=soccfg, time_base=TIME_BASE, readout=config
+    )
+    assert len(plan.batch.tracks) == 1
+    np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
+    (receiver,) = plan.readouts
+    assert receiver.channel == 0
+    assert receiver.batch.model.reference_frequency_ghz == 0.0
+    for point, index in enumerate(receiver.batch.content_index):
+        (event,) = receiver.batch.events[index]
+        assert event.pulses == ()
+        (grid,) = event.grids
+        np.testing.assert_array_equal(grid.times_ns, np.arange(8, 12) + 2 * point)
+        assert grid.demodulation_frequency_ghz == 6.0
+
+    source = ftf.FTFSource(
+        numeric,
+        DeviceManager(),
+        soccfg=soccfg,
+        engine=ResidualEngine([0.25, 0.75]),
+        readout=config,
+    )
+    acquire = replace(request("decimated", templates=(pulseless,)), reps=2048)
+    try:
+        result = source.open_acquire(acquire).sample_round(dc, 0)
+        assert isinstance(result, RoundSignals)
+        (channel,) = result.channels
+        assert channel.channel == 0
+        assert channel.iq.shape == (2 * acquire.reps, 1, 4, 2)
+        observations = channel.iq.reshape(-1, 2)
+        if inactive_slot:
+            # This fixture's sample period is 1 ns; its sample covariance equals the PSD.
+            np.testing.assert_allclose(observations.mean(axis=0), offset, atol=0.09)
+            np.testing.assert_allclose(np.cov(observations.T), noise_psd, atol=0.2)
+        else:
+            np.testing.assert_array_equal(
+                observations, np.broadcast_to(offset, observations.shape)
+            )
+    finally:
+        source.close()
 
 
 @pytest.mark.parametrize(

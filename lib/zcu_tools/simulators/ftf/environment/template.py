@@ -459,11 +459,13 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     same-channel superposition. Each logical event selects independently. Grids
     in one event spanning different PFB channels raise ValueError. An addressed
     single carrier is unchanged; off-channel carriers are excluded even alone.
-    An observed mux event without an in-channel carrier retains empty pulses
-    and emits receiver background offset and noise only. Unobserved events retain
-    their pulses and empty grids without emitting data.
-    Program common-origin carrier phases convert to pulse-local phases in the first
-    terminal carrier's model reference frame; ADC demodulation remains absolute-time.
+    A pulse template with no active readout-generator pulse uses its receiver's
+    first trigger as the evolution endpoint and the neutral 0 GHz reference.
+    Missing pulses at only some points are invalid. This receiver-only event and
+    a mux event without an in-channel carrier emit receiver background offset and
+    noise only. Unobserved events retain their pulses and empty grids without data.
+    With pulses, program common-origin carrier phases convert to pulse-local phases
+    in the first terminal carrier's frame; ADC demodulation remains absolute-time.
     All ADCs retain the same ordered event axis, even if none observes terminal.
     Unobserved events have empty grids. Each ADC must have at least one trigger.
     Projective block counts and each ADC's per-event grid counts must match across
@@ -497,28 +499,36 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
         memo,
         time_base=time_base,
         receiver_delays_ns={ch: adc.time_of_flight_ns for ch, adc in receivers.items()},
+        allow_receiver_only=not path.multiplexed,
     )
     cavity_drives = partition.cavity_drives
-    terminal_template = replace(template, events=partition.terminal_slots)
-    end_ns = np.max(
-        [
-            np.where(e.active, time_base.ns(e.start_ticks), -np.inf)
-            for e in partition.terminal_slots
-        ],
-        axis=0,
-    )
     if any(partition.projective_reads):
+        end_ns = np.max(
+            [
+                np.where(e.active, time_base.ns(e.start_ticks), -np.inf)
+                for e in partition.terminal_slots
+            ],
+            axis=0,
+        )
         event_contents, reference_frequency_ghz = _projective_contents(
             template, drive, memo, time_base, partition
         )
     else:
+        terminal_template = replace(template, events=partition.terminal_slots)
         contents = tuple(
             readout_contents(
-                terminal_template, drive, window, memo, time_base=time_base
+                terminal_template,
+                drive,
+                window,
+                memo,
+                time_base=time_base,
+                allow_receiver_only=not path.multiplexed,
             )
             for window in template.readouts
         )
-        reference_frequency_ghz = contents[0].pulses[0][0].frequency_ghz
+        end_ns = contents[0].end_ns
+        first_pulses = contents[0].pulses[0]
+        reference_frequency_ghz = first_pulses[0].frequency_ghz if first_pulses else 0.0
         event_contents = tuple(
             map_readout_events((content,), reference_frequency_ghz)
             for content in contents

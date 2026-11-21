@@ -109,7 +109,8 @@ class ReadoutPartition:
 class ReadoutContents:
     """Incident fields and one ADC's sampling grids for a read block.
 
-    end_ns: owned float64 (points,) evolution endpoints at this pulse start.
+    end_ns: owned float64 (points,) evolution endpoints at the pulse start or,
+        for receiver-only contents, the first trigger.
     pulses: per-content tuples of coherent ReadoutPulse values with absolute ns,
         GHz and common-origin radians, including calibrated signed amplitudes.
         Constant envelopes fold into amplitude; shaped ones retain linear samples.
@@ -284,6 +285,7 @@ def classify_readout(
     *,
     time_base: TimeBase,
     receiver_delays_ns: Mapping[int, float] | None = None,
+    allow_receiver_only: bool = False,
 ) -> ReadoutPartition:
     """Partition readout blocks into terminal, projective and cavity drives.
 
@@ -298,7 +300,9 @@ def classify_readout(
     Return terminal masks in slot order, cavity pulses in point/slot order and
     projective reads in point/start order, with ns/GHz/pulse-local radians at
     zero-GHz reference. Earlier pulses may end exactly at the next block start.
-    Missing terminal pulses, triggers before the first block and pulses crossing
+    With allow_receiver_only, a generator with no active pulses anywhere in the
+    template returns no terminal slots and empty tuples per point. Otherwise,
+    missing terminal pulses, triggers before the first block and pulses crossing
     the next start raise ValueError. With receiver_delays_ns, map each ADC channel
     to its nonnegative flight time in ns. Each nonterminal trigger records later
     blocks that reach its receiver by the last sample. With None, samples at or
@@ -308,10 +312,15 @@ def classify_readout(
     Inputs are not modified; terminal slots borrow unchanged input arrays.
     """
     slots = tuple(event for event in template.events if event.gen_ch == drive.gen_ch)
-    if not slots:
-        raise ValueError("requires one terminal readout pulse per point")
-    latest = np.max([np.where(e.active, e.start_ticks, -np.inf) for e in slots], axis=0)
+    latest = (
+        np.max([np.where(e.active, e.start_ticks, -np.inf) for e in slots], axis=0)
+        if slots
+        else np.full(len(template.points), -np.inf)
+    )
     if not np.isfinite(latest).all():
+        if allow_receiver_only and not np.isfinite(latest).any():
+            empty = ((),) * len(template.points)
+            return ReadoutPartition((), empty, empty, empty)
         raise ValueError("requires one terminal readout pulse per point")
     terminals = []
     terminal_pulses: list[list[ReadoutPulse]] = [[] for _ in template.points]
@@ -714,6 +723,7 @@ def readout_contents(
     memo: dict[int, EnvelopeSpec],
     *,
     time_base: TimeBase,
+    allow_receiver_only: bool = False,
 ) -> ReadoutContents:
     """Deduplicate terminal pulses and one receiver's grids by complete content.
 
@@ -727,50 +737,45 @@ def readout_contents(
     absolute ns/GHz/radians. time_base interprets all tick fields; grids combine
     trigger and integer sample offsets before one ns conversion.
     Return owned arrays with sorted distinct content and a point-to-content map.
-    Missing pulses, varying tone count, pulse mode with multiple tones, mux with
-    more than eight tones or different starts, wrong ADC generator routes, empty
-    trigger axes or a first trigger before terminal start raise ValueError.
+    Wrong ADC generator routes and empty trigger axes raise ValueError.
+    With allow_receiver_only, no active drive.gen_ch pulse anywhere in the template
+    yields empty pulses with endpoints at the first trigger for each point.
+    Otherwise, missing pulses, varying tone count, pulse mode with multiple tones,
+    mux with more than eight tones or different starts, or a first trigger before
+    terminal pulse start raise ValueError.
     Core template/window arrays must satisfy their documented shapes and units.
     No physical model, density propagation or sampling is constructed.
     """
     slots = tuple(e for e in template.events if e.gen_ch == drive.gen_ch)
-    count = np.sum([e.active for e in slots], axis=0)
-    if not slots or np.any(count == 0):
-        raise ValueError("requires one terminal readout pulse per point")
-    if drive.kind == "pulse" and np.any(count != 1):
-        raise ValueError("requires one terminal readout pulse per point")
-    tones = int(count[0])
-    if tones > 8 or np.any(count != tones):
-        raise ValueError("mux requires a fixed 1..8 tone count per point")
+    count = (
+        np.sum([e.active for e in slots], axis=0)
+        if slots
+        else np.zeros(len(template.points), dtype=np.int64)
+    )
+    if allow_receiver_only and not np.any(count):
+        slots = ()
+        tones = 0
+    else:
+        if np.any(count == 0) or (drive.kind == "pulse" and np.any(count != 1)):
+            raise ValueError("requires one terminal readout pulse per point")
+        tones = int(count[0])
+        if tones > 8 or np.any(count != tones):
+            raise ValueError("mux requires a fixed 1..8 tone count per point")
     if not window.trigger_ticks.shape[1] or np.any(
         window.generator_channels != drive.gen_ch
     ):
         raise ValueError("requires ADC timing and its bound readout generator")
-    fields = ("start_ticks", "duration_ticks", "frequency_mhz", "phase_deg", "gain")
-    values = np.zeros((len(template.points), tones, 6))
-    rows = np.arange(len(template.points))
-    ranks = np.cumsum([e.active for e in slots], axis=0) - 1
-    envelopes = []
-    for event, rank in zip(slots, ranks, strict=True):
-        for col, name in enumerate(fields):
-            values[rows, rank, col] += np.where(event.active, getattr(event, name), 0)
-        # Retain the program's common-origin phase until the model reference
-        # frequency is known; ADC pulse-local conversion happens below.
-        values[rows, rank, 3] -= np.where(
-            event.active,
-            360
-            * event.frequency_mhz
-            * (time_base.ns(event.phase_reference_ticks) / 1000),
-            0,
-        )
-        values[rows, rank, 5] += np.where(
-            event.active, event.envelope_index + len(envelopes), 0
-        )
-        envelopes.extend(event.envelopes)
-    if np.any(values[:, :, 0] != values[:, :1, 0]):
-        raise ValueError("mux tones require a common pulse start per point")
-    if np.any(window.trigger_ticks[:, 0] < values[:, 0, 0]):
-        raise ValueError("first ADC trigger must not precede terminal readout start")
+    values, envelopes = _terminal_pulse_rows(
+        slots, len(template.points), tones, time_base
+    )
+    first_trigger = window.trigger_ticks[:, 0]
+    end_ticks = first_trigger
+    if tones:
+        end_ticks = values[:, 0, 0].astype(np.int64)
+        if np.any(first_trigger < end_ticks):
+            raise ValueError(
+                "first ADC trigger must not precede terminal readout start"
+            )
     representatives, inverse = _content_rows(values, window)
     pulses = []
     grids = []
@@ -800,12 +805,40 @@ def readout_contents(
             )
         )
     return ReadoutContents(
-        time_base.ns(values[:, 0, 0].astype(np.int64)),
+        time_base.ns(end_ticks),
         tuple(pulses),
         tuple(grids),
         inverse.astype(np.int64),
         (tuple(range(window.trigger_ticks.shape[1])),) * len(grids),
     )
+
+
+def _terminal_pulse_rows(
+    slots: tuple[EventSlot, ...], points: int, tones: int, time_base: TimeBase
+) -> tuple[NDArray[np.float64], list[PulseEnvelope | None]]:
+    """Pack active terminal tones per point, retaining their common-origin phases."""
+    fields = ("start_ticks", "duration_ticks", "frequency_mhz", "phase_deg", "gain")
+    values = np.zeros((points, tones, 6))
+    rows = np.arange(points)
+    ranks = np.cumsum([e.active for e in slots], axis=0) - 1
+    envelopes: list[PulseEnvelope | None] = []
+    for event, rank in zip(slots, ranks, strict=True):
+        for col, name in enumerate(fields):
+            values[rows, rank, col] += np.where(event.active, getattr(event, name), 0)
+        values[rows, rank, 3] -= np.where(
+            event.active,
+            360
+            * event.frequency_mhz
+            * (time_base.ns(event.phase_reference_ticks) / 1000),
+            0,
+        )
+        values[rows, rank, 5] += np.where(
+            event.active, event.envelope_index + len(envelopes), 0
+        )
+        envelopes.extend(event.envelopes)
+    if np.any(values[:, :, 0] != values[:, :1, 0]):
+        raise ValueError("mux tones require a common pulse start per point")
+    return values, envelopes
 
 
 def _content_rows(
