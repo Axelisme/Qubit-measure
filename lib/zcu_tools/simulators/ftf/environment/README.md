@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, readout block arrival times
+**Last updated:** 2026-11-21, ADC wiring and readout block arrival times
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -713,7 +713,7 @@ indices. Standalone `plan_template` rejects mixing within its template too.
 Separate acquires can select different paths in the same environment.
 The caller supplies the board profile independently of model wiring. Runtime
 uses that profile without inferring channel counts or selecting a mock profile;
-the environment routes include both configured readout paths and all drive lines.
+only the configured pulse and mux readout paths route to ADCs, while drive and fast-flux lines are declared as DACs only.
 `plan_template` and `FTFSource` accept an explicit `readout=` override. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
 Each batch retains the same chronological logical-event axis. An event contains
