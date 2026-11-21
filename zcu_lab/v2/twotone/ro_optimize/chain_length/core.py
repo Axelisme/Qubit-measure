@@ -45,6 +45,15 @@ from zcu_lab.v2.twotone.ro_optimize._chain_common import (
 class ChainLengthCfg(ConfigBase):
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     length: Annotated[SweepCfg, FieldMeta(label="Readout length", unit="us")]
+    time_of_fly: Annotated[
+        float,
+        FieldMeta(
+            label="Time of flight",
+            unit="µs",
+            description="Readout propagation time to the ADC. Correct the resonator calibration and Reset if blank.",
+            readonly=True,
+        ),
+    ] = Field(strict=True, allow_inf_nan=False, ge=0)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -77,7 +86,7 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
             result_type=ThermalChainSums,
             cfg_type=ChainLengthCfg,
             tag="twotone/ro_optimize/chain_length",
-            cfg_schema_version="4.0",
+            cfg_schema_version="5.0",
             result_builder=restore_readout_sums,
             labber_layout="independent",
         )
@@ -86,7 +95,8 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
     def run(self, cfg: ChainLengthCfg, *, context: RunContext) -> ThermalChainSums:
         """Acquire 16 consecutive reads per shot, separated by K=relax_delay us.
 
-        Sweep readout length in us. The host builds one program per ADC window; its pulse is window + 0.11 us.
+        Sweep ADC window length in us, building one program per window.
+        The pulse lasts trig_offset minus time_of_fly plus the window and 0.11 us.
         There is no reset or drive within a shot. The readout post_delay
         supplies the photon decay gap between reads. K after each shot lets the
         next shot start from thermal equilibrium. Live plots show score and
@@ -138,16 +148,15 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
                     relax_delay=cfg.relax_delay,
                     reps_innermost=True,
                 )
-                # Each ADC window has its own pulse, with a 0.11 us margin.
+                window = step.value
                 readout = PulseReadout(
                     "readout",
                     cfg.readout,
-                    ro_length=step.value,
-                    length=step.value + 0.11,
+                    ro_length=window,
+                    length=cfg.readout.trig_offset - cfg.time_of_fly + window + 0.11,
                 )
                 with builder.repeat("read", READS_PER_SHOT):
                     builder.emit(readout)
-                    builder.delay_auto()
                 prog = builder.build()
                 step.run_acquire_summed(
                     prog,
