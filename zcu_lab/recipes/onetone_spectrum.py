@@ -40,19 +40,19 @@ class OnetoneSpectrumInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Select the Readout pulse and ADC window by library key; omit to retain the Form selection, or pass null to the Form.",
+        description="Select Readout by library key (pulse and ADC window); omit to keep; null goes to the Form.",
     )
     center_mhz: float | None | Keep = Field(
         KEEP,
-        description="Set Readout RF frequency › Start and Stop (MHz) around this absolute RF center; provide span_mhz too. Omit both to retain the sweep; null clears both endpoints.",
+        description="Set Readout RF frequency › Start and Stop around this RF center (MHz); pair with span_mhz.",
     )
     span_mhz: Annotated[float, Field(gt=0)] | None | Keep = Field(
         KEEP,
-        description="Set Readout RF frequency › Start and Stop (MHz) to center_mhz minus/plus half this full span. Omit both to retain the sweep; null clears both endpoints.",
+        description="Set Readout RF frequency › Start and Stop to center_mhz ± half this full span (MHz).",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Set Readout › Gain (a.u.), the fraction of DAC full-scale pulse amplitude; omit to retain it, or pass null to the Form.",
+        description="Set Readout › Gain (a.u.), a fraction of DAC full scale; omit to keep; null goes to the Form.",
     )
     points: Annotated[int, Field(ge=2)] | None | Keep = Field(
         KEEP,
@@ -69,19 +69,19 @@ class OnetoneSpectrumInputs(RecipeInputs):
 
     model_type: Literal["hm", "t", "auto"] | None | Keep = Field(
         KEEP,
-        description="Set Analyze › Resonance model: hm for a hanger notch, t for a transmission peak, or auto to choose from the measured magnitude; omit to retain it, or pass null to Analyze.",
+        description="Set Analyze › Resonance model: hm for a hanger notch, t for a transmission peak, or auto.",
     )
     fit_bg_amp_slope: bool | None | Keep = Field(
         KEEP,
-        description="Set Analyze › Fit amplitude background slope to allow a frequency-dependent amplitude envelope; omit to retain it, or pass null to Analyze.",
+        description="Set Analyze › Fit amplitude background slope to allow the baseline amplitude to vary with frequency.",
     )
     fit_bg_phase_curvature: bool | None | Keep = Field(
         KEEP,
-        description="Set Analyze › Fit phase background curvature to allow a quadratic phase term; omit to retain it, or pass null to Analyze.",
+        description="Set Analyze › Fit phase background curvature to allow a quadratic phase term.",
     )
     edelay: float | None | Keep = Field(
         KEEP,
-        description="Set Analyze › Electrical delay seed (µs; blank = auto); omit to retain it or pass null to use a matching saved calibration or automatic branch search.",
+        description="Set Analyze › Electrical delay seed (µs); null uses a matching saved delay or automatic search.",
     )
 
 

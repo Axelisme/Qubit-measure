@@ -38,7 +38,7 @@ class OnetoneRangeFindInputs(RecipeInputs):
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     freq: ToneRangeInputs = Field(
-        description="Set Readout RF frequency › Start and Stop (MHz) to absolute RF endpoints, not mixer offsets; both are required."
+        description="Set Readout RF frequency › Start and Stop (MHz) to absolute RF endpoints, not mixer offsets."
     )
     n: int = Field(
         strict=True,
@@ -47,13 +47,13 @@ class OnetoneRangeFindInputs(RecipeInputs):
     )
     resonators: list[str] = Field(
         min_length=1,
-        description="Set Analyze › Resonators (JSON) as a nonempty list of names; the list length gives the expected dip count. Use temporary names if needed.",
+        description="Set Analyze › Resonators (JSON) to one name per expected dip; temporary names are allowed.",
     )
     min_separation: (
         Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)] | None | Keep
     ) = Field(
         KEEP,
-        description="Set Analyze › Min separation (MHz), the minimum dip spacing (>0, initially 1); omit to retain it, or pass null to Analyze.",
+        description="Set Analyze › Min separation (MHz), the minimum dip spacing (>0, default 1).",
     )
     reps: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         KEEP,
@@ -61,7 +61,7 @@ class OnetoneRangeFindInputs(RecipeInputs):
     )
     rounds: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         KEEP,
-        description="Set Rounds (count), repetitions of the sweep for averaging; omit to retain it, or pass null to the Form.",
+        description="Set Rounds (count), sweeps to average; omit to keep; null goes to the Form.",
     )
 
 

@@ -42,7 +42,7 @@ class OnetoneSpectrumOverPowerInputs(RecipeInputs):
     )
     center_mhz: float | None | Keep = Field(
         KEEP,
-        description="Set Readout RF frequency › Start and Stop (MHz) around this absolute RF center; provide span_mhz too.",
+        description="Set Readout RF frequency › Start and Stop around this RF center (MHz); pair with span_mhz.",
     )
     span_mhz: Annotated[float, Field(gt=0)] | None | Keep = Field(
         KEEP,
