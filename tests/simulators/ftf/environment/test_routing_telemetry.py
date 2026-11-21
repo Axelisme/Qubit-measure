@@ -230,7 +230,7 @@ def test_finish_acquire_projects_binding_outcome_without_numeric_work(
         telemetry=RoutingTelemetry(tmp_path),
     )
     try:
-        source.finish_acquire(AcquireOutcome((), 7.0, 2.0, complete))
+        source.finish_acquire(AcquireOutcome((), 7.0, 2.0, complete, "fixture-acquire"))
         files = list(tmp_path.glob("routing-*.jsonl"))
         assert len(files) == 1
         rows = [json.loads(line) for line in files[0].read_text().splitlines()]

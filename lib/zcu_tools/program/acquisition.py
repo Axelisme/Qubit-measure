@@ -242,7 +242,11 @@ class EarlyStopMixin(TypedAcquireMixin):
         if self.acquire_params["type"] == "accumulated" and cancel_flag is not None:
             return self._finish_accumulated_round(cancel_flag)
 
-        not_finish = super().finish_round()
+        not_finish = (
+            self._finish_decimated_round()
+            if self.acquire_params["type"] == "decimated"
+            else super().finish_round()
+        )
         if not_finish and cancel_flag is not None and cancel_flag.is_set():
             self._close_rounds_pbar()
             return False
@@ -255,6 +259,9 @@ class EarlyStopMixin(TypedAcquireMixin):
                 "acquire stopped before the first round completed"
             )
         return super().finish_acquire()
+
+    def _finish_decimated_round(self) -> bool:
+        return super().finish_round()
 
     def _finish_accumulated_round(self, cancel_flag: CancelFlagProtocol) -> bool:
         # Mirrors the "accumulated" branch of qick's AcquireMixin.finish_round

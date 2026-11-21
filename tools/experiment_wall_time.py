@@ -44,7 +44,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 
 from tools._experiment_wall_time_report import (
-    RUN_TARGET_S,
     BatchPlan,
     JournalUsageError,
     Row,
@@ -55,12 +54,17 @@ from tools._experiment_wall_time_report import (
     reusable_rows,
     write_json,
 )
-from tools.analyze_routing_telemetry import AcquireInput, AcquireWallTotals
+from tools.analyze_routing_telemetry import (
+    AcquireInput,
+    MaterializeInput,
+    decode_routing_record,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DATA_DIR = _REPO_ROOT / "tools" / "data" / "experiment_wall_time"
 _OUTPUT_ROOT = _REPO_ROOT / ".agent_state" / "benchmark" / "wall-time"
 _DEFAULT_ROW_TIMEOUT_S = 360.0
+_MIN_ROW_TIMEOUT_S = 180.0
 _QT_TIMER_MAX_MS = 2**31 - 1
 _QT_TIMER_MAX_S = _QT_TIMER_MAX_MS / 1000
 _CANCEL_GRACE_S = 30.0
@@ -195,16 +199,74 @@ class Inventory:
     measure: Callable[[WallTimeCase, Path, Path, _RecordAttempt], None]
 
 
-def summarize_acquires(directory: Path, *, live: bool = False) -> AcquireWallTotals:
-    """Sum all routing JSONL records from one dedicated Run telemetry directory.
+@dataclass
+class AcquireCoreTotals:
+    """Measured totals in seconds and coverage for one Run's telemetry.
 
-    Return coverage counts even when no wall measurements are available.
-    An empty directory produces zero included and excluded records. I/O and
-    invalid record errors propagate; unrelated filenames are not read. Pass
-    live=True while a worker may still append or prune files: count committed
-    lines only and skip files pruned between enumeration and open.
+    included and excluded count main acquire rows with and without all five
+    wall measurements. uncovered_materialize indicates an event without a
+    measured main row. wall_s sums the included acquire walls. The stage totals
+    cover those same rows, plus matched deferred work in materialize_wall_s.
+    remainder_s excludes only work within wall_s. All sums start at zero.
     """
-    totals = AcquireWallTotals()
+
+    included: int = 0
+    excluded: int = 0
+    uncovered_materialize: bool = False
+    wall_s: float = 0.0
+    compile_wall_s: float = 0.0
+    evolve_wall_s: float = 0.0
+    readout_wall_s: float = 0.0
+    materialize_wall_s: float = 0.0
+    remainder_s: float = 0.0
+
+    @property
+    def core_s(self) -> float:
+        """Sum the four measured stage totals, including matched deferred work."""
+        return (
+            self.compile_wall_s
+            + self.evolve_wall_s
+            + self.readout_wall_s
+            + self.materialize_wall_s
+        )
+
+    def add_acquire(self, record: AcquireInput) -> bool:
+        """Count a main row and return whether all its wall times were summed."""
+        if (
+            record.wall_s is None
+            or record.compile_wall_s is None
+            or record.evolve_wall_s is None
+            or record.readout_wall_s is None
+            or record.materialize_wall_s is None
+        ):
+            self.excluded += 1
+            return False
+        self.included += 1
+        self.wall_s += record.wall_s
+        self.compile_wall_s += record.compile_wall_s
+        self.evolve_wall_s += record.evolve_wall_s
+        self.readout_wall_s += record.readout_wall_s
+        self.materialize_wall_s += record.materialize_wall_s
+        self.remainder_s += (
+            record.wall_s
+            - record.compile_wall_s
+            - record.evolve_wall_s
+            - record.readout_wall_s
+            - record.materialize_wall_s
+        )
+        return True
+
+
+def summarize_acquires(directory: Path, *, live: bool = False) -> AcquireCoreTotals:
+    """Sum measured acquire stages and pair deferred raw work by acquire ID.
+
+    Read routing-*.jsonl from one Run directory; I/O and invalid record errors
+    propagate. Pass live=True while a worker may still append or prune files:
+    count committed lines only and skip files pruned between listing and open.
+    """
+    totals = AcquireCoreTotals()
+    measured_ids: set[str] = set()
+    deferred: dict[str, float] = {}
     for path in sorted(directory.iterdir()):
         if not path.match("routing-*.jsonl"):
             continue
@@ -217,7 +279,20 @@ def summarize_acquires(directory: Path, *, live: bool = False) -> AcquireWallTot
         with stream:
             for line in stream:
                 if not live or line.endswith(b"\n"):
-                    totals.add(AcquireInput.model_validate_json(line))
+                    record = decode_routing_record(line)
+                    if isinstance(record, MaterializeInput):
+                        acquire_id = record.acquire_id
+                        deferred[acquire_id] = (
+                            deferred.get(acquire_id, 0.0) + record.materialize_wall_s
+                        )
+                    elif totals.add_acquire(record) and record.acquire_id is not None:
+                        measured_ids.add(record.acquire_id)
+    for acquire_id, seconds in deferred.items():
+        if acquire_id in measured_ids:
+            # Deferred work contributes to core, but is outside acquire wall.
+            totals.materialize_wall_s += seconds
+        else:
+            totals.uncovered_materialize = True
     return totals
 
 
@@ -246,18 +321,26 @@ def _current_commit() -> str:
 
 
 def _add_breakdown(
-    row: Row, totals: AcquireWallTotals, *, partial: bool = False
+    row: Row, totals: AcquireCoreTotals, *, timed_out: bool = False
 ) -> None:
-    available = totals.included > 0 and (partial or not totals.excluded)
+    covered = totals.included > 0
+    complete = (
+        covered
+        and not timed_out
+        and not totals.excluded
+        and not totals.uncovered_materialize
+    )
+    available = complete or (covered and timed_out)
     row.update(
         acquires=totals.included + totals.excluded,
         compile_s=totals.compile_wall_s if available else None,
         evolve_s=totals.evolve_wall_s if available else None,
         readout_s=totals.readout_wall_s if available else None,
+        materialize_s=totals.materialize_wall_s if available else None,
+        core_s=totals.core_s if complete else None,
+        core_s_lower_bound=totals.core_s if covered and not complete else None,
         remainder_s=totals.remainder_s if available else None,
-    )
-    row["breakdown"] = (
-        ("partial" if partial else "complete") if available else "missing"
+        breakdown="complete" if complete else "partial" if available else "missing",
     )
 
 
@@ -561,14 +644,14 @@ def _finish_timeout(run: Run, location: Path, row: Row, stop: _Interruption) -> 
     run.cancel()
     deadline = perf_counter() + _CANCEL_GRACE_S
     telemetry = location / "telemetry"
-    _add_breakdown(row, summarize_acquires(telemetry, live=True), partial=True)
+    _add_breakdown(row, summarize_acquires(telemetry, live=True), timed_out=True)
     write_json(location / "row.json", row)
     settled = run.wait_until(deadline, stop.requested, idle=True)
     if stop.requested():
         raise _InterruptedBatch
     if settled is None or settled.monotonic_s > deadline:
         raise _RunCannotContinue
-    _add_breakdown(row, summarize_acquires(telemetry), partial=True)
+    _add_breakdown(row, summarize_acquires(telemetry), timed_out=True)
     write_json(location / "row.json", row)
 
 
@@ -663,9 +746,12 @@ def _measure_attempt(run: Run, location: Path, row: Row, batch: _Batch) -> None:
 
 def _row_timeout(raw: str) -> float:
     seconds = float(raw)
-    if not math.isfinite(seconds) or not RUN_TARGET_S <= seconds <= _QT_TIMER_MAX_S:
+    if (
+        not math.isfinite(seconds)
+        or not _MIN_ROW_TIMEOUT_S <= seconds <= _QT_TIMER_MAX_S
+    ):
         raise argparse.ArgumentTypeError(
-            f"row deadline must be between {RUN_TARGET_S:g} and {_QT_TIMER_MAX_S:.3f} seconds"
+            f"row deadline must be between {_MIN_ROW_TIMEOUT_S:g} and {_QT_TIMER_MAX_S:.3f} seconds"
         )
     return seconds
 
@@ -726,7 +812,7 @@ def _main(
         metavar="SECONDS",
         help=(
             f"deadline from Run dispatch (default {_DEFAULT_ROW_TIMEOUT_S:g} s; "
-            f"range {RUN_TARGET_S:g} to {_QT_TIMER_MAX_S:.3f} s)"
+            f"range {_MIN_ROW_TIMEOUT_S:g} to {_QT_TIMER_MAX_S:.3f} s)"
         ),
     )
     parser.add_argument(

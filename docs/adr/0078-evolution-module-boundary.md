@@ -55,11 +55,12 @@ status: accepted
 
 **例子。** 比較兩個 checkout 的序列總耗時時，成對計時直接呼叫 `Engine.evolve`，不經 acquire。精度案例與指標見[測試文件](../../tests/README.md#evolution-精度矩陣)。
 
-**邊界。** 各層都重現不了使用者回報的錯時，可以跑一次 e2e 定位。腳本不入庫，不當驗收門檻。整實驗只允許 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 入庫記錄正常參數的 Run 牆鐘與分項，不當測試、gate 或精度證據。該工具用固定模擬輸入，在 `time_scale=0` 下只計送出 Run 到終態，不呼叫 Analyze 或 Save。這個具體範圍由 designer 代裁，使用者未覆核。
+**邊界。** 各層都重現不了使用者回報的錯時，可以跑一次 e2e 定位。腳本不入庫，不當驗收門檻。整實驗只允許 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 入庫：它以現行表單預設跑完整 Run，記錄 Run 牆鐘與分項，不當測試、gate 或精度證據。優化指標是模擬器核心耗時，即該 Run 各次 acquire 的編譯、演化、讀出與 raw materialize 四項之和。Controller、表單、Qt、繪圖、Analyze、Save 與 `ShotReducer` 等 host 處理不計入核心。Raw materialize 由呼叫它的模擬 binding 計時，寫進 [acquire telemetry](../../lib/zcu_tools/simulators/README.md#acquire-telemetry)，工具只彙總。不另建凍結的核心場景：改了實驗就重跑那一列；比較模擬器改動時，前後兩次在同一版實驗上跑。完整核心、下限與 180 秒判定的規則見[工具說明](../../tools/README.md#實驗-run-牆鐘)。工具用固定模擬輸入，在 `time_scale=0` 下只計送出 Run 到終態，不呼叫 Analyze 或 Save。
 
 **依據。**
 - 2026-11-15，使用者：「我會預期模擬器測試腳本只會依賴模擬器模塊，後端與前端分開測，kernel與dispatch也分開測，不該有e2e的測試需求」。對「整條序列的最終誤差放哪一層」答「A」，即加序列層；同意只為定位而跑一次 e2e，答「我選B」。見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
-- 2026-11-20，使用者問：「為什麼要用不入庫的 scratch 腳本量?而不是入庫的？」2026-11-21，對用 Run 牆鐘作優化指標、工具入庫而不當 gate 答「都採用建議」。同日 designer 代裁上述工具的具體範圍，使用者未覆核。見[實驗 Run 牆鐘工具](../discussions/2026-11-21-experiment-run-wall-time.md)。
+- 2026-11-20，使用者問：「為什麼要用不入庫的 scratch 腳本量?而不是入庫的？」2026-11-21，對工具入庫而不當 gate 答「都採用建議」。見[實驗 Run 牆鐘工具](../discussions/2026-11-21-experiment-run-wall-time.md)。
+- 2026-11-21，使用者更正指標：「大头是模拟器本身，所以量模拟器速度就好了」。比較凍結核心場景與跑完整 Run 時，使用者問：「你觉得哪一种比较简单？是直接跑完整的1:1比较简单，还是复制场景比较简单？请你从维护性跟那个扩充性来考虑。」designer 建議照舊跑完整 Run、從 telemetry 讀核心並補 raw materialize、不建凍結場景，核心不計 host 處理；使用者答「那就采用建议吧」。`time_scale=0`、不呼叫 Analyze 或 Save，以及延後 materialize 的補充紀錄、核心下限與 180 秒判定的規則，是 designer 代裁，使用者未覆核。見[模擬器核心耗時](../discussions/2026-11-21-simulator-core-time.md)。
 
 ### 每個 kernel 的量測場景只有一段
 
@@ -199,6 +200,16 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 
 **依據。** 2026-11-18，使用者：「这不合理，CZ gate 可能也是从 charge line 打，而且模拟器理应不知道现在的架构是 FTF 还是只有单个 F 还是什么的。」見 [FTF 動態維度](../discussions/2026-11-18-ftf-dynamic-dimension.md)。
 
+### FTF Stop 用合作式檢查點，設計上 5 秒內
+
+**規則。** FTF Stop 不設強制上限，也不設延遲 gate。放點依據是正常參數下，相鄰兩次取消檢查之間的區段在 5 秒內結束。FTF 在每個 projective outcome 推進前檢查取消。Engine 在幾何規劃結束、建立 WorkPlan 前和 chunk 邊界檢查，binding 在 pacing 等待中檢查。
+
+**例子。** `chain/amp_rabi` 以 51 gains、100 reps、100 rounds 離線執行。在第 10 個 span 組裝時送出 Stop，0.0009 秒後檢查讀到旗標，0.017 秒到 core 終態，沒有完成輪。先前觀察到 11.8 至 95.3 秒的組裝區段不查取消；這次逐 outcome 查詢，第 7 至 9 個 span 的單次 advance 最長約 0.02 秒。
+
+**邊界。** 5 秒不是驗收門檻，**目前未達成**。`Engine.evolve` 的 plan 和 WorkPlan 仍量到超過 5 秒的區段，尚未定位子段。空 cache、warmup 關閉時，首個 cold chunk 量到 5.4 至 8.5 秒。Engine 後的讀出分布、raw 準備與抽樣未覆蓋。這些區段由 `ftf-stop-remaining-gaps` 承接。若縮短間隔只能犧牲速度或改變啟動行為，交回使用者取捨。通用 Cancel 與 terminal 所有權遵循 [ADR-0066](0066-operation-lifecycle.md#取消與互動)。
+
+**依據。** 2026-11-21，使用者對 Stop 上限答「3C，但設計上5秒內」，並說「我认为能及时中断也是一个挺重要的功能。」具體放點與剩餘區段的承接是 designer 依授權代裁，使用者未覆核。見 [FTF Stop 討論](../discussions/2026-11-21-ftf-stop-checkpoints.md)。
+
 ### 模擬器帶通用調試介面
 
 **規則。** 每個模擬器提供同一組調試介面，定位與驗證工具只依賴這組介面。共同欄位有型別；模擬器自行決定哪些額外值放進 dict。
@@ -243,15 +254,15 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 
 **規則。** 算法的數值實作留在自己的模組與專用 helpers。多個算法共用的數值由單一模組擁有，kernel 不借用另一個 kernel class 的方法。Rates→Q／decay、period playback 與 fractional tail 的 owner 見 [Algorithm ownership and reuse](../../lib/zcu_tools/simulate/evolution/README.md#algorithm-ownership-and-reuse)。
 
-**例子。** ADC 擁有 flat 腔場二階矩的精確結果 memo，負責 lossless key、有界容量與回傳陣列 ownership。FTF 在一次 acquire 的 span composition 建立最多 64 MiB 的 owner，供 g/e 各點串行共用。正常返回或拋出 exception 時都清理。`CavityDrive` 只轉交 owner，不組 ADC key。
-現行的 flat span memo 也收各 state 的端點場；這項擴充是 designer 代裁，使用者未覆核。ADC 同次求解產出兩種產品，共用原本的容量與壽命。無法證明等價時分開求解、不收錄。詳細 key、容量、清理見 [ADC README](../../lib/zcu_tools/simulate/adc/README.md) 與 [FTF cavity drives](../../lib/zcu_tools/simulators/ftf/environment/README.md#cavity-drives)。
+**例子。** ADC 擁有 flat 腔場 span 的精確結果 memo，負責 lossless key、有界容量與回傳陣列 ownership。同一次求解產出二階矩與各 state 的端點場，兩種產品共用容量與壽命；無法證明等價時分開求解、不收錄。FTF 的 projective 與非 projective 兩種 span composition 都經 `CavityAverageCache.span` 取得兩種產品。每次 composition 建立一個 owner，兩種 composition 用同一個 512 MiB 容量，供該次 composition 的各點與各 history 串行共用；ADC 全庫預設仍是 64 MiB。正常返回或拋出 exception 時都清理。`CavityDrive` 只轉交 owner，不組 ADC key。`chain_length` 2.2 µs 的 projective 前綴有 29,921 次 span，其中 19,346 次命中別的 history 已解過的 key；ADC 回傳二階矩與端點場，FTF 再為每條 history 選態、建 shift。詳細 key、容量依據與清理見 [ADC README](../../lib/zcu_tools/simulate/adc/README.md) 與 [FTF cavity drives](../../lib/zcu_tools/simulators/ftf/environment/README.md#cavity-drives)。
 
-**邊界。** Memo 不留在 Engine、global 或長駐 source。FTF 仍選態、建 Stark／dephasing shift 並傳場給下一段。Shaped/callable 與主分支選擇不進 memo；projective 只重用既有的 flat 二階矩，不收各 state 端點場。跨 package 的依賴維持 [[0072]] 與 C8、C9、C12，不新增依賴方向或放寬 `ignore_imports`。這些 contract 不檢查內部子模組的匯入路徑；package root 的公開入口由介面與 caller review 維持。
+**邊界。** Memo 不留在 Engine、global 或長駐 source。FTF 仍逐 history 選態、建 Stark／dephasing shift 並傳場給下一段；projective 路徑不合併 histories，不改投影權重或主分支選態。Shaped/callable 輸入與主分支選擇不進 memo。跨 package 的依賴維持 [[0072]] 與 C8、C9、C12，不新增依賴方向或放寬 `ignore_imports`。這些 contract 不檢查內部子模組的匯入路徑；package root 的公開入口由介面與 caller review 維持。
 
 **依據。**
 - 2026-10-18，使用者：「之後我的規劃是讓你先整理目前模擬引擎，使其對外是黑盒子，對內是實質偶合，決策分類有全部算法的知識，算法部分內聚，以不影響優化與可讀性為主要指標，移除已經沒用的邏輯，將研究成果以及嘗試紀錄到repo文檔中供以後參考。然後就可以開始planner的重構，使各優化算法的實作張力能以自然的表達」。原裁決未附入庫討論，見 Git `ee1eeaa8d`。
 - 2026-10-21，使用者對二階矩 memo 的方案答「前兩個採用建議」。原裁決未附入庫討論，見 Git `ffe98f8f7`；[MIST 腔場重用的先例整理](../discussions/2026-11-21-mist-cavity-reuse.md#先例與立場)列出這項裁決的適用範圍。
-- 2026-11-21，designer 依使用者授權「我授权你的范围除了 push 还有真实硬体之外都可以做」代裁端點場擴充，使用者未覆核。正常參數重測為 281.5 s 與 163.3 s；兩次 commit 不同，不能把差值全歸因於快取。二階矩單獨重用的上限及比較見 [MIST 腔場重用](../discussions/2026-11-21-mist-cavity-reuse.md)。
+- 2026-11-21，designer 依使用者授權「我授权你的范围除了 push 还有真实硬体之外都可以做」代裁端點場擴充。使用者 2026-11-21 追認：「其余的第二批追认。」正常參數重測為 281.5 s 與 163.3 s；兩次 commit 不同，不能把差值全歸因於快取。二階矩單獨重用的上限及比較見 [MIST 腔場重用](../discussions/2026-11-21-mist-cavity-reuse.md)。
+- 2026-11-21，使用者對模擬器下一批加速的選項答「6A」，選 projective 腔場的 span 重用。對本節原邊界句「projective 只重用既有的 flat 二階矩，不收各 state 端點場」答「2S，我對於模擬器沒那麼多限制，好維護與模擬效率是唯二考量，其他都只是建議」，改為 projective 與非 projective 走同一條 ADC span 合併解。512 MiB 的選法（再加倍多出的命中少於跨 history 重複機會的 10%，且 process peak RSS 增量不超過 512 MiB）與兩種 composition 共用一個容量，是 designer 代裁，使用者未覆核。見 [Projective 腔場改走 ADC flat span 合併解](../discussions/2026-11-21-projective-span-reuse.md)。
 
 ### t6 只保留 direct
 

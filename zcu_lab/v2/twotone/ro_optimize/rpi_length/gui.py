@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.cfg_model import TemplateDef
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -30,11 +33,18 @@ def _run(cfg: RPiLengthCfg, *, context: RunContext) -> RPiLengthRunResult:
     return RunRecord(cfg=cfg, result=RPiLengthExp().run(cfg, context=context))
 
 
-# No writeback: the operator chooses the window from the score and its diagnostics.
-DEFINITION = Adapter(
-    spec=RPiLengthExp.AXES_SPEC,
-    make_form=make_form,
-    run=_run,
-    guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
-)
+def build_adapter(
+    templates: Mapping[str, TemplateDef],
+) -> Adapter[RPiLengthCfg, RPiLengthResult, None, RPiLengthAnalysis]:
+    """Bind the registering Registry's templates for Open and Reset.
+
+    Return an adapter without building a Form or inspecting the catalog.
+    """
+    # No writeback: the operator chooses the window from the score and its diagnostics.
+    return Adapter(
+        spec=RPiLengthExp.AXES_SPEC,
+        make_form=partial(make_form, templates=templates),
+        run=_run,
+        guide=Path(__file__).with_name("guide.md"),
+        analysis=Analysis(fn=_analyze),
+    )

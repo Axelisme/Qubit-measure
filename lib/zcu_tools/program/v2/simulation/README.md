@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-21, named ADC frequency requirement
+**Last updated:** 2026-11-21, backend cancellation and deferred raw timing
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -27,9 +27,10 @@ per-request ns bound without rejecting a long acquisition.
 Timeline durations include readout, pre/post delays and pending ADC activity;
 structural templates cover every scan point once. The binding subtracts snapshot
 and execution wall time, then sleeps only for a positive remainder. Failures do
-not wait. With cancellation, waits check Stop at intervals of at most 10 ms; the
-integrated acquisition discards the interrupted round, while decimated
-acquisition keeps its completed trace and stops before the next round.
+not wait. Pacing checks the same Stop query as the backend at intervals of at
+most 10 ms. If Stop interrupts pacing after numeric execution returns, integrated
+acquisition discards that round and decimated acquisition keeps its trace.
+Neither starts another round.
 A finite nonnegative `time_scale` of 1.0 follows physical time, 0.1 is ten times
 faster, and zero disables pacing. Without an injected clock, zero also skips
 round clock reads. Generic bindings default
@@ -40,13 +41,23 @@ builder owns this policy, not the GUI. For a 2 us timeline with zero relaxation,
 the target when numeric work dominates.
 `SimulationBinding(..., callbacks=SimulationCallbacks(on_end=callback))` optionally observes each admitted
 acquire after all software rounds, including partial or failed acquisitions.
-The callback receives one frozen `AcquireOutcome(rounds, wall_s, compile_wall_s,
-complete)`. `rounds` contains captured inputs in execution order, including a
-failed round's input. `wall_s` includes pacing and mixin cleanup, but excludes
+The callback receives one frozen `AcquireOutcome`. Its `rounds` tuple contains
+captured inputs in execution order, including a failed round's input. `wall_s` includes pacing and mixin cleanup, but excludes
 readiness, `on_begin` and observer work. The mixin wraps only
 `build_compiled_request` in `binding.compiling()`; its elapsed seconds accumulate
 in `compile_wall_s` even if construction raises. Installation and execution do
 not contribute to compile time. No entered compile scope means `0.0`.
+`materialize_wall_s` sums the seconds spent generating and detaching raw shots
+inside the acquire, including failed calls. It is `0.0` when no shots are
+materialized during acquire. It excludes downstream shot processing.
+If a later getter materializes retained shots, optional
+`SimulationCallbacks(on_materialize=callback)` receives the originating
+`acquire_id` and elapsed seconds. `get_shot_result()` publishes only after building
+the result successfully; a failure after raw materialization does not publish.
+A direct `get_raw()` publishes on materialization as before. The binding measures
+both paths without counting mask or result construction. Program has no
+knowledge of the telemetry writer or file format. Both callbacks use the same
+warning policy.
 
 The binding's acquire body includes request release and active-marker cleanup.
 It sets `complete=True` only when that body returns normally. A Stop that returns
@@ -57,8 +68,8 @@ The observer runs after this decision and before admission releases. Ordinary
 observer `Exception`s warn at most once and cannot mask acquisition failures,
 even under warning-as-error filters. Observer `BaseException`s propagate and
 retain an original acquire error as context. Admission releases in either case.
-An omitted `on_end` avoids acquire and compiling clock reads. FTF projects this
-outcome into its local routing report; program knows no writer or file format.
+An omitted `on_end` avoids acquire stage clock reads. An omitted
+`on_materialize` avoids timing deferred access.
 Integrated `acquire(..., charge_requirements=(ChargeDriveRequirement(name, gen_ch), ...))`
 passes named physical charge requirements through the simulation request. The
 record lives in `simulate.boundary`; names are diagnostics, not dispatch keys.
@@ -523,12 +534,15 @@ and call sequence reproduces results within the recorded library versions.
 `step_rounds=True` fails before request construction or sequence admission for
 both simulation acquisition modes. Reentry on the same program or bound SoC fails
 before overwriting the active call. `finally` releases call-owned buffers and
-admission on normal return or exception. Integrated Stop reaches evolution's
-chunk checkpoints through `RoundRequest.cancel`, discards the interrupted round,
-and retains completed rounds (or no result when none completed); warmup and
-hardware acquisition are unchanged. Decimated Stop reaches pacing only, without
-adding backend evolution cancellation; its completed-trace policy is unchanged.
-ADC work and pacing sleeps remain synchronous.
+admission on normal return or exception. In both modes, the SoC holds the
+acquire's Stop query until it releases the request. `RoundRequest.cancel`
+passes it to the backend for cooperative checks, with no fixed Stop latency.
+If the backend raises `Cancelled`, acquisition discards the interrupted round
+without setting or requiring the caller's Stop flag. QICK averages completed
+rounds; only those rounds reach the round hook. If none completed, acquisition
+raises `StoppedPartialAcquireError` without attempting an average. Decimated
+acquisition retains the trace when Stop interrupts only pacing. Warmup and
+hardware acquisition are unchanged. ADC work and pacing sleeps remain synchronous.
 
 Only `SimulationProvenance.identifier` is copied to public Run metadata as optional
 `simulation_id`. Backend/RNG versions and private requests remain on the typed

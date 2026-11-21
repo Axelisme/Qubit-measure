@@ -34,7 +34,7 @@ from zcu_tools.simulate.evolution import (
 )
 from zcu_tools.simulators.ftf.environment import FTFSource, plan_template
 from zcu_tools.simulators.ftf.environment.numeric import resonators
-from zcu_tools.simulators.ftf.physics import CavityDrive
+from zcu_tools.simulators.ftf.physics import CavityDrive, CavityResponse
 
 from tests.core._simulation import tick_array, ticks
 from tests.program._profiles import profile_soccfg
@@ -166,6 +166,23 @@ def projective_source(projective_case):
         source.close()
 
 
+@pytest.fixture
+def exact_cavity_span_hits(monkeypatch: pytest.MonkeyPatch):
+    hits: set[tuple[float, float]] = set()
+    solve = adc.CavityAverageCache.span
+
+    def observe_span(owner, model, pulses, start_ns, end_ns, **memory):
+        before = owner.hits
+        result = solve(owner, model, pulses, start_ns, end_ns, **memory)
+        if owner.hits > before:
+            hits.add((start_ns, end_ns))
+        return result
+
+    # Acquire returns physics results; ADC's public hit counter observes reuse.
+    monkeypatch.setattr(adc.CavityAverageCache, "span", observe_span)
+    return hits
+
+
 def _check_history_inputs(
     rows: list[tuple[TimelineBatch, int]],
     expected: NDArray[np.float64],
@@ -195,7 +212,7 @@ def _check_history_inputs(
 
 
 def test_point_local_batches_continue_histories_and_keep_seeded_draws(
-    projective_source,
+    projective_source, exact_cavity_span_hits
 ):
     source, engine, acquire = projective_source
     facts = source.model_facts(snapshot())
@@ -312,6 +329,42 @@ def test_point_local_batches_continue_histories_and_keep_seeded_draws(
             assert {
                 inversion.point for inversion in diagnostic.stark_order_inversions
             } == histories.keys()
+
+    # Each herald begins with two distinct density rows and the same inherited
+    # field. Only the cavity solve is shared; the rows and their weights are not.
+    assert {(0, 2), (2, 4)} <= exact_cavity_span_hits
+
+
+def test_cancel_during_projective_assembly_stops_before_next_history(
+    projective_source, monkeypatch: pytest.MonkeyPatch
+):
+    source, _, acquire = projective_source
+    cancel = Event()
+    advanced_after_cancel: list[tuple[float, float]] = []
+    advance = CavityDrive.advance
+
+    def request_cancel_after_first_history(
+        drive: CavityDrive,
+        start_ns: float,
+        end_ns: float,
+        populations: NDArray[np.float64],
+        initial_field: NDArray[np.complex128],
+    ) -> tuple[CavityResponse, NDArray[np.complex128]]:
+        span = (start_ns, end_ns)
+        if cancel.is_set():
+            advanced_after_cancel.append(span)
+        response = advance(drive, start_ns, end_ns, populations, initial_field)
+        if span == (4, 6):  # This span has two histories at the second point.
+            cancel.set()
+        return response
+
+    # The acquire exception alone cannot reveal advances before Engine sees Stop.
+    monkeypatch.setattr(CavityDrive, "advance", request_cancel_after_first_history)
+    with pytest.raises(Cancelled):
+        source.open_acquire(acquire).sample_round(snapshot(), 0, cancel=cancel)
+
+    assert cancel.is_set()
+    assert advanced_after_cancel == []
 
 
 @pytest.mark.parametrize(
@@ -533,6 +586,7 @@ def test_debug_capture_joins_each_projective_batch_to_its_origin(
             wall_s=0.0,
             compile_wall_s=0.0,
             complete=not fail_second_round,
+            acquire_id="fixture-acquire",
         )
     )
 

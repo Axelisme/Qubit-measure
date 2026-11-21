@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-18, round settings in debug capture
+**Last updated:** 2026-11-21, cooperative Stop and raw materialization timing
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -58,9 +58,10 @@ captures, retention and the cache directory.
 bounded `routing-*.jsonl` row after each admitted acquire. Set `directory` to
 choose the output directory; null selects project-root `.sim_telemetry`.
 Direct evolution and every projective continuation enable Engine telemetry.
-The row contains binding compile time, summed Engine wall time and ADC/readout
-wall time. It includes failed calls through their failure and leaves unentered
-stages at `0.0`. No deferred raw materialization enters the row.
+The row contains compile, evolution, ADC/readout and in-acquire raw materialization
+time. It includes failed calls through their failure and leaves unentered stages
+at `0.0`. Successful materialization from a later raw getter appends a
+[supplemental timing record](../../README.md#acquire-telemetry).
 `complete` comes from the binding's `AcquireOutcome`: normal partial Stop is true,
 while exceptions are false. Writer I/O failures warn once and do not change the
 acquire result. Disabling the policy suppresses writes; evolution still collects
@@ -189,12 +190,13 @@ No terminal marginal can replace `raw.readout` when sampling projection historie
 
 Integrated rounds use ADC `round_statistics` and `PreparedRawShots`.
 Decimated rounds use ADC `sample_traces`. No environment-owned random sampler,
-synthetic second cavity or alternate IQ generator exists. QICK owns averaging,
-round hooks and Stop checkpoints. The binding paces each round to
+synthetic second cavity or alternate IQ generator exists. QICK owns averaging
+and round hooks. The binding paces each round to
 `time_scale * reps * sum(point timeline duration + relax_delay)`.
 `numerics.time_scale` defaults to 1.0 (physical time); zero disables waiting.
-Integrated Stop is checked between evolution chunks and during pacing, discarding
-the interrupted round while retaining completed rounds. ADC sampling remains synchronous.
+For integrated acquisition, the engine checks Stop at cooperative evolution
+checkpoints and the binding checks it during pacing. Acquisition discards the
+interrupted round and retains completed rounds. ADC sampling remains synchronous.
 
 ## Coherence drift and simulated time
 

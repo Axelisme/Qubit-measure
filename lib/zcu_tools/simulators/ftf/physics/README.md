@@ -1,6 +1,6 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-11-21, exact cavity span reuse
+**Last updated:** 2026-11-21, shared cavity span solve
 
 **讀者：** framework-dev、agent。固定座標 FTF 數值模型、路由與快取契約。
 
@@ -160,11 +160,12 @@ Every conditional branch begins with the same inherited field at that span's
 absolute start time. ADC owns propagation and second-moment integration. This
 single-branch memory is semiclassical and does not describe quantum cavity-state
 entanglement. Experiment composes it with evolution's continued DC densities.
-The optional `span_cache` passes an ADC `CavityAverageCache` to `advance` for
-flat second moments and all-state endpoint fields. The optional `cache` retains
-the average-only path used by projective continuation. ADC owns cache keys and
-storage. `CavityDrive` computes Stark shifts and dephasing from the moments and
-selects the endpoint from the current populations on each call.
+`advance` gets second moments and all-state endpoint fields from ADC in both
+projective and non-projective continuation. Pass a `CavityAverageCache` as
+`cache` to reuse exact flat span results. Without a cache, `advance` does not
+retain results. ADC owns keys and storage. `CavityDrive` computes Stark shifts
+and dephasing from the moments and selects the endpoint from the current
+populations on each call.
 
 ## Readout and Floquet paths
 

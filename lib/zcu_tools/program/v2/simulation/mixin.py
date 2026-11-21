@@ -2,13 +2,19 @@
 
 from collections.abc import Callable
 from inspect import Signature, signature
+from threading import Event
 from typing import TYPE_CHECKING, Literal, overload
 
 import numpy as np
 from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 
-from zcu_tools.program.acquisition import CancelFlagProtocol, ImproveAcquireMixin
+from zcu_tools.program.acquisition import (
+    CancelFlagProtocol,
+    ImproveAcquireMixin,
+    ShotResult,
+    StoppedPartialAcquireError,
+)
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
@@ -16,8 +22,8 @@ from zcu_tools.simulate.boundary import (
     RoundStatistics,
 )
 
+from .binding import SimulationBinding
 from .result import IntegratedRound, RawShots
-from .signals import materialize_shots
 from .soc import SimulationSoc
 
 if TYPE_CHECKING:
@@ -36,7 +42,8 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
     """
 
     _simulation_active: bool = False
-    _simulation_raw: tuple[RawShots, AcquireRequest] | None = None
+    _simulation_raw: tuple[SimulationBinding, AcquireRequest, RawShots] | None = None
+    _deferred_raw_notifications: list[Callable[[], None]] | None = None
 
     def _acquire_configured(
         self, soc, *args, **kwargs
@@ -169,11 +176,9 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
 
         soc = params["soc"]
         try:
-            result = soc.run_round(cancel=cancel_flag)
+            result = soc.run_round()
         except Cancelled:
-            soc.cleanup_round()
-            self._close_rounds_pbar()
-            return False
+            return self._finish_cancelled_backend_round(soc)
         if cancel_flag.is_set():
             soc.cleanup_round()
             self._close_rounds_pbar()
@@ -191,6 +196,28 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             self._close_rounds_pbar()
             return False
         return True
+
+    def _finish_decimated_round(self) -> bool:
+        soc = self.acquire_params["soc"]
+        if not isinstance(soc, SimulationSoc):
+            return super()._finish_decimated_round()
+        from zcu_tools.simulate.evolution import Cancelled
+
+        try:
+            return super()._finish_decimated_round()
+        except Cancelled:
+            return self._finish_cancelled_backend_round(soc)
+
+    def _finish_cancelled_backend_round(self, soc: SimulationSoc) -> bool:
+        soc.cleanup_round()
+        self._close_rounds_pbar()
+        # The backend can cancel without setting the caller's flag. Do not let
+        # QICK average an empty round buffer in that case.
+        if self._completed_round_count() == 0:
+            raise StoppedPartialAcquireError(
+                "acquire stopped before the first round completed"
+            )
+        return False
 
     def _program(self) -> "MyProgramV2":
         from ..base import MyProgramV2
@@ -210,14 +237,14 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         request = soc.binding.last_request
         if request is None:
             raise RuntimeError("simulation round requires installed request")
-        self._simulation_raw = (result.raw, request)
+        self._simulation_raw = (soc.binding, request, result.raw)
         if not self._simulation_needs_raw:
             self.acc_buf = None
             self.rounds_buf.append(
                 self._average_statistics(result.statistics, request.reps)
             )
             return
-        raw = materialize_shots(request, result.raw)
+        raw = soc.binding.materialize_raw(request, result.raw)
         self.acc_buf = [raw[ch] for ch in prog.ro_chs]
         self.rounds_buf.append(prog._process_accumulated(self.acc_buf))
 
@@ -242,13 +269,47 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         """Return last-round int64 QICK sums, materializing compact shots once.
 
         Deferred shots use the retained environment source, never a new backend call.
+        Calls inside acquire contribute to its raw materialization time. Successful
+        deferred materialization can publish a separate timing for the same acquire.
         Hardware and decimated data use QICK buffers.
         """
         if self.acc_buf is None and self._simulation_raw is not None:
-            source, request = self._simulation_raw
-            raw = materialize_shots(request, source)
+            binding, request, source = self._simulation_raw
+            notifications = self._deferred_raw_notifications
+            raw = binding.materialize_raw(
+                request,
+                source,
+                defer_notification=notifications.append
+                if notifications is not None
+                else None,
+            )
             self.acc_buf = [raw[ch] for ch in self._program().ro_chs]
         return super().get_raw()
+
+    def get_shot_result(self) -> ShotResult | None:
+        """Return visible raw shots and mask for the retained integrated round.
+
+        As in the base getter, no retained raw returns None; a missing required
+        mask raises RuntimeError. Publish newly materialized deferred timing only
+        if the getter builds the shot result successfully.
+        """
+        if (
+            self._simulation_raw is None
+            or self.acc_buf is not None
+            or self._deferred_raw_notifications is not None
+        ):
+            return super().get_shot_result()
+
+        notifications: list[Callable[[], None]] = []
+        self._deferred_raw_notifications = notifications
+        try:
+            result = super().get_shot_result()
+        finally:
+            self._deferred_raw_notifications = None
+        if result is not None:
+            for notify in notifications:
+                notify()
+        return result
 
     @overload
     def acquire(
@@ -299,8 +360,10 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         source through the same pipeline as hardware.
         True step_rounds prepares hardware and returns None; SimulationSoc raises
         ValueError before admission. Extra positional options or a dynamic bool
-        retain the list-or-None type. Errors and cancellation follow the normal
-        acquisition pipeline.
+        retain the list-or-None type. If the simulation backend raises Cancelled,
+        acquisition discards that round and averages the completed rounds, even
+        if the Stop flag is clear. If none completed, it raises
+        StoppedPartialAcquireError.
         charge_requirements names generators that must bind to physical charge
         lines. Only simulations carry these records to their environment, which
         validates or explicitly rejects unsupported requirements. White noise
@@ -349,7 +412,11 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         extra positional options or a dynamic bool retain the union.
         Nonempty herald or registered shot mask sources raise ValueError
         because post-selection needs integrated shots.
-        Other acquisition errors and cancellation follow the normal pipeline.
+        If the simulation backend raises Cancelled, acquisition discards that
+        round even if the Stop flag is clear. A round already computed when
+        pacing is interrupted keeps its trace. The result averages completed
+        rounds or raises StoppedPartialAcquireError if none completed. Unbound
+        hardware uses the original QICK round path.
         """
         if not isinstance(soc, SimulationSoc):
             return super().acquire_decimated(soc, *args, rounds=rounds, **kwargs)
@@ -387,12 +454,11 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
                             routes=soc.routes,
                             charge_requirements=charge_requirements,
                         )
-                    soc.install_request(
-                        request,
-                        pacing_cancel=kwargs.get("cancel_flag")
-                        if mode == "decimated"
-                        else None,
-                    )
+                    cancel_flag = kwargs.get("cancel_flag")
+                    if cancel_flag is None:
+                        cancel_flag = Event()
+                        kwargs["cancel_flag"] = cancel_flag
+                    soc.install_request(request, cancel=cancel_flag)
                     yield
                 finally:
                     soc.release_request()

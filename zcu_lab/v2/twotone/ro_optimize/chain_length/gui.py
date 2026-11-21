@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
 from typing import TypeAlias
 
 from zcu_tools.analysis.readout_chain import ThermalChainSums
+from zcu_tools.cfg_model import TemplateDef
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -30,11 +33,18 @@ def _run(cfg: ChainLengthCfg, *, context: RunContext) -> ChainLengthRunResult:
     return RunRecord(cfg=cfg, result=ChainLengthExp().run(cfg, context=context))
 
 
-# No writeback: choose the maximum score; QND and M remain diagnostics.
-DEFINITION = Adapter(
-    spec=ChainLengthExp.AXES_SPEC,
-    make_form=make_form,
-    run=_run,
-    guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
-)
+def build_adapter(
+    templates: Mapping[str, TemplateDef],
+) -> Adapter[ChainLengthCfg, ThermalChainSums, None, ChainAnalysis]:
+    """Bind the registering Registry's templates for Open and Reset.
+
+    Return an adapter without building a Form or inspecting the catalog.
+    """
+    # No writeback: choose the maximum score; QND and M remain diagnostics.
+    return Adapter(
+        spec=ChainLengthExp.AXES_SPEC,
+        make_form=partial(make_form, templates=templates),
+        run=_run,
+        guide=Path(__file__).with_name("guide.md"),
+        analysis=Analysis(fn=_analyze),
+    )

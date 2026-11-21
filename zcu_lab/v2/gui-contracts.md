@@ -25,7 +25,7 @@ mux/onetone 的逐 tone 數值計算、outcomes 與單 tone 失敗隔離由 core
 gui.py 保留來源與 route prior 解析，以及 writeback。
 修改實驗前讀 core.py、form.py 與 gui.py，分工規則見 ADR-0072。
 
-每個 gui.py 宣告具名參數的 Adapter 值，form.py 提供 make_form(ctx)。
+`gui.py` 以具名參數組裝 Adapter。框架在 Open／Reset 呼叫 adapter 的 `make_form(ctx)`，表單定義留在 `form.py`。
 PostAnalysis 的 writeback 與 primary 各自持有 opaque draft，adapter 不接觸 Writeback 實作。
 `RecordWriteback` 只 append adapter 提供的 JSON object，framework 不補座標。
 格式由 adapter 間的 policy 決定，見 [Record policy](measure-authoring.md#record-policy)。
@@ -54,7 +54,7 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   是 allocation resolution hint，flux 則使用中性 device-value contract。完整家族
   契約見 `measure-authoring.md`。
 - `support/measure/` 是公開支援 package，提供至少被兩個 concrete adapters 共用的 mechanics。
-  已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，目前限 T1 時間尺度選源與 Rabi 的來源、有效性及首次初值。
+  已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，例如 T1 時間尺度、Rabi 候選與讀出掃描的長度差。
   T1 helper 的 tone 掃描先選 `ext.t1_with_tone`，僅缺失或 null 才改選普通 `t1`。
   已存無效 tone T1 不下探。Mux recovery 在建 Form 時比較各顆的捕捉初值，
   保留最大者的 seed。缺 T1 以 30 us 參與比較，缺值勝出時仍為 150 us 字面值。
@@ -175,7 +175,7 @@ Framework 保存來源、插件輸出與圖，不要求完整 options 或保證�
 `params` 保持表單輸入，互動 Done 不以終態 options 替換它。
 GUI 與 remote 讀同一份已提交輸出；取消或失敗不覆蓋前次成功紀錄。
 
-`form.py` 的 `make_form(ctx)` 以 `Form(input_type, tree, ...)` 集中表單結構、初值與來源選擇。
+`form.py` 以 `Form(input_type, tree, ...)` 集中表單結構、初值與來源選擇。
 輸入型別的 annotations 與 FieldMeta 定義型別、驗證和欄位顯示資訊。
 需要轉接時宣告具名 Input，由 adapter.run 轉成實驗 cfg；record 只保存實驗 cfg。
 Generic model 生成、module materialization 與 typed cfg 轉換由

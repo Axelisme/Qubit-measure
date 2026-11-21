@@ -106,13 +106,16 @@ def mux_readout_initial(
     (alias/source faults propagate). With a captured readout, ignore absent/null
     kappas, add 5/(2*pi*min(set kappas)) us (zero if all unset) to its trigger,
     preserve ro_length, and seed length=max(original length, trigger+ro_length).
+    Seed post_delay with the larger of its stored value and that same wait;
+    keep its stored value when all kappas are unset.
     Without a slot, always seed ro_length=1.0 us, independent of kappa.
     Mixer uses $mux.mixer_freq independently of kappa and tone frequencies;
     missing/null mixer leaves that required field blank.
-    Seed trig_offset=$mux.time_of_fly+5/(2*pi*min(kappas)) us and
-    length=trig_offset+ro_length only when all group kappas and the group's
-    flight time exist. Missing/null kappa or group flight time leaves trigger
-    and length required and blank. Set flight time must be finite nonnegative
+    Seed post_delay=5/(2*pi*min(kappas)) us when all group kappas exist;
+    otherwise keep the blank template's 0.0 us. Seed trig_offset with the
+    group's flight time plus the same wait and length=trig_offset+ro_length
+    only when both sources exist. Otherwise trigger and length stay required
+    and blank. Set flight time must be finite nonnegative
     us or raise ValueError. These are editable candidates,
     not device-confirmed settings; capability checks remain at Run.
     This spectroscopy exception uses a detached slot copy when available and
@@ -185,12 +188,14 @@ def mux_readout_seed_metadata(
         "mixer_freq": "From captured $mux.mixer_freq in MHz",
         "ro_length": "Fixed 1.0 us ADC window candidate; independent of group kappa",
         "trig_offset": "From captured $mux.time_of_fly + 5/(2*pi*min($mux.resonators kappa)) in us",
+        "post_delay": "From 5/(2*pi*min($mux.resonators kappa)) in us; five photon decay times",
         "length": "From captured $mux.time_of_fly + 5/(2*pi*min($mux.resonators kappa)) + fixed ro_length 1.0 us",
     }
     if isinstance(initial, Slot):
         formulas.update(
             {
                 "trig_offset": "From captured $mux.module.readout.trig_offset + 5/(2*pi*min(set $mux.resonators kappa)) in us; no set kappa adds zero wait",
+                "post_delay": "From max(captured $mux.module.readout.post_delay, 5/(2*pi*min(set $mux.resonators kappa))) in us",
                 "length": "From max(captured $mux.module.readout.length, derived trig_offset + captured $mux.module.readout.ro_length) in us",
             }
         )
@@ -223,37 +228,45 @@ def _ringup_timing(ctx: FormContext, group: MuxGroupSchema) -> dict[str, Templat
                 "kappa must be finite and positive in MHz"
             )
         kappas.append(f"{resonator}.kappa")
-    if not ctx.has("$mux.module.readout"):
-        return _blank_ringup_timing(group, kappas)
-    wait = "0.0"
+    wait = None
     if kappas:
         linewidth = f"min({', '.join(kappas)})" if len(kappas) > 1 else kappas[0]
         wait = f"5 / (2 * pi * {linewidth})"
+    if not ctx.has("$mux.module.readout"):
+        return _blank_ringup_timing(
+            group, wait if len(kappas) == len(group.resonators) else None
+        )
     readout = parameters.library.module_spec(
         parameters.library_key("$mux.module.readout")
     )
     if not isinstance(readout, MuxReadoutSpec):
         raise TypeError("Mux readout slot must reference a MuxReadoutSpec")
-    trigger = f"$mux.module.readout.trig_offset + {wait}"
+    trigger = f"$mux.module.readout.trig_offset + {wait or '0.0'}"
     length = (
         f"max($mux.module.readout.length, {trigger} + $mux.module.readout.ro_length)"
     )
-    return {"trig_offset": Expr(trigger), "length": Expr(length)}
+    seeds: dict[str, TemplateSeed] = {
+        "trig_offset": Expr(trigger),
+        "length": Expr(length),
+    }
+    if wait is not None:
+        seeds["post_delay"] = Expr(f"max($mux.module.readout.post_delay, {wait})")
+    return seeds
 
 
 def _blank_ringup_timing(
-    group: MuxGroupSchema, kappas: list[str]
+    group: MuxGroupSchema, complete_wait: str | None
 ) -> dict[str, TemplateSeed]:
     seeds: dict[str, TemplateSeed] = dict.fromkeys(
         ("trig_offset", "ro_length", "length")
     )
     seeds["ro_length"] = 1.0
-    flight_time = group.time_of_fly
-    if flight_time is None or len(kappas) != len(group.resonators):
+    if complete_wait is None:
         return seeds
-    linewidth = f"min({', '.join(kappas)})" if len(kappas) > 1 else kappas[0]
-    trigger = f"$mux.time_of_fly + 5 / (2 * pi * {linewidth})"
-    seeds.update({"trig_offset": Expr(trigger), "length": Expr(f"{trigger} + 1.0")})
+    seeds["post_delay"] = Expr(complete_wait)
+    if group.time_of_fly is not None:
+        trigger = f"$mux.time_of_fly + {complete_wait}"
+        seeds.update({"trig_offset": Expr(trigger), "length": Expr(f"{trigger} + 1.0")})
     return seeds
 
 
