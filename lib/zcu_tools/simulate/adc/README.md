@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-21, explicit demodulation frequencies and exact cavity span results
+**Last updated:** 2026-11-21, exact flat span reuse for FTF projective and MIST continuation
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -54,10 +54,12 @@ history and inputs with unproven equivalence use separate solvers without
 admission. The field solver must accept the endpoints as float64 query times;
 rounding that makes them coincide raises `ValueError`.
 
-The two entry points share one byte budget (64 MiB by default). Results are
-writable copies independent of resident arrays. Full capacity declines new
-entries without eviction. Callers serialize access and clear the owner at the
-end of its lifetime. `cavity_field_average` and `cavity_fields` remain uncached.
+FTF projective continuation and non-projective (MIST) evolution both call
+`span` for cavity drives. `average` and `span` share one byte budget, 64 MiB by
+default. Results are writable copies independent of resident arrays. Full
+capacity declines new entries without eviction. Callers serialize access and
+clear the owner at the end of its lifetime. `cavity_field_average` and
+`cavity_fields` remain uncached.
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below

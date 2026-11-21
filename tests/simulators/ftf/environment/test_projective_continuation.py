@@ -166,6 +166,23 @@ def projective_source(projective_case):
         source.close()
 
 
+@pytest.fixture
+def exact_cavity_span_hits(monkeypatch: pytest.MonkeyPatch):
+    hits: set[tuple[float, float]] = set()
+    solve = adc.CavityAverageCache.span
+
+    def observe_span(owner, model, pulses, start_ns, end_ns, **memory):
+        before = owner.hits
+        result = solve(owner, model, pulses, start_ns, end_ns, **memory)
+        if owner.hits > before:
+            hits.add((start_ns, end_ns))
+        return result
+
+    # Acquire returns physics results; ADC's public hit counter observes reuse.
+    monkeypatch.setattr(adc.CavityAverageCache, "span", observe_span)
+    return hits
+
+
 def _check_history_inputs(
     rows: list[tuple[TimelineBatch, int]],
     expected: NDArray[np.float64],
@@ -195,7 +212,7 @@ def _check_history_inputs(
 
 
 def test_point_local_batches_continue_histories_and_keep_seeded_draws(
-    projective_source,
+    projective_source, exact_cavity_span_hits
 ):
     source, engine, acquire = projective_source
     facts = source.model_facts(snapshot())
@@ -312,6 +329,10 @@ def test_point_local_batches_continue_histories_and_keep_seeded_draws(
             assert {
                 inversion.point for inversion in diagnostic.stark_order_inversions
             } == histories.keys()
+
+    # Each herald begins with two distinct density rows and the same inherited
+    # field. Only the cavity solve is shared; the rows and their weights are not.
+    assert {(0, 2), (2, 4)} <= exact_cavity_span_hits
 
 
 def test_cancel_during_projective_assembly_stops_before_next_history(

@@ -254,15 +254,15 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 
 **規則。** 算法的數值實作留在自己的模組與專用 helpers。多個算法共用的數值由單一模組擁有，kernel 不借用另一個 kernel class 的方法。Rates→Q／decay、period playback 與 fractional tail 的 owner 見 [Algorithm ownership and reuse](../../lib/zcu_tools/simulate/evolution/README.md#algorithm-ownership-and-reuse)。
 
-**例子。** ADC 擁有 flat 腔場二階矩的精確結果 memo，負責 lossless key、有界容量與回傳陣列 ownership。FTF 在一次 acquire 的 span composition 建立最多 64 MiB 的 owner，供 g/e 各點串行共用。正常返回或拋出 exception 時都清理。`CavityDrive` 只轉交 owner，不組 ADC key。
-現行的 flat span memo 也收各 state 的端點場。ADC 同次求解產出兩種產品，共用原本的容量與壽命。無法證明等價時分開求解、不收錄。詳細 key、容量、清理見 [ADC README](../../lib/zcu_tools/simulate/adc/README.md) 與 [FTF cavity drives](../../lib/zcu_tools/simulators/ftf/environment/README.md#cavity-drives)。
+**例子。** ADC 擁有 flat 腔場 span 的精確結果 memo，負責 lossless key、有界容量與回傳陣列 ownership。同一次求解產出二階矩與各 state 的端點場，兩種產品共用容量與壽命；無法證明等價時分開求解、不收錄。FTF 的 projective 與非 projective 兩種 span composition 都經 `CavityAverageCache.span` 取得兩種產品。每次 composition 建立一個 owner，兩種 composition 用同一個 512 MiB 容量，供該次 composition 的各點與各 history 串行共用；ADC 全庫預設仍是 64 MiB。正常返回或拋出 exception 時都清理。`CavityDrive` 只轉交 owner，不組 ADC key。`chain_length` 2.2 µs 的 projective 前綴有 29,921 次 span，其中 19,346 次命中別的 history 已解過的 key；ADC 回傳二階矩與端點場，FTF 再為每條 history 選態、建 shift。詳細 key、容量依據與清理見 [ADC README](../../lib/zcu_tools/simulate/adc/README.md) 與 [FTF cavity drives](../../lib/zcu_tools/simulators/ftf/environment/README.md#cavity-drives)。
 
-**邊界。** Memo 不留在 Engine、global 或長駐 source。FTF 仍選態、建 Stark／dephasing shift 並傳場給下一段。Shaped/callable 與主分支選擇不進 memo；projective 只重用既有的 flat 二階矩，不收各 state 端點場。跨 package 的依賴維持 [[0072]] 與 C8、C9、C12，不新增依賴方向或放寬 `ignore_imports`。這些 contract 不檢查內部子模組的匯入路徑；package root 的公開入口由介面與 caller review 維持。
+**邊界。** Memo 不留在 Engine、global 或長駐 source。FTF 仍逐 history 選態、建 Stark／dephasing shift 並傳場給下一段；projective 路徑不合併 histories，不改投影權重或主分支選態。Shaped/callable 輸入與主分支選擇不進 memo。跨 package 的依賴維持 [[0072]] 與 C8、C9、C12，不新增依賴方向或放寬 `ignore_imports`。這些 contract 不檢查內部子模組的匯入路徑；package root 的公開入口由介面與 caller review 維持。
 
 **依據。**
 - 2026-10-18，使用者：「之後我的規劃是讓你先整理目前模擬引擎，使其對外是黑盒子，對內是實質偶合，決策分類有全部算法的知識，算法部分內聚，以不影響優化與可讀性為主要指標，移除已經沒用的邏輯，將研究成果以及嘗試紀錄到repo文檔中供以後參考。然後就可以開始planner的重構，使各優化算法的實作張力能以自然的表達」。原裁決未附入庫討論，見 Git `ee1eeaa8d`。
 - 2026-10-21，使用者對二階矩 memo 的方案答「前兩個採用建議」。原裁決未附入庫討論，見 Git `ffe98f8f7`；[MIST 腔場重用的先例整理](../discussions/2026-11-21-mist-cavity-reuse.md#先例與立場)列出這項裁決的適用範圍。
 - 2026-11-21，designer 依使用者授權「我授权你的范围除了 push 还有真实硬体之外都可以做」代裁端點場擴充。使用者 2026-11-21 追認：「其余的第二批追认。」正常參數重測為 281.5 s 與 163.3 s；兩次 commit 不同，不能把差值全歸因於快取。二階矩單獨重用的上限及比較見 [MIST 腔場重用](../discussions/2026-11-21-mist-cavity-reuse.md)。
+- 2026-11-21，使用者對模擬器下一批加速的選項答「6A」，選 projective 腔場的 span 重用。對本節原邊界句「projective 只重用既有的 flat 二階矩，不收各 state 端點場」答「2S，我對於模擬器沒那麼多限制，好維護與模擬效率是唯二考量，其他都只是建議」，改為 projective 與非 projective 走同一條 ADC span 合併解。512 MiB 的選法（再加倍多出的命中少於跨 history 重複機會的 10%，且 process peak RSS 增量不超過 512 MiB）與兩種 composition 共用一個容量，是 designer 代裁，使用者未覆核。見 [Projective 腔場改走 ADC flat span 合併解](../discussions/2026-11-21-projective-span-reuse.md)。
 
 ### t6 只保留 direct
 
