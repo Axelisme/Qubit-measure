@@ -1,6 +1,7 @@
 """Common MHz frequency scan with fixed signed gains and relative phase."""
 
 from dataclasses import dataclass
+from textwrap import fill
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
@@ -557,7 +558,9 @@ def _plot_population_maps(
         for outcome, ax in enumerate(fig.axes, start):
             image = _return_map(ax, durations, coordinates, populations[..., outcome])
             image.set_clim(0, 1)
-            ax.set_title(labels[outcome])
+            ax.set(xlabel="", ylabel="", title=labels[outcome])
+        fig.supxlabel(_DURATION_LABEL)
+        fig.supylabel(_COORDINATE_LABEL)
         key = ScalarMappable(norm=Normalize(0, 1), cmap="viridis")
         fig.colorbar(key, ax=fig.axes, label="Joint probability (0–1)")
 
@@ -634,7 +637,7 @@ def _plot_duration_traces(
         title += (
             f"Rabi rate = {rate.rate:.4g} ± {rate.uncertainty:.2g} MHz"
             if rate.rate is not None
-            else (rate.reason or "Rate unavailable")
+            else "\n" + fill(rate.reason or "Rate unavailable", width=54)
         )
         quality = rate.quality
         if (
@@ -643,6 +646,12 @@ def _plot_duration_traces(
             and quality.normalized_residual_rms is not None
         ):
             title += f"\nR² = {quality.r2:.3g} · Normalized RMS = {quality.normalized_residual_rms:.3g}"
-        ax.set(title=title, ylabel=_RETURN_LABEL)
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
+        ax.set_title(title)
+    entries = {
+        label: handle
+        for ax in fig.axes
+        for handle, label in zip(*ax.get_legend_handles_labels(), strict=True)
+    }
+    fig.legend(entries.values(), entries.keys(), loc="outside lower center", ncols=2)
     fig.axes[-1].set_xlabel(_DURATION_LABEL)
+    fig.supylabel(_RETURN_LABEL)

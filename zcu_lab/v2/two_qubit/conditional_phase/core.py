@@ -341,7 +341,9 @@ def _plot_terminal_quadratures(
                 color=f"C{q}",
                 label=f"{projection} ± shot SEM",
             )
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.03), ncols=2)
+    fig.legend(
+        *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
+    )
     fig.axes[-1].set_xlabel("Common CZ frequency (MHz)")
 
 
@@ -365,7 +367,9 @@ def _start_live_view(
         viewers.append(live_errorbar(ax, num_lines=2))
         for line, projection in zip(ax.lines, ("X", "Y"), strict=True):
             line.set(label=f"{projection} ± shot SEM", linestyle="none")
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.03), ncols=2)
+    fig.legend(
+        *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
+    )
     fig.axes[-1].set_xlabel("Common CZ frequency (MHz)")
     fig.show()
 

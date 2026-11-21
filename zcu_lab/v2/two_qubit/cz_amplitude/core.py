@@ -550,8 +550,9 @@ def _plot_joint_outcomes(
                 color=_OUTCOME_COLORS[i][j],
                 label=f"P({_OUTCOMES[i]},{state})",
             )
-        ax.set(title=f"Qubit1 classified {_OUTCOMES[i]}", ylabel="Joint probability")
-        ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.0), ncols=3)
-        ax.margins(y=0.22)
+        ax.set(ylabel="Joint probability")
+        ax.set_title(f"Qubit1 classified {_OUTCOMES[i]}", pad=28)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1), ncols=3)
+        ax.margins(y=0.12)
     fig.axes[-1].set_xlabel(_X_LABEL)
     fig.suptitle(f"{_TITLE}\nTerminal outcomes after double Xπ")

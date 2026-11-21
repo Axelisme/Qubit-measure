@@ -254,7 +254,9 @@ def _start_live_view(
         viewers.append(live_errorbar(ax, num_lines=2))
         for line, projection in zip(ax.lines, ("X", "Y"), strict=True):
             line.set(label=f"{projection} ± shot SEM", linestyle="none")
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.03), ncols=2)
+    fig.legend(
+        *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
+    )
     fig.axes[-1].set_xlabel("CZ gates per shot (count)")
     fig.show()
 
@@ -535,8 +537,10 @@ def _plot_quadratures(
                 color=f"C{q}",
                 label=f"{projection} ± shot SEM",
             )
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.03), ncols=2)
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    fig.legend(
+        *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
+    )
     fig.axes[-1].set_xlabel("CZ gates per shot (count)")
 
 
@@ -579,7 +583,11 @@ def _plot_phase(
         ):
             diagnostic += f"\nR² = {quality.r2:.3g} · Normalized RMS = {quality.normalized_residual_rms:.3g}"
         ax.set_title(diagnostic)
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncols=2)
+    handles = next(
+        (ax.get_legend_handles_labels() for ax in fig.axes if ax.lines), None
+    )
+    if handles is not None:
+        fig.legend(*handles, loc="outside lower center", ncols=2)
     fig.axes[-1].set_xlabel("CZ gates per shot (count)")
 
 
