@@ -92,11 +92,7 @@ Cfg 的建構驗證與 `run`／`analyze` 的使用分開。不要在 `run`／`an
 
 ## 4. Live plot 與 Analyze 圖
 
-1. 同一個量用相同的軸標與單位。無因次機率與存活率寫出機率名稱，不加 `(a.u.)`。
-2. 曲線圖沿用[共用樣式](../../lib/zcu_tools/plotting/experiment.mplstyle)的 `axes.grid: True`，不呼叫 `grid()`。影像與熱圖的軸在兩處都明確呼叫 `grid(False)`。
-3. 量測點在兩處用相同的 marker，live plot 可以連線顯示進度。擬合曲線用實線，不加 marker。
-4. 同一張熱圖在兩處用相同的 colormap。
-5. Analyze 有多張圖時，先畫和 live plot 相同的量與座標軸，再畫其他診斷。
+圖的設計、單位與操作員判讀檢查見[實驗呈現指南](figure-style.md)。
 
 ## 5. 自查
 
