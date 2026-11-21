@@ -65,6 +65,18 @@ The nonzero-detune fringe fit had enormous T2 uncertainty and was not calibratio
 
 ## Measurement and analysis
 
+For a fringe fit, plan at least 10 samples per expected fringe period.
+For 0.25 MHz, for example, use a total-delay step no larger than 0.4 µs.
+For either fit, aim for a scan span of roughly three times the expected T2E.
+If only the beginning of the envelope is measured, T2E relies on extrapolation.
+
+The live figure shows acquired total-delay points. Both figures show mean IQ
+projected onto its principal axis, not an excited-state probability. Analyze
+overlays the model and marks T2E within the scan window. R² is the fraction
+of variation explained by the model. Normalized residual RMS measures typical
+fit mismatch relative to the signal range. The ± values describe fit parameters,
+not point noise. Averaged IQ records do not provide shot SEM.
+
 Each tone needs a fixed x90 drive and x180 pi pulse on the same generator.
 The two pulses may have different waveforms, carriers, gains and phases.
 Validate both pulses for each selected tone. Open/Defaults sets unselected drive/pi_pulse fields to None; both remain editable.

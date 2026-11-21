@@ -3,10 +3,12 @@
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.cfg_model import FieldMeta
+from zcu_tools.program.v2 import PulseCfg, SweepCfg
 
 from .mux_sweep_cfg import MuxAcquisition, MuxDriveToneCfg, validate_mux_tones
 
@@ -22,7 +24,21 @@ class MuxCoherenceToneCfg(MuxDriveToneCfg):
     and rejects duplicate names in the complete list.
     """
 
-    detune: float = 0.0
+    drive: Annotated[
+        PulseCfg | None,
+        FieldMeta(
+            label="π/2 pulse",
+            description="Enter the Rabi-calibrated π/2 pulse used before and after free evolution.",
+        ),
+    ] = None
+    detune: Annotated[
+        float,
+        FieldMeta(
+            label="Applied phase-ramp detune",
+            unit="MHz",
+            description="Enter the final π/2 phase ramp in cycles per µs; 0 leaves the phase fixed.",
+        ),
+    ] = 0.0
 
 
 def validate_coherence_scan(

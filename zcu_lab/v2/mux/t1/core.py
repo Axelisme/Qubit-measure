@@ -91,9 +91,9 @@ Native pulse and readout owners reject unsupported hardware settings.
 
 The caller owns compatible soc/soccfg, devices, plots and a fresh stop signal.
 This core does not initialize external devices, save automatically or close a
-caller's environment. Use `ftf(settings, workers=1)` for a physical offline smoke,
-with typed YAML `readout.drive.kind: mux`, an ADC receiver list and independently
-bound drive lines. Small truncations demonstrate execution only and do not
+caller's environment. For an FTF offline run, configure `readout.mux` with
+its own generator and `readout.mux.adc` receiver list. Bind the qubit drives
+to independent generators and build FTF against the matching board profile. Small truncations demonstrate execution only and do not
 establish physical convergence or calibration accuracy.
 
 ## Results, cancellation and analysis
@@ -129,12 +129,13 @@ The adapter below owns component proposals using the captured binding.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -143,6 +144,8 @@ from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
     decay_time_bounds,
+    dual_expfunc,
+    expfunc,
     fit_decay,
     fit_dual_decay,
 )
@@ -249,12 +252,42 @@ class MuxT1Cfg(ConfigBase):
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
+    reset: Annotated[
+        ResetCfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the common preparation reset; leave blank to omit it.",
+        ),
+    ] = None
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated multiplexed readout used after the qubit drive sequence.",
+        ),
+    ]
     tones: Annotated[list[MuxT1ToneCfg], FieldMeta(element_label="name")]
-    participants: list[StrictInt]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
-    sampling: Literal["linear", "decay"] = "linear"
+    participants: Annotated[
+        list[StrictInt],
+        FieldMeta(
+            description="Enter the original zero-based tone indices in measurement order."
+        ),
+    ]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Delay",
+            unit="µs",
+            description="Enter the wait after the π pulse in µs.",
+        ),
+    ]
+    sampling: Annotated[
+        Literal["linear", "decay"],
+        FieldMeta(
+            label="Delay spacing",
+            description="Choose even spacing or denser early points to resolve a decay.",
+        ),
+    ] = "linear"
 
     reps: Annotated[
         int,
@@ -331,11 +364,78 @@ def _validate_result(result: MuxT1Result) -> None:
         raise ValueError("invalid MuxT1Result axes or IQ shape/dtype")
 
 
+_DELAY_LABEL = "Wait after π pulse (µs)"
+_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
+
+
+def _show_live_t1(plots: Plots, cfg: MuxT1Cfg, times: NDArray[np.float64]):
+    viewers = []
+    for index in cfg.participants:
+        fig, ax = plots.subplots(num=f"measurement_{index}")
+        fig.suptitle(f"Mux T1 · {cfg.tones[index].name} · IQ contrast")
+        ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
+        progress = ax.set_title(f"Acquired delay points: 0 / {times.size}")
+        viewer = live_line(ax)
+        ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
+        ax.legend()
+        viewers.append((viewer, progress))
+        fig.show()
+
+    @plots.on_plot_thread
+    def update(data: NDArray[np.complex128]):
+        artists = []
+        for row, (viewer, progress) in enumerate(viewers):
+            measured = data[:, row]
+            acquired = np.isfinite(measured)
+            real = rotate2real(np.where(acquired, measured, np.nan)).real
+            progress.set_text(
+                f"Acquired delay points: {np.count_nonzero(acquired)} / {times.size}"
+            )
+            artists.extend((*viewer.set(times, real), progress))
+        return artists
+
+    return update
+
+
+def _plot_t1_fit(
+    ax: Axes,
+    xs: NDArray[np.float64],
+    real: NDArray[np.float64],
+    params: Sequence[float],
+    outcome: MuxT1Fit,
+) -> None:
+    t1, err = outcome.fit.t1, outcome.fit.t1_err
+    t1b, errb = outcome.fit.t1b, outcome.fit.t1b_err
+    quality = (
+        None if outcome.fit.fit_quality is None else outcome.fit.fit_quality["fit"]
+    )
+    ax.plot(xs, real, "o", ms=3, label="Measured IQ")
+    model = dual_expfunc if t1b is not None else expfunc
+    label = "Double exponential" if t1b is not None else "Exponential decay"
+    if xs.min() <= t1 <= xs.max():
+        ax.axvline(t1, color="0.4", ls=":", label="T1")
+    result_label = f"T1 = {t1:.4g} ± {err:.2g} µs"
+    if t1b is not None and errb is not None:
+        result_label += f" · Short decay = {t1b:.4g} ± {errb:.2g} µs"
+    curve = np.linspace(xs.min(), xs.max(), 400)
+    ax.plot(curve, model(curve, *params), color="C1", label=label)
+    r2 = None if quality is None else quality.r2
+    rms = None if quality is None else quality.normalized_residual_rms
+    quality_label = f"R² = {r2:.3g}" if r2 is not None else "R² unavailable"
+    quality_label += (
+        f" · Normalized residual RMS = {rms:.3g}"
+        if rms is not None
+        else " · Normalized residual RMS unavailable"
+    )
+    ax.set_title(f"{result_label}\n{quality_label}", fontsize=10)
+
+
 def fit_and_plot_t1(
     result: MuxT1Result,
     options: T1AnalyzeOptions,
     *,
     plots: Plots,
+    tone_names: tuple[str, ...] | None = None,
 ) -> tuple[MuxT1Fit | MuxFitFailure, ...]:
     """Validate IQ axes, raise on invalid sources, and fit and plot each tone T1.
 
@@ -348,7 +448,8 @@ def fit_and_plot_t1(
     plots owns fit_i, independent of duplicate readout labels; caller
     finishes/releases figures. Draw only the selected primary model and return
     per-tone fit summaries. Acquired delays, projected observations and
-    predictions remain local to plotting. No cfg or hardware is read.
+    predictions remain local to plotting. tone_names supplies original-index
+    display names when the saved configuration is available. No hardware is read.
     """
     _validate_result(result)
     times, indices, signals = result.times, result.tone_indices, result.signals
@@ -359,9 +460,10 @@ def fit_and_plot_t1(
         finite = np.isfinite(signal)
         xs = times[options.skip :][finite]
         signal = signal[finite]
-        fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
-        ax.set(xlabel="Delay (µs)", ylabel="Signal (a.u.)")
-        fig.suptitle(f"tone {index}")
+        tone = f"Tone {index}" if tone_names is None else tone_names[index]
+        fig, ax = plots.subplots(num=f"fit_{index}", figsize=(7, 5))
+        ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
+        fig.suptitle(f"Mux T1 · {tone} · IQ contrast")
         try:
             minimum = 6 if options.dual_exp else 4
             if len(xs) < minimum:
@@ -407,16 +509,19 @@ def fit_and_plot_t1(
             np.linalg.LinAlgError,
         ) as exc:
             outcomes.append(MuxFitFailure(index, str(exc)))
-            ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
-            ax.text(0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True)
+            ax.plot(xs, rotate2real(signal).real, "o", ms=3, label="Measured IQ")
+            ax.text(
+                0.02,
+                0.98,
+                f"Fit unavailable: {exc}",
+                transform=ax.transAxes,
+                va="top",
+                wrap=True,
+            )
         else:
+            _plot_t1_fit(ax, xs, real, tuple(params), outcome)
             outcomes.append(outcome)
-            ax.plot(xs, real, "o", label="measured")
-            ax.plot(xs, fitted, label=f"T1={t1:.4g} ± {err:.2g} µs")
-            if options.dual_exp:
-                ax.set_title(f"Second decay: {t1b:.4g} ± {errb:.2g} µs")
         ax.legend()
-        ax.grid(True)
         fig.tight_layout()
     return tuple(outcomes)
 
@@ -475,24 +580,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[i] for i in indices]
         )
-        viewers = []
-        for i in indices:
-            fig, ax = context.plots.subplots(num=f"measurement_{i}")
-            ax.set(
-                xlabel="Delay (µs)",
-                ylabel="Magnitude (a.u.)",
-                title=f"{i}: {cfg.tones[i].name}",
-            )
-            viewers.append(live_line(ax))
-            fig.show()
-
-        @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]):
-            return tuple(
-                artist
-                for row, viewer in enumerate(viewers)
-                for artist in viewer.set(times, np.abs(data[:, row]))
-            )
+        update = _show_live_t1(context.plots, cfg, times)
 
         # 2. Sweep the shared wait after all pi branches finish, then acquire mux readout.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
@@ -545,24 +633,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[i] for i in indices]
         )
-        viewers = []
-        for i in indices:
-            fig, ax = context.plots.subplots(num=f"measurement_{i}")
-            ax.set(
-                xlabel="Delay (µs)",
-                ylabel="Magnitude (a.u.)",
-                title=f"{i}: {cfg.tones[i].name}",
-            )
-            viewers.append(live_line(ax))
-            fig.show()
-
-        @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]):
-            return tuple(
-                artist
-                for row, viewer in enumerate(viewers)
-                for artist in viewer.set(times, np.abs(data[:, row]))
-            )
+        update = _show_live_t1(context.plots, cfg, times)
 
         # 2. Step the hardware delay table after all pi branches finish, then acquire mux readout.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
@@ -625,4 +696,9 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
 
         """
         # 1. Fit saved acquired delays per tone using the requested skip and single/dual decay policy.
-        return fit_and_plot_t1(source.result, options, plots=plots)
+        names = (
+            None
+            if source.cfg is None
+            else tuple(tone.name for tone in source.cfg.tones)
+        )
+        return fit_and_plot_t1(source.result, options, plots=plots, tone_names=names)

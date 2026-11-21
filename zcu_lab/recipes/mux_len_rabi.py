@@ -40,24 +40,24 @@ class MuxLenRabiInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
+        description="Sets Participants: original zero-based tone indices in acquisition order; selects both drives and readout tones.",
     )
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
-        description="Start/stop for every tone in original order, including nonparticipants. No per-tone n.",
+        description="Sets Tones › Length › Start and Stop (µs), the total pulse lengths for every original tone.",
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Positive hardware scan point count shared by all tones.",
+        description="Sets Expts (count), the shared number of length points.",
     )
 
     decay: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit a decaying oscillation envelope. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Fit decay envelope to fit damping as well as the oscillation.",
     )
     fit_phase: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit the oscillation phase offset. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Fit phase offset to estimate the oscillation phase.",
     )
 
 

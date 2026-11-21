@@ -108,7 +108,13 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    compute_fit_quality,
+    cosfunc,
+    decaycos,
+    fit_rabi,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
@@ -146,6 +152,9 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     ToneRangeCfg,
     validate_mux_scan,
 )
+
+_SWEEP_LABEL = "Drive pulse length (µs)"
+_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
 
 
 @validated_dataclass(frozen=True)
@@ -191,7 +200,14 @@ class MuxLengthScan:
 class MuxLenRabiToneCfg(MuxDriveToneCfg):
     """One named drive and its independent length bounds in us."""
 
-    length: Annotated[ToneRangeCfg | None, FieldMeta(unit="µs")] = None
+    length: Annotated[
+        ToneRangeCfg | None,
+        FieldMeta(
+            label="Length",
+            unit="µs",
+            description="Enter this tone's total drive pulse duration range in µs.",
+        ),
+    ] = None
 
     def require_length(self) -> ToneRangeCfg:
         """Return active length bounds, or raise ValueError naming this tone."""
@@ -218,16 +234,33 @@ class MuxLenRabiCfg(ConfigBase):
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
+    reset: Annotated[
+        ResetCfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the common preparation reset; leave blank to omit it.",
+        ),
+    ] = None
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated multiplexed readout used after the qubit drive sequence.",
+        ),
+    ]
     tones: Annotated[list[MuxLenRabiToneCfg], FieldMeta(element_label="name")]
-    expts: int = Field(
+    expts: Annotated[int, FieldMeta(label="Expts", unit="count")] = Field(
         strict=True,
         gt=0,
         title="Expts",
         description="Scan point count shared by all tones.",
     )
-    participants: list[StrictInt]
+    participants: Annotated[
+        list[StrictInt],
+        FieldMeta(
+            description="Enter the original zero-based tone indices in measurement order."
+        ),
+    ]
 
     reps: Annotated[
         int,
@@ -380,21 +413,27 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         viewers = []
         for index in scan.indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(
-                xlabel="Pulse length (µs)",
-                ylabel="Magnitude (a.u.)",
-                title=f"{index}: {cfg.tones[index].name}",
-            )
-            viewers.append(live_line(ax))
+            fig.suptitle(f"Mux length Rabi · {cfg.tones[index].name} · IQ contrast")
+            ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+            progress = ax.set_title(f"Acquired length points: 0 / {cfg.expts}")
+            viewer = live_line(ax)
+            ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
+            ax.legend()
+            viewers.append((viewer, progress))
             fig.show()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]):
-            return tuple(
-                artist
-                for row, viewer in enumerate(viewers)
-                for artist in viewer.set(scan.coordinates[row], np.abs(data[:, row]))
-            )
+            artists = []
+            for row, (viewer, progress) in enumerate(viewers):
+                measured = data[:, row]
+                acquired = np.isfinite(measured)
+                real = rotate2real(np.where(acquired, measured, np.nan)).real
+                progress.set_text(
+                    f"Acquired length points: {np.count_nonzero(acquired)} / {cfg.expts}"
+                )
+                artists.extend((*viewer.set(scan.coordinates[row], real), progress))
+            return artists
 
         # 1. One hardware point loop selects all participants' length tables.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
@@ -460,12 +499,13 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         viewers = []
         for index in scan.indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(
-                xlabel="Pulse length (µs)",
-                ylabel="Magnitude (a.u.)",
-                title=f"{index}: {cfg.tones[index].name}",
-            )
-            viewers.append(live_line(ax))
+            fig.suptitle(f"Mux length Rabi · {cfg.tones[index].name} · IQ contrast")
+            ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+            progress = ax.set_title(f"Acquired length points: 0 / {cfg.expts}")
+            viewer = live_line(ax)
+            ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
+            ax.legend()
+            viewers.append((viewer, progress))
             fig.show()
 
         def average_round(data: NDArray[np.complex128]) -> NDArray[np.complex128]:
@@ -477,12 +517,17 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]):
+            artists = []
             mean = average_round(data)
-            return tuple(
-                artist
-                for row, viewer in enumerate(viewers)
-                for artist in viewer.set(scan.coordinates[row], np.abs(mean[:, row]))
-            )
+            for row, (viewer, progress) in enumerate(viewers):
+                measured = mean[:, row]
+                acquired = np.isfinite(measured)
+                real = rotate2real(np.where(acquired, measured, np.nan)).real
+                progress.set_text(
+                    f"Acquired length points: {np.count_nonzero(acquired)} / {cfg.expts}"
+                )
+                artists.extend((*viewer.set(scan.coordinates[row], real), progress))
+            return artists
 
         # 2. Reuse each point's reset/simultaneous-drive/readout program across host rounds.
         signals = SignalBuffer((rounds, *scan.coordinates.T.shape), on_update=update)
@@ -573,9 +618,11 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
             finite = np.isfinite(signal)
             xs = result.coordinates[row, finite]
             signal = signal[finite]
-            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
-            ax.set(xlabel="Pulse length (µs)", ylabel="Signal real (a.u.)")
-            fig.suptitle(f"tone {index}")
+            cfg = source.cfg
+            tone = f"Tone {index}" if cfg is None else cfg.tones[index].name
+            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(7, 5))
+            ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+            fig.suptitle(f"Mux length Rabi · {tone} · IQ contrast")
             try:
                 if len(xs) < 6:
                     raise ValueError(
@@ -618,24 +665,41 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
                 np.linalg.LinAlgError,
             ) as exc:
                 # 4. Keep a failed tone's acquired magnitude and reason without stopping other fits.
-                ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
+                ax.plot(xs, rotate2real(signal).real, "o", ms=3, label="Measured IQ")
                 ax.text(
-                    0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True
+                    0.02,
+                    0.98,
+                    f"Fit unavailable: {exc}",
+                    transform=ax.transAxes,
+                    va="top",
+                    wrap=True,
                 )
                 outcomes.append(MuxFitFailure(index, str(exc)))
             else:
-                # 5. Show pi/pi2 length uncertainty and Rabi frequency on each successful fit.
-                ax.plot(xs, real, "o", label="measured")
-                ax.plot(xs, fitted, label="fit")
-                for value, error, label in ((pi, pierr, "pi"), (pi2, pi2err, "pi/2")):
-                    ax.axvline(
-                        value, ls="--", label=f"{label}={value:.4g} ± {error:.2g} µs"
-                    )
-                    ax.axvspan(value - error, value + error, alpha=0.2, color="red")
-                ax.set_title(f"Rabi f={freq:.4g} ± {freqerr:.2g} MHz")
+                ax.plot(xs, real, "o", ms=3, label="Measured IQ")
+                model = decaycos if options.decay else cosfunc
+                label = "Damped cosine" if options.decay else "Cosine fit"
+                for value, marker, color in (
+                    (pi, "π length", "C2"),
+                    (pi2, "π/2 length", "C3"),
+                ):
+                    if xs.min() <= value <= xs.max():
+                        ax.axvline(value, ls=":", color=color, label=marker)
+                result_label = f"π length = {pi:.4g} ± {pierr:.2g} µs · π/2 length = {pi2:.4g} ± {pi2err:.2g} µs"
+                result_label += f"\nRabi rate = {freq:.4g} ± {freqerr:.2g} MHz"
+                curve = np.linspace(xs.min(), xs.max(), 400)
+                ax.plot(curve, model(curve, *params), color="C1", label=label)
+                r2 = quality.r2
+                rms = quality.normalized_residual_rms
+                quality_label = f"R² = {r2:.3g}" if r2 is not None else "R² unavailable"
+                quality_label += (
+                    f" · Normalized residual RMS = {rms:.3g}"
+                    if rms is not None
+                    else " · Normalized residual RMS unavailable"
+                )
+                ax.set_title(f"{result_label}\n{quality_label}", fontsize=10)
                 outcomes.append(outcome)
             ax.legend()
-            ax.grid(True)
             fig.tight_layout()
         # 6. Preserve each tone's pi/pi2 lengths, frequency and quality, or its failure reason.
         return tuple(outcomes)

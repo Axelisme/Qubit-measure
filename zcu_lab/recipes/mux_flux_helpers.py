@@ -29,15 +29,15 @@ class MuxFluxInputs(RecipeInputs):
     reuse_tab_id: ReuseTabId
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original mux readout tone indices in acquisition order.",
+        description="Sets Participants: original zero-based readout tone indices in acquisition order.",
     )
     flux_unit: Literal["A", "V", "native"] | None | Keep = Field(
         default=KEEP,
-        description="DC device unit label. No conversion.",
+        description="Sets Flux unit to the DC source's configured A, V or native label; no conversion.",
     )
     flux_n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Shared DC point count. Local lines advance in a zip, not a product.",
+        description="Sets DC bias › Expts for global scans or Flux points for local scans (count); local sweeps advance together.",
     )
     flux_half: dict[str, float] | None | Keep = Field(
         default=KEEP,
@@ -54,11 +54,11 @@ class MuxOnetoneFluxInputs(MuxFluxInputs):
 
     df: ToneRangeInputs | None | Keep = Field(
         default=KEEP,
-        description="Common start/stop offsets in MHz added to each base tone frequency.",
+        description="Sets Frequency offset › Start and Stop (MHz), added to each base readout RF frequency.",
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Shared frequency point count, n → df Expts.",
+        description="Sets Frequency offset › Expts (count), shared by the selected tones.",
     )
 
 
@@ -67,15 +67,15 @@ class MuxTwotoneFluxInputs(MuxFluxInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
+        description="Sets Participants: original zero-based tone indices in acquisition order; selects both drives and readout tones.",
     )
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
-        description="Absolute MHz start/stop for every original tone, including nonparticipants. No per-tone n.",
+        description="Sets Tones › Frequency › Start and Stop (MHz), the drive RF endpoints for every original tone.",
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Shared hardware frequency count, n → expts.",
+        description="Sets Expts (count), the shared number of drive frequency points.",
     )
 
 

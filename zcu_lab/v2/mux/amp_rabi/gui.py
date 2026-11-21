@@ -169,12 +169,22 @@ def run(
     return RunRecord(cfg=cfg, result=MuxAmpRabiExp().run(cfg, context=context))
 
 
+def _summary_lines(source: RunRecord[MuxAmpRabiCfg, MuxSweepResult]) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=replace(MuxAmpRabiExp.AXES_SPEC, save_stem=mux_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze, options=_MuxAmpRabi_options, writeback=_get_writeback_items
+        summary_lines=_summary_lines,
+        fn=_analyze,
+        options=_MuxAmpRabi_options,
+        writeback=_get_writeback_items,
     ),
 )

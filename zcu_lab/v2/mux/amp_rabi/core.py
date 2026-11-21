@@ -83,7 +83,12 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    compute_fit_quality,
+    cosfunc,
+    fit_rabi,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
@@ -116,6 +121,9 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     ToneRangeCfg,
     validate_mux_scan,
 )
+
+_SWEEP_LABEL = "Drive pulse gain (a.u.)"
+_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
 
 
 @validated_dataclass(frozen=True)
@@ -161,7 +169,14 @@ class MuxPulseScan:
 class MuxAmpRabiToneCfg(MuxDriveToneCfg):
     """One named drive and its independent gain bounds in gain a.u.."""
 
-    gain: Annotated[ToneRangeCfg | None, FieldMeta(unit="a.u.")] = None
+    gain: Annotated[
+        ToneRangeCfg | None,
+        FieldMeta(
+            label="Gain",
+            unit="a.u.",
+            description="Enter this tone's Rabi pulse gain range in a.u.",
+        ),
+    ] = None
 
     def require_gain(self) -> ToneRangeCfg:
         """Return active gain bounds, or raise ValueError naming this tone."""
@@ -184,16 +199,33 @@ class MuxAmpRabiCfg(ConfigBase):
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
+    reset: Annotated[
+        ResetCfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the common preparation reset; leave blank to omit it.",
+        ),
+    ] = None
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated multiplexed readout used after the qubit drive sequence.",
+        ),
+    ]
     tones: Annotated[list[MuxAmpRabiToneCfg], FieldMeta(element_label="name")]
-    expts: int = Field(
+    expts: Annotated[int, FieldMeta(label="Expts", unit="count")] = Field(
         strict=True,
         gt=0,
         title="Expts",
         description="Hardware scan point count shared by all tones.",
     )
-    participants: list[StrictInt]
+    participants: Annotated[
+        list[StrictInt],
+        FieldMeta(
+            description="Enter the original zero-based tone indices in measurement order."
+        ),
+    ]
 
     reps: Annotated[
         int,
@@ -317,21 +349,27 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
         viewers = []
         for index in scan.indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(
-                xlabel="Pulse gain (a.u.)",
-                ylabel="Magnitude (a.u.)",
-                title=f"{index}: {cfg.tones[index].name}",
-            )
-            viewers.append(live_line(ax))
+            fig.suptitle(f"Mux amplitude Rabi · {cfg.tones[index].name} · IQ contrast")
+            ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+            progress = ax.set_title(f"Acquired gain points: 0 / {cfg.expts}")
+            viewer = live_line(ax)
+            ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
+            ax.legend()
+            viewers.append((viewer, progress))
             fig.show()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]):
-            return tuple(
-                artist
-                for row, viewer in enumerate(viewers)
-                for artist in viewer.set(scan.coordinates[row], np.abs(data[:, row]))
-            )
+            artists = []
+            for row, (viewer, progress) in enumerate(viewers):
+                measured = data[:, row]
+                acquired = np.isfinite(measured)
+                real = rotate2real(np.where(acquired, measured, np.nan)).real
+                progress.set_text(
+                    f"Acquired gain points: {np.count_nonzero(acquired)} / {cfg.expts}"
+                )
+                artists.extend((*viewer.set(scan.coordinates[row], real), progress))
+            return artists
 
         # Advance each drive gain in the same tProc point loop.
         # 2. Sweep gains in one hardware loop with simultaneous drives after reset.
@@ -423,9 +461,11 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
             finite = np.isfinite(signal)
             xs = result.coordinates[row, options.skip :][finite]
             signal = signal[finite]
-            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
-            ax.set(xlabel="Pulse gain (a.u.)", ylabel="Signal (a.u.)")
-            fig.suptitle(f"tone {index}")
+            cfg = source.cfg
+            tone = f"Tone {index}" if cfg is None else cfg.tones[index].name
+            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(7, 5))
+            ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+            fig.suptitle(f"Mux amplitude Rabi · {tone} · IQ contrast")
             try:
                 if len(xs) < 6:
                     raise ValueError(
@@ -460,23 +500,40 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
                 np.linalg.LinAlgError,
             ) as exc:
                 # 4. Isolate each tone's fit failure and show its acquired magnitude for diagnosis.
-                ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
+                ax.plot(xs, rotate2real(signal).real, "o", ms=3, label="Measured IQ")
                 ax.text(
-                    0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True
+                    0.02,
+                    0.98,
+                    f"Fit unavailable: {exc}",
+                    transform=ax.transAxes,
+                    va="top",
+                    wrap=True,
                 )
                 outcomes.append(MuxFitFailure(index, str(exc)))
             else:
-                # 5. Mark pi/pi2 gains and uncertainty bands on the projected Rabi fit.
-                ax.plot(xs, real, "o", label="measured")
-                ax.plot(xs, fitted, label="fit")
-                for value, error, label in ((pi, pierr, "pi"), (pi2, pi2err, "pi/2")):
-                    ax.axvline(
-                        value, ls="--", label=f"{label}={value:.4g} ± {error:.2g}"
-                    )
-                    ax.axvspan(value - error, value + error, alpha=0.2, color="red")
+                ax.plot(xs, real, "o", ms=3, label="Measured IQ")
+                model = cosfunc
+                label = "Cosine fit"
+                for value, marker, color in (
+                    (pi, "π gain", "C2"),
+                    (pi2, "π/2 gain", "C3"),
+                ):
+                    if xs.min() <= value <= xs.max():
+                        ax.axvline(value, ls=":", color=color, label=marker)
+                result_label = f"π gain = {pi:.4g} ± {pierr:.2g} a.u. · π/2 gain = {pi2:.4g} ± {pi2err:.2g} a.u."
+                curve = np.linspace(xs.min(), xs.max(), 400)
+                ax.plot(curve, model(curve, *params), color="C1", label=label)
+                r2 = quality.r2
+                rms = quality.normalized_residual_rms
+                quality_label = f"R² = {r2:.3g}" if r2 is not None else "R² unavailable"
+                quality_label += (
+                    f" · Normalized residual RMS = {rms:.3g}"
+                    if rms is not None
+                    else " · Normalized residual RMS unavailable"
+                )
+                ax.set_title(f"{result_label}\n{quality_label}", fontsize=10)
                 outcomes.append(outcome)
             ax.legend()
-            ax.grid(True)
             fig.tight_layout()
         # 6. Keep pi/pi2 gains or a failure reason under each original tone identity.
         return tuple(outcomes)

@@ -63,6 +63,25 @@ Its short-scan fit is not calibration evidence.
 
 ## Measurement and analysis
 
+For a fringe fit, plan at least 10 samples per expected fringe period: for
+an expected rate of 0.25 MHz, use a step no larger than 0.4 µs. Set the
+scan span to roughly three times the expected T2* so it covers the decaying
+envelope. If the window shows only the first part of the decay, the fitted
+T2* relies on extrapolation.
+
+The live figure shows acquired delay points. Both views use mean IQ projected
+onto the direction of greatest IQ variation for each tone. The sign and scale
+of this projection do not make it a population. The solid curve in Analyze
+is the selected fit, and the vertical marker shows T2* when it is within the
+scan. R² measures the fraction of the variation explained by the fit.
+Normalized residual RMS measures the typical mismatch relative to the signal
+range. The ± values are fit parameter errors. Averaged IQ records do not
+provide per-point shot SEM.
+
+Layout reference: Ding Fig. 5-9(b,e) (printed p. 152) couples a Ramsey-like
+sequence to phase interpretation. Mux Ramsey scans free-evolution time and
+shows projected IQ rather than the conditional gate phase.
+
 Use fixed x90 drives and an individual detune in MHz for each tone.
 All tones share one finite, nonnegative requested-delay range in µs.
 
@@ -140,8 +159,13 @@ You may select them manually after reviewing the source and fit.
 Each qualifying tone proposes `<qubit>.t2r` in µs and a T2R sample at captured bias.
 A frequency candidate additionally requires source configuration, a fringe fit,
 finite source carrier, finite actual detune and finite fitted fringe rate.
-It uses source carrier + actual detune - fitted fringe rate in MHz.
-NaN actual detune suppresses only the frequency correction.
+Read the π/2 pulse source frequency and Applied detune from this run's Analyze
+summary. Read Fitted fringe rate from this run's fit figure. The proposed
+frequency is source frequency + applied detune − fitted fringe rate in MHz.
+If the fitted rate is 0.002 MHz above the applied detune, lower the source
+frequency by 0.002 MHz. If it is 0.002 MHz below, raise the source frequency
+by 0.002 MHz. Do not use this correction for decay-only fits, an unknown
+actual detune or a fringe with an ambiguous sign.
 Review phase/rate conventions, uncertainty and captured destination before applying.
 
 Frequency writeback changes the qubit calibration, not the existing x90/x180

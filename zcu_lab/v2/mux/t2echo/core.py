@@ -44,6 +44,7 @@ from zcu_tools.program.v2.modules import (
     MuxReadout,
     MuxReadoutCfg,
 )
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.acquire import mux_snr_checker
@@ -62,6 +63,9 @@ from zcu_lab.v2.support.mux_coherence_analysis import (
     project_coherence_trace,
 )
 from zcu_lab.v2.support.mux_coherence_persistence import coherence_spec
+
+_DELAY_LABEL = "Total free evolution time (µs)"
+_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
 
 
 @validated_dataclass(frozen=True)
@@ -84,7 +88,13 @@ class MuxEchoToneCfg(MuxCoherenceToneCfg):
     tones may leave pulses None; name identifies the qubit in saved results.
     """
 
-    pi_pulse: Pulse.Cfg | None = None
+    pi_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Refocusing π pulse",
+            description="Enter the calibrated π pulse applied halfway through the total free evolution time.",
+        ),
+    ] = None
 
     def require_pi_pulse(self) -> Pulse.Cfg:
         """Return the active x180 pulse, or raise ValueError naming the tone."""
@@ -106,11 +116,35 @@ class MuxT2EchoCfg(ConfigBase):
     initial_delay/relax_delay are finite nonnegative us shared by all tones.
     """
 
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
+    reset: Annotated[
+        ResetCfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the common preparation reset; leave blank to omit it.",
+        ),
+    ] = None
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated multiplexed readout used after the final π/2 pulses.",
+        ),
+    ]
     tones: Annotated[list[MuxEchoToneCfg], FieldMeta(element_label="name")]
-    participants: list[StrictInt]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
+    participants: Annotated[
+        list[StrictInt],
+        FieldMeta(
+            description="Enter original zero-based tone indices in measurement order; these select drives and readout tones."
+        ),
+    ]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Delay",
+            unit="µs",
+            description="Enter the shared Hahn echo free evolution time range in µs.",
+        ),
+    ]
 
     reps: Annotated[
         int,
@@ -171,6 +205,34 @@ class MuxT2EchoCfg(ConfigBase):
         return self
 
 
+def _show_live_echo(plots: Plots, cfg: MuxT2EchoCfg, times: NDArray[np.float64]):
+    viewers = []
+    for index in cfg.participants:
+        fig, ax = plots.subplots(num=f"measurement_{index}")
+        fig.suptitle(f"Mux Hahn echo · {cfg.tones[index].name} · IQ contrast")
+        ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
+        progress = ax.set_title(f"Acquired delay points: 0 / {times.size}")
+        viewer = live_line(ax)
+        ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
+        ax.legend(loc="best")
+        viewers.append((viewer, progress))
+        fig.show()
+
+    @plots.on_plot_thread
+    def update(data: NDArray[np.complex128]):
+        artists = []
+        for row, (viewer, progress) in enumerate(viewers):
+            acquired = np.isfinite(data[row])
+            projected = rotate2real(np.where(acquired, data[row], np.nan)).real
+            progress.set_text(
+                f"Acquired delay points: {np.count_nonzero(acquired)} / {times.size}"
+            )
+            artists.extend((*viewer.set(times, projected), progress))
+        return artists
+
+    return update
+
+
 class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
     """Measure and fit each participating qubit's Hahn Echo decay or fringes."""
 
@@ -219,26 +281,8 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         )
 
         # 2. Show each selected tone on the common requested total-delay axis.
-        viewers = []
-        for index, tone_cfg in zip(indices, tones, strict=True):
-            fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(
-                xlabel="Requested delay (µs)",
-                ylabel="Magnitude (a.u.)",
-                title=f"{index}: {tone_cfg.name}",
-            )
-            viewers.append(live_line(ax))
-            fig.show()
+        update = _show_live_echo(context.plots, cfg, times)
 
-        @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]):
-            return tuple(
-                artist
-                for row, viewer in enumerate(viewers)
-                for artist in viewer.set(times, np.abs(data[row]))
-            )
-
-        # 3. Play synchronized pulse stages on the common delay sweep.
         signals = SignalBuffer((len(indices), times.size), on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             # Each stage starts all drives together and waits for its longest pulse.
@@ -343,9 +387,11 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
             trace = prepare_coherence_trace(
                 int(raw_index), source.result.times, source.result.signals[row], skip=1
             )
-            fig, ax = plots.subplots(num=f"fit_{trace.index}", figsize=(8, 5))
-            ax.set(xlabel="Requested delay (µs)", ylabel="Signal real (a.u.)")
-            fig.suptitle(f"echo tone {trace.index}")
+            cfg = source.cfg
+            tone = f"Tone {trace.index}" if cfg is None else cfg.tones[trace.index].name
+            fig, ax = plots.subplots(num=f"fit_{trace.index}", figsize=(7, 5))
+            ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
+            fig.suptitle(f"Mux Hahn echo · {tone} · IQ contrast")
             try:
                 # Source detune, not a fitted oscillation, determines fringe eligibility.
                 fit_fringe = options.fit_method == "fringe"
@@ -366,12 +412,14 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
 
                 # 2. Echo fringes start at zero phase unless phase is fitted freely.
                 phase = None if options.fit_phase else 0.0
+                curve_times = np.linspace(trace.times[0], trace.times[-1], 400)
                 outcome, fitted = fit_coherence_trace(
                     trace,
                     real,
                     fit_fringe=fit_fringe,
                     phase=phase,
                     expected_frequency_mhz=None,
+                    curve_times=curve_times,
                 )
             except (
                 AnalysisFailed,
@@ -381,23 +429,42 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 np.linalg.LinAlgError,
             ) as exc:
                 ax.plot(
-                    trace.times, np.abs(trace.signal), "o", label="acquired magnitude"
+                    trace.times,
+                    rotate2real(trace.signal).real,
+                    "o",
+                    ms=3,
+                    label="Measured IQ",
                 )
                 ax.text(
-                    0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True
+                    0.02,
+                    0.98,
+                    f"Fit unavailable: {exc}",
+                    transform=ax.transAxes,
+                    va="top",
+                    wrap=True,
                 )
                 outcomes.append(MuxFitFailure(trace.index, str(exc)))
             else:
-                ax.plot(trace.times, real, "o", label="measured")
-                ax.plot(trace.times, fitted, label="primary fit")
-                ax.set_title(
-                    f"T2 = {outcome.t2:.4g} ± {outcome.t2_err:.2g} µs; "
-                    f"fringe = {outcome.detune:.4g} MHz"
+                ax.plot(trace.times, real, "o", ms=3, label="Measured IQ")
+                model = "Damped cosine" if outcome.fit_fringe else "Exponential decay"
+                ax.plot(curve_times, fitted, label=model)
+                if trace.times[0] <= outcome.t2 <= trace.times[-1]:
+                    ax.axvline(outcome.t2, color="0.4", ls=":", label="T2 echo")
+                result = f"T2 echo = {outcome.t2:.4g} ± {outcome.t2_err:.2g} µs"
+                if outcome.fit_fringe:
+                    result += f" · Fitted fringe rate = {outcome.detune:.4g} ± {outcome.detune_err:.2g} MHz"
+                r2 = outcome.quality.r2
+                rms = outcome.quality.normalized_residual_rms
+                quality = f"R² = {r2:.3g}" if r2 is not None else "R² unavailable"
+                quality += (
+                    f" · Normalized residual RMS = {rms:.3g}"
+                    if rms is not None
+                    else " · Normalized residual RMS unavailable"
                 )
+                ax.set_title(f"{result}\n{quality}", fontsize=10)
                 outcomes.append(outcome)
 
             # 3. Keep each tone's fit or failure visible without stopping other fits.
             ax.legend()
-            ax.grid(True)
             fig.tight_layout()
         return tuple(outcomes)

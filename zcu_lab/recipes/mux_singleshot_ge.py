@@ -34,28 +34,28 @@ class MuxSingleshotGEInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
+        description="Sets Participants: original zero-based tone indices in acquisition order; selects both drives and readout tones.",
     )
 
     initial_state: Literal["ground", "excited"] | None | Keep = Field(
         default=KEEP,
-        description="Prepared state for GE separation. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Initial state, the g or e label for the probe-off preparation.",
     )
     backend: Literal["pca", "center"] | None | Keep = Field(
         default=KEEP,
-        description="Rotation and threshold fit backend. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Backend, the PCA or cluster-center IQ rotation method.",
     )
     logscale: bool | None | Keep = Field(
         default=KEEP,
-        description="Plot histograms on a logarithmic scale. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Logscale for the histogram count axis.",
     )
     align_t1: bool | None | Keep = Field(
         default=KEEP,
-        description="Align the GE model with captured T1. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Align T1 to use captured T1 for the GE model.",
     )
     length_ratio: float | None | Keep = Field(
         default=KEEP,
-        description="Integration length ratio for GE fitting. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Length ratio (a.u.), the readout integration length divided by T1.",
     )
 
 

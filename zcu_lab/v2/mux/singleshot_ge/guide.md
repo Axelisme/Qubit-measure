@@ -64,6 +64,19 @@ error. The raw clouds remain evidence of acquisition, not accepted fidelity.
 
 ## Measurement and analysis
 
+Use the live IQ figure to check the shot counts and whether the probe-off and
+probe-on clouds occupy distinct regions. The first Analyze figure preserves
+the raw clouds. The projected histogram adds fitted centers and the threshold
+on the rotated in-phase axis. Inspect the overlap before using the threshold
+for classification. The classifier outcome panels show how often outcomes
+are assigned to g, e or other; other does not identify a particular leakage
+state.
+
+The histogram shows individual-shot distributions, not uncertainty bars on a
+mean-IQ sweep. R² and normalized residual RMS describe the histogram fit for
+each preparation. R² measures explained variation, and normalized residual RMS
+measures the typical mismatch relative to the histogram range.
+
 The Form exposes shots, not reps or rounds. The core uses reps=shots and rounds=1.
 Shots sets the number of raw acquisitions in each probe-off/on preparation.
 Each tone's optional init pulse runs in both preparations on its drive generator.

@@ -67,6 +67,18 @@ This 16-point example had large linewidth uncertainty and no calibration Apply.
 
 ## Measurement and analysis
 
+Use the live figure to check the frequency coverage, then check whether the
+Analyze center marker sits on a resolved peak or dip. Compare the reported
+linewidth with the scan spacing and span before using the center as the next
+drive frequency.
+
+Live points show a principal-axis projection of mean IQ. Analyze fits the
+same projection after subtracting its estimated background. Neither view is
+a calibrated population. R² measures explained variation and normalized
+residual RMS measures mismatch relative to the signal range. The ± values
+belong to the fitted parameters. This scan locates a spectral feature, so it
+does not show per-point shot SEM.
+
 Each tone supplies a drive-frequency range in MHz.
 Set each tone's Start and Stop in MHz. Expts follows Tones and sets one shared
 positive point count for all tones, for selected tones (default 301).
