@@ -238,7 +238,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             i, q = _direction(mean)
             sem = iq_shot_sem(moments, direction=(i, q))
             retained = np.nanmax(counts, initial=0)
-            title = ax.set_title(f"{experiment} · {retained:.0f} retained shots/point")
+            title = ax.set_title(f"{experiment}\n{retained:.0f} retained shots/point")
             return (*viewer.set(lengths, mean.real * i + mean.imag * q, sem), title)
 
         fig.show()
@@ -300,7 +300,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             i, q = _direction(mean)
             sem = iq_shot_sem(moments, direction=(i, q))
             retained = np.nanmax(counts, initial=0)
-            title = ax.set_title(f"{experiment} · {retained:.0f} retained shots/point")
+            title = ax.set_title(f"{experiment}\n{retained:.0f} retained shots/point")
             return (*viewer.set(lengths, mean.real * i + mean.imag * q, sem), title)
 
         fig.show()

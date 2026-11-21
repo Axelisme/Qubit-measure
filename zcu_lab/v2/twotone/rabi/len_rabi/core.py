@@ -320,8 +320,8 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             sem = iq_shot_sem(moments, direction=(i, q))
             acquired = counts[np.isfinite(counts)]
             title = ax.set_title(
-                f"Length Rabi · {acquired.size}/{len(lengths)} measured lengths · "
-                f"≤{np.max(acquired, initial=0):.0f} retained shots/point"
+                f"Length Rabi · {acquired.size}/{len(lengths)} lengths\n"
+                f"Up to {np.max(acquired, initial=0):.0f} retained shots/point"
             )
             return (*viewer.set(lengths, mean.real * i + mean.imag * q, sem), title)
 

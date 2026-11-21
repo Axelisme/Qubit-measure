@@ -343,13 +343,20 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         pi2_amp, pi2_amp_err = fit.pi2_x, fit.pi2_x_err
 
         # 2. Assess the oscillation fit and uncertainty of the calibrated rotation gains.
-        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+        fig, ax = plots.subplots(
+            num="fit", figsize=config.figsize, layout="constrained"
+        )
 
         if sem is None:
-            ax.plot(gains, real_signals, ".-", label="Measured", markersize=5)
+            ax.plot(gains, real_signals, ".", label="Measured", markersize=5)
         else:
             ax.errorbar(
-                gains, real_signals, yerr=sem, label="Measured", fmt=".-", markersize=5
+                gains,
+                real_signals,
+                yerr=sem,
+                label="Measured ± shot SEM",
+                fmt=".",
+                markersize=5,
             )
         fit_gains = np.linspace(gains.min(), gains.max(), 200)
         r2 = fit.quality.r2
@@ -367,13 +374,11 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         )
         ax.axvspan(pi2_amp - pi2_amp_err, pi2_amp + pi2_amp_err, color="red", alpha=0.2)
         ax.set(
-            title="Amplitude Rabi calibration",
             xlabel=_PULSE_GAIN_LABEL,
             ylabel=_IQ_PROJECTION_LABEL,
         )
+        fig.suptitle("Amplitude Rabi calibration")
         ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
-
-        fig.tight_layout()
 
         # Include the gain uncertainties in the GUI summary as well as the figure.
         return AmpRabiAnalysis(

@@ -16,6 +16,7 @@ from zcu_tools.analysis.fitting import (
     project_arm_means,
 )
 from zcu_tools.analysis.fitting import RBAnalysis as ReferenceRBAnalysis
+from zcu_tools.analysis.fitting.base import expfunc
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -125,7 +126,7 @@ def _live_plot(
     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
     viewer = live_errorbar(ax, num_lines=len(labels))
     for line, label in zip(ax.lines, labels, strict=True):
-        line.set_label(label)
+        line.set_label(f"{label} ± seed SD")
     ax.legend()
 
     xs = depths.astype(np.float64)
@@ -326,10 +327,19 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         # 1. Select the estimate based on the saved arms, not on current settings.
         del options
         result = source.result
+        lo, hi = int(result.depths.min()), int(result.depths.max())
+        dense = np.linspace(lo, hi, 200)
         if len(result.arms) == 1:
             fit = analyze_reference_rb(result.depths, result.signals)
             analysis = fit.summary
             labels = ("Reference",)
+            # Evaluate the existing exponential from p and its two endpoint values.
+            y_lo = fit.fit_signals[0, result.depths.argmin()]
+            y_hi = fit.fit_signals[0, result.depths.argmax()]
+            log_p = np.log(analysis.p_reference)
+            fraction = np.expm1(log_p * (dense - lo)) / np.expm1(log_p * (hi - lo))
+            curves = [y_lo + (y_hi - y_lo) * fraction]
+            fit_labels = ("Reference fit",)
             title = (
                 f"Reference RB · Error per Clifford = {analysis.reference_epc:.6f}\n"
                 f"95% seed bootstrap interval [{analysis.epc_ci_low:.6f}, "
@@ -341,6 +351,12 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             target = source.cfg.target_gate if source.cfg is not None else None
             name = "target" if target is None else target
             labels = ("Reference", f"Interleaved {name}")
+            curves = [expfunc(dense, *arm.params) for arm in fit.arm_fits]
+            fit_labels = tuple(
+                f"{label} fit (R² = {r2:.3f})" if r2 is not None else f"{label} fit"
+                for label, arm in zip(labels, fit.arm_fits, strict=True)
+                for r2 in (arm.quality.r2,)
+            )
             title = (
                 f"Interleaved RB · {name} fidelity = {analysis.gate_fidelity:.6f}\n"
                 f"95% paired-seed interval [{analysis.fidelity_ci_low:.6f}, "
@@ -359,10 +375,10 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             )
             line, _, _ = points.lines
             ax.plot(
-                result.depths,
-                fit.fit_signals[arm],
+                dense,
+                curves[arm],
                 color=line.get_color(),
-                label=f"{label} fit",
+                label=fit_labels[arm],
             )
         ax.set(
             xlabel="Random Clifford depth (count)",

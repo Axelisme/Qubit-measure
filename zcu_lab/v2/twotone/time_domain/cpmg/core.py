@@ -326,9 +326,9 @@ def _live_plot(
     formatter.set_powerlimits((-2, 2))
     heat_ax.xaxis.set_major_formatter(formatter)
     heatmap = live_heatmap(heat_ax, uniform=True, clim=(0.0, 1.0))
+    heat_ax.grid(False)
     fig.colorbar(heat_ax.images[0], ax=heat_ax, label="Normalized IQ (a.u.)")
     line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-    line_ax.grid()
     lines = live_line(line_ax, num_lines=2)
     for artist in line_ax.lines[:-1]:
         artist.set(marker="None", alpha=0.6, color="C1", label="Previous count")
@@ -372,7 +372,10 @@ def _plot_coherence(
 
     X = np.broadcast_to(counts[None, :], contrast.T.shape)
     Y = delays.T
-    image = ax1.pcolormesh(X, Y, contrast.T, shading="nearest", vmin=0, vmax=1)
+    image = ax1.pcolormesh(
+        X, Y, contrast.T, shading="nearest", vmin=0, vmax=1, cmap="RdBu_r"
+    )
+    ax1.grid(False)
     fig.colorbar(image, ax=ax1, label="Normalized IQ (a.u.)")
     ax1.set(
         title="CPMG contrast",
@@ -397,8 +400,10 @@ def _plot_coherence(
         ax2.axhline(2 * options.t1, color="blue", linestyle="--", label=r"$2T_1$")
     if options.t2r is not None:
         ax2.axhline(options.t2r, color="green", linestyle="--", label=r"$T_{2r}$")
-    ax2.set_xlim(0.3, None)
     ax2.set_xscale("log")
+    if counts.size <= 5:
+        ax2.set_xticks(counts, labels=[str(n) for n in counts])
+    ax2.tick_params(axis="x", which="minor", bottom=False, labelbottom=False)
     ax2.set_yscale("log")
     ax2.legend()
     ax2.set_xlabel("π pulses (count)")

@@ -6,7 +6,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.artist import Artist
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as validated_dataclass
 from scipy.ndimage import gaussian_filter1d
@@ -139,10 +139,10 @@ def _live_plot(
         xlabel=scan_label,
         ylabel="Gate repetitions (count)",
     )
-    formatter = ScalarFormatter(useMathText=True)
-    formatter.set_powerlimits((-2, 2))
-    ax.xaxis.set_major_formatter(formatter)
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    ax.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
     heatmap = live_heatmap(ax, uniform=True)
+    ax.grid(False)
     fig.colorbar(ax.images[0], ax=ax, label="IQ projection (a.u.)")
 
     @plots.on_plot_thread
@@ -326,7 +326,9 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         min_value = values[np.nanargmin(loss)]
 
         # 4. Relate the selected gain or frequency to repeat-count contrast and variation loss.
-        fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, sharex=True)
+        fig, _ = plots.subplots(
+            num="fit", nrows=2, ncols=1, sharex=True, layout="constrained"
+        )
         ax1, ax2 = fig.axes
 
         dx = (values[1] - values[0]) * 0.5
@@ -336,8 +338,10 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             aspect="auto",
             extent=(values[0] - dx, values[-1] + dx, times[0] - dy, times[-1] + dy),
             origin="lower",
-            interpolation="none",
+            interpolation="nearest",
+            cmap="RdBu_r",
         )
+        ax1.grid(False)
         cfg = source.cfg
         if cfg is None:
             scan_label, unit = "Repeated gate setting", ""
@@ -361,5 +365,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         )
         ax2.legend()
         ax2.set(xlabel=scan_label, ylabel="IQ variation (a.u.)")
+        ax2.xaxis.set_major_locator(MaxNLocator(nbins=5))
+        ax2.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
 
         return ZigZagScanAnalysis(min_value=float(min_value))
