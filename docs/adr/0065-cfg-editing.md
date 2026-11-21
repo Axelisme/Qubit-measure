@@ -6,125 +6,110 @@ status: accepted
 
 ## 局部取代範圍
 
-本篇關於普通切換補 fresh defaults、數值葉 command 改 parent，以及僅保存 input 並丟棄不相容葉的規則，由 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題) 局部取代。欄位轉換與保存還原以該篇為準，其餘 owner 邊界不變。
+**規則。** 欄位轉換與保存還原以 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題) 為準。
+
+**例子。** 普通切換沒有 converter 時只改 selection，不補 fresh defaults。
+
+**邊界。** 局部取代也涵蓋改動 parent 的數值葉 command，以及只保存 input、丟棄不相容葉的舊規則。其餘 owner 邊界不變。
+
+**依據。** 取代項目與實作狀態由 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題) 記錄。
 
 ## 問題與決策
 
-Qt、remote 與 Run 必須使用同一份 tab cfg。若 widget 持有唯一可編輯的樹，headless caller 就依賴 view 的存在。若 Run 重新解析 live source，caller 看到的值與實際執行值可能不同。
+**規則。** Measure 的 `TabFormResource` 擁有一份不依賴 Qt 的 `FormState` 與固定來源，讓 Qt、remote 與 Run 使用同一份 cfg。`TabFormResources` 管理建立、查找、操作禁令與撤銷。前端只讀單層 description、input、preview 與 errors，修改走 resource 的公開入口。Form 決定 defaults、形狀、驗證與 core cfg 轉換，wire caller 不重建這些規則。
 
-Measure 的 `TabFormResource` 擁有一份 Qt-free `FormState` 與固定來源。`TabFormResources` 管理建立、查找、操作禁令與撤銷。Qt、remote 與 Run 都使用同一資源。Frontend 只讀單層 description、input、preview 與 errors，寫入走 resource 的公開入口。Form 決定 defaults、形狀、驗證與 core cfg 轉換，wire caller 不重建這些規則。
+**例子。** 有效的 Expr 初值若在支援 Eval 的欄位，Form 保留原式，初開畫面顯示 Expression 模式與公式。宣告 choices 的文字或數值欄位沒有 Eval 模式，初值仍求值並檢查是否可接受，保存為 direct 值，不交給拒絕 authored Expr 的規則清空。
 
-Library、Inspect 與 writeback 也使用 FormState／FormEditor，但各自持有 state 與提交政策，不借用 tab resource。Library 寫入持久 Spec，writeback 的 opaque draft 與 selected Apply 見 [[0008]]。舊 CfgSchema、gui.cfg、widgets.cfg 與 experiment.cfg_editing 已移除。
+**邊界。** Library、Inspect 與 writeback 共用 FormState／FormEditor，但各自持有 state 與提交政策，不借用 tab resource。Library 寫持久 Spec，writeback 的 opaque draft 與 selected Apply 見 [[0008]]。Expr 初值的能力分界也適用於分支初值與相容還原補入的 defaults，不新增模式或保存格式。Literal、Enum、bool 與禁用 expression 的 InputPolicy 不新增初值求值能力。求值或欄位驗證失敗時留空；靜態預設和來源故障照既有規則處理。詳見 [Form README](../../lib/zcu_tools/gui/form/README.md)。
 
-使用者於 2026-11-02 裁定：「採用建議」。只有 leaf 具 Eval 能力時，有效 Expr 初值才與使用者輸入的 expression 一樣保留原文，讓初開畫面顯示 Expression 與來源公式，而非失去來源的 direct 數字。宣告 choices 的文字或數值 leaf 沒有 Eval 模式，初值沿用既有求值與 admission，保存可接受的 direct 值。這避免原本合法的初值被 choice 的 authored Expr 拒絕規則清空，不擴充 UI、result、describe 或 restore 契約。Literal、Enum、bool 與 InputPolicy 禁用 expression 的 leaf 不新增初值求值能力。Core 仍檢查初值能否求值及被欄位接受；失敗留空，既有靜態預設與來源故障傳遞規則不變。分支初值與相容還原補入的 defaults 使用相同能力分界，不新增模式或保存格式。
-
-使用者於 2026-10-25 裁定：「但我比较想是我改完就自动 apply，有隐式 apply。然后 revert 的话，感觉三个 panel 都可以有，只是 UI UX 怎么设计我还不确定。」「因为目前是 write through，所以我觉得好算了，就不做 reverse undo 功能了。」Inspect 三頁採隱式提交，不提供 revert 或 undo。
+**依據。** 2026-11-02，使用者對 Expr 初值答「採用建議」。原始討論未入庫，裁決記於 Git `b67f3d549`，choices 的處理見 `f5da919ba`。
 
 ### 表單錯誤的呈現
 
-2026-11-16，使用者指出：「我說的重複是UIUX的layout問題，比如說這張圖，應該只有兩個問題，但4個提示」，並選擇選項 B。可見的無效欄位各自保留 inline 紅字。共用 FormEditor 的底部摘要只顯示第一個沒有可見欄位呈現的錯誤及完整路徑，包含折疊、hidden 欄位及 model／group 錯誤。所有錯誤都由可見欄位呈現時，摘要隱藏。例如 Start 與 Stop 都無效且展開時只留兩行 inline 錯誤；收起後保留摘要，讓使用者找到錯誤。
+**規則。** 共用 FormEditor 讓每個可見的無效欄位保留 inline 紅字。底部摘要只顯示第一個沒有可見欄位承接的錯誤及完整路徑，包括折疊、hidden 與 model／group 錯誤。錯誤都已由可見欄位呈現時，摘要隱藏。Measure 的 Run 區顯示無效欄位總數，tooltip 只提示修正標紅欄位。Run 保持停用，修正後清空提示並恢復既有 admission。
 
-Measure 的 Run 區另顯示 `Config invalid: N fields`，單數使用 `Config invalid: 1 field`。N 是 resource model／lowering 與 editor-local 錯誤的 canonical FormPath 聯集大小，不按訊息去重。尚未提交的 parse errors 也計入。Run 訂閱 editor 的 `errors_changed`，錯誤數改變但 validity 不變時仍更新。Run tooltip 只提示修正標紅欄位，不複製第一項錯誤原文。Run 保持停用，全部修正後清空計數並恢復既有 admission。
+**例子。** Start 與 Stop 都無效且展開時，表單只留兩行 inline 錯誤，Run 區顯示 `Config invalid: 2 fields`。收起這兩欄後，底部摘要顯示第一個未呈現的錯誤及路徑。計數按 canonical FormPath 合併 resource model／lowering 與 editor-local 錯誤，包含未提交的 parse errors，不按訊息去重。單複數與 `errors_changed` 的更新方式見 [Tab admission](../../lib/zcu_tools/gui/app/measure/README.md#tab-admission)。
 
-此規則只改錯誤呈現，不改驗證、提交或 domain admission。MainWindow 的 Ready、Saved 等狀態列訊息不變。無 Form 的歷史 tab 仍依 [[0073]] 顯示 factory 原因，不以欄位計數取代。Workflow、Inspect 與 writeback 共用摘要規則，保留各自的提交政策。這次小改動不另建討論快照，裁決與適用邊界記於本段。
+**邊界。** 這只改呈現，不改驗證、提交或 domain admission。MainWindow 的 Ready、Saved 等狀態列訊息不變；無 Form 的歷史 tab 仍依 [[0073]] 顯示 factory 原因。Workflow、Inspect 與 writeback 共用摘要規則，各自保留提交政策。
+
+**依據。** 2026-11-16，使用者指出：「我說的重複是UIUX的layout問題，比如說這張圖，應該只有兩個問題，但4個提示」，並選擇選項 B。沒有另建討論快照，裁決見 Git `8ea32f872`。
 
 ## 共用機制與領域 owner
 
-2026-10-18 採用的欄位轉換、固定 list 與保存還原設計見 [[0079]]，實作尚待完成。以下相關條款描述目標契約，不代表目前程式已完成遷移。
+**規則。** `gui.form` 擁有 input、FormState、單層 description、preview、result 與錯誤。`widgets/form` 的 FormEditor 依 description 畫欄位與選項，不解讀 library 或實驗語義。`gui.form_adapter` 從 core cfg 或持久 Spec 生成 Form，處理 FieldMeta 投影、key-or-inline wrapper 與屏蔽欄位；Form core 不讀 FieldMeta。實驗 adapter 用 `Form(core_cfg, tree)`，由 annotations 定義可編輯形狀，tree 定義初值、唯讀屬性、Slot 與 Template。
 
-共用 `gui.form` 擁有 input、單層 description、FormState、preview、result 與錯誤。`widgets/form` 的 FormEditor 依 description 顯示欄位與選項，不解讀 library 或實驗語義。`gui.form_adapter` 從 core cfg 與持久 Spec 生成 Form，集中 FieldMeta 呈現投影、key-or-inline wrappers 與屏蔽欄位政策。Form core 不讀 FieldMeta。
+**例子。** Library entry 的表單由 session 持有，初始 input 與提交都保留 child key。不能把既有 pulse 改成 readout；換 concrete Spec family 要新建條目。Optional None 維持缺席。選填 `desc` 由生成器略過，提交時用 Spec 預設，不保留舊值；無預設的必填欄位仍可編輯。None、library key 與 Inline kinds 共用一個下拉，key 只顯示名稱，不展開唯讀 descendants。普通選 Inline 按 converter 的型別配對繼承，明確的 `to_inline` 才從固定 library 複製。Advanced 預設折疊，Expression 只用於支援它的文字欄位，不用於下拉或勾選。
 
-Library entry 表單由 session 擁有，固定 root 的具體 Spec family。初始 input 與提交都保留 child key，不能把既有 pulse 切成 readout；換 family 要新建 entry。Optional None 維持缺席。生成器略過選填的 desc，提交時以 Spec 預設補回，不保留原值；沒有預設的必填欄位仍可編輯。
+**邊界。** 欄位轉換、固定 list 與保存還原依 [[0079]] 的目標契約，實作尚未完成。沒有 converter 時只改 selection，子表單結構和 input 不變。Memento 保留 selection／branch 和原始 input，不保存來源覆寫。還原不跑 converter；型別與固定元素依 [[0079]] 的還原規則處理。Open 與 Reset 計算 defaults；Reset 可在同一資源換形狀及初值，成功後不再接受舊 editor state 寫入。`make_form`、範本及固定來源見 [[0073]]。
 
-None、library keys 與各 Inline kind 在同一個合併下拉。Key 只顯示名稱，不展開唯讀 descendants。普通選 Inline 由欄位 converter 依明確的型別配對政策繼承；明確的 to_inline 指令從固定 library 複製內容。無 converter 時只改 selection，子表單結構與 input 不變，不補 fresh defaults，見 [[0079]]。Advanced 群組預設折疊。Expression 只適用於文字欄位，下拉與勾選欄位不求值。
-
-實驗 adapter 宣告 `Form(core_cfg, tree)`。Core annotations 定義可編輯形狀，tree 定義起始值、唯讀屬性、Slot 與 Template。Open 與 Reset 計算 defaults。Memento 保存 selection／branch 與原始 Form input，不保存來源覆寫；還原不執行 converter，identity 不相容時明確報錯，見 [[0079]]。Make_form、範本與固定來源的契約見 [[0073]]。Reset 可在同一資源內更換形狀與初值；成功後舊 editor state 不再承接寫入。
+**依據。** 2026-10-18 採用的欄位轉換、固定 list 與保存還原設計見 [[0079]]。生成器與 widget 的分層見[選項分層討論](../discussions/2026-10-13-form-options-layering.md)，實作細節見[生成器 README](../../lib/zcu_tools/gui/form_adapter/README.md)。
 
 ## Input 與宿主提交
 
-FormInput 保存未填、null 與 expression 原文，FormModel 實例只承載求值後的普通值。FormState 擁有 draft／base，不持有 Engine revision。FormEditor 擁有尚未 parse 的文字與 local parse errors；宿主提交前檢查這些錯誤，再取得 Form result，不能把 preview 當成可提交結果。
+**規則。** FormInput 保存未填、null 與 expression 原文，FormModel 實例只承載求值後的普通值。FormState 擁有 draft／base，宿主擁有 Engine revision。FormEditor 保留尚未 parse 的文字及 local parse errors。宿主決定 capture、Apply、Discard 和何時保存 input；提交前先查 editor 的錯誤，再取 Form result，不以 preview 代替。宿主不另建 evaluator、validator 或 codec。
 
-Host 決定 capture、Apply、Discard 與 input 保存時機。Library／writeback 提交持久 Spec；workflow host 交普通 plan／tunables 給 Engine，只有 Engine 成功 publication 後才接受 input／base，見 [[0062]]。Expression 留在 FormInput，不進 Engine journal。Host 保留 input 的責任不表示它擁有另一套 evaluator、validator 或 codec。
+**例子。** Library 與 writeback 提交持久 Spec。Workflow 宿主提交普通 plan／tunables，Engine 成功 publication 後才接受 input／base。Expression 留在 FormInput，不進 Engine journal，見 [[0062]]。
 
-宣告唯讀的欄位使用初值與 `Display(readonly=True)`，由 Form core 對 Qt、MCP 與 RPC 執行同一寫入規則。同值寫入通過，不同值拒絕；父層或批次寫入不能繞過唯讀子欄位。RPC／MCP 拒絕保留 `error.reason="form_input_rejected"` 與 `error.data.form_path`。唯讀拒絕另帶 `error.data.reason="readonly"` 與目前值的 JSON 形式 `error.data.current`；其他 rejection 不帶這兩個欄位。
+**邊界。** 表單用初值與 `Display(readonly=True)` 宣告唯讀。Form core 對 Qt、MCP 與 RPC 採同一規則：同值可寫，不同值拒絕，父層與批次也不能繞過。RPC／MCP 回 `error.reason="form_input_rejected"` 及 `error.data.form_path`；只有唯讀拒絕另附 `error.data.reason="readonly"` 與目前值的 JSON `error.data.current`。還原保留唯讀欄位的存檔值，不重算；能否執行由一般驗證決定，見 [[0079]]。Form core 不依賴 app、widgets、remote、experiment 或 Qt，editor 不依賴 app、remote、experiment 或 MCP。`.importlinter` 的 `form-core-no-ui-policy` 與 `form-editor-no-host` 檢查這兩條邊界。
 
-使用者於 2026-10-19 裁定：「那為什麼不直接都用ReadOnly就好？」「1同樣值不報錯。2我選存檔的版本，因為有些lock值可能是生成的。能不能執行是另外一回事」。還原保留唯讀欄位的存檔值，不從宣告重新計算，執行有效性仍由一般驗證判定，見 [[0079]]。
-
-共用核心不依賴 app、widgets、remote、experiment 或 Qt，editor 不依賴 app、remote、experiment 或 MCP。既有 `.importlinter` contracts `form-core-no-ui-policy` 與 `form-editor-no-host` 投影這兩個方向。使用者於 2026-10-16 以「都採用建議」確認將表單草稿的這些穩定邊界併入本篇及 [[0062]]，方法與欄位細節留在 owner 文件。
+**依據。** 2026-10-16，使用者以「都採用建議」確認將穩定邊界併入本篇及 [[0062]]。2026-10-19，使用者問「那為什麼不直接都用ReadOnly就好？」並答「1同樣值不報錯。2我選存檔的版本，因為有些lock值可能是生成的。能不能執行是另外一回事」。原始討論未入庫，分別見 Git `854f4198b`、`c499c06d9` 及 [[0079]] 的還原裁決。方法與欄位見 [Form README](../../lib/zcu_tools/gui/form/README.md) 及 [FormEditor README](../../lib/zcu_tools/gui/widgets/form/README.md)。
 
 ## Measure tab 的 input 與使用
 
-Input 保存 ordinary JSON、顯式 `{expr: text}`、complex tags 與 model field names。普通字串保持 literal。Preview 提供 ordinary leaf values，不代表可以 Run。Form errors 包含帶路徑的診斷，合法但尚未完成的 input 保持可編輯。結構或來源錯誤拒絕整批，不保留成功前綴。
+**規則。** FormInput 保存 model field names、普通 JSON、顯式 `{expr: text}` 與 complex tags；普通字串保持 literal。未完成或一般值無效的草稿仍可編輯。結構或來源錯誤拒絕整批，不留成功前綴。Preview、result 與 description 不改寫 input；preview 可投影有效的子表單，不代表整份 cfg 能 Run。Run 只接受目前有效的 Form result，不收 cfg ref 或 expected revision，不回退上次有效值。接受後的執行值與來源 provenance 深層隔離，後續 Edit、Reset 或全域來源變更不影響該 Run。
 
-`tab.get_cfg`、`tab.edit_cfg` 與 `tab.reset_cfg` 回傳 input、values、errors，不附 schema。Values 是 path/value 葉清單，errors 是 path/message 清單。Tab 以 typed segments 指定 model-field paths，欄位名為 str，list index 為 int。Sweep 的 tagged branch 決定 active 座標與採樣。Range 使用 start／stop，Center 使用 center／span，Expts 使用 n，Step 使用 step。四個分支只保存 active 欄位，切換其中一個維度不重設另一個維度。Inactive paths 沿 form_path 契約拒絕。Wire 不提供 CfgSchema kind、ref 子樹或 Valid/Invalid/Unavailable publication。
+**例子。** Sweep 的 Range／Center 與 Expts／Step 各只保存 active 欄位。座標切換保留 n／step 的原文、錯誤或缺席，採樣切換才用目前的採樣值。掛在 sweep row 的 command 只求值參與欄位；無關錯誤不阻擋換算。成功才把參與的 expression 改成 direct 數字，之後新輸入的 expression 照常保存。失敗保留模式與全部原稿。FormState 核對 annotation 和 subtree 後原子安裝，不改 parent 或 siblings。普通切換也走 [[0079]] 的安裝流程，不由核心另補 defaults。Step 的 `start=0`、`stop=1`、`step=0.3` 保留原稿 `stop=1`，Qt 顯示有效 stop 0.9。點數為 `floor(|span|/|step|)+1`，有效 stop 為 `start + step × (n−1)`；零 span 只接受 `step=0` 的單點。Center 用有效端點投影 center／span。Adapter 用同一投影與原 step 產生 SweepCfg，不重算；執行端仍驗證方向、單點與點數一致性。非零 span 的步長、方向與 `1e-9` 相對容差見[生成器的 Sweep 表示](../../lib/zcu_tools/gui/form_adapter/README.md#sweep-表示)。非法或未完成的 draft 不縮成其他可執行掃描。Memento 保留四種 active input 與 expression，Reset 回 fresh Range + Expts。
 
-Sweep 的模式與 active 原稿存於 FormInput，不由 widget 保存。Sweep row 宣告 command，callable 透過公開 evaluate 求值參與欄位，回該 row 的候選狀態。FormState 檢查 annotation 與 subtree 範圍，再原子安裝；command 不修改 parent 或 siblings。座標切換不使用 n／step，保留其原文、錯誤或缺席。採樣切換使用座標與目前採樣欄位。成功只把參與 expression 改成 direct 數字，之後新輸入的 expression 照常保存。無關欄位錯誤不阻擋換算，失敗保留模式與整組原稿。普通選項切換與 sweep command 共用 [[0079]] 的安裝流程，不另外補 defaults。
+**邊界。**
+- Cfg 讀寫回 input、values、errors，不附 schema。Values 列出 path／value，errors 列出 path／message。Canonical path 以 `str` 欄位名、`int` list index 組成。`tab.describe_cfg` 只讀宣告、目前 input 和一層 children，不 materialize 或呼叫 `to_cfg`。普通單一 model wrapper 可攤平一層，完整 path 仍保留 wrapper。欄位回覆含局部 input_present、input、value 與定向 preview errors；get_cfg 或 Run admission 檢查 lowered errors。Get 與 describe 另回全表 diagnostics，合併 preview／lowered errors，不受 picker 或 describe path 限制。逐位置種子及未知校準狀態見 [Seed diagnostics](../../lib/zcu_tools/gui/form_adapter/README.md#seed-diagnostics)。Unknown、inactive 或 whole-leaf 子路徑回 `invalid_params`／`form_path`，保留請求的 `data.form_path`，其他 ValueError 維持 `controller_error`。Writeback 的 `observe_entry` 也只回 input、values、errors。Agent 的 logical 路徑、GUI 內部 canonical 入口及各方法的回覆見 [[0068]] 與 [Tab cfg 協定](../../lib/zcu_tools/mcp/measure/README.md#tab-cfg-協定)。
+- Description 只列 active path 宣告的 command。`tab.run_cfg_command` 經 resource 的控制身份、busy、lifetime 與 mutation guard，成功回 input／values／errors。Qt 檢查參與欄位的 local parse errors，不猜模型、不換算。Sweep 指令放在 row 的右鍵選單，標準文字與 Expression 選單不變。禁編輯時也禁指令。Options 投影、fixed 與延遲展開見 [Form README](../../lib/zcu_tools/gui/form/README.md)。Editor 第一次展開才查 children，收起保留 widgets 與未提交文字，換選項只換該子樹。折疊錯誤聚合到可見祖先。各宿主共用 editor，不共用 capture、Apply／Cancel、guard 或 lifetime。
+- Read、preview、result 與 accept 都不捕捉來源。通知期間能讀，不能 mutation、accept、Run 或 close。Subscriber 出錯記 traceback，不回滾 input，也不阻擋其他 subscriber。來源就緒才建立 tab，建立即捕捉並可 headless 編輯。腳本只把 opaque `TabInput` 交 Form owner 還原，不重建 Form 或來源。未知 adapter、無效 JSON 或來源建立失敗在發布前報錯。輸入範圍與丟棄路徑見 [Measure README](../../lib/zcu_tools/gui/app/measure/README.md#composition-root)；框架沒有 pending 還原，啟動責任見 [[0064]]。
+- Qt attach／detach 只管理 view 與訂閱。Idle close 撤銷舊 handle，同名重開仍是新資源。Active Run 禁同 tab 的人工 Edit、Reset、replacement 與 close，其他 tab 仍能編輯。控制身份見 [[0070]]，hardware guard、lease 和 operation lifecycle 見 [[0066]]。Load 只載結果與分析來源，不要求現有 cfg 有效，不回填任何 Form input，也不換其固定來源。Wire 回結果與分析準備狀態，不回填表單狀態。保存的 native cfg 可經公開 `datafile.load` 離線讀為 Container，也可在 Results browser 唯讀查看，見 [[0063]]。
 
-Step 的有效點數由共用 Form 驗證層計算。非零 span 的 step 必須非零、同向且不大於整段，點數為 floor(|span|/|step|)+1。商接近整數時以相對容差 1e-9 修正，不對一般不整除的商四捨五入。有效 stop=start+step×(n−1)，保留 start 與 step。Center 以有效端點投影 center／span。零 span 只接受 step=0 的單點。非法或未完成的 draft 保存原稿與診斷，不能縮成另一個可執行掃描。
-
-Preview、result 與 description 都不暗改 input。Values 顯示有效端點，Qt 在 authored 與有效數值不同時明示 Effective 值。例如 stop=1、step=0.3 保留原稿 1，顯示有效 stop=0.9。有效子表單的投影不因無關欄位出錯而消失。Form adapter 使用同一投影與原 step 產生既有 SweepCfg，執行端仍驗證方向、單點與點數一致性。Memento 保存四種 active input 與 expression，Reset 回 fresh Range + Expts。
-
-`tab.run_cfg_command(tab_id, path, name)` 只派發目前 active path 描述的公開指令，沿 resource 的控制身份、busy、lifetime 與 mutation guard。成功回 input／values／errors。掛載欄位的 description 提供公開 command，Qt 檢查相關 local parse errors，不猜模型結構或自行換算。Sweep command 由 sweep row 的右鍵選單呈現，不掛在數值葉；標準文字與 Expression 選單保留。禁止編輯時指令也不可執行。
-
-`tab.describe_cfg(path)` 以 str 欄位名／int index 查目標與直接 children，不產生整棵 JSON Schema。回覆同時包含局部 input_present、input、value 與 Form preview 定向 errors，不 materialize 或呼叫 to_cfg。Lowered cfg errors 用 get_cfg 或 Run admission 檢查。兩個讀取入口另回全表 diagnostics，涵蓋全部原始 list 位置並合併 preview／lowered errors，不受 describe path 或 picker 影響。Form adapter 保留逐位置 seed 來源，校準狀態只依作者的 `with_seed_metadata` 宣告，未知保持 null，不從缺值推論。Unknown、inactive 與 whole-leaf 子路徑回 invalid_params／form_path，data.form_path 保留請求路徑。其他 ValueError 維持 controller_error。Writeback 的 observe_entry 同樣只回 input、values、errors。
-
-使用者 2026-10-15：「好，先照這個規劃開始」。共用描述直接讀宣告與目前 input，options 只列 label、value 與 command name／label，不帶 fields。查 active path 才列 children；單一普通 model wrapper 攤平一層，完整 path 仍保留 wrapper。can_expand 只表示結構可展開，不執行 child hooks 或保證 children 非空。selection_fixed 表示本層 annotation 只有一個非 null 分支，不凍結內部欄位；fixed 表示完整值固定。Core cfg 本身的單值 Literal 仍算固定值。`RecipeFormField.locked` 是 selection_fixed、fixed 與宣告 readonly 三者的 or，不從當次選單數量推定。
-
-FormEditor 首次展開才查詢並建立 descendants，收起保留 widgets 與未提交文字，不偷寫 input。換選項只替換該子樹。折疊錯誤從完整 preview 聚合到可見祖先。Measure、workflows、Inspect、New Entry 與 writeback 共用此機制，保留各宿主的固定 capture、Apply／Cancel、guard 與 lifetime。
-
-Read、preview、result 與 accept 不捕捉來源。通知期間允許讀取，禁止 mutation、accept、Run 及 close。Subscriber 故障記錄 traceback，不回滾已提交 input，也不阻止其他 subscriber 收到通知。
-
-Run 只接受目前有效的 Form result，不收 cfg ref 或 expected revision，也不回退上次有效 cfg。Accepted config 深層隔離執行值與來源 provenance。後續 Edit、全域來源變更與 Reset 都不改已接受 Run。控制身份見 [[0070]]，hardware guard、lease 與 operation lifecycle 見 [[0066]]。
-
-Tab 在來源就緒後建立，建立時 capture 一次，隨即能 headless 編輯。腳本可用 `tabs.new_tab(adapter, input=TabInput(form_json))` 交回 opaque authored input，由 Form owner 解碼及還原，不由腳本重建 form 或來源。`TabInput` 保存 data、expression 原稿、一般 invalid draft 與 explicit selections，不含結果或來源，也不是 framework session 磁碟 schema。不相容路徑由既有 restore 政策丟棄並記 log，未知 adapter、無效 JSON 或來源建立失敗在 tab 發布前報錯。框架沒有 pending 還原；腳本選擇何時建 tab，見 [[0064]]。
-
-Qt attach/detach 只管理 view 與訂閱。Idle close 撤銷舊 handle，重建同名 tab 建立新資源。Active Run 禁止同 tab 的人工 Edit、Reset、replacement 與 close，其他 tab 仍可編輯。Load 只載既有結果及分析來源，保留表單原輸入與固定來源。有效、Invalid 與未完成的 draft 都不被改寫，Load 不要求 current 有效，也不從 native cfg 推回 Form input。Wire 回覆保留結果與分析準備 facts，不提供回填狀態。原始 cfg 保存在 native 資料檔，透過公開 datafile.load 離線讀取為 Container；Results browser 可唯讀檢視保存的 cfg，不回填 Form，見 [[0063]]。
+**依據。** 2026-10-15，使用者對共用單層描述與延遲展開答「好，先照這個規劃開始」。原始討論未入庫，裁決見 Git `54ea21f0d`。Sweep 換算的背景見[初值與 Sweep 模式討論](../discussions/2026-10-17-measure-form-initial-values-and-sweep-mode.md#sweep-模式)，現行切換範圍依 [[0079]]。
 
 ## 固定來源與 Form library key
 
-Open、Refresh 與 Reset 各捕捉一次 point、library、alias 表、cached device infos 與已發布 value sources。Edit、parameter_read、preview、result 與 Run 使用這份 capture，直到下一次 Refresh 或 Reset。全域來源事件不刷新既有 tab。捕捉不輪詢硬體。
+**規則。** Open、Refresh 與 Reset 各捕捉一次 point、library、alias 表、cached device infos 及已發布的 value sources，不輪詢硬體。Edit、parameter_read、preview、result 與 Run 使用這份 capture，全域事件不刷新 tab。`read_context(aliases=None)` 固定 point、library、storage 與全表。非空 aliases 只覆寫這次 capture 的具名列，保留 dependent authored links，不改全域表。省略、None 和 `{}` 都不覆寫。EMPTY 無覆寫回 None，保留 context-free defaults；非空覆寫拒絕 `no_context`。
 
-公開 `read_context(aliases=None)` 固定 point、library、storage 與全表。非空 aliases 只覆寫這次 capture 的具名列，保留 dependent authored links，不改全域表。省略、None 與 {} 使用全域列。EMPTY 且無覆寫時回 None，保留 context-free defaults，非空覆寫仍拒絕 no_context。
+**例子。** Refresh 更換 capture 並重驗全部 input 與 explicit selections，expression 隨新來源求值但原文不動，choice 初值或使用者填的 direct 值也不動。缺來源仍是欄位錯誤。Reset 更換 capture 並重算 defaults。兩者的單次 aliases 都不存進 alias 表或 memento。`tab.parameter_read` 只讀 `resource.env.parameters`，不收 aliases。`tab.run_start` 在改焦點或開始 operation 前拒絕非空 aliases；None 或 `{}` 使用畫面與固定來源。Recipe 的 `open_tab` 不論新建或 reuse 都先 Reset，再設定參數及 Run。Target 只覆寫這次 Reset 的 aliases，不在 preview 或 Run 另行解析。Recipe 從作者宣告的 inputs model 取得參數契約，不從 tab Form 產生，見 [Recipe 與 execution](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution)。
 
-`tab.refresh_sources(aliases=...)` 重新捕捉來源，保留全部 input data 與 explicit selections，包括 Eval-capable leaf 的有效 Expr 初值原文、choice 的 direct 初值與使用者填入的 direct 值，再以新來源求值與驗證。Expression 的值隨新 capture 更新，input 原文不變。缺失來源仍是欄位錯誤。`tab.reset_cfg(aliases=...)` 重新捕捉來源並以新來源重算 defaults。兩者的單次覆寫都不存入 alias 表或 memento。`tab.parameter_read` 只讀 resource.env.parameters，不收 aliases。`tab.run_start` 在任何 focus 或 operation 效果前拒絕非空 aliases，None 與 {} 使用畫面上的值與固定 capture。
+**邊界。**
+- Form Slot 的 `ModuleRef` 保存 `{kind: ref, name: actual_library_key}`，`ModuleInline` 保存 `{kind: inline, module: Spec input}`。巢狀 key-or-inline 欄位以普通字串作 key。Recipe 選 library 時用實際 key，不建立 `__ref` intent。子欄位唯讀不鎖住祖先的 library 選擇；如果 Module 節點本身唯讀，ref／inline 選擇及整棵子樹都固定，不另設 selector-only 或強制 inline。
+- Recipe 的 `tab.read` 一次讀同一 owner turn 的欄位。回覆包含原稿、presence、ordinary value、key／inline 模式、實際 key、locked、via_ref、現有 children 和定向錯誤。`locked` 由 selection_fixed、fixed 或宣告唯讀決定，不看當次選項數。`via_ref` 表示穿過 library 引用，不表示宣告唯讀，也不授予寫入。Canonical inline path 含生成的 `module` wrapper，logical path 省略它。入口見 [[0068]] 與 [Tab cfg 協定](../../lib/zcu_tools/mcp/measure/README.md#tab-cfg-協定)。完整的 sweep container edit 可一次建成 Range + Expts，不要求舊草稿可換算；部分更新只寫 active leaves。
+- 實驗 cfg 依 [[0073]] 使用 `flux_dev`、`jpa_flux_dev` 等具名裝置欄位，不存 dev role mapping。Open／Reset 從 `$qubit.flux_dev`、`$mux.flux_dev` 或 JPA 的 `flux_dev`／`rf_source` 填可覆寫的 direct 名稱。缺來源留空，必填欄位報錯。使用 flux 時必填 `flux_unit`（A、V 或 native），Core 與 Notebook 無隱含預設，GUI 初值為 A。Recipe helper 只比 cached unit，通過才寫 caller 指定的具名欄位及獨立 `flux_unit`，不換算、連線或 setup。Core 用具名欄位向 `context.devices` 取 driver，缺名由實際取用 driver 的程式報錯；RunContext 無 setters。操作分工見 [[0067]]，Run 前 snapshot 與保存見 [[0063]]。
+- `$alias` 與 `$alias.path` 讀固定 DocumentSetCapture，bare concrete paths 使用獨立 namespace。Run 與 Load 使用相同的 capture 契約。裸 `$alias` 是名稱字串，不做數值算術或字串插值。缺列或未綁時指名報錯，不沿用舊解析值，也不刷新來源。Measure 不用舊跨 tab source refresh／Unavailable 恢復路徑；範本綁定與缺來源依 [[0073]]。
 
-RecipeSession.open_tab 的公開 aliases/reuse 用法不變。新 tab 與 reuse tab 都先 Reset，再設定參數與 Run。Target 對到 Reset 的 aliases，而非 preview 或 Run 的臨時解析。Recipe 的參數 schema 保持手寫，不從 Form 或 Python signatures 生成。
-
-Form Slot 使用公開 ModuleRef/ModuleInline input。Key branch 保存 `{kind: ref, name: actual_library_key}`，inline branch 保存 `{kind: inline, module: Spec input}`。Nested key-or-inline 欄位用普通字串作 key。RecipeTab.use_library 寫實際 key，不建立舊 __ref editing intent。Module 子欄位唯讀不限制祖先選擇，仍可選 library key。Module 節點本身標唯讀則固定整個子樹，包含 ref／inline 選擇與所有子欄位，不論初值是 ref 或 inline；不另設 selector-only 宣告，也不自動強制 inline。
-
-RecipeTab.read_field 每次以一次 `tab.describe_cfg` 讀同一 owner turn 的目前欄位，回傳具名 RecipeFormField，包含 authored input、input_present、ordinary value、key/inline mode、actual key、locked、via_ref、目前 child field names 與 directed errors。`via_ref` 表示路徑穿過 library 引用，不表示宣告唯讀。它不投影 CfgSchema kind，觀察 ref descendants 也不授權寫入。Inline model 的路徑包含 module，例如 `modules.readout.module.freq`。Range count 的路徑是 n。set_sweep 的完整 start／stop／expts 設定以一次 container edit 建立 Range + Expts，不寫 Center／Step 的 inactive paths，也不要求舊 draft 可換算。部分設定仍只編輯目前 active leaves。
-
-實驗 cfg 依 [[0073]] 使用具名裝置欄位，例如 flux_dev、jpa_flux_dev，不再保存 dev role mapping。Form 在 Open／Reset 從 $qubit.flux_dev、$mux.flux_dev 或 JPA 的 flux_dev／rf_source 讀取可覆寫的 direct 名稱。缺來源時留空，必填欄位報錯。使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Core 與 Notebook 不提供隱含 default，GUI 的初始值為 A。Recipe helper 只比 cached unit，成功後寫 caller 指定的具名裝置欄位與獨立 flux_unit，不換算、不連線或 setup。
-使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
-
-Core 以 context.devices[cfg.flux_dev] 等具名欄位取 driver。缺名由實際使用者報錯；RunContext 不提供 setters。操作分工見 [[0067]]，Run 前 snapshot 與保存見 [[0063]]。Measure 不保留舊跨 tab source refresh／Unavailable 恢復路徑；使用時綁範本與缺來源的語義由 [[0073]] 擁有。
-
-Form expression 的 `$alias` 與 `$alias.path` 沿固定 DocumentSetCapture 解析，bare concrete paths 使用獨立 namespace。Run 與 Load capture 相同。裸 `$alias` 是名稱字串，不參與數值算術或字串插值。缺列或未綁時 errors 指名 alias，不沿用舊解析值。Expression 不刷新來源。
+**依據。** 固定文件組的推導見 [Global／point 參數型別收斂與文件組](../discussions/2026-11-17-global-point-parameter-types-and-document-set.md)；Refresh 與 Reset 的裁決見[取捨與相鄰責任](#取捨與相鄰責任)。具名裝置欄位與單位一條是 agent 的選擇。使用者 2026-11-18 過目：「我大概看了一遍，基本上是没问题」，並說這類規則「并不算是裁决，而算是建议」；只作參考先例。原始對話未入庫，見 Git `1f4b16aa0`。
 
 ## Library 與 Inspect
 
-`open_library_entry` 從持久 ModuleSpec／WaveformSpec 建立 LibraryEntryForm。Expression 使用開啟時固定的 env，提交將求得的數字寫進 Spec，不把 expression 存成 Library 來源。Inspect 的 Modules 在 Enter、一般離開欄位、改下拉或勾選時，將 Name 與有效 Spec 以一次 replace 交 `apply_library_change`。文字 idle debounce 在此頁停用，打字途中不寫入。表單 Invalid 或有 local parse errors 時標紅、不提交。寫入被 owner 拒絕時，錯誤留在頁面，輸入可再編輯，檔案不變。Revision 過期沿 [[0081]] 的 Keep／Reload 流程。切換條目、切換 point 或關閉時直接丟棄未提交輸入，不詢問 Save／Discard／Cancel，也沒有 Apply、Revert 或 Saved／Unsaved 標籤。
+**規則。** `open_library_entry` 從持久 ModuleSpec／WaveformSpec 建立表單，以開啟時的 env 求值，寫入 Spec 的是數字，不是 expression。Inspect 三頁採隱式提交，不提供 revert 或 undo。Modules 只在 Enter、一般離開欄位、改下拉或勾選時，把 Name 與有效 Spec 一次 replace 交 `apply_library_change`，打字停頓不提交。
 
-New 從 Registry 注入的 TemplateDef 目錄建立 entry input。換範本建新 State 與 Editor，欄位、折疊與捲動回預設，只保留 Name。已綁定的 Slot 保留 child key。生成器負責 defaults 與驗證，caller 不另建 normalization 或 shape catalog。
+**例子。** New 從 Registry 注入的 TemplateDef 目錄建立條目。換範本就換 State 與 Editor，欄位、折疊與捲動回初始狀態，只保留 Name。已綁 Slot 保留 child key。生成器負責 defaults 與驗證，caller 不另造 normalization 或 shape catalog。
 
-`context.ml_edit` 使用 Form 路徑陣列與值，一次套用該 entry 的整批 edits。只有有效 Spec 才交既有 Library write owner；錯誤帶欄位路徑，Library 不留下成功前綴。Module writeback 使用相同的 entry form 與 observation，但 draft-local editing 與 selected Apply 的交易邊界依 [[0008]]，不宣稱跨項原子性。`ml_list_roles`／`ml_create_from_role` 保留既有名稱與範本入口。
+**邊界。** Invalid 或有 local parse errors 時標紅、不提交。Owner 拒絕時留錯誤與可編輯輸入，不改檔；revision 衝突用 [[0081]] 的 Keep／Reload。切換條目、point 或關閉時丟棄未提交輸入，不問 Save／Discard／Cancel，不顯示 Apply、Revert 或 Saved／Unsaved。`context.ml_edit` 用 Form 路徑陣列和值套用同一 entry 的整批 edits，錯誤帶欄位路徑，不留成功前綴；只把有效 Spec 交 Library write owner。`ml_list_roles`／`ml_create_from_role` 保留名稱與範本入口。Module writeback 共用 entry form 與觀察方式，不共用 Inspect 的隱式提交；draft-local editing 與 selected Apply 依 [[0008]]，不保證跨項原子性。
+
+**依據。** 2026-10-25，使用者說：「但我比较想是我改完就自动 apply，有隐式 apply。然后 revert 的话，感觉三个 panel 都可以有，只是 UI UX 怎么设计我还不确定。」「因为目前是 write through，所以我觉得好算了，就不做 reverse undo 功能了。」原始討論未入庫，裁決記於 Git `ac82fca14`；面板細節見 [session README](../../lib/zcu_tools/gui/session/README.md#結構)，範本 RPC 見 [MCP Measure README](../../lib/zcu_tools/mcp/measure/README.md#library-template-rpc)。
 
 ## 共用 Inspect 與來源
 
-Inspect、Device 與 ARB UI 及其 service 由 session 提供，host 經公開入口注入必填協作者，不靠 host 差異猜能力。Inspect 有 Parameters、Modules、Aliases 三頁。Parameters 使用自己的 YamlValue／FieldSpec，不屬 Form 遷移。Run 或 agent 接管時，Inspect 表單不可改，但仍可選取文字、展開與捲動。
+**規則。** Session 提供 Inspect、Device 與 ARB UI 及服務。Host 經公開入口注入協作者，不從 host 差異猜能力。Inspect 有 Parameters、Modules 與 Aliases 三頁；Parameters 沿用 YamlValue／FieldSpec，不屬 Form 遷移。Alias 表保存工作焦點，parameters 保存元件事實。通用 alias owner 保存及解析 `participants` 的有序名稱清單，名稱轉索引由領域表單的 capture 處理，不在 recipe 重做通用規則。
 
-使用者於 2026-10-23 對 alias 表加 participants 列裁定：「甲」。Alias 是目前工作焦點，parameters 是元件事實。Participants 的有序名稱清單由通用 alias owner 保存與解析，不在 recipe 重做這些規則。名稱轉索引屬於領域表單捕捉邊界，不放進通用 alias owner。
+**例子。** Aliases 的 Value 欄可填單一識別名、既有 `$` link 或 YAML flow list，例如 `[Q3, Q1]`。清單保留順序，每個元素照 earlier-row link 規則。空清單表示未綁，讀取沿固定 capture 的 `lookup`／`lookup_point`／`value`，不另編碼。只接受單一元件的路徑或範本 placeholder 遇到清單會拒絕，不取首項。
 
-Aliases 由共用 Inspect 的第三頁編輯，沒有獨立 AliasDialog 或 aliases wire 名稱。Value 欄可輸入單一識別名、既有 `$` link 或 YAML flow list，例如 `[Q3, Q1]`。清單元素各自沿用 earlier-row link 規則，順序不變。空清單是未綁，不是已選零個元件。List 讀回使用普通固定 capture 的 `lookup`／`lookup_point`／`value`，不另造字串編碼。單一元件路徑及 template placeholder 拒絕清單，不取首項。
+**邊界。**
+- Aliases 由 Inspect 第三頁編輯，不另設 AliasDialog 或 aliases wire 名稱。每次完成儲存格編輯或 Remove，把有效有序的整表交 `apply_alias_rows`，寫 Inspect 所選 Global 或目前 point。Add 的名稱有效前只留在畫面，空 Value 是合法的未綁值。無效列標紅不寫入。未開 entry 回 `no_context`；成功先原子保存 `aliases.yaml`，才安裝記憶體與發布。失敗保留舊表、檔案、版本及畫面輸入。Revision 衝突依 [[0081]]。切換 point 或 entry 丟棄未交輸入並載入當前表，關閉不詢問，也不提供 Apply、Revert 或 undo。
+- Run 或 agent 接管時，Inspect 禁止編輯，但仍能選取文字、展開及捲動。MCP 直接呼叫 owning context，不開 dialog、不切頁也不改焦點。`context.aliases_set` 回已安裝的 authored rows，不做解析；解析另讀 snapshot。`context.set_parameter` 一次 capture 固定 target 與 before，保留 metadata，不寫 ledger。這些 mutation 仍走 owner 與 holder admission，Run 中可寫，但不改既有 Form 或 Run 的 capture。`dialog.screenshot` 只擷取已開 dialog 的當前頁。
 
-Aliases 在每次儲存格編輯完成或 Remove 後，將有效的有序 authored rows 整表交 `apply_alias_rows`。Add 的新列在 alias 名稱有效前只留在畫面，空 Value 仍是合法的未綁值。無效列標紅、不寫入。保存目的地是 Inspect 所選的 Destination（Global 或目前 point）。Owner 要求已開 entry，否則回 `no_context`；成功時先原子保存該文件組的 `aliases.yaml`，再安裝 memory 與發布。失敗保留舊表、檔案、版本與畫面輸入。Revision 過期沿 [[0081]] 的 Keep／Reload 流程。切換 point 或 entry 時直接丟棄未提交輸入並載入目前表。關閉不詢問，也不提供 Apply、Revert 或 undo。
-
-MCP 直接呼叫 owning context，不開 dialog、不切頁或焦點。`context.aliases_set` 回已安裝的 authored rows，不解析；解析另讀 snapshot。`context.set_parameter` 用一次 capture 固定具體 target 與 before，保留 metadata、不寫 ledger。這些 mutation 沿既有 owner 與 holder admission，Run 中可寫，但不改既有 Form 或 Run 的固定 capture。`dialog.screenshot` 只擷取目前已開 dialog 的當前頁，不切 Inspect tab。
+**依據。** 2026-10-23，使用者對 alias 表加 participants 列答「甲」。原始討論未入庫，裁決記於 Git `09113733b`。Alias 解析及持久化見 [session README](../../lib/zcu_tools/gui/session/README.md#contextsession-environment-與-run-snapshot) 和 [[0067]]。
 
 ## 取捨與相鄰責任
 
-單一表單核心讓各宿主共用 input、驗證與 editor，宿主仍決定 lifetime、來源捕捉與提交時機。來源變更不提示、不自動更新。Measure 要保留目前 input 並取新來源就明確 Refresh，要重算初值就 Reset。
+**規則。** 各宿主共用 input、驗證與 editor，但自行決定 lifetime、來源捕捉與提交時機。來源變更不提示，也不自動更新既有 tab。
 
-使用者於 2026-10-19 裁定：「Reset/Refresh應該是不同分工，而不是捆綁」「我認為Reset可以包含Refresh，這樣方便」。Source basis 記錄 provenance，不是 cfg admission 門檻。這不取代 [[0079]] 還原時的型別與元素 identity 檢查；library 內容版本不同本身不是 identity mismatch。舊 `@{}` 補全、eval／value_ref wire tags 與 editor.* 事件／RPC 不再提供。`value.list`／`value.read` 與內部 ValueRef／resolve_value_ref 保留，見 [[0037]]。
+**例子。** Measure 要保留 input 並讀新來源時用 Refresh；要用新來源重算初值時用 Reset。
 
-參數容器與 Library 寫入權由 [[0067]] 定義；保存與 crash durability 歸 [[0063]]；workflow run 與 patches 歸 [[0062]]；wire、guard 與 delivery failure 見 [[0068]]。模組入口見 [Form](../../lib/zcu_tools/gui/form/README.md)、[生成器](../../lib/zcu_tools/gui/form_adapter/README.md)、[session](../../lib/zcu_tools/gui/session/README.md) 與 [measure app](../../lib/zcu_tools/gui/app/measure/README.md)。
+**邊界。** Source basis 記 provenance，不是 cfg admission 門檻。還原的型別與固定元素政策見 [[0079]]，不把 library 內容版本不同視為 identity mismatch。`value.list`／`value.read` 與內部 ValueRef／resolve_value_ref 歸 [[0037]]。參數容器和 Library 寫入權見 [[0067]]，保存與 crash durability 見 [[0063]]，workflow Run 與 patches 見 [[0062]]，wire、guard 與 delivery failure 見 [[0068]]。
+
+**依據。** 2026-10-19，使用者裁定：「Reset/Refresh應該是不同分工，而不是捆綁」「我認為Reset可以包含Refresh，這樣方便」。原始討論未入庫，裁決見 Git `a1377ef12`；現行來源交接見 [Measure README](../../lib/zcu_tools/gui/app/measure/README.md#sources-and-workflow)。
