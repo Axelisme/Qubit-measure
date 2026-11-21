@@ -34,11 +34,15 @@ class MistFluxDepParams:
     auto_range uses the full acquired endpoints.
     """
 
-    flux_half: Annotated[float | None, ParamMeta(label="Half-flux device value")] = None
-    flux_period: Annotated[
-        float | None, ParamMeta(label="Flux period (device units)")
+    flux_half: Annotated[
+        float | None, ParamMeta(label="Half-flux bias (device units)")
     ] = None
-    ac_coeff: Annotated[float | None, ParamMeta(label="Photon coefficient")] = None
+    flux_period: Annotated[
+        float | None, ParamMeta(label="Flux period (device units / Φ₀)")
+    ] = None
+    ac_coeff: Annotated[
+        float | None, ParamMeta(label="Photon number / gain squared")
+    ] = None
     auto_range: Annotated[bool, ParamMeta(label="Full acquired range")] = True
 
 
@@ -96,10 +100,19 @@ def run(
     return RunRecord(cfg=cfg, result=FluxDepExp().run(cfg, context=context))
 
 
+def _summary_lines(source: MistFluxDepRun) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=FluxDepExp.AXES_SPEC,
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, options=_default_params),
+    analysis=Analysis(
+        fn=_analyze, options=_default_params, summary_lines=_summary_lines
+    ),
 )
