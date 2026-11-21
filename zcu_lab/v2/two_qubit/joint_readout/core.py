@@ -33,7 +33,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._readout import MuxResetCfg
+from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
 from .._sums import joint_probabilities, validate_qubit_tones
 
 PREPARED_STATES = (("g", "g"), ("g", "e"), ("e", "g"), ("e", "e"))
@@ -111,7 +111,8 @@ class JointReadoutCfg(ConfigBase):
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full mux readout; Qubit1 and Qubit2 need circle radii from GE Post.",
+            description="Full mux readout; Qubit1 and Qubit2 need circle radii from GE Post. "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
     qubit1_tone: Annotated[

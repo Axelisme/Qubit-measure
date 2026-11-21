@@ -38,7 +38,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 
 from .._drive import QubitDriveCfg
-from .._readout import MuxResetCfg
+from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
 from .._sums import (
     joint_probabilities,
     validate_qubit_tones,
@@ -156,7 +156,8 @@ class CZAmplitudeCfg(ConfigBase):
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full-group mux readout with calibrated frequencies, gains and timing.",
+            description="Full-group mux readout with calibrated frequencies, gains and timing. "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
     qubit1_tone: Annotated[

@@ -6,7 +6,11 @@
 
 In the point's Aliases table, bind `qubit1` and `qubit2` to different components. Bind `mux` to their MuxGroup. Joint readout does not require a `coupler` binding. For an older point, add the two position aliases for the components you want to prepare first and second, then Reset the form. Notebook uses the same built-in position names, but its bindings do not populate the GUI's Aliases table.
 
-Open and Reset find both components in `$mux.qubits`. Their positions in that list are the zero-based tone indices. Keep the complete readout in the same order, including any tones outside Qubit1 and Qubit2. If the captured readout has a different number of tones, Open or Reset reports the mismatch. The form hides the indices. To verify them, inspect `qubit1_tone` and `qubit2_tone` in the saved run cfg. Refresh preserves authored inputs, so use Reset after changing bindings or calibration sources.
+Open and Reset check the [ordered mux group bindings](../guide.md#綁定位置與讀出-tones). Each qubit must link to the resonator at the same position in the group. The two aliases select zero-based indices from `$mux.qubits`; inspect `qubit1_tone` and `qubit2_tone` in the saved run cfg to check the hidden values.
+
+A bound slot must provide a mux readout with one tone per group member. The form checks the count again before Run, including after choosing a different library entry or editing inline. A mismatch blocks Run and the form result reports the expected and actual counts at `readout`. Keep all tones in group order, including those outside Qubit1 and Qubit2: equal counts do not prove physical order.
+
+Refresh keeps the draft and uses the new capture for the count check and hidden indices. Use Reset to replace the draft with initial values from new bindings or calibration sources.
 
 Provide calibrated `$qubit1.module.x180` and `$qubit2.module.x180` pulses on different charge generators. Readout starts from `$mux.module.readout` or a blank mux input if the slot is absent. Confirm generator, mixer, ADC channels, integration window, trigger timing and headroom before Run.
 

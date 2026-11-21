@@ -12,6 +12,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 from .._cz_phase import CZPhasePair
 from .._drive import QubitDriveCfg
 from .._rb_scheduling import validate_x_pulses
+from .._readout import POINT_ALIAS_DESCRIPTION
 from .._sums import validate_qubit_tones
 
 
@@ -68,7 +69,8 @@ class RBInputs[ResetT](ConfigBase):
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full-group mux readout with calibrated frequencies, gains and timing.",
+            description="Full-group mux readout with calibrated frequencies, gains and timing. "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
     qubit1_tone: Annotated[

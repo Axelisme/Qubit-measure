@@ -10,7 +10,7 @@ from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
 )
 
-from .._measure import captured_qubits
+from .._measure import TwoQubitForm, captured_qubits
 from .core import SpectroscopyCfg
 
 
@@ -50,8 +50,9 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
             node = replace(node, copy=True, set={"freq": Hidden(0.0)})
         drive[position] = node
     readout = mux_readout_initial(ctx)
-    return Form(
+    return TwoQubitForm(
         SpectroscopyCfg,
+        readout_of=lambda cfg: cfg.readout,
         tree={
             "reps": 1000,
             "rounds": 10,

@@ -11,7 +11,7 @@ Bind `coupler` to the component that stores their CZ pulses.
 Notebook uses the same built-in position names, but does not bind the GUI aliases.
 For an existing point, bind the new aliases. Rename both CZ slots and their library keys to
 `cz_qubit1` and `cz_qubit2`. Make each slot point to its renamed key.
-Open or Reset captures aliases, parameters and library once. Refresh preserves authored inputs.
+Open or Reset captures aliases, parameters and library once. Refresh keeps the draft and checks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
 After changing bindings or calibrations, Reset and check the whole Form again.
 
 ## Preparation and inputs

@@ -37,7 +37,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
-from .._readout import MuxResetCfg
+from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
 from .._sums import qubit_sigma, validate_qubit_tones
 from ._analysis import (
     IdleBranchFit,
@@ -117,7 +117,8 @@ class IdleZZCfg(ConfigBase):
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full-group mux readout with calibrated frequencies, gains and timing.",
+            description="Full-group mux readout with calibrated frequencies, gains and timing. "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
     qubit1_tone: Annotated[

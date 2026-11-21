@@ -40,7 +40,7 @@ from zcu_tools.program.v2.modules import (
 from .._drive import QubitDriveCfg
 from .._rabi_analysis import ReturnData, fit_duration_rates
 from .._rabi_scan import RabiScanResult
-from .._readout import MuxResetCfg
+from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
 from .._sums import (
     joint_probabilities,
     validate_qubit_tones,
@@ -102,7 +102,8 @@ class ChevronCfg(ConfigBase):
         MuxReadoutCfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot，先用 lookback 取得 timing us，再做 mux onetone。",
+            description="填入 full-group mux readout slot，先用 lookback 取得 timing us，再做 mux onetone。 "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
     qubit1_tone: Annotated[

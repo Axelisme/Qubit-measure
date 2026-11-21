@@ -47,9 +47,8 @@ sweep before the inner duration sweep. Repetitions, rounds and acquisition
 delays appear last.
 Enter finite scan endpoints and strictly positive durations.
 Review repetitions, rounds, optional reset and timing before Run.
-Refresh updates choices without overwriting authored inputs.
-After changing the parameter source, use the Form's Reset to recapture inputs.
-Reset can overwrite unsaved inputs.
+Refresh keeps authored inputs and rechecks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
+Use Reset to replace unsaved input with initial values from the new source.
 
 ## Read the figures
 

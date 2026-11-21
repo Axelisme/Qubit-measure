@@ -8,7 +8,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
 from .._cz_phase_form import captured_phase_pair
-from .._measure import captured_qubits
+from .._measure import TwoQubitForm, captured_qubits
 from .core import RBCfg
 from .core_heralded import RBHeraldedCfg
 
@@ -26,8 +26,9 @@ def rb_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     """
     qubits = captured_qubits(ctx, require_coupler=True)
     readout = Slot("$mux.module.readout")
-    return Form(
+    return TwoQubitForm(
         cfg_type,
+        readout_of=lambda cfg: cfg.readout,
         tree={
             "reps": 1000,
             "rounds": 10,

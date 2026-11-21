@@ -53,6 +53,7 @@ from .._cz_phase import CZPhasePair
 from .._drive import QubitDriveCfg
 from .._rb_scheduling import emit_sequence, validate_x_pulses
 from .._rb_sequence import RBArm, make_rb_arms
+from .._readout import POINT_ALIAS_DESCRIPTION
 from .._sums import joint_probabilities, validate_qubit_tones
 
 _KNOTS_PER_CHANNEL = 6
@@ -161,7 +162,10 @@ class CZOptimizeCfg(ConfigBase):
     ]
     readout: Annotated[
         MuxReadout.Cfg,
-        FieldMeta(description="Full mux readout with Qubit1/Qubit2 classifiers."),
+        FieldMeta(
+            description="Full mux readout with Qubit1/Qubit2 classifiers. "
+            + POINT_ALIAS_DESCRIPTION,
+        ),
     ]
     qubit1_tone: Annotated[
         int,

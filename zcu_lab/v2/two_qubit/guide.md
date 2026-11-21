@@ -138,7 +138,11 @@ Rabi 的 module 與 slot rows 可分開 Apply。確認 x180/x90 指向這次接�
 
 `joint_readout`、`idle_zz`、`conditional_spectroscopy` 不要求綁 `$coupler`。其餘九個入口要求綁定：`chevron`、`constructive_phase`、`cz_amplitude`、`conditional_phase`、`conditional_phase_heralded`、`local_z`、`rb`、`rb_heralded`、`cz_optimize`。
 
-Open／Reset 不檢查元件種類。兩個位置須指向不同元件，且都在 `$mux.qubits` 中。若已綁 `$mux.module.readout`，tone 數須等於 `$mux.qubits` 的長度；不符時表單會報錯。保留完整 readout 的原順序，不用 label、ADC number 或 IQ cluster 排序推定對應。
+Open／Reset 檢查 `$mux` 是否綁到 `group/mux`，以及 group 所列的 qubit、resonator 是否存在且種類正確。每個 `qubits[i].resonator` 必須等於 `resonators[i]`。兩個位置須綁到不同元件，且都在 `$mux.qubits` 中。這些檢查不限 qubit 的物理子種類，也不檢查 coupler 的種類。
+
+若已綁 `$mux.module.readout`，它必須是 mux readout，且 tone 數須等於完整 group 的大小。缺 slot 時，按實驗表單提示選擇或填寫 readout。無論引用 library 還是 inline 編輯，表單提交時都核對實際 tone 數；數量不符會在 `readout` 回報預期與實際數量並阻止 Run。等長不代表物理順序正確。請自行核對 readout 的順序，表單不以 label、頻率、ADC number 或 IQ cluster 推定對應。
+
+Refresh 保留原稿，不重算初值。它重建表單，用新的 capture 判定 tone 數並更新隱藏的索引。若需要按新來源重填初值，使用 Reset。
 
 例如 `qubit1=QA`、`qubit2=QB`，而 `$mux.qubits=[QB, QA]`，則 Qubit1 用 `tones[1]`、Qubit2 用 `tones[0]`。表單隱藏 `qubit1_tone` 與 `qubit2_tone`，可在保存的 run cfg 查到。
 

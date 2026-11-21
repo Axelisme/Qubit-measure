@@ -6,7 +6,7 @@
 
 Cfg schema 7.0 uses `qubit1` and `qubit2` positions.
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+Refresh keeps authored input and rechecks it against the new capture, including the [mux tone count](../guide.md#綁定位置與讀出-tones). Use Reset to replace unsaved input with initial values from the new source.
 
 ## Before run
 

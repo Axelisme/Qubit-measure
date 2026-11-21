@@ -121,7 +121,7 @@ Mux readout 初值與 `require_mux_qubits` 共用此查詢。缺 capture、alias
 
 None、未綁 mux、不存在或非 MuxGroup 的 target、沒有 qubits 都不增加 bring-up 門檻。
 其他 alias 錯誤與來源故障照常傳遞。Mux qubit caller 自行要求完整 tone 數對齊與 active drive。
-共用函式不選 tone、不猜角色、不寫回。Two-qubit Forms 使用自己的 [`captured_qubits`](../../two_qubit/_measure.py) 檢查綁定與 tone 數，不檢查元件種類。
+共用函式不選 tone、不猜角色、不寫回。Two-qubit 的 [`captured_qubits`](../../two_qubit/_measure.py) 呼叫 `require_mux_qubits` 驗證完整有序綁定，再定位兩個 alias 並核對已綁 readout 的類別與 tone 數。不限制 qubit 的物理子種類或 coupler 的種類。
 
 在 concrete `form.py` 使用下列 import，並在自己的 `make_form(ctx)` 建立 Form 前呼叫。
 `MuxCfg` 是該 caller 的既有 core cfg；範例省略 caller 自己的綁定要求與 tree 內容。

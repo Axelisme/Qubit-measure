@@ -12,7 +12,7 @@ Cfg schema 為 6.0，掃描欄位為 `gate_count`。新版 Load 拒絕軸名不�
 
 先校準 X90、CZ 與完整 mux readout。Qubit1/Qubit2 的原 tone 都需要 circle classifier 與 GE Post radius。缺 classifier、非 circle 或缺 radius 時，Run 會要求先做 GE Post。其他 tone 不需要 classifier。修改 readout 設定後，重新校準。
 
-Readout 有 `$mux.module.readout` slot 時引用完整 library 設定。缺 slot 時手填 blank mux 範本的必要欄位。Open／Reset 捕捉角色、library 與 tone 位置。Refresh 保留已填輸入，換來源後要 Reset 並核對輸入。
+Readout 有 `$mux.module.readout` slot 時引用完整 library 設定。缺 slot 時手填 blank mux 範本的必要欄位。Open／Reset 捕捉角色、library 與 tone 位置。Refresh 保留原稿，並用新 capture [核對完整 tone 數](../guide.md#綁定位置與讀出-tones)。要用新來源重填初值時，按 Reset 並核對輸入。
 
 Form 複製兩角色 X90 與 `$coupler.module.cz_qubit1`／`cz_qubit2`。缺 CZ slot 時必須補填。兩 CZ pulses 用不同 generator，frequency、duration、pre-delay 必須相同。保留 signed gain 比例、relative phase 與 waveform。X90 generator 必須對應自己的角色。幅度與 frequency 選定後再量 local Z。
 
@@ -59,7 +59,7 @@ Reset 選 `reset/mux_herald`，readout 與終端讀取用同一份設定。Qubit
 
 Use a validated `LocalZCfg` as `cfg` and fill `qubit1_tone` and `qubit2_tone` with the zero-based positions in the full readout. Notebook roles use `qubit1` and `qubit2`, but are separate from GUI aliases and do not bind them automatically. Supply the notebook's existing handles and device manager. `point_view` selects the save destination.
 
-The GUI uses the Run or Load capture's component names in the analysis legends. With no labels supplied, notebook analysis uses `Qubit1` and `Qubit2`.
+The GUI uses the Run or Load capture's component names in the analysis legends. If the run has no captured qubit pair, analysis uses `Qubit1` and `Qubit2`, but writeback still requires the fixed bindings. Notebook analysis uses the same position labels by default. Supply `LocalZExp.Options(qubit1_label=..., qubit2_label=...)` for custom labels.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter

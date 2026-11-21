@@ -12,7 +12,7 @@ Cfg schema 為 7.0。掃描欄位使用 `dc`。
 
 Open／Reset 根據有序的 `$mux.qubits` 設定隱藏的 tone index。每顆 qubit 的 Xπ 與 Xπ/2 使用同一 generator；兩顆 qubit 使用不同 generator。Readout 引用完整 `$mux.module.readout` slot，缺 slot 時手填 blank mux 範本。Qubit1/Qubit2 必須有含 radius 的 circle classifier，缺少時先完成 GE Post。其他 tone 保留原順序，不要求 classifier。
 
-Refresh 更新來源與選項，保留已填輸入。修改來源或 aliases 後按 Reset 重新取得初值，並核對兩顆 qubit 的 pulses 與 readout 順序。Reset 可能覆蓋尚未保存的輸入。
+Refresh 保留原稿，並用新 capture [核對完整 tone 數](../guide.md#綁定位置與讀出-tones)。要用新來源或 aliases 重填初值時，按 Reset。Reset 會替換原稿；請核對兩顆 qubit 的 pulses 與 readout 順序。
 
 ## 設定與 Run
 

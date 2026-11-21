@@ -38,7 +38,7 @@ from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
 from .._drive import QubitDriveCfg
-from .._readout import MuxResetCfg
+from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
 from .._sums import (
     qubit_marginal_probabilities,
     validate_qubit_tones,
@@ -116,7 +116,8 @@ class SpectroscopyCfg(ConfigBase):
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full mux readout; Qubit1/Qubit2 need circle + radius from GE Post.",
+            description="Full mux readout; Qubit1/Qubit2 need circle + radius from GE Post. "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
     qubit1_tone: Annotated[

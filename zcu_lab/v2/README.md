@@ -174,7 +174,7 @@ MuxGroup 可不填 qubits 做 resonator bring-up，readout 各欄位仍可編輯
 `support.measure.mux_bindings.validate_mux_bindings(ctx.parameters)`，以固定 capture
 檢查 component 存在、kind 及逐項 qubit.resonator 對應，無效就拒絕來源。
 其他 mux Forms 共用此入口，呼叫例見 [Measure support](support/measure/README.md#mux-綁定驗證)。
-Two-qubit Forms 另用 [`captured_qubits`](two_qubit/_measure.py) 從該次 capture 的 `$mux.qubits` 定位兩個 tone，並檢查 readout tone 數，不查 qubit kind。
+Two-qubit Forms 用 [`captured_qubits`](two_qubit/_measure.py) 要求完整的有序 mux 綁定，從 `$mux.qubits` 找出兩個位置並核對已綁 readout 的類別與 tone 數。這不限制 qubit 的物理子種類或 coupler 的種類。正常 lowering 後，`TwoQubitForm.to_cfg` 用同次 capture 核對實際 ref／inline readout 的完整 tone 數。Refresh 保留草稿，以新 capture 重建 Form 和 hidden indices。操作員仍須核對 tone 順序，見 [Two-qubit guide](two_qubit/guide.md#綁定位置與讀出-tones)。
 Module 可整組引用或 inline 編輯，tones 使用 picker 逐項編輯。
 七個 mux qubit Forms 有 readout slot 時引用 library，完整 tones 與 scalar 設定取自該模組。
 缺 slot 時從 blank mux 範本加 group tones，填入 resonator 校準頻率與名稱 label。

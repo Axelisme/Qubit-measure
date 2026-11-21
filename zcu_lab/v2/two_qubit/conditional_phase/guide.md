@@ -15,7 +15,7 @@ For an existing point, bind the new aliases. Rename both CZ slots and their libr
 
 Calibrate Xπ, X90 and the complete mux readout first. Each qubit tone needs a circle classifier with radius from mux singleshot GE Post. Missing calibration, linear classification or missing radius stops Run with a GE Post prompt. Other mux tones need no classifier.
 
-Readout references `$mux.module.readout` when present. Without a slot, fill all required fields in the blank mux template. Open or Reset captures calibrated pulses and sets two hidden tone indices from `$mux.qubits`. Refresh preserves authored inputs. After changing sources, use Reset and check the inputs again.
+Readout references `$mux.module.readout` when present. Without a slot, fill all required fields in the blank mux template. Open or Reset captures calibrated pulses and sets two hidden tone indices from `$mux.qubits`. Refresh keeps the draft and rechecks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture. Use Reset to replace the draft with initial values from the new source, then check them again.
 
 The Form copies `$coupler.module.cz_qubit1` and `cz_qubit2` into editable pulses. Missing CZ slots remain required. CZ, Xπ and X90 must use the generator for that qubit. The two CZ lines require different generators, equal finite frequency, equal envelope duration and equal pre-delay. Signed gains, relative phase, waveform and individual post-delays remain explicit. Playback starts both lines together and waits for both to finish. The coupler stays DC-biased.
 

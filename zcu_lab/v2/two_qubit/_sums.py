@@ -60,13 +60,7 @@ def qubit_marginal_probabilities(
     """
     if target not in ("qubit1", "qubit2"):
         raise ValueError("target must be qubit1 or qubit2")
-    return _marginal_probabilities(counts, sum_axis=-1 if target == "qubit1" else -2)
-
-
-def _marginal_probabilities(
-    counts: NDArray[np.float64], *, sum_axis: Literal[-1, -2]
-) -> NDArray[np.float64]:
-    return joint_probabilities(counts).sum(axis=sum_axis)
+    return joint_probabilities(counts).sum(axis=-1 if target == "qubit1" else -2)
 
 
 def qubit_sigma(

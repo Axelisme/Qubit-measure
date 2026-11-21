@@ -41,6 +41,7 @@ from zcu_lab.v2.support import live_line
 
 from .._drive import QubitDriveCfg
 from .._phase import QuadraturePhase, count_phase, qubit_sigma_variance
+from .._readout import POINT_ALIAS_DESCRIPTION
 from .._sums import qubit_sigma, validate_qubit_tones
 from .crossing import PhaseCrossings, phase_crossings
 
@@ -135,7 +136,8 @@ class ConditionalPhaseCfg(ConfigBase):
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full-group mux readout with calibrated frequencies, gains and timing.",
+            description="Full-group mux readout with calibrated frequencies, gains and timing. "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
     qubit1_tone: Annotated[

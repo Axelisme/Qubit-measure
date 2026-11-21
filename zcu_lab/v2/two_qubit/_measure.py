@@ -1,9 +1,49 @@
 """Fixed capture binding for two-qubit Forms, never used by core."""
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
-from zcu_tools.cfg_model import MuxReadoutSpec
-from zcu_tools.gui.form_adapter import FormContext
+from zcu_tools.cfg_model import ConfigBase, FormNode, MuxReadoutCfg, MuxReadoutSpec
+from zcu_tools.gui.form import FormEnv, FormErrors, FormModel
+from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2.support.measure.mux_bindings import (
+    require_mux_group,
+    require_mux_qubits,
+)
+
+
+class TwoQubitForm[C: ConfigBase](Form[C]):
+    """Lower a two-qubit draft against the complete captured mux group."""
+
+    def __init__(
+        self,
+        core_cfg: type[C],
+        *,
+        tree: Mapping[str, FormNode],
+        readout_of: Callable[[C], MuxReadoutCfg],
+    ) -> None:
+        """Use the usual Form tree and a typed accessor for the cfg's terminal readout."""
+        super().__init__(core_cfg, tree)
+        self._readout_of = readout_of
+
+    def to_cfg(self, value: FormModel, env: FormEnv) -> C | FormErrors:
+        """Lower a result in its fixed Form environment, without modifying its draft.
+
+        Preserve ordinary lowering errors. If the validated terminal readout
+        is not the size of the captured group, return an error at readout.
+        """
+        cfg = super().to_cfg(value, env)
+        if isinstance(cfg, FormErrors):
+            return cfg
+        # Open/Reset (or Refresh) has already checked the same group's ordered links.
+        expected = len(require_mux_group(env.parameters).resonators)
+        actual = len(self._readout_of(cfg).tones)
+        if actual != expected:
+            return FormErrors(
+                {("readout",): f"$mux group: expected {expected} tones, got {actual}"}
+            )
+        return cfg
 
 
 @dataclass(frozen=True)
@@ -30,10 +70,11 @@ def captured_qubits(
 
     Require scalar $qubit1, $qubit2 and $mux aliases; only resolve $coupler
     when require_coupler is true. Both distinct qubits must appear in the
-    ordered $mux.qubits list. If $mux.module.readout is bound, require a mux
-    readout with one tone per listed qubit. Missing or inconsistent capture
-    inputs raise ValueError with the relevant aliases or counts. Component
-    kinds are not checked. The capture is neither refreshed nor changed.
+    ordered $mux.qubits list. Require a group/mux with complete, ordered
+    qubit/resonator links (ADR-0072), without requiring a qubit or coupler
+    subtype. If $mux.module.readout is bound, require a mux readout with one
+    tone per listed qubit. Missing or inconsistent bindings raise ValueError.
+    The capture is neither refreshed nor changed.
     """
     parameters = ctx.parameters
     if parameters is None:
@@ -47,9 +88,7 @@ def captured_qubits(
         raise ValueError(
             f"$qubit1 and $qubit2 both bind {qubit1!r}; use distinct components"
         )
-    qubits = parameters.lookup_point("$mux.qubits").value
-    if not isinstance(qubits, list):
-        raise ValueError(f"$mux={mux!r} must provide an ordered $mux.qubits list")
+    qubits = require_mux_qubits(parameters)
     for alias, name in (("$qubit1", qubit1), ("$qubit2", qubit2)):
         if name not in qubits:
             raise ValueError(f"$mux.qubits does not contain {alias}={name!r}")

@@ -14,7 +14,9 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleResolutionError
 
 from .core import LocalZAnalysis, LocalZCfg, LocalZExp, LocalZOptions, LocalZResult
 from .form import make_form
@@ -22,15 +24,25 @@ from .form import make_form
 LocalZRun: TypeAlias = RunRecord[LocalZCfg, LocalZResult]
 
 
+def _captured_names(parameters: DocumentSetCapture | None) -> tuple[str, str] | None:
+    if parameters is None:
+        return None
+    try:
+        return parameters.resolve_path("$qubit1"), parameters.resolve_path("$qubit2")
+    except RoleResolutionError as exc:
+        if exc.reason not in (
+            "Unknown alias",
+            "Alias is not bound",
+            "Role is not bound",
+        ):
+            raise
+        return None
+
+
 def _analyze(req: AnalyzeRequest[LocalZRun, None], *, plots: Plots) -> LocalZAnalysis:
-    """Fit saved counts, using only the fixed capture for display names."""
-    parameters = req.parameters
-    options = None
-    if parameters is not None:
-        options = LocalZOptions(
-            qubit1_label=parameters.resolve_path("$qubit1"),
-            qubit2_label=parameters.resolve_path("$qubit2"),
-        )
+    """Fit saved counts; use position labels when the source has no qubit pair."""
+    names = _captured_names(req.parameters)
+    options = LocalZOptions(*names) if names is not None else None
     return LocalZExp().analyze(req.run_result, options, plots=plots)
 
 
@@ -40,12 +52,15 @@ def _get_writeback_items(
     """Propose one component-named pair only when both target fits are valid.
 
     Use only the fixed Run/Load capture for names and the coupler target.
-    Raise ValueError without a capture. Apply does not alter the CZ pulses
-    or their constructive relative phase.
+    Raise ValueError without both qubit bindings in the capture. Apply does
+    not alter the CZ pulses or their constructive relative phase.
     """
-    parameters = req.ctx.parameters
-    if parameters is None:
-        raise ValueError("Local-Z writeback requires a Run/Load capture")
+    names = _captured_names(req.ctx.parameters)
+    if names is None:
+        raise ValueError(
+            "Local-Z writeback requires a Run/Load capture with $qubit1 and $qubit2 bindings"
+        )
+    qubit1, qubit2 = names
     first, second = req.analyze_result.fits
     if first.correction_deg is None or second.correction_deg is None:
         return []
@@ -54,8 +69,8 @@ def _get_writeback_items(
             target_name="$coupler.ext.cz_phase",
             description="B00 thermal linear-model logical corrections (deg); source Qubit1/Qubit2 identities, correction = −slope",
             proposed_value={
-                "qubit1": parameters.resolve_path("$qubit1"),
-                "qubit2": parameters.resolve_path("$qubit2"),
+                "qubit1": qubit1,
+                "qubit2": qubit2,
                 "correction_qubit1_deg": first.correction_deg,
                 "correction_qubit2_deg": second.correction_deg,
             },

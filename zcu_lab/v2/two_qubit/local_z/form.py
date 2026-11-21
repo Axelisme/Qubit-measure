@@ -7,7 +7,7 @@ from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
 )
 
-from .._measure import captured_qubits
+from .._measure import TwoQubitForm, captured_qubits
 from .core import LocalZCfg
 
 
@@ -20,8 +20,9 @@ def make_form(ctx: FormContext) -> Form[LocalZCfg]:
     """
     qubits = captured_qubits(ctx, require_coupler=True)
     readout = mux_readout_initial(ctx)
-    return Form(
+    return TwoQubitForm(
         LocalZCfg,
+        readout_of=lambda cfg: cfg.readout,
         tree={
             "reps": 1000,
             "rounds": 10,

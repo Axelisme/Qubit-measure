@@ -6,7 +6,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
 from .._cz_phase_form import captured_phase_pair
-from .._measure import captured_qubits
+from .._measure import TwoQubitForm, captured_qubits
 from .core import CZOptimizeCfg
 
 
@@ -18,8 +18,9 @@ def make_form(ctx: FormContext) -> Form[CZOptimizeCfg]:
     """
     qubits = captured_qubits(ctx, require_coupler=True)
     readout = Slot("$mux.module.readout")
-    return Form(
+    return TwoQubitForm(
         CZOptimizeCfg,
+        readout_of=lambda cfg: cfg.readout,
         tree={
             "reps": 1000,
             "relax_delay": 1.0,
