@@ -12,6 +12,7 @@ from pydantic import AfterValidator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
@@ -19,6 +20,7 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 )
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     PulseReadout,
     Reset,
@@ -111,6 +113,74 @@ class PowerDepCfg(ConfigBase):
     ] = None
 
 
+class _PowerMap:
+    """Draw the gain map and the ten cuts ending at the latest plottable gain."""
+
+    CUT_SLOTS = 10
+
+    def __init__(
+        self,
+        plots: Plots,
+        gains: NDArray[np.float64],
+        freqs: NDArray[np.float64],
+        *,
+        live: bool = False,
+    ) -> None:
+        self.gains, self.freqs, self.live = gains, freqs, live
+        self.figure, _ = plots.subplots(2, 1, num="measurement", layout="constrained")
+        self.figure.suptitle("One-tone power dependence · Resonator · IQ magnitude")
+        heat_ax, line_ax = self.figure.axes
+        heat_ax.set(xlabel="Readout gain (a.u.)", ylabel="Readout RF frequency (MHz)")
+        heat_ax.grid(False)
+        line_ax.set(
+            xlabel="Readout RF frequency (MHz)", ylabel="Normalized magnitude (a.u.)"
+        )
+        self.heatmap = live_heatmap(heat_ax, uniform=True)
+        self.figure.colorbar(
+            heat_ax.images[0], ax=heat_ax, label="Normalized magnitude (a.u.)"
+        )
+        self.lines = live_line(line_ax, num_lines=self.CUT_SLOTS)
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(marker=".", color="C0")
+        self.map_title = heat_ax.set_title(
+            f"Gain settings measured: 0 / {len(gains)}" if live else "Gain map",
+            fontsize=11,
+        )
+        self.slice_label = line_ax.set_title("Latest gain spectrum", fontsize=11)
+
+    def set(
+        self, data: NDArray[np.complex128], *, snr: float | None = None
+    ) -> tuple[Artist, ...]:
+        measured = np.flatnonzero(np.any(np.isfinite(data), axis=1))
+        if self.live and not measured.size:
+            return ()
+        real = np.full(data.shape, np.nan)
+        if measured.size:
+            real[measured] = gaindep_signal2real(data[measured])
+        valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+        history = np.full((self.CUT_SLOTS, len(self.freqs)), np.nan)
+        latest = "Latest gain spectrum"
+        if valid.size:
+            current = valid[-1]
+            count = min(len(history), current + 1)
+            history[-count:] = real[current + 1 - count : current + 1]
+            latest = f"Latest gain: {self.gains[current]:.4g} a.u."
+            if self.live and snr is not None and current == measured[-1]:
+                latest += f" · SNR {snr:.1f}"
+        self.slice_label.set_text(latest)
+        if self.live:
+            self.map_title.set_text(
+                f"Gain settings measured: {measured.size} / {len(self.gains)}"
+            )
+        return (
+            *self.heatmap.set(self.gains, self.freqs, real),
+            *self.lines.set(self.freqs, history),
+            self.map_title,
+            self.slice_label,
+        )
+
+
 class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
     # freqs stored as Hz on disk (MHz * 1e6); gains stored as-is (IDENTITY)
     AXES_SPEC: ClassVar[AxesSpec[PowerDepResult, PowerDepCfg]] = AxesSpec(
@@ -169,42 +239,14 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             nonlocal current_snr
             current_snr = snr
 
-        fig, _ = context.plots.subplots(2, 1, num="measurement", layout="constrained")
-        fig.suptitle("One-tone power dependence · Resonator · IQ magnitude")
-        heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel="Readout gain (a.u.)", ylabel="Readout RF frequency (MHz)")
-        heat_ax.grid(False)
-        line_ax.set(
-            xlabel="Readout RF frequency (MHz)", ylabel="Normalized magnitude (a.u.)"
-        )
-        heatmap = live_heatmap(heat_ax, uniform=True)
-        fig.colorbar(heat_ax.images[0], ax=heat_ax, label="Normalized magnitude (a.u.)")
-        line = live_line(line_ax)
-        progress = heat_ax.set_title(
-            f"Gain settings measured: 0 / {len(gains)}", fontsize=11
-        )
-        slice_label = line_ax.set_title("Latest gain spectrum", fontsize=11)
+        power_map = _PowerMap(context.plots, gains, freqs, live=True)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
-            """Display measured gain columns and the latest available spectrum."""
-            valid = np.flatnonzero(np.any(np.isfinite(data), axis=1))
-            if not valid.size:
-                return ()
-            real = np.full(data.shape, np.nan)
-            real[valid] = gaindep_signal2real(data[valid])
-            current = valid[-1]
-            progress.set_text(f"Gain settings measured: {valid.size} / {len(gains)}")
-            snr = "" if current_snr is None else f" · SNR {current_snr:.1f}"
-            slice_label.set_text(f"Latest gain: {gains[current]:.4g} a.u.{snr}")
-            return (
-                *heatmap.set(gains, freqs, real),
-                *line.set(freqs, real[current]),
-                progress,
-                slice_label,
-            )
+            """Display measured gain columns and the latest spectra."""
+            return power_map.set(data, snr=current_snr)
 
-        fig.show()
+        power_map.figure.show()
         signals_buffer = SignalBuffer(
             (len(gains), len(freqs)),
             on_update=update,
@@ -245,3 +287,16 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             freqs=freqs,
             signals=signals_buffer.array,
         )
+
+    def analyze(
+        self,
+        source: RunRecord[PowerDepCfg, PowerDepResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> None:
+        """Redraw a retained gain map and its final cuts without acquisition or fitting."""
+        del options
+        result = source.result
+        power_map = _PowerMap(plots, result.gains, result.freqs)
+        plots.on_plot_thread(power_map.set)(result.signals)
