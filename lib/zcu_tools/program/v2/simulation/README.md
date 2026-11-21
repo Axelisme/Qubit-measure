@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-21, named ADC frequency requirement
+**Last updated:** 2026-11-21, backend cancellation with no completed rounds
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -27,9 +27,10 @@ per-request ns bound without rejecting a long acquisition.
 Timeline durations include readout, pre/post delays and pending ADC activity;
 structural templates cover every scan point once. The binding subtracts snapshot
 and execution wall time, then sleeps only for a positive remainder. Failures do
-not wait. With cancellation, waits check Stop at intervals of at most 10 ms; the
-integrated acquisition discards the interrupted round, while decimated
-acquisition keeps its completed trace and stops before the next round.
+not wait. Pacing checks the same Stop query as the backend at intervals of at
+most 10 ms. If Stop interrupts pacing after numeric execution returns, integrated
+acquisition discards that round and decimated acquisition keeps its trace.
+Neither starts another round.
 A finite nonnegative `time_scale` of 1.0 follows physical time, 0.1 is ten times
 faster, and zero disables pacing. Without an injected clock, zero also skips
 round clock reads. Generic bindings default
@@ -530,12 +531,15 @@ and call sequence reproduces results within the recorded library versions.
 `step_rounds=True` fails before request construction or sequence admission for
 both simulation acquisition modes. Reentry on the same program or bound SoC fails
 before overwriting the active call. `finally` releases call-owned buffers and
-admission on normal return or exception. Integrated Stop reaches evolution's
-chunk checkpoints through `RoundRequest.cancel`, discards the interrupted round,
-and retains completed rounds (or no result when none completed); warmup and
-hardware acquisition are unchanged. Decimated Stop reaches pacing only, without
-adding backend evolution cancellation; its completed-trace policy is unchanged.
-ADC work and pacing sleeps remain synchronous.
+admission on normal return or exception. In both modes, the SoC holds the
+acquire's Stop query until it releases the request. `RoundRequest.cancel`
+passes it to the backend for cooperative checks, with no fixed Stop latency.
+If the backend raises `Cancelled`, acquisition discards the interrupted round
+without setting or requiring the caller's Stop flag. QICK averages completed
+rounds; only those rounds reach the round hook. If none completed, acquisition
+raises `StoppedPartialAcquireError` without attempting an average. Decimated
+acquisition retains the trace when Stop interrupts only pacing. Warmup and
+hardware acquisition are unchanged. ADC work and pacing sleeps remain synchronous.
 
 Only `SimulationProvenance.identifier` is copied to public Run metadata as optional
 `simulation_id`. Backend/RNG versions and private requests remain on the typed

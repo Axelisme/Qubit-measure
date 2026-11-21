@@ -345,7 +345,6 @@ class SimulationBinding:
         index: int,
         *,
         cancel: CancellationQuery | None = None,
-        pacing_cancel: CancellationQuery | None = None,
     ) -> IntegratedRound | RoundSignals:
         """Capture inputs and synchronously return one joint ADC realization.
 
@@ -353,11 +352,9 @@ class SimulationBinding:
         index is its zero-based software round index, supplied by the SoC. Call
         inside an admitted acquire scope; this method does not check admission,
         request identity or index range and does not increment the index itself.
-        cancel is forwarded unchanged as read-only round control; None disables it.
-        pacing_cancel optionally controls waiting only, without reaching the backend.
-        When omitted, waiting uses cancel. This lets decimated callers interrupt
-        pacing without adding backend cancellation or changing completed traces.
-        A backend Cancelled exception propagates without a result or pacing.
+        cancel is forwarded unchanged as read-only round control and also
+        interrupts pacing. None disables both. A backend Cancelled exception
+        propagates without a result or pacing.
 
         Calls capture_snapshot once, appends the resulting RoundRequest to rounds,
         then calls execute once. Validates the mode/result type and returns the
@@ -388,16 +385,13 @@ class SimulationBinding:
         if self._time_scale > 0:
             target = self._time_scale * request_round_time_s(request)
             remaining = target - (now() - started)
-            wait_cancel = cancel if pacing_cancel is None else pacing_cancel
-            if wait_cancel is None:
+            if cancel is None:
                 if remaining > 0:
                     time.sleep(remaining)
             else:
-                while remaining > 0 and not wait_cancel.is_set():
+                while remaining > 0 and not cancel.is_set():
                     time.sleep(min(remaining, 0.01))
                     remaining = target - (now() - started)
-        if self._clock is not None and not any(
-            query is not None and query.is_set() for query in (cancel, pacing_cancel)
-        ):
+        if self._clock is not None and (cancel is None or not cancel.is_set()):
             self._clock.complete_round(request_round_time_s(request), now() - started)
         return result

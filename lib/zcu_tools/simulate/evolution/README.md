@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-20, Stark inversion warnings
+**Last updated:** 2026-11-21, cancellation after geometry planning
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -1483,7 +1483,9 @@ fraction of cheap gate/no-drive rows select one or six timeline chunks per
 worker. Prepare retains six chunks per worker to spread cold key builds.
 An explicit `chunks_per_worker` fixes CPU prepare and timeline chunks. It does
 not split GPU batches. This choice does not change admission, WorkPlan facts or RNG.
-Cancellation is checked at chunk and preparation boundaries, and before return.
+Cancellation is checked after geometry planning, before building the WorkPlan
+and recording routing usage. Other checks run at entry, at chunk and preparation
+boundaries, and before return.
 Native BLAS stays at one thread throughout evolve. Overlapping engines share a
 process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.

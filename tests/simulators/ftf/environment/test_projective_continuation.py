@@ -34,7 +34,7 @@ from zcu_tools.simulate.evolution import (
 )
 from zcu_tools.simulators.ftf.environment import FTFSource, plan_template
 from zcu_tools.simulators.ftf.environment.numeric import resonators
-from zcu_tools.simulators.ftf.physics import CavityDrive
+from zcu_tools.simulators.ftf.physics import CavityDrive, CavityResponse
 
 from tests.core._simulation import tick_array, ticks
 from tests.program._profiles import profile_soccfg
@@ -312,6 +312,38 @@ def test_point_local_batches_continue_histories_and_keep_seeded_draws(
             assert {
                 inversion.point for inversion in diagnostic.stark_order_inversions
             } == histories.keys()
+
+
+def test_cancel_during_projective_assembly_stops_before_next_history(
+    projective_source, monkeypatch: pytest.MonkeyPatch
+):
+    source, _, acquire = projective_source
+    cancel = Event()
+    advanced_after_cancel: list[tuple[float, float]] = []
+    advance = CavityDrive.advance
+
+    def request_cancel_after_first_history(
+        drive: CavityDrive,
+        start_ns: float,
+        end_ns: float,
+        populations: NDArray[np.float64],
+        initial_field: NDArray[np.complex128],
+    ) -> tuple[CavityResponse, NDArray[np.complex128]]:
+        span = (start_ns, end_ns)
+        if cancel.is_set():
+            advanced_after_cancel.append(span)
+        response = advance(drive, start_ns, end_ns, populations, initial_field)
+        if span == (4, 6):  # This span has two histories at the second point.
+            cancel.set()
+        return response
+
+    # The acquire exception alone cannot reveal advances before Engine sees Stop.
+    monkeypatch.setattr(CavityDrive, "advance", request_cancel_after_first_history)
+    with pytest.raises(Cancelled):
+        source.open_acquire(acquire).sample_round(snapshot(), 0, cancel=cancel)
+
+    assert cancel.is_set()
+    assert advanced_after_cancel == []
 
 
 @pytest.mark.parametrize(
