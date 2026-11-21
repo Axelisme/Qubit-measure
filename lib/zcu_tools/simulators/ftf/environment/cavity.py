@@ -445,7 +445,8 @@ def evolve_projective_plans(
     batches the current absolute span of one point. A row ID identifies the
     original point and history across spans and rounds. Densities return by ID
     before the next span.
-    One acquire-local flat cavity-average cache is cleared on success or failure.
+    One acquire-local ADC cache shares flat second moments and all-state end
+    fields across matching spans. It is cleared on success or failure.
     """
     points = np.concatenate([plan.batch.points for plan in plans])
     count = facts.source.initial_density.shape[0]
@@ -566,7 +567,7 @@ def evolve_plans(
                 plan.batch,
                 segment_spans(plan.batch),
                 tuple(
-                    CavityDrive(facts.joint, pair, pulses, span_cache=cache)
+                    CavityDrive(facts.joint, pair, pulses, cache=cache)
                     for pulses in plan.cavity_drives
                 ),
                 np.repeat(

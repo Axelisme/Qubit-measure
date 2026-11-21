@@ -49,10 +49,10 @@ class CavityDrive:
     mean vacuum; explicit initial memory retains ringdown. Multiple pulses
     add fields coherently, including ringdown. Population rates never mix the
     fixed state branches. This object performs no density evolution or sampling.
-    cache optionally supplies the ADC owner for separate average() queries
-    and for advance() when span_cache is None. span_cache optionally supplies
-    the ADC owner for both products of advance(), before branch selection.
-    Queries with a shared owner must be serialized; the caller clears it.
+    cache optionally supplies the ADC owner for average() and for both products
+    of advance(), before branch selection. Without an owner, results are not
+    retained between queries. Queries with a shared owner must be serialized;
+    the caller clears it.
     """
 
     def __init__(
@@ -62,13 +62,11 @@ class CavityDrive:
         pulses: tuple[ReadoutPulse, ...],
         *,
         cache: CavityAverageCache | None = None,
-        span_cache: CavityAverageCache | None = None,
     ) -> None:
         self._model = readout_model(joint, resonators)
         self._chi = self._model.frequencies_ghz - [r.frequency_ghz for r in resonators]
         self._pulses = pulses
         self._cache = cache
-        self._span_cache = span_cache
 
     def response(self, times_ns: RealArray) -> CavityResponse:
         """Evaluate at a finite nonempty increasing emitted-ns vector.
@@ -119,33 +117,20 @@ class CavityDrive:
         values = np.asarray(populations, dtype=np.float64)
         if values.shape != (len(self._chi),) or not np.isfinite(values).all():
             raise ValueError("cavity populations must be a finite (state,) vector")
-        if self._span_cache is not None:
-            # ADR-0078: ADC owns reuse; FTF turns moments and populations into a response.
-            span = self._span_cache.span(
-                self._model,
-                self._pulses,
-                start_ns,
-                end_ns,
-                initial_field=initial_field,
-                initial_time_ns=start_ns,
-            )
-            average = self._response_for_moments(span.average)
-            final_fields = span.final_fields
-        else:
-            average = self.average(
-                start_ns,
-                end_ns,
-                initial_field=initial_field,
-                initial_time_ns=start_ns,
-            )
-            final_fields = cavity_fields(
-                self._model,
-                self._pulses,
-                np.array([start_ns, end_ns]),
-                initial_field=initial_field,
-                initial_time_ns=start_ns,
-            )[-1]
-        return average, final_fields[int(np.argmax(values))].copy()
+        # ADR-0078: ADC owns reuse; FTF turns moments and populations into a response.
+        cache = (
+            self._cache if self._cache is not None else CavityAverageCache(max_bytes=0)
+        )
+        span = cache.span(
+            self._model,
+            self._pulses,
+            start_ns,
+            end_ns,
+            initial_field=initial_field,
+            initial_time_ns=start_ns,
+        )
+        response = self._response_for_moments(span.average)
+        return response, span.final_fields[int(np.argmax(values))].copy()
 
     def average(
         self,
