@@ -20,6 +20,9 @@ from zcu_tools.program.v2 import Pulse, PulseReadout, Readout, Reset, TimelineBu
 
 from zcu_lab.v2.support import live_line
 
+_TIME_LABEL = "Time from readout start (µs)"
+_MAGNITUDE_LABEL = "|Mean IQ| (a.u.)"
+
 
 @dataclass(frozen=True)
 class LookbackResult:
@@ -47,22 +50,28 @@ def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 class LookbackCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Select the pulse and ADC window used to record the readout arrival.",
+        ),
+    ]
     rounds: Annotated[
         int,
         FieldMeta(
-            label="Rounds",
+            label="Averaging rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of one-shot ADC traces to average.",
         ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Inter-shot wait",
             unit="µs",
             decimals=3,
-            description="Delay after each shot.",
+            description="Enter the wait after each shot (µs) before repeating the readout.",
         ),
     ]
     initial_delay: Annotated[
@@ -75,6 +84,8 @@ class LookbackCfg(ConfigBase):
 
 class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
     Options: ClassVar[type[LookbackAnalyzeOptions]] = LookbackAnalyzeOptions
+    # A decimated trace uses one repetition in each averaging round.
+    REPS: ClassVar[int] = 1
 
     # times stored in seconds on disk -> scale=1e-6 (mem us)
     AXES_SPEC: ClassVar[AxesSpec[LookbackResult, LookbackCfg]] = AxesSpec(
@@ -97,15 +108,19 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         # 1. Decimated acquisition uses one repetition per round, not an IQ-shot loop.
         run_cfg = deepcopy(config)
 
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (µs)", ylabel="Amplitude (a.u.)")
+        title = f"Lookback · ADC {run_cfg.readout.ro_ch} · Readout magnitude"
+        fig, ax = context.plots.subplots(num="measurement", layout="tight")
+        ax.set(
+            title=f"{title}\nWaiting for first shot",
+            xlabel=_TIME_LABEL,
+            ylabel=_MAGNITUDE_LABEL,
+        )
         line = live_line(ax)
-
         fig.show()
         # 2. Fix the reset/preparation/readout sample axis before a possible stop.
         builder = TimelineBuilder(
             context.soccfg,
-            reps=1,
+            reps=self.REPS,
             initial_delay=run_cfg.initial_delay,
             relax_delay=run_cfg.relax_delay,
         )
@@ -124,7 +139,14 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
             Read the scan-shaped data without changing it. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            return line.set(times, lookback_signal2real(data))
+            title_artist = ax.set_title(
+                f"{title}\nRunning average · full window per shot"
+            )
+            return (*line.set(times, lookback_signal2real(data)), title_artist)
+
+        @context.plots.on_plot_thread
+        def show_acquired_average(_: None) -> Iterable[Artist]:
+            return (ax.set_title(f"{title}\nAcquired average"),)
 
         # 3. Acquire the time-resolved trace for arrival-time analysis.
         signals_buffer = SignalBuffer(
@@ -134,6 +156,8 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         with Schedule(signals_buffer, scope=context.scope) as sched:
             sched.run_acquire_decimated(program, context.soc, rounds=run_cfg.rounds)
 
+        if np.any(np.isfinite(signals_buffer.array)):
+            show_acquired_average(None)
         return LookbackResult(times=times, signals=signals_buffer.array)
 
     def analyze(
@@ -148,51 +172,77 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         Optionally smooth complex samples with a Gaussian width in samples.
         Find the last pre-peak sample below ratio times the peak magnitude;
         fall back to the first sample time if no such sample exists. Return
-        that time as predict_offset, not a fitted resonator response. Saved cfg
-        is optional and only supplies the readout-window markers on the plot.
+        that time as predict_offset, not a fitted resonator response. Display
+        the trace and the estimated arrival; plot_fit controls decision markers.
+        Saved cfg is optional and identifies the ADC in the titles when present.
         """
         # 1. Optionally smooth complex ADC samples before locating readout arrival.
         result = source.result
         Ts = result.times
         signals = result.signals
-        cfg = source.cfg
-        readout_cfg = cfg.readout if cfg is not None else None
-
-        if options.smooth is not None:
-            signals = gaussian_filter1d(signals, options.smooth)
-        y = np.abs(signals)
+        filtered = (
+            signals
+            if options.smooth is None
+            else gaussian_filter1d(signals, options.smooth)
+        )
+        magnitude = np.abs(filtered)
 
         # 2. Work backward from the peak to locate the last below-threshold sample.
-        max_idx = np.argmax(y)
-        candidate_mask = y[:max_idx] < options.ratio * y[max_idx]
-        if not np.any(candidate_mask):
-            offset = float(Ts[0])
-        else:
-            offset = float(Ts[np.nonzero(candidate_mask)[0][-1]])
+        max_idx = np.argmax(magnitude)
+        threshold = options.ratio * magnitude[max_idx]
+        candidates = np.flatnonzero(magnitude[:max_idx] < threshold)
+        offset_idx = int(candidates[-1]) if candidates.size else 0
+        offset = float(Ts[offset_idx])
 
-        # 3. Compare IQ and magnitude with arrival and saved readout-window markers.
-        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-
-        # np.real/np.imag are used instead of .real/.imag because numpy 2.4
-        # stubs narrow the overloaded descriptor in a way that confuses pyright
-        # when the array dtype was widened by gaussian_filter1d.
-        ax.plot(Ts, np.real(signals), label="I value")
-        ax.plot(Ts, np.imag(signals), label="Q value")
-        ax.plot(Ts, y, label="mag")
-        if options.plot_fit:
-            ax.axvline(offset, color="r", linestyle="--", label="predict_offset")
-        if readout_cfg is not None:
-            trig_offset = float(readout_cfg.trig_offset)
-            ro_length = float(readout_cfg.ro_length)
-            ax.axvline(trig_offset, color="g", linestyle="--", label="ro start")
-            ax.axvline(
-                trig_offset + ro_length, color="g", linestyle="--", label="ro end"
+        adc = f"ADC {source.cfg.readout.ro_ch}" if source.cfg is not None else "ADC"
+        _, ax = plots.subplots(num="fit", figsize=config.figsize, layout="tight")
+        ax.set(
+            title=f"Lookback · {adc} · Readout magnitude",
+            xlabel=_TIME_LABEL,
+            ylabel=_MAGNITUDE_LABEL,
+        )
+        ax.plot(
+            Ts,
+            lookback_signal2real(signals),
+            "o-",
+            color="C0",
+            ms=2,
+            label="Acquired average",
+        )
+        if options.smooth is not None:
+            ax.plot(
+                Ts, magnitude, "--", color="C1", label="Gaussian-smoothed magnitude"
             )
-        ax.set_xlabel("Time (µs)")
-        ax.set_ylabel("Amplitude (a.u.)")
-        ax.grid(True)
-        ax.legend()
+        if options.plot_fit:
+            ax.axhline(
+                threshold, color="0.35", linestyle=":", label="Arrival threshold"
+            )
+            label = (
+                "Estimated readout arrival"
+                if candidates.size
+                else "Window start fallback"
+            )
+            ax.plot(
+                offset,
+                magnitude[offset_idx],
+                "D",
+                color="C3",
+                zorder=4,
+                label=f"{label} = {offset:.4f} µs",
+            )
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
 
-        fig.tight_layout()
+        # The signed components separate phase changes from changes in magnitude.
+        _, iq_ax = plots.subplots(
+            num="quadratures", figsize=config.figsize, layout="tight"
+        )
+        iq_ax.set(
+            title=f"Lookback · {adc} · Readout quadratures",
+            xlabel=_TIME_LABEL,
+            ylabel="Mean IQ (a.u.)",
+        )
+        iq_ax.plot(Ts, np.real(signals), color="C0", label="I (in-phase)")
+        iq_ax.plot(Ts, np.imag(signals), color="C1", label="Q (quadrature)")
+        iq_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
 
         return LookbackAnalysis(predict_offset=offset)

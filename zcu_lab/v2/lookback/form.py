@@ -100,19 +100,19 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
     ).with_seed_metadata(
         {
             ("readout", "module", "gain"): FieldMeta(
-                description="未校準的起始值，來源：固定常數。lookback Template gain 1.0 a.u. within [-1, 1]; operator confirmation required",
+                description="Enter a readout drive gain (a.u., −1 to 1); verify the uncalibrated 1.0 starting value before running.",
                 calibration="uncalibrated",
             ),
             ("readout", "module", "freq"): FieldMeta(
-                description="$resonator.freq + kappa (MHz); missing/null kappa uses a 1 MHz offset，未校準的起始值，來源：固定常數。operator confirmation required",
+                description="Enter the shared readout RF frequency (MHz); the uncalibrated start is the resonator frequency plus its linewidth (or 1 MHz if unknown).",
                 calibration="uncalibrated",
             ),
             ("readout", "module", "trig_offset"): FieldMeta(
-                description="$resonator.time_of_fly - 0.1 µs; missing/null TOF uses a 0 µs offset，未校準的起始值，來源：固定常數。operator confirmation required",
+                description="Enter when the ADC window opens (µs from readout start); the default is 0.1 µs before the saved flight time, or 0 µs if unknown.",
                 calibration="uncalibrated",
             ),
             ("readout", "module", "ro_length"): FieldMeta(
-                description="未校準的起始值，來源：固定常數。lookback Template ADC window 1.5 µs; operator confirmation required",
+                description="Enter the ADC capture duration (µs); extend the 1.5 µs starting window if it cuts off the pulse.",
                 calibration="uncalibrated",
             ),
         }

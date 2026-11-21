@@ -20,41 +20,44 @@ from zcu_lab.v2.lookback.gui import LookbackSummary
 class LookbackInputs(RecipeInputs):
     """Inputs for lookback; all units and null policies are declared per field."""
 
-    target: SingleTarget
+    target: SingleTarget = Field(
+        default_factory=lambda: KEEP,
+        description="Open/Defaults for this qubit and its resonator. Omit or use null to keep the current aliases.",
+    )
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key. Sources are chosen by the Form.",
+        description="Select a library module in Readout. Omit to retain the selection; null is not accepted.",
     )
     frequency_mhz: float | None | Keep = Field(
         KEEP,
-        description="Readout frequency in MHz.",
+        description="Set Readout › Frequency (MHz), the shared RF drive and demodulation frequency.",
     )
     readout_length_us: float | None | Keep = Field(
         KEEP,
-        description="Set Readout › RO length (µs), the ADC acquisition window.",
+        description="Set Readout › RO length (µs), the ADC capture duration.",
     )
     trigger_offset_us: float | None | Keep = Field(
         KEEP,
-        description="Set Readout › Trig offset (µs), the ADC trigger offset.",
+        description="Set Readout › Trig offset (µs), the ADC window start relative to readout start.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Averaging rounds (count), the number of one-shot traces to average.",
     )
 
     ratio: float | None | Keep = Field(
         KEEP,
-        description="Threshold ratio. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Arrival threshold / peak (a.u.), a fraction of the peak used to find the rising edge.",
     )
     smooth: float | None | Keep = Field(
         KEEP,
-        description="Smooth sigma. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Gaussian smoothing width (samples), the Gaussian sigma applied to I and Q.",
     )
     plot_fit: bool | None | Keep = Field(
         KEEP,
-        description="Plot fit. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Show arrival markers. This changes the display, not the arrival estimate.",
     )
 
 
@@ -62,19 +65,19 @@ class LookbackReport(RecipeReport):
     """Lookback results and failure reason; cancellation returns no report."""
 
     trigger_offset_us: float | None = Field(
-        description="Proposed ADC trigger offset in µs; null means not estimable."
+        description="Estimated readout arrival (µs); null means analysis returned no value."
     )
 
 
 @recipe(
     "lookback",
-    description="Capture readout arrival timing in lookback; analyze, ask before writeback, and save.",
+    description="Capture the time-resolved ADC readout trace, estimate its arrival, ask before saving that time to the resonator, and save the run.",
 )
 async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackReport:
     """Capture the readout pulse's arrival and ADC time envelope.
 
     Read out at a fixed frequency without reset or initialization pulses.
-    Primary estimates the trigger offset from the rising signal envelope.
+    Analyze estimates readout arrival from the rising magnitude envelope.
     Ask before applying the timing proposal, then save raw trace and analysis.
 
     No n → expts input: acquisition uses the readout duration and rounds.
