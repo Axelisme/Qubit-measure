@@ -2,7 +2,7 @@
 
 import time
 import warnings
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from fractions import Fraction
 from threading import Event
 
@@ -15,6 +15,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import (
     AcquireOutcome,
+    IntegratedRound,
     SimulationBinding,
     SimulationCallbacks,
     SimulationSoc,
@@ -277,58 +278,43 @@ def test_execute_failure_and_success_inside_outer_except(program_seam, mode):
         soc.run_round()
 
 
-@pytest.mark.parametrize("completed_rounds", [0, 1])
-def test_integrated_stop_complete_means_normal_partial_return(
-    program_seam, completed_rounds
-):
-    program, soc, observed = program_seam
-    cancel = Event()
-    execute = soc.binding.execute
-
-    def stop(request):
-        if request.index == completed_rounds:
-            cancel.set()
-            raise Cancelled()
-        return execute(request)
-
-    soc.binding.execute = stop
-    if completed_rounds:
-        result = program.acquire(soc, rounds=3, cancel_flag=cancel, progress=False)
-        assert len(result) == 1
-    else:
-        with pytest.raises(StoppedPartialAcquireError):
-            program.acquire(soc, rounds=3, cancel_flag=cancel, progress=False)
-    assert len(observed) == 1
-    assert observed[0].complete is bool(completed_rounds)
-    assert len(observed[0].rounds) == completed_rounds + 1
-
-
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+@pytest.mark.parametrize("set_flag", [False, True], ids=["flag-clear", "flag-set"])
 @pytest.mark.parametrize("completed_rounds", [0, 2])
-def test_decimated_stop_during_backend_keeps_only_completed_rounds(
-    program_seam, completed_rounds
+def test_stop_during_backend_keeps_only_completed_rounds(
+    program_seam, mode, completed_rounds, set_flag
 ):
     program, soc, observed = program_seam
     cancel = Event()
     hook_rounds = []
+    execute = soc.binding.execute
+    acquire = program.acquire if mode == "integrated" else program.acquire_decimated
 
-    def solve(request: RoundRequest) -> RoundSignals:
-        query = request.cancel
-        assert query is not None and query is cancel
+    def solve(request: RoundRequest) -> IntegratedRound | RoundSignals:
+        assert request.cancel is cancel
         if request.index == completed_rounds:
-            cancel.set()
-        if query.is_set():
+            if set_flag:
+                cancel.set()
             raise Cancelled()
         samples = request.acquire.readouts[0].samples
-        iq = [(2.0, -8.0), (8.0, -2.0)][request.index]
-        trace = np.broadcast_to(np.array(iq), (1, 1, samples, 2))
-        return RoundSignals((ChannelSignals(0, trace),))
+        iq = np.array([(2.0, -8.0), (8.0, -2.0)][request.index])
+        if mode == "decimated":
+            trace = np.broadcast_to(iq, (1, 1, samples, 2))
+            return RoundSignals((ChannelSignals(0, trace),))
+        result = execute(request)
+        assert isinstance(result, IntegratedRound)
+        (channel,) = result.statistics.channels
+        # The integrated backend supplies sample sums, not normalized IQ.
+        channel = replace(channel, sums=(samples * iq)[None, :])
+        statistics = replace(result.statistics, channels=(channel,))
+        return replace(result, statistics=statistics)
 
-    def round_hook(count, _trace, flag: CancelFlagProtocol) -> None:
+    def round_hook(count, _iq, flag: CancelFlagProtocol) -> None:
         assert flag is cancel
         hook_rounds.append(count)
 
-    def acquire():
-        return program.acquire_decimated(
+    def run():
+        return acquire(
             soc,
             rounds=4,
             cancel_flag=cancel,
@@ -339,13 +325,17 @@ def test_decimated_stop_during_backend_keeps_only_completed_rounds(
 
     soc.binding.execute = solve
     if completed_rounds == 0:
-        with pytest.raises(StoppedPartialAcquireError):
-            acquire()
+        with pytest.raises(
+            StoppedPartialAcquireError,
+            match="^acquire stopped before the first round completed$",
+        ):
+            run()
     else:
-        (trace,) = acquire()
-        np.testing.assert_array_equal(trace[:, 0], 5.0)
-        np.testing.assert_array_equal(trace[:, 1], -5.0)
+        (iq,) = run()
+        np.testing.assert_array_equal(iq[..., 0], 5.0)
+        np.testing.assert_array_equal(iq[..., 1], -5.0)
     assert hook_rounds == list(range(1, completed_rounds + 1))
+    assert cancel.is_set() is set_flag
     (outcome,) = observed
     assert outcome.complete is bool(completed_rounds)
     assert len(outcome.rounds) == completed_rounds + 1

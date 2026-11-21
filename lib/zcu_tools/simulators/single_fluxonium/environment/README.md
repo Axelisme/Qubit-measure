@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-18, round settings in debug capture
+**Last updated:** 2026-11-21, cooperative Stop checks
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -189,12 +189,13 @@ No terminal marginal can replace `raw.readout` when sampling projection historie
 
 Integrated rounds use ADC `round_statistics` and `PreparedRawShots`.
 Decimated rounds use ADC `sample_traces`. No environment-owned random sampler,
-synthetic second cavity or alternate IQ generator exists. QICK owns averaging,
-round hooks and Stop checkpoints. The binding paces each round to
+synthetic second cavity or alternate IQ generator exists. QICK owns averaging
+and round hooks. The binding paces each round to
 `time_scale * reps * sum(point timeline duration + relax_delay)`.
 `numerics.time_scale` defaults to 1.0 (physical time); zero disables waiting.
-Integrated Stop is checked between evolution chunks and during pacing, discarding
-the interrupted round while retaining completed rounds. ADC sampling remains synchronous.
+For integrated acquisition, the engine checks Stop at cooperative evolution
+checkpoints and the binding checks it during pacing. Acquisition discards the
+interrupted round and retains completed rounds. ADC sampling remains synchronous.
 
 ## Coherence drift and simulated time
 
