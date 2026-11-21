@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, explicit ADC frequencies and cross-block cavity-field limit
+**Last updated:** 2026-11-21, shared ADC span memo for projective and MIST evolution
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -645,13 +645,14 @@ or cancelled batch publishes no partial preparation.
 
 One ADC `CavityAverageCache` serves each cavity span composition. FTF sets a
 512 MiB budget per composition. Its g/e points share the owner; different bias
-models do not. ADC's library default remains 64 MiB. The
-non-projective path reuses ADC flat second moments and all-state endpoint fields.
-FTF selects the main branch and builds each `SegmentShift` without a second memo.
-Projective continuation still reuses only flat second moments. Neither path
-caches shaped inputs. ADC owns keys, arrays and admission. Composition clears
-all entries on return or exception; Engine and the long-lived source do not
-retain the owner.
+models do not. ADC's library default remains 64 MiB.
+Both projective and non-projective paths call `CavityAverageCache.span`.
+An exact key match reuses flat second moments and all-state endpoint fields.
+FTF selects the main branch, builds each `SegmentShift`, and passes the selected
+field to the next span. Projective continuation does these steps separately for
+each history, without a second memo. Neither path caches shaped inputs. ADC owns
+keys, arrays and admission. Composition clears all entries on return or
+exception; Engine and the long-lived source do not retain the owner.
 
 In the fixed projective prefixes, `chain/amp_rabi` and `chain/len_rabi` gain no
 hits above 64 MiB. For `chain_length` at 2.2 µs, the 64, 128, 256 and 512 MiB
