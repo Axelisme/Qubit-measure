@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, device-time ADC window pairing
+**Last updated:** 2026-11-21, readout approximation measurements
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -44,6 +44,7 @@ and source-owned history. These controls are not physical YAML or program cfg.
   - [Flux pulses](#flux-pulses)
   - [Cavity drives](#cavity-drives)
   - [Readout and sampling](#readout-and-sampling)
+  - [Known approximations](#known-approximations)
   - [Physical applicability](#physical-applicability)
 
 ## Round pacing
@@ -551,8 +552,10 @@ large-excursion device accuracy.
 At each point, the latest active readout-channel block is terminal. The planner
 classifies earlier blocks with ADC triggers as projective reads and earlier blocks
 without owned windows as cavity drives. For pairing, the shared planner uses
-the receiver's flight time to convert the ADC window to device time. A block's
-pairing interval includes ringdown up to the next block or the point end.
+ADC's `adc_to_device_time_ns` to subtract
+[`Receiver.time_of_flight_ns`](../../../simulate/adc/README.md) from the window
+endpoints. The ADC keeps the original grid for demodulation.
+A block's pairing interval includes ringdown up to the next block or the point end.
 The last intersecting block owns the window. Every intersecting block
 contributes its pulses without shifting their emission or projection times.
 The timeline compiler still rejects overlapping windows for successive
@@ -739,15 +742,6 @@ only receiver offset and noise without adding a projection or solving a cavity
 field. If every event already has a physical observation on the same ADC,
 planning identifies the ADC and trigger that cannot be placed.
 
-Separately, the event does not inherit the cavity field left by the previous block.
-When `post_delay` is shorter than several field decay times, the samples omit
-that earlier pulse's residual field. With the `ftf-demo/initial` fixture's R1
-κ, a single-mode estimate at `post_delay=0 µs` for a 0.99 µs window puts the
-omitted field at about 9.5% of steady-state amplitude at window start and 0.4%
-at window end. The MIST exact cavity span reuse in [Cavity drives](#cavity-drives)
-reuses moments and endpoint fields for evolution; it does not carry residual
-fields across blocks into ADC events.
-
 Empty grids mean the ADC does not observe the event or emit a read column. All ADCs may omit
 terminal observations; the terminal event and evolution endpoint remain in the
 plan. Each ADC must still observe at least one event. Projective plans retain
@@ -782,6 +776,51 @@ owns detached buffers, declaration order and acquisition averaging. All channels
 index share one sampled joint state; receiver noise is independent. There is no
 extra tone axis: each declared ADC has its own raw-shot array. Output follows
 program ADC declaration order, which is mux tone order, not sorted channel index.
+
+### Known approximations
+
+- **Vacuum at event start.** ADC readout propagates the event's member pulses
+  from vacuum. It does not inherit residual field from earlier events. The
+  cavity field carried between evolution spans does not initialize ADC readout.
+- **One state per event before ADC jumps.** FTF initializes the whole window
+  with the owner block's state, even for samples emitted before that block's
+  projection. The projection still occurs at the pulse start. ADC can model
+  jumps within an event, but does not switch states at the projection boundary.
+
+The table compares noiseless I/Q sums on the same ADC grids and phases. It uses
+ADC 0, the `ftf-demo/initial` R1 readout and the board and FTF settings in
+[`tools/data/experiment_wall_time`](../../../../../tools/data/experiment_wall_time/).
+The receiver flight time is 400 ns, and R1's photon decay rate is
+`κ = 2π × 1.1 MHz`. Each comparison uses four fixed predecessor/owner histories
+from the same two DC states, `joint-0` and `joint-2`, corresponding to F1 g and e
+with the coupler and F2 in their ground states. These are conditional simulations
+without qubit evolution, ADC jumps, sampled noise or rounding.
+
+| Comparison | Worst history | ΔI | ΔQ | \|ΔIQ\| | Reference g/e distance | Single-shot noise RMS | \|ΔIQ\| / distance | \|ΔIQ\| / noise |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `chain/t1`, second read, `post_delay = 0 µs` | g→g | +355.3 | −767.6 | 845.8 | 22,572 | 3,961 | 3.75% | 0.214 |
+| `chain/t1`, second read, `post_delay = 5/κ ≈ 0.723 µs` | g→g | −23.5 | −65.4 | 69.5 | 21,168 | 3,961 | 0.328% | 0.0175 |
+| `rpi_length`, first default sweep point, 62 windows crossing a projection | e→g, column 61 (zero-based) | −250.9 | +1,099.6 | 1,127.9 | 117.2 | 1,774 | 9.62× | 0.636 |
+
+The signed differences are approximation minus reference. The table gives the
+largest Euclidean I/Q difference in each comparison. Signal, difference, g/e
+separation and noise all use ADC sample-sum units. The separation compares
+owner g and e in the reference while fixing the predecessor. Noise is the
+receiver-only RMS of the integrated I/Q vector, `sqrt(trace(N × PSD / dt_ns))`,
+for `N` independent samples. It excludes state mixture, jumps and rounding.
+
+For `chain/t1`, the first delay setting is 0 µs. Each 0.99 µs nominal window
+has 304 samples. The reference carries the first read's complex field into the
+second after free decay over the compiled gap, 1.91 ns or 725.03 ns. Neither
+window crosses a projection, so the state approximation does not apply there.
+For `rpi_length`, the nominal window is 0.2 µs with 61 samples. In each crossing
+window, 25 samples fall before the projection and 36 at or after it. The
+reference changes state at that projection without resetting the cavity field.
+Both sides use the same incident pulses and start the event from vacuum. The
+other two windows cross no projection and serve as controls. The `rpi_length`
+ratio exceeds one because the short post-projection segment gives a small g/e
+separation in this fixture. The numbers do not estimate hardware error or
+apply to other chain timings or calibrations.
 
 ### Physical applicability
 

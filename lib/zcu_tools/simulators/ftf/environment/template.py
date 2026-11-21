@@ -161,8 +161,10 @@ class FTFTemplatePlan:
     batch: ns/GHz/rad microwave tracks and three-loop fast-flux schedule,
         with continuous samples for filtered/varying flux, ending at terminal start.
     readouts: per-ADC pulse/grid contents at DC, in declaration order. Every ADC
-        retains the same ordered logical event axis, with empty grids for events
-        it does not observe. An event contains only its own block's pulses.
+        retains the same ordered logical event axis. An observed event contains
+        the union of pulses from the blocks matched to its device-time windows,
+        filtered by PFB channel for mux readout. A receiver-only event has no
+        pulses. An unobserved event retains its owner's pulses and has no grids.
     cavity_drives: tuple in batch.points order, each containing the earlier active
         untriggered readout-generator ReadoutPulse inputs in template slot order. Supports are
         absolute ns, carriers GHz, phases pulse-local radians in the neutral DC
