@@ -47,3 +47,9 @@ The cpmg recipe follows the same Run, Analyze and Save steps and reports the sam
    max_n/points produces the count grid, or supply times. length_points sets Time points and delay.expts. min_length_us/max_length_us set the time window. fit_fringe changes only analysis.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+
+## Reading the plots
+
+Live shows the normalized IQ map and the latest and previous pulse-count rows; each row is scaled to its own contrast range, not a population. The map and row trace use total evolution delay in µs. The Analyze map uses each count's own quantized grid. The lifetime plot shows T₂ versus refocusing count on log axes. Each bar is the standard error of that row's fit, not shot SEM. The two-dimensional IQ map and these derived lifetimes are not one-dimensional shot means.
+
+Rows must have resolved decay within the measured window, fit error below half the lifetime, and fitted contrast above four times the mean absolute smoothed residual. Missing or rejected rows do not contribute to the power law. Widen the total-delay window if a fitted lifetime reaches the grid span; increase Reps or Rounds if the decay is obscured by noise. The Analyze summary reports configured Reps × Rounds.

@@ -83,3 +83,7 @@ relative error.
 Load rejects older files with a round axis (wrong number of axes). It does
 not convert these files or previous standalone RB and IRB runs. Re-enter the
 settings and Run to save the current format.
+
+## Reading the plots
+
+Live shows an IQ projection by random Clifford depth; its title shows the number of complete seeds. The Analyze marks are the means across eligible seeds. Bars are across-seed sample standard deviation, not shot SEM, and do not give the uncertainty of the mean IQ over repetitions. The 95% bootstrap interval estimates variation when resampling finite seeds, not systematic model error. The summary shows configured Reps × Rounds for each arm and seed.

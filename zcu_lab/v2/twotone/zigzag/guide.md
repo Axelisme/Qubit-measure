@@ -21,3 +21,7 @@ Review the measured trace manually; calibration stays unchanged. Preparation coh
 ## Recommended
 
 Repeat on X180_pulse to check the pi pulse; repeat on X90_pulse (applied in pairs) to check the pi/2 pulse. About 10 repetitions usually show a mis-calibration clearly. Use the zig-zag gain or frequency scans to sweep the repeated pulse's gain or frequency.
+
+## Reading the plots
+
+The live x axis is repetition count: one count adds one X180 or a pair of X90 pulses, as stated in the title. The y axis is mean IQ projected along the trace's principal axis (a.u.), not a population. Each bar shows one shot SEM along the same axis, using the sample standard deviation divided by the square root of the retained shot count. The title reports retained shots per point. Legacy mean-only files still load. Plain ZigZag has no separate Analyze fit: use the live trace to check for count-dependent contrast, then choose the gain or frequency sweep to locate a tuning minimum.

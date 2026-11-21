@@ -314,19 +314,25 @@ def _live_plot(
     """
     fig, _ = plots.subplots(1, 2, num="measurement")
     heat_ax, line_ax = fig.axes
-    heat_ax.set(xlabel="Pi pulses (count)", ylabel="Time idxs")
-    line_ax.set(xlabel="Time idxs", ylabel="Signal (a.u.)")
+    heat_ax.set(
+        title="CPMG acquisition",
+        xlabel="π pulses (count)",
+        ylabel="Total evolution delay (µs)",
+    )
+    line_ax.set(
+        xlabel="Total evolution delay (µs)", ylabel="Normalized IQ projection (a.u.)"
+    )
     formatter = ScalarFormatter(useMathText=True)
     formatter.set_powerlimits((-2, 2))
     heat_ax.xaxis.set_major_formatter(formatter)
-    heat_ax.yaxis.set_major_formatter(formatter)
-    heatmap = live_heatmap(heat_ax, uniform=True)
+    heatmap = live_heatmap(heat_ax, uniform=True, clim=(0.0, 1.0))
+    fig.colorbar(heat_ax.images[0], ax=heat_ax, label="Normalized IQ (a.u.)")
     line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
     line_ax.grid()
     lines = live_line(line_ax, num_lines=2)
     for artist in line_ax.lines[:-1]:
-        artist.set(marker="None", alpha=0.3, color="red")
-    line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        artist.set(marker="None", alpha=0.6, color="C1", label="Previous count")
+    line_ax.lines[-1].set(label="Latest count", marker=".", color="C0")
     line_ax.legend()
 
     @plots.on_plot_thread
@@ -340,13 +346,65 @@ def _live_plot(
             history[-offset - 1] = real[current - offset]
         artists = heatmap.set(times.astype(np.float64), ys, real)
         artists = (*artists, *lines.set(ys, history))
-        title = f"snr = {snr:.1f}" if snr else None
-        if title is not None:
-            return (*artists, heat_ax.set_title(title))
-        return artists
+        title = f"CPMG · {valid.size}/{times.size} counts measured"
+        row = f"Latest: {times[current]} π pulses" if current >= 0 else "Awaiting data"
+        if snr:
+            row += f" · SNR {snr:.1f}"
+        return (*artists, heat_ax.set_title(title), line_ax.set_title(row))
 
     fig.show()
     return update
+
+
+def _plot_coherence(
+    plots: Plots,
+    result: CPMG_Result,
+    lifetimes: NDArray[np.float64],
+    errors: NDArray[np.float64],
+    summary: CPMGAnalysis,
+    options: CPMGAnalyzeOptions,
+) -> None:
+    """Compare the IQ map with the accepted row fits and optional T1/T2* references."""
+    counts, delays = result.ns, result.delays
+    contrast = cpmg_signal2real(result.signals)
+    fig, _ = plots.subplots(num="fit", nrows=1, ncols=2, figsize=(9, 4))
+    ax1, ax2 = fig.axes
+
+    X = np.broadcast_to(counts[None, :], contrast.T.shape)
+    Y = delays.T
+    image = ax1.pcolormesh(X, Y, contrast.T, shading="nearest", vmin=0, vmax=1)
+    fig.colorbar(image, ax=ax1, label="Normalized IQ (a.u.)")
+    ax1.set(
+        title="CPMG contrast",
+        xlabel="π pulses (count)",
+        ylabel="Total evolution delay (µs)",
+    )
+
+    ax2.set_title(f"CPMG coherence · {summary.fit_rows}/{counts.size} fits")
+    ax2.errorbar(
+        counts, lifetimes, yerr=errors, label="T₂ ± fit error", color="red", fmt="."
+    )
+    if summary.t2_1_us is not None and summary.gamma is not None:
+        fit_ns = np.geomspace(counts.min(), counts.max(), 200)
+        ax2.plot(
+            fit_ns,
+            summary.t2_1_us * fit_ns**summary.gamma,
+            label=r"$T_{2,1} n^{\gamma}$",
+            color="black",
+        )
+        ax2.set_title(f"CPMG coherence · γ = {summary.gamma:.3g}")
+    if options.t1 is not None:
+        ax2.axhline(2 * options.t1, color="blue", linestyle="--", label=r"$2T_1$")
+    if options.t2r is not None:
+        ax2.axhline(options.t2r, color="green", linestyle="--", label=r"$T_{2r}$")
+    ax2.set_xlim(0.3, None)
+    ax2.set_xscale("log")
+    ax2.set_yscale("log")
+    ax2.legend()
+    ax2.set_xlabel("π pulses (count)")
+    ax2.set_ylabel("CPMG coherence time T₂ (µs)")
+
+    fig.tight_layout()
 
 
 class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
@@ -501,12 +559,11 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         """
         # 1. Separate real-IQ decay fits from normalized contrast used to compare pulse counts.
         result = source.result
-        fit_fringe, t2r, t1 = options.fit_fringe, options.t2r, options.t1
+        fit_fringe = options.fit_fringe
 
         times, lengths, signals2D = result.ns, result.delays, result.signals
 
         real_signals2D = rotate2real(signals2D).real
-        norm_signals = cpmg_signal2real(signals2D)
 
         def is_good_fit(
             *,
@@ -563,36 +620,5 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
 
         summary = _summarize_t2(times, t2s, t2errs)
 
-        # 3. Compare decay times across pulse counts without treating IQ as population.
-        fig, _ = plots.subplots(num="fit", nrows=1, ncols=2, figsize=(8, 3))
-        ax1, ax2 = fig.axes
-
-        X = np.broadcast_to(times[None, :], norm_signals.T.shape)
-        Y = lengths.T
-        ax1.pcolormesh(X, Y, norm_signals.T, shading="nearest")
-        ax1.set_xlabel("Pi pulses (count)")
-        ax1.set_ylabel("Time (µs)")
-
-        ax2.errorbar(times, t2s, yerr=t2errs, label=r"$T_{CPMG}$", color="red", fmt=".")
-        if summary.t2_1_us is not None and summary.gamma is not None:
-            fit_ns = np.geomspace(times.min(), times.max(), 200)
-            ax2.plot(
-                fit_ns,
-                summary.t2_1_us * fit_ns**summary.gamma,
-                label=r"$T_{2,1} n^{\gamma}$",
-                color="black",
-            )
-            ax2.set_title(rf"$\gamma = {summary.gamma:.3g}$")
-        if t1 is not None:
-            ax2.axhline(2 * t1, color="blue", linestyle="--", label=r"$2T_1$")
-        if t2r is not None:
-            ax2.axhline(t2r, color="green", linestyle="--", label=r"$T_{2r}$")
-        ax2.set_xlim(0.3, None)
-        ax2.set_xscale("log")
-        ax2.set_yscale("log")
-        ax2.legend()
-        ax2.set_xlabel("Pi pulses (count)")
-        ax2.set_ylabel("T2 (µs)")
-
-        fig.tight_layout()
+        _plot_coherence(plots, result, t2s, t2errs, summary, options)
         return summary

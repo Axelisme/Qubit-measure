@@ -109,15 +109,21 @@ class RBCfg(ConfigBase):
 
 
 def _live_plot(
-    plots: Plots, depths: NDArray[np.int64], n_arms: int
+    plots: Plots, depths: NDArray[np.int64], target: TargetGate | None
 ) -> Callable[[NDArray[np.complex128]], None]:
     """Show one live line per arm and return its owner-dispatched IQ update."""
     fig, ax = plots.subplots(num="measurement")
-    ax.set(xlabel="Random Clifford depth (count)", ylabel="Signal (a.u.)")
+    experiment = "Reference RB" if target is None else f"Interleaved RB · {target}"
+    labels = (
+        ("Reference",) if target is None else ("Reference", f"Interleaved {target}")
+    )
+    ax.set(
+        title=experiment,
+        xlabel="Random Clifford depth (count)",
+        ylabel="IQ projection (a.u.)",
+    )
     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-    ax.grid()
-    viewer = live_errorbar(ax, num_lines=n_arms)
-    labels = ("Reference", "Interleaved")[:n_arms]
+    viewer = live_errorbar(ax, num_lines=len(labels))
     for line, label in zip(ax.lines, labels, strict=True):
         line.set_label(label)
     ax.legend()
@@ -127,7 +133,11 @@ def _live_plot(
     @plots.on_plot_thread
     def update(data: NDArray[np.complex128]):
         projection = project_arm_means(data)
-        return viewer.set(xs, projection.mean_signals, projection.seed_std)
+        complete = int(np.isfinite(data).all(axis=(1, 2)).sum())
+        title = ax.set_title(
+            f"{experiment} · {complete}/{data.shape[0]} seeds complete"
+        )
+        return (*viewer.set(xs, projection.mean_signals, projection.seed_std), title)
 
     fig.show()
     return update
@@ -174,7 +184,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             ],
             dtype=np.int64,
         )
-        update = _live_plot(context.plots, depths, len(arms))
+        update = _live_plot(context.plots, depths, cfg.target_gate)
         buffer = SignalBuffer(
             (len(seeds), len(arms), len(depths)),
             on_update=update,
@@ -321,10 +331,9 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             analysis = fit.summary
             labels = ("Reference",)
             title = (
-                f"Reference decay: p = {analysis.p_reference:.6f}, "
-                f"error per Clifford = {analysis.reference_epc:.6f}\n"
-                f"95% seed bootstrap EPC: [{analysis.epc_ci_low:.6f}, "
-                f"{analysis.epc_ci_high:.6f}] (statistical only)"
+                f"Reference RB · Error per Clifford = {analysis.reference_epc:.6f}\n"
+                f"95% seed bootstrap interval [{analysis.epc_ci_low:.6f}, "
+                f"{analysis.epc_ci_high:.6f}]"
             )
         else:
             fit = analyze_irb(result.depths, result.signals)
@@ -333,29 +342,33 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             name = "target" if target is None else target
             labels = ("Reference", f"Interleaved {name}")
             title = (
-                f"{name} fidelity estimate: {analysis.gate_fidelity:.6f}\n"
-                f"95% seed bootstrap: [{analysis.fidelity_ci_low:.6f}, "
-                f"{analysis.fidelity_ci_high:.6f}] (statistical only)"
+                f"Interleaved RB · {name} fidelity = {analysis.gate_fidelity:.6f}\n"
+                f"95% paired-seed interval [{analysis.fidelity_ci_low:.6f}, "
+                f"{analysis.fidelity_ci_high:.6f}]"
             )
 
         # 2. Plot the observed and fitted decay in the same IQ projection.
         fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(labels):
-            (line,) = ax.plot(result.depths, fit.mean_signals[arm], "o", label=label)
-            ax.errorbar(
+            points = ax.errorbar(
                 result.depths,
                 fit.mean_signals[arm],
                 yerr=fit.seed_std[arm],
-                fmt="none",
-                ecolor=line.get_color(),
+                fmt="o",
+                label=f"{label} ± seed SD",
             )
-            ax.plot(result.depths, fit.fit_signals[arm], color=line.get_color())
+            line, _, _ = points.lines
+            ax.plot(
+                result.depths,
+                fit.fit_signals[arm],
+                color=line.get_color(),
+                label=f"{label} fit",
+            )
         ax.set(
             xlabel="Random Clifford depth (count)",
-            ylabel="Projected IQ (a.u.)",
+            ylabel="IQ projection (a.u.)",
             title=title,
         )
         ax.legend()
-        ax.grid(True)
         fig.tight_layout()
         return analysis

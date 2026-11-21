@@ -41,3 +41,9 @@ Phase defaults to fixed 0/180 degrees; enable Fit phase offset when pulse shapin
    points maps to length Expts; max_length_us sets the stop. frequency_mhz and gain override the fixed drive. decay and fit_phase change the existing analysis model.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+
+## Reading the plots
+
+The horizontal axis is pulse length (µs); both plots show mean IQ projected onto its principal axis (a.u.). This is not population. One bar is one shot SEM: the retained shots' sample standard deviation along that axis divided by the square root of their count. An older mean-only file loads and fits without bars. The fit is not weighted by the bars.
+
+Analyze draws the fitted oscillation on a dense grid and marks the π and π/2 lengths. Shading and the ± numbers on those markers are fit standard errors, not shot SEM. The title gives Rabi frequency and its fit error in MHz. R² compares model residuals with the measured variation. Check that the fitted curve follows a complete oscillation and the calibration markers lie within the scan; otherwise extend the upper length or refine the gain. The Analyze summary reports the configured Reps × Rounds.

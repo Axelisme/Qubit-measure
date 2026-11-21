@@ -33,3 +33,9 @@ Load accepts the new tag and restores the saved record, not the current Form. Ol
 The `t1_cov` recipe takes the shared readout and π pulse keys, an optional `use_reset` selection, and delay and acquisition controls. `points` sets Expts. Omitted inputs retain their current values, and null is passed to the field owner. The recipe applies `overrides` before checking readiness.
 
 The recipe runs, analyzes, asks before writing T1, and saves completed acquisition data even if analysis fails. Set `skip` and `dual_exp` with recipe inputs. To change `n_states`, edit the tab's Analysis settings and run Analyze again.
+
+## Reading the plots
+
+The line shows the inferred probability C that the state changed between readouts. Live uses a two-state calibration and shows Calibrating until it can identify the states. Analyze can request three states with noncollinear IQ centers. At finite shot counts C can lie outside [0, 1]; check separation and the assumed shared IQ response rather than clipping it.
+
+C comes from a shared calibration and inversion of paired IQ moments, not from counting classified changed shots. The figure does not substitute a binomial SEM. The uncertainty beside T₁ is the fit standard error. R² compares residual and measured variation around the mean; it does not validate the readout calibration. The Analyze summary repeats the acquired cfg's Reps × Rounds.

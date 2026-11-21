@@ -128,7 +128,14 @@ class AmpRabiCfg(ConfigBase):
     ] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Pulse gain",
+            unit="a.u.",
+            description="Sweep the drive gain at fixed pulse length and carrier; 1 is full scale.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
@@ -240,7 +247,11 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
         # 2. Monitor Rabi contrast as the rotation amplitude changes.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel=_PULSE_GAIN_LABEL, ylabel=_IQ_PROJECTION_LABEL)
+        ax.set(
+            title="Amplitude Rabi",
+            xlabel=_PULSE_GAIN_LABEL,
+            ylabel=_IQ_PROJECTION_LABEL,
+        )
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         viewer = live_errorbar(ax)
 
@@ -251,7 +262,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             counts = moments[:, 0]
             low, high = counts.min(), counts.max()
             retained = f"{low:.0f}" if low == high else f"{low:.0f}–{high:.0f}"
-            title = ax.set_title(f"Retained shots / point: {retained}")
+            title = ax.set_title(f"Amplitude Rabi · {retained} retained shots/point")
             return (*viewer.set(gains, contrast, sem), title)
 
         fig.show()
@@ -355,7 +366,11 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             label=f"π/2 = {pi2_amp:.3g} ± {pi2_amp_err:.2g} a.u.",
         )
         ax.axvspan(pi2_amp - pi2_amp_err, pi2_amp + pi2_amp_err, color="red", alpha=0.2)
-        ax.set(xlabel=_PULSE_GAIN_LABEL, ylabel=_IQ_PROJECTION_LABEL)
+        ax.set(
+            title="Amplitude Rabi calibration",
+            xlabel=_PULSE_GAIN_LABEL,
+            ylabel=_IQ_PROJECTION_LABEL,
+        )
         ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
 
         fig.tight_layout()
