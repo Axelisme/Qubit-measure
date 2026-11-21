@@ -330,8 +330,8 @@ history 的固定來源。同 entry 有 point 時讀該 point 的現存持久值
 分析與 writeback 只讀 record，不讀 current Form input。
 
 作者宣告 `Adapter(spec, make_form, run, guide, analysis=None, post_analysis=None)`。
-Primary 只可為 `Analysis(fn, options=None, writeback=None)`、
-`Interactive(plugin, frontend, options=None, writeback=None)` 或 None，互斥由型別表達。
+Primary 只可為 `Analysis(fn, options=None, writeback=None, summary_lines=None)`、
+`Interactive(plugin, frontend, options=None, writeback=None, summary_lines=None)` 或 None，互斥由型別表達。
 第二層使用 `PostAnalysis(fn, options=None, writeback=None)`。
 Capabilities 由值推導，不手填。一般 gui.py 只需 import Adapter 與 Analysis。
 
@@ -341,12 +341,14 @@ MCP schema 與 JSON 重建使用同一物件型別，不重新讀歷史。編輯
 沒有 options 時仍能分析，表單為空。現有三個歷史預設生成器接入此機制；
 現有 16 個分析時讀歷史的 wrapper 仍保留，其清理另行處理。
 Figures-only 分析回 None，仍保存具名圖與空摘要，不提出 writeback。
+`summary_lines(source)` 可從固定來源提供操作員文字；缺少來源值時省略該行。
+GUI 和 MCP 共用這些行，不把它們寫入原生 JSON。見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
 
 Framework 依 RunRecord/spec 提供 `data_item` 與 `analysis_item`，作者不覆寫 artifact hooks。
 只保存已提交輸出與歷史分析輸入，不取草稿或目前表單。缺 cfg 不補值；
 準備失敗只使該 data output 失敗，不阻塞獨立的圖與分析，檔案寫入由保存流程負責。
 Host 將 native 分析結果交給 `summarize_analysis`，Save／MCP 共用這個入口。
-實驗端不再提供 `to_summary_dict` 或 summary 投影，也不繼承已退休的結果 base。
+實驗端不提供 `to_summary_dict` 或原生 JSON 投影，也不繼承已退休的結果 base。
 結果根須為 dataclass、pydantic model 或字串 key 的 Mapping，summary 固定為 strict JSON object。
 Key 使用原生結果欄位名，recipe／workflow 依這些欄位讀取，不提供舊 key alias，也不重寫舊存檔。
 Converter 將非有限數值轉為 null，Live RPC 的 `invalid` 列出路徑。

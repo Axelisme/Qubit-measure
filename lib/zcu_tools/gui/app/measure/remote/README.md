@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-11-20，arb 資產寫回
+**Last updated:** 2026-11-22，Analyze 摘要
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -221,6 +221,10 @@ Root cancellation uses ScriptCancelled after drain and does not overwrite genuin
 
 Operation-bound `tab.get_analyze_result` and `tab.get_post_analyze_result`
 include `presentation: {run_id, stage, figure_names, figures_replaced}`.
+A completed Primary analysis also includes `presentation.summary_lines` when the
+adapter authored lines for that source Run/Load. The GUI Analysis pane shows
+these same plain-text lines in order. If no lines apply, the key is omitted.
+The text is not part of the native result `summary` or `RunMetadata`.
 Run identity comes from the selected Run/Load metadata, not the live point or
 Save receipt. Missing metadata yields null. Stage is primary or post.
 Figure names are the native names in that pane's current collection.

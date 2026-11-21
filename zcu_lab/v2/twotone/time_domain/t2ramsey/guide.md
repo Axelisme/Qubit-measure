@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. T2 Ramsey: two pi/2 pulses separated by a swept free-evolution delay; fits the decaying fringe to extract the Ramsey coherence time T2* and the qubit-drive detuning. Runs on real hardware. Run after a pi/2 pulse is calibrated; a small deliberate detuning produces the fringe whose frequency reads out the true qubit frequency offset.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-22
 
 After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
@@ -15,6 +15,13 @@ Open and Defaults capture the T1 used for starting values. A missing or null T1,
 ## Module slots
 
 Readout uses the qubit.module.readout slot captured at Open/Defaults, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. The drive uses qubit.module.x90 with a pi2_pulse template fallback. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
+
+## Analyze summary
+
+After Analyze, the GUI Analysis pane and MCP show the source configuration's
+Reps × Rounds. `Applied detune` is the phase-ramp frequency after hardware
+rounding, not the fitted fringe frequency. Loading native data still allows
+Analyze. The file does not save the applied detune, so the summary omits that line.
 
 ## Typical writeback
 

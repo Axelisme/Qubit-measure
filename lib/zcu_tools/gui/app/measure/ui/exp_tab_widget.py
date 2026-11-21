@@ -51,6 +51,7 @@ from zcu_tools.gui.widgets import (
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
+from ..remote.analysis_types import project_analysis_presentation
 from ..writeback import WritebackWidget
 from .experiment_figure_area import ExperimentFigureArea
 from .experiment_ledger import (
@@ -340,6 +341,14 @@ class ExpTabWidget(QWidget):
             # per availability/busy and retains blue primary when idle.
             self.analyze_btn = primary_action_button("Analyze")
             analysis_layout.addWidget(self.analyze_btn)
+
+            self._analysis_summary = QLabel()
+            self._analysis_summary.setObjectName("analysis.summary_lines")
+            self._analysis_summary.setTextFormat(Qt.TextFormat.PlainText)
+            self._analysis_summary.setWordWrap(True)
+            make_label_selectable(self._analysis_summary)
+            self._analysis_summary.hide()
+            analysis_layout.addWidget(self._analysis_summary)
 
             self.writeback_section = LedgerSection("Writeback preview", collapsed=False)
             self.writeback_widget = WritebackWidget(
@@ -979,6 +988,10 @@ class ExpTabWidget(QWidget):
         """
         writeback = self._ctrl.admit(self.tab_id, TabAction.WRITEBACK)
         if self._has_analysis:
+            presentation = project_analysis_presentation(snapshot, "primary")
+            lines = presentation.get("summary_lines", [])
+            self._analysis_summary.setText("\n".join(lines))
+            self._analysis_summary.setVisible(bool(lines))
             analyze = self._ctrl.admit(self.tab_id, TabAction.ANALYZE)
             self.analyze_btn.setToolTip(analyze.message)
             self.analyze_btn.setEnabled(
