@@ -15,7 +15,7 @@ import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.fitting import fit_decay
+from zcu_tools.analysis.fitting import expfunc, fit_decay
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
     CycleSums,
@@ -43,19 +43,21 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     chain_cycle_sums,
 )
-from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
     checks_text,
     cycle_sums_variables,
-    first_read_iq,
+    first_read_projection,
     restore_cycle_sums,
 )
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar, live_line
 
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
+_SWEEP_LABEL = "Wait after π pulse (µs)"
+_IQ_TITLE = "K-cycle T1 · Qubit · First-read IQ"
+_IQ_LABEL = "Projected mean IQ (a.u.)"
 
 
 @dataclass(frozen=True)
@@ -85,23 +87,23 @@ class ChainT1Cfg(ConfigBase):
     pi_pulse: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="Pi Pulse",
-            description="Calibrated π pulse that starts each block's wait.",
+            label="π pulse",
+            description="Select the calibrated π pulse that starts each block's wait.",
         ),
     ]
     readout: Annotated[
         PulseReadout.Cfg,
         FieldMeta(
             label="Readout",
-            description="Pulse readout played twice after each wait.",
+            description="Select the single-tone pulse readout used twice after each wait.",
         ),
     ]
     delay: Annotated[
         SweepCfg,
         FieldMeta(
-            label="Delay",
+            label="Wait after π pulse",
             unit="µs",
-            description="Wait x between the π pulse and the first read of a block.",
+            description="Enter Start and Stop (µs) and Expts, the number of waits (count).",
         ),
     ]
     reps: Annotated[
@@ -109,7 +111,7 @@ class ChainT1Cfg(ConfigBase):
         FieldMeta(
             label="Reps",
             unit="count",
-            description="Cycles per point in each round, at least 66.",
+            description="Enter the number of cycles at each sweep point in one round (at least 66).",
         ),
     ] = Field(ge=66)
     rounds: Annotated[
@@ -117,16 +119,16 @@ class ChainT1Cfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Software acquisition rounds.",
+            description="Enter the number of rounds; each round measures all sweep points.",
         ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Cycle thermalisation wait K",
             unit="µs",
             decimals=3,
-            description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
+            description="Enter the wait before each cycle (µs); use at least 5 × T1 to start near thermal equilibrium.",
         ),
     ]
 
@@ -154,20 +156,30 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         """
         # 1. Delay axis and the live plot.
         delays = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Delay (µs)", ylabel="Projected signal (sigma)")
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
-        lines = live_line(ax, num_lines=2)
-        ax.lines[0].set_label("all 65 numbers")
-        ax.lines[1].set_label("first read")
-        ax.legend()
+        fig, _ = context.plots.subplots(
+            num="measurement", nrows=2, sharex=True, layout="constrained"
+        )
+        ax, diagnostic_ax = fig.axes
+        ax.set(title=_IQ_TITLE, ylabel=_IQ_LABEL)
+        diagnostic_ax.set(xlabel=_SWEEP_LABEL, ylabel="Joint projection\n(SEM units)")
+        diagnostic_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        iq_points = live_errorbar(ax)
+        diagnostic_line = live_line(diagnostic_ax)
+        progress = fig.suptitle("Waiting for the first round")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
-            curves = cycle_curves(CycleSums.from_augmented(delays, data))
-            return lines.set(
-                delays, np.stack([curves.main_sigma, curves.first_read_sigma])
+            sums = CycleSums.from_augmented(delays, data)
+            signal, sem = first_read_projection(sums)
+            joint = cycle_curves(sums)
+            shots = int(joint.cycle_count.min())
+            progress.set_text(
+                f"Round {shots // cfg.reps}/{cfg.rounds} · {shots} cycles per point (count)"
+            )
+            return (
+                *iq_points.set(delays, signal, sem),
+                *diagnostic_line.set(delays, joint.main_sigma),
+                progress,
             )
 
         fig.show()
@@ -225,10 +237,9 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
     ) -> ChainT1Analysis:
         """Fit all 65 numbers with the rate-equation T1 model.
 
-        The T1 of a single-decay fit of the first read's mean IQ is only the
-        starting value, without a figure of its own. fit_cycle then fits the
-        saved sums with t1_model, and "populations" is the only figure
-        published. Return T1 and the secondary time with Wald errors and the
+        Publish the first-read IQ and its single-decay fit in "fit". This
+        decay time seeds fit_cycle; "populations" shows the joint fit and
+        standardized residuals. Return T1 and the secondary time with Wald errors and the
         three checks. The source cfg may be None. Failures of either fit
         propagate.
         """
@@ -236,10 +247,44 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         sums = source.result
         delays = sums.axis
 
-        # 1. Starting value: the T1 of a single-decay fit of the first read.
-        first_read_t1 = float(
-            fit_decay(delays, rotate2real(first_read_iq(sums)).real).decay_time
+        # 1. Fit the first-read IQ to seed the joint model.
+        seed_signal, seed_sem = first_read_projection(sums)
+        seed_fit = fit_decay(delays, seed_signal)
+        first_read_t1 = float(seed_fit.decay_time)
+        seed_dense = np.linspace(delays.min(), delays.max(), 400)
+        seed_fig, seed_ax = plots.subplots(
+            num="fit", figsize=config.figsize, layout="constrained"
         )
+        seed_fig.suptitle(_IQ_TITLE)
+        seed_ax.errorbar(
+            delays,
+            seed_signal,
+            yerr=seed_sem,
+            fmt=".",
+            color="C0",
+            label="First-read mean ± shot SEM",
+        )
+        seed_ax.plot(
+            seed_dense,
+            expfunc(seed_dense, *seed_fit.params),
+            color="C1",
+            label="First-read fit",
+        )
+        if delays.min() <= seed_fit.decay_time <= delays.max():
+            seed_ax.axvline(seed_fit.decay_time, ls="--", color="0.35", linewidth=1)
+        r2 = seed_fit.quality.r2
+        residual = seed_fit.quality.normalized_residual_rms
+        r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
+        residual_text = "unavailable" if residual is None else f"{residual:.3g}"
+        seed_ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+        seed_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        seed_ax.set_title(
+            f"First-read T1 = {seed_fit.decay_time:.4g} ± {seed_fit.decay_time_err:.2g} µs\n"
+            f"R² = {r2_text} · Normalized residual RMS = {residual_text}",
+            loc="left",
+            fontsize=10,
+        )
+        seed_fig.legend(loc="outside lower center", ncols=2)
 
         # 2. Joint fit of all 65 numbers.
         model = t1_model()
@@ -259,51 +304,53 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         ) / fit.population_errors
         population_fig, _ = plots.subplots(
             num="populations",
-            nrows=2,
-            ncols=1,
+            nrows=4,
             sharex=True,
-            figsize=(config.figsize[0], 1.5 * config.figsize[1]),
-            gridspec_kw={"height_ratios": [3, 1]},
+            figsize=(6.4, 8.6),
+            layout="constrained",
         )
-        population_ax, population_residual_ax = population_fig.axes
-        population_by_thermal = np.argsort(nuisances.thermal)[::-1]
-        for population_name, population_state, population_color in zip(
-            "gef", population_by_thermal, ("C0", "C1", "C2"), strict=True
+        population_fig.suptitle(
+            "K-cycle T1 · Qubit · First-read populations\n"
+            f"T1 = {relaxation.t1:.4g} ± {relaxation.t1_error:.2g} µs\n"
+            f"Secondary time = {relaxation.secondary_time:.4g} ± {relaxation.secondary_error:.2g} µs\n"
+            f"Joint J/df = {fit.J:.2g}/{fit.df}\n{checks_text(fit)}",
+            fontsize=10,
+        )
+        population_axes = population_fig.axes[:3]
+        residual_ax = population_fig.axes[3]
+        population_order = np.argsort(nuisances.thermal)[::-1]
+        for rank, (population_ax, state) in enumerate(
+            zip(population_axes, population_order, strict=True)
         ):
+            color = f"C{rank}"
+            thermal = nuisances.thermal[state]
             population_ax.errorbar(
                 delays,
-                fit.populations[:, population_state],
-                yerr=fit.population_errors[:, population_state],
-                fmt="o",
-                markersize=3,
-                color=population_color,
-                label=f"{population_name}, thermal {nuisances.thermal[population_state]:.2f}",
+                fit.populations[:, state],
+                yerr=fit.population_errors[:, state],
+                fmt=".",
+                color=color,
+                label="Point estimate ± Wald SE",
             )
             population_ax.plot(
                 population_dense,
-                population_curves[:, population_state],
-                color=population_color,
+                population_curves[:, state],
+                color=color,
+                label="Joint fit",
             )
-            population_residual_ax.plot(
-                delays,
-                population_residuals[:, population_state],
-                "o-",
-                markersize=3,
-                color=population_color,
+            if delays.min() <= relaxation.t1 <= delays.max():
+                population_ax.axvline(relaxation.t1, ls="--", color="0.35", linewidth=1)
+            population_ax.set(
+                ylabel=f"P({'gef'[rank]})",
+                title=f"{'gef'[rank]} · thermal rank {rank + 1} · Thermal population {thermal:.2f}",
             )
-        population_ax.set_ylabel("First-read population")
-        population_ax.set_title(
-            f"T1 = {relaxation.t1:.4g} ± {relaxation.t1_error:.2g} µs, secondary time {relaxation.secondary_time:.4g} ± {relaxation.secondary_error:.2g} µs\n{checks_text(fit)}",
-            fontsize=9,
-        )
-        population_ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
-        population_ax.grid(True)
-        population_residual_ax.axhspan(-1.96, 1.96, color="0.9", zorder=0)
-        population_residual_ax.axhline(0.0, color="0.4", linewidth=0.8)
-        population_residual_ax.set_xlabel("Delay (µs)")
-        population_residual_ax.set_ylabel("Residual / error")
-        population_residual_ax.grid(True)
-        population_fig.tight_layout()
+            residual_ax.plot(delays, population_residuals[:, state], ".", color=color)
+        handles, labels = population_axes[0].get_legend_handles_labels()
+        population_fig.legend(handles, labels, loc="outside lower center", ncols=2)
+        residual_ax.axhspan(-1.96, 1.96, color="0.9", zorder=0)
+        residual_ax.axhline(0.0, color="0.4", linewidth=0.8)
+        residual_ax.set(xlabel=_SWEEP_LABEL, ylabel="Residual / Wald SE")
+        residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
 
         return ChainT1Analysis(
             t1=relaxation.t1,
