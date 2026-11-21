@@ -94,7 +94,7 @@ def test_finish_projects_original_binding_outcome(
     devices = DeviceManager()
     source = runtime.SixFluxoniumSource(telemetry_settings, devices)
     try:
-        outcome = AcquireOutcome((), 7.0, 2.0, complete)
+        outcome = AcquireOutcome((), 7.0, 2.0, complete, "fixture-acquire")
         source.finish_acquire(outcome)
         (record,) = [
             json.loads(line)

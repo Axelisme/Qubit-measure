@@ -8,8 +8,18 @@ import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, StrictBool, StrictFloat, ValidationError
+from pydantic import (
+    BaseModel,
+    Discriminator,
+    StrictBool,
+    StrictFloat,
+    StrictStr,
+    Tag,
+    TypeAdapter,
+    ValidationError,
+)
 
 
 class FamilyInput(BaseModel):
@@ -31,17 +41,51 @@ class AcquireInput(BaseModel):
     complete is normal return (True), escaping error (False), or unknown (None).
     wall_s is total acquire wall seconds. compile_wall_s measures compilation;
     evolve_wall_s and readout_wall_s sum evolution and readout wall seconds.
+    materialize_wall_s measures in-acquire raw materialization. acquire_id links
+    the summary to deferred events. Both may be absent in older summaries.
     Missing or null wall fields mean unmeasured, not zero. Non-null complete
     must be a JSON boolean; non-null wall fields must be JSON numbers, not bools
     or numeric strings. Wrong types invalidate the entire row.
     """
 
     families: dict[str, FamilyInput]
+    acquire_id: StrictStr | None = None
+    materialize_wall_s: StrictFloat | None = None
     complete: StrictBool | None = None
     wall_s: StrictFloat | None = None
     compile_wall_s: StrictFloat | None = None
     evolve_wall_s: StrictFloat | None = None
     readout_wall_s: StrictFloat | None = None
+
+
+class MaterializeInput(BaseModel):
+    """Successful deferred raw work in wall seconds for an opaque acquire ID."""
+
+    event: Literal["materialize"]
+    acquire_id: StrictStr
+    materialize_wall_s: StrictFloat
+
+
+def _routing_tag(row: object) -> Literal["acquire", "materialize"]:
+    if isinstance(row, MaterializeInput) or (
+        isinstance(row, dict) and row.get("event") == "materialize"
+    ):
+        return "materialize"
+    return "acquire"
+
+
+_routing_record = TypeAdapter(
+    Annotated[
+        Annotated[AcquireInput, Tag("acquire")]
+        | Annotated[MaterializeInput, Tag("materialize")],
+        Discriminator(_routing_tag),
+    ]
+)
+
+
+def decode_routing_record(line: str | bytes) -> AcquireInput | MaterializeInput:
+    """Decode an acquire summary or deferred raw timing; invalid rows raise ValidationError."""
+    return _routing_record.validate_json(line)
 
 
 @dataclass
@@ -141,7 +185,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     A row contributes times only when all four wall fields are measured.
     Non-null complete must be a JSON boolean; non-null wall fields must be JSON
     numbers (not booleans or strings). Wrong types skip the entire record.
-    All valid rows contribute family counters. Multiple inputs merge into one
+    Only acquire summaries contribute counters; deferred raw events are skipped
+    without warnings. Multiple inputs merge into one
     report without inferring simulator identity. No files are modified.
     Returns zero after a readable run. argparse handles invalid CLI arguments.
     """
@@ -163,13 +208,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         with path.open(encoding="utf-8") as stream:
             for number, line in enumerate(stream, 1):
                 try:
-                    record = AcquireInput.model_validate_json(line)
+                    record = decode_routing_record(line)
                 except ValidationError as error:
                     print(
                         f"{path}:{number}: skipping invalid record: {error}",
                         file=sys.stderr,
                     )
                     skipped += 1
+                    continue
+                if isinstance(record, MaterializeInput):
                     continue
                 records += 1
                 group = (

@@ -6,10 +6,12 @@ import warnings
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
+from functools import partial
 from threading import Lock
 from uuid import uuid4
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.program.shot_time import request_round_time_s
 from zcu_tools.simulate.boundary import (
@@ -22,7 +24,8 @@ from zcu_tools.simulate.boundary import (
 
 from ._envelope_pool import EnvelopePool
 from .clock import SimulationTiming
-from .result import IntegratedRound
+from .result import IntegratedRound, RawShots
+from .signals import materialize_shots
 
 
 @dataclass(frozen=True)
@@ -59,15 +62,20 @@ class AcquireOutcome:
             mixin cleanup, before the observer, including pacing.
         compile_wall_s: Sum of compiling scope seconds, including failed builds;
             zero when no compiling scope ran.
+        materialize_wall_s: Sum of in-acquire raw-shot materialization seconds,
+            including failed calls; zero when no raw shots were materialized.
         complete: True when the body and cleanup returned without an escaping
             BaseException, including a normally returned partial Stop result.
             This does not mean all requested rounds completed.
+        acquire_id: Opaque identity of this admitted acquire for pairing telemetry.
     """
 
     rounds: tuple[RoundRequest, ...]
     wall_s: float
     compile_wall_s: float
     complete: bool
+    acquire_id: str
+    materialize_wall_s: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -80,13 +88,18 @@ class SimulationCallbacks:
         Its ordinary Exceptions warn once without masking execution errors;
         BaseExceptions propagate with the acquire error retained as context.
     on_begin: no-argument preparation after wait_ready, before request construction;
-        errors release admission and propagate. All default None
-        and must not reenter acquisition.
+        errors release admission and propagate.
+    on_materialize: receives (acquire_id, elapsed wall seconds) for successful
+        raw materialization outside that acquire's body. When a shot-result getter
+        requests the raw arrays, it publishes only after building the result.
+        Ordinary Exceptions warn once without failing raw access; BaseExceptions propagate.
+    Callbacks default to None and must not reenter acquisition.
     """
 
     wait_ready: Callable[[], object] | None = None
     on_end: Callable[[AcquireOutcome], None] | None = None
     on_begin: Callable[[], None] | None = None
+    on_materialize: Callable[[str, float], None] | None = None
 
 
 class SimulationBinding:
@@ -171,7 +184,9 @@ class SimulationBinding:
         Exceptions emit at most one warning and never mask an acquisition error,
         even under -W error. BaseExceptions propagate, retaining any acquire
         error as context. callbacks=None supplies no lifecycle hooks.
-        on_end=None avoids acquire/compiling clocks and completion notifications.
+        on_end=None avoids acquire stage clocks and completion notifications.
+        callbacks.on_materialize optionally observes successful deferred raw
+        materialization, including when called after a subsequent acquire.
 
         Raises ValueError for an invalid scale or boolean/non-int/negative seed, and TypeError
         if NumPy returns non-integer entropy. Callback execution is deferred to
@@ -183,9 +198,12 @@ class SimulationBinding:
             raise ValueError("seed must be a nonnegative integer or None")
         hooks = SimulationCallbacks() if callbacks is None else callbacks
         self._on_end = hooks.on_end
+        self._on_materialize = hooks.on_materialize
+        self._active_sequence: int | None = None
         self._observer_warned = False
         self._acquire_started = 0.0
         self._compile_wall_s = 0.0
+        self._materialize_wall_s = 0.0
         policy = SimulationTiming() if timing is None else timing
         self._time_scale = policy.time_scale
         self._clock = policy.clock
@@ -213,7 +231,7 @@ class SimulationBinding:
 
         Place request construction, execution and cleanup inside this scope.
         Readiness/on_begin failure releases admission without consuming sequence
-        or notifying on_end. Admission resets rounds and compile time; a later
+        or notifying on_end. Admission resets rounds and stage times; a later
         failure still consumes sequence. last_request is unchanged until install.
         Concurrent/reentrant entry raises RuntimeError without consuming sequence.
         The observer receives the body's normal-return/escaping-error outcome
@@ -231,14 +249,17 @@ class SimulationBinding:
             self._sequence += 1
             self.rounds = ()
             self._compile_wall_s = 0.0
+            self._materialize_wall_s = 0.0
             if self._on_end is not None:
                 self._acquire_started = time.monotonic()
+            self._active_sequence = sequence
             complete = False
             try:
                 yield sequence
                 complete = True
             finally:
-                self._notify_outcome(complete=complete)
+                self._active_sequence = None
+                self._notify_outcome(sequence, complete=complete)
         finally:
             self._admission.release()
 
@@ -260,7 +281,50 @@ class SimulationBinding:
         finally:
             self._compile_wall_s += time.monotonic() - started
 
-    def _notify_outcome(self, *, complete: bool) -> None:
+    def materialize_raw(
+        self,
+        request: AcquireRequest,
+        source: RawShots,
+        *,
+        defer_notification: Callable[[Callable[[], None]], None] | None = None,
+    ) -> dict[int, NDArray[np.int64]]:
+        """Generate and detach raw int64 arrays keyed by ADC, without processing IQ.
+
+        Pass this binding's original request and retained numeric source.
+        Shape, dtype or channel mismatches raise ValueError; source errors
+        propagate. Count elapsed wall seconds inside the originating acquire,
+        including failed attempts. For successful later materialization, notify
+        the observer with the original acquire identity. If defer_notification is
+        supplied, give it the no-argument notification instead; the caller can
+        run that notification once if its own work succeeds. With no observer for
+        the applicable phase, this call does not read the clock.
+        """
+        active = self._active_sequence == request.sequence
+        observer = self._on_materialize
+        if (active and self._on_end is None) or (not active and observer is None):
+            return materialize_shots(request, source)
+        started = time.monotonic()
+        try:
+            raw = materialize_shots(request, source)
+        finally:
+            elapsed = time.monotonic() - started
+            if active:
+                self._materialize_wall_s += elapsed
+        if not active and observer is not None:
+            notify = partial(
+                self._notify,
+                partial(observer, self._acquire_id(request.sequence), elapsed),
+            )
+            if defer_notification is None:
+                notify()
+            else:
+                defer_notification(notify)
+        return raw
+
+    def _acquire_id(self, sequence: int) -> str:
+        return f"{self.provenance.identifier}:{sequence}"
+
+    def _notify_outcome(self, sequence: int, *, complete: bool) -> None:
         if self._on_end is None:
             return
         outcome = AcquireOutcome(
@@ -268,9 +332,14 @@ class SimulationBinding:
             time.monotonic() - self._acquire_started,
             self._compile_wall_s,
             complete,
+            acquire_id=self._acquire_id(sequence),
+            materialize_wall_s=self._materialize_wall_s,
         )
+        self._notify(partial(self._on_end, outcome))
+
+    def _notify(self, observer: Callable[[], None]) -> None:
         try:
-            self._on_end(outcome)
+            observer()
         except Exception as error:
             if not self._observer_warned:
                 self._observer_warned = True

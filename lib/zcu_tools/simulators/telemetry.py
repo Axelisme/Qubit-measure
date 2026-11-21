@@ -1,15 +1,15 @@
-"""Best-effort local JSONL persistence for acquire-level routing reports."""
+"""Best-effort local JSONL persistence for acquire routing and raw-shot timing."""
 
 from __future__ import annotations
 
 import json
 import warnings
-from collections.abc import Sequence
-from contextlib import suppress
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 from pydantic import JsonValue
 
@@ -34,12 +34,15 @@ class TelemetrySettings(Values):
 class AcquireTelemetry(TypedDict):
     """Required caller-supplied summary for one acquire, without numerical inputs.
 
+    acquire_id: opaque identity used to link deferred materialization to this row.
     points: request grid size excluding shots and rounds.
     rounds: number of captured attempts, including failed attempts.
     wall_s: admitted acquire wall seconds including pacing, excluding writer I/O.
     compile_wall_s: compilation wall seconds, through failure if it raises.
     evolve_wall_s: sum of Engine.evolve wall seconds, including failed calls.
     readout_wall_s: summed ADC/readout wall seconds, including failed calls.
+    materialize_wall_s: summed raw-shot materialization wall seconds during the
+    acquire, including failed calls; excludes subsequent shot processing.
     Stages not entered contribute 0.0; no stage may be unmeasured.
     complete: True if the acquire body and cleanup returned normally, including
     a partial Stop result; False if an exception escaped. It does not mean all
@@ -48,12 +51,14 @@ class AcquireTelemetry(TypedDict):
     to JSON values; pass {} when absent. Consumers index required keys directly.
     """
 
+    acquire_id: str
     points: int
     rounds: int
     wall_s: float
     compile_wall_s: float
     evolve_wall_s: float
     readout_wall_s: float
+    materialize_wall_s: float
     complete: bool
     extras: dict[str, JsonValue]
     capture_file: str | None
@@ -77,6 +82,21 @@ class RoutingRecord(AcquireTelemetry):
     frontend_cpu_s: float
     estimated_cost_unit: str
     families: dict[str, dict[str, int | float | str | None]]
+
+
+class MaterializeRecord(TypedDict):
+    """Successful deferred raw work; not an acquire or part of its wall_s.
+
+    event: record discriminator, always "materialize".
+    acquire_id: the originating acquire row's opaque identity.
+    materialize_wall_s: elapsed seconds for this raw materialization only.
+    timestamp: UTC ISO timestamp of supplemental publication.
+    """
+
+    event: Literal["materialize"]
+    acquire_id: str
+    materialize_wall_s: float
+    timestamp: str
 
 
 def _families(
@@ -107,7 +127,7 @@ def _families(
 
 
 class RoutingTelemetry:
-    """Write one UTF-8 JSON line per acquire and bound owned routing files.
+    """Write bounded UTF-8 JSONL for acquire summaries and deferred raw timing.
 
     directory is the local output directory, created lazily on write. max_bytes
     is the positive total routing-*.jsonl budget (default 50 MiB). Before append,
@@ -141,46 +161,73 @@ class RoutingTelemetry:
         Templates carry no experiment/program identifier, so none is synthesized.
         Filesystem/serialization failures follow this class's warning-only policy.
         """
+        now = datetime.now(timezone.utc)
+        with self._writing():
+            record: RoutingRecord = {
+                "timestamp": now.isoformat(),
+                "acquire_id": summary["acquire_id"],
+                "points": summary["points"],
+                "rounds": summary["rounds"],
+                "wall_s": summary["wall_s"],
+                "frontend_cpu_s": sum(p.frontend_cpu_s for p in paths),
+                "estimated_cost_unit": "relative scheduling units",
+                "families": _families(paths),
+                "compile_wall_s": summary["compile_wall_s"],
+                "evolve_wall_s": summary["evolve_wall_s"],
+                "readout_wall_s": summary["readout_wall_s"],
+                "materialize_wall_s": summary["materialize_wall_s"],
+                "complete": summary["complete"],
+                "extras": summary["extras"],
+                "capture_file": summary["capture_file"],
+            }
+            self._append(now, record)
+
+    def write_materialize(self, acquire_id: str, elapsed_s: float) -> None:
+        """Append successful deferred raw work for an existing acquire identity.
+
+        elapsed_s is the raw materialization's elapsed wall seconds, separate
+        from the original row's wall_s. The original row is never rewritten.
+        This append uses the same budget and warning-only policy as write().
+        """
+        now = datetime.now(timezone.utc)
+        with self._writing():
+            self._append(
+                now,
+                {
+                    "event": "materialize",
+                    "acquire_id": acquire_id,
+                    "materialize_wall_s": elapsed_s,
+                    "timestamp": now.isoformat(),
+                },
+            )
+
+    def _append(self, now: datetime, record: RoutingRecord | MaterializeRecord) -> None:
+        line = (
+            json.dumps(record, allow_nan=False, separators=(",", ":")) + "\n"
+        ).encode("utf-8")
+        if len(line) > self.max_bytes:
+            raise ValueError("routing record exceeds the directory budget")
+        self.directory.mkdir(parents=True, exist_ok=True)
+        files = sorted(
+            (
+                (p.stat().st_mtime_ns, p.name, p, p.stat().st_size)
+                for p in self.directory.glob("routing-*.jsonl")
+            ),
+        )
+        total = sum(size for _, _, _, size in files)
+        for _, _, path, size in files:
+            if total + len(line) <= self.max_bytes:
+                break
+            path.unlink()
+            total -= size
+        with (self.directory / f"routing-{now:%Y%m%d}.jsonl").open("ab") as stream:
+            stream.write(line)
+
+    @contextmanager
+    def _writing(self) -> Generator[None]:
         with self._lock:
             try:
-                now = datetime.now(timezone.utc)
-                record: RoutingRecord = {
-                    "timestamp": now.isoformat(),
-                    "points": summary["points"],
-                    "rounds": summary["rounds"],
-                    "wall_s": summary["wall_s"],
-                    "frontend_cpu_s": sum(p.frontend_cpu_s for p in paths),
-                    "estimated_cost_unit": "relative scheduling units",
-                    "families": _families(paths),
-                    "compile_wall_s": summary["compile_wall_s"],
-                    "evolve_wall_s": summary["evolve_wall_s"],
-                    "readout_wall_s": summary["readout_wall_s"],
-                    "complete": summary["complete"],
-                    "extras": summary["extras"],
-                    "capture_file": summary["capture_file"],
-                }
-                line = (
-                    json.dumps(record, allow_nan=False, separators=(",", ":")) + "\n"
-                ).encode("utf-8")
-                if len(line) > self.max_bytes:
-                    raise ValueError("routing record exceeds the directory budget")
-                self.directory.mkdir(parents=True, exist_ok=True)
-                files = sorted(
-                    (
-                        (p.stat().st_mtime_ns, p.name, p, p.stat().st_size)
-                        for p in self.directory.glob("routing-*.jsonl")
-                    ),
-                )
-                total = sum(size for _, _, _, size in files)
-                for _, _, path, size in files:
-                    if total + len(line) <= self.max_bytes:
-                        break
-                    path.unlink()
-                    total -= size
-                with (self.directory / f"routing-{now:%Y%m%d}.jsonl").open(
-                    "ab"
-                ) as stream:
-                    stream.write(line)
+                yield
             except (OSError, ValueError, TypeError) as error:
                 if not self._warned:
                     self._warned = True

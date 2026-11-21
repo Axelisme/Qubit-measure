@@ -997,9 +997,11 @@ class FTFSource:
         self.telemetry.write(
             {
                 "points": prod(request.point_dims) if request is not None else 0,
+                "acquire_id": outcome.acquire_id,
                 "rounds": len(rounds),
                 "wall_s": outcome.wall_s,
                 "compile_wall_s": outcome.compile_wall_s,
+                "materialize_wall_s": outcome.materialize_wall_s,
                 "evolve_wall_s": 0.0 if session is None else session.evolve_wall_s,
                 "readout_wall_s": 0.0 if session is None else session.readout_wall_s,
                 "complete": outcome.complete,
@@ -1221,6 +1223,9 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
                 on_begin=lambda: coordinator.begin_acquire(seed=binding.root_seed),
                 on_end=coordinator.finish_acquire
                 if coordinator.telemetry is not None or settings.numerics.debug_capture
+                else None,
+                on_materialize=coordinator.telemetry.write_materialize
+                if coordinator.telemetry is not None
                 else None,
             ),
         )

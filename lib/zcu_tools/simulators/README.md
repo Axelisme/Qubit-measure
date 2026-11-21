@@ -1,6 +1,6 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-18, round settings and detached rounds in debug capture
+**Last updated:** 2026-11-21, acquire rows and deferred raw timing
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
@@ -55,22 +55,24 @@ The startup changes only select the new model imports.
 ## Acquire telemetry
 
 `simulators.telemetry` owns `RoutingTelemetry`, `TelemetrySettings` and the shared
-acquire-summary types. FTF, single and six use this writer. Each admitted acquire
-writes one row, including numeric failures. Six aggregates all sources and routed
-groups before writing; individual sources do not write rows.
+acquire-summary types. FTF, single and six use this writer. It writes one main
+row per admitted acquire, including numeric failures. Six aggregates all sources
+and routed groups before writing; individual sources do not write rows.
 
 Call `RoutingTelemetry(directory).write(summary, paths=paths)` once at the acquire
-boundary. `AcquireTelemetry` requires the first nine fields below.
+boundary. `AcquireTelemetry` requires the first eleven fields below.
 `RoutingRecord` inherits them and adds the four writer-generated fields.
 
 | Field | Meaning |
 | --- | --- |
+| `acquire_id` | Opaque identity for matching deferred work to this acquire. |
 | `points` | Request grid size, excluding shots and rounds. |
 | `rounds` | Captured attempts, including failed attempts. |
 | `wall_s` | Admitted acquire wall seconds, including pacing and excluding telemetry I/O. |
 | `compile_wall_s` | Compilation wall seconds from the binding's frozen `AcquireOutcome`. |
 | `evolve_wall_s` | Sum of every `Engine.evolve` call's wall seconds across rounds and continuations. |
 | `readout_wall_s` | Sum of ADC/readout wall seconds, including preparation and integrated or decimated sampling. |
+| `materialize_wall_s` | Wall seconds spent generating and detaching raw shots within the acquire, from `AcquireOutcome`. No raw materialization contributes `0.0`. |
 | `complete` | `true` when the acquire body and cleanup returned normally, including a partial Stop result. `false` when an exception escaped. |
 | `extras` | Simulator-prefixed keys with JSON values, or `{}` when absent. |
 | `capture_file` | Capture basename, or `null` when recording is off or publication fails. |
@@ -79,13 +81,26 @@ boundary. `AcquireTelemetry` requires the first nine fields below.
 | `estimated_cost_unit` | `relative scheduling units`, the label for family scheduling costs. |
 | `families` | Engine family names mapped to merged routing counters, CPU seconds and optional OpenCL detection error. |
 
-All four wall fields are floats. A failed call retains elapsed time through its
+All five wall fields are floats. A failed call retains elapsed time through its
 exception; a stage not entered contributes `0.0`. `complete` comes from the binding
 and does not mean every requested round ran. FTF measures cavity-memory spans and
 projective continuations. Single and six also include projective prefixes and
-continuations. The remainder, `wall_s - compile_wall_s - evolve_wall_s - readout_wall_s`,
-contains environment preparation and pacing outside the measured stages.
-Raw materialization requested after acquire is outside the row.
+continuations. Unmeasured parts of `wall_s` include environment preparation,
+pacing and host shot processing.
+
+When a later getter produces retained raw shots and returns successfully, the
+same writer appends a separate JSONL record:
+
+```json
+{"event":"materialize","acquire_id":"opaque-acquire-id","materialize_wall_s":0.25,"timestamp":"2026-11-21T10:15:00+00:00"}
+```
+
+Match it to the original acquire by `acquire_id`. The supplemental duration
+is outside that acquire's `wall_s`. It does not count as another acquire and
+cannot change the original row or completion status. A failed getter or an
+access to cached shots appends nothing. The same retention budget
+applies to both record kinds; the matching acquire row can be absent if pruned.
+Older acquire rows may have neither `acquire_id` nor `materialize_wall_s`.
 
 Use extras keys such as `ftf.projection_outcomes`; the prefix names the simulator's
 extension, not a row identity. Required extras keys are indexed directly by their
@@ -122,7 +137,9 @@ Missing or null `complete` is unknown. Missing or null wall fields are unmeasure
 Only rows with numeric `wall_s` and all three numeric stages contribute wall totals
 and the remainder, including unknown rows. Each observed group reports `included`
 and `excluded`; their sum across groups equals `records`. Absent groups mean zero
-rows. Every valid row still contributes family statistics. Non-null `complete`
+rows. Every valid main row contributes family statistics, even if wall times are
+unmeasured. Supplemental records contribute neither acquire counts nor family
+statistics. Non-null `complete`
 must be a JSON boolean. Non-null wall fields must be JSON numbers, not booleans or
 numeric strings. Wrong types skip the entire row, including its family counters,
 and produce a file/line warning and a `skipped` count.
