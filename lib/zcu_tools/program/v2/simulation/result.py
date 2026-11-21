@@ -1,12 +1,12 @@
 """Integrated environment delivery: pure statistics plus environment-owned raw."""
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.simulate.boundary import RoundStatistics
+from zcu_tools.simulate.boundary import CancellationQuery, RoundStatistics
 
 
 class RawShots(Protocol):
@@ -36,6 +36,21 @@ class RawShots(Protocol):
         reproduce identical values; calls never advance the mean stream. Wrong
         reps/layout, invalid data and int64 overflow raise ValueError. Numeric
         solver failures may raise RuntimeError. No partial mapping is returned.
+        """
+        ...
+
+
+@runtime_checkable
+class CancellableRawShots(RawShots, Protocol):
+    """Optional cooperative cancellation for shot work required by this round."""
+
+    def materialize_cancellable(
+        self, reps: int, avg_level: int, *, cancel: CancellationQuery
+    ) -> dict[int, NDArray[np.int64]]:
+        """Follow materialize's layout and RNG contract, or raise Cancelled.
+
+        Borrow the read-only query for this call. No partial arrays escape on
+        cancellation; later materialize calls must not read this query.
         """
         ...
 

@@ -8,11 +8,12 @@ from .binding import (
 )
 from .clock import SimulationClock, SimulationTiming
 from .mixin import SimulationAcquireMixin
-from .result import IntegratedRound, RawShots
+from .result import CancellableRawShots, IntegratedRound, RawShots
 from .soc import SimulationSoc
 
 __all__ = [
     "AcquireOutcome",
+    "CancellableRawShots",
     "IntegratedRound",
     "RawShots",
     "SimulationAcquireMixin",
