@@ -161,6 +161,18 @@ Module `README.md` 專指 `lib/` 與 `tests/` 子目錄中的高層 cheat-sheet�
 - 改動 tracked 程式碼後、交付前，執行 `tools/doc_relations.py <base>`。它列出相關文件（改動路徑上的 README、這些 README 與改動程式引用的 ADR、引用同一批 ADR 的其他文件），以及提到被刪除、改名或改動的名稱與檔案路徑的文件行。文件對被改對象另有稱呼時，用 `--term` 補上。每一筆給一個處置：無關、已一致、已更新。用法見 [tools/README.md](tools/README.md#document-relations)。
 - `tools/doc_relations.py --check` 檢查相對連結的目標與 `ADR-NNNN` 是否存在。
 
+#### 文檔組織與搜尋
+
+讓不熟 repo 的人或 agent 花最少時間與力氣找到所需粒度的資訊。
+
+- **粒度分層。** 依〈讀者宣告〉選入口：operator、lab-author、framework-dev 或 agent 從各自會讀的文件找操作、契約與決策。實作細節由程式碼交代，維護理由留在相關程式的註解。各層分工，說法一致，跨層用連結代替重抄。例如，skopt `n_jobs=1` 的理由留在 [auto-optimize 的 `core.py`](zcu_lab/v2/twotone/ro_optimize/auto_optimize/core.py) 註解；operator guide 只說操作與結果。
+- **判斷依據。** 讓讀者從文件找到會影響判斷的事實：是什麼、由誰負責、為何如此。要追到實作時，連到程式碼或寫明可 grep 的名稱。例如，lab-author 從 [`experiment-authoring.md` 的存檔軸段](zcu_lab/v2/experiment-authoring.md#存檔軸用關鍵字固定座標不塞進-result)找結果格式；需要判斷舊檔的 cfg 相容性時，入口指向 [ADR-0069〈Cfg 欄位改名與 schema 版本〉](docs/adr/0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。
+- **橫向互指。** 一個模組的契約依賴另一個模組的定義時，從雙方的契約段落互連到對應段落。例如，FTF environment、ADC 與 Program simulation 在各自說明 integrated statistics 的段落互指，讓讀者直接對照環境產出的統計、ADC 的邊際計數與 Program 消費的統計格式。
+- **限定語。** 同一詞在不同模組代表不同資料時，每個模組在自己的文件寫明限定語或固定搜尋詞。例如，`joint` 可以指 FTF 的 herald history × terminal state 聯合分布，也可以指 `two_qubit/joint_readout` 的雙 qubit IQ 聯合分類；ADC 的 per-event marginals 則是各讀取事件的邊際計數。
+- **Grep 橋接。** 動態組出名稱時，在組字串的程式旁以註解列出完整名稱。例如，若 two_qubit 用 `cz_{role}` 組出 `cz_qubit1` 與 `cz_qubit2`，就在組字串處列出這兩個 slot 名，讓人用完整名稱搜到產生處。
+- **調查筆記。** 調查或裁決時，發現文件缺連結、難搜尋或已過時，記下具體位置、要找的事實與可用的入口或搜尋詞。在 map 內依該 map 的 Standing order 記筆記；在 map 外用 `candidate-backlog` 登記範圍外的發現，將 `area` 設為 `doc-organization`。例如，FTF 的 integrated statistics 只連到 ADC README 開頭時，記下兩邊的段落和 ADC 的 `ProjectionChain` 搜尋詞。
+- **重構時機。** 從上次彙整起，文檔組織發現累積 5 筆，或同一類缺陷出現在 2 份筆記時，交由負責排程的人彙整成一個文檔重構 task。一起修具體文件與這類查找的規範或搜尋詞。驗收時重走觸發筆記的查找路徑，確認能從 README 連結、ADR 索引或寫明的 grep 詞找到所需事實。例如，兩份筆記都發現 integrated statistics 缺契約互指，就一起補；從 ADC 的契約段落應能直達 FTF 與 Program 的對應段落。
+
 #### 編碼與 agent 工作檔
 
 中文文件使用 UTF-8。Windows 或 PowerShell 顯示 mojibake 時，先將 terminal 切換為 UTF-8，例如 `chcp 65001` 或設定 `$OutputEncoding`，不改寫檔案編碼。
