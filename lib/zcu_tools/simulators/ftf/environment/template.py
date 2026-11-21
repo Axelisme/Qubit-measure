@@ -10,6 +10,7 @@ from zcu_tools.experiment.readout_plan import (
     ProjectiveRead,
     ReadoutDrive,
     ReadoutMapping,
+    ReadoutPartition,
     classify_readout,
     drive_track,
     logical_event_contents,
@@ -374,16 +375,56 @@ def _projective_contents(
     drive: ReadoutDrive,
     memo: dict[int, EnvelopeSpec],
     time_base: TimeBase,
+    partition: ReadoutPartition,
 ) -> tuple[tuple[ReadoutMapping, ...], float]:
     """Align actual trigger contents on a common chronological block axis."""
     channels = tuple(
-        logical_event_contents(template, drive, window, memo, time_base=time_base)
+        logical_event_contents(
+            template, drive, window, memo, time_base=time_base, partition=partition
+        )
         for window in template.readouts
     )
     reference = channels[0][-1].pulses[0][0].frequency_ghz
     return tuple(
         map_readout_events(contents, reference) for contents in channels
     ), reference
+
+
+def _reject_omitted_arrivals(
+    partition: ReadoutPartition,
+    content: ReadoutMapping,
+    adc: FTFReceiverConfig,
+    gen_ch: int,
+) -> None:
+    """Check physical block coverage in assembled events before PFB selection."""
+    delay = adc.time_of_flight_ns
+    for point, row in enumerate(content.inverse):
+        pulses = (
+            *partition.cavity_drives[point],
+            *(p for read in partition.projective_reads[point] for p in read.pulses),
+            *partition.terminal_pulses[point],
+        )
+        # The mapping's permutation goes from trigger order to flattened grids.
+        windows = iter(np.argsort(content.output_order[row]))
+        for event in content.events[row]:
+            # Pairing includes whole emission blocks, including all mux tones.
+            included_starts = {pulse.start_ns for pulse in event.pulses}
+            omitted = tuple(p for p in pulses if p.start_ns not in included_starts)
+            for grid in event.grids:
+                window = next(windows)
+                for pulse in omitted:
+                    arrival_start = pulse.start_ns + delay
+                    arrival_end = pulse.end_ns + delay
+                    if (
+                        arrival_start < arrival_end
+                        and arrival_start <= grid.times_ns[-1]
+                        and grid.times_ns[0] < arrival_end
+                    ):
+                        raise ValueError(
+                            f"FTF ADC {adc.ro_ch} window {window} at point {point}: "
+                            f"omitted gen {gen_ch} pulse emitted at {pulse.start_ns:.12g} ns "
+                            "arrives during sampling; FTF pairs triggers by emission time"
+                        )
 
 
 def _mux_channel_contents(
@@ -432,8 +473,10 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     latest active readout-generator block per point ends evolution. Earlier
     readout blocks with their own triggers are projective reads; untriggered
     blocks are cavity drives. A block owns triggers until the next block starts,
-    including ringdown. Earlier pulses may end at the next start, but their last
-    ADC sample must be strictly earlier. Invalid windows name the block/trigger.
+    including ringdown. Later pulses that reach a receiver by its last sample
+    are included in that ADC event without moving the projection time. If an
+    event omits a pulse whose delayed support overlaps its sampling interval,
+    raise ValueError naming the receiver, window, generator and emission time.
     Bound fast-flux generators pass through per-loop delay and multi-exponential
     filtering, with 2 ns waveform samples and 1e-3 Phi0 midpoint bath levels.
     Ideal constant platforms omit continuous samples to retain sudden switching.
@@ -455,11 +498,13 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     same-channel superposition. Each logical event selects independently. Grids
     in one event spanning different PFB channels raise ValueError. An addressed
     single carrier is unchanged; off-channel carriers are excluded even alone.
-    An observed mux event without an in-channel carrier retains empty pulses
-    and emits receiver background offset and noise only. Unobserved events retain
-    their pulses and empty grids without emitting data.
-    Program common-origin carrier phases convert to pulse-local phases in the first
-    terminal carrier's model reference frame; ADC demodulation remains absolute-time.
+    A pulse template with no active readout-generator pulse uses its receiver's
+    first trigger as the evolution endpoint and the neutral 0 GHz reference.
+    Missing pulses at only some points are invalid. This receiver-only event and
+    a mux event without an in-channel carrier emit receiver background offset and
+    noise only. Unobserved events retain their pulses and empty grids without data.
+    With pulses, program common-origin carrier phases convert to pulse-local phases
+    in the first terminal carrier's frame; ADC demodulation remains absolute-time.
     All ADCs retain the same ordered event axis, even if none observes terminal.
     Unobserved events have empty grids. Each ADC must have at least one trigger.
     Projective block counts and each ADC's per-event grid counts must match across
@@ -484,31 +529,45 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
         path.input_per_gain,
         "mux" if path.multiplexed else "pulse",
     )
-    partition = classify_readout(template, drive, memo, time_base=time_base)
-    cavity_drives = partition.cavity_drives
-    terminal_template = replace(template, events=partition.terminal_slots)
     for window in template.readouts:
         if window.channel not in receivers:
             raise ValueError(f"unbound FTF receiver {window.channel}")
-    end_ns = np.max(
-        [
-            np.where(e.active, time_base.ns(e.start_ticks), -np.inf)
-            for e in partition.terminal_slots
-        ],
-        axis=0,
+    partition = classify_readout(
+        template,
+        drive,
+        memo,
+        time_base=time_base,
+        receiver_delays_ns={ch: adc.time_of_flight_ns for ch, adc in receivers.items()},
+        allow_receiver_only=not path.multiplexed,
     )
+    cavity_drives = partition.cavity_drives
     if any(partition.projective_reads):
+        end_ns = np.max(
+            [
+                np.where(e.active, time_base.ns(e.start_ticks), -np.inf)
+                for e in partition.terminal_slots
+            ],
+            axis=0,
+        )
         event_contents, reference_frequency_ghz = _projective_contents(
-            template, drive, memo, time_base
+            template, drive, memo, time_base, partition
         )
     else:
+        terminal_template = replace(template, events=partition.terminal_slots)
         contents = tuple(
             readout_contents(
-                terminal_template, drive, window, memo, time_base=time_base
+                terminal_template,
+                drive,
+                window,
+                memo,
+                time_base=time_base,
+                allow_receiver_only=not path.multiplexed,
             )
             for window in template.readouts
         )
-        reference_frequency_ghz = contents[0].pulses[0][0].frequency_ghz
+        end_ns = contents[0].end_ns
+        first_pulses = contents[0].pulses[0]
+        reference_frequency_ghz = first_pulses[0].frequency_ghz if first_pulses else 0.0
         event_contents = tuple(
             map_readout_events((content,), reference_frequency_ghz)
             for content in contents
@@ -520,9 +579,10 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     joint, source, physical = facts.joint, facts.source, facts.readout
     readouts = []
     for window, content in zip(template.readouts, event_contents, strict=True):
+        adc = receivers[window.channel]
+        _reject_omitted_arrivals(partition, content, adc, drive.gen_ch)
         if path.multiplexed:
             content = _mux_channel_contents(content, soccfg, window.channel)
-        adc = receivers[window.channel]
         dt = time_base.ns(window.sample_period_ticks)
         receiver = Receiver(
             adc.gain,

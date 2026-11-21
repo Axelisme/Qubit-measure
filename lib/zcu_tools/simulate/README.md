@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-18, dissipative DC propagation and channel pricing
+**Last updated:** 2026-11-21, ADC frequency images
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -231,6 +231,9 @@ resonator's `mismatch_phase_rad` defaulting to zero. This retains correlations b
 state and field. Substituting a population-averaged frequency does not implement
 this model. Each pulse has finite support, so the same equations cover ringup
 and ringdown. `SampleGrid` supplies physical lookback times and demodulation.
+The grid carries either an explicit physical frequency image or a raw DDS
+congruence. Only the raw variant folds the signed detuning around the model's
+reference frequency.
 Populations refer to the earliest readout pulse start, or zero with no pulses.
 Earlier samples have zero physical field and do not advance the initial mixture.
 Receiver offset and noise still apply to those samples.

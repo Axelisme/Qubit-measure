@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-21，host／FPGA sweep 的 gain 驗證時機
+**Last updated:** 2026-11-21，tProc 記憶體、ADC 頻率解碼與 host／FPGA gain 驗證時機
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -142,7 +142,7 @@ Tests 自備 [`tests/program/profiles/`](../../../../tests/program/profiles/)。
 欄位與數值由各 YAML 擁有，測試的 fixture 與替身慣例見 [tests README](../../../../tests/README.md#qick-編譯-fixture)。
 
 `pfb_channel(soccfg, ro_ch, frequency_mhz)` 透過 QICK 公開 readout 計算解析絕對物理頻率，使用該 ADC 的 PFB 時脈與 channelization。
-Caller 不另做 folding 或 rounding。明確的 `(gen_ch, ro_ch)` 接線屬於 `SimulationSoc`，使用未接線 channel 會失敗。
+Caller 不另做 folding 或 rounding。`SimulationSoc` 的 `routes` 宣告 `(gen_ch, ro_ch)` 接線，`drive_generators` 宣告不接 ADC 也能發射 pulse 的 DAC；使用未宣告的 DAC 或未接線的 ADC 路由會失敗。
 白噪音環境另接受 `routes="all"`，將每個 generator 接到每個 ADC。
 Request、數值契約與環境組裝見 [simulation](simulation/README.md)，startup 與 YAML 入口見 [simulation environments](../../../../zcu_lab/simulation_envs/README.md)。
 
@@ -239,7 +239,8 @@ Pass 行為速查見 [simulation](simulation/README.md#ir-pass-behavior)。
 它們不修改 cfg，也不使用 waveform、gain 或 readout window。`readout_freq_words` 編碼仍明確接收上述四項設定。
 `generator_frequencies_from_words` 接收已取整的物理 mixer 頻率與 generator channel，不建立 readout cfg。
 `readout_frequencies_from_words` 接收已宣告 ADC 與同 shape 的物理 reference array，選最近 ADC-DDS image。
-Compiled request builder 從實際輸出效果提供 references，cfg-based API 委派給相同 word decoder。
+Compiled request builder 用 trigger 起點生效的具名 ADC config 供應頻率 reference，不用 carrier。
+沒有具名來源的 raw word 解成 folded baseband，並標記 DDS 週期。Cfg-based API 仍委派給相同 word decoder。
 
 ## Macro 層
 

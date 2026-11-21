@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-20，Schedule 建構範例
+**Last updated:** 2026-11-21，讀出 block 到達時間、頻率語意與 receiver-only event
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -84,13 +84,22 @@ same support, carrier-phase and envelope semantics across the three environments
 reads and untriggered cavity drives at each point. Projective reads group the
 coherent tones and bound receiver triggers at one projection time. A block owns
 triggers from its start until the next block start, including ringdown after
-pulse end. Nonterminal sampling must finish strictly before the next block.
+pulse end. By default, nonterminal sampling must finish before the next block
+starts. When the environment supplies receiver flight times, the planner includes
+later pulses that reach a receiver by its last sample in that receiver's event.
 `ReadoutPartition.terminal_pulses` retains terminal tones even when no ADC observes
 them. Projective block counts and each ADC's per-event grid counts must match
 across points; classification rejects differences with the point and counts.
 `read_event_contents` detaches and deduplicates each trigger's own pulse/grid
 contents. `readout_contents` retains the terminal-only planning contract.
-`logical_event_contents` retains chronological physical events and each grid's
+Callers can opt in to `allow_receiver_only` on `classify_readout` and
+`readout_contents`. If the selected generator has no active pulses at any point,
+classification returns no pulse blocks and contents retain the bound ADC grids
+with empty pulses. Each point's first trigger supplies its endpoint. Missing
+terminal pulses at only some points still raise `ValueError`.
+Both content functions preserve each trigger's supplied frequency image in the sample grid and
+keep otherwise identical grids separate when their image semantics differ.
+The planner does not select a demodulation image. `logical_event_contents` retains chronological physical events and each grid's
 original channel-local trigger column. `map_readout_events` localizes phases,
 expands point/event contents and supplies the per-content output permutation.
 Single and FTF share this mapping; six uses single's preparation interface.

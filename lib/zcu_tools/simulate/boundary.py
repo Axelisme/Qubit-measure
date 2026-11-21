@@ -13,10 +13,10 @@ remaining field layouts and contents against the request.
 """
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from math import gcd, isfinite, lcm, prod
-from typing import Literal, Protocol, overload
+from typing import Literal, Protocol, Self, overload
 
 import numpy as np
 from numpy.typing import NDArray
@@ -335,6 +335,29 @@ class PulseEvent:
 
 
 @dataclass(frozen=True)
+class ExplicitImage:
+    """A physical demodulation frequency specified by a named ADC config."""
+
+
+@dataclass(frozen=True)
+class DDSCongruence:
+    """A raw demodulation frequency, equivalent modulo period_ghz.
+
+    period_ghz: Positive finite DDS repetition frequency in cycles/ns, taken
+        from the same ADC DDS used to decode the raw word.
+    """
+
+    period_ghz: float
+
+    def __post_init__(self) -> None:
+        if not isfinite(self.period_ghz) or self.period_ghz <= 0:
+            raise ValueError("DDS period in GHz must be finite and positive")
+
+
+FrequencyImage = ExplicitImage | DDSCongruence
+
+
+@dataclass(frozen=True)
 class ReadoutWindow:
     """One ADC's fixed sample grid and read triggers for each execution.
 
@@ -358,6 +381,9 @@ class ReadoutWindow:
             trigger_ticks. Empty in shape-only records, whose gen_ch is the fallback.
             PointTimeline windows populate this even when all reads use one route.
             gen_ch retains the final route for the fixed ADC shape descriptor.
+        frequency_images: Frequency meaning per trigger in emission order.
+            A single ExplicitImage applies to all reads. Otherwise the tuple
+            must contain one image per trigger.
     """
 
     channel: int
@@ -368,6 +394,7 @@ class ReadoutWindow:
     frequency_mhz: tuple[float, ...] = ()
     phase_deg: tuple[float, ...] = ()
     generator_channels: tuple[int, ...] = ()
+    frequency_images: ExplicitImage | tuple[FrequencyImage, ...] = ExplicitImage()
 
     @property
     def reads(self) -> int:
@@ -452,6 +479,9 @@ class ReadoutSlot:
     frequency_mhz: Demodulation frequency per trigger.
     phase_deg: Demodulation phase per trigger, relative to execution zero.
     generator_channels: int64 generator route per trigger.
+    frequency_images: Meaning of each frequency in (points, reads) order.
+        A single ExplicitImage applies to every trigger. Otherwise the outer
+        tuple has one row per point and each row has one image per read.
     """
 
     channel: int
@@ -461,6 +491,64 @@ class ReadoutSlot:
     frequency_mhz: NDArray[np.float64]
     phase_deg: NDArray[np.float64]
     generator_channels: NDArray[np.int64]
+    frequency_images: ExplicitImage | tuple[tuple[FrequencyImage, ...], ...] = (
+        ExplicitImage()
+    )
+
+    def frequency_images_at(self, point: int) -> tuple[FrequencyImage, ...]:
+        """Return the frequency meaning for each trigger in one local point row."""
+        if isinstance(self.frequency_images, ExplicitImage):
+            return (self.frequency_images,) * self.trigger_ticks.shape[1]
+        return self.frequency_images[point]
+
+    def window_at(self, point: int, *, gen_ch: int) -> ReadoutWindow:
+        """Detach one local point row, using gen_ch for the fixed route field.
+
+        The returned window retains each trigger's actual route and frequency
+        meaning. Invalid point indices raise IndexError.
+        """
+        images = self.frequency_images
+        return ReadoutWindow(
+            channel=self.channel,
+            gen_ch=gen_ch,
+            samples=self.samples,
+            sample_period_ticks=self.sample_period_ticks,
+            trigger_ticks=tuple(int(x) for x in self.trigger_ticks[point]),
+            frequency_mhz=tuple(float(x) for x in self.frequency_mhz[point]),
+            phase_deg=tuple(float(x) for x in self.phase_deg[point]),
+            generator_channels=tuple(int(x) for x in self.generator_channels[point]),
+            frequency_images=images[point] if isinstance(images, tuple) else images,
+        )
+
+    def subset(
+        self,
+        *,
+        points: slice | NDArray[np.int64] = slice(None),
+        reads: slice = slice(None),
+    ) -> Self:
+        """Select local point rows and trigger columns without dropping axes.
+
+        points is a slice or one-dimensional int64 row index; reads is a slice
+        of trigger columns. The returned slot retains receiver and sample spacing,
+        and selects all arrays and frequency meanings in the same order.
+        Invalid indices raise IndexError.
+        """
+        images = self.frequency_images
+        if isinstance(images, tuple):
+            selected = (
+                images[points]
+                if isinstance(points, slice)
+                else tuple(images[i] for i in points)
+            )
+            images = tuple(row[reads] for row in selected)
+        return replace(
+            self,
+            trigger_ticks=self.trigger_ticks[points, reads],
+            frequency_mhz=self.frequency_mhz[points, reads],
+            phase_deg=self.phase_deg[points, reads],
+            generator_channels=self.generator_channels[points, reads],
+            frequency_images=images,
+        )
 
 
 @dataclass(frozen=True)
@@ -486,7 +574,7 @@ def _check_tick_scalar(ticks: int) -> None:
     _check_int64(int(ticks))
 
 
-def _validate_window_times(base: TimeBase, window: ReadoutWindow) -> None:
+def _validate_window_layout(base: TimeBase, window: ReadoutWindow) -> None:
     base.validate_ticks(window.sample_period_ticks)
     if window.sample_period_ticks <= 0:
         raise ValueError("ADC sample period must be positive")
@@ -495,9 +583,12 @@ def _validate_window_times(base: TimeBase, window: ReadoutWindow) -> None:
     for start in window.trigger_ticks:
         base.validate_ticks(start)
         base.validate_ticks(int(start) + duration)
+    images = window.frequency_images
+    if isinstance(images, tuple) and len(images) != window.reads:
+        raise ValueError("window frequency_images must contain one image per trigger")
 
 
-def _validate_template_times(base: TimeBase, template: TimelineTemplate) -> None:
+def _validate_template_layout(base: TimeBase, template: TimelineTemplate) -> None:
     size = len(template.points)
     base.validate_ticks(template.duration_ticks)
     if template.duration_ticks.shape != (size,):
@@ -527,6 +618,12 @@ def _validate_template_times(base: TimeBase, template: TimelineTemplate) -> None
         if readout.trigger_ticks.ndim != 2 or readout.trigger_ticks.shape[0] != size:
             raise ValueError("trigger time shape must be (points, reads)")
         base.validate_ticks(readout.trigger_ticks + duration)
+        images = readout.frequency_images
+        if isinstance(images, tuple) and (
+            len(images) != size
+            or any(len(row) != readout.trigger_ticks.shape[1] for row in images)
+        ):
+            raise ValueError("slot frequency_images shape must be (points, reads)")
 
 
 @dataclass(frozen=True)
@@ -587,8 +684,8 @@ class AcquireRequest:
     root_seed, sequence and rng_version are private sampling metadata, not
     normal GUI/MCP metadata.
     Construction rejects noninteger scalar/array times with TypeError, time
-    array shape mismatches, empty templates, negative body durations or
-    nonpositive sample periods with ValueError, and
+    array or frequency image shape mismatches, empty templates, negative body
+    durations or nonpositive sample periods with ValueError, and
     times or derived event/ADC/envelope ends outside TimeBase bounds with
     OverflowError. Arrays are borrowed and must not be mutated during use.
     """
@@ -621,9 +718,9 @@ class AcquireRequest:
         if self.relax_delay_ticks < 0:
             raise ValueError("relax delay must be nonnegative")
         for window in self.readouts:
-            _validate_window_times(self.time_base, window)
+            _validate_window_layout(self.time_base, window)
         for template in self.templates:
-            _validate_template_times(self.time_base, template)
+            _validate_template_layout(self.time_base, template)
 
     def materialize_point(self, point: int) -> PointTimeline:
         """Expand a flat C-order point into detached diagnostic controls.
@@ -665,20 +762,7 @@ class AcquireRequest:
                 )
                 routes = {window.channel: window.gen_ch for window in self.readouts}
                 readouts = tuple(
-                    ReadoutWindow(
-                        channel=slot.channel,
-                        gen_ch=routes[slot.channel],
-                        samples=slot.samples,
-                        sample_period_ticks=slot.sample_period_ticks,
-                        trigger_ticks=tuple(int(x) for x in slot.trigger_ticks[local]),
-                        frequency_mhz=tuple(
-                            float(x) for x in slot.frequency_mhz[local]
-                        ),
-                        phase_deg=tuple(float(x) for x in slot.phase_deg[local]),
-                        generator_channels=tuple(
-                            int(x) for x in slot.generator_channels[local]
-                        ),
-                    )
+                    slot.window_at(local, gen_ch=routes[slot.channel])
                     for slot in template.readouts
                 )
                 return PointTimeline(

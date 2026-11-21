@@ -812,13 +812,6 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay(ro_leng
         modules=[cfg.build("readout")],
         reps=1,
     )
-    if ro_length == 0.1:
-        with pytest.raises(
-            ValueError, match=r"ADC 0 read 0.*no pulse carrier in acquisition window"
-        ):
-            prog.acquire(env.soc, progress=False)
-        assert not env.soc.binding.rounds
-        return
     prog.acquire(env.soc, progress=False)
     request = env.soc.binding.last_request
     expected_trigger = prog.cycles2us(prog.us2cycles(0.25))

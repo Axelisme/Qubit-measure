@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, exact cavity span reuse
+**Last updated:** 2026-11-21, ADC readout timing and cross-block cavity-field limit
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -428,12 +428,15 @@ It converts QICK ticks/MHz/degrees into ns/GHz/radians with point arrays.
 sample grids. Preparation keys include the clock. It preserves signed gains, complex sampled envelopes and the common
 carrier origin for evolution. Readout converts the program's common-origin
 phase to ADC's pulse-local phase by subtracting
-`2*pi*(f-f_ref)*pulse_start_ns`, with frequencies in GHz. The model reference
-is the first carrier; that carrier's phase stays unchanged. The existing
+`2*pi*(f-f_ref)*pulse_start_ns`, with frequencies in GHz. When pulses are
+present, the first terminal carrier sets the model reference and its phase
+stays unchanged. The existing
 `phase_reference_ticks` contribution, converted through `TimeBase.ns`, stays part of the common-origin phase.
-ADC demodulation keeps its absolute-time grid. An isolated addressed carrier's
-conditional IQ center is therefore invariant under a common pulse/grid time
-shift. Mux ADCs select incident carriers by the supplied board's PFB channel
+ADC demodulation keeps its absolute-time grid and phase at shot time zero.
+Named configs, including static PFB configs, retain their physical frequency
+image. Only raw DDS words demodulate at the image nearest the shared reference.
+An isolated addressed carrier's conditional IQ center is invariant under a
+common pulse/grid time shift. Mux ADCs select incident carriers by the supplied board's PFB channel
 before demodulation. The caller's board YAML determines Nyquist folding,
 PFBv4 channel spacing, offset and passband. Changing its ADC clock ratios or
 decimation changes carrier selection.
@@ -446,7 +449,9 @@ in the same channel still superpose, so their finite-window leakage can depend
 on readout start. This ideal selection does not model FIR response, filter
 transients or anti-alias filtering. Pulse supports use absolute nearest-2-ns rounding, ties even.
 The model owner supplies a round-DC `ModelSource`. Charge and small-signal flux
-controls evolve every template to readout start. Each drive line selects full charge n or the derivative of the existing
+controls evolve to the terminal pulse start, or to the receiver's first trigger
+when the template has no active readout pulse. Each drive line selects full
+charge n or the derivative of the existing
 fixed-coordinate Hamiltonian at that round's DC point. Omitted operator means
 charge. Charge calibration uses GHz/gain; flux calibration uses Phi0/gain and
 multiplies the derivative in GHz/Phi0. Signed complex crosstalk uses
@@ -483,7 +488,7 @@ Bath levels round midpoint offsets from that DC to integer multiples of
 1e-3 Phi0, ties even. Offsets smaller than 5e-4 Phi0 snap to DC. Equal adjacent
 levels merge. Filtering retains tails until their conservative absolute sum is
 below 5e-4 Phi0 per loop, then appends DC. Signed cancellation does not shorten
-that bound. Evolution stops at terminal readout start even if a tail continues.
+that bound. Evolution stops at the readout endpoint even if a tail continues.
 The terminal ADC model always uses the snapshot DC, including when the pulse
 has not settled. Sequences that need DC readout must allow settling first.
 
@@ -546,9 +551,12 @@ large-excursion device accuracy.
 At each point, the latest active readout-channel block is terminal. The planner
 classifies earlier blocks with ADC triggers as projective reads and earlier blocks
 without triggers as cavity drives. A block owns triggers from its start until the
-next block starts, including ringdown after pulse end. Earlier pulses may end at
-the next start, but their last ADC sample must be strictly earlier. A crossing
-sample window raises `ValueError` naming the block and trigger.
+next block starts, including ringdown after pulse end. A sampling window may
+extend past the next block's emission start. The planner adds each receiver's
+flight time to the later block's start. A later pulse that arrives by the last
+sample contributes coherently to that ADC event. The timeline compiler still
+rejects overlapping windows for successive timeline triggers on the same ADC
+([ADR-0083](../../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)).
 
 `FTFTemplatePlan.projective_reads` retains each point's ordered projection times,
 incident pulses and bound triggers. The numeric batch includes projection starts
@@ -669,22 +677,27 @@ reported validation rule. FTF catches only that type, retains its count in
 preparations retain zero rejected rows. The source retains the latest
 evolve diagnostics even when this preparation fails, including the engine's
 report-only maximum trace error. Raw evolution densities remain unchanged.
-It ignores drive-line controls at or after the terminal readout start. Earlier
-control portions, including controls after a herald, still evolve normally. Pulse readout requires exactly one active terminal incident pulse per
-point, including mutually exclusive slots. Mux readout permits 1..8 coherent incident tones with
-a common pulse start. Each mux ADC observes only the shared-line carriers in its
-PFB channel through its own demodulation, calibration, delay and sample grid.
-An observed channel with no in-channel carrier still emits its read columns.
-Its empty pulse event produces the existing receiver background offset and noise,
-without CTMC or cavity propagation. No new noise parameters are introduced.
-The rotating reference is chosen from the first terminal carrier before selection
-and stays common to every ADC. Logical events select independently when an ADC
-retunes between reads. Multiple grids within one event must address the same PFB
-channel; planning raises `ValueError` if they span different channels.
-The physical resonator pair
-is unchanged; tones are not assigned to individual resonators. Controls evolve
-to the common terminal readout start only. Multiple terminal readout blocks are
-not supported.
+Drive-line controls evolve up to the terminal pulse start, including earlier
+control portions after a herald. With active pulses, the pulse path requires
+exactly one terminal pulse per point, including mutually exclusive slots. If
+its readout generator has no active pulse anywhere in the template, the bound
+ADC's first trigger sets the evolution endpoint at each point. This path uses
+the neutral 0 GHz model reference and retains the ADC grids without creating a
+carrier. Missing terminal pulses at only some points still raise `ValueError`.
+
+Mux readout permits 1..8 coherent incident tones with a common pulse start.
+Each mux ADC observes only the shared-line carriers in its PFB channel through
+its own demodulation, calibration, delay and sample grid. The first terminal
+carrier before PFB selection sets the rotating reference for every ADC. Logical
+events select independently when an ADC retunes between reads. Multiple grids
+within one event must address the same PFB channel; planning raises `ValueError`
+if they span different channels. The tones are not assigned to individual
+resonators. Multiple terminal readout blocks are not supported.
+
+Both an observed mux channel with no in-channel carrier and a receiver-only
+pulse-path event retain their read columns. With no incident field, the ADC
+emits only the receiver's configured offset and noise, without CTMC or cavity
+propagation.
 Constant readout envelope values
 fold into amplitude with `envelope=None`, enabling the exact field solution.
 Nonconstant samples become ADC `PiecewiseLinearEnvelope` inputs without changing
@@ -706,23 +719,39 @@ adapts the single `readout.adc` object and optional `readout.mux` section withou
 changing calibrations. Omitting mux disables only that path. The removed
 `readout.drive.kind` field raises a field-path error at YAML loading. Generator
 and receiver indices are nonnegative integers with no fixed upper bound.
-Active event generators select the pulse or mux path. Each readout window must
-use a receiver and generator from that path. `FTFSource.open_acquire` rejects
+Active readout generators select the pulse or mux path. With neither active,
+the planner uses the pulse path. Each readout window must use a receiver and
+generator from that path. `FTFSource.open_acquire` rejects
 pulse and mux generators anywhere in one request's templates and names both
 indices. Standalone `plan_template` rejects mixing within its template too.
 Separate acquires can select different paths in the same environment.
 The caller supplies the board profile independently of model wiring. Runtime
 uses that profile without inferring channel counts or selecting a mock profile;
-the environment routes include both configured readout paths and all drive lines.
+only the configured pulse and mux readout paths route to ADCs, while drive and fast-flux lines are declared as DACs only.
 `plan_template` and `FTFSource` accept an explicit `readout=` override. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
-Each batch retains the same chronological logical-event axis. An event contains
-only its own incident pulse block and that ADC's observed grids. Empty grids mean
-that ADC does not observe the event and emits no read column. All ADCs may omit
+Each batch retains the same chronological logical-event axis. An event retains
+that ADC's observed grids. FTF pairs triggers with pulse blocks by emission
+start, not arrival time. An event holds the block's incident pulses and any later
+pulses that reach that receiver by its last sample. If an omitted pulse's emission
+interval shifted by the receiver's flight time overlaps the window's sampling
+interval, planning raises `ValueError` before returning IQ. The error names the
+ADC, window, generator and emission time.
+
+Separately, the event does not inherit the cavity field left by the previous block.
+When `post_delay` is shorter than several field decay times, the samples omit
+that earlier pulse's residual field. With the `ftf-demo/initial` fixture's R1
+κ, a single-mode estimate at `post_delay=0 µs` for a 0.99 µs window puts the
+omitted field at about 9.5% of steady-state amplitude at window start and 0.4%
+at window end. The MIST exact cavity span reuse in [Cavity drives](#cavity-drives)
+reuses moments and endpoint fields for evolution; it does not carry residual
+fields across blocks into ADC events.
+
+Empty grids mean the ADC does not observe the event or emit a read column. All ADCs may omit
 terminal observations; the terminal event and evolution endpoint remain in the
 plan. Each ADC must still observe at least one event. Projective plans retain
-point-local event contents. Templates without projective reads keep their existing
-terminal-content deduplication and rotating reference. Integrated flat,
+point-local event contents. Templates without projective reads deduplicate
+terminal contents. Integrated flat,
 common-start mux batches use ADC's carrier-wise linear sums. Each carrier keeps
 the guarded direct-sum or constant-field/full-exponential route. Delay, mismatch,
 ringdown and per-receiver offset remain part of ADC's response contract. Shaped

@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-21, exact cavity span results
+**Last updated:** 2026-11-21, per-trigger demodulation images and exact cavity span results
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -88,6 +88,13 @@ ADC. Evolution retains its raw densities and reports trace drift separately.
 conjugate the demodulated physical field before receiver gain, phase, offset and
 noise. Receiver calibration does not conjugate or rotate the added noise's I/Q
 covariance. Constant and shaped pulses use the same convention.
+
+A `SampleGrid` with an `ExplicitImage` uses the signed detuning
+`f_demod − f_ref` unchanged. A grid with a raw `DDSCongruence` folds that
+detuning to `[-f_dds/2, f_dds/2)` using the supplied DDS frequency before
+multiplying by absolute shot time. Both use the same phase at time zero.
+In a multi-tone model, a raw word selects the image nearest the shared
+reference. Use a named ADC config to specify a different image.
 
 `Receiver.background(f)` supplies a fixed complex transmission background at
 each incident carrier's absolute frequency `f` in GHz:

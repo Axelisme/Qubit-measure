@@ -431,10 +431,12 @@ def test_lru_budget_close_and_failed_preparation_release_residents():
         builds = cache.builds
         draw(source, other)
         assert cache.builds == builds + 1, "least recently used key must be evicted"
-        invalid = replace(
-            request(), templates=(replace(request().templates[0], events=()),)
-        )
-        with pytest.raises(ValueError, match="readout"):
+        ordinary = request()
+        (first,) = ordinary.templates
+        (window,) = first.readouts
+        early = replace(window, trigger_ticks=window.trigger_ticks - 1)
+        invalid = replace(ordinary, templates=(replace(first, readouts=(early,)),))
+        with pytest.raises(ValueError, match="trigger must not precede"):
             draw(source, invalid)
         assert cache.resident_bytes == 0
         draw(source)

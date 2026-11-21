@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-20, forward jump lanes and host shot masks
+**Last updated:** 2026-11-21, ADC frequency images
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -121,11 +121,14 @@ The builder also rejects unresolved readout routes. An ADC without a wired
 generator route receives an explicit missing-route diagnostic with read and time.
 Content after the terminal self-jump is rejected, including unreachable NOPs;
 body, cleanup and loop NOPs remain supported.
-For a runtime-controlled ADC, all overlapping carriers on the selected route must
-resolve the ADC word to the same frequency image. No carrier or conflicting images
-raise before a request is returned. Static-config ADCs use the full frequency from
-the shared QICK `calc_ro_freq` adapter and do not require an overlapping carrier
-for this image resolution.
+For a runtime-controlled ADC, the configuration effective at each window start
+determines the demodulation frequency. A named config supplies its compiled
+physical frequency as the reference for decoding the DDS word. Edits and sweeps
+of a wave loaded from that config retain its named source through WMEM and
+`r_wave`. A word without such a source decodes to folded baseband
+`[-f_dds/2, f_dds/2)`. No pulse carrier is needed for frequency decoding; the
+route checks still apply. Static-config ADCs retain the full frequency from the
+shared QICK `calc_ro_freq` adapter.
 Wave writes dispatch by `(port, tmux_ch)` across the program's declared generators
 and tProc-controlled readouts. For a port with tmux selectors, conf bits 8–15
 select the registered user with `(conf >> 8) & 0xFF`. Active lanes must select the same user;
@@ -144,9 +147,10 @@ Runtime readout WPORT commands are instantaneous config updates.
 Each readout channel's FIFO uses the maximum of the command timestamp and its
 previous effective time, without
 wave duration or pipeline delays. Each read uses the last update effective at its
-window start. A different frequency or phase inside the open window raises before
-request construction; an equal update is accepted. Missing start-time config also
-raises. Shot-local configuration writes must supply every read on that port and
+window start. An update inside the open window raises before request construction
+if it changes the DDS frequency word or phase word. The comparison uses hardware
+words, not the named physical frequency image. An equal-word update is accepted.
+Missing start-time config also raises. Shot-local configuration writes must supply every read on that port and
 drain before the next shot. A port configured only in the prologue can remain
 constant. A read cannot use a prologue or previous-shot config once its port is
 mutable in the shot, even when later updates have equal values. Pending FIFO
@@ -414,8 +418,10 @@ must separately bind every requested route and supply any physical mux response.
 `ReadoutWindow` keeps ADC sample counts and integer sample periods independent
 of generator duration. Per-point
 windows retain trigger emission order, demodulation MHz/degrees and the generator
-association for each read. The acquire-level windows specify fixed ADC shapes;
-new consumers use template arrays for point-dependent timing/demodulation.
+association for each read. Each trigger also carries an explicit image for named
+configs, or a DDS congruence with the decoding DDS frequency for raw words.
+The acquire-level windows specify fixed ADC shapes; new consumers use template
+arrays for point-dependent timing and demodulation.
 `materialize_point` expands one detached point for diagnostics, excluding reps.
 Readout plans and environment templates convert integer tick grids to ns through
 `TimeBase.ns`; frequency conversion to GHz remains with the physical consumers.

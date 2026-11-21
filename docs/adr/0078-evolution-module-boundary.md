@@ -250,16 +250,21 @@ Sampled multitone 過渡期的速度代價照樣用 benchmark 判斷，不以「
 
 ### 模擬器不替使用者擋實驗參數
 
-實驗參數設得不好時，模擬器照常給結果。
+模擬器只拒絕實機也會拒絕的程式。
+實驗參數設得不好，或程式合法但不合理時，模擬器照常算出物理上預期的結果。
 它算不準的部分以警告說明是模擬器的限制，不因參數不當而報錯。
 
 例：projective read 改成 Markov chain 時，51 點、21 能階是合法參數，沒有被記憶體預算擋下（[Projective read 的輸出改成 Markov chain](../discussions/2026-11-17-projection-markov-chain-readout.md)）。
 例：FTF 的 cavity drive 使相鄰態能量順序反轉時，模擬照常用原色散模型計算，不重排狀態。一次 acquisition 對每組反轉的態發一次警告，列出首個受影響點及段、總點數與段數，並在固定 gain 比例與觀察到的腔場歷程下，給出 cavity drive gain 的共同縮放上限。超過上限的結果不在色散模型有效範圍內。見 [FTF cavity drives](../../lib/zcu_tools/simulators/ftf/environment/README.md#cavity-drives)。2026-11-19，使用者在「改成警告」與「保留報錯、補上限」兩案中選前者：「1cA」；比較見 [FTF cavity Stark 反轉：從報錯改成警告](../discussions/2026-11-20-ftf-stark-inversion-warning.md)。
+例：FTF 的讀出整段沒有 readout pulse、只開 ADC window 時，算出只有 receiver offset 與雜訊的空 event，不報「沒有 generator 候選」。下一個 pulse 在前一個 ADC window 內抵達時，兩個 pulse 放進同一個 event 相干相加，不拒絕。見 [FTF readout and sampling](../../lib/zcu_tools/simulators/ftf/environment/README.md#readout-and-sampling)。
 邊界：契約外的輸入（型別、範圍、維度錯）照舊在進入點 fast fail。
 數值近似的 guard 照〈先保證正確，再優化瓶頸〉不放行超標結果，因為那是算法算錯，不是參數造成的。
+模擬器還沒實作的情況同樣拒絕，不回傳缺訊號的結果。例如 FTF 以發射時間配對 ADC trigger，某個 pulse 在 window 內抵達卻不在該 window 的 event 裡時，規劃時報錯，寫明 ADC、window 與漏配的 pulse。物理上無法判定的輸入也 fast fail，例如 Six 的 raw ADC 頻率字到兩個 cavity 的同餘距離相同時。
 
 2026-11-15，使用者覆核 sideband reset 的殘餘光子檢查時說：「4我覺得有需要嗎？實驗參數設置不當就會發生的問題為什麼模擬器要擋？」對選項答「A」，即算不準也照常給結果並警告。
 原始討論未入庫。
+
+使用者 2026-11-21 定下「只拒絕實機也會拒絕的程式」這條：「模擬器要給出合法的預期結果，只要合法，不因為不合理就抱錯」。FTF 讀出的例子與在途漏配的拒絕，由 designer 依使用者授權代裁，使用者未覆核。Six 同餘距離平手的拒絕也是 designer 代裁，使用者同日覆核 raw 字的同餘機制時選擇保留。比較見[FTF 合法讀出時序](../discussions/2026-11-21-ftf-legal-readout-timing.md)。
 
 ### 模擬器不從程式內容推斷實驗類型或硬體架構
 

@@ -13,6 +13,7 @@ from zcu_tools.simulate.boundary import (
     CancellationQuery,
     RoundSignals,
     RoundStatistics,
+    TimeBase,
 )
 from zcu_tools.simulate.evolution import (
     CaptureBuffer,
@@ -20,6 +21,11 @@ from zcu_tools.simulate.evolution import (
     EvolutionResult,
     ModelSource,
     TimelineBatch,
+)
+from zcu_tools.simulators.ftf.environment import (
+    FTFReadoutConfig,
+    FTFReceiverConfig,
+    FTFTemplatePlan,
 )
 
 from tests.core._simulation import TIME_BASE, tick_array, ticks
@@ -279,6 +285,104 @@ def test_herald_plan_aligns_two_events_when_one_adc_only_observes_terminal() -> 
         assert herald_event.grids[0].phase_rad == pytest.approx(np.deg2rad(10))
 
 
+def _plan_cross_block_readout(
+    time_of_flight_ns: float, *, first_trigger_us: float = 1.110801
+) -> FTFTemplatePlan:
+    from zcu_tools.simulators.ftf.environment import plan_template
+
+    # Zero post-delay: the terminal pulse starts at the herald pulse's end.
+    time_base = TimeBase.from_clocks((1_000_000.0, 1_000.0))
+    base = template()
+    herald = replace(
+        base.events[0],
+        start_ticks=np.zeros(2, dtype=np.int64),
+        duration_ticks=np.full(2, time_base.ticks(1.2), dtype=np.int64),
+        phase_reference_ticks=0,
+    )
+    terminal = replace(
+        herald,
+        start_ticks=np.full(2, time_base.ticks(1.2), dtype=np.int64),
+        gain=np.full(2, 0.5),
+    )
+    window = replace(
+        base.readouts[0],
+        samples=200,
+        sample_period_ticks=time_base.period_ticks(1_000.0),
+        trigger_ticks=np.tile(
+            [time_base.ticks(first_trigger_us), time_base.ticks(2.310801)], (2, 1)
+        ),
+        frequency_mhz=np.full((2, 2), 6000.0),
+        phase_deg=np.zeros((2, 2)),
+        generator_channels=np.zeros((2, 2), dtype=np.int64),
+    )
+    model = settings()
+    model = model.model_copy(
+        update={
+            "readout": model.readout.model_copy(
+                update={
+                    "adc": model.readout.receivers[0].model_copy(
+                        update={"time_of_flight_ns": time_of_flight_ns}
+                    )
+                }
+            )
+        }
+    )
+    return plan_template(
+        model,
+        snapshot(),
+        replace(
+            base,
+            events=(herald, terminal),
+            readouts=(window,),
+            duration_ticks=np.full(2, time_base.ticks(2.6), dtype=np.int64),
+        ),
+        soccfg=profile_soccfg("ftf"),
+        time_base=time_base,
+    )
+
+
+def test_later_readout_pulse_arriving_after_herald_window_stays_in_its_event() -> None:
+    plan = _plan_cross_block_readout(time_of_flight_ns=387.370)
+    np.testing.assert_array_equal(plan.batch.end_ns, [1200, 1200])
+    batch = plan.readouts[0].batch
+    for content in batch.content_index:
+        herald, terminal = batch.events[content]
+        assert tuple(p.start_ns for p in herald.pulses) == (0,)
+        assert tuple(p.start_ns for p in terminal.pulses) == (1200,)
+        (herald_grid,) = herald.grids
+        (terminal_grid,) = terminal.grids
+        np.testing.assert_allclose(herald_grid.times_ns, 1110.801 + np.arange(200))
+        np.testing.assert_allclose(terminal_grid.times_ns, 2310.801 + np.arange(200))
+
+
+def test_later_readout_pulse_arriving_inside_herald_window_shares_its_event() -> None:
+    # With a shorter flight time, the same terminal emission arrives at 1300 ns,
+    # before the final herald sample at 1309.801 ns.
+    plan = _plan_cross_block_readout(time_of_flight_ns=100.0)
+    assert tuple(
+        tuple(read.start_ns for read in reads) for reads in plan.projective_reads
+    ) == (
+        (0,),
+        (0,),
+    )
+    batch = plan.readouts[0].batch
+    for content in batch.content_index:
+        herald, terminal = batch.events[content]
+        assert tuple(p.start_ns for p in herald.pulses) == (0, 1200)
+        assert terminal.pulses == herald.pulses[1:]
+        assert len(herald.grids) == len(terminal.grids) == 1
+
+
+def test_readout_rejects_an_omitted_in_flight_pulse() -> None:
+    # The first trigger follows the second emission (1200 ns), yet all samples
+    # lie in the first pulse's arrival interval (387.370 to 1587.370 ns).
+    with pytest.raises(
+        ValueError,
+        match=r"ADC 0 window 0.*gen 0.*0 ns.*pairs triggers by emission time",
+    ):
+        _plan_cross_block_readout(time_of_flight_ns=387.370, first_trigger_us=1.27906)
+
+
 def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
     from zcu_tools.simulators.ftf.environment import plan_template
 
@@ -311,7 +415,7 @@ def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
 
 
 @pytest.mark.parametrize("trigger_ticks", [ticks(0.008) - 1, 0])
-def test_readout_rejects_trigger_without_an_incident_pulse_window(
+def test_readout_rejects_trigger_before_an_active_pulse_block(
     trigger_ticks,
 ) -> None:
     from zcu_tools.simulators.ftf import environment as ftf
@@ -325,6 +429,23 @@ def test_readout_rejects_trigger_without_an_incident_pulse_window(
             settings(),
             snapshot(),
             replace(base, readouts=(window,)),
+            soccfg=profile_soccfg("ftf"),
+            time_base=TIME_BASE,
+        )
+
+
+def test_readout_rejects_missing_pulse_at_only_some_points() -> None:
+    from zcu_tools.simulators.ftf import environment as ftf
+
+    base = template()
+    pulse = replace(base.events[0], active=np.array([False, True]))
+    with pytest.raises(
+        ValueError, match="requires one terminal readout pulse per point"
+    ):
+        ftf.plan_template(
+            settings(),
+            snapshot(),
+            replace(base, events=(pulse,)),
             soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
@@ -444,6 +565,75 @@ class ResidualEngine(Engine):
         points = np.concatenate([batch.points for batch in batches])
         densities = np.repeat(np.diag(self.populations)[None], len(points), axis=0)
         return EvolutionResult(points, densities, PathDiagnostics())
+
+
+@pytest.mark.parametrize("inactive_slot", [False, True])
+def test_pulseless_readout_samples_only_receiver_offset_and_noise(
+    inactive_slot: bool,
+) -> None:
+    from zcu_tools.simulators.ftf import environment as ftf
+
+    base = template(tones=1)
+    control, readout = base.events
+    events = (control,)
+    if inactive_slot:
+        events += (replace(readout, active=np.zeros(2, dtype=bool)),)
+    pulseless = replace(base, events=events)
+    offset = (11.0, -7.0)
+    noise_psd = ((4.0, 0.5), (0.5, 2.0)) if inactive_slot else ((0.0, 0.0), (0.0, 0.0))
+    config = FTFReadoutConfig(
+        FTFReceiverConfig(
+            0,
+            1000.0,
+            noise_psd,
+            offset_adc=offset,
+            ripple_period_mhz=1000.0,
+            pivot_ghz=0.0,
+        )
+    )
+    numeric = settings()
+    dc = snapshot()
+    soccfg = profile_soccfg("ftf")
+    plan = ftf.plan_template(
+        numeric, dc, pulseless, soccfg=soccfg, time_base=TIME_BASE, readout=config
+    )
+    assert len(plan.batch.tracks) == 1
+    np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
+    (receiver,) = plan.readouts
+    assert receiver.channel == 0
+    assert receiver.batch.model.reference_frequency_ghz == 0.0
+    for point, index in enumerate(receiver.batch.content_index):
+        (event,) = receiver.batch.events[index]
+        assert event.pulses == ()
+        (grid,) = event.grids
+        np.testing.assert_array_equal(grid.times_ns, np.arange(8, 12) + 2 * point)
+        assert grid.demodulation_frequency_ghz == 6.0
+
+    source = ftf.FTFSource(
+        numeric,
+        DeviceManager(),
+        soccfg=soccfg,
+        engine=ResidualEngine([0.25, 0.75]),
+        readout=config,
+    )
+    acquire = replace(request("decimated", templates=(pulseless,)), reps=2048)
+    try:
+        result = source.open_acquire(acquire).sample_round(dc, 0)
+        assert isinstance(result, RoundSignals)
+        (channel,) = result.channels
+        assert channel.channel == 0
+        assert channel.iq.shape == (2 * acquire.reps, 1, 4, 2)
+        observations = channel.iq.reshape(-1, 2)
+        if inactive_slot:
+            # This fixture's sample period is 1 ns; its sample covariance equals the PSD.
+            np.testing.assert_allclose(observations.mean(axis=0), offset, atol=0.09)
+            np.testing.assert_allclose(np.cov(observations.T), noise_psd, atol=0.2)
+        else:
+            np.testing.assert_array_equal(
+                observations, np.broadcast_to(offset, observations.shape)
+            )
+    finally:
+        source.close()
 
 
 @pytest.mark.parametrize(

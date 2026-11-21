@@ -1072,7 +1072,7 @@ def _routing_telemetry(settings: FTFSettings) -> RoutingTelemetry | None:
 
 
 def _flux_generator_channels(settings: FTFSettings) -> tuple[int, ...]:
-    """Collect declared fast-flux generators for mock firmware capacity/routes."""
+    """Collect declared fast-flux generators for DAC admission."""
     return tuple(
         line.gen_ch
         for line in (
@@ -1101,10 +1101,12 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
     returned manager owns cleanup; builder failures close all devices and preserve
     both original and cleanup errors. soccfg is the required QICK compile profile,
     built by the caller from independent board YAML. It must include all configured
-    drive/flux channels, pulse readout and optional mux/PFB routes. No channel
-    counts or board settings are inferred from physical wiring. The same soccfg
-    supplies the SoC and numeric PFB carrier selection. One environment supports
-    separate pulse and mux acquires without reconfiguration. Host receives no model truth.
+    drive/flux channels, pulse readout and optional mux/PFB routes. The settings
+    bind each ADC to its readout generator and list drive/flux DACs separately.
+    No channel counts or board settings are inferred from physical wiring.
+    The same soccfg supplies the SoC and numeric PFB carrier selection. One
+    environment supports separate pulse and mux acquires without reconfiguration.
+    The host receives no model truth.
     acquisition selects the optional clock and drift truth log. One engine
     persists across acquires, using workers (default 1) as its sole parallel width.
     Worker threads live only during multi-timeline evolve; dropping the environment
@@ -1178,16 +1180,14 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
             acquisition=replace(options, clock=sim_clock),
             telemetry=telemetry,
         )
-        readout = coordinator.readout
-        mux = readout.mux
-        gens = (
-            settings.readout.drive.gen_ch,
-            *(s.gen_ch for s in settings.drive_lines.values()),
-            *_flux_generator_channels(settings),
-            *((mux.gen_ch,) if mux is not None else ()),
+        # ADR-0072: the environment declares the model's physical wiring.
+        readout = settings.readout
+        routes: tuple[tuple[int, int], ...] = (
+            (readout.drive.gen_ch, readout.adc.ro_ch),
         )
-        mux_receivers = () if mux is None else tuple(r.ro_ch for r in mux.receivers)
-        receivers = (readout.pulse.ro_ch, *mux_receivers)
+        mux = readout.mux
+        if mux is not None:
+            routes += tuple((mux.gen_ch, adc.ro_ch) for adc in mux.adc)
         from zcu_tools.simulators.ftf.environment.warmup import startup_warmup
 
         preparation = (
@@ -1227,7 +1227,11 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
         soc = SimulationSoc(
             soccfg,
             binding,
-            routes=tuple((gen, ch) for gen in gens for ch in receivers),
+            routes=routes,
+            drive_generators=(
+                *(line.gen_ch for line in settings.drive_lines.values()),
+                *_flux_generator_channels(settings),
+            ),
         )
         environment = SimulationEnvironment(
             soc,

@@ -9,7 +9,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.simulate.boundary import (
+    DDSCongruence,
     EventSlot,
+    ExplicitImage,
+    FrequencyImage,
     PulseEnvelope,
     ReadoutSlot,
     TimeBase,
@@ -57,8 +60,10 @@ class _Config:
 
     start: IntArray
     active: BoolArray
+    words: IntArray
     frequency: NDArray[np.float64]
     phase: NDArray[np.float64]
+    raw: BoolArray
     position: int
 
 
@@ -69,6 +74,7 @@ class _Read:
     start: IntArray
     frequency: NDArray[np.float64]
     phase: NDArray[np.float64]
+    raw: BoolArray
 
 
 class Outputs:
@@ -204,24 +210,64 @@ class Outputs:
         phase_bits = int(cfg.get("b_phase", 32))
         phase = (words[:, 1] % 2**phase_bits) * 360 / 2**phase_bits
         if kind == "ro":
-            updates = self.configs.setdefault(ch, [])
-            if updates:
-                previous = np.maximum.reduce(
-                    [
-                        np.where(row.active, row.start, np.iinfo(np.int64).min)
-                        for row in updates
-                    ]
-                )
-                start = np.maximum(start, previous)
-            frequency = (words[:, 0] % 2**32).astype(np.float64)
-            updates.append(
-                _Config(start, machine.active.copy(), frequency, phase, position)
+            reference = machine.wave_reference(
+                inst.addr, wmem=inst.src == SrcKeyword.WMEM
+            )
+            raw = reference.source < 0
+            freq_words = words[:, 0] % 2**32
+            frequency = self._runtime_frequencies(
+                ch, freq_words, reference.frequency_mhz, raw
+            )
+            self._queue_readout(
+                ch,
+                _Config(
+                    start,
+                    machine.active.copy(),
+                    freq_words,
+                    frequency,
+                    phase,
+                    raw,
+                    position,
+                ),
             )
             return
         if "mux_tones" in self.prog.gen_chs[ch]:
             self._mux_wave(machine, ch, words, position, source, start)
             return
         self._ordinary_wave(machine, ch, words, position, source, start)
+
+    def _queue_readout(self, ch: int, config: _Config) -> None:
+        updates = self.configs.setdefault(ch, [])
+        if updates:
+            previous = np.maximum.reduce(
+                [
+                    np.where(row.active, row.start, np.iinfo(np.int64).min)
+                    for row in updates
+                ]
+            )
+            config = replace(config, start=np.maximum(config.start, previous))
+        updates.append(config)
+
+    def _runtime_frequencies(
+        self,
+        ch: int,
+        words: IntArray,
+        reference_mhz: NDArray[np.float64],
+        raw: BoolArray,
+    ) -> NDArray[np.float64]:
+        # Raw lanes have a zero reference: decode their folded baseband, with
+        # the positive Nyquist edge represented by the negative edge.
+        frequency = readout_frequencies_from_words(
+            self.prog.soccfg,
+            words,
+            ro_ch=ch,
+            reference_freq_mhz=reference_mhz,
+            flip_downconversion=self.prog.FLIP_DOWNCONVERSION,
+        )
+        half_period = float(self.prog.soccfg["readouts"][ch]["f_dds"]) / 2
+        return np.where(
+            raw & (frequency >= half_period), frequency - 2 * half_period, frequency
+        )
 
     def _ordinary_wave(
         self,
@@ -452,6 +498,7 @@ class Outputs:
                         np.zeros(self.size, dtype=np.int64),
                         np.zeros(self.size, dtype=np.float64),
                         np.zeros(self.size, dtype=np.float64),
+                        np.zeros(self.size, dtype=np.bool_),
                     )
                 )
                 self.trigger_ticks[ch].append(np.zeros(self.size, dtype=np.int64))
@@ -502,17 +549,21 @@ class Outputs:
                     self.trigger_ticks[ch][index][self.points],
                     self.prog.tproccfg["f_time"],
                 )
-                frequency = np.full(machine.size, np.nan)
-                phase = np.full(machine.size, np.nan)
+                words = np.zeros(machine.size, dtype=np.int64)
+                frequency = np.zeros(machine.size)
+                phase = np.zeros(machine.size)
+                raw = np.zeros(machine.size, dtype=np.bool_)
                 selected = np.full(machine.size, -1, dtype=np.int64)
                 rows = self.configs.get(ch, [])
                 for config_index, config in enumerate(rows):
                     active = (config.start <= start) & config.active
+                    words[active] = config.words[active]
                     frequency[active] = config.frequency[active]
                     phase[active] = config.phase[active]
+                    raw[active] = config.raw[active]
                     selected[active] = config_index
-                if np.any(np.isnan(frequency)):
-                    lane = int(np.flatnonzero(np.isnan(frequency))[0])
+                if np.any(selected < 0):
+                    lane = int(np.flatnonzero(selected < 0)[0])
                     raise ValueError(
                         f"ADC {ch} read {index} point {self.points[lane]}: no effective runtime config at window start {start[lane]}"
                     )
@@ -526,7 +577,7 @@ class Outputs:
                         f"PortWriteInst at preopt ADC {ch}: cross-shot config live-in"
                     )
                 for config in rows:
-                    changed = (config.frequency != frequency) | (config.phase != phase)
+                    changed = (config.words != words) | (config.phase != phase)
                     conflict = (
                         config.active
                         & (start < config.start)
@@ -539,11 +590,12 @@ class Outputs:
                             f"ADC {ch} read {index} window [{start[lane]}, {start[lane] + duration}): "
                             f"config effective at {config.start[lane]}, "
                             f"PortWriteInst WPORT_WR at preopt {config.position}; "
-                            f"initial=(frequency_word={frequency[lane]}, phase={phase[lane]}), "
-                            f"updated=(frequency_word={config.frequency[lane]}, phase={config.phase[lane]})"
+                            f"initial=(frequency_word={words[lane]}, phase={phase[lane]}), "
+                            f"updated=(frequency_word={config.words[lane]}, phase={config.phase[lane]})"
                         )
                 self._put(read.frequency, frequency, machine)
                 self._put(read.phase, phase, machine)
+                read.raw[self.points[machine.active]] = raw[machine.active]
 
     def validate_fifo(self, machine: Machine) -> None:
         """Reject mutable readout FIFO updates pending beyond this shot.
@@ -580,8 +632,9 @@ class Outputs:
             frequencies = np.stack([read.frequency for read in reads], axis=1)
             phases = np.stack([read.phase for read in reads], axis=1)
             routes = self._routes(ch, starts)
-            if cfg.get("tproc_ctrl") is not None:
-                frequencies = self._runtime_frequencies(ch, starts, frequencies, routes)
+            images = self._frequency_images(
+                ch, np.stack([read.raw for read in reads], axis=1)
+            )
             slots.append(
                 ReadoutSlot(
                     ch,
@@ -591,6 +644,7 @@ class Outputs:
                     frequencies,
                     phases,
                     routes,
+                    images,
                 )
             )
         return TimelineTemplate(
@@ -610,49 +664,14 @@ class Outputs:
             (self.loop_positions[name], index) for name, index in iterations
         ) + ((position, tone),)
 
-    def _runtime_frequencies(
-        self,
-        ch: int,
-        starts: IntArray,
-        frequencies: NDArray[np.float64],
-        routes: IntArray,
-    ) -> NDArray[np.float64]:
-        result = np.full(starts.shape, np.nan, dtype=np.float64)
-        first_carrier = np.zeros(starts.shape, dtype=np.float64)
-        duration = self._read_duration(ch)
-        for read in range(starts.shape[1]):
-            start = starts[:, read]
-            words = frequencies[:, read].astype(np.int64)
-            for event in self.events.values():
-                active = _overlaps_window(event, start, duration) & (
-                    event.gen_ch == routes[:, read]
-                )
-                if not np.any(active):
-                    continue
-                images = readout_frequencies_from_words(
-                    self.prog.soccfg,
-                    words,
-                    ro_ch=ch,
-                    reference_freq_mhz=event.frequency_mhz,
-                    flip_downconversion=self.prog.FLIP_DOWNCONVERSION,
-                )
-                conflict = (
-                    active & np.isfinite(result[:, read]) & (result[:, read] != images)
-                )
-                if np.any(conflict):
-                    point = int(np.flatnonzero(conflict)[0])
-                    raise ValueError(
-                        f"ADC {ch} read {read} point {point}: carriers={[first_carrier[point, read], event.frequency_mhz[point]]}, images={[result[point, read], images[point]]}"
-                    )
-                result[active, read] = images[active]
-                first_carrier[active, read] = event.frequency_mhz[active]
-            missing = ~np.isfinite(result[:, read])
-            if np.any(missing):
-                point = int(np.flatnonzero(missing)[0])
-                raise ValueError(
-                    f"ADC {ch} read {read} point {point}: no pulse carrier in acquisition window [{start[point]}, {start[point] + duration})"
-                )
-        return result
+    def _frequency_images(
+        self, ch: int, raw: BoolArray
+    ) -> ExplicitImage | tuple[tuple[FrequencyImage, ...], ...]:
+        explicit = ExplicitImage()
+        if not np.any(raw):
+            return explicit
+        dds = DDSCongruence(float(self.prog.soccfg["readouts"][ch]["f_dds"]) / 1000)
+        return tuple(tuple(dds if value else explicit for value in row) for row in raw)
 
     def _routes(self, ch: int, times: IntArray) -> IntArray:
         wired = sorted({gen for gen, adc in self.routes if adc == ch})

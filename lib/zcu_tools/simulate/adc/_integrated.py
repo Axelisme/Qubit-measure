@@ -234,10 +234,7 @@ class IntegratedLine:
         nu = (
             2
             * np.pi
-            * (
-                np.array([g.demodulation_frequency_ghz for g in grids])
-                - model.reference_frequency_ghz
-            )
+            * np.array([g.detuning_ghz(model.reference_frequency_ghz) for g in grids])
         )
         result = np.zeros((len(omega), len(self._q)), dtype=np.complex128)
         active = elapsed[(elapsed >= 0) & (elapsed < duration)]
@@ -317,11 +314,7 @@ class IntegratedLine:
         delay = receiver.time_of_flight_ns
         elapsed = times - delay - pulse.start_ns
         duration = pulse.end_ns - pulse.start_ns
-        nu = (
-            2
-            * np.pi
-            * (grid.demodulation_frequency_ghz - model.reference_frequency_ghz)
-        )
+        nu = 2 * np.pi * grid.detuning_ghz(model.reference_frequency_ghz)
         phase = np.exp(1j * nu * (delay + pulse.start_ns) - 1j * grid.phase_rad)
         summed = np.zeros(len(self._q), dtype=np.complex128)
         active = elapsed[(elapsed >= 0) & (elapsed < duration)]
