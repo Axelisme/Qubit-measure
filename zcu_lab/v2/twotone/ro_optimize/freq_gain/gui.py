@@ -87,6 +87,13 @@ def _RoOptFreqGain_make_form(ctx: FormContext) -> Form[FreqGainCfg]:
     return make_form(ctx)
 
 
+def _summary_lines(source: RoOptFreqGainRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 def _run(
     cfg: FreqGainCfg, *, context: RunContext
 ) -> RunRecord[FreqGainCfg, FreqGainResult]:
@@ -101,6 +108,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_RoOptFreqGain_analyze,
+        summary_lines=_summary_lines,
         options=lambda source, env: RoOptFreqGainAnalyzeParams(),
         writeback=_RoOptFreqGain_get_writeback_items,
     ),

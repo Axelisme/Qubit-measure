@@ -20,7 +20,7 @@ Lags 1 to 15 pair reads only within the same cycle. The statistics accumulate ac
 The Form does not offer settings for the number of pairs per rep or the relax delay.
 
 The wait from R to π is the readout's `post_delay` plus the π pulse's own `pre_delay`, which is usually 0. With `post_delay` 0.05 µs and a π `pre_delay` of 0.02 µs, each π starts 0.07 µs after the readout generator pulse ends, and the wait is the same at every window. The wait counts from the generator end and not from the ADC window end, so a π can play while the ADC window is still open. Inside a rep, the next readout starts after the π ends, later only by the π pulse's `post_delay` and the readout's `pre_delay`, which are usually 0.
-The Form has no separate wait field. Change `post_delay` in the readout module to change this wait. Run keeps every π setting, including a nonzero `pre_delay`.
+The Form has no separate wait field. Set the readout post-delay in the readout module. Start at `5/(2πκ)` µs for linewidth κ in MHz and compare with a longer wait. Run keeps the π pulse's pre-delay.
 
 Each rep ends with the shot closure, which waits for every ADC window to close before the next rep starts. If the last ADC window closes after the last π ends, this adds a wait at the rep boundary. The closure is not a relax delay, and the Form has no field for it.
 This rep-boundary wait does not appear in a lag pair's time interval, but it can still affect the estimate through the next cycle's starting population.
@@ -30,8 +30,8 @@ Run does not reset the qubit, discard reads, add a warmup or calibrate the π pu
 ## Parameter sources
 
 Calibrate the readout frequency and the π pulse first. The Form cannot check the π calibration, and a wrong π changes the score and every diagnostic.
-Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template that reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly`. The template starts at gain 0.1, which is an uncalibrated value to confirm.
-Pi pulse uses the captured `$qubit.module.x180` slot, or a fresh `pi_pulse` template.
+**Readout pulse and ADC window** uses the captured `$resonator.module.readout` slot, or a fresh `readout` template that reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly`. The template starts at gain 0.1, which is an uncalibrated value to confirm.
+**Qubit π pulse** uses the captured `$qubit.module.x180` slot, or a fresh `pi_pulse` template.
 Run sets both lengths at each sweep point, so the Form hides them in the readout module.
 When you open the tab or choose Defaults, **Length margin** starts at the captured module’s pulse length minus its ADC window. Without a captured readout, it uses the `readout` template’s difference as an uncalibrated starting value. The stock template gives 0.03 µs. If either length cannot be resolved, the margin stays blank and required. Confirm or edit this finite, nonnegative time in µs before Run. Check that the pulse covers the intended ADC window at the receiver with the selected trigger offset.
 **ADC window** starts at 11 points from 0.2 to 2.2 µs.
@@ -41,20 +41,19 @@ Missing or invalid sources leave the affected fields empty and Invalid; supply t
 ## Live plot
 
 After every round the `measurement` plot shows the score of each valid window with a finished round, from all finished rounds. The x axis is `ADC window (µs)` and the y axis is `Alternating-contrast score`.
-Invalid windows are gaps in the curve. The title counts them, for example `Not plotted: 3 invalid`. Windows that have not finished a round are not on the curve and are not counted as invalid.
+The heading counts acquired settings. Rejected window settings are gaps in the curve and the heading counts them separately. Windows that have not finished a round are not on the curve and are not counted as invalid.
 
 Stop keeps the sums of finished rounds. Windows with at least one finished round stay in the result, and windows that were not measured are dropped from it. A stop before any window finishes a round keeps nothing, and the Run fails with that message.
 
 ## Analysis
 
 Analysis recomputes every window from its own saved sums. It has no options.
-The `score` figure has six panels, all with `ADC window (µs)` on the x axis:
+Both Analyze figures use **ADC window (µs)** on the x axis.
 
-- The score of each valid window. A red dashed line and the legend mark the best window in µs.
-- `Invalid reason per window`. Each row is a reason that occurred, with a mark at each window reporting it.
-- `Q_eff`, `q`, amplitude `a` and noise variance `σ²`, for valid windows only.
+- **Alternating contrast:** the top panel keeps the valid live score points. The red dashed line and heading identify the best window in µs and its score. The lower panel marks each rejected window at every applicable reason.
+- **Correlation diagnostics:** effective retention Qeff includes π errors. The other panels show amplitude-to-noise ratio q, alternating amplitude in a.u.² and one-quadrature noise variance in a.u.². The red dashed line shows the selected window. Look for consistent estimates across nearby settings before using it.
 
-The figure title counts the invalid windows. Invalid windows appear only in the reason panel. No panel draws `σ²` as an error bar on the score.
+Rejected settings appear only in the reasons panel. The score is a nonlinear estimate from correlated reads, not a shot mean. No panel shows a shot SEM. The Analyze summary includes the source run's Reps × Rounds if its cfg is available.
 
 The summary reports:
 

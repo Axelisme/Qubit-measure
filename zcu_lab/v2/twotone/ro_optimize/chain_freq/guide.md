@@ -10,16 +10,15 @@ After changing a parameter source, use Defaults to recapture initial values. Ref
 
 `twotone/ro_optimize/chain_freq` sweeps readout frequency in MHz.
 Each shot reads one PulseReadout 16 times without a drive or reset.
-After a readout pulse ends, the readout's `post_delay` gives cavity photons time to decay before the next readout starts.
+After a readout pulse ends, its post-delay gives cavity photons time to decay. Start at `5/(2πκ)` µs for linewidth κ in MHz. Try a longer wait and check whether the correlations change.
 The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
 The relax delay K follows each shot. Every shot after the first starts K after the previous shot.
-Set `relax_delay` in µs long enough to return to thermal equilibrium.
+Set **Thermal wait K (µs)** long enough for the qubit to return to thermal equilibrium.
 The Form seeds it from 5·T1. The first shot relies on the state before Run.
 There is no additional wait inside the chain beyond the readout's own timing.
 
-Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template.
-The template uses the resonator frequency, wiring and time of flight.
-By default, the sweep uses 11 points from one linewidth below the resonator frequency to one linewidth above it. Run replaces both generator and ADC frequency, so the Form hides readout frequency.
+**Readout pulse and ADC window** uses the captured `$resonator.module.readout` slot or the readout template. The template takes frequency, wiring and time of flight from the resonator. It leaves 0.015 µs of pulse before and after the ADC window at the receiver.
+**Readout frequency (MHz)** starts with 11 points across the captured resonator frequency ± one linewidth. Enter absolute RF when a mixer is set, or DDS frequency without a mixer. The sweep replaces both generator and ADC frequency.
 Reps defaults to 2000 shots per setting per round. Rounds defaults to 320, giving 640 000 shots per setting.
 Missing or invalid sources leave fields Invalid. Supply them before Run.
 
@@ -50,16 +49,13 @@ If the best frequency is at either scan boundary, extend that side and repeat be
 
 ## Live and analysis plots
 
-Live `measurement` and offline `metric` figures have the same three panels:
+Live and Analyze share the same three panels:
 
-- Heuristic score with model-conditional approximate error bars.
-- QND with model-conditional approximate error bars. The axis stays at 0..1; reports retain unmodified QND, even outside that range.
-- M alongside |ρ|. Large M remains visible on this diagnostic axis.
+- **Thermal-chain score** selects the best frequency. The red dashed line marks the maximum.
+- **Estimated QND** shows the model's QND estimate, without clipping to 0–1. Use it to check the trade-off at the selected frequency.
+- The diagnostics compare **correlation growth M** and **first-pair |ρ|**. Compare them to see whether correlation growth reduces the score.
 
-Red dashed lines mark the maximum-score setting in every panel.
-The score axis uses score values alone, so large errors do not flatten the curve.
-Error bars can extend beyond that axis and be cut off.
-Acquisition calculates scores after each completed round, then the plot thread draws them.
+The bars on score and QND are model error scales, not shot SEM. The axes include the displayed bars. The live heading counts settings with completed data and shows the minimum shots per acquired setting. Analyze labels the selected frequency; the summary reports the source run's Reps × Rounds when its cfg is available.
 Stop keeps settings with a completed round. A stop before any completed round raises an error.
 
 Analysis has no options and can use saved sums without cfg or hardware.
@@ -96,7 +92,7 @@ Native save and restore preserve the moments for reanalysis of score, M and best
 The tag is `twotone/ro_optimize/chain_freq` and cfg schema is `4.0`. There is no earlier-schema compatibility path.
 
 `ro_optimize_chain_freq` accepts optional `freq_start_mhz` and `freq_stop_mhz` in MHz, `points`, `relax_delay`, `reps` and `rounds`.
-`points` maps to sweep Expts. Omission keeps the Form value; null passes to the field owner.
+The endpoints and `points` set **Readout frequency › Start, Stop, Expts**. The recipe can select a library readout in **Readout pulse and ADC window**. Omission keeps the Form value; null passes to the field owner.
 Overrides apply last, then check_ready rejects missing or invalid inputs before Run.
 The recipe runs, analyzes and saves. It proposes no writeback.
 It reports `freq_mhz`, `score`, `score_error`, `qnd`, `qnd_error`, `correlation`, `amplification` and `mist`.

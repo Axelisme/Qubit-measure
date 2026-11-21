@@ -108,12 +108,18 @@ class RPiLengthCfg(ConfigBase):
     rounds: Software rounds, at least 1.
     """
 
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout pulse and ADC window",
+            description="Select the resonator pulse and ADC timing for the read before every π pulse.",
+        ),
+    ]
     pi_pulse: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="Pi pulse",
-            description="Calibrated g-to-e pi pulse after every readout in the R-pi cycle.",
+            label="Qubit π pulse",
+            description="Select the calibrated g-to-e π pulse applied after each readout.",
         ),
     ]
     length: Annotated[
@@ -121,7 +127,7 @@ class RPiLengthCfg(ConfigBase):
         FieldMeta(
             label="ADC window",
             unit="µs",
-            description="ADC window sweep.",
+            description="Enter the ADC integration window sweep in µs; the RF pulse grows by the same amount.",
         ),
     ]
     length_margin: Annotated[
@@ -129,7 +135,7 @@ class RPiLengthCfg(ConfigBase):
         FieldMeta(
             label="Length margin",
             unit="µs",
-            description="Time added to each ADC window to set the readout pulse length.",
+            description="Enter the time in µs added to each ADC window to set the RF pulse length.",
         ),
     ] = Field(strict=True, allow_inf_nan=False, ge=0)
     reps: Annotated[
@@ -223,25 +229,33 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
 
         # 2. Track valid R-pi scores from completed windows and flag rejected settings.
         fig, ax = context.plots.subplots(num="measurement")
+        fig.suptitle("R–π ADC window sweep · Resonator · Alternating contrast")
         ax.set(xlabel=LENGTH_AXIS.label, ylabel=SCORE_LABEL)
-        ax.grid(True)
         fix_sweep_xlim(ax, lengths)
         viewer = live_line(ax)
+        ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
         def draw(
-            payload: tuple[NDArray[np.float64], list[RPiAnalysis]],
+            payload: tuple[NDArray[np.float64], list[RPiAnalysis], int],
         ) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            windows, analyses = payload
-            ax.set_title(not_plotted_title(analyses, LENGTH_AXIS.setting_name))
+            windows, analyses, reads = payload
+            status = not_plotted_title(analyses, LENGTH_AXIS.setting_name)
+            progress = (
+                f"{len(analyses)}/{len(lengths)} settings acquired\n"
+                f"Minimum reads per acquired setting: {reads} count"
+            )
+            ax.set_title(f"{progress}\n{status}" if status else progress)
             return (*viewer.set(windows, valid_values(analyses, "score")), ax.title)
 
         def update(records: NDArray[np.float64]) -> None:
             # Analyze here, on the acquisition thread, so the GUI thread only draws.
             """Refresh the measurement artists from the current acquired data."""
             finished = _finished(records)
-            draw((lengths[finished], analyze_records(records[finished])))
+            completed = records[finished]
+            reads = int(min(completed[:, 1], default=0))
+            draw((lengths[finished], analyze_records(completed), reads))
 
         fig.show()
         record_sums = SignalBuffer(
@@ -309,22 +323,32 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
         analyses = analyze_records(source.result.records)
         best = best_index(analyses)
 
-        # 2. Diagnose window-dependent score through effective Q, correlation and noise.
-        fig, _ = plots.subplots(3, 2, num="score", sharex=True, figsize=(11, 8))
-        ax_score, ax_reasons, ax_q_eff, ax_q, ax_amplitude, ax_noise = fig.axes
-
-        ax_score.plot(lengths, valid_values(analyses, "score"), "o-", color="C0")
+        # 2. Compare valid scores with the reasons other settings were rejected.
+        fig, _ = plots.subplots(2, 1, num="score", sharex=True, figsize=(8, 6))
+        ax_score, ax_reasons = fig.axes
+        fig.suptitle("R–π ADC window sweep · Resonator · Alternating contrast")
+        scores = valid_values(analyses, "score")
+        ax_score.plot(lengths, scores, "o", color="C0")
         ax_score.set_ylabel(SCORE_LABEL)
-        for ax, name, ylabel in (
-            (ax_q_eff, "q_eff", "Q_eff (includes π error)"),
-            (ax_q, "q", "q = a / σ²"),
-            (ax_amplitude, "amplitude", "Amplitude a (ADC units²)"),
-            (ax_noise, "noise_variance", "Noise variance σ² (ADC units²)"),
-        ):
-            ax.plot(lengths, valid_values(analyses, name), "o-")
-            ax.set_ylabel(ylabel)
+        if best is not None:
+            setting = float(lengths[best])
+            score = scores[best]
+            ax_score.axvline(setting, color="C3", ls="--")
+            ax_score.set_title(
+                f"Selected ADC window = {setting:.{LENGTH_AXIS.digits}g} {LENGTH_AXIS.unit}\n"
+                f"Alternating-contrast score = {score:.4g}"
+            )
+        else:
+            ax_score.set_title("No valid window to select")
 
-        # 3. Explain rejected windows alongside the best valid integration duration.
+        reasons = {
+            "gate_failed": "Contrast gate",
+            "q_eff_out_of_range": "Qeff outside 0–1",
+            "nonpositive_amplitude": "Amplitude ≤ 0",
+            "nonpositive_noise_variance": "Noise variance ≤ 0",
+            "zero_denominator": "Missing pair or zero divisor",
+            "nonpositive_same_read_variance": "Same-read variance ≤ 0",
+        }
         rows = sorted(invalid_reason_counts(analyses))
         for row, reason in enumerate(rows):
             rejected = [
@@ -333,24 +357,33 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
                 if reason in analysis.invalid_reasons
             ]
             ax_reasons.plot(rejected, [row] * len(rejected), "x", color="C3")
-        ax_reasons.set_yticks(range(len(rows)), rows)
+        ax_reasons.set_yticks(range(len(rows)), [reasons[reason] for reason in rows])
         ax_reasons.set_ylim(-0.5, max(len(rows), 1) - 0.5)
-        ax_reasons.set_title(f"Invalid reason per {LENGTH_AXIS.setting_name}")
+        ax_reasons.set(
+            xlabel=LENGTH_AXIS.label,
+            title="Why settings were rejected" if rows else "No settings rejected",
+        )
 
-        for ax in fig.axes:
-            ax.grid(True)
+        # 3. Inspect the two-state model estimates at the valid settings.
+        fig, _ = plots.subplots(2, 2, num="diagnostics", sharex=True, figsize=(8, 6))
+        fig.suptitle("R–π ADC window sweep · Resonator · Correlation diagnostics")
+        for ax, name, ylabel in zip(
+            fig.axes,
+            ("q_eff", "q", "amplitude", "noise_variance"),
+            (
+                "Effective retention Qeff",
+                "Amplitude/noise q",
+                "Amplitude (a.u.²)",
+                "Noise variance (a.u.²)",
+            ),
+            strict=True,
+        ):
+            ax.plot(lengths, valid_values(analyses, name), "o", color="C0")
+            ax.set_ylabel(ylabel)
             if best is not None:
-                ax.axvline(float(lengths[best]), color="r", ls="--")
-        if best is not None:
-            value = f"{float(lengths[best]):.{LENGTH_AXIS.digits}g}"
-            ax_score.legend(
-                [ax_score.lines[-1]], [f"largest score = {value} {LENGTH_AXIS.unit}"]
-            )
-        ax_amplitude.set_xlabel(LENGTH_AXIS.label)
-        ax_noise.set_xlabel(LENGTH_AXIS.label)
-        title = not_plotted_title(analyses, LENGTH_AXIS.setting_name)
-        if title:
-            fig.suptitle(title)
+                ax.axvline(float(lengths[best]), color="C3", ls="--")
+        for ax in fig.axes[2:]:
+            ax.set_xlabel(LENGTH_AXIS.label)
         fig.tight_layout()
 
         return RPiLengthAnalysis(

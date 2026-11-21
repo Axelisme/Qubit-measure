@@ -16,40 +16,39 @@ Lags 1 to 15 pair reads only within the same cycle. The statistics accumulate ac
 The experiment fixes the 64 pairs per rep and the zero relax delay. The Form does not offer them.
 
 The wait from R to π is the readout's `post_delay` plus the π pulse's own `pre_delay`, which is usually 0. With `post_delay` 0.05 µs and a π `pre_delay` of 0.02 µs, each π starts 0.07 µs after the readout generator pulse ends, and the wait is the same at every gain. The wait counts from the generator end and not from the ADC window end, so a π can play while the ADC window is still open. Inside a rep, the next readout starts after the π ends, later only by the π pulse's `post_delay` and the readout's `pre_delay`, which are usually 0.
-The Form has no separate wait field. Change `post_delay` in the readout module to change this wait. Run keeps every π setting, including a nonzero `pre_delay`.
+The Form has no separate wait field. Set the readout post-delay in the readout module. Start at `5/(2πκ)` µs for linewidth κ in MHz and compare with a longer wait. Run keeps the π pulse's pre-delay.
 
 Each rep ends with the shot closure, which waits for every ADC window to close before the next rep starts. If the last ADC window closes after the last π ends, this adds a wait at the rep boundary. The closure is not a relax delay, and the Form has no field for it.
 This rep-boundary wait does not appear in a lag pair's time interval, but it can still affect the estimate through the next cycle's starting population.
-If one ADC window would overlap the next, Run fails when the program builds and names the ADC overlap. Shorten the ADC window or lengthen the readout or its post-delay.
+Keep the ADC windows disjoint. Shorten the ADC window or lengthen the readout pulse or post-delay if successive windows overlap.
 
 Run does not reset the qubit, discard reads, add a warmup or calibrate the π pulse.
 
 ## Parameter sources
 
 Calibrate the readout frequency and the π pulse first. The Form cannot check the π calibration, and a wrong π changes the score and every diagnostic.
-Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template that reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly`.
-Pi pulse uses the captured `$qubit.module.x180` slot, or a fresh `pi_pulse` template.
+**Readout pulse and ADC window** uses the captured `$resonator.module.readout` slot, or a fresh `readout` template that reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly`.
+**Qubit π pulse** uses the captured `$qubit.module.x180` slot, or a fresh `pi_pulse` template.
 Run replaces the readout gain with the sweep, so the Form hides the readout gain.
-Gain is the normalized DAC amplitude in a.u., where 1 is full scale. It starts at 10 points from 0.02 to 0.2 a.u.
+**Readout gain (a.u.)** is the normalized DAC amplitude, where 1 is full scale. It starts at 10 points from 0.02 to 0.2 a.u.
 Reps starts at 250 and Rounds at 20. Each gain has 5 000 cycles of 64 reads, or 320 000 reads in total.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
 
 ## Live plot
 
 After every round the `measurement` plot shows the score of each valid gain, from all finished rounds. The y axis is `Alternating-contrast score`.
-Invalid gains are gaps in the curve. The title counts them, for example `Not plotted: 3 invalid`.
+The heading counts acquired settings. Rejected gain settings are gaps in the curve and the heading counts them separately.
 Stop keeps the sums of finished rounds. A stop before the first round finishes keeps nothing, and the Run fails with that message.
 
 ## Analysis
 
 Analysis recomputes every gain from its own saved sums. It has no options.
-The `score` figure has six panels, all with the readout gain on the x axis:
+Both Analyze figures use **Readout gain (a.u.)** on the x axis.
 
-- The score of each valid gain. A red dashed line and the legend mark the best gain.
-- `Invalid reason per gain`. Each row is a reason that occurred, with a mark at each gain reporting it.
-- `Q_eff`, `q`, amplitude `a` and noise variance `σ²`, for valid gains only.
+- **Alternating contrast:** the top panel keeps the valid live score points. The red dashed line and heading identify the best gain in a.u. and its score. The lower panel marks each rejected gain at every applicable reason.
+- **Correlation diagnostics:** effective retention Qeff includes π errors. The other panels show amplitude-to-noise ratio q, alternating amplitude in a.u.² and one-quadrature noise variance in a.u.². The red dashed line shows the selected gain. Look for consistent estimates across nearby settings before using it.
 
-The figure title counts the invalid gains. Invalid gains appear only in the reason panel.
+Rejected settings appear only in the reasons panel. The score is a nonlinear estimate from correlated reads, not a shot mean. No panel shows a shot SEM. The Analyze summary includes the source run's Reps × Rounds if its cfg is available.
 
 The summary reports:
 
