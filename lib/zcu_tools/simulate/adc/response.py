@@ -9,6 +9,7 @@ from scipy.integrate import solve_ivp
 
 from ..baths import population_generator
 from ._constant import ConstantLine
+from ._time import adc_to_device_time_ns
 from .model import ReadoutModel, RealArray, readonly_array, readout_model_key
 from .readout_batch import ConditionalSums, ReadoutBatch, ReadoutEvent
 from .request import (
@@ -303,7 +304,9 @@ class ConditionalReadout:
                     * np.conj(self.model.receiver.background(pulse.frequency_ghz)),
                 )
                 solution = self._constant_line.sampled_trajectory(
-                    weighted, times - delay, omega
+                    weighted,
+                    adc_to_device_time_ns(times, time_of_flight_ns=delay),
+                    omega,
                 )
                 if solution is None:
                     return self._fields(pulses, times, constant=False)[0]
@@ -414,7 +417,7 @@ class ConditionalReadout:
         # Evaluate the emitted field at retarded time. Restoring the absolute
         # carrier's frame phase below is necessary even when f_ref == f_drive.
         delay = self.model.receiver.time_of_flight_ns
-        times = times - delay
+        times = adc_to_device_time_ns(times, time_of_flight_ns=delay)
         start = min(p.start_ns for p in pulses) if pulses else 0.0
         end = max(start, float(times[-1]))
         if constant and projected:
@@ -618,7 +621,8 @@ class ConditionalReadout:
 def _relative_grid_key(event: ReadoutEvent, times: RealArray, delay: float) -> bytes:
     """Key relative sample times for reusable carrier field projections."""
     start = event.pulses[0].start_ns if event.pulses else 0.0
-    return np.maximum(times - delay - start, 0.0).tobytes()
+    device_times = adc_to_device_time_ns(times, time_of_flight_ns=delay)
+    return np.maximum(device_times - start, 0.0).tobytes()
 
 
 def _sample_counts(batch: ReadoutBatch) -> NDArray[np.int64]:

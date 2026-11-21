@@ -8,6 +8,7 @@ from numba import njit
 from numpy.typing import NDArray
 
 from ._jump_paths import JumpPaths
+from ._time import adc_to_device_time_ns
 from ._trajectories import PathFields
 from .model import ReadoutModel, RealArray
 from .request import ReadoutPulse, SampleGrid
@@ -232,7 +233,10 @@ class IntegratedPaths:
             ]
         )
         delay = model.receiver.time_of_flight_ns
-        self.times = tuple(grid.times_ns - delay for grid in grids)
+        self.times = tuple(
+            adc_to_device_time_ns(grid.times_ns, time_of_flight_ns=delay)
+            for grid in grids
+        )
         all_times = np.unique(np.concatenate(self.times))
         self.end = max(self.start, float(all_times[-1]))
         self.path_fields = tuple(

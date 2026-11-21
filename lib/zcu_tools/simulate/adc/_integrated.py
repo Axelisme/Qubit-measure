@@ -17,6 +17,7 @@ import numpy as np
 import scipy.linalg
 from numpy.typing import NDArray
 
+from ._time import adc_to_device_time_ns
 from .model import ReadoutModel, RealArray
 from .request import ReadoutPulse, SampleGrid
 
@@ -112,12 +113,11 @@ class IntegratedLine:
             if result is None:
                 return None
             results.append(result)
-        elapsed = max(
-            0.0,
-            max(float(g.times_ns[-1]) for g in grids)
-            - model.receiver.time_of_flight_ns
-            - pulse.start_ns,
+        last_device_time = adc_to_device_time_ns(
+            max(float(g.times_ns[-1]) for g in grids),
+            time_of_flight_ns=model.receiver.time_of_flight_ns,
         )
+        elapsed = max(0.0, last_device_time - pulse.start_ns)
         populations = (self._uq * np.exp(self._lq * elapsed)) @ self._iq
         return np.stack(results), np.asarray(populations, dtype=np.complex128)
 
@@ -205,12 +205,11 @@ class IntegratedLine:
         iq = np.stack((calibrated.real, calibrated.imag), axis=-1)
         counts = np.array([len(g.times_ns) for g in grids[0]])
         iq += counts[None, :, None, None] * receiver.offset
-        elapsed = max(
-            0.0,
-            max(float(g.times_ns[-1]) for g in grids[0])
-            - receiver.time_of_flight_ns
-            - pulses[0].start_ns,
+        last_device_time = adc_to_device_time_ns(
+            max(float(g.times_ns[-1]) for g in grids[0]),
+            time_of_flight_ns=receiver.time_of_flight_ns,
         )
+        elapsed = max(0.0, last_device_time - pulses[0].start_ns)
         populations = np.asarray(
             (self._uq * np.exp(self._lq * elapsed)) @ self._iq, dtype=np.complex128
         )
@@ -229,7 +228,7 @@ class IntegratedLine:
         if np.any(abs(times - (times[0] + np.arange(len(times)) * step)) > tolerance):
             return None
         delay = model.receiver.time_of_flight_ns
-        elapsed = times - delay - pulse.start_ns
+        elapsed = adc_to_device_time_ns(times, time_of_flight_ns=delay) - pulse.start_ns
         duration = pulse.end_ns - pulse.start_ns
         nu = (
             2
@@ -312,7 +311,7 @@ class IntegratedLine:
             return None
         receiver = model.receiver
         delay = receiver.time_of_flight_ns
-        elapsed = times - delay - pulse.start_ns
+        elapsed = adc_to_device_time_ns(times, time_of_flight_ns=delay) - pulse.start_ns
         duration = pulse.end_ns - pulse.start_ns
         nu = 2 * np.pi * grid.detuning_ghz(model.reference_frequency_ghz)
         phase = np.exp(1j * nu * (delay + pulse.start_ns) - 1j * grid.phase_rad)

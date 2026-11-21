@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-21, cooperative Stop during required integrated raw sampling
+**Last updated:** 2026-11-21, device-time conversion, exact flat span reuse and raw sampling Stop
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -155,8 +155,11 @@ flat cavity-average cache keys include the legacy parameters and every optional
 background record, including the fixed roughness seed.
 
 `Receiver.time_of_flight_ns` is one finite nonnegative total line delay, default
-zero. The solver evaluates the physical output at t−τ and restores the rotating
-frame's exp(+2πi*f_ref*τ) before demodulation at ADC time t. Conjugation then gives
+zero. Call `adc_to_device_time_ns(t, time_of_flight_ns=receiver.time_of_flight_ns)`
+to convert ADC times in ns to device times t−τ. Use the result once, for emitted
+time, and keep the original grid times for demodulation. Negative device times
+are valid. The solver evaluates the physical output at that device time and restores
+the rotating frame's exp(+2πi*f_ref*τ) before demodulation at ADC time t. Conjugation then gives
 exp(−2πi*f_abs*τ) at the absolute carrier, without counting τ twice. Onset,
 ringup, ringdown and envelopes all arrive late; offset/noise do not. Pulse phase
 retains its documented rotating-coordinate convention.
