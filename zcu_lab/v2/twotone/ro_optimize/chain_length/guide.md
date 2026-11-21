@@ -19,13 +19,11 @@ There is no additional wait inside the chain beyond the readout's own timing.
 
 Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template.
 The template uses the resonator frequency, wiring and time of flight.
-ADC window starts at 11 points from 0.2 to 2.2 us. Run rebuilds the program at each point and sets its pulse length to `trig_offset − time_of_fly + window + 0.11 us`.
-Subtracting the flight time accounts for propagation to the ADC. The extra 0.11 us lets the pulse end reach the ADC after the window closes.
-For the pulse to cover the whole window, the ADC must open no earlier than the pulse reaches it (`trigger offset ≥ pre-delay + time of flight`). An earlier opening leaves the start of the window without a readout pulse.
+ADC window starts at 11 points from 0.2 to 2.2 µs. At each point, Run sets the ADC window to the sweep value and the pulse duration to `window + length_margin`. The Form hides the two lengths that Run sets.
 
-The Form hides the two lengths that Run sets. It shows **Time of flight (µs)** as a read-only, required field.
-Open and Reset capture it from `$resonator.time_of_fly`. Refresh keeps the value already shown.
-If the field is blank, correct the missing or invalid calibration at the source, then Reset before Run.
+**Length margin (µs)** is editable and must be finite and nonnegative. On Open or Reset it starts at the captured readout's `waveform.length − ro_length`. Without a captured readout it starts at the difference in the `readout` template. If either length cannot be resolved, enter the margin before Run. Refresh keeps the existing input.
+
+Keep the trigger offset and pre-delay from a readout that covers the ADC window. Sweeping both lengths by the same amount preserves their timing at the ADC, apart from clock rounding. If you change the margin or the trigger, verify that the pulse reaches the ADC before it opens and still covers it when it closes. The sweep does not adjust the trigger offset or require a separate flight-time input.
 Reps defaults to 2000 shots per setting per round. Rounds defaults to 320, giving 640 000 shots per setting.
 Supply any other missing or invalid sources before Run.
 
@@ -99,11 +97,11 @@ The record is ThermalChainSums with the sweep axis, shot count and 107 float64 s
 It keeps I/Q sums of R1..R16, R1 I²/IQ/Q², all four cross components of all 15 adjacent pairs, and the R1,R3 through R1,R5 pairs.
 No weighted M aggregate replaces those pairs.
 Native save and restore preserve the moments for reanalysis of score, M and best setting.
-The tag is `twotone/ro_optimize/chain_length` and cfg schema is `5.0`. An older run can still load its saved moments for analysis, but its cfg is not restored.
+The tag is `twotone/ro_optimize/chain_length` and cfg schema is `6.0`. An older run can still load its saved moments for analysis, but its cfg is not restored.
 
 `ro_optimize_chain_length` accepts optional `length_start_us` and `length_stop_us` in us, `points`, `relax_delay`, `reps` and `rounds`.
 `points` maps to sweep Expts. Omission keeps the Form value; null passes to the field owner.
 Overrides apply last, then check_ready rejects missing or invalid inputs before Run.
 The recipe runs, analyzes and saves. It proposes no writeback.
 It reports `length_us`, `score`, `score_error`, `qnd`, `qnd_error`, `correlation`, `amplification` and `mist`.
-Enter the chosen ADC window in the readout module yourself.
+To use the chosen ADC window in the readout module, set the pulse duration to that window plus the margin used in the sweep.

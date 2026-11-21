@@ -196,4 +196,5 @@
 - 2026-11-20 [Two-qubit RB 在 Clifford 邊界對齊兩條時間線](2026-11-20-rb-clifford-barrier.md)：排程修正。2026-11-15 的並行排程只在 CZ 同步，reference 組相鄰 Clifford 會重疊，interleaved 組不會；改為兩組都在 Clifford 邊界 join，interleaved 時序不變、reference 變長，新舊資料不混比。
 - 2026-11-20 [RB 每個 depth 的誤差棒](2026-11-20-rb-errorbars.md)：圖上診斷。畫 seed 間標準差，不加 shot noise 參考線，不改 Analyze 回傳；RB 與 IRB 數值工具合併。
 - 2026-11-21 [Herald 後的等待由 readout 的 post_delay 擁有](2026-11-21-herald-wait-readout-post-delay.md)：欄位歸屬。Herald 後的等待由 readout 的 `post_delay` 擁有，不加獨立欄位；guide 寫需求、症狀與驗證方法。
-- 2026-11-21 [讀出鏈的 pulse 長度與間隔](2026-11-21-chain-readout-spacing.md)：讀出時序。chain_length 用唯讀飛行時間校準換算 pulse 長度，九個 chain 實驗等前一個 pulse 結束加 post-delay，不另等 ADC 關窗。
+- 2026-11-21 [讀出鏈的 pulse 長度與間隔](2026-11-21-chain-readout-spacing.md)：讀出時序。九個 chain 實驗等前一個 pulse 結束加 post-delay，不另等 ADC 關窗。該篇的 pulse 長度公式已局部取代。
+- 2026-11-21 [Chain length 掃描固定 pulse 與 ADC window 的長度差](2026-11-21-chain-length-fixed-margin.md)：讀出時序。每點 pulse 長度為當點 ADC window 加上可編輯的長度差，不在 cfg 另填飛行時間。

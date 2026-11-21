@@ -49,3 +49,7 @@ R1 fixture 的 `post_delay` 是 0 µs。新間隔下，前一個 ADC window 最�
 - [FTF fixture](../../tools/data/experiment_wall_time/) 的 `ftf-demo/initial`，別名指向 R1 的 pulse module。2 µs 是該 point 的 MG12 mux module 設定，不是 R1 原值。
 - [ADR-0083](../adr/0083-program-macros-and-timelines.md) 的 readout tail 與 ADC overlap 規則。
 - [實驗離線環境契約](../../lib/zcu_tools/experiment/README.md#explicit-simulation-environments) 記錄 FTF 使用的 block 檢查。
+
+## 後記
+
+使用者同日以[固定長度差](2026-11-21-chain-length-fixed-margin.md)取代上述長度公式與唯讀飛行時間欄位。九個 chain 實驗不另等 ADC 關窗的間隔規則不變。

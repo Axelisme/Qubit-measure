@@ -2,11 +2,11 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-**Last updated:** 2026-11-10，ringup tone ADC 使用 group wiring
+**Last updated:** 2026-11-21，讀出長度掃描初值
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
-已定案且供多個 Form 共用的初值政策集中在具名 domain helper，涵蓋 T1 時間尺度選源、Rabi 來源與首次初值，以及 mux readout 的 ringup 等待。
+已定案且供多個 Form 共用的初值政策集中在具名 domain helper，涵蓋 T1 時間尺度選源、Rabi 來源與首次初值、讀出掃描的長度差，以及 mux readout 的 ringup 等待。
 各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
 
 `mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
@@ -79,6 +79,10 @@ Group model 仍擁有長度與重複 qubit 的結構規則。
 `ctx_helpers.source(ctx, path, template)` 依固定 capture 的 `ctx.has(path)` 回傳 ref-only `Slot(path)` 或原樣的 Template。
 Template 持有自己的 set 與 seed metadata。
 路徑語法與來源故障由 `ctx.has` 傳出，family 不相容由 Form 報錯。
+
+`readout_initial_values.pulse_readout_length_margin(ctx, readout)` 從選定的 readout 取 `waveform.length − ro_length`，單位為 µs。
+用 Slot 時讀固定 capture，用 Template 時讀 lab 範本的兩個初值。任一長度無法解析時，必填欄位留空。
+Form 在覆寫模組內的掃描欄位前取得差值及來源說明，不寫回模組。
 
 `rabi_initial_values.len_rabi_length_stop` 只推導四個 Length Rabi Forms 的掃描上限。
 無 capture、缺失或 null x180、arb waveform 時上限為 1 µs。

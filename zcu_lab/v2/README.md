@@ -67,6 +67,7 @@ Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
 並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。
 [\_chain_common.py](twotone/ro_optimize/_chain_common.py) 只保留保存映射、完成點篩選與最佳 setting 摘要型別。
+[chain_length](twotone/ro_optimize/chain_length/guide.md) 在每個 ADC window 加上同一個可編輯的 `length_margin` 設定 pulse 長度。初值取擷取模組的兩個長度之差，沒有模組才用 readout 範本。
 Rπ 的 rpi_power／rpi_freq／rpi_length 各自在 `run()` 寫出掃描與 R→π 鏈，並保留自己的 cfg、Result 與分析摘要型別。
 三者各自在 core 畫 score 與診斷圖；[\_rpi_common.py](twotone/ro_optimize/_rpi_common.py) 只保留共用的 `rpi_sums` 解碼、選點與格式化。
 

@@ -54,7 +54,7 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   是 allocation resolution hint，flux 則使用中性 device-value contract。完整家族
   契約見 `measure-authoring.md`。
 - `support/measure/` 是公開支援 package，提供至少被兩個 concrete adapters 共用的 mechanics。
-  已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，目前限 T1 時間尺度選源與 Rabi 的來源、有效性及首次初值。
+  已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，例如 T1 時間尺度、Rabi 候選與讀出掃描的長度差。
   T1 helper 的 tone 掃描先選 `ext.t1_with_tone`，僅缺失或 null 才改選普通 `t1`。
   已存無效 tone T1 不下探。Mux recovery 在建 Form 時比較各顆的捕捉初值，
   保留最大者的 seed。缺 T1 以 30 us 參與比較，缺值勝出時仍為 150 us 字面值。
