@@ -170,9 +170,9 @@ Module `README.md` 專指 `lib/` 與 `tests/` 子目錄中的高層 cheat-sheet�
 - **橫向互指。** 一個模組的契約依賴另一個模組的定義時，從雙方的契約段落互連到對應段落。例如，FTF environment、ADC 與 Program simulation 在各自說明 integrated statistics 的段落互指，讓讀者直接對照環境產出的統計、ADC 的邊際計數與 Program 消費的統計格式。
 - **限定語。** 同一詞在不同模組代表不同資料時，每個模組在自己的文件寫明限定語或固定搜尋詞。例如，`joint` 可以指 FTF 的 herald history × terminal state 聯合分布，也可以指 `two_qubit/joint_readout` 的雙 qubit IQ 聯合分類；ADC 的 per-event marginals 則是各讀取事件的邊際計數。
 - **實測數字。** 文件引用實測得到的耗時、誤差或計數時，在數字旁標明量測所用的 commit。一般常數照常引用。例如，比較 Gaussian 與 constant gate 序列的實測耗時時，若表內數字來自同一次量測，在表旁標一次 commit 即可。
-- **Grep 橋接。** 動態組出名稱時，在組字串的程式旁以註解列出完整名稱。例如，若 two_qubit 用 `cz_{role}` 組出 `cz_qubit1` 與 `cz_qubit2`，就在組字串處列出這兩個 slot 名，讓人用完整名稱搜到產生處。
-- **調查筆記。** 調查或裁決時，發現文件缺連結、難搜尋或已過時，記下具體位置、要找的事實與可用的入口或搜尋詞。在 map 內依該 map 的 Standing order 記筆記；在 map 外用 `candidate-backlog` 登記範圍外的發現，將 `area` 設為 `doc-organization`。例如，FTF 的 integrated statistics 只連到 ADC README 開頭時，記下兩邊的段落和 ADC 的 `ProjectionChain` 搜尋詞。
-- **重構時機。** 從上次彙整起，文檔組織發現累積 5 筆，或同一類缺陷出現在 2 份筆記時，交由負責排程的人彙整成一個文檔重構 task。一起修具體文件與這類查找的規範或搜尋詞。驗收時重走觸發筆記的查找路徑，確認能從 README 連結、ADR 索引或寫明的 grep 詞找到所需事實。例如，兩份筆記都發現 integrated statistics 缺契約互指，就一起補；從 ADC 的契約段落應能直達 FTF 與 Program 的對應段落。
+- **Grep 橋接。** 動態組出的持久名稱若能列舉，就在組字串的程式旁以註解列出完整名稱。含 hash 等無法列出全名的名稱，則寫明可 grep 的固定前綴。例如，two_qubit 用 `cz_{role}` 組出 `cz_qubit1` 與 `cz_qubit2`，就在組字串處列出這兩個 slot 名，讓人用完整名稱搜到產生處。
+- **調查筆記。** 調查或裁決時，在 map 內照該 map 的 Standing order 記筆記。在 map 外，只用現有的 `candidate-backlog` 登記範圍外的文檔組織發現，將 `area` 設為 `doc-organization`。記下觀察、可重現的證據（如檔案路徑或搜尋詞）、對查找的影響與想取得的結果。沒有該 skill 時，在回報中附上這些欄位與 `area`，交由 backlog owner 登記。例如，FTF 的 integrated statistics 只連到 ADC README 開頭時，記下兩邊的段落與 ADC 的 `ProjectionChain` 搜尋詞，說明讀者無法直接對照契約，希望連結直達對應段落。
+- **重構時機。** 在 map 內照該 map 的 Standing order 彙整。在 map 外，從上次彙整起計算 `doc-organization` 候選項，依既有的 task 納入紀錄排除已彙整的項目。累積 5 筆候選項，或同一類缺陷出現 2 次時，交由負責排程的人彙整成一個文檔重構 task。一起修具體文件與這類查找的規範或搜尋詞。驗收時重走觸發筆記的查找路徑，確認能從 README 連結、ADR 索引或寫明的 grep 詞找到所需事實。例如，integrated statistics 有兩處缺契約互指，就一起補；從 ADC 的契約段落應能直達 FTF 與 Program 的對應段落。
 
 #### 編碼與 agent 工作檔
 
