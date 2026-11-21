@@ -341,6 +341,61 @@ def test_stop_during_backend_keeps_only_completed_rounds(
     assert len(outcome.rounds) == completed_rounds + 1
 
 
+@pytest.mark.parametrize("failure", ["first-round", "second-round", "unrelated"])
+def test_stop_during_required_raw_preserves_only_completed_rounds(program_seam, failure):
+    program, soc, observed = program_seam
+    cancel = Event()
+    hooks = []
+    execute = soc.binding.execute
+    failure_index = int(failure == "second-round")
+    completed_raw = np.full((1, 1, 2), 8, dtype=np.int64)
+
+    def solve(request: RoundRequest) -> IntegratedRound:
+        result = execute(request)
+        assert isinstance(result, IntegratedRound)
+
+        class Raw:
+            def materialize(self, reps, avg_level):
+                if request.index == failure_index:
+                    if failure == "unrelated":
+                        raise ValueError("bad ADC data")
+                    raise Cancelled()
+                return {0: completed_raw.copy()}
+
+        return replace(result, raw=Raw())
+
+    def run():
+        return program.acquire(
+            soc,
+            rounds=3,
+            cancel_flag=cancel,
+            threshold=0.0,
+            remove_offset=False,
+            progress=False,
+            round_hook=lambda count, *_: hooks.append(count),
+        )
+
+    soc.binding.execute = solve
+    if failure == "unrelated":
+        with pytest.raises(ValueError, match="bad ADC data"):
+            run()
+    elif failure_index == 0:
+        with pytest.raises(StoppedPartialAcquireError):
+            run()
+    else:
+        (iq,) = run()
+        np.testing.assert_array_equal(iq, [[1.0, 0.0]])
+        np.testing.assert_array_equal(program.get_raw(), [completed_raw])
+        np.testing.assert_array_equal(soc.get_accumulated(0, 0, 1), [[8, 8]])
+
+    assert hooks == list(range(1, failure_index + 1))
+    assert (program.get_raw() is None) is (failure_index == 0)
+    assert not cancel.is_set()
+    (outcome,) = observed
+    assert outcome.complete is bool(failure_index)
+    assert len(outcome.rounds) == failure_index + 1
+
+
 def test_cleanup_failure_is_inside_binding_outcome(program_seam, monkeypatch):
     program, soc, observed = program_seam
     release = soc.release_request
