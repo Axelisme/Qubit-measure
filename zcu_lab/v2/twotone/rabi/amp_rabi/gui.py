@@ -121,7 +121,7 @@ def _AmpRabi_get_writeback_items(
     items.append(
         ParameterWriteback(
             target_name="$qubit.ext.pi_product",
-            description="Pi pulse gain times length (a.u. * us)",
+            description="Pi pulse gain times length (a.u. * µs)",
             proposed_value=result.pi_amp * length,
         )
     )

@@ -13,15 +13,15 @@
 
 - Reset 取自 `$qubit.module.reset`，缺來源時停用 reset。
 - Flux pulse 模組槽使用 `flux_pulse` 範本，初始為 const waveform、gain 1.0、frequency 0 MHz、Nyquist zone 2。
-  Channel 取自 `$qubit.wiring.lo_flux_ch`。本表單設定初始長度 0.5 us。
+  Channel 取自 `$qubit.wiring.lo_flux_ch`。本表單設定初始長度 0.5 µs。
   Channel 無法解析時保持 Invalid，須填入已確認的通道。這些初值僅供編輯，flux 校準須另行確認。
   執行前必須核對接線、gain、pulse 長度與 pre-delay，或選擇已確認的 library pulse。
-- Qubit probe 使用既有 qubit probe 範本，初始 gain 為 0.1、長度為 0.05 us。確認頻率、generator channel 與探測功率適合目前 qubit。
+- Qubit probe 使用既有 qubit probe 範本，初始 gain 為 0.1、長度為 0.05 µs。確認頻率、generator channel 與探測功率適合目前 qubit。
 - Readout 有 `$resonator.module.readout` 時保留引用，否則從 readout 範本填寫。
-- Length sweep 是 qubit probe 開始前的等待時間，單位 us。初始為 0 到 1 us，共 101 點。
+- Length sweep 是 qubit probe 開始前的等待時間，單位 µs。初始為 0 到 1 µs，共 101 點。
 - Frequency sweep 以 `$qubit.freq` 為中心，半寬為 `1.5 * $qubit.kappa`，共 101 點。缺校準值時請手填，並讓頻率範圍涵蓋整條暫態共振。
-- `readout_t` 初始為 2 us。它設定平行分支的最短等待時間，實際 readout 時刻由最晚結束的分支決定。
-- Reps 與 Rounds 初始各為 100，relax delay 為 1 us。這些初值僅供編輯，硬體安全設定及充分的熱化時間須依實際設備確認。
+- `readout_t` 初始為 2 µs。它設定平行分支的最短等待時間，實際 readout 時刻由最晚結束的分支決定。
+- Reps 與 Rounds 初始各為 100，relax delay 為 1 µs。這些初值僅供編輯，硬體安全設定及充分的熱化時間須依實際設備確認。
 
 Open 與 Reset 捕捉當時的 alias 和 library。修改全域來源後，按 Reset 才會重新取初值。
 Reset 會丟棄目前表單修改。執行前用 preview cfg 核對掃描、pulse duration、pre-delay 與 readout。
@@ -44,7 +44,7 @@ Live measurement 圖顯示時間與頻率的 IQ 投影。
 ## 保存與離線限制
 
 Save All 保存掃描軸、IQ 與來源 cfg。Signals 的記憶體 shape 為 wait × frequency。
-記憶體中的時間是 us，頻率是 MHz；磁碟上的 Wait Time 是 s，Frequency 是 Hz。
+記憶體中的時間是 µs，頻率是 MHz；磁碟上的 Wait Time 是 s，Frequency 是 Hz。
 Load 載入結果供分析，目前表單保持原值。
 
 離線 white-noise 模擬器的驗證範圍限於排程與取資料流程。

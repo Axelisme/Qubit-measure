@@ -45,9 +45,9 @@ tone still needs valid frequency and ADC identity, even when not selected.
 
 ## FTF cost example
 
-A two-participant offline Run used 16 delays from 0 to 3.75 us, 0.5 MHz
-nominal detune on both tones, 0.5 us const x90 pulses, 300 reps and 1 round.
-Recovery was 1007.509 us; readout and ADC integration were 2 and 1.5 us.
+A two-participant offline Run used 16 delays from 0 to 3.75 µs, 0.5 MHz
+nominal detune on both tones, 0.5 µs const x90 pulses, 300 reps and 1 round.
+Recovery was 1007.509 µs; readout and ADC integration were 2 and 1.5 µs.
 Recorded RPC Run wall time was 19.095 s, about 1.19 s per joint delay point.
 It includes first simulation compilation and Run completion waiting, not just
 acquisition. Analyze and Save are outside that timer.
@@ -64,7 +64,7 @@ Its short-scan fit is not calibration evidence.
 ## Measurement and analysis
 
 Use fixed x90 drives and an individual detune in MHz for each tone.
-All tones share one finite, nonnegative requested-delay range in us.
+All tones share one finite, nonnegative requested-delay range in µs.
 
 The sequence is common reset, simultaneous first x90 pulses, common delay,
 simultaneous phase-ramped final x90 pulses, then mux readout.
@@ -79,7 +79,7 @@ Fit fringe selects damped-cosine fitting; disabling it selects exponential decay
 A fringe fit needs six finite points and decay needs four.
 Fixed fringe phase uses the nearest-zero 0/180-degree policy; Fit phase frees it.
 Decay uses the same model regardless of Fit phase.
-T2* and error are in us; fringe rate and error are in MHz.
+T2* and error are in µs; fringe rate and error are in MHz.
 Each tone returns its index, fit values, selected model and quality, including
 fringe sampling quality when applicable.
 Analysis plots retain the delay coordinates, measured values and fitted curves.
@@ -120,7 +120,7 @@ coupled Q1/Q2 pair; it does not establish that every mux group has this distorti
 In the offline control, Q2 drive gains were already zero. Disabling only RO2
 raised the Q1 fringe fit r2 from 0.632 to 0.953.
 That identifies readout contamination in that configuration, not a calibrated
-change in T2. The scan had only 16 points over 3.75 us.
+change in T2. The scan had only 16 points over 3.75 µs.
 Use mux Ramsey mainly for decay/T2 trends, not precise detuning.
 Prefer reviewing decay candidates; treat frequency candidates conservatively.
 Adequate sampling and automatic initial selection do not prove the absence
@@ -137,7 +137,7 @@ decay/T2 trend; a frequency candidate is not precision-detuning evidence.
 Failed or unavailable checks leave candidates unselected with explanatory notes.
 You may select them manually after reviewing the source and fit.
 
-Each qualifying tone proposes `<qubit>.t2r` in us and a T2R sample at captured bias.
+Each qualifying tone proposes `<qubit>.t2r` in µs and a T2R sample at captured bias.
 A frequency candidate additionally requires source configuration, a fringe fit,
 finite source carrier, finite actual detune and finite fitted fringe rate.
 It uses source carrier + actual detune - fitted fringe rate in MHz.

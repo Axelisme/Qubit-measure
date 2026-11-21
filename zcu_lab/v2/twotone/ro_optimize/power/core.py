@@ -79,12 +79,12 @@ class PowerCfg(ConfigBase):
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pi pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    wait: Annotated[float, FieldMeta(label="Wait", unit="us", decimals=3)] = Field(
+    wait: Annotated[float, FieldMeta(label="Wait", unit="µs", decimals=3)] = Field(
         default=0.0, ge=0.0
     )
-    reps: Annotated[int, FieldMeta(label="Reps")]
-    rounds: Annotated[int, FieldMeta(label="Rounds")] = 1
-    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us", decimals=3)]
+    reps: Annotated[int, FieldMeta(label="Reps", unit="count")]
+    rounds: Annotated[int, FieldMeta(label="Rounds", unit="count")] = 1
+    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="µs", decimals=3)]
 
 
 def restore_result(data: GroupedLoadData[PowerCfg]) -> PowerResult:
@@ -280,7 +280,17 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 "Middle pi miss fraction f",
                 "Covariance retention (R1 on)",
             ),
-            ("SNR", "F_sep", "p", "S", "Q", "epsilon up", "epsilon down", "f", "S_cov"),
+            (
+                "SNR (a.u.)",
+                "F_sep",
+                "p",
+                "S",
+                "Q",
+                "epsilon up",
+                "epsilon down",
+                "f",
+                "S_cov",
+            ),
             strict=True,
         ):
             if name + "_on" in arrays:
@@ -289,7 +299,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             else:
                 ax.plot(result.gains, arrays[name], "o-", label="R1 on")
             ax.set_title(label, fontsize=11)
-            ax.set(xlabel="Gain (a.u.)", ylabel=symbol + " (dimensionless)")
+            ax.set(xlabel="Gain (a.u.)", ylabel=symbol)
             ax.legend()
             ax.grid(True)
         fig.tight_layout()

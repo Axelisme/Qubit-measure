@@ -191,7 +191,7 @@ class MuxLengthScan:
 class MuxLenRabiToneCfg(MuxDriveToneCfg):
     """One named drive and its independent length bounds in us."""
 
-    length: Annotated[ToneRangeCfg | None, FieldMeta(unit="us")] = None
+    length: Annotated[ToneRangeCfg | None, FieldMeta(unit="µs")] = None
 
     def require_length(self) -> ToneRangeCfg:
         """Return active length bounds, or raise ValueError naming this tone."""
@@ -230,11 +230,18 @@ class MuxLenRabiCfg(ConfigBase):
     participants: list[StrictInt]
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ] = Field(gt=0)
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = Field(default=1, gt=0)
     earlystop_snr: Annotated[
         float | None,
@@ -247,7 +254,7 @@ class MuxLenRabiCfg(ConfigBase):
         float,
         FieldMeta(
             label="Initial delay",
-            unit="us",
+            unit="µs",
             description="Delay before the first repetition.",
         ),
     ] = Field(default=1.0, ge=0, allow_inf_nan=False)
@@ -255,7 +262,7 @@ class MuxLenRabiCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -303,7 +310,7 @@ def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxLengthS
         )
         if np.any(lengths <= 0):
             raise ValueError(
-                f"tones[{index}].length quantized lengths must be positive us"
+                f"tones[{index}].length quantized lengths must be positive µs"
             )
         coordinates.append(lengths)
     return MuxLengthScan(indices, np.asarray(coordinates, dtype=np.float64))
@@ -374,7 +381,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         for index in scan.indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             ax.set(
-                xlabel="Pulse length (us)",
+                xlabel="Pulse length (µs)",
                 ylabel="Magnitude (a.u.)",
                 title=f"{index}: {cfg.tones[index].name}",
             )
@@ -454,7 +461,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         for index in scan.indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             ax.set(
-                xlabel="Pulse length (us)",
+                xlabel="Pulse length (µs)",
                 ylabel="Magnitude (a.u.)",
                 title=f"{index}: {cfg.tones[index].name}",
             )
@@ -567,7 +574,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
             xs = result.coordinates[row, finite]
             signal = signal[finite]
             fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
-            ax.set(xlabel="Pulse length (us)", ylabel="Signal real (a.u.)")
+            ax.set(xlabel="Pulse length (µs)", ylabel="Signal real (a.u.)")
             fig.suptitle(f"tone {index}")
             try:
                 if len(xs) < 6:
@@ -622,7 +629,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
                 ax.plot(xs, fitted, label="fit")
                 for value, error, label in ((pi, pierr, "pi"), (pi2, pi2err, "pi/2")):
                     ax.axvline(
-                        value, ls="--", label=f"{label}={value:.4g} ± {error:.2g} us"
+                        value, ls="--", label=f"{label}={value:.4g} ± {error:.2g} µs"
                     )
                     ax.axvspan(value - error, value + error, alpha=0.2, color="red")
                 ax.set_title(f"Rabi f={freq:.4g} ± {freqerr:.2g} MHz")

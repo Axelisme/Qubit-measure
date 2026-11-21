@@ -45,10 +45,10 @@ tone still needs valid frequency and ADC identity, even when not selected.
 
 ## FTF cost example
 
-A two-participant offline Run used 16 total delays from 0 to 3.75 us,
-0.5 us const x90/x180 pulses, 300 reps and 1 round.
+A two-participant offline Run used 16 total delays from 0 to 3.75 µs,
+0.5 µs const x90/x180 pulses, 300 reps and 1 round.
 Q1 detune was 0 and Q2 detune was 0.5 MHz.
-Recovery was 1007.509 us; readout and ADC integration were 2 and 1.5 us.
+Recovery was 1007.509 µs; readout and ADC integration were 2 and 1.5 µs.
 Recorded RPC Run wall time was 0.689 s, about 0.043 s per joint delay point.
 It measures Run and completion waiting, not acquisition alone, and excludes
 Analyze and Save. The GUI had already executed earlier Runs, so this is not
@@ -68,7 +68,7 @@ The nonzero-detune fringe fit had enormous T2 uncertainty and was not calibratio
 Each tone needs a fixed x90 drive and x180 pi pulse on the same generator.
 The two pulses may have different waveforms, carriers, gains and phases.
 Validate both pulses for each selected tone. Open/Reset sets unselected drive/pi_pulse fields to None; both remain editable.
-Use finite, nonnegative bounds for the shared total-delay range in us.
+Use finite, nonnegative bounds for the shared total-delay range in µs.
 Each tone has its own detune in MHz.
 
 The sequence is common reset, simultaneous x90 pulses, half the requested delay,
@@ -94,7 +94,7 @@ The original first point is omitted before finite-IQ filtering.
 A fringe fit needs six remaining points; decay needs four.
 Fringe phase is fixed at zero unless Fit phase is enabled.
 Decay uses the same model regardless of Fit phase.
-T2E and error are in us; fringe rate and error are in MHz.
+T2E and error are in µs; fringe rate and error are in MHz.
 Each tone returns its index, fit values, selected model and quality, including
 fringe sampling quality when applicable.
 Analysis plots retain the delay coordinates, measured values and fitted curves.
@@ -138,7 +138,7 @@ normalized residual RMS at most 0.1 and relative T2 error at most 0.5.
 Failed or unavailable checks leave candidates unselected with explanatory notes.
 You may select them manually after reviewing the source and fit.
 
-Each qualifying tone proposes its captured qubit's `t2e` in us and a T2E sample
+Each qualifying tone proposes its captured qubit's `t2e` in µs and a T2E sample
 at captured bias. Echo candidates update coherence only.
 An unavailable actual detune still allows an otherwise usable T2E fit.
 Review the model, uncertainty and captured destination before applying.
@@ -171,7 +171,7 @@ frequency on the tone-only grid. Check that both outputs report `saved`.
 Inspect each output's error when saving fails.
 
 For core callers, `MuxCoherenceResult` stores original `tone_indices (K,)`,
-requested total `times (P,)` in us, `signals (K,P)` in ADC-length-normalized units,
+requested total `times (P,)` in µs, `signals (K,P)` in ADC-length-normalized units,
 and `actual_detunes (K,)` / x90 `source_frequencies (K,)` in MHz.
 A nonzero detune without any positive rounded delay can yield NaN actual detune.
 Do not replace it with zero or nominal detune, or infer a frequency correction.

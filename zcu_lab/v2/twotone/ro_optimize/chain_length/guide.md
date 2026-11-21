@@ -8,12 +8,12 @@ After changing a parameter source, use Reset to recapture initial values. Refres
 
 ## Shot and parameters
 
-`twotone/ro_optimize/chain_length` sweeps readout ADC window in us.
+`twotone/ro_optimize/chain_length` sweeps readout ADC window in µs.
 Each shot reads one PulseReadout 16 times without a drive or reset.
 After a readout pulse ends, the readout's `post_delay` gives cavity photons time to decay before the next readout starts.
 The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
 The relax delay K follows each shot. Every shot after the first starts K after the previous shot.
-Set `relax_delay` in us long enough to return to thermal equilibrium.
+Set `relax_delay` in µs long enough to return to thermal equilibrium.
 The Form seeds it from 5·T1. The first shot relies on the state before Run.
 There is no additional wait inside the chain beyond the readout's own timing.
 
@@ -67,7 +67,7 @@ Acquisition calculates scores after each completed round, then the plot thread d
 Stop keeps settings with a completed round. A stop before any completed round raises an error.
 
 Analysis has no options and can use saved sums without cfg or hardware.
-The summary is `best`, a SettingScore containing `setting` in us, `score`, `score_error`, `qnd`, `qnd_error`, `correlation`, `amplification` and `mist`.
+The summary is `best`, a SettingScore containing `setting` in µs, `score`, `score_error`, `qnd`, `qnd_error`, `correlation`, `amplification` and `mist`.
 The API name `mist` holds M, with the diagnostic meaning above.
 There is no fit, no-signal classification or third-state population estimate.
 Invalid projected variance or zero early covariance norm raises ValueError rather than inventing a QND value.
@@ -99,7 +99,7 @@ No weighted M aggregate replaces those pairs.
 Native save and restore preserve the moments for reanalysis of score, M and best setting.
 The tag is `twotone/ro_optimize/chain_length` and cfg schema is `6.0`. An older run can still load its saved moments for analysis, but its cfg is not restored.
 
-`ro_optimize_chain_length` accepts optional `length_start_us` and `length_stop_us` in us, `points`, `relax_delay`, `reps` and `rounds`.
+`ro_optimize_chain_length` accepts optional `length_start_us` and `length_stop_us` in µs, `points`, `relax_delay`, `reps` and `rounds`.
 `points` maps to sweep Expts. Omission keeps the Form value; null passes to the field owner.
 Overrides apply last, then check_ready rejects missing or invalid inputs before Run.
 The recipe runs, analyzes and saves. It proposes no writeback.

@@ -40,11 +40,11 @@ class T2RamseyInputs(RecipeInputs):
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in us.",
+        description="Set Delay › Stop (µs), the free-evolution sweep endpoint.",
     )
     detune_ratio: float | None | Keep = Field(
         KEEP,
-        description="Final-pulse phase-ramp ratio, dimensionless.",
+        description="Set Detune ratio (fringes/step) for the final-pulse phase ramp.",
     )
     points: int | None | Keep = Field(
         KEEP,
@@ -73,10 +73,10 @@ class T2RamseyReport(RecipeReport):
     """T2 Ramsey results and failure reason; cancellation returns no report."""
 
     t2ramsey_us: float | None = Field(
-        description="Free-evolution coherence time in us; null means not estimable."
+        description="Free-evolution coherence time in µs; null means not estimable."
     )
     t2ramsey_err_us: float | None = Field(
-        description="Free-evolution coherence uncertainty in us; null means not estimable."
+        description="Free-evolution coherence uncertainty in µs; null means not estimable."
     )
     detune_mhz: float | None = Field(
         description="Fitted fringe frequency in MHz; zero for decay-only fitting; null means not estimable."

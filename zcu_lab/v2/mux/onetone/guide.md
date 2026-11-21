@@ -20,15 +20,15 @@
 
 ### 無 readout slot 的候選來源
 
-Open／Reset 固定填入 `ro_length = 1.0 us`，不依賴 `kappa`。
+Open／Reset 固定填入 `ro_length = 1.0 µs`，不依賴 `kappa`。
 Mixer 從 group 的 `mixer_freq` 取初值，不依賴 `kappa` 或 tone frequency。
 所有 group resonators 都有有效 `kappa` 時，Open／Reset 估算五個光子衰減時間。Group 的 `time_of_fly` 另用於 trigger 與 pulse 長度。
-`kappa` 與 tone frequency 的單位為 MHz，時間的單位為 us。
+`kappa` 與 tone frequency 的單位為 MHz，時間的單位為 µs。
 
 | 欄位 | 初值來源 |
 | --- | --- |
 | `mixer_freq` | `$mux.mixer_freq`，單位 MHz。缺失或 null 時留空必填。 |
-| `ro_length` | 固定 1.0 us 的 ADC 積分窗候選，不依賴 `kappa` 或 `time_of_fly`。 |
+| `ro_length` | 固定 1.0 µs 的 ADC 積分窗候選，不依賴 `kappa` 或 `time_of_fly`。 |
 | `trig_offset` | `$mux.time_of_fly` 加上五倍 ringup 時間 `5 / (2π · min kappa)`，不讀 resonator 的 pulse 路徑 TOF。 |
 | `length` | `trig_offset + ro_length`，讓 pulse 覆蓋 ADC window。 |
 | `post_delay` | `5 / (2π · min kappa)`，即五個光子衰減時間，不依賴 `time_of_fly`。 |
@@ -36,7 +36,7 @@ Mixer 從 group 的 `mixer_freq` 取初值，不依賴 `kappa` 或 tone frequenc
 任一 resonator 的 `kappa` 缺失或 null 時，不從其餘成員推導等待。`post_delay` 保留範本的 0 µs，`trig_offset` 與 `length` 留空必填。
 Group 的 `time_of_fly` 缺失或 null 時，只讓 `trig_offset` 與 `length` 留空必填。
 `readout/mux:blank` 本身不預填 `trig_offset`，缺少推導來源時不會退回 0。
-上述缺值情境仍填入 `ro_length = 1.0 us`。
+上述缺值情境仍填入 `ro_length = 1.0 µs`。
 已設的 kappa 須為有限正數，mixer 頻率須為有限數，group time_of_fly 須為有限非負數。
 無效的已設來源會讓 Open／Reset 報錯。
 本節逐項列出這些來源。
@@ -60,7 +60,7 @@ Open／Reset 檢查每個元件是否存在、kind 是否正確，以及 `Q1.res
 ## FTF 成本例
 
 一次雙 tone 離線 Run 掃共同 offset −2 至 2 MHz，共 12 點，100 reps、1 round。
-Readout 長 1 us，ADC 積分窗 0.5 us，recovery 為 0.1 us。
+Readout 長 1 µs，ADC 積分窗 0.5 µs，recovery 為 0.1 µs。
 Driver 的 Run action 實測 2.807 s，除以共同掃描點數約為每點 0.23 s。
 這是短掃描的成本量級，不代表 readout 校準已通過。
 
@@ -101,9 +101,9 @@ Labber 匯出保留共同 offset、原始 tone 序號與複數訊號，columns �
 Model type 可選 hanger `hm`、transmission `t` 或 `auto`，預設 `hm`。
 Fit amplitude background 預設開啟，Fit phase curvature 預設關閉，兩者可獨立切換。
 
-Electrical delay seed 單位為 us，預設留空。
+Electrical delay seed 單位為 µs，預設留空。
 留空時，每個 tone 使用對應 resonator.ext.edelay 中符合 generator／ADC route 的有限校準值作 branch seed。
-缺少匹配時，該 tone 使用固定 100 us 上限作 global 搜尋。
+缺少匹配時，該 tone 使用固定 100 µs 上限作 global 搜尋。
 明填有限數字時，所有 active tones 共用此 branch seed，0 與負值也有效。
 Seed 選擇擬合起點，模型仍會擬合 delay。非有限或非數字輸入會拒絕整次 FIT。
 

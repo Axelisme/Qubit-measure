@@ -30,7 +30,7 @@ def reset_scan_buffer(
     Unmeasured points stay NaN. Display conversion never selects a reset optimum.
     """
     fig, ax = plots.subplots(num="measurement")
-    ax.set(xlabel=xlabel, ylabel="Amplitude")
+    ax.set(xlabel=xlabel, ylabel="Amplitude (a.u.)")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
     ax.grid(False)
     viewer = live_line(ax, num_lines=prod(branch_shape))

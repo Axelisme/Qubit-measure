@@ -11,7 +11,7 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 `chain/t2ramsey` sweeps the Ramsey wait like `twotone/t2ramsey`, but every repetition is one cycle of 16 reads instead of one read.
 A cycle waits Relax delay, then plays eight blocks of Pi/2 Pulse, the swept Delay, a second Pi/2 Pulse and two reads of the same Readout, with no reset inside the cycle.
 The second Pi/2 Pulse has the first one's phase plus 180 degrees, so at zero delay it undoes the first and returns the qubit to its start.
-Its phase also advances by 360 × Detune × delay degrees, which adds Detune fringes per us of delay without changing the drive frequency.
+Its phase also advances by 360 × Detune × delay degrees, which adds Detune fringes per µs of delay without changing the drive frequency.
 Relax delay is the thermalisation wait K, including before the first cycle. Set it to at least 5 T1 for the model's thermal-equilibrium start.
 After a readout pulse ends, its `post_delay` sets the wait before the second readout or the next Pi/2 Pulse.
 The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
@@ -27,7 +27,7 @@ Pi/2 Pulse uses the `$qubit.module.x90` slot or a fresh `pi2_pulse` template, an
 Readout must be a pulse readout; a mux readout module is rejected by the Form. The cycle has no Reset.
 Delay runs from 0 to 1.5 × `$qubit.t2r` over 101 points, and Detune starts at 5 / (1.5 × `$qubit.t2r`) MHz, which gives five fringes over the range. Both stay empty when T2r is missing.
 Detune ramps the phase of the second π/2 pulse without changing its drive frequency.
-Relax delay starts at 5 * `$qubit.t1` us, or 150 us when T1 is missing.
+Relax delay starts at 5 * `$qubit.t1` µs, or 150 µs when T1 is missing.
 Every cycle contains eight delays, so one cycle lasts about Relax delay + 8 × (delay + 2 × π/2 length + 2 × readout length).
 Reps starts at 100 and Rounds at 100. Reps must be at least 66, so that even a single delay gives the first round 65 cycles beyond its mean to estimate the noise of the 65 numbers.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.

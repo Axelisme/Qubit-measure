@@ -67,13 +67,20 @@ class LenRabiCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Duration", unit="us")]
+    length: Annotated[SweepCfg, FieldMeta(label="Duration", unit="µs")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     earlystop_snr: Annotated[
         float | None,
@@ -86,7 +93,7 @@ class LenRabiCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -150,7 +157,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         """Sweep constant or flat-top pulse lengths in hardware and return mean IQ."""
         # 1. Monitor Rabi contrast across hardware-swept pulse durations.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Length (us)", ylabel="Signal")
+        ax.set(xlabel="Length (µs)", ylabel="Signal (a.u.)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
@@ -210,7 +217,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
         # 2. Monitor the round-averaged contrast and SNR of the host duration scan.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Length (us)", ylabel="Signal")
+        ax.set(xlabel="Length (µs)", ylabel="Signal (a.u.)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
@@ -314,17 +321,17 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             pi_len,
             ls="--",
             c="red",
-            label=f"pi = {pi_len:.3g} ± {pi_len_err:.2g} μs",
+            label=f"pi = {pi_len:.3g} ± {pi_len_err:.2g} µs",
         )
         ax.axvspan(pi_len - pi_len_err, pi_len + pi_len_err, color="red", alpha=0.2)
         ax.axvline(
             pi2_len,
             ls="--",
             c="red",
-            label=f"pi/2 = {pi2_len:.3g} ± {pi2_len_err:.2g} μs",
+            label=f"pi/2 = {pi2_len:.3g} ± {pi2_len_err:.2g} µs",
         )
         ax.axvspan(pi2_len - pi2_len_err, pi2_len + pi2_len_err, color="red", alpha=0.2)
-        ax.set_xlabel("Pulse length (μs)")
+        ax.set_xlabel("Pulse length (µs)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.set_title(f"Rabi Oscillation (f={freq:.3f} ± {freq_err:.3f} MHz)")
         ax.legend(loc=4)

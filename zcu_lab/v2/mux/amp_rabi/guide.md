@@ -47,7 +47,7 @@ tone still needs valid frequency and ADC identity, even when not selected.
 ## FTF cost example
 
 A two-participant offline Run used 8 gain points from 0 to 0.3, 100 reps
-and 1 round. Each drive was a 0.02 us const pulse, with 0.1 us recovery.
+and 1 round. Each drive was a 0.02 µs const pulse, with 0.1 µs recovery.
 The recorded Run action took 2.105 s, about 0.26 s per joint sweep point.
 This is an order-of-magnitude budget for that short smoke configuration,
 not a calibrated Rabi measurement.

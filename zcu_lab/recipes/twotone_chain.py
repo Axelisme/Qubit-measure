@@ -49,7 +49,7 @@ class TwotoneChainInputs(RecipeInputs):
     )
     pulse_length_us: float | None | Keep = Field(
         KEEP,
-        description="Fixed drive pulse duration in us.",
+        description="Fixed drive pulse duration in µs.",
     )
     points: int = Field(
         ge=2,

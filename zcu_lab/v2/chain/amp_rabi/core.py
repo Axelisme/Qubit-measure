@@ -100,6 +100,7 @@ class ChainAmpRabiCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
+            unit="count",
             description="Cycles per point in each round, at least 66.",
         ),
     ] = Field(ge=66)
@@ -107,6 +108,7 @@ class ChainAmpRabiCfg(ConfigBase):
         int,
         FieldMeta(
             label="Rounds",
+            unit="count",
             description="Software acquisition rounds.",
         ),
     ] = 1
@@ -114,7 +116,7 @@ class ChainAmpRabiCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
         ),

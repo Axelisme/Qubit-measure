@@ -72,13 +72,13 @@ class MuxOnetoneAnalyzeParams:
     """
 
     edelay: Annotated[
-        float | None, ParamMeta(label="Electrical delay seed (us; blank = auto)")
+        float | None, ParamMeta(label="Electrical delay seed (µs; blank = auto)")
     ] = None
-    """Electrical-delay branch seed in us, default None, shown as blank.
+    """Electrical-delay branch seed in µs, default None, shown as blank.
 
     A finite number, including zero or a negative value, seeds the delay branch.
     Blank first uses a finite route-matched calibration as the seed.
-    Otherwise automatic branch selection uses an internal 100 us search cap.
+    Otherwise automatic branch selection uses an internal 100 µs search cap.
     Fitting starts from the selected branch and stores the fitted delay in the
     analysis result. The input field retains the supplied seed or blank state.
     Invalid seeds raise ValueError at analyze entry.

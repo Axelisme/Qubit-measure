@@ -25,7 +25,7 @@ The Form takes readout from `$resonator.module.readout` when that slot exists.
 Without a slot, it starts from the readout template and still needs the readout wiring, frequency and calibration.
 A readout slot alone does not make the experiment ready.
 Measured drive carriers, gains, scan endpoints and point counts remain required.
-The initial relaxation delay uses five times the captured qubit T1, with 30 us as the T1 fallback when missing.
+The initial relaxation delay uses five times the captured qubit T1, with 30 µs as the T1 fallback when missing.
 Confirm this delay for the device before Run.
 
 Source changes do not refill an open Form.
@@ -36,16 +36,16 @@ Reset or reopen after applying a new readout classifier.
 ## Select the envelopes and scan
 
 Pump waveform and Stokes waveform each accept gauss, cosine, drag or arb.
-Both start as Gaussian with sigma 0.05 us and length 0.3 us.
+Both start as Gaussian with sigma 0.05 µs and length 0.3 µs.
 These are Form initial values, not model defaults or measured calibrations.
 Select a waveform library key or an inline shape independently for each drive.
-Set the selected shape's parameters in us, including length and Gaussian/DRAG sigma.
+Set the selected shape's parameters in µs, including length and Gaussian/DRAG sigma.
 DRAG also uses its delta and alpha parameters.
 Arbitrary envelopes take their duration from the selected sampled asset.
 No common width or six-sigma length rule couples the drives.
 If an envelope exceeds the generator's memory, the existing upload check reports the error.
 
-Positive Stokes lead delays Pump by that many us.
+Positive Stokes lead delays Pump by that many µs.
 Negative Stokes lead delays Stokes instead.
 Different pulse lengths are allowed. Readout starts only after both timelines finish.
 

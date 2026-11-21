@@ -99,7 +99,7 @@ async def mux_twotone_spectrum(
     Overrides run last. Only participant drive/sweep settings are required;
     readout identities remain required for every tone.
     n sets shared Expts; sweeps covers all original tones with start/stop only.
-    Frequency uses MHz, length us and gain in a.u. within [-1, 1].
+    Frequency uses MHz, length µs and gain in a.u. within [-1, 1].
     Analyze with the supplied model_type, then ask before writeback.
     The fitted curve is always shown.
     Save raw and completed artifacts after Run, including expected fit failures.

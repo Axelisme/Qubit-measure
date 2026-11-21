@@ -23,11 +23,11 @@ Unassigned 不提案。Recipe 的 `resonators` 仍為必填，不沿用 GUI 預�
 
 Open／Reset 從固定 capture 讀取 resonator 校準，並以 `readout` Template 建立初值。
 
-- `kappa` 使用 MHz，時間使用 us。TOF 讀 resonator 頂層 `$resonator.time_of_fly`，不從 ext 讀取。缺失或 null 時，trigger 與 pulse length 留空必填。
+- `kappa` 使用 MHz，時間使用 µs。TOF 讀 resonator 頂層 `$resonator.time_of_fly`，不從 ext 讀取。缺失或 null 時，trigger 與 pulse length 留空必填。
 - 未設 `kappa`（缺 leaf 或 null）時，`trig_offset = time_of_fly`。
   已設時，`trig_offset = time_of_fly + 5 / (2 * pi * kappa)`。
-  `kappa = 1 MHz` 時，等待增量約為 `0.795775 us`。
-- `ro_length` 初值為 Template 原 pulse 長度減 `0.03 us`，目前為 `0.97 us`。
+  `kappa = 1 MHz` 時，等待增量約為 `0.795775 µs`。
+- `ro_length` 初值為 Template 原 pulse 長度減 `0.03 µs`，目前為 `0.97 µs`。
 - `pulse length = max(Template 原長度, trig_offset + ro_length)`。
   Pulse 至少涵蓋 ADC 窗口，原長度較大時保留原長度。
 - Open／Reset 產生 detached、可編輯的 timing。操作員之後的編輯保留於 cfg 輸出。

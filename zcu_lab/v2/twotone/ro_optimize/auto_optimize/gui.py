@@ -52,7 +52,7 @@ def _RoOptAuto_get_writeback_items(
         ),
         ParameterWriteback(
             target_name="$qubit.ext.best_ro_length",
-            description="Optimal readout length (us)",
+            description="Optimal readout length (µs)",
             proposed_value=result.best_length,
         ),
     ]

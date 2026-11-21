@@ -46,11 +46,11 @@ class T2EchoInputs(RecipeInputs):
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Total echo-delay stop in us, not half-delay.",
+        description="Total echo-delay stop in µs, not half-delay.",
     )
     detune_ratio: float | None | Keep = Field(
         KEEP,
-        description="Final-pulse phase-ramp ratio, dimensionless.",
+        description="Set Detune ratio (fringes/step) for the final-pulse phase ramp.",
     )
     points: int | None | Keep = Field(
         KEEP,
@@ -79,10 +79,10 @@ class T2EchoReport(RecipeReport):
     """T2 Echo results and failure reason; cancellation returns no report."""
 
     t2echo_us: float | None = Field(
-        description="Refocused coherence time in us; null means not estimable."
+        description="Refocused coherence time in µs; null means not estimable."
     )
     t2echo_err_us: float | None = Field(
-        description="Refocused coherence uncertainty in us; null means not estimable."
+        description="Refocused coherence uncertainty in µs; null means not estimable."
     )
 
 

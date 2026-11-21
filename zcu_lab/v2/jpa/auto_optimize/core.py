@@ -204,17 +204,24 @@ class JPAOptCfg(ConfigBase):
         ),
     ] = None
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -523,7 +530,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         ax_iter.axhline(max_snr, color="r", ls="--", label=f"best = {max_snr:.2g}")
         ax_iter.scatter([max_id], [max_snr], color="r", marker="*")
         ax_iter.set_xlabel("Iteration")
-        ax_iter.set_ylabel("SNR")
+        ax_iter.set_ylabel("SNR (a.u.)")
         ax_iter.legend()
         ax_iter.grid(True)
 
@@ -535,7 +542,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
             ax.scatter([best_value], [max_snr], color="r", marker="*")
             ax.set_xlabel(label_name)
             ax.ticklabel_format(axis="x", useOffset=False)
-            ax.set_ylabel("SNR")
+            ax.set_ylabel("SNR (a.u.)")
             ax.legend()
             ax.grid(True)
 

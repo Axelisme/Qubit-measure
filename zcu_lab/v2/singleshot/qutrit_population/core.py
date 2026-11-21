@@ -46,7 +46,7 @@ class QutritPopulationCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="Pi 01",
-            description="Calibrated g to e pulse; frequency in MHz, duration in us.",
+            description="Calibrated g to e pulse; frequency in MHz, duration in µs.",
         ),
     ]
     pi03: Annotated[
@@ -64,13 +64,13 @@ class QutritPopulationCfg(ConfigBase):
         ),
     ]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    shots: Annotated[int, FieldMeta(label="Shots per preparation")] = Field(
-        default=4096, ge=6
+    shots: Annotated[int, FieldMeta(label="Shots per preparation", unit="count")] = (
+        Field(default=4096, ge=6)
     )
-    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = (
+    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="µs")] = (
         Field(default=1.0, ge=0)
     )
-    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us")] = Field(
+    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="µs")] = Field(
         ge=0
     )
 
@@ -150,8 +150,8 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         ):
             ax.scatter(row.real, row.imag, s=2, alpha=0.3, label=label)
         ax.set(
-            xlabel="I (mean-sample ADC)",
-            ylabel="Q (mean-sample ADC)",
+            xlabel="Mean-sample ADC I (a.u.)",
+            ylabel="Mean-sample ADC Q (a.u.)",
             title="Reference preparations (not pure states)",
         )
         ax.legend()

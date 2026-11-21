@@ -52,17 +52,24 @@ class PowerDepCfg(ConfigBase):
     readout: Readout.Cfg
     gain: Annotated[SweepCfg, FieldMeta(label="gain", unit="a.u.")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -107,7 +114,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         )
 
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse gain", ylabel="MIST")
+        ax.set(xlabel="Pulse gain (a.u.)", ylabel="Signal difference (a.u.)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid(False)
         viewer = live_line(ax)
