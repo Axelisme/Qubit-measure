@@ -1,12 +1,12 @@
 """Shared starting values for readout length sweeps."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite
 
-from zcu_tools.cfg_model import FieldMeta, PulseReadoutCfg, Slot, Template
+from zcu_tools.cfg_model import FieldMeta, PulseReadoutCfg, Slot, Template, TemplateDef
 from zcu_tools.gui.form_adapter import FormContext
 
-from zcu_lab.templates import TEMPLATES
 from zcu_lab.v2.support.measure.seed_metadata import seed_metadata
 
 
@@ -21,18 +21,17 @@ class ReadoutLengthMarginSeed:
 
 
 def pulse_readout_length_margin(
-    ctx: FormContext, readout: Slot | Template
+    ctx: FormContext, readout: Slot | Template, *, templates: Mapping[str, TemplateDef]
 ) -> ReadoutLengthMarginSeed:
     """Read pulse duration minus ADC window from the selected readout source.
 
-    ctx is the fixed Open/Reset capture. Pass the original Slot or lab Template
-    before overriding lengths for the sweep. A Slot requires a capture and
-    resolves its key there. The selected Template uses the lab catalog's
-    authored scalar seeds and its own overrides. Either source returns None
-    for unresolved or non-finite lengths, without substituting another source.
-    Only a resolved template fallback is marked uncalibrated. Captured and
-    blank values have unknown calibration status. Slot key, template ID and
-    capture failures propagate. No sources are edited.
+    Pass the original Slot or Template before hiding lengths for the sweep.
+    A Slot reads the fixed Open/Reset capture in ctx. A Template uses the
+    supplied registry catalog's scalar seeds, with Template.set taking priority.
+    Unknown template IDs raise ValueError, and Slot key and capture failures
+    propagate. Unresolved or non-finite lengths leave the value blank instead
+    of falling back to another source. Only a supplied template margin is
+    marked uncalibrated. No sources are edited.
     """
     if isinstance(readout, Slot):
         if ctx.parameters is None:
@@ -50,7 +49,10 @@ def pulse_readout_length_margin(
             return ReadoutLengthMarginSeed(None, seed_metadata(source))
     else:
         source = f"{readout.id} template: waveform.length − ro_length"
-        seeds = TEMPLATES[readout.id].seeds
+        try:
+            seeds = templates[readout.id].seeds
+        except KeyError as exc:
+            raise ValueError(f"Unknown template {readout.id!r}") from exc
         pulse = readout.set.get("waveform.length", seeds.get("waveform.length"))
         window = readout.set.get("ro_length", seeds.get("ro_length"))
 

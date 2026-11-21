@@ -38,7 +38,7 @@
 `../templates.py` 提供注入 Registry 的持久範本目錄。公開支援套件 `support/measure/` 提供跨 adapter
 共用的 analysis、writeback 與 context mechanics，也可集中已定案且供多個 Form 共用的具名初值政策。
 
-每個實驗在 `core.py` 定義 cfg 與 FieldMeta，在 `form.py` 提供 Qt-free `make_form(ctx)`。
+每個實驗在 `core.py` 定義 cfg 與 FieldMeta，在 `form.py` 定義 Qt-free Form。框架透過 adapter 的 `make_form(ctx)` 呼叫它。
 core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。
 分析計算包含擬合、逐 tone 迴圈、失敗隔離與結果型別。GUI 為 writeback 做的有限值檢查與摘要整理不算分析計算。
 mux/onetone 的逐 tone 數值計算、outcomes 與單 tone 失敗隔離由 core 擁有。
@@ -84,7 +84,7 @@ Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Refre
 宣告 choices 的文字或數值 leaf 沿用既有初值求值能力，以可接受的 direct 值保存，不開放 authored Expr input。Literal、Enum、bool 與 InputPolicy 禁用 expression 的 leaf 不新增初值求值能力。使用者輸入的 expression 仍保留原文交一般驗證。
 必要來源缺少時留 Invalid，不由 framework 補數字。實驗可在 `make_form` 明確選擇已定案的首次初值，見下節。Reset 重新捕捉並可換形狀，Run 使用畫面上的值。
 
-持久範本目錄由組合根以 Registry(templates=TEMPLATES) 注入，也供 Library 新建選單使用。
+組合根以 `Registry(templates=TEMPLATES)` 注入預設持久範本，Library 新建選單也讀這份 catalog。chain_length 與 rpi_length 的 Form factory 由 `register_all` 綁定 `registry.templates`，讓長度差初值與 Form 展開使用同一份範本。
 範本儲存 Spec defaults 與 seeds，不維護另一份角色 shape／blank／ref 表。
 Library、writeback 與 Inspect 也使用 gui.form／FormEditor，透過 gui.form_adapter
 投影持久 Spec。Adapter 的 ModuleWriteback 直接提供 ModuleSpec proposal，不組編輯樹。

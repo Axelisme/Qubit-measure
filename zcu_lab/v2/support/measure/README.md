@@ -60,9 +60,9 @@ Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitio
 單一實驗的初值政策留在其 `form.py`，其他 domain policy 留在 authoritative file；同一小群組共用但不具全域意義的
 helper 留在群組內 `_shared.py`。
 
-表單形狀與初值由各實驗的 `form.py` 提供 `make_form(ctx)`，共用生成器位於
-`zcu_tools.gui.form_adapter`。持久範本表由 `zcu_lab.templates.TEMPLATES` 擁有，
-組合根注入 Registry 與 Library 新建選單。不再維護 builder、Seed wrapper 或角色 default 表。
+表單形狀與初值由各實驗的 `form.py` 定義，共用生成器位於 `zcu_tools.gui.form_adapter`。
+組合根將預設的 `zcu_lab.templates.TEMPLATES` 注入 Registry，Library 新建選單與 Form 展開都讀 `registry.templates`。
+`register_all` 將這份 catalog 綁給 chain_length 與 rpi_length 的 factory。框架仍呼叫 `make_form(ctx)`。
 
 `record_frame.captured_qubit_flux` 從固定 Run／Start parameter capture 複製具名 qubit 的 flux 區塊。
 GUI record writers 與 workflow Plan 接線共用這個查詢。缺 capture 或非 qubit 會報錯，不以未校準形狀代替。尚未校準的 qubit 回傳 `{offset: null, period: {}}`。
@@ -81,8 +81,8 @@ Group model 仍擁有長度與重複 qubit 的結構規則。
 Template 持有自己的 set 與 seed metadata。
 路徑語法與來源故障由 `ctx.has` 傳出，family 不相容由 Form 報錯。
 
-`readout_initial_values.pulse_readout_length_margin(ctx, readout)` 從選定的 readout 取 `waveform.length − ro_length`，單位為 µs。
-用 Slot 時讀固定 capture，用 Template 時讀 lab 範本的兩個初值。任一長度無法解析時，必填欄位留空。
+`readout_initial_values.pulse_readout_length_margin(ctx, readout, templates=...)` 從選定的 readout 取 `waveform.length − ro_length`，單位為 µs。
+Slot 讀固定 capture。Template 從傳入的 catalog 讀取初值，優先使用 `Template.set` 的覆寫，不另讀預設 catalog。未知的範本 ID 報錯。任一長度無法解析時，必填欄位留空。
 Form 在覆寫模組內的掃描欄位前取得差值及診斷 metadata，不寫回模組。
 只有實際填入的固定範本差值標為 uncalibrated；捕捉的差值與空白欄位不標記校準狀態。
 

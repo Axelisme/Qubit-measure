@@ -48,8 +48,8 @@ Templates 發布後不修改其內容；frozen dataclass 不會遞迴凍結範�
 各入口的最小 Protocol 與依賴理由見 [ADR-0072](../docs/adr/0072-module-boundaries.md#lab-定義與組合根)。
 
 Measure behavior 先註冊 components，再以 `lab.templates` 建 Registry，呼叫 `lab.register_experiments` 填入 adapters。
-Library 新建直接讀 registry 的範本，不另建 catalog。
-Reload 保留既有範本與元件註冊，不重新 bootstrap components。
+Library 新建直接讀 `registry.templates`。`definitions.register_all` 綁同一份 catalog 給 chain_length 與 rpi_length，供兩張表在沒有擷取模組時取得長度差。
+Reload 保留既有範本與元件註冊，不重新 bootstrap components。兩張表的 factory 重新綁到該次註冊收到的 Registry 範本。
 Import 不執行註冊，重複 bootstrap 按接收 registry 的規則報錯。
 
 `components/` 擁有具體元件 model、wiring、module 槽與內建角色。`base.py` 放共用欄位與基礎元件；`qubit.py` 放共用 qubit 欄位與 wiring。Fluxonium、transmon、resonator、JPA 與 mux 各有獨立子模組。`__init__.py` 提供公開匯出與明確註冊入口。Model 自行宣告 ext 與 extra 策略，普通字串引用在 resolve 時解析。GUI behavior 與 measure MCP server 消費 lab 的 registrar，明確 bootstrap；兩個 analysis MCP 不註冊 components。Notebook caller 可呼叫 `components.register_all(component_registry)`。框架只提供容器、kind 查表、角色解析與來源記錄。
@@ -67,7 +67,7 @@ Scalar alias `mux=MG12` 讓 mux adapter 從固定 capture 的 `$mux.module.reado
 Recipe 的宣告、Inputs／Report、tab 操作、來源與 overrides、Analyze／取消及 Save 契約見
 [recipes README](recipes/README.md)。Mux 的逐元素操作見 [mux recipe guide](recipes/mux-guide.md)。
 
-Measure 的 `form.py` 提供 `make_form(ctx)`，在 Open／Reset 依固定來源選初值與形狀。
+Measure 在 Open／Reset 呼叫 adapter 的 `make_form(ctx)`，依固定來源選初值與形狀。表單定義在各實驗的 `form.py`。
 `gui.py` 宣告 Adapter／Analysis／Interactive／PostAnalysis 值，不繼承 adapter class。
 Form 輸出 adapter 的輸入型別，adapter.run 轉成實際實驗 cfg 並回傳 RunRecord。
 Module 與掃描欄位平鋪於頂層，只有 pulse Advanced 保留既有分組與摺疊。

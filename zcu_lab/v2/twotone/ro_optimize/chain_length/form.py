@@ -1,8 +1,9 @@
 """Starting values for ro_optimize/chain_length; Qt-free data only."""
 
+from collections.abc import Mapping
 from dataclasses import replace
 
-from zcu_tools.cfg_model import FormNode, Hidden, Range, Template
+from zcu_tools.cfg_model import FormNode, Hidden, Range, Template, TemplateDef
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
@@ -13,11 +14,15 @@ from zcu_lab.v2.support.measure.seed_metadata import pulse_readout_seed_metadata
 from zcu_lab.v2.twotone.ro_optimize.chain_length.core import ChainLengthCfg
 
 
-def make_form(ctx: FormContext) -> Form[ChainLengthCfg]:
+def make_form(
+    ctx: FormContext, *, templates: Mapping[str, TemplateDef]
+) -> Form[ChainLengthCfg]:
     """Seed the editable length margin in us from the captured readout or template.
 
-    Leave it required and blank if either length cannot be resolved. Seed thermal
-    relaxation K from 5*T1 using the same fixed Open/Reset context.
+    Use templates from the registering Registry only when ctx has no captured
+    readout. An unknown template ID raises ValueError. Leave the margin required
+    and blank if either length cannot be resolved. Seed thermal relaxation K from
+    5*T1 using the same fixed Open/Reset context.
     """
     readout = source(
         ctx,
@@ -28,7 +33,7 @@ def make_form(ctx: FormContext) -> Form[ChainLengthCfg]:
             seed_metadata=pulse_readout_seed_metadata(gain=0.1),
         ),
     )
-    margin = pulse_readout_length_margin(ctx, readout)
+    margin = pulse_readout_length_margin(ctx, readout, templates=templates)
     # Run replaces both lengths for each point in the ADC window sweep.
     readout = replace(
         readout,

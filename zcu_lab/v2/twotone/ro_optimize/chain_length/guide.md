@@ -21,7 +21,7 @@ Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout`
 The template uses the resonator frequency, wiring and time of flight.
 ADC window starts at 11 points from 0.2 to 2.2 µs. At each point, Run sets the ADC window to the sweep value and the pulse duration to `window + length_margin`. The Form hides the two lengths that Run sets.
 
-**Length margin (µs)** is editable and must be finite and nonnegative. On Open or Reset it starts at the captured readout's `waveform.length − ro_length`. Without a captured readout it starts at the `readout` template’s uncalibrated 0.03 µs difference. If either length cannot be resolved, enter the margin before Run. Refresh keeps the existing input.
+**Length margin (µs)** is editable and must be finite and nonnegative. On Open or Reset it starts at the captured readout's `waveform.length − ro_length`. Without a captured readout, it uses the `readout` template’s difference as an uncalibrated starting value. The stock template gives 0.03 µs. If either length cannot be resolved, enter the margin before Run. Refresh keeps the existing input.
 
 Keep the trigger offset and pre-delay from a readout that covers the ADC window. Sweeping both lengths by the same amount preserves their timing at the ADC, apart from clock rounding. If you change the margin or the trigger, verify that the pulse reaches the ADC before it opens and still covers it when it closes. The sweep does not adjust the trigger offset or require a separate flight-time input.
 Reps defaults to 2000 shots per setting per round. Rounds defaults to 320, giving 640 000 shots per setting.

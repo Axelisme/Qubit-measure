@@ -67,7 +67,7 @@ Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
 並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。
 [\_chain_common.py](twotone/ro_optimize/_chain_common.py) 只保留保存映射、完成點篩選與最佳 setting 摘要型別。
-[chain_length](twotone/ro_optimize/chain_length/guide.md) 與 [rpi_length](twotone/ro_optimize/rpi_length/guide.md) 在每個 ADC window 加上同一個可編輯的 `length_margin` 設定 pulse 長度。初值取擷取模組的 pulse 長度減 ADC window，沒有模組才用 readout 範本。
+[chain_length](twotone/ro_optimize/chain_length/guide.md) 與 [rpi_length](twotone/ro_optimize/rpi_length/guide.md) 在每個 ADC window 加上同一個可編輯的 `length_margin` 設定 pulse 長度。初值取擷取模組的 pulse 長度減 ADC window，沒有模組才用該 Registry 的 readout 範本。
 Rπ 的 rpi_power／rpi_freq／rpi_length 各自在 `run()` 寫出掃描與 R→π 鏈，並保留自己的 cfg、Result 與分析摘要型別。
 三者各自在 core 畫 score 與診斷圖；[\_rpi_common.py](twotone/ro_optimize/_rpi_common.py) 只保留共用的 `rpi_sums` 解碼、選點與格式化。
 
@@ -333,6 +333,8 @@ zcu_lab/
 
 `support/resonator.py` 集中單 tone 與 mux 的模型 fitting 及 route prior 解析，不 import GUI。各實驗自己持有 Figure 並選擇 renderer，各 caller 保留分析選擇、失敗隔離與 writeback 政策。Core 不經 `support/measure/` 取得這些 mechanics。
 
-`definitions.register_all` 明列 measure adapters，從 caller 的 Registry 取得 `templates.TEMPLATES` 持久範本，填入 startup 的 library catalog。組合根以 `Registry(templates=TEMPLATES)` 注入一次，import 不註冊或操作硬體。Reload 重建 leaf、catalog 與 core-typed Notebook helper，保留 measure／singleshot shared support、workflow support、templates 與框架 identity。修改固定依賴需要重啟。
+組合根以 `Registry(templates=TEMPLATES)` 注入預設持久範本。Library 新建與表單範本展開都讀 `registry.templates`。`definitions.register_all` 明列 measure adapters，並把收到的範本綁給 chain_length 與 rpi_length 的 Form factory。Import 不註冊或操作硬體。
+
+Reload 重建 leaf、adapter catalog 與 core-typed Notebook helper，保留 measure／singleshot shared support、workflow support、templates 與框架 identity。兩個 Form factory 使用該次註冊收到的 Registry 範本。修改固定依賴需要重啟。
 
 框架 owner 用測試自己定義的最小合成 workflow／adapter 驗證公開接縫，不 import `zcu_lab`。本套件的實驗定義不寫個別測試，也不以 lab registry 選取測試材料。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow。Core-only caller 明確 import `core`；GUI callers 明確選擇其附件。
