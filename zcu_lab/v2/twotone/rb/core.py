@@ -113,7 +113,7 @@ def _live_plot(
     plots: Plots, depths: NDArray[np.int64], target: TargetGate | None
 ) -> Callable[[NDArray[np.complex128]], None]:
     """Show one live line per arm and return its owner-dispatched IQ update."""
-    fig, ax = plots.subplots(num="measurement")
+    fig, ax = plots.subplots(num="measurement", layout="constrained")
     experiment = "Reference RB" if target is None else f"Interleaved RB · {target}"
     labels = (
         ("Reference",) if target is None else ("Reference", f"Interleaved {target}")
@@ -127,7 +127,7 @@ def _live_plot(
     viewer = live_errorbar(ax, num_lines=len(labels))
     for line, label in zip(ax.lines, labels, strict=True):
         line.set_label(f"{label} ± seed SD")
-    ax.legend()
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncols=len(labels))
 
     xs = depths.astype(np.float64)
 

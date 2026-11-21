@@ -415,7 +415,9 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         )
 
         # 3. Show the oscillation and the fitted calibration lengths.
-        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+        fig, ax = plots.subplots(
+            num="fit", figsize=config.figsize, layout="constrained"
+        )
 
         if result.iq_moments is None:
             ax.plot(lens, real_signals, ".", label="Measured")
@@ -446,10 +448,8 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         ax.axvspan(pi2_len - pi2_len_err, pi2_len + pi2_len_err, color="red", alpha=0.2)
         ax.set_xlabel("Pulse length (µs)")
         ax.set_ylabel("IQ projection (a.u.)")
-        ax.set_title(f"Length Rabi · Rabi frequency = {freq:.3f} ± {freq_err:.3f} MHz")
-        ax.legend(loc="best")
-
-        fig.tight_layout()
+        fig.suptitle(f"Length Rabi · Rabi frequency = {freq:.3f} ± {freq_err:.3f} MHz")
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
 
         # Include length and frequency uncertainties in the GUI summary as in the figure.
         return LenRabiAnalysis(

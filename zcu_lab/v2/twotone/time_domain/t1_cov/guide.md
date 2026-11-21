@@ -18,7 +18,7 @@ Analyze recalibrates from all measured points. Choose `n_states=2` or `3`, with 
 
 The fit uses $C = 1 - \mathrm{tr}(J)$, the probability that the state differs between the two reads. $J$ is the joint probability of the two states. The conditional transfer matrix is a calibration diagnostic, not the fitted observable or a gate fidelity. `skip` omits leading points from the fit, and the fit also drops nonfinite delay and C pairs. Select `dual_exp` to fit two decay terms instead of one.
 
-The fit plot shows C and the fitted curve. The legend reports `pi_hat`, the populations after `pre_readout`, ordered by population rather than assigned g/e/f labels. Decay during the first read can lower the excited population. The summary reports T1, its error in µs, normalized singular values, and fit diagnostics. The second lifetime and its error are empty for a single-exponential fit.
+The fit plot shows C and the fitted curve. The summary reports `pi_hat`, the populations after `pre_readout`, ordered by population rather than assigned g/e/f labels. Decay during the first read can lower the excited population. The summary also reports T1, its error in µs, normalized singular values, and fit diagnostics. The second lifetime and its error are empty for a single-exponential fit.
 
 ## Review writeback and save
 
@@ -38,4 +38,4 @@ The recipe runs, analyzes, asks before writing T1, and saves completed acquisiti
 
 The line shows the inferred probability C that the state changed between readouts. Live uses a two-state calibration and shows Calibrating until it can identify the states. Analyze can request three states with noncollinear IQ centers. At finite shot counts C can lie outside [0, 1]; check separation and the assumed shared IQ response rather than clipping it.
 
-C comes from a shared calibration and inversion of paired IQ moments, not from counting classified changed shots. The figure does not substitute a binomial SEM. The uncertainty beside T₁ is the fit standard error. R² compares residual and measured variation around the mean; it does not validate the readout calibration. The Analyze summary repeats the acquired cfg's Reps × Rounds.
+C comes from a shared calibration and inversion of paired IQ moments, not from counting classified changed shots. The figure does not substitute a binomial SEM. The uncertainty beside T₁ is its fit standard error, not the uncertainty of any individual C point. R² compares residual and measured variation around the mean; it does not validate the readout calibration. The Analyze summary repeats the acquired cfg's Reps × Rounds.

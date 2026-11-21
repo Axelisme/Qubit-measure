@@ -312,7 +312,7 @@ def _live_plot(
     us, normalized (count, time) contrast and the current SNR as a flat payload.
     It updates the heatmap, two recent rows and SNR title; inputs are unchanged.
     """
-    fig, _ = plots.subplots(1, 2, num="measurement")
+    fig, _ = plots.subplots(1, 2, num="measurement", layout="constrained")
     heat_ax, line_ax = fig.axes
     heat_ax.set(
         title="CPMG acquisition",
@@ -333,7 +333,7 @@ def _live_plot(
     for artist in line_ax.lines[:-1]:
         artist.set(marker="None", alpha=0.6, color="C1", label="Previous count")
     line_ax.lines[-1].set(label="Latest count", marker=".", color="C0")
-    line_ax.legend()
+    line_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18))
 
     @plots.on_plot_thread
     def update(data: tuple[NDArray[np.float64], NDArray[np.float64], float]):
