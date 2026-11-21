@@ -298,9 +298,19 @@ Framework 測試用 synthetic adapter 驗 Form、Open／Reset、固定 capture�
 
 例：`singleshot/len_rabi` 在 FTF 測試 point 上以初值 Run，完成 23 點後，第 24 點報 `generator 2: buffer length must be 8192 samples or less.`。操作員或 agent 依訊息查知識庫的 judge 條目，換算容量，再縮短 `Length → Stop` 或改用 flat_top。
 
-邊界：操作員或 agent 常在按 Run 之後才撞到同一類限制時，再考慮加檢查。加的話放在 adapter.run 開頭，這是 [[0067]] 規定的額外實驗驗證位置。gain 這類不依板子的固定範圍不在本條範圍內。
+邊界：操作員或 agent 常在按 Run 之後才撞到同一類限制時，再考慮加檢查。加的話放在 adapter.run 開頭，這是 [[0067]] 規定的額外實驗驗證位置。gain 這類不依板子的固定範圍不在本條範圍內。見〈表單只做現成機制做得到的簡單檢查〉。
 
 使用者 2026-11-21 先選 Run 開頭報錯：「1a, 由於run內是黑盒，可以抱錯，而cfg只能自然做到簡單中性的檢查，這是可以接受的取捨，bc的維護複雜度略高，且目前沒有強烈需求……」。同日改判：「上一題的一我改變想法，我想先補guide就好」。之後 guide 的部分改放知識庫，見 [[0075]]。比較見[表單預設超過板子限制，錯誤解析放知識庫](../discussions/2026-11-21-form-board-limits.md)。
+
+### 表單只做現成機制做得到的簡單檢查
+
+不依板子、只看單一值的固定範圍，用欄位 annotation 在表單擋。例如 runtime `PulseCfg.gain`、`PulseReadoutCfg.gain` 用 `cfg_model` 的 `Gain`（[-1, 1]），填 1.6 時那一列變紅，表單不交付 cfg。需要新增並長期維護的機制不做，包括專用型別、端點投影、邊界特例與新的警示機制；這些情況交給 Run 內既有的檢查，或寫進 guide 與知識庫。
+
+例：掃描 gain 維持一般 `SweepCfg`，表單不擋。`singleshot/reset_check` 的 Gain Stop 填 1.6 時表單接受，按 Run 後在 acquisition 前被拒。FPGA 掃描由 program 的 `add_pulse` 拒絕；host 迴圈逐點傳入的值，在組該點的 runtime cfg 時由 `Gain` 拒絕。兩條路徑的錯誤訊息不同，訊息內容不屬契約。若要在表單擋掃描端點，得為 Center、Step 模式決定標哪一列（這兩種模式沒有 Start／Stop 列），處理 −0.7 + 0.1 × 17 = 1.0000000000000002 這類浮點端點，還要為所有掃描共用的 `SweepCfg` 另做 gain 專用型別。
+
+邊界：要跨欄位計算或依板子的限制留在 Run。例如 CPMG 的 interval 由三個欄位算出；CZ 的 `scale × gain` 是跨欄位乘法；Mux Amp Rabi 只檢查參與的 tone，範圍留在 participants validator。防止「程式照跑卻默默產生錯誤資料」的守門不受本條限制，仍要加。
+
+使用者 2026-11-21 先定方向：「2檢查固定範圍這種簡單的機制可以在form做，太複雜的保留在run抱錯」。同日得知掃描端點要另做機制後，選只留純量：「那就采用建议吧，能够简单实做的机制，那就可以实做。如果需要加上一些需要维护的机制，那就算了。检查这种东西简单就好，对我来说，维护的负担才是重点」。隨後以「例子没错，边界也对。简单来说，不影响行为的检查应该以自然、简单即可。」核准這條原則與邊界。Mux 與 host 掃描兩句由 designer 依使用者授權代裁，使用者未覆核。比較見[Gain 固定範圍：表單只驗純量，掃描留給 Run](../discussions/2026-11-21-form-gain-range.md)。
 
 ## 取捨
 

@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-20，記憶體 arb 波形、herald 分派與 module 遮罩來源
+**Last updated:** 2026-11-21，scalar gain override validation
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -148,8 +148,16 @@ A `TableParam` in `ro_length` raises `NotImplementedError` when constructing
 `PulseReadout`, before build. Linear ADC-window sweeps retain QICK's existing
 compile restrictions. `MuxReadout` does not support table sweeps.
 
-`cfg.set_param(name, value)` remains available and mutates that cfg. Use a
-caller-owned copy when deliberately updating cfg before constructing modules.
+Scalar gain overrides must be in [-1, 1], including gains on nested reset
+pulses. Applying an out-of-range scalar raises `ValidationError` when the
+constructor writes the effective cfg. A host sweep passes one scalar gain per
+point, so the rejected point does not enter acquisition. For an FPGA sweep,
+`MyProgramV2.add_pulse` rejects an out-of-range `QickParam` during compilation
+with `ValueError`. The two paths need not report the same diagnostic.
+
+`cfg.set_param(name, value)` mutates that cfg and applies the same scalar gain
+validation on assignment. Use a caller-owned copy when deliberately updating cfg
+before constructing modules.
 
 ## Table sweep parameters
 
