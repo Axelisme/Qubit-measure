@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+from zcu_tools.experiment.simulation import closing_environment
 from zcu_tools.resources.simulation_schema import ReceiverBackground
 from zcu_tools.simulate.adc import (
     BackgroundBandEdge,
@@ -12,11 +13,56 @@ from zcu_tools.simulate.adc import (
 )
 from zcu_tools.simulators.ftf import environment as ftf_module
 from zcu_tools.simulators.ftf.config import parse_ftf
+from zcu_tools.simulators.ftf.environment import ftf
 from zcu_tools.simulators.ftf.environment.preparation import preparation_key
 from zcu_tools.simulators.ftf.environment.readout import readout_configuration
 
+from tests.program._profiles import load_mux_soccfg, load_soccfg
 from tests.simulators.ftf.config._data import dual_readout_document, ftf_document
 from tests.simulators.ftf.environment._templates import request
+
+
+@pytest.mark.parametrize(
+    ("pulse_route", "mux_gen", "mux_adcs", "expected"),
+    [
+        pytest.param((0, 0), 7, (2, 3), ((0, 0), (7, 2), (7, 3)), id="default-wiring"),
+        pytest.param((4, 3), 1, (4, 1), ((1, 1), (1, 4), (4, 3)), id="rewired"),
+        pytest.param((1, 2), None, (), ((1, 2),), id="pulse-only"),
+    ],
+)
+def test_environment_declares_only_configured_adc_routes(
+    pulse_route: tuple[int, int],
+    mux_gen: int | None,
+    mux_adcs: tuple[int, ...],
+    expected: tuple[tuple[int, int], ...],
+) -> None:
+    document = ftf_document() if mux_gen is None else dual_readout_document(mux_adcs)
+    drive_lines = document["drive_lines"]
+    assert isinstance(drive_lines, dict)
+    drive_lines["mw2"] = {**drive_lines["mw"], "gen_ch": 3}
+    readout = document["readout"]
+    assert isinstance(readout, dict)
+    readout["drive"]["gen_ch"], readout["adc"]["ro_ch"] = pulse_route
+    if mux_gen is None:
+        board = load_soccfg(8, 5)
+    else:
+        readout["mux"]["gen_ch"] = mux_gen
+        board = load_mux_soccfg(8, 5, gen_ch=mux_gen, ro_chs=mux_adcs)
+
+    with closing_environment(ftf(parse_ftf(document), soccfg=board)) as env:
+        assert tuple(sorted(env.soc.routes)) == expected
+
+
+def test_environment_rejects_a_drive_generator_missing_from_the_board() -> None:
+    settings = parse_ftf(ftf_document())
+    # Readout fits; the configured charge drive on DAC 2 does not.
+    board = load_soccfg(2, 1)
+
+    with (
+        pytest.raises(ValueError, match=r"invalid simulation .*\b2\b"),
+        closing_environment(ftf(settings, soccfg=board)),
+    ):
+        pass
 
 
 def test_readout_configuration_preserves_pulse_without_mux() -> None:
