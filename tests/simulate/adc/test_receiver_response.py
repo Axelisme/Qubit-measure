@@ -7,7 +7,7 @@ import pytest
 from numpy.testing import assert_allclose
 from scipy.linalg import expm
 from zcu_tools.simulate import adc
-from zcu_tools.simulate.boundary import DDSCongruence, SamplingIdentity
+from zcu_tools.simulate.boundary import SamplingIdentity
 
 
 def test_omitted_extensions_preserve_legacy_background_point_for_point():
@@ -242,33 +242,26 @@ def traces(model, pulse, grid, path):
 
 
 @pytest.mark.parametrize("include_traces", [False, True])
-def test_only_raw_dds_images_produce_equal_iq_at_absolute_sample_times(include_traces):
+def test_distinct_demodulation_frequencies_produce_distinct_iq(include_traces):
     model = line_model()
     pulse = adc.ReadoutPulse(0.0, 20.0, 1.2 + 0.3j, 6.0, 0.2)
     declared = adc.SampleGrid(np.array([1.125, 4.125, 7.125]), 6.003, phase_rad=0.1)
-    # Same DDS class as 6.003 GHz, two periods below it.
-    other_image = replace(declared, demodulation_frequency_ghz=1.003)
-    raw = replace(other_image, frequency_image=DDSCongruence(period_ghz=2.5))
+    other = replace(declared, demodulation_frequency_ghz=1.003)
     response = adc.ConditionalReadout(model).responses(
         adc.ReadoutBatch(
             model,
-            tuple(
-                (adc.ReadoutEvent((pulse,), (grid,)),)
-                for grid in (declared, other_image, raw)
-            ),
-            np.arange(3, dtype=np.int64),
+            tuple((adc.ReadoutEvent((pulse,), (grid,)),) for grid in (declared, other)),
+            np.arange(2, dtype=np.int64),
             include_traces,
         )
     )
 
-    expected, explicit, observed = response.sums[:, 0]
-    assert np.max(np.abs(explicit - expected)) > 0.1
-    assert_allclose(observed, expected, rtol=0, atol=1e-9)
+    first, second = response.sums[:, 0]
+    assert np.max(np.abs(first - second)) > 0.1
     if include_traces:
         assert response.traces is not None
-        expected, explicit, observed = response.traces[:, 0]
-        assert np.max(np.abs(explicit - expected)) > 0.1
-        assert_allclose(observed, expected, rtol=0, atol=1e-9)
+        first, second = response.traces[:, 0]
+        assert np.max(np.abs(first - second)) > 0.1
 
 
 @pytest.mark.parametrize("path", ["single", "constant", "shaped"])

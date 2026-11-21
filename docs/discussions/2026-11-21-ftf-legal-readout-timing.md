@@ -82,3 +82,7 @@ trigger 早於 pulse block 的讀出仍被拒絕。ADC event 也不繼承前一�
 [讀出鏈的 pulse 長度與間隔](2026-11-21-chain-readout-spacing.md) 記載 chain_length 不再等 ADC window 的既有時序背景。相關跨模組界線分別見 [ADR-0072](../adr/0072-module-boundaries.md)、[ADR-0083](../adr/0083-program-macros-and-timelines.md) 與 [ADR-0084](../adr/0084-simulation-integer-time-base.md)。
 
 原始 dossier、angle reports、task 工作檔與驗收收據未入庫；本快照已寫入必要數字與結論，不依賴那些檔案或本機路徑。
+
+## 後記
+
+2026-11-21，使用者改選「S」。模擬 frontend 現在拒絕在 window 起點生效且沒有具名來源的 raw ADC 頻率字。DDS 同餘類、ADC 取模與 Six 的同餘選路一併移除。本篇其他裁決不變。見 [raw ADC 頻率字改成編譯時拒絕](2026-11-21-raw-adc-word-reject.md)。
