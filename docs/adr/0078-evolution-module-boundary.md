@@ -179,14 +179,14 @@ status: accepted
 
 **例子。** FTF 規劃 ADC window 時，若整個 template 沒有 readout pulse，event 只有 receiver offset 與雜訊，不報「沒有 generator 候選」。下一個 pulse 在 window 內抵達且已配到這個 event 時，兩個 pulse 相干相加。若抵達的 pulse 漏配，規劃就報錯，指出 ADC、window 和 pulse，不回傳缺訊號的 I/Q。見 [FTF readout and sampling](../../lib/zcu_tools/simulators/ftf/environment/README.md#readout-and-sampling)。
 
-**邊界。** 型別、範圍、維度等契約外輸入仍在進入點 fast fail。物理上無法判定的輸入也拒絕，例如 Six 的 raw ADC 字到兩個 cavity 的同餘距離平手。模擬器未實作的情況不能回傳缺訊號的結果；FTF 仍按發射時間配對 ADC trigger，在途漏配由規劃守門攔下。算法數值近似仍受[精度 guard](#先保證正確再優化瓶頸)約束。
+**邊界。** 型別、範圍、維度等契約外輸入仍在進入點 fast fail。模擬器缺少決定結果所需資訊的合法程式，在編譯時精確拒絕。例如 window 起點生效的 ADC 頻率字沒有具名來源時，模擬器不知道它代表哪個 DDS image，訊息請作者改用具名 ADC config。模擬器未實作的情況不能回傳缺訊號的結果；FTF 仍按發射時間配對 ADC trigger，在途漏配由規劃守門攔下。算法數值近似仍受[精度 guard](#先保證正確再優化瓶頸)約束。
 
 FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重排狀態。警告指出受影響範圍與 gain 共同縮放上限；超限結果不在色散模型有效範圍內。計數方式與上限假設見 [FTF cavity drives](../../lib/zcu_tools/simulators/ftf/environment/README.md#cavity-drives)。
 
 **依據。**
 - 2026-11-15，使用者覆核 sideband reset 的殘餘光子檢查：「4我覺得有需要嗎？實驗參數設置不當就會發生的問題為什麼模擬器要擋？」對照算並警告答「A」。原始討論未入庫。
 - 2026-11-19，使用者同意 cavity Stark 反轉照算並警告，答「1cA」。2026-11-20，designer 依授權代裁共同縮放上限的表示，使用者未覆核。見 [FTF cavity Stark 反轉：從報錯改成警告](../discussions/2026-11-20-ftf-stark-inversion-warning.md)。
-- 2026-11-21，使用者定下「只拒絕實機也會拒絕的程式」這條規則，原話是「模擬器要給出合法的預期結果，只要合法，不因為不合理就抱錯」。FTF 的 receiver-only event、相干相加與在途漏配拒絕是 designer 代裁，使用者未覆核。Six 的平手拒絕也是 designer 代裁，隨 raw 字的同餘機制在使用者覆核後保留。使用者覆核的是 raw 字的同餘機制：「那我选，K 吧，感觉有些少频率的，比如说像是 one tone frequency，如果不是等间距的话，要先计算 table，然后存起来。感觉就会出现模拟上需要解读弱智的问题。」這句沒有單獨裁定平手或 FTF 時序。見 [FTF 合法讀出時序](../discussions/2026-11-21-ftf-legal-readout-timing.md)。
+- 2026-11-21，使用者定下「只拒絕實機也會拒絕的程式」這條規則，原話是「模擬器要給出合法的預期結果，只要合法，不因為不合理就抱錯」。FTF 的 receiver-only event、相干相加與在途漏配拒絕是 designer 代裁，使用者未覆核。見 [FTF 合法讀出時序](../discussions/2026-11-21-ftf-legal-readout-timing.md)。同日稍後，使用者在「保留 raw 字的 DDS 同餘機制」與「raw 字編譯時拒絕」之間改選後者，答「S」；先前選保留的理由（「那我选，K 吧，……解读弱智的问题。」）經 onetone homophasal 回歸測試證實不成立，table sweep 保留具名來源。見 [raw ADC 頻率字改成編譯時拒絕](../discussions/2026-11-21-raw-adc-word-reject.md)。
 - 51 點、21 能階的合法輸入不受 projection 記憶體預算阻擋。案例與驗收見 [Projective read 的輸出改成 Markov chain](../discussions/2026-11-17-projection-markov-chain-readout.md)。
 
 ### 模擬器不從程式內容推斷實驗類型或硬體架構

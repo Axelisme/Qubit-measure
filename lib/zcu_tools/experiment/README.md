@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-21，讀出 block 到達時間、頻率語意與 receiver-only event
+**Last updated:** 2026-11-21，讀出 block 到達時間、明示頻率與 receiver-only event
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -97,10 +97,9 @@ Callers can opt in to `allow_receiver_only` on `classify_readout` and
 classification returns no pulse blocks and contents retain the bound ADC grids
 with empty pulses. Each point's first trigger supplies its endpoint. Missing
 terminal pulses at only some points still raise `ValueError`.
-Both content functions preserve each trigger's supplied frequency image in the sample grid and
-keep otherwise identical grids separate when their image semantics differ.
-The planner does not select a demodulation image. `logical_event_contents` retains chronological physical events and each grid's
-original channel-local trigger column. `map_readout_events` localizes phases,
+Both content functions pass each trigger's demodulation frequency and phase to
+its sample grid. `logical_event_contents` retains chronological physical events
+and each grid's original channel-local trigger column. `map_readout_events` localizes phases,
 expands point/event contents and supplies the per-content output permutation.
 Single and FTF share this mapping; six uses single's preparation interface.
 The shared planner converts common-origin carrier phases to pulse-local phases. Environment planners supply

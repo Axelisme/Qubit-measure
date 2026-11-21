@@ -9,10 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.simulate.boundary import (
-    DDSCongruence,
     EventSlot,
-    ExplicitImage,
-    FrequencyImage,
     PulseEnvelope,
     ReadoutSlot,
     TimeBase,
@@ -61,7 +58,7 @@ class _Config:
     start: IntArray
     active: BoolArray
     words: IntArray
-    frequency: NDArray[np.float64]
+    reference_mhz: NDArray[np.float64]
     phase: NDArray[np.float64]
     raw: BoolArray
     position: int
@@ -74,7 +71,6 @@ class _Read:
     start: IntArray
     frequency: NDArray[np.float64]
     phase: NDArray[np.float64]
-    raw: BoolArray
 
 
 class Outputs:
@@ -213,20 +209,15 @@ class Outputs:
             reference = machine.wave_reference(
                 inst.addr, wmem=inst.src == SrcKeyword.WMEM
             )
-            raw = reference.source < 0
-            freq_words = words[:, 0] % 2**32
-            frequency = self._runtime_frequencies(
-                ch, freq_words, reference.frequency_mhz, raw
-            )
             self._queue_readout(
                 ch,
                 _Config(
                     start,
                     machine.active.copy(),
-                    freq_words,
-                    frequency,
+                    words[:, 0] % 2**32,
+                    reference.frequency_mhz,
                     phase,
-                    raw,
+                    reference.source < 0,
                     position,
                 ),
             )
@@ -247,27 +238,6 @@ class Outputs:
             )
             config = replace(config, start=np.maximum(config.start, previous))
         updates.append(config)
-
-    def _runtime_frequencies(
-        self,
-        ch: int,
-        words: IntArray,
-        reference_mhz: NDArray[np.float64],
-        raw: BoolArray,
-    ) -> NDArray[np.float64]:
-        # Raw lanes have a zero reference: decode their folded baseband, with
-        # the positive Nyquist edge represented by the negative edge.
-        frequency = readout_frequencies_from_words(
-            self.prog.soccfg,
-            words,
-            ro_ch=ch,
-            reference_freq_mhz=reference_mhz,
-            flip_downconversion=self.prog.FLIP_DOWNCONVERSION,
-        )
-        half_period = float(self.prog.soccfg["readouts"][ch]["f_dds"]) / 2
-        return np.where(
-            raw & (frequency >= half_period), frequency - 2 * half_period, frequency
-        )
 
     def _ordinary_wave(
         self,
@@ -498,7 +468,6 @@ class Outputs:
                         np.zeros(self.size, dtype=np.int64),
                         np.zeros(self.size, dtype=np.float64),
                         np.zeros(self.size, dtype=np.float64),
-                        np.zeros(self.size, dtype=np.bool_),
                     )
                 )
                 self.trigger_ticks[ch].append(np.zeros(self.size, dtype=np.int64))
@@ -545,12 +514,10 @@ class Outputs:
                 continue
             duration = self._read_duration(ch)
             for index, read in enumerate(reads):
-                start = self._ticks(
-                    self.trigger_ticks[ch][index][self.points],
-                    self.prog.tproccfg["f_time"],
-                )
+                trigger_cycles = self.trigger_ticks[ch][index][self.points]
+                start = self._ticks(trigger_cycles, self.prog.tproccfg["f_time"])
                 words = np.zeros(machine.size, dtype=np.int64)
-                frequency = np.zeros(machine.size)
+                reference_mhz = np.zeros(machine.size)
                 phase = np.zeros(machine.size)
                 raw = np.zeros(machine.size, dtype=np.bool_)
                 selected = np.full(machine.size, -1, dtype=np.int64)
@@ -558,7 +525,7 @@ class Outputs:
                 for config_index, config in enumerate(rows):
                     active = (config.start <= start) & config.active
                     words[active] = config.words[active]
-                    frequency[active] = config.frequency[active]
+                    reference_mhz[active] = config.reference_mhz[active]
                     phase[active] = config.phase[active]
                     raw[active] = config.raw[active]
                     selected[active] = config_index
@@ -566,6 +533,15 @@ class Outputs:
                     lane = int(np.flatnonzero(selected < 0)[0])
                     raise ValueError(
                         f"ADC {ch} read {index} point {self.points[lane]}: no effective runtime config at window start {start[lane]}"
+                    )
+                raw_reads = np.flatnonzero(raw & machine.active)
+                if raw_reads.size:
+                    lane = int(raw_reads[0])
+                    raise ValueError(
+                        f"ADC {ch} read {index} point {self.points[lane]}: "
+                        f"trigger at {trigger_cycles[lane]} tProc cycles uses a raw frequency word "
+                        "without a named source. The simulator cannot determine its DDS image; "
+                        "請改用具名 ADC config."
                     )
                 prologue = self.prologue_configs.get(ch, 0)
                 if (
@@ -593,9 +569,15 @@ class Outputs:
                             f"initial=(frequency_word={words[lane]}, phase={phase[lane]}), "
                             f"updated=(frequency_word={config.words[lane]}, phase={config.phase[lane]})"
                         )
+                frequency = readout_frequencies_from_words(
+                    self.prog.soccfg,
+                    words,
+                    ro_ch=ch,
+                    reference_freq_mhz=reference_mhz,
+                    flip_downconversion=self.prog.FLIP_DOWNCONVERSION,
+                )
                 self._put(read.frequency, frequency, machine)
                 self._put(read.phase, phase, machine)
-                read.raw[self.points[machine.active]] = raw[machine.active]
 
     def validate_fifo(self, machine: Machine) -> None:
         """Reject mutable readout FIFO updates pending beyond this shot.
@@ -632,9 +614,6 @@ class Outputs:
             frequencies = np.stack([read.frequency for read in reads], axis=1)
             phases = np.stack([read.phase for read in reads], axis=1)
             routes = self._routes(ch, starts)
-            images = self._frequency_images(
-                ch, np.stack([read.raw for read in reads], axis=1)
-            )
             slots.append(
                 ReadoutSlot(
                     ch,
@@ -644,7 +623,6 @@ class Outputs:
                     frequencies,
                     phases,
                     routes,
-                    images,
                 )
             )
         return TimelineTemplate(
@@ -663,15 +641,6 @@ class Outputs:
         return tuple(
             (self.loop_positions[name], index) for name, index in iterations
         ) + ((position, tone),)
-
-    def _frequency_images(
-        self, ch: int, raw: BoolArray
-    ) -> ExplicitImage | tuple[tuple[FrequencyImage, ...], ...]:
-        explicit = ExplicitImage()
-        if not np.any(raw):
-            return explicit
-        dds = DDSCongruence(float(self.prog.soccfg["readouts"][ch]["f_dds"]) / 1000)
-        return tuple(tuple(dds if value else explicit for value in row) for row in raw)
 
     def _routes(self, ch: int, times: IntArray) -> IntArray:
         wired = sorted({gen for gen, adc in self.routes if adc == ch})

@@ -2,17 +2,11 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from math import remainder
 
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.simulate.boundary import (
-    DDSCongruence,
-    ExplicitImage,
-    FrequencyImage,
-    SamplingIdentity,
-)
+from zcu_tools.simulate.boundary import SamplingIdentity
 
 from .model import RealArray, readonly_array
 from .populations import validate_populations
@@ -140,23 +134,17 @@ class SampleGrid:
     times_ns: owned/read-only finite strictly increasing (sample,) absolute ns;
         at least one sample. Negative/pre-pulse times model physical lookback.
         No hidden sample-period multiplication occurs in sample sums.
-    demodulation_frequency_ghz: oscillator cycles/ns in the supplied image.
-        Rotating output is multiplied by exp(+2πi*detuning*t-i*phase_rad),
-        where detuning is f_demod-f_ref with the frequency_image rule below.
-        The result is then conjugated
-        into microwave I+iQ before receiver gain/phase/offset and added noise.
+    demodulation_frequency_ghz: Explicit physical oscillator frequency in cycles/ns.
+        Rotating output is multiplied by exp(+2πi*detuning*t-i*phase_rad), where
+        detuning is f_demod-f_ref. The result is then conjugated into microwave
+        I+iQ before receiver gain/phase/offset and added noise.
     phase_rad: demod oscillator phase at absolute origin zero, radians.
-    frequency_image: ExplicitImage uses the declared oscillator unchanged.
-        DDSCongruence uses the image nearest the model's reference frequency.
-        In a multi-tone model the reference is shared by all tones. Use a named
-        ADC config to specify a different image.
     Empty/nonfinite/unordered grids raise ValueError.
     """
 
     times_ns: RealArray
     demodulation_frequency_ghz: float
     phase_rad: float = 0.0
-    frequency_image: FrequencyImage = ExplicitImage()
 
     def __post_init__(self) -> None:
         times = readonly_array(self.times_ns, "sample times")
@@ -170,15 +158,9 @@ class SampleGrid:
         """Return signed f_demod − f_ref for the oscillator, in cycles/ns.
 
         reference_frequency_ghz is the model's common rotating reference.
-        Raw DDS detuning is folded to [-period/2, period/2); explicit
-        detuning is unchanged. This does not shift sample times or phase zero.
+        This does not shift sample times or phase zero.
         """
-        detuning = self.demodulation_frequency_ghz - reference_frequency_ghz
-        if isinstance(self.frequency_image, DDSCongruence):
-            period = self.frequency_image.period_ghz
-            folded = remainder(detuning, period)
-            return folded if folded < period / 2 else -period / 2
-        return detuning
+        return self.demodulation_frequency_ghz - reference_frequency_ghz
 
 
 @dataclass(frozen=True)
