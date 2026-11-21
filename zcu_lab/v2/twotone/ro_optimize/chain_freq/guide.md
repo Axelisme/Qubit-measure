@@ -19,7 +19,7 @@ There is no additional wait inside the chain beyond the readout's own timing.
 
 Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template.
 The template uses the resonator frequency, wiring and time of flight.
-Frequency starts at 11 points around `$resonator.freq`, with span `$resonator.kappa`. Run replaces both generator and ADC frequency, so the Form hides readout frequency.
+By default, the sweep uses 11 points from one linewidth below the resonator frequency to one linewidth above it. Run replaces both generator and ADC frequency, so the Form hides readout frequency.
 Reps defaults to 2000 shots per setting per round. Rounds defaults to 320, giving 640 000 shots per setting.
 Missing or invalid sources leave fields Invalid. Supply them before Run.
 
