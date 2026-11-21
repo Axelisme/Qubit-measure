@@ -24,6 +24,16 @@ T1-derived defaults use the Open/Reset snapshot. A missing or null T1, or an una
 
 These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
 
+## Drive envelope limit
+
+The drive inherits the x180 waveform shape. A longer sampled pulse, such as a
+cosine, uses more waveform memory. The drive generator rejects the upload if
+the waveform exceeds its capacity.
+
+Lower Stop under Length (`length.stop`). Or select `flat_top` so only the ramps
+use waveform memory. The shortest sweep point must leave room for both ramps
+and a plateau.
+
 ## Module slots
 
 The qubit pulse uses the x180 module when present and the qub_probe template when absent, with the starting values described above. Reset uses optional `$qubit.module.reset`; readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Reset snapshot.

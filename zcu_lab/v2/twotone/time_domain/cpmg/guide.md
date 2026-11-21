@@ -10,11 +10,22 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 Pi pulse counts accepts Log or List input. Log uses a maximum count and requested point count. It starts at 1 and retains the maximum count. It rounds geometrically spaced values to integers and removes duplicates. A maximum greater than 1 requires at least two requested points. A maximum of 1 accepts one point and returns `[1]`. Use List for any other single count. The resulting list may have fewer points than requested. List accepts a nonempty JSON array of positive integers, such as `[1, 2, 4, 8]`. Zero, negative counts and fractional counts are invalid.
 
-Minimum time and Maximum time define one shared total-time window in us for every pulse count. Time points sets the samples per row. The initial values are 1 us, 100 us and 101 points. Increase the minimum time when a large pulse count leaves too little spacing between pulses. The same point count applies to every pulse count.
+Minimum time and Maximum time define one shared total-time window in us for every pulse count. Time points sets the samples per row. The initial values are 1 us, 100 us and 101 points. The same point count applies to every pulse count.
 
 For Python callers, `CPMG_Cfg.delay` also accepts a list of `SweepCfg`, one delay sweep per pi-pulse count in `count` order. Every sweep must have the same number of points. This lets different pulse counts use different total-time windows. The GUI continues to provide one shared window.
 
 Detune ratio is the number of fringe periods per time index. The default is 0.1. Use Fit fringes for this phase-ramped acquisition. Set Detune ratio to 0 and disable Fit fringes for a decay-only acquisition. Early-stop SNR optionally ends averaging of each row when its signal is resolved.
+
+## Refocusing interval limit
+
+Each row must satisfy `min_length / (2 × count) ≥ (pi2 + pi) / 2`.
+Here `min_length` is the row's starting time, `count` is its number of pi pulses,
+and `pi2` and `pi` are the pi/2 and pi pulse durations. With a shared time
+window, check the largest count.
+
+If the pulses do not fit, raise Minimum time (`min_length_us`). To keep the same
+time window, lower Max under Pi pulse counts in Log mode or remove counts that
+do not fit in List mode.
 
 ## Module sources and waiting
 

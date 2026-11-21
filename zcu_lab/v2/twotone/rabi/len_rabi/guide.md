@@ -16,6 +16,16 @@ The length sweep starts at 0.03 us and stops at 4*pi_len, using the stored x180 
 
 Open and Reset capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 us, giving a 150 us wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 
+## Drive envelope limit
+
+The drive inherits the x180 waveform shape. A longer sampled pulse, such as a
+cosine, uses more waveform memory. The drive generator rejects the upload if
+the waveform exceeds its capacity.
+
+Lower Stop under Duration (`length.stop`). Or select `flat_top` so only the ramps
+use waveform memory. The shortest sweep point must leave room for both ramps
+and a plateau.
+
 ## Module slots
 
 Readout uses the `$resonator.module.readout` slot captured at Open/Reset; an unset slot, missing module or unbound alias uses a fresh 'readout' template. That fallback still needs its required parameter sources. Reset uses qubit.module.reset and stays disabled when absent. The drive uses the sources described above, with qubit.module.x180 when present and qub_probe when absent. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.05 us; missing required calibration remains Invalid.
@@ -26,7 +36,7 @@ Proposes qubit.ext.rabi_freq in MHz from the fit. With acquired run settings, co
 
 ## Recommended
 
-Phase defaults to fixed 0/180 degrees; enable Fit phase offset when pulse shaping shifts the length oscillation. Analysis defaults to fitting a decay envelope on the oscillation; keep it on when the Rabi oscillation visibly damps over the sweep, turn it off for a pure undamped cosine fit. A length sweep spanning a few pi lengths (up to 4*pi_len when calibrated) captures a full oscillation; widen it if no full period is visible.
+Phase defaults to fixed 0/180 degrees; enable Fit phase offset when pulse shaping shifts the length oscillation. Analysis defaults to fitting a decay envelope on the oscillation; keep it on when the Rabi oscillation visibly damps over the sweep, turn it off for a pure undamped cosine fit. A length sweep spanning a few pi lengths (up to 4*pi_len when calibrated) captures a full oscillation. If no full period is visible, widen the sweep within the drive generator's limit.
 
 ## Four starting situations
 

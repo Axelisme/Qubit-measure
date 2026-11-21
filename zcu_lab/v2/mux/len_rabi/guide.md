@@ -44,6 +44,16 @@ Editing participants preserves every tone value. Fill any newly selected tone's
 missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
 tone still needs valid frequency and ADC identity, even when not selected.
 
+## Drive envelope limit
+
+The drive inherits the x180 waveform shape. A longer sampled pulse, such as a
+cosine, uses more waveform memory. The drive generator rejects the upload if
+the waveform exceeds its capacity.
+
+Select the affected tone and lower its Length Stop (`tones.<index>.length.stop`).
+Or select `flat_top` so only the ramps use waveform memory. The shortest sweep
+point must leave room for both ramps and a plateau.
+
 ## FTF cost example
 
 A two-participant offline Run used 8 requested lengths from 0.02 to 0.16 us,
