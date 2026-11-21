@@ -31,7 +31,14 @@ class CPMGInput(ConfigBase):
     min_length_us: Annotated[
         float,
         Field(gt=0, allow_inf_nan=False),
-        FieldMeta(label="Minimum time", unit="us"),
+        FieldMeta(
+            label="Minimum time",
+            unit="us",
+            description=(
+                "Enter the shortest total evolution time (µs), using the pulse "
+                "durations from the π/2 and π calibrations."
+            ),
+        ),
     ] = 1.0
     max_length_us: Annotated[
         float,
@@ -91,6 +98,7 @@ def make_form(ctx: FormContext) -> Form[CPMGInput]:
                 ),
             ),
             "count": LogPoints(max=16, points=5, include_zero=False),
+            # ADR-0073: Use the fixed Open/Reset capture, not later count edits.
             "min_length_us": Expr(
                 "16 * ($qubit.module.x90.waveform.length + "
                 "$qubit.module.x180.waveform.length)"
@@ -100,4 +108,14 @@ def make_form(ctx: FormContext) -> Form[CPMGInput]:
             "reps": 1000,
             "rounds": 10,
         },
+    ).with_seed_metadata(
+        {
+            ("min_length_us",): FieldMeta(
+                description=(
+                    "Open/Reset seeds the shortest evolution time from the captured "
+                    "$qubit.module.x90.waveform.length and "
+                    "$qubit.module.x180.waveform.length (µs)."
+                )
+            )
+        }
     )

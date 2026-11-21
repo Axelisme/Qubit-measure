@@ -18,7 +18,7 @@ basis:
 
 使用者決定不加 Run 檢查，也不在實驗指南說明板子限制。指南寫給懂物理但沒看過實作的讀者，只說明實驗和它的行為。四種 Run 錯誤的判讀、改法與 FTF 案例放在獨立的量測知識庫。Length Rabi 繼續沿用 `x180` 的形狀，掃描上限仍是 `x180` 的四倍長。`reset_check` 另把 gain 掃描上限寫成 `min(1.0, 4.0 * x180.gain)`，和 `singleshot/amp_rabi` 一致。CPMG 的 Minimum time 改用校準脈衝長度計算。兩項只修表單預設，不加驗證。
 
-## 問題
+## 當時的離線失敗
 
 第一張離線 Run 牆鐘表中，本次處理的七個實驗都以預設值失敗。`singleshot/len_rabi` 跑了 23 點，第 24 點才因 generator 的 8192 samples 上限停止。錯誤沒有寫該改哪個欄位，也沒有把 samples 換算成表單使用的 µs。`reset_check` 則不需查板子就能定位：測試 point 的 `x180.gain` 為 0.617，四倍是 2.468，超過 gain 的固定上限 1.0。CPMG 的 1 µs 預設在 16 次 refocusing 時，留給每段 interval 的時間只有約 31 ns，不夠放下測試 point 的脈衝。
 
@@ -48,3 +48,9 @@ basis:
 使用者同日選擇修 CPMG 的預設值：「1c，没错，这个是 这个是预设值的瑕疵，这种类似的东西都是改预设值就好了。」用各 0.48 µs 的 π/2 與 π 脈衝離線核對，表單給出的 15.36 µs 通過既有的 interval 檢查，手填 15.35 µs 則不通過。
 
 原始牆鐘表未入庫。重跑入口和離線輸入見 [實驗 Run 牆鐘](../../tools/README.md#實驗-run-牆鐘)。板子數字用[入庫的 `qick_216_v2` profile](../../zcu_lab/simulation_envs/profiles/qick_216_v2.yaml)核對。
+
+## 後記
+
+[reset_check Form](../../zcu_lab/v2/singleshot/reset_check/form.py) 宣告 Gain Stop 初值，[CPMG Form](../../zcu_lab/v2/twotone/time_domain/cpmg/form.py) 宣告 Minimum time 初值。
+
+設計者在審查時選擇保留 CPMG 的初值公式。即使兩個脈衝都已校準，只要任一脈衝用取樣點定義的 arbitrary waveform，表單仍將 Minimum time 留空，由操作員填入。缺少任一脈衝時也留空。
