@@ -724,8 +724,9 @@ def build_compiled_request(
     does not infer drive roles from names or instructions. Unsupported effects,
     malformed/missing loop definitions, cross-shot state or pending config carry,
     and ambiguous routing raise ValueError with instruction or readout context.
-    A runtime ADC frequency word without a named source raises ValueError with
-    the ADC channel and trigger time. Use a named ADC config for that window.
+    If the runtime ADC frequency word effective at a window trigger has no
+    named source, the builder raises ValueError with the ADC channel and trigger
+    time. Use a named ADC config for that window.
     SimulationSoc acquisition uses this builder for native programs.
     """
     prog.compile()
