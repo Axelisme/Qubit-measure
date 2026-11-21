@@ -409,6 +409,14 @@ def plan(
         geometries.append(_batch_geometry(batch, source, plateau_cache))
         if cancel.is_set():
             raise Cancelled()
+    return _merge_geometries(source, batches, geometries)
+
+
+def _merge_geometries(
+    source: ModelSource,
+    batches: Sequence[TimelineBatch],
+    geometries: Sequence[Geometry],
+) -> Geometry:
     points = np.concatenate([g.points for g in geometries])
     if len(np.unique(points)) != len(points):
         raise ValueError("point indices must be unique across batches")
