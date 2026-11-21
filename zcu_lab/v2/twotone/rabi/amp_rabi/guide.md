@@ -54,7 +54,7 @@ If the trace does not define a rotation, the plot uses the real component I.
 The projection is readout contrast, not a calibrated population.
 
 The live title shows the retained shots per point from completed rounds. It shows a range if the counts differ across points.
-Run saves the mean IQ and the shot sums of those same shots after removing the ADC offset.
+Run saves the mean IQ and the shot sums of those same shots after applying the [QICK offset correction](../../../../../docs/adr/0074-flat-readout-module.md#選用校正後的-iq-矩).
 At each point, the error bar extends one standard error of the mean (SEM) above and below the point.
 SEM is the sample standard deviation along the displayed IQ axis divided by the square root of the retained shot count.
 It estimates uncertainty in the point mean, not the spread of individual shots or the variation between rounds.

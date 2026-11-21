@@ -164,6 +164,7 @@
 - 2026-11-21 [Gain 固定範圍：表單只驗純量，掃描留給 Run](2026-11-21-form-gain-range.md)：刪除或收窄。表單以既有 annotation 限制純量 gain；一般掃描保留 `SweepCfg`，超界點在 acquisition 前被拒。
 - 2026-11-21 [readout 時序預設：固定長度差與光子衰減等待](2026-11-21-readout-timing-defaults.md)：初值與預設值。範本前後各留 0.015 µs，chain／Rπ length 改用可編輯長度差（schema 6.0／4.0），mux post_delay 種子取 5/(2π·κ)；範本差值讀注入的 catalog。
 - 2026-11-22 [實驗呈現規範：圖、摘要與讀者檢查](2026-11-22-presentation-rules.md)：呈現規範。圖只放理論重點，採集設定進摘要，對數值大小敏感的一維資料畫 error bar，規範集中在 `figure-style.md`。
+- 2026-11-22 [Analyze 摘要與逐點誤差棒的責任分工](2026-11-22-shared-presentation-facts.md)：呈現責任。GUI 與 MCP 共用 adapter 摘要行，analysis 計算 shot SEM，實驗 core 寫標題與圖例。
 - 2026-11-22 [Two-qubit mux 綁定與編輯後的檢查](2026-11-22-two-qubit-mux-binding-checks.md)：驗證位置。Open／Reset 驗有序元件連結，提交時按同次 capture 驗實際 readout tone 數。
 
 ## 模組邊界
@@ -194,6 +195,7 @@
 - 2026-11-19 [單 qubit RB 與 IRB 合併成 twotone/rb](2026-11-19-single-qubit-rb-irb-merge.md)：實驗合併與資料格式。`target_gate=None` 只跑 reference，指定 gate 才跑兩臂；Result 改為 (round, seed, arm, depth)；`twotone/irb` 移除不留 alias，舊 run 只保留原檔。
 - 2026-11-20 [用 writeback 發布 CZ 的 arb 資產](2026-11-20-arb-asset-writeback.md)：資產發布。Apply 先發布不覆寫的 entry 資產，再寫引用該 key 的 library 提案。
 - 2026-11-22 [Two-qubit 新 native 軸名與舊格式](2026-11-22-two-qubit-native-axis-cutover.md)：資料格式。只有模擬測試資料的家族不新增不相容舊 layout 的 reader，原檔保留。
+- 2026-11-22 [Amp Rabi 的 shot moments](2026-11-22-amp-rabi-shot-moments.md)：資料格式。同批校正 IQ 保留既有平均，native 可選 moments；驗所有現有變數後，Labber 仍只匯出原單 log。
 
 ## 量測策略
 

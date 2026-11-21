@@ -136,7 +136,8 @@ Scale 定義為 `disk = memory * scale`，MHz→Hz 用 1e6，us→s 用 1e-6，�
 Z 各維度須匹配軸長，固定軸也計入；load 不將固定值寫進 Result。
 `GroupedAxesSpec` 的 `VariableAxisSpec` 全用 keyword，`VariableZSpec` 只有 field_name 可用位置參數。
 `VariableAxisSpec.generated_arange(label=..., unit=...)` 也用 keyword。
-單變數映射見 `twotone/power_dep/core.py:67-77`，二維硬體掃描見 `twotone/ro_optimize/freq_gain/core.py` 的 `FreqGainExp.AXES_SPEC`。
+可選 native 變數與 Labber 選集各自宣告，見 [ADR-0069](../../docs/adr/0069-experiment-core-and-frontends.md#native-可選變數與-labber-投影)。
+單變數映射見 [PowerExp.AXES_SPEC](twotone/power_dep/core.py)，二維硬體掃描見 [FreqGainExp.AXES_SPEC](twotone/ro_optimize/freq_gain/core.py)。
 
 ### 分析選項自行驗證，fit 結果用屬性讀取
 

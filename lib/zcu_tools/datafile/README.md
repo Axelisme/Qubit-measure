@@ -28,6 +28,7 @@
 它與 writer 共用結構檢查：數值 dtype、rank 與軸數、合法且唯一的軸名，以及一維座標長度。
 Scalar 不帶軸。違規拋 `ValueError`，不改陣列。它不驗變數的外層 key、整份容器、Labber 網格、
 有限值、單位或統計語意，也不保證後續修改陣列後仍有效或寫檔成功。
+由 [experiment](../experiment/README.md) 在驗證後選擇 Labber 變數；datafile writer 只處理 caller 傳入的變數。
 
 `json_text(document)` 不做 I/O，使用 writer 同一 encoder 驗證並編碼完整有限 JSON object。
 Caller 可在建立輸出目錄前使用它，非法值在任意深度都會 raise `ValueError`，原文件不變。
