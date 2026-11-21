@@ -8,7 +8,6 @@ _initialize / _body / compile pipeline.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from math import inf, nextafter
 from pathlib import Path
 
 import pytest
@@ -183,11 +182,11 @@ def _gain_builder(
     return builder
 
 
-@pytest.mark.parametrize("gain", [1.2, -1.2, nextafter(1.0, inf)])
-def test_scalar_gain_outside_full_scale_fails_at_compile(
+@pytest.mark.parametrize("gain", [1.2, -1.2])
+def test_constant_qick_param_gain_outside_full_scale_fails_at_compile(
     mock_soccfg: QickConfig, gain: float
 ) -> None:
-    builder = _gain_builder(mock_soccfg, gain)
+    builder = _gain_builder(mock_soccfg, QickParam(gain))
 
     with pytest.raises(ValueError, match="gain range") as error:
         builder.build()

@@ -15,6 +15,7 @@ from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import (
     Centroid3Classifier,
     CircleClassifier,
+    Gain,
     LinearClassifier,
     ReadoutClassifier,
 )
@@ -40,12 +41,13 @@ class PulseReadoutCfg(AbsReadoutCfg):
     """Native generator/ADC readout, with one shared semantic frequency.
 
     gen_ch/ro_ch select generator/ADC channels; nqz is Nyquist zone 1 or 2.
-    freq/mixer_freq are MHz, gain is normalized, phase is degrees. waveform is
-    an expanded native envelope (arb holds its absolute asset path). pre_delay
-    and post_delay are in us. pre_delay offsets generator playback; post_delay
-    follows generator completion once. ro_length is the independent ADC
-    window and trig_offset the trigger delay in us. Scalar knobs except mixer_freq accept
-    QICK sweeps. desc is optional prose. type is readout/pulse. classifier stores
+    freq/mixer_freq are MHz; scalar gain must be a DAC full-scale fraction in
+    [-1, 1]; phase is degrees. waveform is an expanded native envelope (arb
+    holds its absolute asset path). pre_delay and post_delay are in us. pre_delay
+    offsets generator playback; post_delay follows generator completion once.
+    ro_length is the independent ADC window and trig_offset the trigger delay in
+    us. Scalar knobs except mixer_freq accept QICK sweeps; swept gain is checked
+    at compile time. desc is optional prose. type is readout/pulse. classifier stores
     offset-free normalized ADC calibration (including radians for linear angle);
     None means no calibration is available. The module does not apply it.
     """
@@ -54,7 +56,7 @@ class PulseReadoutCfg(AbsReadoutCfg):
     gen_ch: int
     nqz: Literal[1, 2]
     freq: float | QickParam
-    gain: float | QickParam
+    gain: Gain | QickParam
     phase: float | QickParam = 0.0
     waveform: Annotated[WaveformCfg, BeforeValidator(resolve_waveform_ref)]
     mixer_freq: float | None = None
@@ -108,6 +110,7 @@ class PulseReadoutCfg(AbsReadoutCfg):
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set shared freq (MHz), gain, generator phase (deg), length or ro_length (us).
 
+        Assigning a scalar gain outside [-1, 1] raises ValidationError.
         Unsupported names raise ValueError; waveform length restrictions apply.
         """
         if name == "length":
@@ -287,9 +290,11 @@ class Readout:
     ) -> AbsReadout:
         """Build a detached readout with optional MHz/gain/us overrides.
 
-        None keeps cfg. Pulse readout accepts freq, gain, length and ro_length;
-        mux rejects non-None overrides with ValueError. Waveform set_param
-        restrictions propagate. Unknown keys or nonnumeric values raise TypeError.
+        None keeps cfg. Pulse readout accepts freq, gain, phase, length and
+        ro_length. Applying a scalar gain outside [-1, 1] to a pulse readout cfg
+        raises ValidationError during construction. Mux rejects non-None overrides
+        with ValueError. Waveform set_param restrictions propagate. Unknown keys
+        or nonnumeric values raise TypeError.
         The caller's cfg is never modified.
         """
         effective = deepcopy(cfg)
@@ -328,9 +333,11 @@ class PulseReadout(AbsReadout):
         """Capture a flat readout and semantic scalar/sweep overrides.
 
         name identifies ADC and pulse templates. cfg is copied and not mutated.
-        freq (MHz), gain (normalized), phase (degrees), length and ro_length (us) override the
-        copied cfg via set_param. None keeps cfg; unsupported waveform length
-        sweeps raise ValueError. TableParam ro_length raises NotImplementedError.
+        freq (MHz), gain (normalized), phase (degrees), length and ro_length (us)
+        override the copied cfg via set_param. None keeps cfg; unsupported waveform
+        length sweeps raise ValueError. Applying a scalar gain outside [-1, 1]
+        raises ValidationError during construction. TableParam ro_length raises
+        NotImplementedError.
         init must precede run. Invalid QICK settings
         fail during initialization. Unknown keys or nonnumeric overrides raise TypeError.
         """

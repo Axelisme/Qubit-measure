@@ -40,6 +40,11 @@ class PulseResetCfg(AbsResetCfg):
         return PulseReset(name, self)
 
     def set_param(self, name: str, value: float | QickParam) -> None:
+        """Set freq, phase, length or gain on the nested pulse cfg.
+
+        PulseCfg.set_param restrictions apply, including ValidationError when
+        assigning a scalar gain outside [-1, 1].
+        """
         self.pulse_cfg.set_param(name, value)
 
 
@@ -52,6 +57,11 @@ class TwoPulseResetCfg(AbsResetCfg):
         return TwoPulseReset(name, self)
 
     def set_param(self, name: str, value: float | QickParam) -> None:
+        """Set gain1/freq1 or gain2/freq2 on the named pulse, or length on both.
+
+        PulseCfg.set_param restrictions apply, including ValidationError when
+        assigning a scalar gain outside [-1, 1]. Unknown names raise ValueError.
+        """
         if name in ["gain1", "freq1"]:
             self.pulse1_cfg.set_param(name.replace("1", ""), value)
         elif name in ["gain2", "freq2"]:
@@ -73,6 +83,11 @@ class BathResetCfg(AbsResetCfg):
         return BathReset(name, self)
 
     def set_param(self, name: str, value: float | QickParam) -> None:
+        """Set qub/res gain, freq or length on the tone cfgs, or pi2_phase.
+
+        PulseCfg.set_param restrictions apply, including ValidationError when
+        assigning a scalar gain outside [-1, 1]. Unknown names raise ValueError.
+        """
         if name in ["qub_gain", "qub_freq"]:
             self.qubit_tone_cfg.set_param(name.replace("qub_", ""), value)
         elif name in ["res_gain", "res_freq"]:
@@ -191,6 +206,8 @@ class Reset:
         lengths us, phases degrees and gains normalized; values may be sweeps.
         None keeps each cfg value. Unknown or wrong-variant keys and nonnumeric
         values raise TypeError. Unsupported waveform sweeps raise ValueError.
+        Applying an allowed scalar gain override outside [-1, 1] to a nested
+        pulse cfg raises ValidationError during construction.
         """
         unknown = overrides.keys() - ResetOverrides.__annotations__.keys()
         if unknown:
@@ -227,6 +244,8 @@ class PulseReset(AbsReset):
         Unknown keys or nonnumeric overrides raise TypeError.
         Values accept scalars or QICK sweeps; None keeps cfg. Existing set_param
         waveform restrictions apply and unsupported length sweeps raise ValueError.
+        Applying a scalar gain outside [-1, 1] to a nested pulse cfg raises
+        ValidationError during construction.
         """
         self.name = name
         self.cfg = deepcopy(cfg)
@@ -261,6 +280,8 @@ class TwoPulseReset(AbsReset):
         Unknown keys or nonnumeric overrides raise TypeError.
         Values accept scalars or QICK sweeps; None keeps cfg. Existing set_param
         waveform restrictions apply and unsupported length sweeps raise ValueError.
+        Applying a scalar gain outside [-1, 1] to a nested pulse cfg raises
+        ValidationError during construction.
         """
         self.name = name
         self.cfg = deepcopy(cfg)
@@ -304,6 +325,8 @@ class BathReset(AbsReset):
         Unknown keys or nonnumeric overrides raise TypeError.
         Values accept scalars or QICK sweeps; None keeps cfg. Existing set_param
         waveform restrictions apply and unsupported length sweeps raise ValueError.
+        Applying a scalar gain outside [-1, 1] to a nested pulse cfg raises
+        ValidationError during construction.
         """
         self.name = name
         self.cfg = deepcopy(cfg)

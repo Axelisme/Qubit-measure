@@ -6,6 +6,7 @@ from typing import Literal
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.program.v2 import TableParam, TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.modules.base import Module
@@ -29,7 +30,9 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
 from zcu_tools.program.v2.utils import is_qick_param
 
+from tests.program._acquisition_soc import AcquisitionSoc
 from tests.program._profiles import load_soccfg
+from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import native_mux
 from tests.program.v2.wave_observations import executed_words
 
@@ -99,6 +102,44 @@ def _pulse_cfg(ch: int = 0) -> PulseCfg:
         gain=0.2,
         waveform=ConstWaveformCfg(length=0.1),
     )
+
+
+@pytest.mark.parametrize("target", ["pulse", "readout"])
+def test_host_gain_override_rejects_point_before_acquisition(
+    target: Literal["pulse", "readout"],
+) -> None:
+    soccfg = deepcopy(_BASE_SOCCFG)
+    soc = AcquisitionSoc(soccfg.get_cfg())
+    drive_cfg = _pulse_cfg(ch=1)
+    readout_cfg = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.2,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.2,
+    )
+    fixed_readout = readout_cfg.build("readout")
+    constructed_gains: list[float] = []
+    acquired_gains: list[float] = []
+
+    def acquire_point(gain: float) -> None:
+        modules: Sequence[Module]
+        if target == "pulse":
+            modules = (Pulse("drive", drive_cfg, gain=gain), fixed_readout)
+        else:
+            modules = (PulseReadout("readout", readout_cfg, gain=gain),)
+        constructed_gains.append(gain)
+        prog = compile_modules(soccfg, modules)
+        prog.acquire(soc, progress=False)
+        acquired_gains.append(gain)
+
+    acquire_point(0.3)
+    with pytest.raises(ValidationError):
+        acquire_point(1.6)
+    assert constructed_gains == [0.3]
+    assert acquired_gains == [0.3]
 
 
 @pytest.mark.parametrize("via_override", [False, True])
