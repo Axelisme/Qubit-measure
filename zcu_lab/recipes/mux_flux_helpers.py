@@ -37,7 +37,7 @@ class MuxFluxInputs(RecipeInputs):
     )
     flux_n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Sets DC bias › Expts for global scans or Flux points for local scans (count); local sweeps advance together.",
+        description="Sets DC bias › Expts (global) or Flux points (local), in count; local sweeps advance together.",
     )
     flux_half: dict[str, float] | None | Keep = Field(
         default=KEEP,
@@ -67,7 +67,7 @@ class MuxTwotoneFluxInputs(MuxFluxInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Sets Participants: original zero-based tone indices in acquisition order; selects both drives and readout tones.",
+        description="Sets Participants: original tone indices (zero-based) for drives and readout, in run order.",
     )
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,

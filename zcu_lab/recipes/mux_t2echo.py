@@ -34,7 +34,7 @@ class MuxT2EchoInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Sets Participants: original zero-based tone indices in acquisition order; selects both drives and readout tones.",
+        description="Sets Participants: original tone indices (zero-based) for drives and readout, in run order.",
     )
 
     fit_method: Literal["fringe", "decay"] | None | Keep = Field(

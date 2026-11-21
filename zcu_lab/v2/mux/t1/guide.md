@@ -156,7 +156,7 @@ before `check_ready()`; omission keeps the current value.
 
 ## Simulation limits
 
-For an offline FTF run, use the [FTF mux readout settings](../../../simulation_envs/FTF/field-guide.md#readout).
+For an offline FTF run, use the [FTF mux readout settings](../../../simulation_envs/FTF/field-guide.md#readoutdrive--物理-resonators--adc).
 Set `readout.mux` and list the receivers under `readout.mux.adc`. Bind each
 qubit drive independently of the mux readout generator.
 Enable `numerics.debug_capture` to inspect the [FTF capture manifest](../../../../lib/zcu_tools/simulators/ftf/environment/README.md#debug-capture).

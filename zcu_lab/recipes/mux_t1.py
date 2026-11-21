@@ -30,7 +30,7 @@ class MuxT1Inputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Sets Participants: original zero-based tone indices in acquisition order; selects both drives and readout tones.",
+        description="Sets Participants: original tone indices (zero-based) for drives and readout, in run order.",
     )
 
     dual_exp: bool | None | Keep = Field(
@@ -39,7 +39,7 @@ class MuxT1Inputs(RecipeInputs):
     )
     skip: int | None | Keep = Field(
         default=KEEP,
-        description="Sets Analysis › Skip leading points (count), the number of earliest delay points excluded from the fit.",
+        description="Sets Analysis › Skip leading points (count), excluding that many early delays from the fit.",
     )
 
 
