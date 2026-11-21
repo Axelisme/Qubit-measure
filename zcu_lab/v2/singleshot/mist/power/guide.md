@@ -48,4 +48,8 @@ Old files storing `signals` instead of `counts` are unsupported. Load reports
 the missing `counts` variable. Acquire a new run; Load does not convert stored
 fractions to counts.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+Use Run to spot the gain where P(Other) starts changing. Compare points in Analyze against their shot SEM before calling a change an onset. The bars use the class counts retained at that point, with covariance propagated through saved readout correction when available. If the calibrated photon axis is enabled, the x coordinate is the saved scan gain squared times the AC-Stark coefficient. Widen or recenter the gain scan if the onset touches a scan limit. No fit or writeback is made.
+
+**Last updated:** 2026-11-22

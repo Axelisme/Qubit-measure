@@ -10,7 +10,9 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.multi_decay import (
     calc_lambdas,
     fit_dual_transition_rates,
+    model_func,
 )
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
@@ -39,6 +41,16 @@ from zcu_lab.v2.support import live_line
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
+
+
+_PANELS = (
+    ("No π pulse", "g", "tab:blue"),
+    ("No π pulse", "e", "tab:red"),
+    ("No π pulse", "other", "tab:green"),
+    ("With π pulse", "g", "tab:blue"),
+    ("With π pulse", "e", "tab:red"),
+    ("With π pulse", "other", "tab:green"),
+)
 
 
 @dataclass(frozen=True)
@@ -73,12 +85,49 @@ def _sum_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 class T1WithToneCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select the reset module applied before preparation, or leave empty to skip reset.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Initial preparation pulse",
+            description="Select the pulse applied before the probe, or leave empty to omit it.",
+        ),
+    ] = None
+    pi_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="g↔e π pulse",
+            description="Enter the calibrated π pulse used only for the e preparation.",
+        ),
+    ]
+    probe_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Probe tone",
+            description="Enter the fixed RF frequency and gain of the tone applied during the variable-duration window.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the readout module applied at the end of the shot.",
+        ),
+    ]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Probe exposure time",
+            unit="µs",
+            description="Set the probe exposure duration sweep in µs before readout.",
+        ),
+    ]
     sampling: Literal["linear", "decay"] = "decay"
     reps: Annotated[
         int,
@@ -133,26 +182,39 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
 
     def _live_update(self, plots: Plots, lengths: NDArray[np.float64]):
         """Show both initial-state population traces and return their live artist updater."""
-        figure, _ = plots.subplots(ncols=2, num="measurement", figsize=(12, 5))
-        axes = figure.axes
-        lines = [live_line(ax, num_lines=POPULATION_COUNT) for ax in axes]
-        for ax in axes:
-            ax.set(xlabel="Time (µs)", ylabel="P(g), P(e), P(other)", ylim=(0.0, 1.0))
-            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
-                line.set_label(label)
-            ax.legend()
+        figure, _ = plots.subplots(
+            nrows=2,
+            ncols=3,
+            num="measurement",
+            figsize=(10, 6),
+            layout="constrained",
+        )
+        progress = figure.suptitle("T1 with tone · qubit · classified populations")
+        lines = [live_line(ax) for ax in figure.axes]
+        for ax, (branch, state, color) in zip(figure.axes, _PANELS, strict=True):
+            ax.set(
+                xlabel="Probe exposure time (µs)", ylabel=f"P({state})", title=branch
+            )
+            ax.lines[0].set(color=color, marker="o", markersize=3)
 
         @plots.on_plot_thread
         def update(counts: NDArray[np.float64]):
-            """Draw acquired shot counts on the measurement axes; return changed artists.
-
-            Read scan-shaped samples without changing them. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            populations = counts / counts.sum(axis=-1, keepdims=True)
+            """Show acquired class fractions and the number of populated cells."""
+            totals = counts.sum(axis=-1)
+            populations = counts / totals[..., None]
+            progress.set_text(
+                f"T1 with tone · qubit · classified populations\n"
+                f"{np.count_nonzero(totals > 0)}/{totals.size} preparation–time points acquired"
+            )
             return (
-                *lines[0].set(lengths, populations[:, 0].T),
-                *lines[1].set(lengths, populations[:, 1].T),
+                progress,
+                *(
+                    artist
+                    for index, viewer in enumerate(lines)
+                    for artist in viewer.set(
+                        lengths, populations[:, index // 3, index % 3][None, :]
+                    )
+                ),
             )
 
         figure.show()
@@ -304,43 +366,54 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         fit_result = fit_dual_transition_rates(lens, populations1, populations2)
 
         lambdas, _ = calc_lambdas(fit_result.rates)
-        fit_pops1 = fit_result.fitted_populations1
-        fit_pops2 = fit_result.fitted_populations2
 
         t1 = 1.0 / lambdas[2]
         t1_b = 1.0 / lambdas[1]
 
-        # 3. Compare the fitted G/E/Other curves with each preparation's data.
+        # 3. Render counted fractions and physical decay fit on matching panels.
+        covariance = class_probability_covariance(result.counts[skip:])
+        if confusion_matrix is not None:
+            jacobian = np.linalg.solve(confusion_matrix.T, np.eye(3))
+            covariance = jacobian @ covariance @ jacobian.T
+        sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
         fig, _ = plots.subplots(
-            num="fit", nrows=1, ncols=2, figsize=(12, 6), sharex=True
+            num="fit",
+            nrows=2,
+            ncols=3,
+            figsize=(10, 6),
+            layout="constrained",
         )
-        ax1, ax2 = fig.axes
-
-        fig.suptitle(f"T_1 = {t1:.1f} µs, T_1_b = {t1_b:.1f} µs")
-
-        ax1.plot(lens, fit_pops1[:, 0], color="blue", ls="--", label="Ground Fit")
-        ax1.plot(lens, fit_pops1[:, 1], color="red", ls="--", label="Excited Fit")
-        ax1.plot(lens, fit_pops1[:, 2], color="green", ls="--", label="Other Fit")
-        ax1.scatter(lens, populations1[:, 0], color="blue", label="Ground", s=1)
-        ax1.scatter(lens, populations1[:, 1], color="red", label="Excited", s=1)
-        ax1.scatter(lens, populations1[:, 2], color="green", label="Other", s=1)
-        ax1.set_ylabel("P(g), P(e), P(other)")
-        ax1.legend(loc=4)
-        ax1.set_ylim(0, 1)
-        ax1.grid(True)
-
-        ax2.plot(lens, fit_pops2[:, 0], color="blue", ls="--", label="Ground Fit")
-        ax2.plot(lens, fit_pops2[:, 1], color="red", ls="--", label="Excited Fit")
-        ax2.plot(lens, fit_pops2[:, 2], color="green", ls="--", label="Other Fit")
-        ax2.scatter(lens, populations2[:, 0], color="blue", label="Ground", s=1)
-        ax2.scatter(lens, populations2[:, 1], color="red", label="Excited", s=1)
-        ax2.scatter(lens, populations2[:, 2], color="green", label="Other", s=1)
-        ax2.set_xlabel("Time (µs)")
-        ax2.set_ylabel("P(g), P(e), P(other)")
-        ax2.legend(loc=4)
-        ax2.set_ylim(0, 1)
-        ax2.grid(True)
-
-        fig.tight_layout()
+        title = "T1 with tone · qubit · classified populations"
+        if confusion_matrix is not None:
+            title = title.replace(
+                "classified populations", "readout-corrected populations"
+            )
+        diagnostics = fit_result.diagnostics
+        fig.suptitle(
+            f"{title}\n"
+            f"Slow T₁ = {t1:.3g} µs · Fast T₁ = {t1_b:.3g} µs · "
+            f"Reduced χ² = {diagnostics.reduced_chi_square:.3g}"
+        )
+        dense_time = np.linspace(float(lens.min()), float(lens.max()), 250)
+        for index, (ax, (branch, state, color)) in enumerate(
+            zip(fig.axes, _PANELS, strict=True)
+        ):
+            prep, outcome = divmod(index, 3)
+            model = model_func(dense_time, *fit_result.model_parameters(prep + 1))
+            ax.errorbar(
+                lens,
+                populations[:, prep, outcome],
+                yerr=sem[:, prep, outcome],
+                fmt="o",
+                markersize=3,
+                capsize=2,
+                color=color,
+                label="Data ± shot SEM",
+            )
+            ax.plot(dense_time, model[:, outcome], color=color, label="Rate model")
+            ax.set(
+                xlabel="Probe exposure time (µs)", ylabel=f"P({state})", title=branch
+            )
+        fig.axes[2].legend(loc="best", fontsize=10)
 
         return T1WithToneAnalysis(t1=float(t1), t1_b=float(t1_b))

@@ -26,12 +26,12 @@ The simulator's acquire path starts each repetition from its configured thermal 
 
 Run collects three rows in order: g has no preparation pulse, e applies Pi 01, f applies Pi 03 followed by Pi 32.
 Each row contains **Shots per preparation** complex IQ values in mean-sample ADC units.
-No reset or extra drive is inserted for g. The measurement plot shows the three acquired clouds.
+No reset or extra drive is inserted for g. Run shows the three IQ clouds and counts the shots acquired out of the three requested rows.
 
 Click Analysis to train a Euclidean nearest-centroid classifier on the first half of each row.
 The remaining half evaluates assignment. An odd shot count gives the extra shot to evaluation.
 Training confusion rows are requested preparation labels and columns are classified labels.
-The Result fit figure shows held-out raw fractions, unclipped corrected fractions, training confusion and matrix quality.
+The Analyze figure marks the trained centroids on the held-out IQ clouds. Compare the classified fractions with the unclipped corrected estimates and read the condition number beside the training confusion matrix. The cloud and calibration matrices are diagnostics, not a 1D scan, so they have no per-point shot SEM bars.
 The analysis also returns arrays, centroids, sample counts and diagnostics for the host's saved analysis summary.
 
 Correction solves the transpose of the training confusion matrix.

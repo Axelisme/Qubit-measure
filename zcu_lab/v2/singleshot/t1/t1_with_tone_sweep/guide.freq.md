@@ -2,13 +2,13 @@
 
 **Readers:** operator, agent. How to map single-shot T1 transition rates versus probe frequency from the GUI or MCP and interpret the results.
 
-Single-shot T1-with-tone, probe-frequency sweep: at each probe frequency it sweeps the wait-plus-probe length from both |g> and |e> initial states (Branch), classifies each shot during acquisition against the |g>/|e> centres, fits the dual transition rates per frequency, and renders the 3×3 rate landscape over (freq, time). Runs on real hardware.
+Single-shot T1-with-tone, probe-frequency sweep: at each probe frequency it sweeps the wait-plus-probe length from both |g> and |e> initial states (Branch), classifies each shot during acquisition against the |g>/|e> centres, fits the dual transition rates per frequency, and plots six population maps plus the fitted rates. Runs on real hardware.
 
 ## Saved counts
 
 The saved `counts` array has axes `(frequency, initial state, length, population state)`. The final axis contains class counts `[g,e,other]` summed over acquired rounds, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
 
-Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema is 4.0 after renaming the time window to delay and uniform to sampling.
+Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema is 5.0. If a file retains native counts but lacks compatible cfg, Analyze cannot use its readout correction.
 
 ## Parameter sources
 
@@ -42,4 +42,8 @@ This is a diagnostic only. Read the rate landscape from the grid; calibration pa
 
 Run singleshot/ge Primary and Post, then Apply to the selected readout module. Keep the frequency sweep coarse (the inner length sweep multiplies the run time). 'sampling="linear"' (default) uses a linear length sweep; set 'sampling="decay"' to cluster points along the expected exponential decay while preserving the configured window and count. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+The six Analyze maps share a 0–1 probability scale and separate the two preparations. Read the fitted rates in the separate plot against the tone's RF frequency. The rate error bars show the marginal fit-parameter errors at every fifth point. They are not per-shot SEM. The 2D maps have no individual error bars. When a rate changes abruptly, check whether both preparations reached a plateau there. Extend the Delay stop if they did not. The frequency axis stays in MHz; the photon conversion applies to the gain variant only.
+
+**Last updated:** 2026-11-22

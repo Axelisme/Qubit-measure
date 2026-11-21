@@ -34,11 +34,42 @@ class CheckAnalyzeOptions:
 
 
 class CheckCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    shots: Annotated[int, FieldMeta(label="Shots", unit="count")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select the reset module applied before preparation, or leave empty to skip reset.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Initial preparation pulse",
+            description="Select the pulse applied before the probe, or leave empty to omit it.",
+        ),
+    ] = None
+    probe_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit probe pulse",
+            description="Enter the qubit pulse applied before collecting the IQ cloud.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the readout module applied at the end of the shot.",
+        ),
+    ]
+    shots: Annotated[
+        int,
+        FieldMeta(
+            label="Shots",
+            unit="count",
+            description="Enter the number of IQ readouts after the same preparation.",
+        ),
+    ]
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -84,7 +115,25 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
 
-        signals_buffer = SignalBuffer((cfg.shots,))
+        figure, ax = context.plots.subplots(num="measurement", layout="constrained")
+
+        @context.plots.on_plot_thread
+        def update(signals: NDArray[np.complex128]):
+            """Draw the retained IQ cloud without assuming a classifier."""
+            ax.clear()
+            finite = np.isfinite(signals)
+            ax.scatter(signals[finite].real, signals[finite].imag, s=4, alpha=0.4)
+            ax.set(
+                xlabel="IQ in-phase I (a.u.)",
+                ylabel="IQ quadrature Q (a.u.)",
+                title="Single-shot check · qubit · IQ cloud\n"
+                f"Accumulated shots = {np.count_nonzero(finite)} count",
+            )
+            ax.set_aspect("equal", adjustable="datalim")
+            return (figure,)
+
+        figure.show()
+        signals_buffer = SignalBuffer((cfg.shots,), on_update=update)
         with Schedule(signals_buffer, scope=context.scope) as sched:
             # Prepare the same state for every shot before probing and readout.
             builder = TimelineBuilder(
@@ -144,7 +193,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
             classifier.e_center,
             classifier.radius,
         )
-        _, ax = plots.subplots(num="fit", figsize=(6, 6))
+        _, ax = plots.subplots(num="fit", figsize=(6, 6), layout="constrained")
 
         mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)
         ng = mask_g.sum() / signals.shape[0]
@@ -209,10 +258,10 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
             )
 
         ax.set_aspect("equal")
-        ax.legend()
-        ax.set_xlabel("I value (a.u.)")
-        ax.set_ylabel("Q value (a.u.)")
-
+        ax.legend(title="Saved decision circle centers", loc="best")
+        ax.set_xlabel("IQ in-phase I (a.u.)")
+        ax.set_ylabel("IQ quadrature Q (a.u.)")
         ax.set_title(
-            f"Population: Ground: {ng:.1%}, Excited: {ne:.1%}, Other: {no:.1%}"
+            "Single-shot check · qubit · classified IQ\n"
+            f"P(g) = {ng:.1%} · P(e) = {ne:.1%} · P(other) = {no:.1%}"
         )

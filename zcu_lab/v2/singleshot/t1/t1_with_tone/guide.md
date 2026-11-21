@@ -8,7 +8,7 @@ Single-shot T1-with-tone: applies a π pulse and a simultaneous probe tone durin
 
 The saved `counts` array has axes `(length, initial state, population state)`. The final axis contains class counts `[g,e,other]` summed over acquired rounds, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
 
-Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema is 4.0 after renaming the time window to delay and uniform to sampling.
+Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema is 5.0. If a file retains native counts but lacks compatible cfg, Analyze cannot use its readout correction.
 
 ## Parameter sources
 
@@ -42,4 +42,8 @@ Proposes the fitted T1 relaxation time under the probe tone at `$qubit.ext.t1_wi
 
 Run singleshot/ge Primary and Post, then Apply to the selected readout module. Use 'sampling="decay"' (default) to cluster points along the expected exponential decay while preserving the configured window and point count; use 'sampling="linear"' for a linear sweep. The probe-tone gain and frequency are set in the `probe_pulse` module slot. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+Compare both preparations against the dual-transition-rate fit. If the populations are still changing at the longest exposure, extend the Delay stop to several times the provisional T1. A reduced χ² far from one warrants checking model residuals and the noise assumptions before using the fitted T1. The data bars are shot SEM from retained counts per preparation and exposure. When readout correction is available, Analyze propagates the covariance through that correction.
+
+**Last updated:** 2026-11-22

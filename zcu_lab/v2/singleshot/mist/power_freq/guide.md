@@ -48,4 +48,8 @@ Old files storing `signals` instead of `counts` are unsupported. Load reports
 the missing `counts` variable. Acquire a new run; Load does not convert stored
 fractions to counts.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+Compare the g, e and Other panels at the same gain and RF frequency; the maps use a common 0–1 color scale. The contours of elevated Other show where outcomes leave the g/e circles, not which higher level was populated. If the region reaches a scan edge, extend that axis before choosing a safer operating point. No per-point SEM is drawn on the maps. Layout reference: Ding Fig. 5-8(b), p. 151 also uses a 2D map, but its axes and observable differ from these gain–frequency population maps.
+
+**Last updated:** 2026-11-22

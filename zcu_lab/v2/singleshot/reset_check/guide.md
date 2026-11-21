@@ -2,13 +2,13 @@
 
 **Readers:** operator, agent. How to compare single-shot reset branches from the GUI or MCP and interpret the results.
 
-Hardware gain and three-branch sweep: Rabi / Rabi + reset / Rabi + reset + Rabi. Both pulses share the swept gain. Saves G/E/Other class counts; live view and analysis show Ground / Excited / Other with color for state and solid / dashed / dotted lines for branch.
+Hardware gain and three-branch sweep: Rabi / Rabi + reset / Rabi + reset + Rabi. Both pulses share the swept gain. Saves G/E/Other class counts; live view and analysis use one panel per branch and one color per outcome.
 
 ## Saved counts
 
 The saved `counts` array has axes `(gain, reset branch, population state)`. The final axis contains class counts `[g,e,other]` summed over acquired rounds, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
 
-Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema remains 3.0 because the configuration fields did not change.
+Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The current cfg schema is 4.0. Older files with native counts but without a compatible saved cfg retain the counts; Analyze can show classified fractions, but cannot use unavailable readout correction.
 
 ## Parameter sources
 
@@ -42,4 +42,8 @@ The returned analysis summary contains `reset_mean_excited_population`, `reset_m
 
 Reps are shots per gain per branch per round; rounds average repeated hardware sweeps and update the live plot. Branches are independent preparations. Other counts shots outside the accepted circle regions or tied between them. Calibrated leakage and reset-channel fidelity require separate characterization.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+Compare P(g) and P(Other) at the same gain across the three branch panels. The Reset only panel reports mean and maximum P(e) across the scan, not a new calibration. Read the branch contrast at the intended π gain when judging the tested reset. If the prepared e population is low without reset, adjust the π pulse first. Analyze draws shot SEM from each measured branch's retained class counts, with the covariance propagated through saved readout correction when available.
+
+**Last updated:** 2026-11-22

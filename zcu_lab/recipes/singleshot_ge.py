@@ -29,44 +29,44 @@ class SingleshotGEInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key.",
+        description="Sets Run › Readout to a readout library key. Omit to retain; null is passed to the form.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key.",
+        description="Sets Run › π probe pulse to a calibrated g↔e pulse key. Omit to retain.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Preparation module option.",
+        description="Sets Run › Reset to a reset module option. Omit to keep the current source; null skips reset.",
     )
     init_pulse_ref: str | None | Keep = Field(
         KEEP,
-        description="Preparation module option.",
+        description="Sets Run › Initial preparation pulse to a pulse option. Omit to retain; null skips it.",
     )
     shots: int | None | Keep = Field(
         KEEP,
-        description="Probe-off/on shot count.",
+        description="Sets Run › Shots per preparation (count) for each probe-off/on branch. Omit to retain.",
     )
 
     initial_state: Literal["ground", "excited"] | None | Keep = Field(
         KEEP,
-        description="Initial State. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Primary › State before π probe to ground or excited. Omit to retain.",
     )
     backend: Literal["pca", "center"] | None | Keep = Field(
         KEEP,
-        description="Backend. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Primary › IQ rotation method: pooled axis (pca) or line between centers (center).",
     )
     logscale: bool | None | Keep = Field(
         KEEP,
-        description="Log Scale. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Primary › Log scale for projected shot counts. Only the histogram display changes.",
     )
     align_t1: bool | None | Keep = Field(
         KEEP,
-        description="Align T1. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Primary › Share decay ratio across histogram fits. Omit to retain.",
     )
     length_ratio: float | None | Keep = Field(
         KEEP,
-        description="Length Ratio. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Primary › Readout length / T1 (a.u.). Omit to retain; null lets analysis estimate the ratio.",
     )
 
 
@@ -83,19 +83,19 @@ class SingleshotGEReport(RecipeReport):
     )
 
     fidelity: float | None = Field(
-        description="Ground/excited discrimination fidelity; null means not estimable."
+        description="Prepared-label assignment fidelity (fraction, 0–1); null means not estimable."
     )
     theta: float | None = Field(
-        description="IQ rotation angle in radians; null means not estimable."
+        description="IQ rotation angle (rad); null means not estimable."
     )
     threshold: float | None = Field(
-        description="Rotated-IQ discrimination threshold; null means not estimable."
+        description="Rotated I threshold (a.u.); null means not estimable."
     )
     ge_radius: float | None = Field(
-        description="Post-analysis classification radius in IQ units; null means not estimable."
+        description="Classification radius (a.u.) from Post; null means not estimable."
     )
     confusion: list[list[float | None]] = Field(
-        description="Post-analysis confusion matrix in state order; nonfinite entries are null."
+        description="Corrected confusion from Post, rows model states, columns assigned outcomes, each in g/e/other order; nonfinite probabilities are null."
     )
     primary_writeback_applied: bool = Field(
         default=False, description="Primary receipt confirmed one or more writes."
@@ -107,7 +107,7 @@ class SingleshotGEReport(RecipeReport):
 
 @recipe(
     "singleshot_ge",
-    description="Run GE single-shot calibration with Primary and Post analysis.",
+    description="Acquire π probe-off/on IQ clouds, fit g/e discrimination in Primary and derive circle classification in Post; ask before writing calibration and save both stages.",
 )
 async def singleshot_ge(
     session: RecipeSession, inputs: SingleshotGEInputs

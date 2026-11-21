@@ -50,4 +50,8 @@ Old files storing `signals` instead of `counts` are unsupported. Load reports
 the missing `counts` variable. Acquire a new run; Load does not convert stored
 fractions to counts.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+The live and analysis spectra show how the g/e/Other fractions respond to the preparation RF frequency. This is a peak-location spectrum, so the points do not use shot SEM bars. If a feature hits the frequency limit, use its RF frequency as the new center and extend the scan until the neighboring baseline is visible.
+
+**Last updated:** 2026-11-22

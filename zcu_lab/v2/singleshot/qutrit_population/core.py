@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.singleshot import ReferenceIQAnalysis, analyze_reference_iq
@@ -45,8 +46,8 @@ class QutritPopulationCfg(ConfigBase):
     pi01: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="Pi 01",
-            description="Calibrated g to e pulse; frequency in MHz, duration in µs.",
+            label="g↔e π pulse",
+            description="Enter the calibrated g↔e π pulse for the e preparation.",
         ),
     ]
     pi03: Annotated[
@@ -64,9 +65,14 @@ class QutritPopulationCfg(ConfigBase):
         ),
     ]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    shots: Annotated[int, FieldMeta(label="Shots per preparation", unit="count")] = (
-        Field(default=4096, ge=6)
-    )
+    shots: Annotated[
+        int,
+        FieldMeta(
+            label="Shots per preparation",
+            unit="count",
+            description="Enter the number of single-shot IQ readouts per preparation.",
+        ),
+    ] = Field(default=4096, ge=6)
     initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="µs")] = (
         Field(default=1.0, ge=0)
     )
@@ -111,7 +117,21 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         measured pulse calibrations and a relaxation interval suitable for g.
         """
         # 1. Reserve separate raw IQ clouds for the three reference preparations.
-        buffer = SignalBuffer((3, cfg.shots))
+        figure, ax = context.plots.subplots(num="measurement", layout="constrained")
+
+        @context.plots.on_plot_thread
+        def update(signals: NDArray[np.complex128]):
+            """Display each acquired preparation cloud and accumulated count."""
+            ax.clear()
+            _plot_reference_clouds(ax, signals)
+            ax.set_title(
+                "Qutrit population · qubit · IQ references\n"
+                f"Accumulated shots = {np.count_nonzero(np.isfinite(signals))} count"
+            )
+            return (figure,)
+
+        figure.show()
+        buffer = SignalBuffer((3, cfg.shots), on_update=update)
         # 2. Compare no pulse, pi01, and pi03-then-pi32 preparations with raw readout.
         with Schedule(buffer, scope=context.scope) as sched:
             for label, step in sched.scan("preparation", [0, 1, 2]):
@@ -134,29 +154,10 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
                 if shots is None:
                     break
                 buffer[step].set(raw_shots_to_signal(shots, program)[0])
-        result = QutritPopulationResult(
+        return QutritPopulationResult(
             signals=buffer.array,
             shot_indices=np.arange(cfg.shots, dtype=np.int64),
         )
-        plots = context.plots
-        # 3. Inspect reference-cloud separation without assuming pure prepared states.
-        figure, _ = plots.subplots(num="measurement")
-
-        ax = figure.axes[0]
-        for label, row in zip(
-            ("g: no pulse", "e: pi01", "f: pi03 then pi32"),
-            result.signals,
-            strict=True,
-        ):
-            ax.scatter(row.real, row.imag, s=2, alpha=0.3, label=label)
-        ax.set(
-            xlabel="Mean-sample ADC I (a.u.)",
-            ylabel="Mean-sample ADC Q (a.u.)",
-            title="Reference preparations (not pure states)",
-        )
-        ax.legend()
-        figure.show()
-        return result
 
     def analyze(
         self,
@@ -178,11 +179,24 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         result = analyze_reference_iq(
             source.result.signals, np.array([0, 1, 2], dtype=np.int64)
         )
-        # 2. Expose raw/corrected fractions, training confusion, and label-quality limits.
+        # 2. Compare the acquisition IQ with trained reference centers.
+        _, cloud_ax = plots.subplots(num="references", layout="constrained")
+        _plot_reference_clouds(cloud_ax, source.result.signals)
+        cloud_ax.scatter(
+            result.centroids.real,
+            result.centroids.imag,
+            color="black",
+            marker="x",
+            label="Training centroids",
+        )
+        cloud_ax.legend(loc="best")
+        cloud_ax.set_title("Qutrit population · qubit · trained IQ references")
+        # 3. Compare raw and corrected evaluation with training confusion.
         figure, _ = plots.subplots(
             nrows=2, ncols=2, num="fit", figsize=(10, 7), layout="constrained"
         )
 
+        figure.suptitle("Qutrit population · qubit · held-out classification")
         for ax, matrix, title in zip(
             figure.axes[:3],
             (
@@ -197,7 +211,20 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
             ),
             strict=True,
         ):
-            ax.imshow(matrix, vmin=0, vmax=1, cmap="Blues")
+            ax.grid(False)
+            corrected = title == "Corrected (unclipped)"
+            image = ax.imshow(
+                matrix,
+                cmap="Blues",
+                vmin=None if corrected else 0,
+                vmax=None if corrected else 1,
+            )
+            figure.colorbar(
+                image,
+                ax=ax,
+                shrink=0.8,
+                label="Estimate" if corrected else "Probability (0–1)",
+            )
             ax.set(
                 xticks=range(3),
                 yticks=range(3),
@@ -230,3 +257,17 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
             fontsize=10,
         )
         return result
+
+
+def _plot_reference_clouds(ax: Axes, signals: NDArray[np.complex128]) -> None:
+    """Draw I and Q in ADC units for the g/e/f preparation rows."""
+    for label, row, color in zip(
+        ("g: no pulse", "e: g↔e π", "f: g↔3 π then 3↔f π"),
+        signals,
+        ("tab:blue", "tab:red", "tab:purple"),
+        strict=True,
+    ):
+        ax.scatter(row.real, row.imag, s=4, alpha=0.3, label=label, color=color)
+    ax.set(xlabel="IQ in-phase I (a.u.)", ylabel="IQ quadrature Q (a.u.)")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.legend(loc="best")

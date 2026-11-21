@@ -6,13 +6,13 @@ The hardware gain sweep preserves every raw IQ shot. Live view classifies Ground
 
 ## Parameter sources
 
-Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1. Gain sweep runs from -0.3 to 1.0.
+Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1. Gain sweep starts at -0.3. Defaults computes its stop from the stored π gain.
 
 Raw acquisition and joint fitting require one ADC: Pulse or a single-tone Mux. Live preview uses that readout's circle classifier under Readout → Advanced. Without a classifier, Run still collects raw IQ and Analyze still fits; only the population preview is skipped. A supplied linear classifier cannot show Other; a circle without radius prompts singleshot GE Post.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
-The gain sweep starts at -0.3 and stops at 1.0 regardless of calibration. When the x180 module has a stored scalar waveform length, its editable pulse copy starts at length = 1.5*pi_len*pi_gain µs. pi_len must be a finite positive number; pi_gain must be finite and in (0, 1]. Both values must be numeric, with booleans treated as invalid. Missing, null or invalid values leave the required length empty. A finite invalid gain stays visible for correction; a nonfinite gain leaves both gain and length empty.
+The default gain stop is `min(1.0, 4.0 * $qubit.module.x180.gain)`. When the x180 module has a stored scalar waveform length, its editable pulse copy starts at length = 1.5*pi_len*pi_gain µs. pi_len must be a finite positive number; pi_gain must be finite and in (0, 1]. Both values must be numeric, with booleans treated as invalid. Missing, null or invalid values leave the required length empty. A finite invalid gain stays visible for correction; a nonfinite gain leaves both gain and length empty.
 
 If the x180 module is absent, the qub_probe template starts at gain=1 and length=1 µs. An arbitrary-waveform x180 keeps the original module slot, waveform shape and data. Its duration stays with the selected waveform; change waveform first to edit duration.
 
@@ -36,4 +36,10 @@ Analysis returns fitted parameters, pre-pulse `initial_populations`, the fixed 3
 
 Sweep a full Rabi period. Initial State describes the predominant state before the drive, at zero gain, even if the first gain is nonzero. Reps are shots per gain per round; rounds concatenate shots and update live populations. Joint fitting requires a file containing raw IQ shots.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+In Run, check that all three classified outcomes change across the gain sweep. In Analyze, compare data against the joint fit and locate π and π/2 on the gain axis. If fewer than one full oscillation is visible, extend the range rather than applying an extrapolated gain. Use the projected-IQ fit and the confusion matrix to check whether the model separates g and e. The fit's negative log-likelihood is an objective value, not a population error or a pass threshold.
+
+Population error bars are shot SEM from the retained IQ shots assigned to g, e or Other. They are not fit-parameter uncertainties or the width of the projected IQ histogram. For pointwise probability error bars, see Ding Fig. 5-13(a), p. 157; that plot varies CZ pulse width and shows fidelity, not oscillation versus drive gain.
+
+**Last updated:** 2026-11-22
