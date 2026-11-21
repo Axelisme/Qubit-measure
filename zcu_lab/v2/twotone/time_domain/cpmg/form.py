@@ -3,7 +3,7 @@
 from typing import Annotated
 
 from pydantic import Field, model_validator
-from zcu_tools.cfg_model import ConfigBase, FieldMeta, LogPoints, Slot, Template
+from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta, LogPoints, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.program.v2 import Pulse, Readout, Reset
 
@@ -91,6 +91,10 @@ def make_form(ctx: FormContext) -> Form[CPMGInput]:
                 ),
             ),
             "count": LogPoints(max=16, points=5, include_zero=False),
+            "min_length_us": Expr(
+                "16 * ($qubit.module.x90.waveform.length + "
+                "$qubit.module.x180.waveform.length)"
+            ),
             "detune_ratio": 0.1,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
