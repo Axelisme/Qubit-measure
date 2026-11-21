@@ -72,14 +72,48 @@ def marginal_probabilities(
     """
     if target not in ("f1", "f2"):
         raise ValueError("target must be f1 or f2")
-    return joint_probabilities(counts).sum(axis=-1 if target == "f1" else -2)
+    return _marginal_probabilities(counts, sum_axis=-1 if target == "f1" else -2)
+
+
+def qubit_marginal_probabilities(
+    counts: NDArray[np.float64], target: Literal["qubit1", "qubit2"]
+) -> NDArray[np.float64]:
+    """Return (..., 3) P_g/P_e/P_other for the named qubit position.
+
+    counts ends in terminal Qubit1 then Qubit2. Other contributes to the
+    denominator. Empty or unmeasured points yield NaN; invalid targets raise
+    ValueError.
+    """
+    if target not in ("qubit1", "qubit2"):
+        raise ValueError("target must be qubit1 or qubit2")
+    return _marginal_probabilities(counts, sum_axis=-1 if target == "qubit1" else -2)
+
+
+def _marginal_probabilities(
+    counts: NDArray[np.float64], *, sum_axis: Literal[-1, -2]
+) -> NDArray[np.float64]:
+    return joint_probabilities(counts).sum(axis=sum_axis)
 
 
 def sigma(
     counts: NDArray[np.float64], target: Literal["f1", "f2"]
 ) -> NDArray[np.float64]:
     """Return target's (N_e - N_g)/N_total; other stays in the denominator."""
-    marginal = marginal_probabilities(counts, target)
+    return _sigma(marginal_probabilities(counts, target))
+
+
+def qubit_sigma(
+    counts: NDArray[np.float64], target: Literal["qubit1", "qubit2"]
+) -> NDArray[np.float64]:
+    """Return target's (N_e - N_g)/N_total from terminal Qubit1 × Qubit2 counts.
+
+    Include other in N_total. Empty or unmeasured points yield NaN; invalid
+    targets raise ValueError.
+    """
+    return _sigma(qubit_marginal_probabilities(counts, target))
+
+
+def _sigma(marginal: NDArray[np.float64]) -> NDArray[np.float64]:
     return marginal[..., 1] - marginal[..., 0]
 
 
