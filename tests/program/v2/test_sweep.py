@@ -1,6 +1,31 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
+from zcu_tools.program.v2 import sweep
 from zcu_tools.program.v2.sweep import SweepCfg
+
+
+@pytest.mark.parametrize(
+    ("start", "stop", "step"),
+    [(0.0, 1.25, 1.25), (0.0, -1.25, -1.25), (1.25, 0.0, -1.25)],
+)
+def test_gain_sweep_rejects_either_endpoint_outside_full_scale(
+    start: float, stop: float, step: float
+) -> None:
+    adapter = TypeAdapter(sweep.GainSweepCfg)
+    raw = {"start": start, "stop": stop, "step": step, "expts": 2}
+    with pytest.raises(ValidationError, match=r"\[-1, 1\]"):
+        adapter.validate_python(raw)
+    with pytest.raises(ValidationError, match=r"\[-1, 1\]"):
+        adapter.validate_python(SweepCfg(start=start, stop=stop, step=step, expts=2))
+
+
+def test_gain_sweep_accepts_full_scale_endpoints_in_either_order() -> None:
+    adapter = TypeAdapter(sweep.GainSweepCfg)
+    for start, stop in [(-1.0, 1.0), (1.0, -1.0)]:
+        result = adapter.validate_python(
+            {"start": start, "stop": stop, "step": stop - start, "expts": 2}
+        )
+        assert (result.start, result.stop) == (start, stop)
 
 
 @pytest.mark.parametrize("value", [float("inf"), float("-inf")])

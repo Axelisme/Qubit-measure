@@ -20,7 +20,7 @@ from .device_name import (
 )
 from .field_meta import FieldMeta, get_field_meta
 from .form_nodes import FormNode, Hidden, LogPoints, Range
-from .gain import Gain
+from .gain import FULL_SCALE_GAIN_BOUNDS, Gain
 from .inputs import CfgInputMap, CfgInputValue
 from .materialization import (
     ModuleCfgFactory,
@@ -71,6 +71,7 @@ from .spec_types import (
     is_module_spec_type,
     is_waveform_spec_type,
 )
+from .sweep_bounds import SweepBounds
 from .template_nodes import Expr, Slot, Template, TemplateLiteral, TemplateSeed
 from .templates import TemplateDef, expand_path
 from .waveform import (
@@ -98,7 +99,9 @@ __all__ = [
     "CircleClassifier",
     "LinearClassifier",
     "ReadoutClassifier",
+    "FULL_SCALE_GAIN_BOUNDS",
     "Gain",
+    "SweepBounds",
     "Expr",
     "Slot",
     "Template",

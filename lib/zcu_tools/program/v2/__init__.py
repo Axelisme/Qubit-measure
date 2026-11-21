@@ -47,7 +47,7 @@ from .read_axes import (
     split_sums,
 )
 from .rpi import rpi_sums
-from .sweep import SweepCfg
+from .sweep import GainSweepCfg, SweepCfg
 from .table_param import TableParam, TableRawParam
 from .timeline import TimelineProgramV2
 from .utils import sweep2param

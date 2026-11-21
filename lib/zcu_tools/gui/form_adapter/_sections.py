@@ -21,6 +21,7 @@ from zcu_tools.cfg_model import (
     ModuleSpec,
     Range,
     Slot,
+    SweepBounds,
     Template,
     TemplateDef,
     WaveformSpec,
@@ -71,9 +72,14 @@ from .sweep import CenterSpan, LinRange, StepCenter, StepRange, sweep_converter
 
 
 def _sweep_branch(
-    base: type[FormModel], node: FormNode, decimals: int | None, unit: str | None
+    base: type[FormModel],
+    node: FormNode,
+    meta: FieldMeta | None,
+    bounds: tuple[SweepBounds, ...],
 ) -> type[FormModel]:
-    """Specialize authored endpoint requirements and float display precision."""
+    """Specialize endpoint requirements, float display and bound validation."""
+    decimals = meta.decimals if meta is not None else None
+    unit = meta.unit if meta is not None else None
     fields: dict[str, FieldInfo] = {}
     for name, info in base.model_fields.items():
         if info.annotation is not float:
@@ -101,6 +107,7 @@ def _sweep_branch(
             {
                 "__module__": "zcu_tools.gui.form_adapter.form",
                 "__annotations__": {name: float for name in fields},
+                "_sweep_bounds": bounds,
                 **fields,
             }
         ),
@@ -118,16 +125,22 @@ def _sweep_model(node: FormNode, info: FieldInfo) -> object:
     No expression is evaluated and no shared branch class is modified.
     """
     meta = get_field_meta(info)
-    decimals = meta.decimals if meta is not None else None
+    branch_items = branch_metadata(info.annotation, SweepCfg)
+    bounds = tuple(
+        item
+        for item in (*branch_items, *info.metadata)
+        if isinstance(item, SweepBounds)
+    )
     branches = tuple(
-        _sweep_branch(base, node, decimals, meta.unit if meta is not None else None)
+        _sweep_branch(base, node, meta, bounds)
         for base in (LinRange, CenterSpan, StepRange, StepCenter)
     )
     annotation: object = Annotated[
         union_type(branches), Field(discriminator="kind"), sweep_converter(branches)
     ]
-    for item in branch_metadata(info.annotation, SweepCfg):
-        annotation = annotated_type(annotation, item)
+    for item in branch_items:
+        if not isinstance(item, SweepBounds):
+            annotation = annotated_type(annotation, item)
     return (
         union_type((annotation, type(None)))
         if type(None) in _members(info.annotation)
@@ -183,6 +196,10 @@ def _field_info(info: FieldInfo) -> FieldInfo:
         result.metadata.append(suggestions)
     display = field_display(info)
     if SweepCfg in _members(info.annotation):
+        # The generated branches report these bounds on their editable rows.
+        result.metadata = [
+            item for item in result.metadata if not isinstance(item, SweepBounds)
+        ]
         display = (display or Display()).overlay(Display(decimals=None, selector=False))
     if display is not None:
         result.metadata.append(display)

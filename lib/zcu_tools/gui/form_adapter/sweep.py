@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal, Self
 
 from pydantic import Field, JsonValue, model_validator
 
+from zcu_tools.cfg_model import SweepBounds
 from zcu_tools.gui.form import (
     Display,
     FormCommandContext,
@@ -238,7 +239,30 @@ _CENTER_EXPTS = InputCommand(
 )
 
 
-class LinRange(FormModel):
+class _SweepForm(FormModel):
+    _sweep_bounds: ClassVar[tuple[SweepBounds, ...]] = ()
+
+    def _check_endpoints(
+        self,
+        start: float,
+        stop: float,
+        *,
+        rows: tuple[str, str],
+        authored_center: float | None = None,
+    ) -> None:
+        for endpoint, row in zip((start, stop), rows, strict=True):
+            for bounds in self._sweep_bounds:
+                if (error := bounds.endpoint_error(endpoint)) is not None:
+                    if (
+                        row == "span"
+                        and authored_center is not None
+                        and bounds.endpoint_error(authored_center) is not None
+                    ):
+                        row = "center"
+                    raise field_error((row,), error)
+
+
+class LinRange(_SweepForm):
     """Range + Expts in caller units, including descending sweeps.
 
     kind selects the branch. start/stop are finite endpoints; n is a positive
@@ -252,8 +276,13 @@ class LinRange(FormModel):
     stop: float
     n: Annotated[int, Display(label="Expts")] = Field(ge=1)
 
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> Self:
+        self._check_endpoints(self.start, self.stop, rows=("start", "stop"))
+        return self
 
-class CenterSpan(FormModel):
+
+class CenterSpan(_SweepForm):
     """Center + Expts; span is signed full width, never halfwidth.
 
     kind selects the branch; center is the finite midpoint in caller units,
@@ -276,8 +305,15 @@ class CenterSpan(FormModel):
         """Return the effective final endpoint in caller units."""
         return self.center + self.span / 2
 
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> Self:
+        self._check_endpoints(
+            self.start, self.stop, rows=("span", "span"), authored_center=self.center
+        )
+        return self
 
-class StepRange(FormModel):
+
+class StepRange(_SweepForm):
     """Range + Step; validation projects stop, without changing authored input.
 
     kind selects the branch. start/stop are finite caller-unit endpoints; step is
@@ -299,6 +335,7 @@ class StepRange(FormModel):
         except ValueError as exc:
             raise field_error(("step",), str(exc)) from exc
         self.stop = self.start + self.step * (count - 1)
+        self._check_endpoints(self.start, self.stop, rows=("start", "step"))
         return self
 
     @cached_property
@@ -308,7 +345,7 @@ class StepRange(FormModel):
         return _step_count(self.stop - self.start, self.step)
 
 
-class StepCenter(FormModel):
+class StepCenter(_SweepForm):
     """Center + Step; validation projects the effective midpoint and signed span.
 
     kind selects the branch. center/span are finite caller-unit coordinates;
@@ -329,9 +366,15 @@ class StepCenter(FormModel):
             count = self.n
         except ValueError as exc:
             raise field_error(("step",), str(exc)) from exc
-        start = self.start
+        start, authored_center = self.start, self.center
         self.span = self.step * (count - 1)
         self.center = start + self.span / 2
+        self._check_endpoints(
+            self.start,
+            self.stop,
+            rows=("span", "step"),
+            authored_center=authored_center,
+        )
         return self
 
     @property
