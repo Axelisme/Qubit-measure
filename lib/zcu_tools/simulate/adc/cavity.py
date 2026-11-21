@@ -1,5 +1,6 @@
 """State-conditioned coherent fields before scattering and calibration."""
 
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from struct import pack
@@ -92,22 +93,41 @@ class CavityFieldAverage:
     field_products: NDArray[np.complex128]
 
 
+@dataclass(frozen=True)
+class CavitySpanResult:
+    """Fixed-branch cavity products in model state order for one interval.
+
+    average: owned same-time quadratic moments over the requested interval.
+    final_fields: owned complex128 (state,cavity) fields at the interval end,
+        in sqrt(photons) in the original model reference, including ringdown.
+    """
+
+    average: CavityFieldAverage
+    final_fields: NDArray[np.complex128]
+
+
+@dataclass(frozen=True, slots=True)
+class _FlatSpan:
+    products: NDArray[np.complex128]
+    final: NDArray[np.complex128]
+
+
 class CavityAverageCache:
-    """Byte-bounded owner of exact noiseless flat second moments.
+    """Byte-bounded owner of exact flat second moments and span endpoints.
 
     max_bytes: nonnegative integer resident limit, default 64 MiB, fixed for this
         owner. Zero disables admission. Oversized results still return normally;
         existing entries remain, with no eviction. Calls must be serialized.
-    hits/misses: cumulative flat lookups found/not found, including failed solves
-        after lookup. Invalid inputs, empty vacuum and shaped/callable inputs
-        bypass lookups.
+    hits/misses: cumulative flat lookups found/not found across average and span,
+        including failed solves after lookup. Invalid and shaped/callable inputs
+        bypass lookups; see each method for its other bypass conditions.
     resident_bytes: retained keys, whole owned array allocations and dictionary
         storage in bytes; zero after construction or clear(). Active calculation
         workspaces and caller-owned return arrays are outside this limit.
 
-    Keys retain complete converted model/pulse content, exact coordinates and
-    complex initial fields, not identities or rounded values. Only successful
-    flat solves are admitted. Hits and misses return independent writable arrays.
+    Keys use exact model and pulse content, coordinates and initial fields.
+    The shared capacity covers both entry kinds; only successful flat solves
+    are admitted. Hits and misses return independent writable arrays.
     Constructor raises ValueError for a noninteger or negative capacity. Solver
     errors propagate without admission. This owner retains no model or callback.
     """
@@ -119,7 +139,7 @@ class CavityAverageCache:
         self.hits: int = 0
         self.misses: int = 0
         self.resident_bytes: int = 0
-        self._products: dict[bytes, NDArray[np.complex128]] = {}
+        self._results: dict[bytes, NDArray[np.complex128] | _FlatSpan] = {}
         self._payload_bytes = 0
 
     @property
@@ -129,9 +149,71 @@ class CavityAverageCache:
 
     def clear(self) -> None:
         """Release all resident content and storage, preserving hits/misses."""
-        self._products = {}
+        self._results = {}
         self._payload_bytes = 0
         self.resident_bytes = 0
+
+    def span(
+        self,
+        model: ReadoutModel,
+        pulses: tuple[ReadoutPulse, ...],
+        start_ns: float,
+        end_ns: float,
+        *,
+        initial_field: NDArray[np.complex128] | None = None,
+        initial_time_ns: float = 0.0,
+    ) -> CavitySpanResult:
+        """Return owned second moments and all-state fields at the interval end.
+
+        Inputs have the same units, fixed state order and history as average().
+        The endpoints must also be valid for cavity_fields as float64 query
+        times: finite, strictly increasing and not before initial_time_ns.
+        Rounding can make distinct endpoints coincide and raise ValueError.
+
+        For a nonempty flat pulse tuple starting from memory at start_ns, one
+        solve supplies both products when the solvers use the same boundaries
+        and the inputs have an exact key. Pulses starting at or after end_ns
+        keep their original timing, carrier and phase but their amplitudes do
+        not affect reuse. Other inputs use separate solvers without admission.
+        Invalid input or solver failures propagate without a partial result.
+        """
+        initial = _average_initial(
+            model, start_ns, end_ns, initial_field, initial_time_ns
+        )
+        if (
+            not pulses
+            or any(p.envelope is not None for p in pulses)
+            or not _same_flat_timeline(start_ns, end_ns, initial_time_ns)
+        ):
+            return _uncached_span(
+                model, pulses, start_ns, end_ns, initial, initial_time_ns
+            )
+        # ADR-0078: ADC owns the exact content key and both solver products.
+        key = _flat_span_key(
+            model, pulses, (start_ns, end_ns, initial_time_ns), initial
+        )
+        if key is None:
+            return _uncached_span(
+                model, pulses, start_ns, end_ns, initial, initial_time_ns
+            )
+        cached = self._results.get(key)
+        if isinstance(cached, _FlatSpan):
+            self.hits += 1
+            return CavitySpanResult(
+                _field_average(cached.products.copy()), cached.final.copy()
+            )
+        self.misses += 1
+        near, converted, memory = _near_carrier(model, pulses, initial, initial_time_ns)
+        solved = _flat_integral(
+            near, converted, start_ns, end_ns, memory, initial_time_ns
+        )
+        # Use the same two query times and rotation as cavity_fields applies.
+        times = np.array([start_ns, end_ns], dtype=np.float64)
+        delta = near.reference_frequency_ghz - model.reference_frequency_ghz
+        final = solved.final.copy()
+        final *= _reference_rotation(delta, times)[-1]
+        self._admit(key, _FlatSpan(solved.products.copy(), final.copy()))
+        return CavitySpanResult(_field_average(solved.products), final)
 
     def average(
         self,
@@ -157,10 +239,9 @@ class CavityAverageCache:
         without admission. Capacity exhaustion still returns the computed result.
         Result arrays are writable independent copies on hits and misses.
         """
-        if not np.isfinite([start_ns, end_ns]).all() or end_ns <= start_ns:
-            raise ValueError("cavity average interval must be finite and positive")
-        initial = _initial_field(initial_field, model.cavity_count)
-        _validate_origin(initial_time_ns, start_ns)
+        initial = _average_initial(
+            model, start_ns, end_ns, initial_field, initial_time_ns
+        )
         if any(p.envelope is not None for p in pulses) or not (
             pulses or np.any(initial)
         ):
@@ -173,17 +254,11 @@ class CavityAverageCache:
                 initial_time_ns=initial_time_ns,
             )
         near, converted, memory = _near_carrier(model, pulses, initial, initial_time_ns)
-        key = _flat_key(near, converted, start_ns, end_ns, memory, initial_time_ns)
-        products = self._products.get(key)
-        if products is not None:
+        key = _flat_key(near, converted, (start_ns, end_ns, initial_time_ns), memory)
+        products = self._results.get(key)
+        if isinstance(products, np.ndarray):
             self.hits += 1
-            products = products.copy()
-            n = len(model.state_labels)
-            c = model.cavity_count
-            photons = (
-                products.reshape(c * n, c * n).diagonal().real.reshape(n, c).copy()
-            )
-            return CavityFieldAverage(photons, products)
+            return _field_average(products.copy())
         self.misses += 1
         result = cavity_field_average(
             model,
@@ -193,15 +268,55 @@ class CavityAverageCache:
             initial_field=initial,
             initial_time_ns=initial_time_ns,
         )
-        owned = result.field_products.copy()
-        candidate = self._products | {key: owned}
+        self._admit(key, result.field_products.copy())
+        return result
+
+    def _admit(self, key: bytes, owned: NDArray[np.complex128] | _FlatSpan) -> None:
         payload = self._payload_bytes + getsizeof(key) + getsizeof(owned)
+        if isinstance(owned, _FlatSpan):
+            payload += getsizeof(owned.products) + getsizeof(owned.final)
+        if payload > self.max_bytes:
+            return
+        candidate = self._results | {key: owned}
         resident = payload + getsizeof(candidate)
         if resident <= self.max_bytes:
-            self._products = candidate
+            self._results = candidate
             self._payload_bytes = payload
             self.resident_bytes = resident
-        return result
+
+
+def _same_flat_timeline(start: float, end: float, origin: float) -> bool:
+    # Both flat solvers must build the same boundaries. Narrow NumPy scalars
+    # can round differences in the integral before the field query uses float64.
+    return (
+        all(
+            type(t) in (float, np.float64, int) and float(t) == t
+            for t in (start, end, origin)
+        )
+        and origin == start
+        and np.signbit(origin) == np.signbit(start)
+    )
+
+
+def _uncached_span(
+    model: ReadoutModel,
+    pulses: tuple[ReadoutPulse, ...],
+    start: float,
+    end: float,
+    initial: NDArray[np.complex128],
+    origin: float,
+) -> CavitySpanResult:
+    average = cavity_field_average(
+        model, pulses, start, end, initial_field=initial, initial_time_ns=origin
+    )
+    fields = cavity_fields(
+        model,
+        pulses,
+        np.array([start, end]),
+        initial_field=initial,
+        initial_time_ns=origin,
+    )
+    return CavitySpanResult(average, fields[-1].copy())
 
 
 def cavity_field_average(
@@ -237,25 +352,42 @@ def cavity_field_average(
     or envelope values raise ValueError; nonconvergence/nonfinite propagation
     raises RuntimeError. Result arrays own their storage and have no time axis.
     """
-    if not np.isfinite([start_ns, end_ns]).all() or end_ns <= start_ns:
-        raise ValueError("cavity average interval must be finite and positive")
+    initial = _average_initial(model, start_ns, end_ns, initial_field, initial_time_ns)
     c = model.cavity_count
-    initial = _initial_field(initial_field, c)
-    _validate_origin(initial_time_ns, start_ns)
     n = len(model.state_labels)
     products = np.zeros((n, c, n, c), dtype=np.complex128)
     if pulses or np.any(initial):
         near, pulses, initial = _near_carrier(model, pulses, initial, initial_time_ns)
         if all(pulse.envelope is None for pulse in pulses):
-            products = _flat_average(
+            # The integrator advances fields to accumulate moments; only span returns them.
+            products = _flat_integral(
                 near, pulses, start_ns, end_ns, initial, initial_time_ns
-            )
+            ).products
         else:
             products = _shaped_average(
                 near, pulses, start_ns, end_ns, initial, initial_time_ns
             )
+    return _field_average(products)
+
+
+def _field_average(products: NDArray[np.complex128]) -> CavityFieldAverage:
+    n, c = products.shape[:2]
     photons = products.reshape(c * n, c * n).diagonal().real.reshape(n, c).copy()
     return CavityFieldAverage(photons, products)
+
+
+def _average_initial(
+    model: ReadoutModel,
+    start: float,
+    end: float,
+    initial_field: NDArray[np.complex128] | None,
+    origin: float,
+) -> NDArray[np.complex128]:
+    if not np.isfinite([start, end]).all() or end <= start:
+        raise ValueError("cavity average interval must be finite and positive")
+    initial = _initial_field(initial_field, model.cavity_count)
+    _validate_origin(origin, start)
+    return initial
 
 
 def _near_carrier(
@@ -282,43 +414,136 @@ def _near_carrier(
 def _flat_key(
     model: ReadoutModel,
     pulses: tuple[ReadoutPulse, ...],
-    start: float,
-    end: float,
+    times: tuple[float, float, float],
     initial: NDArray[np.complex128],
-    origin: float,
 ) -> bytes:
-    # Fixed schema for the converted flat solver inputs, including signed zeros.
-    parts = [
-        b"cavity-flat-average-v1\0",
-        pack("!QQ", len(model.state_labels), len(pulses)),
-    ]
-    for text in (model.identity, *model.state_labels):
-        encoded = text.encode("utf-8")
-        parts.extend((pack("!Q", len(encoded)), encoded))
+    # Keep the legacy average-only key over the carrier-converted inputs.
     receiver = model.receiver
-    # Frozen numeric records have lossless scalar reprs; spectral arrays are
-    # derived from roughness parameters and deliberately excluded from repr.
     background = repr(
         (receiver.extra_ripples, receiver.roughness, receiver.band_edges)
     ).encode("ascii")
-    parts.extend((pack("!Q", len(background)), background))
-    parts.append(
-        pack(
-            "!12d",
-            model.reference_frequency_ghz,
-            receiver.gain,
-            receiver.phase_rad,
-            receiver.time_of_flight_ns,
-            receiver.ripple_depth,
-            receiver.ripple_period_ghz,
-            receiver.ripple_phase_rad,
-            receiver.slope_db_per_ghz,
-            receiver.pivot_ghz,
-            start,
-            end,
-            origin,
+    return b"".join(
+        (
+            b"cavity-flat-average-v1\0",
+            _flat_model_labels(model, len(pulses)),
+            pack("!Q", len(background)),
+            background,
+            pack("!12d", *_model_scalars(model), *times),
+            _flat_model_arrays(model, initial),
+            *(_flat_pulse_key(pulse) for pulse in pulses),
         )
     )
+
+
+def _flat_span_key(
+    model: ReadoutModel,
+    pulses: tuple[ReadoutPulse, ...],
+    times: tuple[float, float, float],
+    initial: NDArray[np.complex128],
+) -> bytes | None:
+    # Subclasses may change solver behavior without changing the recorded data.
+    if type(model) is not ReadoutModel or any(
+        type(p) is not ReadoutPulse for p in pulses
+    ):
+        return None
+    parts = [
+        b"cavity-flat-span-v2\0",
+        _flat_model_labels(model, len(pulses)),
+        _flat_model_arrays(model, initial),
+    ]
+    for value in _span_scalars(model, pulses, times):
+        encoded = _scalar_bits(value)
+        if encoded is None:
+            return None
+        parts.append(encoded)
+    return b"".join(parts)
+
+
+def _span_scalars(
+    model: ReadoutModel,
+    pulses: tuple[ReadoutPulse, ...],
+    times: tuple[float, float, float],
+) -> Iterator[object]:
+    yield from _model_scalars(model)
+    yield from times
+    receiver = model.receiver
+    yield len(receiver.extra_ripples)
+    for wave in receiver.extra_ripples:
+        yield from (wave.depth, wave.period_mhz, wave.phase_deg)
+    roughness = receiver.roughness
+    yield roughness is not None
+    if roughness is not None:
+        # The spectral arrays are derived from the seed.
+        yield from (roughness.amplitude, roughness.correlation_mhz, roughness.seed)
+    edges = receiver.band_edges
+    yield edges is not None
+    if edges is not None:
+        for edge in (edges.low, edges.high):
+            yield edge is not None
+            if edge is not None:
+                yield from (edge.corner_ghz, edge.rolloff_db_per_ghz)
+    for pulse in pulses:
+        # Future amplitudes cannot contribute. Keep their carriers and corners.
+        yield from (
+            pulse.start_ns,
+            pulse.end_ns,
+            0j if pulse.start_ns >= times[1] else pulse.amplitude,
+            pulse.frequency_ghz,
+            pulse.phase_rad,
+            len(pulse.breakpoints_ns),
+            *pulse.breakpoints_ns,
+        )
+
+
+def _scalar_bits(value: object) -> bytes | None:
+    # Type tags distinguish scalars that compare equal but promote differently.
+    if type(value) is float:
+        return b"f" + pack("!d", value)
+    if type(value) is complex:
+        return b"c" + pack("!2d", value.real, value.imag)
+    if type(value) is int:
+        size = (value.bit_length() + 8) // 8
+        return b"i" + pack("!Q", size) + value.to_bytes(size, "big", signed=True)
+    if type(value) is bool:
+        return b"b" + bytes((value,))
+    if isinstance(value, (np.bool_, np.integer, np.floating, np.complexfloating)):
+        dtype = value.dtype
+        # Unrecognized subclasses and extended floats with padding bypass reuse.
+        if (
+            type(value) is dtype.type
+            and dtype.kind in "biufc"
+            and dtype.char not in {"g", "G"}
+        ):
+            return b"n" + pack("!B", dtype.num) + value.tobytes()
+    return None
+
+
+def _flat_model_labels(model: ReadoutModel, pulse_count: int) -> bytes:
+    parts = [pack("!QQ", len(model.state_labels), pulse_count)]
+    for text in (model.identity, *model.state_labels):
+        encoded = text.encode("utf-8")
+        parts.extend((pack("!Q", len(encoded)), encoded))
+    return b"".join(parts)
+
+
+def _model_scalars(model: ReadoutModel) -> tuple[float, ...]:
+    receiver = model.receiver
+    return (
+        model.reference_frequency_ghz,
+        receiver.gain,
+        receiver.phase_rad,
+        receiver.time_of_flight_ns,
+        receiver.ripple_depth,
+        receiver.ripple_period_ghz,
+        receiver.ripple_phase_rad,
+        receiver.slope_db_per_ghz,
+        receiver.pivot_ghz,
+    )
+
+
+def _flat_model_arrays(model: ReadoutModel, initial: NDArray[np.complex128]) -> bytes:
+    receiver = model.receiver
+    parts: list[bytes] = []
     for array in (
         model.frequencies_ghz,
         model.kappa_internal_per_ns,
@@ -338,21 +563,20 @@ def _flat_key(
                 array.tobytes(),
             )
         )
-    for pulse in pulses:
-        parts.append(
-            pack(
-                "!6dQ",
-                pulse.start_ns,
-                pulse.end_ns,
-                pulse.amplitude.real,
-                pulse.amplitude.imag,
-                pulse.frequency_ghz,
-                pulse.phase_rad,
-                len(pulse.breakpoints_ns),
-            )
-        )
-        parts.append(pack(f"!{len(pulse.breakpoints_ns)}d", *pulse.breakpoints_ns))
     return b"".join(parts)
+
+
+def _flat_pulse_key(pulse: ReadoutPulse) -> bytes:
+    return pack(
+        "!6dQ",
+        pulse.start_ns,
+        pulse.end_ns,
+        pulse.amplitude.real,
+        pulse.amplitude.imag,
+        pulse.frequency_ghz,
+        pulse.phase_rad,
+        len(pulse.breakpoints_ns),
+    ) + pack(f"!{len(pulse.breakpoints_ns)}d", *pulse.breakpoints_ns)
 
 
 def _initial_field(
@@ -460,18 +684,22 @@ def _flat_fields(
         if cursor < len(times) and right == times[cursor]:
             output[cursor] = fields
             cursor += 1
-    output *= np.exp(-2j * np.pi * delta * times)[:, None, None]
+    output *= _reference_rotation(delta, times)
     return output
 
 
-def _flat_average(
+def _reference_rotation(delta: float, times: RealArray) -> NDArray[np.complex128]:
+    return np.exp(-2j * np.pi * delta * times)[:, None, None]
+
+
+def _flat_integral(
     model: ReadoutModel,
     pulses: tuple[ReadoutPulse, ...],
     start: float,
     end: float,
     initial: NDArray[np.complex128],
     origin: float,
-) -> NDArray[np.complex128]:
+) -> _FlatSpan:
     n = len(model.state_labels)
     a, v = line_parameters(model)
     line = ConstantLine(np.zeros((n, n)), a, v, v.astype(np.complex128))
@@ -499,7 +727,7 @@ def _flat_average(
         )
         if left >= start:
             products += integral
-    return products / (end - start)
+    return _FlatSpan(products / (end - start), fields)
 
 
 def _shaped_average(

@@ -536,8 +536,9 @@ def evolve_plans(
     No engine model source, drive phase, envelope origin or flux is rebuilt.
     options.cancel is forwarded to every evolution span's chunk checkpoints; None
     disables cancellation. Cancelled propagates without a partial result.
-    One ADC-owned flat-average cache (at most 64 MiB) serves all g/e points in
-    this composition, serially. Return and exception paths release its contents;
+    One ADC-owned cache (at most 64 MiB for moments and all-state end fields)
+    serves all g/e points in this composition, serially. Return and exception
+    paths release its contents;
     no owner is retained by the engine or long-lived acquisition source.
     """
     if not any(any(plan.cavity_drives) for plan in plans):
@@ -551,6 +552,7 @@ def evolve_plans(
                 capture=options.capture,
                 reuse_key=options.key,
             ), (options.key,)
+    # ADR-0078: this composition alone owns the ADC memo's lifetime.
     cache = CavityAverageCache()
     try:
         pair = resonators(settings)
@@ -559,7 +561,7 @@ def evolve_plans(
                 plan.batch,
                 segment_spans(plan.batch),
                 tuple(
-                    CavityDrive(facts.joint, pair, pulses, cache=cache)
+                    CavityDrive(facts.joint, pair, pulses, span_cache=cache)
                     for pulses in plan.cavity_drives
                 ),
                 np.repeat(
