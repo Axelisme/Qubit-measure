@@ -191,8 +191,8 @@ Recipe 放在 [`../recipes/`](../recipes/README.md)。撰寫時遵守以下六�
 4. Helper 只做數字呈現等機械格式化。選脈衝、掃描範圍、重測與寫回判斷留在主體。
 5. Review core 時逐項說明 class 與抽象的用途，讓讀者從 `run` 看見脈衝序列。
    Class 數只提示閱讀成本，不是新增或刪除 class 的配額。
-6. Docstring 說明量測動作、分析參數的效果與 null 的行為。
-   Input schema 與 report 的可見文字照 [Recipe 說明 S1–S2](figure-style.md#recipe-說明)撰寫。
+6. Docstring 用使用者術語交代輸入、動作、結果與失敗。寫明單位、分析參數的效果，以及 `n → expts` 或 `points → expts` 的對應。可省略的欄位要說明省略時保留什麼、明填 null 如何原樣交給 owner。
+   Input schema 與 report 的可見文字另依 [Recipe 說明 S1–S2](figure-style.md#recipe-說明)撰寫，不能代替 docstring 的契約。
 
 以下骨架使用 `recipe_api` 的真實介面與 twotone owner 的具名 summary。
 輸入繼承 `RecipeInputs`，報告繼承 `RecipeReport`。`RecipeInputs` 不宣告欄位。
@@ -202,6 +202,7 @@ Recipe 可按需宣告 `target: SingleTarget`、`reuse_tab_id: ReuseTabId` 與 `
 多角色可以改用自己的 target model。基底也不提供通用 library／inline 輸入。
 可省略的實驗欄位用 `T | None | Keep = KEEP`，省略保留，null 原樣交 owner。
 以下例子的掃描端點與 pulse length 都必填，分析選項可省略。
+`Expts (count)` 和 `Length (µs)` 是顯示詞彙遷移後的目標，不是現行 UI 文字，也不改 cfg 或存檔格式。
 
 骨架先對 drive 與 waveform command to_inline。已 inline 時 command 不改值。
 這樣改長度會保留既有 waveform family，不固定換成 const，單 kind module 也照此處理。
@@ -242,18 +243,22 @@ class Inputs(RecipeInputs):
 class Report(RecipeReport):
     """Transition estimate and the inherited writeback/analysis facts."""
 
-    frequency_mhz: float | None = None
+    freq: float | None = Field(default=None, description="Qubit frequency (MHz).")
 
 
 @recipe("custom_spectrum", description="Sweep drive frequency with a custom pulse.")
 async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
     """Sweep, fit a transition, ask before writeback, then save.
 
-    n sets Form freq.n, lowered to cfg freq.expts. Frequencies use MHz.
-    pulse_length_us changes the drive duration before acquisition.
-    model_type selects the existing lor/sinc fit. The fitted curve is always shown.
-    Missing Form values stop before acquisition. Omitted analysis controls retain
-    owner values; explicit null is passed unchanged to the analysis owner.
+    start_mhz and stop_mhz set the RF sweep endpoints in MHz.
+    n sets the number of points via Form freq.n, which becomes cfg freq.expts.
+    pulse_length_us sets the probe duration in microseconds.
+    model_type chooses a Lorentzian or sinc line shape for the peak fit.
+    Omission keeps the current analysis value; explicit null goes unchanged
+    to Analyze for validation.
+    Report the fitted qubit frequency in MHz and whether writeback was applied.
+    Invalid Form values stop Run. If Analyze produces no result, report its
+    failure reason and save the acquired data.
     """
     tab = session.open_tab(
         "twotone/freq", target={"qubit": inputs.target}, reuse=inputs.reuse_tab_id,
@@ -283,12 +288,16 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
             receipt.raise_for_error()
             applied = bool(receipt.items)
         return Report(
-            frequency_mhz=report_number(analysis.result.freq),
+            freq=report_number(analysis.result.freq),
             writeback_applied=applied,
         )
     finally:
         tab.save()
 ```
+
+這個例子的 report 與 Analyze 摘要都呈現擬合的 qubit 頻率。若擬合值為 5800.125 MHz，兩處都寫 `Qubit frequency (MHz) = 5800.125`。
+Report 從 `analysis.result.freq` 取值，core 結果與原生 JSON 摘要的 key 仍是 `freq`。
+範例的 `description` 說明 report 欄位的意義，不設定 Analyze 的顯示名稱。
 
 `FieldEdit` 是 dotted path 加上 `value`、`select`、`command` 其中一個，不帶 source；`select: null` 清空可清空的 selector。Overrides 省略為空 list，不接受 null。
 `tab.apply_overrides` 依序執行、不去重；某筆失敗時報出索引與 path，前面已套用的保留，不 rollback。每次操作允許尚未 ready 的合法草稿。

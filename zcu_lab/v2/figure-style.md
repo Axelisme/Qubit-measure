@@ -10,7 +10,7 @@
 
 壞例：Ramsey 圖上只寫 `detune = 0.402 MHz`，讀者分不出那是施加的失諧還是條紋擬合值，也不知道頻率該往哪裡改。
 
-好例（本地改寫示例）：圖內標明擬合的條紋頻率，Analyze 摘要列出施加的 detune 和 π/2 脈衝來源頻率，guide 說明符號慣例和修正式。例如來源為 5800.000 MHz、施加 0.400 MHz、擬合 0.402 MHz，則建議值為 5799.998 MHz，比來源低 0.002 MHz。讀者不必查看 fitter 就能算出下一步。Ding 圖 5-9(b,e)（頁 152）示範如何把 Ramsey 類序列與對應的相位判讀放在一起。
+好例（本地改寫示例）：圖內標明擬合的條紋頻率，Analyze 摘要列出同一次 run 的實際 detune 和 π/2 脈衝來源頻率，guide 說明符號慣例和修正式。有有效的條紋 fit 才用修正式。例如來源為 5800.000 MHz、施加 0.400 MHz、擬合 0.402 MHz，則建議值為 5799.998 MHz，比來源低 0.002 MHz。Ding 圖 5-9(b,e)（頁 152）示範如何把 Ramsey 類序列與對應的相位判讀放在一起。
 
 ### 組讀者包
 
@@ -80,10 +80,11 @@
 
 ### R3b：結果旁寫 fit 品質
 
-在結果旁列出 core 或分析已回傳的品質值，例如 `FitQuality` 的 R²、正規化殘差 RMS 或參數相對誤差。繪圖端不重算品質值，也不自訂門檻。只有實驗已有選取判準且結果未通過時，才標「未通過選取判準」，列出未通過的指標、數值與門檻。沒有既有判準時只列數值。guide 依 [Gd3](#gd3解釋誤差棒與-fit-品質) 解釋各指標與既有判準。
+在結果旁列出 core 或分析已回傳的品質值，例如 `FitQuality` 的 R²、正規化殘差 RMS 或參數相對誤差。繪圖端不重算品質值。若已有選取判準，沿用負責選取的程式給出的結論與未通過理由。只有既有判定未通過時，才標「未通過選取判準」並列出未通過的指標、數值與門檻。繪圖端不重做選取，也不自訂門檻。沒有既有判準時只列數值。guide 依 [Gd3](#gd3解釋誤差棒與-fit-品質) 解釋各指標與既有判準。
 
 - 壞例：實驗沒有選取判準，繪圖端自行以 R² < 0.9 標成未通過。
-- 好例（本地示例）：T2 Echo 的寫回候選未通過預先勾選的條件，圖上標「未通過選取判準：R² = 0.774，須 ≥ 0.9；正規化殘差 RMS = 0.113，須 ≤ 0.1；T2 相對誤差 = 0.83，須 ≤ 0.5」。guide 說明各指標和預先勾選的條件。若另一個實驗只回傳 R²、沒有選取判準，圖上只列 R² 的值。
+- 好例（repo 現例）：[Reset Rabi check](twotone/reset/rabi_check/core.py) 的殘差子圖在 legend 使用[各分支擬合回傳的 RMS](twotone/reset/rabi_check/fit.py)，不重算 RMS，也不標通過與否。[Guide](twotone/reset/rabi_check/guide.md) 說明這些診斷共用同一個 IQ 投影軸，並請操作員比較擬合殘差。
+- 好例（本地改寫示例）：[T2 Echo 的 GUI adapter](twotone/time_domain/t2echo/gui.py) 已決定寫回候選是否預先勾選，並提供未勾選的理由。若把這份既有判定呈現到圖上，可寫「未通過選取判準：R² = 0.774，須 ≥ 0.9；正規化殘差 RMS = 0.113，須 ≤ 0.1；T2 相對誤差 = 0.83，須 ≤ 0.5」。這是呈現寫法，並非現行圖上的標註。Core 和繪圖端不另套這些條件。
 
 ### R4：尺度跟著資料走
 
@@ -104,7 +105,7 @@ y 軸與色階預設依資料範圍自動縮放。跨圖比較才用固定尺度
 標題寫「實驗 · 目標 · 量」。免責聲明放 guide，圖上不印 `True`、`None`、enum 名或內部座標名。每個軸寫量與單位；多 tone 的每個 panel 都寫 qubit 或 resonator 名。
 
 - 壞例：標題 `terminal_gg · herald=True`，軸名 `df`。
-- 好例：Ding 圖 5-8(b)（頁 151）寫出驅動頻率、plateau 長度與色階所指的態。本地示例用「CZ Chevron · Q1/Q2 · P(g,g)」作標題，軸寫「驅動頻率 (MHz)」和「脈衝平台長度 (µs)」，色棒標 `P(g,g)`。
+- 好例：Ding 圖 5-8(b)（頁 151）寫出驅動頻率、脈衝平台（plateau）長度與色階所指的態。[本地 CZ Chevron](two_qubit/chevron/guide.md) 掃的是兩路共用的驅動頻率與波形包絡長度，不是論文的 plateau。改寫時，標題可用「CZ Chevron · Q1/Q2 · P(g,g)」，軸標「共用驅動頻率 (MHz)」和「共用波形包絡長度 (µs)」，色棒標「雙 Xπ 後的 P(g,g)」。
 
 ### R7：用實際存檔尺寸檢查版面
 
@@ -131,10 +132,12 @@ y 軸與色階預設依資料範圍自動縮放。跨圖比較才用固定尺度
 
 ### R10：圖放理論重點，採集設定放摘要
 
-圖上放物理量、模型、擬合結果與判讀所需的標註。不要把 run 身分或採集設定印在圖上。存檔路徑已有實驗名與 run id。GUI 與 MCP 的 Analyze 摘要保留 run 身分，由 adapter 列出實際採集設定：Reps×Rounds 與完成輪數、shot 數、是否提前停，以及實際施加的值，例如 detune。liveplot 的進度仍按 R8 顯示。
+圖上放物理量、模型、擬合結果與判讀所需的標註。不要把 run 身分或採集設定印在圖上。存檔路徑已有實驗名與 run id。GUI 與 MCP 的可見 Analyze 摘要應列出實驗名與 run id，由 adapter 提供同一次 run 的實際採集資訊：Reps×Rounds 與完成輪數、shot 數、是否提前停，以及實際施加的值，例如 detune。liveplot 的進度仍按 R8 顯示。
+
+Run 身分與採集資訊屬於呈現資料，不寫進原生結果的 JSON `summary`。MCP 的 Analyze 回覆已沿用 [RPC handler 提供的 `presentation`](../../lib/zcu_tools/gui/app/measure/remote/handlers/analysis.py)，獨立傳遞來源 run id。原生結果欄位維持不變，見 [S2](#s2report-的數值沿用-analyze-摘要名稱)。
 
 - 壞例：Ramsey 圖標題塞了 run id 和初始設定，摘要卻沒說跑了幾輪或施加多少 detune。
-- 好例（本地示例）：圖上只保留判讀條紋和 T2* 需要的量與標註；同次 Analyze 摘要寫「Reps×Rounds 1000×10（完成 10/10 輪）· 提前停：否 · 實際 detune 0.400 MHz」，另報實際 shot 數。Ding 圖 5-9(e)（頁 152）的相位圖集中在判讀所需的 180° 參考線與候選頻率，不是採集設定表。
+- 好例（本地改寫示例）：圖上只保留判讀條紋和 T2* 需要的量與標註。同次 Analyze 摘要在實驗名與 run id 旁列「Reps×Rounds 1000×10（完成 10/10 輪）· 提前停：否 · 實際 detune 0.400 MHz」，另報實際 shot 數。Ding 圖 5-9(e)（頁 152）的相位圖集中在判讀所需的 180° 參考線與候選頻率。
 
 ### R11：對數值大小敏感的一維資料畫 error bar
 
@@ -176,8 +179,9 @@ Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二�
 
 用量或脈衝的名稱，不用 cfg key 或內部名稱。只改顯示 label，保留 cfg key 及 `qubit1`、`qubit2` 等位置名。欄位名若和 GUI 按鈕撞名，只改 label 來區分。
 
-- 壞例：Ramsey 的重置模組欄位和表單重設按鈕都叫 `Reset`。
-- 好例：把欄位 label 寫成 `Reset method`，cfg key 仍是 `reset`，按鈕仍叫 Reset。
+- 壞例：把 Ramsey 的欄位標成 `detune_ratio`，或讓重置模組欄位與表單重設按鈕都叫 `Reset`。
+- 好例（repo 現例）：[Ramsey 表單](twotone/time_domain/t2ramsey/form.py) 把 `detune_ratio` 顯示為 `Detune ratio (fringes/step)`，寫出每掃描一步的相位變化量。
+- 好例（本地改寫示例）：把重置模組欄位的 label 改為 `Reset method` 以免撞名。cfg key 仍是 `reset`，按鈕仍叫 Reset。
 
 ### F2：數值欄位標單位
 
@@ -207,12 +211,15 @@ Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二�
 用下列項目檢查內容，章節不必照這個順序編排：
 
 - 量什麼，用什麼脈衝序列。用文字示意序列，必要時附圖。
-- 每個參數的作用，以及每張圖支援的判斷（[R1](#r1一張圖支援一個判斷)）。
+- 操作步驟、每個參數的作用，以及表單初值從哪裡來。
+- 每張圖支援的判斷（[R1](#r1一張圖支援一個判斷)）。
 - 怎麼判讀、下一步做什麼。需要調參時，寫出怎麼算出方向和改多少。
 - 適用範圍只寫物理假設、observable 和結果能辨識什麼。板子限制與 QICK 等底層問題不放 guide，見 [ADR-0075〈判讀依據放知識庫〉](../../docs/adr/0075-agent-interface-layers.md#判讀依據放知識庫)。
 
 - 壞例：Ramsey guide 只寫「擬合後按需要調整 qubit 頻率」，不說圖上的 detune 是什麼，也沒給修正式。
-- 好例：Ramsey 量自由演化的相干時間，序列是 π/2 → 等待 → 相位隨等待時間改變的 π/2 → 讀出。掃描終點控制能觀察多久的衰減；detune ratio 設定第二個 π/2 的相位每一步改變幾個週期。第一張擬合圖用來讀 T2* 和條紋頻率。要改 `qubit.freq`，用「π/2 來源頻率 + 實際施加的 detune − 擬合條紋頻率」。擬合值若比施加值高 0.002 MHz，就把來源頻率下調 0.002 MHz；若低 0.002 MHz，就上調 0.002 MHz。若只量到衰減的一小段，T2* 主要靠模型外推。
+- 好例：依 [Ramsey guide](twotone/time_domain/t2ramsey/guide.md)，量 T2* 的序列是 π/2 → 自由演化 → 相位隨等待時間改變的 π/2 → 讀出。先校準 π/2 脈衝，換參數來源後用 Reset 重抓初值。Run 前檢查延遲掃描上限和取樣間距。掃描初值為 0 到 1.5 × `qubit.t2r`，共 101 點；`Detune ratio` 預設為 0.05，除以延遲步距（µs）就是施加的 detune（MHz）。從擬合圖讀 T2* 和條紋頻率。若只量到衰減的一小段，T2* 主要靠模型外推。
+
+  只有條紋 fit 有效，且知道同一次 run 實際施加的 detune，才用「該次 π/2 脈衝來源頻率 + 實際施加的 detune − 擬合條紋頻率」建議 `qubit.freq`。擬合值比施加值高 0.002 MHz 就下調 0.002 MHz，低 0.002 MHz 就上調 0.002 MHz。純衰減 fit 或載入資料的實際 detune 不明時，不建議修正頻率。
 
 ### Gd2：引用博論的版式，說明差異
 
@@ -239,7 +246,7 @@ Ding 博論有相近的圖時，以「版式參考」引圖號和印刷頁碼。
 
 ### S2：report 的數值沿用 Analyze 摘要名稱
 
-Report 的數值帶名稱與單位。和 [Analyze 摘要](#r10圖放理論重點採集設定放摘要)語意相同的量用同一個名稱。摘要 key 以 core 結果的欄位名為準，不另造 summary model。
+Report 的數值帶名稱與單位。只有語意相同的量才和[可見的 Analyze 摘要](#r10圖放理論重點採集設定放摘要)共用顯示名稱與單位。原生 JSON `summary` 沿用 core 結果的 key。不要為顯示名稱改 schema、加重複欄位或另造 summary model。
 
 - 壞例：Ramsey report 寫 `detune = 0.402`，摘要把這個值叫條紋頻率，讀者可能誤認成施加的 detune。
 - 好例：report 和 Analyze 摘要都把這個量標為「擬合條紋頻率 = 0.402 MHz」。摘要 key 沿用 core 的 `detune`，不另造 `fringe_freq`。若摘要也列施加值，另用「實際施加的 detune」區分。
