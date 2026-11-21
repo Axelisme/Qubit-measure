@@ -323,7 +323,7 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
                 gains,
                 real_signals[index],
                 yerr=sem[index],
-                fmt=".-",
+                fmt=".",
                 color=color,
                 markersize=5,
                 label="Measured",
@@ -332,12 +332,13 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
                 dense_gains,
                 branch.evaluate(dense_gains, fit.frequency),
                 color=color,
+                linestyle="--",
                 label="Fit: f + 2f" if index == 2 else "Fit: f",
             )
             ax.set_title(f"{label}\nAmplitude at f = {branch.amplitude:.3g} a.u.")
             ax.legend(
                 loc="upper center",
-                bbox_to_anchor=(0.5, -0.16 if index == 2 else -0.02),
+                bbox_to_anchor=(0.5, -0.25 if index == 2 else -0.02),
                 ncols=2,
             )
             residual_ax.plot(
@@ -347,8 +348,8 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
                 color=color,
                 label=f"{label}: {branch.residual_rms:.3g} a.u.",
             )
-        before_ax.set_ylabel(_YLABEL)
-        after_ax.set(xlabel=_XLABEL, ylabel=_YLABEL)
+        before_ax.set_ylabel("Projected IQ (a.u.)")
+        after_ax.set(xlabel=_XLABEL, ylabel="Projected IQ (a.u.)")
         after_ax.set_title(
             f"{_BRANCH_LABELS[2]}\nf amplitude = {fit.after.amplitude:.3g} a.u.; 2f = {fit.after.second_harmonic_amplitude:.3g} a.u."
         )

@@ -166,7 +166,9 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             VariableSpec(
                 "data",
                 (_SCAN_AXIS,),
-                VariableZSpec("signals", label="Signal", unit="a.u."),
+                VariableZSpec(
+                    "signals", label="Signal", unit="a.u.", dtype=np.complex128
+                ),
             ),
             VariableSpec(
                 "iq_moments",

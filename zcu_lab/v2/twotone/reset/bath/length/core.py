@@ -259,7 +259,12 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         )
         for line, phase in zip(i_ax.lines, _PHASES, strict=True):
             line.set_label(f"π/2 at {phase:g}°")
-        i_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=4)
+        q_ax.legend(
+            handles=tuple(i_ax.lines),
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.25),
+            ncols=4,
+        )
 
         @plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
@@ -371,4 +376,4 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                 )
         i_ax.set_ylabel("Mean IQ real (a.u.)")
         q_ax.set(xlabel=_XLABEL, ylabel="Mean IQ imaginary (a.u.)")
-        i_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=4)
+        q_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.25), ncols=4)

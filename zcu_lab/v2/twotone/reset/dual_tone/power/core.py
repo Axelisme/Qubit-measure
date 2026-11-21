@@ -263,6 +263,8 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         viewer = live_heatmap(ax)
         (image,) = viewer.set(gains1, gains2, np.abs(signals - signals[ref_i, ref_j]))
+        left, right, bottom, top = image.get_extent()
+        ax.set(xlim=(left, right), ylim=(bottom, top))
         fig.colorbar(image, ax=ax, label=_COLOR_LABEL)
         ax.grid(False)
         ax.scatter(

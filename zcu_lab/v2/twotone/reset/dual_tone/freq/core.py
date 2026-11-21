@@ -364,6 +364,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         viewer = live_heatmap(ax)
         (image,) = viewer.set(freqs1, freqs2, dual_reset_signal2real(signals))
+        left, right, bottom, top = image.get_extent()
+        ax.set(xlim=(left, right), ylim=(bottom, top))
         fig.colorbar(image, ax=ax, label=_COLOR_LABEL)
         ax.grid(False)
         ax.scatter(
