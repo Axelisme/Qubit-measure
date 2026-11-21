@@ -474,6 +474,65 @@ def test_source_rejects_nonterminal_cavity_pulses_before_evolution():
         env.devices.close_all_devices()
 
 
+def test_preflight_uses_calibrated_delay_to_pair_a_trigger_after_terminal_start():
+    config = settings()
+    env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
+    source = SingleFluxoniumSource(config, env.devices)
+    try:
+        window = ReadoutSlot(
+            0,
+            4,
+            TIME_BASE.period_ticks(1000),
+            tick_array([[0.025, 0.031], [0.025, 0.031]]),
+            np.full((2, 2), 7000.0),
+            np.zeros((2, 2)),
+            np.zeros((2, 2), dtype=np.int64),
+        )
+        compiled = TimelineTemplate(
+            np.arange(2, dtype=np.int64),
+            (
+                slot(0, 16, 4, frequency_mhz=7000.0),
+                slot(0, 24, 4, frequency_mhz=7000.0),
+            ),
+            (window,),
+            tick_array([0.040, 0.040]),
+        )
+        request = AcquireRequest(
+            "integrated",
+            (1, 2),
+            0,
+            (
+                ReadoutWindow(
+                    0, 0, 4, window.sample_period_ticks, tick_tuple((0.025, 0.031))
+                ),
+            ),
+            123,
+            0,
+            "test",
+            point_dims=(2,),
+            point_names=("sweep",),
+            templates=(compiled,),
+            time_base=TIME_BASE,
+        )
+        receiver = config.readout.adc.model_copy(update={"time_of_flight_ns": 5.0})
+        ((plan,),) = source.preflight(
+            request, source.snapshot(), receivers=(receiver,)
+        ).plans
+        # The first ADC grid reads [20,23] ns in device time, before terminal.
+        for (projection,) in plan.projective_reads:
+            assert projection.start_ns == 16
+            (trigger,) = projection.triggers
+            assert (trigger.read_index, trigger.trigger_ns) == (0, 25)
+        herald, terminal = plan.read_events
+        assert herald.read_indices == ((0,), (0,))
+        assert terminal.read_indices == ((1,), (1,))
+    finally:
+        source.close()
+        if env.close_backend is not None:
+            env.close_backend()
+        env.devices.close_all_devices()
+
+
 class EvolutionObserver(EngineDouble):
     """Count calls at the injected evolution boundary without replacing admission."""
 

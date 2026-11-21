@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-21，ADC 視窗按裝置時間配對
+**Last updated:** 2026-11-21，ADC 視窗按裝置時間配對，事件共用 pulse 歷史
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -86,13 +86,24 @@ coherent tones and bound receiver triggers at one projection time. The planner
 uses the ADC conversion to subtract the receiver's flight time from the window
 endpoints without moving the sample grid. A block's pairing interval starts at
 emission and includes ringdown until the next block starts or the point ends.
-All blocks intersecting the converted window contribute pulses to its event.
-The latest intersecting block owns the window. An earlier-than-all-blocks
-window uses an unobserved event for its receiver baseline. If none is available,
-planning rejects the layout without adding a projection.
+The planner records each window's intersecting blocks separately. The last
+intersection sets its owner. At one point, windows with the same ADC and owner
+share one event and one pulse history: the union of their intersecting blocks,
+once per block. An earlier member pulse can leave a field in a later window that
+does not intersect that pulse's block. Membership never comes from another ADC
+or owner. ADCs observing the same event share the CTMC path, not pulse lists or
+receiver noise.
+
+A window entirely before the first block produces only its receiver baseline.
+It uses an existing event without field grids for that ADC at that point.
+Across points the planner first fills the per-event grid counts set by field
+windows. Remaining baseline grids use an event with no field grids at any point,
+preferring terminal. The planner neither mixes baseline and field grids nor adds
+a projection. It rejects an unrepresentable placement with the ADC, trigger and
+reason.
 `ReadoutPartition.terminal_pulses` retains terminal tones even when no ADC observes
 them. Projective block counts and each ADC's per-event grid counts must match
-across points; classification rejects differences with the point and counts.
+across points.
 `read_event_contents` detaches each trigger's matched pulses and grid.
 `readout_contents` detaches terminal pulses and ADC grids without pairing.
 Callers can opt in to `allow_receiver_only` on `classify_readout` and

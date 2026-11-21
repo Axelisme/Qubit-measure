@@ -415,6 +415,52 @@ def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
             assert tuple(p.frequency_ghz for p in terminal.pulses) == (6.0, 6.08)
 
 
+def test_trigger_before_first_pulse_observes_it_at_its_delayed_arrival() -> None:
+    from zcu_tools.simulators.ftf.environment import plan_template
+
+    base = template()
+    first = replace(base.events[0], duration_ticks=tick_array([0.004, 0.004]))
+    terminal = replace(first, start_ticks=first.start_ticks + ticks(0.012))
+    window = replace(
+        base.readouts[0],
+        trigger_ticks=np.column_stack(
+            (first.start_ticks - ticks(0.001), terminal.start_ticks + ticks(0.001))
+        ),
+        frequency_mhz=np.full((2, 2), 6000.0),
+        phase_deg=np.full((2, 2), 45.0),
+        generator_channels=np.zeros((2, 2), dtype=np.int64),
+    )
+    receiver = FTFReceiverConfig(
+        0,
+        1000.0,
+        ((0.0, 0.0), (0.0, 0.0)),
+        time_of_flight_ns=1.0,
+        ripple_period_mhz=1000.0,
+        pivot_ghz=0.0,
+    )
+    plan = plan_template(
+        settings(),
+        snapshot(),
+        replace(base, events=(first, terminal), readouts=(window,)),
+        readout=FTFReadoutConfig(receiver, None),
+        soccfg=profile_soccfg("ftf"),
+        time_base=TIME_BASE,
+    )
+    batch = plan.readouts[0].batch
+    for point, (start_ns, index) in enumerate(
+        zip((8, 10), batch.content_index, strict=True)
+    ):
+        (projection,) = plan.projective_reads[point]
+        assert projection.start_ns == start_ns
+        (trigger,) = projection.triggers
+        assert (trigger.read_index, trigger.trigger_ns) == (0, start_ns - 1)
+        herald, terminal_event = batch.events[index]
+        assert tuple(p.start_ns for p in herald.pulses) == (start_ns,)
+        assert tuple(p.start_ns for p in terminal_event.pulses) == (start_ns + 12,)
+        (grid,) = herald.grids
+        np.testing.assert_array_equal(grid.times_ns, start_ns + np.arange(-1, 3))
+
+
 def test_window_before_all_pulses_keeps_receiver_baseline_without_projection() -> None:
     from zcu_tools.simulators.ftf import environment as ftf
 

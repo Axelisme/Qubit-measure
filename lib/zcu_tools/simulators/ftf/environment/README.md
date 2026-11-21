@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, readout approximation measurements
+**Last updated:** 2026-11-21, readout pulse history and approximation measurements
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -556,8 +556,9 @@ ADC's `adc_to_device_time_ns` to subtract
 [`Receiver.time_of_flight_ns`](../../../simulate/adc/README.md) from the window
 endpoints. The ADC keeps the original grid for demodulation.
 A block's pairing interval includes ringdown up to the next block or the point end.
-The last intersecting block owns the window. Every intersecting block
-contributes its pulses without shifting their emission or projection times.
+The planner records each window's intersections. The last intersecting block
+owns that window. Neither pairing nor sharing pulse history moves pulse emissions,
+projections or ADC grids.
 The timeline compiler still rejects overlapping windows for successive
 timeline triggers on the same ADC
 ([ADR-0083](../../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)).
@@ -734,19 +735,26 @@ uses that profile without inferring channel counts or selecting a mock profile;
 only the configured pulse and mux readout paths route to ADCs, while drive and fast-flux lines are declared as DACs only.
 `plan_template` and `FTFSource` accept an explicit `readout=` override. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
-Each batch retains the same chronological logical-event axis. An event retains
-that ADC's observed grids in ADC time. It holds the union of pulse blocks
-matched to those windows in device time. A window entirely before the first
-block can use an otherwise unobserved event on that ADC. This event produces
-only receiver offset and noise without adding a projection or solving a cavity
-field. If every event already has a physical observation on the same ADC,
-planning identifies the ADC and trigger that cannot be placed.
+Each batch retains the same chronological logical-event axis. At one point,
+grids with the same ADC and owner share the union of their intersecting pulse
+blocks, once per block, subject to mux PFB selection. An early member pulse
+can leave a field in a later grid that intersects only the owner block. A
+different ADC can have different pulse members for that event. The ADCs share
+the event's CTMC path, not each other's pulse lists or noise.
+
+A window entirely before the first block can use an existing event without
+field grids for that ADC at that point. The planner places baseline grids where
+the per-event grid counts can match across points. The baseline produces only
+receiver offset and noise without adding a projection or solving a cavity field.
+If the layout cannot represent that window, planning reports the ADC, trigger
+and reason.
 
 Empty grids mean the ADC does not observe the event or emit a read column. All ADCs may omit
 terminal observations; the terminal event and evolution endpoint remain in the
 plan. Each ADC must still observe at least one event. Projective plans retain
-point-local event contents. Ordinary terminal-only plans deduplicate
-terminal contents. Integrated flat,
+point-local event contents. Terminal-only plans deduplicate when every point
+has just its owner block or every point has empty pulses. Earlier members or
+mixed field and baseline membership require point-local rows. Integrated flat,
 common-start mux batches use ADC's carrier-wise linear sums. Each carrier keeps
 the guarded direct-sum or constant-field/full-exponential route. Delay, mismatch,
 ringdown and per-receiver offset remain part of ADC's response contract. Shaped
@@ -809,18 +817,23 @@ owner g and e in the reference while fixing the predecessor. Noise is the
 receiver-only RMS of the integrated I/Q vector, `sqrt(trace(N × PSD / dt_ns))`,
 for `N` independent samples. It excludes state mixture, jumps and rounding.
 
-For `chain/t1`, the first delay setting is 0 µs. Each 0.99 µs nominal window
-has 304 samples. The reference carries the first read's complex field into the
-second after free decay over the compiled gap, 1.91 ns or 725.03 ns. Neither
-window crosses a projection, so the state approximation does not apply there.
-For `rpi_length`, the nominal window is 0.2 µs with 61 samples. In each crossing
-window, 25 samples fall before the projection and 36 at or after it. The
-reference changes state at that projection without resetting the cavity field.
-Both sides use the same incident pulses and start the event from vacuum. The
-other two windows cross no projection and serve as controls. The `rpi_length`
-ratio exceeds one because the short post-projection segment gives a small g/e
-separation in this fixture. The numbers do not estimate hardware error or
-apply to other chain timings or calibrations.
+The `chain/t1` comparison (R5) changes only the field at the start of the
+second event. The approximation starts that event from vacuum. The reference
+carries in the first read's complex field after free decay over 1.91 ns or
+725.03 ns. Each 0.99 µs nominal window has 304 samples. Neither window crosses
+a projection.
+
+The `rpi_length` comparison (G3) changes the state at the projection in the
+reference and uses the owner state throughout the window in the approximation.
+Both sides use the same pulses and start from vacuum. Each 0.2 µs nominal
+crossing window has 25 samples before projection and 36 at or after it. The
+other two windows cross no projection and serve as controls. The ratio exceeds
+one because the short post-projection segment gives a small g/e separation in
+this fixture.
+
+Neither comparison measures the contribution of block 62's pulse to column
+63's I/Q when the terminal event shares the pulse union. The numbers do not
+estimate hardware error or apply to other timings or calibrations.
 
 ### Physical applicability
 

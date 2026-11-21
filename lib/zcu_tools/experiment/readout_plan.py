@@ -113,8 +113,9 @@ class ReadoutPartition:
 class ReadoutContents:
     """Incident fields and one ADC's sampling grids for a read block.
 
-    end_ns: owned float64 (points,) evolution endpoints at the pulse start or,
-        for receiver-only contents, the first trigger.
+    end_ns: owned float64 (points,) endpoints at the owner's pulse start,
+        including an empty-pulse event anchored to an existing block. With no
+        active readout pulse in the template, use each point's first trigger.
     pulses: per-content tuples of coherent ReadoutPulse values with absolute ns,
         GHz and common-origin radians, including calibrated signed amplitudes.
         Constant envelopes fold into amplitude; shaped ones retain linear samples.
@@ -299,15 +300,14 @@ def classify_readout(
     envelope_specs' lifetime contract. The latest active start is terminal.
     Earlier blocks with their own ADC triggers are projective reads; other
     earlier pulses remain cavity drives. Simultaneous mux tones form one block.
-    receiver_delays_ns maps each ADC channel to its flight time in ns. A missing
-    channel raises KeyError; None means zero delay for every ADC. The ADC
-    conversion rejects invalid delays. Pair each device-time window with the
-    blocks it intersects, from each block's start up to (not including) the next
-    start or point end.
-    This includes ringdown. The latest intersecting block owns the trigger.
-    Windows entirely before the first block use an otherwise unobserved event for
-    receiver-only output, or raise ValueError if no event is available without a
-    new projection. A window wholly beyond point end also raises ValueError.
+    receiver_delays_ns maps each ADC to its flight time in ns. None means zero;
+    missing channels raise KeyError and invalid delays raise ValueError. The last
+    block interval intersecting the device-time window owns it. Intervals include
+    ringdown and exclude the next block start or point end.
+    Entirely early windows fill other points' fixed grid counts in events
+    without field grids for that ADC. Leftovers use an event with no field grids
+    at any point. Baselines do not add projections. An unplaceable window or a
+    window entirely after point end raises ValueError naming ADC and trigger.
     Return terminal masks in slot order, cavity pulses in point/slot order and
     projective reads in point/start order, with ns/GHz/pulse-local radians at
     zero-GHz reference. Earlier pulses may end exactly at the next block start.
@@ -360,45 +360,44 @@ def classify_readout(
                 _readout_pulse(drive, rows[index], envelopes, time_base, memo)
             )
     terminal_blocks = _terminal_pulses(terminal_pulses, drive)
+    earlier_pulses = local_readout_pulses(tuple(tuple(p) for p in drives), 0.0)
+    point_matches = []
+    for point, pulses in enumerate(earlier_pulses):
+        starts = (
+            *sorted({p.start_ns for p in pulses}),
+            terminal_blocks[point][0].start_ns,
+        )
+        point_matches.append(
+            _point_triggers(
+                template, drive, point, starts, time_base, receiver_delays_ns
+            )
+        )
+    _anchor_receiver_only(template, point_matches)
     cavity_drives, projective_reads, terminal_triggers = [], [], []
-    for point, pulses in enumerate(
-        local_readout_pulses(tuple(tuple(p) for p in drives), 0.0)
-    ):
-        terminal_start = terminal_blocks[point][0].start_ns
-        starts = (*sorted({pulse.start_ns for pulse in pulses}), terminal_start)
-        triggers = _point_triggers(
-            template, drive, point, starts, time_base, receiver_delays_ns
-        )
-        reads = _projective_blocks(pulses, starts[:-1], triggers)
-        cavity_drives.append(
-            tuple(pulse for pulse in pulses if pulse.start_ns not in triggers)
-        )
-        projective_reads.append(reads)
-        terminal_triggers.append(triggers.get(terminal_start, ()))
-    partition = ReadoutPartition(
+    for pulses, (owners, _) in zip(earlier_pulses, point_matches, strict=True):
+        *projective, terminal = owners
+        projective_reads.append(_projective_blocks(pulses, projective, owners))
+        cavity_drives.append(tuple(p for p in pulses if p.start_ns not in owners))
+        terminal_triggers.append(tuple(owners[terminal]))
+    return ReadoutPartition(
         tuple(terminals),
         tuple(cavity_drives),
         tuple(projective_reads),
         terminal_blocks,
         tuple(terminal_triggers),
     )
-    _validate_topology(template, partition)
-    return partition
 
 
 def _projective_blocks(
     pulses: tuple[ReadoutPulse, ...],
-    starts: tuple[float, ...],
-    triggers: Mapping[float, tuple[ReadoutTrigger, ...]],
+    starts: list[float],
+    owners: Mapping[float, list[ReadoutTrigger]],
 ) -> tuple[ProjectiveRead, ...]:
     return tuple(
         ProjectiveRead(
-            start,
-            tuple(pulse for pulse in pulses if pulse.start_ns == start),
-            triggers[start],
+            ns, tuple(p for p in pulses if p.start_ns == ns), tuple(owners[ns])
         )
-        for start in starts
-        if start in triggers
+        for ns in starts
     )
 
 
@@ -442,35 +441,91 @@ def _terminal_pulses(
     return local_readout_pulses(tuple(tuple(point) for point in pulses), 0.0)
 
 
-def _validate_topology(template: TimelineTemplate, partition: ReadoutPartition) -> None:
-    expected = len(partition.projective_reads[0])
-    for point, reads in enumerate(partition.projective_reads):
-        if len(reads) != expected:
+_PointMatches = tuple[dict[float, list[ReadoutTrigger]], list[ReadoutTrigger]]
+_EventGridRows = tuple[tuple[list[ReadoutTrigger], ...], ...]
+
+
+def _anchor_receiver_only(
+    template: TimelineTemplate, matches: list[_PointMatches]
+) -> None:
+    """Assign baseline grids to existing owners, aligned by chronological event index."""
+    expected = len(matches[0][0]) - 1
+    for point, (owners, _) in zip(template.points, matches, strict=True):
+        if len(owners) - 1 != expected:
             raise ValueError(
-                f"point {template.points[point]} projective block count {len(reads)} "
+                f"point {point} projective block count {len(owners) - 1} "
                 f"differs from point {template.points[0]} count {expected}"
             )
-    for window in template.readouts:
-        layouts = []
-        for reads, terminal in zip(
-            partition.projective_reads, partition.terminal_triggers, strict=True
+    events = tuple(zip(*(owners.values() for owners, _ in matches), strict=True))
+    channel_order = {window.channel: i for i, window in enumerate(template.readouts)}
+    for channel in channel_order:
+        early = [[t for t in row if t.channel == channel] for _, row in matches]
+        _align_adc_grids(template.points, channel, events, early)
+    for event in events:
+        for triggers in event:
+            triggers.sort(key=lambda t: (channel_order[t.channel], t.read_index))
+
+
+def _align_adc_grids(
+    points: NDArray[np.int64],
+    channel: int,
+    events: _EventGridRows,
+    early: list[list[ReadoutTrigger]],
+) -> None:
+    unobserved = []
+    for event, rows in enumerate(events):
+        field = [[t for t in row if t.channel == channel] for row in rows]
+        fixed = next((item for item in enumerate(map(len, field)) if item[1]), None)
+        if fixed is None:
+            unobserved.append(event)
+            continue
+        reference, count = points[fixed[0]], fixed[1]
+        for point, observed, baseline, row in zip(
+            points, field, early, rows, strict=True
         ):
-            layouts.append(
-                tuple(
-                    sum(t.channel == window.channel for t in triggers)
-                    for triggers in (*(read.triggers for read in reads), terminal)
+            if observed and len(observed) != count:
+                raise ValueError(
+                    f"point {point} ADC {channel} trigger index={observed[0].read_index} "
+                    f"event {event} grid count {len(observed)} differs from point "
+                    f"{reference} count {count}; observed grids cannot move"
                 )
-            )
-        for point, layout in enumerate(layouts):
-            for event, (actual, expected_grids) in enumerate(
-                zip(layout, layouts[0], strict=True)
-            ):
-                if actual != expected_grids:
-                    raise ValueError(
-                        f"point {template.points[point]} ADC {window.channel} event {event} "
-                        f"grid count {actual} differs from point {template.points[0]} "
-                        f"count {expected_grids}"
+            if not observed:
+                if len(baseline) < count:
+                    trigger = (
+                        f" index={baseline[0].read_index}" if baseline else " layout"
                     )
+                    raise ValueError(
+                        f"point {point} ADC {channel} trigger{trigger}: event {event} "
+                        f"needs {count} receiver-only grids but only {len(baseline)} remain"
+                    )
+                row.extend(baseline[:count])
+                del baseline[:count]
+    _place_remaining_baselines(points, events, unobserved, early)
+
+
+def _place_remaining_baselines(
+    points: NDArray[np.int64],
+    events: _EventGridRows,
+    unobserved: list[int],
+    early: list[list[ReadoutTrigger]],
+) -> None:
+    pending = [(p, row[0]) for p, row in zip(points, early, strict=True) if row]
+    if not pending:
+        return
+    point, trigger = pending[0]
+    label = f"ADC {trigger.channel} trigger index={trigger.read_index} at point {point}"
+    if any(len(row) != len(early[0]) for row in early):
+        raise ValueError(
+            f"{label} has unequal remaining receiver-only grid counts across points"
+        )
+    if not unobserved:
+        raise ValueError(
+            f"{label} precedes all readout blocks and needs an unobserved event across "
+            "points for receiver-only output without a new projection or mixing with field grids"
+        )
+    anchor = len(events) - 1 if len(events) - 1 in unobserved else unobserved[0]
+    for row, baseline in zip(events[anchor], early, strict=True):
+        row.extend(baseline)
 
 
 def _point_triggers(
@@ -480,9 +535,9 @@ def _point_triggers(
     starts: tuple[float, ...],
     time_base: TimeBase,
     receiver_delays_ns: Mapping[int, float] | None,
-) -> dict[float, tuple[ReadoutTrigger, ...]]:
+) -> _PointMatches:
     ends = (*starts[1:], time_base.ns(template.duration_ticks[point]))
-    assigned: dict[float, list[ReadoutTrigger]] = {}
+    assigned: dict[float, list[ReadoutTrigger]] = {starts[-1]: []}
     receiver_only = []
     for window in template.readouts:
         delay = (
@@ -490,6 +545,7 @@ def _point_triggers(
         )
         ticks = window.trigger_ticks[point]
         first = time_base.ns(ticks)
+        # ADR-0084: assemble the last sample on the integer grid before conversion.
         last = time_base.ns(ticks + (window.samples - 1) * window.sample_period_ticks)
         device_first = adc_to_device_time_ns(first, time_of_flight_ns=delay)
         device_last = adc_to_device_time_ns(last, time_of_flight_ns=delay)
@@ -519,31 +575,7 @@ def _point_triggers(
                     f"{template.points[point]} has no readout block before point end"
                 )
 
-    # A receiver-only window can use an existing projection or terminal event
-    # that its ADC does not observe. It never creates a projection by itself.
-    anchors = (starts[-1], *(start for start in starts[:-1] if start in assigned))
-    for trigger in receiver_only:
-        for anchor in anchors:
-            seen = assigned.setdefault(anchor, [])
-            if all(
-                t.channel != trigger.channel or not t.incident_starts_ns for t in seen
-            ):
-                seen.append(trigger)
-                break
-        else:
-            raise ValueError(
-                f"ADC {trigger.channel} trigger index={trigger.read_index} at point "
-                f"{template.points[point]} precedes all readout blocks and needs an "
-                "unobserved event for receiver-only output without a new projection"
-            )
-
-    channel_order = {window.channel: i for i, window in enumerate(template.readouts)}
-    return {
-        owner: tuple(
-            sorted(triggers, key=lambda t: (channel_order[t.channel], t.read_index))
-        )
-        for owner, triggers in assigned.items()
-    }
+    return dict(sorted(assigned.items())), receiver_only
 
 
 def _selected_pulses(
@@ -554,14 +586,12 @@ def _selected_pulses(
     """Union the windows' incident blocks, keeping the owner's tones first."""
     if not triggers:
         return blocks[owner]
-    starts = sorted(
-        {start for trigger in triggers for start in trigger.incident_starts_ns}
-    )
+    starts = {start for trigger in triggers for start in trigger.incident_starts_ns}
     if not starts:
         return ()
     return (
         *blocks[owner],
-        *(p for start in starts if start != owner for p in blocks[start]),
+        *(p for start in sorted(starts) if start != owner for p in blocks[start]),
     )
 
 
@@ -631,12 +661,13 @@ def logical_event_contents(
     """Return each projective block then terminal on a common logical event axis.
 
     Inputs and phase/units follow readout_contents. window must belong to
-    template.readouts and contain at least one trigger. An observed event holds
-    the union of blocks matched to its grids; a receiver-only event has no
-    pulses. Unobserved events retain the owner's pulse block with no grids.
+    template.readouts and contain at least one trigger. A field event contains
+    each pulse block intersecting any of this ADC's windows with that owner,
+    once per block. A receiver-only event has no pulses. Unobserved events retain the owner's pulse block with no grids.
     Empty grids emit no read column. read_indices retains ADC emission order.
-    Terminal-only plans with the same one-block topology retain deduplication;
-    projective or mixed membership uses point-local contents with identity maps.
+    Terminal-only plans deduplicate rows when all points have only their owner
+    block or all have empty pulses. Projective, earlier-member and mixed
+    field/baseline plans use point-local contents with identity maps.
     Pass a partition for the same template, drive and time base, or classify
     with zero delay. Partitions with no pulse anywhere must instead use
     readout_contents with allow_receiver_only. Invalid layouts or routes raise
@@ -654,19 +685,15 @@ def logical_event_contents(
         time_base=time_base,
     )
     rows = _receiver_events(partition, window.channel)
-    if not any(partition.projective_reads):
+    terminal_only = not any(partition.projective_reads)
+    if terminal_only:
         if all(_owner_pulses_only(row[0]) for row in rows):
             return (terminal,)
         if all(not row[0].pulses for row in rows):
             return (replace(terminal, pulses=((),) * len(terminal.grids)),)
     return tuple(
-        _materialize_event(
-            terminal,
-            events,
-            keep_owner_phase=index == len(rows[0]) - 1
-            and not any(partition.projective_reads),
-        )
-        for index, events in enumerate(zip(*rows, strict=True))
+        _materialize_event(terminal, events, use_source_owner_phases=terminal_only)
+        for events in zip(*rows, strict=True)
     )
 
 
@@ -680,25 +707,31 @@ def _materialize_event(
     source: ReadoutContents,
     events: tuple[_ReceiverEvent, ...],
     *,
-    by_trigger: bool = False,
-    keep_owner_phase: bool = False,
+    source_grids_already_subset: bool = False,
+    use_source_owner_phases: bool = False,
 ) -> ReadoutContents:
+    """Materialize one logical event per point with common-origin pulse phases.
+
+    source holds the full ADC grid axis unless source_grids_already_subset is
+    set and it holds just the selected trigger's grid. use_source_owner_phases
+    requires source.pulses to hold this event's owner for every point. Reuse
+    those common-origin phases; only convert the earlier members.
+    """
     pulses = []
     grids = []
     for row, event in zip(source.inverse, events, strict=True):
-        pulses.append(
-            source.pulses[row]
-            + tuple(
+        if use_source_owner_phases and event.pulses:
+            earlier = tuple(
                 _common_readout_phase(pulse)
                 for pulse in event.pulses
                 if pulse.start_ns != event.owner_ns
             )
-            if keep_owner_phase and event.pulses
-            else tuple(_common_readout_phase(pulse) for pulse in event.pulses)
-        )
+            pulses.append(source.pulses[row] + earlier)
+        else:
+            pulses.append(tuple(_common_readout_phase(pulse) for pulse in event.pulses))
         grids.append(
             source.grids[row]
-            if by_trigger
+            if source_grids_already_subset
             else tuple(source.grids[row][read] for read in event.read_indices)
         )
     return ReadoutContents(
@@ -757,7 +790,10 @@ def read_event_contents(
         else:
             contents.append(
                 _materialize_event(
-                    content, events, by_trigger=True, keep_owner_phase=True
+                    content,
+                    events,
+                    source_grids_already_subset=True,
+                    use_source_owner_phases=True,
                 )
             )
     return tuple(contents)

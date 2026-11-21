@@ -478,9 +478,11 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     Projective block counts and each ADC's per-event grid counts must match across
     points; differences raise ValueError naming the point and differing counts.
     Missing routes, invalid DC values or invalid readout pulse blocks raise
-    ValueError. Terminal-only contents deduplicate point rows; projective plans
-    retain point-local contents. Earlier cavity pulses detach once per active
-    point/slot. No per-point evolution planner is called.
+    ValueError. Terminal-only ADC contents deduplicate rows when all points use
+    only their owner block, or all have empty pulses. Earlier member blocks,
+    mixed field/receiver-only rows or projective events retain point-local
+    contents. Earlier cavity pulses detach once per active point/slot. No
+    per-point evolution planner is called.
     """
     config = readout_configuration(settings) if readout is None else readout
     path = _readout_path(settings, config, template)
