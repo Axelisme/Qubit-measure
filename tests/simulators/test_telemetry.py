@@ -21,12 +21,14 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
         caller_context: str
 
     summary: CallerSummary = {
+        "acquire_id": "fixture-acquire",
         "points": 2,
         "rounds": 3,
         "wall_s": 1.0,
         "compile_wall_s": 0.1,
         "evolve_wall_s": 0.5,
         "readout_wall_s": 0.2,
+        "materialize_wall_s": 0.15,
         "complete": False,
         "extras": {
             "ftf.projection_outcomes": [4, 2],
@@ -101,12 +103,14 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
     assert len(records) == 1
     record = records[0]
     assert set(record) == {
+        "acquire_id",
         "points",
         "rounds",
         "wall_s",
         "compile_wall_s",
         "evolve_wall_s",
         "readout_wall_s",
+        "materialize_wall_s",
         "complete",
         "extras",
         "capture_file",
@@ -118,23 +122,27 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
     assert {
         key: record[key]
         for key in (
+            "acquire_id",
             "points",
             "rounds",
             "wall_s",
             "compile_wall_s",
             "evolve_wall_s",
             "readout_wall_s",
+            "materialize_wall_s",
             "complete",
             "capture_file",
             "extras",
         )
     } == {
+        "acquire_id": "fixture-acquire",
         "points": 2,
         "rounds": 3,
         "wall_s": 1.0,
         "compile_wall_s": 0.1,
         "evolve_wall_s": 0.5,
         "readout_wall_s": 0.2,
+        "materialize_wall_s": 0.15,
         "complete": False,
         "capture_file": "capture-example.json.gz",
         "extras": {
@@ -197,12 +205,14 @@ def test_writer_removes_oldest_routing_files_and_warns_only_once(tmp_path: Path)
     writer = RoutingTelemetry(directory, max_bytes=1000)
     writer.write(
         {
+            "acquire_id": "fixture-acquire",
             "points": 2,
             "rounds": 1,
             "wall_s": 0.1,
             "compile_wall_s": 0.0,
             "evolve_wall_s": 0.0,
             "readout_wall_s": 0.0,
+            "materialize_wall_s": 0.0,
             "complete": True,
             "extras": {},
             "capture_file": None,
@@ -224,12 +234,14 @@ def test_writer_removes_oldest_routing_files_and_warns_only_once(tmp_path: Path)
         for _ in range(3):
             failing.write(
                 {
+                    "acquire_id": "fixture-acquire",
                     "points": 1,
                     "rounds": 1,
                     "wall_s": 0.0,
                     "compile_wall_s": 0.0,
                     "evolve_wall_s": 0.0,
                     "readout_wall_s": 0.0,
+                    "materialize_wall_s": 0.0,
                     "complete": False,
                     "extras": {},
                     "capture_file": None,

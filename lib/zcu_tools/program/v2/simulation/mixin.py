@@ -12,6 +12,7 @@ from qick.qick_asm import AcquireMixin
 from zcu_tools.program.acquisition import (
     CancelFlagProtocol,
     ImproveAcquireMixin,
+    ShotResult,
     StoppedPartialAcquireError,
 )
 from zcu_tools.progress_bar import make_pbar
@@ -21,8 +22,8 @@ from zcu_tools.simulate.boundary import (
     RoundStatistics,
 )
 
+from .binding import SimulationBinding
 from .result import IntegratedRound, RawShots
-from .signals import materialize_shots
 from .soc import SimulationSoc
 
 if TYPE_CHECKING:
@@ -41,7 +42,8 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
     """
 
     _simulation_active: bool = False
-    _simulation_raw: tuple[RawShots, AcquireRequest] | None = None
+    _simulation_raw: tuple[SimulationBinding, AcquireRequest, RawShots] | None = None
+    _deferred_raw_notifications: list[Callable[[], None]] | None = None
 
     def _acquire_configured(
         self, soc, *args, **kwargs
@@ -235,14 +237,14 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         request = soc.binding.last_request
         if request is None:
             raise RuntimeError("simulation round requires installed request")
-        self._simulation_raw = (result.raw, request)
+        self._simulation_raw = (soc.binding, request, result.raw)
         if not self._simulation_needs_raw:
             self.acc_buf = None
             self.rounds_buf.append(
                 self._average_statistics(result.statistics, request.reps)
             )
             return
-        raw = materialize_shots(request, result.raw)
+        raw = soc.binding.materialize_raw(request, result.raw)
         self.acc_buf = [raw[ch] for ch in prog.ro_chs]
         self.rounds_buf.append(prog._process_accumulated(self.acc_buf))
 
@@ -267,13 +269,47 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         """Return last-round int64 QICK sums, materializing compact shots once.
 
         Deferred shots use the retained environment source, never a new backend call.
+        Calls inside acquire contribute to its raw materialization time. Successful
+        deferred materialization can publish a separate timing for the same acquire.
         Hardware and decimated data use QICK buffers.
         """
         if self.acc_buf is None and self._simulation_raw is not None:
-            source, request = self._simulation_raw
-            raw = materialize_shots(request, source)
+            binding, request, source = self._simulation_raw
+            notifications = self._deferred_raw_notifications
+            raw = binding.materialize_raw(
+                request,
+                source,
+                defer_notification=notifications.append
+                if notifications is not None
+                else None,
+            )
             self.acc_buf = [raw[ch] for ch in self._program().ro_chs]
         return super().get_raw()
+
+    def get_shot_result(self) -> ShotResult | None:
+        """Return visible raw shots and mask for the retained integrated round.
+
+        As in the base getter, no retained raw returns None; a missing required
+        mask raises RuntimeError. Publish newly materialized deferred timing only
+        if the getter builds the shot result successfully.
+        """
+        if (
+            self._simulation_raw is None
+            or self.acc_buf is not None
+            or self._deferred_raw_notifications is not None
+        ):
+            return super().get_shot_result()
+
+        notifications: list[Callable[[], None]] = []
+        self._deferred_raw_notifications = notifications
+        try:
+            result = super().get_shot_result()
+        finally:
+            self._deferred_raw_notifications = None
+        if result is not None:
+            for notify in notifications:
+                notify()
+        return result
 
     @overload
     def acquire(

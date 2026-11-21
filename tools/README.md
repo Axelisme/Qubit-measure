@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-18 (FTF gate scenes and paired Engine backend selection)
+**Last updated:** 2026-11-21 (experiment Run core-time coverage)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -46,7 +46,7 @@
 | `inspect_simulator_capture.py` | `tools/inspect_simulator_capture.py [path] --telemetry-directory DIRECTORY` | 0 完成，壞資料或讀檔失敗時非零 | 否 |
 | `family_pareto.py` | `-m tools.family_pareto --scenario <name>` | 0 完成，輸入或量測失敗時非零 | 否 |
 | `paired_benchmark.py` | `-m tools.paired_benchmark run --baseline A --candidate B --scenario NAME --reference-cache DIR --blocks K --exclusive --output FILE` | 0 完成；1 輸入、cache 或 child 失敗；2 用法錯誤 | 否，需外層 exclusive runner |
-| `experiment_wall_time.py` | `-m tools.experiment_wall_time`，參數見[實驗 Run 牆鐘](#實驗-run-牆鐘) | 0 所選列均已判定；3 已出報表但仍有未完列；1 工具或環境錯誤；2 用法錯誤 | 否，只記耗時 |
+| `experiment_wall_time.py` | `-m tools.experiment_wall_time`，參數見[實驗 Run 牆鐘](#實驗-run-牆鐘) | 0 所選列均有結果；3 已出報表但仍有未完列；1 工具或環境錯誤；2 用法錯誤 | 否，只記耗時 |
 
 Usage 錯誤由 argparse 以 2 結束；未轉譯的 Git、讀檔或其他執行錯誤仍會傳出例外，不能當作檢查通過。
 模擬器量測與重計算的授權、排隊和收據要求見後續各節。表中的命令不提供執行授權。
@@ -178,23 +178,31 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
   python -m tools.experiment_wall_time --select onetone/freq --output "$output" > "$output.receipt.json"
 ```
 
-`batch.json` 記錄本批選中的 adapter、Git HEAD、每份輸入的 SHA-256 和 guide 盤點。從乾淨 checkout 執行，才能用 commit 找回執行時的程式。每列在送出 Run 前先寫 `start.json`，記 UTC 時刻與 monotonic 秒數。Run 到終態後，工具在清理該列資源前寫 `row.json`。`report.json` 和 `summary.md` 從這些落盤紀錄組成，列出已判定列數、本批涵蓋列數及全 inventory 列數。
+`batch.json` 記錄本批選中的 adapter、Git HEAD、每份輸入的 SHA-256 和 guide 盤點。從乾淨 checkout 執行，才能用 commit 找回執行時的程式。每列在送出 Run 前先寫 `start.json`，記 UTC 時刻與 monotonic 秒數。Run 到終態後，工具在清理該列資源前寫 `row.json`。`report.json` 和 `summary.md` 從這些落盤紀錄組成，列出已記錄結果的列數、本批涵蓋列數及全 inventory 列數。
 
-工具在送出 Run 及收到 Controller 終態事件時各取一次時間。Run 秒數取兩次 monotonic clock 的差，UTC 時刻供閱讀。環境組裝、Open、覆寫及派送前落盤都不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留 fixture 副本與 acquired ledger，不寫回入庫輸入。Compile、evolve、readout 與 remainder 加總該目錄中的 acquire 牆鐘。Remainder 不含 acquire 外的 Run 開銷。若沒有 acquire 記錄或分項不全，`missing_breakdown` 保留 Run 秒數，分項寫 `null`。
+工具在送出 Run 及收到 Controller 終態事件時各取一次時間。`wall_s` 是兩次 monotonic clock 的差，UTC 時刻供閱讀。環境組裝、Open、覆寫及派送前落盤都不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留 fixture 副本與 acquired ledger，不寫回入庫輸入。
 
-`--row-timeout SECONDS` 從送出 Run 起算，預設 360 秒。只接受有限且介於 180 到 2,147,483.647 秒的值，兩端都可用。到期時先把所有 Python 執行緒的 stack 寫到該列的 `timeout-stack.txt`，再請 Controller 取消。`timeout` 的精確 `wall_s` 是 `null`，`wall_s_lower_bound` 表示 Run 大於期限。能加總的 acquire 分項標「部分」，沒有可用分項時標「分項缺」。摘要以未四捨五入的 Run 秒數列出嚴格大於 180 秒的實驗，也列入所有 `timeout`。取消後 30 秒內，工具觀察到 Run 終態且 Controller idle 才繼續。否則停止派送，保留報表，將尚未開始的列記為 `not_run`。
+工具從 [acquire telemetry](../lib/zcu_tools/simulators/README.md#acquire-telemetry) 加總各階段秒數。`core_s` 是 `compile_s`、`evolve_s`、`readout_s` 和 `materialize_s` 四項之和。`materialize_s` 含 acquire 內產生 raw shots 的時間，也含依 `acquire_id` 配對的延後 materialize。`remainder_s` 從 acquire 牆鐘扣除該牆鐘內的四項工作。延後 materialize 在 acquire 之外，不再從 remainder 扣除。`ShotReducer` 等 host 處理不計入核心。
 
-Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`，再落盤 `run_failed` 列。該列記 Run 起點、收到失敗事件的時刻，以及 Controller 提供的錯誤類型與訊息。`failure_record` 是相對於該列 `case_directory` 的診斷檔路徑。失敗列不填 Run 秒數，也不列入 `Run >180 s`。工具寫完該列才檢查 Controller 是否 idle；若仍有活動中的操作，就停止派送。摘要分別計數成功計時、`timeout` 與 `run_failed`。`Run failures` 按完全相同的 Controller 診斷分組，每組列出 adapter key 與診斷檔路徑。工具不推斷根因。
+Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆鐘和四個分項、每筆補充紀錄都有主紀錄配對時，才填 `core_s`。缺 materialize 的舊 telemetry 不補 0。配不到主紀錄的補充紀錄不計秒數或 acquire 次數，並使分項不完整。成功但分項不全的 `missing_breakdown` 列保留 Run 秒數，四個分項與 remainder 寫 `null`。分項不全或逾時時，`core_s` 寫 `null`，`core_s_lower_bound` 只加總分項齊全的主紀錄與配對到它們的補充紀錄。沒有分項齊全的主紀錄時，下限也寫 `null`。
+
+完整只表示現存 telemetry 的分項齊全。Writer 採盡力寫入；工具無法察覺整筆主紀錄或補充紀錄遺失。若該 Run 期間出現保留上限刪檔或寫入失敗的警告，不要用該列的 `core_s` 斷言達標。
+
+摘要的 Core 欄在不完整列顯示 `≥` 加下限，沒有下限則顯示「—」。3 分鐘判定使用未四捨五入的秒數。完整核心嚴格大於 180 秒才列入 `Core >180 s`。下限嚴格大於 180 秒列入 `Core 已知至少超標`，其餘沒有完整核心的列列入 `Core 未判定`。Run 秒數和期限都不參與核心判定。
+
+`--row-timeout SECONDS` 從送出 Run 起算，預設 360 秒。只接受有限且介於 180 到 2,147,483.647 秒的值，兩端都可用。到期時先把所有 Python 執行緒的 stack 寫到該列的 `timeout-stack.txt`，再請 Controller 取消。`timeout` 的精確 `wall_s` 是 `null`，`wall_s_lower_bound` 表示 Run 大於期限。能加總的 acquire 分項標「部分」，沒有可用分項時標「分項缺」。取消後 30 秒內，工具觀察到 Run 終態且 Controller idle 才繼續。否則停止派送，保留報表，將尚未開始的列記為 `not_run`。
+
+Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`，再落盤 `run_failed` 列。該列記 Run 起點、收到失敗事件的時刻，以及 Controller 提供的錯誤類型與訊息。`failure_record` 是相對於該列 `case_directory` 的診斷檔路徑。失敗列不填 Run 或核心秒數。工具寫完該列才檢查 Controller 是否 idle；若仍有活動中的操作，就停止派送。摘要分別計數成功計時、`timeout` 與 `run_failed`。`Run failures` 按完全相同的 Controller 診斷分組，每組列出 adapter key 與診斷檔路徑。工具不推斷根因。
 
 Open 加上覆寫後仍缺欄位或 slot 時，`missing_defaults` 列出表單的錯誤，不送出 Run。[案例宣告](data/experiment_wall_time/case-inputs.json)列出這個 FTF 環境無法執行的 adapter；這些 `not_runnable` 列只寫原因，不複製 project 或啟動 Run。工具例外、未知 Run outcome、環境組裝、journal 錯誤與 telemetry 格式錯誤會中止指令，不轉成案例狀態。重建與續跑都拒絕 adapter key 不符的結果列，以及沒有有效 Run 秒數的 `ok` 或 `missing_breakdown` 列。
 
-批次中斷時，有 `start.json` 但沒有 `row.json` 的列記為 `incomplete`。這種列的 `started_at` 是派送前記下的時刻，不代表 Run 已送出。兩份紀錄都沒有的列記為 `not_run`。兩種列的 Run 秒數和下限都寫 `null`，摘要的 Run 欄顯示「—」。全表需要每個註冊的 adapter 都有成功計時、`timeout`、`run_failed`、`missing_defaults` 或 `not_runnable` 的結果。`incomplete` 和 `not_run` 不算已判定。
+批次中斷時，有 `start.json` 但沒有 `row.json` 的列記為 `incomplete`。這種列的 `started_at` 是派送前記下的時刻，不代表 Run 已送出。兩份紀錄都沒有的列記為 `not_run`。兩種列的 Run 秒數和下限都寫 `null`，摘要的 Run 欄顯示「—」。全表需要每個註冊的 adapter 都有成功計時、`timeout`、`run_failed`、`missing_defaults` 或 `not_runnable` 的結果。`incomplete` 和 `not_run` 不算已記錄結果。
 
 量測和 `--report-only` 使用同一套 exit status：
 
 | Exit status | 意義 |
 | --- | --- |
-| `0` | 報表已寫，所選列均已判定。可以含 `timeout` 或 `run_failed`。 |
+| `0` | 報表已寫，所選列均有結果。可以含核心未判定的列，例如 `timeout` 或 `run_failed`。 |
 | `3` | 報表已寫，但含 `incomplete` 或 `not_run`。收到 SIGINT 或 SIGTERM 後若能寫出部分報表，也適用此規則。 |
 | `1` | 工具或環境錯誤，包含讀寫或解析 journal 失敗。 |
 | `2` | 用法錯誤，例如無效的選擇、期限或不相符的續跑來源。 |
@@ -208,7 +216,7 @@ uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
   --report-only --output "$output"
 ```
 
-批次起迄與外層逾時看 `run_heavy.py` 的收據，不用來推算 Run 耗時。要補未判定列，使用下方的續跑方式。
+缺 `materialize_s`、`core_s` 或 `core_s_lower_bound` 的舊 `row.json` 會讓重建以 exit 1 結束，不寫報表。請在 `batch.json` 記錄的 commit 執行 `--report-only` 重建舊報表。批次起迄與外層逾時看 `run_heavy.py` 的收據，不用來推算 Run 耗時。要補未派送或未完成的列，使用下方的續跑方式。
 
 續跑使用新的 `--output`，以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。新報表併入來源中已落盤的判定列；`--select` 只派送所選範圍內尚未判定的列。`timeout` 和 `run_failed` 都是已判定列，不會自動重跑。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`：
 
@@ -1291,12 +1299,14 @@ it does not mean every requested round ran. Only observed groups appear.
 Each group reports `included`, `excluded`, and sums of `wall_s`, `compile_wall_s`,
 `evolve_wall_s`, `readout_wall_s` and `remainder_s`. The remainder is total wall
 minus the three stages, including environment preparation and pacing outside
-those stages. Raw materialization requested after acquire is outside the row.
+those stages. The analyzer ignores supplemental `event: "materialize"` records
+when counting acquires and aggregating these three stages.
 
 A row contributes wall totals only when all four wall fields are JSON numbers.
 Missing or null wall fields make it excluded from wall totals, including in the
 unknown group. Included plus excluded across groups equals `records`.
-All valid rows still count toward family statistics. Non-null `complete` accepts
+All valid main rows still count toward family statistics. Supplemental records
+do not contribute family statistics. Non-null `complete` accepts
 only JSON booleans. Non-null wall fields accept only JSON numbers, not booleans or
 numeric strings. Wrong types skip the whole row, including family work, and emit
 the same file/line warning as other malformed records.

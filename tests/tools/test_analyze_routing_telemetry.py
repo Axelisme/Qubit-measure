@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from tools.analyze_routing_telemetry import main
+from tools.analyze_routing_telemetry import decode_routing_record, main
 
 
 @pytest.fixture
@@ -118,6 +119,41 @@ def test_wall_groups_include_only_measured_rows_without_losing_family_work(
     assert report["families"]["t4"]["rows"] == 18
     assert report["families"]["t4"]["prepare_cpu_s"] == 9
     assert report["families"]["t4"]["apply_cpu_s"] == 27
+
+
+def test_materialization_events_do_not_count_as_acquires(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "routing-mixed.jsonl"
+    path.write_text(
+        '{"acquire_id":"id","families":{}}\n'
+        '{"event":"materialize","acquire_id":"id","materialize_wall_s":0.25}\n',
+        encoding="utf-8",
+    )
+
+    assert main([str(path)]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    report = json.loads(captured.out)
+    assert report["records"] == 1
+    assert report["skipped"] == 0
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {},
+        {"acquire_id": "id"},
+        {"materialize_wall_s": 0.25},
+        {"acquire_id": 3, "materialize_wall_s": 0.25},
+        {"acquire_id": "id", "materialize_wall_s": "0.25"},
+        {"acquire_id": "id", "materialize_wall_s": True},
+    ],
+)
+def test_invalid_materialize_event_cannot_decode_as_acquire(fields: dict[str, object]):
+    line = json.dumps({"event": "materialize", "families": {}, **fields})
+    with pytest.raises(ValidationError):
+        decode_routing_record(line)
 
 
 @pytest.mark.parametrize(
