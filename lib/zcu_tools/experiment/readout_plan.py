@@ -14,7 +14,6 @@ from zcu_tools.simulate.adc import (
     SampleGrid,
 )
 from zcu_tools.simulate.boundary import (
-    DDSCongruence,
     EventSlot,
     PulseEnvelope,
     ReadoutSlot,
@@ -794,13 +793,11 @@ def readout_contents(
                     time_base.ns(trigger + offsets),
                     frequency / 1000,
                     float(np.deg2rad(phase)),
-                    image,
                 )
-                for trigger, frequency, phase, image in zip(
+                for trigger, frequency, phase in zip(
                     window.trigger_ticks[index],
                     window.frequency_mhz[index],
                     window.phase_deg[index],
-                    window.frequency_images_at(int(index)),
                     strict=True,
                 )
             )
@@ -852,19 +849,6 @@ def _content_rows(
         window.frequency_mhz,
         window.phase_deg,
     )
-    if isinstance(window.frequency_images, tuple):
-        # An explicit image uses key 0, distinct from any positive DDS period.
-        key += (
-            np.array(
-                [
-                    [
-                        image.period_ghz if isinstance(image, DDSCongruence) else 0.0
-                        for image in row
-                    ]
-                    for row in window.frequency_images
-                ]
-            ),
-        )
     _, representatives, inverse = np.unique(
         np.column_stack(key), axis=0, return_index=True, return_inverse=True
     )

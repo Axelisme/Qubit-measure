@@ -11,7 +11,6 @@ from zcu_tools.program.v2.ir.io_instructions import DportWriteInst
 from zcu_tools.program.v2.ir.operands import ImmValue, Register
 from zcu_tools.program.v2.modules import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.simulate.boundary import ExplicitImage
 
 from tests.program._profiles import RO_MHZ, TPROC_MHZ, load_soccfg
 from tests.program.v2.simulation._compiled_support import program, request
@@ -342,7 +341,6 @@ def test_runtime_adc_without_carriers_uses_config_effective_at_each_window_start
                 (100, start_mhz + point * span_mhz / 3), abs=1e-5
             )
             assert read.phase_deg == (0, 90 if modify_phase else 0)
-            assert read.frequency_images == ExplicitImage()
     finally:
         env.devices.close_all_devices()
 
@@ -395,7 +393,6 @@ def test_unused_raw_dac_library_entry_does_not_block_named_readout():
     try:
         read = request(prog, env).materialize_point(0).readouts[0]
         assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
-        assert read.frequency_images == ExplicitImage()
     finally:
         env.devices.close_all_devices()
 

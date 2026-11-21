@@ -7,9 +7,7 @@ import numpy as np
 import pytest
 from zcu_tools.experiment import readout_plan
 from zcu_tools.simulate.boundary import (
-    DDSCongruence,
     EventSlot,
-    ExplicitImage,
     PulseEnvelope,
     ReadoutSlot,
     TimeBase,
@@ -237,32 +235,6 @@ def test_terminal_only_event_contents_preserve_late_triggers_and_deduplication()
         assert content.pulses == combined.pulses
         np.testing.assert_array_equal(
             content.grids[0][0].times_ns, combined.grids[0][read].times_ns
-        )
-
-
-def test_readout_grid_contents_keep_frequency_image_per_point_and_trigger() -> None:
-    base = template((pulse(0.030),), (0.031, 0.040))
-    explicit = ExplicitImage()
-    raw = DDSCongruence(period_ghz=2.5)
-    images = ((explicit, raw), (raw, explicit))
-    window = replace(base.readouts[0], frequency_images=images)
-    base = replace(base, readouts=(window,))
-    drive = readout_plan.ReadoutDrive(0, 2.0)
-    combined = readout_plan.readout_contents(
-        base, drive, window, {}, time_base=TIME_BASE
-    )
-    separated = readout_plan.read_event_contents(
-        base, drive, window, {}, time_base=TIME_BASE
-    )
-
-    for point, expected in enumerate(images):
-        assert (
-            tuple(g.frequency_image for g in combined.grids[combined.inverse[point]])
-            == expected
-        )
-        assert (
-            tuple(c.grids[c.inverse[point]][0].frequency_image for c in separated)
-            == expected
         )
 
 

@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-21, ADC frequency images
+**Last updated:** 2026-11-21, named ADC frequency requirement
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -125,10 +125,12 @@ For a runtime-controlled ADC, the configuration effective at each window start
 determines the demodulation frequency. A named config supplies its compiled
 physical frequency as the reference for decoding the DDS word. Edits and sweeps
 of a wave loaded from that config retain its named source through WMEM and
-`r_wave`. A word without such a source decodes to folded baseband
-`[-f_dds/2, f_dds/2)`. No pulse carrier is needed for frequency decoding; the
-route checks still apply. Static-config ADCs retain the full frequency from the
-shared QICK `calc_ro_freq` adapter.
+`r_wave`. If the word effective at a trigger has no named source, the builder
+raises `ValueError` with the ADC channel and trigger time. The raw word does not
+identify a physical DDS image. Use a named ADC config for that window. No pulse
+carrier is needed for frequency decoding; the route checks still apply.
+Static-config ADCs retain the full frequency from the shared QICK
+`calc_ro_freq` adapter.
 Wave writes dispatch by `(port, tmux_ch)` across the program's declared generators
 and tProc-controlled readouts. For a port with tmux selectors, conf bits 8–15
 select the registered user with `(conf >> 8) & 0xFF`. Active lanes must select the same user;
@@ -417,9 +419,8 @@ must separately bind every requested route and supply any physical mux response.
 
 `ReadoutWindow` keeps ADC sample counts and integer sample periods independent
 of generator duration. Per-point
-windows retain trigger emission order, demodulation MHz/degrees and the generator
-association for each read. Each trigger also carries an explicit image for named
-configs, or a DDS congruence with the decoding DDS frequency for raw words.
+windows retain trigger emission order, explicit demodulation frequency in MHz,
+phase in degrees and the generator association for each read.
 The acquire-level windows specify fixed ADC shapes; new consumers use template
 arrays for point-dependent timing and demodulation.
 `materialize_point` expands one detached point for diagnostics, excluding reps.
