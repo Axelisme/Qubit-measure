@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-20，雙讀出矩的自校準
+**Last updated:** 2026-11-22，逐點 shot SEM
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -31,6 +31,14 @@ prominence／noise 的中點。候選不足或剛好 N 個時使用現有最低�
 `failure.AnalysisFailed` 表示數值 owner 已辨識的無法產出分析結果，與任意程式錯誤分開。
 Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交付 failed 值。
 分類範圍由各數值 owner 文件列明，不以 ValueError／RuntimeError 的文字猜測。
+
+## 逐點 shot SEM
+
+[`shot_uncertainty`](shot_uncertainty.py) 依來源提供兩種估計。`iq_shot_sem` 接收
+ADR-0074 的單次讀出 IQ 總和 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]`。它把樣本標準差投影到
+指定的 IQ 軸，再除以 √N。`class_probability_covariance` 以每點保留的類別計數估計機率共變異，
+對角元素開根號就是各類的二項 SEM。兩者都不以設定的 reps×rounds 取代實際保留的 shot 數，
+也不估計輪間散布、RB 的 seed 散布或擬合參數誤差。
 
 ## 雙讀出矩的自校準
 
