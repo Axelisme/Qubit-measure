@@ -312,6 +312,34 @@ def test_invalid_row_journal_is_a_tool_error_not_a_usage_error(
     assert not continued.exists()
 
 
+def test_report_only_rejects_a_journal_without_core_fields(
+    tmp_path: Path,
+    data_dir: Path,
+) -> None:
+    output = tmp_path / "original"
+    assert (
+        main(
+            ["--output", str(output)],
+            data_dir=data_dir,
+            discover=lambda: _inventory(_FREQUENCY, [_GUIDE], lambda *_: 2.0),
+            read_commit=lambda: "abc",
+        )
+        == 0
+    )
+    journal = output / "cases/001/row.json"
+    row = json.loads(journal.read_text())
+    for field in ("materialize_s", "core_s", "core_s_lower_bound"):
+        row.pop(field, None)
+    journal.write_text(json.dumps(row))
+    (output / "report.json").unlink()
+    (output / "summary.md").unlink()
+
+    with pytest.raises(ValidationError, match="core_s_lower_bound"):
+        main(["--report-only", "--output", str(output)])
+    assert not (output / "report.json").exists()
+    assert not (output / "summary.md").exists()
+
+
 @pytest.mark.parametrize("change", [None, "commit", "input"])
 def test_resume_reuses_only_matching_committed_rows_and_marks_the_first_new_run_cold(
     tmp_path: Path,
@@ -446,7 +474,7 @@ def test_failed_run_is_journaled_before_idle_check_and_never_timed(
     assert report["coverage"]["resolved"] == (2 if settled_idle else 1)
     summary = (output / "summary.md").read_text()
     assert f"Runs: {int(settled_idle)} timed, 0 timeout, 1 run_failed." in summary
-    assert "Run >180 s: —" in summary
+    assert "Core >180 s: —" in summary
 
 
 def test_summary_groups_identical_diagnostics_and_lists_each_failure_record(
@@ -614,27 +642,37 @@ def test_main_reports_every_adapter_and_both_guide_gaps(
     assert f"Guides without adapters: `{unmatched_guide}`" in table
 
 
-def test_main_flags_only_unrounded_run_seconds_above_180(
+def test_main_flags_only_unrounded_core_seconds_above_180(
     tmp_path: Path, data_dir: Path
 ) -> None:
-    adapters = {"fake/at": 180.0, "fake/above": 180.0001}
+    evolve = {"fake/at": 174.0, "fake/above": 174.0001}
 
-    def measure(case: WallTimeCase, _data_dir: Path, _telemetry: Path) -> float:
-        return adapters[case.adapter]
+    def measure(case: WallTimeCase, _data_dir: Path, telemetry: Path) -> float:
+        record = {
+            "families": {},
+            "wall_s": 190,
+            "compile_wall_s": 1,
+            "evolve_wall_s": evolve[case.adapter],
+            "readout_wall_s": 4,
+            "materialize_wall_s": 1,
+        }
+        (telemetry / "routing-test.jsonl").write_text(json.dumps(record) + "\n")
+        return 200.0
 
     output = tmp_path / "output"
     assert (
         main(
             ["--output", str(output)],
             data_dir=data_dir,
-            discover=lambda: _inventory(dict.fromkeys(adapters), [], measure),
+            discover=lambda: _inventory(dict.fromkeys(evolve), [], measure),
             read_commit=lambda: "abc",
         )
         == 0
     )
     table = (output / "summary.md").read_text(encoding="utf-8")
-    assert "Run >180 s: `fake/above`" in table
-    assert "Run >180 s: `fake/above`, `fake/at`" not in table
+    assert "Core >180 s: `fake/above`\n" in table
+    assert "Core 已知至少超標: —\n" in table
+    assert "Core 未判定: —\n" in table
 
 
 def test_main_reports_known_ftf_exclusions_without_trying_run(
@@ -803,8 +841,16 @@ def test_main_keeps_run_wall_when_telemetry_is_missing(
     assert row["acquires"] == 0
     assert all(
         row[key] is None
-        for key in ("compile_s", "evolve_s", "readout_s", "remainder_s")
+        for key in (
+            "compile_s",
+            "evolve_s",
+            "readout_s",
+            "materialize_s",
+            "core_s",
+            "core_s_lower_bound",
+            "remainder_s",
+        )
     )
-    assert "| fake/frequency | 3.000 | — | — | — | — | 0 | 分項缺 |" in (
+    assert "| fake/frequency | 3.000 | — | — | — | — | — | — | 0 | 分項缺 |" in (
         output / "summary.md"
     ).read_text(encoding="utf-8")

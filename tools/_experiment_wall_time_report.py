@@ -9,7 +9,7 @@ from typing import Annotated, Literal, NotRequired, TypedDict
 
 from pydantic import Field, TypeAdapter
 
-RUN_TARGET_S = 180.0
+CORE_TARGET_S = 180.0
 
 
 class BatchPlan(TypedDict):
@@ -56,8 +56,13 @@ class Row(TypedDict):
     wall_s is exact measured seconds, and wall_s_lower_bound is used instead for
     timed-out Runs. An incomplete row has only the pre-dispatch started_at and
     neither duration. Breakdown is complete, partial, missing, or None if not
-    attempted. Acquires counts observed records; the four stage
-    fields are measured seconds or None. Status distinguishes complete, missing
+    attempted. Acquires counts observed main records. The stage fields are
+    measured seconds or None. Materialize includes matched deferred work;
+    remainder is acquire wall minus the stages inside it. core_s is the
+    sum of the four stages for a complete Run breakdown. For an incomplete
+    breakdown, core_s_lower_bound sums only acquires with all stages measured
+    and their matched deferred work, or is None if none qualify.
+    Status distinguishes complete, missing
     data/defaults, unsupported, failed, timed-out and uncompleted rows. Reason
     explains an exclusion, unresolved defaults or a failure, when applicable.
     failure_record is present on failed Runs and names the diagnostic relative
@@ -78,6 +83,9 @@ class Row(TypedDict):
     compile_s: float | None
     evolve_s: float | None
     readout_s: float | None
+    materialize_s: float | None
+    core_s: float | None
+    core_s_lower_bound: float | None
     remainder_s: float | None
     status: RowStatus
     reason: str | None
@@ -107,6 +115,9 @@ def new_row(
         "compile_s": None,
         "evolve_s": None,
         "readout_s": None,
+        "materialize_s": None,
+        "core_s": None,
+        "core_s_lower_bound": None,
         "remainder_s": None,
         "status": status,
         "reason": reason,
@@ -120,15 +131,19 @@ def _seconds(seconds: float | None) -> str:
 
 
 def _summary_row(row: Row) -> str:
-    times = " | ".join(
+    stages = " | ".join(
         _seconds(seconds)
         for seconds in (
             row["compile_s"],
             row["evolve_s"],
             row["readout_s"],
-            row["remainder_s"],
+            row["materialize_s"],
         )
     )
+    core = _seconds(row["core_s"])
+    if (core_bound := row["core_s_lower_bound"]) is not None:
+        core = f"≥{_seconds(core_bound)}"
+    remainder = _seconds(row["remainder_s"])
     status = {
         "ok": "OK",
         "missing_breakdown": "分項缺",
@@ -161,7 +176,10 @@ def _summary_row(row: Row) -> str:
         )
         or "—"
     )
-    return f"| {row['adapter']} | {wall} | {times} | {acquires} | {status} | {guide} | {source} |\n"
+    return (
+        f"| {row['adapter']} | {wall} | {stages} | {core} | {remainder} | "
+        f"{acquires} | {status} | {guide} | {source} |\n"
+    )
 
 
 def _write_report(
@@ -179,12 +197,6 @@ def _write_report(
         if guide is not None and guide not in inventoried
     }
     no_adapter = sorted(inventoried.difference(guides_by_adapter.values()))
-    over_target = [
-        row["adapter"]
-        for row in rows
-        if row["status"] == "timeout"
-        or ((wall := row["wall_s"]) is not None and wall > RUN_TARGET_S)
-    ]
     write_json(
         output / "report.json",
         {
@@ -205,10 +217,10 @@ def _write_report(
         f"Coverage: {resolved}/{len(rows)} selected rows resolved; "
         f"{len(guides_by_adapter)} registered adapters.\n\n"
         + _run_summary(rows)
-        + "| Experiment | Run (s) | Compile (s) | Evolve (s) | Readout (s) | Remainder (s) | Acquires | Status | Guide | Source |\n"
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |\n"
+        + "| Experiment | Run (s) | Compile (s) | Evolve (s) | Readout (s) | Materialize (s) | Core (s) | Remainder (s) | Acquires | Status | Guide | Source |\n"
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |\n"
         + "".join(map(_summary_row, rows))
-        + f"\nRun >{RUN_TARGET_S:g} s: {_format_names(over_target)}\n"
+        + _core_summary(rows)
         + _failure_list(rows)
         + f"\nAdapters without declared guides: {_format_names(no_guide)}\n"
         + "\nDeclared guides not in inventory: "
@@ -218,6 +230,26 @@ def _write_report(
         )
         + f"\n\nGuides without adapters: {_format_names(no_adapter)}\n",
         encoding="utf-8",
+    )
+
+
+def _core_summary(rows: list[Row]) -> str:
+    over_target: list[str] = []
+    lower_bound_over_target: list[str] = []
+    undetermined: list[str] = []
+    for row in rows:
+        adapter = row["adapter"]
+        if (core := row["core_s"]) is not None:
+            if core > CORE_TARGET_S:
+                over_target.append(adapter)
+        elif (bound := row["core_s_lower_bound"]) is not None and bound > CORE_TARGET_S:
+            lower_bound_over_target.append(adapter)
+        else:
+            undetermined.append(adapter)
+    return (
+        f"\nCore >{CORE_TARGET_S:g} s: {_format_names(over_target)}\n"
+        f"Core 已知至少超標: {_format_names(lower_bound_over_target)}\n"
+        f"Core 未判定: {_format_names(undetermined)}\n"
     )
 
 
