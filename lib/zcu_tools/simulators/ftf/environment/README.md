@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, explicit ADC frequencies and cross-block cavity-field limit
+**Last updated:** 2026-11-21, raw materialization timing
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -115,7 +115,8 @@ omitted rather than guessed from controls or caller frames.
 The [shared telemetry contract](../../README.md#acquire-telemetry) lists the
 persisted family fields and defines the common summary and directory settings.
 `FTFSource.finish_acquire(outcome)` receives the binding's `AcquireOutcome` and
-projects its builder-only `compile_wall_s` and `complete`.
+projects its builder-only `compile_wall_s`, in-acquire raw-shot
+`materialize_wall_s` and `complete`.
 `complete` means the acquire body and cleanup returned normally, including partial
 Stop results. An escaping error is false.
 `evolve_wall_s` sums each `Engine.evolve` call, including dimension pilots,
@@ -125,7 +126,8 @@ ADC preparation and integrated or decimated sampling. These scopes do not overla
 evolution. A failing call contributes time through its exception; a stage never
 entered contributes `0.0`. Reusing a preparation adds no evolution wall, but still
 counts fresh round sampling. Preparation and pacing remain in total wall's
-remainder. Raw-shot materialization requested after acquire is outside this row.
+remainder. Successful materialization from a later raw getter appends a
+[supplemental timing record](../../README.md#acquire-telemetry).
 FTF records one dimension decision per acquire in `extras`, not per round.
 See [Dimension selection](#dimension-selection) for the cases that skip the pilot.
 

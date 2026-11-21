@@ -533,6 +533,7 @@ def test_debug_capture_joins_each_projective_batch_to_its_origin(
             wall_s=0.0,
             compile_wall_s=0.0,
             complete=not fail_second_round,
+            acquire_id="fixture-acquire",
         )
     )
 

@@ -2,18 +2,24 @@
 
 import json
 from collections.abc import Generator
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pytest
+from numpy.typing import NDArray
 from zcu_tools.device import DeviceManager
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule
 from zcu_tools.program.v2.modules import Module
 from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.simulation import AcquireOutcome
+from zcu_tools.program.v2.simulation import AcquireOutcome, IntegratedRound
+from zcu_tools.simulate.boundary import RoundRequest
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment import (
     acquire as acquisition,
@@ -89,7 +95,7 @@ def test_finish_projects_original_binding_outcome(
     devices = DeviceManager()
     source = runtime.SingleFluxoniumSource(telemetry_settings, devices)
     try:
-        outcome = AcquireOutcome((), 7.0, 2.0, complete)
+        outcome = AcquireOutcome((), 7.0, 2.0, complete, "fixture-acquire")
         source.finish_acquire(outcome)
         (record,) = [
             json.loads(line)
@@ -159,6 +165,104 @@ def test_acquire_writes_one_layered_record(
     assert record["readout_wall_s"] == 8.0  # one preparation + one ADC sample
     assert work_clock.calls["prepare_readout"] == 1
     assert record["families"]["fixture"]["rows"] == (3 if projective else 1)
+
+
+@pytest.fixture
+def telemetry_program(telemetry_environment: SimulationEnvironment):
+    readout = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=7000,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.008),
+        ro_length=0.004,
+    )
+    return compile_modules(
+        telemetry_environment.soccfg, modules=[readout.build("ro")], reps=2
+    )
+
+
+@pytest.mark.parametrize("raw_path", ["projection", "round_hook"])
+def test_acquire_records_raw_materialization_only_when_needed(
+    tmp_path: Path,
+    telemetry_environment: SimulationEnvironment,
+    telemetry_program,
+    raw_path: str,
+):
+    env = telemetry_environment
+    program = telemetry_program
+
+    def raw_hook(*_: object) -> None:
+        assert program.get_raw() is not None
+
+    if raw_path == "round_hook":
+        program.acquire(env.soc, round_hook=raw_hook, progress=False, rounds=2)
+    else:
+        program.acquire(env.soc, threshold=0.0, progress=False, rounds=2)
+    program.acquire(env.soc, progress=False)
+
+    raw, integrated = (
+        json.loads(line)
+        for path in tmp_path.glob("routing-*.jsonl")
+        for line in path.read_text().splitlines()
+    )
+    assert raw["materialize_wall_s"] > 0.0
+    assert integrated["materialize_wall_s"] == 0.0
+
+
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "getter-error"])
+def test_schedule_attributes_deferred_raw_to_its_acquire(
+    tmp_path: Path,
+    telemetry_environment: SimulationEnvironment,
+    telemetry_program,
+    fails: bool,
+):
+    env = telemetry_environment
+    program = telemetry_program
+    program.acquire(env.soc, progress=False)
+
+    if fails:
+
+        class FailingRaw:
+            def materialize(
+                self, reps: int, avg_level: int
+            ) -> dict[int, NDArray[np.int64]]:
+                raise RuntimeError("deferred raw source failed")
+
+        execute = env.soc.binding.execute
+
+        def execute_with_failed_raw(request: RoundRequest):
+            result = execute(request)
+            assert isinstance(result, IntegratedRound)
+            return replace(result, raw=FailingRaw())
+
+        env.soc.binding.execute = execute_with_failed_raw
+
+    with Schedule(scope=Scope("run")) as sched:
+        if fails:
+            with pytest.raises(RuntimeError, match="deferred raw source failed"):
+                sched.run_acquire_shots(program, env.soc, options=RunOptions(retry=2))
+        else:
+            shots = sched.run_acquire_shots(program, env.soc)
+            assert shots is not None
+            assert shots.shots[0].shape == (1, 2, 1, 2)
+            program.get_raw()  # Reading the retained buffer must not publish again.
+
+    first, last, *supplements = (
+        json.loads(line)
+        for path in sorted(tmp_path.glob("routing-*.jsonl"))
+        for line in path.read_text().splitlines()
+    )
+    assert first["materialize_wall_s"] == last["materialize_wall_s"] == 0.0
+    assert last["complete"] is True
+    if fails:
+        assert supplements == []  # Includes no reacquire on the getter error.
+    else:
+        (supplement,) = supplements
+        assert supplement["event"] == "materialize"
+        assert supplement["acquire_id"] == last["acquire_id"] != first["acquire_id"]
+        assert supplement["materialize_wall_s"] > 0.0
 
 
 @pytest.mark.parametrize("seam", ["evolve", "continuation", "adc"])

@@ -55,7 +55,11 @@ from tools._experiment_wall_time_report import (
     reusable_rows,
     write_json,
 )
-from tools.analyze_routing_telemetry import AcquireInput, AcquireWallTotals
+from tools.analyze_routing_telemetry import (
+    AcquireInput,
+    AcquireWallTotals,
+    decode_routing_record,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DATA_DIR = _REPO_ROOT / "tools" / "data" / "experiment_wall_time"
@@ -196,7 +200,7 @@ class Inventory:
 
 
 def summarize_acquires(directory: Path, *, live: bool = False) -> AcquireWallTotals:
-    """Sum all routing JSONL records from one dedicated Run telemetry directory.
+    """Sum acquire summaries from one dedicated Run telemetry directory.
 
     Return coverage counts even when no wall measurements are available.
     An empty directory produces zero included and excluded records. I/O and
@@ -217,7 +221,9 @@ def summarize_acquires(directory: Path, *, live: bool = False) -> AcquireWallTot
         with stream:
             for line in stream:
                 if not live or line.endswith(b"\n"):
-                    totals.add(AcquireInput.model_validate_json(line))
+                    record = decode_routing_record(line)
+                    if isinstance(record, AcquireInput):
+                        totals.add(record)
     return totals
 
 

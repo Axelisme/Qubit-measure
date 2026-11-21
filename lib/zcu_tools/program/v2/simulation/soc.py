@@ -11,7 +11,7 @@ from zcu_tools.simulate.boundary import AcquireRequest, CancellationQuery, Round
 
 from .binding import SimulationBinding
 from .result import IntegratedRound
-from .signals import StatisticsCopier, materialize_shots, pack_signals
+from .signals import StatisticsCopier, pack_signals
 
 
 def _validate_routes(routes: object) -> None:
@@ -190,7 +190,7 @@ class SimulationSoc(QickConfig):
                 raise RuntimeError("raw transport requires a retained round request")
             self._accumulated = {
                 ch: raw.reshape(-1, 2)
-                for ch, raw in materialize_shots(
+                for ch, raw in self.binding.materialize_raw(
                     self._raw_request, self._statistics.raw
                 ).items()
             }

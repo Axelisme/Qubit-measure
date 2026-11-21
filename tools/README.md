@@ -1291,7 +1291,8 @@ it does not mean every requested round ran. Only observed groups appear.
 Each group reports `included`, `excluded`, and sums of `wall_s`, `compile_wall_s`,
 `evolve_wall_s`, `readout_wall_s` and `remainder_s`. The remainder is total wall
 minus the three stages, including environment preparation and pacing outside
-those stages. Raw materialization requested after acquire is outside the row.
+those stages. The analyzer ignores supplemental `event: "materialize"` records
+when counting acquires and aggregating these three stages.
 
 A row contributes wall totals only when all four wall fields are JSON numbers.
 Missing or null wall fields make it excluded from wall totals, including in the
