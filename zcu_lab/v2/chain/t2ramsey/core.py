@@ -217,9 +217,9 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
                 builder.delay_by_timeline()
                 builder.emit(second_pi2)
                 builder.emit(readout)
-                builder.delay_auto()
                 builder.emit(readout)
-                builder.delay_auto()
+                # Advance to the readout pulse end plus post_delay, not the ADC end.
+                builder.delay_by_timeline()
 
             prog = builder.build()
             sched.run_acquire_summed(

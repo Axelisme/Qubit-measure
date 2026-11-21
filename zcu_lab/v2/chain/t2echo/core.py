@@ -206,9 +206,9 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
                 builder.delay_by_timeline()
                 builder.emit(pi2_pulse)
                 builder.emit(readout)
-                builder.delay_auto()
                 builder.emit(readout)
-                builder.delay_auto()
+                # Advance to the readout pulse end plus post_delay, not the ADC end.
+                builder.delay_by_timeline()
 
             prog = builder.build()
             sched.run_acquire_summed(
