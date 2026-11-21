@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-20，遮罩來源與 reducer 初始化
+**Last updated:** 2026-11-21，零輪停止的責任分界
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -143,8 +143,12 @@ Reducer outputs must be float64 `(points, *axes)` with a fixed shape and no
 empty axes. Invalid outputs raise ValueError with expected and actual values.
 
 Hardware and simulation share this processing and accumulation path. Cancellation
-discards incomplete rounds and preserves completed sums; no completed round raises
-`StoppedPartialAcquireError`. Hardware stepped acquisition returns None at
+discards incomplete rounds and preserves completed sums. Other modules report an
+interrupted round through `EarlyStopMixin._stop_interrupted_round()`, which ends
+the round loop without setting the caller's Stop flag. `EarlyStopMixin.finish_acquire()`
+raises `StoppedPartialAcquireError` if acquisition stopped before any round completed
+([ADR-0083](../../../docs/adr/0083-program-macros-and-timelines.md)).
+Hardware stepped acquisition returns None at
 preparation, then `finish_acquire()` returns the summed ndarray. Simulation keeps
 its existing stepped-acquisition rejection. Explicit `threshold`, `angle` and
 `herald` options are rejected. Native `acquire` retains its IQ contract.
