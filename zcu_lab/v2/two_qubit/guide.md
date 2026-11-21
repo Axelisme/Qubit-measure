@@ -212,7 +212,7 @@ Result 依 (seed, arm, depth) 排列，再接 Qubit1／Qubit2 分類軸。Herald
 
 Plain RB 從終端 joint g,g 計數算 survival。Heralded 另以終端回到各自 herald g,g／e,e 的比例作 survival，依各組完整 seeds 聯合擬合。使用 d=4 的 error estimate，保留負值及 paired-seed bootstrap interval。熱 population、準備／讀出效果與模型假設均須納入判讀，物理 gate 表現需由實際量測確認。
 
-若最大 depth 太淺，擬合可以貼合資料但無法確定衰減長度。用 `fit_quality.relative_parameter_errors["decay_time"]` 檢查各臂。在[合成例子](rb/guide.md#interpreting-the-result)中，最大 depth 30 時 R² 是 0.993、相對誤差是 0.30；量到 depth 200 後相對誤差降為 0.035。
+RB 的 liveplot 與第一張 Analyze 圖用保留 shots 的計數畫機率。帶端帽的棒是 shot SEM；淡色的棒是 seed 間 SD。擬合圖用完整 seeds 的等權平均，棒仍是 seed SD，1/e depth 標註的 ± 才是 fit 標準誤。若掃描窗無法解析衰減，先依 [RB 判讀](rb/guide.md#interpreting-the-result)檢查深度與不確定度，不用 ratio 建議 CZ 調參。
 
 取得第一個 IRB 結果後，依論文 §5.3.3 掃 CZ 的 cosine 寬度。長閘的誤差由被驅動非計算態的 T1 主導，短閘由同調 leakage 主導，最佳寬度在兩者之間（論文裝置為 85 ns）。每個寬度重做 4 → 5 → 6 與 IRB。最短寬度受驅動強度限制，先由實測 Rabi rate 換算 gain 1 時的 2π 週期；非 const 波形的最大振幅只有 const 的一半。
 

@@ -140,9 +140,11 @@ Recipe 的 `target` 物件仍用來綁定 aliases。
 `target` 用 `qubit1`、`qubit2`、`coupler`、`mux` 綁定本次 Open／Reset。
 Form 檢查 `$coupler.ext.cz_phase` 的元件名是否依序符合 `qubit1`、`qubit2`。不符就指出位置，符合才帶入兩個修正角度。
 
-`depths` 填非負整數，單位是每個序列的隨機 Clifford 數，不含 recovery。
-`seeds` 填 0 到 2147483647 的整數序列 ID，兩臂共用同一批 ID。
-省略時保留 Reset 值。明填 null 由 Form 驗證，不會改用預設。
+`depths` 設定 Random Clifford depths (count)，不含 recovery。
+`seeds` 設定 Sequence seeds，兩臂共用 0 到 2147483647 的序列 ID。
+`reps` 設定 Reps (count)，即每個 depth 每輪的 shots；`rounds` 設定 Rounds (count)，即每個 seed 和 arm 的採集輪數。
+`reuse_tab_id` 指定要重用的 tab。`overrides` 在具名欄位設定後套用額外表單操作。
+省略這四個量測輸入會保留表單值。明填 null 由 Form 驗證，不會改用預設。
 兩份清單由 Form 去重並排序。範例：
 
 ```json
@@ -171,8 +173,8 @@ Form 檢查 `$coupler.ext.cz_phase` 的元件名是否依序符合 `qubit1`、`q
 如需更換 X90 或 X180 波形，同樣對 `x90_qubit1`、`x90_qubit2`、`x180_qubit1` 或 `x180_qubit2` 的 pulse 路徑和其 `.waveform` 操作。
 這些覆寫不改 library。
 
-報告轉交 `p_reference`、`p_interleaved`、`reference_epc`、`gate_error`、
-`error_ci_low`、`error_ci_high`、`n_paired_seeds`、`bootstrap_successes` 和 `warning`。
+報告的 `gate_error` 是 Analyze 的 CZ error estimate，`error_ci_low` 後接 `error_ci_high` 是 95% seed CI 的上下界。這些值與 `p_reference`、`p_interleaved`、`reference_epc` 都是無單位比值。
+`n_paired_seeds` 與 `bootstrap_successes` 分別是配對 seed 數和有效 bootstrap fit 數，單位為 count。`warning` 交代模型限制。
 用 [adapter 的報告判讀](../v2/two_qubit/rb/guide.md#interpreting-the-result) 檢查誤差和兩臂的衰減。
 兩臂診斷各在 `reference_fit_quality` 和 `interleaved_fit_quality`。基底 `fit_quality` 為 null。
 沒有估計時，估計欄位為 null，`reason` 說明原因。分析拋錯時，執行回失敗與原錯誤。
