@@ -272,6 +272,36 @@ Framework 測試用 synthetic adapter 驗 Form、Open／Reset、固定 capture�
 
 使用者 2026-10-14：「我預期能大幅簡化預設值與格式的定義代碼，目前預設值有些不太合理，可能是建立時打錯的，遷移時可以選擇：保留目前行為，但記錄下來之後讓我看。或是目前行為遷移後會需要比較複雜的寫法，可以直接問我或你。」
 
+### 自動推導點到為止
+
+表單初值的公式保持簡單固定。不為了讓初值在每種 point 上都能執行而加分支或讀更多來源，也不依板子調整。缺值、無效值與來源故障照上述規則分流。不依板子的固定上下限，在初值 expression 裡用 `min` 截斷。依輸入浮動的導出值照公式帶入，不在 Form 裡 clamp，算出的值不合理時由後續驗證報錯，沿用 [2026-10-17 的初值討論](../discussions/2026-10-17-measure-form-initial-values-and-sweep-mode.md)。
+
+例：Length Rabi 沿用捕捉的 x180，掃描上限是 4 × x180 長度。FTF 測試 point 的 x180 是 0.48 µs 的 cosine，上限 1.92 µs 超過 drive generator 的 envelope 容量，初值仍用這條公式。`singleshot/reset_check` 的 Gain Stop 初值是 `min(1.0, 4.0 * $qubit.module.x180.gain)`。x180 gain 為 0.125 時得 0.5，為 0.617 時得 1.0。
+
+邊界：截斷只用於不依板子的固定上下限，例如正規化 gain 的 [-1, 1]。依板子而定的上限（generator 的 envelope 容量、單一 pulse 的可編碼長度）不在初值裡截斷，見〈板子限制先不加程式檢查〉。
+
+使用者 2026-11-21 對 Length Rabi 要不要改用其他 pulse 形狀答：「……2a，簡單比複雜好，自動推導的正確性點到為止即可」，「2a」即沿用 x180 的形狀。同日對 reset_check 的 gain 上限說：「關於4gain超過1.0使於是預設值設計不良，應該套一層min來在expression中截斷」。比較見[表單預設超過板子限制，錯誤解析放知識庫](../discussions/2026-11-21-form-board-limits.md)。
+
+### 預設值的瑕疵就改預設值
+
+表單初值在一般 point 上就違反實驗自己的規則時，修正初值公式，不加檢查。新公式對所有 point 一致，guide 與 seed metadata 寫出這條公式。Form 不依個別 point 的算出值另作修正。Run 原有的檢查不變，操作員手動填錯時仍由 Run 報錯。
+
+例：`twotone/cpmg` 的 Minimum time 原本固定 1 µs。最大 refocusing 次數為 16 時，每段 interval 只有約 31 ns，放不下一般 point 的 π/2 與 π 脈衝。初值改成 `16 * ($qubit.module.x90.waveform.length + $qubit.module.x180.waveform.length)`。兩個 0.48 µs 脈衝得 15.36 µs，通過既有的 interval 檢查；手填 15.35 µs 仍被拒。
+
+邊界：違反的是依板子而定的限制時，不改初值，留給 Run 報錯，見〈板子限制先不加程式檢查〉。例如 `singleshot/t1_tone` 缺 T1 時掃描終點是 150 µs，超過 `qick_216_v2` profile 上 gen 0 單一 pulse 約 109 µs 的上限，初值不變。
+
+使用者 2026-11-21 對 CPMG 選擇修初值：「1c，没错，这个是 这个是预设值的瑕疵，这种类似的东西都是改预设值就好了。」同日以「核准」接受 t1_tone 不改初值的邊界。比較見[表單預設超過板子限制，錯誤解析放知識庫](../discussions/2026-11-21-form-board-limits.md)。
+
+### 板子限制先不加程式檢查
+
+表單初值違反依板子而定的限制時，不加表單檢查、Run 前 preflight 或 Run 開頭的檢查。這類限制包括 generator 的 envelope 容量與單一 pulse 的可編碼長度。錯誤由 Run 內原有的 program build、upload 與實驗 core 檢查報出。這些報錯的判讀與改法放 `measure_knowledge/` 的 judge 條目，guide 不寫，分工見 [[0075]]〈判讀依據放知識庫〉。
+
+例：`singleshot/len_rabi` 在 FTF 測試 point 上以初值 Run，完成 23 點後，第 24 點報 `generator 2: buffer length must be 8192 samples or less.`。操作員或 agent 依訊息查知識庫的 judge 條目，換算容量，再縮短 `Length → Stop` 或改用 flat_top。
+
+邊界：操作員或 agent 常在按 Run 之後才撞到同一類限制時，再考慮加檢查。加的話放在 adapter.run 開頭，這是 [[0067]] 規定的額外實驗驗證位置。gain 這類不依板子的固定範圍不在本條範圍內。
+
+使用者 2026-11-21 先選 Run 開頭報錯：「1a, 由於run內是黑盒，可以抱錯，而cfg只能自然做到簡單中性的檢查，這是可以接受的取捨，bc的維護複雜度略高，且目前沒有強烈需求……」。同日改判：「上一題的一我改變想法，我想先補guide就好」。之後 guide 的部分改放知識庫，見 [[0075]]。比較見[表單預設超過板子限制，錯誤解析放知識庫](../discussions/2026-11-21-form-board-limits.md)。
+
 ## 取捨
 
 維持 builder 仍要抄兩份形狀。把初值全放 Annotated 則讓實驗覆寫變成型別註記內的小語言。

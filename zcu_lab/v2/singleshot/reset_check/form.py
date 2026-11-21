@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 
-from zcu_tools.cfg_model import Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import FieldMeta, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.singleshot.reset_check.core import ResetCheckCfg
@@ -32,9 +32,19 @@ def make_form(ctx: FormContext) -> Form[ResetCheckCfg]:
                 "$resonator.module.readout",
                 Template("readout", bindings={"resonator": "$resonator"}),
             ),
-            "gain": Range(0.0, "4.0 * $qubit.module.x180.gain", expts=51),
+            # ADR-0073: Use the fixed Open/Reset capture for the gain stop.
+            "gain": Range(0.0, "min(1.0, 4.0 * $qubit.module.x180.gain)", expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
         },
+    ).with_seed_metadata(
+        {
+            ("gain", "stop"): FieldMeta(
+                description=(
+                    "Open/Reset derives the normalized gain stop from captured "
+                    "$qubit.module.x180.gain."
+                )
+            )
+        }
     )
