@@ -199,6 +199,16 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 
 **依據。** 2026-11-18，使用者：「这不合理，CZ gate 可能也是从 charge line 打，而且模拟器理应不知道现在的架构是 FTF 还是只有单个 F 还是什么的。」見 [FTF 動態維度](../discussions/2026-11-18-ftf-dynamic-dimension.md)。
 
+### FTF Stop 用合作式檢查點，設計上 5 秒內
+
+**規則。** FTF Stop 不設強制上限，也不設延遲 gate。放點依據是正常參數下，相鄰兩次取消檢查之間的區段在 5 秒內結束。FTF 在每個 projective outcome 推進前檢查取消。Engine 在幾何規劃結束、建立 WorkPlan 前和 chunk 邊界檢查，binding 在 pacing 等待中檢查。
+
+**例子。** `chain/amp_rabi` 以 51 gains、100 reps、100 rounds 離線執行。在第 10 個 span 組裝時送出 Stop，0.0009 秒後檢查讀到旗標，0.017 秒到 core 終態，沒有完成輪。先前觀察到 11.8 至 95.3 秒的組裝區段不查取消；這次逐 outcome 查詢，第 7 至 9 個 span 的單次 advance 最長約 0.02 秒。
+
+**邊界。** 5 秒不是驗收門檻，**目前未達成**。`Engine.evolve` 的 plan 和 WorkPlan 仍量到超過 5 秒的區段，尚未定位子段。空 cache、warmup 關閉時，首個 cold chunk 量到 5.4 至 8.5 秒。Engine 後的讀出分布、raw 準備與抽樣未覆蓋。這些區段由 `ftf-stop-remaining-gaps` 承接。若縮短間隔只能犧牲速度或改變啟動行為，交回使用者取捨。通用 Cancel 與 terminal 所有權遵循 [ADR-0066](0066-operation-lifecycle.md#取消與互動)。
+
+**依據。** 2026-11-21，使用者對 Stop 上限答「3C，但設計上5秒內」，並說「我认为能及时中断也是一个挺重要的功能。」具體放點與剩餘區段的承接是 designer 依授權代裁，使用者未覆核。見 [FTF Stop 討論](../discussions/2026-11-21-ftf-stop-checkpoints.md)。
+
 ### 模擬器帶通用調試介面
 
 **規則。** 每個模擬器提供同一組調試介面，定位與驗證工具只依賴這組介面。共同欄位有型別；模擬器自行決定哪些額外值放進 dict。
