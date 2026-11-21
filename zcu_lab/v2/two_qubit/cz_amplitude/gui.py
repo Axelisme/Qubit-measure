@@ -66,6 +66,7 @@ def amplitude_writeback(
     coupler = parameters.resolve_path("$coupler")
     items: list[WritebackItem] = []
     for role, pulse in (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2)):
+        # Pulse library keys: $coupler.pulses.cz_qubit1 and $coupler.pulses.cz_qubit2.
         target = f"{coupler}.pulses.cz_{role}"
         items.append(
             module_writeback(
@@ -77,6 +78,7 @@ def amplitude_writeback(
         )
         items.append(
             ParameterWriteback(
+                # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
                 target_name=f"{coupler}.module.cz_{role}",
                 description=f"CZ {role.capitalize()} pulse slot",
                 proposed_value=parameters.library_key(target),

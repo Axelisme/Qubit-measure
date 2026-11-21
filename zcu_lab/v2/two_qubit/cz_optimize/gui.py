@@ -71,6 +71,7 @@ def _get_writeback_items(
     ]
     for position, pulse in (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2)):
         label = position.capitalize()
+        # Pulse library keys: $coupler.pulses.cz_qubit1 and $coupler.pulses.cz_qubit2.
         target = f"$coupler.pulses.cz_{position}"
         items.extend(
             (
@@ -84,6 +85,7 @@ def _get_writeback_items(
                     note=note,
                 ),
                 ParameterWriteback(
+                    # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
                     target_name=f"$coupler.module.cz_{position}",
                     description=f"CZ {label} pulse slot",
                     proposed_value=parameters.library_key(target),

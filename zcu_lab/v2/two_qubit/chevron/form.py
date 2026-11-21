@@ -26,6 +26,7 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
     qubits = captured_qubits(ctx, require_coupler=True)
     drive = {}
     for position in ("qubit1", "qubit2"):
+        # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
         slot = f"$coupler.module.cz_{position}"
         # Run replaces both line frequencies with the common scan coordinate.
         node = source(

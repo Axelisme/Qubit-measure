@@ -54,6 +54,7 @@ def _get_writeback_items(
     coupler = parameters.resolve_path("$coupler")
     items: list[WritebackItem] = []
     for role, pulse in (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2)):
+        # Pulse library keys: $coupler.pulses.cz_qubit1 and $coupler.pulses.cz_qubit2.
         root = f"{coupler}.pulses.cz_{role}"
         items.append(
             module_writeback(
@@ -65,6 +66,7 @@ def _get_writeback_items(
         )
         items.append(
             ParameterWriteback(
+                # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
                 target_name=f"{coupler}.module.cz_{role}",
                 description=f"Select captured coupler CZ {role.capitalize()} pulse",
                 proposed_value=parameters.library_key(root),
