@@ -23,6 +23,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-21 [FTF Stop：合作式檢查點與取消傳輸](2026-11-21-ftf-stop-checkpoints.md)：停止與取消。不設上限、設計上檢查間隔 5 秒；取消經 SimulationSoc request 生命週期到兩個 QICK round 入口，零輪拋既有停止例外；cold 首跑與 Engine 內剩餘區段未達 5 秒，另開 task 承接。
+
 - 2026-11-21 [FTF 合法讀出時序的 ADC image、drive admission 與到達時間缺口](2026-11-21-ftf-legal-readout-timing.md)：時序邊界。具名 ADC config 保留物理 image、無來源 raw 字按 DDS 同餘類解調，純 drive DAC 由 `drive_generators` admission；在途漏配明確拒絕，完整到達時間模型與 E2E 留待落地後排他重測。
 
 - 2026-11-21 [raw ADC 頻率字改成編譯時拒絕](2026-11-21-raw-adc-word-reject.md)：刪除或收窄。無具名來源的 raw ADC 字編譯時拒絕，拿掉 DDS 同餘類與 Six 同餘選路。

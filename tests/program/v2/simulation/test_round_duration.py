@@ -130,10 +130,7 @@ def test_simulation_clock_preserves_physical_rounds_and_idle(clock: Clock, scale
     assert sim_clock.now() == pytest.approx(10 + 2 * max(0.2, work))
 
 
-@pytest.mark.parametrize("separate_pacing", [False, True])
-def test_simulation_clock_does_not_credit_cancelled_or_failed_rounds(
-    clock: Clock, separate_pacing
-):
+def test_simulation_clock_does_not_credit_cancelled_or_failed_rounds(clock: Clock):
     from zcu_tools.program.v2.simulation import SimulationClock
 
     sim_clock = SimulationClock(monotonic=clock.monotonic)
@@ -151,12 +148,7 @@ def test_simulation_clock_does_not_credit_cancelled_or_failed_rounds(
         timing=SimulationTiming(time_scale=0, clock=sim_clock),
     )
     with binding.acquire():
-        binding.sample_round(
-            request_for(binding, 0),
-            0,
-            cancel=cancel,
-            pacing_cancel=Event() if separate_pacing else None,
-        )
+        binding.sample_round(request_for(binding, 0), 0, cancel=cancel)
         assert sim_clock.now() == pytest.approx(0.03)
 
     def fail(_request):
@@ -333,7 +325,6 @@ def test_decimated_stop_interrupts_wait_and_keeps_completed_trace(
         assert data is not None
         assert np.isfinite(data).all()
         assert len(binding.rounds) == 1
-        assert binding.rounds[0].cancel is None
         assert len(clock.waits) == 1
         assert 0 < clock.waits[0] <= 0.01
         # Decimated acquisition still keeps the completed trace of that round.

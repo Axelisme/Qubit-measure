@@ -7,539 +7,212 @@ date: 2026-10-29
 
 Builder 契約更新：2026-10-30。Timeline、Repeat、收尾證明與全面遷移裁定更新：2026-11-01。
 查表掃描與 native 時間來源裁定更新：2026-11-02。
-全部實驗使用 TimelineBuilder／TimelineProgramV2，legacy program 與 control module 已移除。
 相關：[[0072]]、[[0074]]、[[0078]]
 
 ## 脈絡
 
-Program 作者需要在同一個 body 混用原生 QICK 操作與可重用的 Pulse、Readout、Reset。
-跨 channel 的排程也需要獨立於 QICK channel timestamp 的具名時間線。
-若以 Module 繼承 Macro 表達兩者，同一物件的資源宣告與每次發射狀態就會混在一起。
-若把 default timeline 綁到 reference，省略 timeline 的 module 與具名 module 又會遵循不同的推進規則。
+Program 作者要在同一個 body 混用原生 QICK 操作與可重用的 Pulse、Readout、Reset，也要排定跨 channel 的事件。Module 若繼承 Macro，每次發射的狀態就會混入資源宣告。具名 timeline 若把 default 綁到 reference，省略名字和明示名字又會遵循不同的推進規則。
 
 ## 決策
 
-Module 與 builder 的 owner 細節由 advisor 依使用者 2026-10-30 代理授權裁定。
-Compiled snapshot 的存取形式、routes 與 FIFO 細則由 advisor 依下述 compiled frontend 授權裁定。
-使用者的設計選擇另附日期與逐字原話，與 advisor 的細節裁定分開記錄。
-2026-11-01 的 timeline 整理由 advisor 依使用者「1代理模式就都給你決定，我事後看就好」的代理授權確認，涵蓋下述 owner 邊界、證明模型與 lowering 細節。
-
-2026-11-01，使用者裁定：「不要留Join」，並要求：「ModularProgram連同Join/Branch/Repeat/ScanWith都刪掉，全面用新的TimelineProgram，我應該早就這樣要求了」。
-全部實驗使用 `TimelineBuilder`／`TimelineProgramV2`。`ModularProgramV2`、`BaseCustomProgramV2`、`ProgramBuilder`、`Schedule.prog_builder` 與 control module `Join`／`Branch`／`Repeat`／`ScanWith` 已移除。
-Module 的 legacy `init`／`run`／`block_mode`／`tag` 與 `set_param` 不再是作者介面。Tag 由每次 emit 指定，數值覆寫由 constructor keyword 指定。
-並行只用 builder／program 的 `fork`／`join`，按 sweep 點選 case 用 `branch`／`case`，迴圈用 `repeat()`。這不移除原生 program 的分支與迴圈能力。
-使用者同日選擇「B, 我要睡了，預期起來後我規劃都落地」，將 Schedule 移除 cfg 與實驗 cfg 寫法慣例納入遷移。
+Program 擁有資源與發射時序。Builder 只組裝 program，Schedule 擁有實驗的取數政策。全部實驗使用 `TimelineBuilder`／`TimelineProgramV2`，不保留舊 program 或 control module。
 
 ### Program 基底與 module owner
 
-`TimelineProgramV2` 繼承 repo 的 `MyProgramV2` 加 `ProgramResourcesMixin`。
-它承接既有 `SimulationAcquireMixin`、`ImproveAsmV2`、`IRCompileMixin` 與 classify／herald acquire 擴充。
-`TimelineProgramV2` 使用唯一的 compiled simulation frontend。
-支援範圍依指令效果判定，不代表所有 native 操作均可模擬；admission 契約見 [simulation README](../../lib/zcu_tools/program/v2/simulation/README.md#compiled-request-builder)。
-原生操作與 module lowering 共用既有 IR 管線及 `TimedMergePass` 的安全條件，不按來源分流或另建 canonicalization。
-共用 `ProgramResourcesMixin` 只集中 dmem 配置與 readout route 保護。
-`TimelineProgramV2` 的 generator／ADC 宣告沿用 QICK，後宣告覆蓋先宣告，由作者負責設定是否一致。
-它不做宣告等值檢查或提供查詢介面，作者需要資訊時讀 QICK 的 gen_chs／ro_chs。
-Timeline module 不自動保護 readout route，只有作者明確呼叫繼承的 protect_readout_routes 才啟用保護。
-Register 名稱／地址衝突仍由 program owner 檢查，錯誤指出兩個 module 的名稱與物件。
-明示 register 借用與 Pulse registry 的 template 共用規則不變。
-tProc readout 仍以各自具名 config 在 runtime 切換 freq／phase／outsel，add_readoutconfig 保留 QICK template 契約。
-每 shot 取數以編譯出的 trigger 總數為準，不按宣告或單一 module 的 emit 次數拒絕共用。
-2026-10-31，使用者裁定：「既然做这些检查这么的麻烦，那就干脆不检查了，就跟原生机制一样就好。」
-取消自動 route 保護、保留 register 衝突與原生 template 契約的細節由 advisor 依代理授權整理，builder 不解析 module 內部資源。
+**規則。** `TimelineProgramV2` 繼承 `MyProgramV2` 與 `ProgramResourcesMixin`，沿用 `SimulationAcquireMixin`、`ImproveAsmV2`、`IRCompileMixin`、classify／herald acquisition 及唯一的 [compiled simulation frontend](#compiled-snapshot-與-simulation-入口)。原生操作與 module lowering 共用 IR 管線與 `TimedMergePass` 的安全條件，不按來源分流或另做 canonicalization。Module 描述資源需求，不是 QICK Macro。Program 以 module 的物件身分保存宣告結果，每次 emit 產生新的 `ModuleEmission`，時間與 tag 屬於該次發射。Module owner 提供 declare 與 lowering，不在物件上保存跨 program 宣告狀態。
 
-作者在 `_initialize` 建立並 `declare(module)`，在 `_body` 呼叫 `emit(module, timeline=..., tag=...)`。
-Module 描述資源需求，不繼承 QICK Macro，也不能直接傳給 `append_macro`。
-原生路徑由 `TimelineProgramV2` 以 module 物件身分為 key 持有宣告結果，宣告時寫入，lowering 從該 program 讀取。
-同一 module 物件可同時宣告進多個原生 program，手寫 program 與 `TimelineBuilder` 都適用。
-重新 compile 只重建該 program 的宣告結果，不覆寫其他 program 的資源。
+**例子。** 手寫 program 在 `_initialize` 建立並 `declare(module)`，在 `_body` 用 `emit(module, timeline=..., tag=...)`。同一 module 可宣告到兩個 program，重新 compile 只重建當前 program 的宣告。用 `Pulse("probe", cfg.probe, freq=freq)` 套用數值或 sweep，不必先複製 caller cfg 或處理 waveform 路由。[Module 原生寫法](../../lib/zcu_tools/program/v2/modules/README.md#原生寫法)及[建構子覆寫](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides)說明有效 cfg、`None` 與各參數的限制。
 
-2026-10-30，對宣告結果改由 program 持有的 B1 方案，使用者回答：「我也傾向B1，原因是對作者而言最小驚訝」。
-Builder 深複製只解決 builder 的重用，且會分離原物件與複本的身分，手寫 program 不受益。
-切換 program 時重新綁定也無法保留多個 program 各自的宣告結果，因此兩者都不能取代 program ownership。
+**邊界。** Module 不能傳給 `append_macro`，也不由 cfg 自動生成或透過 handle 使用。只有 preprocess 或 expand 確實不同時，才另建 macro 類別。`ProgramResourcesMixin` 只集中 DMEM 配置與 readout route 保護。Generator／ADC 重複宣告沿用 QICK 的後者覆蓋；program 不檢查兩次設定是否相等，也不另設查詢介面。作者讀 `gen_chs`／`ro_chs` 查設定，明確呼叫 `protect_readout_routes` 才啟用保護。Register 名稱或地址衝突由 program 檢查，錯誤指出兩個 module 的名稱與物件。明示借用與 Pulse template 共用不變。tProc readout 用各自具名的 config 在 runtime 切換 freq／phase／outsel，沿用 QICK `add_readoutconfig` 的 template 契約。每 shot 依[編譯出的 trigger 數](#每發-adc-讀取數)取數，不按宣告或單一 module 的發射次數限制共用。
+Program／emission owner 配置每次 lower 的內部名稱。Scope 每次 compile 重建，巢狀發射或 lower 失敗不污染呼叫端；builder 不組這些名稱。LoadValue owner 重用 table 與 destination，提供當次 index 的 lookup。作者用 Repeat 或頂層 sweep index 存取，不複製或改寫 loader 宣告。固定 Repeat 的 counter metadata 由 program 提供，不混入 QICK 頂層 sweep。入口與資源衝突見 [ProgramV2 README](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline)，各 owner 分工見 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#design-boundaries)。
 
-作者以 `Pulse("probe", cfg.probe, freq=freq)` 這類 constructor keyword 傳入數值或 sweep。
-支援覆寫的 module 建構子先複製 cfg，再套用覆寫並保留有效 cfg，caller cfg 不變。
-`None` 沿用原值。
-Registry identity、read axes 與 lowering 都使用有效 cfg。
-作者不必只為套入掃描值先 deepcopy cfg，也不必知道 waveform 的內部路由。
-各 module 的 keyword、單位與限制見 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides)。
-2026-10-30，對掃描值的作者寫法，使用者指出：「11其實我覺得set_param有點複雜，不夠python原生，作者不容易直接看出來要怎麼寫新實驗。」
-使用者選擇「11B」，採用建構時 keyword 覆寫。
-
-每次 emit 建立新的通用 `ModuleEmission`，時間與 tag 屬於那次發射。
-各 module owner 提供宣告與 lowering，module 不保存跨 program 的宣告狀態。
-只有確實需要不同 preprocess／expand 行為時，才另建 macro 類別。
-
-使用者於 2026-10-29 對原生作者入口指出：「我覺得不太好，用program寫法就該接近原生的寫法，而builder才該設計成一個with scope，內部是像body的寫法」。
-對宣告與發射分開的選項，使用者選擇：「那用A好了，但代價應該就是會出現很多新macro與module」。
-這裡的 A 指顯式 module 宣告、每次 emit 產生 macro，不是交付階段名稱。
-以通用 emission 加 owner lowering 避免每種 module 都需要一個對應 macro 類別。
-對 cfg 直接產生 macro 的替代方案，使用者裁定：「A'的機制可能比較複雜，收益相比A比較小，除非有很一致且簡單的declare機制，否則還是顯式module好了」。
-Module 家族沒有一致的 cfg-only 宣告入口，部分 owner 還需要 cfg 以外的參數，因此不從 cfg 自動建 module 或加入 handle 層。
-原生 program 仍顯式宣告 module；下節的 builder 自動宣告作者交來的 module 物件。
-
-Program／emission owner 配置每次 lower 的內部名稱，scope 隨 compile 重建，nested emission 與失敗返回不污染呼叫端。
-平行排程由作者或 module owner 以 fork／emit／join 表達，保留作者次序。
-Builder 只重播公開方法，不自行組 emission 的內部名稱。
-LoadValue owner 提供本次 index 的 lookup，重用已宣告的 table 與 destination。
-作者以原生 `repeat()` 或 top-level sweep index 配合該 lookup，不複製或改寫 loader 的宣告狀態。
-Program 的 repeat owner 提供固定 counter 的名稱、次數與 writer metadata；nested loop 不加入 QICK 的 top-level sweep metadata。
-這些分工讓 emission 狀態與宣告資源分開，也避免呼叫端鏡射 QICK 私有 discovery 流程。
+**依據。**
+- 2026-10-29，使用者說：「我覺得不太好，用program寫法就該接近原生的寫法，而builder才該設計成一個with scope，內部是像body的寫法」。手寫入口保留原生寫法，builder 是否用 `with` 依[下一節](#builder-與-schedule-的職責)的後續裁決。對分開宣告和發射答「那用A好了，但代價應該就是會出現很多新macro與module」；對 cfg 直接生成 macro 答「A'的機制可能比較複雜，收益相比A比較小，除非有很一致且簡單的declare機制，否則還是顯式module好了」。見 [module 身分與作者入口](../discussions/2026-10-29-module-to-macro.md#module-身分與作者入口)。
+- 2026-10-30，對 program 持有宣告結果答「我也傾向B1，原因是對作者而言最小驚訝」。使用者也說：「11其實我覺得set_param有點複雜，不夠python原生，作者不容易直接看出來要怎麼寫新實驗。」並選「11B」，用建構子 keyword 覆寫。原始討論未入庫，宣告 owner 見 Git `e57265396`，builder 更新見 `e999cab42`。
+- 2026-10-31，使用者對宣告檢查說：「既然做这些检查这么的麻烦，那就干脆不检查了，就跟原生机制一样就好。」取消自動 route 保護、保留 register 檢查與原生 template 契約是 designer 代裁，使用者未覆核。Program 與 module owner 的其他代理細節依 2026-10-30 授權，同為 designer 代裁，使用者未覆核。見 [宣告與時間模型的討論](../discussions/2026-10-31-timeline-variable-model.md)及 Git `3a8adfa93`。
 
 ### Builder 與 Schedule 的職責
 
-`TimelineBuilder` 位於 program 層，只記錄序列並以顯式 `build()` 產生 `TimelineProgramV2`。
-Builder 不管理取數生命週期，不是 context manager，也不接收 SoC 或依賴 Schedule。
-它在 module 物件第一次 emit 時記錄宣告，同一物件再次 emit 沿用宣告。
-不同物件不按內容合併；硬體資源的共享與衝突交給各 module 家族和 program owner。
+**規則。** `TimelineBuilder` 只記錄序列和第一次 emit 的 module 宣告，`build()` 產生 `TimelineProgramV2`。Schedule 與 scan step 用 `run_acquire`、`run_acquire_summed`、`run_acquire_decimated` 接收已建好的 program，program 在 SoC 之前。`RunOptions` 管理轉換後寫入 slot、即時顯示、retry 與 `stop_condition`。Program 自身的 `acquire*` 只取數並回傳。逐 shot 遮罩屬於 program 的取數層，`ImproveAcquireMixin` 持有來源，`acquire`／`acquire_summed` 在每輪完成後呼叫來源。
 
-Schedule 與 scan step 不保存 cfg。實驗 run 讀取自己的 cfg 參數，步驟差異由區域變數或 `with_updates` 表達。
-Schedule 與 scan step 的 `run_acquire`、`run_acquire_summed`、`run_acquire_decimated` 接收已建立的 program。
-它們以 `RunOptions` 管理轉換後寫入 slot、即時顯示、retry 與 stop_condition。
-Builder 產生的 program 與手寫 program 使用相同入口；program 自身的 `acquire*` 只取數並回傳。
-序列組裝不需知道這些執行政策，作者也不必為手寫 program 另做 retry 與停止邏輯。
+**例子。** Builder 第一次 emit 記錄宣告，對同一物件的第二次 emit 沿用宣告。手寫 program 與 builder 產物交給同一個 Schedule 入口，不各寫一套 retry。Builder 收到 `register_shot_mask_source` 只錄下，在 program 的 `_initialize` 依錄製順序轉交；手寫 program 直接註冊。組完 body，program 依宣告順序呼叫各 module 的 `register_shot_mask_sources(prog)`，預設 hook 不註冊來源，program 不檢查具體型別。Herald reset 在 lowering 標記讀取，到 hook 才解析各路徑的實體索引，每次發射註冊一個來源。[Program README](../../lib/zcu_tools/program/README.md#registered-shot-masks)記錄遮罩的取數契約。
 
-逐 shot 遮罩的來源註冊在 program 上，由 program 的取數層（`ImproveAcquireMixin`）持有，每完成一輪由 program 自己的 `acquire`／`acquire_summed` 呼叫。
-作者在 builder 呼叫 `TimelineBuilder.register_shot_mask_source(consumed_reads, source)` 時，builder 只記錄，`build()` 產生的 program 在 `_initialize` 依記錄順序轉交 program 的同名方法；手寫 program 直接呼叫該方法。
-`TimelineProgramV2` 組裝完 body 後，依宣告順序呼叫各個 module 的 `register_shot_mask_sources(prog)`。預設不註冊任何來源，program 不辨認具體的 module 型別。Herald reset 在 lowering 時標記讀取，並在這個 hook 解析各路徑上的實體讀取索引，再為每次發射註冊一個來源。手寫與 builder program 共用這個 hook。
-Schedule 與 scan step 不呼叫來源，也不套用遮罩。`run_acquire_decimated` 與 `run_acquire` 在重試前呼叫 program 提供的 `check_shot_mask_options`，由 program 拒絕帶來源的 decimated 或原生 `threshold`。沒有 precheck 的 producer 視為沒有來源。
-遮罩與下游的契約見 [[0074]] 的〈Herald reset 與逐 shot 遮罩〉與 [program README](../../lib/zcu_tools/program/README.md#registered-shot-masks)；遮罩屬於取數層、不屬於 module 的使用者裁決也記在 [[0074]]。
+**邊界。** Builder 不是 context manager，不接收 SoC 或依賴 Schedule，不按內容合併不同 module 物件。資源共用或衝突由各家族或 program 處理。Schedule 與 scan step 不保存 cfg，run 讀實驗自己的 cfg；步驟差異以區域變數或 `with_updates` 表達。Schedule 不呼叫來源或套用遮罩。`run_acquire_decimated` 與 `run_acquire` 在 retry 前透過 `check_shot_mask_options` 讓 program 拒絕含來源的 decimated 或原生 `threshold`。沒有 precheck 的 producer 視為沒有來源。
 
-使用者於 2026-10-30 提出：「我認為builder也許該專注於build program，能與sched解偶就解偶，讓acquire由sched提供方法而不是builder」。
-確認職責切分時，使用者補充：「採用，除此之外，builder應該不用with寫法，他沒有要管理生命周期的需求吧？program可以顯式呼叫構建，」。
-同日，對 module 以物件身分宣告、資源由各家族共用的方案，使用者回答：「採用建議」。
-取數入口最後依使用者「然後，我突然想到run_acquire與RunOptions比managed這名字好懂」及「用run option就好」命名。
+**依據。**
+- 2026-10-30，使用者：「我認為builder也許該專注於build program，能與sched解偶就解偶，讓acquire由sched提供方法而不是builder」。確認時說：「採用，除此之外，builder應該不用with寫法，他沒有要管理生命周期的需求吧？program可以顯式呼叫構建，」。對物件身分與資源共用答「採用建議」。入口依「然後，我突然想到run_acquire與RunOptions比managed這名字好懂」及「用run option就好」命名。原始討論未入庫，見 Git `e999cab42`。
+- 2026-10-30，使用者確定參數順序：「沒問題，採用建議，我思考soc/prog的順序，感覺prog應該要是第一個才對」。2026-11-01，使用者答「B, 我要睡了，預期起來後我規劃都落地」，將 Schedule 移除 cfg 與實驗 cfg 寫法納入遷移。原始討論未入庫，見 Git `7cab54392`。
+- 遮罩的使用者裁決見 [[0074]]〈Herald reset 與逐 shot 遮罩〉。2026-11-20 review 後使用通用 hook 的理由見 [herald reset 討論後記](../discussions/2026-11-20-herald-reset-shot-masks.md#後記)。
 
 #### Round 在取數端歸約
 
-一般實驗把 round 數傳給 acquire，由取數端的 reducer 加總或平均已完成 rounds。實驗不在主機端重複迴圈，Result 不留 round 軸。這是建議，不是強制。
-例如 `two_qubit/rb` 與 `two_qubit/rb_heralded` 加總分類計數，`twotone/rb` 平均 IQ。三者都只呼叫每支 seed／arm program 一次。
-實驗確實需要逐輪資料（trace by trace 平均）時，作者可以把 round 迴圈放在最外層。
+**規則。** 一般實驗把 round 數交給 acquire。Reducer 加總或平均已完成的 rounds，Result 不留 round 軸。這是建議，不是強制。
 
-2026-11-20，使用者說：「其实结果的 round 的轴是多余的，我想应该是之前实做的人的瑕疵。round 的轴应该在 round 函数内就已经被平均掉了，而且呢，这个平均应该是 reducer。负责的吧？」
-同日補充適用邊界：「這是建議而不強制，如果有強烈的trace by trace平均需求，實驗作者當然可以將round做在最外面，但一般實驗使用acquire內建的rounds就好了」
-比較與結果見[討論紀錄](../discussions/2026-11-20-rb-round-reduction-and-fit-quality.md)。
+**例子。** `two_qubit/rb` 與 `two_qubit/rb_heralded` 加總分類計數，`twotone/rb` 平均 IQ。每支 seed／arm program 只取數一次。
+
+**邊界。** 需要逐輪資料，例如 trace by trace 平均時，作者可以把 round 迴圈放在最外層。
+
+**依據。** 2026-11-20，使用者：「其实结果的 round 的轴是多余的，我想应该是之前实做的人的瑕疵。round 的轴应该在 round 函数内就已经被平均掉了，而且呢，这个平均应该是 reducer。负责的吧？」同日補充：「這是建議而不強制，如果有強烈的trace by trace平均需求，實驗作者當然可以將round做在最外面，但一般實驗使用acquire內建的rounds就好了」。比較見 [RB 取數歸約](../discussions/2026-11-20-rb-round-reduction-and-fit-quality.md)。
 
 ### 查表掃描與 QICK 協定
 
-2026-11-02，使用者提出：「我的想法是：add_table_sweep能支援的與add_sweep一致，實驗方式也接近，都在loop尾端更新對應register」。
-同日，對沿 QICK 四層加入查表種類的設計，使用者裁定：「採用提案」。
-以下型別接線、算術、拒絕時機與 native 時間來源由 advisor 於同日依代理授權確認。
+**規則。** `add_table_sweep` 與 `add_sweep` 都建立頂層 loop，回傳的參數交給既有 consumer。`TableParam` 沿 QICK `QickParam.to_int` 協定轉成 `TableRawParam`，各點硬體字等於該點純量編譯的結果。Generator 與 readout manager 不用另建編碼路徑。`MarkedCloseLoop` 在同一個原生 loop 收尾處處理查表 waveform 及 register，再交回 QICK 的線性 sweep 收尾。
 
-`add_table_sweep(name, values)` 與 `add_sweep` 建立相同的頂層 loop，回傳參數交給既有 module consumer。
-Program 層的 `TableParam` 繼承 `QickParam`，經 QICK 的 `to_int` 協定逐點轉成 `TableRawParam`。
-Generator／readout manager 沿用原有轉換，每點硬體字必須等於以該點純量值編出的 program，不另建 module 專屬編碼路徑。
+**例子。** 從 rotated DMEM 表載入下一點。即使分支沒播放該 waveform，loop 也更新其查表值。最後一點後載回第一點，下一個外層 loop 或 rep 可以照常開始。[ProgramV2 README](../../lib/zcu_tools/program/v2/README.md#查表掃描)示範同一 loop 用頻率與 gain 兩張表。
 
-`MarkedCloseLoop` 在同一個 native 收尾內發現 waveform 與 register 的查表值，從 rotated DMEM 表載入下一點，再交給 QICK 的線性 sweep 收尾。
-每發都更新，與該發是否播放或選到分支無關。最後一點後載入第一點，供外層 loop 或下一次 reps 使用。
+**邊界。** `TableParam` 可與純量或未掃描的 `QickParam` 算術，不可與另一個 sweep 參數運算，也不能當成零 span 的純量。`ro_length` 不支援查表，`PulseReadout` 在建構時就拒絕；`MuxReadout` 不支援查表掃描。單位、waveform 限制與錯誤型別見[查表掃描](../../lib/zcu_tools/program/v2/README.md#查表掃描)與 [module 覆寫](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides)。
 
-未掃描的 `QickParam` 視為純量，可與 `TableParam` 做純量算術。
-與 swept `QickParam` 或另一個 `TableParam` 的算術仍 raise `TypeError`。
-`TableParam` 不提供仿射的 `start`／`spans` 表示，consumer 不能把查表值當成零 span 純量。
-`ro_length` 收到查表值時，在建構 `PulseReadout` 即 raise `NotImplementedError`，不延至 build。
-`MuxReadout` 不支援查表掃描。
-參數單位、waveform 限制與公開用法由 [program README](../../lib/zcu_tools/program/v2/README.md#查表掃描) 及 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides) 維護。
+**依據。** 2026-11-02，使用者：「我的想法是：add_table_sweep能支援的與add_sweep一致，實驗方式也接近，都在loop尾端更新對應register」。對沿 QICK 四層接線答「採用提案」。型別、算術、拒絕時機與 native 時間來源是同日 designer 代裁，使用者未覆核。原始討論未入庫，見 Git `f633572b0`。
 
 ### Timeline 只存結尾，與 reference 分開
 
-採 B1 模型。每條 timeline 只存相對 `ref_time` 的目前結尾 E，下限為 0，不另存開始或 channel end 集合。
-`"default"` 是普通 timeline，不是 reference。一般 emit 省略 timeline 時選 default，不移動 reference。
-範圍外未帶 timeline 的原生 pulse／trigger 保留 QICK reference timing。
-不建立每 channel 一條預設 timeline，原生 channel timestamp 保持原用途。
+**規則。** 每條 timeline 只存相對 `ref_time` 的結尾 E，下限為 0。`default` 是普通 timeline，不是 reference，實體 channel timestamp 也不是具名 timeline。範圍外的 emit 省略名字時選 default。一般 emit 從所選結尾放置事件，按規則 b 用實際 lowering 結果更新結尾，不讀 `total_length` 或串接原先重疊的事件。`timeline_inc` 只增加所選結尾。`delay_by_timeline` 按各點實際結尾推 reference，不以 symbolic max 或統一長度代替。跨零或 max 交叉時也按各點真值算。Reference 推進 d 後，含 default 在內的每條結尾變成 `max(0, E-d)`。只有作者明示操作及每 shot 收尾會推進 reference。
 
-使用者於 2026-10-29 說明定位：「原生qick其實有timeline機制，只是其timeline固定綁定到channel, 且與ref_time是分開的…我們新設計的timeline，其實就是不綁定channel的原生timeline」。
-對儲存狀態裁定：「我倒是認為只要存當前結尾就好，不用存開始，我傾向B1」。
+**例子。** Readout 作者 timeline 只含 pre-delay、generator waveform 與一次 post-delay。最後取整，不先各自取整尾段。ADC 視窗只記到該 ADC 的物理結尾，不 join 回作者 timeline。九個 chain 實驗因而不用 `delay_auto(ros=True)` 等 ADC，只等 generator 結束加 `post_delay`。上一視窗可與下一個 pulse 的發射重疊，因為下一個 pulse 尚在飛行；同一 ADC 的 trigger 仍不得重疊。[讀出鏈間隔討論](../discussions/2026-11-21-chain-readout-spacing.md)另記 pulse 長度與緩衝。
 
-`with builder.timeline(name)` 與 `with program.timeline(name)` 只切換範圍內省略 `timeline=` 或傳入 `None` 時的預設。
-`emit`、pulse／trigger、兩種 readout config、register playback、`timeline_inc`、`delay_by_timeline` 及 Repeat／Branch 的母 timeline 都遵守此規則。
-顯式名字優先，包含 `"default"`；巢狀範圍覆蓋外層，離開時還原。
-名字須是 default 或已 fork 的 timeline，未知名字報錯。範圍不 fork、不 join，也不推進 reference。
-Branch 的 case 另以自己的 timeline 屏蔽預設，不能藉外層 scope 使用母 timeline。
-原生 `delay`／`delay_auto` 推進 reference，不受這個預設影響。
-2026-10-30，使用者對預設名字、顯式值優先、巢狀還原與 program 同名入口回答：「1a 採用建議」。
-2026-10-31，使用者以「7,8,9,13照建議」確認同族 timed API 的 scope 一致性與刪除 `qick_threshold_options`。
+**邊界。** `with timeline(name)` 只替換省略或為 `None` 的預設名。Emit、pulse／trigger、兩種 readout config、register playback、timeline 增量與同步、Repeat／Branch 的母 timeline 都遵守這個預設。顯式名字優先，巢狀範圍退出時還原，未知名字報錯。Scope 不 fork、join 或推 reference，case 另用自己的 timeline 屏蔽外層。範圍外未指定 timeline 的原生 pulse／trigger 照 QICK；原生 `delay`、`delay_auto`、`wait_auto`、`resync` 不加 timeline keyword。
+帶 timeline 的 pulse／trigger 在 E+t 發射，pulse 結尾到 generator 結束，trigger 結尾只計 trigger 寬度。兩種 readout config 在 E+t 瞬時生效，不加 config 長度或 ADC 視窗。Delay 與 SoftDelay 只加結尾。Reset 留各 child 的 post-delay，沒有 composite post；BathReset 的 pi/2 在 cavity end 加 post-delay 並向上取整後開始，取 qubit 與 pi/2 的實際結尾合流。實際發射的長度與 [nominal duration](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration) 分開看。
+另開 timeline 不豁免同 generator 的可證明重疊。帶 timeline 的後續 trigger 必須能證明不早於同 ADC 前一視窗結尾；原生 `t=None` 留下不可定位的 ADC 結尾，任一 Branch case 帶出此結尾都會攔下後續同 ADC 的 timeline trigger。純原生的後續 trigger 仍走 QICK。Shot 收尾仍等待所有 ADC。
+DelayAuto module 是唯一的 emission 例外，只在範圍外且未指定 timeline 時包裝原生 delay_auto／delay_reg_auto，保留 gens／ros 並推 reference。其他情況在 emit 報錯。Repeat 內可明用原生操作，case 與 Reset 的守衛照常。原生 delay_reg_auto 先消耗選定實體 channel，再推進非負 register cycles；尚未消耗的 timeline 依 producer bounds 扣實際推進量，全消耗後則沿用原生非負時間契約。PulseReadout 的 runtime gain／frequency words 不是時間 consumer，不受這項時間限制。不提供 `delay_auto_timeline`，也不為 `delay_timeline`／`sync` 留別名。
 
-一般 emission 先取所選 timeline 的結尾作為內部事件的共同起點。
-完成後採規則 b，不從 `total_length` 重建 duration，也不把 composite 內原本重疊的事件串接。
-單一 post-delay owner 取實際 generator waveform 結尾，加一次 post-delay，再對完整結尾向上取整到 tProc cycle。
-Readout 的 ADC 視窗只記在該 ADC channel 自己的尾端，不延長也不 join 回作者 timeline。
-`PulseReadoutCfg.nominal_duration_us`＝pre_delay＋generator waveform 長度＋post_delay。
-分數尾段保留到 aggregate 收尾，不先各自取整。
-Reset 保留各 child 的 post-delay，不新增 composite post。
-BathReset 的 pi/2 在 cavity end 加 post-delay 向上取整後開始，最後合併 qubit 與 pi/2 的實際結尾。
-Delay 與 SoftDelay 都只加結尾，不推進 reference。
-帶 timeline 的 pulse／trigger 在 E+t 發射，pulse 結尾更新到 generator 結束，trigger 結尾只含 trigger 寬度。
-兩種 readout config 是瞬時事件，結尾更新到 E+t，不加 config length 或其他 ADC window。
-同 generator 可證明的 pulse 重疊在編譯期報錯，另一條 timeline 不能豁免此檢查。
-後一個 trigger 帶 timeline 時，必須證明起點不早於同 ADC 前一視窗結尾。重疊或無法證明時在編譯期報錯。
-原生 `t=None` trigger 的 ADC 結尾不可定位。Branch 的各 case 從同一入口狀態編譯；任何 case 到出口仍有不可定位的結尾時，合流後的同 ADC timeline trigger 仍報錯。
-純原生的後一個 trigger 保留 QICK 行為。每個 shot 收尾仍等待全部 ADC。
-2026-11-01，使用者裁定：「18b請用gen的就好，adc讓其在獨立timeline不join，因為adc目前不影響後續pulse」。
-對編譯期報錯方式，使用者同日回答：「B」。
-
-2026-11-21，使用者把同一方向用在連續讀出：「B''，ii，應該改的是readout module計算timeline的方式，不join ro window，然後實驗cfg要多預留先緩衝pulse長度，不要對齊到極限。」Readout module 本來就不 join ADC 視窗，所以九個 chain 實驗讀出後只等 generator 結束加 `post_delay`，不再用 `delay_auto(ros=True)` 等 ADC。上一個 ADC 視窗可以和下一個 pulse 的發射時刻重疊，因為下一個 pulse 要過飛行時間才到 ADC。同一個 ADC 的 trigger 仍不得重疊。比較見[讀出鏈的 pulse 長度與間隔](../discussions/2026-11-21-chain-readout-spacing.md)。
-
-`timeline_inc(t, timeline=X)` 只加 X 的結尾，`delay_by_timeline(timeline=X)` 才將 reference 推到 X 的結尾。
-Reference 推進 d 後，全部 timeline 包含 default 一起變成 `max(0, E-d)`。
-原生 delay／delay_auto／wait_auto／resync 沿用 QICK，不增加 timeline keyword。
-不提供 `delay_auto_timeline`。跨零或 max 交叉時按各點真值計算，不補成統一長度。
-2026-10-31，使用者選定命名：「名字我考慮：timeline_inc, delay_by_timeline，這樣有delay的方法都是動ref的比較一致」。
-舊 `delay_timeline`／`sync` 入口不保留別名。Reference 只因作者明確要求的操作及每 shot 收尾推進。
-
-DelayAuto module 是一般 emission 規則的唯一例外。
-它只在 timeline 範圍外且未指定 timeline 時包裝原生 delay_auto／delay_reg_auto，保留 gens／ros，移 reference 並扣減全部結尾。
-顯式指定任何 timeline，包含 default，或由範圍選出 timeline，均在 emit 入口報錯。
-在 Repeat 等範圍內需要此效果時，作者直接呼叫原生操作，仍須遵守 case 與 Reset 的 reference 守衛。
-原生 delay_reg_auto 先消耗選定 native channels，再推進非負 register cycles。
-尚未完整消耗的 timeline 依 producer bounds 扣除實際推進量；全部已消耗時，register 部分沿用原生非負時間契約。
-PulseReadout 的 gain／frequency runtime words 是非時間 consumer，不受此時間限制排除。
-
-使用者於 2026-10-31 指出：「ModularProgram那個是沒有rintime timeline功能時的無可奈何辦法，新program有就不要模仿了」。
-新 program 的 runtime delay_by_timeline 依逐點實際結尾對齊，不模仿 legacy DelayAuto symbolic max 權宜行為。
-已移除的 legacy program 行為不構成 Timeline 的相容性要求。
+**依據。**
+- 2026-10-29，使用者：「原生qick其實有timeline機制，只是其timeline固定綁定到channel, 且與ref_time是分開的…我們新設計的timeline，其實就是不綁定channel的原生timeline」。並選「我倒是認為只要存當前結尾就好，不用存開始，我傾向B1」。見 [B1 時間模型的討論](../discussions/2026-10-29-module-to-macro.md#timeline-模型不綁定參考時間只存結尾)。
+- 2026-10-30，使用者對 scope 答「1a 採用建議」。2026-10-31，使用者以「7,8,9,13照建議」確認 timed API 的一致性及刪除 `qick_threshold_options`。命名選「名字我考慮：timeline_inc, delay_by_timeline，這樣有delay的方法都是動ref的比較一致」，並說「ModularProgram那個是沒有rintime timeline功能時的無可奈何辦法，新program有就不要模仿了」。原始問答未入庫，命名見[時間模型討論](../discussions/2026-10-31-timeline-variable-model.md)；交付見 Git `3a8adfa93`、`870d10f17`。
+- 2026-11-01，使用者：「18b請用gen的就好，adc讓其在獨立timeline不join，因為adc目前不影響後續pulse」。對編譯期報錯答「B」。原始討論未入庫，見 Git `57f83c88e`、`2e85c8e3d`。Timeline 的 owner 邊界與 lowering 細節是同日 designer 代裁，使用者未覆核，授權原話見[範圍證明的依據](#runtime-end-與範圍證明)。
+- 2026-11-21，使用者：「B''，ii，應該改的是readout module計算timeline的方式，不join ro window，然後實驗cfg要多預留先緩衝pulse長度，不要對齊到極限。」實作沿用 module 既有的不 join 規則。見 [讀出鏈的 pulse 長度與間隔](../discussions/2026-11-21-chain-readout-spacing.md)。
 
 ### Runtime end 與範圍證明
 
-`timeline_inc` 的 scalar／QickParam 單位為 us，register 名稱代表非負 tProc cycles。
-Timeline 結尾與作者時間的合法範圍為 `[0, 2**31)`，中間算術須符合 signed32。
-有已知 bounds 時，編譯器照常檢查 overflow 與可證明的同 channel 重疊。
-作者自行準備的 register 時間可不提供 `range_hint=(lo, hi)`。
-只有既有 bounds 與 hint 都不存在的時間段，才以作者的非負契約記 lo=0、hi 未知。
-該段 max 在 runtime 算，overlap 與 overflow 由作者負責，不加有限上界或硬體檢查，也不因無法證明而拒絕。
-已知的常數、sweep、framework table 與 hint 仍供證明及省指令使用；hint 不會關閉既有資訊。
-這個時間視圖不改 signed 非時間資料，也不改已捕獲來源的身份。
-2026-10-31，使用者裁定：「F3同意，range_hint是可選的」。lo=0／hi 未知與保留已知來源的細節由 advisor 於 2026-11-01 依代理授權裁定。
-使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
+**規則。** 時間與結尾在 `[0, 2**31)`，中間算術須符合 signed32。Program／timeline owner 保存 producer bounds、來源及實體 channel 的編譯期結尾式，並稽核翻譯後的所有寫入及初始化。只在實際發射時計入 channel，reference 推進時扣減並 floor 0；Repeat／Branch 保留迭代與路徑關係。這些是 WAIT／overlap 的證明資料，不是第二個 scheduler，也不用 channel-end register。
 
-Program／timeline owner 擁有 framework producer bounds 與翻譯後的全流寫入稽核。
-原生常數、sweep、loader table 與 playback owner 提供來源關係、合法 index 及依賴。
-這些已登記來源仍須符合寫入與初始化契約，錯誤指出 register 與指令位置。
-Register 次數 Repeat 內，先執行的 LoadValue 以作者 table 值域定義同圈來源，ComputedPulse／時間 consumer 可隨後使用。
-未執行的圈或其他路徑不建立定義，未知、未初始化與越界來源仍拒絕。
-這項同圈定義由 advisor 於 2026-11-01 依代理授權裁定，不是一般未知 register 的範圍 fallback。
-非時間 raw-word consumer 保留原契約，不因時間稽核而縮窄 uint32 words。
-Getter 對 scalar／仿射時間回實際量化值；runtime-only 或非仿射時間明確 raise RuntimeError，不回 ndarray 或 bounds 上界。
+**例子。** Register 次數的 Repeat 中，先執行的 LoadValue 提供該圈 table 值域，後續 ComputedPulse 或時間 consumer 可用；沒執行的圈或別的路徑不建立定義。Runtime 整數起點 R 加小數 f 後，再放 t 的事件時用 `R+ceil(f+t)`。單次操作內合計實際起點、長度與 post，再取整，不把不同操作合成一次 ceil。原生 QICK 的 scalar channel timestamp 仍用 nearest。[Timeline 取整](../../lib/zcu_tools/program/v2/README.md#timeline-取整)記錄容差、2³¹ 附近約 0.002 cycle 的效果、查表與線性 sweep、getter 及跨格點換算。
 
-具名 timeline 操作把自己的結果 ceil 到整數 tProc cycle 一次，事件起點也用 ceil。
-原生 QICK channel timestamp 保留純量路徑的 nearest，不能用 timeline 的 ceil 結尾取代。
-小數在單一 timeline 操作內保留到收尾，例如實際起點、waveform／ADC 長度與 post 的合計。
-Runtime 整數起點 R 加靜態小數 f，下一操作計算 R＋ceil(f＋t)。
-Ceil 以 `math.isclose(ticks, nearest, rel_tol=1e-12, abs_tol=1e-10)` 吸收接近整數的換算雜訊，其餘小數照常向上取整。
-在 2³¹ 附近，相對容差最多也會吸收約 0.002 cycle 的真實小數。
-線性 sweep 沿 QICK 原生 start round 與每圈 step 往零截斷，實際值可能不同於預期值，不自動轉成逐點時間 table。
-作者明示的 `add_table_sweep` 依上節查表協定載入每點時間。
-2026-10-31，使用者要求：「你永遠都不能先加總再ceil，誤差會很大」，並補充「純delay的應該也是量化」。
-2026-11-01，使用者以「B，而新設計沒有查表fallback吧？」確認相對容差方案。精確有理數時間模型另行評估。
+**邊界。**
+- `timeline_inc` 的 scalar／QickParam 是 µs，register 名稱是非負 tProc cycles。作者可省略 `range_hint=(lo, hi)`。只有既無 bounds 又無 hint 的作者時間段才記 lo=0、hi 未知。該段 max 用 runtime 真值，overlap 與 overflow 由作者負責，不加有限上界或硬體檢查，也不只因無法證明就拒絕。既知的常數、sweep、table 或 hint 仍供檢查與省指令使用。Producer 本身仍須已知、已初始化且未越界；錯誤指出 register 與指令。這個時間視圖不改已捕獲來源的身分，也不縮窄非時間的 signed 值或 uint32 words。Getter 只回實際可量化表示的 scalar／仿射值，不以 ndarray 或 bounds 上界代替，runtime-only 或非仿射值報 `RuntimeError`。
+- Native pulse 起點若有原 `TableParam`，先加實長再按 QICK nearest 換算，不逐段 ceil。Trigger 查完整 scheduled end 的查表來源才可用同一物理時間做 ADC tail 的 nearest；混入其他 sweep／register 或沒有表來源時仍採 runtime ceil。`TimelineBook` 用 `RuntimeEnd` 物件 identity 與強引用記來源，compile reset 清掉記錄。恢復舊 end 可查回來源，新寫入非查表 end 不借用舊表。只保存原表或允許的查表加靜態值結果，不從 register 名、點值或 proof recipe 猜來源，也不改 `RuntimeEnd`、`CycleProducer` 或 Branch 合流。
+- 靜態 generator fabric／ADC 長度用有理數時鐘換算。既有 runtime length sweep 與 selected waveform／length table 用 k=8 上界定點換算，範圍為 2²³ tProc cycles，超限與 signed32 overflow 在 build 報錯。500 µs 內不得早於物理結尾，最多晚 1 µs，超過不承諾此誤差上限。不開一般 length register 或 ADC length API，換算不用 ARITH 或除法器。
+- 證明按軸 ID 對齊時間分量。已知軸存一維值，未知軸存範圍與係數，常數是大小 1 的固定軸。加減合併同軸、消去零項；逐點全等歸到常數軸，常數結尾不配 end register。跨格點常數 bias 用字面值，零 span 不配 sweep register；runtime 結尾只差一個常數時沿用原 register，consumer 要獨立 operand 才物化。同一已知軸的非線性逐點算，跨軸 ceil／定點換算用有界誤差軸，不建網格。跨軸 max／min 以線性部分及有理係數的 Abs 項表示，容許負係數及巢狀 Abs。取界按共用軸分連通塊，塊內分支定界；每塊超過 20 個未定號 Abs 項才退回區間界，不改真值。不可變節點快取範圍，支配判斷快取正規化差式，`RuntimeEnd` 的界由式子推出。
+- 合流共用 N 路 max／min。展平同向候選，提出共項，合併相同餘項，按差值界刪掉被支配者，只在剩下的 k 項做 k−1 次選值。物化入口讀已捕獲的 register，不重算證明式或重讀被覆寫來源。差值能證明在 signed32 內時，max 用 TEST、複製 x、`if(S)` 寫 y，min 用 `if(NS)`；可覆寫 x 時省複製。k 路選值是 `1+2(k−1)` 條，不含候選求值與共項。不能證明差值安全時用 sign-corrected mask，max 11／min 12 條、3 個 scratch，不依賴溢位後的 S。UF 後由硬體 hazard stall，不加 NOP 或用外部 F／NF。合法非負時間的差不會溢位；無上界仍可能走 mask，但溢位修正沒有合法公開 consumer，min 也沒有公開 codegen consumer。這兩條內部路徑與成本用直接審閱，不宣稱已有端到端驗證。
+- 常數事件用 `@t`；runtime 事件寫 s14，經 preprocess 設 `t_regs["t"]="s_out_time"`，讓 QICK 展開 Pulse、ConfigReadout、Trigger，不另配事件時間 register。同基準後續事件只加差值。Native macro／raw asm 寫 s14 或 Branch 合流時，下一次須載入基準；timeline 自我複製 s14 不使記錄失效。原生掃描仍用 QICK sweep register。這個接縫不複製 expand、不加 QICK 私有呼叫、不 monkeypatch 或更換 QICK。
+- 不自動配置時間或 selected-end DMEM。作者明示的查表掃描、資料／waveform table 與 IR jump-address table 照常使用。Branch 已是 tProc cycles 的結尾以整數乘加與 max／選值合流，不建逐點網格或分段插值。
 
-2026-11-02，查表 native timestamp 與 ADC tail 的來源規則由 advisor 依代理授權確認。
-Timeline 保留 `TableParam` 原值，native pulse 的起點加實際長度後再沿 QICK nearest 轉換，不逐段 ceil 累加。
-`TimelineBook` 以 end 物件的 identity 保存其未取整 `TableParam` 來源。`RuntimeEnd` 依值相等，來源不能按值共用；id 配合強引用區分原物件，每次 compile reset 清空紀錄。
-目前 end 換成非查表的新物件後不沿用舊來源。舊 immutable end 經 branch／fork／module 快照還原時仍能找回原表，不另同步一套來源容器。
-來源只保留原 `TableParam` 及已授權的查表加靜態值結果，不從 register 名稱、值或 proof recipe 猜出。
-Trigger 查完整 scheduled end 的來源，有表時以該時間加 ADC 長度，沿純量 native timestamp 規則記錄同一物理結尾。
-混合其他 sweep／register 或沒有表來源時，維持真正 runtime 的 ceil，不因已知點值而改成 nearest。
-這些來源紀錄不改 `RuntimeEnd`／`CycleProducer` 表示或 branch 的合流規則。
-
-靜態 generator fabric／ADC 長度先作有理數時鐘換算，再於該 timeline 操作 aggregate 收尾 ceil。
-現有 runtime 長度 sweep 與 selected waveform／length table 使用 k=8 上界定點換算，不新增一般作者 length register 或 ADC length API。
-編譯器以移位加減計算乘積，選符合誤差預算且 CSD 項數最少的 W，平手取較小值，不用 ARITH／除法器。
-換算範圍為 2²³ tProc cycles，超限或乘積／中間值 overflow 在 build 報錯。
-500 µs 內的合法長度不早於物理結束，最多晚 1 µs；超出 500 µs 不沿用此誤差上限。
-2026-10-31，使用者選定「那k=8,我知道為什麼優先用dmem了」，並要求「500us任意長誤差晚1us內，不可以早」。
-換算比、W 與目前可達 consumer 見 [program README](../../lib/zcu_tools/program/v2/README.md#timeline-rounding)。
-
-編譯期以軸 ID 對齊時間分量，已知軸保存一維值，未知軸保存範圍與係數，常數使用大小 1 的固定軸。
-加減先合併同軸分量並消去零項。已知軸上逐點全等的分量移到常數軸，結尾因此為常數時不配置 end register。
-編譯期已知的跨格點換算 bias 以字面值進入運算；span 為 0 的換算參數不配 sweep register。只差編譯期常數的 runtime 結尾沿用既有 register，以字面值位移表示，consumer 需要獨立 register operand 時才物化。2026-11-01 advisor 依使用者「1代理模式就都給你決定，我事後看就好」的代理授權，為無同步 chevron 與遷移後 RB／IRB 的 16 data register 容量定下這兩條。
-同一已知軸的非線性運算逐點算；跨軸 ceil／定點換算保留原式，另加有界誤差軸，不建多維網格。
-跨軸 max／min 以線性部分加有理係數的 Abs 項表示，允許負係數及巢狀 Abs。
-取界依共用軸分連通塊，塊內分支定界。每塊超過 20 個未定號 Abs 項才退回區間界，退回不改 runtime 真值。
-不可變節點快取範圍，支配判斷快取正規化相減式；RuntimeEnd 的界從式子推出，不另存 min／max。
-2026-10-31，使用者說明「計算的原理是軸比對，源變數只是軸數為1的變數而已」，並確認「我也傾向Abs寫法，而且k可以開足夠大，因為一次只求一個節點的範圍，還可以考慮快取」。
-
-所有 timeline 合流共用 N 路 max／min：展平同向候選，提出公共部分，合併相同變數餘項，再依差值界剔除被任一候選支配的項。
-剩一項不作 max，剩 k 項作 k−1 次真實選值，再加回公共部分。
-已物化的進入點是不透明綁定，後續讀捕獲 register，不從證明式重建 max 或重讀被覆寫來源。
-差值可證明在 signed32 內時，兩路 max 使用 TEST、複製 x、`if(S)` 寫 y，共 3 條；可覆寫 x 時省去複製。
-k 路選值成本為 `1+2(k−1)`，不含候選求值與公共部分。Min 用 `if(NS)`。
-不能證明差值安全時，使用 sign-corrected mask，max 11／min 12 條、3 個 scratch，不依賴溢位後的 S。
-UF 後由硬體 hazard stall，不加 NOP，不使用外部 F／NF。
-2026-10-31，使用者要求「所以应该是要设计一个多个线性式都可以适用的 join 的算法」，並提醒「要確定一下這個flag真的會影響結果，有可能是假flag。」
-Signed32 guard 與上述 mask 成本由 advisor 於 2026-11-01 依代理授權確認。
-合法非負 timeline 時間的差不溢位；無上界仍可選到 mask，但溢位修正沒有合法公開 consumer。
-該修正與目前無公開 codegen consumer 的 min 不宣稱已有端到端驗證；路徑與成本直接審閱，公開測試保留合法輸入的實際選值驗收。
-
-框架不自動配置時間或 selected-end DMEM table。作者明示的查表掃描、資料／waveform table 與 IR dispatch 的 jump-address table 保留。
-2026-10-31，使用者說明：「Dmem資源很珍貴，除了作者明確知道有用的位置，其他地方少用」。
-對 IR jump-address table，使用者回答：「Ir跳躍那個可以，因為屬於log級別的使用量，我接受」。
-已是 tProc cycles 的 Branch 合流以整數常數乘加及 max／選擇重建結尾，不用逐點網格或分段插值。
-
-常數事件時間用字面值 `@t`；runtime 事件由 timeline 寫 s14，再沿 preprocess 接縫設 `t_regs["t"]="s_out_time"`。
-Pulse、ConfigReadout、Trigger 的 expand 由 QICK 負責，不另配事件時間 data register。
-同基準的下一事件使用 s14 差值增量。Native macro／raw asm 寫 s14 與 Branch 合流使記錄失效，下一事件重新載入基準。
-Timeline 自己事件的 s14 自我複製不使記錄失效，原生 sweep 時間仍用 QICK sweep register。
-不複製 QICK expand、不新增 QICK 底線私有呼叫、不 monkeypatch 或更換 QICK。
-2026-10-31，使用者要求：「我想進一步討論timeline利用s14實現的通用方案，而不只是repeat」。
-QICK preprocess 適配與記錄失效細節由 advisor 於 2026-11-01 依代理授權確認。
-
-Program／timeline owner 為每個 native channel 保留編譯期結尾式子，涵蓋 scalar 與 runtime 起點。
-只在真正發射時記錄，reference 推進時扣除並 floor 0，Repeat／Branch 保留路徑與迭代關係。
-這是 WAIT／overlap 證明的 metadata，不是第二個 scheduler，不新增 channel-end register。
-Native channel 記帳由 advisor 於 2026-10-31 依代理授權裁定。
-使用者於 2026-10-29 裁定：「ABs/asr是安全可用的，可以不用測」。這不是已完成實機驗證的聲明。
+**依據。**
+- 2026-10-31，使用者：「F3同意，range_hint是可選的」。2026-11-01，未知上界與保留已知來源由 designer 代裁。2026-11-18，使用者過目此條說「我大概看了一遍，基本上是没问题」，並說這類規則「并不算是裁决，而算是建议」。這些細節仍是僅供參考的先例，不當成使用者裁決。LoadValue 的同圈定義是 2026-11-01 designer 代裁，使用者未覆核，不是一般未知 register 的 fallback。原始問答未入庫，見 Git `3a8adfa93`、`1f4b16aa0`。
+- 2026-10-31，使用者說「你永遠都不能先加總再ceil，誤差會很大」，補充「純delay的應該也是量化」。對定點換算答「那k=8,我知道為什麼優先用dmem了」，要求「500us任意長誤差晚1us內，不可以早」。2026-11-01，以「B，而新設計沒有查表fallback吧？」確認相對容差方案。精確有理數時間模型另行評估。原始問答未入庫，見 Git `3a8adfa93`。2026-11-02 的查表 native timestamp 與 ADC tail 來源細節是 designer 代裁，使用者未覆核，見 Git `f633572b0`。
+- 2026-10-31，使用者說「計算的原理是軸比對，源變數只是軸數為1的變數而已」，並答「我也傾向Abs寫法，而且k可以開足夠大，因為一次只求一個節點的範圍，還可以考慮快取」。要求「所以应该是要设计一个多个线性式都可以适用的 join 的算法」，提醒「要確定一下這個flag真的會影響結果，有可能是假flag。」對記憶體說「Dmem資源很珍貴，除了作者明確知道有用的位置，其他地方少用」，並答「Ir跳躍那個可以，因為屬於log級別的使用量，我接受」。對事件時間要求「我想進一步討論timeline利用s14實現的通用方案，而不只是repeat」。見 [Timeline 變數、join 與 s14 的討論](../discussions/2026-10-31-timeline-variable-model.md)，其中實作前的 mask 成本不是現行規則。
+- 2026-10-31 的實體 channel 記帳，以及 2026-11-01 的 signed32 guard、mask 成本、preprocess 與失效細節是 designer 代裁，使用者未覆核。2026-11-01 的代理授權原話是「1代理模式就都給你決定，我事後看就好」。字面 bias 與 register 位移也由 designer 依此代裁，使用者未覆核；目的在無同步 chevron 及遷移後 RB／IRB 不超過 16 個 data register。原始工作檔未入庫，見 Git `3a8adfa93`、`05aadfb44`。
+- 2026-10-29，使用者：「ABs/asr是安全可用的，可以不用測」。這不是已完成實機驗證的聲明，原始問答未入庫。
 
 ### 收尾 WAIT 與 slack 護欄
 
-Body 收尾同步全部 timeline 及 ADC 實際結尾，再記錄 body_end，然後進 shot 外殼。
-`delay_by_timeline` 在 runtime 取真實 maximum；shell WAIT 仍是編譯期常數，不使用 variable WAIT，也不以上界代替 runtime 同步。
-ADC 結尾沒有上界時仍參與實際同步，不因無 hint 而拒絕或假造上界。
-已同步消耗的 tail 剩餘量為 0，其他已知 ADC 仍保留來源資訊與既有護欄。
-2026-11-01，對未知 ADC 結尾沿作者時間規則處理的方案，使用者回答：「3A」。
+**規則。** Body 先在 runtime 以真實 maximum 同步所有 timeline 與 ADC 實際結尾，再記 `body_end`，最後進 shot 外殼。Shell WAIT 是編譯期常數，不用 variable WAIT，也不以上界替代 runtime 同步。先配對 raw 與已消耗的結尾再相減取界，保留共同來源與逐點相關性，不枚舉多維笛卡兒積。
 
-收尾先配對 raw 與已消耗的結尾，再相減取界，以保留共同來源與逐點相關性，不枚舉多維笛卡兒積。
-剩餘量為常數時，WAIT 使用精確值，不發 warning，即使常數大於 relax_delay 也不拒絕。
-例如 ADC end＝O+190、body end＝O+200，剩餘量是 0，不因 O 的範圍增加等待。
-能證明精確 min／max 時，WAIT 使用 max，`slack=max-min` 是合法點的實際差距，單位為 tProc cycles。
-Slack 為 0 不警告，大於 0 時 warning 指出變數與差距。
-已知 slack 超過 relax_delay 才 raise ValueError；等於時警告，不拒絕。
+**例子。** ADC end 是 O+190、body end 是 O+200，消耗後剩餘 0。O 的範圍不增加 WAIT。剩餘量為常數時，WAIT 用精確值，不警告；即使該常數超過 `relax_delay` 也不拒收。
 
-只有安全界而非精確差距時，warning 明說 slack 是 upper bound，不以該上界超過 relax_delay 為由拒絕。
-可消去的未知來源先消去，可逐點求值的部分仍保留，不能因另一個未知值丟掉全部 provenance。
-Abs 預算退回區間只使證明保守，不改同步真值，也不把保守下界冒充實際 min。
-2026-10-30，使用者選擇常數 WAIT 方案「A」，並補充「WAIT可以用常數，但sync要考慮runtime」。
-對未知 slack 只警告、不按上界拒絕的方案，使用者同日回答：「A」。引文 sync 的現名為 delay_by_timeline。
-來源配對、相減後取界及證明模型由 advisor 於 2026-11-01 依代理授權同步，不加入一般 CFG analysis。
+**邊界。** 有精確 min／max 時 WAIT 用 max，`slack=max-min` 以 tProc cycles 表示合法點的實際差距。Slack 為 0 不警告；大於 0 時指出變數與差距；等於 `relax_delay` 仍只警告，超過才 raise `ValueError`。只有安全界時，警告說明 slack 是 upper bound，不據此拒絕。可消去的未知來源先消去，仍保留其他已知 ADC 來源與逐點資料；沒有上界的實際 ADC 結尾照樣參與同步，不拒絕或假造上界，已消耗的 tail 為 0。Abs 預算用盡只會放寬證明界，不能把下界當真實 min 或改 runtime 同步。
+
+**依據。** 2026-10-30，對常數 WAIT 答「A」，補充「WAIT可以用常數，但sync要考慮runtime」；對未知 slack 不按上界拒絕另答「A」。此處 sync 的現名是 `delay_by_timeline`。2026-11-01，對未知 ADC 結尾沿作者時間規則處理答「3A」。來源配對與相減取界是同日 designer 代裁，使用者未覆核，不加入一般 CFG analysis。原始討論未入庫，見 Git `ae2632f13`、`3a8adfa93`。
 
 ### Fork、join 與 Repeat 邊界
 
-只有 default 預先存在。其他名字先在 body 用 `fork(source, into=...)` 宣告，複製 source 的結尾。
-Into 接受新名字或名字 list，重名與未宣告使用報錯。
-`join(*sources, into=target)` 將既有 target 與 sources 的結尾取 max 寫回 target，不消耗 sources，也不移 reference。
-它不發射 child Module，不要求每條 fork 都 join 回來。
-2026-10-29，使用者提議：「我覺得join的工作好像可以簡化，不是平行好幾個branch並合併，而是單純的將給定的幾個timetime結尾合併到指定目標timeline」。
-使用者並要求：「那會需要一個宣告新timeline的機制，從當前指定timeline尾端分岔」。
+**規則。** `fork` 從已存在的 timeline 複製結尾到一個或多個新名字，`join` 只把 target 與 sources 的 max 寫回 target，不發射或消耗 sources。Branch 按 sweep 的 zero-based index 選 case，不支援依量測結果選擇。`align_timeline=True` 以所有 case 的結尾 max 合回母 timeline，`False` 用實際 case 的結尾。Repeat 逐圈累積母 timeline，入口與回邊不同步，零圈不執行或宣告 body。兩種結構都把省略時的 scope 預設或 default 作母 timeline，body 用自己的 timeline 屏蔽外部預設。
 
-`branch(by=..., align_timeline=..., timeline=None)` 依 sweep 點索引選 case，不支援量測結果分支。
-母 timeline 省略時選目前範圍，範圍外選 default。
-每個 `with cases.case(index) as name:` 從母 timeline 隱式 fork，名字為 `"<by>[<index>]"`，並屏蔽範圍預設。
-Case 內只能使用 case timeline 與其局部 fork，不能使用母 timeline 或其他外部名字。
-Index 是 by 迴圈的 zero-based 點索引。未宣告的點執行空 case，重複、非整數或超界 index 報錯。
-`align_timeline` 是必填 keyword-only bool。True 把各 case 結尾 join 回母 timeline；False 使用實際執行 case 的結尾。
-True 需要結尾能從入口重建，不執行未選 case 的動作。全靜態取靜態 max，否則取逐點 runtime max。
-兩種模式都保留入口 reference，不自動 delay_by_timeline，其他外部 timeline 不變。
-Case 內經 owner 推進 reference 的操作在 build 報錯，等待改用 timeline_inc。
-Branch 區塊內、case 外的操作也報錯，無條件動作寫在區塊前或後。
-Case 及局部 fork 的名字離開 case 即失效，未 join 的局部 end 直接丟棄，不合回祖先。
-跨 Branch 使用的 timeline 先在入口前宣告；register 超限保留 QICK 原錯誤，由作者負責。
+**例子。** `with cases.case(index) as name:` 從母 timeline 隱式 fork `"<by>[<index>]"`，沒宣告的點是空 case。True 模式的未選 case 不執行，結尾必須能從入口重建；全靜態用靜態 max，否則按點算 runtime max。兩種模式都不推 reference，不改其他外部 timeline。Branch／Repeat 後可直接在外部 timeline 發射，從實際剩餘結尾用 s14 放事件，不以範圍上界放置，也不必先 join、fork 或同步。
 
-2026-10-31，使用者要求：「case()輸入應該要有對應的值，值沒有宣告對應case應該視為空branch」。
-對結尾選擇說明：「我會預期branch實際長度可以選擇所以case的最大值，或是runtime時走的那個branch」；「我不想自動推進ref time」。
-對局部 fork 說明：「局部fork自動並回是超出預期的行為」。
-使用者提出「branch初始化帶timeline參數應該就不用再一層with timeline的寫法，你覺得case隱式建立的timeline名叫什麼，感覺with case as timeline_name是好設計，且一樣屏蔽預設timeline」，並以「45確認」確認母／case timeline 方案。
+**邊界。** 只有 default 預先存在。Fork 重名或使用未宣告名字報錯，不要求每條 fork 都 join 回來。`align_timeline` 是必填 keyword-only bool，重複、非整數或超界 case index 報錯。Case 只能用自己的 timeline 和局部 fork，不能用母 timeline 或外部名字。Repeat 只能用自己的母 timeline 與局部 fork，其他外部名字也不能作 fork source。局部名字離開即失效，未 join 的局部 end 丟棄，外部可重用名字。Branch 區塊內、case 外不能放操作；case 不能經 owner 推進 reference，連巢狀 Repeat 也一樣，等待改用 `timeline_inc`。不在 case 內時，Repeat body 可以明寫 `delay_by_timeline`、原生 delay／delay_auto 或巢狀 Repeat。跨 Branch 的 timeline 先在入口前宣告。
+只有 Repeat body 頂層最後一個操作是針對循環 timeline 的 `delay_by_timeline`，且入口結尾為常數 0，才省略尾端 register。固定圈長用常數 `inc_ref`，其餘用變數尾端／s14。若以該操作收尾，但入口結尾不是常數 0，編譯器發出 `UserWarning`，提示作者在 Repeat 前同步。編譯器不自行插入同步。原生同步不算作 `delay_by_timeline`。不做定點分析、重播 preprocess 或按後續事件數自動推 reference。固定 n 為非負整數，不收 `range_hint`。Register n 不能和 counter 同名，非負閉區間 hint 可省略，不從初值猜上界或新增硬體檢查。回邊的 generator 與 ADC 檢查見 [ProgramV2 README](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline)。
+每 shot／sweep 點重建 loop 狀態，counter 不進頂層 sweep metadata。作者明寫推進時外部結尾扣每圈實際推進量並 floor 0，否則不變。固定且可靜態表示的總量保持靜態；runtime 次數或路徑用逐圈 debit storage。後續 pulse、trigger、config、emit 或 `timeline_inc` 可沿用原本為 shot 收尾、join、fork 或同步所需的 selected-end／debit storage，不預配事件 register。仍受 16 個 data register 上限及不得自動配置時間 DMEM 的限制，超限保留 QICK 原錯誤。
 
-`repeat(name, n, *, timeline=None, range_hint=None)` 使用逐圈累積的 timeline。
-母 timeline 省略時選目前範圍，範圍外選 default。Body 以循環 timeline 屏蔽預設，只能使用母 timeline 與其局部 fork。
-入口與回邊不自動同步，n=0 保留母 timeline，不執行或宣告 body 內容。
-Case 外的 body 可明寫 delay_by_timeline、原生 delay／delay_auto 或巢狀 Repeat。
-Repeat 可以放進 Branch case，但 body 及巢狀結構仍不得經 owner 推進 reference。
-其他外部 timeline 可橫跨 Repeat，不能在 body 內使用，連作為 fork source 也不行。
-離開時局部名字失效，外部可重新 fork 同名。
-2026-10-31，使用者說明：「repeat屏蔽預設timeline，尾端就是一個變數，這樣內部操作自然變成基於這個變數」。
-對 reference 推進，使用者提出：「讓作者顯式在body想要的位置插入delay或sync效果是否一樣？」
-
-只有 body 頂層最後操作為循環 timeline 的 delay_by_timeline，且入口結尾為常數 0，才採不攜帶尾端 register 的 lowering。
-固定圈長編成每圈常數 inc_ref，其他情況使用變數尾端／s14 指針。
-若 body 以該同步結尾但入口不為常數 0，發 UserWarning 提示循環前同步，編譯器不自行加入。
-不分析定點、不重播 preprocess，不因後續事件多就自動推進 reference。
-這項結構規則由使用者於 2026-10-31 以「確認」採用，具體 lowering 由 advisor 依代理授權整理。
-
-固定 n 是非負整數，不接受 range_hint。Register n 是已準備的 register 名字，不能與 counter 的 name 相同。
-Register 次數的非負閉區間 hint 可選，不從初值假造上界，也不增加硬體檢查；沒有 hint 時不證明回邊同 channel overlap。
-每 shot／sweep 點重建循環狀態，counter 不加入 QICK top-level sweep metadata。
-作者明寫 reference 操作時，外部 end 按每圈實際推進量 debit 並 floor 0；無 reference 操作則不變。
-固定且可靜態表示的總量保持靜態，runtime 次數或路徑需要時重用逐圈 debit storage。
-Branch／Repeat 之後可直接在外部 timeline 放 pulse／trigger／config／emit 或使用 timeline_inc，不必先 join、fork 或同步。
-後續事件從實際 remaining end 經 s14 放置，不用範圍上界，也不為可能的事件預配 register。
-Shot 收尾、join、fork、delay_by_timeline 本來需要的 selected-end／debit storage 可直接重用，不另配事件時間 register。
-2026-11-01，對取消外部 timeline 的 wait-only 拒絕、從實際結尾繼續放事件的方案，使用者回答：「1B」。
-Storage 重用範圍由 advisor 同日依代理授權裁定，仍保留 16 個 data register 上限與不用時間 DMEM 的限制。
+**依據。**
+- 2026-10-29，使用者：「我覺得join的工作好像可以簡化，不是平行好幾個branch並合併，而是單純的將給定的幾個timetime結尾合併到指定目標timeline」。並要求「那會需要一個宣告新timeline的機制，從當前指定timeline尾端分岔」。原始問答未入庫。
+- 2026-10-31，使用者：「case()輸入應該要有對應的值，值沒有宣告對應case應該視為空branch」；「我會預期branch實際長度可以選擇所以case的最大值，或是runtime時走的那個branch」；「我不想自動推進ref time」；「局部fork自動並回是超出預期的行為」。對命名提出「branch初始化帶timeline參數應該就不用再一層with timeline的寫法，你覺得case隱式建立的timeline名叫什麼，感覺with case as timeline_name是好設計，且一樣屏蔽預設timeline」，並答「45確認」。原始問答未入庫，見 Git `dfc7bfa87`、`3a8adfa93`。
+- 2026-10-31，使用者：「repeat屏蔽預設timeline，尾端就是一個變數，這樣內部操作自然變成基於這個變數」。並問「讓作者顯式在body想要的位置插入delay或sync效果是否一樣？」對依結構選 lowering 答「確認」。具體 lowering 是 designer 代裁，使用者未覆核，見 [Repeat 與 IR 的討論](../discussions/2026-10-31-timeline-variable-model.md#repeat-與-ir-展開)。
+- 2026-11-01，對外部 timeline 不再只許等待、可從實際結尾繼續發射，使用者答「1B」。Storage 重用是同日 designer 代裁，使用者未覆核。原始討論未入庫，見 Git `3a8adfa93`。
 
 #### 往後跳轉與 label 合併
 
-Branch、Repeat 與作者 label 共用不可變的 `PathState`。它記錄後續放置需要的狀態，包括 timeline 與實體 channel 的結尾、ADC 讀取數與時間證明。
-`TimelineBook` 負責擷取與還原；各控制結構定義自己的合併規則。
+**規則。** `TimelineProgramV2` 在 `_body` 最外層提供 `cond_jump`、`jump` 與 `label`，builder 只記錄並在 build 轉交同名動作。目標必須在後方，迭代用 Repeat 或 sweep。Branch、Repeat 與作者 label 共用不可變 `PathState` 保存結尾、ADC 讀取數與證明，`TimelineBook` 擷取與還原，各控制結構定義自己的合流。Label 合併所有可到達的入邊與 fall-through，不替作者同步。
 
-`TimelineProgramV2` 在錄製 `_body` 時將 QICK 的 `label(label)`、`jump(label)`、`cond_jump(label, arg1, test, op=None, arg2=None)` 改成認得 timeline 的動作。
-`TimelineBuilder` 只記錄同名動作，在 build 時呼叫 program 的方法。
-這些方法在 `_body` 外維持 QICK 原行為。Raw `asm_inst` 跳轉不經 timeline 記帳，由作者負責。
+**例子。** `cond_jump` 記目標入邊並繼續編譯原路，不求值條件。`jump` 後不能放動作，直到有可到達入邊的 label。可跳到 `_body` 最後的作者 label 提早結束本發，shot 外殼仍收尾。若要保留各路徑自己的時間，先在入邊用 `delay_by_timeline` 同步，再進 label；否則 max 會影響下一個動作與 shot 收尾的放置。
 
-作者 label 在 `_body` 內用非空、唯一的字串命名。編譯器配置不與其他機器 label 衝突的名稱。
-這三個動作只允許出現在 `_body` 最外層，不得放在 Repeat body 或 Branch case。 `with timeline(name)` 只切換預設 timeline，不限制跳轉。
-目標必須在跳轉之後；迭代用 Repeat 或 sweep。重複定義、缺少目標、往回跳或位置不合法都在 build 報錯，訊息包含相關 label。
-條件跳轉只接受 `Z`、`NZ`、`S`、`NS` 的 register 測試，不接受硬體 peripheral flag。
+**邊界。** 各邊編譯期的 timeline／generator／ADC 結尾取 max，sweep 交叉時以 sweep register 重建逐點最大值。Runtime 結尾在各邊不同就報錯，列出 label、timeline 或 channel 與入邊，不在邊上補 register 寫入。只留各邊共有的 timeline 名稱。未知 ADC 結尾取聯集，producer 定義取交集，selection 證明依 Branch 規則。Source 表達式各邊均有且一致才保留；未另定合併的欄位必須相同。每個 ADC 讀取數須[對齊](#每發-adc-讀取數)。
+Label 名非空且唯一，編譯器避免撞到機器 label。位置不合法、重複定義、缺目標或往回跳在 build 報錯並指出 label。Repeat／case 內不能跳，`with timeline(name)` 只改預設名，不限制跳轉。條件只用 register 的 `Z`、`NZ`、`S`、`NS`，不用 peripheral flag。`_body` 外仍照 QICK，raw `asm_inst` 不經 timeline 記帳。`shot_sums` 等 label consumer 不沿跳轉邊列舉讀取；在跳轉與目標之間的 trigger 會被拒絕並指出目標，區間外共用讀取可解析。這不改 `trigs` 或 raw IQ。尚未實作的 continue／break 見[草稿](draft/control-flow-completeness.md)。
 
-`cond_jump` 把當下的狀態存為目標的一條入邊，原路繼續編譯。編譯器不求值條件，兩條路都算可到達。
-`jump` 存好入邊後，將 fall-through 標為不可到達。到下一個有入邊的 label 前，放任何 label 以外的動作都會報錯。
-Label 合併所有可到達的跳轉入邊與 fall-through。沒有可到達的前驅時，這個 label 不會重新打開後續路徑。
-
-- 具名 timeline 與每個 generator／ADC 的編譯期結尾取最大，沿用 Branch 的 `align_timeline=True`。Sweep 表達式交叉時，編譯器用 sweep register 重建逐點最大值。
-- 執行期結尾各邊相同才保留。不同時，build 報錯並列出 label、timeline 或 channel，以及入邊。編譯器不在入邊加 register 寫入來合併不同結尾。
-- Timeline 名字只保留各邊共有的名字。結尾未知的 ADC 取聯集。Producer 的定義取交集，selection 證明沿用 Branch 的合併規則。Source 表達式各邊都有且相同才保留。其餘欄位沿用 Branch 的規則，沒有合併規則的欄位要求各邊相同。
-- 每個 ADC 的讀取數在各邊都要相同，見[每發 ADC 讀取數](#每發-adc-讀取數)。
-
-取最大值決定 label 後動作與 shot 收尾的放置時間。編譯器不替作者加同步。若要保留各路徑自己的結尾時間，先在入邊用 `delay_by_timeline` 同步到各路徑的結尾，再進入 label。
-要提早結束本發的 body，可以跳到 `_body` 最後的作者 label；shot 外殼仍會收尾。迴圈的 continue／break 尚未實作，設計留在[草稿](draft/control-flow-completeness.md)。
-
-`shot_sums` 等讀取 label consumer 不沿跳轉邊列舉讀取。它們拒絕位於跳轉與目標 label 之間的 trigger，指出該目標。放在所有跳轉範圍之外的共用讀取照常解析。這不改變 `trigs`，也不限制 raw IQ 取數。
-
-2026-11-20，使用者把介面放在 Timeline program，而不是 builder 的專用 `exit_shot`，並說：「真正通用的机制应该是 condition jump 跟 label。」
-同日，使用者接受只往後跳：「可以接受统一只能往后跳」，並以「都采用建议」接受其餘第一版規則。
-Agent 依授權保留最外層限制，並補定合併與拒收細節。使用者 2026-11-20 覆核時回覆「確認」。理由見[往後跳轉的討論紀錄](../discussions/2026-11-20-timeline-forward-jumps.md)。
+**依據。** 2026-11-20，使用者：「真正通用的机制应该是 condition jump 跟 label。」同日答「可以接受统一只能往后跳」，並以「都采用建议」接受其餘第一版規則。最外層限制、補定的合併、拒收與模擬細節是 designer 代裁，使用者 2026-11-20 追認：「確認」。見[往後跳轉的討論與覆核](../discussions/2026-11-20-timeline-forward-jumps.md#後記)。
 
 #### 量測能力不抵可讀性成本時不加分支
 
-若新增的掃描範圍不足以抵銷第二條編譯或取數路徑的閱讀成本，保留一條路徑，超出已知容量就報錯。Two-qubit RB 每個 seed、arm 編一支板上 depth program，取數前全部編完。每個較淺 depth 的 recovery 直接放在前綴後，先同步到該路徑的結尾，再跳到共用讀取；最深的路徑直接接上讀取。
+**規則。** 新增的量測範圍不足以抵銷第二條編譯或取數路徑的閱讀成本時，保留一條路徑，超出容量就報錯。
 
-舊版 PMEM 對半分塊在稀疏網格只把最高 depth 增加約 15–60；例如 21 點約從 460 到 490。它需要額外的編譯重試、主機迴圈與跨軸 slice 寫入。若實際量測需要的深度用較少點仍放不下，而且可量測的範圍有明顯收益，再評估額外路徑。
+**例子。** Two-qubit RB 在板上掃 depth，每個 seed、arm 編一支 program，取數前全部編完。較淺 depth 在自己的前綴後播放 recovery，同步到該路徑的結尾，再跳到共用讀取。最深路徑直接接讀取。PMEM 對半分塊的深度收益與額外編譯、主機迴圈和 slice 寫入成本見[量測比較](../discussions/2026-11-20-rb-depth-program.md#被否決的選項與理由)。
 
-使用者 2026-11-20 裁定：「拿掉粉块，它带来的效益没有比可读性的破坏来得多」。比較條件與其他選擇見[板上 RB 程式改寫的討論](../discussions/2026-11-20-rb-depth-program.md)。
+**邊界。** 實際要量的深度以較少點仍放不下，而且增加的可量範圍有明顯收益時，才重評額外路徑。
+
+**依據。** 2026-11-20，使用者裁定：「拿掉粉块，它带来的效益没有比可读性的破坏来得多」。見 [板上 RB 程式改寫](../discussions/2026-11-20-rb-depth-program.md)。
 
 ### 每發 ADC 讀取數
 
-Timeline compiler 在 macro preprocess 時記錄 QICK 的每個 ADC trigger 增量。原生 trigger、module readout 和原生 macro 內部送出的 trigger 共用這條路徑。它把逐路徑累計值存進 `PathState`。
+**規則。** Timeline compiler 在 macro preprocess 取得 QICK 的逐 ADC trigger 增量，原生 trigger、module readout 與原生 macro 的內部 trigger 走同一路徑。`PathState` 累計各路徑的讀取數。每個 Branch 出口與作者 label 的可到達入邊（含 fall-through）須逐 ADC 相同。編譯器寫結果到 `ro_chs[ch]["trigs"]`，不重寫 Branch 或 Repeat 指令。
 
-Branch 的每個 case 從同一組入口計數開始。出口逐 ADC 比對所有 case，含省略的空 case。兩個 case 各讀一次時，本發只算一次；一個讀一次而另一個沒讀時，編譯報錯並列出各 case 的計數。同一 selector 後面再用另一個 Branch 補讀，不能抵銷前一次出口的差異。2026-11-20，使用者在互補寫法和每個 Branch 出口都對齊兩案中選後者：「3-1」。討論見 [Timeline 編譯器推算每發 ADC 讀取數](../discussions/2026-11-20-timeline-read-counts.md)。
+**例子。** 兩個 case 各讀一次，本發只算一次。若其中一個是空 case，就在本次 Branch 出口報錯，列出各 case 的計數；不能用同 selector 的第二個 Branch 補讀。Label 不符時列出 label、ADC 與各邊計數。
 
-作者 label 同樣逐 ADC 比對所有可到達的入邊，包含可到達的 fall-through。不同時，build 報錯並列出 label、ADC 與各邊的讀取數。
-固定 Repeat 的出口計數是入口加上迭代次數乘以單輪增量。`range_hint` 上下限相同的 register 次數也按固定次數計算；其餘 register 次數的 body 不得讀取 ADC。
-編譯器將每發計數寫入 QICK 的 `ro_chs[ch]["trigs"]`，不改 Branch 和 Repeat 的指令。`set_reads_per_shot` 只核對值，不再改配置。
-直接以 raw ASM 送出 ADC 觸發不經此記帳。CPU 模擬器仍逐發比對實際觸發數與 `trigs`。
+**邊界。** 固定 Repeat 的出口是入口加上圈數乘單輪增量，`range_hint` 的上下限相等也算固定；其他 runtime 次數的 body 不得讀 ADC。`set_reads_per_shot` 只核對，不改配置。Raw ASM 的 trigger 不經編譯器記帳，CPU 模擬器仍逐發比較實際 trigger 數與 `trigs`。
+
+**依據。** 2026-11-20，使用者選擇在每個 Branch 出口對齊，而不允許後續 Branch 互補，答「3-1」。見 [Timeline 編譯器推算每發 ADC 讀取數](../discussions/2026-11-20-timeline-read-counts.md)。Label 的合併依[往後跳轉的覆核](#往後跳轉與-label-合併)。
 
 ### 並行序列與 reference 守衛
 
-作者以 builder／program 為每個 sequence fork timeline，依作者順序 emit，最後 join 回母 timeline。
-各 sequence 從共同 origin 開始，sequence 及內部 Module 都不重排。`join` 只合併結尾，不發射 children。
-分支與迴圈直接使用上述 `branch`／`case` 與 `repeat()`，沒有 control module 包裝。
-TwoPulseReset／BathReset 的 child 與 branch case 不得經 reference owner 推進 reference。
-守衛設在實際推進 reference 的 owner 接縫，不按 macro 名稱或效果分類，不保留交換 admission。
-Producer provenance、全流寫入稽核、physical-end 與 case／Repeat backedge guards 照常執行，不加 padding 或 reference rewind。
+**規則。** 作者用 builder／program 從共同 origin 為各條 sequence fork timeline，依作者順序 emit，再 join 回母 timeline。Join 只併結尾，不發射 children 或重排序列。分支與迴圈用 program 的 `branch`／`case` 與 `repeat()`，不用 control module。
 
-2026-10-31，使用者對統一並行寫法回答：「f12同意，刪掉，不要有兩種寫法」。
-Fork／join lowering 與 reference owner 守衛由 advisor 同日依代理授權裁定，取代將推進型 sequence 排到最後的方案。
-Raw asm_inst 或自訂 Macro.translate 推進 reference 不經 timeline 記帳，也不受這些守衛或 Repeat 契約保護，結果由作者負責。
+**例子。** TwoPulseReset 或 BathReset 的 child，以及 Branch case，若呼叫會推進 reference 的 owner 接縫，build 報錯。守衛看實際推進，不按 macro 名或效果猜，也不把會推進的 sequence 移到最後。
+
+**邊界。** Producer provenance、全流寫入稽核、實體結尾與 case／Repeat 回邊照常檢查，不加 padding 或 rewind。Raw `asm_inst` 或自訂 `Macro.translate` 若直接推 reference，不經 timeline 記帳，守衛與 Repeat 契約都不保護，作者負責。
+
+**依據。** 2026-10-31，使用者對統一並行寫法答「f12同意，刪掉，不要有兩種寫法」。同日的 fork／join lowering 與 reference owner 守衛是 designer 代裁，使用者未覆核。原始討論未入庫，見 Git `3a8adfa93`。
 
 ### Compiled snapshot 與 simulation 入口
 
-IR compiler 每次成功 compile 後在 program 發布具型別、不可變的 `compiled_stream`。
-它保存優化前的 logical instructions、labels 與結構 metadata，是與 simulation 無關的 compiler artifact。
-`TimelineProgramV2` 的手寫與 builder 路徑使用相同契約。
-Snapshot 不借用可變的 Module／macro graph，與後續 program 變更隔離；consumer 取得 detached typed instructions。
-Compiler 擁有結構與資料，不依賴 simulation，也不透過 observer callback 管理 consumer。
-Simulation 不接管 compile lifecycle。
-存取、copy、recompile 與位址語意見 [IR README](../../lib/zcu_tools/program/v2/ir/README.md#pre-optimization-compile-snapshot)。
+**規則。** IR compiler 在成功 compile 後發布不可變、具型別的 `compiled_stream`，保存優化前的 logical instructions、labels 與結構 metadata。手寫與 builder program 共用此契約。Compiler 擁有內容，不借用可變的 module／macro graph，不依賴 simulation 或 observer callback；simulation 不管理 compile lifecycle。`SimulationAcquireMixin` 對 `SimulationSoc` 使用唯一 compiled request builder，明傳 SoC routes。Builder 交付 detached numeric requests，物理 backend 仍由 numeric owner 負責；其他 SoC 照 QICK 取數。
 
-Producer 以 LOOP／BRANCH／SOURCE 與 body 邊界描述結構、標記作者來源，並提供 resolved sweep 起點、步長與有限 table definitions。
-Simulation frontend 核對 metadata 與實際指令，不從 jump 或仿射 shell 反推結構，也不重新解釋 Module tree。
-不一致在建立 request 前拒絕。
-來源名稱由 producer 擁有，分工見 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#design-boundaries)。
+**例子。** 發布 body 邊界、LOOP／BRANCH／SOURCE、已解析的起點／步長與有限 table definitions，由 frontend 對照指令。編譯器為作者跳轉附 `CONTROL_LABEL` 與 `CONTROL_JUMP`，不寫入 binary。Label 標記貼著機器 label，jump 標記在指令前，只帶 `target`、`conditional` 與 `test`，無條件時 `test=None`。Frontend 核對最外層、唯一的前方目標、TEST 與跳轉指令，包括 direct JUMP 和 `WriteLabel(s15)` 加間接 JUMP。門檻見 [QICK big-jump](../../lib/zcu_tools/program/v2/README.md#big-jump-閾值)。同一個向量步驟中，跳走的 lanes 等到目標才恢復，其他 lanes 照常執行；等待中的 lane 不更新時間、register、memory、FIFO 或輸出事件。
 
-Timeline 跳轉只新增兩種固定欄位的結構標記，不帶 `kind`、`region` 或通用 payload。標記留在 snapshot，不寫入 binary。
-`CONTROL_LABEL` 記作者的 `label`，與對應的機器 label 同位置。
-`CONTROL_JUMP` 放在指令序列之前，記作者目標 `target`、布林值 `conditional` 與 QICK 的 `test`。無條件跳轉的 `test` 為 `None`。
-Frontend 驗證標記在 body 最外層，目標 label 唯一且在後方，指令的目標與條件和標記相符。
-它驗證 direct JUMP 與 `WriteLabel(s15)` 加間接 JUMP 兩種序列，條件跳轉還必須有對應的 TEST。Lowering 沿用 [QICK big-jump 閾值](../../lib/zcu_tools/program/v2/README.md#big-jump-閾值)。
-Body 內沒有結構標記涵蓋的 raw JUMP 照舊拒收。依硬體 flag 或量測回填 register 的跳轉也拒收。
+**邊界。** 支援與否看 instruction effect，不按 macro 類別或來源白名單。Frontend 不從 raw JUMP、仿射 shell 或 module tree 猜結構，metadata 與指令不符、無標記的 body JUMP、依硬體 flag 或量測回填 register 的跳轉，都在送 request／呼叫 backend 前拒絕。結構標記沒有通用 payload、`kind` 或 `region`。各 sweep point 獨立，reps 只在 metadata，不執行；非 sweep loop 依標記與 active mask 迭代，不展開。同值或輸出不變也不能讓 register、memory、readout config FIFO 或 pending update 跨 point／rep；prologue 後未再寫的常數或 config 可用。它保留 shot-local 運算、記憶體與 FIFO 時序，逐 lane 核對實際讀取數，不做回饋或 tProc latency 模擬，不提供 ordered engine 或 legacy fallback。[IR snapshot](../../lib/zcu_tools/program/v2/ir/README.md#pre-optimization-compile-snapshot)記存取、複製、recompile 與位址；[Simulation README](../../lib/zcu_tools/program/v2/simulation/README.md#compiled-request-builder)記 admission、routes、FIFO 與指令效果；[module owner](../../lib/zcu_tools/program/v2/modules/README.md#design-boundaries)擁有來源名稱。
 
-Sweep points 是獨立向量 lanes，reps 只保留在 request metadata，不執行。
-條件跳轉依各 active lane 的 TEST 結果分流，無條件跳轉則選全部 active lanes。
-被選中的 lane 等到目標 label 才恢復；其餘 lane 繼續執行。等待中的 lane 不更新時間、register、memory、FIFO 或輸出事件。
-跳轉只往後，frontend 依指令順序走一遍就能安排各 lane 的跳轉。取數仍逐 lane 核對實際 trigger 數與 `trigs`。
-Shot 內的非 sweep loops 依標記順序迭代，以 active masks 處理零次、固定與 register 次數，不展開指令流。
-跨 point／rep 的 register、memory、readout config FIFO 與 pending update 延續在建立 request 前拒絕，同值或輸出不變也不豁免。
-Prologue 後不再寫入的常數與 config 可用，沒有 ordered engine 或 fallback。
-支援範圍由 instruction effect 決定，不依 macro 類別或來源白名單；不支援的效果在呼叫 backend 前拒絕。
-Frontend 保留 shot-local 運算、memory 與 FIFO 時序，不執行量測結果 feedback，也不模擬 tProc 執行 latency；它不是通用 tProc emulator。
+`SimulationSoc` 在 request 生命週期持有取消查詢。`install_request` 收下該次 acquire 的旗標，`release_request` 清除，`run_round()` 把同一查詢交給 backend 和 pacing。QICK 0.2.436 的 decimated round 入口是 `start_tproc()`，accumulated 是 `start_readout()`；兩個入口都經 `run_round()`。QICK 簽名不改，旗標不放進 `AcquireRequest`。Backend 只讀查詢，不寫 caller 的旗標。Backend 拋 `Cancelled` 時，`SimulationAcquireMixin` 在 round 邊界清理中斷輪，不留下該輪資料。零完成輪拋 `StoppedPartialAcquireError`；已有完成輪則照 QICK finalize 回傳其平均。實機路徑不變。
 
-`SimulationAcquireMixin` 對 `SimulationSoc` 呼叫唯一的 compiled request builder，傳入 SoC routes。
-Builder 讀 snapshot，輸出 detached numeric requests；physical backend 仍由既有 numeric owner 負責。
-其他 SoC 保留 QICK acquisition。
-舊 Module-tree simulation frontend 已移除，不留 selector、legacy oracle 或 fallback。
-呼叫與拒絕契約見 [simulation README](../../lib/zcu_tools/program/v2/simulation/README.md#compiled-request-builder)。
-
-2026-10-29，使用者要求：「優化是一定要做的，你可以安排流程」，對 compiled frontend 選擇回答：「A, 不是瓶頸就好」。
-同日，對移除舊 frontend，使用者裁定：「舊前端不留，第二題你決定」。
-對運算支援，使用者回答：「運算的採用建議」，因此採 instruction effects 判定，取代早期 runtime 運算禁令。
-2026-10-30，使用者描述執行模型：「每個內部迴圈都當作獨立點向量化模擬，但內部非sweep迴圈會視為一個shot內部的order，但不會單純的展開」。
-對獨立 shot 與拒絕跨 shot carry 的提案，使用者回答：「採用建議」。
-同日，通用標記暫緩後，使用者回答：「那採用建議做法」。
-這個裁決先用於有限的 LOOP metadata，也適用於上述兩種跳轉標記。
+**依據。**
+- 2026-10-29，使用者：「優化是一定要做的，你可以安排流程」。對 compiled frontend 答「A, 不是瓶頸就好」，對舊 frontend 答「舊前端不留，第二題你決定」，對運算支援答「運算的採用建議」。以指令效果判定，取代早期 runtime 運算禁令，早期範圍見[原型討論](../discussions/2026-10-29-module-to-macro.md#模擬器的範圍)。
+- 2026-10-30，使用者：「每個內部迴圈都當作獨立點向量化模擬，但內部非sweep迴圈會視為一個shot內部的order，但不會單純的展開」。對獨立 shot 與拒絕跨 shot carry 答「採用建議」；通用標記暫緩後答「那採用建議做法」，用有限的 LOOP metadata，跳轉也用有限標記。Snapshot 存取、routes 與 FIFO 細節是 designer 依 compiled frontend 授權代裁，使用者未覆核。上述 compiled 選項的原始問答未入庫，交付見 Git `182b9bede`。
+- 2026-11-20 的跳轉標記與 lanes 行為是 designer 代裁，使用者 2026-11-20 追認：「確認」。見[往後跳轉的討論後記](../discussions/2026-11-20-timeline-forward-jumps.md#後記)。
+- 2026-11-21，使用者答「3C，但設計上5秒內」，選擇讓 decimated 的取消進入 FTF 求解。取消傳輸與零輪轉換由 designer 依授權代裁，使用者未覆核。見 [FTF Stop 討論](../discussions/2026-11-21-ftf-stop-checkpoints.md)與 [simulation acquisition 契約](../../lib/zcu_tools/program/v2/simulation/README.md)。
 
 ### IR analysis 與驗收責任
 
-`program/v2/ir` 擁有唯讀時序 analysis，不 import frontend 私有 macro，也不從 module total_length 回推編譯行為。
-Program owner 產生 boundary metadata，經既有 IR meta 通道傳到最終 linked addresses，公開為 `timing_layout`。
-Layout 提供 body_start、body_end 與由外到內的 loop 名稱／次數。Loop 資訊只用於掃描座標，不取代編譯指令的初值、更新與跳轉。
-`CompiledTimingInput` 接收公開 prog_list、labels、layout，以及 `compile_datamem()` 的 dmem 結果。
-Dmem 是 signed int32 words，位址是從零起算的 word offset；None 或空資料不是零填記憶體。
-Analysis 只讀已知位址及資料並處理可決定的控制流，缺資料、未知或越界位址、寫入等未支援效果均報錯。
-Caller 不重建 dispatch table，不用固定指令數、手填位址或掃 opcode 猜 shot 外殼。
+**規則。** `program/v2/ir` 擁有唯讀時序 analysis，不讀 frontend 私有 macro 或從 module `total_length` 猜行為。Program owner 透過既有 IR metadata 傳遞 body boundaries 及 loop 名稱／次數，依最終 linked addresses 公開為 `timing_layout`。Loop 資料只標掃描座標，不能代替指令中的初值、更新與跳轉。驗收以合法輸入和現行 B1／規則 b 獨立手算逐點事件以及 body／shot 結尾，不把新舊結果相等、指令數、register 排法或逐位相同當正確性。
 
-每次執行 body_start 開始一個 shot。
-Shot_end 取下次 body_start 前的 reference，最後一個取程式結束時的 reference，包含 final_wait／final_delay 外殼。
-結果另提供 body_end reference，供觀察 body 自身推進量。
-事件 cycle 的原點是初始 reference 0，analysis 不模擬 CPU latency。
-Resync 讀硬體 s_usr_time／s11，analysis 明確拒絕，不預設為 0，也不宣稱其後精確時序。
-編譯期可知的 register 時間與唯讀 dmem 照常分析，不套用硬體時間例外。
-IR 窗口同時計入字面值 s14 增量與 TIME inc_ref，register 增量視為未知，不展開該窗口。
-TimeInst 不宣告讀寫 s14，TIME 不碰 s14；純 register 自我複製的刪除由通用 peephole 處理，不把 timeline 規則放進 IR。
-這項 IR／program 分工由 advisor 於 2026-11-01 依代理授權確認。
+**例子。** 由同次編譯的 `prog_list`、labels、layout 與 `compile_datamem()` 建 `CompiledTimingInput`。每次到 `body_start` 開始一發，下一次 `body_start` 前的 reference 是前一發 `shot_end`，最後一發用程式終點，含 `final_wait`／`final_delay`。另報 `body_end` 供觀察 body 本身推進的量。事件 cycle 從初始 reference 0 起算。驗證 WAIT 時，從公開事件與 `body_end` 加上獨立換算的 generator／ADC 時鐘和長度求剩餘量；隨機和固定案例驗每點都夠等，能證明精確時用精確 max，並核對 slack 的 warning 與 relax 拒絕邊界。例見 [Compiled timing 驗收](../../lib/zcu_tools/program/v2/modules/README.md#compiled-timing-驗收)。
 
-Analysis 沒有 waveform／ADC 積分長度，不能單獨算出 event end，也不作 production WAIT guard 的 oracle。
-WAIT 驗收從公開逐點事件與 body_end 出發，另以已知硬體時鐘和播放／積分長度獨立計算剩餘時間。
-隨機 program 與固定回歸案例檢查 WAIT 不小於任何合法點的剩餘時間，已證明精確的來源使用精確 max。
-能證明合法點剩餘相同時須精確且無 warning；變動時區分實際 slack 與保守上界，再檢查 warning 及 relax 的拒絕邊界。
+**邊界。** Analysis 不模擬 CPU latency，不能單獨算 waveform 或 ADC end，也不是正式 WAIT guard 的 oracle。Dmem 用 signed int32 words，位址是從零起算的 word offset，None 或空資料不是零填。只讀已知且在範圍內的地址；缺資料、未知位址、越界、寫入或不可決定的控制流均報錯。Caller 不重建 dispatch table 或掃 opcode 猜邊界。Resync 讀硬體 s11，analysis 拒絕，不假設為 0。已知 register 時間及唯讀 DMEM 仍可分析。IR 窗口看字面值 s14 增量及 TIME inc_ref；register 增量使窗口未知，不展開。`TimeInst` 不讀寫 s14，自我複製交給通用 peephole，不在 IR 放 timeline 特例。一次性遷移報告不是現行 gate，不為還原舊指令排法新增 scalar＋sweep 合併。參見 [IR analysis 契約](../../lib/zcu_tools/program/v2/ir/README.md#compiled-timing-analysis)。
 
-使用者於 2026-10-29 裁定：「第一件選A，語意與行為一致就可以了，舊設計的怪癖不一定要對齊」，並強調：「我沒有要求必須與舊的一致，我要求的是與預期行為一致」。
-因此驗收從具體輸入與現行 B1／規則 b 獨立手算逐掃描點的 pulse／trigger 絕對 cycle、body_end 與 shot_end，不由受測 total_length 或新舊輸出生成 expected。
-指令數、register 排法與逐位相同都不是驗收條件，不為還原它們新增 scalar＋sweep 合併。
-新舊六項輸出 prog_list／labels／pmem／wmem／dmem／asm 連同輸入、版本、重現命令只作一次性遷移差異報告。
-規則 a→b 報告使用真實 A baseline 與 B 編譯結果。兩側支援且輸入合法時，逐點列 event、body／shot end 與 b−a delta。
-A 不支援的 owner／runtime 組合列具體原因，A timing 與 delta 記 N/A；B 仍以真 producer 完成獨立手算驗收。
-不為比較另寫 rule-a adapter。Legacy 原始輸出只能標示「沒有 boundary metadata」，不冒充 rule a、不猜時序，也不為它新增 producer。
-報告區分預期改變、舊怪癖與新缺陷，說明正負 delta，不設只許提前或統一 N cycle 門檻。
-這項報告政策由 advisor 依使用者 2026-10-30 代理授權裁定，沿用使用者要求的預期行為驗收。
-例如修正漏算的較長 qubit tail 可以讓 B 的 body 結尾晚於 A，不能以 delta 的正負取代正確性判斷。
-新缺陷須修正，未知差異須回報；報告不成為常駐的新舊 equality test。
+**依據。**
+- 2026-10-29，使用者：「第一件選A，語意與行為一致就可以了，舊設計的怪癖不一定要對齊」，並強調「我沒有要求必須與舊的一致，我要求的是與預期行為一致」。見 [驗收改為預期行為的討論](../discussions/2026-10-29-module-to-macro.md#驗收基準改為預期行為)。
+- 2026-10-30，一次性遷移報告由當時的 advisor 依使用者授權代裁，使用者未覆核。原始工作檔未入庫，報告規則與例子見 Git `3a8adfa93`。
+- 2026-11-01，IR／program 的分工是 designer 代裁，使用者未覆核。見 [s14 與 IR 的討論](../discussions/2026-10-31-timeline-variable-model.md#s14-與-ref)及 Git `3a8adfa93`。
 
 ### 現行交付範圍與裁定沿革
 
-Timeline module lowering、規則 b、runtime timeline、builder／Schedule 分工與 compiled simulation frontend 均已交付。
-全部實驗已改用 Timeline；舊 program、builder、module lifecycle 與 control module 不再保留為平行路徑。
-MuxReadout 的 `collect_iq`／`collect_raw_iq` 依 Timeline program 已編譯的 readout emission 取數，保留平均、ADC 長度正規化、offset、tone／ADC 順序與輸出 shape。
+**規則。** 全部實驗用 Timeline program；module lowering 採規則 b，runtime timeline、builder／Schedule 分工與 compiled simulation frontend 都是現行路徑，不是階段開關。
 
-早期 A／B／C／D 是交付順序，不是現行功能開關。A 的規則 a、靜態證明限制與 register Repeat 等待上界已由本篇的規則 b 與 runtime 契約取代。
-2026-10-29，對規則 b 與差異報告提前到 B、D 只刪舊路徑的安排，使用者回答：「採用建議」。
-同日，對 B 的 register delay、Module Join lowering 與 Mux 取數範圍，使用者回答：「1A  2B 3A」。
-當時三項分別採用 register 名稱表示 timeline cycles、保留 Module Join 的原生 lowering，以及只轉 Mux 宣告／播放、不擴 collect_raw_iq。後兩項已由 2026-11-01 的全面遷移裁定取代。
-2026-10-31，對 D 移回大量實驗遷移結尾的安排，使用者回答：「採用建議」。遷移與刪除現已完成，不再留待 D 交付。
+**例子。** `MuxReadout.collect_iq`／`collect_raw_iq` 從 Timeline program 已編譯的 readout emission 取數，保留平均、ADC 長度正規化、offset、tone／ADC 順序與輸出 shape。降低 register 用量後，四個 chevron／constructive_phase 實驗的硬體與 host 路徑共移除八處 drive join 後同步。舊 cfg 仍能編譯，公開編譯事件時間逐點不變。
 
-2026-10-30，對先交付 builder／Schedule 取數、實驗遷移另開工作且等待模擬 frontend 的安排，使用者回答：「沒問題，採用建議，我思考soc/prog的順序，感覺prog應該要是第一個才對」。
-因此現行 run 入口以 program 在前、soc 在後。Builder 不管理取數，Schedule 不組裝 program。
-Compiled frontend 已取代舊 Module-tree simulation frontend，沒有 legacy selector 或 fallback。
+**邊界。** 不保留 `ModularProgramV2`、`BaseCustomProgramV2`、`ProgramBuilder`、`Schedule.prog_builder`，也沒有 `Join`／`Branch`／`Repeat`／`ScanWith` control module。Module 作者不用 legacy `init`／`run`／`block_mode`／`tag` 或 `set_param`；每次 emit 指定 tag，數值覆寫走建構子。原生 program 仍有分支與迴圈能力。舊 Module-tree frontend 不留 selector、oracle 或 fallback。
+
+**依據。**
+- 2026-11-01，使用者裁定「不要留Join」，並要求「ModularProgram連同Join/Branch/Repeat/ScanWith都刪掉，全面用新的TimelineProgram，我應該早就這樣要求了」。同日對不影響時序的同步答「13沒影響就移除多餘的同步」。原始問答未入庫，見 Git `7cab54392`、`57f83c88e`。
+- 2026-10-29 的階段安排見[原型與遷移討論](../discussions/2026-10-29-module-to-macro.md#驗收基準改為預期行為)。當天回答「1A  2B 3A」中，以 register 名稱傳入 timeline cycles 的設計仍適用；Module Join 與當時的 Mux 取數範圍由全面遷移取代，見 Git `bbcd98bd5`。2026-10-31 重新排定大量實驗遷移，原始問答未入庫，見 Git `7cab54392`。
 
 ## 依賴與後果
 
-序列組裝留在 program，取數執行政策由 experiment runtime 擁有。
-Experiment 可依賴 program；program 不反向依賴 experiment，此方向由 `.importlinter` C8 檢查。
-沿用 [[0072]] 的分層與 `.importlinter` 的 C8、C9、C12、C19，以及 `program-simulation-entry` contract。
-IR analysis 是編譯結果分析，不是物理模擬 frontend，不產生模擬量測資料。
-模擬遷移的狀態另見 [simulation-environments](draft/simulation-environments.md#compiled-frontend-與小介面依賴)。
+Program 組裝序列，experiment runtime 擁有取數政策。Experiment 可依賴 program，program 不反向依賴 experiment。沿用 [[0072]] 及 `.importlinter` 的 C8、C9、C12、C19 與 `program-simulation-entry`。IR analysis 只分析編譯結果，不產生模擬量測資料。模擬遷移見 [simulation-environments](draft/simulation-environments.md#compiled-frontend-與小介面依賴)。
 
-作者必須明確同步 timeline 與原生 reference，不能以未同步的原生 pulse 代替序列發射。
-Runtime timeline 承接無法靜態精確表示的時間。已知來源保留 bounds、provenance 與可證明重疊的拒絕，無 hint 作者時間的未知段由作者負責合法性。
-Data register 上限仍為 16，不保證任意序列都能編譯。
-register-economy 後，chevron／constructive_phase 四個實驗的硬體與 host 路徑共八處 drive Join 後同步已刪除。
-原 cfg 仍可編譯，公開 compiled 事件時間與刪除前逐點相同。
-2026-11-01，使用者裁定：「13沒影響就移除多餘的同步」。
-原生寫法與公開 API 範例由 [program README](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline) 維護，module 宣告與 owner 邊界見 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#原生寫法)。
+作者須明示何時同步 timeline 與原生 reference，不能用未同步的原生 pulse 代替序列發射。無法靜態表示的時間由 runtime timeline 承接，未知的作者時間段由作者負責；仍有 16 個 data register 上限。[原生 program 寫法](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline)與 [module 宣告](../../lib/zcu_tools/program/v2/modules/README.md#原生寫法)見各 owner README。
