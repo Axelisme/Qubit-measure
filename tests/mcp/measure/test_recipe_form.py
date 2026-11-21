@@ -581,18 +581,21 @@ def test_open_tab_named_controls_reset_with_local_target(
     ("target", "aliases"),
     [
         (
-            {"f1": "Q3", "f2": "Q5", "coupler": "C0", "mux": "MUX2"},
-            {"f1": "Q3", "f2": "Q5", "coupler": "C0", "mux": "MUX2"},
+            {"qubit1": "Q3", "qubit2": "Q5", "coupler": "C0", "mux": "MUX2"},
+            {"qubit1": "Q3", "qubit2": "Q5", "coupler": "C0", "mux": "MUX2"},
         ),
-        ({"f1": "Q3", "f2": None, "mux": "MUX2"}, {"f1": "Q3", "mux": "MUX2"}),
+        (
+            {"qubit1": "Q3", "qubit2": None, "mux": "MUX2"},
+            {"qubit1": "Q3", "mux": "MUX2"},
+        ),
     ],
 )
 def test_open_tab_resets_all_provided_roles_together(
     tmp_path: Path, target: dict[str, str | None], aliases: dict[str, str]
 ) -> None:
     class RoleTargets(BaseModel):
-        f1: str | None = None
-        f2: str | None = None
+        qubit1: str | None = None
+        qubit2: str | None = None
         coupler: str | None = None
         mux: str | None = None
 
@@ -605,8 +608,8 @@ def test_open_tab_resets_all_provided_roles_together(
         session.open_tab(
             "synthetic",
             target={
-                "f1": roles.f1,
-                "f2": roles.f2,
+                "qubit1": roles.qubit1,
+                "qubit2": roles.qubit2,
                 "coupler": roles.coupler,
                 "mux": roles.mux,
             },

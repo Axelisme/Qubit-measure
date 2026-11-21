@@ -25,11 +25,11 @@ class ConditionalPhaseInputs(RecipeInputs):
 
     target: TwoQubitTarget | None = Field(
         default=None,
-        description="Role bindings for this Reset. Omitted or null roles keep the current aliases.",
+        description="Position bindings for this Reset. Omitted or null positions keep the current aliases.",
     )
     reuse_tab_id: ReuseTabId
     overrides: Overrides
-    ramsey_role: Literal["f1", "f2"] | None | Keep = Field(
+    ramsey_role: Literal["qubit1", "qubit2"] | None | Keep = Field(
         KEEP, description="Qubit that measures phase, assigned to Form target."
     )
     gate_count: list[Annotated[int, Field(strict=True, ge=1)]] | None | Keep = Field(

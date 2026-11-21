@@ -126,7 +126,7 @@ class AutoOptCfg(ConfigBase):
     ]
     length: Annotated[
         SweepCfg,
-        FieldMeta(label="Readout length", unit="us"),
+        FieldMeta(label="Readout length", unit="µs"),
     ]
     skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
         default=0.0, ge=0.0
@@ -144,17 +144,24 @@ class AutoOptCfg(ConfigBase):
     ] = None
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -305,7 +312,7 @@ def _live_search_plot(
         ("Iteration", grid[:, 0]),
         ("Frequency (MHz)", grid[0, 1]),
         ("Readout Gain (a.u.)", grid[1, 1]),
-        ("Readout Length (us)", grid[2, 1]),
+        ("Readout Length (µs)", grid[2, 1]),
     ):
         ax = figure.add_subplot(cell)
         ax.set(xlabel=xlabel, ylabel="SNR (a.u.)")
@@ -328,7 +335,7 @@ def _live_search_plot(
         cur_freq, cur_gain, cur_len = sampled_params[idx, :]
         title = (
             f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), "
-            f"Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (us)"
+            f"Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (µs)"
         )
         artists: list[Artist] = [axes[0].set_title(title)]
         for line, xs in zip(
@@ -493,7 +500,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         ax_iter.axhline(max_snr, color="r", ls="--", label=f"best = {max_snr:.2g}")
         ax_iter.scatter([max_id], [max_snr], color="r", marker="*")
         ax_iter.set_xlabel("Iteration")
-        ax_iter.set_ylabel("SNR")
+        ax_iter.set_ylabel("SNR (a.u.)")
         ax_iter.legend()
         ax_iter.grid(True)
 
@@ -509,13 +516,13 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
             ax.axvline(best_value, color="r", ls="--", label=f"best = {best_label}")
             ax.scatter([best_value], [max_snr], color="r", marker="*")
             ax.set_xlabel(label_name)
-            ax.set_ylabel("SNR")
+            ax.set_ylabel("SNR (a.u.)")
             ax.legend()
             ax.grid(True)
 
         plot_ax(ax_freq, 0, "Frequency (MHz)", f"{best_params[0]:.2f} MHz")
         plot_ax(ax_gain, 1, "Readout Gain (a.u.)", f"{best_params[1]:.3g} a.u.")
-        plot_ax(ax_len, 2, "Readout Length (us)", f"{best_params[2]:.3g} us")
+        plot_ax(ax_len, 2, "Readout Length (µs)", f"{best_params[2]:.3g} µs")
 
         return AutoOptAnalysis(
             float(best_params[0]), float(best_params[1]), float(best_params[2])

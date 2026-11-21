@@ -45,8 +45,8 @@ def make_form(ctx: FormContext) -> Form[OnetoneFluxLocalCfg]:
     for field, description in (
         ("reps", "Fixed 1000 repetitions per round candidate"),
         ("rounds", "Fixed 10 software rounds candidate"),
-        ("initial_delay", "Fixed 1.0 us initial delay candidate"),
-        ("relax_delay", "Fixed 1.0 us recovery delay candidate"),
+        ("initial_delay", "Fixed 1.0 µs initial delay candidate"),
+        ("relax_delay", "Fixed 1.0 µs recovery delay candidate"),
         ("settle", "Fixed 0.1 s DC settling candidate; confirm for each driver"),
         ("flux_expts", "Shared 101-point zipped local DC scan candidate"),
     ):

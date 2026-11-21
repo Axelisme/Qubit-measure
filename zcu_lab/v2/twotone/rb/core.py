@@ -65,20 +65,26 @@ class RBCfg(ConfigBase):
     readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
     depth: Annotated[
         list[Annotated[int, Field(ge=0, strict=True)]],
-        FieldMeta(label="Clifford depths"),
+        FieldMeta(label="Clifford depths", unit="count"),
     ] = Field(min_length=1)
     """Ordered nonempty nonnegative integer Clifford depths."""
     seed: Annotated[int, FieldMeta(label="Random seed")]
-    n_seeds: Annotated[int, FieldMeta(label="Number of sequences")] = Field(ge=2)
+    n_seeds: Annotated[int, FieldMeta(label="Number of sequences", unit="count")] = (
+        Field(ge=2)
+    )
     """Number of independent random sequences, shared between arms when interleaving."""
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
+            unit="count",
             description="Number of acquisition rounds to average per seed and arm.",
         ),
     ] = 1
@@ -86,7 +92,7 @@ class RBCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -107,7 +113,7 @@ def _live_plot(
 ) -> Callable[[NDArray[np.complex128]], None]:
     """Show one live line per arm and return its owner-dispatched IQ update."""
     fig, ax = plots.subplots(num="measurement")
-    ax.set(xlabel="Random Clifford depth", ylabel="Signal (a.u.)")
+    ax.set(xlabel="Random Clifford depth (count)", ylabel="Signal (a.u.)")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
     ax.grid()
     viewer = live_errorbar(ax, num_lines=n_arms)
@@ -345,7 +351,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             )
             ax.plot(result.depths, fit.fit_signals[arm], color=line.get_color())
         ax.set(
-            xlabel="Random Clifford depth",
+            xlabel="Random Clifford depth (count)",
             ylabel="Projected IQ (a.u.)",
             title=title,
         )

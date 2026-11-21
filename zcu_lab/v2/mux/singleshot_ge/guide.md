@@ -46,7 +46,7 @@ tone still needs valid frequency and ADC identity, even when not selected.
 ## FTF cost example
 
 A two-participant offline Run used 300 shots per preparation, two preparations,
-0.02 us const probe pulses and 0.1 us recovery. Reps and rounds stayed fixed
+0.02 µs const probe pulses and 0.1 µs recovery. Reps and rounds stayed fixed
 at 1. The recorded Run action took 6.118 s for the pair, about 3.06 s per
 preparation. There is no frequency or delay sweep point here.
 This preparation average is not per-shot acquisition latency.
@@ -79,7 +79,7 @@ Analyze fits each tone's probe-off/on clouds. Initial state describes the
 predominant state after reset/init and before probe. It maps analysis rows to g/e
 while preserving the stored data order.
 Options include PCA/center fitting, angle in degrees, log histogram, T1 alignment
-and a dimensionless length ratio.
+and the readout length / T1 ratio (a.u.).
 The length ratio (readout length / T1) is inferred from the decay tail between the two clusters.
 With Length Ratio left empty, two tight clusters without a visible tail make Analyze return `length_ratio: null` and title the IQ plot `GE IQ (length ratio: not identifiable)`.
 This reporting decision does not change centers, fidelity or Post.

@@ -53,7 +53,7 @@ from ._config import RBInputs
 
 @dataclass(frozen=True)
 class RBResult:
-    """Float64 class counts with axes (seed, arm, depth, F1, F2).
+    """Float64 class counts with axes (seed, arm, depth, Qubit1, Qubit2).
 
     depths counts random Cliffords; seeds retains exact random.Random identities.
     The fixed arm axis [0,1] means reference/CZ-interleaved. sums ends in (3,3),
@@ -218,7 +218,7 @@ def validate_axes(
 
 
 def restore_result(data: GroupedLoadData[RBCfg]) -> RBResult:
-    """Restore counts on (seed, arm, depth, F1, F2) from saved arrays.
+    """Restore counts on (seed, arm, depth, Qubit1, Qubit2) from saved arrays.
 
     data supplies the grouped sums variable and its persisted scan axes. Return
     this experiment's Result with float64 class counts and its original axis
@@ -252,8 +252,8 @@ def build_program(config: RBCfg, soccfg: QickConfig, arm: RBArm) -> TimelineProg
     emit_depth_sweep(
         builder,
         arm,
-        x90=(config.x90_f1, config.x90_f2),
-        x180=(config.x180_f1, config.x180_f2),
+        x90=(config.x90_qubit1, config.x90_qubit2),
+        x180=(config.x180_qubit1, config.x180_qubit2),
         drive=config.drive,
         phase_pair=config.phase_pair,
     )
@@ -269,8 +269,8 @@ class RBExp(Experiment[RBResult, RBCfg]):
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit1", unit=""),
                     VariableAxisSpec(
                         label="Clifford depth",
                         unit="",
@@ -294,7 +294,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         ),
         result_type=RBResult,
         cfg_type=RBCfg,
-        cfg_schema_version="6.0",
+        cfg_schema_version="7.0",
         tag="two_qubit/rb",
         result_builder=restore_result,
     )
@@ -307,7 +307,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         Compile one board program per seed and arm before acquiring. Each
         program acquires reps shots per depth for each acquisition round and the
         reducer adds finished rounds. A mux herald reset excludes rejected shots.
-        Return counts on (seed, arm, depth, F1, F2), NaN in unacquired cells.
+        Return counts on (seed, arm, depth, Qubit1, Qubit2), NaN in unacquired cells.
         """
         # 1. Compare reference and CZ-interleaved joint00 survival across Clifford depth.
         fig, ax = context.plots.subplots(num="measurement")
@@ -349,8 +349,8 @@ class RBExp(Experiment[RBResult, RBCfg]):
                     reducer = shot_sums(
                         program,
                         [
-                            Classify("terminal", config.roles.f1_tone),
-                            Classify("terminal", config.roles.f2_tone),
+                            Classify("terminal", config.qubit1_tone),
+                            Classify("terminal", config.qubit2_tone),
                         ],
                     )
                     arm_step.run_acquire_summed(

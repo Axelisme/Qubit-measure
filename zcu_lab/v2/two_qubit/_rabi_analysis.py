@@ -17,7 +17,7 @@ from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_share
 class ReturnData:
     """Count-derived terminal probabilities and fit eligibility.
 
-    populations is (Nc,Nd,9), flattened F1/F2 g/e/other order, with P00 first.
+    populations is (Nc,Nd,9), flattened Qubit1/Qubit2 g/e/other order, with P00 first.
     complete marks points with finite, positive counts from completed rounds.
     acquired_shots is the accepted total (Nc,Nd), NaN for unmeasured points.
     """

@@ -84,17 +84,24 @@ class AcStarkCfg(ConfigBase):
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -176,9 +183,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         # Show measured G/E/Other fractions alongside the current trace.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(0.0, 1.0)
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
+            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
             ax.legend()
 
@@ -198,7 +203,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                 title=state.capitalize(),
             )
             heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
-        ax_current.set(xlabel="Probe Frequency (MHz)", ylabel="Population")
+        ax_current.set(xlabel="Probe Frequency (MHz)", ylabel="P(g), P(e), P(other)")
         cur_1d = live_line(ax_current, num_lines=3)
         configure_axes(ax_current)
         current_index = 0

@@ -6,7 +6,7 @@
 
 Select the qubit and its resonator. Confirm the qubit pi pulse, readout frequency, readout waveform, integration window and ADC wiring. The optional reset runs before each preparation. The gain sweep overrides the readout gain for both R1 on and R2.
 
-Set `wait` in us. The Form starts it at 0.01 times the captured T1 estimate and starts `relax_delay` at 5 times T1. If T1 is missing or null, or no capture exists, the Form uses 30 us as a first-run time scale. This gives `wait = 0.3 us` and `relax_delay = 150 us`; the 30 us scale is not a calibrated T1 and is not written back as one. A stored but invalid T1 leaves these fields blank and Invalid until you enter values. These starting values do not establish a suitable photon ring-down time.
+Set `wait` in µs. The Form starts it at 0.01 times the captured T1 estimate and starts `relax_delay` at 5 times T1. If T1 is missing or null, or no capture exists, the Form uses 30 µs as a first-run time scale. This gives `wait = 0.3 µs` and `relax_delay = 150 µs`; the 30 µs scale is not a calibrated T1 and is not written back as one. A stored but invalid T1 leaves these fields blank and Invalid until you enter values. These starting values do not establish a suitable photon ring-down time.
 
 `wait` starts after the R1 waveform and its configured post-delay, not after the ADC integration window. Set the readout timing and wait so the two ADC windows do not overlap. Include any extra resonator ring-down time you need in this interval.
 
@@ -41,7 +41,7 @@ Analyze produces a metric grid and an F_sep versus QND scatter plot. The grid sh
 - Retention S, QND Q, upward and downward flip probabilities, and middle-pi miss fraction f, each with a solid R1-on curve and dashed R1-off curve.
 - Covariance retention from the R1-on calibration branches as a model check. This curve and the three shared calibration curves have the legend R1 on; they do not have an R1-off estimate.
 
-All metrics are dimensionless. Analysis leaves estimates outside the physical range unclipped. Missing shots or degenerate moments give NaN for the affected metrics. The R1-off curves use the R1-on calibration because a zero-gain R1 has no state separation.
+The plots label each metric by name. Analysis leaves estimates outside the physical range unclipped. Missing shots or degenerate moments give NaN for the affected metrics. The R1-off curves use the R1-on calibration because a zero-gain R1 has no state separation.
 
 QND includes R1 and the waiting interval, so it also includes ordinary relaxation. Compare on and off before attributing a loss to measurement. A discrepancy between mean-based and covariance retention indicates that the two-state, isotropic-noise model may not describe the data. It does not identify or correct leakage. F_sep is a Gaussian separation estimate, not an assignment fidelity measured from labeled shots.
 

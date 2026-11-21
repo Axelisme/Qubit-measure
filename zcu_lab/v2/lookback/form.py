@@ -108,11 +108,11 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
                 calibration="uncalibrated",
             ),
             ("readout", "module", "trig_offset"): FieldMeta(
-                description="$resonator.time_of_fly - 0.1 us; missing/null TOF uses a 0 us offset，未校準的起始值，來源：固定常數。operator confirmation required",
+                description="$resonator.time_of_fly - 0.1 µs; missing/null TOF uses a 0 µs offset，未校準的起始值，來源：固定常數。operator confirmation required",
                 calibration="uncalibrated",
             ),
             ("readout", "module", "ro_length"): FieldMeta(
-                description="未校準的起始值，來源：固定常數。lookback Template ADC window 1.5 us; operator confirmation required",
+                description="未校準的起始值，來源：固定常數。lookback Template ADC window 1.5 µs; operator confirmation required",
                 calibration="uncalibrated",
             ),
         }

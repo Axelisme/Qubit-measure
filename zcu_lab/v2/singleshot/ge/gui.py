@@ -50,7 +50,7 @@ class GEAnalyzeParams:
     logscale: Annotated[bool, ParamMeta(label="Log Scale")] = False
     align_t1: Annotated[bool, ParamMeta(label="Align T1")] = True
     length_ratio: Annotated[
-        float | None, ParamMeta(label="Length Ratio", decimals=4)
+        float | None, ParamMeta(label="Length ratio (a.u.)", decimals=4)
     ] = None
 
 

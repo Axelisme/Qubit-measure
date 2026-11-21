@@ -146,7 +146,7 @@ def _get_writeback_items(
             [
                 ParameterWriteback(
                     target_name=f"{qubit}.t1",
-                    description="T1 relaxation time (us)",
+                    description="T1 relaxation time (µs)",
                     proposed_value=fit.t1,
                     stderr=fit.t1_err,
                 ),

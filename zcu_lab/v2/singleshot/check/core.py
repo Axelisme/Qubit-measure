@@ -38,18 +38,18 @@ class CheckCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    shots: Annotated[int, FieldMeta(label="Shots")]
+    shots: Annotated[int, FieldMeta(label="Shots", unit="count")]
     initial_delay: Annotated[
         float,
         FieldMeta(
-            label="Initial delay", unit="us", description="Delay before the first shot."
+            label="Initial delay", unit="µs", description="Delay before the first shot."
         ),
     ] = 1.0
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Delay after each shot.",
         ),

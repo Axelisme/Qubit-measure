@@ -271,19 +271,19 @@ class MuxGECfg(ConfigBase):
     readout: MuxReadoutCfg
     tones: Annotated[list[MuxGEToneCfg], FieldMeta(element_label="name")]
     participants: list[StrictInt]
-    shots: StrictInt = Field(gt=0)
+    shots: Annotated[StrictInt, FieldMeta(label="Shots", unit="count")] = Field(gt=0)
 
     initial_delay: Annotated[
         float,
         FieldMeta(
-            label="Initial delay", unit="us", description="Delay before the first shot."
+            label="Initial delay", unit="µs", description="Delay before the first shot."
         ),
     ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Delay after each shot.",
         ),
@@ -489,7 +489,7 @@ def _validate_fixed_pulse(pulse: Pulse.Cfg) -> None:
         if isinstance(value, QickParam) or not math.isfinite(value):
             raise ValueError(f"{name} must be fixed and finite")
     if pulse.pre_delay < 0 or pulse.post_delay < 0:
-        raise ValueError("pulse delays must be nonnegative us")
+        raise ValueError("pulse delays must be nonnegative µs")
     if isinstance(
         pulse.waveform, (ConstWaveform.Cfg, FlatTopWaveform.Cfg)
     ) and isinstance(pulse.waveform.length, QickParam):

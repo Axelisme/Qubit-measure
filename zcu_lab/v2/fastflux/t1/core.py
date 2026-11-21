@@ -47,19 +47,26 @@ class T1Cfg(ConfigBase):
     flux_pulse: Pulse.Cfg
     readout: Readout.Cfg
     gain: Annotated[SweepCfg, FieldMeta(label="gain", unit="a.u.")]
-    length: SweepCfg
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="µs")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -102,7 +109,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
         # 2. Keep the relaxation traces grouped by flux gain.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Time (us)")
+        ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Time (µs)")
         formatter = ScalarFormatter(useMathText=True)
         formatter.set_powerlimits((-2, 2))
         ax.xaxis.set_major_formatter(formatter)
@@ -217,7 +224,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             interpolation="none",
             cmap="RdBu_r",
         )
-        ax.set_ylabel("Time (us)")
+        ax.set_ylabel("Time (µs)")
 
         ax.errorbar(gains, t1s, yerr=t1errs, fmt=".", label="T1", color="black")
         ax.set_xlabel("Flux Pulse Gain (a.u.)")

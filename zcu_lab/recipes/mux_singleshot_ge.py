@@ -76,7 +76,8 @@ class MuxGEToneReport(MuxFitToneReport):
         description="Owner excited histogram fit diagnostics; null when unavailable.",
     )
     fidelity: float | None = Field(
-        default=None, description="GE assignment fidelity, dimensionless."
+        default=None,
+        description="GE assignment fidelity (probability of correct assignment).",
     )
     theta: float | None = Field(
         default=None, description="IQ rotation angle in radians."

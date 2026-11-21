@@ -22,7 +22,7 @@ RBHeraldedRun: TypeAlias = RunRecord[RBHeraldedCfg, RBHeraldedResult]
 
 
 def make_form(ctx: FormContext) -> Form[RBHeraldedCfg]:
-    """Capture roles, X90/CZ/readout and named corrections; reset starts None."""
+    """Capture tone indices, X90/CZ/readout and ordered corrections; reset starts None."""
     return rb_form(ctx, RBHeraldedCfg)
 
 

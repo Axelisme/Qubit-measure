@@ -186,20 +186,27 @@ class MuxT2RamseyCfg(ConfigBase):
     readout: MuxReadoutCfg
     tones: Annotated[list[MuxCoherenceToneCfg], FieldMeta(element_label="name")]
     participants: list[StrictInt]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ] = Field(gt=0)
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
             label="Initial delay",
-            unit="us",
+            unit="µs",
             description="Delay before the first repetition.",
         ),
     ] = Field(default=1.0, ge=0, allow_inf_nan=False)
@@ -207,7 +214,7 @@ class MuxT2RamseyCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -272,7 +279,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         for index in indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             ax.set(
-                xlabel="Requested delay (us)",
+                xlabel="Requested delay (µs)",
                 ylabel="Magnitude (a.u.)",
                 title=f"{index}: {cfg.tones[index].name}",
             )
@@ -377,7 +384,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
                 int(raw_index), source.result.times, source.result.signals[row], skip=0
             )
             fig, ax = plots.subplots(num=f"fit_{trace.index}", figsize=(8, 5))
-            ax.set(xlabel="Requested delay (us)", ylabel="Signal real (a.u.)")
+            ax.set(xlabel="Requested delay (µs)", ylabel="Signal real (a.u.)")
             fig.suptitle(f"ramsey tone {trace.index}")
             try:
                 real = project_coherence_trace(
@@ -418,7 +425,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
                 ax.plot(trace.times, real, "o", label="measured")
                 ax.plot(trace.times, fitted, label="fit")
                 ax.set_title(
-                    f"T2 = {outcome.t2:.4g} ± {outcome.t2_err:.2g} us; "
+                    f"T2 = {outcome.t2:.4g} ± {outcome.t2_err:.2g} µs; "
                     f"fringe = {outcome.detune:.4g} MHz"
                 )
                 outcomes.append(outcome)

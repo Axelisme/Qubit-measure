@@ -38,18 +38,18 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._drive import DualLineCfg
-from .._phase import QuadraturePhase, count_phase, phase_variance, sigma_variance
-from .._readout import JointRoles, MuxResetCfg
-from .._sums import sigma, validate_classifiers
+from .._drive import QubitDriveCfg
+from .._phase import QuadraturePhase, count_phase, phase_variance, qubit_sigma_variance
+from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
+from .._sums import qubit_sigma, validate_qubit_tones
 
 
 @dataclass(frozen=True)
 class LocalZResult:
     """Summed counts with target × quadrature × n leading axes.
 
-    Fixed targets [0,1] denote F1/F2; quadratures [0,1] denote X/Y.
-    sums is float64 with terminal F1/F2 g/e/other class axes, each length 3.
+    Fixed targets [0,1] denote Qubit1/Qubit2; quadratures [0,1] denote X/Y.
+    sums is float64 with terminal Qubit1/Qubit2 g/e/other class axes, each length 3.
     Rounds add without averaging. Unmeasured points remain NaN.
     """
 
@@ -76,17 +76,25 @@ class LocalZFit:
 
 
 @dataclass(frozen=True)
+class LocalZOptions:
+    """Display labels for the first and second targets in the analysis figures."""
+
+    qubit1_label: str = "Qubit1"
+    qubit2_label: str = "Qubit2"
+
+
+@dataclass(frozen=True)
 class LocalZAnalysis:
-    """Fixed F1/F2 phase-line summaries in target order; no scan arrays."""
+    """Fixed Qubit1/Qubit2 phase-line summaries in target order; no scan arrays."""
 
     fits: tuple[LocalZFit, ...]
 
 
 class LocalZCfg(ConfigBase):
-    """Independent X/Y projections with acquisition-side F1/F2 classification.
+    """Independent X/Y projections with acquisition-side Qubit1/Qubit2 classification.
 
     Frequencies are MHz, phases degrees and delays us. reps is shots per round;
-    rounds accumulate counts at acquisition. F1/F2 require circle classifiers
+    rounds accumulate counts at acquisition. Qubit1/Qubit2 require circle classifiers
     with GE Post radii. reset=None skips reset; otherwise reset starts each shot.
     Both targets use consecutive nonnegative gate_count values, including n=0.
     """
@@ -95,35 +103,49 @@ class LocalZCfg(ConfigBase):
         MuxResetCfg | None,
         FieldMeta(label="Reset", description="Optional reset before each shot."),
     ] = None
-    x90_f1: Annotated[
+    x90_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F1 Xπ/2",
-            description="Calibrated F1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit1 Xπ/2",
+            description="Calibrated Qubit1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
-    x90_f2: Annotated[
+    x90_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F2 Xπ/2",
-            description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit2 Xπ/2",
+            description="Calibrated Qubit2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     drive: Annotated[
-        DualLineCfg,
+        QubitDriveCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="F1/F2 charge-line CZ pulses from the calibrated coupler slots.",
+            description="Qubit1/Qubit2 charge-line CZ pulses from the calibrated coupler slots.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full-group mux readout with calibrated frequencies, gains and timing.",
+            description="Full-group mux readout with calibrated frequencies, gains and timing. "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
-    roles: JointRoles
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based position in the full mux readout.",
+        ),
+    ]
     gate_count: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
         default_factory=lambda: [0, 1, 2, 3, 4], min_length=3
     )
@@ -155,13 +177,13 @@ class LocalZCfg(ConfigBase):
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Require full readout, correct role generators and consecutive train lengths."""
-        validate_classifiers(self.readout, self.roles)
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
         for drive, x90 in (
-            (self.drive.f1, self.x90_f1),
-            (self.drive.f2, self.x90_f2),
+            (self.drive.qubit1, self.x90_qubit1),
+            (self.drive.qubit2, self.x90_qubit2),
         ):
             if drive.ch != x90.ch:
-                raise ValueError("CZ and X90 must use the same captured role generator")
+                raise ValueError("CZ and X90 must use the same target generator")
             if not isinstance(x90.phase, (int, float)) or not np.isfinite(x90.phase):
                 raise ValueError("X90 phase must be a finite scalar")
         if any(b - a != 1 for a, b in pairwise(self.gate_count)):
@@ -203,13 +225,15 @@ def restore_result(data: GroupedLoadData[LocalZCfg]) -> LocalZResult:
 class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
     """Independent classified local-Z experiment."""
 
+    Options: ClassVar[type[LocalZOptions]] = LocalZOptions
+
     AXES_SPEC: ClassVar[GroupedAxesSpec[LocalZResult, LocalZCfg]] = GroupedAxesSpec(
         variables=(
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit1", unit=""),
                     VariableAxisSpec(
                         label="CZ gate count",
                         unit="",
@@ -223,7 +247,10 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                         dtype=np.int64,
                     ),
                     VariableAxisSpec(
-                        label="Target F1 or F2", unit="", values=(0, 1), dtype=np.int64
+                        label="Target Qubit1 or Qubit2",
+                        unit="",
+                        values=(0, 1),
+                        dtype=np.int64,
                     ),
                 ),
                 z=VariableZSpec(
@@ -236,7 +263,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         ),
         result_type=LocalZResult,
         cfg_type=LocalZCfg,
-        cfg_schema_version="5.0",
+        cfg_schema_version="6.0",
         tag="two_qubit/local_z",
         result_builder=restore_result,
     )
@@ -258,7 +285,9 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             counts = np.moveaxis(sums, 0, 2)
-            values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
+            values = np.stack(
+                (qubit_sigma(counts[0], "qubit1"), qubit_sigma(counts[1], "qubit2"))
+            )
             return viewer.set(np.array(config.gate_count), values.reshape(4, -1))
 
         # 2. Rebuild each host CZ train; select target and projection quadrature in hardware.
@@ -276,52 +305,55 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                     initial_delay=config.initial_delay,
                     relax_delay=config.relax_delay,
                 )
-                builder.add_loop("target", 2)  # 0 = F1, 1 = F2
+                builder.add_loop("target", 2)  # 0 = Qubit1, 1 = Qubit2
                 quadrature = builder.add_sweep(
                     "quadrature", SweepCfg(start=0, stop=90, expts=2, step=90)
                 )
-                prepare_f1 = Pulse("prepare_f1", config.x90_f1)
-                prepare_f2 = Pulse("prepare_f2", config.x90_f2)
-                projection_f1 = Pulse(
-                    "projection_f1",
-                    config.x90_f1,
-                    phase=config.x90_f1.phase + quadrature,
+                prepare_qubit1 = Pulse("prepare_qubit1", config.x90_qubit1)
+                prepare_qubit2 = Pulse("prepare_qubit2", config.x90_qubit2)
+                projection_qubit1 = Pulse(
+                    "projection_qubit1",
+                    config.x90_qubit1,
+                    phase=config.x90_qubit1.phase + quadrature,
                 )
-                projection_f2 = Pulse(
-                    "projection_f2",
-                    config.x90_f2,
-                    phase=config.x90_f2.phase + quadrature,
+                projection_qubit2 = Pulse(
+                    "projection_qubit2",
+                    config.x90_qubit2,
+                    phase=config.x90_qubit2.phase + quadrature,
                 )
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset, terminal=readout))
                 with builder.branch(by="target", align_timeline=True) as cases:
                     with cases.case(0):
-                        builder.emit(prepare_f1)
+                        builder.emit(prepare_qubit1)
                     with cases.case(1):
-                        builder.emit(prepare_f2)
+                        builder.emit(prepare_qubit2)
                 drive = (
-                    Pulse("cz_f1", config.drive.f1),
-                    Pulse("cz_f2", config.drive.f2),
+                    Pulse("cz_qubit1", config.drive.qubit1),
+                    Pulse("cz_qubit2", config.drive.qubit2),
                 )
                 for gate_index in range(n):
                     builder.fork(
                         "default",
-                        into=[f"drive_f1_{gate_index}", f"drive_f2_{gate_index}"],
+                        into=[
+                            f"drive_qubit1_{gate_index}",
+                            f"drive_qubit2_{gate_index}",
+                        ],
                     )
-                    builder.emit(drive[0], timeline=f"drive_f1_{gate_index}")
-                    builder.emit(drive[1], timeline=f"drive_f2_{gate_index}")
+                    builder.emit(drive[0], timeline=f"drive_qubit1_{gate_index}")
+                    builder.emit(drive[1], timeline=f"drive_qubit2_{gate_index}")
                     builder.join(
-                        f"drive_f1_{gate_index}",
-                        f"drive_f2_{gate_index}",
+                        f"drive_qubit1_{gate_index}",
+                        f"drive_qubit2_{gate_index}",
                         into="default",
                     )
                 builder.delay_by_timeline()  # finish the common train before target projection
                 with builder.branch(by="target", align_timeline=True) as cases:
                     with cases.case(0):
-                        builder.emit(projection_f1)
+                        builder.emit(projection_qubit1)
                     with cases.case(1):
-                        builder.emit(projection_f2)
+                        builder.emit(projection_qubit2)
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 step.run_acquire_summed(
@@ -330,8 +362,8 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                     reducer=shot_sums(
                         prog,
                         [
-                            Classify("terminal", config.roles.f1_tone),
-                            Classify("terminal", config.roles.f2_tone),
+                            Classify("terminal", config.qubit1_tone),
+                            Classify("terminal", config.qubit2_tone),
                         ],
                     ),
                     rounds=config.rounds,
@@ -347,13 +379,18 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
     def analyze(
         self,
         source: RunRecord[LocalZCfg, LocalZResult],
-        options: None,
+        options: LocalZOptions | None = None,
         *,
         plots: Plots,
     ) -> LocalZAnalysis:
-        """Fit complete classified phase rows with count-propagated WLS weights."""
+        """Fit classified phase rows with count-propagated WLS weights.
+
+        Use the two positional labels when options is None. Raise ValueError
+        if the saved cfg is absent or the counts do not match its axes.
+        """
+        labels = options if options is not None else LocalZOptions()
+        target_labels = (labels.qubit1_label, labels.qubit2_label)
         # 1. Require saved gate-count axes before deriving complete X/Y quadratures for both targets.
-        del options
         cfg, data = source.cfg, source.result
         if cfg is None:
             raise ValueError("Phase analysis requires saved source cfg")
@@ -362,9 +399,14 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         if data.sums.shape != (2, 2, len(cfg.gate_count), 3, 3):
             raise ValueError("Expected target × quadrature × gate_count × 3 × 3 counts")
         counts = data.sums
-        quadratures = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
+        quadratures = np.stack(
+            (qubit_sigma(counts[0], "qubit1"), qubit_sigma(counts[1], "qubit2"))
+        )
         variances = np.stack(
-            (sigma_variance(counts[0], "f1"), sigma_variance(counts[1], "f2"))
+            (
+                qubit_sigma_variance(counts[0], "qubit1"),
+                qubit_sigma_variance(counts[1], "qubit2"),
+            )
         )
         totals = counts.sum(axis=(-2, -1))
         complete = np.isfinite(totals) & (totals > 0)
@@ -404,14 +446,13 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
 
         # 3. Compare contrast, wrapped phase and weighted unwrapped fits to diagnose local-Z corrections.
         _, axes = plots.subplots(num="quadratures", figsize=(10, 5))
-        for t in range(2):
-            for q, projection in enumerate(("X", "Y")):
-                axes.plot(
-                    data.gate_counts,
-                    quadratures[t, q],
-                    ".",
-                    label=f"F{t + 1} {projection}",
-                )
+        for t, label in enumerate(target_labels):
+            axes.plot(
+                data.gate_counts,
+                quadratures[t].T,
+                ".",
+                label=[f"{label} X", f"{label} Y"],
+            )
         axes.set(xlabel="CZ gate count", ylabel="Target ⟨σ⟩")
         axes.legend()
 
@@ -419,18 +460,18 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             num="phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
         )
         fig.suptitle("Both targets · independent classified X/Y acquisitions")
-        for t, role in enumerate((cfg.roles.f1, cfg.roles.f2)):
+        for t, label in enumerate(target_labels):
             fig.axes[0].plot(
                 data.gate_counts,
                 [p.contrast for p in targets[t]],
                 ".-",
-                label=f"F{t + 1} {role}",
+                label=label,
             )
             fig.axes[1].plot(
                 data.gate_counts,
                 phase_rows[t],
                 ".-",
-                label=f"F{t + 1} {role}",
+                label=label,
             )
             fit = fits[t]
             if fit.unwrapped_deg is not None and fit.fit_curve is not None:
@@ -438,17 +479,19 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                     data.gate_counts,
                     fit.unwrapped_deg,
                     ".",
-                    label=f"F{t + 1} {role} unwrapped",
+                    label=f"{label} unwrapped",
                 )
                 fig.axes[2].plot(
                     data.gate_counts,
                     fit.fit_curve,
                     "-",
-                    label=f"F{t + 1} WLS; correction={summaries[t].correction_deg:.5g} ± {fit.slope_error_deg:.2g} deg (1σ)",
+                    label=f"{label} WLS; correction={summaries[t].correction_deg:.5g} ± {fit.slope_error_deg:.2g} deg (1σ)",
                 )
         fig.axes[2].set_title(
             "\n".join(
-                f"F{t + 1}: {fit.reason}" for t, fit in enumerate(fits) if fit.reason
+                f"{label}: {fit.reason}"
+                for label, fit in zip(target_labels, fits, strict=True)
+                if fit.reason
             )
             or "Complete-row WLS with intercept; correction = −slope"
         )

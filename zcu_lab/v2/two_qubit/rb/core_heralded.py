@@ -61,8 +61,8 @@ class RBHeraldedResult:
     """Raw float64 sums (seed,arm,depth,3,3,3,3), NaN when unacquired.
 
     depths counts random Cliffords, seeds stores RNG identities, and arm 0/1
-    is reference/CZ-interleaved. Trailing axes are herald F1/F2 then terminal
-    F1/F2, each ordered g/e/other. All herald outcomes from finished rounds
+    is reference/CZ-interleaved. Trailing axes are herald Qubit1/Qubit2 then terminal
+    Qubit1/Qubit2, each ordered g/e/other. All herald outcomes from finished rounds
     remain saved; counts are not normalized or filtered.
     """
 
@@ -192,13 +192,13 @@ def _plot_herald_fractions(
     classes = ("g", "e", "other")
     for arm, label in enumerate(("Reference", "CZ interleaved")):
         fig, ax = plots.subplots(num=f"herald_{arm}", figsize=(10, 6))
-        for f1 in range(3):
-            for f2 in range(3):
+        for qubit1 in range(3):
+            for qubit2 in range(3):
                 ax.plot(
                     depths,
-                    aggregate[arm, :, f1, f2],
+                    aggregate[arm, :, qubit1, qubit2],
                     ".-",
-                    label=f"{classes[f1]},{classes[f2]}",
+                    label=f"{classes[qubit1]},{classes[qubit2]}",
                 )
         ax.set(xlabel="Random Clifford depth", ylabel="Herald probability")
         ax.legend()
@@ -256,8 +256,8 @@ def build_program(
     emit_depth_sweep(
         builder,
         arm,
-        x90=(config.x90_f1, config.x90_f2),
-        x180=(config.x180_f1, config.x180_f2),
+        x90=(config.x90_qubit1, config.x90_qubit2),
+        x180=(config.x180_qubit1, config.x180_qubit2),
         drive=config.drive,
         phase_pair=config.phase_pair,
     )
@@ -274,10 +274,18 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
-                        VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
-                        VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
+                        VariableAxisSpec.generated_arange(
+                            label="terminal_qubit2", unit=""
+                        ),
+                        VariableAxisSpec.generated_arange(
+                            label="terminal_qubit1", unit=""
+                        ),
+                        VariableAxisSpec.generated_arange(
+                            label="herald_qubit2", unit=""
+                        ),
+                        VariableAxisSpec.generated_arange(
+                            label="herald_qubit1", unit=""
+                        ),
                         VariableAxisSpec(
                             label="Clifford depth",
                             unit="",
@@ -301,7 +309,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             ),
             result_type=RBHeraldedResult,
             cfg_type=RBHeraldedCfg,
-            cfg_schema_version="3.0",
+            cfg_schema_version="4.0",
             tag="two_qubit/rb_heralded",
             result_builder=restore_result,
         )
@@ -362,10 +370,10 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                     reducer = shot_sums(
                         program,
                         [
-                            Classify("herald", config.roles.f1_tone),
-                            Classify("herald", config.roles.f2_tone),
-                            Classify("terminal", config.roles.f1_tone),
-                            Classify("terminal", config.roles.f2_tone),
+                            Classify("herald", config.qubit1_tone),
+                            Classify("herald", config.qubit2_tone),
+                            Classify("terminal", config.qubit1_tone),
+                            Classify("terminal", config.qubit2_tone),
                         ],
                     )
                     arm_step.run_acquire_summed(

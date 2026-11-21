@@ -13,7 +13,7 @@ Each shot reads one PulseReadout 16 times without a drive or reset.
 After a readout pulse ends, the readout's `post_delay` gives cavity photons time to decay before the next readout starts.
 The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
 The relax delay K follows each shot. Every shot after the first starts K after the previous shot.
-Set `relax_delay` in us long enough to return to thermal equilibrium.
+Set `relax_delay` in µs long enough to return to thermal equilibrium.
 The Form seeds it from 5·T1. The first shot relies on the state before Run.
 There is no additional wait inside the chain beyond the readout's own timing.
 
