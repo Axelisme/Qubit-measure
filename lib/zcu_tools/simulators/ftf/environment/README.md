@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, projective continuation batches
+**Last updated:** 2026-11-21, readout block arrival times
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -546,9 +546,12 @@ large-excursion device accuracy.
 At each point, the latest active readout-channel block is terminal. The planner
 classifies earlier blocks with ADC triggers as projective reads and earlier blocks
 without triggers as cavity drives. A block owns triggers from its start until the
-next block starts, including ringdown after pulse end. Earlier pulses may end at
-the next start, but their last ADC sample must be strictly earlier. A crossing
-sample window raises `ValueError` naming the block and trigger.
+next block starts, including ringdown after pulse end. A sampling window may
+extend past the next block's emission start. The planner adds each receiver's
+flight time to the later block's start. A later pulse that arrives by the last
+sample contributes coherently to that ADC event. The timeline compiler still
+rejects overlapping windows for successive timeline triggers on the same ADC
+([ADR-0083](../../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)).
 
 `FTFTemplatePlan.projective_reads` retains each point's ordered projection times,
 incident pulses and bound triggers. The numeric batch includes projection starts
@@ -714,8 +717,9 @@ the environment routes include both configured readout paths and all drive lines
 `plan_template` and `FTFSource` accept an explicit `readout=` override. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
 Each batch retains the same chronological logical-event axis. An event contains
-only its own incident pulse block and that ADC's observed grids. Empty grids mean
-that ADC does not observe the event and emits no read column. All ADCs may omit
+its own pulse block, any later pulses that reach that receiver by its last
+sample, and that ADC's observed grids. Empty grids mean that ADC does not observe
+the event and emits no read column. All ADCs may omit
 terminal observations; the terminal event and evolution endpoint remain in the
 plan. Each ADC must still observe at least one event. Projective plans retain
 point-local event contents. Templates without projective reads keep their existing

@@ -10,6 +10,7 @@ from zcu_tools.experiment.readout_plan import (
     ProjectiveRead,
     ReadoutDrive,
     ReadoutMapping,
+    ReadoutPartition,
     classify_readout,
     drive_track,
     logical_event_contents,
@@ -374,10 +375,13 @@ def _projective_contents(
     drive: ReadoutDrive,
     memo: dict[int, EnvelopeSpec],
     time_base: TimeBase,
+    partition: ReadoutPartition,
 ) -> tuple[tuple[ReadoutMapping, ...], float]:
     """Align actual trigger contents on a common chronological block axis."""
     channels = tuple(
-        logical_event_contents(template, drive, window, memo, time_base=time_base)
+        logical_event_contents(
+            template, drive, window, memo, time_base=time_base, partition=partition
+        )
         for window in template.readouts
     )
     reference = channels[0][-1].pulses[0][0].frequency_ghz
@@ -432,8 +436,8 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     latest active readout-generator block per point ends evolution. Earlier
     readout blocks with their own triggers are projective reads; untriggered
     blocks are cavity drives. A block owns triggers until the next block starts,
-    including ringdown. Earlier pulses may end at the next start, but their last
-    ADC sample must be strictly earlier. Invalid windows name the block/trigger.
+    including ringdown. Later pulses that reach a receiver by its last sample
+    are included in that ADC event without moving the projection time.
     Bound fast-flux generators pass through per-loop delay and multi-exponential
     filtering, with 2 ns waveform samples and 1e-3 Phi0 midpoint bath levels.
     Ideal constant platforms omit continuous samples to retain sudden switching.
@@ -484,12 +488,18 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
         path.input_per_gain,
         "mux" if path.multiplexed else "pulse",
     )
-    partition = classify_readout(template, drive, memo, time_base=time_base)
-    cavity_drives = partition.cavity_drives
-    terminal_template = replace(template, events=partition.terminal_slots)
     for window in template.readouts:
         if window.channel not in receivers:
             raise ValueError(f"unbound FTF receiver {window.channel}")
+    partition = classify_readout(
+        template,
+        drive,
+        memo,
+        time_base=time_base,
+        receiver_delays_ns={ch: adc.time_of_flight_ns for ch, adc in receivers.items()},
+    )
+    cavity_drives = partition.cavity_drives
+    terminal_template = replace(template, events=partition.terminal_slots)
     end_ns = np.max(
         [
             np.where(e.active, time_base.ns(e.start_ticks), -np.inf)
@@ -499,7 +509,7 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     )
     if any(partition.projective_reads):
         event_contents, reference_frequency_ghz = _projective_contents(
-            template, drive, memo, time_base
+            template, drive, memo, time_base, partition
         )
     else:
         contents = tuple(
