@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run the R-pi ADC window sweep from the GUI or RPC and read its score, diagnostics and invalid reasons per window.
 
-**Last updated:** 2026-11-10
+**Last updated:** 2026-11-21
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -11,13 +11,13 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 `twotone/ro_optimize/rpi_length` sweeps the readout ADC window in us with a calibrated π pulse. At each window it plays cycles of `...R π R π...` with no reset or relax delay, where R is the readout and π is the same fixed pulse at every window.
 Use it next to `twotone/ro_optimize/length` and `twotone/ro_optimize/chain_length`. The first compares g and e prepared with a π pulse, the second uses no π pulse and waits for thermal relaxation between shots, and this one alternates reads with π pulses. Each is a separate experiment.
 
-The ADC window and the readout pulse are different lengths. The ADC window is the swept value, rounded to the ADC clock. The readout pulse is that window plus 0.11 us, rounded to the generator clock. The host builds one program per window, so a short window gets a short pulse and not the longest pulse of the scan.
+The ADC window is the swept value, rounded to the ADC clock. Run adds **Length margin** to that window and rounds the pulse length to the generator clock. The host builds one program per window, so the pulse grows with the window.
 The π frequency, gain and length do not follow the sweep, and neither do the readout gain, frequency or `post_delay`.
 
 One rep is one cycle of 64 R-π pairs, with relax delay 0.
 The acquisition order is host window point → Rounds → Reps. The host completes every round at one window before moving to the next; a round does not revisit the full window axis.
 Lags 1 to 15 pair reads only within the same cycle. The statistics accumulate across reps and rounds, without pairs crossing a rep, round or window boundary.
-The experiment fixes the 64 pairs per rep, the zero relax delay and the 0.11 us margin. The Form does not offer them.
+The Form does not offer settings for the number of pairs per rep or the relax delay.
 
 The wait from R to π is the readout's `post_delay` plus the π pulse's own `pre_delay`, which is usually 0. With `post_delay` 0.05 us and a π `pre_delay` of 0.02 us, each π starts 0.07 us after the readout generator pulse ends, and the wait is the same at every window. The wait counts from the generator end and not from the ADC window end, so a π can play while the ADC window is still open. Inside a rep, the next readout starts after the π ends, later only by the π pulse's `post_delay` and the readout's `pre_delay`, which are usually 0.
 The Form has no separate wait field. Change `post_delay` in the readout module to change this wait. Run keeps every π setting, including a nonzero `pre_delay`.
@@ -32,8 +32,9 @@ Run does not reset the qubit, discard reads, add a warmup or calibrate the π pu
 Calibrate the readout frequency and the π pulse first. The Form cannot check the π calibration, and a wrong π changes the score and every diagnostic.
 Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template that reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly`. The template starts at gain 0.1, which is an uncalibrated value to confirm.
 Pi pulse uses the captured `$qubit.module.x180` slot, or a fresh `pi_pulse` template.
-Run sets the ADC window from the sweep and the pulse length from the window, so the Form hides both lengths in the readout module.
-ADC window is in us. It starts at 11 points from 0.2 to 2.2 us.
+Run sets both lengths at each sweep point, so the Form hides them in the readout module.
+On Open or Reset, **Length margin** starts at the captured module’s pulse length minus its ADC window. If there is no readout module, it starts at 0.03 us from the `readout` template. If either captured length cannot be resolved, the margin stays blank and required. Confirm or edit this finite, nonnegative time in us before Run. Check that the pulse covers the intended ADC window at the receiver with the selected trigger offset.
+**ADC window** starts at 11 points from 0.2 to 2.2 us.
 Reps starts at 250 and Rounds at 20. Each window has 5 000 cycles of 64 reads, or 320 000 reads in total.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
 
@@ -67,7 +68,7 @@ The summary has a fixed size for any scan length, so it does not list each inval
 
 If no window is valid, `best_length` and `best` are empty and the title says there is no valid window to select. The analysis does not fall back to a default window and does not fail.
 If the best window is the first or last window of the scan, the optimum can lie outside the scanned range. Extend the range on that side and run again before you use the window.
-This experiment proposes no writeback. Enter the chosen ADC window, and a pulse length of that window plus 0.11 us, in the readout module yourself.
+This experiment proposes no writeback. In the readout module, enter the chosen ADC window and set the pulse length to that window plus the Length margin used in the run.
 
 ### Score
 
@@ -137,7 +138,7 @@ The offline probe of this experiment checks the program and the data contract wi
 
 The saved record has the ADC windows that finished at least one round, in us in memory and seconds on disk, and one 35-column `rpi_sums` record per window. A record holds the completed cycle count S, the read count N, the 18 moment sums and the 15 pair counts. Each cycle has 64 reads, so L = N/S = 64 and C_j = S × (64 − j). Raw IQ is not saved.
 Loading the file and analyzing it gives the same summary as the analysis of the run.
-The native tag is `twotone/ro_optimize/rpi_length` with cfg schema `3.0`.
+The native tag is `twotone/ro_optimize/rpi_length` with cfg schema `4.0`. Older records keep their data and can still be analyzed. Load does not convert a `3.0` cfg to `4.0`.
 
 ## MCP
 

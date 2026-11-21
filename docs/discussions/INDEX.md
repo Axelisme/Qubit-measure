@@ -199,4 +199,5 @@
 - 2026-11-21 [Mux readout 的 post_delay 從五個光子衰減時間起步](2026-11-21-mux-readout-post-delay-seed.md)：表單初值。Mux Open／Reset 用 `5 / (2π · κ)` 給起點，操作者再用 herald 後的名目 Xπ 驗證。
 - 2026-11-21 [讀出鏈的 pulse 長度與間隔](2026-11-21-chain-readout-spacing.md)：讀出時序。九個 chain 實驗等前一個 pulse 結束加 post-delay，不另等 ADC 關窗。該篇的 pulse 長度公式已局部取代。
 - 2026-11-21 [Chain length 掃描固定 pulse 與 ADC window 的長度差](2026-11-21-chain-length-fixed-margin.md)：讀出時序。每點 pulse 長度為當點 ADC window 加上可編輯的長度差，不在 cfg 另填飛行時間。
+- 2026-11-21 [Rπ length 沿用讀出模組的長度差](2026-11-21-rpi-length-fixed-margin.md)：讀出時序。Rπ 的 ADC window 掃描沿用可編輯的模組長度差，保留交替脈衝序列與結果形狀。
 - 2026-11-21 [讀出範本在 ADC 窗口前後各留 0.015 µs](2026-11-21-readout-template-window-margin.md)：預設時序。範本、DPM 寫回與普通 onetone 表單共用 0.03 µs 的長度差。
