@@ -8,8 +8,10 @@ Bind the qubit and resonator. Open or press **Defaults** to take new starting va
 
 ## Read the map
 
-The map gives RF frequency versus probe gain. Color is the magnitude of the mean IQ after subtracting the median complex IQ of the same spectrum. It is in a.u., not a transition probability. Blank cells have no data. The row counter shows gains with data, including any gain still averaging. The adjacent axes compare the latest and previous gain spectra on that same contrast scale.
+After **Run** or a successful **Load**, press **Analyze** to redraw the selected run's map and gain spectra. Loading does not open a plot. Analyze shows the source run's **Reps × Rounds** if its settings are available. Older files without those settings still plot, but omit that summary line.
+
+The map gives RF frequency versus probe gain. Color is the magnitude of the mean IQ after subtracting the median complex IQ of the same spectrum. It is in a.u., not a transition probability. Blank cells have no data. During Run, the row counter shows gains with data, including any gain still averaging. The adjacent axes compare the latest gain spectrum with the preceding gain row on that same contrast scale.
 
 Look for a ridge that persists across multiple gain rows. A ridge that shifts or broadens with gain warns against applying the high-gain center or linewidth as a weak-drive calibration. Choose the smallest sampled gain at which the line is reproducible, then use `twotone/freq` to fit a finer scan around the observed center. For example, if the ridge is clear at 0.05 a.u. but has merged with a neighboring line by 0.15 a.u., start the follow-up at 0.05 a.u. rather than 0.15 a.u. If the line reaches the frequency boundary, widen the RF endpoints before comparing widths. This is a two-dimensional spectrum; do not infer shot SEM from the color scale.
 
-This experiment presents the map in Run and does not fit, propose writeback or offer a dedicated recipe. Save preserves the gain and RF grids with the complex IQ. Loading a saved run does not replace the current form.
+Analyze does not fit or propose writeback. Use the map and spectra to choose the gain yourself. This experiment has no dedicated recipe. Save preserves the gain and RF grids with the complex IQ. Loading a saved run does not replace the current form.
