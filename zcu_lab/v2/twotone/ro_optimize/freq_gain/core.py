@@ -290,15 +290,12 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         ax.grid(False)
         (image,) = live_heatmap(ax).set(freqs, gains, np.abs(signals))
         fig.colorbar(image, ax=ax, label="g/e IQ separation SNR")
-        ax.scatter(
-            max_freq, max_gain, color="C3", edgecolors="white", label="Selected setting"
-        )
+        ax.scatter(max_freq, max_gain, color="C3", edgecolors="white")
         left, right, bottom, top = image.get_extent()
         ax.set(xlim=(left, right), ylim=(bottom, top))
         ax.set_title(
-            f"Selected readout setting = {max_freq:.6g} MHz, {max_gain:.4g} a.u.\n"
+            f"Selected setting (red dot): {max_freq:.6g} MHz, {max_gain:.4g} a.u.\n"
             f"Selection SNR = {max_snr:.2f}"
         )
-        ax.legend(loc="best")
 
         return FreqGainAnalysis(max_freq, max_gain)
