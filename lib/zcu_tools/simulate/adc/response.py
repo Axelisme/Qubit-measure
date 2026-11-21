@@ -672,7 +672,6 @@ def _grid_key(grids: tuple[SampleGrid, ...]) -> tuple[object, ...]:
             g.times_ns.tobytes(),
             g.demodulation_frequency_ghz,
             g.phase_rad,
-            g.frequency_image,
         )
         for g in grids
     )

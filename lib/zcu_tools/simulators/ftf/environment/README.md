@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, ADC readout timing and cross-block cavity-field limit
+**Last updated:** 2026-11-21, explicit ADC frequencies and cross-block cavity-field limit
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -433,8 +433,8 @@ present, the first terminal carrier sets the model reference and its phase
 stays unchanged. The existing
 `phase_reference_ticks` contribution, converted through `TimeBase.ns`, stays part of the common-origin phase.
 ADC demodulation keeps its absolute-time grid and phase at shot time zero.
-Named configs, including static PFB configs, retain their physical frequency
-image. Only raw DDS words demodulate at the image nearest the shared reference.
+Each ADC trigger uses the physical frequency from its named config, including
+static PFB configs.
 An isolated addressed carrier's conditional IQ center is invariant under a
 common pulse/grid time shift. Mux ADCs select incident carriers by the supplied board's PFB channel
 before demodulation. The caller's board YAML determines Nyquist folding,

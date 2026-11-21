@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-21, raw DDS cavity routing
+**Last updated:** 2026-11-21, nearest-cavity routing for explicit frequencies
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -98,12 +98,9 @@ the routing cap. It is not a process RSS limit.
 The YAML mux generator binds the six configured mux ADCs. Each qubit's
 microwave generator controls only that qubit. The YAML pulse generator binds
 its separate pulse ADC for single-tone sweeps. All other channels stay unbound.
-At every point, each incident tone selects the nearest bare cavity by absolute
-frequency difference. Each ADC trigger selects its observed cavity by the same
-rule for an explicit image. For a raw DDS word, it compares the shortest
-frequency difference modulo that trigger's DDS frequency against the same bare
-cavities. Distances tied within 1e-9 MHz raise `ValueError`; the tolerance covers
-floating subtraction only. A raw tie reports the ADC, window and tied cavities.
+At every point, each incident tone and ADC trigger selects the nearest bare
+cavity by absolute frequency difference. Distances tied within 1e-9 MHz raise
+`ValueError`; the tolerance covers floating subtraction only.
 
 Routing follows frequency, not ADC index or tone declaration order. A pulse sweep
 can cross all six cavity partitions. Multiple coherent tones assigned to one

@@ -11,7 +11,6 @@ from zcu_tools.program.v2.ir.io_instructions import DportWriteInst
 from zcu_tools.program.v2.ir.operands import ImmValue, Register
 from zcu_tools.program.v2.modules import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.simulate.boundary import DDSCongruence, ExplicitImage
 
 from tests.program._profiles import RO_MHZ, TPROC_MHZ, load_soccfg
 from tests.program.v2.simulation._compiled_support import program, request
@@ -342,72 +341,46 @@ def test_runtime_adc_without_carriers_uses_config_effective_at_each_window_start
                 (100, start_mhz + point * span_mhz / 3), abs=1e-5
             )
             assert read.phase_deg == (0, 90 if modify_phase else 0)
-            assert read.frequency_images == ExplicitImage()
     finally:
         env.devices.close_all_devices()
 
 
-def test_raw_adc_frequency_folds_without_borrowing_carrier_or_matching_config():
-    soccfg = load_soccfg(n_gens=2, n_readouts=1)
-    dds_mhz = soccfg["readouts"][0]["f_dds"]
-    carrier_mhz = 2.8 * dds_mhz
+@pytest.mark.parametrize("source", ["r_wave", "wmem"])
+def test_raw_adc_frequency_without_named_source_is_rejected(source):
+    trigger_time = 0.25
 
-    def initialize(p):
-        p.add_pulse(
-            0,
-            "carrier",
-            style="const",
-            freq=carrier_mhz,
-            phase=0,
-            gain=0.1,
-            length=0.3,
-        )
-        p.add_readoutconfig(0, "unused", freq=carrier_mhz)
-
-    def body(p):
-        word = p.soccfg.freq2reg_adc(carrier_mhz, ro_ch=0)
+    def raw_words(p):
+        word = p.soccfg.freq2reg_adc(100, ro_ch=0)
         if p.FLIP_DOWNCONVERSION:
             word = -word
-        word = (word + 2**31) % 2**32 - 2**31
-        for i, value in enumerate((word, 0, 0, 0, 3, 0)):
-            p.write_reg(f"w{i}", value)
-        port = p.soccfg["readouts"][0]["tproc_ctrl"]
-        p.asm_inst({"CMD": "WPORT_WR", "DST": str(port), "SRC": "r_wave", "TIME": "@0"})
-        p.pulse(0, "carrier", t=0)
-
-    prog, env = program(body, initialize, reps=1, config_time=None, soccfg=soccfg)
-    try:
-        read = request(prog, env).materialize_point(0).readouts[0]
-        assert read.frequency_mhz == pytest.approx((-0.2 * dds_mhz,), abs=1e-5)
-        assert read.frequency_images == (DDSCongruence(period_ghz=dds_mhz / 1000),)
-    finally:
-        env.devices.close_all_devices()
-
-
-def test_native_raw_adc_wmem_wave_folds_without_borrowing_the_carrier():
-    soccfg = load_soccfg(n_gens=2, n_readouts=1)
-    dds_mhz = soccfg["readouts"][0]["f_dds"]
-    carrier_mhz = 2.8 * dds_mhz
+        return ((word + 2**31) % 2**32 - 2**31, 0, 0, 0, 3, 0)
 
     def initialize(p):
-        word = p.soccfg.freq2reg_adc(carrier_mhz, ro_ch=0)
-        if p.FLIP_DOWNCONVERSION:
-            word = -word
-        p.add_raw_pulse("raw_adc", [Waveform(word, 2**30, 0, 0, 3, 0)], ro_ch=0)
-        p.add_pulse(
-            0, "carrier", style="const", freq=carrier_mhz, phase=0, gain=0.1, length=0.3
-        )
+        if source == "wmem":
+            p.add_raw_pulse("raw_adc", [Waveform(*raw_words(p))], ro_ch=0)
 
     def body(p):
-        p.send_readoutconfig(0, "raw_adc", t=0)
-        p.pulse(0, "carrier", t=0)
+        if source == "wmem":
+            p.send_readoutconfig(0, "raw_adc", t=0)
+        else:
+            for i, value in enumerate(raw_words(p)):
+                p.write_reg(f"w{i}", value)
+            port = p.soccfg["readouts"][0]["tproc_ctrl"]
+            p.asm_inst(
+                {"CMD": "WPORT_WR", "DST": str(port), "SRC": "r_wave", "TIME": "@0"}
+            )
+        p.pulse(0, "p", t=trigger_time)
 
-    prog, env = program(body, initialize, reps=1, config_time=None, soccfg=soccfg)
+    prog, env = program(
+        body, initialize, reps=1, config_time=None, trigger_time=trigger_time
+    )
     try:
-        read = request(prog, env).materialize_point(0).readouts[0]
-        assert read.frequency_mhz == pytest.approx((-0.2 * dds_mhz,), abs=1e-5)
-        assert read.phase_deg == (90,)
-        assert read.frequency_images == (DDSCongruence(period_ghz=dds_mhz / 1000),)
+        with pytest.raises(ValueError, match=r"ADC 0 read 0") as error:
+            request(prog, env)
+        message = str(error.value)
+        assert f"trigger at {prog.us2cycles(trigger_time)} tProc cycles" in message
+        assert "DDS image" in message
+        assert "請改用具名 ADC config" in message
     finally:
         env.devices.close_all_devices()
 
@@ -420,7 +393,6 @@ def test_unused_raw_dac_library_entry_does_not_block_named_readout():
     try:
         read = request(prog, env).materialize_point(0).readouts[0]
         assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
-        assert read.frequency_images == ExplicitImage()
     finally:
         env.devices.close_all_devices()
 
