@@ -8,6 +8,7 @@ from scipy.integrate import trapezoid
 from scipy.linalg import expm
 from zcu_tools.simulate import adc
 from zcu_tools.simulate.adc import ReadoutPulse
+from zcu_tools.simulate.evolution import SegmentShift
 from zcu_tools.simulators.ftf import physics as ftf
 
 pytestmark = pytest.mark.sim
@@ -174,6 +175,32 @@ def test_cavity_flat_four_us_average_is_finite_and_matches_weighted_subspans(cav
             / 4000
         )
         np.testing.assert_allclose(actual, expected, rtol=1e-7, atol=1e-13)
+
+
+def test_short_cavity_continuation_from_a_shared_field_produces_a_valid_shift(cavity):
+    joint, resonators, _, _ = cavity
+    start, end = 10.0, 10.001
+    initial = np.array([0.2 + 0.3j, -0.1j])
+    drive = ftf.CavityDrive(joint, resonators, (), cache=adc.CavityAverageCache())
+    model = ftf.readout_model(joint, resonators)
+    populations = np.eye(len(model.state_labels))[0]
+
+    response, _ = drive.advance(start, end, populations, initial)
+    shift = SegmentShift(
+        start, end, response.stark_shift_ghz, response.dephasing_per_ns
+    )
+
+    # Check against the ringdown field differences, without subtracting moments.
+    times = np.linspace(start, end, 33)
+    fields = adc.cavity_fields(
+        model, (), times, initial_field=initial, initial_time_ns=start
+    )
+    delta = fields[:, :, None, :] - fields[:, None, :, :]
+    outgoing = delta @ np.sqrt(model.kappa_external_per_ns / 2)
+    rates = np.abs(outgoing) ** 2 / 2
+    rates += np.sum(np.abs(delta) ** 2 * model.kappa_internal_per_ns / 2, axis=-1)
+    expected = trapezoid(rates, times, axis=0) / (end - start)
+    np.testing.assert_allclose(shift.dephasing_per_ns, expected, rtol=0, atol=5e-18)
 
 
 def test_cavity_segment_average_retains_ringdown_and_integrates_rates(cavity):
