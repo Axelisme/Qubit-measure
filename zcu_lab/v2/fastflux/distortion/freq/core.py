@@ -6,11 +6,10 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.artist import Artist
-from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fitlor
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, config
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -47,17 +46,64 @@ def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FreqCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    qub_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    readout_t: float
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="µs")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the reset module before each shot, or leave it disabled.",
+        ),
+    ] = None
+    flux_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Flux pulse",
+            description="Enter the flux transient to characterize; its pre-delay places the leading edge.",
+        ),
+    ]
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit probe",
+            description="Enter the spectroscopy pulse; Qubit probe frequency supplies its swept carrier.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated resonator readout used after both drives finish.",
+        ),
+    ]
+    readout_t: Annotated[
+        float,
+        FieldMeta(
+            label="Minimum readout wait",
+            unit="µs",
+            description="Enter the minimum time before the final readout branch can start.",
+        ),
+    ]
+    length: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Qubit probe wait",
+            unit="µs",
+            description="Enter the waiting time before the spectroscopy pulse starts.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Qubit probe frequency",
+            unit="MHz",
+            description="Enter the absolute RF carrier scan that spans the qubit resonance.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the number of shots per scan point in each round.",
         ),
     ]
     rounds: Annotated[
@@ -65,7 +111,7 @@ class FreqCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of times to acquire and average the full scan.",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -74,7 +120,7 @@ class FreqCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the time for relaxation after each shot.",
         ),
     ]
 
@@ -118,22 +164,24 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         # 2. Keep the delayed spectroscopy map in wait-major order.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (µs)", ylabel="Frequency (MHz)")
-        formatter = ScalarFormatter(useMathText=True)
-        formatter.set_powerlimits((-2, 2))
-        ax.xaxis.set_major_formatter(formatter)
-        ax.yaxis.set_major_formatter(formatter)
+        centers = lengths + float(qub_pulse.waveform.length) / 2
+        fig, ax = context.plots.subplots(num="measurement", layout="constrained")
+        fig.suptitle("Fast-flux transient · Qubit · Resonance")
+        ax.set(xlabel="Probe-center time (µs)", ylabel="Qubit probe frequency (MHz)")
+        ax.set_title(f"0/{centers.size * freqs.size} scan points with IQ")
+        ax.grid(False)
         viewer = live_heatmap(ax)
+        (image,) = viewer.set(
+            centers, freqs, np.full((centers.size, freqs.size), np.nan)
+        )
+        fig.colorbar(image, ax=ax, label="Mean IQ real projection (a.u.)")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
-            """Draw acquired complex IQ on the measurement axes; return changed artists.
-
-            Read the scan-shaped data without changing it. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            return viewer.set(lengths, freqs, freq_signal2real(data))
+            """Display available IQ on the scan grid without changing the buffer."""
+            count = np.count_nonzero(np.isfinite(data))
+            title = ax.set_title(f"{count}/{data.size} scan points with IQ")
+            return (*viewer.set(centers, freqs, freq_signal2real(data)), title)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -195,16 +243,19 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # 3. Recover the resonance from each complete delay trace.
         fit_lengths = []
         fit_freqs = []
+        fit_errors = []
 
         for x, amp in zip(lengths, amps, strict=False):
             if np.any(np.isnan(amp)):
                 continue
 
-            param, _ = fitlor(freqs, amp)
-            curr_freq = param[3]
-
+            param, covariance = fitlor(freqs, amp)
             fit_lengths.append(x)
-            fit_freqs.append(curr_freq)
+            fit_freqs.append(param[3])
+            variance = covariance[3, 3]
+            fit_errors.append(
+                np.sqrt(variance) if np.isfinite(variance) and variance >= 0 else np.nan
+            )
 
         s_lengths, s_freqs = np.array(fit_lengths), np.array(fit_freqs)
 
@@ -223,29 +274,33 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         # 5. Compare resonance tracks with ideal timing and finite-probe edge windows.
-        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", layout="constrained")
+        fig.suptitle("Fast-flux transient · Qubit · Resonance")
+        ax.set(xlabel="Probe-center time (µs)", ylabel="Qubit probe frequency (MHz)")
+        ax.grid(False)
+        (image,) = live_heatmap(ax).set(lengths, freqs, amps)
+        fig.colorbar(image, ax=ax, label="Mean IQ real projection (a.u.)")
+        scan_ylim = ax.get_ylim()
 
-        ax.imshow(
-            amps.T,
-            extent=(lengths[0], lengths[-1], freqs[0], freqs[-1]),
-            aspect="auto",
-            interpolation="none",
-            cmap="RdBu_r",
-            origin="lower",
+        ax.errorbar(
+            s_lengths,
+            s_freqs,
+            yerr=fit_errors,
+            fmt="k.",
+            label="Lorentzian center ± fit SE",
         )
-
-        ax.plot(s_lengths, s_freqs, ".", c="k")
-        ax.plot(ideal_lengths, ideal_curve, "g-", label="Ideal")
-
+        ax.plot(
+            ideal_lengths, ideal_curve, color="green", label="Rectangular reference"
+        )
         ax.axvspan(
-            start_t - qub_len / 2, start_t + qub_len / 2, color="gray", alpha=0.3
+            start_t - qub_len / 2,
+            start_t + qub_len / 2,
+            color="gray",
+            alpha=0.25,
+            label="Probe overlaps edge",
         )
-        ax.axvspan(end_t - qub_len / 2, end_t + qub_len / 2, color="gray", alpha=0.3)
-
-        ax.set_ylabel("Qubit Frequency (MHz)", fontsize=14)
-        ax.set_xlabel("Time (µs)", fontsize=14)
-        ax.legend(fontsize="x-large")
-
-        fig.tight_layout()
+        ax.axvspan(end_t - qub_len / 2, end_t + qub_len / 2, color="gray", alpha=0.25)
+        ax.set_ylim(scan_ylim)
+        ax.legend(loc="upper left", bbox_to_anchor=(0, -0.15), ncols=2)
 
         return FreqAnalysis(lengths_us=s_lengths, freqs_mhz=s_freqs)

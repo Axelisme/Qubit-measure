@@ -1,53 +1,28 @@
-# Fast flux accumulated phase
+**Readers:** operator, agent. Use a moving Ramsey preparation and fixed projection to infer qubit detuning during a flux transient.
 
-**讀者：** operator、agent。從 GUI 或 MCP 設定 fast-flux 累積相位掃描並判讀暫態響應。
+# Fast-flux accumulated phase
 
-**Last updated:** 2026-10-21
+Open `fastflux/distortion/acc_phase`. After optional Reset, run the flux pulse, a wait followed by the first π/2 pulse, and Minimum projection wait in parallel. Once all three branches finish, play the second π/2 pulse at the swept projection phase and read out. The first pulse moves through the transient; keep the second pulse at a fixed time so the phase slope can measure the frequency shift.
 
-## 準備
+## Set pulses and scans
 
-在 measure catalog 開啟 `fastflux/distortion/acc_phase`。
-先完成 qubit 頻率、X90 與 readout 校準，再於全域 aliases 綁定
-`qubit` 與 `resonator`。量測期間 DC flux 裝置保持原位。
+Bind the qubit and resonator before Open. Defaults refreshes these sources and drops edits. Reset uses the qubit reset slot and is optional. The π/2 pulse uses the calibrated x90 slot and Readout uses the resonator readout slot if available. Otherwise enter the calibrated settings in the shown templates.
 
-Open 與 Defaults 使用固定來源選初值。Defaults 會清除本 tab 的編輯並重新捕捉來源。
-X90 優先取 `$qubit.module.x90`，readout 優先取
-`$resonator.module.readout`。缺少時顯示可編輯範本。
-Reset module 為選填，來源是 `$qubit.module.reset`。
-Relax delay 初值為已校準 T1 的 5 倍；缺 T1 時使用 150 µs，可自行調整。
+Flux pulse starts from the qubit fast-flux channel with a 1 µs rectangular envelope, 0 MHz carrier, gain 1.0 a.u. and Nyquist zone 2. Check that the channel and allowed gain are correct. Pre-delay sets the programmed start, and the waveform length sets the duration. Set the readout gain and integration timing from the resonator calibration.
 
-Flux pulse 模組槽使用 `flux_pulse` 範本，channel 取 `$qubit.wiring.lo_flux_ch`。
-缺 channel 時表單保持 Invalid，須填入已確認的通道。範本初值為零頻率、gain 1.0、
-Nyquist zone 2 的 const pulse，長度為 1 µs。這些欄位都可在表單調整。
-初值僅供編輯，flux 校準與硬體安全範圍須另行確認。
-執行前須確認 gain、channel、波形、延遲及接線。
+| Field | Initial value and effect |
+| --- | --- |
+| First π/2 wait | 0 to 2 µs, 101 points. Covers the initial baseline, the pulse and the return to baseline. |
+| Projection phase | 0 to 360 deg, 21 points. The second π/2 pulse uses these carrier phases. Use distinct phases over a cycle to resolve a fringe. |
+| Minimum projection wait | 2 µs. Increase it to at least the later of the flux branch completion and the largest wait plus the first π/2 branch duration. Include pulse delays. Otherwise the projection time moves at the end of the scan and the phase slope does not have the intended meaning. |
+| Reps, Rounds, Relax delay | 1000 shots per point per round, 10 full scans averaged, and five times the captured T1 between shots. If T1 is unavailable, start with 150 µs. |
 
-## 掃描與序列
+## Read the map and detuning
 
-Length 是第一個 X90 前的等待時間，單位 µs，初值掃描 0 至 2 µs、101 點。
-Phase 是第二個 X90 的投影相位，單位 deg，初值 0 至 360 度、21 點。
-兩個 sweep、reps、rounds 與 readout_t 都可編輯。
+The Run and first Analyze heatmaps share the first π/2 pulse center on x, second-pulse projection phase on y, and the same IQ projection. The center is First π/2 wait plus half the pulse duration. Color is mean IQ projected along the largest variation in the scan, in a.u., not a classified state population. The Run title counts finite IQ points. The acquisition progress separately reports how many whole maps contribute to the average.
 
-每次 reset 後，同時開始三條分支：flux pulse、等待 length 後的第一個 X90、
-以及 readout_t 等待。三條都結束後才打第二個 X90，再 readout。
-`readout_t` 初值為 2 µs，設定平行分支的最短等待時間。
-第二個 X90 在最晚結束的分支完成後開始，隨後才 readout。
-請將它設得足以覆蓋整個掃描的第一個 X90 與 flux pulse，避免投影時刻隨掃描改變。
-Run 前用 cfg preview 檢查實際 pulse、時序與 sweep。
+For each time slice, Analyze fits the sine and cosine fringe coefficients and unwraps their phase across the time scan. The detuning plot shows the negative slope of that phase divided by 2π. A positive slope of phase in rad/µs gives a negative detuning in MHz. Black points are numerical detuning estimates, not individual shots. The green rectangular reference has the programmed start and end times, with levels inferred from the lowest and highest deciles of absolute detuning. The gray bands each span one π/2 pulse duration centered on a programmed edge. There is no pointwise shot SEM on the 2D map or fit parameter error on the numerical derivative.
 
-## Run、分析與保存
+A washed-out fringe, a phase jump near one full turn, or a noisy derivative makes a feature unreliable. Sample fast enough that phase changes by less than π between adjacent first-pulse times. For a possible 25 MHz detuning that means less than 0.02 µs between samples. If the estimate remains outside the acceptable frequency offset at the scan end, extend the wait range at that spacing and increase Minimum projection wait accordingly. Do not infer a compensation filter from the derivative alone.
 
-Run 的 measurement 圖顯示等待時間與投影相位的 IQ 投影。
-Analyze 直接使用同一次 Run 或 Load 的 cfg 與 IQ。
-它以正弦／餘弦係數抽出並 unwrap 相位，再以負時間斜率除以 2π 得到 MHz detuning。
-時間軸對齊第一個 X90 的中心。Fit 圖比較 detuning 與理想矩形響應，
-灰色區域標出 X90 在 flux pulse 邊緣附近的有限時間解析度。
-
-請檢查投影對比、相位連續性及邊緣。圖供人工判讀，校正與 fidelity 驗收須另行完成。
-梯度與邊緣判讀需要足夠有效點及對比；資料不足時應先改善量測。
-分析結果供判讀暫態響應，校準參數及 module 保持原值。
-
-Save All 保存等待時間、投影相位、complex IQ 與該次 cfg。
-記憶體等待時間為 µs，磁碟為 s，相位維持 deg。
-Load 載入結果，目前表單保持原值。歷史 cfg 缺失時仍可載入有效 IQ，
-但 Analyze 會回報錯誤，因為它需要來源 pulse 時間。
+Save stores waits in seconds, projection phase in degrees, complex IQ and source cfg. Load leaves the current form unchanged. Analyze needs the saved cfg for the pulse timing. No recipe or calibration writeback is published for this experiment.

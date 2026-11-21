@@ -6,7 +6,6 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.artist import Artist
-from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -40,16 +39,56 @@ def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class TwotoneCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    qub_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    gain: Annotated[SweepCfg, FieldMeta(label="gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the reset module before each shot, or leave it disabled.",
+        ),
+    ] = None
+    flux_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Flux pulse",
+            description="Enter the flux pulse played alongside the spectroscopy pulse; Flux pulse gain supplies its swept gain.",
+        ),
+    ]
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit probe",
+            description="Enter the spectroscopy pulse; Qubit probe frequency supplies its swept carrier.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated resonator readout used after both drives finish.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Flux pulse gain",
+            unit="a.u.",
+            description="Enter the signed DAC gain scan of the flux pulse.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Qubit probe frequency",
+            unit="MHz",
+            description="Enter the absolute RF carrier scan that spans the qubit resonance.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the number of shots per scan point in each round.",
         ),
     ]
     rounds: Annotated[
@@ -57,7 +96,7 @@ class TwotoneCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of times to acquire and average the full scan.",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -66,7 +105,7 @@ class TwotoneCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the time for relaxation after each shot.",
         ),
     ]
 
@@ -110,22 +149,21 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         )
 
         # 2. Keep one averaged spectrum per flux gain.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
-        formatter = ScalarFormatter(useMathText=True)
-        formatter.set_powerlimits((-2, 2))
-        ax.xaxis.set_major_formatter(formatter)
-        ax.yaxis.set_major_formatter(formatter)
+        fig, ax = context.plots.subplots(num="measurement", layout="constrained")
+        fig.suptitle("Fast-flux spectroscopy · Qubit · Resonance map")
+        ax.set(xlabel="Flux pulse gain (a.u.)", ylabel="Qubit probe frequency (MHz)")
+        ax.set_title(f"0/{gains.size * freqs.size} scan points with IQ")
+        ax.grid(False)
         viewer = live_heatmap(ax)
+        (image,) = viewer.set(gains, freqs, np.full((gains.size, freqs.size), np.nan))
+        fig.colorbar(image, ax=ax, label="Mean IQ real projection (a.u.)")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
-            """Draw acquired complex IQ on the measurement axes; return changed artists.
-
-            Read the scan-shaped data without changing it. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            return viewer.set(gains, freqs, twotone_signal2real(data))
+            """Display available IQ on the scan grid without changing the buffer."""
+            count = np.count_nonzero(np.isfinite(data))
+            title = ax.set_title(f"{count}/{data.size} scan points with IQ")
+            return (*viewer.set(gains, freqs, twotone_signal2real(data)), title)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -171,22 +209,9 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         real_signals = twotone_signal2real(signals2D)
 
         # 2. Locate spectral features in the flux-gain/frequency contrast map.
-        fig, ax = plots.subplots(num="fit")
-
-        ax.imshow(
-            real_signals.T,
-            extent=(
-                float(gains[0]),
-                float(gains[-1]),
-                float(freqs[0]),
-                float(freqs[-1]),
-            ),
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            cmap="RdBu_r",
-        )
-        ax.set_xlabel("Flux Pulse Gain (a.u.)")
-        ax.set_ylabel("Frequency (MHz)")
-
-        fig.tight_layout()
+        fig, ax = plots.subplots(num="fit", layout="constrained")
+        fig.suptitle("Fast-flux spectroscopy · Qubit · Resonance map")
+        ax.set(xlabel="Flux pulse gain (a.u.)", ylabel="Qubit probe frequency (MHz)")
+        ax.grid(False)
+        (image,) = live_heatmap(ax).set(gains, freqs, real_signals)
+        fig.colorbar(image, ax=ax, label="Mean IQ real projection (a.u.)")

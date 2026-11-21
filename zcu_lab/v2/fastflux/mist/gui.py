@@ -38,10 +38,19 @@ def run(cfg: MistCfg, *, context: RunContext) -> RunRecord[MistCfg, MistResult]:
     return RunRecord(cfg=cfg, result=MistExp().run(cfg, context=context))
 
 
+def _summary_lines(source: MistRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=MistExp.AXES_SPEC,
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, options=lambda source, env: MistAnalyzeOptions()),
+    analysis=Analysis(
+        fn=_analyze,
+        options=lambda source, env: MistAnalyzeOptions(),
+        summary_lines=_summary_lines,
+    ),
 )
