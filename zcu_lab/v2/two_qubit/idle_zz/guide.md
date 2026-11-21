@@ -2,34 +2,34 @@
 
 **讀者：** operator、agent。設定 conditional Ramsey，判讀 idle ZZ 擬合頻差與限制。
 
-Cfg 掃描欄位使用 `dc`，此實驗的 cfg schema 為 6.0。載入舊主版本的 run 時保留 Result 與 metadata，cfg 為 None，並發出 `CfgUnavailableWarning`。這些舊 run 不支援重新分析，也不提供 cfg 遷移或欄位 alias。
+Cfg schema 為 7.0。掃描欄位使用 `dc`。
 
-`two_qubit/idle_zz` 比較 spectator I、Xπ 的兩個名目分支。Target 使用小寫 `f1` 或 `f2`。每個 shot 做可選 reset → spectator I/Xπ → target π/2 → delay → phase projection → terminal mux readout。reset 留空時不發射 reset。
+`two_qubit/idle_zz` 比較 spectator I、Xπ 的兩個名目分支。Target 使用 `qubit1` 或 `qubit2`。每個 shot 做可選 reset → spectator I/Xπ → target π/2 → delay → phase projection → terminal mux readout。reset 留空時不發射 reset。
 
 ## 開啟前確認
 
-先依 [FTF bring-up 指南](../guide.md) 校準 F1/F2 的 Xπ、Xπ/2 與 mux readout。Aliases `f1`、`f2` 指向不同 fluxonium，`coupler` 指向本對 transmon，`mux` 指向含 F1/F2 的 MuxGroup。Group 的有序 qubits 與 resonators 必須逐項對應。
+在目前 point 的 Aliases 表綁定 `$qubit1`、`$qubit2` 到不同元件，並綁定 `$mux` 到包含兩者的 MuxGroup。舊 point 也要新增這兩個位置 alias；不會自動重綁。GUI aliases 與 Notebook 的同名內建角色分開設定。 不需要綁定 `$coupler`。依 [校準步驟](../guide.md) 準備兩顆的 Xπ、Xπ/2 與 mux readout。
 
-Open／Reset 固定捕捉角色與原始 tone 位置。每個角色的 Xπ 與 Xπ/2 使用同一 generator，F1/F2 使用不同 generator。Readout 引用完整 `$mux.module.readout` slot，缺 slot 時手填 blank mux 範本。F1/F2 必須有含 radius 的 circle classifier，缺少時先完成 GE Post。其他 tone 保留原順序，不要求 classifier。
+Open／Reset 根據有序的 `$mux.qubits` 設定隱藏的 tone index。每顆 qubit 的 Xπ 與 Xπ/2 使用同一 generator；兩顆 qubit 使用不同 generator。Readout 引用完整 `$mux.module.readout` slot，缺 slot 時手填 blank mux 範本。Qubit1/Qubit2 必須有含 radius 的 circle classifier，缺少時先完成 GE Post。其他 tone 保留原順序，不要求 classifier。
 
-Refresh 更新來源與選項，保留已填輸入。修改來源或 aliases 後按 Reset 重新取得初值，並核對角色、pulses 與 tone 對應。Reset 可能覆蓋尚未保存的輸入。
+Refresh 更新來源與選項，保留已填輸入。修改來源或 aliases 後按 Reset 重新取得初值，並核對兩顆 qubit 的 pulses 與 readout 順序。Reset 可能覆蓋尚未保存的輸入。
 
 ## 設定與 Run
 
-表單先列 reset、Xπ、X90 與 mux readout，再列角色與 target。
+表單先列 reset、Xπ、Xπ/2 與 mux readout，再列 target。
 外層 DC 的 device、unit、values 在內層 delay 前。Detune 接在 delay 後，取數欄位在最後。
 
-1. 選 target `f1` 或 `f2`，另一個是 spectator。需要 reset 時填入已校準的 reset cfg。
+1. 選 target `qubit1` 或 `qubit2`，另一個是 spectator。需要 reset 時填入已校準的 reset cfg。
 2. 人工填 signed detune，單位 MHz。其絕對值須明顯大於預期 abs(ζ) 加 qubit 頻率誤差，使兩分支留在 detune 選定的同側。單一 projection 的資料不能證明此前提。
 3. 設 delay 的 µs 範圍及點數。分析至少需要 6 個不同、等距的實際 delay，正的時間跨度，並解析數個 fringe 週期。量化後 delay 不可重複。
-4. 只掃 delay 時，DC source 留空，各 source 不變。結果的單點 DC 座標 0 代表該軸停用。要掃 DC 時，填直接 device 名稱、driver 的 working unit 與已授權的 source values 範圍。支援 A、V、native，不做單位轉換或 F1/F2 補償。
+4. 只掃 delay 時，DC source 留空，各 source 不變。結果的單點 DC 座標 0 代表該軸停用。要掃 DC 時，填直接 device 名稱、driver 的 working unit 與已授權的 source values 範圍。支援 A、V、native，不做單位轉換或 Qubit1/Qubit2 補償。
 5. 核對 reps、rounds、等待時間與完整 mux 積分窗口，再 Run。每個 DC 點用一支 program 在硬體掃 spectator_states 與 delay。DC 要設定外部儀器，因此留在 host。硬體 delay sweep 會產生逐點等待差。若編譯指出收尾 WAIT slack 大於 relax_delay，增加 relax_delay 後再 Run，不把 delay 改回 host scan。Live 每條線是一個 DC／branch 的 target ⟨σ⟩。
 
 DC 操作也可能影響其他 loop。工作點與補償由操作員設定並記錄。結束後 source 維持最後設定，取消或失敗後先核對裝置狀態。
 
 ## FIT 與符號
 
-第二個 target π/2 的 phase 是第一個 pulse 的 phase 加上 `360 * detune * actual_delay`，單位 degree。取數時分類 terminal F1、F2 的 g/e/other，每點保存 9 類計數。分析以目標 qubit 的 `⟨σ⟩ = (N_e − N_g) / N_total` 對 delay 做 free-phase decay cosine fit。Other 留在分母，不旋轉或重分類 IQ。擬合用計數推得的 shot-noise error 加權，飽和點的 error 下限為 1/N。
+第二個 target π/2 的 phase 是第一個 pulse 的 phase 加上 `360 * detune * actual_delay`，單位 degree。取數時分類 terminal Qubit1、Qubit2 的 g/e/other，每點保存 9 類計數。分析以目標 qubit 的 `⟨σ⟩ = (N_e − N_g) / N_total` 對 delay 做 free-phase decay cosine fit。Other 留在分母，不旋轉或重分類 IQ。擬合用計數推得的 shot-noise error 加權，飽和點的 error 下限為 1/N。
 
 Fitter 給非負 fringe magnitude m，單位 MHz。在兩分支同側的前提下，`f = sign(detune) * m`，`ζ = f_Xπ − f_I`。負 detune 也使用 signed frequency 求差。共同人工 phase ramp 在頻差中抵消。
 
@@ -45,23 +45,23 @@ Detune 為 0、點數不足、span 非正、無 Ramsey contrast、非有限不�
 
 ## 取消、保存與重分析
 
-Result 的 sums 是 float64 `DC × spectator_states × delay × 3 × 3` 原始計數。spectator_states 存整數 [0, 1]，分別是 spectator I、Xπ。末兩軸是 terminal F1/F2，各為 g/e/other。Rounds 在取數端累加，不除以 reps 或 rounds，不保存個別 shots 或 IQ。
+Result 的 sums 是 float64 `DC × spectator_states × delay × 3 × 3` 原始計數。spectator_states 存整數 [0, 1]，分別是 spectator I、Xπ。末兩軸是 terminal Qubit1/Qubit2，各為 g/e/other。Rounds 在取數端累加，不除以 reps 或 rounds，不保存個別 shots 或 IQ。
 
 取消保留已完成 rounds 的計數，未量點保持 NaN。Live 可見部分曲線，fit 要求分支上的每個 delay 都至少取到一輪，且有 shot 通過篩選。兩支 fit 可用時才算 ζ。總數為 0 的比例是 NaN。
 
-Save 保存 sums、全部座標與本次 cfg。Native Load 不改目前表單。Analyze 只用所載 cfg，不用目前 library；缺 cfg 時拒絕分析。普通版 cfg schema 為 5.0，target 的舊大寫值不作相容轉換。舊 raw-IQ 檔缺少 sums 時明確報錯。
+Save 保存 sums、全部座標與本次 cfg。Native Load 不改目前表單。Analyze 只用所載 cfg，不用目前 library；缺 cfg 時拒絕分析。新版 Load 會拒絕位置軸名不符的舊檔，不改動原檔。要讀原檔，請用與檔案格式相符的舊版。 不轉換舊 cfg。
 
 本實驗不寫回 calibration，也不自動調整 detune 或 DC。
 
 ## 用 mux herald 篩選 shot
 
-Reset 選 `reset/mux_herald`，readout 與終端讀取用同一份設定。F1、F2 位於完整 readout 的第 0、1 個 tone 時，填 `keep: {'0': g, '1': g}`。用原始 tone 位置，不用 ADC 編號。
+Reset 選 `reset/mux_herald`，readout 與終端讀取用同一份設定。Qubit1、Qubit2 位於完整 readout 的第 0、1 個 tone 時，填 `keep: {'0': g, '1': g}`。用原始 tone 位置，不用 ADC 編號。
 
 機率是通過 herald 的 shot 裡的條件機率，分母是該格的計數總和。接受率等於計數總和除以 reps × rounds，不代表基態純度。沒有 shot 通過時，該格機率為 NaN。中途停止仍可用已完成 rounds 的計數。原本獨立 heralded 實驗的存檔已無法載入。
 
 ## Notebook
 
-`cfg` 使用與表單相同的 IdleZZCfg。經 NotebookAdapter 保留 RunRecord 與保存流程。
+建立 IdleZZCfg 時，按完整 readout 的順序填 `qubit1_tone` 和 `qubit2_tone`，index 從 0 起算。經 NotebookAdapter 保留 RunRecord 與保存流程。
 `point_view` 是儲存目的地已綁定的 `ParameterView`。保存時以本次 `run()` 回傳的 `record` 作為 `source`。
 
 ```python
@@ -77,7 +77,7 @@ exp.save_run(point_view, source=record)
 
 ## Calibration order and field units
 
-Calibrate each role's Xπ and Xπ/2 slots with amplitude and length Rabi before using them.
+Calibrate each qubit's Xπ and Xπ/2 slots with amplitude and length Rabi before using them.
 Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
 Use lookback to set mux timing, then mux onetone to set frequencies and gains.
 Confirm readout timing in us and gains in [-1, 1].

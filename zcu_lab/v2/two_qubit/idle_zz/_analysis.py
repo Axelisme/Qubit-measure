@@ -89,16 +89,16 @@ def complete_points(sums: NDArray[np.float64], expected: int) -> NDArray[np.bool
 
 
 def sigma_errors(
-    counts: NDArray[np.float64], target: Literal["f1", "f2"]
+    counts: NDArray[np.float64], target: Literal["qubit1", "qubit2"]
 ) -> NDArray[np.float64]:
     """Return shot-noise errors for (Ne-Ng)/N, including other in N.
 
-    counts is delay × terminal F1 × terminal F2. The multinomial variance of
+    counts is delay × terminal Qubit1 × terminal Qubit2. The multinomial variance of
     the {-1,+1,0} observation is (Pg+Pe-sigma²)/N. A one-shot error floor
     1/N keeps saturated finite-count bins from receiving infinite weight.
     Zero counts give NaN, not an invented observation.
     """
-    marginal = counts.sum(axis=-1 if target == "f1" else -2)
+    marginal = counts.sum(axis=-1 if target == "qubit1" else -2)
     total = marginal.sum(axis=-1)
     value = np.full(total.shape, np.nan)
     second = np.full(total.shape, np.nan)
