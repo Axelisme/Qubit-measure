@@ -35,6 +35,8 @@ from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET, reson
 from zcu_tools.simulators.ftf.environment.template import FTFModelFacts, FTFTemplatePlan
 from zcu_tools.simulators.ftf.physics import CavityDrive
 
+_CAVITY_SPAN_CACHE_BYTES = 512 * 1024**2
+
 
 class ProjectiveCapture:
     """FTF-owned provenance alongside a single acquire's Engine recordings."""
@@ -454,7 +456,7 @@ def evolve_projective_plans(
     spans = []
     pruned = []
     projection = _ProjectionState(settings.numerics.projection_weight_floor)
-    cache = CavityAverageCache()
+    cache = CavityAverageCache(max_bytes=_CAVITY_SPAN_CACHE_BYTES)
     try:
         pair = resonators(settings)
         for plan in plans:
@@ -542,10 +544,9 @@ def evolve_plans(
     No engine model source, drive phase, envelope origin or flux is rebuilt.
     options.cancel is forwarded to every evolution span's chunk checkpoints; None
     disables cancellation. Cancelled propagates without a partial result.
-    One ADC-owned cache (at most 64 MiB for moments and all-state end fields)
-    serves all g/e points in this composition, serially. Return and exception
-    paths release its contents;
-    no owner is retained by the engine or long-lived acquisition source.
+    One byte-bounded ADC memo for moments and all-state end fields serves all
+    g/e points in this composition serially. Return and exception paths release
+    its contents. The engine and long-lived acquisition source retain no owner.
     """
     if not any(any(plan.cavity_drives) for plan in plans):
         with options.evolving():
@@ -559,7 +560,7 @@ def evolve_plans(
                 reuse_key=options.key,
             ), (options.key,)
     # ADR-0078: this composition alone owns the ADC memo's lifetime.
-    cache = CavityAverageCache()
+    cache = CavityAverageCache(max_bytes=_CAVITY_SPAN_CACHE_BYTES)
     try:
         pair = resonators(settings)
         timelines = [

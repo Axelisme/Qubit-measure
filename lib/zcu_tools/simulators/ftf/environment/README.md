@@ -643,14 +643,28 @@ every key through `Engine.reuse`. Projective continuation keys identify the
 original point, ordered histories, initial densities and span shifts. A failed
 or cancelled batch publishes no partial preparation.
 
-One ADC `CavityAverageCache` serves each cavity span composition. Its 64 MiB
-budget is shared by g/e points of that composition, not across bias models. The
+One ADC `CavityAverageCache` serves each cavity span composition. FTF sets a
+512 MiB budget per composition. Its g/e points share the owner; different bias
+models do not. ADC's library default remains 64 MiB. The
 non-projective path reuses ADC flat second moments and all-state endpoint fields.
 FTF selects the main branch and builds each `SegmentShift` without a second memo.
 Projective continuation still reuses only flat second moments. Neither path
 caches shaped inputs. ADC owns keys, arrays and admission. Composition clears
 all entries on return or exception; Engine and the long-lived source do not
 retain the owner.
+
+In the fixed projective prefixes, `chain/amp_rabi` and `chain/len_rabi` gain no
+hits above 64 MiB. For `chain_length` at 2.2 µs, the 64, 128, 256 and 512 MiB
+budgets give 5,686, 8,284, 14,392 and 19,346 exact hits in 29,921 spans. Each
+doubling adds more than 10% of the 19,346 cross-history repeat opportunities.
+At 512 MiB the memo admits every distinct key in the prefix, so a larger budget
+adds no hits there. The peak memo holds 475,546,067 B. The process peak RSS is
+385 MiB higher than at 64 MiB, the largest increase of the three prefixes.
+
+A complete `mist/flux_dep` Run gives 20,200 exact hits and no declines at either
+64 or 512 MiB. The largest owner holds 8,991,628 B in both runs. The observed
+process peak RSS is 3.49 MiB lower at 512 MiB, within the 512 MiB increase limit
+for sharing the budget across both FTF paths.
 
 When a cavity-drive Stark shift reverses two adjacent state energies, FTF
 continues with the same dispersive calculation and keeps the original state order.
