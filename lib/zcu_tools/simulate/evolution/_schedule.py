@@ -11,7 +11,7 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
-from zcu_tools.simulate.boundary import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
 
 from ._capture import CaptureRun
 from ._dispatch import Dispatch, Selection, classify, prepare
@@ -21,7 +21,7 @@ from ._gain_plan import admit_shared_builds
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
-from .engine import Cancelled, PathDiagnostics
+from .engine import PathDiagnostics
 from .kernel import ApplyContext, Kernel, KernelContext, Prepared, RowPlan, SegmentTable
 from .state import transform_density
 

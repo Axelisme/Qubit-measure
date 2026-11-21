@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from zcu_tools.simulate.boundary import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
 
 from ._capture import CaptureRun
 from ._dispatch import classify
@@ -13,7 +13,6 @@ from ._parallel import Executor
 from ._planning import Geometry
 from ._schedule import Schedule
 from ._validation import owned
-from .engine import Cancelled
 from .kernel import Kernel, KernelContext, PrefixOpenCLQuote, SegmentTable
 from .secular import FluxWaveform
 

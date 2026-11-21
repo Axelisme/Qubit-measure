@@ -216,13 +216,25 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 
 ### FTF Stop 用合作式檢查點，設計上 5 秒內
 
-**規則。** FTF Stop 不設強制上限，也不設延遲 gate。放點依據是正常參數下，相鄰兩次取消檢查之間的區段在 5 秒內結束。FTF 在每個 projective outcome 推進前檢查取消。Engine 在幾何規劃結束、建立 WorkPlan 前和 chunk 邊界檢查，binding 在 pacing 等待中檢查。
+**規則。** FTF Stop 不設強制上限，也不設延遲 gate。放點依據是正常參數下，相鄰兩次取消檢查之間的區段在 5 秒內結束。FTF 在每個 projective outcome 推進前檢查取消。Engine 在每批 geometry 完成後、geometry 合併後、chunk 邊界，以及 WorkPlan population 的 gate inventory 完成後、single-gate pricing 或 usage recording 前檢查。Binding 在 pacing 等待中檢查。當輪需要 raw 時，ADC 在 raw 入口、每個 logical event、每個 point group 與交付前檢查；Binding 在 required-raw 工作完成後、clock credit 前再檢查一次，SoC 只在成功後發佈並前移 index。
 
-**例子。** `chain/amp_rabi` 以 51 gains、100 reps、100 rounds 離線執行。在第 10 個 span 組裝時送出 Stop，0.0009 秒後檢查讀到旗標，0.017 秒到 core 終態，沒有完成輪。先前觀察到 11.8 至 95.3 秒的組裝區段不查取消；這次逐 outcome 查詢，第 7 至 9 個 span 的單次 advance 最長約 0.02 秒。
+**例子。** `chain/amp_rabi` 的單點真實 caller 在第 8 次 `Engine.evolve` 的 6,614 個 geometry batches 中途送 Stop；第 3,307 批結束的檢查讀到旗標，沒有開始下一批。該次前綴的最長查詢間隔是 0.578580 秒。WorkPlan 的真實 caller 在 gate inventory 後讀到 Stop，最長前綴查詢間隔是 1.057840 秒；WorkPlan 關閉，沒有記錄該次的新 usage。必要 raw 的 Stop 測試在第一個 physical point group 結束時讀到取消，零輪沒有發布。這些都是局部診斷值，不是端到端延遲保證。實作接縫見 [Evolution README](../../lib/zcu_tools/simulate/evolution/README.md#workplan-and-cache-ownership)、[ADC README](../../lib/zcu_tools/simulate/adc/README.md) 與 [simulation README](../../lib/zcu_tools/program/v2/simulation/README.md)。
 
-**邊界。** 5 秒不是驗收門檻，**目前未達成**。`Engine.evolve` 的 plan 和 WorkPlan 仍量到超過 5 秒的區段，尚未定位子段。空 cache、warmup 關閉時，首個 cold chunk 量到 5.4 至 8.5 秒。Engine 後的讀出分布、raw 準備與抽樣未覆蓋。這些區段由 `ftf-stop-remaining-gaps` 承接。若縮短間隔只能犧牲速度或改變啟動行為，交回使用者取捨。通用 Cancel 與 terminal 所有權遵循 [ADR-0066](0066-operation-lifecycle.md#取消與互動)。
+**邊界。** 5 秒不是驗收門檻，**目前仍未達成整體設計目標**。以下數字來自離線、非排他的樣本；量測收據未入庫，本文列出判讀所需事實，不把單點或前綴外推到完整工作量。
 
-**依據。** 2026-11-21，使用者對 Stop 上限答「3C，但設計上5秒內」，並說「我认为能及时中断也是一个挺重要的功能。」具體放點與剩餘區段的承接是 designer 依授權代裁，使用者未覆核。見 [FTF Stop 討論](../discussions/2026-11-21-ftf-stop-checkpoints.md)。
+- **已補檢查（附診斷值）。** 單點 #8 `plan` 原量 5.405 秒。重放外層 5.159 秒，其中 geometry batches 4.344 秒、merge/finish 0.815 秒；每批結束查詢，merge 後仍查詢。真實取消前綴最長間隔 0.578580 秒。該次只驗到第 3,307／6,614 批，未跑剩餘批次、merge、WorkPlan 或後段。
+- **已補檢查（附診斷值）。** 單點 #9 `plan` 原量 7.494 秒。重放外層 6.813 秒，其中 geometry batches 5.967 秒、merge/finish 0.847 秒；沿用逐批及 merge 後查詢。#9 走完 geometry 進入 WorkPlan，真實取消由後一段驗證；不能把該前綴當成 #9 geometry 的最大間隔。
+- **已補檢查（附診斷值）。** 單點 #9 `create_work_plan` 原量 7.160 秒，重放 5.649 秒。新檢查位於 gate inventory 後、single-gate pricing 與第一筆 usage recording 前；真實取消前綴最長間隔 1.057840 秒。該次沒有執行後續 single-gate pricing、planner 或本輪後段。
+- **GUI 條件下不出現。** 原清單的空 Numba／ZCU cache、warmup 關閉首個 cold chunk 為 5.412／8.460 秒。保留磁碟 cache、`warmup=True` 的離線 GUI 設定樣本中，首個 chunk 為 0.007628 秒。這只代表該 retained-cache 首段，不代表其他 cache 狀態、後續 chunks 或 GUI 終態。
+- **GUI 條件下不出現。** 同一個 retained-cache 樣本的首個 production WorkPlan 為 0.002580 秒；原空-cache、warmup 關閉的 cold WorkPlan 為 6.055 秒。這只覆蓋一個 segment row，不代表 #9 的大批次 WorkPlan。
+- **GUI 條件下不出現 >5 秒，但空 cache 仍未達成。** Retained-cache 樣本的 `wait_ready` 為 1.962915 秒。另一個 `warmup=True` 的空-cache 樣本等待 115.738108 秒，期間沒有查 Stop；它不是 retained-cache GUI 工作路徑的重測。若要改啟動等待或取消行為，須另行取捨。
+- **仍未達成（原因：尺寸未覆蓋）。** Engine 後的 compact populations、讀出分布、ADC／statistics／raw 準備、compact draw 與成功收尾，只在 1 點、554 outcomes、24 states、16 reads、ADC 0、每窗口 304 samples、100 reps 的 low-snr 副本成功跑完，沒有送 Stop。各段分別為 0.045507、0.001328、0.015142、0.006093、0.000057、0.001970、0.006212 秒；前六段間隔為 0.205343 秒。51 點首輪與 floor `1e-9` 尺寸未覆蓋，不用這些數字宣稱達成或外推。
+- **已補檢查（附診斷值）；仍未達成（原因：冷段與大尺寸未覆蓋）。** 必需 raw 現在在 ADC 的入口、logical event、point group、交付前及 SoC 發佈前查詢。單點 raw 的原相鄰查詢間隔為 5.035913 秒；送 Stop 的樣本中，event 內第一次查詢到第一群結束的查詢為 3.216835 秒，該輪沒有交付、完成輪數為零。另一個未送 Stop 的冷樣本，同一段查詢間隔為 5.296475 秒，raw 全段為 5.392256 秒；收據未分解 event preparation、群內執行與 JIT。不能據此宣稱冷 raw 已符合目標。51 點首輪、floor `1e-9` 與 GUI retained-cache raw 都未覆蓋。
+- **仍未達成（原因：只量到外層）。** 另兩個空-cache、warmup 關閉的首個 evolve 樣本分別有 5.483342 秒與 8.105711 秒的未分解區段，收據沒有定位子段，不能據此另加檢查點或改寫 retained-cache 結論。
+
+通用 Cancel 與 terminal 所有權遵循 [ADR-0066](0066-operation-lifecycle.md#取消與互動)。當輪 raw 的資料 owner 與 query 邊界見[Integrated raw 規則](#integrated-raw-由環境生成介面由-program-擁有)及 [required raw 討論](../discussions/2026-11-21-required-raw-stop-publication.md)。
+
+**依據。** 2026-11-21，使用者對 Stop 上限答「3C，但設計上5秒內」，並說「我认为能及时中断也是一个挺重要的功能。」具體放點、覆蓋清單與落地檢查由 designer 依授權代裁，使用者未覆核。原始檢查點討論見 [FTF Stop 討論](../discussions/2026-11-21-ftf-stop-checkpoints.md)；必要診斷數字與尺寸限制已逐項寫在本節，未入庫的收據不作永久文件依賴。required raw 的 optional protocol 與發佈語意是 designer 代裁，使用者未覆核（Review: pending），選項與理由見 [required raw 討論](../discussions/2026-11-21-required-raw-stop-publication.md)。
 
 ### 模擬器帶通用調試介面
 
@@ -313,13 +325,13 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 
 ### Integrated raw 由環境生成，介面由 program 擁有
 
-**規則。** `program.v2.simulation.RawShots` 定義延遲產生完整單發 ADC sums 的介面。環境透過 `IntegratedRound` 一起交付統計資料與 raw source。Program 只在單發 processing 或 getter 需要時呼叫 source，不重跑 backend。`simulate.boundary.RoundStatistics` 只有資料，不定義 materializer、Protocol 或 callback。
+**規則。** `program.v2.simulation.RawShots` 定義延遲產生完整單發 ADC sums 的介面。環境透過 `IntegratedRound` 一起交付統計資料與 raw source。Program 只在單發 processing 或 getter 需要時呼叫 source，不重跑 backend。`simulate.boundary.RoundStatistics` 只有資料，不定義 materializer、Protocol 或 callback。Program 另定義可選的 `CancellableRawShots` 能力，使用 `materialize_cancellable(reps, avg_level, *, cancel=...)` 對當輪必需 raw 借用唯讀取消查詢；source 不保存 query。唯一的 `Cancelled` 由 `simulate.boundary` 定義，`simulate.evolution.Cancelled` 保留相同類別身分的匯入入口。
 
-**例子。** FTF 的環境交付由 ADC 產生的完整 raw，包含物理訊號、receiver noise 和取整排列。單 carrier raw 抽 CTMC 的等待時間與轉移方向，保留每次跳躍，不重設腔場。介面見 [Compact timelines and statistics](../../lib/zcu_tools/program/v2/simulation/README.md#compact-timelines-and-statistics)，取樣見 [ADC README](../../lib/zcu_tools/simulate/adc/README.md)。
+**例子。** FTF 的環境交付由 ADC 產生的完整 raw，包含物理訊號、receiver noise 和取整排列。當 Program 的 threshold、mask 或 reducer 需要本輪逐 shot 資料時，SoC 將既有 acquire query 傳給支援 cancellable 的 ADC source；抽樣在入口、logical event、point group 與交付前檢查。成功的 shots 只抽一次，Program 與 SoC 各持有獨立可寫陣列。介面見 [Compact timelines and statistics](../../lib/zcu_tools/program/v2/simulation/README.md#compact-timelines-and-statistics)，取樣見 [ADC README](../../lib/zcu_tools/simulate/adc/README.md)。
 
-**邊界。** ADC 與 `simulate.white_noise` 各自產生完整 raw，以結構型別符合 `RawShots`，不 import program。White noise 由 [experiment 的環境組合根](../../lib/zcu_tools/experiment/README.md#explicit-simulation-environments)接線；FTF 由 [`simulators.ftf.environment`](../../lib/zcu_tools/simulators/README.md)組合框架機制。`simulate.rounding` 擁有兩種環境與 decimated transport 共用的取整和 shot-axis 排列，不負責 QICK averaging 或硬體操作。Raw 與直接平均須維持相同期望，不平移 raw 去配有限 shots 的平均。直接平均保留 conditional moments 與既有 RNG stream，不做逐 shot 工作。Caller 的完整 preparation 只存 noiseless inputs，不存 noisy shots 或 round identity。依賴方向維持 C8、C9、C12、C19，不加 `ignore_imports`。
+**邊界。** ADC 與 `simulate.white_noise` 各自產生完整 raw，以結構型別符合 `RawShots`，不 import program。只有明確需要當輪 raw 時才傳 query；一般 compact statistics 路徑不抽 raw，已完成輪的 getter 也不帶當輪 query。沒有 `CancellableRawShots` 能力的來源維持兩參數 `materialize(reps, avg_level)`；SoC 只在同步呼叫前與交付前查詢，不宣稱能中斷來源內部工作。停止或 raw 驗證／抽樣失敗時，SoC 不替換上一個已完成輪的 source 或 buffers，也不前移 index；真實 raw 錯誤照常傳出。成功物化不表示 Program 的 processor 或 hook 也成功；發佈後的 Stop 或 processor 錯誤不回滾已發布 transport。Deferred getter 仍可從 retained source 重新 materialize，raw 與直接平均維持相同期望，直接平均保留 conditional moments 與既有 RNG stream，不做逐 shot 工作。依賴方向維持 C8、C9、C12、C19，不加 `ignore_imports`。
 
-**依據。** 2026-10-20，使用者答「1-1」，並問：「基本認同丙，但我質疑有需要進core嗎？」介面放到 program 後答「同意」。原裁決未附討論紀錄。
+**依據。** 2026-10-20，使用者答「1-1」，並問：「基本認同丙，但我質疑有需要進core嗎？」介面放到 program 後答「同意」。2026-11-21，designer 依既有授權代裁當輪可選取消能力、required-raw 發佈邊界與 QICK／clock 接線，**使用者未覆核**；使用者的既有方向是「3C，但設計上5秒內」及「我认为能及时中断也是一个挺重要的功能。」比較與未覆蓋條件見 [required raw 討論](../discussions/2026-11-21-required-raw-stop-publication.md)。原裁決未附討論紀錄。
 
 ## 取捨
 

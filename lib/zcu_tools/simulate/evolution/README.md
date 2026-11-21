@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-21, cancellation after geometry planning
+**Last updated:** 2026-11-21, geometry and WorkPlan cancellation checkpoints
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -1255,11 +1255,13 @@ densities in place and returns a row-aligned boolean exceedance mask.
 
 ## WorkPlan and cache ownership
 
-[Dispatch](_dispatch.py) creates one [WorkPlan](workplan.py) from the complete
-evolve table before workers start. Its history mode records usage for evolve
-and projects usage for inspection, with the same inventory and cost formulas. Prefix representatives, caller classification
-and timeline workers share it through `KernelContext` and `ApplyContext`. Engine
-drains its pool before closing the plan on success, cancellation or failure.
+Engine owns one [WorkPlan](workplan.py) per call.
+[Dispatch](_dispatch.py) populates it from the complete evolve table before
+workers start. Evolve records history usage; inspection projects usage with the
+same inventory and cost formulas. Prefix representatives, caller classification
+and timeline workers share the plan through `KernelContext` and `ApplyContext`.
+Engine closes the plan on success, cancellation or failure, even if population
+stops before workers start. It drains any workers before closing the plan.
 The single `complete_table` field supplies full immutable geometry to common-frame,
 multitone dispatch and Floquet frame construction. Closing drops it along with
 the evolve-local facts.
@@ -1473,7 +1475,8 @@ possibly through a retained guard rejection. Under an allowlist, an unlisted
 family is not a candidate for those rows. The exception describes only the first
 failing row group; later groups in the acquire have not been checked.
 Preparation and apply failures propagate; they do not restart candidate
-selection. Cancellation raises `Cancelled` without partial results.
+selection. Cancellation raises `Cancelled` without partial results. The
+`simulate.evolution` export is the same exception defined in `simulate.boundary`.
 
 Calls on one Engine serialize. Joblib provides host parallelism.
 CPU kernels are single-threaded and do not open pools. Multi-timeline calls with
@@ -1483,9 +1486,11 @@ fraction of cheap gate/no-drive rows select one or six timeline chunks per
 worker. Prepare retains six chunks per worker to spread cold key builds.
 An explicit `chunks_per_worker` fixes CPU prepare and timeline chunks. It does
 not split GPU batches. This choice does not change admission, WorkPlan facts or RNG.
-Cancellation is checked after geometry planning, before building the WorkPlan
-and recording routing usage. Other checks run at entry, at chunk and preparation
-boundaries, and before return.
+Engine checks Stop after each geometry batch and again after merging geometry.
+During WorkPlan population, it checks after gate inventory and before single-gate
+pricing or usage recording. It also checks at entry, at chunk and preparation
+boundaries, and before return. A check does not preempt work inside a batch or
+planner. See the [FTF Stop design target](../../../../docs/adr/0078-evolution-module-boundary.md#ftf-stop-用合作式檢查點設計上-5-秒內).
 Native BLAS stays at one thread throughout evolve. Overlapping engines share a
 process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.

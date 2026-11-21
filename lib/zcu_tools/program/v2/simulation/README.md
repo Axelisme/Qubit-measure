@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-21, backend cancellation and deferred raw timing
+**Last updated:** 2026-11-21, required raw shots and integrated round publication
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -26,8 +26,8 @@ single seconds conversion to TimeBase. Aggregate totals may exceed int64 and the
 per-request ns bound without rejecting a long acquisition.
 Timeline durations include readout, pre/post delays and pending ADC activity;
 structural templates cover every scan point once. The binding subtracts snapshot
-and execution wall time, then sleeps only for a positive remainder. Failures do
-not wait. Pacing checks the same Stop query as the backend at intervals of at
+and execution wall time, then sleeps only for a positive remainder. Failures
+during snapshot capture or execution do not wait. Pacing checks the same Stop query as the backend at intervals of at
 most 10 ms. If Stop interrupts pacing after numeric execution returns, integrated
 acquisition discards that round and decimated acquisition keeps its trace.
 Neither starts another round.
@@ -92,10 +92,13 @@ Hardware and decimated paths keep their original configuration. Shot processing,
 hooks, normalization, averaging and Stop still belong to that pipeline.
 
 `SimulationBinding(..., timing=SimulationTiming(clock=SimulationClock(...)))` optionally tracks physical
-time independently of pacing speed. One environment shares one clock. It adds
-`max(0, unscaled physical round seconds - elapsed wall seconds)` after each
-completed round, including pacing in elapsed time. Failed or cancelled rounds
-add nothing. Between rounds and acquisitions, wall time advances naturally.
+time independently of pacing speed. One environment shares one clock. Credit
+is `max(0, unscaled physical round seconds - elapsed wall seconds)`. The elapsed
+window covers snapshot capture, execution and pacing. Raw materialization and
+host processing stay outside that window. For integrated rounds requiring raw,
+the binding applies credit only after transport validation, raw materialization
+and the final Stop check. Failed or cancelled raw work adds no credit. Between
+rounds and acquisitions, wall time advances naturally.
 The clock's `monotonic` callable can supply synthetic wall seconds. Generic
 bindings do not create a clock; single-fluxonium environments own one.
 `SimulationCallbacks(on_begin=...)` runs after readiness and before request
@@ -473,8 +476,12 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   coordinates admission and retains `last_request` and `rounds` privately in
   memory. `execute(RoundRequest)` returns `IntegratedRound(statistics, raw)` for
   integrated mode or `RoundSignals` for decimated mode. Mode/result mismatches raise.
-  `statistics` is a pure boundary `RoundStatistics`; `raw` satisfies the program-owned
-  `RawShots.materialize(reps, avg_level)` protocol.
+  `statistics` is a pure boundary `RoundStatistics`. The raw source implements
+  the program-owned `RawShots.materialize(reps, avg_level)` protocol. It may also
+  implement `CancellableRawShots.materialize_cancellable(reps, avg_level, cancel=...)`.
+  The caller passes a read-only Stop query only for required raw work in the
+  current round. Sources do not retain it. A two-argument source still works,
+  but cannot check Stop during its synchronous call.
 - Integrated statistics contain per-point totals over reps, shared category
   counts that sum to reps, noiseless per-shot sums per read and category, and
   receiver covariance. Categories need not represent physical shot paths.
@@ -488,11 +495,11 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   per acquire; this never freezes snapshots or certifies later backend values.
   Without registered shot masks, a reducer or a threshold, it divides totals
   by reps and readout length, removes QICK offsets and moves reads first without
-  allocating `acc_buf`. Registered sources materialize raw IQ for each completed
-  round and use the same [host masked average](../../README.md#registered-shot-masks)
-  as hardware. Hooks receive the running mean of completed rounds.
-  Every `acquire_summed` round materializes retained raw shots and uses the
-  same stateful reducer as hardware. Each round supplies visible ADCs as
+  allocating `acc_buf`. Program requests raw shots for thresholding, registered
+  shot masks or a reducer. Masked rounds use the same
+  [host masked average](../../README.md#registered-shot-masks) as hardware.
+  Hooks receive the running mean of completed rounds. `acquire_summed` uses the
+  same stateful reducer as hardware. Each completed round supplies visible ADCs as
   float64 `(points, reps, reads, 2)` IQ without offset subtraction, along with
   the bool `(points, reps)` keep mask. Compact totals alone do not determine
   either the normalized per-shot IQ or the mask.
@@ -500,9 +507,9 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   and classifiers follow the [program contract](../../README.md#summed-acquisition).
   Round hooks and the Schedule converter receive reducer outputs without averaging.
   Readout optimization uses the same `acquire_summed` path with third-order IQ sums.
-  Thresholding and `get_raw()` also materialize deterministic
-  int64 shots from the retained last-round source. The environment owns signal,
-  noise, rounding and loop layout. Every source call returns fresh arrays with
+  Getters for completed rounds reuse cached shots or materialize from the
+  retained source without the active Stop query, even in a round hook. The
+  environment owns signal, noise, rounding and loop layout. Every source call returns fresh arrays with
   shape `(*loop_dims, reads, 2)`, keyed by requested ADC indices. Sources retain
   their noiseless inputs beyond backend borrows, cache eviction and subsequent
   rounds. Equal inputs, identity and numeric/RNG versions reproduce shots.
@@ -528,8 +535,9 @@ Integrated totals use PCG64 with
 `SeedSequence([root_seed, acquire_sequence, round_index, 0])`; deferred raw uses
 stream suffix 1. Decimated draws retain the three-component seed sequence.
 NumPy, backend and derivation versions are retained. Calls, including failed or stopped calls, consume distinct
-sequences. Getters do not sample. Recreating an environment with the same seed
-and call sequence reproduces results within the recorded library versions.
+sequences. Deferred getters reuse the retained round's sampling identity.
+Recreating an environment with the same seed and call sequence reproduces results
+within the recorded library versions.
 
 `step_rounds=True` fails before request construction or sequence admission for
 both simulation acquisition modes. Reentry on the same program or bound SoC fails
@@ -537,12 +545,25 @@ before overwriting the active call. `finally` releases call-owned buffers and
 admission on normal return or exception. In both modes, the SoC holds the
 acquire's Stop query until it releases the request. `RoundRequest.cancel`
 passes it to the backend for cooperative checks, with no fixed Stop latency.
-If the backend raises `Cancelled`, acquisition discards the interrupted round
-without setting or requiring the caller's Stop flag. QICK averages completed
-rounds; only those rounds reach the round hook. If none completed, acquisition
-raises `StoppedPartialAcquireError` without attempting an average. Decimated
-acquisition retains the trace when Stop interrupts only pacing. Warmup and
-hardware acquisition are unchanged. ADC work and pacing sleeps remain synchronous.
+
+`SimulationSoc.run_round()` keeps integrated results compact by default. A Program
+that requires raw opts in; QICK `start_readout()` also opts in for accumulated
+transport and enables `poll_data()` only after success. For those rounds, the SoC
+validates statistics and raw, builds transport buffers and checks Stop before the
+binding credits the clock. The SoC then publishes the round and advances its
+index. Cancellation or raw failure leaves the previous published round and index
+intact. Required raw is drawn once; the SoC and Program have independent writable
+buffers. QICK signatures and poll format are unchanged.
+
+If round retrieval or required raw raises `Cancelled`, the simulation mixin
+reports the interrupted round to [`EarlyStopMixin`](../../README.md#summed-acquisition)
+without setting or requiring the caller's Stop flag. `EarlyStopMixin` discards the
+interrupted round and raises `StoppedPartialAcquireError` at finalization if no
+round completed. A Stop observed after publication does not roll back transport.
+Successfully processed rounds still count, and no new round starts. Non-cancellation
+raw errors and processor or hook errors still propagate. Decimated acquisition
+retains the trace when Stop interrupts only pacing. Warmup and hardware acquisition
+are unchanged.
 
 Only `SimulationProvenance.identifier` is copied to public Run metadata as optional
 `simulation_id`. Backend/RNG versions and private requests remain on the typed
