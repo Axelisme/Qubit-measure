@@ -19,9 +19,9 @@ status: accepted
 **邊界。** Kernel、dispatch、scheduler 與 cache 都是內部實作。查詢不寫 routing history 或登記重用事實，也不改變下一次 evolve 的路由或 density。Guard preparation 在查詢返回時釋放，source 仍可填入模型快取與 shift registration。量測層可借出 `RoutingHistory`，也可指定整次 acquire 的候選白名單；逐段仍由 dispatch 選路及驗證。這兩個控制不進物理 YAML、`AcquireRequest`、實驗 cfg 或 program binding。沒有逐段 family 對照、callback、偏好順序或公開 kernel registry。固定單一候選可以略過成本捷徑。白名單或 pin 都不能略過前置條件或 guard；`multitone_gate` 的建構後例外見[正確性規則](#先保證正確再優化瓶頸)。借用、清除及無可用候選時的錯誤契約見 [Accuracy, failures and lifecycle](../../lib/zcu_tools/simulate/evolution/README.md#accuracy-failures-and-lifecycle)。
 
 **依據。**
-- 2026-10-18，使用者定案：「Q1A，是的，演化引擎黑盒子就是指simulate.evolution。」
-- 2026-11-12，使用者對具名歷史與整次 acquire 的 family 白名單答「可以」。
-- 2026-11-16，使用者核可公開 dispatch 查詢的實作計畫：「1核可」；Floquet guard 選「B」，保留一週期 propagator 計算；對「查詢不改 routing history」與「欄位只回報既有排程工作量」答「追認」。分層的取捨見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
+- 2026-10-18，使用者定案：「Q1A，是的，演化引擎黑盒子就是指simulate.evolution。」原裁決未附入庫討論，見 Git `ee1eeaa8d`。
+- 2026-11-12，使用者對具名歷史與整次 acquire 的 family 白名單答「可以」。原裁決未附入庫討論，見 Git `a95315c32`。
+- 2026-11-16，使用者核可公開 dispatch 查詢的實作計畫：「1核可」。Floquet guard 保留一週期 propagator 計算，使用者答「B」。對「查詢不改 routing history」與「欄位只回報既有排程工作量」答「追認」。原裁決未附入庫討論，核可與追認分別見 Git `2c59fcdec`、`0a81af3c7`。測試與量測的背景見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
 
 ### `Engine` 的 GPU backend
 
@@ -45,20 +45,20 @@ status: accepted
 
 ### 模擬器的測試與量測分層，不做 e2e
 
-**規則。** 模擬器測試與 kernel／family 比較只依賴模擬器，不把 program、編譯、演化和 I/Q 串成一項測試。各層各驗一件事：
+**規則。** 模擬器測試與 kernel／family 比較只依賴模擬器，不把 program、編譯、演化和 I/Q 串成一項測試。Kernel／family 比較只計 `Engine.evolve` 的時間。各層各驗一件事：
 
 - Kernel：用 `Engine.evolve` 固定候選，以一段輸入對獨立參考解量誤差與耗時。
 - Dispatch：用 `Engine.inspect_dispatch` 查逐列 family、guard 與排程工作量，不演化呼叫端的 density。Guard 仍走 evolve 的路徑，包含自身需要的 ODE，故用小模型。
 - 序列：用手寫多段 `TimelineBatch` 在 `Engine.evolve` 量最終 density 誤差及總耗時。整體有沒有變慢、family 是否保留都在這層判斷。場景按 gate 種類與個數宣告，不逐實驗增加。
 - 前端：驗 program 編譯出的訊號，不演化。
-- Environment：給定 density，驗讀出。
+- Environment：給定 density，驗讀出。FTF 的測試用不演化的 Engine 替身驗交接。
 
-**例子。** Kernel／family 比較的計時只包 `Engine.evolve`。例如，成對計時在序列層比較兩個 checkout，不經 acquire。FTF environment 用不演化的 Engine 替身驗讀出交接。精度案例與指標見[測試文件](../../tests/README.md#evolution-精度矩陣)。
+**例子。** 比較兩個 checkout 的序列總耗時時，成對計時直接呼叫 `Engine.evolve`，不經 acquire。精度案例與指標見[測試文件](../../tests/README.md#evolution-精度矩陣)。
 
 **邊界。** 各層都重現不了使用者回報的錯時，可以跑一次 e2e 定位。腳本不入庫，不當驗收門檻。整實驗只允許 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 入庫記錄正常參數的 Run 牆鐘與分項，不當測試、gate 或精度證據。該工具用固定模擬輸入，在 `time_scale=0` 下只計送出 Run 到終態，不呼叫 Analyze 或 Save。這個具體範圍由 designer 代裁，使用者未覆核。
 
 **依據。**
-- 2026-11-15，使用者：「我會預期模擬器測試腳本只會依賴模擬器模塊，後端與前端分開測，kernel與dispatch也分開測，不該有e2e的測試需求」。對「整條序列的最終誤差放哪一層」答「A」，即加序列層；對除錯例外答「我選B」。見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
+- 2026-11-15，使用者：「我會預期模擬器測試腳本只會依賴模擬器模塊，後端與前端分開測，kernel與dispatch也分開測，不該有e2e的測試需求」。對「整條序列的最終誤差放哪一層」答「A」，即加序列層；同意只為定位而跑一次 e2e，答「我選B」。見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
 - 2026-11-20，使用者問：「為什麼要用不入庫的 scratch 腳本量?而不是入庫的？」2026-11-21，對用 Run 牆鐘作優化指標、工具入庫而不當 gate 答「都採用建議」。同日 designer 代裁上述工具的具體範圍，使用者未覆核。見[實驗 Run 牆鐘工具](../discussions/2026-11-21-experiment-run-wall-time.md)。
 
 ### 每個 kernel 的量測場景只有一段
@@ -75,9 +75,9 @@ status: accepted
 
 **規則。** 測試與驗收不為個別實驗加場景。先把輸入約化成 kernel 與 guard 看得到的物理量：每個 tone 的耦合，也就是 gain 乘該 flux 下的矩陣元、到最近躍遷的失諧、時長、包絡形狀與 tone 間距。先在約化空間宣告覆蓋格點，再檢查實驗的座標是否落在覆蓋內。
 
-**例子。** AC Stark 與 FTF mux 的兩個常數 tone 共用一張三軸格點：共振轉角（耦合 × 時長）、離共振比（耦合 ÷ 失諧）、累積 Stark 相位（耦合² × 時長 ÷ 失諧）。序列層的 RB 型場景按 gate 種類與個數宣告，並用隨機相位，避免固定 X、Y、−X、−Y 循環抵消部分 RWA 誤差。
+**例子。** AC Stark 與 FTF mux 的兩個常數 tone 共用一張三軸格點：共振轉角（耦合 × 時長）、離共振比（耦合 ÷ 失諧）、累積 Stark 相位（耦合² × 時長 ÷ 失諧）。
 
-**邊界。** 約化丟掉的物理若會改變結果，就加一個物理軸，例如讀出投影、連續 flux 或量子 resonator，而不是新增實驗專屬場景。
+**邊界。** 約化丟掉的物理若會改變結果，就加一個物理軸，例如讀出投影、連續 flux 或量子 resonator，而不是新增實驗專屬場景。序列層按 gate 種類與個數宣告。RB 型場景用隨機相位，避免固定 X、Y、−X、−Y 循環抵消部分 RWA 誤差。
 
 **依據。** 2026-11-14，使用者：「实验场景非常多，要完整覆盖是相当困难的，无脑扩充测试场景只会拖慢开发速度，你应该约化不同场景，系统性的覆盖可能情况」。對整理後的原則答「符合，我預期不會加專屬實驗場景」。`multitone_rwa` 的原始量測範圍討論未入庫；序列取樣見 [RB 型相位序列作為固定量表輸入](../discussions/2026-11-14-random-gate-sequence-workloads.md)。
 
@@ -103,15 +103,15 @@ status: accepted
 
 ### 先保證正確，再優化瓶頸
 
-**規則。** Guard 在整個參數空間不放行最終誤差超過 `2e-3` 的結果。優化先做實際工作負載中耗時最多、使用者在等的場景。從 kernel 表、量表摘要或討論找耗時紀錄，沒有才問使用者。快速算法的 guard 可以比它算得對的區域窄。
+**規則。** Guard 在整個參數空間不放行最終誤差超過 `2e-3` 的結果。速度優化只針對有耗時紀錄、使用者在等的瓶頸，也就是實際工作負載中耗時最多的場景。從 kernel 表、量表摘要或討論找紀錄，找不到才問使用者。快速算法的 guard 可以比它算得對的區域窄。
 
 **例子。** `t6` 的 direct 優化針對四個有耗時紀錄的慢場景。掃長度的 first-evolve wall 從 736 s 降到 6.3 s，四個場景的最終誤差都 ≤ `2e-3`。見 [t6 的 direct 加速策略](../discussions/2026-11-14-t6-direct-strategy.md)。
 
 **邊界。** 修法很快會落地時，過渡期維持現狀。修法仍在研究、時程未定時，先收窄 admission，改走慢但對的候選，修好再放回。Sampled multitone 的[過渡期拒收](../discussions/2026-11-14-sampled-multitone-interim.md)用的就是後者。另有一項例外：`multitone_gate` 比價選中就建構及使用，不在建構後另做精度檢查、不因精度退回 `dop853`，數值失敗仍直接回報。其他 family guard、sampled `multitone_rwa` 抽查及動態維度 pilot 不適用這項例外。
 
 **依據。**
-- 2026-11-14，使用者問「模拟器不应该是覆盖所有可能范围吗？」，並說：「我预期就是首先先确保能全覆盖，然后再来是对于瓶颈场景做优化。」過渡期邊界選「A」。`multitone_rwa` 適用範圍的原始討論未入庫。
-- 2026-11-19，使用者：「我应该说过，不要因为听度而回退。比价的时候决定好就不要再改了，就算结果超标也是能接受。我不想白付时间去尝试错误的路径」。其中「听度」即精度。使用者把範圍限定在 `multitone_gate`，現行路徑見 [Kernel summary](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)。
+- 2026-11-14，使用者問「模拟器不应该是覆盖所有可能范围吗？」，並說：「我预期就是首先先确保能全覆盖，然后再来是对于瓶颈场景做优化。」對時程未定時先收窄 admission 答「A」。`multitone_rwa` 適用範圍的原始討論未入庫。
+- 2026-11-19，使用者：「我应该说过，不要因为听度而回退。比价的时候决定好就不要再改了，就算结果超标也是能接受。我不想白付时间去尝试错误的路径」。其中「听度」即精度。使用者把範圍限定在 `multitone_gate`。原裁決未附入庫討論，見 Git `7043877d5`。現行路徑見 [Kernel summary](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)。
 
 ### Evolution 輸出合法 density
 
@@ -121,7 +121,7 @@ status: accepted
 
 **邊界。** 修正超出 budget 就回報數值失敗，不放行、不改 kernel 選路，也不放寬 continuation 容差。投影步驟、容差與指出 point 的錯誤見 [Accuracy, failures and lifecycle](../../lib/zcu_tools/simulate/evolution/README.md#accuracy-failures-and-lifecycle)。
 
-**依據。** 2026-11-19，使用者看過診斷與四個選項後選 A，回覆「其余采用建议」。見 [Evolution 輸出合法 density](../discussions/2026-11-19-evolution-valid-density.md)。
+**依據。** 2026-11-19，使用者選定回傳前投影，修正量超過 budget 就回報失敗，並回覆「其余采用建议」。見 [Evolution 輸出合法 density](../discussions/2026-11-19-evolution-valid-density.md)。
 
 ### 固定預算，找適合的場景
 
@@ -129,9 +129,9 @@ status: accepted
 
 **例子。** 截到能量最低 24 態時，單 tone FTF 掃描誤差 ≤ `1e-3`、每點約快 2 倍。兩 qubit 同時打 X90 的 depth 500 序列分給每個 gate 的額度很小，截斷不划算；不為此放寬 RB 的預算。
 
-**邊界。** 使用者可以按場景改需求。長序列的預算是 max(`2e-3`, `3.9e-6` × gate 數)。例子中的 depth 500 序列有 2,581 個 gate，預算約 `1e-2`。
+**邊界。** 使用者可以按場景另訂需求，不為讓某個算法過關而放寬預算。以 FTF RB 長序列為例，使用者接受按 gate 數放寬到 max(`2e-3`, `3.9e-6` × gate 數)。例子中的 depth 500 序列有 2,581 個 gate，預算約 `1e-2`。
 
-**依據。** 2026-11-18，使用者：「我認為不同場景的預算分配確實不同，但模擬算法的衡量不應該改變預算，而是固定預算並找適合的場景」，並說：「還有對於depth 500這種超長序列，我能接受更多的誤差。」長序列預算選「A」。見 [FTF 模擬的子空間約化](../discussions/2026-11-18-ftf-subspace-reduction.md)。
+**依據。** 2026-11-18，使用者：「我認為不同場景的預算分配確實不同，但模擬算法的衡量不應該改變預算，而是固定預算並找適合的場景」，並說：「還有對於depth 500這種超長序列，我能接受更多的誤差。」對 FTF RB 長序列的預算答「A」。見 [FTF 模擬的子空間約化](../discussions/2026-11-18-ftf-subspace-reduction.md)。
 
 ### 跨平台，不綁作業系統
 
@@ -167,26 +167,27 @@ status: accepted
 
 **規則。** 物理與介面決定哪些輸入要支援、算對與合理計價；在[約化參數空間](#場景覆蓋靠約化的參數空間)上驗覆蓋，不看使用者常不常用。
 
-**例子。** Prepare 的價格攤提用重用次數作輸入軸，同一段接 N = 1、20、100。Sampled multitone 過渡期的速度代價也照樣量，不以「這類序列較少使用」替代 benchmark。
+**例子。** 量 prepare 價格如何隨重用攤提時，把同一段分別接 1、20、100 次。高重用的輸入即使用得少，也在量測範圍內。
 
-**邊界。** 只有在已有耗時紀錄時，使用頻率才用來排優化先後。刪掉 `t6` 只在高重用才快的 channel 後，該類輸入仍算得對，只是變慢。
+**邊界。** 只有在已有耗時紀錄時，使用頻率才用來排優化先後。過渡期的速度代價照樣量，不以「這類序列較少使用」替代 benchmark。不為省時間而放棄算對高重用的輸入。
 
-**依據。** 2026-11-16，使用者：「你為什麼老是問我常不常用？我常用與你模擬器要不要支援是兩回事」，對邊界答「A」。`multitone_rwa` 校價需求的原始討論未入庫；例子分別見 [Sampled multitone 的過渡期拒收](../discussions/2026-11-14-sampled-multitone-interim.md)及 [t6 只保留 direct](../discussions/2026-11-15-t6-channel-removal.md)。
+**依據。** 2026-11-16，使用者：「你為什麼老是問我常不常用？我常用與你模擬器要不要支援是兩回事」，對使用頻率只用來排優化先後答「A」。`multitone_rwa` 校價需求的原始討論未入庫。過渡期量測及高重用案例見 [Sampled multitone 的過渡期拒收](../discussions/2026-11-14-sampled-multitone-interim.md)及 [t6 只保留 direct](../discussions/2026-11-15-t6-channel-removal.md)。
 
 ### 模擬器不替使用者擋實驗參數
 
 **規則。** 就實驗參數而言，模擬器只拒絕實機也會拒絕的程式。程式合法但參數不合理時，照算物理上預期的結果。模型算不準的部分用警告說明，不因參數不當報錯。
 
-**例子。** FTF cavity drive 使相鄰態能量反轉時，仍用原色散模型，不重排狀態。警告指出受影響範圍及 gain 共同縮放上限，超限結果不在色散模型有效範圍內。警告的計數方式及上限假設見 [FTF cavity drives](../../lib/zcu_tools/simulators/ftf/environment/README.md#cavity-drives)。
-Projective read 改用 Markov chain 後，51 點、21 能階的合法輸入不再被記憶體預算擋下。
-FTF 只開 ADC window、整個 template 無 readout pulse 時，回傳只有 receiver offset 與雜訊的 event，不報「沒有 generator 候選」。下一個 pulse 在前一個 ADC window 內抵達且已配到該 event 時，兩個 pulse 在同一 event 相干相加。這兩個讀出例子是 designer 代裁，使用者未覆核。見 [FTF readout and sampling](../../lib/zcu_tools/simulators/ftf/environment/README.md#readout-and-sampling)。
+**例子。** FTF 規劃 ADC window 時，若整個 template 沒有 readout pulse，event 只有 receiver offset 與雜訊，不報「沒有 generator 候選」。下一個 pulse 在 window 內抵達且已配到這個 event 時，兩個 pulse 相干相加。若抵達的 pulse 漏配，規劃就報錯，指出 ADC、window 和 pulse，不回傳缺訊號的 I/Q。見 [FTF readout and sampling](../../lib/zcu_tools/simulators/ftf/environment/README.md#readout-and-sampling)。
 
-**邊界。** 型別、範圍、維度等契約外輸入仍在進入點 fast fail；算法數值近似仍受[精度 guard](#先保證正確再優化瓶頸)約束。未實作的模擬情況不能回傳缺訊號的結果。例如 FTF 以發射時間配對 ADC trigger，若 pulse 在 window 內抵達但漏配到該 event，規劃就報錯，指出 ADC、window 和 pulse。這項漏配拒絕是 designer 代裁，使用者未覆核。物理上無法判定的輸入也 fast fail，例如 Six 的 raw ADC 字到兩個 cavity 的同餘距離平手；這項代裁已由使用者覆核保留。
+**邊界。** 型別、範圍、維度等契約外輸入仍在進入點 fast fail。物理上無法判定的輸入也拒絕，例如 Six 的 raw ADC 字到兩個 cavity 的同餘距離平手。模擬器未實作的情況不能回傳缺訊號的結果；FTF 仍按發射時間配對 ADC trigger，在途漏配由規劃守門攔下。算法數值近似仍受[精度 guard](#先保證正確再優化瓶頸)約束。
+
+FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重排狀態。警告指出受影響範圍與 gain 共同縮放上限；超限結果不在色散模型有效範圍內。計數方式與上限假設見 [FTF cavity drives](../../lib/zcu_tools/simulators/ftf/environment/README.md#cavity-drives)。
 
 **依據。**
 - 2026-11-15，使用者覆核 sideband reset 的殘餘光子檢查：「4我覺得有需要嗎？實驗參數設置不當就會發生的問題為什麼模擬器要擋？」對照算並警告答「A」。原始討論未入庫。
-- 2026-11-19，使用者對 cavity Stark 反轉改為警告答「1cA」。見 [FTF cavity Stark 反轉：從報錯改成警告](../discussions/2026-11-20-ftf-stark-inversion-warning.md)。
-- 2026-11-21，使用者定下「只拒絕實機也會拒絕的程式」這條：「模擬器要給出合法的預期結果，只要合法，不因為不合理就抱錯」。同日覆核 raw 字的同餘機制時保留 Six 平手的拒絕。FTF 讀出行為與在途漏配拒絕是 designer 代裁，使用者未覆核。見 [FTF 合法讀出時序](../discussions/2026-11-21-ftf-legal-readout-timing.md)及 [Projective read 的輸出改成 Markov chain](../discussions/2026-11-17-projection-markov-chain-readout.md)。
+- 2026-11-19，使用者同意 cavity Stark 反轉照算並警告，答「1cA」。2026-11-20，designer 依授權代裁共同縮放上限的表示，使用者未覆核。見 [FTF cavity Stark 反轉：從報錯改成警告](../discussions/2026-11-20-ftf-stark-inversion-warning.md)。
+- 2026-11-21，使用者定下「只拒絕實機也會拒絕的程式」這條規則，原話是「模擬器要給出合法的預期結果，只要合法，不因為不合理就抱錯」。FTF 的 receiver-only event、相干相加與在途漏配拒絕是 designer 代裁，使用者未覆核。Six 的平手拒絕也是 designer 代裁，隨 raw 字的同餘機制在使用者覆核後保留。使用者覆核的是 raw 字的同餘機制：「那我选，K 吧，感觉有些少频率的，比如说像是 one tone frequency，如果不是等间距的话，要先计算 table，然后存起来。感觉就会出现模拟上需要解读弱智的问题。」這句沒有單獨裁定平手或 FTF 時序。見 [FTF 合法讀出時序](../discussions/2026-11-21-ftf-legal-readout-timing.md)。
+- 51 點、21 能階的合法輸入不受 projection 記憶體預算阻擋。案例與驗收見 [Projective read 的輸出改成 Markov chain](../discussions/2026-11-17-projection-markov-chain-readout.md)。
 
 ### 模擬器不從程式內容推斷實驗類型或硬體架構
 
@@ -202,9 +203,9 @@ FTF 只開 ADC window、整個 template 無 readout pulse 時，回傳只有 rec
 
 **規則。** 每個模擬器提供同一組調試介面，定位與驗證工具只依賴這組介面。共同欄位有型別；模擬器自行決定哪些額外值放進 dict。
 
-**例子。** FTF、single 與 six 每次 acquire 以共用 writer 寫一行總 wall、編譯、演化、讀出與各 family 的分項，額外資訊放在 `extras`。見[共用 telemetry](../../lib/zcu_tools/simulators/README.md#acquire-telemetry)。開啟 debug capture 後，三者用同一個 buffer 錄下每次 evolve 的凍結輸入與實際選路，同一支 inspect 工具就能讀。設定方式見[模擬器的 debug capture](../../lib/zcu_tools/simulators/README.md#debug-capture)。
+**例子。** FTF、single 與 six 每次 acquire 以共用 writer 寫一行總 wall、編譯、演化、讀出與各 family 的分項，模擬器特有的欄位放在 `extras`。見[共用 telemetry](../../lib/zcu_tools/simulators/README.md#acquire-telemetry)。
 
-**邊界。** 共用介面可以帶中性的模擬知識，但不把 FTF 的腔記憶或 six 的 scatter 放成共用 hook。調試者就是模擬器維護者，介面可暴露內部資訊，不另為外部使用者承諾穩定 API。直接用 `ModelSource` 呼叫引擎仍能錄製與體檢，沒有前端和讀出，也就沒有那兩層的耗時。
+**邊界。** 共用介面可以帶中性的模擬知識，不把 FTF 的腔記憶或 six 的 scatter 放成共用 hook。調試者就是模擬器維護者，介面可暴露內部資訊，不另為外部使用者承諾穩定 API。[模擬器的 debug capture](../../lib/zcu_tools/simulators/README.md#debug-capture)共用錄製與體檢介面，保存凍結輸入與實際選路。直接用 `ModelSource` 呼叫引擎仍能錄製與體檢，但沒有前端和讀出的耗時。
 
 **依據。** 2026-11-16，使用者：「優化手段要看模擬器是否實作功能，應該是要規範模擬器應該帶有用於調試的通用接口，類似基類或protocol的概念」。對資料形狀答：「可以，但我認為這個資料不一定要完全強型別，可以用多餘資訊的接口，比如dict屬性，放值得記錄的資訊」。對使用者答：「可以，調試者應該就是模擬器維護者，我沒有意向去解耦合兩者責任」。對共通部分答：「中性的模擬知識是沒有問題的。場景特化的才不建議」。原始討論未入庫；實例見[共用 acquire telemetry writer](../discussions/2026-11-16-shared-acquire-telemetry.md)與 [Engine capture 的逐輪選路事件](../discussions/2026-11-17-engine-capture-events.md)。
 
@@ -236,7 +237,7 @@ FTF 只開 ADC window、整個 template 無 readout pulse 時，回傳只有 rec
 
 **邊界。** Plan 只活在一次 evolve，不留在 kernel state。排程接縫不作對外擴充框架。`PathDiagnostics` 按 family 計數，builder 與 frame variant 留在內部。不為隔離分類需要的資料而新增 Protocol、registry 或通用 declaration；改一個算法時可能也要改 dispatch。
 
-**依據。** 2026-10-18，使用者：「Q2只要是有助於分類的資訊，planner都可以知道。」這項裁決適用於現行 dispatch。已移除 planner 的研究見 [Planner evidence 與固定成本討論](../discussions/2026-10-18-planner-evidence-and-overhead.md)，不是現行 API 契約。
+**依據。** 2026-10-18，使用者：「Q2只要是有助於分類的資訊，planner都可以知道。」現行 dispatch 沿用這條裁決。原裁決未附入庫討論，見 Git `ee1eeaa8d`。[Planner evidence 與固定成本討論](../discussions/2026-10-18-planner-evidence-and-overhead.md)是研究紀錄，不是現行 API 契約。
 
 ### 算法內聚，共用數值有單一 owner
 
@@ -248,8 +249,8 @@ FTF 只開 ADC window、整個 template 無 readout pulse 時，回傳只有 rec
 **邊界。** Memo 不留在 Engine、global 或長駐 source。FTF 仍選態、建 Stark／dephasing shift 並傳場給下一段。Shaped/callable 與主分支選擇不進 memo；projective 只重用既有的 flat 二階矩，不收各 state 端點場。跨 package 的依賴維持 [[0072]] 與 C8、C9、C12，不新增依賴方向或放寬 `ignore_imports`。這些 contract 不檢查內部子模組的匯入路徑；package root 的公開入口由介面與 caller review 維持。
 
 **依據。**
-- 2026-10-18，使用者：「之後我的規劃是讓你先整理目前模擬引擎，使其對外是黑盒子，對內是實質偶合，決策分類有全部算法的知識，算法部分內聚，以不影響優化與可讀性為主要指標，移除已經沒用的邏輯，將研究成果以及嘗試紀錄到repo文檔中供以後參考。然後就可以開始planner的重構，使各優化算法的實作張力能以自然的表達」。
-- 2026-10-21，使用者對二階矩 memo 的方案答「前兩個採用建議」。
+- 2026-10-18，使用者：「之後我的規劃是讓你先整理目前模擬引擎，使其對外是黑盒子，對內是實質偶合，決策分類有全部算法的知識，算法部分內聚，以不影響優化與可讀性為主要指標，移除已經沒用的邏輯，將研究成果以及嘗試紀錄到repo文檔中供以後參考。然後就可以開始planner的重構，使各優化算法的實作張力能以自然的表達」。原裁決未附入庫討論，見 Git `ee1eeaa8d`。
+- 2026-10-21，使用者對二階矩 memo 的方案答「前兩個採用建議」。原裁決未附入庫討論，見 Git `ffe98f8f7`；[MIST 腔場重用的先例整理](../discussions/2026-11-21-mist-cavity-reuse.md#先例與立場)列出這項裁決的適用範圍。
 - 2026-11-21，designer 依使用者授權「我授权你的范围除了 push 还有真实硬体之外都可以做」代裁端點場擴充，使用者未覆核。正常參數重測為 281.5 s 與 163.3 s；兩次 commit 不同，不能把差值全歸因於快取。二階矩單獨重用的上限及比較見 [MIST 腔場重用](../discussions/2026-11-21-mist-cavity-reuse.md)。
 
 ### t6 只保留 direct
@@ -260,20 +261,20 @@ FTF 只開 ADC window、整個 template 無 readout pulse 時，回傳只有 rec
 
 **邊界。** 其他 family 的 period channel 不變。未來若出現高重用工作負載，再依新證據評估，不保留相容性分支。
 
-**依據。** 2026-11-15，使用者對移除 channel、保留 direct 答「2B」。四個代表性場景與 benchmark 沒選到算得準的 channel；真實表格幾乎每列相位不同，同一 key 約累積 1.5 萬載波週期才開始划算。見[移除 t6 channel 的討論](../discussions/2026-11-15-t6-channel-removal.md)。
+**依據。** 2026-11-15，使用者裁定 `t6` 只保留 direct，答「2B」。量測與方案比較見[移除 t6 channel 的討論](../discussions/2026-11-15-t6-channel-removal.md)。
 
 ### 損耗漂移下的結構與 preparation lifetime
 
 **規則。** Single、six 與 FTF 都支援損耗漂移，預設關閉。每次 acquisition 開始取一次有效損耗，整次固定。只在 acquisition 之間命中，不足以保留沒有同次命中的快取層。Engine 不保留跨 evolve 的數值 preparation 或 exact result，source 不保留跨 preparation 的 ADC solver。Engine 的 routing-facts cache 只以 inventory 與 pricing facts 驗證 caller-owned preparation 的當前路由，不存傳播結果。
 
-**例子。** Single 的物理模型擁有損耗無關的結構，experiment 只組合結果。損耗改變時，source 保留該結構，關閉舊 ModelSource，丟棄完整 models 與 preparation，按本次固定的 losses 建 rates。溫度、DC、truncation 等結構依賴改變時才丟棄結構。FTF 漂移開啟時不拆結構，按每次 acquisition 的 effective settings 重建完整 facts，包含 eigensystem，並清掉舊的完整 preparation；points 與 rounds 共用這次的 losses。這是 advisor 依授權定的重建策略。漂移關閉時行為不變。見 [Single reuse and lifetime](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#reuse-and-lifetime)、[FTF acquisition clock and loss drift](../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)與 [FTF preparation reuse](../../lib/zcu_tools/simulators/ftf/environment/README.md#preparation-reuse)。
+**例子。** Single 的物理模型擁有損耗無關的結構，experiment 只組合結果。損耗改變時，source 保留該結構，關閉舊 ModelSource，丟棄完整 models 與 preparation，按本次固定的 losses 建 rates。溫度、DC、truncation 等結構依賴改變時才丟棄結構。FTF 漂移開啟時不拆結構，按每次 acquisition 的 effective settings 重建完整 facts，包含 eigensystem，並清掉舊的完整 preparation；points 與 rounds 共用這次的 losses。漂移關閉時不採這套重建策略。見 [Single reuse and lifetime](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#reuse-and-lifetime)、[FTF acquisition clock and loss drift](../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)與 [FTF preparation reuse](../../lib/zcu_tools/simulators/ftf/environment/README.md#preparation-reuse)。
 
-**邊界。** Rates、dissipative propagator、density 與完整 preparation 不跨不同 losses 重用。同輸入的不可變完整 preparation 可按設定、losses 與路由條件重用。FTF 的 complete preparation LRU、envelope fingerprints 與 acquire-local `CavityAverageCache` 不屬於移除的三層。中途 projective readout 由環境在 read 起點投影並續演化；分支 density 只活在一次 span preparation，不作下一 shot、round 或 acquisition 的初態。能重用的是不可變的 FTF outcome weights 與 event populations、single／six 的初始分佈與轉移表，以及兩者的 conditional sums，不是抽樣後的 herald 結果。已交付 raw source 仍持有自己的不可變抽樣輸入。抽樣 RNG 與 raw 契約不因這項 lifetime 決定而變。數值、設定與 truth 的 owner 見 [[0072]]；C8、C9、C12、C19 不添依賴或例外。
+**邊界。** Rates、dissipative propagator、density 與完整 preparation 不跨不同 losses 重用。同輸入的不可變完整 preparation 可按設定、losses 與路由條件重用。FTF 的 complete preparation LRU、envelope fingerprints 與 acquire-local `CavityAverageCache` 仍可重用。即使不開漂移，FTF 重複 acquisition 也可能要重算。中途 projective readout 由環境在 read 起點投影並續演化；分支 density 只活在一次 span preparation，不作下一 shot、round 或 acquisition 的初態。能重用的是不可變的 FTF outcome weights 與 event populations、single／six 的初始分佈與轉移表，以及兩者的 conditional sums，不是抽樣後的 herald 結果。已交付 raw source 仍持有自己的不可變抽樣輸入。抽樣 RNG 與 raw 契約不因這項 lifetime 決定而變。數值、設定與 truth 的 owner 見 [[0072]]；C8、C9、C12、C19 不添依賴或例外。
 
 **依據。**
-- 2026-10-27（UTC），advisor 的 before-accepted ruling：「保留 single 的 _models／_prepared 與 FTF acquire-local 的 CavityAverageCache；拆 _facts 為結構與 rates。」同日使用者裁決：「我預期都會加入漂移機制」、「沒有不漂移的時候，我考慮C，應該是說，用不到的就可以移除」。Single CPMG、six 與 FTF 的代表性 acquisition 在指定三層未命中，不是所有 workload 的命中率。未漂移的 FTF 重複 acquisition 因這三層移除而重算時，接受代價。
-- 2026-10-27，advisor 依使用者授權「B你可以自己開task，不用我看過」訂定 FTF 重建策略；原裁決未附討論紀錄。
-- 2026-10-28，使用者以「A我認為可以完整版。」授權 single、six、FTF 的中途 projective readout。這句決定支援範圍，lifetime 沿用本節規則。
+- 2026-10-27（UTC），advisor 對快取分工的原話（不作現行契約）：「保留 single 的 _models／_prepared 與 FTF acquire-local 的 CavityAverageCache；拆 _facts 為結構與 rates。」同日使用者裁決：「我預期都會加入漂移機制」、「沒有不漂移的時候，我考慮C，應該是說，用不到的就可以移除」。原裁決未附入庫討論，見 Git `c6ff3f173` 的裁決與量測紀錄。
+- 2026-10-27，advisor 依使用者授權「B你可以自己開task，不用我看過」訂定 FTF 重建策略。原裁決未附入庫討論，見 Git `257e8cc3a`；未見使用者覆核這項策略的紀錄。
+- 2026-10-28，使用者以「A我認為可以完整版。」授權 single、six、FTF 的中途 projective readout。這句決定支援範圍，lifetime 沿用本節規則。原裁決未附入庫討論；[模擬環境草稿](draft/simulation-environments.md#acquire-接線與-projective-readout)也記有這項裁決。
 
 ### Projective read 的 Markov chain 表示
 
@@ -283,23 +284,23 @@ FTF 只開 ADC window、整個 template 無 readout pulse 時，回傳只有 rec
 
 **邊界。** FTF 的 history 含腔記憶，單憑 DC 末態不能決定後續，仍用 `ProjectionReadout`。Single／six 的 chain 記憶體隨點數線性成長，raw 另隨 reps 成長。有 projective read 時，single／six 的同 seed 抽樣會因表示改變；無 projective read 的 single／six，以及 FTF，不因這項變更改輸出，結果逐位不變。
 
-**依據。** 2026-11-16，使用者要求「模擬器不該有 OOM」，看過選項後授權「OOM你就改designer決定」。2026-11-17，designer 代裁 single／six 的表示；同日使用者對 Markov chain、逐點 floor、同 seed 的改變、人工 category bins 及移除 2 GiB 預算的覆核答「兩筆追認」。見 [Projective read 的輸出改成 Markov chain](../discussions/2026-11-17-projection-markov-chain-readout.md)。
+**依據。** 2026-11-16，使用者要求「模擬器不該有 OOM」，並授權「OOM你就改designer決定」。2026-11-17，designer 代裁 single／six 的表示；同日使用者覆核答「兩筆追認」。覆核涵蓋 Markov chain、逐點 floor、同 seed 的抽樣差異、人工 category bins，以及不設 projection 記憶體預算。見 [Projective read 的輸出改成 Markov chain](../discussions/2026-11-17-projection-markov-chain-readout.md)。
 
 ### Integrated raw 由環境生成，介面由 program 擁有
 
 **規則。** `program.v2.simulation.RawShots` 定義延遲產生完整單發 ADC sums 的介面。環境透過 `IntegratedRound` 一起交付統計資料與 raw source。Program 只在單發 processing 或 getter 需要時呼叫 source，不重跑 backend。`simulate.boundary.RoundStatistics` 只有資料，不定義 materializer、Protocol 或 callback。
 
-**例子。** ADC 和 white_noise 各自產生完整 raw，包含物理訊號、receiver noise 及取整排列。兩者以結構型別符合 `RawShots`，不 import program，由既有組合根 `experiment.simulation` 與 `experiment.ftf` 接線。單 carrier raw 直接抽 CTMC 的 waiting times 與 directional transitions。每次跳躍都保留，不重設腔場；直接平均不做逐 shot 工作。介面見 [Compact timelines and statistics](../../lib/zcu_tools/program/v2/simulation/README.md#compact-timelines-and-statistics)，ADC 取樣細節見 [ADC README](../../lib/zcu_tools/simulate/adc/README.md)。
+**例子。** FTF 的環境交付由 ADC 產生的完整 raw，包含物理訊號、receiver noise 和取整排列。單 carrier raw 抽 CTMC 的等待時間與轉移方向，保留每次跳躍，不重設腔場。介面見 [Compact timelines and statistics](../../lib/zcu_tools/program/v2/simulation/README.md#compact-timelines-and-statistics)，取樣見 [ADC README](../../lib/zcu_tools/simulate/adc/README.md)。
 
-**邊界。** `simulate.rounding` 擁有兩種環境與 decimated transport 共用的取整和 shot-axis 排列，不負責 QICK averaging 或硬體操作。Raw 與直接平均須維持相同期望，不平移 raw 去配有限 shots 的平均。直接平均保留 conditional moments 與既有 RNG stream；caller 的完整 preparation 只存 noiseless inputs，不存 noisy shots 或 round identity。依賴方向維持 C8、C9、C12、C19，不加 `ignore_imports`。
+**邊界。** ADC 與 `simulate.white_noise` 各自產生完整 raw，以結構型別符合 `RawShots`，不 import program。White noise 由 [experiment 的環境組合根](../../lib/zcu_tools/experiment/README.md#explicit-simulation-environments)接線；FTF 由 [`simulators.ftf.environment`](../../lib/zcu_tools/simulators/README.md)組合框架機制。`simulate.rounding` 擁有兩種環境與 decimated transport 共用的取整和 shot-axis 排列，不負責 QICK averaging 或硬體操作。Raw 與直接平均須維持相同期望，不平移 raw 去配有限 shots 的平均。直接平均保留 conditional moments 與既有 RNG stream，不做逐 shot 工作。Caller 的完整 preparation 只存 noiseless inputs，不存 noisy shots 或 round identity。依賴方向維持 C8、C9、C12、C19，不加 `ignore_imports`。
 
-**依據。** 2026-10-20，使用者裁決：「1-1」「基本認同丙，但我質疑有需要進core嗎？」介面放到 program 後答「同意」。原裁決未附討論紀錄。
+**依據。** 2026-10-20，使用者答「1-1」，並問：「基本認同丙，但我質疑有需要進core嗎？」介面放到 program 後答「同意」。原裁決未附討論紀錄。
 
 ## 取捨
 
 內部接縫隔離排程與數值表示，不保證換 kernel 時 dispatch 完全不用改。Guard 拒絕可以換候選，prepare 或 apply 的數值失敗直接傳給呼叫端。事後 accuracy exceedance 只記錄並警告，不因它修正 density、重算或重新分類；回傳 density 的合法性是[另一項檢查](#evolution-輸出合法-density)。
 
-[[0077]] 的實驗 constant planner、shadow graph、profiles 與 checked plan replay 不再是執行契約，也沒有相容層。本決策不保證消除所有中間結果的重算。若以後再設計 planner，資料壽命與重用要另行設計。
+引擎不提供實驗 planner 的相容層，[[0077]] 不定義現行執行契約。本決策不保證消除所有中間結果的重算。若以後再設計 planner，資料壽命與重用要另行設計。
 
 ## 現行契約與研究依據
 
