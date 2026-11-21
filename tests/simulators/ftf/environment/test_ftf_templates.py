@@ -285,7 +285,9 @@ def test_herald_plan_aligns_two_events_when_one_adc_only_observes_terminal() -> 
         assert herald_event.grids[0].phase_rad == pytest.approx(np.deg2rad(10))
 
 
-def _plan_cross_block_readout(time_of_flight_ns: float) -> FTFTemplatePlan:
+def _plan_cross_block_readout(
+    time_of_flight_ns: float, *, first_trigger_us: float = 1.110801
+) -> FTFTemplatePlan:
     from zcu_tools.simulators.ftf.environment import plan_template
 
     # Zero post-delay: the terminal pulse starts at the herald pulse's end.
@@ -307,7 +309,7 @@ def _plan_cross_block_readout(time_of_flight_ns: float) -> FTFTemplatePlan:
         samples=200,
         sample_period_ticks=time_base.period_ticks(1_000.0),
         trigger_ticks=np.tile(
-            [time_base.ticks(1.110801), time_base.ticks(2.310801)], (2, 1)
+            [time_base.ticks(first_trigger_us), time_base.ticks(2.310801)], (2, 1)
         ),
         frequency_mhz=np.full((2, 2), 6000.0),
         phase_deg=np.zeros((2, 2)),
@@ -369,6 +371,16 @@ def test_later_readout_pulse_arriving_inside_herald_window_shares_its_event() ->
         assert tuple(p.start_ns for p in herald.pulses) == (0, 1200)
         assert terminal.pulses == herald.pulses[1:]
         assert len(herald.grids) == len(terminal.grids) == 1
+
+
+def test_readout_rejects_an_omitted_in_flight_pulse() -> None:
+    # The first trigger follows the second emission (1200 ns), yet all samples
+    # lie in the first pulse's arrival interval (387.370 to 1587.370 ns).
+    with pytest.raises(
+        ValueError,
+        match=r"ADC 0 window 0.*gen 0.*0 ns.*pairs triggers by emission time",
+    ):
+        _plan_cross_block_readout(time_of_flight_ns=387.370, first_trigger_us=1.27906)
 
 
 def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:

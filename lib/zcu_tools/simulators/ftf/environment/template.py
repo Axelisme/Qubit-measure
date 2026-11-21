@@ -390,6 +390,43 @@ def _projective_contents(
     ), reference
 
 
+def _reject_omitted_arrivals(
+    partition: ReadoutPartition,
+    content: ReadoutMapping,
+    adc: FTFReceiverConfig,
+    gen_ch: int,
+) -> None:
+    """Check physical block coverage in assembled events before PFB selection."""
+    delay = adc.time_of_flight_ns
+    for point, row in enumerate(content.inverse):
+        pulses = (
+            *partition.cavity_drives[point],
+            *(p for read in partition.projective_reads[point] for p in read.pulses),
+            *partition.terminal_pulses[point],
+        )
+        # The mapping's permutation goes from trigger order to flattened grids.
+        windows = iter(np.argsort(content.output_order[row]))
+        for event in content.events[row]:
+            # Pairing includes whole emission blocks, including all mux tones.
+            included_starts = {pulse.start_ns for pulse in event.pulses}
+            omitted = tuple(p for p in pulses if p.start_ns not in included_starts)
+            for grid in event.grids:
+                window = next(windows)
+                for pulse in omitted:
+                    arrival_start = pulse.start_ns + delay
+                    arrival_end = pulse.end_ns + delay
+                    if (
+                        arrival_start < arrival_end
+                        and arrival_start <= grid.times_ns[-1]
+                        and grid.times_ns[0] < arrival_end
+                    ):
+                        raise ValueError(
+                            f"FTF ADC {adc.ro_ch} window {window} at point {point}: "
+                            f"omitted gen {gen_ch} pulse emitted at {pulse.start_ns:.12g} ns "
+                            "arrives during sampling; FTF pairs triggers by emission time"
+                        )
+
+
 def _mux_channel_contents(
     content: ReadoutMapping, soccfg: QickConfig, channel: int
 ) -> ReadoutMapping:
@@ -437,7 +474,9 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     readout blocks with their own triggers are projective reads; untriggered
     blocks are cavity drives. A block owns triggers until the next block starts,
     including ringdown. Later pulses that reach a receiver by its last sample
-    are included in that ADC event without moving the projection time.
+    are included in that ADC event without moving the projection time. If an
+    event omits a pulse whose delayed support overlaps its sampling interval,
+    raise ValueError naming the receiver, window, generator and emission time.
     Bound fast-flux generators pass through per-loop delay and multi-exponential
     filtering, with 2 ns waveform samples and 1e-3 Phi0 midpoint bath levels.
     Ideal constant platforms omit continuous samples to retain sudden switching.
@@ -540,9 +579,10 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
     joint, source, physical = facts.joint, facts.source, facts.readout
     readouts = []
     for window, content in zip(template.readouts, event_contents, strict=True):
+        adc = receivers[window.channel]
+        _reject_omitted_arrivals(partition, content, adc, drive.gen_ch)
         if path.multiplexed:
             content = _mux_channel_contents(content, soccfg, window.channel)
-        adc = receivers[window.channel]
         dt = time_base.ns(window.sample_period_ticks)
         receiver = Receiver(
             adc.gain,

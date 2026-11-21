@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, ADC wiring, readout timing and exact cavity span reuse
+**Last updated:** 2026-11-21, ADC readout timing and cross-block cavity-field limit
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -731,9 +731,23 @@ only the configured pulse and mux readout paths route to ADCs, while drive and f
 `plan_template` and `FTFSource` accept an explicit `readout=` override. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
 Each batch retains the same chronological logical-event axis. An event retains
-that ADC's observed grids. If a pulse block is present, the event also holds its
-incident pulses and any later pulses that reach that receiver by its last
-sample. Empty grids mean the ADC does not observe the event or emit a read column. All ADCs may omit
+that ADC's observed grids. FTF pairs triggers with pulse blocks by emission
+start, not arrival time. An event holds the block's incident pulses and any later
+pulses that reach that receiver by its last sample. If an omitted pulse's emission
+interval shifted by the receiver's flight time overlaps the window's sampling
+interval, planning raises `ValueError` before returning IQ. The error names the
+ADC, window, generator and emission time.
+
+Separately, the event does not inherit the cavity field left by the previous block.
+When `post_delay` is shorter than several field decay times, the samples omit
+that earlier pulse's residual field. With the `ftf-demo/initial` fixture's R1
+κ, a single-mode estimate at `post_delay=0 µs` for a 0.99 µs window puts the
+omitted field at about 9.5% of steady-state amplitude at window start and 0.4%
+at window end. The MIST exact cavity span reuse in [Cavity drives](#cavity-drives)
+reuses moments and endpoint fields for evolution; it does not carry residual
+fields across blocks into ADC events.
+
+Empty grids mean the ADC does not observe the event or emit a read column. All ADCs may omit
 terminal observations; the terminal event and evolution endpoint remain in the
 plan. Each ADC must still observe at least one event. Projective plans retain
 point-local event contents. Templates without projective reads deduplicate
