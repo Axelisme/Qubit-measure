@@ -46,8 +46,8 @@ tone still needs valid frequency and ADC identity, even when not selected.
 
 ## FTF cost example
 
-A two-participant offline Run used 8 requested lengths from 0.02 to 0.16 us,
-const pulses at gain 0.1, 100 reps, 1 round and 0.1 us recovery.
+A two-participant offline Run used 8 requested lengths from 0.02 to 0.16 µs,
+const pulses at gain 0.1, 100 reps, 1 round and 0.1 µs recovery.
 The recorded Run action took 2.006 s, about 0.25 s per joint sweep point.
 These short, uncalibrated inputs demonstrate execution, not a pi-length calibration.
 Keep the hardware-rounded coordinates when reviewing the result.
@@ -68,7 +68,7 @@ tones. Inactive drives may be blank.
 For flat_top, total length includes both ramps and must exceed their duration.
 Switch an arb source to a supported waveform explicitly before Run.
 
-Each tone supplies positive Start and Stop lengths in us. Expts follows Tones
+Each tone supplies positive Start and Stop lengths in µs. Expts follows Tones
 and sets one shared positive point count for all tones (default 101).
 When all participants use const or flat_top, one program sweeps their length
 tables in a shared hardware loop. If any participant uses a sampled waveform,
@@ -91,7 +91,7 @@ round count.
 Each tone uses its own rounded requested-length axis and needs six finite IQ points.
 Decay defaults to a damped cosine and can be disabled.
 Fit phase defaults to fixed 0 degrees with signed amplitude. Enable it for a free
-phase. Lengths and one-sigma errors are in us; Rabi frequency and error are in MHz.
+phase. Lengths and one-sigma errors are in µs; Rabi frequency and error are in MHz.
 Review the curve and fit quality, especially for small-truncation simulations.
 
 ## Writeback

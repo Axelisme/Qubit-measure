@@ -43,7 +43,7 @@ def validate_coherence_scan(
 
     # Check the shared evolution window and each final-pulse phase ramp.
     if min(delay.start, delay.stop) < 0:
-        raise ValueError("delay must be nonnegative us")
+        raise ValueError("delay must be nonnegative µs")
     for index in participants:
         tone = tones[index]
         if not math.isfinite(tone.detune):
@@ -98,7 +98,7 @@ def validate_coherence_result(result: MuxCoherenceResult) -> None:
         or not np.all(np.isfinite(times))
         or np.any(times < 0)
     ):
-        raise ValueError("times must be finite nonnegative float64 (P,) us")
+        raise ValueError("times must be finite nonnegative float64 (P,) µs")
 
     # Partial acquisition may leave NaN IQ, but never infinite samples.
     if result.signals.dtype != np.dtype(np.complex128) or result.signals.shape != (

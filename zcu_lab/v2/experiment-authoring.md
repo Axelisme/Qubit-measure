@@ -121,7 +121,7 @@ Cfg 從 `zcu_tools.cfg_model` import `ConfigBase`，modules 與掃描欄位平�
 Module 保留 selector 與子表單，掃描保留 SweepCfg 子表單，FieldMeta 提供 label、unit 等提示。
 Pulse Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay、Mixer freq 的既有摺疊。
 Tone lists 保留逐元素結構。只宣告實驗會使用的取數欄位。
-Initial delay 需編輯或驗證時才宣告，否則沿用 program 的 1.0 us。
+Initial delay 需編輯或驗證時才宣告，否則沿用 program 的 1.0 µs。
 平鋪 cfg 使用 `cfg_schema_version="3.0"`，後續契約變更依各實驗提升版本。
 Load 保留舊 major 的資料與 metadata，回 `record.cfg=None` 與 `cfg_issue`，不轉換舊巢狀 cfg。
 Core 按需 import 實際使用的 module、SweepCfg 與硬體指令。

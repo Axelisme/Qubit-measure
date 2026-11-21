@@ -13,11 +13,11 @@ Prepare level 3 with Pi 03 in twotone/freq's Init Pulse, then locate 3–2.
 Open New Tab → twotone → rabi → amp_rabi and set Init Pulse to the calibrated Pi 03 on generator 1.
 Set Rabi Pulse to generator 2, the measured 3–2 carrier and a fixed duration. Sweep Gain, inspect the oscillation, then click Analysis → Analyze to determine the Pi 32 gain.
 See the [amplitude Rabi guide](../../twotone/rabi/amp_rabi/guide.md#prepared-state-amplitude-rabi) for the pulse fields and None ground-state path.
-Enter those calibrations in the three pulse editors, including MHz frequency, gain, us duration and generator.
+Enter those calibrations in the three pulse editors, including MHz frequency, gain, µs duration and generator.
 For integer-fluxonium, Pump uses generator 1, Stokes uses generator 2 and readout uses generator 0.
 Pi 32 must target the configured charge line; it is not a fast-flux channel.
 
-Use the environment's validated cavity/receiver settings: nominal carrier 7460 MHz, constant readout length 0.4 us, gain 0.1, ADC integration length 0.4 us and trigger offset 0 us.
+Use the environment's validated cavity/receiver settings: nominal carrier 7460 MHz, constant readout length 0.4 µs, gain 0.1, ADC integration length 0.4 µs and trigger offset 0 µs.
 These are synthetic input settings, not measured device calibration.
 Set a relaxation interval that returns the system to the ground preparation before each repetition.
 The simulator's acquire path starts each repetition from its configured thermal state; this does not establish hardware reset performance.

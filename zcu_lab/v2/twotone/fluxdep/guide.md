@@ -10,7 +10,7 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 ## Parameter sources
 
-Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 us from the sources captured at Open/Reset. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Open and Reset leave both frequency endpoints blank and required, with 1001 points. Enter a reviewed drive-frequency window before Run. Flux spans 10% beyond the selected device's actual integer and half over 101 points. The helper uses qubit.flux and other contributors' detached Form device values. Missing selected calibration leaves endpoints Invalid; invalid contributors raise an error. Both sweeps remain editable. Existing edits persist until Reset restores these starting values.
+Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs from the sources captured at Open/Reset. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Open and Reset leave both frequency endpoints blank and required, with 1001 points. Enter a reviewed drive-frequency window before Run. Flux spans 10% beyond the selected device's actual integer and half over 101 points. The helper uses qubit.flux and other contributors' detached Form device values. Missing selected calibration leaves endpoints Invalid; invalid contributors raise an error. Both sweeps remain editable. Existing edits persist until Reset restores these starting values.
 
 ## Module slots
 

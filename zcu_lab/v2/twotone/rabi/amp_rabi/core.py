@@ -67,11 +67,18 @@ class AmpRabiCfg(ConfigBase):
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     earlystop_snr: Annotated[
         float | None,
@@ -84,7 +91,7 @@ class AmpRabiCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -128,7 +135,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
         # 2. Monitor Rabi contrast as the rotation amplitude changes.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse gain", ylabel="Amplitude")
+        ax.set(xlabel="Pulse gain (a.u.)", ylabel="Amplitude (a.u.)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)

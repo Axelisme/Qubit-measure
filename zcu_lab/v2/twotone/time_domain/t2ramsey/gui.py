@@ -121,7 +121,7 @@ def _T2Ramsey_get_writeback_items(
     items: list[WritebackItem] = [
         ParameterWriteback(
             target_name="$qubit.t2r",
-            description="T2 Ramsey time (us)",
+            description="T2 Ramsey time (µs)",
             proposed_value=result.t2r,
         ),
     ]

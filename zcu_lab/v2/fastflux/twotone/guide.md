@@ -27,7 +27,7 @@ The Flux pulse module slot uses the `flux_pulse` template.
 Its channel comes from `$qubit.wiring.lo_flux_ch`.
 A missing or invalid channel leaves the form Invalid until you supply a confirmed channel.
 The template starts with const waveform, gain 1.0, frequency 0 MHz and Nyquist zone 2.
-This form starts its waveform duration at 1 us, matching the initial probe duration.
+This form starts its waveform duration at 1 µs, matching the initial probe duration.
 These values are editing seeds. Establish the flux calibration separately.
 Set the flux pulse frequency, Nyquist zone, waveform, duration and timing for your wiring.
 
@@ -37,7 +37,7 @@ Set its gain range and point count explicitly before mapping.
 The sweep determines the acquired gain, overriding the template's gain of 1.0.
 Confirm allowed gain limits, channels, timing, reset, readout and repetition settings before Run.
 Gain is normalized amplitude. Converting it to magnetic flux requires a separate
-calibration. Frequency is MHz; durations are us.
+calibration. Frequency is MHz; durations are µs.
 Use Preview cfg to review the complete resolved configuration.
 
 ## Run and analysis

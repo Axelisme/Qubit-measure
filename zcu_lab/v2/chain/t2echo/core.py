@@ -104,7 +104,7 @@ class ChainT2EchoCfg(ConfigBase):
         SweepCfg,
         FieldMeta(
             label="Delay",
-            unit="us",
+            unit="µs",
             description="Total free-evolution wait x, split into two halves around the π pulse.",
         ),
     ]
@@ -112,6 +112,7 @@ class ChainT2EchoCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
+            unit="count",
             description="Cycles per point in each round, at least 66.",
         ),
     ] = Field(ge=66)
@@ -119,6 +120,7 @@ class ChainT2EchoCfg(ConfigBase):
         int,
         FieldMeta(
             label="Rounds",
+            unit="count",
             description="Software acquisition rounds.",
         ),
     ] = 1
@@ -126,7 +128,7 @@ class ChainT2EchoCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
         ),
@@ -162,7 +164,7 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
             cfg.delay, "time", {"soccfg": context.soccfg, "scaler": 0.5}
         )
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Total delay (us)", ylabel="Projected signal (sigma)")
+        ax.set(xlabel="Total delay (µs)", ylabel="Projected signal (sigma)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         lines = live_line(ax, num_lines=2)
@@ -263,9 +265,9 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
             seed_xs, seed_real_signals, label="data", ls="-", marker="o", markersize=5
         )
         seed_ax.plot(seed_xs, seed_y_fit, label="fit", c="orange", zorder=1)
-        seed_t2e_str = f"{seed_t2e:.2f}us ± {seed_t2eerr:.2f}us"
+        seed_t2e_str = f"{seed_t2e:.2f}µs ± {seed_t2eerr:.2f}µs"
         seed_ax.set_title("$T_{2echo}$ decay = " + seed_t2e_str, fontsize=14)
-        seed_ax.set_xlabel("Delay Time (us)", fontsize=14)
+        seed_ax.set_xlabel("Delay Time (µs)", fontsize=14)
         seed_ax.set_ylabel("Signal (a.u.)", fontsize=14)
         seed_ax.legend(loc="upper right")
         seed_ax.grid(True)
@@ -316,10 +318,10 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
                 population_fitted[:, population_state],
                 color=f"C{population_state}",
             )
-        population_ax.set_xlabel("Total delay (us)")
+        population_ax.set_xlabel("Total delay (µs)")
         population_ax.set_ylabel("First-read population")
         population_ax.set_title(
-            f"{f'T2 echo = {t2:.4g} ± {t2_err:.2g} us, third state {tf:.3g} ± {tf_err:.2g} us'}\n{checks_text(fit)}",
+            f"{f'T2 echo = {t2:.4g} ± {t2_err:.2g} µs, third state {tf:.3g} ± {tf_err:.2g} µs'}\n{checks_text(fit)}",
             fontsize=9,
         )
         population_ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))

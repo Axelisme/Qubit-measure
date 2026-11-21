@@ -50,15 +50,15 @@ class MuxT1ToneReport(MuxFitToneReport):
     Identity uses the original tone position, never the participant row offset.
     """
 
-    t1: float | None = Field(default=None, description="Fitted decay time in us.")
+    t1: float | None = Field(default=None, description="Fitted decay time in µs.")
     t1_err: float | None = Field(
-        default=None, description="One-sigma decay time uncertainty in us."
+        default=None, description="One-sigma decay time uncertainty in µs."
     )
     t1b: float | None = Field(
-        default=None, description="Optional second decay time in us."
+        default=None, description="Optional second decay time in µs."
     )
     t1b_err: float | None = Field(
-        default=None, description="Optional second decay uncertainty in us."
+        default=None, description="Optional second decay uncertainty in µs."
     )
 
 

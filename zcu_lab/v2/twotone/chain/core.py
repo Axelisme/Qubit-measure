@@ -138,6 +138,7 @@ class ChainCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
+            unit="count",
             description="Fast sweeps in each software round.",
         ),
     ] = Field(ge=12)
@@ -145,6 +146,7 @@ class ChainCfg(ConfigBase):
         int,
         FieldMeta(
             label="Rounds",
+            unit="count",
             description="Software rounds, each followed by a live update.",
         ),
     ] = 1
@@ -152,7 +154,7 @@ class ChainCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Wait after each dwell's chain, before the next dwell.",
         ),

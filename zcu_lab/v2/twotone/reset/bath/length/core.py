@@ -50,20 +50,27 @@ class LengthCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
     tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="µs")]
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -141,7 +148,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         # 2. Show tomography contrast, but retain phase-resolved IQ for round averaging.
         plots = context.plots
         fig, ax = plots.subplots(num="measurement")
-        ax.set(xlabel="Length (us)", ylabel="Signal (a.u.)")
+        ax.set(xlabel="Length (µs)", ylabel="Signal (a.u.)")
         viewer = live_line(ax, num_lines=1)
 
         @plots.on_plot_thread
@@ -212,7 +219,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         _, ax = plots.subplots(num="fit")
 
         ax.plot(lens, real_signals, marker=".")
-        ax.set_xlabel("Length (us)")
+        ax.set_xlabel("Length (µs)")
         ax.set_ylabel("Signal (a.u.)")
         ax.set_title("Bath Reset Length Measurement")
         ax.grid(True)

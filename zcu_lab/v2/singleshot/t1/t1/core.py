@@ -61,20 +61,27 @@ class T1Cfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
     sampling: Literal["linear", "decay"] = "decay"
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -115,10 +122,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         axes = figure.axes
         lines = [live_line(ax, num_lines=POPULATION_COUNT) for ax in axes]
         for ax in axes:
-            ax.set(xlabel="Time (us)", ylabel="Amplitude", ylim=(0.0, 1.0))
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
+            ax.set(xlabel="Time (µs)", ylabel="P(g), P(e), P(other)", ylim=(0.0, 1.0))
+            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
             ax.legend()
 
@@ -279,7 +284,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         )
         ax1, ax2 = fig.axes
 
-        fig.suptitle(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")
+        fig.suptitle(f"T_1 = {t1:.1f} µs, T_1_b = {t1_b:.1f} µs")
 
         ax1.plot(lens, fit_pops1[:, 0], color="blue", ls="--", label="Ground Fit")
         ax1.plot(lens, fit_pops1[:, 1], color="red", ls="--", label="Excited Fit")
@@ -311,7 +316,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             marker=".",
             markersize=3,
         )
-        ax1.set_xlabel("Time (μs)")
+        ax1.set_xlabel("Time (µs)")
         ax1.legend(loc=4)
         ax1.grid(True)
 
@@ -345,8 +350,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             marker=".",
             markersize=3,
         )
-        ax2.set_xlabel("Time (μs)")
-        ax2.set_ylabel("Population")
+        ax2.set_xlabel("Time (µs)")
+        ax2.set_ylabel("P(g), P(e), P(other)")
         ax2.legend(loc=4)
         ax2.grid(True)
 

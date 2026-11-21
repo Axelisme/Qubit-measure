@@ -81,7 +81,7 @@ class StirapDetuningInputs(RecipeInputs):
     )
     stokes_lead_us: float | None | Keep = Field(
         default=KEEP,
-        description="Fixed lead in us; positive means Stokes first.",
+        description="Fixed lead in µs; positive means Stokes first.",
     )
     readout_ref: str | None | Keep = Field(
         default=KEEP,
@@ -93,7 +93,7 @@ class StirapDetuningInputs(RecipeInputs):
     )
     relax_delay_us: float | None | Keep = Field(
         default=KEEP,
-        description="Relaxation interval in us for ground preparation.",
+        description="Relaxation interval in µs for ground preparation.",
     )
 
 
@@ -138,8 +138,8 @@ async def stirap_detuning(
     sweeps. Positive stokes_lead_us delays Pump; negative delays
     Stokes. Gains are signed. Each gauss/cosine/drag/arb waveform owns its length.
     Omitted waveform refs retain each current Form source, initially Gaussian
-    sigma 0.05 us and length 0.3 us. Use a waveform library key or an exact Form
-    option such as Inline: cosine, then set pump_waveform.length in us through
+    sigma 0.05 µs and length 0.3 µs. Use a waveform library key or an exact Form
+    option such as Inline: cosine, then set pump_waveform.length in µs through
     overrides. Arbitrary envelopes use the selected asset's duration.
 
     Omission (Python KEEP, not a JSON value) retains each Form value/source.

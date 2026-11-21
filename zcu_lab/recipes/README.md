@@ -180,7 +180,7 @@ Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 Two-qubit 的位置綁定、舊 point 重綁、herald reset、寫回與 RB 波形覆寫見 [two-qubit guide](two-qubit-guide.md)。
 
 三個 thermal-chain ro_optimize recipe 以 K 等待熱平衡，再無 drive 連讀 16 次。
-`relax_delay` 設 K，單位 us。K 後熱態不同於 readout-driven steady state。
+`relax_delay` 設 K，單位 µs。K 後熱態不同於 readout-driven steady state。
 Score 是受限二態模型的資訊 proxy，乘上 M 相關增量懲罰。M 不等於可辨識的 leakage，純二態再布居也會受罰。
 只取 score 最大的 setting，同分保留 acquisition order，誤差不參與排名。
 最佳 setting 在邊界時，擴大該側範圍後重測。
@@ -200,9 +200,9 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | `stirap_delay` | `twotone/stirap/delay` | `start_us/stop_us/n` 掃描 Stokes lead，正值 Stokes 先、負值 Pump 先。兩條各自選 gauss、cosine、drag 或 arb 與各自時長。必填量得的 `pump_freq_mhz/stokes_freq_mhz` 與 signed gains。完整 Run、Analyze、Save，分析只用保存的 centroid3，不提出 writeback。 |
 | `stirap_detuning` | `twotone/stirap/detuning` | Pump 與 Stokes 各自選 gauss、cosine、drag 或 arb。`pump_start_mhz/pump_stop_mhz/pump_n` 掃內層 Pump，`stokes_start_mhz/stokes_stop_mhz/stokes_n` 掃外層 Stokes。兩軸都是加到量得載波的 MHz offset。`pump_waveform_ref/stokes_waveform_ref` 選 library key 或 `Inline: cosine` 等 Form 選項，overrides 設所選波形參數。完整 Run、Analyze、Save，不提出 writeback。 |
 | `raman_gf` | `twotone/raman_gf` | `carrier_mhz` 由操作者提供；drive 接受任何受支援波形，`waveform_asset` 可指定已建立的 arbitrary envelope（sqrt(sin) 形狀需 arb）。`scan_mode` 使用 frequency、gain、frequency_gain；detuning 使用 two-photon MHz，正值使單 carrier 增加一半 detuning，gain 直接使用 DAC full-scale fraction（a.u.）。分析只用 Run 保存的 centroid3 readout，完整 Run、Analyze、Save，不提出 writeback。 |
-| `ro_optimize_chain_power` | `twotone/ro_optimize/chain_power` | 可省略 `gain_start`／`gain_stop`（a.u.）、`points`、`relax_delay`（us）、`reps`、`rounds`。每 shot 等待 K 後連讀 16 次，無 drive。回報最佳 `gain`、`score`、`score_error`、`qnd`、`qnd_error`、`correlation`、`amplification`、`mist`（M 診斷）。完整 Run、Analyze、Save，不提出 writeback。 |
+| `ro_optimize_chain_power` | `twotone/ro_optimize/chain_power` | 可省略 `gain_start`／`gain_stop`（a.u.）、`points`、`relax_delay`（µs）、`reps`、`rounds`。每 shot 等待 K 後連讀 16 次，無 drive。回報最佳 `gain`、`score`、`score_error`、`qnd`、`qnd_error`、`correlation`、`amplification`、`mist`（M 診斷）。完整 Run、Analyze、Save，不提出 writeback。 |
 | `ro_optimize_chain_freq` | `twotone/ro_optimize/chain_freq` | 同上，掃描端點為 `freq_start_mhz`／`freq_stop_mhz`（MHz），回報 `freq_mhz`。 |
-| `ro_optimize_chain_length` | [`twotone/ro_optimize/chain_length`](../v2/twotone/ro_optimize/chain_length/guide.md) | 同上，`length_start_us`／`length_stop_us` 設 ADC window 掃描端點（us）。Run 用各 window 加表單的 `length_margin` 設 pulse 長度，回報 `length_us`。 |
+| `ro_optimize_chain_length` | [`twotone/ro_optimize/chain_length`](../v2/twotone/ro_optimize/chain_length/guide.md) | 同上，`length_start_us`／`length_stop_us` 設 ADC window 掃描端點（µs）。Run 用各 window 加表單的 `length_margin` 設 pulse 長度，回報 `length_us`。 |
 | `twotone_chain` | `twotone/chain` | 必填 drive 的 `center_mhz`、`span_mhz`、`points`。每點 48 次無 reset 的（驅動、讀出），`reps` 是每輪快掃次數。分析以 `twotone/freq` 的峰擬合擬合離背景的 sigma 曲線，`expected_center_mhz` 選峰。回報中心、近似寬度與 5% 誤報門檻，完整 Run、Analyze、Save，不提出 writeback。 |
 | `chain_amp_rabi` | `chain/amp_rabi` | 掃 drive gain，`gain_range`、`points`。每個 rep 是一個 cycle：K（`relax_delay`）後 (Rabi pulse, 讀, 讀) × 8，`reps` 是每輪每點 cycle 數。分析以 `twotone/rabi/amp_rabi` 擬合第一次讀出取起點，再聯合擬合 65 個數。回報 π gain、Rabi 頻率與 Wald 誤差、R、三項檢查，完整 Run、Analyze、Save，不提出 writeback。 |
 | `chain_len_rabi` | `chain/len_rabi` | 掃 const／flat_top drive 的長度，`max_length_us`、`points`。Cycle 與 `reps` 同上。起點取自 `twotone/rabi/len_rabi` 的第一讀擬合。回報 π 長度、Rabi 頻率（MHz）與 Wald 誤差、R、三項檢查，不提出 writeback。 |

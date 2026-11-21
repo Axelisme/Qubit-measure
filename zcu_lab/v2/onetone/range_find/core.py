@@ -110,7 +110,7 @@ class RangeFindCfg(ConfigBase):
         PulseReadout.Cfg,
         FieldMeta(
             label="Readout",
-            description="Resonator readout 設定與 timing（us）。",
+            description="Resonator readout 設定與 timing（µs）。",
         ),
     ]
     freq: Annotated[
@@ -122,17 +122,24 @@ class RangeFindCfg(ConfigBase):
         ),
     ]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -165,7 +172,7 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         freqs = linear_freqs(cfg.freq, cfg.readout, context=context)
         # 2. Preview magnitude dips while preserving complex IQ for dip detection.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
+        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude (a.u.)")
         line = live_line(ax)
 
         @context.plots.on_plot_thread

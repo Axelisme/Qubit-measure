@@ -8,7 +8,7 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 ## Behavior
 
-`twotone/ro_optimize/rpi_length` sweeps the readout ADC window in us with a calibrated π pulse. At each window it plays cycles of `...R π R π...` with no reset or relax delay, where R is the readout and π is the same fixed pulse at every window.
+`twotone/ro_optimize/rpi_length` sweeps the readout ADC window in µs with a calibrated π pulse. At each window it plays cycles of `...R π R π...` with no reset or relax delay, where R is the readout and π is the same fixed pulse at every window.
 Use it next to `twotone/ro_optimize/length` and `twotone/ro_optimize/chain_length`. The first compares g and e prepared with a π pulse, the second uses no π pulse and waits for thermal relaxation between shots, and this one alternates reads with π pulses. Each is a separate experiment.
 
 The ADC window is the swept value, rounded to the ADC clock. Run adds **Length margin** to that window and rounds the pulse length to the generator clock. The host builds one program per window, so the pulse grows with the window.
@@ -19,7 +19,7 @@ The acquisition order is host window point → Rounds → Reps. The host complet
 Lags 1 to 15 pair reads only within the same cycle. The statistics accumulate across reps and rounds, without pairs crossing a rep, round or window boundary.
 The Form does not offer settings for the number of pairs per rep or the relax delay.
 
-The wait from R to π is the readout's `post_delay` plus the π pulse's own `pre_delay`, which is usually 0. With `post_delay` 0.05 us and a π `pre_delay` of 0.02 us, each π starts 0.07 us after the readout generator pulse ends, and the wait is the same at every window. The wait counts from the generator end and not from the ADC window end, so a π can play while the ADC window is still open. Inside a rep, the next readout starts after the π ends, later only by the π pulse's `post_delay` and the readout's `pre_delay`, which are usually 0.
+The wait from R to π is the readout's `post_delay` plus the π pulse's own `pre_delay`, which is usually 0. With `post_delay` 0.05 µs and a π `pre_delay` of 0.02 µs, each π starts 0.07 µs after the readout generator pulse ends, and the wait is the same at every window. The wait counts from the generator end and not from the ADC window end, so a π can play while the ADC window is still open. Inside a rep, the next readout starts after the π ends, later only by the π pulse's `post_delay` and the readout's `pre_delay`, which are usually 0.
 The Form has no separate wait field. Change `post_delay` in the readout module to change this wait. Run keeps every π setting, including a nonzero `pre_delay`.
 
 Each rep ends with the shot closure, which waits for every ADC window to close before the next rep starts. If the last ADC window closes after the last π ends, this adds a wait at the rep boundary. The closure is not a relax delay, and the Form has no field for it.
@@ -33,14 +33,14 @@ Calibrate the readout frequency and the π pulse first. The Form cannot check th
 Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template that reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly`. The template starts at gain 0.1, which is an uncalibrated value to confirm.
 Pi pulse uses the captured `$qubit.module.x180` slot, or a fresh `pi_pulse` template.
 Run sets both lengths at each sweep point, so the Form hides them in the readout module.
-On Open or Reset, **Length margin** starts at the captured module’s pulse length minus its ADC window. Without a captured readout, it uses the `readout` template’s difference as an uncalibrated starting value. The stock template gives 0.03 us. If either length cannot be resolved, the margin stays blank and required. Confirm or edit this finite, nonnegative time in us before Run. Check that the pulse covers the intended ADC window at the receiver with the selected trigger offset.
-**ADC window** starts at 11 points from 0.2 to 2.2 us.
+On Open or Reset, **Length margin** starts at the captured module’s pulse length minus its ADC window. Without a captured readout, it uses the `readout` template’s difference as an uncalibrated starting value. The stock template gives 0.03 µs. If either length cannot be resolved, the margin stays blank and required. Confirm or edit this finite, nonnegative time in µs before Run. Check that the pulse covers the intended ADC window at the receiver with the selected trigger offset.
+**ADC window** starts at 11 points from 0.2 to 2.2 µs.
 Reps starts at 250 and Rounds at 20. Each window has 5 000 cycles of 64 reads, or 320 000 reads in total.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
 
 ## Live plot
 
-After every round the `measurement` plot shows the score of each valid window with a finished round, from all finished rounds. The x axis is `ADC window (us)` and the y axis is `Alternating-contrast score`.
+After every round the `measurement` plot shows the score of each valid window with a finished round, from all finished rounds. The x axis is `ADC window (µs)` and the y axis is `Alternating-contrast score`.
 Invalid windows are gaps in the curve. The title counts them, for example `Not plotted: 3 invalid`. Windows that have not finished a round are not on the curve and are not counted as invalid.
 
 Stop keeps the sums of finished rounds. Windows with at least one finished round stay in the result, and windows that were not measured are dropped from it. A stop before any window finishes a round keeps nothing, and the Run fails with that message.
@@ -48,9 +48,9 @@ Stop keeps the sums of finished rounds. Windows with at least one finished round
 ## Analysis
 
 Analysis recomputes every window from its own saved sums. It has no options.
-The `score` figure has six panels, all with `ADC window (us)` on the x axis:
+The `score` figure has six panels, all with `ADC window (µs)` on the x axis:
 
-- The score of each valid window. A red dashed line and the legend mark the best window in us.
+- The score of each valid window. A red dashed line and the legend mark the best window in µs.
 - `Invalid reason per window`. Each row is a reason that occurred, with a mark at each window reporting it.
 - `Q_eff`, `q`, amplitude `a` and noise variance `σ²`, for valid windows only.
 
@@ -58,7 +58,7 @@ The figure title counts the invalid windows. Invalid windows appear only in the 
 
 The summary reports:
 
-- `best_length`: the valid ADC window with the largest score, in us.
+- `best_length`: the valid ADC window with the largest score, in µs.
 - `best`: every estimate at that window, listed below.
 - `length_count`: the number of windows in the saved result.
 - `not_plotted`: the number of invalid windows.

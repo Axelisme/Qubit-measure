@@ -69,16 +69,16 @@ class MuxLenRabiToneReport(MuxFitToneReport):
     """
 
     pi_len: float | None = Field(
-        default=None, description="Fitted pi total pulse length in us."
+        default=None, description="Fitted pi total pulse length in µs."
     )
     pi_len_err: float | None = Field(
-        default=None, description="One-sigma pi length uncertainty in us."
+        default=None, description="One-sigma pi length uncertainty in µs."
     )
     pi2_len: float | None = Field(
-        default=None, description="Fitted pi/2 total pulse length in us."
+        default=None, description="Fitted pi/2 total pulse length in µs."
     )
     pi2_len_err: float | None = Field(
-        default=None, description="One-sigma pi/2 length uncertainty in us."
+        default=None, description="One-sigma pi/2 length uncertainty in µs."
     )
     rabi_f: float | None = Field(
         default=None, description="Rabi oscillation frequency in MHz."
@@ -109,7 +109,7 @@ async def mux_len_rabi(
     Overrides run last. Only participant drive/sweep settings are required;
     readout identities remain required for every tone.
     n sets shared Expts; sweeps covers all original tones with start/stop only.
-    Frequency uses MHz, length us and gain in a.u. within [-1, 1].
+    Frequency uses MHz, length µs and gain in a.u. within [-1, 1].
     Analyze with the supplied decay, fit_phase, then ask before writeback.
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.
