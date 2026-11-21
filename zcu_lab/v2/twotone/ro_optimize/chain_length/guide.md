@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run the no-drive ADC window sweep and read its heuristic score, QND and correlation-growth diagnostic.
 
-**Last updated:** 2026-11-10
+**Last updated:** 2026-11-21
 
 After changing a parameter source, use Reset to recapture initial values. Refresh updates sources and choices while preserving authored inputs. Reset can overwrite unsaved inputs.
 
@@ -19,9 +19,11 @@ There is no additional wait inside the chain beyond the readout's own timing.
 
 Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template.
 The template uses the resonator frequency, wiring and time of flight.
-ADC window starts at 11 points from 0.2 to 2.2 us. Run rebuilds the program for each window and sets the pulse length to window + 0.11 us. The Form hides both lengths in the readout module.
+ADC window starts at 11 points from 0.2 to 2.2 us. Run rebuilds the program at each point and sets its pulse length to `trig_offset − time_of_fly + window + 0.11 us`.
+Subtracting the flight time accounts for propagation to the ADC. The extra 0.11 us lets the pulse end reach the ADC after the window closes.
+The Form hides the two lengths and captures the required `$resonator.time_of_fly` in us. If the flight time is missing or invalid, correct it at the source and Reset before Run.
 Reps defaults to 2000 shots per setting per round. Rounds defaults to 320, giving 640 000 shots per setting.
-Missing or invalid sources leave fields Invalid. Supply them before Run.
+Supply any other missing or invalid sources before Run.
 
 This experiment needs thermal g/e contrast, not a calibrated π pulse.
 The state after K is not the readout-driven steady state. A measured 60:40 readout-driven population does not specify the population before the first read.
@@ -93,7 +95,7 @@ The record is ThermalChainSums with the sweep axis, shot count and 107 float64 s
 It keeps I/Q sums of R1..R16, R1 I²/IQ/Q², all four cross components of all 15 adjacent pairs, and the R1,R3 through R1,R5 pairs.
 No weighted M aggregate replaces those pairs.
 Native save and restore preserve the moments for reanalysis of score, M and best setting.
-The tag is `twotone/ro_optimize/chain_length` and cfg schema is `4.0`. There is no earlier-schema compatibility path.
+The tag is `twotone/ro_optimize/chain_length` and cfg schema is `5.0`. An older run can still load its saved moments for analysis, but its cfg is not restored.
 
 `ro_optimize_chain_length` accepts optional `length_start_us` and `length_stop_us` in us, `points`, `relax_delay`, `reps` and `rounds`.
 `points` maps to sweep Expts. Omission keeps the Form value; null passes to the field owner.
