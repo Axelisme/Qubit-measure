@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-21，ADC 視窗按裝置時間配對，事件共用 pulse 歷史
+**Last updated:** 2026-11-22，optional native 變數與 Labber 匯出選集
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -192,7 +192,7 @@ Caller 用實驗自己的 Result 型別包裝陣列，再組 RunRecord 交給 sa
 框架測試的合成輸入與 lab 驗收邊界見 [tests](../../../tests/README.md#實驗定義)。
 
 `probe.compare_roundtrip(original, restored, *, spec)` 也可比較 caller 已還原的 Result。
-Shape 與 dtype 必須相同。AxesSpec 與 GroupedAxesSpec 各組宣告中，scale≠1 且比例有限非零的浮點 Result 欄位，容許每個實數／虛數分量相對誤差 ≤2·eps，absolute tolerance 為0。
+Shape 與 dtype 必須相同。`None` 只與 `None` 相等，不等於陣列。Run 階段的 exact dtype 檢查只略過缺席的 optional variable，其餘 field-backed arrays 照常驗證。AxesSpec 與 GroupedAxesSpec 各組宣告中，scale≠1 且比例有限非零的浮點 Result 欄位，容許每個實數／虛數分量相對誤差 ≤2·eps，absolute tolerance 為0。
 eps 取實際實數分量 dtype 的 machine epsilon，不隨 scale 大小改變。此上界涵蓋以同一 scale 各乘、除一次的正常有限值捨入，不放寬 underflow 或 overflow。
 固定或自動產生的軸沒有 Result 欄位，不加入縮放欄位映射。
 NaN 分量位置與 infinity 符號必須相同，其他欄位及整數陣列保持 exact 比較。
@@ -210,7 +210,7 @@ Warning 指出欄位、index_axis、index 與 shape、dtype 或 value 差異。�
 - `RunSnapshot` 記錄 entry_name、point 與 roles，不含 entry UUID。舊 metadata 的 entry_id 被忽略，不從它推導名稱。
 - `metadata.ParameterSnapshot` 保存 resource-owned 參數內容、library Specs、authored aliases 與 fixed names。它不含持久 target 或 storage。還原時不預驗未使用的區塊，讀取 owner 在使用值、Spec 或 alias 時報錯。GUI Run 在提交 worker 前固定這份 snapshot，Save 使用 RunMetadata 中的內容，不重新捕捉 live point。
 - `base.py` 的 `Experiment[Result, Cfg]` 只宣告 `AXES_SPEC` 與 `run`、`analyze`、`post_analyze` 簽名。未實作的操作 raise `NotImplementedError`，無持久化宣告時 `AXES_SPEC=None`。核心不保存上次結果，也不提供存讀方法。NotebookExperiment 管理 records，NotebookAdapter 只綁定可重用環境。`native_persistence` 的 `save_run(record, path, spec=...)`、`load_run(path, spec=...)`、`load_run_with_metadata(path, spec=...)` 與 `restore_run(container, spec=...)` 接明確宣告。`save_labber(record, path, spec=..., comment=..., tag=...)` 另作單檔 Labber 匯出，cfg 缺失時拒絕。路徑都是本機 `Path`，caller 選路徑與覆寫政策，不提供 server_ip／port 或格式猜測。只有 Labber 的舊檔須先用 `migrations/` 離線轉換。
-- `native_persistence.py` 的 `prepare_run_data` 將明確 RunRecord/spec 映射為 `PreparedRunData`，持有 SI `Container`、`CfgSnapshot`、原始 `LabberMetadata` 與 Labber layout。準備不做 I/O，也不要求 metadata 或 Labber common grid。`to_container(record.metadata)` 驗證 native schema、experiment tag 與 JSON，再加入 `docs/cfg={values,cfg_type,schema_version}` 與 `docs/metadata`。Metadata 的所有 key 原樣保存，包括作者自加與已廢棄的 key。Load 將檔內 metadata 原樣放入 record，不預驗未用欄位。非法文件的錯誤指出來源檔。`save_run` 只收 record，不另收 metadata；缺 metadata 即拒絕。`load_run_with_metadata` 回 record，`load_run` 保留 record／snapshot tuple。
+- `native_persistence.py` 的 `prepare_run_data` 將明確 RunRecord/spec 映射為 `PreparedRunData`，持有 SI `Container`、`CfgSnapshot`、原始 `LabberMetadata`、Labber layout 與變數選集。準備先驗證所有現有 SI variables，不做 I/O，也不要求 metadata 或 Labber common grid。`to_labber_container()` 投影匯出選集，不改寫 native 變數。`to_container(record.metadata)` 驗證 native schema、experiment tag 與 JSON，再加入 `docs/cfg={values,cfg_type,schema_version}` 與 `docs/metadata`。Metadata 的所有 key 原樣保存，包括作者自加與已廢棄的 key。Load 將檔內 metadata 原樣放入 record，不預驗未用欄位。非法文件的錯誤指出來源檔。`save_run` 只收 record，不另收 metadata；缺 metadata 即拒絕。`load_run_with_metadata` 回 record，`load_run` 保留 record／snapshot tuple。
 - `native_persistence.read_run_metadata(path)` 用 datafile 的 `read_doc` 只讀歷史 metadata，不載 vars 或 cfg，也不回退到全檔 load。需要完整歷史證據的 caller 可取得 typed `RunMetadata`，不受壞 vars 阻礙。Saved-runs 清單另從 datafile.read_doc 投影顯示欄位，不要求 provenance 或完整 snapshot。缺文件 raise 指名來源的 `KeyError`，非法文件或 metadata raise 指名來源的 `ValueError`。已載 Container 的完整歷史讀取使用 `metadata_from_container(container)`，不重讀檔案。Fluxdep 用 `device_snapshot_from_container(container)` 只投影 device settings，不驗 cfg、provenance 或 entry snapshot；缺值回 None，已記錄空 mapping 保留為空。`metadata_from_container` 與 `read_run_metadata` 是明確完整投影，仍使用完整 RunMetadata 驗證。`metadata_content_from_container` 只固定文件，property 在使用欄位時驗證，錯誤指名 `/docs/metadata/<field>`。Container 缺 metadata 時 raise 指名 `/docs/metadata` 的 `ValueError`，caller 在轉譯錯誤時附來源路徑。
 - 公開 `restore_run(container, spec=...)` 不做 I/O。它核對 metadata 的 experiment tag 與宣告的 variables、axes、units、dtype、shape，再重建 Result 與 typed cfg。未使用的 completion、timestamps、entry snapshot 與 provenance 不擋還原，實際讀取或完整投影才報錯。`VariableSpec.variable_from_result`／`loaded_from_variable` 負責 Result 與 `datafile.Variable` 的映射。Container axes 按 NumPy 維度順序，spec 與 loaded axes 為 inner-first，數值陣列不 transpose。GUI、Notebook 與 native load 共用 `restore_run`。合法 cfg envelope 的 type、schema major 或 concrete validation 不相容時，record.cfg=None，`RestoredRun.cfg_issue` 與 `CfgUnavailableWarning` 說明同一原因。缺 cfg 或非法 envelope 仍拒絕。Record 保留 metadata；unknown vars/docs/groups 與 raw cfg 由原 Container 保真，不塞進 typed record。
 - `artifacts` 的 `save_artifacts(artifacts, *, record, ...)` 編排一次保存。它只取 `record.metadata`，缺失或非法時在寫檔前拒絕。`SaveLayout` 原樣使用 caller 的 stem，native 為 `runs/<stem>/data.h5`，Run 圖片與窗格 JSON 共用該目錄。Result 的 point／全域圖片副本為 `<stem>_<圖名>.png`。Writer 在首次 Save 建立 Database 目錄，entry create／open 不建立它。Labber 日期樹內初始名為 `<stem>.hdf5`，只有碰撞時才取 numeric suffix。Comment 在 cfg 旁保存歷史 snapshot.point 與 snapshot.roles。同 stem 重存覆寫 native、PNG 與窗格 JSON，不覆寫 Labber。
@@ -234,9 +234,9 @@ Warning 指出欄位、index_axis、index 與 shape、dtype 或 value 差異。�
   Grouped 的 `VariableAxisSpec` 全部使用關鍵字，`values` 與 `field_name`、`generated` 互斥。
   `generated_arange(label=..., unit=...)` 也使用關鍵字。
   `VariableZSpec` 可用位置參數指定 field_name，其餘選項使用關鍵字。
-  `GroupedLoadData` 仍提供固定座標，由 Result builder 決定是否保留。
+  `GroupedLoadData` 提供現有變數及其固定座標，由 Result builder 決定是否保留。`VariableSpec(required=False)` 只在 Result 的整個 z 欄為 `None` 時略寫該變數。讀檔缺席的 optional variable 不傳給 builder；存在但不合宣告仍拒絕。每個 grouped spec 至少有一個 required variable。
 
-  `AxesSpec` 在宣告時核對 Result 的資料欄位，不要求 Result 包含 cfg。軸以 inner-first 排列；保存時套用宣告的單位比例，載入時還原成 Result 欄位。Native cfg snapshot 載入時由宣告的 cfg 型別驗證；Labber 匯出另以 comment envelope 保存 cfg。`save_labber` 使用 caller 指定的路徑，不替 caller 選檔名。對包含多個 Data Variable 的單一 Result，`GroupedAxesSpec`／`VariableSpec` 描述 variable 與欄位的映射，由 typed builder 重建純 Result；Grouped 與 single 都透過 `save_labber(record, path, spec=...)` 匯出，cfg 缺失時拒絕。`labber_layout` 預設 common，要求共同 grid；明確宣告 independent 時，各 variable 保留自己的 1D／2D axes。單檔 save 與 artifact 保存都遵守這項宣告，不自動切換，也不改 native 格式。Grouped native load 由 `load_run_with_metadata` 與 single 共用 restore，不從 Labber reconstruction 讀回。通用檔案格式與讀寫由 [datafile](../datafile/README.md) 負責；保存權責另見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
+  `AxesSpec` 在宣告時核對 Result 的資料欄位，不要求 Result 包含 cfg。軸以 inner-first 排列；保存時套用宣告的單位比例，載入時還原成 Result 欄位。Native cfg snapshot 載入時由宣告的 cfg 型別驗證；Labber 匯出另以 comment envelope 保存 cfg。`save_labber` 使用 caller 指定的路徑，不替 caller 選檔名。對包含多個 Data Variable 的單一 Result，`GroupedAxesSpec`／`VariableSpec` 描述 variable 與欄位的映射，由 typed builder 重建純 Result；Grouped 與 single 都透過 `save_labber(record, path, spec=...)` 匯出，cfg 缺失時拒絕。`labber_layout` 預設 common，要求共同 grid；明確宣告 independent 時，各 variable 保留自己的 1D／2D axes。`labber_variables` 預設匯出所有現有變數，也可明列名稱選集；native required 與否不限制選集。單檔 save 與 artifact 保存共用投影，不自動切換 layout，也不改 native 格式。Grouped native load 由 `load_run_with_metadata` 與 single 共用 restore，不從 Labber reconstruction 讀回。通用檔案格式與讀寫由 [datafile](../datafile/README.md) 負責；保存權責另見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
 
 `metadata.validate_run_metadata(document)` 在實際 Save 前驗證完整 schema 與原文件的有限 JSON，不修改作者 key。
 GUI 在修改 comment 或準備 ledger 前呼叫它，native 與 artifact saver 也使用同一入口。

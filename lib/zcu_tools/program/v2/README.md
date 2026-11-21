@@ -157,6 +157,7 @@ Request、數值契約與環境組裝見 [simulation](simulation/README.md)，st
 框架用 `start(points)` 建立 state 並保存它；round hook 與最終結果都從 reducer 的 `output(state)` 取得。
 `shot_sums(prog, axes)` 在 compile 後以 emit tag 或未標記 module 名稱解析 `Classify` 與 `IQ` 軸。
 Label、讀取索引與讀取數以移除遮罩來源消耗的讀取後的資料為準。
+`IQ(read, offset_corrected=True)` 在加總前對單 ADC、單次積分讀取扣除 QICK IQ offset；其餘 IQ 軸仍使用未扣 offset 的正規化 IQ。限制見 [summed acquisition](../README.md#summed-acquisition)。
 `chain_sweep_sums(prog, read)` 處理單一 fixed Repeat 內的 PulseReadout，回傳每點 12 × 12 augmented sums。
 `thermal_chain_sums(prog, read)` 處理同一 PulseReadout 的 16 次連讀，可展開或放在單一 fixed Repeat。
 每點回傳 108 欄：shot count 與 107 個 sums，跨保留的 reps 與已完成的 rounds 只加總。

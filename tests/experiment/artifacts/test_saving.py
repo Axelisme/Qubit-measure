@@ -14,6 +14,7 @@ from matplotlib.figure import Figure
 from zcu_tools.datafile import (
     load,
     load_grouped_labber_data,
+    load_labber_data,
 )
 from zcu_tools.experiment import (
     AnalysisDocument,
@@ -40,6 +41,10 @@ from tests.experiment._grouped_layout_support import (
     assert_mixed_disk_values,
     mixed_record,
     mixed_spec,
+)
+from tests.experiment._optional_variables_support import (
+    diagnostic_record,
+    diagnostic_spec,
 )
 from tests.experiment._saving_support import SavingCfg, SavingCore, saving_figure
 
@@ -235,6 +240,45 @@ def test_grouped_artifacts_obey_declared_layout_and_preserve_native_ledger_seman
     if independent:
         assert labber_paths[0] != labber_paths[1]
     assert len(ledger.events()) == 2
+
+
+def test_artifact_data_projects_labber_without_losing_native_diagnostic(
+    tmp_path: Path,
+) -> None:
+    spec = replace(diagnostic_spec(), labber_variables=("data",))
+    source = diagnostic_record(present=True)
+    metadata, layout, ledger = storage(tmp_path)
+    metadata = metadata.model_copy(update={"experiment": spec.tag})
+    report = save_artifacts(
+        (
+            SaveArtifact(
+                ArtifactRef("run", "measurement_data"),
+                (
+                    DataItem.from_run(
+                        ArtifactKey("run", "measurement_data", "data"),
+                        source,
+                        spec=spec,
+                        comment="diagnostic projection",
+                    ),
+                ),
+            ),
+        ),
+        layout=layout,
+        record=replace(source, metadata=metadata.model_dump(mode="json")),
+        ledger=ledger,
+        origin="notebook",
+    )
+    (native,) = (item for item in report.outputs if item.output.format == "data_h5")
+    (labber,) = (item for item in report.outputs if item.output.format == "labber")
+    assert native.status == "saved", native.error
+    assert labber.status == "saved", labber.error
+    stored = load(native.output.path)
+    assert set(stored.vars) == {"data", "diagnostics"}
+    np.testing.assert_array_equal(stored.vars["diagnostics"].values, [[2, 10], [3, 16]])
+    exported = load_labber_data(str(labber.output.path))
+    assert exported.data.name == "data"
+    np.testing.assert_array_equal(exported.z, [1 + 2j, 3 - 4j])
+    np.testing.assert_allclose(exported.axes[0].values, [1e-6, 2e-6])
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])

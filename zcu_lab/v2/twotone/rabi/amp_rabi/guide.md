@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Sweep drive-pulse gain at a measured carrier and fixed duration, then fit the oscillation to find pi and pi/2 gains. Use with the selected hardware or simulator environment.
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-11-22
 
 After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
@@ -46,6 +46,10 @@ Copies the source drive pulse into captured qubit.pulses.pi_amp and pi2_amp, rep
 ## Recommended
 
 Analysis takes a 'Skip points' count (default 0) to drop leading low-gain sweep points before the cosine fit; raise it only if the first few points are distorted. A gain sweep spanning roughly two pi amplitudes captures at least a full oscillation; widen it if no full period is visible.
+
+## Point error bars
+
+The live plot and Analyze draw one standard error of the mean (SEM) above and below each point with at least two retained shots. Run saves the mean IQ and the shot sums from the same completed rounds, after removing the ADC offset. Each error bar divides the sample standard deviation along the displayed IQ axis by the square root of the retained shot count. It shows the expected uncertainty of the point's mean, not the spread of single shots or round averages. It does not include uncertainty in the axis or the fit and does not weight the fit. Missing shot statistics leave a point without a bar. Files with mean IQ only, including calibration workflow files, still load and fit without point error bars.
 
 ## Four starting situations
 

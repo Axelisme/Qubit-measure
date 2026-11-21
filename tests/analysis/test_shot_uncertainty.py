@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from zcu_tools.analysis import shot_uncertainty
 
 
@@ -20,6 +21,32 @@ def test_iq_sem_projects_cross_moment_and_uses_retained_count() -> None:
     np.testing.assert_allclose(sem, [2.5, 1.4433756729740645, np.nan, np.nan, np.nan])
 
 
+@pytest.mark.parametrize("count", [-1.0, 1.5, np.inf, -np.inf])
+def test_iq_sem_rejects_invalid_counts_even_with_missing_sums(count: float) -> None:
+    with pytest.raises(ValueError, match="count"):
+        shot_uncertainty.iq_shot_sem(
+            np.array([count, np.nan, 0, 0, 0, 0]), direction=(1, 0)
+        )
+
+
+def test_iq_sem_leaves_missing_points_undefined_but_rejects_infinite_moments() -> None:
+    missing = np.array([3, 2, 0, 2, np.nan, 0])
+    assert np.isnan(shot_uncertainty.iq_shot_sem(missing, direction=(1, 0)))
+    with pytest.raises(ValueError, match="infinite"):
+        shot_uncertainty.iq_shot_sem(
+            np.array([1, 2, 0, 4, np.nan, np.inf]), direction=(1, 0)
+        )
+
+
+def test_iq_sem_clips_only_rounding_scale_negative_centered_sums() -> None:
+    rounded = np.array([2, 2, 0, np.nextafter(2.0, 0.0), 0, 0])
+    assert shot_uncertainty.iq_shot_sem(rounded, direction=(1, 0)) == 0
+    with pytest.raises(ValueError, match="negative centered"):
+        shot_uncertainty.iq_shot_sem(
+            np.array([2, 0, 0, 2, 4, 2]), direction=(0.5, -0.5)
+        )
+
+
 def test_class_counts_give_binomial_sem_and_multinomial_cross_covariance() -> None:
     binary = shot_uncertainty.class_probability_covariance(
         np.array([1, 3], dtype=np.int64)
@@ -39,3 +66,27 @@ def test_class_counts_give_binomial_sem_and_multinomial_cross_covariance() -> No
     np.testing.assert_allclose(covariance[0], expected)
     np.testing.assert_allclose(covariance[1], expected / 2)
     assert np.isnan(covariance[2]).all()
+
+
+def test_class_covariance_requires_at_least_two_retained_shots() -> None:
+    covariance = shot_uncertainty.class_probability_covariance(
+        np.array([[1, 0], [2, 0]], dtype=np.int64)
+    )
+    assert np.isnan(covariance[0]).all()
+    np.testing.assert_array_equal(covariance[1], np.zeros((2, 2)))
+
+
+def test_class_covariance_rejects_nonfinite_total_of_finite_counts() -> None:
+    limit = np.finfo(np.float64).max
+    with pytest.raises(ValueError, match="total shot count"):
+        shot_uncertainty.class_probability_covariance(np.array([limit, limit]))
+
+
+@pytest.mark.parametrize("count", [-1.0, 1.5, np.inf, -np.inf])
+def test_class_covariance_rejects_invalid_counts_even_with_missing_classes(
+    count: float,
+) -> None:
+    missing = shot_uncertainty.class_probability_covariance(np.array([np.nan, 3]))
+    assert np.isnan(missing).all()
+    with pytest.raises(ValueError, match="count"):
+        shot_uncertainty.class_probability_covariance(np.array([count, np.nan]))

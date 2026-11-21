@@ -1,7 +1,7 @@
 """Compile read labels into joint shot-vector outer-product sums."""
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Literal
 
@@ -33,13 +33,17 @@ class IQ:
     read names one logical compiled readout, present once on each Branch path.
     tone is None for PulseReadout or a zero-based MuxReadout cfg tone position.
     None also selects a mux's only tone; multi-tone mux requires an explicit
-    position and lists available tones on error. Values use normalized ADC
-    coordinates without IQ-offset subtraction.
+    position and lists available tones on error. By default values use normalized
+    ADC coordinates without IQ-offset subtraction. offset_corrected=True
+    subtracts the native QICK offset from I and Q before forming moments.
+    shot_sums accepts that opt-in only for one quadratic axis on a single ADC
+    with one integrated read per shot and no registered shot masks.
     """
 
     read: str
     tone: int | None = None
     order: Literal[2, 3] = 2
+    offset_corrected: bool = field(default=False, kw_only=True)
 
     def __post_init__(self) -> None:
         if self.order not in (2, 3):
@@ -89,11 +93,15 @@ def shot_sums(
     calibration, missing circle radius and invalid tone selection raise ValueError.
     The reducer borrows ADC-keyed float64 (points, reps, logical_reads, 2)
     arrays and accumulates (points, *axes) outer-product sums of kept shots.
-    IQ NaNs in kept shots propagate. The reducer rejects read-count changes
-    and does not modify its input or the program's compiled read counts.
+    IQ NaNs in kept shots propagate. Corrected IQ uses the selected compiled
+    logical read's native offset (including the static PFB policy). Unsupported
+    ADC/read counts, edge counting, masks or additional axes raise ValueError.
+    The reducer rejects read-count changes and does not modify its input or
+    the program's compiled read counts.
     """
     if not axes:
         raise ValueError("axes must contain at least one read")
+    offset_corrected = _validate_iq_correction(prog, axes)
     paths = iter(observe_readout_paths(prog))
     reference = next(paths)
     labels, resolved = _resolve_path(prog, axes, reference)
@@ -109,6 +117,8 @@ def shot_sums(
     }
 
     def round_sums(iq: ShotIQ, mask: NDArray[np.bool_]) -> NDArray[np.float64]:
+        if offset_corrected and (prog.has_shot_mask_sources or not mask.all()):
+            raise ValueError("offset_corrected IQ does not support shot masks")
         for ch, count in counts.items():
             actual = iq[ch].shape
             if len(actual) != 4 or actual[2] != count or actual[-1] != 2:
@@ -128,12 +138,35 @@ def shot_sums(
             )
         if product is None:
             raise ValueError("axes must contain at least one read")
-        if mask.all():
+        if offset_corrected or mask.all():
             return product.sum(axis=1, dtype=np.float64)
         kept = mask.reshape(*mask.shape, *((1,) * (product.ndim - 2)))
         return product.sum(axis=1, dtype=np.float64, where=kept)
 
     return AdditiveShotReducer(round_sums, tuple(axis.size for axis in resolved))
+
+
+def _validate_iq_correction(
+    prog: TimelineProgramV2, axes: Sequence[Classify | IQ]
+) -> bool:
+    selected = next(
+        (axis for axis in axes if isinstance(axis, IQ) and axis.offset_corrected),
+        None,
+    )
+    if selected is None:
+        return False
+    if len(axes) != 1 or selected.order != 2:
+        raise ValueError("offset_corrected IQ requires one quadratic IQ axis")
+    if prog.has_shot_mask_sources:
+        raise ValueError("offset_corrected IQ does not support shot masks")
+    if len(prog.ro_chs) != 1:
+        raise ValueError("offset_corrected IQ requires a single ADC")
+    readout = next(iter(prog.ro_chs.values()))
+    if readout["edge_counting"] or readout["trigs"] != 1:
+        raise ValueError(
+            "offset_corrected IQ requires one integrated read per shot, not edge counting"
+        )
+    return True
 
 
 type _LabelReads = dict[str, list[tuple[PulseReadout | MuxReadout, dict[int, int]]]]
@@ -158,6 +191,13 @@ def _iq_features(
     return np.stack(components, axis=-1)
 
 
+def _corrected_iq_features(
+    values: NDArray[np.float64], *, prog: TimelineProgramV2, channel: int
+) -> NDArray[np.float64]:
+    # QICK sets the static PFB frequency registers during acquire config, not build.
+    return _iq_features(values - prog.native_readout_iq_offset(channel), order=2)
+
+
 def _path_description(path: ReadoutPath) -> str:
     return "Branch cases " + ", ".join(f"{name}[{index}]" for name, index in path.cases)
 
@@ -177,7 +217,7 @@ def _resolve_path(
                     f"label {axis.read!r}: expected one emission, actual {len(matches)}; "
                     f"available labels: {list(labels)}"
                 )
-            result = _resolve_axis(axis, matches[0], unsupported)
+            result = _resolve_axis(prog, axis, matches[0], unsupported)
             ch = result.channel
             compiled = prog.ro_chs[ch]["trigs"]
             if observed[ch] != compiled:
@@ -274,6 +314,7 @@ def _collect_reads(
 
 
 def _resolve_axis(
+    prog: TimelineProgramV2,
     axis: Classify | IQ,
     read: tuple[PulseReadout | MuxReadout, dict[int, int]],
     unsupported: dict[int, str],
@@ -306,10 +347,15 @@ def _resolve_axis(
             f"ADC {ch}: trigger inside {unsupported[ch]} is unsupported for read labels"
         )
     if isinstance(axis, IQ):
+        features = (
+            partial(_corrected_iq_features, prog=prog, channel=ch)
+            if axis.offset_corrected
+            else partial(_iq_features, order=axis.order)
+        )
         return _ResolvedAxis(
             ch,
             indices[ch],
-            partial(_iq_features, order=axis.order),
+            features,
             _QUADRATIC_IQ_WIDTH if axis.order == 2 else _CUBIC_IQ_WIDTH,
         )
     classifier = axis.classifier if axis.classifier is not None else classifier

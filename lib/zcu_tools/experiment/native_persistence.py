@@ -2,7 +2,7 @@
 
 import warnings
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Generic, Literal, TypeVar
 
@@ -22,6 +22,7 @@ from zcu_tools.datafile import (
     save,
     write_labber,
 )
+from zcu_tools.datafile.container_nodes import validate_variable
 
 from .axes_spec import (
     AxesSpec,
@@ -73,6 +74,7 @@ class PreparedRunData:
     container holds SI arrays with NumPy-ordered axes. cfg retains complete JSON
     values and declaration identity. labber_metadata carries raw comment and tags,
     not a cfg envelope. labber_layout is common or independent, from the spec.
+    labber_variables selects declared names; None exports all present variables.
     experiment_tag is the persistence declaration identity, independent of
     mutable Labber export tags. Construction copies mappings and cfg/metadata
     but shares large arrays.
@@ -84,6 +86,7 @@ class PreparedRunData:
     labber_metadata: LabberMetadata
     experiment_tag: str
     labber_layout: Literal["common", "independent"] = "common"
+    labber_variables: tuple[str, ...] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -98,6 +101,24 @@ class PreparedRunData:
         )
         object.__setattr__(self, "cfg", deepcopy(self.cfg))
         object.__setattr__(self, "labber_metadata", deepcopy(self.labber_metadata))
+
+    def to_labber_container(self) -> Container:
+        """Project prepared SI variables in order using the declaration's selection.
+
+        None selects all variables. Absent optional variables stay absent. This
+        does not mutate the native container, perform I/O or check Labber grid
+        and layout constraints; the Labber writer handles those.
+        """
+        if self.labber_variables is None:
+            return self.container
+        return replace(
+            self.container,
+            vars={
+                name: variable
+                for name, variable in self.container.vars.items()
+                if name in self.labber_variables
+            },
+        )
 
     def validate_metadata(self, metadata: JsonObject) -> RunMetadata:
         """Validate native history and its declaration tag without performing I/O.
@@ -153,13 +174,20 @@ def prepare_run_data(
     comment = TypeAdapter(str).validate_python(comment, strict=True)
     if isinstance(spec, GroupedAxesSpec) and spec.result_validator is not None:
         spec.result_validator(source.result)
+    variables = {
+        str(variable.data_variable): variable.variable_from_result(
+            source.result, context=f"{spec.tag}: /vars/{variable.data_variable}"
+        )
+        for variable in _variable_specs(spec)
+        if not variable.is_omitted(source.result)
+    }
+    for name, variable in variables.items():
+        try:
+            validate_variable(variable)
+        except ValueError as error:
+            raise ValueError(f"{spec.tag}: /vars/{name}: {error}") from error
     container = Container(
-        vars={
-            str(variable.data_variable): variable.variable_from_result(
-                source.result, context=f"{spec.tag}: /vars/{variable.data_variable}"
-            )
-            for variable in _variable_specs(spec)
-        },
+        vars=variables,
         docs={},
         groups={},
         attrs=ContainerAttrs("3.0", "zcu_tools.experiment", "experiment-run", {}),
@@ -175,6 +203,9 @@ def prepare_run_data(
         LabberMetadata(comment=comment, tags=spec.tag),
         spec.tag,
         spec.labber_layout if isinstance(spec, GroupedAxesSpec) else "common",
+        labber_variables=spec.labber_variables
+        if isinstance(spec, GroupedAxesSpec)
+        else None,
     )
 
 
@@ -189,15 +220,15 @@ def save_labber(
     """Export a record to the caller's Labber-normalized local path.
 
     cfg must be present. comment is appended to the cfg JSON envelope; tag
-    overrides spec.tag. Grouped exports follow spec.labber_layout, requiring a
-    common grid unless independent layout is declared. Invalid arrays or cfg
-    raise ValueError/TypeError; existing paths raise FileExistsError and I/O
+    overrides spec.tag. Grouped exports follow spec.labber_variables and
+    spec.labber_layout, requiring a common grid unless independent is declared.
+    Invalid arrays or cfg raise ValueError/TypeError; existing paths raise FileExistsError and I/O
     errors propagate. No native file, path reservation or live capture occurs.
     """
     prepared = prepare_run_data(source, spec=spec, comment=comment or "")
     write_labber(
         Path(format_ext(str(destination))),
-        prepared.container,
+        prepared.to_labber_container(),
         metadata=replace(
             prepared.labber_metadata,
             comment=encode_labber_comment(prepared.cfg.values, comment),
@@ -355,7 +386,8 @@ def restore_run(
     readers validate requested fields through RunMetadataContent or the complete
     document through RunMetadata.model_validate. Reconstruct and validate Result
     before concrete cfg validation;
-    grouped builders receive only loaded arrays. Extra variables/unknown cfg keys
+    grouped builders receive only loaded arrays, without absent optional variables.
+    Extra variables/unknown cfg keys
     remain in the Container, not the typed record. Malformed docs or data raise
     ValueError/TypeError. An incompatible cfg type/schema/model yields cfg=None,
     cfg_issue and one CfgUnavailableWarning, retaining data and record.metadata.
@@ -368,7 +400,7 @@ def restore_run(
         )
     variables = _variable_specs(spec)
     missing = {
-        str(variable.data_variable) for variable in variables
+        str(variable.data_variable) for variable in variables if variable.required
     } - stored.vars.keys()
     if missing:
         raise ValueError(f"/vars: missing variables {sorted(missing)}")
@@ -378,6 +410,7 @@ def restore_run(
             context=f"/vars/{variable.data_variable}",
         )
         for variable in variables
+        if str(variable.data_variable) in stored.vars
     }
     try:
         cfg_snapshot = _CFG.validate_python(stored.docs["cfg"])

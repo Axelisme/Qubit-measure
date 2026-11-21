@@ -51,12 +51,23 @@ def _comparison_difference(
 
 def _compare_field(
     name: str,
-    before: np.ndarray,
-    after: np.ndarray,
+    before_value: object,
+    after_value: object,
     comparisons: list[tuple[float, int | None, int]],
 ) -> bool:
-    """Check each declared region and the exact, undeclared remainder."""
+    """Check presence, each declared region and the exact, undeclared remainder."""
     logger = logging.getLogger("zcu_tools.experiment.probe")
+    if before_value is None and after_value is None:
+        return True
+    if (before_value is None or after_value is None) and (
+        isinstance(before_value, np.ndarray) or isinstance(after_value, np.ndarray)
+    ):
+        logger.warning(
+            "Roundtrip field=%s index_axis=None index=None: None and array differ",
+            name,
+        )
+        return False
+    before, after = np.asarray(before_value), np.asarray(after_value)
     if before.shape != after.shape:
         logger.warning(
             "Roundtrip field=%s index_axis=None index=None: shape %s != %s",
@@ -110,9 +121,10 @@ def compare_roundtrip(
     Both inputs must be dataclass instances of spec.result_type with the same
     fields; otherwise raise TypeError. Compare every field, including fields
     not named by the persistence declaration.
-    Return False for any differing field shape or dtype. Each field value is
-    compared as np.asarray(value), so a scalar float field restored as None
-    differs in dtype (float64 vs object). AxesSpec and
+    Return False for any differing field shape or dtype. None equals None but
+    never an array. Otherwise field values compare as np.asarray(value), so a
+    scalar float field restored as None differs in dtype (float64 vs object).
+    AxesSpec and
     GroupedAxesSpec fields with a finite, nonzero scale other than 1 allow
     relative error <= 2*eps, atol=0, for
     floating values (each real/imaginary component for complex arrays). eps is
@@ -174,8 +186,8 @@ def compare_roundtrip(
         ]
         field_equal = _compare_field(
             item.name,
-            np.asarray(getattr(original, item.name)),
-            np.asarray(getattr(restored, item.name)),
+            getattr(original, item.name),
+            getattr(restored, item.name),
             comparisons,
         )
         equal &= field_equal

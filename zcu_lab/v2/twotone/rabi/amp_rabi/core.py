@@ -12,8 +12,18 @@ from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import FitQuality, fit_rabi
+from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, config
+from zcu_tools.datafile import DataVariable
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+    config,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions
@@ -21,18 +31,33 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.program.v2 import (
+    IQ,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+    split_sums,
+)
+from zcu_tools.utils.process import find_rotate_angle
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 
 @dataclass(frozen=True)
 class AmpRabiResult:
-    """Drive gains (amps) and mean complex readout IQ, both shaped (Ngain,)."""
+    """One-dimensional drive gains and offset-corrected mean complex IQ.
+
+    iq_moments, when available, has shape (Ngain, 6) with columns
+    [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] of retained shots in the same offset-corrected
+    frame. None denotes a mean-only result.
+    """
 
     amps: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    iq_moments: NDArray[np.float64] | None = None
 
 
 @validated_dataclass(frozen=True)
@@ -49,9 +74,36 @@ class AmpRabiAnalysis:
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
+def _rabi_rotation(signals: NDArray[np.complex128]) -> complex | None:
+    try:
+        angle = find_rotate_angle(signals)
+    except ValueError:
+        return None
+    return complex(np.exp(-1j * angle))
+
+
+def _project_real(
+    signals: NDArray[np.complex128], rotation: complex | None
+) -> NDArray[np.float64]:
+    return signals.real if rotation is None else (signals * rotation).real
+
+
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
-    return rotate2real(signals).real
+    """Project mean complex IQ onto its principal axis, or take I if undefined."""
+    return _project_real(signals, _rabi_rotation(signals))
+
+
+def _mean_iq(moments: NDArray[np.float64]) -> NDArray[np.complex128]:
+    # Counts remain in the moments for the SEM; decode only the mean here.
+    return split_sums(moments)[1]
+
+
+def _contrast_with_sem(
+    signals: NDArray[np.complex128], moments: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    rotation = _rabi_rotation(signals)
+    direction = (1.0, 0.0) if rotation is None else (rotation.real, -rotation.imag)
+    return _project_real(signals, rotation), iq_shot_sem(moments, direction=direction)
 
 
 class AmpRabiCfg(ConfigBase):
@@ -98,16 +150,54 @@ class AmpRabiCfg(ConfigBase):
     ]
 
 
+_GAIN_AXIS = VariableAxisSpec(field_name="amps", label="Gain", unit="")
+_MOMENT_COLUMNS = (0, 1, 2, 3, 4, 5)
+
+
+def _build_result(data: GroupedLoadData[AmpRabiCfg]) -> AmpRabiResult:
+    signal = data.variable("data")
+    gains = signal.axes[0]
+    moments = data.variables.get(DataVariable("iq_moments"))
+    if moments is None:
+        return AmpRabiResult(gains, signal.z)
+    columns, moment_gains = moments.axes
+    if not np.array_equal(gains, moment_gains):
+        raise ValueError("/vars/iq_moments: Gain axis must equal /vars/data Gain axis")
+    if not np.array_equal(columns, _MOMENT_COLUMNS):
+        raise ValueError(
+            "/vars/iq_moments: Moment axis must contain columns 0 through 5"
+        )
+    return AmpRabiResult(gains, signal.z, moments.z)
+
+
 class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
 
-    AXES_SPEC: ClassVar[AxesSpec[AmpRabiResult, AmpRabiCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("amps", label="Gain", unit=""),),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
+    AXES_SPEC: ClassVar[GroupedAxesSpec[AmpRabiResult, AmpRabiCfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "data",
+                (_GAIN_AXIS,),
+                VariableZSpec(
+                    "signals", label="Signal", unit="a.u.", dtype=np.complex128
+                ),
+            ),
+            VariableSpec(
+                "iq_moments",
+                (
+                    VariableAxisSpec(label="Moment", unit="", values=_MOMENT_COLUMNS),
+                    _GAIN_AXIS,
+                ),
+                VariableZSpec("iq_moments", label="IQ moments", unit=""),
+                required=False,
+            ),
+        ),
         result_type=AmpRabiResult,
         cfg_type=AmpRabiCfg,
         cfg_schema_version="3.0",
         tag="twotone/ge/rabi_gain",
+        result_builder=_build_result,
+        labber_variables=("data",),
     )
 
     def run(
@@ -119,9 +209,11 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         """Measure Rabi oscillations versus qubit drive gain at fixed duration.
 
         Reset, apply the optional init pulse, play the gain-swept qubit
-        pulse, then read out. Return gains and mean complex IQ; subsequent
-        analysis uses the oscillation period to infer pi and pi/2 gains.
-        earlystop_snr stops averaging at completed-round boundaries. None disables SNR early stop.
+        pulse, then read out. Return gains, offset-corrected mean complex IQ
+        and the moments of the same shots. Requires one integrated ADC read
+        per shot without masking. Show the real contrast and its shot SEM.
+        earlystop_snr checks the mean curve at completed-round boundaries.
+        None disables SNR early stop.
         """
         # 1. Quantize drive gains for rotation-amplitude calibration.
         cfg = deepcopy(cfg)
@@ -138,25 +230,21 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         ax.set(xlabel="Pulse gain (a.u.)", ylabel="Amplitude (a.u.)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
-        viewer = live_line(ax)
+        viewer = live_errorbar(ax)
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            """Refresh the amplitude Rabi contrast curve.
-
-            data is complex IQ in drive-gain order; NaN marks unmeasured points.
-            Return the changed artists without modifying the input array.
-            """
-            return viewer.set(gains, rabi_signal2real(data))
+        def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh contrast and shot SEM from the cumulative (gain, 6) sums."""
+            contrast, sem = _contrast_with_sem(_mean_iq(moments), moments)
+            return viewer.set(gains, contrast, sem)
 
         fig.show()
-        signals_buffer = SignalBuffer(
-            (len(gains),),
-            on_update=update,
+        moments_buffer = SignalBuffer(
+            (len(gains), 6), dtype=np.float64, on_update=update
         )
 
         # 3. Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
-        with Schedule(signals_buffer, scope=context.scope) as sched:
+        with Schedule(moments_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -169,18 +257,23 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse, gain=gain_param))
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(
+            reducer = shot_sums(prog, (IQ("readout", offset_corrected=True),))
+            sched.run_acquire_summed(
                 prog,
                 soc,
+                reducer=reducer,
                 rounds=cfg.rounds,
                 options=RunOptions(
                     stop_condition=snr_checker(
-                        signals_buffer.at(), cfg.earlystop_snr, rabi_signal2real
+                        moments_buffer.at(),
+                        cfg.earlystop_snr,
+                        lambda moments: rabi_signal2real(_mean_iq(moments)),
                     ),
                 ),
             )
 
-        return AmpRabiResult(amps=gains, signals=signals_buffer.array)
+        moments = moments_buffer.array
+        return AmpRabiResult(amps=gains, signals=_mean_iq(moments), iq_moments=moments)
 
     def analyze(
         self,
@@ -193,8 +286,10 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
         Skip the first ``options.skip`` points and project IQ onto a real
         contrast axis. The point nearest zero gain fixes the phase to 0 or
-        180 degrees. Publish ``fit`` and report fit quality; these are pulse
-        amplitude calibrations, not gate fidelities. Source cfg may be None.
+        180 degrees. If shot moments are present, plot the SEM along the same
+        axis; invalid statistics raise ValueError. The cosine fit is unchanged.
+        Publish ``fit`` and report fit quality; these are pulse amplitude
+        calibrations, not gate fidelities. Source cfg may be None.
         """
         # 1. Calibrate pi and pi/2 gains from unskipped contrast using the near-zero-gain phase.
         result = source.result
@@ -203,7 +298,12 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         gains = gains[options.skip :]
         signals = signals[options.skip :]
 
-        real_signals = rabi_signal2real(signals)
+        if result.iq_moments is None:
+            real_signals, sem = rabi_signal2real(signals), None
+        else:
+            real_signals, sem = _contrast_with_sem(
+                signals, result.iq_moments[options.skip :]
+            )
 
         zero_signal = real_signals[np.argmin(np.abs(gains))]
         if zero_signal > 0.5 * (np.max(real_signals) + np.min(real_signals)):
@@ -223,7 +323,12 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         # 2. Assess the oscillation fit and uncertainty of the calibrated rotation gains.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        if sem is None:
+            ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        else:
+            ax.errorbar(
+                gains, real_signals, yerr=sem, label="meas", fmt="o-", markersize=3
+            )
         ax.plot(gains, y_fit, label="fit")
         ax.axvline(
             pi_amp, ls="--", c="red", label=f"pi = {pi_amp:.3g} ± {pi_amp_err:.2g}"

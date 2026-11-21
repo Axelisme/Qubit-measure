@@ -168,6 +168,13 @@ tone position and lists available positions on error. Pulse axes require
 g/e/other; linear emits g/e; centroid3 emits g/e/f. Classification boundaries match
 `v2.modules.readout.classification_processor`.
 
+`v2.IQ(read, offset_corrected=True)` subtracts the same QICK DC offset from I
+and Q after normalization, before forming the six quadratic components.
+Use it as the only axis for one Pulse or single-tone Mux read, with one ADC
+and one integrated read per shot. Static PFB correction uses the registers
+that QICK sets for the active acquire. Edge counting, extra axes, cubic
+moments and shot masks are rejected. Other axes and native `acquire` are unchanged.
+
 Timeline read labels use emit tags, falling back to module names for untagged
 emissions. Missing or ambiguous labels
 raise ValueError listing available labels. Explicit tags retain QICK's global
