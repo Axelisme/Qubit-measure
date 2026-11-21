@@ -78,7 +78,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 ## Analysis / Simulation / Waveform
 
 原則：family 的完整序列最終精度合格就只比耗時，刪除前先補同型態長序列證據，見 [ADR-0078](0078-evolution-module-boundary.md#family-去留合格只比耗時)。
-原則：模擬器的測試與量測按層分開（kernel、dispatch、序列、前端、environment），不做 program → 編譯 → 演化 → I/Q 的 e2e，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
+原則：模擬器分層測試，不做 e2e 測試。只允許一支整實驗 Run 牆鐘工具，kernel／family 比較仍只量 `Engine.evolve`，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 原則：guard 在整個參數空間不放行超標；速度優化只做有耗時紀錄的瓶頸，修法時程未定時先走慢但對的候選，見 [ADR-0078](0078-evolution-module-boundary.md#先保證正確再優化瓶頸)。
 原則：評估算法時預算固定為使用者按場景宣告的需求，在固定預算下找算法適合的場景，不為算法放寬預算；長序列預算按 gate 數放寬，見 [ADR-0078](0078-evolution-module-boundary.md#固定預算找適合的場景)。
 原則：模擬算法與機制同時適用 Windows 與 Linux，不依賴單一作業系統的設定或行為，見 [ADR-0078](0078-evolution-module-boundary.md#跨平台不綁作業系統)。

@@ -1,0 +1,241 @@
+# Source project: ftf-cz-recalibration-20261120 (FTF simulation); copied 2026-11-21.
+# Point: ftf-demo/initial; source document revision (SHA-256): 987fd256619eb4b4cc2d8d7fcbe3246d2f99b882908936aafcff32052a7dc58a
+format: zcu.module-library
+format_version: '2.0'
+components:
+  R1:
+    readout:
+      readout_rf:
+        type: readout/pulse
+        desc:
+        classifier:
+          mode: circle
+          g_center:
+            __complex__:
+            - 19.65473552528706
+            - 9.093232998504856
+          e_center:
+            __complex__:
+            - 36.350473545537795
+            - -58.38402008864197
+          radius: 48.180684213760934
+          confusion_matrix:
+          - - 0.9965424762668922
+            - 0.0024765934456462534
+            - 0.0009809302874615761
+          - - 0.007392874292957135
+            - 0.9926071257070428
+            - 0.0
+          - - 0.0
+            - 0.0
+            - 1.0
+        waveform:
+          style: const
+          length: 2.100801351175282
+        gen_ch: 0
+        nqz: 2
+        freq: 7189.980642392195
+        gain: 0.15
+        phase: 0.0
+        mixer_freq:
+        pre_delay: 0.0
+        post_delay: 0.0
+        ro_ch: 0
+        ro_length: 0.99
+        trig_offset: 1.110801351175282
+  R2:
+    readout:
+      readout_rf:
+        type: readout/pulse
+        desc:
+        classifier:
+          mode: circle
+          g_center:
+            __complex__:
+            - -14.032135610141182
+            - 99.79381084637748
+          e_center:
+            __complex__:
+            - 95.17300401802751
+            - 2.202664856112193
+          radius: 90.51571162947309
+          confusion_matrix:
+          - - 1.0
+            - 0.0
+            - 0.0
+          - - 0.0
+            - 0.9999998517232714
+            - 1.482767285834475e-07
+          - - 0.0
+            - 0.0
+            - 1.0
+        waveform:
+          style: const
+          length: 2.100801351175282
+        gen_ch: 0
+        nqz: 2
+        freq: 7079.687937293966
+        gain: 0.15
+        phase: 0.0
+        mixer_freq:
+        pre_delay: 0.0
+        post_delay: 0.0
+        ro_ch: 0
+        ro_length: 0.99
+        trig_offset: 1.110801351175282
+  Q1:
+    pulses:
+      pi_amp:
+        type: pulse
+        desc:
+        waveform:
+          style: cosine
+          length: 0.48
+        ch: 2
+        nqz: 2
+        freq: 297.74211811095904
+        phase: 0.0
+        gain: 0.6169902190510289
+        pre_delay: 0.0
+        post_delay: 0.0
+        mixer_freq:
+      pi2_amp:
+        type: pulse
+        desc:
+        waveform:
+          style: cosine
+          length: 0.48
+        ch: 2
+        nqz: 2
+        freq: 297.74211811095904
+        phase: 0.0
+        gain: 0.30849510952551445
+        pre_delay: 0.0
+        post_delay: 0.0
+        mixer_freq:
+  Q2:
+    pulses:
+      pi_amp:
+        type: pulse
+        desc:
+        waveform:
+          style: cosine
+          length: 0.4
+        ch: 3
+        nqz: 2
+        freq: 221.7199297947328
+        phase: 0.0
+        gain: 0.8503746297602666
+        pre_delay: 0.0
+        post_delay: 0.0
+        mixer_freq:
+      pi2_amp:
+        type: pulse
+        desc:
+        waveform:
+          style: cosine
+          length: 0.4
+        ch: 3
+        nqz: 2
+        freq: 221.7199297947328
+        phase: 0.0
+        gain: 0.4251873148801333
+        pre_delay: 0.0
+        post_delay: 0.0
+        mixer_freq:
+  MG12:
+    readout:
+      readout_rf:
+        type: readout/mux
+        desc:
+        gen_ch: 7
+        nqz: 1
+        mixer_freq: 7135.0
+        tones:
+        - freq: 7189.961400071605
+          gain: 0.03
+          phase: 0.0
+          ro_ch: 2
+          label: R1
+          classifier:
+            mode: circle
+            g_center:
+              __complex__:
+              - 3.7874169588028668
+              - 1.8295748060210928
+            e_center:
+              __complex__:
+              - 8.185085574511334
+              - -12.37860810759247
+            radius: 14.87319572117195
+            confusion_matrix:
+            - - 0.9049394040357411
+              - 0.07822154516025565
+              - 0.016839050804003323
+            - - 0.08636458974384977
+              - 0.902021406158145
+              - 0.01161400409800529
+            - - 0.0
+              - 0.0
+              - 1.0
+        - freq: 7079.652710129052
+          gain: 0.03
+          phase: 0.0
+          ro_ch: 3
+          label: R2
+          classifier:
+            mode: circle
+            g_center:
+              __complex__:
+              - -4.891383196153877
+              - 18.512706034344696
+            e_center:
+              __complex__:
+              - 20.168987669363972
+              - 3.05391909186167
+            radius: 19.047624516419646
+            confusion_matrix:
+            - - 0.9983781460715783
+              - 0.00035030312625040607
+              - 0.00127155080217136
+            - - 0.0
+              - 0.9985366106035257
+              - 0.0014633893964742196
+            - - 0.0
+              - 0.0
+              - 1.0
+        length: 4.167795864838565
+        ro_length: 3.0
+        pre_delay: 0.0
+        post_delay: 2.0
+        trig_offset: 1.1677958648385653
+  coupler:
+    pulses:
+      cz_f2:
+        type: pulse
+        desc:
+        waveform:
+          style: const
+          length: 0.8
+        ch: 3
+        nqz: 2
+        freq: 5799.976979080261
+        phase: -0.21495102875174946
+        gain: 0.024144059109456696
+        pre_delay: 0.0
+        post_delay: 0.0
+        mixer_freq:
+      cz_f1:
+        type: pulse
+        desc:
+        waveform:
+          style: const
+          length: 0.8
+        ch: 2
+        nqz: 2
+        freq: 5799.976979080261
+        phase: 0.0
+        gain: 0.024144059109456696
+        pre_delay: 0.0
+        post_delay: 0.0
+        mixer_freq:

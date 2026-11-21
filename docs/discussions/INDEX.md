@@ -90,6 +90,11 @@
 
 - 2026-11-15 [單段雙 tone benchmark 的量測邊界](2026-11-15-single-segment-benchmark-boundary.md)：量測邊界。專用 Engine factory 與既有 acquire 分開，模型與參考解仍由各自 owner 建立。
 
+- 2026-11-21 [實驗 Run 牆鐘工具](2026-11-21-experiment-run-wall-time.md)：量測邊界。整個 Run 只用一支入庫工具記耗時，測試與 kernel 比較仍按層分開。
+- 2026-11-21 [牆鐘報表的 guide 與輸入](2026-11-21-wall-time-coverage.md)：宣告歸屬。Adapter 交付 guide 路徑；工具固定模擬輸入，只計 Run 到終態。
+- 2026-11-21 [牆鐘工具如何記錄 Run 失敗](2026-11-21-wall-time-run-failed.md)：失敗隔離。Controller 回報失敗時先寫列；idle 才續跑；exit status 區分未判定列與工具錯誤。
+- 2026-11-21 [牆鐘報表如何重建中斷列](2026-11-21-wall-time-interrupted-rows.md)：刪除或收窄。派送前 journal 不能證明 Run 耗時，重建不填秒數或下限。
+
 - 2026-11-15 [模擬器測試與量測的分層](2026-11-15-simulator-test-measurement-layering.md)：分層。Kernel、dispatch、序列、前端與 environment 分開驗，退休 acquire e2e 量測，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 
 - 2026-11-15 [t6 只保留 direct](2026-11-15-t6-channel-removal.md)：刪除或收窄。移除代表性工作負載未選用的 channel 做法與價格分支，保留 direct 與既有 family。

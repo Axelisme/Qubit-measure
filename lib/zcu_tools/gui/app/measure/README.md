@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-20，arb 資產寫回
+**Last updated:** 2026-11-21，guide 路徑宣告
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -51,8 +51,10 @@ Registry stores values and performs its one heterogeneous generic erasure at
 registration. Capabilities derive from the primary value and post declaration.
 Every value requires SoC for Run and permits a Load attempt; restore compatibility
 is decided by the declared spec. `restore`, `data_item` and `analysis_item`
-provide framework projections without I/O. Guide reads its declared Markdown
-only when called. Record proposals contain adapter-owned JSON, with no coordinate declaration.
+provide framework projections without I/O. `Adapter.guide_path` returns the
+original guide path or None without reading or checking the file.
+`Adapter.guide()` reads the declared Markdown for presentation. Record proposals
+contain adapter-owned JSON, with no coordinate declaration.
 
 Each adapter declares `run(inp, *, context) -> RunRecord`, converts its input
 to the actual experiment cfg and invokes the experiment. Even without a

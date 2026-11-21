@@ -1,0 +1,62 @@
+[
+  {
+    "adapter": "twotone/t2ramsey",
+    "path": ["delay", "stop"],
+    "value": 180.0,
+    "basis": "Three times the Q1 60.1 ± 20.9 us short-window diagnostic at the joint bias (cz-measure, 2026-11-20, run 20261120T115030Z-3da45b); not accepted as a calibration."
+  },
+  {
+    "adapter": "twotone/t2ramsey",
+    "path": ["delay", "n"],
+    "value": 361,
+    "basis": "0–180 us inclusive gives 0.5 us steps. The programmed 0.05 MHz fringe rate gives 40 steps per period, leaving margin for residual detuning (the Q1 independent-model comparison differed by about 0.068 MHz)."
+  },
+  {
+    "adapter": "twotone/t2ramsey",
+    "path": ["detune_ratio"],
+    "value": 0.025,
+    "basis": "0.025 fringes/step / 0.5 us = 0.05 MHz; 40 steps per programmed period, above the 10-point target."
+  },
+  {
+    "adapter": "mux/t2ramsey",
+    "path": ["delay", "stop"],
+    "value": 180.0,
+    "basis": "One window for two tones, using three times the longer usable diagnostic from single-qubit center runs: Q1 60.1 ± 20.9 us (20261120T115030Z-3da45b) and earlier Q2 49.0 ± 21.1 us (20261120T114349Z-8ea27d); later Q2 joint-bias short-window fit was not identifiable. Not a fitted mux T2."
+  },
+  {
+    "adapter": "mux/t2ramsey",
+    "path": ["delay", "n"],
+    "value": 361,
+    "basis": "0–180 us inclusive gives 0.5 us steps, or 40 steps per programmed 0.05 MHz period. The mux Ramsey guide's historical 16-point sweep was too sparse for precise detuning."
+  },
+  {
+    "adapter": "mux/t2ramsey",
+    "path": ["tones", 0, "detune"],
+    "value": 0.05,
+    "basis": "First fixture tone (Q1): deliberately set a 20 us period, sampled at 40 steps/period before residual detuning."
+  },
+  {
+    "adapter": "mux/t2ramsey",
+    "path": ["tones", 1, "detune"],
+    "value": 0.05,
+    "basis": "Second fixture tone (Q2): use the same 20 us programmed period and 40 steps/period before residual detuning."
+  },
+  {
+    "adapter": "twotone/t2echo",
+    "path": ["delay", "stop"],
+    "value": 465.0,
+    "basis": "Three times the Q1 155 ± 129 us decay-only diagnostic (cz-measure, 2026-11-20, run 20261120T120426Z-d61050). This was a short-window fit, not accepted calibration."
+  },
+  {
+    "adapter": "twotone/t2echo",
+    "path": ["detune_ratio"],
+    "value": 0.0,
+    "basis": "Use the decay-only setting of run 20261120T120426Z-d61050; no programmed fringe to sample."
+  },
+  {
+    "adapter": "mux/t2echo",
+    "path": ["delay", "stop"],
+    "value": 465.0,
+    "basis": "Three times the longer single-qubit decay-only diagnostic in the two-tone fixture: Q1 155 ± 129 us (20261120T120426Z-d61050), Q2 80 ± 36 us (20261120T120456Z-45adf2). Keep the mux Echo guide's decay-only default; not a measured mux T2."
+  }
+]

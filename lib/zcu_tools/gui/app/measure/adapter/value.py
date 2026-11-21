@@ -298,6 +298,15 @@ class Adapter(
         """Return spec.tag as the persistence identity, without constructing core."""
         return self.spec.tag
 
+    # ADR-0067: catalog consumers read the declaration without presenting the guide.
+    @property
+    def guide_path(self) -> Path | None:
+        """Return the declared guide path, or None if no guide was declared.
+
+        This reads no files and does not check whether the path exists.
+        """
+        return self._guide
+
     def guide(self) -> AdapterGuide:
         """Read the declared UTF-8 Markdown and return text/resource directory.
 
