@@ -198,6 +198,24 @@ class CavityDrive:
             np.einsum("ijrr,r->ij", differences, self._model.kappa_internal_per_ns).real
             / 2
         )
+        rows, cols = np.nonzero(dephasing < 0)
+        if rows.size:
+            # ADC moments are PSD up to roundoff. For nearly equal fields the
+            # four-moment subtraction can leave a small negative residual.
+            magnitude = (
+                np.abs(same[rows])
+                + np.abs(same[cols])
+                + np.abs(products[rows, :, cols, :])
+                + np.abs(products[cols, :, rows, :])
+            )
+            weights = (np.outer(v, v) + np.diag(self._model.kappa_internal_per_ns)) / 2
+            roundoff = (
+                8
+                * np.finfo(np.float64).eps
+                * np.einsum("irq,rq->i", magnitude, weights)
+            )
+            small = np.isfinite(roundoff) & (dephasing[rows, cols] >= -roundoff)
+            dephasing[rows[small], cols[small]] = 0.0
         return CavityResponse(
             self._chi.copy(),
             average.photons,
