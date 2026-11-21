@@ -262,7 +262,7 @@ def test_point_local_batches_continue_histories_and_keep_seeded_draws(
                 )
             )
             if point == 1 and span == (2, 4):
-                memory[1] = memory[0]
+                memory.fill(0)
             _check_history_inputs(
                 rows, np.array(ground, dtype=float), memory, cavities[point], span
             )
@@ -330,7 +330,7 @@ def test_point_local_batches_continue_histories_and_keep_seeded_draws(
                 inversion.point for inversion in diagnostic.stark_order_inversions
             } == histories.keys()
 
-    # Each herald begins with two distinct density rows and the same inherited
+    # Each herald begins with two distinct density rows and the same vacuum
     # field. Only the cavity solve is shared; the rows and their weights are not.
     assert {(0, 2), (2, 4)} <= exact_cavity_span_hits
 

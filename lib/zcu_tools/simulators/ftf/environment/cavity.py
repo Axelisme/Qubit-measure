@@ -270,7 +270,9 @@ def _project_outcomes(
             density[0, state, state] = 1
             expanded.append(
                 _Outcome(
-                    replace(timeline, density=density, fields=timeline.fields.copy()),
+                    replace(
+                        timeline, density=density, fields=np.zeros_like(timeline.fields)
+                    ),
                     weight,
                     (*outcome.history, state),
                 )

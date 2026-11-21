@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, readout pulse history, approximation measurements, shared ADC span memo and timing telemetry
+**Last updated:** 2026-11-21, vacuum start for projective continuation
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -580,10 +580,10 @@ This check belongs to environment preparation, not the program frontend.
 
 At each projective start, runtime replaces the DC density with rank-1 energy
 outcomes and weights them by its normalized diagonal. It retains the complete
-outcome history across later reads. Each outcome has its own density and cavity
-field. The projective pulse drives that outcome's cavity during continuation.
-A later projection copies the incoming cavity field before continuing each new
-outcome. Projection uses all retained energy levels, not IQ-resolvability clusters.
+outcome history across later reads. Each projection discards the incoming
+cavity field and starts every new outcome from vacuum, as ADC does at event
+start. The projective pulse drives that outcome's cavity during continuation.
+Projection uses all retained energy levels, not IQ-resolvability clusters.
 ADC CTMC transitions during a herald affect its IQ only. They do not change the
 outcome's later quantum evolution. This approximation excludes active reset and
 measurement-induced state transitions.
@@ -604,12 +604,12 @@ dephasing, including shared-line interference and independent internal losses.
 These driven contributions are separate from residual thermal-photon dephasing.
 
 FTF queries evolution's final spans, then advances density and cavity memory
-sequentially. All state-conditioned fields start each span from the previous
-main branch's final field. The first span starts from vacuum. The main branch
-has the largest population in the span-start DC density; exact ties select the
-lowest energy. Each span supplies ADC's `initial_field` and absolute
-`initial_time_ns`; the first supplies zero at 0 ns. Fields retain ringdown after
-pulse switch-off. Selecting one
+sequentially. The first span and each projection start from vacuum. Otherwise,
+all state-conditioned fields start from the previous main branch's final
+field. The main branch has the largest population in the span-start DC density;
+exact ties select the lowest energy. Each span supplies ADC's `initial_field`
+and absolute `initial_time_ns`. Fields retain ringdown after pulse switch-off.
+Selecting one
 branch for a superposition is a semiclassical approximation, not a description
 of quantum cavity-state entanglement.
 
