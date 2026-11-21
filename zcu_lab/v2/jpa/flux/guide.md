@@ -12,7 +12,7 @@ The JPA flux axis and saved values use device-native `a.u.` without scaling. Thi
 
 ## Module slots
 
-Module slots use `$qubit.module.x180`, `$resonator.module.readout` and optional `$qubit.module.reset`. Empty pi/readout slots use the pi_pulse/readout templates. The pi pulse uses `$qubit.freq` and `$qubit.wiring.ch`; readout uses resonator frequency/wiring and `$resonator.time_of_fly` + 0.05. An empty reset slot disables reset. Missing calibration required by these templates marks the form Invalid.
+Module slots use `$qubit.module.x180`, `$resonator.module.readout` and optional `$qubit.module.reset`. Empty pi/readout slots use the pi_pulse/readout templates. The pi pulse uses `$qubit.freq` and `$qubit.wiring.ch`; readout uses resonator frequency/wiring and `$resonator.time_of_fly` + 0.015 us. An empty reset slot disables reset. Missing calibration required by these templates marks the form Invalid.
 
 ## Typical writeback
 

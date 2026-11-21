@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-20，單 qubit T1 二階矩量測
+**Last updated:** 2026-11-21，讀出長度掃描
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -67,6 +67,7 @@ Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
 並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。
 [\_chain_common.py](twotone/ro_optimize/_chain_common.py) 只保留保存映射、完成點篩選與最佳 setting 摘要型別。
+[chain_length](twotone/ro_optimize/chain_length/guide.md) 與 [rpi_length](twotone/ro_optimize/rpi_length/guide.md) 在每個 ADC window 加上同一個可編輯的 `length_margin` 設定 pulse 長度。初值取擷取模組的 pulse 長度減 ADC window，沒有模組才用該 Registry 的 readout 範本。
 Rπ 的 rpi_power／rpi_freq／rpi_length 各自在 `run()` 寫出掃描與 R→π 鏈，並保留自己的 cfg、Result 與分析摘要型別。
 三者各自在 core 畫 score 與診斷圖；[\_rpi_common.py](twotone/ro_optimize/_rpi_common.py) 只保留共用的 `rpi_sums` 解碼、選點與格式化。
 
@@ -154,7 +155,7 @@ Tone label 是可重複的顯示文字，不是 component 名稱，也不改變�
 `mux/onetone` adapter 從 group 的 resonators 產生 readout tones。
 有 readout slot 時以副本保留 scalar 初值，再套用 ringup timing。
 缺 slot 時使用 blank mux 範本，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。
-ADC window 固定填入 1.0 us，完整 group 的 kappa 都有效時再推導其餘 mixer／timing 候選，來源見 [mux onetone guide](mux/onetone/guide.md#無-readout-slot-的候選來源)。
+ADC window 固定填入 1.0 us，mixer 取 group 的 `mixer_freq`。初值來源及缺值處理見 [mux onetone guide](mux/onetone/guide.md#無-readout-slot-的候選來源)。
 `participants` 是非空、唯一的原始整數 index list，按輸入順序量測。Open／Reset 將 alias `$participants` 的名稱依 `$mux.resonators` 位置轉成 indices；缺列、未綁或空清單預設全部。之後改 aliases 不更新現有輸入，需 Reset 或重新 Open。
 Lab 將 subset 交 program，不改完整 cfg。
 RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
@@ -179,12 +180,12 @@ Pulse length、ro_length 與 trig_offset 留空必填。
 即使 group 有 time_of_fly，也不替 qubit Forms 推導 timing。
 頻率缺失或無效時也留空必填。
 `mux/onetone` 有 readout slot 時使用副本，以 group tones 與 ringup timing 作初值。
-Ringup-copy 路徑保留既有初值：tone gain 為 0.1，ro_ch 按 group 順序從 0 起算。
+Ringup-copy 的 tone gain 填 0.1，ADC 取同序的 `$mux.wiring.ro_ch[i]`。
 Mux onetone 缺 slot 時仍使用 blank 範本，ADC window 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
 無 slot 的 mixer 從 `$mux.mixer_freq` 取初值，缺失或 null 時留空必填，不依賴 tone 頻率或 kappa。
 Trigger 取 `$mux.time_of_fly` 加五倍 ringup 時間，pulse 長度取 trigger 加 window。
 任一 kappa 或 group time_of_fly 缺值時，trigger 與 pulse 長度留空必填，不讀 resonator 的 pulse 路徑 TOF。
-上述缺值情境仍保留 1.0 us 的 ADC window。
+`post_delay` 用最小 κ 估五個光子衰減時間 `5 / (2π · κ)`。有 slot 時，用已設 κ 計算並保留較長的原值；全未設時保留原值。無 slot 時，只有 κ 齊全才推導這段等待，不要求 `time_of_fly`，否則保留範本的 0 µs。
 Readout 欄位說明列來源與未經裝置確認的限制，Run 仍執行 capability 檢查。
 Label 可編輯且可重複，不當 identity。固定槽位只限制增刪，不防止整列表交換值。
 Library 的 `readout/mux:blank` 不預填必需的通道、gain、時長或 trig_offset，不以 0 代替未校準的 trigger timing。Mux Forms 的 fallback 透過 typed model-list seeds 加入 tones。
@@ -332,6 +333,8 @@ zcu_lab/
 
 `support/resonator.py` 集中單 tone 與 mux 的模型 fitting 及 route prior 解析，不 import GUI。各實驗自己持有 Figure 並選擇 renderer，各 caller 保留分析選擇、失敗隔離與 writeback 政策。Core 不經 `support/measure/` 取得這些 mechanics。
 
-`definitions.register_all` 明列 measure adapters，從 caller 的 Registry 取得 `templates.TEMPLATES` 持久範本，填入 startup 的 library catalog。組合根以 `Registry(templates=TEMPLATES)` 注入一次，import 不註冊或操作硬體。Reload 重建 leaf、catalog 與 core-typed Notebook helper，保留 measure／singleshot shared support、workflow support、templates 與框架 identity。修改固定依賴需要重啟。
+組合根以 `Registry(templates=TEMPLATES)` 注入預設持久範本。Library 新建與表單範本展開都讀 `registry.templates`。`definitions.register_all` 明列 measure adapters，並把收到的範本綁給 chain_length 與 rpi_length 的 Form factory。Import 不註冊或操作硬體。
+
+Reload 重建 leaf、adapter catalog 與 core-typed Notebook helper，保留 measure／singleshot shared support、workflow support、templates 與框架 identity。兩個 Form factory 使用該次註冊收到的 Registry 範本。修改固定依賴需要重啟。
 
 框架 owner 用測試自己定義的最小合成 workflow／adapter 驗證公開接縫，不 import `zcu_lab`。本套件的實驗定義不寫個別測試，也不以 lab registry 選取測試材料。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow。Core-only caller 明確 import `core`；GUI callers 明確選擇其附件。

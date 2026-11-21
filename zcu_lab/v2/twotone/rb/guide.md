@@ -25,7 +25,7 @@ Run. Open and Reset take the X90 and X180 pulses from the qubit's module slots
 and readout from the resonator's readout slot. If a slot is empty or points to a
 missing module, the form uses the corresponding `pi2_pulse`, `pi_pulse` or
 `readout` template. The templates use the captured frequency and wiring.
-The readout template uses the resonator's time of flight plus 0.05 us.
+The readout template uses the resonator's time of flight plus 0.015 us.
 Missing required calibration leaves the affected input Invalid. You can select
 a saved module instead. The reset module comes from the qubit's reset slot and
 stays off when that slot is empty.

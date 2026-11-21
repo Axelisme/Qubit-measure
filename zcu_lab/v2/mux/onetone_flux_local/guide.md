@@ -37,12 +37,21 @@ edits and captures sources again.
   firmware cannot sweep tone frequencies in hardware. `participants` supplies
   the original tone selection to that inner scan.
 
-Readout uses the mux onetone ringup-copy policy. A captured slot retains its
-mixer and ADC window; five ringup times are added to trigger coverage. Without
-a slot, generator and ADCs come from group wiring, gain starts at 0.1, mixer
-comes from group `mixer_freq`, and the ADC window starts at 1.0 µs. Trigger is
-group `time_of_fly + 5/(2π min κ)`; pulse length covers trigger plus window.
-Missing group flight time or any κ leaves trigger and length required and blank.
+Open and Reset use the [mux onetone timing policy](../onetone/guide.md#無-readout-slot-的候選來源).
+The shared wait is `5 / (2π · min κ)` µs, where κ is the resonator linewidth
+in MHz from the captured group.
+
+- With a readout slot, the form copies its mixer and ADC window. It adds the
+  wait to the saved trigger and extends the pulse if needed to cover the window.
+  It seeds `post_delay` with the larger of the saved value and the wait.
+  Only set linewidths count. If none are set, the saved trigger and
+  `post_delay` are unchanged.
+- Without a slot, generator and ADCs come from group wiring, gain starts at
+  0.1, mixer comes from group `mixer_freq`, and the ADC window starts at 1.0 µs.
+  The trigger is the group `time_of_fly` plus the wait; pulse length is trigger
+  plus window. Missing flight time or any linewidth leaves trigger and length
+  required and blank. `post_delay` uses the wait if all linewidths are set,
+  even without flight time. Otherwise it keeps the template's 0 µs.
 
 These initial values are editable candidates, not confirmed calibrations.
 Averaging starts at 1000 reps and 10 rounds. Reduce both and the sweep point

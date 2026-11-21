@@ -80,11 +80,13 @@ Chevron 的 25×101 點保存 181,800 bytes 的 `sums`。選 mux herald 不改�
 
 在支援的入口選 `reset/mux_herald`，用與終端相同的完整 mux readout。F1、F2 在 tone 位置 0、1 時，用 `keep: {'0': g, '1': g}`。Herald 在序列前讀出一次。Result 只保留通過篩選的終端計數。
 
-使用 herald 前，先設定 readout 的 `post_delay`，讓腔內光子在後續 qubit drive 前衰減。Herald 讀出和終端讀出共用這個值（[ADR-0074](../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)）。等待從 readout generator 的波形結束算起，不等 ADC 積分窗結束（[ADR-0083](../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)）。沒有實驗會校準這個欄位，新 mux readout module 預設為 0 µs。
+使用 herald 前，先設定 readout 的 `post_delay`，讓腔內光子在後續 qubit drive 前衰減。Herald 讀出和終端讀出共用這個值（[ADR-0074](../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)）。等待從 readout generator 的波形結束算起，不等 ADC 積分窗結束（[ADR-0083](../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)）。`mux/onetone` 依線寬給可編輯的初值，但 FIT 不校準這段等待。
 
-等待太短時，殘留的腔光子會讓 qubit 轉移頻率偏移並造成退相干。Herald 後的名目 Xπ 可能幾乎不翻轉，conditional phase 掃描也可能找不到 π 交點。FTF 的一個低 SNR 例子中，gg herald 後打名目 F2 Xπ，F2 的 terminal e 比例在 0 µs 時為 11.6%，在 2 µs 時為 92.9%。這兩個比例沒有扣除 I 基線。2 µs 只是這次比較用的值，不是最短或最佳等待。
+用 `mux/onetone` 的 FIT 取得各 resonator 的 `kappa`，也就是以 MHz 記的半高全寬。從 `5 / (2π · κ)` µs 開始，這是五個光子衰減時間，也是表單估算 ring-up 等待的公式。共用一個 `post_delay` 時，用最小的 κ，讓線寬最窄的腔有時間放空。
 
-用 `mux/onetone` 的 FIT 取得各 resonator 的線寬 `kappa`（半高全寬 FWHM，單位 MHz）。腔場衰減時間約為 `1 / (π · FWHM)`，單位是 µs。先把 `post_delay` 設為衰減時間的數倍。
+等待太短時，殘留的腔光子會讓 qubit 轉移頻率偏移並造成退相干。Herald 後的名目 Xπ 可能幾乎不翻轉，conditional phase 掃描也可能找不到 π 交點。
+
+在 FTF 的低 SNR 例子中，R2 的線寬約 1.2 MHz。五個光子衰減時間約 0.66 µs；2 µs 約是單個光子衰減時間的 15 倍。gg herald 後打名目 F2 Xπ，等待 0 µs 時，F2 的終端 e 比例為 11.6%；等待 2 µs 時為 92.9%。比例未扣除 I 基線。2 µs 只是當時的比較值，不是最短或最佳等待。
 
 在 `two_qubit/joint_readout` 的 Reset 欄位選 `reset/mux_herald`，在 `keep` 用 F1、F2 的 role tone 在完整 readout 中的位置作鍵，兩個值都填 g。Herald 和 terminal 使用同一份完整 mux readout。Run 後看 FIT 的 4×9 列正規化機率矩陣。取目標 qubit 打名目 Xπ、另一顆打 I 的那一列，把目標 qubit 的 terminal 分類為 e 的欄位加總。也可與兩顆都打 I 的 gg 列比較。這是通過 gg herald 的 shots 中，目標 qubit 的 terminal e 比例，不是 gate fidelity。只延長 `post_delay`，其餘設定不變，再 Run 和 FIT。若比例仍隨等待延長而上升，先調整等待再跑 heralded 掃描。
 

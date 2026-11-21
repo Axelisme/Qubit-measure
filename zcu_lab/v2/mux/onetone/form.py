@@ -26,10 +26,12 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
     names qubits, invalid pairings raise at Open/Reset. Groups without qubits
     still support resonator bring-up. With a slot, add five ringup times from
     the smallest set group kappa to its trigger and extend pulse coverage,
-    preserving its ADC window; all kappas unset adds no wait. Without a slot,
-    always seed the ADC window at 1.0 us, independent of kappa. Mixer reads
-    $mux.mixer_freq independently of kappa and tone frequencies; null stays
-    required and blank. Trigger uses $mux.time_of_fly plus five ringup times
+    preserving its ADC window. Use the larger of the stored post_delay and
+    the same wait. If all kappas are unset, keep both the trigger and post_delay.
+    Without a slot, seed the ADC window at 1.0 us, independent of kappa. Seed
+    post_delay with the same wait when all kappas are set, or keep the template's
+    0.0 us otherwise. Mixer reads $mux.mixer_freq independently of kappa and
+    tone frequencies; null stays required and blank. Trigger uses $mux.time_of_fly plus five ringup times
     from the smallest group kappa. Pulse length is trigger plus ADC window.
     Missing group flight time or any kappa leaves trigger and pulse length
     required and blank. Invalid set sources reject
