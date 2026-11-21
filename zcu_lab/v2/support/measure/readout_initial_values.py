@@ -3,10 +3,11 @@
 from dataclasses import dataclass
 from math import isfinite
 
-from zcu_tools.cfg_model import PulseReadoutCfg, Slot, Template
+from zcu_tools.cfg_model import FieldMeta, PulseReadoutCfg, Slot, Template
 from zcu_tools.gui.form_adapter import FormContext
 
 from zcu_lab.templates import TEMPLATES
+from zcu_lab.v2.support.measure.seed_metadata import seed_metadata
 
 
 @dataclass(frozen=True)
@@ -15,8 +16,8 @@ class ReadoutLengthMarginSeed:
 
     value: float | None
     """Pulse duration minus ADC window in µs, or None if unresolved."""
-    source: str
-    """Description of the captured slot or template and its source fields."""
+    metadata: FieldMeta
+    """Source description; only a supplied fixed template value is uncalibrated."""
 
 
 def pulse_readout_length_margin(
@@ -29,7 +30,9 @@ def pulse_readout_length_margin(
     resolves its key there. The selected Template uses the lab catalog's
     authored scalar seeds and its own overrides. Either source returns None
     for unresolved or non-finite lengths, without substituting another source.
-    Slot key, template ID and capture failures propagate. No sources are edited.
+    Only a resolved template fallback is marked uncalibrated. Captured and
+    blank values have unknown calibration status. Slot key, template ID and
+    capture failures propagate. No sources are edited.
     """
     if isinstance(readout, Slot):
         if ctx.parameters is None:
@@ -40,11 +43,11 @@ def pulse_readout_length_margin(
         try:
             module = library.get_module(key)
             if not isinstance(module, PulseReadoutCfg):
-                return ReadoutLengthMarginSeed(None, source)
+                return ReadoutLengthMarginSeed(None, seed_metadata(source))
             pulse, window = module.waveform.length, module.ro_length
         except ValueError:
             # Unresolvable waveform/cfg leaves the margin blank, not a template value.
-            return ReadoutLengthMarginSeed(None, source)
+            return ReadoutLengthMarginSeed(None, seed_metadata(source))
     else:
         source = f"{readout.id} template: waveform.length − ro_length"
         seeds = TEMPLATES[readout.id].seeds
@@ -59,5 +62,7 @@ def pulse_readout_length_margin(
     ):
         margin = float(pulse) - float(window)
         if isfinite(margin):
-            return ReadoutLengthMarginSeed(margin, source)
-    return ReadoutLengthMarginSeed(None, source)
+            return ReadoutLengthMarginSeed(
+                margin, seed_metadata(source, fallback=isinstance(readout, Template))
+            )
+    return ReadoutLengthMarginSeed(None, seed_metadata(source))

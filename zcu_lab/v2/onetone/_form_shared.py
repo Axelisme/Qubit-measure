@@ -5,16 +5,7 @@ from math import isfinite
 from zcu_tools.cfg_model import Expr, FormNode, Hidden, Range, Template, TemplateSeed
 from zcu_tools.gui.form_adapter import FormContext
 
-from zcu_lab.templates import READOUT_LENGTH_MARGIN_US, READOUT_PULSE_LENGTH_US
-
-
-def initial_ro_length() -> float:
-    """Return the readout template's ADC window in us as an editable seed.
-
-    The readout Template supplies the pulse source. Open/Reset creates a
-    detached direct RO window that remains independently editable.
-    """
-    return READOUT_PULSE_LENGTH_US - READOUT_LENGTH_MARGIN_US
+from zcu_lab.templates import READOUT_ADC_WINDOW_US, READOUT_PULSE_LENGTH_US
 
 
 def initial_readout_timing(ctx: FormContext) -> dict[str, TemplateSeed]:
@@ -45,13 +36,13 @@ def initial_readout_timing(ctx: FormContext) -> dict[str, TemplateSeed]:
         ):
             raise ValueError("$resonator.kappa must be finite and positive in MHz")
         trigger += " + 5 / (2 * pi * $resonator.kappa)"
-    window = f"({trigger}) + {initial_ro_length()!r}"
+    window = f"({trigger}) + {READOUT_ADC_WINDOW_US!r}"
     original = READOUT_PULSE_LENGTH_US
     # Encode max using the expression language's abs: max(a,b)=(a+b+abs(a-b))/2.
     length = f"({original!r} + ({window}) + abs({original!r} - ({window}))) / 2"
     return {
         "trig_offset": Expr(trigger),
-        "ro_length": initial_ro_length(),
+        "ro_length": READOUT_ADC_WINDOW_US,
         "waveform.length": Expr(length),
     }
 

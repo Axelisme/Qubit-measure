@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 
-from zcu_tools.cfg_model import FieldMeta, FormNode, Hidden, Range, Template
+from zcu_tools.cfg_model import FormNode, Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
@@ -48,5 +48,5 @@ def make_form(ctx: FormContext) -> Form[ChainLengthCfg]:
     if margin.value is not None:
         tree["length_margin"] = margin.value
     return Form(ChainLengthCfg, tree).with_seed_metadata(
-        {("length_margin",): FieldMeta(description=margin.source)}
+        {("length_margin",): margin.metadata}
     )

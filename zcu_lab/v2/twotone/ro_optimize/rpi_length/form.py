@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 
-from zcu_tools.cfg_model import FieldMeta, FormNode, Hidden, Range, Template
+from zcu_tools.cfg_model import FormNode, Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source
@@ -55,15 +55,6 @@ def make_form(ctx: FormContext) -> Form[RPiLengthCfg]:
     }
     if margin.value is not None:
         tree["length_margin"] = margin.value
-    return Form(
-        RPiLengthCfg,
-        field_order=(
-            "readout",
-            "pi_pulse",
-            "length",
-            "length_margin",
-            "reps",
-            "rounds",
-        ),
-        tree=tree,
-    ).with_seed_metadata({("length_margin",): FieldMeta(description=margin.source)})
+    return Form(RPiLengthCfg, tree).with_seed_metadata(
+        {("length_margin",): margin.metadata}
+    )

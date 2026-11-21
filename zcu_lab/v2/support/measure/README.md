@@ -18,7 +18,7 @@ Group tones 的 freq 取捕捉的 resonator.freq，label 初值為 resonator 名
 Blank 的 mixer_freq 從 `$mux.mixer_freq` 取初值，缺失或 null 時留空必填，不依賴 tone 頻率或 kappa。
 length、ro_length 與 trig_offset 保持必填且未填，不猜時長或以 0 代替 trigger timing。
 未選 wait_for_ringup 時，即使 group 有 time_of_fly 也不推導 timing。
-`mux/onetone` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。
+`mux/onetone`、`mux/onetone_flux_local` 與 `mux/onetone_flux_global` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。
 有 captured readout 時，helper 從固定 capture 取完整 group 已設成員的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
 `post_delay` 取原值與同一個等待時間的較大值。此路徑忽略缺 leaf 或 null 的 kappa。全未設時不加等待，trig_offset 與 `post_delay` 保留來源值。
 Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。
@@ -83,7 +83,8 @@ Template 持有自己的 set 與 seed metadata。
 
 `readout_initial_values.pulse_readout_length_margin(ctx, readout)` 從選定的 readout 取 `waveform.length − ro_length`，單位為 µs。
 用 Slot 時讀固定 capture，用 Template 時讀 lab 範本的兩個初值。任一長度無法解析時，必填欄位留空。
-Form 在覆寫模組內的掃描欄位前取得差值及來源說明，不寫回模組。
+Form 在覆寫模組內的掃描欄位前取得差值及診斷 metadata，不寫回模組。
+只有實際填入的固定範本差值標為 uncalibrated；捕捉的差值與空白欄位不標記校準狀態。
 
 `rabi_initial_values.len_rabi_length_stop` 只推導四個 Length Rabi Forms 的掃描上限。
 無 capture、缺失或 null x180、arb waveform 時上限為 1 µs。

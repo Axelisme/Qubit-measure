@@ -33,6 +33,7 @@ _RESONATOR_RO_CH = Expr("{resonator}.wiring.ro_ch")
 _READOUT_WINDOW_EDGE_MARGIN_US = 0.015
 READOUT_LENGTH_MARGIN_US = 2 * _READOUT_WINDOW_EDGE_MARGIN_US
 READOUT_PULSE_LENGTH_US = 1.0
+READOUT_ADC_WINDOW_US = READOUT_PULSE_LENGTH_US - READOUT_LENGTH_MARGIN_US
 _READOUT_TRIGGER_OFFSET = Expr(
     f"{{resonator}}.time_of_fly + {_READOUT_WINDOW_EDGE_MARGIN_US}"
 )
@@ -75,7 +76,7 @@ def ro(
     freq: TemplateSeed = _RESONATOR_FREQ,
     gen_ch: TemplateSeed = _RESONATOR_CH,
     ro_ch: TemplateSeed = _RESONATOR_RO_CH,
-    ro_length: TemplateSeed = READOUT_PULSE_LENGTH_US - READOUT_LENGTH_MARGIN_US,
+    ro_length: TemplateSeed = READOUT_ADC_WINDOW_US,
     trig_offset: TemplateSeed = _READOUT_TRIGGER_OFFSET,
     at: str = "",
 ) -> dict[str, TemplateSeed]:
