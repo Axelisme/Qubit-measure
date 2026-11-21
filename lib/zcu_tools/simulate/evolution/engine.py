@@ -14,7 +14,7 @@ from threading import Event, Lock
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
-from zcu_tools.simulate.boundary import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
 
 if TYPE_CHECKING:
     from ._capture import CaptureBuffer
@@ -578,10 +578,6 @@ class EvolutionResult:
         object.__setattr__(self, "densities", densities)
 
 
-class Cancelled(Exception):
-    """Numeric work was cancelled at a cooperative check without a partial result."""
-
-
 class Engine:
     """Segment engine with inline or threaded execution.
 
@@ -774,8 +770,8 @@ class Engine:
         otherwise raises ValueError. It also bounds the maximum absolute entry
         change when repairing a readout density. A closed engine raises RuntimeError.
         cancel: read-only is_set query, or None to disable. Raises Cancelled
-        without partial results when set at a check, including after geometry
-        and before building the WorkPlan or recording routing usage.
+        without partial results when set at a check, including between batches
+        and after geometry before building the WorkPlan or recording routing usage.
         capture: caller-owned CaptureBuffer, or None. Records frozen batch inputs,
         actual routes and sampled RWA spot decisions/errors, not probe states.
         Success marks records complete; exceptions leave them incomplete. Concurrent
@@ -798,13 +794,14 @@ class Engine:
         RuntimeError naming the point if the repair fails or exceeds budget.
         """
         from ._capture import CaptureRun
-        from ._dispatch import classify, create_work_plan
+        from ._dispatch import classify, populate_work_plan
         from ._dop853_dispatch import with_opencl
         from ._input_key import input_key
         from ._planning import plan
         from ._prefix import PrefixResolver
         from ._schedule import Schedule
         from .kernel import KernelContext
+        from .workplan import WorkPlan
 
         cancel = Event() if cancel is None else cancel
         recording_scope = (
@@ -823,7 +820,7 @@ class Engine:
                 )
             content_key = input_key(source, batches, budget)
             frontend_started = time.thread_time() if telemetry else 0.0
-            geometry = plan(source, batches)
+            geometry = plan(source, batches, cancel=cancel)
             if cancel.is_set():
                 raise Cancelled()
             inversions = geometry.stark_order_inversions
@@ -837,14 +834,12 @@ class Engine:
             )
             # Drain workers before releasing evolve-local ownership.
             with closing(
-                create_work_plan(
-                    geometry.table,
-                    source,
-                    budget,
-                    telemetry=telemetry,
-                    content_key=content_key,
-                )
+                WorkPlan(complete_table=geometry.table, content_key=content_key)
             ) as work_plan:
+                work_plan.routing.enabled = telemetry
+                populate_work_plan(
+                    geometry.table, source, work_plan, budget, cancel=cancel
+                )
                 frontend_cpu_s = (
                     time.thread_time() - frontend_started if telemetry else 0.0
                 )
@@ -933,29 +928,33 @@ class Engine:
         in Engine caches. Subsequent evolve routing and densities are unchanged.
         Source model caches and shift registrations may be populated.
         """
-        from ._dispatch import classify, create_work_plan
+        from ._dispatch import classify, populate_work_plan
         from ._dop853_dispatch import with_opencl
         from ._input_key import input_key
         from ._inspection import report
         from ._planning import plan
         from .kernel import KernelContext
+        from .workplan import WorkPlan
 
         cancel = Event() if cancel is None else cancel
         with self._lock, native_limit.acquire():
             self._check_evolve_ready(budget, cancel)
             if not batches or not any(len(batch.points) for batch in batches):
                 return DispatchInspection(())
-            geometry = plan(source, batches)
+            geometry = plan(source, batches, cancel=cancel)
+            if cancel.is_set():
+                raise Cancelled()
             trace: dict[int, dict[str, DispatchCandidate]] = {}
             with closing(
-                create_work_plan(
-                    geometry.table,
-                    source,
-                    budget,
+                WorkPlan(
+                    complete_table=geometry.table,
                     content_key=input_key(source, batches, budget),
                     history_mode="project",
                 )
             ) as work_plan:
+                populate_work_plan(
+                    geometry.table, source, work_plan, budget, cancel=cancel
+                )
                 # ADR-0078: expose observations, not a second dispatch entry point.
                 workers = (
                     self._workers

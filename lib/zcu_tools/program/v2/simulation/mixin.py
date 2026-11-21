@@ -13,11 +13,11 @@ from zcu_tools.program.acquisition import (
     CancelFlagProtocol,
     ImproveAcquireMixin,
     ShotResult,
-    StoppedPartialAcquireError,
 )
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
+    Cancelled,
     ChargeDriveRequirement,
     RoundStatistics,
 )
@@ -172,17 +172,16 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         params = self.acquire_params
         if not isinstance(params["soc"], SimulationSoc):
             return super()._finish_accumulated_round(cancel_flag)
-        from zcu_tools.simulate.evolution import Cancelled
-
         soc = params["soc"]
+        needs_raw = self._simulation_needs_raw
         try:
-            result = soc.run_round()
+            result = soc.run_round(require_raw=needs_raw)
         except Cancelled:
-            return self._finish_cancelled_backend_round(soc)
-        if cancel_flag.is_set():
-            soc.cleanup_round()
-            self._close_rounds_pbar()
-            return False
+            return self._stop_interrupted_round()
+        # For required raw, SoC checked Stop before publishing. A later Stop
+        # does not undo that transport or skip successful round processing.
+        if not needs_raw and cancel_flag.is_set():
+            return self._stop_interrupted_round()
         if not isinstance(result, IntegratedRound):
             raise ValueError("integrated acquisition requires IntegratedRound")
         self._consume_integrated_result(soc, result)
@@ -201,23 +200,11 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         soc = self.acquire_params["soc"]
         if not isinstance(soc, SimulationSoc):
             return super()._finish_decimated_round()
-        from zcu_tools.simulate.evolution import Cancelled
 
         try:
             return super()._finish_decimated_round()
         except Cancelled:
-            return self._finish_cancelled_backend_round(soc)
-
-    def _finish_cancelled_backend_round(self, soc: SimulationSoc) -> bool:
-        soc.cleanup_round()
-        self._close_rounds_pbar()
-        # The backend can cancel without setting the caller's flag. Do not let
-        # QICK average an empty round buffer in that case.
-        if self._completed_round_count() == 0:
-            raise StoppedPartialAcquireError(
-                "acquire stopped before the first round completed"
-            )
-        return False
+            return self._stop_interrupted_round()
 
     def _program(self) -> "MyProgramV2":
         from ..base import MyProgramV2
@@ -244,7 +231,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
                 self._average_statistics(result.statistics, request.reps)
             )
             return
-        raw = soc.binding.materialize_raw(request, result.raw)
+        raw = soc.copy_integrated_raw()
         self.acc_buf = [raw[ch] for ch in prog.ro_chs]
         self.rounds_buf.append(prog._process_accumulated(self.acc_buf))
 

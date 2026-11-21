@@ -32,6 +32,7 @@ from zcu_tools.simulate.boundary import (
 from zcu_tools.simulate.evolution import Cancelled
 
 from tests.program._profiles import load_soccfg
+from tests.program._shot_reduction import SumRounds
 
 
 def synthetic_binding(
@@ -339,6 +340,140 @@ def test_stop_during_backend_keeps_only_completed_rounds(
     (outcome,) = observed
     assert outcome.complete is bool(completed_rounds)
     assert len(outcome.rounds) == completed_rounds + 1
+
+
+@pytest.mark.parametrize("failure", ["first-round", "second-round", "unrelated"])
+def test_stop_during_required_raw_preserves_only_completed_rounds(
+    program_seam, failure
+):
+    program, soc, observed = program_seam
+    cancel = Event()
+    hooks = []
+    execute = soc.binding.execute
+    failure_index = int(failure == "second-round")
+    completed_raw = np.full((1, 1, 2), 8, dtype=np.int64)
+
+    def solve(request: RoundRequest) -> IntegratedRound:
+        result = execute(request)
+        assert isinstance(result, IntegratedRound)
+
+        class Raw:
+            def materialize(self, reps, avg_level):
+                if request.index == failure_index:
+                    if failure == "unrelated":
+                        raise ValueError("bad ADC data")
+                    raise Cancelled()
+                return {0: completed_raw.copy()}
+
+        return replace(result, raw=Raw())
+
+    def run():
+        return program.acquire(
+            soc,
+            rounds=3,
+            cancel_flag=cancel,
+            threshold=0.0,
+            remove_offset=False,
+            progress=False,
+            round_hook=lambda count, *_: hooks.append(count),
+        )
+
+    soc.binding.execute = solve
+    if failure == "unrelated":
+        with pytest.raises(ValueError, match="bad ADC data"):
+            run()
+    elif failure_index == 0:
+        with pytest.raises(StoppedPartialAcquireError):
+            run()
+    else:
+        (iq,) = run()
+        np.testing.assert_array_equal(iq, [[1.0, 0.0]])
+        published = program.get_raw()
+        assert published is not None
+        np.testing.assert_array_equal(published, [completed_raw])
+        published[0][:] = 7
+        np.testing.assert_array_equal(soc.get_accumulated(0, 0, 1), [[8, 8]])
+
+    assert hooks == list(range(1, failure_index + 1))
+    assert (program.get_raw() is None) is (failure_index == 0)
+    assert not cancel.is_set()
+    (outcome,) = observed
+    assert outcome.complete is bool(failure_index)
+    assert len(outcome.rounds) == failure_index + 1
+
+
+@pytest.mark.parametrize("processor_fails", [False, True])
+def test_stop_after_required_raw_publication_does_not_skip_processing(
+    program_seam, monkeypatch, processor_fails
+):
+    program, soc, observed = program_seam
+    stop = Event()
+    execute = soc.run_round
+
+    def stop_after_delivery(**options):
+        result = execute(**options)
+        stop.set()
+        return result
+
+    def processor(shots):
+        np.testing.assert_array_equal(shots[0], 0)
+        if processor_fails:
+            raise Cancelled("processor failure")
+        return np.array([[3.0]])
+
+    # Backend and raw callbacks run before publication; the processor is already too late.
+    monkeypatch.setattr(soc, "run_round", stop_after_delivery)
+
+    def run():
+        return program.acquire_summed(
+            soc,
+            rounds=3,
+            reducer=SumRounds(processor),
+            cancel_flag=stop,
+            progress=False,
+        )
+
+    if processor_fails:
+        with pytest.raises(Cancelled, match="processor failure"):
+            run()
+    else:
+        np.testing.assert_array_equal(run(), [3.0])
+    np.testing.assert_array_equal(soc.get_accumulated(0, 0, 1), [[0, 0]])
+    (outcome,) = observed
+    assert outcome.complete is not processor_fails
+    assert len(outcome.rounds) == 1
+
+
+def test_completed_round_raw_getters_ignore_a_later_stop(program_seam):
+    program, soc, observed = program_seam
+    stop = Event()
+    execute = soc.binding.execute
+    materialized = []
+
+    class Raw:
+        def materialize(self, reps, avg_level):
+            materialized.append(reps)
+            return {0: np.full((reps, 1, 2), 8, dtype=np.int64)}
+
+        def materialize_cancellable(self, reps, avg_level, *, cancel):
+            pytest.fail("a getter for completed data must not receive a Stop query")
+
+    def compact(request):
+        result = execute(request)
+        assert isinstance(result, IntegratedRound)
+        return replace(result, raw=Raw())
+
+    def hook(count, _iq, flag):
+        assert count == 1 and not materialized
+        flag.set()
+        np.testing.assert_array_equal(program.get_raw(), np.full((1, 1, 1, 2), 8))
+
+    soc.binding.execute = compact
+    program.acquire(soc, rounds=3, cancel_flag=stop, round_hook=hook, progress=False)
+    np.testing.assert_array_equal(soc.get_accumulated(0, 0, 1), [[8, 8]])
+    assert materialized == [1, 1]
+    (outcome,) = observed
+    assert outcome.complete and len(outcome.rounds) == 1
 
 
 def test_cleanup_failure_is_inside_binding_outcome(program_seam, monkeypatch):

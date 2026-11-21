@@ -17,6 +17,7 @@ from zcu_tools.program.shot_time import request_round_time_s
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
     CancellationQuery,
+    Cancelled,
     EnvironmentSnapshot,
     RoundRequest,
     RoundSignals,
@@ -286,13 +287,16 @@ class SimulationBinding:
         request: AcquireRequest,
         source: RawShots,
         *,
+        cancel: CancellationQuery | None = None,
         defer_notification: Callable[[Callable[[], None]], None] | None = None,
     ) -> dict[int, NDArray[np.int64]]:
         """Generate and detach raw int64 arrays keyed by ADC, without processing IQ.
 
         Pass this binding's original request and retained numeric source.
         Shape, dtype or channel mismatches raise ValueError; source errors
-        propagate. Count elapsed wall seconds inside the originating acquire,
+        propagate. Only round-time consumers supply a read-only cancel query,
+        which lets a capable source raise Cancelled without returning data.
+        Count elapsed wall seconds inside the originating acquire,
         including failed attempts. For successful later materialization, notify
         the observer with the original acquire identity. If defer_notification is
         supplied, give it the no-argument notification instead; the caller can
@@ -302,10 +306,10 @@ class SimulationBinding:
         active = self._active_sequence == request.sequence
         observer = self._on_materialize
         if (active and self._on_end is None) or (not active and observer is None):
-            return materialize_shots(request, source)
+            return materialize_shots(request, source, cancel=cancel)
         started = time.monotonic()
         try:
-            raw = materialize_shots(request, source)
+            raw = materialize_shots(request, source, cancel=cancel)
         finally:
             elapsed = time.monotonic() - started
             if active:
@@ -383,6 +387,42 @@ class SimulationBinding:
         within one 10 ms sleep interval and returns the borrowed result; the
         adapter applies its existing completed-round policy.
         """
+        result, started = self._sample_and_pace(request, index, cancel)
+        if self._clock is not None and (cancel is None or not cancel.is_set()):
+            self._clock.complete_round(
+                request_round_time_s(request), self._clock.now() - started
+            )
+        return result
+
+    @contextmanager
+    def sampling_required_raw(
+        self, request: AcquireRequest, index: int, *, cancel: CancellationQuery | None
+    ) -> Generator[IntegratedRound]:
+        """Yield a paced integrated result for transport validation and raw work.
+
+        request, index and read-only cancel have the same meaning as in
+        sample_round. A non-integrated request raises ValueError before
+        snapshot capture, round recording, execution or pacing. After the caller's
+        synchronous validation and required shot work, raise Cancelled if the
+        query is set. Credit the clock only on successful exit and use the same
+        elapsed window as sample_round, excluding validation and raw work.
+        The caller publishes completed buffers only after this scope succeeds.
+        """
+        if request.mode != "integrated":
+            raise ValueError("required raw shots need an integrated request")
+        result, started = self._sample_and_pace(request, index, cancel)
+        if not isinstance(result, IntegratedRound):
+            raise ValueError("required raw shots need an integrated round")
+        elapsed = 0.0 if self._clock is None else self._clock.now() - started
+        yield result
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+        if self._clock is not None:
+            self._clock.complete_round(request_round_time_s(request), elapsed)
+
+    def _sample_and_pace(
+        self, request: AcquireRequest, index: int, cancel: CancellationQuery | None
+    ) -> tuple[IntegratedRound | RoundSignals, float]:
         timed = self._time_scale > 0 or self._clock is not None
         now = time.monotonic if self._clock is None else self._clock.now
         started = now() if timed else 0.0
@@ -406,6 +446,4 @@ class SimulationBinding:
                 while remaining > 0 and not cancel.is_set():
                     time.sleep(min(remaining, 0.01))
                     remaining = target - (now() - started)
-        if self._clock is not None and (cancel is None or not cancel.is_set()):
-            self._clock.complete_round(request_round_time_s(request), now() - started)
-        return result
+        return result, started

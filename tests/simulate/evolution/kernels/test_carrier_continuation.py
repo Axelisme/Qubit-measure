@@ -1,11 +1,11 @@
 """Constant CF4 carrier prediction through complete planning and kernel playback."""
 
+from contextlib import closing
 from dataclasses import replace
 
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution._dispatch import create_work_plan
 from zcu_tools.simulate.evolution.kernel import (
     ApplyContext,
     KernelContext,
@@ -14,6 +14,7 @@ from zcu_tools.simulate.evolution.kernel import (
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
+from .._engine import create_work_plan
 from ..contract.kernel_suite import synthetic_model
 
 
@@ -47,7 +48,8 @@ def source():
     source = ModelSource(np.ones((3, 3), dtype=np.complex128) / 3, lambda level: model)
     # Compile the numerical boundary before observing NumPy; replacing a NumPy
     # function while Numba first types its callers would change compilation.
-    playback(scan([0.05]), KernelContext(source, 1e-3, WorkPlan()))
+    with closing(WorkPlan()) as plan:
+        playback(scan([0.05]), KernelContext(source, 1e-3, plan))
     return source
 
 
@@ -89,22 +91,23 @@ def test_narrow_carriers_use_four_anchors_and_independent_coarse_checks(
             defects.append(float(result))
         return result
 
-    context = KernelContext(source, 1e-3, create_work_plan(table, source))
-    with monkeypatch.context() as patch:
-        patch.setattr(np.linalg, "norm", observe)
-        actual = playback(table, context)
+    with create_work_plan(table, source) as plan:
+        context = KernelContext(source, 1e-3, plan)
+        with monkeypatch.context() as patch:
+            patch.setattr(np.linalg, "norm", observe)
+            actual = playback(table, context)
     # Four real anchors build independently. Every other key checks all nine
     # original coarse probes; prediction is never an unchecked cache hit.
     assert len(defects) == (16 - 4) * 9
     assert max(defects) <= 1e-4
-    independent = playback(table, KernelContext(source, 1e-3, WorkPlan()))
+    with closing(WorkPlan()) as plan:
+        independent = playback(table, KernelContext(source, 1e-3, plan))
     # Playback stays within this budget's sampled CF4 guard tolerance:
     # min(1e-4, budget * 0.1). This is not a global density error certificate.
     np.testing.assert_allclose(actual, independent, atol=1e-4, rtol=0)
     assert not np.array_equal(actual, independent)
     anchors = np.linspace(0, 15, 4).round().astype(int)
     np.testing.assert_array_equal(actual[anchors], independent[anchors])
-    context.work_plan.close()
 
 
 def test_rejected_carrier_prediction_refines_independently_bitwise(source, monkeypatch):
@@ -118,27 +121,28 @@ def test_rejected_carrier_prediction_refines_independently_bitwise(source, monke
             defects.append(float(result))
         return result
 
-    context = KernelContext(source, 1e-10, create_work_plan(table, source))
-    with monkeypatch.context() as patch:
-        patch.setattr(np.linalg, "norm", observe)
-        actual = playback(table, context)
+    with create_work_plan(table, source) as plan:
+        context = KernelContext(source, 1e-10, plan)
+        with monkeypatch.context() as patch:
+            patch.setattr(np.linalg, "norm", observe)
+            actual = playback(table, context)
     assert len(defects) == (16 - 4) * 9
     assert max(defects) > 1e-11
-    independent = playback(table, KernelContext(source, 1e-10, WorkPlan()))
+    with closing(WorkPlan()) as plan:
+        independent = playback(table, KernelContext(source, 1e-10, plan))
     np.testing.assert_array_equal(actual, independent)
-    context.work_plan.close()
 
 
 def test_carrier_predictions_do_not_depend_on_split_or_reordered_consumers(source):
     table = scan(np.linspace(0.05, 0.0504, 16))
-    reference = playback(
-        table, KernelContext(source, 1e-3, create_work_plan(table, source))
-    )
-    reordered = playback(
-        table,
-        KernelContext(source, 1e-3, create_work_plan(table, source)),
-        order=[np.array([i]) for i in range(15, -1, -1)],
-    )
+    with create_work_plan(table, source) as plan:
+        reference = playback(table, KernelContext(source, 1e-3, plan))
+    with create_work_plan(table, source) as plan:
+        reordered = playback(
+            table,
+            KernelContext(source, 1e-3, plan),
+            order=[np.array([i]) for i in range(15, -1, -1)],
+        )
     np.testing.assert_array_equal(reference, reordered)
 
 
@@ -156,31 +160,36 @@ def test_ineligible_carrier_groups_keep_independent_playback_bitwise(
     source, frequencies
 ):
     table = scan(frequencies)
-    context = KernelContext(source, 1e-3, create_work_plan(table, source))
-    actual = playback(table, context)
-    independent = playback(table, KernelContext(source, 1e-3, WorkPlan()))
+    with create_work_plan(table, source) as plan:
+        actual = playback(table, KernelContext(source, 1e-3, plan))
+    with closing(WorkPlan()) as plan:
+        independent = playback(table, KernelContext(source, 1e-3, plan))
     np.testing.assert_array_equal(actual, independent)
-    context.work_plan.close()
 
 
 def test_carrier_resources_release_after_last_actual_consumer(source):
-    from zcu_tools.simulate.evolution._gain_plan import admit_shared_builds
+    from zcu_tools.simulate.evolution._gain_plan import (
+        admit_shared_builds,
+        carrier_anchor_resource,
+    )
 
     table = scan(np.linspace(0.05, 0.0504, 16))
-    context = KernelContext(source, 1e-3, create_work_plan(table, source))
-    groups = getattr(context.work_plan, "cf4_carrier_groups", ())
-    assert len(groups) == 1, "complete carrier inventory must publish fixed supports"
-    from zcu_tools.simulate.evolution._gain_plan import carrier_anchor_resource
-
-    group = groups[0]
-    handles = [carrier_anchor_resource(context, group, f) for f in group.anchors_ghz]
-    # One caller admission seals all supports. A prefix subset must not seal them.
-    admit_shared_builds(context, table, np.arange(16), np.empty(0, dtype=np.int64))
-    assert all(h.sealed and not h.released for h in handles)
-    playback(table, context, order=[np.array([i]) for i in range(15, -1, -1)])
-    assert all(h.released and not h.remaining_consumers for h in handles)
-    assert all(h.actual_consumers == h.planned_consumers for h in handles)
-    context.work_plan.close()
+    with create_work_plan(table, source) as plan:
+        context = KernelContext(source, 1e-3, plan)
+        groups = getattr(context.work_plan, "cf4_carrier_groups", ())
+        assert len(groups) == 1, (
+            "complete carrier inventory must publish fixed supports"
+        )
+        group = groups[0]
+        handles = [
+            carrier_anchor_resource(context, group, f) for f in group.anchors_ghz
+        ]
+        # One caller admission seals all supports. A prefix subset must not seal them.
+        admit_shared_builds(context, table, np.arange(16), np.empty(0, dtype=np.int64))
+        assert all(h.sealed and not h.released for h in handles)
+        playback(table, context, order=[np.array([i]) for i in range(15, -1, -1)])
+        assert all(h.released and not h.remaining_consumers for h in handles)
+        assert all(h.actual_consumers == h.planned_consumers for h in handles)
 
 
 @pytest.mark.parametrize("workers", [1, 2])
@@ -243,8 +252,8 @@ def test_carrier_coarse_guard_preserves_density_bitwise(source, sign, geometry):
 
     source = spectral_source(source, geometry)
     table = scan(sign * np.linspace(0.05, 0.0504, 16))
-    context = KernelContext(source, 1e-3, create_work_plan(table, source))
-    actual = playback(table, context)
+    with create_work_plan(table, source) as plan:
+        actual = playback(table, KernelContext(source, 1e-3, plan))
     # Characterize the original Padé guard's accepted predictions and fallbacks.
     # Coherent inputs and phase-translated fractional tails make this sensitive
     # to a changed interpolation admission, not just to population conservation.
@@ -276,7 +285,6 @@ def test_carrier_coarse_guard_preserves_density_bitwise(source, sign, geometry):
     }
     assert sha256(actual.tobytes()).hexdigest() == expected[geometry, sign]
     np.testing.assert_allclose(np.trace(actual, axis1=1, axis2=2), 1, atol=1e-12)
-    context.work_plan.close()
 
 
 def test_carrier_coarse_nodes_are_built_once_for_concurrent_consumers(
@@ -285,7 +293,6 @@ def test_carrier_coarse_nodes_are_built_once_for_concurrent_consumers(
     from concurrent.futures import ThreadPoolExecutor
 
     table = scan(np.linspace(0.05, 0.0504, 16))
-    context = KernelContext(source, 1e-3, create_work_plan(table, source))
     batches = []
     eigh = np.linalg.eigh
 
@@ -294,17 +301,18 @@ def test_carrier_coarse_nodes_are_built_once_for_concurrent_consumers(
             batches.append(nodes.shape)
         return eigh(nodes, *args, **kwargs)
 
-    def consume(rows):
-        return playback(table, context, order=[rows])[rows]
+    with create_work_plan(table, source) as plan:
+        context = KernelContext(source, 1e-3, plan)
 
-    with monkeypatch.context() as patch:
-        patch.setattr(np.linalg, "eigh", observe)
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            results = list(pool.map(consume, [np.arange(8), np.arange(8, 16)]))
+        def consume(rows):
+            return playback(table, context, order=[rows])[rows]
+
+        with monkeypatch.context() as patch:
+            patch.setattr(np.linalg, "eigh", observe)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(consume, [np.arange(8), np.arange(8, 16)]))
     assert len(batches) == 1, "one single-flight node eigensystem per phase grid"
     assert batches[0][1:] == (2, 3, 3)
-    reference = playback(
-        table, KernelContext(source, 1e-3, create_work_plan(table, source))
-    )
+    with create_work_plan(table, source) as plan:
+        reference = playback(table, KernelContext(source, 1e-3, plan))
     np.testing.assert_array_equal(np.concatenate(results), reference)
-    context.work_plan.close()
