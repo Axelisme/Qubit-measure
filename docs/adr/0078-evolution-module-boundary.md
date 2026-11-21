@@ -338,7 +338,9 @@ exact-result memo 由 `simulate.adc.CavityAverageCache` 擁有，集中完整 lo
 建立至多 64 MiB owner，供 g/e 各點串行共用，並在 return 或 exception 時清理。
 `simulate.ftf.CavityDrive` 只轉交 owner，不組 ADC key。Owner 不留在 Engine、global
 或長駐 source；這讓重複 flat 積分可重用，又不延長數值產品的 acquire lifetime。
-Shaped/callable 路徑、末態場與主分支選擇不進 memo。
+
+2026-11-21，designer 依使用者授權（「我授权你的范围除了 push 还有真实硬体之外都可以做」）代裁，使用者尚未覆核：同一個 owner 也收錄 flat span 中各 state 的端點場。ADC 在一次 flat span 求解中，同時記下二階矩和所有 state 的端點場。key 由 ADC 定義，以數值型別與位元編碼涵蓋所有會改變輸出的輸入，只忽略 span 結束前都未作用的 pulse 振幅。無法證明等價時（例如窄精度時間讓 ringdown 端點不同）照舊分別求解、不收錄。兩種產品合計 64 MiB，滿額不收錄、不逐出，壽命與清理同上。FTF 照原規則選態、建 Stark／dephasing shift，並把場傳給下一段，不組 ADC 的 key。Shaped/callable 路徑與主分支選擇不進 memo；projective 路徑仍沿用既有的 flat 二階矩 memo，不收錄各 state 的端點場。原因：`mist/flux_dep` 在正常參數下只重用二階矩，毛上限是讀出的 37.88%，達不到 3 分鐘門檻；加上端點場後，正式排他重測從 281.5 s 降到 163.3 s。比較見[MIST 腔場重用](../discussions/2026-11-21-mist-cavity-reuse.md)。
+
 排程共用接縫保留 `Kernel`、`Prepared`、`RowPlan` 與 `ApplyContext`，不把它們提升為對外擴充框架。
 `PathDiagnostics` 仍按 family 名稱計數，builder 與 frame variant 是內部資訊。
 
