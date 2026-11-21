@@ -129,7 +129,9 @@ def _execute_acquire(
 ) -> RoundStatistics:
     round_request = RoundRequest(acquire, snapshot() if state is None else state, 0)
     result = expect_statistics(source.execute(round_request))
-    source.finish_acquire(AcquireOutcome((round_request,), 1.0, 0.0, True))
+    source.finish_acquire(
+        AcquireOutcome((round_request,), 1.0, 0.0, True, f"test:{acquire.sequence}")
+    )
     return result
 
 
@@ -471,7 +473,9 @@ def test_round_keeps_the_selected_dimension_but_uses_live_dc(tmp_path: Path) -> 
             RoundRequest(acquire, state, index)
             for index, state in enumerate((before, before, before, after, after))
         )
-        source.finish_acquire(AcquireOutcome(rounds, 1.0, 0.0, True))
+        source.finish_acquire(
+            AcquireOutcome(rounds, 1.0, 0.0, True, f"test:{acquire.sequence}")
+        )
         _execute_acquire(source, replace(acquire, sequence=acquire.sequence + 1), after)
     finally:
         source.close()

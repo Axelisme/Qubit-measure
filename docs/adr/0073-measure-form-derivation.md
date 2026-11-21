@@ -81,9 +81,9 @@ status: accepted
 
 **例子。** 呼叫端用 `Template.bindings` 明填 `qubit → $qubit` 或 `qubit → $qubit1`。模板展開只使用這份替換，不解析 alias。建構先驗宣告語法與結構，展開時缺 binding 才報 `ValueError`。詳見 [cfg_model README](../../lib/zcu_tools/cfg_model/README.md)。
 
-**邊界。** Session、startup 與 FormEnv 不提供模板綁定預設值。`bath_reset.pi2_cfg` 用 x90 Slot，有來源就保留引用，缺來源保持 Invalid，不改回 pi2_pulse 或數字初值。沒有函式型範本；第二個需要依 ctx 選來源的範本出現時再討論。
+**邊界。** Session、startup 與 FormEnv 不提供模板綁定預設值。`bath_reset.pi2_cfg` 用 x90 Slot，有來源就保留引用，缺來源保持 Invalid，不改回 pi2_pulse 或數字初值。沒有函式型範本；第二個需要依 ctx 選來源的範本出現時再討論。Lab Form factory 需要讀範本 seeds 時，由 `zcu_lab/definitions.py::register_all` 從注入的 `registry.templates` 綁定，不 import 全域 `TEMPLATES`；第三個這種 factory 出現時，改評由 `FormContext` 提供 catalog。
 
-**依據。** 2026-10-14，使用者：「A是理想，但目前沒有用的話就C」。2026-10-20，使用者：「你搞錯了吧，模板/alias是不同的東西，後者才是startup填的」「模板是form adapter提供的工具的語法，讓呼叫端可以填需要的名子，比如$qubit或$qubit1，來展開成使用不同alias的表達式」。原始討論未入庫，目錄的設計背景見 [Measure 表單重設計](../discussions/2026-10-13-measure-form-redesign.md)。
+**依據。** 2026-10-14，使用者：「A是理想，但目前沒有用的話就C」。2026-10-20，使用者：「你搞錯了吧，模板/alias是不同的東西，後者才是startup填的」「模板是form adapter提供的工具的語法，讓呼叫端可以填需要的名子，比如$qubit或$qubit1，來展開成使用不同alias的表達式」。原始討論未入庫，目錄的設計背景見 [Measure 表單重設計](../discussions/2026-10-13-measure-form-redesign.md)。2026-11-21，factory 的 catalog 綁定是 designer 代裁，使用者未覆核；依據是使用者同日「一般实验用简单的做法就好了，有需求再做多余的设计」。見 [readout 時序預設](../discussions/2026-11-21-readout-timing-defaults.md)。
 
 ### Core 使用具名裝置欄位
 

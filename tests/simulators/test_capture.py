@@ -288,6 +288,7 @@ def test_direct_ftf_finish_publishes_capture_and_telemetry_with_detached_round(
                 wall_s=7.0,
                 compile_wall_s=0.0,
                 complete=True,
+                acquire_id="fixture-acquire",
             )
         )
     finally:

@@ -50,9 +50,6 @@ from zcu_lab.v2.twotone.ro_optimize._rpi_common import (
     valid_values,
 )
 
-# The readout pulse is the ADC window plus this margin, in us, at every setting.
-PULSE_MARGIN_US = 0.11
-
 LENGTH_AXIS = SweepAxis(
     setting_name="window", label="ADC window (us)", unit="us", digits=5
 )
@@ -96,15 +93,17 @@ class RPiLengthAnalysis:
 
 
 class RPiLengthCfg(ConfigBase):
-    """Readout and pi modules, the ADC window sweep and the averaging counts.
+    """Readout and pi modules, the ADC window sweep, margin and averaging counts.
 
     readout: Readout module. Run replaces its ADC window with the sweep and its
-        pulse length with that window plus 0.11 us. The wait between the readout
-        generator end and the pi is its post_delay plus the pre_delay of
-        pi_pulse, both in us.
+        pulse length with that window plus length_margin. The wait from the
+        readout generator end to the pi pulse adds the readout post_delay and
+        pi_pulse pre_delay, both in us.
     pi_pulse: Calibrated pi pulse, the same at every window. Run keeps all of its
         settings; its pre_delay in us is usually 0.
     length: ADC window sweep in us.
+    length_margin: Finite, nonnegative time in us added to each ADC window
+        to set the readout pulse length.
     reps: Cycles of 64 R-pi per window in each round, at least 1.
     rounds: Software rounds, at least 1.
     """
@@ -125,6 +124,14 @@ class RPiLengthCfg(ConfigBase):
             description="ADC window sweep.",
         ),
     ]
+    length_margin: Annotated[
+        float,
+        FieldMeta(
+            label="Length margin",
+            unit="µs",
+            description="Time added to each ADC window to set the readout pulse length.",
+        ),
+    ] = Field(strict=True, allow_inf_nan=False, ge=0)
     reps: Annotated[
         int,
         FieldMeta(
@@ -171,7 +178,7 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
             result_type=RPiLengthResult,
             cfg_type=RPiLengthCfg,
             tag="twotone/ro_optimize/rpi_length",
-            cfg_schema_version="3.0",
+            cfg_schema_version="4.0",
             result_builder=restore_result,
         )
     )
@@ -181,11 +188,12 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
 
         The host builds one program per window. Each program sets the ADC window
         to the swept value, rounded to the ADC clock, and the readout pulse to
-        that window plus 0.11 us. The pi pulse and every other readout setting,
-        including post_delay, stay fixed. One rep is one cycle of 64 pairs of
-        the readout and cfg.pi_pulse. All cfg.reps reps of one window run before
-        the next window, with no reset or relax delay. Rep, round and window boundaries
-        never contribute lag pairs.
+        that window plus cfg.length_margin in us, rounded to the generator
+        clock. The pi pulse and every other readout setting, including
+        post_delay, stay fixed. One rep is one cycle of 64 pairs of the readout
+        and cfg.pi_pulse. All reps and rounds at one window finish before the
+        next window, with no reset or relax delay. Lag pairs never cross rep,
+        round or window boundaries.
 
         Inside a rep, each pi starts cfg.readout.post_delay plus
         cfg.pi_pulse.pre_delay us after the readout generator pulse ends, even
@@ -252,7 +260,7 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
                     "readout",
                     cfg.readout,
                     ro_length=step.value,
-                    length=step.value + PULSE_MARGIN_US,
+                    length=step.value + cfg.length_margin,
                 )
                 pi_pulse = Pulse("pi_pulse", cfg.pi_pulse)
                 with builder.repeat("rpi", READS_PER_REP):
