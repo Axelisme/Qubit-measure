@@ -1,5 +1,6 @@
 """Engine timeline geometry and physical row projection through kernel observations."""
 
+from collections.abc import Mapping
 from contextlib import closing
 from dataclasses import replace
 from threading import Event
@@ -7,10 +8,12 @@ from threading import Event
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import (
+    Cancelled,
     Engine,
     EnvelopeSpec,
     FluxSchedule,
     ModelSource,
+    RoutingHistory,
     SecularModel,
 )
 
@@ -193,6 +196,41 @@ def test_waveform_time_and_complex_samples_remain_distinct_in_one_acquire():
     np.testing.assert_array_equal(
         result.densities, np.repeat(src.initial_density[None], 3, axis=0)
     )
+
+
+def test_stop_during_geometry_does_not_record_routing_usage():
+    cancel = Event()
+    model = synthetic_model()
+    recorded: list[dict[bytes, int]] = []
+
+    class History(RoutingHistory):
+        def record_gate_usage(
+            self, inventory: Mapping[bytes, int], *, content: bytes
+        ) -> dict[bytes, int]:
+            recorded.append(dict(inventory))
+            return super().record_gate_usage(inventory, content=content)
+
+    def build(level):
+        if level == (1,):
+            cancel.set()  # The driven, non-DC row requests this model during geometry.
+        return replace(model, level=level)
+
+    shaped = EnvelopeSpec(
+        "sampled", sample_ns=np.array([0.0, 1.5, 3.0]), samples=np.array([0, 1, 0])
+    )
+    driven = replace(
+        batch(1),
+        tracks=(track(1, shaped),),
+        flux=FluxSchedule(np.array([0, 1]), np.array([0.0]), np.array([[1]])),
+    )
+    with (
+        closing(ModelSource(np.diag([1.0, 0.0, 0.0]), build, history=History())) as src,
+        closing(Engine(1, backend="cpu")) as engine,
+        pytest.raises(Cancelled),
+    ):
+        engine.evolve(src, (driven,), cancel=cancel)
+
+    assert not recorded
 
 
 def test_active_unknown_port_raises_value_error():

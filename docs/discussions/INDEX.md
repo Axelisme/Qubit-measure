@@ -23,6 +23,10 @@
 
 ## 模擬量測環境
 
+- 2026-11-21 [Projective 腔場改走 ADC flat span 合併解](2026-11-21-projective-span-reuse.md)：快取歸屬。Projective 與 MIST 都向 ADC 取 flat 二階矩與各 state 端點場，只在 exact key 命中時重用，FTF 仍逐 history 選態與建 shift；兩路共用 512 MiB，`CavityDrive` 只留 `cache=`；三個固定前綴同 seed density 相等、獨立端點解歸零。
+
+- 2026-11-21 [FTF Stop：合作式檢查點與取消傳輸](2026-11-21-ftf-stop-checkpoints.md)：停止與取消。不設上限、設計上檢查間隔 5 秒；取消經 SimulationSoc request 生命週期到兩個 QICK round 入口，零輪拋既有停止例外；cold 首跑與 Engine 內剩餘區段未達 5 秒，另開 task 承接。
+
 - 2026-11-21 [FTF 合法讀出時序的 ADC image、drive admission 與到達時間缺口](2026-11-21-ftf-legal-readout-timing.md)：時序邊界。具名 ADC config 保留物理 image、無來源 raw 字按 DDS 同餘類解調，純 drive DAC 由 `drive_generators` admission；在途漏配明確拒絕，完整到達時間模型與 E2E 留待落地後排他重測。
 
 - 2026-11-21 [raw ADC 頻率字改成編譯時拒絕](2026-11-21-raw-adc-word-reject.md)：刪除或收窄。無具名來源的 raw ADC 字編譯時拒絕，拿掉 DDS 同餘類與 Six 同餘選路。
@@ -100,6 +104,7 @@
 - 2026-11-21 [牆鐘報表的 guide 與輸入](2026-11-21-wall-time-coverage.md)：宣告歸屬。Adapter 交付 guide 路徑；工具固定模擬輸入，只計 Run 到終態。
 - 2026-11-21 [牆鐘工具如何記錄 Run 失敗](2026-11-21-wall-time-run-failed.md)：失敗隔離。Controller 回報失敗時先寫列；idle 才續跑；exit status 區分未判定列與工具錯誤。
 - 2026-11-21 [牆鐘報表如何重建中斷列](2026-11-21-wall-time-interrupted-rows.md)：刪除或收窄。派送前 journal 不能證明 Run 耗時，重建不填秒數或下限。
+- 2026-11-21 [模擬器核心耗時：從完整 Run 讀，不建凍結場景](2026-11-21-simulator-core-time.md)：量測指標。3 分鐘目標讀完整 Run 中的編譯、演化、讀出與 raw materialize；延後的 raw 以 acquire 身分補列；不完整列只報下限，下限嚴格大於 180 秒才判超標；錄製重播與手寫場景因維護成本否決。
 
 - 2026-11-15 [模擬器測試與量測的分層](2026-11-15-simulator-test-measurement-layering.md)：分層。Kernel、dispatch、序列、前端與 environment 分開驗，退休 acquire e2e 量測，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 
@@ -154,6 +159,7 @@
 - 2026-11-20 [v2 實驗命名與顯示：先對齊 two_qubit 的圖](2026-11-20-experiment-naming-and-display.md)：命名取捨。全 v2 共用分類，先定使用者看得到的名字；第一批只對齊 two_qubit 的圖與 guide 首標，不改 key、tag 或 cfg。
 - 2026-11-21 [表單預設超過板子限制，錯誤解析放知識庫](2026-11-21-form-board-limits.md)：文件邊界。指南描述實驗行為，知識庫說明板子限制與錯誤；修正 `reset_check` 的 gain 和 CPMG 的 Minimum time 預設值，決策見 [ADR-0073](../adr/0073-measure-form-derivation.md)、[ADR-0075](../adr/0075-agent-interface-layers.md#判讀依據放知識庫)。
 - 2026-11-21 [Gain 固定範圍：表單只驗純量，掃描留給 Run](2026-11-21-form-gain-range.md)：刪除或收窄。表單以既有 annotation 限制純量 gain；一般掃描保留 `SweepCfg`，超界點在 acquisition 前被拒。
+- 2026-11-21 [readout 時序預設：固定長度差與光子衰減等待](2026-11-21-readout-timing-defaults.md)：初值與預設值。範本前後各留 0.015 µs，chain／Rπ length 改用可編輯長度差（schema 6.0／4.0），mux post_delay 種子取 5/(2π·κ)；範本差值讀注入的 catalog。
 
 ## 模組邊界
 
@@ -198,4 +204,8 @@
 - 2026-11-20 [Two-qubit RB 在 Clifford 邊界對齊兩條時間線](2026-11-20-rb-clifford-barrier.md)：排程修正。2026-11-15 的並行排程只在 CZ 同步，reference 組相鄰 Clifford 會重疊，interleaved 組不會；改為兩組都在 Clifford 邊界 join，interleaved 時序不變、reference 變長，新舊資料不混比。
 - 2026-11-20 [RB 每個 depth 的誤差棒](2026-11-20-rb-errorbars.md)：圖上診斷。畫 seed 間標準差，不加 shot noise 參考線，不改 Analyze 回傳；RB 與 IRB 數值工具合併。
 - 2026-11-21 [Herald 後的等待由 readout 的 post_delay 擁有](2026-11-21-herald-wait-readout-post-delay.md)：欄位歸屬。Herald 後的等待由 readout 的 `post_delay` 擁有，不加獨立欄位；guide 寫需求、症狀與驗證方法。
-- 2026-11-21 [讀出鏈的 pulse 長度與間隔](2026-11-21-chain-readout-spacing.md)：讀出時序。chain_length 用唯讀飛行時間校準換算 pulse 長度，九個 chain 實驗等前一個 pulse 結束加 post-delay，不另等 ADC 關窗。
+- 2026-11-21 [Mux readout 的 post_delay 從五個光子衰減時間起步](2026-11-21-mux-readout-post-delay-seed.md)：表單初值。Mux Open／Reset 用 `5 / (2π · κ)` 給起點，操作者再用 herald 後的名目 Xπ 驗證。
+- 2026-11-21 [讀出鏈的 pulse 長度與間隔](2026-11-21-chain-readout-spacing.md)：讀出時序。九個 chain 實驗等前一個 pulse 結束加 post-delay，不另等 ADC 關窗。該篇的 pulse 長度公式已局部取代。
+- 2026-11-21 [Chain length 掃描固定 pulse 與 ADC window 的長度差](2026-11-21-chain-length-fixed-margin.md)：讀出時序。每點 pulse 長度為當點 ADC window 加上可編輯的長度差，不在 cfg 另填飛行時間。
+- 2026-11-21 [Rπ length 沿用讀出模組的長度差](2026-11-21-rpi-length-fixed-margin.md)：讀出時序。Rπ 的 ADC window 掃描沿用可編輯的模組長度差，保留交替脈衝序列與結果形狀。
+- 2026-11-21 [讀出範本在 ADC 窗口前後各留 0.015 µs](2026-11-21-readout-template-window-margin.md)：預設時序。範本、DPM 寫回與普通 onetone 表單共用 0.03 µs 的長度差。

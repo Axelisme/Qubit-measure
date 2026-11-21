@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, readout pulse history and approximation measurements
+**Last updated:** 2026-11-21, readout pulse history, approximation measurements, shared ADC span memo and timing telemetry
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -93,7 +93,7 @@ captures, retention and the cache directory.
 ## Routing telemetry
 
 `numerics.telemetry.enabled` defaults to **True**. Each admitted acquire writes
-one JSON line, including all software rounds and partial work after a failure.
+one main JSON line, including all software rounds and partial work after a failure.
 `numerics.telemetry.directory` defaults to `null`, selecting
 `<project root>/.sim_telemetry/routing-YYYYMMDD.jsonl`. Dates and timestamps use
 UTC. Relative explicit directories resolve at environment startup. The GUI and
@@ -102,7 +102,7 @@ experiment acquisition calls need no changes.
 YAML switches and `settings.with_telemetry(...)` setup belong to
 [environment configuration](../../../../../zcu_lab/simulation_envs/README.md#關閉補等與-telemetry).
 
-Each line contains `timestamp`, `points` (request grid, excluding shots),
+Each main line contains `timestamp`, `points` (request grid, excluding shots),
 `rounds` (captured attempts), `wall_s` (admitted acquire time including pacing,
 excluding telemetry I/O), `frontend_cpu_s` (geometry and WorkPlan calling-thread
 CPU), `estimated_cost_unit` and `families`. Failed calls
@@ -116,7 +116,8 @@ omitted rather than guessed from controls or caller frames.
 The [shared telemetry contract](../../README.md#acquire-telemetry) lists the
 persisted family fields and defines the common summary and directory settings.
 `FTFSource.finish_acquire(outcome)` receives the binding's `AcquireOutcome` and
-projects its builder-only `compile_wall_s` and `complete`.
+projects its builder-only `compile_wall_s`, in-acquire raw-shot
+`materialize_wall_s` and `complete`.
 `complete` means the acquire body and cleanup returned normally, including partial
 Stop results. An escaping error is false.
 `evolve_wall_s` sums each `Engine.evolve` call, including dimension pilots,
@@ -126,7 +127,10 @@ ADC preparation and integrated or decimated sampling. These scopes do not overla
 evolution. A failing call contributes time through its exception; a stage never
 entered contributes `0.0`. Reusing a preparation adds no evolution wall, but still
 counts fresh round sampling. Preparation and pacing remain in total wall's
-remainder. Raw-shot materialization requested after acquire is outside this row.
+remainder. If a later getter materializes retained raw and returns successfully,
+the writer appends a [supplemental timing record](../../README.md#acquire-telemetry).
+The supplement carries the original `acquire_id` and materialization time, not
+`points` or `families`.
 FTF records one dimension decision per acquire in `extras`, not per round.
 See [Dimension selection](#dimension-selection) for the cases that skip the pilot.
 
@@ -166,6 +170,7 @@ are gitignored. `tools/analyze_routing_telemetry.py <directory or files...>` rep
 wall stages and their remainder by normal return, escaping error or unknown
 outcome, family usage shares, rejection counts, CPU per relative cost unit, and
 weighted `(actual - estimated) / estimated` error where CPU estimates exist.
+These statistics use main rows only.
 
 ## Numeric source
 
@@ -648,14 +653,29 @@ every key through `Engine.reuse`. Projective continuation keys identify the
 original point, ordered histories, initial densities and span shifts. A failed
 or cancelled batch publishes no partial preparation.
 
-One ADC `CavityAverageCache` serves each cavity span composition. Its 64 MiB
-budget is shared by g/e points of that composition, not across bias models. The
-non-projective path reuses ADC flat second moments and all-state endpoint fields.
-FTF selects the main branch and builds each `SegmentShift` without a second memo.
-Projective continuation still reuses only flat second moments. Neither path
-caches shaped inputs. ADC owns keys, arrays and admission. Composition clears
-all entries on return or exception; Engine and the long-lived source do not
-retain the owner.
+One ADC `CavityAverageCache` serves each cavity span composition. FTF sets a
+512 MiB budget per composition. Its g/e points share the owner; different bias
+models do not. ADC's library default remains 64 MiB.
+Both projective and non-projective paths call `CavityAverageCache.span`.
+An exact key match reuses flat second moments and all-state endpoint fields.
+FTF selects the main branch, builds each `SegmentShift`, and passes the selected
+field to the next span. Projective continuation does these steps separately for
+each history, without a second memo. Neither path caches shaped inputs. ADC owns
+keys, arrays and admission. Composition clears all entries on return or
+exception; Engine and the long-lived source do not retain the owner.
+
+In the fixed projective prefixes, `chain/amp_rabi` and `chain/len_rabi` gain no
+hits above 64 MiB. For `chain_length` at 2.2 µs, the 64, 128, 256 and 512 MiB
+budgets give 5,686, 8,284, 14,392 and 19,346 exact hits in 29,921 spans. Each
+doubling adds more than 10% of the 19,346 cross-history repeat opportunities.
+At 512 MiB the memo admits every distinct key in the prefix, so a larger budget
+adds no hits there. The peak memo holds 475,546,067 B. The process peak RSS is
+385 MiB higher than at 64 MiB, the largest increase of the three prefixes.
+
+A complete `mist/flux_dep` Run gives 20,200 exact hits and no declines at either
+64 or 512 MiB. The largest owner holds 8,991,628 B in both runs. The observed
+process peak RSS is 3.49 MiB lower at 512 MiB, within the 512 MiB increase limit
+for sharing the budget across both FTF paths.
 
 When a cavity-drive Stark shift reverses two adjacent state energies, FTF
 continues with the same dispersive calculation and keeps the original state order.

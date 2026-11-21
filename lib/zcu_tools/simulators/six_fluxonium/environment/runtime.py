@@ -305,9 +305,11 @@ class SixFluxoniumSource:
                     "points": prod(outcome.rounds[0].acquire.point_dims)
                     if outcome.rounds
                     else 0,
+                    "acquire_id": outcome.acquire_id,
                     "rounds": len(outcome.rounds),
                     "wall_s": outcome.wall_s,
                     "compile_wall_s": outcome.compile_wall_s,
+                    "materialize_wall_s": outcome.materialize_wall_s,
                     "evolve_wall_s": sum(
                         source.evolve_wall_s for source in self.sources
                     ),
@@ -631,6 +633,9 @@ def six_fluxonium(  # noqa: PLR0913  # tolerated: independent optional controls 
                 on_begin=lambda: source.begin_acquire(seed=binding.root_seed),
                 on_end=source.finish_acquire
                 if source.telemetry is not None or settings.numerics.debug_capture
+                else None,
+                on_materialize=source.telemetry.write_materialize
+                if source.telemetry is not None
                 else None,
             ),
         )

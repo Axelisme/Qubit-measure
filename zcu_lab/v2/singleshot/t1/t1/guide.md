@@ -23,7 +23,7 @@ Linear has no Other state and is rejected.
 Analyze corrects populations only with the saved readout cfg's confusion matrix.
 Historical cfg without a classifier or matrix skips correction.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
 The ordinary T1 sweep stop is 5 times the same time scale, initially 150 us when T1 is missing.
 

@@ -11,7 +11,7 @@ from zcu_tools.simulate.boundary import AcquireRequest, CancellationQuery, Round
 
 from .binding import SimulationBinding
 from .result import IntegratedRound
-from .signals import StatisticsCopier, materialize_shots, pack_signals
+from .signals import StatisticsCopier, pack_signals
 
 
 def _validate_routes(routes: object) -> None:
@@ -67,7 +67,7 @@ class SimulationSoc(QickConfig):
             if not 0 <= gen < len(self["gens"]):
                 raise ValueError(f"invalid simulation drive generator {gen}")
         self._request: AcquireRequest | None = None
-        self._pacing_cancel: CancellationQuery | None = None
+        self._cancel: CancellationQuery | None = None
         self._round_index = 0
         self._accumulated = {}
         self._decimated = {}
@@ -77,14 +77,14 @@ class SimulationSoc(QickConfig):
         self._raw_request: AcquireRequest | None = None
 
     def install_request(
-        self, request: AcquireRequest, *, pacing_cancel: CancellationQuery | None = None
+        self, request: AcquireRequest, *, cancel: CancellationQuery | None = None
     ) -> None:
         """Admit detached controls only when every used channel is wired.
 
         request is borrowed until release_request. Validate every execution's
         generator and ADC routes before retaining it or invoking the backend.
-        pacing_cancel optionally interrupts round waiting only; None disables it.
-        It is borrowed until release_request and never reaches numeric execution.
+        cancel supplies read-only cancellation for numeric execution and pacing
+        in every round. None disables it. The query is borrowed until release_request.
         ValueError identifies an unbound generator's source module/channel, or
         an unbound generator/ADC route. This method does not generate signals.
         """
@@ -102,32 +102,29 @@ class SimulationSoc(QickConfig):
                 ):
                     raise ValueError("program uses an unbound generator/ADC route")
         self._request = request
-        self._pacing_cancel = pacing_cancel
+        self._cancel = cancel
         self.binding.last_request = request
         self._round_index = 0
 
     def release_request(self) -> None:
+        """Clear the installed controls and cancellation query, keeping results."""
         self._request = None
-        self._pacing_cancel = None
+        self._cancel = None
 
-    def run_round(
-        self, *, cancel: CancellationQuery | None = None
-    ) -> IntegratedRound | RoundSignals:
+    def run_round(self) -> IntegratedRound | RoundSignals:
         """Execute the next installed round and detach/validate its numeric result.
 
         Statistics remain compact until an accumulated getter is used. Signals
         populate the usual buffers immediately. Raise on absent request or invalid
         backend data; a successful call advances the software round index.
-        cancel is queried by evolution between chunks; None disables it. Cancelled
-        propagates without advancing the index or replacing completed buffers.
+        The installed cancellation query reaches numeric execution and pacing.
+        A backend Cancelled propagates without advancing the index or replacing
+        completed buffers. A trace computed before pacing is interrupted still counts.
         """
         if self._request is None:
             raise RuntimeError("simulation has no active acquisition request")
         result = self.binding.sample_round(
-            self._request,
-            self._round_index,
-            cancel=cancel,
-            pacing_cancel=self._pacing_cancel,
+            self._request, self._round_index, cancel=self._cancel
         )
         self._statistics = None
         if isinstance(result, IntegratedRound):
@@ -190,7 +187,7 @@ class SimulationSoc(QickConfig):
                 raise RuntimeError("raw transport requires a retained round request")
             self._accumulated = {
                 ch: raw.reshape(-1, 2)
-                for ch, raw in materialize_shots(
+                for ch, raw in self.binding.materialize_raw(
                     self._raw_request, self._statistics.raw
                 ).items()
             }
