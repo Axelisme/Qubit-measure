@@ -9,11 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 
-from zcu_tools.program.acquisition import (
-    CancelFlagProtocol,
-    ImproveAcquireMixin,
-    StoppedPartialAcquireError,
-)
+from zcu_tools.program.acquisition import CancelFlagProtocol, ImproveAcquireMixin
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
@@ -176,11 +172,9 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         try:
             result = soc.run_round()
         except Cancelled:
-            return self._finish_cancelled_backend_round(soc)
+            return self._stop_interrupted_round()
         if cancel_flag.is_set():
-            soc.cleanup_round()
-            self._close_rounds_pbar()
-            return False
+            return self._stop_interrupted_round()
         if not isinstance(result, IntegratedRound):
             raise ValueError("integrated acquisition requires IntegratedRound")
         self._consume_integrated_result(soc, result)
@@ -204,18 +198,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         try:
             return super()._finish_decimated_round()
         except Cancelled:
-            return self._finish_cancelled_backend_round(soc)
-
-    def _finish_cancelled_backend_round(self, soc: SimulationSoc) -> bool:
-        soc.cleanup_round()
-        self._close_rounds_pbar()
-        # The backend can cancel without setting the caller's flag. Do not let
-        # QICK average an empty round buffer in that case.
-        if self._completed_round_count() == 0:
-            raise StoppedPartialAcquireError(
-                "acquire stopped before the first round completed"
-            )
-        return False
+            return self._stop_interrupted_round()
 
     def _program(self) -> "MyProgramV2":
         from ..base import MyProgramV2
