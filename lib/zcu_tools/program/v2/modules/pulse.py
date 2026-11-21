@@ -43,6 +43,11 @@ class PulseCfg(AbsModuleCfg):
         return Pulse(name, self)
 
     def set_param(self, name: str, value: float | QickParam) -> None:
+        """Set freq (MHz), phase (degrees), length (us) or normalized gain.
+
+        Assigning a scalar gain outside [-1, 1] raises ValidationError.
+        Unknown names raise ValueError; waveform length restrictions apply.
+        """
         if name == "length":
             self.waveform.set_param(name, value)
         elif name in {"gain", "freq", "phase"}:
@@ -94,10 +99,10 @@ class Pulse(Module):
         pulse template; matching envelope samples are shared even then.
         freq (MHz), gain (normalized), phase (degrees) and length (us) override
         the copied cfg via set_param; None keeps cfg. Waveform length restrictions
-        apply, including ValueError for unsupported sweeps. Scalar gain outside
-        [-1, 1] raises ValidationError. With cfg=None, non-None overrides raise
-        ValueError because there is no pulse to update.
-        Unknown override keys or nonnumeric values raise TypeError.
+        apply, including ValueError for unsupported sweeps. Applying a scalar
+        gain outside [-1, 1] raises ValidationError during construction. With
+        cfg=None, non-None overrides raise ValueError because there is no pulse
+        to update. Unknown override keys or nonnumeric values raise TypeError.
         """
         self.name = name
         self.cfg = deepcopy(cfg) if cfg is not None else None

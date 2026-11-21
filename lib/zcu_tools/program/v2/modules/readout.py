@@ -110,6 +110,7 @@ class PulseReadoutCfg(AbsReadoutCfg):
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set shared freq (MHz), gain, generator phase (deg), length or ro_length (us).
 
+        Assigning a scalar gain outside [-1, 1] raises ValidationError.
         Unsupported names raise ValueError; waveform length restrictions apply.
         """
         if name == "length":
@@ -289,9 +290,11 @@ class Readout:
     ) -> AbsReadout:
         """Build a detached readout with optional MHz/gain/us overrides.
 
-        None keeps cfg. Pulse readout accepts freq, gain, length and ro_length;
-        mux rejects non-None overrides with ValueError. Waveform set_param
-        restrictions propagate. Unknown keys or nonnumeric values raise TypeError.
+        None keeps cfg. Pulse readout accepts freq, gain, phase, length and
+        ro_length. Applying a scalar gain outside [-1, 1] to a pulse readout cfg
+        raises ValidationError during construction. Mux rejects non-None overrides
+        with ValueError. Waveform set_param restrictions propagate. Unknown keys
+        or nonnumeric values raise TypeError.
         The caller's cfg is never modified.
         """
         effective = deepcopy(cfg)
@@ -332,8 +335,9 @@ class PulseReadout(AbsReadout):
         name identifies ADC and pulse templates. cfg is copied and not mutated.
         freq (MHz), gain (normalized), phase (degrees), length and ro_length (us)
         override the copied cfg via set_param. None keeps cfg; unsupported waveform
-        length sweeps raise ValueError. Scalar gain outside [-1, 1] raises
-        ValidationError. TableParam ro_length raises NotImplementedError.
+        length sweeps raise ValueError. Applying a scalar gain outside [-1, 1]
+        raises ValidationError during construction. TableParam ro_length raises
+        NotImplementedError.
         init must precede run. Invalid QICK settings
         fail during initialization. Unknown keys or nonnumeric overrides raise TypeError.
         """
