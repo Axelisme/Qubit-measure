@@ -40,15 +40,15 @@ status: accepted
 
 **例子。** Library entry 的表單由 session 持有，初始 input 與提交都保留 child key。不能把既有 pulse 改成 readout；換 concrete Spec family 要新建條目。Optional None 維持缺席。選填 `desc` 由生成器略過，提交時用 Spec 預設，不保留舊值；無預設的必填欄位仍可編輯。None、library key 與 Inline kinds 共用一個下拉，key 只顯示名稱，不展開唯讀 descendants。普通選 Inline 按 converter 的型別配對繼承，明確的 `to_inline` 才從固定 library 複製。Advanced 預設折疊，Expression 只用於支援它的文字欄位，不用於下拉或勾選。
 
-**邊界。** 欄位轉換、固定 list 與保存還原依 [[0079]] 的目標契約，實作尚未完成。沒有 converter 時只改 selection，子表單結構和 input 不變。Memento 保留 selection／branch 和原始 input，不保存來源覆寫。還原不跑 converter；型別與固定元素依 [[0079]] 的還原規則處理。Open 與 Reset 計算 defaults；Reset 可在同一資源換形狀及初值，成功後不再接受舊 editor state 寫入。`make_form`、範本及固定來源見 [[0073]]。
+**邊界。** 欄位轉換、固定 list 與保存還原以 [[0079]] 為準。[Form core](../../lib/zcu_tools/gui/form/README.md) 的 `select` 執行宣告的 converter；沒有 converter 時只改 selection，子表單結構和 input 不變。Memento 保留 selection／branch 和原始 input，不保存來源覆寫。`restore_input` 不跑 converter；型別與固定元素依 [[0079]] 的還原規則處理。[生成器的固定元素宣告](../../lib/zcu_tools/gui/form_adapter/README.md#固定元素宣告)只約束選用它的表單。Open 與 Reset 計算 defaults；Reset 可在同一資源換形狀及初值，成功後不再接受舊 editor state 寫入。`make_form`、範本及固定來源見 [[0073]]。
 
 **依據。** 2026-10-18 採用的欄位轉換、固定 list 與保存還原設計見 [[0079]]。生成器與 widget 的分層見[選項分層討論](../discussions/2026-10-13-form-options-layering.md)，實作細節見[生成器 README](../../lib/zcu_tools/gui/form_adapter/README.md)。
 
 ## Input 與宿主提交
 
-**規則。** FormInput 保存未填、null 與 expression 原文，FormModel 實例只承載求值後的普通值。FormState 擁有 draft／base，宿主擁有 Engine revision。FormEditor 保留尚未 parse 的文字及 local parse errors。宿主決定 capture、Apply、Discard 和何時保存 input；提交前先查 editor 的錯誤，再取 Form result，不以 preview 代替。宿主不另建 evaluator、validator 或 codec。
+**規則。** FormInput 保存未填、null 與 expression 原文，FormModel 實例只承載求值後的普通值。FormState 擁有 draft／base，不持有 Engine revision。Workflow 的 revision 由 Engine 持有並發布，見 [[0062]]。FormEditor 保留尚未 parse 的文字及 local parse errors。宿主決定 capture、Apply、Discard 和何時保存 input；提交前先查 editor 的錯誤，再取 Form result，不以 preview 代替。宿主不另建 evaluator、validator 或 codec。
 
-**例子。** Library 與 writeback 提交持久 Spec。Workflow 宿主提交普通 plan／tunables，Engine 成功 publication 後才接受 input／base。Expression 留在 FormInput，不進 Engine journal，見 [[0062]]。
+**例子。** Library 與 writeback 提交持久 Spec。Workflow 宿主提交普通 plan／tunables，並在 Engine 成功發布後才接受 input／base。Expression 留在 FormInput，不進 Engine journal，見 [[0062]]。
 
 **邊界。** 表單用初值與 `Display(readonly=True)` 宣告唯讀。Form core 對 Qt、MCP 與 RPC 採同一規則：同值可寫，不同值拒絕，父層與批次也不能繞過。RPC／MCP 回 `error.reason="form_input_rejected"` 及 `error.data.form_path`；只有唯讀拒絕另附 `error.data.reason="readonly"` 與目前值的 JSON `error.data.current`。還原保留唯讀欄位的存檔值，不重算；能否執行由一般驗證決定，見 [[0079]]。Form core 不依賴 app、widgets、remote、experiment 或 Qt，editor 不依賴 app、remote、experiment 或 MCP。`.importlinter` 的 `form-core-no-ui-policy` 與 `form-editor-no-host` 檢查這兩條邊界。
 

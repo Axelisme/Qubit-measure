@@ -7,7 +7,9 @@ date: 2026-10-18
 
 ## 決策狀態與問題
 
-本篇設計已採用，但實作尚未完成。欄位切換、command 作用範圍與草稿還原以本篇為準，局部取代 [ADR-0065](0065-cfg-editing.md#局部取代範圍) 與 [ADR-0073](0073-measure-form-derivation.md#局部取代範圍)。本篇也擴充 [[0068]] 的 indexed paths 與 recipe 契約。既有 guard、capture、Run／Load 與 writeback 所有權不變。
+欄位切換、command 作用範圍與草稿還原以本篇為準，局部取代 [ADR-0065](0065-cfg-editing.md#局部取代範圍) 與 [ADR-0073](0073-measure-form-derivation.md#局部取代範圍)。本篇也擴充 [[0068]] 的 indexed paths 與 recipe 契約。既有 guard、capture、Run／Load 與 writeback 所有權不變。
+
+[Form core](../../lib/zcu_tools/gui/form/README.md) 提供選項轉換與草稿還原。[Measure 的 reload](../../lib/zcu_tools/gui/app/measure/README.md#sources-and-workflow)使用共用 codec 與還原入口。[固定元素宣告](../../lib/zcu_tools/gui/form_adapter/README.md#固定元素宣告)也用於 Mux Amp Rabi 的 tones。
 
 Qt、remote 與 recipe 要能在同一份 Form 執行同一操作。領域型別擴充不應改動通用 Core，command 的掛載位置應能說明它會改哪些資料。固定多元素設定需要區分元素位置、顯示名稱與此次執行順序。
 

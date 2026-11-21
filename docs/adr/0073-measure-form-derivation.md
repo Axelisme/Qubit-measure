@@ -6,7 +6,7 @@ status: accepted
 
 ## 局部取代範圍
 
-[ADR-0079](0079-form-field-transitions.md#決策狀態與問題) 局部取代本篇關於普通切換補 fresh defaults、數值葉 command 改 parent，以及僅保存 input 並丟棄不相容葉的規則。欄位轉換與保存還原以該篇的設計為準。設計已採用，實作尚未完成；其餘 owner 邊界不變。
+[ADR-0079](0079-form-field-transitions.md#決策狀態與問題) 局部取代本篇關於普通切換補 fresh defaults、數值葉 command 改 parent，以及僅保存 input 並丟棄不相容葉的規則。欄位轉換與保存還原以該篇為準。[Form core](../../lib/zcu_tools/gui/form/README.md) 提供 `select` 與 `restore_input`，Measure 的 tab 由 Form owner 還原已保存的原始輸入，見 [Measure owner](../../lib/zcu_tools/gui/app/measure/README.md#sources-and-workflow)。其餘 owner 邊界不變。
 
 本篇接替 [[0012]] 的 measure definition／seed 契約與 [[0009]] 的角色 default 表。Library、writeback 與 Inspect 也使用共用 Form，持久 Spec 與提交邊界見 [[0065]]、[[0008]]。實驗核心與前端分工見 [[0069]]。
 
@@ -59,7 +59,7 @@ status: accepted
 - `to_inline` 明確複製固定 library 內容。Widget 與 MCP 用共用 description 的 Option label、value 與 commands，不猜 union 或 library 結構。直接 children 的查詢、wrapper 攤平、完整 model-field path 與首次展開才建子表單的契約見 [Measure tab 的 input 與使用](0065-cfg-editing.md#measure-tab-的-input-與使用)。Inspect、New Entry、writeback 與 workflows 共用這套描述。
 
 **依據。**
-- 2026-10-19，使用者：「我會選B，lock應該被認知為只對子樹作用。」「有一些是為了方便轉換成experiment cfg而塞入的，其實可以改成直接不曝露欄位。run再補齊。」同日 advisor 把 LogPoints 放在與 Range 相同的樹上初值邊界，另定正值分支。原始討論未入庫，見 Git `c499c06d9`、`d2911c048`、`eccae1221`。
+- 2026-10-19，使用者：「我會選B，lock應該被認知為只對子樹作用。」「有一些是為了方便轉換成experiment cfg而塞入的，其實可以改成直接不曝露欄位。run再補齊。」同日 advisor 代裁，讓 LogPoints 與 Range 使用相同的樹上初值邊界，並另定正值分支。未見使用者覆核 LogPoints 這兩項決定的紀錄。原始討論未入庫，見 Git `c499c06d9`、`d2911c048`、`eccae1221`。
 - 2026-10-20，使用者：「應該有更簡單的做法，比如就隨便填一個合法值，或是給adapter生成時說明哪些路徑不重要。」同日補充「不只是onetone/freq有這個問題」。各實驗依自己的 Run 覆寫路徑宣告 Hidden。原始討論未入庫，見 Git `ada1f6895`、`51a3a474b`。
 - 2026-10-30，使用者答「9A」；其中 Template 自有 metadata 的部分仍適用。2026-11-01，使用者以「B，如果要省下重複名字，那就一個factory helper就好」決定由 lab helper 選來源。舊 Slot fallback 的原話與規則未有入庫討論，見 Git `304ba12ef`、`a967ae052`。
 - 2026-11-02，使用者：「我以為生成Form預設值的form_adapter就能處理這種if/else的複雜邏輯，這樣Form就只要呈現就好，或是搭配command或convert或即時計算」，並對 factory 接收宣告初值答「A」。同日問「Factory不能回傳新的樹嗎？他可以原地修改default並回傳吧？」，再以「採用建議」確認由 Form 整份採用回傳樹。原始討論未入庫，見 Git `a8c7eb66a`。
@@ -149,7 +149,7 @@ status: accepted
 **依據。**
 - 2026-11-21，使用者：「2檢查固定範圍這種簡單的機制可以在form做，太複雜的保留在run抱錯」。同日選擇只留純量：「那就采用建议吧，能够简单实做的机制，那就可以实做。如果需要加上一些需要维护的机制，那就算了。检查这种东西简单就好，对我来说，维护的负担才是重点」。隨後核准原則與邊界：「例子没错，边界也对。简单来说，不影响行为的检查应该以自然、简单即可。」見 [Gain 固定範圍討論](../discussions/2026-11-21-form-gain-range.md)。
 - Mux 保留 participants validator 是 designer 代裁，使用者 2026-11-21 追認：「啊，其余大部分都没有问题啊，整批追认。」
-- Host 掃描的拒絕位置是 designer 代裁，使用者 2026-11-21 追認行為並更正用詞：「行为上是没错，但是什么叫做主该点的 config？我记得目前实作惯例上并没有主 config 的概念吧。因为它是把 config 拆成多个需要用的子 config，然后按需使用，而不是每个 host 点都建一个 config。」兩項追認的原始紀錄未入庫。
+- Host 掃描的拒絕位置是 designer 代裁，使用者 2026-11-21 追認行為並更正用詞：「零零九五的用词也有点怪，呃，行为上是没错，但是什么叫做主该点的 config？我记得目前实作惯例上并没有主 config 的概念吧。因为它是把 config 拆成多个需要用的子 config，然后按需使用，而不是每个 host 点都建一个 config。」兩項追認的原始紀錄未入庫。
 
 ## 取捨
 

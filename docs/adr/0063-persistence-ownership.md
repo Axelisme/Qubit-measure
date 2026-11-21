@@ -166,7 +166,7 @@ Lab 擁有目前版本、步驟與真實舊文件形狀；`scripts/upgrade_param
 
 ### 失敗、路徑與遷移邊界
 
-**規則。** Run accept 先追加一筆 accepted，再按目的地提交：arb 資產一組、parameters 一組、library module／waveform 一組、records 逐筆。組內保留順序。Parameters 與 library 各一次 edit，任一項無效整組不寫。`WritebackResult` 回 accepted event_id 與逐項 committed values；失敗的 `WritebackApplyError.result` 保留已確認前綴與 event_id、applied 數、原 cause。不收回已成功的組或事件，停止後續組。資產 I/O 失敗也保留已確認前綴。Notebook 直接收錯誤，GUI context owner 發布實際成功前綴、service 標記後原樣拋 cause，wire 保留 producer 分類。
+**規則。** Run accept 先追加一筆 accepted，再按目的地提交：arb 資產一組、parameters 一組、library module／waveform 一組、records 逐筆。組內保留順序。Parameters 與 library 各一次 edit，任一項無效整組不寫。`WritebackResult` 回 accepted event_id 與逐項 committed values。Ledger append 失敗時原樣拋出錯誤，不開始後續寫入。Append 成功後若有一組失敗，executor 停止後續組，保留事件與已提交項目。`WritebackApplyError.result` 包含 accepted `event_id` 與已確認的 `committed` 前綴，也保留資產 I/O 失敗前已確認的項目。例外本身公開 `event_id`，以 `applied` 計已確認的項目數，並以 `__cause__` 保留原始錯誤。Notebook 直接收到例外。GUI context owner 發布實際成功前綴，service 標記後原樣拋出 cause；wire 保留 producer 分類。
 
 Owner 在實際寫入時形成逐項值。批次 setter 驗 draft 並捕捉隔離值，整組 commit 後才回傳；record append 回傳當筆完整序列化的 row。Executor 回實際提交順序，accepted 的 writes 保留供應順序。`CommittedWrite.index` 是供應 tuple 的位置，GUI 用它關聯 item ID／pane／目的地，不用 path 或前綴長度推算，也不重開讀回、不拿 proposal 當 actual。後項覆寫父／子路徑不改先前收據。不作 per-item callback、worker、retry 或 rollback。
 

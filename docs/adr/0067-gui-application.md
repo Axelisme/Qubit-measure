@@ -51,7 +51,7 @@ RunContext 提供 devices、cancel_signal 等能力，不提供儀器設定方�
 State 的 owner loop 可用 Qt queued signal 或 headless queue，不要求 core 依賴 Qt 主線程。`pane_commit` 擁有 Measure 的 pane 提交、artifact 規劃、版本、退役清理與未發布 plots 的 discard。State 只交換已備妥的資料並回傳退役資源；唯讀 preview 與 swap 共用退役選擇，不改 State 或清理。Service／control 轉接失效事實，remote 只投影既有 wire 字串與順序。GuardService 判 domain admission，gate 裁 hardware exclusion，operation owner 保留終局、取消及觸發清理的時機。Run、Analyze、PostAnalyze、Load 與 Tab 不各自管理清理。提交順序及失效關係見 [Measure owners](../../lib/zcu_tools/gui/app/measure/README.md#owners)、[[0066]]。這不改 C8／C9 或 artifacts／writeback 分隔契約。
 
 **依據。**
-- 2026-10-29，使用者授權評估及選擇窄 port 的實作：「候選8，需要評估trade-off, 候選11可以做，都允許你自己決定」。沒有把直接使用 owner service 的做法當作使用者逐項裁定。原裁決未附入庫討論，見 Git `14d72247e`。
+- 2026-10-29，使用者授權評估及選擇窄 port 的實作：「候選8，需要評估trade-off, 候選11可以做，都允許你自己決定」。由 designer 在授權下代裁，讓 owner services 直接滿足窄 port。未見使用者覆核紀錄。原始討論未入庫，見 Git `14d72247e`。
 - 2026-10-20，使用者裁定：「我規劃將soc連線與顯示的邏輯從setup dialog獨立出來，成為獨立的dialog並有獨立入口按鈕，新setup dialog的working points移到原本soc區域的右側。」原裁決未附入庫討論，見 Git `602ddda77`。2026-11-16，使用者要求「不要再有setup這個名詞與屬性了」，因此視窗與程式識別都改名 Entry。
 - 2026-10-29，使用者提出：「沒有激活point就用全域的parameter.yaml/module_cfg/alias，有激活就用point內的，每個都是write-through」。對整組切換答「A，我目前先設計成整個作用域換成point，沒有個別的fallback邏輯」。2026-11-16，對「三檔合稱文件組、由 session 持有、每種檔一個形狀相同的開檔入口」答：「A不錯」。文件組與命名的推導及覆核見 [Global／point 參數型別收斂與文件組](../discussions/2026-11-17-global-point-parameter-types-and-document-set.md)。
 - 2026-10-28，使用者說：「我其實沒有要知道來源的需求，這功能純屬於錦上添花」「來源我一直以為只是metadata，沒想要解析」。見 [移除 module provenance 的格式變更](../storage-format-history/2026-10-28-remove-module-provenance.md)。
@@ -91,7 +91,7 @@ State 的 owner loop 可用 Qt queued signal 或 headless queue，不要求 core
 **依據。**
 - 2026-10-20，使用者裁定：「框架內支援的fluxonium/transmon是理論上的兩種qubit，有自己定義的參數，與用戶定義的component解偶」。檔案交接：「我認為還有一個最簡單的，不轉。讓fluxdep的工具寫preditor要用的格式檔，而不是component的欄位。」對 entry 層檔案、格式與 dialog 答：「1先entry吧。2可以。3可以。」原裁決未附入庫討論，見 Git `5b14a43e7`。
 - 2026-10-19，使用者裁決：「採 B，只限 PredictorDialog。依 repo 規則，新 class 有理由：它們各自隱藏真實的控件與局部 state 協調（參數編輯、曲線互動），不是轉接層。照你列的硬邊界（PredictorControlPort／ModelParams／物理 owner 不變、public 行為與文字版面不變、無 Protocol/factory/mixin、callers/tests 同票）。外觀不得改變；ComponentDriver 情境＋逐步 PNG 你親看即可，不需交使用者。」原裁決未附入庫討論，見 Git `28fe32144`。
-- 2026-10-29，使用者授權移動試算狀態與規則：「候選11可以做，都允許你自己決定」。Qt-free trial 的實作見 Git `73e00b1f3` 和上述 Session README。原裁決未附入庫討論。
+- 2026-10-29，使用者授權移動試算狀態與規則：「候選11可以做，都允許你自己決定」。由 designer 在授權下代裁，將試算移到 Qt-free trial。未見使用者覆核紀錄。原始討論未入庫，實作見 Git `73e00b1f3` 和上述 Session README。
 
 ## Experiment figure area
 
@@ -126,7 +126,7 @@ Domain 模組定義事件 enum、payload 及已提交的 fact，不傳 widget �
 
 **邊界。** Capability 不等於當次 readiness、相容性或權限。Run 要 SoC 連線，Run、Load 不另要求 storage；Load、Analyze 不要求目前 context。任何 adapter 都可嘗試 Load，相容性由 spec 決定。不相容顯示原因並保留舊成果。實驗額外驗證在 adapter.run 開頭，不另設 `validate_run_request` hook，不代替 execution guard。定義值與建值檢查見 [Measure adapter contract](../../lib/zcu_tools/gui/app/measure/README.md) 及 [實驗 adapter owner](../../zcu_lab/v2/gui-contracts.md)。
 
-Adapter 只交 data_item、analysis_item 與結果內容，不挑格式或路徑，不寫檔。框架在 owner thread 同步編碼，從已提交 pane 取具名原生圖；資料準備失敗由共用 experiment.artifacts 報對應 data outputs，其餘圖和分析仍嘗試保存。Acquired 寫 record.metadata，不保存 cfg；GUI 不探測 cfg、Result 或分析值的 shape，不收窄 workflow 回傳。GUI handover 與 Qt-free experiment 核心維持 C8／C9 的 GUI → experiment → datafile／resources 方向，`artifacts-core-no-ui` 禁止核心依賴 GUI 或 Qt。`measure-artifacts-no-writeback` 與 `measure-writeback-no-artifacts` 分別保護兩方向；resources.entry executor、remote handler 與 wire types 留原 owner。Pane 持有具名 `WritebackDraft` 或 None，UI 和 remote 不直接操作 draft。Service 協調跨 draft 的預驗證及成功前綴，control 保留 admission、事件和 detached receipt。Draft 狀態與注入的寫入能力見 [Writeback README](../../lib/zcu_tools/gui/app/measure/writeback/README.md)。Proposal 型別由 writeback package 擁有，adapter 公開入口再匯出。
+Adapter 只交 data_item、analysis_item 與結果內容，不挑格式或路徑，不寫檔。框架在 owner thread 同步編碼，從已提交 pane 取具名原生圖；資料準備失敗由共用 experiment.artifacts 報對應 data outputs，其餘圖和分析仍嘗試保存。RunService 從 `record.metadata` 取得歷史欄位，把 `acquired` 事件追加到 ledger，不在事件中保存 cfg，見 [[0063]]。GUI 不探測 cfg、Result 或分析值的 shape，不收窄 workflow 回傳。GUI handover 與 Qt-free experiment 核心維持 C8／C9 的 GUI → experiment → datafile／resources 方向，`artifacts-core-no-ui` 禁止核心依賴 GUI 或 Qt。`measure-artifacts-no-writeback` 與 `measure-writeback-no-artifacts` 分別保護兩方向；resources.entry executor、remote handler 與 wire types 留原 owner。Pane 持有具名 `WritebackDraft` 或 None，UI 和 remote 不直接操作 draft。Service 協調跨 draft 的預驗證及成功前綴，control 保留 admission、事件和 detached receipt。Draft 狀態與注入的寫入能力見 [Writeback README](../../lib/zcu_tools/gui/app/measure/writeback/README.md)。Proposal 型別由 writeback package 擁有，adapter 公開入口再匯出。
 
 LoadService 讀 native 檔及比對 tag，交 `adapter.restore(stored)`，由 adapter 依 spec 呼叫 `restore_run`。框架只讀 `RestoredRun` 的 envelope、metadata 及 `cfg_issue`。無可用 cfg 仍可成功 Load，回覆的 `cfg_issue` 是原因文字或 null，不另給 `has_cfg_snapshot`。讀檔、restore 或建立歷史來源失敗時保留舊成果。Load 不回填表單；離線可用 `datafile.load` 把 native cfg 讀為 Container，或用 Results browser 唯讀檢視。`open_tab_from_file` 是唯一隔離 `make_form` 失敗的建 tab 路徑，保留明確無 Form 狀態與錯誤，不造空 Form 或回填 cfg。範本綁定、defaults 及 Load 失敗仍傳出；Load 失敗移除新 tab 並還原焦點。無 Form 的 Reset 準備失敗更新原錯呈現並拋出該次例外，有 Form 的 Reset 失敗則保留舊 Form。保存與 typed restore 見 [[0063]]、[[0069]]，Factory 與 Reset 見 [[0073]]。
 

@@ -113,7 +113,7 @@ Measure、workflows、fluxdep 與 dispersive 的 MCP 各有工具。Agent 需要
 
 **規則。** 下層寫入共享狀態，上層讀同一份狀態。Writeback 更新工作點參數與 module library；Ledger 與 Experiment Data File 的保存權威見 [[0063]]。
 
-**例子。** Fluxdep 把 fit 結果寫入 `params.json` 作為 typed handoff，dispersive 讀這份結果。
+**例子。** [Fluxdep](../../lib/zcu_tools/gui/app/fluxdep/README.md#entry-and-export) 匯出時，符合條件才寫 predictor JSON。Fluxdep 透過 `entry.parameters()` 更新全域擬合參數。[Dispersive](../../lib/zcu_tools/gui/app/dispersive/README.md#entry-and-predictor) 從同一 entry 載入操作者選定的 predictor，使用檔內的能量與 flux frame。兩個 app 共用 [entry 選取與路徑規則](../../lib/zcu_tools/gui/app/analysis_project/README.md)，不讀 `params.json`。
 
 **邊界。** Agent 可以讀資料做判斷，但後續實驗應取用共享狀態，不從對話帶入記住的數值。寫回需要明確接受與 provenance。
 
@@ -231,7 +231,7 @@ Measure、workflows、fluxdep 與 dispersive 的 MCP 各有工具。Agent 需要
 
 **邊界。** 等待期間同一 stdio server 不處理其他呼叫；只因操作久，不另加 token。
 
-**依據。** 2026-10-12 的 [Fluxdep MCP 討論](../discussions/2026-10-12-fluxdep-mcp-design.md#討論中使用者的判斷與修正)記錄了使用者對「長操作是否應一律回 token」的修正。
+**依據。** 2026-10-12，使用者修正長操作一律回 token 的做法：「範式7不一定，重點是看agent在過程中能否發揮判斷的影響力，比如measure-gui的run就會回token，過程中可以檢測進度並early_stop。」見 [Fluxdep MCP 討論](../discussions/2026-10-12-fluxdep-mcp-design.md#討論中使用者的判斷與修正)。
 
 ### 人與 agent 共駕
 

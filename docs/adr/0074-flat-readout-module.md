@@ -136,7 +136,7 @@ status: accepted
 
 **規則。** 共用 Form 生成器直接編輯平鋪 Readout；`gen_ch`、`ro_ch` 必填且可編輯，不推導、不補值。Module library 只在容器結構改變時升版本，不因 module 或 waveform 欄位改變升版。
 
-**例子。** Recipe 的頻率路徑是 `modules.readout.module.freq`，持久 Spec 是 `freq`。只有整個 module 和 waveform 的 inline input 加 wrapper；不使用舊 shape inheritance。編輯欄位及 waveform 引用見 [Form adapter](../../lib/zcu_tools/gui/form_adapter/README.md)。
+**例子。** Inline readout 的頻率在 canonical Form input 用 `modules.readout.module.freq`，在持久 Readout Spec 用 `freq`。只有整個 module 和 waveform 的 inline input 加 wrapper，不使用舊 shape inheritance。Recipe 路徑省略生成的 wrapper，見 [Measure MCP 的 tab cfg 協定](../../lib/zcu_tools/mcp/measure/README.md#tab-cfg-協定)。編輯欄位及 waveform 引用見 [Form adapter](../../lib/zcu_tools/gui/form_adapter/README.md)。
 
 **邊界。** 舊 nested Readout 與 Direct 條目不遷移、不加相容讀取。驗證入口指出 library key，作者重建條目。Artifact restore 的 typed cfg 失效及原始 data 可讀性由 [[0063]] 的 owner 負責。Library 保持 2.0，不加 readout 版本；實驗 cfg schema major 與宿主 wire／GUI revision 依各 owner 的不相容契約更新。Parameter container、native artifact 與 ledger 不因 Readout 欄位形狀改變外層格式。
 

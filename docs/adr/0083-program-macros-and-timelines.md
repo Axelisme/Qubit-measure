@@ -120,7 +120,7 @@ DelayAuto module 是唯一的 emission 例外，只在範圍外且未指定 time
 **例子。** `with cases.case(index) as name:` 從母 timeline 隱式 fork `"<by>[<index>]"`，沒宣告的點是空 case。True 模式的未選 case 不執行，結尾必須能從入口重建；全靜態用靜態 max，否則按點算 runtime max。兩種模式都不推 reference，不改其他外部 timeline。Branch／Repeat 後可直接在外部 timeline 發射，從實際剩餘結尾用 s14 放事件，不以範圍上界放置，也不必先 join、fork 或同步。
 
 **邊界。** 只有 default 預先存在。Fork 重名或使用未宣告名字報錯，不要求每條 fork 都 join 回來。`align_timeline` 是必填 keyword-only bool，重複、非整數或超界 case index 報錯。Case 只能用自己的 timeline 和局部 fork，不能用母 timeline 或外部名字。Repeat 只能用自己的母 timeline 與局部 fork，其他外部名字也不能作 fork source。局部名字離開即失效，未 join 的局部 end 丟棄，外部可重用名字。Branch 區塊內、case 外不能放操作；case 不能經 owner 推進 reference，連巢狀 Repeat 也一樣，等待改用 `timeline_inc`。不在 case 內時，Repeat body 可以明寫 `delay_by_timeline`、原生 delay／delay_auto 或巢狀 Repeat。跨 Branch 的 timeline 先在入口前宣告。
-只在 Repeat 頂層最後一步同步自己的 timeline，且入口結尾是常數 0 時，才不攜帶尾端 register；固定圈長用常數 `inc_ref`，其餘用變數尾端／s14。最後有同步但入口不是常數 0 時，發 `UserWarning` 建議先同步，不自動插入。不做定點分析、重播 preprocess 或按後續事件數自動推 reference。固定 n 為非負整數，不收 `range_hint`。Register n 不能和 counter 同名，非負閉區間 hint 可省略，不從初值猜上界或新增硬體檢查。回邊的 generator 與 ADC 檢查見 [ProgramV2 README](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline)。
+只有 Repeat body 頂層最後一個操作是針對循環 timeline 的 `delay_by_timeline`，且入口結尾為常數 0，才省略尾端 register。固定圈長用常數 `inc_ref`，其餘用變數尾端／s14。若以該操作收尾，但入口結尾不是常數 0，編譯器發出 `UserWarning`，提示作者在 Repeat 前同步。編譯器不自行插入同步。原生同步不算作 `delay_by_timeline`。不做定點分析、重播 preprocess 或按後續事件數自動推 reference。固定 n 為非負整數，不收 `range_hint`。Register n 不能和 counter 同名，非負閉區間 hint 可省略，不從初值猜上界或新增硬體檢查。回邊的 generator 與 ADC 檢查見 [ProgramV2 README](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline)。
 每 shot／sweep 點重建 loop 狀態，counter 不進頂層 sweep metadata。作者明寫推進時外部結尾扣每圈實際推進量並 floor 0，否則不變。固定且可靜態表示的總量保持靜態；runtime 次數或路徑用逐圈 debit storage。後續 pulse、trigger、config、emit 或 `timeline_inc` 可沿用原本為 shot 收尾、join、fork 或同步所需的 selected-end／debit storage，不預配事件 register。仍受 16 個 data register 上限及不得自動配置時間 DMEM 的限制，超限保留 QICK 原錯誤。
 
 **依據。**
@@ -193,7 +193,7 @@ Label 名非空且唯一，編譯器避免撞到機器 label。位置不合法�
 
 **依據。**
 - 2026-10-29，使用者：「第一件選A，語意與行為一致就可以了，舊設計的怪癖不一定要對齊」，並強調「我沒有要求必須與舊的一致，我要求的是與預期行為一致」。見 [驗收改為預期行為的討論](../discussions/2026-10-29-module-to-macro.md#驗收基準改為預期行為)。
-- 2026-10-30，遷移報告政策是 designer 代裁，使用者未覆核。報告記 `prog_list`／labels／pmem／wmem／dmem／asm、輸入、版本與重現命令。用真規則 a baseline 和 b 編譯結果，兩者均支援且輸入合法時列逐點事件、body／shot end 與 b−a delta。A 不支援時列原因並標 A timing 與 delta 為 N/A，B 仍獨立驗收。Legacy 缺 boundary metadata 就如實標示，不猜時間、冒充 A 或另建 adapter。差異分預期改變、舊怪癖與新缺陷。新缺陷要修，未知差異要回報。修正漏算的 qubit tail 可以讓結尾更晚，delta 不限正負，也不設統一 cycle 門檻。原始工作檔未入庫，見 Git `3a8adfa93`。
+- 2026-10-30，一次性遷移報告由當時的 advisor 依使用者授權代裁，使用者未覆核。原始工作檔未入庫，報告規則與例子見 Git `3a8adfa93`。
 - 2026-11-01，IR／program 的分工是 designer 代裁，使用者未覆核。見 [s14 與 IR 的討論](../discussions/2026-10-31-timeline-variable-model.md#s14-與-ref)及 Git `3a8adfa93`。
 
 ### 現行交付範圍與裁定沿革
