@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-21, exact flat span reuse for FTF projective and MIST continuation
+**Last updated:** 2026-11-21, cooperative Stop during required integrated raw sampling
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -317,8 +317,8 @@ populations supplied for later events.
 
 `PreparedRawShots(readout, batches, reps=...)` owns noiseless probabilities
 and per-channel ReadoutBatch inputs. `bind(identity)` returns an `ADCRawShots`
-source without doing shot work. `materialize(reps, avg_level)` alone draws full
-CTMC paths, one per logical event. Within an event all carriers, ADCs and grids
+source without doing shot work. Materialization draws full CTMC paths, one per
+logical event. Within an event all carriers, ADCs and grids
 share the path. Different events draw independent paths after selecting one
 outcome shared by the whole shot, or following the chain's projection states.
 Each receiver adds
@@ -340,6 +340,14 @@ noisy results or adjust shots to independently drawn mean totals. Invalid reps,
 layout, shapes or states raise ValueError, as do unsafe integer sums. Solver
 failures raise RuntimeError. `simulate.rounding` owns shared numeric int64
 conversion and shot-axis layout. Numeric sources do not import program.
+
+`materialize(reps, avg_level)` remains available without a Stop query.
+`materialize_cancellable(reps, avg_level, cancel=...)` borrows a read-only query
+for the current call. It checks at entry, at each logical event, after each
+point group with shared ADC contents, and before returning. If it observes Stop,
+it raises `simulate.boundary.Cancelled` without returning partial arrays.
+The source does not retain the query. When Stop is not observed, both methods
+use the same RNG stream and batch order and return identical shots.
 
 `sample_traces(readout, batches, reps=..., identity=..., rtol=..., atol=...)`
 requires physical `ReadoutBatch` inputs keyed by ADC channel in declaration order.
