@@ -45,13 +45,12 @@ from zcu_lab.v2.twotone.ro_optimize._chain_common import (
 class ChainLengthCfg(ConfigBase):
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     length: Annotated[SweepCfg, FieldMeta(label="Readout length", unit="us")]
-    time_of_fly: Annotated[
+    length_margin: Annotated[
         float,
         FieldMeta(
-            label="Time of flight",
+            label="Length margin",
             unit="µs",
-            description="Readout propagation time to the ADC. Correct the resonator calibration and Reset if blank.",
-            readonly=True,
+            description="Time added to each ADC window to set the readout pulse length.",
         ),
     ] = Field(strict=True, allow_inf_nan=False, ge=0)
     relax_delay: Annotated[
@@ -86,7 +85,7 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
             result_type=ThermalChainSums,
             cfg_type=ChainLengthCfg,
             tag="twotone/ro_optimize/chain_length",
-            cfg_schema_version="5.0",
+            cfg_schema_version="6.0",
             result_builder=restore_readout_sums,
             labber_layout="independent",
         )
@@ -96,7 +95,7 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
         """Acquire 16 consecutive reads per shot, separated by K=relax_delay us.
 
         Sweep ADC window length in us, building one program per window.
-        The pulse lasts trig_offset minus time_of_fly plus the window and 0.11 us.
+        The pulse lasts the quantized window plus length_margin, in us.
         There is no reset or drive within a shot. The readout post_delay
         supplies the photon decay gap between reads. K after each shot lets the
         next shot start from thermal equilibrium. Live plots show score and
@@ -153,7 +152,7 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
                     "readout",
                     cfg.readout,
                     ro_length=window,
-                    length=cfg.readout.trig_offset - cfg.time_of_fly + window + 0.11,
+                    length=window + cfg.length_margin,
                 )
                 with builder.repeat("read", READS_PER_SHOT):
                     builder.emit(readout)

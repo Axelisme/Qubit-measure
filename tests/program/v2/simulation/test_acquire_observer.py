@@ -2,18 +2,20 @@
 
 import time
 import warnings
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from fractions import Fraction
 from threading import Event
 
+import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.acquisition import StoppedPartialAcquireError
+from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import (
     AcquireOutcome,
+    IntegratedRound,
     SimulationBinding,
     SimulationCallbacks,
     SimulationSoc,
@@ -21,10 +23,13 @@ from zcu_tools.program.v2.simulation import (
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
+    ChannelSignals,
     EnvironmentSnapshot,
+    RoundRequest,
     RoundSignals,
     TimeBase,
 )
+from zcu_tools.simulate.evolution import Cancelled
 
 from tests.program._profiles import load_soccfg
 
@@ -273,32 +278,67 @@ def test_execute_failure_and_success_inside_outer_except(program_seam, mode):
         soc.run_round()
 
 
-@pytest.mark.parametrize("completed_rounds", [0, 1])
-def test_integrated_stop_complete_means_normal_partial_return(
-    program_seam, completed_rounds
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+@pytest.mark.parametrize("set_flag", [False, True], ids=["flag-clear", "flag-set"])
+@pytest.mark.parametrize("completed_rounds", [0, 2])
+def test_stop_during_backend_keeps_only_completed_rounds(
+    program_seam, mode, completed_rounds, set_flag
 ):
     program, soc, observed = program_seam
     cancel = Event()
+    hook_rounds = []
     execute = soc.binding.execute
+    acquire = program.acquire if mode == "integrated" else program.acquire_decimated
 
-    def stop(request):
+    def solve(request: RoundRequest) -> IntegratedRound | RoundSignals:
+        assert request.cancel is cancel
         if request.index == completed_rounds:
-            cancel.set()
-            from zcu_tools.simulate.evolution import Cancelled
-
+            if set_flag:
+                cancel.set()
             raise Cancelled()
-        return execute(request)
+        samples = request.acquire.readouts[0].samples
+        iq = np.array([(2.0, -8.0), (8.0, -2.0)][request.index])
+        if mode == "decimated":
+            trace = np.broadcast_to(iq, (1, 1, samples, 2))
+            return RoundSignals((ChannelSignals(0, trace),))
+        result = execute(request)
+        assert isinstance(result, IntegratedRound)
+        (channel,) = result.statistics.channels
+        # The integrated backend supplies sample sums, not normalized IQ.
+        channel = replace(channel, sums=(samples * iq)[None, :])
+        statistics = replace(result.statistics, channels=(channel,))
+        return replace(result, statistics=statistics)
 
-    soc.binding.execute = stop
-    if completed_rounds:
-        result = program.acquire(soc, rounds=3, cancel_flag=cancel, progress=False)
-        assert len(result) == 1
+    def round_hook(count, _iq, flag: CancelFlagProtocol) -> None:
+        assert flag is cancel
+        hook_rounds.append(count)
+
+    def run():
+        return acquire(
+            soc,
+            rounds=4,
+            cancel_flag=cancel,
+            round_hook=round_hook,
+            remove_offset=False,
+            progress=False,
+        )
+
+    soc.binding.execute = solve
+    if completed_rounds == 0:
+        with pytest.raises(
+            StoppedPartialAcquireError,
+            match="^acquire stopped before the first round completed$",
+        ):
+            run()
     else:
-        with pytest.raises(StoppedPartialAcquireError):
-            program.acquire(soc, rounds=3, cancel_flag=cancel, progress=False)
-    assert len(observed) == 1
-    assert observed[0].complete is bool(completed_rounds)
-    assert len(observed[0].rounds) == completed_rounds + 1
+        (iq,) = run()
+        np.testing.assert_array_equal(iq[..., 0], 5.0)
+        np.testing.assert_array_equal(iq[..., 1], -5.0)
+    assert hook_rounds == list(range(1, completed_rounds + 1))
+    assert cancel.is_set() is set_flag
+    (outcome,) = observed
+    assert outcome.complete is bool(completed_rounds)
+    assert len(outcome.rounds) == completed_rounds + 1
 
 
 def test_cleanup_failure_is_inside_binding_outcome(program_seam, monkeypatch):

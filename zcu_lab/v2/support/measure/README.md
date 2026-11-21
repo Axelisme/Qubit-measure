@@ -2,11 +2,11 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-**Last updated:** 2026-11-10，ringup tone ADC 使用 group wiring
+**Last updated:** 2026-11-21，讀出長度差與 mux post_delay 初值
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
-已定案且供多個 Form 共用的初值政策集中在具名 domain helper，涵蓋 T1 時間尺度選源、Rabi 來源與首次初值，以及 mux readout 的 ringup 等待。
+已定案且供多個 Form 共用的初值政策集中在具名 domain helper，涵蓋 T1 時間尺度選源、Rabi 來源與首次初值、讀出掃描的長度差，以及 mux readout 的 ringup 等待。
 各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
 
 `mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
@@ -18,9 +18,9 @@ Group tones 的 freq 取捕捉的 resonator.freq，label 初值為 resonator 名
 Blank 的 mixer_freq 從 `$mux.mixer_freq` 取初值，缺失或 null 時留空必填，不依賴 tone 頻率或 kappa。
 length、ro_length 與 trig_offset 保持必填且未填，不猜時長或以 0 代替 trigger timing。
 未選 wait_for_ringup 時，即使 group 有 time_of_fly 也不推導 timing。
-`mux/onetone` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。
+`mux/onetone`、`mux/onetone_flux_local` 與 `mux/onetone_flux_global` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。
 有 captured readout 時，helper 從固定 capture 取完整 group 已設成員的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
-此路徑忽略缺 leaf 或 null 的 kappa。全未設時不加等待，trig_offset 保留來源值。
+`post_delay` 取原值與同一個等待時間的較大值。此路徑忽略缺 leaf 或 null 的 kappa。全未設時不加等待，trig_offset 與 `post_delay` 保留來源值。
 Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。
 Trigger 與 length 使用 min／max Expr。單一已設 kappa 直接引用該來源，全未設時加 0。
 Slot-copy 與 blank 初值都從 `$mux.wiring.ro_ch[i]` 取得第 i 個 tone 的 ADC，不把 tone 位置當作 ADC channel。
@@ -28,6 +28,7 @@ Mux onetone 缺 slot 時，ro_length 固定填入 1.0 us，不依賴 kappa 或 t
 完整 group 的 kappa 都有效且 group 有頂層 time_of_fly，才推導 trigger 與 length。
 trig_offset 取 `$mux.time_of_fly` 加 ringup，length 取 trig_offset + ro_length，不讀 resonator 的 pulse 路徑 TOF。
 任一 kappa 或 group time_of_fly 缺值時，trig_offset／length 留空必填，mixer_freq 不受影響。
+`post_delay` 用最小 κ 估五個光子衰減時間 `5 / (2π · κ)`。只要求所有 κ 齊全，不要求 group time_of_fly。缺 κ 時保留範本的 0 µs。
 上述缺值情境仍填入 ro_length=1.0 us。
 已設的 frequency 須為有限數，time_of_fly 須為有限非負數，否則 Open／Reset 報錯。
 候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。缺來源時採用的初值 metadata 由 Template 持有；ringup caller 以 `Form(...).with_seed_metadata(...)` 加入 detached copy 的來源公式。`seed_metadata` 供 readout 與 flux 表單共用，只把固定常數 fallback（如 gain 0.1、ADC window 1.0 us、掃描點數）標為 uncalibrated，description 寫明「未校準的起始值，來源：固定常數」。Mixer、推導 timing 與 frequency／flux endpoints 寫明 capture 來源，不宣稱 measured，也不標 uncalibrated。Ref-only slot 不標記，未改寫的 captured 欄位保持未知。
@@ -59,9 +60,9 @@ Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitio
 單一實驗的初值政策留在其 `form.py`，其他 domain policy 留在 authoritative file；同一小群組共用但不具全域意義的
 helper 留在群組內 `_shared.py`。
 
-表單形狀與初值由各實驗的 `form.py` 提供 `make_form(ctx)`，共用生成器位於
-`zcu_tools.gui.form_adapter`。持久範本表由 `zcu_lab.templates.TEMPLATES` 擁有，
-組合根注入 Registry 與 Library 新建選單。不再維護 builder、Seed wrapper 或角色 default 表。
+表單形狀與初值由各實驗的 `form.py` 定義，共用生成器位於 `zcu_tools.gui.form_adapter`。
+組合根將預設的 `zcu_lab.templates.TEMPLATES` 注入 Registry，Library 新建選單與 Form 展開都讀 `registry.templates`。
+`register_all` 將這份 catalog 綁給 chain_length 與 rpi_length 的 factory。框架仍呼叫 `make_form(ctx)`。
 
 `record_frame.captured_qubit_flux` 從固定 Run／Start parameter capture 複製具名 qubit 的 flux 區塊。
 GUI record writers 與 workflow Plan 接線共用這個查詢。缺 capture 或非 qubit 會報錯，不以未校準形狀代替。尚未校準的 qubit 回傳 `{offset: null, period: {}}`。
@@ -79,6 +80,11 @@ Group model 仍擁有長度與重複 qubit 的結構規則。
 `ctx_helpers.source(ctx, path, template)` 依固定 capture 的 `ctx.has(path)` 回傳 ref-only `Slot(path)` 或原樣的 Template。
 Template 持有自己的 set 與 seed metadata。
 路徑語法與來源故障由 `ctx.has` 傳出，family 不相容由 Form 報錯。
+
+`readout_initial_values.pulse_readout_length_margin(ctx, readout, templates=...)` 從選定的 readout 取 `waveform.length − ro_length`，單位為 µs。
+Slot 讀固定 capture。Template 從傳入的 catalog 讀取初值，優先使用 `Template.set` 的覆寫，不另讀預設 catalog。未知的範本 ID 報錯。任一長度無法解析時，必填欄位留空。
+Form 在覆寫模組內的掃描欄位前取得差值及診斷 metadata，不寫回模組。
+只有實際填入的固定範本差值標為 uncalibrated；捕捉的差值與空白欄位不標記校準狀態。
 
 `rabi_initial_values.len_rabi_length_stop` 只推導四個 Length Rabi Forms 的掃描上限。
 無 capture、缺失或 null x180、arb waveform 時上限為 1 µs。

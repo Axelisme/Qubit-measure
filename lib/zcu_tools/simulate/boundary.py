@@ -755,9 +755,10 @@ class RoundRequest:
         index: Zero-based software round index within this acquire, not an
             execution/shot index. White noise combines it with acquire.root_seed
             and acquire.sequence to select this round's random stream.
-        cancel: Optional read-only query checked between evolution chunks. None
-            disables cancellation. Cancellation discards this round, not earlier
-            completed rounds. It is excluded from equality.
+        cancel: Optional read-only Stop query for cooperative checks during
+            numeric work. None supplies no Stop request. If a check stops numeric
+            work, acquisition discards this round and retains earlier completed
+            rounds. The query is excluded from equality.
     """
 
     acquire: AcquireRequest

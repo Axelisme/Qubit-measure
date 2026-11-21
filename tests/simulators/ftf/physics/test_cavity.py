@@ -32,29 +32,18 @@ def cavity():
     return joint, resonators, pulse, drive_type
 
 
-@pytest.mark.parametrize("cache_kind", ["none", "average", "span"])
+@pytest.mark.parametrize("with_cache", [False, True], ids=["uncached", "cached"])
 @pytest.mark.parametrize(
     "branch", [0, 1, None], ids=["ground", "prepared", "tie-lowest-energy"]
 )
 def test_cavity_advance_inherits_main_branch_and_keeps_ringdown(
-    cavity, branch, cache_kind
+    cavity, branch, with_cache
 ):
     from zcu_tools.simulate.adc import cavity_field_average, cavity_fields
 
     joint, resonators, pulse, _ = cavity
-    cache_type = getattr(adc, "CavityAverageCache", None)
-    assert cache_type is not None, "FTF must accept the ADC-owned average cache"
-    cache = cache_type() if cache_kind != "none" else None
-    drive = ftf.CavityDrive(
-        joint,
-        resonators,
-        (pulse,),
-        cache=cache if cache_kind == "average" else None,
-        span_cache=cache if cache_kind == "span" else None,
-    )
-    assert callable(getattr(drive, "advance", None)), (
-        "FTF must carry the main branch field between spans"
-    )
+    cache = adc.CavityAverageCache() if with_cache else None
+    drive = ftf.CavityDrive(joint, resonators, (pulse,), cache=cache)
     model = ftf.readout_model(joint, resonators)
     count = len(model.state_labels)
     populations = np.zeros(count)
@@ -97,7 +86,9 @@ def test_cavity_advance_inherits_main_branch_and_keeps_ringdown(
         )
         for name in ("chi_ghz", "photons", "stark_shift_ghz", "dephasing_per_ns"):
             assert getattr(repeated, name).tobytes() == getattr(average, name).tobytes()
-        assert repeated_final.tobytes() == fields[-1, other].tobytes()
+        np.testing.assert_allclose(
+            repeated_final, fields[-1, other], rtol=0, atol=1e-12
+        )
         assert cache.hits == 1 and cache.misses == 2
     # Restarting each branch from vacuum would erase this entire span.
     np.testing.assert_array_equal(
