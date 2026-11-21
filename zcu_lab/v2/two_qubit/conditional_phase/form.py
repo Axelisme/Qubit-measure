@@ -8,25 +8,25 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_lab.v2.support.measure.ctx_helpers import source
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
-from .._measure import captured_roles
+from .._measure import captured_qubits
 from .core import ConditionalPhaseCfg
 
 CfgT = TypeVar("CfgT", bound=ConditionalPhaseCfg)
 
 
 def make_form(ctx: FormContext) -> Form[ConditionalPhaseCfg]:
-    """Capture roles and seed the ordinary classified phase experiment."""
+    """Use fixed qubit and coupler bindings to seed the ordinary classified phase experiment."""
     return phase_form(ctx, ConditionalPhaseCfg)
 
 
 def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
-    """Capture role identities and seed calibrated pulses for either variant.
+    """Seed calibrated pulses and hidden tone positions for either variant.
 
-    Missing CZ slots stay required. Both role tones need circle + radius from
+    Missing CZ slots stay required. Both qubit tones need circle + radius from
     GE Post before Run. No other experiment Form or simulator truth supplies inputs.
     reset starts as None and can be authored explicitly.
     """
-    roles = captured_roles(ctx)
+    qubits = captured_qubits(ctx, require_coupler=True)
     readout = source(
         ctx,
         "$mux.module.readout",
@@ -38,20 +38,21 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
             "reps": 1000,
             "rounds": 10,
             "relax_delay": 1.0,
-            "roles": roles,
+            "qubit1_tone": Hidden(qubits.qubit1_tone),
+            "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
-            "x180_f1": Slot("$f1.module.x180", copy=True),
-            "x180_f2": Slot("$f2.module.x180", copy=True),
-            "x90_f1": Slot("$f1.module.x90", copy=True),
-            "x90_f2": Slot("$f2.module.x90", copy=True),
+            "x180_qubit1": Slot("$qubit1.module.x180", copy=True),
+            "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
+            "x90_qubit1": Slot("$qubit1.module.x90", copy=True),
+            "x90_qubit2": Slot("$qubit2.module.x90", copy=True),
             "readout": readout,
             "drive": {
                 # Run overrides both CZ frequencies with the common hardware sweep.
-                "f1": Slot(
-                    "$coupler.module.cz_f1", copy=True, set={"freq": Hidden(0.0)}
+                "qubit1": Slot(
+                    "$coupler.module.cz_qubit1", copy=True, set={"freq": Hidden(0.0)}
                 ),
-                "f2": Slot(
-                    "$coupler.module.cz_f2", copy=True, set={"freq": Hidden(0.0)}
+                "qubit2": Slot(
+                    "$coupler.module.cz_qubit2", copy=True, set={"freq": Hidden(0.0)}
                 ),
             },
             "frequency": Range(None, None, expts=101),

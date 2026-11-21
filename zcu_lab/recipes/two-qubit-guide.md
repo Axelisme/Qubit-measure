@@ -49,7 +49,7 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 
 ```json
 {
-  "target": {"f1": "F1", "f2": "F2", "coupler": "C0", "mux": "MG12"},
+  "target": {"qubit1": "Q1", "qubit2": "Q2", "coupler": "C0", "mux": "MG12"},
   "scale_range": [0, 1.5],
   "scale_points": 31,
   "reps": 1000,
@@ -83,20 +83,20 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 
 `two_qubit_constructive_phase` 執行一次 `two_qubit/constructive_phase`。
 依 [adapter 的準備說明](../v2/two_qubit/constructive_phase/guide.md#prepare-the-form) 確認兩路脈衝的共同頻率與掃描範圍。
-`relative_phase_range: [start, stop]` 填 F2 減 F1 的相位範圍，單位 deg。`duration_range: [start, stop]` 填兩路共同脈衝長度，單位 us，兩端都必須大於零。
+`relative_phase_range: [start, stop]` 填 Qubit2 減 Qubit1 的相位範圍，單位 deg。`duration_range: [start, stop]` 填兩路共同脈衝長度，單位 us，兩端都必須大於零。
 `relative_phase_points` 和 `duration_points` 寫入各自的 Form Expts。省略保留 Reset 值；Reset 未預填兩軸端點，須用具名欄位或 overrides 提供。
 
 報告的 `relative_phase_deg` 是最大擬合速率對應的相對相位。找不到相位時，此欄為 null，`reason` 說明原因。
 頂層 `fit_quality` 轉交速率平方的干涉擬合診斷，不回報個別脈衝長度曲線的擬合品質。
 
-相位可辨識時，Primary 提出 F2 脈衝的 phase 更新和 coupler 的 F2 slot 兩筆候選。兩筆可獨立選取。
-F2 的新 phase 是來源 F1 phase 加上擬合的相對相位。參見 [候選目的地與 Apply 規則](../v2/two_qubit/constructive_phase/guide.md#review-and-apply-phase-proposals)。
+相位可辨識時，Primary 提出 Qubit2 脈衝的 phase 更新和 coupler 的 Qubit2 slot 兩筆候選。兩筆可獨立選取。
+Qubit2 的新 phase 是來源 Qubit1 phase 加上擬合的相對相位。參見 [候選目的地與 Apply 規則](../v2/two_qubit/constructive_phase/guide.md#review-and-apply-phase-proposals)。
 
 ## two_qubit_conditional_phase
 
 `two_qubit_conditional_phase` 執行一次 `two_qubit/conditional_phase`。
 先依 [adapter 的準備說明](../v2/two_qubit/conditional_phase/guide.md#prepare-the-inputs) 確認兩顆 qubit 的脈衝與 mux 分類器。
-`ramsey_role` 填 `"f1"` 或 `"f2"`，寫入 Form 的 `target`，另一顆是 spectator。
+`ramsey_role` 填 `"qubit1"` 或 `"qubit2"`，寫入 Form 的 `target`，另一顆是 spectator。
 四角色的 recipe `target` 仍用來綁定 aliases。
 `gate_count` 填至少兩個不重複的正整數。
 `frequency_range: [start, stop]` 填遞增的 MHz 端點，`frequency_points` 設定 Expts。
@@ -104,8 +104,8 @@ F2 的新 phase 是來源 F1 phase 加上擬合的相對相位。參見 [候選�
 
 ```json
 {
-  "target": {"f1": "F1", "f2": "F2", "coupler": "C0", "mux": "MG12"},
-  "ramsey_role": "f2",
+  "target": {"qubit1": "Q1", "qubit2": "Q2", "coupler": "C0", "mux": "MG12"},
+  "ramsey_role": "qubit2",
   "gate_count": [1, 2, 3],
   "frequency_range": [5799.8, 5800.2],
   "frequency_points": 21,

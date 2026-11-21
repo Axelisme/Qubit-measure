@@ -37,16 +37,18 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._drive import DualLineCfg
-from .._readout import JointRoles, MuxResetCfg
+from .._drive import QubitDriveCfg
+from .._readout import MuxResetCfg
 from .._sums import (
     joint_probabilities,
-    validate_classifiers,
+    validate_qubit_tones,
 )
 from .fit import CZReturnFit, fit_return
 
 OUTCOME_LABELS = tuple(
-    f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
+    f"{qubit1},{qubit2}"
+    for qubit1 in ("g", "e", "other")
+    for qubit2 in ("g", "e", "other")
 )
 
 
@@ -54,7 +56,7 @@ OUTCOME_LABELS = tuple(
 class CZAmplitudeResult:
     """scales is the gain multiplier; sums is float64 (Ns,3,3) raw counts.
 
-    Class axes are terminal F1/F2, each ordered g/e/other. Rounds add without
+    Class axes are terminal Qubit1/Qubit2, each ordered g/e/other. Rounds add without
     averaging. Unmeasured scales remain NaN; completed rounds survive stop.
     """
 
@@ -64,7 +66,7 @@ class CZAmplitudeResult:
 
 @dataclass(frozen=True)
 class CZReturnData:
-    """counts/probabilities are (Ns,3,3), F1/F2 classes ordered g/e/other.
+    """counts/probabilities are (Ns,3,3), Qubit1/Qubit2 classes ordered g/e/other.
 
     complete marks scales with finite, positive counts from completed rounds.
     acquired_shots and analyzed_shots are the saved terminal totals, including
@@ -115,10 +117,10 @@ class CZAmplitudeAnalysis:
 class CZAmplitudeCfg(ConfigBase):
     """Optional reset → B11 → simultaneous CZ → Xπ⊗Xπ → terminal mux.
 
-    roles fixes captured identities and original full-mux tone positions.
+    The two tone indices address positions in the full mux readout.
     drive uses MHz, µs, degrees and signed gains. scale is a finite, increasing
     nonnegative common gain multiplier; phase, waveform and gain ratio stay fixed.
-    F1/F2 need circle classifiers with radius from GE Post. reps is shots per
+    Qubit1/Qubit2 need circle classifiers with radius from GE Post. reps is shots per
     round; rounds accumulate counts at acquisition. reset=None emits no reset.
     No bias device, confusion inversion or pure-state assumption is used.
     """
@@ -129,25 +131,25 @@ class CZAmplitudeCfg(ConfigBase):
             label="Reset", description="Optional reset at the start of every shot."
         ),
     ] = None
-    x180_f1: Annotated[
+    x180_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F1 Xπ",
-            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit1 Xπ",
+            description="Calibrated Qubit1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
-    x180_f2: Annotated[
+    x180_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F2 Xπ",
-            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit2 Xπ",
+            description="Calibrated Qubit2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     drive: Annotated[
-        DualLineCfg,
+        QubitDriveCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="F1/F2 charge-line CZ pulses from the calibrated coupler slots.",
+            description="Qubit1/Qubit2 charge-line CZ pulses from the calibrated coupler slots.",
         ),
     ]
     readout: Annotated[
@@ -157,7 +159,20 @@ class CZAmplitudeCfg(ConfigBase):
             description="Full-group mux readout with calibrated frequencies, gains and timing.",
         ),
     ]
-    roles: JointRoles
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based Qubit1 position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based Qubit2 position in the full mux readout.",
+        ),
+    ]
     scale: Annotated[
         SweepCfg,
         FieldMeta(
@@ -194,9 +209,14 @@ class CZAmplitudeCfg(ConfigBase):
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Reject tone/line mismatches and invalid or degenerate gain axes before I/O."""
-        validate_classifiers(self.readout, self.roles)
-        if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
-            raise ValueError("Each CZ line must use its role's calibrated Xπ generator")
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
+        if (
+            self.drive.qubit1.ch != self.x180_qubit1.ch
+            or self.drive.qubit2.ch != self.x180_qubit2.ch
+        ):
+            raise ValueError(
+                "Each CZ line must use its qubit's calibrated Xπ generator"
+            )
         scales = sweep2array(self.scale)
         if len(scales) < 2 or np.any(scales < 0) or np.any(np.diff(scales) <= 0):
             raise ValueError(
@@ -276,8 +296,12 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                        VariableAxisSpec.generated_arange(
+                            label="terminal_qubit2", unit=""
+                        ),
+                        VariableAxisSpec.generated_arange(
+                            label="terminal_qubit1", unit=""
+                        ),
                         VariableAxisSpec(
                             label="Common gain scale", unit="", field_name="scales"
                         ),
@@ -292,7 +316,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             ),
             result_type=CZAmplitudeResult,
             cfg_type=CZAmplitudeCfg,
-            cfg_schema_version="5.0",
+            cfg_schema_version="6.0",
             tag="two_qubit/cz_amplitude",
             result_builder=restore_result,
         )
@@ -331,32 +355,46 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             relax_delay=config.relax_delay,
         )
         scale = builder.add_sweep("scale", config.scale)
-        drive_f1 = Pulse(
-            "cz_f1", config.drive.f1, gain=float(config.drive.f1.gain) * scale
+        drive_qubit1 = Pulse(
+            "cz_qubit1",
+            config.drive.qubit1,
+            gain=float(config.drive.qubit1.gain) * scale,
         )
-        drive_f2 = Pulse(
-            "cz_f2", config.drive.f2, gain=float(config.drive.f2.gain) * scale
+        drive_qubit2 = Pulse(
+            "cz_qubit2",
+            config.drive.qubit2,
+            gain=float(config.drive.qubit2.gain) * scale,
         )
         readout = MuxReadout("readout", config.readout)
         if config.reset is not None:
             builder.emit(Reset("reset", config.reset, terminal=readout))
-        builder.fork("default", into=["prepare_f1_time", "prepare_f2_time"])
-        builder.emit(Pulse("prepare_f1", config.x180_f1), timeline="prepare_f1_time")
-        builder.emit(Pulse("prepare_f2", config.x180_f2), timeline="prepare_f2_time")
-        builder.join("prepare_f1_time", "prepare_f2_time", into="default")
-        builder.fork("default", into=["drive_f1_time", "drive_f2_time"])
-        builder.emit(drive_f1, timeline="drive_f1_time")
-        builder.emit(drive_f2, timeline="drive_f2_time")
-        builder.join("drive_f1_time", "drive_f2_time", into="default")
-        builder.fork("default", into=["contrast_f1_time", "contrast_f2_time"])
-        builder.emit(Pulse("contrast_f1", config.x180_f1), timeline="contrast_f1_time")
-        builder.emit(Pulse("contrast_f2", config.x180_f2), timeline="contrast_f2_time")
-        builder.join("contrast_f1_time", "contrast_f2_time", into="default")
+        builder.fork("default", into=["prepare_qubit1_time", "prepare_qubit2_time"])
+        builder.emit(
+            Pulse("prepare_qubit1", config.x180_qubit1), timeline="prepare_qubit1_time"
+        )
+        builder.emit(
+            Pulse("prepare_qubit2", config.x180_qubit2), timeline="prepare_qubit2_time"
+        )
+        builder.join("prepare_qubit1_time", "prepare_qubit2_time", into="default")
+        builder.fork("default", into=["drive_qubit1_time", "drive_qubit2_time"])
+        builder.emit(drive_qubit1, timeline="drive_qubit1_time")
+        builder.emit(drive_qubit2, timeline="drive_qubit2_time")
+        builder.join("drive_qubit1_time", "drive_qubit2_time", into="default")
+        builder.fork("default", into=["contrast_qubit1_time", "contrast_qubit2_time"])
+        builder.emit(
+            Pulse("contrast_qubit1", config.x180_qubit1),
+            timeline="contrast_qubit1_time",
+        )
+        builder.emit(
+            Pulse("contrast_qubit2", config.x180_qubit2),
+            timeline="contrast_qubit2_time",
+        )
+        builder.join("contrast_qubit1_time", "contrast_qubit2_time", into="default")
         builder.emit(readout, tag="terminal")
         prog = builder.build()
         axes = [
-            Classify("terminal", config.roles.f1_tone),
-            Classify("terminal", config.roles.f2_tone),
+            Classify("terminal", config.qubit1_tone),
+            Classify("terminal", config.qubit2_tone),
         ]
         with Schedule(buffer, scope=context.scope) as sched:
             sched.run_acquire_summed(

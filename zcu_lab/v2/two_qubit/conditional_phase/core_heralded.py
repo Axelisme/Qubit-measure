@@ -34,7 +34,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._sums import herald_probabilities, sigma, terminal_counts
+from .._sums import herald_probabilities, qubit_sigma, terminal_counts
 from .core import (
     ConditionalPhaseAnalysis,
     ConditionalPhaseCfg,
@@ -48,8 +48,8 @@ from .core import (
 class ConditionalPhaseHeraldedResult:
     """Scan coordinates follow ConditionalPhaseResult; sums retains all 81 classes.
 
-    sums is float64 (2,2,Nn,Nf,3,3,3,3), ordered herald F1/F2 then terminal
-    F1/F2, each g/e/other. No selection or normalization precedes persistence.
+    sums is float64 (2,2,Nn,Nf,3,3,3,3), ordered herald Qubit1/Qubit2 then terminal
+    Qubit1/Qubit2, each g/e/other. No selection or normalization precedes persistence.
     Unmeasured points remain NaN; completed rounds survive cancellation.
     """
 
@@ -127,10 +127,10 @@ class ConditionalPhaseHeraldedExp(
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
-                    VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
-                    VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit1", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_qubit2", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_qubit1", unit=""),
                     VariableAxisSpec(
                         label="Common CZ frequency",
                         unit="Hz",
@@ -167,7 +167,7 @@ class ConditionalPhaseHeraldedExp(
         ),
         result_type=ConditionalPhaseHeraldedResult,
         cfg_type=ConditionalPhaseHeraldedCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="two_qubit/conditional_phase_heralded",
         result_builder=restore_result,
     )
@@ -193,7 +193,7 @@ class ConditionalPhaseHeraldedExp(
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             counts = terminal_counts(np.moveaxis(sums, 0, 2), ("g", "g"))
-            values = sigma(counts, config.target)
+            values = qubit_sigma(counts, config.target)
             return viewer.set(frequencies, values.reshape(-1, len(frequencies)))
 
         # 3. Sweep spectator/quadrature/frequency in hardware, with herald before each host-length CZ train.
@@ -202,8 +202,10 @@ class ConditionalPhaseHeraldedExp(
             dtype=np.float64,
             on_update=update_view,
         )
-        target = config.x90_f1 if config.target == "f1" else config.x90_f2
-        spectator = config.x180_f2 if config.target == "f1" else config.x180_f1
+        target = config.x90_qubit1 if config.target == "qubit1" else config.x90_qubit2
+        spectator = (
+            config.x180_qubit2 if config.target == "qubit1" else config.x180_qubit1
+        )
         with Schedule(buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
             for n, step in sched.scan("gate_count", config.gate_count):
@@ -224,8 +226,8 @@ class ConditionalPhaseHeraldedExp(
                     "projection", target, phase=target.phase + quadrature
                 )
                 drive = (
-                    Pulse("cz_f1", config.drive.f1, freq=frequency),
-                    Pulse("cz_f2", config.drive.f2, freq=frequency),
+                    Pulse("cz_qubit1", config.drive.qubit1, freq=frequency),
+                    Pulse("cz_qubit2", config.drive.qubit2, freq=frequency),
                 )
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
@@ -240,13 +242,16 @@ class ConditionalPhaseHeraldedExp(
                 for gate_index in range(n):
                     builder.fork(
                         "default",
-                        into=[f"drive_f1_{gate_index}", f"drive_f2_{gate_index}"],
+                        into=[
+                            f"drive_qubit1_{gate_index}",
+                            f"drive_qubit2_{gate_index}",
+                        ],
                     )
-                    builder.emit(drive[0], timeline=f"drive_f1_{gate_index}")
-                    builder.emit(drive[1], timeline=f"drive_f2_{gate_index}")
+                    builder.emit(drive[0], timeline=f"drive_qubit1_{gate_index}")
+                    builder.emit(drive[1], timeline=f"drive_qubit2_{gate_index}")
                     builder.join(
-                        f"drive_f1_{gate_index}",
-                        f"drive_f2_{gate_index}",
+                        f"drive_qubit1_{gate_index}",
+                        f"drive_qubit2_{gate_index}",
                         into="default",
                     )
                 builder.emit(projection)
@@ -258,10 +263,10 @@ class ConditionalPhaseHeraldedExp(
                     reducer=shot_sums(
                         prog,
                         [
-                            Classify("herald", config.roles.f1_tone),
-                            Classify("herald", config.roles.f2_tone),
-                            Classify("terminal", config.roles.f1_tone),
-                            Classify("terminal", config.roles.f2_tone),
+                            Classify("herald", config.qubit1_tone),
+                            Classify("herald", config.qubit2_tone),
+                            Classify("terminal", config.qubit1_tone),
+                            Classify("terminal", config.qubit2_tone),
                         ],
                     ),
                     rounds=config.rounds,
@@ -372,7 +377,7 @@ class ConditionalPhaseHeraldedExp(
             num="phase", nrows=3, figsize=(11, 11), layout="constrained"
         )
         fig.suptitle(
-            f"{cfg.target.upper()} · shared slopes by actual spectator; gg vs ee"
+            f"{cfg.target.capitalize()} · shared slopes by actual spectator; gg vs ee"
         )
         for (herald, points), (b, state), (j, n) in product(
             (("gg", phases), ("ee", ee_phases)),
@@ -451,7 +456,7 @@ class ConditionalPhaseHeraldedExp(
             xticklabels=[
                 f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")
             ],
-            xlabel="Herald class (F1, F2)",
+            xlabel="Herald class (Qubit1, Qubit2)",
             ylabel="Scan row (spectator, projection, n, frequency)",
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
