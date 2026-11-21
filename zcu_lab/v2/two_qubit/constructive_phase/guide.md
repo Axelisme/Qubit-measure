@@ -87,9 +87,11 @@ The proposed relative phase is `atan2(C,B)` in degrees, the maximum-rate branch.
 More than three identifiable phase slices and full-rank phase coverage are
 needed for finite uncertainty. Zero modulation or nonfinite uncertainty prevents
 a proposal. The interference plot shows the dense rate-squared fit and its
-maximum. R² is the fraction of measured rate-squared variation explained by
-the fit; it has no additional selection threshold. This phase is not a logical
-local-Z correction.
+maximum. R² measures how much measured rate-squared variation the fit explains.
+Normalized RMS is the residual RMS divided by the measured rate-squared span.
+The summary also reports each parameter's standard error relative to its
+absolute fitted value. These metrics have no additional selection threshold.
+This phase is not a logical local-Z correction.
 
 ## Save and load
 
@@ -100,9 +102,9 @@ Every class axis is ordered g, e, other.
 Rounds accumulate during acquisition without normalization.
 File size does not grow with repetitions or rounds.
 Completed rounds survive cancellation; unmeasured points remain NaN.
-A point with counts from at least one completed round can enter the fit if it has accepted shots.
-Fits require all requested shots at every point of a duration trace.
-Always check the execution status before accepting partial results.
+A duration trace can enter the fit only when every duration has retained
+counts. A trace may meet that condition before the requested final round.
+Check the execution status and retained counts before accepting partial results.
 
 Load leaves the current Form unchanged. Analysis uses the saved cfg (schema 5.0) and counts.
 Native Load rejects older results whose axis names do not match this layout. Keep the original file and use the matching older version to read it.

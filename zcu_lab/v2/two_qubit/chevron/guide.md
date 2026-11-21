@@ -91,9 +91,9 @@ Every class axis is ordered g, e, other.
 Rounds accumulate during acquisition without normalization.
 File size does not grow with repetitions or rounds.
 Completed rounds survive cancellation; unmeasured points remain NaN.
-A point with counts from at least one completed round can enter the fit if it has accepted shots.
-Fits require all requested shots at every point of a duration trace.
-Always check the execution status before accepting partial results.
+A duration trace can enter the fit only when every duration has retained
+counts. A trace may meet that condition before the requested final round.
+Check the execution status and retained counts before accepting partial results.
 
 Cfg schema is 5.0. Load leaves the current form unchanged, and analysis uses the
 saved cfg and counts. The current Load rejects older files whose axis names no

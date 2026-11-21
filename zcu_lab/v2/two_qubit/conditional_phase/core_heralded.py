@@ -115,6 +115,9 @@ def _plot_terminal_quadratures(
         figsize=(7, 6.6),
         layout="constrained",
     )
+    if not np.isfinite(values).any():
+        herald_label += " · No retained projection data"
+        fig.axes[-1].set_xlim(frequencies[0], frequencies[-1])
     fig.suptitle(f"{title}\n{herald_label}")
     for b, ax in enumerate(fig.axes):
         ax.set(title=f"Actual spectator {('g', 'e')[b]}", ylabel="Target P(e) − P(g)")
@@ -518,6 +521,8 @@ def _plot_phase_crossing(
     )
     ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
     ax.ticklabel_format(useOffset=False)
+    if not (np.isfinite(conditional).any() or np.isfinite(gg_only).any()):
+        ax.set_xlim(xs[0], xs[-1])
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
     fig.suptitle(f"Heralded conditional phase · {target} · π crossing")
 
@@ -551,6 +556,11 @@ def _plot_slopes(
     ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
     ax.ticklabel_format(useOffset=False)
+    if not (
+        np.isfinite(fitted.slopes_deg).any() or np.isfinite(gg_only.slopes_deg).any()
+    ):
+        ax.set_title("No identifiable slopes")
+        ax.set_xlim(xs[0], xs[-1])
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
     fig.suptitle(f"Heralded conditional phase · {target} · slope ± fit SE")
 
@@ -599,4 +609,12 @@ def _plot_phase_diagnostics(
     phase_ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Wrapped phase (deg)")
     phase_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
     phase_ax.ticklabel_format(useOffset=False)
-    fig.suptitle(f"Heralded conditional phase · {target} · {n} CZ gates")
+    title = f"Heralded conditional phase · {target} · {n} CZ gates"
+    if not any(
+        np.isfinite(point.contrast)
+        for group in (*phases, *ee_phases)
+        for point in group
+    ):
+        phase_ax.set_xlim(xs[0], xs[-1])
+        title += "\nNo retained contrast data"
+    fig.suptitle(title)
