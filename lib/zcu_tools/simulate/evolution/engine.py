@@ -773,15 +773,13 @@ class Engine:
         budget: finite positive absolute population and low-four error allowance;
         otherwise raises ValueError. It also bounds the maximum absolute entry
         change when repairing a readout density. A closed engine raises RuntimeError.
-        cancel: read-only is_set query checked between chunks; None disables it;
-        when set, raises Cancelled, without returning partial results.
-        capture optionally appends frozen batch inputs, actual route events and
-        sampled RWA spot decisions/errors (not propagated probe states) to a
-        caller-owned CaptureBuffer; None does no recording. Success marks
-        this call's records complete; exceptions retain incomplete records and
-        propagate unchanged. Concurrent use of the same buffer raises ValueError
-        at entry. Capture itself performs no file I/O; see CaptureBuffer for
-        lifetimes. OpenCL program builds may access the simulator user cache.
+        cancel: read-only is_set query, or None to disable. Raises Cancelled
+        without partial results when set at a check, including after geometry
+        and before building the WorkPlan or recording routing usage.
+        capture: caller-owned CaptureBuffer, or None. Records frozen batch inputs,
+        actual routes and sampled RWA spot decisions/errors, not probe states.
+        Success marks records complete; exceptions leave them incomplete. Concurrent
+        use raises ValueError at entry. No file I/O; OpenCL builds may use the user cache.
         telemetry enables per-family calling-thread CPU and routing accounting
         without I/O; False avoids CPU clock reads and returns empty routing.
         Model ValueErrors propagate; a kernel numerical failure raises
@@ -826,6 +824,8 @@ class Engine:
             content_key = input_key(source, batches, budget)
             frontend_started = time.thread_time() if telemetry else 0.0
             geometry = plan(source, batches)
+            if cancel.is_set():
+                raise Cancelled()
             inversions = geometry.stark_order_inversions
             capture_run = (
                 None if captured is None else CaptureRun(geometry, batches, captured)
