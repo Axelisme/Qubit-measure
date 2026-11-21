@@ -28,7 +28,7 @@ class LookbackInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Select a library module in Readout. Omit to retain the selection; null is not accepted.",
+        description="Select a Readout module. Omit to keep it. The schema allows null; required Readout rejects it.",
     )
     frequency_mhz: float | None | Keep = Field(
         KEEP,
