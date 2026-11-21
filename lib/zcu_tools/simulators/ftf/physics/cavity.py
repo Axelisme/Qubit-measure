@@ -7,6 +7,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.simulate.adc import (
     CavityAverageCache,
+    CavityFieldAverage,
     ReadoutPulse,
     cavity_field_average,
     cavity_fields,
@@ -48,9 +49,10 @@ class CavityDrive:
     mean vacuum; explicit initial memory retains ringdown. Multiple pulses
     add fields coherently, including ringdown. Population rates never mix the
     fixed state branches. This object performs no density evolution or sampling.
-    cache optionally supplies a caller-owned CavityAverageCache shared across
-    serialized span queries. None disables reuse. This drive only forwards it
-    to ADC; the caller owns its capacity and clear/exception lifetime.
+    cache optionally supplies the ADC owner for separate average() queries
+    and for advance() when span_cache is None. span_cache optionally supplies
+    the ADC owner for both products of advance(), before branch selection.
+    Queries with a shared owner must be serialized; the caller clears it.
     """
 
     def __init__(
@@ -60,11 +62,13 @@ class CavityDrive:
         pulses: tuple[ReadoutPulse, ...],
         *,
         cache: CavityAverageCache | None = None,
+        span_cache: CavityAverageCache | None = None,
     ) -> None:
         self._model = readout_model(joint, resonators)
         self._chi = self._model.frequencies_ghz - [r.frequency_ghz for r in resonators]
         self._pulses = pulses
         self._cache = cache
+        self._span_cache = span_cache
 
     def response(self, times_ns: RealArray) -> CavityResponse:
         """Evaluate at a finite nonempty increasing emitted-ns vector.
@@ -115,6 +119,19 @@ class CavityDrive:
         values = np.asarray(populations, dtype=np.float64)
         if values.shape != (len(self._chi),) or not np.isfinite(values).all():
             raise ValueError("cavity populations must be a finite (state,) vector")
+        if self._span_cache is not None:
+            span = self._span_cache.span(
+                self._model,
+                self._pulses,
+                start_ns,
+                end_ns,
+                initial_field=initial_field,
+                initial_time_ns=start_ns,
+            )
+            return (
+                self._response_for_moments(span.average),
+                span.final_fields[int(np.argmax(values))].copy(),
+            )
         average = self.average(
             start_ns,
             end_ns,
@@ -163,6 +180,9 @@ class CavityDrive:
             initial_field=initial_field,
             initial_time_ns=initial_time_ns,
         )
+        return self._response_for_moments(average)
+
+    def _response_for_moments(self, average: CavityFieldAverage) -> CavityResponse:
         products = average.field_products
         n = len(self._chi)
         same = products[np.arange(n), :, np.arange(n), :]

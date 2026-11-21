@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-17
+**Last updated:** 2026-11-21, exact cavity span results
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -42,12 +42,19 @@ integrals. Shaped inputs retain the field ODE and converged quadrature, split at
 pulse boundaries, envelope corners and the decay timescale. ADC owns these
 field integrals; consumers project them into their own Stark or dephasing models.
 
-`CavityAverageCache.average` is the optional exact flat-result entry point;
-`cavity_field_average` remains uncached. The ADC owner retains complete lossless
-converted inputs and owned second moments within its fixed byte budget (default
-64 MiB). It rejects new residency when full, without changing returned results.
-Shaped/callable inputs bypass reuse. Hits and misses return independent arrays.
-Callers serialize access and clear the owner at the end of its lifetime.
+`CavityAverageCache.average` reuses flat second moments. `CavityAverageCache.span`
+returns both second moments and final fields for all states in the original model
+reference. It shares the original flat propagation when the initial time equals
+the span start. Its exact key keeps model content, initial field bits, and pulse
+order, timing, carrier, phase and breakpoints. Pulse amplitudes starting at or
+after the span end cannot affect either product and do not distinguish span keys.
+Shaped/callable pulses, an empty pulse tuple and earlier pulse history use the
+separate solvers rather than the span memo.
+
+The two entry points share one byte budget (64 MiB by default). Results are
+writable copies independent of resident arrays. Full capacity declines new
+entries without eviction. Callers serialize access and clear the owner at the
+end of its lifetime. `cavity_field_average` and `cavity_fields` remain uncached.
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
