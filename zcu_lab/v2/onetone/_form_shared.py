@@ -5,16 +5,16 @@ from math import isfinite
 from zcu_tools.cfg_model import Expr, FormNode, Hidden, Range, Template, TemplateSeed
 from zcu_tools.gui.form_adapter import FormContext
 
-from zcu_lab.templates import READOUT_PULSE_LENGTH_US
+from zcu_lab.templates import READOUT_LENGTH_MARGIN_US, READOUT_PULSE_LENGTH_US
 
 
 def initial_ro_length() -> float:
-    """Return an editable RO window in us, 0.01 us shorter than the readout pulse.
+    """Return the readout template's ADC window in us as an editable seed.
 
     The readout Template supplies the pulse source. Open/Reset creates a
     detached direct RO window that remains independently editable.
     """
-    return READOUT_PULSE_LENGTH_US - 0.01
+    return READOUT_PULSE_LENGTH_US - READOUT_LENGTH_MARGIN_US
 
 
 def initial_readout_timing(ctx: FormContext) -> dict[str, TemplateSeed]:

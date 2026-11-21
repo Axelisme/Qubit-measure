@@ -197,3 +197,4 @@
 - 2026-11-20 [RB 每個 depth 的誤差棒](2026-11-20-rb-errorbars.md)：圖上診斷。畫 seed 間標準差，不加 shot noise 參考線，不改 Analyze 回傳；RB 與 IRB 數值工具合併。
 - 2026-11-21 [Herald 後的等待由 readout 的 post_delay 擁有](2026-11-21-herald-wait-readout-post-delay.md)：欄位歸屬。Herald 後的等待由 readout 的 `post_delay` 擁有，不加獨立欄位；guide 寫需求、症狀與驗證方法。
 - 2026-11-21 [讀出鏈的 pulse 長度與間隔](2026-11-21-chain-readout-spacing.md)：讀出時序。chain_length 用唯讀飛行時間校準換算 pulse 長度，九個 chain 實驗等前一個 pulse 結束加 post-delay，不另等 ADC 關窗。
+- 2026-11-21 [讀出範本在 ADC 窗口前後各留 0.015 µs](2026-11-21-readout-template-window-margin.md)：預設時序。範本、DPM 寫回與普通 onetone 表單共用 0.03 µs 的長度差。

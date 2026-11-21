@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱 one-tone 表單的 readout timing 初值與共用來源。
 
-**Last updated:** 2026-11-16，freq 表單欄位歸回 FreqInput
+**Last updated:** 2026-11-21，ADC window 與 readout 範本共用長度差
 
 `freq`、`power_dep`、`flux_dep`、`range_find` 的 `make_form` 共用
 [`_form_shared.py`](_form_shared.py) 的 `initial_readout_timing`。
@@ -27,7 +27,7 @@ Open／Reset 從固定 capture 讀取 resonator 校準，並以 `readout` Templa
 - 未設 `kappa`（缺 leaf 或 null）時，`trig_offset = time_of_fly`。
   已設時，`trig_offset = time_of_fly + 5 / (2 * pi * kappa)`。
   `kappa = 1 MHz` 時，等待增量約為 `0.795775 us`。
-- `ro_length` 初值為 Template 原 pulse 長度減 `0.01 us`，目前為 `0.99 us`。
+- `ro_length` 初值為 Template 原 pulse 長度減 `0.03 us`，目前為 `0.97 us`。
 - `pulse length = max(Template 原長度, trig_offset + ro_length)`。
   Pulse 至少涵蓋 ADC 窗口，原長度較大時保留原長度。
 - Open／Reset 產生 detached、可編輯的 timing。操作員之後的編輯保留於 cfg 輸出。
