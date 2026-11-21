@@ -27,6 +27,7 @@ from zcu_tools.experiment.v2.utils.t1_sampling import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
+    GainSweepCfg,
     Pulse,
     PulseReadout,
     Readout,
@@ -153,7 +154,7 @@ class T1WithToneSweepCfg(ConfigBase):
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
+    gain: Annotated[GainSweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
     freq: Annotated[SweepCfg | None, FieldMeta(label="Frequency", unit="MHz")] = None
     delay: Annotated[
         SweepCfg,

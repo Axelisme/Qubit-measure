@@ -70,7 +70,7 @@ Cfg 的建構驗證與 `run`／`analyze` 的使用分開。不要在 `run`／`an
 
 **抽象。** 單一實驗的局部邏輯留在自己的 `core.py`。獨立、大而複雜且不認得 lab cfg 的數值計算可以由 `zcu_tools` 擁有，不要求先有第二個實驗使用。
 移入 library 前列出區塊、輸入輸出與目的 package，經使用者確認後再搬。公開數值入口補合成資料測試。抽取理由是獨立的數值責任，不是兩個實驗外觀相似。
-使用者 2026-11-11 對 gain 專用 sweep 型別的判斷仍適用：「特化一個 gain sweep config，感覺就有點過度工程」。
+掃描欄位型別依 [Cfg 名稱、順序與取數欄位](experiment-authoring.md#cfg-名稱順序與取數欄位) 選用。
 
 同一實驗中必須一起改的 shape、index 與 population 數量，用同檔具名常數，或把相依語句放在相鄰幾行，讓修改處直接看得到依賴。
 不為了合併相似文字新增跨實驗常數、predicate 或檢查。STIRAP 的不同 generator 條件由各實驗各留一份。

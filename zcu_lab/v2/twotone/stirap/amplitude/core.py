@@ -26,9 +26,9 @@ from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
+    GainSweepCfg,
     Pulse,
     PulseReadout,
-    SweepCfg,
     TimelineBuilder,
     shot_sums,
 )
@@ -106,7 +106,7 @@ class StirapAmplitudeCfg(ConfigBase):
     stokes_lead: Annotated[float, FieldMeta(label="Stokes lead", unit="us")] = 0.05
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     pump_gain: Annotated[
-        SweepCfg,
+        GainSweepCfg,
         FieldMeta(
             label="Pump gain",
             unit="a.u.",
@@ -114,7 +114,7 @@ class StirapAmplitudeCfg(ConfigBase):
         ),
     ]
     stokes_gain: Annotated[
-        SweepCfg,
+        GainSweepCfg,
         FieldMeta(
             label="Stokes gain",
             unit="a.u.",

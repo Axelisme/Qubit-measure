@@ -31,6 +31,7 @@ from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
+    GainSweepCfg,
     Pulse,
     PulseReadout,
     Readout,
@@ -121,7 +122,7 @@ class AutoOptCfg(ConfigBase):
         FieldMeta(label="Readout freq", unit="MHz"),
     ]
     gain: Annotated[
-        SweepCfg,
+        GainSweepCfg,
         FieldMeta(label="Readout gain", unit="a.u."),
     ]
     length: Annotated[

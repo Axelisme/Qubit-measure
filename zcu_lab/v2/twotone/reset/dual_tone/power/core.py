@@ -16,10 +16,10 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    GainSweepCfg,
     Pulse,
     Readout,
     Reset,
-    SweepCfg,
     TimelineBuilder,
     TwoPulseReset,
 )
@@ -58,8 +58,8 @@ class PowerCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
     tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain1: Annotated[SweepCfg, FieldMeta(label="Gain1", unit="a.u.")]
-    gain2: Annotated[SweepCfg, FieldMeta(label="Gain2", unit="a.u.")]
+    gain1: Annotated[GainSweepCfg, FieldMeta(label="Gain1", unit="a.u.")]
+    gain2: Annotated[GainSweepCfg, FieldMeta(label="Gain2", unit="a.u.")]
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")

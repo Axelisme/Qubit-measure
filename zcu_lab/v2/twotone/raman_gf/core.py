@@ -32,6 +32,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_freq, round_zcu_ga
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
+    GainSweepCfg,
     Pulse,
     PulseReadout,
     SweepCfg,
@@ -94,7 +95,7 @@ class RamanGFCfg(ConfigBase):
         ),
     ] = "frequency_gain"
     detuning: Annotated[SweepCfg, FieldMeta(label="Two-photon detuning", unit="MHz")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Drive gain", unit="a.u.")]
+    gain: Annotated[GainSweepCfg, FieldMeta(label="Drive gain", unit="a.u.")]
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=1024, ge=6
     )

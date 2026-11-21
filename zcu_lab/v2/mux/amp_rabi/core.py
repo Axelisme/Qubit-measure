@@ -84,7 +84,7 @@ from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import ConfigBase, FieldMeta, Gain
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
@@ -111,11 +111,7 @@ from zcu_lab.v2.support.mux import (
     validate_mux_result,
 )
 from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
-from zcu_lab.v2.support.mux_sweep_cfg import (
-    MuxDriveToneCfg,
-    ToneRangeCfg,
-    validate_mux_scan,
-)
+from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveToneCfg, validate_mux_scan
 
 
 @validated_dataclass(frozen=True)
@@ -158,6 +154,13 @@ class MuxPulseScan:
     point_pulses: Sequence[Sequence[PulseCfg]]
 
 
+class ToneRangeCfg(ConfigBase):
+    """One tone's first and last scan gains in a.u., each within [-1, 1]."""
+
+    start: Gain = Field(description="First scan value in experiment units.")
+    stop: Gain = Field(description="Last scan value in experiment units.")
+
+
 class MuxAmpRabiToneCfg(MuxDriveToneCfg):
     """One named drive and its independent gain bounds in gain a.u.."""
 
@@ -178,8 +181,8 @@ class MuxAmpRabiCfg(ConfigBase):
     participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Selected drives are required/validated on independent
-    generators distinct from readout. Independent DAC gain ranges in a.u. within [-1, 1] stay
-    in [-1,1]; expts is the positive hardware point count shared by all tones.
+    generators distinct from readout. Each supplied gain range is in a.u. within [-1, 1];
+    expts is the positive hardware point count shared by all tones.
     Explicit reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
@@ -222,12 +225,10 @@ class MuxAmpRabiCfg(ConfigBase):
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxAmpRabiCfg:
-        """Reject invalid full length, drive channels, counts or gain ranges."""
+        """Validate shared controls and require a gain range for each participant."""
         validate_mux_scan(self, self.tones, self.participants, self.expts)
         for index in self.participants:
-            tone = self.tones[index]
-            if max(abs(tone.require_gain().start), abs(tone.require_gain().stop)) > 1:
-                raise ValueError(f"tones[{index}].gain gains must be in [-1,1]")
+            self.tones[index].require_gain()
         return self
 
 

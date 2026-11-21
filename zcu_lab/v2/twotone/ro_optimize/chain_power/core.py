@@ -27,8 +27,8 @@ from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    GainSweepCfg,
     PulseReadout,
-    SweepCfg,
     TimelineBuilder,
     thermal_chain_sums,
 )
@@ -44,7 +44,7 @@ from zcu_lab.v2.twotone.ro_optimize._chain_common import (
 
 class ChainPowerCfg(ConfigBase):
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Readout gain", unit="a.u.")]
+    gain: Annotated[GainSweepCfg, FieldMeta(label="Readout gain", unit="a.u.")]
     relax_delay: Annotated[
         float,
         FieldMeta(

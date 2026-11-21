@@ -21,6 +21,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    GainSweepCfg,
     Pulse,
     Readout,
     Reset,
@@ -56,7 +57,7 @@ class ScanT1WithToneCfg(ConfigBase):
     pi_pulse: Pulse.Cfg
     test_pulse: Pulse.Cfg
     readout: Readout.Cfg
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[GainSweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     length: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")

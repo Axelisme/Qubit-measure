@@ -37,8 +37,7 @@ class MuxAcquisition(Protocol):
 class ToneRangeCfg(ConfigBase):
     """Finite sweep endpoints; units are determined by the experiment.
 
-    start and stop use MHz, gain in a.u. within [-1, 1] or us according to the leaf.
-    The experiment supplies the shared point count, not individual tones.
+    The leaf supplies the units for start and stop and the shared point count.
     """
 
     start: float = Field(
@@ -119,11 +118,10 @@ def validate_mux_scan(
     participants: Sequence[int],
     expts: int,
 ) -> None:
-    """Validate fixed drives plus independent pulse ranges and a shared count.
+    """Validate fixed drives and a shared point count without mutation.
 
     cfg, tones and participants obey validate_mux_tones. expts is a positive
-    integer shared by all tones. Each leaf declares its physical range field
-    using ToneRangeCfg, which owns finite endpoints. Raise without mutation.
+    integer shared by all tones. Each leaf owns validation of its range fields.
     """
     validate_mux_tones(cfg, tones, participants)
     if type(expts) is not int or expts <= 0:

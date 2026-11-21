@@ -63,9 +63,9 @@ before increasing point count or rounds.
 
 ## Measurement and analysis
 
-Each tone supplies a gain range in normalized units within `[-1, 1]`.
-Set each tone's Start and Stop in gain units. Expts follows Tones and sets one
-shared positive point count, for selected tones (default 51).
+Set each participating tone's Start and Stop between −1 and 1, inclusive, in normalized gain units.
+If a supplied endpoint is outside this range, the Form marks that endpoint and does not submit Run.
+Expts follows Tones and sets one shared positive point count for selected tones (default 51).
 One program advances the selected drives' gains together in a shared hardware loop.
 Each drive retains its own Start and Stop. Plots and saved axes use the actual
 hardware-quantized gains; integer register steps can shift points from a separately
