@@ -267,6 +267,11 @@ def test_report_only_recovers_from_persisted_facts_after_a_hard_stop(
         ({"wall_s": -1.0}, "wall_s"),
         ({"wall_s": float("inf")}, "wall_s"),
         ({"wall_s": True}, "wall_s"),
+    ]
+    + [
+        pytest.param({field: value}, field, id=f"{field}-{type(value).__name__}")
+        for field in ("materialize_s", "core_s", "core_s_lower_bound")
+        for value in ("181", True)
     ],
 )
 def test_invalid_row_journal_is_a_tool_error_not_a_usage_error(

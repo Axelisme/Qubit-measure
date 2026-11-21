@@ -12,6 +12,7 @@ from qick.qick_asm import AcquireMixin
 from zcu_tools.program.acquisition import (
     CancelFlagProtocol,
     ImproveAcquireMixin,
+    ShotResult,
     StoppedPartialAcquireError,
 )
 from zcu_tools.progress_bar import make_pbar
@@ -42,6 +43,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
 
     _simulation_active: bool = False
     _simulation_raw: tuple[SimulationBinding, AcquireRequest, RawShots] | None = None
+    _deferred_raw_notifications: list[Callable[[], None]] | None = None
 
     def _acquire_configured(
         self, soc, *args, **kwargs
@@ -273,9 +275,39 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         """
         if self.acc_buf is None and self._simulation_raw is not None:
             binding, request, source = self._simulation_raw
-            raw = binding.materialize_raw(request, source)
+            notifications = self._deferred_raw_notifications
+            raw = binding.materialize_raw(
+                request,
+                source,
+                defer_notification=notifications.append if notifications is not None else None,
+            )
             self.acc_buf = [raw[ch] for ch in self._program().ro_chs]
         return super().get_raw()
+
+    def get_shot_result(self) -> ShotResult | None:
+        """Return visible raw shots and mask for the retained integrated round.
+
+        As in the base getter, no retained raw returns None; a missing required
+        mask raises RuntimeError. Publish newly materialized deferred timing only
+        if the getter builds the shot result successfully.
+        """
+        if (
+            self._simulation_raw is None
+            or self.acc_buf is not None
+            or self._deferred_raw_notifications is not None
+        ):
+            return super().get_shot_result()
+
+        notifications: list[Callable[[], None]] = []
+        self._deferred_raw_notifications = notifications
+        try:
+            result = super().get_shot_result()
+        finally:
+            self._deferred_raw_notifications = None
+        if result is not None:
+            for notify in notifications:
+                notify()
+        return result
 
     @overload
     def acquire(

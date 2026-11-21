@@ -8,13 +8,15 @@ import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
+    Discriminator,
     StrictBool,
     StrictFloat,
     StrictStr,
+    Tag,
     TypeAdapter,
     ValidationError,
 )
@@ -64,7 +66,21 @@ class MaterializeInput(BaseModel):
     materialize_wall_s: StrictFloat
 
 
-_routing_record = TypeAdapter(AcquireInput | MaterializeInput)
+def _routing_tag(row: object) -> Literal["acquire", "materialize"]:
+    if isinstance(row, MaterializeInput) or (
+        isinstance(row, dict) and row.get("event") == "materialize"
+    ):
+        return "materialize"
+    return "acquire"
+
+
+_routing_record = TypeAdapter(
+    Annotated[
+        Annotated[AcquireInput, Tag("acquire")]
+        | Annotated[MaterializeInput, Tag("materialize")],
+        Discriminator(_routing_tag),
+    ]
+)
 
 
 def decode_routing_record(line: str | bytes) -> AcquireInput | MaterializeInput:

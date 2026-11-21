@@ -1,6 +1,6 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-21, raw materialization timing
+**Last updated:** 2026-11-21, acquire rows and deferred raw timing
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
@@ -55,9 +55,9 @@ The startup changes only select the new model imports.
 ## Acquire telemetry
 
 `simulators.telemetry` owns `RoutingTelemetry`, `TelemetrySettings` and the shared
-acquire-summary types. FTF, single and six use this writer. Each admitted acquire
-writes one row, including numeric failures. Six aggregates all sources and routed
-groups before writing; individual sources do not write rows.
+acquire-summary types. FTF, single and six use this writer. It writes one main
+row per admitted acquire, including numeric failures. Six aggregates all sources
+and routed groups before writing; individual sources do not write rows.
 
 Call `RoutingTelemetry(directory).write(summary, paths=paths)` once at the acquire
 boundary. `AcquireTelemetry` requires the first eleven fields below.
@@ -88,8 +88,8 @@ projective continuations. Single and six also include projective prefixes and
 continuations. Unmeasured parts of `wall_s` include environment preparation,
 pacing and host shot processing.
 
-When a later getter successfully materializes retained raw shots, the same
-writer appends a separate JSONL record:
+When a later getter produces retained raw shots and returns successfully, the
+same writer appends a separate JSONL record:
 
 ```json
 {"event":"materialize","acquire_id":"opaque-acquire-id","materialize_wall_s":0.25,"timestamp":"2026-11-21T10:15:00+00:00"}
@@ -97,8 +97,8 @@ writer appends a separate JSONL record:
 
 Match it to the original acquire by `acquire_id`. The supplemental duration
 is outside that acquire's `wall_s`. It does not count as another acquire and
-cannot change the original row or completion status. A failed materialization
-or an access to cached shots appends nothing. The same retention budget
+cannot change the original row or completion status. A failed getter or an
+access to cached shots appends nothing. The same retention budget
 applies to both record kinds; the matching acquire row can be absent if pruned.
 Older acquire rows may have neither `acquire_id` nor `materialize_wall_s`.
 
@@ -137,7 +137,9 @@ Missing or null `complete` is unknown. Missing or null wall fields are unmeasure
 Only rows with numeric `wall_s` and all three numeric stages contribute wall totals
 and the remainder, including unknown rows. Each observed group reports `included`
 and `excluded`; their sum across groups equals `records`. Absent groups mean zero
-rows. Every valid row still contributes family statistics. Non-null `complete`
+rows. Every valid main row contributes family statistics, even if wall times are
+unmeasured. Supplemental records contribute neither acquire counts nor family
+statistics. Non-null `complete`
 must be a JSON boolean. Non-null wall fields must be JSON numbers, not booleans or
 numeric strings. Wrong types skip the entire row, including its family counters,
 and produce a file/line warning and a `skipped` count.

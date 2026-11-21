@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from tools.analyze_routing_telemetry import main
+from tools.analyze_routing_telemetry import decode_routing_record, main
 
 
 @pytest.fixture
@@ -136,6 +137,23 @@ def test_materialization_events_do_not_count_as_acquires(
     report = json.loads(captured.out)
     assert report["records"] == 1
     assert report["skipped"] == 0
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {},
+        {"acquire_id": "id"},
+        {"materialize_wall_s": 0.25},
+        {"acquire_id": 3, "materialize_wall_s": 0.25},
+        {"acquire_id": "id", "materialize_wall_s": "0.25"},
+        {"acquire_id": "id", "materialize_wall_s": True},
+    ],
+)
+def test_invalid_materialize_event_cannot_decode_as_acquire(fields: dict[str, object]):
+    line = json.dumps({"event": "materialize", "families": {}, **fields})
+    with pytest.raises(ValidationError):
+        decode_routing_record(line)
 
 
 @pytest.mark.parametrize(

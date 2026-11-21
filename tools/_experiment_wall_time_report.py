@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Literal, NotRequired, TypedDict
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field, StrictFloat, TypeAdapter
 
 CORE_TARGET_S = 180.0
 
@@ -83,9 +83,9 @@ class Row(TypedDict):
     compile_s: float | None
     evolve_s: float | None
     readout_s: float | None
-    materialize_s: float | None
-    core_s: float | None
-    core_s_lower_bound: float | None
+    materialize_s: StrictFloat | None
+    core_s: StrictFloat | None
+    core_s_lower_bound: StrictFloat | None
     remainder_s: float | None
     status: RowStatus
     reason: str | None

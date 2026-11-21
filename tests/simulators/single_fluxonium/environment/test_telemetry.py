@@ -12,7 +12,8 @@ from numpy.typing import NDArray
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment
-from zcu_tools.experiment.v2.runtime import RunOptions, Schedule
+from zcu_tools.experiment.v2.runtime import Schedule
+from zcu_tools.program import acquisition as program_acquisition
 from zcu_tools.program.v2.modules import Module
 from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -211,58 +212,86 @@ def test_acquire_records_raw_materialization_only_when_needed(
     assert integrated["materialize_wall_s"] == 0.0
 
 
-@pytest.mark.parametrize("fails", [False, True], ids=["success", "getter-error"])
+def _routing_records(directory: Path):
+    return [
+        json.loads(line)
+        for path in sorted(directory.glob("routing-*.jsonl"))
+        for line in path.read_text().splitlines()
+    ]
+
+
 def test_schedule_attributes_deferred_raw_to_its_acquire(
     tmp_path: Path,
     telemetry_environment: SimulationEnvironment,
     telemetry_program,
-    fails: bool,
 ):
     env = telemetry_environment
     program = telemetry_program
     program.acquire(env.soc, progress=False)
-
-    if fails:
-
-        class FailingRaw:
-            def materialize(
-                self, reps: int, avg_level: int
-            ) -> dict[int, NDArray[np.int64]]:
-                raise RuntimeError("deferred raw source failed")
-
-        execute = env.soc.binding.execute
-
-        def execute_with_failed_raw(request: RoundRequest):
-            result = execute(request)
-            assert isinstance(result, IntegratedRound)
-            return replace(result, raw=FailingRaw())
-
-        env.soc.binding.execute = execute_with_failed_raw
-
     with Schedule(scope=Scope("run")) as sched:
-        if fails:
-            with pytest.raises(RuntimeError, match="deferred raw source failed"):
-                sched.run_acquire_shots(program, env.soc, options=RunOptions(retry=2))
-        else:
-            shots = sched.run_acquire_shots(program, env.soc)
-            assert shots is not None
-            assert shots.shots[0].shape == (1, 2, 1, 2)
-            program.get_raw()  # Reading the retained buffer must not publish again.
+        shots = sched.run_acquire_shots(program, env.soc)
+        assert shots is not None
+        assert shots.shots[0].shape == (1, 2, 1, 2)
+        program.get_raw()  # Reading the retained buffer must not publish again.
 
-    first, last, *supplements = (
-        json.loads(line)
-        for path in sorted(tmp_path.glob("routing-*.jsonl"))
-        for line in path.read_text().splitlines()
-    )
+    first, last, supplement = _routing_records(tmp_path)
     assert first["materialize_wall_s"] == last["materialize_wall_s"] == 0.0
     assert last["complete"] is True
-    if fails:
-        assert supplements == []  # Includes no reacquire on the getter error.
-    else:
-        (supplement,) = supplements
-        assert supplement["event"] == "materialize"
-        assert supplement["acquire_id"] == last["acquire_id"] != first["acquire_id"]
-        assert supplement["materialize_wall_s"] > 0.0
+    assert supplement["event"] == "materialize"
+    assert supplement["acquire_id"] == last["acquire_id"] != first["acquire_id"]
+    assert supplement["materialize_wall_s"] > 0.0
+
+
+def test_schedule_does_not_publish_materialization_when_raw_source_fails(
+    tmp_path: Path,
+    telemetry_environment: SimulationEnvironment,
+    telemetry_program,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    soc = telemetry_environment.soc
+
+    class FailingRaw:
+        def materialize(self, reps: int, avg_level: int) -> dict[int, NDArray[np.int64]]:
+            raise RuntimeError("deferred raw source failed")
+
+    execute = soc.binding.execute
+
+    def execute_with_failed_raw(request: RoundRequest):
+        result = execute(request)
+        assert isinstance(result, IntegratedRound)
+        return replace(result, raw=FailingRaw())
+
+    # The physical environment builder exposes no raw source injection. Keep its
+    # real round, Schedule and writer, and substitute only the returned raw source.
+    monkeypatch.setattr(soc.binding, "execute", execute_with_failed_raw)
+    with (
+        Schedule(scope=Scope("run")) as sched,
+        pytest.raises(RuntimeError, match="deferred raw source failed"),
+    ):
+        sched.run_acquire_shots(telemetry_program, soc)
+
+    assert not any(row.get("event") == "materialize" for row in _routing_records(tmp_path))
+
+
+def test_schedule_does_not_publish_materialization_when_shot_result_construction_fails(
+    tmp_path: Path,
+    telemetry_environment: SimulationEnvironment,
+    telemetry_program,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fail_result_construction(**_: object) -> None:
+        raise MemoryError("shot result construction failed")
+
+    # A valid simulated acquire offers no public way to fail allocation after
+    # raw has been generated. Substitute only the final result construction.
+    monkeypatch.setattr(program_acquisition, "ShotResult", fail_result_construction)
+    with (
+        Schedule(scope=Scope("run")) as sched,
+        pytest.raises(MemoryError, match="shot result construction failed"),
+    ):
+        sched.run_acquire_shots(telemetry_program, telemetry_environment.soc)
+
+    assert not any(row.get("event") == "materialize" for row in _routing_records(tmp_path))
 
 
 @pytest.mark.parametrize("seam", ["evolve", "continuation", "adc"])

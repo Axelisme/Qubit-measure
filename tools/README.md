@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-18 (FTF gate scenes and paired Engine backend selection)
+**Last updated:** 2026-11-21 (experiment Run core-time coverage)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -185,6 +185,8 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
 工具從 [acquire telemetry](../lib/zcu_tools/simulators/README.md#acquire-telemetry) 加總各階段秒數。`core_s` 是 `compile_s`、`evolve_s`、`readout_s` 和 `materialize_s` 四項之和。`materialize_s` 含 acquire 內產生 raw shots 的時間，也含依 `acquire_id` 配對的延後 materialize。`remainder_s` 從 acquire 牆鐘扣除該牆鐘內的四項工作。延後 materialize 在 acquire 之外，不再從 remainder 扣除。`ShotReducer` 等 host 處理不計入核心。
 
 Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆鐘和四個分項、每筆補充紀錄都有主紀錄配對時，才填 `core_s`。缺 materialize 的舊 telemetry 不補 0。配不到主紀錄的補充紀錄不計秒數或 acquire 次數，並使分項不完整。成功但分項不全的 `missing_breakdown` 列保留 Run 秒數，四個分項與 remainder 寫 `null`。分項不全或逾時時，`core_s` 寫 `null`，`core_s_lower_bound` 只加總分項齊全的主紀錄與配對到它們的補充紀錄。沒有分項齊全的主紀錄時，下限也寫 `null`。
+
+完整只表示現存 telemetry 的分項齊全。Writer 採盡力寫入；工具無法察覺整筆主紀錄或補充紀錄遺失。若該 Run 期間出現保留上限刪檔或寫入失敗的警告，不要用該列的 `core_s` 斷言達標。
 
 摘要的 Core 欄在不完整列顯示 `≥` 加下限，沒有下限則顯示「—」。3 分鐘判定使用未四捨五入的秒數。完整核心嚴格大於 180 秒才列入 `Core >180 s`。下限嚴格大於 180 秒列入 `Core 已知至少超標`，其餘沒有完整核心的列列入 `Core 未判定`。Run 秒數和期限都不參與核心判定。
 
@@ -1303,7 +1305,8 @@ when counting acquires and aggregating these three stages.
 A row contributes wall totals only when all four wall fields are JSON numbers.
 Missing or null wall fields make it excluded from wall totals, including in the
 unknown group. Included plus excluded across groups equals `records`.
-All valid rows still count toward family statistics. Non-null `complete` accepts
+All valid main rows still count toward family statistics. Supplemental records
+do not contribute family statistics. Non-null `complete` accepts
 only JSON booleans. Non-null wall fields accept only JSON numbers, not booleans or
 numeric strings. Wrong types skip the whole row, including family work, and emit
 the same file/line warning as other malformed records.

@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-21, backend cancellation with no completed rounds
+**Last updated:** 2026-11-21, backend cancellation and deferred raw timing
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -52,9 +52,12 @@ inside the acquire, including failed calls. It is `0.0` when no shots are
 materialized during acquire. It excludes downstream shot processing.
 If a later getter materializes retained shots, optional
 `SimulationCallbacks(on_materialize=callback)` receives the originating
-`acquire_id` and elapsed seconds only after successful materialization. The
-binding measures both paths. Program has no knowledge of the telemetry writer
-or file format. Both callbacks use the same warning policy.
+`acquire_id` and elapsed seconds. `get_shot_result()` publishes only after building
+the result successfully; a failure after raw materialization does not publish.
+A direct `get_raw()` publishes on materialization as before. The binding measures
+both paths without counting mask or result construction. Program has no
+knowledge of the telemetry writer or file format. Both callbacks use the same
+warning policy.
 
 The binding's acquire body includes request release and active-marker cleanup.
 It sets `complete=True` only when that body returns normally. A Stop that returns

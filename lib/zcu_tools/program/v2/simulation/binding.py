@@ -89,9 +89,10 @@ class SimulationCallbacks:
         BaseExceptions propagate with the acquire error retained as context.
     on_begin: no-argument preparation after wait_ready, before request construction;
         errors release admission and propagate.
-    on_materialize: receives (acquire_id, elapsed wall seconds) after a successful
-        raw materialization outside that acquire's body. Ordinary Exceptions
-        warn once without failing raw access; BaseExceptions propagate.
+    on_materialize: receives (acquire_id, elapsed wall seconds) for successful
+        raw materialization outside that acquire's body. When a shot-result getter
+        requests the raw arrays, it publishes only after building the result.
+        Ordinary Exceptions warn once without failing raw access; BaseExceptions propagate.
     Callbacks default to None and must not reenter acquisition.
     """
 
@@ -281,16 +282,22 @@ class SimulationBinding:
             self._compile_wall_s += time.monotonic() - started
 
     def materialize_raw(
-        self, request: AcquireRequest, source: RawShots
+        self,
+        request: AcquireRequest,
+        source: RawShots,
+        *,
+        defer_notification: Callable[[Callable[[], None]], None] | None = None,
     ) -> dict[int, NDArray[np.int64]]:
         """Generate and detach raw int64 arrays keyed by ADC, without processing IQ.
 
         Pass this binding's original request and retained numeric source.
         Shape, dtype or channel mismatches raise ValueError; source errors
         propagate. Count elapsed wall seconds inside the originating acquire,
-        including failed attempts. Later, report only successful materialization
-        and retain the original acquire identity. With no observer for the
-        applicable phase, this call does not read the clock.
+        including failed attempts. For successful later materialization, notify
+        the observer with the original acquire identity. If defer_notification is
+        supplied, give it the no-argument notification instead; the caller can
+        run that notification once if its own work succeeds. With no observer for
+        the applicable phase, this call does not read the clock.
         """
         active = self._active_sequence == request.sequence
         observer = self._on_materialize
@@ -304,7 +311,13 @@ class SimulationBinding:
             if active:
                 self._materialize_wall_s += elapsed
         if not active and observer is not None:
-            self._notify(partial(observer, self._acquire_id(request.sequence), elapsed))
+            notify = partial(
+                self._notify, partial(observer, self._acquire_id(request.sequence), elapsed)
+            )
+            if defer_notification is None:
+                notify()
+            else:
+                defer_notification(notify)
         return raw
 
     def _acquire_id(self, sequence: int) -> str:
