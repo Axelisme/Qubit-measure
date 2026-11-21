@@ -52,7 +52,7 @@ Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`ro
 
 | FTF 入口 | P |
 | --- | --- |
-| Joint readout | `2 prepared_f1 × 2 prepared_f2 = 4`。 |
+| Joint readout | `2 prepared_qubit1 × 2 prepared_qubit2 = 4`。 |
 | Idle ZZ | `DC 點數 × 2 spectator states × delay 點數`。 |
 | Conditional spectroscopy | `DC 點數 × 2 prepared_f1 × 2 prepared_f2 × frequency 點數`。 |
 | Constructive phase／chevron | `phase 或 frequency 點數 × duration 點數`。Chevron 初開為 25×101 點，端點仍須人工提供。 |
@@ -88,7 +88,7 @@ Chevron 的 25×101 點保存 181,800 bytes 的 `sums`。選 mux herald 不改�
 
 在 FTF 的低 SNR 例子中，R2 的線寬約 1.2 MHz。五個光子衰減時間約 0.66 µs；2 µs 約是單個光子衰減時間的 15 倍。gg herald 後打名目 F2 Xπ，等待 0 µs 時，F2 的終端 e 比例為 11.6%；等待 2 µs 時為 92.9%。比例未扣除 I 基線。2 µs 只是當時的比較值，不是最短或最佳等待。
 
-在 `two_qubit/joint_readout` 的 Reset 欄位選 `reset/mux_herald`，在 `keep` 用 F1、F2 的 role tone 在完整 readout 中的位置作鍵，兩個值都填 g。Herald 和 terminal 使用同一份完整 mux readout。Run 後看 FIT 的 4×9 列正規化機率矩陣。取目標 qubit 打名目 Xπ、另一顆打 I 的那一列，把目標 qubit 的 terminal 分類為 e 的欄位加總。也可與兩顆都打 I 的 gg 列比較。這是通過 gg herald 的 shots 中，目標 qubit 的 terminal e 比例，不是 gate fidelity。只延長 `post_delay`，其餘設定不變，再 Run 和 FIT。若比例仍隨等待延長而上升，先調整等待再跑 heralded 掃描。
+在 `two_qubit/joint_readout` 的 Reset 欄位選 `reset/mux_herald`。用 Qubit1、Qubit2 在完整 readout 中的 tone 位置作為 `keep` 的鍵，兩個值都填 g。Herald 和 terminal 使用同一份完整 mux readout。Run 後看 FIT 的 4×9 列正規化機率矩陣。取目標 qubit 打名目 Xπ、另一顆打 I 的那一列，把目標 qubit 的 terminal 分類為 e 的欄位加總。也可與兩顆都打 I 的 gg 列比較。這是通過 gg herald 的 shots 中，目標 qubit 的 terminal e 比例，不是 gate fidelity。只延長 `post_delay`，其餘設定不變，再 Run 和 FIT。若比例仍隨等待延長而上升，先調整等待再跑 heralded 掃描。
 
 `reset` 預設 None，不發射 reset。脈衝 reset 每 shot 開始時發射。表單 Reset 只重新捕捉初值。
 
@@ -127,6 +127,8 @@ Rabi 的 module 與 slot rows 可分開 Apply。確認 x180/x90 指向這次接�
 
 ## FTF 的四個角色與 tone 對應
 
+Joint readout 用 `qubit1`、`qubit2` 和 `mux`，不需要 `coupler`。綁定與重綁步驟見 [Joint readout guide](joint_readout/guide.md#before-run)。
+
 | Scalar alias | 指向（kickstart／simulation 新 entry 的綁定） | 用途 |
 | --- | --- | --- |
 | `f1` | 第一個 fluxonium component，`Q1` | 取 `$f1.module.x180`／`x90`，供準備與 projection。既有 entry 缺此角色時，在 Aliases 加入 `f1` 並綁到 `Q1`。 |
@@ -146,7 +148,7 @@ F1 的 tone 是 `$f1` component 在 Open／Reset 所固定的 `$mux.qubits` 中�
 
 | 次序 | 操作與圖 | 判讀與後續動作 |
 | --- | --- | --- |
-| 0b. [Joint readout](joint_readout/guide.md) | 四個 B00／B01／B10／B11 分支各接一次 mux readout，看 acquired shots、counts 與 4×9 matrix。 | 行是名目準備，列是 F1/F2 的 g/e/other 九種聯合結果。Heralded 另依實際初態顯示 g,g、e,e 與合併矩陣。 |
+| 0b. [Joint readout](joint_readout/guide.md) | 四個 I／Xπ 準備分支各接一次 mux readout，看 acquired shots、counts 與 4×9 matrix。 | 每行是一種名目準備；每欄是 Qubit1／Qubit2 的一種 g/e/other 聯合結果。選 herald reset 時只計通過篩選的 shots。 |
 | 1. [Idle ZZ](idle_zz/guide.md) | Target 選 F1 或 F2，spectator 做 I／Xπ。人工填 detune，掃 delay，看曲線、fit 與 ζ；需要時外層掃具名 DC source。 | ζ 是單頻模型下的兩分支擬合頻差，符號依 detune 同側前提。近 0／2×abs(detune) 時回不可辨識。依曲線與 fit_quality 判讀熱混合，調偏由操作員決定。 |
 | 2. [Conditional higher-level spectroscopy](conditional_spectroscopy/guide.md) | 四分支雙線 weak probe，掃共同 frequency，可加 coupler DC 軸與雙 Xπ 對比。 | 人工選 transition 與後續 probe 窗口。頻譜是診斷訊號，能級命名、EC/EJ/J 與 CZ frequency 需另行確認。 |
 | 3a. [Constructive phase](constructive_phase/guide.md) | B11 固定 signed gain 比例，掃 relative phase × duration。 | 無衰減 cosine 求各 trace rate，rate < 1/span 為未解析。以 `rate² = A + B cosφ + C sinφ` 求最大 rate 的 `atan2(C,B)`，只提 F2 pulse 與獨立 slot。Nyquist 與 signed gain ratio 由操作員確認，此掃描只調 relative phase。 |

@@ -33,16 +33,15 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._readout import JointRoles, MuxResetCfg
-from .._sums import (
-    joint_probabilities,
-    validate_classifiers,
-)
+from .._readout import MuxResetCfg
+from .._sums import joint_probabilities, validate_qubit_tones
 
 PREPARED_STATES = (("g", "g"), ("g", "e"), ("e", "g"), ("e", "e"))
-PREPARED_LABELS = tuple(f"{f1},{f2}" for f1, f2 in PREPARED_STATES)
+PREPARED_LABELS = tuple(",".join(states) for states in PREPARED_STATES)
 OUTCOME_LABELS = tuple(
-    f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
+    f"{qubit1},{qubit2}"
+    for qubit1 in ("g", "e", "other")
+    for qubit2 in ("g", "e", "other")
 )
 
 SUMS_SHAPE = (2, 2, 3, 3)
@@ -52,11 +51,11 @@ OUTCOME_COUNT = len(OUTCOME_LABELS)
 
 @dataclass(frozen=True)
 class JointReadoutResult:
-    """prepared_f1/f2 are int64 [0,1]; sums is float64 (2,2,3,3) counts.
+    """sums holds float64 (2,2,3,3) counts in preparation and terminal order.
 
-    Preparation indices are 0=g, 1=e; F1 is outer, giving gg/ge/eg/ee.
-    Class axes are terminal F1,
-    terminal F2, each g/e/other. Rounds add without averaging; unmeasured branches
+    Preparation indices are 0=g, 1=e; Qubit1 is outer, giving gg/ge/eg/ee.
+    The last axes are terminal Qubit1 and Qubit2, each ordered g/e/other.
+    Rounds add without averaging; unmeasured branches
     remain NaN. Completed rounds survive cooperative cancellation. Acquisition
     exceptions propagate unchanged from run; the stop signal carries only stop
     requests and reason text, not errors or data completeness.
@@ -69,7 +68,7 @@ class JointReadoutResult:
 class JointReadoutAnalysis:
     """counts and row-normalized matrix are (4,9), including other outcomes.
 
-    Columns are F1-major g/e/other pairs; acquired_shots is each row's total.
+    Columns are Qubit1-major g/e/other pairs; acquired_shots is each row's total.
     Zero-count or unmeasured rows have NaN probabilities.
     """
 
@@ -82,10 +81,10 @@ class JointReadoutCfg(ConfigBase):
     """Four nominal thermal I/Xπ branches with optional reset before preparation.
 
     reps is shots per round; rounds accumulate counts on the acquisition side.
-    Delays are us, pulse frequency MHz and phase degrees. roles retain the
-    captured full mux mapping. Only F1/F2 require circle classifiers with GE Post
-    radii. No DC device is driven. readout and pulses are editable calibrated
-    inputs. reset=None emits no reset; otherwise it starts every shot.
+    Delays are us, pulse frequency MHz and phase degrees. The two distinct
+    tone indices address the full readout, not ADC channels. Only their tones
+    need circle classifiers with GE Post radii. No DC device is driven.
+    reset=None emits no reset; otherwise it starts every shot.
     """
 
     reset: Annotated[
@@ -94,28 +93,41 @@ class JointReadoutCfg(ConfigBase):
             label="Reset", description="Optional reset at the start of every shot."
         ),
     ] = None
-    x180_f1: Annotated[
+    x180_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F1 Xπ",
-            description="Calibrated F1 x180 pulse on its charge generator.",
+            label="Qubit1 Xπ",
+            description="Calibrated Qubit1 x180 pulse on its charge generator.",
         ),
     ]
-    x180_f2: Annotated[
+    x180_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F2 Xπ",
-            description="Calibrated F2 x180 pulse on its charge generator.",
+            label="Qubit2 Xπ",
+            description="Calibrated Qubit2 x180 pulse on its charge generator.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full mux readout; F1/F2 need circle + radius from GE Post.",
+            description="Full mux readout; Qubit1 and Qubit2 need circle radii from GE Post.",
         ),
     ]
-    roles: JointRoles
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based Qubit1 position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based Qubit2 position in the full mux readout.",
+        ),
+    ]
     reps: Annotated[int, FieldMeta(label="Reps")] = Field(gt=0)
     rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
     initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
@@ -123,8 +135,8 @@ class JointReadoutCfg(ConfigBase):
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
-        """Require calibrated F1/F2 role tones."""
-        validate_classifiers(self.readout, self.roles)
+        """Require distinct in-range tone indices with circle radii."""
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
         return self
 
 
@@ -178,7 +190,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
             ),
             result_type=JointReadoutResult,
             cfg_type=JointReadoutCfg,
-            cfg_schema_version="5.0",
+            cfg_schema_version="6.0",
             tag="two_qubit/joint_readout",
             result_builder=restore_result,
         )
@@ -221,34 +233,34 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                 initial_delay=config.initial_delay,
                 relax_delay=config.relax_delay,
             )
-            builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e (outer)
-            builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e (inner)
+            builder.add_loop("prepared_qubit1", 2)  # 0 = g, 1 = e (outer)
+            builder.add_loop("prepared_qubit2", 2)  # 0 = g, 1 = e (inner)
             readout = MuxReadout("readout", config.readout)
-            x180_f1 = Pulse("x180_f1", config.x180_f1)
-            x180_f2 = Pulse("x180_f2", config.x180_f2)
+            x180_qubit1 = Pulse("x180_qubit1", config.x180_qubit1)
+            x180_qubit2 = Pulse("x180_qubit2", config.x180_qubit2)
             if config.reset is not None:
                 builder.emit(Reset("reset", config.reset, terminal=readout))
-            builder.fork("default", into=["f1", "f2"])
+            builder.fork("default", into=["qubit1", "qubit2"])
             with (
                 builder.branch(
-                    by="prepared_f1", align_timeline=True, timeline="f1"
+                    by="prepared_qubit1", align_timeline=True, timeline="qubit1"
                 ) as cases,
-                cases.case(1),  # F1 prepared in e
+                cases.case(1),
             ):
-                builder.emit(x180_f1)
+                builder.emit(x180_qubit1)
             with (
                 builder.branch(
-                    by="prepared_f2", align_timeline=True, timeline="f2"
+                    by="prepared_qubit2", align_timeline=True, timeline="qubit2"
                 ) as cases,
-                cases.case(1),  # F2 prepared in e
+                cases.case(1),
             ):
-                builder.emit(x180_f2)
-            builder.join("f1", "f2", into="default")
+                builder.emit(x180_qubit2)
+            builder.join("qubit1", "qubit2", into="default")
             builder.emit(readout, tag="terminal")
             prog = builder.build()
             axes = [
-                Classify("terminal", config.roles.f1_tone),
-                Classify("terminal", config.roles.f2_tone),
+                Classify("terminal", config.qubit1_tone),
+                Classify("terminal", config.qubit2_tone),
             ]
             sched.run_acquire_summed(
                 prog,
@@ -267,7 +279,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         *,
         plots: Plots,
     ) -> JointReadoutAnalysis:
-        """Normalize counts to a 4×9 matrix, including g/e/other for both roles."""
+        """Normalize counts to a 4×9 matrix, including g/e/other for both positions."""
         # 1. Normalize terminal counts while retaining each row's shot total.
         del options
         result = source.result
@@ -314,7 +326,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                     PREPARED_LABELS, answer.acquired_shots, strict=True
                 )
             ],
-            xlabel="Observed terminal class (F1, F2)",
+            xlabel="Observed terminal class (Qubit1, Qubit2)",
             ylabel="Nominal I/Xπ preparation; acquired shots",
             title="Preparation → observed outcome; includes preparation and readout effects",
         )

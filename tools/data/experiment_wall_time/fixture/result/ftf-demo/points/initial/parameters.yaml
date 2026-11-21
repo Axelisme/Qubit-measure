@@ -43,6 +43,8 @@ components:
     module:
       cz_f2: coupler.pulses.cz_f2
       cz_f1: coupler.pulses.cz_f1
+      cz_qubit2: coupler.pulses.cz_qubit2
+      cz_qubit1: coupler.pulses.cz_qubit1
     wiring: {}
     freq:
     flux:
@@ -108,3 +110,5 @@ metadata:
   MG12.module.readout: {}
   coupler.module.cz_f2: {}
   coupler.module.cz_f1: {}
+  coupler.module.cz_qubit2: {}
+  coupler.module.cz_qubit1: {}

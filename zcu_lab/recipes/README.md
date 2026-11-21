@@ -32,7 +32,7 @@ Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須�
 掃描端點、flux 範圍與裝置單位檢查直接寫在 recipe 主體，不另設選源 helper。
 數字回報使用 lib 的 `report_number`，不改單位或精度。
 `mux_helpers.py` 只共用 tone 範圍輸入與報告欄位，不組裝 Form edits。
-[`two_qubit_helpers.py`](two_qubit_helpers.py) 共用四角色 target、選定候選的寫回與收據處理，並說明如何轉交 owner 報告。Recipe 主體決定何時詢問寫回。
+[`two_qubit_helpers.py`](two_qubit_helpers.py) 提供 `TwoQubitPositionTarget`，以 `qubit1`、`qubit2`、`coupler`、`mux` 綁定同一次 Open／Reset。使用舊位置名的 recipe 仍用 `TwoQubitTarget`。此模組也共用選定候選的寫回與收據處理。Recipe 主體決定何時詢問寫回。
 [`two_qubit_rb_helpers.py`](two_qubit_rb_helpers.py) 共用兩個 paired RB recipe 的輸入與 CZ 誤差估計欄位。
 `ro_optimize_chain_helpers.py` 共用三個 readout-chain ro_optimize recipe 的報告欄位，並複製最佳 setting 的 score、QND、M 與模型近似誤差尺度。
 `mux_flux_helpers.py` 共用四個 flux recipe 的輸入、報告與逐 Q 分析 updates。

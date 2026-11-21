@@ -33,6 +33,32 @@ class TwoQubitTarget(FormModel):
         }
 
 
+class TwoQubitPositionTarget(FormModel):
+    """Bind positions on this Open/Reset only; null leaves a binding unchanged."""
+
+    qubit1: str | None = Field(default=None, description="Component at Qubit1.")
+    qubit2: str | None = Field(default=None, description="Component at Qubit2.")
+    coupler: str | None = Field(
+        default=None, description="Component holding the pair's CZ calibration."
+    )
+    mux: str | None = Field(
+        default=None, description="Mux group containing Qubit1 and Qubit2."
+    )
+
+    def aliases(self) -> dict[str, str]:
+        """Return only supplied alias bindings for open_tab, without inference."""
+        return {
+            alias: name
+            for alias, name in (
+                ("qubit1", self.qubit1),
+                ("qubit2", self.qubit2),
+                ("coupler", self.coupler),
+                ("mux", self.mux),
+            )
+            if name is not None
+        }
+
+
 def apply_selected_writeback(tab: RecipeTab, decision: WritebackAnswer) -> bool:
     """Apply only the answered selection from this tab's latest writeback ask.
 

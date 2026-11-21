@@ -1,28 +1,26 @@
-"""Fixed-capture roles and editable calibration inputs for joint readout."""
+"""Fixed-capture tone positions and calibration inputs for joint readout."""
 
-from zcu_tools.cfg_model import Slot, Template
+from zcu_tools.cfg_model import Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
-from .._measure import captured_roles
+from .._measure import captured_qubits
 from .core import JointReadoutCfg
 
 
 def make_form(ctx: FormContext) -> Form[JointReadoutCfg]:
-    """Require captured F1/F2 fluxoniums, transmon coupler and full mux binding.
+    """Seed joint readout from the GUI's $qubit1, $qubit2 and $mux aliases.
 
-    Resolve roles and original tone positions once at Open/Reset, locking them
-    against manual editing. The shared validator owns qubit/resonator relations.
-    Missing capture, roles, required kinds or group membership raise ValueError;
-    source and alias failures propagate. Never refresh or mutate the capture.
-    Xπ slots are copied into editable inputs; readout references its library slot.
-    Missing pulses remain Invalid; absent readout starts blank
-    for manual calibration.
-    Core validation requires its tone count to match the captured full group.
+    The fixed Open/Reset capture supplies both hidden tone indices. These
+    GUI aliases are separate from Notebook's built-in bindings of the same
+    names. Missing or inconsistent bindings or a captured tone-count mismatch
+    raise ValueError. The capture is not changed. Copy the Xπ slots into
+    editable inputs and reference the mux readout slot. Missing pulses remain
+    unfilled; without a readout slot, start with a blank readout template.
     """
-    roles = captured_roles(ctx)
+    qubits = captured_qubits(ctx)
     readout = source(
         ctx,
         "$mux.module.readout",
@@ -34,10 +32,11 @@ def make_form(ctx: FormContext) -> Form[JointReadoutCfg]:
             "reps": 1000,
             "rounds": 10,
             "relax_delay": 1.0,
-            "roles": roles,
+            "qubit1_tone": Hidden(qubits.qubit1_tone),
+            "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
-            "x180_f1": Slot("$f1.module.x180", copy=True),
-            "x180_f2": Slot("$f2.module.x180", copy=True),
+            "x180_qubit1": Slot("$qubit1.module.x180", copy=True),
+            "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
             "readout": readout,
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

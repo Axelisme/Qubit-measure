@@ -36,7 +36,7 @@
 | Local Z | [`two_qubit/local_z`](two_qubit/local_z/guide.md) | — |
 | Paired RB／IRB | [`two_qubit/rb`](two_qubit/rb/guide.md) | [`two_qubit/rb_heralded`](two_qubit/rb/guide_heralded.md) |
 
-一般入口保存 terminal F1/F2 的 9 類計數。除了 `conditional_phase`，表內一般入口可用 `reset/mux_herald` 在序列前篩選 shot，仍只保存這 9 類終端計數。RB 與 conditional phase 的 `_heralded` 入口保存 81 類 herald × 終端計數，讓分析同時使用 herald g,g 與 e,e 組。採樣與保存量見 [FTF guide](two_qubit/guide.md#採樣數與成本)。
+一般入口保存兩個位置的 9 類 terminal 聯合計數。除了 `conditional_phase`，表內一般入口可用 `reset/mux_herald` 在序列前篩選 shot，仍只保存這 9 類終端計數。RB 與 conditional phase 的 `_heralded` 入口保存 81 類 herald × 終端計數，讓分析同時使用 herald g,g 與 e,e 組。採樣與保存量見 [FTF guide](two_qubit/guide.md#採樣數與成本)。
 
 ## 套件邊界
 
@@ -63,7 +63,7 @@ AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/res
 Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
 [\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩個實驗各自在 `analyze()` 畫自己的圖，
-[\_sums.py](two_qubit/_sums.py) 只負責分類計數的數值換算。
+[\_sums.py](two_qubit/_sums.py) 檢查分類校準並換算計數，不讀 alias 或元件。
 Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
 並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。
 [\_chain_common.py](twotone/ro_optimize/_chain_common.py) 只保留保存映射、完成點篩選與最佳 setting 摘要型別。
@@ -170,8 +170,8 @@ MuxGroup 可不填 qubits 做 resonator bring-up，readout 各欄位仍可編輯
 填了則由 model 檢查等長與重複 qubit。Form 在 Open／Reset 呼叫
 `support.measure.mux_bindings.validate_mux_bindings(ctx.parameters)`，以固定 capture
 檢查 component 存在、kind 及逐項 qubit.resonator 對應，無效就拒絕來源。
-其他 mux／FTF Forms 共用此入口，精確 import 與呼叫例見
-[Measure support](support/measure/README.md#mux-綁定驗證)。
+其他 mux Forms 與使用 `captured_roles` 的 FTF Forms 共用此入口，呼叫例見
+[Measure support](support/measure/README.md#mux-綁定驗證)。Joint readout 只用該次 capture 的 `$mux.qubits` 與 readout 定位兩個 tone，不查元件 kind。
 Module 可整組引用或 inline 編輯，tones 使用 picker 逐項編輯。
 七個 mux qubit Forms 有 readout slot 時引用 library，完整 tones 與 scalar 設定取自該模組。
 缺 slot 時從 blank mux 範本加 group tones，填入 resonator 校準頻率與名稱 label。

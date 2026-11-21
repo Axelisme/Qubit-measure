@@ -24,15 +24,37 @@ def validate_classifiers(readout: MuxReadout.Cfg, roles: JointRoles) -> None:
     Calibration errors name the role and request GE Post.
     """
     roles.validate_readout(readout)
-    for role, tone in (("F1", roles.f1_tone), ("F2", roles.f2_tone)):
-        try:
-            classifier = circle_classifier(readout, ro_ch=readout.tones[tone].ro_ch)
-        except ValueError as exc:
+    for label, tone in (("F1", roles.f1_tone), ("F2", roles.f2_tone)):
+        _require_circle_radius(readout, label, tone)
+
+
+def validate_qubit_tones(
+    readout: MuxReadout.Cfg, qubit1_tone: int, qubit2_tone: int
+) -> None:
+    """Require distinct zero-based tone indices into readout and circle radii.
+
+    Invalid indices or missing circle calibration raise ValueError. Calibration
+    diagnostics name the position and request GE Post. Other tones are unchanged.
+    """
+    if qubit1_tone == qubit2_tone:
+        raise ValueError("Qubit1 and Qubit2 must use distinct readout tone indices")
+    for label, tone in (("Qubit1", qubit1_tone), ("Qubit2", qubit2_tone)):
+        if not 0 <= tone < len(readout.tones):
             raise ValueError(
-                f"{role}: circle classifier required; run GE Post. {exc}"
-            ) from exc
-        if classifier.radius is None:
-            raise ValueError(f"{role}: circle radius required; run GE Post")
+                f"{label} tone index {tone} is outside the {len(readout.tones)} readout tones"
+            )
+        _require_circle_radius(readout, label, tone)
+
+
+def _require_circle_radius(readout: MuxReadout.Cfg, label: str, tone: int) -> None:
+    try:
+        classifier = circle_classifier(readout, ro_ch=readout.tones[tone].ro_ch)
+    except ValueError as exc:
+        raise ValueError(
+            f"{label}: circle classifier required; run GE Post. {exc}"
+        ) from exc
+    if classifier.radius is None:
+        raise ValueError(f"{label}: circle radius required; run GE Post")
 
 
 def joint_probabilities(counts: NDArray[np.float64]) -> NDArray[np.float64]:

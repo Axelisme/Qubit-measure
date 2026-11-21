@@ -239,3 +239,31 @@ components:
         pre_delay: 0.0
         post_delay: 0.0
         mixer_freq:
+      cz_qubit2:
+        type: pulse
+        desc:
+        waveform:
+          style: const
+          length: 0.8
+        ch: 3
+        nqz: 2
+        freq: 5799.976979080261
+        phase: -0.21495102875174946
+        gain: 0.024144059109456696
+        pre_delay: 0.0
+        post_delay: 0.0
+        mixer_freq:
+      cz_qubit1:
+        type: pulse
+        desc:
+        waveform:
+          style: const
+          length: 0.8
+        ch: 2
+        nqz: 2
+        freq: 5799.976979080261
+        phase: 0.0
+        gain: 0.024144059109456696
+        pre_delay: 0.0
+        post_delay: 0.0
+        mixer_freq:
