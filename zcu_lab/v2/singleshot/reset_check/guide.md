@@ -13,6 +13,7 @@ Live plots and Analyze divide each row by its total count before displaying popu
 ## Parameter sources
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`; Gain → Stop starts at 4 * `$qubit.module.x180.gain` or 1.0, whichever is lower.
+The first and last sampled gains must be in [-1, 1] a.u. If either is outside that range, the form marks a row in red and disables Run.
 
 Readout accepts only the pulse family.
 A mux readout in the library is incompatible.
