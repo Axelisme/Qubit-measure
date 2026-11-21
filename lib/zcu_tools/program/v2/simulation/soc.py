@@ -24,13 +24,22 @@ def _validate_routes(routes: object) -> None:
         raise TypeError("routes must be a tuple of (int, int) generator/ADC pairs")
 
 
+def _validate_drive_generators(drive_generators: object) -> None:
+    if not isinstance(drive_generators, tuple) or any(
+        not isinstance(gen, int) for gen in drive_generators
+    ):
+        raise TypeError("drive_generators must be a tuple of integer channels")
+
+
 class SimulationSoc(QickConfig):
     """Bound offline SoC; no implicit noise mode and no driver ownership.
 
-    routes is a tuple of (generator, ADC) integer pairs. Other containers,
-    malformed pairs and non-integer channels raise TypeError at construction.
-    Out-of-range channels raise ValueError. The fixed capability profile is
-    supplied by the caller's compile profile; using an unbound route fails before acquisition.
+    routes is a tuple of (generator, ADC) integer pairs. drive_generators is a
+    tuple of additional generator indices that can emit pulses without an ADC
+    connection. It does not add any ADC routes. Other containers, malformed
+    pairs and non-integer channels raise TypeError at construction. Channels
+    outside the caller's compile profile raise ValueError. Using an unbound
+    generator or ADC route fails before numeric execution.
     Getters retain the last completed realization, never execute or resample it.
     """
 
@@ -43,14 +52,20 @@ class SimulationSoc(QickConfig):
         binding: SimulationBinding,
         *,
         routes: tuple[tuple[int, int], ...],
+        drive_generators: tuple[int, ...] = (),
     ) -> None:
         _validate_routes(routes)
+        _validate_drive_generators(drive_generators)
         super().__init__(soccfg.get_cfg())
         self.binding = binding
         self.routes = routes
+        self._drive_generators = drive_generators
         for gen, adc in routes:
             if not 0 <= gen < len(self["gens"]) or not 0 <= adc < len(self["readouts"]):
                 raise ValueError(f"invalid simulation route {(gen, adc)}")
+        for gen in drive_generators:
+            if not 0 <= gen < len(self["gens"]):
+                raise ValueError(f"invalid simulation drive generator {gen}")
         self._request: AcquireRequest | None = None
         self._pacing_cancel: CancellationQuery | None = None
         self._round_index = 0
@@ -73,7 +88,7 @@ class SimulationSoc(QickConfig):
         ValueError identifies an unbound generator's source module/channel, or
         an unbound generator/ADC route. This method does not generate signals.
         """
-        bound_gens = {gen for gen, _ in self.routes}
+        bound_gens = {gen for gen, _ in self.routes}.union(self._drive_generators)
         for template in request.templates:
             for event in template.events:
                 if np.any(event.active) and event.gen_ch not in bound_gens:

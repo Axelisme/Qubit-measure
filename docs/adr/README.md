@@ -33,6 +33,10 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Cfg / Value Model
 
+原則：表單初值用簡單固定的公式，不依板子調整；不依板子的固定上下限在 expression 用 `min` 截斷，見 [ADR-0073](0073-measure-form-derivation.md#自動推導點到為止)。
+原則：初值在一般 point 上就違反實驗自己的規則時，修初值公式，不加檢查；依板子的限制不改初值，見 [ADR-0073](0073-measure-form-derivation.md#預設值的瑕疵就改預設值)。
+原則：依板子而定的限制先不加程式檢查，由 Run 報錯，判讀放知識庫的 judge 條目，見 [ADR-0073](0073-measure-form-derivation.md#板子限制先不加程式檢查)。
+
 - [0008 — Headless Form 與 writeback draft](0008-cfg-editor-session.md)：Headless Form 與 writeback draft 的宿主所有權及 Apply 提交邊界。
 - [0037 — Session value lookup](0037-measure-gui-value-lookup-resolve-once.md)：唯讀 value lookup、resolve-once 與固定 capture。
 - [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、持久 Spec、固定來源與 Library／Inspect／writeback 提交邊界。
@@ -44,6 +48,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：recipe 與 workflow 對 agent 的通用契約只有 `ask` 與正常結束，其上的工具都是 helper；helper 不好用時修 helper，不擴充原語，見 [ADR-0075](0075-agent-interface-layers.md#通用契約只有-ask-與正常結束)。
 
 原則：便利性的小功能要等同一個問題多次出現才加，錯誤結果、資料遺失或擋住流程的問題第一次就修，見 [ADR-0075](0075-agent-interface-layers.md#先做簡單設計再按需加法)。
+
+原則：guide 寫給懂物理、沒看過實作的讀者，只介紹實驗與它的行為；板子限制與底層報錯的判讀放知識庫的 judge 條目，見 [ADR-0075](0075-agent-interface-layers.md#判讀依據放知識庫)。
 
 - [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch、RPC／MCP 與事件錯誤投影。
 - [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：Measure／fluxdep 單一 holder、固定連線身份、控制權交接與 Measure 診斷呈現。

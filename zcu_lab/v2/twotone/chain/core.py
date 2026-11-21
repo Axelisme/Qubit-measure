@@ -273,8 +273,6 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             with builder.repeat("chain", READS_PER_DWELL):
                 builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=freq))
                 builder.emit(PulseReadout("readout", cfg.readout))
-                # The next drive starts after this readout's ADC window closes.
-                builder.delay_auto()
 
             prog = builder.build()
             sched.run_acquire_summed(

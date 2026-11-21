@@ -178,6 +178,8 @@ Delay 與 SoftDelay 都只加結尾，不推進 reference。
 2026-11-01，使用者裁定：「18b請用gen的就好，adc讓其在獨立timeline不join，因為adc目前不影響後續pulse」。
 對編譯期報錯方式，使用者同日回答：「B」。
 
+2026-11-21，使用者把同一方向用在連續讀出：「B''，ii，應該改的是readout module計算timeline的方式，不join ro window，然後實驗cfg要多預留先緩衝pulse長度，不要對齊到極限。」Readout module 本來就不 join ADC 視窗，所以九個 chain 實驗讀出後只等 generator 結束加 `post_delay`，不再用 `delay_auto(ros=True)` 等 ADC。上一個 ADC 視窗可以和下一個 pulse 的發射時刻重疊，因為下一個 pulse 要過飛行時間才到 ADC。同一個 ADC 的 trigger 仍不得重疊。比較見[讀出鏈的 pulse 長度與間隔](../discussions/2026-11-21-chain-readout-spacing.md)。
+
 `timeline_inc(t, timeline=X)` 只加 X 的結尾，`delay_by_timeline(timeline=X)` 才將 reference 推到 X 的結尾。
 Reference 推進 d 後，全部 timeline 包含 default 一起變成 `max(0, E-d)`。
 原生 delay／delay_auto／wait_auto／resync 沿用 QICK，不增加 timeline keyword。

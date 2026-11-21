@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-20，Schedule 建構範例
+**Last updated:** 2026-11-21，讀出 block 到達時間
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -84,7 +84,9 @@ same support, carrier-phase and envelope semantics across the three environments
 reads and untriggered cavity drives at each point. Projective reads group the
 coherent tones and bound receiver triggers at one projection time. A block owns
 triggers from its start until the next block start, including ringdown after
-pulse end. Nonterminal sampling must finish strictly before the next block.
+pulse end. By default, nonterminal sampling must finish before the next block
+starts. When the environment supplies receiver flight times, the planner includes
+later pulses that reach a receiver by its last sample in that receiver's event.
 `ReadoutPartition.terminal_pulses` retains terminal tones even when no ADC observes
 them. Projective block counts and each ADC's per-event grid counts must match
 across points; classification rejects differences with the point and counts.

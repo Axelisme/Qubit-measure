@@ -11,7 +11,8 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 `chain/len_rabi` sweeps the Rabi Pulse length like `twotone/rabi/len_rabi`, but every repetition is one cycle of 16 reads instead of one read.
 A cycle waits Relax delay, then plays eight blocks of the length-swept Rabi Pulse followed by two reads of the same Readout, with no reset inside the cycle.
 Relax delay is the thermalisation wait K, including before the first cycle. Set it to at least 5 T1 for the model's thermal-equilibrium start.
-Each read waits for the previous ADC window to close, so the second read of a block starts after the first and the next Rabi Pulse starts after the second.
+After a readout pulse ends, its `post_delay` sets the wait before the second readout or the next Rabi Pulse.
+The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
 The FPGA sweeps the length, so the Rabi Pulse must use a const or flat_top waveform; Run rejects other waveforms before acquisition.
 The length loop runs outside the cycle. Reps sets the cycles at every length in one round, and Rounds sets the number of rounds.
 

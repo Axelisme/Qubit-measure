@@ -13,6 +13,7 @@ from zcu_tools.simulate.boundary import (
     CancellationQuery,
     RoundSignals,
     RoundStatistics,
+    TimeBase,
 )
 from zcu_tools.simulate.evolution import (
     CaptureBuffer,
@@ -21,6 +22,7 @@ from zcu_tools.simulate.evolution import (
     ModelSource,
     TimelineBatch,
 )
+from zcu_tools.simulators.ftf.environment import FTFTemplatePlan
 
 from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.program._profiles import profile_soccfg
@@ -277,6 +279,92 @@ def test_herald_plan_aligns_two_events_when_one_adc_only_observes_terminal() -> 
         )
         assert herald_event.grids[0].demodulation_frequency_ghz == 5.9
         assert herald_event.grids[0].phase_rad == pytest.approx(np.deg2rad(10))
+
+
+def _plan_cross_block_readout(time_of_flight_ns: float) -> FTFTemplatePlan:
+    from zcu_tools.simulators.ftf.environment import plan_template
+
+    # Zero post-delay: the terminal pulse starts at the herald pulse's end.
+    time_base = TimeBase.from_clocks((1_000_000.0, 1_000.0))
+    base = template()
+    herald = replace(
+        base.events[0],
+        start_ticks=np.zeros(2, dtype=np.int64),
+        duration_ticks=np.full(2, time_base.ticks(1.2), dtype=np.int64),
+        phase_reference_ticks=0,
+    )
+    terminal = replace(
+        herald,
+        start_ticks=np.full(2, time_base.ticks(1.2), dtype=np.int64),
+        gain=np.full(2, 0.5),
+    )
+    window = replace(
+        base.readouts[0],
+        samples=200,
+        sample_period_ticks=time_base.period_ticks(1_000.0),
+        trigger_ticks=np.tile(
+            [time_base.ticks(1.110801), time_base.ticks(2.310801)], (2, 1)
+        ),
+        frequency_mhz=np.full((2, 2), 6000.0),
+        phase_deg=np.zeros((2, 2)),
+        generator_channels=np.zeros((2, 2), dtype=np.int64),
+    )
+    model = settings()
+    model = model.model_copy(
+        update={
+            "readout": model.readout.model_copy(
+                update={
+                    "adc": model.readout.receivers[0].model_copy(
+                        update={"time_of_flight_ns": time_of_flight_ns}
+                    )
+                }
+            )
+        }
+    )
+    return plan_template(
+        model,
+        snapshot(),
+        replace(
+            base,
+            events=(herald, terminal),
+            readouts=(window,),
+            duration_ticks=np.full(2, time_base.ticks(2.6), dtype=np.int64),
+        ),
+        soccfg=profile_soccfg("ftf"),
+        time_base=time_base,
+    )
+
+
+def test_later_readout_pulse_arriving_after_herald_window_stays_in_its_event() -> None:
+    plan = _plan_cross_block_readout(time_of_flight_ns=387.370)
+    np.testing.assert_array_equal(plan.batch.end_ns, [1200, 1200])
+    batch = plan.readouts[0].batch
+    for content in batch.content_index:
+        herald, terminal = batch.events[content]
+        assert tuple(p.start_ns for p in herald.pulses) == (0,)
+        assert tuple(p.start_ns for p in terminal.pulses) == (1200,)
+        (herald_grid,) = herald.grids
+        (terminal_grid,) = terminal.grids
+        np.testing.assert_allclose(herald_grid.times_ns, 1110.801 + np.arange(200))
+        np.testing.assert_allclose(terminal_grid.times_ns, 2310.801 + np.arange(200))
+
+
+def test_later_readout_pulse_arriving_inside_herald_window_shares_its_event() -> None:
+    # With a shorter flight time, the same terminal emission arrives at 1300 ns,
+    # before the final herald sample at 1309.801 ns.
+    plan = _plan_cross_block_readout(time_of_flight_ns=100.0)
+    assert tuple(
+        tuple(read.start_ns for read in reads) for reads in plan.projective_reads
+    ) == (
+        (0,),
+        (0,),
+    )
+    batch = plan.readouts[0].batch
+    for content in batch.content_index:
+        herald, terminal = batch.events[content]
+        assert tuple(p.start_ns for p in herald.pulses) == (0, 1200)
+        assert terminal.pulses == herald.pulses[1:]
+        assert len(herald.grids) == len(terminal.grids) == 1
 
 
 def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
