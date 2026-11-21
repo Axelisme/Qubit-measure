@@ -17,6 +17,8 @@ from ._dop853 import (
 )
 from ._dop853_intervals import row_intervals
 
+_DP54_INITIAL_STEP_NS = 0.05
+
 
 class ChainRows(NamedTuple):
     """Rows and solver choices passed to one chronological CPU apply.
@@ -55,8 +57,9 @@ def run_chain(
     chain_rows supplies the rows and model indices for states (rows, M, M).
     Each chain reads only its first input slot; subsequent rows use the previous
     endpoint, changing basis on model changes. Disjoint rows read their own
-    input. Each active sample knot stops integration and resets a deterministic
-    0.1 ns seed. A narrow interval limits only its own steps, not the whole row.
+    input. Each interval starts with a deterministic step seed: 0.05 ns for
+    DP5(4), 0.1 ns for DOP853. A narrow interval limits only its own steps,
+    not the whole row.
     Source-coordinate endpoints preserve event sides and nextafter bridges.
     Constant envelopes and ordinary DOP853's unpacked flux add no stops.
     Chain membership comes from dispatch, not apply-call adjacency.
@@ -95,6 +98,7 @@ def run_chain(
         phase_rtol = controls.phase_budget / max(1.0, spectral_phase)
         scale = min(1.0, phase_rtol / controls.rtol)
         use_dp54 = dp54[index]
+        initial_step_ns = _DP54_INITIAL_STEP_NS if use_dp54 else ROW_INITIAL_STEP_NS
         if use_dp54:
             scale /= DP54_TOLERANCE_DIVISOR
         row_controls = Tolerances(
@@ -118,7 +122,7 @@ def run_chain(
                 context,
                 IntervalStep(
                     interval.duration,
-                    min(ROW_INITIAL_STEP_NS, interval.duration, row_controls.max_step),
+                    min(initial_step_ns, interval.duration, row_controls.max_step),
                     use_dp54,
                 ),
                 row_controls,
