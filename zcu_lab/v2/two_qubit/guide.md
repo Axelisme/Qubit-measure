@@ -14,7 +14,7 @@
 
 確認接線、device 名稱、native 單位與已授權範圍。FTF 模型的 `f1_charge`／`f2_charge` 預設接 gen2／gen3，省略 operator 表示 charge。表單使用 Open／Defaults 捕捉的接線。兩條 drive line 須用不同 generator，串擾係數仍只描述這兩條線。
 
-實際 mux 模擬須明填 `readout.drive.kind: mux` 與 receiver list，預設 readout kind 為 pulse。每個同 shot 的完整 tones 必須對應同一個 joint 態。取數時依固定 tone 順序聯合分類 Qubit1、Qubit2，保存類別計數。平均頻譜或兩路獨立抽樣的 IQ 無法提供 joint shots。校準來源限實測資料或人工確認的範圍；predictor、Hamiltonian 假設、simulator truth、template 與等待時間 fallback 都只是假設或初值。每個初值都須逐項核對硬體安全範圍。
+FTF 的 mux 模擬在 `readout.mux` 宣告 generator 與 receiver 清單 `adc`；tones 仍填在 mux 讀出模組。[欄位指南](../../simulation_envs/FTF/field-guide.md#generatoradc-與-entry-接線對照)列出接線對照。`readout.drive` 屬於獨立的單 tone pulse 路徑。每個同 shot 的完整 tones 必須對應同一個 joint 態。取數時依固定 tone 順序聯合分類 Qubit1、Qubit2，保存類別計數。平均頻譜或兩路獨立抽樣的 IQ 無法提供 joint shots。校準來源限實測資料或人工確認的範圍；predictor、Hamiltonian 假設、simulator truth、template 與等待時間 fallback 都只是假設或初值。每個初值都須逐項核對硬體安全範圍。
 
 離線合成資料可檢查操作與分析流程。現場仍須驗證 FTF／GUI 控制鏈、接線、時序、cfg 與 acquisition。低 contrast 是可保留的資料結果；fit 無法辨識時保存原因並停止該校準提案；執行錯誤須先排除再繼續。現場驗證以流程與資料完整性為準，fidelity、leakage、π phase 與 matrix 對角值留作物理解讀。
 
@@ -165,9 +165,9 @@ Notebook 的內建角色也叫 `qubit1`、`qubit2`，但與 GUI 的 point aliase
 
 | 次序 | 操作與圖 | 判讀與後續動作 |
 | --- | --- | --- |
-| 0b. [Joint readout](joint_readout/guide.md) | 四個 I／Xπ 準備分支各接一次 mux readout，看 acquired shots、counts 與 4×9 matrix。 | 每行是一種名目準備；每欄是 Qubit1／Qubit2 的一種 g/e/other 聯合結果。選 herald reset 時只計通過篩選的 shots。 |
-| 1. [Idle ZZ](idle_zz/guide.md) | Target 選 Qubit1 或 Qubit2，spectator 做 I／Xπ。人工填 detune，掃 delay，看曲線、fit 與 ζ；需要時外層掃具名 DC source。 | ζ 是單頻模型下的兩分支擬合頻差，符號依 detune 同側前提。近 0／2×abs(detune) 時回不可辨識。依曲線與 fit_quality 判讀熱混合，調偏由操作員決定。 |
-| 2. [Conditional higher-level spectroscopy](conditional_spectroscopy/guide.md) | 四分支雙線 weak probe，掃共同 frequency，可加 coupler DC 軸與雙 Xπ 對比。 | 人工選 transition 與後續 probe 窗口。頻譜是診斷訊號，能級命名、EC/EJ/J 與 CZ frequency 需另行確認。 |
+| 0b. [Joint readout](joint_readout/guide.md) | 一般入口 `two_qubit/joint_readout` 測四個 I／Xπ 準備；Run 看終端分類長條圖和保留 shots。Reset 可選 `reset/mux_herald`，此時只計通過篩選的 shots。 | Analyze 保留長條圖與 shot SEM，另列單一 4×9 計數／機率矩陣。每列是一種名目準備，每欄是 Qubit1／Qubit2 的 g/e/other 聯合結果。沒有獨立 heralded 入口或分開的 g,g、e,e herald 矩陣。 |
+| 1. [Idle ZZ](idle_zz/guide.md) | 選 Ramsey target，spectator 做 I／Xπ。填 programmed Ramsey detuning，掃自由演化延遲；需要時再掃 DC bias。 | Analyze 疊上擬合並列兩分支的頻率與殘差診斷。ζ 是兩個名目分支的 signed 頻差；符號無法辨識時不報 ζ，熱混合可能使單頻模型偏離資料。 |
+| 2. [Conditional higher-level spectroscopy](conditional_spectroscopy/guide.md) | 四個名目準備各掃雙線 probe 的共同 RF，可掃 DC bias 或加雙 Xπ 對比。 | 從同一 qubit 的四個 P(e) 頻譜比較峰谷位置，再選窄掃窗口。能級、EC/EJ/J 與可用的 CZ frequency 需另行確認。 |
 | 3a. [Constructive phase](constructive_phase/guide.md) | B11 固定 signed gain 比例，掃 relative phase × duration。 | 無衰減 cosine 求各 trace rate，rate < 1/span 為未解析，圖會標在可辨識 rates 之外。以 `rate² = A + B cosφ + C sinφ` 求最大 rate 的 `atan2(C,B)`，只提 Qubit2 pulse 與獨立 slot。Nyquist 與 signed gain ratio 由操作員確認，此掃描只調 relative phase。 |
 | 3b. [Rabi chevron](chevron/guide.md) | 固定 relative phase 與兩線 gain，掃共同 CZ 載波 × 共同波形 envelope 時長（µs）。 | 看 P(g,g) 谷值人工選時長與頻率窗口。用 duration slices 的量測點、shot SEM 和密網格 fit 核對。兩線同頻、同 duration、同時間原點，waveforms 由 cfg 明示，cosine 包絡只是起點。 |
 | 4. [CZ amplitude](cz_amplitude/guide.md) | B11 後播雙線 CZ、雙 Xπ 對比與 mux readout。掃共同 gain scale，固定原 signed gain 比例、relative phase、frequency 與 waveform。 | 零相位 cosine 擬合終端 P(g,g) 的第一正回返。實測從 0 覆蓋完整一週期才提案；兩支來源 pulse 的 signed gain 各乘以該倍率。逐列 preview 兩線 pulse 與 slots。回返是 thermal leakage proxy，須看 fit_quality 與大振幅 AC Stark 偏離。 |
@@ -212,7 +212,7 @@ Result 依 (seed, arm, depth) 排列，再接 Qubit1／Qubit2 分類軸。Herald
 
 Plain RB 從終端 joint g,g 計數算 survival。Heralded 另以終端回到各自 herald g,g／e,e 的比例作 survival，依各組完整 seeds 聯合擬合。使用 d=4 的 error estimate，保留負值及 paired-seed bootstrap interval。熱 population、準備／讀出效果與模型假設均須納入判讀，物理 gate 表現需由實際量測確認。
 
-若最大 depth 太淺，擬合可以貼合資料但無法確定衰減長度。用 `fit_quality.relative_parameter_errors["decay_time"]` 檢查各臂。在[合成例子](rb/guide.md#interpreting-the-result)中，最大 depth 30 時 R² 是 0.993、相對誤差是 0.30；量到 depth 200 後相對誤差降為 0.035。
+RB 的 liveplot 與第一張 Analyze 圖用保留 shots 的計數畫機率。帶端帽的棒是 shot SEM；淡色的棒是 seed 間 SD。擬合圖用完整 seeds 的等權平均，棒仍是 seed SD，1/e depth 標註的 ± 才是 fit 標準誤。若掃描窗無法解析衰減，先依 [RB 判讀](rb/guide.md#interpreting-the-result)檢查深度與不確定度，不用 ratio 建議 CZ 調參。
 
 取得第一個 IRB 結果後，依論文 §5.3.3 掃 CZ 的 cosine 寬度。長閘的誤差由被驅動非計算態的 T1 主導，短閘由同調 leakage 主導，最佳寬度在兩者之間（論文裝置為 85 ns）。每個寬度重做 4 → 5 → 6 與 IRB。最短寬度受驅動強度限制，先由實測 Rabi rate 換算 gain 1 時的 2π 週期；非 const 波形的最大振幅只有 const 的一半。
 

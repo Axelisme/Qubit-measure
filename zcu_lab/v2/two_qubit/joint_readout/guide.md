@@ -1,66 +1,40 @@
+**Readers:** operator, agent. Set up four-branch joint readout and compare the observed outcomes with the nominal preparations.
+
 # Four-branch joint readout
 
-**Readers:** operator, agent. Run `two_qubit/joint_readout` and interpret its nine-class joint distribution.
+Joint readout checks whether the two qubits return the expected pair of classifications after preparation. Each shot runs **optional reset → I or Xπ on each qubit → one terminal mux readout**. A nominal g means no pulse (I). A nominal e means apply Xπ. The two Xπ pulses start together in the e,e branch. The four branches wait the same time from the start of preparation to readout. Without Reset, the pulses act on the initial thermal ensemble, so g and e name the intended preparation, not a verified initial state.
 
-## Before run
+## Set up the form
 
-In the point's Aliases table, bind `qubit1` and `qubit2` to different components. Bind `mux` to their MuxGroup. Joint readout does not require a `coupler` binding. For an older point, add the two position aliases for the components you want to prepare first and second, then choose Defaults. Notebook uses the same built-in position names, but its bindings do not populate the GUI's Aliases table.
+1. Bind the point's `qubit1` and `qubit2` aliases to different components and `mux` to their MuxGroup. This experiment does not need `coupler`. In the [MuxGroup](../guide.md#綁定位置與讀出-tones), find each qubit's position in the ordered qubit list. The same position in the resonator and readout tone lists must belong to that qubit. For example, if the group's qubits are ordered Q2, Q1, the first tone belongs to Q2. The plots always show Qubit1 first, independent of this order.
+2. **Qubit1 Xπ** and **Qubit2 Xπ** show **Inline** when the form has copied the point's Xπ calibration from `$qubit1.module.x180` and `$qubit2.module.x180`. Inline means the pulse values are editable in this form. Editing a copy does not change the library. A missing calibration slot leaves the pulse field blank. A named choice refers to a library pulse; its presence in the list does not make it a calibrated Xπ for the selected qubit. Use each qubit's amplitude or length Rabi calibration.
 
-Opening the tab or choosing Defaults checks the [ordered mux group bindings](../guide.md#綁定位置與讀出-tones). Each qubit must link to the resonator at the same position in the group. The two aliases select zero-based indices from `$mux.qubits`; inspect `qubit1_tone` and `qubit2_tone` in the saved run cfg to check the hidden values.
+   **Gen ch** is the qubit drive generator channel. Check that the two pulses use different channels. The RF frequency (MHz) sets the pulse carrier; signed gain (a.u.) scales the drive; waveform and length (µs) set the envelope shape and duration. Use the shape, length and gain from the same calibration. **NQZ** selects the DAC Nyquist band, phase (°) sets the rotation axis, and the before/after waits (µs) set spacing around the envelope. Leave mixer frequency blank if the drive does not use a mixer.
+3. **Mux readout** starts at `$mux.module.readout` or a blank mux form when that slot is missing. Keep every tone in the group's order, even tones other than the selected pair. Use [mux single-shot GE and GE Post](../../mux/singleshot_ge/guide.md) to obtain g/e circle centers and radii for the selected pair. Recheck the calibration if you change the readout frequency, gain or integration window. The form checks the number of tones; it does not infer the order from ADC numbers or frequencies. Refresh keeps the draft and rechecks it against current bindings. Defaults replaces the draft with values from current sources.
+4. **Reset** starts blank, so the shot starts without a reset or a herald filter. Choose a calibrated preparation reset to apply it in all four branches. For a herald filter, choose `reset/mux_herald`, use the same full mux readout, and set `keep` to g for both qubits. Set the keys to the zero-based positions in the full mux readout, not ADC numbers. Use `{'0': g, '1': g}` only for the pair at positions 0 and 1. The count then includes only shots that passed herald. The pass fraction is retained shots divided by attempted shots, not the true ground-state purity.
+5. **Reps** is attempted shots per preparation per round. **Rounds** repeats the four preparations and adds their counts. The form starts at 1000 × 10, so a complete unfiltered run attempts 10,000 shots for each preparation and 40,000 across all four. **Initial wait** is before the first shot of a round. **Relaxation wait** is after a shot, before the next preparation. Both start at 1 µs. Set the relaxation wait from the device's relaxation and cavity-emptying calibration rather than treating 1 µs as a physical recommendation.
 
-A bound slot must provide a mux readout with one tone per group member. The form checks the count again before Run, including after choosing a different library entry or editing inline. A mismatch blocks Run and the form result reports the expected and actual counts at `readout`. Keep all tones in group order, including those outside Qubit1 and Qubit2: equal counts do not prove physical order.
+## Read the plots
 
-Refresh keeps the draft and uses the new capture for the count check and hidden indices. Use Defaults to replace the draft with initial values from new bindings or calibration sources.
+For each retained shot, the mux classifier assigns g, e or other independently to each qubit, then the experiment counts the resulting pair. A point is g or e only if it is strictly closer to that center and inside its circle. Ties and points at or beyond the nearer circle's radius count as `other`. This class does not identify a leakage level. Every class, including `other`, contributes to its preparation's total.
 
-Provide calibrated `$qubit1.module.x180` and `$qubit2.module.x180` pulses on different charge generators. Readout starts from `$mux.module.readout` or a blank mux input if the slot is absent. Confirm generator, mixer, ADC channels, integration window, trigger timing and headroom before Run.
+- **Run and Analyze distributions.** Each panel fixes one nominal preparation. The x-axis lists the nine terminal classes in Qubit1, Qubit2 order. The y-axis is the fraction of that preparation's retained shots assigned to the class. The blue bar matches the intended preparation; gray bars are all the other observed outcomes. The same probability scale is used in each panel. Liveplot adds the total retained shots across the four panels, not the number per panel. The final liveplot and first Analyze figure otherwise use the same counts and display. A panel with no retained shots has no probabilities.
+- **Error bars.** Each bar uses shot SEM, the sample standard deviation of the 0-or-1 class indicator divided by the square root of the retained shots in that panel. It is an estimate of uncertainty in the probability, not single-shot spread, fit uncertainty or a confidence interval. No bar is drawn for fewer than two retained shots. A measured fraction of exactly zero or one has zero sample SEM, which does not prove the event impossible or certain.
+- **Analyze probability and count matrix.** Read rows as nominal preparations and columns as terminal classes. The upper number in each cell is its probability, rounded to three decimals; the lower number is the shot count. The colorbar runs from 0 to 1 on the same probability scale for all rows. Use the matrix to compare one outcome between preparations or recover numbers from small bars: divide its count by the sum of the nine counts in that row. A row without retained shots has no probability.
 
-The Qubit1 and Qubit2 tones each need a circle classifier **with radius**. Run mux singleshot GE and apply GE Post under the actual readout conditions. Missing calibration, linear or centroid3 mode, and missing radius make the cfg invalid with a GE Post prompt. Other tones need no classifier for this experiment. Recalibrate after changing readout settings.
+## Decide what to check next
 
-`reset` starts as None. Leave it None to omit reset, or supply a calibrated reset configuration to emit it at the start of every shot. Set DC devices externally before Run.
+For each row, check whether the matching outcome dominates the other outcomes. Quantify ambiguous runs by comparing the matching and largest mismatched fractions. If Qubit1 stays g on many shots after its nominal Xπ, sum the Qubit1=g columns in the e,g row, then compare the same quantity in the g,g row. This is a terminal Qubit1 marginal, not a gate error rate. Compare the e,e row to both single-flip rows to look for errors that appear only when both pulses play.
 
-## Sequence and acquisition
+If the matching and mismatched bars are close within the shot uncertainty, increase the attempts without changing the preparation or readout. For example, to halve a nonzero SEM at the same retention and outcome fractions, collect about four times as many shots per preparation. If the bars already separate beyond their shot uncertainty but the mismatched fractions are large, more shots refine the probabilities; they do not fix preparation or readout. Check GE separation and `other` first. If the readout is stable, compare runs with and without g,g herald at fixed pulse settings, or recalibrate one Xπ at a time. The matrix alone cannot tell you which knob to change, by how much, or what the gate fidelity is. It mixes initial populations, preparation and readout; it is not a calibrated assignment matrix to invert.
 
-Each shot starts with optional reset, applies its nominal I/Xπ preparation, then reads the full mux once with tag `terminal`. One program sweeps two hardware axes, `prepared_qubit1` outside `prepared_qubit2`. Each axis uses 0 for g (I) and 1 for e (Xπ), giving row order gg, ge, eg, ee.
+Analyze identifies the source run and displays **Reps×Rounds** from its saved cfg. Use the matrix counts to find how many shots each preparation retained. Counts alone do not identify whether you used Reset or which shots a filter rejected. For that distinction, check the saved settings for the Analyze Run ID. The current form, including its Reset default, is not a record of a previous run. If a run is stopped, completed rounds still contribute. Analyze reads the saved counts without consulting the current form or library and does not propose writeback. The native file stores the cfg and a 4 × 9 set of terminal counts across two preparation and two classification axes, not individual shots. To open data from the discontinued standalone heralded experiment or earlier incompatible axis layouts, use the software version that wrote the file.
 
-The program forks directly into Qubit1 and Qubit2 timelines after optional reset, without an extra delay_by_timeline. The forked timelines inherit the reset end. Each timeline has an aligned branch that emits its Xπ only for case 1; case 0 is empty. Both Xπ pulses start together for ee. The timelines join before terminal readout, so all preparations have the same readout start time. Without reset, preparations act on the thermal ensemble.
-
-`reps` is shots per acquisition round per branch. `rounds` accumulates completed rounds at acquisition. Initial and relaxation delays use µs.
-
-The reducer classifies Qubit1 and Qubit2 on each shot and sums the nine joint classes. Each position has g, e and other. Circle boundaries and equidistant points count as other. The experiment does not save per-shot IQ and does not multiply separate qubit probabilities.
-
-The live plot shows terminal P(g,g) from accumulated counts for each nominal branch. Cancel preserves completed rounds. Unmeasured branches stay NaN. A failed acquisition remains an operation failure even when partial counts survive.
-
-## Saved data and analysis
-
-The HDF5 file stores unnormalized float64 counts in `/vars/sums` with shape `(2,2,3,3)`. Its first two axes are `Prepared Qubit1 (0=g, 1=e)` and `Prepared Qubit2 (0=g, 1=e)`, each with coordinates `[0, 1]`. The last two axes are `terminal_qubit1` and `terminal_qubit2`; coordinates `[0, 1, 2]` mean g, e and other. The file also stores the cfg used for the run. File size does not grow with shot count.
-
-FIT shows a 4×9 count and row-normalized probability matrix. Columns are Qubit1-major joint classes from g,g through other,other. Every class, including other, contributes to the denominator. Zero-count and unmeasured rows give NaN probabilities. Partial acquisitions can still provide distributions from their completed rounds. Each row label shows its acquired shot count.
-
-The matrix includes initial populations, preparation errors and readout effects. It is not a pure-state assignment matrix. FIT offers no correction or writeback. Do not infer gate fidelity or invert this matrix without separate calibration evidence.
-
-Load rejects files whose `/vars/sums` axis names do not match, including files saved with the former position-axis names. Keep the original file unchanged and open it with the corresponding older software version. Load also rejects old raw-IQ files without `sums` and files with a single preparation axis. Analyze uses the saved counts without looking up the current library or cfg.
-
-## Select shots with mux herald
-
-Choose `reset/mux_herald` in Reset. Use the same mux readout as the terminal
-readout. Set `keep: {'0': g, '1': g}` if Qubit1 and Qubit2 occupy tone positions 0 and 1.
-Use their original tone positions from the full readout, not their ADC numbers.
-
-Probabilities are conditional on passing herald. Divide each terminal class
-count by the point's total count. Acceptance is the total divided by
-reps × rounds, not ground-state purity. A point with no accepted shots has
-NaN probabilities. Completed rounds remain usable when Run stops early.
-Files saved under the former separate heralded experiment no longer load.
-
-Continue physical calibration with the [FTF bring-up guide](../guide.md).
+Continue in the [two-qubit calibration guide](../guide.md).
 
 ## Notebook
 
-Use a validated `JointReadoutCfg` as `cfg`. Set `x180_qubit1` and `x180_qubit2`
-to the calibrated pulses and supply `qubit1_tone` and `qubit2_tone` as indices
-in the full readout. Supply the notebook's existing hardware handles and
-device manager. `point_view` is the bound ParameterView for the
-save destination. Run requires that environment; analyze uses the saved counts.
+With a validated `JointReadoutCfg`, set `qubit1_tone` and `qubit2_tone` to the two positions in the full mux readout. Pass the existing hardware handles and device manager to the notebook adapter. Use a destination `ParameterView` for `point_view`.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter
@@ -72,6 +46,3 @@ record = exp.run(cfg)
 analysis = exp.analyze(None)
 saved = exp.save_run(point_view, source=record)
 ```
-
-Do not call core acquisition directly from the notebook. NotebookAdapter owns
-the run record and the plots for each operation.
