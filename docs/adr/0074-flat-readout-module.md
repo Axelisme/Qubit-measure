@@ -6,395 +6,142 @@ status: accepted
 
 ## 背景
 
-內嵌 Pulse 與 DirectReadout 讓作者重複填寫 generator 與 ADC 的頻率和通道。
-Readout 的引用、表單繼承與校準也各自維護同步規則。
-
-使用者於 2026-10-15 提出：「我在考慮將Readout Module改成獨立一個Module，而不是內嵌Pulse/DirectReadout，同時移除後者。這樣之後MuxPulse/MuxPulseReadout出來後應該比較一致」。
+內嵌 Pulse 與 DirectReadout 讓作者重複填寫 generator 與 ADC 的頻率和通道。Readout 的引用、表單繼承與校準也各自維護同步規則。
 
 ## 決策
 
 ### Readout 擁有 generator 與 ADC 配置
 
-持久 `PulseReadoutSpec` 與 materialized `PulseReadoutCfg` 使用 `readout/pulse`。
-Generator 通道叫 `gen_ch`，ADC 通道叫 `ro_ch`。
-使用者於 2026-10-15 選定：「1保留readout/pulse吧，與readout/mux一致。2叫gen_ch好了」。
+**規則。** 持久 `PulseReadoutSpec` 與展開後的 `PulseReadoutCfg` 都使用 `readout/pulse`。Readout 平鋪保存 generator 通道 `gen_ch`、ADC 通道 `ro_ch`、waveform 和讀出時序，不內嵌 `pulse_cfg` 或 `ro_cfg`。單一 `freq` 以 MHz 同時指定兩端的頻率。
 
-Pulse readout 平鋪保存 `gen_ch`、`nqz`、`freq`、`gain`、`phase`、`waveform`、
-`mixer_freq`、`pre_delay`、`post_delay`、`ro_ch`、`ro_length`、`trig_offset` 與 `desc`。
-它不保存 `pulse_cfg`、`ro_cfg` 或獨立的 `ro_freq`。
-MHz 頻率 `freq` 同時決定 generator 與 ADC。時間欄位使用 us，phase 使用 deg，gain 使用 normalized gain。
+**例子。** Onetone 的 linear 與 homophasal 取樣共用同一個 Readout。`set_param` 接受 `freq`、`gain`、`length` 與 `ro_length`。只有 `length` 委派給 waveform，其餘更新同名欄位。平鋪欄位另有 `nqz`、`phase`、`mixer_freq`、`pre_delay`、`post_delay`、`trig_offset` 與 `desc`。時間用 us，phase 用 deg，gain 用 normalized gain。
 
-Pulse readout 的 `set_param` 接受 `freq`、`gain`、`length` 與 `ro_length`。
-`length` 委派 waveform，其餘三項更新同名欄位。其他名稱回報 ValueError。
+**邊界。** 不提供 `readout/direct`、Direct 範本、獨立的 `ro_freq` 或 `onetone/sa`。不支援的 `set_param` 名稱回報 `ValueError`。整個 Readout 可以引用 library key；waveform 可 inline 或引用 waveform key，flat-top ramp 也可遞迴引用。Readout 不引用 Pulse 條目，Reset 的 Pulse 引用不變。共享配置由 [cfg_model](../../lib/zcu_tools/cfg_model/README.md) 擁有。
 
-整個 Readout 可以引用 library key。Pulse readout 的 waveform 仍可內嵌或引用 waveform key，
-包含 flat-top ramp 的遞迴引用。Readout 不引用 Pulse 條目，Reset 的 Pulse 引用保持不變。
-
-使用者於 2026-10-15 對純 ADC Direct readout 回覆「不保留」，對獨立 ADC 頻率回覆「onetone/sa可以刪除。C」。
-因此不提供 `readout/direct`、Direct 範本或 onetone/sa。
-Onetone 的 linear 與 homophasal 取樣繼續使用同一個 Readout。
+**依據。** 2026-10-15，使用者提議：「我在考慮將Readout Module改成獨立一個Module，而不是內嵌Pulse/DirectReadout，同時移除後者。這樣之後MuxPulse/MuxPulseReadout出來後應該比較一致」。同日選定：「1保留readout/pulse吧，與readout/mux一致。2叫gen_ch好了」。對純 ADC readout 答「不保留」，對獨立 ADC 頻率答「onetone/sa可以刪除。C」。原始討論未入庫，見 Git `f647c9a9c`。
 
 ### Mux readout 保存有序 tones
 
-持久 `MuxReadoutSpec` 與 materialized `MuxReadoutCfg` 使用 `readout/mux`。
-Module 明填 `gen_ch`、`nqz` 與 `mixer_freq`，共用 const 播放 `length` 與 ADC window。
-有序的 1 至 8 筆 tones 各自保存 `freq`、`gain`、`phase` 與 logical ADC channel `ro_ch`。
-每筆 tone 的 generator 與 ADC 使用同一個 MHz 頻率，不引用 Pulse 或 waveform。
-Mux readout 不接受 sweep 或逐 tone library key，`set_param` 一律拒絕更新，caller 重建 cfg 與 program。
-使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
+**規則。** `MuxReadoutSpec` 與 `MuxReadoutCfg` 使用 `readout/mux`。Module 明填 generator、Nyquist zone 與 mixer，共用 const 播放長度和 ADC window。每筆 tone 的 generator 與 ADC 共用一個 MHz 頻率。Tone 在清單中的位置決定資料軸，顯示用的 `label` 與 ADC 編號都不改變軸順序。配置、tone 數量及 label 的保存契約見 [cfg_model](../../lib/zcu_tools/cfg_model/README.md)。
 
-Tone 的選填 `label` 預設空字串，隨 Spec、cfg 與 library 保存。
-Label 只作顯示，可以重複，不代表 component；program 不解讀它。
-Tone 序號定義資料軸順序，label 與 ADC channel 都不改變這個順序。
-Form 沿用整個 module 的 ref／inline 與 Convert to inline，tones 使用 model-list picker 逐項編輯。
-每筆 tone 的 freq、gain、phase、ro_ch 與 label 都可編輯。Label 不當固定 identity。
+**例子。** Mux 實驗的 lab Form 用固定 capture 中的 mux group 建初始清單，每個 resonator 一個槽位。`freq` 取校準值，`gain` 取 lab 初值，`ro_ch` 依 group 順序。Form 沿用整個 module 的 ref／inline 與 Convert to inline，再用 model-list picker 逐欄編輯 tone。Library 新建入口識別 `MuxReadoutSpec`；`readout/mux:blank` 只提供 scalar 編輯初值，見 [lab 的初值說明](../../zcu_lab/v2/README.md)。Typed model-list 初值與 nested ref／inline 由 [Form adapter](../../lib/zcu_tools/gui/form_adapter/README.md#native-model-lists) 處理，Core 仍收普通 list input。
 
-Library 新建入口識別 MuxReadoutSpec，`readout/mux:blank` 只提供 scalar 編輯初值。
-Mux 實驗的 lab Form 從固定 capture 的 mux group 產生清單，每個 resonator 一個槽位。
-Freq 取該 resonator 校準值，gain 使用 lab 初值，ro_ch 依 group 順序。生成器不猜硬體或校準值。
-Lab 以 Template.set／Slot.set 提供依原 Spec schema 驗證的 typed model-list 初值。
-Form adapter 集中生成與 nested ref／inline 路徑處理，Core 只處理普通 list input。
-FixedElements 的無 participants 模式只固定目前 inline 清單的槽位數，見 [[0079]]。
+**邊界。** Mux 不引用 Pulse、waveform 或逐 tone library key，不接受 sweep，`set_param` 拒絕更新。要改設定，由 caller 重建 cfg 與 program。Label 可以重複，不代表 component 或持久 identity。Lab 提供初值，生成器不猜硬體和校準值，也不保證硬體安全。不擴充 `InputPolicy`；`FixedElements` 不帶 participants 時只固定目前 inline 清單的槽位數，見 [[0079]]。
 
-使用者於 2026-10-16 曾同意 scalar 初值加必填 tones JSON 的方案。
-使用者於 2026-10-20 對從 group 產生可逐欄編輯的固定清單回覆：「可以」。
-本次取代 JSON leaf 候選，不擴充 InputPolicy，不新增持久 identity，也不提供硬體安全保證。
-
-2026-10-21 註：目前的表單設計採用固定 model-list 與逐欄編輯，JSON leaf 是已被取代的候選。
+**依據。** 2026-10-20，使用者對從 group 建立可逐欄編輯的固定清單答「可以」，2026-10-21 的註記確認採用固定 model-list。2026-10-16 的舊 Form 方案由此取代，歷程見 Git `2277294b9` 及本 ADR 的 Git 歷史；原始討論未入庫。Mux 不接受 sweep 等配置規則是 agent 的選擇。使用者 2026-11-18 說「我大概看了一遍，基本上是没问题」，也說這類規則「并不算是裁决，而算是建议」。這次過目不構成裁決，引用時只作參考。原始討論未入庫，見 Git `1f4b16aa0`。
 
 ### Classifier 隨 readout 保存
 
-Pulse readout 與 mux 的每筆 tone 各有可選 `classifier`，預設 None。
-數值由 library readout module 擁有，module 本身只保存而不使用分類參數。
-使用者於 2026-10-29 提出：「將center/radius/confusion matrix等資訊直接放到readout cfg裡的可選欄位中」，並說明「module本身不利用，但可以自然綁定到對應的readout module上」。
+**規則。** Library readout module 擁有分類校準。Pulse readout 與 mux 的每筆 tone 都有可選 `classifier`，預設 `None`。Readout module 只保存，不在宣告或播放時分類。Spec、native cfg、library 與 `data.h5` 的 run cfg 都保留欄位，不升容器版本；校準不另建 experiment storage。分類取自 run 使用的 cfg，不查 live library。取數與結果保存見 [Shot sums 與 heralding](#shot-sums-與-heralding)。
 
-Circle 保存 g/e 複數中心、可缺的 radius 與 3×3 confusion matrix。
-Linear 保存 radians 的 angle、threshold 與可缺的 2×2 confusion matrix。
-`Centroid3Classifier` 使用 `mode="centroid3"`，保存必填的 g_center、e_center、f_center 與 3×3 confusion_matrix。
-三中心須有限且彼此不同。Matrix rows 為準備態 g/e/f，columns 為量到的 g/e/f。
-分類座標為原始積分 ADC 值除以 rounded integration sample count，不扣 IQ offset；linear 以 `exp(1j*angle)` 旋轉。
-矩陣 rows 為真實／準備態，columns 為量到的態，circle 順序 g/e/other，linear 順序 g/e。
-矩陣只驗有限值與形狀，不轉置、不限制值域或 row sum。
-Radius 提供時須有限且 >0；None 表示尚未提供 Post 半徑校準。
-複數中心沿用 point 參數的 `{__complex__: [re, im]}` tag，由 `core.complex_codec` 編解碼。
-Core/native conversion、library 與 data.h5 cfg 都保留 classifier，不升容器版本。
-舊條目沒有 classifier 時讀為 None，不從其他參數補值。
-Point 的 `readout_cal` 停用，不再讀寫，也不把舊數值搬入 classifier。
-改版後重跑 singleshot GE 並 Apply 到 readout library module。
-使用者於 2026-10-29 對 library 所有權與不搬舊值的選項同意：「2A 3A 4同意」。
+**例子。** 三態 reference 只用 acquired IQ 和 preparation labels 建立中心及 training confusion，並用既有的完整 module proposal／Apply 流程更新 Run 捕捉的 library 目標。只改 classifier，保留其他欄位與 child keys。Reference 與 centroid3 分類共用 `utils.shot_classification` 的最近中心規則。STIRAP 的 [delay](../../zcu_lab/v2/twotone/stirap/delay/guide.md)、[amplitude](../../zcu_lab/v2/twotone/stirap/amplitude/guide.md)、[detuning](../../zcu_lab/v2/twotone/stirap/detuning/guide.md) 與單頻 [g↔f Raman](../../zcu_lab/v2/twotone/raman_gf/guide.md) 都從 saved run cfg 取 centroid3。
 
-Classifier 不保存校準時的 readout 設定，也沒有自動失效機制。
-修改 readout 設定不會清除既有 classifier，取用時也不比對校準設定是否仍適用。
-操作員須在修改 readout 後重跑對應校準，circle 使用 singleshot GE 與 Post，centroid3 使用三態 reference。Apply 新校準後再使用分類。
-使用者於 2026-10-29 裁決：「QC3我認為分類參數比對需求還不確定，先A」。
-Writeback proposal 的 materialized 設定比對只防止把新校準寫給不同設定，不檢查既有 classifier 的有效性。
+- 型別、矩陣方向與驗證、正規化 ADC 座標及複數編碼見 [cfg_model](../../lib/zcu_tools/cfg_model/README.md)。[Program 的 readout 契約](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration) 說明按 ADC 取校準與各模式的分類軸。Circle 的半徑邊界和等距算 other；linear 旋轉後實部等於 threshold 算 ground，大於才算 excited；centroid3 選 Euclidean 距離最近的中心，平手依 g/e/f 順序取第一個，沒有拒判區。f 不是 circle 的 other。
+- 單 qubit GE Primary 提案只有 circle 中心，Post 提案有中心、radius 與 matrix。兩者都是完整 module replacement，批次依 Primary→Post 接受，分開 Apply 則最後一次生效。Post→Primary 會回到只有中心。Mux GE 每個 phase 合成一個完整 proposal，只更新成功 tone 的 classifier 路徑。GE 的 Run slot、proposal builder 與 materialized 比對見 [[0008]]。
 
-Classify 軸以 one-hot 表示分類結果。
-Circle 輸出 [g,e,other]，半徑邊界與等距屬 other。
-Linear 輸出 [g,e]，旋轉後實部大於 threshold 判 excited，等於時判 ground。
-Centroid3 輸出 [g,e,f]，每 shot 選 Euclidean 距離最近的中心，等距時依 g/e/f 順序選第一個，沒有拒判區。
-F 不代表 circle 的 other。
-普通 `acquire` 保留原生 IQ 與 QICK threshold／angle，不提供 host classify 或 herald option。
-分類取數的 reducer、累加與保存分工見下節 [Shot sums 與 heralding](#shot-sums-與-heralding)。
-使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
+**邊界。** 沒有捕捉的 library 目標，或非更新欄位與實測 readout 不符時，writeback 失敗，不建也不猜目標。這項比對只防止新校準寫到不同設定；已存 classifier 不附校準時的 readout 設定，改設定不清除它，取用時也不比對。改 readout 後，操作員重新做相應校準再 Apply：circle 做 singleshot GE 與 Post，centroid3 做三態 reference。舊條目沒有 classifier 時讀作 `None`，不讀寫 point 的 `readout_cal` 或搬用舊值。
 
-三態 reference 只用 acquired IQ 與 preparation labels 建立中心及 training confusion。
-它經既有完整 readout module proposal／Apply 流程，只更新 Run 捕捉的 library 目標的 classifier，保留其他欄位與 child keys。
-沒有捕捉的 library 目標或非更新欄位與實測 readout 不符時明確失敗，不自動建立或猜測目標。
-Training confusion 包含準備污染，correction 回到 preparation-label 座標，保留負值與大於 1 的結果。
-這不是 pure energy-state population 或 readout fidelity。
-STIRAP 的 [delay](../../zcu_lab/v2/twotone/stirap/delay/guide.md)、[amplitude](../../zcu_lab/v2/twotone/stirap/amplitude/guide.md)、[detuning](../../zcu_lab/v2/twotone/stirap/detuning/guide.md) 與單頻 [g↔f Raman](../../zcu_lab/v2/twotone/raman_gf/guide.md) 從該次 run 保存的 readout cfg 要求 centroid3。
-缺少 classifier、型別不符或未知 ADC 明確失敗，不退回 circle、不從 live library 補值、不讀 simulator truth。
-校準沿 Spec、native cfg、library 與 data.h5 的 run cfg 保存，不另建 experiment calibration storage。
-Reference 分析與 centroid3 分類共用 `utils.shot_classification` 的最近中心規則。
+- Centroid3 consumer 遇到缺欄位、錯型或未知 ADC 就失敗，不退回 circle、不查 live library，也不讀 simulator truth。Training confusion 包含準備污染；correction 回到 preparation-label 座標，保留負值與大於 1 的結果，不代表 pure energy-state population 或 readout fidelity。
+- 雙 qubit 分類實驗在 Run 前驗證兩個角色 tone 都有 circle 與 GE Post 的 radius，否則 cfg 驗證報錯。一般入口保存終端讀出的 9 類計數，獨立 heralded 入口保存含 herald 的 81 類計數。Result 存原 float64 總和，不存逐 shot IQ，也不在 Analyze 分類，見 [雙 qubit guide](../../zcu_lab/v2/two_qubit/guide.md)。Readout 的單 ADC circle lookup 不解讀 lab 角色。
+- T1 需要 other，不收 linear 或 centroid3。舊 cfg 沒有 classifier 時略過 confusion 修正。需要 radius 的 consumer 提示做 Post。其餘 singleshot population consumers 在取數時分類，confusion correction 只用 saved cfg。Amplitude／Length Rabi 保留單 ADC raw IQ 與聯合 fit；未校準只略過 live population preview。有效 fit 透過同一中立 builder 更新捕捉的 resonator readout，Pulse 改 `classifier`，單 tone Mux 改 `tones.0.classifier`，不支援多 tone 分析。Check 的 raw Run 不要求 classifier，Analyze 才從 saved cfg 要求 circle 與 radius，見 [Check guide](../../zcu_lab/v2/singleshot/check/guide.md)。
 
-2026-10-29，使用者對三態校準交接選 A，答「3A」：新增 readout classifier 型別，由三態 reference Apply 到 library，後續實驗讀 saved run cfg。
-同日，對沿用 QICK 的 float64 I/Q 分量或先轉成 complex128 的選項，使用者回答：「我想推進Program設計一致性，選A」。
-Reducer 接收 I/Q 分量，需要複數運算時自行轉換。`acquire_decimated` 不變。
-原先每 ADC 一個 processor、單一 payload 軸與框架取平均的方案，由 2026-10-30 的 shot-sums 契約取代。
-
-單 qubit GE Primary 提出只有中心的 circle，Post 提出含中心、radius 與 matrix 的完整 circle。
-兩者都是完整 module replacement，同次批次依 Primary→Post 接受。
-分兩次 Apply 時最後一次生效，Post→Primary 會回到只有中心。
-需要 radius 的 consumer 因此提示做 Post。T1 需要 other，不接受 linear 或 centroid3。
-舊 cfg 沒有 classifier 時，T1 分析略過 confusion 修正，不讀 point 校準。
-GE 以 run 的 readout slot 解析目標，proposal builder 與 materialized 比對契約見 [[0008]]。
-Mux GE 每個 phase 合成一個完整 proposal，只更新成功 tone 的精確 classifier 路徑。
-雙 qubit 分類實驗在 Run 前要求兩個角色 tone 的 circle 與 GE Post 的 radius，缺少或非 circle 時 cfg 驗證報錯。
-取數端以 shot sums 分類：一般入口存終端讀出的 9 類計數，獨立 heralded 入口存 herald 加終端的 81 類計數。Result 保存原 float64 總和，不保存逐 shot IQ，也不在 analyze 分類。
-2026-10-30 使用者裁定：「不要再有逐shot記錄的實驗了，除了singleshot/ge這種本來就是用於生成分類參數的實驗，其他都請在平均時分類」。gg／ee 分析與 writeback 細節由 `zcu_lab/v2/two_qubit/guide.md` 擁有。
-Readout owner 的單 ADC circle lookup 不理解 lab 角色，也不讀 live library。
-其餘 singleshot population consumers 使用 shot-sums 分類取數，confusion correction 只讀 saved cfg。
-Amplitude／Length Rabi 保留單 ADC raw IQ 與聯合 fit，未校準時只略過 live population preview。
-有效 Rabi fit 經同一中立 builder 更新 captured resonator readout 的完整 classifier，
-Pulse 更新 classifier，單 tone Mux 更新 tones.0.classifier，不支援多 tone 分析。
-Check 的 raw Run 不要求 classifier，到分析才從 saved cfg 要求 circle 與 radius。
+**依據。**
+- 2026-10-29，使用者提議「將center/radius/confusion matrix等資訊直接放到readout cfg裡的可選欄位中」，並說「module本身不利用，但可以自然綁定到對應的readout module上」。對 library 所有權與不搬舊值答「2A 3A 4同意」，對比對校準設定答「QC3我認為分類參數比對需求還不確定，先A」。見 [Singleshot 分類參數放進 readout cfg](../discussions/2026-10-29-readout-classifier.md)；其中早期取數與兩次 Apply 的說法不代表現行契約。
+- 2026-10-29，使用者對三態校準交接答「3A」；對沿用 QICK 的 float64 I/Q 分量答「我想推進Program設計一致性，選A」。Reducer 收 I/Q 分量，需要複數時自己轉換，`acquire_decimated` 不因這項選擇變更。原始討論未入庫，見 Git `9005d4ede`。同日提出的每 ADC processor、單一 payload 軸及框架取平均，在 2026-10-30 由 [shot-sums 裁決](#shot-sums-與-heralding) 取代。
+- 使用者 2026-11-18 過目分類軸等 agent 選擇時說「我大概看了一遍，基本上是没问题」，並說「并不算是裁决，而算是建议」。引用這些選擇時只作參考。原始討論未入庫，見 Git `1f4b16aa0`。
 
 ### 原生 QICK projection 的 readout 與 caller 分工
 
-普通 `acquire` 保留原生 QICK threshold／angle projection。
-Caller 依實驗語意決定是否傳入 threshold／angle，並負責 ADC 宣告順序、完整覆蓋與校準是否仍適用。
-原生 projection 將 excited fraction 放在 I，Q 為零，讓既有 IQ analysis 可使用這個等效 IQ。
-使用者於 2026-10-29 說：「1混入IQ是故意的，就是要變成等效IQ，好讓分析程序可以不用動。2所以是由實驗方手動傳遞3這是用戶責任。4目的是自帶0~1的合理範圍，這樣數據的值本身就有意義。」
+**規則。** 普通 `acquire` 保留原生 IQ 與 QICK `threshold`／`angle` projection，不提供 host classify 或 herald option。Caller 依實驗語意準備原生參數，負責 ADC 宣告順序、完整覆蓋及校準是否仍適用。
 
-使用者於 2026-10-31 裁定：「7,8,9,13照建議」。
-沒有 caller 的 classifier-to-QICK options helper 已移除。
-Caller 自行準備原生 projection 參數，readout 不提供缺少校準時整體退回普通 IQ 的 helper。
-此分工沿用 [[0072]] 與 `.importlinter` C8、C15、C16 的依賴方向，不新增跨層入口。
+**例子。** 要讓既有 IQ analysis 讀取 projection，caller 明示 `threshold`／`angle`。QICK 將 excited fraction 放在 I，Q 為零，見 [Native acquisition](../../lib/zcu_tools/program/README.md#native-acquisition)。
+
+**邊界。** Readout 不提供 classifier-to-QICK options helper，也不在校準不足時替 caller 整體退回普通 IQ。Host 分類走 [shot sums](#shot-sums-與-heralding)；帶遮罩的原生取數限制見 [Herald reset 與逐 shot 遮罩](#herald-reset-與逐-shot-遮罩)。依賴沿用 [[0072]] 與 `.importlinter` C8、C15、C16，不新增跨層入口。
+
+**依據。** 2026-10-29，使用者說：「1混入IQ是故意的，就是要變成等效IQ，好讓分析程序可以不用動。2所以是由實驗方手動傳遞3這是用戶責任。4目的是自帶0~1的合理範圍，這樣數據的值本身就有意義。」2026-10-31，對 caller 分工答「7,8,9,13照建議」。原生取數的初期討論見 [Singleshot 分類參數放進 readout cfg](../discussions/2026-10-29-readout-classifier.md)；移除 helper 的原始討論未入庫，見 Git `dda262afd`。
 
 ### Shot sums 與 heralding
 
-`acquire_summed` 與 Schedule 的 `run_acquire_summed` 以關鍵字 `reducer=` 接收單一 `ShotReducer[State]`。
-Reducer 是累加邏輯，state 是被累加的資料。State 由框架持有，reducer 本身不保存它。
-框架在第一輪前以 `start(points)` 建立 state。`points` 是不含 reps 的迴圈大小乘積，沒有掃描時為 1。
-每輪完成後，框架呼叫 `add(state, shots, mask)` 並保存回傳的新 state。
-硬體與模擬用同一條路徑。取消時捨棄未完成的輪次，保留最後完成那一輪的 state。
-Round hook 與最終結果都取自 `output(state)` 的 float64 `(points, *axes)`。框架只還原點的維度，不另做總和或平均。
-Reducer 收到 ADC-keyed float64 `(points, reps, reads, 2)` IQ（已除以積分長度，未扣 IQ offset）和 bool `(points, reps)` 遮罩。
-來源消耗的讀取及只供遮罩使用的 ADC 不交給 reducer。沒有來源時遮罩全為 True。
-不可相加的統計（例如 KMeans）以自己的 state 表達，`add` 讀得到前面累積的 state。
-`shot_sums`、`chain_sweep_sums`、`thermal_chain_sums`、`chain_cycle_sums` 與 `rpi_sums` 都從 `(points, *axes)` 的零陣列開始，各自決定怎麼使用遮罩。
-遮罩的來源與其他下游見 [Herald reset 與逐 shot 遮罩](#herald-reset-與逐-shot-遮罩)。
+**規則。** `acquire_summed` 與 Schedule 的 `run_acquire_summed` 接收單一 `reducer=`。框架持有 state，reducer 定義如何累加。硬體與模擬共用處理路徑；取消時只保留已完成 rounds 的 state。Round hook 與最終結果都取 reducer 輸出，框架只還原點的維度，不另加總或平均。Result 原樣保存 float64 總和，分析與繪圖才從總和與計數算比例、平均 IQ 或條件平均。需要分類時在取數時完成，不在 Analyze 分類。
 
-讀出軸只有 `Classify` 與 `IQ`。
-Classify 把一次讀出的分類結果轉成 k 維 one-hot。`IQ(read)` 預設將一次未分類讀出轉成 `(1, I, Q, I², IQ, Q²)`，不需重複同一次讀出來取得二階特徵。
-`IQ(read, order=3)` 加上 `(I³, I²Q, IQ², Q³)`，共十個分量。Readout 與 JPA optimization 的 live 與最終分數都從已完成 rounds 的總和計算，不另維護統計狀態。
-取數層沒有 tracker：`TrackerMixin`、`MomentTracker` 與 `KMeansTracker` 已刪除。
-原本用 tracker 的 9 處（jpa 4 個、`ro_optimize` 4 個、`calibration_acquire`）改用 `run_acquire_summed` 加 `IQ(read, order=3)`。
-`read_axes.split_cubic_sums` 將十個總和解成計數與每發原始矩。`snr_as_signal` 用這些矩算出 sample covariance 與三階中心矩，再算 SNR 與 skew penalty。
-`shot_sums` 對每個掃描點計算 `Σ_kept v₁ ⊗ v₂ ⊗ …`，只加總遮罩保留的 shot，輸出形狀是 `(points, *axes)`。
-軸順序由作者列出的讀出軸決定。同一次讀出仍可列多次，以保存特徵的外積。
-所有 IQ 軸都取第 0 格時得到計數；只有 Classify 軸時，整個輸出就是各聯合類別的計數。
+**例子。** `twotone/t1_cov` 不需要 classifier。它在同一 shot 用相同的 Pulse readout cfg 發射 `pre_readout` 和 `post_readout`，`shot_sums` 保存兩個二階 `IQ` 軸的 float64 `(N, 6, 6)` 外積總和。兩側共用的中心與 Gaussian width 由二階矩自校準。J 是兩次讀出的聯合機率，K 的每列是條件轉移機率；用 `C = 1 − tr J` 擬合與更新即時圖，K 只供診斷。播放、Analyze、Summary、live 與存檔契約由 [T1 cov guide](../../zcu_lab/v2/twotone/time_domain/t1_cov/guide.md) 擁有，自校準由 [analysis](../../lib/zcu_tools/analysis/README.md#雙讀出矩的自校準) 擁有。Cov 比較掃描點的變化，接受讀出期間衰減與拖尾帶來的偏差，不宣稱無偏的 gate fidelity。
 
-讀出以字串 label 指定，不要求作者計算 ADC 的 read index。
-`shot_sums(prog, axes)` 在 compile 後、取數前解析 label。
-Timeline 發射用 emit tag，未標記的發射以 module 名稱識別。
-Label 與 ADC read index 只在可見的讀取中解析。Label 必須唯一指向一次可見的發射，否則在取數前報錯。
-Classifier 取自該 readout 的 cfg 或作者明確提供的 override，不查 live library。
+**邊界。** Reducer 可用自己的 state 做不可相加的統計，例如 KMeans；取數層不另留 tracker。Reducer 的 `start`／`add`／`output`、輸入形狀、遮罩及加總型 reducer 見 [Summed acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition)。來源消耗的讀取不交給 reducer。Schedule 沒有 `RunOptions(converter=...)` 時原樣交付總和，不把類別計數當作 IQ。
 
-Result 原樣保存 reducer 的 float64 總和，不在 run 中換成平均或比例。
-分析與繪圖從計數和總和計算比例、平均 IQ 或條件平均。
-Schedule 的 `run_acquire_summed` 讓 caller 以 `RunOptions(converter=...)` 選擇 live signal；未提供 converter 時原樣寫入總和，不把類別計數當作 IQ。
-搬遷後的實驗拒絕缺少 counts／sums 的舊格式，不從舊比例推算計數，也不加相容路徑。
+- 只有 `Classify` 與 `IQ` 兩種軸。前者把一次讀出的類別轉成 one-hot，後者預設二階六分量。軸階數不是態數。作者顯式列軸及順序，可重列一次讀出做外積。`shot_sums` 只加總遮罩留下的 shots；全取 IQ 軸第 0 格是計數，只有 `Classify` 時則是聯合類別的計數。Classifier 取自 readout cfg 或顯式 override，不查 live library。Label 在 compile 後、取數前解析，使用 emit tag 或未標記發射的 module 名稱；缺失或有歧義即失敗，不猜 ADC read index。
+- Readout 與 JPA optimization 顯式選 `IQ(read, order=3)`，live 與最終分數用同一份已完成 rounds 的總和，不另存統計狀態。十個分量及解出的計數與原始矩見 [Program](../../lib/zcu_tools/program/README.md#summed-acquisition)，sample covariance、三階中心矩用於 [SNR 與 skew penalty](../../lib/zcu_tools/experiment/v2/README.md#v2-工具與實驗輔助)。
+- 搬遷後的實驗拒絕沒有 counts／sums 的舊格式，不從比例逆推計數。T1 cov 只收單 tone `readout/pulse` 和可選脈衝類 reset，不用 herald 遮罩。不載入舊 `heralding/t1`，也不提供 alias。這裡 cov 指二階矩，heralding 指分類後的 post-selection，並非 active reset；放置規則見[下節](#herald-reset-與逐-shot-遮罩)。雙 qubit heralded 保留分類。
+- Experiment 使用 program 的取數能力；lab core 不依賴 GUI，framework 不反向載入 lab。真實 acquire 和模擬的執行邊界不改，依賴沿用 [[0072]] 與 `.importlinter` C8、C15、C16。
 
-單 qubit heralding 的五個實驗使用 `[IQ("herald"), IQ("signal")]` 保存 float64 `(N, 6, 6)` 二階特徵外積總和。
-Herald 與 signal 由兩個 PulseReadout instance 發射，共用同一份 readout cfg，不需要 classifier。
-共用讀出的中心與 Gaussian width 由二階矩自校準；各點的 J 是 herald/signal 聯合機率，K 的每列是條件轉移機率。
-分析、擬合、即時圖與 earlystop 只用 C = 1 − tr J，不直接擬合 K。
-Analyze 選 n_states 為 2 或 3，從完整資料重新校準。二階特徵至多辨識三態，三中心共線會失敗。
-Summary 保存擬合參數、post-herald 布居 π̂ 與正規化奇異值，不放逐點陣列。
-Herald 期間衰減會使 π̂ 低於原始熱布居，讀出拖尾也會造成偏差。
-即時圖在首次校準前標示 Calibrating，成功後熱啟動；辨識失敗保留前圖且不中斷取數。
-Live 與 earlystop 各自持有校準快取，不跨 thread 共用狀態。當次失敗回 NaN C，不觸發 earlystop。
-Host scan 跨 acquire 加總實際取得的 sums，不把 cached 結果算成新資料。這不是 active reset。
-存檔軸為 herald_features 與 signal_features；既有 label 驗證拒絕舊分類 herald 資料，沒有相容路徑。
-實際取數介面見 [program 契約](../../lib/zcu_tools/program/README.md#summed-acquisition)。
-
-先前 circle、linear、centroid3 與 herald-g post-selection 的單 qubit 契約已由上述自校準取代。
-Classify 與雙 qubit heralded 實驗保留原分類契約。
-
-2026-11-09 註：單 qubit heralding 的五個實驗、對應 recipes 與 `zcu_tools.analysis.herald_transfer` 已移除。
-上兩段的自校準、C 指標、即時圖與存檔軸是歷史記錄，catalog 不再提供單 qubit heralding。
-使用者於 2026-11-09 說：「舊 heralding 我完全沒用過也沒讀過，可以直接刪掉。」
-當時保留 `IQ` 六分量讀出軸、`shot_sums`、`split_sums` 與 Classify，雙 qubit heralded 實驗保留原分類契約。
-
-使用者於 2026-10-30 要求單一 processor：「H1 , 我認為processor就不要每個adc分開給，統一只給一個就行」。
-同日明定分類時機：「分類請不要在analyze裡做，浪費記憶體，分類請在processor裡做，將nread, 2的資料轉成M維資料」。
-對讀出軸，使用者提出：「不用堆到一個M維度裡，而是一個嵌套維度，一般iq訊號被轉成3維(1,i, q)，而k分類器轉成k維，幾次readout就幾層」。
-整理成逐 shot 外積總和後，使用者確認：「1是 2你說得Result是什麼？ 3可以 我認為當前設計夠簡單但靈活」。
-同日的實驗保存約束是：「不要再有逐shot記錄的實驗了，除了singleshot/ge這種本來就是用於生成分類參數的實驗，其他都請在平均時分類」。
-本次總和保存裁定取代 2026-10-29「5B」的同網格 pass_fraction 保存方案。
-Result 改存所有 herald 類別的總和，通過比例改由計數衍生，不再只留下通過類別的資料。
-
-2026-11-02，使用者決定以二階 IQ 特徵支援不需 classifier 的單 qubit heralding。
-以下六維特徵決策取代 2026-10-30 引文中「一般iq訊號被轉成3維」的 IQ 部分。
-舊引文保留為歷史，Classify one-hot 與逐 shot 外積總和的契約不變。
-
-1. IQ 使用 `(1, I, Q, I², IQ, Q²)` 六個分量。
-   使用者提出：「讓iq模式的維度變成[1,i1,q1,1i,1q,ii,iq,qi,qq]就好了」。
-   對將重複的一階與 IQ／QI 分量去重成六個分量的建議，使用者答「a」。
-2. IQ 特徵預設二階，維持六分量的形狀。
-   2026-11-02 使用者裁決：「先固定2階，3階有需要再考慮支援」。三階偏態校正需要額外分量，因此 SNR caller 明填 `order=3`。
-   這裡的階數不是態數，`n_states=2/3` 契約不變。
-3. IQ 與 Classify 保留為兩種軸，不合併成 Classify。
-   使用者裁決：「實作上，我考慮你的簡單方案，因為使用IQ與Classify的實驗似乎都分開了？至少在使用時就知道。」
-   這項選擇取代合併提案，不改 Classify 從 readout cfg 取用 classifier 的契約。
-4. 實驗依目的選擇是否分類。需要 population 的實驗保留分類，不需 classifier 的路徑限於本次單 qubit heralding。
-   使用者裁決：「a，但有些實驗，可能特別要求取得population，還是要支援分類，但一般只是為了訊號比較好，取出initial population影響的實驗，可以不給classifier」。
-   Classify 與雙 qubit heralded 的既有分類要求不變。
-5. 自校準用於比較掃描點間的相對變化，接受模型偏差，不宣稱結果是無偏的 gate fidelity。
-   使用者裁決：「老實說有偏差沒關係，重點是我能不能很好的看到不同掃描點的K的變化，訊號是相對的」。
-   Readout 拖尾與 herald 期間衰減的限制仍有效。
-6. 分析、擬合、即時圖與 earlystop 只使用 `C = 1 − tr J`，J 與 K 保留為診斷。
-   使用者裁決：「那就都用C，先不要直接擬合K，除非有必要我再討論」。
-   不加入 K 層級的直接擬合或額外指標。
-
-實驗層保留獨立的 `heralding/*` 組合序列，不在既有實驗加入 Reset 模組。
-T1、Amp Rabi、Len Rabi、Ramsey 與 Echo 沿用普通版 writeback 目標與規則，描述標明 Heralded，不另設校準欄位。
-使用者於 2026-10-29 裁決：「那不做active reset，讓底層支援post-selection，上層使用新實驗組，比如heralding/*」。
-對 Amp Rabi、Len Rabi、Ramsey、Echo 的成員清單，使用者回答：「herald第二階段清單採用建議」。
-對沿用普通版 writeback 並標明 Heralded 的選項，使用者回答：「Herald選A」。
-操作、保存與 writeback 目標原見各 guide：T1、Amp Rabi、Len Rabi、Ramsey、Echo。
-
-2026-11-09 註：`heralding/*` 實驗組已移除，上一段的成員、writeback 規則與 guide 名稱是歷史記錄。
-這五份 guide 已於 `188409d1d`（Remove single-qubit heralding experiments and herald_transfer）隨實驗刪除。
-上方第 4 至 6 項中只適用單 qubit heralding 的自校準與 C 指標規則，目前沒有實驗使用。
-
-2026-11-20 註：2026-10-29「上層使用新實驗組」的放置選擇已推翻。Post-selection 改由既有 `reset` 欄位選用 herald reset 模塊，見下方 [Herald reset 與逐 shot 遮罩](#herald-reset-與逐-shot-遮罩)。
-同句的「讓底層支援post-selection」與不做 active reset 仍有效。
-
-2026-11-20 註：單 qubit T1 的二階矩方法以 `twotone/t1_cov` 恢復，上方的自校準、C 指標與第 4 至 6 項規則重新適用於這個實驗。
-二階矩方法改稱 cov；heralding 只指分類後的 post-selection。
-兩次讀出改名為 `pre_readout` 與 `post_readout`，存檔軸是 `pre_readout_features` 與 `post_readout_features`，tag 是 `twotone/ge/t1_cov`。上文的 herald／signal 名稱是歷史記錄。
-自校準 helper 是 `zcu_tools.analysis.cov_transfer.selfcal_transfer`，行為與已移除的 `herald_transfer` 相同。
-實驗只收單 tone `readout/pulse`，可選脈衝類 reset，播放順序是 reset、`pre_readout`、π pulse、delay、`post_readout`。
-舊 `heralding/t1` 資料沒有載入路徑，也沒有 alias。Amp Rabi、Len Rabi、Ramsey 與 Echo 不恢復，需要時再加。
-使用者於 2026-11-19 說明：「可以加回來，應該說，我刪掉的不是cov版，而是heralding版」，並要求改名：「把前一种基于共变因素的实验，把它纠正其义，不要再叫其 hurdling，呃，改成加上什么 COV 的 postfit 之类的。」
-2026-11-20，對先恢復 T1 的選項，使用者回答「舊題都採用建議」；對名稱、readout 與 reset，使用者回答：「關於t1_cov，1A，名字叫pre_readout/post_readout比較明確。2採用建議。3我認為可以加可選reset，作為穩定ge分佈使用。」
-選項比較見 [T1 二階矩實驗以 t1_cov 恢復](../discussions/2026-11-20-t1-cov-restore.md)。
-
-依賴沿用 [[0072]] 的分層與 `.importlinter` C8、C15、C16。
-Experiment 使用 program 的取數能力，lab core 不依賴 GUI，framework 不反向載入 lab。
-本次修改不改變真實 acquire 與模擬的執行邊界，也不新增依賴方向。
+**依據。**
+- 2026-10-30，使用者要求單一處理器：「H1 , 我認為processor就不要每個adc分開給，統一只給一個就行」。分類時機：「分類請不要在analyze裡做，浪費記憶體，分類請在processor裡做，將nread, 2的資料轉成M維資料」。軸設計：「不用堆到一個M維度裡，而是一個嵌套維度，一般iq訊號被轉成3維(1,i, q)，而k分類器轉成k維，幾次readout就幾層」。整理為逐 shot 外積總和後答「1是 2你說得Result是什麼？ 3可以 我認為當前設計夠簡單但靈活」。保存原則：「不要再有逐shot記錄的實驗了，除了singleshot/ge這種本來就是用於生成分類參數的實驗，其他都請在平均時分類」。分類軸的嵌套保留，IQ 分量以後續裁決為準。原始裁決討論未入庫，見 Git `05df4f6bb`。2026-10-29 的舊 pass_fraction 方案見 [Heralding post-selection 討論](../discussions/2026-10-29-heralding-post-selection.md) 與 ADR 的 Git 歷史。
+- 2026-11-02，使用者提出「讓iq模式的維度變成[1,i1,q1,1i,1q,ii,iq,qi,qq]就好了」，對去重成六個分量答「a」，並說「先固定2階，3階有需要再考慮支援」。對保留兩種軸說：「實作上，我考慮你的簡單方案，因為使用IQ與Classify的實驗似乎都分開了？至少在使用時就知道。」對分類使用範圍說：「a，但有些實驗，可能特別要求取得population，還是要支援分類，但一般只是為了訊號比較好，取出initial population影響的實驗，可以不給classifier」。對 cov 偏差與擬合說：「老實說有偏差沒關係，重點是我能不能很好的看到不同掃描點的K的變化，訊號是相對的」「那就都用C，先不要直接擬合K，除非有必要我再討論」。見[二階矩自校準的討論](../discussions/2026-11-02-herald-transfer-matrix.md)。
+- 2026-11-19，使用者說「可以加回來，應該說，我刪掉的不是cov版，而是heralding版」，並要求「把前一种基于共变因素的实验，把它纠正其义，不要再叫其 hurdling，呃，改成加上什么 COV 的 postfit 之类的。」2026-11-20，對先恢復 T1 答「舊題都採用建議」；對名稱、readout 與 reset 答「關於t1_cov，1A，名字叫pre_readout/post_readout比較明確。2採用建議。3我認為可以加可選reset，作為穩定ge分佈使用。」見 [T1 二階矩實驗以 t1_cov 恢復](../discussions/2026-11-20-t1-cov-restore.md)。該討論也記錄 2026-11-09 使用者說「舊 heralding 我完全沒用過也沒讀過，可以直接刪掉。」2026-10-29 舊實驗組的成員及 writeback 不再適用，見 [早期討論](../discussions/2026-10-29-heralding-post-selection.md) 與 Git `188409d1d`。
+- 2026-11-20，使用者將 tracker 與 processor 的重疊分工改成顯式 reducer 與 state。語音原話：「Jiki 基本没问题，但我有发现一个设计上的取舍。我发现有 processor 机制之后，我好像不需要 tracker 机制，后者是不是可以删掉了？」「但这两个东西的定位重复了，我不是很想要重复定位的东西出现在城市里，这对于使用者跟维护者来说都是负担。无单调缺可，就必须放弃。一些不可加的统计能力，比如说 K-means，K-means，所以这是我烦恼的。」「那我觉得还是用比较显示的方法比较好，也就是一个 reducer，然后再一个 stage，然后者是状态，前者是累加器，这个抽象会比较合理一点，比较自然一点。」其中「Jiki」讀作「幾題」，「城市」是「程式」，「stage」是 state，「显示」是「顯式」。對一併實作與採用關鍵字 `reducer=` 答「采用建议」。見 [tracker 與 processor 的討論](../discussions/2026-11-20-herald-reset-shot-masks.md#tracker-與-processor-的定位重複)。
 
 #### Herald reset 與逐 shot 遮罩
 
-本段的 heralding 只指分類後的 post-selection，命名見上方 2026-11-20 的 t1_cov 註。
+**規則。** 只需篩選初態時，使用既有 `reset` 欄位選 herald，不另設欄位或實驗入口，也不做 FPGA active reset。Herald 與終端發射共用 readout 設定。Module 或作者只註冊遮罩來源，`program` 的取數層在每個完成 round 算遮罩，與 round hook 同層。所有 ADC 共用同一張 bool `(points, reps)` 遮罩，沒有讀取軸。多個來源依註冊順序執行，以 AND 合併；沒有來源時全為 True，取數結果逐位不變。註冊位置與 owner 見 [[0083]]〈Builder 與 Schedule 的職責〉。取數時檢查索引未超出編譯後的讀取數，宣告與形狀見 [Registered shot masks](../../lib/zcu_tools/program/README.md#registered-shot-masks)。
 
-**選用。** 只需要篩選初態時，實驗沿用既有 `reset` 欄位選用 herald，不另加 herald 欄位或 `_heralded` 版本。
-`ResetWithHeraldCfg` 是普通 reset 加上 `reset/herald` 與 `reset/mux_herald` 的 union；`Reset.Cfg` 不含 herald 類型。
-一般入口的 RB、chevron、constructive phase、CZ amplitude、conditional spectroscopy、local Z、idle ZZ 與 joint readout 使用 mux 終端讀取，因此只收普通 reset 與 `reset/mux_herald`。
-`twotone/t1_cov` 使用 `Reset.Cfg`，不收 herald：遮罩會改變它的聯合二階矩，而 cov 已用第一次讀取自校準。
-選用 herald 時，Result 的形狀與存檔欄位和沒有 herald 時相同。
-Herald reset 只留下通過的 shot，不保存被排除 shot 的類別。
-只有 `two_qubit/rb_heralded` 與 `two_qubit/conditional_phase_heralded` 保留獨立入口。兩者保存 herald 加終端讀取的 81 類計數。
+**例子。** Mux 實驗以 `reset/mux_herald` 選 `keep: {'0': g, '2': g}`。鍵是完整 tones 清單的位置，不是 ADC 編號。只在兩個 tone 都是 g 時保留該 shot，所有 ADC 一起保留或排除。`reset/herald` 搭配 `readout/pulse`，`keep` 是單一態。可選 `prepare` 是一個 `pulse`、`reset/pulse`、`reset/two_pulse` 或 `reset/bath`，可 inline 或引用 library key。先 prepare，再做 herald 讀取、實驗序列和終端讀取。Herald 的 `readout` 可 inline 或引用 library key。Herald 沿用 readout 的 `pre_delay`／`post_delay`。共享 readout 物件的兩種建法見 [Herald resets](../../lib/zcu_tools/program/v2/modules/README.md#herald-resets)。
 
-**Herald 模塊。**
+**邊界。** `ResetWithHeraldCfg` 才包含兩種 herald，普通 `Reset.Cfg` 不含。一般入口的 RB、chevron、constructive phase、CZ amplitude、conditional spectroscopy、local Z、idle ZZ 與 joint readout 都用 mux 終端讀取，只收普通 reset 或 `reset/mux_herald`。T1 cov 不收 herald，遮罩會改變它用來自校準的聯合二階矩。只有 `two_qubit/rb_heralded` 與 `two_qubit/conditional_phase_heralded` 保留獨立入口，見[下一節](#保留獨立-heralded-實驗的條件)。
 
-| type | readout | `keep` |
-| --- | --- | --- |
-| `reset/herald` | `readout/pulse` | 一個態，例如 `g` |
-| `reset/mux_herald` | `readout/mux` | tone 在完整 tones 中的位置 → 態；鍵是加引號的十進位字串，例如 `{'0': g, '2': g}` |
+- Circle 可選 g、e、other，需 radius；linear 可選 g、e；不接受 centroid3。Mux `keep` 鍵須為非負十進位整數的字串，否則 cfg 驗證報錯。Build 拒絕與終端不同或有掃描的 herald readout、未知 tone、缺少 classifier 或 circle radius、非法 `keep` 態，以及各可行路徑消耗的實體讀取不一致。掃描會改變已校準 classifier 所對應的設定，所以不收 swept herald readout。
+- 硬體觸發照實計數。Mux 的 herald 讀取包括未列入 `keep` 的 tone；每個觸發的 ADC 都移除這一次讀取。實驗用可見的 label 和索引，`shot_sums` 按邏輯讀取數檢查，不必改實驗的 converter。平均、reducer、`ShotResult` 不含來源消耗的讀取，沒有剩餘讀取的 ADC 也省略。`get_raw()` 仍含全部 trigger。`run_acquire_shots` 給可見讀取的原始 int64 積分 IQ 與 bool mask，不由框架套遮罩；實驗決定如何使用。
+- 有遮罩來源時，普通平均在 host 算 `Σ m·x / N`。`x` 是逐 shot 長度正規化並扣 IQ offset 後的值，`m` 為 0 或 1，`N` 是 reps 乘已完成 rounds。接受率留在幅度，不另存。Reducer 收遮罩，`shot_sums` 只加保留的 shots。Herald reset 不存被排除的類別，也不改 Result 形狀與存檔欄位。
+- 分類計數的分母是每格總計數，機率以通過 herald 的 shot 為條件。例：RB 的 joint00 是兩個 tone 都以 g 通過時的存活率。接受率可由計數總和除以 reps×rounds 得到，不另存。有限計數代表已量，少跑幾輪也可用，統計誤差按實際計數。未量格維持 NaN，已量格的計數總和為零時機率是 NaN，分析附原因。
+- 帶遮罩來源時，decimated 取數會報錯，因為時間軌跡沒有可分類的逐 shot 積分值。`acquire`／`run_acquire` 有來源且收到原生 `threshold` 時也在進入點報錯。FTF 按 projective outcome 分支演化一次，herald 與終端讀取共用同一發的 outcome 歷史。有來源或 reducer 時逐 shot 抽 IQ，和硬體走相同的遮罩、平均與 reducer 路徑。
 
-- `readout` 是 library key 或 inline，設定必須和實驗的終端讀取完全相同。Caller 用 `Reset(name, cfg, terminal=readout)` 時，herald 與終端發射共用傳入的 readout 物件，普通 reset 則忽略它。也可用 herald cfg 的 `build(name)` 建立模塊，並發射它的 `readout` 作為終端讀取。
-- 分類用 readout cfg 的 classifier。Circle 的態是 g、e、other，需要 radius；linear 的態是 g、e；centroid3 不能用於 herald。
-- `keep` 列出的每個 tone 都分類成指定的態，這一發才保留。所有 ro ch 一起保留或一起排除。
-- 可選的 `prepare` 是一個 `pulse`、`reset/pulse`、`reset/two_pulse` 或 `reset/bath`，library key 或 inline，不可以是 herald。
-- Herald 沒有自己的 `post_delay`，herald 讀取沿用 readout 的 `pre_delay` 與 `post_delay`。
-- 播放順序是 `prepare` → herald 讀取 → 實驗序列 → 終端讀取。
-- Mux `keep` 的鍵不是非負十進位字串時，cfg 驗證報錯。
-- 以下情況在 build 報錯並寫出原因：readout 與終端不同、herald readout 參數有掃描、`keep` 指到不存在的 tone、tone 沒有 classifier、circle 缺 radius、`keep` 的態不屬於該 classifier、herald 在各可行路徑上消耗的實體讀取不同。
+**依據。** 選項、實測與契約核對見 [Herald 改為 reset 模塊與逐 shot 遮罩](../discussions/2026-11-20-herald-reset-shot-masks.md)。
 
-**遮罩。**
-
-- 遮罩是 bool `(points, reps)`，每一輪算一次。所有 ro ch 共用同一個遮罩，對每個 ch 的 `(points, reps, reads_ch, 2)` 廣播；遮罩沒有讀取軸。
-- 遮罩機制屬於 `zcu_tools.program` 的取數層，和 round hook 同層，不屬於 module。Module 與作者只註冊遮罩來源，註冊位置與 owner 見 [[0083]] 的〈Builder 與 Schedule 的職責〉。
-- 每個來源逐 ADC 宣告自己消耗的實體讀取。註冊拒絕負數與非整數索引，取數對照編譯後的讀取數檢查上界。每輪來源收到這些讀取已除以積分長度、未扣 IQ offset 的 IQ，回傳自己的遮罩。
-- 多個來源照註冊順序執行，以 AND 合併：所有來源都保留的 shot 才保留。
-- 沒有來源時遮罩全為 True，平均、reducer 與 shots 的輸出和沒有遮罩機制時逐位元相同。
-
-**下游。**
-
-- 平均（`acquire`、`run_acquire` 與 round hook）：每點輸出 `Σ m·x / N`，m 以 0／1 計。x 是逐 shot 除以積分長度、扣 IQ offset 後的值，N 是 reps 乘以已完成的 rounds。有來源時平均改在 host 上逐 shot 算。接受率留在平均值的幅度裡，不另外存。
-- Reducer：每輪收到遮罩，見本節開頭。`shot_sums` 只加總保留的 shot。
-- 分類計數：機率除以該格計數總和，是通過 herald 的 shot 裡的條件機率。例如 RB 的 joint00 存活率是 herald 兩個 tone 都是 g 時的存活率。接受率等於計數總和除以 reps×rounds，不另外存。取數只累加已完成的 rounds，因此計數有限的格子視為完整。中途停止、少跑幾輪的格子仍可用，統計誤差按實際計數計算。未量的格子維持 NaN。已量的格子若總和為零，機率為 NaN，分析附上原因。一般入口的 RB、chevron、constructive phase、CZ amplitude、conditional spectroscopy、local Z、idle ZZ 與 joint readout 都依這條規則判讀分類計數。
-- `run_acquire_shots` 回傳 `ShotResult`：`shots` 是可見讀取的原始 int64 積分 IQ `(points, reps, reads, 2)`，`mask` 是 bool `(points, reps)`。框架不套用遮罩，被排除的 shot 仍在 `shots` 裡，用法由實驗決定。
-
-**Herald 讀取對實驗隱藏。**
-
-- 硬體觸發次數照實計算，包含 herald 讀取。
-- Mux herald 讀取觸發該 readout 每個 tone 的 ro ch，`keep` 沒列出的 tone 也一樣。每個 ch 都拿掉這一次讀取。
-- Readout label、讀取索引與 `shot_sums` 的讀取數檢查都在拿掉來源讀取後的邏輯讀取上解析。實驗的 converter、label 與讀取索引不用改。
-- 平均、reducer 與 `ShotResult` 都不含來源消耗的讀取。某個 ADC 的讀取全被消耗時，這些輸出省略這個 ADC。`get_raw()` 仍回傳含全部 trigger 的實體 buffer。
-
-**不支援的組合。** Program 有遮罩來源時，decimated 取數報錯，因為時間軌跡沒有逐 shot 的積分值可分類。
-`acquire` 與 `run_acquire` 收到 QICK 原生 `threshold` 時在進入點報錯；沒有來源時 `threshold` 照舊。
-Herald readout 參數有掃描時在 build 報錯，因為 classifier 只在一組設定下校準過。
-
-**模擬。** FTF 沿用逐 shot 的 IQ 抽樣。量子演化照舊按 projective outcome 分支算一次，herald 與終端讀取共用同一發的 outcome 歷史。
-有遮罩來源或 reducer 時，模擬器每輪產生逐 shot IQ，交給和硬體相同的遮罩、平均與 reducer 路徑。
-
-**裁決。**
-
-- 放置：2026-11-19，使用者說：「H我自己的想法是，如果是reset模塊，那就放棄可以取得多餘的資訊，比如說把分類非g的shot值都設定成0來使其對平均沒有貢獻。對於想要利用更多資訊的實驗，保持分化是合理的。」2026-11-20，使用者對整批建議回答：「好，我沒問題了，全部採用建議」。
-  這推翻 2026-10-29「上層使用新實驗組，比如heralding/*」的放置選擇。獨立入口的保留條件見下一節。
-- 遮罩在取數層、所有下游統一收：2026-11-19，「我傾向統一的處理方式，統一知道權重的存在，而也代表權重的Mixin要在比較底層，作為通用底層功能存在，而不屬於Module層級。」
-- 多個來源與 0／1 值：2026-11-20，「2我認為可以支援多次register_shot_weights，照順序執行，並合併mask，考慮這這個機制，我傾向mask先只有0/1就好，用int?目前沒想出用float的需求，看你的想法。」型別 bool 是 agent 依「看你的想法」做的選擇：值只有兩種，合併直接用 `&`，乘上 IQ 時自動轉型。
-- 遮罩形狀：2026-11-20，使用者提出：「關於mask，我擔心的是mux與多個ro ch的多次readout，據我所知，不同ro ch儲存欄位是分開的，那mask的形狀就需要討論一下。」對以 shot 為單位、所有 ro ch 共用的選項，使用者回答「M1」。
-- 平均公式：2026-11-19，「比如說把分類非g的shot值都設定成0來使其對平均沒有貢獻。」「由於掃flux本來就會正規化，所以都沒差……2我認為先不用存，但平均就能分析出來。」「平均公式可以調查一下設計張力，沒問題就採用。」張力調查的結論是：在長度正規化與扣 offset 之後才記 0，結果不受影響；在原始積分上記 0，扣 offset 後會變成 −offset。
-- 條件計數：2026-11-19，對機率除以計數總和的選項，使用者回答「5a」。除以 reps×rounds 會讓機率含接受率，現有分析的分母都要改。
-- Shots 帶遮罩：2026-11-19，「run_acquire_shots我傾向遮罩，應該說，怎麼使用遮罩應該是各實驗的自由。」
-- 讀取隱藏與各下游的透明：2026-11-19，「3希望能設計的乾淨些，實作前請與我討論具體細節。」「6為什麼不支援run_acquire_shots？為什麼不支援tracker？作為一個獨立於processor的機制，我希望能保持彼此透明，如果不能，我希望瞭解原因。」2026-11-20，使用者確認契約：「herald spec 的測試接縫和 contracts 我確認」。
-  ADC 讀取全被消耗時省略該 ADC、帶來源時拒收 `threshold` 這兩條補充，使用者回答「B, 我傾向一次就設計完整。23可以」（2026-11-20），其中「2」同意這兩條。
-- Herald cfg：「也許herald cfg可以設定要留哪種。」（2026-11-19）「關於reset/herald，post_delay不是已經在readout裡就有了嗎？pre_reset是為什麼需要呢？……mux與一般的readout要用同一個module type還是不同的？我以為通常都是不同的。mux的module通常都是特化。」（2026-11-19）「pre_reset應該可以不只是reset type，普通的qubit pulse或onetone pulse應該都可以達到穩定ge分佈的效果。」（2026-11-20）對只放一個 `prepare` 的選項：「C，目前沒想到需要多個prepare的場景，那就先簡單做法。」（2026-11-20）
-- Mux `keep` 的鍵：library 為了和 JSON 相容，mapping 的鍵只收字串。對鍵加引號的寫法，使用者回答「2-1」（2026-11-20）。
-- 刪除 tracker、改用顯式 reducer 與 state：2026-11-20 的語音輸入原樣保留，「城市」讀作「程式」，「stage」讀作 state，「显示」讀作「顯式」。
-  「Jiki 基本没问题，但我有发现一个设计上的取舍。我发现有 processor 机制之后，我好像不需要 tracker 机制，后者是不是可以删掉了？」
-  「但这两个东西的定位重复了，我不是很想要重复定位的东西出现在城市里，这对于使用者跟维护者来说都是负担。无单调缺可，就必须放弃。一些不可加的统计能力，比如说 K-means，K-means，所以这是我烦恼的。」
-  「那我觉得还是用比较显示的方法比较好，也就是一个 reducer，然后再一个 stage，然后者是状态，前者是累加器，这个抽象会比较合理一点，比较自然一点。」
-  對在本任務一起做與關鍵字由 `processor=` 改為 `reducer=` 兩項建議，使用者回答「采用建议」。
-  「Jiki」讀作「幾題」，表示拆票時的三題都接受建議，其中一題是分析只先改 plain `two_qubit/rb`。
-- 模擬：2026-11-19，使用者要求：「7不要逐shot模擬，太慢了，請使用一些統計手段來等效生成」。實測顯示，FTF 預設參數下讀取窗口內至少躍遷一次的機率約 21%，只用高斯會讓三階矩與誤判率失真；逐 shot 路徑在 100000 reps 暖機後約 0.2 s。使用者看過數字後回答：「shot抽樣就e吧」（2026-11-20）。
-
-選項比較與被否決的做法見 [Herald 改為 reset 模塊與逐 shot 遮罩](../discussions/2026-11-20-herald-reset-shot-masks.md)。
+- 放置：2026-10-29，使用者說「那不做active reset，讓底層支援post-selection，上層使用新實驗組，比如heralding/*」。底層 post-selection 與不做 active reset 仍有效；上層放置已被取代，見[早期討論](../discussions/2026-10-29-heralding-post-selection.md#後記)。2026-11-19，使用者說：「H我自己的想法是，如果是reset模塊，那就放棄可以取得多餘的資訊，比如說把分類非g的shot值都設定成0來使其對平均沒有貢獻。對於想要利用更多資訊的實驗，保持分化是合理的。」2026-11-20，對整批建議答「好，我沒問題了，全部採用建議」。
+- 取數層與多來源：2026-11-19，使用者說「我傾向統一的處理方式，統一知道權重的存在，而也代表權重的Mixin要在比較底層，作為通用底層功能存在，而不屬於Module層級。」2026-11-20 說「2我認為可以支援多次register_shot_weights，照順序執行，並合併mask，考慮這這個機制，我傾向mask先只有0/1就好，用int?目前沒想出用float的需求，看你的想法。」Bool 是 agent 的具體型別選擇，可直接用 `&` 合併，乘 IQ 時自動轉型。同日使用者問「關於mask，我擔心的是mux與多個ro ch的多次readout，據我所知，不同ro ch儲存欄位是分開的，那mask的形狀就需要討論一下。」對全 ADC 共用的逐 shot 遮罩答「M1」。
+- 平均、計數與 shots：2026-11-19，使用者說「比如說把分類非g的shot值都設定成0來使其對平均沒有貢獻。」「由於掃flux本來就會正規化，所以都沒差……2我認為先不用存，但平均就能分析出來。」「平均公式可以調查一下設計張力，沒問題就採用。」扣 offset 後才置零，否則被排除的 shot 會留下負 offset。對條件計數的分母答「5a」，並說「run_acquire_shots我傾向遮罩，應該說，怎麼使用遮罩應該是各實驗的自由。」
+- 隱藏讀取：2026-11-19，使用者說「3希望能設計的乾淨些，實作前請與我討論具體細節。」「6為什麼不支援run_acquire_shots？為什麼不支援tracker？作為一個獨立於processor的機制，我希望能保持彼此透明，如果不能，我希望瞭解原因。」2026-11-20 答「herald spec 的測試接縫和 contracts 我確認」。同日回答「B, 我傾向一次就設計完整。23可以」，其中「2」同意省略全被消耗的 ADC，以及有來源時拒收 `threshold`。
+- Herald cfg：2026-11-19，使用者說「也許herald cfg可以設定要留哪種。」「關於reset/herald，post_delay不是已經在readout裡就有了嗎？pre_reset是為什麼需要呢？……mux與一般的readout要用同一個module type還是不同的？我以為通常都是不同的。mux的module通常都是特化。」2026-11-20 說「pre_reset應該可以不只是reset type，普通的qubit pulse或onetone pulse應該都可以達到穩定ge分佈的效果。」對只放一個 `prepare` 答「C，目前沒想到需要多個prepare的場景，那就先簡單做法。」同日對 JSON 相容的帶引號 `keep` 鍵答「2-1」。
+- 模擬：2026-11-19 提出的統計生成方案，見[模擬抽樣比較](../discussions/2026-11-20-herald-reset-shot-masks.md#模擬器的統計抽樣提出後撤回)。使用者看過躍遷機率、偏差和逐 shot 抽樣耗時後，於 2026-11-20 答「shot抽樣就e吧」。
 
 #### 保留獨立 heralded 實驗的條件
 
-分析要在 gg 和 ee 兩組共用一個參數，而且準備誤差只進各組自己的振幅或偏移、不移動共用參數時，才保留獨立的 heralded 實驗。例如 RB 的衰減參數 `p`，兩組各自擬合振幅與偏移。Conditional phase 只用 π 交點寫回；兩組在 π 交點相符，不代表離開 π 時也等效。
+**規則。** 只有分析在 gg 和 ee 兩組共用一個參數，且準備誤差只進各組自己的振幅或偏移、不移動共用參數，才保留獨立的 heralded 入口。
 
-準備誤差若會拉動共用參數，或分析根本不共用參數，就用 `reset/mux_herald` 只保留 gg。例如 idle ZZ 的 ζ 會受準備污染拉動，joint readout 的混淆矩陣直接包含準備誤差。
+**例子。** RB 的兩組各自擬合振幅與偏移，共用衰減參數 `p`。Conditional phase 只用 π 交點寫回；兩組在 π 交點相符，不代表離開 π 時也等效。
 
-2026-11-20，使用者說：「有一些实验呢，它天生不在意 GG 还是 EE，它在意的是 GE 的交换，或者是保留在 GGEE 的属性。这种情况下，利用 hurdling 去。诶，具体来说，用交叉矩以及 hurdling 这两种方案去分析，有助于提高拟合可信度。那其他实验就用 reset 模块就好了。」使用者追問 gg 與 ee 是否等效，核對後同意保留 RB 和 conditional phase，並將準則寫入本 ADR。語音用詞、數值與選項比較見[只為共用參數保留獨立 heralded 實驗](../discussions/2026-11-20-heralded-experiment-pruning.md)。
+**邊界。** 準備誤差若會拉動共用參數，或分析本就不共用參數，就用 `reset/mux_herald` 只留 gg。例如 idle ZZ 的 ζ 會受準備污染拉動，joint readout 矩陣也直接含準備誤差。
+
+**依據。** 2026-11-20，使用者說：「有一些实验呢，它天生不在意 GG 还是 EE，它在意的是 GE 的交换，或者是保留在 GGEE 的属性。这种情况下，利用 hurdling 去。诶，具体来说，用交叉矩以及 hurdling 这两种方案去分析，有助于提高拟合可信度。那其他实验就用 reset 模块就好了。」使用者追問 gg／ee 是否等效，核對後同意保留獨立的 RB 與 conditional phase。語音用詞、數值及選項比較見[只為共用參數保留獨立 heralded 實驗](../discussions/2026-11-20-heralded-experiment-pruning.md)。
 
 ### Owner 不變，caller 不重建舊配置
 
-`cfg_model` 擁有 Spec、cfg 驗證、引用展開與參數設定。
-`program` 負責 native conversion、QICK 宣告與排程。
-`resources` 擁有 library 文件與 I/O。
-`gui.form_adapter` 從 core cfg 與持久 Spec 推導 Form，session 擁有 Library entry 表單。
-這些分工沿用 [[0072]]、[[0065]] 與 [[0073]]，不保留 editable shape catalog。
+**規則。** `cfg_model` 擁有 Spec、cfg 驗證、引用展開與參數設定。`program` 擁有 native conversion、QICK 宣告與排程。`resources` 擁有 library 文件與 I/O。`gui.form_adapter` 從 core cfg 與持久 Spec 推導 Form；session 擁有 Library entry 表單。
 
-依賴沿用 `.importlinter` 的 C11、C16、C19 與 `form-adapter-no-host`。
-Readout 不新增 registry、factory 或跨 owner resolver。
-Core/native factory 使用 caller 捕捉的 resolver 與 asset capability，不查 process-global library。
+**例子。** Pulse readout runtime 可把平鋪欄位投影成內部 `PulseCfg`，重用 waveform 與播放，caller 不重建 ADC cfg。Pulse cfg 沒有 `ro_ch`；runtime 接收 ADC matching 通道，`PulseRegistry` 用它區分硬體定義，避免 ADC 0 與 1 誤共用。Readout 在 module 起點送設定，在 `trig_offset` 觸發 ADC、在 `pre_delay` 播放 generator。結尾及 clock rounding 由 [program 的 readout 契約](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration) 與 [[0083]]〈Timeline 只存結尾，與 reference 分開〉擁有。
 
-Pulse readout runtime 可將平鋪 generator 欄位投影成內部 PulseCfg，以重用 waveform 與播放邏輯。
-Caller 不維護另一份 ADC cfg。Pulse cfg 不含 `ro_ch`，runtime Pulse 另接收 ADC matching 通道。
-PulseRegistry 的硬體定義身分包含該通道，避免相同 pulse cfg 在 ADC 0 與 1 間錯誤共用。
+**邊界。** 不保留 editable shape catalog，不新增 registry、factory 或跨 owner resolver。Core/native factory 用 caller 捕捉的 resolver 與 asset capability，不查 process-global library。
 
-Pulse readout 在 module 起點送出 readout configuration，在 `trig_offset` 觸發 ADC，
-在 `pre_delay` 播放 generator。Blocking duration 覆蓋 ADC window 和含 post-delay 的 generator 播放，
-各自沿既有硬體 clock rounding。
+**依據。** Readout 沿用 [[0072]]、[[0065]]、[[0073]] 的既有責任和 `.importlinter` C11、C16、C19 及 `form-adapter-no-host`，不另立 owner。分工的原始討論未入庫，見 Git `f647c9a9c`。
 
 ### 高階頻率與低階 words 分開
 
-`PulseReadout` 接收一個高階 `freq`，查表掃描以 `TableParam` 傳入。
-QICK 原生轉換逐點產生配對的 generator／ADC frequency words，再由原生 loop 收尾更新。
-`freq_val` 與 `ro_freq_val` 是 runtime register 契約，不是持久 cfg 的兩個頻率。
-兩種 words 表示同一語意頻率，由各硬體的 mixer／downconversion 規則編碼。
-模擬的 accumulated、raw 與 decimated 路徑使用同一份平鋪 readout plan，數值單位與物理模型不變。
+**規則。** `PulseReadout` 只收一個高階 `freq`。底層成對的 generator／ADC words 表示同一語意頻率，各按硬體 mixer／downconversion 規則編碼。
+
+**例子。** 查表掃描將 `TableParam` 傳給 `PulseReadout`，QICK 逐點產生兩個 words，原生 loop 在收尾時更新，見 [Readout table sweeps](../../lib/zcu_tools/program/v2/modules/README.md#readout-table-sweeps)。
+
+**邊界。** `freq_val` 與 `ro_freq_val` 是 runtime register 契約，不是持久 cfg 的兩個頻率。模擬的 accumulated、raw 和 decimated 共用平鋪 readout plan，不改數值單位或物理模型。
+
+**依據。** 單一高階頻率沿用使用者 2026-10-15 的 [Readout 配置決定](#readout-擁有-generator-與-adc-配置)。查表掃描與底層的分工見 [[0083]]；原始討論未入庫。
 
 ### 表單與持久資料
 
-Pulse readout Form 直接編輯 `gen_ch`、`ro_ch`、`freq`、`gain`、`waveform` 與 ADC window。
-`gen_ch`、`ro_ch` 必填且可編輯，不從其他欄位推導或補值。
-Form 只在整個 module 和 waveform 的 inline input 加入 wrapper。
-例如 recipe 頻率路徑為 `modules.readout.module.freq`，持久 Spec 路徑為 `freq`。
-Readout 不使用舊 shape inheritance 或自動補值，表單由共用 Form 生成器建立。
+**規則。** 共用 Form 生成器直接編輯平鋪 Readout；`gen_ch`、`ro_ch` 必填且可編輯，不推導、不補值。Module library 只在容器結構改變時升版本，不因 module 或 waveform 欄位改變升版。
 
-舊 nested Readout 與 Direct 條目不遷移，也不加相容讀取。
-正常驗證入口回報具體 library key，作者重建條目。
-Artifact restore 的 typed cfg 失效與原始 data 可讀性由 [[0063]] 的 owner 負責。
+**例子。** Inline readout 的頻率在 canonical Form input 用 `modules.readout.module.freq`，在持久 Readout Spec 用 `freq`。只有整個 module 和 waveform 的 inline input 加 wrapper，不使用舊 shape inheritance。Recipe 路徑省略生成的 wrapper，見 [Measure MCP 的 tab cfg 協定](../../lib/zcu_tools/mcp/measure/README.md#tab-cfg-協定)。編輯欄位及 waveform 引用見 [Form adapter](../../lib/zcu_tools/gui/form_adapter/README.md)。
 
-Module library 版本只跟容器結構改變，不因 module／waveform 欄位變動升版。
-使用者於 2026-10-15 定案：「只是改Module而已真的需要升Library版本嗎？就像加一個Component原件定義，不應該讓舊版本不能讀對吧」「1可以，2A，3保留2.0」。
-Library 維持既有 2.0，不加 readout 條目版本。
-實驗 cfg schema major 與宿主 wire／GUI revision 依各 owner 的不相容契約更新。
-Parameter container、native artifact 與 ledger 的外層格式不因 Readout 欄位形狀改變。
+**邊界。** 舊 nested Readout 與 Direct 條目不遷移、不加相容讀取。驗證入口指出 library key，作者重建條目。Artifact restore 的 typed cfg 失效及原始 data 可讀性由 [[0063]] 的 owner 負責。Library 保持 2.0，不加 readout 版本；實驗 cfg schema major 與宿主 wire／GUI revision 依各 owner 的不相容契約更新。Parameter container、native artifact 與 ledger 不因 Readout 欄位形狀改變外層格式。
+
+**依據。** 2026-10-15，使用者問「只是改Module而已真的需要升Library版本嗎？就像加一個Component原件定義，不應該讓舊版本不能讀對吧」，並定案「1可以，2A，3保留2.0」。原始討論未入庫，見 Git `f647c9a9c`。
 
 ## 取捨
 
-共用某個 Pulse 條目的 Readout 改為自行保存 generator 設定，兩者需要分別維護。
-換來的是一個頻率來源和一套表單路徑，runtime 仍可重用 Pulse 的播放實作。
-純 ADC 與獨立 ADC 頻率不在 Readout 契約內。
-Mux readout 共用 generator 與時間欄位，不能逐 tone 設定 waveform 或時間窗。
+Readout 與獨立 Pulse 分別維護 generator 設定。Readout 因此只有一個頻率來源和一套表單路徑，runtime 仍可重用 Pulse 的播放。純 ADC 和獨立 ADC 頻率不在契約內。Mux 共用 generator 與時間欄位，不逐 tone 設 waveform 或時間窗。

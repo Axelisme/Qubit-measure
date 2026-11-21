@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-21, decimated backend cancellation
+**Last updated:** 2026-11-21, backend cancellation with no completed rounds
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -525,12 +525,14 @@ and call sequence reproduces results within the recorded library versions.
 both simulation acquisition modes. Reentry on the same program or bound SoC fails
 before overwriting the active call. `finally` releases call-owned buffers and
 admission on normal return or exception. In both modes, the SoC holds the
-acquire's Stop query until it releases the request. The same query reaches
-evolution checkpoints through `RoundRequest.cancel`. A round interrupted by
-backend cancellation is discarded. Acquisition retains completed rounds and
-raises `StoppedPartialAcquireError` if none completed. Decimated acquisition
-also retains the trace when Stop interrupts only pacing. Warmup and hardware
-acquisition are unchanged. ADC work and pacing sleeps remain synchronous.
+acquire's Stop query until it releases the request. `RoundRequest.cancel`
+passes it to the backend for cooperative checks, with no fixed Stop latency.
+If the backend raises `Cancelled`, acquisition discards the interrupted round
+without setting or requiring the caller's Stop flag. QICK averages completed
+rounds; only those rounds reach the round hook. If none completed, acquisition
+raises `StoppedPartialAcquireError` without attempting an average. Decimated
+acquisition retains the trace when Stop interrupts only pacing. Warmup and
+hardware acquisition are unchanged. ADC work and pacing sleeps remain synchronous.
 
 Only `SimulationProvenance.identifier` is copied to public Run metadata as optional
 `simulation_id`. Backend/RNG versions and private requests remain on the typed

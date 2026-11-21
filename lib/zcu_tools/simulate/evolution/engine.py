@@ -579,7 +579,7 @@ class EvolutionResult:
 
 
 class Cancelled(Exception):
-    """Evolution was cancelled between chunks; no partial result is returned."""
+    """Numeric work was cancelled at a cooperative check without a partial result."""
 
 
 class Engine:

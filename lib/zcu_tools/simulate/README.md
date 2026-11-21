@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-21, explicit ADC demodulation frequencies
+**Last updated:** 2026-11-21, cooperative cancellation
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -163,9 +163,12 @@ ODE is accepted within 1e-2; the 21-level Q1 calibration measured about 1e-4 or
 less. This is not a bound for arbitrary gains, durations or coherences.
 Carriers at or above 30 MHz keep the existing dispatch.
 
-Acquisition cancellation takes effect between evolution chunks, discards the
-interrupted round and retains completed rounds; startup warmup has no acquire
-cancel query.
+Numeric work checks the acquisition's Stop query at cooperative checkpoints,
+including after geometry planning, between evolution chunks, and before
+advancing each FTF projective outcome. When a check observes Stop, it raises
+`Cancelled` without a partial result. Acquisition discards the interrupted
+round and retains earlier completed rounds. These checks do not guarantee a
+fixed Stop latency. Startup warmup has no acquire cancel query.
 
 `ControlSequence`, `Envelope` and `NumericModel` remain inputs to independent
 continuous-flux and model tools. They do not define an acquisition backend.
