@@ -23,6 +23,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-21 [FTF 合法讀出時序的 ADC image、drive admission 與到達時間缺口](2026-11-21-ftf-legal-readout-timing.md)：時序邊界。具名 ADC config 保留物理 image、無來源 raw 字按 DDS 同餘類解調，純 drive DAC 由 `drive_generators` admission；在途漏配明確拒絕，完整到達時間模型與 E2E 留待落地後排他重測。
+
 - 2026-11-21 [MIST 腔場重用：ADC 擁有 flat span 的結果](2026-11-21-mist-cavity-reuse.md)：快取歸屬。ADC 的同一個 memo owner 收錄二階矩與各 state 端點場（合計 64 MiB、一次 composition），FTF 只選態與建 shift；mist/flux_dep 從 281.5 s 降到 163.3 s。
 
 - 2026-11-21 [FTF projective 列身分與失敗定位](2026-11-21-ftf-projective-row-provenance.md)：識別作用域。FTF 給原點和 history 穩定的列 ID，在單次 preparation 內檢查碰撞，並用 capture ID 串起逐列來源。

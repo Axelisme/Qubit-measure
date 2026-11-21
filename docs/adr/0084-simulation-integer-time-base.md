@@ -40,6 +40,8 @@ Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envel
 
 本階段不改變物理模型。平移不變、整數 DDS 相位、ADC 相對動力學，以及第一個樣本對齊 ADC clock 的建模，都不在本次選擇內。物理模擬仍使用 [[0071]] 的 ns 與頻率單位。
 
+例外：ADC 解調頻率的 DDS image 只對沒有具名來源的 raw 頻率字建模。具名 ADC config 的解調頻率是作者明示的物理 image，照原樣使用；同一來源的 WMEM／`r_wave` 修改與 sweep 也算具名。沒有具名來源的 raw 字只代表一個 DDS 同餘類。Frontend 在 readout boundary 標明這個語意並附 `f_dds`。ADC 把 `f_demod − f_ref` 化到 [−f_dds/2, f_dds/2)，等於解調最接近共用參考的 image。拿 readout 頻率和物理頻率比較的消費端，依同一個標記選絕對距離或同餘距離。絕對相位約定不變。2026-11-21 由 designer 依使用者授權代裁；使用者同日覆核，在「保留」與「raw 字改成編譯時拒絕」之間選保留：「那我选，K 吧，感觉有些少频率的，比如说像是 one tone frequency，如果不是等间距的话，要先计算 table，然后存起来。感觉就会出现模拟上需要解读弱智的问题。」比較見[FTF 合法讀出時序](../discussions/2026-11-21-ftf-legal-readout-timing.md)。
+
 ## 依賴與驗證
 
 沿用 [[0072]] 的分層與 `.importlinter` C8、C9、C12、C19。Program 與 experiment 使用 `simulate.boundary` 的資料契約；`simulate-closed` contract 禁止 simulate import 其他 zcu_tools package。TimeBase 只使用標準庫與 NumPy。Compiled frontend 的入口與 snapshot owner 維持 [[0083]]。
