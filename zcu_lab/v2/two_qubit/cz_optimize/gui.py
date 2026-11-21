@@ -96,6 +96,9 @@ def _get_writeback_items(
         )
     items.append(
         ParameterWriteback(
+            # Keys: $coupler.ext.cz_phase.qubit1, $coupler.ext.cz_phase.qubit2,
+            # $coupler.ext.cz_phase.correction_qubit1_deg,
+            # $coupler.ext.cz_phase.correction_qubit2_deg.
             target_name="$coupler.ext.cz_phase",
             description="Best logical Z corrections for Qubit1 and Qubit2 (deg)",
             proposed_value={

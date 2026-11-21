@@ -66,6 +66,9 @@ def _get_writeback_items(
         return []
     return [
         ParameterWriteback(
+            # Keys: $coupler.ext.cz_phase.qubit1, $coupler.ext.cz_phase.qubit2,
+            # $coupler.ext.cz_phase.correction_qubit1_deg,
+            # $coupler.ext.cz_phase.correction_qubit2_deg.
             target_name="$coupler.ext.cz_phase",
             description="B00 thermal linear-model logical corrections (deg); source Qubit1/Qubit2 identities, correction = −slope",
             proposed_value={
