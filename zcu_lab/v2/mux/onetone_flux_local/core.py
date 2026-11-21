@@ -243,6 +243,8 @@ class OnetoneFluxLocalExp(Experiment[MuxFluxResult, OnetoneFluxLocalCfg]):
         )
 
         # 2. Settle each DC point and reuse the program for each host frequency offset.
+        # Reusing each whole program saves recompilation, but each offset's program
+        # retains its latest acquire buffers until its next acquire or this Run ends.
         programs: dict[float, tuple[TimelineProgramV2, MuxReadout]] = {}
         for point in range(cfg.flux_expts):
             if context.scope.stop.is_set():
