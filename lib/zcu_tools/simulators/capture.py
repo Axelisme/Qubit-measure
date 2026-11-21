@@ -54,12 +54,19 @@ class AcquireCaptureSettings:
         """Keep the immutable settings represented by this successful snapshot."""
         self._by_identity.setdefault(snapshot.model_identity, settings)
 
-    def write(self, buffer: CaptureBuffer, outcome: AcquireOutcome) -> str | None:
+    def write(
+        self,
+        buffer: CaptureBuffer,
+        outcome: AcquireOutcome,
+        *,
+        metadata: dict[str, object] | None = None,
+    ) -> str | None:
         """Publish after evolution and return the basename or None on writer failure.
 
         Keep every round in outcome.rounds, including failed attempts. Include
         effective settings only for round identities observed by this capture.
         Detached rounds can name identities absent from effective_settings.
+        Metadata adds simulator-owned fields; common fields take precedence.
         """
         rounds: list[CaptureRound] = [
             {
@@ -70,7 +77,7 @@ class AcquireCaptureSettings:
             for item in outcome.rounds
         ]
         request = outcome.rounds[0].acquire if rounds else None
-        metadata: AcquireCaptureMetadata = {
+        common: AcquireCaptureMetadata = {
             "complete": outcome.complete,
             "sampling": (
                 None
@@ -87,5 +94,5 @@ class AcquireCaptureSettings:
             if rounds
             else self._admission.model_dump(mode="json"),
         }
-        path = write_capture(buffer, metadata=dict(metadata))
+        path = write_capture(buffer, metadata={**(metadata or {}), **common})
         return None if path is None else path.name

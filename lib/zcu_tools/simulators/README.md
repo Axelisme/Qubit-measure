@@ -171,6 +171,9 @@ FTF and single also write a top-level `metadata` object:
   if the outcome has no round snapshots.
 - `complete`: acquire return status, distinct from each evolve's status.
   A normal partial Stop is true; an escaping exception is false.
+
+For FTF projective continuation, [FTF capture metadata](ftf/environment/README.md#debug-capture)
+links Engine rows to original points, spans and histories.
 Captures contain numerical inputs and model settings. Keep them out of ordinary Run metadata and Git.
 
 ## Test owners

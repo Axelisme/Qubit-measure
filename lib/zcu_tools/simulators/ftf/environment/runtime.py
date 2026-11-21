@@ -66,6 +66,8 @@ from zcu_tools.simulators.ftf.environment.acquisition import FTFAcquisitionOptio
 from zcu_tools.simulators.ftf.environment.cavity import (
     CavityEvolutionOptions,
     ProjectionEvolution,
+    ProjectiveCapture,
+    ProjectiveSpan,
     evolve_plans,
     evolve_projective_plans,
 )
@@ -111,7 +113,8 @@ class FTFNumericUse:
     projection_outcomes counts retained histories per C-order point, not the
     semiclassical cavity main state. projection_pruned_weight gives cumulative
     removed probability before proportional redistribution. Both are empty for
-    terminal-only templates. Reuse preserves these author-only values.
+    terminal-only templates. projective_spans locates solved histories and their
+    diagnostics at each absolute span. Reuse preserves these author-only values.
     """
 
     acquire_sequence: int
@@ -120,6 +123,7 @@ class FTFNumericUse:
     rejected_rows: int = 0
     projection_outcomes: tuple[int, ...] = ()
     projection_pruned_weight: tuple[float, ...] = ()
+    projective_spans: tuple[ProjectiveSpan, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -132,6 +136,7 @@ class _Prepared:
     reuse_keys: tuple[bytes, ...]
     projection_outcomes: tuple[int, ...]
     projection_pruned_weight: tuple[float, ...]
+    projective_spans: tuple[ProjectiveSpan, ...]
     split_pilot: bool
     pilot_dimension: int | None
 
@@ -274,6 +279,8 @@ class FTFAcquire:
         source: "FTFSource",
         request: AcquireRequest,
         dimensions: OrderedDict[bytes, int],
+        *,
+        projective_capture: ProjectiveCapture | None = None,
     ) -> None:
         """Bind the owning source, fixed request, and source's dimension records.
 
@@ -287,6 +294,7 @@ class FTFAcquire:
         """
         self._source = source
         self._dimensions = dimensions
+        self._projective_capture = projective_capture
         self._active = True
         self.request = request
         self._snapshot: EnvironmentSnapshot | None = None
@@ -343,6 +351,7 @@ class FTFAcquire:
         """Release deterministic arrays and reject further rounds; safe to repeat."""
         self._active = False
         self._prepared = None
+        self._projective_capture = None
         self.routing.clear()
         self._stark_limits.clear()
 
@@ -507,6 +516,8 @@ class FTFAcquire:
             capture=owner.capture,
             evolving=self._evolving,
             reading=self._reading,
+            round_index=index,
+            projective_capture=self._projective_capture,
         )
         prepared = self._prepare(snapshot, index, facts, options, previous)
         # A changed live snapshot uses the session's N, but has not validated
@@ -536,6 +547,7 @@ class FTFAcquire:
                 prepared.paths,
                 projection_outcomes=prepared.projection_outcomes,
                 projection_pruned_weight=prepared.projection_pruned_weight,
+                projective_spans=prepared.projective_spans,
             ),
         )
         prepared.paths.warn_exceeded()
@@ -628,15 +640,15 @@ class FTFAcquire:
             if projection is None
             else tuple(projection.pruned_weight[p] for p in order)
         )
-        owner.evaluations = (
-            FTFNumericUse(
-                acquire.sequence,
-                index,
-                evolved.paths,
-                projection_outcomes=outcome_counts,
-                projection_pruned_weight=pruned_weight,
-            ),
+        report = FTFNumericUse(
+            acquire.sequence,
+            index,
+            evolved.paths,
+            projection_outcomes=outcome_counts,
+            projection_pruned_weight=pruned_weight,
+            projective_spans=() if projection is None else projection.spans,
         )
+        owner.evaluations = (report,)
         with self._reading():
             try:
                 distribution = _readout_distribution(
@@ -647,9 +659,7 @@ class FTFAcquire:
                 )
             except PopulationValidationError as error:
                 owner.evaluations = (
-                    FTFNumericUse(
-                        acquire.sequence, index, evolved.paths, error.rejected_rows
-                    ),
+                    replace(report, rejected_rows=error.rejected_rows),
                 )
                 raise
             if previous is None:
@@ -687,6 +697,7 @@ class FTFAcquire:
             reuse_keys,
             outcome_counts,
             pruned_weight,
+            report.projective_spans,
             reference is not None,
             len(model.initial_density) if self._pilot_facts is not None else None,
         )
@@ -791,6 +802,7 @@ class FTFSource:
         self._preparation_engine = self.engine
         self.capture: CaptureBuffer | None = None
         self._capture_settings: AcquireCaptureSettings | None = None
+        self._projective_capture: ProjectiveCapture | None = None
         self._closed = False
 
     @property
@@ -840,6 +852,9 @@ class FTFSource:
             None
             if self.capture is None
             else AcquireCaptureSettings(self.effective_settings)
+        )
+        self._projective_capture = (
+            None if self.capture is None else ProjectiveCapture(self.capture)
         )
         self._pending_acquire = True
 
@@ -930,7 +945,9 @@ class FTFSource:
         self._pending_acquire = False
         if self._session is not None:
             self._session.invalidate()
-        self._session = FTFAcquire(self, request, self._dimensions)
+        self._session = FTFAcquire(
+            self, request, self._dimensions, projective_capture=self._projective_capture
+        )
         self.evaluations = ()
         return self._session
 
@@ -957,11 +974,16 @@ class FTFSource:
         capture_file is the successful basename or None when recording is off or
         publication fails.
         """
-        capture_settings = self._capture_settings
-        self._capture_settings = None
+        capture_settings, self._capture_settings = self._capture_settings, None
+        projective_capture, self._projective_capture = self._projective_capture, None
         capture_file = None
         if self.capture is not None and capture_settings is not None:
-            capture_file = capture_settings.write(self.capture, outcome)
+            metadata: dict[str, object] = {}
+            if projective_capture is not None and projective_capture.spans:
+                metadata["ftf"] = {"projective_spans": projective_capture.spans}
+            capture_file = capture_settings.write(
+                self.capture, outcome, metadata=metadata
+            )
         rounds = outcome.rounds
         request = rounds[0].acquire if rounds else None
         session = self._session

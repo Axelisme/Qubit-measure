@@ -8,9 +8,42 @@ Cfg sweep fields use `gate_count`. This experiment uses cfg schema 3.0. Loading 
 
 Choose `two_qubit/conditional_phase_heralded`. This is a separate experiment from `two_qubit/conditional_phase`, with its own saved cfg and Result. Bind f1, f2, coupler and mux; calibrate the same pulses and full mux readout described in the [ordinary guide](guide.md). Both role tones need a circle classifier with a GE Post radius before Run. Other tones need no classifier. Reset the Form after changing captured sources.
 
-Every shot emits optional reset, herald mux readout, the original preparation/CZ/projection sequence, then terminal mux readout. Set reset=None to skip reset. Herald and terminal use the same mux object, tones, gain, integration and classifier settings. The wait after herald is readout.post_delay.
+Every shot emits optional reset, herald mux readout, the original preparation/CZ/projection sequence, then terminal mux readout. Set reset=None to skip reset. Herald and terminal use the same mux object, tones, gain, integration and classifier settings.
 
 Choose lowercase target f1/f2, positive unique gate_counts, default [1,2,3], with at least two points and difference gcd=1 and a strictly increasing common frequency scan in MHz. Terminal phase is atan2(sigma_Y,sigma_X); sigma=(N_e-N_g)/N_total includes other. Conditional phase comes from the shared per-gate slope_e−slope_g. A unique joint π crossing selects the writeback frequency. FIT proposes `$coupler.pulses.cz_f1` and `cz_f2` plus their `$coupler.module.cz_f1` and `cz_f2` slot rows. Review and apply rows separately.
+
+## Wait after herald
+
+Set the readout's `post_delay` before scanning so photons in the resonator can
+decay before the qubit drive. Herald and terminal readout share this value
+([ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)).
+The wait starts when the readout generator waveform ends, without waiting for
+the ADC integration window to end
+([ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)).
+No experiment calibrates this field. New mux readout modules default to 0 µs.
+
+If the scan has no π crossing, check `post_delay`. Photons left by the
+herald readout can shift the qubit transition frequency and cause dephasing.
+A nominal Xπ after herald may barely flip the qubit.
+In one low-SNR FTF example, after gg herald and a nominal F2 Xπ, the F2
+terminal e fraction was 11.6% at 0 µs and 92.9% at 2 µs. These fractions do
+not subtract the I baseline. The 2 µs value is an example, not a minimum
+or an optimum.
+
+Use each resonator's `kappa` from the `mux/onetone` FIT. It is the full
+width at half maximum (FWHM) in MHz. Estimate the cavity field decay time as
+`1 / (π · FWHM)` in µs. Start with a wait several times that estimate.
+
+In `two_qubit/joint_readout`, choose `reset/mux_herald` in Reset. Set
+`keep` to g for both role tones, keyed by their positions in the full readout.
+Use the same full mux readout for herald and terminal. After Run, inspect the
+4×9 row-normalized probability matrix in FIT. Find the row with nominal Xπ
+on the target and I on the other qubit.
+Sum the columns where the target's terminal class is e. Compare with the
+gg row for an I baseline if needed. This is the terminal e fraction among
+shots that passed gg herald, not gate fidelity. Lengthen only `post_delay`
+and repeat Run and FIT. If the longer wait still raises the terminal e
+fraction, adjust `post_delay` before scanning for the π crossing.
 
 ## Counts and plots
 

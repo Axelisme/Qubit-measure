@@ -4,11 +4,11 @@ from dataclasses import replace
 from typing import Literal
 
 import numpy as np
-from zcu_tools.simulate.boundary import AcquireRequest
+from zcu_tools.simulate.boundary import AcquireRequest, TimelineTemplate
 from zcu_tools.simulators.ftf.config import FTFSettings
 from zcu_tools.simulators.ftf.environment import FTFReadoutConfig
 
-from tests.core._simulation import tick_array
+from tests.core._simulation import tick_array, ticks
 from tests.simulators.ftf.environment._templates import (
     herald_template,
     request,
@@ -81,6 +81,28 @@ def dimension_request(points: int = 8) -> AcquireRequest:
     )
 
 
+def _delay_terminal_readout(
+    plan: TimelineTemplate, delay_ticks: int, terminal_tones: int
+) -> TimelineTemplate:
+    readouts = []
+    for read in plan.readouts:
+        triggers = read.trigger_ticks.copy()
+        triggers[:, -1] += delay_ticks
+        readouts.append(replace(read, trigger_ticks=triggers))
+    return replace(
+        plan,
+        events=(
+            *plan.events[:-terminal_tones],
+            *(
+                replace(event, start_ticks=event.start_ticks + delay_ticks)
+                for event in plan.events[-terminal_tones:]
+            ),
+        ),
+        readouts=tuple(readouts),
+        duration_ticks=plan.duration_ticks + delay_ticks,
+    )
+
+
 def dimension_bypass(
     kind: Literal["herald", "early_cavity"],
 ) -> tuple[AcquireRequest, FTFReadoutConfig | None]:
@@ -91,15 +113,25 @@ def dimension_bypass(
         templates = tuple(
             replace(herald, points=plan.points) for plan in acquire.templates
         )
-        return replace(acquire, templates=templates), readout
+        terminal_tones = 2
+    else:
+        # One early cavity template is sufficient to bypass the whole acquire.
+        first, *others = acquire.templates
+        early = replace(
+            first.events[-1],
+            start_ticks=np.zeros(2, dtype=np.int64),
+            duration_ticks=tick_array(np.full(2, 0.002)),
+            envelopes=(None,),
+        )
+        first = replace(first, events=(early, first.events[-1]))
+        templates = (first, *others)
+        readout = None
+        terminal_tones = 1
 
-    # One early cavity template is sufficient to bypass the whole acquire.
-    first, *others = acquire.templates
-    early = replace(
-        first.events[-1],
-        start_ticks=np.zeros(2, dtype=np.int64),
-        duration_ticks=tick_array(np.full(2, 0.002)),
-        envelopes=(None,),
+    # Distinct terminal starts identify the eight points at Engine.evolve.
+    # The 8/10 ns pair repeats every 4 ns, after all earlier pulse edges.
+    staggered = tuple(
+        _delay_terminal_readout(plan, index * ticks(0.004), terminal_tones)
+        for index, plan in enumerate(templates)
     )
-    first = replace(first, events=(early, first.events[-1]))
-    return replace(acquire, templates=(first, *others)), None
+    return replace(acquire, templates=staggered), readout

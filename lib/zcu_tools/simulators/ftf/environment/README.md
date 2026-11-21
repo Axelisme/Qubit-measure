@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-20, Stark inversion warnings
+**Last updated:** 2026-11-21, projective continuation batches
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -73,6 +73,15 @@ in `effective_settings`. Each attempted round retains its DC values, even if
 execution failed after its snapshot. If no snapshot was taken, read
 `admission_settings` instead. `sampling` shows the actual seed and sequence
 when a round snapshot exists.
+
+FTF owns `metadata.ftf.projective_spans`. Join an input record's Engine
+`capture_id` to this map, then use its Engine point ID (a decimal-string key in
+`histories`) to find the ordered projected states. Each entry gives the original
+C-order acquisition `point`, absolute `span_ns`, and software `round_index`.
+Use the capture ID rather than the Engine point ID alone: the same row identity
+can appear in several spans and rounds. Recorded failed calls have the same
+lookup. A reused preparation issues no new evolve and adds no entry.
+
 When telemetry is enabled, use `capture_file` in `routing-*.jsonl` to match the
 manifest to its acquire row. The row shows family totals, stage timings and
 projection outcomes and pruned weights. Capture writes run before summary
@@ -594,13 +603,37 @@ origin. Within a span, evolution uses the averages rather than instantaneous
 fields. Templates with neither cavity drives nor projective reads retain their
 original single-evolve path.
 
+Projective continuation sends one point's ready histories through its current
+absolute span in one `Engine.evolve` call. FTF derives a nonnegative 63-bit Engine
+row ID from the SHA-256 hash of the original point and its ordered history. The
+same pair keeps its ID across spans, rounds and preparations. Within one
+preparation, FTF checks for collisions across all points and spans, including
+points with identical numerical inputs. If two different pairs produce the same
+ID, FTF raises `ValueError` naming the colliding pair, without merging the rows
+or returning a partial result.
+
+FTF does not check for collisions across preparations. Such a collision can
+cause Engine to skip counting a batch's routing usage only if two different
+pairs share an ID and the rest of their batches' Engine inputs match bit for bit.
+A lower usage count can change the selected kernel. The same density accuracy
+budget still applies.
+
+The result returns to its history by ID before the next span starts. Engine row
+order does not change the original order of histories used for sampling.
+
+`FTFNumericUse.projective_spans` gives each solved span's row IDs and histories,
+Engine path class membership, and Stark inversions. Aggregate path classes and
+Stark warnings still refer to the original point. Each point counts once per
+class across the acquire. If Engine rejects rows with `NoValidKernel`, FTF reports
+the original point, absolute span, and rejected histories, with the Engine
+exception as the cause. Other Engine exceptions retain their type and an FTF
+note for the batch; cancellation is unchanged. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#黑盒邊界是-simulateevolution)
+and [Debug capture](#debug-capture).
+
 Each cavity-driven preparation retains all span reuse keys. Cache hits check
-every key through `Engine.reuse`. Projection history, initial density and span
-shifts enter continuation digests. Runtime evolves each point/outcome separately,
-so one Engine call never contains duplicate point IDs. Evolution's
-`merge_path_diagnostics` combines
-span work and unions class membership by caller point index, so each point counts
-once per class across the acquire.
+every key through `Engine.reuse`. Projective continuation keys identify the
+original point, ordered histories, initial densities and span shifts. A failed
+or cancelled batch publishes no partial preparation.
 
 One ADC `CavityAverageCache` serves the cavity span composition of an acquire.
 All g/e points share its 64 MiB budget through serialized calls. ADC owns keys,

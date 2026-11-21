@@ -23,6 +23,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-21 [FTF projective 列身分與失敗定位](2026-11-21-ftf-projective-row-provenance.md)：識別作用域。FTF 給原點和 history 穩定的列 ID，在單次 preparation 內檢查碰撞，並用 capture ID 串起逐列來源。
+
 - 2026-11-20 [FTF cavity Stark 反轉：從報錯改成警告](2026-11-20-ftf-stark-inversion-warning.md)：放寬或拒絕。依 ADR-0078 先例，Stark 位移讓相鄰態反轉時照原模型繼續算，每組反轉發一次警告並給 gain 共同縮放上限；反轉後模型仍算得出數字，所以否決保留報錯。
 
 - 2026-11-19 [Evolution 輸出合法 density](2026-11-19-evolution-valid-density.md)：數值保證。純態經 DP5(4) 短段後最小特徵值為 −2.4e−6；engine 在 budget 內投影回合法 density，超出照數值失敗回報。
@@ -187,3 +189,4 @@
 - 2026-11-20 [T1 二階矩實驗以 t1_cov 恢復](2026-11-20-t1-cov-restore.md)：恢復已刪除的概念。2026-11-09 誤刪的是二階矩方法，不是 post-selection；先恢復 T1，改稱 cov，讀出叫 pre_readout／post_readout，加可選脈衝 reset，舊資料不載入。
 - 2026-11-20 [Two-qubit RB 在 Clifford 邊界對齊兩條時間線](2026-11-20-rb-clifford-barrier.md)：排程修正。2026-11-15 的並行排程只在 CZ 同步，reference 組相鄰 Clifford 會重疊，interleaved 組不會；改為兩組都在 Clifford 邊界 join，interleaved 時序不變、reference 變長，新舊資料不混比。
 - 2026-11-20 [RB 每個 depth 的誤差棒](2026-11-20-rb-errorbars.md)：圖上診斷。畫 seed 間標準差，不加 shot noise 參考線，不改 Analyze 回傳；RB 與 IRB 數值工具合併。
+- 2026-11-21 [Herald 後的等待由 readout 的 post_delay 擁有](2026-11-21-herald-wait-readout-post-delay.md)：欄位歸屬。Herald 後的等待由 readout 的 `post_delay` 擁有，不加獨立欄位；guide 寫需求、症狀與驗證方法。
