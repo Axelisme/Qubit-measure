@@ -7,7 +7,7 @@ Each length point measures four branches in one program with the same readout.
 Each repetition applies optional reset, the before-reset pi switch, the tested flux reset, the after-reset pi switch, then readout.
 Both switches use the same calibrated pi pulse. Each switch has off=0 and on=1.
 Saved complex IQ has axes before pi, after pi, length, in that order.
-The saved length axis contains the hardware-quantized hold durations in us.
+The saved length axis contains the hardware-quantized hold durations in µs.
 
 The tested reset preset uses `reset/pulse` on `$qubit.wiring.lo_flux_ch`, with frequency 0 MHz and a const waveform.
 Its fixed gain starts from `$qubit.ext.flux_reset_gain` through the `flux_reset` template.
@@ -20,14 +20,14 @@ Readout uses `$resonator.module.readout`, or the readout template if that slot i
 
 ## Scan settings
 
-The length range starts at a single 0.1 us point. Set start, stop and point count for the permitted hold-length range before Run.
+The length range starts at a single 0.1 µs point. Set start, stop and point count for the permitted hold-length range before Run.
 Run replaces only the tested pulse's hold length. It keeps the gain and pre/post delays unchanged.
 The preset uses a zero-frequency const pulse. The experiment does not require a const waveform or zero frequency.
-Its `pulse_cfg.post_delay` is the time in us to wait after returning from the flux excursion for the flux tail to settle.
+Its `pulse_cfg.post_delay` is the time in µs to wait after returning from the flux excursion for the flux tail to settle.
 0 means no wait. On hardware, measure the flux tail, for example with `fastflux/distortion`, and set this delay long enough for settling.
 
 Reps and rounds start at 1000 and 10. Each branch/length point receives that many repetitions per round.
-Relax delay starts at five times the captured T1. Missing T1 uses 30 us as a starting time scale, giving 150 us.
+Relax delay starts at five times the captured T1. Missing T1 uses 30 µs as a starting time scale, giving 150 µs.
 Invalid T1 leaves the derived field empty. Review the wait between repetitions rather than treating it as a calibrated reset time.
 
 ## Reading the contrasts
@@ -68,6 +68,6 @@ No extra near-zero contrast threshold is applied.
 Excluded or unmeasured points do not certify behavior between the measured lengths or beyond the scan endpoint.
 If no finite or qualifying candidate remains, the plot says so and analysis produces no writeback proposal.
 
-Review the contrasts and assumptions before accepting the `$qubit.ext.flux_reset_length` proposal in us.
+Review the contrasts and assumptions before accepting the `$qubit.ext.flux_reset_length` proposal in µs.
 Analysis only proposes this ext value. It does not Apply it or change the current point automatically.
 A low estimate alone does not prove effective reset. Verify an accepted setting with `twotone/reset/check` or `singleshot/reset_check` using the `flux_reset` template.

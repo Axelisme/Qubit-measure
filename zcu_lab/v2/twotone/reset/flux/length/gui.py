@@ -48,7 +48,7 @@ def _writeback(
     return (
         ParameterWriteback(
             target_name="$qubit.ext.flux_reset_length",
-            description="Flux reset length (us), shortest sustained p0≈0 residual ≤ epsilon",
+            description="Flux reset length (µs), shortest sustained p0≈0 residual ≤ epsilon",
             proposed_value=length,
         ),
     )

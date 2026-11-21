@@ -156,7 +156,7 @@ Tone label 是可重複的顯示文字，不是 component 名稱，也不改變�
 `mux/onetone` adapter 從 group 的 resonators 產生 readout tones。
 有 readout slot 時以副本保留 scalar 初值，再套用 ringup timing。
 缺 slot 時使用 blank mux 範本，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。
-ADC window 固定填入 1.0 us，mixer 取 group 的 `mixer_freq`。初值來源及缺值處理見 [mux onetone guide](mux/onetone/guide.md#無-readout-slot-的候選來源)。
+ADC window 固定填入 1.0 µs，mixer 取 group 的 `mixer_freq`。初值來源及缺值處理見 [mux onetone guide](mux/onetone/guide.md#無-readout-slot-的候選來源)。
 `participants` 是非空、唯一的原始整數 index list，按輸入順序量測。Open／Defaults 將 alias `$participants` 的名稱依 `$mux.resonators` 位置轉成 indices；缺列、未綁或空清單預設全部。之後改 aliases 不更新現有輸入，需按 Defaults 或重新開啟 tab。
 Lab 將 subset 交 program，不改完整 cfg。
 RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
@@ -182,7 +182,7 @@ Pulse length、ro_length 與 trig_offset 留空必填。
 頻率缺失或無效時也留空必填。
 `mux/onetone` 有 readout slot 時使用副本，以 group tones 與 ringup timing 作初值。
 Ringup-copy 的 tone gain 填 0.1，ADC 取同序的 `$mux.wiring.ro_ch[i]`。
-Mux onetone 缺 slot 時仍使用 blank 範本，ADC window 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
+Mux onetone 缺 slot 時仍使用 blank 範本，ADC window 固定填入 1.0 µs，不依賴 kappa 或 time_of_fly。
 無 slot 的 mixer 從 `$mux.mixer_freq` 取初值，缺失或 null 時留空必填，不依賴 tone 頻率或 kappa。
 Trigger 取 `$mux.time_of_fly` 加五倍 ringup 時間，pulse 長度取 trigger 加 window。
 任一 kappa 或 group time_of_fly 缺值時，trigger 與 pulse 長度留空必填，不讀 resonator 的 pulse 路徑 TOF。

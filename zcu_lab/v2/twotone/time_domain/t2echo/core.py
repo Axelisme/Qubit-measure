@@ -75,14 +75,21 @@ class T2EchoCfg(ConfigBase):
     pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
     detune: float = 0.0
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     earlystop_snr: Annotated[
         float | None,
@@ -95,7 +102,7 @@ class T2EchoCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -142,7 +149,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
 
         # 2. Display the IQ projection while averaging the total-delay sweep.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (us)", ylabel="Amplitude")
+        ax.set(xlabel="Time (µs)", ylabel="Amplitude (a.u.)")
         ax.set_title(f"T2 Echo (detune={true_detune:.3f}MHz)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
@@ -277,7 +284,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
         ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
 
-        t2e_str = f"{t2e:.2f}us ± {t2eerr:.2f}us"
+        t2e_str = f"{t2e:.2f}µs ± {t2eerr:.2f}µs"
         if fit_method == "fringe":
             detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
             title = r"$T_{2echo}$ fringe = " + f"{t2e_str}, detune = {detune_str}"
@@ -286,7 +293,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             title = r"$T_{2echo}$ decay = " + f"{t2e_str}"
 
         ax.set_title(title, fontsize=14)
-        ax.set_xlabel("Delay Time (us)", fontsize=14)
+        ax.set_xlabel("Delay Time (µs)", fontsize=14)
         ax.set_ylabel("Signal (a.u.)", fontsize=14)
         ax.legend(loc="upper right")
         ax.grid(True)

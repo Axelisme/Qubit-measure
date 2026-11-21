@@ -65,7 +65,7 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
     ).with_seed_metadata(
         {
             ("relax_delay",): FieldMeta(
-                description="Fixed 1.0 us initial recovery delay"
+                description="Fixed 1.0 µs initial recovery delay"
             ),
         }
     )

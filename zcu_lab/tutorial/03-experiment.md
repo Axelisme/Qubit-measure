@@ -44,9 +44,9 @@ class PowerMapCfg(ConfigBase):
     readout: Readout.Cfg
     gain: Annotated[SweepCfg, FieldMeta(unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(unit="MHz")]
-    reps: int = 1
-    rounds: int = 1
-    relax_delay: Annotated[float, FieldMeta(unit="us")] = 1.0
+    reps: Annotated[int, FieldMeta(unit="count")] = 1
+    rounds: Annotated[int, FieldMeta(unit="count")] = 1
+    relax_delay: Annotated[float, FieldMeta(unit="µs")] = 1.0
 ```
 
 這段示範頂層型別與單位，複製的 power map 仍需保留其他實驗欄位。

@@ -22,7 +22,7 @@ displayed configuration. Reopen the tab or choose Defaults to apply alias change
 - Optional reset and initialization use `$qubit.module.reset` and
   `$qubit.module.x180`. Missing slots leave these modules disabled.
 - Probe starts from the resonator probe template: resonator frequency and
-  generator channel, gain 0.05, and a 1 us constant waveform.
+  generator channel, gain 0.05, and a 1 µs constant waveform.
 - Readout uses `$resonator.module.readout` when available, otherwise the readout
   template. The template needs resonator frequency, generator/ADC channels and
   `$resonator.time_of_fly`. Missing required sources stay Invalid.
@@ -30,7 +30,7 @@ displayed configuration. Reopen the tab or choose Defaults to apply alias change
   `$resonator.kappa`, with 51 points. Gain starts at 0–1 with 51 points.
   Both sweep axes override the probe's scalar frequency and gain during Run.
 - Reps starts at 1000 and Rounds at 100. Relax delay starts at five times
-  `$qubit.t1`. Missing/null T1 uses a 30 us scale, giving 150 us.
+  `$qubit.t1`. Missing/null T1 uses a 30 µs scale, giving 150 µs.
   Invalid stored T1 leaves the delay empty. All these values remain editable.
 
 Review probe duration, channels, gain range, readout and waiting time before Run.

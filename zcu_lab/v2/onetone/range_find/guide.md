@@ -16,7 +16,7 @@
 
 ## FTF 成本例
 
-先前的離線 FTF 驗收以 7050 至 7220 MHz、501 點、Reps 2、Rounds 1、Relax delay 1 us 跑一次 Run。Pulse readout 使用 generator 0、ADC 0、gain 0.05、當時的 RO window 0.99 us、trigger 0.798 us。Run wall time 為 0.856 s，CPU slot 為 4–5，BLAS 單執行緒。此例使用 repo FTF preset 與模擬資料，不代表硬體成本或物理校準已通過。
+先前的離線 FTF 驗收以 7050 至 7220 MHz、501 點、Reps 2、Rounds 1、Relax delay 1 µs 跑一次 Run。Pulse readout 使用 generator 0、ADC 0、gain 0.05、當時的 RO window 0.99 µs、trigger 0.798 µs。Run wall time 為 0.856 s，CPU slot 為 4–5，BLAS 單執行緒。此例使用 repo FTF preset 與模擬資料，不代表硬體成本或物理校準已通過。
 
 一個點是一個絕對頻率，不是 resonator 數量乘以點數。計時從點擊 Run 到 Run 按鈕恢復可用，包含設定、編譯、acquisition 與宿主提交，不含 Analyze 或保存。FTF 的編譯與快取會影響時間，成本不保證與 reps 成正比。先用目標設定做短 Run 估成本，再增加點數。不同 CPU slot、設定或快取狀態的時間不能直接比較。
 

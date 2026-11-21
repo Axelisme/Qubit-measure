@@ -24,14 +24,14 @@ length、ro_length 與 trig_offset 保持必填且未填，不猜時長或以 0 
 Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。
 Trigger 與 length 使用 min／max Expr。單一已設 kappa 直接引用該來源，全未設時加 0。
 Slot-copy 與 blank 初值都從 `$mux.wiring.ro_ch[i]` 取得第 i 個 tone 的 ADC，不把 tone 位置當作 ADC channel。
-Mux onetone 缺 slot 時，ro_length 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
+Mux onetone 缺 slot 時，ro_length 固定填入 1.0 µs，不依賴 kappa 或 time_of_fly。
 完整 group 的 kappa 都有效且 group 有頂層 time_of_fly，才推導 trigger 與 length。
 trig_offset 取 `$mux.time_of_fly` 加 ringup，length 取 trig_offset + ro_length，不讀 resonator 的 pulse 路徑 TOF。
 任一 kappa 或 group time_of_fly 缺值時，trig_offset／length 留空必填，mixer_freq 不受影響。
 `post_delay` 用最小 κ 估五個光子衰減時間 `5 / (2π · κ)`。只要求所有 κ 齊全，不要求 group time_of_fly。缺 κ 時保留範本的 0 µs。
-上述缺值情境仍填入 ro_length=1.0 us。
+上述缺值情境仍填入 ro_length=1.0 µs。
 已設的 frequency 須為有限數，time_of_fly 須為有限非負數，否則 Open／Reset 報錯。
-候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。缺來源時採用的初值 metadata 由 Template 持有；ringup caller 以 `Form(...).with_seed_metadata(...)` 加入 detached copy 的來源公式。`seed_metadata` 供 readout 與 flux 表單共用，只把固定常數 fallback（如 gain 0.1、ADC window 1.0 us、掃描點數）標為 uncalibrated，description 寫明「未校準的起始值，來源：固定常數」。Mixer、推導 timing 與 frequency／flux endpoints 寫明 capture 來源，不宣稱 measured，也不標 uncalibrated。Ref-only slot 不標記，未改寫的 captured 欄位保持未知。
+候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。缺來源時採用的初值 metadata 由 Template 持有；ringup caller 以 `Form(...).with_seed_metadata(...)` 加入 detached copy 的來源公式。`seed_metadata` 供 readout 與 flux 表單共用，只把固定常數 fallback（如 gain 0.1、ADC window 1.0 µs、掃描點數）標為 uncalibrated，description 寫明「未校準的起始值，來源：固定常數」。Mixer、推導 timing 與 frequency／flux endpoints 寫明 capture 來源，不宣稱 measured，也不標 uncalibrated。Ref-only slot 不標記，未改寫的 captured 欄位保持未知。
 每個已設成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
 Onetone 的 Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留操作員之後的編輯。
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。

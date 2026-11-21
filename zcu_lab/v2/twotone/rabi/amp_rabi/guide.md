@@ -8,21 +8,21 @@ After changing the parameter source, use Defaults to recapture initial values. R
 
 ## Parameter sources
 
-Gain runs -0.3 to 1.0 over 51 points; Run overwrites drive gain. Relax delay is 5 * qubit.t1 us. Other missing required calibration leaves the affected fields empty and Invalid.
+Gain runs -0.3 to 1.0 over 51 points; Run overwrites drive gain. Relax delay is 5 * qubit.t1 µs. Other missing required calibration leaves the affected fields empty and Invalid.
 
-The gain sweep runs from -0.3 to 1.0 regardless of calibration. For an x180 pulse with a stored numeric waveform length, the editable copy starts at length = 1.5*pi_len*pi_gain us. Here pi_len is the calibrated x180 length and pi_gain its gain. Enter a finite positive pi_len and a finite pi_gain in (0, 1]; missing or invalid values leave length required and empty. A finite invalid gain stays visible; a nonfinite gain leaves both gain and length empty. If x180 is absent, qub_probe starts at gain=1 and length=1 us. An arbitrary-waveform x180 keeps its saved module, shape and data. Switch waveform type first to edit duration.
+The gain sweep runs from -0.3 to 1.0 regardless of calibration. For an x180 pulse with a stored numeric waveform length, the editable copy starts at length = 1.5*pi_len*pi_gain µs. Here pi_len is the calibrated x180 length and pi_gain its gain. Enter a finite positive pi_len and a finite pi_gain in (0, 1]; missing or invalid values leave length required and empty. A finite invalid gain stays visible; a nonfinite gain leaves both gain and length empty. If x180 is absent, qub_probe starts at gain=1 and length=1 µs. An arbitrary-waveform x180 keeps its saved module, shape and data. Switch waveform type first to edit duration.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 us, giving a 150 us wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 
 ## Module slots
 
-Readout uses the `$resonator.module.readout` slot captured at Open/Defaults; an unset slot, missing module or unbound alias uses a fresh 'readout' template. That fallback still needs its required parameter sources. Reset uses qubit.module.reset and stays disabled when absent. The drive uses the sources described above, with qubit.module.x180 when present and qub_probe when absent. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 us; missing required calibration remains Invalid.
+Readout uses the `$resonator.module.readout` slot captured at Open/Defaults; an unset slot, missing module or unbound alias uses a fresh 'readout' template. That fallback still needs its required parameter sources. Reset uses qubit.module.reset and stays disabled when absent. The drive uses the sources described above, with qubit.module.x180 when present and qub_probe when absent. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
 
 ## Prepared-state amplitude Rabi
 
 Open New Tab → twotone → rabi → amp_rabi. Init Pulse starts at None, which skips preparation and preserves the ground-state workflow.
 To start from another state, select a saved preparation pulse or choose Inline in Init Pulse.
-For an inline constant pulse, select Waveform → Inline: const and enter Length in us.
+For an inline constant pulse, select Waveform → Inline: const and enter Length in µs.
 Enter its calibrated Gen ch, Frequency in MHz and fixed Gain. Open Advanced and set NQZ for the selected generator.
 Resolve any remaining required fields before Run.
 Each repetition applies Reset if configured, then Init Pulse, the gain-swept Rabi Pulse and Readout.
@@ -41,7 +41,7 @@ No transition frequency is inferred from the simulator. Select None again to dis
 
 ## Typical writeback
 
-Copies the source drive pulse into captured qubit.pulses.pi_amp and pi2_amp, replacing gain with the fitted pi and pi/2 gains. Separately proposes qubit.module.x180 and x90 pointing to those saved pulses, even when already bound to the same keys. Also proposes qubit.ext.pi_product as fitted pi gain times the source pulse length (a.u. * us). Every item is independently selectable. Proposals require acquired run settings and use that run's source pulse. Gain updates are part of the pulse copies.
+Copies the source drive pulse into captured qubit.pulses.pi_amp and pi2_amp, replacing gain with the fitted pi and pi/2 gains. Separately proposes qubit.module.x180 and x90 pointing to those saved pulses, even when already bound to the same keys. Also proposes qubit.ext.pi_product as fitted pi gain times the source pulse length (a.u. * µs). Every item is independently selectable. Proposals require acquired run settings and use that run's source pulse. Gain updates are part of the pulse copies.
 
 ## Recommended
 

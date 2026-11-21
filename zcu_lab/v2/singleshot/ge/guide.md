@@ -10,9 +10,9 @@ After changing the parameter source, use Defaults to recapture initial values. R
 
 Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. The probe template uses `$qubit.freq` and `$qubit.wiring.ch`.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
-T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 us, so the 5*T1 wait starts at 150 us. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
 
 These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
 
@@ -69,7 +69,7 @@ This labels the two acquisitions; each can contain a mixture of states.
 Use a large 'shots' (~1e5) so the IQ histograms are well sampled.
 The default analysis method is 'pca'.
 Analysis also exposes histogram log scale, T1 alignment, and an optional shared length ratio.
-The dimensionless length ratio (readout length / T1) is inferred from the decay tail between the two clusters.
+The length ratio (a.u., readout length / T1) is inferred from the decay tail between the two clusters.
 With Length Ratio left empty, two tight clusters without a visible tail make Analyze return `length_ratio: null` and title the IQ plot `GE IQ (length ratio: not identifiable)`.
 This reporting decision does not change centers, fidelity or Post-Analysis.
 If you set Length Ratio manually, Analyze returns the supplied value.

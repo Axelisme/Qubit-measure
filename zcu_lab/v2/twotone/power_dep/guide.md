@@ -6,7 +6,7 @@
 
 ## Parameter sources
 
-Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 us from the sources captured at Open/Defaults. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Frequency sweep is qubit.freq ± 1.5 * qubit.kappa; gain runs 0.001 to 1.0.
+Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs from the sources captured at Open/Defaults. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Frequency sweep is qubit.freq ± 1.5 * qubit.kappa; gain runs 0.001 to 1.0.
 
 ## Module slots
 

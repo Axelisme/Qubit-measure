@@ -10,7 +10,7 @@ Measure relaxation during a fast-flux pulse at each programmed gain. Each sequen
 resets, applies a calibrated pi pulse, applies the flux pulse, then reads out.
 The gain and pulse-length sweeps produce complex IQ shaped (gain, length).
 Gain is normalized DAC amplitude. Converting it to flux requires a separate
-calibration. Length and fitted T1 use us.
+calibration. Length and fitted T1 use µs.
 
 ## Open and Defaults
 
@@ -23,7 +23,7 @@ The Flux pulse module slot uses the `flux_pulse` template. It starts with a cons
 waveform, gain 1.0, frequency 0 MHz and Nyquist zone 2.
 Its channel comes from `$qubit.wiring.lo_flux_ch`.
 An unresolved channel leaves the form Invalid until you supply a confirmed channel.
-This form seeds a 0.1 us waveform duration. These values are editing seeds;
+This form seeds a 0.1 µs waveform duration. These values are editing seeds;
 establish the flux calibration separately. Check the channel, waveform, timing
 and wiring before Run.
 
@@ -34,11 +34,11 @@ Run also replaces its pulse length with the length sweep. Use a waveform
 with a sweepable duration, such as const or flat_top. A fixed arb asset has a
 fixed duration and is unsuitable for this length sweep.
 
-Length starts at 0.1 us and ends at 5 times captured qubit T1 with 101 points.
+Length starts at 0.1 µs and ends at 5 times captured qubit T1 with 101 points.
 The positive start avoids a zero-length pulse, which the generator compiler rejects.
 Check the minimum duration and sweep spacing on the actual generator's clock grid.
-Relax delay uses the same endpoint. Missing or null T1 uses a 30 us time scale,
-giving 150 us. Stored invalid T1 leaves the derived fields empty.
+Relax delay uses the same endpoint. Missing or null T1 uses a 30 µs time scale,
+giving 150 µs. Stored invalid T1 leaves the derived fields empty.
 These editable timing estimates affect this form only; stored calibration retains
 its values. Reps start at 1000 and rounds at 10. Defaults refreshes sources and
 discards edits. After editing aliases, use Defaults to refresh an already open form.
@@ -60,5 +60,5 @@ This experiment measures a gain-dependent curve. Analysis publishes only the
 figure; the stored operating-point T1 retains its value. Save preserves gain
 and time axes, complex IQ and source cfg. Load and Analyze use that saved source;
 the current form, alias table and library remain separate. Time is stored in
-seconds and restored to us. Analyze can use valid saved data even when its cfg
+seconds and restored to µs. Analyze can use valid saved data even when its cfg
 is missing or unusable.

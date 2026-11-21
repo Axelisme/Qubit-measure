@@ -100,7 +100,7 @@ class ChainT1Cfg(ConfigBase):
         SweepCfg,
         FieldMeta(
             label="Delay",
-            unit="us",
+            unit="µs",
             description="Wait x between the π pulse and the first read of a block.",
         ),
     ]
@@ -108,6 +108,7 @@ class ChainT1Cfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
+            unit="count",
             description="Cycles per point in each round, at least 66.",
         ),
     ] = Field(ge=66)
@@ -115,6 +116,7 @@ class ChainT1Cfg(ConfigBase):
         int,
         FieldMeta(
             label="Rounds",
+            unit="count",
             description="Software acquisition rounds.",
         ),
     ] = 1
@@ -122,7 +124,7 @@ class ChainT1Cfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
         ),
@@ -153,7 +155,7 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         # 1. Delay axis and the live plot.
         delays = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Delay (us)", ylabel="Projected signal (sigma)")
+        ax.set(xlabel="Delay (µs)", ylabel="Projected signal (sigma)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         lines = live_line(ax, num_lines=2)
@@ -291,14 +293,14 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
             )
         population_ax.set_ylabel("First-read population")
         population_ax.set_title(
-            f"T1 = {relaxation.t1:.4g} ± {relaxation.t1_error:.2g} us, secondary time {relaxation.secondary_time:.4g} ± {relaxation.secondary_error:.2g} us\n{checks_text(fit)}",
+            f"T1 = {relaxation.t1:.4g} ± {relaxation.t1_error:.2g} µs, secondary time {relaxation.secondary_time:.4g} ± {relaxation.secondary_error:.2g} µs\n{checks_text(fit)}",
             fontsize=9,
         )
         population_ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
         population_ax.grid(True)
         population_residual_ax.axhspan(-1.96, 1.96, color="0.9", zorder=0)
         population_residual_ax.axhline(0.0, color="0.4", linewidth=0.8)
-        population_residual_ax.set_xlabel("Delay (us)")
+        population_residual_ax.set_xlabel("Delay (µs)")
         population_residual_ax.set_ylabel("Residual / error")
         population_residual_ax.grid(True)
         population_fig.tight_layout()

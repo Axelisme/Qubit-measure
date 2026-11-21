@@ -26,8 +26,8 @@ The Rabi Pulse starts from a fresh `qub_probe` const pulse with gain 1.0, not fr
 Its gain is an uncalibrated starting value; confirm it before Run.
 The length sweep accepts const and flat_top drive waveforms.
 Readout uses the `$resonator.module.readout` slot or a fresh `readout` template, and must be a pulse readout; a mux readout module is rejected by the Form.
-The length runs from 0.03 us to 4 × the x180 length (1.0 us without x180) over 101 points. The cycle has no Reset or Init Pulse.
-Relax delay starts at 5 * `$qubit.t1` us, or 150 us when T1 is missing.
+The length runs from 0.03 µs to 4 × the x180 length (1.0 µs without x180) over 101 points. The cycle has no Reset or Init Pulse.
+Relax delay starts at 5 * `$qubit.t1` µs, or 150 µs when T1 is missing.
 Reps starts at 100 and Rounds at 100. Reps must be at least 66, so that even a single length gives the first round 65 cycles beyond its mean to estimate the noise of the 65 numbers.
 One cycle lasts about Relax delay + 8 × (pulse length + 2 × readout length).
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
@@ -48,7 +48,7 @@ It then fits all 65 numbers at all lengths jointly with a three-state model whos
 The drive row for each starting state interpolates between two free population endpoints, D_i(x) = [1 − f_i(x)] × endpoint_i0 + f_i(x) × endpoint_i1.
 The curve weights are sin²(π f x) for g, cos²(π f x) for e and sin²(π f x) for the third state.
 The third-state row can vary with x. Equal endpoints give a flat row; distinct endpoints allow an oscillating response.
-f is in MHz, or cycles per us. The reported π length is 1 / (2 f) in a zero-phase model with no length offset or decay envelope.
+f is in MHz, or cycles per µs. The reported π length is 1 / (2 f) in a zero-phase model with no length offset or decay envelope.
 Interpret this value as the π total length only for a const pulse.
 Run still accepts flat_top, but its total length includes ramps whose area adds a length offset.
 The zero-phase model does not account for that offset, so its reported half-period is not a calibrated flat_top π total length.
@@ -61,7 +61,7 @@ The title gives the π length and the three lack-of-fit checks as J/df:
 - `sharing`: shared readout nuisances against fully separate lengths; it has no p.
 - `curve`: the Rabi curve against a free drive at each length, with p. A decaying Rabi oscillation raises it.
 
-The summary reports `pi_len` and `pi_len_err` in us, `f` and `f_err` in MHz, the reliability `R` = 1 / (2π × length span × f_err), the three checks, the joint `J` and `df`, and `first_read_pi_len` from the first-read fit.
+The summary reports `pi_len` and `pi_len_err` in µs, `f` and `f_err` in MHz, the reliability `R` = 1 / (2π × length span × f_err), the three checks, the joint `J` and `df`, and `first_read_pi_len` from the first-read fit.
 Errors are Wald errors from the joint fit. At low state contrast and few cycles per length they can understate the uncertainty. R is a diagnostic without a threshold.
 A fit failure in either step produces an analysis failure; the live plot and the saved sums remain.
 

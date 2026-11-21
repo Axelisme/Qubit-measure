@@ -31,7 +31,7 @@ class ConstWaveformCfg(AbsWaveformCfg):
 
     style: Literal["const"] = "const"
     length: Annotated[
-        float | QickParam, FieldMeta(label="Length", unit="us", decimals=3)
+        float | QickParam, FieldMeta(label="Length", unit="µs", decimals=3)
     ]
 
     def set_param(self, name: str, value: float | QickParam) -> None:
@@ -46,7 +46,7 @@ class CosineWaveformCfg(AbsWaveformCfg):
     """Cosine envelope. length is a fixed duration in µs; sweeps are unsupported."""
 
     style: Literal["cosine"] = "cosine"
-    length: Annotated[float, FieldMeta(label="Length", unit="us", decimals=3)]
+    length: Annotated[float, FieldMeta(label="Length", unit="µs", decimals=3)]
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set fixed length in µs; unknown names and QickParam raise ValueError."""
@@ -61,8 +61,8 @@ class GaussWaveformCfg(AbsWaveformCfg):
     """Gaussian envelope. length and sigma are fixed duration and width in µs."""
 
     style: Literal["gauss"] = "gauss"
-    length: Annotated[float, FieldMeta(label="Length", unit="us", decimals=3)]
-    sigma: Annotated[float, FieldMeta(label="Sigma", unit="us", decimals=3)]
+    length: Annotated[float, FieldMeta(label="Length", unit="µs", decimals=3)]
+    sigma: Annotated[float, FieldMeta(label="Sigma", unit="µs", decimals=3)]
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set length (rescaling sigma), only_length, or sigma in µs.
@@ -84,16 +84,18 @@ class GaussWaveformCfg(AbsWaveformCfg):
 
 
 class DragWaveformCfg(AbsWaveformCfg):
-    """DRAG Gaussian. length/sigma are in µs, delta in MHz, alpha is dimensionless.
+    """DRAG Gaussian. length/sigma are in µs and delta is in MHz.
+
+    alpha scales the quadrature correction in a.u.
 
     All four fields are fixed floats; QICK sweeps are unsupported.
     """
 
     style: Literal["drag"] = "drag"
-    length: Annotated[float, FieldMeta(label="Length", unit="us", decimals=3)]
-    sigma: Annotated[float, FieldMeta(label="Sigma", unit="us", decimals=3)]
+    length: Annotated[float, FieldMeta(label="Length", unit="µs", decimals=3)]
+    sigma: Annotated[float, FieldMeta(label="Sigma", unit="µs", decimals=3)]
     delta: Annotated[float, FieldMeta(label="Delta", unit="MHz", decimals=2)]
-    alpha: Annotated[float, FieldMeta(label="Alpha", decimals=4)]
+    alpha: Annotated[float, FieldMeta(label="Alpha", unit="a.u.", decimals=4)]
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set length (rescaling sigma), only_length, sigma, delta, or alpha.
@@ -194,7 +196,7 @@ class _FlatTopFields(ConfigBase):
 
     style: Literal["flat_top"] = "flat_top"
     length: Annotated[
-        float | QickParam, FieldMeta(label="Length", unit="us", decimals=3)
+        float | QickParam, FieldMeta(label="Length", unit="µs", decimals=3)
     ]
 
 

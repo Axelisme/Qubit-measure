@@ -10,21 +10,21 @@ After changing the parameter source, use Defaults to recapture initial values. R
 
 Pi pulse counts accepts Log or List input. Log uses a maximum count and requested point count. It starts at 1 and retains the maximum count. It rounds geometrically spaced values to integers and removes duplicates. A maximum greater than 1 requires at least two requested points. A maximum of 1 accepts one point and returns `[1]`. Use List for any other single count. The resulting list may have fewer points than requested. List accepts a nonempty JSON array of positive integers, such as `[1, 2, 4, 8]`. Zero, negative counts and fractional counts are invalid.
 
-Minimum time and Maximum time define one shared total-time window in us for every pulse count. When you open the tab or choose Defaults, Minimum time starts at 16 times the sum of the calibrated π/2 and π pulse durations. The factor 16 is the initial maximum number of refocusing pulses. If either calibrated pulse is missing or uses an arbitrary waveform defined by samples, the form leaves Minimum time blank. Enter it before running. Changing Pi pulse counts does not recalculate Minimum time. Maximum time starts at 100 us, and Time points starts at 101 samples per row. Increase the minimum time when a large pulse count leaves too little spacing between pulses.
+Minimum time and Maximum time define one shared total-time window in µs for every pulse count. When you open the tab or choose Defaults, Minimum time starts at 16 times the sum of the calibrated π/2 and π pulse durations. The factor 16 is the initial maximum number of refocusing pulses. If either calibrated pulse is missing or uses an arbitrary waveform defined by samples, the form leaves Minimum time blank. Enter it before running. Changing Pi pulse counts does not recalculate Minimum time. Maximum time starts at 100 µs, and Time points starts at 101 samples per row. Increase the minimum time when a large pulse count leaves too little spacing between pulses.
 
 For Python callers, `CPMG_Cfg.delay` also accepts a list of `SweepCfg`, one delay sweep per pi-pulse count in `count` order. Every sweep must have the same number of points. This lets different pulse counts use different total-time windows. The GUI continues to provide one shared window.
 
-Detune ratio is the number of fringe periods per time index. The default is 0.1. Use Fit fringes for this phase-ramped acquisition. Set Detune ratio to 0 and disable Fit fringes for a decay-only acquisition. Early-stop SNR optionally ends averaging of each row when its signal is resolved.
+`Detune ratio (fringes/step)` sets the number of fringe periods per total-time sweep step. The default is 0.1. Use Fit fringes for this phase-ramped acquisition. Set Detune ratio to 0 and disable Fit fringes for a decay-only acquisition. Early-stop SNR optionally ends averaging of each row when its signal is resolved.
 
 ## Module sources and waiting
 
 The form uses the captured `$qubit.module.x180`, `$qubit.module.x90` and `$resonator.module.readout` slots. Missing slots use pi_pulse, pi2_pulse and readout templates. Reset uses `$qubit.module.reset` and stays disabled when absent. Missing calibration in a template remains Invalid until supplied.
 
-Relax delay starts at 5 times the captured `$qubit.t1`. A missing or null T1 uses 30 us, giving a 150 us wait. An invalid stored T1 leaves the derived input empty. Open and Defaults capture these sources. After alias or calibration edits, use Defaults to refresh the form.
+Relax delay starts at 5 times the captured `$qubit.t1`. A missing or null T1 uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves the derived input empty. Open and Defaults capture these sources. After alias or calibration edits, use Defaults to refresh the form.
 
 ## Run and analyze
 
-Run displays normalized IQ versus pulse count and time. Save the raw data, then Analyze to fit a decay for each count. The fit figure compares accepted T_CPMG values with pulse count on log axes. Optional Ramsey T2 and T1 references add horizontal T2R and 2*T1 lines in us; the fit uses the measured decay independently of these references.
+Run displays normalized IQ versus pulse count and time. Save the raw data, then Analyze to fit a decay for each count. The fit figure compares accepted T_CPMG values with pulse count on log axes. Optional Ramsey T2 and T1 references add horizontal T2R and 2*T1 lines in µs; the fit uses the measured decay independently of these references.
 
 The heatmap and T_CPMG points remain visible. Incomplete or rejected rows have no T2 point. Analysis fails only when every row fails the per-row fit checks. Extend the time window if the decay is unresolved. Calibration stays unchanged.
 

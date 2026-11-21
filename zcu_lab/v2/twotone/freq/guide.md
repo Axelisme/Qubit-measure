@@ -8,7 +8,7 @@ After changing the parameter source, use Defaults to recapture initial values. R
 
 ## Parameter sources
 
-Open and Defaults fill editable starting values from captured calibration. The frequency sweep starts with 301 points at `$qubit.freq` ± 20 * `$qubit.kappa`, in MHz. The endpoints and point count remain editable. Existing edits persist until Defaults evaluates the starting values again. The fresh probe reads `$qubit.freq` and `$qubit.wiring.ch`; its gain is 0.1 and waveform length is 1.0 us, independent of the calibrated x180 pulse length. The readout template reads `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch` for its tones and channels, and `$resonator.time_of_fly` + 0.015 us for trigger timing. Missing or invalid required parameter sources leave the affected fields empty and Invalid. Supply valid calibration or direct values before Run. For a first qubit search, supply the frequency window yourself. Review the hardware-safe passband and enter a user-approved wide sweep.
+Open and Defaults fill editable starting values from captured calibration. The frequency sweep starts with 301 points at `$qubit.freq` ± 20 * `$qubit.kappa`, in MHz. The endpoints and point count remain editable. Existing edits persist until Defaults evaluates the starting values again. The fresh probe reads `$qubit.freq` and `$qubit.wiring.ch`; its gain is 0.1 and waveform length is 1.0 µs, independent of the calibrated x180 pulse length. The readout template reads `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch` for its tones and channels, and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Missing or invalid required parameter sources leave the affected fields empty and Invalid. Supply valid calibration or direct values before Run. For a first qubit search, supply the frequency window yourself. Review the hardware-safe passband and enter a user-approved wide sweep.
 
 ## Module slots
 
@@ -26,7 +26,7 @@ it for preparation. In this Form enable Init Pulse, choose that π03 library
 pulse or enter its measured frequency, channel, gain and waveform inline.
 Sweep Probe Pulse to find 3–2 after that preparation. The Init Pulse frequency
 stays fixed while the probe frequency follows the sweep.
-Enter its calibrated frequency in MHz and its duration in us.
+Enter its calibrated frequency in MHz and its duration in µs.
 
 Keep π01, π03 and π32 calibration records separate. Do not Apply a 0–3 or
 prepared 3–2 fit to the generic qubit.freq slot as though it were 0–1.

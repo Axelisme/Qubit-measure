@@ -20,7 +20,7 @@ Missing optional slots stay disabled. Disable initialization for ground-state
 preparation, or select a calibrated pulse to prepare another state.
 
 Probe starts from the `res_probe` template using `$resonator.freq` and
-`$resonator.wiring.ch`, with a 1 us constant pulse. Readout uses
+`$resonator.wiring.ch`, with a 1 µs constant pulse. Readout uses
 `$resonator.module.readout` when present, otherwise the `readout` template. The
 readout template needs resonator frequency, generator/ADC wiring and
 `$resonator.time_of_fly`. Missing required sources stay Invalid; select a
@@ -28,7 +28,7 @@ valid module or fill the inline fields before Run.
 
 The initial gain range is 0 to 1 with 151 points. Reps starts at 1000 and Rounds
 at 100. Relax delay starts at 5 times the captured `$qubit.t1`. Missing/null T1
-uses 30 us, giving a 150 us wait; invalid T1 leaves the required wait empty.
+uses 30 µs, giving a 150 µs wait; invalid T1 leaves the required wait empty.
 These are editable starting values. Set safe ranges using the limits of your
 hardware. Review gain, frequency, pulse length, readout and state preparation
 before running.

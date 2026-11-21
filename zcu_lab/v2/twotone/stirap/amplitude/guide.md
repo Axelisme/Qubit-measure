@@ -20,11 +20,11 @@ Defaults may overwrite unsaved input. Refresh only updates sources and choices; 
 ## Controls and sequence
 
 Pump and Stokes each accept gauss, cosine, drag or arb. They can use different families and lengths.
-The Form initially selects Gaussian envelopes with sigma 0.05 us and length 0.3 us.
+The Form initially selects Gaussian envelopes with sigma 0.05 µs and length 0.3 µs.
 For arb, choose an available waveform asset. Its samples determine the duration.
 Generator envelope capacity errors come from the existing upload check. Shorten the waveform or choose another generator if upload fails.
 
-`stokes_lead` is in us. A positive value starts Stokes first and delays Pump.
+`stokes_lead` is in µs. A positive value starts Stokes first and delays Pump.
 A negative value starts Pump first. Zero starts both together.
 The program joins both pulse ends before the terminal readout.
 It uses the same two envelopes, carrier frequencies and lead at every gain pair.
@@ -34,7 +34,7 @@ It uses the same two envelopes, carrier frequencies and lead at every gain pair.
 Both axes offer Range or Center coordinates, with Expts or Step sampling.
 Each generator quantizes its gain separately. Saved axes contain the requested gains, not the hardware-quantized values.
 `shots` sets repetitions at each gain pair in one acquisition round.
-`relax_delay` is the wait in us after each shot.
+`relax_delay` is the wait in µs after each shot.
 
 ## Analyze and Save
 

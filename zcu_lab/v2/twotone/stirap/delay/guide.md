@@ -17,7 +17,7 @@ A missing calibration blocks acquisition. This experiment does not train a class
 Pump and Stokes each accept Gaussian, cosine, DRAG or arbitrary envelopes.
 Each envelope owns its duration. Gaussian and DRAG use their own length and sigma.
 Arbitrary duration comes from the selected asset. Constant and flat-top envelopes are not offered.
-The Form starts both envelopes as Gaussian with sigma 0.05 us and length 0.3 us.
+The Form starts both envelopes as Gaussian with sigma 0.05 µs and length 0.3 µs.
 The core cfg requires both envelopes explicitly.
 
 After changing aliases, component parameters or the module library, use Defaults to seed the Form from a new capture.
@@ -26,19 +26,19 @@ Defaults may overwrite unsaved input. Refresh only updates sources and choices; 
 ## Lead and acquisition
 
 Set `stokes_lead.start`, `stokes_lead.stop` and `stokes_lead.n` in the Form.
-Lead is in us. Positive lead starts Stokes first. Negative lead starts Pump first.
-Zero starts both together. For example, +0.1 us starts Pump 0.1 us after Stokes.
+Lead is in µs. Positive lead starts Stokes first. Negative lead starts Pump first.
+Zero starts both together. For example, +0.1 µs starts Pump 0.1 µs after Stokes.
 Lead describes pulse starts, not their centers or ends.
 
 The host builds and acquires one program per lead coordinate.
 Both drives retain their own carrier, signed gain, envelope and length throughout the scan.
 Readout starts after the later drive end, even when the lengths differ.
 `shots` controls repetitions per coordinate in one acquisition round.
-`relax_delay` is the inter-shot wait in us.
+`relax_delay` is the inter-shot wait in µs.
 Physical simulation requires both selected drive generators to bind charge lines.
 The zero-noise offline probe checks compiled playback without physical evolution.
 
-The live figure shows measured g/e/f fractions against Stokes lead in us.
+The live figure shows measured g/e/f fractions against Stokes lead in µs.
 The saved Result contains requested lead coordinates with shape `(N,)` and float64 g/e/f counts with shape `(N, 3)`.
 It stores counts, not normalized fractions. Stopped scans leave unfinished counts as NaN.
 Lead coordinates retain their requested values; hardware quantizes playback times to its clocks.
@@ -48,8 +48,8 @@ Lead coordinates retain their requested values; hardware quantizes playback time
 Analyze uses only the Run's saved centroid3 readout, not current Form or library calibration.
 It skips unfinished and zero-count points.
 The single `populations` figure shows raw fractions as dashed curves and confusion-corrected fractions as solid curves.
-Each state has the same color in both curves. The horizontal axis is Stokes lead in us.
-The vertical axis is dimensionless population fraction.
+Each state has the same color in both curves. The horizontal axis is Stokes lead in µs.
+The vertical axis shows the preparation-label fractions for g, e, and f.
 Corrected fractions are not clipped to [0, 1].
 
 The summary contains the training confusion matrix, its condition number and its minimum singular value.

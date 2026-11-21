@@ -48,8 +48,8 @@ tone still needs valid frequency and ADC identity, even when not selected.
 
 A two-participant offline DAC sweep used 16 joint points, 300 reps and 1 round.
 Q1 swept 596 to 602 MHz and Q2 swept 295 to 301 MHz.
-Both drives were 1 us const pulses at gain 0.1.
-Recovery was 1007.509 us; readout and ADC integration were 1 and 0.5 us.
+Both drives were 1 µs const pulses at gain 0.1.
+Recovery was 1007.509 µs; readout and ADC integration were 1 and 0.5 µs.
 The recorded Run action took 1.206 s, about 0.075 s per joint sweep point.
 The count is 16, not 16 squared, because the DAC ranges advance together.
 

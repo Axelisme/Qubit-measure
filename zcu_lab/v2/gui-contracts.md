@@ -47,17 +47,17 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   `t1_initial_time` 共用固定 capture 的來源分類 mechanics。有效 T1 回傳
   `Expr("<倍率> * <來源路徑>")` tree seed，保留呼叫端的名稱或 alias；Form
   以既有機制求值，`seed_sources` 保存 expression 與 available 狀態。
-  缺值用 `倍率 × 30 us` 字面值，無效值留空必填，來源故障傳遞 owner 的原錯誤。
+  缺值用 `倍率 × 30 µs` 字面值，無效值留空必填，來源故障傳遞 owner 的原錯誤。
   初值可覆寫，不寫回校準。純反射的 `flux_onetone` / `check` 等待維持
-  `0.1 us` / `0.5 us`，六個 adapter 的 `reps` / `rounds` 不變；
-  未使用的 `initial_delay` 不宣告為實驗欄位，builder 沿用 1.0 us 預設。auto optimizer 的 sweep `expts`
+  `0.1 µs` / `0.5 µs`，六個 adapter 的 `reps` / `rounds` 不變；
+  未使用的 `initial_delay` 不宣告為實驗欄位，builder 沿用 1.0 µs 預設。auto optimizer 的 sweep `expts`
   是 allocation resolution hint，flux 則使用中性 device-value contract。完整家族
   契約見 `measure-authoring.md`。
 - `support/measure/` 是公開支援 package，提供至少被兩個 concrete adapters 共用的 mechanics。
   已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，例如 T1 時間尺度、Rabi 候選與讀出掃描的長度差。
   T1 helper 的 tone 掃描先選 `ext.t1_with_tone`，僅缺失或 null 才改選普通 `t1`。
   已存無效 tone T1 不下探。Mux recovery 在建 Form 時比較各顆的捕捉初值，
-  保留最大者的 seed。缺 T1 以 30 us 參與比較，缺值勝出時仍為 150 us 字面值。
+  保留最大者的 seed。缺 T1 以 30 µs 參與比較，缺值勝出時仍為 150 µs 字面值。
   任一無效 T1 留空。
   各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
   本 package 不擁有 registry order，也不 import concrete adapter。
@@ -115,7 +115,7 @@ Module proposal 從完整 run readout 建立，只換成功 active 的 freq；�
 Apply 模組列與 slot 列後，slot 指向該 library root，下次開表單沿既有 slot 來源讀取。
 Capture 為 None 時保留 module 與原有 scalar 提案。
 Adapter 從 Run／Load capture 公開 lookup 取得 `$mux.resonators`，長度須等於完整 N，不是 active K。成功 tone i 以 resonators[i] 提 freq、kappa、ext.theta0 和可 persist 的 route-qualified ext.edelay，每個參數獨立一列。Resonators 長度不符時，保留 readout module 與 capture 可解析的 readout slot 提案，省略逐 resonator scalar，summary 顯示原因。Alias／來源故障仍傳播，不以長度不符掩蓋。
-Prior 同樣只查 capture 的 resonator.ext.edelay，按原始 tone 的 generator／ADC route 比對。`edelay` 單位為 us，留空時每個 active tone 各自使用有限的 route-matched prior 作 branch seed；沒有匹配時，該 tone 使用內部固定 100 us 上限作 global 搜尋。明填有限數字時，所有 active tones 共用此 branch seed，0 與負數也有效。Seed 是擬合起點，不是固定 delay。非有限或非數字的 `edelay` 輸入會拒絕整次 FIT。Delay 只有 seeded 或非等距 grid 才可 persist，沿單 tone 政策。無 capture 仍可純計算，非空 Apply 沿既有拒絕。Load 使用同 entry 檔案 history 的 point／roles capture，不讀當前 aliases。Duplicate resonators 不去重，由既有 Apply 的重複 destination 驗證處理。
+Prior 同樣只查 capture 的 resonator.ext.edelay，按原始 tone 的 generator／ADC route 比對。`edelay` 單位為 µs，留空時每個 active tone 各自使用有限的 route-matched prior 作 branch seed；沒有匹配時，該 tone 使用內部固定 100 µs 上限作 global 搜尋。明填有限數字時，所有 active tones 共用此 branch seed，0 與負數也有效。Seed 是擬合起點，不是固定 delay。非有限或非數字的 `edelay` 輸入會拒絕整次 FIT。Delay 只有 seeded 或非等距 grid 才可 persist，沿單 tone 政策。無 capture 仍可純計算，非空 Apply 沿既有拒絕。Load 使用同 entry 檔案 history 的 point／roles capture，不讀當前 aliases。Duplicate resonators 不去重，由既有 Apply 的重複 destination 驗證處理。
 
 ## OneTone、TwoTone 與 Lookback
 

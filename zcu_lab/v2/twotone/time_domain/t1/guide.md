@@ -6,31 +6,33 @@
 
 After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
+The live trace and Analyze fit plot the real component of rotated mean IQ (a.u.), not a classified state probability.
+
 ## Parameter sources
 
-Delay runs 0 to 5 * qubit.t1 us over 101 points. Relax delay is 5 * qubit.t1 us. Other missing required calibration leaves the affected fields empty and Invalid.
+Delay runs 0 to 5 * qubit.t1 µs over 101 points. Relax delay is 5 * qubit.t1 µs. Other missing required calibration leaves the affected fields empty and Invalid.
 
-The ordinary T1 sweep stop is 5 times the same time scale, initially 150 us when T1 is missing.
+The ordinary T1 sweep stop is 5 times the same time scale, initially 150 µs when T1 is missing.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 us, giving a 150 us wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 
 ## Tone-driven T1 gain scan
 
-The Python experiment `ScanT1WithToneExp` scans test-tone gain on the host and tone duration on the board. Its `gain` accepts one `SweepCfg` in normalized gain units, not an explicit list. `length` supplies the duration `SweepCfg` in us. The result keeps gain × duration complex IQ.
+The Python experiment `ScanT1WithToneExp` scans test-tone gain on the host and tone duration on the board. Its `gain` accepts one `SweepCfg` in normalized gain units, not an explicit list. `length` supplies the duration `SweepCfg` in µs. The result keeps gain × duration complex IQ. The live history traces show its rotated real component (a.u.), not a classified state probability.
 
 The gain-only sweep schema is 4.0. Loading a schema 3.0 file leaves cfg unavailable and reports `cfg_issue`; its data arrays remain available for plotting and analysis. No cfg conversion is performed.
 
 ## Module slots
 
-Readout uses the qubit.module.readout slot captured at Open/Defaults, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. The drive uses qubit.module.x180 with a pi_pulse template fallback. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 us; missing required calibration remains Invalid.
+Readout uses the qubit.module.readout slot captured at Open/Defaults, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. The drive uses qubit.module.x180 with a pi_pulse template fallback. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
 
 ## Typical writeback
 
-Proposes fitted qubit.t1 and its standard error (us) to the captured qubit and working point. Also offers an independent sample with t1_us/t1_err_us at the Run bias when captured device evidence is available. Module slots stay unchanged.
+Proposes fitted qubit.t1 and its standard error (µs) to the captured qubit and working point. Also offers an independent sample with t1_us/t1_err_us at the Run bias when captured device evidence is available. Module slots stay unchanged.
 
 ## Recommended
 
-Analysis defaults to a single-exponential fit; enable dual-exponential only when the decay clearly shows two timescales (a fast component on top of the slow relaxation). A delay sweep reaching ~5*T1 lets the decay flatten so the fit is well-constrained. Missing T1 starts the delay endpoint at 150 us; stored invalid T1 leaves it required and empty. Set `sampling="decay"` to cluster more points on the exponential decay while keeping the configured start/stop window.
+Analysis defaults to a single-exponential fit; enable dual-exponential only when the decay clearly shows two timescales (a fast component on top of the slow relaxation). A delay sweep reaching ~5*T1 lets the decay flatten so the fit is well-constrained. Missing T1 starts the delay endpoint at 150 µs; stored invalid T1 leaves it required and empty. Set `sampling="decay"` to cluster more points on the exponential decay while keeping the configured start/stop window.
 
 ## Four starting situations
 

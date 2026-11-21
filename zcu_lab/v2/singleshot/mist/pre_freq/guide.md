@@ -20,7 +20,7 @@ Linear has no Other state and is rejected.
 Analyze corrects populations only with the saved readout cfg's confusion matrix.
 Historical cfg without a classifier or matrix skips correction.
 
-Relax delay starts at five times the captured T1. Missing or null T1 uses a 30 us time scale, giving 150 us. An invalid stored T1 leaves the required delay empty. Defaults remain editable and separate from calibration writeback. Reps starts at 1000 and rounds at 10.
+Relax delay starts at five times the captured T1. Missing or null T1 uses a 30 µs time scale, giving 150 µs. An invalid stored T1 leaves the required delay empty. Defaults remain editable and separate from calibration writeback. Reps starts at 1000 and rounds at 10.
 
 ## Operator workflow
 

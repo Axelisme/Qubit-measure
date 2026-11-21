@@ -152,7 +152,7 @@ def _get_writeback_items(
         row_items.append(
             ParameterWriteback(
                 target_name=f"{qubit}.ext.pi_product",
-                description="Pi pulse gain times length (a.u. * us)",
+                description="Pi pulse gain times length (a.u. * µs)",
                 proposed_value=outcome.pi_gain * length,
             )
         )

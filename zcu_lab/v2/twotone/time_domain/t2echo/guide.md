@@ -8,13 +8,13 @@ After changing the parameter source, use Defaults to recapture initial values. R
 
 ## Parameter sources
 
-Total delay runs 0 to 1.5 * qubit.t2e us over 101 points. Detune ratio is fringes per sweep step; native MHz detune is ratio / step. Relax delay is 5 * qubit.t1 us. Other missing required calibration leaves the affected fields empty and Invalid.
+Total delay runs 0 to 1.5 * qubit.t2e µs over 101 points. Detune ratio is fringes per sweep step; native MHz detune is ratio / step. Relax delay is 5 * qubit.t1 µs. Other missing required calibration leaves the affected fields empty and Invalid.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 us, giving a 150 us wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 
 ## Module slots
 
-Readout uses the qubit.module.readout slot captured at Open/Defaults, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. Drive slots use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 us; missing required calibration remains Invalid.
+Readout uses the qubit.module.readout slot captured at Open/Defaults, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. Drive slots use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
 
 ## Typical writeback
 
@@ -23,7 +23,7 @@ normalized residual RMS at most 0.1 and relative T2 error at most 0.5.
 Failed or unavailable checks leave candidates unselected with explanatory notes.
 You may select them manually after reviewing the source and fit.
 
-Proposes fitted qubit.t2e (us) to the captured qubit and working point, including loaded data with IQ only. Frequency and module slots stay unchanged. Proposals keep the qubit and working point captured for this result even after focus changes. An independent t2e_us/t2e_err_us sample uses the captured Run bias when device evidence is available.
+Proposes fitted qubit.t2e (µs) to the captured qubit and working point, including loaded data with IQ only. Frequency and module slots stay unchanged. Proposals keep the qubit and working point captured for this result even after focus changes. An independent t2e_us/t2e_err_us sample uses the captured Run bias when device evidence is available.
 
 ## Recommended
 

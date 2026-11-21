@@ -58,10 +58,10 @@ class MuxT2RamseyToneReport(MuxFitToneReport):
         description="Owner diagnostic for delay sampling of the fitted fringe; null when unavailable.",
     )
     t2: float | None = Field(
-        default=None, description="Fitted Ramsey coherence time T2* in us."
+        default=None, description="Fitted Ramsey coherence time T2* in µs."
     )
     t2_err: float | None = Field(
-        default=None, description="One-sigma Ramsey time uncertainty in us."
+        default=None, description="One-sigma Ramsey time uncertainty in µs."
     )
     detune: float | None = Field(
         default=None, description="Fitted Ramsey fringe rate in MHz."

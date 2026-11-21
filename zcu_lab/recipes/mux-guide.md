@@ -117,7 +117,7 @@ center using its period rule. Review its actual committed state.
    Form selectors and final overrides. Wiring and nominal values alone do not make
    the Form valid. Do not infer bounds from simulator internals.
 2. With frequencies but no readout slot, opening the tab or choosing Defaults creates the captured
-   template. Onetone seeds ADC window 1 us and gain 0.1. Missing linewidths or
+   template. Onetone seeds ADC window 1 µs and gain 0.1. Missing linewidths or
    group flight time leave trigger and pulse length required. Twotone requires
    readout pulse length and ADC duration; it also requires every drive and MHz
    range. Supply full-list `sweeps` if frequency/linewidth calibration is absent.
@@ -137,7 +137,7 @@ explicit selections and resolved seeds; it does not refill defaults. After
 changing aliases, library or calibrations, choose Defaults to use them. Defaults discards
 unsaved Form edits. All four forms show participants, tone identities, modules,
 frequency/DC scans, averaging, then timing. Frequency labels use MHz, timing
-uses us except settle in s, and DC coordinates use the chosen flux_unit.
+uses µs except settle in s, and DC coordinates use the chosen flux_unit.
 Seed descriptions expose source paths and mark generated candidates
 uncalibrated. A captured slot is not marked measured merely because it exists.
 
@@ -289,7 +289,7 @@ The three pulse-scan recipes also accept:
 | `n` | A positive integer point count shared by all tones | Keep Expts |
 
 Frequency endpoints use MHz, amplitude endpoints gain in a.u. within [-1, 1] and length
-endpoints us. Each sweep accepts only start and stop; use top-level `n` for the
+endpoints µs. Each sweep accepts only start and stop; use top-level `n` for the
 shared count. A list length mismatch returns `needs_parameters` naming missing
 or extra original positions. Null `sweeps` clears every range's bounds; null
 `n` clears the common count.
@@ -439,11 +439,11 @@ oscillations to estimate pi and pi/2 lengths and the Rabi frequency.
 
 Set `tones[i].drive` to a const or flat_top pulse. A flat_top duration must exceed
 both ramps. Arb waveforms are not supported for this scan. Set each
-`tones[i].length.start` and `stop` in us, or supply the full `sweeps` list.
+`tones[i].length.start` and `stop` in µs, or supply the full `sweeps` list.
 Set shared `n` for all tones.
 The recipe does not stretch or crop a waveform to make it valid.
 
-Successful report rows contain `pi_len` and `pi2_len` in us and `rabi_f`
+Successful report rows contain `pi_len` and `pi2_len` in µs and `rabi_f`
 in MHz, with errors. Inspect `measurement` and `fit_i` for the oscillation
 period and fit quality. Check drive settings and length-sweep bounds in the
 fixed Run conditions.
@@ -459,12 +459,12 @@ and slot destinations in the [review step](#save-review-and-apply).
 `mux_t1` opens `mux/t1`. It excites selected qubits, waits for a common delay,
 and measures mux IQ to fit their energy relaxation.
 
-Select calibrated pi pulses at `tones[i].drive`. Set the shared us range with
+Select calibrated pi pulses at `tones[i].drive`. Set the shared µs range with
 `"delay.start"`, `"delay.stop"` and `"delay.n"` overrides.
 `sampling` defaults to `"linear"`; select `"decay"` for a nonuniform delay table.
 There is one requested-delay axis for all participants.
 
-Successful report rows contain `t1` and optional second decay `t1b` in us
+Successful report rows contain `t1` and optional second decay `t1b` in µs
 with errors. Compare the decay in `measurement` with each `fit_i`.
 Check the shared delay range and pulse selections in the fixed Run conditions.
 
@@ -479,10 +479,10 @@ Review the decay, error and destination before [Apply](#save-review-and-apply).
 and a final x90, then fits decay or Ramsey fringes to estimate T2*.
 
 Select x90 pulses at `tones[i].drive` and set each tone's `detune` in MHz.
-Set the common us range with `"delay.start"`, `"delay.stop"` and
+Set the common µs range with `"delay.start"`, `"delay.stop"` and
 `"delay.n"`. The final x90 phase varies with detune and delay.
 
-Successful report rows contain `t2` in us and fitted `detune` in MHz with
+Successful report rows contain `t2` in µs and fitted `detune` in MHz with
 errors. Inspect `measurement` and `fit_i` for the fitted model, fringe rate and
 decay. Check nominal detune, pulse selections and the shared delay range in the
 fixed Run conditions.
@@ -504,9 +504,9 @@ estimate echo coherence.
 
 Select `tones[i].drive` for x90 and `tones[i].pi_pulse` for x180. Both pulses
 for one qubit use the same generator. Set each tone's `detune` in MHz and the
-shared us range at `"delay.start"`, `"delay.stop"` and `"delay.n"`.
+shared µs range at `"delay.start"`, `"delay.stop"` and `"delay.n"`.
 
-Successful report rows contain `t2` in us and fitted `detune` in MHz with
+Successful report rows contain `t2` in µs and fitted `detune` in MHz with
 errors. Inspect `measurement` and `fit_i` for the decay model and fit quality.
 Check both pulse selections, nominal detune and shared delay range in the fixed
 Run conditions.

@@ -44,7 +44,7 @@ def _writeback(
     return [
         ParameterWriteback(
             target_name="$qubit.t1",
-            description="T1 relaxation time from paired IQ moments (us)",
+            description="T1 relaxation time from paired IQ moments (µs)",
             proposed_value=req.analyze_result.t1,
             stderr=req.analyze_result.t1_err,
         )

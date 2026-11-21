@@ -41,7 +41,7 @@ class RoOptLengthAnalyzeParams:
     # GUI-facing name for LengthAnalyzeOptions.t0: this is a duration
     # normalization overhead, not a penalty strength. Small positive values
     # produce stronger short-readout bias than large positive values.
-    duration_t0: Annotated[float | None, ParamMeta(label="Duration t0 (us)")] = None
+    duration_t0: Annotated[float | None, ParamMeta(label="Duration t0 (µs)")] = None
 
 
 def _RoOptLength_analyze(
@@ -63,7 +63,7 @@ def _RoOptLength_get_writeback_items(
     items: list[WritebackItem] = [
         ParameterWriteback(
             target_name="$qubit.ext.best_ro_length",
-            description="Optimal readout length (us)",
+            description="Optimal readout length (µs)",
             proposed_value=result.best_length,
         ),
     ]

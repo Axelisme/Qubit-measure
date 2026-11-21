@@ -6,9 +6,9 @@
 
 ## Parameter sources
 
-Seeds 51 length points from 0.01 to 3.5 us. Relax delay reads 5.0 * `$qubit.t1`. Run replaces acquisition length and sets drive length from the largest requested length. Open and Defaults fill editable starting values from the selected aliases and calibration. Qubit pulse templates read `$qubit.freq` and `$qubit.wiring.ch`. Readout templates read `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 us for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
+Seeds 51 length points from 0.01 to 3.5 µs. Relax delay reads 5.0 * `$qubit.t1`. Run replaces acquisition length and sets drive length from the largest requested length. Open and Defaults fill editable starting values from the selected aliases and calibration. Qubit pulse templates read `$qubit.freq` and `$qubit.wiring.ch`. Readout templates read `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 us, giving a 150 us wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 
 ## Module slots
 
@@ -16,8 +16,8 @@ The qubit pulse uses the `$qubit.module.x180` slot captured at Open/Defaults, or
 
 ## Typical writeback
 
-Proposes the SNR-maximizing readout length to `$qubit.ext.best_ro_length` (us). When acquired run settings include pulse readout and `$qubit.ext.best_ro_freq` / `$qubit.ext.best_ro_gain` / `$qubit.ext.best_ro_length` are known from this result plus captured calibration, also proposes `$resonator.readout.readout_dpm`. With a captured parameter source, a following `$resonator.module.readout` proposal points to that optimized module. Apply both updates to replace the selected readout for all later forms using this resonator. The qubit's `best_ro_*` scalar destinations stay unchanged.
+Proposes the SNR-maximizing readout length to `$qubit.ext.best_ro_length` (µs). When acquired run settings include pulse readout and `$qubit.ext.best_ro_freq` / `$qubit.ext.best_ro_gain` / `$qubit.ext.best_ro_length` are known from this result plus captured calibration, also proposes `$resonator.readout.readout_dpm`. With a captured parameter source, a following `$resonator.module.readout` proposal points to that optimized module. Apply both updates to replace the selected readout for all later forms using this resonator. The qubit's `best_ro_*` scalar destinations stay unchanged.
 
 ## Recommended
 
-Analysis denoises the SNR curve before picking the peak; wavelet smoothing is the default. The optional 'duration_t0' analyze param is the fixed-duration term in SNR/sqrt(length + t0): leave it blank (None) for the raw max; a small positive us value applies stronger short-readout bias than a large positive value.
+Analysis denoises the SNR curve before picking the peak; wavelet smoothing is the default. The optional 'duration_t0' analyze param is the fixed-duration term in SNR/sqrt(length + t0): leave it blank (None) for the raw max; a small positive µs value applies stronger short-readout bias than a large positive value.
