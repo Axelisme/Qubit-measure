@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-21, per-trigger demodulation images
+**Last updated:** 2026-11-21, per-trigger demodulation images and exact cavity span results
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -42,12 +42,22 @@ integrals. Shaped inputs retain the field ODE and converged quadrature, split at
 pulse boundaries, envelope corners and the decay timescale. ADC owns these
 field integrals; consumers project them into their own Stark or dephasing models.
 
-`CavityAverageCache.average` is the optional exact flat-result entry point;
-`cavity_field_average` remains uncached. The ADC owner retains complete lossless
-converted inputs and owned second moments within its fixed byte budget (default
-64 MiB). It rejects new residency when full, without changing returned results.
-Shaped/callable inputs bypass reuse. Hits and misses return independent arrays.
-Callers serialize access and clear the owner at the end of its lifetime.
+`CavityAverageCache.average` reuses flat second moments. `CavityAverageCache.span`
+returns both second moments and final fields for all states in the original model
+reference. It shares flat propagation when the initial time equals the span
+start and both solvers use the same time boundaries. Its exact key keeps model
+content, initial field bits, and pulse order, timing, carrier, phase and
+breakpoints. It distinguishes numeric scalar types and bits without using their
+display format. Pulse amplitudes starting at or after the span end do not
+distinguish span keys. Shaped/callable pulses, an empty pulse tuple, earlier
+history and inputs with unproven equivalence use separate solvers without
+admission. The field solver must accept the endpoints as float64 query times;
+rounding that makes them coincide raises `ValueError`.
+
+The two entry points share one byte budget (64 MiB by default). Results are
+writable copies independent of resident arrays. Full capacity declines new
+entries without eviction. Callers serialize access and clear the owner at the
+end of its lifetime. `cavity_field_average` and `cavity_fields` remain uncached.
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below

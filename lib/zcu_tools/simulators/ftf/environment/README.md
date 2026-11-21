@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, ADC wiring, demodulation images and receiver-only reads
+**Last updated:** 2026-11-21, ADC wiring, readout timing and exact cavity span reuse
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -643,11 +643,14 @@ every key through `Engine.reuse`. Projective continuation keys identify the
 original point, ordered histories, initial densities and span shifts. A failed
 or cancelled batch publishes no partial preparation.
 
-One ADC `CavityAverageCache` serves the cavity span composition of an acquire.
-All g/e points share its 64 MiB budget through serialized calls. ADC owns keys,
-arrays and admission; `CavityDrive` only forwards the owner. Composition clears
-all resident content on return or exception. Neither Engine nor the long-lived
-source retains this owner. Shaped inputs and final branch fields stay uncached.
+One ADC `CavityAverageCache` serves each cavity span composition. Its 64 MiB
+budget is shared by g/e points of that composition, not across bias models. The
+non-projective path reuses ADC flat second moments and all-state endpoint fields.
+FTF selects the main branch and builds each `SegmentShift` without a second memo.
+Projective continuation still reuses only flat second moments. Neither path
+caches shaped inputs. ADC owns keys, arrays and admission. Composition clears
+all entries on return or exception; Engine and the long-lived source do not
+retain the owner.
 
 When a cavity-drive Stark shift reverses two adjacent state energies, FTF
 continues with the same dispersive calculation and keeps the original state order.

@@ -10,6 +10,7 @@ from .. import _numba_cache  # Bootstrap before any dispatcher is created.
 from .cavity import (
     CavityAverageCache,
     CavityFieldAverage,
+    CavitySpanResult,
     cavity_field_average,
     cavity_fields,
 )

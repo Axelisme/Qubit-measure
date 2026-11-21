@@ -1,5 +1,6 @@
 """Shared nonzero cavity memory at the public ADC boundary."""
 
+from contextlib import nullcontext
 from dataclasses import replace
 from inspect import signature
 
@@ -147,6 +148,203 @@ def test_flat_cache_owns_exact_moments_for_complete_inputs(variant):
     np.testing.assert_array_equal(again.photons, expected.photons)
     np.testing.assert_array_equal(again.field_products, expected.field_products)
     assert cache.hits == 1 and 0 < cache.resident_bytes <= cache.max_bytes
+
+
+def test_flat_span_reuses_both_products_when_only_future_amplitude_changes():
+    model = _model()
+    # The first pulse sets the carrier even while only the second is active.
+    future = adc.ReadoutPulse(14, 24, 0.3j, 6.01, 0.2)
+    active = adc.ReadoutPulse(2, 10, 0.15, 6.04, -0.3, breakpoints_ns=(3, 7))
+    pulses = (future, active)
+    start, end = 5.0, 14.0
+    initial = np.array([0.2 + 0.1j, -0.3j])
+    cache = adc.CavityAverageCache()
+    first = cache.span(
+        model, pulses, start, end, initial_field=initial, initial_time_ns=start
+    )
+    _assert_span_matches_separate_solves(
+        first, model, pulses, start, end, initial, start
+    )
+    assert first.final_fields[0].tobytes() != first.final_fields[1].tobytes()
+    first.average.photons[:] = -1
+    first.average.field_products[:] = -1
+    first.final_fields[:] = -1
+
+    hit = cache.span(
+        model,
+        (replace(future, amplitude=0.5), active),
+        start,
+        end,
+        initial_field=initial,
+        initial_time_ns=start,
+    )
+    assert cache.hits == 1, "amplitude at or after the span end cannot affect the solve"
+    assert cache.misses == 1
+    _assert_span_matches_separate_solves(hit, model, pulses, start, end, initial, start)
+
+
+def _assert_span_matches_separate_solves(
+    result, model, pulses, start, end, initial, origin
+):
+    average = adc.cavity_field_average(
+        model, pulses, start, end, initial_field=initial, initial_time_ns=origin
+    )
+    fields = adc.cavity_fields(
+        model,
+        pulses,
+        np.array([start, end]),
+        initial_field=initial,
+        initial_time_ns=origin,
+    )
+    assert result.average.photons.tobytes() == average.photons.tobytes()
+    assert result.average.field_products.tobytes() == average.field_products.tobytes()
+    assert result.final_fields.tobytes() == fields[-1].tobytes()
+
+
+def test_flat_span_does_not_reuse_different_complete_inputs():
+    model = _model()
+    future = adc.ReadoutPulse(20, 24, 0.3j, 6.01, 0.2)
+    active = adc.ReadoutPulse(2, 10, 0.15, 6.04, -0.3, breakpoints_ns=(3, 7))
+    pulses = (future, active)
+    start, end = 5.0, 14.0
+    initial = np.array([0.2 + 0.1j, 0j])
+    models = (
+        model,
+        replace(model, frequencies_ghz=model.frequencies_ghz + 0.001),
+        replace(model, reference_frequency_ghz=6.13),
+        replace(model, state_labels=("e", "g")),
+    )
+    pulse_variants = (
+        (replace(future, phase_rad=0.21), active),
+        (replace(future, frequency_ghz=6.011), active),
+        (future, replace(active, breakpoints_ns=(3, 8))),
+        (future, replace(active, end_ns=11)),
+        (future, replace(active, amplitude=0.31)),
+        (active, future),
+    )
+    field_variants = (
+        np.array([initial[0], 0.1j]),
+        np.array([initial[0], complex(-0.0, 0.0)]),
+    )
+    cache = adc.CavityAverageCache()
+    requests = (
+        *((m, pulses, start, end, initial) for m in models),
+        *((model, p, start, end, initial) for p in pulse_variants),
+        *((model, pulses, start, end, field) for field in field_variants),
+        (model, pulses, start + 1, end, initial),
+        (model, pulses, start, end + 1, initial),
+    )
+    for num, (m, p, left, right, field) in enumerate(requests, 1):
+        result = cache.span(
+            m, p, left, right, initial_field=field, initial_time_ns=left
+        )
+        assert cache.hits == 0 and cache.misses == num
+        _assert_span_matches_separate_solves(result, m, p, left, right, field, left)
+
+
+@pytest.mark.parametrize("carrier_type", [np.float32, np.float64])
+def test_span_distinguishes_carriers_with_the_same_display(carrier_type):
+    model = _model()
+    pulse = adc.ReadoutPulse(0, 10, 0.3j, 6.1, 0.2)
+    other = replace(pulse, frequency_ghz=carrier_type(6.1))
+    start, end = 5.0, 15.0
+    initial = np.array([0.2 + 0.1j, -0.3j])
+    cache = adc.CavityAverageCache()
+    # NumPy 1.26 already uses the display style NumPy 2 calls legacy 1.25.
+    legacy = (
+        np.printoptions(legacy="1.25")
+        if np.lib.NumpyVersion(np.__version__) >= "2.0.0"
+        else nullcontext()
+    )
+    with legacy:
+        for drive in (pulse, other):
+            actual = cache.span(
+                model,
+                (drive,),
+                start,
+                end,
+                initial_field=initial,
+                initial_time_ns=start,
+            )
+            _assert_span_matches_separate_solves(
+                actual, model, (drive,), start, end, initial, start
+            )
+        assert cache.hits == 0 and cache.misses == 2
+
+    actual = cache.span(
+        model, (other,), start, end, initial_field=initial, initial_time_ns=start
+    )
+    _assert_span_matches_separate_solves(
+        actual, model, (other,), start, end, initial, start
+    )
+    assert cache.hits == 1 and cache.misses == 2
+
+
+@pytest.mark.parametrize(
+    "unsupported", ["historical-origin", "shaped", "empty", "signed-origin"]
+)
+def test_span_preserves_separate_solvers_without_admission(unsupported):
+    model = _model()
+    pulse = adc.ReadoutPulse(0, 10, 0.3j, 6.01, 0.2)
+    start, end = 5.0, 15.0
+    origin = 4.0 if unsupported == "historical-origin" else start
+    pulses = (pulse,)
+    if unsupported == "shaped":
+        pulses = (replace(pulse, envelope=lambda t: 1.0),)
+    elif unsupported == "empty":
+        pulses = ()
+    elif unsupported == "signed-origin":
+        start, origin = +0.0, -0.0
+    initial = np.array([0.2 + 0.1j, -0.3j])
+    cache = adc.CavityAverageCache()
+    for _ in range(2):
+        result = cache.span(
+            model, pulses, start, end, initial_field=initial, initial_time_ns=origin
+        )
+        _assert_span_matches_separate_solves(
+            result, model, pulses, start, end, initial, origin
+        )
+    assert cache.resident_bytes == cache.hits == cache.misses == 0
+
+
+def test_span_preserves_ringdown_endpoint_with_float32_times():
+    model = _model()
+    pulses = (adc.ReadoutPulse(-1, 0, 0.3j, 6.01, 0.2),)
+    # In float32, end - start rounds to 1; the field query subtracts in float64.
+    start, end = np.float32(2**-25), np.float32(1)
+    initial = np.array([0.2 + 0.1j, -0.3j])
+    cache = adc.CavityAverageCache()
+    # Bind the public call with its real runtime scalar types, without conversion.
+    query = signature(cache.span).bind(
+        model, pulses, start, end, initial_field=initial, initial_time_ns=start
+    )
+    for _ in range(2):
+        actual = cache.span(*query.args, **query.kwargs)
+        _assert_span_matches_separate_solves(
+            actual, model, pulses, start, end, initial, start
+        )
+    assert cache.resident_bytes == cache.hits == cache.misses == 0
+
+
+def test_span_and_average_share_one_capacity_without_evicting():
+    model = _model()
+    pulses = (adc.ReadoutPulse(0, 10, 0.3j, 6.01, 0.2),)
+    sizing = adc.CavityAverageCache()
+    span = sizing.span(model, pulses, 0.0, 15.0)
+    assert (
+        sizing.resident_bytes
+        > span.average.field_products.nbytes + span.final_fields.nbytes
+    )
+    cache = adc.CavityAverageCache(sizing.resident_bytes)
+    cache.span(model, pulses, 0.0, 15.0)
+    for _ in range(2):
+        cache.average(model, pulses, 0.0, 15.0)
+    assert cache.misses == 3 and cache.hits == 0
+    assert cache.resident_bytes == cache.max_bytes
+    cache.span(model, pulses, 0.0, 15.0)
+    assert cache.hits == 1
+    cache.clear()
+    assert cache.resident_bytes == 0
 
 
 def test_flat_cache_capacity_clear_bypass_and_failure():
