@@ -218,7 +218,9 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
                 builder.emit(second_pi2)
                 builder.emit(readout)
                 builder.emit(readout)
-                # Advance to the readout pulse end plus post_delay, not the ADC end.
+                # Advance to the readout pulse end plus post_delay, not ADC close.
+                # The compiler needs this to prove that windows on the same ADC
+                # do not overlap across the hardware repeat back edge (ADR-0083).
                 builder.delay_by_timeline()
 
             prog = builder.build()

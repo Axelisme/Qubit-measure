@@ -1,44 +1,42 @@
 """Starting values for ro_optimize/chain_length; Qt-free data only."""
 
 from dataclasses import replace
-from math import isfinite
 
-from pydantic import ValidationError
-from zcu_tools.cfg_model import Hidden, Range, Template
+from zcu_tools.cfg_model import FieldMeta, FormNode, Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 from zcu_lab.v2.support.measure.seed_metadata import pulse_readout_seed_metadata
 from zcu_lab.v2.twotone.ro_optimize.chain_length.core import ChainLengthCfg
 
+_FLIGHT_TIME_SOURCE = "$resonator.time_of_fly"
+
 
 def _initial_time_of_fly(ctx: FormContext) -> float | None:
-    """Capture finite nonnegative resonator flight time in us, or leave it blank."""
-    if ctx.parameters is None:
+    """Capture the resonator's flight time in us, or leave its field blank."""
+    parameters = ctx.parameters
+    if parameters is None:
+        return None
+    path = parameters.resolve_path(_FLIGHT_TIME_SOURCE)
+    point = parameters.point_content()
+    # Navigate before validating the leaf so source and structure errors escape.
+    try:
+        point.node(path)
+    except AttributeError:
         return None
     try:
-        result = ctx.parameters.lookup("$resonator.time_of_fly")
-    except ValueError as exc:
-        # Raw point lookup wraps leaf schema errors with the parameter path.
-        if isinstance(exc.__cause__, ValidationError):
-            return None
-        raise
-    value = result.value
-    if (
-        not result.present
-        or isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not isfinite(value)
-        or value < 0
-    ):
+        value = point.value(path)
+    except ValueError:
         return None
-    return float(value)
+    if value is not None and not isinstance(value, float):
+        raise TypeError(f"{path}: expected a resonator flight time")
+    return value
 
 
 def make_form(ctx: FormContext) -> Form[ChainLengthCfg]:
     """Capture the readout and flight time and seed relaxation K from 5*T1.
 
-    A missing or invalid flight time leaves a required hidden value blank.
+    A missing or invalid flight time leaves the readonly field blank.
     Source faults propagate; this form does not read live parameters.
     """
     readout = source(
@@ -59,14 +57,20 @@ def make_form(ctx: FormContext) -> Form[ChainLengthCfg]:
             "waveform.length": Hidden(0.0),
         },
     )
-    return Form(
-        ChainLengthCfg,
-        tree={
-            "reps": 2000,
-            "rounds": 320,
-            "readout": readout,
-            "time_of_fly": Hidden(_initial_time_of_fly(ctx)),
-            "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
-            "length": Range(0.2, 2.2, expts=11),
-        },
+    flight_time = _initial_time_of_fly(ctx)
+    tree: dict[str, FormNode] = {
+        "reps": 2000,
+        "rounds": 320,
+        "readout": readout,
+        "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
+        "length": Range(0.2, 2.2, expts=11),
+    }
+    if flight_time is not None:
+        tree["time_of_fly"] = flight_time
+    return Form(ChainLengthCfg, tree).with_seed_metadata(
+        {
+            ("time_of_fly",): FieldMeta(
+                description=f"From captured {_FLIGHT_TIME_SOURCE}"
+            )
+        }
     )

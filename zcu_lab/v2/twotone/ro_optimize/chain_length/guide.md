@@ -21,7 +21,11 @@ Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout`
 The template uses the resonator frequency, wiring and time of flight.
 ADC window starts at 11 points from 0.2 to 2.2 us. Run rebuilds the program at each point and sets its pulse length to `trig_offset − time_of_fly + window + 0.11 us`.
 Subtracting the flight time accounts for propagation to the ADC. The extra 0.11 us lets the pulse end reach the ADC after the window closes.
-The Form hides the two lengths and captures the required `$resonator.time_of_fly` in us. If the flight time is missing or invalid, correct it at the source and Reset before Run.
+For the pulse to cover the whole window, the ADC must open no earlier than the pulse reaches it (`trigger offset ≥ pre-delay + time of flight`). An earlier opening leaves the start of the window without a readout pulse.
+
+The Form hides the two lengths that Run sets. It shows **Time of flight (µs)** as a read-only, required field.
+Open and Reset capture it from `$resonator.time_of_fly`. Refresh keeps the value already shown.
+If the field is blank, correct the missing or invalid calibration at the source, then Reset before Run.
 Reps defaults to 2000 shots per setting per round. Rounds defaults to 320, giving 640 000 shots per setting.
 Supply any other missing or invalid sources before Run.
 

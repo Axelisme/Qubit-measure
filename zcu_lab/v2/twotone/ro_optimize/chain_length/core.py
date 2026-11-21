@@ -49,8 +49,9 @@ class ChainLengthCfg(ConfigBase):
         float,
         FieldMeta(
             label="Time of flight",
-            unit="us",
-            description="Calibrated propagation time from the readout generator to the ADC.",
+            unit="µs",
+            description="Readout propagation time to the ADC. Correct the resonator calibration and Reset if blank.",
+            readonly=True,
         ),
     ] = Field(strict=True, allow_inf_nan=False, ge=0)
     relax_delay: Annotated[
