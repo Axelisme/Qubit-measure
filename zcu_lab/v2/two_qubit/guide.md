@@ -1,10 +1,10 @@
-# FTF bring-up 與 CZ 校準操作指南
+# Two-qubit bring-up 與 CZ 校準操作指南
 
-**讀者：** operator、agent。從 GUI 或 MCP 準備 F1、F2 並校準 microwave-activated CZ。
+**讀者：** operator、agent。從 GUI 或 MCP 準備 Qubit1、Qubit2 並校準 microwave-activated CZ。
 
-**Last updated:** 2026-11-19，引用參考校準流程
+**Last updated:** 2026-11-22，位置命名與舊 point 重綁
 
-F1、F2 是兩個 fluxonium，coupler 是這一對共用的 transmon。CZ 由兩條 fluxonium charge line 同頻、相鎖地驅動，coupler 只設 DC bias。
+`qubit1`、`qubit2` 是量測位置，不代表元件種類。下文以 FTF 為例：兩條 qubit charge line 同頻、相鎖地驅動 CZ，coupler 只設 DC bias。
 
 本指南的順序對應 Leon Ding, *Novel Gates with Superconducting Fluxonium Qubits*（MIT 物理博士論文，2023） 的校準流程：§4.1.3 以 heralding 初始化，§4.3.2 校準單 qubit gate，§5.3.2–5.3.5 校準 CZ。偏離該流程時，在量測紀錄寫明原因。
 
@@ -12,9 +12,9 @@ F1、F2 是兩個 fluxonium，coupler 是這一對共用的 transmon。CZ 由兩
 
 先分別完成下方的單 qubit 校準，再依序量 joint readout、idle ZZ、conditional spectroscopy、constructive phase、chevron、CZ amplitude、conditional phase 與 local Z。最後用 paired RB／IRB 評估結果。每一步都需要獨立 Run、看圖、分析與人工 Apply。
 
-確認接線、device 名稱、native 單位與已授權範圍。`f1_charge`／`f2_charge` 的預設接線為 gen2／gen3，省略 operator 表示 charge；表單實際使用 Open／Reset 時的角色接線。兩角色須使用不同 generator，串擾係數仍只描述這兩條 charge line。
+確認接線、device 名稱、native 單位與已授權範圍。FTF 模型的 `f1_charge`／`f2_charge` 預設接 gen2／gen3，省略 operator 表示 charge。表單使用 Open／Reset 捕捉的接線。兩條 drive line 須用不同 generator，串擾係數仍只描述這兩條線。
 
-實際 mux 模擬須明填 `readout.drive.kind: mux` 與 receiver list，預設 readout kind 為 pulse。每個同 shot 的完整 tones 必須對應同一個 joint 態。取數時依固定 tone 順序聯合分類 F1、F2，保存類別計數。平均頻譜或兩路獨立抽樣的 IQ 無法提供 joint shots。校準來源限實測資料或人工確認的範圍；predictor、Hamiltonian 假設、simulator truth、template 與等待時間 fallback 都只是假設或初值。每個初值都須逐項核對硬體安全範圍。
+實際 mux 模擬須明填 `readout.drive.kind: mux` 與 receiver list，預設 readout kind 為 pulse。每個同 shot 的完整 tones 必須對應同一個 joint 態。取數時依固定 tone 順序聯合分類 Qubit1、Qubit2，保存類別計數。平均頻譜或兩路獨立抽樣的 IQ 無法提供 joint shots。校準來源限實測資料或人工確認的範圍；predictor、Hamiltonian 假設、simulator truth、template 與等待時間 fallback 都只是假設或初值。每個初值都須逐項核對硬體安全範圍。
 
 離線合成資料可檢查操作與分析流程。現場仍須驗證 FTF／GUI 控制鏈、接線、時序、cfg 與 acquisition。低 contrast 是可保留的資料結果；fit 無法辨識時保存原因並停止該校準提案；執行錯誤須先排除再繼續。現場驗證以流程與資料完整性為準，fidelity、leakage、π phase 與 matrix 對角值留作物理解讀。
 
@@ -26,11 +26,13 @@ Open 或表單的 Reset 會固定捕捉當時的 aliases、參數與 module libr
 
 每次 Run 後先看資料圖，再做 FIT 或互動分析。檢查 preview 的來源、目的 component、數值、單位與 pulse 內容。只勾選要接受的 rows，最後按 Apply。只有已 Apply 的 proposal 才能作為後續校準來源。
 
-保存本次資料及 cfg。重新載入後的分析與提案只用該次來源；Load 保持目前表單原值。歷史來源缺失時，部分分析仍可顯示數值，pulse proposal 則需要完整的量測來源。
+保存本次資料及 cfg。Load 保持目前表單原值。寫回使用該次 Run／Load 的 capture，不使用目前 aliases。沒有 capture 就不能寫回。
+
+新版 HDF5 的位置軸使用新名，例如 `terminal_qubit1`、`terminal_qubit2`。若舊檔的軸名不符新版宣告，Load 會拒絕。保留原檔，用對應的舊版軟體讀取。若結果格式相容但 cfg major 不同，Load 保留 Result 與 metadata，不還原 cfg。需要 cfg 的分析會報錯。
 
 ## Run 前的表單與環境檢查
 
-MCP `status` 的 `ready.can_run` 只檢查 entry、active context、SoC 與至少一張 tab 是否存在。它不表示這張 FTF 表單有效。即使回覆 `can_run=true`、`missing=[]`，仍先用 `tab.get_cfg` 讀目標 tab 的 `input`、`values`、`errors`，補齊必填值並重新檢查。查單一欄位的 metadata 用 `tab.read_recipe_field`，路徑是 logical path。呼叫方式見 [MCP 連線與觀察](../../../lib/zcu_tools/mcp/measure/README.md#連線與觀察)。
+MCP `status` 的 `ready.can_run` 只檢查 entry、active context、SoC 與至少一張 tab 是否存在。它不表示這張 two-qubit 表單有效。即使回覆 `can_run=true`、`missing=[]`，仍先用 `tab.get_cfg` 讀目標 tab 的 `input`、`values`、`errors`，補齊必填值並重新檢查。查單一欄位的 metadata 用 `tab.read_recipe_field`，路徑是 logical path。呼叫方式見 [MCP 連線與觀察](../../../lib/zcu_tools/mcp/measure/README.md#連線與觀察)。
 
 表單有效只表示 cfg 通過驗證，不表示初值已校準、硬體操作已獲授權或 Run 一定能取得控制權。先核對實際接線、安全範圍與量測來源，再 Run。
 
@@ -38,7 +40,7 @@ MCP `status` 的 `ready.can_run` 只檢查 entry、active context、SoC 與至�
 
 Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`rounds` 是 software acquisition rounds。完整量測的每座標、每分支採樣數是 `reps × rounds`。有多個 sweep 軸時，座標數是各軸點數的乘積；分支數另外乘入。Mux 的兩個 tones 屬於同一 shot，不是兩份獨立 joint samples。
 
-以下是單 qubit 準備流程的初開值，尚未計入對 F1、F2 各做一次的倍數。Open／Reset 的來源或人工編輯可能改變目前 cfg，Run 前以表單為準。
+以下是單 qubit 準備流程的初開值，尚未計入對 Qubit1、Qubit2 各做一次的倍數。Open／Reset 的來源或人工編輯可能改變目前 cfg，Run 前以表單為準。
 
 | 入口 | 初開採樣設定 | 一次完整 Run 的採樣數 |
 | --- | --- | --- |
@@ -46,29 +48,29 @@ Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`ro
 | Qubit spectroscopy，twotone freq | 301 個頻率，reps=1000、rounds=10 | 每頻率 10,000 次，共 3,010,000 次。 |
 | GE single-shot | shots=100000，probe off／on 各一分支 | 每分支 100,000 shots，共 200,000 shots。此入口內部使用 reps=shots、rounds=1，不再乘一組平均次數。 |
 
-兩 qubit FTF 表單 Open／Reset 的初值為 reps=1000、rounds=10，每座標、每準備或 projection 分支取得 10,000 個 joint shots。這個數量不代表擬合或校準已有足夠統計。RB 的 `rounds` 交給取數端，reducer 加總已完成 rounds。
+two-qubit 表單 Open／Reset 的初值為 reps=1000、rounds=10，每座標、每準備或 projection 分支取得 10,000 個 joint shots。這個數量不代表擬合或校準已有足夠統計。RB 的 `rounds` 交給取數端，reducer 加總已完成 rounds。
 
 下表的 P 是掃描點數，已包含準備態、spectator 與 projection 軸。DC sweep 關閉時 DC 點數取 1。一次完整 Run 的總 shots 都是 `P × reps × rounds`。
 
-| FTF 入口 | P |
+| Two-qubit 入口 | P |
 | --- | --- |
 | Joint readout | `2 prepared_qubit1 × 2 prepared_qubit2 = 4`。 |
 | Idle ZZ | `DC 點數 × 2 spectator states × delay 點數`。 |
-| Conditional spectroscopy | `DC 點數 × 2 prepared_f1 × 2 prepared_f2 × frequency 點數`。 |
+| Conditional spectroscopy | `DC 點數 × 2 prepared_qubit1 × 2 prepared_qubit2 × frequency 點數`。 |
 | Constructive phase／chevron | `phase 或 frequency 點數 × duration 點數`。Chevron 初開為 25×101 點，端點仍須人工提供。 |
 | CZ amplitude | `scale 點數`。 |
 | Conditional phase | `frequency 點數 × gate-count 個數 × 2 spectator states × 2 projections`。 |
 | Local Z | `gate-count 個數 × 2 targets × 2 projections`。 |
 | Paired RB／IRB | `depth 點數 × seed 個數 × 2 arms`。每點保存已完成 rounds 的計數總和。 |
 
-取數使用含 radius 的 circle classifier，把 F1、F2 分成 g／e／other。缺 radius 或使用 linear classifier 時，Run 前會要求先做 GE Post。Result 的 `sums` 保存 float64 未正規化總和，未量點為 NaN。Other 留在機率與 `⟨σ⟩=(N_e−N_g)/N_total` 的分母。不保存逐 shot IQ，舊逐 shot 格式不轉換成新 Result。
+取數使用含 radius 的 circle classifier，把 Qubit1、Qubit2 分成 g／e／other。缺 radius 或使用 linear classifier 時，Run 前會要求先做 GE Post。Result 的 `sums` 保存 float64 未正規化總和，未量點為 NaN。Other 留在機率與 `⟨σ⟩=(N_e−N_g)/N_total` 的分母。不保存逐 shot IQ，舊逐 shot 格式不轉換成新 Result。
 
 | 版本 | 每 shot 的 mux 讀出 | 每掃描點的類別數 | `sums` 陣列大小，不含座標與 cfg |
 | --- | --- | --- | --- |
 | 一般入口 | 1 次 terminal。若選 `reset/mux_herald`，再加 1 次 herald。 | `3×3=9` | `P × 9 × 8 = 72P bytes`。|
 | Heralded | 1 次 herald＋1 次 terminal | `3×3×3×3=81` | `P × 81 × 8 = 648P bytes`。|
 
-Chevron 的 25×101 點保存 181,800 bytes 的 `sums`。選 mux herald 不改欄位大小。以 reps=1000、rounds=10 計，不選 herald 發射 25,250,000 次 mux 讀出。選 herald 發射 50,500,000 次。完整 mux 的其他 tones 照設定讀出；Result 只保存 F1/F2 的終端聯合計數。
+Chevron 的 25×101 點保存 181,800 bytes 的 `sums`。選 mux herald 不改欄位大小。以 reps=1000、rounds=10 計，不選 herald 發射 25,250,000 次 mux 讀出。選 herald 發射 50,500,000 次。完整 mux 的其他 tones 照設定讀出；Result 只保存 Qubit1/Qubit2 的終端聯合計數。
 
 估算硬體序列時間時，逐座標加總 `shots × 該點每 shot 序列時間`。序列時間包含可選 reset、herald、preparation、drive、terminal readout 與等待。使用 herald 多一次讀出及其 post_delay，不能直接當成牆鐘時間加倍。編譯、資料傳輸、round 交接、DC ramp／settle、繪圖與保存另計。這裡沒有實測牆鐘效能，不由類別數或保存量推論加速比。
 
@@ -78,7 +80,7 @@ Chevron 的 25×101 點保存 181,800 bytes 的 `sums`。選 mux herald 不改�
 
 只有 RB 與 conditional phase 另有 `_heralded` 入口。兩者保存 81 類，分析同時使用 herald g,g 與 e,e 的終端計數。本次移除的七個獨立入口改在對應的一般入口用 reset 選擇 herald。入口清單見 [v2 README](../README.md#two-qubit-實驗清單)。
 
-在支援的入口選 `reset/mux_herald`，用與終端相同的完整 mux readout。F1、F2 在 tone 位置 0、1 時，用 `keep: {'0': g, '1': g}`。Herald 在序列前讀出一次。Result 只保留通過篩選的終端計數。
+在支援的入口選 `reset/mux_herald`，用與終端相同的完整 mux readout。Qubit1、Qubit2 在 tone 位置 0、1 時，用 `keep: {'0': g, '1': g}`。Herald 在序列前讀出一次。Result 只保留通過篩選的終端計數。
 
 使用 herald 前，先設定 readout 的 `post_delay`，讓腔內光子在後續 qubit drive 前衰減。Herald 讀出和終端讀出共用這個值（[ADR-0074](../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)）。等待從 readout generator 的波形結束算起，不等 ADC 積分窗結束（[ADR-0083](../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)）。`mux/onetone` 依線寬給可編輯的初值，但 FIT 不校準這段等待。
 
@@ -86,7 +88,7 @@ Chevron 的 25×101 點保存 181,800 bytes 的 `sums`。選 mux herald 不改�
 
 等待太短時，殘留的腔光子會讓 qubit 轉移頻率偏移並造成退相干。Herald 後的名目 Xπ 可能幾乎不翻轉，conditional phase 掃描也可能找不到 π 交點。
 
-在 FTF 的低 SNR 例子中，R2 的線寬約 1.2 MHz。五個光子衰減時間約 0.66 µs；2 µs 約是單個光子衰減時間的 15 倍。gg herald 後打名目 F2 Xπ，等待 0 µs 時，F2 的終端 e 比例為 11.6%；等待 2 µs 時為 92.9%。比例未扣除 I 基線。2 µs 只是當時的比較值，不是最短或最佳等待。
+在 FTF 的低 SNR 例子中，R2 的線寬約 1.2 MHz。五個光子衰減時間約 0.66 µs；2 µs 約是單個光子衰減時間的 15 倍。gg herald 後打名目 Qubit2 Xπ，等待 0 µs 時，Qubit2 的終端 e 比例為 11.6%；等待 2 µs 時為 92.9%。比例未扣除 I 基線。2 µs 只是當時的比較值，不是最短或最佳等待。
 
 在 `two_qubit/joint_readout` 的 Reset 欄位選 `reset/mux_herald`。用 Qubit1、Qubit2 在完整 readout 中的 tone 位置作為 `keep` 的鍵，兩個值都填 g。Herald 和 terminal 使用同一份完整 mux readout。Run 後看 FIT 的 4×9 列正規化機率矩陣。取目標 qubit 打名目 Xπ、另一顆打 I 的那一列，把目標 qubit 的 terminal 分類為 e 的欄位加總。也可與兩顆都打 I 的 gg 列比較。這是通過 gg herald 的 shots 中，目標 qubit 的 terminal e 比例，不是 gate fidelity。只延長 `post_delay`，其餘設定不變，再 Run 和 FIT。若比例仍隨等待延長而上升，先調整等待再跑 heralded 掃描。
 
@@ -96,9 +98,9 @@ Chevron 的 25×101 點保存 181,800 bytes 的 `sums`。選 mux herald 不改�
 
 兩個 `_heralded` 入口的 **pass fraction** 是 herald g,g 計數除以全部已取得 shots。它不含 e,e 的接受數。先核對各組 shot 數與 uncertainty，再判讀選取後的差異。
 
-## 分別準備 F1 與 F2，實驗 0a
+## 分別準備 Qubit1 與 Qubit2，實驗 0a
 
-既有單 qubit 表單使用 `qubit` 與 `resonator` aliases。先把 `qubit` 綁到 F1，`resonator` 綁到它的 readout resonator，完成下列步驟。DC 掃描在 Open／Reset 從 `$qubit.flux_dev` 取得可覆寫的裝置名稱。再改綁 F2，重新 Open／Reset，重做同一套步驟。每次 preview 都核對實際 component，避免把 F1 的結果套到 F2。
+既有單 qubit 表單使用 `qubit` 與 `resonator` aliases。先把 `qubit` 綁到 Qubit1，`resonator` 綁到它的 readout resonator，完成下列步驟。DC 掃描在 Open／Reset 從 `$qubit.flux_dev` 取得可覆寫的裝置名稱。再改綁 Qubit2，重新 Open／Reset，重做同一套步驟。每次 preview 都核對實際 component，避免把 Qubit1 的結果套到 Qubit2。
 
 | 次序與既有指南 | 要觀察的圖與判讀 | 可接受的校準與 preview |
 | --- | --- | --- |
@@ -112,7 +114,7 @@ Chevron 的 25×101 點保存 181,800 bytes 的 `sums`。選 mux herald 不改�
 | 8. [T1](../twotone/time_domain/t1/guide.md) | 看 π pulse 後的 delay decay、fit 與誤差，時間窗涵蓋衰減至接近平坦的區域。 | Preview `qubit.t1` 與誤差。更新後 Reset 後續表單，重算依 T1 建立的等待初值。 |
 | 9. [T2 Ramsey](../twotone/time_domain/t2ramsey/guide.md) 與 [T2 echo](../twotone/time_domain/t2echo/guide.md) | Ramsey 看 fringe 與衰減，echo 看重聚焦後的總 delay decay。缺 T2 初值時人工填時間窗。 | Preview `qubit.t2r`／`t2e`。Ramsey 需來源 cfg、實際 detune 與 fringe fit 齊全才另提 frequency；echo 只提 T2。Pulse module 維持原值。 |
 
-F1/F2 drive 分別填入各自的 charge-line pulse，包含 frequency、signed gain、NQZ 與 envelope duration。Frequency 單位為 MHz。Signed gain 單位為 a.u.，範圍為 [-1, 1]。Envelope duration 單位為 us。先做 F1 與 F2 的 frequency 與 amplitude／length Rabi，取得各自的 pulse 參考。高能階 drive 範圍及 CZ pulse slot 仍由操作者確認。
+Qubit1/Qubit2 drive 分別填入各自的 charge-line pulse，包含 frequency、signed gain、NQZ 與 envelope duration。Frequency 單位為 MHz。Signed gain 單位為 a.u.，範圍為 [-1, 1]。Envelope duration 單位為 us。先做 Qubit1 與 Qubit2 的 frequency 與 amplitude／length Rabi，取得各自的 pulse 參考。高能階 drive 範圍及 CZ pulse slot 仍由操作者確認。
 
 Rabi 的 module 與 slot rows 可分開 Apply。確認 x180/x90 指向這次接受的 keys；只更新 module 時，slot 可能仍指向舊 pulse。Ramsey 更新 qubit frequency 後，也須核對後續實際 pulse frequency，scalar 與 library pulse 是獨立設定。
 
@@ -125,37 +127,48 @@ Rabi 的 module 與 slot rows 可分開 Apply。確認 x180/x90 指向這次接�
 3. 用 cosine 包絡的 x180，以 [zig-zag](../twotone/zigzag/guide.md) 的奇數 π 脈衝串精定振幅。
 4. 用 [single-qubit RB](../twotone/rb/guide.md) 逐顆驗收 gate。論文另做 DRAG 與兩顆同時 RB；本 repo 目前沒有這兩個實驗。
 
-## FTF 的四個角色與 tone 對應
+## 綁定位置與讀出 tones
 
-Joint readout 用 `qubit1`、`qubit2` 和 `mux`，不需要 `coupler`。綁定與重綁步驟見 [Joint readout guide](joint_readout/guide.md#before-run)。
-
-| Scalar alias | 指向（kickstart／simulation 新 entry 的綁定） | 用途 |
+| Point alias | FTF 範本綁定 | 用途 |
 | --- | --- | --- |
-| `f1` | 第一個 fluxonium component，`Q1` | 取 `$f1.module.x180`／`x90`，供準備與 projection。既有 entry 缺此角色時，在 Aliases 加入 `f1` 並綁到 `Q1`。 |
-| `f2` | 另一個 fluxonium component，`Q2` | 取 `$f2.module.x180`／`x90`，使用另一個 charge generator。既有 entry 缺此角色時，在 Aliases 加入 `f2` 並綁到 `Q2`。 |
-| `coupler` | 本對 transmon component，`coupler` | 保存這一對的兩線 CZ pulses 與 local-Z pair。 |
-| `mux` | MuxGroup component，`MG12` | 從 `$mux.module.readout` 取完整 mux readout。缺來源時須手填有效設定；template 只是起點。 |
+| `qubit1` | `Q1` | 第一個位置。依實驗從 `$qubit1.module.x180`／`x90` 取準備或 projection 脈衝。 |
+| `qubit2` | `Q2` | 第二個位置。依實驗從 `$qubit2.module.x180`／`x90` 取脈衝。 |
+| `mux` | `MG12` | 從 `$mux.qubits` 定位兩顆 qubit，從 `$mux.module.readout` 取完整 mux readout。 |
+| `coupler` | `coupler` | 存放這一對的 CZ 脈衝 slots 與 local-Z 校準。 |
 
-F1 的 tone 是 `$f1` component 在 Open／Reset 所固定的 `$mux.qubits` 中的位置，F2 同理。例如 `f1=FA`、`f2=FB`，`qubits=[FB, FA]`，則 F1 對應 `tones[1]`，F2 對應 `tones[0]`。Tone index 由綁定決定，畫面只供核對。
+`joint_readout`、`idle_zz`、`conditional_spectroscopy` 不要求綁 `$coupler`。其餘九個入口要求綁定：`chevron`、`constructive_phase`、`cz_amplitude`、`conditional_phase`、`conditional_phase_heralded`、`local_z`、`rb`、`rb_heralded`、`cz_optimize`。
 
-保留完整 tone 列表原順序。MuxGroup 的 `resonators`／`qubits` 須逐項對應且包含 F1/F2；缺少綁定會在 acquire 前報錯。使用 `qubits` 指定身分，label、ADC number、generator 或 IQ cluster 排序都無法替代此綁定。
+Open／Reset 不檢查元件種類。兩個位置須指向不同元件，且都在 `$mux.qubits` 中。若已綁 `$mux.module.readout`，tone 數須等於 `$mux.qubits` 的長度；不符時表單會報錯。保留完整 readout 的原順序，不用 label、ADC number 或 IQ cluster 排序推定對應。
 
-改角色後 Reset，核對 F1/F2 pulses、兩個 generator、mux readout 與 DC source。DC 操作使用具名 device 與 native 單位。F1/F2 bias 由操作員提供並記錄；掃 coupler source 也可能影響其他 loop，F1/F2 偏移須另行確認與處理。
+例如 `qubit1=QA`、`qubit2=QB`，而 `$mux.qubits=[QB, QA]`，則 Qubit1 用 `tones[1]`、Qubit2 用 `tones[0]`。表單隱藏 `qubit1_tone` 與 `qubit2_tone`，可在保存的 run cfg 查到。
+
+Notebook 的內建角色也叫 `qubit1`、`qubit2`，但與 GUI 的 point aliases 分開，不會自動互綁。直接建立 Notebook cfg 時，按完整 readout 的順序填兩個從 0 起算的 tone index。
+
+### 重綁舊 point
+
+程式不會遷移舊 point 或翻譯舊名。先確認要更新的 point、兩個元件的順序與對應的 CZ 校準，再依序更新：
+
+1. 在 Aliases 用 `qubit1`、`qubit2` 取代舊 `f1`、`f2` 綁定，保留各自原指向。保留適用的 `mux`、`coupler` 綁定。
+2. 將 coupler 的 CZ pulse library keys `cz_f1`、`cz_f2` 改為 `cz_qubit1`、`cz_qubit2`，保留原脈衝內容。
+3. 將 coupler 的 CZ module slots `cz_f1`、`cz_f2` 改為 `cz_qubit1`、`cz_qubit2`，讓兩個 slot 各指向相應的新 library key。
+4. 若已有 `$coupler.ext.cz_phase`，把 `f1`、`f2` 改為 `qubit1`、`qubit2`，把 `correction_f1_deg`、`correction_f2_deg` 改為 `correction_qubit1_deg`、`correction_qubit2_deg`。保留元件名、兩角度與配對順序。
+
+重新 Open／Reset，核對兩路脈衝、generator、完整 mux readout 與 DC source。RB、heralded RB 與 CZ optimize 也會核對 phase pair 的元件名與順序。不符時不要交換 label 來使用舊校準，應核對綁定或重測對應的 local Z。
 
 ## Joint readout 到 local Z 的校準路線
 
-以下以 0a 的 pulses、readout 與已記錄 bias 為起點，表格連到一般入口的 guide。`B(ab)` 表示對 F1/F2 分別施加 I 或 Xπ，a 對應 F1，b 對應 F2。未啟用 reset 時，`B(11)` 仍是熱 ensemble；選 mux herald 並保留 g,g 時，從通過該篩選的 shots 解讀準備。
+以下以 0a 的 pulses、readout 與已記錄 bias 為起點，表格連到一般入口的 guide。`B(ab)` 表示對 Qubit1/Qubit2 分別施加 I 或 Xπ，a 對應 Qubit1，b 對應 Qubit2。未啟用 reset 時，`B(11)` 仍是熱 ensemble；選 mux herald 並保留 g,g 時，從通過該篩選的 shots 解讀準備。
 
 | 次序 | 操作與圖 | 判讀與後續動作 |
 | --- | --- | --- |
 | 0b. [Joint readout](joint_readout/guide.md) | 四個 I／Xπ 準備分支各接一次 mux readout，看 acquired shots、counts 與 4×9 matrix。 | 每行是一種名目準備；每欄是 Qubit1／Qubit2 的一種 g/e/other 聯合結果。選 herald reset 時只計通過篩選的 shots。 |
-| 1. [Idle ZZ](idle_zz/guide.md) | Target 選 F1 或 F2，spectator 做 I／Xπ。人工填 detune，掃 delay，看曲線、fit 與 ζ；需要時外層掃具名 DC source。 | ζ 是單頻模型下的兩分支擬合頻差，符號依 detune 同側前提。近 0／2×abs(detune) 時回不可辨識。依曲線與 fit_quality 判讀熱混合，調偏由操作員決定。 |
+| 1. [Idle ZZ](idle_zz/guide.md) | Target 選 Qubit1 或 Qubit2，spectator 做 I／Xπ。人工填 detune，掃 delay，看曲線、fit 與 ζ；需要時外層掃具名 DC source。 | ζ 是單頻模型下的兩分支擬合頻差，符號依 detune 同側前提。近 0／2×abs(detune) 時回不可辨識。依曲線與 fit_quality 判讀熱混合，調偏由操作員決定。 |
 | 2. [Conditional higher-level spectroscopy](conditional_spectroscopy/guide.md) | 四分支雙線 weak probe，掃共同 frequency，可加 coupler DC 軸與雙 Xπ 對比。 | 人工選 transition 與後續 probe 窗口。頻譜是診斷訊號，能級命名、EC/EJ/J 與 CZ frequency 需另行確認。 |
-| 3a. [Constructive phase](constructive_phase/guide.md) | B11 固定 signed gain 比例，掃 relative phase × duration。 | 無衰減 cosine 求各 trace rate，rate < 1/span 為未解析。以 `rate² = A + B cosφ + C sinφ` 求最大 rate 的 `atan2(C,B)`，只提 F2 pulse 與獨立 slot。Nyquist 與 signed gain ratio 由操作員確認，此掃描只調 relative phase。 |
+| 3a. [Constructive phase](constructive_phase/guide.md) | B11 固定 signed gain 比例，掃 relative phase × duration。 | 無衰減 cosine 求各 trace rate，rate < 1/span 為未解析。以 `rate² = A + B cosφ + C sinφ` 求最大 rate 的 `atan2(C,B)`，只提 Qubit2 pulse 與獨立 slot。Nyquist 與 signed gain ratio 由操作員確認，此掃描只調 relative phase。 |
 | 3b. [Rabi chevron](chevron/guide.md) | 固定 relative phase 與兩線 gain，掃 common frequency × duration。 | 人工選 CZ width 與 frequency 窗口。Population 谷值只供選窗。兩線同頻、同 duration、同時間原點，waveforms 由 cfg 明示，cosine 包絡只是起點。 |
 | 4. [CZ amplitude](cz_amplitude/guide.md) | B11 後播雙線 CZ、雙 Xπ 對比與 mux readout。掃共同 gain scale，固定原 signed gain 比例、relative phase、frequency 與 waveform。 | 零相位 cosine 擬合 joint 00 的第一正回返週期。實測從 0 覆蓋完整週期才提案，範圍不足即停止提案。逐列 preview 兩線 pulse 與 slots。回返是 thermal leakage proxy，須看 fit_quality 與大振幅 AC Stark 偏離。 |
 | 5. [Conditional phase／frequency](conditional_phase/guide.md) | Spectator I／Xπ，target π/2，n 次 CZ，獨立 X/Y projection。掃共同 frequency 與 n，預設 `[1,2,3]`。 | 以計數加權的 X/Y 模型求每 gate slope，再由兩 spectator 的 slope 差找唯一 π 交點，線性內插提 frequency。Gate-count 差值 gcd 必須為 1，`[1,3,5]` 有 slope alias，不能使用。缺失、無交點、多交點或退化均保留原因並停止提案。核對 wrapping、contrast、branch 標記，逐列接受 pulse／slots。 |
-| 6. [Local Z](local_z/guide.md) | 從 B00 分別量 F1/F2 的 π/2、n 次 CZ、獨立 X/Y projection，另一 qubit 維持原熱態。至少三個連續非負 n，整列 phase 完整才相鄰 unwrap 與含 intercept 的計數加權最小平方。 | Correction=-slope，保持原值。兩分量可辨識才提一筆具 component 名稱的 pair。採樣假設為相鄰真實增量小於 180°，每 gate 額外 360° 無法辨認。看 fit_quality 與 uncertainty，保留熱態模型限制；缺 correction 回報缺失。 |
+| 6. [Local Z](local_z/guide.md) | 從 B00 分別量 Qubit1/Qubit2 的 π/2、n 次 CZ、獨立 X/Y projection，另一 qubit 維持原熱態。至少三個連續非負 n，整列 phase 完整才相鄰 unwrap 與含 intercept 的計數加權最小平方。 | Correction=-slope，保持原值。兩分量可辨識才提一筆具 component 名稱的 pair。採樣假設為相鄰真實增量小於 180°，每 gate 額外 360° 無法辨認。看 fit_quality 與 uncertainty，保留熱態模型限制；缺 correction 回報缺失。 |
 
 Joint matrix 表示「名目準備→觀測結果，含熱 population」，包含準備與讀出效果。Matrix 的用途限於診斷原始熱 population 與讀出結果；後續分析保留原 population。Matrix inverse、對角值門檻與 gate fidelity 推論都超出此校準的適用範圍。Circle 分類把半徑外資料列為 other，不能直接把 other 當成 leakage。缺失、非有限或重合的 GE 中心與缺 radius 均回報無效。
 
@@ -171,19 +184,19 @@ Joint matrix 表示「名目準備→觀測結果，含熱 population」，包�
 
 ### Coupler 保存與 local-Z 重測
 
-每個 coupler 保存一對 F1/F2 的 CZ 校準。
+每個 coupler 保存一對 Qubit1/Qubit2 的 CZ 校準。
 
 | 目的地 | 內容 |
 | --- | --- |
-| `$coupler.pulses.cz_f1`、`$coupler.pulses.cz_f2` | 兩個 pulse，含本次實測 generator、frequency、gain、phase 與 waveform。 |
-| `$coupler.module.cz_f1`、`$coupler.module.cz_f2` | 獨立 slot rows，指向同次 Open／Reset 解析的上述 library keys。 |
-| `$coupler.ext.cz_phase` | 一筆 parameter，含 F1/F2 component 名稱與 `correction_f1_deg`、`correction_f2_deg`，兩 correction 來自同次 local-Z 量測。 |
+| `$coupler.pulses.cz_qubit1`、`$coupler.pulses.cz_qubit2` | 兩個 pulse，含本次實測 generator、frequency、gain、phase 與 waveform。 |
+| `$coupler.module.cz_qubit1`、`$coupler.module.cz_qubit2` | 獨立 slot rows，指向同次 Open／Reset 解析的上述 library keys。 |
+| `$coupler.ext.cz_phase` | 一筆 parameter。`qubit1`、`qubit2` 保存實際元件名；`correction_qubit1_deg`、`correction_qubit2_deg` 保存同次 local-Z 量測得到的角度。 |
 
 Amplitude／frequency proposal 只換擬合的共同 scale 或 frequency，保留來源 cfg 的 gain 比例、relative phase 與 waveform。所有提案都必須能追溯到本次量測的 pulse。
 
 每 CZ 的 logical Bloch phase accrual 為 θ1、θ2 時，local correction 是 −θ1、−θ2，單位 degree。後續序列以 virtual Z 更新 single-qubit logical frame，兩線 constructive relative phase 維持原值。Pulse phase 的正負換算須依既有 frame convention 核對。
 
-先選定 amplitude／frequency，再量 local Z。之後改任一線的 amplitude、frequency、duration、waveform、relative phase 或 DC 工作點，都要重新檢查 CZ 並重測 local Z。交換 F1/F2 後也須先核對保存的 component 名稱，再重做對應校準。校準時效由操作員確認。
+先選定 amplitude／frequency，再量 local Z。之後改任一線的 amplitude、frequency、duration、waveform、relative phase 或 DC 工作點，都要重新檢查 CZ 並重測 local Z。交換 Qubit1/Qubit2 後也須先核對保存的 component 名稱，再重做對應校準。校準時效由操作員確認。
 
 Pulse、slot 與 phase rows 都可獨立 Apply。部分套用後，檢查下一次 Run 的完整 cfg，確認 pulse 與 phase correction 屬於同一組已接受校準。
 
@@ -191,7 +204,7 @@ Pulse、slot 與 phase rows 都可獨立 Apply。部分套用後，檢查下一�
 
 [Two-qubit RB／IRB](rb/guide.md) 使用配對的 two-qubit Clifford reference／CZ-interleaved sequences、各自完整 inverse、實際雙線 CZ 與 local frames。它與[單 qubit RB／IRB](../twotone/rb/guide.md) 分別量不同的控制序列。
 
-Result 依 (seed, arm, depth) 排列，再接 F1／F2 分類軸。Heralded 在終端分類軸前多兩個 herald 分類軸。Stop 保留已完成 rounds 的計數，未量格子是 NaN。舊檔有 round 軸，Load 因軸數不合而拒絕。
+Result 依 (seed, arm, depth) 排列，再接 Qubit1／Qubit2 分類軸。Heralded 在終端分類軸前多兩個 herald 分類軸。Stop 保留已完成 rounds 的計數，未量格子是 NaN。舊檔有 round 軸，Load 因軸數不合而拒絕。
 
 Plain RB 從終端 joint g,g 計數算 survival。Heralded 另以終端回到各自 herald g,g／e,e 的比例作 survival，依各組完整 seeds 聯合擬合。使用 d=4 的 error estimate，保留負值及 paired-seed bootstrap interval。熱 population、準備／讀出效果與模型假設均須納入判讀，物理 gate 表現需由實際量測確認。
 
@@ -201,4 +214,4 @@ Plain RB 從終端 joint g,g 計數算 survival。Heralded 另以終端回到各
 
 要調整已校準 CZ 的 I/Q 形狀，依[每輪優化與驗收](cz_optimize/guide.md#每輪優化與驗收)操作。優化、寫回，再用 plain RB 的新 seeds 做 paired IRB。驗收的 gate error 仍有改善才 Reset Form，從寫回值開始下一輪。
 
-所有 FTF 資料保存未正規化 sums、準備態／spectator／sweep 座標與本次 cfg，cfg 保留完整 tone 順序。取消時保存已取得計數，未量點為 NaN。Phase 依各實驗的完整性規則分析 X/Y；RB／IRB 只用完整配對。診斷型 joint readout 與 conditional spectroscopy 可顯示已完成 rounds 的分布及每點 shot 數。寄生抵消需另行研究，各校準由操作員逐項執行。
+Two-qubit 實驗保存未正規化 sums、準備態／spectator／sweep 座標與本次 cfg，cfg 保留完整 tone 順序。取消時保存已取得計數，未量點為 NaN。Phase 依各實驗的完整性規則分析 X/Y；RB／IRB 只用完整配對。診斷型 joint readout 與 conditional spectroscopy 可顯示已完成 rounds 的分布及每點 shot 數。寄生抵消需另行研究，各校準由操作員逐項執行。

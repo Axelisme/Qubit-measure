@@ -12,28 +12,6 @@ from zcu_tools.mcp.measure.recipe_api import RecipeTab, WritebackAnswer
 
 
 class TwoQubitTarget(FormModel):
-    """Explicit role bindings for this Reset only; null leaves a role unchanged."""
-
-    f1: str | None = Field(default=None, description="Fluxonium in the F1 role.")
-    f2: str | None = Field(default=None, description="Fluxonium in the F2 role.")
-    coupler: str | None = Field(default=None, description="Coupler transmon.")
-    mux: str | None = Field(default=None, description="Mux group containing F1 and F2.")
-
-    def aliases(self) -> dict[str, str]:
-        """Return non-null role names for open_tab, without inferring any roles."""
-        return {
-            role: name
-            for role, name in (
-                ("f1", self.f1),
-                ("f2", self.f2),
-                ("coupler", self.coupler),
-                ("mux", self.mux),
-            )
-            if name is not None
-        }
-
-
-class TwoQubitPositionTarget(FormModel):
     """Bind positions on this Open/Reset only; null leaves a binding unchanged."""
 
     qubit1: str | None = Field(default=None, description="Component at Qubit1.")

@@ -32,7 +32,7 @@ Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須�
 掃描端點、flux 範圍與裝置單位檢查直接寫在 recipe 主體，不另設選源 helper。
 數字回報使用 lib 的 `report_number`，不改單位或精度。
 `mux_helpers.py` 只共用 tone 範圍輸入與報告欄位，不組裝 Form edits。
-[`two_qubit_helpers.py`](two_qubit_helpers.py) 提供 `TwoQubitPositionTarget`，以 `qubit1`、`qubit2`、`coupler`、`mux` 綁定同一次 Open／Reset。使用舊位置名的 recipe 仍用 `TwoQubitTarget`。此模組也共用選定候選的寫回與收據處理。Recipe 主體決定何時詢問寫回。
+[`two_qubit_helpers.py`](two_qubit_helpers.py) 提供 `TwoQubitTarget`，以 `qubit1`、`qubit2`、`coupler`、`mux` 綁定同一次 Open／Reset。省略或填 null 就保留目前的 alias。此模組也處理選定候選的寫回與收據；recipe 主體決定何時詢問寫回。
 [`two_qubit_rb_helpers.py`](two_qubit_rb_helpers.py) 共用兩個 paired RB recipe 的輸入與 CZ 誤差估計欄位。
 `ro_optimize_chain_helpers.py` 共用三個 readout-chain ro_optimize recipe 的報告欄位，並複製最佳 setting 的 score、QND、M 與模型近似誤差尺度。
 `mux_flux_helpers.py` 共用四個 flux recipe 的輸入、報告與逐 Q 分析 updates。
@@ -177,7 +177,7 @@ Runtime 回覆 `status="cancelled"`、`report=null` 與各次 `runs`。
 用 `recipe_guide(adapter="twotone/t1")` 依 adapter 名查 operator guide。
 Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 十二個 mux 的輸入、原始 tone 位置與報告見 [mux guide](mux-guide.md)。
-Two-qubit 的角色、herald reset、寫回與 RB 波形覆寫見 [two-qubit guide](two-qubit-guide.md)。
+Two-qubit 的位置綁定、舊 point 重綁、herald reset、寫回與 RB 波形覆寫見 [two-qubit guide](two-qubit-guide.md)。
 
 三個 thermal-chain ro_optimize recipe 以 K 等待熱平衡，再無 drive 連讀 16 次。
 `relax_delay` 設 K，單位 us。K 後熱態不同於 readout-driven steady state。

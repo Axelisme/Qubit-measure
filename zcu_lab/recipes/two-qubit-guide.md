@@ -1,18 +1,22 @@
 # Two-qubit recipes
 
-**讀者：** operator、agent。設定 two-qubit recipe 的角色、掃描、herald reset 與校準寫回。
+**讀者：** operator、agent。設定 two-qubit recipe 的位置、掃描、herald reset 與校準寫回。
 
 ## 共用輸入
 
 | 欄位 | 要填的值 | 省略時 |
 | --- | --- | --- |
-| `target` | `{f1, f2, coupler, mux}`。F1 與 F2 填兩顆 fluxonium 的元件名稱，`coupler` 填 transmon 名稱，`mux` 填包含兩顆 fluxonium 的 mux group 名稱。 | 沿用全域 aliases。個別角色省略或填 null 也沿用相應的全域 alias。 |
+| `target` | `{qubit1, qubit2, coupler, mux}`。前兩項填不同的元件名，`coupler` 填保存這一對 CZ 校準的元件名，`mux` 填包含兩顆 qubit 的 mux group 名稱。 | 沿用目前 point 的 aliases。個別欄位省略或填 null 也沿用相應 alias。 |
 | `reuse_tab_id` | 同 adapter 的閒置 tab ID。重用時先 Reset，不保留上次編輯。 | 開新 tab 並 Reset。 |
 | `overrides` | 有順序的操作列表。每項填邏輯 `path` 和一個 `value`、`select` 或 `command`。 | 不做額外編輯。不接受 null。 |
 | `reps`、`rounds` | 直接設定 Form 的 Reps 和 Rounds。 | 保留 Reset 值。 |
 
-角色只改這次 Reset 的 capture，不改全域 aliases。Recipe 不交換 F1/F2，也不從 qubit 推測 mux group。
-Reset 後先套具名欄位，再依序套用 `overrides`。例如 `drive.f1.gain` 是脈衝 gain 的邏輯路徑。
+`target` 只改這次 Open／Reset 的 capture，不改 point aliases。Recipe 不交換兩個位置，也不從 qubit 猜 mux group。
+表單不限制元件種類，但兩個元件須不同、都在 `$mux.qubits` 中；已綁定的 readout 必須有相同數量的 tones。
+本頁的 recipes 都需要 `$coupler`。實驗入口 `joint_readout`、`idle_zz`、`conditional_spectroscopy` 不需要。
+使用舊 point 時，依[重綁步驟](../v2/two_qubit/guide.md#重綁舊-point)更新 aliases、CZ pulse library keys、module slots 和 `ext.cz_phase` keys，再 Open／Reset。Notebook 內建的 `qubit1`、`qubit2` 與 GUI aliases 分開，不會自動互綁。
+
+Reset 後先套具名欄位，再依序套用 `overrides`。例如 `drive.qubit1.gain` 是脈衝 gain 的邏輯路徑。
 欄位仍有錯誤時，`check_ready` 回報要修正的路徑，recipe 不啟動 Run。
 
 ## 選用 mux herald
@@ -97,7 +101,7 @@ Qubit2 的新 phase 是來源 Qubit1 phase 加上擬合的相對相位。參見 
 `two_qubit_conditional_phase` 執行一次 `two_qubit/conditional_phase`。
 先依 [adapter 的準備說明](../v2/two_qubit/conditional_phase/guide.md#prepare-the-inputs) 確認兩顆 qubit 的脈衝與 mux 分類器。
 `ramsey_role` 填 `"qubit1"` 或 `"qubit2"`，寫入 Form 的 `target`，另一顆是 spectator。
-四角色的 recipe `target` 仍用來綁定 aliases。
+Recipe 的 `target` 物件仍用來綁定 aliases。
 `gate_count` 填至少兩個不重複的正整數。
 `frequency_range: [start, stop]` 填遞增的 MHz 端點，`frequency_points` 設定 Expts。
 省略具名欄位會保留 Reset 值。Reset 沒有預填頻率端點，需用具名欄位或 overrides 提供。

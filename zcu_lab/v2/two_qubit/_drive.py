@@ -11,44 +11,6 @@ from zcu_tools.program.v2 import PulseCfg
 from zcu_tools.program.v2.modules import ArbWaveformCfg
 
 
-class DualLineCfg(ConfigBase):
-    """Two ordinary scalar pulses on independent F1/F2 charge generators.
-
-    f1/f2 explicitly carry each line's waveform, signed gain and phase (deg).
-    Frequencies (MHz), envelope durations (us) and pre-delays (us) must match.
-    Gains and relative phase remain independent; no ratio is optimized here.
-    Post-delays may differ: parallel playback waits for both to finish.
-    Frequency, gain, phase and delays must be finite scalars. Delays must be
-    nonnegative and envelope duration positive. When both lines reference the
-    same arb path, duration matches by construction and the file is validated
-    when a run reads it, not when the cfg is restored.
-    Runs apply typed Pulse overrides for hardware sweeps after validating this
-    scalar baseline; each run writes its own parallel fork/emit/join sequence.
-    No coupler AC line, persistent gate module kind or logical frame is implied.
-    """
-
-    f1: Annotated[
-        PulseCfg,
-        FieldMeta(
-            label="F1 drive",
-            description="F1 charge-line pulse。",
-        ),
-    ]
-    f2: Annotated[
-        PulseCfg,
-        FieldMeta(
-            label="F2 drive",
-            description="F2 charge-line pulse。",
-        ),
-    ]
-
-    @model_validator(mode="after")
-    def validate_lines(self) -> Self:
-        """Reject non-scalar/mismatched timing or frequency."""
-        _validate_pulse_pair(self.f1, self.f2)
-        return self
-
-
 class QubitDriveCfg(ConfigBase):
     """Aligned scalar charge-line pulses on the two named qubit positions.
 

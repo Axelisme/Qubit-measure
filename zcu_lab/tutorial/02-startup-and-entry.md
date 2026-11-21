@@ -70,9 +70,9 @@ Aliases 的 Value 欄接受具體名稱或前列 alias 的欄位連結，兩者�
 | --- | --- | --- |
 | `qubit` | `Q1` | 直接綁定具體 component `Q1`。 |
 | `resonator` | `$qubit.resonator` | 讀取前列 `qubit` 所指元件的 `resonator` 欄位，此時得到 `R1`。改綁 `qubit` 後會跟隨該欄位。 |
-| `f1` | `Q1` | 同樣直接綁定 `Q1`，不隨 `qubit` 列的修改而變更。 |
+| `qubit1` | `Q1` | 同樣直接綁定 `Q1`，不隨 `qubit` 列的修改而變更。 |
 
-若要讓 `f1` 與 `qubit1` 指向同一元件，兩列都填具體名稱 `Q1`。不要填 `f1: $qubit1`，Aliases 不接受裸 alias 作為另一列的連結。`$qubit.resonator` 才是可接受的欄位連結，而且 `qubit` 必須排在 `resonator` 前面。這是 Aliases 的儲存語法，不是表單 expression 中裸 `$alias` 的求值語法。
+要讓 `qubit` 與 `qubit1` 指向同一元件，兩列都填具體名稱 `Q1`。不要填 `qubit1: $qubit`，Aliases 不接受裸 alias 作為另一列的連結。`$qubit.resonator` 才是可接受的欄位連結，而且 `qubit` 必須排在 `resonator` 前面。這是 Aliases 的儲存語法，不是表單 expression 中裸 `$alias` 的求值語法。
 
 在 GUI 開啟 Inspect 的 Aliases 頁，Destination 選 initial，把 `qubit` 的 Value 改成 `Q2`，按 Enter 完成編輯。有效編輯會立即保存，沒有另一個 Apply 按鈕。`resonator` 會解析成 `R2`。重新 Open／Reset 後，flux 表單從 Q2 的 flux_dev 取得 `f2_bias`。`mux: MG12` 仍指向同一個 group，不隨 `qubit` 切換。元件的 source 欄位與表單的裝置名稱都不會連線或建立 device。
 

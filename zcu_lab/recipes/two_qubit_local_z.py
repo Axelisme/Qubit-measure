@@ -18,13 +18,13 @@ from zcu_tools.mcp.measure.recipe_api import (
 
 from zcu_lab.v2.two_qubit.local_z.core import LocalZAnalysis, LocalZFit
 
-from .two_qubit_helpers import TwoQubitPositionTarget, apply_selected_writeback
+from .two_qubit_helpers import TwoQubitTarget, apply_selected_writeback
 
 
 class LocalZInputs(RecipeInputs):
     """Four-role target and gate-count scan. Overrides apply after named edits."""
 
-    target: TwoQubitPositionTarget | None = Field(
+    target: TwoQubitTarget | None = Field(
         default=None,
         description="Role bindings for this Reset. Omitted or null roles keep the current aliases.",
     )

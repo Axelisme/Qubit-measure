@@ -34,7 +34,7 @@ FIT shows a 4×9 count and row-normalized probability matrix. Columns are Qubit1
 
 The matrix includes initial populations, preparation errors and readout effects. It is not a pure-state assignment matrix. FIT offers no correction or writeback. Do not infer gate fidelity or invert this matrix without separate calibration evidence.
 
-Load rejects files whose `/vars/sums` axis names do not match, including files saved with the former F1/F2 axis names. Keep the original file unchanged and open it with the corresponding older software version. Load also rejects old raw-IQ files without `sums` and files with a single preparation axis. Analyze uses the saved counts without looking up the current library or cfg.
+Load rejects files whose `/vars/sums` axis names do not match, including files saved with the former position-axis names. Keep the original file unchanged and open it with the corresponding older software version. Load also rejects old raw-IQ files without `sums` and files with a single preparation axis. Analyze uses the saved counts without looking up the current library or cfg.
 
 ## Select shots with mux herald
 

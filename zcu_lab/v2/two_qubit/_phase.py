@@ -6,7 +6,7 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from ._sums import marginal_probabilities, qubit_marginal_probabilities
+from ._sums import qubit_marginal_probabilities
 
 
 @dataclass(frozen=True)
@@ -42,18 +42,6 @@ def count_phase(x: float, y: float) -> QuadraturePhase:
     if contrast == 0:
         return QuadraturePhase(contrast, None, "Zero quadrature contrast")
     return QuadraturePhase(contrast, wrap_phase(float(np.degrees(np.arctan2(y, x)))))
-
-
-def sigma_variance(
-    counts: NDArray[np.float64], target: Literal["f1", "f2"]
-) -> NDArray[np.float64]:
-    """Return count-derived variance of sigma for terminal (...,3,3) counts.
-
-    g/e/other form one multinomial: Var(sigma)=(P_e+P_g-sigma²)/N.
-    This includes the negative covariance of the two binomial marginals.
-    Zero totals and unmeasured counts yield NaN without divide warnings.
-    """
-    return _sigma_variance(counts, marginal_probabilities(counts, target))
 
 
 def qubit_sigma_variance(

@@ -17,13 +17,13 @@ from zcu_tools.mcp.measure.recipe_api import (
 
 from zcu_lab.v2.two_qubit.conditional_phase.core import ConditionalPhaseAnalysis
 
-from .two_qubit_helpers import TwoQubitPositionTarget, apply_selected_writeback
+from .two_qubit_helpers import TwoQubitTarget, apply_selected_writeback
 
 
 class ConditionalPhaseInputs(RecipeInputs):
     """Scan inputs shared by both variants. Overrides apply after named edits."""
 
-    target: TwoQubitPositionTarget | None = Field(
+    target: TwoQubitTarget | None = Field(
         default=None,
         description="Position bindings for this Reset. Omitted or null positions keep the current aliases.",
     )
