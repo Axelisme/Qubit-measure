@@ -37,8 +37,8 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
-from .._readout import JointRoles, MuxResetCfg
-from .._sums import sigma, validate_classifiers
+from .._readout import MuxResetCfg
+from .._sums import qubit_sigma, validate_qubit_tones
 from ._analysis import (
     IdleBranchFit,
     complete_points,
@@ -51,7 +51,7 @@ from ._analysis import (
 
 @dataclass(frozen=True)
 class IdleZZResult:
-    """Unnormalized float64 sums (D,2,T,3,3), terminal F1/F2 g/e/other.
+    """Unnormalized float64 sums (D,2,T,3,3), terminal Qubit1/Qubit2 g/e/other.
 
     dc_values is the D-point device coordinate, or [0] when DC is disabled.
     The spectator axis is fixed [0,1] for I/Xπ. delays is actual quantized µs.
@@ -66,18 +66,18 @@ class IdleZZResult:
 
 
 class IdleZZCfg(ConfigBase):
-    """Target f1/f2 Ramsey with nominal spectator I/Xπ branches and optional reset.
+    """Target qubit1/qubit2 Ramsey with nominal spectator I/Xπ branches and optional reset.
 
-    target selects the role doing π/2→delay→phase projection. The other role
+    target selects the qubit doing π/2→delay→phase projection. The other qubit
     receives I (branch 0) or Xπ (branch 1). reset=None emits no reset.
-    roles are fixed capture names and original tone positions. Delay is µs,
+    The tone indices address the full readout. Delay is µs,
     pulse frequency MHz, phase degrees. detune (MHz) is a required operator input:
     second π/2 phase = first.phase + 360*detune*actual_delay. Its magnitude must
     comfortably exceed expected |ζ| plus qubit frequency error so both nominal
     branches remain on its sign-selected side. No automatic detune adjustment
     occurs. dc_device=None leaves all sources untouched;
     otherwise only the named source is swept, with no compensation. Rounds
-    accumulate class counts on the acquisition side. F1/F2 require circle
+    accumulate class counts on the acquisition side. Qubit1/Qubit2 require circle
     classifiers with radii from GE Post; other tones remain in the full readout.
     """
 
@@ -85,32 +85,32 @@ class IdleZZCfg(ConfigBase):
         MuxResetCfg | None,
         FieldMeta(label="Reset", description="Optional reset before every shot."),
     ] = None
-    x180_f1: Annotated[
+    x180_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F1 Xπ",
-            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit1 Xπ",
+            description="Calibrated Qubit1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
-    x180_f2: Annotated[
+    x180_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F2 Xπ",
-            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit2 Xπ",
+            description="Calibrated Qubit2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
-    x90_f1: Annotated[
+    x90_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F1 Xπ/2",
-            description="Calibrated F1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit1 Xπ/2",
+            description="Calibrated Qubit1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
-    x90_f2: Annotated[
+    x90_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F2 Xπ/2",
-            description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit2 Xπ/2",
+            description="Calibrated Qubit2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     readout: Annotated[
@@ -120,8 +120,21 @@ class IdleZZCfg(ConfigBase):
             description="Full-group mux readout with calibrated frequencies, gains and timing.",
         ),
     ]
-    roles: JointRoles
-    target: Literal["f1", "f2"] = "f1"
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based Qubit1 position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based Qubit2 position in the full mux readout.",
+        ),
+    ]
+    target: Literal["qubit1", "qubit2"] = "qubit1"
     dc_device: Annotated[
         DeviceName | None,
         FieldMeta(
@@ -136,7 +149,7 @@ class IdleZZCfg(ConfigBase):
         SweepCfg,
         FieldMeta(
             label="DC source values",
-            description="Inactive when source is None; no conversion or F1/F2 compensation.",
+            description="Inactive when source is None; no conversion or Qubit1/Qubit2 compensation.",
         ),
     ] = Field(default_factory=lambda: SweepCfg(start=0, stop=0, step=0, expts=1))
     delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
@@ -178,11 +191,11 @@ class IdleZZCfg(ConfigBase):
     def validate_pair(self) -> Self:
         """Require complete tones and consistent independent calibrated drive lines."""
         m = self
-        if m.x180_f1.ch == m.x180_f2.ch:
-            raise ValueError("F1/F2 require independent charge generators")
-        if m.x90_f1.ch != m.x180_f1.ch or m.x90_f2.ch != m.x180_f2.ch:
-            raise ValueError("Each role's Xπ and Xπ/2 must use the same generator")
-        validate_classifiers(m.readout, self.roles)
+        if m.x180_qubit1.ch == m.x180_qubit2.ch:
+            raise ValueError("Qubit1/Qubit2 require independent charge generators")
+        if m.x90_qubit1.ch != m.x180_qubit1.ch or m.x90_qubit2.ch != m.x180_qubit2.ch:
+            raise ValueError("Each qubit's Xπ and Xπ/2 must use the same generator")
+        validate_qubit_tones(m.readout, m.qubit1_tone, m.qubit2_tone)
         delays = sweep2array(self.delay)
         if np.any(delays < 0):
             raise ValueError("Ramsey delay must be nonnegative")
@@ -237,8 +250,8 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit1", unit=""),
                     VariableAxisSpec(
                         label="Delay", unit="s", field_name="delays", scale=1e-6
                     ),
@@ -261,7 +274,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         ),
         result_type=IdleZZResult,
         cfg_type=IdleZZCfg,
-        cfg_schema_version="6.0",
+        cfg_schema_version="7.0",
         tag="two_qubit/idle_zz",
         result_builder=restore_result,
     )
@@ -289,7 +302,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             return viewer.set(
-                delays, sigma(sums, config.target).reshape(-1, len(delays))
+                delays, qubit_sigma(sums, config.target).reshape(-1, len(delays))
             )
 
         # 3. Set DC on the host; sweep spectator preparation and detuned target Ramsey delay in hardware.
@@ -317,9 +330,15 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 builder.add_loop("spectator_states", 2)  # 0 = I, 1 = Xπ (outer)
                 delay = builder.add_sweep("delay", delay_sweep)
                 spectator_cfg = (
-                    config.x180_f2 if config.target == "f1" else config.x180_f1
+                    config.x180_qubit2
+                    if config.target == "qubit1"
+                    else config.x180_qubit1
                 )
-                pi2_cfg = config.x90_f1 if config.target == "f1" else config.x90_f2
+                pi2_cfg = (
+                    config.x90_qubit1
+                    if config.target == "qubit1"
+                    else config.x90_qubit2
+                )
                 spectator = Pulse("spectator_x180", spectator_cfg)
                 pi2 = Pulse("target_pi2", pi2_cfg)
                 projection = Pulse(
@@ -341,8 +360,8 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 axes = [
-                    Classify("terminal", config.roles.f1_tone),
-                    Classify("terminal", config.roles.f2_tone),
+                    Classify("terminal", config.qubit1_tone),
+                    Classify("terminal", config.qubit2_tone),
                 ]
                 step.run_acquire_summed(
                     prog,
@@ -383,7 +402,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             (cfg.delay.expts, 3, 3),
         )
         complete = complete_points(result.sums, cfg.reps * cfg.rounds)
-        traces = sigma(result.sums, cfg.target)
+        traces = qubit_sigma(result.sums, cfg.target)
         shots = result.sums.sum(axis=(-2, -1))
         fits = []
         for dc_index in range(len(dc_values)):
@@ -437,7 +456,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             ax.set(
                 xlabel="Delay (us)",
                 ylabel="Target ⟨σ⟩",
-                title=f"Target {cfg.target}, detune={cfg.detune:g} MHz; {dc_label}={dc_value:g}\n{subtitle}; single-frequency model estimate\nNominal branches; mixture not excluded",
+                title=f"Target {cfg.target.capitalize()}, detune={cfg.detune:g} MHz; {dc_label}={dc_value:g}\n{subtitle}; single-frequency model estimate\nNominal branches; mixture not excluded",
             )
             ax.text(
                 0.01,
