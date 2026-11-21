@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-21, geometry and WorkPlan cancellation checkpoints
+**Last updated:** 2026-11-22, segment shift and capture entry points
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -429,9 +429,11 @@ constant-pair query does not change dispatch prices.
 
 Call `common_frame_diagnostic(model, ports, frequencies_ghz, amplitudes,
 duration_ns, envelopes=None)` from the package root. Supply the row's fixed-flux
-`SecularModel`, including segment shifts. Each tuple describes two tones in the
-same order. Port names may repeat. Frequencies are finite signed GHz, gains are
-finite signed dimensionless values, and duration is finite nonnegative ns.
+`SecularModel`, including segment shifts. For the producer of `segment_shifts`,
+see [FTF cavity drives](../../simulators/ftf/environment/README.md#cavity-drives).
+Each tuple describes two tones in the same order. Port names may repeat.
+Frequencies are finite signed GHz, gains are finite signed dimensionless
+values, and duration is finite nonnegative ns.
 Optional `EnvelopeSpec` values describe the complete envelopes. The default is
 unity. Full-envelope peak and slope bounds apply even when the row slices a
 pulse. Phase, offsets and initial density do not affect these indicators.
@@ -452,7 +454,8 @@ The comparisons do not depend on the Engine's per-segment budget.
 | `tail` | Fifth-and-higher BCH norm tail without oscillatory cancellation, dimensionless. |
 | `derivative` | Envelope-slope omission indicator, dimensionless. |
 
-`reason` is `accepted`, `carrier`, `denominator`, `coherent` or `bath`.
+To investigate a rejection (search term `common_frame rejected`), read the
+diagnostic's `reason`: `accepted`, `carrier`, `denominator`, `coherent` or `bath`.
 A zero mean carrier returns `accepted=False` and leaves all numeric fields
 `RWAUncomputed`. A denominator rejection exposes its minimum but leaves the
 later indicators uncomputed. A coherent rejection still exposes bath and all
@@ -466,6 +469,11 @@ preparations, or compute extra indicators. These calibrated proxies do not
 certify full-density accuracy. The coherent limit is 0.0018; the bath limit
 remains 0.01. A rejected pinned row raises `NoValidKernel`. Default dispatch
 compares the remaining admissible families by price.
+
+To read recorded routes and guard decisions (search term `inspect-dp54-summary`),
+use the [simulator capture inspector](../../../../tools/README.md#simulator-capture-inspection).
+A recorded `rejected` decision does not include the reason. The inspector does
+not reevaluate the guard.
 
 ## Engine capture
 
@@ -917,7 +925,11 @@ The same named inputs also run with
 [default empty and warm routing history](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py);
 those runs measure the families actually selected, not every candidate.
 The [matrix instructions](../../../../tests/README.md#evolution-精度矩陣)
-own the command and report format.
+own the command and report format. Both independent timeline solvers,
+[lab-frame `reference_timeline`](../../../../tests/simulate/evolution/contract/reference.py)
+and [interaction-picture `interaction_density`](../../../../tests/simulate/evolution/contract/interaction_reference.py),
+reject batches with `segment_shifts`. The matrix does not certify shifted spans.
+For the FTF producer and guard query, see [Common-frame guard diagnostics](#common-frame-guard-diagnostics).
 
 Sampled dual tones that pass the row proxies form `multitone_rwa` groups whose
 members differ only in each tone's amplitude. A group matches model, duration,

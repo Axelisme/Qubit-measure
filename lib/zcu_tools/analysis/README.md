@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-20，雙讀出矩的自校準
+**Last updated:** 2026-11-22，取數 sums 與分析接縫
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -177,6 +177,9 @@ Record 到這些型別的轉換由 resources 負責，Notebook 副軸使用同�
 Fluxdep native 載入與 dispersive 投影共用此規則。
 
 ## 子模組
+
+[Program V2 取數](../program/v2/README.md#取數與-readout-observation) 的 `shot_sums` 等 reducer 產出 sums 與 moments，不估計不確定度。
+例如，[雙讀出矩自校準](#雙讀出矩的自校準)用外積總和估計狀態改變機率。T1 covariance 分析再用這些機率擬合延遲曲線，由 [fitter](fitting/README.md#named-fitting-results) 回傳參數與標準誤差。
 
 - `fluxdep/`：Flux-Dependence Analysis 的選點、filtering、line selection、one-tone peak detection
   共用 kernel。`fluxdep/models.py` 擁有頻譜校正／點位資料、transition 型別與能譜到躍遷頻率的共用轉換；
