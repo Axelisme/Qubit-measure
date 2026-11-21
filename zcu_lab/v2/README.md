@@ -107,7 +107,7 @@ Host 路徑在回傳前對可用 rounds 取平均，未取數的點保留 NaN，
 
 ```python
 fig, ax = context.plots.subplots(num="signal")
-ax.set(xlabel="Time (us)", ylabel="Signal")
+ax.set(xlabel="Time (µs)", ylabel="Signal (a.u.)")
 line = live_line(ax)
 
 
