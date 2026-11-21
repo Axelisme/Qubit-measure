@@ -38,10 +38,17 @@ def _run(
     return RunRecord(cfg=cfg, result=RabiCheckExp().run(cfg, context=context))
 
 
+def _summary_lines(source: RunRecord[RabiCheckCfg, RabiCheckResult]) -> tuple[str, ...]:
+    """Report the saved configuration's requested repetitions and rounds."""
+    if source.cfg is None:
+        return ()
+    return (f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=RabiCheckExp.AXES_SPEC,
     make_form=_RabiCheck_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_RabiCheck_analyze),
+    analysis=Analysis(fn=_RabiCheck_analyze, summary_lines=_summary_lines),
 )
