@@ -7,9 +7,9 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from zcu_tools.simulate.boundary import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
 
-from .engine import Cancelled, DriveTrack, EnvelopeSpec, PathDiagnostics, TimelineBatch
+from .engine import DriveTrack, EnvelopeSpec, PathDiagnostics, TimelineBatch
 from .kernel import SegmentTable
 from .secular import FluxWaveform, ModelSource, StarkOrderInversion
 

@@ -17,6 +17,7 @@ from zcu_tools.program.acquisition import (
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
+    Cancelled,
     ChargeDriveRequirement,
     RoundStatistics,
 )
@@ -171,14 +172,15 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         params = self.acquire_params
         if not isinstance(params["soc"], SimulationSoc):
             return super()._finish_accumulated_round(cancel_flag)
-        from zcu_tools.simulate.evolution import Cancelled
-
         soc = params["soc"]
+        needs_raw = self._simulation_needs_raw
         try:
-            result = soc.run_round()
+            result = soc.run_round(require_raw=needs_raw)
         except Cancelled:
             return self._stop_interrupted_round()
-        if cancel_flag.is_set():
+        # For required raw, SoC checked Stop before publishing. A later Stop
+        # does not undo that transport or skip successful round processing.
+        if not needs_raw and cancel_flag.is_set():
             return self._stop_interrupted_round()
         if not isinstance(result, IntegratedRound):
             raise ValueError("integrated acquisition requires IntegratedRound")
@@ -198,7 +200,6 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         soc = self.acquire_params["soc"]
         if not isinstance(soc, SimulationSoc):
             return super()._finish_decimated_round()
-        from zcu_tools.simulate.evolution import Cancelled
 
         try:
             return super()._finish_decimated_round()
@@ -230,7 +231,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
                 self._average_statistics(result.statistics, request.reps)
             )
             return
-        raw = soc.binding.materialize_raw(request, result.raw)
+        raw = soc.copy_integrated_raw()
         self.acc_buf = [raw[ch] for ch in prog.ro_chs]
         self.rounds_buf.append(prog._process_accumulated(self.acc_buf))
 

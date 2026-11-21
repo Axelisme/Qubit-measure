@@ -107,7 +107,9 @@ def test_evolve_releases_open_resources_on_every_exit(outcome):
         kernel.handles[0].get(lambda: Bounds(np.zeros(1)))
 
 
-def test_stop_during_work_plan_releases_geometry_without_counting_gate_usage(monkeypatch):
+def test_stop_during_work_plan_releases_geometry_without_counting_gate_usage(
+    monkeypatch,
+):
     from zcu_tools.simulate.evolution import _dispatch
 
     stop = Event()

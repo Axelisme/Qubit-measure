@@ -9,7 +9,7 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
-from zcu_tools.simulate.boundary import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
 
 from ._capture import CaptureRound
 from ._carrier_plan import populate_carrier_plan, ramp_families_for_rows
@@ -34,7 +34,7 @@ from ._shaped_dispatch import (
 from ._shared_multitone_dispatch import route_sampled, split_gate_outsiders
 from ._slow_dispatch import direct_preferred as slow_direct_preferred
 from ._two_tone_dispatch import first_candidate
-from .engine import Cancelled, PathDiagnostics
+from .engine import PathDiagnostics
 from .exceptions import NoValidKernel
 from .kernel import (
     GuardPreparation,

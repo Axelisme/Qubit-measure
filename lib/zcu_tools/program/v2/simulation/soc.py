@@ -7,7 +7,12 @@ import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
 
-from zcu_tools.simulate.boundary import AcquireRequest, CancellationQuery, RoundSignals
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    CancellationQuery,
+    Cancelled,
+    RoundSignals,
+)
 
 from .binding import SimulationBinding
 from .result import IntegratedRound
@@ -69,9 +74,9 @@ class SimulationSoc(QickConfig):
         self._request: AcquireRequest | None = None
         self._cancel: CancellationQuery | None = None
         self._round_index = 0
-        self._accumulated = {}
+        self._accumulated: dict[int, NDArray[np.int64]] | None = {}
         self._decimated = {}
-        self._poll_done = False
+        self._poll_done = True
         self._statistics: IntegratedRound | None = None
         self._statistics_copier = StatisticsCopier()
         self._raw_request: AcquireRequest | None = None
@@ -105,41 +110,88 @@ class SimulationSoc(QickConfig):
         self._cancel = cancel
         self.binding.last_request = request
         self._round_index = 0
+        self._poll_done = True
 
     def release_request(self) -> None:
         """Clear the installed controls and cancellation query, keeping results."""
         self._request = None
         self._cancel = None
+        self._poll_done = True
 
-    def run_round(self) -> IntegratedRound | RoundSignals:
+    def run_round(self, *, require_raw: bool = False) -> IntegratedRound | RoundSignals:
         """Execute the next installed round and detach/validate its numeric result.
 
-        Statistics remain compact until an accumulated getter is used. Signals
-        populate the usual buffers immediately. Raise on absent request or invalid
-        backend data; a successful call advances the software round index.
-        The installed cancellation query reaches numeric execution and pacing.
-        A backend Cancelled propagates without advancing the index or replacing
-        completed buffers. A trace computed before pacing is interrupted still counts.
+        Integrated results stay compact by default. Set require_raw for an
+        integrated consumer that needs full shots this round. Required raw is
+        validated and checked for Stop before clock credit, publication or index
+        advance. Copy those cached arrays with copy_integrated_raw. Decimated
+        signals always populate their transport buffers, including when Stop
+        interrupts pacing after a successful solve.
+        Absent request raises RuntimeError; invalid mode or backend data raises
+        ValueError. Cancelled from numeric work propagates without replacing
+        completed buffers or advancing the index.
         """
-        if self._request is None:
+        request = self._request
+        if request is None:
             raise RuntimeError("simulation has no active acquisition request")
-        result = self.binding.sample_round(
-            self._request, self._round_index, cancel=self._cancel
-        )
-        self._statistics = None
-        if isinstance(result, IntegratedRound):
-            result = IntegratedRound(
-                self._statistics_copier.copy(self._request, result.statistics),
-                result.raw,
-            )
-            self._statistics = result
-            self._raw_request = self._request
-            self._accumulated, self._decimated = {}, {}
+        if require_raw:
+            result = self._run_required_raw(request)
         else:
-            self._raw_request = None
-            self._accumulated, self._decimated = pack_signals(self._request, result)
+            result = self.binding.sample_round(
+                request, self._round_index, cancel=self._cancel
+            )
+            if isinstance(result, IntegratedRound):
+                result = self._detach_statistics(request, result)
+                self._publish_integrated(request, result, raw=None)
+            else:
+                self._accumulated, self._decimated = pack_signals(request, result)
+                self._statistics = None
+                self._raw_request = None
+        self._poll_done = True
         self._round_index += 1
         return result
+
+    def _run_required_raw(self, request: AcquireRequest) -> IntegratedRound:
+        if request.mode != "integrated":
+            raise ValueError("required raw shots need an integrated request")
+        cancel = self._cancel
+        with self.binding.sampling_required_raw(
+            request, self._round_index, cancel=cancel
+        ) as borrowed:
+            result = self._detach_statistics(request, borrowed)
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            raw = self.binding.materialize_raw(request, result.raw, cancel=cancel)
+        self._publish_integrated(request, result, raw=raw)
+        return result
+
+    def _detach_statistics(
+        self, request: AcquireRequest, result: IntegratedRound
+    ) -> IntegratedRound:
+        return IntegratedRound(
+            self._statistics_copier.copy(request, result.statistics), result.raw
+        )
+
+    def _publish_integrated(
+        self,
+        request: AcquireRequest,
+        result: IntegratedRound,
+        *,
+        raw: dict[int, NDArray[np.int64]] | None,
+    ) -> None:
+        self._statistics = result
+        self._raw_request = request
+        self._accumulated, self._decimated = raw, {}
+
+    def copy_integrated_raw(self) -> dict[int, NDArray[np.int64]]:
+        """Copy published integrated shots in QICK loop layout without sampling.
+
+        Buffers are writable and independent of the SoC. Raise RuntimeError
+        if no integrated raw has been materialized for the retained round.
+        """
+        if self._statistics is None or self._accumulated is None:
+            raise RuntimeError("no materialized integrated raw shots")
+        return {ch: values.copy() for ch, values in self._accumulated.items()}
 
     def start_tproc(self) -> None:
         self.run_round()
@@ -154,19 +206,25 @@ class SimulationSoc(QickConfig):
         ):
             raise ValueError("QICK readout layout differs from simulation request")
         del counter_addr
+        self.run_round(require_raw=True)
         self._poll_done = False
-        self.run_round()
 
     def poll_data(self, totaltime=0.1, timeout=None):
         del totaltime, timeout
         if self._poll_done or self._request is None:
             return []
         self._poll_done = True
-        self._materialize_accumulated()
+        assert self._accumulated is not None
         return [
             (
                 prod(self._request.loop_dims),
-                ([self._accumulated[w.channel] for w in self._request.readouts], {}),
+                (
+                    [
+                        self._accumulated[w.channel].reshape(-1, 2).copy()
+                        for w in self._request.readouts
+                    ],
+                    {},
+                ),
             )
         ]
 
@@ -178,19 +236,13 @@ class SimulationSoc(QickConfig):
         return self._decimated[ch][address : address + length].copy()
 
     def get_accumulated(self, ch, address, length):
-        self._materialize_accumulated()
-        return self._accumulated[ch][address : address + length].copy()
-
-    def _materialize_accumulated(self) -> None:
-        if self._statistics is not None and not self._accumulated:
-            if self._raw_request is None:
+        if self._accumulated is None:
+            if self._raw_request is None or self._statistics is None:
                 raise RuntimeError("raw transport requires a retained round request")
-            self._accumulated = {
-                ch: raw.reshape(-1, 2)
-                for ch, raw in self.binding.materialize_raw(
-                    self._raw_request, self._statistics.raw
-                ).items()
-            }
+            self._accumulated = self.binding.materialize_raw(
+                self._raw_request, self._statistics.raw
+            )
+        return self._accumulated[ch].reshape(-1, 2)[address : address + length].copy()
 
     def stop_tproc(self, *args, **kwargs) -> None: ...
     def start_src(self, *args, **kwargs) -> None: ...

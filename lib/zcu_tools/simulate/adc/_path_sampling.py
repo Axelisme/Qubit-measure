@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
+
 from ._integrated_paths import IntegratedPaths
 from ._jump_paths import JumpPaths
 from ._noise import noise_root
@@ -24,12 +26,14 @@ def physical_shots(
     rng: np.random.Generator,
     *,
     traces: bool = False,
+    cancel: CancellationQuery | None = None,
 ) -> dict[int, RealArray]:
     """Observe one outcome per shot, with an independent CTMC per read event.
 
     Return owned float64 (points,reps,reads[,samples],IQ) arrays. Within each
     event all ADCs and grids share initial states and paths; noise is independent
     per receiver/read/sample. Traces require equal sample counts per ADC.
+    Raise Cancelled at event or point-group checkpoints if cancel is set.
     """
     readout = prepared.readout
     point_dims = (
@@ -59,6 +63,8 @@ def physical_shots(
     ordered = sorted(range(len(keys)), key=keys.__getitem__)
     offsets = dict.fromkeys((channel for channel, _ in batches), 0)
     for event_index, states in enumerate(_event_states(readout, reps, rng)):
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
         plans = {
             (channel, content): IntegratedPaths(
                 batch.model,
@@ -103,6 +109,8 @@ def physical_shots(
                 output[channel][points, :, offset : offset + values.shape[1]] = (
                     values.reshape((len(points), reps, *values.shape[1:]))
                 )
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
         for channel, batch in batches:
             offsets[channel] += len(batch.events[0][event_index].grids)
     _add_receiver_noise(prepared, output, rng, traces=traces)

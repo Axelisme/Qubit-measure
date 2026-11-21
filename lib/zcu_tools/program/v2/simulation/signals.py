@@ -10,25 +10,36 @@ from numpy.typing import NDArray
 
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
+    CancellationQuery,
     ChannelStatistics,
     RoundSignals,
     RoundStatistics,
 )
 from zcu_tools.simulate.rounding import rounded_sums
 
-from .result import RawShots
+from .result import CancellableRawShots, RawShots
 
 
 def materialize_shots(
-    request: AcquireRequest, source: RawShots
+    request: AcquireRequest,
+    source: RawShots,
+    *,
+    cancel: CancellationQuery | None = None,
 ) -> dict[int, NDArray[np.int64]]:
     """Call an environment raw source and detach validated QICK shot arrays.
 
     request fixes ADC keys, loop dimensions and read counts. source owns signal,
     noise, rounding and layout. Wrong keys, dtype or shapes raise ValueError.
     Returned buffers are owned by the adapter, independent of future source calls.
+    With a query, a CancellableRawShots source can raise Cancelled without data.
+    Other sources use the original two-argument call.
     """
-    raw = source.materialize(request.reps, request.avg_level)
+    if cancel is not None and isinstance(source, CancellableRawShots):
+        raw = source.materialize_cancellable(
+            request.reps, request.avg_level, cancel=cancel
+        )
+    else:
+        raw = source.materialize(request.reps, request.avg_level)
     if set(raw) != {w.channel for w in request.readouts}:
         raise ValueError("raw ADC channels do not match request")
     detached = {}

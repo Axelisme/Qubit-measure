@@ -14,7 +14,7 @@ from threading import Event, Lock
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
-from zcu_tools.simulate.boundary import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
 
 if TYPE_CHECKING:
     from ._capture import CaptureBuffer
@@ -578,10 +578,6 @@ class EvolutionResult:
         object.__setattr__(self, "densities", densities)
 
 
-class Cancelled(Exception):
-    """Numeric work was cancelled at a cooperative check without a partial result."""
-
-
 class Engine:
     """Segment engine with inline or threaded execution.
 
@@ -841,7 +837,9 @@ class Engine:
                 WorkPlan(complete_table=geometry.table, content_key=content_key)
             ) as work_plan:
                 work_plan.routing.enabled = telemetry
-                populate_work_plan(geometry.table, source, work_plan, budget, cancel=cancel)
+                populate_work_plan(
+                    geometry.table, source, work_plan, budget, cancel=cancel
+                )
                 frontend_cpu_s = (
                     time.thread_time() - frontend_started if telemetry else 0.0
                 )
@@ -954,7 +952,9 @@ class Engine:
                     history_mode="project",
                 )
             ) as work_plan:
-                populate_work_plan(geometry.table, source, work_plan, budget, cancel=cancel)
+                populate_work_plan(
+                    geometry.table, source, work_plan, budget, cancel=cancel
+                )
                 # ADR-0078: expose observations, not a second dispatch entry point.
                 workers = (
                     self._workers

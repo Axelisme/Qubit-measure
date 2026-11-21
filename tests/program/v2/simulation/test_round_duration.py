@@ -11,7 +11,9 @@ from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import (
+    IntegratedRound,
     SimulationBinding,
+    SimulationCallbacks,
     SimulationClock,
     SimulationSoc,
     SimulationTiming,
@@ -21,9 +23,12 @@ from zcu_tools.simulate.boundary import (
     AcquireRequest,
     EnvironmentSnapshot,
     RoundSignals,
+    RoundStatistics,
+    SamplingIdentity,
     TimeBase,
     TimelineTemplate,
 )
+from zcu_tools.simulate.evolution import Cancelled
 
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
@@ -160,6 +165,60 @@ def test_simulation_clock_does_not_credit_cancelled_or_failed_rounds(clock: Cloc
         with pytest.raises(RuntimeError, match="numeric failure"):
             binding.sample_round(request_for(binding, 1), 0)
         assert sim_clock.now() == pytest.approx(0.05)
+
+
+@pytest.mark.parametrize("stop_before_publish", [False, True])
+def test_required_raw_gets_credit_only_after_acceptance(
+    clock: Clock, stop_before_publish
+):
+    stop = Event()
+    sim_clock = SimulationClock(monotonic=clock.monotonic)
+    outcomes = []
+    raw_clock = []
+
+    class LegacyRaw:
+        def materialize(self, reps, avg_level):
+            raw_clock.append(sim_clock.now())
+            clock.now += 0.04
+            if stop_before_publish:
+                stop.set()
+            return {}
+
+    def execute(round_request):
+        clock.now += 0.02
+        request = round_request.acquire
+        return IntegratedRound(
+            RoundStatistics(
+                np.full((3, 1), request.reps, dtype=np.int64),
+                (),
+                SamplingIdentity(1),
+            ),
+            LegacyRaw(),
+        )
+
+    binding = SimulationBinding(
+        lambda: EnvironmentSnapshot("test", "test", ()),
+        execute,
+        backend_version="test",
+        callbacks=SimulationCallbacks(on_end=outcomes.append),
+        timing=SimulationTiming(time_scale=0.5, clock=sim_clock),
+    )
+    soc = SimulationSoc(load_soccfg(), binding, routes=())
+    with binding.acquire() as sequence:
+        request = replace(request_for(binding, sequence), mode="integrated")
+        soc.install_request(request, cancel=stop)
+        if stop_before_publish:
+            with pytest.raises(Cancelled):
+                soc.start_readout(30, 0, [], [])
+        else:
+            soc.start_readout(30, 0, [], [])
+            assert soc.poll_data() == [(30, ([], {}))]
+        assert raw_clock == pytest.approx([0.1])
+        # Required raw's 40 ms is wall time, not part of the paced interval.
+        assert sim_clock.now() == pytest.approx(0.14 if stop_before_publish else 0.24)
+        soc.release_request()
+    (outcome,) = outcomes
+    assert outcome.materialize_wall_s == pytest.approx(0.04)
 
 
 def test_physical_target_scales_with_reps_and_time_scale(clock: Clock):
