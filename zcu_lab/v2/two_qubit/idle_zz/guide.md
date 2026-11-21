@@ -10,9 +10,9 @@ Cfg schema 為 7.0。掃描欄位使用 `dc`。
 
 在目前 point 的 Aliases 表綁定 `$qubit1`、`$qubit2` 到不同元件，並綁定 `$mux` 到包含兩者的 MuxGroup。舊 point 也要新增這兩個位置 alias；不會自動重綁。GUI aliases 與 Notebook 的同名內建角色分開設定。 不需要綁定 `$coupler`。依 [校準步驟](../guide.md) 準備兩顆的 Xπ、Xπ/2 與 mux readout。
 
-Open／Reset 根據有序的 `$mux.qubits` 設定隱藏的 tone index。每顆 qubit 的 Xπ 與 Xπ/2 使用同一 generator；兩顆 qubit 使用不同 generator。Readout 引用完整 `$mux.module.readout` slot，缺 slot 時手填 blank mux 範本。Qubit1/Qubit2 必須有含 radius 的 circle classifier，缺少時先完成 GE Post。其他 tone 保留原順序，不要求 classifier。
+Open／Defaults 根據有序的 `$mux.qubits` 設定隱藏的 tone index。每顆 qubit 的 Xπ 與 Xπ/2 使用同一 generator；兩顆 qubit 使用不同 generator。Readout 引用完整 `$mux.module.readout` slot，缺 slot 時手填 blank mux 範本。Qubit1/Qubit2 必須有含 radius 的 circle classifier，缺少時先完成 GE Post。其他 tone 保留原順序，不要求 classifier。
 
-Refresh 保留原稿，並用新 capture [核對完整 tone 數](../guide.md#綁定位置與讀出-tones)。要用新來源或 aliases 重填初值時，按 Reset。Reset 會替換原稿；請核對兩顆 qubit 的 pulses 與 readout 順序。
+Refresh 保留原稿，並用新 capture [核對完整 tone 數](../guide.md#綁定位置與讀出-tones)。要用新來源或 aliases 重填初值時，按 Defaults。Defaults 會替換原稿；請核對兩顆 qubit 的 pulses 與 readout 順序。
 
 ## 設定與 Run
 

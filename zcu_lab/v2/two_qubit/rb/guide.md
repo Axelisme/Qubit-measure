@@ -6,13 +6,13 @@
 
 Cfg schema 7.0 uses `qubit1` and `qubit2` positions.
 
-Refresh keeps authored input and rechecks it against the new capture, including the [mux tone count](../guide.md#綁定位置與讀出-tones). Use Reset to replace unsaved input with initial values from the new source.
+Refresh keeps authored input and rechecks it against the new capture, including the [mux tone count](../guide.md#綁定位置與讀出-tones). Use Defaults to replace unsaved input with initial values from the new source.
 
 ## Before run
 
 Select `two_qubit/rb` after calibrating the Qubit1/Qubit2 X90 and X180 pulses, complete mux readout,
 two charge-line CZ pulses and their local-Z corrections. Bind scalar aliases
-`qubit1`, `qubit2`, `coupler` and `mux`, then Open or Reset the Form. The fixed capture
+`qubit1`, `qubit2`, `coupler` and `mux`, then open the tab or choose Defaults. The fixed capture
 maps logical Q0 to Qubit1 and Q1 to Qubit2. Their tone positions come from the captured
 `$mux.qubits` list. Bind the two positions to distinct components listed there.
 When reusing an older point, bind the new qubit aliases and rename the CZ slots and pulse library keys to `cz_qubit1` and `cz_qubit2`. Rerun [local Z](../local_z/guide.md) and apply its proposal to populate the new pair keys below.
@@ -28,13 +28,13 @@ and a common start. Their individual gains and constructive relative phase
 remain unchanged throughout a sequence.
 
 The required `$coupler.ext.cz_phase` input contains `qubit1`, `qubit2`,
-`correction_qubit1_deg` and `correction_qubit2_deg`. Open and Reset check the names against the captured components in order and report the mismatched position. The cfg keeps only the angles. Corrections are
+`correction_qubit1_deg` and `correction_qubit2_deg`. Opening the tab or choosing Defaults checks the names against the captured components in order and reports the mismatched position. The cfg keeps only the angles. Corrections are
 logical Z angles in degrees, normally minus the corresponding measured local-Z
 slope. Missing angles remain invalid. Review any operator override against measured
 calibration before Run; model hypotheses only describe assumed behavior.
 
 The saved readout cfg must supply circle g/e centers and radius at
-`qubit1_tone` and `qubit2_tone`, not by ADC sorting. Open and Reset fill these hidden fields. Run rejects missing,
+`qubit1_tone` and `qubit2_tone`, not by ADC sorting. Opening the tab or choosing Defaults fills these hidden fields. Run rejects missing,
 linear or radius-free classifiers and requests GE Post. After changing readout
 settings, repeat GE and Post before using the classifiers.
 

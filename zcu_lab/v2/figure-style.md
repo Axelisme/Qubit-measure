@@ -10,7 +10,7 @@
 
 壞例：Ramsey 圖上只寫 `detune = 0.402 MHz`，讀者分不出那是施加的失諧還是條紋擬合值，也不知道頻率該往哪裡改。
 
-好例（本地改寫示例）：圖內標明擬合的條紋頻率，Analyze 摘要列出同一次 run 的實際 detune 和 π/2 脈衝來源頻率，guide 說明符號慣例和修正式。有有效的條紋 fit 才用修正式。例如來源為 5800.000 MHz、施加 0.400 MHz、擬合 0.402 MHz，則建議值為 5799.998 MHz，比來源低 0.002 MHz。Ding 圖 5-9(b,e)（頁 152）示範如何把 Ramsey 類序列與對應的相位判讀放在一起。
+好例（本地改寫示例）：圖內標明擬合的條紋頻率，Analyze 摘要列出同一次 run 的實際 detune，guide 說明如何找出當次 π/2 脈衝來源頻率，並寫出符號慣例和修正式。有有效的條紋 fit 才用修正式。例如來源為 5800.000 MHz、施加 0.400 MHz、擬合 0.402 MHz，則建議值為 5799.998 MHz，比來源低 0.002 MHz。Ding 圖 5-9(b,e)（頁 152）示範如何把 Ramsey 類序列與對應的相位判讀放在一起。
 
 ### 組讀者包
 
@@ -42,8 +42,8 @@
 
 | 類別 | 缺陷或限制 | 例子 |
 | --- | --- | --- |
-| A | 圖與摘要無法辨認 run 身分或實際採集設定 | 只見表單初值，不知實際掃描點數、完成輪數、是否提前停或施加的 detune。見 R10。 |
-| B | 缺逐點不確定度或 shot 數 | 機率點沒有 error bar，只報了 fit 參數的誤差。見 R8、R10、R11。 |
+| A | 圖與摘要無法辨認 run 身分或判讀所需的採集設定 | 只見表單初值，不知該次 cfg 的 Reps×Rounds 或實際施加的 detune。見 R10。 |
+| B | 缺逐點不確定度 | 機率點沒有用 shot SEM 畫 error bar，只報了 fit 參數的誤差。見 R11。 |
 | C | 缺已回傳的 fit 品質值、指標解釋，或既有選取判準的說明 | 圖列了殘差 RMS，guide 沒說這個數值代表什麼。若候選未通過既有選取判準，圖沒指出未通過的指標與門檻也算缺陷。沒有既有判準不算缺陷。見 R3b、Gd3。 |
 | D | 表單欄位的語意或單位不清 | `Frequency` 沒說是 RF 還是 IF；`Reset` 欄位與 Reset 按鈕混淆。 |
 | E | 圖上的標題、圖例或軸量不清 | y 軸只寫 `Real Signal`，沒說投影與單位。見 R6、R7。 |
@@ -107,12 +107,12 @@ y 軸與色階預設依資料範圍自動縮放。跨圖比較才用固定尺度
 - 壞例：標題 `terminal_gg · herald=True`，軸名 `df`。
 - 好例：Ding 圖 5-8(b)（頁 151）寫出驅動頻率、脈衝平台（plateau）長度與色階所指的態。[本地 CZ Chevron](two_qubit/chevron/guide.md) 掃的是兩路共用的驅動頻率與波形包絡長度，不是論文的 plateau。改寫時，標題可用「CZ Chevron · Q1/Q2 · P(g,g)」，軸標「共用驅動頻率 (MHz)」和「共用波形包絡長度 (µs)」，色棒標「雙 Xπ 後的 P(g,g)」。
 
-### R7：用實際存檔尺寸檢查版面
+### R7：用 GUI 與存檔的實際尺寸檢查版面
 
-按存檔 PNG 的實際尺寸看圖。最小字級 10 pt，tick 標籤不能重疊，legend 不能蓋資料。一張圖最多 6 個 panel。
+在 GUI 各頁面以實際顯示尺寸看圖，也按存檔 PNG 的實際尺寸檢查。面板不是固定格子，Save 頁面較窄。字級跟著顯示尺寸縮放，最小字級 10 pt。tick 標籤不能重疊，legend 不能蓋資料。一張圖最多 6 個 panel。
 
-- 壞例：編輯時放大視窗才讀得清楚，存檔後 colorbar 擠到標題，tick 標籤彼此重疊。
-- 好例：Ding 圖 5-7（頁 150）的四分支分成 2×2 panel。採用這種分組後，仍要以自己匯出的 PNG 核對字級、tick、legend 與資料位置。
+- 壞例：放大 Run 頁才讀得清楚，切到較窄的 Save 頁就看不清 tick 標籤；存檔後 colorbar 又擠到標題。
+- 好例：Ding 圖 5-7（頁 150）的四分支分成 2×2 panel。採用這種分組後，仍要在 GUI 和匯出的 PNG 核對字級、tick、legend 與資料位置。
 
 ### R8：圖型對應資料，liveplot 標明進度
 
@@ -132,19 +132,21 @@ y 軸與色階預設依資料範圍自動縮放。跨圖比較才用固定尺度
 
 ### R10：圖放理論重點，採集設定放摘要
 
-圖上放物理量、模型、擬合結果與判讀所需的標註。不要把 run 身分或採集設定印在圖上。存檔路徑已有實驗名與 run id。GUI 與 MCP 的可見 Analyze 摘要應列出實驗名與 run id，由 adapter 提供同一次 run 的實際採集資訊：Reps×Rounds 與完成輪數、shot 數、是否提前停，以及實際施加的值，例如 detune。liveplot 的進度仍按 R8 顯示。
+圖上放物理量、模型、擬合結果與判讀所需的標註。不要把 run 身分或採集設定印在圖上。存檔路徑已有實驗名與 run id。除了定位 run 的實驗名與 run id，GUI 與 MCP 的可見 Analyze 摘要只由 adapter 補上該次 cfg 的 Reps×Rounds，以及實驗已回傳的實際施加值，例如 detune。不列完成輪數、是否提前停或 shot 數。liveplot 的進度仍按 R8 顯示。
 
-Run 身分與採集資訊屬於呈現資料，不寫進原生結果的 JSON `summary`。MCP 的 Analyze 回覆已沿用 [RPC handler 提供的 `presentation`](../../lib/zcu_tools/gui/app/measure/remote/handlers/analysis.py)，獨立傳遞來源 run id。原生結果欄位維持不變，見 [S2](#s2report-的數值沿用-analyze-摘要名稱)。
+Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summary`，也不擴充 `RunMetadata`。各實驗依需要決定是否在 Result 保存實際施加值。MCP 的 Analyze 回覆沿用 [RPC handler 提供的 `presentation`](../../lib/zcu_tools/gui/app/measure/remote/handlers/analysis.py)，獨立傳遞來源 run id。原生結果欄位的命名見 [S2](#s2report-的數值沿用-analyze-摘要名稱)。
 
-- 壞例：Ramsey 圖標題塞了 run id 和初始設定，摘要卻沒說跑了幾輪或施加多少 detune。
-- 好例（本地改寫示例）：圖上只保留判讀條紋和 T2* 需要的量與標註。同次 Analyze 摘要在實驗名與 run id 旁列「Reps×Rounds 1000×10（完成 10/10 輪）· 提前停：否 · 實際 detune 0.400 MHz」，另報實際 shot 數。Ding 圖 5-9(e)（頁 152）的相位圖集中在判讀所需的 180° 參考線與候選頻率。
+- 壞例：Ramsey 圖標題塞了 run id 和初始設定，摘要卻只重複表單初值，沒寫實驗回傳的實際 detune。
+- 好例（本地改寫示例）：圖上只保留判讀條紋和 T2* 需要的量與標註。同次 Analyze 摘要在實驗名與 run id 旁列「Reps×Rounds 1000×10；實際 detune 0.400 MHz」。Ding 圖 5-9(e)（頁 152）的相位圖集中在判讀所需的 180° 參考線與候選頻率。
 
 ### R11：對數值大小敏感的一維資料畫 error bar
 
-Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二維圖不畫逐點 error bar。其他實驗依同一判準決定，並在 guide 寫明 error bar 的來源。fit 參數的誤差與量測點的誤差是兩件事。
+Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二維圖不畫逐點 error bar。其他實驗依同一判準決定，並在 guide 寫明 error bar 的來源。
+
+逐點 shot SEM 估計該點平均值的標準差，代表這個平均值的預期誤差。shot SEM = 每發樣本標準差 ÷ √(保留 shot 數)。被 mask 的 shot 不算。它不是單發散布 σ、輪間散布或 fit 參數誤差。RB 的跨 seed 標準差也不是 shot SEM。估計器在 [`zcu_tools.analysis`](../../lib/zcu_tools/analysis/README.md)。只存平均的實驗在家族修正時新增二階 moment 欄位。舊檔仍可 Load，缺少估計所需資料時不畫 error bar。
 
 - 壞例：T1 只報 `T1 = 80 ± 5 µs`，不顯示每個量測點的不確定度。
-- 好例：Rabi 的布居點畫逐點 error bar，若畫的是各點平均值的標準誤，guide 寫明以各點獨立重複量測的樣本標準差除以重複次數的平方根。Ding 圖 5-13(a)（頁 157）的 CZ fidelity 對脈衝寬度圖，示範數值大小有意義時如何顯示估值的不確定度；圖 5-8(b)（頁 151）的二維掃描則用熱圖。
+- 好例：Rabi 的逐點布居用 shot SEM 畫 error bar。Ding 圖 5-13(a)（頁 157）的 CZ fidelity 對脈衝寬度圖可作逐點誤差棒的版式參考；圖 5-8(b)（頁 151）的二維掃描則用熱圖。
 
 ### R12：y 軸畫物理 observable
 
@@ -177,11 +179,11 @@ Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二�
 
 ### F1：label 用操作員的物理用語
 
-用量或脈衝的名稱，不用 cfg key 或內部名稱。只改顯示 label，保留 cfg key 及 `qubit1`、`qubit2` 等位置名。欄位名若和 GUI 按鈕撞名，只改 label 來區分。
+用量或脈衝的名稱，不用 cfg key 或內部名稱。只改顯示 label，保留 cfg key 及 `qubit1`、`qubit2` 等位置名。用不同的文字區分物理欄位和 GUI 操作。
 
 - 壞例：把 Ramsey 的欄位標成 `detune_ratio`，或讓重置模組欄位與表單重設按鈕都叫 `Reset`。
 - 好例（repo 現例）：[Ramsey 表單](twotone/time_domain/t2ramsey/form.py) 把 `detune_ratio` 顯示為 `Detune ratio (fringes/step)`，寫出每掃描一步的相位變化量。
-- 好例（本地改寫示例）：把重置模組欄位的 label 改為 `Reset method` 以免撞名。cfg key 仍是 `reset`，按鈕仍叫 Reset。
+- 好例：重置模組欄位維持 `Reset`，cfg key 仍是 `reset`。Run 頁的 `Defaults` 按鈕重新讀取來源並重建表單初值。
 
 ### F2：數值欄位標單位
 
@@ -217,7 +219,7 @@ Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二�
 - 適用範圍只寫物理假設、observable 和結果能辨識什麼。板子限制與 QICK 等底層問題不放 guide，見 [ADR-0075〈判讀依據放知識庫〉](../../docs/adr/0075-agent-interface-layers.md#判讀依據放知識庫)。
 
 - 壞例：Ramsey guide 只寫「擬合後按需要調整 qubit 頻率」，不說圖上的 detune 是什麼，也沒給修正式。
-- 好例：依 [Ramsey guide](twotone/time_domain/t2ramsey/guide.md)，量 T2* 的序列是 π/2 → 自由演化 → 相位隨等待時間改變的 π/2 → 讀出。先校準 π/2 脈衝，換參數來源後用 Reset 重抓初值。Run 前檢查延遲掃描上限和取樣間距。掃描初值為 0 到 1.5 × `qubit.t2r`，共 101 點；`Detune ratio` 預設為 0.05，除以延遲步距（µs）就是施加的 detune（MHz）。從擬合圖讀 T2* 和條紋頻率。若只量到衰減的一小段，T2* 主要靠模型外推。
+- 好例：依 [Ramsey guide](twotone/time_domain/t2ramsey/guide.md)，量 T2* 的序列是 π/2 → 自由演化 → 相位隨等待時間改變的 π/2 → 讀出。先校準 π/2 脈衝，換參數來源後按 Defaults 重抓初值。Run 前檢查延遲掃描上限和取樣間距。掃描初值為 0 到 1.5 × `qubit.t2r`，共 101 點；`Detune ratio` 預設為 0.05，除以延遲步距（µs）就是施加的 detune（MHz）。從擬合圖讀 T2* 和條紋頻率。若只量到衰減的一小段，T2* 主要靠模型外推。
 
   只有條紋 fit 有效，且知道同一次 run 實際施加的 detune，才用「該次 π/2 脈衝來源頻率 + 實際施加的 detune − 擬合條紋頻率」建議 `qubit.freq`。擬合值比施加值高 0.002 MHz 就下調 0.002 MHz，低 0.002 MHz 就上調 0.002 MHz。純衰減 fit 或載入資料的實際 detune 不明時，不建議修正頻率。
 
@@ -248,5 +250,5 @@ Ding 博論有相近的圖時，以「版式參考」引圖號和印刷頁碼。
 
 Report 的數值帶名稱與單位。只有語意相同的量才和[可見的 Analyze 摘要](#r10圖放理論重點採集設定放摘要)共用顯示名稱與單位。原生 JSON `summary` 沿用 core 結果的 key。不要為顯示名稱改 schema、加重複欄位或另造 summary model。
 
-- 壞例：Ramsey report 寫 `detune = 0.402`，摘要把這個值叫條紋頻率，讀者可能誤認成施加的 detune。
-- 好例：report 和 Analyze 摘要都把這個量標為「擬合條紋頻率 = 0.402 MHz」。摘要 key 沿用 core 的 `detune`，不另造 `fringe_freq`。若摘要也列施加值，另用「實際施加的 detune」區分。
+- 壞例：Ramsey report 把擬合條紋頻率寫成 `detune = 0.402`，讀者可能誤認成 Analyze 摘要裡實際施加的 detune。
+- 好例：report 與 Analyze 圖都寫「擬合條紋頻率 = 0.402 MHz」。原生 JSON `summary` 的 key 沿用 core 的 `detune`，不另造 `fringe_freq`。report 若也列施加值，沿用 Analyze 摘要的「實際施加的 detune」與單位 MHz。

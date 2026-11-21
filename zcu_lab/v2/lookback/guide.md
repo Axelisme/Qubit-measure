@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-23
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Behavior
 
@@ -40,11 +40,11 @@ Use a wide readout window to capture the full pulse arrival. Increase `smooth`, 
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Check the ADC window and trigger offset. Reset and Init pulse stay hidden.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `lookback` after inspecting the same Form errors.
    No scan count is exposed; use frequency_mhz when no frequency source exists. Analysis controls are ratio, smooth and plot_fit.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

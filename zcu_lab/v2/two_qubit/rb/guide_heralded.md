@@ -9,7 +9,7 @@ Cfg schema 4.0 uses `qubit1` and `qubit2` positions.
 Select `two_qubit/rb_heralded`. Calibrate X90 and X180 on both roles, full mux
 readout, both CZ pulses and ordered local-Z corrections as described in the
 [ordinary RB guide](guide.md). Follow its rebinding steps for an older point.
-Open or Reset captures the same module slots and checks that the local-Z pair names match the two captured components in order.
+Opening the tab or choosing Defaults captures the same module slots and checks that the local-Z pair names match the two captured components in order.
 The cfg deduplicates and sorts both `depth` and `seed` so that the saved cfg
 matches the data axes. As in ordinary RB, Refresh keeps the draft and rechecks the
 [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.

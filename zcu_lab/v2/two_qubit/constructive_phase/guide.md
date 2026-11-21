@@ -8,7 +8,7 @@ Scan Qubit2 minus Qubit1 relative phase in degrees and common envelope duration 
 Each shot emits optional reset, nominal B11 preparation, simultaneous two-line
 drive, double Xπ contrast and one terminal mux readout.
 `reset=None` emits no reset. Set a reset cfg only after reviewing its pulse
-and timing against the authorized limits. The Form's Reset action recaptures
+and timing against the authorized limits. The Defaults button recaptures
 inputs; it does not emit a reset pulse.
 
 Both qubit tones require circle classifiers with g/e centers and radius.
@@ -24,7 +24,7 @@ Bind `coupler` to the component that stores their CZ pulses.
 Notebook uses the same built-in position names, but does not bind the GUI aliases.
 For an existing point, bind the new aliases. Rename both CZ slots and their library keys to
 `cz_qubit1` and `cz_qubit2`. Make each slot point to its renamed key.
-Open or Reset to set the hidden tone indices from `$mux.qubits`.
+Open the tab or choose Defaults to set the hidden tone indices from `$mux.qubits`.
 Check both Xπ pulses and all mux tones, ADC routes and scalar timing.
 Readout references `$mux.module.readout` when present. Otherwise fill the blank
 mux template, including classifiers. Missing sources remain required inputs.
@@ -48,7 +48,7 @@ delays appear last.
 Enter finite scan endpoints and strictly positive durations.
 Review repetitions, rounds, optional reset and timing before Run.
 Refresh keeps authored inputs and rechecks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
-Use Reset to replace unsaved input with initial values from the new source.
+Use Defaults to replace unsaved input with initial values from the new source.
 
 ## Read the figures
 

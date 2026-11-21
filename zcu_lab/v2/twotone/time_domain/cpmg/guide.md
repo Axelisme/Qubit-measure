@@ -4,13 +4,13 @@
 
 **Last updated:** 2026-10-21
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Configure the scan
 
 Pi pulse counts accepts Log or List input. Log uses a maximum count and requested point count. It starts at 1 and retains the maximum count. It rounds geometrically spaced values to integers and removes duplicates. A maximum greater than 1 requires at least two requested points. A maximum of 1 accepts one point and returns `[1]`. Use List for any other single count. The resulting list may have fewer points than requested. List accepts a nonempty JSON array of positive integers, such as `[1, 2, 4, 8]`. Zero, negative counts and fractional counts are invalid.
 
-Minimum time and Maximum time define one shared total-time window in µs for every pulse count. On Open or Reset, Minimum time starts at 16 times the sum of the calibrated π/2 and π pulse durations. The factor 16 is the initial maximum number of refocusing pulses. If either calibrated pulse is missing or uses an arbitrary waveform defined by samples, the form leaves Minimum time blank. Enter it before running. Changing Pi pulse counts does not recalculate Minimum time. Maximum time starts at 100 µs, and Time points starts at 101 samples per row. Increase the minimum time when a large pulse count leaves too little spacing between pulses.
+Minimum time and Maximum time define one shared total-time window in µs for every pulse count. When you open the tab or choose Defaults, Minimum time starts at 16 times the sum of the calibrated π/2 and π pulse durations. The factor 16 is the initial maximum number of refocusing pulses. If either calibrated pulse is missing or uses an arbitrary waveform defined by samples, the form leaves Minimum time blank. Enter it before running. Changing Pi pulse counts does not recalculate Minimum time. Maximum time starts at 100 µs, and Time points starts at 101 samples per row. Increase the minimum time when a large pulse count leaves too little spacing between pulses.
 
 For Python callers, `CPMG_Cfg.delay` also accepts a list of `SweepCfg`, one delay sweep per pi-pulse count in `count` order. Every sweep must have the same number of points. This lets different pulse counts use different total-time windows. The GUI continues to provide one shared window.
 
@@ -20,7 +20,7 @@ For Python callers, `CPMG_Cfg.delay` also accepts a list of `SweepCfg`, one dela
 
 The form uses the captured `$qubit.module.x180`, `$qubit.module.x90` and `$resonator.module.readout` slots. Missing slots use pi_pulse, pi2_pulse and readout templates. Reset uses `$qubit.module.reset` and stays disabled when absent. Missing calibration in a template remains Invalid until supplied.
 
-Relax delay starts at 5 times the captured `$qubit.t1`. A missing or null T1 uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves the derived input empty. Open and Reset capture these sources. After alias or calibration edits, use Reset to refresh the form.
+Relax delay starts at 5 times the captured `$qubit.t1`. A missing or null T1 uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves the derived input empty. Open and Defaults capture these sources. After alias or calibration edits, use Defaults to refresh the form.
 
 ## Run and analyze
 
@@ -39,11 +39,11 @@ The cpmg recipe follows the same Run, Analyze and Save steps and reports the sam
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Obtain calibrated pi and pi/2 pulses. Set positive refocusing counts and the shared evolution-time window.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `cpmg` after inspecting the same Form errors.
    max_n/points produces the count grid, or supply times. length_points sets Time points and delay.expts. min_length_us/max_length_us set the time window. fit_fringe changes only analysis.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

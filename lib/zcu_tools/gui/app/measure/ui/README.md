@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-19，Results Browser 索引
+**Last updated:** 2026-11-22，Run 頁 Defaults 與 Analysis 來源
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -71,7 +71,10 @@ cleanup together. Data activation refreshes previews before switching pages,
 then reflows the visible gallery. The tab's overridable public figure reader
 remains the preview source; each failed pane read leaves only that preview empty.
 Figure/container methods on the tab delegate to this owner. Results and Save
-policy stay with their existing owners.
+policy stay with their existing owners. When Primary has a result, the left
+Analysis panel shows the adapter name and the published Run ID if available.
+It clears that source label when the result is cleared. The label is separate
+from the adapter summary lines shared with MCP.
 
 Run, Analysis, Post-Analysis and Workflow share a two-column tiled layout with
 up to four figures per page. Larger sets show Previous page and Next page controls
@@ -189,7 +192,7 @@ the greyed-out date edits; either their text area or arrow opens the calendar.
 新 tab 的 Load 使用既有 application owner。缺少 analysis source 的原因同時顯示在瀏覽器結果與載入後的 tab。
 A history tab whose form factory failed shows its original reason in the form
 area. Run shows that reason unless an earlier domain prerequisite fails, such
-as missing active context. Reset can replace that notice with a real editor;
+as missing active context. The Run page's Defaults button can replace that notice with a real editor;
 a failed retry leaves the notice and shows the current preparation error.
 
 `ArtifactSaveCenter` shows each output on two lines: the filename, status and

@@ -11,15 +11,15 @@ Bind `coupler` to the component that stores their CZ pulses.
 Notebook uses the same built-in position names, but does not bind the GUI aliases.
 For an existing point, bind the new aliases. Rename both CZ slots and their library keys to
 `cz_qubit1` and `cz_qubit2`. Make each slot point to its renamed key.
-Open or Reset captures aliases, parameters and library once. Refresh keeps the draft and checks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
-After changing bindings or calibrations, Reset and check the whole Form again.
+Opening the tab or choosing Defaults captures aliases, parameters and library once. Refresh keeps the draft and checks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
+After changing bindings or calibrations, choose Defaults and check the whole Form again.
 
 ## Preparation and inputs
 
 Supply calibrated `$qubit1.module.x180`, `$qubit2.module.x180`, and the complete mux
 readout. Readout references `$mux.module.readout` when present.
 Without that slot, fill every required field in the blank mux template.
-Keep all tones in their original order. Open or Reset sets hidden tone indices from `$mux.qubits`.
+Keep all tones in their original order. Opening the tab or choosing Defaults sets hidden tone indices from `$mux.qubits`.
 
 Both qubit tones require circle classifiers with radius. Missing classifiers,
 linear classifiers and missing radii make the cfg invalid before Run.
@@ -104,7 +104,7 @@ Writeback fails without that capture.
 
 Select the rows you accept, then press Apply Selected.
 Pulse rows and slot rows apply independently. Apply each required slot explicitly.
-Reset other open forms to capture accepted calibrations.
+Choose Defaults in other open forms to capture accepted calibrations.
 Alternate amplitude and conditional-phase/frequency manually.
 After changing pulse shape, duration, phase, gain, frequency or bias,
 recheck CZ and remeasure both local-Z corrections.

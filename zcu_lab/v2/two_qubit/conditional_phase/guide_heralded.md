@@ -5,8 +5,8 @@
 ## Inputs and sequence
 
 Choose `two_qubit/conditional_phase_heralded`. This experiment has its own saved cfg and Result. Bind `qubit1`, `qubit2`, `coupler` and `mux` as in the [ordinary guide](guide.md#prepare-the-inputs), which also explains how to rebind an existing point.
-Notebook uses the same built-in position names, but does not bind the GUI aliases. Open or Reset sets two hidden tone indices from `$mux.qubits`.
-Both qubit tones need a circle classifier with a GE Post radius before Run. Other tones need no classifier. Reset the Form after changing captured sources.
+Notebook uses the same built-in position names, but does not bind the GUI aliases. Opening the tab or choosing Defaults sets two hidden tone indices from `$mux.qubits`.
+Both qubit tones need a circle classifier with a GE Post radius before Run. Other tones need no classifier. Choose Defaults after changing captured sources.
 
 Every shot emits optional reset, herald mux readout, the original preparation/CZ/projection sequence, then terminal mux readout. Set reset=None to skip reset. Herald and terminal use the same mux object, tones, gain, integration and classifier settings.
 

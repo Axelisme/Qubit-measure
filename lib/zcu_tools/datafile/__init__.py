@@ -21,7 +21,7 @@ if TYPE_CHECKING:
         Variable,
         VariableSchema,
     )
-    from .container_nodes import json_text
+    from .container_nodes import json_text, validate_variable
     from .grouped import load_grouped_labber_data
     from .json_values import json_values_equal
     from .labber_container import read_labber
@@ -49,6 +49,7 @@ __all__ = [
     "Axis",
     "Variable",
     "VariableSchema",
+    "validate_variable",
     "Container",
     "ContainerAttrs",
     "ContainerInfo",
@@ -84,6 +85,7 @@ _EXPORT_MODULES = {
     "Axis": ".container_models",
     "Variable": ".container_models",
     "VariableSchema": ".container_models",
+    "validate_variable": ".container_nodes",
     "Container": ".container_models",
     "ContainerAttrs": ".container_models",
     "ContainerInfo": ".container_models",

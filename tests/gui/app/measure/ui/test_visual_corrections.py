@@ -135,22 +135,22 @@ def exp_tab_widget(qapp, make_ctrl):
 def test_run_action_switches_to_stop_and_restores_after_completion(
     qapp, exp_tab_widget, make_ctrl
 ):
-    """Run/Stop treatment follows interaction state and preserves Reset availability."""
+    """Run/Stop treatment follows interaction state and preserves Defaults availability."""
     ctrl = make_ctrl()
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
     qapp.processEvents()
 
-    # Reset and Run text present, Run has primaryButton, Stop semantics
-    assert tab.reset_btn.text() == "Reset"
+    # Defaults and Run text present, Run has primaryButton, Stop semantics
+    assert tab.reset_btn.text() == "Defaults"
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.objectName() == "primaryButton"
     idle_style = tab.run_btn.styleSheet()
     assert not tab.reset_btn.isHidden()
     assert tab.reset_btn.height() == tab.run_btn.height()
 
-    # While running, Reset is hidden and Run becomes Stop.
+    # While running, Defaults is hidden and Run becomes Stop.
     assert snap.interaction is not None
     busy = dataclasses.replace(
         snap,

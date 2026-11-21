@@ -41,4 +41,4 @@ basis:
 
 ## 依據
 
-原始調查與合成檔未入庫。舊 joint_readout 的保存宣告可查 basis commit。對外的舊檔處理步驟在 [two-qubit guide](../../zcu_lab/v2/two_qubit/guide.md#openreset-與人工-apply)。
+原始調查與合成檔未入庫。舊 joint_readout 的保存宣告可查 basis commit。對外的舊檔處理步驟在 [two-qubit guide](../../zcu_lab/v2/two_qubit/guide.md#opendefaults-與人工-apply)。

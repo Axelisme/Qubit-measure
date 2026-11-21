@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-10-22
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## GUI setup
 
@@ -30,14 +30,14 @@ positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
 out-of-range participants block Run and remain editable for correction.
 
 Selected tones need drives on independent generators, distinct from readout.
-Open/Reset fills selected tones' drive and pi_pulse defaults and sets
+Open/Defaults fills selected tones' drive and pi_pulse defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
-Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
+Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
 and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
 Alias list elements may use `$` links. A missing, unbound or empty row selects all
-original indices in order. An unbound element in a nonempty list rejects Open/Reset.
+original indices in order. An unbound element in a nonempty list rejects Open/Defaults.
 An out-of-group name stays visible as an invalid Participants draft until corrected.
-Changing aliases requires Reset or reopening; ordinary participant edits keep tone values.
+Changing aliases requires Defaults or reopening; ordinary participant edits keep tone values.
 
 Editing participants preserves every tone value. Fill any newly selected tone's
 missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
@@ -67,7 +67,7 @@ The nonzero-detune fringe fit had enormous T2 uncertainty and was not calibratio
 
 Each tone needs a fixed x90 drive and x180 pi pulse on the same generator.
 The two pulses may have different waveforms, carriers, gains and phases.
-Validate both pulses for each selected tone. Open/Reset sets unselected drive/pi_pulse fields to None; both remain editable.
+Validate both pulses for each selected tone. Open/Defaults sets unselected drive/pi_pulse fields to None; both remain editable.
 Use finite, nonnegative bounds for the shared total-delay range in µs.
 Each tone has its own detune in MHz.
 
@@ -187,7 +187,7 @@ cover stop errors, completed-round averaging and caller-owned plots.
 Saved drafts retain invalid field text and Participants for correction.
 Restoration reports dropped fields and keeps the original parameter source.
 Unreadable saved inputs produce a diagnostic and fresh defaults.
-Reset captures current parameters and rebuilds initial values.
+Defaults captures current parameters and rebuilds initial values.
 
 Recipe writes and override paths use dotted strings, for example
 `"tones.0.drive.gain"`. The decimal index addresses the complete tone list.

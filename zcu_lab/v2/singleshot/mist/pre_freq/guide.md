@@ -8,7 +8,7 @@ The live plot shows Ground, Excited and Other versus preparation frequency in MH
 
 ## Starting values
 
-Open and Reset take a snapshot of aliases, parameters and module choices. The preparation pulse starts from the qub_probe template. Its sweep spans `$qubit.freq +/- 1.5 * $qubit.kappa` with 51 points. The fixed MIST probe starts from res_probe at `$resonator.freq`. Check both pulse gains and lengths before Run.
+Open and Defaults take a snapshot of aliases, parameters and module choices. The preparation pulse starts from the qub_probe template. Its sweep spans `$qubit.freq +/- 1.5 * $qubit.kappa` with 51 points. The fixed MIST probe starts from res_probe at `$resonator.freq`. Check both pulse gains and lengths before Run.
 
 Optional reset and pi pulse use `$qubit.module.reset` and `$qubit.module.x180`. Missing optional slots start disabled. Readout uses `$resonator.module.readout` when available, otherwise the readout template. Missing wiring or frequencies remain Invalid. Run also requires a complete circle classifier with radius on every readout ADC.
 
@@ -26,7 +26,7 @@ Relax delay starts at five times the captured T1. Missing or null T1 uses a 30 Â
 
 1. Select the qubit and resonator aliases, then Open singleshot/mist/pre_freq.
 2. Check preparation, pi, MIST probe and readout settings. Enable the pi pulse only when it is part of the intended sequence.
-3. Set the preparation-frequency span and shot count. Reset rebuilds defaults from a fresh source snapshot.
+3. Set the preparation-frequency span and shot count. Defaults rebuilds defaults from a fresh source snapshot.
 4. Preview the configuration, then Run. Analyze shows the corrected populations when a confusion matrix is available.
 5. Save the run and figures. Saved data retain the rounded preparation-frequency axis and measured G/E/Other fractions shaped Nfreq by 3.
 
