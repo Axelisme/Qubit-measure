@@ -10,7 +10,7 @@ Open and Reset take a snapshot of the current aliases, parameters and module cho
 
 Raw acquisition and joint fitting require one ADC: Pulse or a single-tone Mux. Live preview uses that readout's circle classifier under Readout → Advanced. Without a classifier, Run still collects raw IQ and Analyze still fits; only the population preview is skipped. A supplied linear classifier cannot show Other; a circle without radius prompts singleshot GE Post.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
 The gain sweep starts at -0.3 and stops at 1.0 regardless of calibration. When the x180 module has a stored scalar waveform length, its editable pulse copy starts at length = 1.5*pi_len*pi_gain us. pi_len must be a finite positive number; pi_gain must be finite and in (0, 1]. Both values must be numeric, with booleans treated as invalid. Missing, null or invalid values leave the required length empty. A finite invalid gain stays visible for correction; a nonfinite gain leaves both gain and length empty.
 

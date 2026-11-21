@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-11-01，作者入口與驗收命令分層
+**Last updated:** 2026-11-21，讀出範本的 ADC window 餘量
 
 **讀者：** lab-author、agent。查找實驗室定義的套件邊界、註冊入口與操作文件。
 
@@ -34,6 +34,8 @@ Alias 各自保存在 global 與 point 的 `aliases.yaml`，缺檔為空表，�
 
 Source package 路徑由 `zcu_lab.__file__` 與 `zcu_tools.__file__` 推得。
 Templates 發布後不修改其內容；frozen dataclass 不會遞迴凍結範本。
+
+`readout` 建立 1.0 µs 的 pulse 與 0.97 µs 的 ADC window。Trigger offset 是 resonator 的飛行時間加 0.015 µs，讓抵達 ADC 的 pulse 在開窗前、關窗後各多 0.015 µs。`readout_dpm` 沿用此 trigger 規則，將 pulse 設為 `best_ro_length` 加 0.03 µs。這些初值不改動已儲存的 module。
 
 `flux_reset` 範本建立 `reset/pulse`，可存到 qubit 的 reset library 分組，再由
 `$qubit.module.reset` 指向該 module。它在 `$qubit.wiring.lo_flux_ch` 播放 frequency

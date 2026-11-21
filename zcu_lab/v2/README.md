@@ -155,7 +155,7 @@ Tone label 是可重複的顯示文字，不是 component 名稱，也不改變�
 `mux/onetone` adapter 從 group 的 resonators 產生 readout tones。
 有 readout slot 時以副本保留 scalar 初值，再套用 ringup timing。
 缺 slot 時使用 blank mux 範本，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。
-ADC window 固定填入 1.0 us，完整 group 的 kappa 都有效時再推導其餘 mixer／timing 候選，來源見 [mux onetone guide](mux/onetone/guide.md#無-readout-slot-的候選來源)。
+ADC window 固定填入 1.0 us，mixer 取 group 的 `mixer_freq`。初值來源及缺值處理見 [mux onetone guide](mux/onetone/guide.md#無-readout-slot-的候選來源)。
 `participants` 是非空、唯一的原始整數 index list，按輸入順序量測。Open／Reset 將 alias `$participants` 的名稱依 `$mux.resonators` 位置轉成 indices；缺列、未綁或空清單預設全部。之後改 aliases 不更新現有輸入，需 Reset 或重新 Open。
 Lab 將 subset 交 program，不改完整 cfg。
 RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
@@ -180,12 +180,12 @@ Pulse length、ro_length 與 trig_offset 留空必填。
 即使 group 有 time_of_fly，也不替 qubit Forms 推導 timing。
 頻率缺失或無效時也留空必填。
 `mux/onetone` 有 readout slot 時使用副本，以 group tones 與 ringup timing 作初值。
-Ringup-copy 路徑保留既有初值：tone gain 為 0.1，ro_ch 按 group 順序從 0 起算。
+Ringup-copy 的 tone gain 填 0.1，ADC 取同序的 `$mux.wiring.ro_ch[i]`。
 Mux onetone 缺 slot 時仍使用 blank 範本，ADC window 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
 無 slot 的 mixer 從 `$mux.mixer_freq` 取初值，缺失或 null 時留空必填，不依賴 tone 頻率或 kappa。
 Trigger 取 `$mux.time_of_fly` 加五倍 ringup 時間，pulse 長度取 trigger 加 window。
 任一 kappa 或 group time_of_fly 缺值時，trigger 與 pulse 長度留空必填，不讀 resonator 的 pulse 路徑 TOF。
-上述缺值情境仍保留 1.0 us 的 ADC window。
+`post_delay` 用最小 κ 估五個光子衰減時間 `5 / (2π · κ)`。有 slot 時，用已設 κ 計算並保留較長的原值；全未設時保留原值。無 slot 時，只有 κ 齊全才推導這段等待，不要求 `time_of_fly`，否則保留範本的 0 µs。
 Readout 欄位說明列來源與未經裝置確認的限制，Run 仍執行 capability 檢查。
 Label 可編輯且可重複，不當 identity。固定槽位只限制增刪，不防止整列表交換值。
 Library 的 `readout/mux:blank` 不預填必需的通道、gain、時長或 trig_offset，不以 0 代替未校準的 trigger timing。Mux Forms 的 fallback 透過 typed model-list seeds 加入 tones。

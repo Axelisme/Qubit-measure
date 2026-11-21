@@ -507,8 +507,8 @@ ModuleLibrary `$resonator.readout.readout_dpm`，並以 writeback `role_id="read
 readout role proposal。有 capture 時，module 後新增 `$resonator.module.readout` row，值為該 capture 解析的最佳化 root。Apply module 與 slot 後，後續使用該 resonator 的表單改用最佳化讀出。無 capture 時只提出 module；缺值或 non-finite 值略過 module 與 slot writeback。
 `readout_dpm` 以 `source.cfg.readout` 作為 template，將 readout
 `freq` 設為 `best_ro_freq`、`gain` 設為 `best_ro_gain`、
-waveform length 設為 `best_ro_length + READOUT_DPM_PULSE_TAIL_US`（0.1 us tail）、
-ADC readout length 設為 `best_ro_length`。
+ADC window 設為 `best_ro_length`。Waveform length 比 ADC window 長 0.03 µs，
+使用 `zcu_lab.templates.READOUT_LENGTH_MARGIN_US`。Trigger offset 沿用 Run snapshot。
 
 `onetone/freq` analyze 仍寫回 parameter context `r_f` / `rf_w` / `theta0`；當來源 RunRecord 的
 `source.cfg` 非 None 且 `source.cfg.readout` 是 pulse readout 時，adapter 也提出
