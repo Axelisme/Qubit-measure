@@ -49,18 +49,23 @@ class ChainPowerCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             description="K: thermal relaxation between 16-read shots.",
         ),
     ] = Field(ge=0)
     reps: Annotated[
         int,
-        FieldMeta(label="Reps", description="16-read shots per setting in each round."),
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="16-read shots per setting in each round.",
+        ),
     ] = Field(ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
+            unit="count",
             description="Software rounds; live plots use all completed rounds.",
         ),
     ] = Field(default=1, ge=1)

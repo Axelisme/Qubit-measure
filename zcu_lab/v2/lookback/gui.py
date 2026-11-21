@@ -33,7 +33,7 @@ LookbackRunResult: TypeAlias = RunRecord[LookbackCfg, LookbackResult]
 
 @dataclass
 class LookbackAnalyzeParams:
-    ratio: Annotated[float, ParamMeta(label="Threshold ratio", decimals=3)] = 0.1
+    ratio: Annotated[float, ParamMeta(label="Threshold ratio (a.u.)", decimals=3)] = 0.1
     smooth: Annotated[float, ParamMeta(label="Smooth sigma", decimals=3)] = 1.0
     plot_fit: Annotated[bool, ParamMeta(label="Plot fit")] = True
 
@@ -74,7 +74,7 @@ def _writeback(
     return [
         ParameterWriteback(
             target_name="$resonator.time_of_fly",
-            description="Readout trigger offset prediction (us)",
+            description="Readout trigger offset prediction (µs)",
             proposed_value=req.analyze_result.predict_offset,
         )
     ]

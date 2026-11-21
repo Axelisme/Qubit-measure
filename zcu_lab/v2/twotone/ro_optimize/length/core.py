@@ -59,23 +59,30 @@ class LengthCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Readout length", unit="us")]
+    length: Annotated[SweepCfg, FieldMeta(label="Readout length", unit="µs")]
     skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
         default=0.0, ge=0.0
     )
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -125,7 +132,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         # 2. Display the score for each integration window, not averaged state IQ.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Readout Length (us)", ylabel="SNR")
+        ax.set(xlabel="Readout Length (µs)", ylabel="SNR (a.u.)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid(False)
         line = live_line(ax)
@@ -229,7 +236,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         ax.plot(lengths, snrs)
         ax.axvline(max_length, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
-        ax.set_xlabel("Readout Length (us)")
+        ax.set_xlabel("Readout Length (µs)")
         ax.set_ylabel("SNR (a.u.)")
         ax.legend()
         ax.grid(True)

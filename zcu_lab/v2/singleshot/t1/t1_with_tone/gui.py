@@ -49,7 +49,7 @@ def _writeback(
     return [
         ParameterWriteback(
             target_name="$qubit.ext.t1_with_tone",
-            description="T1 with probe tone (us)",
+            description="T1 with probe tone (µs)",
             proposed_value=req.analyze_result.t1,
         ),
     ]

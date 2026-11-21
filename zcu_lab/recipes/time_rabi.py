@@ -48,7 +48,7 @@ class TimeRabiInputs(RecipeInputs):
     )
     max_length_us: float | None | Keep = Field(
         KEEP,
-        description="Pulse-length sweep stop in us.",
+        description="Pulse-length sweep stop in µs.",
     )
     points: int | None | Keep = Field(
         KEEP,
@@ -77,16 +77,16 @@ class TimeRabiReport(RecipeReport):
     """Time Rabi results and failure reason; cancellation returns no report."""
 
     pi_length_us: float | None = Field(
-        description="Pi pulse duration in us; null means not estimable."
+        description="Pi pulse duration in µs; null means not estimable."
     )
     pi_length_err_us: float | None = Field(
-        description="Pi duration uncertainty in us; null means not estimable."
+        description="Pi duration uncertainty in µs; null means not estimable."
     )
     pi2_length_us: float | None = Field(
-        description="Pi/2 pulse duration in us; null means not estimable."
+        description="Pi/2 pulse duration in µs; null means not estimable."
     )
     pi2_length_err_us: float | None = Field(
-        description="Pi/2 duration uncertainty in us; null means not estimable."
+        description="Pi/2 duration uncertainty in µs; null means not estimable."
     )
     rabi_frequency_mhz: float | None = Field(
         description="Fitted Rabi oscillation frequency in MHz; null means not estimable."

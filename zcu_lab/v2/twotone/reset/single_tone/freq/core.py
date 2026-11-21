@@ -55,17 +55,24 @@ class FreqCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -104,7 +111,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # 2. Retain complex IQ and display its projection along the response axis.
         plots = context.plots
         fig, ax = plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
+        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude (a.u.)")
         viewer = live_line(ax, num_lines=1)
 
         @plots.on_plot_thread

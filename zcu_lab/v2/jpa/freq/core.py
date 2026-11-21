@@ -75,17 +75,24 @@ class FreqCfg(ConfigBase):
         ),
     ] = None
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -123,7 +130,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # Show independent points because neighboring samples need not be nearby.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="JPA Frequency (MHz)", ylabel="Signal Difference")
+        ax.set(xlabel="JPA Frequency (MHz)", ylabel="Signal Difference (a.u.)")
         line = live_line(ax)
         ax.lines[0].set_linestyle("None")
         ax.lines[0].set_marker("o")

@@ -33,11 +33,11 @@ class LookbackInputs(RecipeInputs):
     )
     readout_length_us: float | None | Keep = Field(
         KEEP,
-        description="ADC acquisition window in us.",
+        description="ADC acquisition window in µs.",
     )
     trigger_offset_us: float | None | Keep = Field(
         KEEP,
-        description="ADC trigger offset in us.",
+        description="ADC trigger offset in µs.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
@@ -62,7 +62,7 @@ class LookbackReport(RecipeReport):
     """Lookback results and failure reason; cancellation returns no report."""
 
     trigger_offset_us: float | None = Field(
-        description="Proposed ADC trigger offset in us; null means not estimable."
+        description="Proposed ADC trigger offset in µs; null means not estimable."
     )
 
 

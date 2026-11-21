@@ -25,7 +25,7 @@ Temporary arrays within one acquisition round grow with points × Reps. Increasi
 The Form uses the `twotone/t2echo` sources: the `$qubit.module.x90` slot or a fresh `pi2_pulse` template, the `$qubit.module.x180` slot or a fresh `pi_pulse` template, and the `$resonator.module.readout` slot or a fresh `readout` template.
 Readout must be a pulse readout; a mux readout module is rejected by the Form. The cycle has no Reset.
 Delay runs from 0 to 1.5 × `$qubit.t2e` over 101 points; it stays empty when T2e is missing.
-Relax delay starts at 5 * `$qubit.t1` us, or 150 us when T1 is missing.
+Relax delay starts at 5 * `$qubit.t1` µs, or 150 µs when T1 is missing.
 Every cycle contains eight echoes, so one cycle lasts about Relax delay + 8 × (delay + π length + 2 × π/2 length + 2 × readout length).
 Reps starts at 100 and Rounds at 100. Reps must be at least 66, so that even a single delay gives the first round 65 cycles beyond its mean to estimate the noise of the 65 numbers.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
@@ -55,7 +55,7 @@ The title gives t2, tf and the three lack-of-fit checks as J/df:
 - `sharing`: shared readout nuisances against fully separate delays; it has no p.
 - `curve`: the echo curves against a free operation at each delay, with p. Pulse errors or other third-state dynamics raise it.
 
-The summary reports `t2`, `t2_err`, `tf` and `tf_err` in us, the three checks, the joint `J` and `df`, and `first_read_t2` from the first-read fit.
+The summary reports `t2`, `t2_err`, `tf` and `tf_err` in µs, the three checks, the joint `J` and `df`, and `first_read_t2` from the first-read fit.
 Errors are Wald errors from the joint fit. At low state contrast and few cycles per delay they can understate the uncertainty. A small third-state population leaves tf poorly determined.
 A fit failure in either step produces an analysis failure; the live plot and the saved sums remain.
 

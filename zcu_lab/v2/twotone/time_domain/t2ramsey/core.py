@@ -70,14 +70,21 @@ class T2RamseyCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
     detune: float = 0.0
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     earlystop_snr: Annotated[
         float | None,
@@ -90,7 +97,7 @@ class T2RamseyCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -139,7 +146,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         # 2. Display the IQ projection while averaging the delay sweep.
         title = f"T2 Ramsey - detune {detune:.2f} MHz"
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (us)", ylabel="Real Signal")
+        ax.set(xlabel="Time (µs)", ylabel="Real Signal (a.u.)")
         ax.set_title(title)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
@@ -260,13 +267,13 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
 
         ax.plot(lengths, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(lengths, y_fit, label="fit")
-        t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
+        t2r_str = f"{t2r:.2f}µs ± {t2rerr:.2f}µs"
         if fit_fringe:
             detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
             ax.set_title(f"T2 fringe = {t2r_str},\ndetune = {detune_str}", fontsize=15)
         else:
             ax.set_title(f"T2 decay = {t2r_str}", fontsize=15)
-        ax.set_xlabel("Delay Time (us)")
+        ax.set_xlabel("Delay Time (µs)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()
         ax.grid(True)

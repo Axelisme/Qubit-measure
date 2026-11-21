@@ -10,7 +10,7 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 ## Parameter sources
 
-The tab uses a fixed copy of the resonator parameters taken when it was opened or reset. `resonator.freq` and `resonator.kappa` seed the sweep. The ADC window starts at 0.97 us. Trigger timing reads the top-level `$resonator.time_of_fly`, adding `5/(2π·kappa)` us when kappa is set. Missing or null TOF leaves trigger and pulse length required and blank. Pulse length starts at the larger of 1.0 us and trigger plus the ADC window. `resonator.wiring.ch` and `resonator.wiring.ro_ch` seed the channels. Missing or null calibration leaves required fields Invalid until valid values are supplied.
+The tab uses a fixed copy of the resonator parameters taken when it was opened or reset. `resonator.freq` and `resonator.kappa` seed the sweep. The ADC window starts at 0.97 µs. Trigger timing reads the top-level `$resonator.time_of_fly`, adding `5/(2π·kappa)` µs when kappa is set. Missing or null TOF leaves trigger and pulse length required and blank. Pulse length starts at the larger of 1.0 µs and trigger plus the ADC window. `resonator.wiring.ch` and `resonator.wiring.ro_ch` seed the channels. Missing or null calibration leaves required fields Invalid until valid values are supplied.
 
 The Sampling mode selector offers Linear or Homophasal. Homophasal shows three required fields: `r_f` in MHz, `rf_w` in MHz, and `theta0` in rad. Selecting Homophasal seeds editable values from the saved `resonator.freq`, `resonator.kappa`, and `resonator.ext.theta0`. Missing sources or expression evaluation failures leave the corresponding fields empty. Values that fail measurement validation stay visible with an error and block submission. Override each value directly or with an expression.
 
@@ -20,7 +20,7 @@ Analysis can also use the saved `resonator.ext.edelay` calibration when it match
 
 The readout starts as a fresh inline pulse with a `const` waveform. Configure its pulse settings directly in the tab.
 
-Use lookback to measure TOF, then one-tone spectroscopy to measure kappa. Review trigger offset and waveform duration in us after those calibrations.
+Use lookback to measure TOF, then one-tone spectroscopy to measure kappa. Review trigger offset and waveform duration in µs after those calibrations.
 Enter absolute MHz sweep endpoints. The range-find Form does not infer a scan window from a known resonance center.
 
 ## Calibration updates
@@ -49,9 +49,9 @@ Use Homophasal after a fit has written `theta0` when you want equal resonator-ci
 
 ## Analysis controls
 
-Analysis has four controls: Model type, Fit amplitude background, Fit phase curvature, and Electrical delay seed in us. Their defaults are `hm`, on, off, and blank.
+Analysis has four controls: Model type, Fit amplitude background, Fit phase curvature, and Electrical delay seed in µs. Their defaults are `hm`, on, off, and blank.
 
-Leave the delay blank to use a finite route-matched calibration as the branch seed. When a matching prior is absent, analysis searches with a 100 us cap. Enter a finite delay to seed the fitted branch instead. Valid delay inputs are finite numbers, including zero and negative values. The fit can adjust the seeded delay.
+Leave the delay blank to use a finite route-matched calibration as the branch seed. When a matching prior is absent, analysis searches with a 100 µs cap. Enter a finite delay to seed the fitted branch instead. Valid delay inputs are finite numbers, including zero and negative values. The fit can adjust the seeded delay.
 
 ## Four starting situations
 

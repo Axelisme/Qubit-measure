@@ -49,9 +49,9 @@ tone still needs valid frequency and ADC identity, even when not selected.
 ## FTF cost example
 
 A two-participant offline Run used 11 equally spaced requested delays from
-0.02383 to 0.25635 us, 0.02 us const drive pulses, 50 reps, 2 rounds and
-0.1 us recovery. Readout used 0.1 us pulse and integration windows, with a
-0.4 us trigger offset. The hardware-sweep Run took 1.152 s on CPUs 4 and 5 after
+0.02383 to 0.25635 µs, 0.02 µs const drive pulses, 50 reps, 2 rounds and
+0.1 µs recovery. Readout used 0.1 µs pulse and integration windows, with a
+0.4 µs trigger offset. The hardware-sweep Run took 1.152 s on CPUs 4 and 5 after
 warming the simulation caches.
 This window only checks execution. It does not constrain a physical T1.
 
@@ -67,7 +67,7 @@ includes the intended longest delay before budgeting the full scan.
 
 ## Measurement and analysis
 
-Use calibrated fixed pi pulses. All qubits share one delay axis in us,
+Use calibrated fixed pi pulses. All qubits share one delay axis in µs,
 executed by one program's hardware loop. Requested window endpoints and the
 linear input axis must be finite, nonnegative and strictly increasing.
 
@@ -88,14 +88,14 @@ and baseline.
 
 Skip removes leading points before finite-IQ filtering.
 Choose the single- or dual-exponential model and inspect quality and uncertainty.
-T1 and errors are in us.
+T1 and errors are in µs.
 Each tone returns its index, fit values and quality as an analysis summary.
 Analysis plots retain the delay coordinates, measured values and fitted curves.
 The returned summary does not include these arrays.
 
 ## Writeback
 
-Each qualifying row proposes its captured qubit's `t1` in us with fitted error,
+Each qualifying row proposes its captured qubit's `t1` in µs with fitted error,
 plus a T1 sample at the captured bias.
 Review the model, uncertainty and captured destination before Apply.
 

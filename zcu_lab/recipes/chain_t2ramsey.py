@@ -37,11 +37,11 @@ class ChainT2RamseyInputs(RecipeInputs):
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in us.",
+        description="Delay sweep stop in µs.",
     )
     detune_mhz: float | None | Keep = Field(
         KEEP,
-        description="Second pi/2 phase ramp in MHz (fringes per us of delay).",
+        description="Second pi/2 phase ramp in MHz (fringes per µs of delay).",
     )
     points: int | None | Keep = Field(
         KEEP,
@@ -61,10 +61,10 @@ class ChainT2RamseyReport(RecipeReport):
     """Chain Ramsey fit and its checks; cancellation returns no report."""
 
     t2_us: float | None = Field(
-        description="T2 Ramsey from the chain fit in us; null means not estimable."
+        description="T2 Ramsey from the chain fit in µs; null means not estimable."
     )
     t2_err_us: float | None = Field(
-        description="T2 Ramsey uncertainty in us; null means not estimable."
+        description="T2 Ramsey uncertainty in µs; null means not estimable."
     )
     detuning_mhz: float | None = Field(
         description="Fringe frequency in MHz, ramp included; null means not estimable."
@@ -73,10 +73,10 @@ class ChainT2RamseyReport(RecipeReport):
         description="Fringe frequency uncertainty in MHz; null means not estimable."
     )
     tf_us: float | None = Field(
-        description="Third-state decay time in us; null means not estimable."
+        description="Third-state decay time in µs; null means not estimable."
     )
     tf_err_us: float | None = Field(
-        description="Third-state decay uncertainty in us; null means not estimable."
+        description="Third-state decay uncertainty in µs; null means not estimable."
     )
     reliability: float | None = Field(
         description="Diagnostic R of the detuning error, no threshold."
@@ -91,7 +91,7 @@ class ChainT2RamseyReport(RecipeReport):
         description="Curve check J, df, p; null without analysis."
     )
     first_read_t2_us: float | None = Field(
-        description="T2 in us of the first-read twotone fit; null means not estimable."
+        description="T2 in µs of the first-read twotone fit; null means not estimable."
     )
 
 

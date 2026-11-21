@@ -74,7 +74,7 @@ and reasons without rolling back edits. Analysis null goes to the picker owner.
    Fill any missing resonator frequency, mixer, trigger and pulse duration. Ringup timing needs every resonator linewidth and the group flight time; without them enter timing explicitly.
 2. **Frequencies without a readout slot.** Open or Reset to capture updated
    frequencies. The readout template takes generator/ADCs from group wiring.
-   The ADC window candidate is 1 us. Trigger and pulse duration remain blank when linewidth or group flight time is missing.
+   The ADC window candidate is 1 µs. Trigger and pulse duration remain blank when linewidth or group flight time is missing.
    Review gain 0.1 and the DC bounds rather than treating seeds as calibrations.
 3. **Captured readout slot.** Open or Reset after assigning the group readout.
    The form copies it, rebuilds full group tones and adds ringup to its trigger while preserving its mixer and ADC window.

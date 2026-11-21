@@ -62,17 +62,24 @@ class PreFreqCfg(ConfigBase):
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     freq: Annotated[SweepCfg, FieldMeta(label="Preparation freq", unit="MHz")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -137,7 +144,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         # 3. Show the measured G/E/Other fractions in classifier order.
 
         figure, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pre Pulse Frequency", ylabel="MIST")
+        ax.set(xlabel="Preparation pulse frequency (MHz)", ylabel="State probability")
         viewer = live_line(ax, num_lines=POPULATION_COUNT)
         ax.set_ylim(0.0, 1.0)
         for line, label in zip(ax.lines, ("Ground", "Excited", "Other"), strict=True):
@@ -243,7 +250,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             markersize=1,
         )
         ax.set_xlabel("Frequency (MHz)", fontsize=14)
-        ax.set_ylabel("Population", fontsize=14)
+        ax.set_ylabel("State probability", fontsize=14)
         ax.grid(True)
         ax.tick_params(axis="both", which="major", labelsize=12)
         ax.set_ylim(0, 1)

@@ -65,8 +65,8 @@ class CPMGAnalyzeOptions:
     """Fringe fitting and optional reference coherence times in us."""
 
     fit_fringe: Annotated[bool, FieldMeta(label="Fit fringes")] = True
-    t2r: Annotated[float | None, FieldMeta(label="Ramsey T2 reference (us)")] = None
-    t1: Annotated[float | None, FieldMeta(label="T1 reference (us)")] = None
+    t2r: Annotated[float | None, FieldMeta(label="Ramsey T2 reference (µs)")] = None
+    t1: Annotated[float | None, FieldMeta(label="T1 reference (µs)")] = None
 
 
 @dataclass(frozen=True)
@@ -100,24 +100,37 @@ class CPMG_Cfg(ConfigBase):
     count: Annotated[
         list[Annotated[int, Field(strict=True, ge=1)]],
         Field(min_length=1),
-        FieldMeta(label="Pi pulse counts"),
+        FieldMeta(label="Pi pulse counts", unit="count"),
     ]
     delay: SweepCfg | list[SweepCfg]  # Each pulse count can use its own delay sweep.
     detune_ratio: Annotated[
-        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
+        float,
+        FieldMeta(
+            label="Detune ratio",
+            unit="a.u.",
+            description="Fringes per step.",
+            decimals=3,
+        ),
     ] = 0.0
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -307,8 +320,8 @@ def _live_plot(
     """
     fig, _ = plots.subplots(1, 2, num="measurement")
     heat_ax, line_ax = fig.axes
-    heat_ax.set(xlabel="Number of Pi", ylabel="Time idxs")
-    line_ax.set_xlabel("Time idxs")
+    heat_ax.set(xlabel="Pi pulses (count)", ylabel="Time idxs")
+    line_ax.set(xlabel="Time idxs", ylabel="Signal (a.u.)")
     formatter = ScalarFormatter(useMathText=True)
     formatter.set_powerlimits((-2, 2))
     heat_ax.xaxis.set_major_formatter(formatter)
@@ -563,8 +576,8 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         X = np.broadcast_to(times[None, :], norm_signals.T.shape)
         Y = lengths.T
         ax1.pcolormesh(X, Y, norm_signals.T, shading="nearest")
-        ax1.set_xlabel("Number of Pi")
-        ax1.set_ylabel("Time (us)")
+        ax1.set_xlabel("Pi pulses (count)")
+        ax1.set_ylabel("Time (µs)")
 
         ax2.errorbar(times, t2s, yerr=t2errs, label=r"$T_{CPMG}$", color="red", fmt=".")
         if summary.t2_1_us is not None and summary.gamma is not None:
@@ -584,8 +597,8 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         ax2.set_xscale("log")
         ax2.set_yscale("log")
         ax2.legend()
-        ax2.set_xlabel("Number of Pi")
-        ax2.set_ylabel("T2 (us)")
+        ax2.set_xlabel("Pi pulses (count)")
+        ax2.set_ylabel("T2 (µs)")
 
         fig.tight_layout()
         return summary

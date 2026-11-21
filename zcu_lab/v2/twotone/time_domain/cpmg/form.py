@@ -23,17 +23,23 @@ class CPMGInput(ConfigBase):
     count: Annotated[
         list[Annotated[int, Field(strict=True, ge=1)]],
         Field(min_length=1),
-        FieldMeta(label="Pi pulse counts"),
+        FieldMeta(label="Pi pulse counts", unit="count"),
     ]
     detune_ratio: Annotated[
-        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
+        float,
+        FieldMeta(
+            label="Detune ratio",
+            unit="a.u.",
+            description="Fringes per step.",
+            decimals=3,
+        ),
     ] = 0.0
     min_length_us: Annotated[
         float,
         Field(gt=0, allow_inf_nan=False),
         FieldMeta(
             label="Minimum time",
-            unit="us",
+            unit="µs",
             description=(
                 "Enter the shortest total evolution time (µs), using the pulse "
                 "durations from the π/2 and π calibrations."
@@ -43,21 +49,28 @@ class CPMGInput(ConfigBase):
     max_length_us: Annotated[
         float,
         Field(gt=0, allow_inf_nan=False),
-        FieldMeta(label="Maximum time", unit="us"),
+        FieldMeta(label="Maximum time", unit="µs"),
     ] = 100.0
     length_points: Annotated[int, Field(ge=2), FieldMeta(label="Time points")] = 101
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ] = 1
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),

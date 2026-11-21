@@ -8,13 +8,13 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 ## Parameter sources
 
-Total delay runs 0 to 1.5 * qubit.t2e us over 101 points. Detune ratio is fringes per sweep step; native MHz detune is ratio / step. Relax delay is 5 * qubit.t1 us. Other missing required calibration leaves the affected fields empty and Invalid.
+Total delay runs 0 to 1.5 * qubit.t2e µs over 101 points. Detune ratio is fringes per sweep step; native MHz detune is ratio / step. Relax delay is 5 * qubit.t1 µs. Other missing required calibration leaves the affected fields empty and Invalid.
 
-Open and Reset capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 us, giving a 150 us wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+Open and Reset capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 
 ## Module slots
 
-Readout uses the qubit.module.readout slot captured at Open/Reset, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. Drive slots use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 us; missing required calibration remains Invalid.
+Readout uses the qubit.module.readout slot captured at Open/Reset, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. Drive slots use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
 
 ## Typical writeback
 
@@ -23,11 +23,11 @@ normalized residual RMS at most 0.1 and relative T2 error at most 0.5.
 Failed or unavailable checks leave candidates unselected with explanatory notes.
 You may select them manually after reviewing the source and fit.
 
-Proposes fitted qubit.t2e (us) to the captured qubit and working point, including loaded data with IQ only. Frequency and module slots stay unchanged. Proposals keep the qubit and working point captured for this result even after focus changes. An independent t2e_us/t2e_err_us sample uses the captured Run bias when device evidence is available.
+Proposes fitted qubit.t2e (µs) to the captured qubit and working point, including loaded data with IQ only. Frequency and module slots stay unchanged. Proposals keep the qubit and working point captured for this result even after focus changes. An independent t2e_us/t2e_err_us sample uses the captured Run bias when device evidence is available.
 
 ## Recommended
 
-Enable Fit phase offset to fit a free fringe phase; it defaults to fixed phase and applies to fringe fits only. Set the 'Detune ratio (fringes/step)' input (default 0.1). This is the number of fringe periods per delay-sweep step; the absolute detune (MHz) applied to the final pi/2 pulse phase is detune_ratio / sweep step, leaving a residual oscillation on the echo decay. Analysis 'Fit method' defaults to 'decay'. Select 'fringe' explicitly only for nonzero source detune; choosing 'decay' remains valid. Zero source detune forces decay even when fringe is selected. Analysis uses the saved cfg detune, or finite saved actual detune without cfg. A fringe request without either source reports a missing-detune error; explicit decay still works. Set the ratio to 0 for a standard echo (pure exponential decay → T2E). A total-delay sweep reaching a few T2E lets the echo decay; the first sweep point is dropped in the fit.
+Enable Fit phase offset to fit a free fringe phase; it defaults to fixed phase and applies to fringe fits only. Set the 'Detune ratio (a.u.)' input (default 0.1). This is the number of fringe periods per delay-sweep step; the absolute detune (MHz) applied to the final pi/2 pulse phase is detune_ratio / sweep step, leaving a residual oscillation on the echo decay. Analysis 'Fit method' defaults to 'decay'. Select 'fringe' explicitly only for nonzero source detune; choosing 'decay' remains valid. Zero source detune forces decay even when fringe is selected. Analysis uses the saved cfg detune, or finite saved actual detune without cfg. A fringe request without either source reports a missing-detune error; explicit decay still works. Set the ratio to 0 for a standard echo (pure exponential decay → T2E). A total-delay sweep reaching a few T2E lets the echo decay; the first sweep point is dropped in the fit.
 
 ## Four starting situations
 

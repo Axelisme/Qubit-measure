@@ -23,7 +23,7 @@ Temporary arrays within one acquisition round grow with points × Reps. Increasi
 
 The Form uses the `twotone/t1` sources: the `$qubit.module.x180` slot or a fresh `pi_pulse` template, and the `$resonator.module.readout` slot or a fresh `readout` template.
 Readout must be a pulse readout; a mux readout module is rejected by the Form. The cycle has no Reset.
-Relax delay starts at 5 * `$qubit.t1` us, or 150 us when T1 is missing. Delay runs from 0 to the same value over 101 points.
+Relax delay starts at 5 * `$qubit.t1` µs, or 150 µs when T1 is missing. Delay runs from 0 to the same value over 101 points.
 Every cycle contains eight delays, so one cycle lasts about Relax delay + 8 × (delay + π length + 2 × readout length). A shorter delay range shortens long-delay cycles.
 Reps starts at 100 and Rounds at 100. Reps must be at least 66, so that even a single delay gives the first round 65 cycles beyond its mean to estimate the noise of the 65 numbers.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
@@ -61,7 +61,7 @@ The title gives T1, the secondary time and the three lack-of-fit checks as J/df:
 - `sharing`: shared readout nuisances against fully separate delays; it has no p.
 - `curve`: the rate-equation curves against a free operation at each delay, with p.
 
-The summary reports `t1` and `t1_err`, `secondary_time` and `secondary_time_err` in us, the three checks, and the joint `J` and `df`.
+The summary reports `t1` and `t1_err`, `secondary_time` and `secondary_time_err` in µs, the three checks, and the joint `J` and `df`.
 Errors are Wald errors from the joint fit. At low state contrast and few cycles per delay they can understate the uncertainty.
 A fit failure in either step produces an analysis failure; the live plot and the saved sums remain.
 

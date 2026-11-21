@@ -23,13 +23,13 @@ Open 與 Reset 讀取當時的 `$qubit` 與 `$resonator` alias。
 - Flux pulse 模組槽使用 `flux_pulse` 範本，channel 初值來自 `$qubit.wiring.lo_flux_ch`。
   缺 channel 時保持 Invalid，須填入已確認的通道。
   範本初值為 const waveform、gain 1.0、frequency 0.0 MHz、Nyquist zone 2。
-  Waveform length 初值為 1.0 us。
+  Waveform length 初值為 1.0 µs。
   這些初值僅供編輯，flux 校準須另行確認。使用者必須設定 flux gain 範圍，核對頻率、長度與接線。
 
 兩個 gain sweep 的首次範圍都是 0 到 0.1，共 101 點，硬體安全範圍須另行確認。
 量測以 sweep 值覆寫對應 pulse 的 gain，掃描範圍由兩個 gain sweep 欄位決定。
 請先把兩個 sweep 改成已確認的範圍，再 Run。
-Relax delay 以捕捉的 T1 的五倍作初值，缺校準時使用 150 us，可自行修改。
+Relax delay 以捕捉的 T1 的五倍作初值，缺校準時使用 150 µs，可自行修改。
 Reps 與 Rounds 分別從 1000 與 100 開始，可先減少掃描點與平均次數檢查訊號。
 Run 前核對完整 pulse 與 sweep。
 

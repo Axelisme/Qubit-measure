@@ -122,7 +122,7 @@ class StirapDetuningCfg(ConfigBase):
             description="Fill the signed Stokes drive amplitude.",
         ),
     ] = Field(ge=-1, le=1)
-    stokes_lead: Annotated[float, FieldMeta(label="Fixed Stokes lead", unit="us")] = (
+    stokes_lead: Annotated[float, FieldMeta(label="Fixed Stokes lead", unit="µs")] = (
         0.05
     )
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
@@ -130,14 +130,14 @@ class StirapDetuningCfg(ConfigBase):
         EnvelopeWaveformCfg,
         FieldMeta(
             label="Pump waveform",
-            description="Select the Pump 0–3 envelope from the waveform library or inline parameters, with durations in us.",
+            description="Select the Pump 0–3 envelope from the waveform library or inline parameters, with durations in µs.",
         ),
     ]
     stokes_waveform: Annotated[
         EnvelopeWaveformCfg,
         FieldMeta(
             label="Stokes waveform",
-            description="Select the Stokes 3–2 envelope from the waveform library or inline parameters, with durations in us.",
+            description="Select the Stokes 3–2 envelope from the waveform library or inline parameters, with durations in µs.",
         ),
     ]
     pump_detuning: Annotated[SweepCfg, FieldMeta(label="Pump detuning", unit="MHz")]
@@ -145,7 +145,7 @@ class StirapDetuningCfg(ConfigBase):
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=4096, ge=1
     )
-    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us")] = Field(
+    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="µs")] = Field(
         ge=0
     )
 

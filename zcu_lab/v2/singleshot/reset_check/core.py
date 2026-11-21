@@ -81,17 +81,24 @@ class ResetCheckCfg(ConfigBase):
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -154,7 +161,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         # 2. Show G/E/Other for all three independent preparations.
 
         figure, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse gain (a.u.)", ylabel="Classified population")
+        ax.set(xlabel="Pulse gain (a.u.)", ylabel="State probability")
         viewer = live_line(ax, num_lines=BRANCH_COUNT * POPULATION_COUNT)
         ax.set_ylim(-0.02, 1.02)
         for line, kwargs in zip(ax.lines, _population_line_kwargs(), strict=True):
@@ -275,7 +282,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             )
         ax.set(
             xlabel="Pulse gain (a.u.)",
-            ylabel="Population"
+            ylabel="State probability"
             if confusion_matrix is not None
             else "Classified population",
             ylim=(-0.02, 1.02),
