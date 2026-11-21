@@ -129,7 +129,7 @@ def snr_as_signal(
     *,
     skew_penalty: float = DEFAULT_SKEW_PENALTY,
 ) -> NDArray[np.float64]:
-    """Convert a single ``IQ(read, order=3)`` shot-sum axis to g/e SNR (a.u.).
+    """Convert a single ``IQ(read, order=3)`` shot-sum axis to g/e SNR.
 
     The last axis of sums contains ten raw sums, starting with the count.
     ge_axis selects the length-2 g/e axis among the preceding axes; negative
