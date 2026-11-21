@@ -42,8 +42,8 @@
 
 | 類別 | 缺陷或限制 | 例子 |
 | --- | --- | --- |
-| A | 圖與摘要無法辨認 run 身分或判讀所需的採集設定 | 只見表單初值，不知 cfg 的 Reps×Rounds，或實驗已回傳的實際 detune 沒出現在摘要中。見 R10。 |
-| B | 缺逐點不確定度或 liveplot 進度 | 機率點沒有 error bar，只報了 fit 參數的誤差。見 R8、R11。 |
+| A | 圖與摘要無法辨認 run 身分或判讀所需的採集設定 | 只見表單初值，不知該次 cfg 的 Reps×Rounds 或實際施加的 detune。見 R10。 |
+| B | 缺逐點不確定度 | 機率點沒有用 shot SEM 畫 error bar，只報了 fit 參數的誤差。見 R11。 |
 | C | 缺已回傳的 fit 品質值、指標解釋，或既有選取判準的說明 | 圖列了殘差 RMS，guide 沒說這個數值代表什麼。若候選未通過既有選取判準，圖沒指出未通過的指標與門檻也算缺陷。沒有既有判準不算缺陷。見 R3b、Gd3。 |
 | D | 表單欄位的語意或單位不清 | `Frequency` 沒說是 RF 還是 IF；`Reset` 欄位與 Reset 按鈕混淆。 |
 | E | 圖上的標題、圖例或軸量不清 | y 軸只寫 `Real Signal`，沒說投影與單位。見 R6、R7。 |
@@ -143,7 +143,7 @@ Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summar
 
 Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二維圖不畫逐點 error bar。其他實驗依同一判準決定，並在 guide 寫明 error bar 的來源。
 
-逐點 shot SEM 是該點平均值的標準誤，代表該點平均值的預期誤差。逐點計算：shot SEM = 每發樣本標準差 ÷ √保留 shot 數。被 mask 的 shot 不算。它不是單發散布 σ、輪間散布或 fit 參數誤差。RB 的跨 seed 標準差也不是 shot SEM。估計器在 [`zcu_tools.analysis`](../../lib/zcu_tools/analysis/README.md)。只存平均的實驗在家族修正時新增二階 moment 欄位。舊檔仍可 Load，缺少估計所需資料時不畫 error bar。
+逐點 shot SEM 估計該點平均值的標準差，代表這個平均值的預期誤差。shot SEM = 每發樣本標準差 ÷ √(保留 shot 數)。被 mask 的 shot 不算。它不是單發散布 σ、輪間散布或 fit 參數誤差。RB 的跨 seed 標準差也不是 shot SEM。估計器在 [`zcu_tools.analysis`](../../lib/zcu_tools/analysis/README.md)。只存平均的實驗在家族修正時新增二階 moment 欄位。舊檔仍可 Load，缺少估計所需資料時不畫 error bar。
 
 - 壞例：T1 只報 `T1 = 80 ± 5 µs`，不顯示每個量測點的不確定度。
 - 好例：Rabi 的逐點布居用 shot SEM 畫 error bar。Ding 圖 5-13(a)（頁 157）的 CZ fidelity 對脈衝寬度圖可作逐點誤差棒的版式參考；圖 5-8(b)（頁 151）的二維掃描則用熱圖。
