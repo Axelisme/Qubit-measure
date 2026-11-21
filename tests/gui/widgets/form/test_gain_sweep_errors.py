@@ -1,4 +1,4 @@
-"""A generated gain sweep shows bounds errors below the editable coordinate."""
+"""A generated gain sweep locates row and whole-sweep errors."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -107,3 +107,30 @@ def test_gain_step_boundary_edit_clears_the_row_error(
     effective_stop = driver.observe(object_name="form.value.gain.stop")
     assert not effective_stop.visible, effective_stop.text
     assert not driver.observe(object_name="form.value.gain.step").visible
+
+
+def test_gain_sweep_collapse_clears_the_sweep_error(
+    gain_editor: ComponentDriver, tmp_path: Path
+) -> None:
+    driver = gain_editor
+    driver.screenshot(tmp_path / "01-range-expts.png")
+
+    driver.enter_text(object_name="form.input.gain.start", value="1.0000000002")
+    driver.screenshot(tmp_path / "02-one-clamped-endpoint.png")
+
+    driver.enter_text(object_name="form.input.gain.stop", value="1.0000000007")
+    driver.screenshot(tmp_path / "03-collapsed-endpoints.png")
+    errors = [
+        widget
+        for widget in driver.visible().widgets
+        if widget.object_name.startswith("form.error.gain")
+    ]
+    assert [error.object_name for error in errors] == ["form.error.gain"]
+    assert "different endpoints" in errors[0].text
+    assert errors[0].fully_visible and errors[0].caption_fits
+
+    driver.enter_text(object_name="form.input.gain.stop", value="0.75")
+    driver.screenshot(tmp_path / "04-distinct-endpoints.png")
+    assert not driver.observe(object_name="form.error.gain").visible
+    assert not driver.observe(object_name="form.error.summary").visible
+    assert driver.observe(object_name="form.input.gain.start").text == "1.0000000002"

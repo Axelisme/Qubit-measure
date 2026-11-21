@@ -123,6 +123,18 @@ def test_gain_sweep_uses_effective_step_endpoints_and_leaves_plain_sweep_unbound
     [
         pytest.param(
             "linrange",
+            {"start": 1.0000000002, "stop": 1.0000000002, "n": 1},
+            (1.0, 1.0, 0.0, 1),
+            id="clamped-single-point",
+        ),
+        pytest.param(
+            "linrange_step",
+            {"start": 1.0, "stop": 1.0, "step": 0.0},
+            (1.0, 1.0, 0.0, 1),
+            id="boundary-single-point-step",
+        ),
+        pytest.param(
+            "linrange",
             {"start": {"expr": "-1.0000000008"}, "stop": 0.5, "n": 4},
             (-1.0, 0.5, 0.5, 4),
             id="range-expts",
@@ -186,6 +198,32 @@ def test_gain_sweep_delivers_normalized_endpoints_without_editing_the_input(
         cfg.sweep.step,
         cfg.sweep.expts,
     ) == delivered
+    assert state.input.data == before
+
+
+@pytest.mark.parametrize(
+    ("kind", "coordinates"),
+    [
+        ("linrange", {"start": 1.0000000002, "stop": 1.0000000007, "n": 2}),
+        ("center", {"center": -1.00000000045, "span": -5e-10, "n": 2}),
+        ("linrange_step", {"start": 1.0000000002, "stop": 1.0000000007, "step": 5e-10}),
+        ("center_step", {"center": -1.00000000045, "span": -5e-10, "step": -5e-10}),
+    ],
+    ids=["range-expts", "center-expts", "range-step", "center-step"],
+)
+def test_gain_sweep_rejects_collapsed_endpoints_at_the_sweep_path(
+    kind: str, coordinates: dict[str, JsonValue]
+) -> None:
+    env = FormEnv()
+    form = Form(SweepPlan, {})
+    state = FormState(form.default_input(env))
+    state.write({("sweep",): {"kind": kind, **coordinates}}, env)
+    before = state.input.data
+
+    result = state.result(env)
+    assert isinstance(result, FormErrors), result
+    assert list(result.messages) == [("sweep",)]
+    assert "different endpoints" in result.messages[("sweep",)]
     assert state.input.data == before
 
 

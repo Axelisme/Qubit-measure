@@ -149,7 +149,7 @@ form = Form(Group, {
 
 SweepCfg 生成 Range／Center × Expts／Step 四個 tagged branches，各自只保存 active 座標與 n 或 step。未指定初值的 fresh input 只選 Range + Expts，raw 為 `{"kind": "linrange"}`；start／stop／n 空白且必填。Range 的 None 端點與求值失敗的 Expr 初始端點保持未填且必填，缺少 input key 也不補 0／1。`gui.form_adapter.sweep` 擁有四種數值 model 與換算。指令掛在 sweep row，以共用 Form 的 readonly snapshot、局部 evaluate 與原子安裝執行，不由葉欄位修改 parent。Step 的有效端點與 floor count 由這些 model 的驗證產生。`to_cfg` 保留點數與原 step，由 `SweepCfg` 驗證單點與點數一致性。Memento 保存 FormInput，因此模式與新 expression 不依賴 Qt view，read／preview／result 不暗改原稿。
 
-掃描 annotation 帶 `SweepBounds` 時，FormState 依有效端點檢查閉區間。`GainSweepCfg` 的範圍為 [-1, 1]。四種模式使用與 Step 點數相同的 1e-9 相對容差。端點在界外但未超過容差時，Form 將端點投影到邊界，不改原稿或點數。預覽與 `to_cfg` 共用這份投影。預覽的有效座標與原稿相同時不顯示 Effective，Step 欄仍顯示原稿。只有端點已正規化且 `SweepCfg` 拒絕原 Step，才以交付端點重算 Step 並再驗證一次。直接以 Pydantic 驗證 `GainSweepCfg` 時不套用 Form 容差。
+掃描 annotation 帶 `SweepBounds` 時，FormState 依有效端點檢查閉區間。`GainSweepCfg` 的範圍為 [-1, 1]。四種模式使用與 Step 點數相同的 1e-9 相對容差。端點在界外但未超過容差時，Form 將端點投影到邊界，不改原稿或點數。若兩點以上的掃描投影後兩端重合，Form 不交付 cfg，只在掃描整欄提示需要不同端點，不標個別列。單點掃描不受這條規則影響。預覽與 `to_cfg` 共用這份投影。預覽的有效座標與原稿相同時不顯示 Effective，Step 欄仍顯示原稿。只有端點已正規化且 `SweepCfg` 拒絕原 Step，才以交付端點重算 Step 並再驗證一次。直接以 Pydantic 驗證 `GainSweepCfg` 時不套用 Form 容差。
 
 超過容差才標列。兩端都超過容差時只回報第一點。Range + Expts 標 Start 或 Stop。Center + Expts 優先標超界的輸入 Center，否則標 Span。Step 終點單獨超界時標 Step；第一點超界時，Range + Step 標 Start，Center + Step 依原輸入 Center 選 Center 或 Span，不用投影後的 Center。
 

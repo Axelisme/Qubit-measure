@@ -250,6 +250,7 @@ class _SweepForm(FormModel):
         self,
         start: float,
         stop: float,
+        count: int,
         *,
         rows: tuple[str, str],
         authored_center: float | None = None,
@@ -280,6 +281,10 @@ class _SweepForm(FormModel):
         self._normalized_endpoints = (
             (first, last) if (first, last) != (start, stop) else None
         )
+        if self._normalized_endpoints is not None and count > 1 and first == last:
+            raise ValueError(
+                "A sweep with two or more points needs different endpoints after clamping"
+            )
         return self._normalized_endpoints
 
     def to_sweep_cfg(
@@ -327,12 +332,15 @@ class _CenterSweep(_SweepForm):
             return self._normalized_endpoints[1]
         return self.center + self.span / 2
 
-    def _project_center(self, *, last_row: str, authored_center: float) -> None:
+    def _project_center(
+        self, count: int, *, last_row: str, authored_center: float
+    ) -> None:
         # Keep the exact endpoints for lowering; reversing center/span can
         # introduce another rounding error at the bound.
         endpoints = self._normalize_endpoints(
             self.center - self.span / 2,
             self.center + self.span / 2,
+            count,
             rows=("span", last_row),
             authored_center=authored_center,
         )
@@ -359,7 +367,7 @@ class LinRange(_SweepForm):
     @model_validator(mode="after")
     def _validate_bounds(self) -> Self:
         if endpoints := self._normalize_endpoints(
-            self.start, self.stop, rows=("start", "stop")
+            self.start, self.stop, self.n, rows=("start", "stop")
         ):
             self.start, self.stop = endpoints
         return self
@@ -378,7 +386,7 @@ class CenterSpan(_CenterSweep):
 
     @model_validator(mode="after")
     def _validate_bounds(self) -> Self:
-        self._project_center(last_row="span", authored_center=self.center)
+        self._project_center(self.n, last_row="span", authored_center=self.center)
         return self
 
 
@@ -406,7 +414,7 @@ class StepRange(_SweepForm):
             raise field_error(("step",), str(exc)) from exc
         self.stop = self.start + self.step * (count - 1)
         if endpoints := self._normalize_endpoints(
-            self.start, self.stop, rows=("start", "step")
+            self.start, self.stop, count, rows=("start", "step")
         ):
             self.start, self.stop = endpoints
         return self
@@ -440,7 +448,7 @@ class StepCenter(_CenterSweep):
         start, authored_center = self.start, self.center
         self.span = self.step * (count - 1)
         self.center = start + self.span / 2
-        self._project_center(last_row="step", authored_center=authored_center)
+        self._project_center(count, last_row="step", authored_center=authored_center)
         return self
 
     @cached_property
