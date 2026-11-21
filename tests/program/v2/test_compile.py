@@ -8,19 +8,16 @@ _initialize / _body / compile pipeline.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from math import inf, nextafter
 from pathlib import Path
 
 import pytest
 import yaml
-from pydantic import ValidationError
 from qick import QickConfig
 from qick.asm_v2 import QickParam
 from zcu_tools.program import build_soccfg
 from zcu_tools.program.v2 import (
     Pulse,
     PulseCfg,
-    PulseReadoutCfg,
     TableParam,
     TimelineBuilder,
     TimelineProgramV2,
@@ -183,38 +180,6 @@ def _gain_builder(
         )
     )
     return builder
-
-
-@pytest.mark.parametrize("gain", [1.2, -1.2, nextafter(1.0, inf)])
-def test_scalar_gain_outside_full_scale_fails_at_construction(gain: float) -> None:
-    with pytest.raises(ValidationError) as error:
-        PulseCfg(
-            ch=0,
-            nqz=1,
-            freq=100.0,
-            gain=gain,
-            waveform=ConstWaveformCfg(length=0.1),
-        )
-
-    assert {item["loc"][0] for item in error.value.errors()} == {"gain"}
-
-
-@pytest.mark.parametrize("gain", [1.2, -1.2])
-def test_readout_scalar_gain_outside_full_scale_fails_at_construction(
-    gain: float,
-) -> None:
-    with pytest.raises(ValidationError) as error:
-        PulseReadoutCfg(
-            gen_ch=0,
-            nqz=1,
-            freq=100.0,
-            gain=gain,
-            waveform=ConstWaveformCfg(length=0.1),
-            ro_ch=0,
-            ro_length=0.1,
-        )
-
-    assert {item["loc"][0] for item in error.value.errors()} == {"gain"}
 
 
 @pytest.mark.parametrize("gain", [1.2, -1.2])

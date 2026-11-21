@@ -841,15 +841,13 @@ class Section:
                 item, LinRange | CenterSpan | StepRange | StepCenter
             ):
                 try:
-                    sweep = SweepCfg(
-                        start=item.start,
-                        stop=item.stop,
-                        expts=item.n,
+                    sweep = item.to_sweep_cfg(
+                        item.start,
+                        item.stop,
+                        item.n,
                         step=item.step
                         if isinstance(item, StepRange | StepCenter)
-                        else (item.stop - item.start) / (item.n - 1)
-                        if item.n > 1
-                        else 0,
+                        else None,
                     )
                 except ValidationError as exc:
                     errors[(*prefix, name)] = str(exc)

@@ -239,8 +239,7 @@ requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩
 partial NaN 不補零。Mux GE 逐 tone 直接呼叫數值工具，不委派單 qubit 實驗的分析。
 
 七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[int]`。
-每個元素有固定 qubit `name` 與 nullable drive。Pulse sweep 的 `ToneRangeCfg` 只含 `start`／`stop`；
-Amp Rabi 的端點用 `Gain`，表單會標出超界的端點，不提交 Run。
+每個元素有固定 qubit `name` 與 nullable drive；pulse sweep 類另有只含 `start`／`stop` 的 `ToneRangeCfg`，
 T1／Ramsey／Echo 使用共用 requested-delay 軸。Participants 選擇使用的 drive 與逐 tone sweep。
 同 generator 的脈衝若重疊，program compiler 在 build 時拒絕。Cfg 仍拒絕 drive 與 readout 共用 generator。
 未參與欄位保留草稿，結果為 None。全 readout 身分始終驗證。三個 pulse scan 的頂層 `expts` 是共用正整數，

@@ -1,5 +1,5 @@
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from zcu_tools.program.v2.modules.readout import (
     AbsReadoutCfg,
     PulseReadout,
@@ -37,6 +37,24 @@ def test_readout_cfg_namespace_dispatches_nested_pulse():
     assert modules.readout == cfg
     assert modules.pulse == cfg
     assert isinstance(Readout("readout", modules.readout), PulseReadout)
+
+
+@pytest.mark.parametrize("gain", [1.2, -1.2])
+def test_readout_scalar_gain_outside_full_scale_fails_at_construction(
+    gain: float,
+) -> None:
+    with pytest.raises(ValidationError) as error:
+        PulseReadoutCfg(
+            gen_ch=0,
+            nqz=1,
+            freq=100.0,
+            gain=gain,
+            waveform=ConstWaveformCfg(length=0.1),
+            ro_ch=0,
+            ro_length=0.1,
+        )
+
+    assert {item["loc"][0] for item in error.value.errors()} == {"gain"}
 
 
 @pytest.mark.parametrize(

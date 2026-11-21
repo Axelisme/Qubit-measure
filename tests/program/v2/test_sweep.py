@@ -6,7 +6,13 @@ from zcu_tools.program.v2.sweep import SweepCfg
 
 @pytest.mark.parametrize(
     ("start", "stop", "step"),
-    [(0.0, 1.25, 1.25), (0.0, -1.25, -1.25), (1.25, 0.0, -1.25)],
+    [
+        (0.0, 1.25, 1.25),
+        (0.0, -1.25, -1.25),
+        (1.25, 0.0, -1.25),
+        (0.0, 1.0000000008, 1.0000000008),
+        (0.0, -1.0000000008, -1.0000000008),
+    ],
 )
 def test_gain_sweep_rejects_either_endpoint_outside_full_scale(
     start: float, stop: float, step: float

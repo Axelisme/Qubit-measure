@@ -83,3 +83,27 @@ def test_gain_sweep_marks_only_the_visible_row_until_corrected(
     driver.enter_text(object_name=f"form.input.gain.{edited}", value=valid)
     driver.screenshot(tmp_path / "05-corrected.png")
     assert not driver.observe(object_name=f"form.error.gain.{row}").visible
+
+
+def test_gain_step_boundary_edit_clears_the_row_error(
+    gain_editor: ComponentDriver, tmp_path: Path
+) -> None:
+    driver = gain_editor
+    driver.invoke_context_action(object_name="form.fold.gain", action="Switch to Step")
+    driver.enter_text(object_name="form.input.gain.start", value="-0.7")
+    driver.enter_text(object_name="form.input.gain.step", value="0.1")
+    driver.enter_text(object_name="form.input.gain.stop", value="1.1")
+    driver.screenshot(tmp_path / "01-outside-boundary.png")
+    error = driver.observe(object_name="form.error.gain.step")
+    assert error.fully_visible and error.caption_fits and "[-1, 1]" in error.text
+
+    driver.enter_text(object_name="form.input.gain.stop", value="1")
+    driver.screenshot(tmp_path / "02-corrected-to-boundary.png")
+    assert not driver.observe(object_name="form.error.gain.step").visible
+    assert not driver.observe(object_name="form.error.summary").visible
+    assert driver.observe(object_name="form.input.gain.start").text == "-0.7"
+    assert driver.observe(object_name="form.input.gain.stop").text == "1"
+    assert driver.observe(object_name="form.input.gain.step").text == "0.1"
+    effective_stop = driver.observe(object_name="form.value.gain.stop")
+    assert not effective_stop.visible, effective_stop.text
+    assert not driver.observe(object_name="form.value.gain.step").visible
