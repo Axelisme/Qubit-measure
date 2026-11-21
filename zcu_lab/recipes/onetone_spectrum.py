@@ -30,53 +30,58 @@ class OnetoneSpectrumInputs(RecipeInputs):
     """Inputs for onetone spectrum; all units and null policies are declared per
     field."""
 
-    target: SingleTarget
+    target: Annotated[
+        SingleTarget,
+        Field(
+            description="Qubit binding used to resolve its resonator; omit or pass null to keep the current alias."
+        ),
+    ]
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key. Sources are chosen by the Form.",
+        description="Select the Readout pulse and ADC window by library key; omit to retain the Form selection, or pass null to the Form.",
     )
     center_mhz: float | None | Keep = Field(
         KEEP,
-        description="Sweep center in MHz. Supply with span_mhz.",
+        description="Set Readout RF frequency › Start and Stop (MHz) around this absolute RF center; provide span_mhz too. Omit both to retain the sweep; null clears both endpoints.",
     )
     span_mhz: Annotated[float, Field(gt=0)] | None | Keep = Field(
         KEEP,
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Supply with center_mhz.",
+        description="Set Readout RF frequency › Start and Stop (MHz) to center_mhz minus/plus half this full span. Omit both to retain the sweep; null clears both endpoints.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse amplitude in native gain units.",
+        description="Set Readout › Gain (a.u.), the fraction of DAC full-scale pulse amplitude; omit to retain it, or pass null to the Form.",
     )
     points: Annotated[int, Field(ge=2)] | None | Keep = Field(
         KEEP,
-        description="Sweep sample count.",
+        description="Set Readout RF frequency › Expts (count); omit to retain it, or pass null to the Form.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count.",
+        description="Set Reps (count), shots per frequency per round; omit to retain it, or pass null to the Form.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Rounds (count), repeats of the sweep for averaging; omit to retain it, or pass null to the Form.",
     )
 
     model_type: Literal["hm", "t", "auto"] | None | Keep = Field(
         KEEP,
-        description="Model type. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Resonance model: hm for a hanger notch, t for a transmission peak, or auto to choose from the measured magnitude; omit to retain it, or pass null to Analyze.",
     )
     fit_bg_amp_slope: bool | None | Keep = Field(
         KEEP,
-        description="Fit amplitude background. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Fit amplitude background slope to allow a frequency-dependent amplitude envelope; omit to retain it, or pass null to Analyze.",
     )
     fit_bg_phase_curvature: bool | None | Keep = Field(
         KEEP,
-        description="Fit phase curvature. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Fit phase background curvature to allow a quadratic phase term; omit to retain it, or pass null to Analyze.",
     )
     edelay: float | None | Keep = Field(
         KEEP,
-        description="Electrical delay seed (µs; blank = auto). Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Electrical delay seed (µs; blank = auto); omit to retain it or pass null to use a matching saved calibration or automatic branch search.",
     )
 
 
@@ -84,16 +89,16 @@ class OnetoneSpectrumReport(RecipeReport):
     """Onetone spectrum results and failure reason; cancellation returns no report."""
 
     frequency_mhz: float | None = Field(
-        description="Fitted resonator frequency in MHz; null means not estimable."
+        description="Resonator frequency (MHz) from the fit; null means not estimable."
     )
     linewidth_mhz: float | None = Field(
-        description="Fitted full linewidth in MHz; null means not estimable."
+        description="Linewidth (FWHM) (MHz) from the fit; null means not estimable."
     )
 
 
 @recipe(
     "onetone_spectrum",
-    description="Run one onetone spectrum and save raw data and Primary analysis.",
+    description="Sweep the resonator readout RF frequency, fit the complex IQ spectrum and ask before writing the calibration; save the acquired data and analysis.",
 )
 async def onetone_spectrum(
     session: RecipeSession, inputs: OnetoneSpectrumInputs

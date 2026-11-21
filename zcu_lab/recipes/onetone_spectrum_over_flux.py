@@ -32,50 +32,55 @@ class OnetoneSpectrumOverFluxInputs(RecipeInputs):
     """Inputs for onetone spectrum over flux; all units and null policies are
     declared per field."""
 
-    target: SingleTarget
+    target: Annotated[
+        SingleTarget,
+        Field(
+            description="Qubit binding used to resolve its resonator; omit or pass null to keep the current alias."
+        ),
+    ]
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key. Sources are chosen by the Form.",
+        description="Select the Readout pulse and ADC window by library key; omit to retain the Form selection.",
     )
     center_mhz: float | None | Keep = Field(
         KEEP,
-        description="Sweep center in MHz. Supply with span_mhz.",
+        description="Set Readout RF frequency › Start and Stop (MHz) around this absolute RF center; provide span_mhz too.",
     )
     span_mhz: Annotated[float, Field(gt=0)] | None | Keep = Field(
         KEEP,
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Supply with center_mhz.",
+        description="Set Readout RF frequency › Start and Stop (MHz) to center_mhz minus/plus half this full span.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse amplitude in native gain units.",
+        description="Set Readout › Gain (a.u.), the fraction of DAC full-scale pulse amplitude.",
     )
     flux_device: DeviceName = Field(
-        description="Registered flux-device name; read only its cached snapshot, without connecting."
+        description="Set Flux-bias device to the registered bias source; the recipe checks its cached unit without connecting."
     )
     flux_unit: str = Field(
-        description="Exact cached device unit, including native; no coordinate conversion occurs."
+        description="Set Bias unit to the exact cached device unit (A, V or native); no coordinate conversion occurs."
     )
     freq_points: Annotated[int, Field(ge=2)] | None | Keep = Field(
         KEEP,
-        description="Frequency sample count.",
+        description="Set Readout RF frequency › Expts (count), the number of frequencies at each outer sweep setting.",
     )
     flux_points: int = Field(
-        ge=2, description="Required native-flux sample count, at least two."
+        ge=2, description="Set Flux bias › Expts (count) to at least two bias settings."
     )
     flux_range: list[float] = Field(
         min_length=2,
         max_length=2,
-        description="Two distinct device-native flux endpoints, in either direction; no conversion occurs.",
+        description="Set Flux bias › Start and Stop to distinct endpoints in Bias unit; either order is allowed.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count.",
+        description="Set Reps (count), shots per frequency per round.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Rounds (count), sweeps to average at each outer setting.",
     )
 
 
@@ -83,13 +88,13 @@ class OnetoneSpectrumOverFluxReport(RecipeReport):
     """Onetone spectrum over flux results and failure reason; cancellation returns no report."""
 
     flux_half: float | None = Field(
-        description="Accepted half-flux line in device-native coordinates; null means not estimable."
+        description="Half-flux bias in Bias unit; null means no accepted pick."
     )
     flux_integer: float | None = Field(
-        description="Accepted integer-flux line in device-native coordinates; null means not estimable."
+        description="Integer-flux bias in Bias unit; null means no accepted pick."
     )
     flux_period: float | None = Field(
-        description="Flux period in device-native coordinates; null means not estimable."
+        description="Bias period in Bias unit; null means no accepted pick."
     )
 
 

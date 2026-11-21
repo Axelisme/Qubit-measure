@@ -6,6 +6,8 @@ from typing import TypeAlias
 
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
+    FluxPickState,
+    analyze_flux_pick,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import RunMetadataContent
@@ -21,7 +23,6 @@ from zcu_tools.gui.app.measure.flux_pick_frontend import make_flux_pick_frontend
 from zcu_tools.gui.app.measure.flux_pick_plugin import (
     FluxPickPlugin,
     make_flux_pick_plugin,
-    render_flux_pick,
 )
 from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickParams,
@@ -55,13 +56,22 @@ def _make_interactive_plugin(
             metadata.device_snapshot,
         )
     )
+
+    def build_result(
+        inputs: FluxPickInputs, state: FluxPickState, plots: Plots
+    ) -> FluxPickResult:
+        """Validate the accepted positions and draw them on the original Run map."""
+        pick = analyze_flux_pick(inputs, state)
+        FluxDepExp.plot_pick(req.run_result, pick, plots=plots)
+        return FluxPickResult(pick.flux_half, pick.flux_int, pick.flux_period)
+
     return make_flux_pick_plugin(
         inputs,
         flux_half=None if points is None else points.half,
         flux_int=None if points is None else points.integer,
         force_magnitude=True,
         plots=plots,
-        result_builder=render_flux_pick,
+        result_builder=build_result,
     )
 
 
@@ -82,6 +92,12 @@ def run(
     return RunRecord(cfg=cfg, result=FluxDepExp().run(cfg, context=context))
 
 
+def _summary_lines(source: OneToneFluxDepRunResult) -> tuple[str, ...]:
+    """Report configured averaging from the analyzed Run or Load, if available."""
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=FluxDepExp.AXES_SPEC,
     make_form=make_form,
@@ -92,5 +108,6 @@ DEFINITION = Adapter(
         frontend=make_flux_pick_frontend,
         options=lambda source, env: FluxPickParams(),
         writeback=_get_writeback_items,
+        summary_lines=_summary_lines,
     ),
 )

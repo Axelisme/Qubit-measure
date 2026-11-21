@@ -29,34 +29,39 @@ class OnetoneRangeFindInputs(RecipeInputs):
     It affects dip selection, not the acquisition grid or hardware channels.
     """
 
-    target: SingleTarget
+    target: Annotated[
+        SingleTarget,
+        Field(
+            description="Resonator binding for the survey readout; omit or pass null to keep the current alias."
+        ),
+    ]
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     freq: ToneRangeInputs = Field(
-        description="Required absolute MHz start/stop, not mixer offsets. No frequency initial guess is inferred."
+        description="Set Readout RF frequency › Start and Stop (MHz) to absolute RF endpoints, not mixer offsets; both are required."
     )
     n: int = Field(
         strict=True,
         ge=2,
-        description="Required frequency sample count; use at least 11 points for dip analysis.",
+        description="Set Readout RF frequency › Expts (count); use at least 11 samples for dip selection.",
     )
     resonators: list[str] = Field(
         min_length=1,
-        description="Required nonempty picker labels set dip count, not cfg. Use temporary names for unidentified dips.",
+        description="Set Analyze › Resonators (JSON) as a nonempty list of names; the list length gives the expected dip count. Use temporary names if needed.",
     )
     min_separation: (
         Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)] | None | Keep
     ) = Field(
         KEEP,
-        description="Analysis dip spacing in MHz (>0, initially 1); omitted keeps value, null passes to owner.",
+        description="Set Analyze › Min separation (MHz), the minimum dip spacing (>0, initially 1); omit to retain it, or pass null to Analyze.",
     )
     reps: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         KEEP,
-        description="Acquisition repetitions.",
+        description="Set Reps (count), shots per frequency per round; omit to retain it, or pass null to the Form.",
     )
     rounds: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         KEEP,
-        description="Averaging rounds.",
+        description="Set Rounds (count), repetitions of the sweep for averaging; omit to retain it, or pass null to the Form.",
     )
 
 
@@ -64,7 +69,7 @@ class OnetoneRangeFindReport(RecipeReport):
     """Frequency-ordered dip estimates and pairing uncertainty."""
 
     resonators: list[ResonatorDipSummary] = Field(
-        description="Each dip's optional name (null when unassigned), absolute MHz frequency and background-relative depth in a.u."
+        description="Selected dips: name (null if unassigned), frequency (MHz), depth (a.u.), half-prominence width (MHz) and depth/width (a.u./MHz) when available."
     )
     prominence_factor: float | None = Field(
         default=None,
