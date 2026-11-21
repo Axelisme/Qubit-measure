@@ -4,7 +4,6 @@ from dataclasses import replace
 
 import numpy as np
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution._dispatch import create_work_plan
 from zcu_tools.simulate.evolution._gain_plan import period_builder
 from zcu_tools.simulate.evolution.kernel import (
     ApplyContext,
@@ -13,6 +12,7 @@ from zcu_tools.simulate.evolution.kernel import (
 )
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 
+from .._engine import create_work_plan
 from ..contract.kernel_suite import KernelCase, reference, synthetic_model
 
 

@@ -13,6 +13,7 @@ from zcu_tools.simulate.evolution import (
     ModelSource,
     TimelineBatch,
 )
+from zcu_tools.simulate.evolution._dispatch import populate_work_plan
 from zcu_tools.simulate.evolution.kernel import (
     ApplyContext,
     GuardResult,
@@ -20,6 +21,7 @@ from zcu_tools.simulate.evolution.kernel import (
     Prepared,
     SegmentTable,
 )
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from .contract.kernel_suite import synthetic_model
 
@@ -30,6 +32,13 @@ def source() -> ModelSource:
         np.diag([0.2, 0.3, 0.5]).astype(complex),
         lambda level: replace(model, level=level),
     )
+
+
+def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
+    """Prepare complete cold facts for direct kernel tests."""
+    plan = WorkPlan(complete_table=table)
+    populate_work_plan(table, source, plan)
+    return plan
 
 
 def batch(n: int = 12, *, duration: float = 3.0) -> TimelineBatch:

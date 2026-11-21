@@ -6,7 +6,6 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution._dispatch import create_work_plan
 from zcu_tools.simulate.evolution._gain_plan import (
     admit_shared_builds,
     gain_anchor_resource,
@@ -19,6 +18,7 @@ from zcu_tools.simulate.evolution.kernel import (
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
+from .._engine import create_work_plan
 from ..contract.kernel_suite import synthetic_model
 
 

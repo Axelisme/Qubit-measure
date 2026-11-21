@@ -7,7 +7,9 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from .engine import DriveTrack, EnvelopeSpec, PathDiagnostics, TimelineBatch
+from zcu_tools.simulate.boundary import CancellationQuery
+
+from .engine import Cancelled, DriveTrack, EnvelopeSpec, PathDiagnostics, TimelineBatch
 from .kernel import SegmentTable
 from .secular import FluxWaveform, ModelSource, StarkOrderInversion
 
@@ -397,10 +399,16 @@ def _shift_contents(batch, point, start, levels, source):
     return contents, tuple(inversions)
 
 
-def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
-    """Segment templates with array event sorting; assign global timeline indices."""
+def plan(
+    source: ModelSource, batches: Sequence[TimelineBatch], *, cancel: CancellationQuery
+) -> Geometry:
+    """Segment templates and assign global indices; raise Cancelled between batches."""
     plateau_cache: _PlateauCache = {}
-    geometries = [_batch_geometry(batch, source, plateau_cache) for batch in batches]
+    geometries = []
+    for batch in batches:
+        geometries.append(_batch_geometry(batch, source, plateau_cache))
+        if cancel.is_set():
+            raise Cancelled()
     points = np.concatenate([g.points for g in geometries])
     if len(np.unique(points)) != len(points):
         raise ValueError("point indices must be unique across batches")
