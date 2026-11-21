@@ -1,203 +1,57 @@
 # Two-qubit paired RB and CZ-interleaved RB
 
-**Readers:** operator, agent. Run paired two-qubit RB and CZ-interleaved RB through the GUI or MCP and interpret their error estimates.
-
-**Last updated:** 2026-11-20, per-depth seed spread
-
-Cfg schema 7.0 uses `qubit1` and `qubit2` positions.
-
-Refresh keeps authored input and rechecks it against the new capture, including the [mux tone count](../guide.md#綁定位置與讀出-tones). Use Defaults to replace unsaved input with initial values from the new source.
+**Readers:** operator, agent. Compare reference and CZ-interleaved decays and decide whether the data constrain a CZ error estimate.
 
 ## Before run
 
-Select `two_qubit/rb` after calibrating the Qubit1/Qubit2 X90 and X180 pulses, complete mux readout,
-two charge-line CZ pulses and their local-Z corrections. Bind scalar aliases
-`qubit1`, `qubit2`, `coupler` and `mux`, then open the tab or choose Defaults. The fixed capture
-maps logical Q0 to Qubit1 and Q1 to Qubit2. Their tone positions come from the captured
-`$mux.qubits` list. Bind the two positions to distinct components listed there.
-When reusing an older point, bind the new qubit aliases and rename the CZ slots and pulse library keys to `cz_qubit1` and `cz_qubit2`. Rerun [local Z](../local_z/guide.md) and apply its proposal to populate the new pair keys below.
+Select `two_qubit/rb`. Bind `qubit1`, `qubit2`, `coupler` and `mux` to the calibrated point. Both qubits must appear in the full mux group. The tab uses their order in the mux group, not ADC channel numbers, to find the two readout tones. The outcome `(g,e)` always means Qubit1 in g and Qubit2 in e, regardless of ADC order.
 
-Readout references `$mux.module.readout`, preserving the library's complete tones and scalar settings. A missing readout slot stays Invalid.
-The Form copies `$qubit1.module.x90`, `$qubit1.module.x180`, `$qubit2.module.x90`,
-`$qubit2.module.x180`, `$coupler.module.cz_qubit1` and `$coupler.module.cz_qubit2`.
-Missing pulse slots stay Invalid. Each X pulse uses the generator of its
-role's CZ line and a finite scalar phase. Supply measured calibration for
-every required slot. The ordinary
-CZ pulses use independent generators, the same frequency and envelope duration,
-and a common start. Their individual gains and constructive relative phase
-remain unchanged throughout a sequence.
+| Form field | What to check |
+| --- | --- |
+| Qubit1 Xπ/2, Qubit2 Xπ/2, Qubit1 Xπ, Qubit2 Xπ | Open or Defaults copies the four pulses from the corresponding point slots. Use amplitude and length Rabi to calibrate each pulse. Check frequency (MHz), signed gain (a.u.) and envelope duration (µs). Each X pulse uses its qubit's CZ generator. |
+| Two-line CZ drive | Defaults copies the two coupler pulses. Check their common frequency (MHz), envelope duration (µs) and start time, and keep the calibrated gain and constructive relative phase of each line. The interleaved arm inserts this pulse pair after each random Clifford. |
+| Local Z corrections | Defaults reads the ordered pair from `$coupler.ext.cz_phase` and checks the component names. Use the corrections from [Local Z](../local_z/guide.md), usually minus the measured local-Z phase per CZ (deg). |
+| Mux readout | Defaults selects `$mux.module.readout`. Use Lookback for the readout timing (µs), mux Onetone for readout frequencies (MHz) and gains (a.u.), and GE and GE Post for both circle centers and radii. Repeat GE and GE Post after changing readout settings. |
+| Reset | Leave blank to start from the thermal population. Select ordinary reset to prepare each shot or `reset/mux_herald` to keep only shots classified as g on both qubits before the sequence. |
+| Random Clifford depths (count) | Enter the number of random Cliffords before recovery, excluding the recovery itself. The default is 0, 1, 2, 3. Use depth 0 for the no-random-Clifford baseline. |
+| Sequence seeds | Enter integer sequence IDs from 0 to 2147483647. The default is 0, 1. The two arms use the same sequence IDs; duplicates do not add independent sequences. |
+| Reps (count), Rounds (count) | Enter shots per depth in each round and rounds per seed and arm. Defaults are 1000 and 10. Increase either to reduce shot noise without sampling more random sequences. |
+| Initial delay (µs), Relax delay (µs) | Set the wait before the first shot of a round and the relaxation wait after each shot. The initial wait starts at 1 µs. Check the relaxation wait in the Form before running. |
 
-The required `$coupler.ext.cz_phase` input contains `qubit1`, `qubit2`,
-`correction_qubit1_deg` and `correction_qubit2_deg`. Opening the tab or choosing Defaults checks the names against the captured components in order and reports the mismatched position. The cfg keeps only the angles. Corrections are
-logical Z angles in degrees, normally minus the corresponding measured local-Z
-slope. Missing angles remain invalid. Review any operator override against measured
-calibration before Run; model hypotheses only describe assumed behavior.
+After changing bindings, select Defaults to reload the calibrated values. Refresh keeps the draft and checks it against the new source. If an older point refers to previous role names, update the bindings and the `cz_qubit1` / `cz_qubit2` pulse slots, then rerun Local Z to get the ordered pair.
 
-The saved readout cfg must supply circle g/e centers and radius at
-`qubit1_tone` and `qubit2_tone`, not by ADC sorting. Opening the tab or choosing Defaults fills these hidden fields. Run rejects missing,
-linear or radius-free classifiers and requests GE Post. After changing readout
-settings, repeat GE and Post before using the classifiers.
-
-Reset defaults to `None`. To emit a preparation pulse before each sequence,
-select an ordinary reset. To keep only shots classified as g on both role
-tones before the sequence, select a `reset/mux_herald` module in Reset.
-The Form does not offer `reset/herald`, which requires a pulse readout.
-The module's `readout` must match the terminal Readout field, including the
-classifiers and the full tone order. Reference the same library key in both
-fields. For Qubit1 and Qubit2 at positions 0 and 1 in the full tone list, the module is:
-
-```yaml
-type: reset/mux_herald
-readout: MG12.readout.main
-keep: {'0': g, '1': g}
-```
-
-Use the actual Qubit1 and Qubit2 tone positions, not ADC numbers. Quote both keys.
-An optional `prepare` emits one ordinary reset or pulse before the herald read.
-The mux readout's delays apply to both reads. RB saves only terminal counts
-from shots that pass both herald classifications. To preserve all herald
-outcomes and fit gg and ee return survival jointly, use the separate
-[`two_qubit/rb_heralded`](guide_heralded.md) experiment.
+For a herald reset, select the same full-group library readout as Mux readout and set `keep` to g at both role tone positions. The module's optional `prepare` runs before the herald read. The readout delays apply to both reads. Ordinary RB saves terminal counts only for shots that pass; choose [heralded RB](guide_heralded.md) to retain all herald outcomes and compare gg and ee separately.
 
 ## Sequences and cost
 
-Enter a nonempty list of nonnegative Clifford counts in `depth`, and a
-nonempty list of nonnegative 31-bit integers in `seed`. The cfg removes
-duplicates and sorts both lists before Run, so the saved cfg matches the data
-axes. Each seed draws one random sequence up to the largest depth. Both arms
-use the same draw, and shallower depths use its prefixes.
+Each shot uses optional reset → random Clifford prefix → recovery Clifford → joint terminal readout. The reference arm uses the random Cliffords alone. The interleaved arm adds one CZ after each random Clifford. Reference Cliffords can already contain CZs. Both arms use the same random prefix at each depth, drawn uniformly from the 11,520 two-qubit Cliffords. Each arm and depth gets a recovery that inverts its own sequence.
 
-The draw is uniform over all 11,520 two-qubit Cliffords, with replacement.
-The decomposition minimizes CZ count first, then the number of physical X
-pulses. X90 and X180 each count as one pulse, and Z90 only updates the
-frame. The uniform average is 1.5 CZs per Clifford before interleaving and
-recovery. A seed still draws the same Clifford identities as before.
-
-Interleaved inserts one CZ after each random Clifford. Reference already
-contains CZs inside the Clifford decompositions. At each depth, each arm plays
-one recovery Clifford that inverts the full prefix, including its inserted CZs.
-Even a shallow depth can contain several CZ pulses.
-
-Each shot starts with zero logical frames. Z90 adds 90 degrees to one frame.
-X90 and X180 play at their configured phase minus that frame. CZ keeps the
-two charge-line phases fixed and advances each frame by its local-Z correction.
-Terminal Z frames do not affect computational-basis readout.
-
-Both arms align the two qubit timelines at each Clifford boundary, including
-before recovery. Within a Clifford, each qubit plays its own pulses and virtual
-Zs in order. Pulses on different qubits can overlap. At CZ, both qubits wait,
-the two charge-line pulses start together, and both qubits resume at the later
-CZ end, including delays. X180 can change pulse timing in either arm. Do not
-pool decay estimates with older runs that used two X90s or overlapped
-neighboring Cliffords.
-
-Run compiles every seed and arm before taking data. Each program contains
-one copy of the deepest Clifford sequence. At each requested depth, the
-matching board-loop index plays its recovery, waits until it ends, then jumps
-to the common terminal readout. Shots for larger depths skip that recovery.
-The deepest shot plays its recovery and continues straight to readout.
-
-If a program exceeds PMEM, Run stops without acquiring shots. The error gives
-the seed, arm, depth point count, largest depth, words used and board limit.
-Reduce the largest depth or use fewer points. On a 4,096-word profile with
-synthetic pulses, no reset and seed 7, 201 points from 0 to 200 took
-3,728 words for reference and 4,114 for interleaved, so the sweep did not fit.
-The same fixture fit 21 points from 0 to 400 at 2,777 and 3,586 words.
-These numbers are compile examples, not limits for every pulse or reset setup.
-
-Run acquires each seed/arm program once. `rounds` is the number of acquisition
-rounds per program. QICK visits each depth once per repetition, giving `reps`
-shots per depth per round. The acquisition reducer adds counts from finished
-rounds.
-
-Without reset, the nominal B00 start leaves the thermal initial population in
-place. Terminal Qubit1/Qubit2 classification happens during acquisition. Circle outcomes
-are g, e and other. Radius boundaries and equidistant points are other.
-The live plot shows joint00 from accepted counts accumulated over seeds and
-rounds in each arm. This count-weighted view is not the equal-seed decay fit.
+The two local frames start at zero. Virtual Z updates change the phase of later Xπ/2 and Xπ pulses. Each CZ uses the calibrated two-line phase and then applies the Local Z corrections to the frames. Both qubits finish each Clifford before starting the next. Depth and seed lists are sorted and deduplicated before acquisition.
 
 ## Save, cancel and analyze
 
-Result `sums` is float64 with shape `(Nseed, 2, Nd, 3, 3)` and axes
-(seed, arm, depth, Qubit1 class, Qubit2 class). Arm 0 is reference and arm 1 is
-CZ-interleaved. Each class axis is ordered g, e, other. Counts preserve
-joint outcomes from each kept shot. Neither the round count nor heralding
-adds a Result axis. On a full run, divide the total counts in a cell by
-`reps × rounds` to estimate the herald acceptance fraction.
+Save retains joint g, e and other counts for each seed, arm and depth. If stopped, the run retains counts from finished acquisition rounds. Load restores those counts and the saved cfg without changing the current Form. Incompatible earlier formats, including raw-IQ files and files with a separate round axis, need the corresponding older release. Load does not convert or modify them.
 
-Stop keeps the sum of completed rounds for the current seed and arm, even
-when fewer than `rounds` finish. Cells with no completed rounds stay NaN.
-`stop_requested` records a stop request, not data completeness. Acquisition
-exceptions propagate from Run and leave the previous successful record
-unchanged. Save counts and cfg before closing the source. Load restores the
-saved source without changing the current Form. Load rejects files with a
-round axis (wrong number of axes) or older raw-IQ files without `sums`.
-It also rejects results with incompatible axis names. To read the original file, use the corresponding older release. Load does not convert or modify the file.
-
-Analyze divides each cell's terminal gg count by that cell's total accepted
-count, including other. Zero accepted shots give NaN survival; a finite
-count cell from fewer rounds remains usable if the total is positive.
-Malformed or partially populated cells cause an error. The fit uses only
-seeds with finite survival in both arms at every requested depth. It weights
-these seeds equally and requires at least two paired seeds and four distinct
-depths.
+The Analyze header identifies the experiment and the source run. Reps × Rounds comes from the saved run config, not the current Form, and does not state that every round finished or every shot passed herald.
 
 ## Interpreting the result
 
-Analyze reports `estimate`, `fit_quality` and `reason`. Per-depth survival
-and fitted curves stay inside analysis for plotting.
+- **Joint ground return**, the live and first Analyze figure, shows the fraction of kept shots classified as terminal `(g,g)`, pooled across seeds by arm and depth. The live caption counts measured seed/arm/depth cells and total retained shots. Other outcomes contribute to the denominator. No kept shots means no plotted probability.
+- **Paired decay fit** uses the same depths and outcome probability, but gives each seed equal weight. It uses only seeds with data at every depth in both arms, with at least four distinct depths and two complete pairs. Dots are means, solid curves are fits to `A p^depth + B`. Compare both curves with their dots before interpreting the ratio.
 
-Paired decay analysis fits each arm to `A*p**depth+B`.
-The two-qubit dimension is 4. The reported quantities are
-`reference_epc = 3/4*(1-p_reference)` and
-`gate_error = 3/4*(1-p_interleaved/p_reference)`.
-Negative error estimates remain negative. They are diagnostics of the ratio
-and its assumptions. Interpret a negative estimate as a model diagnostic,
-while retaining the reported value.
+Capped bars on the pooled views are shot SEM, the sample standard deviation of the kept-shot success indicator divided by the square root of the kept shot count. Fewer than two kept shots leaves the SEM undefined. A zero bar at probability 0 or 1 is not a confidence bound. The pale bars on pooled views and the bars on the fit are the sample SD across seeds, not SEM or fit error. The fit figure uses complete paired seeds for those bars; pooled views use the seeds available at each point. Seed SD includes shot noise and variation between sequences. With fewer than two seeds, there is no seed SD bar.
 
-The 95% interval resamples entire paired seed curves, preserving depth and arm
-correlations. It describes statistical seed variation; independent-shot
-uncertainty requires a different model. The summary reports the number of
-paired seeds and valid bootstrap fits. The default is 1,000 deterministic resamples with bootstrap seed 42.
+The CZ error estimate is `3/4 × (1 − p_interleaved/p_reference)`. Reference error per Clifford is `3/4 × (1 − p_reference)`. Both are unitless. The 95% seed CI resamples whole paired seed curves. The default is 1000 resamples with bootstrap seed 42. The CI omits systematic effects such as readout errors and coherent or gate-dependent noise. A negative estimate means the fitted interleaved decay is slower than the reference decay. Keep the signed value as a model diagnostic, not a physical negative error rate. Other outcomes do not identify a particular leakage state.
 
-The live and pooled-survival plots center each bar on the count-weighted point.
-The fit plot centers each bar on the equal-seed mean of the complete pairs.
-Each bar extends one sample standard deviation (`ddof=1`) across seeds on either
-side at that depth. A point with only one seed has no bar. The spread includes
-sequence-to-sequence variation and shot noise. For survival probability `P` and
-`N` shots contributing to a seed's estimate, shot noise is about `√(P(1−P)/N)`.
-It grows as `P` falls from near one toward one-half, so a bar that grows with
-depth does not by itself identify coherent error.
+Each arm's 1/e depth is in Clifford counts. Its ± value is the standard error from the fit covariance, not the shot SEM. Divide that error by the 1/e depth to obtain the reported relative error. R² measures how much of the spread in the fitted observations the model explains. Normalized RMS is the root-mean-square residual divided by the observed range. Neither is an acceptance threshold. A large relative error or a depth-window warning means the decay can be poorly constrained even with a large R².
 
-For each arm,
-read `fit_quality.relative_parameter_errors["decay_time"]`. This number is
-the fitted 1/e length's standard error divided by that length. A large
-relative error can mean that the deepest point does not reach the tail and
-the fit cannot separate the decay length from the offset. Add deeper points
-and check the relative error again.
+If the fitted 1/e depth is shorter than the first nonzero depth, add shallower depths. If the data only cover the start of a decay and the 1/e depth is inside the sweep, aim to include both the 1/e point and depths around three times it, then compare the fit uncertainty again. For example, a supported 1/e depth of 20 Cliffords with only shallow coverage calls for points around 60 Cliffords. Do not extrapolate a window-limited decay into a CZ gain or frequency correction. If the pooled shot SEM is small but the seed CI is broad, add independent seeds rather than only Reps. To investigate an unexplained ratio, inspect both arm fits and repeat the upstream CZ and Local Z calibrations before reporting a gate error.
 
-For example, with 11 synthetic depths, p = 0.98 and noise σ = 0.01, maximum
-depths 30, 50, 80 and 200 gave relative errors 0.30, 0.14, 0.08 and 0.035.
-R² was 0.993, 0.997, 0.998 and 0.999, so even the shortest sweep looked close
-to its fitted curve. See the [comparison record](../../../../docs/discussions/2026-11-20-rb-round-reduction-and-fit-quality.md).
-Insufficient data, absent saved cfg, flat decay, invalid fits or unstable bootstrap
-stop estimation and retain the failure reason. Preserve that result and review
-the data before deciding to remeasure. Statistical diagnostics and physical
-acceptance remain operator decisions.
-
-Thermal population, preparation and readout errors contribute to this ensemble.
-Circle other outcomes do not identify a particular leakage state. Finite shots
-and too few shallow depths can leave the decay unidentifiable. A shallow
-curve can also yield finite but biased parameters when amplitude and offset
-are poorly constrained. Even a finite fit needs an identifiability review.
-Gate-dependent noise, coherent errors and nonexponential decay can bias the
-interleaved ratio beyond its statistical interval. Inspect the curves and those limitations before
-interpreting a CZ error. This experiment provides diagnostic estimates only;
-physical calibration acceptance is manual.
+Layout reference: Ding, Fig. 5-13(b) (printed p. 157), places the RB data beside their fitted decays. Here the vertical coordinate is the full-mux joint ground-return probability, and the error estimate uses the ratio of the two complete-pair decays.
 
 ## Notebook
 
-Use a validated `RBCfg` as `cfg` and set the two tone indices in the full readout. Notebook roles use `qubit1` and `qubit2`, but are separate from GUI aliases and do not bind them automatically. Supply the notebook's existing hardware handles, device manager and destination `point_view`.
+Use a validated `RBCfg` with the two saved tone positions and your existing SoC, device manager and `point_view`. Notebook does not infer the GUI bindings.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter
@@ -210,13 +64,6 @@ analysis = exp.analyze(RBOptions())
 saved = exp.save_run(point_view, source=record)
 ```
 
-The adapter owns the run record and plots for each operation.
-
 ## Calibration order and field units
 
-Calibrate each role's Xπ/2 and Xπ slots with amplitude and length Rabi before using them.
-Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
-Use lookback to set mux timing, then mux onetone to set frequencies and gains.
-Confirm readout timing in us and gains in [-1, 1].
-Locate the dual-line CZ pulse with conditional spectroscopy and chevron.
-Confirm the coupler's `cz_qubit1` and `cz_qubit2` slots before copying them into the Form.
+Calibrate Xπ/2 and Xπ with Rabi and the mux timing with Lookback. Tune mux frequencies and gains with mux Onetone before GE and GE Post. Locate the two-line CZ with conditional spectroscopy and chevron, then measure Local Z. Check the matching pulse slots and corrections under [Before run](#before-run).
