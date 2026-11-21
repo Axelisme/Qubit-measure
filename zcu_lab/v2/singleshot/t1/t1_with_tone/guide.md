@@ -30,13 +30,6 @@ T1-derived defaults use the Open/Reset snapshot. A missing or null T1, or an una
 
 These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
 
-## Probe pulse length limit
-
-Each Delay value sets the Probe Pulse duration. If neither the tone-specific T1
-nor ordinary T1 is stored, the default sweep can request a duration longer than
-the generator allows for a single pulse. Lower Stop under Delay (`delay.stop`).
-Changing Relax delay does not shorten the probe pulse.
-
 ## Module slots
 
 Pi pulse uses `$qubit.module.x180` or pi_pulse. Probe starts from res_probe. Optional init/reset use `$qubit.module.x180`/reset. Readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Reset snapshot.
