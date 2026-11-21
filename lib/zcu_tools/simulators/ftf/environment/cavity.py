@@ -35,6 +35,8 @@ from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET, reson
 from zcu_tools.simulators.ftf.environment.template import FTFModelFacts, FTFTemplatePlan
 from zcu_tools.simulators.ftf.physics import CavityDrive
 
+_CAVITY_SPAN_CACHE_BYTES = 512 * 1024**2
+
 
 class ProjectiveCapture:
     """FTF-owned provenance alongside a single acquire's Engine recordings."""
@@ -445,7 +447,8 @@ def evolve_projective_plans(
     batches the current absolute span of one point. A row ID identifies the
     original point and history across spans and rounds. Densities return by ID
     before the next span.
-    One acquire-local flat cavity-average cache is cleared on success or failure.
+    One acquire-local ADC cache shares flat second moments and all-state end
+    fields across matching spans. It is cleared on success or failure.
     """
     points = np.concatenate([plan.batch.points for plan in plans])
     count = facts.source.initial_density.shape[0]
@@ -453,7 +456,7 @@ def evolve_projective_plans(
     spans = []
     pruned = []
     projection = _ProjectionState(settings.numerics.projection_weight_floor)
-    cache = CavityAverageCache()
+    cache = CavityAverageCache(max_bytes=_CAVITY_SPAN_CACHE_BYTES)
     try:
         pair = resonators(settings)
         for plan in plans:
@@ -541,10 +544,9 @@ def evolve_plans(
     No engine model source, drive phase, envelope origin or flux is rebuilt.
     options.cancel is forwarded to every evolution span's chunk checkpoints; None
     disables cancellation. Cancelled propagates without a partial result.
-    One ADC-owned cache (at most 64 MiB for moments and all-state end fields)
-    serves all g/e points in this composition, serially. Return and exception
-    paths release its contents;
-    no owner is retained by the engine or long-lived acquisition source.
+    One byte-bounded ADC memo for moments and all-state end fields serves all
+    g/e points in this composition serially. Return and exception paths release
+    its contents. The engine and long-lived acquisition source retain no owner.
     """
     if not any(any(plan.cavity_drives) for plan in plans):
         with options.evolving():
@@ -558,7 +560,7 @@ def evolve_plans(
                 reuse_key=options.key,
             ), (options.key,)
     # ADR-0078: this composition alone owns the ADC memo's lifetime.
-    cache = CavityAverageCache()
+    cache = CavityAverageCache(max_bytes=_CAVITY_SPAN_CACHE_BYTES)
     try:
         pair = resonators(settings)
         timelines = [
@@ -566,7 +568,7 @@ def evolve_plans(
                 plan.batch,
                 segment_spans(plan.batch),
                 tuple(
-                    CavityDrive(facts.joint, pair, pulses, span_cache=cache)
+                    CavityDrive(facts.joint, pair, pulses, cache=cache)
                     for pulses in plan.cavity_drives
                 ),
                 np.repeat(

@@ -34,20 +34,24 @@ decay before the qubit drive. Herald and terminal readout share this value
 The wait starts when the readout generator waveform ends, without waiting for
 the ADC integration window to end
 ([ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)).
-No experiment calibrates this field. New mux readout modules default to 0 µs.
+The `mux/onetone` Form seeds this field from the linewidth. FIT does not
+calibrate the wait.
 
 If the wait is too short, leftover photons shift the qubit transition
 frequency and cause dephasing. A nominal Xπ after herald may barely flip
 the qubit. A separate conditional-phase scan may show no π crossing; RB
 does not measure that crossing.
-In one low-SNR FTF example, after gg herald and a nominal F2 Xπ, the F2
-terminal e fraction was 11.6% at 0 µs and 92.9% at 2 µs. These fractions do
-not subtract the I baseline. The 2 µs value is an example, not a minimum
-or an optimum.
 
 Use each resonator's `kappa` from the `mux/onetone` FIT. It is the full
-width at half maximum (FWHM) in MHz. Estimate the cavity field decay time as
-`1 / (π · FWHM)` in µs. Start with a wait several times that estimate.
+width at half maximum (FWHM) in MHz. Start at `5 / (2π · κ)` µs, five photon
+decay times and the same formula used for the ring-up seed. For a shared
+`post_delay`, use the smallest κ so the slowest resonator has time to empty.
+
+In a low-SNR FTF example, R2's linewidth was about 1.2 MHz. Five photon
+decay times are about 0.66 µs, and 2 µs is about 15 times one photon decay
+time. After gg herald and a nominal F2 Xπ, F2's terminal e fraction was
+11.6% at 0 µs and 92.9% at 2 µs. These fractions do not subtract the I
+baseline. The 2 µs value was a comparison point, not a minimum or an optimum.
 
 In `two_qubit/joint_readout`, choose `reset/mux_herald` in Reset. Set
 `keep` to g for both role tones, keyed by their positions in the full readout.

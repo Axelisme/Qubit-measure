@@ -191,9 +191,13 @@ def _install_headless_controller(
     monkeypatch.setattr(experiment_wall_time, "datetime", clock)
 
 
+@pytest.mark.parametrize("orphan", [False, True], ids=["paired", "orphan"])
 @pytest.mark.usefixtures("core_app")
 def test_main_times_only_dispatch_to_terminal_and_sums_its_acquires(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    orphan: bool,
 ) -> None:
     clock = _Clock()
     _use_virtual_deadline(monkeypatch, clock)
@@ -211,22 +215,44 @@ def test_main_times_only_dispatch_to_terminal_and_sums_its_acquires(
     def run(ctrl: _SyntheticController) -> None:
         records = [
             {
+                "acquire_id": "inline",
                 "wall_s": 4.5,
                 "compile_wall_s": 0.5,
                 "evolve_wall_s": 2.0,
                 "readout_wall_s": 1.0,
+                "materialize_wall_s": 0.25,
             },
             {
+                "acquire_id": "deferred",
                 "wall_s": 2.0,
                 "compile_wall_s": 0.5,
                 "evolve_wall_s": 0.75,
                 "readout_wall_s": 0.5,
+                "materialize_wall_s": 0.0,
             },
         ]
         for index, record in enumerate(records):
             (ctrl.telemetry / f"routing-{index}.jsonl").write_text(
                 json.dumps({**record, "families": {}, "complete": True}) + "\n"
             )
+        events = [
+            {
+                "event": "materialize",
+                "acquire_id": "deferred",
+                "materialize_wall_s": 0.5,
+            },
+        ]
+        if orphan:
+            events.append(
+                {
+                    "event": "materialize",
+                    "acquire_id": "pruned",
+                    "materialize_wall_s": 0.75,
+                }
+            )
+        (ctrl.telemetry / "routing-2.jsonl").write_text(
+            "".join(json.dumps(event) + "\n" for event in events)
+        )
 
         def finish() -> None:
             clock.advance(8.0)
@@ -258,17 +284,33 @@ def test_main_times_only_dispatch_to_terminal_and_sums_its_acquires(
     assert report["inputs"]["fixture/point.txt"] == (
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     )
-    assert row["status"] == "ok"
     assert row["wall_s"] == 8.0
     assert row["started_at"] == "2026-11-21T00:00:52+00:00"
     assert row["finished_at"] == "2026-11-21T00:01:00+00:00"
+    assert row["acquires"] == 2
+    summary = (output / "summary.md").read_text()
+    if orphan:
+        assert row["status"] == "missing_breakdown"
+        assert row["core_s"] is None
+        assert row["core_s_lower_bound"] == 6.0
+        assert "| ≥6.000 |" in summary
+        return
+    assert row["status"] == "ok"
     assert [
         row[key]
-        for key in ("acquires", "compile_s", "evolve_s", "readout_s", "remainder_s")
-    ] == [2, 1.0, 2.75, 1.5, 1.25]
+        for key in (
+            "compile_s",
+            "evolve_s",
+            "readout_s",
+            "materialize_s",
+            "core_s",
+            "core_s_lower_bound",
+            "remainder_s",
+        )
+    ] == [1.0, 2.75, 1.5, 0.75, 6.0, None, 1.0]
     assert (
-        "| fake/frequency | 8.000 | 1.000 | 2.750 | 1.500 | 1.250 | 2 |"
-        in (output / "summary.md").read_text()
+        "| fake/frequency | 8.000 | 1.000 | 2.750 | 1.500 | 0.750 | 6.000 | 1.000 | 2 |"
+        in summary
     )
 
 
@@ -297,7 +339,7 @@ def test_timeout_continues_only_when_terminal_and_idle_are_observed_in_grace(
             if idle:
                 (ctrl.telemetry / "routing-fake.jsonl").write_text(
                     '{"families":{},"wall_s":5,"compile_wall_s":1,'
-                    '"evolve_wall_s":2,"readout_wall_s":1}\n'
+                    '"evolve_wall_s":2,"readout_wall_s":1,"materialize_wall_s":0}\n'
                 )
             QTimer.singleShot(0, lambda: clock.advance(180.0))
         else:
@@ -343,6 +385,90 @@ def test_timeout_continues_only_when_terminal_and_idle_are_observed_in_grace(
         "missing_breakdown" if expected_exit == 0 else "not_run"
     )
     summary = (output / "summary.md").read_text()
-    assert "Run >180 s: `fake/frequency`" in summary
+    assert "Core >180 s: —\n" in summary
     assert ">180.0" in summary
     assert f"Runs: {int(expected_exit == 0)} timed, 1 timeout, 0 run_failed." in summary
+
+
+@pytest.mark.parametrize(
+    ("evolve_s", "lower_bound", "over_target"),
+    [(173.5001, 180.0001, True), (173.5, 180.0, False), (None, None, False)],
+    ids=["above-target", "at-target", "no-complete-acquire"],
+)
+@pytest.mark.usefixtures("core_app")
+def test_timeout_judges_only_the_measured_core_lower_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    evolve_s: float | None,
+    lower_bound: float | None,
+    *,
+    over_target: bool,
+) -> None:
+    clock = _Clock()
+    _use_virtual_deadline(monkeypatch, clock)
+
+    def run(ctrl: _SyntheticController) -> None:
+        legacy = {
+            "acquire_id": "legacy",
+            "families": {},
+            "wall_s": 10,
+            "compile_wall_s": 1,
+            "evolve_wall_s": 8,
+            "readout_wall_s": 1,
+        }
+        records = [
+            legacy,
+            {"event": "materialize", "acquire_id": "legacy", "materialize_wall_s": 0.5},
+        ]
+        if evolve_s is not None:
+            records += [
+                {
+                    **legacy,
+                    "acquire_id": "raw",
+                    "wall_s": 185,
+                    "evolve_wall_s": evolve_s,
+                    "readout_wall_s": 4,
+                    "materialize_wall_s": 1.25,
+                },
+                {
+                    "event": "materialize",
+                    "acquire_id": "raw",
+                    "materialize_wall_s": 0.25,
+                },
+            ]
+        (ctrl.telemetry / "routing-test.jsonl").write_text(
+            "".join(json.dumps(record) + "\n" for record in records)
+        )
+        QTimer.singleShot(0, lambda: clock.advance(200.0))
+
+    data_dir, output = tmp_path / "inputs", tmp_path / "output"
+    _headless_inputs(data_dir)
+    _install_headless_controller(
+        monkeypatch,
+        clock,
+        {"fake/frequency": None},
+        run,
+        lambda ctrl: QTimer.singleShot(0, lambda: ctrl.complete("cancelled")),
+    )
+    assert (
+        main(
+            ["--output", str(output), "--row-timeout", "200"],
+            data_dir=data_dir,
+            read_commit=lambda: "abc",
+        )
+        == 0
+    )
+
+    [row] = json.loads((output / "report.json").read_text())["rows"]
+    assert row["status"] == "timeout"
+    assert row["wall_s_lower_bound"] == 200.0
+    assert row["core_s"] is None
+    assert row["core_s_lower_bound"] == lower_bound
+    assert row["materialize_s"] == (1.5 if evolve_s is not None else None)
+    assert row["acquires"] == (2 if evolve_s is not None else 1)
+    summary = (output / "summary.md").read_text()
+    assert "Core >180 s: —" in summary
+    assert f"Core 已知至少超標: {'`fake/frequency`' if over_target else '—'}" in summary
+    assert f"Core 未判定: {'—' if over_target else '`fake/frequency`'}" in summary
+    if lower_bound is not None:
+        assert "| ≥180.000 |" in summary

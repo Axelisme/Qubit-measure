@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-21, interrupted rounds and early-stop ownership
+**Last updated:** 2026-11-21, early-stop ownership and deferred raw timing
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -41,13 +41,23 @@ builder owns this policy, not the GUI. For a 2 us timeline with zero relaxation,
 the target when numeric work dominates.
 `SimulationBinding(..., callbacks=SimulationCallbacks(on_end=callback))` optionally observes each admitted
 acquire after all software rounds, including partial or failed acquisitions.
-The callback receives one frozen `AcquireOutcome(rounds, wall_s, compile_wall_s,
-complete)`. `rounds` contains captured inputs in execution order, including a
-failed round's input. `wall_s` includes pacing and mixin cleanup, but excludes
+The callback receives one frozen `AcquireOutcome`. Its `rounds` tuple contains
+captured inputs in execution order, including a failed round's input. `wall_s` includes pacing and mixin cleanup, but excludes
 readiness, `on_begin` and observer work. The mixin wraps only
 `build_compiled_request` in `binding.compiling()`; its elapsed seconds accumulate
 in `compile_wall_s` even if construction raises. Installation and execution do
 not contribute to compile time. No entered compile scope means `0.0`.
+`materialize_wall_s` sums the seconds spent generating and detaching raw shots
+inside the acquire, including failed calls. It is `0.0` when no shots are
+materialized during acquire. It excludes downstream shot processing.
+If a later getter materializes retained shots, optional
+`SimulationCallbacks(on_materialize=callback)` receives the originating
+`acquire_id` and elapsed seconds. `get_shot_result()` publishes only after building
+the result successfully; a failure after raw materialization does not publish.
+A direct `get_raw()` publishes on materialization as before. The binding measures
+both paths without counting mask or result construction. Program has no
+knowledge of the telemetry writer or file format. Both callbacks use the same
+warning policy.
 
 The binding's acquire body includes request release and active-marker cleanup.
 It sets `complete=True` only when that body returns normally. A Stop that returns
@@ -58,8 +68,8 @@ The observer runs after this decision and before admission releases. Ordinary
 observer `Exception`s warn at most once and cannot mask acquisition failures,
 even under warning-as-error filters. Observer `BaseException`s propagate and
 retain an original acquire error as context. Admission releases in either case.
-An omitted `on_end` avoids acquire and compiling clock reads. FTF projects this
-outcome into its local routing report; program knows no writer or file format.
+An omitted `on_end` avoids acquire stage clock reads. An omitted
+`on_materialize` avoids timing deferred access.
 Integrated `acquire(..., charge_requirements=(ChargeDriveRequirement(name, gen_ch), ...))`
 passes named physical charge requirements through the simulation request. The
 record lives in `simulate.boundary`; names are diagnostics, not dispatch keys.

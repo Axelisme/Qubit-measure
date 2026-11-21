@@ -28,6 +28,7 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickResult
 from zcu_tools.program.v2.modules import AbsModuleCfg, PulseReadoutCfg
 
 from zcu_lab.components.qubit import QubitBaseSchema, QubitFluxCalibration
+from zcu_lab.templates import READOUT_LENGTH_MARGIN_US
 from zcu_lab.v2.support.flux import (
     record_flux_frame,
     snapshot_numeric_values,
@@ -44,7 +45,6 @@ class _HasReadout(Protocol):
 
 
 _READOUT_DPM_KEYS = ("best_ro_freq", "best_ro_gain", "best_ro_length")
-READOUT_DPM_PULSE_TAIL_US = 0.1
 
 
 def _resolve_readout_dpm_values(
@@ -138,6 +138,8 @@ def readout_dpm_writeback_items(
     cfg_snapshot supplies the Run's readout settings. proposed supplies any of
     best_ro_freq (MHz), best_ro_gain (normalized), and best_ro_length (us);
     missing coordinates come from ctx's captured $qubit.ext calibration.
+    The pulse length is 0.03 us longer than best_ro_length, which is the ADC
+    window. The trigger offset stays as recorded in the Run's cfg.
     Missing cfg, non-pulse readout, or missing/non-finite coordinates yields no
     items. A captured parameter source adds a slot proposal after the module,
     pointing $resonator.module.readout to the resolved optimized module root.
@@ -159,10 +161,7 @@ def readout_dpm_writeback_items(
         field_updates=(
             ("freq", best_ro_freq),
             ("gain", best_ro_gain),
-            (
-                "waveform.length",
-                best_ro_length + READOUT_DPM_PULSE_TAIL_US,
-            ),
+            ("waveform.length", best_ro_length + READOUT_LENGTH_MARGIN_US),
             ("ro_length", best_ro_length),
         ),
         role_id="readout_dpm",
