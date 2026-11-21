@@ -17,7 +17,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Reset, SweepCfg, TimelineBuilder
+from zcu_tools.program.v2 import Reset, SweepCfg, TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_heatmap, live_line
@@ -242,7 +242,10 @@ class OnetoneFluxLocalExp(Experiment[MuxFluxResult, OnetoneFluxLocalCfg]):
             tones=[cfg.readout.tones[i] for i in indices]
         )
 
-        # 2. Set local lines together, settle, then scan reset/readout frequency offsets on the host.
+        # 2. Settle each DC point and reuse the program for each host frequency offset.
+        # Reusing each whole program saves recompilation, but each offset's program
+        # retains its latest acquire buffers until its next acquire or this Run ends.
+        programs: dict[float, tuple[TimelineProgramV2, MuxReadout]] = {}
         for point in range(cfg.flux_expts):
             if context.scope.stop.is_set():
                 break
@@ -267,23 +270,26 @@ class OnetoneFluxLocalExp(Experiment[MuxFluxResult, OnetoneFluxLocalCfg]):
             spectrum = SignalBuffer((len(dfs), len(indices)))
             with Schedule(spectrum, scope=context.scope) as sched:
                 for df, step in sched.scan("df", dfs.tolist()):
-                    readout = active_readout.with_updates(
-                        tones=[
-                            tone.with_updates(freq=tone.freq + df)
-                            for tone in active_readout.tones
-                        ]
-                    )
-                    builder = TimelineBuilder(
-                        context.soccfg,
-                        reps=cfg.reps,
-                        initial_delay=cfg.initial_delay,
-                        relax_delay=cfg.relax_delay,
-                    )
-                    if cfg.reset is not None:
-                        builder.emit(Reset("reset", cfg.reset))
-                    readout_module = MuxReadout("readout", readout)
-                    builder.emit(readout_module)
-                    prog = builder.build()
+                    # DC affects acquisition, not the compiled reset/readout sequence.
+                    if df not in programs:
+                        readout = active_readout.with_updates(
+                            tones=[
+                                tone.with_updates(freq=tone.freq + df)
+                                for tone in active_readout.tones
+                            ]
+                        )
+                        builder = TimelineBuilder(
+                            context.soccfg,
+                            reps=cfg.reps,
+                            initial_delay=cfg.initial_delay,
+                            relax_delay=cfg.relax_delay,
+                        )
+                        if cfg.reset is not None:
+                            builder.emit(Reset("reset", cfg.reset))
+                        readout_module = MuxReadout("readout", readout)
+                        builder.emit(readout_module)
+                        programs[df] = builder.build(), readout_module
+                    prog, readout_module = programs[df]
                     _ = step.run_acquire(
                         prog,
                         context.soc,
