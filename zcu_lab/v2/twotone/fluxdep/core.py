@@ -9,8 +9,9 @@ from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.fluxdep.line_state import FluxPickAnalysis
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
@@ -18,6 +19,7 @@ from zcu_tools.experiment.v2.runtime.schedule import (
     SignalBuffer,
 )
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 from zcu_tools.utils.process import minus_background
 
@@ -39,22 +41,54 @@ class FreqFluxCfg(ConfigBase):
         Literal["A", "V", "native"],
         FieldMeta(
             label="Flux unit",
-            description="Working unit for the selected driver; no conversion.",
+            description="Choose A, V, or native to match the selected DC bias source; the scan values are not converted.",
         ),
     ]  # External flux driver unit; no conversion.
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select a reset before each probe; leave blank to omit it.",
+        ),
+    ] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Probe Pulse",
+            description="Fill in the qubit drive waveform played at each RF frequency.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Fill in the calibrated resonator readout applied after the probe.",
+        ),
+    ]
     flux_dev: Annotated[
         DeviceName,
         FieldMeta(
             label="Flux Device",
-            description="Name of the connected flux-bias device driven by the sweep.",
+            description="Fill in the connected DC bias source to step between spectra.",
         ),
     ]
-    flux: Annotated[SweepCfg, FieldMeta(label="Flux device value", decimals=6)]
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
+    flux: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="DC bias",
+            decimals=6,
+            description="Fill in the bias endpoints in the selected Flux unit and the number of spectra.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Probe RF frequency",
+            unit="MHz",
+            description="Fill in the qubit drive RF endpoints in MHz and the points per spectrum.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
@@ -81,8 +115,9 @@ class FreqFluxCfg(ConfigBase):
     acquire_retry: Annotated[
         int,
         FieldMeta(
-            label="Acquire retry",
-            description="Retries after a transient acquisition failure.",
+            label="Acquisition retries",
+            unit="count",
+            description="Set the number of retries at one bias after a transient acquisition error.",
         ),
     ] = Field(default=0, ge=0)
 
@@ -128,45 +163,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
-        # 2. Track the flux-dependent contrast map and recent frequency traces.
-        fig, _ = context.plots.subplots(1, 2, num="measurement")
-        heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel="Flux device value", ylabel="Frequency (MHz)")
-        line_ax.set(xlabel="Frequency (MHz)", ylabel="Signal (a.u.)")
-        formatter = ScalarFormatter(useMathText=True)
-        formatter.set_powerlimits((-2, 2))
-        heat_ax.xaxis.set_major_formatter(formatter)
-        heat_ax.yaxis.set_major_formatter(formatter)
-        heatmap = live_heatmap(heat_ax, uniform=True)
-        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        line_ax.grid()
-        lines = live_line(line_ax, num_lines=2)
-        for artist in line_ax.lines[:-1]:
-            artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
-        line_ax.legend()
-
-        @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            """Refresh the flux contrast map and two recent frequency traces.
-
-            data is complex IQ shaped (flux bias, frequency); NaN marks unmeasured points.
-            Return the changed artists without modifying the input array.
-            """
-            # Display each row's contrast relative to its own median background.
-            real = np.abs(minus_background(data, axis=1))
-            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
-            current = int(valid[-1]) if valid.size else -1
-            history = np.full((2, len(freqs)), np.nan)
-            for offset in range(min(2, current + 1)):
-                history[-offset - 1] = real[current - offset]
-            return (*heatmap.set(dev_values, freqs, real), *lines.set(freqs, history))
-
-        fig.show()
-        signals_buffer = SignalBuffer(
-            (len(dev_values), len(freqs)),
-            on_update=update,
-        )
+        signals_buffer = self._live_spectra(context.plots, cfg, dev_values, freqs)
 
         # 3. Set the external flux bias before acquiring each complete spectrum.
         with Schedule(signals_buffer, scope=context.scope) as sched:
@@ -203,4 +200,118 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
             values=dev_values,
             freqs=freqs,
             signals=signals_buffer.array,
+        )
+
+    def _live_spectra(
+        self,
+        plots: Plots,
+        cfg: FreqFluxCfg,
+        dev_values: NDArray[np.float64],
+        freqs: NDArray[np.float64],
+    ) -> SignalBuffer:
+        """Attach the map and recent spectra to the run's live buffer."""
+        # 2. Track the flux-dependent contrast map and recent frequency traces.
+        fig, _ = plots.subplots(
+            1, 2, num="measurement", figsize=(10, 4.8), layout="constrained"
+        )
+        heat_ax, line_ax = fig.axes
+        fig.suptitle(f"Two-tone flux map · {cfg.flux_dev} · qubit spectrum")
+        unit = cfg.flux_unit if cfg.flux_unit != "native" else "device units"
+        heat_ax.set(xlabel=f"DC bias ({unit})", ylabel="Probe RF frequency (MHz)")
+        contrast_label = "Background-subtracted IQ magnitude (a.u.)"
+        line_ax.set(xlabel="Probe RF frequency (MHz)", ylabel=contrast_label)
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_powerlimits((-2, 2))
+        heat_ax.xaxis.set_major_formatter(formatter)
+        heat_ax.grid(False)
+        heatmap = live_heatmap(heat_ax, uniform=False)
+        (image,) = heatmap.set(
+            dev_values, freqs, np.full((len(dev_values), len(freqs)), np.nan)
+        )
+        image.set_cmap("viridis")
+        fig.colorbar(image, ax=heat_ax, label=contrast_label)
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        lines = live_line(line_ax, num_lines=2)
+        line_ax.lines[0].set(
+            label="Previous bias", marker="o", markersize=3, color="0.55"
+        )
+        line_ax.lines[1].set(label="Latest bias", marker="o", markersize=3, color="C0")
+        line_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncols=2)
+
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the flux contrast map and two recent frequency traces.
+
+            data is complex IQ shaped (flux bias, frequency); NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
+            # Display each row's contrast relative to its own median background.
+            real = np.abs(minus_background(data, axis=1))
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((2, len(freqs)), np.nan)
+            for offset, row in enumerate(valid[-2:][::-1]):
+                history[-offset - 1] = real[row]
+            progress = heat_ax.set_title(
+                f"Bias rows with data: {len(valid)}/{len(dev_values)}"
+            )
+            if current >= 0:
+                line_ax.set_title(f"Latest DC bias: {dev_values[current]:.6g} {unit}")
+            return (
+                *heatmap.set(dev_values, freqs, real),
+                *lines.set(freqs, history),
+                progress,
+            )
+
+        fig.show()
+        return SignalBuffer(
+            (len(dev_values), len(freqs)),
+            on_update=update,
+        )
+
+    def plot_pick(
+        self,
+        source: RunRecord[FreqFluxCfg, FreqFluxResult],
+        selection: FluxPickAnalysis,
+        *,
+        plots: Plots,
+    ) -> None:
+        """Plot the recorded map and accepted half/integer selections as ``pick``.
+
+        The source supplies mean complex IQ and scan axes; historical cfg, when
+        available, supplies the bias label and unit. Selection values use the
+        recorded device coordinate and come from the picker, not a fit here.
+        The figure uses the same IQ contrast as Run; input arrays are unchanged.
+        Figure registration and plotting errors propagate.
+        """
+        result = source.result
+        cfg = source.cfg
+        unit = (
+            "device units"
+            if cfg is None or cfg.flux_unit == "native"
+            else cfg.flux_unit
+        )
+        target = "qubit" if cfg is None else cfg.flux_dev
+        fig, ax = plots.subplots(num="pick", figsize=(8, 5), layout="constrained")
+        ax.set(
+            title=f"Two-tone flux map · {target} · flux-line picks",
+            xlabel=f"DC bias ({unit})",
+            ylabel="Probe RF frequency (MHz)",
+        )
+        ax.grid(False)
+        heatmap = live_heatmap(ax, uniform=False)
+        contrast = np.abs(minus_background(result.signals, axis=1))
+        (image,) = heatmap.set(result.values, result.freqs, contrast)
+        image.set_cmap("viridis")
+        fig.colorbar(image, ax=ax, label="Background-subtracted IQ magnitude (a.u.)")
+        ax.axvline(selection.flux_half, color="red", linestyle="--", label="Half flux")
+        ax.axvline(
+            selection.flux_int, color="blue", linestyle="--", label="Integer flux"
+        )
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncols=2)
+        ax.set_title(
+            f"Two-tone flux map · {target} · flux-line picks\n"
+            f"Half flux = {selection.flux_half:.6g} {unit} · "
+            f"Integer flux = {selection.flux_int:.6g} {unit}\n"
+            f"Flux period = {selection.flux_period:.6g} {unit}"
         )

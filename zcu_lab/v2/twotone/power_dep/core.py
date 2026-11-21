@@ -37,10 +37,36 @@ class PowerResult:
 class PowerCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Probe Pulse",
+            description="Fill in the qubit drive waveform; the scans supply its RF frequency and gain.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Fill in the calibrated resonator readout after the probe.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Probe gain",
+            unit="a.u.",
+            description="Fill in the probe amplitude endpoints (a.u.) and the number of spectra.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Probe RF frequency",
+            unit="MHz",
+            description="Fill in the drive RF endpoints (MHz) and number of points per spectrum.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
@@ -113,22 +139,30 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         )
 
         # 2. Track power-dependent spectral contrast and recent frequency traces.
-        fig, _ = context.plots.subplots(1, 2, num="measurement")
+        fig, _ = context.plots.subplots(
+            1, 2, num="measurement", figsize=(10, 4.8), layout="constrained"
+        )
+        fig.suptitle("Two-tone power dependence · qubit probe · IQ contrast")
         heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel="Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
-        line_ax.set(xlabel="Frequency (MHz)", ylabel="Signal (a.u.)")
+        heat_ax.set(xlabel="Probe gain (a.u.)", ylabel="Probe RF frequency (MHz)")
+        contrast_label = "Background-subtracted IQ magnitude (a.u.)"
+        line_ax.set(xlabel="Probe RF frequency (MHz)", ylabel=contrast_label)
+        heat_ax.grid(False)
         formatter = ScalarFormatter(useMathText=True)
         formatter.set_powerlimits((-2, 2))
         heat_ax.xaxis.set_major_formatter(formatter)
         heat_ax.yaxis.set_major_formatter(formatter)
-        heatmap = live_heatmap(heat_ax, uniform=True)
+        heatmap = live_heatmap(heat_ax, uniform=False)
+        (image,) = heatmap.set(gains, freqs, np.full((len(gains), len(freqs)), np.nan))
+        image.set_cmap("viridis")
+        fig.colorbar(image, ax=heat_ax, label=contrast_label)
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        line_ax.grid()
         lines = live_line(line_ax, num_lines=2)
-        for artist in line_ax.lines[:-1]:
-            artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
-        line_ax.legend()
+        line_ax.lines[0].set(
+            label="Previous gain", marker="o", markersize=3, color="0.55"
+        )
+        line_ax.lines[1].set(label="Latest gain", marker="o", markersize=3, color="C0")
+        line_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncols=2)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
@@ -144,7 +178,16 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             history = np.full((2, len(freqs)), np.nan)
             for offset in range(min(2, current + 1)):
                 history[-offset - 1] = real[current - offset]
-            return (*heatmap.set(gains, freqs, real), *lines.set(freqs, history))
+            progress = heat_ax.set_title(
+                f"Gain rows with data: {len(valid)}/{len(gains)}"
+            )
+            if current >= 0:
+                line_ax.set_title(f"Latest gain: {gains[current]:.4g} a.u.")
+            return (
+                *heatmap.set(gains, freqs, real),
+                *lines.set(freqs, history),
+                progress,
+            )
 
         fig.show()
         signals_buffer = SignalBuffer(

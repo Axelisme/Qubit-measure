@@ -1,7 +1,5 @@
 **Readers:** operator, agent. Run a single-carrier two-photon g/f scan and analyze acquired g/e/f counts with saved readout calibration.
 
-# Single-tone Raman g/f scan
-
 ## Before opening the tab
 
 Measure the 0–3 transition from ground with spectroscopy. Prepare level 3 with
@@ -60,7 +58,7 @@ The modes use the following ranges:
 Two-photon detuning is `2*f_drive − 2*carrier_center`, in MHz.
 A positive value raises the single carrier by half that detuning.
 Drive gain is a DAC full-scale fraction (a.u.), not a calibrated rotation angle.
-QICK quantizes the carrier and gain; saved coordinates use those actual values.
+Saved coordinates use the applied carrier and gain.
 The scan does not calculate a two-photon area or normalize gains between waveforms.
 
 Drive gain may be negative, zero or positive, within [-1, 1].
@@ -72,7 +70,7 @@ Each point sends one Raman pulse followed immediately by readout. There is no re
 Run classifies each point's repetitions into g/e/f counts with shape (points, 3).
 The shots field sets repetitions per point in one round, not a saved shot axis.
 Points are ordered by detuning first, then gain.
-The measurement plot shows counts divided by the total count at each point.
+The measurement plot shows counts divided by the total count at each point. A frequency or gain scan shows curves on its physical axis. A frequency-gain scan shows separate g, e and f maps. The title counts acquired points and retained shots.
 Stop retains completed rows and leaves unfinished rows as NaN.
 Save keeps counts, actual detuning and gain together with this run's cfg.
 It does not copy a later library change into an existing result.
@@ -80,8 +78,6 @@ It does not copy a later library change into an existing result.
 After changing source parameters or library bindings, Defaults captures them again
 and may replace unsaved input. Refresh updates source choices but preserves
 authored input and previously resolved defaults.
-Reload experiments rebuilds the adapter and restores the existing tab.
-Restart the application after changing a fixed framework dependency.
 
 ## Analyze and restore
 
@@ -89,13 +85,14 @@ Open Analysis and click Analyze after Run. The measurement figure retains raw
 g/e/f fractions. Analysis normalizes counts and shows raw and confusion-corrected g/e/f
 estimates separately. Frequency and gain modes show two sets of three curves.
 Frequency-gain mode shows six maps with actual detuning and drive-gain axes.
+One-dimensional scans show one shot SEM on each side of the point. For measured label fraction p and N retained shots, it is √[p(1−p)/(N−1)] for N > 1. Analyze propagates the joint label covariance through the saved confusion correction. The bars do not include uncertainty in the training classifier. The two-dimensional maps have no pointwise error bars.
 The title reports the saved training matrix's condition number and minimum
-singular value. The summary contains only the training confusion matrix and
+singular value. A large condition number or small minimum singular value warns that correction magnifies count noise. The summary contains only the training confusion matrix and
 these two diagnostics; per-point fractions stay in the figures.
 Correction solves in preparation-label coordinates and keeps
 negative and above-one values. It does not clip or renormalize them.
 
-The e curve is a leakage-label estimate. Preparation contamination remains part
+Look for a range with consistently high corrected f and low corrected e. A bright f region at +0.8 MHz two-photon detuning suggests moving the carrier +0.4 MHz to put the same drive at zero detuning. Check the peak with a finer frequency or gain scan before adopting it. The e curve is a leakage-label estimate. Preparation contamination remains part
 of the calibration, so these estimates are not pure energy-state populations
 or experimental gate fidelity. A circle classifier's third class is Other, not f.
 Analysis rejects incomplete, nonfinite or empty counts and singular confusion matrices.
@@ -142,8 +139,7 @@ The report gives the saved confusion matrix condition number and minimum
 singular value. Full raw/corrected g/e/f arrays remain in the analysis summary
 and saved artifacts. There is no writeback proposal or question. Analysis
 failure still saves g/e/f counts; inspect each Save output receipt. Analysis never
-reads live calibration or collects fresh references. Restart the MCP server
-after changing recipe declarations; GUI Reload does not reload that process.
+reads live calibration or collects fresh references.
 
 ## Interpretation and limits
 

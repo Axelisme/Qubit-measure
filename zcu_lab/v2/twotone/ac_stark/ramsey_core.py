@@ -8,7 +8,6 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.artist import Artist
-from matplotlib.image import NonUniformImage
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -47,8 +46,22 @@ class AcStarkRamseyResult:
 class AcStarkRamseyAnalyzeOptions:
     """FFT center in MHz (subtracted from the axis) and exclusive gain cutoff."""
 
-    detune: Annotated[float, FieldMeta(label="FFT detune (MHz)")] = 0.0
-    cutoff: Annotated[float | None, FieldMeta(label="Gain cutoff (a.u.)")] = None
+    detune: Annotated[
+        float,
+        FieldMeta(
+            label="FFT reference frequency",
+            unit="MHz",
+            description="Set the center of the FFT window in MHz; the displayed axis subtracts this value.",
+        ),
+    ] = 0.0
+    cutoff: Annotated[
+        float | None,
+        FieldMeta(
+            label="Stark gain cutoff",
+            unit="a.u.",
+            description="Exclude gains at or above this value; blank keeps every row.",
+        ),
+    ] = None
 
 
 def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -58,13 +71,59 @@ def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
 
 class AcStarkRamseyCfg(ConfigBase):
     reset: Reset.Cfg | None = None
-    stark_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse")]
-    readout: Readout.Cfg
-    wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="µs")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="µs")]
-    detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
+    stark_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Stark resonator tone",
+            description="Fill in the resonator drive pulse played alongside the Ramsey sequence.",
+        ),
+    ]
+    pi2_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Ramsey π/2 pulse",
+            description="Fill in the calibrated π/2 qubit drive for the two Ramsey rotations.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Fill in the resonator readout used after the tone and Ramsey sequence end.",
+        ),
+    ]
+    wait_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Tone settling delay",
+            unit="µs",
+            description="Fill in the wait in µs from Stark tone start to the first π/2 pulse.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Stark tone gain",
+            unit="a.u.",
+            description="Fill in the gain endpoints and number of delay traces; the grid is uniform in gain squared.",
+        ),
+    ]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Free evolution time",
+            unit="µs",
+            description="Fill in the time endpoints in µs and the number of delays between π/2 pulses.",
+        ),
+    ]
+    detune: Annotated[
+        float,
+        FieldMeta(
+            label="Phase-ramp detune",
+            unit="MHz",
+            description="Set the added phase slope in MHz, positive for advancing the second π/2 phase.",
+        ),
+    ] = 0.0
 
     reps: Annotated[
         int,
@@ -139,40 +198,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         )
         gains = round_zcu_gain(gains, soccfg, cfg.stark_pulse.ch)
 
-        # 2. Track Stark-dependent Ramsey oscillations and recent delay traces.
-        fig, _ = context.plots.subplots(1, 2, num="measurement")
-        heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Time (µs)")
-        line_ax.set(xlabel="Time (µs)", ylabel="Signal (a.u.)")
-        heatmap = live_heatmap(heat_ax, uniform=False)
-        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        line_ax.grid()
-        lines = live_line(line_ax, num_lines=2)
-        for artist in line_ax.lines[:-1]:
-            artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
-        line_ax.legend()
-
-        @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            """Refresh the Stark Ramsey map and two recent delay traces.
-
-            data is complex IQ shaped (gain, delay); NaN marks unmeasured points.
-            Return the changed artists without modifying the input array.
-            """
-            real = acstark_ramsey_signal2real(data)
-            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
-            current = int(valid[-1]) if valid.size else -1
-            history = np.full((2, len(lengths)), np.nan)
-            for offset in range(min(2, current + 1)):
-                history[-offset - 1] = real[current - offset]
-            return (*heatmap.set(gains, lengths, real), *lines.set(lengths, history))
-
-        fig.show()
-        signals_buffer = SignalBuffer(
-            (len(gains), len(lengths)),
-            on_update=update,
-        )
+        signals_buffer = self._live_spectra(context.plots, gains, lengths)
 
         # 3. At each Stark gain, sweep the Ramsey delay and its programmed phase.
         with Schedule(signals_buffer, scope=context.scope) as sched:
@@ -206,6 +232,64 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
 
         # 4. Preserve the gain-delay map for Stark-shift spectroscopy.
         return AcStarkRamseyResult(gains, lengths, signals_buffer.array)
+
+    def _live_spectra(
+        self, plots: Plots, gains: NDArray[np.float64], lengths: NDArray[np.float64]
+    ) -> SignalBuffer:
+        """Attach the map and recent spectra to the run's live buffer."""
+        # 2. Track Stark-dependent Ramsey oscillations and recent delay traces.
+        fig, _ = plots.subplots(
+            1, 2, num="measurement", figsize=(10, 4.8), layout="constrained"
+        )
+        fig.suptitle("AC Stark Ramsey · qubit · Ramsey fringes")
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(xlabel="Stark tone gain (a.u.)", ylabel="Free evolution time (µs)")
+        contrast = "Signed IQ principal-axis projection (a.u.)"
+        line_ax.set(xlabel="Free evolution time (µs)", ylabel=contrast)
+        heat_ax.grid(False)
+        heatmap = live_heatmap(heat_ax, uniform=False)
+        (image,) = heatmap.set(
+            gains, lengths, np.full((len(gains), len(lengths)), np.nan)
+        )
+        image.set_cmap("viridis")
+        fig.colorbar(image, ax=heat_ax, label=contrast)
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        lines = live_line(line_ax, num_lines=2)
+        line_ax.lines[0].set(
+            label="Previous gain", marker="o", markersize=3, color="0.55"
+        )
+        line_ax.lines[1].set(label="Latest gain", marker="o", markersize=3, color="C0")
+        line_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncols=2)
+
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the Stark Ramsey map and two recent delay traces.
+
+            data is complex IQ shaped (gain, delay); NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
+            real = acstark_ramsey_signal2real(data)
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((2, len(lengths)), np.nan)
+            for offset in range(min(2, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            progress = heat_ax.set_title(
+                f"Gain rows with data: {len(valid)}/{len(gains)}"
+            )
+            if current >= 0:
+                line_ax.set_title(f"Latest gain: {gains[current]:.4g} a.u.")
+            return (
+                *heatmap.set(gains, lengths, real),
+                *lines.set(lengths, history),
+                progress,
+            )
+
+        fig.show()
+        return SignalBuffer(
+            (len(gains), len(lengths)),
+            on_update=update,
+        )
 
     def analyze(
         self,
@@ -251,26 +335,39 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
 
         fft_signals /= np.max(fft_signals, axis=1, keepdims=True)
 
-        gains2 = gains**2
+        # 2. Show the Run contrast first; the FFT indicates the fringe shift.
+        fig, _ = plots.subplots(
+            num="fit", nrows=2, ncols=1, figsize=(8, 7), layout="constrained"
+        )
+        fringes, spectrum = fig.axes
+        fig.suptitle("AC Stark Ramsey · qubit · fringes and spectrum")
+        fringes.set(
+            xlabel="Stark tone gain (a.u.)",
+            ylabel="Free evolution time (µs)",
+        )
+        fringes.grid(False)
+        (time_image,) = live_heatmap(fringes, uniform=False).set(
+            gains, lens, real_signals
+        )
+        time_image.set_cmap("viridis")
+        fig.colorbar(
+            time_image, ax=fringes, label="Signed IQ principal-axis projection (a.u.)"
+        )
 
-        # 2. Compare time-domain fringes with normalized sidebands versus Stark power.
-        fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, sharex=True)
-        ax1, ax2 = fig.axes
-
-        im1 = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
-        im1.set_data(gains2, lens, real_signals.T)
-        im1.set_extent((gains2[0], gains2[-1], lens[0], lens[-1]))
-        ax1.add_image(im1)
-        ax1.set_ylim(lens[0], lens[-1])
-        ax1.set_ylabel("Time (µs)", fontsize=14)
-
-        im2 = NonUniformImage(ax2, cmap="viridis", interpolation="nearest")
-        im2.set_data(gains2, fft_freqs, fft_signals.T)
-        im2.set_extent((gains2[0], gains2[-1], fft_freqs[0], fft_freqs[-1]))
-        ax2.add_image(im2)
-        ax2.set_xlim(gains2[0], gains2[-1])
-        ax2.set_ylim(-5.0, 5.0)
-        ax2.set_xlabel("Stark Pulse Gain² (a.u.²)", fontsize=14)
-        ax2.set_ylabel("FFT Detune (MHz)", fontsize=14)
-
-        fig.tight_layout()
+        order = np.argsort(fft_freqs)
+        spectrum.set(
+            xlabel="Squared Stark tone gain (a.u.²)",
+            ylabel="FFT offset (MHz)",
+            title=f"FFT relative to {detune:g} MHz",
+        )
+        spectrum.grid(False)
+        (fft_image,) = live_heatmap(spectrum, uniform=False, clim=(0, 1)).set(
+            gains**2, fft_freqs[order], fft_signals[:, order]
+        )
+        fft_image.set_cmap("viridis")
+        fig.colorbar(
+            fft_image,
+            ax=spectrum,
+            label="Row-normalized FFT magnitude (a.u.)",
+            ticks=(0, 0.5, 1),
+        )
