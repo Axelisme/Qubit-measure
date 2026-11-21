@@ -5,6 +5,7 @@ superseded_by: null
 related:
   - ../adr/0067-gui-application.md
   - ../adr/0073-measure-form-derivation.md
+  - ../adr/0075-agent-interface-layers.md
   - 2026-10-17-measure-form-initial-values-and-sweep-mode.md
   - 2026-11-21-experiment-run-wall-time.md
 basis:
@@ -18,9 +19,13 @@ basis:
 
 使用者決定不加 Run 檢查，也不在實驗指南說明板子限制。指南寫給懂物理但沒看過實作的讀者，只說明實驗和它的行為。四種 Run 錯誤的判讀、改法與 FTF 案例放在獨立的量測知識庫。Length Rabi 繼續沿用 `x180` 的形狀，掃描上限仍是 `x180` 的四倍長。`reset_check` 另把 gain 掃描上限寫成 `min(1.0, 4.0 * x180.gain)`，和 `singleshot/amp_rabi` 一致。CPMG 的 Minimum time 改用校準脈衝長度計算。兩項只修表單預設，不加驗證。
 
+文件分工的規則寫在 [ADR-0075〈判讀依據放知識庫〉](../adr/0075-agent-interface-layers.md#判讀依據放知識庫)。表單初值的三條原則寫在 ADR-0073 的[〈自動推導點到為止〉](../adr/0073-measure-form-derivation.md#自動推導點到為止)、[〈預設值的瑕疵就改預設值〉](../adr/0073-measure-form-derivation.md#預設值的瑕疵就改預設值)與[〈板子限制先不加程式檢查〉](../adr/0073-measure-form-derivation.md#板子限制先不加程式檢查)。
+
 ## 當時的離線失敗
 
 第一張離線 Run 牆鐘表中，本次處理的七個實驗都以預設值失敗。`singleshot/len_rabi` 跑了 23 點，第 24 點才因 generator 的 8192 samples 上限停止。錯誤沒有寫該改哪個欄位，也沒有把 samples 換算成表單使用的 µs。`reset_check` 則不需查板子就能定位：測試 point 的 `x180.gain` 為 0.617，四倍是 2.468，超過 gain 的固定上限 1.0。CPMG 的 1 µs 預設在 16 次 refocusing 時，留給每段 interval 的時間只有約 31 ns，不夠放下測試 point 的脈衝。
+
+表單建立初值時只拿得到 point、alias 與 library 的捕捉，沒有板子設定。板子設定要到 Run 才和 cfg 一起交給 program，所以板子限制都在 Run 之後才檢查。同一張表的 `twotone/ro_optimize/chain_length` 也以預設值失敗，原因是讀出 pulse 與 ADC 窗的時序，不是板子限制，另題處理。
 
 ## 考慮過的選項與比較
 
@@ -28,6 +33,17 @@ basis:
 - 使用者後改為不改 Run，先補指南，再把板子數字和錯誤解析移到知識庫。最後連中性的限制說明也留在知識庫，讓指南只描述實驗行為。操作員遇到錯誤時可按症狀查判讀方法。現有 Run 仍可能做到一半才報錯。
 - 把 `reset_check` 的四倍 gain 在 expression 截到 1.0，沿用同類 Amplitude Rabi 寫法。這和 [2026-10-17 的表單討論](2026-10-17-measure-form-initial-values-and-sweep-mode.md) 中的負 `trig_offset` 不同：這次上限是固定的，不會依板子或校準輸入浮動。
 - CPMG 同樣修預設。Minimum time 取 π/2 與 π 脈衝長度總和的 16 倍，配合預設的最大 refocusing 次數。任一脈衝未校準時，Minimum time 留空必填。使用者改次數時，Minimum time 不跟著重算。
+
+### 先例與立場
+
+- [2026-10-17 的表單初值討論](2026-10-17-measure-form-initial-values-and-sweep-mode.md)「可預測與一致比正確重要」：遵循。Length Rabi 的公式不依板子改，各 point 用同一條公式。
+- 同篇「算出的值不合理時，讓後續驗證報錯，不在 Form 裡 clamp 或暗中修正」：板子限制遵循，留給 Run 報錯。`reset_check` 區別：gain 的 1.0 是固定上限，同篇已把 Amplitude Rabi 的 gain 掃描定為 −0.3～1.0，使用者這次也明說在 expression 截斷。CPMG 區別：改的是對所有 point 一致的公式，不是依個別 point 的算出值修正。
+- [ADR-0067](../adr/0067-gui-application.md) 把額外實驗驗證放在 adapter.run 開頭，不提供 Run 前 hook：遵循。先選的 Run 開頭方案照這條放置；Run 前 preflight 會擴大 Run admission 的語意。
+- [ADR-0069](../adr/0069-experiment-core-and-frontends.md) 由核心擁有設定驗證，[ADR-0072](../adr/0072-module-boundaries.md) 由 `program` 擁有 QICK 機制：先選的方案遵循這兩條，能力查詢由 `program` 提供、實驗呼叫。改判為不加檢查後，兩條不再涉及。
+- [ADR-0078〈模擬器不替使用者擋實驗參數〉](../adr/0078-evolution-module-boundary.md#模擬器不替使用者擋實驗參數)：區別。那條處理參數合法、模擬器算不準的情況。這次的限制來自取自實機 bitfile 的板子 profile，實機上同樣會拒絕。
+- [ADR-0075〈判讀依據放知識庫〉](../adr/0075-agent-interface-layers.md#判讀依據放知識庫)：遵循並延伸。該節原本只分 skill 與知識庫，這次把實驗 guide 與知識庫的分工寫進同一節。
+- 知識庫的 judge 條目回答症狀與候選原因、辨別動作及判斷依據（[知識庫範本](../../.agents/skills/measure-task/templates/knowledge/README.md)）：遵循，四種 Run 錯誤寫成一條 judge。
+- 使用者的全域 agent 規則「先用最弱的正向做法，有具體失敗類型再升級成禁止或強制」：遵循。這條規則未入庫。
 
 ## 被否決的選項與理由
 
@@ -47,10 +63,12 @@ basis:
 
 使用者同日選擇修 CPMG 的預設值：「1c，没错，这个是 这个是预设值的瑕疵，这种类似的东西都是改预设值就好了。」用各 0.48 µs 的 π/2 與 π 脈衝離線核對，表單給出的 15.36 µs 通過既有的 interval 檢查，手填 15.35 µs 則不通過。
 
+使用者同日以「核准」接受一條邊界：`singleshot/t1_tone` 缺 T1 時掃描終點是 150 µs，超過單一 pulse 的可編碼長度；這屬於依板子的限制，初值不改。
+
 原始牆鐘表未入庫。重跑入口和離線輸入見 [實驗 Run 牆鐘](../../tools/README.md#實驗-run-牆鐘)。板子數字用[入庫的 `qick_216_v2` profile](../../zcu_lab/simulation_envs/profiles/qick_216_v2.yaml)核對。
 
 ## 後記
 
 [reset_check Form](../../zcu_lab/v2/singleshot/reset_check/form.py) 宣告 Gain Stop 初值，[CPMG Form](../../zcu_lab/v2/twotone/time_domain/cpmg/form.py) 宣告 Minimum time 初值。
 
-設計者在審查時選擇保留 CPMG 的初值公式。即使兩個脈衝都已校準，只要任一脈衝用取樣點定義的 arbitrary waveform，表單仍將 Minimum time 留空，由操作員填入。缺少任一脈衝時也留空。
+設計者在審查時選擇保留 CPMG 的初值公式。即使兩個脈衝都已校準，只要任一脈衝用取樣點定義的 arbitrary waveform，表單仍將 Minimum time 留空，由操作員填入。缺少任一脈衝時也留空。這項由設計者代裁，待使用者覆核。
