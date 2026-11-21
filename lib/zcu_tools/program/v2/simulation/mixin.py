@@ -279,7 +279,9 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             raw = binding.materialize_raw(
                 request,
                 source,
-                defer_notification=notifications.append if notifications is not None else None,
+                defer_notification=notifications.append
+                if notifications is not None
+                else None,
             )
             self.acc_buf = [raw[ch] for ch in self._program().ro_chs]
         return super().get_raw()

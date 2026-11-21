@@ -312,7 +312,8 @@ class SimulationBinding:
                 self._materialize_wall_s += elapsed
         if not active and observer is not None:
             notify = partial(
-                self._notify, partial(observer, self._acquire_id(request.sequence), elapsed)
+                self._notify,
+                partial(observer, self._acquire_id(request.sequence), elapsed),
             )
             if defer_notification is None:
                 notify()

@@ -251,7 +251,9 @@ def test_schedule_does_not_publish_materialization_when_raw_source_fails(
     soc = telemetry_environment.soc
 
     class FailingRaw:
-        def materialize(self, reps: int, avg_level: int) -> dict[int, NDArray[np.int64]]:
+        def materialize(
+            self, reps: int, avg_level: int
+        ) -> dict[int, NDArray[np.int64]]:
             raise RuntimeError("deferred raw source failed")
 
     execute = soc.binding.execute
@@ -270,7 +272,9 @@ def test_schedule_does_not_publish_materialization_when_raw_source_fails(
     ):
         sched.run_acquire_shots(telemetry_program, soc)
 
-    assert not any(row.get("event") == "materialize" for row in _routing_records(tmp_path))
+    assert not any(
+        row.get("event") == "materialize" for row in _routing_records(tmp_path)
+    )
 
 
 def test_schedule_does_not_publish_materialization_when_shot_result_construction_fails(
@@ -291,7 +295,9 @@ def test_schedule_does_not_publish_materialization_when_shot_result_construction
     ):
         sched.run_acquire_shots(telemetry_program, telemetry_environment.soc)
 
-    assert not any(row.get("event") == "materialize" for row in _routing_records(tmp_path))
+    assert not any(
+        row.get("event") == "materialize" for row in _routing_records(tmp_path)
+    )
 
 
 @pytest.mark.parametrize("seam", ["evolve", "continuation", "adc"])
