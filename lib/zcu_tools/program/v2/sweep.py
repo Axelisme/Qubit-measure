@@ -5,7 +5,7 @@ from typing import Annotated
 
 from pydantic import Field, model_validator
 
-from zcu_tools.cfg_model import FULL_SCALE_GAIN_BOUNDS, ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 
 
 class SweepCfg(ConfigBase):
@@ -44,10 +44,3 @@ class SweepCfg(ConfigBase):
             )
 
         return self
-
-
-GainSweepCfg = Annotated[SweepCfg, FULL_SCALE_GAIN_BOUNDS]
-"""A native SweepCfg whose first and last gain lie within DAC full scale.
-
-Use as a Pydantic field annotation, or validate with TypeAdapter(GainSweepCfg).
-"""

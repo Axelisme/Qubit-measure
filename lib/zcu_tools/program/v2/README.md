@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-21，純量與掃描 gain 驗證
+**Last updated:** 2026-11-21，runtime cfg 純量 gain 驗證
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -126,7 +126,6 @@ Registry identity 與 lowering 使用有效 cfg，`set_param()` 則修改接收�
 參數表見 [modules](modules/README.md#constructor-overrides)，跨家族 audit 見 [set_param contract](../../../../tests/cfg_model/test_set_param_contract.py)。
 
 `SweepCfg` 的 start、stop、step 必須是有限值，並與 expts 一致。它不限制單位或 gain 範圍。
-實驗 cfg 可用 `GainSweepCfg` 宣告 gain 掃描。Pydantic 驗證 start、stop 都在 [-1, 1]，接受正反向掃描，儲存欄位不變。單獨驗證時用 `TypeAdapter(GainSweepCfg).validate_python(...)`。
 `PulseCfg.gain` 與 `PulseReadoutCfg.gain` 共用 `Gain`。建構或更新 cfg 時，純量 gain 必須在 [-1, 1]，單位為 DAC full-scale fraction，a.u.。
 `MyProgramV2.add_pulse` 在 QICK 轉換前仍檢查原生呼叫傳入的純量 gain，
 以及 `QickParam` 與 `TableParam` 運算後的 `minval()`／`maxval()`。

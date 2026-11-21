@@ -64,8 +64,7 @@ Recipe 同樣按設定、量測、分析與 writeback 問答分段。
 
 ### Cfg 名稱、順序與取數欄位
 
-連續 gain 掃描欄位用 `GainSweepCfg`，有效的第一點與最後一點須在 `[-1, 1]`。
-表單會標出超界的輸入列，不提交 Run。其他連續物理量用 `SweepCfg`，離散整數序列用 `list[int]`。
+連續物理量掃描用 `SweepCfg`，離散整數序列用 `list[int]`。
 整數是否可為零、是否須唯一，由各實驗的需求決定。
 Cfg 掃描欄位用被掃量的單數名，如 `delay`、`gain`、`freq`、`depth`，硬體與 host 掃描都適用。
 Result 用複數名，如 `delays`、`gains`、`freqs`、`depths`；沒有自然複數時用 `_values`。

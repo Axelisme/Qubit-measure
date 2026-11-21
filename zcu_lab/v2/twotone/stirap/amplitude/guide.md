@@ -12,7 +12,7 @@ It does not compile or acquire separately at each coordinate.
 - Measure the Pump 0–3 and Stokes 3–2 carrier frequencies at the intended operating point. Enter both in MHz. Do not substitute simulator parameters for measured carriers.
 - Bind Pump and Stokes to different charge-drive generators. Their envelopes overlap, and one channel cannot play both arbitrary-waveform carrier frequencies at the same time. Check the physical wiring before using hardware.
 - Select a pulse readout with a saved `centroid3` calibration. The calibration must contain distinct g/e/f IQ centers and a training confusion matrix. Obtain it separately before this experiment.
-- Set both gain ranges in a.u. The first and last measured points of each sweep must lie between −1 and 1, inclusive. If either point is outside that range, the Form marks the input to correct and does not submit Run.
+- Set the two gain ranges in a.u. Both sweeps accept negative, zero and positive gains. The Form accepts endpoints outside [-1, 1], but Run rejects them during program compilation before acquisition.
 
 After changing aliases, component parameters or the module library, use Reset to seed the Form from a new capture.
 Reset may overwrite unsaved input. Refresh only updates sources and choices; it keeps the current input.

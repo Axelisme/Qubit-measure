@@ -17,7 +17,6 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    GainSweepCfg,
     Pulse,
     Readout,
     Reset,
@@ -75,7 +74,7 @@ class FluxDepCfg(ConfigBase):
         ),
     ]
     flux: SweepCfg
-    gain: Annotated[GainSweepCfg, FieldMeta(label="gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ]

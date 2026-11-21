@@ -32,9 +32,9 @@ from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    GainSweepCfg,
     Pulse,
     PulseReadout,
+    SweepCfg,
     TimelineBuilder,
     chain_cycle_sums,
 )
@@ -95,7 +95,7 @@ class ChainAmpRabiCfg(ConfigBase):
             description="Pulse readout played twice after each Rabi pulse.",
         ),
     ]
-    gain: Annotated[GainSweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[
         int,
         FieldMeta(

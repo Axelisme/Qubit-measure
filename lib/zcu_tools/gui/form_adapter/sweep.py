@@ -5,9 +5,8 @@ from collections.abc import Mapping
 from functools import cached_property
 from typing import Annotated, ClassVar, Literal, Self
 
-from pydantic import Field, JsonValue, PrivateAttr, ValidationError, model_validator
+from pydantic import Field, JsonValue, model_validator
 
-from zcu_tools.cfg_model import SweepBounds
 from zcu_tools.gui.form import (
     Display,
     FormCommandContext,
@@ -24,11 +23,8 @@ from zcu_tools.gui.form import (
     field_error,
 )
 from zcu_tools.gui.form.commands import ReadonlyFormInput, readonly_input
-from zcu_tools.program.v2.sweep import SweepCfg
 
 from ._converters import inherit_raw
-
-_SWEEP_REL_TOL = 1e-9
 
 
 def _data(snapshot: FormCommandSnapshot) -> dict[str, JsonValue]:
@@ -116,7 +112,7 @@ def _step_count(span: float, step: float) -> int:
     nearest = round(quotient)
     # Relative tolerance only repairs almost-integral quotients, not ordinary
     # nondivisible spans. This matches the native sweep consistency tolerance.
-    if math.isclose(quotient, nearest, rel_tol=_SWEEP_REL_TOL, abs_tol=0):
+    if math.isclose(quotient, nearest, rel_tol=1e-9, abs_tol=0):
         quotient = nearest
     if quotient < 1:
         raise ValueError("Step must not exceed a nonzero span")
@@ -242,115 +238,7 @@ _CENTER_EXPTS = InputCommand(
 )
 
 
-class _SweepForm(FormModel):
-    _sweep_bounds: ClassVar[tuple[SweepBounds, ...]] = ()
-    _normalized_endpoints: tuple[float, float] | None = PrivateAttr(default=None)
-
-    def _normalize_endpoints(
-        self,
-        start: float,
-        stop: float,
-        count: int,
-        *,
-        rows: tuple[str, str],
-        authored_center: float | None = None,
-    ) -> tuple[float, float] | None:
-        if not self._sweep_bounds:
-            return None
-        endpoints = []
-        for endpoint, row in zip((start, stop), rows, strict=True):
-            for bounds in self._sweep_bounds:
-                error = bounds.endpoint_error(endpoint)
-                if error is None:
-                    continue
-                boundary = (
-                    bounds.minimum if endpoint < bounds.minimum else bounds.maximum
-                )
-                if math.isclose(endpoint, boundary, rel_tol=_SWEEP_REL_TOL, abs_tol=0):
-                    endpoint = boundary
-                    continue
-                if (
-                    row == "span"
-                    and authored_center is not None
-                    and bounds.endpoint_error(authored_center) is not None
-                ):
-                    row = "center"
-                raise field_error((row,), error)
-            endpoints.append(endpoint)
-        first, last = endpoints
-        self._normalized_endpoints = (
-            (first, last) if (first, last) != (start, stop) else None
-        )
-        if self._normalized_endpoints is not None and count > 1 and first == last:
-            raise ValueError(
-                "A sweep with two or more points needs different endpoints after clamping"
-            )
-        return self._normalized_endpoints
-
-    def to_sweep_cfg(
-        self, start: float, stop: float, n: int, *, step: float | None
-    ) -> SweepCfg:
-        """Lower this validated branch's projected endpoints and point count.
-
-        For Expts, pass step=None to derive it from the delivered endpoints.
-        For Step, pass the authored step. Only retry with a derived step if
-        endpoints were normalized and native validation rejects the original.
-        Propagate any remaining native validation error.
-        """
-        if step is None:
-            return SweepCfg(
-                start=start,
-                stop=stop,
-                expts=n,
-                step=(stop - start) / (n - 1) if n > 1 else 0.0,
-            )
-        try:
-            return SweepCfg(start=start, stop=stop, expts=n, step=step)
-        except ValidationError:
-            if self._normalized_endpoints is None or n <= 1:
-                raise
-            return SweepCfg(
-                start=start, stop=stop, expts=n, step=(stop - start) / (n - 1)
-            )
-
-
-class _CenterSweep(_SweepForm):
-    center: float
-    span: float
-
-    @property
-    def start(self) -> float:
-        """Return the effective first endpoint in caller units."""
-        if self._normalized_endpoints is not None:
-            return self._normalized_endpoints[0]
-        return self.center - self.span / 2
-
-    @property
-    def stop(self) -> float:
-        """Return the effective final endpoint in caller units."""
-        if self._normalized_endpoints is not None:
-            return self._normalized_endpoints[1]
-        return self.center + self.span / 2
-
-    def _project_center(
-        self, count: int, *, last_row: str, authored_center: float
-    ) -> None:
-        # Keep the exact endpoints for lowering; reversing center/span can
-        # introduce another rounding error at the bound.
-        endpoints = self._normalize_endpoints(
-            self.center - self.span / 2,
-            self.center + self.span / 2,
-            count,
-            rows=("span", last_row),
-            authored_center=authored_center,
-        )
-        if endpoints is not None:
-            start, stop = endpoints
-            self.center = start / 2 + stop / 2
-            self.span = stop - start
-
-
-class LinRange(_SweepForm):
+class LinRange(FormModel):
     """Range + Expts in caller units, including descending sweeps.
 
     kind selects the branch. start/stop are finite endpoints; n is a positive
@@ -364,16 +252,8 @@ class LinRange(_SweepForm):
     stop: float
     n: Annotated[int, Display(label="Expts")] = Field(ge=1)
 
-    @model_validator(mode="after")
-    def _validate_bounds(self) -> Self:
-        if endpoints := self._normalize_endpoints(
-            self.start, self.stop, self.n, rows=("start", "stop")
-        ):
-            self.start, self.stop = endpoints
-        return self
 
-
-class CenterSpan(_CenterSweep):
+class CenterSpan(FormModel):
     """Center + Expts; span is signed full width, never halfwidth.
 
     kind selects the branch; center is the finite midpoint in caller units,
@@ -382,22 +262,28 @@ class CenterSpan(_CenterSweep):
 
     input_commands: ClassVar[tuple[InputCommand, ...]] = (_RANGE, _CENTER_STEP)
     kind: Annotated[Literal["center"], Display(hidden=True)] = "center"
+    center: float
+    span: float
     n: Annotated[int, Display(label="Expts")] = Field(ge=1)
 
-    @model_validator(mode="after")
-    def _validate_bounds(self) -> Self:
-        self._project_center(self.n, last_row="span", authored_center=self.center)
-        return self
+    @property
+    def start(self) -> float:
+        """Return the effective first endpoint in caller units."""
+        return self.center - self.span / 2
+
+    @property
+    def stop(self) -> float:
+        """Return the effective final endpoint in caller units."""
+        return self.center + self.span / 2
 
 
-class StepRange(_SweepForm):
+class StepRange(FormModel):
     """Range + Step; validation projects stop, without changing authored input.
 
     kind selects the branch. start/stop are finite caller-unit endpoints; step is
     signed. A nonzero interval needs a same-direction step no larger than itself.
-    Zero span requires step=0. Sampling uses the authored start and step;
+    Zero span requires step=0. Effective stop preserves start and the given step;
     n uses floor(span/step)+1, repairing near integers with relative 1e-9 tolerance.
-    A branch with SweepBounds can normalize the projected endpoints.
     """
 
     input_commands: ClassVar[tuple[InputCommand, ...]] = (_STEP_CENTER, _RANGE_EXPTS)
@@ -413,10 +299,6 @@ class StepRange(_SweepForm):
         except ValueError as exc:
             raise field_error(("step",), str(exc)) from exc
         self.stop = self.start + self.step * (count - 1)
-        if endpoints := self._normalize_endpoints(
-            self.start, self.stop, count, rows=("start", "step")
-        ):
-            self.start, self.stop = endpoints
         return self
 
     @cached_property
@@ -426,17 +308,19 @@ class StepRange(_SweepForm):
         return _step_count(self.stop - self.start, self.step)
 
 
-class StepCenter(_CenterSweep):
+class StepCenter(FormModel):
     """Center + Step; validation projects the effective midpoint and signed span.
 
     kind selects the branch. center/span are finite caller-unit coordinates;
     span is full width; step is signed. StepRange's sampling rules apply.
-    Sampling anchors at the authored first endpoint, not the authored midpoint.
-    SweepBounds can then normalize the endpoints. FormInput retains the draft.
+    Projection preserves the authored first endpoint, never centers a shortened
+    interval on the authored midpoint. FormInput still holds the authored fields.
     """
 
     input_commands: ClassVar[tuple[InputCommand, ...]] = (_STEP_RANGE, _CENTER_EXPTS)
     kind: Annotated[Literal["center_step"], Display(hidden=True)] = "center_step"
+    center: float
+    span: float
     step: float
 
     @model_validator(mode="after")
@@ -445,11 +329,20 @@ class StepCenter(_CenterSweep):
             count = self.n
         except ValueError as exc:
             raise field_error(("step",), str(exc)) from exc
-        start, authored_center = self.start, self.center
+        start = self.start
         self.span = self.step * (count - 1)
         self.center = start + self.span / 2
-        self._project_center(count, last_row="step", authored_center=authored_center)
         return self
+
+    @property
+    def start(self) -> float:
+        """Return the effective first endpoint in caller units."""
+        return self.center - self.span / 2
+
+    @property
+    def stop(self) -> float:
+        """Return the effective final endpoint in caller units."""
+        return self.center + self.span / 2
 
     @cached_property
     def n(self) -> int:
