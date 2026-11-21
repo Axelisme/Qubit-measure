@@ -31,6 +31,56 @@ IntArray = NDArray[np.int64]
 BoolArray = NDArray[np.bool_]
 
 
+@dataclass(frozen=True)
+class WaveReference:
+    """Per-lane authored ADC provenance, separate from waveform words.
+
+    source is the original named ADC waveform's WMEM address, or -1 for raw.
+    frequency_mhz supplies the named image reference; raw lanes carry zero.
+    """
+
+    source: IntArray
+    frequency_mhz: NDArray[np.float64]
+
+    @classmethod
+    def raw(cls, size: int) -> WaveReference:
+        """Create size lanes without a named readout source."""
+        return cls(np.full(size, -1, dtype=np.int64), np.zeros(size))
+
+    def copy_from(self, other: WaveReference, active: BoolArray) -> None:
+        """Copy source and frequency from the same active lanes of other."""
+        self.source[active] = other.source[active]
+        self.frequency_mhz[active] = other.frequency_mhz[active]
+
+
+def readout_references(
+    prog: MyProgramV2, point_loops: dict[str, int]
+) -> dict[int, NDArray[np.float64]]:
+    """Map named ADC WMEM addresses to their compiled physical MHz by point.
+
+    prog has finished QICK compilation. point_loops gives the outer scan axes
+    in lane order, excluding reps. References retain QICK's rounded affine or
+    table values and include any DAC mixer for relative-frequency programs.
+    """
+    shape = tuple(point_loops.values())
+    references = {}
+    for name, pulse in prog.pulses.items():
+        if pulse.ro_chs is None:
+            continue
+        frequency = pulse.params["freq"].get_rounded()
+        values = np.asarray(
+            frequency.to_array(point_loops, all_loops=True), dtype=np.float64
+        )
+        gen = pulse.params.get("gen_ch")
+        if not prog.ABSOLUTE_FREQS and gen is not None:
+            values = values + float(
+                prog.gen_chs[gen].get("mixer_freq", {}).get("rounded", 0)
+            )
+        for wave in prog.list_pulse_waveforms(name):
+            references[prog.wave2idx[wave]] = np.broadcast_to(values, shape).reshape(-1)
+    return references
+
+
 def signed32(value: IntArray) -> IntArray:
     """Return two's-complement signed 32-bit words in an int64 container."""
     return (value + 2**31) % 2**32 - 2**31
@@ -92,7 +142,13 @@ class Machine:
     labels maps pre-optimization label names to logical word positions.
     """
 
-    def __init__(self, prog: MyProgramV2, size: int, labels: dict[str, int]) -> None:
+    def __init__(
+        self,
+        prog: MyProgramV2,
+        size: int,
+        labels: dict[str, int],
+        references: dict[int, NDArray[np.float64]],
+    ) -> None:
         self.size = size
         self.labels = labels
         self.registers: dict[str, IntArray] = {"s0": np.zeros(size, dtype=np.int64)}
@@ -119,6 +175,14 @@ class Machine:
             for i, w in enumerate(prog.waves)
         }
         self.wmem_valid = {i: np.ones(size, dtype=np.bool_) for i in self.wmem}
+        self._readout_references = references
+        self._wmem_references = {
+            address: WaveReference(
+                np.full(size, address, dtype=np.int64), np.full(size, values[0])
+            )
+            for address, values in references.items()
+        }
+        self._register_reference = WaveReference.raw(size)
         data = prog.compile_datamem()
         self.dmem_capacity = int(prog.tproccfg["dmem_size"])
         self.dmem = {
@@ -239,6 +303,34 @@ class Machine:
             result[selected] = self.wmem[int(address)][selected]
         return result
 
+    def wave_reference(
+        self, operand: Register | MemAddr | None, *, wmem: bool
+    ) -> WaveReference:
+        """Snapshot the reference accompanying the selected WMEM or r_wave lanes.
+
+        In register mode operand is unused. The caller has already read and
+        validated the corresponding words.
+        """
+        result = WaveReference.raw(self.size)
+        if not wmem:
+            result.copy_from(self._register_reference, self.read_mask)
+            return result
+        index = self.address(operand, self.wmem_capacity)
+        for address in np.unique(index[self.read_mask]):
+            if int(address) in self._wmem_references:
+                result.copy_from(
+                    self._wmem_references[int(address)],
+                    (index == address) & self.read_mask,
+                )
+        return result
+
+    def apply_readout_reference_sweeps(self) -> None:
+        """Advance original WMEM references from prologue to compiled scan values."""
+        for address, frequencies in self._readout_references.items():
+            ref = self._wmem_references[address]
+            own = ref.source == address
+            ref.frequency_mhz[own] = frequencies[own]
+
     def write_wave(self, operand: Register | MemAddr | None, active: BoolArray) -> None:
         """Store all wave registers, initializing newly written memory lanes."""
         index = self.address(operand, self.wmem_capacity)
@@ -252,6 +344,13 @@ class Machine:
                 self.wmem_valid[int(address)] = np.zeros(self.size, dtype=np.bool_)
             self.wmem[int(address)][selected] = words[selected]
             self.wmem_valid[int(address)] |= selected
+            key = int(address)
+            if key in self._wmem_references or np.any(
+                self._register_reference.source[selected] >= 0
+            ):
+                if key not in self._wmem_references:
+                    self._wmem_references[key] = WaveReference.raw(self.size)
+                self._wmem_references[key].copy_from(self._register_reference, selected)
             self.writes.add(f"WMEM[{address}]")
 
     def _alu_effects(self, inst: ModifiedInstruction) -> _AluEffects:
@@ -417,10 +516,12 @@ class Machine:
     ) -> None:
         if inst.src == SrcKeyword.WMEM and inst.dst.canonical_name == "r_wave":
             words = self.wave(inst.addr)
+            reference = self.wave_reference(inst.addr, wmem=True)
             if inst.ww is not None:
                 self.write_wave(inst.addr, active)
             for i in range(6):
                 self.write(Register(f"w{i}"), words[:, i], active)
+            self._register_reference.copy_from(reference, active)
             return
         if inst.src == SrcKeyword.IMM:
             value = self.value(inst.lit)

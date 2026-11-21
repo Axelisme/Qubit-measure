@@ -14,6 +14,7 @@ from zcu_tools.simulate.adc import (
     SampleGrid,
 )
 from zcu_tools.simulate.boundary import (
+    DDSCongruence,
     EventSlot,
     PulseEnvelope,
     ReadoutSlot,
@@ -691,17 +692,10 @@ def _read_event_contents(
             for e in template.events
             if e.gen_ch == drive.gen_ch
         )
-        selected_window = replace(
-            window,
-            trigger_ticks=window.trigger_ticks[:, read : read + 1],
-            frequency_mhz=window.frequency_mhz[:, read : read + 1],
-            phase_deg=window.phase_deg[:, read : read + 1],
-            generator_channels=window.generator_channels[:, read : read + 1],
-        )
         content = readout_contents(
             replace(template, events=events),
             drive,
-            selected_window,
+            window.subset(reads=slice(read, read + 1)),
             memo,
             time_base=time_base,
         )
@@ -777,17 +771,7 @@ def readout_contents(
         raise ValueError("mux tones require a common pulse start per point")
     if np.any(window.trigger_ticks[:, 0] < values[:, 0, 0]):
         raise ValueError("first ADC trigger must not precede terminal readout start")
-    features = np.column_stack(
-        (
-            values.reshape(len(template.points), -1),
-            window.trigger_ticks,
-            window.frequency_mhz,
-            window.phase_deg,
-        )
-    )
-    _, representatives, inverse = np.unique(
-        features, axis=0, return_index=True, return_inverse=True
-    )
+    representatives, inverse = _content_rows(values, window)
     pulses = []
     grids = []
     offsets = np.arange(window.samples, dtype=np.int64) * window.sample_period_ticks
@@ -804,11 +788,13 @@ def readout_contents(
                     time_base.ns(trigger + offsets),
                     frequency / 1000,
                     float(np.deg2rad(phase)),
+                    image,
                 )
-                for trigger, frequency, phase in zip(
+                for trigger, frequency, phase, image in zip(
                     window.trigger_ticks[index],
                     window.frequency_mhz[index],
                     window.phase_deg[index],
+                    window.frequency_images_at(int(index)),
                     strict=True,
                 )
             )
@@ -820,6 +806,35 @@ def readout_contents(
         inverse.astype(np.int64),
         (tuple(range(window.trigger_ticks.shape[1])),) * len(grids),
     )
+
+
+def _content_rows(
+    pulses: NDArray[np.float64], window: ReadoutSlot
+) -> tuple[NDArray[np.intp], NDArray[np.intp]]:
+    """Deduplicate rows by pulse, timing, and complete oscillator contents."""
+    key = (
+        pulses.reshape(len(pulses), -1),
+        window.trigger_ticks,
+        window.frequency_mhz,
+        window.phase_deg,
+    )
+    if isinstance(window.frequency_images, tuple):
+        # An explicit image uses key 0, distinct from any positive DDS period.
+        key += (
+            np.array(
+                [
+                    [
+                        image.period_ghz if isinstance(image, DDSCongruence) else 0.0
+                        for image in row
+                    ]
+                    for row in window.frequency_images
+                ]
+            ),
+        )
+    _, representatives, inverse = np.unique(
+        np.column_stack(key), axis=0, return_index=True, return_inverse=True
+    )
+    return representatives, inverse
 
 
 def _readout_pulse(

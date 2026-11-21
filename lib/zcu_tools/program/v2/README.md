@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-21，tProc 記憶體容量例外
+**Last updated:** 2026-11-21，tProc 記憶體與 ADC 頻率解碼
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -238,7 +238,8 @@ Pass 行為速查見 [simulation](simulation/README.md#ir-pass-behavior)。
 它們不修改 cfg，也不使用 waveform、gain 或 readout window。`readout_freq_words` 編碼仍明確接收上述四項設定。
 `generator_frequencies_from_words` 接收已取整的物理 mixer 頻率與 generator channel，不建立 readout cfg。
 `readout_frequencies_from_words` 接收已宣告 ADC 與同 shape 的物理 reference array，選最近 ADC-DDS image。
-Compiled request builder 從實際輸出效果提供 references，cfg-based API 委派給相同 word decoder。
+Compiled request builder 用 trigger 起點生效的具名 ADC config 供應頻率 reference，不用 carrier。
+沒有具名來源的 raw word 解成 folded baseband，並標記 DDS 週期。Cfg-based API 仍委派給相同 word decoder。
 
 ## Macro 層
 

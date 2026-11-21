@@ -590,7 +590,7 @@ class ConditionalReadout:
         oscillator = np.exp(
             2j
             * np.pi
-            * (grid.demodulation_frequency_ghz - self.model.reference_frequency_ghz)
+            * grid.detuning_ghz(self.model.reference_frequency_ghz)
             * grid.times_ns
             - 1j * grid.phase_rad
         )
@@ -668,5 +668,11 @@ def _pulse_key(pulses: tuple[ReadoutPulse, ...]) -> tuple[object, ...]:
 def _grid_key(grids: tuple[SampleGrid, ...]) -> tuple[object, ...]:
     """Physical sample coordinates and demodulation, preserving read order."""
     return tuple(
-        (g.times_ns.tobytes(), g.demodulation_frequency_ghz, g.phase_rad) for g in grids
+        (
+            g.times_ns.tobytes(),
+            g.demodulation_frequency_ghz,
+            g.phase_rad,
+            g.frequency_image,
+        )
+        for g in grids
     )

@@ -182,6 +182,7 @@ def _template_digest(template: TimelineTemplate) -> bytes:
         digest.update(
             repr((window.channel, window.samples, window.sample_period_ticks)).encode()
         )
+        digest.update(repr(window.frequency_images).encode())
         for array in (
             window.trigger_ticks,
             window.frequency_mhz,

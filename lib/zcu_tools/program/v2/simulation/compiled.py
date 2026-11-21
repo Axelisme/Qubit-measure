@@ -13,7 +13,6 @@ from zcu_tools.simulate.boundary import (
     AcquireRequest,
     AcquisitionMode,
     ChargeDriveRequirement,
-    ReadoutWindow,
     TimeBase,
 )
 
@@ -42,7 +41,7 @@ from ..ir.io_instructions import (
 from ..ir.operands import ImmValue, Register, SrcKeyword
 from ._compiled_guard import guard_live_in
 from ._compiled_output import Outputs
-from ._compiled_state import BoolArray, IntArray, Machine, signed32
+from ._compiled_state import BoolArray, IntArray, Machine, readout_references, signed32
 from ._compiled_stream import (
     DecodedInstruction,
     NativeLoop,
@@ -600,13 +599,17 @@ def _build_lanes(
         for r in records
         if isinstance(r.instruction, LabelInst)
     }
-    machine = Machine(prog, outputs.size, labels)
+    names = _point_names(records, loops)
+    references = readout_references(
+        prog, {name: prog.loop_dict[name] for name in names}
+    )
+    machine = Machine(prog, outputs.size, labels, references)
     outputs.loop_positions = {
         name: records[loop.start].position for name, loop in loops.items()
     }
     for record in records[:start]:
         _located_execute(record, machine, outputs)
-    seed = Machine(prog, 1, labels)
+    seed = Machine(prog, 1, labels, references)
     seed_outputs = Outputs(prog, 1, outputs.routes, outputs.pool, outputs.time_base)
     for record in records[:start]:
         _located_execute(record, seed, seed_outputs)
@@ -620,9 +623,9 @@ def _build_lanes(
     )
     _validate_native_sweeps(prog, records, loops, machine)
     _validate_hooks(records, loops, seed, end, live)
-    names = _point_names(records, loops)
     grid = _native_grid(prog, names)
     _apply_sweeps(records, loops, names, grid, machine)
+    machine.apply_readout_reference_sweeps()
     outputs.begin(machine, np.arange(outputs.size, dtype=np.int64))
     _run_body(records, loops, branches, machine, outputs, (start + 1, end))
     outputs.finish(machine)
@@ -745,16 +748,7 @@ def build_compiled_request(
     _build_lanes(prog, records, loops, branches, outputs)
     template = outputs.template()
     windows = tuple(
-        ReadoutWindow(
-            s.channel,
-            int(s.generator_channels[0, -1]),
-            s.samples,
-            s.sample_period_ticks,
-            tuple(int(x) for x in s.trigger_ticks[0]),
-            tuple(float(x) for x in s.frequency_mhz[0]),
-            tuple(float(x) for x in s.phase_deg[0]),
-            tuple(int(x) for x in s.generator_channels[0]),
-        )
+        s.window_at(0, gen_ch=int(s.generator_channels[0, -1]))
         for s in template.readouts
     )
     if prog.loop_dims is None or prog.avg_level is None:

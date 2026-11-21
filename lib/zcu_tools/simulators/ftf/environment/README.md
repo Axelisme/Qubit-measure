@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, ADC wiring and readout block arrival times
+**Last updated:** 2026-11-21, ADC wiring, block arrival times and demodulation images
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -431,9 +431,11 @@ phase to ADC's pulse-local phase by subtracting
 `2*pi*(f-f_ref)*pulse_start_ns`, with frequencies in GHz. The model reference
 is the first carrier; that carrier's phase stays unchanged. The existing
 `phase_reference_ticks` contribution, converted through `TimeBase.ns`, stays part of the common-origin phase.
-ADC demodulation keeps its absolute-time grid. An isolated addressed carrier's
-conditional IQ center is therefore invariant under a common pulse/grid time
-shift. Mux ADCs select incident carriers by the supplied board's PFB channel
+ADC demodulation keeps its absolute-time grid and phase at shot time zero.
+Named configs, including static PFB configs, retain their physical frequency
+image. Only raw DDS words demodulate at the image nearest the shared reference.
+An isolated addressed carrier's conditional IQ center is invariant under a
+common pulse/grid time shift. Mux ADCs select incident carriers by the supplied board's PFB channel
 before demodulation. The caller's board YAML determines Nyquist folding,
 PFBv4 channel spacing, offset and passband. Changing its ADC clock ratios or
 decimation changes carrier selection.

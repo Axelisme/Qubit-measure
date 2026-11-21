@@ -9,7 +9,9 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.readout_plan import ReadoutDrive, classify_readout
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
+    DDSCongruence,
     EventSlot,
+    ExplicitImage,
     ReadoutSlot,
     TimeBase,
     TimelineTemplate,
@@ -60,6 +62,45 @@ def _nearest_cavity(
     return distances.argmin(axis=-1).astype(np.int64)
 
 
+def _raw_cavity_candidates(
+    frequency_mhz: float, bare_mhz: NDArray[np.float64], image: DDSCongruence
+) -> NDArray[np.intp]:
+    """Find all minima in the raw trigger's circular MHz distance."""
+    period_mhz = image.period_ghz * 1000
+    offset = np.remainder(frequency_mhz - bare_mhz, period_mhz)
+    distance = np.minimum(offset, period_mhz - offset)
+    return np.flatnonzero(distance - distance.min() <= _ROUTING_TIE_MHZ)
+
+
+def _observed_cavities(
+    window: ReadoutSlot, bare_mhz: NDArray[np.float64], points: NDArray[np.int64]
+) -> NDArray[np.int64]:
+    images = window.frequency_images
+    if isinstance(images, ExplicitImage):
+        return _nearest_cavity(window.frequency_mhz, bare_mhz)
+    if not np.isfinite(window.frequency_mhz).all():
+        raise ValueError("readout routing requires finite frequencies")
+    selected = np.empty(window.frequency_mhz.shape, dtype=np.int64)
+    for point, (frequencies, row) in enumerate(
+        zip(window.frequency_mhz, images, strict=True)
+    ):
+        for read, (frequency, image) in enumerate(zip(frequencies, row, strict=True)):
+            if isinstance(image, ExplicitImage):
+                selected[point, read] = _nearest_cavity(
+                    frequencies[read : read + 1], bare_mhz
+                )[0]
+                continue
+            tied = _raw_cavity_candidates(float(frequency), bare_mhz, image)
+            if len(tied) != 1:
+                names = ", ".join(f"Q{i + 1}" for i in tied)
+                raise ValueError(
+                    f"ADC {window.channel} window {read} at point {points[point]}: "
+                    f"raw DDS nearest-cavity tie among {names}"
+                )
+            selected[point, read] = tied[0]
+    return selected
+
+
 def _event_rows(
     event: EventSlot, rows: NDArray[np.int64], active: NDArray[np.bool_]
 ) -> EventSlot:
@@ -72,16 +113,6 @@ def _event_rows(
         gain=event.gain[rows],
         envelope_index=event.envelope_index[rows],
         active=active[rows],
-    )
-
-
-def _window_rows(window: ReadoutSlot, rows: NDArray[np.int64]) -> ReadoutSlot:
-    return replace(
-        window,
-        trigger_ticks=window.trigger_ticks[rows],
-        frequency_mhz=window.frequency_mhz[rows],
-        phase_deg=window.phase_deg[rows],
-        generator_channels=window.generator_channels[rows],
     )
 
 
@@ -104,7 +135,7 @@ def _route_template(
     receivers = []
     for channel in channels:
         window = next(w for w in template.readouts if w.channel == channel)
-        selected = _nearest_cavity(window.frequency_mhz, bare)
+        selected = _observed_cavities(window, bare, template.points)
         if np.any(selected != selected[:, :1]):
             raise ValueError(
                 "one ADC's reads must observe the same cavity at each point"
@@ -172,7 +203,7 @@ def _project_template(
                 points=compact[template.points[rows]],
                 events=events,
                 readouts=tuple(
-                    _window_rows(w, rows)
+                    w.subset(points=rows)
                     for w in template.readouts
                     if w.channel in observed
                 ),
@@ -187,10 +218,12 @@ def route_request(
 ) -> tuple[RoutedGroup, ...]:
     """Detach independent-cavity templates from the complete admitted request.
 
-    Each tone selects its nearest bare cavity at each point, rejecting distances
-    tied within 1e-9 MHz (subtraction tolerance). Each ADC's demod frequency
-    selects the observed cavity; all reads of that ADC at a point must select
-    the same cavity. Only observed routing patterns are enumerated.
+    Each tone selects the nearest bare cavity by absolute MHz difference.
+    Each ADC trigger uses absolute distance for an explicit image or the
+    shortest difference modulo its DDS frequency for a raw word. Distances tied
+    within 1e-9 MHz raise ValueError; a raw tie names the ADC, window and cavities.
+    All reads of one ADC at a point must select the same cavity. Only observed
+    routing patterns are enumerated.
     Triggered nonterminal blocks follow their incident tones into each source.
     Untriggered cavity drives, mixed pulse/mux routes, foreign generators, ties
     and absent terminal tones fail before any evolution or sampling. Microwave

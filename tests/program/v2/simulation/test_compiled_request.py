@@ -646,16 +646,11 @@ def test_multi_generator_readout_route_uses_only_overlapping_wired_outputs(
 
 
 @pytest.mark.parametrize(
-    "carriers,trigger_time,error",
-    [
-        ([], 0, "no pulse"),
-        ([100], 0.3, "no pulse"),
-        ([100, 3000], 0, "carriers=.*images="),
-        ([100, 120], 0, None),
-    ],
+    "carriers,trigger_time",
+    [([], 0), ([100], 0.3), ([100, 3000], 0), ([100, 120], 0)],
 )
-def test_runtime_adc_word_requires_one_common_window_frequency_image(
-    carriers, trigger_time, error
+def test_runtime_adc_uses_named_config_regardless_of_window_carriers(
+    carriers, trigger_time
 ):
     def initialize(p):
         for i, frequency in enumerate(carriers):
@@ -668,20 +663,16 @@ def test_runtime_adc_word_requires_one_common_window_frequency_image(
             p.pulse(0, f"c{i}", t=i * 0.1)
 
     prog, env = program(body, initialize, reps=1, trigger_time=trigger_time)
-    if error is not None:
-        with pytest.raises(ValueError, match=rf"ADC 0 read 0.*{error}"):
-            request(prog, env)
-    else:
-        assert request(prog, env).materialize_point(0).readouts[
-            0
-        ].frequency_mhz == pytest.approx((100,), abs=1e-5)
+    try:
+        readout = request(prog, env).materialize_point(0).readouts[0]
+        assert readout.frequency_mhz == pytest.approx((100,), abs=1e-5)
+    finally:
+        env.devices.close_all_devices()
 
 
 @pytest.mark.parametrize("boundary_tick", [7, 28])
 @pytest.mark.parametrize("multiple_routes", [False, True])
-def test_touching_window_endpoints_do_not_supply_routes_or_carrier_images(
-    boundary_tick, multiple_routes
-):
+def test_touching_window_endpoints_do_not_supply_routes(boundary_tick, multiple_routes):
     def initialize(p):
         p.declare_gen(1, nqz=1)
         p.add_pulse(

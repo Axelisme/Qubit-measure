@@ -256,11 +256,7 @@ class IntegratedPaths:
                 ]
             )
             outgoing = incident[:, None] - baseline @ self.scattering
-            omega = (
-                2
-                * np.pi
-                * (grid.demodulation_frequency_ghz - model.reference_frequency_ghz)
-            )
+            omega = 2 * np.pi * grid.detuning_ghz(model.reference_frequency_ghz)
             oscillator = (
                 np.exp(1j * omega * grid.times_ns - 1j * grid.phase_rad) * delay_phase
             )
