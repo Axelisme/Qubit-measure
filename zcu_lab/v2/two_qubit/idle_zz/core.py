@@ -508,7 +508,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             fig, _ = plots.subplots(
                 num=f"ramsey_{dc_index}",
                 nrows=2,
-                height_ratios=(3, 1.6),
+                gridspec_kw={"height_ratios": (3, 1.6)},
                 figsize=(10, 7),
                 layout="constrained",
             )
