@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-22，Run 頁 Defaults
+**Last updated:** 2026-11-22，Run 頁 Defaults 與 Analyze 摘要
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -22,8 +22,8 @@ None 結果產生空摘要與零 writeback 候選，圖與空摘要沿用既有�
 [`adapter/value.py`](adapter/value.py) defines four frozen, keyword-only values.
 `Adapter(spec, make_form, run, guide, analysis=None, post_analysis=None)` connects
 native persistence, captured Form construction and adapter-owned acquisition.
-`Analysis(fn, options=None, writeback=None)` and
-`Interactive(plugin, frontend, options=None, writeback=None)` occupy the same
+`Analysis(fn, options=None, writeback=None, summary_lines=None)` and
+`Interactive(plugin, frontend, options=None, writeback=None, summary_lines=None)` occupy the same
 primary slot. `PostAnalysis(fn, options=None, writeback=None)` declares the
 independent second stage. Authors do not declare capability flags or artifact hooks.
 
@@ -40,6 +40,10 @@ The host generates once when preparing a new source or primary, retains the
 object for schema queries, and passes edited options to analysis. Existing lab
 wrappers may still read historical parameters during analysis. Their cleanup is
 a separate task.
+
+Both primary declarations accept `summary_lines(source) -> tuple[str, ...]`.
+Use the retained RunRecord to write ordered operator text. Return `()` if no
+lines apply. Keep estimates and recipe fields in the native analysis result.
 
 The private primary-stage base hides only Interactive's state type S.
 Interactive passes its typed plugin to the host's generic SessionFactory, then
@@ -127,7 +131,9 @@ rejects Done without closing input.
 - [`services/`](services/app_services.py)：app service layer。Run、Analyze、PostAnalyze、Load 與 Tab 將 pane 提交及退役資源清理交給 `pane_commit`。
   GuardService 統一 domain admission，啟動時的 hardware exclusion 由 gate 裁決。
   各 operation 決定終局與觸發清理的時機。Run 與 Load 不依賴 WritebackService 來清理 draft。
-  Analyze 回傳就發布結果，拋錯就 failed 並顯示原始訊息，不辨識例外型別。
+  Primary Analyze 提交時從來源 RunRecord 擷取 adapter 摘要行。GUI Analysis 與 MCP 共用
+  [AnalysisPresentation](remote/README.md#analysis-presentation)，不將文字寫入原生分析結果。
+  Analyze 回傳並完成發布準備才提交；拋錯就 failed 並顯示原始訊息，不辨識例外型別。
   Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
   結果瀏覽器與 RPC 共用 `services.results_index.scan_results(project_root)`。瀏覽器透過 `Controller.watch_results_index` 訂閱 app 擁有的背景索引，按 entry 收到已交付成果的唯讀快照。RPC 透過 `Controller.query_results` 每次做完整新掃描，不取瀏覽器快照。
   掃描各 Database entry 的 run 目錄時，呼叫 datafile.read_docs 一次開檔讀保存的 metadata 與 cfg，再以同名 Result entry 的 acquired 事件提供歷史身分，缺 ledger 仍列為未登錄。瀏覽投影容許 metadata 缺欄與額外欄位，不以目前 RunMetadata 型別擋住歷史內容；壞文件保留 run 與 issues，不遮住同檔可讀的另一份文件。Cfg JSON 原樣讀取，不查 catalog 或驗證實驗 schema。Cfg／analysis 搜尋包含未出現在 roles 的 tone 名稱。文件與圖檔讀取只接受索引中的 run key 與成員檔名，讀取前重驗根目錄與 symlink 邊界。索引不建立檔案或 lock，也不改 opened entry。
