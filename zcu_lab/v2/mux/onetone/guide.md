@@ -22,7 +22,7 @@
 
 Open／Reset 固定填入 `ro_length = 1.0 us`，不依賴 `kappa`。
 Mixer 從 group 的 `mixer_freq` 取初值，不依賴 `kappa` 或 tone frequency。
-Timing 在所有 group resonators 都有有效 `kappa`，且 group 有 `time_of_fly` 時，填入下列可編輯候選。
+所有 group resonators 都有有效 `kappa` 時，Open／Reset 估算五個光子衰減時間。Group 的 `time_of_fly` 另用於 trigger 與 pulse 長度。
 `kappa` 與 tone frequency 的單位為 MHz，時間的單位為 us。
 
 | 欄位 | 初值來源 |
@@ -31,9 +31,10 @@ Timing 在所有 group resonators 都有有效 `kappa`，且 group 有 `time_of_
 | `ro_length` | 固定 1.0 us 的 ADC 積分窗候選，不依賴 `kappa` 或 `time_of_fly`。 |
 | `trig_offset` | `$mux.time_of_fly` 加上五倍 ringup 時間 `5 / (2π · min kappa)`，不讀 resonator 的 pulse 路徑 TOF。 |
 | `length` | `trig_offset + ro_length`，讓 pulse 覆蓋 ADC window。 |
+| `post_delay` | `5 / (2π · min kappa)`，即五個光子衰減時間，不依賴 `time_of_fly`。 |
 
-任一 resonator 的 `kappa` 缺失或 null，`trig_offset` 與 `length` 留空必填，不使用其餘成員的子集推導。
-Group 的 `time_of_fly` 缺失或 null，`trig_offset` 與 `length` 留空必填。
+任一 resonator 的 `kappa` 缺失或 null 時，不從其餘成員推導等待。`post_delay` 保留範本的 0 µs，`trig_offset` 與 `length` 留空必填。
+Group 的 `time_of_fly` 缺失或 null 時，只讓 `trig_offset` 與 `length` 留空必填。
 `readout/mux:blank` 本身不預填 `trig_offset`，缺少推導來源時不會退回 0。
 上述缺值情境仍填入 `ro_length = 1.0 us`。
 已設的 kappa 須為有限正數，mixer 頻率須為有限數，group time_of_fly 須為有限非負數。
@@ -45,7 +46,7 @@ Run 前核對 mixer、接線、功率與 timing，必要時修改候選。
 
 已有 readout slot 時，沿用其 mixer 與 ADC window。
 Trigger 仍在 slot 原值上加最小已設 kappa 對應的 ringup 等待，pulse 只在不足以覆蓋 window 時延長。
-此路徑忽略缺失或 null 的 kappa，全部未設時不增加等待。
+`post_delay` 取原值與同一個等待時間的較大值。此路徑忽略缺失或 null 的 kappa，全部未設時保留原有 `post_delay`，也不增加 trigger 的等待。
 
 Group 可選填 `qubits: [Q1, Q2, Q3]`。省略或 null 適用於 resonator bring-up。
 提供時，qubits 必須與完整 resonators 等長，且每個 qubit 唯一。
@@ -146,11 +147,13 @@ Run 固定捕捉 module alias 與 resonator 資料，其後修改全域 aliases�
 
 ## Herald 後的等待
 
-FIT 不校準 `post_delay`，其他實驗也不校準。Module 提案保留輸入的值，新建 mux readout module 預設為 0 µs。用這份 readout 做 heralded 實驗前，先設定 `post_delay`，讓腔內光子在後續 qubit drive 前衰減。Herald 和 terminal 共用這個值（[ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)）。等待從 readout generator 的波形結束算起，不等 ADC 積分窗結束（[ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)）。
+Open／Reset 給 `post_delay` 初值，FIT 不校準這段等待。Module 提案保留 Run 輸入的值。Apply module 與 readout slot 後，後續實驗會使用保存的值。用這份 readout 做 heralded 實驗前，先設定 `post_delay`，讓腔內光子在後續 qubit drive 前衰減。Herald 和 terminal 共用這個值（[ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)）。等待從 readout generator 的波形結束算起，不等 ADC 積分窗結束（[ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)）。
 
-等待太短時，殘留的腔光子會讓 qubit 轉移頻率偏移並造成退相干。Herald 後的名目 Xπ 可能幾乎不翻轉，conditional phase 掃描也可能找不到 π 交點。FTF 的一個低 SNR 例子中，gg herald 後打名目 F2 Xπ，F2 的 terminal e 比例在 0 µs 時為 11.6%，在 2 µs 時為 92.9%。這兩個比例沒有扣除 I 基線。2 µs 只是這次比較用的值，不是最短或最佳等待。
+用 FIT 取得各 resonator 的 `kappa`，也就是以 MHz 記的半高全寬。從 `5 / (2π · κ)` µs 開始，這是五個光子衰減時間，也是表單估算 ring-up 等待的公式。共用一個 `post_delay` 時，用最小的 κ，讓線寬最窄的腔有時間放空。
 
-用 FIT 得到的各 resonator 線寬 `kappa`（半高全寬 FWHM，單位 MHz）估算腔場衰減時間 `1 / (π · FWHM)`，結果的單位是 µs。先把 `post_delay` 設為衰減時間的數倍。
+等待太短時，殘留的腔光子會讓 qubit 轉移頻率偏移並造成退相干。Herald 後的名目 Xπ 可能幾乎不翻轉，conditional phase 掃描也可能找不到 π 交點。
+
+在 FTF 的低 SNR 例子中，R2 的線寬約 1.2 MHz。五個光子衰減時間約 0.66 µs；2 µs 約是單個光子衰減時間的 15 倍。gg herald 後打名目 F2 Xπ，等待 0 µs 時，F2 的終端 e 比例為 11.6%；等待 2 µs 時為 92.9%。比例未扣除 I 基線。2 µs 只是當時的比較值，不是最短或最佳等待。
 
 在 `two_qubit/joint_readout` 的 Reset 欄位選 `reset/mux_herald`，在 `keep` 用 F1、F2 的 role tone 在完整 readout 中的位置作鍵，兩個值都填 g。Herald 和 terminal 使用同一份完整 mux readout。Run 後看 FIT 的 4×9 列正規化機率矩陣。取目標 qubit 打名目 Xπ、另一顆打 I 的那一列，把目標 qubit 的 terminal 分類為 e 的欄位加總。也可與兩顆都打 I 的 gg 列比較。這是通過 gg herald 的 shots 中，目標 qubit 的 terminal e 比例，不是 gate fidelity。只延長 `post_delay`，其餘設定不變，再 Run 和 FIT。若比例仍隨等待延長而上升，先調整等待再跑 heralded 掃描。
 
