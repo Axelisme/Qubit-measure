@@ -261,7 +261,7 @@ Measure、workflows、fluxdep 與 dispersive 的 MCP 各有工具。Agent 需要
 
 **邊界。** 表單或結果中直接看到的行為仍寫進 guide，即使來自固定上限。例如 [reset_check guide](../../zcu_lab/v2/singleshot/reset_check/guide.md) 說 Gain Stop 初值取 4 × x180 gain 與 1.0 中較小者；[CPMG guide](../../zcu_lab/v2/twotone/time_domain/cpmg/guide.md) 說明 Minimum time 的公式及何時留空。Skill 不必有知識庫也能依最小判準運作；guide 不連到獨立、未被本 repo 追蹤的知識庫檔案。
 
-**依據。** Skill 與知識庫的分工見 2026-10-12 的 [Fluxdep MCP 設計](../discussions/2026-10-12-fluxdep-mcp-design.md#mcp-設計範式)。2026-11-21，使用者先要求：「然後guide請不要包含取決於板子資訊的內容，其應該是中性的說明，要提供錯誤解析，應該放知識沉澱的疑難排解」。同日再定 guide 的讀者與範圍：「Guide的定位是給只有物理知識，完全沒看過實作的使用者角度看的，寫太多實作細節沒有意義，所以板子限制不要放guide，guide是介紹這個實驗，與其行為描述的說明，底層qick抱錯屬於疑難雜症，進知識沉澱的judge」。規則取自使用者裁決，guide／知識庫分工的條文由 designer 代寫，**使用者未覆核措辭**。見[表單預設超過板子限制，錯誤解析放知識庫](../discussions/2026-11-21-form-board-limits.md)。
+**依據。** Skill 與知識庫的分工見 2026-10-12 的 [Fluxdep MCP 設計](../discussions/2026-10-12-fluxdep-mcp-design.md#mcp-設計範式)。2026-11-21，使用者先要求：「然後guide請不要包含取決於板子資訊的內容，其應該是中性的說明，要提供錯誤解析，應該放知識沉澱的疑難排解」。同日再定 guide 的讀者與範圍：「Guide的定位是給只有物理知識，完全沒看過實作的使用者角度看的，寫太多實作細節沒有意義，所以板子限制不要放guide，guide是介紹這個實驗，與其行為描述的說明，底層qick抱錯屬於疑難雜症，進知識沉澱的judge」。規則取自使用者裁決，guide／知識庫分工的條文由 designer 代寫，使用者 2026-11-21 覆核措辭，定為慣例（原話見 [ADR-0073〈自動推導點到為止〉](0073-measure-form-derivation.md#自動推導點到為止)）。見[表單預設超過板子限制，錯誤解析放知識庫](../discussions/2026-11-21-form-board-limits.md)。
 
 ### Fluxdep 的依賴模型不是跨 app 原則
 
