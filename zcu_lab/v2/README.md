@@ -23,7 +23,7 @@
 
 ## Two-qubit 實驗清單
 
-Open／Reset 使用 point aliases `qubit1`、`qubit2` 和 `mux`。兩個位置須綁不同元件，且都在 `$mux.qubits` 中；表單不檢查元件種類。`joint_readout`、`idle_zz`、`conditional_spectroscopy` 不要求 `$coupler`。其餘入口須綁 `$coupler`，它是這對 qubit 的 CZ 校準來源或寫回目標。
+Open／Reset 使用 point aliases `qubit1`、`qubit2` 和 `mux`。表單不限制 qubit 的物理子種類或 coupler 的種類，仍要求 `group/mux` 並檢查有序的 qubit／resonator 綁定。兩個位置須綁不同元件，且都在 `$mux.qubits` 中。`joint_readout`、`idle_zz`、`conditional_spectroscopy` 不要求 `$coupler`。其餘入口須綁 `$coupler`，它是這對 qubit 的 CZ 校準來源或寫回目標。
 
 下表列出 two-qubit 的 GUI／MCP registry keys。每個連結指向該入口的 guide。另有 [`two_qubit/cz_optimize`](two_qubit/cz_optimize/guide.md)，以固定 depth 的 interleaved RB 搜尋 CZ 的 I/Q 形狀與 local Z。
 

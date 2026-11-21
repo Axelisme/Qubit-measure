@@ -12,7 +12,7 @@
 | `reps`、`rounds` | 直接設定 Form 的 Reps 和 Rounds。 | 保留 Reset 值。 |
 
 `target` 只改這次 Open／Reset 的 capture，不改 point aliases。Recipe 不交換兩個位置，也不從 qubit 猜 mux group。
-表單不限制元件種類，但兩個元件須不同、都在 `$mux.qubits` 中；已綁定的 readout 必須有相同數量的 tones。
+表單不限制 qubit 的物理子種類或 coupler 的種類，仍要求 `group/mux` 並驗證[有序的 qubit／resonator 綁定](../v2/two_qubit/guide.md#綁定位置與讀出-tones)。兩個元件須不同且都在 `$mux.qubits` 中。已綁定和提交時的 readout 都須有完整 group 的 tone 數；操作員仍須核對 tone 順序。
 本頁的 recipes 都需要 `$coupler`。實驗入口 `joint_readout`、`idle_zz`、`conditional_spectroscopy` 不需要。
 使用舊 point 時，依[重綁步驟](../v2/two_qubit/guide.md#重綁舊-point)更新 aliases、CZ pulse library keys、module slots 和 `ext.cz_phase` keys，再 Open／Reset。Notebook 內建的 `qubit1`、`qubit2` 與 GUI aliases 分開，不會自動互綁。
 
