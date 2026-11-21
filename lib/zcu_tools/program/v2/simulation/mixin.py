@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from inspect import Signature, signature
+from threading import Event
 from typing import TYPE_CHECKING, Literal, overload
 
 import numpy as np
@@ -169,7 +170,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
 
         soc = params["soc"]
         try:
-            result = soc.run_round(cancel=cancel_flag)
+            result = soc.run_round()
         except Cancelled:
             soc.cleanup_round()
             self._close_rounds_pbar()
@@ -191,6 +192,19 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             self._close_rounds_pbar()
             return False
         return True
+
+    def _finish_decimated_round(self) -> bool:
+        soc = self.acquire_params["soc"]
+        if not isinstance(soc, SimulationSoc):
+            return super()._finish_decimated_round()
+        from zcu_tools.simulate.evolution import Cancelled
+
+        try:
+            return super()._finish_decimated_round()
+        except Cancelled:
+            soc.cleanup_round()
+            self._close_rounds_pbar()
+            return False
 
     def _program(self) -> "MyProgramV2":
         from ..base import MyProgramV2
@@ -349,7 +363,10 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         extra positional options or a dynamic bool retain the union.
         Nonempty herald or registered shot mask sources raise ValueError
         because post-selection needs integrated shots.
-        Other acquisition errors and cancellation follow the normal pipeline.
+        Cancellation in the backend discards that incomplete round; a round
+        already computed when pacing is interrupted keeps its trace. The result
+        averages completed rounds or raises StoppedPartialAcquireError if none
+        completed. Unbound hardware uses the original QICK round path.
         """
         if not isinstance(soc, SimulationSoc):
             return super().acquire_decimated(soc, *args, rounds=rounds, **kwargs)
@@ -387,12 +404,11 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
                             routes=soc.routes,
                             charge_requirements=charge_requirements,
                         )
-                    soc.install_request(
-                        request,
-                        pacing_cancel=kwargs.get("cancel_flag")
-                        if mode == "decimated"
-                        else None,
-                    )
+                    cancel_flag = kwargs.get("cancel_flag")
+                    if cancel_flag is None:
+                        cancel_flag = Event()
+                        kwargs["cancel_flag"] = cancel_flag
+                    soc.install_request(request, cancel=cancel_flag)
                     yield
                 finally:
                     soc.release_request()

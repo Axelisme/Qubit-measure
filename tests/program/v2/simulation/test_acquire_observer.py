@@ -6,9 +6,10 @@ from dataclasses import FrozenInstanceError
 from fractions import Fraction
 from threading import Event
 
+import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.acquisition import StoppedPartialAcquireError
+from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -21,10 +22,13 @@ from zcu_tools.program.v2.simulation import (
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
+    ChannelSignals,
     EnvironmentSnapshot,
+    RoundRequest,
     RoundSignals,
     TimeBase,
 )
+from zcu_tools.simulate.evolution import Cancelled
 
 from tests.program._profiles import load_soccfg
 
@@ -284,8 +288,6 @@ def test_integrated_stop_complete_means_normal_partial_return(
     def stop(request):
         if request.index == completed_rounds:
             cancel.set()
-            from zcu_tools.simulate.evolution import Cancelled
-
             raise Cancelled()
         return execute(request)
 
@@ -299,6 +301,54 @@ def test_integrated_stop_complete_means_normal_partial_return(
     assert len(observed) == 1
     assert observed[0].complete is bool(completed_rounds)
     assert len(observed[0].rounds) == completed_rounds + 1
+
+
+@pytest.mark.parametrize("completed_rounds", [0, 2])
+def test_decimated_stop_during_backend_keeps_only_completed_rounds(
+    program_seam, completed_rounds
+):
+    program, soc, observed = program_seam
+    cancel = Event()
+    hook_rounds = []
+
+    def solve(request: RoundRequest) -> RoundSignals:
+        query = request.cancel
+        assert query is not None and query is cancel
+        if request.index == completed_rounds:
+            cancel.set()
+        if query.is_set():
+            raise Cancelled()
+        samples = request.acquire.readouts[0].samples
+        iq = [(2.0, -8.0), (8.0, -2.0)][request.index]
+        trace = np.broadcast_to(np.array(iq), (1, 1, samples, 2))
+        return RoundSignals((ChannelSignals(0, trace),))
+
+    def round_hook(count, _trace, flag: CancelFlagProtocol) -> None:
+        assert flag is cancel
+        hook_rounds.append(count)
+
+    def acquire():
+        return program.acquire_decimated(
+            soc,
+            rounds=4,
+            cancel_flag=cancel,
+            round_hook=round_hook,
+            remove_offset=False,
+            progress=False,
+        )
+
+    soc.binding.execute = solve
+    if completed_rounds == 0:
+        with pytest.raises(StoppedPartialAcquireError):
+            acquire()
+    else:
+        (trace,) = acquire()
+        np.testing.assert_array_equal(trace[:, 0], 5.0)
+        np.testing.assert_array_equal(trace[:, 1], -5.0)
+    assert hook_rounds == list(range(1, completed_rounds + 1))
+    (outcome,) = observed
+    assert outcome.complete is bool(completed_rounds)
+    assert len(outcome.rounds) == completed_rounds + 1
 
 
 def test_cleanup_failure_is_inside_binding_outcome(program_seam, monkeypatch):
