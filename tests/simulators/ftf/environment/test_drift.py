@@ -61,10 +61,12 @@ def test_projective_rounds_keep_acquisition_effective_losses_and_facts(tmp_path)
         for index in range(2):
             now[0] += 2
             result = expect_statistics(session.sample_round(snapshot(), index))
-            assert result.state_counts.shape == (2, 4)
+            np.testing.assert_array_equal(
+                result.state_counts.sum(axis=-1), session.request.reps
+            )
             assert source.effective_settings == effective
             assert source.model_facts(snapshot()) is facts
-            assert source.evaluations[0].projection_outcomes == (2, 2)
+            assert source.evaluations[0].projection_continued_states == ((2,), (2,))
         assert len((tmp_path / "truth.jsonl").read_text().splitlines()) == 3
     finally:
         source.close()

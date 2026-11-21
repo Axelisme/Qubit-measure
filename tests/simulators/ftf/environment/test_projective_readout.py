@@ -1,7 +1,9 @@
-"""FTF outcome histories connect herald reads to continued terminal populations."""
+"""FTF compact marginals and shot-aligned projective readout."""
 
 import json
+from collections.abc import Sequence
 from dataclasses import replace
+from typing import override
 
 import numpy as np
 import pytest
@@ -12,8 +14,19 @@ from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate import adc
 from zcu_tools.simulate.adc import ADC
-from zcu_tools.simulate.boundary import RoundSignals, SamplingIdentity
-from zcu_tools.simulate.evolution import Engine, EvolutionResult, PathDiagnostics
+from zcu_tools.simulate.boundary import (
+    CancellationQuery,
+    RoundSignals,
+    SamplingIdentity,
+)
+from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
+    Engine,
+    EvolutionResult,
+    ModelSource,
+    PathDiagnostics,
+    TimelineBatch,
+)
 from zcu_tools.simulators.ftf.config.schema import MuxReadoutSource
 from zcu_tools.simulators.ftf.environment import FTFSource, plan_template
 from zcu_tools.simulators.telemetry import RoutingTelemetry
@@ -262,7 +275,7 @@ def herald_program(env, *, reads=2, reps=256):
 
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
-def test_mux_herald_postselection_retains_joint_ground_and_reports_outcomes(
+def test_mux_herald_postselection_retains_joint_ground_and_reports_nodes(
     tmp_path, mode
 ):
     numeric = thermal_mux_settings().with_telemetry(enabled=True, directory=tmp_path)
@@ -307,56 +320,204 @@ def test_mux_herald_postselection_retains_joint_ground_and_reports_outcomes(
         record = json.loads(
             next(tmp_path.glob("routing-*.jsonl")).read_text().splitlines()[-1]
         )
-        assert record["extras"]["ftf.projection_outcomes"] == [4]
-        assert record["extras"]["ftf.projection_pruned_weight"] == [0.0]
+        assert record["extras"]["ftf.projection_continued_states"] == [[4]]
+        assert record["extras"]["ftf.projection_identity_weight"] == [[0.0]]
     finally:
         env.devices.close_all_devices()
 
 
-def test_herald_expands_joint_count_axis_and_preserves_terminal_only_adc():
-    template, readout = herald_template()
+class FlipAtTerminal(EngineDouble):
+    """An exact population flip in the last span before the terminal read."""
+
+    @override
+    def evolve(
+        self,
+        source: ModelSource,
+        batches: Sequence[TimelineBatch],
+        *,
+        budget: float = 1e-3,
+        cancel: CancellationQuery | None = None,
+        telemetry: bool = False,
+        reuse_key: bytes | None = None,
+        capture: CaptureBuffer | None = None,
+    ) -> EvolutionResult:
+        result = super().evolve(
+            source,
+            batches,
+            budget=budget,
+            cancel=cancel,
+            telemetry=telemetry,
+            reuse_key=reuse_key,
+            capture=capture,
+        )
+        ends = np.concatenate([batch.end_ns for batch in batches])
+        flip = np.isin(ends, [8.0, 10.0])
+        densities = result.densities.copy()
+        densities[flip] = densities[flip, ::-1, ::-1]
+        return replace(result, densities=densities)
+
+
+@pytest.fixture
+def flipping_readout():
+    base, readout = herald_template()
     numeric = settings().with_telemetry(enabled=False)
-    numeric = numeric.model_copy(
-        update={"chip": numeric.chip.model_copy(update={"temperature_k": 1.0})}
+    chip = numeric.chip.model_copy(
+        update={
+            "temperature_k": 1.0,
+            "f1": numeric.chip.f1.model_copy(
+                update={"q_cap": None, "q_ind": None, "aphi": 0.0, "xqp": 0.0}
+            ),
+            "f2": numeric.chip.f2.model_copy(
+                update={"q_cap": None, "q_ind": None, "aphi": 0.0, "xqp": 0.0}
+            ),
+            "coupler": numeric.chip.coupler.model_copy(
+                update={"q_cap": None, "aphi": 0.0}
+            ),
+        }
+    )
+    return base, readout, numeric.model_copy(update={"chip": chip})
+
+
+def test_compact_bins_partition_reps_and_weight_each_reads_own_flip_marginal(
+    flipping_readout,
+):
+    base, readout, numeric = flipping_readout
+    source = FTFSource(
+        numeric,
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        readout=readout,
+        engine=FlipAtTerminal(),
+    )
+    acquire = replace(request(templates=(base,)), reps=20000)
+    try:
+        facts = source.model_facts(snapshot())
+        plan = plan_template(
+            numeric,
+            snapshot(),
+            base,
+            soccfg=source.soccfg,
+            readout=readout,
+            facts=facts,
+            time_base=acquire.time_base,
+        )
+        result = source.open_acquire(acquire).sample_round(snapshot(), 0)
+        statistics = expect_statistics(result)
+        # Two two-state events use at most 1 + (2 - 1) * 2 ordered bins,
+        # not four (herald state, terminal state) joint categories.
+        assert statistics.state_counts.shape[0] == 2
+        assert statistics.state_counts.shape[1] <= 3
+        np.testing.assert_array_equal(
+            statistics.state_counts.sum(axis=-1), acquire.reps
+        )
+
+        initial = facts.source.initial_density.diagonal().real
+        expected_occupancies = []
+        for item, channel in zip(plan.readouts, statistics.channels, strict=True):
+            response = ADC(item.batch.model).responses(item.batch)
+            centres = response.sums[item.batch.content_index]
+            assert channel.sums.shape[-2] == (2 if item.channel == 4 else 1)
+            assert (
+                np.linalg.norm(centres[..., 0, :] - centres[..., 1, :], axis=-1) > 1e-5
+            ).all()
+            is_ground = np.isclose(
+                channel.conditional_sums, centres[..., :1, :], rtol=1e-12, atol=1e-9
+            ).all(axis=-1)
+            is_excited = np.isclose(
+                channel.conditional_sums, centres[..., 1:, :], rtol=1e-12, atol=1e-9
+            ).all(axis=-1)
+            assert (is_ground ^ is_excited).all()
+            ground = np.einsum("pb,prb->pr", statistics.state_counts, is_ground)
+            expected = initial if item.channel == 4 else initial[1:]
+            np.testing.assert_allclose(
+                ground / acquire.reps,
+                np.broadcast_to(expected, ground.shape),
+                atol=0.01,
+            )
+            expected_occupancies.append(ground)
+            weighted = np.einsum(
+                "pb,prbi->pri", statistics.state_counts, channel.conditional_sums
+            )
+            expected_total = (
+                ground[..., None] * centres[..., 0, :]
+                + (acquire.reps - ground)[..., None] * centres[..., 1, :]
+            )
+            np.testing.assert_allclose(weighted, expected_total, rtol=1e-12, atol=1e-9)
+            # With zero receiver noise, observed totals only add the ADC's
+            # integrated quantization noise (variance reps/12 per component).
+            np.testing.assert_allclose(
+                channel.sums, weighted, atol=6 * np.sqrt(acquire.reps / 12), rtol=0
+            )
+        both, terminal = expected_occupancies
+        np.testing.assert_array_equal(both[:, :1] + terminal, acquire.reps)
+        np.testing.assert_array_equal(both[:, 1:], terminal)
+    finally:
+        source.close()
+
+
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+def test_flipping_chain_preserves_raw_and_trace_pairs_with_terminal_only_adc(
+    flipping_readout,
+    mode,
+):
+    base, readout, numeric = flipping_readout
+    assert readout.mux is not None
+    readout = replace(
+        readout,
+        mux=replace(
+            readout.mux,
+            receivers=tuple(
+                replace(receiver, gain=1e8) for receiver in readout.mux.receivers
+            ),
+        ),
     )
     source = FTFSource(
         numeric,
         DeviceManager(),
         soccfg=profile_soccfg("ftf"),
         readout=readout,
-        engine=EngineDouble(),
+        engine=FlipAtTerminal(),
     )
-    acquire = replace(request(templates=(template,)), reps=20000)
+    acquire = replace(request(mode, templates=(base,)), reps=64)
     try:
-        try:
-            result = source.open_acquire(acquire).sample_round(snapshot(), 0)
-        except ValueError as error:
-            pytest.fail(
-                f"projective FTF round must prepare aligned outcome histories: {error}"
+        plan = plan_template(
+            numeric,
+            snapshot(),
+            base,
+            soccfg=source.soccfg,
+            readout=readout,
+            facts=source.model_facts(snapshot()),
+            time_base=acquire.time_base,
+        )
+        result = source.open_acquire(acquire).sample_round(snapshot(), 0)
+        if isinstance(result, IntegratedRound):
+            shots = result.raw.materialize(acquire.reps, acquire.avg_level)
+        else:
+            shots = {
+                channel.channel: channel.iq.sum(axis=-2).reshape(acquire.reps, 2, -1, 2)
+                for channel in result.channels
+            }
+        labels = {}
+        for item in plan.readouts:
+            centres = (
+                ADC(item.batch.model)
+                .responses(item.batch)
+                .sums[item.batch.content_index]
             )
-        statistics = expect_statistics(result)
-        assert statistics.state_counts.shape == (2, 4)
-        np.testing.assert_array_equal(
-            statistics.state_counts.sum(axis=-1), [20000, 20000]
-        )
-        facts = source.model_facts(snapshot())
-        expected_joint = facts.source.initial_density.diagonal().real[:, None] * np.eye(
-            2
-        )
-        np.testing.assert_allclose(
-            statistics.state_counts.reshape(2, 2, 2) / acquire.reps,
-            np.broadcast_to(expected_joint, (2, 2, 2)),
-            atol=0.01,
-        )
-        assert statistics.channels[0].sums.shape[-2] == 2
-        assert statistics.channels[1].sums.shape[-2] == 1
-        assert source.evaluations[0].projection_outcomes == (2, 2)
+            distances = np.linalg.norm(
+                shots[item.channel][..., None, :] - centres[None], axis=-1
+            )
+            labels[item.channel] = distances.argmin(axis=-1)
+        both = labels[4]
+        assert set(np.unique(both[..., 0])) == {0, 1}
+        np.testing.assert_array_equal(both[..., 0] + both[..., 1], 1)
+        np.testing.assert_array_equal(both[..., 1:], labels[1])
     finally:
         source.close()
 
 
 @pytest.mark.parametrize("floor", [0.0, 0.9])
-def test_projection_floor_keeps_zero_weight_histories_or_names_empty_point(floor):
+def test_projection_floor_preserves_reps_even_if_every_row_is_identity(floor):
     template, readout = herald_template()
     numeric = settings().with_telemetry(enabled=False)
     numeric = numeric.model_copy(
@@ -378,20 +539,20 @@ def test_projection_floor_keeps_zero_weight_histories_or_names_empty_point(floor
     )
     try:
         session = source.open_acquire(request(templates=(template,)))
-        if floor:
-            with pytest.raises(ValueError, match=r"point 0.*floor.*0.9"):
-                session.sample_round(snapshot(), 0)
-        else:
-            statistics = expect_statistics(session.sample_round(snapshot(), 0))
-            assert statistics.state_counts.shape == (2, 4)
-            assert source.evaluations[0].projection_outcomes == (2, 2)
-            assert source.evaluations[0].projection_pruned_weight == (0.0, 0.0)
+        statistics = expect_statistics(session.sample_round(snapshot(), 0))
+        np.testing.assert_array_equal(statistics.state_counts.sum(axis=-1), 3)
+        assert source.evaluations[0].projection_continued_states == (
+            ((0,), (0,)) if floor else ((2,), (2,))
+        )
+        assert source.evaluations[0].projection_identity_weight == (
+            ((1.0,), (1.0,)) if floor else ((0.0,), (0.0,))
+        )
     finally:
         source.close()
 
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
-def test_unobserved_terminal_still_evolves_and_keeps_joint_final_state(mode):
+def test_unobserved_terminal_still_evolves_without_adding_an_adc_column(mode):
     base, readout = herald_template()
     first = base.readouts[0]
     first = replace(
@@ -411,21 +572,30 @@ def test_unobserved_terminal_still_evolves_and_keeps_joint_final_state(mode):
         DeviceManager(),
         soccfg=profile_soccfg("ftf"),
         readout=readout,
-        engine=EngineDouble(),
+        engine=FlipAtTerminal(),
     )
     try:
         result = source.open_acquire(request(mode, templates=(base,))).sample_round(
             snapshot(), 0
         )
         if mode == "integrated":
-            statistics = expect_statistics(result)
-            assert statistics.state_counts.shape == (2, 4)
-            assert statistics.channels[0].sums.shape == (2, 1, 2)
+            if not isinstance(result, IntegratedRound) or not isinstance(
+                result.raw, adc.ADCRawShots
+            ):
+                raise AssertionError(
+                    "integrated FTF must return ADC statistics and raw"
+                )
+            chain = result.raw.prepared.readout
+            assert isinstance(chain, adc.ProjectionChain)
+            (terminal,) = chain.transitions
+            np.testing.assert_array_equal(terminal, np.tile(np.eye(2)[::-1], (2, 1, 1)))
+            assert not dict(result.raw.prepared.batches)[4].events[0][1].grids
+            assert result.statistics.channels[0].sums.shape == (2, 1, 2)
         else:
             if not isinstance(result, RoundSignals):
                 raise AssertionError("decimated round must return traces")
             assert result.channels[0].iq.shape == (6, 1, 4, 2)
-        assert source.evaluations[0].projection_outcomes == (2, 2)
+        assert source.evaluations[0].projection_continued_states == ((2,), (2,))
     finally:
         source.close()
 
@@ -518,7 +688,7 @@ def test_terminal_only_runtime_hands_given_density_order_and_seed_to_adc(mode):
         source.close()
 
 
-def test_configured_floor_prunes_and_redistributes_thermal_outcome_weight():
+def test_configured_floor_keeps_low_weight_state_instead_of_redistributing_it():
     template, readout = herald_template()
     numeric = settings().with_telemetry(enabled=False)
     numeric = numeric.model_copy(
@@ -534,20 +704,32 @@ def test_configured_floor_prunes_and_redistributes_thermal_outcome_weight():
         DeviceManager(),
         soccfg=profile_soccfg("ftf"),
         readout=readout,
-        engine=EngineDouble(),
+        engine=FlipAtTerminal(),
     )
     try:
         initial = source.model_facts(snapshot()).source.initial_density.diagonal().real
         result = source.open_acquire(
             replace(request(templates=(template,)), reps=100)
         ).sample_round(snapshot(), 0)
-        statistics = expect_statistics(result)
-        assert statistics.state_counts.shape == (2, 2)
-        assert source.evaluations[0].projection_outcomes == (1, 1)
+        if not isinstance(result, IntegratedRound) or not isinstance(
+            result.raw, adc.ADCRawShots
+        ):
+            raise AssertionError("integrated FTF must return ADC statistics and raw")
+        chain = result.raw.prepared.readout
+        assert isinstance(chain, adc.ProjectionChain)
+        (terminal,) = chain.transitions
+        np.testing.assert_allclose(chain.initial, np.tile(initial, (2, 1)))
+        # The adopted ground row flips, the skipped excited row stays excited.
+        np.testing.assert_array_equal(terminal, np.tile([[[0, 1], [0, 1]]], (2, 1, 1)))
+        assert source.evaluations[0].projection_continued_states == ((1,), (1,))
         np.testing.assert_allclose(
-            source.evaluations[0].projection_pruned_weight, initial[1], atol=1e-10
+            source.evaluations[0].projection_identity_weight,
+            [[initial[1]], [initial[1]]],
+            atol=1e-10,
         )
-        np.testing.assert_array_equal(statistics.state_counts.sum(axis=-1), [100, 100])
+        np.testing.assert_array_equal(
+            result.statistics.state_counts.sum(axis=-1), [100, 100]
+        )
     finally:
         source.close()
 
@@ -621,14 +803,18 @@ def test_two_projections_preserve_both_herald_states_in_conditional_statistics()
             snapshot(), 0
         )
         statistics = expect_statistics(result)
-        assert source.evaluations[0].projection_outcomes == (4, 4)
-        sums = statistics.channels[0].conditional_sums.reshape(2, 3, 4, 2, 2)
-        # Histories are 00,01,10,11; the final state is a separate joint axis.
-        np.testing.assert_array_equal(sums[:, 0, 0], sums[:, 0, 1])
-        np.testing.assert_array_equal(sums[:, 0, 2], sums[:, 0, 3])
-        np.testing.assert_array_equal(sums[:, 1, 0], sums[:, 1, 2])
-        np.testing.assert_array_equal(sums[:, 1, 1], sums[:, 1, 3])
-        assert np.max(np.abs(sums[:, 0, 0] - sums[:, 0, 2])) > 1e-5
-        assert np.max(np.abs(sums[:, 1, 0] - sums[:, 1, 1])) > 1e-5
+        report = source.evaluations[0]
+        assert report.projection_continued_states == ((2, 2), (2, 2))
+        assert {
+            span.event_index
+            for span in report.projective_spans
+            if span.event_index is not None
+        } == {0, 1}
+        assert all(len(span.nodes) <= 2 for span in report.projective_spans)
+        sums = statistics.channels[0].conditional_sums
+        assert sums.shape[:2] == (2, 3)
+        # Both herald events still have distinguishable state-conditioned means.
+        for event in (0, 1):
+            assert np.max(np.ptp(sums[:, event], axis=1)) > 1e-5
     finally:
         source.close()
