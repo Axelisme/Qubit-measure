@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-21, backend cancellation with no completed rounds
+**Last updated:** 2026-11-21, interrupted rounds and early-stop ownership
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -527,11 +527,12 @@ before overwriting the active call. `finally` releases call-owned buffers and
 admission on normal return or exception. In both modes, the SoC holds the
 acquire's Stop query until it releases the request. `RoundRequest.cancel`
 passes it to the backend for cooperative checks, with no fixed Stop latency.
-If the backend raises `Cancelled`, acquisition discards the interrupted round
-without setting or requiring the caller's Stop flag. QICK averages completed
-rounds; only those rounds reach the round hook. If none completed, acquisition
-raises `StoppedPartialAcquireError` without attempting an average. Decimated
-acquisition retains the trace when Stop interrupts only pacing. Warmup and
+If the backend raises `Cancelled`, the simulation mixin reports the interrupted
+round to [`EarlyStopMixin`](../../README.md#summed-acquisition) without setting or
+requiring the caller's Stop flag. `EarlyStopMixin` discards the interrupted round
+and raises `StoppedPartialAcquireError` at finalization if no round completed.
+Otherwise QICK averages completed rounds; only those rounds reach the round hook.
+Decimated acquisition retains the trace when Stop interrupts only pacing. Warmup and
 hardware acquisition are unchanged. ADC work and pacing sleeps remain synchronous.
 
 Only `SimulationProvenance.identifier` is copied to public Run metadata as optional
