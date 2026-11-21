@@ -45,4 +45,14 @@ If you need to repeat Lookback, keep the ADC window early instead. Start it abou
 
 ## Run from the recipe
 
-`lookback` uses the same acquisition and Analyze settings. The `target` selects the qubit, whose resonator supplies the initial Readout. `readout_ref` selects a module. Omit it to keep the current selection. The recipe input schema accepts `null`, but applying it tries to disable Readout. Lookback requires Readout and rejects that edit before acquisition. The remaining inputs identify their Run or Analyze fields in the recipe schema. Omitting a field retains its current value. Passing `null` does not reset a required field. Overrides run after the named Run inputs. The recipe checks the form before running, asks before writeback, and saves the acquired trace even if analysis fails.
+The recipe opens a new Lookback tab unless `reuse_tab_id` names an idle Lookback tab. Omitting `reuse_tab_id` or passing `null` opens a new tab. The recipe applies Defaults in either case. Use `target` to select the qubit and its resonator for those defaults. Omit it or pass `null` to use the current session aliases.
+
+The recipe applies `readout_ref` first to select a Readout module. Omit it to keep the selection from Defaults. The input schema accepts `readout_ref: null`, but the required Readout selector rejects the attempt to disable it before acquisition.
+
+`frequency_mhz` sets **Frequency** in MHz, `readout_length_us` sets **RO length** in µs, and `trigger_offset_us` sets **Trig offset** in µs. If you supply any of these three inputs, even as `null`, the recipe first copies the selected library Readout into the tab as Inline, then applies the supplied field edits. If Readout is already Inline, the recipe edits it in place. Neither edit writes back to the library module. Omit all three to leave the selected source unchanged.
+
+`rounds` sets **Averaging rounds**. Omit any of the four Run value inputs to keep its field value. A `null` leaves that required field invalid, rather than restoring its default. The recipe applies `overrides` in order after the named Run edits. If a required value is still missing, the Form check stops the recipe before acquisition. Omit `overrides` for no additional edits. An explicit `overrides: null` fails input validation before a tab opens.
+
+After Run, the recipe applies `ratio`, `smooth`, and `plot_fit` to **Arrival threshold / peak**, **Gaussian smoothing width**, and **Show arrival markers**, respectively. Omit an input to keep its current Analyze value. The recipe schema accepts `null` for these inputs, but Analyze rejects it when validating the settings after Run and before analysis starts. Null does not turn off smoothing or markers. Set `plot_fit` to `false` to hide the markers.
+
+When Analyze rejects an input, the recipe does not produce an arrival estimate or ask for writeback. It still attempts Save for the completed Run. Check the Run's Save report for the raw data outcome. You can correct the settings and Analyze the existing Run, or load the saved Run and Analyze it, without acquiring it again. When analysis succeeds, the recipe asks before writing the estimate to the resonator.

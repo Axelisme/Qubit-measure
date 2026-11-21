@@ -18,7 +18,7 @@ from zcu_lab.v2.lookback.gui import LookbackSummary
 
 
 class LookbackInputs(RecipeInputs):
-    """Inputs for lookback; all units and null policies are declared per field."""
+    """Lookback Run and Analyze inputs; see the guide for null handling."""
 
     target: SingleTarget = Field(
         default_factory=lambda: KEEP,
@@ -28,19 +28,19 @@ class LookbackInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Select a Readout module. Omit to keep it. The schema allows null; required Readout rejects it.",
+        description="Select a Readout module first. Omit to keep it. Schema allows null; required Readout rejects it.",
     )
     frequency_mhz: float | None | Keep = Field(
         KEEP,
-        description="Set Readout › Frequency (MHz), the shared RF drive and demodulation frequency.",
+        description="Readout › Frequency (MHz). Copies a library Readout to Inline before editing; no library writeback.",
     )
     readout_length_us: float | None | Keep = Field(
         KEEP,
-        description="Set Readout › RO length (µs), the ADC capture duration.",
+        description="Readout › RO length (µs). Copies a library Readout to Inline before editing; no library writeback.",
     )
     trigger_offset_us: float | None | Keep = Field(
         KEEP,
-        description="Set Readout › Trig offset (µs), the ADC window start relative to readout start.",
+        description="Readout › Trig offset (µs). Copies a library Readout to Inline before editing; no library writeback.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
@@ -49,15 +49,15 @@ class LookbackInputs(RecipeInputs):
 
     ratio: float | None | Keep = Field(
         KEEP,
-        description="Set Analyze › Arrival threshold / peak (a.u.), a fraction of the peak used to find the rising edge.",
+        description="Set Analyze › Arrival threshold / peak (a.u.). Omit to keep it; Analyze rejects null.",
     )
     smooth: float | None | Keep = Field(
         KEEP,
-        description="Set Analyze › Gaussian smoothing width (samples), the Gaussian sigma applied to I and Q.",
+        description="Set Analyze › Gaussian smoothing width (samples). Omit to keep it; Analyze rejects null.",
     )
     plot_fit: bool | None | Keep = Field(
         KEEP,
-        description="Set Analyze › Show arrival markers. This changes the display, not the arrival estimate.",
+        description="Set Analyze › Show arrival markers only. Omit to keep it; Analyze rejects null.",
     )
 
 
@@ -71,18 +71,19 @@ class LookbackReport(RecipeReport):
 
 @recipe(
     "lookback",
-    description="Capture the time-resolved ADC readout trace, estimate its arrival, ask before saving that time to the resonator, and save the run.",
+    description="Capture the ADC trace and estimate arrival. Analyze rejects null after Run, before analysis starts. The recipe still attempts to save the trace. Confirm before writing arrival to the resonator.",
 )
 async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackReport:
     """Capture the readout pulse's arrival and ADC time envelope.
 
     Read out at a fixed frequency without reset or initialization pulses.
     Analyze estimates readout arrival from the rising magnitude envelope.
-    Ask before applying the timing proposal, then save raw trace and analysis.
+    Ask before applying any timing proposal. After Run, attempt Save even if
+    Analyze rejects its inputs.
 
-    No n → expts input: acquisition uses the readout duration and rounds.
-    Analysis controls: ratio, smooth, plot_fit. Omission retains each analysis value; null is passed to its owner.
-    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
+    Named Readout field edits copy the selected library Readout to Inline first.
+    Omit Analyze inputs to retain their values. Analyze validates and rejects
+    null updates after Run and before starting analysis.
     """
     tab = session.open_tab(
         "lookback",
