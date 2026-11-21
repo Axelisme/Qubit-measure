@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-11-22，Analyze 摘要
+**Last updated:** 2026-11-22，Workflow operation wire 與 Analyze 摘要
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -72,8 +72,12 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 Workflow records project executor operation identity, timing, outcome, reason,
 stopped state and caller-supplied name. Device snapshots are in
 `RunRecord.metadata["device_snapshot"]`, not on the operation wire.
-Program acquisition observations are not part of this projection. This wire-contract change advances
-`WIRE_VERSION` to 125 and `GUI_VERSION` to 158 under the rule in `wire_version.py`.
+See [ADR-0062](../../../../../../docs/adr/0062-experiment-workflow.md#一個-run-的-operation) for the workflow operation contract.
+The operation wire carries neither [Analyze summary lines](#analysis-presentation)
+nor program acquisition observations. The runtime logs data-driven early stops
+as described in [Stop and Retry](../../../../experiment/v2/runtime/README.md#stop-與-retry).
+The change that removed acquisition observations advanced `WIRE_VERSION` to 125
+and `GUI_VERSION` to 158 under the rule in `wire_version.py`.
 
 ## Saved results
 
@@ -224,7 +228,11 @@ include `presentation: {run_id, stage, figure_names, figures_replaced}`.
 A completed Primary analysis also includes `presentation.summary_lines` when the
 adapter authored lines for that source Run/Load. The GUI Analysis pane shows
 these same plain-text lines in order. If no lines apply, the key is omitted.
-The text is not part of the native result `summary` or `RunMetadata`.
+The text is not part of the native result `summary`, `RunMetadata`, or the
+[workflow operation wire](#workflow-operation-facts). The [GUI service owner](../README.md#owners)
+shares these lines with MCP. [ADR-0069 presentation rules](../../../../../../docs/adr/0069-experiment-core-and-frontends.md#呈現規範)
+and [figure-style R10](../../../../../../zcu_lab/v2/figure-style.md#r10圖放理論重點採集設定放摘要)
+define what goes in the visible Analyze summary.
 Run identity comes from the selected Run/Load metadata, not the live point or
 Save receipt. Missing metadata yields null. Stage is primary or post.
 Figure names are the native names in that pane's current collection.

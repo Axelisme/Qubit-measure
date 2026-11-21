@@ -65,6 +65,8 @@ Workflow host 只有在 Engine 成功 publication 後才接受 input／base。�
 
 Complete、Stop 或 failure 只有一個終局入口。根 Stop 請求合作停止；進行中的 fn 正常返回時先保留 completion facts，再由 host 拋 ScriptCancelled，真正的 fn／hook／cleanup 錯誤優先傳播。下一個 call／ask 也拋 ScriptCancelled，不回 None，不向作者 task 注入 asyncio.CancelledError。子層取消與 operation 自己的 stopped 位元見 [[0075]]。宿主等待原 worker 的 finally、executor drain 與 owner delivery；同步 startup failure 也由同一 owner 收尾。清理完成前不能 replacement Start。終局完成才 settle handle、清理 progress 與釋放 lease，清理失敗遵守 [[0066]] 的 best-effort 規則，不承諾跨 State、channel、檔案與硬體的原子交易。
 
+[Workflow operation wire](../../lib/zcu_tools/gui/app/measure/remote/README.md#workflow-operation-facts) 投影 executor 的 operation facts，不帶 program acquisition observations 或 [ADR-0069 的 Analyze 呈現摘要](0069-experiment-core-and-frontends.md#呈現規範)。
+
 本程序 RUN lease 在 Ask waiting 期間仍保留。它不仲裁其他 GUI process 的儀器操作。Measure-gui 在另一 process 執行實驗，不代表 workflows 的 cache 已刷新，也不保證儀器保持某個值。
 
 ## 裝置讀回

@@ -134,7 +134,7 @@ y 軸與色階預設依資料範圍自動縮放。跨圖比較才用固定尺度
 
 圖上放物理量、模型、擬合結果與判讀所需的標註。不要把 run 身分或採集設定印在圖上。存檔路徑已有實驗名與 run id。除了定位 run 的實驗名與 run id，GUI 與 MCP 的可見 Analyze 摘要只由 adapter 補上該次 cfg 的 Reps×Rounds，以及實驗已回傳的實際施加值，例如 detune。不列完成輪數、是否提前停或 shot 數。liveplot 的進度仍按 R8 顯示。
 
-Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summary`，也不擴充 `RunMetadata`。各實驗依需要決定是否在 Result 保存實際施加值。MCP 的 Analyze 回覆沿用 [RPC handler 提供的 `presentation`](../../lib/zcu_tools/gui/app/measure/remote/handlers/analysis.py)，獨立傳遞來源 run id。原生結果欄位的命名見 [S2](#s2report-的數值沿用-analyze-摘要名稱)。
+Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summary`，也不擴充 `RunMetadata`。各實驗依需要決定是否在 Result 保存實際施加值。MCP 的 Analyze 回覆沿用 [RPC handler 提供的 `presentation`](../../lib/zcu_tools/gui/app/measure/remote/handlers/analysis.py)，獨立傳遞來源 run id。GUI 與 MCP 共用的摘要讀取契約見 [Analysis presentation](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation)。原生結果欄位的命名見 [S2](#s2report-的數值沿用-analyze-摘要名稱)。
 
 - 壞例：Ramsey 圖標題塞了 run id 和初始設定，摘要卻只重複表單初值，沒寫實驗回傳的實際 detune。
 - 好例（本地改寫示例）：圖上只保留判讀條紋和 T2* 需要的量與標註。同次 Analyze 摘要在實驗名與 run id 旁列「Reps×Rounds 1000×10；實際 detune 0.400 MHz」。Ding 圖 5-9(e)（頁 152）的相位圖集中在判讀所需的 180° 參考線與候選頻率。
