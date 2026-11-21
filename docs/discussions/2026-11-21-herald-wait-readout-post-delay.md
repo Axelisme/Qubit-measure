@@ -12,6 +12,7 @@ related:
   - docs/adr/0083-program-macros-and-timelines.md
   - docs/discussions/2026-11-20-herald-reset-shot-masks.md
   - docs/discussions/2026-10-30-readout-optimization-metrics.md
+  - docs/discussions/2026-11-21-readout-timing-defaults.md
 basis:
   - "repo@666eb48ac：調查時的 main"
   - "FTF conditional phase 與 joint readout 的模擬紀錄、離線編譯與調查報告未入庫，必要數字與判讀寫在正文"
@@ -77,3 +78,7 @@ D 與 G 都能和 N 並用，沒有納入本次。D 可參考 onetone 從線寬�
 ## 依據
 
 調查以 `666eb48ac` 的程式與文件為準。共用設定的契約見 [ADR-0074](../adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)，起算點見 [ADR-0083](../adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)。FTF 模擬 run、離線編譯記錄與調查報告未入庫；上文已記下用來比較選項的數字與限制。
+
+## 後記（2026-11-21）
+
+Herald 與 terminal 仍共用 `post_delay`。Mux Open／Reset 在可用線寬時用 `5/(2π·κ)` 給種子，不再一律從 0 µs 起步。保留原值與缺線寬的規則見[讀出時序預設](2026-11-21-readout-timing-defaults.md)。

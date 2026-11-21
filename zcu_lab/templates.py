@@ -28,10 +28,15 @@ _QUBIT_CH = Expr("{qubit}.wiring.ch")
 _RESONATOR_FREQ = Expr("{resonator}.freq")
 _RESONATOR_CH = Expr("{resonator}.wiring.ch")
 _RESONATOR_RO_CH = Expr("{resonator}.wiring.ro_ch")
-_TIME_OF_FLIGHT_PLUS_005_US = Expr("{resonator}.time_of_fly + 0.05")
 
-# Initial pulse duration in us for the readout template and single-tone RO windows.
+# Time the pulse covers on each side of the ADC window.
+_READOUT_WINDOW_EDGE_MARGIN_US = 0.015
+READOUT_LENGTH_MARGIN_US = 2 * _READOUT_WINDOW_EDGE_MARGIN_US
 READOUT_PULSE_LENGTH_US = 1.0
+READOUT_ADC_WINDOW_US = READOUT_PULSE_LENGTH_US - READOUT_LENGTH_MARGIN_US
+_READOUT_TRIGGER_OFFSET = Expr(
+    f"{{resonator}}.time_of_fly + {_READOUT_WINDOW_EDGE_MARGIN_US}"
+)
 
 
 def pulse(
@@ -71,8 +76,8 @@ def ro(
     freq: TemplateSeed = _RESONATOR_FREQ,
     gen_ch: TemplateSeed = _RESONATOR_CH,
     ro_ch: TemplateSeed = _RESONATOR_RO_CH,
-    ro_length: TemplateSeed = 0.9,
-    trig_offset: TemplateSeed = _TIME_OF_FLIGHT_PLUS_005_US,
+    ro_length: TemplateSeed = READOUT_ADC_WINDOW_US,
+    trig_offset: TemplateSeed = _READOUT_TRIGGER_OFFSET,
     at: str = "",
 ) -> dict[str, TemplateSeed]:
     """Return partial flat readout seeds beneath the optional dotted path ``at``.
@@ -80,8 +85,9 @@ def ro(
     ``freq`` is the shared generator/ADC frequency in MHz. ``gen_ch`` and
     ``ro_ch`` select generator and ADC channels. ``ro_length`` and
     ``trig_offset`` are us. Waveform, gain and Nyquist zone remain caller-owned.
-    The default trigger offset is the resonator time
-    of flight plus 0.05 us; missing calibration remains Invalid in the consumer.
+    The default ADC window is 0.97 us. The default trigger offset is the
+    resonator time of flight plus 0.015 us; missing calibration remains Invalid
+    in the consumer.
     Expr seeds evaluate only in the consuming Form. Ordinary strings are literal;
     TemplateDef validates and expands ``{qubit}`` and ``{resonator}`` placeholders.
     This helper does not evaluate or read a library. The consuming catalog checks
@@ -134,7 +140,9 @@ TEMPLATES: dict[str, TemplateDef] = {
             "nqz": 2,
             "gain": Expr("{qubit}.ext.best_ro_gain"),
             "waveform.style": "const",
-            "waveform.length": Expr("{qubit}.ext.best_ro_length + 0.1"),
+            "waveform.length": Expr(
+                f"{{qubit}}.ext.best_ro_length + {READOUT_LENGTH_MARGIN_US}"
+            ),
         },
         default_name="readout_dpm",
     ),
