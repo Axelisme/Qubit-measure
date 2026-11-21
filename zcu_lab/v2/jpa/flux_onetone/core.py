@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.artist import Artist
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.support import live_heatmap, live_line
@@ -99,6 +102,64 @@ class OneToneFluxCfg(ConfigBase):
     ]
 
 
+def _survey_plot(
+    plots: Plots,
+    fluxes: NDArray[np.float64],
+    freqs: NDArray[np.float64],
+    *,
+    show_progress: bool,
+) -> tuple[Figure, Callable[[NDArray[np.complex128]], Iterable[Artist]]]:
+    """Set up the bias map and five adjacent spectra for Run and Analyze."""
+    fig, _ = plots.subplots(2, 1, num="measurement", figsize=(7, 7))
+    heat_ax, line_ax = fig.axes
+    title = "JPA bias survey · readout resonator · reflection"
+    fig.suptitle(title)
+    heat_ax.set(
+        xlabel="JPA flux-bias value (a.u.)", ylabel="Readout RF frequency (MHz)"
+    )
+    heat_ax.ticklabel_format(axis="y", style="plain", useOffset=False)
+    heat_ax.grid(False)
+    line_ax.set(
+        title="Latest bias spectra",
+        xlabel="Readout RF frequency (MHz)",
+        ylabel="Magnitude of mean IQ (a.u.)",
+    )
+    line_ax.ticklabel_format(axis="x", style="plain", useOffset=False)
+    heatmap = live_heatmap(heat_ax, uniform=True)
+    fig.colorbar(heat_ax.images[0], ax=heat_ax, label="Magnitude of mean IQ (a.u.)")
+    lines = live_line(line_ax, num_lines=5)
+    for artist in line_ax.lines[:-1]:
+        artist.set(marker="None", alpha=0.3, color="red")
+    line_ax.lines[0].set_label("Previous biases")
+    line_ax.lines[-1].set(label="Latest bias", marker=".", color="C0")
+    line_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.20), ncols=2)
+
+    def draw(data: NDArray[np.complex128]) -> Iterable[Artist]:
+        real = np.abs(data)
+        valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+        current = int(valid[-1]) if valid.size else -1
+        history = np.full((5, len(freqs)), np.nan)
+        for offset in range(min(5, current + 1)):
+            history[-offset - 1] = real[current - offset]
+        artists: list[Artist] = [
+            *heatmap.set(fluxes, freqs, real),
+            *lines.set(freqs, history),
+        ]
+        if current >= 0:
+            artists.append(
+                line_ax.set_title(f"Latest bias: {fluxes[current]:.6g} a.u.")
+            )
+        if show_progress:
+            artists.append(
+                fig.suptitle(
+                    f"{title}\n{len(valid)}/{len(fluxes)} bias spectra sampled"
+                )
+            )
+        return artists
+
+    return fig, draw
+
+
 class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
     # Axes are declared inner-first (ADR-0063): inner (fastest-varying) axis is
     # freqs (stored as Hz on disk, MHz in memory); outer axis is jpa flux (a.u.).
@@ -140,48 +201,8 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
             allow_array=True,
         )
 
-        fig, _ = context.plots.subplots(2, 1, num="measurement", figsize=(7, 7))
-        heat_ax, line_ax = fig.axes
-        title = "JPA bias survey · readout resonator · reflection"
-        fig.suptitle(title)
-        unit = "a.u." if cfg.flux_unit == "native" else cfg.flux_unit
-        heat_ax.set(
-            xlabel=f"JPA flux-bias value ({unit})", ylabel="Readout RF frequency (MHz)"
-        )
-        heat_ax.ticklabel_format(axis="y", style="plain", useOffset=False)
-        heat_ax.grid(False)
-        line_ax.set(
-            title="Latest bias spectrum",
-            xlabel="Readout RF frequency (MHz)",
-            ylabel="Magnitude of mean IQ (a.u.)",
-        )
-        line_ax.ticklabel_format(axis="x", style="plain", useOffset=False)
-        heatmap = live_heatmap(heat_ax, uniform=True)
-        fig.colorbar(heat_ax.images[0], ax=heat_ax, label="Magnitude of mean IQ (a.u.)")
-        line = live_line(line_ax)
-        line_ax.lines[0].set(marker="o", markersize=4, color="C0")
-
-        @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
-            """Draw acquired complex IQ on the measurement axes; return changed artists.
-
-            Read the scan-shaped data without changing it. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            real = np.abs(data)
-            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
-            progress = fig.suptitle(
-                f"{title}\n{len(valid)}/{len(jpa_fluxs)} bias spectra sampled"
-            )
-            image = heatmap.set(jpa_fluxs, freqs, real)
-            if not valid.size:
-                return (*image, progress)
-            current = int(valid[-1])
-            spectrum = line_ax.set_title(
-                f"Latest bias spectrum: {jpa_fluxs[current]:.6g} {unit}"
-            )
-            return (*image, *line.set(freqs, real[current]), progress, spectrum)
-
+        fig, draw = _survey_plot(context.plots, jpa_fluxs, freqs, show_progress=True)
+        update = context.plots.on_plot_thread(draw)
         fig.show()
         signals_buffer = SignalBuffer(
             (len(jpa_fluxs), len(freqs)),
@@ -215,3 +236,22 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
         signals = signals_buffer.array
 
         return OneToneFluxResult(fluxes=jpa_fluxs, freqs=freqs, signals=signals)
+
+    def analyze(
+        self,
+        source: RunRecord[OneToneFluxCfg, OneToneFluxResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> None:
+        """Redraw the source's bias map and recent spectra in the named measurement figure.
+
+        Accept a Run or Load record, even without cfg. Use its device-native
+        bias values (a.u.), readout MHz and mean IQ, leaving NaN gaps intact.
+        Pass None for options. Register the figure without showing it, return
+        None without fitting or selecting a bias, and propagate plotting errors.
+        """
+        del options
+        result = source.result
+        _, draw = _survey_plot(plots, result.fluxes, result.freqs, show_progress=False)
+        draw(result.signals)

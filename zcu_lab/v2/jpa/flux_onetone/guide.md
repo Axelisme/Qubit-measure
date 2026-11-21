@@ -15,6 +15,10 @@ Choose the resonator and JPA aliases at the current point, then choose **Default
 
 ## Read the plots
 
-The map shows the magnitude of mean complex IQ as color (a.u.). It shows reflected signal, not state population, calibrated gain or g/e separation. The color scale follows measured data; blank columns show bias settings not yet sampled. Live reports how many bias spectra have data. The lower panel shows the latest bias spectrum to locate a dip or peak without estimating its position from color alone.
+After **Run** or a successful **Load**, choose **Analyze** to redraw that result. Load alone does not open a plot. The summary lists the source's **Reps × Rounds** if its saved settings can be read. Older results without readable settings still plot.
 
-Trace a repeatable feature across the map. If it runs into a frequency boundary, widen the window toward the edge. To refine an interior feature, set the next bounds to the surrounding bias and frequency samples. There is no automatic bias selection. This spectral survey does not show pointwise shot-SEM bars. Confirm a candidate on a separate g/e separation scan before treating it as a readout optimum.
+The map colors the magnitude of mean complex IQ (a.u.). It shows reflected signal, not state population, calibrated gain or g/e separation. The bias axis shows the recorded device values in native coordinates (a.u.); the form's A/V/native choice controls the source and does not rescale or relabel the plot. The color scale follows the measured data. Blank cells are missing samples, not zeros. The live title counts bias spectra with data.
+
+The lower panel shows the latest sampled bias spectrum in blue. The four preceding bias positions appear in faint red where data exist. Use these cuts to locate a dip or peak without estimating its position from color alone.
+
+Trace a repeatable feature across the map. If it runs into a frequency boundary, widen the window toward the edge. To refine an interior feature, set the next bounds to the surrounding bias and frequency samples. Analyze does not fit or select a bias, and it does not write back settings. You decide which bias to check next. This spectral survey does not show pointwise shot-SEM bars. Confirm a candidate on a separate g/e separation scan before treating it as a readout optimum.
