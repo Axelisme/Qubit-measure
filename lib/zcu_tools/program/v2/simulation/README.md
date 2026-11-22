@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-22, unentered acquire timings
+**Last updated:** 2026-11-23, deferred raw shots and plan lifetime
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -371,6 +371,10 @@ deliver an independent `RawShots` source with retained noiseless inputs and a lo
 round identity. A joint IQ distribution across reads uses I/Q values paired by
 shot index from `RawShots`, not the compact counts or per-read sums.
 Requesting shots calls that source without rerunning evolution or the backend.
+For ADC-backed rounds, retaining the round inputs does not keep the acquire-local
+plan memo active. A getter that needs raw shots can rebuild the plan after the
+memo retires. See [ADC integrated raw shots](../../../simulate/adc/README.md#integrated-raw-shots)
+for the sampling contract and plan lifetime.
 Raw ADC values remain int64, and round indices select distinct sampling streams.
 See [FTF compact statistics](../../../simulators/ftf/environment/README.md#compact-statistics)
 for the environment's output and [ADC integrated chain statistics](../../../simulate/adc/README.md#integrated-chain-statistics)
