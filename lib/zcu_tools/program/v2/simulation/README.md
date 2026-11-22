@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-22, backend acquire cleanup
+**Last updated:** 2026-11-21, required raw shots and integrated round publication
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -17,7 +17,7 @@ integer sequence. Reentry or concurrent entry raises before consuming a sequence
 `SimulationBinding` optionally accepts `SimulationCallbacks(wait_ready=callback)`.
 Admission calls readiness, then `on_begin`, before consuming the sequence or
 constructing a request. Either failure releases admission and propagates without
-calling `on_cleanup` or `on_end`; the environment callback owns any optional startup-compilation fallback. External timers must wait at the environment's
+calling `on_end`; the environment callback owns any optional startup-compilation fallback. External timers must wait at the environment's
 ready interface before starting if startup time should be excluded.
 `SimulationBinding(..., timing=SimulationTiming(time_scale=0.0))` optionally paces each round to
 `time_scale × program.request_round_time_s(request)` seconds. That owner sums
@@ -42,7 +42,7 @@ the target when numeric work dominates.
 `SimulationBinding(..., callbacks=SimulationCallbacks(on_end=callback))` optionally observes each admitted
 acquire after all software rounds, including partial or failed acquisitions.
 The callback receives one frozen `AcquireOutcome`. Its `rounds` tuple contains
-captured inputs in execution order, including a failed round's input. `wall_s` includes pacing and cleanup, but excludes
+captured inputs in execution order, including a failed round's input. `wall_s` includes pacing and mixin cleanup, but excludes
 readiness, `on_begin` and observer work. The mixin wraps only
 `build_compiled_request` in `binding.compiling()`; its elapsed seconds accumulate
 in `compile_wall_s` even if construction raises. Installation and execution do
@@ -59,11 +59,8 @@ both paths without counting mask or result construction. Program has no
 knowledge of the telemetry writer or file format. Both callbacks use the same
 warning policy.
 
-The acquire body releases the installed request. The binding clears its active
-marker before calling the optional `SimulationCallbacks(on_cleanup=callback)`. This no-argument
-callback releases backend resources after every admitted acquire, including Stop
-and errors, without enabling stage clocks. Cleanup errors propagate.
-The binding sets `complete=True` only when the body and cleanup return normally. A Stop that returns
+The binding's acquire body includes request release and active-marker cleanup.
+It sets `complete=True` only when that body returns normally. A Stop that returns
 partial results is true; zero completed rounds that raise
 `StoppedPartialAcquireError` are false. This field does not certify that every
 requested round ran. An outer exception handler does not affect the result.

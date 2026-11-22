@@ -1255,6 +1255,15 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
                 preparation.wait_ready()
             coordinator.close()
 
+        finish_diagnostics = (
+            coordinator.telemetry is not None or settings.numerics.debug_capture
+        )
+
+        def on_end(outcome: AcquireOutcome) -> None:
+            coordinator.retire_raw_plans()
+            if finish_diagnostics:
+                coordinator.finish_acquire(outcome)
+
         binding = SimulationBinding(
             coordinator.snapshot,
             coordinator.execute,
@@ -1269,10 +1278,7 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
             callbacks=SimulationCallbacks(
                 wait_ready=None if preparation is None else preparation.wait_ready,
                 on_begin=lambda: coordinator.begin_acquire(seed=binding.root_seed),
-                on_cleanup=coordinator.retire_raw_plans,
-                on_end=coordinator.finish_acquire
-                if coordinator.telemetry is not None or settings.numerics.debug_capture
-                else None,
+                on_end=on_end,
                 on_materialize=coordinator.telemetry.write_materialize
                 if coordinator.telemetry is not None
                 else None,

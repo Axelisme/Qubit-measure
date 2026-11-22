@@ -936,6 +936,15 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
             *((settings.flux_line.gen_ch,) if settings.flux_line is not None else ()),
         )
         adc = settings.readout.adc.ro_ch
+        finish_diagnostics = (
+            source.telemetry is not None or settings.numerics.debug_capture
+        )
+
+        def on_end(outcome: AcquireOutcome) -> None:
+            source.retire_raw_plans()
+            if finish_diagnostics:
+                source.finish_acquire(outcome)
+
         binding = SimulationBinding(
             source.snapshot,
             source.execute,
@@ -946,10 +955,7 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
             ),
             callbacks=SimulationCallbacks(
                 on_begin=lambda: source.begin_acquire(seed=binding.root_seed),
-                on_cleanup=source.retire_raw_plans,
-                on_end=source.finish_acquire
-                if source.telemetry is not None or settings.numerics.debug_capture
-                else None,
+                on_end=on_end,
                 on_materialize=source.telemetry.write_materialize
                 if source.telemetry is not None
                 else None,

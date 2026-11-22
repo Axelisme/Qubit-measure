@@ -396,8 +396,10 @@ A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sum
 content mappings, path diagnostics and deferred raw inputs across acquires.
 The acquire session owns the [ADC raw plan memo](../../../simulate/adc/README.md#integrated-raw-shots).
 It retires that memo on batch invalidation, managed acquire exit, matching
-direct finish, a new acquire or close. A preparation cache hit in a new acquire
-starts without a raw plan.
+direct finish, a new acquire or close. The binding's completion callback
+retires the memo even when telemetry and debug capture are both disabled.
+It runs finish diagnostics only if either is enabled. A preparation cache hit
+in a new acquire starts without a raw plan.
 A later acquire can reuse either a pilot round's split preparation or a full-batch
 preparation. Both retain the selected N. A separate 256-entry LRU remembers N for
 that same content after the preparation is evicted. On a preparation miss with a

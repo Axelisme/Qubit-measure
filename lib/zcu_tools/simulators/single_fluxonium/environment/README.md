@@ -269,7 +269,10 @@ through this entry point. Conditional ADC solvers live only for the current
 preparation. The standalone acquire session owns the
 [ADC raw plan memo](../../../simulate/adc/README.md#integrated-raw-shots).
 It retires that memo on batch invalidation, managed acquire exit, matching
-direct finish, a new acquire or close. Six-fluxonium binds without a plan memo.
+direct finish, a new acquire or close. The binding's completion callback
+retires the memo even when telemetry and debug capture are both disabled.
+It runs finish diagnostics only if either is enabled. Six-fluxonium binds
+without a plan memo.
 
 The source retains one loss-independent structural generation and one complete
 noiseless preparation. The structural key excludes q_cap, q_ind, xqp, aphi and
