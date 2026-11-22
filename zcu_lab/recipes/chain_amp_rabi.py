@@ -31,73 +31,75 @@ class ChainAmpRabiInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Set Readout to a library key for the single-tone pulse readout played twice per cycle block.",
+        description="Pulse readout library key. Sources are chosen by the Form.",
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
-        description="Set Drive pulse to a library key; the sweep replaces gain, so π gain need not be calibrated.",
+        description="Drive library key. No pi calibration is required for this sweep.",
     )
     frequency_mhz: float | None | Keep = Field(
         KEEP,
-        description="Set Drive pulse › Frequency (MHz), the fixed RF carrier; the pulse switches to inline editing.",
+        description="Fixed pulse frequency in MHz.",
     )
     pulse_length_us: float | None | Keep = Field(
         KEEP,
-        description="Set Drive pulse › Waveform › Length (µs), the fixed drive duration; switches to inline editing.",
+        description="Fixed drive pulse duration in µs.",
     )
     gain_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
     ) = Field(
         KEEP,
-        description="Set Drive gain › Start and Stop (a.u.), in that order.",
+        description="Two native gain endpoints.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Set Drive gain › Expts (count), the number of sweep points.",
+        description="Sweep sample count.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Set Reps (count), the number of cycles at every sweep point in one round; at least 66.",
+        description="Cycles per gain in each round, at least 66.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Set Rounds (count), the planned number of passes through the sweep.",
+        description="Round count; the live plot updates after each round.",
     )
 
 
 class ChainAmpRabiReport(RecipeReport):
     """Chain Rabi fit and its checks; cancellation returns no report."""
 
-    pi_gain: float | None = Field(description="π gain (a.u.); null if unavailable.")
+    pi_gain: float | None = Field(
+        description="Pi gain from the chain fit in native units; null means not estimable."
+    )
     pi_gain_err: float | None = Field(
-        description="π gain Wald standard error (a.u.); null if unavailable."
+        description="Pi gain uncertainty; null means not estimable."
     )
     frequency_per_gain: float | None = Field(
-        description="Rabi frequency (cycles per gain unit); null if unavailable."
+        description="Rabi frequency in cycles per gain unit; null means not estimable."
     )
     frequency_per_gain_err: float | None = Field(
-        description="Rabi frequency Wald standard error (cycles per gain unit); null if unavailable."
+        description="Rabi frequency uncertainty; null means not estimable."
     )
     reliability: float | None = Field(
-        description="R, the inverse phase uncertainty from the frequency error over the sweep (no threshold); null if unavailable."
+        description="Diagnostic R of the frequency error, no threshold."
     )
     within_point: CycleCheck | None = Field(
         description="Within-point check J, df, p; null without analysis."
     )
     sharing: CycleCheck | None = Field(
-        description="Sharing check J, df, p; null without analysis."
+        description="Sharing check J, df, p null; null without analysis."
     )
     curve: CycleCheck | None = Field(
         description="Curve check J, df, p; null without analysis."
     )
     first_read_pi_gain: float | None = Field(
-        description="First-read π gain (a.u.); null if unavailable."
+        description="Pi gain of the first-read twotone fit; null means not estimable."
     )
 
 
 @recipe(
     "chain_amp_rabi",
-    description="Sweep drive gain in K-cycle amplitude Rabi; use the first-read fit to seed a joint three-state fit, then save without writeback.",
+    description="Run one K-cycle readout-chain gain Rabi, fit all 65 numbers, save sums and analysis.",
 )
 async def chain_amp_rabi(
     session: RecipeSession, inputs: ChainAmpRabiInputs
