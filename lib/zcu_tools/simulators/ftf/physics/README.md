@@ -1,6 +1,6 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-11-21, shared cavity span solve
+**Last updated:** 2026-11-23, readout and evolution model boundaries
 
 **讀者：** framework-dev、agent。固定座標 FTF 數值模型、路由與快取契約。
 
@@ -67,14 +67,19 @@ one tick. Quantized `FluxDynamics` events in the requested window join those
 ticks and zero. Its optional identity remains caller metadata.
 `fixed_numeric_model` supplies a static Hamiltonian and full baths at an explicit
 constant reduced flux, without event metadata. It is not valid for a driven
-flux source or passive tail. Neither record performs evolution. Engine consumes
-`ModelSource` from `model_source`, not `NumericModel`.
+flux source or passive tail. Neither record performs evolution.
 
 `collapse_operators` combines multilevel relaxation with CP flux/residual-photon
 pure dephasing. Slopes/pulls use rad/us in the pure-rate formulas, then rates
 convert to 1/ns. No second T1/2 is added. Flux absolute-distance and photon
 Lorentzian Gram kernels define diagonal Lindblad operators. This models an
 exponential echo characteristic rate, not complete 1/f noise or Floquet baths.
+Resonator thermal occupation enters residual photon dephasing. `_bath_rates`
+uses circuit loss channels and adds no resonator-induced Purcell transition
+rates. `fixed_numeric_model` stores the collapse operators alongside static H
+in a `NumericModel`. That record is not an Engine input. `model_source` wraps
+the `SecularModel` builder in a `ModelSource` for Engine. See the
+[Evolution model contracts](../../../simulate/evolution/README.md#public-entry-points).
 
 `readout_frequencies_ghz` sums parent virtual transitions over the entire retained
 local product space, beyond the M evolution states. It includes counter-rotating
@@ -110,8 +115,6 @@ after that bound is below tolerance. `schedule` rounds midpoint offsets from DC
 to the nearest 1e-3 Phi0 level, ties even, and merges equal adjacent levels.
 Offsets smaller than 5e-4 Phi0 snap to DC. These functions do not propagate a
 density or certify convergence of the fixed-DC projected subspace.
-`readout_model(joint, resonators)` supplies the existing ADC model at DC, with a
-zero reference frequency and neutral receiver for composition to calibrate.
 
 ## Flux-pulse evolution and limits
 
@@ -165,11 +168,18 @@ projective and non-projective continuation. Pass a `CavityAverageCache` as
 `cache` to reuse exact flat span results. Without a cache, `advance` does not
 retain results. ADC owns keys and storage. `CavityDrive` computes Stark shifts
 and dephasing from the moments and selects the endpoint from the current
-populations on each call.
+populations on each call. See [Readout and Floquet paths](#readout-and-floquet-paths)
+for the DC model shared with terminal readout.
 
 ## Readout and Floquet paths
 
-FTF passes readout populations and the DC readout model to `simulate.adc`.
+`readout_model(joint, resonators)` supplies ADC's [ReadoutModel](../../../simulate/adc/README.md#readout-model)
+at DC, with a zero reference frequency and neutral receiver for composition to
+calibrate. Frequencies and rates use retained DC energy-state order. The rates
+are directional, indexed `[target, source]`, in 1/ns. ADC uses them for jumps
+within a readout event, not for transitions between projections. Passing them
+to ADC does not add a quantum bath to Evolution.
+
 For a single readout pulse with `envelope=None`, the batch response uses the
 exact matrix exponential in the carrier frame, even when the carrier differs
 from the model reference. Pulses with envelopes and multi-tone readout use the
