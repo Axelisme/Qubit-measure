@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-22，projective readout chain
+**Last updated:** 2026-11-23，離線 probe 的圖形產物
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -168,7 +168,9 @@ Save 比較不符時回 `roundtrip_equal=False`；I/O 或 restore 失敗仍拋�
 
 Run 與 analysis 的 `pngs` 是 `dict[str, bytes]`，階段不寫圖片或建立暫存目錄。
 Key 是 `live-`／`analysis-` 加 URL-escaped 圖名與 `.png`。
-兩者使用 Agg canvas、NonPresentingHost、figure 目前尺寸與 100 dpi。
+兩者使用 Agg canvas、figure 目前尺寸與 100 dpi。`run_stage` 在 `plots.finish()` 後才編碼 PNG，
+因此每張 Live 圖只回傳末格，不保留中途進度幀。
+[`NonPresentingHost`](../plotting/README.md#操作與呈現) 不開視窗，但仍執行[原生 artist 更新](../plotting/README.md#原生-matplotlib-更新)。
 Caller 自行保存 bytes 並逐張看圖。建立 Plots 前套用[共用樣式](../plotting/README.md#預設外觀)，
 實驗的原生 Matplotlib 參數與 style context 可覆寫外觀。
 Caller 負責環境 backend 與 devices 的清理，階段不更改 seed 或接線。
