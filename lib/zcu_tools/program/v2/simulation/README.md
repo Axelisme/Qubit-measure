@@ -4,7 +4,7 @@
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
-[ADR-0072](../../../../../docs/adr/0072-module-boundaries.md) separates hardware acquisition, simulation binding and physical environment validation.
+[ADR-0072](../../../../../docs/adr/0072-module-boundaries.md#真實-acquire-與模擬邊界) separates hardware acquisition, simulation binding and physical environment validation.
 [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md) assigns the RawShots interface to program and raw generation to numeric owners.
 [ADR-0083](../../../../../docs/adr/0083-program-macros-and-timelines.md) defines compiled snapshots and the simulation frontend boundary.
 [ADR-0084](../../../../../docs/adr/0084-simulation-integer-time-base.md) defines the common integer request time base and pacing conversion.
@@ -579,6 +579,8 @@ General program classes depend on the public mixin entry, not frontend, binding,
 signal-packing or SoC internals. `.importlinter` enforces that direct dependency
 boundary while allowing the entry to delegate internally. The
 `program-simulation-imports` contract prevents the rest of Program from importing
-`simulate` or `simulators` directly. `experiment.simulation` composes program and
-device capabilities. Numeric backends depend on core records,
+`zcu_tools.simulate` or `zcu_tools.simulators` directly. The framework-wide
+`framework-no-simulators` contract still forbids dependencies on
+`zcu_tools.simulators`, including from this package. `experiment.simulation`
+composes program and device capabilities. Numeric backends depend on core records,
 not on program or GUI owners.

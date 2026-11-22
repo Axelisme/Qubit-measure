@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-23，shot time 與模擬 round pacing 的 owner
+**Last updated:** 2026-11-23，模擬 mixin 邊界與兩種估時的 owner
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -10,7 +10,9 @@
 
 `acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、逐 shot 遮罩、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，提供原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。`ProgramResourcesMixin` 提供 dmem 配置及 readout route 保護。
 
-`v2.builder.TimelineBuilder` 記錄宣告、線性動作、巢狀 repeat／branch 與最外層往後跳轉。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。`SimulationSoc` acquisition 透過 compiled frontend 執行 TimelineProgramV2 的受支援 instruction effects。
+`v2.builder.TimelineBuilder` 記錄宣告、線性動作、巢狀 repeat／branch 與最外層往後跳轉。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。
+
+`MyProgramV2` 只透過 [`SimulationAcquireMixin`](v2/simulation/README.md) 接入模擬。模擬專用的邏輯、參數與型別留在 `program.v2.simulation`。Lab 用共用的取數介面，不傳模擬專用參數。依 [ADR-0072〈真實 acquire 與模擬邊界〉](../../../docs/adr/0072-module-boundaries.md#真實-acquire-與模擬邊界)，Program 其他模組不得直接 import `zcu_tools.simulate` 或 `zcu_tools.simulators`。既有的框架禁令仍禁止 mixin 依賴 `zcu_tools.simulators`。
 
 ## YAML compile profiles
 

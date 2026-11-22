@@ -67,13 +67,15 @@ status: accepted
 
 ### 真實 acquire 與模擬邊界
 
-**規則。** 真實硬體 acquire 不執行模擬。Program 只經 `SimulationAcquireMixin` 進入模擬路徑。Caller 使用相同的 Program 取數介面，不傳模擬專用的線路要求。模擬環境依自身接線與編譯後的 generator 事件決定路由。
+**規則。** 真實硬體 acquire 不執行模擬。`MyProgramV2` 只經 `SimulationAcquireMixin` 接入模擬，模擬專用的邏輯、參數與型別留在 `program.v2.simulation`，不進 Program 的共用取數介面。Lab 不向 Program 傳模擬專用參數。模擬環境依自己的接線與編譯所得的 generator 事件決定路由。
 
-**例子。** STIRAP 編譯 Pump 與 Stokes 的 generator、載波與 envelope，使用同一個 `Schedule.run_acquire_summed` 呼叫在 FTF 或 Single-fluxonium 取數。模擬以環境設定中的通道與線路運算，不從脈衝名稱推斷角色。見 [Program 的模擬入口](../../lib/zcu_tools/program/v2/simulation/README.md)與 [Single-fluxonium 的完整時間軸](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#complete-timelines)。
+**例子。** STIRAP 用同一個 `Schedule.run_acquire_summed` 呼叫在 FTF 或 Single-fluxonium 取數。編譯所得的 Pump 與 Stokes 事件已有 generator、載波與 envelope。模擬環境用這些事件與自身接線運算，不從脈衝名稱推斷角色，見 [Single-fluxonium 的完整時間軸](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#complete-timelines)。整數 request 的單輪時長也只供模擬 binding 使用，見 [ADR-0084〈模擬 round 時長〉](0084-simulation-integer-time-base.md#模擬-round-時長)。
 
-**邊界。** Operator 核對實機接線。模擬環境仍驗證自己支援的 generator 與 ADC 路由。這條規則不取消路由驗證，也不改 experiment 層的來源紀錄或 lab 使用的數值模型。真實 acquire 是否執行模擬仍要審閱執行路徑。
+**邊界。** `program-simulation-imports` 禁止 `zcu_tools.program` 在 `zcu_tools.program.v2.simulation` 之外直接 import `zcu_tools.simulate` 或 `zcu_tools.simulators`，包括兩者的子模組。既有 [`framework-no-simulators`](#分層) 不變，整個框架仍不得依賴 `zcu_tools.simulators`，mixin 也不例外。直接 import 檢查不取代執行路徑的審閱；docstring 仍可說明模擬時的行為。環境仍檢查 generator 與 ADC 路由，operator 仍核對實機接線。Experiment 的 Run 來源紀錄和 lab 使用的數值模型不屬於 Program，維持原狀。
 
-**依據。** 2026-10-26，使用者：「我不太希望真实 acquire 还会走模拟的模块。」2026-10-30，advisor 依授權「可以按需排task，我授權你代理」代裁：「驗證 owner 是 single_fluxonium 環境，在既有拒絕 unbound generator 的 preflight 位置一起檢查，早於任何 evolution。」未見使用者覆核這項代裁的紀錄。原裁決未附入庫討論，見 Git `d657120b9`。
+**依據。** 2026-10-26，使用者：「我不太希望真实 acquire 还会走模拟的模块。」2026-11-22，使用者：「据我所知啦，模拟器这个功能啊，应该只局限在一个 mixin 内，也就是说，如果把这个 mixin 拿掉，我的 program 就没有模拟功能。这个是解耦的设计。」「我认为这两处可能有违背了我的设计理念。对我来说，只要把这个 mixin 拿掉，我的 program 就不会有模拟的逻辑存在了。」Designer 依 2026-11-23 的授權代裁，移除僅供模擬端驗證的線路要求，並用 import contract 守住 Program 邊界，待使用者追認。比較與舊裁決見 [Program 的模擬邏輯只在 mixin 內](../discussions/2026-11-23-program-simulation-mixin.md)。
+
+> 原則草稿，待使用者核准措辭：拿掉 `SimulationAcquireMixin` 後，Program 不留模擬邏輯、參數或型別。Docstring 可說明模擬時的行為。Lab 不向 Program 傳模擬專用參數。
 
 ### Mux PFB channel 查詢與 carrier selection 的 owner
 
