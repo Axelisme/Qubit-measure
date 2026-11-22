@@ -3,7 +3,8 @@
 One cycle is one rep: the thermalisation wait K (relax_delay), then eight
 blocks of (π pulse, wait x, read, read). The host reduces each cycle to 65
 numbers and keeps only running sums. Analysis fits all 65 numbers jointly with
-a rate-equation model, starting from a single-decay fit of the first read.
+a rate-equation model, seeded by a single-decay fit of the first read or by
+one third of the saved wait span when the first-read fit is unavailable.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import expfunc, fit_decay
 from zcu_tools.analysis.readout_chain import (
     CycleSums,
@@ -238,12 +240,13 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
     ) -> ChainT1Analysis:
         """Fit all 65 numbers with the rate-equation T1 model.
 
-        Publish the first-read IQ and its single-decay fit in "fit". This
-        decay time seeds the joint rate fit. "joint-residuals" shows the
-        measured and modeled signals along the live all-feature direction.
+        Plot the first-read IQ in "fit". If its decay fit succeeds, plot
+        the fit and use its time as the joint start. If it raises
+        AnalysisFailed, keep the measured points and start one joint fit
+        at max(saved wait span / 3, 0.001 µs). The source cfg may be None.
         Return T1, the secondary time, their Wald errors, and the joint
-        residual diagnostics. The source cfg may be None. The joint fit
-        determines convergence; the residual diagnostics do not reject it.
+        residual diagnostics; show them with the live-direction projection
+        in "joint-residuals". Input and joint failures propagate unchanged.
         """
         del options  # This analysis has no configurable options.
         sums = source.result
@@ -251,9 +254,11 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
 
         # 1. Fit the first-read IQ to seed the joint model.
         seed_signal, seed_sem = first_read_projection(sums)
-        seed_fit = fit_decay(delays, seed_signal)
-        first_read_t1 = float(seed_fit.decay_time)
-        seed_dense = np.linspace(delays.min(), delays.max(), 400)
+        try:
+            seed_fit = fit_decay(delays, seed_signal)
+        except AnalysisFailed:  # ADR-0075: recover only from the seed fitter's numerical failure.
+            seed_fit = None
+
         seed_fig, seed_ax = plots.subplots(
             num="fit", figsize=config.figsize, layout="constrained"
         )
@@ -266,31 +271,39 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
             color="C0",
             label="First-read mean ± shot SEM",
         )
-        seed_ax.plot(
-            seed_dense,
-            expfunc(seed_dense, *seed_fit.params),
-            color="C1",
-            label="First-read fit",
-        )
-        if delays.min() <= seed_fit.decay_time <= delays.max():
-            seed_ax.axvline(seed_fit.decay_time, ls="--", color="0.35", linewidth=1)
-        r2 = seed_fit.quality.r2
-        residual = seed_fit.quality.normalized_residual_rms
-        r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
-        residual_text = "unavailable" if residual is None else f"{residual:.3g}"
+        if seed_fit is None:
+            seed_title = "First-read fit unavailable"
+        else:
+            seed_dense = np.linspace(delays.min(), delays.max(), 400)
+            seed_ax.plot(
+                seed_dense,
+                expfunc(seed_dense, *seed_fit.params),
+                color="C1",
+                label="First-read fit",
+            )
+            if delays.min() <= seed_fit.decay_time <= delays.max():
+                seed_ax.axvline(seed_fit.decay_time, ls="--", color="0.35", linewidth=1)
+            r2 = seed_fit.quality.r2
+            residual = seed_fit.quality.normalized_residual_rms
+            r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
+            residual_text = "unavailable" if residual is None else f"{residual:.3g}"
+            seed_title = (
+                f"First-read T1 = {seed_fit.decay_time:.4g} ± {seed_fit.decay_time_err:.2g} µs\n"
+                f"R² = {r2_text} · Normalized residual RMS = {residual_text}"
+            )
         seed_ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
         seed_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        seed_ax.set_title(
-            f"First-read T1 = {seed_fit.decay_time:.4g} ± {seed_fit.decay_time_err:.2g} µs\n"
-            f"R² = {r2_text} · Normalized residual RMS = {residual_text}",
-            loc="left",
-            fontsize=10,
-        )
+        seed_ax.set_title(seed_title, loc="left", fontsize=10)
         seed_fig.legend(loc="outside lower center", ncols=2)
 
-        # 2. Joint fit of all 65 numbers.
+        # 2. Joint fit of all 65 numbers from one starting time.
+        initial_t1 = (
+            max(float(np.ptp(delays)) / 3, 1e-3)
+            if seed_fit is None
+            else float(seed_fit.decay_time)
+        )
         model = t1_model()
-        fit = fit_cycle(sums, model, {"t1": first_read_t1})
+        fit = fit_cycle(sums, model, {"t1": initial_t1})
         relaxation = fit.relaxation
         assert relaxation is not None  # A RateModel fit always has relaxation.
 

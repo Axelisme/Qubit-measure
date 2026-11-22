@@ -78,11 +78,13 @@ async def chain_t1(session: RecipeSession, inputs: ChainT1Inputs) -> ChainT1Repo
     """Sweep the wait after a pi pulse with one K-cycle per rep: K, then (pi, wait, read, read) x 8.
 
     relax_delay is the thermalisation wait K; the Form starts it at 5 T1 and
-    overrides can change it. Primary fits the first read with a single decay
-    for the starting value, then fits all 65 numbers jointly with the
-    rate-equation model. It reports T1, the eigen time with the larger
-    amplitude, and the other eigen time as the secondary time, both in µs
-    with Wald standard errors. It reports J, df, J/df, the numerical χ²
+    overrides can change it. Primary fits all 65 numbers jointly with the
+    rate-equation model. It starts at the first-read decay time if available.
+    If the first-read fit has no estimate, Primary tries one joint fit from
+    one third of the saved wait span, with a minimum of 0.001 µs. This start
+    is not reported as an estimate. Primary reports T1, the eigen time with
+    the larger amplitude, and the other eigen time as the secondary time.
+    Both are in µs with Wald standard errors. It reports J, df, J/df, the numerical χ²
     reference band and the fraction of whitened residuals with |r| > 3.
     These numbers do not determine acceptance. The live-direction residual
     series stays in the figure. Save keeps the sums and analysis without writeback.
