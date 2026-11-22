@@ -177,11 +177,7 @@ def _install_headless_controller(
         config, "load_ftf", lambda _: SimpleNamespace(with_telemetry=lambda **_: None)
     )
 
-    def make_environment(
-        _settings: object, *, soccfg: object, workers: int = 1
-    ) -> SimpleNamespace:
-        if on_ftf is not None:
-            on_ftf(workers)
+    def make_environment(soccfg: object) -> SimpleNamespace:
         return SimpleNamespace(
             soc=None,
             soccfg=soccfg,
@@ -190,7 +186,16 @@ def _install_headless_controller(
             close_backend=None,
         )
 
-    monkeypatch.setattr(environment, "ftf", make_environment)
+    def observe_environment(
+        _settings: object, *, soccfg: object, workers: int = 1
+    ) -> SimpleNamespace:
+        if on_ftf is not None:
+            on_ftf(workers)
+        return make_environment(soccfg)
+
+    # The CLI report does not expose the factory argument. Delegate to the existing
+    # headless fake so observing it does not build a real FTF backend.
+    monkeypatch.setattr(environment, "ftf", observe_environment)
     monkeypatch.setattr(controller, "Controller", make_controller)
     # The Run's monotonic and UTC observation clocks are not CLI arguments.
     monkeypatch.setattr(experiment_wall_time, "perf_counter", clock.monotonic)

@@ -165,7 +165,7 @@
     "adapter": "singleshot/len_rabi",
     "path": ["length", "stop"],
     "value": 0.84,
-    "basis": "Four times the captured 0.48 us Q1 x180 is 1.92 us. The earlier board diagnostic hit 8384 samples on gen 2 at point 24; ending at 0.84 us keeps the maximum at 8048 samples below 8192 while retaining the cosine and point count."
+    "basis": "Four times the captured 0.48 us Q1 x180 is 1.92 us. The offline envelope check at commit 55e47cb0b8f1aa3934c09be82de48d922e6f193a found 8,384 samples on gen 2 at point 24, beyond its 8,192-sample capacity. A 0.84 us stop corresponds to an estimated 8,048 samples on the board grid and retains the cosine and point count."
   },
   {
     "adapter": "singleshot/mist/pre_freq",
@@ -183,7 +183,7 @@
     "adapter": "singleshot/t1_tone",
     "path": ["delay", "stop"],
     "value": 105,
-    "basis": "Current retry requests 66,881 cycles before the sweep ends. Board gen 0 has a 16-bit pulse-length word at 599.04 MHz; 105 us stays below 65,536 cycles, without changing the form's point count."
+    "basis": "The baseline retry at commit 6602f8985376b94a1d5055cb703699bbd5c64c93 failed when QICK rejected a 66,881-cycle probe pulse. Board gen 0 has a 16-bit pulse-length word at 599.04 MHz. A 105 us stop is about 62,899 cycles by clock conversion, below 65,536 cycles, and keeps the form's point count."
   },
   {
     "adapter": "singleshot/t1_tone_sweep_freq",
@@ -310,54 +310,6 @@
     "path": ["detune"],
     "value": 0.37,
     "basis": "FTF recalibration Round 08 used +0.37 MHz on the same bias, run 20261120T122845Z-862d02. It exceeds the observed few-kHz shift and still gives 3.7 fringes in the default 10 us delay window."
-  },
-  {
-    "adapter": "two_qubit/rb",
-    "path": ["phase_pair", "f1"],
-    "value": "Q1",
-    "basis": "Ordered Q1/Q2 degree corrections from FTF Local Z run 20261120T175443Z-da29e5, measured with the fixture's 5799.976979 MHz, 0.8 us CZ pair and same bias; representative pilot values, not persistent calibration."
-  },
-  {
-    "adapter": "two_qubit/rb",
-    "path": ["phase_pair", "f2"],
-    "value": "Q2",
-    "basis": "Ordered Q1/Q2 degree corrections from FTF Local Z run 20261120T175443Z-da29e5, measured with the fixture's 5799.976979 MHz, 0.8 us CZ pair and same bias; representative pilot values, not persistent calibration."
-  },
-  {
-    "adapter": "two_qubit/rb",
-    "path": ["phase_pair", "correction_f1_deg"],
-    "value": 0.2741774049131674,
-    "basis": "Ordered Q1/Q2 degree corrections from FTF Local Z run 20261120T175443Z-da29e5, measured with the fixture's 5799.976979 MHz, 0.8 us CZ pair and same bias; representative pilot values, not persistent calibration."
-  },
-  {
-    "adapter": "two_qubit/rb",
-    "path": ["phase_pair", "correction_f2_deg"],
-    "value": -3.416475492328557,
-    "basis": "Ordered Q1/Q2 degree corrections from FTF Local Z run 20261120T175443Z-da29e5, measured with the fixture's 5799.976979 MHz, 0.8 us CZ pair and same bias; representative pilot values, not persistent calibration."
-  },
-  {
-    "adapter": "two_qubit/rb_heralded",
-    "path": ["phase_pair", "f1"],
-    "value": "Q1",
-    "basis": "Ordered Q1/Q2 degree corrections from FTF Local Z run 20261120T175443Z-da29e5, measured with the fixture's 5799.976979 MHz, 0.8 us CZ pair and same bias; representative pilot values, not persistent calibration."
-  },
-  {
-    "adapter": "two_qubit/rb_heralded",
-    "path": ["phase_pair", "f2"],
-    "value": "Q2",
-    "basis": "Ordered Q1/Q2 degree corrections from FTF Local Z run 20261120T175443Z-da29e5, measured with the fixture's 5799.976979 MHz, 0.8 us CZ pair and same bias; representative pilot values, not persistent calibration."
-  },
-  {
-    "adapter": "two_qubit/rb_heralded",
-    "path": ["phase_pair", "correction_f1_deg"],
-    "value": 0.2741774049131674,
-    "basis": "Ordered Q1/Q2 degree corrections from FTF Local Z run 20261120T175443Z-da29e5, measured with the fixture's 5799.976979 MHz, 0.8 us CZ pair and same bias; representative pilot values, not persistent calibration."
-  },
-  {
-    "adapter": "two_qubit/rb_heralded",
-    "path": ["phase_pair", "correction_f2_deg"],
-    "value": -3.416475492328557,
-    "basis": "Ordered Q1/Q2 degree corrections from FTF Local Z run 20261120T175443Z-da29e5, measured with the fixture's 5799.976979 MHz, 0.8 us CZ pair and same bias; representative pilot values, not persistent calibration."
   },
   {
     "adapter": "twotone/ac_stark",

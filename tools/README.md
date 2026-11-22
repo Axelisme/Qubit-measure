@@ -166,7 +166,7 @@ write_snapshot(
 
 `--workers N` 設定每列 FTF 環境的平行 worker 數。`N` 必須是正整數，省略時用 1。若要採 GUI 的 worker 策略，指定 `max(1, slot CPU 數 − 1)`，例如 4 核 slot 用 `--workers 3`。`run_heavy.py` 的收據記錄 payload 參數與 `cpus`，可核對 worker 數和 CPU affinity。
 
-完整表或需要排他的正式比較，在已協調的窗口用 `tools/run_heavy.py --exclusive`。先設定 `output` 為新的絕對路徑、`budget_s` 為整批 payload 的秒數預算：
+完整表或需要排他的正式比較，在已協調的窗口用 `tools/run_heavy.py --exclusive`。先設定 `output` 為新的絕對路徑，建立其父目錄，並將 `budget_s` 設為整批 payload 的秒數預算。下例省略 `--workers`，使用 1 個 worker。若要套用 GUI 策略，按排他 runner 分配的 CPU 數指定 `--workers`：
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
@@ -231,11 +231,19 @@ uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
 
 缺 `materialize_s`、`core_s` 或 `core_s_lower_bound` 的舊 `row.json` 會讓重建以 exit 1 結束，不寫報表。請在 `batch.json` 記錄的 commit 執行 `--report-only` 重建舊報表。批次起迄與外層逾時看 `run_heavy.py` 的收據，不用來推算 Run 耗時。要補未派送或未完成的列，使用下方的續跑方式。
 
-續跑使用新的 `--output`，以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。也要沿用來源批次的 `--workers`；工具不把 worker 數寫進 journal，請從來源收據的 payload 參數核對。新報表併入來源中已落盤的判定列；`--select` 只派送所選範圍內尚未判定的列。`timeout` 和 `run_failed` 都是已判定列，不會自動重跑。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`：
+續跑會派送 Run，仍由 `run_heavy.py` 配置 CPU slot、寫 log 和收據。以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。呼叫端也要沿用來源批次的 worker 數。工具不把 worker 數寫入 journal，也不檢查是否一致。請查來源收據的 `command`：有 `--workers 3` 就沿用 3，沒有 `--workers` 就用預設的 1。
+
+新報表併入來源中已落盤的判定列。`--select` 只派送所選範圍內尚未判定的列。`timeout` 和 `run_failed` 都是已判定列，不會自動重跑。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`。
+
+下例續跑來源使用 3 個 workers 的非排他批次。保留 `output` 為來源目錄，另設定新的絕對路徑 `continued_output` 及本次 payload 的秒數預算 `budget_s`。先建立 `continued_output` 的父目錄，並確認新輸出、log 和收據路徑未被使用。若來源未指定 worker 數，改用 `workers=1`；若來源停用了 OpenCL，沿用上例的 ICD 與 cache 設定。若來源是排他的批次，在協調的窗口為 runner 加上 `--exclusive`。
 
 ```bash
-uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
-  --resume-from "$output" --workers 3 --select mux --output "$continued_output"
+workers=3
+uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
+  --wait-limit 60 --log "$continued_output.log" "$budget_s" -- \
+  python -m tools.experiment_wall_time --resume-from "$output" \
+    --workers "$workers" --select mux --output "$continued_output" \
+  > "$continued_output.receipt.json"
 ```
 
 若要重跑已判定的失敗列，用 `--select` 指定該 adapter，另開新的 `--output`，不要帶入包含該列的 `--resume-from`。若已換 commit，使用新 commit 開新批次，不留用舊列。
