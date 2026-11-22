@@ -40,9 +40,9 @@ positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
 out-of-range participants block Run and remain editable for correction.
 
 Leave **Reset** blank to skip reset. Selected tones need drives on independent
-generators, distinct from readout. Open/Defaults fills **Drive** for selected
+generators, distinct from readout. Open/Defaults fills **π/2 pulse** for selected
 tones. Unselected tones start blank and can stay blank. Leave **Mixer freq**
-blank under Drive to skip configuring a mixer for that drive.
+blank under **π/2 pulse** to skip configuring a mixer for that drive.
 Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
 and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
 Alias list elements may use `$` links. A missing, unbound or empty row selects all
