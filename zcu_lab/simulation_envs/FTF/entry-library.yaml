@@ -1,0 +1,90 @@
+format: zcu.module-library
+format_version: '2.0'
+components:
+  Q1:
+    pulses:
+      pi_amp:
+        type: pulse
+        waveform: {style: cosine, length: 0.48}
+        ch: 2
+        nqz: 2
+        freq: 297.74211811095904
+        gain: 0.6169902190510289
+      pi2_amp:
+        type: pulse
+        waveform: {style: cosine, length: 0.48}
+        ch: 2
+        nqz: 2
+        freq: 297.74211811095904
+        gain: 0.30849510952551445
+  Q2:
+    pulses:
+      pi_amp:
+        type: pulse
+        waveform: {style: cosine, length: 0.4}
+        ch: 3
+        nqz: 2
+        freq: 221.7199297947328
+        gain: 0.8503746297602666
+      pi2_amp:
+        type: pulse
+        waveform: {style: cosine, length: 0.4}
+        ch: 3
+        nqz: 2
+        freq: 221.7199297947328
+        gain: 0.4251873148801333
+  R1:
+    readout:
+      readout_rf:
+        type: readout/pulse
+        waveform: {style: const, length: 2.100801351175282}
+        gen_ch: 0
+        nqz: 2
+        freq: 7189.980642392195
+        gain: 0.15
+        ro_ch: 0
+        ro_length: 0.99
+        trig_offset: 1.110801351175282
+  R2:
+    readout:
+      readout_rf:
+        type: readout/pulse
+        waveform: {style: const, length: 2.100801351175282}
+        gen_ch: 0
+        nqz: 2
+        freq: 7079.687937293966
+        gain: 0.15
+        ro_ch: 0
+        ro_length: 0.99
+        trig_offset: 1.110801351175282
+  MG12:
+    readout:
+      readout_rf:
+        type: readout/mux
+        gen_ch: 7
+        nqz: 1
+        mixer_freq: 7135.0
+        tones:
+          - {freq: 7189.961400071605, gain: 0.03, phase: 0.0, ro_ch: 2, label: R1}
+          - {freq: 7079.652710129052, gain: 0.03, phase: 0.0, ro_ch: 3, label: R2}
+        length: 4.167795864838565
+        ro_length: 3.0
+        post_delay: 2.0
+        trig_offset: 1.1677958648385653
+  coupler:
+    pulses:
+      cz_qubit1:
+        type: pulse
+        waveform: {style: const, length: 0.8}
+        ch: 2
+        nqz: 2
+        freq: 5799.976979080261
+        gain: 0.024144059109456696
+      cz_qubit2:
+        type: pulse
+        waveform: {style: const, length: 0.8}
+        ch: 3
+        nqz: 2
+        freq: 5799.976979080261
+        phase: -0.21495102875174946
+        gain: 0.024144059109456696

@@ -634,9 +634,8 @@ by the floor at each transition. This count includes zero-weight levels when
 the floor is zero.
 
 FTF applies `numerics.projection_weight_floor` when building transition rows.
-The setting is required and accepts finite values in `[0, 1)`. See the template
-values in [default.yaml](../../../../../zcu_lab/simulation_envs/FTF/default.yaml) and
-[low-snr.yaml](../../../../../zcu_lab/simulation_envs/FTF/low-snr.yaml).
+The setting is required and accepts finite values in `[0, 1)`. The standard
+[FTF preset](../../../../../zcu_lab/simulation_envs/FTF/default.yaml) sets it to `1e-5`.
 At each point and transition, a source state with current marginal below the
 floor skips evolution and gets an identity row. FTF keeps that weight in the
 same state without redistributing or renormalizing it. Even an all-identity

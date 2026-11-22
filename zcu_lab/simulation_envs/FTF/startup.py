@@ -12,7 +12,9 @@ from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.app.measure.startup_context import StartupContext, simulation_workers
 from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.program import build_soccfg
+from zcu_tools.resources.context.library import ModuleLibrary
 from zcu_tools.resources.entry import (
     DestinationExistsError,
     EntryTemplate,
@@ -40,9 +42,9 @@ def startup(ctx: StartupContext) -> None:
     The template binds qubit1=Q1, qubit2=Q2, coupler=coupler and mux=MG12
     for two-qubit forms. Existing entries keep their aliases; update the point's
     Aliases if the current bindings are missing.
-    The template seeds pulse gen0/ADC0, charge gen2/gen3 and MG12 mux
-    gen7/ADCs [2, 3] in resonator order on the shared v2 board.
-    The GUI is then ready for the user to open experiment tabs.
+    The template seeds the half-flux components and module slots. The script
+    installs the demo library in the entry's global documents before creating
+    the point, so `initial` inherits both the components and their modules.
 
     ctx is the GUI's typed startup capability, called on its background worker
     after lab components/adapters are registered. Use the GUI's data project
@@ -176,13 +178,34 @@ def _seed_predictors(
 
 
 def _seed_entry(ctx: StartupContext, template: EntryTemplate) -> None:
-    """Seed global components, then create initial and save its aliases."""
+    """Install global defaults before inheriting them into the initial point."""
+    library = ModuleLibrary(Path(__file__).with_name("entry-library.yaml")).snapshot()
+    if invalid := library.document().invalid_entries:
+        raise ValueError(f"Invalid FTF demo module library: {invalid}")
     for name, component in template.components.items():
         fields = TypeAdapter(YamlMap).validate_python(
             component.model_dump(exclude_unset=True)
         )
         fields.pop("kind")
         ctx.context.add_component(name, component.kind, fields, point=None)
+
+    def install_library() -> None:
+        control = ctx.context.control
+        target = control.read_context()
+        for key in library.module_keys():
+            control.apply_library_change(
+                target,
+                LibraryChange("module", "put", key, module=library.module_spec(key)),
+            )
+        for key in library.waveform_keys():
+            control.apply_library_change(
+                target,
+                LibraryChange(
+                    "waveform", "put", key, waveform=library.waveform_spec(key)
+                ),
+            )
+
+    ctx.calls.call(install_library)
     ctx.setup.new_point("initial")
     ctx.context.apply_alias_rows(
         tuple(
