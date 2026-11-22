@@ -1,124 +1,33 @@
 # Heralded Conditional phase
 
-**Readers:** operator, agent. Run herald-conditioned conditional phase and inspect acceptance.
+**Readers:** operator, agent. Find a π crossing from a joint fit of gg- and ee-heralded Ramsey measurements.
 
 ## Inputs and sequence
 
-Choose `two_qubit/conditional_phase_heralded`. This experiment has its own saved cfg and Result. Bind `qubit1`, `qubit2`, `coupler` and `mux` as in the [ordinary guide](guide.md#prepare-the-inputs), which also explains how to rebind an existing point.
-Notebook uses the same built-in position names, but does not bind the GUI aliases. Opening the tab or choosing Defaults sets two hidden tone indices from `$mux.qubits`.
-Both qubit tones need a circle classifier with a GE Post radius before Run. Other tones need no classifier. Choose Defaults after changing captured sources.
+Select `two_qubit/conditional_phase_heralded` and check these inputs before Run:
 
-Every shot emits optional reset, herald mux readout, the original preparation/CZ/projection sequence, then terminal mux readout. Set reset=None to skip reset. Herald and terminal use the same mux object, tones, gain, integration and classifier settings.
+- Bind `qubit1` and `qubit2` to distinct qubits in `mux`, and bind `coupler` for the CZ pair. Use the full **Mux readout**. Check the tone for each role against the mux order. Both role tones need GE circle classifiers and GE Post radii calibrated with these readout settings.
+- Supply calibrated Xπ and Xπ/2 pulses for each role and both CZ drives. **Dual-line drive** starts from the coupler's `cz_qubit1` and `cz_qubit2` slots; fill any missing pulse. Each role's pulses share one generator, distinct from the other role's. Match the CZ envelope lengths and pre-delays. See the [ordinary guide](guide.md#prepare-the-inputs) for context.
 
-Choose `target=qubit1` or `target=qubit2` and a list of positive unique `gate_count` values, default [1,2,3], with at least two points and difference gcd=1 and a strictly increasing common frequency scan in MHz. Terminal phase is atan2(sigma_Y,sigma_X); sigma=(N_e-N_g)/N_total includes other. Conditional phase comes from the shared per-gate slope_e−slope_g. A unique joint π crossing selects the writeback frequency. FIT proposes `$coupler.pulses.cz_qubit1` and `cz_qubit2` plus their `$coupler.module.cz_qubit1` and `cz_qubit2` slot rows. Review and apply rows separately.
+Each shot runs **optional ordinary Reset → herald mux readout → spectator I/Xπ → target Xπ/2 → n CZ pairs → independent X or Y projection → terminal mux readout**. Both reads use the same full mux settings. Blank Reset omits the optional pulse but not herald; do not select a mux-herald reset module.
+
+Set **Ramsey target**, **CZ gates per shot** (at least two unique positive counts with difference gcd 1, e.g. [1,2,3]) and increasing **Common CZ drive frequency** (MHz) across the expected crossing. [Recipe blank inputs](guide.md#prepare-the-inputs) follow the same rules as ordinary phase.
 
 ## Wait after herald
 
-Set the readout's `post_delay` before scanning so photons in the resonator can
-decay before the qubit drive. Herald and terminal readout share this value
-([ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)).
-The wait starts when the readout generator waveform ends, without waiting for
-the ADC integration window to end
-([ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)).
-The `mux/onetone` Form seeds this field from the linewidth. FIT does not
-calibrate the wait.
-
-If the scan has no π crossing, check `post_delay`. Photons left by the
-herald readout can shift the qubit transition frequency and cause dephasing.
-A nominal Xπ after herald may barely flip the qubit.
-
-Use each resonator's `kappa` from the `mux/onetone` FIT. It is the full
-width at half maximum (FWHM) in MHz. Start at `5 / (2π · κ)` µs, five photon
-decay times and the same formula used for the ring-up seed. For a shared
-`post_delay`, use the smallest κ so the slowest resonator has time to empty.
-
-In a low-SNR FTF example, R2's linewidth was about 1.2 MHz. Five photon
-decay times are about 0.66 µs, and 2 µs is about 15 times one photon decay
-time. After gg herald and a nominal Qubit2 Xπ, Qubit2's terminal e fraction was
-11.6% at 0 µs and 92.9% at 2 µs. These fractions do not subtract the I
-baseline. The 2 µs value was a comparison point, not a minimum or an optimum.
-
-In `two_qubit/joint_readout`, choose `reset/mux_herald` in Reset. Set
-`keep` to g for both role tones, keyed by their positions in the full readout.
-Use the same full mux readout for herald and terminal. After Run, inspect the
-4×9 row-normalized probability matrix in FIT. Find the row with nominal Xπ
-on the target and I on the other qubit.
-Sum the columns where the target's terminal class is e. Compare with the
-gg row for an I baseline if needed. This is the terminal e fraction among
-shots that passed gg herald, not gate fidelity. Lengthen only `post_delay`
-and repeat Run and FIT. If the longer wait still raises the terminal e
-fraction, adjust `post_delay` before scanning for the π crossing.
+Set **Mux readout** post-delay from `5/(2π·κ)` µs with the smallest FWHM linewidth κ of the shared readout, in MHz. The wait starts at the end of the generator waveform, not the ADC window, and both reads share it. Residual photons can detune the next qubit pulse. In [Joint readout](../joint_readout/guide.md), use gg herald and sum the target terminal-e columns in the row with target Xπ and spectator I. Lengthen only post-delay and repeat; if the e fraction still rises, adjust the wait before trying to resolve a π crossing. This comparison is not a fidelity estimate.
 
 ## Counts and plots
 
-Analyze returns only `frequency_mhz` and `frequency_reason`. Per-frequency phases,
-slopes, crossings, counts and herald fractions stay inside analysis for plotting.
+The joint fit shares phase slope per gate for each actual spectator and frequency, with separate contrast and phase offset per herald. The ee group negates both σ values and swaps the nominal I/Xπ labels to actual e/g. In both groups, `σ=(N_e−N_g)/N_total` before correction and other remains in the denominator.
 
-Saved sums is float64 `(2,2,Nn,Nf,3,3,3,3)`. Leading scan axes follow the ordinary experiment. The final four axes are herald Qubit1, herald Qubit2, terminal Qubit1, terminal Qubit2, each ordered g/e/other. All 81 classes persist as raw accumulated counts. Rounds accumulate at acquisition. There is no host round axis or per-shot IQ storage.
+- **Run and first Analyze quadratures** connect measured gg quadratures for the current or last started train; empty groups stay blank. Further Analyze panels show gg and sign-corrected ee X/Y, contrast and wrapped phase for every planned train. X/Y bars are ±1 shot SEM (sample SD / √N from that herald group's retained shots), not slope uncertainty or round spread. Low or zero acceptance is not incomplete acquisition: both projections need complete Reps × Rounds counted across all 81 classes before selection.
+- **Slopes** compares the joint and gg-only fit, with fit SE and reduced χ² as in the [ordinary guide](guide.md#read-phase-and-quadratures). Each individual herald group must retain at least two usable counts with difference gcd 1; combining two aliased sets does not fix either. Missing fits are not zero.
+- **Herald heatmap:** panels split nominal spectator and X/Y; MHz runs across each panel. Each vertical gate-count band lists nine herald classes, Qubit1 slowest, Qubit2 fastest. Gray means no probability. The gg fraction measures acceptance, not ground-state purity. Compare it with the quadrature contrast before trusting the slope.
+- **π crossing** compares joint and gg-only conditional phase (spectator-e slope minus spectator-g). Only a unique unambiguous joint crossing supports a proposal; no gg fallback or interpolation uncertainty. Missing, flat, ambiguous or multiple crossings block it.
 
-Analysis uses both herald (g,g) and (e,e). In the ee group, target sigma reverses sign and nominal spectator I/Xπ means actual spectator e/g. Analysis reverses both sigma signs and reorders ee to actual g/e before fitting. It keeps separate amplitudes and phase offsets for each herald group while sharing the per-gate slope for each actual spectator and frequency. The model is X=A_h cos(n·slope+φ_h), Y=A_h sin(n·slope+φ_h), without quadrature DC.
+## Next step
 
-Count-derived sigma variances weight both groups, with other in each denominator. Zero acceptance and unavailable positive variances remove points. Each group must retain at least two gate counts with difference gcd=1. Unmeasured axes or aliased groups retain diagnostic phases and a reason, but do not authorize joint writeback. Never combine two herald groups' gate-count sets to hide an alias. Odd-only counts such as [1,3,5] are rejected before Run.
+Writeback substitutes the joint crossing frequency in both CZ pulses and offers their two separate coupler slot rows. Recheck amplitude and local Z after accepting. Heralding does not prove gate fidelity. Older files and missing source cfg: see the [family load note](../guide.md#opendefaults-與人工-apply). For common GUI actions, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-The live quadratures show herald (g,g) for the current CZ train and identify
-the actual spectator state. Analyze starts with (g,g) for the latest train
-with any acquired counts, even if it is incomplete or has no retained (g,g)
-shots. If no train started, the first figure says so. Analyze keeps (g,g),
-sign-corrected (e,e), and contrast/wrapped-phase figures for every planned
-gate count, including the empty ones.
-
-The (g,g) panels show P(e) − P(g). The sign-corrected (e,e) panels show
-P(g) − P(e). Other terminal outcomes contribute zero. The X/Y bars are ±1
-shot SEM from the retained shots in the displayed herald group. Negating the
-(e,e) signal does not change its SEM.
-
-Slopes show the joint and independent (g,g) fits with fit standard errors,
-not shot SEM. The lower panel shows reduced χ² per frequency for the same
-series. The fit divides each residual by its fit error, sums the squares,
-then divides by the residual degrees of freedom. Values near 1 are consistent with those
-errors. Missing points mean the fit or reduced χ² is unavailable, not zero.
-Reduced χ² does not set a selection threshold. Use the π crossing figure to
-compare the fits. Writeback uses only the joint slope_e−slope_g crossing.
-A missing, flat, ambiguous or nonunique crossing prevents a proposal. There
-is no gg fallback. Frequency interpolation supplies no uncertainty.
-
-In the wrapped phase, π crossing, and phase-per-CZ plots, each series keeps
-both points when adjacent angles differ by 180° or more. The gap between
-those points marks a cut or an ambiguous half-turn. A frequency without a
-point has no available value; no line spans it. The red π marker is still the
-crossing from the joint phase interpolation.
-
-The herald heatmap panels split nominal spectator preparation (g or e) and
-target projection (X or Y). Across each panel, columns follow the saved
-frequency scan in MHz. Down the panel, each band is one planned CZ gate
-count, in scan order. Within the band, read the nine herald classes from top
-to bottom in the order printed below the panels: Qubit1 changes slowest and
-Qubit2 changes fastest. Gray cells have no probability. The (g,g) fraction
-is the pass fraction, not ground-state purity. Check it alongside contrast
-and fit diagnostics; a low pass fraction leaves fewer shots in the fit group.
-
-Spectator, quadrature and frequency use hardware loops. Gate count stays on the host because it changes the sequence structure. Both read tags share one mux object within each freshly built program.
-
-Native Save retains all sums, axes and source cfg (schema 4.0). Load leaves the Form unchanged.
-Native Load rejects older results whose axis names do not match this layout. Keep the original file and use the matching older version to read it.
-If the result layout matches but the cfg major does not, Load retains Result and metadata without cfg. Phase analysis requires cfg.
-
-Cancellation preserves completed rounds; unmeasured points remain NaN. StopSignal carries only a stop request and reason. Acquisition failures propagate from Run as exceptions. A normal return after a stop request may contain partial counts. Phase and fits require every planned round of both projections, checked against reps × rounds using all 81 classes before herald selection. Low or zero gg/ee acceptance does not mean acquisition is incomplete. Incomplete points retain counts but supply no phase; the existing complete-axis fit and writeback rules still apply.
-
-Preview every proposal before Apply Selected. Writeback uses the original Run or Load capture, even if you change aliases afterward. Writeback fails without that capture. Recalibrate after changing pulse or readout conditions. Herald selection does not establish gate fidelity.
-
-
-## Notebook
-
-Use the validated ConditionalPhaseHeraldedCfg as `cfg`. Supply the notebook's existing handles and device manager. `point_view` selects the save destination.
-
-```python
-from zcu_tools.notebook import NotebookAdapter
-from zcu_lab.v2.two_qubit.conditional_phase.core_heralded import ConditionalPhaseHeraldedExp
-
-nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
-exp = nb_adapter(ConditionalPhaseHeraldedExp())
-record = exp.run(cfg)
-analysis = exp.analyze(None)
-saved = exp.save_run(point_view, source=record)
-```
+In the wrapped phase, per-CZ slope and π-crossing panels, a break between adjacent samples can mark the ±180° cut or an ambiguous half-turn: angles separated by 180° or more are not joined. A frequency with no available value has no point or bridging line. The red π marker is the crossing from joint interpolation, not the gg-only trace.

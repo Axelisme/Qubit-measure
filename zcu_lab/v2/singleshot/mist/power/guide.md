@@ -1,57 +1,24 @@
-## Behavior
+# MIST probe-gain sweep
 
-**Readers:** operator, agent. How to measure MIST populations versus probe gain from the GUI or MCP and interpret the results.
+**Readers:** operator, agent. Find the onset of changes in single-shot populations as the probe gain increases.
 
-MIST probe-power sweep: drives a probe pulse whose gain is swept and classifies each shot during acquisition against the |g>/|e> single-shot centres, plotting the ground/excited/other populations versus probe gain (or photon number when an AC-Stark coefficient is known). Runs on real hardware. Inspect the acquired populations directly.
+## What is measured
 
-## Parameter sources
+Optional **Reset** → optional **Initial preparation pulse** → **MIST tone** at the swept gain → **Readout**. Other includes shots outside both decision circles or tied; it does not identify a leaked level.
 
-Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. Probe gain sweep runs from 0 to 1.
+## Key settings
 
-Readout accepts only the pulse family.
-A mux readout in the library is incompatible.
-Classification uses the readout's circle classifier under Readout → Advanced.
-Run requires a positive radius; missing radius prompts singleshot GE Post.
-Linear has no Other state and is rejected.
-Analyze corrects populations only with the saved readout cfg's confusion matrix.
-Historical cfg without a classifier or matrix skips correction.
+- Before Run, use Pulse **Readout** (not Mux) with a circle and positive radius under **Advanced**. A linear classifier cannot report Other; obtain a missing radius from [GE Post-Analysis](../../ge/guide.md).
+- Set the **MIST drive gain** window (initially 0–1) to sample below and above the expected onset. Keep preparation and tone duration fixed when comparing gains.
+- **Relax delay** starts at 5 × ordinary T1 (150 µs if absent; blank if invalid). Adding reset does not shorten it automatically.
+- Analyze converts gain to mean photon number with `$qubit.ext.ac_stark_coeff × gain²` when the Run captured that coefficient. Obtain it from [AC-Stark calibration](../../ac_stark/guide.md). **Logarithmic x-axis** changes the scale, not the measured probabilities.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+## How to read the results
 
-T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. Look for a change in P(Other) across the scan. Compare it against the bars, one shot SEM from counts retained at each point (absent below two shots). Analyze propagates count covariance through any correction. These bars are not fit errors or round-to-round variation.
 
-These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
+## Next step
 
-## Module slots
+Widen or recenter the scan if the onset is at a limit. No calibration is written. Load cannot convert older files without class counts; acquire again.
 
-Probe starts from res_probe. Optional init/reset use `$qubit.module.x180`/reset. Readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Defaults snapshot.
-
-## Typical writeback
-
-This is a diagnostic only. Read the population curves from the plot; calibration parameters stay unchanged.
-
-## Recommended
-
-Run singleshot/ge Primary and Post, then Apply to the selected readout module. Sweep the probe gain across the MIST onset; provide '`$qubit.ext.ac_stark_coeff`' (from the AC-Stark experiment) for a photon-number x-axis.
-
-## Saved counts
-
-Save keeps `counts` shaped `(Ngain, 3)` in `[g,e,other]` order, with
-`population_states=[0,1,2]`. Other counts shots outside the accepted circles
-or tied between them. It is not a calibrated leakage population.
-Each point sums to the shots acquired across completed rounds. Live plots and
-Analyze divide each point by its total before displaying populations or applying
-the saved confusion matrix. Sweep coordinates and units are unchanged. Cfg schema
-remains 3.0.
-
-Old files storing `signals` instead of `counts` are unsupported. Load reports
-the missing `counts` variable. Acquire a new run; Load does not convert stored
-fractions to counts.
-
-## Reading the figures
-
-Run shows raw class probabilities. Each bar is one shot SEM from the counts retained at that point. Fewer than two retained shots give no bar.
-
-Use Run to spot the gain where P(Other) starts changing. Compare points in Analyze against their shot SEM before calling a change an onset. The bars use the class counts retained at that point, with covariance propagated through saved readout correction when available. If the calibrated photon axis is enabled, the x coordinate is the saved scan gain squared times the AC-Stark coefficient. Widen or recenter the gain scan if the onset touches a scan limit. No fit or writeback is made.
-
-**Last updated:** 2026-11-22
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).

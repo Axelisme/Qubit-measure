@@ -2,75 +2,29 @@
 
 # MIST over flux
 
-Open `mist/flux_dep` to find where a gain-dependent readout response changes
-with flux bias. At each bias the pulse sequence is optional reset, optional
-qubit preparation, the gain-swept resonator probe, readout, then a relaxation
-wait. The bias holds still during each gain sweep. The readout sees mean IQ,
-not individually classified qubit states.
+For opening, refreshing and saving, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-## Set up and run
+At each fixed DC bias, a shot applies `optional reset → optional preparation → gain-swept resonator probe → readout → relaxation wait`. The map measures changes in mean IQ, not state populations.
 
-Bind the qubit and resonator. Open the experiment or choose **Defaults**
-to recapture their values and discard draft edits.
+## Set the bias and gain ranges
 
-- **Flux device** starts from the chosen qubit's DC source. Confirm its name
-  and **Flux-bias unit**. The sweep sends values directly in A, V or native
-  device units, with no conversion.
-- **Flux-bias sweep** starts from calibrated integer flux to half flux with
-  101 points, including endpoints. If the calibration is missing, fill
-  Start and Stop in the selected device unit. Confirm both endpoints.
-- **Reset** and **Preparation pulse** use the qubit's reset and x180 modules
-  if assigned. Turn off either one to omit it, or select a calibrated module
-  for the intended preparation.
-- **Resonator probe** starts from the resonator's frequency and generator
-  and a 1 µs constant envelope. **Probe gain sweep** replaces its gain. It
-  starts at 0–0.5 a.u. with 101 points. Choose a low-gain starting region
-  for the reference and confirm the stop gain before Run.
-- **Readout** uses the resonator's assigned module or the pulse readout
-  template. Check its frequency, gain, timing and integration window.
-- **Reps** starts at 1000 shots per gain and bias in one round. **Rounds**
-  starts at 10 sweeps per bias. **Relax delay** starts at five times the qubit
-  T1. Missing T1 uses 30 µs, giving 150 µs. An invalid T1 leaves the wait blank.
+- Bind the qubit and resonator. Verify **Flux device** and its native unit. The sweep applies values in A, V or native device units without conversion. The initial bias range is the captured integer-to-half flux interval. Supply both endpoints if calibration is missing.
+- Select reset and preparation for the state you want to probe. They start from assigned reset and x180 modules, if present. Disable either to skip it.
+- Verify the readout pulse and integration timing. Check the resonator probe frequency and duration; set the gain sweep to begin in the weak-drive region, which supplies the IQ reference.
+- **Relax delay** starts at 5 × captured T1, or 150 µs if T1 is missing. Invalid T1 leaves the required wait blank. Choose a wait that limits history from earlier shots.
 
-The device stays at the last applied bias. Restore your working bias explicitly
-after the scan.
+The device stays at the last applied bias. Restore the working bias explicitly after the scan.
 
-## Read the figures
+## Read the maps
 
-In Run, the left map shows how many bias rows have IQ. Completed averaging
-rounds appear in acquisition progress. The right panel shows the most recent
-row in blue with its bias above the axis, and up to three earlier rows in
-gray. Compare their rises to see whether the response changes smoothly as
-the bias moves. Blank map cells have no displayed data.
+Run shows bias rows with data and the latest gain trace in blue, with up to three earlier traces in gray. Acquisition progress counts rounds. Blank cells have no displayed data.
+Each row subtracts its own mean IQ over the first 5% of gain points (at least one) before taking the magnitude. The display caps displacement at ten times the median of its lower half, so the same top color can hide different responses. The maps have no per-cell error bars or fit.
 
-Each bias row has its own complex IQ reference, the mean of its first 5% of
-gain points with at least one point. The map and trace show the magnitude of
-mean IQ shift from that reference, in a.u. To keep outliers from setting the
-entire color scale, the display clips values at ten times the median of the
-lower half of the displacement values. Equal colors at the upper limit can
-therefore hide stronger responses. Save retains unmodified mean complex IQ.
-The map does not use per-cell error bars and there is no fit.
+Analyze shows the same displacement with optional axis calibrations. The two flux values start from the source Run's qubit calibration for the scanned device. Set both **Half-flux bias** and **Flux period** for Φ₀ below and device units above; clear either for native units only. Set **Photon number / gain squared** only with an independent calibration: `n = coefficient × gain²`. **Full acquired range** uses the acquired endpoints.
 
-Analyze shows the same map with optional axis calibrations. The summary
-records the source run's Reps × Rounds. **Half-flux bias (device units)** and
-**Flux period (device units / Φ₀)** start from the qubit calibration captured
-for that Run. With both present, the bottom axis shows calibrated flux in
-Φ₀ and the top shows the corresponding device values. Clear either to keep
-only device units. **Photon number / gain squared** changes the vertical
-axis to coefficient × gain². Leave it blank without a gain-to-photon
-calibration. **Full acquired range** limits the view to acquired endpoints.
+## Use the response map
 
-Find a band of changing response that repeats across nearby biases and gains.
-Rescan a candidate window rather than choosing a single bright cell. If
-the change spans 0.20–0.24 a.u., 41 gain points across that window give a
-nominal 0.001 a.u. step. Compare the IQ map to a classified measurement before
-assigning a state transition or population.
+Look for a band that persists across nearby gains and biases, then rescan that window. Compare against classified readout before assigning a transition or population. There is no writeback.
 
-Layout reference: Ding Fig. 5-8(b), p. 151, uses a heatmap for frequency
-and pulse length versus population. This map uses flux bias and probe gain
-versus an IQ displacement.
-
-Load uses the saved run, not today's settings. The `mist_flux_dep` recipe
-runs one map using explicit native flux and gain ranges, saves and analyzes
-it, and leaves calibration unchanged. The adaptive `mist_fluxdep` workflow
-is a separate procedure.
+The `mist_flux_dep` recipe scans one map, not the adaptive `mist_fluxdep` workflow. Required `flux_device`, `flux_unit`, `flux_range` and `gain_range` reject null at input validation. After opening the tab and before Run, the recipe rejects a unit that does not match the device and equal endpoints on either axis. Omit `points` to keep the counts. Null clears both Expts values; readiness stops before acquisition if overrides leave them blank.
+Omit `flux_half`, `flux_period`, `ac_coeff` or `auto_range` to keep their Analyze values. Null for either flux calibration or for `ac_coeff` leaves the corresponding axis uncalibrated. Null for `auto_range` is rejected after Run, at Analyze settings validation before analysis starts. The recipe still attempts Save.
