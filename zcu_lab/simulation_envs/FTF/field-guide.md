@@ -396,17 +396,17 @@ readout:
   adc:
     ro_ch: 0
     gain: 100.0
-    noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+    noise_psd_adc2_ns: 1.0
   mux:
     gen_ch: 7
     input_per_gain: 10.0
     adc:
       - ro_ch: 2
         gain: 100.0
-        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+        noise_psd_adc2_ns: 1.0
       - ro_ch: 3
         gain: 100.0
-        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+        noise_psd_adc2_ns: 1.0
 ```
 
 這是結構示意，不是完整設定。物理 resonators 與 receiver 的延遲等值請保留 [default.yaml](default.yaml) 的設定。Tone 的頻率、gain、phase、播放長度與 ADC window 仍由 program 的 `MuxReadoutCfg` 提供。Raw 與 acquire 結果沿 program tone 的宣告順序排列。
@@ -426,18 +426,18 @@ readout:
 | `background.pivot_ghz` | 斜率因子為 1 的絕對頻率 | GHz，有限 signed 數 | 必填 |
 | `phase_deg` | 額外的 receiver phase | degree，有限 signed 數 | 省略為 0；不接受 `null` |
 | `offset_adc` | 每個 sample 的 I、Q offset | ADC sample units，有限二元素 `[I, Q]` | 省略為 `[0, 0]`；不接受 `null` |
-| `noise_psd_adc2_ns` | Two-sided white receiver noise spectral density | ADC²*ns，有限、對稱、positive-semidefinite 的 2×2 matrix，順序為 I、Q | 必填；零矩陣與 singular matrix 合法，不能省略代表無 noise |
+| `noise_psd_adc2_ns` | I、Q 各自的雙邊白雜訊 PSD | ADC²·ns，有限非負數 | 必填；填 `0` 關閉接收雜訊；不接受矩陣 |
 
 `time_of_flight_ns` 把物理輸出延後 τ，包含 lookback 的前導無訊號、ringup、ringdown 與 shaped envelope。它同時產生 `exp(-i*2*pi*f*τ)`，f 使用絕對 carrier frequency。τ = 400 ns 時，額外相位斜率約為 -2.513 rad/MHz。沒有獨立 edelay 旋鈕，也不需要為了此延遲修改 pulse 或 trigger metadata。
 
-ADC 先延後物理場，再解調並取共軛，轉成微波分析的 I+iQ。每個 incident carrier 的線路響應先乘 `background` 的 B(f)，f 為該 carrier 的絕對頻率，再套 gain 與 `phase_deg`。各 carrier 相加後只加入一次 offset，最後加入 noise。前導無訊號區仍有 offset 與 noise。共軛不翻轉 offset 或 noise 的 I/Q covariance，receiver phase 也不旋轉 noise。
+ADC 先延後物理場，再解調並取共軛，轉成微波分析的 I+iQ。每個 incident carrier 的線路響應先乘 `background` 的 B(f)，f 為該 carrier 的絕對頻率，再套 gain 與 `phase_deg`。各 carrier 相加後只加入一次 offset，最後加入 noise。前導無訊號區仍有 offset 與 noise。共軛與 receiver phase 只作用於訊號，不改變之後加入的 offset 或 noise。
 
 `background` 的複數漣漪同時改變振幅與相位，斜率項在 `pivot_ghz` 為 1。它不影響腔內場、Stark shift 或 noise PSD。公式見 [ADC 契約](../../../lib/zcu_tools/simulate/adc/README.md)。背景固定，不會隨 round 漂移。
 
-矩陣的對角項是 I、Q 的 PSD，非對角項是相關 PSD，兩個非對角值必須相等。非對角項可為負，但整體仍須 positive-semidefinite。這個矩陣不是每個 sample 的 covariance，也不是三迴路 map。
+I 和 Q 的接收雜訊獨立，兩者變異數都是 PSD 除以取樣間隔。下式的 `I₂` 是 2×2 單位矩陣。
 
 ```text
-Cov(sample) = noise_psd_adc2_ns / dt_ns
+Cov(sample) = (noise_psd_adc2_ns / dt_ns) × I₂
 ```
 
 `dt_ns` 是 ADC output sample interval，以 ns 計，由 caller 的板子 YAML 決定。物理模型 YAML 不提供 ADC clock 或 `dt_ns` 欄位。提高 sample rate 會縮短 dt，單樣本白雜訊 variance 因此增加。`gain` 不縮放這份 noise；要改接收雜訊，直接改 PSD，而不是把 `input_per_gain` 或物理 linewidth 當成 noise 旋鈕。

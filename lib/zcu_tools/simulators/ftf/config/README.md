@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-11-22, projective transition floor
+**Last updated:** 2026-11-22, projective transition floor and isotropic receiver noise
 
 `numerics.debug_capture` is optional and defaults to false. True records one
 acquire's Engine inputs and routes using the
@@ -76,7 +76,7 @@ env = ftf(settings.with_telemetry(enabled=False), soccfg=soccfg)
 
 `numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False), soccfg=soccfg)` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../environment/README.md#routing-telemetry)。
 
-錯誤包含欄位路徑。未知欄位、重複 source 名稱或 generator 綁定、非 A/V 的電源單位、無效 limits／dimensions，以及非 positive-semidefinite 的 ADC noise PSD 都在建立資源前拒絕。Loader 要求 v2 文件，對 v1 明確報錯並保留本機工作副本與既有 entry。
+錯誤包含欄位路徑。未知欄位、重複 source 名稱或 generator 綁定、非 A/V 的電源單位、無效 limits／dimensions，以及不符合有限非負純量要求的 ADC noise PSD 都在建立資源前拒絕。Loader 要求 v2 文件，對 v1 明確報錯並保留本機工作副本與既有 entry。
 
 `readout.adc.time_of_flight_ns` 是有限非負總讀取線延遲，單位 ns。`readout.resonators.r1.mismatch_phase_rad` 與 `r2.mismatch_phase_rad` 分別是有限散射相位，單位 radians。三個欄位省略都為 0，不接受 null 或非有限值。Resources 只驗證這些值；`simulators.ftf.environment` 接到 `simulate.adc` 的數值模型，由 ADC 決定物理延遲、微波 IQ 與散射響應。
 
@@ -96,6 +96,6 @@ Program 提供 tones 的頻率、gain、phase 與順序，YAML 綁定各路徑�
 
 獨立板子 YAML 擁有 generator／ADC 數量、型別與時脈，caller 用 `program.build_soccfg` 建立 `soccfg` 後明確交給 `ftf`。模型 YAML 只擁有物理接線與校準，不從最大索引推導板子。索引必須是非負整數，caller 要確保每個綁定都符合實際板子的通道與型別。索引空洞不是已綁定的線路。
 
-Charge 係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。ADC noise 採 two-sided white PSD，sample covariance 為 PSD/dt_ns，receiver gain 不縮放 noise。板子設定與物理接線的對照見欄位指南。
+Charge 係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。每個 receiver 必填純量 `noise_psd_adc2_ns`，以 ADC²·ns 表示每個 I/Q 分量的雙邊白雜訊 PSD。I 和 Q 獨立，取樣變異數為 PSD/dt_ns。Receiver gain 不縮放 noise。板子設定與物理接線的對照見欄位指南。
 
 [default.yaml](../../../../../zcu_lab/simulation_envs/FTF/default.yaml) 的 circuit energies、couplings 與 resonator frequencies 採 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。

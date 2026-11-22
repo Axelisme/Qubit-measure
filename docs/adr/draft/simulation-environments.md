@@ -312,13 +312,23 @@ Readout 採弱讀出、dispersive、線性 resonator 與能量基底 QND mixture
 
 2026-10-14，使用者提出：「readout_source/receiver一個就好，因為共用傳輸線。」對是否也只用一個 generator 與一個 ADC readout channel 的追問，確認：「是的，只有一個gen_ch與ro_ch」。初版 FTF 的 readout_source 與 receiver 各一個，分別綁定 YAML 指定的 gen_ch 與 ro_ch，不合併 microwave／flux control 的其他 generators。現行 FTF 另支援 mux readout，一個 generator 發出共同起點的有序 tones，每個 ADC receiver 接收全部 incident carriers，再以自己的頻率解調。同一 shot 的全部 ADC 沿同一條投影狀態 chain 取樣。觀測同一 event 時共用 CTMC path，receiver noise 各自獨立。單 pulse 與 mux 的現行設定及數值契約見 [FTF README](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 
-R1、R2 共用 reciprocal、co-located two-port transmission line，包含 off-diagonal radiative damping，不等同兩條獨立 Lorentzian 相加或僅共用 ADC。Two-port 指物理端口，不代表雙 ADC。每個 receiver 觀測共同線路輸出，其接收 noise 的 PSD matrix 定義在 I,Q 空間，為2×2實對稱正半定矩陣。有限 pulse 經 classical field evolution，ADC 以總讀取線延遲推遲物理輸出，再解調、取共軛成微波 I+iQ，套 receiver gain／phase／offset 並加入 noise。各 resonator 的 mismatch 相位只旋轉其散射項，不改 shared-line 動力學。數值與欄位契約見 [ADC README](../../../lib/zcu_tools/simulate/adc/README.md) 及 [FTF 欄位指南](../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
+R1、R2 共用 reciprocal、co-located two-port transmission line，包含 off-diagonal radiative damping，不等同兩條獨立 Lorentzian 相加或僅共用 ADC。Two-port 指物理端口，不代表雙 ADC。每個 receiver 觀測共同線路輸出並加入[等向接收雜訊](#等向接收雜訊)。有限 pulse 經 classical field evolution，ADC 以總讀取線延遲推遲物理輸出，再解調、取共軛成微波 I+iQ，套 receiver gain／phase／offset 並加入 noise。各 resonator 的 mismatch 相位只旋轉其散射項，不改 shared-line 動力學。數值與欄位契約見 [ADC README](../../../lib/zcu_tools/simulate/adc/README.md) 及 [FTF 欄位指南](../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
 
 2026-10-14，使用者對「保留空間內的多能階relaxation＋條件平均讀出，不追逐shot衰減細節」回答「好，同意」。對每個 readout 初始 joint state 計算含既有 directional relaxation／thermal transitions 的條件平均響應，涵蓋矩陣元允許的 cascade、直接跨級、coupler／leakage states 與熱激發，不限0↔1。不新增 readout T1、空間外態或 ground sink。
 
 響應保留 population 與 state-conditioned 場 moments 的關聯，不能只平均 resonator frequency 再解單一場方程。Integrated 將各讀出的條件均值依其事件的 occupancy 加總，得 noiseless total。共用 bins 只編碼各事件邊際，不表示跨事件物理 joint。Raw／decimated 沿同一發的 chain 取樣，每 event 再抽 CTMC path。兩種取數都使用同一份 `ProjectionChain`，不逐 shot 重解量子演化。Raw path 生成跳變時間造成的 IQ 尾巴與跨 ADC 關聯，但 herald path 不回饋量子續演化。
 
 此模型不新增 power-induced transitions、額外 readout Purcell、強 backaction 或 Kerr，不作硬體 single-shot fidelity 認證。相同物理條件可共用演化與條件平均響應，reps／rounds 主要增加抽樣及資料輸出，成本仍須實測。
+
+### 等向接收雜訊
+
+**規則。** `resources.simulation_schema.Receiver` 要求 `noise_psd_adc2_ns` 為有限非負純量，代表每個 I/Q 分量的雙邊白雜訊 PSD，單位 ADC²·ns。I 和 Q 獨立，各自的變異數為 PSD 除以取樣間隔 ns。設定不接受 2×2 矩陣，不自動轉換舊檔。
+
+**例子。** 取樣間隔為 10 ns、PSD 為 400 ADC²·ns 時，I 與 Q 的單樣本變異數各為 40 ADC²。填 0 會關閉接收雜訊。
+
+**邊界。** 此規則管束 FTF、single、integer 與 six fluxonium 的模型設定。環境把純量換算為對角共變異矩陣，交給 `simulate.adc` 的一般取樣介面。這不限制其他訊號來源造成的 IQ 分布，也不改寫分析模型。
+
+**依據。** 2026-11-22，使用者：「我从来都没有要求杂讯要出现不同方向的异性我从来都是假设杂讯是各项同性所以这个机制完全没有必要留着，直接全部同向就好了。等向」。對移除矩陣欄位的方案答「我选 A」。見[模擬器接收雜訊只保留等向設定](../../discussions/2026-11-22-isotropic-receiver-noise.md)。
 
 ### Lookback、適用域與 GUI 邊界
 

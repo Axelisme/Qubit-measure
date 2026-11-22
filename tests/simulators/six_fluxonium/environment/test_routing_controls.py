@@ -26,7 +26,7 @@ def routing_settings():
     for qubit in document["qubits"].values():
         qubit["chip"]["temperature_k"] = 0.05
         qubit["numerics"]["truncation"] = {"native_cutoff": 12, "levels": 2}
-        qubit["readout"]["adc"]["noise_psd_adc2_ns"] = [[0.01, 0], [0, 0.01]]
+        qubit["readout"]["adc"]["noise_psd_adc2_ns"] = 0.01
     return parse_six_fluxonium(document)
 
 
