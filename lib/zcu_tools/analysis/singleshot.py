@@ -299,7 +299,8 @@ class ReferenceIQAnalysis:
         latent energy-state populations when preparations are contaminated.
     label_errors: three evaluation misassignment fractions, including preparation error.
     macro_error: equally weighted mean label error, not pure-state readout infidelity.
-    minimum_separation: minimum pairwise pooled Mahalanobis distance from training.
+    minimum_separation: closest pair of training centroids' Euclidean distance
+        divided by the shared isotropic training sigma (dimensionless).
     condition_number: training confusion matrix 2-norm condition number.
     minimum_singular_value: training confusion matrix minimum singular value.
     training_shots/evaluation_shots: disjoint per-label sample counts.
@@ -328,9 +329,10 @@ def analyze_reference_iq(
     N must be >=6. First floor(N/2) shots per row train centroids and confusion;
     the remaining shots evaluate assignment and unclipped correction. Exact
     nearest-centroid ties choose the lowest label. Output axes are label-sorted.
-    Pooled covariance is the equally weighted mean of unbiased within-training
-    IQ covariances. Degenerate centers/covariance, singular confusion, invalid
-    labels or incomplete/nonfinite data raise ValueError or LinAlgError.
+    The shared isotropic sigma is the square root of half the trace of the
+    equally pooled unbiased within-training IQ covariance. Coincident centers,
+    zero or nonfinite sigma, invalid labels, and incomplete/nonfinite data raise
+    ValueError. Singular confusion raises LinAlgError.
     No state-purity inference or clipping is performed.
     """
     if signals.ndim != 2 or signals.shape[0] != 3 or signals.shape[1] < 6:
@@ -351,17 +353,13 @@ def analyze_reference_iq(
     raw = np.stack(
         [(evaluation_predictions == i).mean(axis=1) for i in range(3)], axis=1
     )
-    covariance = np.mean(
-        [np.cov(np.stack((row.real, row.imag))) for row in training], axis=0
+    # Complex sample variance already sums the I and Q variances.
+    sigma = np.sqrt(np.mean(np.var(training, axis=1, ddof=1)) / 2)
+    if not np.isfinite(sigma) or sigma <= 0:
+        raise ValueError("Reference shared IQ sigma must be finite and positive")
+    minimum_distance = min(
+        abs(first - second) for first, second in combinations(centroids, 2)
     )
-    if np.linalg.matrix_rank(covariance) != 2:
-        raise ValueError("Reference pooled IQ covariance must be nonsingular")
-    separations = []
-    for first, second in combinations(centroids, 2):
-        difference = np.array([(first - second).real, (first - second).imag])
-        separations.append(
-            float(np.sqrt(difference @ np.linalg.solve(covariance, difference)))
-        )
     errors = 1 - np.diag(raw)
     return ReferenceIQAnalysis(
         centroids=centroids,
@@ -370,7 +368,7 @@ def analyze_reference_iq(
         corrected_populations=correct_populations(raw, confusion, clip=False),
         label_errors=errors,
         macro_error=float(errors.mean()),
-        minimum_separation=min(separations),
+        minimum_separation=float(minimum_distance / sigma),
         condition_number=float(np.linalg.cond(confusion)),
         minimum_singular_value=float(np.linalg.svd(confusion, compute_uv=False).min()),
         training_shots=split,

@@ -249,6 +249,7 @@ def test_reference_iq_uses_training_only_and_reports_heldout_label_fractions() -
         (np.ones((3, 8), dtype=complex), np.array([0.0, 1.5, 2.0])),
         (np.full((3, 8), complex(np.nan, 0)), np.array([0, 1, 2])),
         (np.ones((3, 8), dtype=complex), np.array([0, 1, 2])),
+        (np.repeat([[0j], [6 + 0j], [12j]], 8, axis=1), np.array([0, 1, 2])),
     ],
 )
 def test_reference_iq_rejects_invalid_or_unidentifiable_references(
@@ -285,10 +286,22 @@ def test_reference_correction_uses_training_rows_without_clipping() -> None:
     )
 
 
-def test_reference_iq_rejects_singular_within_cloud_covariance() -> None:
-    signals = np.array([0, 10, 20])[:, None] + np.arange(8, dtype=complex)
-    with pytest.raises(ValueError, match="covariance"):
-        analyze_reference_iq(signals, np.array([0, 1, 2]))
+@pytest.mark.parametrize("f_axis", [1, 1j], ids=["rank-one", "anisotropic"])
+def test_reference_separation_uses_shared_isotropic_sigma(f_axis: complex) -> None:
+    centers = np.array([0, 6, 12j])
+    offsets = np.array([1, 2, 2 * f_axis])[:, None] * np.array([-1, 1, -1, 1])
+    training = centers[:, None] + offsets
+    evaluation = np.repeat(centers[:, None], 4, axis=1)
+
+    result = analyze_reference_iq(
+        np.concatenate((training, evaluation), axis=1), np.array([0, 1, 2])
+    )
+
+    # Training residual sums of squares are 4, 16 and 16, each with 3 degrees
+    # of freedom. The shared per-quadrature variance is 2; the closest pair is 6 apart.
+    assert result.minimum_separation == pytest.approx(np.sqrt(18))
+    np.testing.assert_array_equal(result.confusion_matrix, np.eye(3))
+    np.testing.assert_array_equal(result.corrected_populations, np.eye(3))
 
 
 def test_reference_diagnostics_do_not_depend_on_adc_unit_scale() -> None:
