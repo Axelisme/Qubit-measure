@@ -14,7 +14,7 @@ Bind the `mux` alias to a `group/mux` with matching qubits and resonators in rea
 
 Choose each tone's calibrated **π/2 pulse** and set **Applied phase-ramp detune** (MHz). The final pulse adds `360° × detune × delay` to the source phase; the RF carrier does not change. Choose a shared **Delay** window of about 3 × expected T2* with at least 10 points per fringe, based on the fastest expected rate. A short window shows only part of the decay, so T2* relies on extrapolation; sparse points can hide or alias fringes.
 
-**Fit fringe** uses a damped cosine (at least six finite points); off uses an exponential (at least four). **Fit phase offset (fringe only)** lets the fit find a constant offset; otherwise the phase follows the 0°/180° convention.
+**Fit fringe** uses a damped cosine (at least six finite points); off uses an exponential (at least four). **Fit phase offset (fringe only)** lets the fit find a constant offset; when off, it uses the measured signal at the delay closest to zero to choose 0° or 180°.
 
 In `mux_t2ramsey`, omission retains settings. Null `participants` leaves a missing selection at the pre-Run readiness check unless an override fills it. Null `fit_fringe` or `fit_phase` is rejected by Analyze, after acquisition. See the [mux recipe inputs](../../../recipes/mux-guide.md#mux_t2ramsey).
 
@@ -26,7 +26,7 @@ Analyze `fit_i` keeps the same points and overlays the fitted model as a solid l
 
 Shot SEM bars show the expected error of each projected mean: the sample standard deviation of the same shots that gave that point, divided by the square root of their count. They are not single-shot scatter, round-to-round scatter or fit uncertainty. Fewer than two shots give no bar. After reloading a data file, rerunning Analyze gives no bars because only the mean was saved; saved figures still show their original bars.
 
-The ± on T2* and fringe rate is the fitted parameter's standard error. R² measures explained variation; normalized residual RMS is the residual RMS divided by the observed signal span. Systematic mismatch, unresolved fringes or cross-tone contamination can make a correction unreliable. Sampling uses `1 / (largest delay gap × max(|fitted fringe rate|, |actual detune|))`; adequate means at least 10 points per cycle and a full cycle, not proof against unknown aliases.
+The ± on T2* and fringe rate is the fitted parameter's standard error. R² measures explained variation; normalized residual RMS is the residual RMS divided by the observed signal span. Systematic mismatch, unresolved fringes or cross-tone contamination can make a correction unreliable. Sampling uses `1 / (largest delay gap × max(|fitted fringe rate|, |actual detune|))`. This estimate cannot rule out unknown aliases.
 
 ## Next step
 

@@ -45,7 +45,7 @@ from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.detune import actual_detune
 
 _DELAY_LABEL = "Total echo delay (µs)"
-_IQ_LABEL = "IQ projection (a.u.)"
+_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
 
 
 @dataclass(frozen=True)
@@ -305,7 +305,9 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             if result.iq_moments is None
             else iq_shot_sem(result.iq_moments[1:][valid], direction=(i, q))
         )
-        _, ax = plots.subplots(num="fit", figsize=config.figsize, layout="tight")
+        fig, ax = plots.subplots(
+            num="fit", figsize=config.figsize, layout="constrained"
+        )
         ax.set(title="Spin echo", xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
         if sem is not None and np.isfinite(sem).any():
             measured, _, _ = ax.errorbar(
@@ -313,7 +315,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             ).lines
         else:
             (measured,) = ax.plot(xs, real_signals, ".-", label="Measured")
-        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.17))
+        measured_legend = fig.legend(loc="outside lower center", ncols=2)
 
         # 3. Fit the same unweighted observations and overlay the model on a dense grid.
         if fit_method == "fringe":
@@ -332,7 +334,8 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         ax.plot(
             fit_delays, model(fit_delays, *fit.params), color="tab:orange", label=label
         )
-        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncols=2)
+        measured_legend.remove()
+        fig.legend(loc="outside lower center", ncols=2)
 
         # 4. Annotate the fitted lifetimes, frequency and quality without selection gates.
         t2e, t2eerr = fit.decay_time, fit.decay_time_err

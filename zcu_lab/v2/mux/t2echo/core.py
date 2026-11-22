@@ -22,6 +22,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.lines import Line2D
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -208,8 +209,14 @@ class MuxT2EchoCfg(ConfigBase):
 
 
 def _show_live(plots: Plots, cfg: MuxT2EchoCfg, times: NDArray[np.float64]):
-    # Plot only committed rounds, with shot SEM along the mean-IQ axis.
+    """Show one live figure per cfg participant and return its shared updater.
+
+    times contains requested total echo delays in µs. The updater takes completed-round
+    sums shaped (delays, participants, 6) and returns the changed data, SEM and
+    progress artists. Projection and plot update errors propagate.
+    """
     viewers = []
+    empty = times[:0]
     for index in cfg.participants:
         fig, ax = plots.subplots(num=f"measurement_{index}", layout="constrained")
         fig.suptitle(f"Mux Echo · {cfg.tones[index].name} · IQ contrast")
@@ -218,7 +225,9 @@ def _show_live(plots: Plots, cfg: MuxT2EchoCfg, times: NDArray[np.float64]):
             f"Acquired points: 0 / {times.size} · 0 shots per point"
         )
         viewer = live_errorbar(ax)
-        ax.lines[0].set(marker="o", markersize=4, label="Measured IQ ± shot SEM")
+        for artist in viewer.set(empty, empty, empty):
+            if isinstance(artist, Line2D):
+                artist.set(marker="o", markersize=4, label="Measured IQ ± shot SEM")
         fig.legend(loc="outside lower center")
         viewers.append((viewer, progress))
         fig.show()
@@ -247,6 +256,12 @@ def _plot_fit(
     fitted: NDArray[np.float64],
     outcome: MuxCoherenceFit,
 ) -> None:
+    """Add the fit curve, in-window T2 echo marker and fit facts to ax.
+
+    times contains increasing requested delays in µs. fitted contains the model
+    values on that grid; outcome supplies the model kind, estimates and quality.
+    Update ax in place; return None without presenting or refreshing the figure.
+    """
     model = "Damped cosine" if outcome.fit_fringe else "Exponential decay"
     ax.plot(times, fitted, color="C1", label=model)
     if times[0] <= outcome.t2 <= times[-1]:
@@ -411,8 +426,8 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         Omit the first point and missing IQ. Return per-tone T2E in us, fringe
         rate in MHz, uncertainties and fit quality, or a fit failure reason.
         Acquired delays, projected observations and predictions stay local
-        to analysis. Draw only the primary curve in fit_i. Invalid sources or
-        fit methods raise.
+        to analysis. Draw fit_i with any available projected IQ; on projection
+        failure show the reason without data. Invalid sources or fit methods raise.
         """
         # 1. Omit the first requested point before removing missing IQ.
         data = source.result
@@ -427,7 +442,6 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
             moments = (
                 None if data.iq_moments is None else data.iq_moments[row, 1:][finite]
             )
-            real, sem = project_iq(trace.signal, moments)
             name = (
                 f"Tone {raw_index}"
                 if source.cfg is None
@@ -438,17 +452,10 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
             )
             ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
             fig.suptitle(f"Mux Echo · {name} · IQ contrast")
-            (measured,) = ax.plot(trace.times, real, "o", ms=4, label="Measured IQ")
-            if sem is not None and np.isfinite(sem).any():
-                ax.errorbar(
-                    trace.times,
-                    real,
-                    yerr=sem,
-                    fmt="none",
-                    ecolor="C0",
-                    label="Shot SEM",
-                )
+            projected = None
             try:
+                projected = project_iq(trace.signal, moments)
+                real, _ = projected
                 # Source detune, not a fitted oscillation, determines fringe eligibility.
                 fit_fringe = options.fit_method == "fringe"
                 if fit_fringe:
@@ -483,11 +490,34 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 ArithmeticError,
                 np.linalg.LinAlgError,
             ) as exc:
-                measured.set_linestyle("-")
+                fit_curve = None
                 ax.set_title(f"Fit unavailable: {exc}", wrap=True)
                 outcomes.append(MuxFitFailure(trace.index, str(exc)))
             else:
-                _plot_fit(ax, curve_times, fitted, outcome)
+                fit_curve = (curve_times, fitted, outcome)
                 outcomes.append(outcome)
+
+            if projected is None:
+                continue
+            real, sem = projected
+            ax.plot(
+                trace.times,
+                real,
+                "o",
+                ms=4,
+                linestyle="-" if fit_curve is None else "none",
+                label="Measured IQ",
+            )
+            if sem is not None and np.isfinite(sem).any():
+                ax.errorbar(
+                    trace.times,
+                    real,
+                    yerr=sem,
+                    fmt="none",
+                    ecolor="C0",
+                    label="Shot SEM",
+                )
+            if fit_curve is not None:
+                _plot_fit(ax, *fit_curve)
             fig.legend(loc="outside lower center", ncols=2)
         return tuple(outcomes)
