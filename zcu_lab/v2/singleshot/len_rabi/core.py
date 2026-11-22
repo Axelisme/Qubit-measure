@@ -14,12 +14,15 @@ from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabili
 from zcu_tools.analysis.fitting.singleshot_rabi import (
     RabiJointFitResult,
     RabiJointFitSummary,
+    RabiPhysicalParams,
     fit_rabi_joint,
+    rabi_excited_population,
     summarize_rabi_joint_fit,
 )
-from zcu_tools.analysis.singleshot import classify_rabi_iq
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
+from zcu_tools.analysis.singleshot import classify_rabi_iq, classify_result
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, config
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions
@@ -28,7 +31,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.singleshot.util import (
     rabi_preview_classifier,
     raw_shots_to_signal,
@@ -135,8 +138,7 @@ def _plot_initial_histogram(
         )
     ax.set_xlabel("Pooled PCA projection (a.u.)")
     ax.set_ylabel("Shots (count)")
-    ax.legend(fontsize=8, loc="lower left")
-    ax.grid(True)
+    ax.legend(fontsize=10, loc="best")
 
 
 def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
@@ -170,16 +172,126 @@ def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
         ax.set_title("Confusion matrix unavailable", fontsize=10)
     ax.set_xticks(range(3), labels)
     ax.set_yticks(range(3), labels)
-    ax.set_xlabel("Classified state")
-    ax.set_ylabel("True state")
+    ax.grid(False)
+    ax.set_xlabel("Assigned outcome")
+    ax.set_ylabel("Model state")
+
+
+def _plot_rabi_populations(
+    axes: NDArray[np.object_],
+    coordinates: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+    fit: RabiJointFitResult,
+    initial_state: str,
+) -> None:
+    """Display retained-shot fractions and the corresponding model predictions."""
+    panels: list[Axes] = list(axes)
+    fig = panels[0].get_figure()
+    if fig is not None:
+        title = f"Single-shot length Rabi · qubit · classified outcomes ({initial_state} start)"
+        if fit.backend.valid:
+            pi = np.pi / fit.omega
+            index = fit.backend.parameter_names.index("log_omega")
+            pi_error = pi * np.sqrt(
+                max(float(fit.backend.covariance[index, index]), 0.0)
+            )
+            title += (
+                f"\nπ length = {pi:.3g} ± {pi_error:.2g} µs · "
+                f"Fit NLL = {fit.backend.nll:.3g} · Readout condition = {fit.condition_number:.3g}"
+            )
+        else:
+            title += "\nJoint fit invalid; fitted classification unavailable"
+        fig.suptitle(title, fontsize=10)
+    for ax, state in zip(panels, ("g", "e", "other"), strict=True):
+        ax.set(xlabel="Drive envelope length (µs)", ylabel=f"P({state})")
+    if not fit.backend.valid:
+        return
+
+    retained = np.isfinite(signals)
+    masks = classify_result(signals, fit.g_center, fit.e_center, fit.radius)
+    counts = np.stack([(mask & retained).sum(axis=1) for mask in masks], axis=1)
+    with np.errstate(invalid="ignore"):
+        fractions = counts / counts.sum(axis=-1, keepdims=True)
+    covariance = class_probability_covariance(counts)
+    errors = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
+    grid = np.linspace(float(coordinates.min()), float(coordinates.max()), 250)
+    excited = rabi_excited_population(
+        grid,
+        RabiPhysicalParams(
+            p_e0=float(fit.initial_populations[1]),
+            p_inf=fit.p_inf,
+            center_g=fit.projected_g_center,
+            center_e=fit.projected_e_center,
+            sigma=fit.sigma,
+            p_avg=fit.p_avg,
+            length_ratio=fit.length_ratio,
+            t_r=fit.t_r,
+            omega=fit.omega,
+            phase=fit.phase,
+        ),
+    )
+    predicted = (
+        np.column_stack((1.0 - excited, excited, np.zeros_like(excited)))
+        @ fit.confusion_matrix
+    )
+    for i, (ax, color) in enumerate(
+        zip(panels, ("tab:blue", "tab:red", "tab:green"), strict=True)
+    ):
+        ax.errorbar(
+            coordinates,
+            fractions[:, i],
+            yerr=errors[:, i],
+            fmt="o",
+            markersize=3,
+            capsize=2,
+            color=color,
+            label="Data ± shot SEM",
+        )
+        ax.plot(grid, predicted[:, i], color=color, label="Joint fit prediction")
+    pi = np.pi / fit.omega
+    if coordinates.min() <= pi <= coordinates.max():
+        panels[1].axvline(pi, linestyle=":", color="0.35", label="π length")
+    panels[1].legend(loc="best", fontsize=10)
 
 
 class LenRabiCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="µs")]
-    shots: Annotated[int, FieldMeta(label="Shots", unit="count")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select the reset module applied before preparation, or leave empty to skip reset.",
+        ),
+    ] = None
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit drive pulse",
+            description="Enter the resonant qubit pulse whose envelope length is swept.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the readout module applied at the end of the shot.",
+        ),
+    ]
+    length: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Drive envelope length",
+            unit="µs",
+            description="Set the qubit drive envelope duration sweep in µs.",
+        ),
+    ]
+    shots: Annotated[
+        int,
+        FieldMeta(
+            label="Shots per length",
+            unit="count",
+            description="Enter the number of IQ readouts at each drive length.",
+        ),
+    ]
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -255,11 +367,14 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         # 2. Preview classified populations while keeping raw IQ as the result.
 
         viewer = None
+        progress = None
         if classifier is not None:
             figure, ax = context.plots.subplots(num="measurement")
-            ax.set(xlabel="Length (µs)", ylabel="P(g), P(e), P(other)")
-            viewer = live_line(ax, num_lines=3)
-            ax.set_ylim(0.0, 1.0)
+            ax.set(xlabel="Drive envelope length (µs)", ylabel="Outcome probability")
+            progress = figure.suptitle(
+                "Single-shot length Rabi · qubit · classified populations"
+            )
+            viewer = live_errorbar(ax, num_lines=3)
             for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
             ax.legend()
@@ -275,12 +390,27 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             if viewer is None or classifier is None or classifier.radius is None:
                 return ()
             acquired_rows = np.all(np.isfinite(raw_iq), axis=1)
-            populations = classify_rabi_iq(
+            masks = classify_result(
                 raw_iq, classifier.g_center, classifier.e_center, classifier.radius
             )
-            populations[~acquired_rows] = np.nan
+            counts = np.stack([mask.sum(axis=1) for mask in masks], axis=1).astype(
+                np.float64
+            )
+            counts[~acquired_rows] = np.nan
+            populations = counts[:, :2] / raw_iq.shape[1]
             other = 1.0 - populations.sum(axis=1)
-            return viewer.set(lengths, np.column_stack((populations, other)).T)
+            covariance = class_probability_covariance(counts)
+            sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
+            artists = viewer.set(
+                lengths, np.column_stack((populations, other)).T, sem.T
+            )
+            if progress is None:
+                return artists
+            progress.set_text(
+                "Single-shot length Rabi · qubit · classified populations\n"
+                f"{np.count_nonzero(acquired_rows)}/{acquired_rows.size} lengths acquired"
+            )
+            return (progress, *artists)
 
         buffer = SignalBuffer(
             expected_shape,
@@ -349,50 +479,16 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         readout = source.cfg.readout if source.cfg is not None else None
         ro_length = readout.ro_length if readout is not None else None
         ro_length_us = float(ro_length) if isinstance(ro_length, Real) else None
-        width, height = config.figsize
-        fig = Figure(figsize=(width, height * 1.6), layout="constrained")
+        fig = Figure(figsize=(9, 4), layout="constrained")
         plots.adopt("fit", fig)
-        grid = fig.add_gridspec(
-            2,
-            2,
-            height_ratios=(2.0, 1.2),
-            hspace=0.16,
-            wspace=0.12,
+        axes = fig.subplots(ncols=3)
+        _plot_rabi_populations(
+            axes, result.lengths, result.signals, fit, options.initial_state
         )
-        ax = fig.add_subplot(grid[0, :])
-        histogram_ax = fig.add_subplot(grid[1, 0])
-        confusion_ax = fig.add_subplot(grid[1, 1])
-
-        colors = ("blue", "red", "green")
-        labels = ("$|0\\rangle$", "$|1\\rangle$", "$|L\\rangle$")
-        for index, (color, label) in enumerate(zip(colors, labels, strict=True)):
-            ax.plot(
-                result.lengths,
-                fit.measured_populations[:, index],
-                color=color,
-                ls="none",
-                marker="o",
-                markersize=3,
-                label=label,
-            )
-            ax.plot(
-                result.lengths,
-                fit.fitted_populations[:, index],
-                color=color,
-                ls="-",
-            )
-        if fit.backend.valid:
-            ax.set_title(
-                f"$\\Omega$={fit.omega:.3g} rad/µs, "
-                f"phase={np.degrees(fit.phase):.2f}°, cond={fit.condition_number:.3g}"
-            )
-        else:
-            ax.set_title("Rabi joint fit invalid")
-        ax.set_xlabel("Pulse length (µs)")
-        ax.set_ylabel("P(0), P(1), P(L)")
-        ax.set_ylim(0.0, 1.0)
-        ax.legend(loc=4)
-        ax.grid(True)
+        diagnostics = Figure(figsize=(9, 4.5), layout="constrained")
+        plots.adopt("readout", diagnostics)
+        histogram_ax, confusion_ax = diagnostics.subplots(ncols=2)
+        diagnostics.suptitle("Single-shot length Rabi · qubit · readout diagnostics")
         # 3. Show readout diagnostics, deriving T1 and initial fractions only if valid.
         effective_t1_us = None
         if (

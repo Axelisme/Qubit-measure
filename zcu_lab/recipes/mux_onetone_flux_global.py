@@ -38,7 +38,7 @@ class MuxOnetoneFluxGlobalInputs(MuxOnetoneFluxInputs):
     overrides: Overrides
     flux: ToneRangeInputs | None | Keep = Field(
         default=KEEP,
-        description="Native coil start/stop. No unit conversion.",
+        description="Sets DC bias › Start and Stop in Flux unit on the common source.",
     )
 
 

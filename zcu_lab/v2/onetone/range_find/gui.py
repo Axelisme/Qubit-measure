@@ -19,10 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.analyze_params import ParamMeta
-from zcu_tools.gui.app.measure.range_find_frontend import (
-    draw_range_find,
-    make_range_find_frontend,
-)
+from zcu_tools.gui.app.measure.range_find_frontend import make_range_find_frontend
 from zcu_tools.gui.app.measure.range_find_plugin import (
     DipSelection,
     RangeFindParameters,
@@ -169,17 +166,17 @@ def _make_interactive_plugin(
     options = req.analyze_params.to_options()
     result = req.run_result.result
 
-    fig, _ = plots.subplots(nrows=1, num="fit", figsize=(9, 4.5))
-
-    @plots.on_plot_thread
-    def draw(state: RangeFindState):
-        draw_range_find(fig, plugin.freqs, plugin.magnitude, state)
-        return (fig,)
-
     def build_result(state: RangeFindState) -> RangeFindAnalysis:
+        """Render the committed dip choices without changing picker state."""
         analysis = _build_analysis(req, state)
-        draw(state)
-        fig.show()
+        RangeFindExp.plot_dips(
+            plugin.freqs,
+            plugin.magnitude,
+            [(dip.component, dip.freq) for dip in state.selected],
+            candidates=[dip.freq for dip in state.candidates],
+            prominence_factor=state.options.prominence_factor,
+            plots=plots,
+        )
         return analysis
 
     plugin = RangeFindPlugin(
@@ -288,6 +285,12 @@ def run(
     return RunRecord(cfg=cfg, result=RangeFindExp().run(cfg, context=context))
 
 
+def _summary_lines(source: RangeFindRun) -> tuple[str, ...]:
+    """Report configured averaging from the analyzed Run or Load, if available."""
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=RangeFindExp.AXES_SPEC,
     make_form=make_form,
@@ -298,5 +301,6 @@ DEFINITION = Adapter(
         frontend=make_range_find_frontend,
         options=_get_analyze_params,
         writeback=_get_writeback_items,
+        summary_lines=_summary_lines,
     ),
 )

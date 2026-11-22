@@ -47,3 +47,9 @@ Analysis defaults to a single-exponential fit; enable dual-exponential only when
    points maps to delay Expts; max_delay_us sets the stop. dual_exp and skip change only analysis.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+
+## Reading the plots
+
+Both plots show the projection of mean IQ along the trace's principal axis in a.u. It is contrast, not a population. The live title shows retained shots per point. Each bar is one shot SEM: retained shots' sample standard deviation along that IQ axis divided by the square root of their count. Points without moments or with fewer than two shots have no bar. Mean-only files still Load. The bars do not weight the fit.
+
+Analyze shows the decay model on a dense grid, T₁ with fit standard error, and a secondary decay if Dual exponential is selected. R² describes the variation explained by the model, not an acceptance cutoff. If the trace has not reached baseline at the right edge, extend the delay and increase Expts to retain early-time coverage. The summary shows the source Reps × Rounds, not shots actually retained.

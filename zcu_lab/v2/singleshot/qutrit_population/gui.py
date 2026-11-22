@@ -21,6 +21,15 @@ from .core import QutritPopulationCfg, QutritPopulationExp, QutritPopulationResu
 from .form import make_form
 
 
+def _summary_lines(
+    source: RunRecord[QutritPopulationCfg, QutritPopulationResult],
+) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds: {cfg.shots}×1 per preparation",)
+
+
 def _run(
     cfg: QutritPopulationCfg, *, context: RunContext
 ) -> RunRecord[QutritPopulationCfg, QutritPopulationResult]:
@@ -74,5 +83,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_writeback),
+    analysis=Analysis(fn=_analyze, writeback=_writeback, summary_lines=_summary_lines),
 )

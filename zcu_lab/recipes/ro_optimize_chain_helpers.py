@@ -16,7 +16,7 @@ class ChainSweepReport(RecipeReport):
 
     score: float | None = Field(
         default=None,
-        description="Maximum combined heuristic score; null if unavailable.",
+        description="Thermal-chain score at the selected setting; null if unavailable.",
     )
     score_error: float | None = Field(
         default=None,
@@ -24,7 +24,7 @@ class ChainSweepReport(RecipeReport):
     )
     qnd: float | None = Field(
         default=None,
-        description="QND at the best setting, without clipping; null if unavailable.",
+        description="Estimated QND at the selected setting, without clipping; null if unavailable.",
     )
     qnd_error: float | None = Field(
         default=None,

@@ -129,6 +129,11 @@ def _run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]
     return RunRecord(cfg=cfg, result=FreqExp().run(cfg, context=context))
 
 
+def _summary_lines(source: FreqRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=FreqExp.AXES_SPEC,
     make_form=_Freq_make_form,
@@ -138,5 +143,6 @@ DEFINITION = Adapter(
         fn=_Freq_analyze,
         options=lambda source, env: FreqAnalyzeOptions(),
         writeback=_Freq_get_writeback_items,
+        summary_lines=_summary_lines,
     ),
 )

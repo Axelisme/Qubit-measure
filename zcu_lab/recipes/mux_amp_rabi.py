@@ -40,20 +40,20 @@ class MuxAmpRabiInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
+        description="Sets Participants: original tone indices (zero-based) for drives and readout, in run order.",
     )
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
-        description="Start/stop for every tone in original order, including nonparticipants. No per-tone n.",
+        description="Sets Tones › Gain › Start and Stop (a.u.) for every original tone, including nonparticipants.",
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Positive hardware scan point count shared by all tones.",
+        description="Sets Expts (count), the shared number of gain points.",
     )
 
     skip: int | None | Keep = Field(
         default=KEEP,
-        description="Leading gain-fit points to skip. Omitted keeps analysis value; null passes to owner.",
+        description="Sets Analysis › Skip points (count), the number of leading gain points excluded from the fit.",
     )
 
 

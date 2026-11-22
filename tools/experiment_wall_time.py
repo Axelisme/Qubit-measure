@@ -15,7 +15,6 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from functools import partial
 from hashlib import sha256
 from os.path import abspath
 from pathlib import Path
@@ -476,6 +475,7 @@ class _ControllerRun:
 
 @dataclass
 class _RunOwner:
+    workers: int = 1
     app: QCoreApplication | None = None
     retained: list[ExitStack] = field(default_factory=list)
 
@@ -530,7 +530,7 @@ def _measure_run(
         settings = load_ftf(data_dir / "ftf-settings.yaml").with_telemetry(
             enabled=True, directory=telemetry.resolve()
         )
-        env = ftf(settings, soccfg=soccfg)
+        env = ftf(settings, soccfg=soccfg, workers=owner.workers)
         if env.close_backend is not None:
             cleanup.callback(env.close_backend)
         try:
@@ -569,7 +569,7 @@ def _measure_run(
                 owner.retained.append(cleanup.pop_all())
 
 
-def _discover(owner: _RunOwner | None = None) -> Inventory:
+def _discover(owner: _RunOwner) -> Inventory:
     from zcu_tools.gui.app.measure import Registry
     from zcu_tools.resources.entry.registry import component_registry
 
@@ -586,7 +586,6 @@ def _discover(owner: _RunOwner | None = None) -> Inventory:
         else None
         for name in registry.list_names()
     }
-    run_owner = owner if owner is not None else _RunOwner()
 
     def measure(
         case: WallTimeCase,
@@ -594,7 +593,7 @@ def _discover(owner: _RunOwner | None = None) -> Inventory:
         telemetry: Path,
         record_attempt: _RecordAttempt,
     ) -> None:
-        _measure_run(registry, case, data_dir, telemetry, run_owner, record_attempt)
+        _measure_run(registry, case, data_dir, telemetry, owner, record_attempt)
 
     return Inventory(adapters, _operator_guides(), measure)
 
@@ -756,6 +755,13 @@ def _row_timeout(raw: str) -> float:
     return seconds
 
 
+def _worker_count(raw: str) -> int:
+    workers = int(raw)
+    if workers < 1:
+        raise argparse.ArgumentTypeError("worker count must be at least 1")
+    return workers
+
+
 def _recover_report(output: Path) -> int:
     all_resolved = assemble_report(output, read_plan(output))
     print(output)
@@ -766,7 +772,7 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     data_dir: Path = _DATA_DIR,
-    discover: Callable[[], Inventory] = _discover,
+    discover: Callable[[], Inventory] | None = None,
     read_commit: Callable[[], str] = _current_commit,
 ) -> int:
     """Write report.json, summary.md and isolated telemetry for selected Runs.
@@ -776,8 +782,9 @@ def main(
     measure every registered adapter. With no output, create a timestamped path
     under the repository's wall-time output root. data_dir holds the board,
     FTF settings, fixture, case declarations and overrides. discover lists the
-    adapters and guides and supplies a runner (by default the offline controller
-    from a fresh CLI process). read_commit supplies the checkout revision before
+    adapters and guides and supplies a runner. With no discover override, use
+    the offline Controller and pass --workers (a positive integer, default 1)
+    to each simulated FTF environment. read_commit supplies the checkout revision before
     Run; by default read Git HEAD. Input, Run and output errors propagate. Bad
     CLI arguments exit with usage status. --report-only rebuilds both reports
     from the existing --output, without discovery or dispatch. A start without
@@ -788,15 +795,16 @@ def main(
     incomplete or not_run rows. KeyboardInterrupt stops the batch and reports
     from its journal under the same exit status rule.
     """
-    return _main(argv, data_dir, discover, read_commit, _Interruption())
+    return _main(argv, data_dir, discover, read_commit, _Interruption(), _RunOwner())
 
 
 def _main(
     argv: Sequence[str] | None,
     data_dir: Path,
-    discover: Callable[[], Inventory],
+    discover: Callable[[], Inventory] | None,
     read_commit: Callable[[], str],
     stop: _Interruption,
+    owner: _RunOwner,
 ) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -816,6 +824,13 @@ def _main(
         ),
     )
     parser.add_argument(
+        "--workers",
+        type=_worker_count,
+        default=1,
+        metavar="N",
+        help="parallel FTF workers per experiment (default 1)",
+    )
+    parser.add_argument(
         "--report-only",
         action="store_true",
         help="rebuild reports from an existing --output",
@@ -832,7 +847,8 @@ def _main(
                 "--report-only requires --output and does not accept --select or --resume-from"
             )
         return _recover_report(args.output)
-    inventory = discover()
+    owner.workers = args.workers
+    inventory = _discover(owner) if discover is None else discover()
     try:
         selected = _select_adapters(inventory.adapters, args.select or ())
     except ValueError as exc:
@@ -939,7 +955,7 @@ def _cli() -> int:
         sig: signal.signal(sig, stop.request) for sig in (signal.SIGINT, signal.SIGTERM)
     }
     try:
-        code = _main(None, _DATA_DIR, partial(_discover, owner), _current_commit, stop)
+        code = _main(None, _DATA_DIR, None, _current_commit, stop, owner)
     except Exception:
         if owner.retained:
             traceback.print_exc()

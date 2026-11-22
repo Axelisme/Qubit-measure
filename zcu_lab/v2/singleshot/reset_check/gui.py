@@ -34,6 +34,15 @@ def _analyze(
     )
 
 
+def _summary_lines(
+    source: RunRecord[ResetCheckCfg, ResetCheckResult],
+) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds: {cfg.reps}×{cfg.rounds}",)
+
+
 def _run(
     cfg: ResetCheckCfg, *, context: RunContext
 ) -> RunRecord[ResetCheckCfg, ResetCheckResult]:
@@ -45,5 +54,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

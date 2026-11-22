@@ -1,6 +1,6 @@
 """Readout gain sweep scored by the thermal-chain score.
 
-Recipe points → expts: the gain sample count maps to the GUI Gain Expts field.
+Recipe points sets Readout gain › Expts (count) in the GUI.
 """
 
 from pydantic import Field
@@ -29,30 +29,31 @@ class RoOptimizeChainPowerInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse readout library key. Sources are chosen by the Form.",
+        description="Select the library module in Readout pulse and ADC window; omit to keep the Form source.",
     )
     gain_start: float | None | Keep = Field(
         KEEP,
-        description="First readout gain in a.u.",
+        description="Set Readout gain › Start (a.u.), the first setting in the scan.",
     )
     gain_stop: float | None | Keep = Field(
         KEEP,
-        description="Last readout gain in a.u.",
+        description="Set Readout gain › Stop (a.u.), the last setting in the scan.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Gain sample count, at least 2.",
+        description="Set Readout gain › Expts (count); enter at least 2 settings.",
     )
     relax_delay: float | None | Keep = Field(
-        KEEP, description="K: thermal relaxation between 16-read shots, in µs."
+        KEEP,
+        description="Set Thermal wait K (µs), the relaxation wait after each 16-read shot.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="16-read shots per setting in each round, at least 1.",
+        description="Set Reps (count), the 16-read shots per setting in each round.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Round count; the live metric updates between rounds.",
+        description="Set Rounds (count), the number of acquisitions of the sweep.",
     )
 
 
@@ -61,7 +62,7 @@ class RoOptimizeChainPowerReport(ChainSweepReport):
 
     gain: float | None = Field(
         default=None,
-        description="Gain with the largest combined heuristic score in a.u.; null if analysis gave no result.",
+        description="Selected readout gain (a.u.); null if analysis gave no result.",
     )
 
 

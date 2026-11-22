@@ -15,6 +15,7 @@ from pathlib import Path
 from weakref import ReferenceType, ref
 
 import numpy as np
+from pydantic import JsonValue
 from qick import QickConfig
 
 from zcu_tools.device import DeviceManager
@@ -36,7 +37,9 @@ from zcu_tools.simulate.adc import (
     PopulationValidationError,
     PreparedRawShots,
     PreparedStatistics,
+    ProjectionChain,
     ProjectionReadout,
+    RawPlanOwner,
     ReadoutBatch,
     normalize_populations,
     sample_traces,
@@ -65,11 +68,11 @@ from zcu_tools.simulators.ftf.config import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.simulators.ftf.environment.acquisition import FTFAcquisitionOptions
 from zcu_tools.simulators.ftf.environment.cavity import (
     CavityEvolutionOptions,
-    ProjectionEvolution,
+    ProjectionChainEvolution,
     ProjectiveCapture,
-    ProjectiveSpan,
+    ProjectiveNodeSpan,
     evolve_plans,
-    evolve_projective_plans,
+    evolve_projection_chain,
 )
 from zcu_tools.simulators.ftf.environment.dimension import (
     DimensionSelection,
@@ -110,33 +113,33 @@ class FTFNumericUse:
     rejected_rows is zero after successful ADC preparation, or the number of
     rows ADC rejected under its reported validation rule. The record survives
     that failure. A reused snapshot does not create a new solve or change it.
-    projection_outcomes counts retained histories per C-order point, not the
-    semiclassical cavity main state. projection_pruned_weight gives cumulative
-    removed probability before proportional redistribution. Both are empty for
-    terminal-only templates. projective_spans locates solved histories and their
-    diagnostics at each absolute span. Reuse preserves these author-only values.
+    projection_continued_states gives the number of solved DC source states
+    per C-order point and transition. projection_identity_weight gives the
+    source marginal mass left unchanged at each transition. Both are empty for
+    terminal-only templates. projective_spans locates solved nodes and their
+    diagnostics in each absolute span. Reuse preserves these author-only values.
     """
 
     acquire_sequence: int
     round_index: int
     paths: PathDiagnostics
     rejected_rows: int = 0
-    projection_outcomes: tuple[int, ...] = ()
-    projection_pruned_weight: tuple[float, ...] = ()
-    projective_spans: tuple[ProjectiveSpan, ...] = ()
+    projection_continued_states: tuple[tuple[int, ...], ...] = ()
+    projection_identity_weight: tuple[tuple[float, ...], ...] = ()
+    projective_spans: tuple[ProjectiveNodeSpan, ...] = ()
 
 
 @dataclass(frozen=True)
 class _Prepared:
-    readout: ProjectionReadout
+    readout: ProjectionReadout | ProjectionChain
     channels: tuple[ChannelReadout, ...]
     paths: PathDiagnostics
     sampler: PreparedStatistics | None
     raw: PreparedRawShots
     reuse_keys: tuple[bytes, ...]
-    projection_outcomes: tuple[int, ...]
-    projection_pruned_weight: tuple[float, ...]
-    projective_spans: tuple[ProjectiveSpan, ...]
+    projection_continued_states: tuple[tuple[int, ...], ...]
+    projection_identity_weight: tuple[tuple[float, ...], ...]
+    projective_spans: tuple[ProjectiveNodeSpan, ...]
     split_pilot: bool
     pilot_dimension: int | None
 
@@ -145,17 +148,17 @@ def _readout_distribution(
     evolved: EvolutionResult,
     plans: tuple[FTFTemplatePlan, ...],
     point_dims: tuple[int, ...],
-    projected: ProjectionReadout | None,
-) -> ProjectionReadout:
+    projected: ProjectionChain | None,
+) -> ProjectionReadout | ProjectionChain:
     if projected is not None:
         order = np.argsort(evolved.points)
-        return ProjectionReadout(
-            projected.weights[order].reshape(
-                (*point_dims, projected.weights.shape[-1])
+        return ProjectionChain(
+            projected.initial[order].reshape(
+                (*point_dims, projected.initial.shape[-1])
             ),
             tuple(
                 values[order].reshape((*point_dims, *values.shape[-2:]))
-                for values in projected.populations
+                for values in projected.transitions
             ),
         )
     state_count = evolved.densities.shape[-1]
@@ -174,11 +177,27 @@ def _readout_distribution(
     )
 
 
-def _same_readout(first: ProjectionReadout, second: ProjectionReadout) -> bool:
-    return np.array_equal(first.weights, second.weights) and all(
-        np.array_equal(current, old)
-        for current, old in zip(first.populations, second.populations, strict=True)
-    )
+def _same_readout(
+    first: ProjectionReadout | ProjectionChain,
+    second: ProjectionReadout | ProjectionChain,
+) -> bool:
+    if isinstance(first, ProjectionChain) and isinstance(second, ProjectionChain):
+        return (
+            np.array_equal(first.initial, second.initial)
+            and len(first.transitions) == len(second.transitions)
+            and all(
+                np.array_equal(current, old)
+                for current, old in zip(
+                    first.transitions, second.transitions, strict=True
+                )
+            )
+        )
+    if isinstance(first, ProjectionReadout) and isinstance(second, ProjectionReadout):
+        return np.array_equal(first.weights, second.weights) and all(
+            np.array_equal(current, old)
+            for current, old in zip(first.populations, second.populations, strict=True)
+        )
+    return False
 
 
 def _validate_event_layouts(plans: tuple[FTFTemplatePlan, ...]) -> None:
@@ -299,6 +318,7 @@ class FTFAcquire:
         self.request = request
         self._snapshot: EnvironmentSnapshot | None = None
         self._prepared: _Prepared | None = None
+        self._raw_plans = RawPlanOwner()
         self.routing: list[PathDiagnostics] = []
         self._stark_limits: dict[
             tuple[int, int], dict[tuple[int, float, float], float]
@@ -350,10 +370,15 @@ class FTFAcquire:
     def invalidate(self) -> None:
         """Release deterministic arrays and reject further rounds; safe to repeat."""
         self._active = False
+        self.retire_raw_plans()
         self._prepared = None
         self._projective_capture = None
         self.routing.clear()
         self._stark_limits.clear()
+
+    def retire_raw_plans(self) -> None:
+        """Retire the raw memo without changing preparation or diagnostics."""
+        self._raw_plans.retire()
 
     def _record_stark_order(self, paths: PathDiagnostics) -> None:
         for entry in paths.stark_order_inversions:
@@ -415,7 +440,8 @@ class FTFAcquire:
             or snapshot != self._snapshot
             or self._prepared.split_pilot
         ):
-            # The first round used a split solve; later rounds need the full batch.
+            # A changed snapshot or a split solve invalidates the round batch.
+            self.retire_raw_plans()
             try:
                 prepared = self._reuse_or_prepare(snapshot, index, cancel=cancel)
             except Exception:
@@ -441,7 +467,8 @@ class FTFAcquire:
                     round_index=index,
                 )
                 result = IntegratedRound(
-                    statistics, prepared.raw.bind(statistics.raw_identity)
+                    statistics,
+                    self._raw_plans.bind(prepared.raw, statistics.raw_identity),
                 )
             else:
                 traces = sample_traces(
@@ -545,8 +572,8 @@ class FTFAcquire:
                 self.request.sequence,
                 index,
                 prepared.paths,
-                projection_outcomes=prepared.projection_outcomes,
-                projection_pruned_weight=prepared.projection_pruned_weight,
+                projection_continued_states=prepared.projection_continued_states,
+                projection_identity_weight=prepared.projection_identity_weight,
                 projective_spans=prepared.projective_spans,
             ),
         )
@@ -578,7 +605,7 @@ class FTFAcquire:
         options: CavityEvolutionOptions,
         model: ModelSource,
         reference: EvolutionResult | None,
-    ) -> tuple[EvolutionResult, tuple[bytes, ...], ProjectionEvolution | None]:
+    ) -> tuple[EvolutionResult, tuple[bytes, ...], ProjectionChainEvolution | None]:
         owner = self._source
         settings = owner.effective_settings
         if model is not facts.source or reference is not None:
@@ -592,7 +619,7 @@ class FTFAcquire:
             )
             return evolved, keys, None
         if any(any(plan.projective_reads) for plan in plans):
-            projection = evolve_projective_plans(
+            projection = evolve_projection_chain(
                 owner.engine, plans, facts, settings, options=options
             )
             return projection.result, projection.reuse_keys, projection
@@ -632,20 +659,22 @@ class FTFAcquire:
             self.routing.append(evolved.paths)
         # Retain solve diagnostics even when ADC preparation rejects a row.
         order = np.argsort(evolved.points)
-        outcome_counts = (
-            () if projection is None else tuple(projection.outcomes[p] for p in order)
-        )
-        pruned_weight = (
+        continued = (
             ()
             if projection is None
-            else tuple(projection.pruned_weight[p] for p in order)
+            else tuple(projection.continued_states[p] for p in order)
+        )
+        identity_weight = (
+            ()
+            if projection is None
+            else tuple(projection.identity_weight[p] for p in order)
         )
         report = FTFNumericUse(
             acquire.sequence,
             index,
             evolved.paths,
-            projection_outcomes=outcome_counts,
-            projection_pruned_weight=pruned_weight,
+            projection_continued_states=continued,
+            projection_identity_weight=identity_weight,
             projective_spans=() if projection is None else projection.spans,
         )
         owner.evaluations = (report,)
@@ -695,8 +724,8 @@ class FTFAcquire:
             sampler,
             raw,
             reuse_keys,
-            outcome_counts,
-            pruned_weight,
+            continued,
+            identity_weight,
             report.projective_spans,
             reference is not None,
             len(model.initial_density) if self._pilot_facts is not None else None,
@@ -882,7 +911,13 @@ class FTFSource:
             )
         return self._facts
 
+    def retire_raw_plans(self) -> None:
+        """Drop the current session's raw plans without affecting diagnostics."""
+        if self._session is not None:
+            self._session.retire_raw_plans()
+
     def _clear_preparations(self) -> None:
+        self.retire_raw_plans()
         self.preparation_cache.clear()
         self._dimensions.clear()
 
@@ -967,13 +1002,21 @@ class FTFSource:
 
         outcome retains captured round inputs (including failed attempts), wall
         seconds including pacing, builder seconds and normal-return status.
-        Only the matching current session contributes warnings and routing work.
+        Only the matching current session retires its raw plans and contributes
+        warnings and routing work.
         Direct callers may supply their own outcome after the final round and cleanup. Debug capture
         keeps detached rounds but omits settings for identities it did not observe.
         The buffer publishes before summary construction, even with telemetry disabled.
         capture_file is the successful basename or None when recording is off or
         publication fails.
         """
+        rounds = outcome.rounds
+        request = rounds[0].acquire if rounds else None
+        session = self._session
+        if session is None or session.request is not request:
+            session = None
+        else:
+            session.retire_raw_plans()
         capture_settings, self._capture_settings = self._capture_settings, None
         projective_capture, self._projective_capture = self._projective_capture, None
         capture_file = None
@@ -984,11 +1027,6 @@ class FTFSource:
             capture_file = capture_settings.write(
                 self.capture, outcome, metadata=metadata
             )
-        rounds = outcome.rounds
-        request = rounds[0].acquire if rounds else None
-        session = self._session
-        if session is None or session.request is not request:
-            session = None
         if session is not None:
             session.warn_stark_order()
         if self.telemetry is None:
@@ -1008,16 +1046,7 @@ class FTFSource:
                 "capture_file": capture_file,
                 "extras": {
                     **_dimension_telemetry(session),
-                    "ftf.projection_outcomes": list(
-                        self.evaluations[-1].projection_outcomes
-                        if paths and self.evaluations
-                        else ()
-                    ),
-                    "ftf.projection_pruned_weight": list(
-                        self.evaluations[-1].projection_pruned_weight
-                        if paths and self.evaluations
-                        else ()
-                    ),
+                    **_projection_telemetry(self.evaluations if paths else ()),
                 },
             },
             paths=paths,
@@ -1035,6 +1064,25 @@ class FTFSource:
         self.envelope_encoder.clear()
         self._closed = True
         self.engine.close()
+
+
+def _projection_telemetry(
+    evaluations: tuple[FTFNumericUse, ...],
+) -> dict[str, JsonValue]:
+    return {
+        "ftf.projection_continued_states": [
+            [value for value in row]
+            for row in (
+                evaluations[-1].projection_continued_states if evaluations else ()
+            )
+        ],
+        "ftf.projection_identity_weight": [
+            [value for value in row]
+            for row in (
+                evaluations[-1].projection_identity_weight if evaluations else ()
+            )
+        ],
+    }
 
 
 def _dimension_telemetry(
@@ -1207,6 +1255,15 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
                 preparation.wait_ready()
             coordinator.close()
 
+        finish_diagnostics = (
+            coordinator.telemetry is not None or settings.numerics.debug_capture
+        )
+
+        def on_end(outcome: AcquireOutcome) -> None:
+            coordinator.retire_raw_plans()
+            if finish_diagnostics:
+                coordinator.finish_acquire(outcome)
+
         binding = SimulationBinding(
             coordinator.snapshot,
             coordinator.execute,
@@ -1221,9 +1278,7 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
             callbacks=SimulationCallbacks(
                 wait_ready=None if preparation is None else preparation.wait_ready,
                 on_begin=lambda: coordinator.begin_acquire(seed=binding.root_seed),
-                on_end=coordinator.finish_acquire
-                if coordinator.telemetry is not None or settings.numerics.debug_capture
-                else None,
+                on_end=on_end,
                 on_materialize=coordinator.telemetry.write_materialize
                 if coordinator.telemetry is not None
                 else None,

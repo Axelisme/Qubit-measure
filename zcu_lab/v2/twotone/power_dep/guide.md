@@ -1,21 +1,17 @@
-## Behavior
+**Readers:** operator, agent. Find a qubit-probe gain that reveals a transition without obscuring nearby lines.
 
-**Readers:** operator, agent. Two-tone qubit power dependence: a 2D scan sweeping the qubit-drive gain (outer) against the drive frequency (inner), reading out the resonator at each point, to map how the qubit line shifts and broadens with drive power (AC-Stark shift, power broadening, multi-photon lines). Runs on real hardware. Read the 2D map manually.
+## Run the scan
 
-**Last updated:** 2026-10-21
+At each **Probe gain**, Run sweeps **Probe RF frequency** and measures resonator IQ. A shot applies the optional reset and preparation, plays the qubit probe, reads out the resonator, then waits **Relax delay**. The scan changes the drive setting, not the resonator readout power. Gain in a.u. is a DAC full-scale fraction, not power in dBm.
 
-## Parameter sources
+Bind the qubit and resonator. Open or press **Defaults** to take new starting values; **Refresh** preserves edits. The probe template uses the bound qubit's carrier and generator. The gain sweep starts at 0.001–1.0 a.u. with 101 points; choose a lower maximum if the line already broadens at low gain. Fill or verify the RF endpoints in MHz around a transition measured in `twotone/freq`. Select the calibrated **Readout** from the bound resonator; the template is a starting point when no slot is set. Leave **Reset** blank to omit reset. The default form uses 1000 reps per RF point per round, 10 rounds at each gain and 1 µs of relaxation after each shot.
 
-Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs from the sources captured at Open/Defaults. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Frequency sweep is qubit.freq ± 1.5 * qubit.kappa; gain runs 0.001 to 1.0.
+## Read the map
 
-## Module slots
+After **Run** or a successful **Load**, press **Analyze** to redraw the selected run's map and gain spectra. Loading does not open a plot. Analyze shows the source run's **Reps × Rounds** if its settings are available. Older files without those settings still plot, but omit that summary line.
 
-Readout uses the qubit.module.readout slot captured at Open/Defaults, or a fresh readout template when the slot is unset or points to a missing module. Optional qubit.module.reset stays disabled when absent. Saved modules remain selectable; sweeps replace only the swept fields at Run. Qubit probe starts from a template's gain and frequency; both are overwritten by the sweeps.
+The map gives RF frequency versus probe gain. Color is the magnitude of the mean IQ after subtracting the median complex IQ of the same spectrum. It is in a.u., not a transition probability. Blank cells have no data. During Run, the row counter shows gains with data, including any gain still averaging. The adjacent axes compare the latest gain spectrum with the preceding gain row on that same contrast scale.
 
-## Typical writeback
+Look for a ridge that persists across multiple gain rows. A ridge that shifts or broadens with gain warns against applying the high-gain center or linewidth as a weak-drive calibration. Choose the smallest sampled gain at which the line is reproducible, then use `twotone/freq` to fit a finer scan around the observed center. For example, if the ridge is clear at 0.05 a.u. but has merged with a neighboring line by 0.15 a.u., start the follow-up at 0.05 a.u. rather than 0.15 a.u. If the line reaches the frequency boundary, widen the RF endpoints before comparing widths. This is a two-dimensional spectrum; do not infer shot SEM from the color scale.
 
-Inspect the 2D map manually. Enter the observed low-power qubit frequency into 'qubit.freq' after review; calibration stays unchanged until you update it.
-
-## Recommended
-
-Default sweep: gain ~0.001→1.0 over ~101 points, frequency ~201 points spanning 1.5 linewidths around 'qubit.freq'. Start the gain sweep low to find the unsaturated line, then extend the upper bound to watch the AC-Stark shift and power broadening; widen the frequency span if higher-power features fall outside the window.
+Analyze does not fit or propose writeback. Use the map and spectra to choose the gain yourself. This experiment has no dedicated recipe. Save preserves the gain and RF grids with the complex IQ. Loading a saved run does not replace the current form.

@@ -5,8 +5,6 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.axes import Axes
-from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.singleshot import correct_populations
@@ -33,7 +31,7 @@ from zcu_tools.program.v2.modules.readout import (
 )
 from zcu_tools.utils.process import minus_background
 
-from zcu_lab.v2.support import live_heatmap, live_line
+from zcu_lab.v2.support import live_heatmap
 from zcu_lab.v2.support.resonance import get_resonance_freq
 
 
@@ -74,15 +72,57 @@ class AcStarkAnalysis:
 
 
 class AcStarkCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select the reset module applied before preparation, or leave empty to skip reset.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Initial preparation pulse",
+            description="Select the pulse applied before the probe, or leave empty to omit it.",
+        ),
+    ] = None
     stark_pulse1: Annotated[
-        Pulse.Cfg, FieldMeta(label="Cavity Stark Tone (gain sweep)")
+        Pulse.Cfg,
+        FieldMeta(
+            label="Cavity Stark tone",
+            description="Enter the cavity drive that overlaps qubit spectroscopy, with its gain swept.",
+        ),
     ]
-    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Tone (freq sweep)")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
+    stark_pulse2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit probe tone",
+            description="Enter the qubit spectroscopy pulse whose RF frequency is swept.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the readout module applied at the end of the shot.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Cavity Stark gain",
+            unit="a.u.",
+            description="Set the Stark-tone gain sweep in a.u.; points are equally spaced in gain².",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Qubit probe RF frequency",
+            unit="MHz",
+            description="Set the qubit spectroscopy RF sweep in MHz during the cavity Stark tone.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
@@ -179,44 +219,44 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             allow_array=True,
         )
 
-        # 2. Show the state-population map and current frequency trace.
-        # Show measured G/E/Other fractions alongside the current trace.
-        def configure_axes(ax: Axes) -> None:
-            ax.set_ylim(0.0, 1.0)
-            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
-                line.set_label(label)
-            ax.legend()
-
+        # 2. Use the same probability scale for the three readout outcomes.
         figure, _ = context.plots.subplots(
-            nrows=2, ncols=2, num="measurement", figsize=(8, 6)
+            ncols=3,
+            num="measurement",
+            figsize=(11, 4),
+            layout="constrained",
         )
-        ax_ground, ax_excited, ax_other, ax_current = figure.axes
+        progress = figure.suptitle("AC Stark scan · qubit · classified populations")
         heatmaps = []
-        for state, ax in (
-            ("ground", ax_ground),
-            ("excited", ax_excited),
-            ("other", ax_other),
-        ):
+        for state, ax in zip(("g", "e", "other"), figure.axes, strict=True):
             ax.set(
-                xlabel="Stark Pulse Gain (a.u.)",
-                ylabel="Probe Frequency (MHz)",
-                title=state.capitalize(),
+                xlabel="Cavity Stark gain (a.u.)",
+                ylabel="Qubit probe RF frequency (MHz)",
+                title=f"P({state})",
             )
+            ax.grid(False)
             heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
-        ax_current.set(xlabel="Probe Frequency (MHz)", ylabel="P(g), P(e), P(other)")
-        cur_1d = live_line(ax_current, num_lines=3)
-        configure_axes(ax_current)
-        current_index = 0
+        figure.colorbar(
+            figure.axes[0].images[0], ax=figure.axes, label="Probability (0–1)"
+        )
 
         @context.plots.on_plot_thread
         def plot_fn(counts: NDArray[np.float64]):
-            populations = counts / counts.sum(axis=-1, keepdims=True)
-            artists = [
-                artist
-                for i, heatmap in enumerate(heatmaps)
-                for artist in heatmap.set(gains, freqs, populations[..., i])
-            ]
-            return (*artists, *cur_1d.set(freqs, populations[current_index, :].T))
+            """Display the classified probability maps and completed cells."""
+            totals = counts.sum(axis=-1)
+            populations = counts / totals[..., None]
+            progress.set_text(
+                "AC Stark scan · qubit · classified populations\n"
+                f"{np.count_nonzero(totals > 0)}/{totals.size} gain–frequency points acquired"
+            )
+            return (
+                progress,
+                *(
+                    artist
+                    for i, heatmap in enumerate(heatmaps)
+                    for artist in heatmap.set(gains, freqs, populations[..., i])
+                ),
+            )
 
         figure.show()
 
@@ -227,11 +267,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         )
         # 3. Acquire overlapping cavity and qubit probes across the gain grid.
         with Schedule(buffer, scope=context.scope) as sched:
-            for gain_idx, (gain, step) in enumerate(
-                sched.scan("resonator gain", gains.tolist())
-            ):
-                current_index = gain_idx
-
+            for gain, step in sched.scan("resonator gain", gains.tolist()):
                 # Start the cavity tone nonblocking so the qubit probe can overlap.
                 builder = TimelineBuilder(
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -295,73 +331,63 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
 
         populations = correct_populations(populations, confusion_matrix)
 
-        # 2. Fit the resonance shift and convert gain squared to photon number.
-        # merge two populations into one
-        populations = (
+        # 2. Subtract the off-peak baseline and extract one resonance per gain.
+        contrast = (
             np.abs(minus_background(populations[..., 0]))
             + np.abs(minus_background(populations[..., 1]))
         ) / 2
-
-        s_gains, s_freqs = get_resonance_freq(gains, freqs, populations)
-
+        s_gains, s_freqs = get_resonance_freq(gains, freqs, contrast)
         gains2 = gains**2
-        s_gains2 = s_gains**2
-
-        # fitting max_freqs with ax2 + bx + c
-        x2_fit = np.linspace(min(gains2), max(gains2), 100)
-        b, c = np.polyfit(s_gains2, s_freqs, 1)
-        y_fit = b * x2_fit + c
-
-        # Calculate the Stark shift. eta accounts for the finite resonator
-        # linewidth kappa relative to the dispersive shift chi (matches the
-        # twotone AcStarkExp.analyze formula).
+        dense_gain2 = np.linspace(float(gains2.min()), float(gains2.max()), 250)
+        slope, intercept = np.polyfit(s_gains**2, s_freqs, 1)
+        deviations = s_freqs - s_freqs.mean()
+        total = float(deviations @ deviations)
+        residuals = s_freqs - (slope * s_gains**2 + intercept)
+        r2 = (
+            "unavailable"
+            if total == 0.0
+            else f"{1 - (residuals @ residuals) / total:.3g}"
+        )
         eta = kappa**2 / (kappa**2 + chi**2)
-        ac_coeff = abs(b) / (2 * eta * chi)
+        ac_coeff = abs(slope) / (2 * eta * chi)
 
-        # 3. Display the resonance fit with photon-number and readout-gain axes.
-        # plot the data and the fitted polynomial
-        avg_n = ac_coeff * gains2
-
-        fig, ax1 = plots.subplots(num="fit")
-
-        # Use NonUniformImage for better visualization with gain^2 as x-axis
-        im = NonUniformImage(ax1, cmap="RdBu_r", interpolation="nearest")
-        im.set_data(avg_n, freqs, populations.T)
-        im.set_extent((avg_n[0], avg_n[-1], freqs[0], freqs[-1]))
-        ax1.add_image(im)
-
-        # Set proper limits for the plot
-        ax1.set_xlim(avg_n[0], avg_n[-1])
-        ax1.set_ylim(freqs[0], freqs[-1])
-
-        # Plot the resonance frequencies and fitted curve
-        ax1.plot(ac_coeff * s_gains2, s_freqs, ".", c="k")
-
-        # Fit curve in terms of gain^2
-        label = r"$\bar n$" + f" = {ac_coeff:.2g} " + r"$gain^2$"
-        gain_fit = ac_coeff * x2_fit
-        ax1.plot(gain_fit, y_fit, "-", label=label, color="y")
-
-        # Create secondary x-axis for gain^2 (Readout Gain²)
-        ax2 = ax1.twiny()
-
-        # The secondary axis converts average photon number back to drive gain.
-        ax1.set_xticks(ax1.get_xticks())
-        ax1.set_xlabel(r"Average Photon Number ($\bar n$)", fontsize=14)
-
-        # 上方次 x 軸顯示 gain
-        avgn_ticks = ax1.get_xticks()
-        gain_ticks = np.sqrt(avgn_ticks / ac_coeff)
-        ax2.set_xlim(ax1.get_xlim())
-        ax2.set_xticks(avgn_ticks)
-        ax2.set_xticklabels([f"{gain:.2g}" for gain in gain_ticks])
-        ax2.set_xlabel("Readout Gain (a.u.)", fontsize=14)
-
-        ax1.set_ylabel("Qubit Frequency (MHz)", fontsize=14)
-        ax1.legend(fontsize="x-large")
-        ax1.tick_params(axis="both", which="major", labelsize=12)
-
-        fig.tight_layout()
+        # 3. Preserve the live coordinates, then show the line used for calibration.
+        _plot_populations(
+            plots,
+            gains,
+            freqs,
+            populations,
+            xlabel="Cavity Stark gain (a.u.)",
+            corrected=confusion_matrix is not None,
+        )
+        fig, ax = plots.subplots(num="fit", layout="constrained")
+        heatmap = live_heatmap(ax, uniform=False)
+        (image,) = heatmap.set(gains2, freqs, contrast)
+        ax.grid(False)
+        fig.colorbar(image, ax=ax, label="Baseline-subtracted g/e probability contrast")
+        ax.plot(
+            s_gains**2,
+            s_freqs,
+            "o",
+            markersize=4,
+            color="black",
+            label="Extracted resonances",
+        )
+        ax.plot(
+            dense_gain2,
+            slope * dense_gain2 + intercept,
+            color="tab:orange",
+            label="Linear Stark fit",
+        )
+        ax.set(
+            title=f"AC Stark scan · qubit · resonance shift\n"
+            f"Photon calibration = {ac_coeff:.3g} photons / gain² · R² = {r2}",
+            xlabel="Squared cavity Stark gain (a.u.²)",
+            ylabel="Qubit probe RF frequency (MHz)",
+            xlim=(float(gains2.min()), float(gains2.max())),
+            ylim=(float(freqs.min()), float(freqs.max())),
+        )
+        ax.legend(loc="best")
 
         # 4. Return the photon-number calibration for later analysis.
         return AcStarkAnalysis(ac_stark_coeff=float(ac_coeff))
@@ -400,51 +426,44 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
 
         populations = correct_populations(populations, confusion_matrix)
 
-        gains2 = gains**2
-
-        # plot the data and the fitted polynomial
-        photons = ac_coeff * gains2
-
-        fig, _ = plots.subplots(
-            num="populations", nrows=1, ncols=3, figsize=(12, 4), sharey=True
+        _plot_populations(
+            plots,
+            ac_coeff * gains**2,
+            freqs,
+            populations,
+            xlabel="Mean cavity photon number (count)",
+            corrected=confusion_matrix is not None,
         )
-        ax1, ax2, ax3 = fig.axes
 
-        max_p = np.max(populations).item()
 
-        # Use NonUniformImage for better visualization with gain^2 as x-axis
-        im = NonUniformImage(ax1, cmap="RdBu_r", interpolation="nearest")
-        im.set_data(photons, freqs, populations[..., 0].T)
-        im.set_extent((photons[0], photons[-1], freqs[0], freqs[-1]))
-        im.set_clim(0.0, max_p)
-        ax1.add_image(im)
-        ax1.set_xlim(photons[0], photons[-1])
-        ax1.set_ylim(freqs[0], freqs[-1])
-        ax1.set_aspect("auto")
-        ax1.set_title("Ground")
-        ax1.set_xlabel(r"$\bar n$", fontsize=14)
-        ax1.set_ylabel("Frequency (MHz)", fontsize=14)
-
-        im = NonUniformImage(ax2, cmap="RdBu_r", interpolation="nearest")
-        im.set_data(photons, freqs, populations[..., 1].T)
-        im.set_extent((photons[0], photons[-1], freqs[0], freqs[-1]))
-        im.set_clim(0.0, max_p)
-        ax2.add_image(im)
-        ax2.set_xlim(photons[0], photons[-1])
-        ax2.set_ylim(freqs[0], freqs[-1])
-        ax2.set_aspect("auto")
-        ax2.set_title("Excited")
-        ax2.set_xlabel(r"$\bar n$", fontsize=14)
-
-        im = NonUniformImage(ax3, cmap="RdBu_r", interpolation="nearest")
-        im.set_data(photons, freqs, populations[..., 2].T)
-        im.set_extent((photons[0], photons[-1], freqs[0], freqs[-1]))
-        im.set_clim(0.0, max_p)
-        ax3.add_image(im)
-        ax3.set_xlim(photons[0], photons[-1])
-        ax3.set_ylim(freqs[0], freqs[-1])
-        ax3.set_aspect("auto")
-        ax3.set_title("Other")
-        ax3.set_xlabel(r"$\bar n$", fontsize=14)
-
-        fig.tight_layout()
+def _plot_populations(
+    plots: Plots,
+    coordinates: NDArray[np.float64],
+    freqs: NDArray[np.float64],
+    populations: NDArray[np.float64],
+    *,
+    xlabel: str,
+    corrected: bool,
+) -> None:
+    """Show comparable G/E/Other maps against drive gain or calibrated photon number."""
+    fig, _ = plots.subplots(
+        num="populations",
+        ncols=3,
+        figsize=(11, 4),
+        layout="constrained",
+    )
+    quantity = (
+        "readout-corrected populations" if corrected else "classified populations"
+    )
+    fig.suptitle(f"AC Stark scan · qubit · {quantity}")
+    for index, (ax, state) in enumerate(
+        zip(fig.axes, ("g", "e", "other"), strict=True)
+    ):
+        ax.set(
+            title=f"P({state})", xlabel=xlabel, ylabel="Qubit probe RF frequency (MHz)"
+        )
+        ax.grid(False)
+        live_heatmap(ax, uniform=False, clim=(0.0, 1.0)).set(
+            coordinates, freqs, populations[..., index]
+        )
+    fig.colorbar(fig.axes[0].images[0], ax=fig.axes, label="Probability (0–1)")

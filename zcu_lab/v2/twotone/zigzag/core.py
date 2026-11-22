@@ -9,20 +9,42 @@ from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.datafile import DataVariable
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    RunRecord,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
-from zcu_tools.program.v2 import LoadValue, Pulse, Readout, Reset, TimelineBuilder
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import (
+    IQ,
+    LoadValue,
+    Pulse,
+    Readout,
+    Reset,
+    TimelineBuilder,
+    shot_sums,
+    split_sums,
+)
+from zcu_tools.utils.process import find_rotate_angle
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 
 @dataclass(frozen=True)
 class ZigZagResult:
     times: NDArray[np.int64]
     signals: NDArray[np.complex128]
+    iq_moments: NDArray[np.float64] | None = None
+    """Retained shot sums [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] per point; None for mean-only files."""
 
 
 class ZigZagCfg(ConfigBase):
@@ -71,11 +93,65 @@ class ZigZagCfg(ConfigBase):
     ]
 
 
+def _direction(signals: NDArray[np.complex128]) -> tuple[float, float]:
+    """Project along the principal IQ axis, or use I if fewer than two points."""
+    try:
+        angle = find_rotate_angle(signals)
+    except ValueError:
+        return (1.0, 0.0)
+    return (float(np.cos(angle)), float(np.sin(angle)))
+
+
+_TRACE_AXIS = VariableAxisSpec(
+    label="Times",
+    unit="a.u.",
+    field_name="times",
+    dtype=np.int64,
+)
+_MOMENT_COLUMNS = tuple(range(6))
+
+
+def _build_result(data: GroupedLoadData[ZigZagCfg]) -> ZigZagResult:
+    """Restore the measured trace and any shot moments on the same native axis."""
+    trace = data.variable("data")
+    (coordinates,) = trace.axes
+    moments = data.variables.get(DataVariable("iq_moments"))
+    if moments is None:
+        return ZigZagResult(coordinates, trace.z)
+    columns, moment_coordinates = moments.axes
+    if not np.array_equal(coordinates, moment_coordinates) or not np.array_equal(
+        columns, _MOMENT_COLUMNS
+    ):
+        raise ValueError(
+            "/vars/iq_moments: expected columns 0–5 on the /vars/data grid"
+        )
+    return ZigZagResult(coordinates, trace.z, iq_moments=moments.z)
+
+
 class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
     # times is an int counter (a.u.) -> Axis dtype int64, scale IDENTITY
-    AXES_SPEC: ClassVar[AxesSpec[ZigZagResult, ZigZagCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("times", label="Times", unit="a.u.", dtype=np.int64),),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
+    # ADR-0069: preserve the original trace; shot moments are optional on load.
+    AXES_SPEC: ClassVar[GroupedAxesSpec[ZigZagResult, ZigZagCfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "data",
+                (_TRACE_AXIS,),
+                VariableZSpec(
+                    "signals", label="Signal", unit="a.u.", dtype=np.complex128
+                ),
+            ),
+            VariableSpec(
+                "iq_moments",
+                (
+                    VariableAxisSpec(label="Moment", unit="", values=_MOMENT_COLUMNS),
+                    _TRACE_AXIS,
+                ),
+                VariableZSpec("iq_moments", label="IQ moments", unit=""),
+                required=False,
+            ),
+        ),
+        result_builder=_build_result,
+        labber_variables=("data",),
         result_type=ZigZagResult,
         cfg_type=ZigZagCfg,
         cfg_schema_version="3.0",
@@ -99,25 +175,34 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
 
         # 2. Monitor repeated-gate contrast on a common IQ projection axis.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Repetitions (count)", ylabel="Signal (a.u.)")
+        gate = "X90 pairs" if cfg.repeat_on == "X90_pulse" else "X180"
+        experiment = f"ZigZag · {gate}"
+        ax.set(
+            title=experiment,
+            xlabel="Gate repetitions (count)",
+            ylabel="IQ projection (a.u.)",
+        )
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
-        viewer = live_line(ax)
+        viewer = live_errorbar(ax)
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            """Refresh the common-axis IQ projection versus repeat count.
-
-            data is complex IQ in repeat-count order; NaN marks unmeasured points.
-            Return the changed artists without modifying the input array.
-            """
-            # Project the repeat-count trace onto its common real IQ axis.
-            return viewer.set(times.astype(np.float64), rotate2real(data).real)
+        def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Update the projected IQ, shot SEM and acquisition count."""
+            counts, mean = split_sums(moments)
+            i, q = _direction(mean)
+            sem = iq_shot_sem(moments, direction=(i, q))
+            retained = np.nanmax(counts, initial=0)
+            title = ax.set_title(f"{experiment} · {retained:.0f} retained shots/point")
+            return (
+                *viewer.set(
+                    times.astype(np.float64), mean.real * i + mean.imag * q, sem
+                ),
+                title,
+            )
 
         fig.show()
         signals_buffer = SignalBuffer(
-            (len(times),),
-            on_update=update,
+            (len(times), len(_MOMENT_COLUMNS)), dtype=np.float64, on_update=update
         )
         # 3. Amplify rotation errors by repeating the selected gate after the initial X90.
         with Schedule(signals_buffer, scope=context.scope) as sched:
@@ -151,6 +236,49 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
                 builder.emit(Pulse(cfg.repeat_on, repeat_pulse))
                 builder.delay_by_timeline()
             builder.emit(Readout("readout", cfg.readout))
-            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
+            prog = builder.build()
+            sched.run_acquire_summed(
+                prog,
+                soc,
+                rounds=cfg.rounds,
+                reducer=shot_sums(prog, (IQ("readout", offset_corrected=True),)),
+            )
 
-        return ZigZagResult(times=times, signals=signals_buffer.array)
+        return ZigZagResult(
+            times=times,
+            signals=split_sums(signals_buffer.array)[1],
+            iq_moments=signals_buffer.array,
+        )
+
+    def analyze(
+        self, source: RunRecord[ZigZagCfg, ZigZagResult], options: None, *, plots: Plots
+    ) -> None:
+        """Redraw the source trace against gate repetition count without a fit.
+
+        Pass None for options. The measurement figure shows projected mean IQ
+        and, when retained moments are available, shot SEM along the same axis.
+        Missing points stay missing. A source without cfg omits the pulse label.
+        """
+        # 1. Project the stored IQ and any retained shot moments on the Live axis.
+        del options
+        result = source.result
+        i, q = _direction(result.signals)
+        projected = result.signals.real * i + result.signals.imag * q
+        title = "ZigZag"
+        if source.cfg is not None:
+            gate = "X90 pairs" if source.cfg.repeat_on == "X90_pulse" else "X180"
+            title = f"{title} · {gate}"
+        if result.iq_moments is None:
+            sem = np.full(projected.shape, np.nan)
+        else:
+            sem = iq_shot_sem(result.iq_moments, direction=(i, q))
+
+        # 2. Redraw the terminal view without presenting it or estimating a calibration.
+        _, ax = plots.subplots(num="measurement")
+        ax.set(
+            title=title,
+            xlabel="Gate repetitions (count)",
+            ylabel="IQ projection (a.u.)",
+        )
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        live_errorbar(ax).set(result.times.astype(np.float64), projected, sem)

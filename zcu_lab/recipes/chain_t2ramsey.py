@@ -29,75 +29,73 @@ class ChainT2RamseyInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse readout library key. Sources are chosen by the Form.",
+        description="Set Readout to a library key for the single-tone pulse readout played twice per cycle block.",
     )
     pi2_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi/2-pulse library key.",
+        description="Set π/2 pulse to the calibrated library pulse.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in µs.",
+        description="Set Free-evolution wait › Stop (µs), the last wait.",
     )
     detune_mhz: float | None | Keep = Field(
         KEEP,
-        description="Second pi/2 phase ramp in MHz (fringes per µs of delay).",
+        description="Set Ramsey phase-ramp detune (MHz) for the second π/2 phase ramp; the RF frequency is unchanged.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count.",
+        description="Set Free-evolution wait › Expts (count), the number of sweep points.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Cycles per delay in each round, at least 66.",
+        description="Set Reps (count), the number of cycles at every sweep point in one round; at least 66.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Round count; the live plot updates after each round.",
+        description="Set Rounds (count), the planned number of passes through the sweep.",
     )
 
 
 class ChainT2RamseyReport(RecipeReport):
     """Chain Ramsey fit and its checks; cancellation returns no report."""
 
-    t2_us: float | None = Field(
-        description="T2 Ramsey from the chain fit in µs; null means not estimable."
-    )
+    t2_us: float | None = Field(description="T2* (µs); null if unavailable.")
     t2_err_us: float | None = Field(
-        description="T2 Ramsey uncertainty in µs; null means not estimable."
+        description="T2* Wald standard error (µs); null if unavailable."
     )
     detuning_mhz: float | None = Field(
-        description="Fringe frequency in MHz, ramp included; null means not estimable."
+        description="Fringe frequency (MHz), including the phase ramp; null if unavailable."
     )
     detuning_err_mhz: float | None = Field(
-        description="Fringe frequency uncertainty in MHz; null means not estimable."
+        description="Fringe frequency Wald standard error (MHz); null if unavailable."
     )
     tf_us: float | None = Field(
-        description="Third-state decay time in µs; null means not estimable."
+        description="Third-state decay time (µs); null if unavailable."
     )
     tf_err_us: float | None = Field(
-        description="Third-state decay uncertainty in µs; null means not estimable."
+        description="Third-state decay time Wald standard error (µs); null if unavailable."
     )
     reliability: float | None = Field(
-        description="Diagnostic R of the detuning error, no threshold."
+        description="R, the inverse phase uncertainty from the frequency error over the sweep (no threshold); null if unavailable."
     )
     within_point: CycleCheck | None = Field(
         description="Within-point check J, df, p; null without analysis."
     )
     sharing: CycleCheck | None = Field(
-        description="Sharing check J, df, p null; null without analysis."
+        description="Sharing check J, df, p; null without analysis."
     )
     curve: CycleCheck | None = Field(
         description="Curve check J, df, p; null without analysis."
     )
     first_read_t2_us: float | None = Field(
-        description="T2 in µs of the first-read twotone fit; null means not estimable."
+        description="First-read T2* (µs); null if unavailable."
     )
 
 
 @recipe(
     "chain_t2ramsey",
-    description="Run one K-cycle readout-chain T2 Ramsey, fit all 65 numbers, save sums and analysis.",
+    description="Sweep free-evolution wait in K-cycle T2 Ramsey; use the first-read fit to seed a joint three-state fit, then save without writeback.",
 )
 async def chain_t2ramsey(
     session: RecipeSession, inputs: ChainT2RamseyInputs

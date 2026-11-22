@@ -1,6 +1,6 @@
 """Readout length sweep scored by the thermal-chain score.
 
-Recipe points → expts: the window sample count maps to the GUI Readout length Expts field.
+Recipe points sets ADC window › Expts (count) in the GUI.
 """
 
 from pydantic import Field
@@ -29,30 +29,31 @@ class RoOptimizeChainLengthInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse readout library key. Sources are chosen by the Form.",
+        description="Select the library module in Readout pulse and ADC window; omit to keep the Form source.",
     )
     length_start_us: float | None | Keep = Field(
         KEEP,
-        description="Shortest ADC window in µs.",
+        description="Set ADC window › Start (µs), the first setting in the scan.",
     )
     length_stop_us: float | None | Keep = Field(
         KEEP,
-        description="Longest ADC window in µs.",
+        description="Set ADC window › Stop (µs), the last setting in the scan.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Window sample count, at least 2.",
+        description="Set ADC window › Expts (count); enter at least 2 settings.",
     )
     relax_delay: float | None | Keep = Field(
-        KEEP, description="K: thermal relaxation between 16-read shots, in µs."
+        KEEP,
+        description="Set Thermal wait K (µs), the relaxation wait after each 16-read shot.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="16-read shots per setting in each round, at least 1.",
+        description="Set Reps (count), the 16-read shots per setting in each round.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Rounds per window; the live metric updates between rounds.",
+        description="Set Rounds (count), the number of acquisitions per window.",
     )
 
 
@@ -61,13 +62,13 @@ class RoOptimizeChainLengthReport(ChainSweepReport):
 
     length_us: float | None = Field(
         default=None,
-        description="ADC window with the largest combined heuristic score in µs; null if analysis gave no result.",
+        description="Selected ADC window (µs); null if analysis gave no result.",
     )
 
 
 @recipe(
     "ro_optimize_chain_length",
-    description="Sweep the ADC window in thermally reset 16-read shots. Set the pulse length for each window using trigger offset and flight time, then score each window and save the sums and analysis.",
+    description="Sweep the ADC window with thermally reset 16-read shots. The readout pulse lasts the window plus Length margin. Score each window and save the sums and analysis.",
 )
 async def ro_optimize_chain_length(
     session: RecipeSession, inputs: RoOptimizeChainLengthInputs
@@ -80,9 +81,9 @@ async def ro_optimize_chain_length(
     identifiable physical leakage). Errors do not affect selection.
     Save keeps shot counts, all 107 sums and analysis. No writeback is proposed.
 
-    points → expts sets the number of ADC windows. In µs, each pulse lasts
-    trig_offset minus time_of_fly plus the window and 0.11 µs.
-    relax_delay sets K in µs. Omission retains the Form value; null goes to its owner.
+    Set ADC window › Expts (count) with points. Set Length margin (µs)
+    through overrides to change the time added to each ADC window.
+    Omission keeps the Form value; null goes to the field owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(

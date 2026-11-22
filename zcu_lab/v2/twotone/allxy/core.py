@@ -5,29 +5,40 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib import rcParams
 from matplotlib.artist import Artist
-from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting.allxy import fit_allxy_errors
+from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, config
+from zcu_tools.datafile import DataVariable
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+    config,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    IQ,
     ComputedPulse,
     LoadValue,
     Pulse,
     Readout,
     Reset,
     TimelineBuilder,
+    shot_sums,
+    split_sums,
 )
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.process import find_rotate_angle
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 
 @dataclass(frozen=True)
@@ -35,6 +46,8 @@ class AllXY_Result:
     """Mean complex IQ for the fixed 21 AllXY gate pairs, shaped (21,)."""
 
     signals: NDArray[np.complex128]
+    iq_moments: NDArray[np.float64] | None = None
+    """Retained shot sums [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] per point; None for mean-only files."""
 
 
 # Standard AllXY sequence of 21 gate pairs
@@ -65,6 +78,15 @@ ALLXY_SEQUENCE = [
 GATE_LIST = ["I", "X90", "Y90", "X180", "Y180"]
 ALLXY_GATE1_IDX = [GATE_LIST.index(g1) for g1, _ in ALLXY_SEQUENCE]
 ALLXY_GATE2_IDX = [GATE_LIST.index(g2) for _, g2 in ALLXY_SEQUENCE]
+
+_GATE_NAME = {
+    "I": "I",
+    "X90": "X₉₀",
+    "Y90": "Y₉₀",
+    "X180": "X₁₈₀",
+    "Y180": "Y₁₈₀",
+}
+_GATE_PAIR_LABELS = [f"{_GATE_NAME[g1]}–{_GATE_NAME[g2]}" for g1, g2 in ALLXY_SEQUENCE]
 
 # ------------------------------------------------------------------------------
 # Helper functions
@@ -105,9 +127,19 @@ class AllXYAnalysis:
     residual_rms: float
 
 
+def _direction(signals: NDArray[np.complex128]) -> tuple[float, float]:
+    """Project along the principal IQ axis, or use I if fewer than two points."""
+    try:
+        angle = find_rotate_angle(signals)
+    except ValueError:
+        return (1.0, 0.0)
+    return (float(np.cos(angle)), float(np.sin(angle)))
+
+
 def allxy_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     """Convert mean complex IQ to the real contrast used by live and analysis plots."""
-    return rotate2real(signals).real
+    i, q = _direction(signals)
+    return signals.real * i + signals.imag * q
 
 
 class AllXYCfg(ConfigBase):
@@ -141,19 +173,57 @@ class AllXYCfg(ConfigBase):
     ]
 
 
+_TRACE_AXIS = VariableAxisSpec(
+    label="Gate Pair Index",
+    unit="",
+    values=tuple(range(len(ALLXY_SEQUENCE))),
+    dtype=np.int64,
+)
+_MOMENT_COLUMNS = tuple(range(6))
+
+
+def _build_result(data: GroupedLoadData[AllXYCfg]) -> AllXY_Result:
+    """Restore the measured trace and any shot moments on the same native axis."""
+    trace = data.variable("data")
+    (coordinates,) = trace.axes
+    moments = data.variables.get(DataVariable("iq_moments"))
+    if moments is None:
+        return AllXY_Result(trace.z)
+    columns, moment_coordinates = moments.axes
+    if not np.array_equal(coordinates, moment_coordinates) or not np.array_equal(
+        columns, _MOMENT_COLUMNS
+    ):
+        raise ValueError(
+            "/vars/iq_moments: expected columns 0–5 on the /vars/data grid"
+        )
+    return AllXY_Result(trace.z, iq_moments=moments.z)
+
+
 class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
     Options: ClassVar[type[AllXYAnalyzeOptions]] = AllXYAnalyzeOptions
 
-    AXES_SPEC: ClassVar[AxesSpec[AllXY_Result, AllXYCfg]] = AxesSpec(
-        axes=(
-            AxesSpec.Axis(
-                values=tuple(range(len(ALLXY_SEQUENCE))),
-                label="Gate Pair Index",
-                unit="",
-                dtype=np.int64,
+    # ADR-0069: preserve the original trace; shot moments are optional on load.
+    AXES_SPEC: ClassVar[GroupedAxesSpec[AllXY_Result, AllXYCfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "data",
+                (_TRACE_AXIS,),
+                VariableZSpec(
+                    "signals", label="Signal", unit="a.u.", dtype=np.complex128
+                ),
+            ),
+            VariableSpec(
+                "iq_moments",
+                (
+                    VariableAxisSpec(label="Moment", unit="", values=_MOMENT_COLUMNS),
+                    _TRACE_AXIS,
+                ),
+                VariableZSpec("iq_moments", label="IQ moments", unit=""),
+                required=False,
             ),
         ),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
+        result_builder=_build_result,
+        labber_variables=("data",),
         result_type=AllXY_Result,
         cfg_type=AllXYCfg,
         cfg_schema_version="3.0",
@@ -175,43 +245,39 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
 
         # 2. Track the staircase with gate-pair labels in acquisition order.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Gate", ylabel="Signal (a.u.)")
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
-        viewer = live_line(ax)
-        name_map = {
-            "I": "$I$",
-            "X90": "$X_{90}$",
-            "Y90": "$Y_{90}$",
-            "X180": "$X_{180}$",
-            "Y180": "$Y_{180}$",
-        }
-        gate_labels = [
-            f"{name_map[gate1]}-{name_map[gate2]}" for gate1, gate2 in ALLXY_SEQUENCE
-        ]
-        ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
-        ax.set_xticklabels(gate_labels, rotation=30, ha="right", fontsize=8)
-        ax.grid(True)
-        line = ax.lines[0]
-        line.set_marker(".")
-        line.set_linestyle(rcParams["lines.linestyle"])
-        line.set_markersize(5)
+        ax.set(
+            title="AllXY gate-pair response",
+            xlabel="Ordered gate pair",
+            ylabel="IQ projection (a.u.)",
+        )
+        viewer = live_errorbar(ax)
+        ax.set_xticks(
+            np.arange(len(ALLXY_SEQUENCE)), _GATE_PAIR_LABELS, rotation=90, fontsize=10
+        )
+        fig.tight_layout()
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            """Refresh the ALLXY contrast curve.
-
-            data is complex IQ in ALLXY_SEQUENCE order; NaN marks unmeasured pairs.
-            Return the changed artists without modifying the input array.
-            """
-            return viewer.set(
-                np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
-                allxy_signal2real(data),
+        def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh projected mean IQ, shot SEM and retained counts per pair."""
+            counts, mean = split_sums(moments)
+            i, q = _direction(mean)
+            sem = iq_shot_sem(moments, direction=(i, q))
+            title = ax.set_title(
+                f"AllXY · {np.nanmax(counts, initial=0):.0f} retained shots/pair"
+            )
+            return (
+                *viewer.set(
+                    np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
+                    mean.real * i + mean.imag * q,
+                    sem,
+                ),
+                title,
             )
 
         fig.show()
         signals_buffer = SignalBuffer(
-            (len(ALLXY_SEQUENCE),),
+            (len(ALLXY_SEQUENCE), len(_MOMENT_COLUMNS)),
+            dtype=np.float64,
             on_update=update,
         )
         # 3. Measure all 21 gate pairs using the calibrated X rotations and derived Y rotations.
@@ -260,11 +326,15 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             )
             builder.emit(Readout("readout", cfg=cfg.readout))
             prog = builder.build()
-            sched.run_acquire(prog, soc, rounds=cfg.rounds)
+            sched.run_acquire_summed(
+                prog,
+                soc,
+                rounds=cfg.rounds,
+                reducer=shot_sums(prog, (IQ("readout", offset_corrected=True),)),
+            )
 
-        return AllXY_Result(
-            signals=signals_buffer.array,
-        )
+        moments = signals_buffer.array
+        return AllXY_Result(signals=split_sums(moments)[1], iq_moments=moments)
 
     def analyze(
         self,
@@ -286,7 +356,8 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
 
         # 1. Project the gate-pair IQ onto a common contrast axis for error estimation.
         sequence = ALLXY_SEQUENCE
-        real_signals = allxy_signal2real(signals)
+        i, q = _direction(signals)
+        real_signals = signals.real * i + signals.imag * q
 
         # 2. Estimate coherent rotation errors from the 21 pair responses.
 
@@ -295,39 +366,34 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         # 3. Compare the measured staircase with the fitted low-order model.
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-        ax.plot(real_signals, marker="o", linestyle="None", label="Measured Signals")
+        if result.iq_moments is None:
+            ax.plot(real_signals, ".", label="Measured")
+        else:
+            indices = np.arange(real_signals.size)
+            sem = iq_shot_sem(result.iq_moments, direction=(i, q))
+            ax.errorbar(
+                indices, real_signals, yerr=sem, fmt=".", label="Measured ± shot SEM"
+            )
         ax.plot(
             fit.predict_signals,
             marker="x",
             linestyle="-",
             color="red",
-            label="Predicted Signals",
-        )
-        ax.axhline(y=fit.center, color="green", linestyle="--", alpha=0.2)
-        ax.axhline(
-            y=fit.center + 0.5 * fit.contrast,
-            color="blue",
-            linestyle="--",
-            alpha=0.2,
-        )
-        ax.axhline(
-            y=fit.center - 0.5 * fit.contrast,
-            color="blue",
-            linestyle="--",
-            alpha=0.2,
+            label="Coherent-error model",
         )
 
-        ax.set_xlabel("Gate")
-        ax.set_xticks(np.arange(len(sequence)))
-        ax.set_xticklabels([f"{g1}-{g2}" for g1, g2 in sequence], rotation=45)
-
-        ax.set_ylabel("Signal (a.u.)")
+        ax.set(xlabel="Ordered gate pair", ylabel="IQ projection (a.u.)")
+        ax.set_xticks(
+            np.arange(len(sequence)), _GATE_PAIR_LABELS, rotation=90, fontsize=10
+        )
         ax.legend()
-        ax.grid(True)
 
         ax.set_title(
-            f"amp err: {fit.amplitude_error:+.2%}, power dep: {fit.power_err:.1%}, "
-            f"detune dep: {fit.detune_err:.1%}, residual: {fit.residual_rms:.1%}"
+            f"AllXY · Relative drive error {fit.amplitude_error:+.2%}\n"
+            f"Amplitude deviation: {fit.power_err:.3f} in Bloch z\n"
+            f"Detuning deviation: {fit.detune_err:.3f} in Bloch z\n"
+            f"Residual RMS: {fit.residual_rms:.3f} in Bloch z",
+            fontsize=10,
         )
 
         fig.tight_layout()

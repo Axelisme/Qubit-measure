@@ -31,9 +31,10 @@ Invalid T1 leaves the derived field empty. Review the wait between repetitions r
 
 ## Reading the contrasts
 
-The live plot shows I for the four branches, not a population projection.
+The live plot and the Analyze I panel show the same four branches of mean IQ real. The markers represent the two π switches: no pulses, π after only, π before only, and π before and after. Compare I with the Q panel to see whether the after-pulse difference has a real or imaginary component.
+For mean I and Q, each error bar is the sample standard deviation of retained shots in that quadrature divided by the square root of the retained count. This shot SEM measures uncertainty of the point mean. It is not a fit error, nor an uncertainty for the nonlinear contrast ratio or residual estimate. Mean-only files still Load and display points without bars.
 Analysis plots the raw I and Q, the contrast ratio r and the residual estimate against gain.
-The summary contains only selected_gain; per-gain contrasts and residuals stay in the figure.
+Analyze reports the source run’s requested Reps × Rounds. Branch response and derived contrasts stay in the plots.
 Let S[a,b] be mean complex IQ with before-pi switch a and after-pi switch b.
 The after-pi differences are `d0=S[0,0]-S[0,1]` and `d1=S[1,0]-S[1,1]`.
 Analysis calculates `r=Re(d1*conj(d0))/|d0|²` without PCA or external IQg/IQe inputs.
@@ -45,7 +46,6 @@ Four mean IQs alone cannot identify p0 and p1 separately.
 This experiment assumes the reset hardly heats g, so p0 is small, and reports `residual_estimate=(1-r)/2`.
 In general this estimate is `(p1-p0)/(1-2*p0)`, not absolute p1.
 A thermally excited idle point, such as fluxonium near half flux, invalidates the p0≈0 approximation.
-The fixed offline model used for validation has idle first-excited-state population about 0.358.
 Only after an initial reset makes p0 small can the estimate represent absolute residual excitation, with the other assumptions still required.
 Offline validation checks run, save, restore, analyze, PNG output and selection. It does not establish physical reset effectiveness.
 Do not use model populations to calibrate the estimate or to change the four-branch formula or selection.

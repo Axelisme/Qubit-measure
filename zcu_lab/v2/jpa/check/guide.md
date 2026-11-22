@@ -1,21 +1,18 @@
-## Behavior
+**Readers:** operator, agent. Compare the resonator reflection spectra with the JPA pump off and on.
 
-**Readers:** operator, agent. Run the JPA pump off/on resonator check from the GUI or MCP and compare the traces. The run sweeps the readout frequency with the selected JPA RF output off, then repeats with it on. Compare the two one-tone resonator traces by eye. This run commands real hardware. WARNING: the JPA pump output remains ON after the run. Review the selected RF device and sweep range before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
+# JPA pump check
 
-## Parameter sources
+The run turns the pump off, then takes an optional reset → frequency-swept readout spectrum. It turns the pump on and repeats the same sequence. Pump frequency, power and flux bias stay at their existing settings. **This leaves the pump on after a normal run.** Verify its settings and the selected device before Run.
 
-Uses the resonator alias for `$resonator.freq`, `$resonator.kappa` and resonator wiring, and the jpa (`amplifier/jpa`) alias for `$jpa.rf_source`. The qubit alias supplies an optional reset module. Opening the tab or choosing Defaults reads the RF default from `$jpa.rf_source`; a missing source leaves the field empty and Invalid. The direct device name remains editable. Select the connected JPA RF device in the form. The check uses the existing pump-frequency, pump-power and flux settings on the hardware. Missing required resonator calibration marks the form Invalid.
+## Set up the comparison
 
-## Module slots
+Choose the resonator and JPA aliases at the selected point, then choose **Defaults**.
 
-Readout starts from the readout template. Its pulse uses `$resonator.freq` and `$resonator.wiring.ch`; acquisition uses `$resonator.freq`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs. The sweep sets both frequencies during the run. You can also select a saved readout module. Optional reset uses `$qubit.module.reset`; an empty slot disables reset.
+- **JPA pump RF source** starts from `$jpa.rf_source`. Select the connected source whose output to toggle.
+- **Readout RF frequency** uses absolute RF in MHz. The initial bounds are `$resonator.freq` ± 1.5 × `$resonator.kappa` with 101 samples. Use a window wide enough to see the feature and both shoulders.
+- **Frequency-swept readout** starts from the resonator's wiring and timing; its trigger starts at the flight time plus 0.015 µs. The sweep sets transmit and receive RF frequency. Choose a calibrated readout for this route. Select **Reset** from the qubit's optional reset module or leave it empty.
+- **Reps** and **Rounds** start at 1000 shots per frequency per round and 10 rounds per pump setting. **Relaxation wait** starts at 0.5 µs and sets the delay after readout. The Analyze summary shows Reps × Rounds for the plotted run.
 
-## Typical writeback
+## Read the plots
 
-Use this visual diagnostic to compare the two traces. Update stored parameters in a separate step.
-
-## Recommended
-
-The Analyze tab shows the pump off/on comparison figure with fixed settings. A typical readout-frequency sweep uses about 101 points spanning 1.5 linewidths around `$resonator.freq`. Before every run, confirm the current JPA pump state and review the selected RF device. The run toggles its output off, then on, and leaves it ON.
-
-**Last updated:** 2026-10-21
+The two labeled traces in Live and Analyze use the same RF axis and the magnitude of mean complex IQ, in a.u. This is a reflected readout signal, not a state population or calibrated gain in dB. Blank frequencies have no data yet; Live counts the sampled frequency and pump-state pairs. Compare the feature's position, width and contrast between the pump conditions. A change is evidence that the pump affects the reflection, but does not by itself identify the pump setting with the best g/e separation. Rescan with narrower frequency bounds around the feature if more resolution is needed. Use a g/e separation sweep to choose a pump setting. The spectra have no fit, shot-SEM bars or automatic writeback.

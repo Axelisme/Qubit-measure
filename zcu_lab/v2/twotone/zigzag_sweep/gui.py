@@ -64,6 +64,11 @@ def _ZigZagScanFreq_make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
     return make_freq_form(ctx)
 
 
+def _summary_lines(source: ZigZagScanRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 GAIN_DEFINITION = Adapter(
     spec=ZigZagScanExp.AXES_SPEC,
     make_form=_ZigZagScanGain_make_form,
@@ -71,6 +76,7 @@ GAIN_DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.gain.md"),
     analysis=Analysis(
         fn=_ZigZagScanBase_analyze,
+        summary_lines=_summary_lines,
         options=lambda source, env: ZigZagScanAnalyzeParams(),
     ),
 )
@@ -83,6 +89,7 @@ FREQ_DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.freq.md"),
     analysis=Analysis(
         fn=_ZigZagScanBase_analyze,
+        summary_lines=_summary_lines,
         options=lambda source, env: ZigZagScanAnalyzeParams(),
     ),
 )

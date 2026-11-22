@@ -1,18 +1,14 @@
 **Readers:** operator, agent. Sweep Pump and Stokes detuning with independent envelopes and interpret saved-readout g/e/f estimates.
 
-# STIRAP detuning
-
 Open `New Tab → twotone → stirap → detuning`.
-This experiment sweeps Stokes detuning in the outer hardware loop and Pump detuning in the inner hardware loop.
-One program and one acquisition cover the full grid. The computer does not compile or acquire each coordinate separately.
+Run acquires the full grid in one round, stepping Pump detuning within each Stokes detuning.
 Each shot overlaps the two drives, waits for both to finish, then reads out g/e/f.
 It does not infer carriers from a simulator or tune them automatically.
 
 ## Before Run
 
 Measure the Pump 0–3 and Stokes 3–2 carriers separately.
-Connect them to different generators and verify the physical charge-drive wiring.
-Pump and Stokes envelopes overlap, and one channel cannot play both arbitrary-waveform carrier frequencies at the same time.
+Select separate charge-drive lines for overlapping Pump and Stokes pulses.
 Enter the measured carriers in MHz and signed gains between -1 and 1.
 The carrier fields remain blank until you provide them.
 
@@ -43,7 +39,6 @@ Set the selected shape's parameters in µs, including length and Gaussian/DRAG s
 DRAG also uses its delta and alpha parameters.
 Arbitrary envelopes take their duration from the selected sampled asset.
 No common width or six-sigma length rule couples the drives.
-If an envelope exceeds the generator's memory, the existing upload check reports the error.
 
 Positive Stokes lead delays Pump by that many µs.
 Negative Stokes lead delays Stokes instead.
@@ -51,14 +46,14 @@ Different pulse lengths are allowed. Readout starts only after both timelines fi
 
 Set Stokes detuning and Pump detuning endpoints in MHz and the number of points on each axis.
 Each detuning adds to its own measured carrier.
-The plotted coordinates are the requested offsets. Actual pulse frequencies follow the board's hardware grid.
+The plotted coordinates record the requested offsets.
 Shots sets the g/e/f classification count per scan point.
 Relax delay follows each shot.
 
 ## Read the results
 
 Run stores float64 counts with shape `(Nstokes, Npump, 3)` in g/e/f order.
-The measurement heatmap shows the raw f fraction, with Pump detuning on x and Stokes detuning on y.
+Run shows measured g, e and f fractions on three maps, with Pump detuning on x and Stokes detuning on y. The color scale is 0–1 and the title reports retained shot counts.
 Unfinished points remain NaN.
 
 Analyze uses only the readout classifier saved in that Run.
@@ -69,7 +64,7 @@ The summary and recipe report give `f_population_estimate`, the largest finite
 corrected f population on this grid, and `pump_detuning_mhz` and `stokes_detuning_mhz`, offsets from the measured carriers.
 Ties go to the first acquired point. If no finite value is available, the peak
 and its coordinates are null. The estimate is unclipped and does not identify
-a global optimum.
+a global optimum. The cross marks the selected point. If the high-f region is centered at Pump +0.5 MHz and Stokes −0.4 MHz, center the next, finer scan at those offsets. To adopt them as the new carriers, add each offset to its own carrier and center the new detuning ranges at zero. The 2D maps do not show pointwise shot SEM.
 These are preparation-label estimates, not transfer fidelity or an intermediate-state measurement.
 Nonfinite or empty counts and singular confusion matrices fail analysis.
 There is no calibration writeback.

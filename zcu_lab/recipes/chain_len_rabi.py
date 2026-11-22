@@ -29,35 +29,35 @@ class ChainLenRabiInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse readout library key. Sources are chosen by the Form.",
+        description="Set Readout to a library key for the single-tone pulse readout played twice per cycle block.",
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
-        description="Drive library key with a const or flat_top waveform.",
+        description="Set Drive pulse to a library pulse with a constant or flat-top waveform.",
     )
     frequency_mhz: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse frequency in MHz.",
+        description="Set Drive pulse › Frequency (MHz), the fixed RF carrier; the pulse switches to inline editing.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse amplitude in native gain units.",
+        description="Set Drive pulse › Gain (a.u.), the fixed signed drive gain.",
     )
     max_length_us: float | None | Keep = Field(
         KEEP,
-        description="Pulse-length sweep stop in µs.",
+        description="Set Drive duration › Stop (µs), the last drive duration.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count.",
+        description="Set Drive duration › Expts (count), the number of sweep points.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Cycles per length in each round, at least 66.",
+        description="Set Reps (count), the number of cycles at every sweep point in one round; at least 66.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Round count; the live plot updates after each round.",
+        description="Set Rounds (count), the planned number of passes through the sweep.",
     )
 
 
@@ -65,37 +65,37 @@ class ChainLenRabiReport(RecipeReport):
     """Chain Rabi fit and its checks; cancellation returns no report."""
 
     pi_length_us: float | None = Field(
-        description="Pi length from the chain fit in µs; null means not estimable."
+        description="π duration (µs); null if unavailable."
     )
     pi_length_err_us: float | None = Field(
-        description="Pi length uncertainty in µs; null means not estimable."
+        description="π duration Wald standard error (µs); null if unavailable."
     )
     rabi_frequency_mhz: float | None = Field(
-        description="Rabi frequency in MHz; null means not estimable."
+        description="Rabi frequency (MHz); null if unavailable."
     )
     rabi_frequency_err_mhz: float | None = Field(
-        description="Rabi frequency uncertainty in MHz; null means not estimable."
+        description="Rabi frequency Wald standard error (MHz); null if unavailable."
     )
     reliability: float | None = Field(
-        description="Diagnostic R of the frequency error, no threshold."
+        description="R, the inverse phase uncertainty from the frequency error over the sweep (no threshold); null if unavailable."
     )
     within_point: CycleCheck | None = Field(
         description="Within-point check J, df, p; null without analysis."
     )
     sharing: CycleCheck | None = Field(
-        description="Sharing check J, df, p null; null without analysis."
+        description="Sharing check J, df, p; null without analysis."
     )
     curve: CycleCheck | None = Field(
         description="Curve check J, df, p; null without analysis."
     )
     first_read_pi_length_us: float | None = Field(
-        description="Pi length in µs of the first-read twotone fit; null means not estimable."
+        description="First-read π duration (µs); null if unavailable."
     )
 
 
 @recipe(
     "chain_len_rabi",
-    description="Run one K-cycle readout-chain length Rabi, fit all 65 numbers, save sums and analysis.",
+    description="Sweep drive duration in K-cycle length Rabi; use the first-read fit to seed a joint three-state fit, then save without writeback.",
 )
 async def chain_len_rabi(
     session: RecipeSession, inputs: ChainLenRabiInputs

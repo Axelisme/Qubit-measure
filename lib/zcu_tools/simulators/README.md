@@ -1,6 +1,6 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-21, acquire rows and deferred raw timing
+**Last updated:** 2026-11-22, FTF projective diagnostics
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
@@ -21,7 +21,7 @@ environment = ftf(settings, soccfg=soccfg)
 ```
 
 The caller supplies `model_path` and a `QickConfig` built from independent board YAML.
-Model YAML explicitly supplies RNG seeds, bath occupations, pruning thresholds and
+Model YAML explicitly supplies RNG seeds, bath occupations, projection weight floors and
 existing numerical controls. A null root seed chooses once at startup; a null
 bath occupation uses the circuit temperature. Every receiver supplies background
 period and pivot, even when zero depth and slope disable the effect.
@@ -102,7 +102,7 @@ access to cached shots appends nothing. The same retention budget
 applies to both record kinds; the matching acquire row can be absent if pruned.
 Older acquire rows may have neither `acquire_id` nor `materialize_wall_s`.
 
-Use extras keys such as `ftf.projection_outcomes`; the prefix names the simulator's
+Use extras keys such as `ftf.projection_continued_states`; the prefix names the simulator's
 extension, not a row identity. Required extras keys are indexed directly by their
 consumer. The writer projects only declared fields and never modifies the caller's
 summary. It stores no numerical inputs or simulator identity.
@@ -190,7 +190,7 @@ FTF and single also write a top-level `metadata` object:
   A normal partial Stop is true; an escaping exception is false.
 
 For FTF projective continuation, [FTF capture metadata](ftf/environment/README.md#debug-capture)
-links Engine rows to original points, spans and histories.
+links Engine rows to their round, original point, span, source event and DC energy state.
 Captures contain numerical inputs and model settings. Keep them out of ordinary Run metadata and Git.
 
 ## Test owners

@@ -124,20 +124,19 @@ SimulationAcquireMixin 由 program owner 提供，只在 MyProgramV2 共同基�
 
 Run／QICK round loop、hooks、分類、normalization 與 averaging 沿用取數管線。EarlyStopMixin／cancel_flag 繼續擁有停止及部分結果語意，不承諾立即中斷同步 solver 或有界停止延遲；實測過久再評估合作式取消。
 
-2026-10-28，使用者以「A我認為可以完整版。」授權三環境的中途 projective readout，取代初版僅末端讀出的限制。Single、six、FTF 都將帶 ADC trigger 的非終端 readout block 分類為 projective read。環境在 pulse start 以 retained DC 能量基底作 rank-1 對角投影，並續演化到下一次 read 或終端；FTF 保留各 outcome 權重，single／six 保留每個投影狀態的轉移列（[[0078]]）。未帶 trigger 的非終端 block 仍是 cavity drive，FTF 保留既有 cavity-drive 演化，single／six 在演化前拒絕。
+2026-10-28，使用者以「A我認為可以完整版。」授權三環境的中途 projective readout，取代初版僅末端讀出的限制。Single、six、FTF 都將帶 ADC trigger 的非終端 readout block 分類為 projective read。環境在 pulse start 以 retained DC 能量基底作 rank-1 對角投影，並續演化到下一次 read 或終端；三種環境都輸出 `ProjectionChain`。FTF 每次投影後把入射腔場設為真空，逐層依被佔據的 DC 能階求轉移（[[0078]]）。未帶 trigger 的非終端 block 仍是 cavity drive，FTF 保留既有 cavity-drive 演化，single／six 在演化前拒絕。
 
 讀出視窗的裝置時間配對、block owner 與跨投影規則見 [ADR-0078](../0078-evolution-module-boundary.md#ftf-讀出窗依裝置時間配對)。同一 template 跨 point、同一 numeric preparation 跨 template 的 projective block 數與各 ADC/event grid 數必須一致。Six 以每個 routed source 為單位，先完成所有 source 的 preflight，再開始任何演化或取樣。
 
 所有 ADC 與 projection populations 共用 logical-event 軸。ADC 未觀測的 event 保留空 grids，不產生 read 欄。允許所有 ADC 都略過終端觀測，終態仍進 integrated counts；每個 ADC 至少觀測一個 event。Single 的公開 `preflight`／`prepare_readouts` 接收同 cavity 的完整 ADC 集合，six 不逐 ADC 重建投影。
 
-Raw 與 decimated 每 shot 先抽投影狀態：FTF 抽一條完整 outcome history，single／six 沿 `ProjectionChain` 從前一個投影狀態的轉移列逐 event 抽下一個。各 event 再抽自己的 CTMC path。觀測同一 event 的 ADC 共用 path，receiver noise 各自獨立。
-FTF 的 integrated counts 攤平 outcome 與 terminal-state 軸。Single／six 以逐態 multinomial flow 抽各 event 的 state histogram，再用累積邊界編成共同 category 軸，每點最多 `1+Σ(S_e−1)` 個，不隨 reps 成長；各 read 的 noiseless totals 的聯合分佈與逐 shot 抽完整路徑相同，category 不代表真實 shot 路徑。兩種表示都讓 herald 與終端統計共用 counts。Herald 期間的 CTMC transitions 只影響該次 IQ，不回饋後續密度演化。投影不依 IQ 可分辨性聚類，不支援 MIST 或資料相依 feedback／active reset。
+Raw 與 decimated 每發沿 `ProjectionChain` 逐 event 抽投影狀態，再為各 event 抽 CTMC path。觀測同一 event 的 ADC 共用 path，receiver noise 各自獨立。
+Integrated 以逐態 multinomial flow 抽各 event 的 state histogram，再用累積邊界編成共用 category 軸，每點最多 `1+Σ(S_e−1)` 個，不隨 reps 成長。每個讀出的 noiseless total 由對應事件的 counts 乘條件均值後加總。Flow 保留各事件 occupancy 的聯合分佈，但 bins 只編碼各事件邊際，不代表真實 shot 路徑或跨事件物理 joint。Herald 期間的 CTMC transitions 只影響該次 IQ，不回饋後續密度演化。投影不依 IQ 可分辨性聚類，不支援 MIST 或資料相依 feedback／active reset。
 
-Single／six 的 `numerics.projection_prune_floor` 與 FTF 的 `numerics.projection_weight_floor` 都接受有限 `0 <= floor < 1`，預設 `1e-9`。
-FTF 每次投影後剪掉低於 floor 的全域 history 權重，按比例正規化存活權重並記錄剪枝量。零不剪枝；某點沒有存活 outcome 時 raise `ValueError`，指名 point 與 floor，不保留最大 outcome 作後備。
-Single／six 在每一點、每個轉移各自判斷：該點近似機率不低於 floor 的投影狀態採用 solver 從該狀態演化出的轉移列，其餘狀態在該點設 identity，近似為留在原狀態。這個近似不丟機率、不重新正規化，也沒有全部剪光的錯誤；floor 為零時是精確 chain。
-每個 plan 對至少一點需要的狀態聯集演化一次；某點不需要的列即使算過也不用。
-Diagnostics 的 `continued_states` 以每點每轉移的採用 mask 計數，`uncontinued_probability` 是 mask 補集上的近似機率和。一點的路徑 total variation 不超過它跨轉移的 `uncontinued_probability` 總和，不含 solver 誤差。`evolution_calls` 記含 prefix 的實際呼叫，不能由採用數換算。表示與代裁見 [[0078]]。
+Single／six 的 `numerics.projection_prune_floor` 與 FTF 的 `numerics.projection_weight_floor` 都接受有限 `0 <= floor < 1`，且都必填。
+Single／six 樣板明填 `1e-9`。FTF 的樣板值見 [FTF 工作副本與調參](../../../zcu_lab/simulation_envs/FTF/README.md#工作副本與調參)連結的 YAML。
+三種環境按點、按轉移套 floor。來源態機率低於 floor 時用 identity 列，留在原態；其餘來源態用 solver 的轉移列。這項近似不丟機率、不重新正規化。Floor 為零時不套這項近似。Single／six 每個 plan 對至少一點需要的狀態聯集演化一次；某點不需要的列即使算過也不用。
+Diagnostics 記每點每轉移實際續演化的來源態數，以及 identity 列的近似機率和。FTF 稱後者為 `ftf.projection_identity_weight`，single／six 稱為 `uncontinued_probability`。一點的路徑 total variation 不超過它跨轉移的 identity 列機率總和，不含 solver 誤差。`evolution_calls` 記含 prefix 的實際呼叫，不能由採用數換算。表示與代裁見 [[0078]]。
 沒有 projective read 的 template 保留原 raw、integrated、decimated 輸出。Continuation density 與完整 preparation 重用的區別見 [[0078]]。
 
 ### Compiled frontend 與小介面依賴
@@ -312,13 +311,13 @@ FTF 在符合條件的 acquire 以上限基底解一條 pilot，再從完整 den
 
 Readout 採弱讀出、dispersive、線性 resonator 與能量基底 QND mixture，不增加 resonator quantum Hilbert space。引擎在各 projective read 與終端 readout 起點回到 DC 能量基底。ADC 固定使用 DC 格點的 basis、rates／pulls，忽略殘餘 flux tail 及重疊 controls。量子演化仍包含 herald 之後、終端 readout 起點之前的 controls。每點可有多組 projective read 與一組末端 readout，每組使用單 pulse 或共同起點的 mux tones。這是讀出近似，不宣稱 tail 已消失或 ADC 支援時變 flux。二階 dispersive pulls 對所有可佔據 retained states 計算，virtual transitions 可來自較大的 parent space，不給 leakage／coupler states 任意零 pull。
 
-2026-10-14，使用者提出：「readout_source/receiver一個就好，因為共用傳輸線。」對是否也只用一個 generator 與一個 ADC readout channel 的追問，確認：「是的，只有一個gen_ch與ro_ch」。初版 FTF 的 readout_source 與 receiver 各一個，分別綁定 YAML 指定的 gen_ch 與 ro_ch，不合併 microwave／flux control 的其他 generators。現行 FTF 另支援 mux readout，一個 generator 發出共同起點的有序 tones，每個 ADC receiver 接收全部 incident carriers，再以自己的頻率解調。同一 shot 的全部 ADC 共用一次 outcome history 抽樣，觀測同一 event 時共用 CTMC path，receiver noise 各自獨立。單 pulse 與 mux 的現行設定及數值契約見 [FTF README](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
+2026-10-14，使用者提出：「readout_source/receiver一個就好，因為共用傳輸線。」對是否也只用一個 generator 與一個 ADC readout channel 的追問，確認：「是的，只有一個gen_ch與ro_ch」。初版 FTF 的 readout_source 與 receiver 各一個，分別綁定 YAML 指定的 gen_ch 與 ro_ch，不合併 microwave／flux control 的其他 generators。現行 FTF 另支援 mux readout，一個 generator 發出共同起點的有序 tones，每個 ADC receiver 接收全部 incident carriers，再以自己的頻率解調。同一 shot 的全部 ADC 沿同一條投影狀態 chain 取樣。觀測同一 event 時共用 CTMC path，receiver noise 各自獨立。單 pulse 與 mux 的現行設定及數值契約見 [FTF README](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 
 R1、R2 共用 reciprocal、co-located two-port transmission line，包含 off-diagonal radiative damping，不等同兩條獨立 Lorentzian 相加或僅共用 ADC。Two-port 指物理端口，不代表雙 ADC。每個 receiver 觀測共同線路輸出，其接收 noise 的 PSD matrix 定義在 I,Q 空間，為2×2實對稱正半定矩陣。有限 pulse 經 classical field evolution，ADC 以總讀取線延遲推遲物理輸出，再解調、取共軛成微波 I+iQ，套 receiver gain／phase／offset 並加入 noise。各 resonator 的 mismatch 相位只旋轉其散射項，不改 shared-line 動力學。數值與欄位契約見 [ADC README](../../../lib/zcu_tools/simulate/adc/README.md) 及 [FTF 欄位指南](../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
 
 2026-10-14，使用者對「保留空間內的多能階relaxation＋條件平均讀出，不追逐shot衰減細節」回答「好，同意」。對每個 readout 初始 joint state 計算含既有 directional relaxation／thermal transitions 的條件平均響應，涵蓋矩陣元允許的 cascade、直接跨級、coupler／leakage states 與熱激發，不限0↔1。不新增 readout T1、空間外態或 ground sink。
 
-響應保留 population 與 state-conditioned 場 moments 的關聯，不能只平均 resonator frequency 再解單一場方程。Integrated 使用條件 moments 與共同 joint counts，raw／decimated 使用每 event 的 CTMC path。兩者共用同一份投影產品（FTF 的 outcome weights 與 event populations、single／six 的 `ProjectionChain`），不逐 shot 重解量子演化。Raw path 生成跳變時間造成的 IQ 尾巴與跨 ADC 關聯，但 herald path 不回饋量子續演化。
+響應保留 population 與 state-conditioned 場 moments 的關聯，不能只平均 resonator frequency 再解單一場方程。Integrated 將各讀出的條件均值依其事件的 occupancy 加總，得 noiseless total。共用 bins 只編碼各事件邊際，不表示跨事件物理 joint。Raw／decimated 沿同一發的 chain 取樣，每 event 再抽 CTMC path。兩種取數都使用同一份 `ProjectionChain`，不逐 shot 重解量子演化。Raw path 生成跳變時間造成的 IQ 尾巴與跨 ADC 關聯，但 herald path 不回饋量子續演化。
 
 此模型不新增 power-induced transitions、額外 readout Purcell、強 backaction 或 Kerr，不作硬體 single-shot fidelity 認證。相同物理條件可共用演化與條件平均響應，reps／rounds 主要增加抽樣及資料輸出，成本仍須實測。
 

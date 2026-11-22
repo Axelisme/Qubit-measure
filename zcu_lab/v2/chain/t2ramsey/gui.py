@@ -38,6 +38,11 @@ class ChainT2RamseySummary(BaseModel):
     )
 
 
+def _summary_lines(source: RunRecord[ChainT2RamseyCfg, CycleSums]) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
+
+
 def _analyze(
     req: AnalyzeRequest[RunRecord[ChainT2RamseyCfg, CycleSums], None],
     *,
@@ -59,5 +64,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

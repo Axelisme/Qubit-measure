@@ -23,6 +23,12 @@
 
 ## 模擬量測環境
 
+- 2026-11-22 [FTF 樣板的 projective floor](2026-11-22-ftf-projection-weight-floor.md)：精度取捨。FTF 樣板 floor 改為 `1e-5`；舊 history 模型下原設定第一點的 1,800 s 參考缺口，在 Markov 同模型驗收後不再適用。
+- 2026-11-22 [ADC raw plan 由誰持有](2026-11-22-adc-raw-plan-acquire-owner.md)：快取歸屬。FTF 與 standalone single 的 acquire session 持有 ADC plan；換 batch 或結束就退役，舊 raw 可冷重算。
+- 2026-11-22 [FTF projective 從真空續演化並改用 Markov chain](2026-11-22-ftf-projective-markov.md)：表示與資料格式。投影後逐 DC 態續演化，raw 保留單發配對，compact 只給逐事件邊際；獨立參考兩 floor 驗過 41／75 個 key。
+- 2026-11-22 [模擬器的時間門檻與驗證成本](2026-11-22-simulator-speed-first-verification.md)：取捨原則。正常參數先守 180 秒，精度以 `1e-2` 為目標；優化先做局部對照，獨立參考與全表不再是每次落地關卡。
+- 2026-11-22 [牆鐘工具的 worker 數與量測範圍](2026-11-22-wall-time-worker-policy.md)：量測條件。預設保留單 worker；非排他慢實驗子集按 CPU slot 明示 worker 數，以收據核對。
+
 - 2026-11-21 [Projective 腔場改走 ADC flat span 合併解](2026-11-21-projective-span-reuse.md)：快取歸屬。Projective 與 MIST 都向 ADC 取 flat 二階矩與各 state 端點場，只在 exact key 命中時重用，FTF 仍逐 history 選態與建 shift；兩路共用 512 MiB，`CavityDrive` 只留 `cache=`；三個固定前綴同 seed density 相等、獨立端點解歸零。
 
 - 2026-11-21 [FTF Stop：合作式檢查點與取消傳輸](2026-11-21-ftf-stop-checkpoints.md)：停止與取消。不設上限、設計上檢查間隔 5 秒；取消經 SimulationSoc request 生命週期到兩個 QICK round 入口，零輪拋既有停止例外；cold 首跑與 Engine 內剩餘區段未達 5 秒，另開 task 承接。
@@ -107,6 +113,7 @@
 - 2026-11-21 [牆鐘報表的 guide 與輸入](2026-11-21-wall-time-coverage.md)：宣告歸屬。Adapter 交付 guide 路徑；工具固定模擬輸入，只計 Run 到終態。
 - 2026-11-21 [牆鐘工具如何記錄 Run 失敗](2026-11-21-wall-time-run-failed.md)：失敗隔離。Controller 回報失敗時先寫列；idle 才續跑；exit status 區分未判定列與工具錯誤。
 - 2026-11-21 [牆鐘報表如何重建中斷列](2026-11-21-wall-time-interrupted-rows.md)：刪除或收窄。派送前 journal 不能證明 Run 耗時，重建不填秒數或下限。
+- 2026-11-22 [固定 FTF fixture 缺路由的十列](2026-11-22-wall-time-fixture-flux-routing.md)：量測邊界。固定 fixture 缺快磁通與共用 coil 的十列明示未量，不借示意係數或其他場景的 coil。
 - 2026-11-21 [模擬器核心耗時：從完整 Run 讀，不建凍結場景](2026-11-21-simulator-core-time.md)：量測指標。3 分鐘目標讀完整 Run 中的編譯、演化、讀出與 raw materialize；延後的 raw 以 acquire 身分補列；不完整列只報下限，下限嚴格大於 180 秒才判超標；錄製重播與手寫場景因維護成本否決。
 
 - 2026-11-15 [模擬器測試與量測的分層](2026-11-15-simulator-test-measurement-layering.md)：分層。Kernel、dispatch、序列、前端與 environment 分開驗，退休 acquire e2e 量測，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
@@ -156,6 +163,8 @@
 ## Measure UI
 
 - 2026-11-22 [在 Measure Data 頁讀原圖](2026-11-22-data-figure-reading.md)：圖形呈現。縮圖用來選圖，`View figure` 用當前原生 Figure 在同頁重繪一張可捲動的圖，不改 Save 工件。
+- 2026-11-22 [Live-only 實驗的 figures-only Analyze](2026-11-22-figures-only-analyze.md)：Analyze 能力。四個 leaf 只從明確來源重畫具名圖，不增加數值結果或寫回。
+- 2026-11-22 [非均勻熱圖在建構時選色盤](2026-11-22-nonuniform-heatmap-cmap.md)：繪圖介面。作者在建構期傳入具名 cmap，預設與其他熱圖行為不變。
 
 ## Cfg 與表單
 
@@ -178,6 +187,7 @@
 - 2026-11-14 [Lab 依賴只經 assembly 入口](2026-11-14-lab-dependency-boundary.md)：依賴邊界。組合根與開發工具只直接 import assembly，migrations 保留格式遷移所需的直接依賴，決策見 [ADR-0072](../adr/0072-module-boundaries.md)。
 - 2026-10-20 [框架去具體化：alias、模板、predictor 與一晶片一 qubit 假設](2026-10-20-framework-decoupling.md)：領域 alias、模板與模型認知留在 zcu_lab，框架的 owner 邊界見 [ADR-0072](../adr/0072-module-boundaries.md)。
 - 2026-11-22 [Two-qubit 的身分、定位與中性位置名](2026-11-22-two-qubit-identity-and-neutral-positions.md)：職責歸屬。Adapter 解析身分並傳定位數值，分析 options 接收標籤，位置沿用 `qubit1/qubit2`。
+- 2026-11-22 [頻譜擬合模型的求值 owner](2026-11-22-spectrum-fit-evaluation-owner.md)：擬合邊界。Fitting 重用同次係數，實驗 caller 決定窗內網格與呈現。
 
 ## 測試與驗證
 
@@ -186,6 +196,7 @@
 - 2026-11-16 [實驗 probe 的 snapshot 保存與比較](2026-11-16-probe-snapshots.md)：工具範圍。保存與比較留在 tools，階段不寫 snapshot，環境清理由獨立 context manager 收尾。
 - 2026-11-15 [Doc relations 略過 fenced code 示例連結](2026-11-15-doc-relations-fenced-links.md)：檢查器誤報，修正 checker 對示例的判讀，保留正文連結與 ADR 檢查。
 - 2026-10-16 [Agent 自行做 UI e2e：元件驅動情境](2026-10-16-agent-ui-e2e.md)：Agent 經使用者可操作的元件驗證可見行為，使用者走查判品味。
+- 2026-11-22 [Families 部分交付與代表 R0 缺口](2026-11-22-families-partial-delivery.md)：驗收範圍。已驗 leaf 與 mux reducer 進版；Coherence 四葉、MIST、JPA、Fast-flux、Chain 等代表 R0 未驗時如實保留缺口，不寫成通過。
 
 ## 存檔與資料格式
 
@@ -200,9 +211,11 @@
 - 2026-11-20 [用 writeback 發布 CZ 的 arb 資產](2026-11-20-arb-asset-writeback.md)：資產發布。Apply 先發布不覆寫的 entry 資產，再寫引用該 key 的 library 提案。
 - 2026-11-22 [Two-qubit 新 native 軸名與舊格式](2026-11-22-two-qubit-native-axis-cutover.md)：資料格式。只有模擬測試資料的家族不新增不相容舊 layout 的 reader，原檔保留。
 - 2026-11-22 [Amp Rabi 的 shot moments](2026-11-22-amp-rabi-shot-moments.md)：資料格式。同批校正 IQ 保留既有平均，native 可選 moments；驗所有現有變數後，Labber 仍只匯出原單 log。
+- 2026-11-22 [Mux 逐 tone 校正 IQ 矩與 R11](2026-11-22-mux-iq-moments-and-r11.md)：資料格式。Reducer 按參與 tone 順序計算完成輪的同批校正六矩，保留既有平均與舊檔。
 
 ## 量測策略
 
+- 2026-11-22 [Fast-flux 頻譜擬合失敗](2026-11-22-fastflux-distortion-fit-failure.md)：失敗語意。保留整次 Analyze 失敗，不用部分成功圖掩蓋不可辨識的掃描。
 - 2026-10-27 [T1/T2 over flux 量測策略：哪些機制有效](2026-10-27-coherence-strategy-levers.md)：自適應 flux 選點無增益，穩健 delay 取樣讓每條曲線的 σ 約為原來 0.73 倍。
 - 2026-10-29 [Heralding：取數層 post-selection，不做 FPGA active reset](2026-10-29-heralding-post-selection.md)：在 host 取數層依 herald 篩選再平均，不做 FPGA active reset，決策見 [ADR-0074](../adr/0074-flat-readout-module.md)。
 - 2026-10-30 [Readout 優化指標：用兩次讀出的一、二次矩算 SNR 與 QND](2026-10-30-readout-optimization-metrics.md)：兩次讀出的一、二次矩估 SNR 與 QND，先畫 Pareto 前緣由人選。
