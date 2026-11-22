@@ -29,27 +29,27 @@ class ChainT1Inputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse readout library key. Sources are chosen by the Form.",
+        description="Set Readout to a library key for the single-tone pulse readout played twice per cycle block.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key.",
+        description="Set π pulse to the calibrated library pulse.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in µs.",
+        description="Set Wait after π pulse › Stop (µs), the last wait.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count.",
+        description="Set Wait after π pulse › Expts (count), the number of sweep points.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Cycles per delay in each round, at least 66.",
+        description="Set Reps (count), the number of cycles at every sweep point in one round; at least 66.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Round count; the live plot updates after each round.",
+        description="Set Rounds (count), the planned number of passes through the sweep.",
     )
 
 
@@ -57,22 +57,22 @@ class ChainT1Report(RecipeReport):
     """Chain T1 fit and its checks; cancellation returns no report."""
 
     t1_us: float | None = Field(
-        description="T1 in µs, the larger-amplitude eigen time; null means not estimable."
+        description="T1 (µs), the larger-amplitude eigen time; null if unavailable."
     )
     t1_err_us: float | None = Field(
-        description="T1 uncertainty in µs; null means not estimable."
+        description="T1 Wald standard error (µs); null if unavailable."
     )
     secondary_time_us: float | None = Field(
-        description="The other eigen time in µs; null means not estimable."
+        description="Secondary time (µs), the other eigen time; null if unavailable."
     )
     secondary_time_err_us: float | None = Field(
-        description="Secondary time uncertainty in µs; null means not estimable."
+        description="Secondary time Wald standard error (µs); null if unavailable."
     )
     within_point: CycleCheck | None = Field(
         description="Within-point check J, df, p; null without analysis."
     )
     sharing: CycleCheck | None = Field(
-        description="Sharing check J, df, p null; null without analysis."
+        description="Sharing check J, df, p; null without analysis."
     )
     curve: CycleCheck | None = Field(
         description="Curve check J, df, p; null without analysis."
@@ -81,7 +81,7 @@ class ChainT1Report(RecipeReport):
 
 @recipe(
     "chain_t1",
-    description="Run one K-cycle readout-chain T1, fit all 65 numbers, save sums and analysis.",
+    description="Sweep wait after π pulse in K-cycle T1; use the first-read fit to seed a joint three-state fit, then save without writeback.",
 )
 async def chain_t1(session: RecipeSession, inputs: ChainT1Inputs) -> ChainT1Report:
     """Sweep the wait after a pi pulse with one K-cycle per rep: K, then (pi, wait, read, read) x 8.

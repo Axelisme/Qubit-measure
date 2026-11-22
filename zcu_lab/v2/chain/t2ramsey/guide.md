@@ -1,20 +1,18 @@
-# K-cycle readout-chain T2 Ramsey
-
 **Readers:** operator, agent. Run the readout-chain T2 Ramsey from the GUI or MCP and read its live curves, joint fit and checks.
 
-**Last updated:** 2026-11-09
+# K-cycle readout-chain T2 Ramsey
 
 After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Behavior
 
 `chain/t2ramsey` sweeps the Ramsey wait like `twotone/t2ramsey`, but every repetition is one cycle of 16 reads instead of one read.
-A cycle waits Relax delay, then plays eight blocks of Pi/2 Pulse, the swept Delay, a second Pi/2 Pulse and two reads of the same Readout, with no reset inside the cycle.
-The second Pi/2 Pulse has the first one's phase plus 180 degrees, so at zero delay it undoes the first and returns the qubit to its start.
-Its phase also advances by 360 × Detune × delay degrees, which adds Detune fringes per µs of delay without changing the drive frequency.
-Relax delay is the thermalisation wait K, including before the first cycle. Set it to at least 5 T1 for the model's thermal-equilibrium start.
-After a readout pulse ends, its `post_delay` sets the wait before the second readout or the next Pi/2 Pulse.
-The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
+A cycle waits Cycle thermalisation wait K, then plays eight blocks of π/2 pulse, the swept Free-evolution wait, a second π/2 pulse and two reads of the same Readout, with no reset inside the cycle.
+The second π/2 pulse has the first one's phase plus 180 degrees, so at zero delay it undoes the first and returns the qubit to its start.
+Its phase also advances by 360 × Ramsey phase-ramp detune × delay degrees, which adds the specified fringes per µs of delay without changing the drive frequency.
+Use at least 5 × T1 for K, including before the first cycle, to start near thermal equilibrium.
+After a readout pulse ends, its `post_delay` sets the wait before the second readout or the next π/2 pulse.
+For cavity ring-down, start with a wait of 5/(2πκ), with κ the readout linewidth in MHz and the result in µs. The fallback readout template leaves 0.015 µs of arriving drive on both sides of the ADC window.
 The delay loop runs outside the cycle. Reps sets the cycles at every delay in one round, and Rounds sets the number of rounds.
 
 The host reduces each cycle to 65 numbers: the IQ of the 16 reads, their I², IQ, Q² summed over three read groups, and IQ products between read pairs summed over six groups set by the number of Ramsey blocks and reads between them.
@@ -23,71 +21,46 @@ Temporary arrays within one acquisition round grow with points × Reps. Increasi
 
 ## Parameter sources
 
-Pi/2 Pulse uses the `$qubit.module.x90` slot or a fresh `pi2_pulse` template, and Readout the `$resonator.module.readout` slot or a fresh `readout` template.
-Readout must be a pulse readout; a mux readout module is rejected by the Form. The cycle has no Reset.
-Delay runs from 0 to 1.5 × `$qubit.t2r` over 101 points, and Detune starts at 5 / (1.5 × `$qubit.t2r`) MHz, which gives five fringes over the range. Both stay empty when T2r is missing.
-Detune ramps the phase of the second π/2 pulse without changing its drive frequency.
-Relax delay starts at 5 * `$qubit.t1` µs, or 150 µs when T1 is missing.
-Every cycle contains eight delays, so one cycle lasts about Relax delay + 8 × (delay + 2 × π/2 length + 2 × readout length).
+π/2 pulse uses the `$qubit.module.x90` slot or a fresh `pi2_pulse` template, and Readout the `$resonator.module.readout` slot or a fresh `readout` template.
+Select a single-tone pulse readout, not a mux module. The cycle has no Reset.
+Free-evolution wait runs from 0 to 1.5 × `$qubit.t2r` over 101 points, and Ramsey phase-ramp detune starts at 5 / (1.5 × `$qubit.t2r`) MHz, which gives five fringes over the range. Both stay empty when T2r is missing.
+Ramsey phase-ramp detune ramps the phase of the second π/2 pulse without changing its drive frequency.
+Cycle thermalisation wait K starts at 5 * `$qubit.t1` µs, or 150 µs when T1 is missing.
+Every cycle contains eight delays, so one cycle lasts about Cycle thermalisation wait K + 8 × (delay + 2 × π/2 length + 2 × readout length).
 Reps starts at 100 and Rounds at 100. Reps must be at least 66, so that even a single delay gives the first round 65 cycles beyond its mean to estimate the noise of the 65 numbers.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
 
-## Live plot
+Open this experiment with the qubit and its resonator bound in the selected point. Choose or expand the pulse and readout modules, check Free-evolution wait › Start, Stop and Expts, the number of sampled values, then Run. In `linrange`, enter endpoints and a point count. `center` uses a midpoint and span instead of endpoints. The `_step` variants use spacing instead of a point count. Missing inputs must be filled before Run.
+Frequency is the RF carrier (MHz). Leave Mixer freq blank when no mixer setting is needed. Gen ch selects the drive output and NQZ its Nyquist zone. Gain, when shown, is the signed DAC full-scale fraction (a.u.). Phase sets the rotation axis in degrees. The waveform style and Length set the envelope. Pre-delay waits before playback and Post-delay waits after playback, both in µs.
+For Readout, use the resonator's calibrated RF frequency, gain and phase. RO ch selects the receiver. RO length sets its integration window and Trig offset places that window, both in µs. An optional classifier stores state-calibration data but this sequence does not classify or filter shots.
 
-After every round the `measurement` plot shows two curves from all completed rounds, both in standard errors of the point means (sigma):
+## Run and Analyze
 
-- `all 65 numbers`: the 65 numbers relative to their median over delays, whitened by the noise within a delay and projected onto the direction that changes most across the sweep.
-- `first read`: the mean IQ of read 0 relative to its median, projected onto its principal axis; this is the familiar single-read Ramsey curve.
+During Run, the upper live panel shows the mean IQ of the first read in each cycle. The I and Q weights follow the direction of greatest variation across the sweep; the projected signal is in a.u., not a classified state probability. With too few points to estimate that direction, the plot uses I. The lower panel combines the 65 features into a joint projection. It subtracts the across-sweep median and scales by noise estimated within each sweep point. Its unit is one point-mean standard error. It helps you see whether the joint data also resolve the fringes; there are no shot-SEM bars on this pooled, noise-normalized diagnostic. The header advances once per completed round and shows cycles accumulated per point. Stop retains completed rounds.
 
-The sign of the first curve follows the second, so both show the same fringes. Stop keeps the sums of completed rounds. A stop before the first round finishes keeps nothing and the Run fails with that message.
+The first Analyze figure (`fit`) repeats the first-read live points (blue) and adds the seed model (orange). The vertical bars on both first-read plots are one **shot SEM**: the projected single-cycle sample standard deviation divided by the square root of the retained cycles at that point. Each cycle contributes its first read once. The bars come from the saved I, Q, I², IQ and Q² sums, not from round-to-round scatter or the uncertainty of a fitted parameter.
+The solid damped cosine estimates the first-read fringe frequency and decay time. The dashed marker gives the first-read T2* within the scan. The fringe frequency is not the applied ramp.
+In the first-read figure, R² is the fraction of variation explained by the fit; the normalized residual RMS divides residual RMS by the signal range. A negative R² means the curve fits worse than a constant at the mean. A smaller normalized residual RMS indicates closer agreement. Neither metric sets a selection threshold. The traces need enough contrast and sweep coverage to distinguish the fit from noise.
 
-## Analysis
+The `populations` figure tests whether a single physical model explains all 65 features across the sweep. Each panel shows one model-inferred first-read state population, not a classifier count. The points allow the operation to vary independently by sweep point. Their bars are one **Wald standard error**, taken from the local fit covariance, not shot SEM. The solid lines use the joint fit. The panel title gives the fitted thermal population before the drive. The plotted populations are after the drive. The y axes autoscale separately.
+The joint Ramsey model uses exp(−wait/T2*) × cos(2π × fringe frequency × wait) and a separate decay for the third-state row. T2* includes relaxation and dephasing; the dashed line marks it within the scan. The fitted fringe frequency includes the programmed phase ramp and the drive–qubit mismatch. The cosine does not measure its sign.
+State numbers are fit labels, not independently identified levels. R is 1/(2π × sweep span × fringe-frequency standard error), using the Ramsey fringe frequency in inverse sweep units. It is a frequency-precision diagnostic, not a pass/fail test. The joint weighted residual J is reported with its degrees of freedom (df). The separate checks report their own J/df and give p where available:
 
-Analysis needs no options. It first fits the first read's mean IQ with the `twotone/t2ramsey` decaying-fringe fit and publishes that experiment's `fit` figure; its T2 starts both fitted times and its fringe frequency starts the detuning.
-It then fits all 65 numbers at all delays jointly with `t2_ramsey_model`, a three-state model whose readout and population nuisances are shared across delays.
-With c = exp(−x / t2) × cos(2π × detuning × x), the probability of ending in e is (1 − c)/2 from g and (1 + c)/2 from e; the third state decays with its own exp(−x / tf).
-t2 includes the transverse part of T1 relaxation. detuning is the fringe frequency in MHz and includes the Detune ramp; its sign is not measured.
+- **within-point** asks whether a free three-state model explains the data at each point.
+- **sharing** checks whether sharing readout parameters worsens the fit relative to fitting points separately. It has no p-value.
+- **curve** checks the constrained sweep model against a free operation at each point.
 
-The `populations` plot shows, per delay, the first-read populations of a fit with a free operation at each delay, with Wald error bars, and the fitted model as lines.
-State labels are arbitrary; the legend gives each state's fitted thermal population, and the largest one is normally g.
-The title gives t2, detuning, tf, R and the three lack-of-fit checks as J/df:
+Compare the points and the model before interpreting the numbers. Large J relative to df or a small reported p indicates a mismatch to investigate; no check selects a calibration automatically. Missing diagnostics are not a pass. The Analyze summary identifies the run and gives its saved Reps×Rounds setting, not the number of rounds that finished.
 
-- `within-point`: the free three-state model at each delay, with p.
-- `sharing`: shared readout nuisances against fully separate delays; it has no p.
-- `curve`: the Ramsey curves against a free operation at each delay, with p. Pulse errors or other third-state dynamics raise it.
+## What to do next
 
-The summary reports `t2`, `detuning`, `tf` and their `_err` values, the reliability `R` = 1 / (2π × delay span × detuning_err), the three checks, the joint `J` and `df`, and `first_read_t2` and `first_read_detuning` from the first-read fit.
-Errors are Wald errors from the joint fit. At low state contrast and few cycles per delay they can understate the uncertainty. A small third-state population leaves tf poorly determined. R is a diagnostic without a threshold.
-A fit failure in either step produces an analysis failure; the live plot and the saved sums remain.
+Take at least 10 points per fringe period (step ≤ 1/(10 × fringe frequency)) and a window near 3 × T2*. For a 0.4 MHz fringe and T2* ≈ 12 µs, use steps ≤ 0.25 µs and a stop near 36 µs, at least 145 points from zero. Sparse sampling can create a slower apparent fringe; a short window leaves the envelope set mostly by extrapolation. Do not infer a signed qubit-frequency correction from this fit alone. Use a second run with a known different ramp to resolve the sign or the dedicated `twotone/t2ramsey` calibration. The summary does not retain a separate measured ramp.
+This experiment does not propose writeback. The model assumes independent thermalised cycles, Markov transitions between three states and three shared IQ centers with one isotropic noise width. A read that changes the state places its IQ between the initial and final centers. This does not identify multiple jumps within a read, cavity transients or a physical leakage level. Large Wald errors or negligible thermal population of a state can leave its dynamics poorly determined. Fit convergence or a small residual is not proof of unbiased parameters.
 
-This experiment proposes no writeback. Compare `t2` with `first_read_t2`, and calibrate `$qubit.t2r` and the qubit frequency with `twotone/t2ramsey`.
+Layout reference: Ding, *Novel Gates with Superconducting Fluxonium Qubits*, Fig. 5-9(b,e) (printed p. 152), places a phase-sensitive sequence next to its fringes. This run varies free-evolution wait, with a phase ramp on the second π/2 pulse, and measures projected IQ or model-inferred populations rather than a calibrated phase.
 
-### Model assumptions and starting fit
+## Saved data and MCP recipe
 
-The fit assumes independent thermalised cycles and Markov state transitions within each cycle.
-It shares the three IQ centers, one isotropic Gaussian noise variance, the thermal populations and the read-transition matrix across sweep points.
-Gaussian noise is independent between reads and cycles. The model does not fit a separate noise width or ellipse for each state.
+Native Save retains the free-evolution wait axis, per-point cycle count and 65 feature sums, and the 65 × 65 product sums pooled across points for the live joint projection. Load keeps the same data and can reproduce the analysis; the first-read shot SEM uses moments already present in these files.
 
-The read matrix is R = diag(r) + outer(1 − r, landing), with three retention values r and one landing population vector.
-For a transition i → j, the conditional IQ center lies on the line between the two state centers, at c_j + u × (c_i − c_j).
-The model draws u from a truncated exponential on [0, 1] with rate −log(1 − R[i,j]). A read without a transition uses c_i.
-This emission law is not a general model of multiple jumps during integration or resonator dynamics.
-Transitions during a long gap after integration need not produce the IQ tail that this model assigns to a read transition.
-Passing the lack-of-fit checks does not establish unbiased physical parameters.
-
-The first-read mean must support the starting fit. Weak or absent first-read contrast can make that fit fail or supply an uninformative seed even when later reads have correlations.
-The joint fit starts from the first-read curve parameters. It does not try multiple curve seeds or guarantee the correct basin.
-There is no manual initial value or fallback.
-
-## Saved data
-
-The saved record contains the delay axis, the cycle count and the 65 sums at each delay, and one 65 × 65 product sum added over all delays.
-Delays are us in memory and seconds in the file. The product sum feeds only the live plot. Loading the file and analyzing it again gives the same summary.
-
-## MCP recipe
-
-`chain_t2ramsey` takes `max_delay_us`, `points`, `detune_mhz`, `reps`, `rounds`, `pi2_ref` and `readout_ref`; points maps to delay Expts.
-Set Relax delay with an override on `relax_delay`.
-The recipe runs, analyzes and saves. It never asks for writeback.
-The report gives `t2_us`, `t2_err_us`, `detuning_mhz`, `detuning_err_mhz`, `tf_us`, `tf_err_us`, `reliability`, the checks `within_point`, `sharing` and `curve` (each J, df, p), and `first_read_t2_us`.
-Omitted inputs retain Form values; overrides apply last, then check_ready reports missing or invalid fields before Run.
+`chain_t2ramsey` can set π/2 pulse and Readout library references, Free-evolution wait › Stop/Expts, Ramsey phase-ramp detune, Reps and Rounds. Use an override on `relax_delay` for Cycle thermalisation wait K. Omitted inputs keep the form values, overrides apply last, and null is passed to the form as an explicit clear where accepted. The recipe runs, analyzes and saves, with no writeback.

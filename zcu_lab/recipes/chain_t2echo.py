@@ -29,66 +29,64 @@ class ChainT2EchoInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse readout library key. Sources are chosen by the Form.",
+        description="Set Readout to a library key for the single-tone pulse readout played twice per cycle block.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key.",
+        description="Set π pulse to the calibrated library pulse.",
     )
     pi2_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi/2-pulse library key.",
+        description="Set π/2 pulse to the calibrated library pulse.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Total echo-delay stop in µs, not half-delay.",
+        description="Set Total echo wait › Stop (µs), the last total echo wait.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count.",
+        description="Set Total echo wait › Expts (count), the number of sweep points.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Cycles per delay in each round, at least 66.",
+        description="Set Reps (count), the number of cycles at every sweep point in one round; at least 66.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Round count; the live plot updates after each round.",
+        description="Set Rounds (count), the planned number of passes through the sweep.",
     )
 
 
 class ChainT2EchoReport(RecipeReport):
     """Chain echo fit and its checks; cancellation returns no report."""
 
-    t2_us: float | None = Field(
-        description="T2 echo from the chain fit in µs; null means not estimable."
-    )
+    t2_us: float | None = Field(description="T2 echo (µs); null if unavailable.")
     t2_err_us: float | None = Field(
-        description="T2 echo uncertainty in µs; null means not estimable."
+        description="T2 echo Wald standard error (µs); null if unavailable."
     )
     tf_us: float | None = Field(
-        description="Third-state decay time in µs; null means not estimable."
+        description="Third-state decay time (µs); null if unavailable."
     )
     tf_err_us: float | None = Field(
-        description="Third-state decay uncertainty in µs; null means not estimable."
+        description="Third-state decay time Wald standard error (µs); null if unavailable."
     )
     within_point: CycleCheck | None = Field(
         description="Within-point check J, df, p; null without analysis."
     )
     sharing: CycleCheck | None = Field(
-        description="Sharing check J, df, p null; null without analysis."
+        description="Sharing check J, df, p; null without analysis."
     )
     curve: CycleCheck | None = Field(
         description="Curve check J, df, p; null without analysis."
     )
     first_read_t2_us: float | None = Field(
-        description="T2 echo in µs of the first-read twotone fit; null means not estimable."
+        description="First-read T2 echo (µs); null if unavailable."
     )
 
 
 @recipe(
     "chain_t2echo",
-    description="Run one K-cycle readout-chain T2 echo, fit all 65 numbers, save sums and analysis.",
+    description="Sweep total echo wait in K-cycle T2 echo; use the first-read fit to seed a joint three-state fit, then save without writeback.",
 )
 async def chain_t2echo(
     session: RecipeSession, inputs: ChainT2EchoInputs

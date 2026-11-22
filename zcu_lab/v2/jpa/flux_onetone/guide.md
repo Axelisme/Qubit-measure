@@ -1,23 +1,24 @@
-## Behavior
+**Readers:** operator, agent. Find bias-dependent resonator features in a JPA bias and readout-frequency survey.
 
-**Readers:** operator, agent. Run a 2D JPA flux and readout-frequency survey from the GUI or MCP and inspect the map. The outer axis sweeps the JPA flux device value, and the inner axis sweeps readout frequency. Inspect the one-tone resonator response map by eye to choose useful settings. WARNING: this run commands the selected flux device on real hardware. Review that device and both sweep ranges before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware. The pump state stays under your control. If the measurement requires the pump on, confirm its state in the Devices interface before running.
+# JPA bias and readout spectrum
 
-## Parameter sources
+The run steps the JPA flux bias. At each bias it acquires a resonator frequency sweep with the sequence optional reset → readout. It does not set the pump frequency, power or output. Set these separately and verify the safe bias range before Run.
 
-Uses the resonator and jpa (`amplifier/jpa`) aliases. Bounds use `$resonator.freq`, `$resonator.kappa` and `$jpa.flux`. Opening the tab or choosing Defaults reads the required JPA flux device from `$jpa.flux_dev`; a missing source leaves it empty and marks the form Invalid. The direct device name remains editable. `flux_unit` starts as A, and the device receives the entered values unchanged. The qubit alias supplies an optional reset module.
+## Set up the survey
 
-The JPA flux axis and saved values use device-native `a.u.` without scaling. This label does not assert a physical current or voltage unit; review the selected device and `flux_unit` separately.
+Choose the resonator and JPA aliases at the current point, then choose **Defaults**.
 
-## Module slots
+- **JPA flux-bias source** starts from `$jpa.flux_dev`. Select the connected DC source. **JPA bias unit** starts at A; match it to the source. Values are sent unchanged. **JPA flux-bias value** starts at `$jpa.flux` ± 0.005 in the chosen unit with 101 samples. This scans a source setting, not flux in Φ₀.
+- **Readout RF frequency** starts at `$resonator.freq` ± 1.5 × `$resonator.kappa` with 101 samples. This is the absolute resonator probe RF (MHz).
+- **Frequency-swept readout** starts from the resonator wiring and timing, with the trigger at the flight time plus 0.015 µs. The sweep sets transmit and receive RF frequency. Choose a calibrated readout for this route. Select **Reset** from the qubit's optional reset module, or leave it empty.
+- **Reps** sets shots per frequency per round (1000 by default); **Rounds** sets rounds at each bias (10). **Relaxation wait** is the delay after each readout (0.1 µs by default).
 
-Readout starts from the readout template. Its pulse uses `$resonator.freq` and `$resonator.wiring.ch`; acquisition uses `$resonator.freq`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs. The sweep sets both frequencies during the run. You can also select a saved readout module. Optional reset uses `$qubit.module.reset`; an empty slot disables reset.
+## Read the plots
 
-## Typical writeback
+After **Run** or a successful **Load**, choose **Analyze** to redraw that result. Load alone does not open a plot. The summary lists the source's **Reps × Rounds** if its saved settings can be read. Older results without readable settings still plot.
 
-The result is a 2D map for visual inspection. Choose useful flux and frequency settings by eye, then update stored parameters in a separate step.
+The map colors the magnitude of mean complex IQ (a.u.). It shows reflected signal, not state population, calibrated gain or g/e separation. The bias axis shows the recorded device values in native coordinates (a.u.); the form's A/V/native choice controls the source and does not rescale or relabel the plot. The color scale follows the measured data. Blank cells are missing samples, not zeros. The live title counts bias spectra with data.
 
-## Recommended
+The lower panel shows the latest sampled bias spectrum in blue. The four preceding bias positions appear in faint red where data exist. Use these cuts to locate a dip or peak without estimating its position from color alone.
 
-A typical sweep uses about 101 JPA flux points around `$jpa.flux` and about 101 readout-frequency points spanning 1.5 linewidths around `$resonator.freq`. Confirm the JPA pump state before every run. Survey a wide map first, then narrow the ranges around the response you want to inspect.
-
-**Last updated:** 2026-11-01
+Trace a repeatable feature across the map. If it runs into a frequency boundary, widen the window toward the edge. To refine an interior feature, set the next bounds to the surrounding bias and frequency samples. Analyze does not fit or select a bias, and it does not write back settings. You decide which bias to check next. This spectral survey does not show pointwise shot-SEM bars. Confirm a candidate on a separate g/e separation scan before treating it as a readout optimum.
