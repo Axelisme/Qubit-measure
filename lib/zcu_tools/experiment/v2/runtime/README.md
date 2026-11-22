@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-11-22，取數與 GUI 的停止來源
+**Last updated:** 2026-11-23，取數與 GUI 的停止來源
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -173,6 +173,11 @@ Data stop 是正常完成，不設 scope event，也不標記 partial。
   round hook 先把 completed round 寫入 buffer，再執行 condition；命中時呼叫
   acquire-local `cancel_flag.set()`，保留該 completed round 並停止下一 round；`Schedule.outcome`
   仍是 `completed`。
+  保留完成輪不代表結果帶有 shot 矩。單 ADC 如何以 `offset_corrected=True` 選用校正後的矩，見
+  [ADR-0074〈選用校正後的 IQ 矩〉](../../../../../docs/adr/0074-flat-readout-module.md#選用校正後的-iq-矩)的 Amp Rabi 例子；
+  `run_acquire_summed` 的 reducer 契約見 [Summed acquisition](../../../program/README.md#summed-acquisition)。
+  [Standalone Echo](../../../../../zcu_lab/v2/twotone/time_domain/t2echo/core.py) 的 `T2EchoResult.iq_moments` 保留完成輪的實收 `N`，不用 `cfg.reps × cfg.rounds` 補算。
+  對照 [workflow 的 `run_t2echo`](../../../../../zcu_lab/workflows/common/lifetime_acquire.py)：它用 `run_acquire`，回傳的 IQ 只有平均值，不附 shot 矩。
 - Runner 每次 retry 寫一行 warning，包含原因、下一次 attempt number 與原始錯誤。
   Shot 超量的原因是 `shot_overrun`，其他原因是 exception class name。
 - Data condition 讓 acquire 在設定 rounds 前正常結束時，Runner 寫一行 info，包含 stop value 與 completed rounds。

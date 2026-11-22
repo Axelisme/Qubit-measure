@@ -467,6 +467,13 @@ Run 完成不保存 raw。RPC 呼叫 `tab.save_data` 才保存 raw；recipe work
 Saved 只反映 measurement_data 在 owner tracker 是否全部保存，不查檔案是否仍存在。
 保存 analysis 不會把 raw 的 saved 改成 true。原本頂層 run_id 仍只在至少一個持久輸出成功後出現。
 
+The [Source Run](#analysis-presentation) identifies the Run/Load, not a particular
+Analyze on that source. To verify a Primary result, compare its native
+`operation_id` with `analysis_state.source_operation_id` in `tab.snapshot`.
+Read `tab.get_analyze_result` with that `operation_id`. The reply's `params` comes
+from `result_params`, the options captured at publication, not the current
+editable values.
+
 Post start receipts include `result_read_timeout_seconds` and a source-bound
 `recovery` RPC envelope. The owner budgets 5 seconds plus 5 per measured tone,
 capped at 60 seconds. The Post result handler ceiling is 60 seconds.

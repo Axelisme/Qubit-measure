@@ -249,6 +249,7 @@ options=RunOptions(converter=...))`.
 The optional converter receives both cumulative and final reducer outputs.
 It owns any normalization and signal-slot shape. Without a converter, Schedule writes the output unchanged.
 Retry, progress and stop conditions follow the other Schedule run methods.
+See [Stop and retry](../experiment/v2/runtime/README.md#stop-與-retry) for Schedule's stop and retry rules.
 
 ## Shot time
 

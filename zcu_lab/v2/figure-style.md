@@ -28,7 +28,14 @@
 
 若家族驗收指定同一次 FTF Run，liveplot 的進度與末格、Analyze 圖與摘要都取自該次 Run。
 [離線 stage probe](../../tests/README.md#實驗定義) 可以獨立驗各階段，通過不等於完成 R0 讀者包。
-要確認 GUI 如何建立 Analyze options 和發布摘要，見 [共用 lifecycle hooks](gui-contracts.md#共用-lifecycle-hooks)。
+
+若需轉寫 Primary Analyze 控制項，記產生包內 Primary 圖與摘要的那次分析所用的欄值，不用目前的可編輯欄值或表單初值替代。
+如何核對結果綁定的 options 與摘要，見 [共用 lifecycle hooks](gui-contracts.md#共用-lifecycle-hooks)。
+
+在讀者包外記下擷取 commit、Source Run 與可核對的 Primary operation。Source Run 識別 Run／Load，不能區分同一 Run 的兩次 Analyze。
+若只換 guide，另記 guide 的候選 commit。舊圖與摘要仍屬原擷取，不能算作候選版本重跑的結果。
+若擷取用了 tracked FTF preset，記下該檔的 `commit:path` 與 blob ID，例如 `git rev-parse 34d928cc7:zcu_lab/simulation_envs/FTF/default.yaml` 可查該版本的 blob。
+現行同名 preset 不能還原歷史輸入。若用了外部 overrides，保留原件與 SHA-256 摘要。
 
 ### 派讀者並收答卷
 
@@ -75,6 +82,8 @@
 - 壞例：只畫 fit，或用同一組 marker 畫模型與資料。
 - 好例：Ding 圖 5-13(b)（頁 157）可直接對照 RB 的量測點與模型線。本地作圖時，分列各組的量測與模型 legend，並用至少 200 點算模型線，讓模型網格不受量測點疏密限制。
 - 頻譜要先選峰再畫 fit 時，用 [fitting 的 Peak candidates](../../lib/zcu_tools/analysis/fitting/README.md#peak-candidates) 對照 `twotone/freq` 的局部策略與 `twotone/chain` 的預設策略。
+- 時域 fit 的具名欄位見 [fitting 的 Named fitting results](../../lib/zcu_tools/analysis/fitting/README.md#named-fitting-results)。
+  [單 qubit Ramsey](twotone/time_domain/t2ramsey/core.py) 的 `fit_decay_fringe` 用量測點擬合，再用 `decaycos(fit_delays, *fit.params)` 在密網格上計算同次擬合的曲線，不重跑 fit。
 
 ### R3：結果寫在圖上
 
