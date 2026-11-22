@@ -23,24 +23,24 @@ class MistPowerTraceInputs(RecipeInputs):
     overrides: Overrides
     probe_ref: str | None | Keep = Field(
         KEEP,
-        description="Probe library key.",
+        description="Resonator probe library key. Omit to keep; recipe accepts null, but Form rejects it before Run.",
     )
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key.",
+        description="Readout library key. Omit to keep; recipe accepts null, but Form rejects it before Run.",
     )
 
     g0: str | None | Keep = Field(
         KEEP,
-        description="Ground IQ (empty = first point). Analysis only; omitted keeps value, null passes to owner.",
+        description="Analyze › Ground IQ reference (a.u., e.g. 1+2j). Omit to keep; null: mean of first 5% (≥1 point).",
     )
     e0: str | None | Keep = Field(
         KEEP,
-        description="Excited IQ (optional y-limit). Analysis only; omitted keeps value, null passes to owner.",
+        description="Analyze › Excited IQ (optional y-limit), e.g. 1+2j. Omit to keep; null restores automatic limits.",
     )
     ac_coeff: float | None | Keep = Field(
         KEEP,
-        description="Photon number / gain squared. Analysis only; omitted keeps value, null passes to owner.",
+        description="Analyze › Photon number / gain squared (photons/a.u.²). Omit to keep; null uses Probe gain (a.u.).",
     )
 
 
@@ -56,15 +56,16 @@ class MistPowerTraceReport(RecipeReport):
 
 @recipe(
     "mist_power_trace",
-    description="Acquire MIST mean IQ versus probe gain, save raw data and plot.",
+    description="Sweep Resonator probe gain, plot how far mean IQ moves from its reference, and save the mean IQ data and Analyze figure without a fit or writeback.",
 )
 async def mist_power_trace(
     session: RecipeSession, inputs: MistPowerTraceInputs
 ) -> MistPowerTraceReport:
     """Probe across gain, save mean complex IQ and plot its displacement.
 
-    No n → expts input: the captured Form supplies the gain grid.
-    Analysis controls: g0, e0, ac_coeff. Omission retains each analysis value; null is passed to its owner.
+    No n → expts input: Probe gain sweep supplies the gain grid; use overrides to edit it.
+    Omitted Analyze inputs keep their current settings; null selects the scan-start IQ
+    reference, automatic y limits, or gain coordinates, respectively.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(
