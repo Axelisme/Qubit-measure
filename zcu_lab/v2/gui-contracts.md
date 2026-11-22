@@ -89,6 +89,8 @@ Primary options 在成功 Run／Load 後建立表單時生成一次，post 在 p
 Schema 查詢、JSON 重建與分析點擊不重跑生成函式。使用者編輯後的物件交給 fn。
 無 options 時表單為空但分析仍可用。既有三個歷史預設生成器已接入；
 16 個分析執行時讀歷史的 wrapper 尚保留，後續清理才會移到 options 生成階段。
+要核對已發布的 Primary 結果使用哪些 options，見 [Completion and provenance](../../lib/zcu_tools/gui/app/measure/remote/README.md#completion-and-provenance) 的
+`result_params`、`source_operation_id` 與帶 `operation_id` 的 `tab.get_analyze_result`。
 Primary 發布時呼叫 `summary_lines(source)`。回傳有序的純文字 tuple；缺少來源值就省略該行。
 GUI Analysis 與 MCP 從 [AnalysisPresentation](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation)
 顯示這些行，Save 不將它們放入原生分析 JSON。採集設定的範圍見[呈現指南](figure-style.md#r10圖放理論重點採集設定放摘要)。
