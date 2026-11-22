@@ -232,7 +232,9 @@ testpaths = ["tests"]
 # (including slow) unless lib/zcu_tools/simulate/ changed; then use -m "" for all tests.
 # Ticket checks use -m sim (or an affected subset including sim) only when that
 # simulation package changed.
-addopts = "--import-mode=importlib --strict-markers --strict-config -p no:randomly -m 'not slow and not sim'"
+# Register --failure-log before conftest discovery so an existing log path
+# cannot be mistaken for a collection path on xdist worker restart.
+addopts = "--import-mode=importlib --strict-markers --strict-config -p no:randomly -p tests._failure_log -m 'not slow and not sim'"
 filterwarnings = [
   "ignore::DeprecationWarning:matplotlib.*",
   "ignore:invalid escape sequence.*:SyntaxWarning:qick\\..*",

@@ -155,9 +155,12 @@ from zcu_lab.v2.support.mux_coherence_analysis import (
     MuxCoherenceFit,
     fit_coherence_trace,
     prepare_coherence_trace,
+    project_coherence_for_plot,
     project_coherence_trace,
 )
 from zcu_lab.v2.support.mux_coherence_persistence import coherence_spec
+
+_IQ_LABEL = "IQ projection (a.u.)"
 
 
 @validated_dataclass(frozen=True)
@@ -280,7 +283,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             ax.set(
                 xlabel="Requested delay (µs)",
-                ylabel="Magnitude (a.u.)",
+                ylabel=_IQ_LABEL,
                 title=f"{index}: {cfg.tones[index].name}",
             )
             viewers.append(live_line(ax))
@@ -291,7 +294,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             return tuple(
                 artist
                 for row, viewer in enumerate(viewers)
-                for artist in viewer.set(times, np.abs(data[row]))
+                for artist in viewer.set(times, project_coherence_for_plot(data[row]))
             )
 
         signals = SignalBuffer((len(indices), times.size), on_update=update)
@@ -384,7 +387,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
                 int(raw_index), source.result.times, source.result.signals[row], skip=0
             )
             fig, ax = plots.subplots(num=f"fit_{trace.index}", figsize=(8, 5))
-            ax.set(xlabel="Requested delay (µs)", ylabel="Signal real (a.u.)")
+            ax.set(xlabel="Requested delay (µs)", ylabel=_IQ_LABEL)
             fig.suptitle(f"ramsey tone {trace.index}")
             try:
                 real = project_coherence_trace(
@@ -415,7 +418,10 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
                 np.linalg.LinAlgError,
             ) as exc:
                 ax.plot(
-                    trace.times, np.abs(trace.signal), "o-", label="acquired magnitude"
+                    trace.times,
+                    project_coherence_for_plot(trace.signal),
+                    "o-",
+                    label="acquired projection",
                 )
                 ax.text(
                     0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True

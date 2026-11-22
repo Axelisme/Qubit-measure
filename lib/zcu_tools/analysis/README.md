@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-22，K-cycle joint 殘差
+**Last updated:** 2026-11-23，K-cycle 數值入口
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -107,6 +107,10 @@ K 後熱布居與 readout-driven steady state 不等同。稀少遠端第三態�
 第三態與 g/e 的 IQ 重疊可能隱藏 leakage。實機 K R^16 尚未驗證這個效用。
 
 ## Readout chain K-cycle
+
+Lab 的 [K-cycle 套件邊界](../../../zcu_lab/v2/README.md#套件邊界) 說明五個 chain core 的分工。
+以 [Amp Rabi 的 `ChainAmpRabiExp.analyze`](../../../zcu_lab/v2/chain/amp_rabi/core.py) 為例，core 從 first-read 估計或保存軸取得起點，再呼叫 `fit_cycle`。
+First-read 用到的 `fit_rabi`、`fit_decay_fringe` 等工具及其初猜失敗契約見 [fitting〈fitting helpers〉](fitting/README.md#fitting-helpers)。
 
 `CycleSums` 保存 K-cycle 讀出鏈逐點的 cycle count、65 個 feature sums 與跨點加總的
 product sum。`cycle_curves` 從這份 record 算出 live plot 的全 feature 曲線與第一讀曲線。

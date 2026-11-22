@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-22，實驗呈現指南
+**Last updated:** 2026-11-23，實驗呈現指南與 GE 診斷
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -13,7 +13,7 @@
 - 設計 liveplot 與 Analyze 圖、檢查操作員能否判讀：讀 [實驗呈現指南](figure-style.md)。圖顯示後的 artist 更新與 refresh 契約見 [plotting〈原生 matplotlib 更新〉](../../lib/zcu_tools/plotting/README.md#原生-matplotlib-更新)。
 - [Two-qubit bring-up 與 CZ 校準](two_qubit/guide.md) 說明 Qubit1、Qubit2 的單 qubit 校準、位置綁定、舊 point 重綁與資料保存。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
   - 一般入口用 reset 選擇 herald。只有 RB 與 conditional phase 另有 g,g／e,e 聯合分析入口，見下方[完整清單](#two-qubit-實驗清單)。
-- [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與 joint residual 的判讀方式。
+- [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與 joint residual 的判讀方式。數值契約見 [analysis〈Readout chain K-cycle〉](../../lib/zcu_tools/analysis/README.md#readout-chain-k-cycle)。
 - [`twotone/t1_cov`](twotone/time_domain/t1_cov/guide.md) 用兩次單 tone 讀出的二階矩自校準，擬合狀態改變機率以估計 T1。可選脈衝 reset，不需 classifier。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records 與資料形狀，新實驗從[寫法慣例](experiment-authoring.md#寫法慣例)選 cfg、分析與圖 API 的寫法。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
@@ -74,7 +74,9 @@ AC Stark spectroscopy 的 [core.py](twotone/ac_stark/core.py) 對應 `twotone/ac
 [ramsey_core.py](twotone/ac_stark/ramsey_core.py) 對應 `twotone/ac_stark_ramsey`。
 註冊位置與 Ramsey guide 見 [Lab 組裝與註冊](../README.md#lab-組裝與註冊)。
 Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot` 擁有。
-各實驗的 `core.py` 自行選擇分析資料並繪圖，數值擬合工具由 `zcu_tools.analysis.fitting` 擁有。
+兩個 core 都以 `plots=None` 呼叫 `singleshot_ge_analysis` 做擬合，不畫共用 helper 的模型 histogram。
+可選的診斷圖見 [experiment 的 GE 模型診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷)。
+各實驗的 `core.py` 自行選擇分析資料並繪製分類圖，數值擬合工具由 `zcu_tools.analysis.fitting` 擁有。
 跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
 mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
 AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/resonance.py)。
@@ -83,6 +85,7 @@ Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
 [\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩個實驗各自在 `analyze()` 畫自己的圖，
 [\_sums.py](two_qubit/_sums.py) 檢查分類校準並換算計數，不讀 alias 或元件。
+Two-qubit 的 conditional phase 與 heralded conditional phase 呼叫 `fit_phase_slopes`；斜率的單位與週期代表值見 [fitting〈Phase regressions〉](../../lib/zcu_tools/analysis/fitting/README.md#phase-regressions)。
 Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
 並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。
 [\_chain_common.py](twotone/ro_optimize/_chain_common.py) 只保留保存映射、完成點篩選與最佳 setting 摘要型別。
@@ -91,8 +94,9 @@ Rπ 的 rpi_power／rpi_freq／rpi_length 各自在 `run()` 寫出掃描與 R→
 三者各自在 core 畫 score 與診斷圖；[\_rpi_common.py](twotone/ro_optimize/_rpi_common.py) 只保留共用的 `rpi_sums` 解碼、選點與格式化。
 
 K-cycle 讀出鏈實驗各自在 `run()` 寫出 (D(x), 讀, 讀) × 8 的 `builder.repeat("cycle", BLOCKS_PER_CYCLE)` 迴圈；
-各 chain core 保留可用的 first-read 起點。第一讀無估計時改用保存軸的單一起點，圖上保留實測點，既有 first-read 估計欄位回傳 null。兩種情況都用完整 sums 聯合擬合 65 個特徵一次。
-Analyze 畫出沿 live 方向的實測點、聯合模型曲線及有正負號的逐點殘差。圖與摘要都呈現 `J`、`df`、`J/df`、χ² 期望帶的數值端點與白化殘差的 `|r| > 3` 比例。逐點序列只用於畫圖，這些數值不作為接受或拒絕擬合的門檻。
+各 chain core 保留可用的 first-read 起點。第一讀無估計時改用保存軸的單一起點，first-read 圖保留實測點，既有 first-read 估計欄位回傳 null。兩種情況都用完整 sums 聯合擬合 65 個特徵一次。
+`fit_cycle` 的 joint 估計、`J/df` 與 `cycle_residual_projection` 的畫圖契約見 [analysis〈Readout chain K-cycle〉](../../lib/zcu_tools/analysis/README.md#readout-chain-k-cycle)。
+可沿 live 方向投影時，Analyze 畫出實測點、聯合模型曲線與有正負號的逐點殘差。圖與摘要都呈現 `J`、`df`、`J/df`、χ² 期望帶的數值端點與白化殘差的 `|r| > 3` 比例。逐點序列只用於畫圖，這些數值不作為接受或拒絕擬合的門檻。
 五個 core 各自在 `run()` 建立及更新 all-number 與 first-read 的 live 曲線。
 [chain/\_cycle.py](chain/_cycle.py) 保留共用的 CycleSums 存檔變數與第一讀 IQ 投影。[`chain/_joint.py`](chain/_joint.py) 提供 joint residual 的欄位與圖元，各實驗決定圖面配置。模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
 

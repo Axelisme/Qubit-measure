@@ -20,7 +20,7 @@ In `mux_t2echo`, omission retains settings. Null `participants` leaves a missing
 
 ## Read the plots
 
-Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Live shows the magnitude of mean IQ; Analyze fits a signed real projection on the same requested total-delay axis. Neither is population. The ± on T2 is fit uncertainty, not a shot SEM bar. Compare coverage and shape rather than expecting the two ordinates to match. R² measures explained variation and normalized residual RMS measures mismatch relative to signal range.
+Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Both show the signed principal-axis projection of mean IQ (a.u.) against requested total delay. Analyze omits the first requested point. If the fit fails, `fit_i` shows the remaining acquired points and the failure reason instead of a fitted curve. With fewer than two finite points, the plot uses the I axis. The projection is not population. The ± on T2 is fit uncertainty, not a shot SEM bar. R² measures explained variation and normalized residual RMS measures mismatch relative to signal range.
 
 ### Multi-tone readout control
 

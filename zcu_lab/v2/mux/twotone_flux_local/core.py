@@ -25,6 +25,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg, Pulse
+from zcu_tools.utils.process import minus_background
 
 from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.device import check_flux_unit, set_flux
@@ -209,7 +210,7 @@ def _require_finite_spectrum(
 def _plot_flux_maps_and_make_updater(
     plots: Plots, result: MuxFluxResult, flux_unit: str, tone_names: tuple[str, ...]
 ) -> Callable[[NDArray[np.complex128]], None]:
-    """Display the per-tone IQ magnitude maps and latest spectra.
+    """Display per-tone IQ contrast after subtracting each bias spectrum's median.
 
     result supplies tone-major (K,F) bias, (K,P) RF and (K,F,P) IQ arrays.
     tone_names maps original tone positions to labels. flux_unit labels bias
@@ -219,7 +220,7 @@ def _plot_flux_maps_and_make_updater(
     flux_values, frequencies = result.flux_values, result.frequencies
     unit = "device units" if flux_unit == "native" else flux_unit
     rf_label = "Qubit drive RF frequency (MHz)"
-    iq_label = "|Mean IQ| (a.u.)"
+    iq_label = "Background-subtracted IQ magnitude (a.u.)"
     panels = []
     for index in result.tone_indices:
         fig, _ = plots.subplots(
@@ -227,7 +228,7 @@ def _plot_flux_maps_and_make_updater(
         )
         heat_ax, line_ax = fig.axes
         fig.suptitle(
-            f"Mux two-tone · Local DC scan · {tone_names[index]} · Readout amplitude"
+            f"Mux two-tone · Local DC scan · {tone_names[index]} · IQ contrast"
         )
         heat_ax.set(xlabel=f"DC bias ({unit})", ylabel=rf_label)
         heat_ax.grid(False)
@@ -247,11 +248,12 @@ def _plot_flux_maps_and_make_updater(
     def update(data: NDArray[np.complex128]):
         artists = []
         for row, (_, heatmap, line, progress, slice_label) in enumerate(panels):
-            real = np.abs(data[row])
-            valid = np.flatnonzero(np.all(np.isfinite(real), axis=1))
+            # ADR-0069: remove each bias spectrum's IQ background before taking magnitude.
+            contrast = np.abs(minus_background(data[row], axis=1))
+            valid = np.flatnonzero(np.all(np.isfinite(data[row]), axis=1))
             history = np.full((2, frequencies.shape[1]), np.nan)
             for offset, bias_index in enumerate(valid[-2:][::-1]):
-                history[-offset - 1] = real[bias_index]
+                history[-offset - 1] = contrast[bias_index]
             progress.set_text(
                 f"Acquired bias points: {valid.size} / {flux_values.shape[1]}"
             )
@@ -261,7 +263,7 @@ def _plot_flux_maps_and_make_updater(
                 else "No acquired spectrum"
             )
             slice_label.set_text(latest)
-            artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
+            artists.extend(heatmap.set(flux_values[row], frequencies[row], contrast))
             artists.extend(line.set(frequencies[row], history))
             artists.extend((progress, slice_label))
         return artists
