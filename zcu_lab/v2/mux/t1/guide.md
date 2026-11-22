@@ -81,6 +81,7 @@ vertical bars show the standard error of the mean (shot SEM): the sample
 standard deviation of the same projected shots divided by the square root of
 the acquired shot count. Older mean-only files still load and fit without bars.
 Points with fewer than two shots have no bar.
+The Analyze legend sits below the data area. It identifies Measured IQ, the exponential fit and the T1 marker, and lists Shot SEM when available, without covering points or bars or changing the plotted ranges.
 
 Use calibrated fixed pi pulses. All qubits share one delay axis in µs,
 executed by one program's hardware loop. Requested window endpoints and the

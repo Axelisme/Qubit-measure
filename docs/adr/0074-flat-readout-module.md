@@ -97,7 +97,7 @@ status: accepted
 
 **邊界。** 選取的 mux readout 在每發只做一次無條件積分。程式不含其他 ADC 讀取、edge counting 或 shot masks。此 reducer 不取跨 tone 外積，不放寬單 ADC opt-in，不改原生取數或分類。FTF 使用同一輪既有 required raw 路徑，不為了補誤差棒另取一批 shots。不要求同 seed 的 compact 與 required raw mean 逐值相同。
 
-**依據。** 2026-11-22，designer 代裁，使用者未覆核。點平均的不確定度口徑見 [[0069]]〈呈現規範〉；完成輪與模擬 raw 發佈邊界見 [[0083]]。
+**依據。** 2026-11-22，該點不確定度遵循使用者所說：「像我其实更想要设计的，其实应该是平均标准差，也就是这个点的预期误差。」Mux reducer 與矩保存細節由 designer 代裁，使用者未覆核。原始討論未入庫；取捨見 [Mux 逐 tone 校正 IQ 矩與 R11](../discussions/2026-11-22-mux-iq-moments-and-r11.md)。點平均的不確定度口徑見 [[0069]]〈呈現規範〉；完成輪與模擬 raw 發佈邊界見 [[0083]]。
 
 #### Herald reset 與逐 shot 遮罩
 
