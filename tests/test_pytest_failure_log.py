@@ -21,6 +21,7 @@ def checkout(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> Path
         "__init__.py",
         "conftest.py",
         "_cache_environment.py",
+        "_failure_log.py",
         "_temp_directory_guard.py",
     ):
         shutil.copyfile(repo / "tests" / name, tests / name)
@@ -97,3 +98,45 @@ def test_xdist_failure_log_records_each_failure_once(
 
     result.assert_outcomes(failed=1, errors=1, passed=1)
     assert_failed_phases(log)
+
+
+@pytest.mark.requires_subprocess
+def test_xdist_replacement_starts_after_crash_creates_external_failure_log(
+    pytester: pytest.Pytester, checkout: Path, tmp_path: Path
+) -> None:
+    log = tmp_path / "pytest-failures.jsonl"
+    (checkout / "test_outcomes.py").write_text(
+        """
+import os
+
+
+def test_crash():
+    os._exit(42)
+
+
+def test_remaining():
+    pass
+""",
+        encoding="utf-8",
+    )
+    root = checkout.parent
+    result = pytester.runpytest_subprocess(
+        "-q",
+        "--rootdir",
+        str(root),
+        "-c",
+        str(root / "pyproject.toml"),
+        "-n",
+        "1",
+        "--dist=worksteal",
+        "--max-worker-restart=1",
+        "--failure-log",
+        str(log),
+    )
+
+    result.assert_outcomes(failed=1, passed=1)
+    (record,) = [
+        json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()
+    ]
+    assert record["nodeid"] == "tests/test_outcomes.py::test_crash"
+    assert "crashed while running" in record["traceback"]
