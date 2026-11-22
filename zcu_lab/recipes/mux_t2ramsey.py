@@ -33,16 +33,16 @@ class MuxT2RamseyInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
+        description="Sets Participants (zero-based tone positions in Run order); null requires an override before Run.",
     )
 
     fit_fringe: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit oscillations instead of a pure decay. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Fit fringe (damped cosine or decay). Omit to keep it; Analyze rejects null.",
     )
     fit_phase: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit the phase offset when fitting fringes. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Fit phase offset (fringe only). Omit to keep it; Analyze rejects null after Run.",
     )
 
 
@@ -57,17 +57,14 @@ class MuxT2RamseyToneReport(MuxFitToneReport):
         default=None,
         description="Owner diagnostic for delay sampling of the fitted fringe; null when unavailable.",
     )
-    t2: float | None = Field(
-        default=None, description="Fitted Ramsey coherence time T2* in µs."
-    )
-    t2_err: float | None = Field(
-        default=None, description="One-sigma Ramsey time uncertainty in µs."
-    )
+    t2: float | None = Field(default=None, description="T2* (µs).")
+    t2_err: float | None = Field(default=None, description="T2* standard error (µs).")
     detune: float | None = Field(
-        default=None, description="Fitted Ramsey fringe rate in MHz."
+        default=None, description="Fitted fringe rate (MHz); zero for decay fits."
     )
     detune_err: float | None = Field(
-        default=None, description="One-sigma fringe rate uncertainty in MHz."
+        default=None,
+        description="Fitted fringe rate standard error (MHz); zero for decay fits.",
     )
 
 
@@ -91,7 +88,7 @@ async def mux_t2ramsey(
     Open captures Form sources; omitted inputs keep values and null clears them.
     Overrides run last. Only participant drive/sweep settings are required;
     readout identities remain required for every tone.
-    Shared sweep n is set through overrides; indices are original tone positions.
+    Use overrides for Delay › Start/Stop (µs) and Delay › Expts (count); n sets Expts.
     Analyze with fit_fringe, fit_phase, then ask before writeback.
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.

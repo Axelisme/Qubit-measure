@@ -10,10 +10,10 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.analysis.flux import DevicePeriod, offset_for_flux
-from zcu_tools.cfg_model import ConfigBase, module_spec_from_raw
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
@@ -25,7 +25,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickResult
-from zcu_tools.program.v2.modules import AbsModuleCfg, PulseReadoutCfg
+from zcu_tools.program.v2.modules import AbsModuleCfg, ModuleCfgFactory, PulseReadoutCfg
 
 from zcu_lab.components.qubit import QubitBaseSchema, QubitFluxCalibration
 from zcu_lab.templates import READOUT_LENGTH_MARGIN_US
@@ -86,17 +86,10 @@ def module_writeback(
     section raises KeyError; a result that is not a valid persistent module
     Spec raises ValueError. target, description and role_id fill the item.
     """
-    raw: dict[str, Any] = module.to_dict()
-    for path, value in field_updates:
-        *sections, leaf = path.split(".")
-        node = raw
-        for section in sections:
-            node = node[section]
-        node[leaf] = value
     return ModuleWriteback(
         target_name=target,
         description=description,
-        proposal=module_spec_from_raw(raw),
+        proposal=ModuleCfgFactory.to_spec(module, field_updates=field_updates),
         role_id=role_id,
     )
 
