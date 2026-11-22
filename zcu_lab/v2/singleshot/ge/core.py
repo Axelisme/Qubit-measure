@@ -31,6 +31,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, PulseReadout, Reset, TimelineBuilder
 
+from zcu_lab.v2.support.singleshot.center_quality import ge_centers_identifiable
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to_signal
 
 
@@ -371,6 +372,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
                 logscale=options.logscale,
                 align_t1=options.align_t1,
                 length_ratio=options.length_ratio,
+                centers_identifiable=ge_centers_identifiable,
             ),
             plots=plots,
             figure_name="diagnostic",

@@ -6,10 +6,18 @@ from matplotlib.axes import Axes
 from matplotlib.colors import to_rgba
 from matplotlib.container import BarContainer
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from pydantic import ValidationError
+from scipy.special import ndtri
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.fitting.singleshot import calc_population_pdf
 from zcu_tools.experiment.utils.single_shot import ge
-from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
+from zcu_tools.experiment.utils.single_shot.ge import (
+    base as ge_owner,
+)
+from zcu_tools.experiment.utils.single_shot.ge import (
+    singleshot_ge_analysis,
+)
 from zcu_tools.experiment.utils.single_shot.ge.base import (
     GEFitOptions,
     calc_fidelity,
@@ -347,6 +355,122 @@ def test_ge_analysis_fit_only_retains_calibration_and_quality(selection):
         plots.release()
 
 
+def _known_joint_fit(
+    monkeypatch: pytest.MonkeyPatch,
+    covariance_block: NDArray[np.float64],
+) -> NDArray[np.complex128]:
+    # Replace the joint solver, whose public result is in physical coordinates.
+    covariance = np.zeros((7, 7))
+    covariance[:3, :3] = covariance_block
+    sg, se = 1.0, 6.0
+    monkeypatch.setattr(
+        ge_owner,
+        "fit_singleshot",
+        lambda *args, **kwargs: ((sg, se, 1.0, 1.0, 0.0, 0.5, 0.0), covariance),
+    )
+    noise = ndtri((np.arange(1000) + 0.5) / 1000)
+    return np.asarray([sg + noise + 0.1j, se + noise - 0.1j])
+
+
+@pytest.mark.parametrize("identifiable", [True, False])
+def test_fitted_snr_uses_joint_covariance_and_preserves_the_fit(
+    monkeypatch: pytest.MonkeyPatch, *, identifiable: bool
+) -> None:
+    signals = _known_joint_fit(
+        monkeypatch,
+        np.array([[0.25, 0.06, 0.02], [0.06, 0.16, -0.01], [0.02, -0.01, 0.04]]),
+    )
+    received: list[FitQuality] = []
+
+    def center_check(quality: FitQuality) -> bool:
+        received.append(quality)
+        return identifiable
+
+    def unexpected_check(_quality: FitQuality) -> bool:
+        pytest.fail("fit-only analysis called its plot predicate")
+
+    plots = Plots(NonPresentingHost())
+    try:
+        baseline = singleshot_ge_analysis(signals, angle=0.0, plots=plots)
+        assert "Fitted SNR" not in " ".join(t.get_text() for t in plots["fit"].texts)
+        fit_only = singleshot_ge_analysis(
+            signals,
+            angle=0.0,
+            options=GEFitOptions(centers_identifiable=unexpected_check),
+        )
+        annotated = singleshot_ge_analysis(
+            signals,
+            angle=0.0,
+            options=GEFitOptions(centers_identifiable=center_check),
+            plots=plots,
+            figure_name="diagnostic",
+        )
+
+        for result in (fit_only, annotated):
+            assert result[0] == baseline[0]
+            np.testing.assert_array_equal(result[1], baseline[1])
+            assert result[2] == baseline[2]
+        assert len(plots["diagnostic"].axes) == 4
+        title = next(
+            (
+                line
+                for t in plots["diagnostic"].texts
+                for line in t.get_text().splitlines()
+                if line.startswith("Fitted SNR")
+            ),
+            "",
+        )
+        # J C J^T = 1.59. A diagonal-only estimate would display 1.19.
+        assert "Fitted SNR = 5 ± 1.26" in title
+        assert ("not identifiable" in title) is not identifiable
+        assert received == [annotated[2]["fit_quality"]["joint"]]
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
+@pytest.mark.parametrize(
+    ("covariance", "identifiable"),
+    [
+        pytest.param(
+            [[1.0, np.nan, 0.0], [np.nan, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            False,
+            id="nonfinite-cross-term",
+        ),
+        pytest.param(np.diag([-0.1, 1.0, 1.0]), True, id="negative-diagonal"),
+        pytest.param(np.zeros((3, 3)), True, id="zero-variance"),
+        pytest.param(
+            [[1.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 0.01]],
+            True,
+            id="negative-projection",
+        ),
+        pytest.param(np.diag([1.0, 1.0, 1e308]), True, id="overflowing-projection"),
+    ],
+)
+def test_fitted_snr_keeps_successful_figure_when_standard_error_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    covariance: NDArray[np.float64] | list[list[float]],
+    *,
+    identifiable: bool,
+) -> None:
+    signals = _known_joint_fit(monkeypatch, np.asarray(covariance))
+    plots = Plots(NonPresentingHost())
+    try:
+        singleshot_ge_analysis(
+            signals,
+            angle=0.0,
+            plots=plots,
+            options=GEFitOptions(centers_identifiable=lambda _: identifiable),
+        )
+        assert len(plots["fit"].axes) == 4
+        text = " ".join(t.get_text() for t in plots["fit"].texts)
+        assert "Fitted SNR = 5 ± unavailable" in text
+        assert ("unavailable (not identifiable)" in text) is not identifiable
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
 @pytest.mark.parametrize("error_type", [ValueError, RuntimeError])
 def test_ge_analysis_propagates_original_matplotlib_error(monkeypatch, error_type):
     from scipy.special import ndtri
@@ -356,7 +480,7 @@ def test_ge_analysis_propagates_original_matplotlib_error(monkeypatch, error_typ
     signals = np.asarray([-1 + noise + quadrature, 1 + noise + quadrature])
     fault = error_type("external scatter failure")
 
-    def fail_scatter(*args, **kwargs):
+    def fail_scatter(*_args, **_kwargs):
         raise fault
 
     monkeypatch.setattr(Axes, "scatter", fail_scatter)

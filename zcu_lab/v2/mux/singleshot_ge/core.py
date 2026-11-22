@@ -67,6 +67,7 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     validate_participants,
 )
+from zcu_lab.v2.support.singleshot.center_quality import ge_centers_identifiable
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state
 
 
@@ -748,6 +749,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                         logscale=option.logscale,
                         align_t1=option.align_t1,
                         length_ratio=option.length_ratio,
+                        centers_identifiable=ge_centers_identifiable,
                     ),
                     plots=plots,
                     figure_name=f"diagnostic_{index}",

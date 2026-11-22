@@ -186,7 +186,12 @@ Blue and red shots distinguish the g (probe-off) and e (probe-on) preparations.
 These preparations may contain state mixtures; they are not classified shots.
 Analyze draws each participant's raw IQ clouds in `fit_i`.
 For each successful fit, `diagnostic_i` shows rotated IQ, projected preparation histograms, and fitted components.
-Check whether the fitted components separate and follow the measured histograms. Read the fitted populations above the preparation panels and the readout length relative to T1 at the top.
+Check whether the fitted components separate and follow the measured histograms.
+Read the fitted populations above the preparation panels and the readout length relative to T1 at the top.
+**Fitted SNR** is the distance between the fitted peaks divided by their shared Gaussian width.
+The value after ± is a first-order standard error from the same joint fit, conditional on the model and IQ rotation. It is not a confidence interval.
+`unavailable` means the fit did not yield an estimate for that value.
+`not identifiable` on the SNR line means the relative-error check failed for at least one center, even if the figure shows a number. Passing this check alone does not guarantee writeback preselection.
 Analyze uses the selected Run/Load source. Use the Analysis figure picker for
 `fit_i` and `diagnostic_i`, and the Post figure picker for `post_i`.
 If an Analysis tile clips labels, open the diagnostic in Data with **View figure**.

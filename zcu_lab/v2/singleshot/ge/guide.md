@@ -85,7 +85,12 @@ Run once the qubit pi-pulse and the readout are both calibrated.
 Run and Analyze show raw IQ scatter with blue g-preparation and red e-preparation shots.
 The live labels mean probe off/on; Analyze maps them using Initial State.
 A successful Analyze also shows `diagnostic`: rotated IQ, projected preparation histograms, and fitted components.
-Check whether the fitted components separate and follow the measured histograms. Read the fitted populations above the preparation panels and the readout length relative to T1 at the top.
+Check whether the fitted components separate and follow the measured histograms.
+Read the fitted populations above the preparation panels and the readout length relative to T1 at the top.
+**Fitted SNR** is the distance between the fitted peaks divided by their shared Gaussian width.
+The value after ± is a first-order standard error from the same joint fit, conditional on the model and IQ rotation. It is not a confidence interval.
+`unavailable` means the fit did not yield an estimate for that value.
+`not identifiable` on the SNR line means the relative-error check failed for at least one center, even if the figure shows a number. Passing this check alone does not guarantee writeback preselection.
 Histogram log scale changes the diagnostic histograms, not the scatter.
 If the Analysis tile clips labels, open the diagnostic in Data with **View figure**.
 Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.

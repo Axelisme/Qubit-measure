@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -220,6 +222,9 @@ class GEFitOptions:
     None; a fixed length_ratio bypasses this check. The default 1.0 corresponds
     to fit_tools' sigma(ln p) > 1 weak-parameter rule. Nonpositive or nonfinite
     thresholds raise ValidationError at construction.
+    centers_identifiable optionally checks both centers using the joint
+    FitQuality. Only a plotted fit calls it and adds fitted SNR with a
+    first-order standard error and a warning when the check fails.
     """
 
     numbins: int | str = "auto"
@@ -232,6 +237,7 @@ class GEFitOptions:
     length_ratio_max_relative_error: float = Field(
         default=1.0, gt=0.0, allow_inf_nan=False
     )
+    centers_identifiable: Callable[[FitQuality], bool] | None = None
 
 
 def fitting_ge_and_plot(
@@ -428,10 +434,6 @@ def fitting_ge_and_plot(
         axs[1][0].plot(xs, fit_g_pdfs, "b-", label="g")
         axs[1][0].plot(xs, fit_e_pdfs, "r-", label="e")
 
-        axs[1][0].set_title(
-            f"Prepared assignment: {fid:.1%}; ideal model: {ideal_fid:.1%}", fontsize=12
-        )
-
         _format_ge_fit_axes(axs, threshold, g_pdfs, e_pdfs, logscale=options.logscale)
 
         length_title = (
@@ -439,13 +441,20 @@ def fitting_ge_and_plot(
             if options.align_t1
             else f"{l_ratio_g:.1f} / {l_ratio_e:.1f}"
         )
-        fig.suptitle(
-            "Readout length: not identifiable"
-            if identifiable_length_ratio is None
-            else f"Readout length = {length_title} " + r"$T_1$"
+        title = _diagnostic_title(
+            length_title if identifiable_length_ratio is not None else None,
+            options.centers_identifiable,
+            fit_quality["joint"],
+            (sg, se, s),
+            joint_covariance,
         )
-        fig.tight_layout()
-        fig.subplots_adjust(hspace=0.25, wspace=0.15)
+        _layout_ge_diagnostic(
+            fig,
+            axs[1][0],
+            title,
+            (fid, ideal_fid),
+            annotated=options.centers_identifiable is not None,
+        )
 
     return (
         fid,
@@ -467,6 +476,76 @@ def fitting_ge_and_plot(
             fit_quality=fit_quality,
         ),
     )
+
+
+def _layout_ge_diagnostic(
+    fig: Figure,
+    assignment: Axes,
+    title: str,
+    scores: tuple[float, float],
+    *,
+    annotated: bool,
+) -> None:
+    prepared, ideal = scores
+    separator = "\n" if annotated else " "
+    assignment.set_title(
+        f"Prepared assignment: {prepared:.1%};{separator}ideal model: {ideal:.1%}",
+        fontsize=10 if annotated else 12,
+    )
+    if annotated:
+        fig.suptitle(title, fontsize=11)
+        # Reflow the two-line header and the panels when the tile is resized.
+        fig.set_layout_engine("constrained")
+    else:
+        fig.suptitle(title)
+        fig.tight_layout()
+        fig.subplots_adjust(hspace=0.25, wspace=0.15)
+
+
+def _diagnostic_title(
+    length_title: str | None,
+    centers_identifiable: Callable[[FitQuality], bool] | None,
+    joint_quality: FitQuality,
+    centers_and_width: tuple[float, float, float],
+    joint_covariance: NDArray[np.float64],
+) -> str:
+    title = (
+        "Readout length: not identifiable"
+        if length_title is None
+        else f"Readout length = {length_title} " + r"$T_1$"
+    )
+    if centers_identifiable is None:
+        return title
+
+    identifiable = centers_identifiable(joint_quality)
+    snr = _fitted_snr_title(*centers_and_width, joint_covariance[:3, :3])
+    return title + "\n" + snr + ("" if identifiable else " (not identifiable)")
+
+
+def _fitted_snr_title(
+    sg: float, se: float, width: float, covariance: NDArray[np.float64]
+) -> str:
+    separation = se - sg
+    ratio = abs(separation) / width
+    if not math.isfinite(ratio):
+        return "Fitted SNR = unavailable"
+
+    title = f"Fitted SNR = {ratio:.3g} ± "
+    if (
+        separation == 0.0
+        or not np.isfinite(covariance).all()
+        or np.any(covariance.diagonal() < 0.0)
+    ):
+        return title + "unavailable"
+
+    # Propagate the full joint covariance in physical (sg, se, width) order.
+    slope = math.copysign(1.0, separation) / width
+    gradient = np.array([-slope, slope, -ratio / width])
+    with np.errstate(over="ignore", invalid="ignore", under="ignore"):
+        variance = float(gradient @ covariance @ gradient)
+    if not math.isfinite(variance) or variance <= 0.0:
+        return title + "unavailable"
+    return title + f"{math.sqrt(variance):.3g}"
 
 
 def _identifiable_length_ratio(

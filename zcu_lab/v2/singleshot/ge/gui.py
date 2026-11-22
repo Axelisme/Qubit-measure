@@ -35,6 +35,10 @@ from zcu_lab.v2.singleshot.ge.core import (
     GEPostAnalyzeOptions,
 )
 from zcu_lab.v2.singleshot.ge.form import make_form
+from zcu_lab.v2.support.singleshot.center_quality import (
+    GE_CENTER_ERROR_PATHS,
+    ge_center_relative_error_reasons,
+)
 
 GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
 
@@ -111,14 +115,9 @@ def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
     reasons = [
         f"joint {issue.path}: {issue.reason}"
         for issue in quality.invalid
-        if issue.path
-        in {
-            "r2",
-            "normalized_residual_rms",
-            "relative_parameter_errors.s",
-            "relative_parameter_errors.sg",
-            "relative_parameter_errors.se",
-        }
+        if issue.path in GE_CENTER_ERROR_PATHS
+        or issue.path
+        in {"r2", "normalized_residual_rms", "relative_parameter_errors.s"}
     ]
     if quality.r2 is None or not math.isfinite(quality.r2):
         reasons.append("joint r² unavailable")
@@ -134,12 +133,7 @@ def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
         reasons.append("relative width error unavailable")
     elif width_error > 0.5:
         reasons.append(f"relative width error={width_error:.4g} >0.5")
-    for name, label in (("sg", "g-center"), ("se", "e-center")):
-        error = quality.relative_parameter_errors.get(name)
-        if error is None or not math.isfinite(error):
-            reasons.append(f"relative {label} error unavailable (required <=0.5)")
-        elif error > 0.5:
-            reasons.append(f"relative {label} error={error} >0.5")
+    reasons.extend(ge_center_relative_error_reasons(quality))
     return "Review required: " + "; ".join(reasons) if reasons else None
 
 
