@@ -12,7 +12,7 @@ Optional **Reset** → optional **Preparation pulse** → simultaneous cavity an
 
 ## Read the figures and choose a duration
 
-The I and Q panels show four phase branches versus qubit-tone duration (µs). Their bars are shot SEM: sample SD in that quadrature divided by √(retained shots), not fit error or round-to-round scatter. Mean-only files show no bars. With unequal shot counts across partial passes, means weight the passes equally and no pooled SEM is shown.
+Live shows the four phase branches versus qubit-tone duration (µs) on one principal IQ axis estimated from all four branches. This projection is not a population. Analyze shows I and Q separately so you can see both components of the phase differences. Bars are shot SEM along the displayed axis: sample SD divided by √(retained shots), not fit error or round-to-round scatter. Mean-only files show no bars. With unequal shot counts across partial passes, means weight the passes equally and no pooled SEM is shown.
 
 The contrast panel shows |S180−S0|² + |S270−S90|² (a.u.²), with S the complex phase-branch mean. It has no direct shot SEM and is not a population or reset fidelity. Compare the acquired points; a flat trace with no resolved response does not establish a plateau.
 
