@@ -117,7 +117,7 @@ def _require_positive_lengths(lengths: NDArray[np.float64]) -> None:
     if invalid.size:
         raise ValueError(
             "t1_with_tone_sweep length axis must be finite and strictly positive; "
-            f"got invalid value {float(invalid[0])!r} us"
+            f"got invalid value {float(invalid[0])!r} µs"
         )
 
 
@@ -159,26 +159,33 @@ class T1WithToneSweepCfg(ConfigBase):
         SweepCfg,
         FieldMeta(
             label="Probe length",
-            unit="us",
+            unit="µs",
             description=(
-                "Enter the probe length range (us); "
+                "Enter the probe length range (µs); "
                 "every point must be finite and strictly positive."
             ),
         ),
     ]
     sampling: Literal["linear", "decay"] = "linear"
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -259,19 +266,22 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         for column in (0, 1):
             for row in (0, 1, 2):
                 ax = cells[2 * row + column]
-                ax.set(xlabel=sweep_name, ylabel="Time (us)" if column == 0 else "")
+                ax.set(
+                    xlabel="Probe gain (a.u.)"
+                    if sweep_name == "gain"
+                    else "Probe frequency (MHz)",
+                    ylabel="Time (µs)" if column == 0 else "",
+                )
                 heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
         lines = []
         for column, ax in enumerate(cells[6:]):
             ax.set(
-                xlabel="Time (us)",
-                ylabel="Population" if column == 0 else "",
+                xlabel="Time (µs)",
+                ylabel="P(g), P(e), P(other)" if column == 0 else "",
                 ylim=(0.0, 1.0),
             )
             lines.append(live_line(ax, num_lines=3))
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
+            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
             ax.legend()
         figure.show()
@@ -458,8 +468,8 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
 
         _plot_transition_rates(xs, rates, rate_Covs, (ax_Tg, ax_Te, ax_To), xlabel)
 
-        ax_gg.set_ylabel("Time (μs)")
-        ax_eg.set_ylabel("Time (μs)")
-        ax_Tg.set_ylabel("Rate (μs⁻¹)")
+        ax_gg.set_ylabel("Time (µs)")
+        ax_eg.set_ylabel("Time (µs)")
+        ax_Tg.set_ylabel("Rate (µs⁻¹)")
 
         fig.tight_layout()

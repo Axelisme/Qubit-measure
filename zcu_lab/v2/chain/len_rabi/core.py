@@ -95,11 +95,12 @@ class ChainLenRabiCfg(ConfigBase):
             description="Pulse readout played twice after each Rabi pulse.",
         ),
     ]
-    length: Annotated[SweepCfg, FieldMeta(label="Duration", unit="us")]
+    length: Annotated[SweepCfg, FieldMeta(label="Duration", unit="µs")]
     reps: Annotated[
         int,
         FieldMeta(
             label="Reps",
+            unit="count",
             description="Cycles per point in each round, at least 66.",
         ),
     ] = Field(ge=66)
@@ -107,6 +108,7 @@ class ChainLenRabiCfg(ConfigBase):
         int,
         FieldMeta(
             label="Rounds",
+            unit="count",
             description="Software acquisition rounds.",
         ),
     ] = 1
@@ -114,7 +116,7 @@ class ChainLenRabiCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
         ),
@@ -149,7 +151,7 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
             cfg.length, "time", {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse length (us)", ylabel="Projected signal (sigma)")
+        ax.set(xlabel="Pulse length (µs)", ylabel="Projected signal (sigma)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         lines = live_line(ax, num_lines=2)
@@ -258,7 +260,7 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
             seed_pi_len,
             ls="--",
             c="red",
-            label=f"pi = {seed_pi_len:.3g} ± {seed_pi_len_err:.2g} μs",
+            label=f"pi = {seed_pi_len:.3g} ± {seed_pi_len_err:.2g} µs",
         )
         seed_ax.axvspan(
             seed_pi_len - seed_pi_len_err,
@@ -270,7 +272,7 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
             seed_pi2_len,
             ls="--",
             c="red",
-            label=f"pi/2 = {seed_pi2_len:.3g} ± {seed_pi2_len_err:.2g} μs",
+            label=f"pi/2 = {seed_pi2_len:.3g} ± {seed_pi2_len_err:.2g} µs",
         )
         seed_ax.axvspan(
             seed_pi2_len - seed_pi2_len_err,
@@ -278,7 +280,7 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
             color="red",
             alpha=0.2,
         )
-        seed_ax.set_xlabel("Pulse length (μs)")
+        seed_ax.set_xlabel("Pulse length (µs)")
         seed_ax.set_ylabel("Signal Real (a.u.)")
         seed_ax.set_title(
             f"Rabi Oscillation (f={seed_freq:.3f} ± {seed_freq_err:.3f} MHz)"
@@ -323,10 +325,10 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
                 population_fitted[:, population_state],
                 color=f"C{population_state}",
             )
-        population_ax.set_xlabel("Pulse length (us)")
+        population_ax.set_xlabel("Pulse length (µs)")
         population_ax.set_ylabel("First-read population")
         population_ax.set_title(
-            f"{f'pi length = {pi_len:.4g} ± {pi_len_err:.2g} us, R = {reliability_text}'}\n{checks_text(fit)}",
+            f"{f'pi length = {pi_len:.4g} ± {pi_len_err:.2g} µs, R = {reliability_text}'}\n{checks_text(fit)}",
             fontsize=9,
         )
         population_ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))

@@ -61,23 +61,30 @@ class AcStarkRamseyCfg(ConfigBase):
     stark_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
     pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse")]
     readout: Readout.Cfg
-    wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="us")]
+    wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="µs")]
     gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="µs")]
     detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -135,8 +142,8 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         # 2. Track Stark-dependent Ramsey oscillations and recent delay traces.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Time (us)")
-        line_ax.set_xlabel("Time (us)")
+        heat_ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Time (µs)")
+        line_ax.set(xlabel="Time (µs)", ylabel="Signal (a.u.)")
         heatmap = live_heatmap(heat_ax, uniform=False)
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         line_ax.grid()
@@ -255,7 +262,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         im1.set_extent((gains2[0], gains2[-1], lens[0], lens[-1]))
         ax1.add_image(im1)
         ax1.set_ylim(lens[0], lens[-1])
-        ax1.set_ylabel("Time (us)", fontsize=14)
+        ax1.set_ylabel("Time (µs)", fontsize=14)
 
         im2 = NonUniformImage(ax2, cmap="viridis", interpolation="nearest")
         im2.set_data(gains2, fft_freqs, fft_signals.T)

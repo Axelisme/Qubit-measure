@@ -57,19 +57,26 @@ class ScanT1WithToneCfg(ConfigBase):
     test_pulse: Pulse.Cfg
     readout: Readout.Cfg
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    length: SweepCfg
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="µs")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -120,8 +127,8 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         # 2. Show the gain/time map and the five most recent gain rows.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel="gain", ylabel="Time (us)")
-        line_ax.set_xlabel("Time (us)")
+        heat_ax.set(xlabel="Test tone gain (a.u.)", ylabel="Time (µs)")
+        line_ax.set(xlabel="Time (µs)", ylabel="Rotated IQ real (a.u.)")
         formatter = ScalarFormatter(useMathText=True)
         formatter.set_powerlimits((-2, 2))
         heat_ax.xaxis.set_major_formatter(formatter)
@@ -243,7 +250,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
 
         fig.suptitle("T1 while readout")
 
-        ax1.set_ylabel("T1 over sweep value")
+        ax1.set_ylabel("T1 (µs)")
         ax1.imshow(
             real_signals.T,
             aspect="auto",
@@ -254,7 +261,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             gains, t1s, yerr=t1errs, label="Fitting T1", elinewidth=1, capsize=1
         )
         ax2.set_xlabel("Readout Gain (a.u.)")
-        ax2.set_ylabel("T1 (us)")
+        ax2.set_ylabel("T1 (µs)")
         ax2.set_ylim(bottom=0)
         ax2.set_xlim(gains[0], gains[-1])
         ax2.grid()

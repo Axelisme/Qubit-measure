@@ -74,7 +74,7 @@ Adapter 以 `guide=Path(__file__).with_name("guide.md")` 宣告 operator guide�
 不需轉換時也在本地宣告 run 並配對同次 cfg 與 Result。額外驗證放在 run 開頭，硬體 I/O 前失敗。
 Run 不重新讀目前的 point、library 或 alias。所有 Run 都需要 SoC，框架不提供額外 preflight hook。
 
-Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Refresh 也重建 Form 定義，
+Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Run 頁的按鈕叫 Defaults，RPC 仍叫 `tab.reset_cfg`。Refresh 也重建 Form 定義，
 但保留 authored input、explicit selections 與既有初值，不重新套 defaults。
 `ctx.has(ref)` 用固定來源選 Slot 或 Template，缺參照回 False，來源故障 raise。
 單音 readout module 與 `module.readout` slot 由 resonator 擁有。單 qubit 表單透過 `resonator: $qubit.resonator` alias 讀取 `$resonator.module.readout`，沒有 slot 時使用 `Template("readout")`，不讀 qubit 上的舊 slot。
@@ -117,13 +117,12 @@ Adapter 使用獨立輸入型別時，預設順序由該型別決定。
 持久 Spec 的 Form 也不接受非空 `field_order`。
 在 guide 依實際可見順序寫操作步驟，預演時核對繼承欄位與例外排序。
 
-同一物理量使用一致的可見 label 與單位，例如 Frequency、MHz，Delay、us，
-Gain、normalized，以及掃描點數 Expts。以宣告模型的 `FieldMeta` 指定 label／unit；
-SweepCfg 的座標與 step 繼承 unit，點數不帶物理單位。
+在宣告模型的 `FieldMeta` 指定可見 label／unit，照[表單文字 F1–F4](figure-style.md#表單文字)及
+[單位表](figure-style.md#單位)撰寫，例如「自由演化時間 (µs)」和「驅動增益 (a.u.)」。
+SweepCfg 的座標與 step 繼承 unit，點數不繼承掃描量的物理單位。
 既有 cfg key 不因顯示文字改名，例如 `delays`、`delay` 與 `length` 都可顯示 Delay。
 共用但物理量不同的 range 必須說明單位由哪張實驗決定。
-Flux 軸使用 `flux_unit`，不能把動態單位寫成固定 MHz 或 us。
-Recipe docstring 明列 `n → expts` 或 `points → expts` 的對應。
+Flux 軸從 `flux_unit` 取得單位，不寫成固定單位。
 Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數。
 
 初值依來源處理。來源可推導時，用 Expr 或固定 capture，寫明來源路徑與單位。
@@ -141,8 +140,7 @@ Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數�
 用 `get_cfg.diagnostics` 的 seed_source、seed_status、uncalibrated 核對 Open／Reset 的結果。
 Hidden 只用於 Run 會覆寫或計算的值，不用來藏起 required input。
 
-必填欄位的靜態 FieldMeta 寫可讀 label、unit 與 description。
-說明用「填入 …」指出角色、單位及取得來源的前置實驗。
+必填欄位的 label、unit 與 description 宣告在靜態 `FieldMeta`，寫法見 [F3](figure-style.md#f3description-用一句填寫說明)。
 有作者說明的必填空白錯誤會附上該欄位與父欄位的 label／description，保留原 path。
 Recipe preflight 沿用這些 message 與 typed paths，不從 generic error 猜物理設定。
 Readout slot found 與 form valid 必須分開判讀；slot 存在不代表 drive、GE centers 或掃描範圍齊全。
@@ -153,7 +151,7 @@ Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
 1. Kickstart entry 只有接線與 nominal values，沒有 module slot。
    記錄哪些欄位有 seed、哪些欄位必填空白，以及 uncalibrated 候選。
 2. 加入必要 frequency，仍不加入 readout slot。
-   比較 Open、Refresh、Reset；Refresh 保留舊輸入，Reset 依新 capture 重新取初值。
+   比較 Open、Refresh、Defaults。Refresh 保留舊輸入，Defaults 依新 capture 重新取初值。
 3. 使用包含 readout slot 的 project 副本。
    分開列出 slot 是否存在，以及表單尚缺哪些 pulse、drive、timing 或 GE calibration。
 4. 核對對應的 agent recipe。
@@ -161,11 +159,10 @@ Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
    沒有 recipe 的表單在 guide 說明使用 GUI／RPC，不假設 recipe 覆蓋所有實驗。
 
 每個 GUI 情境保存 get_cfg 的 input、values、errors、diagnostics 與實際欄位順序。
-用 ComponentDriver 操作 Open／Refresh／Reset，保存截圖並審閱可見 label、單位與錯誤。
+用 ComponentDriver 開啟 tab、操作 Refresh 與 Defaults，保存截圖並審閱可見 label、單位與錯誤。
 在 guide 寫出各情境的起手步驟與仍需取得的校準。
 預演不呼叫 Run、不連硬體，也不操作使用者正在使用的桌面 GUI，除非另有明確授權。
-Guide 必須提醒來源修改後需 Reset；Refresh 只更新 source／choice，
-Reset 可能覆蓋尚未儲存的輸入。
+Guide 必須提醒操作員：來源修改後，按 Defaults 重取初值，確認後會丟棄表單編輯。Refresh 只更新 source／choice，保留輸入。
 
 ## Recipe 撰寫
 
@@ -181,7 +178,7 @@ Reset 可能覆蓋尚未儲存的輸入。
 lib 基底只給可選的預設路徑，不限制 recipe 直接寫自己的步驟，也不要求套進固定流程。
 新增自己的設定時，在輸入宣告欄位，再在步驟發生的位置使用它。
 
-每個 cfg／表單／recipe 欄位要能用一句使用者術語說出它在這個實驗的用途，說不出就是殘留，review 時逐欄位問。
+審查時逐欄確認 cfg／表單／recipe 欄位在實驗中的用途。沒有用途的欄位不保留。
 
 Recipe 放在 [`../recipes/`](../recipes/README.md)。撰寫時遵守以下六項，審查裁決見
 [程式碼品質](../../docs/code-quality.md#zcu_lab-審查裁決)：
@@ -193,15 +190,18 @@ Recipe 放在 [`../recipes/`](../recipes/README.md)。撰寫時遵守以下六�
 4. Helper 只做數字呈現等機械格式化。選脈衝、掃描範圍、重測與寫回判斷留在主體。
 5. Review core 時逐項說明 class 與抽象的用途，讓讀者從 `run` 看見脈衝序列。
    Class 數只提示閱讀成本，不是新增或刪除 class 的配額。
-6. Docstring 寫使用者要填的量、單位、null 語意、量測動作與分析參數的效果。
-   明列 `n → expts` 或 `points → expts`，不要用框架術語取代實驗說明。
+6. Docstring 用使用者術語交代輸入、動作、結果與失敗。寫明單位、分析參數的效果，以及 `n → expts` 或 `points → expts` 的對應。可省略的欄位要說明省略時保留什麼、明填 null 如何原樣交給 owner。
+   Input schema 與 report 的可見文字另依 [Recipe 說明 S1–S2](figure-style.md#recipe-說明)撰寫，不能代替 docstring 的契約。
 
 以下骨架使用 `recipe_api` 的真實介面與 twotone owner 的具名 summary。
 輸入繼承 `RecipeInputs`，報告繼承 `RecipeReport`。`RecipeInputs` 不宣告欄位。
 Recipe 可按需宣告 `target: SingleTarget`、`reuse_tab_id: ReuseTabId` 與 `overrides: Overrides`。
+`target` 指定本次開啟或重設表單所用的綁定，`reuse_tab_id` 選擇要重用的 tab，
+`overrides` 在實驗欄位設好後套用額外的表單操作。
 多角色可以改用自己的 target model。基底也不提供通用 library／inline 輸入。
 可省略的實驗欄位用 `T | None | Keep = KEEP`，省略保留，null 原樣交 owner。
 以下例子的掃描端點與 pulse length 都必填，分析選項可省略。
+`Expts (count)` 和 `Length (µs)` 是顯示詞彙遷移後的目標，不是現行 UI 文字，也不改 cfg 或存檔格式。
 
 骨架先對 drive 與 waveform command to_inline。已 inline 時 command 不改值。
 這樣改長度會保留既有 waveform family，不固定換成 const，單 kind module 也照此處理。
@@ -219,33 +219,45 @@ from zcu_lab.v2.twotone.freq.gui import TwotoneSpectrumSummary
 
 
 class Inputs(RecipeInputs):
-    """Drive sweep bounds in MHz and a custom constant-pulse duration in us."""
+    """Sweep the RF drive frequency with a custom probe-pulse duration."""
 
     target: SingleTarget
     reuse_tab_id: ReuseTabId
     overrides: Overrides
-    start_mhz: float = Field(description="Drive sweep start in MHz.")
-    stop_mhz: float = Field(description="Drive sweep stop in MHz.")
-    n: int = Field(ge=2, description="Sweep sample count, mapped to GUI Expts.")
-    pulse_length_us: float = Field(gt=0, description="Custom drive duration in us.")
-    model_type: Literal["lor", "sinc"] | None | Keep = KEEP
+    start_mhz: float = Field(description="Set Frequency › Start (MHz), the first RF frequency.")
+    stop_mhz: float = Field(description="Set Frequency › Stop (MHz), the last RF frequency.")
+    n: int = Field(ge=2, description="Set Frequency › Expts (count), the number of sweep points.")
+    pulse_length_us: float = Field(
+        gt=0, description="Set Probe Pulse › Waveform › Length (µs), the drive duration."
+    )
+    model_type: Literal["lor", "sinc"] | None | Keep = Field(
+        KEEP,
+        description=(
+            "Choose the peak-fit line shape in Analyze › Model type; "
+            "omission keeps it, null passes to the owner."
+        ),
+    )
 
 
 class Report(RecipeReport):
     """Transition estimate and the inherited writeback/analysis facts."""
 
-    frequency_mhz: float | None = None
+    freq: float | None = Field(default=None, description="Qubit frequency (MHz).")
 
 
 @recipe("custom_spectrum", description="Sweep drive frequency with a custom pulse.")
 async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
     """Sweep, fit a transition, ask before writeback, then save.
 
-    n sets Form freq.n, lowered to cfg freq.expts. Frequencies use MHz.
-    pulse_length_us changes the drive duration before acquisition.
-    model_type selects the existing lor/sinc fit. The fitted curve is always shown.
-    Missing Form values stop before acquisition. Omitted analysis controls retain
-    owner values; explicit null is passed unchanged to the analysis owner.
+    start_mhz and stop_mhz set the RF sweep endpoints in MHz.
+    n sets the number of points via Form freq.n, which becomes cfg freq.expts.
+    pulse_length_us sets the probe duration in microseconds.
+    model_type chooses a Lorentzian or sinc line shape for the peak fit.
+    Omission keeps the current analysis value; explicit null goes unchanged
+    to Analyze for validation.
+    Report the fitted qubit frequency in MHz and whether writeback was applied.
+    Invalid Form values stop Run. If Analyze produces no result, report its
+    failure reason and save the acquired data.
     """
     tab = session.open_tab(
         "twotone/freq", target={"qubit": inputs.target}, reuse=inputs.reuse_tab_id,
@@ -275,12 +287,16 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
             receipt.raise_for_error()
             applied = bool(receipt.items)
         return Report(
-            frequency_mhz=report_number(analysis.result.freq),
+            freq=report_number(analysis.result.freq),
             writeback_applied=applied,
         )
     finally:
         tab.save()
 ```
+
+這個例子的 report 與 Analyze 摘要都呈現擬合的 qubit 頻率。若擬合值為 5800.125 MHz，兩處都寫 `Qubit frequency (MHz) = 5800.125`。
+Report 從 `analysis.result.freq` 取值，core 結果與原生 JSON 摘要的 key 仍是 `freq`。
+範例的 `description` 說明 report 欄位的意義，不設定 Analyze 的顯示名稱。
 
 `FieldEdit` 是 dotted path 加上 `value`、`select`、`command` 其中一個，不帶 source；`select: null` 清空可清空的 selector。Overrides 省略為空 list，不接受 null。
 `tab.apply_overrides` 依序執行、不去重；某筆失敗時報出索引與 path，前面已套用的保留，不 rollback。每次操作允許尚未 ready 的合法草稿。
@@ -314,8 +330,8 @@ history 的固定來源。同 entry 有 point 時讀該 point 的現存持久值
 分析與 writeback 只讀 record，不讀 current Form input。
 
 作者宣告 `Adapter(spec, make_form, run, guide, analysis=None, post_analysis=None)`。
-Primary 只可為 `Analysis(fn, options=None, writeback=None)`、
-`Interactive(plugin, frontend, options=None, writeback=None)` 或 None，互斥由型別表達。
+Primary 只可為 `Analysis(fn, options=None, writeback=None, summary_lines=None)`、
+`Interactive(plugin, frontend, options=None, writeback=None, summary_lines=None)` 或 None，互斥由型別表達。
 第二層使用 `PostAnalysis(fn, options=None, writeback=None)`。
 Capabilities 由值推導，不手填。一般 gui.py 只需 import Adapter 與 Analysis。
 
@@ -325,12 +341,14 @@ MCP schema 與 JSON 重建使用同一物件型別，不重新讀歷史。編輯
 沒有 options 時仍能分析，表單為空。現有三個歷史預設生成器接入此機制；
 現有 16 個分析時讀歷史的 wrapper 仍保留，其清理另行處理。
 Figures-only 分析回 None，仍保存具名圖與空摘要，不提出 writeback。
+`summary_lines(source)` 可從固定來源提供操作員文字；缺少來源值時省略該行。
+GUI 和 MCP 共用這些行，不把它們寫入原生 JSON。見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
 
 Framework 依 RunRecord/spec 提供 `data_item` 與 `analysis_item`，作者不覆寫 artifact hooks。
 只保存已提交輸出與歷史分析輸入，不取草稿或目前表單。缺 cfg 不補值；
 準備失敗只使該 data output 失敗，不阻塞獨立的圖與分析，檔案寫入由保存流程負責。
 Host 將 native 分析結果交給 `summarize_analysis`，Save／MCP 共用這個入口。
-實驗端不再提供 `to_summary_dict` 或 summary 投影，也不繼承已退休的結果 base。
+實驗端不提供 `to_summary_dict` 或原生 JSON 投影，也不繼承已退休的結果 base。
 結果根須為 dataclass、pydantic model 或字串 key 的 Mapping，summary 固定為 strict JSON object。
 Key 使用原生結果欄位名，recipe／workflow 依這些欄位讀取，不提供舊 key alias，也不重寫舊存檔。
 Converter 將非有限數值轉為 null，Live RPC 的 `invalid` 列出路徑。
@@ -451,8 +469,9 @@ Dotted 的 device value／period NaN cell 視為缺席，inf／bool 仍拒絕。
 
 ## Operator guide 格式
 
-Adapter guide 是 prose，不是 machine contract。內容放在實驗同目錄的 UTF-8 Markdown 檔，
-章節可自由安排。Adapter 明確宣告檔案，不依 class 名稱推導路徑：
+Adapter guide 是 prose，不是 machine contract。內容放在實驗同目錄的 UTF-8 Markdown 檔。
+Markdown 章節可自由安排，內容檢查表見 [Operator guide Gd1–Gd3](figure-style.md#operator-guide)。
+Adapter 明確宣告檔案，不依 class 名稱推導路徑：
 
 ```python
 from pathlib import Path
@@ -535,7 +554,7 @@ branch；uniform grid 若沒有可信 seed，不會把 local alias 提案寫成 
 all-or-none。只有可辨識 pulse route 的 run snapshot，且有可信 seed 或 fitting grid 為 nonuniform，
 才提出此 writeback。沒有 cfg snapshot 的舊資料仍可分析，不提出無 route 的 calibration。
 worker 提出 proposal，`ContextService` 在 preview/apply 後負責 parameter context 寫入。
-GUI 的 maximum search radius 預設為 `100.0`（MHz 軸時單位為 us）；若已明確固定
+GUI 的 maximum search radius 預設為 `100.0`（MHz 軸時單位為 µs）；若已明確固定
 `edelay`，不重新搜尋 branch。
 
 ---

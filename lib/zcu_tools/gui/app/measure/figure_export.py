@@ -1,4 +1,4 @@
-"""Measure save and Data Preview geometry for live GUI-owned Figures.
+"""Measure save, Data Preview and reading geometry for GUI-owned Figures.
 
 Calls run on the Figure's owner thread. Size is temporarily pinned and restored
 after rendering; agent screenshots use the shared gui.plotting renderer.
@@ -81,3 +81,13 @@ def render_figure_preview_png(fig: Figure) -> bytes:
         format="png",
     )
     return buf.getvalue()
+
+
+def render_figure_reading_png(fig: Figure) -> bytes:
+    """Render a fresh, full 12×9 inch Figure at 100 pixels per inch for reading.
+
+    Call on the Qt owner thread only. The view shows pixels at their rendered
+    size, scrolling when necessary. Canvas ownership and on-screen size stay
+    unchanged. Rendering failures propagate; no file is read or written.
+    """
+    return render_figure_png(fig, figsize=(12.0, 9.0), dpi=100.0)

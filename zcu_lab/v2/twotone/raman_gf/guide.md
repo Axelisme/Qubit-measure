@@ -13,8 +13,8 @@ Choose any supported drive waveform: arb, cosine, gauss, drag, const or flat_top
 The default editor selects arb and needs a waveform asset.
 To use sqrt(sin(pi*t/T)) for 0 ≤ t ≤ T, select arb and prepare an asset;
 this shape is equivalent to a centered sqrt(cos) pulse.
-For example, a 0.1 us asset uses the formula
-`sqrt(abs(sin(pi*t/0.1)))` over a single 0.1 us segment with peak normalization.
+For example, a 0.1 µs asset uses the formula
+`sqrt(abs(sin(pi*t/0.1)))` over a single 0.1 µs segment with peak normalization.
 Choose that asset in the Raman drive waveform editor.
 This scan does not generate a second carrier or a pair of Lambda pulses.
 For two-generator Lambda pulses, use the separate STIRAP
@@ -46,7 +46,7 @@ A kickstart entry supplies wiring and nominal readout candidates, not pulse or
 readout timing calibration. A blank carrier or required timing keeps Run disabled.
 An arb waveform also needs its asset before Run becomes available.
 Entering a spectroscopy carrier alone does not complete the readout.
-An existing readout slot is used on Open or Reset; its presence does not prove
+An existing readout slot is used on Open or Defaults; its presence does not prove
 that its settings or classifier remain calibrated.
 
 The modes use the following ranges:
@@ -77,7 +77,7 @@ Stop retains completed rows and leaves unfinished rows as NaN.
 Save keeps counts, actual detuning and gain together with this run's cfg.
 It does not copy a later library change into an existing result.
 
-After changing source parameters or library bindings, Reset captures them again
+After changing source parameters or library bindings, Defaults captures them again
 and may replace unsaved input. Refresh updates source choices but preserves
 authored input and previously resolved defaults.
 Reload experiments rebuilds the adapter and restores the existing tab.
@@ -131,7 +131,7 @@ that key. The default Raman Form already uses the arbitrary family.
 Each `n` maps to its saved cfg `expts`. Frequency holds gain start; gain holds
 detuning start. Detuning is two-photon MHz; a positive offset raises the single
 carrier by half that value. Drive gain uses DAC full-scale fraction (a.u.).
-`shots` sets repetitions per point; `relax_delay_us` uses us.
+`shots` sets repetitions per point; `relax_delay_us` uses µs.
 
 Omitted inputs retain Form values and sources; explicit null goes unchanged to
 the owner. Python KEEP marks omission and is not a JSON value. Ordered

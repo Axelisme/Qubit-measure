@@ -73,17 +73,24 @@ class FreqCfg(ConfigBase):
     method: Literal["soft", "hard"] = "soft"
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -154,7 +161,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         fig, _ = plots.subplots(nrows=1, ncols=2, num="measurement")
         map_ax, line_ax = fig.axes
         map_ax.set(xlabel="Frequency1 (MHz)", ylabel="Frequency2 (MHz)")
-        line_ax.set_xlabel("Frequency1 (MHz)")
+        line_ax.set(xlabel="Frequency1 (MHz)", ylabel="Signal (a.u.)")
         viewer = live_heatmap(map_ax)
         line = live_line(line_ax)
         line_ax.lines[0].set(label="current line", marker=".", color="C0")

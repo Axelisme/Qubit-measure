@@ -262,8 +262,9 @@ class LoadedVariableData:
 class GroupedLoadData(Generic[T_Config]):
     """Validated grouped arrays used to rebuild an experiment Result.
 
-    variables maps each DataVariable identity to its memory-unit loaded arrays.
-    Result builders reconstruct from these arrays before typed cfg validation.
+    variables maps each present DataVariable identity to its memory-unit loaded
+    arrays. Absent optional variables have no entry. Result builders reconstruct
+    from these arrays before typed cfg validation.
     """
 
     variables: Mapping[DataVariable, LoadedVariableData]
@@ -286,11 +287,14 @@ class VariableSpec:
     variable is its lowercase snake_case identity; invalid names raise ValueError
     at construction. axes declares inner-first axes; z declares the measured
     channel, memory dtype and unit conversion. Arrays use reversed-axis shape.
+    required=True demands this variable in native files. With required=False,
+    grouped saves omit it only when the entire Result z field is None.
     """
 
     variable: str | DataVariable
     axes: tuple[VariableAxisSpec, ...]
     z: VariableZSpec
+    required: bool = field(default=True, kw_only=True)
 
     def __post_init__(self) -> None:
         DataVariable(self.variable)
@@ -299,6 +303,14 @@ class VariableSpec:
     def data_variable(self) -> DataVariable:
         """Return the validated snake_case identity for this mapping."""
         return DataVariable(self.variable)
+
+    def is_omitted(self, result: object) -> bool:
+        """Return whether an optional variable's entire Result z field is None.
+
+        A missing optional z attribute raises AttributeError. Required variables
+        are never omitted; this query does not validate arrays or read axes.
+        """
+        return not self.required and getattr(result, self.z.field_name) is None
 
     def validate_result_fields(
         self, result_fields: set[str], result_type_name: str
@@ -472,7 +484,9 @@ class VariableSpec:
 class GroupedAxesSpec(Generic[T_Result, T_Config]):
     """Declare the grouped persistence mapping for one experiment (ADR-0063).
 
-    variables is a nonempty ordered tuple of unique VariableSpec declarations.
+    variables is an ordered tuple of unique VariableSpec declarations, with at
+    least one required variable. Absent optional variables are not passed to
+    result_builder. Present variables are validated regardless of required.
     result_type is the Result dataclass; cfg_type validates saved cfg comments.
     tag is the default file tag. result_builder rebuilds result_type from loaded
     memory-unit arrays; result_validator, when supplied, checks results on save
@@ -482,7 +496,9 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     'common', requiring a shared grid. Explicit 'independent' preserves each
     variable's own axes and supports one or two dimensions per variable.
     There is no automatic layout fallback. Native persistence permits different
-    grids regardless of the Labber layout.
+    grids regardless of the Labber layout. labber_variables selects a nonempty
+    subset of declared names for export, in declaration order. None exports all
+    present variables. Selection never changes native save or restore.
     save_stem receives captured SaveContext and returns an exact filename stem.
     The default joins dotted frontend name, ordered role names and full run_id.
     Frontends append no prefix or ID. Invalid stems fail SaveLayout validation;
@@ -498,13 +514,14 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     cfg_schema_version: str = "1.0"  # declaration-owned cfg major.minor
     labber_layout: Literal["common", "independent"] = "common"
     save_stem: Callable[[SaveContext], str] = default_save_stem
+    labber_variables: tuple[str, ...] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         _validate_cfg_schema_version(self.cfg_schema_version)
         if self.labber_layout not in {"common", "independent"}:
             raise ValueError("labber_layout must be common or independent")
-        if not self.variables:
-            raise ValueError("GroupedAxesSpec requires at least one variable")
+        if not any(variable.required for variable in self.variables):
+            raise ValueError("GroupedAxesSpec requires at least one required variable")
         result_type = self.result_type
         if not is_dataclass(result_type):
             raise TypeError(f"result_type {result_type!r} must be a dataclass")
@@ -517,13 +534,28 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
                 raise ValueError(f"duplicate grouped data variable {data_variable!r}")
             seen.add(data_variable)
             variable.validate_result_fields(result_fields, self.result_type.__name__)
+        if self.labber_variables is not None:
+            selected = {DataVariable(name) for name in self.labber_variables}
+            if not selected or len(selected) != len(self.labber_variables):
+                raise ValueError("labber_variables must be nonempty with unique names")
+            if unknown := selected - seen:
+                raise ValueError(
+                    f"labber_variables names not declared: {sorted(unknown)}"
+                )
 
     @property
     def required_variables(self) -> tuple[DataVariable, ...]:
         """Return required variable identities in declaration order."""
-        return tuple(variable.data_variable for variable in self.variables)
+        return tuple(
+            variable.data_variable for variable in self.variables if variable.required
+        )
 
     def payloads_from_result(self, result: T_Result) -> dict[str, LabberPayload]:
+        """Map present variables to payloads in declaration order, without I/O.
+
+        result must provide the declared fields. Validation and mapping errors
+        propagate; optional variables with a None z field are omitted.
+        """
         if self.result_validator is not None:
             self.result_validator(result)
         return {
@@ -535,6 +567,7 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
                 ),
             )
             for variable in self.variables
+            if not variable.is_omitted(result)
         }
 
 

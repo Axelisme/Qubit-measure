@@ -91,22 +91,22 @@ class StirapDelayCfg(ConfigBase):
         EnvelopeWaveformCfg,
         FieldMeta(
             label="Pump waveform",
-            description="Select the Pump 0–3 envelope from the waveform library or inline parameters, with durations in us.",
+            description="Select the Pump 0–3 envelope from the waveform library or inline parameters, with durations in µs.",
         ),
     ]
     stokes_waveform: Annotated[
         EnvelopeWaveformCfg,
         FieldMeta(
             label="Stokes waveform",
-            description="Select the Stokes 3–2 envelope from the waveform library or inline parameters, with durations in us.",
+            description="Select the Stokes 3–2 envelope from the waveform library or inline parameters, with durations in µs.",
         ),
     ]
     readout: PulseReadout.Cfg
-    stokes_lead: Annotated[SweepCfg, FieldMeta(label="Stokes lead", unit="us")]
-    shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
+    stokes_lead: Annotated[SweepCfg, FieldMeta(label="Stokes lead", unit="µs")]
+    shots: Annotated[int, FieldMeta(label="Shots per point", unit="count")] = Field(
         default=4096, ge=1
     )
-    relax_delay: Annotated[float, FieldMeta(unit="us")] = Field(ge=0)
+    relax_delay: Annotated[float, FieldMeta(unit="µs")] = Field(ge=0)
 
     @model_validator(mode="after")
     def _different_generators(self) -> Self:
@@ -156,7 +156,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
 
         # 2. Monitor g/e/f transfer fractions as the Stokes lead changes.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Stokes lead (us)", ylabel="Measured fraction")
+        ax.set(xlabel="Stokes lead (µs)", ylabel="Measured fraction")
         viewer = live_line(ax, num_lines=len(STATE_LABELS))
         for line, state in zip(ax.lines, STATE_LABELS, strict=True):
             line.set_label(state)
@@ -262,7 +262,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
                 label=f"{state} corrected",
             )
         ax.set(
-            xlabel="Stokes lead (us)",
+            xlabel="Stokes lead (µs)",
             ylabel="Population fraction",
             title="STIRAP delay",
         )

@@ -125,7 +125,7 @@ class FreqCfg(ConfigBase):
         PulseReadout.Cfg,
         FieldMeta(
             label="Readout",
-            description="Resonator readout 設定與 timing（us）。",
+            description="Resonator readout 設定與 timing（µs）。",
         ),
     ]
     freq: Annotated[
@@ -142,17 +142,24 @@ class FreqCfg(ConfigBase):
     ] = None
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -215,7 +222,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # 2. Preview resonance magnitude while preserving complex IQ for fitting.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
+        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude (a.u.)")
         line = live_line(ax)
 
         @context.plots.on_plot_thread

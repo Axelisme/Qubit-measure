@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-**Last updated:** 2026-11-21，讀出長度差與 mux post_delay 初值
+**Last updated:** 2026-11-22，Run 頁 Defaults 與 mux 初值
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
@@ -24,21 +24,21 @@ length、ro_length 與 trig_offset 保持必填且未填，不猜時長或以 0 
 Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。
 Trigger 與 length 使用 min／max Expr。單一已設 kappa 直接引用該來源，全未設時加 0。
 Slot-copy 與 blank 初值都從 `$mux.wiring.ro_ch[i]` 取得第 i 個 tone 的 ADC，不把 tone 位置當作 ADC channel。
-Mux onetone 缺 slot 時，ro_length 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
+Mux onetone 缺 slot 時，ro_length 固定填入 1.0 µs，不依賴 kappa 或 time_of_fly。
 完整 group 的 kappa 都有效且 group 有頂層 time_of_fly，才推導 trigger 與 length。
 trig_offset 取 `$mux.time_of_fly` 加 ringup，length 取 trig_offset + ro_length，不讀 resonator 的 pulse 路徑 TOF。
 任一 kappa 或 group time_of_fly 缺值時，trig_offset／length 留空必填，mixer_freq 不受影響。
 `post_delay` 用最小 κ 估五個光子衰減時間 `5 / (2π · κ)`。只要求所有 κ 齊全，不要求 group time_of_fly。缺 κ 時保留範本的 0 µs。
-上述缺值情境仍填入 ro_length=1.0 us。
-已設的 frequency 須為有限數，time_of_fly 須為有限非負數，否則 Open／Reset 報錯。
-候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。缺來源時採用的初值 metadata 由 Template 持有；ringup caller 以 `Form(...).with_seed_metadata(...)` 加入 detached copy 的來源公式。`seed_metadata` 供 readout 與 flux 表單共用，只把固定常數 fallback（如 gain 0.1、ADC window 1.0 us、掃描點數）標為 uncalibrated，description 寫明「未校準的起始值，來源：固定常數」。Mixer、推導 timing 與 frequency／flux endpoints 寫明 capture 來源，不宣稱 measured，也不標 uncalibrated。Ref-only slot 不標記，未改寫的 captured 欄位保持未知。
-每個已設成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
-Onetone 的 Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留操作員之後的編輯。
+上述缺值情境仍填入 ro_length=1.0 µs。
+已設的 frequency 須為有限數，time_of_fly 須為有限非負數，否則 Open 或 Run 頁的 Defaults 報錯。
+候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。缺來源時採用的初值 metadata 由 Template 持有；ringup caller 以 `Form(...).with_seed_metadata(...)` 加入 detached copy 的來源公式。`seed_metadata` 供 readout 與 flux 表單共用，只把固定常數 fallback（如 gain 0.1、ADC window 1.0 µs、掃描點數）標為 uncalibrated，description 寫明「未校準的起始值，來源：固定常數」。Mixer、推導 timing 與 frequency／flux endpoints 寫明 capture 來源，不宣稱 measured，也不標 uncalibrated。Ref-only slot 不標記，未改寫的 captured 欄位保持未知。
+每個已設成員的 kappa 都須為有限正數，否則 Open 或 Run 頁的 Defaults 報錯。其他 mux Forms 沿用來源 timing。
+Onetone 的 Open／Defaults 產生 detached、可編輯的初值，cfg 輸出保留操作員之後的編輯。
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。
 Label 不是 identity。這些初值不保證硬體安全，操作員仍須核對接線。缺少必要欄位仍擋 Run。
 每個 Form 使用公開 `FixedElements`、native readonly／element_label metadata 與逐位置初值。
-`captured_mux_participants(ctx, names)` 在 Open／Reset 從同一固定 capture 的 alias owner 解析 `$participants`，包含清單內的 `$` 軟連結。Drive 與 flux Forms 以完整 `$mux.qubits` 排序，onetone 以完整 `$mux.resonators` 排序，把名稱轉成原始索引。缺列、未綁或空清單選全部原始索引。非空清單的未綁元素照常報錯，不 fallback。外群名稱保留為 participants 的普通 invalid draft，讓操作員看到原名稱並改成合法索引；一般整數驗證阻擋 cfg。Alias 改動不影響現有輸入，需 Reset 或重新 Open。MuxGroup 不保存 participants，recipe 只收索引。省略 participants 以 KEEP 保留捕捉的選取；明填 null 原樣交 owner，不代表保留。
-所有元素共用宣告，不把逐位置 lock 套成共同限制。Participants 是完整 tones 的原始索引清單。Open／Reset 先選定 participants，再由 `mux_tone_initials` 保留參與 tone 的 drive、Echo pi_pulse 與逐 tone sweep 初值，其餘填 None。欄位仍可編輯。一般 participants 編輯不呼叫初始化，移出的 tone 保值，新加入且仍為 None 的值由 native cfg 顯示「填入 …」錯誤。Readout 身分與 local flux_dev 全 tone 必填。GE 的可選 init_pulse 保持既有驗證，不列入 active 必填集合。
+`captured_mux_participants(ctx, names)` 在 Open／Defaults 從同一固定 capture 的 alias owner 解析 `$participants`，包含清單內的 `$` 軟連結。Drive 與 flux Forms 以完整 `$mux.qubits` 排序，onetone 以完整 `$mux.resonators` 排序，把名稱轉成原始索引。缺列、未綁或空清單選全部原始索引。非空清單的未綁元素照常報錯，不 fallback。外群名稱保留為 participants 的普通 invalid draft，讓操作員看到原名稱並改成合法索引；一般整數驗證阻擋 cfg。Alias 改動不影響現有輸入。要重新帶入初值，在 Run 頁按 Defaults 或開新 tab。MuxGroup 不保存 participants，recipe 只收索引。省略 participants 以 KEEP 保留捕捉的選取；明填 null 原樣交 owner，不代表保留。
+所有元素共用宣告，不把逐位置 lock 套成共同限制。Participants 是完整 tones 的原始索引清單。Open／Defaults 先選定 participants，再由 `mux_tone_initials` 保留參與 tone 的 drive、Echo pi_pulse 與逐 tone sweep 初值，其餘填 None。欄位仍可編輯。一般 participants 編輯不呼叫初始化，移出的 tone 保值，新加入且仍為 None 的值由 native cfg 顯示「填入 …」錯誤。Readout 身分與 local flux_dev 全 tone 必填。GE 的可選 init_pulse 保持既有驗證，不列入 active 必填集合。
 Recovery 採完整名稱清單中最大的五倍 T1；沿用既有 missing／invalid 政策，不重讀來源。
 Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit caller 仍預設 `$qubit`。
 
@@ -114,30 +114,30 @@ Mux readout 初值與 `require_mux_qubits` 共用此查詢。缺 capture、alias
 此要求不改變下列可選 qubit 配對驗證的 bring-up 政策。
 
 `mux_bindings.validate_mux_bindings(parameters: DocumentSetCapture | None) -> None`
-集中 onetone、mux qubit 與 FTF two-qubit Forms 共用的跨 component 驗證。
+集中 onetone 與 mux qubit Forms 的跨 component 驗證。
 它只讀借用的固定 capture，不刷新來源、不讀 live 檔案或裝置，也不 materialize library assets。
 有 qubits 時，它驗證完整有序清單的 component 存在、kind 與逐項 qubit.resonator 對應。
-錯誤保留欄位、原始 index 及實際值。`require_mux_group` 與 `validate_mux_bindings` 經 `DocumentSetCapture.component()` 完整投影指定 group，執行 MuxGroup 的名稱、等長與重複 qubit 檢查。FTF `captured_roles` 也用這個投影讀 group。Kind 與 resonator 關係讀取只要求對應 leaf，不預驗其他元件。
+錯誤保留欄位、原始 index 及實際值。`require_mux_group` 與 `validate_mux_bindings` 經 `DocumentSetCapture.component()` 完整投影指定 group，執行 MuxGroup 的名稱、等長與重複 qubit 檢查。Kind 與 resonator 關係讀取只要求對應 leaf，不預驗其他元件。
 
 None、未綁 mux、不存在或非 MuxGroup 的 target、沒有 qubits 都不增加 bring-up 門檻。
-其他 alias 錯誤與來源故障照常傳遞。FTF caller 自行要求 group、qubits 及 F1/F2；
-新 mux qubit caller 自行要求完整 tone 數對齊與 active drive。共用函式不選 tone、不猜角色、不寫回。
+其他 alias 錯誤與來源故障照常傳遞。Mux qubit caller 自行要求完整 tone 數對齊與 active drive。
+共用函式不選 tone、不猜角色、不寫回。Two-qubit 的 [`captured_qubits`](../../two_qubit/_measure.py) 呼叫 `require_mux_qubits` 驗證完整有序綁定，再定位兩個 alias 並核對已綁 readout 的類別與 tone 數。不限制 qubit 的物理子種類或 coupler 的種類。
 
 在 concrete `form.py` 使用下列 import，並在自己的 `make_form(ctx)` 建立 Form 前呼叫。
-`TwoQubitCfg` 是該 caller 的既有 core cfg；範例省略 caller 自己的角色要求與 tree 內容。
+`MuxCfg` 是該 caller 的既有 core cfg；範例省略 caller 自己的綁定要求與 tree 內容。
 
 ```python
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.mux_bindings import validate_mux_bindings
 
-from .core import TwoQubitCfg
+from .core import MuxCfg
 
 
-def make_form(ctx: FormContext) -> Form[TwoQubitCfg]:
+def make_form(ctx: FormContext) -> Form[MuxCfg]:
     validate_mux_bindings(ctx.parameters)
-    # Enforce this caller's required group, qubits and F1/F2 here.
-    return Form(TwoQubitCfg, tree={})
+    # Enforce this caller's required bindings here.
+    return Form(MuxCfg, tree={})
 ```
 
 ## Flux form defaults
@@ -198,7 +198,7 @@ package facade 只 re-export concrete adapters 實際共用的 authoring vocabul
 range recipe 與 writeback policy 不經 facade 轉送。共用 readout writeback helper 依 caller 傳入的
 target、description、field updates 與 role 建立 proposal，保留既有 DPM 校準政策。
 
-Reset Form 從 Open／Reset 的固定 capture 讀 qubit ext 初值。Expr 與 Range 的求值及驗證由 Form owner 處理。
+Reset Form 從 Open／Defaults 的固定 capture 讀 qubit ext 初值。Expr 與 Range 的求值及驗證由 Form owner 處理。
 SingleToneFreq、DualTonePower 與 BathPhase 各自擁有 finisher。它們直接 materialize 該 Run
 的完整 tested_reset，只換本次分析欄位，不重讀 ext 或方案 slot。三個 length adapter
 不擬合參數，返回空 proposal collection。框架與本 support package 不檢查 reset 校準是否齊全。

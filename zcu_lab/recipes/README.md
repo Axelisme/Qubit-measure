@@ -32,7 +32,7 @@ Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須�
 掃描端點、flux 範圍與裝置單位檢查直接寫在 recipe 主體，不另設選源 helper。
 數字回報使用 lib 的 `report_number`，不改單位或精度。
 `mux_helpers.py` 只共用 tone 範圍輸入與報告欄位，不組裝 Form edits。
-[`two_qubit_helpers.py`](two_qubit_helpers.py) 共用四角色 target、選定候選的寫回與收據處理，並說明如何轉交 owner 報告。Recipe 主體決定何時詢問寫回。
+[`two_qubit_helpers.py`](two_qubit_helpers.py) 提供 `TwoQubitTarget`，以 `qubit1`、`qubit2`、`coupler`、`mux` 綁定同一次 Open／Reset。省略或填 null 就保留目前的 alias。此模組也處理選定候選的寫回與收據；recipe 主體決定何時詢問寫回。
 [`two_qubit_rb_helpers.py`](two_qubit_rb_helpers.py) 共用兩個 paired RB recipe 的輸入與 CZ 誤差估計欄位。
 `ro_optimize_chain_helpers.py` 共用三個 readout-chain ro_optimize recipe 的報告欄位，並複製最佳 setting 的 score、QND、M 與模型近似誤差尺度。
 `mux_flux_helpers.py` 共用四個 flux recipe 的輸入、報告與逐 Q 分析 updates。
@@ -177,10 +177,10 @@ Runtime 回覆 `status="cancelled"`、`report=null` 與各次 `runs`。
 用 `recipe_guide(adapter="twotone/t1")` 依 adapter 名查 operator guide。
 Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 十二個 mux 的輸入、原始 tone 位置與報告見 [mux guide](mux-guide.md)。
-Two-qubit 的角色、herald reset、寫回與 RB 波形覆寫見 [two-qubit guide](two-qubit-guide.md)。
+Two-qubit 的位置綁定、舊 point 重綁、herald reset、寫回與 RB 波形覆寫見 [two-qubit guide](two-qubit-guide.md)。
 
 三個 thermal-chain ro_optimize recipe 以 K 等待熱平衡，再無 drive 連讀 16 次。
-`relax_delay` 設 K，單位 us。K 後熱態不同於 readout-driven steady state。
+`relax_delay` 設 K，單位 µs。K 後熱態不同於 readout-driven steady state。
 Score 是受限二態模型的資訊 proxy，乘上 M 相關增量懲罰。M 不等於可辨識的 leakage，純二態再布居也會受罰。
 只取 score 最大的 setting，同分保留 acquisition order，誤差不參與排名。
 最佳 setting 在邊界時，擴大該側範圍後重測。
@@ -200,9 +200,9 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | `stirap_delay` | `twotone/stirap/delay` | `start_us/stop_us/n` 掃描 Stokes lead，正值 Stokes 先、負值 Pump 先。兩條各自選 gauss、cosine、drag 或 arb 與各自時長。必填量得的 `pump_freq_mhz/stokes_freq_mhz` 與 signed gains。完整 Run、Analyze、Save，分析只用保存的 centroid3，不提出 writeback。 |
 | `stirap_detuning` | `twotone/stirap/detuning` | Pump 與 Stokes 各自選 gauss、cosine、drag 或 arb。`pump_start_mhz/pump_stop_mhz/pump_n` 掃內層 Pump，`stokes_start_mhz/stokes_stop_mhz/stokes_n` 掃外層 Stokes。兩軸都是加到量得載波的 MHz offset。`pump_waveform_ref/stokes_waveform_ref` 選 library key 或 `Inline: cosine` 等 Form 選項，overrides 設所選波形參數。完整 Run、Analyze、Save，不提出 writeback。 |
 | `raman_gf` | `twotone/raman_gf` | `carrier_mhz` 由操作者提供；drive 接受任何受支援波形，`waveform_asset` 可指定已建立的 arbitrary envelope（sqrt(sin) 形狀需 arb）。`scan_mode` 使用 frequency、gain、frequency_gain；detuning 使用 two-photon MHz，正值使單 carrier 增加一半 detuning，gain 直接使用 DAC full-scale fraction（a.u.）。分析只用 Run 保存的 centroid3 readout，完整 Run、Analyze、Save，不提出 writeback。 |
-| `ro_optimize_chain_power` | `twotone/ro_optimize/chain_power` | 可省略 `gain_start`／`gain_stop`（a.u.）、`points`、`relax_delay`（us）、`reps`、`rounds`。每 shot 等待 K 後連讀 16 次，無 drive。回報最佳 `gain`、`score`、`score_error`、`qnd`、`qnd_error`、`correlation`、`amplification`、`mist`（M 診斷）。完整 Run、Analyze、Save，不提出 writeback。 |
+| `ro_optimize_chain_power` | `twotone/ro_optimize/chain_power` | 可省略 `gain_start`／`gain_stop`（a.u.）、`points`、`relax_delay`（µs）、`reps`、`rounds`。每 shot 等待 K 後連讀 16 次，無 drive。回報最佳 `gain`、`score`、`score_error`、`qnd`、`qnd_error`、`correlation`、`amplification`、`mist`（M 診斷）。完整 Run、Analyze、Save，不提出 writeback。 |
 | `ro_optimize_chain_freq` | `twotone/ro_optimize/chain_freq` | 同上，掃描端點為 `freq_start_mhz`／`freq_stop_mhz`（MHz），回報 `freq_mhz`。 |
-| `ro_optimize_chain_length` | [`twotone/ro_optimize/chain_length`](../v2/twotone/ro_optimize/chain_length/guide.md) | 同上，`length_start_us`／`length_stop_us` 設 ADC window 掃描端點（us）。Run 用各 window 加表單的 `length_margin` 設 pulse 長度，回報 `length_us`。 |
+| `ro_optimize_chain_length` | [`twotone/ro_optimize/chain_length`](../v2/twotone/ro_optimize/chain_length/guide.md) | 同上，`length_start_us`／`length_stop_us` 設 ADC window 掃描端點（µs）。Run 用各 window 加表單的 `length_margin` 設 pulse 長度，回報 `length_us`。 |
 | `twotone_chain` | `twotone/chain` | 必填 drive 的 `center_mhz`、`span_mhz`、`points`。每點 48 次無 reset 的（驅動、讀出），`reps` 是每輪快掃次數。分析以 `twotone/freq` 的峰擬合擬合離背景的 sigma 曲線，`expected_center_mhz` 選峰。回報中心、近似寬度與 5% 誤報門檻，完整 Run、Analyze、Save，不提出 writeback。 |
 | `chain_amp_rabi` | `chain/amp_rabi` | 掃 drive gain，`gain_range`、`points`。每個 rep 是一個 cycle：K（`relax_delay`）後 (Rabi pulse, 讀, 讀) × 8，`reps` 是每輪每點 cycle 數。分析以 `twotone/rabi/amp_rabi` 擬合第一次讀出取起點，再聯合擬合 65 個數。回報 π gain、Rabi 頻率與 Wald 誤差、R、三項檢查，完整 Run、Analyze、Save，不提出 writeback。 |
 | `chain_len_rabi` | `chain/len_rabi` | 掃 const／flat_top drive 的長度，`max_length_us`、`points`。Cycle 與 `reps` 同上。起點取自 `twotone/rabi/len_rabi` 的第一讀擬合。回報 π 長度、Rabi 頻率（MHz）與 Wald 誤差、R、三項檢查，不提出 writeback。 |
@@ -212,8 +212,8 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | `chain_t2echo` | `chain/t2echo` | 掃總 echo 等待，`max_delay_us`（總長）、`points`。每個 block 是 (π/2, x/2, π, x/2, π/2, 讀, 讀)。起點取自 `twotone/t2echo` 的第一讀擬合。回報 T2 echo、第三態衰減時間與 Wald 誤差、三項檢查，不提出 writeback。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 | [`two_qubit_cz_amplitude`](two-qubit-guide.md#two_qubit_cz_amplitude) | `two_qubit/cz_amplitude` | `scale_range`、`scale_points` 掃兩路共同 gain 倍率。回報第一個 return scale 與擬合診斷。有候選才問 Primary 寫回；完成 Run 後保存。 |
-| [`two_qubit_local_z`](two-qubit-guide.md#two_qubit_local_z) | `two_qubit/local_z` | 掃 `gate_count`，分別回報 F1、F2 的相位擬合。兩條擬合都給出 correction 才詢問寫回校正對。 |
-| [`two_qubit_constructive_phase`](two-qubit-guide.md#two_qubit_constructive_phase) | `two_qubit/constructive_phase` | 掃 F2 相對相位和兩路共同脈衝長度。回報最大擬合速率的相位與干涉擬合診斷。有可辨識相位才詢問 F2 脈衝和 slot 寫回。 |
+| [`two_qubit_local_z`](two-qubit-guide.md#two_qubit_local_z) | `two_qubit/local_z` | 掃 `gate_count`，分別以 `qubit1`、`qubit2` 回報相位擬合。兩條擬合都給出 correction 才詢問寫回校正對。 |
+| [`two_qubit_constructive_phase`](two-qubit-guide.md#two_qubit_constructive_phase) | `two_qubit/constructive_phase` | 掃 Qubit2 相對相位和兩路共同脈衝長度。回報最大擬合速率的相位與干涉擬合診斷。有可辨識相位才詢問 Qubit2 脈衝和 slot 寫回。 |
 | [`two_qubit_conditional_phase`](two-qubit-guide.md#two_qubit_conditional_phase) | `two_qubit/conditional_phase` | 用 `ramsey_role` 選相位量測的 qubit，並設定 `gate_count`、`frequency_range` 與 `frequency_points`。回報唯一的 π 交點，或 null 與原因。有交點才問 Primary 頻率寫回；完成 Run 後保存。 |
 | [`two_qubit_conditional_phase_heralded`](two-qubit-guide.md#two_qubit_conditional_phase_heralded) | `two_qubit/conditional_phase_heralded` | 掃描輸入同上。每發先做 mux herald，用 joint gg/ee 斜率找唯一的 π 交點；沒有交點不問寫回。完成 Run 後保存。 |
 | [`two_qubit_rb`](two-qubit-guide.md#two_qubit_rb) | `two_qubit/rb` | `depths` 和 `seeds` 設定成對序列。回報 CZ 誤差、信賴區間和兩臂擬合診斷。保存，不詢問寫回。 |

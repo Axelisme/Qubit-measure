@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, TypeAlias
 
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -15,10 +16,13 @@ from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import (
     FitQuality,
     IRBAnalysis,
+    IRBFitResult,
     analyze_irb,
+    expfunc,
     seed_standard_deviation,
 )
 from zcu_tools.analysis.fitting.shared import SharedFitResult
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     Experiment,
@@ -43,8 +47,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.support import live_errorbar
-
 from .._rb_scheduling import compile_depth_sweep, emit_depth_sweep
 from .._rb_sequence import RBArm, make_rb_arms
 from .._sums import joint_probabilities
@@ -53,7 +55,7 @@ from ._config import RBInputs
 
 @dataclass(frozen=True)
 class RBResult:
-    """Float64 class counts with axes (seed, arm, depth, F1, F2).
+    """Float64 class counts with axes (seed, arm, depth, Qubit1, Qubit2).
 
     depths counts random Cliffords; seeds retains exact random.Random identities.
     The fixed arm axis [0,1] means reference/CZ-interleaved. sums ends in (3,3),
@@ -218,7 +220,7 @@ def validate_axes(
 
 
 def restore_result(data: GroupedLoadData[RBCfg]) -> RBResult:
-    """Restore counts on (seed, arm, depth, F1, F2) from saved arrays.
+    """Restore counts on (seed, arm, depth, Qubit1, Qubit2) from saved arrays.
 
     data supplies the grouped sums variable and its persisted scan axes. Return
     this experiment's Result with float64 class counts and its original axis
@@ -252,13 +254,81 @@ def build_program(config: RBCfg, soccfg: QickConfig, arm: RBArm) -> TimelineProg
     emit_depth_sweep(
         builder,
         arm,
-        x90=(config.x90_f1, config.x90_f2),
-        x180=(config.x180_f1, config.x180_f2),
+        x90=(config.x90_qubit1, config.x90_qubit2),
+        x180=(config.x180_qubit1, config.x180_qubit2),
         drive=config.drive,
         phase_pair=config.phase_pair,
     )
     builder.emit(readout, tag="terminal")
     return compile_depth_sweep(builder, arm)
+
+
+def _draw_pooled_survival(
+    ax: Axes, depths: NDArray[np.int64], sums: NDArray[np.float64]
+) -> None:
+    """Draw kept-shot P(g,g), shot SEM and seed spread for each arm and depth."""
+    counts = np.nansum(sums, axis=0)
+    successes = counts[..., 0, 0]
+    binary = np.stack((successes, counts.sum(axis=(-2, -1)) - successes), axis=-1)
+    sem = np.sqrt(class_probability_covariance(binary)[..., 0, 0])
+    survival = joint_probabilities(counts)[..., 0, 0]
+    seed_std = seed_standard_deviation(joint_probabilities(sums)[..., 0, 0])
+    for arm, label in enumerate(("Reference", "CZ interleaved")):
+        color = f"C{arm}"
+        ax.errorbar(
+            depths,
+            survival[arm],
+            seed_std[arm],
+            fmt="none",
+            color=color,
+            alpha=0.3,
+            lw=3,
+        )
+        ax.errorbar(
+            depths,
+            survival[arm],
+            sem[arm],
+            fmt=".",
+            color=color,
+            capsize=3,
+            label=label,
+        )
+    ax.set(xlabel="Random Clifford depth (count)", ylabel="P(terminal g,g)")
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1), ncols=2)
+
+
+def _draw_seed_fit(
+    ax: Axes,
+    depths: NDArray[np.int64],
+    means: NDArray[np.float64],
+    seed_std: NDArray[np.float64],
+    fit: IRBFitResult | None,
+) -> None:
+    """Compare the complete-pair mean and seed SD against each fitted decay."""
+    xs = np.linspace(depths.min(), depths.max(), 201)
+    for arm, label in enumerate(("Reference", "CZ interleaved")):
+        color = f"C{arm}"
+        ax.errorbar(
+            depths,
+            means[arm],
+            seed_std[arm],
+            fmt=".",
+            color=color,
+            capsize=3,
+            label=f"{label} data",
+        )
+        if fit is not None:
+            sign = 1.0 if np.sum(fit.mean_signals * means) >= 0 else -1.0
+            ax.plot(
+                xs,
+                sign * expfunc(xs, *fit.arm_fits[arm].params),
+                color=color,
+                label=f"{label} fit",
+            )
+    ax.set(xlabel="Random Clifford depth (count)", ylabel="P(terminal g,g)")
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1), ncols=2)
 
 
 class RBExp(Experiment[RBResult, RBCfg]):
@@ -269,8 +339,8 @@ class RBExp(Experiment[RBResult, RBCfg]):
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit1", unit=""),
                     VariableAxisSpec(
                         label="Clifford depth",
                         unit="",
@@ -294,7 +364,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         ),
         result_type=RBResult,
         cfg_type=RBCfg,
-        cfg_schema_version="6.0",
+        cfg_schema_version="7.0",
         tag="two_qubit/rb",
         result_builder=restore_result,
     )
@@ -307,26 +377,28 @@ class RBExp(Experiment[RBResult, RBCfg]):
         Compile one board program per seed and arm before acquiring. Each
         program acquires reps shots per depth for each acquisition round and the
         reducer adds finished rounds. A mux herald reset excludes rejected shots.
-        Return counts on (seed, arm, depth, F1, F2), NaN in unacquired cells.
+        Return counts on (seed, arm, depth, Qubit1, Qubit2), NaN in unacquired cells.
         """
         # 1. Compare reference and CZ-interleaved joint00 survival across Clifford depth.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(
-            xlabel="Random Clifford depth", ylabel="Joint (g,g) survival probability"
-        )
-        viewer = live_errorbar(ax, num_lines=2)
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        fig, ax = context.plots.subplots(num="measurement", layout="constrained")
+        depths = np.array(config.depth, dtype=np.int64)
+        fig.suptitle("Two-qubit RB · Qubit1/Qubit2 · Joint ground return")
         fig.show()
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]):
-            totals = np.nansum(sums, axis=0)  # Pool seeds for the markers.
-            survival = joint_probabilities(sums)[..., 0, 0]
-            return viewer.set(
-                np.array(config.depth),
-                joint_probabilities(totals)[..., 0, 0],
-                seed_standard_deviation(survival),
+            for bars in tuple(ax.containers):
+                bars.remove()
+            ax.relim()
+            _draw_pooled_survival(ax, depths, sums)
+            cells = np.isfinite(sums[..., 0, 0])
+            fig.supxlabel(
+                f"Measured seed/arm/depth cells: {cells.sum()}/{cells.size} count\n"
+                f"Total retained shots: {np.nansum(sums):,.0f} count\n"
+                "Capped: shot SEM · Pale: seed SD",
+                fontsize=10,
             )
+            return (fig,)
 
         # 2. Compile all arms before acquiring any shots.
         programs = [
@@ -349,8 +421,8 @@ class RBExp(Experiment[RBResult, RBCfg]):
                     reducer = shot_sums(
                         program,
                         [
-                            Classify("terminal", config.roles.f1_tone),
-                            Classify("terminal", config.roles.f2_tone),
+                            Classify("terminal", config.qubit1_tone),
+                            Classify("terminal", config.qubit2_tone),
                         ],
                     )
                     arm_step.run_acquire_summed(
@@ -390,8 +462,8 @@ class RBExp(Experiment[RBResult, RBCfg]):
             validate_counts(data.sums, (-2, -1))
         survival = joint_probabilities(data.sums)[..., 0, 0]
         means = np.full((2, len(data.depths)), np.nan)
-        curves = means.copy()
         seed_std = means.copy()
+        fit = None
         estimate = None
         quality = None
         reason = None
@@ -417,47 +489,45 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 seed_std = fit.seed_std
                 estimate = estimate_d4(fit.summary)
                 quality = (fit.arm_fits[0].quality, fit.arm_fits[1].quality)
-                # Restore probability coordinates, not the decay ratio.
-                sign = 1.0 if np.sum(fit.mean_signals * means) >= 0 else -1.0
-                curves = sign * fit.fit_signals
-        # 3. Compare paired reference/interleaved mean survival and fitted probability curves with failure reasons.
-        # Show pooled counts as in the live plot before the equal-seed fit.
-        pooled = joint_probabilities(np.nansum(data.sums, axis=0))
-        pooled_std = seed_standard_deviation(survival)
-        _, ax = plots.subplots(num="pooled_survival", layout="constrained")
-        for arm, label in enumerate(("Reference", "CZ interleaved")):
-            ax.errorbar(
-                data.depths,
-                pooled[arm, :, 0, 0],
-                yerr=pooled_std[arm],
-                fmt=".",
-                label=label,
-            )
-        ax.set(
-            xlabel="Random Clifford depth", ylabel="Joint (g,g) survival probability"
-        )
-        ax.legend()
+        # 3. Show the live pooled view first, then the complete-pair fit.
+        fig, ax = plots.subplots(num="pooled_survival", layout="constrained")
+        _draw_pooled_survival(ax, data.depths, data.sums)
+        fig.suptitle("Two-qubit RB · Qubit1/Qubit2 · Joint ground return")
+        fig.supxlabel("Pooled counts · Capped: shot SEM · Pale: seed SD", fontsize=10)
 
-        fig, ax = plots.subplots(num="fit", figsize=(9, 6))
-        for arm, label in enumerate(("Reference", "CZ interleaved")):
-            (line,) = ax.plot(data.depths, means[arm], ".", label=label)
-            ax.errorbar(
-                data.depths,
-                means[arm],
-                yerr=seed_std[arm],
-                fmt="none",
-                ecolor=line.get_color(),
+        fig, ax = plots.subplots(num="fit", figsize=(7, 5), layout="constrained")
+        _draw_seed_fit(ax, data.depths, means, seed_std, fit)
+        fig.suptitle("Two-qubit RB · Qubit1/Qubit2 · Paired decay fit")
+        report = ["Equal-seed means · Bars: seed SD"]
+        if estimate is not None and fit is not None:
+            report.append(
+                f"CZ error estimate = {estimate.gate_error:.3g}; 95% seed CI "
+                f"[{estimate.error_ci_low:.3g}, {estimate.error_ci_high:.3g}]"
             )
-            if estimate is not None:
-                ax.plot(data.depths, curves[arm], color=line.get_color())
-        ax.set(
-            xlabel="Random Clifford depth", ylabel="Joint (g,g) survival probability"
-        )
-        ax.legend()
-        if reason is not None:
-            ax.set_title(f"No RB estimate: {reason}")
-        else:
-            ax.set_title("d=4 paired RB; classified ensemble, statistical seed CI only")
-        fig.tight_layout()
+            for label, arm in zip(
+                ("Reference", "CZ interleaved"), fit.arm_fits, strict=True
+            ):
+                quality_item = arm.quality
+                r2 = (
+                    "unavailable"
+                    if quality_item.r2 is None
+                    else f"{quality_item.r2:.3g}"
+                )
+                rms = quality_item.normalized_residual_rms
+                rms_label = "unavailable" if rms is None else f"{rms:.3g}"
+                report.append(
+                    f"{label}: 1/e depth = {arm.decay_time:.3g} ± {arm.decay_time_err:.2g} count; "
+                    f"R² {r2}; normalized RMS {rms_label}"
+                )
+                # Keep the owner's bound and value; the heading translates its conclusion.
+                report.extend(
+                    f"{label}: decay unresolved in depth window (count)\n"
+                    + issue.reason.removesuffix(": 窗口內無法解析衰減時間")
+                    for issue in quality_item.invalid
+                    if issue.path == "decay_time"
+                )
+        elif reason is not None:
+            report.append(f"No RB estimate: {reason}")
+        fig.supxlabel("\n".join(report), fontsize=10)
         # 4. Keep the d=4 estimate and statistical seed uncertainty, or a failure without a calibration proposal.
         return RBAnalysis(estimate, quality, reason)

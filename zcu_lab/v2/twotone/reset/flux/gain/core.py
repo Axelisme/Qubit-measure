@@ -75,17 +75,25 @@ class GainCfg(ConfigBase):
 
     reps: Annotated[
         int,
-        FieldMeta(label="Reps", description="Repetitions per branch/gain per round."),
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Repetitions per branch/gain per round.",
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -242,7 +250,7 @@ class GainExp(Experiment[GainResult, GainCfg]):
         axes[3].plot(gains, residual, ".-", label="p0≈0 estimate (unclipped)")
         axes[0].set_ylabel("I (a.u.)")
         axes[1].set_ylabel("Q (a.u.)")
-        axes[2].set_ylabel("Contrast ratio r")
+        axes[2].set_ylabel("Contrast ratio r (a.u.)")
         axes[3].set_ylabel("Residual estimate")
         axes[3].set_xlabel("Flux reset gain (a.u.)")
         axes[0].legend(fontsize=8)

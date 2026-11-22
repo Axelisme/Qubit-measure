@@ -253,15 +253,22 @@ class MuxT1Cfg(ConfigBase):
     readout: MuxReadoutCfg
     tones: Annotated[list[MuxT1ToneCfg], FieldMeta(element_label="name")]
     participants: list[StrictInt]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
     sampling: Literal["linear", "decay"] = "linear"
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ] = Field(gt=0)
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = Field(default=1, gt=0)
     earlystop_snr: Annotated[
         float | None,
@@ -274,7 +281,7 @@ class MuxT1Cfg(ConfigBase):
         float,
         FieldMeta(
             label="Initial delay",
-            unit="us",
+            unit="µs",
             description="Delay before the first repetition.",
         ),
     ] = Field(default=1.0, ge=0, allow_inf_nan=False)
@@ -282,7 +289,7 @@ class MuxT1Cfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -294,7 +301,7 @@ class MuxT1Cfg(ConfigBase):
         validate_mux_tones(self, self.tones, self.participants)
         times = sweep2array(self.delay, "none")
         if np.any(times < 0) or np.any(np.diff(times) <= 0):
-            raise ValueError("delays must be nonnegative increasing us")
+            raise ValueError("delays must be nonnegative increasing µs")
         return self
 
 
@@ -353,7 +360,7 @@ def fit_and_plot_t1(
         xs = times[options.skip :][finite]
         signal = signal[finite]
         fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
-        ax.set(xlabel="Delay (us)", ylabel="Signal (a.u.)")
+        ax.set(xlabel="Delay (µs)", ylabel="Signal (a.u.)")
         fig.suptitle(f"tone {index}")
         try:
             minimum = 6 if options.dual_exp else 4
@@ -405,9 +412,9 @@ def fit_and_plot_t1(
         else:
             outcomes.append(outcome)
             ax.plot(xs, real, "o", label="measured")
-            ax.plot(xs, fitted, label=f"T1={t1:.4g} ± {err:.2g} us")
+            ax.plot(xs, fitted, label=f"T1={t1:.4g} ± {err:.2g} µs")
             if options.dual_exp:
-                ax.set_title(f"Second decay: {t1b:.4g} ± {errb:.2g} us")
+                ax.set_title(f"Second decay: {t1b:.4g} ± {errb:.2g} µs")
         ax.legend()
         ax.grid(True)
         fig.tight_layout()
@@ -472,7 +479,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         for i in indices:
             fig, ax = context.plots.subplots(num=f"measurement_{i}")
             ax.set(
-                xlabel="Delay (us)",
+                xlabel="Delay (µs)",
                 ylabel="Magnitude (a.u.)",
                 title=f"{i}: {cfg.tones[i].name}",
             )
@@ -542,7 +549,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         for i in indices:
             fig, ax = context.plots.subplots(num=f"measurement_{i}")
             ax.set(
-                xlabel="Delay (us)",
+                xlabel="Delay (µs)",
                 ylabel="Magnitude (a.u.)",
                 title=f"{i}: {cfg.tones[i].name}",
             )

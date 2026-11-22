@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-21 (experiment Run core-time coverage)
+**Last updated:** 2026-11-22 (experiment Run fixture sources)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -156,7 +156,13 @@ write_snapshot(
 
 `tools.experiment_wall_time` 預設為 lab assembly 註冊的每個 adapter 產生一列。`--select` 接受完整的 adapter key 或第一段家族名。例如 `--select onetone/freq` 選一個實驗，`--select mux` 選整個家族。可以重複指定，重疊的實驗只跑一次。省略 `--output` 時，工具在 `.agent_state/benchmark/wall-time/` 下建立有時間戳的新目錄。量測時，指定的目錄必須尚未存在。
 
-使用有 Qt 與 QICK 的 worktree 環境。工具用 `Controller(view=None)` 和 Qt 事件迴圈，不開視窗、遠端服務或硬體連線。工具只讀[自持的 FTF 設定、board profile 和校準 point](data/experiment_wall_time/)。FTF 的 `time_scale` 是 0，初始虛擬電流是 fixture 的校準工作點。每個案例有獨立的模擬環境和 project 副本。工具用 Open 建立表單，接著透過表單介面套用[覆寫表](data/experiment_wall_time/overrides.json)中該 adapter 的欄位。每筆覆寫記 adapter key、表單 cfg 路徑與 JSON 值。`basis` 記供人閱讀的覆寫依據，不影響執行。路徑使用欄位名及從 0 開始的清單索引，例如 `['delay', 'n']` 是線性掃描的點數。
+使用有 Qt 與 QICK 的 worktree 環境。工具用 `Controller(view=None)` 和 Qt 事件迴圈，不開視窗、遠端服務或硬體連線。工具只讀[自持的 FTF 設定、board profile 和校準 point](data/experiment_wall_time/)。FTF 的 `time_scale` 是 0，初始虛擬電流是 fixture 的校準工作點。每個執行案例有獨立的模擬環境和 project 副本。
+
+工具選用 `ftf-demo/initial` 並以 Open 建立表單。Open 固定表單的來源 capture，見 [Measure services 的開表 owner](../lib/zcu_tools/gui/app/measure/services/README.md#操作-owners)。Open 成功後，工具才透過 `form.write` 套用[覆寫表](data/experiment_wall_time/overrides.json)中該 adapter 的欄位；覆寫只改表單值，不會補回 Open 時缺少的來源。每筆覆寫記 adapter key、表單 cfg 路徑與 JSON 值。`basis` 記供人閱讀的覆寫依據，不影響執行。路徑使用欄位名及從 0 開始的清單索引，例如 `['delay', 'n']` 是線性掃描的點數。表單通過檢查才派送 Run；Run 的 admission、輸入快照與終態見 [ADR-0066〈問題與決策〉](../docs/adr/0066-operation-lifecycle.md#問題與決策)。
+
+查 CZ pulse、slot 與相位配對的來源，從 [Joint readout 到 local Z 的校準路線](../zcu_lab/v2/two_qubit/guide.md#joint-readout-到-local-z-的校準路線)看校準順序。`ftf-demo/initial` 存有 CZ pulse 與 slot，但沒有 `$coupler.ext.cz_phase`。量到 local-Z correction 不等於把配對寫入來源；配對的身分檢查和寫回見 [Local Z〈Preview 與 Apply〉](../zcu_lab/v2/two_qubit/local_z/guide.md#preview-與-apply)。
+
+查序列內的脈衝磁通線設定，見 [FTF `flux_lines` 欄位與限制](../zcu_lab/simulation_envs/FTF/field-guide.md#flux-lines序列內磁通校準與濾波)。查 point 裡的 DC 磁通校準，見 [ADR-0082〈Component 保存 offset 與 signed periods〉](../docs/adr/0082-component-flux-frame.md#component-保存-offset-與-signed-periods)。
 
 正式批次在該 worktree 用 `tools/run_heavy.py --exclusive`。先設定 `output` 為新的絕對路徑、`budget_s` 為整批 payload 的秒數預算：
 
@@ -178,7 +184,7 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
   python -m tools.experiment_wall_time --select onetone/freq --output "$output" > "$output.receipt.json"
 ```
 
-`batch.json` 記錄本批選中的 adapter、Git HEAD、每份輸入的 SHA-256 和 guide 盤點。從乾淨 checkout 執行，才能用 commit 找回執行時的程式。每列在送出 Run 前先寫 `start.json`，記 UTC 時刻與 monotonic 秒數。Run 到終態後，工具在清理該列資源前寫 `row.json`。`report.json` 和 `summary.md` 從這些落盤紀錄組成，列出已記錄結果的列數、本批涵蓋列數及全 inventory 列數。
+`batch.json` 記錄本批選中的 adapter、Git HEAD、每份輸入的 SHA-256 和 guide 盤點。從乾淨 checkout 執行，才能用 commit 找回執行時的程式。每列在送出 Run 前先寫 `start.json`，記 UTC 時刻與 monotonic 秒數。Run 在期限內到終態時，工具在清理該列資源前寫 `row.json`。逾時則先寫 `row.json`，再等 Run 終態與 Controller idle。`report.json` 和 `summary.md` 從這些落盤紀錄組成，列出已記錄結果的列數、本批涵蓋列數及全 inventory 列數。
 
 工具在送出 Run 及收到 Controller 終態事件時各取一次時間。`wall_s` 是兩次 monotonic clock 的差，UTC 時刻供閱讀。環境組裝、Open、覆寫及派送前落盤都不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留 fixture 副本與 acquired ledger，不寫回入庫輸入。
 
@@ -190,11 +196,15 @@ Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆�
 
 摘要的 Core 欄在不完整列顯示 `≥` 加下限，沒有下限則顯示「—」。3 分鐘判定使用未四捨五入的秒數。完整核心嚴格大於 180 秒才列入 `Core >180 s`。下限嚴格大於 180 秒列入 `Core 已知至少超標`，其餘沒有完整核心的列列入 `Core 未判定`。Run 秒數和期限都不參與核心判定。
 
-`--row-timeout SECONDS` 從送出 Run 起算，預設 360 秒。只接受有限且介於 180 到 2,147,483.647 秒的值，兩端都可用。到期時先把所有 Python 執行緒的 stack 寫到該列的 `timeout-stack.txt`，再請 Controller 取消。`timeout` 的精確 `wall_s` 是 `null`，`wall_s_lower_bound` 表示 Run 大於期限。能加總的 acquire 分項標「部分」，沒有可用分項時標「分項缺」。取消後 30 秒內，工具觀察到 Run 終態且 Controller idle 才繼續。否則停止派送，保留報表，將尚未開始的列記為 `not_run`。
+`--row-timeout SECONDS` 從送出 Run 起算，預設 360 秒。只接受有限且介於 180 到 2,147,483.647 秒的值，兩端都可用。到期時先把所有 Python 執行緒的 stack 寫到該列的 `timeout-stack.txt`，再請 Controller 取消。`timeout` 的精確 `wall_s` 是 `null`，`wall_s_lower_bound` 表示 Run 大於期限。能加總的 acquire 分項標「部分」，沒有可用分項時標「分項缺」。請求取消後，工具先依當下的 telemetry 寫 `row.json`。取消寬限的 30 秒內，工具若觀察到 Run 終態且 Controller idle，就重新讀取 telemetry、更新逾時列，再繼續派送。寬限內未觀察到兩者時，工具保留先寫的列並停止派送，報表將尚未開始的列記為 `not_run`。
 
 Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`，再落盤 `run_failed` 列。該列記 Run 起點、收到失敗事件的時刻，以及 Controller 提供的錯誤類型與訊息。`failure_record` 是相對於該列 `case_directory` 的診斷檔路徑。失敗列不填 Run 或核心秒數。工具寫完該列才檢查 Controller 是否 idle；若仍有活動中的操作，就停止派送。摘要分別計數成功計時、`timeout` 與 `run_failed`。`Run failures` 按完全相同的 Controller 診斷分組，每組列出 adapter key 與診斷檔路徑。工具不推斷根因。
 
-Open 加上覆寫後仍缺欄位或 slot 時，`missing_defaults` 列出表單的錯誤，不送出 Run。[案例宣告](data/experiment_wall_time/case-inputs.json)列出這個 FTF 環境無法執行的 adapter；這些 `not_runnable` 列只寫原因，不複製 project 或啟動 Run。工具例外、未知 Run outcome、環境組裝、journal 錯誤與 telemetry 格式錯誤會中止指令，不轉成案例狀態。重建與續跑都拒絕 adapter key 不符的結果列，以及沒有有效 Run 秒數的 `ok` 或 `missing_breakdown` 列。
+若 Open 成功，但表單仍有錯誤（例如覆寫後還缺欄位或 slot），`missing_defaults` 列出錯誤，不送出 Run。報表中的「FTF 不能跑」是 `not_runnable`，只適用於[固定案例宣告](data/experiment_wall_time/case-inputs.json)明列排除的 adapter。工具寫下該列的原因，不複製 project，也不派送 Open 或 Run。缺初值不一定是排除，請看各列的原因。
+
+固定案例列出兩類排除：六個 JPA 入口沒有模型或裝置；`two_qubit/rb`、`two_qubit/rb_heralded`、`two_qubit/cz_optimize` 在 `ftf-demo/initial` 缺 Open 所需的 Q1／Q2 有序 Local Z 配對 `$coupler.ext.cz_phase`。後三列需上游校準，未計時，不表示 FTF 不支援這些實驗。
+
+工具例外、未知 Run outcome、環境組裝、journal 錯誤與 telemetry 格式錯誤會中止指令，不轉成案例狀態。重建與續跑都拒絕 adapter key 不符的結果列，以及沒有有效 Run 秒數的 `ok` 或 `missing_breakdown` 列。
 
 批次中斷時，有 `start.json` 但沒有 `row.json` 的列記為 `incomplete`。這種列的 `started_at` 是派送前記下的時刻，不代表 Run 已送出。兩份紀錄都沒有的列記為 `not_run`。兩種列的 Run 秒數和下限都寫 `null`，摘要的 Run 欄顯示「—」。全表需要每個註冊的 adapter 都有成功計時、`timeout`、`run_failed`、`missing_defaults` 或 `not_runnable` 的結果。`incomplete` 和 `not_run` 不算已記錄結果。
 

@@ -58,7 +58,7 @@ GUI startup policy. Eight CPUs select seven workers. Direct factory calls keep
 A new entry contains Q1 as `qubit/fluxonium`, R1 as `resonator`, and `flux_bias`
 as `device/current_source`. Q1 uses generators 1 and 2. R1 uses generator 0 and
 ADC 0. Aliases are `qubit: Q1` and `resonator: $qubit.resonator`.
-Flux forms read `$qubit.flux_dev` on Open/Reset without a device alias.
+Flux forms read `$qubit.flux_dev` on Open/Defaults without a device alias.
 The template seeds simulated-truth from `default.yaml`: Q1 has
 `flux: {offset: 0.5, period: {flux_bias: 0.01}}`, with offset in Phi0 and period
 in A/Phi0. The component template uses `schema_version: 3`.

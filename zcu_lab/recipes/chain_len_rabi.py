@@ -45,7 +45,7 @@ class ChainLenRabiInputs(RecipeInputs):
     )
     max_length_us: float | None | Keep = Field(
         KEEP,
-        description="Pulse-length sweep stop in us.",
+        description="Pulse-length sweep stop in µs.",
     )
     points: int | None | Keep = Field(
         KEEP,
@@ -65,10 +65,10 @@ class ChainLenRabiReport(RecipeReport):
     """Chain Rabi fit and its checks; cancellation returns no report."""
 
     pi_length_us: float | None = Field(
-        description="Pi length from the chain fit in us; null means not estimable."
+        description="Pi length from the chain fit in µs; null means not estimable."
     )
     pi_length_err_us: float | None = Field(
-        description="Pi length uncertainty in us; null means not estimable."
+        description="Pi length uncertainty in µs; null means not estimable."
     )
     rabi_frequency_mhz: float | None = Field(
         description="Rabi frequency in MHz; null means not estimable."
@@ -89,7 +89,7 @@ class ChainLenRabiReport(RecipeReport):
         description="Curve check J, df, p; null without analysis."
     )
     first_read_pi_length_us: float | None = Field(
-        description="Pi length in us of the first-read twotone fit; null means not estimable."
+        description="Pi length in µs of the first-read twotone fit; null means not estimable."
     )
 
 

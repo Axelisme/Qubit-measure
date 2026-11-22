@@ -40,7 +40,7 @@ class T1Inputs(RecipeInputs):
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in us.",
+        description="Delay sweep stop in µs.",
     )
     points: int | None | Keep = Field(
         KEEP,
@@ -69,16 +69,16 @@ class T1Report(RecipeReport):
     """T1 results and failure reason; cancellation returns no report."""
 
     t1_us: float | None = Field(
-        description="Relaxation time in us; null means not estimable."
+        description="Relaxation time in µs; null means not estimable."
     )
     t1_err_us: float | None = Field(
-        description="Relaxation uncertainty in us; null means not estimable."
+        description="Relaxation uncertainty in µs; null means not estimable."
     )
     t1b_us: float | None = Field(
-        description="Second relaxation time in us; null without a second fit or when not estimable."
+        description="Second relaxation time in µs; null without a second fit or when not estimable."
     )
     t1b_err_us: float | None = Field(
-        description="Second relaxation uncertainty in us; null without a second fit or when not estimable."
+        description="Second relaxation uncertainty in µs; null without a second fit or when not estimable."
     )
 
 

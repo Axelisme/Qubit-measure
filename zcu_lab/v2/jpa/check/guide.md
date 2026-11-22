@@ -4,11 +4,11 @@
 
 ## Parameter sources
 
-Uses the resonator alias for `$resonator.freq`, `$resonator.kappa` and resonator wiring, and the jpa (`amplifier/jpa`) alias for `$jpa.rf_source`. The qubit alias supplies an optional reset module. Opening or resetting the form reads the RF default from `$jpa.rf_source`; a missing source leaves the field empty and Invalid. The direct device name remains editable. Select the connected JPA RF device in the form. The check uses the existing pump-frequency, pump-power and flux settings on the hardware. Missing required resonator calibration marks the form Invalid.
+Uses the resonator alias for `$resonator.freq`, `$resonator.kappa` and resonator wiring, and the jpa (`amplifier/jpa`) alias for `$jpa.rf_source`. The qubit alias supplies an optional reset module. Opening the tab or choosing Defaults reads the RF default from `$jpa.rf_source`; a missing source leaves the field empty and Invalid. The direct device name remains editable. Select the connected JPA RF device in the form. The check uses the existing pump-frequency, pump-power and flux settings on the hardware. Missing required resonator calibration marks the form Invalid.
 
 ## Module slots
 
-Readout starts from the readout template. Its pulse uses `$resonator.freq` and `$resonator.wiring.ch`; acquisition uses `$resonator.freq`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 us. The sweep sets both frequencies during the run. You can also select a saved readout module. Optional reset uses `$qubit.module.reset`; an empty slot disables reset.
+Readout starts from the readout template. Its pulse uses `$resonator.freq` and `$resonator.wiring.ch`; acquisition uses `$resonator.freq`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs. The sweep sets both frequencies during the run. You can also select a saved readout module. Optional reset uses `$qubit.module.reset`; an empty slot disables reset.
 
 ## Typical writeback
 

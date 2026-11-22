@@ -10,7 +10,7 @@ from zcu_lab.v2.twotone.ro_optimize._chain_common import ChainAnalysis
 class ChainSweepReport(RecipeReport):
     """Best-setting diagnostics; each recipe adds the swept setting and unit.
 
-    All fields are dimensionless and stay null when analysis gives no result.
+    The named metrics stay null when analysis gives no result.
     Errors are model-conditional approximate scales, not general one-sigma errors.
     """
 
@@ -45,7 +45,7 @@ class ChainSweepReport(RecipeReport):
 
 
 class ChainReportFields(TypedDict):
-    """Dimensionless report values copied from the best SettingScore."""
+    """Report the named diagnostics from the best SettingScore."""
 
     score: float | None
     score_error: float | None

@@ -89,21 +89,29 @@ class LengthCfg(ConfigBase):
         ),
     ]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="µs")]
 
     reps: Annotated[
         int,
-        FieldMeta(label="Reps", description="Repetitions per branch/length per round."),
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Repetitions per branch/length per round.",
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -156,7 +164,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         signals_buffer = reset_scan_buffer(
             context.plots,
             lengths,
-            xlabel="Flux reset length (us)",
+            xlabel="Flux reset length (µs)",
             branch_shape=(2, 2),
             signal2real=lambda data: data.real.reshape(4, -1),
         )
@@ -272,15 +280,15 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         )
         axes[0].set_ylabel("I (a.u.)")
         axes[1].set_ylabel("Q (a.u.)")
-        axes[2].set_ylabel("Contrast ratio r")
+        axes[2].set_ylabel("Contrast ratio r (a.u.)")
         axes[3].set_ylabel("Residual estimate")
-        axes[3].set_xlabel("Flux reset length (us)")
+        axes[3].set_xlabel("Flux reset length (µs)")
         axes[0].legend(fontsize=8)
         axes[3].legend(fontsize=8)
         axes[0].set_title(
             "No qualifying finite length; no writeback"
             if selected is None
-            else f"Selected length = {selected:.6g} us | p0≈0; not reset fidelity",
+            else f"Selected length = {selected:.6g} µs | p0≈0; not reset fidelity",
             fontsize=10,
         )
         for ax in axes:
