@@ -643,6 +643,8 @@ same state without redistributing or renormalizing it. Even an all-identity
 layer keeps all probability. Floor zero solves every state, including zero-weight
 states, and removes the identity approximation within this vacuum-reset model.
 
+In the Markov model, six same-seed comparisons of the template floor against floor zero, including the original first point of chain amp_rabi, found maximum differences of 6.921e-6 in the full final density and 6.964e-6 in per-readout populations (commit cc6b252c0). This checks the floor within the model, not accuracy against an independent reference.
+
 `simulate.adc` solves the linear, state-conditioned cavity fields. The incident
 amplitude uses the same `input_per_gain` conversion as terminal readout.
 For state s and resonator r, the photon number is `n[s,r] = |alpha[s,r]|²`.
