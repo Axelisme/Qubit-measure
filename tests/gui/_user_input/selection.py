@@ -38,7 +38,13 @@ def unique[T](query: str, candidates: list[T], descriptions: list[str]) -> T:
 
 def on_screen(widget: QWidget) -> bool:
     """Check Qt visibility and a nonempty visible region, not OS-level occlusion."""
-    return widget.isVisible() and not widget.visibleRegion().isEmpty()
+    # SIP can return a cached QWidget wrapper for a native non-widget QObject.
+    # Check the QObject's native type before calling any QWidget method.
+    return (
+        widget.isWidgetType()
+        and widget.isVisible()
+        and not widget.visibleRegion().isEmpty()
+    )
 
 
 def can_interact(widget: QWidget) -> bool:

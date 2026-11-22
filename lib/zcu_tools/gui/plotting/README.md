@@ -1,6 +1,6 @@
 # GUI plotting
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-23
 
 **讀者：** framework-dev。Matplotlib／Qt 圖形呈現、更新與釋放契約。
 
@@ -30,9 +30,11 @@ FigureContainer 包裝 QStackedWidget 與 placeholder，並擁有容器 membersh
 Qt wrapper 存活狀態的唯讀查詢。host.py 透過容器介面維護 weak-key
 Figure-to-container registry，不讀取容器內部 layout，並透過 GUI-thread QObject
 處理 explicit attach 與 canvas removal。容器可以同時保留多張圖，重新 attach 會選取對應 canvas。
+容器可指定新的 Figure 要用的 Qt canvas 型別。Figure 移到另一容器時，host 重用相容的 canvas；
+若型別不相容，host 在 Qt 執行緒釋放退役的 canvas。Host 不決定 app 幾何。
 容器 clear 清掉動態 canvas 與 registry entry，不清空原生 Figure。
 
-`figure_export.render_figure_png` 提供固定 geometry 的原生 Figure PNG。Measure agent screenshots 使用這個 shared rendering owner，save／preview 政策仍屬於 app。Caller 持有 exclusive rendering slot；成功與失敗都恢復原尺寸，不轉移 canvas ownership，也不註冊 pyplot Figure。
+`figure_export.render_figure_png` 提供固定 geometry 的原生 Figure PNG。Measure agent screenshots 使用這個 shared rendering owner，save／preview 政策仍屬於 app。Caller 持有 exclusive rendering slot；成功與失敗都恢復原尺寸，不轉移 canvas ownership，也不註冊 pyplot Figure。Caller 可傳入英寸座標的 `bbox_inches` 覆蓋預設裁框。
 
 ## Thread 與 rendering 邊界
 

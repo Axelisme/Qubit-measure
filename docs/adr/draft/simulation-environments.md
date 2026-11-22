@@ -36,13 +36,13 @@ Python 組合物理模型、模擬資源、接線與 backend，不同拓樸不�
 
 YAML 不是通用 environment DSL。Launcher／runtime 不辨識 FTF 欄位，不建立 registry、設定繼承、plugin 自動探索或 hot reload。環境檔是可信 Python，不提供 sandbox。
 
-2026-10-14，使用者比較傳入 controller 與回傳環境兩種方案，裁決：「考慮到要與gui解耦，我選第二種方案。」Builder 不接收 GUI controller，回傳具名結構中的已組裝 Python 物件。一般 `load_environment` API 保留可信 Python 檔的零參數 `build_environment()` 契約。FTF startup 與 Notebook 則直接呼叫公開 `experiment.ftf.ftf(...)`，不再另設 `environment.py` 薄包裝。GUI 不解析 FTF 參數或依描述重建 backend。
+2026-10-14，使用者比較傳入 controller 與回傳環境兩種方案，裁決：「考慮到要與gui解耦，我選第二種方案。」Builder 不接收 GUI controller，回傳具名結構中的已組裝 Python 物件。一般 `load_environment` API 保留可信 Python 檔的零參數 `build_environment()` 契約。FTF startup 與 Notebook 則直接呼叫公開 `zcu_tools.simulators.ftf.environment.ftf(...)`，不再另設 `environment.py` 薄包裝。GUI 不解析 FTF 參數或依描述重建 backend。
 
 `SimulationEnvironment` 包含已綁定的 soc、匹配的 soccfg、已註冊具名裝置的 devices: DeviceManager，以及不含模型真值的公開 description。Builder 成功回傳後，caller 負責安排清理。Notebook 直接使用並清理 manager；GUI 腳本則經公開 facets 安裝 SoC 並逐一 register 已建 drivers，不把 environment manager 注入 session。GUI 只接管成功 register 的 driver，SoC 仍由 caller 擁有，不假設通用 close 方法。
 
 FTF 範例先讀相鄰 `entry-template.yaml`，建立新 entry 與 global components。接著建立第一個 `initial` point，以 `ctx.context.apply_alias_rows` 初始化該 point 的 aliases。最後組裝環境、install SoC、register devices，GUI 即可從 New Tab 開實驗。它不依賴 `create_entry` CLI。建 entry／component 與 alias Apply 都走既有資源 owner，不由腳本自行寫 entry 檔案。
 
-FTF startup 呼叫 `ftf(Path(__file__).with_name("ftf.yaml"), workers=simulation_workers(os.cpu_count()), warmup=True)`，透過共用 GUI 策略保留一核，至少使用一個 worker。設定按 script 位置定位。啟動時在背景做數值準備與 GPU 預編譯，不做 acquire。Notebook 明示工作副本 YAML 路徑，以 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True` 保留兩核並啟動背景預編譯。指定檔缺失或無效直接報錯，不 fallback。公開 `ftf()` 預設只用一個 worker 且不預編譯，兩個 caller 各自明示成本政策。
+[FTF startup](../../../zcu_lab/simulation_envs/FTF/startup.py) 用 `zcu_tools.simulators.ftf.config.load_ftf` 讀取腳本旁的 `ftf.yaml`，用 `program.build_soccfg` 從獨立的板子 YAML 建立 `soccfg`，再呼叫 `ftf(settings, soccfg=soccfg, workers=simulation_workers(os.cpu_count()), warmup=True)`。共用 GUI 策略保留一核，至少使用一個 worker。啟動時在背景做數值準備與可用的 GPU 預編譯，不做 acquire。[Notebook 範例](../../../notebook_md/single_qubit.md#load-the-environment) 直接傳入工作副本 YAML 路徑與 `soccfg`，以 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True` 保留兩核並啟動背景預編譯。指定檔缺失或無效直接報錯，不 fallback。公開 `ftf()` 預設只用一個 worker 且不預編譯，兩個 caller 各自明示成本政策。
 
 FTF、single_fluxonium 與 six_fluxonium 的 startup 都讀同目錄、不納入 Git 的工作副本，分別為 `ftf.yaml`、`single_fluxonium.yaml` 與 `six_fluxonium.yaml`。各環境的 `default.yaml` 是納入 Git 的樣板，不是 startup 的讀取來源。第一次使用先複製樣板；工作副本不存在時報錯並附上 `cp default.yaml <工作副本>` 指令，不退回樣板。2026-10-26，使用者對 single／six 比照 FTF 的方案確認：「亚某那个，我认同你采用你的方案」。
 
@@ -72,7 +72,7 @@ GUI 不持有正常／simulate 模式。模擬認知集中在腳本，GUI 只提
 | Program 量測要求 | Pulse、gain、frequency、phase、timing、sweep、readout 與抽樣要求；YAML 不提供隱藏 pulse 來覆寫它。 |
 | 校準估計 | 從 I/Q 推得，可用於後續量測，不直接改模型真值。 |
 
-Loader 驗證必要／未知欄位、units、維度與數值合法性，失敗中止；solver 只收具名數值，不讀 YAML 或資料容器。`resources.ftf.FTFSettings` 定義具名 schema 與預設值，`parse_ftf` 提供 field-path 診斷。範例參數不代表任意模型的精度保證。
+Loader 驗證必要／未知欄位、units、維度與數值合法性，失敗中止；solver 只收具名數值，不讀 YAML 或資料容器。`zcu_tools.simulators.ftf.config.schema.FTFSettings` 定義具名 schema 與預設值，[`zcu_tools.simulators.ftf.config`](../../../lib/zcu_tools/simulators/ftf/config/README.md) 的 `parse_ftf` 提供 field-path 診斷。範例參數不代表任意模型的精度保證。
 
 2026-10-14，使用者提出：「可以考慮讓FakeDevice在建立時設定使用的參數，預設是native這樣」。對建立時指定且建立後固定的提案，回答「認同，再來要做什麼？」。FakeDevice 接受 value_unit=native／V／A，預設 native；driver 保存單位，Info 如實回報。Value 與 rampstep 使用同一單位，不自動換算。Setup 不切換單位，傳入不符單位時在寫入前拒絕；要換單位就重建裝置。
 
@@ -293,6 +293,8 @@ FTF 在符合條件的 acquire 以上限基底解一條 pilot，再從完整 den
 
 ### 演化與 ADC 數值工具
 
+下段保留初版的分工與歷史路徑。現行 FTF 的 YAML、環境組裝與數值模型分別由 [`simulators.ftf.config`](../../../lib/zcu_tools/simulators/ftf/config/README.md)、[`simulators.ftf.environment`](../../../lib/zcu_tools/simulators/ftf/environment/README.md) 與 [`simulators.ftf.physics`](../../../lib/zcu_tools/simulators/ftf/physics/README.md) 擁有。
+
 數值能力位於既有 `zcu_tools.simulate` 下的子模組，不新增頂層 package。Library 提供演化與 ADC 兩個可分別使用的工具，由 environment 作者組合，不強制綁成單一使用入口。公開入口為 `simulate.evolution`、`simulate.adc` 與 `evolution.populations`。`resources.ftf` 擁有具名 YAML 與 field-path 診斷，`experiment.ftf` 組裝固定單位裝置、接線及逐 round snapshot，`simulate.ftf` 只收數值。依賴沿 C8、C9、C10、C12，不新增 ignore。
 
 2026-10-15，使用者裁決：「你剛剛不是設計成一個子module嗎？怎麼邊package? 1235認同 4我認為可以lib可以拆成兩個工具，分別處理演化與ADC，讓enviroment作者使用」。其中 1、2、3、5 分別是提供數值模型、保留連續控制描述、統一演化入口並內部選算法，以及模型／資料可常駐但每次明確傳入初態。
@@ -361,6 +363,8 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 ### 分工契約與模組邊界
 
 2026-10-16，使用者要求：「我反而認為應該是先完成每個分工模塊的contract，然後各自內部平行開始，因為各自都是黑盒」。對六個契約與先定契約的流程，使用者回覆「確認」。
+
+下列分工與 C1–C6 表中的 FTF 套件名稱為歷史路徑。現行 FTF 組裝與模型的 owner 見[演化與 ADC 數值工具](#演化與-adc-數值工具)。
 
 依 [[0072]]，`core` 放無狀態型別，`simulate` 不 import `program`，`experiment.ftf` 負責組合與單位換算。依賴方向由 C8 分層、C9 無循環、C12 穩定工具不依賴有狀態能力模組保護。一般 program 只依賴公開 mixin 入口，由 `program-simulation-entry` contract 限制，不繞過入口操作 frontend 或引擎。
 

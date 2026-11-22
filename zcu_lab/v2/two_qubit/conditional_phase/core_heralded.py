@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from textwrap import fill
 from typing import ClassVar
 
 import numpy as np
@@ -583,7 +584,9 @@ def _plot_phase_crossing(
     result = (
         f"Selected π crossing = {crossings.frequencies_mhz[0]:.7g} MHz"
         if crossings.reason is None
-        else crossings.reason
+        else "\n".join(
+            fill(reason, width=60) for reason in crossings.reason.split("; ")
+        )
     )
     ax.set(
         xlabel="Common CZ frequency (MHz)",

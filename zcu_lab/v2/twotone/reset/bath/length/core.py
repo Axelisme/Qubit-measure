@@ -38,6 +38,7 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.support import live_errorbar, live_line
+from zcu_lab.v2.twotone.reset._projection import principal_iq_direction
 
 
 @dataclass(frozen=True)
@@ -238,48 +239,39 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         prog_cache: dict[float, TimelineProgramV2] = {}
         reducers = {}
 
-        # 2. Show the tomography contrast and the IQ means that determine it.
+        # 2. Show the rotation-invariant contrast and the projected phase branches.
         plots = context.plots
         fig, _ = plots.subplots(
             num="measurement",
-            nrows=3,
+            nrows=2,
             sharex=True,
             figsize=(8, 8),
             layout="constrained",
         )
-        contrast_ax, i_ax, q_ax = fig.axes
+        contrast_ax, projection_ax = fig.axes
         fig.suptitle(_TITLE)
         contrast_ax.set_ylabel(_CONTRAST_LABEL)
         contrast = live_line(contrast_ax)
-        i_ax.set_ylabel("Mean IQ real (a.u.)")
-        q_ax.set(xlabel=_XLABEL, ylabel="Mean IQ imaginary (a.u.)")
-        i_view, q_view = (
-            live_errorbar(i_ax, num_lines=4),
-            live_errorbar(q_ax, num_lines=4),
-        )
-        for line, phase in zip(i_ax.lines, _PHASES, strict=True):
+        projection_ax.set(xlabel=_XLABEL, ylabel="Mean IQ on principal axis (a.u.)")
+        viewer = live_errorbar(projection_ax, num_lines=4)
+        for line, phase in zip(projection_ax.lines, _PHASES, strict=True):
             line.set_label(f"π/2 at {phase:g}°")
-        q_ax.legend(
-            handles=tuple(i_ax.lines),
-            loc="upper center",
-            bbox_to_anchor=(0.5, -0.25),
-            ncols=4,
-        )
+        projection_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.25), ncols=4)
 
         @plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
-            """Update tomography contrast, the phase means and their direct shot SEM."""
+            """Update tomography contrast and projected phase means with shot SEM."""
             signals, moments = _combine_outer_rounds(data)
-            i_sem = iq_shot_sem(moments, direction=(1.0, 0.0))
-            q_sem = iq_shot_sem(moments, direction=(0.0, 1.0))
+            direction = principal_iq_direction(signals)
+            projected = direction[0] * signals.real + direction[1] * signals.imag
+            sem = iq_shot_sem(moments, direction=direction)
             shots = int(np.nan_to_num(moments[..., 0]).max())
             title = contrast_ax.set_title(
                 f"Up to {shots} retained shots per duration and phase (count)"
             )
             return (
                 *contrast.set(lengths, bathreset_signal2real(signals)),
-                *i_view.set(lengths, signals.real.T, i_sem.T),
-                *q_view.set(lengths, signals.imag.T, q_sem.T),
+                *viewer.set(lengths, projected.T, sem.T),
                 title,
             )
 
@@ -356,6 +348,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         fig.suptitle(_TITLE)
         contrast_ax.plot(lens, real_signals, ".-", markersize=5)
         contrast_ax.set_ylabel(_CONTRAST_LABEL)
+        # Show both readout quadratures so the components behind the invariant contrast remain visible.
         for ax, values, direction in (
             (i_ax, signals.real, (1.0, 0.0)),
             (q_ax, signals.imag, (0.0, 1.0)),

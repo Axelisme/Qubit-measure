@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from qtpy import sip
 from qtpy.QtWidgets import QStackedWidget, QWidget
 
 from zcu_tools.plotting.presentation import FigureShowManager
@@ -25,9 +27,17 @@ from . import host as _host
 class FigureContainer:
     """Thin host wrapper around a plot stack with a fixed placeholder widget."""
 
-    def __init__(self, stack: QStackedWidget, placeholder: QWidget) -> None:
+    def __init__(
+        self,
+        stack: QStackedWidget,
+        placeholder: QWidget,
+        *,
+        canvas_type: type[FigureCanvasQTAgg] = FigureCanvasQTAgg,
+    ) -> None:
+        """Borrow the stack and placeholder; use canvas_type for new presentations."""
         self._stack = stack
         self._placeholder = placeholder
+        self._canvas_type = canvas_type
         # Initialise the host bridge on the main thread now (this Container is
         # built on the GUI thread), so a later worker-thread emit marshals
         # correctly instead of taking the worker's affinity.
@@ -78,6 +88,13 @@ class FigureContainer:
             return self._stack.indexOf(canvas) >= 0
         except RuntimeError:
             return False
+
+    def canvas_for_figure(self, figure: Figure) -> FigureCanvasQTAgg:
+        """Reuse a compatible live canvas or install this container's canvas on-owner."""
+        canvas = figure.canvas
+        if isinstance(canvas, self._canvas_type) and not sip.isdeleted(canvas):
+            return canvas
+        return self._canvas_type(figure)
 
     def attach_canvas(self, canvas: QWidget) -> None:
         if self._stack.indexOf(canvas) < 0:

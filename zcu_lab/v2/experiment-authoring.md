@@ -142,6 +142,11 @@ Z 各維度須匹配軸長，固定軸也計入；load 不將固定值寫進 Res
 
 Native HDF5 的變數名（`VariableSpec.variable` 或 `AxesSpec.data_variable`）與存檔軸的 `label` 都是結果格式的一部分，不是圖上的標籤。Cfg 改名與舊檔相容性見 [ADR-0069〈Cfg 欄位改名與 schema 版本〉](../../docs/adr/0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。現行例子見 [Two-qubit 持久名稱](README.md#two-qubit-持久名稱)。
 
+各 K-cycle core 宣告 sweep 軸，用 [chain/\_cycle.py](chain/_cycle.py) 的 `cycle_sums_variables` 與 `restore_cycle_sums` 保存與還原 `CycleSums.axis`。
+[round_zcu.py](../../lib/zcu_tools/experiment/v2/utils/round_zcu.py) 的 `sweep2array` 展開量化座標。軸量化或存檔成功，不保證 first-read 的 `fit_rabi` 或 `fit_decay_fringe` 能取得 FFT 初猜。
+對 joint 擬合而言，first-read 估計只提供起點；無估計時由 caller 用保存軸另取起點。
+能否畫出 live 方向的投影，見 [analysis〈Readout chain K-cycle〉](../../lib/zcu_tools/analysis/README.md#readout-chain-k-cycle) 的 `cycle_residual_projection`。這個投影不是 joint 估計的前提。
+
 ### 分析選項自行驗證，fit 結果用屬性讀取
 
 分析選項用 pydantic dataclass 的欄位限制驗證，GUI 沿用此驗證。
@@ -185,7 +190,8 @@ Slot.set 初值只套用到 copy，這項設定本身不把 reference 改成 cop
 
 建圖、預設樣式、show、owner-thread 更新與 finish／release 依 [plotting README](../../lib/zcu_tools/plotting/README.md)。
 Live artists 與多面板格式依 [v2 README](README.md#即時圖工具)。
-建立非均勻熱圖時，在 `live_heatmap(..., uniform=False, cmap="viridis")` 傳入 Matplotlib 已註冊的色盤名稱。省略時用 `RdBu_r`。在 placeholder 載入前選定色盤；第一次 `set` 後不能更換。
+建立非均勻熱圖（`uniform=False`）時，用 [`live_heatmap`](support/live.py) 的 `cmap` 選色盤，例如 `live_heatmap(ax, uniform=False, cmap="viridis")`。
+`cmap` 接受 Matplotlib 已註冊的色盤名稱，省略時用 `RdBu_r`。熱圖掛載到 axes 後就不能更換色盤。
 實驗自行決定座標、labels 與圖名。show 前可填資料，show 後的修改也經 plot-thread callback。
 選 y 軸要畫的物理量時看 [R12：y 軸畫物理 observable](figure-style.md#r12y-軸畫物理-observable)，標示方式見[〈單位〉](figure-style.md#單位)。
 一維建圖與 update 見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)，熱圖與最近兩條切線見 [PowerExp 的 live plot](twotone/power_dep/core.py)。

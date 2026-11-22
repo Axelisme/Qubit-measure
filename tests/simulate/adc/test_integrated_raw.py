@@ -114,6 +114,34 @@ def test_integrated_shots_form_bridge_and_match_conditional_expectation(rates, s
     assert_array_equal(source.materialize(1600, 0)[0], raw)
 
 
+def test_irregular_raw_sums_match_same_multijump_traces() -> None:
+    rates = np.array([[0, 0.09, 0], [0, 0, 0.15], [0, 0, 0]])
+    readout_model = replace(
+        model(rates, receiver=adc.Receiver(gain=10_000, phase_rad=0.4)),
+        kappa_external_per_ns=np.array([0.045, 0.03]),
+        mismatch_phase_rad=np.array([0.2, -0.3]),
+    )
+    pulse = adc.ReadoutPulse(0, 48, 0.8 + 0.2j, 6.007)
+    grid = adc.SampleGrid(np.array([-2, 1, 9, 14, 22, 27, 36, 49, 57.0]), 6.003)
+    content = adc.ReadoutBatch(
+        readout_model, ((adc.ReadoutEvent((pulse,), (grid,)),),), np.array([0])
+    )
+    readout = adc.ProjectionReadout.unprojected(np.array([0.0, 0.0, 1.0]))
+    batches = {0: content}
+    reps = 64
+    identity = SamplingIdentity(52)
+    prepared = adc.PreparedRawShots(readout, batches, reps=reps)
+    owner = adc.RawPlanOwner()
+    traces = adc.sample_traces(readout, batches, reps=reps, identity=identity)
+    expected = np.rint(traces.channels[0].iq.sum(axis=-2))
+    raw = owner.bind(prepared, identity).materialize(reps, 0)[0]
+    assert np.unique(expected[:, 0], axis=0).shape[0] > reps // 2
+    assert_array_equal(raw, expected)
+    assert_array_equal(owner.bind(prepared, identity).materialize(reps, 0)[0], raw)
+    owner.retire()
+    assert_array_equal(prepared.bind(identity).materialize(reps, 0)[0], raw)
+
+
 @pytest.mark.parametrize("mux", [False, True])
 def test_receivers_share_full_paths_and_windows_with_independent_noise(mux):
     rates = np.array([[0, 0.12, 0.04], [0.06, 0, 0.1], [0.09, 0.03, 0]])

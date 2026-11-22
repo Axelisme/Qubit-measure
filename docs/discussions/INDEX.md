@@ -166,7 +166,8 @@
 
 - 2026-11-23 [一維反演量的誤差棒與圖上事實](2026-11-23-inverted-error-bars-and-figure-facts.md)：圖形呈現。可傳遞 shot 共變異的一維反演量也畫棒；圖呈現品質值，寫回建議留在 Writeback。
 - 2026-11-23 [一維讀出校正無解時保留分類比例](2026-11-23-singular-readout-analysis.md)：Analyze 失敗語意。六個 circle 入口保留同次分類圖，不交付校正數值、擬合或寫回提議。
-- 2026-11-22 [在 Measure Data 頁讀原圖](2026-11-22-data-figure-reading.md)：圖形呈現。縮圖用來選圖，`View figure` 用當前原生 Figure 在同頁重繪一張可捲動的圖，不改 Save 工件。
+- 2026-11-23 [圖磚沿用存檔幾何](2026-11-23-figure-fixed-geometry.md)：圖形呈現。各面以 12×9 in 排版後等比嵌入。R7 只在固定幾何的 PNG 驗版面，Data 保留縮圖選圖與 `View figure`。
+- 2026-11-22 [在 Measure Data 頁讀原圖](2026-11-22-data-figure-reading.md)：圖形呈現。記錄當時用縮圖選圖、在同頁捲動閱讀的做法。現行圖磚與閱讀面見 [Figure presentation](../../lib/zcu_tools/gui/app/measure/README.md#figure-presentation)。
 - 2026-11-22 [Live-only 實驗的 figures-only Analyze](2026-11-22-figures-only-analyze.md)：Analyze 能力。四個 leaf 只從明確來源重畫具名圖，不增加數值結果或寫回。
 - 2026-11-22 [非均勻熱圖在建構時選色盤](2026-11-22-nonuniform-heatmap-cmap.md)：繪圖介面。作者在建構期傳入具名 cmap，預設與其他熱圖行為不變。
 - 2026-11-22 [GE 寫回保護先於診斷圖交付](2026-11-22-ge-gate-split-from-diagnostic.md)：交付切分。窄磚上診斷圖標籤仍相碰，寫回初選的中心檢查先獨立落地，直方圖與擬合 SNR 整批延到續作。
@@ -185,6 +186,7 @@
 - 2026-11-22 [實驗呈現規範：圖、摘要與讀者檢查](2026-11-22-presentation-rules.md)：呈現規範。圖只放理論重點，採集設定進摘要，對數值大小敏感的一維資料畫 error bar，規範集中在 `figure-style.md`。
 - 2026-11-22 [量測點何時連線與 spectrum 的 error bar](2026-11-22-data-point-lines.md)：呈現規則。無擬合曲線的一維圖連線、有擬合只畫點；有 shot 資料就畫 SEM，spectrum 不再例外；wrapped phase 只斷跨切口、恰半圈與缺值的線段。
 - 2026-11-22 [Analyze 摘要與逐點誤差棒的責任分工](2026-11-22-shared-presentation-facts.md)：呈現責任。GUI 與 MCP 共用 adapter 摘要行，analysis 計算 shot SEM，實驗 core 寫標題與圖例。
+- 2026-11-23 [平均 IQ 圖的投影慣例](2026-11-23-mean-iq-plot-projection.md)：呈現規則。同類實驗沿用同一 IQ 轉換，一維預設用主軸投影，二維 flux／頻率圖逐 bias 扣背景再取幅值。
 - 2026-11-22 [Two-qubit mux 綁定與編輯後的檢查](2026-11-22-two-qubit-mux-binding-checks.md)：驗證位置。Open／Reset 驗有序元件連結，提交時按同次 capture 驗實際 readout tone 數。
 
 ## 模組邊界

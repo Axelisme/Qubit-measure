@@ -258,6 +258,10 @@ class RenderView(Protocol):
         """Read an active frontend's figure and preview flag, if mounted."""
         ...
 
+    def present_committed_interactive_frame(self, tab_id: str) -> None:
+        """Publish the opted-in frontend's frame after an owner-thread command."""
+        ...
+
     def take_figure_screenshot_for_subtab(self, tab_id: str, subtab_id: str) -> bytes:
         """Pane-qualified figure screenshot (run|analysis|post_analysis).
 
