@@ -872,15 +872,9 @@ Program v2 的 compile regression 先找 `test_modules_integration.py` 中同一
 
 ## Cfg 解析測試的 import 注意事項
 
-`ModuleCfgFactory`／`WaveformCfgFactory` 由 `cfg_model` 擁有，按 Spec 與成品 cfg 的 union 驗證並遞迴展開引用。測試從 schema owner 的 package 入口 import，避免直接碰 leaf base class：
+驗證持久 Spec 的解析與引用展開時，從 `zcu_tools.cfg_model` 匯入 `ModuleCfgFactory` 或 `WaveformCfgFactory`。
+呼叫 `ModuleCfgFactory.from_raw(raw, context=...)` 將 Spec 解析為共用 cfg。`CfgValidationContext` 明示固定的 module resolver 與 asset capability；不需要這些依賴的 inline cfg 可省略 context。
 
-```python
-from zcu_tools.cfg_model import ModuleCfgFactory   # 使用 schema owner 的 package 入口
-# 不要從 program runtime 或 schema leaf 匯入 factory
-
-cfg = ModuleCfgFactory.from_raw({"type": "readout/direct", "ro_ch": 0, ...})
-```
-
-呼叫 `ModuleCfgFactory.from_raw(raw, context=...)` 進行解析。`CfgValidationContext` 明示固定的 module resolver 與 asset capability；dependency-free inline cfg 可省略 context。
+驗證 native program cfg 與共用 cfg／Spec 的轉換時，從 `zcu_tools.program.v2.modules` 匯入 `ModuleCfgFactory`。
 
 **測試一個非 `Literal` 的 cfg（負面測試）**：若要在測試裡定義 `class UnknownCfg(AbsReadoutCfg): type: str = "unknown"` 來驗證 factory 錯誤路徑，重點是它不在 `ModuleCfg` Union 裡，因此 `ModuleCfgFactory.from_raw()` 不會 dispatch 到它。
