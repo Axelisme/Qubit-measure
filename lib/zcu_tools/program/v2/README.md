@@ -32,7 +32,8 @@
 帶 timeline 的 pulse／trigger 在結尾加 t 發射。Readout 的作者結尾只含 generator waveform 與 pre/post delay，ADC 視窗留在 ADC channel，shot 收尾仍等待全部 ADC。
 未帶 timeline 且未進範圍的原生輸出保留 QICK 行為。
 `pulse_by_reg` 選到 timeline 時，須提供配對的 `selection` metadata。
-兩個普通 `Pulse` 在同一個 generator 上重疊時，編譯器會以 `pulse overlap` 拒絕，分到不同 timeline 也一樣。`TwoPulseReset.lower` 從同一起點發射兩個子 pulse，仍受這項檢查。
+兩個普通 `Pulse` 的實際播放在同一個 generator 上重疊時，編譯器會以 `pulse overlap` 拒絕，分到不同 timeline 也一樣。
+`TwoPulseReset.lower` 的兩條子 timeline 共用原點。每個子 pulse 在共用原點加上各自的 `pre_delay` 後發射，仍受同一項重疊檢查。
 帶 timeline 的後一個 trigger 必須證明不與同 ADC 前一視窗重疊，否則在 build 時報錯。
 原生 `t=None` 無法定位 ADC 起點，會使後一個同 ADC timeline trigger 無法證明不重疊。此未知標記不捏造 shot 收尾的 runtime 結尾。
 Branch 的每個 case 從入口的 ADC 狀態開始編譯。任一 case 在出口的 ADC 結尾未知，Branch 後的同 ADC timeline trigger 就會在編譯時報錯。

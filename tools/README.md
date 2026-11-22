@@ -229,7 +229,7 @@ Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`
 
 中斷時，有 `start.json` 而沒有 `row.json` 的列記為 `incomplete`。其 `started_at` 是派送前記下的時刻，不證明 Run 已派送。兩份紀錄都沒有時，列為 `not_run`。兩者不填精確秒數或下限，也不算已判定。180 秒判定不涵蓋未入選的實驗。
 
-驗收派送時，須觀察 Controller 的 `RunStarted` 事件及其 admission token（實作搜尋 `RunStartedPayload`）。
+只有[場景選定結論](../docs/discussions/2026-11-23-curated-wall-time-scenes.md#結論)指定的 10 個派送驗收場景，才要求觀察 Controller 發出的 `RunStarted` 事件及其 admission token（實作搜尋 `RunStartedPayload`）。
 
 量測和 `--report-only` 使用同一套 exit status：
 

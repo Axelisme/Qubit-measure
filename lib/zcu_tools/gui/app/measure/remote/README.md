@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-11-22，Workflow operation wire 與 Analyze 摘要
+**Last updated:** 2026-11-23，Figures-only Analyze 的 RPC 空摘要與 recipe 結果連結
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
