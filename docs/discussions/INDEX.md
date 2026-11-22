@@ -227,6 +227,7 @@
 - 2026-11-22 [Two-qubit 新 native 軸名與舊格式](2026-11-22-two-qubit-native-axis-cutover.md)：資料格式。只有模擬測試資料的家族不新增不相容舊 layout 的 reader，原檔保留。
 - 2026-11-22 [Amp Rabi 的 shot moments](2026-11-22-amp-rabi-shot-moments.md)：資料格式。同批校正 IQ 保留既有平均，native 可選 moments；驗所有現有變數後，Labber 仍只匯出原單 log。
 - 2026-11-22 [Mux 逐 tone 校正 IQ 矩與 R11](2026-11-22-mux-iq-moments-and-r11.md)：資料格式。Reducer 按參與 tone 順序計算完成輪的同批校正六矩，保留既有平均與舊檔。
+- 2026-11-23 [Labber scalar 匯出的索引軸](2026-11-23-labber-scalar-index-axis.md)：資料格式。匯出時為無軸 scalar 加一點的索引軸，native 結果與 reader 不變。
 
 ## 量測策略
 
