@@ -347,7 +347,14 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
                 label="Other peak candidates",
             )
         model = "Lorentzian" if options.model_type == "lor" else "Sinc"
-        ax.plot(fit.freqs, fit.fitted, color="C1", label=f"{model} fit")
+        fit_grid_mhz = np.linspace(fit.freqs.min(), fit.freqs.max(), 200)
+        ax.plot(
+            fit_grid_mhz,
+            fit.evaluate(fit_grid_mhz),
+            "-",
+            color="C1",
+            label=f"{model} fit",
+        )
         ax.axvline(fit.freq, color="C1", linestyle=":", alpha=0.7)
         quality = ""
         if fit.selected_peak is not None:
