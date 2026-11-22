@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-23，K-cycle 數值入口
+**Last updated:** 2026-11-23，K-cycle 數值入口與讀出校正後的 shot SEM
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -34,10 +34,12 @@ Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交�
 
 ## 逐點 shot SEM
 
-[`shot_uncertainty`](shot_uncertainty.py) 依來源提供兩種估計。`iq_shot_sem` 接收
+[`shot_uncertainty`](shot_uncertainty.py) 從保留 shots 的 IQ 總和或分類計數估計抽樣誤差。`iq_shot_sem` 接收
 ADR-0074 的單次讀出 IQ 總和 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]`。它取指定 IQ 投影的樣本標準差，再除以 √N。
 `class_probability_covariance` 用保留 shots 的 one-hot 樣本共變異除以 N 估計平均機率的共變異。
 對角元素開根號就是各類的二項 SEM。比例為 0 或 1 時樣本變異數為 0，不代表信賴區間。
+`corrected_population_sem` 視讀出校正矩陣為已知，用其轉置的逆傳遞 shot 共變異，取對角元素開根號。
+它不估計校正矩陣本身的誤差。算不出有限 SEM 時以 NaN 回傳並記錄警告；接近奇異不另設門檻。
 兩者都以實際保留的 shots 為分母，不估計輪間散布、RB 的 seed 散布或擬合參數誤差。
 少於兩發或缺測（NaN）時，該點誤差未定。負、非整數、無窮計數及其加總溢位會報錯。
 IQ 估計也拒絕無窮矩、超過捨入誤差的負中心平方和，以及不可能的中心共變異，不受選定的投影方向影響。
@@ -217,6 +219,8 @@ Fluxdep native 載入與 dispersive 投影共用此規則。
 radius=None 時由 `optimize_ge_radius` 選半徑。選項預設值與畫圖留在實驗。QICK raw buffer 的 accumulator normalization 留在 caller 的實驗 helper；本模組不讀 program metadata。
 
 `analyze_reference_iq` 只收三組 acquired IQ 與準備標籤。它與 centroid3 processor 共用 `utils.shot_classification.nearest_centroid3` 的 g/e/f 最近中心與等距規則。前半訓練 nearest-centroid classifier 與 confusion matrix，後半獨立計算 raw/corrected fractions 與準備標籤錯誤率。最小分離度是最近兩個中心的 IQ 距離除以共用等向 σ。σ² 為 pooled training covariance 的 trace/2；σ 必須為正且有限。矩陣品質由 training confusion 的 condition number 與最小 singular value 表示。Correction 回到準備標籤座標，保留負值與大於 1 的值，不推論參考態純度。`correct_populations` 的既有預設仍 clipping；caller 可用 `clip=False` 保留線性解。
+
+`try_correct_populations` 為一維 circle 分析提供不裁切的數值解。矩陣奇異或原本有限的分類點反解溢位時，記下原因並回傳 `None`。原先缺測的點不算反解溢位。沒有矩陣時原樣回傳；矩陣形狀不符或含非有限值則拋出 `ValueError`。是否只發布分類比例診斷圖由實驗決定，不改 `correct_populations` 的既有契約。
 
 `classify_reference_iq(signals, centroids)` 將固定三中心套用到任意 scan axes 加最後 shot axis 的 acquired IQ，輸出 scan axes 加 g/e/f fraction axis。它也使用共用 nearest kernel。中心與 IQ 使用相同 ADC 單位，不重訓、不修正。Exact ties 歸最低 label。Caller 用 `correct_populations(..., clip=False)` 套用 reference training confusion；結果仍是 preparation-label 座標，不是 latent energy-state population。
 

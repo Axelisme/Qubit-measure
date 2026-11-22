@@ -13,7 +13,6 @@ from uuid import uuid4
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.program.shot_time import request_round_time_s
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
     CancellationQuery,
@@ -26,6 +25,7 @@ from zcu_tools.simulate.boundary import (
 from ._envelope_pool import EnvelopePool
 from .clock import SimulationTiming
 from .result import IntegratedRound, RawShots
+from .round_time import request_round_time_s
 from .signals import materialize_shots
 
 
@@ -163,9 +163,9 @@ class SimulationBinding:
 
         timing=None uses SimulationTiming's defaults. timing.time_scale is a
         finite nonnegative physical-time multiplier. Each round
-        targets time_scale * request_round_time_s(request). The program shot-time
-        owner sums integer body/relax ticks and reps, then TimeBase converts the
-        aggregate to seconds. One follows physical time; 0.1 runs
+        targets time_scale * request_round_time_s(request). That helper sums
+        integer body/relax ticks and multiplies by reps, then TimeBase converts
+        the aggregate to seconds. One follows physical time; 0.1 runs
         ten times faster. Zero (default) disables pacing. Without clock it also
         skips round clock reads. Snapshot
         and execution consume this budget; failures never wait. With cancel,

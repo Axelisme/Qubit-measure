@@ -8,7 +8,6 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
-from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -32,6 +31,11 @@ from zcu_tools.program.v2.modules.readout import (
 )
 
 from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.singleshot.population_analysis import (
+    CLASSIFIED_FIGURE,
+    UNAVAILABLE_NOTICE,
+    circle_readout_series,
+)
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
@@ -267,17 +271,16 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
                 "Acquire a new run."
             )
 
-        populations = correct_populations(populations, options.confusion_matrix)
-        covariance = class_probability_covariance(result.counts)
-        if options.confusion_matrix is not None:
-            jacobian = np.linalg.solve(
-                options.confusion_matrix.T, np.eye(POPULATION_COUNT)
-            )
-            covariance = jacobian @ covariance @ jacobian.T
-        sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
+        series = circle_readout_series(
+            populations, result.counts, options.confusion_matrix
+        )
 
         # 2. Isolate preparation-frequency dependence with the later probe held fixed.
-        _, ax = plots.subplots(num="fit", figsize=(7, 5), layout="constrained")
+        _, ax = plots.subplots(
+            num=CLASSIFIED_FIGURE if series.correction_unavailable else "fit",
+            figsize=(7, 5),
+            layout="constrained",
+        )
         for index, (label, color) in enumerate(
             zip(
                 ("P(g)", "P(e)", "P(other)"),
@@ -287,8 +290,8 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         ):
             ax.errorbar(
                 freqs,
-                populations[:, index],
-                yerr=sem[:, index],
+                series.values[:, index],
+                yerr=series.sem[:, index],
                 fmt="o-",
                 markersize=3,
                 label=label,
@@ -299,9 +302,13 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             if options.confusion_matrix is None
             else "readout-corrected populations"
         )
+        if series.correction_unavailable:
+            quantity = f"classified fractions\n{UNAVAILABLE_NOTICE}"
         ax.set(
             title=f"MIST preparation spectrum · qubit · {quantity}",
             xlabel="Preparation RF frequency (MHz)",
-            ylabel="Outcome probability",
+            ylabel="Classified fraction"
+            if series.correction_unavailable
+            else "Outcome probability",
         )
         ax.legend(loc="best")

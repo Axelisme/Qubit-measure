@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import pairwise
@@ -41,10 +42,18 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_errorbar
 
 from .._drive import QubitDriveCfg
-from .._phase import QuadraturePhase, count_phase, phase_variance, qubit_sigma_variance
+from .._phase import (
+    QuadraturePhase,
+    count_phase,
+    phase_display_sem,
+    phase_variance,
+    qubit_sigma_variance,
+)
 from .._phase_plot import wrapped_phase_plot_data
 from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
 from .._sums import qubit_sigma, validate_qubit_tones
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -469,6 +478,10 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         totals = counts.sum(axis=(-2, -1))
         complete = np.isfinite(totals) & (totals > 0)
         quadratures = np.where(complete, quadratures, np.nan)
+        phase_var = phase_variance(
+            quadratures[:, 0], quadratures[:, 1], variances[:, 0], variances[:, 1]
+        )
+        phase_sem = phase_display_sem(phase_var, totals[:, 0], totals[:, 1])
         targets: list[tuple[QuadraturePhase, ...]] = []
         fits: list[PhaseLineFit] = []
         # 2. Require complete phase rows before unwrapping and count-weighted slope fitting.
@@ -490,12 +503,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                 else fit_phase_line(
                     np.array(cfg.gate_count, dtype=np.float64),
                     np.array(values, dtype=np.float64),
-                    phase_variance(
-                        quadratures[t, 0],
-                        quadratures[t, 1],
-                        variances[t, 0],
-                        variances[t, 1],
-                    ),
+                    phase_var[t],
                 )
             )
         summaries = tuple(map(summarize_fit, fits))
@@ -503,8 +511,8 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         _plot_quadratures(
             plots, data.gate_counts, target_labels, quadratures, _projection_sem(counts)
         )
-        _plot_phase(plots, data.gate_counts, target_labels, fits, summaries)
-        _plot_contrast(plots, data.gate_counts, target_labels, targets)
+        _plot_phase(plots, data.gate_counts, target_labels, fits, summaries, phase_sem)
+        _plot_contrast(plots, data.gate_counts, target_labels, targets, phase_sem)
 
         # 4. Keep each target's negative-slope correction and uncertainty, or its unresolved-fit reason.
         return LocalZAnalysis(summaries)
@@ -556,6 +564,7 @@ def _plot_phase(
     labels: tuple[str, str],
     fits: list[PhaseLineFit],
     summaries: tuple[LocalZFit, ...],
+    phase_sem: NDArray[np.float64],
 ) -> None:
     """Draw the fitted phase line and correction on a dense grid without refitting."""
     fig, _ = plots.subplots(
@@ -563,7 +572,9 @@ def _plot_phase(
     )
     fig.suptitle("Local Z · unwrapped phase and weighted fit")
     xs = np.linspace(ns[0], ns[-1], 401)
-    for ax, label, fit, summary in zip(fig.axes, labels, fits, summaries, strict=True):
+    for ax, label, fit, summary, sem in zip(
+        fig.axes, labels, fits, summaries, phase_sem, strict=True
+    ):
         ax.set(ylabel="Unwrapped phase (deg)")
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         if (
@@ -573,7 +584,9 @@ def _plot_phase(
         ):
             ax.set_title(f"{label}: {fit.reason}")
             continue
-        ax.plot(ns, fit.unwrapped_deg, ".", color="C0", label="Measured phase")
+        ax.errorbar(
+            ns, fit.unwrapped_deg, yerr=sem, fmt=".", color="C0", label="Measured phase"
+        )
         ax.plot(
             xs,
             summary.intercept_deg + summary.slope_deg * xs,
@@ -602,6 +615,7 @@ def _plot_contrast(
     ns: NDArray[np.int64],
     labels: tuple[str, str],
     targets: list[tuple[QuadraturePhase, ...]],
+    phase_sem: NDArray[np.float64],
 ) -> None:
     """Expose contrast and wrapped phase before applying the linear fit."""
     fig, _ = plots.subplots(
@@ -616,9 +630,25 @@ def _plot_contrast(
             np.nan if p.logical_phase_deg is None else p.logical_phase_deg
             for p in points
         ]
-        phase_ax.plot(*wrapped_phase_plot_data(ns, phase_deg), ".-", color=f"C{t}")
+        sem = phase_sem[t]
+        unavailable = ~np.isfinite(sem)
+        if unavailable.any():
+            logger.warning(
+                "Omitting %d phase error bars for %s: "
+                "zero contrast, fewer than two retained shots, or unavailable X/Y phase variance",
+                np.count_nonzero(unavailable),
+                label,
+            )
+        x, phase, errors = wrapped_phase_plot_data(
+            ns, phase_deg, np.where(unavailable, np.nan, sem)
+        )
+        phase_ax.errorbar(x, phase, yerr=errors, fmt=".-", color=f"C{t}")
     contrast_ax.set_ylabel("Classified contrast")
     contrast_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncols=2)
-    phase_ax.set(xlabel="CZ gates per shot (count)", ylabel="Wrapped phase (deg)")
+    phase_ax.set(
+        xlabel="CZ gates per shot (count)",
+        ylabel="Wrapped phase (deg)",
+        ylim=(-180, 180),
+    )
     phase_ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     fig.suptitle("Local Z · X/Y contrast and wrapped phase")

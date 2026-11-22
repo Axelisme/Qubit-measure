@@ -6,10 +6,17 @@ from matplotlib.axes import Axes
 from matplotlib.colors import to_rgba
 from matplotlib.container import BarContainer
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from pydantic import ValidationError
+from scipy.special import ndtri
 from zcu_tools.analysis.fitting.singleshot import calc_population_pdf
 from zcu_tools.experiment.utils.single_shot import ge
-from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
+from zcu_tools.experiment.utils.single_shot.ge import (
+    base as ge_owner,
+)
+from zcu_tools.experiment.utils.single_shot.ge import (
+    singleshot_ge_analysis,
+)
 from zcu_tools.experiment.utils.single_shot.ge.base import (
     GEFitOptions,
     calc_fidelity,
@@ -92,7 +99,6 @@ def test_hist_returns_normalized_populations_and_draws_matching_bars(
             assert bar.get_alpha() == 0.5
     assert ax.get_legend_handles_labels()[1] == ["g", "e"]
     assert ax.get_xlabel() == "I [ADC levels]"
-    assert ax.get_ylabel() == "Counts"
     assert ax.get_title() == ("Existing title" if title is None else title)
 
 
@@ -186,10 +192,11 @@ def test_ge_analysis_without_decay_tail_reports_only_fixed_length_ratio(
         assert result["s"] == pytest.approx(0.25, abs=0.03)
         if plots is not None:
             title = " ".join(text.get_text() for text in plots["fit"].texts)
-            if result["length_ratio"] is None:
-                assert "Readout length: not identifiable" in title
-            else:
+            if length_ratio is None:
                 assert "Readout length =" in title
+                assert " ± " in title
+            else:
+                assert r"Readout length = 0 $T_1$" in title
     finally:
         if plots is not None:
             plots.finish(present=False)
@@ -233,11 +240,9 @@ def test_visible_decay_tail_identifies_joint_length_ratio(align_t1, max_relative
         assert result["e_center"].real == pytest.approx(1.0, abs=0.03)
         assert result["s"] == pytest.approx(0.25, abs=0.03)
         title = " ".join(text.get_text() for text in plots["fit"].texts)
-        if result["length_ratio"] is None:
-            assert "Readout length: not identifiable" in title
-        else:
-            assert "Readout length =" in title
-            assert (" / " in title) == (not align_t1)
+        assert "Readout length =" in title
+        assert (" / " in title) == (not align_t1)
+        assert title.count(" ± ") == (1 if align_t1 else 2)
     finally:
         plots.finish(present=False)
         plots.release()
@@ -347,6 +352,194 @@ def test_ge_analysis_fit_only_retains_calibration_and_quality(selection):
         plots.release()
 
 
+def _known_joint_fit(
+    monkeypatch: pytest.MonkeyPatch,
+    covariance_block: NDArray[np.float64],
+) -> NDArray[np.complex128]:
+    covariance = np.zeros((7, 7))
+    covariance[:3, :3] = covariance_block
+    sg, se = 1.0, 6.0
+    # singleshot_ge_analysis accepts no covariance. Supply a deterministic joint
+    # solver result in physical coordinates to verify the SNR error projection.
+    monkeypatch.setattr(
+        ge_owner,
+        "fit_singleshot",
+        lambda *args, **kwargs: ((sg, se, 1.0, 1.0, 0.0, 0.5, 0.0), covariance),
+    )
+    noise = ndtri((np.arange(1000) + 0.5) / 1000)
+    return np.asarray([sg + noise + 0.1j, se + noise - 0.1j])
+
+
+def test_ge_diagnostic_sharpens_binned_raw_preparation_colors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    angle = 0.7
+    signals = _known_joint_fit(monkeypatch, np.eye(3)) * np.exp(-1j * angle)
+    ground_wins, excited_wins, tied = 2 + 5j, 4 - 10j, 3 + 2j
+    ground_only, excited_only = 1 - 5j, 5 + 5j
+    shots = np.array(
+        [
+            [ground_wins] * 6 + [excited_wins] * 4 + [tied, tied, ground_only],
+            [ground_wins] * 4 + [excited_wins] * 6 + [tied, tied, excited_only],
+        ]
+    )
+    plots = Plots(NonPresentingHost())
+    try:
+        singleshot_ge_analysis(
+            np.concatenate((signals, shots), axis=1),
+            angle=angle,
+            options=GEFitOptions(raw_iq_diagnostic=True),
+            plots=plots,
+        )
+        images = [img for ax in plots["fit"].axes for img in ax.get_images()]
+        assert len(images) == 1, "GE diagnostic does not render binned IQ"
+        image = images[0]
+        rgba = np.asarray(image.get_array())
+        i0, i1, q0, q1 = image.get_extent()
+
+        def color_at(point: complex) -> NDArray[np.float64]:
+            column = min(
+                int((point.real - i0) / (i1 - i0) * rgba.shape[1]), rgba.shape[1] - 1
+            )
+            row = min(
+                int((point.imag - q0) / (q1 - q0) * rgba.shape[0]), rgba.shape[0] - 1
+            )
+            return rgba[row, column]
+
+        g_color, e_color, tie_color, pure_g, pure_e = map(
+            color_at, (ground_wins, excited_wins, tied, ground_only, excited_only)
+        )
+        # With 6 and 4 shots, the red/blue weight ratio is 64:729.
+        np.testing.assert_allclose(g_color[:3], (0.080706, 0, 0.919294), atol=1e-6)
+        np.testing.assert_allclose(e_color[:3], (0.919294, 0, 0.080706), atol=1e-6)
+        np.testing.assert_array_equal(tie_color[:3], (0.5, 0, 0.5))
+        np.testing.assert_array_equal(pure_g[:3], (0, 0, 1))
+        np.testing.assert_array_equal(pure_e[:3], (1, 0, 0))
+        assert g_color[3] == e_color[3] > tie_color[3] > pure_g[3] == pure_e[3] > 0
+        # Relative spacing of log1p counts 1, 4 and 10, independent of peak count.
+        assert (tie_color[3] - pure_g[3]) / (g_color[3] - pure_g[3]) == pytest.approx(
+            0.537493, abs=1e-6
+        )
+        assert color_at(1 - 9j)[3] == 0
+        assert plots["fit"].axes[0].get_aspect() == 1.0
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
+def test_ge_iq_density_refreshes_the_blank_image_and_rescales_to_current_shots():
+    ax = Figure().subplots()
+    ax.set_title("Live GE")
+    missing = np.array([complex(np.nan)])
+    image = ge.plot_ge_iq_density(ax, missing, missing)
+    assert not np.asarray(image.get_array())[..., 3].any()
+
+    ground = np.array([-5 + 3j, -3 + 2j])
+    excited = np.array([4 - 4j, 5 - 3j])
+    updated = ge.plot_ge_iq_density(ax, ground, excited, image=image)
+    assert list(ax.get_images()) == [image] and updated is image
+    rgba = np.asarray(image.get_array())
+    np.testing.assert_array_equal(rgba[-1, 0], (0, 0, 1, 1))
+    i0, i1 = ax.get_xlim()
+    q0, q1 = ax.get_ylim()
+    assert i0 <= -5 and i1 >= 5 and q0 <= -4 and q1 >= 3
+
+    # A later, tighter frame replaces the old data limits, not just the pixels.
+    smaller_ground = np.array([-2.5 + 1.5j, -1.5 + 1j])
+    smaller_excited = np.array([2 - 2j, 2.5 - 1.5j])
+    updated = ge.plot_ge_iq_density(ax, smaller_ground, smaller_excited, image=image)
+    assert list(ax.get_images()) == [image] and updated is image
+    i0, i1 = ax.get_xlim()
+    q0, q1 = ax.get_ylim()
+    assert -5 < i0 <= -2.5 and 2.5 <= i1 < 5
+    assert -4 < q0 <= -2 and 1.5 <= q1 < 3
+    assert ax.get_aspect() == 1.0
+    assert ax.get_title() == "Live GE"
+
+
+def test_fitted_snr_uses_joint_covariance_and_preserves_the_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signals = _known_joint_fit(
+        monkeypatch,
+        np.array([[0.25, 0.06, 0.02], [0.06, 0.16, -0.01], [0.02, -0.01, 0.04]]),
+    )
+    plots = Plots(NonPresentingHost())
+    try:
+        baseline = singleshot_ge_analysis(signals, angle=0.0, plots=plots)
+        assert "Fitted SNR" not in " ".join(t.get_text() for t in plots["fit"].texts)
+        fit_only = singleshot_ge_analysis(
+            signals,
+            angle=0.0,
+            options=GEFitOptions(raw_iq_diagnostic=True),
+        )
+        annotated = singleshot_ge_analysis(
+            signals,
+            angle=0.0,
+            options=GEFitOptions(raw_iq_diagnostic=True),
+            plots=plots,
+            figure_name="diagnostic",
+        )
+
+        for result in (fit_only, annotated):
+            assert result[0] == baseline[0]
+            np.testing.assert_array_equal(result[1], baseline[1])
+            assert result[2] == baseline[2]
+        assert len(plots["diagnostic"].axes) == 4
+        title = next(
+            (
+                line
+                for t in plots["diagnostic"].texts
+                for line in t.get_text().splitlines()
+                if line.startswith("Fitted SNR")
+            ),
+            "",
+        )
+        # J C J^T = 1.59. A diagonal-only estimate would display 1.19.
+        assert "Fitted SNR = 5 ± 1.26" in title
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
+@pytest.mark.parametrize(
+    "covariance",
+    [
+        pytest.param(
+            [[1.0, np.nan, 0.0], [np.nan, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            id="nonfinite-cross-term",
+        ),
+        pytest.param(np.diag([-0.1, 1.0, 1.0]), id="negative-diagonal"),
+        pytest.param(np.zeros((3, 3)), id="zero-variance"),
+        pytest.param(
+            [[1.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 0.01]],
+            id="negative-projection",
+        ),
+        pytest.param(np.diag([1.0, 1.0, 1e308]), id="overflowing-projection"),
+    ],
+)
+def test_fitted_snr_keeps_successful_figure_when_standard_error_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    covariance: NDArray[np.float64] | list[list[float]],
+) -> None:
+    signals = _known_joint_fit(monkeypatch, np.asarray(covariance))
+    plots = Plots(NonPresentingHost())
+    try:
+        singleshot_ge_analysis(
+            signals,
+            angle=0.0,
+            plots=plots,
+            options=GEFitOptions(raw_iq_diagnostic=True),
+        )
+        assert len(plots["fit"].axes) == 4
+        text = " ".join(t.get_text() for t in plots["fit"].texts)
+        assert "Fitted SNR = 5 ± unavailable" in text
+        assert "Readout length: unavailable" in text
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
 @pytest.mark.parametrize("error_type", [ValueError, RuntimeError])
 def test_ge_analysis_propagates_original_matplotlib_error(monkeypatch, error_type):
     from scipy.special import ndtri
@@ -356,7 +549,7 @@ def test_ge_analysis_propagates_original_matplotlib_error(monkeypatch, error_typ
     signals = np.asarray([-1 + noise + quadrature, 1 + noise + quadrature])
     fault = error_type("external scatter failure")
 
-    def fail_scatter(*args, **kwargs):
+    def fail_scatter(*_args, **_kwargs):
         raise fault
 
     monkeypatch.setattr(Axes, "scatter", fail_scatter)

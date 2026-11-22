@@ -67,13 +67,13 @@ status: accepted
 
 ### 真實 acquire 與模擬邊界
 
-**規則。** 真實硬體 acquire 不執行模擬模組，包括 `simulate` 及 `program.v2.simulation` 的排程器。共用估時留在中性的 `program` 工具。模擬 caller 明示 generator 必須綁到 charge drive line 時，由知道實體線路的 environment 驗證。Program 只將需求傳進 `AcquireRequest.charge_requirements`；`simulators.replay` 保存同一種 boundary record，不重做驗證。
+**規則。** 真實硬體 acquire 不執行模擬。`MyProgramV2` 只經 `SimulationAcquireMixin` 接入模擬，模擬專用的邏輯、參數與型別留在 `program.v2.simulation`，不進 Program 的共用取數介面。Lab 不向 Program 傳模擬專用參數。模擬環境依自己的接線與編譯所得的 generator 事件決定路由。
 
-**例子。** STIRAP 以 `ChargeDriveRequirement` 傳入診斷名稱和 generator index。名稱不是 role registry key，caller 不查環境設定或判斷線路成員。Single-fluxonium 每次 acquire 在 waveform 建構、preparation reuse 與 evolution 之前用 `drive_lines` 驗證；已綁 flux 或 readout 不算 charge，也不改其他合法 fast-flux 路由。見 [program 的模擬入口](../../lib/zcu_tools/program/v2/simulation/README.md)與 [single environment](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md)。
+**例子。** STIRAP 用同一個 `Schedule.run_acquire_summed` 呼叫在 FTF 或 Single-fluxonium 取數。編譯所得的 Pump 與 Stokes 事件已有 generator、載波與 envelope。模擬環境用這些事件與自身接線運算，不從脈衝名稱推斷角色，見 [Single-fluxonium 的完整時間軸](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#complete-timelines)。整數 request 的單輪時長也只供模擬 binding 使用，見 [ADR-0084〈模擬 round 時長〉](0084-simulation-integer-time-base.md#模擬-round-時長)。
 
-**邊界。** 硬體入口取走 keyword，不轉送 QICK、不建模擬 request、不做物理驗證；operator 核對實機線路。`white_noise` 沒有物理線路，接受但不驗證。Six 與 FTF 等不支援此需求的物理環境在 evolution 前拒絕非空需求，空需求不改流程。不清空需求、不從 waveform 猜角色、不擴張 `QubitWiringSchema`，也不另加 Protocol 或 `RunContext` capability。Program、experiment、simulators 與 lab 可 import `simulate.boundary` 的 record；載入型別不執行模擬，`simulate` 初始化只載入 numpy。C8、C9、C12、`simulate-closed` 與 `program-simulation-entry` 檢查依賴，program class 只能經入口使用模擬 frontend、timeline 與 adapter。真實 acquire 是否執行模擬仍要審閱執行路徑。
+**邊界。** `program-simulation-imports` 禁止 `zcu_tools.program` 在 `zcu_tools.program.v2.simulation` 之外直接 import `zcu_tools.simulate` 或 `zcu_tools.simulators`，包括兩者的子模組。既有 [`framework-no-simulators`](#分層) 不變，整個框架仍不得依賴 `zcu_tools.simulators`，mixin 也不例外。直接 import 檢查不取代執行路徑的審閱；docstring 仍可說明模擬時的行為。環境仍檢查 generator 與 ADC 路由，operator 仍核對實機接線。Experiment 的 Run 來源紀錄和 lab 使用的數值模型不屬於 Program，維持原狀。
 
-**依據。** 2026-10-26，使用者：「我不太希望真实 acquire 还会走模拟的模块。」2026-10-30，advisor 依授權「可以按需排task，我授權你代理」代裁：「驗證 owner 是 single_fluxonium 環境，在既有拒絕 unbound generator 的 preflight 位置一起檢查，早於任何 evolution。」未見使用者覆核這項代裁的紀錄。原裁決未附入庫討論，見 Git `d657120b9`。
+**依據。** 2026-10-26，使用者：「我不太希望真实 acquire 还会走模拟的模块。」2026-11-22，使用者：「据我所知啦，模拟器这个功能啊，应该只局限在一个 mixin 内，也就是说，如果把这个 mixin 拿掉，我的 program 就没有模拟功能。这个是解耦的设计。」「我认为这两处可能有违背了我的设计理念。对我来说，只要把这个 mixin 拿掉，我的 program 就不会有模拟的逻辑存在了。」Designer 依 2026-11-23 的授權代裁，移除僅供模擬端驗證的線路要求，並用 import contract 守住 Program 邊界，待使用者追認。比較與舊裁決見 [Program 的模擬邏輯只在 mixin 內](../discussions/2026-11-23-program-simulation-mixin.md)。
 
 ### Mux PFB channel 查詢與 carrier selection 的 owner
 

@@ -20,7 +20,7 @@ basis:
 
 使用者選擇用同一條規則處理 Run 和 Analyze 的一維掃描。沒有擬合曲線，量測點用折線連接。有擬合曲線，量測資料只畫點與可用的誤差棒。Spectrum 若能用原 shot 資料估計 SEM，也畫逐點誤差棒。這改掉了[原呈現規範](2026-11-22-presentation-rules.md)的峰位例外。類別軸不連線，IQ 散點與二維圖不套用這條規則。
 
-[ADR-0069〈呈現規範〉](../adr/0069-experiment-core-and-frontends.md#呈現規範)記錄裁決和責任分工。實驗呈現指南的 [R8](../../zcu_lab/v2/figure-style.md#r8圖型對應資料liveplot-標明進度)說明線型，[R11](../../zcu_lab/v2/figure-style.md#r11有-shot-sem-的一維資料畫-error-bar)說明誤差棒。
+[ADR-0069〈呈現規範〉](../adr/0069-experiment-core-and-frontends.md#呈現規範)記錄裁決和責任分工。實驗呈現指南的 [R8](../../zcu_lab/v2/figure-style.md#r8圖型對應資料liveplot-標明進度)說明線型，[R11](../../zcu_lab/v2/figure-style.md#r11一維資料的逐點誤差棒)說明誤差棒。
 
 ## 問題
 

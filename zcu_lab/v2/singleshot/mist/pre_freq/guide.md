@@ -14,7 +14,9 @@ Optional **Reset** → **Preparation pulse** at the swept RF frequency → **Opt
 
 ## How to read the results
 
-Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. Later library or form edits do not alter that result's correction. Compare the three traces versus preparation RF frequency. The lines join measured fractions, not fits. Bars show ±1 shot SEM from the g/e/Other counts at each point, not fit error or round-to-round scatter. Analyze propagates the sampling covariance through the correction when applied. Fewer than two shots or missing counts leave no bar.
+Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. Later library or form edits do not alter that result's correction. Compare the three traces versus preparation RF frequency. The lines join measured fractions, not fits. Bars show ±1 shot SEM from the g/e/Other counts at each point, not fit error or round-to-round scatter. Analyze uses the linear correction without clipping, so estimates can be below 0 or above 1. It propagates shot-count covariance with the saved calibration matrix treated as known. Fewer than two shots or missing counts leave no bar.
+
+If the saved matrix cannot produce finite corrected fractions, Analyze shows **Readout correction unavailable** and only the G/E/Other classified fractions from this Run, with shot SEM where available. These are counts after classification, before correction. When only a corrected bar is unavailable, the corrected point remains.
 
 ## Next step
 
