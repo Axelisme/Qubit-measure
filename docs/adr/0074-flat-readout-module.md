@@ -89,16 +89,6 @@ status: accepted
 
 **依據。** 2026-11-22，designer 代裁，使用者未覆核。比較、非零 offset 驗證及前例見 [Amp Rabi 的 shot moments](../discussions/2026-11-22-amp-rabi-shot-moments.md)。
 
-#### 選用 mux 各 tone 的校正 IQ 矩
-
-**規則。** 作者在建置 `MuxReadout` 前依參與順序選取 active tones，再以 `mux_iq_sums(prog, read)` 明示需要每個 tone 的校正六矩。Reducer 按該 cfg 的 tone 順序回傳 `(*point_dims, tones, 6)`，不按 ADC 編號排序。每個 ADC 使用自己的積分長度和當輪 QICK／PFB offset；只加總完成的 rounds。
-
-**例子。** Mux T1 先選原 tone 1 再選原 tone 0 時，第一列平均及線性投影 SEM 同取 tone 1 的校正 shots。SEM 使用完成 shots 的 N；N 小於 2 時不顯示誤差棒。
-
-**邊界。** 選取的 mux readout 在每發只做一次無條件積分。程式不含其他 ADC 讀取、edge counting 或 shot masks。此 reducer 不取跨 tone 外積，不放寬單 ADC opt-in，不改原生取數或分類。FTF 使用同一輪既有 required raw 路徑，不為了補誤差棒另取一批 shots。不要求同 seed 的 compact 與 required raw mean 逐值相同。
-
-**依據。** 2026-11-22，該點不確定度遵循使用者所說：「像我其实更想要设计的，其实应该是平均标准差，也就是这个点的预期误差。」Mux reducer 與矩保存細節由 designer 代裁，使用者未覆核。原始討論未入庫；取捨見 [Mux 逐 tone 校正 IQ 矩與 R11](../discussions/2026-11-22-mux-iq-moments-and-r11.md)。點平均的不確定度口徑見 [[0069]]〈呈現規範〉；完成輪與模擬 raw 發佈邊界見 [[0083]]。
-
 #### Herald reset 與逐 shot 遮罩
 
 **規則。** 只需篩選初態時，使用既有 `reset` 欄位選 herald，不另設欄位或實驗入口，也不做 FPGA active reset。Herald 與終端發射共用 readout 設定。Module 或作者只註冊遮罩來源，`program` 的取數層在每個完成 round 算遮罩，與 round hook 同層。所有 ADC 共用同一張 bool `(points, reps)` 遮罩，沒有讀取軸。多個來源依註冊順序執行，以 AND 合併；沒有來源時全為 True，取數結果逐位不變。註冊位置與 owner 見 [[0083]]〈Builder 與 Schedule 的職責〉。取數時檢查索引未超出編譯後的讀取數，宣告與形狀見 [Registered shot masks](../../lib/zcu_tools/program/README.md#registered-shot-masks)。

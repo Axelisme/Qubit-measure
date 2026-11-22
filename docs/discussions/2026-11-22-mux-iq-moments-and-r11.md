@@ -3,7 +3,7 @@ date: 2026-11-22
 status: active
 superseded_by: null
 related:
-  - ../adr/0074-flat-readout-module.md#選用-mux-各-tone-的校正-iq-矩
+  - ../../lib/zcu_tools/program/v2/README.md#mux-iq-sums
   - ../adr/0069-experiment-core-and-frontends.md#呈現規範
   - ../../lib/zcu_tools/program/README.md
 basis:
@@ -15,7 +15,7 @@ basis:
 
 ## 結論
 
-這次用了明示選用的 `mux_iq_sums`。Mux Amp Rabi、Len Rabi 和 T1 以同一批校正 shots 算平均和線性投影的 SEM。只合併完成的 rounds，結果依選取的 tone 順序排列。原生資料把矩存為可選欄位，舊檔仍可讀。寫成產品契約的範圍見 [ADR-0074](../adr/0074-flat-readout-module.md#選用-mux-各-tone-的校正-iq-矩)。
+這次用了明示選用的 `mux_iq_sums`。Mux Amp Rabi、Len Rabi 和 T1 以同一批校正 shots 算平均和線性投影的 SEM。只合併完成的 rounds，結果依選取的 tone 順序排列。原生資料把矩存為可選欄位，舊檔仍可讀。寫成產品契約的範圍見 [Program v2 的 Mux IQ sums](../../lib/zcu_tools/program/v2/README.md#mux-iq-sums)。
 
 ## 問題
 
