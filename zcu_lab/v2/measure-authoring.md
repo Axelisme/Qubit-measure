@@ -517,6 +517,15 @@ Wheel 收錄 `zcu_lab` 下的 Markdown、PNG 與 JPG。新增或刪除實驗時�
 
 ## Readout 分析與 writeback
 
+Core 回傳分析品質，圖依 [R3b](figure-style.md#r3b結果旁寫-fit-品質) 呈現已回傳的品質值。
+有既有判準時，由 adapter 決定 proposal 的初選與理由。Draft 複製這兩個欄位，
+[writeback preview](../../lib/zcu_tools/gui/app/measure/writeback/README.md#initial-selection-and-notes) 顯示結果，不重判品質。
+
+若只改 adapter 的寫回政策，在 scratch 用來源 `RunRecord`、分析結果與固定 context 組成 `WritebackRequest`，
+呼叫公開的 `adapter.get_writeback_items`，核對 proposal 的 `selected` 與 `note`，不執行 Apply。
+GUI 的 [`AnalyzeService`](../../lib/zcu_tools/gui/app/measure/services/analyze.py) 呼叫 `get_writeback_items` 後，
+才把 proposals 交給 `WritebackService.create_draft`。`analysis_stage` 只呼叫 core，不經這個接縫。
+
 ro-optimize 與 reset 的 peak-picking adapter 以 `smooth_method` 提供 `wavelet` / `gaussian`
 選擇，預設 `wavelet`；`smooth` 在 GUI 標為 smoothing strength，不再只代表 Gaussian sigma。
 twotone `ro_optimize/length` 的 GUI analyze param 對外命名為 `duration_t0`，表示

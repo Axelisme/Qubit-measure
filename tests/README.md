@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-22，UI 與實驗圖驗收導覽
+**Last updated:** 2026-11-23，實驗圖與寫回提案驗收
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -89,8 +89,12 @@ API 的輸入、輸出、生成器與比較規則由上述 experiment probe 文�
 
 Stage probe 驗 core 與資料存檔，不經 adapter 或 GUI lifecycle。
 `analysis_stage` 直接呼叫 `Experiment.analyze`，不驗 GUI 的 [capability](../zcu_lab/v2/gui-contracts.md#capability-宣告與實作)，
-也不驗 [lifecycle hooks](../zcu_lab/v2/gui-contracts.md#共用-lifecycle-hooks) 如何建立 Analyze options 與發布摘要。
+也不驗 [lifecycle hooks](../zcu_lab/v2/gui-contracts.md#共用-lifecycle-hooks) 如何建立 Analyze options 與發布摘要，且不建立 writeback draft。
 階段通過不等於完成 [R0 讀者包](../zcu_lab/v2/figure-style.md#組讀者包)，也不能用不同 Run 的圖和摘要補齊要求同次 Run 的代表驗收。
+
+若只改 adapter 的寫回初選或理由，在 scratch 依
+[作者指南〈Readout 分析與 writeback〉](../zcu_lab/v2/measure-authoring.md#readout-分析與-writeback)
+核對公開 proposal 的 `note` 和 `selected`。框架的寫回測試仍使用合成 adapter。
 
 Agent 在 review-done 前完成下列檢查，將證據留在 task scratch，不新增個別實驗的 durable tests：
 
@@ -102,6 +106,9 @@ Agent 在 review-done 前完成下列檢查，將證據留在 task scratch，不
 3. 將選用階段的每張 PNG 保存到 scratch，親自開啟並逐張記錄路徑、預期畫面與實際判讀。
    核對曲線或熱圖、軸標、單位、圖例及本次變更影響的外觀。
    只有檔案存在或數值結果通過不算看圖驗收。預期有圖卻未產生時，記錄為驗收缺口。
+
+Analyze-only probe 的 Agg PNG 按原圖尺寸輸出，可核對該圖的 legend 等改動。
+這不等於驗過 [R7](../zcu_lab/v2/figure-style.md#r7用-gui-與存檔的實際尺寸檢查版面) 的 Data 閱讀面、其他 GUI 繪圖面或匯出 PNG。
 
 環境建構與清理由 [probe API 契約](../lib/zcu_tools/experiment/README.md#offline-experiment-probe) 規範，腳本須覆蓋失敗路徑。
 離線驗收不代表實機校準或物理模型已獲驗證。
