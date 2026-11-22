@@ -183,7 +183,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         ):
             line.set(label=label, color=color, marker="o", markersize=3)
             bars.set_color(color)
-        ax.legend(loc="best")
+        figure.legend(loc="outside lower center", ncols=3)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
