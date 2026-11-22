@@ -31,7 +31,7 @@ from zcu_tools.program.v2.modules.readout import (
     require_circle_classifiers,
 )
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
@@ -173,15 +173,17 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         figure, ax = context.plots.subplots(num="measurement", layout="constrained")
         progress = figure.suptitle("MIST gain scan · qubit · classified populations")
         ax.set(xlabel="MIST drive gain (a.u.)", ylabel="Outcome probability")
-        viewer = live_line(ax, num_lines=POPULATION_COUNT)
-        for line, label, color in zip(
+        viewer = live_errorbar(ax, num_lines=POPULATION_COUNT)
+        for line, bars, label, color in zip(
             ax.lines,
+            ax.collections,
             ("P(g)", "P(e)", "P(other)"),
             ("tab:blue", "tab:red", "tab:green"),
             strict=True,
         ):
             line.set(label=label, color=color, marker="o", markersize=3)
-        ax.legend(loc="best")
+            bars.set_color(color)
+        figure.legend(loc="outside lower center", ncols=3)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
@@ -191,7 +193,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 f"MIST gain scan · qubit · classified populations\n"
                 f"{np.count_nonzero(totals > 0)}/{totals.size} points acquired"
             )
-            return (progress, *viewer.set(gains, (data / totals[..., None]).T))
+            covariance = class_probability_covariance(data)
+            sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
+            return (progress, *viewer.set(gains, (data / totals[..., None]).T, sem.T))
 
         figure.show()
         buffer = SignalBuffer(

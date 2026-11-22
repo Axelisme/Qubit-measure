@@ -271,9 +271,6 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
         if result.iq_moments is None:
             sem = np.full(projected.shape, np.nan)
         else:
-            counts, _ = split_sums(result.iq_moments)
-            retained = np.nanmax(counts, initial=0)
-            title = f"{title} · {retained:.0f} retained shots/point"
             sem = iq_shot_sem(result.iq_moments, direction=(i, q))
 
         # 2. Redraw the terminal view without presenting it or estimating a calibration.

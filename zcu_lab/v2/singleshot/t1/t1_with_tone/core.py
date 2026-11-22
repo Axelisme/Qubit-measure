@@ -37,7 +37,7 @@ from zcu_tools.program.v2 import (
     shot_sums,
 )
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
@@ -190,18 +190,21 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             layout="constrained",
         )
         progress = figure.suptitle("T1 with tone · qubit · classified populations")
-        lines = [live_line(ax) for ax in figure.axes]
+        viewers = [live_errorbar(ax) for ax in figure.axes]
         for ax, (branch, state, color) in zip(figure.axes, _PANELS, strict=True):
             ax.set(
                 xlabel="Probe exposure time (µs)", ylabel=f"P({state})", title=branch
             )
             ax.lines[0].set(color=color, marker="o", markersize=3)
+            ax.collections[0].set_color(color)
 
         @plots.on_plot_thread
         def update(counts: NDArray[np.float64]):
             """Show acquired class fractions and the number of populated cells."""
             totals = counts.sum(axis=-1)
             populations = counts / totals[..., None]
+            covariance = class_probability_covariance(counts)
+            sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
             progress.set_text(
                 f"T1 with tone · qubit · classified populations\n"
                 f"{np.count_nonzero(totals > 0)}/{totals.size} preparation–time points acquired"
@@ -210,9 +213,11 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                 progress,
                 *(
                     artist
-                    for index, viewer in enumerate(lines)
+                    for index, viewer in enumerate(viewers)
                     for artist in viewer.set(
-                        lengths, populations[:, index // 3, index % 3][None, :]
+                        lengths,
+                        populations[:, index // 3, index % 3],
+                        sem[:, index // 3, index % 3],
                     )
                 ),
             )

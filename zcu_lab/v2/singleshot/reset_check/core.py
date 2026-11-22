@@ -29,7 +29,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.readout import require_circle_classifiers
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
@@ -190,15 +190,18 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             layout="constrained",
         )
         progress = figure.suptitle("Reset check · qubit · classified populations")
-        viewers = [live_line(ax, num_lines=POPULATION_COUNT) for ax in figure.axes]
+        viewers = [live_errorbar(ax, num_lines=POPULATION_COUNT) for ax in figure.axes]
         for ax, branch in zip(figure.axes, BRANCH_LABELS, strict=True):
             ax.set(
                 xlabel="Qubit drive gain (a.u.)",
                 ylabel="Outcome probability",
                 title=branch,
             )
-            for line, (state, color) in zip(ax.lines, _STATES, strict=True):
+            for line, bars, (state, color) in zip(
+                ax.lines, ax.collections, _STATES, strict=True
+            ):
                 line.set(label=f"P({state})", color=color, marker="o", markersize=3)
+                bars.set_color(color)
             ax.legend(loc="best")
 
         @context.plots.on_plot_thread
@@ -210,12 +213,14 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
                 f"{np.count_nonzero(totals > 0)}/{totals.size} gain–branch points acquired"
             )
             populations = data / totals[..., None]
+            covariance = class_probability_covariance(data)
+            sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
             return (
                 progress,
                 *(
                     artist
                     for i, viewer in enumerate(viewers)
-                    for artist in viewer.set(gains, populations[:, i].T)
+                    for artist in viewer.set(gains, populations[:, i].T, sem[:, i].T)
                 ),
             )
 

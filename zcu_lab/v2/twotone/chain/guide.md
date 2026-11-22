@@ -49,6 +49,7 @@ Stop the run when the peaks are clear. Stop keeps the sums of completed rounds. 
 Analysis recomputes the sigma curve from the saved sums and fits one peak with the shared numerical spectrum fitter.
 This experiment retains its own options: `expected_center_mhz` selects the nearest candidate, blank selects the most prominent, and `min_prominence`, `min_snr`, `min_width_samples` and `min_distance_mhz` gate the candidates.
 The fit window ends halfway to neighbouring candidates and needs at least six samples.
+If it spans at most half the measured scan, the overview shades it and a second panel shows the fit and measured points in that window.
 The local-maximum selection and six-half-width window of `twotone/freq` do not apply here.
 Keep `model_type` at `lor`; the sigma curve is never negative, so it cannot show the opposite-signed sidelobes that the `sinc` model fits.
 The fit uses the same RF frequency and evidence-above-background axes as Run. The dashed gray line is the 5% false-mark level; gray triangles show any other candidates and the dotted fit-color line marks the fitted center. Candidate SNR shows the chosen peak's height above the median divided by the estimated noise sigma, not the likelihood that the fitted model is correct.

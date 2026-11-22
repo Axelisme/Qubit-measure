@@ -480,7 +480,9 @@ def fit_and_plot_t1(
         xs = times[options.skip :][finite]
         signal = signal[finite]
         tone = f"Tone {index}" if tone_names is None else tone_names[index]
-        fig, ax = plots.subplots(num=f"fit_{index}", figsize=(7, 5))
+        fig, ax = plots.subplots(
+            num=f"fit_{index}", figsize=(7, 5), layout="constrained"
+        )
         ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
         fig.suptitle(f"Mux T1 · {tone} · IQ contrast")
         real, sem = project_iq(
@@ -543,8 +545,7 @@ def fit_and_plot_t1(
         else:
             _plot_t1_fit(ax, xs, tuple(params), outcome)
             outcomes.append(outcome)
-        ax.legend()
-        fig.tight_layout()
+        fig.legend(loc="outside lower center", ncols=2)
     return tuple(outcomes)
 
 

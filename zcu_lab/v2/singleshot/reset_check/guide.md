@@ -44,6 +44,8 @@ Reps are shots per gain per branch per round; rounds average repeated hardware s
 
 ## Reading the figures
 
+Run shows raw class probabilities. Each bar is one shot SEM from the counts retained at that point. Fewer than two retained shots give no bar.
+
 Compare P(g) and P(Other) at the same gain across the three branch panels. The Reset only panel reports mean and maximum P(e) across the scan, not a new calibration. Read the branch contrast at the intended π gain when judging the tested reset. If the prepared e population is low without reset, adjust the π pulse first. Analyze draws shot SEM from each measured branch's retained class counts, with the covariance propagated through saved readout correction when available.
 
 **Last updated:** 2026-11-22

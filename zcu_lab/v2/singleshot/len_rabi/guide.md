@@ -12,6 +12,8 @@ Native arb waveforms have an asset-derived length and raise ValueError before sc
 
 Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1. Length sweep is 0.03 µs to 4 * `$qubit.module.x180.waveform.length`.
 
+When the Live preview is enabled, its bars show one shot SEM of the raw class fractions from the same shots. Fewer than two retained shots give no bar.
+
 Raw acquisition and joint fitting require one ADC: Pulse or a single-tone Mux. Live preview uses that readout's circle classifier under Readout → Advanced. Without a classifier, Run still collects raw IQ and Analyze still fits; only the population preview is skipped. A supplied linear classifier cannot show Other; a circle without radius prompts singleshot GE Post.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
