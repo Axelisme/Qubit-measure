@@ -1,4 +1,4 @@
-"""Continuous-flux Lindblad integration in fixed row bases."""
+"""Continuous-flux Lindblad integration with quantized secular baths."""
 
 from dataclasses import dataclass
 from typing import NamedTuple
@@ -16,7 +16,6 @@ from ._dop853_data import (
     Models,
     Segments,
     fill_hamiltonian,
-    full_dissipator,
     pack_models,
 )
 from ._dop853_intervals import playback_time
@@ -129,8 +128,6 @@ def _rhs(time, state, context):
             derivative[target, target] += (
                 models.rates[model, target, source] * rho[source, source]
             )
-    if models.jump_offsets[model + 1] > models.jump_offsets[model]:
-        derivative += full_dissipator(rho, models, model)
     return derivative.ravel()
 
 
@@ -190,9 +187,8 @@ class FluxDOP853Kernel:
     source and expansion). prepare retains the immutable expansion and source's
     thread-safe model cache, never density. apply packs only unique used bath
     levels; model references/workspaces are outside Prepared.nbytes, as for the
-    other kernels. Operators and states use each row's bath eigenbasis. The
-    expansion is transformed into that basis; explicit jumps stay constant
-    there. Chained rows switch basis at boundaries. The shared single-threaded, nogil DOP853
+    other kernels. Operators and states use each row's bath eigenbasis. Chained
+    rows switch basis at boundaries. The shared single-threaded, nogil DOP853
     core stops at each active envelope/flux knot and restarts a deterministic
     initial step. Each interval limits only its own steps. Source-coordinate
     endpoints preserve event sides without imposing their gap on the full row.
@@ -208,27 +204,14 @@ class FluxDOP853Kernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> NDArray[np.bool_]:
-        """Accept driven rows with samples and require a matching expansion for full loss."""
+        """Accept driven rows with samples; engine owns flux-change routing."""
         source, budget = context.source, context.budget
         tolerances(budget)
+        del source
         available = np.full(len(rows), table.flux_waveform is not None)
         if table.flux_waveform_available is not None:
             available &= table.flux_waveform_available[table.timeline[rows]]
-        driven = (table.tones[rows] > 0) & available
-        full = driven & table.full_loss[rows]
-        if np.any(full):
-            try:
-                expansion = source.flux_expansion()
-            except ValueError:
-                driven[full] = False
-            else:
-                driven[full] = (
-                    expansion.static.shape == source.initial_density.shape
-                    and all(
-                        term.loop < table.level.shape[1] for term in expansion.terms
-                    )
-                )
-        return driven
+        return (table.tones[rows] > 0) & available
 
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext

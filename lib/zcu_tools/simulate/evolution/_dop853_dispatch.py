@@ -1,11 +1,10 @@
-"""Direct-solver routing, frame and chain decisions."""
+"""Timeline-wide frame and chain decisions for the direct solvers."""
 
 from dataclasses import replace
 
 import numpy as np
 from numpy.typing import NDArray
 
-from ._planning import Geometry
 from .kernel import KernelContext, RowPlan, SegmentTable
 from .kernels._dop853 import DP54_MIN_BUDGET
 from .kernels._dop853_opencl import ROWS_PER_BATCH, OpenCLBackend
@@ -19,29 +18,6 @@ _MAX_OPENCL_DURATION_NS = 10_000.0
 # Arc d=24/d=32 simultaneous-drive medians were 0.68/0.61 of DOP853 wall.
 # Use the slower factor for matrix work, not for launch or per-trial floors.
 _DP54_GPU_WORK_SCALE = 0.68
-
-
-def full_loss_candidates(
-    geometry: Geometry, rows: NDArray[np.int64]
-) -> tuple[tuple[str, NDArray[np.int64], tuple[str, ...]], ...]:
-    """Return (domain, global rows, family names) for explicit jumps in scope.
-
-    Fixed rows without a waveform offer CPU dop853. Only driven rows with a
-    waveform for that timeline can try CPU flux_dop853. Refusals come first;
-    dispatch owns allowlist filtering and the kernel checks the expansion.
-    """
-    table = geometry.table
-    full = rows[table.full_loss[rows]]
-    moving = geometry.flux_drive[full]
-    flux = full[moving]
-    driven = (table.tones[flux] > 0) & (table.flux_waveform is not None)
-    if table.flux_waveform_available is not None:
-        driven &= table.flux_waveform_available[table.timeline[flux]]
-    return (
-        ("full_loss_flux", flux[~driven], ()),
-        ("full_loss_flux", flux[driven], ("flux_dop853",)),
-        ("full_loss", full[~moving], ("dop853",)),
-    )
 
 
 def with_opencl(context: KernelContext, backend: OpenCLBackend | None) -> KernelContext:

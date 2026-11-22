@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-22, collapse operators with driven continuous flux
+**Last updated:** 2026-11-22, explicit collapse operators and physical v2
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -140,10 +140,8 @@ policy changes.
 Import records and functions from `zcu_tools.simulate.evolution`.
 `SecularModel` supplies energy-basis Hamiltonians, drive quadratures, directional
 rates and pure dephasing. It can also supply full complex collapse operators
-for fixed-flux CPU `dop853` or driven continuous-flux CPU `flux_dop853`.
-`ModelSource` provides the row bases at quantized flux levels and the separate
-Hamiltonian expansion for continuous flux. Energies use H/h in GHz, time is ns
-and phase is radians.
+for fixed-flux CPU `dop853`. `ModelSource` provides these models at quantized flux
+levels. Energies use H/h in GHz, time is ns and phase is radians.
 
 `Engine.evolve` takes a `ModelSource` with the initial DC density and a sequence
 of `TimelineBatch` records. It returns densities at readout start in the DC

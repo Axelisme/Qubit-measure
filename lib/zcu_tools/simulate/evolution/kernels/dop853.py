@@ -17,7 +17,6 @@ from ._dop853_data import (
     Segments,
     drive_amplitude,
     fill_hamiltonian,
-    full_dissipator,
     pack_models,
 )
 from ._dop853_intervals import playback_time
@@ -99,6 +98,15 @@ class DOP853Prepared:
 
 
 @njit(nogil=True, cache=True)
+def _full_dissipator(rho, models, model):
+    loss = models.loss[model] @ rho
+    result = -0.5 * (loss + loss.conj().T)
+    for index in range(models.jump_offsets[model], models.jump_offsets[model + 1]):
+        result += models.jumps[index] @ rho @ models.jumps_adjoint[index]
+    return result
+
+
+@njit(nogil=True, cache=True)
 def _rhs(time, state, context):
     drive, h, product, derivative = context
     size = drive.models.energies.shape[1]
@@ -123,7 +131,7 @@ def _rhs(time, state, context):
         drive.models.jump_offsets[drive.model + 1]
         > drive.models.jump_offsets[drive.model]
     ):
-        derivative += full_dissipator(rho, drive.models, drive.model)
+        derivative += _full_dissipator(rho, drive.models, drive.model)
     return derivative.ravel()
 
 
@@ -204,7 +212,7 @@ def _interaction_rhs(time, state, context):
         # Apply the lab-basis dissipator to the unrotated state, then rotate
         # it back. This transforms the recycling and anticommutator together.
         rotation = phases[:, None] * phases.conj()[None, :]
-        derivative += rotation * full_dissipator(rotation.conj() * rho, models, model)
+        derivative += rotation * _full_dissipator(rotation.conj() * rho, models, model)
     return derivative.ravel()
 
 

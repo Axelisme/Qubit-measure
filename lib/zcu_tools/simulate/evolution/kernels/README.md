@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-22，變動磁通的完整 collapse operators
+**Last updated:** 2026-11-22，CPU DOP853 的完整 collapse operators
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -43,8 +43,7 @@ Scheduler 只建構獲選的 key。Key 不含起始相位，同一次 evolve 的
 建構不跑密度精度探針。數值失敗向呼叫端拋出，不改用其他 family。
 
 `dop853.advance_endpoints` 擁有旋轉座標 density 積分。
-固定 flux 且無波形的完整 collapse operators 走 CPU `dop853`。有 active tone、該點有波形及相符 expansion 時走 CPU `flux_dop853`。
-兩者共用完整 dissipator：保留每個算符的 recycling 和 anticommutator。固定 flux 的旋轉座標對兩項一起換基。變動 flux 把 H(t) 轉進固定的 row 基底，L 留在同一個基底。
+固定 flux 的完整 collapse operators 走 CPU DOP853。RHS 保留每個算符的 recycling 和 anticommutator；旋轉座標的兩項一起換基。
 其餘 `dop853` 的 CPU row 和符合 [OpenCL 條件](../README.md#gpu-backend)的 row，在時長 ≤10 µs 且 budget ≥1e-3 時走 DP5(4)，兩個局部容差都除以三。
 [共用 solver](_dop853.py) 提供兩套 tableau 與 controller 常數。兩種方法在各自的裝置上共用積分迴圈、RHS 與 knot 停點。
 `t6` direct、period fractional tail 與 `flux_dop853` 仍用 DOP853。
