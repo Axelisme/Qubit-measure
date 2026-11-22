@@ -165,6 +165,7 @@
 
 ## Measure UI
 
+- 2026-11-23 [Single-shot T1 的兩個衰減時間與 tone Stop 初值](2026-11-23-singleshot-t1-relaxation-times.md)：讀圖語意。圖由短到長列出兩個模型衰減時間，寫回仍提議較短值供 tone Stop 取五倍。
 - 2026-11-23 [一維反演量的誤差棒與圖上事實](2026-11-23-inverted-error-bars-and-figure-facts.md)：圖形呈現。可傳遞 shot 共變異的一維反演量也畫棒；圖呈現品質值，寫回建議留在 Writeback。
 - 2026-11-23 [一維讀出校正無解時保留分類比例](2026-11-23-singular-readout-analysis.md)：Analyze 失敗語意。六個 circle 入口保留同次分類圖，不交付校正數值、擬合或寫回提議。
 - 2026-11-23 [圖磚沿用存檔幾何](2026-11-23-figure-fixed-geometry.md)：圖形呈現。各面以 12×9 in 排版後等比嵌入。R7 只在固定幾何的 PNG 驗版面，Data 保留縮圖選圖與 `View figure`。
