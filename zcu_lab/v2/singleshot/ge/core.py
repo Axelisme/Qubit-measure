@@ -8,6 +8,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.legend import Legend
 from matplotlib.patches import Polygon
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
@@ -421,7 +422,8 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
 
-        figure, axes = context.plots.subplots(num="measurement")
+        figure, axes = context.plots.subplots(num="measurement", layout="constrained")
+        legend: Legend | None = None
 
         @context.plots.on_plot_thread
         def update(clouds: NDArray[np.complex128]):
@@ -430,6 +432,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
             Read scan-shaped samples without changing them. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
+            nonlocal legend
             axes.clear()
             for cloud, label, color in zip(
                 clouds,
@@ -448,10 +451,9 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
                 title="Single-shot GE · qubit readout · IQ clouds",
             )
             axes.set_aspect("equal", adjustable="datalim")
-            axes.legend(
-                title=f"Accumulated shots: {off} off, {on} on (count)",
-                loc="upper center",
-            )
+            if legend is None:
+                legend = figure.legend(loc="outside lower center", ncols=2)
+            legend.set_title(f"Accumulated shots: {off} off, {on} on (count)")
             return (figure,)
 
         figure.show()

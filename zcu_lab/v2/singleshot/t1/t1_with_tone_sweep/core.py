@@ -6,6 +6,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -39,6 +40,8 @@ from zcu_tools.program.v2.modules.readout import require_circle_classifiers
 from zcu_tools.progress_bar import make_pbar
 
 from zcu_lab.v2.support import live_heatmap
+
+_RF_XLABEL = "Probe RF frequency (MHz)"
 
 
 @dataclass(frozen=True)
@@ -107,6 +110,9 @@ def _plot_transition_rates(
         ax.set_ylabel("Transition rate (µs⁻¹)")
         ax.set_yscale("log")
         ax.set_xlim(xs[0], xs[-1])
+        if xlabel == _RF_XLABEL:
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=3))
+            ax.ticklabel_format(axis="x", style="plain", useOffset=False)
 
 
 def _require_positive_lengths(lengths: NDArray[np.float64]) -> None:
@@ -305,6 +311,9 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                 ylabel="Probe exposure time (µs)",
             )
             ax.grid(False)
+            if xlabel == _RF_XLABEL:
+                ax.xaxis.set_major_locator(MaxNLocator(nbins=3))
+                ax.ticklabel_format(axis="x", style="plain", useOffset=False)
             heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
         figure.colorbar(
             figure.axes[0].images[0], ax=figure.axes, label="Probability (0–1)"
@@ -344,9 +353,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         _require_positive_lengths(lengths)
 
         # 2. Display the same probability scale for all six preparation/outcome pairs.
-        xlabel = (
-            "Probe gain (a.u.)" if sweep_name == "gain" else "Probe RF frequency (MHz)"
-        )
+        xlabel = _RF_XLABEL if sweep_name == "freq" else "Probe gain (a.u.)"
         progress, heatmaps = self._make_viewers(context.plots, xlabel)
 
         @context.plots.on_plot_thread
@@ -454,9 +461,10 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         # 2. Fit both preparations together, then choose the displayed outer axis.
         rates, rate_Covs = _fit_transition_rates(Ts, populations)
 
+        # The RF adapter supplies its label even when a Load could not restore cfg.
         if not xlabel:
             xlabel = (
-                "Probe RF frequency (MHz)"
+                _RF_XLABEL
                 if source.cfg is not None and source.cfg.freq is not None
                 else "Probe gain (a.u.)"
             )
@@ -483,6 +491,9 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                 ylabel="Probe exposure time (µs)",
             )
             ax.grid(False)
+            if xlabel == _RF_XLABEL:
+                ax.xaxis.set_major_locator(MaxNLocator(nbins=3))
+                ax.ticklabel_format(axis="x", style="plain", useOffset=False)
             viewer = live_heatmap(ax, uniform=False, clim=(0.0, 1.0))
             viewer.set(xs, Ts, populations[:, index // 3, :, index % 3])
         fig.colorbar(fig.axes[0].images[0], ax=fig.axes, label="Probability (0–1)")
