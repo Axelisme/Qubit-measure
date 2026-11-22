@@ -30,4 +30,8 @@ Live 橫軸為基準 RF + 名目 offset (MHz)，縱軸為平均 IQ 幅度，不�
 
 Writeback 更新成功 tone 的 readout RF，另提 readout slot 與對應 resonator 的 freq、κ、背景相位和適用的路徑 delay；失敗或未量 tone 原值不變。完整 resonator 數和 readout 數不符時沒有逐 resonator 提案。重複目的地須只選一列。Load 缺歷史 cfg 時無法 FIT；沒有該 Run/Load 的參數來源時可檢查結果，但不能套用候選。
 
-用這份 readout 做 herald 前，從 `post_delay = 5/(2π·min κ)` µs 起步（κ 用 MHz，等待從 readout 波形結束起算）。等待太短時，殘留腔光子會使名目 Xπ 失準。Herald 後打名目 Xπ，保持其餘設定不變，和更長等待比較終端 e 比例；若比例仍上升，先調整等待再做 heralded 掃描。FIT 不會校準這段等待。共用操作見 [zcu_lab/v2/operator-workflow.md](../../operator-workflow.md)。
+用這份 readout 做 herald 前，從 `post_delay = 5/(2π·min κ)` µs 起步。κ 用 MHz，等待從 readout 波形結束起算。等待太短時，殘留腔光子會使名目 Xπ 失準。
+在 [Joint readout](../../two_qubit/joint_readout/guide.md) 用同一份完整 readout 做 g,g herald，對目標 qubit 打名目 Xπ、另一顆打 I。將該列目標 qubit 分到 e 的欄位加總，得到 herald 通過後的終端 e 比例。
+只延長 `post_delay` 再比較；若比例仍上升，先調整等待再做 heralded 掃描。FIT 不會校準這段等待。
+
+共用操作見 [zcu_lab/v2/operator-workflow.md](../../operator-workflow.md)。
