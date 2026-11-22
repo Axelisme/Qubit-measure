@@ -18,6 +18,7 @@ def captured_phase_pair(ctx: FormContext, qubits: CapturedQubits) -> dict[str, E
         raise ValueError("CZ phase pair requires a fixed parameter capture")
     root = "$coupler.ext.cz_phase"
     for position, name in (("qubit1", qubits.qubit1), ("qubit2", qubits.qubit2)):
+        # Persistent names: $coupler.ext.cz_phase.qubit1 and $coupler.ext.cz_phase.qubit2.
         path = f"{root}.{position}"
         source = parameters.lookup(path)
         if not source.present:
@@ -26,6 +27,8 @@ def captured_phase_pair(ctx: FormContext, qubits: CapturedQubits) -> dict[str, E
             raise ValueError(
                 f"{path} names {source.value!r}; expected ${position}={name!r}"
             )
+    # Persistent names: $coupler.ext.cz_phase.correction_qubit1_deg
+    # and $coupler.ext.cz_phase.correction_qubit2_deg.
     return {
         "correction_qubit1_deg": Expr(f"{root}.correction_qubit1_deg"),
         "correction_qubit2_deg": Expr(f"{root}.correction_qubit2_deg"),

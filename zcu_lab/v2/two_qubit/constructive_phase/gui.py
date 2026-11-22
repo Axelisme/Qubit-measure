@@ -59,6 +59,7 @@ def _get_writeback_items(
     if snapshot is None or phase is None or not np.isfinite(phase):
         return []
     coupler = parameters.resolve_path("$coupler")
+    # Grep bridge for the pulse proposal: $coupler.pulses.cz_qubit2
     target = f"{coupler}.pulses.cz_qubit2"
     key = parameters.library_key(target)
     return [
@@ -69,6 +70,7 @@ def _get_writeback_items(
             field_updates=(("phase", float(snapshot.drive.qubit1.phase) + phase),),
         ),
         ParameterWriteback(
+            # Grep bridge for the slot proposal: $coupler.module.cz_qubit2
             target_name=f"{coupler}.module.cz_qubit2",
             description="Qubit2 CZ pulse slot, independent Apply row",
             proposed_value=key,
