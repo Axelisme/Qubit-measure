@@ -38,8 +38,10 @@ from zcu_tools.program.v2 import (
 
 from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.singleshot.population_analysis import (
+    CLASSIFIED_FIGURE,
+    UNAVAILABLE_NOTICE,
+    ReadoutSeries,
     circle_readout_series,
-    plot_t1_classified_fractions,
 )
 
 POPULATION_STATES = (0, 1, 2)
@@ -54,6 +56,35 @@ _PANELS = (
     ("With π pulse", "e", "tab:red"),
     ("With π pulse", "other", "tab:green"),
 )
+
+
+def _plot_classified_fractions(
+    plots: Plots, delays: NDArray[np.float64], series: ReadoutSeries
+) -> None:
+    fig, _ = plots.subplots(
+        num=CLASSIFIED_FIGURE, nrows=2, ncols=3, figsize=(10, 6), layout="constrained"
+    )
+    fig.suptitle(f"T1 with tone · qubit · classified fractions\n{UNAVAILABLE_NOTICE}")
+    for index, (ax, (branch, state, color)) in enumerate(
+        zip(fig.axes, _PANELS, strict=True)
+    ):
+        prep, outcome = divmod(index, 3)
+        ax.errorbar(
+            delays,
+            series.values[:, prep, outcome],
+            yerr=series.sem[:, prep, outcome],
+            fmt="o",
+            markersize=3,
+            capsize=2,
+            color=color,
+            label="Data ± shot SEM",
+        )
+        ax.set(
+            xlabel="Probe exposure time (µs)",
+            ylabel=f"Fraction ({state})",
+            title=branch,
+        )
+    fig.axes[2].legend(loc="best", fontsize=10)
 
 
 @dataclass(frozen=True)
@@ -370,14 +401,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             populations, result.counts[skip:], confusion_matrix
         )
         if series.correction_unavailable:
-            plot_t1_classified_fractions(
-                plots,
-                lens,
-                series,
-                _PANELS,
-                title="T1 with tone",
-                xlabel="Probe exposure time (µs)",
-            )
+            _plot_classified_fractions(plots, lens, series)
             return None
 
         populations, sem = series.values, series.sem

@@ -36,8 +36,10 @@ from zcu_tools.program.v2 import (
 
 from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.singleshot.population_analysis import (
+    CLASSIFIED_FIGURE,
+    UNAVAILABLE_NOTICE,
+    ReadoutSeries,
     circle_readout_series,
-    plot_t1_classified_fractions,
 )
 from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
@@ -53,6 +55,35 @@ _PANELS = (
     ("With π pulse", "e", "tab:red"),
     ("With π pulse", "other", "tab:green"),
 )
+
+
+def _plot_classified_fractions(
+    plots: Plots, delays: NDArray[np.float64], series: ReadoutSeries
+) -> None:
+    fig, _ = plots.subplots(
+        num=CLASSIFIED_FIGURE, nrows=2, ncols=3, figsize=(10, 6), layout="constrained"
+    )
+    fig.suptitle(f"Single-shot T1 · qubit · classified fractions\n{UNAVAILABLE_NOTICE}")
+    for index, (ax, (branch, state, color)) in enumerate(
+        zip(fig.axes, _PANELS, strict=True)
+    ):
+        prep, outcome = divmod(index, 3)
+        ax.errorbar(
+            delays,
+            series.values[:, prep, outcome],
+            yerr=series.sem[:, prep, outcome],
+            fmt="o",
+            markersize=3,
+            capsize=2,
+            color=color,
+            label="Data ± shot SEM",
+        )
+        ax.set(
+            xlabel="Free evolution time (µs)",
+            ylabel=f"Fraction ({state})",
+            title=branch,
+        )
+    fig.axes[2].legend(loc="best", fontsize=10)
 
 
 @dataclass(frozen=True)
@@ -326,14 +357,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             populations, result.counts[skip:], confusion_matrix
         )
         if series.correction_unavailable:
-            plot_t1_classified_fractions(
-                plots,
-                lens,
-                series,
-                _PANELS,
-                title="Single-shot T1",
-                xlabel="Free evolution time (µs)",
-            )
+            _plot_classified_fractions(plots, lens, series)
             return
 
         populations, sem = series.values, series.sem

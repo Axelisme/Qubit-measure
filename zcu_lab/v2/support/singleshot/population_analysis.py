@@ -9,7 +9,6 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.shot_uncertainty import corrected_population_sem
 from zcu_tools.analysis.singleshot import correct_populations
-from zcu_tools.plotting.plots import Plots
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +18,15 @@ UNAVAILABLE_NOTICE = "Readout correction unavailable"
 
 @dataclass(frozen=True)
 class ReadoutSeries:
+    """Plot data with the same shape and class order as the input fractions.
+
+    ``values`` contains unclipped corrected estimates, or raw classified fractions
+    when no matrix is supplied or correction is unavailable. ``sem`` contains the
+    matching shot SEM in fraction units, with NaN for an unavailable bar.
+    ``correction_unavailable`` marks diagnostic-only data that must not feed a fit
+    or summary. It is false for a missing matrix or an unavailable SEM alone.
+    """
+
     values: NDArray[np.float64]
     sem: NDArray[np.float64]
     correction_unavailable: bool
@@ -29,12 +37,19 @@ def circle_readout_series(
     counts: NDArray[np.float64],
     matrix: NDArray[np.float64] | None,
 ) -> ReadoutSeries:
-    """Keep unclipped estimates, or diagnose a valid saved matrix with no solution.
+    """Combine point estimates with shot SEM for a circle readout analysis.
 
-    Missing matrices use classified fractions as before. If the solve fails,
-    return classified fractions and their uncorrected shot SEM for diagnosis only.
-    Malformed inputs keep their ordinary errors; missing classified points do not
-    count as nonfinite solutions.
+    Supply aligned ``classified`` fractions and retained ``counts`` of shape
+    ``(..., K)`` with K >= 2 and the same final-axis class order. Counts follow
+    ``class_probability_covariance``: nonnegative integral values or NaN for
+    missing counts. ``matrix`` is None or a finite (K, K) confusion matrix with
+    true-state rows and classified-state columns, treated as fixed.
+
+    None leaves the fractions uncorrected without marking a failure. A singular
+    matrix or a nonfinite solution at a fully finite input point is logged and
+    returns raw fractions and raw SEM for diagnosis. An already missing input
+    point does not trigger this fallback. Invalid counts and NumPy errors from a
+    malformed matrix propagate; only failures of a valid solve are diagnosed.
     """
     corrected = _solve(classified, matrix)
     if corrected is None:
@@ -67,35 +82,3 @@ def _solve(
         )
         return None
     return corrected
-
-
-def plot_t1_classified_fractions(
-    plots: Plots,
-    delays: NDArray[np.float64],
-    series: ReadoutSeries,
-    panels: tuple[tuple[str, str, str], ...],
-    *,
-    title: str,
-    xlabel: str,
-) -> None:
-    """Publish both preparations' observed fractions without a rate model."""
-    fig, _ = plots.subplots(
-        num=CLASSIFIED_FIGURE, nrows=2, ncols=3, figsize=(10, 6), layout="constrained"
-    )
-    fig.suptitle(f"{title} · qubit · classified fractions\n{UNAVAILABLE_NOTICE}")
-    for index, (ax, (branch, state, color)) in enumerate(
-        zip(fig.axes, panels, strict=True)
-    ):
-        prep, outcome = divmod(index, 3)
-        ax.errorbar(
-            delays,
-            series.values[:, prep, outcome],
-            yerr=series.sem[:, prep, outcome],
-            fmt="o",
-            markersize=3,
-            capsize=2,
-            color=color,
-            label="Data ± shot SEM",
-        )
-        ax.set(xlabel=xlabel, ylabel=f"Fraction ({state})", title=branch)
-    fig.axes[2].legend(loc="best", fontsize=10)
