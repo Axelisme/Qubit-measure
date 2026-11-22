@@ -1,8 +1,9 @@
 """ADC-owned deferred integrated shots, independent of the program protocol."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import prod
+from threading import Lock
 
 import numpy as np
 from numpy.typing import NDArray
@@ -10,7 +11,7 @@ from numpy.typing import NDArray
 from zcu_tools.simulate.boundary import CancellationQuery, Cancelled, SamplingIdentity
 from zcu_tools.simulate.rounding import shot_layout
 
-from ._path_sampling import physical_shots
+from ._path_sampling import EventPlanMemo, physical_shots
 from .projection import ProjectionChain, ProjectionReadout
 from .readout_batch import ReadoutBatch
 
@@ -47,9 +48,9 @@ class PreparedRawShots:
     rtol/atol: positive finite tolerances for noiseless arbitrary-envelope
         baseline solves; no shot LUT or jump-time interpolation is used.
 
-    The preparation stores no identity, counts, shot paths, noisy IQ or RNG.
-    bind returns a small per-round source; materialize alone draws shots. Each
-    source keeps its preparation alive independently of any cache eviction or
+    The preparation stores no plans, identity, counts, shot paths, noisy IQ or RNG.
+    bind returns a per-round source without plan reuse. Materialize alone draws
+    shots. Each source keeps its preparation alive independently of cache eviction or
     next round. Invalid shapes, states, channel indices, reps or tolerances raise
     ValueError. Numeric/solver failures propagate at materialization time.
     """
@@ -122,6 +123,50 @@ class PreparedRawShots:
         return ADCRawShots(self, identity)
 
 
+# ADR-0078: ADC owns batch identity and plan reuse; the acquire session owns retirement.
+class RawPlanOwner:
+    """Reuse deterministic integrated raw plans for one acquire's current batch.
+
+    An acquire session creates one owner and serves integrated rounds through
+    bind. It calls retire when the current batch is discarded or the acquire
+    ends, independently of any source preparation cache.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._active: tuple[PreparedRawShots, EventPlanMemo] | None = None
+
+    def bind(
+        self, prepared: PreparedRawShots, identity: SamplingIdentity
+    ) -> "ADCRawShots":
+        """Bind validated inputs and a local RNG identity without sampling.
+
+        Reuse the memo only for the identical prepared object. A different
+        object retires the old generation before admitting a new one.
+        """
+        with self._lock:
+            active = self._active
+            if active is None or active[0] is not prepared:
+                if active is not None:
+                    active[1].retire()
+                active = self._active = (prepared, EventPlanMemo())
+        source = ADCRawShots(prepared, identity)
+        # Keep the memo tied to this binding, not copied by dataclasses.replace.
+        object.__setattr__(source, "_memo", active[1])
+        return source
+
+    def retire(self) -> None:
+        """Drop the current plans; already delivered sources can still draw cold.
+
+        Idempotent. Late builds cannot refill the retired generation, and a
+        subsequent bind starts cold even for the same prepared object.
+        """
+        with self._lock:
+            if self._active is not None:
+                self._active[1].retire()
+                self._active = None
+
+
 @dataclass(frozen=True)
 class ADCRawShots:
     """One ADC round's raw source, structurally satisfying program RawShots.
@@ -135,6 +180,9 @@ class ADCRawShots:
 
     prepared: PreparedRawShots
     identity: SamplingIdentity
+    _memo: EventPlanMemo | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def materialize(self, reps: int, avg_level: int) -> dict[int, NDArray[np.int64]]:
         """Own complete rounded ADC shots, shaped (*loop_dims,reads,2).
@@ -183,7 +231,7 @@ class ADCRawShots:
                 np.random.SeedSequence((self.identity.seed, *self.identity.stream))
             )
         )
-        shots = physical_shots(prepared, rng, cancel=cancel)
+        shots = physical_shots(prepared, rng, cancel=cancel, memo=self._memo)
         result = {
             channel: shot_layout(values, point_dims, reps, avg_level)
             for channel, values in shots.items()

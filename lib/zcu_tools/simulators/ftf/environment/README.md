@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-22, Markov chain construction and telemetry
+**Last updated:** 2026-11-22, Markov chain, telemetry, and acquire-local raw plans
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -402,7 +402,13 @@ outcome's terminal state or sampled herald result. Immutable outcome weights,
 event populations and conditional sums follow the complete-preparation reuse
 rules below. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
 A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sums,
-content mappings, path diagnostics and integrated sampling plans across acquires.
+content mappings, path diagnostics and deferred raw inputs across acquires.
+The acquire session owns the [ADC raw plan memo](../../../simulate/adc/README.md#integrated-raw-shots).
+It retires that memo on batch invalidation, managed acquire exit, matching
+direct finish, a new acquire or close. The binding's completion callback
+retires the memo even when telemetry and debug capture are both disabled.
+It runs finish diagnostics only if either is enabled. A preparation cache hit
+in a new acquire starts without a raw plan.
 A later acquire can reuse either a pilot round's split preparation or a full-batch
 preparation. Both retain the selected N. A separate 256-entry LRU remembers N for
 that same content after the preparation is evicted. On a preparation miss with a

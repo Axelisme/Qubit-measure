@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-21, receiver flight time in readout planning, cooperative Stop and raw materialization timing
+**Last updated:** 2026-11-22, acquire-local raw plans
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -265,7 +265,14 @@ A standalone source uses an Engine with 4 MiB of routing facts.
 Composing environments pass an exclusive Engine through immutable
 `SingleFluxoniumRuntimeOptions(engine=...)`. The source closes that Engine.
 The six-cavity environment divides its environment-wide routing allowance
-through this entry point. ADC solvers live only for the current preparation.
+through this entry point. Conditional ADC solvers live only for the current
+preparation. The standalone acquire session owns the
+[ADC raw plan memo](../../../simulate/adc/README.md#integrated-raw-shots).
+It retires that memo on batch invalidation, managed acquire exit, matching
+direct finish, a new acquire or close. The binding's completion callback
+retires the memo even when telemetry and debug capture are both disabled.
+It runs finish diagnostics only if either is enabled. Six-fluxonium binds
+without a plan memo.
 
 The source retains one loss-independent structural generation and one complete
 noiseless preparation. The structural key excludes q_cap, q_ind, xqp, aphi and

@@ -358,8 +358,10 @@ class DOP853Kernel:
         endpoint in its own model eigenbasis. Later input slots are ignored.
         A basis overlap is applied on model changes within a chain. Across
         calls, the engine supplies the next input in the next model's basis.
-        Each active envelope knot stops integration and restarts a deterministic
-        0.1 ns step seed. A narrow interval limits only its own steps.
+        Active envelope knots split rows into integration intervals. The step
+        size resets at the start of each interval. CPU DP5(4) uses its own seed;
+        CPU DOP853 and OpenCL use the shared seed. A narrow interval limits only
+        its own steps.
         Pulse-local sample endpoints and row-local carrier phases are retained.
         Samples outside the row's envelope window and all flux waveform samples
         are ignored. Constant envelopes add no internal stops.
