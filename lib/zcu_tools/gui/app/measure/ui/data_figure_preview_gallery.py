@@ -180,6 +180,10 @@ class _PreviewCard(QWidget):
         img_layout = QVBoxLayout(image_page)
         img_layout.setContentsMargins(0, 0, 0, 0)
         self._image_label = FigureTileRaster()
+        # Shorter groups can have taller tiles; keep the spare height below the image.
+        self._image_label.setAlignment(
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
+        )
         self._image_label.setObjectName(f"previewImage_{self._source_key}")
         self._image_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
