@@ -1,145 +1,23 @@
+**Readers:** operator, agent. Find transition centers and widths with simultaneous qubit spectroscopy.
+
 # Mux two-tone spectrum
 
-**Readers:** operator, agent. Run the mux qubit frequency sweep from the GUI or MCP and read its results.
+Sweep the qubit drives and detect spectral features in mean readout IQ. The fit estimates transition center and FWHM in MHz. It does not by itself identify the transition.
 
-**Last updated:** 2026-10-22
+**Sequence:** common reset → simultaneous drives at one frequency per tone → fixed-frequency mux readout after the longest drive.
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+## Key settings
 
-## GUI setup
+Bind the `mux` alias to a `group/mux` with matching qubits and resonators in readout order. Check the full **Readout** module, including frequencies and ADCs for inactive tones. If there is no readout slot, the inline starting values use group wiring and resonator calibrations; verify gain and timing before Run.
 
-Create a `kind: group/mux` component and bind scalar alias `mux` to it, then
-open `mux/twotone_spectrum` from **New Tab**. Without this group and alias, opening the
-form reports an error.
-The captured parameter source must contain every qubit and its matching resonator
-in readout order. Readout references the module slot `$mux.module.readout` when
-present, preserving the library's tones and scalar settings. Use a mux-family
-module with the full group tone count. If the slot is empty, Readout starts
-inline from the blank mux template with group calibration tones.
-The generator comes from `$mux.wiring.gen_ch`. Tone i's ADC channel is an
-integer seed from the fixed capture's `group.wiring.ro_ch[i]`, in the group's
-resonator order. Each tone starts
-with gain 0.1. These values are editable initial inputs, not verified hardware
-settings. Complete the remaining required fields and confirm wiring, gain and
-timing before running.
+**Tones** chooses what to edit. **Participants** takes a nonempty list of unique zero-based positions in run order, e.g. `[2, 0]`. It selects both drives and emitted readout tones. The `participants` alias seeds those positions; if absent, unbound, or empty, the form starts with all tones. Editing the selection preserves tone values. Fill required pulse and sweep fields for any newly selected tone, using distinct drive generators separate from readout.
 
-The Tones picker selects the element to edit. Participants selects the qubits to
-run. Tone names, count and order stay fixed. Set Participants to a nonempty JSON
-list of unique original indices, for example `[2, 0]`. This runs original
-positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
-out-of-range participants block Run and remain editable for correction.
+Set each **Tones → Frequency → Start / Stop** around the expected transition in MHz. The initial bounds are `qubit.freq ± 1.5 × qubit.kappa`; widen if the baseline or both sides of the feature are missing. Use a weak probe to limit power broadening. **Expts** gives one common count, not a grid of frequency combinations. Drives advance together; the plotted RF values are the hardware-rounded coordinates. **Model type** selects Lorentzian (`lor`) or sinc (`sinc`); each fit needs six valid points.
 
-Selected tones need drives on independent generators, distinct from readout.
-Set each tone's `freq.start` and `freq.stop` bounds. All tones share Expts.
-Open/Defaults fills selected tones' drive and per-tone freq defaults and sets
-these fields to None on other tones. The nullable fields remain editable.
-Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
-and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
-Alias list elements may use `$` links. A missing, unbound or empty row selects all
-original indices in order. An unbound element in a nonempty list rejects Open/Defaults.
-An out-of-group name stays visible as an invalid Participants draft until corrected.
-Changing aliases requires Defaults or reopening; ordinary participant edits keep tone values.
+In `mux_twotone_spectrum`, omitted inputs retain settings. Null `participants`, `sweeps` (clears all bounds) or `n` leaves missing required values at the pre-Run readiness check unless an override fills them. Null `model_type` is rejected by Analyze, after acquisition. See the [mux recipe inputs](../../../recipes/mux-guide.md#mux_twotone_spectrum).
 
-Editing participants preserves every tone value. Fill any newly selected tone's
-missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
-tone still needs valid frequency and ADC identity, even when not selected.
+## Read the plots and use the result
 
-## FTF cost example
+Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Live shows background-subtracted mean IQ magnitude against drive RF. Lorentzian Analyze uses the magnitude; sinc uses a signed projection of the background-subtracted IQ to retain its sidelobes. Check that the center marks a resolved feature and that the linewidth is larger than the spacing and inside the span. There is no pointwise shot SEM. R² measures explained variation, normalized residual RMS measures mismatch relative to signal range, and the reported ± is fit uncertainty.
 
-A two-participant offline DAC sweep used 16 joint points, 300 reps and 1 round.
-Q1 swept 596 to 602 MHz and Q2 swept 295 to 301 MHz.
-Both drives were 1 µs const pulses at gain 0.1.
-Recovery was 1007.509 µs; readout and ADC integration were 1 and 0.5 µs.
-The recorded Run action took 1.206 s, about 0.075 s per joint sweep point.
-The count is 16, not 16 squared, because the DAC ranges advance together.
-
-The timer includes inbox transport, ComponentDriver keyboard/mouse actions,
-terminal waiting and screenshots. It is not acquisition-only time and excludes
-Analyze and Save. Do not compare it with timings from other slots or experiments
-as a speed test. This example uses the current single-program DAC sweep.
-Historical host-side software-sweep timings do not estimate this path.
-
-Frequency point count, drive duration and shape, participants, reset, recovery
-and readout windows affect cost. Reps and rounds repeat hardware acquisitions.
-FTF compilation and cached evolution can dominate, so wall time need not scale
-with reps. Start with a short scan at the intended drive length.
-This 16-point example had large linewidth uncertainty and no calibration Apply.
-
-## Measurement and analysis
-
-Use the live figure to check the frequency coverage, then check whether the
-Analyze center marker sits on a resolved peak or dip. Compare the reported
-linewidth with the scan spacing and span before using the center as the next
-drive frequency.
-
-Live points and the Lorentzian analysis show the magnitude of mean IQ after
-subtracting its background. Sinc analysis uses a signed principal-axis
-projection of that background-subtracted IQ to distinguish the sidelobes.
-Neither view is a calibrated population. R² measures explained variation and normalized
-residual RMS measures mismatch relative to the signal range. The ± values
-belong to the fitted parameters. This scan locates a spectral feature, so it
-does not show per-point shot SEM.
-
-Each tone supplies a drive-frequency range in MHz.
-Set each tone's Start and Stop in MHz. Expts follows Tones and sets one shared
-positive point count for all tones, for selected tones (default 301).
-At each point, the selected drives use their corresponding frequencies together.
-The sequence is common reset, simultaneous drives, then mux readout after the
-longest drive. Pulse pre/post delays stay as configured.
-One compiled program advances all drive DAC frequencies in the same hardware
-loop. It does not scan combinations of the independent ranges. Mux readout DAC
-tones and ADC frequencies stay fixed; this scan does not sweep readout frequency.
-The saved axes use each drive's hardware-rounded start and step, which can differ
-from rounding each requested point independently.
-
-Choose the Lorentzian or sinc model. Each tone needs at least six valid points.
-Frequency, FWHM and errors are in MHz. Check model quality and uncertainty before
-using a fit as calibration.
-
-## Writeback
-
-Each qualifying tone proposes its captured qubit's `freq` and `kappa` in MHz,
-plus a frequency sample at the captured bias.
-Destinations use the same Run/Load source's full qubit binding.
-Review the original tone position and captured destination before applying.
-
-## Results and saved sources
-
-Run draws one `measurement_i` figure per participant, without a shared overlay.
-Each figure uses that tone's hardware-rounded scan coordinates.
-The index `i` is the original tone position in the saved configuration.
-Analyze uses the selected Run/Load source. Use the Analysis figure picker for
-`fit_i`.
-Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.
-Summary rows retain that order and show values, quality or a failure reason.
-A missing source configuration leaves the name unavailable.
-
-Use Data to save measurement data and analysis artifacts.
-Load Data selects a native file or saved run and preserves current Form inputs.
-The selected source fixes the historical pulse, binding and writeback destination.
-Cancellation retains completed-round averages for the full sweep.
-If no round completed, signals remain NaN.
-Acquisition errors propagate, and that run publishes no new record.
-A stop request does not determine whether returned data is usable for analysis.
-Only successful, fully finite rows qualify for calibration candidates.
-Missing captured bindings suppress candidates; inconsistent bindings report an error.
-Read each Writeback destination, value, quality and uncertainty.
-Deselect unwanted items, then use **Apply Selected** to write the selected items.
-Analyze and preview only calculate results. Each candidate needs its own selection.
-
-## Drafts and MCP inputs
-
-Saved drafts retain invalid field text and Participants for correction.
-Restoration reports dropped fields and keeps the original parameter source.
-Unreadable saved inputs produce a diagnostic and fresh defaults.
-Defaults captures current parameters and rebuilds initial values.
-
-Recipe writes and override paths use dotted strings, for example
-`"tones.0.drive.gain"`. The decimal index addresses the complete tone list.
-Omission retains a Form input; null clears it. Analysis inputs also use
-omission to retain settings and pass explicit null to their owner.
-The recipe applies overrides last, then calls `check_ready()` before Run.
-See the [mux recipe guide](../../../recipes/mux-guide.md#mux_twotone_spectrum) for dotted-path overrides,
-parameter origins and explicit writeback decisions.
-
-The MCP recipe is `mux_twotone_spectrum`.
+Writeback proposes qubit `freq`, `kappa` and a frequency sample at the captured bias. Confirm the feature belongs to the intended transition before using the new center for Rabi. For shared controls see [zcu_lab/v2/operator-workflow.md](../../operator-workflow.md).
