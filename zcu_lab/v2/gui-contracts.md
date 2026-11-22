@@ -55,8 +55,8 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   契約見 `measure-authoring.md`。
 - `support/measure/` 是公開支援 package，提供至少被兩個 concrete adapters 共用的 mechanics。
   已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，例如 T1 時間尺度、Rabi 候選與讀出掃描的長度差。
-  T1 helper 的 tone 掃描先選 `ext.t1_with_tone`，僅缺失或 null 才改選普通 `t1`。
-  已存無效 tone T1 不下探。Mux recovery 在建 Form 時比較各顆的捕捉初值，
+  Tone 掃描的 Stop 來源與初值政策見 [T1 與等待](measure-authoring.md#t1-與等待)。
+  Mux recovery 在建 Form 時比較各顆的捕捉初值，
   保留最大者的 seed。缺 T1 以 30 µs 參與比較，缺值勝出時仍為 150 µs 字面值。
   任一無效 T1 留空。
   各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
@@ -199,6 +199,8 @@ T_Input 預設為實驗 cfg，四個可選分析槽預設 None，由具名參數
 建值時驗必要輸入，不做 I/O；registry 只接受 Adapter、檢查名稱非空與不重複。
 異質 registry 的型別抹除集中於註冊處，不加入 class/value 相容路徑。
 Figures-only 分析回 None，具名圖與空數值摘要照常保留，不提出 writeback。
+即使沒有數值結果，已發布的圖也可讓 `has_analyze_result` 成立。
+RPC 的空摘要見 [Analysis presentation](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation)；recipe 如何接收空結果，見 [作者可呼叫的操作](../recipes/README.md#作者可呼叫的操作)。
 `onetone/power_dep`、`twotone/power_dep`、`twotone/zigzag` 與 `jpa/flux_onetone` 從明確的 Run／Load 來源提供 figures-only Analyze。Load 不自動畫圖。按 Analyze 發布具名圖與有來源 cfg 時的 Reps × Rounds，不回傳數值 Analysis 或 writeback。
 
 ## 修改原則

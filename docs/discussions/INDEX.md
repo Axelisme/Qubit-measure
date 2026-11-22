@@ -165,11 +165,17 @@
 
 ## Measure UI
 
+- 2026-11-23 [Single-shot T1 的兩個衰減時間與 tone Stop 初值](2026-11-23-singleshot-t1-relaxation-times.md)：讀圖語意。圖由短到長列出兩個模型衰減時間，寫回仍提議較短值供 tone Stop 取五倍。
+- 2026-11-23 [一維反演量的誤差棒與圖上事實](2026-11-23-inverted-error-bars-and-figure-facts.md)：圖形呈現。可傳遞 shot 共變異的一維反演量也畫棒；圖呈現品質值，寫回建議留在 Writeback。
+- 2026-11-23 [一維讀出校正無解時保留分類比例](2026-11-23-singular-readout-analysis.md)：Analyze 失敗語意。六個 circle 入口保留同次分類圖，不交付校正數值、擬合或寫回提議。
 - 2026-11-23 [圖磚沿用存檔幾何](2026-11-23-figure-fixed-geometry.md)：圖形呈現。各面以 12×9 in 排版後等比嵌入。R7 只在固定幾何的 PNG 驗版面，Data 保留縮圖選圖與 `View figure`。
 - 2026-11-22 [在 Measure Data 頁讀原圖](2026-11-22-data-figure-reading.md)：圖形呈現。記錄當時用縮圖選圖、在同頁捲動閱讀的做法。現行圖磚與閱讀面見 [Figure presentation](../../lib/zcu_tools/gui/app/measure/README.md#figure-presentation)。
 - 2026-11-22 [Live-only 實驗的 figures-only Analyze](2026-11-22-figures-only-analyze.md)：Analyze 能力。四個 leaf 只從明確來源重畫具名圖，不增加數值結果或寫回。
 - 2026-11-22 [非均勻熱圖在建構時選色盤](2026-11-22-nonuniform-heatmap-cmap.md)：繪圖介面。作者在建構期傳入具名 cmap，預設與其他熱圖行為不變。
 - 2026-11-22 [GE 寫回保護先於診斷圖交付](2026-11-22-ge-gate-split-from-diagnostic.md)：交付切分。窄磚上診斷圖標籤仍相碰，寫回初選的中心檢查先獨立落地，直方圖與擬合 SNR 整批延到續作。
+- 2026-11-22 [GE 診斷圖保留四格](2026-11-22-ge-diagnostic-layout.md)：圖面取捨。assignment 移到兩列之間；當時採多數準備取色，後記說明改為銳化混色。
+- 2026-11-22 [GE Post 的準備顏色與分類邊界](2026-11-22-ge-post-preparation-majority.md)：讀圖語意。當時採準備共格取色；後記說明回到分格，分類邊界仍與上色分工。
+- 2026-11-23 [Mux GE Fit 用準備色，圖例標出 probe 來源](2026-11-22-mux-fit-preparation-color.md)：讀圖語意。Fit 與 Diagnostic 同用準備色；從 Fit 圖例追溯 Live 的取數列。
 - 2026-11-22 [實驗 guide 只寫操作者需要的內容](2026-11-22-guide-content.md)：文件範圍。改寫規則並清理 111 份 guide，通用操作移到共用頁，排錯與可重用判讀留在知識庫。
 
 ## Cfg 與表單
@@ -196,6 +202,7 @@
 - 2026-10-20 [框架去具體化：alias、模板、predictor 與一晶片一 qubit 假設](2026-10-20-framework-decoupling.md)：領域 alias、模板與模型認知留在 zcu_lab，框架的 owner 邊界見 [ADR-0072](../adr/0072-module-boundaries.md)。
 - 2026-11-22 [Two-qubit 的身分、定位與中性位置名](2026-11-22-two-qubit-identity-and-neutral-positions.md)：職責歸屬。Adapter 解析身分並傳定位數值，分析 options 接收標籤，位置沿用 `qubit1/qubit2`。
 - 2026-11-22 [頻譜擬合模型的求值 owner](2026-11-22-spectrum-fit-evaluation-owner.md)：擬合邊界。Fitting 重用同次係數，實驗 caller 決定窗內網格與呈現。
+- 2026-11-23 [Program 的模擬邏輯只在 mixin 內](2026-11-23-program-simulation-mixin.md)：依賴邊界。單輪模擬估時移入模擬子包，lab 不再傳模擬專用線路要求。
 
 ## 測試與驗證
 
@@ -220,6 +227,8 @@
 - 2026-11-22 [Two-qubit 新 native 軸名與舊格式](2026-11-22-two-qubit-native-axis-cutover.md)：資料格式。只有模擬測試資料的家族不新增不相容舊 layout 的 reader，原檔保留。
 - 2026-11-22 [Amp Rabi 的 shot moments](2026-11-22-amp-rabi-shot-moments.md)：資料格式。同批校正 IQ 保留既有平均，native 可選 moments；驗所有現有變數後，Labber 仍只匯出原單 log。
 - 2026-11-22 [Mux 逐 tone 校正 IQ 矩與 R11](2026-11-22-mux-iq-moments-and-r11.md)：資料格式。Reducer 按參與 tone 順序計算完成輪的同批校正六矩，保留既有平均與舊檔。
+- 2026-11-23 [Labber scalar 匯出的索引軸](2026-11-23-labber-scalar-index-axis.md)：資料格式。匯出時為無軸 scalar 加一點的索引軸，native 結果與 reader 不變。
+- 2026-11-23 [Coherence 的 shot SEM 只隨當次 Run 交接](2026-11-23-coherence-run-only-shot-sem.md)：資料入庫。Mux Ramsey／Echo 與單 qubit Echo 不把矩寫入 Native 或 Labber，重載後重算不畫棒。
 
 ## 量測策略
 
@@ -245,3 +254,4 @@
 - 2026-11-21 [Chain length 掃描固定 pulse 與 ADC window 的長度差](2026-11-21-chain-length-fixed-margin.md)：讀出時序。每點 pulse 長度為當點 ADC window 加上可編輯的長度差，不在 cfg 另填飛行時間。
 - 2026-11-21 [Rπ length 沿用讀出模組的長度差](2026-11-21-rpi-length-fixed-margin.md)：讀出時序。Rπ 的 ADC window 掃描沿用可編輯的模組長度差，保留交替脈衝序列與結果形狀。
 - 2026-11-21 [讀出範本在 ADC 窗口前後各留 0.015 µs](2026-11-21-readout-template-window-margin.md)：預設時序。範本、DPM 寫回與普通 onetone 表單共用 0.03 µs 的長度差。
+- 2026-11-23 [MIST single trace 保留平均 IQ 的位移大小](2026-11-23-mist-single-trace-observable.md)：讀圖語意。Live 與預設 Analyze 用同一掃描前段複數參考，畫幅值而不套用 shot SEM。

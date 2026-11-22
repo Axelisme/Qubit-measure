@@ -478,14 +478,9 @@ Review the decay, error and destination before [Apply](#save-review-and-apply).
 `mux_t2ramsey` opens `mux/t2ramsey`. It applies x90, a common free-evolution delay
 and a final x90, then fits decay or Ramsey fringes to estimate T2*.
 
-Select x90 pulses at `tones[i].drive` and set each tone's `detune` in MHz.
-Set the common µs range with `"delay.start"`, `"delay.stop"` and
-`"delay.n"`. The final x90 phase varies with detune and delay.
+For each tone, set **π/2 pulse** with `tones[i].drive` and **Applied phase-ramp detune** (MHz) with `tones[i].detune`. In `overrides`, use `delay.start` and `delay.stop` for **Delay › Start/Stop** (µs) and `delay.n` for **Delay › Expts** (count).
 
-Successful report rows contain `t2` in µs and fitted `detune` in MHz with
-errors. Inspect `measurement` and `fit_i` for the fitted model, fringe rate and
-decay. Check nominal detune, pulse selections and the shared delay range in the
-fixed Run conditions.
+The report uses `t2` / `t2_err` for T2* and its standard error (µs), and `detune` / `detune_err` for Fitted fringe rate and its standard error (MHz). Analyze lists the source carrier and Applied detune separately from the fitted rate.
 
 The recipe fits Primary, asks about Apply, then saves raw data and completed artifacts.
 Candidates update `t2r` and its sample at captured bias. A frequency correction
@@ -502,14 +497,9 @@ accepting a correction. Follow the [review procedure](#save-review-and-apply).
 the other half-delay and a final x90. It fits the resulting decay or fringes to
 estimate echo coherence.
 
-Select `tones[i].drive` for x90 and `tones[i].pi_pulse` for x180. Both pulses
-for one qubit use the same generator. Set each tone's `detune` in MHz and the
-shared µs range at `"delay.start"`, `"delay.stop"` and `"delay.n"`.
+For each tone, set **π/2 pulse** with `tones[i].drive`, **Pi pulse** with `tones[i].pi_pulse`, and **Applied phase-ramp detune** (MHz) with `tones[i].detune`. Use the same generator for the two pulses. In `overrides`, use `delay.start` and `delay.stop` for **Delay › Start/Stop** (µs) and `delay.n` for **Delay › Expts** (count).
 
-Successful report rows contain `t2` in µs and fitted `detune` in MHz with
-errors. Inspect `measurement` and `fit_i` for the decay model and fit quality.
-Check both pulse selections, nominal detune and shared delay range in the fixed
-Run conditions.
+The report uses `t2` / `t2_err` for T2 echo and its standard error (µs), and `detune` / `detune_err` for Fitted fringe rate and its standard error (MHz). The rate fields are zero for decay-only fits. Analyze lists the actual Applied detune separately.
 
 The recipe fits Primary, then asks about `t2e` and a T2E sample at captured bias.
 It saves raw data and completed artifacts after the decision. Echo does not propose a frequency correction.

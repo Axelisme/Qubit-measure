@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import combinations
@@ -17,6 +18,8 @@ from zcu_tools.utils.shot_classification import (
     gaussian_region_probability,
     nearest_centroid3,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -284,6 +287,48 @@ def correct_populations(
     return np.asarray(
         np.clip(corrected, 0.0, 1.0) if clip else corrected, dtype=np.float64
     )
+
+
+def try_correct_populations(
+    populations: NDArray[np.float64], confusion_matrix: NDArray[np.float64] | None
+) -> NDArray[np.float64] | None:
+    """Solve for unclipped populations, or return None for numerical unavailability.
+
+    Populations has shape (..., K), K >= 2, with nonfinite rows marking missing
+    points. A missing matrix leaves the input unchanged. Otherwise supply a
+    finite (K, K) matrix with true-state rows and classified-state columns.
+    A singular matrix or a nonfinite solution for a fully finite row logs the
+    reason and returns None; missing points do not count as solve overflow.
+    Invalid population shape or malformed calibration raises ValueError.
+    """
+    if populations.ndim == 0 or populations.shape[-1] < 2:
+        raise ValueError("populations must have shape (..., K) with K >= 2")
+    if confusion_matrix is None:
+        return populations
+    classes = populations.shape[-1]
+    if confusion_matrix.shape != (classes, classes):
+        raise ValueError("confusion matrix must match both population class axes")
+    if not np.isfinite(confusion_matrix).all():
+        raise ValueError("confusion matrix must be finite")
+
+    try:
+        corrected = correct_populations(populations, confusion_matrix, clip=False)
+    except np.linalg.LinAlgError as error:
+        logger.warning(
+            "Readout correction unavailable: singular confusion matrix (%s)", error
+        )
+        return None
+
+    failed = np.isfinite(populations).all(axis=-1) & ~np.isfinite(corrected).all(
+        axis=-1
+    )
+    if failed.any():
+        logger.warning(
+            "Readout correction unavailable: nonfinite corrected values for %d finite classified points",
+            np.count_nonzero(failed),
+        )
+        return None
+    return corrected
 
 
 @dataclass(frozen=True)

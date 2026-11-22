@@ -15,12 +15,7 @@ from zcu_tools.program.acquisition import (
     ShotResult,
 )
 from zcu_tools.progress_bar import make_pbar
-from zcu_tools.simulate.boundary import (
-    AcquireRequest,
-    Cancelled,
-    ChargeDriveRequirement,
-    RoundStatistics,
-)
+from zcu_tools.simulate.boundary import AcquireRequest, Cancelled, RoundStatistics
 
 from .binding import SimulationBinding
 from .result import IntegratedRound, RawShots
@@ -305,7 +300,6 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         *,
         rounds: int = 1,
         step_rounds: Literal[False] = False,
-        charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs: object,
     ) -> list[NDArray[np.float64]]: ...
 
@@ -316,7 +310,6 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         *,
         rounds: int = 1,
         step_rounds: Literal[True],
-        charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs: object,
     ) -> None: ...
 
@@ -326,7 +319,6 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         soc: object,
         *args,
         rounds: int = 1,
-        charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs,
     ) -> list[NDArray[np.float64]] | None: ...
 
@@ -335,7 +327,6 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         soc,
         *args,
         rounds: int = 1,
-        charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs,
     ) -> list[NDArray[np.float64]] | None:
         """Return native averaged IQ, preserving ADC declaration order.
@@ -351,17 +342,10 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         acquisition discards that round and averages the completed rounds, even
         if the Stop flag is clear. If none completed, it raises
         StoppedPartialAcquireError.
-        charge_requirements names generators that must bind to physical charge
-        lines. Only simulations carry these records to their environment, which
-        validates or explicitly rejects unsupported requirements. White noise
-        accepts them without physical checks. Hardware drops this keyword before
-        the original acquisition pipeline; operators own physical wiring.
         """
         if not isinstance(soc, SimulationSoc):
             return super().acquire(soc, *args, rounds=rounds, **kwargs)
-        with self._simulation_call(
-            soc, "integrated", kwargs, charge_requirements=charge_requirements
-        ):
+        with self._simulation_call(soc, "integrated", kwargs):
             return super().acquire(soc, *args, rounds=rounds, **kwargs)
 
     @overload
@@ -411,14 +395,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             self._simulation_raw = None
             return super().acquire_decimated(soc, *args, rounds=rounds, **kwargs)
 
-    def _simulation_call(
-        self,
-        soc,
-        mode,
-        kwargs,
-        *,
-        charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
-    ):
+    def _simulation_call(self, soc, mode, kwargs):
         from contextlib import contextmanager
 
         from .compiled import build_compiled_request
@@ -439,7 +416,6 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
                             soc.binding,
                             sequence,
                             routes=soc.routes,
-                            charge_requirements=charge_requirements,
                         )
                     cancel_flag = kwargs.get("cancel_flag")
                     if cancel_flag is None:

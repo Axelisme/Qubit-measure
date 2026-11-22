@@ -37,7 +37,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
-from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
 from .._population_peak import first_finite_peak
 from .._pulses import drive_pulse
@@ -76,7 +75,7 @@ class StirapDetuningSummary(Centroid3Summary):
 class StirapDetuningCfg(ConfigBase):
     """Measured carriers in MHz, signed gains, separate envelopes and lead in us.
 
-    pump_ch/stokes_ch must be different charge-drive generators. Pump drives 0–3;
+    pump_ch/stokes_ch must be different generators. Pump drives 0–3;
     Stokes drives 2–3. Each waveform is gauss, cosine, drag or arb and owns its
     duration in us. No extra pre/post delay is added. Positive stokes_lead delays
     Pump; negative lead delays Stokes. Detunings add to the measured carriers.
@@ -213,8 +212,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         frequency and gain. Both detunings sweep in one program and acquisition.
         Classify cfg.shots repetitions per point in one round;
         cancellation leaves unfinished counts as NaN. Require centroid3 before
-        acquisition. Single-fluxonium preflight requires both generators to bind charge lines.
-        Hardware wiring roles remain the operator responsibility.
+        acquisition.
         """
         # 1. Require calibrated g/e/f readout before planning the pump-Stokes detuning grid.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
@@ -262,10 +260,6 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                     converter=lambda sums: sums.reshape(
                         len(ys), len(xs), len(STATE_LABELS)
                     )
-                ),
-                charge_requirements=(
-                    ChargeDriveRequirement("Pump", cfg.pump_ch),
-                    ChargeDriveRequirement("Stokes", cfg.stokes_ch),
                 ),
             )
         return StirapDetuningResult(xs, ys, buffer.array)

@@ -74,12 +74,12 @@ AC Stark spectroscopy 的 [core.py](twotone/ac_stark/core.py) 對應 `twotone/ac
 [ramsey_core.py](twotone/ac_stark/ramsey_core.py) 對應 `twotone/ac_stark_ramsey`。
 註冊位置與 Ramsey guide 見 [Lab 組裝與註冊](../README.md#lab-組裝與註冊)。
 Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot` 擁有。
-兩個 core 都以 `plots=None` 呼叫 `singleshot_ge_analysis` 做擬合，不畫共用 helper 的模型 histogram。
-可選的診斷圖見 [experiment 的 GE 模型診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷)。
+兩個 core 在 Analyze 都啟用 [共用 GE 診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷)。擬合成功時，Single 發布 `diagnostic`，mux 以原始 tone 序號發布 `diagnostic_i`；各 core 仍另外產生 Fit 圖。
 各實驗的 `core.py` 自行選擇分析資料並繪製分類圖，數值擬合工具由 `zcu_tools.analysis.fitting` 擁有。
 跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
 mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
 AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/resonance.py)。
+兩個 GE core 各自排 Post 版面，並用 [support/singleshot/classification_plot.py](support/singleshot/classification_plot.py) 疊分類線與中心，再將兩格準備圖的 I/Q 範圍對齊。
 Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
 [\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩個實驗各自在 `analyze()` 畫自己的圖，
@@ -153,7 +153,7 @@ Reference marker 與動畫錄影不在這些工具中。
 
 共用的 `live_heatmap` 讓所有欄共用一組 `ys` 座標。[CPMG core](twotone/time_domain/cpmg/core.py) 的 Live 與 Analyze 都用 `_count_map`，讓每個 pulse count 欄各用自己的 delay grid，不呼叫 `live_heatmap`。
 
-Singleshot Check 在自己的 `analyze` 畫分類 IQ／區域圖；GE 的專屬分類圖在 `singleshot/ge/core.py`。
+Singleshot Check 在自己的 `analyze` 畫分類 IQ／區域圖；GE 的 Post 版面在 `singleshot/ge/core.py`。
 Amp／Len Rabi 在各自的 core 畫 joint-fit population、histogram 與 confusion 圖，
 分析計算仍由原分析 owner 負責。
 
@@ -177,7 +177,8 @@ Picker 可調五個找谷 controls、增刪選點與任意調整元件對應。�
 Recipe 等待 agent 透過 `tab_interact` 確認並送出 done，才詢問 writeback。
 操作與判讀見 [range find guide](onetone/range_find/guide.md)。
 
-`mux/onetone` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
+`mux/onetone` 使用 `readout/mux`。**Frequency offset** 是選定 tone 共用、可編輯的 MHz 偏移；每個 sweep 點把名目偏移加到各 tone 的基準 RF。
+Open／Defaults 的 `df` 初值由 [`mux/onetone/form.py` 的 `make_form`](mux/onetone/form.py) 定義。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
 Tone label 是可重複的顯示文字，不是 component 名稱，也不改變資料軸。
 `mux/onetone` adapter 從 group 的 resonators 產生 readout tones。
@@ -264,8 +265,15 @@ Amp Rabi 的 shot count 與 IQ moments 由 [Program 的 summed acquisition](../.
 
 Mux 實驗每個參與 tone 各有一張 `measurement_i`，
 不把多 tone 疊在同一 axis。每張圖保留自己的 actual x，delay 類使用共用
-requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩個 preparation。
-單 qubit 與 mux GE 各自用 matplotlib 畫 IQ scatter，live 更新先複製 IQ，
+requested-delay 軸。
+
+Mux GE Live（`measurement_i`）以藍／紅區分 probe off／on 取數列，不讀 Analyze 的 **Initial State**。
+Analyze Fit（`fit_i`）用 [`ge_signals_by_state`](support/singleshot/util.py) 依 **Initial State** 將同一批 IQ 排成 g／e 準備（藍／紅），圖例標出各準備對應的 probe row。
+`diagnostic_i` 也用準備色。Post（`post_i`）沿用所選來源的 Primary 準備映射，將 g／e 密度分格畫出。準備色不代表分類結果。
+讀圖見 [Mux GE guide](mux/singleshot_ge/guide.md#read-the-plots-and-use-the-result) 與
+[單 qubit GE guide](singleshot/ge/guide.md#how-to-read-the-results)，IQ 密度的取色規則見 [figure-style R4](figure-style.md#r4尺度跟著資料走)。
+
+單 qubit 與 mux GE 的 Live 更新先複製 IQ，
 再經公開的 `@plots.on_plot_thread` 在 host owner 繪圖。Worker 不持有 active artists，
 partial NaN 不補零。Mux GE 逐 tone 直接呼叫數值工具，不委派單 qubit 實驗的分析。
 

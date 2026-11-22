@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import IntegratedRound
-from zcu_tools.simulate.boundary import ChargeDriveRequirement, RoundRequest
+from zcu_tools.simulate.boundary import RoundRequest
 from zcu_tools.simulators.ftf.environment import FTFSource
 from zcu_tools.simulators.ftf.environment import template as template_module
 
@@ -23,20 +23,6 @@ from tests.simulators.ftf.environment._templates import (
 )
 
 pytestmark = pytest.mark.sim
-
-
-def test_open_acquire_rejects_unsupported_charge_requirements():
-    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
-    ordinary = request()
-    try:
-        assert source.open_acquire(ordinary).request is ordinary
-        requested = replace(
-            ordinary, charge_requirements=(ChargeDriveRequirement("control", 2),)
-        )
-        with pytest.raises(ValueError, match="FTF.*charge.*not supported"):
-            source.open_acquire(requested)
-    finally:
-        source.close()
 
 
 def test_delivered_raw_keeps_its_round_after_eviction_and_close():

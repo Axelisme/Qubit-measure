@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-23，擬合品質型別與 phase slope 契約
+**Last updated:** 2026-11-23，擬合品質型別、phase slope 契約與 T1 模型路標
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -231,6 +231,10 @@ g/e populations維持dataset-qualified local identity。`DualTransitionRateFitRe
 named `TransitionRates`與errors、兩組fitted populations、local initial populations，以及
 foundation提供的單一global covariance與diagnostics；singleshot、tone/sweep及overnight
 callers不解包positional per-trace covariance。
+
+[`calc_lambdas`](multi_decay.py) 從 transition-rate matrix 取得衰減率與特徵向量。
+兩個非平穩模各有衰減時間，不是指定兩能階的 pair lifetime。
+兩種模型觀點的區別見 [ADR-0071〈Pair lifetime 與 manifold model T1〉](../../../../docs/adr/0071-coherence-units.md#pair-lifetime-與-manifold-model-t1)。
 
 `analysis.fitting.base.fit_func` 的 curve_fit optimizer 不收斂時 raise
 `analysis.failure.AnalysisFailed`，保留 backend cause，不再以初猜冒充 fit。

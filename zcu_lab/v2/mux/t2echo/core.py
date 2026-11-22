@@ -21,6 +21,8 @@ from __future__ import annotations
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.lines import Line2D
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -39,16 +41,19 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
     TimelineBuilder,
+    mux_iq_sums,
+    split_sums,
 )
 from zcu_tools.program.v2.modules import (
     MuxReadout,
     MuxReadoutCfg,
 )
 
-from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.acquire import mux_snr_checker
+from zcu_lab.v2.mux._moments import project_iq, validate_iq_moments
+from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.acquire import mux_mean_snr_checker
 from zcu_lab.v2.support.detune import actual_detune
-from zcu_lab.v2.support.mux import MuxFitFailure, averaged_mux_signal
+from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.mux_coherence import (
     MuxCoherenceResult,
     MuxCoherenceToneCfg,
@@ -59,24 +64,31 @@ from zcu_lab.v2.support.mux_coherence_analysis import (
     MuxCoherenceFit,
     fit_coherence_trace,
     prepare_coherence_trace,
-    project_coherence_for_plot,
-    project_coherence_trace,
 )
 from zcu_lab.v2.support.mux_coherence_persistence import coherence_spec
 
-_IQ_LABEL = "IQ projection (a.u.)"
+_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
+_DELAY_LABEL = "Requested total echo delay (µs)"
 
 
 @validated_dataclass(frozen=True)
 class T2EchoAnalyzeOptions:
     """Select decay or fringe fitting and optionally free the fringe phase."""
 
-    fit_method: Annotated[Literal["fringe", "decay"], FieldMeta(label="Fit method")] = (
-        "decay"
-    )
-    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset (fringe only)")] = (
-        False
-    )
+    fit_method: Annotated[
+        Literal["fringe", "decay"],
+        FieldMeta(
+            label="Fit method",
+            description="Choose a damped cosine or exponential decay; zero detune forces decay.",
+        ),
+    ] = "decay"
+    fit_phase: Annotated[
+        bool,
+        FieldMeta(
+            label="Fit phase offset (fringe only)",
+            description="On fits the fringe phase offset; off fixes it at 0°.",
+        ),
+    ] = False
 
 
 class MuxEchoToneCfg(MuxCoherenceToneCfg):
@@ -109,11 +121,33 @@ class MuxT2EchoCfg(ConfigBase):
     initial_delay/relax_delay are finite nonnegative us shared by all tones.
     """
 
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
+    reset: Annotated[
+        ResetCfg | None,
+        FieldMeta(
+            description="Choose the common preparation reset; leave blank to omit it."
+        ),
+    ] = None
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            description="Enter the calibrated mux readout used after the final π/2 pulses."
+        ),
+    ]
     tones: Annotated[list[MuxEchoToneCfg], FieldMeta(element_label="name")]
-    participants: list[StrictInt]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
+    participants: Annotated[
+        list[StrictInt],
+        FieldMeta(
+            description="Enter the original zero-based qubit positions in measurement order."
+        ),
+    ]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Delay",
+            unit="µs",
+            description="Sweep the total wait split around the π pulse; Expts counts the delay points.",
+        ),
+    ]
 
     reps: Annotated[
         int,
@@ -174,6 +208,77 @@ class MuxT2EchoCfg(ConfigBase):
         return self
 
 
+def _show_live(plots: Plots, cfg: MuxT2EchoCfg, times: NDArray[np.float64]):
+    """Show one live figure per cfg participant and return its shared updater.
+
+    times contains requested total echo delays in µs. The updater takes completed-round
+    sums shaped (delays, participants, 6) and returns the changed data, SEM and
+    progress artists. Projection and plot update errors propagate.
+    """
+    viewers = []
+    empty = times[:0]
+    for index in cfg.participants:
+        fig, ax = plots.subplots(num=f"measurement_{index}", layout="constrained")
+        fig.suptitle(f"Mux Echo · {cfg.tones[index].name} · IQ contrast")
+        ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
+        progress = ax.set_title(
+            f"Acquired points: 0 / {times.size} · 0 shots per point"
+        )
+        viewer = live_errorbar(ax)
+        for artist in viewer.set(empty, empty, empty):
+            if isinstance(artist, Line2D):
+                artist.set(marker="o", markersize=4, label="Measured IQ ± shot SEM")
+        fig.legend(loc="outside lower center")
+        viewers.append((viewer, progress))
+        fig.show()
+
+    @plots.on_plot_thread
+    def update(data: NDArray[np.float64]):
+        counts, means = split_sums(data)
+        artists = []
+        for row, (viewer, progress) in enumerate(viewers):
+            acquired = np.isfinite(means[:, row])
+            real, sem = project_iq(means[:, row], data[:, row], skip_for_axis=1)
+            shots = int(counts[acquired, row].min()) if acquired.any() else 0
+            progress.set_text(
+                f"Acquired points: {np.count_nonzero(acquired)} / {times.size} · "
+                f"{shots:,} shots per point"
+            )
+            artists.extend((*viewer.set(times, real, sem), progress))
+        return artists
+
+    return update
+
+
+def _plot_fit(
+    ax: Axes,
+    times: NDArray[np.float64],
+    fitted: NDArray[np.float64],
+    outcome: MuxCoherenceFit,
+) -> None:
+    """Add the fit curve, in-window T2 echo marker and fit facts to ax.
+
+    times contains increasing requested delays in µs. fitted contains the model
+    values on that grid; outcome supplies the model kind, estimates and quality.
+    Update ax in place; return None without presenting or refreshing the figure.
+    """
+    model = "Damped cosine" if outcome.fit_fringe else "Exponential decay"
+    ax.plot(times, fitted, color="C1", label=model)
+    if times[0] <= outcome.t2 <= times[-1]:
+        ax.axvline(outcome.t2, color="0.4", ls=":", label="T2 echo")
+    estimate = f"T2 echo = {outcome.t2:.4g} ± {outcome.t2_err:.2g} µs"
+    if outcome.fit_fringe:
+        estimate += f" · Fitted fringe rate = {outcome.detune:.4g} ± {outcome.detune_err:.2g} MHz"
+    r2 = outcome.quality.r2
+    rms = outcome.quality.normalized_residual_rms
+    r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
+    rms_text = "unavailable" if rms is None else f"{rms:.3g}"
+    ax.set_title(
+        f"{estimate}\nR² = {r2_text} · Normalized residual RMS = {rms_text}",
+        fontsize=10,
+    )
+
+
 class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
     """Measure and fit each participating qubit's Hahn Echo decay or fringes."""
 
@@ -190,7 +295,8 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         in us. Each pulse stage starts together; the next wait or readout starts
         after its longest pulse. The final x90 phase ramps with each tone's MHz
         detune. Return requested total delays (P,), averaged complex IQ (K,P),
-        original tone indices, actual detunes and source frequencies (K,).
+        original tone indices, actual detunes and source frequencies (K,), plus
+        completed-round IQ sums (K,P,6) for this Run's plots.
         context supplies hardware and live plots. Cancellation keeps acquired
         averages and NaN gaps. Acquisition and program errors propagate.
         """
@@ -221,29 +327,11 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
             tones=[cfg.readout.tones[index] for index in indices]
         )
 
-        # 2. Show each selected tone on the common requested total-delay axis.
-        viewers = []
-        for index, tone_cfg in zip(indices, tones, strict=True):
-            fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(
-                xlabel="Requested delay (µs)",
-                ylabel=_IQ_LABEL,
-                title=f"{index}: {tone_cfg.name}",
-            )
-            viewers.append(live_line(ax))
-            fig.show()
-
-        @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]):
-            return tuple(
-                artist
-                for row, viewer in enumerate(viewers)
-                for artist in viewer.set(times, project_coherence_for_plot(data[row]))
-            )
-
-        # 3. Play synchronized pulse stages on the common delay sweep.
-        signals = SignalBuffer((len(indices), times.size), on_update=update)
-        with Schedule(signals, scope=context.scope) as sched:
+        update = _show_live(context.plots, cfg, times)
+        moments = SignalBuffer(
+            (times.size, len(indices), 6), dtype=np.float64, on_update=update
+        )
+        with Schedule(moments, scope=context.scope) as sched:
             # Each stage starts all drives together and waits for its longest pulse.
             builder = TimelineBuilder(
                 context.soccfg,
@@ -295,28 +383,30 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
             readout_module = MuxReadout("readout", readout)
             builder.emit(readout_module)
 
-            # 4. Average completed rounds into tone-major IQ, preserving NaN gaps.
+            # One summed acquisition supplies the IQ mean and shot SEM (and the Stop check).
             prog = builder.build()
-            _ = sched.run_acquire(
+            _ = sched.run_acquire_summed(
                 prog,
                 context.soc,
+                reducer=mux_iq_sums(prog, "readout"),
                 rounds=cfg.rounds,
                 options=RunOptions(
-                    converter=lambda raw: (
-                        averaged_mux_signal(prog, readout_module, raw).T
-                    ),
-                    stop_condition=mux_snr_checker(
-                        signals, cfg.earlystop_snr, tone_axis=0
-                    ),
+                    stop_condition=mux_mean_snr_checker(
+                        lambda: split_sums(moments.array)[1],
+                        cfg.earlystop_snr,
+                        tone_axis=1,
+                    )
                 ),
             )
-        signals.trigger_update(flush=True)
+        moments.trigger_update(flush=True)
+        _, means = split_sums(moments.array)
         return MuxCoherenceResult(
             np.asarray(indices, dtype=np.int64),
             times,
-            signals.array.copy(),
+            means.T,
             detunes,
             frequencies,
+            moments.array.transpose(1, 0, 2).copy(),
         )
 
     def analyze(
@@ -336,20 +426,36 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         Omit the first point and missing IQ. Return per-tone T2E in us, fringe
         rate in MHz, uncertainties and fit quality, or a fit failure reason.
         Acquired delays, projected observations and predictions stay local
-        to analysis. Draw only the primary curve in fit_i. Invalid sources or
-        fit methods raise.
+        to analysis. Draw fit_i with any available projected IQ; on projection
+        failure show the reason without data. Invalid sources or fit methods raise.
         """
         # 1. Omit the first requested point before removing missing IQ.
-        validate_coherence_result(source.result)
+        data = source.result
+        validate_coherence_result(data)
+        validate_iq_moments(data.iq_moments, data.signals)
         outcomes: list[MuxCoherenceFit | MuxFitFailure] = []
-        for row, raw_index in enumerate(source.result.tone_indices):
+        for row, raw_index in enumerate(data.tone_indices):
             trace = prepare_coherence_trace(
-                int(raw_index), source.result.times, source.result.signals[row], skip=1
+                int(raw_index), data.times, data.signals[row], skip=1
             )
-            fig, ax = plots.subplots(num=f"fit_{trace.index}", figsize=(8, 5))
-            ax.set(xlabel="Requested delay (µs)", ylabel=_IQ_LABEL)
-            fig.suptitle(f"echo tone {trace.index}")
+            finite = np.isfinite(data.signals[row, 1:])
+            moments = (
+                None if data.iq_moments is None else data.iq_moments[row, 1:][finite]
+            )
+            name = (
+                f"Tone {raw_index}"
+                if source.cfg is None
+                else source.cfg.tones[trace.index].name
+            )
+            fig, ax = plots.subplots(
+                num=f"fit_{trace.index}", figsize=(8, 5), layout="constrained"
+            )
+            ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
+            fig.suptitle(f"Mux Echo · {name} · IQ contrast")
+            projected = None
             try:
+                projected = project_iq(trace.signal, moments)
+                real, _ = projected
                 # Source detune, not a fitted oscillation, determines fringe eligibility.
                 fit_fringe = options.fit_method == "fringe"
                 if fit_fringe:
@@ -363,9 +469,9 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                             "Echo fringe fit requires source detune: cfg or saved finite actual_detune"
                         )
                     fit_fringe = detune != 0.0
-                real = project_coherence_trace(
-                    trace, minimum_points=6 if fit_fringe else 4
-                )
+                if trace.times.size < (6 if fit_fringe else 4):
+                    raise ValueError("Insufficient acquired points for coherence fit")
+                curve_times = np.linspace(trace.times.min(), trace.times.max(), 400)
 
                 # 2. Echo fringes start at zero phase unless phase is fitted freely.
                 phase = None if options.fit_phase else 0.0
@@ -374,6 +480,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                     real,
                     fit_fringe=fit_fringe,
                     phase=phase,
+                    curve_times=curve_times,
                     expected_frequency_mhz=None,
                 )
             except (
@@ -383,27 +490,34 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 ArithmeticError,
                 np.linalg.LinAlgError,
             ) as exc:
-                ax.plot(
-                    trace.times,
-                    project_coherence_for_plot(trace.signal),
-                    "o-",
-                    label="acquired projection",
-                )
-                ax.text(
-                    0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True
-                )
+                fit_curve = None
+                ax.set_title(f"Fit unavailable: {exc}", wrap=True)
                 outcomes.append(MuxFitFailure(trace.index, str(exc)))
             else:
-                ax.plot(trace.times, real, "o", label="measured")
-                ax.plot(trace.times, fitted, label="primary fit")
-                ax.set_title(
-                    f"T2 = {outcome.t2:.4g} ± {outcome.t2_err:.2g} µs; "
-                    f"fringe = {outcome.detune:.4g} MHz"
-                )
+                fit_curve = (curve_times, fitted, outcome)
                 outcomes.append(outcome)
 
-            # 3. Keep each tone's fit or failure visible without stopping other fits.
-            ax.legend()
-            ax.grid(True)
-            fig.tight_layout()
+            if projected is None:
+                continue
+            real, sem = projected
+            ax.plot(
+                trace.times,
+                real,
+                "o",
+                ms=4,
+                linestyle="-" if fit_curve is None else "none",
+                label="Measured IQ",
+            )
+            if sem is not None and np.isfinite(sem).any():
+                ax.errorbar(
+                    trace.times,
+                    real,
+                    yerr=sem,
+                    fmt="none",
+                    ecolor="C0",
+                    label="Shot SEM",
+                )
+            if fit_curve is not None:
+                _plot_fit(ax, *fit_curve)
+            fig.legend(loc="outside lower center", ncols=2)
         return tuple(outcomes)

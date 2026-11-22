@@ -284,9 +284,9 @@ GUI 的 Library、Inspect 與 module writeback 共用 `gui.form` 與 `gui.form_a
 
 ### GE 模型診斷
 
-Singleshot GE 與 mux GE 的 core 都以 `plots=None` 呼叫 [`singleshot_ge_analysis`](utils/single_shot/ge/__init__.py)，各自處理分類與呈現。
-各旋轉方式都委派給 [`fitting_ge_and_plot`](utils/single_shot/ge/base.py)。它回傳擬合品質，並在 caller 傳入 `Plots` 時繪製 GE 模型 histogram。
+[`singleshot_ge_analysis`](utils/single_shot/ge/__init__.py) 將各種旋轉方式的擬合委派給 [`fitting_ge_and_plot`](utils/single_shot/ge/base.py)。共用 helper 回傳擬合品質；只有傳入 `Plots` 才畫圖。
+Singleshot GE 與 mux GE 的 Analyze 傳入 `Plots` 並啟用 `GEFitOptions.raw_iq_diagnostic`，為每次成功的擬合畫一格原始 IQ 與三格投影 histogram。分類與 Post 版面仍由實驗 core 處理。
 
 品質欄位的定義見 [fitting helpers 的 `FitQuality`](../analysis/fitting/README.md#fitting-helpers)。
 `GEFitOptions.length_ratio_max_relative_error` 只用於模型診斷，決定自由擬合的 joint readout length／T1 能否以 `length_ratio` 回報。
-它不是 writeback 初選門檻。初選與理由見 [Readout 分析與 writeback](../../../zcu_lab/v2/measure-authoring.md#readout-分析與-writeback)。
+圖上的估值與標準誤不套這個門檻。它也不是 writeback 初選門檻。初選與理由見 [Readout 分析與 writeback](../../../zcu_lab/v2/measure-authoring.md#readout-分析與-writeback)。
