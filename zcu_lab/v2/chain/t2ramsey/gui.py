@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field
-from zcu_tools.analysis.readout_chain import CycleCheck, CycleSums
+from pydantic import Field
+from zcu_tools.analysis.readout_chain import CycleSums
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -16,8 +16,10 @@ from zcu_lab.v2.chain.t2ramsey.core import (
 )
 from zcu_lab.v2.chain.t2ramsey.form import make_form
 
+from .._joint import JointResidualSummary
 
-class ChainT2RamseySummary(BaseModel):
+
+class ChainT2RamseySummary(JointResidualSummary):
     """Recipe JSON view of the analysis in native units; null is unavailable."""
 
     t2: float | None = Field(description="T2 Ramsey in us.")
@@ -27,9 +29,6 @@ class ChainT2RamseySummary(BaseModel):
     tf: float | None = Field(description="Third-state decay time in us.")
     tf_err: float | None = Field(description="Wald error of tf in us.")
     reliability: float | None = Field(description="Diagnostic R, no threshold.")
-    within_point: CycleCheck = Field(description="Within-point check J, df, p.")
-    sharing: CycleCheck = Field(description="Sharing check J, df; p is null.")
-    curve: CycleCheck = Field(description="Curve check J, df, p.")
     first_read_t2: float | None = Field(
         description="T2 in us of the first-read twotone fit, the starting value."
     )

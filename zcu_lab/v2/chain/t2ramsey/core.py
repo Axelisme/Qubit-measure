@@ -18,8 +18,6 @@ from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fitting import decaycos, fit_decay_fringe
 from zcu_tools.analysis.readout_chain import (
-    CycleCheck,
-    CycleNuisances,
     CycleSums,
     cycle_curves,
     fit_cycle,
@@ -43,12 +41,13 @@ from zcu_tools.program.v2 import (
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
-    checks_text,
     cycle_sums_variables,
     first_read_projection,
     restore_cycle_sums,
 )
 from zcu_lab.v2.support import live_errorbar, live_line
+
+from .._joint import joint_residual_fields, joint_residuals_text, plot_joint_residuals
 
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
 _SWEEP_LABEL = "Free-evolution wait (µs)"
@@ -58,18 +57,16 @@ _IQ_LABEL = "Projected mean IQ (a.u.)"
 
 @dataclass(frozen=True)
 class ChainT2RamseyAnalysis:
-    """Ramsey fit of all 65 numbers, its checks and its starting values.
+    """Joint Ramsey estimates, scalar residual diagnostics and first-read seeds.
 
-    t2 and t2_err are the fitted Ramsey decay time in us and its Wald error.
-    detuning and detuning_err are the fringe frequency in MHz (cycles per us),
-    including the programmed phase ramp, and its Wald error. tf and tf_err are
-    the third state's decay time in us and its Wald error. reliability is
-    R = 1 / (2π × delay span × detuning_err), a diagnostic without a
-    threshold. within_point, sharing and curve are the three lack-of-fit
-    checks of fit_cycle (sharing has no p). J and df are the joint weighted
-    residual and its degrees of freedom. first_read_t2 and first_read_detuning
-    come from the twotone/t2ramsey fringe fit of the first read; they started
-    t2, tf and detuning.
+    t2 and tf are the Ramsey and third-state decay times in µs. detuning is
+    the fringe frequency in MHz, including the programmed phase ramp. The
+    corresponding errors are Wald standard errors. reliability is
+    R = 1 / (2π × delay span × detuning_err), without a threshold.
+    J, df, j_per_df, the χ² reference band endpoints and tail_fraction
+    describe the last joint stage's whitened residuals. The per-delay
+    projection stays in the figure. The first-read fit seeds t2, tf and
+    detuning.
     """
 
     t2: float
@@ -79,11 +76,12 @@ class ChainT2RamseyAnalysis:
     tf: float
     tf_err: float
     reliability: float | None
-    within_point: CycleCheck
-    sharing: CycleCheck
-    curve: CycleCheck
     J: float
     df: int
+    j_per_df: float
+    expected_band_low: float
+    expected_band_high: float
+    tail_fraction: float
     first_read_t2: float
     first_read_detuning: float
 
@@ -262,13 +260,11 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         """Fit all 65 numbers with Ramsey curves, starting from the first read.
 
         First project the first read IQ and fit a decaying fringe with free
-        phase. Publish "fit"; its T2 starts t2 and tf and its fringe frequency
-        starts detuning. Then fit_cycle fits
-        the saved sums with t2_ramsey_model and publishes "populations":
-        per-delay first-read populations with error bars and the fitted
-        curves. Return t2, detuning and tf with Wald errors, R and the three
-        checks. The source cfg may be None. Fitting failures of either fit
-        propagate.
+        phase. Publish "fit"; its T2 starts t2 and tf, and its fringe frequency
+        starts detuning. Fit the saved sums once with the joint Ramsey model.
+        Publish the live-direction projection and signed differences as
+        "joint residuals". Return t2, detuning and tf with Wald errors, R and
+        scalar residual diagnostics. The source cfg may be None.
         """
         del options  # This analysis has no configurable options.
         sums = source.result
@@ -329,57 +325,30 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         reliability_text = (
             "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
         )
-        population_dense = np.linspace(delays.min(), delays.max(), 400)
-        assert isinstance(fit.nuisances, CycleNuisances)
-        population_fitted = model.populations(
-            population_dense, fit.parameters, fit.nuisances
-        )
-        population_fig, _ = plots.subplots(
-            num="populations",
-            nrows=3,
+        fig, _ = plots.subplots(
+            num="joint residuals",
+            nrows=2,
             sharex=True,
-            figsize=(6.4, 7.4),
+            figsize=(8, 6.5),
+            gridspec_kw={"height_ratios": (2, 1)},
             layout="constrained",
         )
-        population_fig.suptitle(
-            "K-cycle T2 Ramsey · Qubit · First-read populations\n"
+        projection_ax, residual_ax = fig.axes
+        plot_joint_residuals(projection_ax, residual_ax, sums, model, fit)
+        if delays.min() <= t2 <= delays.max():
+            projection_ax.axvline(
+                t2, linestyle="--", color="0.35", linewidth=1, label="Joint T2*"
+            )
+        fig.suptitle(
+            "K-cycle T2 Ramsey · Qubit · Joint fit\n"
             f"T2* = {t2:.4g} ± {t2_err:.2g} µs · R = {reliability_text}\n"
             f"Fringe frequency = {detuning:.4g} ± {detuning_err:.2g} MHz\n"
-            f"Third-state decay time = {tf:.4g} ± {tf_err:.2g} µs\n"
-            f"Joint J/df = {fit.J:.2g}/{fit.df}\n{checks_text(fit)}",
-            fontsize=10,
+            f"Third-state decay time = {tf:.4g} ± {tf_err:.2g} µs"
         )
-        population_axes = population_fig.axes
-        population_order = range(3)
-        for rank, (population_ax, state) in enumerate(
-            zip(population_axes, population_order, strict=True)
-        ):
-            color = f"C{rank}"
-            thermal = fit.nuisances.thermal[state]
-            population_ax.errorbar(
-                delays,
-                fit.populations[:, state],
-                yerr=fit.population_errors[:, state],
-                fmt=".",
-                color=color,
-                label="Point estimate ± Wald SE",
-            )
-            population_ax.plot(
-                population_dense,
-                population_fitted[:, state],
-                color=color,
-                label="Joint fit",
-            )
-            if delays.min() <= t2 <= delays.max():
-                population_ax.axvline(t2, ls="--", color="0.35", linewidth=1)
-            population_ax.set(
-                ylabel=f"P(state {rank + 1})",
-                title=f"State {rank + 1} · Thermal population {thermal:.2f}",
-            )
-        handles, labels = population_axes[0].get_legend_handles_labels()
-        population_fig.legend(handles, labels, loc="outside lower center", ncols=2)
-        population_axes[-1].set_xlabel(_SWEEP_LABEL)
-        population_axes[-1].xaxis.set_major_locator(MaxNLocator(nbins=4))
+        projection_ax.set_title(joint_residuals_text(fit), fontsize=10)
+        residual_ax.set_xlabel(_SWEEP_LABEL)
+        residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        fig.legend(loc="outside lower center", ncols=3)
 
         return ChainT2RamseyAnalysis(
             t2=t2,
@@ -389,11 +358,7 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
             tf=tf,
             tf_err=tf_err,
             reliability=fit.reliability,
-            within_point=fit.within_point,
-            sharing=fit.sharing,
-            curve=fit.curve,
-            J=fit.J,
-            df=fit.df,
             first_read_t2=first_read_t2,
             first_read_detuning=first_read_detuning,
+            **joint_residual_fields(fit),
         )
