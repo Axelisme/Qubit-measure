@@ -321,8 +321,18 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
         freq, freq_err, fwhm, fwhm_err = fit.freq, fit.freq_err, fit.fwhm, fit.fwhm_err
 
-        # 2. Assess the selected resonance and linewidth against competing spectral peaks.
-        _, ax = plots.subplots(num="fit", figsize=config.figsize, layout="constrained")
+        # 2. Show the full scan and give a relatively short fit window its own panel.
+        lo, hi = float(fit.freqs.min()), float(fit.freqs.max())
+        if 2 * (hi - lo) <= np.ptp(freqs):
+            fig, _ = plots.subplots(
+                nrows=2, num="fit", figsize=(config.figsize[0], 6), layout="constrained"
+            )
+            ax, zoom = fig.axes
+        else:
+            fig, ax = plots.subplots(
+                num="fit", figsize=config.figsize, layout="constrained"
+            )
+            zoom = ax
 
         ax.plot(freqs, real_signals, "o", color="C0", label="Measured", markersize=3)
         other_peaks = [peak.center for peak in fit.peaks if peak != fit.selected_peak]
@@ -334,37 +344,44 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 color="0.45",
                 label="Other peak candidates",
             )
-        ax.axvspan(
-            float(fit.freqs.min()),
-            float(fit.freqs.max()),
-            color="tab:blue",
-            alpha=0.12,
-            label="Fit window",
-        )
+        ax.axvspan(lo, hi, color="tab:blue", alpha=0.12, label="Fit window")
+        if zoom is not ax:
+            zoom.plot(
+                fit.freqs, fit.observed, "o", color="C0", label="Measured", markersize=3
+            )
+            zoom.set_title("Fit window (zoom)")
         model = "Lorentzian" if options.model_type == "lor" else "Sinc"
-        fit_grid_mhz = np.linspace(fit.freqs.min(), fit.freqs.max(), 200)
-        ax.plot(
+        fit_grid_mhz = np.linspace(lo, hi, 200)
+        zoom.plot(
             fit_grid_mhz,
             fit.evaluate(fit_grid_mhz),
             "-",
             color="C1",
             label=f"{model} fit",
         )
-        ax.axvline(freq, color="C1", linestyle=":", alpha=0.7)
+        zoom.axvline(freq, color="C1", linestyle=":", alpha=0.7)
         ylabel = (
             "Background-subtracted IQ magnitude (a.u.)"
             if options.model_type == "lor"
             else "Signed IQ principal-axis projection (a.u.)"
         )
-        ax.set(xlabel="Probe RF frequency (MHz)", ylabel=ylabel)
         quality = ""
         if fit.selected_peak is not None:
             quality = f" · Candidate SNR {fit.selected_peak.snr:.3g}"
-        ax.set_title(
+        title = (
             "Two-tone spectrum · qubit probe · resonance\n"
             f"Qubit frequency = {freq:.7g} ± {freq_err:.2g} MHz\n"
             f"FWHM = {fwhm:.4g} ± {fwhm_err:.2g} MHz{quality}"
         )
-        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
+        panels = (ax,)
+        if zoom is ax:
+            ax.set_title(title)
+        else:
+            fig.suptitle(title)
+            ax.set_title("Full scan")
+            panels = (ax, zoom)
+        for panel in panels:
+            panel.set(xlabel="Probe RF frequency (MHz)", ylabel=ylabel)
+            panel.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
 
         return FreqAnalysis(freq, freq_err, fwhm, fwhm_err, fit.peaks)
