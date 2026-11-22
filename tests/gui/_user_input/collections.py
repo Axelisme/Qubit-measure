@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
 
 from .._observations import TableRowObservation
 from .input import key_click, mouse_click, type_text
-from .selection import can_interact, on_screen, unique
+from .selection import LiveWidgetSnapshot, can_interact, unique
 
 
 def tree_columns(tree: QTreeWidget, item: QTreeWidgetItem) -> tuple[str, ...]:
@@ -270,7 +270,10 @@ def edit_tree_value(
             ),
         )
     QApplication.processEvents()
-    editors = [e for e in tree.findChildren(QLineEdit) if on_screen(e)]
+    snapshot = LiveWidgetSnapshot()
+    editors = [
+        e for e in snapshot.descendants(tree, QLineEdit) if snapshot.on_screen(e)
+    ]
     editor = unique("tree Value editor", editors, [e.objectName() for e in editors])
     if can_interact(editor):
         key_click(editor, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
