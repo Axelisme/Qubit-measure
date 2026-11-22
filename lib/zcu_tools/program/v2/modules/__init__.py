@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Annotated, Any, Optional, TypeAlias, Union
 
 import qick.asm_v2 as qick_asm_v2
-from pydantic import BeforeValidator, Field, TypeAdapter
+from pydantic import BaseModel, BeforeValidator, Field, TypeAdapter
 
 from zcu_tools import cfg_model as core_cfgs
 from zcu_tools.cfg_model import CfgValidationContext
@@ -79,6 +80,33 @@ ModuleCfg: TypeAlias = Annotated[
 
 
 class ModuleCfgFactory:
+    """Convert between configured modules and their native program representation."""
+
+    @staticmethod
+    def to_spec(
+        module: AbsModuleCfg,
+        *,
+        field_updates: Sequence[tuple[str, float]] = (),
+    ) -> core_cfgs.ModuleSpec:
+        """Project a native module to an inline library Spec without reading assets.
+
+        Keep each file-backed arb's logical data key, not its playback path.
+        Apply ordered (dotted field path, scalar value) updates before Spec
+        validation so fitted values can replace sweeps. Leave module unchanged.
+        Missing parent sections raise KeyError. Nonpersistent values such as
+        remaining sweeps or in-memory arb samples raise ValueError.
+        """
+        fields = module.model_dump(
+            mode="python", exclude_none=True, exclude=_arb_path_exclusions(module)
+        )
+        for path, value in field_updates:
+            *sections, leaf = path.split(".")
+            node = fields
+            for section in sections:
+                node = node[section]
+            node[leaf] = value
+        return core_cfgs.module_spec_from_raw(fields)
+
     @staticmethod
     def from_core(
         core_cfg: CoreModuleCfg,
@@ -154,6 +182,16 @@ class ModuleCfgFactory:
         else:
             resolved_raw = raw
         return TypeAdapter(ModuleCfg).validate_python(resolved_raw, context=dict(ml=ml))
+
+
+def _arb_path_exclusions(cfg: BaseModel) -> dict[str, Any]:
+    if isinstance(cfg, ArbWaveformCfg):
+        return {"path": True}
+    exclusions: dict[str, Any] = {}
+    for name, value in cfg:
+        if isinstance(value, BaseModel) and (nested := _arb_path_exclusions(value)):
+            exclusions[name] = nested
+    return exclusions
 
 
 def _pulse_from_core(
