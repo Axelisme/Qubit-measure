@@ -701,15 +701,19 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         in plots. Successful fits also draw diagnostic_i at the original tone index.
         Incomplete pairs do not fit. Source cfg may be absent; malformed
         axes, mismatched cfg or invalid options raise before fitting.
-
+        If any active fit_i or diagnostic_i name already exists, raise
+        ValueError before fitting or drawing any tone.
         """
         # 1. Match GE fit overrides to original tone identities before inspecting probe-off/on pairs.
         _validate_source(source)
         indices = [int(i) for i in source.result.tone_indices]
+        names = {f"{kind}_{i}" for i in indices for kind in ("fit", "diagnostic")}
+        if collisions := plots.keys() & names:
+            raise ValueError(
+                f"GE figure names already exist: {', '.join(sorted(collisions))}"
+            )
         if any(type(i) is not int or i not in indices for i in options.overrides):
             raise ValueError("GE overrides must name active original tone indices")
-        if any(f"fit_{i}" in plots for i in indices):
-            raise ValueError("fit_i figures already exist in this operation")
         selected = [options.overrides.get(i, options.default) for i in indices]
         outcomes: list[MuxGEAnalysis | MuxFitFailure] = []
         # 2. Inspect state-ordered IQ clouds and reject incomplete preparation pairs per tone.

@@ -85,6 +85,7 @@ Run once the qubit pi-pulse and the readout are both calibrated.
 Run and Analyze show raw IQ scatter with blue g-preparation and red e-preparation shots.
 The live labels mean probe off/on; Analyze maps them using Initial State.
 A successful Analyze also shows `diagnostic`: rotated IQ, projected preparation histograms, and fitted components.
+Each preparation is normalized separately: a bar in the lower-left panel shows the fraction of that preparation's shots in the bin, not a count or a density.
 Check whether the fitted components separate and follow the measured histograms.
 Read the fitted populations above the preparation panels and the readout length relative to T1 at the top.
 **Fitted SNR** is the distance between the fitted peaks divided by their shared Gaussian width.

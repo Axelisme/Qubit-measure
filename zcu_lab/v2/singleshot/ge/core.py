@@ -336,7 +336,8 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         fidelity. Poor histogram fit quality makes model populations and post
         population correction unreliable. Publish raw g/e IQ scatter to plots
         as "fit", including on numerical failure, and the fitted histogram
-        diagnostic as "diagnostic" on success. cfg=None is supported.
+        diagnostic as "diagnostic" on success. If either name already exists,
+        raise ValueError without fitting or drawing. cfg=None is supported.
 
         Rotation/classification, histogram fitting, fitted population/center
         validation and fidelity calculations wrap ValueError, RuntimeError,
@@ -344,11 +345,13 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         the original cause. Plotting, invalid backend/initial_state and final
         calibration validation errors propagate unchanged.
         """
+        if collisions := plots.keys() & {"fit", "diagnostic"}:
+            raise ValueError(
+                f"GE figure names already exist: {', '.join(sorted(collisions))}"
+            )
+
         # 1. Acquisition order is always probe off/on; fit in physical g/e order.
         signals = ge_signals_by_state(source.result.signals, options.initial_state)
-
-        if "fit" in plots:
-            raise ValueError("Figure already exists: fit")
         _, axes = plots.subplots(num="fit")
         for cloud, label, color in zip(
             signals,

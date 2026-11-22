@@ -186,6 +186,7 @@ Blue and red shots distinguish the g (probe-off) and e (probe-on) preparations.
 These preparations may contain state mixtures; they are not classified shots.
 Analyze draws each participant's raw IQ clouds in `fit_i`.
 For each successful fit, `diagnostic_i` shows rotated IQ, projected preparation histograms, and fitted components.
+Each preparation is normalized separately: a bar in the lower-left panel shows the fraction of that preparation's shots in the bin, not a count or a density.
 Check whether the fitted components separate and follow the measured histograms.
 Read the fitted populations above the preparation panels and the readout length relative to T1 at the top.
 **Fitted SNR** is the distance between the fitted peaks divided by their shared Gaussian width.

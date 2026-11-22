@@ -123,7 +123,7 @@ def hist(
                 weights=weights,
                 label=label,
             )
-        ax.set_ylabel("Counts", fontsize=14)
+        ax.set_ylabel("Fraction per bin", fontsize=12)
         ax.set_xlabel("I [ADC levels]", fontsize=14)
         ax.legend(loc="upper right")
         if title is not None:

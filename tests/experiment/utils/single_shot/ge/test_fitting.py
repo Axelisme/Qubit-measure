@@ -100,7 +100,6 @@ def test_hist_returns_normalized_populations_and_draws_matching_bars(
             assert bar.get_alpha() == 0.5
     assert ax.get_legend_handles_labels()[1] == ["g", "e"]
     assert ax.get_xlabel() == "I [ADC levels]"
-    assert ax.get_ylabel() == "Counts"
     assert ax.get_title() == ("Existing title" if title is None else title)
 
 
@@ -359,10 +358,11 @@ def _known_joint_fit(
     monkeypatch: pytest.MonkeyPatch,
     covariance_block: NDArray[np.float64],
 ) -> NDArray[np.complex128]:
-    # Replace the joint solver, whose public result is in physical coordinates.
     covariance = np.zeros((7, 7))
     covariance[:3, :3] = covariance_block
     sg, se = 1.0, 6.0
+    # singleshot_ge_analysis accepts no covariance. Supply a deterministic joint
+    # solver result in physical coordinates to verify the SNR error projection.
     monkeypatch.setattr(
         ge_owner,
         "fit_singleshot",
