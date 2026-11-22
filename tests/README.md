@@ -109,7 +109,7 @@ Agent 在 review-done 前完成下列檢查，將證據留在 task scratch，不
    核對曲線或熱圖、軸標、單位、圖例及本次變更影響的外觀。
    只有檔案存在或數值結果通過不算看圖驗收。預期有圖卻未產生時，記錄為驗收缺口。
 
-Analyze-only probe 的 Agg PNG 可驗收哪些改動，見 [R7〈用 GUI 與存檔的實際尺寸檢查版面〉](../zcu_lab/v2/figure-style.md#r7用-gui-與存檔的實際尺寸檢查版面)。
+Analyze-only probe 的 Agg PNG 可驗收哪些改動，見 [R7〈在固定存檔幾何檢查版面〉](../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面)。
 
 環境建構與清理由 [probe API 契約](../lib/zcu_tools/experiment/README.md#offline-experiment-probe) 規範，腳本須覆蓋失敗路徑。
 離線驗收不代表實機校準或物理模型已獲驗證。
