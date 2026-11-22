@@ -1,9 +1,12 @@
 """Relative Qubit2 minus Qubit1 phase scan in degrees at fixed common frequency."""
 
 from dataclasses import dataclass
+from textwrap import fill
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
+from matplotlib.artist import Artist
+from matplotlib.axes import Axes
 from matplotlib.collections import QuadMesh
 from numpy.typing import NDArray
 from pydantic import model_validator
@@ -12,6 +15,7 @@ from zcu_tools.analysis.fitting.phase_modulation import (
     fit_phase_modulation,
 )
 from zcu_tools.analysis.fitting.quality import FitQuality
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -46,6 +50,7 @@ from .._drive import QubitDriveCfg
 from .._rabi_analysis import (
     RabiRate,
     ReturnData,
+    cosine,
     fit_duration_rates,
 )
 from .._rabi_scan import RabiScanResult
@@ -134,14 +139,14 @@ class ConstructivePhaseCfg(ConfigBase):
         QubitDriveCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="填入 Qubit1/Qubit2 charge-line pulses，先以 conditional spectroscopy 選頻，再確認 cz_qubit1／cz_qubit2 slots。",
+            description="Set the two charge-line pulses. The scan varies only the Qubit2 phase relative to Qubit1.",
         ),
     ]
     readout: Annotated[
         MuxReadoutCfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot，先用 lookback 取得 timing us，再做 mux onetone。 "
+            description="Use the terminal mux pulse and its GE Post classifiers to measure joint return. "
             + POINT_ALIAS_DESCRIPTION,
         ),
     ]
@@ -163,40 +168,49 @@ class ConstructivePhaseCfg(ConfigBase):
         SweepCfg,
         FieldMeta(
             unit="deg",
-            label="Qubit2 relative to Qubit1 phase",
-            description="Set the qubit2 relative to qubit1 phase sweep endpoints in deg; review the scan window before Run.",
+            label="Qubit2 relative to Qubit1 drive phase",
+            description="Sweep Qubit2 phase minus the fixed Qubit1 drive phase. Cover the interference fringe.",
         ),
     ]
 
     duration: Annotated[
         SweepCfg,
         FieldMeta(
-            unit="us",
-            label="Duration",
-            description="Common duration sweep for both charge-line pulses in us.",
+            unit="µs",
+            label="Common waveform envelope duration",
+            description="Sweep the full waveform envelope length of both CZ drives; this is not the flat-top plateau alone.",
         ),
     ]
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Attempted shots per sweep point in one round, before herald selection.",
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of acquisitions accumulated at each sweep point.",
+        ),
     ] = 1
     initial_delay: Annotated[
         float,
         FieldMeta(
             label="Initial delay",
-            unit="us",
+            unit="µs",
             description="Delay before the first repetition.",
         ),
     ] = 1.0
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
-            unit="us",
+            label="Relaxation delay",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -264,85 +278,117 @@ def restore_result(
     )
 
 
+def _nearest_phase_index(
+    coordinates: NDArray[np.float64], relative_phase: float | None
+) -> int:
+    """Return the row nearest the selected phase modulo 360°, or the first row."""
+    if relative_phase is None:
+        return 0
+    distance = (coordinates - relative_phase + 180) % 360 - 180
+    return int(np.argmin(np.abs(distance)))
+
+
 def _plot_return(
     plots: Plots,
     coordinates: NDArray[np.float64],
     durations: NDArray[np.float64],
-    populations: NDArray[np.float64],
+    counts: NDArray[np.float64],
     relative_phase_deg: float | None,
 ) -> None:
-    """Plot three terminal fractions at the nearest measured phase in degrees.
-
-    populations contains all nine normalized outcomes per phase and duration.
-    None selects the first phase. Annotate the largest remaining outcome and
-    its peak fraction. Do not acquire or change the supplied arrays.
-    """
-    phase_index = 0
-    if relative_phase_deg is not None:
-        phase_distance = (coordinates - relative_phase_deg + 180) % 360 - 180
-        phase_index = int(np.argmin(np.abs(phase_distance)))
-    values = populations[phase_index]
-    other_indices = [1, 2, 3, 5, 6, 7, 8]
-    other_peaks = np.nanmax(values[:, other_indices], axis=0)
-    largest_other = other_indices[int(np.argmax(other_peaks))]
-    states = ("in g", "in e", "outside g/e")
-    _, ax = plots.subplots(num="return", figsize=(11, 6), layout="constrained")
-    ax.plot(durations, values[:, 0], ".-", color="C0", label="Both qubits in g")
-    ax.plot(durations, values[:, 4], ".-", color="C3", label="Both qubits in e")
-    ax.plot(
-        durations,
-        values[:, other_indices].sum(axis=1),
-        ".-",
-        color="0.45",
-        label="Anything else",
+    """Compare P(g,g), P(e,e) and all other outcomes at the nearest measured phase."""
+    row = _nearest_phase_index(coordinates, relative_phase_deg)
+    values = counts[row].reshape(-1, 9)
+    grouped = np.stack(
+        (values[:, 0], values[:, 4], values[:, [1, 2, 3, 5, 6, 7, 8]].sum(axis=1)),
+        axis=1,
     )
+    total = grouped.sum(axis=1, keepdims=True)
+    proportions = np.divide(
+        grouped, total, out=np.full_like(grouped, np.nan), where=total > 0
+    )
+    covariance = class_probability_covariance(grouped)
+    fig, ax = plots.subplots(num="return", figsize=(7, 4.8), layout="constrained")
+    for j, (label, color) in enumerate(
+        (("P(g,g)", "C0"), ("P(e,e)", "C3"), ("All other outcomes", "0.45"))
+    ):
+        ax.errorbar(
+            durations,
+            proportions[:, j],
+            yerr=np.sqrt(covariance[:, j, j]),
+            fmt=".",
+            color=color,
+            label=label,
+        )
+    detail = (
+        "nearest measured to selection"
+        if relative_phase_deg is not None
+        else "first measured phase; no selection"
+    )
+    fig.suptitle(f"{_MAP_TITLE}\nTerminal outcomes after double Xπ")
     ax.set(
-        xlabel="Drive duration (us)",
-        ylabel="Fraction of shots",
-        ylim=(0, 1),
-        title="Where the two qubits end up after the drive\n"
-        f"(relative phase {coordinates[phase_index]:g}°"
-        + (
-            "; closest measured to recommendation)"
-            if relative_phase_deg is not None
-            else "; first measured phase, no recommendation)"
-        ),
+        xlabel=_DURATION_LABEL,
+        ylabel="Joint probability",
+        title=f"Relative phase {coordinates[row]:g}° · {detail}",
     )
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncols=3, frameon=False)
-    ax.text(
-        0.99,
-        0.02,
-        f"Largest part of 'anything else': qubit 1 {states[largest_other // 3]}, "
-        f"qubit 2 {states[largest_other % 3]} (up to {other_peaks.max():.1%})",
-        ha="right",
-        va="bottom",
-        transform=ax.transAxes,
-        fontsize="x-small",
-        color="0.35",
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.21), ncols=3)
+
+
+_DURATION_LABEL = "Common waveform envelope duration (µs)"
+_COORDINATE_LABEL = "Qubit2 relative to Qubit1 drive phase (deg)"
+_RETURN_LABEL = "P(g,g) after double Xπ"
+_MAP_TITLE = "CZ constructive phase · Qubit1 / Qubit2"
+
+
+def _return_map(
+    ax: Axes,
+    durations: NDArray[np.float64],
+    coordinates: NDArray[np.float64],
+    values: NDArray[np.float64],
+) -> QuadMesh:
+    """Draw the duration-by-coordinate probability on the supplied axes."""
+    image = ax.pcolormesh(
+        durations, coordinates, values, shading="nearest", cmap="viridis"
     )
+    ax.set(xlabel=_DURATION_LABEL, ylabel=_COORDINATE_LABEL)
+    ax.grid(False)
+    return image
 
 
 def _live_return_map(
     plots: Plots,
     durations: NDArray[np.float64],
     coordinates: NDArray[np.float64],
-) -> QuadMesh:
-    """Show an empty return map against duration and relative phase (deg) and return its mesh."""
+) -> tuple[Axes, QuadMesh]:
+    """Show an empty return heatmap with the same axes and color map as Analyze."""
     fig, ax = plots.subplots(num="measurement", layout="constrained")
-    image = ax.pcolormesh(
-        durations,
-        coordinates,
-        np.full((len(coordinates), len(durations)), np.nan),
-        shading="nearest",
-        vmin=0,
-        vmax=1,
-        cmap="viridis",
+    image = _return_map(
+        ax, durations, coordinates, np.full((len(coordinates), len(durations)), np.nan)
     )
-    ax.set(xlabel="Drive duration (us)", ylabel="Qubit2 relative to Qubit1 phase (deg)")
-    ax.grid(False)
-    fig.colorbar(image, ax=ax, label="Terminal P(g,g)")
+    ax.set_title(f"{_MAP_TITLE}\nWaiting for shots")
+    fig.colorbar(image, ax=ax, label=_RETURN_LABEL)
     fig.show()
-    return image
+    return ax, image
+
+
+def _update_return_map(
+    ax: Axes, image: QuadMesh, counts: NDArray[np.float64]
+) -> tuple[Artist, ...]:
+    """Display measured pixels and the finite points' retained shot range."""
+    probabilities = joint_probabilities(counts)[..., 0, 0]
+    image.set_array(probabilities)
+    valid = np.isfinite(probabilities)
+    totals = counts.sum(axis=(-2, -1))
+    measured = totals[np.isfinite(totals)]
+    if valid.any():
+        lo, hi = float(probabilities[valid].min()), float(probabilities[valid].max())
+        if lo == hi:
+            lo, hi = (max(0, lo - 0.01), min(1, hi + 0.01))
+        image.set_clim(lo, hi)
+    if measured.size:
+        ax.set_title(
+            f"{_MAP_TITLE}\n{measured.size}/{totals.size} points · {int(measured.min())}–{int(measured.max())} retained shots/point"
+        )
+    return image, ax.title
 
 
 class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhaseCfg]):
@@ -412,13 +458,11 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
         # 2. Show terminal return as a heatmap on the two sweep axes.
-        image = _live_return_map(context.plots, durations, coordinates)
+        ax, image = _live_return_map(context.plots, durations, coordinates)
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[QuadMesh, ...]:
-            counts = sums
-            image.set_array(joint_probabilities(counts)[..., 0, 0])
-            return (image,)
+        def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
+            return _update_return_map(ax, image, sums)
 
         class_shape = (3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
@@ -487,13 +531,11 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
         # 2. Show terminal return as a heatmap on the two sweep axes.
-        image = _live_return_map(context.plots, durations, coordinates)
+        ax, image = _live_return_map(context.plots, durations, coordinates)
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[QuadMesh, ...]:
-            counts = sums.swapaxes(0, 1)
-            image.set_array(joint_probabilities(counts)[..., 0, 0])
-            return (image,)
+        def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
+            return _update_return_map(ax, image, sums.swapaxes(0, 1))
 
         class_shape = (3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
@@ -586,8 +628,14 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         coordinates = sweep2array(cfg.relative_phase)
         durations = sweep2array(cfg.duration)
         if (
-            not np.array_equal(result.coordinates, coordinates)
-            or not np.array_equal(result.durations, durations)
+            coordinates.shape != result.coordinates.shape
+            or durations.shape != result.durations.shape
+            or not np.allclose(
+                result.coordinates, coordinates, rtol=2 * np.finfo(float).eps, atol=0
+            )
+            or not np.allclose(
+                result.durations, durations, rtol=2 * np.finfo(float).eps, atol=0
+            )
             or result.sums.shape != (len(coordinates), len(durations), 3, 3)
         ):
             raise ValueError(
@@ -600,114 +648,171 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             np.isfinite(totals) & (totals > 0),
             totals,
         )
-        # 2. Show phase-dependent return and leakage before extracting identifiable duration-slice rates.
         fig, ax = plots.subplots(
-            num="interference", figsize=(9, 6), layout="constrained"
+            num="interference", figsize=(7, 5), layout="constrained"
         )
-        image = ax.pcolormesh(
-            result.durations,
-            result.coordinates,
-            answer.populations[..., 0],
-            shading="nearest",
-            vmin=0,
-            vmax=1,
-            cmap="viridis",
-        )
-        ax.grid(False)
-        fig.colorbar(image, ax=ax, label="Terminal P(g,g)")
-        ax.set(
-            xlabel="Drive duration (us)",
-            ylabel="Qubit2 relative to Qubit1 phase (deg)",
-            title="Nominal B11 return proxy · not gate fidelity",
-        )
-        # 3. Fit complete duration traces, then regress identifiable rates squared against relative phase.
+        image = _return_map(ax, durations, coordinates, answer.populations[..., 0])
+        ax.set_title(_MAP_TITLE)
+        fig.colorbar(image, ax=ax, label=_RETURN_LABEL)
+
         analysis = analyze_constructive_phase(coordinates, durations, answer)
         modulation = analysis.modulation
-        _, ax = plots.subplots(num="rabi_rate", figsize=(10, 6), layout="constrained")
-        ax.errorbar(
-            coordinates,
-            [rate.rate if rate.rate is not None else np.nan for rate in analysis.rates],
-            yerr=[
-                rate.uncertainty if rate.uncertainty is not None else np.nan
-                for rate in analysis.rates
-            ],
-            fmt="o",
-            color="C0",
-        )
-        ax.text(
-            0.02,
-            0.98,
-            "\n".join(
-                f"{coordinate:g}: {rate.reason}"
-                for coordinate, rate in zip(coordinates, analysis.rates, strict=True)
-                if rate.reason
-            ),
-            va="top",
-            transform=ax.transAxes,
-            fontsize="small",
-        )
-        ax.set(
-            xlabel="Qubit2 relative to Qubit1 phase (deg)",
-            ylabel="Rabi rate (MHz)",
-            title="Undamped cosine model · rates below 1/duration span excluded",
-        )
-        _, ax = plots.subplots(num="rabi_traces", figsize=(10, 6), layout="constrained")
-        for coordinate, rate in zip(coordinates, analysis.rates, strict=True):
-            if rate.fitted is not None:
-                ax.plot(durations, rate.fitted, label=f"{coordinate:g}")
-        ax.set(
-            xlabel="Drive duration (us)",
-            ylabel="Fitted joint P00",
-            title="Duration cosine fits · inspect model against measured return curves",
-        )
-        ax.legend(
-            title="Qubit2 relative to Qubit1 phase (deg)", fontsize="x-small", ncols=2
-        )
+        prediction = modulation.prediction
+        candidate = prediction.maximum_phase_deg if prediction is not None else None
+        _plot_duration_rates(plots, coordinates, analysis.rates)
+        row = _nearest_phase_index(coordinates, candidate)
+        indices = sorted({0, row, len(coordinates) - 1})
+        _plot_duration_traces(plots, result, answer, analysis.rates, indices)
+        _plot_return(plots, coordinates, durations, counts, candidate)
 
-        # 4. Summarize terminal outcomes at the measured phase nearest the proposed maximum.
-        _plot_return(
-            plots,
-            coordinates,
-            durations,
-            answer.populations,
-            modulation.prediction.maximum_phase_deg
-            if modulation.prediction is not None
-            else None,
-        )
-
-        # 5. Propose the interference maximum only when the rate-squared modulation is identifiable.
-        if modulation.prediction is not None:
-            _, ax = plots.subplots(
-                num="constructive_phase", figsize=(9, 6), layout="constrained"
-            )
-            ax.plot(
-                analysis.phases,
-                analysis.squared_rates,
-                "o",
-                label="Identifiable duration-slice rates²",
-            )
-            ax.plot(
-                modulation.prediction.phase_degrees,
-                modulation.prediction.squared_rates,
-                label="A + B cosφ + C sinφ",
-            )
-            ax.axvline(
-                modulation.prediction.maximum_phase_deg,
-                ls="--",
-                label="Maximum rate phase",
-            )
-            ax.set(
-                xlabel="Qubit2 relative to Qubit1 phase (deg)",
-                ylabel="Rabi rate² (MHz²)",
-                title="Constructive phase · fixed signed gain ratio",
-            )
-            ax.legend()
-            return ConstructivePhaseAnalysis(
-                modulation.prediction.maximum_phase_deg,
-                modulation.reason,
-                modulation.fit_quality,
-            )
-        # 6. Keep an unresolved constructive-phase proposal explicit with its fit diagnostics.
+        _plot_phase_modulation(plots, analysis)
         return ConstructivePhaseAnalysis(
-            None, modulation.reason, modulation.fit_quality
+            candidate, modulation.reason, modulation.fit_quality
         )
+
+
+def _plot_phase_modulation(plots: Plots, analysis: ConstructivePhaseData) -> None:
+    """Show the rate-squared interference fit and its existing maximum diagnostics."""
+    modulation = analysis.modulation
+    fig, ax = plots.subplots(
+        num="constructive_phase", figsize=(7, 4.8), layout="constrained"
+    )
+    # First-order propagation of each duration fit's SE, for display only.
+    squared_rate_se = [
+        2 * rate.rate * rate.uncertainty if rate.uncertainty is not None else np.nan
+        for rate in analysis.rates
+        if rate.rate is not None
+    ]
+    ax.errorbar(
+        analysis.phases,
+        analysis.squared_rates,
+        yerr=squared_rate_se,
+        fmt=".",
+        color="C0",
+        label="Eligible rates² ± propagated fit SE",
+    )
+    prediction = modulation.prediction
+    if prediction is None:
+        diagnostic = f"No phase proposal: {modulation.reason}"
+    else:
+        ax.plot(
+            prediction.phase_degrees,
+            prediction.squared_rates,
+            "k-",
+            label="Interference fit",
+        )
+        ax.axvline(
+            prediction.maximum_phase_deg, color="C3", ls="--", label="Selected maximum"
+        )
+        diagnostic = f"Maximum-rate phase = {prediction.maximum_phase_deg:.5g} ± {modulation.phase_error_deg:.2g} deg"
+    quality = modulation.fit_quality
+    if (
+        quality is not None
+        and quality.r2 is not None
+        and quality.normalized_residual_rms is not None
+    ):
+        diagnostic += f"\nR² = {quality.r2:.3g} · Normalized RMS = {quality.normalized_residual_rms:.3g}"
+    fig.suptitle(f"{_MAP_TITLE}\nRate-squared interference")
+    ax.set(
+        xlabel=_COORDINATE_LABEL, ylabel="Rabi rate squared (MHz²)", title=diagnostic
+    )
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.21), ncols=2)
+
+
+def _plot_duration_rates(
+    plots: Plots,
+    coordinates: NDArray[np.float64],
+    rates: tuple[RabiRate, ...],
+) -> None:
+    """Show identifiable rates and mark finite fits rejected by the duration span."""
+    fig, ax = plots.subplots(num="rabi_rate", figsize=(7, 5.1), layout="constrained")
+    values = [rate.rate if rate.rate is not None else np.nan for rate in rates]
+    errors = [
+        rate.uncertainty if rate.uncertainty is not None else np.nan for rate in rates
+    ]
+    ax.errorbar(
+        coordinates,
+        values,
+        yerr=errors,
+        fmt=".",
+        color="C0",
+        label="Selected rates ± fit SE",
+    )
+    rejected = [
+        (x, abs(rate.parameters[2]), rate.minimum_rate_mhz)
+        for x, rate in zip(coordinates, rates, strict=True)
+        if rate.parameters is not None and rate.minimum_rate_mhz is not None
+    ]
+    if rejected:
+        x, y, criteria = zip(*rejected, strict=True)
+        ax.plot(x, y, "x", color="C3", label="Unresolved fitted rates")
+        floor = criteria[0]  # The owner uses the common duration span for every slice.
+        ax.axhline(
+            floor,
+            color="0.45",
+            ls="--",
+            label=f"Inverse duration span: {floor:.4g} MHz",
+        )
+    missing = sum(rate.rate is None and rate.parameters is None for rate in rates)
+    fig.suptitle(f"{_MAP_TITLE}\nDuration-fit rates")
+    ax.set(
+        xlabel=_COORDINATE_LABEL,
+        ylabel="Rabi rate (MHz)",
+        title=f"{missing} scan slices without a usable fit" if missing else "",
+    )
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
+
+
+def _plot_duration_traces(
+    plots: Plots,
+    result: ConstructivePhaseResult,
+    data: ReturnData,
+    rates: tuple[RabiRate, ...],
+    indices: list[int],
+) -> None:
+    """Show representative measured duration slices with their fitted cosine and quality."""
+    fig, _ = plots.subplots(
+        num="rabi_traces",
+        nrows=len(indices),
+        sharex=True,
+        figsize=(7, 8),
+        layout="constrained",
+    )
+    fig.suptitle(f"{_MAP_TITLE}\nDuration slices")
+    durations, coordinates = result.durations, result.coordinates
+    xs = np.linspace(durations[0], durations[-1], 401)
+    for ax, i in zip(fig.axes, indices, strict=True):
+        rate = rates[i]
+        covariance = class_probability_covariance(result.sums[i].reshape(-1, 9))
+        ax.errorbar(
+            durations,
+            data.populations[i, :, 0],
+            yerr=np.sqrt(covariance[:, 0, 0]),
+            fmt=".",
+            color="C0",
+            label="Measured ± shot SEM",
+        )
+        if rate.parameters is not None:
+            ax.plot(xs, cosine(xs, *rate.parameters), "k-", label="Cosine fit")
+        title = f"{coordinates[i]:g} deg · "
+        title += (
+            f"Rabi rate = {rate.rate:.4g} ± {rate.uncertainty:.2g} MHz"
+            if rate.rate is not None
+            else "\n" + fill(rate.reason or "Rate unavailable", width=54)
+        )
+        quality = rate.quality
+        if (
+            quality is not None
+            and quality.r2 is not None
+            and quality.normalized_residual_rms is not None
+        ):
+            title += f"\nR² = {quality.r2:.3g} · Normalized RMS = {quality.normalized_residual_rms:.3g}"
+        ax.set_title(title)
+    entries = {
+        label: handle
+        for ax in fig.axes
+        for handle, label in zip(*ax.get_legend_handles_labels(), strict=True)
+    }
+    fig.legend(entries.values(), entries.keys(), loc="outside lower center", ncols=2)
+    fig.axes[-1].set_xlabel(_DURATION_LABEL)
+    fig.supylabel(_RETURN_LABEL)

@@ -31,12 +31,12 @@ from zcu_lab.v2.support.measure.mux_results import (
 )
 from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
-from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
+from zcu_lab.v2.support.mux import MuxFitFailure, MuxRabiResult
 
 from .core import AmpRabiAnalyzeOptions, MuxAmpRabiCfg, MuxAmpRabiExp, MuxAmpRabiFit
 from .form import make_form
 
-MuxAmpRabiRunResult: TypeAlias = RunRecord[MuxAmpRabiCfg, MuxSweepResult]
+MuxAmpRabiRunResult: TypeAlias = RunRecord[MuxAmpRabiCfg, MuxRabiResult]
 
 
 class MuxAmpRabiFitSummary(MuxSummaryTone):
@@ -162,11 +162,16 @@ def _get_writeback_items(
     return items
 
 
-def run(
-    cfg: MuxAmpRabiCfg, *, context: RunContext
-) -> RunRecord[MuxAmpRabiCfg, MuxSweepResult]:
+def run(cfg: MuxAmpRabiCfg, *, context: RunContext) -> MuxAmpRabiRunResult:
     """Run the experiment and retain its actual configuration."""
     return RunRecord(cfg=cfg, result=MuxAmpRabiExp().run(cfg, context=context))
+
+
+def _summary_lines(source: MuxAmpRabiRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
 
 
 DEFINITION = Adapter(
@@ -175,6 +180,9 @@ DEFINITION = Adapter(
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze, options=_MuxAmpRabi_options, writeback=_get_writeback_items
+        summary_lines=_summary_lines,
+        fn=_analyze,
+        options=_MuxAmpRabi_options,
+        writeback=_get_writeback_items,
     ),
 )

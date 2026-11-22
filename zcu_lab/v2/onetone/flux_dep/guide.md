@@ -1,10 +1,8 @@
-## Behavior
+**Readers:** operator, agent. Measure one-tone resonator flux dependence and locate flux sweet spots.
 
-**Readers:** operator, agent. How to measure one-tone resonator flux dependence from the GUI or MCP and locate flux sweet spots.
+# One-tone flux dependence
 
-The 2D sweep varies an external flux-bias device value and readout frequency to trace how the resonator frequency moves with flux. Use the map to locate a Fluxonium's half-flux and integer-flux sweet spots. The measurement runs on real hardware and requires a SoC connection and a configured flux-bias device.
-
-**Last updated:** 2026-10-21
+Run sets the flux-bias device and sweeps the readout RF frequency. At each frequency, a shot plays the readout pulse and integrates its demodulated I and Q over the ADC window. Run averages the complex IQ before stepping to the next bias. Use the resonator's dispersive shift with bias to locate a fluxonium's half- and integer-flux symmetry points.
 
 After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
@@ -18,7 +16,17 @@ The sweet-spot picker projects `$qubit.flux` from the selected Run or Load captu
 
 ## Readout module
 
-The readout starts as a fresh inline pulse with a `const` waveform. Configure its pulse settings directly in the tab.
+The Readout template starts inline with a constant envelope and gain 0.05 a.u. Gain is a DAC full-scale fraction. The sweep overrides the module frequency at every bias. Use the trigger offset and pulse duration to place the ADC window inside the arriving pulse. The ADC window is 0.03 µs shorter than the default 1.0 µs template pulse. Set Post-delay to let the cavity empty after readout; start at `5/(2π·κ)` µs for linewidth κ in MHz.
+
+**Flux-bias device** chooses the source. Its **Bias unit** is A, V or the source's native units. **Flux bias** Start and Stop use that unit, not flux quanta. **Readout RF frequency** Start and Stop use absolute MHz, not mixer offsets. Expts is the number of values on either axis. Reps starts at 1000 shots per frequency and bias per round. Rounds starts at 10 frequency sweeps at each bias, and Relax delay starts at 1 µs after each shot.
+
+## Read the maps
+
+The Run heatmap colors the magnitude of the mean complex IQ, `|mean(I + iQ)|` in a.u., with flux bias on the horizontal axis and acquired readout RF frequency (MHz) on the vertical axis. Blank columns have no measurements. The title counts columns with data, including the current one. The trace below shows the latest bias's frequency cut. The magnitude is not a population. Neither the heatmap nor the frequency cut uses shot SEM; look for where the spectral notch moves.
+
+Use the picker to mark the symmetry points of the notch track. Its interactive frequency display uses GHz; multiply by 1000 to compare it with the Run RF axis. The red line marks half flux and the blue line marks integer flux. The picker's mirror-loss panel compares the magnitude maps on opposite sides of the line you adjust. Lower loss means the measured response reflects more closely about that bias. Use it to refine a nearby symmetry point, not to distinguish half from integer flux or to accept a pick automatically. The final Analyze map returns to MHz and the Run color scale. It labels the accepted lines and reports **Bias period** as twice their separation, in Bias unit. For example, if half flux is at 0.0010 A and integer flux at −0.0030 A, the period magnitude is 0.0080 A. The picks are not a fit and carry no fitted standard error. Recenter or extend the bias sweep if it lacks both symmetry points or if a pick lands at an edge. If the notch is clipped in frequency, extend the affected RF endpoint before judging symmetry.
+
+Analyze identifies the source run and lists its configured Reps × Rounds. A loaded run with no compatible cfg has no averaging line; the plot labels the horizontal axis in device units rather than guessing amperes or volts.
 
 ## Calibration updates
 
@@ -40,13 +48,11 @@ Supply `center_mhz` and `span_mhz` together to set numeric endpoints at center �
 
 Run after lookback and an initial onetone/freq, before any twotone flux mapping, to find the selected device's integer reference and period from the resonator map.
 
-Review `flux_dev`. Opening a tab or choosing Defaults reads `$qubit.flux_dev` once into an editable direct device name. A missing source leaves the required field empty and Invalid. Confirm the device and `flux_unit`, which starts as `A`. The selected unit labels the values as entered. Supply device-native values in that unit.
-
-The calibrated sweep uses 101 flux points across the padded interval between the selected device's actual integer and half, and 101 frequency points at `$resonator.freq` ± `$resonator.kappa` MHz. Start at a low readout gain, about 0.005, to stay below punch-out so the dip tracks cleanly. If poor SNR makes the dip hard to see, raise the gain toward 0.05 while keeping the frequency window tight.
+Opening the tab or choosing Defaults takes the initial Flux-bias device from the qubit's saved binding. Confirm that source and Bias unit, which starts at A. If a source is missing, fill the blank field before running. For a first sweep, start below the drive strength where the resonance shifts toward the bare center. For example, try gain 0.005 a.u. and increase toward 0.05 a.u. only if the notch is too faint and the device calibration allows it.
 
 Survey wide, then narrow around a sweet spot. If the resonator's flux dispersion, or dispersive shift, looks small, narrow the frequency window early. For consecutive flux sweeps, reverse the sweep direction by swapping start and stop on the next run. This reduces the current source's return ramp across the full range.
 
-Inspect the 2D map with `gui_tab_get_figure` and `subtab_id='run'` to judge the frequency window, SNR, and shift. After accepting the calibration, recompute the actual integer for other devices' current values and move the scanned device there and rerun onetone/freq at that flux before twotone/freq.
+Inspect the Run map before accepting a pick. After accepting the calibration, recompute the integer bias for the other devices' actual values. Move the scanned device to that bias and rerun onetone/freq there before twotone/freq.
 
 ## Four starting situations
 

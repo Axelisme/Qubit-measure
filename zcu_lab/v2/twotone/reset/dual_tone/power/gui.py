@@ -35,9 +35,11 @@ DualTonePowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 @dataclass
 class DualTonePowerAnalyzeParams:
     smooth_method: Annotated[
-        Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
+        Literal["wavelet", "gaussian"], ParamMeta(label="Peak selection filter")
     ] = "wavelet"
-    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
+    smooth: Annotated[
+        float, ParamMeta(label="Filter strength (sample steps or a.u.)", decimals=2)
+    ] = 1.0
 
 
 def _DualTonePower_analyze(
@@ -111,6 +113,13 @@ def _run(cfg: PowerCfg, *, context: RunContext) -> RunRecord[PowerCfg, PowerResu
     return RunRecord(cfg=cfg, result=PowerExp().run(cfg, context=context))
 
 
+def _summary_lines(source: RunRecord[PowerCfg, PowerResult]) -> tuple[str, ...]:
+    """Report the saved configuration's requested repetitions and rounds."""
+    if source.cfg is None:
+        return ()
+    return (f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=PowerExp.AXES_SPEC,
     make_form=_DualTonePower_make_form,
@@ -120,5 +129,6 @@ DEFINITION = Adapter(
         fn=_DualTonePower_analyze,
         options=lambda source, env: DualTonePowerAnalyzeParams(),
         writeback=_DualTonePower_get_writeback_items,
+        summary_lines=_summary_lines,
     ),
 )

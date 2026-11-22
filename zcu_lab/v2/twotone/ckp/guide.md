@@ -1,23 +1,17 @@
-## Behavior
+**Readers:** operator, agent. Compare qubit resonance under a resonator drive with and without a qubit π preparation pulse. Use both branches to estimate the dispersive shift, resonator linewidth and readout frequency.
 
-**Readers:** operator, agent. CKP ground/excited-resolved spectroscopy: prepares the qubit in g and e, drives resonator and qubit probe tones concurrently over a two-dimensional frequency sweep, and fits the two resonator branches to extract dispersive shift chi, linewidth kappa, and the readout frequency. Runs on real hardware.
+## Prepare and run
 
-**Last updated:** 2026-10-21
+First calibrate the readout, qubit frequency, π pulse and resonator linewidth. Each shot runs optional **Reset**, skips or applies **Qubit π preparation pulse**, starts both probe tones, waits for both to finish, then reads out. The two branches indicate pulse preparation, not known pure g and e states.
 
-## Parameter sources
+Check both aliases before opening the form. **Defaults** captures fresh calibration and replaces unsaved values; **Refresh** preserves edits. The form uses `$qubit.module.x180` and `$resonator.module.readout`, or editable templates when those slots are empty. An empty reset slot leaves reset off. The resonator and qubit drives start from independent templates. Resonator kappa sets the starting resonator drive length and qubit probe delays. Confirm the timing and both drives' gains before Run.
 
-Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs from the sources captured at Open/Defaults. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Resonator sweep is resonator.freq ± 1.5 * resonator.kappa. Qubit sweep runs qubit.freq - 10 to qubit.freq + 5 MHz. Probe timing scales inversely with resonator.kappa.
+**Resonator drive RF frequency** starts at `$resonator.freq` ± 1.5 × `$resonator.kappa`, with 101 points. **Qubit probe RF frequency** starts at `$qubit.freq` − 10 MHz to `$qubit.freq` + 5 MHz, also with 101 points. Missing required calibration leaves fields empty until you supply values. **Reps** is the number of shots per RF-frequency pair and preparation per round. **Rounds** is the number of averaging passes. Defaults use 1000 × 10. **Relax delay** waits after each shot. The initial wait is five times T1, or 150 µs when no T1 is stored; invalid stored T1 leaves the input empty.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+## Read the maps and shared fit
 
-## Module slots
+Run shows two qubit-frequency versus resonator-frequency maps, one per preparation. Color is the mean IQ projected and scaled within each resonator-frequency slice to 0–1 a.u.; it is not a population. The same color in the two maps does not imply the same absolute IQ. The counter shows RF pairs and preparations with data. Blank regions have not been acquired. There are no pointwise shot error bars on these 2D spectra.
 
-Readout uses the qubit.module.readout slot captured at Open/Defaults, or a fresh readout template when the slot is unset or points to a missing module. Optional qubit.module.reset stays disabled when absent. Saved modules remain selectable; sweeps replace only the swept fields at Run. Pi pulse uses qubit.module.x180 with a pi_pulse template fallback; both probe pulses start from fresh templates.
+Analyze puts the extracted qubit resonance centers and continuous shared model on those maps. It needs at least five usable centers in each preparation and a valid fit covariance. Fit EDM is the optimizer's estimated distance from the minimum of its objective, not a measure of whether the Lorentzian follows the ridge. The fitter checks convergence and covariance; the plot does not add an EDM cutoff. Compare the points with the model on both sides of each ridge before using the result; a weak slice or a clipped window can shift the center. If the ridge hits a qubit RF edge, move that edge past the last visible center and leave room for both shoulders. For example, if the ridge exits at 620 MHz with a 2 MHz FWHM, extend the edge by at least 2 MHz and verify the next map includes the full line. Read χ/2π as half the separation of the two fitted resonator centers and κ/2π as the fitted resonator FWHM. The parameter errors describe the shared fit covariance, not shot SEM. The vertical marker is the proposed readout frequency; it need not be one of the two centers.
 
-## Typical writeback
-
-Proposes fitted chi into '`$qubit.ext.chi`', fitted kappa into '`$resonator.kappa`', and fitted readout frequency into '`$resonator.freq`'. Proposals update scalar calibration only.
-
-## Recommended
-
-Run only after qubit frequency, pi pulse, resonator frequency, and resonator linewidth are calibrated. Review both g/e maps and fitted branches before applying writeback; a branch-selection or fit failure can produce plausible-looking scalar values.
+Check Reps × Rounds in the Analyze summary for the selected Run or Load. Apply only after judging both maps. Apply writes `$qubit.ext.chi`, `$resonator.kappa` and `$resonator.freq`; it does not change a module. There is no dedicated CKP recipe. Save retains the two preparation grids and complex IQ. Load uses the native saved record for Analyze and keeps the current form inputs.

@@ -176,6 +176,15 @@ ADC registers for the active acquire. If they are missing when the reducer
 consumes a round, it raises `RuntimeError`. Edge counting, extra axes, cubic
 moments and shot masks are rejected. Other axes and native `acquire` are unchanged.
 
+For a mux readout whose cfg contains only its participating tones, pass
+`v2.mux_iq_sums(prog, read)` to `acquire_summed`. It returns
+`(*point_dims, tones, 6)` in cfg tone order, not ADC order. Each tone has its
+own six corrected sums and can be decoded with `v2.split_sums`. The program
+must have one unconditional integrated read per shot on each of those ADCs,
+with no extra ADCs, edge counting or shot masks. This opt-in uses the existing
+required-raw simulation path, not a second pass after a compact mean. Count
+and moments describe only completed rounds.
+
 Timeline read labels use emit tags, falling back to module names for untagged
 emissions. Missing or ambiguous labels
 raise ValueError listing available labels. Explicit tags retain QICK's global

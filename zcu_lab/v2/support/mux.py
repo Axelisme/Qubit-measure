@@ -74,6 +74,17 @@ def validate_mux_result(result: MuxSweepResult) -> None:
 
 
 @dataclass(frozen=True)
+class MuxRabiResult(MuxSweepResult):
+    """Zipped Rabi IQ with optional same-batch moments for every tone/point.
+
+    iq_moments is float64 (K,P,6) in [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] order.
+    Unmeasured rows are NaN. None means the source contains only mean IQ.
+    """
+
+    iq_moments: NDArray[np.float64] | None = None
+
+
+@dataclass(frozen=True)
 class MuxFitFailure:
     """Numerical failure for original tone index, with the fitter's reason."""
 

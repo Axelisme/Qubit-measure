@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-11-22，Analyze 摘要
+**Last updated:** 2026-11-22，Analyze 摘要、RecipeReport 討論紀錄與 workflow 表單欄位描述
 
 **讀者：** agent、framework-dev。查閱量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -353,6 +353,7 @@ Center／span 必須成對提供或省略，缺一個就回 needs_parameters 指
 `RecipeReport` 提供 writeback_applied、analysis_failure、fit_quality 與 diagnostics。
 作者填入 owner 的事實，基底不決定 fit 是否可接受，也不自動寫回。
 `recipe_api.FitQuality` 與 `QualityIssue` 直接匯出 analysis owner 的同一型別。
+取捨見 [2026-11-20〈Recipe 報告與執行進度〉](../../../../docs/discussions/2026-11-20-recipe-report-polish.md)，也可從[討論紀錄索引的 agent 介面](../../../../docs/discussions/INDEX.md#agent-介面)查到。
 `await tab.analyze("primary", result=OwnerSummary)` 回傳的 result 使用 owner 型別，recipe 不另宣告鏡像。
 `report_number(value)` 保留有限數的原始精度，None、NaN 與 infinity 轉為 None，不換單位或四捨五入。
 
@@ -545,6 +546,8 @@ Workflow 工具在同一 measure MCP session，與既有 recipe `answer` 分開�
 Batch 是 `[{"path": ["field", 0, "leaf"], "value": ...}]`，路徑是 canonical
 欄位名與原始 list index。Form owner 決定 branch、expression、有效值與錯誤。
 MCP 不計算 defaults、不做 lowering，也不另建 Engine、run registry 或 holder 規則。
+`workflow_describe_form` 在 input／values／errors 之外，只加指定 path 的目標與直接子欄位 metadata。
+生成表單的顯示單位與群組提示見 [form adapter 的 `Display` 投影](../../gui/form_adapter/README.md#依賴方向)。
 
 Start 省略/null batch 使用 shared GUI draft。明填 batch，包括 []，使用 owner
 當次 fresh captured defaults 加 edits。Form preview 的 [] 則讀當前 parsed draft，

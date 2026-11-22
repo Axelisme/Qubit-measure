@@ -50,6 +50,11 @@ def _run(cfg: ChainCfg, *, context: RunContext) -> RunRecord[ChainCfg, SweepSums
 
 
 # No writeback: the sigma-peak width only approximates the qubit line width.
+def _summary_lines(source: RunRecord[ChainCfg, SweepSums]) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=ChainExp.AXES_SPEC,
     make_form=make_form,
@@ -58,5 +63,6 @@ DEFINITION = Adapter(
     analysis=Analysis(
         fn=_analyze,
         options=lambda source, env: ChainAnalyzeOptions(),
+        summary_lines=_summary_lines,
     ),
 )

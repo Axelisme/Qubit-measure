@@ -5,24 +5,37 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
+from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.datafile import DataVariable
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    IQ,
     Pulse,
     PulseReset,
     Readout,
     Reset,
     SweepCfg,
     TimelineBuilder,
+    shot_sums,
+    split_sums,
 )
 
-from zcu_lab.v2.support.reset import reset_scan_buffer
+from zcu_lab.v2.support import live_errorbar
 
 
 @dataclass(frozen=True)
@@ -36,6 +49,8 @@ class GainResult:
 
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    # Per branch and point: [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]; None in mean-only files.
+    iq_moments: NDArray[np.float64] | None = None
 
 
 @dataclass(frozen=True)
@@ -54,24 +69,40 @@ class GainCfg(ConfigBase):
 
     reset: Annotated[
         Reset.Cfg | None,
-        FieldMeta(label="Reset", description="Optional reset before each branch."),
+        FieldMeta(
+            label="Reset",
+            description="Select a preparation reset before the first π switch, or leave blank to skip it.",
+        ),
     ] = None
     pi_pulse: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="Pi pulse",
-            description="Calibrated pi used both before and after the tested reset.",
+            description="Fill in the calibrated Xπ used by both switches around the tested reset.",
         ),
     ]
     tested_reset: Annotated[
         PulseReset.Cfg,
         FieldMeta(
             label="Tested reset",
-            description="Flux reset pulse at fixed length; gain is swept.",
+            description="Fill in the local flux pulse at fixed duration; this scan replaces its gain.",
         ),
     ]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Fill in the calibrated resonator readout for the end of each shot.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Flux reset gain",
+            unit="a.u.",
+            description="Enter the signed flux-pulse gain range (a.u.).",
+        ),
+    ]
 
     reps: Annotated[
         int,
@@ -86,7 +117,7 @@ class GainCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of acquisition rounds to average (count).",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -95,33 +126,72 @@ class GainCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the delay after each shot to let the qubit relax (µs).",
         ),
     ]
 
 
+_SCAN_AXIS = VariableAxisSpec(
+    field_name="gains", label="Flux reset gain", unit="a.u.", dtype=np.float64
+)
+_BRANCH_0 = VariableAxisSpec(
+    values=(0, 1), label="After reset pi (0=off, 1=on)", unit="None", dtype=np.int64
+)
+_BRANCH_1 = VariableAxisSpec(
+    values=(0, 1), label="Before reset pi (0=off, 1=on)", unit="None", dtype=np.int64
+)
+_MEAN_AXES = (_SCAN_AXIS, _BRANCH_0, _BRANCH_1)
+_MOMENT_COLUMNS = (0, 1, 2, 3, 4, 5)
+_TITLE = "Flux reset gain sweep · qubit"
+_XLABEL = "Flux reset gain (a.u.)"
+_BRANCH_LABELS = ("No π pulses", "π after", "π before", "π before and after")
+_I_LABEL = "Mean IQ real (a.u.)"
+_Q_LABEL = "Mean IQ imaginary (a.u.)"
+
+
+def _restore(data: GroupedLoadData[GainCfg]) -> GainResult:
+    """Load mean-only files or the mean and moments sharing its acquisition grid."""
+    mean = data.variable("data")
+    moments = data.variables.get(DataVariable("iq_moments"))
+    if moments is None:
+        return GainResult(mean.axes[0], mean.z)
+    if not np.array_equal(moments.axes[0], _MOMENT_COLUMNS) or not all(
+        np.array_equal(old, new)
+        for old, new in zip(mean.axes, moments.axes[1:], strict=True)
+    ):
+        raise ValueError(
+            "iq_moments axes do not match the stored IQ grid and moment columns"
+        )
+    return GainResult(mean.axes[0], mean.z, moments.z)
+
+
 class GainExp(Experiment[GainResult, GainCfg]):
-    AXES_SPEC: ClassVar[AxesSpec[GainResult, GainCfg]] = AxesSpec(
-        axes=(
-            AxesSpec.Axis("gains", label="Flux reset gain", unit="a.u."),
-            AxesSpec.Axis(
-                values=(0, 1),
-                label="After reset pi (0=off, 1=on)",
-                unit="None",
-                dtype=np.int64,
+    # ADR-0069: preserve historical data axes and export only the mean IQ to Labber.
+    AXES_SPEC: ClassVar[GroupedAxesSpec[GainResult, GainCfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "data",
+                _MEAN_AXES,
+                VariableZSpec(
+                    "signals", label="Signal", unit="a.u.", dtype=np.complex128
+                ),
             ),
-            AxesSpec.Axis(
-                values=(0, 1),
-                label="Before reset pi (0=off, 1=on)",
-                unit="None",
-                dtype=np.int64,
+            VariableSpec(
+                "iq_moments",
+                (
+                    VariableAxisSpec(label="Moment", unit="", values=_MOMENT_COLUMNS),
+                    *_MEAN_AXES,
+                ),
+                VariableZSpec("iq_moments", label="IQ moments", unit=""),
+                required=False,
             ),
         ),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=GainResult,
         cfg_type=GainCfg,
         cfg_schema_version="3.0",
         tag="twotone/reset/flux/gain",
+        result_builder=_restore,
+        labber_variables=("data",),
     )
 
     def run(self, cfg: GainCfg, *, context: RunContext) -> GainResult:
@@ -141,16 +211,35 @@ class GainExp(Experiment[GainResult, GainCfg]):
         gains = sweep2array(
             cfg.gain, "gain", {"soccfg": soccfg, "gen_ch": pulse_cfg.ch}
         )
-        signals_buffer = reset_scan_buffer(
-            context.plots,
-            gains,
-            xlabel="Flux reset gain (a.u.)",
-            branch_shape=(2, 2),
-            signal2real=lambda data: data.real.reshape(4, -1),
+        plots = context.plots
+        fig, ax = plots.subplots(num="measurement", layout="constrained")
+        ax.set(xlabel=_XLABEL, ylabel=_I_LABEL, title=f"{_TITLE} · IQ")
+        viewer = live_errorbar(ax, num_lines=4)
+        for line, label in zip(ax.lines, _BRANCH_LABELS, strict=True):
+            line.set_label(label)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncols=2)
+
+        @plots.on_plot_thread
+        def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Show branch means, shot SEM of I and retained counts."""
+            signals = split_sums(moments)[1]
+            sem = iq_shot_sem(moments, direction=(1.0, 0.0))
+            shots = int(np.nan_to_num(moments[..., 0]).max())
+            title = ax.set_title(
+                f"{_TITLE} · IQ\nRetained shots per point and branch: {shots} count"
+            )
+            return (
+                *viewer.set(gains, signals.real.reshape(4, -1), sem.reshape(4, -1)),
+                title,
+            )
+
+        fig.show()
+        buffer = SignalBuffer(
+            (2, 2, len(gains), len(_MOMENT_COLUMNS)), dtype=np.float64, on_update=update
         )
 
         # 2. Compare before/after-pi responses at each gain to isolate the reset contrast.
-        with Schedule(signals_buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -176,9 +265,12 @@ class GainExp(Experiment[GainResult, GainCfg]):
                 builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.delay_by_timeline()
             builder.emit(Readout("readout", cfg.readout))
-            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
+            program = builder.build()
+            reducer = shot_sums(program, (IQ("readout", offset_corrected=True),))
+            sched.run_acquire_summed(program, soc, reducer=reducer, rounds=cfg.rounds)
 
-        return GainResult(gains=gains, signals=signals_buffer.array)
+        moments = buffer.array
+        return GainResult(gains, split_sums(moments)[1], moments)
 
     def analyze(
         self,
@@ -236,33 +328,59 @@ class GainExp(Experiment[GainResult, GainCfg]):
             else None
         )
 
-        # 3. Keep the measured branches visible beside the uncalibrated estimate.
+        # 3. Show the measured branches alongside the derived diagnostics.
+        outcome = GainAnalysis(selected_gain=selected)
+        self._plot_result(plots, result, ratio, residual, outcome)
+        return outcome
+
+    def _plot_result(
+        self,
+        plots: Plots,
+        result: GainResult,
+        ratio: NDArray[np.float64],
+        residual: NDArray[np.float64],
+        selection: GainAnalysis,
+    ) -> None:
+        """Plot I and Q with shot SEM and the unchanged residual selection."""
+        gains, signals = result.gains, result.signals
         fig, _ = plots.subplots(
-            num="fit", nrows=4, sharex=True, figsize=(10, 10), layout="constrained"
+            num="fit",
+            nrows=2,
+            ncols=2,
+            sharex=True,
+            figsize=(9, 7),
+            layout="constrained",
         )
-        axes = fig.axes
-        for a in range(2):
-            for b in range(2):
-                label = f"Before pi={a}, after pi={b}"
-                axes[0].plot(gains, signals[a, b].real, ".-", label=label)
-                axes[1].plot(gains, signals[a, b].imag, ".-", label=label)
-        axes[2].plot(gains, ratio, ".-")
-        axes[3].plot(gains, residual, ".-", label="p0≈0 estimate (unclipped)")
-        axes[0].set_ylabel("I (a.u.)")
-        axes[1].set_ylabel("Q (a.u.)")
-        axes[2].set_ylabel("Contrast ratio r (a.u.)")
-        axes[3].set_ylabel("Residual estimate")
-        axes[3].set_xlabel("Flux reset gain (a.u.)")
-        axes[0].legend(fontsize=8)
-        axes[3].legend(fontsize=8)
-        axes[0].set_title(
-            "No finite candidate; no writeback"
-            if selected is None
-            else f"Selected gain = {selected:.6g} a.u. | p0≈0; not reset fidelity",
-            fontsize=10,
-        )
-        for ax in axes:
-            ax.grid(True)
-            if selected is not None:
+        i_ax, q_ax, ratio_ax, residual_ax = fig.axes
+        fig.suptitle(f"{_TITLE} · IQ and residual estimate")
+        for ax, values, direction in (
+            (i_ax, signals.real, (1.0, 0.0)),
+            (q_ax, signals.imag, (0.0, 1.0)),
+        ):
+            errors = (
+                np.full(values.shape, np.nan)
+                if result.iq_moments is None
+                else iq_shot_sem(result.iq_moments, direction=direction)
+            )
+            for label, trace, err in zip(
+                _BRANCH_LABELS,
+                values.reshape(4, -1),
+                errors.reshape(4, -1),
+                strict=True,
+            ):
+                ax.errorbar(gains, trace, yerr=err, fmt=".-", markersize=5, label=label)
+        i_ax.set_ylabel(_I_LABEL)
+        q_ax.set_ylabel(_Q_LABEL)
+        i_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
+
+        ratio_ax.plot(gains, ratio, ".-")
+        ratio_ax.set(xlabel=_XLABEL, ylabel="Contrast ratio r (a.u.)")
+        residual_ax.plot(gains, residual, ".-")
+        residual_ax.set(xlabel=_XLABEL, ylabel="Residual with p₀ ≈ 0 (a.u.)")
+        selected = selection.selected_gain
+        if selected is None:
+            residual_ax.set_title("No finite gain candidate")
+        else:
+            residual_ax.set_title(f"Selected gain = {selected:.6g} a.u.")
+            for ax in fig.axes:
                 ax.axvline(selected, color="gray", linestyle="--")
-        return GainAnalysis(selected_gain=selected)

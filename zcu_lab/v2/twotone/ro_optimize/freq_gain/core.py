@@ -6,7 +6,6 @@ from typing import Annotated, Any, ClassVar
 
 import numpy as np
 from matplotlib.artist import Artist
-from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -59,19 +58,59 @@ class FreqGainAnalysis:
 
 
 class FreqGainCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Readout gain", unit="a.u.")]
-    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
-        default=0.0, ge=0.0
-    )
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the qubit reset before preparation, or leave blank to skip reset.",
+        ),
+    ] = None
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit π pulse",
+            description="Select the calibrated π pulse used to prepare the excited branch.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout pulse and ADC window",
+            description="Select the resonator pulse and ADC timing for reading each qubit preparation.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Readout frequency",
+            unit="MHz",
+            description="Enter the sweep of the readout frequency in MHz.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Readout gain",
+            unit="a.u.",
+            description="Enter the sweep of the readout pulse gain in a.u.",
+        ),
+    ]
+    skew_penalty: Annotated[
+        float,
+        FieldMeta(
+            label="IQ skew penalty weight",
+            unit="a.u.",
+            decimals=3,
+            description="Set the penalty weight for asymmetric IQ distributions; zero disables the penalty.",
+        ),
+    ] = Field(default=0.0, ge=0.0)
 
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the number of shots per qubit preparation and setting in each round.",
         ),
     ]
     rounds: Annotated[
@@ -85,10 +124,10 @@ class FreqGainCfg(ConfigBase):
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Qubit relaxation wait",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the qubit relaxation time in µs to wait after each preparation and readout.",
         ),
     ]
 
@@ -141,17 +180,19 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         # 2. Retain one separation score per frequency/gain pair.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="Gain (a.u.)")
-        formatter = ScalarFormatter(useMathText=True)
-        formatter.set_powerlimits((-2, 2))
-        ax.xaxis.set_major_formatter(formatter)
-        ax.yaxis.set_major_formatter(formatter)
+        fig.suptitle("Frequency and gain sweep · Resonator · IQ separation")
+        ax.set(xlabel="Readout frequency (MHz)", ylabel="Readout gain (a.u.)")
+        ax.grid(False)
         heatmap = live_heatmap(ax)
+        fig.colorbar(ax.images[0], ax=ax, label="g/e IQ separation SNR")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            return heatmap.set(freqs, gains, np.abs(data))
+            progress = ax.set_title(
+                f"{np.isfinite(data).sum()}/{data.size} settings scored"
+            )
+            return (*heatmap.set(freqs, gains, np.abs(data)), progress)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -215,7 +256,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         options controls smoothing; unmeasured NaN scores become zero before
         smoothing. Return best_freq in MHz and best_gain in a.u. within [-1, 1], and
-        publish fit. source.cfg may be None.
+        publish the figure. source.cfg may be None.
         """
         # 1. Select the frequency-gain pair maximizing the smoothed readout-separation map.
         result = source.result
@@ -242,19 +283,19 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         max_gain = float(gains[max_gain_id])
         max_snr = float(snrs[max_freq_id, max_gain_id])
 
-        # 2. Locate the optimal readout setting on the smoothed SNR map.
-        _, ax = plots.subplots(num="fit", figsize=config.figsize)
-
-        ax.imshow(
-            snrs.T,
-            extent=(freqs[0], freqs[-1], gains[0], gains[-1]),
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
+        # 2. Mark the selected setting on the measured SNR map.
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+        fig.suptitle("Frequency and gain sweep · Resonator · IQ separation")
+        ax.set(xlabel="Readout frequency (MHz)", ylabel="Readout gain (a.u.)")
+        ax.grid(False)
+        (image,) = live_heatmap(ax).set(freqs, gains, np.abs(signals))
+        fig.colorbar(image, ax=ax, label="g/e IQ separation SNR")
+        ax.scatter(max_freq, max_gain, color="C3", edgecolors="white")
+        left, right, bottom, top = image.get_extent()
+        ax.set(xlim=(left, right), ylim=(bottom, top))
+        ax.set_title(
+            f"Selected setting (red dot): {max_freq:.6g} MHz, {max_gain:.4g} a.u.\n"
+            f"Selection SNR = {max_snr:.2f}"
         )
-        ax.scatter(max_freq, max_gain, color="r", label=f"max SNR = {max_snr:.2f}")
-        ax.set_xlabel("Frequency (MHz)")
-        ax.set_ylabel("Gain (a.u.)")
-        ax.legend()
 
         return FreqGainAnalysis(max_freq, max_gain)

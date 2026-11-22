@@ -17,22 +17,24 @@ from zcu_tools.mcp.measure.recipe_api import (
 
 
 class MistDriveFrequencyInputs(RecipeInputs):
-    """Inputs for mist drive frequency; all units and null policies are declared
-    per field."""
+    """Set the frequency and gain rectangle for a resonator probe map."""
 
     target: SingleTarget
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     freq_range: list[float] = Field(
-        min_length=2, max_length=2, description="Two frequency endpoints in MHz."
+        min_length=2,
+        max_length=2,
+        description="Set Probe carrier frequency sweep › Start and Stop (MHz), in that order.",
     )
     gain_range: list[float] = Field(
         min_length=2,
         max_length=2,
-        description="Two native gain endpoints.",
+        description="Set Probe gain sweep › Start and Stop (a.u.), in that order.",
     )
     points: Annotated[int, Field(ge=2)] | None | Keep = Field(
-        KEEP, description="Sample count on each map axis, at least two."
+        KEEP,
+        description="Set Expts (count) in Probe carrier frequency sweep and Probe gain sweep. At least 2.",
     )
 
 
@@ -48,7 +50,7 @@ class MistDriveFrequencyReport(RecipeReport):
 
 @recipe(
     "mist_drive_frequency",
-    description="Map MIST probe frequency/gain, save native IQ and analyze the response. No writeback.",
+    description="Map mean IQ shift versus resonator probe carrier and gain. Save the acquired complex IQ and Analyze map without writeback.",
 )
 async def mist_drive_frequency(
     session: RecipeSession, inputs: MistDriveFrequencyInputs
@@ -56,7 +58,7 @@ async def mist_drive_frequency(
     """Probe the requested MHz/gain rectangle and save the MIST response map.
 
     points → expts sets the sweep sample count.
-    Analysis uses the captured GUI parameters; no fit controls are added.
+    Analysis shows the IQ shift map and has no display inputs.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(

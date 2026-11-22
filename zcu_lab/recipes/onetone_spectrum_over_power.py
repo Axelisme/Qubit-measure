@@ -28,42 +28,47 @@ class OnetoneSpectrumOverPowerInputs(RecipeInputs):
     """Inputs for onetone spectrum over power; all units and null policies are
     declared per field."""
 
-    target: SingleTarget
+    target: Annotated[
+        SingleTarget,
+        Field(
+            description="Qubit binding used to resolve its resonator; omit or pass null to keep the current alias."
+        ),
+    ]
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key. Sources are chosen by the Form.",
+        description="Select the Readout pulse and ADC window by library key; omit to retain the Form selection.",
     )
     center_mhz: float | None | Keep = Field(
         KEEP,
-        description="Sweep center in MHz. Supply with span_mhz.",
+        description="Set Readout RF frequency › Start and Stop around this RF center (MHz); pair with span_mhz.",
     )
     span_mhz: Annotated[float, Field(gt=0)] | None | Keep = Field(
         KEEP,
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Supply with center_mhz.",
+        description="Set Readout RF frequency › Start and Stop (MHz) to center_mhz minus/plus half this full span.",
     )
     freq_points: Annotated[int, Field(ge=2)] | None | Keep = Field(
         KEEP,
-        description="Frequency sample count.",
+        description="Set Readout RF frequency › Expts (count), the number of frequencies at each outer sweep setting.",
     )
     gain_points: int | None | Keep = Field(
         KEEP,
-        description="Gain sample count.",
+        description="Set Readout gain › Expts (count), the number of readout drive amplitudes.",
     )
     gain_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
     ) = Field(
         KEEP,
-        description="Two native gain endpoints.",
+        description="Set Readout gain › Start and Stop (a.u.), the two DAC full-scale fractions.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count.",
+        description="Set Reps (count), shots per frequency per round.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Rounds (count), sweeps to average at each outer setting.",
     )
 
 
@@ -90,8 +95,8 @@ async def onetone_spectrum_over_power(
     preview only; this survey performs no analysis or writeback.
 
     freq_points → freq.expts; gain_points → gain.expts.
-    Analysis uses the captured GUI parameters; no fit controls are added.
-    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
+    Omitted inputs retain the Form values and null passes to the Form.
+    Missing Form values stop before acquisition.
     """
     tab = session.open_tab(
         "onetone/power_dep",

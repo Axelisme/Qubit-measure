@@ -171,8 +171,8 @@ class HeatmapFormat:
         ax.yaxis.set_major_formatter(formatter)
         self.attach_ax(ax)
 
-    def attach_ax(self, ax: Axes) -> None:
-        """Add the image without changing labels, title or tick formatters."""
+    def attach_ax(self, ax: Axes, *, cmap: str = "RdBu_r") -> None:
+        """Add an image with the given colormap, preserving labels and ticks."""
         self.im = ax.imshow(
             np.full((1, 2), np.nan),
             aspect="auto",
@@ -180,7 +180,7 @@ class HeatmapFormat:
             interpolation="nearest",
             vmin=self.vmin,
             vmax=self.vmax,
-            cmap="RdBu_r",
+            cmap=cmap,
         )
 
     def update(

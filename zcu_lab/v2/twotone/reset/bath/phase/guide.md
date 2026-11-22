@@ -1,8 +1,6 @@
-## Behavior
+**Readers:** operator, agent. Find opposite tomography π/2 phases for a fixed bath reset. Apply optional preparation reset and preparation pulse, start the cavity and qubit tones together, play the phase-swept π/2 pulse after the cavity tone, then read out.
 
-**Readers:** operator, agent. Bath-reset pi/2 phase sweep: holds the tested bath reset at its calibrated cavity freq/gain and length and sweeps the tomography pi/2 pulse phase, fitting the cosine response to find the phases that reset to ground (max) and to excited (min). Runs on real hardware. Run last, to fix the pi/2 phase of the reset module.
-
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-22
 
 ## Parameter sources
 
@@ -14,9 +12,17 @@ Open and Defaults capture the T1 used for starting values. A missing or null T1,
 
 Tested reset starts as an editable copy of the bath_reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. The pi/2 tone uses `$qubit.module.x90`, otherwise a fresh pi2_pulse template. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
 
+## Acquisition and figures
+
+Reps starts at 1000 per sweep point and branch in each acquisition round; Rounds starts at 10. Check the requested Reps × Rounds in Analyze before comparing runs.
+
+Live and Analyze show mean IQ projected onto the principal variation axis (raw I if fewer than two means are available). The ordinate is not calibrated population. Each vertical bar is the per-point shot SEM: sample standard deviation along that same IQ axis divided by the square root of the retained shot count. It measures uncertainty of the mean, not shot scatter or fit-parameter uncertainty. Files saved before shot moments were recorded still load and show points without bars.
+
+Analyze overlays a fixed 360° cosine and marks its maximum and minimum, reported in the turn nearest zero. The dashed markers show equivalent phases nearest the middle of the measured sweep. Their ± values are 1σ phase errors from the fit covariance. For a preferred extremum, set the new π/2 phase to the annotated value modulo 360°; the change is that phase minus the phase in the source pulse, wrapped to the nearest turn. Use independently prepared references to verify which extremum corresponds to g or e. A nearly flat fringe or scan too short to resolve both extrema does not establish the state assignment.
+
 ## Typical writeback
 
-Proposes phases to `$qubit.ext.reset_bath_max_phase` and `$qubit.ext.reset_bath_min_phase`. With acquired run settings and captured calibration, proposes `$qubit.reset.reset_bath` and `$qubit.reset.reset_bath_e` from the tested reset, replacing only pi/2 phase with max/ground and min/excited respectively. Tested cavity frequency, gain and all other fields remain. An optional `$qubit.module.reset` row selects ground by default; it can be edited to excited.
+Proposes phases to `$qubit.ext.reset_bath_max_phase` and `$qubit.ext.reset_bath_min_phase`. With acquired run settings and captured calibration, proposes `$qubit.reset.reset_bath` and `$qubit.reset.reset_bath_e` from the tested reset, replacing only pi/2 phase with the fitted maximum and minimum respectively; verify that the default ground/excited assignment matches calibrated state references. Tested cavity frequency, gain and all other fields remain. An optional `$qubit.module.reset` row selects ground by default; it can be edited to excited.
 
 The proposal uses only this Run's tested reset and captured parameters, not current aliases, ext values or an older library module. Missing saved cfg or parameter capture leaves only the scalar proposals. Source and Apply errors still propagate. Applying the library rows without the optional reset-slot row leaves the selected reset unchanged.
 
