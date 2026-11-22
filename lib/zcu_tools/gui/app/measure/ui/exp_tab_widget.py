@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import (
@@ -179,7 +180,7 @@ class ExpTabWidget(QWidget):
         parent: QWidget | None = None,
         *,
         dialog_presenter: DialogPresenter | None = None,
-        preview_renderer: Any | None = None,
+        preview_renderer: Callable[[Figure], bytes] | None = None,
     ) -> None:
         super().__init__(parent)
         self._init_lifetime()
@@ -245,13 +246,7 @@ class ExpTabWidget(QWidget):
 
         splitter.addWidget(self._left_tabs)
 
-        self._figure_area = ExperimentFigureArea(
-            tab_id,
-            capabilities,
-            lambda pane: self.get_current_figure_for_pane(pane),
-            preview_renderer=preview_renderer,
-        )
-        splitter.addWidget(self._figure_area)
+        self._mount_figure_area(preview_renderer)
 
         splitter.setCollapsible(0, True)
         self._update_left_panel_controls()
@@ -260,6 +255,18 @@ class ExpTabWidget(QWidget):
         self._scope.connect(self._left_tabs.currentChanged, self._on_left_tab_changed)
         # Initially show Run
         self._on_left_tab_changed(self._left_tabs.currentIndex())
+
+    def _mount_figure_area(
+        self, preview_renderer: Callable[[Figure], bytes] | None
+    ) -> None:
+        self._figure_area = ExperimentFigureArea(
+            self.tab_id,
+            self._capabilities,
+            lambda pane: self.get_current_figure_for_pane(pane),
+            preview_renderer=preview_renderer,
+        )
+        self._splitter.addWidget(self._figure_area)
+        self._scope.add_cleanup(self._figure_area.retire_data_reading)
 
     def _build_run_panel(self) -> None:
         # ── Tab: Run (always) ──────────────────────────────────────

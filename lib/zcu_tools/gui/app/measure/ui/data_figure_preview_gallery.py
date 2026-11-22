@@ -26,7 +26,8 @@ Ownership (S2):
 - Never retains a matplotlib ``Figure`` or its canvas — only the
   presentation cache (pixmap and text state) is held.
 - Never calls ``attach``/``reparent``/plot routing; the owning
-  :class:`ExpTabWidget` stays the sole ``FigureContainer`` authority.
+  :class:`ExperimentFigureArea` stays the sole ``FigureContainer`` authority.
+- Reading requests identify a stage and member; their Figure stays with that owner.
 - No timer or per-draw subscription — refresh is snapshot-driven by
   Data activation and the Data-visible prepare/clear/show lifecycle.
 
@@ -43,12 +44,13 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from qtpy.QtCore import QEvent, QObject, QSize, Qt
-from qtpy.QtGui import QPixmap, QResizeEvent, QShowEvent
+from qtpy.QtGui import QHideEvent, QPixmap, QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
@@ -57,9 +59,11 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.widgets import secondary_colour, set_foreground
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
+from .data_figure_reading import DataFigureReading
 from .figure_pager import FigurePager
 from .figure_pane_layout import FigurePaneLayout
 
@@ -112,9 +116,13 @@ class _PreviewCard(QWidget):
         title.setTextFormat(Qt.TextFormat.PlainText)
         title.setObjectName(f"previewTitle_{source_key}")
         self._title = title
-        header.addWidget(title)
-        header.addStretch()
+        title.setToolTip(display_name)
+        header.addWidget(title, stretch=1)
         outer.addLayout(header)
+        # On a narrow two-column card, a button beside the title clips its name.
+        self._view = QPushButton("View figure")
+        self._view.hide()
+        outer.addWidget(self._view, alignment=Qt.AlignmentFlag.AlignLeft)
 
         # Stack the image, empty, and error pages in that order.
         self._stack = QStackedWidget()
@@ -141,6 +149,7 @@ class _PreviewCard(QWidget):
         named_layout = QVBoxLayout(self._named_page)
         named_layout.setContentsMargins(0, 0, 0, 0)
         self._named_names: tuple[str, ...] = ()
+        self._member_scope = LifetimeScope(self)
         self._named_stack = FigurePaneLayout()
         self._named_stack.addWidget(QLabel("No figure yet"))
         named_layout.addWidget(FigurePager(self._named_stack, f"data.{source_key}"))
@@ -194,12 +203,38 @@ class _PreviewCard(QWidget):
         self._stack.addWidget(page)
         return page, label
 
+    def bind_view(
+        self,
+        scope: LifetimeScope,
+        stage: str,
+        member: str | None,
+        open_reading: Callable[[QPushButton], None],
+    ) -> None:
+        if member is not None:
+            self._title.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+            )
+            self._image_label.setMinimumHeight(72)
+        self._view.setObjectName(f"dataFigureView/{stage}/{member or ''}")
+        self._view.setAccessibleName(f"View figure: {stage} {member or ''}".rstrip())
+        scope.connect(self._view.clicked, lambda: open_reading(self._view))
+
+    def set_view_available(self, *, available: bool) -> None:
+        self._view.setVisible(available and bool(self._view.objectName()))
+
+    def close_member_actions(self) -> None:
+        self._member_scope.close()
+
     def show_named_figures(
         self,
         figures: FigureCollection,
         render: Callable[[_PreviewCard, Figure], None],
+        open_reading: Callable[[str, QPushButton], None] | None,
     ) -> None:
         """Render a borrowed stage snapshot, retaining only pixmaps and UI names."""
+        self.set_view_available(available=False)
+        self._member_scope.close()
+        self._member_scope = LifetimeScope(self)
         selected_index = self._named_stack.currentIndex() - 1
         selected = (
             self._named_names[selected_index]
@@ -219,6 +254,8 @@ class _PreviewCard(QWidget):
             card._image_label.setMinimumWidth(0)
             render(card, figure)
             self._named_stack.addWidget(card)
+            if open_reading is not None:
+                self._bind_member_view(card, name, open_reading)
         index = (
             self._named_names.index(selected) if selected in self._named_names else 0
         )
@@ -226,6 +263,20 @@ class _PreviewCard(QWidget):
         self._named_stack.set_tiled(tiled=True)
         self.setMinimumHeight(360 if len(figures) > 2 else 260)
         self._stack.setCurrentWidget(self._named_page)
+
+    def _bind_member_view(
+        self,
+        card: _PreviewCard,
+        name: str,
+        open_reading: Callable[[str, QPushButton], None],
+    ) -> None:
+        def selected(button: QPushButton) -> None:
+            self._named_stack.setCurrentWidget(card)
+            open_reading(name, button)
+
+        stage = "post_analysis" if self._source_key == "post" else self._source_key
+        card.bind_view(self._member_scope, stage, name, selected)
+        card.set_view_available(available=True)
 
     def show_empty(self) -> None:
         self._orig_pixmap = None
@@ -298,6 +349,9 @@ class _PreviewCard(QWidget):
     def named_presentation_active(self) -> bool:
         """Return whether this stage currently shows a named figure group."""
         return self._stack.currentWidget() is self._named_page
+
+    def stage_title(self) -> str:
+        return self._display_name
 
     def current_state(self) -> str:
         """Return 'available' | 'empty' | 'unavailable' for test inspection."""
@@ -381,7 +435,15 @@ class DataFigurePreviewGallery(QWidget):
         parent: QWidget | None = None,
         *,
         renderer: Callable[[Figure], bytes] | None = None,
+        read_png: Callable[[str, str | None], bytes] | None = None,
     ) -> None:
+        """Build preview groups and optional synchronous reading actions.
+
+        `read_png` receives the stage (run, analysis or post_analysis) and a
+        named member, or None for an unnamed figure. It borrows the current
+        Figure on the calling Qt thread and returns the reading PNG or raises.
+        Omit it to build an index without reading actions.
+        """
         super().__init__(parent)
         # tolerated: Untyped callers must receive the distinct missing-capabilities TypeError.
         if capabilities is None:  # pyright: ignore[reportUnnecessaryComparison]
@@ -410,10 +472,27 @@ class DataFigurePreviewGallery(QWidget):
 
             self._renderer = render_figure_preview_png
 
+        self._read_png = read_png
+        self._scope = LifetimeScope(self)
+        self._return_focus: QPushButton | None = None
         self.setObjectName("dataFigurePreviewGallery")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        outer = QVBoxLayout(self)
+        self._build_pages()
+        self.refresh_layout()
+
+    def _build_pages(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._pages = QStackedWidget()
+        layout.addWidget(self._pages)
+        self._overview = QWidget()
+        self._pages.addWidget(self._overview)
+        self._reading = DataFigureReading(self._scope, self._return_to_preview)
+        self._pages.addWidget(self._reading)
+        self._scope.add_cleanup(self.dismiss_reading)
+
+        outer = QVBoxLayout(self._overview)
         outer.setContentsMargins(OUTER_MARGIN, OUTER_MARGIN, OUTER_MARGIN, OUTER_MARGIN)
         outer.setSpacing(6)
 
@@ -424,7 +503,7 @@ class DataFigurePreviewGallery(QWidget):
         header.setObjectName("previewGalleryHeader")
         outer.addWidget(header)
         hint = QLabel(
-            "Run is always shown; Analysis/Post appear when supported by this experiment."
+            "Choose View figure to read the selected figure here without saving."
         )
         hint.setWordWrap(True)
         font = hint.font()
@@ -447,14 +526,39 @@ class DataFigurePreviewGallery(QWidget):
             # A deleted Qt viewport must not prevent gallery construction.
             pass
 
-        # Initial layout arrangement
-        self.refresh_layout()
+    def _open_reading(
+        self,
+        stage: str,
+        member: str | None,
+        button: QPushButton,
+    ) -> None:
+        read_png = self._read_png
+        if read_png is None:
+            return
+        caption = self._cards[stage].stage_title()
+        if member is not None:
+            caption = f"{caption} — {member}"
+        self._return_focus = button
+        self._reading.show_figure(caption, lambda: read_png(stage, member))
+        self._pages.setCurrentWidget(self._reading)
+        self._reading.focus_back()
 
-        # Initial empty state for all present cards
-        for card in self._cards.values():
-            # Avoid double-setting for alias
-            if card.current_state() != "empty":
-                card.show_empty()
+    def _return_to_preview(self) -> None:
+        button = self._return_focus
+        self.dismiss_reading()
+        if button is not None:
+            button.setFocus()
+
+    def dismiss_reading(self) -> None:
+        """Clear the reading raster and return to the overview without moving focus."""
+        if self._return_focus is not None:
+            self._return_focus = None
+            self._reading.clear()
+            self._pages.setCurrentWidget(self._overview)
+
+    def retire_reading(self) -> None:
+        """Disconnect reading controls and drop their raster before tab teardown."""
+        self._scope.close()
 
     def _build_viewport(self) -> None:
         """Build the scrollable card grid without installing resize reactions yet."""
@@ -497,6 +601,26 @@ class DataFigurePreviewGallery(QWidget):
             # Also expose alias "post" for convenience
             self._cards["post"] = post_card
             self._ordered_cards.append(post_card)
+
+        for stage in ("run", "analysis", "post_analysis"):
+            card = self._cards.get(stage)
+            if card is not None:
+                self._scope.add_cleanup(card.close_member_actions)
+                if self._read_png is not None:
+                    self._bind_stage_view(stage, card)
+
+    def _bind_stage_view(self, stage: str, card: _PreviewCard) -> None:
+        card.bind_view(
+            self._scope,
+            stage,
+            None,
+            lambda button: self._open_reading(stage, None, button),
+        )
+
+    def _member_reader(self, stage: str) -> Callable[[str, QPushButton], None] | None:
+        if self._read_png is None:
+            return None
+        return lambda member, button: self._open_reading(stage, member, button)
 
     # -- viewport-driven responsive helpers -------------------------
 
@@ -600,6 +724,10 @@ class DataFigurePreviewGallery(QWidget):
         super().resizeEvent(a0)
         self.refresh_layout()
 
+    def hideEvent(self, a0: QHideEvent | None) -> None:
+        self.dismiss_reading()
+        super().hideEvent(a0)
+
     def showEvent(self, a0: QShowEvent | None) -> None:
         super().showEvent(a0)
         self.refresh_layout()
@@ -671,6 +799,7 @@ class DataFigurePreviewGallery(QWidget):
         states through the public pane reader. Each member's rendering failure
         stays local. Names, page selection and raster widgets are presentation cache only.
         """
+        self.dismiss_reading()
         for key, figures in (
             ("run", run),
             ("analysis", analysis),
@@ -678,7 +807,9 @@ class DataFigurePreviewGallery(QWidget):
         ):
             card = self._cards.get(key)
             if card is not None and figures:
-                card.show_named_figures(figures, self._render_card)
+                card.show_named_figures(
+                    figures, self._render_card, self._member_reader(key)
+                )
         self.refresh_layout()
 
     # -- snapshot update ---------------------------------------------
@@ -700,6 +831,7 @@ class DataFigurePreviewGallery(QWidget):
         The gallery never retains the ``Figure`` objects — only the
         resulting pixmap/text cache is held.
         """
+        self.dismiss_reading()
         # Support alias kwargs for flexibility (post/post_analysis)
         if "post" in kwargs and post_analysis is None:
             post_analysis = kwargs["post"]
@@ -721,6 +853,7 @@ class DataFigurePreviewGallery(QWidget):
         if card is None:
             # Unsupported card — do nothing (S4).
             return
+        card.set_view_available(available=fig is not None)
         if fig is None:
             card.show_empty()
             return

@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-22，Run 頁 Defaults 與 Analysis 來源
+**Last updated:** 2026-11-22，Data 頁讀圖
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -89,7 +89,19 @@ in one column. Wide viewports place two cards side by side; with three cards,
 Run spans the left column and Analysis/Post-Analysis stack on the right.
 A single card fills the width in either mode. Named members and their raster
 labels shrink to the tile width, while stage cards retain their minimum width.
-Each raster aspect-fits its label without cropping as the gallery resizes.
+Each thumbnail aspect-fits its label without cropping as the gallery resizes.
+Use `View figure` on a card, or Tab to the button and press Space, to read that
+stage and member without leaving Data. The reading pane shows one new raster
+at its rendered size. Scroll inside the pane when it does not fit. `Back to
+previews` or Escape returns to the selected card and restores its focus and page.
+
+`ExperimentFigureArea` resolves the request against the current native Figure on
+its Qt thread. The gallery holds only the raster. It discards that raster on a
+figure refresh, when Data is hidden, or when the tab closes. A draw failure shows
+an inline message for that figure. It does not disable Save. The reader does not
+load a saved image, write an artifact, or attach a canvas. Run Save still writes data only, and
+Analysis Save still uses the existing 1800×1350 PNG encoder.
+
 The app-local plot host passes the
 operation's original named collection through the render-host port after canvas
 attachment. It does not rename figures, copy their

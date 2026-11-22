@@ -12,6 +12,7 @@ from qtpy.QtWidgets import QComboBox, QLabel, QStackedWidget, QVBoxLayout, QWidg
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 
+from ..figure_export import render_figure_reading_png
 from .data_figure_preview_gallery import DataFigurePreviewGallery
 from .figure_pager import FigurePager
 from .figure_pane_layout import FigurePaneLayout
@@ -147,6 +148,7 @@ class ExperimentFigureArea(QWidget):
         self._data_gallery = DataFigurePreviewGallery(
             self._capabilities,
             renderer=self._preview_renderer,
+            read_png=self._render_data_figure,
         )
 
         # Placeholder for Guide (no figure) — Data now shows gallery (S4)
@@ -182,6 +184,8 @@ class ExperimentFigureArea(QWidget):
         panes raise RuntimeError. This changes presentation only, never app state.
         """
         self._data_active = pane == "data"
+        if not self._data_active:
+            self._data_gallery.dismiss_reading()
         if pane == "run":
             self._right_stack.setCurrentWidget(self._run_panel_right)
         elif pane == "analysis":
@@ -455,6 +459,40 @@ class ExperimentFigureArea(QWidget):
                 raise RuntimeError("Attached figure canvas does not support draw()")
             draw()
 
+    def retire_data_reading(self) -> None:
+        """Release the reading raster and retire its controls on tab detach."""
+        self._data_gallery.retire_reading()
+
+    def _render_data_figure(self, stage: str, member: str | None) -> bytes:
+        if not self._data_active:
+            raise RuntimeError("Data figure reading requires the active Data pane")
+        current = self._read_figure(stage)
+        if current is None:
+            raise LookupError(f"No current figure for {stage}")
+        if member is None:
+            return render_figure_reading_png(current)
+        collection = self._data_named_figures(stage, current)
+        if collection is None:
+            raise LookupError(f"No named figures for {stage}")
+        return render_figure_reading_png(collection[member])
+
+    def _data_named_figures(
+        self, stage: str, current: Figure | None
+    ) -> FigureCollection | None:
+        if current is None:
+            return None
+        collection = {
+            "run": self._run_figures,
+            "analysis": self._analysis_figures if self._has_analysis else None,
+            "post_analysis": self._post_figures if self._has_post else None,
+        }[stage]
+        # A public pane reader can supply a Figure outside the last named group.
+        if collection is not None and any(
+            fig is current for _, fig in collection.items()
+        ):
+            return collection
+        return None
+
     def _refresh_data_gallery(self) -> None:
         """Refresh Data gallery from current pane figures when Data is visible (S2)."""
         if not self._data_active:
@@ -483,11 +521,9 @@ class ExperimentFigureArea(QWidget):
         try:
             self._data_gallery.update_figures(run_fig, ana_fig, post_fig)
             self._data_gallery.update_collections(
-                self._run_figures if run_fig is not None else None,
-                self._analysis_figures
-                if self._has_analysis and ana_fig is not None
-                else None,
-                self._post_figures if self._has_post and post_fig is not None else None,
+                self._data_named_figures("run", run_fig),
+                self._data_named_figures("analysis", ana_fig),
+                self._data_named_figures("post_analysis", post_fig),
             )
         except Exception:
             logger.exception("failed to refresh data gallery")
