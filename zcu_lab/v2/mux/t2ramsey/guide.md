@@ -23,15 +23,26 @@ with gain 0.1. These values are editable initial inputs, not verified hardware
 settings. Complete the remaining required fields and confirm wiring, gain and
 timing before running.
 
+In Readout, **Length** sets how long the multi-tone pulse plays. **RO length**
+sets how long the ADC integrates. **Pre delay** sets when playback starts, and
+**Trig offset** sets when the ADC triggers. Both are measured from the start of
+the readout segment. **Post delay** is the wait after playback ends. Readout
+requires **Mixer freq**.
+
+Each tone's optional **Classifier** stores classification settings such as
+centers, radius and a confusion matrix. Mux Ramsey does not use them for the
+final readout's mean IQ, its projection, fits or writeback candidates.
+
 The Tones picker selects the element to edit. Participants selects the qubits to
 run. Tone names, count and order stay fixed. Set Participants to a nonempty JSON
 list of unique original indices, for example `[2, 0]`. This runs original
 positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
 out-of-range participants block Run and remain editable for correction.
 
-Selected tones need drives on independent generators, distinct from readout.
-Open/Defaults fills selected tones' drive defaults and sets
-these fields to None on other tones. The nullable fields remain editable.
+Leave **Reset** blank to skip reset. Selected tones need drives on independent
+generators, distinct from readout. Open/Defaults fills **Drive** for selected
+tones. Unselected tones start blank and can stay blank. Leave **Mixer freq**
+blank under Drive to skip configuring a mixer for that drive.
 Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
 and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
 Alias list elements may use `$` links. A missing, unbound or empty row selects all
@@ -85,37 +96,46 @@ Layout reference: Ding Fig. 5-9(b,e) (printed p. 152) couples a Ramsey-like
 sequence to phase interpretation. Mux Ramsey scans free-evolution time and
 shows projected IQ rather than the conditional gate phase.
 
-Use fixed x90 drives and an individual detune in MHz for each tone.
-All tones share one finite, nonnegative requested-delay range in µs.
+Use fixed x90 drives and set **Applied phase-ramp detune** in MHz for each
+participating tone. This Form field sets the nominal phase slope of the final
+x90 pulse. All tones share one finite, nonnegative requested-delay range in µs.
 
-The sequence is common reset, simultaneous first x90 pulses, common delay,
-simultaneous phase-ramped final x90 pulses, then mux readout.
+The sequence is optional common reset, simultaneous first x90 pulses, common
+delay, simultaneous phase-ramped final x90 pulses, then mux readout.
 The delay starts after the longest first branch. Pre/post delays stay configured.
 With zero pulse delays, a shorter pulse waits an extra `max_len - len_i`.
 This can change fringe amplitude and constant phase.
-Analysis uses the common requested delay. Enable Fit phase when a constant phase
-offset matters. The final phase uses each source phase plus its detune times delay.
-Native timing can differ by a few ticks.
+Analysis uses the common requested delay. Before rounding, the final pulse
+adds nominal detune × delay cycles to the source phase. Native timing can differ
+by a few ticks.
 
-Fit fringe selects damped-cosine fitting; disabling it selects exponential decay.
-A fringe fit needs six finite points and decay needs four.
-Fixed fringe phase uses the nearest-zero 0/180-degree policy; Fit phase frees it.
-Decay uses the same model regardless of Fit phase.
+**Fit fringe** selects a damped cosine. Turn it off for exponential decay.
+A fringe fit needs six finite points and decay needs four. **Fit phase offset
+(fringe only)** lets the fringe fit estimate a constant phase offset. If off,
+the fit uses the nearest-zero 0/180-degree policy. This switch does not affect
+an exponential decay fit.
 T2* and error are in µs; fringe rate and error are in MHz.
 Each tone returns its index, fit values, selected model and quality, including
 fringe sampling quality when applicable.
 Analysis plots retain the delay coordinates, measured values and fitted curves.
 The returned summary does not include these arrays.
-Sampling quality uses the largest gap between acquired delays and the larger
-absolute fitted or actual detune. At least ten samples per cycle and a complete
-cycle in the scan window are required for adequate sampling. Fewer samples per
-cycle are undersampled. A shorter window, zero frequency or no delay gap is
-unavailable. Decay fits have no fringe sampling quality. Adequate describes the
-supplied frequencies; it does not rule out unknown higher-frequency aliases.
 
-Actual detune retains the hardware phase-wrap convention, including for signed
-detunes. Check the scan range before treating it as a signed frequency correction.
-A nonzero nominal detune with no positive rounded delay can yield NaN actual detune.
+Read **Applied detune** in the Analyze summary. It is the per-tone phase-ramp
+slope in MHz that Run estimates from its quantized delays and phases. It keeps
+the native phase-wrap convention, including for signed detunes. It can differ
+from the Form's nominal **Applied phase-ramp detune**. The fit figure reports
+**Fitted fringe rate**, the oscillation frequency estimated from the IQ projection.
+
+To check sampling, Analyze multiplies the largest gap between acquired delays
+in µs by the larger magnitude of Fitted fringe rate and Applied detune in MHz.
+The reciprocal gives samples per cycle. If the Run or an old file has no finite
+Applied detune, Analyze uses the fitted rate alone, not the current Form value.
+A nonzero nominal detune can yield a nonfinite Applied detune if no rounded
+delay is positive. Adequate sampling requires at least ten samples per cycle
+and a full cycle in the scan window. Fewer samples per cycle are undersampled.
+A shorter window, a zero rate for this check or no delay gap makes the check
+unavailable. Decay fits have no fringe sampling quality. Adequate sampling at
+these rates does not rule out unknown higher-frequency aliases.
 
 ## Multi-tone readout control
 
@@ -161,15 +181,16 @@ You may select them manually after reviewing the source and fit.
 
 Each qualifying tone proposes `<qubit>.t2r` in µs and a T2R sample at captured bias.
 A frequency candidate additionally requires source configuration, a fringe fit,
-finite source carrier, finite actual detune and finite fitted fringe rate.
-Read the π/2 pulse source frequency and Applied detune from this run's Analyze
-summary. Read Fitted fringe rate from this run's fit figure. The proposed
-frequency is source frequency + applied detune − fitted fringe rate in MHz.
-If the fitted rate is 0.002 MHz above the applied detune, lower the source
-frequency by 0.002 MHz. If it is 0.002 MHz below, raise the source frequency
-by 0.002 MHz. Do not use this correction for decay-only fits, an unknown
-actual detune or a fringe with an ambiguous sign.
-Review phase/rate conventions, uncertainty and captured destination before applying.
+finite source carrier, finite Applied detune and finite Fitted fringe rate.
+Read the π/2 pulse source frequency and **Applied detune** from the same Run's
+Analyze summary. Read **Fitted fringe rate** from that Run's fit figure. The
+proposed frequency is source frequency + Applied detune − Fitted fringe rate,
+in MHz. If the fitted rate is 0.002 MHz above Applied detune, the candidate is
+0.002 MHz below the source frequency. If it is 0.002 MHz below Applied detune,
+the candidate is 0.002 MHz above the source frequency. Do not use this
+correction for decay-only fits, missing Applied detune or a fringe with an
+ambiguous sign. Check the scan range for phase wrap. Review the sign convention,
+fit uncertainty and captured destination before applying.
 
 Frequency writeback changes the qubit calibration, not the existing x90/x180
 library pulses. Recalibrate the pulses at the new frequency, for example with
@@ -216,9 +237,14 @@ Defaults captures current parameters and rebuilds initial values.
 
 Recipe writes and override paths use dotted strings, for example
 `"tones.0.drive.gain"`. The decimal index addresses the complete tone list.
-Omission retains a Form input; null clears it. Analysis inputs also use
-omission to retain settings and pass explicit null to their owner.
+Omit a Form input to keep its value. Use `null` to clear a field that can be
+left blank. `participants` still requires a nonempty list of unique, in-range
+tone indices. `null` does not select all tones.
 The recipe applies overrides last, then calls `check_ready()` before Run.
+
+Pass `fit_fringe` and `fit_phase` as booleans. Omit either to keep its current
+Analyze setting. Analyze rejects explicit `null`; use `false` to turn a switch off.
+
 See the [mux recipe guide](../../../recipes/mux-guide.md#mux_t2ramsey) for dotted-path overrides,
 parameter origins and explicit writeback decisions.
 
