@@ -58,5 +58,335 @@
     "path": ["delay", "stop"],
     "value": 465.0,
     "basis": "Three times the longer single-qubit decay-only diagnostic in the two-tone fixture: Q1 155 ± 129 us (20261120T120426Z-d61050), Q2 80 ± 36 us (20261120T120456Z-45adf2). Keep the mux Echo guide's decay-only default; not a measured mux T2."
+  },
+  {
+    "adapter": "chain/t2echo",
+    "path": ["delay", "stop"],
+    "value": 465,
+    "basis": "Same Q1 diagnostic as twotone/t2echo: 3 × the 155 us decay-only fit (20261120T120426Z-d61050). Q1 has no saved T2e; this is a window, not calibration."
+  },
+  {
+    "adapter": "chain/t2ramsey",
+    "path": ["delay", "stop"],
+    "value": 180,
+    "basis": "Same Q1 joint-bias diagnostic as twotone/t2ramsey (20261120T115030Z-3da45b): 3 × 60.1 us, rounded to 180 us because Q1 has no saved T2r."
+  },
+  {
+    "adapter": "chain/t2ramsey",
+    "path": ["detune"],
+    "value": 0.027777777777777776,
+    "basis": "Five programmed fringes across the 180 us window, per the Chain Ramsey guide; the default 101 points give 20 intervals per programmed fringe."
+  },
+  {
+    "adapter": "mux/amp_rabi",
+    "path": ["tones", 1, "drive", "module", "waveform", "module", "length"],
+    "value": 0.42,
+    "basis": "Current default requests 4,896 samples on Q2 gen 3. At 9,584.64 samples/us its board limit is 4,096 samples (about 0.427 us). Use 0.42 us to keep the cosine and fit the buffer."
+  },
+  {
+    "adapter": "mux/len_rabi",
+    "path": ["tones", 0, "length", "stop"],
+    "value": 0.84,
+    "basis": "Captured Q1 x180 is 0.48 us, so the form requests 1.92 us. Gen 2 fits 8192 samples at 9584.64 samples/us; use 0.84 us (8048 samples after quantization) and retain the cosine sweep."
+  },
+  {
+    "adapter": "mux/len_rabi",
+    "path": ["tones", 1, "length", "stop"],
+    "value": 0.42,
+    "basis": "Captured Q2 x180 is 0.40 us, so the form requests 1.60 us. Gen 3 fits 4096 samples at 9584.64 samples/us; use 0.42 us (4032 samples after quantization), retaining the same number of zipped sweep points."
+  },
+  {
+    "adapter": "mux/twotone_flux_local",
+    "path": ["tones", 0, "freq", "start"],
+    "value": 275.742,
+    "basis": "Q1: 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa); use an operator window of about 10 measured widths on each side for the local bias map."
+  },
+  {
+    "adapter": "mux/twotone_flux_local",
+    "path": ["tones", 0, "freq", "stop"],
+    "value": 319.742,
+    "basis": "Q1: 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa); use an operator window of about 10 measured widths on each side for the local bias map."
+  },
+  {
+    "adapter": "mux/twotone_flux_local",
+    "path": ["tones", 1, "freq", "start"],
+    "value": 213.72,
+    "basis": "Q2: 0.7358 MHz Q2 scan width from FTF run 20261120T113210Z-414e9e (power broadened, not intrinsic kappa); use an operator window of about 10 measured widths on each side for the local bias map."
+  },
+  {
+    "adapter": "mux/twotone_flux_local",
+    "path": ["tones", 1, "freq", "stop"],
+    "value": 229.72,
+    "basis": "Q2: 0.7358 MHz Q2 scan width from FTF run 20261120T113210Z-414e9e (power broadened, not intrinsic kappa); use an operator window of about 10 measured widths on each side for the local bias map."
+  },
+  {
+    "adapter": "mux/twotone_spectrum",
+    "path": ["tones", 0, "freq", "start"],
+    "value": 294.447,
+    "basis": "Q1: 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa); use the form's 1.5-linewidth half-span around the captured f01."
+  },
+  {
+    "adapter": "mux/twotone_spectrum",
+    "path": ["tones", 0, "freq", "stop"],
+    "value": 301.037,
+    "basis": "Q1: 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa); use the form's 1.5-linewidth half-span around the captured f01."
+  },
+  {
+    "adapter": "mux/twotone_spectrum",
+    "path": ["tones", 1, "freq", "start"],
+    "value": 220.616,
+    "basis": "Q2: 0.7358 MHz Q2 scan width from FTF run 20261120T113210Z-414e9e (power broadened, not intrinsic kappa); use the form's 1.5-linewidth half-span around the captured f01."
+  },
+  {
+    "adapter": "mux/twotone_spectrum",
+    "path": ["tones", 1, "freq", "stop"],
+    "value": 222.824,
+    "basis": "Q2: 0.7358 MHz Q2 scan width from FTF run 20261120T113210Z-414e9e (power broadened, not intrinsic kappa); use the form's 1.5-linewidth half-span around the captured f01."
+  },
+  {
+    "adapter": "onetone/range_find",
+    "path": ["freq", "start"],
+    "value": 7050,
+    "basis": "The guide's recorded FTF range-find window (MHz) includes both calibrated resonator dips. Keep the live form's 301 points, not the old diagnostic's 501."
+  },
+  {
+    "adapter": "onetone/range_find",
+    "path": ["freq", "stop"],
+    "value": 7220,
+    "basis": "The guide's recorded FTF range-find window (MHz) includes both calibrated resonator dips. Keep the live form's 301 points, not the old diagnostic's 501."
+  },
+  {
+    "adapter": "singleshot/ac_stark",
+    "path": ["stark_pulse2", "module", "mixer_freq"],
+    "value": null,
+    "basis": "Captured Q1 x180 has no mixer frequency and the gen 2 board profile has no mixer. Use the direct form value None instead of evaluating the missing optional mixer source."
+  },
+  {
+    "adapter": "singleshot/len_rabi",
+    "path": ["length", "stop"],
+    "value": 0.84,
+    "basis": "Four times the captured 0.48 us Q1 x180 is 1.92 us. The offline envelope check at commit 55e47cb0b8f1aa3934c09be82de48d922e6f193a found 8,384 samples on gen 2 at point 24, beyond its 8,192-sample capacity. A 0.84 us stop corresponds to an estimated 8,048 samples on the board grid and retains the cosine and point count."
+  },
+  {
+    "adapter": "singleshot/mist/pre_freq",
+    "path": ["freq", "start"],
+    "value": 294.447,
+    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+  },
+  {
+    "adapter": "singleshot/mist/pre_freq",
+    "path": ["freq", "stop"],
+    "value": 301.037,
+    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+  },
+  {
+    "adapter": "singleshot/t1_tone",
+    "path": ["delay", "stop"],
+    "value": 105,
+    "basis": "The baseline retry at commit 6602f8985376b94a1d5055cb703699bbd5c64c93 failed when QICK rejected a 66,881-cycle probe pulse. Board gen 0 has a 16-bit pulse-length word at 599.04 MHz. A 105 us stop is about 62,899 cycles by clock conversion, below 65,536 cycles, and keeps the form's point count."
+  },
+  {
+    "adapter": "singleshot/t1_tone_sweep_freq",
+    "path": ["delay", "start"],
+    "value": 0.1,
+    "basis": "The guide requires a strictly positive probe duration. Start at 0.1 us, above one gen 0 pulse instruction and small relative to the 30 us T1 startup scale."
+  },
+  {
+    "adapter": "singleshot/t1_tone_sweep_freq",
+    "path": ["delay", "stop"],
+    "value": 105,
+    "basis": "The shared T1-with-tone fallback is 150 us, beyond the gen 0 16-bit pulse-length word on this board. Cap the sweep at 105 us to retain most of the window below 65,536 cycles at 599.04 MHz."
+  },
+  {
+    "adapter": "singleshot/t1_tone_sweep_gain",
+    "path": ["delay", "start"],
+    "value": 0.1,
+    "basis": "The guide requires a strictly positive probe duration. Start at 0.1 us, above one gen 0 pulse instruction and small relative to the 30 us T1 startup scale."
+  },
+  {
+    "adapter": "singleshot/t1_tone_sweep_gain",
+    "path": ["delay", "stop"],
+    "value": 105,
+    "basis": "The shared T1-with-tone fallback is 150 us, beyond the gen 0 16-bit pulse-length word on this board. Cap the sweep at 105 us to retain most of the window below 65,536 cycles at 599.04 MHz."
+  },
+  {
+    "adapter": "two_qubit/chevron",
+    "path": ["frequency", "start"],
+    "value": 5795,
+    "basis": "FTF recalibration Round 10, run 20261120T123907Z-c0247a: use its MHz window around the re-observed 5800 MHz common drive feature, not a model transition."
+  },
+  {
+    "adapter": "two_qubit/chevron",
+    "path": ["frequency", "stop"],
+    "value": 5805.5,
+    "basis": "FTF recalibration Round 10, run 20261120T123907Z-c0247a: use its MHz window around the re-observed 5800 MHz common drive feature, not a model transition."
+  },
+  {
+    "adapter": "two_qubit/chevron",
+    "path": ["duration", "start"],
+    "value": 0.06,
+    "basis": "FTF recalibration Round 10, run 20261120T123907Z-c0247a: measured 0.06–1.80 us window covers both depletion and return; retain the current form point counts."
+  },
+  {
+    "adapter": "two_qubit/chevron",
+    "path": ["duration", "stop"],
+    "value": 1.8,
+    "basis": "FTF recalibration Round 10, run 20261120T123907Z-c0247a: measured 0.06–1.80 us window covers both depletion and return; retain the current form point counts."
+  },
+  {
+    "adapter": "two_qubit/conditional_phase",
+    "path": ["frequency", "start"],
+    "value": 5798,
+    "basis": "FTF recalibration's 5799.976979 MHz installed pair and ding-cz Round 27's measured 5798–5802 MHz bracket give a narrow phase-scan window; retain the captured pulse pair."
+  },
+  {
+    "adapter": "two_qubit/conditional_phase",
+    "path": ["frequency", "stop"],
+    "value": 5802,
+    "basis": "FTF recalibration's 5799.976979 MHz installed pair and ding-cz Round 27's measured 5798–5802 MHz bracket give a narrow phase-scan window; retain the captured pulse pair."
+  },
+  {
+    "adapter": "two_qubit/conditional_phase_heralded",
+    "path": ["frequency", "start"],
+    "value": 5798,
+    "basis": "FTF recalibration's 5799.976979 MHz installed pair and ding-cz Round 27's measured 5798–5802 MHz bracket give a narrow phase-scan window; retain the captured pulse pair."
+  },
+  {
+    "adapter": "two_qubit/conditional_phase_heralded",
+    "path": ["frequency", "stop"],
+    "value": 5802,
+    "basis": "FTF recalibration's 5799.976979 MHz installed pair and ding-cz Round 27's measured 5798–5802 MHz bracket give a narrow phase-scan window; retain the captured pulse pair."
+  },
+  {
+    "adapter": "two_qubit/conditional_spectroscopy",
+    "path": ["frequency", "start"],
+    "value": 5784,
+    "basis": "Ding-cz Round 22 repeated 5784–5816 MHz and resolved responses near 5785 and 5800 MHz. Use its MHz window with the current Form point count."
+  },
+  {
+    "adapter": "two_qubit/conditional_spectroscopy",
+    "path": ["frequency", "stop"],
+    "value": 5816,
+    "basis": "Ding-cz Round 22 repeated 5784–5816 MHz and resolved responses near 5785 and 5800 MHz. Use its MHz window with the current Form point count."
+  },
+  {
+    "adapter": "two_qubit/constructive_phase",
+    "path": ["relative_phase", "start"],
+    "value": -180,
+    "basis": "The constructive phase guide calls for comparing constructive and destructive phases; use one full relative phase turn, as sampled around the near-0° maximum and near-180° minimum in ding-cz Round 23."
+  },
+  {
+    "adapter": "two_qubit/constructive_phase",
+    "path": ["relative_phase", "stop"],
+    "value": 180,
+    "basis": "The constructive phase guide calls for comparing constructive and destructive phases; use one full relative phase turn, as sampled around the near-0° maximum and near-180° minimum in ding-cz Round 23."
+  },
+  {
+    "adapter": "two_qubit/constructive_phase",
+    "path": ["duration", "start"],
+    "value": 0.012,
+    "basis": "Ding-cz Round 23 tested this duration span in us to cover the observed 0.084/0.164 us depletion/return and resolve the phase-dependent rate; retain the current Form point counts."
+  },
+  {
+    "adapter": "two_qubit/constructive_phase",
+    "path": ["duration", "stop"],
+    "value": 0.332,
+    "basis": "Ding-cz Round 23 tested this duration span in us to cover the observed 0.084/0.164 us depletion/return and resolve the phase-dependent rate; retain the current Form point counts."
+  },
+  {
+    "adapter": "two_qubit/cz_amplitude",
+    "path": ["scale", "start"],
+    "value": 0,
+    "basis": "Ding-cz Round 25 measured depletion near half scale, a first return near unit scale and a subsequent fall by 1.5. Use the scan span, not its fitted gain, with the captured pulse pair."
+  },
+  {
+    "adapter": "two_qubit/cz_amplitude",
+    "path": ["scale", "stop"],
+    "value": 1.5,
+    "basis": "Ding-cz Round 25 measured depletion near half scale, a first return near unit scale and a subsequent fall by 1.5. Use the scan span, not its fitted gain, with the captured pulse pair."
+  },
+  {
+    "adapter": "two_qubit/idle_zz",
+    "path": ["detune"],
+    "value": 0.37,
+    "basis": "FTF recalibration Round 08 used +0.37 MHz on the same bias, run 20261120T122845Z-862d02. It exceeds the observed few-kHz shift and still gives 3.7 fringes in the default 10 us delay window."
+  },
+  {
+    "adapter": "twotone/ac_stark",
+    "path": ["freq", "start"],
+    "value": 294.447,
+    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+  },
+  {
+    "adapter": "twotone/ac_stark",
+    "path": ["freq", "stop"],
+    "value": 301.037,
+    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+  },
+  {
+    "adapter": "twotone/chain",
+    "path": ["freq", "start"],
+    "value": 253.812,
+    "basis": "Use 20 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01, preserving the form's wide-search policy."
+  },
+  {
+    "adapter": "twotone/chain",
+    "path": ["freq", "stop"],
+    "value": 341.672,
+    "basis": "Use 20 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01, preserving the form's wide-search policy."
+  },
+  {
+    "adapter": "twotone/flux_dep",
+    "path": ["freq", "start"],
+    "value": 180,
+    "basis": "FTF recalibration Round 03 run 20261120T113046Z-40dd02 found Q1 using 180–850 MHz. Use this measured wide band over the form's DC scan; it need not capture every branch near integer flux."
+  },
+  {
+    "adapter": "twotone/flux_dep",
+    "path": ["freq", "stop"],
+    "value": 850,
+    "basis": "FTF recalibration Round 03 run 20261120T113046Z-40dd02 found Q1 using 180–850 MHz. Use this measured wide band over the form's DC scan; it need not capture every branch near integer flux."
+  },
+  {
+    "adapter": "twotone/freq",
+    "path": ["freq", "start"],
+    "value": 253.812,
+    "basis": "Use 20 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01, preserving the form's wide-search policy."
+  },
+  {
+    "adapter": "twotone/freq",
+    "path": ["freq", "stop"],
+    "value": 341.672,
+    "basis": "Use 20 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01, preserving the form's wide-search policy."
+  },
+  {
+    "adapter": "twotone/power_dep",
+    "path": ["freq", "start"],
+    "value": 294.447,
+    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+  },
+  {
+    "adapter": "twotone/power_dep",
+    "path": ["freq", "stop"],
+    "value": 301.037,
+    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+  },
+  {
+    "adapter": "twotone/rabi/len_rabi",
+    "path": ["length", "stop"],
+    "value": 0.84,
+    "basis": "The current retry hits the gen 2 8192-sample limit before reaching the form's 1.92 us stop. Use 0.84 us (8048 samples at the board profile clock), retaining the cosine and point count."
+  },
+  {
+    "adapter": "twotone/reset/single_tone/freq",
+    "path": ["freq", "start"],
+    "value": 6867.239,
+    "basis": "The single-tone reset guide permits a rough resonator-minus-qubit sideband estimate. Center at fixture R1 − Q1 = 6892.239 MHz with a widened ±25 MHz scout window; not a measured reset frequency."
+  },
+  {
+    "adapter": "twotone/reset/single_tone/freq",
+    "path": ["freq", "stop"],
+    "value": 6917.239,
+    "basis": "The single-tone reset guide permits a rough resonator-minus-qubit sideband estimate. Center at fixture R1 − Q1 = 6892.239 MHz with a widened ±25 MHz scout window; not a measured reset frequency."
   }
 ]
