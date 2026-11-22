@@ -39,12 +39,20 @@ using centers, width or the confusion matrix.
 
 ## Typical writeback
 
-Primary candidates are initially selected only when joint r2 is at least 0.9,
-normalized residual RMS at most 0.1 and relative width error at most 0.5.
-Post radius/confusion also require a finite condition number at most 10.
-Required missing/nonfinite metrics or their invalid issues leave candidates
-unselected with notes. Unrelated fixed-zero parameter issues do not reject them.
-You may select a candidate manually after inspecting the model and raw IQ.
+Primary candidates are initially selected only when the joint histogram fit passes all four checks:
+
+- r² is at least 0.9.
+- Normalized residual RMS is at most 0.1.
+- Relative width error (`s`) is at most 0.5.
+- Relative center errors (`sg` for g and `se` for e) are each at most 0.5.
+
+Post radius and confusion inherit the primary review and also require a finite
+condition number of at most 10. A failed check, missing or nonfinite required
+metric, or invalid issue for a required metric leaves the candidate unselected
+with a note. The note gives the center error and its threshold when it exceeds
+the limit, or reports that the error is unavailable. Unrelated fixed-zero
+parameter issues do not block selection. You may select a candidate manually
+after inspecting the model and raw IQ.
 
 Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
 
