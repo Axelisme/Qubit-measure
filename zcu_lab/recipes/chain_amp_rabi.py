@@ -6,7 +6,6 @@ Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 from typing import Annotated
 
 from pydantic import Field
-from zcu_tools.analysis.readout_chain import CycleCheck
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -20,6 +19,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
+from zcu_lab.v2.chain._joint import JointResidualSummary
 from zcu_lab.v2.chain.amp_rabi.gui import ChainAmpRabiSummary
 
 
@@ -65,8 +65,8 @@ class ChainAmpRabiInputs(RecipeInputs):
     )
 
 
-class ChainAmpRabiReport(RecipeReport):
-    """Chain Rabi fit and its checks; cancellation returns no report."""
+class ChainAmpRabiReport(RecipeReport, JointResidualSummary):
+    """Joint Rabi estimates and scalar residuals; cancellation returns no report."""
 
     pi_gain: float | None = Field(
         description="Pi gain from the chain fit in native units; null means not estimable."
@@ -83,15 +83,6 @@ class ChainAmpRabiReport(RecipeReport):
     reliability: float | None = Field(
         description="Diagnostic R of the frequency error, no threshold."
     )
-    within_point: CycleCheck | None = Field(
-        description="Within-point check J, df, p; null without analysis."
-    )
-    sharing: CycleCheck | None = Field(
-        description="Sharing check J, df, p null; null without analysis."
-    )
-    curve: CycleCheck | None = Field(
-        description="Curve check J, df, p; null without analysis."
-    )
     first_read_pi_gain: float | None = Field(
         description="Pi gain of the first-read twotone fit; null means not estimable."
     )
@@ -99,7 +90,7 @@ class ChainAmpRabiReport(RecipeReport):
 
 @recipe(
     "chain_amp_rabi",
-    description="Run one K-cycle readout-chain gain Rabi, fit all 65 numbers, save sums and analysis.",
+    description="Run K-cycle gain Rabi, fit all 65 numbers jointly, and save the sums, estimates and residual diagnostics.",
 )
 async def chain_amp_rabi(
     session: RecipeSession, inputs: ChainAmpRabiInputs
@@ -109,9 +100,11 @@ async def chain_amp_rabi(
     relax_delay is the thermalisation wait K; the Form starts it at 5 T1 and
     overrides can change it. Primary fits the first read with the twotone Rabi
     fit for the starting value, then fits all 65 numbers jointly. It reports
-    the pi gain and Rabi frequency with Wald errors, R and three checks. No
-    writeback is proposed or requested. Save keeps the running sums and the
-    analysis.
+    π gain and Rabi frequency with Wald standard errors, R, J, df, J/df,
+    the chi-square reference band and the fraction of whitened components
+    with |r| > 3. These numbers do not decide acceptance or validate physical
+    parameters. The live-direction residual series stays in the figure, not
+    the report. Save keeps the sums and analysis; there is no writeback.
 
     points → expts sets the sweep sample count.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
@@ -153,9 +146,12 @@ async def chain_amp_rabi(
                 frequency_per_gain=None,
                 frequency_per_gain_err=None,
                 reliability=None,
-                within_point=None,
-                sharing=None,
-                curve=None,
+                J=None,
+                df=None,
+                j_per_df=None,
+                expected_band_low=None,
+                expected_band_high=None,
+                tail_fraction=None,
                 first_read_pi_gain=None,
                 analysis_failure=analysis.reason,
             )
@@ -165,9 +161,12 @@ async def chain_amp_rabi(
             frequency_per_gain=report_number(analysis.result.f),
             frequency_per_gain_err=report_number(analysis.result.f_err),
             reliability=report_number(analysis.result.reliability),
-            within_point=analysis.result.within_point,
-            sharing=analysis.result.sharing,
-            curve=analysis.result.curve,
+            J=analysis.result.J,
+            df=analysis.result.df,
+            j_per_df=analysis.result.j_per_df,
+            expected_band_low=analysis.result.expected_band_low,
+            expected_band_high=analysis.result.expected_band_high,
+            tail_fraction=analysis.result.tail_fraction,
             first_read_pi_gain=report_number(analysis.result.first_read_pi_amp),
         )
     finally:

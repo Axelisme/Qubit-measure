@@ -1,8 +1,8 @@
 # K-cycle readout-chain amplitude Rabi
 
-**Readers:** operator, agent. Run the readout-chain gain Rabi from the GUI or MCP and read its live curves, joint fit and checks.
+**Readers:** operator, agent. Run the readout-chain gain Rabi from the GUI or MCP and read its live curves, joint fit and residuals.
 
-**Last updated:** 2026-11-09
+**Last updated:** 2026-11-22
 
 After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
@@ -39,24 +39,26 @@ The sign of the first curve follows the second, so both oscillate together. Stop
 
 ## Analysis
 
-Analysis needs no options. It first fits the first read's mean IQ with the `twotone/rabi/amp_rabi` fit and publishes that experiment's `fit` figure; its π gain x_π gives the starting frequency f = 1 / (2 x_π).
-It then fits all 65 numbers at all gains jointly with a three-state model whose readout and population nuisances are shared across gains.
+Analysis needs no options. It fits a cosine to the mean IQ projection of the first read. The seed π gain x_π gives the start f = 1 / (2 x_π).
+It then fits all 65 numbers at all gains jointly with a three-state model whose readout and population parameters are shared across gains.
 The drive row for each starting state interpolates between two free population endpoints, D_i(x) = [1 − f_i(x)] × endpoint_i0 + f_i(x) × endpoint_i1.
 The curve weights are sin²(π f x) for g, cos²(π f x) for e and sin²(π f x) for the third state.
 The third-state row can vary with x. Equal endpoints give a flat row; distinct endpoints allow an oscillating response.
 f is in cycles per gain unit, and the π gain is 1 / (2 f).
 
-The `populations` plot shows, per gain, the first-read populations of a fit with a free drive at each gain, with Wald error bars, and the fitted model as lines.
-State labels are arbitrary; the legend gives each state's fitted thermal population, and the largest one is normally g.
-The title gives the π gain and the three lack-of-fit checks as J/df:
+In `joint residuals`, the upper panel shows the measured points from the live `all 65 numbers` curve and a solid joint-model curve on the same projection. A dashed line marks the joint π gain when it falls inside the sweep.
+The lower panel subtracts the joint prediction from the measurement at each acquired gain. Look there for gain ranges where the model consistently over- or underpredicts the projected signal.
+Both panels use standard errors of point means estimated from the pooled noise. They do not show populations or per-gain shot error bars.
 
-- `within-point`: the free three-state model at each gain, with p.
-- `sharing`: shared readout nuisances against fully separate gains; it has no p.
-- `curve`: the Rabi curve against a free drive at each gain, with p.
+The header and summary report the joint π gain and its Wald standard error, R and the following residual numbers:
 
-The summary reports `pi_amp` and `pi_amp_err`, `f` and `f_err`, the reliability `R` = 1 / (2π × gain span × f_err), the three checks, the joint `J` and `df`, and `first_read_pi_amp` from the first-read fit.
-Errors are Wald errors from the joint fit. At low state contrast and few cycles per gain they can understate the uncertainty. R is a diagnostic without a threshold.
-A fit failure in either step produces an analysis failure; the live plot and the saved sums remain.
+- `J` sums the squares of the whitened residuals from the last joint fit stage. `df` is 65 times the number of gains minus the number of joint fit parameters.
+- `j_per_df` is J/df. `expected_band_low` and `expected_band_high` are the endpoints of the approximate χ² reference band 1 ± 2√(2/df).
+- `tail_fraction` is the fraction of all whitened components with |r| > 3. The header shows it as a percentage. These are the 65-component residuals used by the joint fit, not the one-dimensional residuals in the lower panel.
+
+The summary also reports the fitted frequency and its Wald error, and the first-read π gain. R = 1 / (2π × gain span × frequency standard error) measures how the frequency error compares with the finite gain span. The analysis uses no cutoff on these numbers.
+The `fit` figure shows the cosine used to seed the joint fit. Its dashed lines mark the seed π and π/2 gains, and the shaded bands show their parameter standard errors. Its R² compares the seed fit with the first-read data only.
+If the seed or joint fit fails, the live plot and saved sums remain. There is no secondary diagnostic fit.
 
 This experiment proposes no writeback. Compare `pi_amp` with `first_read_pi_amp`, and calibrate x180 with `twotone/rabi/amp_rabi`.
 
@@ -71,7 +73,7 @@ For a transition i → j, the conditional IQ center lies on the line between the
 The model draws u from a truncated exponential on [0, 1] with rate −log(1 − R[i,j]). A read without a transition uses c_i.
 This emission law is not a general model of multiple jumps during integration or resonator dynamics.
 Transitions during a long gap after integration need not produce the IQ tail that this model assigns to a read transition.
-Passing the lack-of-fit checks does not establish unbiased physical parameters.
+A small residual does not establish unbiased physical parameters. The reported Wald errors measure local fit uncertainty. Low state contrast or few cycles can make them understate uncertainty.
 
 The first-read mean must support the starting fit. Weak or absent first-read contrast can make that fit fail or supply an uninformative seed even when later reads have correlations.
 The joint fit starts from the first-read curve parameters. It does not try multiple curve seeds or guarantee the correct basin.
@@ -80,12 +82,12 @@ There is no manual initial value or fallback.
 ## Saved data
 
 The saved record contains the gain axis, the cycle count and the 65 sums at each gain, and one 65 × 65 product sum added over all gains.
-The product sum feeds only the live plot. Loading the file and analyzing it again gives the same summary.
+The product sum sets the pooled noise scale for the live curve and the Analyze projection. It does not set the joint fit weights. Load the file and select Analyze to rerun the fit from the saved sums.
 
 ## MCP recipe
 
 `chain_amp_rabi` takes `gain_range`, `points`, `reps`, `rounds`, `frequency_mhz`, `pulse_length_us`, `drive_ref` and `readout_ref`; points maps to gain Expts.
 Set Relax delay with an override on `relax_delay`.
 The recipe runs, analyzes and saves. It never asks for writeback.
-The report gives `pi_gain`, `pi_gain_err`, `frequency_per_gain`, `frequency_per_gain_err`, `reliability`, the checks `within_point`, `sharing` and `curve` (each J, df, p), and `first_read_pi_gain`.
+The report gives `pi_gain`, `pi_gain_err`, `frequency_per_gain`, `frequency_per_gain_err`, `reliability`, `first_read_pi_gain` and the six residual fields listed above. The projected residuals at each gain stay in the figure.
 Omitted inputs retain Form values; overrides apply last, then check_ready reports missing or invalid fields before Run.
