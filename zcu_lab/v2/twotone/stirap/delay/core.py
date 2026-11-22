@@ -164,7 +164,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         )
         viewer = live_errorbar(ax, num_lines=len(STATE_LABELS))
         for line, state in zip(ax.lines, STATE_LABELS, strict=True):
-            line.set(marker="o", markersize=3, linestyle="none", label=f"{state} label")
+            line.set(marker="o", markersize=3, label=f"{state} label")
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=3)
 
         @context.plots.on_plot_thread
@@ -288,7 +288,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
                     leads,
                     values[:, index],
                     yerr=sem[:, index],
-                    fmt="o",
+                    fmt="o-",
                     markersize=3,
                     color=f"C{index}",
                     label=f"{state} label",

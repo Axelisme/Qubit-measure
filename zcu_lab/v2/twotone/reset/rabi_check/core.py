@@ -332,7 +332,7 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
                 dense_gains,
                 branch.evaluate(dense_gains, fit.frequency),
                 color=color,
-                linestyle="--",
+                linestyle="-",
                 label="Fit: f + 2f" if index == 2 else "Fit: f",
             )
             ax.set_title(f"{label}\nAmplitude at f = {branch.amplitude:.3g} a.u.")
@@ -341,10 +341,11 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
                 bbox_to_anchor=(0.5, -0.25 if index == 2 else -0.02),
                 ncols=2,
             )
-            residual_ax.plot(
+            residual_ax.errorbar(
                 gains,
                 real_signals[index] - branch.evaluate(gains, fit.frequency),
-                ".",
+                yerr=sem[index],
+                fmt=".-",
                 color=color,
                 label=f"{label}: {branch.residual_rms:.3g} a.u.",
             )
