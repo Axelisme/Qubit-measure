@@ -17,8 +17,17 @@ from zcu_tools.analysis.fitting import (
     fit_decay,
     fit_dual_decay,
 )
+from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.datafile import DataVariable
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions
@@ -28,22 +37,27 @@ from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    IQ,
     DelayAuto,
     Pulse,
     Readout,
     Reset,
     SweepCfg,
     TimelineBuilder,
+    shot_sums,
+    split_sums,
 )
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.process import find_rotate_angle
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 
 @dataclass(frozen=True)
 class T1Result:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    iq_moments: NDArray[np.float64] | None = None
+    """Retained shot sums [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] per point; None for mean-only files."""
 
 
 @validated_dataclass(frozen=True)
@@ -63,16 +77,33 @@ class T1Analysis:
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
+def _direction(signals: NDArray[np.complex128]) -> tuple[float, float]:
+    """Project along the principal IQ axis, or use I if fewer than two points."""
+    try:
+        angle = find_rotate_angle(signals)
+    except ValueError:
+        return (1.0, 0.0)
+    return (float(np.cos(angle)), float(np.sin(angle)))
+
+
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     """Rotate mean complex IQ and return its real component for the plot."""
-    return rotate2real(signals).real  # (times, signals)
+    i, q = _direction(signals)
+    return signals.real * i + signals.imag * q
 
 
 class T1Cfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Relaxation delay",
+            unit="µs",
+            description="Sweep the wait between the π pulse and readout.",
+        ),
+    ]
     sampling: Literal["linear", "decay"] = "linear"
     reps: Annotated[
         int,
@@ -106,6 +137,32 @@ class T1Cfg(ConfigBase):
     ]
 
 
+_TRACE_AXIS = VariableAxisSpec(
+    label="Time",
+    unit="s",
+    field_name="times",
+    scale=1e-6,
+)
+_MOMENT_COLUMNS = tuple(range(6))
+
+
+def _build_result(data: GroupedLoadData[T1Cfg]) -> T1Result:
+    """Restore the measured trace and any shot moments on the same native axis."""
+    trace = data.variable("data")
+    (coordinates,) = trace.axes
+    moments = data.variables.get(DataVariable("iq_moments"))
+    if moments is None:
+        return T1Result(coordinates, trace.z)
+    columns, moment_coordinates = moments.axes
+    if not np.array_equal(coordinates, moment_coordinates) or not np.array_equal(
+        columns, _MOMENT_COLUMNS
+    ):
+        raise ValueError(
+            "/vars/iq_moments: expected columns 0–5 on the /vars/data grid"
+        )
+    return T1Result(coordinates, trace.z, iq_moments=moments.z)
+
+
 class T1Exp(Experiment[T1Result, T1Cfg]):
     """T1 relaxation time measurement.
 
@@ -116,9 +173,28 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
 
     # times stored as seconds on disk -> scale=1e-6
-    AXES_SPEC: ClassVar[AxesSpec[T1Result, T1Cfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("times", label="Time", unit="s", scale=1e-6),),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
+    # ADR-0069: preserve the original trace; shot moments are optional on load.
+    AXES_SPEC: ClassVar[GroupedAxesSpec[T1Result, T1Cfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "data",
+                (_TRACE_AXIS,),
+                VariableZSpec(
+                    "signals", label="Signal", unit="a.u.", dtype=np.complex128
+                ),
+            ),
+            VariableSpec(
+                "iq_moments",
+                (
+                    VariableAxisSpec(label="Moment", unit="", values=_MOMENT_COLUMNS),
+                    _TRACE_AXIS,
+                ),
+                VariableZSpec("iq_moments", label="IQ moments", unit=""),
+                required=False,
+            ),
+        ),
+        result_builder=_build_result,
+        labber_variables=("data",),
         result_type=T1Result,
         cfg_type=T1Cfg,
         cfg_schema_version="4.0",
@@ -146,25 +222,28 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         # 2. Monitor relaxation contrast during uniform-delay averaging.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (µs)", ylabel="Rotated IQ real (a.u.)")
-        ax.set_title("T1 relaxation")
+        experiment = "T1 relaxation · uniform delays"
+        ax.set(
+            title=experiment,
+            xlabel="Relaxation delay (µs)",
+            ylabel="IQ projection (a.u.)",
+        )
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
-        viewer = live_line(ax)
+        viewer = live_errorbar(ax)
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            """Refresh the linear-delay T1 contrast curve.
-
-            data is complex IQ in delay order; NaN marks unmeasured points.
-            Return the changed artists without modifying the input array.
-            """
-            return viewer.set(lengths, t1_signal2real(data))
+        def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Update the projected IQ, shot SEM and acquisition count."""
+            counts, mean = split_sums(moments)
+            i, q = _direction(mean)
+            sem = iq_shot_sem(moments, direction=(i, q))
+            retained = np.nanmax(counts, initial=0)
+            title = ax.set_title(f"{experiment}\n{retained:.0f} retained shots/point")
+            return (*viewer.set(lengths, mean.real * i + mean.imag * q, sem), title)
 
         fig.show()
         signals = SignalBuffer(
-            (len(lengths),),
-            on_update=update,
+            (len(lengths), len(_MOMENT_COLUMNS)), dtype=np.float64, on_update=update
         )
         # 3. Measure relaxation after excitation on the uniform delay grid with SNR stopping.
         with Schedule(signals, scope=context.scope) as sched:
@@ -179,17 +258,24 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             builder.delay_by_timeline()
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(
+            sched.run_acquire_summed(
                 prog,
                 context.soc,
+                reducer=shot_sums(prog, (IQ("readout", offset_corrected=True),)),
                 rounds=cfg.rounds,
                 options=RunOptions(
                     stop_condition=snr_checker(
-                        signals.at(), cfg.earlystop_snr, t1_signal2real
+                        signals.at(),
+                        cfg.earlystop_snr,
+                        lambda sums: t1_signal2real(split_sums(sums)[1]),
                     ),
                 ),
             )
-        return T1Result(times=lengths, signals=signals.array)
+        return T1Result(
+            times=lengths,
+            signals=split_sums(signals.array)[1],
+            iq_moments=signals.array,
+        )
 
     def _run_decay(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
         """Sweep nonuniform delay-table entries after the pi pulse and return mean IQ."""
@@ -198,24 +284,28 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lengths = table.times_us
         # 2. Monitor relaxation contrast at the nonuniform sampled delays.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (µs)", ylabel="Rotated IQ real (a.u.)")
+        experiment = "T1 relaxation · decay-spaced delays"
+        ax.set(
+            title=experiment,
+            xlabel="Relaxation delay (µs)",
+            ylabel="IQ projection (a.u.)",
+        )
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
-        viewer = live_line(ax)
+        viewer = live_errorbar(ax)
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            """Refresh the nonuniform-delay T1 contrast curve.
-
-            data is complex IQ in delay order; NaN marks unmeasured points.
-            Return the changed artists without modifying the input array.
-            """
-            return viewer.set(lengths, t1_signal2real(data))
+        def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Update the projected IQ, shot SEM and acquisition count."""
+            counts, mean = split_sums(moments)
+            i, q = _direction(mean)
+            sem = iq_shot_sem(moments, direction=(i, q))
+            retained = np.nanmax(counts, initial=0)
+            title = ax.set_title(f"{experiment}\n{retained:.0f} retained shots/point")
+            return (*viewer.set(lengths, mean.real * i + mean.imag * q, sem), title)
 
         fig.show()
         signals = SignalBuffer(
-            (len(lengths),),
-            on_update=update,
+            (len(lengths), len(_MOMENT_COLUMNS)), dtype=np.float64, on_update=update
         )
         # 3. Measure post-excitation relaxation using table-driven waits with SNR stopping.
         with Schedule(signals, scope=context.scope) as sched:
@@ -229,17 +319,24 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             builder.emit(DelayAuto("t1_delay", t=delay))
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(
+            sched.run_acquire_summed(
                 prog,
                 context.soc,
+                reducer=shot_sums(prog, (IQ("readout", offset_corrected=True),)),
                 rounds=cfg.rounds,
                 options=RunOptions(
                     stop_condition=snr_checker(
-                        signals.at(), cfg.earlystop_snr, t1_signal2real
+                        signals.at(),
+                        cfg.earlystop_snr,
+                        lambda sums: t1_signal2real(split_sums(sums)[1]),
                     ),
                 ),
             )
-        return T1Result(times=lengths, signals=signals.array)
+        return T1Result(
+            times=lengths,
+            signals=split_sums(signals.array)[1],
+            iq_moments=signals.array,
+        )
 
     def analyze(
         self,
@@ -253,47 +350,48 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         xs = result.times[options.skip :]
         signals = result.signals[options.skip :]
 
-        real_signals = rotate2real(signals).real
+        i, q = _direction(signals)
+        real_signals = signals.real * i + signals.imag * q
+        dense = np.linspace(xs.min(), xs.max(), max(200, xs.size))
 
         if options.dual_exp:
             fit = fit_dual_decay(xs, real_signals)
-            t1, t1err, t1b, t1berr, y_fit = (
+            t1, t1err, t1b, t1berr = (
                 fit.decay_time1,
                 fit.decay_time1_err,
                 fit.decay_time2,
                 fit.decay_time2_err,
-                fit.curve,
             )
+            y_fit = ft.dual_expfunc(dense, *fit.params)
         else:
             fit = fit_decay(xs, real_signals)
-            t1, t1err, y_fit = (
-                fit.decay_time,
-                fit.decay_time_err,
-                fit.curve,
-            )
+            t1, t1err = fit.decay_time, fit.decay_time_err
+            y_fit = ft.expfunc(dense, *fit.params)
             t1b = 0.0
             t1berr = 0.0
 
         # 2. Assess relaxation lifetimes and optional secondary decay against the measured trace.
         fig, ax = plots.subplots(num="fit")
 
-        ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
-        ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
-
-        t1_str = f"{t1:.2f}µs ± {t1err:.2f}µs"
-        if options.dual_exp:
-            t1b_str = f"{t1b:.2f}µs ± {t1berr:.2f}µs"
-            ax.plot(
-                xs, ft.expfunc(xs, *fit.params[:3]), linestyle="--", label="t1b fit"
-            )
-            title = f"$T_1$ = {t1_str},\n" + r"$T_{1b}$ = " + f"{t1b_str}"
+        if result.iq_moments is None:
+            ax.plot(xs, real_signals, ".", label="Measured")
         else:
-            title = f"$T_1$ = {t1_str}"
-        ax.set_title(title, fontsize=14)
-        ax.set_xlabel("Delay Time (µs)", fontsize=14)
-        ax.set_ylabel("Rotated IQ real (a.u.)", fontsize=14)
-        ax.legend(loc="upper right")
-        ax.grid(True)
+            sem = iq_shot_sem(result.iq_moments[options.skip :], direction=(i, q))
+            ax.errorbar(
+                xs, real_signals, yerr=sem, fmt=".", label="Measured ± shot SEM"
+            )
+
+        label = "Two-exponential fit" if options.dual_exp else "Exponential fit"
+        if fit.quality.r2 is not None:
+            label += f" (R² = {fit.quality.r2:.3f})"
+        ax.plot(dense, y_fit, label=label)
+        title = f"Energy relaxation: T₁ = {t1:.2f} ± {t1err:.2f} µs"
+        if options.dual_exp:
+            title += f"\nSecondary decay = {t1b:.2f} ± {t1berr:.2f} µs"
+        ax.set(
+            title=title, xlabel="Relaxation delay (µs)", ylabel="IQ projection (a.u.)"
+        )
+        ax.legend()
 
         fig.tight_layout()
 

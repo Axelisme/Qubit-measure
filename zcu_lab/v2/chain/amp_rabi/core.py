@@ -8,10 +8,12 @@ with a Rabi curve, starting from the usual twotone fit of the first read.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -24,6 +26,7 @@ from zcu_tools.analysis.readout_chain import (
     fit_cycle,
     rabi_model,
 )
+from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec, config
 from zcu_tools.experiment.context import RunContext
@@ -38,7 +41,7 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     chain_cycle_sums,
 )
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.process import find_rotate_angle, rotate2real
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
@@ -46,6 +49,7 @@ from zcu_lab.v2.chain._cycle import (
     checks_text,
     cycle_sums_variables,
     first_read_iq,
+    first_read_iq_moments,
     restore_cycle_sums,
 )
 from zcu_lab.v2.support import live_line
@@ -121,6 +125,38 @@ class ChainAmpRabiCfg(ConfigBase):
             description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
         ),
     ]
+
+
+def _plot_first_read(
+    ax: Axes,
+    sums: CycleSums,
+    iq: NDArray[np.complex128],
+    projected: NDArray[np.float64],
+) -> None:
+    """Add shot SEM on the seed fit's IQ axis when the moments support it."""
+    angle = find_rotate_angle(iq)
+    moments = first_read_iq_moments(sums)
+    direction = (np.cos(angle), np.sin(angle))
+    try:
+        sem = iq_shot_sem(moments, direction=direction)
+    except ValueError as exc:
+        logging.getLogger(__name__).warning("First-read shot SEM unavailable: %s", exc)
+        ax.plot(
+            sums.axis,
+            projected,
+            "o",
+            markersize=3,
+            label="First-read mean (shot SEM unavailable)",
+        )
+    else:
+        ax.errorbar(
+            sums.axis,
+            projected,
+            yerr=sem,
+            fmt="o",
+            markersize=3,
+            label="First-read mean ± shot SEM",
+        )
 
 
 class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
@@ -217,14 +253,16 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         and publishes "populations": per-gain first-read populations with error
         bars and the fitted curves. Return the π gain and f with Wald errors,
         R and the three checks. The source cfg may be None. Fitting failures of
-        either fit propagate.
+        either fit propagate. First-read moments that do not support a shot
+        SEM leave the seed figure's measured points without error bars.
         """
         del options  # This analysis has no configurable options.
         sums = source.result
         gains = sums.axis
 
         # 1. Seed from the first-read IQ using this experiment's fit policy.
-        seed_real_signals = rotate2real(first_read_iq(sums)).real
+        seed_iq = first_read_iq(sums)
+        seed_real_signals = rotate2real(seed_iq).real
         seed_zero_signal = seed_real_signals[np.argmin(np.abs(gains))]
         if seed_zero_signal > 0.5 * (
             np.max(seed_real_signals) + np.min(seed_real_signals)
@@ -243,9 +281,7 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
             seed_fit.curve,
         )
         seed_fig, seed_ax = plots.subplots(num="fit", figsize=config.figsize)
-        seed_ax.plot(
-            gains, seed_real_signals, label="meas", ls="-", marker="o", markersize=3
-        )
+        _plot_first_read(seed_ax, sums, seed_iq, seed_real_signals)
         seed_ax.plot(gains, seed_y_fit, label="fit")
         seed_ax.axvline(
             seed_pi_amp,

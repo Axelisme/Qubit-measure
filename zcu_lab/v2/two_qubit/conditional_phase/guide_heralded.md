@@ -82,6 +82,12 @@ compare the fits. Writeback uses only the joint slope_e−slope_g crossing.
 A missing, flat, ambiguous or nonunique crossing prevents a proposal. There
 is no gg fallback. Frequency interpolation supplies no uncertainty.
 
+In the wrapped phase, π crossing, and phase-per-CZ plots, each series keeps
+both points when adjacent angles differ by 180° or more. The gap between
+those points marks a cut or an ambiguous half-turn. A frequency without a
+point has no available value; no line spans it. The red π marker is still the
+crossing from the joint phase interpolation.
+
 The herald heatmap panels split nominal spectator preparation (g or e) and
 target projection (X or Y). Across each panel, columns follow the saved
 frequency scan in MHz. Down the panel, each band is one planned CZ gate

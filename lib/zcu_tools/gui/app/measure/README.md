@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-22，Data 頁讀圖
+**Last updated:** 2026-11-22，Data 頁讀圖與 R7
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -324,6 +324,7 @@ Run／Analysis／Post-analysis 的 RPC screenshot 與 `get_current_figure_for_pa
 Data gallery 用縮圖辨識各 stage 和具名圖。`View figure` 在同一頁從目前原生 Figure
 繪製一張可捲動 raster，不移動 canvas，也不新增 Save 工件。Run Save 只保存資料。
 操作、焦點與清理規則見 [Measure Qt views](ui/README.md)。
+圖面可讀性依 [R7](../../../../../zcu_lab/v2/figure-style.md#r7用-gui-與存檔的實際尺寸檢查版面) 檢查 GUI 與存檔 PNG。
 Workflow 共用這組平鋪與分頁列，不顯示圖名下拉選單。
 
 ## Workflow hosting

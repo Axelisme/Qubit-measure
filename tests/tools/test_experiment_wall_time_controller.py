@@ -139,6 +139,8 @@ def _install_headless_controller(
     adapters: Mapping[str, Path | None],
     on_run: Callable[[_SyntheticController], None],
     on_cancel: Callable[[_SyntheticController], None],
+    *,
+    on_ftf: Callable[[int, SimpleNamespace], None] | None = None,
 ) -> None:
     def open_entry() -> None:
         clock.seconds += 40.0
@@ -172,23 +174,75 @@ def _install_headless_controller(
     )
     monkeypatch.setattr(program, "build_soccfg", lambda _: object())
     monkeypatch.setattr(
-        config, "load_ftf", lambda _: SimpleNamespace(with_telemetry=lambda **_: None)
+        config, "load_ftf", lambda _: SimpleNamespace(with_telemetry=SimpleNamespace)
     )
+    # Supply a synthetic dirty checkout at the subprocess boundary.
     monkeypatch.setattr(
-        environment,
-        "ftf",
-        lambda _settings, *, soccfg: SimpleNamespace(
+        experiment_wall_time,
+        "subprocess",
+        SimpleNamespace(check_output=lambda *a, **kw: "?? example\n"),
+    )
+
+    def make_environment(soccfg: object) -> SimpleNamespace:
+        return SimpleNamespace(
             soc=None,
             soccfg=soccfg,
             devices=None,
             create_device=None,
             close_backend=None,
-        ),
-    )
+        )
+
+    def observe_environment(
+        settings: SimpleNamespace, *, soccfg: object, workers: int = 1
+    ) -> SimpleNamespace:
+        if on_ftf is not None:
+            on_ftf(workers, settings)
+        return make_environment(soccfg)
+
+    # The CLI report does not expose the factory argument. Delegate to the existing
+    # headless fake so observing it does not build a real FTF backend.
+    monkeypatch.setattr(environment, "ftf", observe_environment)
     monkeypatch.setattr(controller, "Controller", make_controller)
     # The Run's monotonic and UTC observation clocks are not CLI arguments.
     monkeypatch.setattr(experiment_wall_time, "perf_counter", clock.monotonic)
     monkeypatch.setattr(experiment_wall_time, "datetime", clock)
+
+
+@pytest.mark.parametrize(
+    ("worker_args", "expected"), [([], 1), (["--workers", "3"], 3)]
+)
+@pytest.mark.usefixtures("core_app")
+def test_main_configures_ftf_workers_and_stamps_batch_telemetry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    worker_args: list[str],
+    expected: int,
+) -> None:
+    data_dir, output = tmp_path / "inputs", tmp_path / "output"
+    _headless_inputs(data_dir)
+    settings_seen: list[tuple[int, str, bool]] = []
+
+    def observe_ftf(workers: int, settings: SimpleNamespace) -> None:
+        settings_seen.append((workers, settings.commit, settings.dirty))
+
+    _install_headless_controller(
+        monkeypatch,
+        _Clock(),
+        {"fake/frequency": None},
+        lambda ctrl: QTimer.singleShot(0, ctrl.complete),
+        lambda _: pytest.fail("a completed Run must not be cancelled"),
+        on_ftf=observe_ftf,
+    )
+
+    assert (
+        main(
+            ["--output", str(output), *worker_args],
+            data_dir=data_dir,
+            read_commit=lambda: "abc",
+        )
+        == 0
+    )
+    assert settings_seen == [(expected, "abc", True)]
 
 
 @pytest.mark.parametrize("orphan", [False, True], ids=["paired", "orphan"])
@@ -408,8 +462,10 @@ def test_timeout_judges_only_the_measured_core_lower_bound(
     _use_virtual_deadline(monkeypatch, clock)
 
     def run(ctrl: _SyntheticController) -> None:
-        legacy = {
-            "acquire_id": "legacy",
+        unreached = {
+            "acquire_id": "unreached",
+            "complete": False,
+            "materialize_wall_s": None,
             "families": {},
             "wall_s": 10,
             "compile_wall_s": 1,
@@ -417,14 +473,19 @@ def test_timeout_judges_only_the_measured_core_lower_bound(
             "readout_wall_s": 1,
         }
         records = [
-            legacy,
-            {"event": "materialize", "acquire_id": "legacy", "materialize_wall_s": 0.5},
+            unreached,
+            {
+                "event": "materialize",
+                "acquire_id": "unreached",
+                "materialize_wall_s": 0.5,
+            },
         ]
         if evolve_s is not None:
             records += [
                 {
-                    **legacy,
+                    **unreached,
                     "acquire_id": "raw",
+                    "complete": True,
                     "wall_s": 185,
                     "evolve_wall_s": evolve_s,
                     "readout_wall_s": 4,

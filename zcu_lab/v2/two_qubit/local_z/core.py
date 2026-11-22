@@ -42,6 +42,7 @@ from zcu_lab.v2.support import live_errorbar
 
 from .._drive import QubitDriveCfg
 from .._phase import QuadraturePhase, count_phase, phase_variance, qubit_sigma_variance
+from .._phase_plot import wrapped_phase_plot_data
 from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
 from .._sums import qubit_sigma, validate_qubit_tones
 
@@ -253,7 +254,7 @@ def _start_live_view(
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         viewers.append(live_errorbar(ax, num_lines=2))
         for line, projection in zip(ax.lines, ("X", "Y"), strict=True):
-            line.set(label=f"{projection} ± shot SEM", linestyle="none")
+            line.set(label=f"{projection} ± shot SEM")
     fig.legend(
         *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
     )
@@ -538,7 +539,7 @@ def _plot_quadratures(
                 ns,
                 values[t, q],
                 yerr=sem[t, q],
-                fmt=".",
+                fmt=".-",
                 color=f"C{q}",
                 label=f"{projection} ± shot SEM",
             )
@@ -609,17 +610,13 @@ def _plot_contrast(
     contrast_ax, phase_ax = fig.axes
     for t, (label, points) in enumerate(zip(labels, targets, strict=True)):
         contrast_ax.plot(
-            ns, [p.contrast for p in points], ".", color=f"C{t}", label=label
+            ns, [p.contrast for p in points], ".-", color=f"C{t}", label=label
         )
-        phase_ax.plot(
-            ns,
-            [
-                np.nan if p.logical_phase_deg is None else p.logical_phase_deg
-                for p in points
-            ],
-            ".",
-            color=f"C{t}",
-        )
+        phase_deg = [
+            np.nan if p.logical_phase_deg is None else p.logical_phase_deg
+            for p in points
+        ]
+        phase_ax.plot(*wrapped_phase_plot_data(ns, phase_deg), ".-", color=f"C{t}")
     contrast_ax.set_ylabel("Classified contrast")
     contrast_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncols=2)
     phase_ax.set(xlabel="CZ gates per shot (count)", ylabel="Wrapped phase (deg)")

@@ -281,7 +281,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         # 3. Assess echo decay and any fitted fringe frequency against the measured trace.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
+        ax.plot(xs, real_signals, label="data", ls="none", marker="o", markersize=5)
         ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
 
         t2e_str = f"{t2e:.2f}µs ± {t2eerr:.2f}µs"

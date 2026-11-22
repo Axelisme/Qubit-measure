@@ -43,14 +43,27 @@ from zcu_lab.v2.twotone.ro_optimize._chain_common import (
 
 
 class ChainPowerCfg(ConfigBase):
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Readout gain", unit="a.u.")]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout pulse and ADC window",
+            description="Select the resonator pulse and ADC timing used for each of the 16 reads.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Readout gain",
+            unit="a.u.",
+            description="Enter the sweep of the readout pulse gain in a.u.",
+        ),
+    ]
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Thermal wait K",
             unit="µs",
-            description="K: thermal relaxation between 16-read shots.",
+            description="Enter the wait in µs after each 16-read shot so the qubit returns to thermal equilibrium.",
         ),
     ] = Field(ge=0)
     reps: Annotated[
@@ -58,7 +71,7 @@ class ChainPowerCfg(ConfigBase):
         FieldMeta(
             label="Reps",
             unit="count",
-            description="16-read shots per setting in each round.",
+            description="Enter the number of 16-read shots per setting in each round.",
         ),
     ] = Field(ge=1)
     rounds: Annotated[
@@ -109,11 +122,16 @@ class ChainPowerExp(Experiment[ThermalChainSums, ChainPowerCfg]):
         )
 
         @context.plots.on_plot_thread
-        def draw(result: ThermalChainScore | None) -> tuple[Artist, ...]:
-            """Refresh the measurement artists from the current acquired data."""
+        def draw(
+            payload: tuple[ThermalChainScore | None, str],
+        ) -> tuple[Artist, ...]:
+            """Refresh the measurement artists and acquisition progress."""
+            result, progress = payload
+            title = fig.suptitle("Thermal-chain gain sweep · Resonator · Readout score")
             artists = _draw_metric(tuple(fig.axes), result)
+            status = fig.axes[0].set_title(progress)
             fig.tight_layout()
-            return artists
+            return (*artists, title, status)
 
         def update(sums: NDArray[np.float64]) -> None:
             # Calculate off the GUI thread; the plot thread only draws.
@@ -123,7 +141,15 @@ class ChainPowerExp(Experiment[ThermalChainSums, ChainPowerCfg]):
                 result = thermal_chain_score(saved)
             except ThermalMomentsUnavailable:
                 result = None
-            draw(result)
+            done = len(saved.axis)
+            shots = int(saved.shot_count.min())
+            progress = (
+                f"{done}/{len(settings)} settings acquired\n"
+                f"Minimum shots per acquired setting: {shots} count"
+            )
+            if result is None:
+                progress += " · score unavailable"
+            draw((result, progress))
 
         fig.show()
         shot_sums = SignalBuffer(
@@ -173,9 +199,15 @@ class ChainPowerExp(Experiment[ThermalChainSums, ChainPowerCfg]):
         result = thermal_chain_score(source.result)
         # 2. Inspect score, QND and correlation-growth diagnostics for the gain ranking.
         fig, _ = plots.subplots(3, 1, num="metric", sharex=True, figsize=(8, 8))
+        fig.suptitle("Thermal-chain gain sweep · Resonator · Readout score")
         _draw_metric(tuple(fig.axes), result)
+        best = result.settings[result.ranking[0]]
+        fig.axes[0].set_title(
+            f"Selected readout gain = {best.setting:.6g} a.u.\n"
+            f"Thermal-chain score = {best.score:.3g} ± {best.score_error:.2g} (model scale)"
+        )
         fig.tight_layout()
-        return ChainAnalysis(best=result.settings[result.ranking[0]])
+        return ChainAnalysis(best=best)
 
 
 def _draw_metric(
@@ -183,45 +215,31 @@ def _draw_metric(
 ) -> tuple[Artist, ...]:
     """Replace three panels with score, QND and correlation-growth diagnostics.
 
-    axes are the three vertically stacked axes of this power sweep figure.
-    Score and QND show model-conditional approximate error scales, not
-    general one-sigma errors. Score limits use
-    only score values; QND limits stay at 0..1 without clipping reported data.
-    M and |rho| share the diagnostic panel. Red lines mark the largest score,
-    with exact ties resolved by acquisition order, in live and analysis plots.
-    None displays an unavailable live preview with no scored points.
+    axes hold score, QND and M with |rho|, in that order. Score and QND
+    show the existing model-conditional error scales, not shot SEM.
+    Red lines mark the maximum score. None leaves the axes empty.
     """
     ax_score, ax_qnd, ax_m = axes
     for ax in axes:
         ax.clear()
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax_score.set_ylabel("Thermal-chain score")
+    ax_qnd.set_ylabel("Estimated QND")
+    ax_m.set(xlabel="Readout gain (a.u.)", ylabel="Correlation diagnostics")
     if result is None:
-        ax_score.set(ylabel="Heuristic score", title="Moments not yet estimable")
-        ax_qnd.set_ylabel("QND")
-        ax_m.set(xlabel="Readout gain (a.u.)", ylabel="M / |ρ|")
         return tuple(axes)
+
     settings = result.settings
     xs = [point.setting for point in settings]
-    scores = [point.score for point in settings]
     best = settings[result.ranking[0]]
     ax_score.errorbar(
         xs,
-        scores,
+        [point.score for point in settings],
         yerr=[point.score_error for point in settings],
         fmt="o-",
         capsize=3,
         color="C0",
-        label="Score ± model approx. scale",
-    )
-    low, high = min(scores), max(scores)
-    padding = 0.1 * (high - low) if high > low else 0.1 * max(abs(high), 0.01)
-    ax_score.set_ylim(low - padding, high + padding)
-    ax_score.set_ylabel("Heuristic score")
-    ax_score.set_title("Errors: model-conditional approximate scales")
-    ax_score.axvline(
-        best.setting,
-        color="r",
-        ls="--",
-        label=f"Max score: {best.setting:.5g} a.u.",
+        label="Model error scale",
     )
     ax_qnd.errorbar(
         xs,
@@ -230,18 +248,15 @@ def _draw_metric(
         fmt="o-",
         capsize=3,
         color="C0",
-        label="QND ± model approx. scale",
+        label="Model error scale",
     )
-    ax_qnd.set(ylabel="QND", ylim=(0, 1))
-    ax_qnd.axvline(best.setting, color="r", ls="--")
     ax_m.plot(
-        xs, [point.mist for point in settings], "o-", label="M: correlation growth"
+        xs, [point.mist for point in settings], "o-", label="Correlation growth M"
     )
-    ax_m.plot(xs, [abs(point.correlation) for point in settings], "s--", label="|ρ|")
-    ax_m.set(xlabel="Readout gain (a.u.)", ylabel="M / |ρ|")
-    ax_m.axvline(best.setting, color="r", ls="--")
+    ax_m.plot(
+        xs, [abs(point.correlation) for point in settings], "s-", label="First-pair |ρ|"
+    )
     for ax in axes:
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.axvline(best.setting, color="C3", ls="--")
         ax.legend(loc="best")
-        ax.grid(True)
     return tuple(axes)

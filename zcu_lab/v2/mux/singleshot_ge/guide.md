@@ -64,6 +64,19 @@ error. The raw clouds remain evidence of acquisition, not accepted fidelity.
 
 ## Measurement and analysis
 
+Use the live IQ figure to check the shot counts and whether the probe-off and
+probe-on clouds occupy distinct regions. The first Analyze figure preserves
+the raw clouds and adds fitted centers and the threshold line in the original
+IQ plane. The threshold is perpendicular to the fitted projection axis.
+Inspect cloud overlap before using it for classification. The Post figure
+shows g, e and other assignments; other does not identify a specific leakage
+state.
+
+The plots show individual shots, not uncertainty bars on a mean-IQ sweep.
+R² and normalized residual RMS summarize the internal histogram fits. R²
+measures explained variation. Normalized residual RMS measures the typical
+mismatch relative to the histogram range.
+
 The Form exposes shots, not reps or rounds. The core uses reps=shots and rounds=1.
 Shots sets the number of raw acquisitions in each probe-off/on preparation.
 Each tone's optional init pulse runs in both preparations on its drive generator.
@@ -81,7 +94,7 @@ while preserving the stored data order.
 Options include PCA/center fitting, angle in degrees, log histogram, T1 alignment
 and the readout length / T1 ratio (a.u.).
 The length ratio (readout length / T1) is inferred from the decay tail between the two clusters.
-With Length Ratio left empty, two tight clusters without a visible tail make Analyze return `length_ratio: null` and title the IQ plot `GE IQ (length ratio: not identifiable)`.
+With Length ratio left empty, two tight clusters without a visible tail can make Analyze report that the integration window / T1 is unavailable.
 This reporting decision does not change centers, fidelity or Post.
 If you set Length Ratio manually, Analyze returns the supplied value.
 Incomplete pairs and numerical fitting/classification failures retain a reason;
@@ -100,8 +113,8 @@ Override keys are original active indices, not positions in Participants.
 Invalid option indices, source shapes, shot/preparation axes or cfg associations
 raise before fitting. Both operations accept `source.cfg=None`.
 The caller must retain the primary's source association: another source with the
-same indices cannot be detected. Use fresh plots for another analysis; a figure
-cannot reuse an existing `fit_i`, `diagnostic_i`, or `post_i` name.
+same indices cannot be detected. Use fresh plots for another analysis; duplicate
+`fit_i` or `post_i` names are rejected.
 Numerical failures retain the original exception as `GENumericalError.__cause__`.
 
 `MuxGEResult` contains complex128 `signals (K,2,shots)`, int64 `tone_indices (K,)`
@@ -142,14 +155,18 @@ Primary candidates are initially selected only when the joint histogram fit pass
 - Normalized residual RMS is at most 0.1.
 - Relative width error (`s`) is at most 0.5.
 - Relative center errors (`sg` for g and `se` for e) are each at most 0.5.
+  Each is the center's standard error divided by the absolute value of the
+  fitted center.
 
 Post radius and confusion inherit the primary review and also require a finite
-condition number of at most 10. A failed check, missing or nonfinite required
-metric, or invalid issue for a required metric leaves the candidate unselected
-with a note. The note gives the center error and its threshold when it exceeds
-the limit, or reports that the error is unavailable. Unrelated fixed-zero
-parameter issues do not block selection. You may select a candidate manually
-after inspecting the model and raw IQ.
+condition number of at most 10. A failed check leaves the candidate unselected
+with a note. A required metric fails if it is missing, nonfinite, or itself
+marked invalid. For a center error above the limit or itself marked invalid,
+the note gives the reason, the value if finite, and the limit. If the error is
+missing or nonfinite, the note reports it as unavailable. An issue on a
+center's standard error alone does not block preselection. A relative center
+error of 0.0 does not mean the center is precisely known. You may select a
+candidate manually after inspecting the model and raw IQ.
 
 A successful, finite primary row must pass the GE calibration validity check.
 Each phase proposes one complete library mux readout replacement, resolved from
@@ -185,17 +202,8 @@ Run draws one `measurement_i` IQ scatter per participant.
 Blue and red shots distinguish the g (probe-off) and e (probe-on) preparations.
 These preparations may contain state mixtures; they are not classified shots.
 Analyze draws each participant's raw IQ clouds in `fit_i`.
-For each successful fit, `diagnostic_i` shows rotated IQ, projected preparation histograms, and fitted components.
-Each preparation is normalized separately: a bar in the lower-left panel shows the fraction of that preparation's shots in the bin, not a count or a density.
-Check whether the fitted components separate and follow the measured histograms.
-Read the fitted populations above the preparation panels and the readout length relative to T1 at the top.
-**Fitted SNR** is the distance between the fitted peaks divided by their shared Gaussian width.
-The value after ± is a first-order standard error from the same joint fit, conditional on the model and IQ rotation. It is not a confidence interval.
-`unavailable` means the fit did not yield an estimate for that value.
-`not identifiable` on the SNR line means the relative-error check failed for at least one center, even if the figure shows a number. Passing this check alone does not guarantee writeback preselection.
 Analyze uses the selected Run/Load source. Use the Analysis figure picker for
-`fit_i` and `diagnostic_i`, and the Post figure picker for `post_i`.
-If an Analysis tile clips labels, open the diagnostic in Data with **View figure**.
+`fit_i` and the Post figure picker for `post_i`.
 Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.
 Summary rows retain that order and show values, quality or a failure reason.
 A missing source configuration leaves the name unavailable.

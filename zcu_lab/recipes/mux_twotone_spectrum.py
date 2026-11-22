@@ -40,20 +40,20 @@ class MuxTwotoneSpectrumInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
+        description="Sets Participants: original tone indices (zero-based) for drives and readout, in run order.",
     )
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
-        description="Start/stop for every tone in original order, including nonparticipants. No per-tone n.",
+        description="Sets Tones › Frequency › Start and Stop (MHz), the drive RF endpoints for each original tone.",
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Positive hardware scan point count shared by all tones.",
+        description="Sets Expts (count), the shared number of frequency points.",
     )
 
     model_type: Literal["lor", "sinc"] | None | Keep = Field(
         default=KEEP,
-        description="Frequency fit model: Lorentzian or sinc. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Model type to fit a Lorentzian or sinc line shape.",
     )
 
 

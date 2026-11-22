@@ -8,9 +8,7 @@ After changing the parameter source, use Defaults to recapture initial values. R
 
 ## Parameter sources
 
-Gain runs -0.3 to 1.0 over 51 points; Run overwrites drive gain. Relax delay is 5 * qubit.t1 µs. Other missing required calibration leaves the affected fields empty and Invalid.
-
-The gain sweep runs from -0.3 to 1.0 regardless of calibration. For an x180 pulse with a stored numeric waveform length, the editable copy starts at length = 1.5*pi_len*pi_gain µs. Here pi_len is the calibrated x180 length and pi_gain its gain. Enter a finite positive pi_len and a finite pi_gain in (0, 1]; missing or invalid values leave length required and empty. A finite invalid gain stays visible; a nonfinite gain leaves both gain and length empty. If x180 is absent, qub_probe starts at gain=1 and length=1 µs. An arbitrary-waveform x180 keeps its saved module, shape and data. Switch waveform type first to edit duration.
+Pulse gain starts at −0.3 a.u. with 51 points. The Stop is the smaller of 1.0 a.u. and 1.2 × the stored X180 gain. If the X180 gain is unavailable, fill Stop yourself. Run sweeps the Rabi Pulse gain and leaves its carrier and length fixed. Relax delay starts at 5 × `qubit.t1` µs. For an x180 pulse with a stored numeric waveform length, the editable copy starts at length = 1.5*pi_len*pi_gain µs. Here pi_len is the calibrated x180 length and pi_gain its gain. Enter a finite positive pi_len and a finite pi_gain in (0, 1]; missing or invalid values leave length required and empty. A finite invalid gain stays visible; a nonfinite gain leaves both gain and length empty. If x180 is absent, qub_probe starts at gain=1 and length=1 µs. An arbitrary-waveform x180 keeps its saved module, shape and data. Switch waveform type first to edit duration.
 
 Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 

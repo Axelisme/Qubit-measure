@@ -27,6 +27,13 @@ def _analyze(req: AnalyzeRequest[SsT1RunResult, None], *, plots: Plots) -> None:
     return
 
 
+def _summary_lines(source: SsT1RunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds: {cfg.reps}×{cfg.rounds}",)
+
+
 def _run(cfg: T1Cfg, *, context: RunContext) -> RunRecord[T1Cfg, T1Result]:
     return RunRecord(cfg=cfg, result=T1Exp().run(cfg, context=context))
 
@@ -36,5 +43,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

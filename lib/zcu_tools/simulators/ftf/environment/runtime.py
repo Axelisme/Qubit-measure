@@ -290,6 +290,7 @@ class FTFAcquire:
     must be serialized by the caller (the binding provides acquire admission).
     evolve_wall_s sums Engine.evolve wall seconds across this session's rounds.
     readout_wall_s sums cavity propagation, ADC preparation and round sampling.
+    Each total is None until its first timed call.
     Both include elapsed work in failed calls and stay zero with telemetry off.
     """
 
@@ -323,8 +324,8 @@ class FTFAcquire:
         self._stark_limits: dict[
             tuple[int, int], dict[tuple[int, float, float], float]
         ] = {}
-        self.evolve_wall_s = 0.0
-        self.readout_wall_s = 0.0
+        self.evolve_wall_s: float | None = None
+        self.readout_wall_s: float | None = None
         self._dimension: DimensionSelection | None = None
         self._pilot_facts: ReferenceType[FTFModelFacts] | None = None
         self.pilot_wall_s = 0.0
@@ -354,7 +355,9 @@ class FTFAcquire:
         try:
             yield
         finally:
-            self.evolve_wall_s += time.monotonic() - start
+            self.evolve_wall_s = (self.evolve_wall_s or 0.0) + (
+                time.monotonic() - start
+            )
 
     @contextmanager
     def _reading(self) -> Generator[None]:
@@ -365,7 +368,9 @@ class FTFAcquire:
         try:
             yield
         finally:
-            self.readout_wall_s += time.monotonic() - start
+            self.readout_wall_s = (self.readout_wall_s or 0.0) + (
+                time.monotonic() - start
+            )
 
     def invalidate(self) -> None:
         """Release deterministic arrays and reject further rounds; safe to repeat."""
@@ -1040,8 +1045,8 @@ class FTFSource:
                 "wall_s": outcome.wall_s,
                 "compile_wall_s": outcome.compile_wall_s,
                 "materialize_wall_s": outcome.materialize_wall_s,
-                "evolve_wall_s": 0.0 if session is None else session.evolve_wall_s,
-                "readout_wall_s": 0.0 if session is None else session.readout_wall_s,
+                "evolve_wall_s": None if session is None else session.evolve_wall_s,
+                "readout_wall_s": None if session is None else session.readout_wall_s,
                 "complete": outcome.complete,
                 "capture_file": capture_file,
                 "extras": {
@@ -1118,7 +1123,9 @@ def _routing_telemetry(settings: FTFSettings) -> RoutingTelemetry | None:
     directory = policy.directory
     if directory is None:
         directory = Path(__file__).resolve().parents[5] / ".sim_telemetry"
-    return RoutingTelemetry(directory.absolute())
+    return RoutingTelemetry(
+        directory.absolute(), commit=policy.commit, dirty=policy.dirty
+    )
 
 
 def _flux_generator_channels(settings: FTFSettings) -> tuple[int, ...]:

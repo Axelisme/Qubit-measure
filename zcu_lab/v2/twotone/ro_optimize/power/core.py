@@ -75,16 +75,69 @@ class PowerQndAnalysis:
 class PowerCfg(ConfigBase):
     """Paired-readout modules, gain sweep and wait in us; counts add over rounds."""
 
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pi pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    wait: Annotated[float, FieldMeta(label="Wait", unit="µs", decimals=3)] = Field(
-        default=0.0, ge=0.0
-    )
-    reps: Annotated[int, FieldMeta(label="Reps", unit="count")]
-    rounds: Annotated[int, FieldMeta(label="Rounds", unit="count")] = 1
-    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="µs", decimals=3)]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the qubit reset before preparation, or leave blank to skip reset.",
+        ),
+    ] = None
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit π pulse",
+            description="Select the calibrated π pulse for preparation and for the pulse between the two reads.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout pulse and ADC window",
+            description="Select the resonator pulse and ADC timing shared by the first and second reads.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Readout gain",
+            unit="a.u.",
+            description="Enter the gain sweep in a.u. for R1 on and R2.",
+        ),
+    ]
+    wait: Annotated[
+        float,
+        FieldMeta(
+            label="Wait after R1",
+            unit="µs",
+            decimals=3,
+            description="Set the additional wait after the first readout pulse and its post-delay before the middle pulse.",
+        ),
+    ] = Field(default=0.0, ge=0.0)
+    reps: Annotated[
+        int,
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Enter the number of paired-read shots per branch and gain in each round.",
+        ),
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Set how many times the full gain scan is acquired.",
+        ),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Qubit relaxation wait",
+            unit="µs",
+            decimals=3,
+            description="Enter the wait in µs after the second read so the qubit relaxes.",
+        ),
+    ]
 
 
 def restore_result(data: GroupedLoadData[PowerCfg]) -> PowerResult:
@@ -94,6 +147,14 @@ def restore_result(data: GroupedLoadData[PowerCfg]) -> PowerResult:
         gains=variable.axes[3].astype(np.float64),
         sums=variable.z.astype(np.float64),
     )
+
+
+def _r1_contrast(sums: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Return |mean IQ(π) − mean IQ(I)| for R1 on, middle I, across gains."""
+    counts = sums[:, :, 0, 0]
+    counts = np.where(counts == 0, np.nan, counts)
+    means = sums[:, :, 1:3, 0] / counts[..., None]
+    return np.linalg.norm(means[:, 6] - means[:, 2], axis=-1)
 
 
 class PowerExp(Experiment[PowerResult, PowerCfg]):
@@ -152,8 +213,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         )
         # 2. Monitor first-read preparation contrast across readout gain.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Gain (a.u.)", ylabel="R1 preparation contrast (a.u.)")
+        fig.suptitle("Paired-read gain sweep · Resonator · First-read contrast")
+        ax.set(xlabel="Readout gain (a.u.)", ylabel="R1 mean IQ difference (a.u.)")
         viewer = live_line(ax)
+        ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
         def update(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
@@ -162,11 +225,12 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             sums is float64 with shape (gain, 8, 6, 6); zero counts display as NaN.
             Return the changed artists without modifying the input array.
             """
-            counts = sums[:, :, 0, 0]
-            counts = np.where(counts == 0, np.nan, counts)
-            means = sums[:, :, 1:3, 0] / counts[..., None]
-            contrast = np.linalg.norm(means[:, 6] - means[:, 2], axis=-1)
-            return viewer.set(gains, contrast)
+            contrast = _r1_contrast(sums)
+            count = int(np.nansum(sums[0, 2, 0, 0]))
+            status = ax.set_title(
+                f"Accumulated shots per branch and gain: {count} count"
+            )
+            return (*viewer.set(gains, contrast), status)
 
         fig.show()
         buffer = SignalBuffer((len(gains), 8, 6, 6), dtype=np.float64, on_update=update)
@@ -254,71 +318,33 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         indices = np.array(frontier, dtype=np.int64)
         indices = indices[np.argsort(f_sep[indices], kind="stable")]
 
-        # 2. Compare nine readout diagnostics versus gain, including R1-on/off backaction.
-        fig, _ = plots.subplots(3, 3, num="metrics", figsize=(14, 11))
-        for ax, name, label, symbol in zip(
-            fig.axes,
-            (
-                "snr",
-                "f_sep",
-                "thermal_population",
-                "retention",
-                "qnd",
-                "flip_up",
-                "flip_down",
-                "pi_miss",
-                "retention_from_covariance",
-            ),
-            (
-                "SNR",
-                "Gaussian separation fidelity",
-                "Thermal population p",
-                "Retention S",
-                "QND Q",
-                "Upward flip probability",
-                "Downward flip probability",
-                "Middle pi miss fraction f",
-                "Covariance retention (R1 on)",
-            ),
-            (
-                "SNR (a.u.)",
-                "F_sep",
-                "p",
-                "S",
-                "Q",
-                "epsilon up",
-                "epsilon down",
-                "f",
-                "S_cov",
-            ),
-            strict=True,
-        ):
-            if name + "_on" in arrays:
-                ax.plot(result.gains, arrays[name + "_on"], "o-", label="R1 on")
-                ax.plot(result.gains, arrays[name + "_off"], "s--", label="R1 off")
-            else:
-                ax.plot(result.gains, arrays[name], "o-", label="R1 on")
-            ax.set_title(label, fontsize=11)
-            ax.set(xlabel="Gain (a.u.)", ylabel=symbol)
-            ax.legend()
-            ax.grid(True)
-        fig.tight_layout()
+        # 2. Compare the live first-read contrast with the manual selection.
+        fig, ax = plots.subplots(num="contrast")
+        fig.suptitle("Paired-read gain sweep · Resonator · First-read contrast")
+        ax.plot(result.gains, _r1_contrast(result.sums), "o-", color="C0")
+        ax.set(xlabel="Readout gain (a.u.)", ylabel="R1 mean IQ difference (a.u.)")
+        if options.gain is not None:
+            ax.axvline(options.gain, color="C3", ls="--")
+            ax.set_title(f"Selected gain = {options.gain:.4g} a.u.")
 
-        # 3. Expose the separation/QND trade-off with a Pareto frontier and gain lookup.
+        # 3. Inspect calibration and state disturbance by gain.
+        _draw_gain_diagnostics(plots, result.gains, arrays)
+
+        # 4. Expose the separation/QND trade-off with a Pareto frontier and gain lookup.
         # Keep dense gain labels in a lookup table, not on top of the points.
         gain_groups = np.array_split(np.flatnonzero(valid), 3)
         table_height = max(2.0, 0.26 * len(gain_groups[0]) + 0.8)
         fig, ax = plots.subplots(num="pareto", figsize=(13, 5 + table_height))
+        fig.suptitle("Paired-read gain sweep · Resonator · Separation versus QND")
         grid = fig.add_gridspec(2, 3, height_ratios=(5, table_height))
         ax.set_subplotspec(grid[0, :])
         points = ax.scatter(
-            f_sep[valid], qnd[valid], c=result.gains[valid], label="Gains"
+            f_sep[valid], qnd[valid], c=result.gains[valid], label="Measured settings"
         )
         ax.figure.colorbar(points, ax=ax, label="Gain (a.u.)")
         ax.plot(f_sep[indices], qnd[indices], "r.-", label="Pareto frontier")
-        ax.set(xlabel="Gaussian separation fidelity F_sep", ylabel="QND Q (R1 on)")
-        ax.legend()
-        ax.grid(True)
+        ax.set(xlabel="Gaussian separation Fsep", ylabel="Estimated QND Q (R1 on)")
+        ax.legend(loc="best")
         for column, group in enumerate(gain_groups):
             table_ax = fig.add_subplot(grid[1, column])
             table_ax.axis("off")
@@ -335,13 +361,68 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                     ]
                     for index in group
                 ],
-                colLabels=["Gain (a.u.)", "F_sep", "QND Q", ""],
+                colLabels=["Gain (a.u.)", "Fsep", "QND Q", ""],
                 colWidths=[0.3, 0.3, 0.3, 0.1],
                 cellLoc="center",
                 loc="upper center",
             )
             table.auto_set_font_size(False)
-            table.set_fontsize(9)
+            table.set_fontsize(10)
             table.scale(1, 1.3)
         fig.tight_layout()
         return PowerQndAnalysis(gain=options.gain)
+
+
+def _draw_gain_diagnostics(
+    plots: Plots, gains: NDArray[np.float64], arrays: dict[str, NDArray[np.float64]]
+) -> None:
+    """Plot R1-on calibration, on/off disturbance and covariance retention vs gain."""
+    fig, _ = plots.subplots(3, 1, num="separation", sharex=True, figsize=(8, 7))
+    fig.suptitle("Paired-read gain sweep · Resonator · R1-on calibration")
+    for ax, name, ylabel in zip(
+        fig.axes,
+        ("snr", "f_sep", "thermal_population"),
+        (
+            "g/e separation SNR",
+            "Gaussian\nseparation Fsep",
+            "Initial P(e)\n(estimated)",
+        ),
+        strict=True,
+    ):
+        ax.plot(gains, arrays[name], "o-", color="C0")
+        ax.set_ylabel(ylabel)
+    fig.axes[-1].set_xlabel("Readout gain (a.u.)")
+    fig.tight_layout()
+
+    fig, _ = plots.subplots(3, 2, num="disturbance", sharex=True, figsize=(10, 8))
+    fig.suptitle("Paired-read gain sweep · Resonator · State disturbance")
+    for ax, name, ylabel in zip(
+        fig.axes,
+        (
+            "retention",
+            "qnd",
+            "flip_up",
+            "flip_down",
+            "pi_miss",
+            "retention_from_covariance",
+        ),
+        (
+            "Estimated retention S",
+            "Estimated QND Q",
+            "P(g → e)",
+            "P(e → g)",
+            "π miss fraction",
+            "Covariance retention S",
+        ),
+        strict=True,
+    ):
+        if name == "retention_from_covariance":
+            ax.plot(gains, arrays[name], "o-", color="C0", label="R1 on")
+        else:
+            ax.plot(gains, arrays[name + "_on"], "o-", color="C0", label="R1 on")
+            ax.plot(gains, arrays[name + "_off"], "s-", color="C1", label="R1 off")
+        ax.set_ylabel(ylabel)
+    for ax in fig.axes[-2:]:
+        ax.set_xlabel("Readout gain (a.u.)")
+    fig.axes[0].legend(loc="best")
+    fig.tight_layout()

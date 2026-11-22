@@ -86,7 +86,7 @@ SINGLE_MODEL: dict[str, JsonValue] = {
                 "band_edges": {"low": {"corner_ghz": 3.7, "rolloff_db_per_ghz": 100.0}},
             },
             "offset_adc": [0.0, 0.0],
-            "noise_psd_adc2_ns": [[1.0, 0.2], [0.2, 1.0]],
+            "noise_psd_adc2_ns": 1.0,
         },
     },
     "numerics": {
@@ -160,7 +160,7 @@ INTEGER_MODEL: dict[str, JsonValue] = {
             "phase_deg": 0.0,
             "time_of_flight_ns": 0.0,
             "offset_adc": [0.0, 0.0],
-            "noise_psd_adc2_ns": [[400.0, 0.0], [0.0, 400.0]],
+            "noise_psd_adc2_ns": 400.0,
         },
     },
     "numerics": {
@@ -320,7 +320,7 @@ FTF_MODEL: dict[str, JsonValue] = {
                 "band_edges": {"low": {"corner_ghz": 3.7, "rolloff_db_per_ghz": 100.0}},
             },
             "offset_adc": [0.0, 0.0],
-            "noise_psd_adc2_ns": [[1.0, 0.2], [0.2, 1.0]],
+            "noise_psd_adc2_ns": 1.0,
         },
         "mux": {
             "gen_ch": 7,
@@ -352,7 +352,7 @@ FTF_MODEL: dict[str, JsonValue] = {
                         },
                     },
                     "offset_adc": [0.0, 0.0],
-                    "noise_psd_adc2_ns": [[1.0, 0.2], [0.2, 1.0]],
+                    "noise_psd_adc2_ns": 1.0,
                 },
                 {
                     "ro_ch": 3,
@@ -380,7 +380,7 @@ FTF_MODEL: dict[str, JsonValue] = {
                         },
                     },
                     "offset_adc": [0.0, 0.0],
-                    "noise_psd_adc2_ns": [[1.0, 0.2], [0.2, 1.0]],
+                    "noise_psd_adc2_ns": 1.0,
                 },
             ],
         },

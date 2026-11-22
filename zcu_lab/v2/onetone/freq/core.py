@@ -14,6 +14,7 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.run_acquire import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -125,15 +126,15 @@ class FreqCfg(ConfigBase):
         PulseReadout.Cfg,
         FieldMeta(
             label="Readout",
-            description="Resonator readout 設定與 timing（µs）。",
+            description="Set the pulse and ADC window used together at each frequency.",
         ),
     ]
     freq: Annotated[
         SweepCfg,
         FieldMeta(
-            label="Frequency",
+            label="Readout RF frequency",
             unit="MHz",
-            description="Absolute MHz 掃描起訖值。",
+            description="Enter the absolute readout RF sweep endpoints in MHz, not mixer offsets.",
         ),
     ]
     sampling_mode: Annotated[SamplingMode, FieldMeta(label="Sampling mode")] = "linear"
@@ -144,7 +145,9 @@ class FreqCfg(ConfigBase):
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per frequency in each averaging round.",
         ),
     ]
     rounds: Annotated[
@@ -152,7 +155,7 @@ class FreqCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter how many times to repeat and average the entire sweep.",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -161,7 +164,7 @@ class FreqCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the relaxation wait in µs after each shot.",
         ),
     ]
 
@@ -221,21 +224,33 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             )
 
         # 2. Preview resonance magnitude while preserving complex IQ for fitting.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude (a.u.)")
+        fig, ax = context.plots.subplots(num="measurement", layout="constrained")
+        fig.suptitle("One-tone spectrum · Resonator · IQ magnitude")
+        ax.set(
+            xlabel="Readout RF frequency (MHz)", ylabel="Magnitude of mean IQ (a.u.)"
+        )
+        progress = ax.set_title(f"Averaging round 0 / {cfg.rounds}", fontsize=11)
         line = live_line(ax)
+        signals = SignalBuffer((len(freqs),))
+        rounds_done = 0
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
-            """Draw acquired complex IQ on the measurement axes; return changed artists.
+        def update(completed: int) -> Iterable[Artist]:
+            """Plot the cumulative mean and nominal shot count at a completed round."""
+            progress.set_text(
+                f"Averaging round {completed} / {cfg.rounds} · "
+                f"{completed * cfg.reps:,} nominal shots/point"
+            )
+            return (*line.set(freqs, freq_signal2real(signals.array)), progress)
 
-            Read the scan-shaped data without changing it. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            return line.set(freqs, np.abs(data))
+        def show_round() -> bool:
+            """Observe completed rounds without asking the acquisition to stop."""
+            nonlocal rounds_done
+            rounds_done += 1
+            update(rounds_done)
+            return False
 
         fig.show()
-        signals = SignalBuffer((len(freqs),), on_update=update)
         # 3. Reset and measure each resonator frequency with the chosen spacing.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -251,7 +266,12 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
-            sched.run_acquire(builder.build(), context.soc, rounds=cfg.rounds)
+            sched.run_acquire(
+                builder.build(),
+                context.soc,
+                rounds=cfg.rounds,
+                options=RunOptions(stop_condition=show_round),
+            )
         return FreqResult(freqs=freqs, signals=signals.array)
 
     def analyze(
@@ -261,34 +281,67 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
-        # 1. Fit the complex resonance with the requested background model.
-        fig, _ = plots.subplots(num="fit", figsize=(9, 8))
-        answer = fit_resonance(source.result.freqs, source.result.signals, options)
-        # 2. Compare the fitted hanger or transmission model on interior samples.
-        freqs, signals = source.result.freqs[1:-1], source.result.signals[1:-1]
+        """Fit interior complex IQ samples and plot the estimate and raw IQ checks."""
+        freqs, signals = source.result.freqs, source.result.signals
+        answer = fit_resonance(freqs, signals, options)
+        dense = np.linspace(freqs[1], freqs[-2], max(201, len(freqs)))
         params = answer.params
-        fig.clear()
         if "Qc" in params:
-            HangerModel.visualize_fit(
-                freqs,
-                signals,
-                params,
-                figure=fig,
-                fit_bg_amp_slope=options.fit_bg_amp_slope,
-                fit_bg_phase_curvature=options.fit_bg_phase_curvature,
-            )
+            predicted = HangerModel.calc_signals(dense, **params)
+            model_label = "Hanger fit"
         else:
-            TransmissionModel.visualize_fit(
-                freqs,
-                signals,
-                params,
-                figure=fig,
-                fit_bg_amp_slope=options.fit_bg_amp_slope,
-                fit_bg_phase_curvature=options.fit_bg_phase_curvature,
-            )
-        return FreqAnalysis(
-            freq=answer.freq,
-            fwhm=answer.fwhm,
-            params=dict(answer.params),
-            fit_quality=answer.fit_quality,
+            predicted = TransmissionModel.calc_signals(dense, **params)
+            model_label = "Transmission fit"
+
+        fig, ax = plots.subplots(num="fit", layout="constrained")
+        fig.suptitle("One-tone spectrum · Resonator · IQ magnitude")
+        ax.plot(
+            freqs, freq_signal2real(signals), ".", color="C0", label="Measured samples"
         )
+        ax.plot(dense, freq_signal2real(predicted), color="C1", label=model_label)
+        ax.axvline(answer.freq, color="0.35", linestyle="--", label="Fitted center")
+        ax.set(
+            xlabel="Readout RF frequency (MHz)", ylabel="Magnitude of mean IQ (a.u.)"
+        )
+        quality = answer.fit_quality
+        r2 = "unavailable" if quality.r2 is None else f"{quality.r2:.4f}"
+        rms = quality.normalized_residual_rms
+        residual = "unavailable" if rms is None else f"{rms:.3g}"
+        ax.set_title(
+            f"Resonator frequency = {answer.freq:.6f} MHz\n"
+            f"Linewidth (FWHM) = {answer.fwhm:.4g} MHz · Fit errors unavailable\n"
+            f"R² = {r2} · Normalized residual RMS = {residual}",
+            loc="left",
+            fontsize=11,
+        )
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=3, fontsize=10)
+
+        self._plot_iq_diagnostics(freqs, signals, dense, predicted, plots=plots)
+        return FreqAnalysis(answer.freq, answer.fwhm, dict(params), quality)
+
+    @staticmethod
+    def _plot_iq_diagnostics(
+        freqs: NDArray[np.float64],
+        signals: NDArray[np.complex128],
+        dense: NDArray[np.float64],
+        predicted: NDArray[np.complex128],
+        *,
+        plots: Plots,
+    ) -> None:
+        """Show fit agreement beyond magnitude in raw phase and the IQ plane."""
+        fig, _ = plots.subplots(1, 2, num="iq-diagnostics", layout="constrained")
+        fig.suptitle("One-tone spectrum · Resonator · Complex fit check")
+        phase_ax, iq_ax = fig.axes
+        phase = np.unwrap(np.angle(signals))
+        fitted_phase = np.unwrap(np.angle(predicted))
+        # Align phase branches at the first fitted frequency, not a skipped edge.
+        fitted_phase += 2 * np.pi * np.round((phase[1] - fitted_phase[0]) / (2 * np.pi))
+        phase_ax.plot(freqs, phase, ".", color="C0", label="Measured samples")
+        phase_ax.plot(dense, fitted_phase, color="C1", label="Complex fit")
+        phase_ax.set(
+            xlabel="Readout RF frequency (MHz)", ylabel="Unwrapped IQ phase (rad)"
+        )
+        iq_ax.plot(signals.real, signals.imag, ".", color="C0")
+        iq_ax.plot(predicted.real, predicted.imag, color="C1")
+        iq_ax.set(xlabel="Mean I (a.u.)", ylabel="Mean Q (a.u.)", aspect="equal")
+        phase_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), fontsize=10)

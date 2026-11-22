@@ -26,4 +26,8 @@ This is a visual diagnostic of the existing single-shot discrimination. Calibrat
 
 Run after 'singleshot/ge'. Use a large 'shots' (~5000+) for a well-sampled scatter; a tight cluster inside the matching circle indicates good discrimination.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+The live IQ cloud counts acquired shots. In Analyze, compare the measured cloud with the saved I/Q decision circles. The legend gives each classified fraction; Other includes shots outside both circles or tied between classes. If the prepared cloud misses its expected circle, check preparation first, then recalibrate the readout with singleshot/ge. The scatter shows individual IQ shots, not a 1D mean with a shot SEM.
+
+**Last updated:** 2026-11-22

@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-22，校正 IQ 軸的取數前置條件、`shot_sums` 的分析用途
+**Last updated:** 2026-11-22，校正 IQ 矩的取數契約與分析用途
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -184,6 +184,16 @@ Read-count 限制、外積總和與取消契約見 [summed acquisition](../READM
 `observe_readout_paths(prog)` 另回傳含 selector／case 與 observations 的 `ReadoutPath`，同 selector 的多次 Branch 共用 case index。
 兩種 observation 皆以 `repeat_counts` 保留由外至內的 Repeat 次數，整數代表固定次數，字串代表 count register。
 Path 保留 Repeat scope 與未宣告的空 case，不改 flatten traversal。Consumer 保留 module identity、label、read-count 與取數驗證，不自行解析 wrappers。
+
+### Mux IQ sums
+
+**規則。** 作者在建置 `MuxReadout` 前依參與順序選取 active tones，再以 `mux_iq_sums(prog, read)` 明示需要每個 tone 的校正六矩。Reducer 按該 cfg 的 tone 順序回傳 `(*point_dims, tones, 6)`，不按 ADC 編號排序。每個 ADC 使用自己的積分長度和當輪 QICK／PFB offset；只加總完成的 rounds。
+
+**例子。** Mux T1 先選原 tone 1 再選原 tone 0 時，第一列平均及線性投影 SEM 同取 tone 1 的校正 shots。SEM 使用完成 shots 的 N；N 小於 2 時不顯示誤差棒。
+
+**邊界。** 選取的 mux readout 在每發只做一次無條件積分。程式不含其他 ADC 讀取、edge counting 或 shot masks。此 reducer 不取跨 tone 外積，不放寬單 ADC opt-in，不改原生取數或分類。FTF 使用同一輪既有 required raw 路徑，不為了補誤差棒另取一批 shots。不要求同 seed 的 compact 與 required raw mean 逐值相同。
+
+**依據。** 2026-11-22，該點不確定度遵循使用者所說：「像我其实更想要设计的，其实应该是平均标准差，也就是这个点的预期误差。」Mux reducer 與矩保存細節由 designer 代裁，使用者未覆核。原始討論未入庫；取捨見 [Mux 逐 tone 校正 IQ 矩與 R11](../../../../docs/discussions/2026-11-22-mux-iq-moments-and-r11.md)。點平均的不確定度口徑見 [ADR-0069〈呈現規範〉](../../../../docs/adr/0069-experiment-core-and-frontends.md#呈現規範)；完成輪與模擬 raw 發佈邊界見 [ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md)。
 
 <a id="timeline-rounding"></a>
 

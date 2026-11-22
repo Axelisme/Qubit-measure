@@ -82,6 +82,13 @@ def _RoOptLength_make_form(ctx: FormContext) -> Form[LengthCfg]:
     return make_form(ctx)
 
 
+def _summary_lines(source: RoOptLengthRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 def _run(cfg: LengthCfg, *, context: RunContext) -> RunRecord[LengthCfg, LengthResult]:
     """Acquire a trace and retain the experiment configuration with its result."""
     return RunRecord(cfg=cfg, result=LengthExp().run(cfg, context=context))
@@ -94,6 +101,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_RoOptLength_analyze,
+        summary_lines=_summary_lines,
         options=lambda source, env: RoOptLengthAnalyzeParams(),
         writeback=_RoOptLength_get_writeback_items,
     ),

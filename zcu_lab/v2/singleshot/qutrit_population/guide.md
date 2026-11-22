@@ -26,12 +26,12 @@ The simulator's acquire path starts each repetition from its configured thermal 
 
 Run collects three rows in order: g has no preparation pulse, e applies Pi 01, f applies Pi 03 followed by Pi 32.
 Each row contains **Shots per preparation** complex IQ values in mean-sample ADC units.
-No reset or extra drive is inserted for g. The measurement plot shows the three acquired clouds.
+No reset or extra drive is inserted for g. Run shows the three IQ clouds and counts the shots acquired out of the three requested rows.
 
 Click Analysis to train a Euclidean nearest-centroid classifier on the first half of each row.
 The remaining half evaluates assignment. An odd shot count gives the extra shot to evaluation.
 Training confusion rows are requested preparation labels and columns are classified labels.
-The Result fit figure shows held-out raw fractions, unclipped corrected fractions, training confusion and matrix quality.
+The Analyze figure marks the trained centroids on the held-out IQ clouds. Compare the classified fractions with the unclipped corrected estimates and read the condition number beside the training confusion matrix. The cloud and calibration matrices are diagnostics, not a 1D scan, so they have no per-point shot SEM bars.
 The analysis also returns arrays, centroids, sample counts and diagnostics for the host's saved analysis summary.
 
 Correction solves the transpose of the training confusion matrix.
@@ -65,11 +65,13 @@ Training confusion includes preparation contamination, so correction reports pre
 
 ## Quality and failure conditions
 
-For the short-reference integer-fluxonium setting, inspect minimum pooled Mahalanobis separation >=2, macro preparation-label error <=3%, each label error <=6%, training confusion 2-norm condition <=1.5 and minimum singular value >=0.8.
+**Minimum centroid separation (shared σ)** is the closest pair of training centroids' IQ distance divided by one common noise width. The width is the square root of the mean I and Q variances after pooling the within-label training variances.
+For the short-reference integer-fluxonium setting, inspect macro preparation-label error <=3%, each label error <=6%, training confusion 2-norm condition <=1.5 and minimum singular value >=0.8.
+The earlier separation threshold used a different distance metric and does not establish a cutoff for this score.
 These thresholds characterize this synthetic reference setting, not strong STIRAP/Raman drives or hardware.
 An independent fixed-seed acquisition is needed to validate a selected readout configuration.
 
-Analysis rejects nonfinite/partial IQ, fewer than six shots per row, invalid labels, indistinguishable centers, singular pooled IQ covariance or singular confusion.
+Analysis rejects nonfinite/partial IQ, fewer than six shots per row, invalid labels, indistinguishable centers, zero or nonfinite shared σ, or singular confusion.
 It never substitutes simulator populations, a density matrix or replay truth.
 Poor separation or high label error requires checking spectroscopy, pulse calibrations and receiver settings before interpreting correction.
 A small matrix condition number alone does not establish state purity.

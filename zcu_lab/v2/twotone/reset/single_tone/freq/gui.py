@@ -90,12 +90,21 @@ def _run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]
     return RunRecord(cfg=cfg, result=FreqExp().run(cfg, context=context))
 
 
+def _summary_lines(source: RunRecord[FreqCfg, FreqResult]) -> tuple[str, ...]:
+    """Report the saved configuration's requested repetitions and rounds."""
+    if source.cfg is None:
+        return ()
+    return (f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=FreqExp.AXES_SPEC,
     make_form=_SingleToneFreq_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_SingleToneFreq_analyze, writeback=_SingleToneFreq_get_writeback_items
+        fn=_SingleToneFreq_analyze,
+        writeback=_SingleToneFreq_get_writeback_items,
+        summary_lines=_summary_lines,
     ),
 )

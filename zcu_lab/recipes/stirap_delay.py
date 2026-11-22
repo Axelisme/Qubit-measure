@@ -30,45 +30,49 @@ class StirapDelayInputs(RecipeInputs):
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     start_us: float = Field(
-        description="First Stokes lead in µs; negative starts Pump first."
+        description="Set Stokes lead › Start (µs); negative starts Pump first."
     )
     stop_us: float = Field(
-        description="Last Stokes lead in µs; positive starts Stokes first."
+        description="Set Stokes lead › Stop (µs); positive starts Stokes first."
     )
-    n: int = Field(ge=1, description="Lead point count, mapped to cfg expts.")
-    pump_freq_mhz: float = Field(gt=0, description="Measured 0–3 Pump carrier in MHz.")
+    n: int = Field(ge=1, description="Set Stokes lead › Expts (count).")
+    pump_freq_mhz: float = Field(
+        gt=0,
+        description="Set Pump carrier 0–3 (MHz) to the measured transition frequency.",
+    )
     stokes_freq_mhz: float = Field(
-        gt=0, description="Measured 3–2 Stokes carrier in MHz."
+        gt=0,
+        description="Set Stokes carrier 3–2 (MHz) to the measured transition frequency.",
     )
-    pump_gain: float = Field(ge=-1, le=1, description="Signed Pump DAC gain.")
-    stokes_gain: float = Field(ge=-1, le=1, description="Signed Stokes DAC gain.")
+    pump_gain: float = Field(ge=-1, le=1, description="Set Pump gain (a.u.).")
+    stokes_gain: float = Field(ge=-1, le=1, description="Set Stokes gain (a.u.).")
     pump_ch: int | None | Keep = Field(
         default=KEEP,
-        description="Pump charge generator; omission keeps Form, null goes to owner.",
+        description="Set Pump generator (channel).",
     )
     stokes_ch: int | None | Keep = Field(
         default=KEEP,
-        description="Different Stokes charge generator; omission keeps Form, null goes to owner.",
+        description="Set Stokes generator (channel).",
     )
     pump_waveform_ref: str | None | Keep = Field(
         default=KEEP,
-        description="Pump library waveform key or exact Inline option; omission keeps Form, null goes to owner.",
+        description="Set Pump waveform to a library key or exact inline option.",
     )
     stokes_waveform_ref: str | None | Keep = Field(
         default=KEEP,
-        description="Stokes library waveform key or exact Inline option; omission keeps Form, null goes to owner.",
+        description="Set Stokes waveform to a library key or exact inline option.",
     )
     readout_ref: str | None | Keep = Field(
         default=KEEP,
-        description="Centroid3 readout library key; omission keeps Form, null goes to owner.",
+        description="Set Readout to a module with saved centroid3 calibration.",
     )
     shots: int | None | Keep = Field(
         default=KEEP,
-        description="Shots per lead; omission keeps Form, null goes to owner.",
+        description="Set Shots per point (count).",
     )
     relax_delay_us: float | None | Keep = Field(
         default=KEEP,
-        description="Inter-shot relaxation in µs; omission keeps Form, null goes to owner.",
+        description="Set Relax delay (µs).",
     )
 
 
@@ -77,7 +81,7 @@ class StirapDelayReport(RecipeReport):
 
     f_population_estimate: float | None = Field(
         default=None,
-        description="Largest finite corrected f population (unitless, unclipped) on this grid, not fidelity or a global optimum. Null when unavailable.",
+        description="Peak corrected f fraction (unitless and unclipped) on the sampled grid; null when unavailable.",
     )
     stokes_lead_us: float | None = Field(
         default=None,

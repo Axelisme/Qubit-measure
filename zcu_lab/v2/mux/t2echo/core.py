@@ -381,7 +381,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 np.linalg.LinAlgError,
             ) as exc:
                 ax.plot(
-                    trace.times, np.abs(trace.signal), "o", label="acquired magnitude"
+                    trace.times, np.abs(trace.signal), "o-", label="acquired magnitude"
                 )
                 ax.text(
                     0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True

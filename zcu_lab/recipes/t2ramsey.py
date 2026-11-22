@@ -28,19 +28,19 @@ class T2RamseyInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key.",
+        description="Select the Readout library module that integrates IQ.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Preparation module option.",
+        description="Select Reset before the pulse sequence; null disables it.",
     )
     pi2_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi/2-pulse library key.",
+        description="Select π/2 pulse, the calibrated π/2 rotation.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Set Delay › Stop (µs), the free-evolution sweep endpoint.",
+        description="Set Free-evolution delay › Stop (µs), the delay sweep endpoint.",
     )
     detune_ratio: float | None | Keep = Field(
         KEEP,
@@ -48,15 +48,15 @@ class T2RamseyInputs(RecipeInputs):
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count.",
+        description="Set Free-evolution delay › Expts (count), including both endpoints.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count.",
+        description="Set Reps (count), shots per point in each round.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Rounds (count), the acquisition rounds to average.",
     )
 
     fit_fringe: bool | None | Keep = Field(
@@ -73,13 +73,13 @@ class T2RamseyReport(RecipeReport):
     """T2 Ramsey results and failure reason; cancellation returns no report."""
 
     t2ramsey_us: float | None = Field(
-        description="Free-evolution coherence time in µs; null means not estimable."
+        description="T₂* (µs) from the Analyze title; null means not estimable."
     )
     t2ramsey_err_us: float | None = Field(
         description="Free-evolution coherence uncertainty in µs; null means not estimable."
     )
     detune_mhz: float | None = Field(
-        description="Fitted fringe frequency in MHz; zero for decay-only fitting; null means not estimable."
+        description="Analyze fringe frequency (MHz), not Applied detune; zero for decay-only fitting, null if not estimable."
     )
     fit_fringe: bool = Field(
         description="Whether the fringe model was fitted; false when analysis failed."
@@ -91,8 +91,8 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
     """Measure Ramsey fringes and their decay during free qubit evolution.
 
     After optional reset, apply pi/2, wait the swept delay, then apply a
-    phase-shifted pi/2 pulse and read out. Analyze before fitting the decay
-    to estimate Ramsey T2; fringe fitting also estimates detuning. Ask before
+    phase-shifted pi/2 pulse and read out. Analyze estimates T₂* from the
+    decay envelope; the fringe model also returns the observed fringe frequency. Ask before
     applying the proposed calibration; skipping writes nothing. Analysis keeps
     the GUI parameters, which fit a free fringe phase by default. Turn off Fit
     phase offset in the tab to use a fixed phase instead.

@@ -127,11 +127,11 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         jpa_powers = sweep2array(cfg.jpa_power, allow_array=True)
         np.random.default_rng(cfg.seed).shuffle(jpa_powers[1:-1])
 
-        # Show independent points rather than connecting randomized settings.
+        # Draw in coordinate order while keeping acquisition randomized.
+        plot_order = np.argsort(jpa_powers)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Power (dBm)", ylabel="g/e SNR (a.u.)")
         line = live_line(ax)
-        ax.lines[0].set_linestyle("None")
         ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
@@ -141,7 +141,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             Read the scan-shaped data without changing it. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            return line.set(jpa_powers, np.abs(data))
+            return line.set(jpa_powers[plot_order], np.abs(data[plot_order]))
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -211,9 +211,16 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         max_idx = np.nanargmax(snrs)
         best_jpa_power = jpa_powers[max_idx]
 
-        # 2. Mark the best power without connecting randomized pump settings.
+        # 2. Connect neighboring pump settings and mark the best sampled point.
+        plot_order = np.argsort(jpa_powers)
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-        ax.scatter(jpa_powers, snrs, label="Measured g/e SNR", s=1)
+        ax.plot(
+            jpa_powers[plot_order],
+            snrs[plot_order],
+            "o-",
+            ms=3,
+            label="Measured g/e SNR",
+        )
         ax.axvline(
             best_jpa_power,
             color="r",

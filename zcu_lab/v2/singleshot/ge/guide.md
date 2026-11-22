@@ -45,14 +45,18 @@ Primary candidates are initially selected only when the joint histogram fit pass
 - Normalized residual RMS is at most 0.1.
 - Relative width error (`s`) is at most 0.5.
 - Relative center errors (`sg` for g and `se` for e) are each at most 0.5.
+  Each is the center's standard error divided by the absolute value of the
+  fitted center.
 
 Post radius and confusion inherit the primary review and also require a finite
-condition number of at most 10. A failed check, missing or nonfinite required
-metric, or invalid issue for a required metric leaves the candidate unselected
-with a note. The note gives the center error and its threshold when it exceeds
-the limit, or reports that the error is unavailable. Unrelated fixed-zero
-parameter issues do not block selection. You may select a candidate manually
-after inspecting the model and raw IQ.
+condition number of at most 10. A failed check leaves the candidate unselected
+with a note. A required metric fails if it is missing, nonfinite, or itself
+marked invalid. For a center error above the limit or itself marked invalid,
+the note gives the reason, the value if finite, and the limit. If the error is
+missing or nonfinite, the note reports it as unavailable. An issue on a
+center's standard error alone does not block preselection. A relative center
+error of 0.0 does not mean the center is precisely known. You may select a
+candidate manually after inspecting the model and raw IQ.
 
 Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
 
@@ -82,18 +86,10 @@ With Length Ratio left empty, two tight clusters without a visible tail make Ana
 This reporting decision does not change centers, fidelity or Post-Analysis.
 If you set Length Ratio manually, Analyze returns the supplied value.
 Run once the qubit pi-pulse and the readout are both calibrated.
-Run and Analyze show raw IQ scatter with blue g-preparation and red e-preparation shots.
+Run and Analyze each show one IQ scatter, with blue g-preparation and red e-preparation shots.
 The live labels mean probe off/on; Analyze maps them using Initial State.
-A successful Analyze also shows `diagnostic`: rotated IQ, projected preparation histograms, and fitted components.
-Each preparation is normalized separately: a bar in the lower-left panel shows the fraction of that preparation's shots in the bin, not a count or a density.
-Check whether the fitted components separate and follow the measured histograms.
-Read the fitted populations above the preparation panels and the readout length relative to T1 at the top.
-**Fitted SNR** is the distance between the fitted peaks divided by their shared Gaussian width.
-The value after ± is a first-order standard error from the same joint fit, conditional on the model and IQ rotation. It is not a confidence interval.
-`unavailable` means the fit did not yield an estimate for that value.
-`not identifiable` on the SNR line means the relative-error check failed for at least one center, even if the figure shows a number. Passing this check alone does not guarantee writeback preselection.
-Histogram log scale changes the diagnostic histograms, not the scatter.
-If the Analysis tile clips labels, open the diagnostic in Data with **View figure**.
+Histogram fitting remains internal, so histogram log scale does not change the scatter.
+Two separated IQ clouds indicate readout separation.
 Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
 
 **Last updated:** 2026-11-01

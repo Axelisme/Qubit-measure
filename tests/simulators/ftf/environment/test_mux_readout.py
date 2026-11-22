@@ -42,7 +42,7 @@ pytestmark = pytest.mark.sim
 def configuration(channels=(4, 1)):
     return ftf_module.FTFReadoutConfig(
         pulse=ftf_module.FTFReceiverConfig(
-            0, 1000, ((0.0, 0.0), (0.0, 0.0)), ripple_period_mhz=1000.0, pivot_ghz=0.0
+            0, 1000, 0.0, ripple_period_mhz=1000.0, pivot_ghz=0.0
         ),
         mux=ftf_module.FTFMuxReadoutConfig(
             gen_ch=1,
@@ -51,7 +51,7 @@ def configuration(channels=(4, 1)):
                 ftf_module.FTFReceiverConfig(
                     ro_ch=ch,
                     gain=1000.0 + i * 100,
-                    noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0)),
+                    noise_psd_adc2_ns=0.0,
                     ripple_period_mhz=1000.0,
                     pivot_ghz=0.0,
                 )
@@ -236,7 +236,7 @@ def test_mux_empty_channel_builds_and_acquires_receiver_noise(mode, tones):
                 replace(
                     second,
                     offset_adc=(11.0, -7.0),
-                    noise_psd_adc2_ns=((4.0, 0.5), (0.5, 2.0)),
+                    noise_psd_adc2_ns=4.0,
                 ),
             ),
         ),
@@ -287,7 +287,7 @@ def test_mux_empty_channel_builds_and_acquires_receiver_noise(mode, tones):
     np.testing.assert_allclose(
         observations.mean(axis=0), np.array([11.0, -7.0]) * count, atol=0.1
     )
-    covariance = count * np.array([[4.0, 0.5], [0.5, 2.0]])
+    covariance = count * 4.0 * np.eye(2)
     if mode == "integrated":
         covariance += np.eye(2) / 12
     tolerance = 6 * covariance.max() * np.sqrt(2 / (len(observations) - 1))

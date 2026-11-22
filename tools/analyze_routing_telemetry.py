@@ -43,7 +43,8 @@ class AcquireInput(BaseModel):
     evolve_wall_s and readout_wall_s sum evolution and readout wall seconds.
     materialize_wall_s measures in-acquire raw materialization. acquire_id links
     the summary to deferred events. Both may be absent in older summaries.
-    Missing or null wall fields mean unmeasured, not zero. Non-null complete
+    Missing or null wall fields mean unmeasured, including stages a failed
+    acquire never reached. Numeric zero remains measured. Non-null complete
     must be a JSON boolean; non-null wall fields must be JSON numbers, not bools
     or numeric strings. Wrong types invalidate the entire row.
     """
@@ -107,7 +108,11 @@ class AcquireWallTotals:
     remainder_s: float = 0.0
 
     def add(self, record: AcquireInput) -> None:
-        """Count every valid row; sum only rows with all four wall measurements."""
+        """Sum rows with measured wall, compile, evolution and readout times.
+
+        Exclude rows with any of those fields missing or null. Materialization
+        is not part of this three-stage breakdown; it remains in the remainder.
+        """
         if (
             record.wall_s is None
             or record.compile_wall_s is None

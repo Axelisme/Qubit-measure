@@ -315,7 +315,7 @@ def _plot_return(
             durations,
             proportions[:, j],
             yerr=np.sqrt(covariance[:, j, j]),
-            fmt=".",
+            fmt=".-",
             color=color,
             label=label,
         )
@@ -683,15 +683,15 @@ def _plot_phase_modulation(plots: Plots, analysis: ConstructivePhaseData) -> Non
         for rate in analysis.rates
         if rate.rate is not None
     ]
+    prediction = modulation.prediction
     ax.errorbar(
         analysis.phases,
         analysis.squared_rates,
         yerr=squared_rate_se,
-        fmt=".",
+        fmt="." if prediction is not None else ".-",
         color="C0",
         label="Eligible rates² ± propagated fit SE",
     )
-    prediction = modulation.prediction
     if prediction is None:
         diagnostic = f"No phase proposal: {modulation.reason}"
     else:
@@ -734,7 +734,7 @@ def _plot_duration_rates(
         coordinates,
         values,
         yerr=errors,
-        fmt=".",
+        fmt=".-",
         color="C0",
         label="Selected rates ± fit SE",
     )
@@ -788,7 +788,7 @@ def _plot_duration_traces(
             durations,
             data.populations[i, :, 0],
             yerr=np.sqrt(covariance[:, 0, 0]),
-            fmt=".",
+            fmt="." if rate.parameters is not None else ".-",
             color="C0",
             label="Measured ± shot SEM",
         )

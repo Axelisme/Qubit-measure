@@ -365,7 +365,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             title = _label_ramsey(fig, config, index)
             viewer = live_errorbar(ax, num_lines=2)
             for line, name in zip(ax.get_lines(), _BRANCH_NAMES, strict=True):
-                line.set(label=f"Spectator {name} data", linestyle="none")
+                line.set(label=f"Spectator {name} data")
             fig.legend(loc="outside lower center", ncols=2)
             fig.suptitle(f"{title}\n0/{2 * len(delays)} branch-delay points sampled")
             views.append((fig, viewer, title))
@@ -515,7 +515,11 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             ax, notes = fig.axes
             fig.suptitle(_label_ramsey(fig, cfg, dc_index))
             notes.set_axis_off()
-            for fit in answer.branches[2 * dc_index : 2 * dc_index + 2]:
+            branches = answer.branches[2 * dc_index : 2 * dc_index + 2]
+            style = (
+                "." if any(fit.dense_curve is not None for fit in branches) else ".-"
+            )
+            for fit in branches:
                 name = _BRANCH_NAMES[fit.branch]
                 color = f"C{fit.branch}"
                 ax.errorbar(
@@ -523,8 +527,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                     fit.trace,
                     yerr=errors[dc_index, fit.branch],
                     color=color,
-                    marker=".",
-                    linestyle="none",
+                    fmt=style,
                     label=f"Spectator {name} data",
                 )
                 if fit.dense_curve is not None:
@@ -552,19 +555,21 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         # A sweep needs a bias-axis view; a single setting only needs the fit annotation.
         if cfg.dc_device is not None and len(dc_values) > 1:
             _, ax = plots.subplots(num="zeta", figsize=(8, 5), layout="constrained")
-            for index, (bias, value, error) in enumerate(
-                zip(dc_values, answer.zeta_mhz, answer.zeta_error_mhz, strict=True),
-                start=1,
+            # Float arrays map unavailable (None) estimates to gaps in the line.
+            zeta_values = np.asarray(answer.zeta_mhz, dtype=np.float64)
+            zeta_errors = np.asarray(answer.zeta_error_mhz, dtype=np.float64)
+            ax.errorbar(dc_values, zeta_values, yerr=zeta_errors, fmt="o-", color="C0")
+            for index, (bias, value) in enumerate(
+                zip(dc_values, answer.zeta_mhz, strict=True), start=1
             ):
                 if value is not None:
-                    ax.errorbar(bias, value, yerr=error, marker="o", color="C0")
                     ax.annotate(
                         str(index),
                         (bias, value),
                         xytext=(5, 5),
                         textcoords="offset points",
                     )
-            if not any(value is not None for value in answer.zeta_mhz):
+            if not np.isfinite(zeta_values).any():
                 ax.text(
                     0.5,
                     0.5,

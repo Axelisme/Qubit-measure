@@ -347,12 +347,22 @@ def run(
     return RunRecord(cfg=cfg, result=MuxOnetoneExp().run(cfg, context=context))
 
 
+def _summary_lines(
+    source: RunRecord[MuxOnetoneCfg, MuxOnetoneResult],
+) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=replace(MuxOnetoneExp.AXES_SPEC, save_stem=mux_readout_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
+        summary_lines=_summary_lines,
         fn=_analyze,
         options=lambda source, env: MuxOnetoneAnalyzeParams(),
         writeback=_get_writeback_items,

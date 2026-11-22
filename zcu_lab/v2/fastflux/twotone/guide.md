@@ -1,53 +1,21 @@
-# Fast flux two-tone spectroscopy
+**Readers:** operator, agent. Find qubit spectral features versus fast-flux pulse gain and choose the window for a follow-up sweep.
 
-**Readers:** operator, agent. Map qubit probe frequency against fast-flux pulse gain from the GUI or MCP and inspect spectral features.
+# Fast-flux two-tone spectroscopy
 
-**Last updated:** 2026-10-21
+Open `fastflux/twotone`. After optional Reset, a flux pulse and a qubit probe run in parallel. The probe is at the scanned RF frequency. Readout starts after both branches finish. DC flux is not swept. The result locates spectral bands; it does not fit a transition or convert gain to magnetic flux.
 
-## What this measures
+## Choose the scan
 
-Open `fastflux/twotone` to map qubit probe frequency against flux-pulse gain.
-After reset, the flux pulse and qubit probe start together.
-Readout begins after both branches finish.
-The result is mean complex IQ with shape (gain, frequency).
-The live map and Analyze map project IQ onto a real axis.
-They locate spectral features. Transition fitting and flux calibration require
-separate work.
+Bind the intended qubit and resonator before Open. Defaults captures these sources again and discards edits. Reset uses the qubit reset slot or stays disabled. Readout uses the resonator readout slot or the editable template. The Qubit probe uses the qubit microwave drive channel. Check its envelope length and gain. Its carrier comes from Qubit probe frequency, not a fixed module frequency.
 
-## Before Run
+Flux pulse starts with the qubit fast-flux channel, a 1 µs rectangular envelope at 0 MHz and Nyquist zone 2. Check channel, timing and safe gain before playing it. The Flux pulse gain scan overrides the module gain. It starts with one point at zero; specify a nontrivial allowed range to map a flux dependence. Gain is the DAC full-scale fraction in a.u.
 
-Bind `qubit` and `resonator` to the intended components before Open.
-Defaults captures their current values again.
-The probe starts from `$qubit.freq` and `$qubit.wiring.ch`.
-The frequency sweep initially spans three linewidths around `$qubit.freq`.
-Readout uses `$resonator.module.readout` when available, otherwise the readout template.
-Reset uses `$qubit.module.reset`.
+Qubit probe frequency scans absolute RF in MHz. It starts with 301 points centered on the captured qubit frequency and extends 1.5 linewidths on each side. Enter a wider range if the expected flux shift exceeds that width. Reps defaults to 1000 shots per point per round. Rounds defaults to 10 whole scans. Relax delay starts at 1 µs; set it long enough for repeatable preparation.
 
-The Flux pulse module slot uses the `flux_pulse` template.
-Its channel comes from `$qubit.wiring.lo_flux_ch`.
-A missing or invalid channel leaves the form Invalid until you supply a confirmed channel.
-The template starts with const waveform, gain 1.0, frequency 0 MHz and Nyquist zone 2.
-This form starts its waveform duration at 1 µs, matching the initial probe duration.
-These values are editing seeds. Establish the flux calibration separately.
-Set the flux pulse frequency, Nyquist zone, waveform, duration and timing for your wiring.
+## Inspect the resonance map
 
-**Run replaces the flux pulse gain with the gain sweep.**
-The initial sweep is one point at zero gain.
-Set its gain range and point count explicitly before mapping.
-The sweep determines the acquired gain, overriding the template's gain of 1.0.
-Confirm allowed gain limits, channels, timing, reset, readout and repetition settings before Run.
-Gain is normalized amplitude. Converting it to magnetic flux requires a separate
-calibration. Frequency is MHz; durations are µs.
-Use Preview cfg to review the complete resolved configuration.
+Run and Analyze show the same gain/frequency heatmap. Color is the real projection of mean complex IQ along the scan's largest variation, in a.u. It is not a state population. The live title counts points with acquired IQ; the round progress shows the accumulation of whole grids. No per-point bars are drawn for a 2D spectrum.
 
-## Run and analysis
+Follow a continuous bright or dark ridge to read the candidate transition frequency at the flux gain of interest. If a feature crosses the high-frequency boundary, increase the frequency stop by at least one observed linewidth. Add enough points to keep the original MHz spacing. If two bands overlap, first narrow the gain range around the crossing and lower the probe gain to check for power-broadened features. Do not assign a transition or change qubit calibration from contrast alone.
 
-Run acquires the gain-by-frequency map while the DC flux device stays in place.
-Stop retains partial data; unmeasured points remain NaN.
-Analyze redraws the projected map from the selected Run or Load source.
-Analysis produces a map only; calibration parameters and modules retain their values.
-Review the map yourself before choosing any later calibration.
-
-Save and Load retain frequency and gain axes and complex IQ.
-Frequency is stored in Hz and restored in MHz; gain is unchanged.
-Load keeps the current form unchanged and uses the saved source for historical data.
+Save and Load retain the gain axis, the frequency axis saved in Hz and shown in MHz, complex IQ and the source cfg. Load leaves the current form unchanged. A valid map can still be plotted if historical cfg is missing; the acquisition summary then omits Reps×Rounds. This experiment has no recipe or writeback.

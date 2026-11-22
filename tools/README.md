@@ -110,6 +110,9 @@ Runner 遇到用法錯誤、非 Linux、不在已提交的 Git worktree、少於
 | `residual_killed` | 直接子程序結束後仍找到同 process group 的存活程序時設為 `true`，超時本身的整組清理只記在 `timed_out` |
 | `log` | 記錄命令輸出 log 的路徑 |
 
+收據記錄工作樹與執行身分，不記錄 probe 的輸入內容。相同 HEAD 不代表相同輸入。
+要核對 cfg、seed 或來源陣列，請比較 [Probe snapshots](#probe-snapshots) 的輸入指紋。
+
 全樹測試沿用 [tests/README.md 的完整選集命令](../tests/README.md#執行測試套件)，保留 marker、rootdir 與 failure log 選項。
 Full Pyright 將下方的全樹比較命令包進 runner，讓排隊與收據套用到整次比較：
 
@@ -142,6 +145,7 @@ write_snapshot(
 環境設定或來源陣列；writer 不發現實驗或讀取環境私有狀態。
 每個 label 寫入新目錄，保存 `arrays.npz`、PNG 與 `inputs.json`。既存 label 拒絕寫入，
 重跑時選新 output root。輸入指紋包含陣列的 shape、dtype 與內容，不只記形狀。
+指紋只涵蓋 caller 提供的輸入。要核對工作樹與執行身分，請另看[重計算執行器的收據](#重計算執行器)。
 
 同一支 script 在兩個 worktree 各以自己的 `uv run --directory <worktree> --no-sync --`
 執行一次，分別寫 A、B，再執行上表 compare 命令。工具不啟動其他 worktree 或儀器。
@@ -164,7 +168,9 @@ write_snapshot(
 
 查序列內的脈衝磁通線設定，見 [FTF `flux_lines` 欄位與限制](../zcu_lab/simulation_envs/FTF/field-guide.md#flux-lines序列內磁通校準與濾波)。查 point 裡的 DC 磁通校準，見 [ADR-0082〈Component 保存 offset 與 signed periods〉](../docs/adr/0082-component-flux-frame.md#component-保存-offset-與-signed-periods)。
 
-正式批次在該 worktree 用 `tools/run_heavy.py --exclusive`。先設定 `output` 為新的絕對路徑、`budget_s` 為整批 payload 的秒數預算：
+`--workers N` 設定每列 FTF 環境的平行 worker 數。`N` 必須是正整數，省略時用 1。若要採 GUI 的 worker 策略，指定 `max(1, slot CPU 數 − 1)`，例如 4 核 slot 用 `--workers 3`。`run_heavy.py` 的收據記錄 payload 參數與 `cpus`，可核對 worker 數和 CPU affinity。
+
+完整表或需要排他的正式比較，在已協調的窗口用 `tools/run_heavy.py --exclusive`。先設定 `output` 為新的絕對路徑，建立其父目錄，並將 `budget_s` 設為整批 payload 的秒數預算。下例省略 `--workers`，使用 1 個 worker。若要套用 GUI 策略，按排他 runner 分配的 CPU 數指定 `--workers`：
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
@@ -172,25 +178,26 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
   python -m tools.experiment_wall_time --output "$output" > "$output.receipt.json"
 ```
 
-單列 CPU 診斷可用非排他 runner。Linux 上，空的 ICD 目錄停用 OpenCL。cache 留在診斷路徑旁；非排他的秒數不用於正式比較。
+非排他 runner 可用於 CPU 診斷或已核准的子集量測，其秒數不能代替排他比較。Linux 上，空的 ICD 目錄停用 OpenCL。以下用 4 核 slot 選一列，並把 cache 留在 worktree：
 
 ```bash
-scratch="$(dirname "$output")"
-mkdir -p "$scratch/no-opencl"
-OCL_ICD_VENDORS="$scratch/no-opencl" \
-ZCU_TOOLS_CACHE_DIR="$scratch/cache" NUMBA_CACHE_DIR="$scratch/numba" \
+quality="$PWD/.agent_state/quality"
+mkdir -p "$quality/no-opencl"
+OCL_ICD_VENDORS="$quality/no-opencl" \
+ZCU_TOOLS_CACHE_DIR="$quality/cache" NUMBA_CACHE_DIR="$quality/numba" \
 uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
   --wait-limit 60 --log "$output.log" 120 -- \
-  python -m tools.experiment_wall_time --select onetone/freq --output "$output" > "$output.receipt.json"
+  python -m tools.experiment_wall_time --workers 3 --select onetone/freq --output "$output" \
+  > "$output.receipt.json"
 ```
 
-`batch.json` 記錄本批選中的 adapter、Git HEAD、每份輸入的 SHA-256 和 guide 盤點。從乾淨 checkout 執行，才能用 commit 找回執行時的程式。每列在送出 Run 前先寫 `start.json`，記 UTC 時刻與 monotonic 秒數。Run 在期限內到終態時，工具在清理該列資源前寫 `row.json`。逾時則先寫 `row.json`，再等 Run 終態與 Controller idle。`report.json` 和 `summary.md` 從這些落盤紀錄組成，列出已記錄結果的列數、本批涵蓋列數及全 inventory 列數。
+`batch.json` 記錄本批選中的 adapter、Git HEAD、每份輸入的 SHA-256 和 guide 盤點。工具也在本批派送前讀取 Git 的 dirty 狀態，將 HEAD 與 dirty 一起交給每列的 telemetry writer。從乾淨 checkout 執行，才能用 commit 找回執行時的程式。每列在送出 Run 前先寫 `start.json`，記 UTC 時刻與 monotonic 秒數。Run 在期限內到終態時，工具在清理該列資源前寫 `row.json`。逾時則先寫 `row.json`，再等 Run 終態與 Controller idle。`report.json` 和 `summary.md` 從這些落盤紀錄組成，列出已記錄結果的列數、本批涵蓋列數及全 inventory 列數。
 
 工具在送出 Run 及收到 Controller 終態事件時各取一次時間。`wall_s` 是兩次 monotonic clock 的差，UTC 時刻供閱讀。環境組裝、Open、覆寫及派送前落盤都不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留 fixture 副本與 acquired ledger，不寫回入庫輸入。
 
 工具從 [acquire telemetry](../lib/zcu_tools/simulators/README.md#acquire-telemetry) 加總各階段秒數。`core_s` 是 `compile_s`、`evolve_s`、`readout_s` 和 `materialize_s` 四項之和。`materialize_s` 含 acquire 內產生 raw shots 的時間，也含依 `acquire_id` 配對的延後 materialize。`remainder_s` 從 acquire 牆鐘扣除該牆鐘內的四項工作。延後 materialize 在 acquire 之外，不再從 remainder 扣除。`ShotReducer` 等 host 處理不計入核心。
 
-Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆鐘和四個分項、每筆補充紀錄都有主紀錄配對時，才填 `core_s`。缺 materialize 的舊 telemetry 不補 0。配不到主紀錄的補充紀錄不計秒數或 acquire 次數，並使分項不完整。成功但分項不全的 `missing_breakdown` 列保留 Run 秒數，四個分項與 remainder 寫 `null`。分項不全或逾時時，`core_s` 寫 `null`，`core_s_lower_bound` 只加總分項齊全的主紀錄與配對到它們的補充紀錄。沒有分項齊全的主紀錄時，下限也寫 `null`。
+Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆鐘和四個分項、每筆補充紀錄都有主紀錄配對時，才填 `core_s`。缺 materialize 的舊 telemetry 或未走到階段的 `null` 都不補 0。配不到主紀錄的補充紀錄不計秒數或 acquire 次數，並使分項不完整。成功但分項不全的 `missing_breakdown` 列保留 Run 秒數，四個分項與 remainder 寫 `null`。分項不全或逾時時，`core_s` 寫 `null`，`core_s_lower_bound` 只加總分項齊全的主紀錄與配對到它們的補充紀錄。沒有分項齊全的主紀錄時，下限也寫 `null`。
 
 完整只表示現存 telemetry 的分項齊全。Writer 採盡力寫入；工具無法察覺整筆主紀錄或補充紀錄遺失。若該 Run 期間出現保留上限刪檔或寫入失敗的警告，不要用該列的 `core_s` 斷言達標。
 
@@ -201,6 +208,8 @@ Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆�
 Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`，再落盤 `run_failed` 列。該列記 Run 起點、收到失敗事件的時刻，以及 Controller 提供的錯誤類型與訊息。`failure_record` 是相對於該列 `case_directory` 的診斷檔路徑。失敗列不填 Run 或核心秒數。工具寫完該列才檢查 Controller 是否 idle；若仍有活動中的操作，就停止派送。摘要分別計數成功計時、`timeout` 與 `run_failed`。`Run failures` 按完全相同的 Controller 診斷分組，每組列出 adapter key 與診斷檔路徑。工具不推斷根因。
 
 若 Open 成功，但表單仍有錯誤（例如覆寫後還缺欄位或 slot），`missing_defaults` 列出錯誤，不送出 Run。報表中的「FTF 不能跑」是 `not_runnable`，只適用於[固定案例宣告](data/experiment_wall_time/case-inputs.json)明列排除的 adapter。工具寫下該列的原因，不複製 project，也不派送 Open 或 Run。缺初值不一定是排除，請看各列的原因。
+
+固定 FTF fixture 沒有 Q1 的快磁通線，也沒有 MG12 具名的共用 DC coil。`fastflux/{distortion/acc_phase,distortion/freq,distortion/phase,mist,t1,twotone}`、`twotone/reset/flux/{gain,length}`、`mux/{onetone_flux_global,twotone_flux_global}` 這十列的 `missing_defaults` 記為「缺 fixture 路由／校準，未量」，與「需上游輸出，未量」、JPA 無模型、逾時分開計數；不表示 FTF 不能跑這些實驗。要補，需同一 FTF 場景可追溯的 generator／loop 或共用 DC route、單位與校準，以及該實驗的正常輸入（例如 `fastflux/twotone`、`fastflux/distortion/freq` 另需 Q1 的 `kappa` 或有依據的掃頻窗）；示意係數（例如 `low-snr.yaml` 註解中的 gen1 `+0.02 Φ0/gain`）不算校準。
 
 固定案例列出兩類排除：六個 JPA 入口沒有模型或裝置；`two_qubit/rb`、`two_qubit/rb_heralded`、`two_qubit/cz_optimize` 在 `ftf-demo/initial` 缺 Open 所需的 Q1／Q2 有序 Local Z 配對 `$coupler.ext.cz_phase`。後三列需上游校準，未計時，不表示 FTF 不支援這些實驗。
 
@@ -228,11 +237,19 @@ uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
 
 缺 `materialize_s`、`core_s` 或 `core_s_lower_bound` 的舊 `row.json` 會讓重建以 exit 1 結束，不寫報表。請在 `batch.json` 記錄的 commit 執行 `--report-only` 重建舊報表。批次起迄與外層逾時看 `run_heavy.py` 的收據，不用來推算 Run 耗時。要補未派送或未完成的列，使用下方的續跑方式。
 
-續跑使用新的 `--output`，以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。新報表併入來源中已落盤的判定列；`--select` 只派送所選範圍內尚未判定的列。`timeout` 和 `run_failed` 都是已判定列，不會自動重跑。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`：
+續跑會派送 Run，仍由 `run_heavy.py` 配置 CPU slot、寫 log 和收據。以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。呼叫端也要沿用來源批次的 worker 數。工具不把 worker 數寫入 journal，也不檢查是否一致。請查來源收據的 `command`：有 `--workers 3` 就沿用 3，沒有 `--workers` 就用預設的 1。
+
+新報表併入來源中已落盤的判定列。`--select` 只派送所選範圍內尚未判定的列。`timeout` 和 `run_failed` 都是已判定列，不會自動重跑。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`。
+
+下例續跑來源使用 3 個 workers 的非排他批次。保留 `output` 為來源目錄，另設定新的絕對路徑 `continued_output` 及本次 payload 的秒數預算 `budget_s`。先建立 `continued_output` 的父目錄，並確認新輸出、log 和收據路徑未被使用。若來源未指定 worker 數，改用 `workers=1`；若來源停用了 OpenCL，沿用上例的 ICD 與 cache 設定。若來源是排他的批次，在協調的窗口為 runner 加上 `--exclusive`。
 
 ```bash
-uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
-  --resume-from "$output" --select mux --output "$continued_output"
+workers=3
+uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
+  --wait-limit 60 --log "$continued_output.log" "$budget_s" -- \
+  python -m tools.experiment_wall_time --resume-from "$output" \
+    --workers "$workers" --select mux --output "$continued_output" \
+  > "$continued_output.receipt.json"
 ```
 
 若要重跑已判定的失敗列，用 `--select` 指定該 adapter，另開新的 `--output`，不要帶入包含該列的 `--resume-from`。若已換 commit，使用新 commit 開新批次，不留用舊列。
@@ -1313,8 +1330,10 @@ those stages. The analyzer ignores supplemental `event: "materialize"` records
 when counting acquires and aggregating these three stages.
 
 A row contributes wall totals only when all four wall fields are JSON numbers.
-Missing or null wall fields make it excluded from wall totals, including in the
-unknown group. Included plus excluded across groups equals `records`.
+Missing or null values in those four fields exclude the row from wall totals,
+including in the unknown group. A failed acquire may not have reached a stage.
+A null `materialize_wall_s` alone does not exclude it: that stage is not part of
+this breakdown. The analyzer does not filter by `commit` or `dirty`. Included plus excluded across groups equals `records`.
 All valid main rows still count toward family statistics. Supplemental records
 do not contribute family statistics. Non-null `complete` accepts
 only JSON booleans. Non-null wall fields accept only JSON numbers, not booleans or

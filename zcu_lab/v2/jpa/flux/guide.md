@@ -1,25 +1,21 @@
-## Behavior
+**Readers:** operator, agent. Sweep the JPA DC bias and choose a measured setting using qubit readout separation.
 
-**Readers:** operator, agent. Calibrate the JPA flux device value from the GUI or MCP using g/e readout SNR. A pi pulse switches the qubit preparation between g and e. The run sweeps the JPA flux device value and measures the g/e SNR (a.u.) to find the value with the highest SNR. WARNING: this run commands the selected flux device on real hardware. Review that device and the sweep before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
+# JPA flux-bias sweep
 
-## Parameter sources
+Fix the pump RF frequency, power and output before Run. Each bias setting compares optional reset → no pulse → resonator readout (g) with optional reset → qubit π pulse → resonator readout (e).
 
-Uses the qubit (`qubit/*`), resonator and jpa (`amplifier/jpa`) aliases. The flux bounds use `$jpa.flux`. Opening the tab or choosing Defaults reads the optional JPA flux device from `$jpa.flux_dev`; a missing source leaves bias control disabled. The direct device name remains editable. `flux_unit` starts as A, and the device receives the entered values unchanged. Missing required calibration marks the form Invalid.
+## Set up the scan
 
-Relax delay starts at 1*T1 using the parameters captured when you open the tab or choose Defaults. T1 must be a finite positive real number; Boolean values count as invalid. Missing/null T1 or an unavailable parameter snapshot gives a 30 µs initial delay. An invalid stored T1 leaves the required wait field empty, and parameter-source failures report an error. Edit the delay in the form as needed; the stored T1 stays unchanged.
+Choose the qubit, resonator and JPA aliases, then choose **Defaults**. **JPA flux-bias source** starts from `$jpa.flux_dev`. If it is empty, the scan records nominal coordinates without changing the bias. **JPA bias unit** starts at A. Match the connected source to A, V or its native units. Sweep values are sent unchanged. **JPA flux-bias value** starts at `$jpa.flux` ± 0.005 in the chosen source unit, with 101 samples. Review the bounds and unit against the connected device before Run. These are source settings, not flux in units of Φ₀.
 
-The JPA flux axis and saved values use device-native `a.u.` without scaling. This label does not assert a physical current or voltage unit; review the selected device and `flux_unit` separately.
+Choose **Reps** for the shots per preparation and setting in each round, then **Rounds** for the number of such rounds. Defaults are 1000 × 10. The Analyze summary shows the Reps × Rounds from its source run. **Relaxation wait** starts at the qubit T1, or 30 µs if T1 is missing, and lets the system relax between shots. An invalid stored T1 leaves the wait blank; enter a calibrated delay.
 
-## Module slots
+Select **Qubit π pulse** from the qubit's X180 calibration and **Readout** from the resonator's readout calibration. Without a saved slot, Defaults uses the qubit RF frequency and drive channel for the π pulse, and the resonator frequency and readout channels for the resonator pulse. The readout trigger starts at the resonator flight time plus 0.015 µs. **Reset** is an optional pulse module before preparation. Leave it empty to rely on relaxation between shots.
 
-Module slots use `$qubit.module.x180`, `$resonator.module.readout` and optional `$qubit.module.reset`. Empty pi/readout slots use the pi_pulse/readout templates. The pi pulse uses `$qubit.freq` and `$qubit.wiring.ch`; readout uses resonator frequency/wiring and `$resonator.time_of_fly` + 0.015 µs. An empty reset slot disables reset. Missing calibration required by these templates marks the form Invalid.
+## Choose a bias
 
-## Typical writeback
+The separation SNR is the distance between the g and e IQ means divided by their pooled width along the line joining the means. **IQ shape penalty** defaults to zero. Increasing it downweights unequal widths or skew along that axis. The resulting g/e separation score (a.u.) is neither a state population nor an assignment fidelity.
 
-Analysis proposes the SNR-maximizing JPA flux device value as a draft for `$jpa.flux`, in `$jpa.flux_unit` coordinates. Accept the draft to update the stored parameter. Writeback changes stored calibration only; device settings and the current-source value stay unchanged.
+Live counts sampled settings and shots and connects the measured scores. Analyze retains the connected points, overlays a dashed Gaussian smooth with a standard deviation of one scan step, and marks the sampled bias where that smooth peaks. The smooth is not a fit. There are no pointwise shot-SEM bars; an SEM of mean IQ is not uncertainty in the score. If a loaded run lacks its cfg, the axis uses native units without assuming A or V.
 
-## Recommended
-
-Review the selected flux device and sweep bounds before every run. The seeded range around the current centre is only a starting point. Analyze smooths the g/e SNR with a Gaussian of one-sample standard deviation and selects the sampled bias at its peak.
-
-**Last updated:** 2026-11-01
+Use a complete scan taken with bias control. Check that the smoothed peak is near a feature in the measured dots and away from a scan edge. Repeat between its adjacent bias samples before accepting it. Subtract the old bias from the selected bias in the source unit to find the adjustment; a positive value increases the setting. Accepting the writeback updates `$jpa.flux` without changing the source value.

@@ -6,7 +6,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.artist import Artist
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as validated_dataclass
 from scipy.ndimage import gaussian_filter1d
@@ -63,8 +63,22 @@ class ZigZagScanCfg(ConfigBase):
     X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
     X180_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="X180 Pulse")] = None
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
-    freq: Annotated[SweepCfg | None, FieldMeta(label="Freq", unit="MHz")] = None
+    gain: Annotated[
+        SweepCfg | None,
+        FieldMeta(
+            label="Repeated gate gain",
+            unit="a.u.",
+            description="Sweep the signed gain of the repeated gate, not the initial X90.",
+        ),
+    ] = None
+    freq: Annotated[
+        SweepCfg | None,
+        FieldMeta(
+            label="Repeated gate RF frequency",
+            unit="MHz",
+            description="Sweep the RF carrier of the repeated gate, not the initial X90.",
+        ),
+    ] = None
     n_times: Annotated[
         int,
         FieldMeta(
@@ -104,6 +118,49 @@ class ZigZagScanCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ]
+
+
+def _live_plot(
+    plots: Plots,
+    times: NDArray[np.int64],
+    values: NDArray[np.float64],
+    *,
+    frequency: bool,
+    paired_x90: bool,
+):
+    """Present count-by-setting IQ and return the plot-thread update callback."""
+    fig, ax = plots.subplots(num="measurement")
+    scan_label = (
+        "Repeated gate RF frequency (MHz)" if frequency else "Repeated gate gain (a.u.)"
+    )
+    gate = "X90 pairs" if paired_x90 else "X180"
+    ax.set(
+        title=f"ZigZag sweep · {gate}",
+        xlabel=scan_label,
+        ylabel="Gate repetitions (count)",
+    )
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    ax.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+    heatmap = live_heatmap(ax, uniform=True)
+    ax.grid(False)
+    fig.colorbar(ax.images[0], ax=ax, label="IQ projection (a.u.)")
+
+    @plots.on_plot_thread
+    def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+        """Refresh the ZigZag parameter-sweep contrast map.
+
+        data is complex IQ shaped (repeat count, swept value).
+        Return the changed artists without modifying the input array.
+        """
+        measured = int(np.any(np.isfinite(data), axis=0).sum())
+        title = ax.set_title(
+            f"ZigZag sweep · {gate} · {measured}/{len(values)} settings"
+        )
+        real = zigzag_signal2real(data)
+        return (*heatmap.set(values, times.astype(np.float64), real.T), title)
+
+    fig.show()
+    return update
 
 
 class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
@@ -156,7 +213,6 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             x_sweep = cfg.gain
         else:
             raise ValueError("No sweep parameter found in cfg")
-        x_info = ZigZagScanExp.SWEEP_MAP[x_key]
 
         repeat_pulse = getattr(cfg, repeat_on)
         if repeat_pulse is None:
@@ -177,26 +233,13 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
                 x_sweep, "gain", {"soccfg": soccfg, "gen_ch": repeat_pulse.ch}
             )
 
-        # 2. Track mean IQ on the count-by-parameter grid.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Repetitions (count)", ylabel=x_info["name"])
-        formatter = ScalarFormatter(useMathText=True)
-        formatter.set_powerlimits((-2, 2))
-        ax.xaxis.set_major_formatter(formatter)
-        ax.yaxis.set_major_formatter(formatter)
-        heatmap = live_heatmap(ax, uniform=True)
-
-        @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            """Refresh the ZigZag parameter-sweep contrast map.
-
-            data is complex IQ shaped (repeat count, swept value).
-            Return the changed artists without modifying the input array.
-            """
-            real = zigzag_signal2real(data)
-            return heatmap.set(times.astype(np.float64), values, real)
-
-        fig.show()
+        update = _live_plot(
+            context.plots,
+            times,
+            values,
+            frequency=x_key == "freq",
+            paired_x90=repeat_on == "X90_pulse",
+        )
         signals_buffer = SignalBuffer(
             (len(times), len(values)),
             on_update=update,
@@ -283,26 +326,46 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         min_value = values[np.nanargmin(loss)]
 
         # 4. Relate the selected gain or frequency to repeat-count contrast and variation loss.
-        fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, sharex=True)
+        fig, _ = plots.subplots(
+            num="fit", nrows=2, ncols=1, sharex=True, layout="constrained"
+        )
         ax1, ax2 = fig.axes
 
         dx = (values[1] - values[0]) * 0.5
         dy = (times[1] - times[0]) * 0.5
-        ax1.imshow(
+        image = ax1.imshow(
             zigzag_signal2real(signals),
             aspect="auto",
             extent=(values[0] - dx, values[-1] + dx, times[0] - dy, times[-1] + dy),
             origin="lower",
-            interpolation="none",
+            interpolation="nearest",
+            cmap="RdBu_r",
         )
-        ax1.set_ylabel("Gate repetitions (count)")
-        ax2.plot(values, loss, marker=".")
+        ax1.grid(False)
+        cfg = source.cfg
+        if cfg is None:
+            scan_label, unit = "Repeated gate setting", ""
+            gate = ""
+        else:
+            unit = "MHz" if cfg.freq is not None else "a.u."
+            scan_label = (
+                "Repeated gate RF frequency (MHz)"
+                if cfg.freq is not None
+                else "Repeated gate gain (a.u.)"
+            )
+            gate = " · X90 pairs" if cfg.repeat_on == "X90_pulse" else " · X180"
+        fig.colorbar(image, ax=[ax1, ax2], label="IQ projection (a.u.)")
+        ax1.set(title=f"ZigZag sweep{gate}", ylabel="Gate repetitions (count)")
+        ax2.plot(values, loss, ".-", label="Smoothed IQ variation")
         ax2.axvline(
-            x=min_value, color="red", linestyle="--", label=f"x = {min_value:.3f}"
+            min_value,
+            color="red",
+            linestyle="--",
+            label=f"Minimum = {min_value:.5g} {unit}".rstrip(),
         )
-        ax2.grid(True)
         ax2.legend()
-        ax2.set_xlabel("Sweep value (a.u.)")
-        ax2.set_ylabel("Loss (a.u.)")
+        ax2.set(xlabel=scan_label, ylabel="IQ variation (a.u.)")
+        ax2.xaxis.set_major_locator(MaxNLocator(nbins=5))
+        ax2.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
 
         return ZigZagScanAnalysis(min_value=float(min_value))

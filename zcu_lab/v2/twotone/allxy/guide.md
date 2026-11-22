@@ -21,3 +21,9 @@ Analysis reports results for review; calibration stays unchanged. The summary re
 ## Recommended
 
 Analysis always fits the ground and excited levels together with the rotation and detuning errors. The measured range sets their starting values, but the fitted levels can lie outside it. Center is bounded to [min - ptp, max + ptp], where ptp is the measured signal range. Contrast keeps its initial sign and its magnitude is bounded to [0.5 * ptp, 3 * ptp]. The model does not include T1/T2 decay; check the residual before using its error estimates. Use many reps and rounds: each point is a single gate pair.
+
+## Reading the plots
+
+Both plots show projected mean IQ (a.u.) for each ordered gate pair. Error bars are one shot SEM along the plotted IQ axis: sample standard deviation of retained shots divided by the square root of their count. Mean-only files still load without bars. The live title reports retained shots per pair. The Analyze summary shows configured Reps × Rounds.
+
+Compare the three staircase levels and the fitted coherent-error model, not each pair's apparent population. The title lists the relative drive amplitude error and the fitted amplitude-induced and detuning-induced mean absolute deviations in Bloch z. The residual RMS is the data-to-model discrepancy in the same units. When residual RMS is comparable to these deviations, do not treat the fitted errors as an isolated diagnosis; check for decoherence or recalibrate readout and repeat.

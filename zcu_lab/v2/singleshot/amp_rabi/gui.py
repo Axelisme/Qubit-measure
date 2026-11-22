@@ -57,6 +57,13 @@ def _writeback(
     )
 
 
+def _summary_lines(source: SsAmpRabiRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds: {cfg.reps}×{cfg.rounds}",)
+
+
 def _run(
     cfg: AmpRabiCfg, *, context: RunContext
 ) -> RunRecord[AmpRabiCfg, AmpRabiResult]:
@@ -71,6 +78,7 @@ DEFINITION = Adapter(
     analysis=Analysis(
         fn=_analyze,
         options=lambda source, env: SsAmpRabiAnalyzeParams(),
+        summary_lines=_summary_lines,
         writeback=_writeback,
     ),
 )

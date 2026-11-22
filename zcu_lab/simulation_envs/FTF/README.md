@@ -102,17 +102,14 @@ MCP 先呼叫 `predictor.list_files` 發現檔案，再使用
 
 ## 工作副本與調參
 
+樣板更新不會自動改動既有的 `ftf.yaml`。要採用樣板的 projective 剪枝門檻，請從 [default.yaml](default.yaml) 或 [low-snr.yaml](low-snr.yaml) 讀取 `numerics.projection_weight_floor`。
+只更新工作副本中的這個欄位，保留其他設定，再重建模擬環境。
+
 要練習低 SNR 讀出，先備份既有工作副本，再把 [low-snr.yaml](low-snr.yaml) 複製成 `ftf.yaml` 並重建環境。
-它與 [default.yaml](default.yaml) 的唯一差別是把 pulse ADC 和兩個 mux receiver 的 `noise_psd_adc2_ns` 矩陣各乘 **84,000**。
-離線校準以 `singleshot/ge` 的 g/e 峰距除以沿兩峰連線的單一 blob 標準差。
-把兩份樣板在同一設定與 seed 下取得的 IQ 逐發相減，確認接收雜訊的 I/Q 共變異形狀與 PSD 一致。
-預設雜訊的 g 峰核心沿連心線有額外展寬，因此用 PSD 形狀將垂直方向的寬度換算到連心線方向。
-Q1 的 entry pulse readout 測得 SNR 由 110.97 降到 0.38。
-`ro_optimize/auto_optimize` 在 7189.78–7190.22 MHz、gain 0.10–0.25、RF 脈衝長度 5–10 us 內取樣，ADC 積分窗固定為 0.9 us。
-用 GE 複測校準候選後，最高 SNR 出現在 7189.8049 MHz、gain 0.24882、RF 脈衝長度 8.505 us，從 289.92 降到 1.01。
-用新樣板重跑 optimizer，另在其分數最高的設定複測得 SNR 1.02。
-這些結果只涵蓋上述範圍內量過的 Q1 pulse readout 設定，不是其他設定或通道的上限。
-`default.yaml` 改動時同步更新低 SNR 樣板；若變更影響讀出或雜訊，重跑校準。
+它與 [default.yaml](default.yaml) 的唯一差別是 pulse ADC 和兩個 mux receiver 的 `noise_psd_adc2_ns` 都從 `1.0` 改為 `84000.0`。
+這個數值是每個 I/Q 分量的雙邊白雜訊 PSD。I 和 Q 的雜訊獨立，變異數相同。
+保留既有 `ftf.yaml` 設定時，逐筆把舊 2×2 PSD 改成一個數字。兩個對角值相同時，保留原對角值；兩者不同時，指定要給 I 和 Q 共用的 PSD。Loader 拒絕舊矩陣並指出欄位。
+變更讀出或雜訊後，以 `singleshot/ge` 重新確認所用通道的 SNR。舊矩陣的校準結果不適用於等向設定。
 
 `default.yaml` 使用 `format: zcu.ftf`、整數 `version: 2`。V1 文件不能載入，不自動轉換既有工作副本，也不自動更新既有 entry。三個 DC 電源與校準位於 `dc_bias.sources`，樣板使用 A。環境每 round 讀取 live DC snapshot，保留靜態磁通掃描。`drive_lines` 的每條線以 `operator: charge | flux` 選電荷或固定 DC 小訊號磁通導數，省略為 charge。Flux operator 不是逐時重算 Hamiltonian 的大振幅 fast-flux 控制。
 

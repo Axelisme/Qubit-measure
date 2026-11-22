@@ -26,6 +26,10 @@
 
 優先取同一次 run 的 liveplot、Analyze 圖與摘要。記錄來源、run、擷取階段與條件供歸類時核對，別用這份擷取紀錄替產品補答案。若表單是 point 初值、liveplot 是低 reps probe、Analyze 圖又來自另一個保存 run，點數與訊號不同可能只是包組錯了。先核對來源；必要時重做同源讀者包再判 A 或 F。若產品沒有足夠的身分或設定讓操作員區分來源，仍記為 A。
 
+若家族驗收指定同一次 FTF Run，liveplot 的進度與末格、Analyze 圖與摘要都取自該次 Run。
+[離線 stage probe](../../tests/README.md#實驗定義) 可以獨立驗各階段，通過不等於完成 R0 讀者包。
+要確認 GUI 如何建立 Analyze options 和發布摘要，見 [共用 lifecycle hooks](gui-contracts.md#共用-lifecycle-hooks)。
+
 ### 派讀者並收答卷
 
 請一位懂實驗物理、沒看過該實作的 agent 只看讀者包。它不能讀程式碼（包含分析源碼）、包外文件或 raw data，也不能向作者確認答案。請它用自己的話交下列五節，無法確定時寫「不知道」並指出缺少什麼；不要把猜測寫成答案。
@@ -70,6 +74,7 @@
 
 - 壞例：只畫 fit，或用同一組 marker 畫模型與資料。
 - 好例：Ding 圖 5-13(b)（頁 157）可直接對照 RB 的量測點與模型線。本地作圖時，分列各組的量測與模型 legend，並用至少 200 點算模型線，讓模型網格不受量測點疏密限制。
+- 頻譜要先選峰再畫 fit 時，用 [fitting 的 Peak candidates](../../lib/zcu_tools/analysis/fitting/README.md#peak-candidates) 對照 `twotone/freq` 的局部策略與 `twotone/chain` 的預設策略。
 
 ### R3：結果寫在圖上
 
@@ -110,16 +115,24 @@ I、Q 軸每個資料單位使用相同的像素距離。調整顯示尺寸時�
 
 ### R7：用 GUI 與存檔的實際尺寸檢查版面
 
-在 GUI 各頁面以實際顯示尺寸看圖，也按存檔 PNG 的實際尺寸檢查。面板不是固定格子，Save 頁面較窄。字級跟著顯示尺寸縮放，最小字級 10 pt。tick 標籤不能重疊，legend 不能蓋資料。一張圖最多 6 個 panel。
+在 GUI 各繪圖頁以實際顯示尺寸看圖。字級跟著顯示尺寸縮放，最小字級 10 pt。tick 標籤不能重疊，legend 不能蓋資料。一張圖最多 6 個 panel。
 
-Data／Save 頁的縮圖只用來選圖。按 `View figure` 打開閱讀面，再依 R7 檢查；放不下整張圖時捲動查看，不縮小字級。
+Data 頁的縮圖只用來選圖。按 `View figure` 在 Data 頁打開閱讀面，不會存檔。按閱讀面的實際尺寸檢查。放不下整張圖時捲動查看，不縮小字級。閱讀面由 [Measure〈Figure presentation〉](../../lib/zcu_tools/gui/app/measure/README.md#figure-presentation) 說明。
+Run Save 只保存資料。另開所有匯出的 PNG，包含 Analysis 與 Post-analysis 匯出的圖，逐張按 PNG 的實際尺寸檢查。
 
-- 壞例：放大 Run 頁才讀得清楚，切到較窄的 Data 頁，打開 `View figure` 後仍讀不清 tick 標籤；存檔後 colorbar 又擠到標題。
+- 壞例：放大 Run 頁才讀得清楚。在 Data 頁打開 `View figure` 後仍讀不清 tick 標籤，存檔 PNG 的 colorbar 又擠到標題。
 - 好例：Ding 圖 5-7（頁 150）的四分支分成 2×2 panel。採用這種分組後，仍要在 GUI 和匯出的 PNG 核對字級、tick、legend 與資料位置。
 
 ### R8：圖型對應資料，liveplot 標明進度
 
-離散結果分布用長條圖，連續掃描用點加 fit 線，二維掃描用熱圖。liveplot 讓讀者看出哪些部分已取完、累積多少 shots、目前估計值。liveplot 可連接量測點來顯示進度。
+離散結果分布用長條圖，二維掃描用熱圖。liveplot 讓讀者看出哪些部分已取完、累積多少 shots、目前估計值。
+
+Run 和 Analyze 的一維掃描用相同規則：沒有擬合曲線，就用折線連接量測點；有擬合曲線，量測資料只畫點和可用的誤差棒，只有擬合曲線用實線。類別軸（例如 gg、ge、eg、ee 或 AllXY gate 名稱）的量測點不連線。這條規則不適用於 IQ 散點和二維圖。
+
+Wrapped phase 的折線只連掃描順序中相鄰的有效點。圖上角度相差大於 180° 時，線會跨過分支切口；恰為 180° 時，無法判定方向。兩種情況都斷開該線段，保留兩個點和既有誤差棒。缺值也要斷線，不補插值點。
+
+- Rabi 的 live 圖用點、折線和 shot SEM。Analyze 加上擬合曲線後，量測資料只留點和 shot SEM。
+- Local Z 的 live 圖用點和折線顯示 X/Y 投影隨 CZ gate 數的變化。Analyze 的相位圖已有線性擬合，因此量測相位只畫點。
 
 曲線圖沿用[共用樣式](../../lib/zcu_tools/plotting/experiment.mplstyle)的 `axes.grid: True`，不另外呼叫 `grid()`。影像與熱圖在 liveplot 和 Analyze 都明確呼叫 `grid(False)`。
 
@@ -129,6 +142,7 @@ Data／Save 頁的縮圖只用來選圖。按 `View figure` 打開閱讀面，�
 ### R9：liveplot 與 Analyze 盡量一致
 
 能共用就沿用相同的量、座標軸、軸標、單位、圖型與顏色。相同的量測點用同樣的 marker，同一張熱圖用同樣的 colormap。Analyze 第一張圖以 liveplot 最後一格為底，疊上 fit 與結果標註。其他 Analyze 圖依 R1 說明各自支援的判斷。
+GUI 依 adapter 的 [capability](gui-contracts.md#capability-宣告與實作) 決定是否建立 Analyze 控制項。
 
 - 壞例：同次 Ramsey 的 liveplot y 軸寫 `Real Signal`，Analyze 先開殘差圖，再另以 `Signal (a.u.)` 畫原訊號。
 - 好例（本地示例）：liveplot 與第一張 Analyze 圖都以自由演化時間 (µs) 為 x 軸、IQ 實部 (a.u.) 為 y 軸，量測點樣式相同。Analyze 疊上擬合與 T2*，另用診斷圖判斷殘差是否有系統偏差。
@@ -142,11 +156,11 @@ Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summar
 - 壞例：Ramsey 圖標題塞了 run id 和初始設定，摘要卻只重複表單初值，沒寫實驗回傳的實際 detune。
 - 好例（本地改寫示例）：圖上只保留判讀條紋和 T2* 需要的量與標註。同次 Analyze 摘要在實驗名與 run id 旁列「Reps×Rounds 1000×10；實際 detune 0.400 MHz」。Ding 圖 5-9(e)（頁 152）的相位圖集中在判讀所需的 180° 參考線與候選頻率。
 
-### R11：對數值大小敏感的一維資料畫 error bar
+### R11：有 shot SEM 的一維資料畫 error bar
 
-Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二維圖不畫逐點 error bar。其他實驗依同一判準決定，並在 guide 寫明 error bar 的來源。
+已有 shot SEM 的一維系列畫逐點 error bar，包括用來判讀峰位的 spectrum。二維圖不畫逐點 error bar。Guide 寫明 error bar 的來源。
 
-逐點 shot SEM 估計該點平均值的標準差，代表這個平均值的預期誤差。shot SEM = 每發樣本標準差 ÷ √(保留 shot 數)。被 mask 的 shot 不算。它不是單發散布 σ、輪間散布或 fit 參數誤差。RB 的跨 seed 標準差也不是 shot SEM。估計器在 [`zcu_tools.analysis`](../../lib/zcu_tools/analysis/README.md)。只存平均的實驗在家族修正時新增二階 moment 欄位。舊檔仍可 Load，缺少估計所需資料時不畫 error bar。
+逐點 shot SEM 估計該點平均值的標準差，代表這個平均值的預期誤差。shot SEM = 每發樣本標準差 ÷ √(保留 shot 數)。被 mask 的 shot 不算。它不是單發散布 σ、輪間散布或 fit 參數誤差。RB 的跨 seed 標準差也不是 shot SEM。估計器在 [`zcu_tools.analysis`](../../lib/zcu_tools/analysis/README.md)。只存平均或舊檔缺少估計所需資料時不畫 shot SEM。不為了套用連線規則改存檔格式；需要二階 moment 時留到家族取數修正。
 
 - 壞例：T1 只報 `T1 = 80 ± 5 µs`，不顯示每個量測點的不確定度。
 - 好例：Rabi 的逐點布居用 shot SEM 畫 error bar。Ding 圖 5-13(a)（頁 157）的 CZ fidelity 對脈衝寬度圖可作逐點誤差棒的版式參考；圖 5-8(b)（頁 151）的二維掃描則用熱圖。
@@ -204,7 +218,9 @@ Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二�
 用一句短句寫填什麼、單位（如適用）與來源（如前置實驗），必填欄位用「填入 …」開頭。只在 label 看不出來時補寫效果，例如頻率是 RF、IF 還是相對量，選項開關做什麼，或留空代表什麼。推導、理由和操作步驟留在 guide。
 
 - 壞例：`Frequency` 的說明只寫「頻率」；`Mixer freq` 的說明沒有交代留空的意思。
-- 好例：Ramsey 的必填 `Pi/2 Pulse` 寫「填入經 Rabi 校準的 π/2 脈衝。」two-tone 的 RF 掃描起點寫「填入驅動 RF 頻率 (MHz)。」可選的 `Mixer freq` 寫「指定混頻器頻率 (MHz)，留空表示不經 mixer。」
+- 好例：Ramsey 的必填 `Pi/2 Pulse` 寫「填入經 Rabi 校準的 π/2 脈衝。」two-tone 的 RF 掃描起點寫「填入驅動 RF 頻率 (MHz)。」若 generator 不要求填寫數位 mixer 頻率，`Mixer freq` 可寫「指定數位 mixer 頻率 (MHz)，留空表示不設定數位 mixer。」
+
+留空不會關閉外部 LO；需要數位 mixer 的 generator 必須填值。見 [Program 的 Readout configuration](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration)。
 
 ### F4：module 與 slot 寫出序列中的角色
 
@@ -239,7 +255,7 @@ Ding 博論有相近的圖時，以「版式參考」引圖號和印刷頁碼。
 
 ### Gd3：解釋誤差棒與 fit 品質
 
-依 [R11](#r11對數值大小敏感的一維資料畫-error-bar) 寫明 error bar 的來源。依 [R3b](#r3b結果旁寫-fit-品質) 解釋 core 或分析已回傳的品質指標。有既有判準才列出判準，guide 不另訂門檻。
+依 [R11](#r11有-shot-sem-的一維資料畫-error-bar) 寫明 error bar 的來源。依 [R3b](#r3b結果旁寫-fit-品質) 解釋 core 或分析已回傳的品質指標。有既有判準才列出判準，guide 不另訂門檻。
 
 - 壞例：「誤差如圖，R² 越大越好。」讀者不知道誤差棒來自哪裡，也不知道分析如何使用 R²。
 - 好例：reference RB 寫「每個 Clifford depth 的誤差棒是跨 seeds 的一個樣本標準差，不是平均值的標準誤。」T2 Echo 可寫「R² 是擬合所用量測點的決定係數；R² 低於 0.9 時，寫回候選不會預先勾選，須人工審查。這是既有的選取條件之一。」

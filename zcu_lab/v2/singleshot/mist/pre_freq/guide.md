@@ -50,4 +50,11 @@ Old files storing `signals` instead of `counts` are unsupported. Load reports
 the missing `counts` variable. Acquire a new run; Load does not convert stored
 fractions to counts.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+Read the three populations against preparation RF frequency.
+Each bar shows ±1 shot SEM for that fraction, estimated from the G/E/Other counts at that frequency. Run shows classified fractions. When Analyze corrects the fractions, it propagates the sampling covariance through the linear confusion-matrix correction. Bars describe uncertainty of the mean from shot sampling, not scatter between rounds or uncertainty of a fitted peak. Fewer than two shots or missing counts leave the SEM undefined, so those points have no bar.
+
+If a feature hits the frequency limit, use its RF frequency as the new center and extend the scan until the neighboring baseline is visible.
+
+**Last updated:** 2026-11-22

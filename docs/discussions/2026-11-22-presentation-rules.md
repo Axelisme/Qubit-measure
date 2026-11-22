@@ -63,3 +63,5 @@ R12、R13、F1、F3／F4、Gd2 沒有使用者直接定下的原話。這些條�
 ## 依據
 
 裁決日期與使用者原話見 [ADR-0069〈呈現規範〉](../adr/0069-experiment-core-and-frontends.md#呈現規範)。使用者的原始問答、讀者包與逐圖對照紀錄未入庫；本篇保留用於比較的事實。Leon Ding 的 MIT 物理博士論文 *Novel Gates with Superconducting Fluxonium Qubits*（2023）的對應圖號與印刷頁碼列在[實驗呈現指南](../../zcu_lab/v2/figure-style.md)。
+
+後記（2026-11-22）：後續裁決取消峰位 spectrum 的 shot SEM 例外，保留二維圖的例外。見[量測點何時連線與 spectrum 的 error bar](2026-11-22-data-point-lines.md)。

@@ -119,7 +119,7 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 
 `/tmp` 是 RAM-backed tmpfs，不讓平行 lanes 共用具名路徑。
 
-`.agent_state/` 最上層只有 `plans`、`maps`、`archives`、`worktrees`、`backlog`、`measurement-tasks`、`ratchet`、`benchmark` 與 `quality`，不放散檔，也不放沒有主人的 scratch。調查與研究的產出放在提出問題的 task 或 map 的 scratch；要留存的寫成討論紀錄。每個 worktree 有主人與移除時機：票的 lane 在收票或放棄時、integration 在落地後、spike 在報告被接受時、小修改在合併後。移除包含 worktree、分支與空掉的上層目錄。保留下來的證據以能重新核對結論為準，原始大檔在 task 封存時刪除。
+`.agent_state/` 最上層只有 `plans`、`maps`、`archives`、`worktrees`、`backlog`、`measurement-tasks`、`ratchet`、`benchmark` 與 `quality`，不放散檔，也不放沒有主人的 scratch。調查與研究的產出放在提出問題的 task 或 map 的 scratch；要留存的寫成討論紀錄。每個 worktree 有主人與移除時機：票的 lane 在收票或放棄時、integration 在落地後、spike 在報告被接受時、小修改在合併後。移除包含 worktree、分支、設定 `PYTHONPYCACHEPREFIX` 時其下對應該 worktree 絕對路徑的 bytecode 目錄，與空掉的上層目錄。保留下來的證據以能重新核對結論為準，原始大檔在 task 封存時刪除。
 
 ### 5. 完成前驗證
 
@@ -169,7 +169,7 @@ Module `README.md` 專指 `lib/` 與 `tests/` 子目錄中的高層 cheat-sheet�
 - **判斷依據。** 讓讀者從文件找到會影響判斷的事實：是什麼、由誰負責、為何如此。要追到實作時，連到程式碼或寫明可 grep 的名稱。例如，lab-author 從 [`experiment-authoring.md` 的存檔軸段](zcu_lab/v2/experiment-authoring.md#存檔軸用關鍵字固定座標不塞進-result)找結果格式；需要判斷舊檔的 cfg 相容性時，入口指向 [ADR-0069〈Cfg 欄位改名與 schema 版本〉](docs/adr/0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。
 - **橫向互指。** 一個模組的契約依賴另一個模組的定義時，從雙方的契約段落互連到對應段落。例如，FTF environment、ADC 與 Program simulation 在各自說明 integrated statistics 的段落互指，讓讀者直接對照環境產出的統計、ADC 的邊際計數與 Program 消費的統計格式。
 - **限定語。** 同一詞在不同模組代表不同資料時，每個模組在自己的文件寫明限定語或固定搜尋詞。例如，`joint` 可以指 FTF 的 herald history × terminal state 聯合分布，也可以指 `two_qubit/joint_readout` 的雙 qubit IQ 聯合分類；ADC 的 per-event marginals 則是各讀取事件的邊際計數。
-- **實測數字。** 文件引用實測得到的耗時、誤差或計數時，在數字旁標明量測所用的 commit。一般常數照常引用。例如，比較 Gaussian 與 constant gate 序列的實測耗時時，若表內數字來自同一次量測，在表旁標一次 commit 即可。
+- **實測數字。** 文件與 agent 工作檔（dossier、決策、spec、dispatch、報告）引用實測的耗時、誤差、計數或 telemetry 值時，在數字旁標明量測 commit、輸入或設定，以及範圍：單輪或總和、實測或外推。一般常數照常引用。數字要驅動派工、裁決或驗收前，先執行 `git log <commit>..HEAD -- <被測路徑>`；有改動就先重量，或寫明改動為何不影響這個數字。`complete=false` 的 telemetry 列中，未走到的階段可能記為 0 或空值，不代表耗時為零。引用過去裁決或驗收的狀態前，先搜尋其編號，確認沒有被後續決策取代。例如，引用 chain_freq 的 materialize 時寫「325 s（`4a2dea8`，11 點、187 輪總和）」；`git log 4a2dea8..HEAD -- lib/zcu_tools/simulate/adc` 列出 `b6bdb8024`，就先重量再派優化。
 - **Grep 橋接。** 動態組出的持久名稱若能列舉，就在組字串的程式旁以註解列出完整名稱。含 hash 等無法列出全名的名稱，則寫明可 grep 的固定前綴。例如，two_qubit 用 `cz_{role}` 組出 `cz_qubit1` 與 `cz_qubit2`，就在組字串處列出這兩個 slot 名，讓人用完整名稱搜到產生處。
 - **調查筆記。** 調查或裁決時，在 map 內照該 map 的 Standing order 記筆記。在 map 外，只用現有的 `candidate-backlog` 登記範圍外的文檔組織發現，將 `area` 設為 `doc-organization`。記下觀察、可重現的證據（如檔案路徑或搜尋詞）、對查找的影響與想取得的結果。沒有該 skill 時，在回報中附上這些欄位與 `area`，交由 backlog owner 登記。例如，FTF 的 integrated statistics 只連到 ADC README 開頭時，記下兩邊的段落與 ADC 的 `ProjectionChain` 搜尋詞，說明讀者無法直接對照契約，希望連結直達對應段落。
 - **重構時機。** 在 map 內照該 map 的 Standing order 彙整。在 map 外，從上次彙整起計算 `doc-organization` 候選項，依既有的 task 納入紀錄排除已彙整的項目。累積 5 筆候選項，或同一類缺陷出現 2 次時，交由負責排程的人彙整成一個文檔重構 task。一起修具體文件與這類查找的規範或搜尋詞。驗收時重走觸發筆記的查找路徑，確認能從 README 連結、ADR 索引或寫明的 grep 詞找到所需事實。例如，integrated statistics 有兩處缺契約互指，就一起補；從 ADC 的契約段落應能直達 FTF 與 Program 的對應段落。

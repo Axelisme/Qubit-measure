@@ -354,7 +354,6 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             title=f"{_TITLE}\nWaiting for retained shots",
         )
         viewer = live_errorbar(ax)
-        ax.lines[0].set(linestyle="none")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         fig.show()
 
@@ -472,17 +471,17 @@ def _plot_first_return(
     """Overlay the existing cosine fit and selected first return on shot SEM points."""
     fig, ax = plots.subplots(num="terminal_gg", figsize=(7, 4.8), layout="constrained")
     fit = terminal.fit
+    finite = np.isfinite(fit.curve)
     cov = class_probability_covariance(terminal.data.counts.reshape(-1, 9))
     ax.errorbar(
         scales,
         terminal.data.probabilities[:, 0, 0],
         yerr=np.sqrt(cov[:, 0, 0]),
-        fmt=".",
+        fmt="." if finite.any() else ".-",
         markersize=5,
         color="C0",
         label="Measured ± shot SEM",
     )
-    finite = np.isfinite(fit.curve)
     if (
         fit.period is not None
         and fit.offset is not None
@@ -546,7 +545,7 @@ def _plot_joint_outcomes(
                 scales,
                 data.probabilities[:, i, j],
                 yerr=errors[:, i, j],
-                fmt=".",
+                fmt=".-",
                 color=_OUTCOME_COLORS[i][j],
                 label=f"P({_OUTCOMES[i]},{state})",
             )

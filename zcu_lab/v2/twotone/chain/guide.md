@@ -49,10 +49,11 @@ Stop the run when the peaks are clear. Stop keeps the sums of completed rounds. 
 Analysis recomputes the sigma curve from the saved sums and fits one peak with the shared numerical spectrum fitter.
 This experiment retains its own options: `expected_center_mhz` selects the nearest candidate, blank selects the most prominent, and `min_prominence`, `min_snr`, `min_width_samples` and `min_distance_mhz` gate the candidates.
 The fit window ends halfway to neighbouring candidates and needs at least six samples.
+If it spans at most half the measured scan, the overview shades it and a second panel shows the fit and measured points in that window.
 The local-maximum selection and six-half-width window of `twotone/freq` do not apply here.
 Keep `model_type` at `lor`; the sigma curve is never negative, so it cannot show the opposite-signed sidelobes that the `sinc` model fits.
-The `fit` plot shows the sigma curve, the dashed level, the fitted peak, the fitted centre in red and the other candidates in dotted gray.
-The summary reports `freq`, `freq_err`, `fwhm`, `fwhm_err` in MHz, the `level` in sigma and the candidates in `peaks`.
+The fit uses the same RF frequency and evidence-above-background axes as Run. The dashed gray line is the 5% false-mark level; gray triangles show any other candidates and the dotted fit-color line marks the fitted center. Candidate SNR shows the chosen peak's height above the median divided by the estimated noise sigma, not the likelihood that the fitted model is correct.
+Read **Peak center** and **Sigma-peak FWHM** in MHz with their fit errors. The result also reports the 5% false-mark level in σ and candidates. The acquisition summary shows Reps × Rounds from the saved cfg. Run counts retained dwells per RF point separately. The ordinate is a significance statistic computed from pooled moments. The record has no pointwise shot SEM for this statistic.
 The FWHM of a sigma peak approximates the line width. A weak line reads narrower, because points whose distance stays below the noise floor contribute zero sigma.
 A sweep with no candidate above the thresholds produces an analysis failure; the live plot and the saved sums remain.
 
@@ -67,7 +68,7 @@ Loading the file and recomputing the curve gives the same sigma values as the li
 ## MCP recipe
 
 `twotone_chain` requires `center_mhz`, `span_mhz` and `points`.
-Span must be positive and points must be at least 2; points maps to frequency Expts.
+Span must be positive and points must be at least 2; points maps to **Probe RF frequency › Expts** (count).
 `reps` and `rounds` set the fast sweeps per round and the round count.
 `expected_center_mhz` selects the peak to fit; null fits the most prominent.
 The recipe runs, analyzes and saves. It never asks for writeback.

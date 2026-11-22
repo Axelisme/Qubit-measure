@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -45,17 +46,64 @@ def acc_phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class AccPhaseCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    pi2_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="µs")]
-    phase: SweepCfg
-    readout_t: float
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the reset module before each shot, or leave it disabled.",
+        ),
+    ] = None
+    flux_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Flux pulse",
+            description="Enter the flux transient to characterize; its pre-delay places the leading edge.",
+        ),
+    ]
+    pi2_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="π/2 pulse",
+            description="Enter a calibrated π/2 pulse for Ramsey preparation and projection.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated resonator readout used after the second π/2 pulse.",
+        ),
+    ]
+    length: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="First π/2 wait",
+            unit="µs",
+            description="Enter the waiting time before the first π/2 pulse starts.",
+        ),
+    ]
+    phase: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Projection phase",
+            unit="deg",
+            description="Enter the carrier phase of the second π/2 pulse.",
+        ),
+    ]
+    readout_t: Annotated[
+        float,
+        FieldMeta(
+            label="Minimum projection wait",
+            unit="µs",
+            description="Enter the minimum time before the second π/2 branch can start.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the number of shots per scan point in each round.",
         ),
     ]
     rounds: Annotated[
@@ -63,7 +111,7 @@ class AccPhaseCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of times to acquire and average the full scan.",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -72,7 +120,7 @@ class AccPhaseCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the time for relaxation after each shot.",
         ),
     ]
 
@@ -117,17 +165,24 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
 
         # 2. Show the acquired wait-by-phase response.
         # Keep one mean IQ value for each wait/projection-phase pair.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (µs)", ylabel="Phase (deg)")
-        formatter = ScalarFormatter(useMathText=True)
-        formatter.set_powerlimits((-2, 2))
-        ax.xaxis.set_major_formatter(formatter)
-        ax.yaxis.set_major_formatter(formatter)
+        centers = lengths + float(pi2_pulse.waveform.length) / 2
+        fig, ax = context.plots.subplots(num="measurement", layout="constrained")
+        fig.suptitle("Fast-flux transient · Qubit · Accumulated phase")
+        ax.set(xlabel="First π/2 pulse center (µs)", ylabel="Projection phase (deg)")
+        ax.set_title(f"0/{centers.size * phases.size} scan points with IQ")
+        ax.grid(False)
         viewer = live_heatmap(ax)
+        (image,) = viewer.set(
+            centers, phases, np.full((centers.size, phases.size), np.nan)
+        )
+        fig.colorbar(image, ax=ax, label="Mean IQ real projection (a.u.)")
 
         @context.plots.on_plot_thread
-        def update(data):
-            return viewer.set(lengths, phases, acc_phase_signal2real(data))
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Display available IQ on the scan grid without changing the buffer."""
+            count = np.count_nonzero(np.isfinite(data))
+            title = ax.set_title(f"{count}/{data.size} scan points with IQ")
+            return (*viewer.set(centers, phases, acc_phase_signal2real(data)), title)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -211,34 +266,32 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         )
 
         # 3. Compare the measured response with the ideal flux timing.
-        fig, _ = plots.subplots(
-            num="fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True
+        fig, ax = plots.subplots(num="fit", layout="constrained")
+        fig.suptitle("Fast-flux transient · Qubit · Accumulated phase")
+        ax.set(xlabel="First π/2 pulse center (µs)", ylabel="Projection phase (deg)")
+        ax.grid(False)
+        (image,) = live_heatmap(ax).set(lengths, phases, real_signals)
+        fig.colorbar(image, ax=ax, label="Mean IQ real projection (a.u.)")
+
+        fig, ax = plots.subplots(num="detuning", layout="constrained")
+        fig.suptitle("Fast-flux transient · Qubit · Detuning response")
+        ax.set(xlabel="First π/2 pulse center (µs)", ylabel="Detuning (MHz)")
+        ax.plot(lengths, detunes, "k.-", label="Phase-derived detuning")
+        ax.plot(
+            ideal_lengths, ideal_curve, color="green", label="Rectangular reference"
         )
-        ax1, ax2 = fig.axes
-        ax1.imshow(
-            real_signals.T,
-            extent=(lengths[0], lengths[-1], phases[0], phases[-1]),
-            aspect="auto",
-            interpolation="none",
-            cmap="RdBu_r",
+        edge_half_width = pi2_len / 2
+        ax.axvspan(
+            start_t - edge_half_width,
+            start_t + edge_half_width,
+            color="gray",
+            alpha=0.25,
+            label="Pulse overlaps edge",
         )
-        ax1.set_ylabel("Phase (deg)")
-
-        ax2.plot(ideal_lengths, ideal_curve, "g-", label="Ideal")
-        ax2.plot(lengths, detunes, ".-")
-        ax2.set_ylabel("Detune (MHz)")
-        ax2.set_xlabel("Wait Time (µs)")
-
-        ax2.axvspan(
-            start_t - pi2_len / 2, start_t + pi2_len / 2, color="gray", alpha=0.3
+        ax.axvspan(
+            end_t - edge_half_width, end_t + edge_half_width, color="gray", alpha=0.25
         )
-        ax2.axvspan(end_t - pi2_len / 2, end_t + pi2_len / 2, color="gray", alpha=0.3)
-        ax1.axvline(start_t, color="black", linestyle="--")
-        ax1.axvline(end_t, color="black", linestyle="--")
-
-        ax2.legend()
-
-        fig.tight_layout()
+        ax.legend(loc="upper left", bbox_to_anchor=(0, -0.15), ncols=2)
 
         # 4. Return phase and detuning on the pulse-center time axis.
         return AccPhaseAnalysis(

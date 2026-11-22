@@ -35,10 +35,6 @@ from zcu_lab.v2.singleshot.ge.core import (
     GEPostAnalyzeOptions,
 )
 from zcu_lab.v2.singleshot.ge.form import make_form
-from zcu_lab.v2.support.singleshot.center_quality import (
-    GE_CENTER_ERROR_PATHS,
-    ge_center_relative_error_reasons,
-)
 
 GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
 
@@ -99,15 +95,40 @@ class GEPostSummary(BaseModel):
     )
 
 
+def _center_error_reasons(quality: FitQuality) -> list[str]:
+    """Report center measurements that fail or cannot support the gate."""
+    reasons: list[str] = []
+    limit = 0.5
+    for name, label in (("sg", "g-center"), ("se", "e-center")):
+        path = f"relative_parameter_errors.{name}"
+        issues = [
+            f"joint {issue.path}: {issue.reason}"
+            for issue in quality.invalid
+            if issue.path == path
+        ]
+        reasons.extend(issues)
+        error = quality.relative_parameter_errors.get(name)
+        if error is None or not math.isfinite(error):
+            reasons.append(f"relative {label} error unavailable (required <={limit})")
+        elif issues:
+            reasons.append(f"relative {label} error={error} (required <={limit})")
+        elif error > limit:
+            reasons.append(f"relative {label} error={error} >{limit}")
+    return reasons
+
+
 def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
-    """Explain manual selection for single/mux GE model-derived calibrations.
+    """Explain manual selection for single-shot GE model-derived calibrations.
 
     The primary analysis's joint histogram fit must have r2 >=0.9, normalized
     residual RMS <=0.1, relative width (s) error <=0.5, and relative center
-    errors (sg and se) each <=0.5. The note names failed thresholds and missing
-    or nonfinite metrics. Invalid issues for required metrics also prevent
-    preselection; unrelated fixed-zero parameter issues do not. None means
-    these checks passed, not that pure-state readout fidelity was established.
+    errors (sg and se) each <=0.5. A required metric blocks preselection if it
+    is missing, nonfinite, or itself marked invalid. For a finite center error
+    marked invalid, the note gives the reason, value, and required limit.
+    An issue on standard_errors.sg or standard_errors.se alone does not block
+    preselection. A relative center error of 0.0 does not establish center
+    precision. None means these checks passed, not that preparation or
+    pure-state readout fidelity was established.
     """
     quality = None if primary.fit_quality is None else primary.fit_quality.get("joint")
     if quality is None:
@@ -115,8 +136,7 @@ def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
     reasons = [
         f"joint {issue.path}: {issue.reason}"
         for issue in quality.invalid
-        if issue.path in GE_CENTER_ERROR_PATHS
-        or issue.path
+        if issue.path
         in {"r2", "normalized_residual_rms", "relative_parameter_errors.s"}
     ]
     if quality.r2 is None or not math.isfinite(quality.r2):
@@ -133,7 +153,7 @@ def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
         reasons.append("relative width error unavailable")
     elif width_error > 0.5:
         reasons.append(f"relative width error={width_error:.4g} >0.5")
-    reasons.extend(ge_center_relative_error_reasons(quality))
+    reasons.extend(_center_error_reasons(quality))
     return "Review required: " + "; ".join(reasons) if reasons else None
 
 

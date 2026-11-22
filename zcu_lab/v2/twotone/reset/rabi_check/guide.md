@@ -1,8 +1,6 @@
-## Behavior
+**Readers:** operator, agent. Compare three sequences at every Rabi gain. After optional preparation reset, apply the gain-swept Rabi pulse; then either read out, apply the tested reset and read out, or apply the tested reset and a second pulse at the same gain before readout.
 
-**Readers:** operator, agent. Reset Rabi check: sweeps the initialisation (rabi) pulse gain and acquires three branches at each gain: the Rabi pulse alone, Rabi followed by the tested reset, and Rabi followed by the tested reset and another Rabi pulse at the same swept gain. Fits the before-reset frequency and uses it for all branches, adding a second harmonic after reset. Reports half peak-to-peak amplitudes, relative contrast, phases, reset-only residual oscillation and residual RMS on one shared IQ axis. These averaged-readout diagnostics describe contrast and oscillation. Reset fidelity requires a separate state-preparation validation. Runs on real hardware.
-
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-22
 
 ## Parameter sources
 
@@ -13,6 +11,18 @@ Open and Defaults capture the T1 used for starting values. A missing or null T1,
 ## Module slots
 
 Rabi pulse uses `$qubit.module.x180` or a fresh pi_pulse template. Tested reset uses `$qubit.module.reset` or a fresh pulse-reset template; saved reset families remain selectable. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+
+## Acquisition and figures
+
+Reps starts at 1000 per sweep point and branch in each acquisition round; Rounds starts at 10. Check the requested Reps × Rounds in Analyze before comparing runs.
+
+Live and the three fit panels use the principal IQ axis of the before-reset branch (raw I if it is unavailable). Comparing the three mean curves shows how much the tested reset erases the first rotation before the second one. The projected IQ is not a population. Each vertical bar is the per-point shot SEM: sample standard deviation along that same IQ axis divided by the square root of the retained shot count. It measures uncertainty of the mean, not shot scatter or fit-parameter uncertainty. Files saved before shot moments were recorded still load and show points without bars.
+
+In the three fitted Analyze panels, points mark measured means and solid lines show the models. All branches use the before-reset frequency f. The reset-plus-Rabi model adds a 2f term. Read branch amplitudes in a.u., f in cycles/a.u., and the after/before amplitude ratio in a.u. The latter is relative contrast, not fidelity. In the residual panel, each point subtracts the model's IQ from the measured IQ at the original drive gain. The lines join these points in gain order, with the same shot SEM as the measured means. RMS gives the typical residual size (a.u.). A structured residual can reveal oscillations not captured by the model. There is no automatic fit threshold for writeback. Phase estimates for a weak fundamental may be unavailable; an unavailable phase is not a zero offset.
+
+A usable reset has small residual oscillation in the reset-only branch and recovers contrast in the reset-plus-Rabi branch. Compare the tested settings using their before-normalized contrast and the residual panel. To sample the fitted oscillations more densely, use a gain step below 1/(4f) to resolve 2f; extend the sweep toward at least one full period, 1/f, if the trace covers less. Confirm the chosen setting with a population measurement before calling it ground-state preparation.
+
+Layout reference: Ding, Fig. 5-13(b) (printed p. 157) separates measured points and model lines for benchmarking. These traces instead compare reset sequences on average projected IQ versus Rabi gain.
 
 ## Typical writeback
 

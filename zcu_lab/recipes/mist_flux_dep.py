@@ -21,47 +21,47 @@ from zcu_lab.v2.mist.flux_dep.gui import MistFluxDepAnalysis
 
 
 class MistFluxDepInputs(RecipeInputs):
-    """Inputs for mist flux dep; all units and null policies are declared per
-    field."""
+    """Set native bias and probe gain ranges and optional Analyze axes."""
 
     target: SingleTarget
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     flux_device: DeviceName = Field(
-        description="Registered flux-device name; read only its cached snapshot, without connecting."
+        description="Set Flux device to the connected DC bias source name. Check the unit from its captured settings."
     )
     flux_unit: str = Field(
-        description="Exact cached device unit, including native; no coordinate conversion occurs."
+        description="Set Flux-bias unit to the device unit (A, V or native); no conversion is applied."
     )
     flux_range: list[float] = Field(
         min_length=2,
         max_length=2,
-        description="Two distinct device-native flux endpoints, in either direction; no conversion occurs.",
+        description="Set Flux-bias sweep › Start and Stop in the selected Flux-bias unit, in either direction.",
     )
     gain_range: list[Annotated[float, Field(ge=-1, le=1)]] = Field(
         min_length=2,
         max_length=2,
-        description="Two finite distinct native gain endpoints in [-1, 1].",
+        description="Set Probe gain sweep › Start and Stop (a.u.), in that order within [-1, 1].",
     )
     points: Annotated[int, Field(ge=2)] | None | Keep = Field(
-        KEEP, description="Sample count on each map axis, at least two."
+        KEEP,
+        description="Set Expts (count) in Flux-bias sweep and Probe gain sweep. At least 2.",
     )
 
     flux_half: float | None | Keep = Field(
         KEEP,
-        description="Half-flux device value. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Half-flux bias (device units). Null keeps native bias coordinates.",
     )
     flux_period: float | None | Keep = Field(
         KEEP,
-        description="Flux period (device units). Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Flux period (device units / Φ₀). Null keeps native bias coordinates.",
     )
     ac_coeff: float | None | Keep = Field(
         KEEP,
-        description="Photon coefficient. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Photon number / gain squared. Omit to retain it; null keeps the gain axis in a.u.",
     )
     auto_range: bool | None | Keep = Field(
         KEEP,
-        description="Full acquired range. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Full acquired range. True uses endpoints; false uses automatic limits.",
     )
 
 
@@ -77,7 +77,7 @@ class MistFluxDepReport(RecipeReport):
 
 @recipe(
     "mist_flux_dep",
-    description="Acquire one MIST flux/gain map with explicit native ranges; save raw and Primary without writeback.",
+    description="Map mean IQ shift versus native DC bias and resonator probe gain. Save the acquired complex IQ and Analyze map without writeback.",
 )
 async def mist_flux_dep(
     session: RecipeSession, inputs: MistFluxDepInputs

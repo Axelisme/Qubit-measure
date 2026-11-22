@@ -13,11 +13,23 @@ from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import (
     FitQuality,
+    decaycos,
+    expfunc,
     fit_decay,
     fit_decay_fringe,
 )
+from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, config
+from zcu_tools.datafile import DataVariable
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+    config,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions
@@ -25,10 +37,20 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Delay, Pulse, Readout, Reset, SweepCfg, TimelineBuilder
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.program.v2 import (
+    IQ,
+    Delay,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+    split_sums,
+)
+from zcu_tools.utils.process import find_rotate_angle
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.detune import actual_detune
 
 
@@ -38,12 +60,14 @@ class T2RamseyResult:
 
     true_activate_detune is the phase-ramp frequency in MHz after hardware
     time/phase rounding, not a fitted qubit detuning. It is run-only metadata
-    and is None after canonical load.
+    and is None after canonical load. iq_moments stores (N, 6) retained shot
+    sums [count, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²], or None for a mean-only file.
     """
 
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
     true_activate_detune: float | None = None
+    iq_moments: NDArray[np.float64] | None = None
 
 
 @validated_dataclass(frozen=True)
@@ -61,9 +85,42 @@ class T2RamseyAnalysis:
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
+def _direction(signals: NDArray[np.complex128]) -> tuple[float, float]:
+    """Get the principal IQ direction, or the I axis for fewer than two points."""
+    try:
+        angle = find_rotate_angle(signals)
+    except ValueError:
+        return (1.0, 0.0)
+    return (float(np.cos(angle)), float(np.sin(angle)))
+
+
 def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     """Convert mean complex IQ to the real contrast used by live and analysis plots."""
-    return rotate2real(signals).real
+    i, q = _direction(signals)
+    return signals.real * i + signals.imag * q
+
+
+_TIME_AXIS = VariableAxisSpec(label="Time", unit="s", scale=1e-6, field_name="times")
+_MOMENT_COLUMNS = tuple(range(6))
+_DELAY_LABEL = "Free-evolution delay (µs)"
+_IQ_LABEL = "IQ projection (a.u.)"
+
+
+def _build_result(data: GroupedLoadData[T2RamseyCfg]) -> T2RamseyResult:
+    """Restore mean IQ and optional sums on the same saved delay grid."""
+    trace = data.variable("data")
+    (times,) = trace.axes
+    moments = data.variables.get(DataVariable("iq_moments"))
+    if moments is None:
+        return T2RamseyResult(times, trace.z)
+    columns, moment_times = moments.axes
+    if not np.array_equal(times, moment_times) or not np.array_equal(
+        columns, _MOMENT_COLUMNS
+    ):
+        raise ValueError(
+            "/vars/iq_moments: expected columns 0–5 on the /vars/data delay grid"
+        )
+    return T2RamseyResult(times, trace.z, iq_moments=moments.z)
 
 
 class T2RamseyCfg(ConfigBase):
@@ -107,10 +164,28 @@ class T2RamseyCfg(ConfigBase):
 class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
     Options: ClassVar[type[T2RamseyAnalyzeOptions]] = T2RamseyAnalyzeOptions
 
-    # times stored as seconds on disk -> scale=1e-6
-    AXES_SPEC: ClassVar[AxesSpec[T2RamseyResult, T2RamseyCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("times", label="Time", unit="s", scale=1e-6),),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
+    # ADR-0069: keep the native mean-IQ variable and add optional shot moments.
+    AXES_SPEC: ClassVar[GroupedAxesSpec[T2RamseyResult, T2RamseyCfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "data",
+                (_TIME_AXIS,),
+                VariableZSpec(
+                    "signals", label="Signal", unit="a.u.", dtype=np.complex128
+                ),
+            ),
+            VariableSpec(
+                "iq_moments",
+                (
+                    VariableAxisSpec(label="Moment", unit="", values=_MOMENT_COLUMNS),
+                    _TIME_AXIS,
+                ),
+                VariableZSpec("iq_moments", label="IQ moments", unit=""),
+                required=False,
+            ),
+        ),
+        result_builder=_build_result,
+        labber_variables=("data",),
         result_type=T2RamseyResult,
         cfg_type=T2RamseyCfg,
         cfg_schema_version="4.0",
@@ -144,27 +219,26 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         )
 
         # 2. Display the IQ projection while averaging the delay sweep.
-        title = f"T2 Ramsey - detune {detune:.2f} MHz"
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (µs)", ylabel="Real Signal (a.u.)")
-        ax.set_title(title)
+        ax.set(title="Ramsey fringes", xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
-        viewer = live_line(ax)
+        viewer = live_errorbar(ax)
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            """Refresh the Ramsey contrast curve.
-
-            data is complex IQ in delay order; NaN marks unmeasured points.
-            Return the changed artists without modifying the input array.
-            """
-            return viewer.set(lengths, t2ramsey_signal2real(data))
+        def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh projected mean IQ, its shot SEM and count from this round."""
+            counts, mean = split_sums(moments)
+            i, q = _direction(mean)
+            sem = iq_shot_sem(moments, direction=(i, q))
+            retained = np.nanmax(counts, initial=0)
+            title = ax.set_title(
+                f"Ramsey fringes · {retained:.0f} retained shots/point"
+            )
+            return (*viewer.set(lengths, mean.real * i + mean.imag * q, sem), title)
 
         fig.show()
         signals_buffer = SignalBuffer(
-            (len(lengths),),
-            on_update=update,
+            (len(lengths), len(_MOMENT_COLUMNS)), dtype=np.float64, on_update=update
         )
         # 3. Measure freely evolving coherence with a phase-ramped final projection.
         with Schedule(signals_buffer, scope=context.scope) as sched:
@@ -190,13 +264,16 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
             )
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(
+            sched.run_acquire_summed(
                 prog,
                 soc,
+                reducer=shot_sums(prog, (IQ("readout", offset_corrected=True),)),
                 rounds=cfg.rounds,
                 options=RunOptions(
                     stop_condition=snr_checker(
-                        signals_buffer.at(), cfg.earlystop_snr, t2ramsey_signal2real
+                        signals_buffer.at(),
+                        cfg.earlystop_snr,
+                        lambda sums: t2ramsey_signal2real(split_sums(sums)[1]),
                     ),
                 ),
             )
@@ -204,8 +281,9 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         # 4. Preserve the realized phase-ramp frequency with the measured Ramsey trace.
         return T2RamseyResult(
             times=lengths,
-            signals=signals_buffer.array,
+            signals=split_sums(signals_buffer.array)[1],
             true_activate_detune=true_detune,
+            iq_moments=signals_buffer.array,
         )
 
     def analyze(
@@ -232,7 +310,9 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
 
         lengths, signals = result.times, result.signals
 
-        real_signals = t2ramsey_signal2real(signals)
+        i, q = _direction(signals)
+        real_signals = signals.real * i + signals.imag * q
+        fit_delays = np.linspace(lengths.min(), lengths.max(), max(200, lengths.size))
 
         # 2. Choose whether to fit oscillations as well as their decay envelope.
         if fit_fringe:
@@ -245,38 +325,40 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
                     init_phase = 180.0
                 fixedparams = [None, None, None, init_phase, None]
             fit = fit_decay_fringe(lengths, real_signals, fixedparams=fixedparams)
-            t2r, t2rerr, detune, detune_err, y_fit = (
+            t2r, t2rerr, detune, detune_err = (
                 fit.decay_time,
                 fit.decay_time_err,
                 fit.freq,
                 fit.freq_err,
-                fit.curve,
             )
+            y_fit = decaycos(fit_delays, *fit.params)
         else:
             fit = fit_decay(lengths, real_signals)
-            t2r, t2rerr, y_fit = (
-                fit.decay_time,
-                fit.decay_time_err,
-                fit.curve,
-            )
+            t2r, t2rerr = fit.decay_time, fit.decay_time_err
+            y_fit = expfunc(fit_delays, *fit.params)
             detune = 0.0
             detune_err = 0.0
 
         # 3. Assess Ramsey coherence time and any fitted fringe frequency against the trace.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        ax.plot(lengths, real_signals, label="meas", ls="-", marker="o", markersize=3)
-        ax.plot(lengths, y_fit, label="fit")
-        t2r_str = f"{t2r:.2f}µs ± {t2rerr:.2f}µs"
-        if fit_fringe:
-            detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
-            ax.set_title(f"T2 fringe = {t2r_str},\ndetune = {detune_str}", fontsize=15)
+        if result.iq_moments is None:
+            ax.plot(lengths, real_signals, ".", label="Measured")
         else:
-            ax.set_title(f"T2 decay = {t2r_str}", fontsize=15)
-        ax.set_xlabel("Delay Time (µs)")
-        ax.set_ylabel("Signal Real (a.u.)")
+            sem = iq_shot_sem(result.iq_moments, direction=(i, q))
+            ax.errorbar(
+                lengths, real_signals, yerr=sem, fmt=".", label="Measured ± shot SEM"
+            )
+        quality = fit.quality
+        label = "Fringe fit" if fit_fringe else "Decay fit"
+        if quality.r2 is not None:
+            label += f" (R² = {quality.r2:.3f})"
+        ax.plot(fit_delays, y_fit, label=label)
+        title = f"Ramsey: T₂* = {t2r:.2f} ± {t2rerr:.2f} µs"
+        if fit_fringe:
+            title += f"\nFringe frequency = {detune:.4f} ± {detune_err:.4f} MHz"
+        ax.set(title=title, xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
         ax.legend()
-        ax.grid(True)
 
         fig.tight_layout()
 

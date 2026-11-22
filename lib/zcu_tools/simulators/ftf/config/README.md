@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-11-22, projective transition floor
+**Last updated:** 2026-11-22, projective transition floor, isotropic receiver noise, and telemetry provenance
 
 `numerics.debug_capture` is optional and defaults to false. True records one
 acquire's Engine inputs and routes using the
@@ -50,7 +50,8 @@ Coupler 使用 `SquidDrift`，只接受 `q_cap`、`aphi`，拒絕 `q_ind` 與 `x
 
 `numerics.time_scale` 是有限非負的物理時間倍率。省略為 1.0，0.1 為十倍速，0 關閉補等。每 round 的目標秒數為 `time_scale × reps × Σ(各點 timeline 長度 + relax_delay) × 1e-6`，長度與 delay 使用 us。Binding 扣掉計算耗時，只等待正餘量，Stop 可中斷等待。成功 round 仍向共用時鐘補入 unscaled physical duration 的正差額，所以 `time_scale=0` 不會停止漂移時間；閒置時間也照常推進。Builder 提供 `ftf(settings, soccfg=soccfg, time_scale=0)` 覆寫，無須改寫 YAML。舊欄位 `min_round_duration_s` 會報錯並指出新名稱。
 
-`numerics.projection_weight_floor` 接受有限的 `[0, 1)` 機率，必填，範本明填 `1e-9`。
+`numerics.projection_weight_floor` 接受有限的 `[0, 1)` 機率，必填。
+樣板值與套用步驟見 [FTF 工作副本與調參](../../../../../zcu_lab/simulation_envs/FTF/README.md#工作副本與調參)。
 FTF 在每點的每次 projective 轉移各自套用門檻。若來源能階目前的邊際機率低於門檻，FTF 跳過該列演化，改用 identity 列。
 權重留在原能階，不移轉、不丟失，也不重新正規化。設為 `0` 時不因門檻跳過任何列，包含零權重列。
 [Routing telemetry](../environment/README.md#routing-telemetry) 記錄續演化的能階數與 identity 列的總權重。
@@ -74,9 +75,9 @@ env = ftf(settings.with_telemetry(enabled=False), soccfg=soccfg)
 
 使用完畢後，caller 呼叫 `env.devices.close_all_devices()`。相同 acquisition 情境沿用這份 `soccfg`，不從模型接線重建板子。
 
-`numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False), soccfg=soccfg)` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../environment/README.md#routing-telemetry)。
+`numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False), soccfg=soccfg)` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。在擷取啟動時傳入 `commit` 與 `dirty` 可將版本與工作樹狀態寫到每列；省略則寫 `null`。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../environment/README.md#routing-telemetry)。
 
-錯誤包含欄位路徑。未知欄位、重複 source 名稱或 generator 綁定、非 A/V 的電源單位、無效 limits／dimensions，以及非 positive-semidefinite 的 ADC noise PSD 都在建立資源前拒絕。Loader 要求 v2 文件，對 v1 明確報錯並保留本機工作副本與既有 entry。
+錯誤包含欄位路徑。未知欄位、重複 source 名稱或 generator 綁定、非 A/V 的電源單位、無效 limits／dimensions，以及不符合有限非負純量要求的 ADC noise PSD 都在建立資源前拒絕。Loader 要求 v2 文件，對 v1 明確報錯並保留本機工作副本與既有 entry。
 
 `readout.adc.time_of_flight_ns` 是有限非負總讀取線延遲，單位 ns。`readout.resonators.r1.mismatch_phase_rad` 與 `r2.mismatch_phase_rad` 分別是有限散射相位，單位 radians。三個欄位省略都為 0，不接受 null 或非有限值。Resources 只驗證這些值；`simulators.ftf.environment` 接到 `simulate.adc` 的數值模型，由 ADC 決定物理延遲、微波 IQ 與散射響應。
 
@@ -96,6 +97,6 @@ Program 提供 tones 的頻率、gain、phase 與順序，YAML 綁定各路徑�
 
 獨立板子 YAML 擁有 generator／ADC 數量、型別與時脈，caller 用 `program.build_soccfg` 建立 `soccfg` 後明確交給 `ftf`。模型 YAML 只擁有物理接線與校準，不從最大索引推導板子。索引必須是非負整數，caller 要確保每個綁定都符合實際板子的通道與型別。索引空洞不是已綁定的線路。
 
-Charge 係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。ADC noise 採 two-sided white PSD，sample covariance 為 PSD/dt_ns，receiver gain 不縮放 noise。板子設定與物理接線的對照見欄位指南。
+Charge 係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。每個 receiver 必填純量 `noise_psd_adc2_ns`，以 ADC²·ns 表示每個 I/Q 分量的雙邊白雜訊 PSD。I 和 Q 獨立，取樣變異數為 PSD/dt_ns。Receiver gain 不縮放 noise。板子設定與物理接線的對照見欄位指南。
 
 [default.yaml](../../../../../zcu_lab/simulation_envs/FTF/default.yaml) 的 circuit energies、couplings 與 resonator frequencies 採 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。

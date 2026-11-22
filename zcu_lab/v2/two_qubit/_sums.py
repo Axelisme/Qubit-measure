@@ -49,6 +49,16 @@ def joint_probabilities(counts: NDArray[np.float64]) -> NDArray[np.float64]:
     return np.divide(counts, total, out=np.full_like(counts, np.nan), where=total != 0)
 
 
+def qubit_marginal_axis(target: Literal["qubit1", "qubit2"]) -> int:
+    """Return the other qubit's terminal axis to sum out for the named target.
+
+    Terminal axes are Qubit1 then Qubit2. An invalid target raises ValueError.
+    """
+    if target not in ("qubit1", "qubit2"):
+        raise ValueError("target must be qubit1 or qubit2")
+    return -1 if target == "qubit1" else -2
+
+
 def qubit_marginal_probabilities(
     counts: NDArray[np.float64], target: Literal["qubit1", "qubit2"]
 ) -> NDArray[np.float64]:
@@ -58,9 +68,8 @@ def qubit_marginal_probabilities(
     denominator. Empty or unmeasured points yield NaN; invalid targets raise
     ValueError.
     """
-    if target not in ("qubit1", "qubit2"):
-        raise ValueError("target must be qubit1 or qubit2")
-    return joint_probabilities(counts).sum(axis=-1 if target == "qubit1" else -2)
+    axis = qubit_marginal_axis(target)
+    return joint_probabilities(counts).sum(axis=axis)
 
 
 def qubit_sigma(

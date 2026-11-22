@@ -10,7 +10,7 @@
 ## Reading routes
 
 - 寫或改實驗：讀 [實驗寫法指南](experiment-style.md)，從其中的範本開始寫。
-- 設計 liveplot 與 Analyze 圖、檢查操作員能否判讀：讀 [實驗呈現指南](figure-style.md)。
+- 設計 liveplot 與 Analyze 圖、檢查操作員能否判讀：讀 [實驗呈現指南](figure-style.md)。圖顯示後的 artist 更新與 refresh 契約見 [plotting〈原生 matplotlib 更新〉](../../lib/zcu_tools/plotting/README.md#原生-matplotlib-更新)。
 - [Two-qubit bring-up 與 CZ 校準](two_qubit/guide.md) 說明 Qubit1、Qubit2 的單 qubit 校準、位置綁定、舊 point 重綁與資料保存。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
   - 一般入口用 reset 選擇 herald。只有 RB 與 conditional phase 另有 g,g／e,e 聯合分析入口，見下方[完整清單](#two-qubit-實驗清單)。
 - [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與三項檢查。
@@ -19,6 +19,7 @@
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。
 - [Measure support](support/measure/README.md) 提供共享 domain mechanics。
+- [Program 的 Readout configuration](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration) 說明 Pulse／Mux Readout 的 generator、ADC、時序與 IQ 契約。
 - [Framework runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 擁有 Schedule、buffer、acquire 與 stop lifecycle。
 
 ## Two-qubit 實驗清單
@@ -59,8 +60,8 @@ Open／Defaults 使用 point aliases `qubit1`、`qubit2` 和 `mux`。表單不�
 每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。
 `gui.py` 以具名參數宣告可選的 measure-gui Adapter 值，接上 Form、run、guide 與 Analysis／Interactive／PostAnalysis。
 Core 擁有 run 與 analyze 的計算，GUI 只接線、解析來源與決定 writeback。
-`twotone/freq` 的分析只提供 Model type、Expected center、Min SNR，使用局部最高峰與六半寬窗口。
-`twotone/chain` 的選項與中點窗口不變，兩者明選共用數值工具的不同策略，見 [ADR-0072](../../docs/adr/0072-module-boundaries.md#two-tone-廣掃的選峰與窗口)。
+`twotone/freq` 的分析只提供 Model type、Expected center、Min SNR，並選用局部選峰策略。
+`twotone/chain` 保留預設策略。兩者的選峰與擬合窗口見 [fitting〈Peak candidates〉](../../lib/zcu_tools/analysis/fitting/README.md#peak-candidates)，責任分工見 [ADR-0072](../../docs/adr/0072-module-boundaries.md#two-tone-廣掃的選峰與窗口)。
 Mux/onetone core 也擁有逐 tone 數值 outcomes 與擬合失敗隔離。
 GUI 只接線、解析固定 capture 的 route prior／resonator 來源與提出 writeback。
 Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
@@ -69,8 +70,9 @@ Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 只放基本 T1，[t1_with_tone.py](twotone/time_domain/t1/t1_with_tone.py) 與
 [scan_t1_with_tone.py](twotone/time_domain/t1/scan_t1_with_tone.py) 各放固定 tone 與 gain sweep。
 兩者共用基本 T1 的 Result、Analysis 或訊號轉換，不增加 GUI adapter。
-AC Stark 的 [core.py](twotone/ac_stark/core.py) 與
-[ramsey_core.py](twotone/ac_stark/ramsey_core.py) 分別對應既有 spectroscopy／Ramsey adapters。
+AC Stark spectroscopy 的 [core.py](twotone/ac_stark/core.py) 對應 `twotone/ac_stark`，
+[ramsey_core.py](twotone/ac_stark/ramsey_core.py) 對應 `twotone/ac_stark_ramsey`。
+註冊位置與 Ramsey guide 見 [Lab 組裝與註冊](../README.md#lab-組裝與註冊)。
 Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot` 擁有。
 各實驗的 `core.py` 自行選擇分析資料並繪圖，數值擬合工具由 `zcu_tools.analysis.fitting` 擁有。
 跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
@@ -113,13 +115,16 @@ Save／MCP 透過單一 `summarize_analysis` 轉換 native 結果，不使用已
 `const`／`flat_top` 交給 `_run_for_flat`，在 FPGA sweep 長度。
 其他可調長度的波形，例如 `cosine`，交給 `_run_for_arb`，由 host 逐長度取數並重用同長度的程式。
 `_run_for_arb` 沿用歷史名稱，不表示它接受原生 arb 資產。
-兩條路徑都回傳 `LenRabiResult`，`lengths` 與 `signals` 都是一維 `(N,)`，每個長度對應一個平均 complex IQ。
-Host 路徑在回傳前對可用 rounds 取平均，未取數的點保留 NaN，不把內部的 round 軸交給呼叫端。
+兩條路徑都回傳 `LenRabiResult`。`lengths` 與 `signals` 都是一維 `(N,)`，每個長度對應一個平均 complex IQ。
+新 run 另回傳 `iq_moments`；舊檔缺少這個欄位仍可載入。
+Host 路徑先合併各長度已完成的 shot 矩，再除以保留 shot 數求平均。未取數的點保留 NaN，不把內部的 round 軸交給呼叫端。
 
 ## 即時圖工具
 
 `zcu_lab.v2.support` 匯出 `live_line`、`live_errorbar`、`live_scatter` 與 `live_heatmap`。
-顯示、owner 更新與 artist 回傳規則見[圖的建立、顯示與更新](experiment-authoring.md#圖的建立顯示與更新)。
+實驗的呼叫順序見[圖的建立、顯示與更新](experiment-authoring.md#圖的建立顯示與更新)。
+`@plots.on_plot_thread` 的 owner 執行、artist 歸屬驗證與 refresh 規則見
+[plotting〈原生 matplotlib 更新〉](../../lib/zcu_tools/plotting/README.md#原生-matplotlib-更新)。
 
 ```python
 fig, ax = context.plots.subplots(num="signal")
@@ -135,11 +140,13 @@ def update(data):
 fig.show()
 ```
 
-`support/live.py` 提供掛到 axes 的工具，`_live_attached.py` 擁有資料檢查與 artists，
+[`support/live.py`](support/live.py) 提供掛到 axes 的工具，`_live_attached.py` 擁有資料檢查與 artists，
 `_live_format.py` 處理格式。`support.live.AttachedLine` 可用於作者的型別標註。
 `live_errorbar(ax).set(xs, signals, yerr)` 更新點與對稱誤差棒；NaN 誤差只省略誤差棒，保留資料點。
 作者直接在 axes 設 ticks、顏色與標題。掃描歷史線由作者在另一個 axes 建立並更新。
 Reference marker 與動畫錄影不在這些工具中。
+
+共用的 `live_heatmap` 讓所有欄共用一組 `ys` 座標。[CPMG core](twotone/time_domain/cpmg/core.py) 的 Live 與 Analyze 都用 `_count_map`，讓每個 pulse count 欄各用自己的 delay grid，不呼叫 `live_heatmap`。
 
 Singleshot Check 在自己的 `analyze` 畫分類 IQ／區域圖；GE 的專屬分類圖在 `singleshot/ge/core.py`。
 Amp／Len Rabi 在各自的 core 畫 joint-fit population、histogram 與 confusion 圖，
@@ -237,9 +244,11 @@ Reader 回傳各片二維資料，不重組三維陣列。命名與維度限制�
 `mux/twotone_spectrum` 與 `mux/amp_rabi` 提供可 import 的 typed cfg、public `run`、分析與 native persistence。
 兩個 `run()` 各自在 core 直接寫出掃描與 pulse 序列。
 Twotone spectrum 用一個 program 的共用硬體 loop 掃 drive DAC 頻率，mux readout 保持固定。
-Amp Rabi 仍逐點 compile。
+Amp Rabi 也只編譯一個 program，在共用的 `point` 硬體 loop 同步掃各 drive 的 gain。
 共同 reset 後，TimelineBuilder 以 fork／emit 讓 drives 同時起跑，再以 join 取得當點最長結尾，
 接著做共同 mux readout。不補齊末端，不以全 sweep 最大長度 padding。
+Amp Rabi 的 shot count 與 IQ moments 由 [Program 的 summed acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition) 累加。
+需要用 sums 估計逐點不確定度時，見 [analysis〈逐點 shot SEM〉](../../lib/zcu_tools/analysis/README.md#逐點-shot-sem)。
 七個 mux qubit adapters 已註冊在 catalog，透過各 leaf 的 native `form.py` 生成完整
 固定具名 tones 及獨立 Participants 輸入。元素 picker 只選編輯對象；名稱 readonly。
 普通改名、增刪及重排由公開 FixedElements owner 原子拒絕。
@@ -279,8 +288,8 @@ start/span/step 量化。Frequency preparation 不建立逐點 pulse；
 Core 以各 tone 的 start／stop 與共用 expts 建立 `SweepCfg`，
 `run()` 再用 `sweep2param("point", sweep)` 建立 symbolic drive。
 `prepare_amplitude_scan(cfg, soccfg=...)` 仍回傳 `mux.amp_rabi.core.MuxPulseScan`，
-包含原始 `indices`、量化 gain `coordinates (K,P)` 及
-固定 numeric `point_pulses (P,K)`。Gain conversion 沿既有 `round_zcu_gain`。
+包含原始 `indices`、以 `round_zcu_gain` 獨立量化的 gain `coordinates (K,P)` 及
+固定 numeric `point_pulses (P,K)`。`run()` 不用這批 pulse 逐點編譯，並以編譯出的硬體 gain grid 取代準備階段的座標。
 這些入口只準備資料，不 acquire；各 public `run()` 直接寫出 common-start zip 排程，
 不展開 Cartesian product。
 
@@ -293,8 +302,8 @@ Freq 沿用單 qubit 的 magnitude/background transform 與 linewidth fitter；A
 Native mapping 使用 `coordinates`／`signals` 兩個 variables，共享 Point／Tone axes。
 Frequency 座標在磁碟上是 Hz，在記憶體是 MHz。Gain 不縮放。
 Analyze／Save 使用 explicit RunRecord；Load 還原同次完整 tones cfg、原始 indices、獨立數值座標與 IQ。
-它們不讀目前 Form 或 library。Freq 取消保留全 sweep 已完成 rounds 的平均；
-Amp Rabi 取消保留已完成點與當點 completed-round 平均，未寫入 IQ 維持 NaN。
+它們不讀目前 Form 或 library。Freq 與 Amp Rabi 取消時都保留全 sweep 已完成 rounds 的平均。
+Amp Rabi 若沒有完成任何 round，IQ 維持 NaN。
 Acquisition 例外原樣傳出；core 回傳的資料由作者決定是否可分析。
 `MuxOnetoneExp.run` 與 `MuxFreqExp.run` 可接 `on_acquire_stop`，在每次外部取消的 acquire 清理後同步通知。
 Mux flux scan 用這個作者 callback 丟棄被取消的當前 flux point，不從 parent stop 推斷子層資料完整度。

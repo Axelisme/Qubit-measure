@@ -10,6 +10,8 @@ from matplotlib import colormaps
 from matplotlib.artist import Artist
 from matplotlib.axes import Axes
 from matplotlib.colors import Normalize
+from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
 from pydantic import Field
@@ -38,7 +40,7 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.jpa.auto_optimize.optimizer import JPAOptimizer
-from zcu_lab.v2.support import live_scatter
+from zcu_lab.v2.support import live_line, live_scatter
 from zcu_lab.v2.support.device import set_flux, set_rf_frequency, set_rf_power
 
 
@@ -60,7 +62,7 @@ class _JPALiveSnapshot:
     """Search result and current row copied together by the plot-thread dispatcher."""
 
     result: JPAOptimizeResult  # Iteration-aligned candidate settings, phases and SNR.
-    index: int  # Current candidate row, including its search-phase label.
+    retained_shots: int  # Total shots retained across both preparations so far.
 
 
 @dataclass(frozen=True)
@@ -143,54 +145,86 @@ def _build_jpa_auto_result(
 
 
 class JPAOptCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select a qubit reset before readout; leave empty to skip it.",
+        ),
+    ] = None
+    pi_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit π pulse",
+            description="Select the calibrated g→e pulse for the excited preparation only.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Select the calibrated resonator pulse and IQ integration for both preparations.",
+        ),
+    ]
     jpa_flux_dev: Annotated[
         DeviceName,
         FieldMeta(
-            label="JPA flux device",
-            description="Connected flux device driven at each optimizer point.",
+            label="JPA flux-bias source",
+            description="Select the DC source that sets the JPA bias.",
         ),
     ]
     jpa_rf_dev: Annotated[
         DeviceName,
         FieldMeta(
-            label="JPA RF device",
-            description="Connected pump RF device driven at each optimizer point.",
+            label="JPA pump RF source",
+            description="Select the RF source whose JPA pump frequency and power are varied.",
         ),
     ] = ""
     flux_unit: Annotated[
         Literal["A", "V", "native"],
         FieldMeta(
-            label="Flux unit",
-            description="Working unit for the selected flux driver; no conversion.",
+            label="JPA bias unit",
+            description="Match the source unit: amps, volts, or its native coordinate; the sweep values are not converted.",
         ),
     ]
     jpa_flux: Annotated[
         SweepCfg,
         FieldMeta(
-            label="JPA flux device value",
-            description=(
-                "Flux search bounds and relative resolution for phase-1 sampling."
-            ),
+            label="JPA flux-bias value",
+            description="Enter bias search bounds in JPA bias unit and a relative sampling resolution.",
         ),
     ]
-    jpa_freq: Annotated[SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz")]
-    jpa_power: Annotated[SweepCfg, FieldMeta(label="JPA pump power", unit="dBm")]
+    jpa_freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="JPA pump RF frequency",
+            unit="MHz",
+            description="Enter the absolute pump RF search bounds (MHz) and relative sampling resolution.",
+        ),
+    ]
+    jpa_power: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="JPA pump source power",
+            unit="dBm",
+            description="Enter the pump source power bounds (dBm) and relative sampling resolution.",
+        ),
+    ]
     num_points: Annotated[
         int,
         FieldMeta(
-            label="Global optimizer points",
-            description="Total evaluation budget, at least four points.",
+            label="Candidate budget",
+            unit="count",
+            description="Enter the total number of JPA settings to measure (at least four).",
         ),
     ] = Field(ge=4, strict=True)
     skew_penalty: Annotated[
         float,
         FieldMeta(
-            label="Skew penalty",
+            label="IQ shape penalty",
+            unit="a.u.",
             decimals=3,
-            description="Nonnegative SNR skew penalty.",
+            description="Enter a nonnegative weight for unequal IQ widths and skew; 0 uses separation SNR alone.",
         ),
     ] = Field(default=0.0, ge=0.0)
     seed: Annotated[
@@ -198,15 +232,17 @@ class JPAOptCfg(ConfigBase):
         FieldMeta(
             label="Optimizer seed",
             description=(
-                "Fixes the sampler and optimizer candidate points for a given "
-                "acquisition; empty draws a new search each run."
+                "Enter a nonnegative integer to repeat candidate choices for the same score history; "
+                "leave blank for a new search."
             ),
         ),
     ] = None
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per preparation at each setting in one round.",
         ),
     ]
     rounds: Annotated[
@@ -214,16 +250,16 @@ class JPAOptCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of acquisition rounds per setting.",
         ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Relaxation wait",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the wait after readout for relaxation before the next shot (µs).",
         ),
     ]
 
@@ -337,16 +373,16 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         )
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
-        point_indices = np.arange(num_points, dtype=np.float64)
-        update = self._show_search_plot(context, point_indices)
-        current_index = 0
+        retained_shots = np.zeros(num_points, dtype=np.int64)
+        unit = "a.u." if cfg.flux_unit == "native" else cfg.flux_unit
+        update = self._show_search_plot(context, unit)
 
         def plot_fn(data: NDArray[np.float64]) -> None:
             """Update the live JPA artists from the latest acquired signals."""
             update(
                 _JPALiveSnapshot(
                     JPAOptimizeResult(params=params, phases=phases, signals=data),
-                    current_index,
+                    int(retained_shots.sum()),
                 )
             )
 
@@ -357,7 +393,6 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         # 2. Use the previous SNR to choose and apply the next pump/bias setting.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for idx, step in sched.scan("Iteration", range(num_points)):
-                current_index = idx
                 last_snr = None
                 if idx > 0:
                     last_snr = np.abs(signals_buffer.array[idx - 1])
@@ -400,16 +435,19 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
                 builder.delay_by_timeline()
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
+
+                def score(
+                    sums: NDArray[np.float64], *, index: int = idx
+                ) -> NDArray[np.float64]:
+                    """Track cumulative retained shots from both preparations and return SNR."""
+                    retained_shots[index] = int(sums[..., 0].sum())
+                    return snr_as_signal(sums, skew_penalty=cfg.skew_penalty)
+
                 step.run_acquire_summed(
                     prog,
                     soc,
                     reducer=shot_sums(prog, [IQ("readout", order=3)]),
-                    options=RunOptions(
-                        converter=lambda sums: snr_as_signal(
-                            sums,
-                            skew_penalty=cfg.skew_penalty,
-                        ),
-                    ),
+                    options=RunOptions(converter=score),
                     rounds=cfg.rounds,
                 )
 
@@ -418,68 +456,68 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
             params=params, phases=phases, signals=signals_buffer.array
         )
 
-    def _show_search_plot(
-        self, context: RunContext, point_indices: NDArray[np.float64]
-    ) -> Callable[[_JPALiveSnapshot], None]:
-        """Show candidate settings and SNR; return a plot-thread updater that changes these artists.
-
-        Use context.plots to create four panels over iteration indices and
-        candidate flux/MHz/dBm. The updater takes an iteration-aligned result
-        and current row, copied together before drawing. Plot errors propagate.
-        """
-        figure, initial_ax = context.plots.subplots(num="measurement", figsize=(8, 5))
-        initial_ax.remove()
-        figure.suptitle("JPA Auto Optimization")
-        grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
-        axes = [
-            figure.add_subplot(cell)
-            for cell in (grid[:, 0], grid[0, 1], grid[1, 1], grid[2, 1])
-        ]
+    def _search_panels(
+        self, plots: Plots, name: str, unit: str
+    ) -> tuple[Figure, tuple[Axes, ...]]:
+        """Lay out search progression and three views of the same measured candidates."""
+        figure, _ = plots.subplots(2, 2, num=name, figsize=(9, 6), layout="constrained")
+        panels = tuple(figure.axes)
+        figure.suptitle(
+            "JPA joint search · pump and bias settings · g/e separation score"
+        )
         for ax, label in zip(
-            axes,
+            panels,
             (
-                "Iteration",
-                "JPA Flux value (a.u.)",
-                "JPA Frequency (MHz)",
-                "JPA Power (dBm)",
+                "Candidate number (count)",
+                f"JPA flux-bias value ({unit})",
+                "JPA pump RF frequency (MHz)",
+                "JPA pump source power (dBm)",
             ),
             strict=True,
         ):
-            ax.set(xlabel=label, ylabel="SNR (a.u.)")
-        for ax in axes[1:]:
-            ax.ticklabel_format(axis="x", useOffset=False)
+            ax.set(xlabel=label, ylabel="g/e separation score (a.u.)")
+            ax.ticklabel_format(axis="x", style="plain", useOffset=False)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=4, integer=ax is panels[0]))
+        return figure, panels
+
+    def _show_search_plot(
+        self, context: RunContext, unit: str
+    ) -> Callable[[_JPALiveSnapshot], None]:
+        """Show acquired candidates and retained-shot progress on the plot owner."""
+        figure, axes = self._search_panels(context.plots, "measurement", unit)
+        progression = live_line(axes[0])
+        axes[0].lines[0].set(marker="None", color="0.5", zorder=1)
         viewers = [live_scatter(ax) for ax in axes]
+        colorbar = figure.colorbar(
+            axes[0].collections[0], ax=axes, label="Search stage (count)"
+        )
 
         @context.plots.on_plot_thread
         def update(snapshot: _JPALiveSnapshot) -> Iterable[Artist]:
-            """Draw a copied search result and current row; return the changed panel artists."""
-            data = snapshot.result.signals
-            sampled_params = snapshot.result.params
-            sampled_phases = snapshot.result.phases
-            idx = snapshot.index
-            cur_flux, cur_freq, cur_gain = sampled_params[idx, :]
-            title = (
-                f"Iteration {idx}, Phase {sampled_phases[idx]}\n"
-                f"Flux: {cur_flux:#.3g} (a.u.), Freq: {1e-3 * cur_freq:.4g} (GHz)\n"
-                f"Power: {cur_gain:.1f} (dBm)"
+            """Update the progress and phase-colored scatter plots from the copied snapshot."""
+            result = snapshot.result
+            measured = np.isfinite(result.signals)
+            count = np.count_nonzero(measured)
+            progress = figure.suptitle(
+                "JPA joint search · pump and bias settings · g/e separation score\n"
+                f"{count}/{len(result.signals)} candidates sampled · {snapshot.retained_shots:,} retained shots"
             )
-            axes[0].set_title(title)
-            artists = []
+            if not count:
+                return (progress,)
+
+            stages = result.phases[measured].astype(np.float64)
+            colorbar.set_ticks(np.unique(stages).tolist())
+            candidates = np.arange(1, len(measured) + 1, dtype=np.float64)
+            scores = np.abs(result.signals)
+            artists: list[Artist] = [progress, *progression.set(candidates, scores)]
             for viewer, xs in zip(
                 viewers,
-                (
-                    point_indices,
-                    sampled_params[:, 0],
-                    sampled_params[:, 1],
-                    sampled_params[:, 2],
-                ),
+                (candidates[measured], *result.params[measured].T),
                 strict=True,
             ):
-                artists.extend(
-                    viewer.set(
-                        xs, np.abs(data), colors=sampled_phases.astype(np.float64)
-                    )
-                )
+                (scatter,) = viewer.set(xs, scores[measured], colors=stages)
+                scatter.set_sizes(np.array([32.0]))
+                artists.append(scatter)
             return artists
 
         figure.show()
@@ -511,44 +549,45 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         max_snr = float(snrs[max_id])
         best_params = params[max_id, :]
 
-        colors = phases
-
-        figsize = (8, 5)
-        # 2. Mark the best candidate in iteration and pump/bias views, colored by phase.
-        fig, initial_ax = plots.subplots(num="fit", figsize=figsize)
-        initial_ax.remove()
-        gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
-
-        fig.suptitle("JPA Auto Optimization")
-
-        ax_iter = fig.add_subplot(gs[:, 0])
-        ax_flux = fig.add_subplot(gs[0, 1])
-        ax_freq = fig.add_subplot(gs[1, 1])
-        ax_power = fig.add_subplot(gs[2, 1])
-
-        ax_iter.scatter(np.arange(len(snrs)), snrs, c=colors, s=1)
-        ax_iter.axhline(max_snr, color="r", ls="--", label=f"best = {max_snr:.2g}")
-        ax_iter.scatter([max_id], [max_snr], color="r", marker="*")
-        ax_iter.set_xlabel("Iteration")
-        ax_iter.set_ylabel("SNR (a.u.)")
-        ax_iter.legend()
-        ax_iter.grid(True)
-
-        def plot_ax(ax: Axes, param_idx: int, label_name: str, best_label: str) -> None:
-            """Draw one sampled JPA parameter against SNR and mark the best measured setting."""
-            ax.scatter(params[:, param_idx], snrs, c=colors, s=1)
-            best_value = best_params[param_idx]
-            ax.axvline(best_value, color="r", ls="--", label=f"best = {best_label}")
-            ax.scatter([best_value], [max_snr], color="r", marker="*")
-            ax.set_xlabel(label_name)
-            ax.ticklabel_format(axis="x", useOffset=False)
-            ax.set_ylabel("SNR (a.u.)")
-            ax.legend()
-            ax.grid(True)
-
-        plot_ax(ax_flux, 0, "JPA Flux value (a.u.)", f"{best_params[0]:#.3g} a.u.")
-        plot_ax(ax_freq, 1, "JPA Frequency (MHz)", f"{best_params[1]:.2f} MHz")
-        plot_ax(ax_power, 2, "JPA Power (dBm)", f"{best_params[2]:.1f} dBm")
+        # 2. Overlay the selected tuple on the same four views as the live figure.
+        unit = source.cfg.flux_unit if source.cfg is not None else "native units"
+        unit = "a.u." if unit == "native" else unit
+        fig, axes = self._search_panels(plots, "fit", unit)
+        measured = np.isfinite(snrs)
+        candidates = np.arange(1, len(snrs) + 1)
+        axes[0].plot(candidates, snrs, "-", color="0.5", zorder=1)
+        stages = phases[measured]
+        norm = Normalize(vmin=float(stages.min()), vmax=float(stages.max()))
+        best_labels = (
+            f"Candidate {max_id + 1}: score = {max_snr:.3g} a.u.",
+            f"Selected bias = {best_params[0]:.6g} {unit}",
+            f"Selected pump RF = {best_params[1]:.3f} MHz",
+            f"Selected pump power = {best_params[2]:.2f} dBm",
+        )
+        for ax, xs, best_value, label in zip(
+            axes,
+            (candidates, *params.T),
+            (max_id + 1, *best_params),
+            best_labels,
+            strict=True,
+        ):
+            ax.scatter(
+                xs[measured],
+                snrs[measured],
+                c=stages,
+                cmap="viridis",
+                norm=norm,
+                marker=".",
+                s=32,
+            )
+            ax.plot(best_value, max_snr, "*", color="C3", markersize=9)
+            ax.set_title(label, fontsize=10, loc="left")
+        fig.colorbar(
+            axes[0].collections[0],
+            ax=axes,
+            label="Search stage (count)",
+            ticks=np.unique(stages),
+        )
 
         return JPAOptimizeAnalysis(
             float(best_params[0]), float(best_params[1]), float(best_params[2])
