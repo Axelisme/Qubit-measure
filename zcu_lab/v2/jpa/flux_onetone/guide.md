@@ -1,24 +1,18 @@
-**Readers:** operator, agent. Find bias-dependent resonator features in a JPA bias and readout-frequency survey.
+**Readers:** operator, agent. Find resonator features that move with JPA bias, using the magnitude of the reflected IQ.
 
 # JPA bias and readout spectrum
 
-The run steps the JPA flux bias. At each bias it acquires a resonator frequency sweep with the sequence optional reset → readout. It does not set the pump frequency, power or output. Set these separately and verify the safe bias range before Run.
+At each JPA flux-bias setting, sweep readout RF. Each shot is optional reset → readout at the selected RF. The run does not set pump RF, power or output; set those separately.
 
-## Set up the survey
+## Set the survey
 
-Choose the resonator and JPA aliases at the current point, then choose **Defaults**.
+- Bind the resonator and JPA. Confirm **JPA flux-bias source** (initially `$jpa.flux_dev`). Match **JPA bias unit** to that source. **JPA flux-bias value** starts at stored bias ± 0.005 in that unit, not Φ₀. Check approved bounds; the values go to the device unchanged.
+- **Readout RF frequency** starts at the captured center ± 1.5 linewidths. Use absolute MHz. Check the wiring and ADC window of **Frequency-swept readout**. Its trigger starts at flight time + 0.015 µs and the sweep sets transmit and receive RF.
 
-- **JPA flux-bias source** starts from `$jpa.flux_dev`. Select the connected DC source. **JPA bias unit** starts at A; match it to the source. Values are sent unchanged. **JPA flux-bias value** starts at `$jpa.flux` ± 0.005 in the chosen unit with 101 samples. This scans a source setting, not flux in Φ₀.
-- **Readout RF frequency** starts at `$resonator.freq` ± 1.5 × `$resonator.kappa` with 101 samples. This is the absolute resonator probe RF (MHz).
-- **Frequency-swept readout** starts from the resonator wiring and timing, with the trigger at the flight time plus 0.015 µs. The sweep sets transmit and receive RF frequency. Choose a calibrated readout for this route. Select **Reset** from the qubit's optional reset module, or leave it empty.
-- **Reps** sets shots per frequency per round (1000 by default); **Rounds** sets rounds at each bias (10). **Relaxation wait** is the delay after each readout (0.1 µs by default).
+For tab setup, refreshing sources and saving, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-## Read the plots
+## Read the map and cuts
 
-After **Run** or a successful **Load**, choose **Analyze** to redraw that result. Load alone does not open a plot. The summary lists the source's **Reps × Rounds** if its saved settings can be read. Older results without readable settings still plot.
+The map colors `|mean(I + iQ)|` (a.u.); blank cells are missing data. The bias axis displays recorded values as a.u., even if the form used A or V. The blue cut shows the latest sampled bias spectrum. Faint red cuts show up to four preceding bias positions. Use the cuts to locate the peak or notch. Analyze redraws the selected Run or Load; older results without readable settings still plot but have no configured Reps × Rounds line.
 
-The map colors the magnitude of mean complex IQ (a.u.). It shows reflected signal, not state population, calibrated gain or g/e separation. The bias axis shows the recorded device values in native coordinates (a.u.); the form's A/V/native choice controls the source and does not rescale or relabel the plot. The color scale follows the measured data. Blank cells are missing samples, not zeros. The live title counts bias spectra with data.
-
-The lower panel shows the latest sampled bias spectrum in blue. The four preceding bias positions appear in faint red where data exist. Use these cuts to locate a dip or peak without estimating its position from color alone.
-
-Trace a repeatable feature across the map. If it runs into a frequency boundary, widen the window toward the edge. To refine an interior feature, set the next bounds to the surrounding bias and frequency samples. Analyze does not fit or select a bias, and it does not write back settings. You decide which bias to check next. This spectral survey does not show pointwise shot-SEM bars. Confirm a candidate on a separate g/e separation scan before treating it as a readout optimum.
+Extend a clipped RF edge; refine an interior feature with the neighboring bias and frequency values. There is no fit, shot SEM or writeback. Verify a candidate in a g/e separation sweep; the reflection magnitude alone does not measure calibrated gain, population or separation.
