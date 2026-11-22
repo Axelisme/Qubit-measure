@@ -4,7 +4,6 @@ Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 """
 
 from pydantic import Field
-from zcu_tools.analysis.readout_chain import CycleCheck
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -18,6 +17,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
+from zcu_lab.v2.chain._joint import JointResidualSummary
 from zcu_lab.v2.chain.t2ramsey.gui import ChainT2RamseySummary
 
 
@@ -57,8 +57,8 @@ class ChainT2RamseyInputs(RecipeInputs):
     )
 
 
-class ChainT2RamseyReport(RecipeReport):
-    """Chain Ramsey fit and its checks; cancellation returns no report."""
+class ChainT2RamseyReport(RecipeReport, JointResidualSummary):
+    """Joint Ramsey estimates and scalar residuals, or the Analyze failure reason."""
 
     t2_us: float | None = Field(description="T2* (µs); null if unavailable.")
     t2_err_us: float | None = Field(
@@ -79,15 +79,6 @@ class ChainT2RamseyReport(RecipeReport):
     reliability: float | None = Field(
         description="R, the inverse phase uncertainty from the frequency error over the sweep (no threshold); null if unavailable."
     )
-    within_point: CycleCheck | None = Field(
-        description="Within-point check J, df, p; null without analysis."
-    )
-    sharing: CycleCheck | None = Field(
-        description="Sharing check J, df, p; null without analysis."
-    )
-    curve: CycleCheck | None = Field(
-        description="Curve check J, df, p; null without analysis."
-    )
     first_read_t2_us: float | None = Field(
         description="First-read T2* (µs); null if unavailable."
     )
@@ -95,7 +86,7 @@ class ChainT2RamseyReport(RecipeReport):
 
 @recipe(
     "chain_t2ramsey",
-    description="Sweep free-evolution wait in K-cycle T2 Ramsey; use the first-read fit to seed a joint three-state fit, then save without writeback.",
+    description="Sweep K-cycle Ramsey wait, fit all 65 numbers jointly, and save the sums, estimates and residual diagnostics without writeback.",
 )
 async def chain_t2ramsey(
     session: RecipeSession, inputs: ChainT2RamseyInputs
@@ -104,11 +95,14 @@ async def chain_t2ramsey(
 
     The second pi/2 has opposite phase plus the detune ramp. relax_delay is
     the thermalisation wait K; the Form starts it at 5 T1 and overrides can
-    change it. Primary fits the first read with the twotone Ramsey fit for
-    the starting values, then fits all 65 numbers jointly. It reports T2,
-    the fringe frequency and the third-state decay time with Wald errors, R
-    and three checks. No writeback is proposed or requested. Save keeps the
-    running sums and the analysis.
+    change it. Primary starts from the first-read fit or, if that fit has no
+    estimate, uses one start from the saved waits and reports null for the
+    first-read T2*. Primary fits all 65 numbers jointly. It reports T2*,
+    the fringe frequency and the third-state decay time with Wald errors. It
+    also reports R, J, df, J/df, the chi-square reference band endpoints and
+    the fraction of whitened components with |r| > 3. These numbers do not
+    decide acceptance. The per-delay residuals stay in the figure. Save
+    keeps the running sums and the analysis. No writeback is proposed.
 
     points → expts sets the sweep sample count.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
@@ -140,9 +134,12 @@ async def chain_t2ramsey(
                 tf_us=None,
                 tf_err_us=None,
                 reliability=None,
-                within_point=None,
-                sharing=None,
-                curve=None,
+                J=None,
+                df=None,
+                j_per_df=None,
+                expected_band_low=None,
+                expected_band_high=None,
+                tail_fraction=None,
                 first_read_t2_us=None,
                 analysis_failure=analysis.reason,
             )
@@ -154,9 +151,12 @@ async def chain_t2ramsey(
             tf_us=report_number(analysis.result.tf),
             tf_err_us=report_number(analysis.result.tf_err),
             reliability=report_number(analysis.result.reliability),
-            within_point=analysis.result.within_point,
-            sharing=analysis.result.sharing,
-            curve=analysis.result.curve,
+            J=analysis.result.J,
+            df=analysis.result.df,
+            j_per_df=analysis.result.j_per_df,
+            expected_band_low=analysis.result.expected_band_low,
+            expected_band_high=analysis.result.expected_band_high,
+            tail_fraction=analysis.result.tail_fraction,
             first_read_t2_us=report_number(analysis.result.first_read_t2),
         )
     finally:
