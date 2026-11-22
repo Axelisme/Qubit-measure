@@ -39,6 +39,7 @@ from zcu_tools.simulate.adc import (
     PreparedStatistics,
     ProjectionChain,
     ProjectionReadout,
+    RawPlanOwner,
     ReadoutBatch,
     normalize_populations,
     sample_traces,
@@ -317,6 +318,7 @@ class FTFAcquire:
         self.request = request
         self._snapshot: EnvironmentSnapshot | None = None
         self._prepared: _Prepared | None = None
+        self._raw_plans = RawPlanOwner()
         self.routing: list[PathDiagnostics] = []
         self._stark_limits: dict[
             tuple[int, int], dict[tuple[int, float, float], float]
@@ -368,10 +370,15 @@ class FTFAcquire:
     def invalidate(self) -> None:
         """Release deterministic arrays and reject further rounds; safe to repeat."""
         self._active = False
+        self.retire_raw_plans()
         self._prepared = None
         self._projective_capture = None
         self.routing.clear()
         self._stark_limits.clear()
+
+    def retire_raw_plans(self) -> None:
+        """Retire the raw memo without changing preparation or diagnostics."""
+        self._raw_plans.retire()
 
     def _record_stark_order(self, paths: PathDiagnostics) -> None:
         for entry in paths.stark_order_inversions:
@@ -433,7 +440,8 @@ class FTFAcquire:
             or snapshot != self._snapshot
             or self._prepared.split_pilot
         ):
-            # The first round used a split solve; later rounds need the full batch.
+            # A changed snapshot or a split solve invalidates the round batch.
+            self.retire_raw_plans()
             try:
                 prepared = self._reuse_or_prepare(snapshot, index, cancel=cancel)
             except Exception:
@@ -459,7 +467,8 @@ class FTFAcquire:
                     round_index=index,
                 )
                 result = IntegratedRound(
-                    statistics, prepared.raw.bind(statistics.raw_identity)
+                    statistics,
+                    self._raw_plans.bind(prepared.raw, statistics.raw_identity),
                 )
             else:
                 traces = sample_traces(
@@ -902,7 +911,13 @@ class FTFSource:
             )
         return self._facts
 
+    def retire_raw_plans(self) -> None:
+        """Drop the current session's raw plans without affecting diagnostics."""
+        if self._session is not None:
+            self._session.retire_raw_plans()
+
     def _clear_preparations(self) -> None:
+        self.retire_raw_plans()
         self.preparation_cache.clear()
         self._dimensions.clear()
 
@@ -987,13 +1002,21 @@ class FTFSource:
 
         outcome retains captured round inputs (including failed attempts), wall
         seconds including pacing, builder seconds and normal-return status.
-        Only the matching current session contributes warnings and routing work.
+        Only the matching current session retires its raw plans and contributes
+        warnings and routing work.
         Direct callers may supply their own outcome after the final round and cleanup. Debug capture
         keeps detached rounds but omits settings for identities it did not observe.
         The buffer publishes before summary construction, even with telemetry disabled.
         capture_file is the successful basename or None when recording is off or
         publication fails.
         """
+        rounds = outcome.rounds
+        request = rounds[0].acquire if rounds else None
+        session = self._session
+        if session is None or session.request is not request:
+            session = None
+        else:
+            session.retire_raw_plans()
         capture_settings, self._capture_settings = self._capture_settings, None
         projective_capture, self._projective_capture = self._projective_capture, None
         capture_file = None
@@ -1004,11 +1027,6 @@ class FTFSource:
             capture_file = capture_settings.write(
                 self.capture, outcome, metadata=metadata
             )
-        rounds = outcome.rounds
-        request = rounds[0].acquire if rounds else None
-        session = self._session
-        if session is None or session.request is not request:
-            session = None
         if session is not None:
             session.warn_stark_order()
         if self.telemetry is None:
@@ -1251,6 +1269,7 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
             callbacks=SimulationCallbacks(
                 wait_ready=None if preparation is None else preparation.wait_ready,
                 on_begin=lambda: coordinator.begin_acquire(seed=binding.root_seed),
+                on_cleanup=coordinator.retire_raw_plans,
                 on_end=coordinator.finish_acquire
                 if coordinator.telemetry is not None or settings.numerics.debug_capture
                 else None,

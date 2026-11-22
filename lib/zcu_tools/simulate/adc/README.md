@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-21, device-time conversion, exact flat span reuse and raw sampling Stop
+**Last updated:** 2026-11-22, acquire-local raw plans
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -318,6 +318,8 @@ group states by IQ distinguishability. ADC transitions during
 a herald event affect that event's IQ only. They do not feed back into the
 populations supplied for later events.
 
+## Integrated raw shots
+
 `PreparedRawShots(readout, batches, reps=...)` owns noiseless probabilities
 and per-channel ReadoutBatch inputs. `bind(identity)` returns an `ADCRawShots`
 source without doing shot work. Materialization draws full CTMC paths, one per
@@ -335,6 +337,16 @@ added once per sample.
 All ADC models must declare identical state labels and directional rates.
 Different receivers may deduplicate contents differently; point mappings select
 physical inputs independently without changing the common path.
+
+An acquire that reuses a prepared batch calls
+`RawPlanOwner.bind(prepared, identity)` instead of `prepared.bind(identity)`.
+ADC compares prepared objects by identity and retains plans for only the current
+batch. It builds each logical event's plan on demand during raw materialization.
+FTF and standalone single-fluxonium retire the plans when the batch changes or
+the acquire ends, without moving plans into the source preparation cache.
+After retirement, previously delivered sources recompute their plans without
+filling either the old or the current memo. Direct `bind(identity)` and decimated
+traces do not use an owner.
 
 The source retains its inputs independently of later rounds and preparation
 eviction. Every call restarts its private PCG64 stream and returns fresh int64

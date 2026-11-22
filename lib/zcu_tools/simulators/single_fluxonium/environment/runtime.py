@@ -374,13 +374,21 @@ class SingleFluxoniumSource:
     def finish_acquire(self, outcome: AcquireOutcome) -> None:
         """Write one admitted acquire, including failure, from binding's outcome.
 
-        Uses captured attempts for points/rounds and accumulated Engine/ADC work.
+        Retires raw plans only for the matching current session. Uses captured
+        attempts for points/rounds and accumulated Engine/ADC work.
         Writer failures warn once without changing the outcome. Disabled policy
         writes no telemetry. For debug capture, take round snapshots after
         begin_acquire. Publish the buffer before telemetry and include the
         successful basename or None in the summary. The binding is the sole
         authority for complete.
         """
+        session = self._session
+        if (
+            session is not None
+            and outcome.rounds
+            and session.request is outcome.rounds[0].acquire
+        ):
+            session.retire_raw_plans()
         capture_settings = self._capture_settings
         self._capture_settings = None
         capture_file = None
@@ -713,6 +721,7 @@ class SingleFluxoniumSource:
                 self._prepared.paths.warn_exceeded()
                 self.paths.append(self._prepared.paths.for_reuse(telemetry=True))
                 return self._prepared
+            self._discard_preparation()
             plans = validated.plans[0]
             dc = facts.source.model((0,))
             basis = Basis(dc.identity, facts.readout.state_labels, dc.eigenvectors)
@@ -772,7 +781,7 @@ class SingleFluxoniumSource:
             )
             return self._prepared
         except Exception:
-            self._prepared = None
+            self._discard_preparation()
             raise
 
     def open_acquire(self, request: AcquireRequest) -> SingleFluxoniumAcquire:
@@ -814,10 +823,19 @@ class SingleFluxoniumSource:
             request.snapshot, request.index, cancel=request.cancel
         )
 
+    def retire_raw_plans(self) -> None:
+        """Drop the current session's raw plans without affecting diagnostics."""
+        if self._session is not None:
+            self._session.retire_raw_plans()
+
+    def _discard_preparation(self) -> None:
+        self.retire_raw_plans()
+        self._prepared = None
+
     def _clear(self) -> None:
+        self._discard_preparation()
         if self._facts is not None:
             self._facts.source.close()
-        self._prepared = None
         self._facts = None
         self._facts_key = None
         self._plan = None
@@ -928,6 +946,7 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
             ),
             callbacks=SimulationCallbacks(
                 on_begin=lambda: source.begin_acquire(seed=binding.root_seed),
+                on_cleanup=source.retire_raw_plans,
                 on_end=source.finish_acquire
                 if source.telemetry is not None or settings.numerics.debug_capture
                 else None,

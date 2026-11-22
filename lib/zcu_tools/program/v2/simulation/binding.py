@@ -94,6 +94,9 @@ class SimulationCallbacks:
         raw materialization outside that acquire's body. When a shot-result getter
         requests the raw arrays, it publishes only after building the result.
         Ordinary Exceptions warn once without failing raw access; BaseExceptions propagate.
+    on_cleanup: no-argument backend cleanup after the admitted body, on success
+        or failure, before on_end and admission release. Exceptions propagate.
+        This callback does not enable stage clocks or outcome notification.
     Callbacks default to None and must not reenter acquisition.
     """
 
@@ -101,6 +104,7 @@ class SimulationCallbacks:
     on_end: Callable[[AcquireOutcome], None] | None = None
     on_begin: Callable[[], None] | None = None
     on_materialize: Callable[[str, float], None] | None = None
+    on_cleanup: Callable[[], None] | None = None
 
 
 class SimulationBinding:
@@ -185,7 +189,9 @@ class SimulationBinding:
         Exceptions emit at most one warning and never mask an acquisition error,
         even under -W error. BaseExceptions propagate, retaining any acquire
         error as context. callbacks=None supplies no lifecycle hooks.
-        on_end=None avoids acquire stage clocks and completion notifications.
+        on_end=None avoids acquire stage clocks and outcome notifications.
+        callbacks.on_cleanup runs for any admitted acquire before notification;
+        its errors propagate without holding admission.
         callbacks.on_materialize optionally observes successful deferred raw
         materialization, including when called after a subsequent acquire.
 
@@ -211,6 +217,7 @@ class SimulationBinding:
         self.envelope_pool = EnvelopePool()
         self._wait_ready = hooks.wait_ready
         self._on_begin = hooks.on_begin
+        self._on_cleanup = hooks.on_cleanup
         self.capture_snapshot = capture_snapshot
         self.execute = execute
         entropy = np.random.SeedSequence(seed).entropy
@@ -235,9 +242,10 @@ class SimulationBinding:
         or notifying on_end. Admission resets rounds and stage times; a later
         failure still consumes sequence. last_request is unchanged until install.
         Concurrent/reentrant entry raises RuntimeError without consuming sequence.
-        The observer receives the body's normal-return/escaping-error outcome
-        after cleanup. Ordinary observer Exceptions warn once; BaseExceptions
-        propagate. Admission releases in either case.
+        Backend cleanup runs after the admitted body, before any outcome observer.
+        The observer receives the normal-return/escaping-error outcome after cleanup.
+        Ordinary observer Exceptions warn once; BaseExceptions propagate.
+        Admission releases in all cases.
         """
         if not self._admission.acquire(blocking=False):
             raise RuntimeError("simulation acquisition is already active (reentry)")
@@ -256,10 +264,14 @@ class SimulationBinding:
             self._active_sequence = sequence
             complete = False
             try:
-                yield sequence
+                try:
+                    yield sequence
+                finally:
+                    self._active_sequence = None
+                    if self._on_cleanup is not None:
+                        self._on_cleanup()
                 complete = True
             finally:
-                self._active_sequence = None
                 self._notify_outcome(sequence, complete=complete)
         finally:
             self._admission.release()
