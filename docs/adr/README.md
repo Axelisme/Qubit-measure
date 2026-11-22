@@ -86,6 +86,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：懂物理的操作員不讀程式碼就能判讀實驗。圖只放判讀所需資訊，adapter 提供 GUI 與 MCP 共用摘要，一維逐點誤差用 shot SEM，見 [ADR-0069](0069-experiment-core-and-frontends.md#呈現規範)。
 
+原則：Measure 圖磚以 12×9 in 排版，只等比縮放整張圖；R7 在存檔 PNG 檢查版面，見 [ADR-0069](0069-experiment-core-and-frontends.md#圖以固定存檔幾何排版)。
 原則：平均 IQ 的一維圖預設用主軸投影，二維 flux／頻率圖用逐 bias 扣背景後的幅值，改用其他量須寫明理由，見 [ADR-0069](0069-experiment-core-and-frontends.md#平均-iq-的投影慣例)。
 
 原則：只有準備誤差不移動 gg、ee 兩組共用的參數時，才保留獨立 heralded 實驗，見 [ADR-0074](0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)。

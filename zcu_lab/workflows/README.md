@@ -140,8 +140,10 @@ Saver 收 Completed、歷史 snapshot 與 scope.identity，不重新捕捉 evide
 每次 run attempt 建獨立 operation Plots，workflow 趨勢圖留在 env.plots。
 Pane/MCP 以 operation/<name> 顯示目前 attempt，workflow 圖名不能用 operation/ 前綴。
 
-Operation 圖只作即時呈現。保存 PNG 要從 completed.value.result 重畫到 workflow 圖，再用 env.plots.save。
-保存尺寸不隨 GUI tile 改變。單面板為 640×480，frequency 為 1280×960，Rabi 為 1280×480，
+Operation 圖只作即時呈現。Measure 的 Workflow 圖磚以 12×9 in 排版，再等比嵌入，
+見 [Figure presentation](../../lib/zcu_tools/gui/app/measure/README.md#figure-presentation)。
+保存 PNG 要從 completed.value.result 重畫到 workflow 圖，再用 env.plots.save。
+以下是 workflow 自己的 PNG 匯出尺寸，不隨 GUI 圖磚改變。單面板為 640×480，frequency 為 1280×960，Rabi 為 1280×480，
 coherence lifetime 為 640×960。保存時沿用 constrained layout，未設定 layout 的圖套 tight layout。
 Overnight 與 overnight_mux 只保存 native 資料，不自動保存 PNG。
 Coherence 與 MIST 共用 frequency、LenRabi、AmpRabi 與 readout 校準圖，依選定模式建立，每個完成的 flux 點保留一列掃描資料，僅供本次 run 畫圖。

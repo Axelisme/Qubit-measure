@@ -141,7 +141,6 @@ class PlotAxesObservation:
     visible_curves: int  # Nontransparent stroked line paths intersecting the axes.
     xlim: tuple[float, float]  # Displayed horizontal data limits.
     ylim: tuple[float, float]  # Displayed vertical data limits.
-    bounds: tuple[float, float, float, float]  # Global logical x/y/width/height.
     annotations: tuple[str, ...]  # Visible nonempty text artists on these axes.
 
 
