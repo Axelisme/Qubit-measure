@@ -7,7 +7,10 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
-from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
+from zcu_tools.analysis.shot_uncertainty import (
+    class_probability_covariance,
+    corrected_population_sem,
+)
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
@@ -253,7 +256,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 "Acquire a new run."
             )
 
-        populations = correct_populations(populations, options.confusion_matrix)
+        populations = correct_populations(
+            populations, options.confusion_matrix, clip=False
+        )
+        sem = corrected_population_sem(result.counts, options.confusion_matrix)
 
         # 2. Use gain coordinates unless a photon-number calibration is supplied.
         if options.ac_coeff is None:
@@ -265,11 +271,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         # 3. Show probe-induced populations with optional logarithmic gain/photon axis.
         _, ax = plots.subplots(num="fit", figsize=(7, 5), layout="constrained")
-        covariance = class_probability_covariance(result.counts)
-        if options.confusion_matrix is not None:
-            jacobian = np.linalg.solve(options.confusion_matrix.T, np.eye(3))
-            covariance = jacobian @ covariance @ jacobian.T
-        sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
         for index, (label, color) in enumerate(
             zip(
                 ("P(g)", "P(e)", "P(other)"),

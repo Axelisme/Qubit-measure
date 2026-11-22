@@ -7,7 +7,10 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
-from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
+from zcu_tools.analysis.shot_uncertainty import (
+    class_probability_covariance,
+    corrected_population_sem,
+)
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
@@ -288,7 +291,8 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
                 "Reset check requires (gain, branch, G/E/Other) populations"
             )
         populations = result.counts / result.counts.sum(axis=-1, keepdims=True)
-        populations = correct_populations(populations, confusion_matrix)
+        populations = correct_populations(populations, confusion_matrix, clip=False)
+        sem = corrected_population_sem(result.counts, confusion_matrix)
 
         # 2. Summarize finite reset-only samples, not reset-channel fidelity.
         reset_e = populations[:, 1, 1]
@@ -305,11 +309,6 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         )
 
         # 3. Compare the three branches, with upward/downward shot sampling errors.
-        covariance = class_probability_covariance(result.counts)
-        if confusion_matrix is not None:
-            jacobian = np.linalg.solve(confusion_matrix.T, np.eye(3))
-            covariance = jacobian @ covariance @ jacobian.T
-        sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
         fig, _ = plots.subplots(
             num="populations",
             ncols=3,

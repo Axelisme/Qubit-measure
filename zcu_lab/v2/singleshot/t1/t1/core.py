@@ -12,7 +12,10 @@ from zcu_tools.analysis.fitting.multi_decay import (
     fit_dual_transition_rates,
     model_func,
 )
-from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
+from zcu_tools.analysis.shot_uncertainty import (
+    class_probability_covariance,
+    corrected_population_sem,
+)
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
@@ -318,7 +321,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lens = lens[skip:]
         populations = populations[skip:]
 
-        populations = correct_populations(populations, confusion_matrix)
+        populations = correct_populations(populations, confusion_matrix, clip=False)
+        sem = corrected_population_sem(result.counts[skip:], confusion_matrix)
 
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e
@@ -332,11 +336,6 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         t1_b = 1.0 / lambdas[1]
 
         # 3. Render counted fractions and physical decay fit on matching panels.
-        covariance = class_probability_covariance(result.counts[skip:])
-        if confusion_matrix is not None:
-            jacobian = np.linalg.solve(confusion_matrix.T, np.eye(3))
-            covariance = jacobian @ covariance @ jacobian.T
-        sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
         fig, _ = plots.subplots(
             num="fit",
             nrows=2,

@@ -7,7 +7,10 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
-from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
+from zcu_tools.analysis.shot_uncertainty import (
+    class_probability_covariance,
+    corrected_population_sem,
+)
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
@@ -254,14 +257,10 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
                 "Acquire a new run."
             )
 
-        populations = correct_populations(populations, options.confusion_matrix)
-        covariance = class_probability_covariance(result.counts)
-        if options.confusion_matrix is not None:
-            jacobian = np.linalg.solve(
-                options.confusion_matrix.T, np.eye(POPULATION_COUNT)
-            )
-            covariance = jacobian @ covariance @ jacobian.T
-        sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
+        populations = correct_populations(
+            populations, options.confusion_matrix, clip=False
+        )
+        sem = corrected_population_sem(result.counts, options.confusion_matrix)
 
         # 2. Show all three populations versus probe frequency, without a spectral fit.
         _, ax = plots.subplots(num="fit", figsize=(7, 5), layout="constrained")

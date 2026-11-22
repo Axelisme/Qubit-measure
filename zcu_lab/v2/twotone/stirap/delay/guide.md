@@ -13,7 +13,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the s
 
 Live shows measured g/e/f fractions versus requested Stokes lead in µs; unfinished points stay blank. Analyze skips unfinished or empty points and plots measured and corrected fractions in separate panels, using the Run's saved calibration. The corrected values can lie outside [0, 1].
 
-One bar is one shot SEM. For measured fraction p from N > 1 retained shots, SEM is √[p(1−p)/(N−1)]. The corrected panel propagates the three-label count covariance through the correction. Neither bar is a fit error, a shot or round spread, or classifier training uncertainty. Missing, empty or single-shot points have no bar.
+One bar is one shot SEM. For measured fraction p from N > 1 retained shots, SEM is √[p(1−p)/(N−1)]. The corrected panel propagates the retained shots' three-label count covariance with the saved calibration matrix treated as known. The bars do not show fit errors or shot or round spread. Missing, empty or single-shot points have no bar.
 
 A large matrix condition number or small minimum singular value means the correction amplifies count noise. Preparation-label fractions are not transfer fidelity or proof of state purity.
 

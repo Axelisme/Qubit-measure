@@ -1,7 +1,11 @@
 """Shot-sampling uncertainty from retained IQ moments or class counts."""
 
+import logging
+
 import numpy as np
 from numpy.typing import NDArray
+
+logger = logging.getLogger(__name__)
 
 _ROUNDING_RTOL = 16 * np.finfo(np.float64).eps
 
@@ -133,3 +137,39 @@ def class_probability_covariance(
     return (
         column * (np.eye(counts.shape[-1]) - p[..., None, :]) / (n - 1)[..., None, None]
     )
+
+
+def corrected_population_sem(
+    counts: NDArray[np.float64] | NDArray[np.int64],
+    confusion_matrix: NDArray[np.float64] | None,
+) -> NDArray[np.float64]:
+    """Return per-class shot SEMs, treating the readout calibration as fixed.
+
+    ``counts`` follows ``class_probability_covariance``. ``confusion_matrix``
+    is (K, K), with true-state rows and classified-state columns. Propagate
+    the covariance through its transposed inverse; None leaves it unchanged.
+    The result has the same shape as ``counts``. Singular or nonfinite
+    calibration and other undefined SEMs produce NaN and a warning. A
+    wrongly shaped matrix or invalid counts raise ValueError.
+    """
+    covariance = class_probability_covariance(counts)
+    if confusion_matrix is not None:
+        classes = counts.shape[-1]
+        if confusion_matrix.shape != (classes, classes):
+            raise ValueError("confusion matrix must match both class axes")
+        if not np.isfinite(confusion_matrix).all():
+            logger.warning("Omitting corrected shot SEMs: nonfinite confusion matrix")
+            return np.full(counts.shape, np.nan)
+        try:
+            jacobian = np.linalg.solve(confusion_matrix.T, np.eye(classes))
+        except np.linalg.LinAlgError:
+            logger.warning("Omitting corrected shot SEMs: singular confusion matrix")
+            return np.full(counts.shape, np.nan)
+        with np.errstate(over="ignore", invalid="ignore"):
+            covariance = jacobian @ covariance @ jacobian.T
+    variance = np.diagonal(covariance, axis1=-2, axis2=-1)
+    finite = np.isfinite(variance)
+    missing = finite.size - np.count_nonzero(finite)
+    if missing:
+        logger.warning("Omitting %d shot SEMs: nonfinite sampling variance", missing)
+    return np.sqrt(np.where(finite, np.maximum(variance, 0.0), np.nan))

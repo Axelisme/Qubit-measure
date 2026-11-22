@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-22，K-cycle joint 殘差
+**Last updated:** 2026-11-23，讀出校正後的 shot SEM
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -34,10 +34,12 @@ Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交�
 
 ## 逐點 shot SEM
 
-[`shot_uncertainty`](shot_uncertainty.py) 依來源提供兩種估計。`iq_shot_sem` 接收
+[`shot_uncertainty`](shot_uncertainty.py) 從保留 shots 的 IQ 總和或分類計數估計抽樣誤差。`iq_shot_sem` 接收
 ADR-0074 的單次讀出 IQ 總和 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]`。它取指定 IQ 投影的樣本標準差，再除以 √N。
 `class_probability_covariance` 用保留 shots 的 one-hot 樣本共變異除以 N 估計平均機率的共變異。
 對角元素開根號就是各類的二項 SEM。比例為 0 或 1 時樣本變異數為 0，不代表信賴區間。
+`corrected_population_sem` 視讀出校正矩陣為已知，用其轉置的逆傳遞 shot 共變異，取對角元素開根號。
+它不估計校正矩陣本身的誤差。算不出有限 SEM 時以 NaN 回傳並記錄警告；接近奇異不另設門檻。
 兩者都以實際保留的 shots 為分母，不估計輪間散布、RB 的 seed 散布或擬合參數誤差。
 少於兩發或缺測（NaN）時，該點誤差未定。負、非整數、無窮計數及其加總溢位會報錯。
 IQ 估計也拒絕無窮矩、超過捨入誤差的負中心平方和，以及不可能的中心共變異，不受選定的投影方向影響。
