@@ -84,7 +84,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：adapter 解析元件身分，cfg 收位置數值，分析 options 收顯示名。同一位置不跨層翻譯，實驗只驗所需能力，見 [ADR-0069](0069-experiment-core-and-frontends.md#身分定位與顯示)。
 
-原則：懂物理的操作員不讀程式碼就能判讀實驗。圖只放判讀所需資訊，adapter 提供 GUI 與 MCP 共用摘要，一維逐點誤差用 shot SEM，見 [ADR-0069](0069-experiment-core-and-frontends.md#呈現規範)。
+原則：懂物理的操作員不讀程式碼就能判讀實驗。圖只放判讀所需的事實，預選理由留在 Writeback；adapter 提供 GUI 與 MCP 共用摘要。一維逐點誤差包含 shot SEM 及可從 shot 共變異推得的反演標準誤，見 [ADR-0069](0069-experiment-core-and-frontends.md#呈現規範)。
 
 原則：只有準備誤差不移動 gg、ee 兩組共用的參數時，才保留獨立 heralded 實驗，見 [ADR-0074](0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)。
 

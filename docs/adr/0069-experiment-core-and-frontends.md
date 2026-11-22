@@ -161,15 +161,19 @@ GUI application 持有結果與具名圖集合，保存不反向依賴 Qt widget
 
 **規則。** [實驗呈現指南](../../zcu_lab/v2/figure-style.md)定義圖、表單文字、guide 與 recipe 說明的寫法。R0 是共同的驗收原則。懂物理但不熟悉實作的操作員，只看表單、guide、liveplot 與 Analyze 圖，就能說出實驗量什麼、每個參數做什麼、每個圖形元素代表什麼，以及如何判讀結果。
 
-圖只放物理量、模型、擬合結果與判讀所需的標註。Run 身分放在可見的 Analyze 摘要，不印在圖上。Adapter 用該次 cfg 的 Reps×Rounds 與實驗已回傳的實際施加值提供摘要行。GUI 與 MCP 的 [`AnalysisPresentation`](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation) 顯示同一份行，不各自組裝。摘要行不經 [[0062]]〈一個 run 的 operation〉的 workflow operation wire。圖的標題與圖例由各實驗 core 編寫，不建立共用 formatter。Run 頁的按鈕名為 `Defaults`，表單的物理欄位仍用 `Reset`。
+圖只放物理量、模型、擬合結果與判讀所需的事實。結果旁列出 core 或分析已回傳的品質值，繪圖端不重算。圖可以標擬合失敗或標準誤無法估計，不標指標是否通過門檻。寫回預選與否及理由由 adapter 在 Writeback review note 提供，留給操作員決定。Guide 解釋品質指標的意義，不列這些指標的選取或寫回預選門檻。
+
+Run 身分放在可見的 Analyze 摘要，不印在圖上。Adapter 用該次 cfg 的 Reps×Rounds 與實驗已回傳的實際施加值提供摘要行。GUI 與 MCP 的 [`AnalysisPresentation`](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation) 顯示同一份行，不各自組裝。摘要行不經 [[0062]]〈一個 run 的 operation〉的 workflow operation wire。圖的標題與圖例由各實驗 core 編寫，不建立共用 formatter。Run 頁的按鈕名為 `Defaults`，表單的物理欄位仍用 `Reset`。
 
 R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Data 頁的縮圖用來辨識與選取各 stage 的具名圖；Data 的 R7 在 [`View figure` 閱讀面](../../lib/zcu_tools/gui/app/measure/ui/README.md)檢查同一張當前原生 Figure 依閱讀尺度重繪後的畫面，放不下就捲動，不縮小字級。
 
-一維系列若能用現有 shot 資料估計 SEM，就畫逐點 shot SEM，spectrum 也一樣。IQ 散點及二維圖不畫逐點 error bar。Shot SEM 是每發樣本標準差除以保留 shot 數的平方根，表示該點平均值的預期誤差。Run 與 Analyze 的一維連續掃描，沒有擬合曲線時連接量測點，有擬合曲線時只留量測點及可用的誤差棒。類別軸不連線。顯示用時間寫 `µs`，gain、amplitude 與倍率寫 `a.u.`，機率寫出機率名稱，計數寫 `count`。存檔單位照[保存、發現與範圍](#保存發現與範圍)，不受顯示詞彙影響。
+一維系列若能用現有 shot 資料估計 SEM，就畫逐點誤差棒，spectrum 也一樣。對逐發平均，shot SEM 是每發樣本標準差除以保留 shot 數的平方根。對反演量，若能從原始量的 shot 共變異矩陣以一階誤差傳遞求出有限的逐點標準誤，也畫棒。校正矩陣視為已知，棒只含本次 shot 的抽樣誤差。一維讀出校正布居的圖與擬合使用同一個不截斷的線性估計。
 
-**例子。** T2 Ramsey 的 Analyze 圖按規範畫量測點、密網格 fit 與「T2* = 值 ± 誤差 µs」。cfg 的 Reps×Rounds 和實際施加的 detune 放在摘要。Rabi 和 T1 的 shot SEM 表達各點平均值的預期誤差。Two-tone spectrum 有 shot SEM 時也畫誤差棒，沒有擬合曲線時連接量測點。
+Run 與 Analyze 的一維連續掃描，沒有擬合曲線時連接量測點，有擬合曲線時只留量測點及可用的誤差棒。類別軸不連線。顯示用時間寫 `µs`，gain、amplitude 與倍率寫 `a.u.`，機率寫出機率名稱，計數寫 `count`。存檔單位照[保存、發現與範圍](#保存發現與範圍)，不受顯示詞彙影響。
 
-**邊界。** 採集摘要不列完成輪數、是否提前停或 shot 數，不擴充 `RunMetadata`，也不改 [[0062]] 的 Schedule facts 規則。各實驗決定是否保存實際施加值。重開檔案缺某個值就不顯示，不能用現行表單補值。Shot SEM 估計器歸 `zcu_tools.analysis`；fit 參數誤差與 RB 的跨 seed 標準差留在原 owner。只存平均的實驗在家族修正時加二階 moment，不移除舊欄位；舊檔仍可 Load，缺資料時不畫 error bar。除此之外，呈現修正沿用現有資料，不改取數。指南的 fit 品質、population 軸、分支標籤，以及表單、guide 與 recipe 文字細則是 designer 代裁，使用者未覆核。Ding 博論只作版式與標註參考，不把相近的圖視為同一實驗。
+**例子。** T2 Ramsey 的 Analyze 圖按規範畫量測點、密網格 fit 與「T2* = 值 ± 誤差 µs」。cfg 的 Reps×Rounds 和實際施加的 detune 放在摘要。Rabi 的 shot SEM 表達各點平均值的預期誤差。讀出校正 T1 的 `P(e) = −0.004 ± 0.006` 保留負值與跨過 0 的棒。T2 Echo 若有已回傳的 R²，圖列該數值，候選未預選的理由留在 Writeback。Two-tone spectrum 有 shot SEM 時也畫誤差棒，沒有擬合曲線時連接量測點。
+
+**邊界。** 採集摘要不列完成輪數、是否提前停或 shot 數，不擴充 `RunMetadata`，也不改 [[0062]] 的 Schedule facts 規則。各實驗決定是否保存實際施加值。重開檔案缺某個值就不顯示，不能用現行表單補值。Shot SEM 估計器歸 `zcu_tools.analysis`；fit 參數誤差與 RB 的跨 seed 標準差留在原 owner。IQ 散點與二維圖不畫逐點誤差棒，二維校正不變。Score 不當作逐發平均來套 shot SEM。只存平均的實驗在家族修正時加二階 moment，不移除舊欄位；舊檔仍可 Load。缺必要統計量就不畫棒，guide 說明缺哪一項；反演點有限但標準誤不可得時，只省略該棒。呈現修正不為補反演棒改取數或存檔。使用者未覆核的 designer 代裁項目包括指南的其餘 fit 品質細則、一般 population 軸、分支標籤，以及其餘表單、guide 與 recipe 文字細則。Ding 博論只作版式與標註參考，不把相近的圖視為同一實驗。
 
 **依據。** 見[呈現規範討論](../discussions/2026-11-22-presentation-rules.md)與[摘要及誤差棒的責任分工](../discussions/2026-11-22-shared-presentation-facts.md)。原始問答未入庫。
 
@@ -180,6 +184,8 @@ R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Data 頁的�
 - 2026-11-22，Data 頁保留縮圖選圖、改以閱讀面驗 R7，是 designer 依夜間授權代裁，使用者未覆核。使用者同日要求：「那注意排版啊，那个 GUI 的版面配置可能不是正规的四乘三或者什么的，然后字体大小之类的要注意缩放，比如说在 Save 页面可能会变得比较窄」。見[在 Measure Data 頁讀原圖](../discussions/2026-11-22-data-figure-reading.md)。
 - 2026-11-22，使用者在 shot SEM 與輪間散布之間選「A」，補充「像我其实更想要设计的，其实应该是平均标准差，也就是这个点的预期误差。」數值估計器放 analysis、標題與圖例留在 core 是 designer 代裁，使用者未覆核。
 - 2026-11-22，使用者：「如果拟合曲线本身就是连线的，那数据点就不用。但如果没有拟合曲线，那就要连线。」使用者選「全面套用」，並要求 spectrum 也畫可用的 shot SEM。見[量測點何時連線與 spectrum 的 error bar](../discussions/2026-11-22-data-point-lines.md)。
+- 2026-11-23，使用者：「反演出來的量如果可以從變異矩陣推導那也畫。」看過一維校正、適用範圍與矩陣不確定度的選項後，回答「1B 23可以」。見[一維反演量的誤差棒與圖上事實](../discussions/2026-11-23-inverted-error-bars-and-figure-facts.md)。
+- 2026-11-23，使用者：「figure-style 的「圖上呈現既有判定」我想撤回，想聽你的意見，我自己認為這應該是讀者的權利，不是機器的權利，後者只能給建議，但也不是放在圖裡」。討論後確認：「我認同判斷標準是「事實」還是「判斷」」。見同篇[討論](../discussions/2026-11-23-inverted-error-bars-and-figure-facts.md#圖上事實與寫回建議)。
 
 ### 三種分析生命週期
 
