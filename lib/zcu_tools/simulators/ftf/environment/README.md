@@ -799,8 +799,12 @@ then calibrate once per receiver. Single-carrier fast paths and evolution are un
 
 The receiver noise PSD is two-sided, in ADC sample units squared times ns.
 Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
-does not scale noise. Integrated acquisition returns `IntegratedRound` with
-compact `RoundStatistics` and a separate ADC-owned `RawShots` source.
+does not scale noise.
+
+<a id="compact-statistics"></a>
+
+Integrated acquisition returns `IntegratedRound` with compact
+`RoundStatistics` and a separate ADC-owned `RawShots` source.
 For FTF projective reads, ADC draws one set of transition flows per point.
 The `state_counts` partition that point's reps over shared cumulative-count
 bins that encode each logical event's marginal histogram. The category axis

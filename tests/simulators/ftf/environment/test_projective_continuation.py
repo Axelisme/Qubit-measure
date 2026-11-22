@@ -33,6 +33,7 @@ from zcu_tools.simulate.evolution import (
     read_physical_input,
 )
 from zcu_tools.simulators.ftf.environment import FTFSource, plan_template
+from zcu_tools.simulators.ftf.environment.cavity import ProjectiveCapture
 from zcu_tools.simulators.ftf.environment.numeric import resonators
 from zcu_tools.simulators.ftf.physics import CavityDrive, CavityResponse
 
@@ -596,6 +597,38 @@ def captured_projective_source(projective_case, tmp_path, monkeypatch):
         )
     ) as source:
         yield source, engine, acquire
+
+
+def test_capture_provenance_cannot_override_span_metadata(captured_projective_source):
+    source, engine, acquire = captured_projective_source
+    source.open_acquire(acquire).sample_round(snapshot(), 0)
+    model, batches = engine.calls[0]
+    buffer = CaptureBuffer()
+    capture = ProjectiveCapture(buffer)
+    span = (0.0, 2.0)
+    nodes = {str(batches[0].points[0]): None}
+    with capture.recording(
+        1,
+        0,
+        span,
+        {
+            "event_index": None,
+            "nodes": nodes,
+            "round_index": 99,
+            "point": 99,
+            "span_ns": (),
+        },
+    ):
+        engine.evolve(model, batches, capture=buffer)
+
+    capture_id = read_capture_metadata(buffer.records[0])["capture_id"]
+    assert capture.spans[capture_id] == {
+        "event_index": None,
+        "nodes": nodes,
+        "round_index": 1,
+        "point": 0,
+        "span_ns": span,
+    }
 
 
 @pytest.mark.parametrize("fail_second_round", [False, True], ids=["success", "failure"])

@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Sequence
+from contextlib import closing
 from dataclasses import replace
 from typing import override
 
@@ -18,6 +19,7 @@ from zcu_tools.simulate.boundary import (
     CancellationQuery,
     RoundSignals,
     SamplingIdentity,
+    TimelineTemplate,
 )
 from zcu_tools.simulate.evolution import (
     CaptureBuffer,
@@ -326,8 +328,8 @@ def test_mux_herald_postselection_retains_joint_ground_and_reports_nodes(
         env.devices.close_all_devices()
 
 
-class FlipAtTerminal(EngineDouble):
-    """An exact population flip in the last span before the terminal read."""
+class FlipAtSecondRead(EngineDouble):
+    """Flip populations in the span ending at the fixture's second read."""
 
     @override
     def evolve(
@@ -387,7 +389,7 @@ def test_compact_bins_partition_reps_and_weight_each_reads_own_flip_marginal(
         DeviceManager(),
         soccfg=profile_soccfg("ftf"),
         readout=readout,
-        engine=FlipAtTerminal(),
+        engine=FlipAtSecondRead(),
     )
     acquire = replace(request(templates=(base,)), reps=20000)
     try:
@@ -476,7 +478,7 @@ def test_flipping_chain_preserves_raw_and_trace_pairs_with_terminal_only_adc(
         DeviceManager(),
         soccfg=profile_soccfg("ftf"),
         readout=readout,
-        engine=FlipAtTerminal(),
+        engine=FlipAtSecondRead(),
     )
     acquire = replace(request(mode, templates=(base,)), reps=64)
     try:
@@ -572,7 +574,7 @@ def test_unobserved_terminal_still_evolves_without_adding_an_adc_column(mode):
         DeviceManager(),
         soccfg=profile_soccfg("ftf"),
         readout=readout,
-        engine=FlipAtTerminal(),
+        engine=FlipAtSecondRead(),
     )
     try:
         result = source.open_acquire(request(mode, templates=(base,))).sample_round(
@@ -704,7 +706,7 @@ def test_configured_floor_keeps_low_weight_state_instead_of_redistributing_it():
         DeviceManager(),
         soccfg=profile_soccfg("ftf"),
         readout=readout,
-        engine=FlipAtTerminal(),
+        engine=FlipAtSecondRead(),
     )
     try:
         initial = source.model_facts(snapshot()).source.initial_density.diagonal().real
@@ -734,18 +736,7 @@ def test_configured_floor_keeps_low_weight_state_instead_of_redistributing_it():
         source.close()
 
 
-def test_two_projections_preserve_both_herald_states_in_conditional_statistics():
-    base, readout = herald_template()
-    assert readout.mux is not None
-    readout = replace(
-        readout,
-        mux=replace(
-            readout.mux,
-            receivers=tuple(
-                replace(receiver, gain=1e8) for receiver in readout.mux.receivers
-            ),
-        ),
-    )
+def _with_third_read(base: TimelineTemplate) -> TimelineTemplate:
     last = tuple(
         replace(event, start_ticks=event.start_ticks + ticks(0.012))
         for event in base.events[-2:]
@@ -770,11 +761,58 @@ def test_two_projections_preserve_both_herald_states_in_conditional_statistics()
         replace(event, duration_ticks=tick_array(np.full(2, 0.002)))
         for event in base.events[-2:]
     )
-    template = replace(
+    return replace(
         base,
         events=(*base.events[:2], *middle, *last),
         readouts=windows,
         duration_ticks=base.duration_ticks + ticks(0.012),
+    )
+
+
+def test_second_transition_routes_the_state_populated_by_first_transition():
+    base, readout = herald_template()
+    numeric = settings().with_telemetry(enabled=False)
+    numeric = numeric.model_copy(
+        update={
+            "numerics": numeric.numerics.model_copy(
+                update={"projection_weight_floor": 0.5}
+            )
+        }
+    )
+    with closing(
+        FTFSource(
+            numeric,
+            DeviceManager(),
+            soccfg=profile_soccfg("ftf"),
+            readout=readout,
+            engine=FlipAtSecondRead(),
+        )
+    ) as source:
+        acquire = request(templates=(_with_third_read(base),))
+        source.open_acquire(acquire).sample_round(snapshot(), 0)
+
+        # The first transition flips the ground state into the excited state.
+        # Only that flipped state should enter the second transition.
+        observed = {
+            (span.point, span.event_index, state)
+            for span in source.evaluations[0].projective_spans
+            if span.event_index is not None
+            for _, state in span.nodes
+        }
+        assert observed == {(0, 0, 0), (1, 0, 0), (0, 1, 1), (1, 1, 1)}
+
+
+def test_two_projections_preserve_both_herald_states_in_conditional_statistics():
+    base, readout = herald_template()
+    assert readout.mux is not None
+    readout = replace(
+        readout,
+        mux=replace(
+            readout.mux,
+            receivers=tuple(
+                replace(receiver, gain=1e8) for receiver in readout.mux.receivers
+            ),
+        ),
     )
     numeric = settings().with_telemetry(enabled=False)
     chip = numeric.chip.model_copy(
@@ -799,9 +837,9 @@ def test_two_projections_preserve_both_herald_states_in_conditional_statistics()
         engine=EngineDouble(),
     )
     try:
-        result = source.open_acquire(request(templates=(template,))).sample_round(
-            snapshot(), 0
-        )
+        result = source.open_acquire(
+            request(templates=(_with_third_read(base),))
+        ).sample_round(snapshot(), 0)
         statistics = expect_statistics(result)
         report = source.evaluations[0]
         assert report.projection_continued_states == ((2, 2), (2, 2))

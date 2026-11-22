@@ -329,7 +329,9 @@ each I/Q component. The common flow draw preserves the correlations between
 these totals due to event occupancies. It does not yield a shot-level IQ joint,
 CTMC trajectory variance, or cross-read receiver-noise covariance. ADC adds
 Gaussian noise to each read total independently, including the nearest-even
-rounding variance term.
+rounding variance term. See [FTF compact statistics](../../simulators/ftf/environment/README.md#compact-statistics)
+for the environment's output and the [Program statistics contract](../../program/v2/simulation/README.md#compact-timelines-and-statistics)
+for the acquisition handoff.
 
 The environment supplies projection probabilities in the retained DC energy
 basis. ADC neither chooses projection times nor applies the identity floor.

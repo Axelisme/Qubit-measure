@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-21, required raw shots and integrated round publication
+**Last updated:** 2026-11-22, compact statistics references
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -370,6 +370,9 @@ an independent RawShots source with retained noiseless inputs and a local round
 identity.
 Requesting shots calls that source without rerunning evolution or the backend.
 Raw ADC values remain int64, and round indices select distinct sampling streams.
+See [FTF compact statistics](../../../simulators/ftf/environment/README.md#compact-statistics)
+for the environment's output and [ADC projection sampling](../../../simulate/adc/README.md#projection-readout-and-sampling)
+for how the event marginals become category counts and conditional sums.
 
 Python loop counts do not grow with shots or sweep points. Template construction,
 grouping and sampling use NumPy arrays or numba kernels for point-dependent work.
