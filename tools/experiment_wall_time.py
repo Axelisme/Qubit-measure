@@ -303,13 +303,10 @@ def _input_hashes(data_dir: Path, ftf_dir: Path) -> dict[str, str]:
     paths = {
         name: data_dir / name
         for name in ("board-profile.yaml", "case-inputs.json", "overrides.json")
+    } | {
+        (_FTF_DIR.relative_to(_REPO_ROOT) / name).as_posix(): ftf_dir / name
+        for name in ("default.yaml", "entry-template.yaml", "entry-library.yaml")
     }
-    paths.update(
-        {
-            (_FTF_DIR.relative_to(_REPO_ROOT) / name).as_posix(): ftf_dir / name
-            for name in ("default.yaml", "entry-template.yaml", "entry-library.yaml")
-        }
-    )
     return {key: sha256(path.read_bytes()).hexdigest() for key, path in paths.items()}
 
 
@@ -533,11 +530,8 @@ def _measure_run(
     with ExitStack() as cleanup:
         project = telemetry.parent / "project"
         project.mkdir()
-        soccfg = build_soccfg(
-            yaml.safe_load(
-                (data_dir / "board-profile.yaml").read_text(encoding="utf-8")
-            )
-        )
+        profile = data_dir / "board-profile.yaml"
+        soccfg = build_soccfg(yaml.safe_load(profile.read_text(encoding="utf-8")))
         settings = load_ftf(owner.ftf_dir / "default.yaml").with_telemetry(
             enabled=True,
             directory=telemetry.resolve(),
@@ -800,35 +794,21 @@ def main(
 ) -> int:
     """Write report.json, summary.md and isolated telemetry for selected Runs.
 
-    argv accepts repeatable --select (exact adapter key or first-segment family)
-    and --output (a new directory). None reads sys.argv. With no selectors,
-    measure every registered adapter. With no output, create a timestamped path
-    under the repository's wall-time output root. data_dir holds the board,
-    case declarations and overrides. ftf_dir holds the FTF preset, entry
-    template and module library, defaulting to the standard FTF source directory.
-    discover lists the adapters and guides and supplies a runner. With no discover override, use
-    the offline Controller and pass --workers (a positive integer, default 1)
-    to each simulated FTF environment. read_commit supplies the batch revision;
-    by default read Git HEAD. The default runner stamps each telemetry row with
-    that revision and Git's dirty status captured once before dispatch. Input,
-    Run and output errors propagate. Bad
-    CLI arguments exit with usage status. --report-only rebuilds both reports
-    from the existing --output, without discovery or dispatch. A start without
-    a result is incomplete and provides no duration or lower bound. --resume-from
-    retains resolved rows from a journal with matching commit and input hashes,
-    and runs only missing selected cases. Return 0 if all reported rows are
-    resolved (including timeout and run_failed), or 3 if the report contains
-    incomplete or not_run rows. KeyboardInterrupt stops the batch and reports
-    from its journal under the same exit status rule.
+    None argv reads sys.argv; see --help for CLI options. data_dir holds the
+    board profile, case declarations and overrides. ftf_dir holds the preset,
+    entry template and library; it defaults to the standard FTF source. discover
+    supplies an Inventory instead of the offline Controller. read_commit supplies
+    the batch revision (Git HEAD by default); the Controller stamps it and the
+    pre-dispatch dirty status on acquire telemetry.
+
+    Return 0 if all rows are resolved (including timeout and run_failed) or 3
+    for any incomplete or not_run rows. KeyboardInterrupt stops and reports from
+    the journal under the same rule. Usage errors exit 2; setup and I/O errors
+    propagate. --report-only rebuilds reports without discovery or dispatch.
+    --resume-from retains resolved rows with matching commit and input hashes.
     """
-    return _main(
-        argv,
-        data_dir,
-        discover,
-        read_commit,
-        _Interruption(),
-        _RunOwner(ftf_dir=ftf_dir),
-    )
+    owner = _RunOwner(ftf_dir=ftf_dir)
+    return _main(argv, data_dir, discover, read_commit, _Interruption(), owner)
 
 
 def _main(
