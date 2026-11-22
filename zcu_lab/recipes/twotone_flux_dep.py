@@ -27,47 +27,47 @@ class TwotoneFluxDepInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key.",
+        description="Select Readout, the calibrated resonator readout after each probe; omit to keep the form source.",
     )
     center_mhz: float = Field(
-        description="Required drive-frequency sweep center in MHz."
+        description="Set the midpoint between Probe RF frequency › Start and Stop (MHz)."
     )
     span_mhz: float = Field(
         gt=0,
-        description="Required positive drive-frequency full span in MHz; endpoints are center minus/plus span/2.",
+        description="Set the full span of Probe RF frequency (MHz); Start and Stop are center minus/plus half the span.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed qubit-drive pulse amplitude in native gain units.",
+        description="Set Probe Pulse › Gain (a.u.), the fixed probe amplitude across the map.",
     )
     flux_device: DeviceName = Field(
-        description="Registered flux-device name; read only its cached snapshot, without connecting."
+        description="Set Flux Device, the connected DC bias source to step; this reads its cache without connecting."
     )
     flux_unit: str = Field(
-        description="Exact cached device unit, including native; no coordinate conversion occurs."
+        description="Set Flux unit to the source's cached unit (A, V, or native); the sweep is not converted."
     )
     freq_points: int = Field(
         ge=2,
         strict=True,
-        description="Required drive-frequency sample count, at least two.",
+        description="Set Probe RF frequency › Expts (count), the RF points per spectrum.",
     )
     flux_points: int = Field(
         ge=2,
         strict=True,
-        description="Required native-flux sample count, at least two.",
+        description="Set DC bias › Expts (count), the number of bias spectra.",
     )
     flux_range: list[float] = Field(
         min_length=2,
         max_length=2,
-        description="Two distinct device-native flux endpoints, in either direction; no conversion occurs.",
+        description="Set DC bias › Start and Stop in the chosen Flux unit; the endpoints must differ and may descend.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count.",
+        description="Set Reps (count), the shots per RF point per round.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Rounds (count), the averaging passes at each bias.",
     )
 
 
@@ -75,13 +75,13 @@ class TwotoneFluxDepReport(RecipeReport):
     """Two-tone spectrum over flux results and failure reason; cancellation returns no report."""
 
     flux_half: float | None = Field(
-        description="Accepted half-flux line in device-native coordinates; null means not estimable."
+        description="Half flux in the selected device unit; null means no accepted pick."
     )
     flux_integer: float | None = Field(
-        description="Accepted integer-flux line in device-native coordinates; null means not estimable."
+        description="Integer flux in the selected device unit; null means no accepted pick."
     )
     flux_period: float | None = Field(
-        description="Flux period in device-native coordinates; null means not estimable."
+        description="Flux period in the selected device unit, twice the pick separation; null means no accepted pick."
     )
 
 

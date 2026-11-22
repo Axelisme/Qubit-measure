@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import textwrap
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -142,6 +143,22 @@ def _analyze(
         req.analyze_params,
         plots=plots,
     )
+    for outcome in outcomes:
+        if isinstance(outcome, MuxFitFailure):
+            continue
+        review = coherence_review_note(outcome.t2, outcome.t2_err, outcome.quality)
+        if outcome.fit_fringe:
+            frequency_review = _frequency_review_note(outcome, None)
+            if frequency_review is not None:
+                extra = f"Frequency candidate: {frequency_review}"
+                review = extra if review is None else f"{review}\n{extra}"
+        if review is not None:
+            figure = plots[f"fit_{outcome.index}"]
+            wrapped = "\n".join(
+                textwrap.fill(line, width=83) for line in review.splitlines()
+            )
+            figure.suptitle(f"{figure.get_suptitle()}\n{wrapped}", fontsize=10)
+            figure.tight_layout()
     snapshot = req.run_result.cfg
     return MuxT2RamseyAnalyzeResult(
         outcomes,
@@ -251,12 +268,31 @@ def run(
     return RunRecord(cfg=cfg, result=MuxT2RamseyExp().run(cfg, context=context))
 
 
+def _summary_lines(
+    source: RunRecord[MuxT2RamseyCfg, MuxCoherenceResult],
+) -> tuple[str, ...]:
+    cfg, data = source.cfg, source.result
+    lines = [] if cfg is None else [f"Reps×Rounds {cfg.reps}×{cfg.rounds}"]
+    for index, detune, frequency in zip(
+        data.tone_indices, data.actual_detunes, data.source_frequencies, strict=True
+    ):
+        tone = f"Tone {index}" if cfg is None else cfg.tones[int(index)].name
+        if np.isfinite(frequency):
+            lines.append(f"{tone} · π/2 pulse source frequency = {frequency:.6f} MHz")
+        if np.isfinite(detune):
+            lines.append(f"{tone} · Applied detune = {detune:.6f} MHz")
+    return tuple(lines)
+
+
 DEFINITION = Adapter(
     spec=replace(MuxT2RamseyExp.AXES_SPEC, save_stem=mux_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze, options=_MuxT2Ramsey_options, writeback=_get_writeback_items
+        summary_lines=_summary_lines,
+        fn=_analyze,
+        options=_MuxT2Ramsey_options,
+        writeback=_get_writeback_items,
     ),
 )

@@ -140,6 +140,11 @@ def _run(
     return RunRecord(cfg=cfg, result=AmpRabiExp().run(cfg, context=context))
 
 
+def _summary_lines(source: AmpRabiRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=AmpRabiExp.AXES_SPEC,
     make_form=_AmpRabi_make_form,
@@ -147,6 +152,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_AmpRabi_analyze,
+        summary_lines=_summary_lines,
         options=lambda source, env: AmpRabiAnalyzeOptions(),
         writeback=_AmpRabi_get_writeback_items,
     ),

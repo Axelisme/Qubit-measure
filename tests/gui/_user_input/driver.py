@@ -879,13 +879,23 @@ class ComponentDriver:
         return observing.dialogs(self._window)
 
     def scroll_area(self, *, object_name: str) -> ScrollObservation:
-        """Read a scroll area's visible scrollbar; wrong widget types fail fast."""
+        """Read a scroll area's visible scrollbar and content viewport size."""
         widget = self._find(None, object_name)
         if not isinstance(widget, QScrollArea):
             raise TypeError(f"{object_name!r} is not a QScrollArea")
+        if not on_screen(widget):
+            return ScrollObservation(vertical_scrollable=False, viewport_size=None)
         bar = widget.verticalScrollBar()
+        viewport = widget.viewport()
+        # A viewport filled by its content can have an empty visibleRegion.
+        viewport_size = (
+            (viewport.width(), viewport.height())
+            if viewport is not None and viewport.isVisible()
+            else None
+        )
         return ScrollObservation(
-            bar is not None and on_screen(bar) and bar.maximum() > bar.minimum()
+            bar is not None and on_screen(bar) and bar.maximum() > bar.minimum(),
+            viewport_size,
         )
 
     def legends(self) -> LegendObservation:

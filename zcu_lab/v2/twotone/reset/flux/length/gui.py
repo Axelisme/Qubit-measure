@@ -54,6 +54,13 @@ def _writeback(
     )
 
 
+def _summary_lines(source: RunRecord[LengthCfg, LengthResult]) -> tuple[str, ...]:
+    """Report the saved configuration's requested repetitions and rounds."""
+    if source.cfg is None:
+        return ()
+    return (f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=LengthExp.AXES_SPEC,
     make_form=make_form,
@@ -63,5 +70,6 @@ DEFINITION = Adapter(
         fn=_analyze,
         options=lambda source, env: LengthAnalyzeOptions(),
         writeback=_writeback,
+        summary_lines=_summary_lines,
     ),
 )

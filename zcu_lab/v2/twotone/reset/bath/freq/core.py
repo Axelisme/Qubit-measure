@@ -28,6 +28,11 @@ from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signa
 
 from zcu_lab.v2.support import live_heatmap
 
+_TITLE = "Bath reset cavity sweep · qubit · tomography contrast"
+_XLABEL = "Cavity drive RF frequency (MHz)"
+_YLABEL = "Cavity drive gain (a.u.)"
+_COLOR_LABEL = "Opposite-phase IQ contrast (a.u.²)"
+
 
 @dataclass(frozen=True)
 class FreqGainResult:
@@ -60,17 +65,57 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class FreqGainCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select a preparation reset before each shot, or leave blank to skip it.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Preparation pulse",
+            description="Select the pulse after preparation reset, such as calibrated Xπ, or leave blank to skip it.",
+        ),
+    ] = None
+    tested_reset: Annotated[
+        BathReset.Cfg,
+        FieldMeta(
+            label="Tested reset",
+            description="Fill in the simultaneous cavity and qubit drives and the final tomography π/2 pulse.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Fill in the calibrated resonator readout for the end of each shot.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Cavity drive gain",
+            unit="a.u.",
+            description="Enter the signed gain range of the cavity drive (a.u.).",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Cavity drive RF frequency",
+            unit="MHz",
+            description="Enter the RF frequency range of the cavity drive (MHz).",
+        ),
+    ]
 
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per sweep point and sequence branch in each acquisition round (count).",
         ),
     ]
     rounds: Annotated[
@@ -78,7 +123,7 @@ class FreqGainCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of acquisition rounds to average (count).",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -87,7 +132,7 @@ class FreqGainCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the delay after each shot to let the qubit relax (µs).",
         ),
     ]
 
@@ -156,13 +201,19 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         # 2. Display opposite-phase contrast while retaining all four complex IQ planes.
         plots = context.plots
         fig, ax = plots.subplots(num="measurement")
-        ax.set(xlabel="Cavity Frequency (MHz)", ylabel="Cavity drive Gain (a.u.)")
+        ax.set(xlabel=_XLABEL, ylabel=_YLABEL, title=_TITLE)
         viewer = live_heatmap(ax)
+        fig.colorbar(ax.images[0], ax=ax, label=_COLOR_LABEL)
+        ax.grid(False)
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            return viewer.set(freqs, gains, bathreset_signal2real(data).T)
+            acquired = int(np.count_nonzero(np.isfinite(data).all(axis=0)))
+            title = ax.set_title(
+                f"{_TITLE}\nAcquired cells: {acquired}/{len(freqs) * len(gains)} count"
+            )
+            return (*viewer.set(freqs, gains, bathreset_signal2real(data).T), title)
 
         fig.show()
         signals_buffer = SignalBuffer((4, len(gains), len(freqs)), on_update=update)
@@ -233,20 +284,23 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         # 2. Identify the optimal cavity gain and frequency on the smoothed contrast map.
         fig, ax = plots.subplots(num="fit")
 
-        ax.imshow(
-            real_signals,
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            extent=(freqs[0], freqs[-1], gains[0], gains[-1]),
+        viewer = live_heatmap(ax)
+        (image,) = viewer.set(freqs, gains, bathreset_signal2real(signals).T)
+        left, right, bottom, top = image.get_extent()
+        ax.set(xlim=(left, right), ylim=(bottom, top))
+        fig.colorbar(image, ax=ax, label=_COLOR_LABEL)
+        ax.grid(False)
+        ax.scatter(
+            freq_opt,
+            gain_opt,
+            color="white",
+            edgecolors="black",
+            s=64,
+            marker="*",
+            label=f"Selected cavity drive = {freq_opt:.3f} MHz, {gain_opt:.4g} a.u.",
         )
-        peak_label = f"({gain_opt:.2f} a.u., {freq_opt:.1f} MHz)"
-        ax.scatter(freq_opt, gain_opt, color="r", s=40, marker="*", label=peak_label)
-        ax.set_xlabel("Cavity Frequency (MHz)", fontsize="x-large")
-        ax.set_ylabel("Cavity drive Gain (a.u.)", fontsize="x-large")
-        ax.legend(fontsize="x-large")
-        ax.tick_params(axis="both", which="major", labelsize=12)
-
+        ax.set(xlabel=_XLABEL, ylabel=_YLABEL, title=_TITLE)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16))
         fig.tight_layout()
 
         return FreqGainAnalysis(gain=float(gain_opt), freq=float(freq_opt))

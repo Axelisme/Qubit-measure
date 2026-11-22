@@ -78,8 +78,9 @@ Run 使用 tab 在 Open 或 Defaults 時捕捉的參數來源。
 其後修改 aliases、group resonators 或 library，現有 draft 仍保留原來源。
 需要新來源時按 Defaults 或重新開啟 tab，這會重建初值。Participants 只決定本次量測範圍，完整 readout 保留全部 tones。一般編輯 Participants 不重設任何 tone 值。
 
-Live 圖以共同 offset 為橫軸，每個 active tone 各有一張 `measurement_i` magnitude 圖。
-標題使用原始 tone 序號與 label，空 label 顯示例如 `tone 2`。Label 可以重複。
+每個參與的 tone 各有一張 live 圖。橫軸是 readout tone 的基準 RF 頻率加上表單的共同 offset (MHz)。
+縱軸是平均 IQ 的幅度 (a.u.)，不是態布居。檢查已取得的頻點是不是蓋住共振。
+標題使用 tone 的 label；空 label 顯示原始 tone 序號。Label 可以重複。
 資料軸使用原始 tone 序號。停止後保留已取得資料，未取得點保持 NaN。
 Acquisition 例外直接傳出，當次不發布新 record。
 停止請求不代表資料可用性，Analyze 前須由作者確認已取得資料。
@@ -96,6 +97,11 @@ Labber 匯出保留共同 offset、原始 tone 序號與複數訊號，columns �
 檔案設定缺失或無法恢復時，仍可讀取原始資料，FIT 會報錯並要求有效歷史設定。
 
 ## FIT
+
+Analyze 的幅度圖以量測圓點與模型曲線對照，標線定位共振頻率。用相位與 IQ 圖檢查模型
+能否同時解釋複數軌跡與相位變化，再採用標出的共振頻率。頻譜要定位共振，不畫逐點
+shot SEM。圖上 ± 是擬合參數誤差。R² 表示模型解釋量測變異的比例；正規化殘差 RMS
+表示相對於訊號範圍的典型偏差。
 
 所有 active tones 共用 onetone/freq 的四欄設定。
 Model type 可選 hanger `hm`、transmission `t` 或 `auto`，預設 `hm`。

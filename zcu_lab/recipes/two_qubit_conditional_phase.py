@@ -30,29 +30,40 @@ class ConditionalPhaseInputs(RecipeInputs):
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     ramsey_role: Literal["qubit1", "qubit2"] | None | Keep = Field(
-        KEEP, description="Qubit that measures phase, assigned to Form target."
+        KEEP,
+        description="Form Ramsey target: the qubit that measures phase; the other is the spectator.",
     )
     gate_count: list[Annotated[int, Field(strict=True, ge=1)]] | None | Keep = Field(
-        KEEP, description="Positive CZ train lengths, in gates."
+        KEEP,
+        description="Form CZ gates per shot (count): consecutive positive CZ train lengths.",
     )
     frequency_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
-    ) = Field(KEEP, description="Start and stop of the common CZ frequency in MHz.")
-    frequency_points: int | None | Keep = Field(
-        KEEP, description="Number of frequency samples, mapped to Form Expts."
+    ) = Field(
+        KEEP, description="Start and Stop (MHz) of Form Common CZ drive frequency."
     )
-    reps: int | None | Keep = Field(KEEP, description="Shots per point per round.")
-    rounds: int | None | Keep = Field(KEEP, description="Acquisition round count.")
+    frequency_points: int | None | Keep = Field(
+        KEEP, description="Expts (count) under Form Common CZ drive frequency."
+    )
+    reps: int | None | Keep = Field(
+        KEEP,
+        description="Form Reps (count): attempted shots per sweep point in one round.",
+    )
+    rounds: int | None | Keep = Field(
+        KEEP,
+        description="Form Rounds (count): acquisitions accumulated at each sweep point.",
+    )
 
 
 class ConditionalPhaseReport(RecipeReport):
     """Owner's unique π crossing and reason when there is none."""
 
     frequency_mhz: float | None = Field(
-        default=None, description="Common CZ frequency in MHz at a unique π crossing."
+        default=None,
+        description="Analyze frequency_mhz: common CZ drive frequency at the unique π crossing.",
     )
     frequency_reason: str | None = Field(
-        default=None, description="Owner reason when no unique π crossing is available."
+        default=None, description="Analyze frequency_reason for no frequency proposal."
     )
 
 

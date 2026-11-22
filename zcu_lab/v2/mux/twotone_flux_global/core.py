@@ -33,7 +33,14 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
 class MuxFreqToneCfg(MuxDriveToneCfg):
     """One named drive and its independent freq bounds in MHz."""
 
-    freq: Annotated[ToneRangeCfg | None, FieldMeta(unit="MHz")] = None
+    freq: Annotated[
+        ToneRangeCfg | None,
+        FieldMeta(
+            label="Frequency",
+            unit="MHz",
+            description="Enter this tone's qubit drive RF frequency range in MHz.",
+        ),
+    ] = None
 
     def require_freq(self) -> ToneRangeCfg:
         """Return active freq bounds, or raise ValueError naming this tone."""
@@ -57,22 +64,62 @@ class TwotoneFluxGlobalCfg(ConfigBase):
     generators separate from readout. Invalid settings raise before any DC write.
     """
 
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
+    reset: Annotated[
+        ResetCfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the common preparation reset; leave blank to omit it.",
+        ),
+    ] = None
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated multiplexed readout used after the qubit drive sequence.",
+        ),
+    ]
     tones: Annotated[list[MuxFreqToneCfg], FieldMeta(element_label="name")]
-    flux_dev: DeviceName = Field(min_length=1)
-    flux: SweepCfg
-    expts: int = Field(
+    flux_dev: Annotated[
+        DeviceName,
+        FieldMeta(
+            label="Flux source",
+            description="Enter the DC source that sets the shared flux bias.",
+        ),
+    ] = Field(min_length=1)
+    flux: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="DC bias",
+            description="Enter the bias sweep endpoints in the selected Flux unit.",
+        ),
+    ]
+    expts: Annotated[int, FieldMeta(label="Expts", unit="count")] = Field(
         strict=True,
         gt=0,
         title="Expts",
         description="Hardware frequency point count shared by all tones.",
     )
-    participants: list[StrictInt]
-    flux_unit: Literal["A", "V", "native"] = "A"
-    settle: Annotated[float, FieldMeta(unit="s")] = Field(
-        default=0.1, ge=0, allow_inf_nan=False
-    )
+    participants: Annotated[
+        list[StrictInt],
+        FieldMeta(
+            description="Enter the original zero-based tone indices in measurement order."
+        ),
+    ]
+    flux_unit: Annotated[
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="Flux unit",
+            description="Choose the DC source's configured unit; values are not converted.",
+        ),
+    ] = "A"
+    settle: Annotated[
+        float,
+        FieldMeta(
+            label="Settle time",
+            unit="s",
+            description="Enter the wait after setting the DC source in seconds.",
+        ),
+    ] = Field(default=0.1, ge=0, allow_inf_nan=False)
 
     reps: Annotated[
         int,
@@ -114,52 +161,68 @@ class TwotoneFluxGlobalCfg(ConfigBase):
 
 
 def _plot_flux_maps_and_make_updater(
-    plots: Plots, result: MuxFluxResult, flux_unit: str
+    plots: Plots, result: MuxFluxResult, flux_unit: str, tone_names: tuple[str, ...]
 ) -> Callable[[NDArray[np.complex128]], None]:
-    """Show per-tone magnitude maps and return a stateful plot-thread updater.
+    """Display the per-tone IQ magnitude maps and latest spectra.
 
-    result supplies original tone indices, DC coordinates (K,F), MHz coordinates
-    (K,P) and initial complex IQ (K,F,P). flux_unit labels DC without conversion.
-    The returned callback accepts complete IQ arrays in that same order and
-    replaces the heatmaps and up to ten recent frequency traces. It captures
-    result's coordinate arrays but never writes result or the incoming IQ.
-    plots owns the displayed figures and their lifetime; plotting errors propagate.
+    result supplies tone-major (K,F) bias, (K,P) RF and (K,F,P) IQ arrays.
+    tone_names maps original tone positions to labels. flux_unit labels bias
+    without conversion. The returned plot-thread updater replaces the images
+    and current/previous acquired spectra; it does not change data.
     """
     flux_values, frequencies = result.flux_values, result.frequencies
-    figures, heatmaps, lines = [], [], []
+    unit = "device units" if flux_unit == "native" else flux_unit
+    rf_label = "Qubit drive RF frequency (MHz)"
+    iq_label = "|Mean IQ| (a.u.)"
+    panels = []
     for index in result.tone_indices:
-        fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
+        fig, _ = plots.subplots(
+            1, 2, num=f"flux_{index}", figsize=(8, 4.5), layout="constrained"
+        )
         heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
-        line_ax.set(xlabel="Frequency (MHz)", ylabel="Signal (a.u.)")
+        fig.suptitle(
+            f"Mux two-tone · Global DC scan · {tone_names[index]} · Readout amplitude"
+        )
+        heat_ax.set(xlabel=f"DC bias ({unit})", ylabel=rf_label)
+        heat_ax.grid(False)
+        line_ax.set(xlabel=rf_label, ylabel=iq_label)
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        line_ax.grid()
-        heatmaps.append(live_heatmap(heat_ax, uniform=False))
-        lines.append(live_line(line_ax, num_lines=10))
-        for artist in line_ax.lines[:-1]:
-            artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
-        line_ax.legend()
-        figures.append(fig)
+        heatmap = live_heatmap(heat_ax, uniform=False)
+        fig.colorbar(heat_ax.images[0], ax=heat_ax, label=iq_label)
+        line = live_line(line_ax, num_lines=2)
+        line_ax.lines[0].set(
+            marker="None", alpha=0.5, color="0.5", label="Previous bias"
+        )
+        line_ax.lines[1].set(label="Latest bias", marker="o", markersize=3, color="C0")
+        line_ax.legend(fontsize=10)
+        panels.append((fig, heatmap, line, heat_ax.title, line_ax.title))
 
     @plots.on_plot_thread
     def update(data: NDArray[np.complex128]):
         artists = []
-        for row, (heatmap, line) in enumerate(zip(heatmaps, lines, strict=True)):
+        for row, (_, heatmap, line, progress, slice_label) in enumerate(panels):
             real = np.abs(data[row])
-            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
-            current = int(valid[-1]) if valid.size else -1
-            history = np.full((10, frequencies.shape[1]), np.nan)
-            for offset in range(min(10, current + 1)):
-                history[-offset - 1] = real[current - offset]
+            valid = np.flatnonzero(np.all(np.isfinite(real), axis=1))
+            history = np.full((2, frequencies.shape[1]), np.nan)
+            for offset, bias_index in enumerate(valid[-2:][::-1]):
+                history[-offset - 1] = real[bias_index]
+            progress.set_text(
+                f"Acquired bias points: {valid.size} / {flux_values.shape[1]}"
+            )
+            latest = (
+                f"Bias = {flux_values[row, valid[-1]]:.5g} {unit}"
+                if valid.size
+                else "No acquired spectrum"
+            )
+            slice_label.set_text(latest)
             artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
             artists.extend(line.set(frequencies[row], history))
+            artists.extend((progress, slice_label))
         return artists
 
     update(result.signals)
-    for fig in figures:
+    for fig, *_ in panels:
         fig.show()
-
     return update
 
 
@@ -226,7 +289,9 @@ class TwotoneFluxGlobalExp(Experiment[MuxFluxResult, TwotoneFluxGlobalCfg]):
             np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
         )
 
-        update = _plot_flux_maps_and_make_updater(context.plots, result, cfg.flux_unit)
+        update = _plot_flux_maps_and_make_updater(
+            context.plots, result, cfg.flux_unit, tuple(tone.name for tone in cfg.tones)
+        )
 
         # Keep the register-loop spectrum here, not in another experiment's run.
         readout = cfg.readout.with_updates(

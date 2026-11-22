@@ -52,13 +52,16 @@ def live_heatmap(
     *,
     uniform: bool = True,
     clim: tuple[float, float] | None = None,
+    cmap: str = "RdBu_r",
 ) -> AttachedHeatmap:
     """Attach a local nearest-sample image without setting labels or title.
 
     uniform=True spans endpoints evenly; False accepts monotonic uneven centers
     in either direction. clim fixes (min, max); None rescales to finite data.
+    cmap names a registered Matplotlib colormap for either mode. An unknown
+    name raises ValueError before the image is attached.
     AttachedHeatmap.set validates real nonempty 1D axes and signals shaped
     (len(xs), len(ys)) before mutation and returns the image artist. No refresh
     or dispatch is performed; Matplotlib errors propagate.
     """
-    return AttachedHeatmap(axes, uniform=uniform, clim=clim)
+    return AttachedHeatmap(axes, uniform=uniform, clim=clim, cmap=cmap)

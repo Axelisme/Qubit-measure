@@ -65,10 +65,19 @@ def _run(cfg: CKP_Cfg, *, context: RunContext) -> RunRecord[CKP_Cfg, CKP_Result]
     return RunRecord(cfg=cfg, result=CKP_Exp().run(cfg, context=context))
 
 
+def _summary_lines(source: CKPRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=CKP_Exp.AXES_SPEC,
     make_form=_CKP_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_CKP_analyze, writeback=_CKP_get_writeback_items),
+    analysis=Analysis(
+        fn=_CKP_analyze,
+        writeback=_CKP_get_writeback_items,
+        summary_lines=_summary_lines,
+    ),
 )

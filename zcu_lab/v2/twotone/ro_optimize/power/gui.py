@@ -76,6 +76,13 @@ def _RoOptPower_make_form(ctx: FormContext) -> Form[PowerCfg]:
     return make_form(ctx)
 
 
+def _summary_lines(source: RoOptPowerRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 def _run(cfg: PowerCfg, *, context: RunContext) -> RunRecord[PowerCfg, PowerResult]:
     """Acquire a trace and retain the experiment configuration with its result."""
     return RunRecord(cfg=cfg, result=PowerExp().run(cfg, context=context))
@@ -88,6 +95,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_RoOptPower_analyze,
+        summary_lines=_summary_lines,
         options=lambda source, env: RoOptPowerAnalyzeParams(),
         writeback=_RoOptPower_get_writeback_items,
     ),

@@ -114,10 +114,22 @@ def run(cfg: CZOptimizeCfg, *, context: RunContext) -> _Run:
     return RunRecord(cfg=cfg, result=CZOptimizeExp().run(cfg, context=context))
 
 
+def _summary_lines(source: _Run) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (
+        f"Reps×Rounds {cfg.reps}×1",
+        f"Applied CZ envelope duration {source.result.duration:.6g} µs",
+    )
+
+
 DEFINITION = Adapter(
     spec=CZOptimizeExp.AXES_SPEC,
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
+    analysis=Analysis(
+        fn=_analyze, writeback=_get_writeback_items, summary_lines=_summary_lines
+    ),
 )

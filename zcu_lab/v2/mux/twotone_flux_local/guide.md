@@ -121,8 +121,12 @@ and required-field errors before Run.
 ## Run and Stop
 
 Run sets only selected local sources at each flux point, waits for settle, then runs
-its own reset, simultaneous drives and mux readout sequence. Each `flux_i` figure shows absolute MHz
-against that tone's DC coordinate. Sources retain their final written settings.
+its own reset, simultaneous drives and mux readout sequence. The live figure shows DC bias against qubit drive RF (MHz).
+Heatmap color shows mean IQ magnitude (a.u.), not a state probability. The
+second panel compares the latest complete spectrum with the previous one.
+Use the bias-point counter and empty rows to distinguish unmeasured regions
+from weak response. The map locates spectral features, so it does not show
+pointwise shot SEM. Sources retain their final written settings.
 Run does not restore bias automatically.
 
 A flux point is published only after its complete inner spectrum returns.
@@ -143,6 +147,10 @@ Choose another acquired index and click Analyze to calibrate that Q.
 The shared picker displays GHz. Acquisition and loaded frequency coordinates
 remain MHz; the adapter converts only the picker input.
 The picker starts in phase-aware mode, as in twotone/fluxdep.
+Use the picker to decide whether the tracked spectral feature supports both
+flux landmarks, then inspect their values in the completed figure. If a line
+has no clear feature or the period extends beyond the sampled bias range,
+review the pick rather than accepting it as a calibration.
 Move the half-flux and integer-flux lines, then click Done. The existing picker
 also provides Swap Lines, Auto Align and Cancel. Period is twice the absolute
 half-to-integer separation. The summary includes the original index and Q name.

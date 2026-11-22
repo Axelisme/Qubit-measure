@@ -28,39 +28,39 @@ class TimeRabiInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key. Sources are chosen by the Form.",
+        description="Select the Readout library module that integrates IQ.",
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
-        description="Drive library key. No pi calibration is required for this sweep.",
+        description="Select Rabi Pulse, the drive module to sweep.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Reset module option.",
+        description="Select Reset before the pulse sequence; null disables it.",
     )
     frequency_mhz: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse frequency in MHz.",
+        description="Set Rabi Pulse › Frequency (MHz), the RF carrier.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse amplitude in native gain units.",
+        description="Set Rabi Pulse › Gain (a.u.), held fixed during the length scan.",
     )
     max_length_us: float | None | Keep = Field(
         KEEP,
-        description="Set Duration › Stop (µs), the pulse-length sweep endpoint.",
+        description="Set Pulse length › Stop (µs), the pulse-length sweep endpoint.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count.",
+        description="Set Pulse length › Expts (count), including both endpoints.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count.",
+        description="Set Reps (count), shots per point in each round.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Rounds (count), the acquisition rounds to average.",
     )
 
     decay: bool | None | Keep = Field(

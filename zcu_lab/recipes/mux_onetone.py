@@ -33,40 +33,40 @@ class MuxOnetoneInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Original mux readout tone indices in execution order.",
+        description="Sets Participants: original zero-based readout tone indices in acquisition order.",
     )
     df: ToneRangeInputs | None | Keep = Field(
         default=KEEP,
-        description="Common MHz offset start/stop added to every base tone frequency.",
+        description="Sets Frequency offset › Start and Stop (MHz), added to each base readout RF frequency.",
     )
     n: Annotated[int, Field(strict=True, ge=2)] | None | Keep = Field(
         default=KEEP,
-        description="Shared offset sample count.",
+        description="Sets Frequency offset › Expts (count), shared by the selected tones.",
     )
     reps: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Acquisition repetitions.",
+        description="Sets Reps (count), the repetitions per round.",
     )
     rounds: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Averaging rounds.",
+        description="Sets Rounds (count), the number of software averaging rounds.",
     )
 
     model_type: Literal["hm", "t", "auto"] | None | Keep = Field(
         default=KEEP,
-        description="Resonator fit model. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Model type to fit a hanger, transmission peak or automatic model.",
     )
     fit_bg_amp_slope: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit the amplitude background slope. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Fit amplitude background to estimate the amplitude slope.",
     )
     fit_bg_phase_curvature: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit background phase curvature. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Fit phase curvature to include curvature in the phase background.",
     )
     edelay: float | None | Keep = Field(
         default=KEEP,
-        description="Manual cable-delay seed in inverse MHz. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Electrical delay seed (µs), the optional cable-delay fit seed.",
     )
 
 

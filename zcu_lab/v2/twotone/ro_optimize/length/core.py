@@ -56,18 +56,51 @@ class LengthAnalysis:
 
 
 class LengthCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Readout length", unit="µs")]
-    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
-        default=0.0, ge=0.0
-    )
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the qubit reset before preparation, or leave blank to skip reset.",
+        ),
+    ] = None
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit π pulse",
+            description="Select the calibrated π pulse used to prepare the excited branch.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout pulse and ADC window",
+            description="Select the resonator pulse and ADC timing for reading each qubit preparation.",
+        ),
+    ]
+    length: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="ADC window",
+            unit="µs",
+            description="Enter the ADC integration window sweep in µs; the RF pulse stays fixed for this scan.",
+        ),
+    ]
+    skew_penalty: Annotated[
+        float,
+        FieldMeta(
+            label="IQ skew penalty weight",
+            unit="a.u.",
+            decimals=3,
+            description="Set the penalty weight for asymmetric IQ distributions; zero disables the penalty.",
+        ),
+    ] = Field(default=0.0, ge=0.0)
 
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the number of shots per qubit preparation and setting in each round.",
         ),
     ]
     rounds: Annotated[
@@ -81,10 +114,10 @@ class LengthCfg(ConfigBase):
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Qubit relaxation wait",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the qubit relaxation time in µs to wait after each preparation and readout.",
         ),
     ]
 
@@ -132,15 +165,22 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         # 2. Display the score for each integration window, not averaged state IQ.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Readout Length (µs)", ylabel="SNR (a.u.)")
+        fig.suptitle("ADC window sweep · Resonator · IQ separation")
+        ax.set(
+            xlabel="ADC window (µs)",
+            ylabel="g/e IQ separation SNR",
+        )
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
         line = live_line(ax)
+        ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            return line.set(lengths, np.abs(data))
+            progress = ax.set_title(
+                f"{np.isfinite(data).sum()}/{len(lengths)} settings scored"
+            )
+            return (*line.set(lengths, np.abs(data)), progress)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -200,7 +240,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         positive t0 maximizes SNR/sqrt(length + t0), favoring shorter windows
         more strongly for smaller t0. Options reject negative t0 at construction.
         NaN scores become zero before smoothing. Return best_length in us
-        and publish fit. source.cfg may be None.
+        and publish the figure. source.cfg may be None.
         """
         # 1. Optimize smoothed readout separation, optionally accounting for cycle-time overhead.
         result = source.result
@@ -232,13 +272,23 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         max_snr = float(snrs[max_id])
 
         # 2. Inspect the chosen integration window on the smoothed SNR curve.
-        _, ax = plots.subplots(num="fit", figsize=config.figsize)
-
-        ax.plot(lengths, snrs)
-        ax.axvline(max_length, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
-        ax.set_xlabel("Readout Length (µs)")
-        ax.set_ylabel("SNR (a.u.)")
-        ax.legend()
-        ax.grid(True)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+        fig.suptitle("ADC window sweep · Resonator · IQ separation")
+        raw = np.abs(signals)
+        ax.plot(lengths, raw, "o", color="C0", label="Measured SNR")
+        if not np.array_equal(raw, snrs, equal_nan=True):
+            ax.plot(lengths, snrs, color="C1", label="Selection SNR")
+        ax.axvline(max_length, color="C3", ls="--", label="Selected setting")
+        ax.set(xlabel="ADC window (µs)", ylabel="g/e IQ separation SNR")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        objective = "Maximizes selection SNR"
+        if options.t0:
+            objective = f"Maximizes SNR / √(window + {options.t0:g} µs)"
+        ax.set_title(
+            f"Selected ADC window = {max_length:.6g} µs\n"
+            f"Selection SNR = {max_snr:.2f}"
+            f" · {objective}"
+        )
+        ax.legend(loc="best")
 
         return LengthAnalysis(max_length)

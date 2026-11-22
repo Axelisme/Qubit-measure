@@ -57,18 +57,51 @@ class FreqAnalysis:
 
 
 class FreqCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
-    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
-        default=0.0, ge=0.0
-    )
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the qubit reset before preparation, or leave blank to skip reset.",
+        ),
+    ] = None
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit π pulse",
+            description="Select the calibrated π pulse used to prepare the excited branch.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout pulse and ADC window",
+            description="Select the resonator pulse and ADC timing for reading each qubit preparation.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Readout frequency",
+            unit="MHz",
+            description="Enter the readout RF sweep in MHz when a mixer is set, or the DDS sweep without a mixer.",
+        ),
+    ]
+    skew_penalty: Annotated[
+        float,
+        FieldMeta(
+            label="IQ skew penalty weight",
+            unit="a.u.",
+            decimals=3,
+            description="Set the penalty weight for asymmetric IQ distributions; zero disables the penalty.",
+        ),
+    ] = Field(default=0.0, ge=0.0)
 
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the number of shots per qubit preparation and setting in each round.",
         ),
     ]
     rounds: Annotated[
@@ -82,10 +115,10 @@ class FreqCfg(ConfigBase):
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Qubit relaxation wait",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the qubit relaxation time in µs to wait after each preparation and readout.",
         ),
     ]
 
@@ -138,15 +171,22 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # 2. Show the separation score rather than either preparation's mean IQ.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="SNR (a.u.)")
+        fig.suptitle("Readout frequency sweep · Resonator · IQ separation")
+        ax.set(
+            xlabel="Readout frequency (MHz)",
+            ylabel="g/e IQ separation SNR",
+        )
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
         line = live_line(ax)
+        ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            return line.set(freqs, np.abs(data))
+            progress = ax.set_title(
+                f"{np.isfinite(data).sum()}/{len(freqs)} settings scored"
+            )
+            return (*line.set(freqs, np.abs(data)), progress)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -201,7 +241,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
-        """Select the frequency with maximum smoothed SNR and publish fit.
+        """Select the frequency with maximum smoothed SNR and plot it.
 
         options controls smoothing; unmeasured NaN scores become zero before
         smoothing. Return best_freq in MHz. source.cfg may be None.
@@ -231,13 +271,19 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         max_snr = float(snrs[max_id])
 
         # 2. Inspect the SNR maximum on the smoothed frequency response.
-        _, ax = plots.subplots(num="fit", figsize=config.figsize)
-
-        ax.plot(freqs, snrs)
-        ax.axvline(max_freq, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
-        ax.set_xlabel("Frequency (MHz)")
-        ax.set_ylabel("SNR (a.u.)")
-        ax.legend()
-        ax.grid(True)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+        fig.suptitle("Readout frequency sweep · Resonator · IQ separation")
+        raw = np.abs(signals)
+        ax.plot(freqs, raw, "o", color="C0", label="Measured SNR")
+        if not np.array_equal(raw, snrs, equal_nan=True):
+            ax.plot(freqs, snrs, color="C1", label="Selection SNR")
+        ax.axvline(max_freq, color="C3", ls="--", label="Selected setting")
+        ax.set(xlabel="Readout frequency (MHz)", ylabel="g/e IQ separation SNR")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.set_title(
+            f"Selected readout frequency = {max_freq:.6g} MHz\n"
+            f"Selection SNR = {max_snr:.2f}"
+        )
+        ax.legend(loc="best")
 
         return FreqAnalysis(max_freq)
