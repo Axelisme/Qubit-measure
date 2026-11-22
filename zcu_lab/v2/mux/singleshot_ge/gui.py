@@ -35,6 +35,9 @@ from zcu_lab.v2.support.measure.mux_results import (
 )
 from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.mux import MuxFitFailure
+from zcu_lab.v2.support.singleshot.center_quality import (
+    ge_center_relative_error_reasons,
+)
 
 from .core import (
     GEAnalysis,
@@ -98,28 +101,6 @@ class GEPostSummary(BaseModel):
     )
 
 
-def _center_error_reasons(quality: FitQuality) -> list[str]:
-    """Report center measurements that fail or cannot support the gate."""
-    reasons: list[str] = []
-    limit = 0.5
-    for name, label in (("sg", "g-center"), ("se", "e-center")):
-        path = f"relative_parameter_errors.{name}"
-        issues = [
-            f"joint {issue.path}: {issue.reason}"
-            for issue in quality.invalid
-            if issue.path == path
-        ]
-        reasons.extend(issues)
-        error = quality.relative_parameter_errors.get(name)
-        if error is None or not math.isfinite(error):
-            reasons.append(f"relative {label} error unavailable (required <={limit})")
-        elif issues:
-            reasons.append(f"relative {label} error={error} (required <={limit})")
-        elif error > limit:
-            reasons.append(f"relative {label} error={error} >{limit}")
-    return reasons
-
-
 def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
     """Explain manual selection for mux GE model-derived calibrations.
 
@@ -156,7 +137,7 @@ def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
         reasons.append("relative width error unavailable")
     elif width_error > 0.5:
         reasons.append(f"relative width error={width_error:.4g} >0.5")
-    reasons.extend(_center_error_reasons(quality))
+    reasons.extend(ge_center_relative_error_reasons(quality))
     return "Review required: " + "; ".join(reasons) if reasons else None
 
 
