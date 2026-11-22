@@ -1,62 +1,23 @@
-**Readers:** operator, agent. Scan a fixed-length flux reset's gain and review a four-branch residual excitation estimate.
+**Readers:** operator, agent. Sweep flux reset gain at fixed hold duration and estimate excess residual excitation from matched IQ contrasts.
 
-## Preparation and sequence
+## Sequence
 
-Calibrate the qubit pi pulse and averaged-IQ readout at the operating point before this scan.
-Each gain point measures four branches in one program with the same readout.
-Each repetition applies optional reset, the before-reset pi switch, the tested flux reset, the after-reset pi switch, then readout.
-Both switches use the same calibrated pi pulse. Each switch has off=0 and on=1.
-The saved complex IQ has axes before pi, after pi, gain, in that order.
+Optional **Reset** → **Pi pulse** on/off → **Tested reset** → the same **Pi pulse** on/off → **Readout**. The same program acquires all four combinations at each setting.
 
-The tested reset preset uses `reset/pulse` on `$qubit.wiring.lo_flux_ch`, with frequency 0 MHz and a const waveform.
-The gain scan uses a.u.; it does not convert gain to flux.
-Open and Defaults capture the module sources and fill editable starting values.
-Pi pulse uses `$qubit.module.x180` when present, otherwise the pi-pulse template. Verify its calibration before Run.
-Optional reset uses `$qubit.module.reset`; a missing slot leaves it disabled.
-Readout uses `$resonator.module.readout`, or the readout template if that slot is absent.
-The tested reset starts from the `flux_reset` template with fixed length from `$qubit.ext.flux_reset_length` in µs.
-Missing required sources remain Invalid. Enter a duration to calibrate gain before a reset length has been saved.
+## Key settings
 
-## Scan settings
+- Calibrate the π pulse and averaged-IQ readout at the operating point. The **Tested reset** template seeds the fixed hold duration from `$qubit.ext.flux_reset_length`; enter a calibrated value if absent.
+- **Flux reset gain** starts at one point, zero gain. Set the range and count before Run. The sweep replaces only gain; gain is a normalized amplitude, not a flux axis. The tested reset's `post_delay` waits for the flux tail after the excursion; use a settling time measured at the operating point, for example with `fastflux/distortion`.
+- **Relax delay** starts at 5 × T1 (150 µs if absent); enter a wait if T1 is invalid.
 
-The gain range starts at a single zero-gain point. Set start, stop and point count for the permitted local-flux range before Run.
-Run replaces only the tested pulse's gain. It keeps the fixed length and timing unchanged.
-The preset uses a zero-frequency const pulse. The experiment does not require a const waveform or zero frequency.
-Its `pulse_cfg.post_delay` is the time in µs to wait after returning from the flux excursion for the flux tail to settle.
-0 means no wait. On hardware, measure the flux tail, for example with `fastflux/distortion`, and set this delay long enough for settling.
+## Read the figures and choose a setting
 
-Reps and rounds start at 1000 and 10. Each branch/gain point receives that many repetitions per round.
-Relax delay starts at five times the captured T1. Missing T1 uses 30 µs as a starting time scale, giving 150 µs.
-Invalid T1 leaves the derived field empty. Review the wait between repetitions rather than treating it as a calibrated reset time.
+Live and Analyze I show the four before/after π branches versus gain (a.u.); Analyze Q shows the imaginary part. Bars on I and Q are shot SEM: sample SD of that quadrature divided by √(retained shots), not fit error, round-to-round scatter, or uncertainty on the derived quantities. Mean-only files show no bars.
 
-## Reading the contrasts
+For complex means S[a,b] at before/after switch settings a,b, let d₀ = S[0,0]−S[0,1] and d₁ = S[1,0]−S[1,1]. The contrast panel shows r = Re(d₁·conj(d₀))/|d₀|²; the residual panel shows (1−r)/2. For ideal π pulses, stable readout and two states, p₁ = (1−r)/2 + r·p₀, where p₀ and p₁ are the post-reset excitation from g and e. The four means cannot separate p₀ and p₁. Treat the estimate as p₁ only if p₀ is small; a hot idle state can invalidate that assumption. This is neither fidelity nor a leakage measurement. Estimates outside [0,1] are not clipped.
 
-The live plot and the Analyze I panel show the same four branches of mean IQ real. The markers represent the two π switches: no pulses, π after only, π before only, and π before and after. Compare I with the Q panel to see whether the after-pulse difference has a real or imaginary component.
-For mean I and Q, each error bar is the sample standard deviation of retained shots in that quadrature divided by the square root of the retained count. This shot SEM measures uncertainty of the point mean. It is not a fit error, nor an uncertainty for the nonlinear contrast ratio or residual estimate. Mean-only files still Load and display points without bars.
-Analysis plots the raw I and Q, the contrast ratio r and the residual estimate against gain.
-Analyze reports the source run’s requested Reps × Rounds. Branch response and derived contrasts stay in the plots.
-Let S[a,b] be mean complex IQ with before-pi switch a and after-pi switch b.
-The after-pi differences are `d0=S[0,0]-S[0,1]` and `d1=S[1,0]-S[1,1]`.
-Analysis calculates `r=Re(d1*conj(d0))/|d0|²` without PCA or external IQg/IQe inputs.
+Analyze selects the smallest finite estimate; ties use the first point in scan order. The vertical dashed line marks the chosen gain. Zero d₀ or nonfinite IQ, contrast or estimate excludes a point; if nothing qualifies, Analyze shows no candidate and proposes nothing.
 
-Under ideal calibrated pi pulses, the same readout and a two-state approximation, `d0=(1-2*p0)*(IQg-IQe)` and `d1=(1-2*p1)*(IQg-IQe)`.
-Here p0 is excitation after reset starting from g, and p1 is excitation after reset starting from e.
-The exact relation is `p1=(1-r)/2+r*p0`.
-Four mean IQs alone cannot identify p0 and p1 separately.
-This experiment assumes the reset hardly heats g, so p0 is small, and reports `residual_estimate=(1-r)/2`.
-In general this estimate is `(p1-p0)/(1-2*p0)`, not absolute p1.
-A thermally excited idle point, such as fluxonium near half flux, invalidates the p0≈0 approximation.
-Only after an initial reset makes p0 small can the estimate represent absolute residual excitation, with the other assumptions still required.
-Offline validation checks run, save, restore, analyze, PNG output and selection. It does not establish physical reset effectiveness.
-Do not use model populations to calibrate the estimate or to change the four-branch formula or selection.
-Imperfect pi pulses, readout changes and failure of the two-state approximation can bias it.
-It cannot exclude leakage or establish reset fidelity.
-Estimates outside [0,1] stay visible. Analysis does not clip noise or assumption failures into a probability.
+The proposal updates only `$qubit.ext.flux_reset_gain`. Verify the accepted setting with the `flux_reset` template. Use `twotone/reset/check` for the averaged Rabi response or `singleshot/reset_check` to check the state distribution.
 
-## Reviewing the proposal
-
-Analysis selects the smallest finite residual estimate. Ties use the first point in scan order.
-The dashed line marks the selected gain. Review the contrasts and assumptions before accepting the `$qubit.ext.flux_reset_gain` proposal.
-Zero d0 makes the ratio undefined. Nonfinite IQ, contrasts or estimates also exclude a point from selection.
-If no finite candidate remains, the plot says so and analysis produces no writeback proposal.
-A low estimate alone does not prove effective reset. Verify the accepted setting with `twotone/reset/check` or `singleshot/reset_check` using the `flux_reset` template.
+Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../../operator-workflow.md).

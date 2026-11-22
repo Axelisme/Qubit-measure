@@ -1,30 +1,24 @@
-**Readers:** operator, agent. Choose a readout frequency and gain jointly using nominal g/e separation.
+**Readers:** operator, agent. Find a readout frequency and gain pair using nominal g/e separation.
 
 # Readout frequency and gain sweep
 
-## What it measures
+## Sequence and observable
 
-Use this sweep after locating the resonator. Hold the ADC window and pulse timing fixed. At each setting, run optional reset → omit or apply the calibrated qubit π pulse → readout. The two branches are nominal g and e. The SNR is the distance between their IQ centroids divided by the pooled single-shot spread along the line joining the centroids. A positive skew penalty reduces that SNR by a shape factor. Neither the raw SNR nor the penalized score is a state population or a measured assignment fidelity.
+Optional **Reset** → omit or apply the calibrated **Qubit π pulse** → readout. SNR is the distance between the nominal g/e IQ centroids divided by their pooled single-shot spread along the separation axis. It is not population or measured assignment fidelity.
 
-## Set the run parameters
+## Key settings
 
-- **Readout frequency (MHz):** start with 31 points across the captured resonator frequency ± half a linewidth.
-- **Readout gain (a.u.):** start with 31 points from 0 to 0.2. The sweeps replace the two settings in the readout module.
-- **Qubit π pulse:** select the captured, calibrated g-to-e pulse. When the slot is absent, the `pi_pulse` template takes frequency and wiring from the selected qubit; calibrate the pulse before using it.
-- **Readout pulse and ADC window:** use the selected resonator's readout module or the `readout` template. The template uses the resonator frequency, wiring and flight time. It leaves 0.015 µs of pulse before and after the incoming ADC window. Start the readout post-delay at five photon decay times, `5/(2πκ)` µs for linewidth κ in MHz, and check that a longer wait does not change the signal.
-- **Reset:** optionally select the reset used before each preparation. A blank field skips reset.
-- **Qubit relaxation wait (µs):** wait after each read. The initial value is 5 × captured T1. If T1 is absent, the starting estimate is 30 µs and the wait starts at 150 µs. If captured T1 is invalid, supply the wait before Run.
-- **Reps**, **Rounds:** shots per preparation and setting in each software round, and the number of rounds. The Form starts at 1000 and 10. The Analyze summary reports the settings from the analyzed run, not the current Form.
-- **IQ skew penalty weight (a.u.):** leave at 0 to rank by SNR alone. Increase it to reduce the score of populations with mismatched widths or uncancelled skew along the separation axis.
-
-Use **Defaults** after changing the qubit or resonator source to recapture these starting values. Fill any missing required fields before Run.
+- Locate the resonator and calibrate the **Qubit π pulse**. Hold readout timing fixed. **Readout frequency** starts at the captured resonator frequency ± half a linewidth. Set it and **Readout gain** to cover the expected peak; Run replaces both coordinates.
+- For **Readout pulse and ADC window**, check the timing at the receiver. For readout `post_delay`, start at `5/(2πκ)` µs for linewidth κ in MHz. Compare herald → nominal Xπ at that wait and at a longer one when calibrating this delay.
+- **Qubit relaxation wait** starts at 5 × T1 (150 µs if absent). Enter a wait if T1 is invalid.
+- **IQ skew penalty weight** of 0 ranks by SNR alone. A positive weight lowers the score for unequal spreads or uncancelled skew along the separation axis.
 
 ## Read the figures and choose a setting
 
-Live and Analyze show the same readout frequency × gain heatmap. The colorbar is measured g/e IQ separation SNR; the live heading counts scored cells. Analyze highlights the setting that maximizes selection SNR and prints both coordinates. The selected cell need not be the brightest measured cell if smoothing changes the peak. Two-dimensional maps do not show pointwise SEM.
+Live and Analyze show the same frequency × gain heatmap with measured SNR as color. Live counts scored cells. Analyze labels the selected pair, which may differ from the brightest measured cell if smoothing moves the peak. The map has no per-cell shot SEM.
 
-**Smooth method** selects wavelet denoising or Gaussian smoothing. **Smooth strength** scales the wavelet threshold or sets the Gaussian width in sample steps, respectively. Analyze marks the maximum of the resulting selection data, not a fit or a sub-step estimate. The selection uses zero for any missing SNR before smoothing, so do not adopt a candidate from an incomplete sweep without checking the measured points.
+**Smooth method** and **Smooth strength** affect selection, not the raw measured values. Strength scales the wavelet threshold or sets Gaussian width in sample steps. Missing scores enter smoothing as zeros; check the measured points before using a result from an incomplete sweep.
 
-If the marker lies at an edge, extend that axis in the direction of the edge and repeat. Otherwise narrow the ranges around the marked pair before adopting it. To calculate the changes, subtract the previous readout frequency and gain from the two displayed values. Analyze proposes the selected pair in `$qubit.ext.best_ro_freq` and `$qubit.ext.best_ro_gain`. Review the writeback candidates before applying them. If the readout is a pulse module and the remaining calibration coordinates are available, Analyze also proposes an optimized resonator readout module and the captured resonator's readout slot.
+If the marker is at an edge, extend that axis and repeat. Otherwise tighten around the pair and confirm it. Subtract each old coordinate from the selected one for the corrections. The proposal updates `$qubit.ext.best_ro_freq` and `$qubit.ext.best_ro_gain` and, for a pulse readout with the other calibration coordinate available, the resonator readout module and slot.
 
-There is no MCP recipe for this experiment. Use the experiment tab or its RPC entry point.
+Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).
