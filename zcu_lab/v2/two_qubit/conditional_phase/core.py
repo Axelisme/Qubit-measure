@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal, Self
@@ -41,11 +42,13 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_errorbar
 
 from .._drive import QubitDriveCfg
-from .._phase import QuadraturePhase, count_phase, qubit_sigma_variance
+from .._phase import QuadraturePhase, count_phase, phase_variance, qubit_sigma_variance
 from .._phase_plot import wrapped_phase_plot_data
 from .._readout import POINT_ALIAS_DESCRIPTION
 from .._sums import qubit_sigma, validate_qubit_tones
 from .crossing import PhaseCrossings, phase_crossings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -597,6 +600,11 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         )
         quadratures = np.where(complete, quadratures, np.nan)
         phases = phase_points(quadratures)
+        phase_sem = np.sqrt(
+            phase_variance(
+                quadratures[:, 0], quadratures[:, 1], variances[:, 0], variances[:, 1]
+            )
+        )
         # 2. Fit shared X/Y gate-count slopes and require a unique conditional pi crossing.
         fitted = fit_phase_slopes(
             data.gate_counts,
@@ -624,6 +632,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                 int(n),
                 cfg.target.capitalize(),
                 tuple(row[j] for row in phases),
+                phase_sem[:, j],
             )
         # 4. Propose a frequency only for a unique fitted crossing; otherwise retain its rejection reason.
         return answer
@@ -747,6 +756,7 @@ def _plot_phase_diagnostics(
     n: int,
     target: str,
     phases: tuple[tuple[QuadraturePhase, ...], ...],
+    phase_sem: NDArray[np.float64],
 ) -> None:
     """Show contrast and phase before gate-count slope fitting, by spectator."""
     fig, _ = plots.subplots(
@@ -758,23 +768,40 @@ def _plot_phase_diagnostics(
     )
     contrast_ax, phase_ax = fig.axes
     for b, state in enumerate(("g", "e")):
-        for label, style, rows in (("", ".-", phases),):
-            points = rows[b]
-            contrast_ax.plot(
-                xs,
-                [p.contrast for p in points],
-                style,
-                color=f"C{b}",
-                label=f"{label}spectator {state}",
+        points = phases[b]
+        contrast_ax.plot(
+            xs,
+            [p.contrast for p in points],
+            ".-",
+            color=f"C{b}",
+            label=f"spectator {state}",
+        )
+        phase_deg = [
+            np.nan if p.logical_phase_deg is None else p.logical_phase_deg
+            for p in points
+        ]
+        sem = phase_sem[b]
+        unavailable = ~np.isfinite(sem)
+        if unavailable.any():
+            logger.warning(
+                "Omitting %d phase error bars for %s, n=%d, spectator %s: "
+                "zero contrast or unavailable X/Y phase variance",
+                np.count_nonzero(unavailable),
+                target,
+                n,
+                state,
             )
-            phase_deg = [
-                np.nan if p.logical_phase_deg is None else p.logical_phase_deg
-                for p in points
-            ]
-            phase_ax.plot(*wrapped_phase_plot_data(xs, phase_deg), style, color=f"C{b}")
+        x, phase, errors = wrapped_phase_plot_data(
+            xs, phase_deg, np.where(unavailable, np.nan, sem)
+        )
+        phase_ax.errorbar(x, phase, yerr=errors, fmt=".-", color=f"C{b}")
     contrast_ax.set_ylabel("Classified contrast")
     contrast_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
-    phase_ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Wrapped phase (deg)")
+    phase_ax.set(
+        xlabel="Common CZ frequency (MHz)",
+        ylabel="Wrapped phase (deg)",
+        ylim=(-180, 180),
+    )
     phase_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
     phase_ax.ticklabel_format(useOffset=False)
     fig.suptitle(f"Conditional phase · {target} · {n} CZ gates")
