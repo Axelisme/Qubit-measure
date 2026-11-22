@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-22 (experiment Run fixture sources)
+**Last updated:** 2026-11-22 (standard FTF wall-time inputs)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -160,9 +160,9 @@ write_snapshot(
 
 `tools.experiment_wall_time` 預設為 lab assembly 註冊的每個 adapter 產生一列。`--select` 接受完整的 adapter key 或第一段家族名。例如 `--select onetone/freq` 選一個實驗，`--select mux` 選整個家族。可以重複指定，重疊的實驗只跑一次。省略 `--output` 時，工具在 `.agent_state/benchmark/wall-time/` 下建立有時間戳的新目錄。量測時，指定的目錄必須尚未存在。
 
-使用有 Qt 與 QICK 的 worktree 環境。工具用 `Controller(view=None)` 和 Qt 事件迴圈，不開視窗、遠端服務或硬體連線。工具只讀[自持的 FTF 設定、board profile 和校準 point](data/experiment_wall_time/)。FTF 的 `time_scale` 是 0，初始虛擬電流是 fixture 的校準工作點。每個執行案例有獨立的模擬環境和 project 副本。
+使用有 Qt 與 QICK 的 worktree 環境。工具用 `Controller(view=None)` 和 Qt 事件迴圈，不開視窗、遠端服務或硬體連線。每列讀 [FTF 標準 preset](../zcu_lab/simulation_envs/FTF/default.yaml) 的 half-flux 初始偏壓、快磁通路由、共用 coil、接收雜訊與 projection floor。工具在 preset 層只覆寫 `time_scale: 0`，讓模擬不等虛擬硬體的物理時間。板型使用工具的 [board profile](data/experiment_wall_time/board-profile.yaml)。
 
-工具選用 `ftf-demo/initial` 並以 Open 建立表單。Open 固定表單的來源 capture，見 [Measure services 的開表 owner](../lib/zcu_tools/gui/app/measure/services/README.md#操作-owners)。Open 成功後，工具才透過 `form.write` 套用[覆寫表](data/experiment_wall_time/overrides.json)中該 adapter 的欄位；覆寫只改表單值，不會補回 Open 時缺少的來源。每筆覆寫記 adapter key、表單 cfg 路徑與 JSON 值。`basis` 記供人閱讀的覆寫依據，不影響執行。路徑使用欄位名及從 0 開始的清單索引，例如 `['delay', 'n']` 是線性掃描的點數。表單通過檢查才派送 Run；Run 的 admission、輸入快照與終態見 [ADR-0066〈問題與決策〉](../docs/adr/0066-operation-lifecycle.md#問題與決策)。
+工具在每列的新 project 重用 [GUI/MCP 的 FTF startup 資料](../zcu_lab/simulation_envs/FTF/README.md#建立-entry-與啟動)，從標準 entry template 與 library 建立 `ftf-demo/initial` 的元件、模組和 aliases，再以 Open 建立表單。Open 固定表單的來源 capture，見 [Measure services 的開表 owner](../lib/zcu_tools/gui/app/measure/services/README.md#操作-owners)。Open 成功後，工具才透過 `form.write` 套用[覆寫表](data/experiment_wall_time/overrides.json)中該 adapter 的欄位；覆寫只改表單值，不會補回 Open 時缺少的來源。每筆覆寫記 adapter key、表單 cfg 路徑與 JSON 值。`basis` 記供人閱讀的覆寫依據，不影響執行。路徑使用欄位名及從 0 開始的清單索引，例如 `['delay', 'n']` 是線性掃描的點數。表單通過檢查才派送 Run；Run 的 admission、輸入快照與終態見 [ADR-0066〈問題與決策〉](../docs/adr/0066-operation-lifecycle.md#問題與決策)。
 
 查 CZ pulse、slot 與相位配對的來源，從 [Joint readout 到 local Z 的校準路線](../zcu_lab/v2/two_qubit/guide.md#joint-readout-到-local-z-的校準路線)看校準順序。`ftf-demo/initial` 存有 CZ pulse 與 slot，但沒有 `$coupler.ext.cz_phase`。量到 local-Z correction 不等於把配對寫入來源；配對的身分檢查和寫回見 [Local Z〈Preview 與 Apply〉](../zcu_lab/v2/two_qubit/local_z/guide.md#preview-與-apply)。
 
@@ -193,7 +193,7 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
 
 `batch.json` 記錄本批選中的 adapter、Git HEAD、每份輸入的 SHA-256 和 guide 盤點。工具也在本批派送前讀取 Git 的 dirty 狀態，將 HEAD 與 dirty 一起交給每列的 telemetry writer。從乾淨 checkout 執行，才能用 commit 找回執行時的程式。每列在送出 Run 前先寫 `start.json`，記 UTC 時刻與 monotonic 秒數。Run 在期限內到終態時，工具在清理該列資源前寫 `row.json`。逾時則先寫 `row.json`，再等 Run 終態與 Controller idle。`report.json` 和 `summary.md` 從這些落盤紀錄組成，列出已記錄結果的列數、本批涵蓋列數及全 inventory 列數。
 
-工具在送出 Run 及收到 Controller 終態事件時各取一次時間。`wall_s` 是兩次 monotonic clock 的差，UTC 時刻供閱讀。環境組裝、Open、覆寫及派送前落盤都不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留 fixture 副本與 acquired ledger，不寫回入庫輸入。
+工具在送出 Run 及收到 Controller 終態事件時各取一次時間。`wall_s` 是兩次 monotonic clock 的差，UTC 時刻供閱讀。環境組裝、Open、覆寫及派送前落盤都不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留該列初始化的 entry、point 與 acquired ledger，不寫回入庫輸入。
 
 工具從 [acquire telemetry](../lib/zcu_tools/simulators/README.md#acquire-telemetry) 加總各階段秒數。`core_s` 是 `compile_s`、`evolve_s`、`readout_s` 和 `materialize_s` 四項之和。`materialize_s` 含 acquire 內產生 raw shots 的時間，也含依 `acquire_id` 配對的延後 materialize。`remainder_s` 從 acquire 牆鐘扣除該牆鐘內的四項工作。延後 materialize 在 acquire 之外，不再從 remainder 扣除。`ShotReducer` 等 host 處理不計入核心。
 
@@ -207,9 +207,9 @@ Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆�
 
 Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`，再落盤 `run_failed` 列。該列記 Run 起點、收到失敗事件的時刻，以及 Controller 提供的錯誤類型與訊息。`failure_record` 是相對於該列 `case_directory` 的診斷檔路徑。失敗列不填 Run 或核心秒數。工具寫完該列才檢查 Controller 是否 idle；若仍有活動中的操作，就停止派送。摘要分別計數成功計時、`timeout` 與 `run_failed`。`Run failures` 按完全相同的 Controller 診斷分組，每組列出 adapter key 與診斷檔路徑。工具不推斷根因。
 
-若 Open 成功，但表單仍有錯誤（例如覆寫後還缺欄位或 slot），`missing_defaults` 列出錯誤，不送出 Run。報表中的「FTF 不能跑」是 `not_runnable`，只適用於[固定案例宣告](data/experiment_wall_time/case-inputs.json)明列排除的 adapter。工具寫下該列的原因，不複製 project，也不派送 Open 或 Run。缺初值不一定是排除，請看各列的原因。
+若 Open 成功，但表單仍有錯誤（例如覆寫後還缺欄位或 slot），`missing_defaults` 列出錯誤，不送出 Run。報表中的「FTF 不能跑」是 `not_runnable`，只適用於[固定案例宣告](data/experiment_wall_time/case-inputs.json)明列排除的 adapter。工具寫下該列的原因，不建立 project，也不派送 Open 或 Run。缺初值不一定是排除，請看各列的原因。
 
-固定 FTF fixture 沒有 Q1 的快磁通線，也沒有 MG12 具名的共用 DC coil。`fastflux/{distortion/acc_phase,distortion/freq,distortion/phase,mist,t1,twotone}`、`twotone/reset/flux/{gain,length}`、`mux/{onetone_flux_global,twotone_flux_global}` 這十列的 `missing_defaults` 記為「缺 fixture 路由／校準，未量」，與「需上游輸出，未量」、JPA 無模型、逾時分開計數；不表示 FTF 不能跑這些實驗。要補，需同一 FTF 場景可追溯的 generator／loop 或共用 DC route、單位與校準，以及該實驗的正常輸入（例如 `fastflux/twotone`、`fastflux/distortion/freq` 另需 Q1 的 `kappa` 或有依據的掃頻窗）；示意係數（例如 `low-snr.yaml` 註解中的 gen1 `+0.02 Φ0/gain`）不算校準。
+新版輸入雜湊與舊 fixture 批次不同，不能用舊批次續跑或直接把時間差歸因給 simulator 效能。Projection floor 從 `1e-9` 改為標準 `1e-5`，可能改變剪枝和耗時。舊場景的簇位移與 reset 成本見 [FTF 標準 preset 與牆鐘工具的輸入](../docs/discussions/2026-11-22-ftf-standard-wall-time-inputs.md#已知風險)，不是新版的量測結果。
 
 固定案例列出兩類排除：六個 JPA 入口沒有模型或裝置；`two_qubit/rb`、`two_qubit/rb_heralded`、`two_qubit/cz_optimize` 在 `ftf-demo/initial` 缺 Open 所需的 Q1／Q2 有序 Local Z 配對 `$coupler.ext.cz_phase`。後三列需上游校準，未計時，不表示 FTF 不支援這些實驗。
 
