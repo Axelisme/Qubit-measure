@@ -1,79 +1,29 @@
-# Qutrit reference population
+# Qutrit reference populations
 
-**Readers:** operator, agent. Acquire three labeled IQ references and inspect preparation-coordinate correction.
+**Readers:** operator, agent. Acquire three labeled IQ clouds to calibrate a g/e/f classifier and estimate populations in preparation-label coordinates.
 
-## Calibrate before Run
+## What is measured
 
-Open **New Tab → singleshot → qutrit_population**. Missing transition frequencies leave the Form Invalid.
-The entry qubit frequency remains unset until you measure it. The Form does not calculate transition frequencies from the simulator.
+In each sequence, prepare g (no pulse), e (**g↔e π pulse**), or f (**Pi 03** → **Pi 32**), then **Readout** → **Relax delay**. There is no extra reset pulse. The three preparations are references, not guaranteed pure levels.
 
-Find 0–1 and 0–3 with ground-state twotone/freq spectroscopy.
-Use the existing Rabi experiment at each measured carrier to determine Pi 01 and Pi 03 amplitude and duration.
-Prepare level 3 with Pi 03 in twotone/freq's Init Pulse, then locate 3–2.
-Open New Tab → twotone → rabi → amp_rabi and set Init Pulse to the calibrated Pi 03 on generator 1.
-Set Rabi Pulse to generator 2, the measured 3–2 carrier and a fixed duration. Sweep Gain, inspect the oscillation, then click Analysis → Analyze to determine the Pi 32 gain.
-See the [amplitude Rabi guide](../../twotone/rabi/amp_rabi/guide.md#prepared-state-amplitude-rabi) for the pulse fields and None ground-state path.
-Enter those calibrations in the three pulse editors, including MHz frequency, gain, µs duration and generator.
-For integer-fluxonium, Pump uses generator 1, Stokes uses generator 2 and readout uses generator 0.
-Pi 32 must target the configured charge line; it is not a fast-flux channel.
+## Key settings
 
-Use the environment's validated cavity/receiver settings: nominal carrier 7460 MHz, constant readout length 0.4 µs, gain 0.1, ADC integration length 0.4 µs and trigger offset 0 µs.
-These are synthetic input settings, not measured device calibration.
-Set a relaxation interval that returns the system to the ground preparation before each repetition.
-The simulator's acquire path starts each repetition from its configured thermal state; this does not establish hardware reset performance.
+- Locate 0–1 and 0–3 with ground-state spectroscopy and calibrate the π pulses with Rabi. Prepare 3 with **Pi 03**, then locate 3–2 and calibrate **Pi 32** with [prepared-state amplitude Rabi](../../twotone/rabi/amp_rabi/guide.md#prepared-state-amplitude-rabi). For **Pi 32**, choose the configured charge-drive line, not a fast-flux line. Enter each calibrated RF frequency, gain, duration and generator. Missing transition settings leave required fields Invalid.
+- Use a calibrated single-ADC **Readout**. For writeback, save these readout settings as a library module and bind its key before Run. Select it without changing non-classifier settings. For the integer-fluxonium simulation example, see [FTF reference settings](../../../simulation_envs/FTF/README.md#整數-fluxonium-的三態參考驗收).
+- Set **Relax delay** to return to the ground preparation between shots. Use at least six **Shots per preparation**; Analysis requires all three complete IQ rows. It trains on the first half of each row and evaluates on the rest, including the extra shot when the total is odd.
 
-## Acquire and analyze
+## How to read the results
 
-Run collects three rows in order: g has no preparation pulse, e applies Pi 01, f applies Pi 03 followed by Pi 32.
-Each row contains **Shots per preparation** complex IQ values in mean-sample ADC units.
-No reset or extra drive is inserted for g. Run shows the three IQ clouds and counts the shots acquired out of the three requested rows.
+Live shows the three IQ clouds and acquisition progress. Analyze overlays the training centroids on the acquired clouds; the evaluation matrices use only held-out shots. Assignment uses the nearest centroid with no rejection region (exact ties choose g, then e, then f). The color maps and scatters have no shot SEM bars.
 
-Click Analysis to train a Euclidean nearest-centroid classifier on the first half of each row.
-The remaining half evaluates assignment. An odd shot count gives the extra shot to evaluation.
-Training confusion rows are requested preparation labels and columns are classified labels.
-The Analyze figure marks the trained centroids on the held-out IQ clouds. Compare the classified fractions with the unclipped corrected estimates and read the condition number beside the training confusion matrix. The cloud and calibration matrices are diagnostics, not a 1D scan, so they have no per-point shot SEM bars.
-The analysis also returns arrays, centroids, sample counts and diagnostics for the host's saved analysis summary.
+**Training confusion** has requested labels in rows and classified labels in columns. Analyze solves against the transposed matrix to estimate preparation-coordinate populations, without clipping negative or above-one values. Those departures can reflect finite shots or preparation contamination. The result is not pure-state fidelity.
 
-Correction solves the transpose of the training confusion matrix.
-Its coordinates are the reference preparation labels, not guaranteed pure energy states.
-Negative and above-one estimates remain visible because finite calibration shots and preparation contamination can produce them.
-Do not call the preparation-label assignment score pure readout fidelity.
+Check the held-out macro and per-label errors together with the matrix condition number and smallest singular value. A large condition number or small singular value indicates sensitivity to errors in the correction. **Minimum centroid separation (shared σ)** is the closest pair's IQ separation divided by a pooled noise width. Do not accept a correction based on any one of these numbers alone.
 
-## Apply calibration to readout
+## Next step
 
-Before Run, save the tested readout as a library module and bind the resonator's readout slot to its key.
-Select that captured readout in the Form without changing its non-classifier settings.
-After **Analysis → Analyze**, inspect the module proposal's g/e/f centers and training confusion, then click **Apply Selected**.
-Apply replaces the complete captured readout module but changes only its classifier. It preserves the waveform key and all other fields.
-It does not create a missing library target or choose one from the current Form.
-Analyze reports a failure if the Run had no captured target, the slot is unresolved, or any non-classifier setting differs from the captured library module.
-Save and bind the intended settings, then Run again to fix those failures.
+If the clouds overlap or the held-out error is high, check spectroscopy, preparation and the ADC window before using correction. Writeback replaces only the classifier on the captured readout module with the g/e/f centers and training confusion. If the target is missing, unresolved or differs apart from the classifier, bind the intended module and acquire a new Run. Changing readout or preparation does not automatically invalidate stored calibration; reacquire the references before using the new settings.
 
-After Apply, open or choose Defaults in [STIRAP delay](../../twotone/stirap/delay/guide.md),
-[STIRAP amplitude](../../twotone/stirap/amplitude/guide.md),
-[STIRAP detuning](../../twotone/stirap/detuning/guide.md) or
-[Raman](../../twotone/raman_gf/guide.md) to capture the new library calibration.
-The classifier uses Euclidean nearest centers with no rejection region. Exact ties choose g, then e, then f.
-Consumers build a program, then use `shot_sums(prog, [Classify("readout")])`
-with the saved centroid3 calibration and `acquire_summed` to collect `[g,e,f]` counts.
-Acquisition adds completed rounds. Analysis divides each row by its total count.
-Use the explicit f column; do not reconstruct it from g/e.
-Circle calibration's third class remains other. Consumers that require Other must use circle calibration, not centroid3.
-Saved run cfg retains its own centers and training confusion. Later live-library edits do not change that run's classification or correction.
-There is no automatic calibration invalidation. Repeat reference acquisition and Apply after changing readout pulse, ADC window, receiver or preparation settings.
-Training confusion includes preparation contamination, so correction reports preparation-label coordinates, not pure-state fidelity.
+Use this calibration for g/e/f readout in [STIRAP](../../twotone/stirap/delay/guide.md) or [Raman](../../twotone/raman_gf/guide.md). The third outcome is f, not **Other**; experiments needing a rejected class use the GE circle classifier instead. This experiment has no MCP recipe.
 
-## Quality and failure conditions
-
-**Minimum centroid separation (shared σ)** is the closest pair of training centroids' IQ distance divided by one common noise width. The width is the square root of the mean I and Q variances after pooling the within-label training variances.
-For the short-reference integer-fluxonium setting, inspect macro preparation-label error <=3%, each label error <=6%, training confusion 2-norm condition <=1.5 and minimum singular value >=0.8.
-The earlier separation threshold used a different distance metric and does not establish a cutoff for this score.
-These thresholds characterize this synthetic reference setting, not strong STIRAP/Raman drives or hardware.
-An independent fixed-seed acquisition is needed to validate a selected readout configuration.
-
-Analysis rejects nonfinite/partial IQ, fewer than six shots per row, invalid labels, indistinguishable centers, zero or nonfinite shared σ, or singular confusion.
-It never substitutes simulator populations, a density matrix or replay truth.
-Poor separation or high label error requires checking spectroscopy, pulse calibrations and receiver settings before interpreting correction.
-A small matrix condition number alone does not establish state purity.
-Reload experiments rebuilds this adapter; reopening the app retains entry data but does not invent missing pulse calibrations.
-There is no MCP recipe for this experiment.
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).

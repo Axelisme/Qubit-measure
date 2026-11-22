@@ -1,54 +1,23 @@
-## Behavior
+# Single-shot T1
 
-**Readers:** operator, agent. How to measure single-shot T1 from the GUI or MCP and interpret the results.
+**Readers:** operator, agent. Measure relaxation from the g- and e-prepared population curves versus free evolution time.
 
-Single-shot T1: applies a π pulse, waits for a variable delay, reads out, and classifies each shot during acquisition against the |g>/|e> IQ-cluster centres. Repeats from both |g> and |e> initial states (Branch). Plots the ground / excited / other populations versus delay time with dual-transition-rate fits for T1 and T1_b. Runs on real hardware.
+## What is measured
 
-## Saved counts
+Optional **Reset** → no drive for g preparation or **g↔e π pulse** for e → swept free evolution → **Readout**. The joint rate model gives slow T₁ and fast T₁ (`T1_b`), the inverse rates of the two nonstationary relaxation modes, not independent lifetimes of the preparation branches.
 
-The saved `counts` array has axes `(delay, initial state, population state)`. The final axis contains class counts `[g,e,other]` summed over acquired rounds, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
+## Key settings
 
-Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema is 5.0. If a file retains native counts but lacks compatible cfg, Analyze cannot use its readout correction.
+- Before Run, use Pulse **Readout** (not Mux) with a circle classifier and positive radius under **Advanced**. Obtain a missing radius from [GE Post-Analysis](../../ge/guide.md); linear cannot report Other. Calibrate the π pulse before comparing preparations.
+- Set **Free evolution time** to capture the early drop and the late plateau. Its Stop and **Relax delay** start at 5 × stored ordinary T1 (150 µs if absent; blank if invalid). Reset does not shorten the relaxation wait automatically.
+- **Sampling** `decay` (default) concentrates points early; `linear` spaces them evenly. The window and point count stay fixed. Enter a sweep, not a list of delays.
 
-## Parameter sources
+## How to read the results
 
-Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay and delay stop are 5 * `$qubit.t1`.
+Live shows raw g/e/Other fractions. Analyze uses only the selected result's saved confusion matrix for correction; without it, it shows classified fractions. Other includes shots outside both circles or tied and is not an identified energy level. Compare the g- and e-prepared traces against the rate-model fit. Reduced χ² compares residual size with the assumed errors; check for systematic residuals before using the fitted times. Bars represent one shot SEM from retained class counts (absent below two shots); Analyze propagates count covariance through any correction. They are not fit errors or round-to-round variation.
 
-Readout accepts only the pulse family.
-A mux readout in the library is incompatible.
-Classification uses the readout's circle classifier under Readout → Advanced.
-It divides raw ADC sums by integration length without subtracting IQ offset.
-Run requires a positive radius; missing radius prompts singleshot GE Post.
-Linear has no Other state and is rejected.
-Analyze corrects populations only with the saved readout cfg's confusion matrix.
-Historical cfg without a classifier or matrix skips correction.
+## Next step
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+If neither branch reaches a plateau, extend Stop to several times the provisional slow T₁ and sample the early slope. This run does not write T₁ back. Older files without class counts cannot be converted on Load; acquire again.
 
-The ordinary T1 sweep stop is 5 times the same time scale, initially 150 µs when T1 is missing.
-
-T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
-
-These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
-
-## Module slots
-
-Pi pulse uses `$qubit.module.x180` or pi_pulse. Reset is optional; readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Defaults snapshot.
-
-## Typical writeback
-
-T1 appears in the plot title; calibration parameters stay unchanged. Use 'singleshot/t1_tone' to propose the tone T1 scalar in the parameters.
-
-## Recommended
-
-Run 'singleshot/ge', apply Primary and Post to the readout module, then choose Defaults in this tab to capture that calibration. A delay sweep reaching ~5*T1 lets the decay flatten. Missing T1 starts delay stop and relax delay at 150 µs; stored invalid T1 leaves both required and empty. Set 'sampling="linear"' to sweep linearly; leave 'sampling="decay"' to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
-
-## Reading the figures
-
-Run shows raw class probabilities. Each bar is one shot SEM from the counts retained at that point. Fewer than two retained shots give no bar.
-
-Compare g-prepared and e-prepared traces and their fitted curves in Analyze. If neither approaches a plateau, increase the Delay stop to several times the provisional T1 and preserve enough early points to resolve the initial slope. Compare reduced χ² with the residuals visible in the plot; it measures residual size relative to the model's assumed errors and does not itself establish the validity of the rate model.
-
-Bars are shot SEM from retained class counts for each preparation and delay. Saved readout correction, when available, propagates their covariance. Fit uncertainty in the reported time constants is separate from those bars.
-
-**Last updated:** 2026-11-22
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).
