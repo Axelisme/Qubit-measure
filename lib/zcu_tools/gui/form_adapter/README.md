@@ -1,6 +1,6 @@
 # gui/form_adapter — 從輸入型別生成 Form
 
-**Last updated:** 2026-11-22，FieldMeta 與表單呈現入口
+**Last updated:** 2026-11-23，FieldMeta 與表單呈現入口
 
 **讀者：** framework-dev。Adapter 輸入型別與持久 Spec 的表單推導與轉換契約。
 

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-11-22，取數與 GUI 的停止來源
+**Last updated:** 2026-11-23，取數與 GUI 的停止來源
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
