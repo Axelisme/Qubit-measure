@@ -86,11 +86,13 @@ With Length Ratio left empty, two tight clusters without a visible tail make Ana
 This reporting decision does not change centers, fidelity or Post-Analysis.
 If you set Length Ratio manually, Analyze returns the supplied value.
 Run once the qubit pi-pulse and the readout are both calibrated.
-Run and Analyze show raw IQ at equal I/Q scale. In each IQ bin, blue means
-more probe-off shots and red means more probe-on shots on the live plot.
-Analyze maps the acquisitions to g (blue) and e (red) using Initial State.
-A tie is purple. Opacity rises with the log of the total shot count; empty
-bins are transparent. Each successful Analyze also shows `diagnostic`.
+Live and Analyze Fit show raw IQ at equal I/Q scale. Live uses blue for
+probe-off and red for probe-on. Analyze maps the acquisitions to g (blue)
+and e (red) using Initial State. In each IQ bin, the two shot fractions
+are raised to the sixth power and normalized to mix blue and red. A 60:40
+split gives about 92:8 in color; equal counts give purple. Opacity rises
+with the log of the total shot count, and empty bins are transparent.
+Each successful Analyze also shows `diagnostic`.
 
 The diagnostic has four panels:
 
@@ -113,25 +115,24 @@ make a candidate eligible for writeback preselection.
 
 Histogram log scale changes the diagnostic histograms, not the IQ scatter.
 Open the saved diagnostic in Data with **View figure** for a larger view.
+
 ## Read the Post figure
 
-The left panel of `post` shows both preparations on the same raw, equal-scale
-I/Q plane. Each bin is blue if it contains more g-preparation shots, red if it
-contains more e-preparation shots, and purple if the counts tie. Opacity rises
-with the log of the total count; empty bins are transparent. The colors do not
-show purity or how the classifier labeled a shot. A bin's majority color
-cannot tell you how individual shots from the minority preparation were classified.
+The left column of `post` shows raw, equal-scale I/Q in two panels:
+g preparation in blue above and e preparation in red below. Opacity rises
+with the log of the shot count within each panel. Empty bins are transparent.
+Color indicates preparation, not purity or the classifier's label.
 
-The markers show the g and e centers. Dashed lines show the radius boundaries
+Both panels mark the g and e centers. Dashed lines show the radius boundaries
 and, where the disks overlap, the shared segment midway between the centers.
 The classifier chooses the nearer center only inside its radius. Equidistant
-shots and shots on or outside the radius boundary are Other. A purple bin is
-a preparation count tie, not an Other classification.
+shots and shots on or outside the radius boundary are Other.
 
-Read `Observed %` across each preparation row for the shots classified as g,
-e or Other. These percentages are measured before correcting for preparation
-mixing. In **Initial Populations**, rows are prepared states and columns are
-estimated actual states. In **Classifier confusion**, rows are actual states
+Read the percentages above each IQ panel for the fraction of that preparation's
+shots classified as g, e or Other, before correcting for preparation mixing.
+
+In **Initial Populations**, rows are prepared states and columns are estimated
+actual states. In **Classifier confusion**, rows are actual states
 and columns are measured labels after solving for preparation mixing.
 The condition number indicates how sensitive inversion of the classifier
 matrix is. It is not a fidelity score.

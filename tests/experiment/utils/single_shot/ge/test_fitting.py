@@ -372,17 +372,17 @@ def _known_joint_fit(
     return np.asarray([sg + noise + 0.1j, se + noise - 0.1j])
 
 
-def test_ge_diagnostic_colors_bins_by_raw_preparation_majority(
+def test_ge_diagnostic_sharpens_binned_raw_preparation_colors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     angle = 0.7
     signals = _known_joint_fit(monkeypatch, np.eye(3)) * np.exp(-1j * angle)
-    # Each winning bin also contains shots from the other preparation.
     ground_wins, excited_wins, tied = 2 + 5j, 4 - 10j, 3 + 2j
+    ground_only, excited_only = 1 - 5j, 5 + 5j
     shots = np.array(
         [
-            [ground_wins] * 6 + [excited_wins, tied, tied],
-            [ground_wins] + [excited_wins] * 6 + [tied, tied],
+            [ground_wins] * 6 + [excited_wins] * 4 + [tied, tied, ground_only],
+            [ground_wins] * 4 + [excited_wins] * 6 + [tied, tied, excited_only],
         ]
     )
     plots = Plots(NonPresentingHost())
@@ -408,12 +408,22 @@ def test_ge_diagnostic_colors_bins_by_raw_preparation_majority(
             )
             return rgba[row, column]
 
-        g_color, e_color, tie_color = map(color_at, (ground_wins, excited_wins, tied))
-        np.testing.assert_array_equal(g_color[:3], (0, 0, 1))
-        np.testing.assert_array_equal(e_color[:3], (1, 0, 0))
+        g_color, e_color, tie_color, pure_g, pure_e = map(
+            color_at, (ground_wins, excited_wins, tied, ground_only, excited_only)
+        )
+        # With 6 and 4 shots, the red/blue weight ratio is 64:729.
+        np.testing.assert_allclose(g_color[:3], (0.080706, 0, 0.919294), atol=1e-6)
+        np.testing.assert_allclose(e_color[:3], (0.919294, 0, 0.080706), atol=1e-6)
         np.testing.assert_array_equal(tie_color[:3], (0.5, 0, 0.5))
-        assert g_color[3] == e_color[3] > tie_color[3] > 0
+        np.testing.assert_array_equal(pure_g[:3], (0, 0, 1))
+        np.testing.assert_array_equal(pure_e[:3], (1, 0, 0))
+        assert g_color[3] == e_color[3] > tie_color[3] > pure_g[3] == pure_e[3] > 0
+        # Relative spacing of log1p counts 1, 4 and 10, independent of peak count.
+        assert (tie_color[3] - pure_g[3]) / (g_color[3] - pure_g[3]) == pytest.approx(
+            0.537493, abs=1e-6
+        )
         assert color_at(1 - 9j)[3] == 0
+        assert plots["fit"].axes[0].get_aspect() == 1.0
     finally:
         plots.finish(present=False)
         plots.release()

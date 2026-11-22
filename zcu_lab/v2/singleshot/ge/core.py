@@ -7,10 +7,8 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.legend_handler import HandlerTuple
 from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator
-from matplotlib.transforms import blended_transform_factory
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -137,56 +135,30 @@ def _plot_post(
         gridspec_kw={"width_ratios": (1, 1.32)},
         layout="constrained",
     )
-    iq, populations, observed, classifier = fig.axes
-    plot_ge_iq_density(iq, *signals)
-    g_marker, e_marker, boundary = plot_ge_classification_boundary(
-        iq, primary.g_center, primary.e_center, confusion.radius
-    )
-    iq.set_title("Preparation majority", fontsize=10)
-    iq.set_xlabel("I (a.u.)", fontsize=10)
-    iq.set_ylabel("Q (a.u.)", fontsize=10)
-    iq.xaxis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=2))
-    iq.tick_params(labelsize=10)
-    iq.grid(False)
-
-    observed.set_axis_off()
-    gg, ge, go = confusion.g_classification
-    eg, ee, eo = confusion.e_classification
-    # Use a stable left margin even when the equal-aspect IQ box moves.
-    left_margin = 0.035
-    caption = observed.set_title(
-        "Observed %\n"
-        "g / e / Other\n"
-        f"g prep {100 * gg:.1f}  {100 * ge:.1f}  {100 * go:.1f}\n"
-        f"e prep {100 * eg:.1f}  {100 * ee:.1f}  {100 * eo:.1f}",
-        loc="left",
-        x=left_margin,
-        fontsize=10,
-    )
-    caption.set_transform(
-        blended_transform_factory(fig.transFigure, caption.get_transform())
-    )
-    legend = iq.legend(
-        handles=[
-            Patch(color="blue"),
-            Patch(color="red"),
-            Patch(color="purple"),
-            (g_marker, e_marker),
-            boundary,
-        ],
-        labels=["g majority", "e majority", "Tie", "g/e centers", "Boundary"],
-        handler_map={tuple: HandlerTuple(ndivide=None)},
-        loc="upper left",
-        bbox_to_anchor=(left_margin, 1),
-        bbox_transform=blended_transform_factory(fig.transFigure, observed.transAxes),
-        borderaxespad=0,
-        frameon=False,
-        fontsize=10,
-        handlelength=1.8,
-        labelspacing=0.3,
-        markerscale=1.3,
-    )
-    legend.set_in_layout(False)
+    g_iq, populations, e_iq, classifier = fig.axes
+    empty = np.empty(0, dtype=np.complex128)
+    plot_ge_iq_density(g_iq, signals[0], empty)
+    plot_ge_iq_density(e_iq, empty, signals[1])
+    for ax, label, color, (g, e, other) in (
+        (g_iq, "g preparation", "blue", confusion.g_classification),
+        (e_iq, "e preparation", "red", confusion.e_classification),
+    ):
+        plot_ge_classification_boundary(
+            ax, primary.g_center, primary.e_center, confusion.radius
+        )
+        ax.set_title(f"Observed: g {g:.1%}, e {e:.1%}, Other {other:.1%}", fontsize=10)
+        ax.set_xlabel("I (a.u.)", fontsize=10)
+        ax.set_ylabel("Q (a.u.)", fontsize=10)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=2))
+        ax.tick_params(labelsize=10)
+        ax.grid(False)
+        ax.legend(
+            handles=[Patch(color=color, label=label)],
+            loc="lower left",
+            bbox_to_anchor=(1, 0),
+            frameon=False,
+            fontsize=10,
+        )
 
     _plot_post_matrix(populations, confusion.init_matrix)
     populations.set_title("Initial Populations\nPrepared → actual", fontsize=10)

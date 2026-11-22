@@ -1,4 +1,4 @@
-"""Preparation-majority color for GE IQ clouds."""
+"""Preparation density colors and classification geometry for GE IQ clouds."""
 
 import numpy as np
 from matplotlib import patheffects
@@ -17,10 +17,12 @@ def plot_ge_iq_density(
 ) -> AxesImage:
     """Draw one equal-scale image of two 1-D complex IQ clouds on ax.
 
-    Use the input IQ coordinates, ignoring nonfinite shots. Each occupied bin
-    is blue for a ground-preparation majority, red for an excited-preparation
-    majority, or purple for a tie. Opacity rises with the log of the combined
-    count; empty bins and frames without finite shots are transparent.
+    Use the input IQ coordinates, ignoring nonfinite shots. Blend blue (ground)
+    and red (excited) in each bin, weighting each preparation by its share of
+    the bin count raised to the sixth power, then normalizing the weights.
+    A tie is purple. Pass an empty cloud for the other preparation to show
+    just one color. Opacity rises with the log of the combined count; empty
+    bins and frames without finite shots are transparent.
 
     To update a dedicated live IQ axes, pass its previously returned image.
     Reuse that artist and rescale from the current frame if autoscaling is on.
@@ -131,7 +133,11 @@ def _density_frame(
     g, _, _ = np.histogram2d(ground.real, ground.imag, bins=(i_edges, q_edges))
     e, _, _ = np.histogram2d(excited.real, excited.imag, bins=(i_edges, q_edges))
     total = g + e
-    red = np.where(e == g, 0.5, e > g)
+    # Normalizing the sixth powers cancels the shared per-bin total.
+    g_weight, e_weight = g**6, e**6
+    red = np.divide(
+        e_weight, g_weight + e_weight, out=np.full_like(total, 0.5), where=total > 0
+    )
     opacity = np.where(
         total > 0, 0.15 + 0.85 * np.log1p(total) / np.log1p(total.max()), 0.0
     )
