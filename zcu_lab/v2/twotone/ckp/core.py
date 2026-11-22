@@ -190,10 +190,9 @@ def _plot_resonance_maps(
             title=f"{preparation} · Fit center {center:.6g} MHz",
         )
         ax.grid(False)
-        (image,) = live_heatmap(ax, uniform=False, clim=(0, 1)).set(
+        (image,) = live_heatmap(ax, uniform=False, clim=(0, 1), cmap="viridis").set(
             res_freqs, qub_freqs, amps[branch]
         )
-        image.set_cmap("viridis")
         fig.colorbar(
             image, ax=ax, label="Row-normalized IQ projection (a.u.)", ticks=(0, 0.5, 1)
         )
@@ -350,8 +349,8 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         title = "CKP spectroscopy · resonator and qubit · IQ contrast"
         headline = figure.suptitle(title)
         ax_ground, ax_excited = figure.axes
-        ground = live_heatmap(ax_ground, uniform=False, clim=(0, 1))
-        excited = live_heatmap(ax_excited, uniform=False, clim=(0, 1))
+        ground = live_heatmap(ax_ground, uniform=False, clim=(0, 1), cmap="viridis")
+        excited = live_heatmap(ax_excited, uniform=False, clim=(0, 1), cmap="viridis")
         for ax, heatmap, prep in zip(
             figure.axes, (ground, excited), ("No π pulse", "With π pulse"), strict=True
         ):
@@ -360,7 +359,6 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             (image,) = heatmap.set(
                 res_freqs, qub_freqs, np.full((len(res_freqs), len(qub_freqs)), np.nan)
             )
-            image.set_cmap("viridis")
             figure.colorbar(
                 image,
                 ax=ax,

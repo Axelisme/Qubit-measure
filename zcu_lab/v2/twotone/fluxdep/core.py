@@ -224,11 +224,10 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
         formatter.set_powerlimits((-2, 2))
         heat_ax.xaxis.set_major_formatter(formatter)
         heat_ax.grid(False)
-        heatmap = live_heatmap(heat_ax, uniform=False)
+        heatmap = live_heatmap(heat_ax, uniform=False, cmap="viridis")
         (image,) = heatmap.set(
             dev_values, freqs, np.full((len(dev_values), len(freqs)), np.nan)
         )
-        image.set_cmap("viridis")
         fig.colorbar(image, ax=heat_ax, label=contrast_label)
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         lines = live_line(line_ax, num_lines=2)
@@ -299,10 +298,9 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
             ylabel="Probe RF frequency (MHz)",
         )
         ax.grid(False)
-        heatmap = live_heatmap(ax, uniform=False)
+        heatmap = live_heatmap(ax, uniform=False, cmap="viridis")
         contrast = np.abs(minus_background(result.signals, axis=1))
         (image,) = heatmap.set(result.values, result.freqs, contrast)
-        image.set_cmap("viridis")
         fig.colorbar(image, ax=ax, label="Background-subtracted IQ magnitude (a.u.)")
         ax.axvline(selection.flux_half, color="red", linestyle="--", label="Half flux")
         ax.axvline(

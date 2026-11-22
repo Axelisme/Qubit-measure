@@ -247,11 +247,10 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         contrast = "Signed IQ principal-axis projection (a.u.)"
         line_ax.set(xlabel="Free evolution time (µs)", ylabel=contrast)
         heat_ax.grid(False)
-        heatmap = live_heatmap(heat_ax, uniform=False)
+        heatmap = live_heatmap(heat_ax, uniform=False, cmap="viridis")
         (image,) = heatmap.set(
             gains, lengths, np.full((len(gains), len(lengths)), np.nan)
         )
-        image.set_cmap("viridis")
         fig.colorbar(image, ax=heat_ax, label=contrast)
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         lines = live_line(line_ax, num_lines=2)
@@ -346,10 +345,9 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
             ylabel="Free evolution time (µs)",
         )
         fringes.grid(False)
-        (time_image,) = live_heatmap(fringes, uniform=False).set(
+        (time_image,) = live_heatmap(fringes, uniform=False, cmap="viridis").set(
             gains, lens, real_signals
         )
-        time_image.set_cmap("viridis")
         fig.colorbar(
             time_image, ax=fringes, label="Signed IQ principal-axis projection (a.u.)"
         )
@@ -361,10 +359,9 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
             title=f"FFT relative to {detune:g} MHz",
         )
         spectrum.grid(False)
-        (fft_image,) = live_heatmap(spectrum, uniform=False, clim=(0, 1)).set(
-            gains**2, fft_freqs[order], fft_signals[:, order]
-        )
-        fft_image.set_cmap("viridis")
+        (fft_image,) = live_heatmap(
+            spectrum, uniform=False, clim=(0, 1), cmap="viridis"
+        ).set(gains**2, fft_freqs[order], fft_signals[:, order])
         fig.colorbar(
             fft_image,
             ax=spectrum,

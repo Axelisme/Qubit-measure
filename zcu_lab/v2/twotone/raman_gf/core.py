@@ -242,7 +242,10 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         headline = figure.suptitle(title)
         shape = (len(detunings), len(gains))
         if grid:
-            maps = [live_heatmap(ax, uniform=False, clim=(0, 1)) for ax in figure.axes]
+            maps = [
+                live_heatmap(ax, uniform=False, clim=(0, 1), cmap="viridis")
+                for ax in figure.axes
+            ]
             for ax, heatmap, state in zip(figure.axes, maps, STATE_LABELS, strict=True):
                 ax.set(
                     xlabel="Drive gain (a.u.)",
@@ -251,7 +254,6 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                 )
                 ax.grid(False)
                 (image,) = heatmap.set(gains, detunings, np.full(shape[::-1], np.nan))
-                image.set_cmap("viridis")
                 figure.colorbar(
                     image, ax=ax, label="Measured label fraction", ticks=(0, 0.5, 1)
                 )

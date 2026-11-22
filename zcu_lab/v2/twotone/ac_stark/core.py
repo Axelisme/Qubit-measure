@@ -267,9 +267,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         contrast_label = "Row-normalized IQ projection (a.u.)"
         line_ax.set(xlabel="Probe RF frequency (MHz)", ylabel=contrast_label)
         heat_ax.grid(False)
-        heatmap = live_heatmap(heat_ax, uniform=False)
+        heatmap = live_heatmap(heat_ax, uniform=False, cmap="viridis")
         (image,) = heatmap.set(gains, freqs, np.full((len(gains), len(freqs)), np.nan))
-        image.set_cmap("viridis")
         fig.colorbar(image, ax=heat_ax, label=contrast_label)
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         lines = live_line(line_ax, num_lines=2)
@@ -375,8 +374,9 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             ),
         )
         ax.grid(False)
-        (image,) = live_heatmap(ax, uniform=False).set(gains, freqs, amps)
-        image.set_cmap("viridis")
+        (image,) = live_heatmap(ax, uniform=False, cmap="viridis").set(
+            gains, freqs, amps
+        )
         fig.colorbar(image, ax=ax, label="Row-normalized IQ projection (a.u.)")
         ax.plot(
             s_gains,
