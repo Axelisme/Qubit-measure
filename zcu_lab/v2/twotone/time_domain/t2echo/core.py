@@ -13,9 +13,12 @@ from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import (
     FitQuality,
+    decaycos,
+    expfunc,
     fit_decay,
     fit_decay_fringe,
 )
+from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -25,11 +28,24 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Delay, Pulse, Readout, Reset, SweepCfg, TimelineBuilder
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.program.v2 import (
+    IQ,
+    Delay,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+    split_sums,
+)
+from zcu_tools.utils.process import find_rotate_angle, rotate2real
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.detune import actual_detune
+
+_DELAY_LABEL = "Total echo delay (µs)"
+_IQ_LABEL = "IQ projection (a.u.)"
 
 
 @dataclass(frozen=True)
@@ -38,22 +54,33 @@ class T2EchoResult:
 
     true_activate_detune is the phase-ramp frequency in MHz after hardware
     time/phase rounding, not a fitted qubit detuning. It is run-only metadata
-    and is None after canonical load.
+    and is None after canonical load. iq_moments contains corrected shot sums
+    [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] with shape (len(times), 6) from the same
+    standalone run as signals. It is None after load and for mean-only runs.
     """
 
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
     true_activate_detune: float | None = None
+    iq_moments: NDArray[np.float64] | None = None
 
 
 @validated_dataclass(frozen=True)
 class T2EchoAnalyzeOptions:
-    fit_method: Annotated[Literal["fringe", "decay"], FieldMeta(label="Fit method")] = (
-        "decay"
-    )
-    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset (fringe only)")] = (
-        False
-    )
+    fit_method: Annotated[
+        Literal["fringe", "decay"],
+        FieldMeta(
+            label="Fit method",
+            description="Choose decay for the echo envelope or fringe to fit its modulation when detuned.",
+        ),
+    ] = "decay"
+    fit_phase: Annotated[
+        bool,
+        FieldMeta(
+            label="Fit phase offset (fringe only)",
+            description="Fit the fringe phase offset instead of fixing it at 0°.",
+        ),
+    ] = False
 
 
 @dataclass(frozen=True)
@@ -65,8 +92,17 @@ class T2EchoAnalysis:
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
+def _iq_direction(signals: NDArray[np.complex128]) -> tuple[float, float]:
+    """Return the signed IQ principal direction, or I if no contrast is available."""
+    measured = signals[np.isfinite(signals)]
+    if measured.size < 2 or np.all(measured == measured[0]):
+        return (1.0, 0.0)
+    angle = find_rotate_angle(measured)
+    return (float(np.cos(angle)), float(np.sin(angle)))
+
+
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
+    """Project the mean complex IQ used by the completed-round SNR checker."""
     return rotate2real(signals).real
 
 
@@ -129,8 +165,8 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         half delay, then pi/2 and readout. cfg supplies the pulses and total
         delay sweep in us. detune in MHz ramps the final pi/2 phase with total
         delay to add fringes; it does not change the drive frequency.
-        Return hardware-rounded total delays and mean complex IQ. analyze
-        extracts T2echo from the decay or fringe envelope.
+        Return hardware-rounded total delays, mean complex IQ and the
+        offset-corrected shot sums from those same completed rounds.
         """
         # 1. Round both half-delays and report the realized phase-ramp frequency.
         cfg = deepcopy(cfg)
@@ -149,28 +185,30 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
 
         # 2. Display the IQ projection while averaging the total-delay sweep.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (µs)", ylabel="Amplitude (a.u.)")
-        ax.set_title(f"T2 Echo (detune={true_detune:.3f}MHz)")
+        ax.set(
+            title="Spin echo · 0 shots/point",
+            xlabel=_DELAY_LABEL,
+            ylabel=_IQ_LABEL,
+        )
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
-        viewer = live_line(ax)
+        viewer = live_errorbar(ax)
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            """Refresh the echo contrast curve.
-
-            data is complex IQ in delay order; NaN marks unmeasured points.
-            Return the changed artists without modifying the input array.
-            """
-            return viewer.set(lengths, t2echo_signal2real(data))
+        def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh the projected mean, shot SEM and completed shot count."""
+            counts, mean = split_sums(moments)
+            i, q = _iq_direction(mean)
+            sem = iq_shot_sem(moments, direction=(i, q))
+            count = np.nanmax(counts, initial=0)
+            title = ax.set_title(f"Spin echo · {count:.0f} shots/point")
+            return (*viewer.set(lengths, mean.real * i + mean.imag * q, sem), title)
 
         fig.show()
-        signals_buffer = SignalBuffer(
-            (len(lengths),),
-            on_update=update,
+        moments_buffer = SignalBuffer(
+            (len(lengths), 6), dtype=np.float64, on_update=update
         )
         # 3. Measure midpoint-refocused coherence with a phase-ramped final projection.
-        with Schedule(signals_buffer, scope=context.scope) as sched:
+        with Schedule(moments_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -196,22 +234,26 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             )
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(
+            sched.run_acquire_summed(
                 prog,
                 soc,
+                reducer=shot_sums(prog, (IQ("readout", offset_corrected=True),)),
                 rounds=cfg.rounds,
                 options=RunOptions(
                     stop_condition=snr_checker(
-                        signals_buffer.at(), cfg.earlystop_snr, t2echo_signal2real
+                        moments_buffer.at(),
+                        cfg.earlystop_snr,
+                        lambda sums: t2echo_signal2real(split_sums(sums)[1]),
                     ),
                 ),
             )
 
-        # 4. Preserve the realized phase-ramp frequency with the measured echo trace.
+        # 4. Return the measured trace and its shot statistics from the same rounds.
         return T2EchoResult(
             times=lengths,
-            signals=signals_buffer.array,
+            signals=split_sums(moments_buffer.array)[1],
             true_activate_detune=true_detune,
+            iq_moments=moments_buffer.array,
         )
 
     def analyze(
@@ -221,7 +263,10 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         *,
         plots: Plots,
     ) -> T2EchoAnalysis:
-        """Fit T2echo in us from the IQ projection, excluding the first sample.
+        """Fit T2 Echo in us from finite IQ after omitting the first delay.
+
+        Plot the principal-axis projection and same-run shot SEM when present.
+        If fitting raises, leave the measured trace without a model curve.
 
         fit_method selects a pure decay or a decaying fringe. fit_phase frees
         the fringe phase; otherwise it is fixed at zero. Decay-only fits ignore
@@ -250,60 +295,70 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             if detune_source == 0.0:
                 fit_method = "decay"
 
-        xs, signals = result.times, result.signals
+        # 2. Build the measured trace before fitting so it remains available on failure.
+        valid = np.isfinite(result.signals[1:])
+        xs, signals = result.times[1:][valid], result.signals[1:][valid]
+        i, q = _iq_direction(signals)
+        real_signals = signals.real * i + signals.imag * q
+        sem = (
+            None
+            if result.iq_moments is None
+            else iq_shot_sem(result.iq_moments[1:][valid], direction=(i, q))
+        )
+        _, ax = plots.subplots(num="fit", figsize=config.figsize, layout="tight")
+        ax.set(title="Spin echo", xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
+        if sem is not None and np.isfinite(sem).any():
+            measured, _, _ = ax.errorbar(
+                xs, real_signals, yerr=sem, fmt=".-", label="Measured ± shot SEM"
+            ).lines
+        else:
+            (measured,) = ax.plot(xs, real_signals, ".-", label="Measured")
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.17))
 
-        xs = xs[1:]
-        signals = signals[1:]
-
-        # 2. Estimate echo coherence from the real-IQ trace after omitting its first point.
-        real_signals = rotate2real(signals).real
-
+        # 3. Fit the same unweighted observations and overlay the model on a dense grid.
         if fit_method == "fringe":
             fixedparams = None if fit_phase else [None, None, None, 0.0, None]
             fit = fit_decay_fringe(xs, real_signals, fixedparams=fixedparams)
-            t2e, t2eerr, detune, detune_err, y_fit = (
-                fit.decay_time,
-                fit.decay_time_err,
-                fit.freq,
-                fit.freq_err,
-                fit.curve,
-            )
+            model = decaycos
+            label = "Fringe fit"
+            detune, detune_err = fit.freq, fit.freq_err
         else:
             fit = fit_decay(xs, real_signals)
-            t2e, t2eerr, y_fit = (
-                fit.decay_time,
-                fit.decay_time_err,
-                fit.curve,
-            )
-            detune = 0.0
-            detune_err = 0.0
+            model = expfunc
+            label = "Decay fit"
+            detune = detune_err = 0.0
+        fit_delays = np.linspace(xs.min(), xs.max(), max(200, xs.size))
+        measured.set_linestyle("none")
+        ax.plot(
+            fit_delays, model(fit_delays, *fit.params), color="tab:orange", label=label
+        )
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncols=2)
 
-        # 3. Assess echo decay and any fitted fringe frequency against the measured trace.
-        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-
-        ax.plot(xs, real_signals, label="data", ls="none", marker="o", markersize=5)
-        ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
-
-        t2e_str = f"{t2e:.2f}µs ± {t2eerr:.2f}µs"
+        # 4. Annotate the fitted lifetimes, frequency and quality without selection gates.
+        t2e, t2eerr = fit.decay_time, fit.decay_time_err
+        quality = fit.quality
+        facts = [f"T₂ Echo = {t2e:.2f} ± {t2eerr:.2f} µs"]
         if fit_method == "fringe":
-            detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
-            title = r"$T_{2echo}$ fringe = " + f"{t2e_str}, detune = {detune_str}"
-
-        else:
-            title = r"$T_{2echo}$ decay = " + f"{t2e_str}"
-
-        ax.set_title(title, fontsize=14)
-        ax.set_xlabel("Delay Time (µs)", fontsize=14)
-        ax.set_ylabel("Signal (a.u.)", fontsize=14)
-        ax.legend(loc="upper right")
-        ax.grid(True)
-
-        fig.tight_layout()
+            facts.append(f"Fringe frequency = {detune:.4f} ± {detune_err:.4f} MHz")
+        if quality.r2 is not None:
+            facts.append(f"R² = {quality.r2:.4f}")
+        if quality.normalized_residual_rms is not None:
+            facts.append(
+                f"Normalized residual RMS = {quality.normalized_residual_rms:.3g}"
+            )
+        ax.text(
+            0.98,
+            0.97,
+            "\n".join(facts),
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+        )
 
         return T2EchoAnalysis(
             t2e=float(t2e),
             t2e_err=float(t2eerr),
             detune=float(detune),
             detune_err=float(detune_err),
-            fit_quality={"fit": fit.quality},
+            fit_quality={"fit": quality},
         )
