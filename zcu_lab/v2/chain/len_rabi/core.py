@@ -12,14 +12,17 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import decaycos, fit_rabi
+from zcu_tools.analysis.fitting import RabiFit, decaycos, fit_rabi
 from zcu_tools.analysis.readout_chain import (
+    CycleProjectionUnavailable,
     CycleSums,
     cycle_curves,
+    cycle_residual_projection,
     fit_cycle,
     rabi_model,
 )
@@ -47,7 +50,7 @@ from zcu_lab.v2.chain._cycle import (
 )
 from zcu_lab.v2.support import live_errorbar, live_line
 
-from .._joint import joint_residual_fields, joint_residuals_text, plot_joint_residuals
+from .._joint import JointResidualDiagnostics, plot_joint_residuals
 
 LENGTH_AXIS = VariableAxisSpec(label="Length", unit="s", field_name="axis", scale=1e-6)
 _SWEEP_LABEL = "Drive duration (µs)"
@@ -63,14 +66,13 @@ def _estimate_text(value: float, error: float, unit: str) -> str:
 
 
 @dataclass(frozen=True)
-class ChainLenRabiAnalysis:
+class ChainLenRabiAnalysis(JointResidualDiagnostics):
     """Joint estimates, optional first-read π duration and residual diagnostics.
 
     pi_len = 1/(2f) is in µs; f is in MHz. The errors are Wald standard errors,
     and reliability is the inverse phase uncertainty from f_err over the sweep.
     first_read_pi_len (µs) seeds the joint fit when available; otherwise it is
-    None. J and df summarize the whitened residuals with their ratio,
-    chi-square reference band and |r| > 3 fraction.
+    None.
     """
 
     pi_len: float
@@ -79,12 +81,6 @@ class ChainLenRabiAnalysis:
     f_err: float
     reliability: float | None
     first_read_pi_len: float | None
-    J: float
-    df: int
-    j_per_df: float
-    expected_band_low: float
-    expected_band_high: float
-    tail_fraction: float
 
 
 class ChainLenRabiCfg(ConfigBase):
@@ -259,56 +255,6 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
             first_read_pi_len = float(seed_fit.pi_x)
             start_f = 1 / (2 * first_read_pi_len)
 
-        seed_fig, seed_ax = plots.subplots(
-            num="fit", figsize=config.figsize, layout="constrained"
-        )
-        seed_fig.suptitle(_IQ_TITLE)
-        seed_ax.errorbar(
-            lengths,
-            seed_signal,
-            yerr=seed_sem,
-            fmt=".",
-            color="C0",
-            label="First-read mean ± shot SEM",
-        )
-        if seed_fit is None:
-            seed_ax.set_title("First-read fit unavailable", loc="left", fontsize=10)
-        else:
-            seed_dense = np.linspace(lengths.min(), lengths.max(), 400)
-            seed_ax.plot(
-                seed_dense,
-                decaycos(seed_dense, *seed_fit.params),
-                color="C1",
-                label="First-read fit",
-            )
-            for coordinate, label, style in (
-                (seed_fit.pi_x, "π", "--"),
-                (seed_fit.pi2_x, "π/2", ":"),
-            ):
-                if lengths.min() <= coordinate <= lengths.max():
-                    seed_ax.axvline(coordinate, ls=style, color="0.35", linewidth=1)
-                    seed_ax.annotate(
-                        label,
-                        (coordinate, 0.02),
-                        xycoords=("data", "axes fraction"),
-                        xytext=(3, 0),
-                        textcoords="offset points",
-                    )
-            r2 = seed_fit.quality.r2
-            residual = seed_fit.quality.normalized_residual_rms
-            r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
-            residual_text = "unavailable" if residual is None else f"{residual:.3g}"
-            seed_ax.set_title(
-                f"First-read π duration = {seed_fit.pi_x:.4g} ± {seed_fit.pi_x_err:.2g} µs\n"
-                f"First-read π/2 duration = {seed_fit.pi2_x:.4g} ± {seed_fit.pi2_x_err:.2g} µs\n"
-                f"R² = {r2_text} · Normalized residual RMS = {residual_text}",
-                loc="left",
-                fontsize=10,
-            )
-        seed_ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
-        seed_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        seed_fig.legend(loc="outside lower center", ncols=2)
-
         # 2. Joint fit of all 65 numbers with the Rabi curve.
         model = rabi_model()
         fit = fit_cycle(sums, model, {"f": start_f})
@@ -320,30 +266,59 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
         reliability_text = (
             "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
         )
-        joint_fig, _ = plots.subplots(
-            num="joint residuals",
-            nrows=2,
-            sharex=True,
-            figsize=(8, 6),
-            gridspec_kw={"height_ratios": (2, 1)},
-            layout="constrained",
-        )
-        projection_ax, residual_ax = joint_fig.axes
-        plot_joint_residuals(projection_ax, residual_ax, sums, model, fit)
-        if lengths.min() <= pi_len <= lengths.max():
-            projection_ax.axvline(
-                pi_len, linestyle="--", color="C2", label="Joint π duration"
-            )
-        projection_ax.set(ylabel=_JOINT_LABEL, title=joint_residuals_text(fit))
-        residual_ax.set(xlabel=_SWEEP_LABEL, ylabel="Measured − model\n(SEM units)")
-        residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        joint_fig.suptitle(
+        title = (
             "K-cycle length Rabi · Qubit · Joint fit\n"
             f"π duration = {_estimate_text(pi_len, pi_len_err, 'µs')}\n"
             f"Rabi frequency = {_estimate_text(f, f_err, 'MHz')}    R = {reliability_text}"
         )
-        handles, labels = projection_ax.get_legend_handles_labels()
-        joint_fig.legend(handles, labels, loc="outside lower center", ncols=3)
+        band_low, band_high = fit.expected_band
+        diagnostics = (
+            f"J = {fit.J:.5g}    df = {fit.df}    J/df = {fit.j_per_df:.5g}\n"
+            f"χ² reference = [{band_low:.4f}, {band_high:.4f}]    Fraction |r| > 3: {fit.tail_fraction:.3%}"
+        )
+        grid = np.linspace(lengths.min(), lengths.max(), 400)
+        try:
+            view = cycle_residual_projection(sums, model, fit, model_axis=grid)
+        except CycleProjectionUnavailable:
+            fig = Figure(figsize=(8, 2.4), layout="constrained")
+            fig.suptitle(title)
+            fig.text(
+                0.5,
+                0.28,
+                f"{diagnostics}\n\nLive-direction projection unavailable",
+                ha="center",
+                va="center",
+            )
+            plots.adopt("joint residuals", fig)
+        else:
+            joint_fig, _ = plots.subplots(
+                num="joint residuals",
+                nrows=2,
+                sharex=True,
+                figsize=(8, 6),
+                gridspec_kw={"height_ratios": (2, 1)},
+                layout="constrained",
+            )
+            projection_ax, residual_ax = joint_fig.axes
+            plot_joint_residuals(
+                projection_ax,
+                residual_ax,
+                lengths,
+                grid,
+                view,
+                ("Measured · all 65 numbers", "Joint model"),
+            )
+            if lengths.min() <= pi_len <= lengths.max():
+                projection_ax.axvline(
+                    pi_len, linestyle="--", color="C2", label="Joint π duration"
+                )
+            projection_ax.set(ylabel=_JOINT_LABEL, title=diagnostics)
+            residual_ax.set(xlabel=_SWEEP_LABEL, ylabel="Measured − model\n(SEM units)")
+            residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+            joint_fig.suptitle(title)
+            handles, labels = projection_ax.get_legend_handles_labels()
+            joint_fig.legend(handles, labels, loc="outside lower center", ncols=3)
+        _plot_first_read(plots, lengths, seed_signal, seed_sem, seed_fit)
 
         return ChainLenRabiAnalysis(
             pi_len=pi_len,
@@ -352,5 +327,68 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
             f_err=f_err,
             reliability=fit.reliability,
             first_read_pi_len=first_read_pi_len,
-            **joint_residual_fields(fit),
+            J=fit.J,
+            df=fit.df,
+            j_per_df=fit.j_per_df,
+            expected_band_low=band_low,
+            expected_band_high=band_high,
+            tail_fraction=fit.tail_fraction,
         )
+
+
+def _plot_first_read(
+    plots: Plots,
+    lengths: NDArray[np.float64],
+    seed_signal: NDArray[np.float64],
+    seed_sem: NDArray[np.float64],
+    seed_fit: RabiFit | None,
+) -> None:
+    seed_fig, seed_ax = plots.subplots(
+        num="fit", figsize=config.figsize, layout="constrained"
+    )
+    seed_fig.suptitle(_IQ_TITLE)
+    seed_ax.errorbar(
+        lengths,
+        seed_signal,
+        yerr=seed_sem,
+        fmt=".-" if seed_fit is None else ".",
+        color="C0",
+        label="First-read mean ± shot SEM",
+    )
+    if seed_fit is None:
+        seed_ax.set_title("First-read fit unavailable", loc="left", fontsize=10)
+    else:
+        seed_dense = np.linspace(lengths.min(), lengths.max(), 400)
+        seed_ax.plot(
+            seed_dense,
+            decaycos(seed_dense, *seed_fit.params),
+            color="C1",
+            label="First-read fit",
+        )
+        for coordinate, label, style in (
+            (seed_fit.pi_x, "π", "--"),
+            (seed_fit.pi2_x, "π/2", ":"),
+        ):
+            if lengths.min() <= coordinate <= lengths.max():
+                seed_ax.axvline(coordinate, ls=style, color="0.35", linewidth=1)
+                seed_ax.annotate(
+                    label,
+                    (coordinate, 0.02),
+                    xycoords=("data", "axes fraction"),
+                    xytext=(3, 0),
+                    textcoords="offset points",
+                )
+        r2 = seed_fit.quality.r2
+        residual = seed_fit.quality.normalized_residual_rms
+        r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
+        residual_text = "unavailable" if residual is None else f"{residual:.3g}"
+        seed_ax.set_title(
+            f"First-read π duration = {seed_fit.pi_x:.4g} ± {seed_fit.pi_x_err:.2g} µs\n"
+            f"First-read π/2 duration = {seed_fit.pi2_x:.4g} ± {seed_fit.pi2_x_err:.2g} µs\n"
+            f"R² = {r2_text} · Normalized residual RMS = {residual_text}",
+            loc="left",
+            fontsize=10,
+        )
+    seed_ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+    seed_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    seed_fig.legend(loc="outside lower center", ncols=2)

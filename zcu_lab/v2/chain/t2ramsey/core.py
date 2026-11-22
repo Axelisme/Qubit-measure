@@ -13,14 +13,17 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import DecayFringeFit, decaycos, fit_decay_fringe
 from zcu_tools.analysis.readout_chain import (
+    CycleProjectionUnavailable,
     CycleSums,
     cycle_curves,
+    cycle_residual_projection,
     fit_cycle,
     t2_ramsey_model,
 )
@@ -48,7 +51,7 @@ from zcu_lab.v2.chain._cycle import (
 )
 from zcu_lab.v2.support import live_errorbar, live_line
 
-from .._joint import joint_residual_fields, joint_residuals_text, plot_joint_residuals
+from .._joint import JointResidualDiagnostics, plot_joint_residuals
 
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
 _SWEEP_LABEL = "Free-evolution wait (µs)"
@@ -57,16 +60,14 @@ _IQ_LABEL = "Projected mean IQ (a.u.)"
 
 
 @dataclass(frozen=True)
-class ChainT2RamseyAnalysis:
+class ChainT2RamseyAnalysis(JointResidualDiagnostics):
     """Joint Ramsey estimates, scalar residual diagnostics and first-read seeds.
 
     t2 and tf are the Ramsey and third-state decay times in µs. detuning is
     the fringe frequency in MHz, including the programmed phase ramp. The
     corresponding errors are Wald standard errors. reliability is
     R = 1 / (2π × delay span × detuning_err), without a threshold.
-    J, df, j_per_df, the χ² reference band endpoints and tail_fraction
-    describe the last joint stage's whitened residuals. The per-delay
-    projection stays in the figure. The first-read estimates, in µs and MHz,
+    The first-read estimates, in µs and MHz,
     are None if that fit has no estimate.
     """
 
@@ -77,12 +78,6 @@ class ChainT2RamseyAnalysis:
     tf: float
     tf_err: float
     reliability: float | None
-    J: float
-    df: int
-    j_per_df: float
-    expected_band_low: float
-    expected_band_high: float
-    tail_fraction: float
     first_read_t2: float | None
     first_read_detuning: float | None
 
@@ -100,7 +95,7 @@ def _plot_first_read(
         delays,
         signal,
         yerr=sem,
-        fmt=".",
+        fmt=".-" if fit is None else ".",
         color="C0",
         label="First-read mean ± shot SEM",
     )
@@ -343,7 +338,6 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
                 "tf": first_read_t2,
                 "detuning": first_read_detuning,
             }
-        _plot_first_read(plots, delays, seed_signal, seed_sem, seed_fit)
 
         # 2. One joint fit of all 65 numbers using the original wait rows.
         model = t2_ramsey_model()
@@ -355,30 +349,60 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         reliability_text = (
             "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
         )
-        fig, _ = plots.subplots(
-            num="joint residuals",
-            nrows=2,
-            sharex=True,
-            figsize=(8, 6.5),
-            gridspec_kw={"height_ratios": (2, 1), "hspace": 0.18},
-            layout="constrained",
-        )
-        projection_ax, residual_ax = fig.axes
-        plot_joint_residuals(projection_ax, residual_ax, sums, model, fit)
-        if delays.min() <= t2 <= delays.max():
-            projection_ax.axvline(
-                t2, linestyle="--", color="0.35", linewidth=1, label="Joint T2*"
-            )
-        fig.suptitle(
+        title = (
             "K-cycle T2 Ramsey · Qubit · Joint fit\n"
             f"T2* = {_estimate_with_se(t2, t2_err, 'µs')} · R = {reliability_text}\n"
             f"Fringe frequency = {_estimate_with_se(detuning, detuning_err, 'MHz')}\n"
             f"Third-state decay time = {_estimate_with_se(tf, tf_err, 'µs')}"
         )
-        projection_ax.set_title(joint_residuals_text(fit), fontsize=10)
-        residual_ax.set_xlabel(_SWEEP_LABEL)
-        residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        fig.legend(loc="outside lower center", ncols=3)
+        band_low, band_high = fit.expected_band
+        diagnostics = (
+            f"J = {fit.J:.5g}    df = {fit.df}    J/df = {fit.j_per_df:.5g}\n"
+            f"χ² reference = [{band_low:.4f}, {band_high:.4f}]    Fraction |r| > 3: {fit.tail_fraction:.3%}"
+        )
+        grid = np.linspace(delays.min(), delays.max(), 400)
+        try:
+            view = cycle_residual_projection(sums, model, fit, model_axis=grid)
+        except CycleProjectionUnavailable:
+            fig = Figure(figsize=(8, 2.4), layout="constrained")
+            fig.suptitle(title)
+            fig.text(
+                0.5,
+                0.28,
+                f"{diagnostics}\n\nLive-direction projection unavailable",
+                ha="center",
+                va="center",
+            )
+            plots.adopt("joint residuals", fig)
+        else:
+            fig, _ = plots.subplots(
+                num="joint residuals",
+                nrows=2,
+                sharex=True,
+                figsize=(8, 6.5),
+                gridspec_kw={"height_ratios": (2, 1), "hspace": 0.18},
+                layout="constrained",
+            )
+            projection_ax, residual_ax = fig.axes
+            plot_joint_residuals(
+                projection_ax,
+                residual_ax,
+                delays,
+                grid,
+                view,
+                ("Measured · all 65 numbers", "Joint model"),
+            )
+            if delays.min() <= t2 <= delays.max():
+                projection_ax.axvline(
+                    t2, linestyle="--", color="0.35", linewidth=1, label="Joint T2*"
+                )
+            fig.suptitle(title)
+            projection_ax.set_title(diagnostics, fontsize=10)
+            projection_ax.set_ylabel("Joint projection\n(SEM units)")
+            residual_ax.set(xlabel=_SWEEP_LABEL, ylabel="Measured − model\n(SEM units)")
+            residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+            fig.legend(loc="outside lower center", ncols=3)
+        _plot_first_read(plots, delays, seed_signal, seed_sem, seed_fit)
 
         return ChainT2RamseyAnalysis(
             t2=t2,
@@ -390,5 +414,10 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
             reliability=fit.reliability,
             first_read_t2=first_read_t2,
             first_read_detuning=first_read_detuning,
-            **joint_residual_fields(fit),
+            J=fit.J,
+            df=fit.df,
+            j_per_df=fit.j_per_df,
+            expected_band_low=band_low,
+            expected_band_high=band_high,
+            tail_fraction=fit.tail_fraction,
         )

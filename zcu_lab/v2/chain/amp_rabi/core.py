@@ -12,14 +12,17 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import RabiFit, cosfunc, fit_rabi
 from zcu_tools.analysis.readout_chain import (
+    CycleProjectionUnavailable,
     CycleSums,
     cycle_curves,
+    cycle_residual_projection,
     fit_cycle,
     rabi_model,
 )
@@ -46,18 +49,14 @@ from zcu_lab.v2.chain._cycle import (
     first_read_iq,
     restore_cycle_sums,
 )
-from zcu_lab.v2.chain._joint import (
-    joint_residual_fields,
-    joint_residuals_text,
-    plot_joint_residuals,
-)
+from zcu_lab.v2.chain._joint import JointResidualDiagnostics, plot_joint_residuals
 from zcu_lab.v2.support import live_line
 
 GAIN_AXIS = VariableAxisSpec(label="Gain", unit="", field_name="axis")
 
 
 @dataclass(frozen=True)
-class ChainAmpRabiAnalysis:
+class ChainAmpRabiAnalysis(JointResidualDiagnostics):
     """Joint π gain, Rabi frequency and scalar residual diagnostics.
 
     pi_amp and pi_amp_err are the π gain 1 / (2 f) and its Wald SE in a.u.
@@ -66,10 +65,6 @@ class ChainAmpRabiAnalysis:
     Otherwise reliability is R = 1 / (2π × gain span × f_err), without a cutoff.
     first_read_pi_amp is the π gain of the first-read fit that seeded f,
     or None if that fit did not give an estimate.
-    J is the sum of squared joint whitened residuals, df the nominal degrees of
-    freedom and j_per_df their ratio. expected_band_low and expected_band_high
-    give its approximate chi-square reference band, not acceptance limits.
-    tail_fraction is the fraction of joint whitened components with |r| > 3.
     """
 
     pi_amp: float
@@ -78,12 +73,6 @@ class ChainAmpRabiAnalysis:
     f_err: float
     reliability: float | None
     first_read_pi_amp: float | None
-    J: float
-    df: int
-    j_per_df: float
-    expected_band_low: float
-    expected_band_high: float
-    tail_fraction: float
 
 
 class ChainAmpRabiCfg(ConfigBase):
@@ -263,27 +252,63 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         reliability_text = (
             "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
         )
-        fig, _ = plots.subplots(
-            2,
-            num="joint residuals",
-            sharex=True,
-            figsize=(8, 6),
-            gridspec_kw={"height_ratios": (2, 1)},
-            layout="constrained",
+        pi_text = (
+            f"{pi_amp:.6g} ± {pi_amp_err:.2g} a.u."
+            if np.isfinite(pi_amp_err)
+            else f"{pi_amp:.6g} a.u. (SE unavailable)"
         )
-        projection_ax, residual_ax = fig.axes
-        plot_joint_residuals(projection_ax, residual_ax, sums, model, fit)
-        if gains.min() <= pi_amp <= gains.max():
-            projection_ax.axvline(
-                pi_amp, linestyle="--", color="C2", label="Joint π gain"
-            )
-        projection_ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1))
-        projection_ax.set_title(joint_residuals_text(fit))
-        fig.suptitle(
+        title = (
             "K-cycle amplitude Rabi · Joint fit\n"
-            f"π gain = {pi_amp:.6g} ± {pi_amp_err:.2g} a.u.    R = {reliability_text}"
+            f"π gain = {pi_text}    R = {reliability_text}"
         )
-        residual_ax.set_xlabel("Pulse gain (a.u.)")
+        band_low, band_high = fit.expected_band
+        diagnostics = (
+            f"J = {fit.J:.5g}    df = {fit.df}    J/df = {fit.j_per_df:.5g}\n"
+            f"χ² reference = [{band_low:.4f}, {band_high:.4f}]    Fraction |r| > 3: {fit.tail_fraction:.3%}"
+        )
+        grid = np.linspace(gains.min(), gains.max(), 400)
+        try:
+            view = cycle_residual_projection(sums, model, fit, model_axis=grid)
+        except CycleProjectionUnavailable:
+            fig = Figure(figsize=(8, 2.4), layout="constrained")
+            fig.suptitle(title)
+            fig.text(
+                0.5,
+                0.28,
+                f"{diagnostics}\n\nLive-direction projection unavailable",
+                ha="center",
+                va="center",
+            )
+            plots.adopt("joint residuals", fig)
+        else:
+            fig, _ = plots.subplots(
+                num="joint residuals",
+                nrows=2,
+                sharex=True,
+                figsize=(8, 6),
+                gridspec_kw={"height_ratios": (2, 1)},
+                layout="constrained",
+            )
+            projection_ax, residual_ax = fig.axes
+            plot_joint_residuals(
+                projection_ax,
+                residual_ax,
+                gains,
+                grid,
+                view,
+                ("Measured · all 65 numbers", "Joint model"),
+            )
+            projection_ax.set_ylabel("Projected signal (sigma)")
+            residual_ax.set(
+                xlabel="Pulse gain (a.u.)", ylabel="Measured − model (sigma)"
+            )
+            if gains.min() <= pi_amp <= gains.max():
+                projection_ax.axvline(
+                    pi_amp, linestyle="--", color="C2", label="Joint π gain"
+                )
+            projection_ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1))
+            projection_ax.set_title(diagnostics)
+            fig.suptitle(title)
         _plot_first_read_fit(plots, gains, seed_real_signals, seed_fit)
 
         return ChainAmpRabiAnalysis(
@@ -293,7 +318,12 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
             f_err=f_err,
             reliability=fit.reliability,
             first_read_pi_amp=first_read_pi_amp,
-            **joint_residual_fields(fit),
+            J=fit.J,
+            df=fit.df,
+            j_per_df=fit.j_per_df,
+            expected_band_low=band_low,
+            expected_band_high=band_high,
+            tail_fraction=fit.tail_fraction,
         )
 
 
@@ -304,7 +334,14 @@ def _plot_first_read_fit(
     fit: RabiFit | None,
 ) -> None:
     fig, ax = plots.subplots(num="fit", figsize=config.figsize, layout="constrained")
-    ax.plot(gains, signal, label="Measured · first read", ls="none", marker="o", ms=4)
+    ax.plot(
+        gains,
+        signal,
+        label="Measured · first read",
+        ls="-" if fit is None else "none",
+        marker="o",
+        ms=4,
+    )
     title = "First-read fit unavailable"
     if fit is not None:
         grid = np.linspace(gains.min(), gains.max(), 400)

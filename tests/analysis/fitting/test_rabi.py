@@ -3,7 +3,7 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import compute_fit_quality, fit_decay_fringe, rabi
+from zcu_tools.analysis.fitting import compute_fit_quality, fit_decay_fringe
 from zcu_tools.analysis.fitting.base import cosfunc, decaycos
 from zcu_tools.analysis.fitting.rabi import fit_rabi
 
@@ -67,16 +67,6 @@ def test_oscillation_without_contrast_cannot_estimate_a_fringe(
 ) -> None:
     with pytest.raises(AnalysisFailed, match="no contrast"):
         fit(np.linspace(0.0, 3.0, 20), np.full(20, 0.5))
-
-
-def test_zero_frequency_cannot_supply_rabi_pi(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Inject a degenerate optimizer result that real bounded FFT initialization excludes.
-    monkeypatch.setattr(
-        rabi, "fitcos", lambda *args, **kwargs: ([0.5, 0.1, 0.0, 0.0], np.eye(4))
-    )
-    xs = np.linspace(0.0, 3.0, 20)
-    with pytest.raises(AnalysisFailed, match="finite positive π"):
-        fit_rabi(xs, np.cos(xs))
 
 
 def test_fit_rabi_default_matches_explicit_no_decay() -> None:

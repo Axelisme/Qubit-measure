@@ -30,23 +30,101 @@ def whiten(
     return solve_triangular(lower, centered.T, lower=True).T * np.sqrt(counts[:, None])
 
 
+class CycleProjectionUnavailable(ValueError):
+    """Saved moments are compatible with rank loss and cannot be Cholesky-whitened.
+
+    Raised only by cycle_residual_projection. The joint fit can still be used.
+    """
+
+
 def pooled_whitening_factor(
     means: NDArray[np.float64],
     counts: NDArray[np.float64],
     products: NDArray[np.float64],
+    *,
+    classify_rank_loss: bool = False,
 ) -> NDArray[np.float64]:
-    """Return the lower factor of the pooled within-point covariance, or raise ValueError."""
-    covariance = (products - means.T @ (counts[:, None] * means)) / (
-        counts.sum() - len(counts)
-    )
+    """Return the lower factor of the pooled within-point covariance.
+
+    means has shape (F,D), counts (F,), and pooled products (D,D).
+    Raise ValueError for invalid covariance. Only cycle residual projection sets
+    classify_rank_loss, which distinguishes failed Cholesky compatible with PSD
+    rank loss from invalid covariance. Never regularize or change the factor.
+    """
+    df = counts.sum() - len(counts)
+    centered_products = products - means.T @ (counts[:, None] * means)
+    covariance = centered_products / df
     if not np.isfinite(covariance).all():
         raise ValueError("within-point covariance must be finite and positive definite")
-    if not np.allclose(covariance, covariance.T):
+    symmetric = np.allclose(covariance, covariance.T)
+    if not symmetric and not classify_rank_loss:
         raise ValueError("within-point covariance must be symmetric positive definite")
     try:
-        return np.linalg.cholesky(covariance)
+        lower = np.linalg.cholesky(covariance)
     except np.linalg.LinAlgError as exc:
+        if (
+            classify_rank_loss
+            and np.isfinite(df)
+            and _compatible_psd_rank_loss(centered_products, means, counts, products)
+        ):
+            raise CycleProjectionUnavailable(
+                "within-point covariance cannot be whitened at its saved rank"
+            ) from exc
+        if not symmetric:
+            raise ValueError(
+                "within-point covariance must be symmetric positive definite"
+            ) from exc
         raise ValueError("within-point covariance must be positive definite") from exc
+    if not symmetric:
+        raise ValueError("within-point covariance must be symmetric positive definite")
+    return lower
+
+
+def _compatible_psd_rank_loss(
+    centered_products: NDArray[np.float64],
+    means: NDArray[np.float64],
+    counts: NDArray[np.float64],
+    products: NDArray[np.float64],
+) -> bool:
+    # Bound arithmetic on the saved operands, not measurement or accumulation error.
+    # The pooled degrees of freedom cancel in R and B. Balance the numerators
+    # before any division by df so tiny saved moments do not become false zeros.
+    abs_means = np.abs(means)
+    scale = np.abs(products) + abs_means.T @ (counts[:, None] * abs_means)
+    if not np.isfinite(scale).all():
+        return False
+    support = scale.diagonal() > 0
+    if any(
+        np.any(matrix[~support, :]) or np.any(matrix[:, ~support])
+        for matrix in (scale, centered_products)
+    ):
+        return False
+    if not np.any(support):
+        return True
+
+    # Divide by the smaller axis scale first so mixed-unit cross terms do not
+    # underflow on the way to a representable balanced entry.
+    block = np.ix_(support, support)
+    diagonal = np.sqrt(scale.diagonal()[support])
+    small = np.minimum(diagonal[:, None], diagonal)
+    large = np.maximum(diagonal[:, None], diagonal)
+    with np.errstate(over="ignore", invalid="ignore"):
+        r = (centered_products[block] / small) / large
+        b = (scale[block] / small) / large
+        r_norm = np.linalg.norm(r, ord=np.inf)
+        b_norm = np.linalg.norm(b, ord=np.inf)
+    if not (np.isfinite(r_norm) and np.isfinite(b_norm)):
+        return False
+    eps = np.finfo(np.float64).eps
+    k_eps = (2 * len(counts) + 8) * eps
+    moment_error = k_eps / (1 - k_eps) * b_norm
+    if np.linalg.norm(r - r.T, ord=np.inf) > 2 * moment_error:
+        return False
+    eig_error = 8 * len(centered_products) * eps * max(1.0, r_norm)
+    smallest = np.linalg.eigvalsh(r * 0.5 + r.T * 0.5)[0]
+    if not np.all(support):
+        smallest = min(0.0, smallest)
+    return bool(abs(smallest) <= moment_error + eig_error)
 
 
 def block_distances(

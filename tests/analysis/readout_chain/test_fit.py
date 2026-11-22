@@ -186,6 +186,132 @@ def test_joint_predictions_use_the_signed_live_projection_on_points_and_grid() -
     )
 
 
+@pytest.fixture
+def saved_projection_case() -> tuple[CycleSums, CycleModel, CycleFit]:
+    model, nuisance = planted_model("rabi")
+    axis = np.arange(3.0)
+    counts = np.full(3, 16.0)
+    feature_sums = np.zeros((3, 65))
+    feature_sums[:, 2] = counts
+    # Exact rank one after removing the constant third feature's mean square.
+    products = np.zeros((65, 65))
+    products[:2, :2] = 45
+    products[2, 2] = 48
+    sums = CycleSums(axis, counts, feature_sums, products)
+    fit = CycleFit(
+        parameters={"frequency": 1.2},
+        errors={},
+        nuisances=nuisance,
+        covariance=np.empty((0, 0)),
+        parameter_names=(),
+        reliability=None,
+        J=0.0,
+        df=168,
+        j_per_df=0.0,
+        expected_band=(0.78, 1.22),
+        tail_fraction=0.0,
+        predicted_means=model.feature_means(axis, {"frequency": 1.2}, nuisance),
+        relaxation=None,
+    )
+    return sums, model, fit
+
+
+@pytest.mark.parametrize("moments", ["rank-one", "rank-zero", "one-ulp"])
+def test_projection_names_compatible_rank_loss_without_changing_live(
+    saved_projection_case: tuple[CycleSums, CycleModel, CycleFit], moments: str
+) -> None:
+    sums, model, fit = saved_projection_case
+    if moments == "rank-zero":
+        sums.product_sum[:2, :2] = 0
+    elif moments == "one-ulp":
+        sums.product_sum[2, 2] = np.nextafter(48.0, -np.inf)
+
+    with pytest.raises(ValueError, match="positive definite") as live_error:
+        chain.cycle_curves(sums)
+    assert type(live_error.value) is ValueError
+    with pytest.raises(chain.CycleProjectionUnavailable):
+        chain.cycle_residual_projection(
+            sums, model, fit, model_axis=np.linspace(0, 2, 5)
+        )
+
+
+@pytest.mark.parametrize(
+    "moments",
+    [
+        "negative",
+        "low-scale",
+        "subnormal",
+        "antisymmetric",
+        "infinite",
+        "zero-scale-cross",
+    ],
+)
+def test_projection_does_not_classify_bad_saved_moments_as_rank_loss(
+    saved_projection_case: tuple[CycleSums, CycleModel, CycleFit], moments: str
+) -> None:
+    sums, model, fit = saved_projection_case
+    if moments == "negative":
+        sums.product_sum[2, 2] -= 1e-9
+    elif moments == "low-scale":
+        sums.product_sum[64, 64] = -1e-150
+    elif moments == "subnormal":
+        sums.product_sum[64, 64] = np.nextafter(0.0, -np.inf)
+    elif moments == "antisymmetric":
+        sums.product_sum[0, 1] += 1e-9
+    elif moments == "infinite":
+        sums.product_sum[0, 0] = np.inf
+    else:
+        sums.product_sum[0, 64] = sums.product_sum[64, 0] = 1e-12
+
+    with pytest.raises(ValueError, match="positive definite|finite") as error:
+        chain.cycle_residual_projection(sums, model, fit)
+    assert type(error.value) is ValueError
+
+
+@pytest.mark.parametrize(
+    ("invalid", "message"),
+    [
+        ("prediction-shape", "acquired feature shape"),
+        ("prediction-nan", "predictions.*finite"),
+        ("grid", "axis.*finite"),
+        ("model", "nuisance type"),
+        ("grid-prediction", "curve.*shape"),
+        ("callback", "callback error"),
+    ],
+)
+def test_projection_checks_independent_errors_even_when_whitening_cannot_succeed(
+    saved_projection_case: tuple[CycleSums, CycleModel, CycleFit],
+    invalid: str,
+    message: str,
+) -> None:
+    sums, curve_model, fit = saved_projection_case
+    model: CycleModel | chain.RateModel = curve_model
+    grid = np.linspace(0, 2, 5)
+    callback_error = ValueError("callback error")
+
+    def fail_callback(*_args: object) -> np.ndarray:
+        raise callback_error
+
+    if invalid == "prediction-shape":
+        fit = replace(fit, predicted_means=np.zeros((3, 64)))
+    elif invalid == "prediction-nan":
+        fit.predicted_means[0, 0] = np.nan
+    elif invalid == "grid":
+        grid[0] = np.inf
+    elif invalid == "model":
+        model = chain.t1_model()
+    elif invalid == "grid-prediction":
+        model = replace(curve_model, curve=lambda *_args: np.zeros((5, 2)))
+    else:
+        model = replace(curve_model, curve=fail_callback)
+
+    with pytest.raises(ValueError, match=message) as error:
+        chain.cycle_residual_projection(sums, model, fit, model_axis=grid)
+    assert type(error.value) is ValueError
+    if invalid == "callback":
+        assert error.value is callback_error
+
+
 def test_per_state_curves_fit_their_parameters_jointly() -> None:
     _, nuisance = planted_model()
     model = CycleModel(

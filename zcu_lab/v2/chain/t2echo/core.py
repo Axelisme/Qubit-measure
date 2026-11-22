@@ -14,14 +14,17 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import DecayFit, expfunc, fit_decay
 from zcu_tools.analysis.readout_chain import (
+    CycleProjectionUnavailable,
     CycleSums,
     cycle_curves,
+    cycle_residual_projection,
     fit_cycle,
     t2_echo_model,
 )
@@ -49,7 +52,7 @@ from zcu_lab.v2.chain._cycle import (
 )
 from zcu_lab.v2.support import live_errorbar, live_line
 
-from .._joint import joint_residual_fields, joint_residuals_text, plot_joint_residuals
+from .._joint import JointResidualDiagnostics, plot_joint_residuals
 
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
 _SWEEP_LABEL = "Total echo wait (µs)"
@@ -58,19 +61,20 @@ _IQ_LABEL = "Projected mean IQ (a.u.)"
 _JOINT_LABEL = "Joint projection\n(SEM units)"
 
 
+def _estimate_text(value: float, error: float) -> str:
+    if np.isfinite(error):
+        return f"{value:.4g} ± {error:.2g} µs"
+    return f"{value:.4g} µs (SE unavailable)"
+
+
 @dataclass(frozen=True)
-class ChainT2EchoAnalysis:
+class ChainT2EchoAnalysis(JointResidualDiagnostics):
     """Joint echo estimates and scalar diagnostics of all 65 features.
 
     t2 and tf are the echo and third-state decay times in µs. t2_err and
     tf_err are their Wald standard errors in µs. first_read_t2 is the fitted
     first-read decay time in µs used to initialize both t2 and tf, or None
     when the first read did not supply an estimate.
-    J is the squared norm of the final whitened residual; df is the number
-    of features over all delays minus the number of fitted parameters.
-    j_per_df is J / df, expected_band_low and expected_band_high are the
-    approximate chi-square reference limits, and tail_fraction is the
-    fraction of whitened components with |r| > 3.
     """
 
     t2: float
@@ -78,12 +82,6 @@ class ChainT2EchoAnalysis:
     tf: float
     tf_err: float
     first_read_t2: float | None
-    J: float
-    df: int
-    j_per_df: float
-    expected_band_low: float
-    expected_band_high: float
-    tail_fraction: float
 
 
 class ChainT2EchoCfg(ConfigBase):
@@ -279,7 +277,6 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
             with suppress(AnalysisFailed):
                 seed_fit = fit_decay(delays[1:], seed_signal[1:])
         first_read_t2 = None if seed_fit is None else float(seed_fit.decay_time)
-        _plot_first_read(plots, delays, seed_signal, seed_sem, seed_fit)
 
         # 2. Fit all 65 numbers at every wait from one start.
         if first_read_t2 is None:
@@ -306,28 +303,56 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
                 fit.parameters["tf"],
                 fit.errors["tf"],
             )
-        fig, _ = plots.subplots(
-            num="joint-residuals",
-            nrows=2,
-            sharex=True,
-            figsize=(8, 6),
-            layout="constrained",
-        )
-        projection_ax, residual_ax = fig.axes
-        plot_joint_residuals(projection_ax, residual_ax, sums, model, fit)
-        fig.suptitle(
+        title = (
             "K-cycle T2 echo · Qubit · All 65 features\n"
-            f"T2 echo = {t2:.4g} ± {t2_err:.2g} µs\n"
-            f"Third-state decay time = {tf:.4g} ± {tf_err:.2g} µs\n"
-            f"{joint_residuals_text(fit)}",
+            f"T2 echo = {_estimate_text(t2, t2_err)}\n"
+            f"Third-state decay time = {_estimate_text(tf, tf_err)}"
         )
-        if delays.min() <= t2 <= delays.max():
-            projection_ax.axvline(t2, ls="--", color="0.35", linewidth=1)
-        projection_ax.set_ylabel(_JOINT_LABEL)
-        residual_ax.set(xlabel=_SWEEP_LABEL, ylabel="Measured − model\n(SEM units)")
-        residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        handles, labels = projection_ax.get_legend_handles_labels()
-        fig.legend(handles, labels, loc="outside lower center", ncols=2)
+        band_low, band_high = fit.expected_band
+        diagnostics = (
+            f"J = {fit.J:.5g}    df = {fit.df}    J/df = {fit.j_per_df:.5g}\n"
+            f"χ² reference = [{band_low:.4f}, {band_high:.4f}]    Fraction |r| > 3: {fit.tail_fraction:.3%}"
+        )
+        grid = np.linspace(delays.min(), delays.max(), 400)
+        try:
+            view = cycle_residual_projection(sums, model, fit, model_axis=grid)
+        except CycleProjectionUnavailable:
+            fig = Figure(figsize=(8, 2.4), layout="constrained")
+            fig.suptitle(title)
+            fig.text(
+                0.5,
+                0.28,
+                f"{diagnostics}\n\nLive-direction projection unavailable",
+                ha="center",
+                va="center",
+            )
+            plots.adopt("joint-residuals", fig)
+        else:
+            fig, _ = plots.subplots(
+                num="joint-residuals",
+                nrows=2,
+                sharex=True,
+                figsize=(8, 6),
+                layout="constrained",
+            )
+            projection_ax, residual_ax = fig.axes
+            plot_joint_residuals(
+                projection_ax,
+                residual_ax,
+                delays,
+                grid,
+                view,
+                ("Measured · all 65 numbers", "Joint model"),
+            )
+            fig.suptitle(f"{title}\n{diagnostics}")
+            if delays.min() <= t2 <= delays.max():
+                projection_ax.axvline(t2, ls="--", color="0.35", linewidth=1)
+            projection_ax.set_ylabel(_JOINT_LABEL)
+            residual_ax.set(xlabel=_SWEEP_LABEL, ylabel="Measured − model\n(SEM units)")
+            residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+            handles, labels = projection_ax.get_legend_handles_labels()
+            fig.legend(handles, labels, loc="outside lower center", ncols=2)
+        _plot_first_read(plots, delays, seed_signal, seed_sem, seed_fit)
 
         return ChainT2EchoAnalysis(
             t2=t2,
@@ -335,7 +360,12 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
             tf=tf,
             tf_err=tf_err,
             first_read_t2=first_read_t2,
-            **joint_residual_fields(fit),
+            J=fit.J,
+            df=fit.df,
+            j_per_df=fit.j_per_df,
+            expected_band_low=band_low,
+            expected_band_high=band_high,
+            tail_fraction=fit.tail_fraction,
         )
 
 
@@ -368,6 +398,7 @@ def _plot_first_read(
         else "Excluded from first-read fit",
     )
     if seed_fit is None:
+        ax.plot(delays, signal, color="C0", zorder=1)
         title = "First-read fit unavailable"
     else:
         dense = np.linspace(delays[1:].min(), delays.max(), 400)

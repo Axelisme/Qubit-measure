@@ -1,20 +1,16 @@
-"""Shared presentation of one fitted K-cycle model; experiments own their figures."""
+"""Scalar publication and unlabeled trace artists for K-cycle diagnostics."""
 
-from typing import TypedDict
+from dataclasses import dataclass
 
 import numpy as np
 from matplotlib.axes import Axes
+from numpy.typing import NDArray
 from pydantic import BaseModel, Field
-from zcu_tools.analysis.readout_chain import (
-    CycleFit,
-    CycleModel,
-    CycleSums,
-    RateModel,
-    cycle_residual_projection,
-)
+from zcu_tools.analysis.readout_chain import CycleResidualProjection
 
 
-class JointResidualFields(TypedDict):
+@dataclass(frozen=True, kw_only=True)
+class JointResidualDiagnostics:
     """Flat scalar diagnostics from the last joint stage, never a residual series."""
 
     J: float
@@ -24,9 +20,9 @@ class JointResidualFields(TypedDict):
     j_per_df: float
     """J divided by df, or NaN if df is nonpositive."""
     expected_band_low: float
-    """Lower endpoint of the approximate chi-square reference band for J/df."""
+    """Lower endpoint of the approximate chi-square reference band, or NaN if df <= 0."""
     expected_band_high: float
-    """Upper endpoint of the approximate chi-square reference band for J/df."""
+    """Upper endpoint of the approximate chi-square reference band, or NaN if df <= 0."""
     tail_fraction: float
     """Fraction (0 to 1) of whitened residual components with magnitude above 3."""
 
@@ -48,59 +44,31 @@ class JointResidualSummary(BaseModel):
     )
 
 
-def joint_residual_fields(fit: CycleFit) -> JointResidualFields:
-    """Copy the fit's diagnostics to flat summary fields without recomputing them."""
-    low, high = fit.expected_band
-    return {
-        "J": fit.J,
-        "df": fit.df,
-        "j_per_df": fit.j_per_df,
-        "expected_band_low": low,
-        "expected_band_high": high,
-        "tail_fraction": fit.tail_fraction,
-    }
-
-
-def joint_residuals_text(fit: CycleFit) -> str:
-    """Format two lines of diagnostics for a figure, without acceptance labels."""
-    low, high = fit.expected_band
-    return (
-        f"J = {fit.J:.5g}    df = {fit.df}    J/df = {fit.j_per_df:.5g}\n"
-        f"χ² reference = [{low:.4f}, {high:.4f}]    Fraction |r| > 3: {fit.tail_fraction:.3%}"
-    )
-
-
 def plot_joint_residuals(
     projection_ax: Axes,
     residual_ax: Axes,
-    sums: CycleSums,
-    model: CycleModel | RateModel,
-    fit: CycleFit,
+    axis: NDArray[np.float64],
+    grid: NDArray[np.float64],
+    view: CycleResidualProjection,
+    labels: tuple[str, str],
 ) -> None:
-    """Add live-direction points, a dense joint curve and signed residual points.
+    """Draw measured and fitted projections and measured-minus-fitted residual points.
 
-    Pass the same sums and model as in fit_cycle. Both axes use the sweep
-    coordinates; y values use the live projection's point-mean sigma units.
-    The residual is measured minus predicted at the acquired points, not the
-    whitened 65-feature vector. Callers own figure layout, x labels, annotations
-    and legend placement. Propagate the projection's input errors.
+    axis and grid are the acquired and model coordinates used to compute view.
+    labels gives the experiment's legend text for measured points and the fitted
+    curve, in that order. The caller owns all axis labels and figure layout.
     """
-    axis = sums.axis
-    grid = np.linspace(axis.min(), axis.max(), 400)
-    view = cycle_residual_projection(sums, model, fit, model_axis=grid)
     projection_ax.plot(
         axis,
         view.measured_sigma,
         linestyle="none",
         marker="o",
         markersize=4,
-        label="Measured · all 65 numbers",
+        label=labels[0],
     )
     projection_ax.plot(
-        grid, view.model_sigma, linestyle="-", marker="none", label="Joint model"
+        grid, view.model_sigma, linestyle="-", marker="none", label=labels[1]
     )
-    projection_ax.set_ylabel("Projected signal (sigma)")
-
     residual_ax.axhline(0, color="0.4", linewidth=1)
     residual_ax.plot(
         axis,
@@ -109,4 +77,3 @@ def plot_joint_residuals(
         marker="o",
         markersize=4,
     )
-    residual_ax.set_ylabel("Measured − model (sigma)")

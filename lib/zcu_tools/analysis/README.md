@@ -121,7 +121,9 @@ T1 的 init 是 `{"t1": textbook_time}`；`CycleFit.relaxation` 保存兩個 eig
 
 `cycle_residual_projection` 將實測與 joint model 預測投影到 live 全 feature 的同一方向。
 投影用實測的 pooled 共變異數和 median，與 `J` 使用的模型共變異數不同。可指定密集
-座標來畫模型曲線，不需重跑擬合。投影陣列只供畫圖，不放進分析摘要。
+座標來畫模型曲線，不需重跑擬合。若保存矩只支援降秩而無法沿 live 方向投影，
+函式拋出 `CycleProjectionUnavailable`；呼叫者仍可使用已完成的 joint fit。
+無效輸入與 model callback 錯誤不是投影缺席。投影陣列只供畫圖，不放進分析摘要。
 欄位與失敗條件見 [cycle.py](readout_chain/cycle.py)、[model.py](readout_chain/model.py)、
 [fit.py](readout_chain/fit.py) 與 [curve_models.py](readout_chain/curve_models.py)。
 

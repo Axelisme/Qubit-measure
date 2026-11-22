@@ -168,6 +168,7 @@ class CycleModel:
         and nuisances have the same contract as for populations. Invalid inputs
         raise ValueError; inputs are unchanged.
         """
+        # Reuse the fit's analytic moment kernel; the plot grid only needs means.
         means, _ = mean_jacobian(*self._table(axis, parameters, nuisances))
         return means
 

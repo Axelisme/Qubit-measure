@@ -128,6 +128,7 @@ class RateModel:
         raise ValueError; inputs are unchanged.
         """
         coordinates, q = self._coordinates(axis, parameters, nuisances)
+        # Reuse the fit's analytic moment kernel; the plot grid only needs means.
         means, _ = mean_jacobian(*coordinates.table(q))
         return means
 

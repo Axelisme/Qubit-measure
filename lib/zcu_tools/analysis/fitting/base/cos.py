@@ -11,11 +11,27 @@ from zcu_tools.analysis.failure import AnalysisFailed
 from .base import FitResult, assign_init_p, fit_func
 
 
+def _validate_short_delay_seed(
+    x: NDArray[np.float64],
+    fitparams: Sequence[float | None],
+    fixedparams: Sequence[float | None] | None,
+) -> None:
+    if x[0] < 0:
+        raise ValueError("Oscillation delays must be nonnegative")
+    if any(
+        p is not None and not np.isfinite(p)
+        for p in (*fitparams, *(fixedparams if fixedparams is not None else ()))
+    ):
+        raise ValueError("Oscillation initial and fixed parameters must be finite")
+
+
 def _prepare_oscillation_trace(
     x: NDArray[np.float64],
     y: NDArray[np.float64],
     fitparams: Sequence[float | None],
     fixedparams: Sequence[float | None] | None,
+    *,
+    check_short_before_fft: bool = False,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     if x.ndim != 1 or x.shape != y.shape or x.size == 0:
         raise ValueError(
@@ -25,20 +41,30 @@ def _prepare_oscillation_trace(
         raise ValueError("Oscillation coordinates and observations must be finite")
     if x[0] > x[-1]:
         x, y = x[::-1], y[::-1]
+    n_free = (
+        len(fitparams) if fixedparams is None else sum(p is None for p in fixedparams)
+    )
     if any(p is None for p in fitparams):
         steps = np.diff(x)
+        span = x[-1] - x[0]
         if (
             steps.size == 0
-            or steps[0] <= 0.0
             or np.any(steps < 0.0)
-            or not np.isfinite(x[-1] - x[0])
+            or not np.isfinite(span)
+            or span <= 0.0
         ):
             raise ValueError(
                 "Oscillation axis must be ordered with finite positive span and first step"
             )
-    n_free = (
-        len(fitparams) if fixedparams is None else sum(p is None for p in fixedparams)
-    )
+        if check_short_before_fft and y.size < n_free:
+            _validate_short_delay_seed(x, fitparams, fixedparams)
+            raise AnalysisFailed(
+                "Insufficient observations for the free fit parameters"
+            )
+        if steps[0] <= 0.0:
+            raise ValueError(
+                "Oscillation axis must be ordered with finite positive span and first step"
+            )
     if y.size < n_free:
         raise AnalysisFailed("Insufficient observations for the free fit parameters")
     return x, y
@@ -149,6 +175,7 @@ def fitdecaycos(
     fixedparams: Sequence[float | None] | None = None,
     *,
     decay_bounds: tuple[float, float] | None = None,
+    check_short_before_fft: bool = False,
 ) -> FitResult:
     """Fit [y0, yscale, freq (1/x), phase (deg), decay_time] and covariance.
 
@@ -164,7 +191,9 @@ def fitdecaycos(
     Automatic initialization expects regularly spaced coordinates in ascending
     or descending order. Invalid input raises ValueError; valid traces with
     no usable seed or too few observations for the free parameters raise
-    AnalysisFailed.
+    AnalysisFailed. Set check_short_before_fft for delay fringes to diagnose
+    insufficient observations on a valid nonnegative scan before checking
+    the FFT's first step. This does not relax FFT initialization.
     """
     if fitparams is None:
         fitparams = [None] * 5
@@ -173,7 +202,13 @@ def fitdecaycos(
         raise ValueError(
             "Damped cosine parameters must have five entries: [y0, yscale, freq, phase, decay_time]"
         )
-    xdata, ydata = _prepare_oscillation_trace(xdata, ydata, fitparams, fixedparams)
+    xdata, ydata = _prepare_oscillation_trace(
+        xdata,
+        ydata,
+        fitparams,
+        fixedparams,
+        check_short_before_fft=check_short_before_fft,
+    )
 
     # guess initial parameters
     if any(p is None for p in fitparams):

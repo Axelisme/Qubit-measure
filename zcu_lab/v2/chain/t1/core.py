@@ -13,14 +13,17 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import expfunc, fit_decay
+from zcu_tools.analysis.fitting import DecayFit, expfunc, fit_decay
 from zcu_tools.analysis.readout_chain import (
+    CycleProjectionUnavailable,
     CycleSums,
     cycle_curves,
+    cycle_residual_projection,
     fit_cycle,
     t1_model,
 )
@@ -53,7 +56,7 @@ from zcu_lab.v2.chain._cycle import (
 )
 from zcu_lab.v2.support import live_errorbar, live_line
 
-from .._joint import joint_residual_fields, joint_residuals_text, plot_joint_residuals
+from .._joint import JointResidualDiagnostics, plot_joint_residuals
 
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
 _SWEEP_LABEL = "Wait after π pulse (µs)"
@@ -61,29 +64,26 @@ _IQ_TITLE = "K-cycle T1 · Qubit · First-read IQ"
 _IQ_LABEL = "Projected mean IQ (a.u.)"
 
 
+def _estimate_text(value: float, error: float) -> str:
+    if np.isfinite(error):
+        return f"{value:.4g} ± {error:.2g} µs"
+    return f"{value:.4g} µs (SE unavailable)"
+
+
 @dataclass(frozen=True)
-class ChainT1Analysis:
+class ChainT1Analysis(JointResidualDiagnostics):
     """Rate-equation fit of all 65 numbers and its scalar residual diagnostics.
 
     t1 and t1_err are T1 in us and its Wald error: T1 is the eigen time of the
     relaxation with the larger amplitude. secondary_time and secondary_time_err
     are the other eigen time in us and its Wald error. An eigen time with a
     zero decay rate is infinite, and so is its error.
-    J is the sum of squared whitened residuals, df is the nominal degrees of
-    freedom, and j_per_df is their ratio. The expected band endpoints are
-    1 ± 2√(2/df). tail_fraction is the fraction with |r| > 3.
     """
 
     t1: float
     t1_err: float
     secondary_time: float
     secondary_time_err: float
-    J: float
-    df: int
-    j_per_df: float
-    expected_band_low: float
-    expected_band_high: float
-    tail_fraction: float
 
 
 class ChainT1Cfg(ConfigBase):
@@ -260,43 +260,6 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         except AnalysisFailed:
             seed_fit = None
 
-        seed_fig, seed_ax = plots.subplots(
-            num="fit", figsize=config.figsize, layout="constrained"
-        )
-        seed_fig.suptitle(_IQ_TITLE)
-        seed_ax.errorbar(
-            delays,
-            seed_signal,
-            yerr=seed_sem,
-            fmt=".",
-            color="C0",
-            label="First-read mean ± shot SEM",
-        )
-        if seed_fit is None:
-            seed_title = "First-read fit unavailable"
-        else:
-            seed_dense = np.linspace(delays.min(), delays.max(), 400)
-            seed_ax.plot(
-                seed_dense,
-                expfunc(seed_dense, *seed_fit.params),
-                color="C1",
-                label="First-read fit",
-            )
-            if delays.min() <= seed_fit.decay_time <= delays.max():
-                seed_ax.axvline(seed_fit.decay_time, ls="--", color="0.35", linewidth=1)
-            r2 = seed_fit.quality.r2
-            residual = seed_fit.quality.normalized_residual_rms
-            r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
-            residual_text = "unavailable" if residual is None else f"{residual:.3g}"
-            seed_title = (
-                f"First-read T1 = {seed_fit.decay_time:.4g} ± {seed_fit.decay_time_err:.2g} µs\n"
-                f"R² = {r2_text} · Normalized residual RMS = {residual_text}"
-            )
-        seed_ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
-        seed_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        seed_ax.set_title(seed_title, loc="left", fontsize=10)
-        seed_fig.legend(loc="outside lower center", ncols=2)
-
         # 2. Joint fit of all 65 numbers from one starting time.
         initial_t1 = (
             max(float(np.ptp(delays)) / 3, 1e-3)
@@ -308,33 +271,113 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         relaxation = fit.relaxation
         assert relaxation is not None  # A RateModel fit always has relaxation.
 
-        joint_fig, _ = plots.subplots(
-            num="joint-residuals",
-            nrows=2,
-            sharex=True,
-            figsize=(8, 6.2),
-            layout="constrained",
+        estimates = (
+            f"T1 = {_estimate_text(relaxation.t1, relaxation.t1_error)}\n"
+            f"Secondary time = {_estimate_text(relaxation.secondary_time, relaxation.secondary_error)}"
         )
-        joint_fig.align_ylabels()
-        projection_ax, residual_ax = joint_fig.axes
-        plot_joint_residuals(projection_ax, residual_ax, sums, model, fit)
-        joint_fig.suptitle("K-cycle T1 · Qubit · Joint fit")
-        projection_ax.set_title(
-            f"T1 = {relaxation.t1:.4g} ± {relaxation.t1_error:.2g} µs\n"
-            f"Secondary time = {relaxation.secondary_time:.4g} ± {relaxation.secondary_error:.2g} µs\n"
-            f"{joint_residuals_text(fit)}",
-            loc="left",
-            fontsize=10,
+        title = f"K-cycle T1 · Qubit · Joint fit\n{estimates}"
+        band_low, band_high = fit.expected_band
+        diagnostics = (
+            f"J = {fit.J:.5g}    df = {fit.df}    J/df = {fit.j_per_df:.5g}\n"
+            f"χ² reference = [{band_low:.4f}, {band_high:.4f}]    Fraction |r| > 3: {fit.tail_fraction:.3%}"
         )
-        residual_ax.set_xlabel(_SWEEP_LABEL)
-        residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        handles, labels = projection_ax.get_legend_handles_labels()
-        joint_fig.legend(handles, labels, loc="outside lower center", ncols=2)
+        grid = np.linspace(delays.min(), delays.max(), 400)
+        try:
+            view = cycle_residual_projection(sums, model, fit, model_axis=grid)
+        except CycleProjectionUnavailable:
+            fig = Figure(figsize=(8, 2.4), layout="constrained")
+            fig.suptitle(title)
+            fig.text(
+                0.5,
+                0.28,
+                f"{diagnostics}\n\nLive-direction projection unavailable",
+                ha="center",
+                va="center",
+            )
+            plots.adopt("joint-residuals", fig)
+        else:
+            joint_fig, _ = plots.subplots(
+                num="joint-residuals",
+                nrows=2,
+                sharex=True,
+                figsize=(8, 6.2),
+                layout="constrained",
+            )
+            projection_ax, residual_ax = joint_fig.axes
+            plot_joint_residuals(
+                projection_ax,
+                residual_ax,
+                delays,
+                grid,
+                view,
+                ("Measured · all 65 numbers", "Joint model"),
+            )
+            joint_fig.align_ylabels()
+            projection_ax.set_ylabel("Joint projection\n(SEM units)")
+            projection_ax.set_title(
+                f"{estimates}\n{diagnostics}", loc="left", fontsize=10
+            )
+            residual_ax.set(xlabel=_SWEEP_LABEL, ylabel="Measured − model\n(SEM units)")
+            residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+            joint_fig.suptitle("K-cycle T1 · Qubit · Joint fit")
+            handles, labels = projection_ax.get_legend_handles_labels()
+            joint_fig.legend(handles, labels, loc="outside lower center", ncols=2)
+        _plot_first_read(plots, delays, seed_signal, seed_sem, seed_fit)
 
         return ChainT1Analysis(
             t1=relaxation.t1,
             t1_err=relaxation.t1_error,
             secondary_time=relaxation.secondary_time,
             secondary_time_err=relaxation.secondary_error,
-            **joint_residual_fields(fit),
+            J=fit.J,
+            df=fit.df,
+            j_per_df=fit.j_per_df,
+            expected_band_low=band_low,
+            expected_band_high=band_high,
+            tail_fraction=fit.tail_fraction,
         )
+
+
+def _plot_first_read(
+    plots: Plots,
+    delays: NDArray[np.float64],
+    seed_signal: NDArray[np.float64],
+    seed_sem: NDArray[np.float64],
+    seed_fit: DecayFit | None,
+) -> None:
+    seed_fig, seed_ax = plots.subplots(
+        num="fit", figsize=config.figsize, layout="constrained"
+    )
+    seed_fig.suptitle(_IQ_TITLE)
+    seed_ax.errorbar(
+        delays,
+        seed_signal,
+        yerr=seed_sem,
+        fmt=".-" if seed_fit is None else ".",
+        color="C0",
+        label="First-read mean ± shot SEM",
+    )
+    if seed_fit is None:
+        seed_title = "First-read fit unavailable"
+    else:
+        seed_dense = np.linspace(delays.min(), delays.max(), 400)
+        seed_ax.plot(
+            seed_dense,
+            expfunc(seed_dense, *seed_fit.params),
+            color="C1",
+            label="First-read fit",
+        )
+        if delays.min() <= seed_fit.decay_time <= delays.max():
+            seed_ax.axvline(seed_fit.decay_time, ls="--", color="0.35", linewidth=1)
+        r2 = seed_fit.quality.r2
+        residual = seed_fit.quality.normalized_residual_rms
+        r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
+        residual_text = "unavailable" if residual is None else f"{residual:.3g}"
+        seed_title = (
+            f"First-read T1 = {seed_fit.decay_time:.4g} ± {seed_fit.decay_time_err:.2g} µs\n"
+            f"R² = {r2_text} · Normalized residual RMS = {residual_text}"
+        )
+    seed_ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+    seed_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    seed_ax.set_title(seed_title, loc="left", fontsize=10)
+    seed_fig.legend(loc="outside lower center", ncols=2)

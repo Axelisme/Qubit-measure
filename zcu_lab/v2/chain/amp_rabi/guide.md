@@ -48,6 +48,8 @@ The third-state row can vary with x. Equal endpoints give a flat row; distinct e
 f is in cycles per gain unit, and the π gain is 1 / (2 f).
 
 In `joint residuals`, the upper panel shows the measured points from the live `all 65 numbers` curve and a solid joint-model curve on the same projection. A dashed line marks the joint π gain when it falls inside the sweep.
+
+Analyze lists the joint figure first. If the saved statistics cannot support the live projection, the figure says “Live-direction projection unavailable” and shows the joint estimates and residual diagnostics without curves. The first-read figure remains available.
 The lower panel subtracts the joint prediction from the measurement at each acquired gain. Look there for gain ranges where the model consistently over- or underpredicts the projected signal.
 Both panels use standard errors of point means estimated from the pooled noise. They do not show populations or per-gain shot error bars.
 
@@ -59,7 +61,7 @@ The header and summary report the joint π gain and its Wald standard error, R a
 
 The summary also reports the fitted frequency and its Wald error, and the first-read π gain. R = 1 / (2π × gain span × frequency standard error) measures how the frequency error compares with the finite gain span. The analysis uses no cutoff on these numbers.
 The `fit` figure shows the first-read points and, when available, the cosine used to seed the joint fit. Its dashed lines mark the seed π and π/2 gains, and the shaded bands show their parameter standard errors. Its R² compares the seed fit with the first-read data only.
-When the first-read fit is unavailable, the figure keeps the points and omits the curve, markers and R². The summary gives `first_read_pi_amp: null`.
+When the first-read fit is unavailable, the figure connects the measured points and omits the curve, markers and R². The summary gives `first_read_pi_amp: null`.
 Invalid inputs and joint fit errors still stop Analyze. The live plot and saved sums remain.
 
 This experiment proposes no writeback. Compare `pi_amp` with `first_read_pi_amp`, and calibrate x180 with `twotone/rabi/amp_rabi`.
