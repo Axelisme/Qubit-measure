@@ -111,7 +111,7 @@ status: accepted
 - 硬體觸發照實計數。Mux 的 herald 讀取包括未列入 `keep` 的 tone；每個觸發的 ADC 都移除這一次讀取。實驗用可見的 label 和索引，`shot_sums` 按邏輯讀取數檢查，不必改實驗的 converter。平均、reducer、`ShotResult` 不含來源消耗的讀取，沒有剩餘讀取的 ADC 也省略。`get_raw()` 仍含全部 trigger。`run_acquire_shots` 給可見讀取的原始 int64 積分 IQ 與 bool mask，不由框架套遮罩；實驗決定如何使用。
 - 有遮罩來源時，普通平均在 host 算 `Σ m·x / N`。`x` 是逐 shot 長度正規化並扣 IQ offset 後的值，`m` 為 0 或 1，`N` 是 reps 乘已完成 rounds。接受率留在幅度，不另存。Reducer 收遮罩，`shot_sums` 只加保留的 shots。Herald reset 不存被排除的類別，也不改 Result 形狀與存檔欄位。
 - 分類計數的分母是每格總計數，機率以通過 herald 的 shot 為條件。例：RB 的 joint00 是兩個 tone 都以 g 通過時的存活率。接受率可由計數總和除以 reps×rounds 得到，不另存。有限計數代表已量，少跑幾輪也可用，統計誤差按實際計數。未量格維持 NaN，已量格的計數總和為零時機率是 NaN，分析附原因。
-- 帶遮罩來源時，decimated 取數會報錯，因為時間軌跡沒有可分類的逐 shot 積分值。`acquire`／`run_acquire` 有來源且收到原生 `threshold` 時也在進入點報錯。FTF 按 projective outcome 分支演化一次，herald 與終端讀取共用同一發的 outcome 歷史。有來源或 reducer 時逐 shot 抽 IQ，和硬體走相同的遮罩、平均與 reducer 路徑。
+- 帶遮罩來源時，decimated 取數會報錯，因為時間軌跡沒有可分類的逐 shot 積分值。`acquire`／`run_acquire` 有來源且收到原生 `threshold` 時也在進入點報錯。FTF 每次投影後從真空續演化。Herald 與終端讀取沿同一發的投影狀態 chain 取樣。有來源或 reducer 時逐 shot 抽 IQ，和硬體走相同的遮罩、平均與 reducer 路徑。
 
 **依據。** 選項、實測與契約核對見 [Herald 改為 reset 模塊與逐 shot 遮罩](../discussions/2026-11-20-herald-reset-shot-masks.md)。
 
