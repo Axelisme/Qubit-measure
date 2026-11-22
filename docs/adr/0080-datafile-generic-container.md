@@ -30,7 +30,7 @@ related: [0063, 0072]
 
 三個命名空間都可以為空：只有 docs 的檔（純分析結果）、只有 vars 的檔都合法。名稱規則共用：非空的合法路徑段，不含 `/`、NUL、`.`、`..`，不重複。
 
-`cfg`、`metadata`、`analysis`、`source` 這些是生產者的命名慣例，不是格式的一部分。experiment 層的量測 run 用 `docs/cfg`（含 `cfg_type`、`schema_version` 兩個鍵）與 `docs/metadata`（run_id、experiment、started_at、finished_at、completion、snapshot、provenance、device_snapshot，具名型別由 experiment 擁有）；分析結果用 `docs/analysis` 與 `docs/source`（指回來源檔的相對路徑與 run_id），曲線放 `vars`。Labber 的 comment、tags、project、user 是 Labber 轉出時的參數，不進容器；需要留痕時由生產者放進自己的 doc。
+`cfg`、`metadata`、`analysis`、`source` 這些是生產者的命名慣例，不是格式的一部分。experiment 層的量測 run 用 `docs/cfg`（含 `cfg_type`、`schema_version` 兩個鍵）與 `docs/metadata`（run_id、experiment、started_at、finished_at、completion、snapshot、provenance、parameter_snapshot、device_snapshot，具名型別由 experiment 擁有）；分析結果用 `docs/analysis` 與 `docs/source`（指回來源檔的相對路徑與 run_id），曲線放 `vars`。Labber 的 comment、tags、project、user 是 Labber 轉出時的參數，不進容器；需要留痕時由生產者放進自己的 doc。
 
 ### 版本與相容規則
 
