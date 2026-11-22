@@ -33,16 +33,20 @@ LookbackRunResult: TypeAlias = RunRecord[LookbackCfg, LookbackResult]
 
 @dataclass
 class LookbackAnalyzeParams:
-    ratio: Annotated[float, ParamMeta(label="Threshold ratio (a.u.)", decimals=3)] = 0.1
-    smooth: Annotated[float, ParamMeta(label="Smooth sigma", decimals=3)] = 1.0
-    plot_fit: Annotated[bool, ParamMeta(label="Plot fit")] = True
+    ratio: Annotated[
+        float, ParamMeta(label="Arrival threshold / peak (a.u.)", decimals=3)
+    ] = 0.1
+    smooth: Annotated[
+        float, ParamMeta(label="Gaussian smoothing width (samples)", decimals=3)
+    ] = 1.0
+    plot_fit: Annotated[bool, ParamMeta(label="Show arrival markers")] = True
 
 
 class LookbackSummary(BaseModel):
     """Decode consumed scalar JSON fields; null retains an unavailable estimate."""
 
     predict_offset: float | None = Field(
-        description="Owner predict_offset in us; null retains an unavailable estimate."
+        description="Estimated readout arrival (µs); null means no value was returned."
     )
 
 
@@ -61,6 +65,12 @@ def _analyze(
     )
 
 
+def _summary_lines(source: LookbackRunResult) -> tuple[str, ...]:
+    if source.cfg is None:
+        return ()
+    return (f"Reps × Rounds: {LookbackExp.REPS} × {source.cfg.rounds}",)
+
+
 def _writeback(
     req: WritebackRequest[LookbackRunResult, LookbackAnalysis],
 ) -> Sequence[WritebackItem]:
@@ -74,7 +84,7 @@ def _writeback(
     return [
         ParameterWriteback(
             target_name="$resonator.time_of_fly",
-            description="Readout trigger offset prediction (µs)",
+            description="Estimated readout arrival (µs)",
             proposed_value=req.analyze_result.predict_offset,
         )
     ]
@@ -94,6 +104,7 @@ DEFINITION = Adapter(
     analysis=Analysis(
         fn=_analyze,
         options=lambda source, env: LookbackAnalyzeParams(),
+        summary_lines=_summary_lines,
         writeback=_writeback,
     ),
 )

@@ -1,8 +1,6 @@
-## Behavior
+**Readers:** operator, agent. Find the sideband carrier of one reset tone. Each shot applies the optional preparation reset and preparation pulse, then the frequency-swept sideband drive at fixed gain and duration, then readout.
 
-**Readers:** operator, agent. Single-tone sideband-reset frequency sweep: drives the tested pulse-reset tone and sweeps its frequency, fitting the qubit response (Lorentzian) to find the reset sideband frequency and its linewidth. Runs on real hardware. Typically run after an init pulse excites the qubit, to locate the f01+f12 (`$resonator.freq` - `$qubit.freq`) sideband at which the reset pulse dumps the excitation.
-
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-22
 
 ## Parameter sources
 
@@ -13,6 +11,14 @@ Open and Defaults capture the T1 used for starting values. A missing or null T1,
 ## Module slots
 
 Tested reset starts as an editable copy of the reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+
+## Acquisition and figures
+
+Reps starts at 1000 per sweep point and branch in each acquisition round; Rounds starts at 10. Check the requested Reps × Rounds in Analyze before comparing runs.
+
+Live and Analyze plot mean complex IQ projected onto its principal variation axis, falling back to raw I when fewer than two valid means are available. This is a readout contrast in a.u., not an excited-state probability. The live title counts acquired RF points. This spectrum locates a resonance; it does not show shot SEM.
+
+Analyze adds the Lorentzian and its center line. The legend reports the center and full width at half maximum (FWHM) with 1σ fit errors; these are not shot errors. Inspect the measured points on both sides of the feature before accepting the fit. If the feature is at an edge, recenter the next sweep at the fitted RF and capture both sides. Once resolved, a practical next window is center ± 1.5 × FWHM. If the width is comparable to one frequency step, reduce the step before treating the width as measured.
 
 ## Typical writeback
 

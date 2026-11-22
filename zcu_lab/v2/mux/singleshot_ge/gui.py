@@ -344,12 +344,20 @@ def run(cfg: MuxGECfg, *, context: RunContext) -> RunRecord[MuxGECfg, MuxGEResul
     return RunRecord(cfg=cfg, result=MuxGEExp().run(cfg, context=context))
 
 
+def _summary_lines(source: RunRecord[MuxGECfg, MuxGEResult]) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds {cfg.shots}×1 per preparation",)
+
+
 DEFINITION = Adapter(
     spec=replace(MuxGEExp.AXES_SPEC, save_stem=mux_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
+        summary_lines=_summary_lines,
         fn=_analyze,
         options=lambda source, env: GEAnalyzeParams(),
         writeback=_get_writeback_items,

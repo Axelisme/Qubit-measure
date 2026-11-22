@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. CPMG measures coherence decay for several pi-pulse counts. Each sequence applies pi/2, a train of n refocusing pi pulses, a final pi/2 projection and readout. Calibrate pi, pi/2 and readout before running. The sequence corrects the end intervals for finite pulse widths. Intervals too short to fit the pulses cause Run to fail; increase the minimum time.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-22
 
 After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
@@ -47,3 +47,13 @@ The cpmg recipe follows the same Run, Analyze and Save steps and reports the sam
    max_n/points produces the count grid, or supply times. length_points sets Time points and delay.expts. min_length_us/max_length_us set the time window. fit_fringe changes only analysis.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+
+## Reading the plots
+
+The Live and Analyze heatmaps put each acquisition in an equal-width column, in the order you entered the counts. Equal column widths do not mean the counts are equally spaced. Each tick labels the actual π pulse count. If a count repeats, the label also shows its acquisition position, starting from 1. For example, `4 (#3)` means that the third acquisition used four π pulses.
+
+Each column uses its own measured total evolution delays in µs. Its color shows IQ scaled to that column's observed contrast range, not a population. Unmeasured cells stay blank. Live also plots the latest and previous traces against their own delay grids.
+
+The lifetime plot shows T₂ versus the numerical refocusing count on log axes. Each bar is the standard error of that row's fit, not shot SEM. The two-dimensional IQ map and these derived lifetimes are not one-dimensional shot means.
+
+Rows must have resolved decay within the measured window, fit error below half the lifetime, and fitted contrast above four times the mean absolute smoothed residual. Missing or rejected rows do not contribute to the power law. Widen the total-delay window if a fitted lifetime reaches the grid span; increase Reps or Rounds if the decay is obscured by noise. The Analyze summary reports configured Reps × Rounds.

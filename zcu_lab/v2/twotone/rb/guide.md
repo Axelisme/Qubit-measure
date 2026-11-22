@@ -61,13 +61,12 @@ both decays, reference error per Clifford and the target error estimate
 `(1 - p_interleaved / p_reference) / 2`. The target fidelity is one minus that
 error, with a 95% paired-seed bootstrap interval.
 
-Each live and fit point shows one sample standard deviation (`ddof=1`) across
-seeds on either side, measured at that depth on the same IQ axis as the point.
-A point with only one seed has no bar. The spread combines sequence-to-sequence
-variation and shot noise. For a survival probability `P` estimated from `N`
-shots, the shot-noise scale is about `√(P(1−P)/N)`. It grows as `P` falls from
-near one toward one-half. Growing spread with depth alone does not identify
-coherent error.
+Live uses the seeds with finite IQ at each arm and depth. Analyze uses only
+seeds with finite IQ at every depth and, in paired mode, in both arms. The bar
+is one sample standard deviation (`ddof=1`) across those seeds in the same IQ
+projection as the point. A point with fewer than two contributing seeds has
+no bar. The spread combines sequence variation and shot noise. Growing spread
+with depth alone does not identify coherent error.
 
 These intervals describe seed variation. They do not account for bias from
 gate-dependent or coherent noise. A negative target error or fidelity above one
@@ -75,7 +74,8 @@ remains visible. Review the curves and interval before using the estimate.
 Analyze does not write back calibration.
 
 Check that the deepest points approach the fitted offset before using the
-decay estimate. This experiment does not report fit quality. The
+decay estimate. Paired Analyze labels each fit with its R² when available.
+Reference-only Analyze does not report R². The
 [two-qubit RB guide](../../two_qubit/rb/guide.md#interpreting-the-result)
 shows how a short scan can have R² of 0.993 while the decay length has 30%
 relative error.
@@ -83,3 +83,7 @@ relative error.
 Load rejects older files with a round axis (wrong number of axes). It does
 not convert these files or previous standalone RB and IRB runs. Re-enter the
 settings and Run to save the current format.
+
+## Reading the plots
+
+The live title counts complete seeds. The Analyze markers show the means of eligible seeds in the IQ projection. The bars are seed SD, not shot SEM. The Analyze summary shows configured Reps × Rounds for each arm and seed.

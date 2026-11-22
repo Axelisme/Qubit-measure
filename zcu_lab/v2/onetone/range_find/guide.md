@@ -1,8 +1,8 @@
-# One-tone range find
-
 **讀者：** operator、agent。從 GUI 或 MCP 大範圍掃 resonator 頻率，審閱凹陷與頻率寫回候選。
 
-`onetone/range_find` 以普通 pulse readout 的 generator 與 ADC 硬體掃頻，一次取得整條絕對 MHz 曲線。單一 Analyze 入口開啟互動 picker，靜態找谷結果只作初始猜測。確認選點與元件對應後按 Done，才產生分析結果與各 resonator 的 `freq` 候選。它不建立 readout module，也不擬合 resonator linewidth 或 electrical delay。找谷的 FWHM 只作候選篩選。
+# One-tone range find
+
+每發 shot 依該點的絕對 RF 頻率播放讀出脈衝，再以相同頻率解調並在 ADC window 內積分 I、Q。每一輪掃過整條頻率軸。Run 保存各點的平均複數 IQ，不量子位驅動，也不分類布居。單一 Analyze 入口開啟互動 picker，靜態找谷結果只作初始猜測。確認選點與元件對應後按 Done，才產生分析結果與各 resonator 的 `freq` 候選。它不建立 readout module，也不擬合 resonator linewidth 或 electrical delay。找谷的 FWHM 只作候選篩選。
 
 修改 parameter source 後，按 Defaults 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Defaults 可能覆蓋尚未儲存的輸入。
 
@@ -11,8 +11,8 @@
 1. 先完成 lookback，確認 ADC window 與 trigger 能接到 readout。確認 generator、mixer、ADC 通道與功率已獲本次量測授權。能開表單不表示硬體設定安全。
 2. 設定 alias `resonator`。Open／Defaults 與 `onetone/freq` linear 使用相同的 readout Template、gain 與 timing 初值。ADC window 初值為 0.97 µs。`time_of_fly` 必須可讀。未設 kappa 時只用 time-of-flight；已設 kappa 時再加五個 ringup time。Readout 與 reset 的欄位規則沿用普通 one-tone，不使用 mux generator 或 tone 序號。
 3. 從 New Tab 選 `onetone/range_find`。檢查 generator `gen_ch`、ADC `ro_ch`、mixer、gain、pulse 長度、ADC window 與 trigger。Open／Defaults 產生可編輯的 readout 副本，不引用 `$mux` 的 readout 接線。
-4. 展開 Sweep → Frequency。Open／Defaults 後 Start／Stop 空白且必填，Expts 初值為 301。填入絕對 MHz 範圍涵蓋所有預期凹陷，不是 mixer offset。用足夠點數讓每個凹陷有數個取樣點。這裡只有 linear sampling，不使用 homophasal 校準參數。
-5. Acquisition 表單沒有 resonator 名單，Run 不需要預先命名。設定 Reps、Rounds 與 Relax delay，必要欄位有效後才按 Run。來源修改後須按 Defaults 才重新建立初值。Defaults 會丟棄目前 draft。
+4. 展開 **Readout RF frequency**。Open／Defaults 後 Start／Stop 空白且必填，Expts 初值為 301。填入絕對 MHz，讓預期凹陷離掃描兩端都有餘裕。用足夠點數讓每個凹陷有數個取樣點。這個掃描的 RF 間隔相等，不使用同相位取樣。
+5. Run 不需要 resonator 名單。Reps 初值是每點每輪 1000 發，Rounds 初值是 10 輪，Relax delay 初值是每發後等 1 µs。調整 Readout 的 Post-delay 讓腔放空。線寬 κ 以 MHz 表示時，可從 `5/(2π·κ)` µs 開始。確認必要欄位後按 Run。
 
 ## FTF 成本例
 
@@ -22,7 +22,7 @@
 
 ## Run 與停止
 
-Live 圖只有一條 magnitude 曲線，橫軸是硬體量化後的絕對 MHz。先確認範圍涵蓋預期數量的凹陷。
+Live 圖顯示平均複數 IQ 的大小 `|mean(I + iQ)|`（a.u.），橫軸是量化後的絕對 readout RF（MHz）。標題列出已完成的平均輪次和每點名義 shots。每輪量完整條頻率曲線；後續輪次只增加平均樣本數。圖用來定位凹陷，不畫逐點 shot SEM。平均 IQ 也不是分類機率。先確認掃描涵蓋預期數量的凹陷。
 
 Stop 沿用 `onetone/freq` linear 的硬體掃頻語意，保留已完成 acquisition 的資料，不逐點重新編譯。Analyze 拒絕部分或非有限資料。若未取得完整曲線，重新 Run 後再 Analyze。部分資料不會把 acquisition failure 改成成功。
 
@@ -49,9 +49,9 @@ Analyze 用兩端各 10% 點的 magnitude 中位數連成直線背景。`smoothi
 
 每個候選的 FWHM 是半 prominence 位置的插值寬度，至少為谷兩側頻率步進的平均。`max_fwhm` 預設 25 MHz，必須是有限正數。寬度超過上限的候選先剔除；過耦合共振較寬時可調大。其餘候選依 `score = depth / fwhm` 由大到小選取，再排除距離太近的候選。自動選點最多選到名稱數量為止。掃描邊緣的最低點不算凹陷。曲線至少需要 11 個不同且有限的頻率點。
 
-Picker 顯示量測 magnitude 對絕對 MHz 的曲線，灰色圓點是自動候選，紅色星號是目前選點。Legend 顯示頻率順序編號、名稱或 unassigned 與 MHz 頻率。Done 後的圖保留同一組最終選點與對應。編號只用於看圖，不是元件名稱。Summary 的 depth 是去背景曲線經選定平滑後的 prominence，單位 a.u.。FWHM 使用 MHz，score 使用 a.u./MHz。這些值不是擬合 linewidth 或擬合誤差。
+Picker 與 Done 後的圖使用 Live 的同一組頻率和平均 IQ 大小。灰色圓點是自動候選，紅色星號是目前選點。Done 後以元件名稱或 Unassigned 及絕對頻率標註星號。星號指向量到的取樣點，不是擬合中心。Summary 的 depth 是去背景曲線經選定平滑後的 prominence，單位 a.u.。FWHM 使用 MHz，score 使用 a.u./MHz。這些值不是擬合 linewidth 或估計誤差。可見摘要另外列出來源 run 與該次 cfg 的 Reps × Rounds；缺歷史 cfg 時不從現用表單補值。
 
-自動找到的谷少於名稱數量時，picker 仍可調參、增選或取消，不會自動完成。確認所有預期元件都已對應。非線性背景、邊緣凹陷或低訊噪比可能影響選點，不要替看不見的凹陷配名。
+自動找到的谷比名稱少時，可在 picker 調參、增選或取消。若谷在掃描邊緣，延伸該側到曲線兩側都回到背景。若某谷只有一兩點寬，縮小步距再重掃，不用平滑補解析度。核對對應後，用所選的絕對頻率作下一次窄掃中心，不把半 prominence 寬度當作已校準線寬。例如掃描找到 R1 在 7190.125 MHz，就以 7190.125 MHz 為窄掃中心，兩側先各留幾個預期線寬。非線性背景或低訊噪比可能誤選；不要替看不見的凹陷配名。
 
 ## 審閱與 Apply
 

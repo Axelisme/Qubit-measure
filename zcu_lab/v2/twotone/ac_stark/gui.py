@@ -132,6 +132,16 @@ def _AcStarkRamsey_make_form(ctx: FormContext) -> Form[AcStarkRamseyCfg]:
     return make_ramsey_form(ctx)
 
 
+def _stark_summary_lines(source: AcStarkRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
+def _ramsey_summary_lines(source: AcStarkRamseyRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=AcStarkExp.AXES_SPEC,
     make_form=_AcStark_make_form,
@@ -141,6 +151,7 @@ DEFINITION = Adapter(
         fn=_AcStark_analyze,
         options=lambda source, env: AcStarkAnalyzeParams(),
         writeback=_AcStark_get_writeback_items,
+        summary_lines=_stark_summary_lines,
     ),
 )
 
@@ -151,6 +162,8 @@ RAMSEY_DEFINITION = Adapter(
     run=_run_acstarkramsey,
     guide=Path(__file__).with_name("guide.ramsey.md"),
     analysis=Analysis(
-        fn=_AcStarkRamsey_analyze, options=_AcStarkRamsey_get_analyze_params
+        fn=_AcStarkRamsey_analyze,
+        options=_AcStarkRamsey_get_analyze_params,
+        summary_lines=_ramsey_summary_lines,
     ),
 )

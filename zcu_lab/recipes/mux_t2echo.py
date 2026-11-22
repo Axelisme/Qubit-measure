@@ -34,16 +34,16 @@ class MuxT2EchoInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
+        description="Sets Participants: original tone indices (zero-based) for drives and readout, in run order.",
     )
 
     fit_method: Literal["fringe", "decay"] | None | Keep = Field(
         default=KEEP,
-        description="Fit fringes or a pure decay envelope. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Fit method to damped fringes or a pure decay envelope.",
     )
     fit_phase: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit the phase offset in fringe mode. Analysis only; omitted keeps value, null passes to owner.",
+        description="Sets Analysis › Fit phase offset (fringe only) to estimate the constant fringe phase.",
     )
 
 
@@ -61,7 +61,8 @@ class MuxT2EchoToneReport(MuxFitToneReport):
         default=None, description="One-sigma Echo time uncertainty in µs."
     )
     detune: float | None = Field(
-        default=None, description="Fitted fringe rate in MHz; zero for decay fits."
+        default=None,
+        description="Fitted fringe rate (MHz), not the applied detune; zero for decay fits.",
     )
     detune_err: float | None = Field(
         default=None, description="One-sigma fringe rate uncertainty in MHz."

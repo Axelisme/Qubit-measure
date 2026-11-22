@@ -42,10 +42,17 @@ def _run(cfg: LengthCfg, *, context: RunContext) -> RunRecord[LengthCfg, LengthR
     return RunRecord(cfg=cfg, result=LengthExp().run(cfg, context=context))
 
 
+def _summary_lines(source: RunRecord[LengthCfg, LengthResult]) -> tuple[str, ...]:
+    """Report the saved configuration's requested repetitions and rounds."""
+    if source.cfg is None:
+        return ()
+    return (f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=LengthExp.AXES_SPEC,
     make_form=_SingleToneLength_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_SingleToneLength_analyze),
+    analysis=Analysis(fn=_SingleToneLength_analyze, summary_lines=_summary_lines),
 )

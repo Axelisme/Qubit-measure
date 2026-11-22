@@ -30,7 +30,7 @@ class RBHeraldedReport(RBEstimateReport):
 
 @recipe(
     "two_qubit_rb_heralded",
-    description="Run paired two-qubit RB with herald readout, report the joint gg/ee estimate and save without writing back.",
+    description="Compare gg- and ee-conditioned return for reference and CZ-interleaved two-qubit RB, report the shared CZ error estimate, and save without writeback.",
 )
 async def two_qubit_rb_heralded(
     session: RecipeSession, inputs: RBRecipeInputs

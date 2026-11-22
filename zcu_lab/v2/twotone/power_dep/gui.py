@@ -5,10 +5,9 @@ from typing import TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import (
-    Adapter,
-)
+from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.power_dep.core import PowerCfg, PowerExp, PowerResult
 
@@ -27,9 +26,20 @@ def _run(cfg: PowerCfg, *, context: RunContext) -> RunRecord[PowerCfg, PowerResu
     return RunRecord(cfg=cfg, result=PowerExp().run(cfg, context=context))
 
 
+def _analyze(req: AnalyzeRequest[PowerDepRunResult, None], *, plots: Plots) -> None:
+    PowerExp().analyze(req.run_result, req.analyze_params, plots=plots)
+
+
+def _summary_lines(source: PowerDepRunResult) -> tuple[str, ...]:
+    if source.cfg is None:
+        return ()
+    return (f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=PowerExp.AXES_SPEC,
     make_form=_PowerDep_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

@@ -67,6 +67,21 @@ includes the intended longest delay before budgeting the full scan.
 
 ## Measurement and analysis
 
+Use the live figure to check delay coverage. Analyze overlays the exponential
+model and marks T1 when it is inside the measured window. Compare the baseline,
+contrast and tail with the fit before recording T1. A short window that does not
+show the tail can leave T1 mostly determined by extrapolation. A second decay
+time is a model component, not evidence on its own for a second physical state.
+
+Both views show a principal-axis projection of mean IQ, not excited-state
+probability. R² measures explained variation. Normalized residual RMS measures
+typical model mismatch relative to the signal range. The ± value is the
+uncertainty of the fitted time, not point noise. In Live and Analyze, the
+vertical bars show the standard error of the mean (shot SEM): the sample
+standard deviation of the same projected shots divided by the square root of
+the acquired shot count. Older mean-only files still load and fit without bars.
+Points with fewer than two shots have no bar.
+
 Use calibrated fixed pi pulses. All qubits share one delay axis in µs,
 executed by one program's hardware loop. Requested window endpoints and the
 linear input axis must be finite, nonnegative and strictly increasing.
@@ -145,8 +160,9 @@ before `check_ready()`; omission keeps the current value.
 
 ## Simulation limits
 
-For an offline physical smoke, use `ftf(settings, workers=1)` with typed YAML
-`readout.drive.kind: mux`, an ADC receiver list and independent drive lines.
+For an offline FTF run, use the [FTF mux readout settings](../../../simulation_envs/FTF/field-guide.md#readoutdrive--物理-resonators--adc).
+Set `readout.mux` and list the receivers under `readout.mux.adc`. Bind each
+qubit drive independently of the mux readout generator.
 Enable `numerics.debug_capture` to inspect the [FTF capture manifest](../../../../lib/zcu_tools/simulators/ftf/environment/README.md#debug-capture).
 Small truncations and short smoke runs demonstrate execution only.
 Establish convergence and calibrate pulses before using fitted values.

@@ -16,10 +16,35 @@ from zcu_lab.v2.support.measure.seed_metadata import (
 class T2RamseyInput(ConfigBase):
     """Captured pulses, delay sweep and phase advance in fringes per step."""
 
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Optional preparation before the first π/2 pulse.",
+        ),
+    ] = None
+    pi2_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="π/2 pulse",
+            description="Select the calibrated pulse used for both π/2 rotations; its RF carrier stays fixed.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Select the pulse and integration window that measure IQ after the second rotation.",
+        ),
+    ]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Free-evolution delay",
+            unit="µs",
+            description="Sweep the wait between the two π/2 pulses.",
+        ),
+    ]
     detune_ratio: Annotated[
         float,
         FieldMeta(
