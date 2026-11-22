@@ -48,12 +48,19 @@ def _run(cfg: AllXYCfg, *, context: RunContext) -> RunRecord[AllXYCfg, AllXY_Res
     return RunRecord(cfg=cfg, result=AllXY_Exp().run(cfg, context=context))
 
 
+def _summary_lines(source: AllXYRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=AllXY_Exp.AXES_SPEC,
     make_form=_AllXY_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_AllXY_analyze, options=lambda source, env: AllXYAnalyzeOptions()
+        fn=_AllXY_analyze,
+        options=lambda source, env: AllXYAnalyzeOptions(),
+        summary_lines=_summary_lines,
     ),
 )

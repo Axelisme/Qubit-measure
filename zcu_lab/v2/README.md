@@ -100,8 +100,9 @@ Save／MCP 透過單一 `summarize_analysis` 轉換 native 結果，不使用已
 `const`／`flat_top` 交給 `_run_for_flat`，在 FPGA sweep 長度。
 其他可調長度的波形，例如 `cosine`，交給 `_run_for_arb`，由 host 逐長度取數並重用同長度的程式。
 `_run_for_arb` 沿用歷史名稱，不表示它接受原生 arb 資產。
-兩條路徑都回傳 `LenRabiResult`，`lengths` 與 `signals` 都是一維 `(N,)`，每個長度對應一個平均 complex IQ。
-Host 路徑在回傳前對可用 rounds 取平均，未取數的點保留 NaN，不把內部的 round 軸交給呼叫端。
+兩條路徑都回傳 `LenRabiResult`。`lengths` 與 `signals` 都是一維 `(N,)`，每個長度對應一個平均 complex IQ。
+新 run 另回傳 `iq_moments`；舊檔缺少這個欄位仍可載入。
+Host 路徑先合併各長度已完成的 shot 矩，再除以保留 shot 數求平均。未取數的點保留 NaN，不把內部的 round 軸交給呼叫端。
 
 ## 即時圖工具
 

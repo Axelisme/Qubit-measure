@@ -28,45 +28,47 @@ class TwotoneChainInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse readout library key. Sources are chosen by the Form.",
+        description="Set Readout to the pulse readout library key.",
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
-        description="Drive library key. No pi calibration is required for this sweep.",
+        description="Set Probe Pulse to the drive library key; this does not require a calibrated π pulse.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Reset module option.",
+        description="Set Reset to the selected module option.",
     )
-    center_mhz: float = Field(description="Sweep center in MHz.")
+    center_mhz: float = Field(
+        description="Set the midpoint (MHz) of Probe RF frequency › Start and Stop."
+    )
     span_mhz: float = Field(
         gt=0,
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2.",
+        description="Set Probe RF frequency › Start and Stop (MHz) to center minus or plus half this span.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed drive amplitude in native gain units.",
+        description="Set Probe Pulse › Gain (a.u.) for the whole RF sweep.",
     )
     pulse_length_us: float | None | Keep = Field(
         KEEP,
-        description="Fixed drive pulse duration in µs.",
+        description="Set Probe Pulse › Waveform › Length (µs).",
     )
     points: int = Field(
         ge=2,
-        description="Sweep sample count.",
+        description="Set Probe RF frequency › Expts (count), the number of RF settings.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Fast sweeps per round, at least 2.",
+        description="Set Reps (count), the number of fast sweeps per round; at least 12.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Round count; the live curve updates after each round.",
+        description="Set Rounds (count), the number of averaging passes.",
     )
 
     expected_center_mhz: float | None | Keep = Field(
         KEEP,
-        description="Analysis only: fit the peak nearest this MHz; null fits the strongest.",
+        description="Set Analyze › Expected center (MHz); null selects the most prominent peak.",
     )
 
 
@@ -74,19 +76,19 @@ class TwotoneChainReport(RecipeReport):
     """Sigma-peak centre and width; cancellation returns no report."""
 
     frequency_mhz: float | None = Field(
-        description="Fitted sigma-peak centre in MHz; null means not estimable."
+        description="Peak center (MHz); null when not estimable."
     )
     frequency_err_mhz: float | None = Field(
-        description="Centre uncertainty in MHz; null means not estimable."
+        description="Fit error of Peak center (MHz); null when not estimable."
     )
     width_mhz: float | None = Field(
-        description="Sigma-peak FWHM in MHz, an approximate line width; null means not estimable."
+        description="Sigma-peak FWHM (MHz), an approximate linewidth; null when not estimable."
     )
     width_err_mhz: float | None = Field(
-        description="Width uncertainty in MHz; null means not estimable."
+        description="Fit error of Sigma-peak FWHM (MHz); null when not estimable."
     )
     level_sigma: float | None = Field(
-        description="5% false-mark level in sigma; null means analysis gave no result."
+        description="5% false-mark level (σ); null when analysis gives no result."
     )
 
 

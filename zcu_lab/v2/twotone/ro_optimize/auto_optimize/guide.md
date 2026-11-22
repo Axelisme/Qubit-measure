@@ -1,23 +1,31 @@
-## Behavior
+**Readers:** operator, agent. Find a measured candidate for readout frequency, gain and RF pulse duration.
 
-**Readers:** operator, agent. Automatic readout optimization: a Bayesian optimizer searches readout frequency, gain and length jointly to maximize the g/e signal-to-noise ratio (SNR), with the qubit toggled between g and e by a pi pulse. Runs on real hardware. Use it to find a good readout in one shot instead of tuning freq / power / length one axis at a time.
+# Readout search
 
-**Last updated:** 2026-10-21
+## What it measures
 
-## Parameter sources
+Run the search with a calibrated π pulse. The optimizer proposes candidates jointly and uses each measured score to guide later choices. At each setting, run optional reset → omit or apply the calibrated qubit π pulse → readout. The two branches are nominal g and e. The SNR is the distance between their IQ centroids divided by the pooled single-shot spread along the line joining the centroids. A positive skew penalty reduces that SNR by a shape factor. Neither the raw SNR nor the penalized score is a state population or a measured assignment fidelity.
 
-Search bounds seed 51 frequency points at `$resonator.freq` +/- 0.2 * `$resonator.kappa`, 51 gain points from 0.1 to 0.25, and 51 length points from 5.0 to 10.0 µs. The optimizer samples within these bounds. Relax delay starts at 5*T1; optimizer points start at 1001. Open and Defaults fill editable starting values from the selected aliases and calibration. Qubit pulse templates read `$qubit.freq` and `$qubit.wiring.ch`. Readout templates read `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
+## Set the run parameters
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+- **Readout frequency (MHz):** initial bounds are the resonator frequency ± 0.2 linewidths.
+- **Readout gain (a.u.):** initial bounds are 0.1 to 0.25.
+- **Readout pulse duration (µs):** initial bounds are 5 to 10 µs. The search changes the RF pulse duration, not the ADC window. Keep the integration window covered even at the minimum pulse duration.
+- **Search candidate count (count):** set the run budget; the initial value is 1001. The three ranges start in Expts mode at 51 points each, but only the bounds constrain the continuous search; Expts does not divide its candidates into a grid.
+- **Search random seed (count):** supply an integer to repeat the candidate sequence given the same scores; leave blank to start a new sequence.
+- **Qubit π pulse:** select the captured, calibrated g-to-e pulse. When the slot is absent, the `pi_pulse` template takes frequency and wiring from the selected qubit; calibrate the pulse before using it.
+- **Readout pulse and ADC window:** use the selected resonator's readout module or the `readout` template. The template uses the resonator frequency, wiring and flight time. It leaves 0.015 µs of pulse before and after the incoming ADC window. Start the readout post-delay at five photon decay times, `5/(2πκ)` µs for linewidth κ in MHz, and check that a longer wait does not change the signal.
+- **Reset:** optionally select the reset used before each preparation. A blank field skips reset.
+- **Qubit relaxation wait (µs):** wait after each read. The initial value is 5 × captured T1. If T1 is absent, the starting estimate is 30 µs and the wait starts at 150 µs. If captured T1 is invalid, supply the wait before Run.
+- **Reps**, **Rounds:** shots per preparation and setting in each software round, and the number of rounds. The Form starts at 1000 and 10. The Analyze summary reports the settings from the analyzed run, not the current Form.
+- **IQ skew penalty weight (a.u.):** leave at 0 to rank by SNR alone. Increase it to reduce the score of populations with mismatched widths or uncancelled skew along the separation axis.
 
-## Module slots
+Use **Defaults** after changing the qubit or resonator source to recapture these starting values. Fill any missing required fields before Run.
 
-The qubit pulse uses the `$qubit.module.x180` slot captured at Open/Defaults, or a fresh pi_pulse template with a constant waveform. Readout uses the captured `$resonator.module.readout` slot, or a fresh pulse-readout template with a constant waveform. Frequency, gain and length optimization requires pulse readout. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+## Read the figures and choose a setting
 
-## Typical writeback
+The four panels plot each measured g/e SNR by candidate index, readout frequency (MHz), readout gain (a.u.) and RF pulse duration (µs). Live counts candidates with a score. Analyze places a red star on the best measured candidate in all four panels and shows its three settings. This is a search history, not three independent sweeps. Two points at the same frequency may use different gains or durations. The panels do not estimate uncertainty on the nonlinear SNR.
 
-Proposes the optimizer's best readout frequency, gain and length to `$qubit.ext.best_ro_freq` (MHz), `$qubit.ext.best_ro_gain` (a.u.) and `$qubit.ext.best_ro_length` (µs). When acquired run settings include pulse readout, also proposes `$resonator.readout.readout_dpm`. With a captured parameter source, a following `$resonator.module.readout` proposal points to that optimized module. Apply both updates to replace the selected readout for all later forms using this resonator. The qubit's `best_ro_*` scalar destinations stay unchanged.
+Compare the best candidate with other high-scoring points. If they cluster at a boundary, expand that bound if it remains safe to scan; if the search barely covers the range, use more candidates. Confirm the selected triple with a new measurement before using it. For each coordinate, its change is the displayed selection minus the old setting. Analyze proposes the triple in `$qubit.ext.best_ro_freq`, `$qubit.ext.best_ro_gain` and `$qubit.ext.best_ro_length`. Review the writeback candidates before applying them. If the readout is a pulse module and the remaining calibration coordinates are available, Analyze also proposes an optimized resonator readout module and the captured resonator's readout slot.
 
-## Recommended
-
-The three sweep axes set the optimizer's search bounds. Keep frequency within a fraction of a linewidth and choose reviewed gain and length bounds so the search converges. 'Optimizer points' (~1000) sets how many evaluations to spend; raise it for wider bounds, lower it for a quick search. 'Optimizer seed' fixes the optimizer's candidate sequence: with the same seed and the same measured SNRs, a run proposes the same points; leave it empty to draw a new search each run. Analyze reports the best evaluated point directly.
+There is no MCP recipe for this experiment. Use the experiment tab or its RPC entry point.

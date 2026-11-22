@@ -1,6 +1,6 @@
 """Candidate selection and isolated numerical spectrum fitting."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 import numpy as np
@@ -57,6 +57,37 @@ class SpectrumFit:
     fitted: NDArray[np.float64]
     peaks: tuple[PeakCandidate, ...]
     selected_peak: PeakCandidate | None
+    _model_type: Literal["lor", "sinc"] = field(repr=False, compare=False, kw_only=True)
+    _parameters: tuple[float, ...] = field(repr=False, compare=False, kw_only=True)
+    _window_mhz: tuple[float, float] = field(repr=False, compare=False, kw_only=True)
+
+    def evaluate(self, freqs_mhz: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Evaluate the original fit at caller-supplied MHz coordinates.
+
+        freqs_mhz must be a finite one-dimensional float64 array. Coordinates
+        must lie between the minimum and maximum fitted samples, inclusive.
+        Invalid inputs raise ValueError. Values preserve the input shape and
+        order and use the same units as observed. No refitting or interpolation
+        is performed.
+        """
+        _validate_evaluation_coordinates(freqs_mhz, self._window_mhz)
+        model = lorfunc if self._model_type == "lor" else sincfunc
+        return model(freqs_mhz, *self._parameters)
+
+
+def _validate_evaluation_coordinates(
+    freqs_mhz: object, window_mhz: tuple[float, float]
+) -> None:
+    if (
+        not isinstance(freqs_mhz, np.ndarray)
+        or freqs_mhz.ndim != 1
+        or freqs_mhz.dtype != np.float64
+        or not np.isfinite(freqs_mhz).all()
+    ):
+        raise ValueError("Expected a finite one-dimensional float64 MHz array")
+    lower, upper = window_mhz
+    if ((freqs_mhz < lower) | (freqs_mhz > upper)).any():
+        raise ValueError("MHz coordinates must lie inside the fitted window")
 
 
 def fit_spectrum(
@@ -197,7 +228,7 @@ def fit_spectrum(
         width, width_error = 1.2067 * parameters[4], 1.2067 * errors[4]
         fitted = sincfunc(freqs, *parameters)
     else:
-        frequency, error, width, width_error, fitted, _ = fit_qubit_freq(
+        frequency, error, width, width_error, fitted, (parameters, _) = fit_qubit_freq(
             freqs, observed, options.model_type
         )
     return SpectrumFit(
@@ -210,6 +241,9 @@ def fit_spectrum(
         fitted,
         peaks,
         selected,
+        _model_type=options.model_type,
+        _parameters=tuple(parameters),
+        _window_mhz=(float(freqs.min()), float(freqs.max())),
     )
 
 

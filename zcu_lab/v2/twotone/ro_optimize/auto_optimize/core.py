@@ -7,7 +7,6 @@ from typing import Annotated, Any, ClassVar, cast
 
 import numpy as np
 from matplotlib.artist import Artist
-from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -113,29 +112,73 @@ class ReadoutOptimizer:
 
 
 class AutoOptCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the qubit reset before preparation, or leave blank to skip reset.",
+        ),
+    ] = None
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit π pulse",
+            description="Select the calibrated π pulse used to prepare the excited branch.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout pulse and ADC window",
+            description="Select the resonator pulse and ADC timing for reading each qubit preparation.",
+        ),
+    ]
     freq: Annotated[
         SweepCfg,
-        FieldMeta(label="Readout freq", unit="MHz"),
+        FieldMeta(
+            label="Readout frequency",
+            unit="MHz",
+            description="Enter the readout frequency bounds in MHz for the continuous search.",
+        ),
     ]
     gain: Annotated[
         SweepCfg,
-        FieldMeta(label="Readout gain", unit="a.u."),
+        FieldMeta(
+            label="Readout gain",
+            unit="a.u.",
+            description="Enter readout gain bounds in a.u. for the continuous search.",
+        ),
     ]
     length: Annotated[
         SweepCfg,
-        FieldMeta(label="Readout length", unit="µs"),
+        FieldMeta(
+            label="Readout pulse duration",
+            unit="µs",
+            description="Enter the RF pulse duration bounds in µs; the ADC window stays fixed.",
+        ),
     ]
-    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
-        default=0.0, ge=0.0
-    )
-    num_points: Annotated[int, FieldMeta(label="Optimizer points")] = Field(gt=0)
+    skew_penalty: Annotated[
+        float,
+        FieldMeta(
+            label="IQ skew penalty weight",
+            unit="a.u.",
+            decimals=3,
+            description="Set the penalty weight for asymmetric IQ distributions; zero disables the penalty.",
+        ),
+    ] = Field(default=0.0, ge=0.0)
+    num_points: Annotated[
+        int,
+        FieldMeta(
+            label="Search candidate count",
+            unit="count",
+            description="Enter the number of readout settings to try.",
+        ),
+    ] = Field(gt=0)
     seed: Annotated[
         int | None,
         FieldMeta(
-            label="Optimizer seed",
+            label="Search random seed",
+            unit="count",
             description=(
                 "Fixes the optimizer's initial and later candidate points for a "
                 "given acquisition; empty draws a new search each run."
@@ -146,7 +189,9 @@ class AutoOptCfg(ConfigBase):
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the number of shots per qubit preparation and setting in each round.",
         ),
     ]
     rounds: Annotated[
@@ -160,10 +205,10 @@ class AutoOptCfg(ConfigBase):
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Qubit relaxation wait",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the qubit relaxation time in µs to wait after each preparation and readout.",
         ),
     ]
 
@@ -302,22 +347,21 @@ def _live_search_plot(
     iteration title in one refresh, returning changed artists to the plot
     dispatcher. Inputs remain unchanged.
     """
-    figure, initial_ax = plots.subplots(num="measurement", figsize=(8, 5))
+    figure, initial_ax = plots.subplots(num="measurement", figsize=(9, 7))
     initial_ax.remove()
-    figure.suptitle("Readout Auto Optimization")
-    grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
+    figure.suptitle("Readout search · Resonator · IQ separation")
+    grid = figure.add_gridspec(2, 2)
     axes = []
     lines = []
     for xlabel, cell in (
-        ("Iteration", grid[:, 0]),
-        ("Frequency (MHz)", grid[0, 1]),
-        ("Readout Gain (a.u.)", grid[1, 1]),
-        ("Readout Length (µs)", grid[2, 1]),
+        ("Candidate index (count)", grid[0, 0]),
+        ("Readout frequency (MHz)", grid[0, 1]),
+        ("Readout gain (a.u.)", grid[1, 0]),
+        ("Readout pulse duration (µs)", grid[1, 1]),
     ):
         ax = figure.add_subplot(cell)
-        ax.set(xlabel=xlabel, ylabel="SNR (a.u.)")
+        ax.set(xlabel=xlabel, ylabel="g/e IQ separation SNR")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
         lines.append(live_line(ax))
         ax.lines[0].set_linestyle("None")
         ax.lines[0].set_marker("o")
@@ -332,11 +376,7 @@ def _live_search_plot(
         """Refresh SNR panels from the score/parameter snapshot and return artists."""
         data, sampled_params, idx = payload
         snrs = np.abs(data)
-        cur_freq, cur_gain, cur_len = sampled_params[idx, :]
-        title = (
-            f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), "
-            f"Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (µs)"
-        )
+        title = f"{np.isfinite(snrs).sum()}/{len(snrs)} candidates scored\nCandidate index: {idx}"
         artists: list[Artist] = [axes[0].set_title(title)]
         for line, xs in zip(
             lines,
@@ -483,46 +523,44 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         max_snr = float(snrs[max_id])
         best_params = params[max_id, :]
 
-        figsize = (8, 5)
-        # 2. Relate the best SNR to search history and the three sampled readout coordinates.
-        fig, ax = plots.subplots(num="fit", figsize=figsize)
-        ax.remove()
-        gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
+        # 2. Compare search history and the sampled readout settings.
+        fig, _ = plots.subplots(2, 2, num="fit", figsize=(9, 7))
+        fig.suptitle("Readout search · Resonator · IQ separation")
+        ax_iter, ax_freq, ax_gain, ax_len = fig.axes
+        ax_iter.plot(np.arange(len(snrs)), snrs, "o", color="C0")
+        ax_iter.scatter(max_id, max_snr, color="C3", marker="*", zorder=3)
+        ax_iter.set(
+            xlabel="Candidate index (count)",
+            ylabel="g/e IQ separation SNR",
+            title=f"Best measured SNR = {max_snr:.3g}",
+        )
 
-        fig.suptitle("Readout Auto Optimization")
-
-        ax_iter = fig.add_subplot(gs[:, 0])
-        ax_freq = fig.add_subplot(gs[0, 1])
-        ax_gain = fig.add_subplot(gs[1, 1])
-        ax_len = fig.add_subplot(gs[2, 1])
-
-        ax_iter.scatter(np.arange(len(snrs)), snrs, s=1)
-        ax_iter.axhline(max_snr, color="r", ls="--", label=f"best = {max_snr:.2g}")
-        ax_iter.scatter([max_id], [max_snr], color="r", marker="*")
-        ax_iter.set_xlabel("Iteration")
-        ax_iter.set_ylabel("SNR (a.u.)")
-        ax_iter.legend()
-        ax_iter.grid(True)
-
-        def plot_ax(ax: Axes, param_idx: int, label_name: str, best_label: str) -> None:
-            """Plot one sampled readout coordinate, best setting and measured SNR on ax.
-
-            param_idx selects frequency (0), gain (1) or length (2) from captured params.
-            label_name labels that coordinate and its units; best_label is its formatted
-            setting with units. Return None after updating ax.
-            """
-            ax.scatter(params[:, param_idx], snrs, s=1)
-            best_value = best_params[param_idx]
-            ax.axvline(best_value, color="r", ls="--", label=f"best = {best_label}")
-            ax.scatter([best_value], [max_snr], color="r", marker="*")
-            ax.set_xlabel(label_name)
-            ax.set_ylabel("SNR (a.u.)")
-            ax.legend()
-            ax.grid(True)
-
-        plot_ax(ax_freq, 0, "Frequency (MHz)", f"{best_params[0]:.2f} MHz")
-        plot_ax(ax_gain, 1, "Readout Gain (a.u.)", f"{best_params[1]:.3g} a.u.")
-        plot_ax(ax_len, 2, "Readout Length (µs)", f"{best_params[2]:.3g} µs")
+        for idx, ax, xlabel, title in (
+            (
+                0,
+                ax_freq,
+                "Readout frequency (MHz)",
+                f"Selected frequency = {best_params[0]:.6g} MHz",
+            ),
+            (
+                1,
+                ax_gain,
+                "Readout gain (a.u.)",
+                f"Selected gain = {best_params[1]:.4g} a.u.",
+            ),
+            (
+                2,
+                ax_len,
+                "Readout pulse duration (µs)",
+                f"Selected duration = {best_params[2]:.4g} µs",
+            ),
+        ):
+            ax.plot(params[:, idx], snrs, "o", color="C0")
+            ax.scatter(best_params[idx], max_snr, color="C3", marker="*", zorder=3)
+            ax.set(xlabel=xlabel, ylabel="g/e IQ separation SNR", title=title)
+        for ax in fig.axes:
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        fig.tight_layout()
 
         return AutoOptAnalysis(
             float(best_params[0]), float(best_params[1]), float(best_params[2])

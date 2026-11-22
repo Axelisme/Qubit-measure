@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fit_qubit_freq
+from zcu_tools.analysis.fitting.base import lorfunc
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -26,6 +27,10 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
+
+_TITLE = "Single-tone reset resonance · qubit · IQ projection"
+_XLABEL = "Reset drive RF frequency (MHz)"
+_YLABEL = "Mean IQ on principal axis (a.u.)"
 
 
 @dataclass(frozen=True)
@@ -48,16 +53,49 @@ def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FreqCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[PulseReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select a preparation reset before each shot, or leave blank to skip it.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Preparation pulse",
+            description="Select the pulse after preparation reset, such as calibrated Xπ, or leave blank to skip it.",
+        ),
+    ] = None
+    tested_reset: Annotated[
+        PulseReset.Cfg,
+        FieldMeta(
+            label="Tested reset",
+            description="Fill in the fixed-gain sideband pulse applied between preparation and readout.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Fill in the calibrated resonator readout for the end of each shot.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Reset drive RF frequency",
+            unit="MHz",
+            description="Enter the RF frequency range of the tested sideband drive (MHz).",
+        ),
+    ]
 
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per sweep point and sequence branch in each acquisition round (count).",
         ),
     ]
     rounds: Annotated[
@@ -65,7 +103,7 @@ class FreqCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of acquisition rounds to average (count).",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -74,7 +112,7 @@ class FreqCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the delay after each shot to let the qubit relax (µs).",
         ),
     ]
 
@@ -111,13 +149,18 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # 2. Retain complex IQ and display its projection along the response axis.
         plots = context.plots
         fig, ax = plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude (a.u.)")
-        viewer = live_line(ax, num_lines=1)
+        ax.set(xlabel=_XLABEL, ylabel=_YLABEL, title=_TITLE)
+        viewer = live_line(ax)
+        ax.lines[0].set(marker=".", markersize=5)
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            return viewer.set(freqs, reset_signal2real(data))
+            count = int(np.count_nonzero(np.isfinite(data)))
+            title = ax.set_title(
+                f"{_TITLE}\nAcquired frequencies: {count}/{len(freqs)} count"
+            )
+            return (*viewer.set(freqs, reset_signal2real(data)), title)
 
         fig.show()
         signals_buffer = SignalBuffer((len(freqs),), on_update=update)
@@ -162,22 +205,28 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         real_signals = reset_signal2real(signals)
 
-        freq, freq_err, fwhm, _, y_fit, _ = fit_qubit_freq(
+        freq, freq_err, fwhm, fwhm_err, _, (parameters, _) = fit_qubit_freq(
             freqs, real_signals, type="lor"
         )
 
         # 2. Assess the Lorentzian reset resonance and its frequency uncertainty.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)
-        ax.plot(freqs, y_fit, label=f"fit, FWHM = {fwhm:.1g} MHz")
-        label = f"f_reset = {freq:.5g} ± {freq_err:.1g} MHz"
-        ax.axvline(freq, color="r", ls="--", label=label)
-        ax.set_xlabel("Frequency (MHz)")
-        ax.set_ylabel("Signal Real (a.u.)")
-        ax.legend()
-        ax.grid(True)
-        ax.set_title("Sideband Reset Frequency Sweep")
+        dense = np.linspace(freqs.min(), freqs.max(), 200)
+        local = np.linspace(
+            max(freqs.min(), freq - 2 * fwhm), min(freqs.max(), freq + 2 * fwhm), 200
+        )
+        dense = np.unique(np.concatenate((dense, local)))
+        ax.plot(freqs, real_signals, ".-", label="Measured", markersize=5)
+        ax.plot(dense, lorfunc(dense, *parameters), "-", label="Lorentzian fit")
+        ax.axvline(
+            freq,
+            color="C3",
+            ls="--",
+            label=f"Reset RF = {freq:.3f} ± {freq_err:.2g} MHz\nFWHM = {fwhm:.3g} ± {fwhm_err:.2g} MHz",
+        )
+        ax.set(xlabel=_XLABEL, ylabel=_YLABEL, title=_TITLE)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
 
         fig.tight_layout()
 

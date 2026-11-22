@@ -1,83 +1,106 @@
+**Readers:** operator, agent. Run an averaged-IQ MIST gain sweep and check where the readout response changes.
+
 # MIST probe-gain trace
 
-**Readers:** operator, agent. Measure an averaged-IQ MIST trace over probe gain from the GUI or MCP.
+## What the sweep measures
 
-**Last updated:** 2026-10-21
+Open `mist/power_dep/single_trace`. MIST stands for measurement-induced
+state transitions. This sweep looks for a change in the readout response
+after a resonator drive. Each shot runs **optional reset → optional qubit
+preparation → resonator probe → readout → relaxation wait**. Only the probe
+gain changes across the sweep. The readout pulse stays fixed and supplies one
+integrated complex IQ value per shot.
 
-## Measurement
+A change in mean IQ does not identify a state, a transition probability or a
+leakage rate. Residual resonator signal and readout drift can also move mean
+IQ. Use `singleshot/mist/power` with calibrated state discrimination to check
+whether a candidate change in IQ tracks population.
 
-Open `mist/power_dep/single_trace` for an averaged-IQ MIST trace. Each sequence
-applies optional reset and initialization, then a gain-swept probe and readout.
-The board scans probe gain; probe frequency and duration stay fixed. Use
-`singleshot/mist/power` for classified-population measurements.
+## Set up and run
 
-## Starting configuration
+Open or choose **Defaults** after binding the qubit and its resonator.
+Defaults capture the current values and replace draft edits. Review these
+fields before Run:
 
-Open and Defaults capture aliases, parameter sources and module selections.
-Reset and initialization use optional `$qubit.module.reset` and
-`$qubit.module.x180` slots.
-Missing optional slots stay disabled. Disable initialization for ground-state
-preparation, or select a calibrated pulse to prepare another state.
+| Field | Starting value and what to check |
+| --- | --- |
+| Reset | Uses the qubit's reset module if assigned. Turn it off to omit the reset before each shot. |
+| Preparation pulse | Uses the qubit's x180 module if assigned. Turn it off to omit driven preparation, or select a calibrated pulse for the intended starting state. |
+| Resonator probe | Starts from the resonator frequency and generator and a 1 µs constant waveform. Match the carrier to the resonance you want to drive. Length and gain control how strongly the probe excites the resonator. The sweep sets gain, so there is no separate probe gain field. |
+| Readout | Uses the resonator's assigned readout, or starts from a pulse readout template with its frequency, wiring and time of flight. Use a calibrated pulse, trigger delay and integration window. The readout gain is distinct from the swept probe gain. |
+| Probe gain sweep | Start and Stop are 0 and 1 a.u., with 151 points at first. Start at a verified low probe gain to get a reference. Check the pulse settings and restrict the range for the sample before running. Expts sets how many points, including the endpoints. |
+| Reps / Rounds | Start at 1000 shots per gain point and 10 sweeps. Their product is the planned shots per point. |
+| Relax delay | Starts at five times qubit T1. A missing T1 uses 30 µs, so the wait starts at 150 µs. A bad stored T1 can leave the field blank. Enter a wait in µs that lets the qubit relax before the next shot. |
 
-Probe starts from the `res_probe` template using `$resonator.freq` and
-`$resonator.wiring.ch`, with a 1 µs constant pulse. Readout uses
-`$resonator.module.readout` when present, otherwise the `readout` template. The
-readout template needs resonator frequency, generator/ADC wiring and
-`$resonator.time_of_fly`. Missing required sources stay Invalid; select a
-valid module or fill the inline fields before Run.
+Use one measured tone and one integrated ADC read per shot. A pulse
+readout satisfies this when its ADC is set. A multi-tone readout does not.
+In the pulse settings, Gen ch and RO ch route the DAC and ADC. Frequency
+is the programmed carrier in MHz, not a detuning. Waveform sets the drive
+envelope; its Length sets the pulse duration. RO length sets the ADC
+integration window, and Trig offset places that window after the pulse
+starts. For the pulse readout template, the trigger uses the time of flight
+plus 0.015 µs. The 1 µs pulse leaves 0.015 µs on each side of a 0.97 µs
+window at the ADC. NQZ selects the generator's Nyquist zone. Set Mixer freq
+to the generator mixer frequency, or leave it blank without a mixer. Phase
+sets the carrier phase.
+Pre-delay places the pulse later, and Post-delay waits after the pulse.
+The classifier does not affect this averaged-IQ trace.
 
-The initial gain range is 0 to 1 with 151 points. Reps starts at 1000 and Rounds
-at 100. Relax delay starts at 5 times the captured `$qubit.t1`. Missing/null T1
-uses 30 µs, giving a 150 µs wait; invalid T1 leaves the required wait empty.
-These are editable starting values. Set safe ranges using the limits of your
-hardware. Review gain, frequency, pulse length, readout and state preparation
-before running.
+Fill any remaining required blanks. Run shows the IQ displacement as shots
+accumulate. The number in the live title is the number of shots acquired per
+gain point, not the number of gain points. The joined dots show the progress
+of the sweep; the line between them is not a fit.
 
-## Plot and analysis
+## Read the trace
 
-The live `measurement` plot subtracts the mean IQ over the first 5% of gain
-points and shows the displacement magnitude. Analyze publishes a response
-figure named `fit`. This figure shows IQ displacement; use a
-classified-population experiment for population estimates. Its default ground
-reference is the first measured IQ, so it can differ from the live plot.
+Both Run and the default Analyze figure use the first measured gain point as
+the complex IQ reference. Each dot shows the magnitude of the difference
+between that reference and the mean IQ at the dot's gain, in a.u. The first
+point is zero by definition. Analyze shows just the measured points and
+error bars. Its summary identifies the source run and that run's configured
+Reps × Rounds, not the current Form settings.
 
-Optional Ground IQ and Excited IQ accept complex strings such as `1+2j`. Ground
-IQ sets the displacement reference. Excited IQ only sets the vertical range to
-1.1 times the reference separation. Leave both empty to use the first point and
-automatic y limits. Photon number / gain squared is an optional coefficient for
-`n = coefficient * gain**2`; leave it empty for a gain axis. Enter a coefficient
-from an independently checked AC-Stark calibration when needed. Analysis uses
-the acquired or loaded data. Calibration parameters remain unchanged.
+Each bar is one shot standard error of the mean (SEM). The analysis projects
+the individual IQ fluctuations along the direction from the reference to
+that point's mean IQ, then uses their sample standard deviation divided
+by the square root of the shot count. This first-order estimate treats the
+reference as fixed. It does not include uncertainty in a measured reference,
+and it is less useful when the bar is large compared with the displacement.
+There is no bar at zero displacement, where the direction is undefined,
+at points with fewer than two shots, or on old mean-only files. A zero or
+very small SEM can be hidden by its dot. A symmetric bar can extend below
+zero, even though the measured magnitude cannot.
 
-## Save and repeat
+Find a rise that spans adjacent gains and repeats when you rerun the sweep.
+Do not treat one point with a large bar as an onset. If a rise starts between
+two gains, repeat with those gains as Start and Stop and a smaller step.
+For example, 21 points between 0.12 and 0.14 a.u. give a nominal 0.001 a.u.
+step. If the whole trace is flat, the sweep has not located an onset. If
+the reference looks suspect, repeat with a lower Start or use an independently
+measured reference. Repeat with more shots if the bars obscure the change.
+This analysis does not fit or write back an onset.
 
-Data → Save All saves the native complex IQ and gain coordinates with the Run
-configuration, plus available figures and analysis. Native data uses the
-`mist/gain` tag and `Drive Power` axis in a.u. Load preserves the current form
-and uses the saved record for analysis. Analyze also accepts records with
-missing historical configuration.
+## Change the Analyze display
 
-The `mist_power_trace` recipe opens or resets this measurement, optionally
-selects probe/readout modules, runs, saves raw IQ and analyzes. It uses the
-reset form's reset/init choices and gain defaults, including when reusing a tab.
-Reuse discards previous configuration edits. Run directly in the GUI for custom
-acquisition settings. The recipe leaves calibration parameters unchanged.
+- **Reference IQ (a.u.)** sets the complex reference. Enter a value such as
+  `1+2j` measured with the same readout, or leave it blank to use the first point.
+- **Comparison IQ (a.u.)** sets the y-axis upper limit to 1.1 times its distance
+  from Reference IQ. It does not change the dots or bar lengths and may hide
+  points above the limit. Leave it blank for automatic limits.
+- **Photon number / gain squared** replaces the gain axis with the coefficient
+  times gain squared. Leave it blank without an independent calibration.
+  Use one sign of gain for this view, since opposite signs give the same
+  photon number.
 
-Offline `white_noise` exercises the pulse sequence, sweep, readout and saving
-with a simulated device. Its output is noise only. Establish MIST onset and
-calibrated photon number with a suitable physical model or hardware
-measurement.
+Save All stores mean complex IQ, gain coordinates and any available shot
+moments with the run. Load leaves the current Form alone. Analyze uses the
+loaded record and omits the acquisition line if the loaded configuration was
+unavailable.
 
-## Four starting situations
+The `mist_power_trace` recipe opens or resets the same Form, can select
+Resonator probe and Readout modules, and uses that Form's gain grid and averaging.
+Use overrides to set a different grid or shot count. The recipe runs the
+sweep, analyzes it and saves the result without updating calibration.
 
-1. With an empty kickstart project, Open the Form and inspect its required blanks.
-   Set probe gain endpoints and verify probe/readout timing. Supply GE calibration where the Form requests it.
-   Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, choose Defaults to recapture those values.
-   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
-   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
-4. Through the agent, call `mist_power_trace` after inspecting the same Form errors.
-   The captured Form supplies gain Expts. probe_ref/readout_ref select modules. g0, e0 and ac_coeff update the existing display analysis.
-   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+An FTF simulator trace can show probe-dependent IQ without modeling MIST
+transitions. Do not use it to choose a hardware onset.

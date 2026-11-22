@@ -26,55 +26,55 @@ class RamanGFInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key with acquired centroid3 calibration.",
+        description="Set Readout to a library module with saved centroid3 calibration.",
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
-        description="Single Raman drive library key.",
+        description="Set Raman drive to the selected library pulse.",
     )
     waveform_asset: str | None | Keep = Field(
         KEEP,
-        description="Sampled arbitrary waveform asset key, such as an operator-prepared sqrt(cos) envelope.",
+        description="Set Raman drive › Waveform › Arbitrary asset to the sampled envelope key.",
     )
     carrier_mhz: float | None | Keep = Field(
         KEEP,
-        description="Operator-supplied (measured f03 - measured f32)/2 in MHz. No model lookup.",
+        description="Set Carrier center (MHz) to half the measured f03 minus f32 difference.",
     )
     scan_mode: Literal["frequency", "gain", "frequency_gain"] | None | Keep = Field(
         KEEP,
-        description="Frequency, gain or Cartesian frequency-gain scan.",
+        description="Set Scan mode to frequency, gain or frequency_gain.",
     )
     detuning_start_mhz: float | None | Keep = Field(
         KEEP,
-        description="Two-photon detuning start in MHz: 2*f_drive - 2*carrier_mhz.",
+        description="Set Two-photon detuning › Start (MHz); positive raises the carrier by half this value.",
     )
     detuning_stop_mhz: float | None | Keep = Field(
         KEEP,
-        description="Two-photon detuning stop in MHz; positive raises the single carrier by half the detuning.",
+        description="Set Two-photon detuning › Stop (MHz); positive raises the carrier by half this value.",
     )
     detuning_n: int | None | Keep = Field(
         KEEP,
-        description="Detuning sample count, Form detuning.n to cfg detuning.expts.",
+        description="Set Two-photon detuning › Expts (count).",
     )
     gain_start: float | None | Keep = Field(
         KEEP,
-        description="Nonnegative drive-gain start in native units; frequency mode holds this gain.",
+        description="Set Drive gain › Start (a.u.); frequency mode holds this signed gain.",
     )
     gain_stop: float | None | Keep = Field(
         KEEP,
-        description="Native nonnegative drive-gain stop in DAC full-scale fraction, not angle.",
+        description="Set Drive gain › Stop (a.u.), a signed DAC full-scale fraction.",
     )
     gain_n: int | None | Keep = Field(
         KEEP,
-        description="Gain sample count, Form gain.n to cfg gain.expts.",
+        description="Set Drive gain › Expts (count).",
     )
     shots: int | None | Keep = Field(
         KEEP,
-        description="Repetitions per point, classified into saved g/e/f counts.",
+        description="Set Shots per point (count), classified into g/e/f labels.",
     )
     relax_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Relaxation interval in µs for ground preparation.",
+        description="Set Relax delay (µs), the wait after each shot.",
     )
 
 

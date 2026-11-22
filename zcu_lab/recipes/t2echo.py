@@ -30,23 +30,23 @@ class T2EchoInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key.",
+        description="Select the Readout library module that integrates IQ.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Preparation module option.",
+        description="Select Reset before the pulse sequence; null disables it.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key.",
+        description="Select Refocusing π pulse, the calibrated π rotation.",
     )
     pi2_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi/2-pulse library key.",
+        description="Select π/2 pulse, the calibrated π/2 rotation.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Total echo-delay stop in µs, not half-delay.",
+        description="Set Total free-evolution delay › Stop (µs), the delay sweep endpoint.",
     )
     detune_ratio: float | None | Keep = Field(
         KEEP,
@@ -54,15 +54,15 @@ class T2EchoInputs(RecipeInputs):
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count.",
+        description="Set Total free-evolution delay › Expts (count), including both endpoints.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count.",
+        description="Set Reps (count), shots per point in each round.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Rounds (count), the acquisition rounds to average.",
     )
 
     fit_method: Literal["fringe", "decay"] | None | Keep = Field(

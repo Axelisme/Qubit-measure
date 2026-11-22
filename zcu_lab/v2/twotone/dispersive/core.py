@@ -7,7 +7,6 @@ from typing import Annotated, Any, ClassVar
 import numpy as np
 from matplotlib.artist import Artist
 from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
@@ -70,9 +69,28 @@ class DispersiveAnalysis:
 class DispersiveCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Initial pulse")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit preparation pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit π preparation pulse",
+            description="Fill in the calibrated π pulse used only for the nominal excited-state spectrum.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Fill in the resonator probe and ADC readout used in both preparations; the RF sweep sets the carrier.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Readout RF frequency",
+            unit="MHz",
+            description="Fill in RF endpoints in MHz spanning both resonator responses.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
@@ -131,10 +149,11 @@ def _plot_circle_fit(
     ax.plot([norm_xc, 1], [norm_yc, 0], "kx--")
     ax.axhline(0, color="k", linestyle="--")
     ax.set_aspect("equal")
-    ax.grid(True)
-    ax.set_ylabel(r"$Im[S_{21}]$ (a.u.)", fontsize=14)
-    ax.yaxis.set_label_position("right")
-    ax.legend()
+    ax.set(
+        xlabel="Normalized in-phase IQ (a.u.)",
+        ylabel="Normalized quadrature IQ (a.u.)",
+        title=label,
+    )
 
 
 class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
@@ -181,11 +200,20 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         )
 
         # 2. Monitor the readout resonance contrast of both preparations.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude (a.u.)")
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
+        fig, ax = context.plots.subplots(num="measurement", layout="constrained")
+        title = "Dispersive shift · resonator · mean IQ magnitude"
+        ax.set(
+            xlabel="Readout RF frequency (MHz)",
+            ylabel="Mean IQ magnitude (a.u.)",
+            title=title,
+        )
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
         viewer = live_line(ax, num_lines=2)
+        for line, color, label in zip(
+            ax.lines, ("C0", "C3"), ("No π pulse", "With π pulse"), strict=True
+        ):
+            line.set(color=color, marker="o", markersize=3, label=label)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
@@ -195,7 +223,11 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             Return the changed artists without modifying the input array.
             """
             # Display absolute IQ amplitude for both preparations.
-            return viewer.set(freqs, np.abs(data))
+            points = np.count_nonzero(np.isfinite(data))
+            progress = ax.set_title(
+                f"{title}\nPreparation / RF pairs with data: {points}/{data.size}"
+            )
+            return (*viewer.set(freqs, np.abs(data)), progress)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -252,6 +284,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
 
         model = get_proper_model(freqs, g_signals)
         # 2. Fit both complex resonances with the selected hanger or transmission model.
+        dense = np.linspace(float(freqs.min()), float(freqs.max()), 240)
         if isinstance(model, HangerModel):
             g_params = model.fit(
                 freqs,
@@ -265,8 +298,8 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
                 edelay=edelay,
                 fit_bg_amp_slope=options.fit_bg_amp_slope,
             )
-            g_fit = np.abs(model.calc_signals(freqs, **g_params))
-            e_fit = np.abs(model.calc_signals(freqs, **e_params))
+            g_fit = np.abs(model.calc_signals(dense, **g_params))
+            e_fit = np.abs(model.calc_signals(dense, **e_params))
         else:
             g_params = model.fit(
                 freqs,
@@ -280,8 +313,8 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
                 edelay=edelay,
                 fit_bg_amp_slope=options.fit_bg_amp_slope,
             )
-            g_fit = np.abs(model.calc_signals(freqs, **g_params))
-            e_fit = np.abs(model.calc_signals(freqs, **e_params))
+            g_fit = np.abs(model.calc_signals(dense, **g_params))
+            e_fit = np.abs(model.calc_signals(dense, **e_params))
 
         g_freq, g_fwhm = g_params["freq"], g_params["fwhm"]
         e_freq, e_fwhm = e_params["freq"], e_params["fwhm"]
@@ -290,36 +323,35 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
         avg_fwhm = (g_fwhm + e_fwhm) / 2  # average linewidth κ/2π
 
-        fig = Figure(figsize=(8, 4))
-        plots.adopt("fit", fig)
-        spec = fig.add_gridspec(2, 3, wspace=0.2)
-        ax_main = fig.add_subplot(spec[:, :2])
-        ax_g = fig.add_subplot(spec[0, 2])
-        ax_e = fig.add_subplot(spec[1, 2])
-
+        fig, ax = plots.subplots(num="fit", figsize=(8, 5.3), layout="constrained")
         fig.suptitle(
-            f"Dispersive shift χ/2π = {chi:.3f} MHz, κ/2π = {avg_fwhm:.1f} MHz"
+            "Dispersive shift · resonator · mean IQ magnitude\n"
+            f"Half splitting χ/2π = {chi:.4g} MHz · Mean FWHM κ/2π = {avg_fwhm:.4g} MHz"
         )
+        ax.scatter(
+            freqs, g_amps, marker="o", s=9, color="C0", label="No π pulse · measured"
+        )
+        ax.scatter(
+            freqs, e_amps, marker="o", s=9, color="C3", label="With π pulse · measured"
+        )
+        ax.plot(dense, g_fit, color="C0", label="No π pulse · fit")
+        ax.plot(dense, e_fit, color="C3", label="With π pulse · fit")
+        ax.axvline(g_freq, color="C0", linestyle=":", alpha=0.7)
+        ax.axvline(e_freq, color="C3", linestyle=":", alpha=0.7)
+        ax.set(
+            xlabel="Readout RF frequency (MHz)",
+            ylabel="Mean IQ magnitude (a.u.)",
+            title=f"No π: {g_freq:.6g} MHz (FWHM {g_fwhm:.4g} MHz)\n"
+            f"With π: {e_freq:.6g} MHz (FWHM {e_fwhm:.4g} MHz)",
+        )
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
 
-        # 4. Compare the state-dependent resonance positions and amplitude fits.
-        label_g = f"Ground: {g_freq:.1f} MHz, κ = {g_fwhm:.1f} MHz"
-        label_e = f"Excited: {e_freq:.1f} MHz, κ = {e_fwhm:.1f} MHz"
-        ax_main.scatter(freqs, g_amps, marker=".", c="b")
-        ax_main.scatter(freqs, e_amps, marker=".", c="r")
-        ax_main.plot(freqs, g_fit, "b-", alpha=0.7, label=label_g)
-        ax_main.plot(freqs, e_fit, "r-", alpha=0.7, label=label_e)
-
-        ax_main.axvline(g_freq, color="b", ls="--", alpha=0.7)
-        ax_main.axvline(e_freq, color="r", ls="--", alpha=0.7)
-        ax_main.set_xlabel("Frequency (MHz)", fontsize=14)
-        ax_main.set_ylabel("Signal Amplitude (a.u.)", fontsize=14)
-
-        ax_main.legend(loc="upper right")
-        ax_main.grid(True)
-
-        # 5. Check each complex-IQ circle against its resonance fit.
-        _plot_circle_fit(ax_g, freqs, g_signals, dict(g_params), "b", "Ground")
-        _plot_circle_fit(ax_e, freqs, e_signals, dict(e_params), "r", "Excited")
-        ax_e.set_xlabel(r"$Re[S_{21}]$ (a.u.)", fontsize=14)
+        circles, _ = plots.subplots(
+            num="iq-circles", ncols=2, figsize=(8, 4.8), layout="constrained"
+        )
+        circles.suptitle("Dispersive shift · resonator · IQ fit diagnostics")
+        ax_g, ax_e = circles.axes
+        _plot_circle_fit(ax_g, freqs, g_signals, dict(g_params), "C0", "No π pulse")
+        _plot_circle_fit(ax_e, freqs, e_signals, dict(e_params), "C3", "With π pulse")
 
         return DispersiveAnalysis(chi, avg_fwhm)

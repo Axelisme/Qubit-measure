@@ -35,41 +35,43 @@ class TwotoneSpectrumInputs(RecipeInputs):
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
-        description="Drive library key. No pi calibration is required for this sweep.",
+        description="Set Probe Pulse to the drive library key; this does not require a calibrated π pulse.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Reset module option.",
+        description="Set Reset to the selected module option.",
     )
-    center_mhz: float = Field(description="Sweep center in MHz.")
+    center_mhz: float = Field(
+        description="Set the midpoint (MHz) of Probe RF frequency › Start and Stop."
+    )
     span_mhz: float = Field(
         gt=0,
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2.",
+        description="Set Probe RF frequency › Start and Stop (MHz) to center minus or plus half this span.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse amplitude in native gain units.",
+        description="Set Probe Pulse › Gain (a.u.) for the whole RF sweep.",
     )
     pulse_length_us: float | None | Keep = Field(
         KEEP,
-        description="Fixed drive pulse duration in µs.",
+        description="Set Probe Pulse › Waveform › Length (µs).",
     )
     points: int = Field(
         ge=2,
-        description="Sweep sample count.",
+        description="Set Probe RF frequency › Expts (count), the number of RF settings.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count.",
+        description="Set Reps (count), the number of shots per RF point in each round.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Rounds (count), the requested number of averaging passes.",
     )
 
     model_type: Literal["lor", "sinc"] | None | Keep = Field(
         KEEP,
-        description="Model type. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Model type to Lorentzian (lor) or sinc.",
     )
 
 
@@ -77,16 +79,16 @@ class TwotoneSpectrumReport(RecipeReport):
     """Twotone spectrum results and failure reason; cancellation returns no report."""
 
     frequency_mhz: float | None = Field(
-        description="Fitted transition frequency in MHz; null means not estimable."
+        description="Qubit frequency (MHz); null when not estimable."
     )
     frequency_err_mhz: float | None = Field(
-        description="Transition frequency uncertainty in MHz; null means not estimable."
+        description="Fit error of Qubit frequency (MHz); null when not estimable."
     )
     linewidth_mhz: float | None = Field(
-        description="Fitted full linewidth in MHz; null means not estimable."
+        description="FWHM (MHz); null when not estimable."
     )
     linewidth_err_mhz: float | None = Field(
-        description="Linewidth uncertainty in MHz; null means not estimable."
+        description="Fit error of FWHM (MHz); null when not estimable."
     )
 
 

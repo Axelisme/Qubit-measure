@@ -1,8 +1,6 @@
-## Behavior
+**Readers:** operator, agent. Measure how the bath-reset tomography response varies with qubit-tone duration. Apply optional preparation reset and preparation pulse, play both bath tones together, then play the tomography π/2 pulse after the cavity tone and read out.
 
-**Readers:** operator, agent. Bath-reset length sweep: holds the tested bath reset at its calibrated cavity frequency and gain and sweeps its duration (cavity and qubit tones together), with a 4-point pi/2 tomography phase cycle at each length, showing how the residual excitation decays with reset length. Runs on real hardware. Run after the cavity freq/gain are found, to pick the shortest fully-resetting length.
-
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-22
 
 ## Parameter sources
 
@@ -14,10 +12,18 @@ Open and Defaults capture the T1 used for starting values. A missing or null T1,
 
 Tested reset starts as an editable copy of the bath_reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. The pi/2 tone uses `$qubit.module.x90`, otherwise a fresh pi2_pulse template. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
 
+## Acquisition and figures
+
+Reps starts at 1000 per sweep point and branch in each acquisition round; Rounds starts at 10. Check the requested Reps × Rounds in Analyze before comparing runs. This length scan repeats the host sweep for each configured round, and each point within that sweep also acquires the configured number of rounds.
+
+At each duration the final π/2 phase is set to 0°, 90°, 180° and 270° absolute. The qubit-tone duration is the x axis; cavity duration follows it with the difference in the source module held fixed. Opposite-phase tomography contrast is |S180−S0|² + |S270−S90|² in a.u.², with S equal to the complex mean at each phase. It measures phase sensitivity, not residual excitation or reset fidelity. The two IQ panels show mean I and mean Q for each labeled phase. Bars are the sample standard deviation of acquired shots in that quadrature divided by the square root of the retained count. The nonlinear contrast panel has no direct shot SEM. Mean-only files show no bars. If stopped rounds leave unequal shot counts for a point, its mean still gives each acquired host pass equal weight, and the plot omits its pooled SEM.
+
+Choose a duration after the contrast settles; extend Stop if it is still changing at the last acquired point. Verify how that duration prepares the intended state before using it.
+
 ## Typical writeback
 
-Read the chosen reset length from the decay curve and enter it manually. Register the calibrated 'reset_bath' module in the final phase step.
+Read the chosen reset length from the contrast curve and enter it manually. Register the calibrated 'reset_bath' module in the final phase step.
 
 ## Recommended
 
-A length sweep from ~0.05 µs to a few times the expected reset time captures the full decay; shorten the span once the plateau is clear. Allow a long relax delay so the qubit fully relaxes before each reset.
+Use a duration range that reaches beyond the first sustained plateau. Keep the preparation and readout the same while refining the range.

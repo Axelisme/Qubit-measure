@@ -9,7 +9,13 @@ from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.cov_transfer import selfcal_transfer
-from zcu_tools.analysis.fitting import FitQuality, fit_decay, fit_dual_decay
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    dual_expfunc,
+    expfunc,
+    fit_decay,
+    fit_dual_decay,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -102,7 +108,14 @@ class T1CovCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Relaxation delay",
+            unit="µs",
+            description="Sweep the wait from the π pulse to the second readout.",
+        ),
+    ]
     sampling: Literal["linear", "decay"] = "linear"
     reps: Annotated[int, FieldMeta(label="Reps", unit="count")] = 1000
     rounds: Annotated[int, FieldMeta(label="Rounds", unit="count")] = 10
@@ -187,7 +200,11 @@ class T1CovExp(Experiment[T1CovResult, T1CovCfg]):
         prog = builder.build()
 
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Delay (µs)", ylabel="Change probability C")
+        ax.set(
+            title="Paired-readout T1",
+            xlabel="Relaxation delay (µs)",
+            ylabel="State-change probability C",
+        )
         update = live_transfer(context.plots, ax, times)
         fig.show()
         buffer = SignalBuffer((len(times), 6, 6), dtype=np.float64, on_update=update)
@@ -231,14 +248,22 @@ class T1CovExp(Experiment[T1CovResult, T1CovCfg]):
             t1, t1_err = fit.decay_time, fit.decay_time_err
 
         fig, ax = plots.subplots(num="fit")
-        ax.plot(xs, ys, "o-", label=f"C, π̂={transfer.populations.round(3).tolist()}")
-        ax.plot(xs, fit.curve, label="Fit", color="orange")
+        ax.plot(xs, ys, ".", label="Inferred state-change probability")
+        fit_delays = np.linspace(xs.min(), xs.max(), max(200, xs.size))
+        model = dual_expfunc if options.dual_exp else expfunc
+        fit_label = "Two-exponential fit" if options.dual_exp else "Exponential fit"
+        if fit.quality.r2 is not None:
+            fit_label += f" (R² = {fit.quality.r2:.3f})"
+        ax.plot(fit_delays, model(fit_delays, *fit.params), label=fit_label)
         title = rf"$T_1$ = {t1:.2f} ± {t1_err:.2f} µs"
         if t1b is not None and t1b_err is not None:
             title += "\n" + rf"$T_{{1b}}$ = {t1b:.2f} ± {t1b_err:.2f} µs"
-        ax.set(title=title, xlabel="Delay (µs)", ylabel="Change probability C")
-        ax.legend(loc="upper right")
-        ax.grid(True)
+        ax.set(
+            title=f"Paired-readout {title}",
+            xlabel="Relaxation delay (µs)",
+            ylabel="State-change probability C",
+        )
+        ax.legend()
         fig.tight_layout()
 
         return T1CovAnalysis(

@@ -75,6 +75,13 @@ def _RoOptAuto_make_form(ctx: FormContext) -> Form[AutoOptCfg]:
     return make_form(ctx)
 
 
+def _summary_lines(source: RoOptAutoRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 def _run(
     cfg: AutoOptCfg, *, context: RunContext
 ) -> RunRecord[AutoOptCfg, AutoOptResult]:
@@ -87,5 +94,9 @@ DEFINITION = Adapter(
     make_form=_RoOptAuto_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_RoOptAuto_analyze, writeback=_RoOptAuto_get_writeback_items),
+    analysis=Analysis(
+        fn=_RoOptAuto_analyze,
+        writeback=_RoOptAuto_get_writeback_items,
+        summary_lines=_summary_lines,
+    ),
 )

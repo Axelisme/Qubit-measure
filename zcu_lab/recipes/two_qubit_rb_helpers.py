@@ -24,22 +24,25 @@ class RBRecipeInputs(RecipeInputs):
 
     target: TwoQubitTarget | None = Field(
         default=None,
-        description="Role bindings for this Reset. Omitted or null roles keep the current aliases.",
+        description="Bind Qubit1, Qubit2, coupler and mux on Open or Defaults; omit or pass null to keep aliases.",
     )
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     depths: list[Annotated[StrictInt, Field(ge=0)]] | None | Keep = Field(
-        KEEP, description="Random Clifford counts, written to Form depth."
+        KEEP,
+        description="Set Random Clifford depths (count), excluding recovery; omit to keep, or pass null to the form.",
     )
     seeds: list[StrictInt] | None | Keep = Field(
         KEEP,
-        description="Integer sequence identities paired across arms, written to Form seed.",
+        description="Set Sequence seeds, the shared IDs (0–2147483647); omit to keep, or pass null to the form.",
     )
     reps: int | None | Keep = Field(
-        KEEP, description="Shots per acquisition point per round."
+        KEEP,
+        description="Set Reps (count), shots per depth per round; omit to keep, or pass null to the form.",
     )
     rounds: int | None | Keep = Field(
-        KEEP, description="Number of rounds to sum per seed and arm."
+        KEEP,
+        description="Set Rounds (count) per seed and arm; omit to keep, or pass null to the form.",
     )
 
 
@@ -47,30 +50,34 @@ class RBEstimateReport(RecipeReport):
     """Dimensionless owner estimates; all estimate fields are null without a fit."""
 
     p_reference: float | None = Field(
-        default=None, description="Reference decay per random Clifford."
+        default=None, description="Reference decay per random Clifford (unitless)."
     )
     p_interleaved: float | None = Field(
-        default=None, description="Interleaved decay per random Clifford plus CZ."
+        default=None,
+        description="CZ-interleaved decay per random Clifford plus CZ (unitless).",
     )
     reference_epc: float | None = Field(
-        default=None, description="Reference error per Clifford for dimension four."
+        default=None,
+        description="Reference error per Clifford (unitless, dimension four).",
     )
     gate_error: float | None = Field(
-        default=None, description="Dimension-four CZ error estimate, not clipped."
+        default=None,
+        description="CZ error estimate (unitless, dimension four); negative values are retained.",
     )
     error_ci_low: float | None = Field(
         default=None,
-        description="Lower bound of the 95% paired-seed gate error interval.",
+        description="Lower bound of the CZ error estimate’s 95% seed CI (unitless).",
     )
     error_ci_high: float | None = Field(
         default=None,
-        description="Upper bound of the 95% paired-seed gate error interval.",
+        description="Upper bound of the CZ error estimate’s 95% seed CI (unitless).",
     )
     n_paired_seeds: int | None = Field(
-        default=None, description="Seed identities contributing to the paired fit."
+        default=None,
+        description="Seed identities contributing to the paired fit (count).",
     )
     bootstrap_successes: int | None = Field(
-        default=None, description="Valid paired-seed bootstrap fits."
+        default=None, description="Valid paired-seed bootstrap fits (count)."
     )
     warning: str | None = Field(
         default=None, description="Owner warning about the ratio and model limitations."
