@@ -33,6 +33,7 @@ from zcu_tools.program.v2 import Pulse, PulseReadout, Reset, TimelineBuilder
 
 from zcu_lab.v2.support.singleshot.classification_plot import (
     plot_ge_classification_boundary,
+    share_ge_preparation_limits,
 )
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to_signal
 
@@ -160,6 +161,7 @@ def _plot_post(
             fontsize=10,
         )
 
+    share_ge_preparation_limits(g_iq, e_iq)
     _plot_post_matrix(populations, confusion.init_matrix)
     populations.set_title("Initial Populations\nPrepared → actual", fontsize=10)
     _plot_post_matrix(classifier, confusion.matrix)
@@ -353,15 +355,22 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
 
         # 1. Acquisition order is always probe off/on; fit in physical g/e order.
         signals = ge_signals_by_state(source.result.signals, options.initial_state)
-        _, axes = plots.subplots(num="fit")
+        _, axes = plots.subplots(num="fit", layout="constrained")
         plot_ge_iq_density(axes, signals[0], signals[1])
-        axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
+        axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)")
+        # Reserve space between the IQ box and its title even for narrow I ranges.
+        axes.set_title("GE IQ", pad=36)
         axes.grid(False)
         axes.legend(
             handles=[
                 Patch(color="blue", label="g preparation"),
                 Patch(color="red", label="e preparation"),
-            ]
+            ],
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1),
+            borderaxespad=1,
+            ncols=2,
+            fontsize=10,
         )
         # 2. Fit readout separation and preparation mixing in physical g/e order.
         fidelity, init_pops, fit = singleshot_ge_analysis(
@@ -377,7 +386,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
             plots=plots,
             figure_name="diagnostic",
         )
-        # 3. Validate the calibration and label an unidentifiable length ratio.
+        # 3. Validate the calibration; label the fit independently of the reporting limit.
         analysis = GEAnalysis(
             initial_state=options.initial_state,
             fidelity=fidelity,
@@ -391,11 +400,14 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
             fit_quality=fit["fit_quality"],
         )
         analysis.validate_calibration()
-        axes.set_title(
-            "GE IQ (length ratio: not identifiable)"
-            if analysis.length_ratio is None
-            else f"GE IQ (length ratio = {analysis.length_ratio:.2f})"
-        )
+        error = fit["length_ratio_standard_error"]
+        if options.length_ratio is not None:
+            label = f"length ratio = {options.length_ratio:.3g}"
+        elif error is not None:
+            label = f"length ratio = {fit['ge_params'][-1]:.3g} ± {error:.3g}"
+        else:
+            label = "length ratio: unavailable"
+        axes.title.set_text(f"GE IQ ({label})")
         return analysis
 
     def post_analyze(
