@@ -128,6 +128,7 @@ SweepCfg 的座標與 step 繼承 unit，點數不繼承掃描量的物理單位
 Form 的 flux 掃描輸入使用 `flux_unit` 指定的裝置輸入單位，不用它推定 Result 或保存軸的單位。
 例如 [JPA bias survey](jpa/flux_onetone/guide.md#read-the-map-and-cuts) 的圖上 bias 軸與保存的 `fluxes` 軸都使用裝置原生 a.u.，不隨 Form 的 A／V／native 選項改標籤或換算。
 Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數。
+清單各位置共用元素模型宣告的 `FieldMeta`；起始樹可按位置提供不同初值。兩者的分工見 [Native model lists](../../lib/zcu_tools/gui/form_adapter/README.md#native-model-lists)。
 
 初值依來源處理。來源可推導時，用 Expr 或固定 capture，寫明來源路徑與單位。
 有 operator-authored slot 時沿用 slot，並說明它不是本次已驗證的校準。
@@ -476,6 +477,9 @@ Dotted 的 device value／period NaN cell 視為缺席，inf／bool 仍拒絕。
 Adapter guide 是 prose，不是 machine contract。內容放在實驗同目錄的 UTF-8 Markdown 檔。
 Markdown 章節可自由安排。內容依 [Gd1–Gd3](figure-style.md#operator-guide) 的六項、保留條件與必留項撰寫。表單只有初值而沒有等價來源說明時，只為操作員必須自行設定的關鍵參數補最短的來源公式。
 通用 GUI 操作連到 [操作員共用流程](operator-workflow.md)。Recipe 留空語意與確切失敗階段若已由已發布的 `Field.description` 或 schema 完整說明，guide 不重述；兩者不等價時保留必要說明。
+
+撰寫 inline pulse 的時序說明時，從 [Program modules 的原生寫法](../../lib/zcu_tools/program/v2/modules/README.md#原生寫法) 查播放結尾，再到 [`Pulse`](../../lib/zcu_tools/program/v2/modules/pulse.py) 查 `pre_delay` 與 `post_delay`。要區分 Readout 的播放結尾與 ADC window，查 [Readout configuration](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration) 的 `PulseReadout` 段，搜尋 `pre_delay`、`post_delay` 與 `trig_offset`。
+
 Adapter 明確宣告檔案，不依 class 名稱推導路徑：
 
 ```python

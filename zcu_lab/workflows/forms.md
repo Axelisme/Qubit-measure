@@ -43,7 +43,8 @@ Overnight forms 保留固定 pair 與 interval。
 兩個 member 的等待時間都不低於 `relax_min_us`（預設 1 µs，允許 0），表單以 µs 顯示並傳入 tunables。Fit 不改 delay grid、pulse 或 readout。
 `OvernightTunablesForm.sampling` 的標籤是 Sampling，預設 linear。設 decay 只改 T1 在同一視窗內的 delay 分布，不改 Echo。
 `OvernightMuxPlanForm` 使用手寫 FormModel 與 ModuleInputField，提供 mux readout、nullable reset、完整 tone model list 與 participants 原始索引。
-每個 tone 分別選已校準的 x180 drive 與 x90 pi2_pulse，不從半 gain 推導。
+`OvernightMuxToneForm.drive` 選已校準的 x180，`pi2_pulse` 另選已校準的 x90，不從半 gain 推導。
+[`measure_mux_echo`](overnight_mux/stages.py) 建立 `MuxT2EchoCfg` 時，把表單的 x180 `drive` 傳給 `MuxEchoToneCfg.pi_pulse`，把 x90 `pi2_pulse` 傳給 `MuxEchoToneCfg.drive`。後者繼承自 `MuxCoherenceToneCfg`，不是表單上同名的 x180。
 Fresh defaults 從固定 capture 的 `$mux.qubits` 建立完整名稱順序；`$participants` 缺少或未綁定時選所有 qubit，已有選擇則保留其順序。
 已選 tone 的 x180/x90 與 mux readout/reset 只引用現存 module slot。缺 pulse/readout 留待使用者填入，不建立替代 module；reset 可保留 None。
 表單沒有 flux 欄位。`OvernightMuxTunablesForm` 沿用 overnight 的欄位與意義，包含預設 linear 的 `sampling`。設 decay 時只改 T1 的共用 delay 分布，Echo 不變。

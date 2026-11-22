@@ -149,6 +149,8 @@ form = Form(Group, {
 
 SweepCfg 生成 Range／Center × Expts／Step 四個 tagged branches，各自只保存 active 座標與 n 或 step。未指定初值的 fresh input 只選 Range + Expts，raw 為 `{"kind": "linrange"}`；start／stop／n 空白且必填。Range 的 None 端點與求值失敗的 Expr 初始端點保持未填且必填，缺少 input key 也不補 0／1。`gui.form_adapter.sweep` 擁有四種數值 model 與換算。指令掛在 sweep row，以共用 Form 的 readonly snapshot、局部 evaluate 與原子安裝執行，不由葉欄位修改 parent。Step 的有效端點與 floor count 由這些 model 的驗證產生，`to_cfg` 使用這份結果與原 step，不另算步長或截短。既有 SweepCfg 仍驗證單點與點數一致性。Memento 保存 FormInput，因此模式與新 expression 不依賴 Qt view，read／preview／result 不暗改原稿。
 
+描述中的 `options` 列出分支，不代表畫面有下拉選單。[`SweepInput`](sweep.py) 使用 `Display(selector=False)` 隱藏模式下拉，但保留分支描述與 active 子欄。轉寫畫面時，記下 active 子欄及可用的右鍵 commands，不把 `options` 當成選單。呈現規則見 [Form draft view](../widgets/form/README.md#guiwidgetsform--form-draft-view)；在 [`_view.py`](../widgets/form/_view.py) 搜尋 `field.selector` 可找到下拉的判斷。
+
 普通 select 在必要欄位都是有效直接數值時，重用座標與採樣 command 的換算。例如 `{"kind": "linrange", "start": 10, "stop": 14, "n": 3}` 選成 center 後，raw 是 `{"kind": "center", "center": 12, "span": 4, "n": 3}`。選成 center_step 則帶入 center=12、span=4、step=2。此例再切回 linrange，start／stop／n 回到 10／14／3。Step→Expts 沿用 floor count 與有效端點規則。
 
 若任一必要值是 expression、缺席或 invalid，或換算失敗，整次切換退回同名同型別 raw 繼承，不安裝部分換算，也不報換算錯誤。例如 start 是 `{"expr": "10"}` 時，選成 center 只繼承 n，center／span 留空必填。未參與換算的欄位仍保留原文，例如只切換座標時的 n expression。這條 select 規則也適用於 indexed list 內的 sweep 與手寫 `SweepInput`，不改一般 tagged-model union 的切換。
