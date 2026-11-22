@@ -5,7 +5,6 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
-from scipy.optimize import linear_sum_assignment
 from scipy.stats import wishart
 from zcu_tools.analysis.readout_chain import (
     CycleNuisances,
@@ -64,19 +63,6 @@ def test_fit_cycle_wald_errors_follow_axis_units() -> None:
         original.errors["frequency"], rel=1e-4
     )
     assert converted.reliability == pytest.approx(original.reliability, rel=1e-4)
-    # Match geometric states by their public IQ centers, not their Wald errors.
-    # Apply the same permutation to population estimates and their errors.
-    distances = np.sum(
-        (original.nuisances.centers[:, None] - converted.nuisances.centers[None]) ** 2,
-        axis=2,
-    )
-    order = linear_sum_assignment(distances)[1]
-    np.testing.assert_allclose(
-        converted.populations[:, order], original.populations, rtol=1e-4
-    )
-    np.testing.assert_allclose(
-        converted.population_errors[:, order], original.population_errors, rtol=1e-4
-    )
 
 
 def test_augmented_sums_keep_point_counts_and_features_but_pool_products() -> None:

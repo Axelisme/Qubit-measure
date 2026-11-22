@@ -39,7 +39,8 @@ def fit_decay(
     supplied amplitude guess. Non-None fixedparams fixes the corresponding
     values in that order. Free decay time uses
     decay_time_bounds(xs); initial time is clipped. Invalid delay grids raise
-    ValueError and numeric fitting failures raise AnalysisFailed. Fixed times
+    ValueError. Flat traces with a free amplitude and no nonzero amplitude
+    guess, and numeric fitting failures, raise AnalysisFailed. Fixed times
     remain unchanged for quality diagnostics to flag separately.
     """
     pOpt, pCov = fitexp(
@@ -248,8 +249,10 @@ def fit_decay_fringe(
     frequency uses inverse delay units, and time uses delay units. Non-None
     fixedparams fixes values. Return time/error, frequency/error in 1/x units,
     curve and (parameters, covariance). Initial free time is clipped; fixed
-    values are unchanged. Invalid grids raise ValueError and numeric fitting
-    failures raise AnalysisFailed.
+    values are unchanged. Invalid inputs raise ValueError. Insufficient
+    observations, no usable FFT seed and numeric fitting failures raise
+    AnalysisFailed. For automatic initialization, a valid short trace is
+    classified before imposing the FFT's positive first-step requirement.
     """
     pOpt, pCov = fitdecaycos(
         xs,
@@ -257,6 +260,7 @@ def fit_decay_fringe(
         fitparams=fit_params,
         fixedparams=fixedparams,
         decay_bounds=decay_time_bounds(xs),
+        check_short_before_fft=True,
     )
 
     fit_signals = decaycos(xs, *pOpt)

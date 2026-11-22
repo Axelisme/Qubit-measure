@@ -219,6 +219,7 @@
 
 ## 量測策略
 
+- 2026-11-22 [K-cycle chain 只留主擬合](2026-11-22-chain-joint-fit-only.md)：刪除或收窄。移除巢狀擬合與 `CycleCheck`，用白化殘差和 live 方向投影判讀，不讓第一讀估計或投影缺席蓋掉 joint 結果。
 - 2026-11-22 [Fast-flux 頻譜擬合失敗](2026-11-22-fastflux-distortion-fit-failure.md)：失敗語意。保留整次 Analyze 失敗，不用部分成功圖掩蓋不可辨識的掃描。
 - 2026-10-27 [T1/T2 over flux 量測策略：哪些機制有效](2026-10-27-coherence-strategy-levers.md)：自適應 flux 選點無增益，穩健 delay 取樣讓每條曲線的 σ 約為原來 0.73 倍。
 - 2026-10-29 [Heralding：取數層 post-selection，不做 FPGA active reset](2026-10-29-heralding-post-selection.md)：在 host 取數層依 herald 篩選再平均，不做 FPGA active reset，決策見 [ADR-0074](../adr/0074-flat-readout-module.md)。

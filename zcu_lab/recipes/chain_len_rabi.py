@@ -4,7 +4,6 @@ Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 """
 
 from pydantic import Field
-from zcu_tools.analysis.readout_chain import CycleCheck
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -18,6 +17,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
+from zcu_lab.v2.chain._joint import JointResidualSummary
 from zcu_lab.v2.chain.len_rabi.gui import ChainLenRabiSummary
 
 
@@ -61,8 +61,8 @@ class ChainLenRabiInputs(RecipeInputs):
     )
 
 
-class ChainLenRabiReport(RecipeReport):
-    """Chain Rabi fit and its checks; cancellation returns no report."""
+class ChainLenRabiReport(RecipeReport, JointResidualSummary):
+    """Joint Rabi estimates and scalar residual diagnostics."""
 
     pi_length_us: float | None = Field(
         description="π duration (µs); null if unavailable."
@@ -79,15 +79,6 @@ class ChainLenRabiReport(RecipeReport):
     reliability: float | None = Field(
         description="R, the inverse phase uncertainty from the frequency error over the sweep (no threshold); null if unavailable."
     )
-    within_point: CycleCheck | None = Field(
-        description="Within-point check J, df, p; null without analysis."
-    )
-    sharing: CycleCheck | None = Field(
-        description="Sharing check J, df, p; null without analysis."
-    )
-    curve: CycleCheck | None = Field(
-        description="Curve check J, df, p; null without analysis."
-    )
     first_read_pi_length_us: float | None = Field(
         description="First-read π duration (µs); null if unavailable."
     )
@@ -95,7 +86,7 @@ class ChainLenRabiReport(RecipeReport):
 
 @recipe(
     "chain_len_rabi",
-    description="Sweep drive duration in K-cycle length Rabi; use the first-read fit to seed a joint three-state fit, then save without writeback.",
+    description="Sweep drive duration in K-cycle length Rabi, fit all 65 numbers jointly, and save the sums, estimates and residual diagnostics without writeback.",
 )
 async def chain_len_rabi(
     session: RecipeSession, inputs: ChainLenRabiInputs
@@ -104,11 +95,13 @@ async def chain_len_rabi(
 
     The FPGA sweeps the length, so the drive must be const or flat_top.
     relax_delay is the thermalisation wait K; the Form starts it at 5 T1 and
-    overrides can change it. Primary fits the first read with the twotone Rabi
-    fit for the starting value, then fits all 65 numbers jointly. It reports
-    the pi length and Rabi frequency with Wald errors, R and three checks. No
-    writeback is proposed or requested. Save keeps the running sums and the
-    analysis.
+    overrides can change it. Primary uses the first-read Rabi fit to start one
+    joint fit of all 65 numbers. If the first read gives no estimate, Primary
+    starts from the saved duration axis and reports a null first-read π duration.
+    The report gives joint π duration and Rabi frequency with Wald errors, R, J, df,
+    J/df, the chi-square reference band and the fraction of whitened residual
+    components with |r| > 3. These numbers do not decide fit acceptance. Save
+    keeps the running sums and analysis. The recipe does not write back.
 
     points → expts sets the sweep sample count.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
@@ -141,9 +134,12 @@ async def chain_len_rabi(
                 rabi_frequency_mhz=None,
                 rabi_frequency_err_mhz=None,
                 reliability=None,
-                within_point=None,
-                sharing=None,
-                curve=None,
+                J=None,
+                df=None,
+                j_per_df=None,
+                expected_band_low=None,
+                expected_band_high=None,
+                tail_fraction=None,
                 first_read_pi_length_us=None,
                 analysis_failure=analysis.reason,
             )
@@ -153,9 +149,12 @@ async def chain_len_rabi(
             rabi_frequency_mhz=report_number(analysis.result.f),
             rabi_frequency_err_mhz=report_number(analysis.result.f_err),
             reliability=report_number(analysis.result.reliability),
-            within_point=analysis.result.within_point,
-            sharing=analysis.result.sharing,
-            curve=analysis.result.curve,
+            J=analysis.result.J,
+            df=analysis.result.df,
+            j_per_df=analysis.result.j_per_df,
+            expected_band_low=analysis.result.expected_band_low,
+            expected_band_high=analysis.result.expected_band_high,
+            tail_fraction=analysis.result.tail_fraction,
             first_read_pi_length_us=report_number(analysis.result.first_read_pi_len),
         )
     finally:

@@ -2,7 +2,8 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
-from zcu_tools.analysis.fitting import compute_fit_quality
+from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.analysis.fitting import compute_fit_quality, fit_decay_fringe
 from zcu_tools.analysis.fitting.base import cosfunc, decaycos
 from zcu_tools.analysis.fitting.rabi import fit_rabi
 
@@ -12,12 +13,60 @@ from tests.analysis.fitting._fit_contract import assert_frozen_fields
 @pytest.mark.parametrize("invalid_call", [fit_rabi], ids=["fit_rabi"])
 @pytest.mark.parametrize("decay", [True, False], ids=["true", "false"])
 def test_fit_rabi_rejects_short_positional_boolean(
-    invalid_call: Callable[..., object], decay: bool
+    *, invalid_call: Callable[..., object], decay: bool
 ) -> None:
     xs = np.linspace(0, 4, 400)
     signals = cosfunc(xs, 0.0, 1.0, 0.5, 0.0)
     with pytest.raises(TypeError, match="positional"):
         invalid_call(xs, signals, decay)
+
+
+@pytest.mark.parametrize(
+    ("decay", "points", "message"),
+    [
+        (False, 2, "Insufficient observations"),
+        (True, 3, "Insufficient observations"),
+        (True, 4, "frequency interval"),
+    ],
+)
+def test_short_rabi_trace_cannot_estimate_pulse_coordinates(
+    *, decay: bool, points: int, message: str
+) -> None:
+    xs = np.linspace(0.0, 1.5, points)
+    with pytest.raises(AnalysisFailed, match=message):
+        fit_rabi(xs, np.cos(2.0 * xs), decay=decay, init_phase=0.0)
+
+
+def test_two_point_ramsey_trace_cannot_estimate_fringe() -> None:
+    with pytest.raises(AnalysisFailed, match="Insufficient observations"):
+        fit_decay_fringe(np.array([0.0, 2.0]), np.array([0.7, 0.3]))
+
+
+@pytest.mark.parametrize("fit", [fit_rabi, fit_decay_fringe], ids=["rabi", "ramsey"])
+@pytest.mark.parametrize(
+    ("xs", "ys", "error"),
+    [
+        ([0.5, 0.5], [1.0, 2.0], "axis|distinct delays"),
+        ([0.0, 2.0, 1.0], [1.0, 2.0, 3.0], "axis"),
+        ([0.0, 1.0], [[1.0, 2.0]], "shape"),
+        ([0.0, 1.0], [1.0], "shape"),
+        ([0.0, 1.0], [1.0, np.nan], "finite"),
+        ([0.0, np.inf], [1.0, 2.0], "finite"),
+    ],
+)
+def test_invalid_oscillation_inputs_are_not_seed_failures(
+    fit: Callable[..., object], xs: list[float], ys: list[float], error: str
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        fit(np.array(xs), np.array(ys))
+
+
+@pytest.mark.parametrize("fit", [fit_rabi, fit_decay_fringe], ids=["rabi", "ramsey"])
+def test_oscillation_without_contrast_cannot_estimate_a_fringe(
+    fit: Callable[..., object],
+) -> None:
+    with pytest.raises(AnalysisFailed, match="no contrast"):
+        fit(np.linspace(0.0, 3.0, 20), np.full(20, 0.5))
 
 
 def test_fit_rabi_default_matches_explicit_no_decay() -> None:
@@ -33,6 +82,7 @@ def test_fit_rabi_default_matches_explicit_no_decay() -> None:
 @pytest.mark.parametrize("decay", [False, True])
 @pytest.mark.parametrize("fixed_phase", [None, 0.0])
 def test_rabi_named_result_preserves_pulse_coordinates_and_quality(
+    *,
     decay: bool,
     fixed_phase: float | None,
 ) -> None:

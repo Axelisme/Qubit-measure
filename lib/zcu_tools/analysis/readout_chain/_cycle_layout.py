@@ -1,10 +1,10 @@
 """Index layouts of the cycle fit's coordinate vectors.
 
-A shared row holds the 14 coordinates every point shares. A per-point table row
-holds one free (s, f) drive pair per state, then a shared row. The curve-model
-nuisance vector holds twelve endpoint coordinates, then a shared row. A simplex
-is an (s, f) pair with probabilities (s*f, s*(1-f), 1-s); see _cycle_emission.
-The Jacobian columns of mean_jacobian follow the table-row layout.
+A shared row holds the 14 coordinates every point shares. The moment Jacobian
+starts with the first two drive probabilities per state, then the shared row.
+The curve-model nuisance vector holds twelve endpoint coordinates, then the
+shared row. A simplex is an (s, f) pair with probabilities (s*f, s*(1-f), 1-s);
+see _cycle_emission.
 """
 
 
@@ -21,7 +21,7 @@ ROW_RETENTION = slice(9, 12)  # one per state
 ROW_LANDING = slice(12, 14)  # (s, f)
 ROW_SIZE = 14
 
-# A per-point table row: the drive pairs, then a shared row.
+# Local moment Jacobian: six drive probabilities, then the shared row.
 TABLE_DRIVE = slice(0, 6)
 TABLE_SHARED = slice(TABLE_DRIVE.stop, TABLE_DRIVE.stop + ROW_SIZE)
 TABLE_THERMAL = shifted(ROW_THERMAL, TABLE_SHARED.start)
