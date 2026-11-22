@@ -56,6 +56,12 @@ _IQ_LABEL = "Projected mean IQ (a.u.)"
 _JOINT_LABEL = "Joint projection\n(SEM units)"
 
 
+def _estimate_text(value: float, error: float, unit: str) -> str:
+    if np.isfinite(error):
+        return f"{value:.4g} ± {error:.2g} {unit}"
+    return f"{value:.4g} {unit} (SE unavailable)"
+
+
 @dataclass(frozen=True)
 class ChainLenRabiAnalysis:
     """Joint estimates, optional first-read π duration and residual diagnostics.
@@ -311,16 +317,6 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
         f, f_err = fit.parameters["f"], fit.errors["f"]
         pi_len = 1 / (2 * f)
         pi_len_err = f_err / (2 * f**2)
-        pi_text = (
-            f"{pi_len:.4g} ± {pi_len_err:.2g} µs"
-            if np.isfinite(pi_len_err)
-            else f"{pi_len:.4g} µs (SE unavailable)"
-        )
-        frequency_text = (
-            f"{f:.4g} ± {f_err:.2g} MHz"
-            if np.isfinite(f_err)
-            else f"{f:.4g} MHz (SE unavailable)"
-        )
         reliability_text = (
             "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
         )
@@ -343,8 +339,8 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
         residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         joint_fig.suptitle(
             "K-cycle length Rabi · Qubit · Joint fit\n"
-            f"π duration = {pi_text}\n"
-            f"Rabi frequency = {frequency_text}    R = {reliability_text}"
+            f"π duration = {_estimate_text(pi_len, pi_len_err, 'µs')}\n"
+            f"Rabi frequency = {_estimate_text(f, f_err, 'MHz')}    R = {reliability_text}"
         )
         handles, labels = projection_ax.get_legend_handles_labels()
         joint_fig.legend(handles, labels, loc="outside lower center", ncols=3)
