@@ -346,7 +346,14 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             )
             zoom = ax
 
-        ax.plot(freqs, curve.sigma, "o", color="C0", label="Measured", markersize=3)
+        ax.plot(
+            freqs,
+            curve.sigma,
+            "o" if zoom is ax else "o-",
+            color="C0",
+            label="Measured",
+            markersize=3,
+        )
         ax.axhline(curve.level, color="gray", ls="--", label="5% false-mark level")
         other_peaks = [peak for peak in fit.peaks if peak != fit.selected_peak]
         if other_peaks:

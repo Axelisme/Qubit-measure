@@ -363,8 +363,7 @@ def _live_search_plot(
         ax.set(xlabel=xlabel, ylabel="g/e IQ separation SNR")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         lines.append(live_line(ax))
-        ax.lines[0].set_linestyle("None")
-        ax.lines[0].set_marker("o")
+        ax.lines[0].set(linestyle="none" if axes else "-", marker="o")
         axes.append(ax)
 
     figure.show()
@@ -527,7 +526,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         fig, _ = plots.subplots(2, 2, num="fit", figsize=(9, 7))
         fig.suptitle("Readout search · Resonator · IQ separation")
         ax_iter, ax_freq, ax_gain, ax_len = fig.axes
-        ax_iter.plot(np.arange(len(snrs)), snrs, "o", color="C0")
+        ax_iter.plot(np.arange(len(snrs)), snrs, "o-", color="C0")
         ax_iter.scatter(max_id, max_snr, color="C3", marker="*", zorder=3)
         ax_iter.set(
             xlabel="Candidate index (count)",

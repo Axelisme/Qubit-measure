@@ -488,7 +488,7 @@ def fit_and_plot_t1(
         real, sem = project_iq(
             signal, None if moments is None else moments[row, options.skip :][finite]
         )
-        ax.plot(xs, real, "o", ms=3, label="Measured IQ")
+        (measured,) = ax.plot(xs, real, "o", ms=3, label="Measured IQ")
         if sem is not None and np.any(np.isfinite(sem)):
             ax.errorbar(xs, real, yerr=sem, fmt="none", ecolor="C0", label="Shot SEM")
         try:
@@ -533,6 +533,7 @@ def fit_and_plot_t1(
             ArithmeticError,
             np.linalg.LinAlgError,
         ) as exc:
+            measured.set_linestyle("-")
             outcomes.append(MuxFitFailure(index, str(exc)))
             ax.text(
                 0.02,

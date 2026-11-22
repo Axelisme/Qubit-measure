@@ -344,7 +344,7 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
                 ylabel=f"P({'gef'[rank]})",
                 title=f"{'gef'[rank]} · thermal rank {rank + 1} · Thermal population {thermal:.2f}",
             )
-            residual_ax.plot(delays, population_residuals[:, state], ".", color=color)
+            residual_ax.plot(delays, population_residuals[:, state], ".-", color=color)
         handles, labels = population_axes[0].get_legend_handles_labels()
         population_fig.legend(handles, labels, loc="outside lower center", ncols=2)
         residual_ax.axhspan(-1.96, 1.96, color="0.9", zorder=0)

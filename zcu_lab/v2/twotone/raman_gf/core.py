@@ -291,9 +291,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
             )
             lines = live_errorbar(ax, num_lines=len(STATE_LABELS))
             for line, state in zip(ax.lines, STATE_LABELS, strict=True):
-                line.set(
-                    marker="o", markersize=3, linestyle="none", label=f"{state} label"
-                )
+                line.set(marker="o", markersize=3, label=f"{state} label")
             ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncols=3)
 
             @plots.on_plot_thread
@@ -438,7 +436,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                     xs,
                     values[:, index],
                     yerr=sem[:, index],
-                    fmt="o",
+                    fmt="o-",
                     color=f"C{index}",
                     markersize=3,
                     label=f"{state} label",

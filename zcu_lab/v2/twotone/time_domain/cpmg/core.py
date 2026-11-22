@@ -446,18 +446,25 @@ def _plot_coherence(
     )
 
     ax2.set_title(f"CPMG coherence · {summary.fit_rows}/{counts.size} fits")
+    t2_1, gamma = summary.t2_1_us, summary.gamma
+    has_fit = t2_1 is not None and gamma is not None
     ax2.errorbar(
-        counts, lifetimes, yerr=errors, label="T₂ ± fit error", color="red", fmt="."
+        counts,
+        lifetimes,
+        yerr=errors,
+        label="T₂ ± fit error",
+        color="red",
+        fmt="." if has_fit else ".-",
     )
-    if summary.t2_1_us is not None and summary.gamma is not None:
+    if has_fit:
         fit_ns = np.geomspace(counts.min(), counts.max(), 200)
         ax2.plot(
             fit_ns,
-            summary.t2_1_us * fit_ns**summary.gamma,
+            t2_1 * fit_ns**gamma,
             label=r"$T_{2,1} n^{\gamma}$",
             color="black",
         )
-        ax2.set_title(f"CPMG coherence · γ = {summary.gamma:.3g}")
+        ax2.set_title(f"CPMG coherence · γ = {gamma:.3g}")
     if options.t1 is not None:
         ax2.axhline(2 * options.t1, color="blue", linestyle="--", label=r"$2T_1$")
     if options.t2r is not None:

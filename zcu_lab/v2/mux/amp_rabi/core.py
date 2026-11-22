@@ -506,7 +506,7 @@ class MuxAmpRabiExp(Experiment[MuxRabiResult, MuxAmpRabiCfg]):
                 signal,
                 None if moments is None else moments[row, options.skip :][finite],
             )
-            ax.plot(xs, real, "o", ms=3, label="Measured IQ")
+            (measured,) = ax.plot(xs, real, "o", ms=3, label="Measured IQ")
             if sem is not None and np.any(np.isfinite(sem)):
                 ax.errorbar(
                     xs, real, yerr=sem, fmt="none", ecolor="C0", label="Shot SEM"
@@ -544,6 +544,7 @@ class MuxAmpRabiExp(Experiment[MuxRabiResult, MuxAmpRabiCfg]):
                 np.linalg.LinAlgError,
             ) as exc:
                 # 4. Isolate each tone's fit failure without hiding its acquired IQ.
+                measured.set_linestyle("-")
                 ax.text(
                     0.02,
                     0.98,

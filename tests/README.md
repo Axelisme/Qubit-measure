@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-22，FTF projective 測試
+**Last updated:** 2026-11-22，UI 與實驗圖驗收導覽
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -52,6 +52,8 @@ Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的�
 ## UI 驗證
 
 框架 UI 改動依下方元件情境驗收。`zcu_lab/` 實驗定義改動，包含 live plot 與分析圖的畫面改動，依下方離線 probe 驗收，不要求 ComponentDriver 走查。同時修改兩者時，分別完成兩種驗收。
+框架 UI 驗收需要判讀圖面時，依 [R7](../zcu_lab/v2/figure-style.md#r7用-gui-與存檔的實際尺寸檢查版面)
+區分 Data 縮圖、`View figure` 閱讀面與存檔 PNG。
 
 ### 框架 UI
 
@@ -84,6 +86,11 @@ API 契約見 [experiment probe](../lib/zcu_tools/experiment/README.md#offline-e
 依改動選擇階段，不要求串成完整流程。Run 改動選 `run_stage`，保存映射改動選
 `save_stage`，分析改動選 `analysis_stage`。同時影響多個階段時分別驗收。
 API 的輸入、輸出、生成器與比較規則由上述 experiment probe 文件擁有。
+
+Stage probe 驗 core 與資料存檔，不經 adapter 或 GUI lifecycle。
+`analysis_stage` 直接呼叫 `Experiment.analyze`，不驗 GUI 的 [capability](../zcu_lab/v2/gui-contracts.md#capability-宣告與實作)，
+也不驗 [lifecycle hooks](../zcu_lab/v2/gui-contracts.md#共用-lifecycle-hooks) 如何建立 Analyze options 與發布摘要。
+階段通過不等於完成 [R0 讀者包](../zcu_lab/v2/figure-style.md#組讀者包)，也不能用不同 Run 的圖和摘要補齊要求同次 Run 的代表驗收。
 
 Agent 在 review-done 前完成下列檢查，將證據留在 task scratch，不新增個別實驗的 durable tests：
 

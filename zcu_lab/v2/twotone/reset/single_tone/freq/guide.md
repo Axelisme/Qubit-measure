@@ -16,7 +16,7 @@ Tested reset starts as an editable copy of the reset template. Optional initiali
 
 Reps starts at 1000 per sweep point and branch in each acquisition round; Rounds starts at 10. Check the requested Reps × Rounds in Analyze before comparing runs.
 
-Live and Analyze plot mean complex IQ projected onto its principal variation axis, falling back to raw I when fewer than two valid means are available. This is a readout contrast in a.u., not an excited-state probability. The live title counts acquired RF points. This spectrum locates a resonance; it does not show shot SEM.
+Live and Analyze plot mean complex IQ projected onto its principal variation axis, falling back to raw I when fewer than two valid means are available. This is a readout contrast in a.u., not an excited-state probability. The live title counts acquired RF points. The saved spectrum contains only mean IQ, so it has no pointwise shot SEM.
 
 Analyze adds the Lorentzian and its center line. The legend reports the center and full width at half maximum (FWHM) with 1σ fit errors; these are not shot errors. Inspect the measured points on both sides of the feature before accepting the fit. If the feature is at an edge, recenter the next sweep at the fitted RF and capture both sides. Once resolved, a practical next window is center ± 1.5 × FWHM. If the width is comparable to one frequency step, reduce the step before treating the width as measured.
 

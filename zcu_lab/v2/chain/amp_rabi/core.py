@@ -38,14 +38,13 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     chain_cycle_sums,
 )
-from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
     checks_text,
     cycle_sums_variables,
-    first_read_iq,
+    first_read_projection,
     restore_cycle_sums,
 )
 from zcu_lab.v2.support import live_line
@@ -224,7 +223,7 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         gains = sums.axis
 
         # 1. Seed from the first-read IQ using this experiment's fit policy.
-        seed_real_signals = rotate2real(first_read_iq(sums)).real
+        seed_real_signals, seed_sem = first_read_projection(sums)
         seed_zero_signal = seed_real_signals[np.argmin(np.abs(gains))]
         if seed_zero_signal > 0.5 * (
             np.max(seed_real_signals) + np.min(seed_real_signals)
@@ -243,8 +242,13 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
             seed_fit.curve,
         )
         seed_fig, seed_ax = plots.subplots(num="fit", figsize=config.figsize)
-        seed_ax.plot(
-            gains, seed_real_signals, label="meas", ls="-", marker="o", markersize=3
+        seed_ax.errorbar(
+            gains,
+            seed_real_signals,
+            yerr=seed_sem,
+            fmt="o",
+            label="First-read mean ± shot SEM",
+            markersize=3,
         )
         seed_ax.plot(gains, seed_y_fit, label="fit")
         seed_ax.axvline(
