@@ -121,6 +121,7 @@ class RPiFreqCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
+            unit="count",
             description="Cycles of 64 R-π pairs in each round.",
         ),
     ] = Field(ge=1)
@@ -128,6 +129,7 @@ class RPiFreqCfg(ConfigBase):
         int,
         FieldMeta(
             label="Rounds",
+            unit="count",
             description="Software rounds, each followed by a live update.",
         ),
     ] = Field(default=1, ge=1)

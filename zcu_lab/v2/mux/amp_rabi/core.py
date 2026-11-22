@@ -161,7 +161,7 @@ class MuxPulseScan:
 class MuxAmpRabiToneCfg(MuxDriveToneCfg):
     """One named drive and its independent gain bounds in gain a.u.."""
 
-    gain: Annotated[ToneRangeCfg | None, FieldMeta(unit="")] = None
+    gain: Annotated[ToneRangeCfg | None, FieldMeta(unit="a.u.")] = None
 
     def require_gain(self) -> ToneRangeCfg:
         """Return active gain bounds, or raise ValueError naming this tone."""
@@ -196,17 +196,24 @@ class MuxAmpRabiCfg(ConfigBase):
     participants: list[StrictInt]
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ] = Field(gt=0)
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
             label="Initial delay",
-            unit="us",
+            unit="µs",
             description="Delay before the first repetition.",
         ),
     ] = Field(default=1.0, ge=0, allow_inf_nan=False)
@@ -214,7 +221,7 @@ class MuxAmpRabiCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -311,7 +318,7 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
         for index in scan.indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             ax.set(
-                xlabel="Pulse gain",
+                xlabel="Pulse gain (a.u.)",
                 ylabel="Magnitude (a.u.)",
                 title=f"{index}: {cfg.tones[index].name}",
             )

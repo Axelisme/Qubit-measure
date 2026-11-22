@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-22, acquire-local raw plans
+**Last updated:** 2026-11-22, FTF projective readout chain and acquire-local raw plans
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -187,9 +187,9 @@ at least one observed grid across its events.
 column, separately for every content. `content_index` selects each point's row.
 None means identity order. Explicit rows must be complete int64 permutations.
 `ConditionalSums` retains event-major sums, traces and `event_indices`, and carries
-the same output permutation. Integrated sampling expands the physical event's
-joint populations before reordering conditional means and drawing output totals.
-Raw and decimated sampling reorder after the shared paths and receiver noise.
+the same output permutation. Integrated sampling uses each read's logical
+event to select conditional means in output-column order. Raw and decimated
+sampling reorder after the shared paths and receiver noise.
 This preserves chronological physics while restoring the original channel-local
 trigger emission order, even when it differs between points.
 `ConditionalReadout` computes state-conditioned responses once
@@ -273,6 +273,8 @@ traces. Multiple incident carriers superpose their vacuum fields and retain
 one cavity memory on the same path. Integrated direct means retain conditional
 moments and nearest-even shot rounding variance. Acquisition averaging belongs to program.
 
+## Projection readout and sampling
+
 `ProjectionReadout(weights, populations)` owns outcome weights with shape
 `(*point_dims, K)` and one `(*point_dims, K, states)` population array per event.
 It validates and copies these arrays without clipping or normalization.
@@ -286,15 +288,21 @@ without enumerating outcome histories. `initial` has shape `(*point_dims, S)`.
 Each subsequent event supplies one `(*point_dims, S, S)` transition array,
 indexed `[previous_projection_state, next_projection_state]`. Construction
 copies arrays read-only and validates every row without clipping or normalization.
-An empty transition tuple represents one event. `ProjectionReadout` remains
-the outcome-mixture input for FTF and `unprojected` readout.
+An empty transition tuple represents one event.
+[FTF projective readout](../../simulators/ftf/environment/README.md#readout-and-sampling)
+uses `ProjectionChain`. Non-projective FTF readout still uses
+`ProjectionReadout.unprojected`. The adoption does not retire FTF's retained
+outcome-mixture path or the shared `ProjectionReadout` interface.
 
-Raw and trace sampling follow each shot's chain, sharing projection states and
-each event's CTMC path across ADCs and grids. The next projection depends on
-the previous projection state, not on the readout CTMC endpoint. Chain sampling
-uses its own draw order. Equal inputs and identities reproduce results within
-the same numeric/RNG version; no bitwise parity with enumerated histories is
-promised. The existing single-event `ProjectionReadout` RNG order stays unchanged.
+Raw and trace sampling each draw a chain per shot. Reads at the same shot
+index stay paired across events and ADCs. ADCs and grids that observe the same
+event share its CTMC path. The next projection depends on the previous
+projection state, not on the readout CTMC endpoint. Raw and trace paths are
+sampled separately from compact flow counts. No compact bin identifies a shot.
+Chain sampling uses its own draw order. Equal inputs and identities reproduce
+results within the same numeric/RNG version; no bitwise parity with enumerated
+histories is promised. The existing single-event `ProjectionReadout` RNG order
+stays unchanged.
 
 Integrated chain sampling draws first-event occupancy with a multinomial.
 For each next event and source state it draws multinomial destination flows,
@@ -306,16 +314,29 @@ All histograms use the same point shape and total per point. Each total must
 be in `[0, 2**63-1]`, inclusive; larger totals raise `ValueError` before boundary
 encoding. Counts and indices remain int64, without clipping or normalization.
 The shared width is `1+sum(S_e-1)`, independent of reps; duplicate boundaries
-remain zero-count bins. Each read uses its `event_indices` entry and content-specific
-`column_order` to select means on these bins. These categories preserve marginal
-moments, not a joint state distribution or real shot paths. The same encoder
-can combine independent cavity histograms with different category counts.
-Receiver Gaussian noise and nearest-even rounding variance remain unchanged.
+remain zero-count bins. Each read uses its `event_indices` entry and
+content-specific column order to select means on these bins. An ADC that skips
+a herald emits no column for it and keeps the later event indices. The terminal
+event contributes to the bins even if no ADC emits a terminal column. The same
+encoder can combine independent cavity histograms with different category counts.
 
-The experiment runtime supplies projection probabilities in the retained DC
-energy basis. ADC neither chooses projection times nor applies the pruning floor. It does not
-group states by IQ distinguishability. ADC transitions during
-a herald event affect that event's IQ only. They do not feed back into the
+For FTF projective reads, the bins are the shared `state_counts`, partitioning
+reps at each point. They encode each event's marginal histogram, not the
+physical joint of herald history and terminal state. Each read's
+`conditional_sums` holds its noiseless per-shot mean for each bin. Summing
+`state_counts * conditional_sums` over bins gives the noiseless total for
+each I/Q component. The common flow draw preserves the correlations between
+these totals due to event occupancies. It does not yield a shot-level IQ joint,
+CTMC trajectory variance, or cross-read receiver-noise covariance. ADC adds
+Gaussian noise to each read total independently, including the nearest-even
+rounding variance term. See [FTF compact statistics](../../simulators/ftf/environment/README.md#compact-statistics)
+for the environment's output and the [Program statistics contract](../../program/v2/simulation/README.md#compact-timelines-and-statistics)
+for the acquisition handoff.
+
+The environment supplies projection probabilities in the retained DC energy
+basis. ADC neither chooses projection times nor applies the identity floor.
+It does not group states by IQ distinguishability. ADC transitions during a
+herald event affect that event's IQ only. They do not feed back into the
 populations supplied for later events.
 
 ## Integrated raw shots

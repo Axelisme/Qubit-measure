@@ -6,11 +6,11 @@ The 2D sweep varies readout gain and readout frequency to map how the resonator 
 
 **Last updated:** 2026-10-21
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Parameter sources
 
-The tab uses a fixed copy of the resonator parameters taken when it was opened or reset. `resonator.freq` and `resonator.kappa` seed the frequency sweep. `resonator.wiring.ch` and `resonator.wiring.ro_ch` seed the generator and ADC channels. The ADC window starts at 0.97 us. Trigger timing reads the top-level `$resonator.time_of_fly`, adding `5/(2π·kappa)` us when kappa is set. Missing or null TOF leaves trigger and pulse length required and blank. Pulse length starts at the larger of 1.0 us and trigger plus the ADC window. Missing or null calibration and unbound aliases leave required fields Invalid until valid values are supplied. Other source failures are reported as errors.
+The tab uses a fixed copy of the resonator parameters taken when it was opened or reset. `resonator.freq` and `resonator.kappa` seed the frequency sweep. `resonator.wiring.ch` and `resonator.wiring.ro_ch` seed the generator and ADC channels. The ADC window starts at 0.97 µs. Trigger timing reads the top-level `$resonator.time_of_fly`, adding `5/(2π·kappa)` µs when kappa is set. Missing or null TOF leaves trigger and pulse length required and blank. Pulse length starts at the larger of 1.0 µs and trigger plus the ADC window. Missing or null calibration and unbound aliases leave required fields Invalid until valid values are supplied. Other source failures are reported as errors.
 
 ## Readout module
 
@@ -32,11 +32,11 @@ A typical sweep uses gain from about 0.001 to 0.5 over about 101 points, ordered
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Supply resonator frequency/linewidth or explicit center_mhz/span_mhz. Check readout timing and both sweep axes.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `onetone_spectrum_over_power` after inspecting the same Form errors.
    freq_points and gain_points map to their sweep Expts. Supply gain_range when changing its endpoints. This recipe does not Analyze or write back.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-11-20，arb 資產寫回
+**Last updated:** 2026-11-22，Workflow operation wire 與 Analyze 摘要
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -37,7 +37,7 @@ Neither method returns a kind discriminator.
 
 ## Context snapshot
 
-`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 141、GUI_VERSION 174。Entry 視窗在 `open_dialogs` 回報 `entry`，不接受舊視窗值。Target 統一為 `{entry_name, point}`，global 的 point 是 null，不再傳 kind。Source binding 的文件種類使用 `global`、`point` 與 `module_cfg`，不接受舊種類值。MCP 的 handshake pin 直接 import 同一個 WIRE_VERSION，因此同步拒絕舊 GUI。133／166 涵蓋 global／point 的作用中三筆 files、EMPTY／GLOBAL／POINT readiness、point.use 的必填 nullable label 與無 kind 回覆，以及 writeback preview／receipt 只報 entry_name、point 的目的地。Entry 與 point 共用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；前次檔名統一對應的版本是 132／165。
+`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。Entry 視窗在 `open_dialogs` 回報 `entry`，不接受舊視窗值。Target 統一為 `{entry_name, point}`，global 的 point 是 null，不再傳 kind。Source binding 的文件種類使用 `global`、`point` 與 `module_cfg`，不接受舊種類值。133／166 涵蓋 global／point 的作用中三筆 files、EMPTY／GLOBAL／POINT readiness、point.use 的必填 nullable label 與無 kind 回覆，以及 writeback preview／receipt 只報 entry_name、point 的目的地。Entry 與 point 共用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；前次檔名統一對應的版本是 132／165。
 
 省略 path 與 summaries 時，owner 驗證完整 schema，wire encoder 再驗證所有輸出值。`path` 使用 dotted keys 與 canonical 非負 list indices，只由 owner 讀驗所選部分，並優先於 summaries。選整個 component 或 subtree 時，該層的完整投影契約仍適用。未選 sibling 的壞 schema、nonfinite 或 library source fault 不再擋住正常 point leaf。Invalid path 保留第一個不可讀 segment，不先驗其他 sibling。
 
@@ -72,8 +72,11 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 Workflow records project executor operation identity, timing, outcome, reason,
 stopped state and caller-supplied name. Device snapshots are in
 `RunRecord.metadata["device_snapshot"]`, not on the operation wire.
-Program acquisition observations are not part of this projection. This wire-contract change advances
-`WIRE_VERSION` to 125 and `GUI_VERSION` to 158 under the rule in `wire_version.py`.
+See [ADR-0062](../../../../../../docs/adr/0062-experiment-workflow.md#一個-run-的-operation) for the workflow operation contract.
+The operation wire carries neither [Analyze summary lines](#analysis-presentation)
+nor program acquisition observations. The runtime logs data-driven early stops
+as described in [Stop and Retry](../../../../experiment/v2/runtime/README.md#stop-與-retry).
+See [Wire contract](#wire-contract) for the current wire and GUI versions.
 
 ## Saved results
 
@@ -221,6 +224,14 @@ Root cancellation uses ScriptCancelled after drain and does not overwrite genuin
 
 Operation-bound `tab.get_analyze_result` and `tab.get_post_analyze_result`
 include `presentation: {run_id, stage, figure_names, figures_replaced}`.
+A completed Primary analysis also includes `presentation.summary_lines` when the
+adapter authored lines for that source Run/Load. The GUI Analysis pane shows
+these same plain-text lines in order. If no lines apply, the key is omitted.
+The text is not part of the native result `summary`, `RunMetadata`, or the
+[workflow operation wire](#workflow-operation-facts). The [GUI service owner](../README.md#owners)
+shares these lines with MCP. [ADR-0069 presentation rules](../../../../../../docs/adr/0069-experiment-core-and-frontends.md#呈現規範)
+and [figure-style R10](../../../../../../zcu_lab/v2/figure-style.md#r10圖放理論重點採集設定放摘要)
+define what goes in the visible Analyze summary.
 Run identity comes from the selected Run/Load metadata, not the live point or
 Save receipt. Missing metadata yields null. Stage is primary or post.
 Figure names are the native names in that pane's current collection.
@@ -281,6 +292,10 @@ that shutdown was rejected. The wire reply and existing timeout policy stay
 unchanged. Qt's deferred close turn avoids reentrancy, not socket delivery races.
 
 ## Wire contract
+
+Wire version 142 adds optional `presentation.summary_lines` for Primary analysis
+and advances `GUI_VERSION` to 175. MCP imports `WIRE_VERSION` from
+[`wire_version.py`](wire_version.py) and rejects a GUI with a different wire version.
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.

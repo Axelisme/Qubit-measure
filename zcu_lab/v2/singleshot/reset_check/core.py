@@ -68,9 +68,9 @@ class ResetCheckAnalysis:
 def _population_line_kwargs() -> list[dict[str, str]]:
     """Return branch/state labels and styles in the flattened count-axis order."""
     return [
-        {"label": f"{label}: {state}", "color": color, "linestyle": style}
+        {"label": f"{label}: P({state})", "color": color, "linestyle": style}
         for label, style in zip(BRANCH_LABELS, BRANCH_LINESTYLES, strict=True)
-        for state, color in (("Ground", "blue"), ("Excited", "red"), ("Other", "green"))
+        for state, color in (("g", "blue"), ("e", "red"), ("other", "green"))
     ]
 
 
@@ -81,17 +81,24 @@ class ResetCheckCfg(ConfigBase):
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -154,7 +161,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         # 2. Show G/E/Other for all three independent preparations.
 
         figure, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse gain (a.u.)", ylabel="Classified population")
+        ax.set(xlabel="Pulse gain (a.u.)", ylabel="P(g), P(e), P(other)")
         viewer = live_line(ax, num_lines=BRANCH_COUNT * POPULATION_COUNT)
         ax.set_ylim(-0.02, 1.02)
         for line, kwargs in zip(ax.lines, _population_line_kwargs(), strict=True):
@@ -275,9 +282,9 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             )
         ax.set(
             xlabel="Pulse gain (a.u.)",
-            ylabel="Population"
+            ylabel="Corrected P(g), P(e), P(other)"
             if confusion_matrix is not None
-            else "Classified population",
+            else "Classified P(g), P(e), P(other)",
             ylim=(-0.02, 1.02),
             title=f"Reset excited: mean {analysis.reset_mean_excited_population:.2%}, worst sampled {analysis.reset_max_excited_population:.2%}\nOther is not calibrated leakage; populations are not reset-channel fidelity",
         )

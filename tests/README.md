@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-20，逐發 ADC 讀取數與三階 IQ 總和
+**Last updated:** 2026-11-22，FTF projective 測試
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -632,9 +632,10 @@ and public acquire/decimated composition. `test_ftf_templates.py` covers DC read
 and the template engine contract. `test_dynamic_dimension.py` uses public FTF
 acquires, injected densities at the Engine boundary, ADC state counts and the
 acquire summary to check dimension selection, round DC and basis handoff.
-`tests/simulators/ftf/environment/test_projective_readout.py` covers public frontend mux heralding, retained
-outcome histories, pruning, partial ADC observations and terminal-only density,
-point-order and sampling-identity handoff to ADC using an injected non-evolving Engine.
+`tests/simulators/ftf/environment/test_projective_readout.py` covers public frontend mux heralding,
+compact event marginals, shot-aligned raw and trace, identity-floor routing, partial ADC
+observations and terminal-only density, point order, and sampling identity at the ADC
+handoff. It uses injected non-evolving Engine answers for projective transitions.
 `tests/simulators/test_capture.py` owns the shared acquire capture lifecycle across
 FTF, single and six, using non-evolving Engine collaborators. Writer/codec
 publication behavior lives in `tests/simulate/evolution/test_capture_writer.py`.

@@ -139,7 +139,7 @@ def _T2Echo_get_writeback_items(
     items: list[WritebackItem] = [
         ParameterWriteback(
             target_name="$qubit.t2e",
-            description="T2 Echo time (us)",
+            description="T2 Echo time (µs)",
             proposed_value=result.t2e,
             selected=note is None,
             note=note,

@@ -54,6 +54,22 @@ class ProjectiveCapture:
         span: tuple[float, float],
         provenance: dict[str, object],
     ) -> Generator[None]:
+        """Associate one Engine.evolve's recording with its FTF origin.
+
+        round_index is the zero-based software round. point is the original
+        flattened C-order acquisition index. span gives the absolute start and
+        end in ns.
+
+        provenance uses decimal-string Engine row IDs. The history route maps
+        them to tuples of DC state indices under histories. The chain route
+        supplies a zero-based event_index and maps them to DC state indices
+        under nodes. Before the first projection, the event and node state
+        are both None.
+
+        On exit, including failure, use the capture ID from the first row
+        appended in this scope. With no new row, write nothing. The explicit
+        round_index, point and span_ns take precedence over provenance keys.
+        """
         before = len(self._buffer.records)
         try:
             yield
@@ -62,10 +78,10 @@ class ProjectiveCapture:
             if len(records) > before:
                 capture_id = read_capture_metadata(records[before])["capture_id"]
                 self.spans[capture_id] = {
+                    **provenance,
                     "round_index": round_index,
                     "point": point,
                     "span_ns": span,
-                    **provenance,
                 }
 
 

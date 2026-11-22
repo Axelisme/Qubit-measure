@@ -33,18 +33,18 @@ class RoOptimizeChainLengthInputs(RecipeInputs):
     )
     length_start_us: float | None | Keep = Field(
         KEEP,
-        description="Shortest ADC window in us.",
+        description="Shortest ADC window in µs.",
     )
     length_stop_us: float | None | Keep = Field(
         KEEP,
-        description="Longest ADC window in us.",
+        description="Longest ADC window in µs.",
     )
     points: int | None | Keep = Field(
         KEEP,
         description="Window sample count, at least 2.",
     )
     relax_delay: float | None | Keep = Field(
-        KEEP, description="K: thermal relaxation between 16-read shots, in us."
+        KEEP, description="K: thermal relaxation between 16-read shots, in µs."
     )
     reps: int | None | Keep = Field(
         KEEP,
@@ -61,7 +61,7 @@ class RoOptimizeChainLengthReport(ChainSweepReport):
 
     length_us: float | None = Field(
         default=None,
-        description="ADC window with the largest combined heuristic score in us; null if analysis gave no result.",
+        description="ADC window with the largest combined heuristic score in µs; null if analysis gave no result.",
     )
 
 
@@ -80,9 +80,9 @@ async def ro_optimize_chain_length(
     identifiable physical leakage). Errors do not affect selection.
     Save keeps shot counts, all 107 sums and analysis. No writeback is proposed.
 
-    points → expts sets the number of ADC windows. In us, each pulse lasts
-    trig_offset minus time_of_fly plus the window and 0.11 us.
-    relax_delay sets K in us. Omission retains the Form value; null goes to its owner.
+    points → expts sets the number of ADC windows. In µs, each pulse lasts
+    trig_offset minus time_of_fly plus the window and 0.11 µs.
+    relax_delay sets K in µs. Omission retains the Form value; null goes to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(

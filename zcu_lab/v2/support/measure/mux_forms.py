@@ -186,17 +186,17 @@ def mux_readout_seed_metadata(
                 )
     formulas = {
         "mixer_freq": "From captured $mux.mixer_freq in MHz",
-        "ro_length": "Fixed 1.0 us ADC window candidate; independent of group kappa",
-        "trig_offset": "From captured $mux.time_of_fly + 5/(2*pi*min($mux.resonators kappa)) in us",
-        "post_delay": "From 5/(2*pi*min($mux.resonators kappa)) in us; five photon decay times",
-        "length": "From captured $mux.time_of_fly + 5/(2*pi*min($mux.resonators kappa)) + fixed ro_length 1.0 us",
+        "ro_length": "Fixed 1.0 µs ADC window candidate; independent of group kappa",
+        "trig_offset": "From captured $mux.time_of_fly + 5/(2*pi*min($mux.resonators kappa)) in µs",
+        "post_delay": "From 5/(2*pi*min($mux.resonators kappa)) in µs; five photon decay times",
+        "length": "From captured $mux.time_of_fly + 5/(2*pi*min($mux.resonators kappa)) + fixed ro_length 1.0 µs",
     }
     if isinstance(initial, Slot):
         formulas.update(
             {
-                "trig_offset": "From captured $mux.module.readout.trig_offset + 5/(2*pi*min(set $mux.resonators kappa)) in us; no set kappa adds zero wait",
-                "post_delay": "From max(captured $mux.module.readout.post_delay, 5/(2*pi*min(set $mux.resonators kappa))) in us",
-                "length": "From max(captured $mux.module.readout.length, derived trig_offset + captured $mux.module.readout.ro_length) in us",
+                "trig_offset": "From captured $mux.module.readout.trig_offset + 5/(2*pi*min(set $mux.resonators kappa)) in µs; no set kappa adds zero wait",
+                "post_delay": "From max(captured $mux.module.readout.post_delay, 5/(2*pi*min(set $mux.resonators kappa))) in µs",
+                "length": "From max(captured $mux.module.readout.length, derived trig_offset + captured $mux.module.readout.ro_length) in µs",
             }
         )
     for field, formula in formulas.items():

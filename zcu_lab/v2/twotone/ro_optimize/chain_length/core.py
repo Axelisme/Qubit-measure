@@ -44,7 +44,7 @@ from zcu_lab.v2.twotone.ro_optimize._chain_common import (
 
 class ChainLengthCfg(ConfigBase):
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Readout length", unit="us")]
+    length: Annotated[SweepCfg, FieldMeta(label="Readout length", unit="µs")]
     length_margin: Annotated[
         float,
         FieldMeta(
@@ -57,18 +57,23 @@ class ChainLengthCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             description="K: thermal relaxation between 16-read shots.",
         ),
     ] = Field(ge=0)
     reps: Annotated[
         int,
-        FieldMeta(label="Reps", description="16-read shots per setting in each round."),
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="16-read shots per setting in each round.",
+        ),
     ] = Field(ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
+            unit="count",
             description="Software rounds; live plots use all completed rounds.",
         ),
     ] = Field(default=1, ge=1)
@@ -209,7 +214,7 @@ def _draw_metric(
     if result is None:
         ax_score.set(ylabel="Heuristic score", title="Moments not yet estimable")
         ax_qnd.set_ylabel("QND")
-        ax_m.set(xlabel="Readout length (us)", ylabel="M / |ρ|")
+        ax_m.set(xlabel="Readout length (µs)", ylabel="M / |ρ|")
         return tuple(axes)
     settings = result.settings
     xs = [point.setting for point in settings]
@@ -233,7 +238,7 @@ def _draw_metric(
         best.setting,
         color="r",
         ls="--",
-        label=f"Max score: {best.setting:.5g} us",
+        label=f"Max score: {best.setting:.5g} µs",
     )
     ax_qnd.errorbar(
         xs,
@@ -250,7 +255,7 @@ def _draw_metric(
         xs, [point.mist for point in settings], "o-", label="M: correlation growth"
     )
     ax_m.plot(xs, [abs(point.correlation) for point in settings], "s--", label="|ρ|")
-    ax_m.set(xlabel="Readout length (us)", ylabel="M / |ρ|")
+    ax_m.set(xlabel="Readout length (µs)", ylabel="M / |ρ|")
     ax_m.axvline(best.setting, color="r", ls="--")
     for ax in axes:
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))

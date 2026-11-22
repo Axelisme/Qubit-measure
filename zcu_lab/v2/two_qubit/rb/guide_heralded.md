@@ -1,183 +1,59 @@
-# Heralded Two-qubit paired RB and CZ-interleaved RB
+# Heralded two-qubit paired RB and CZ-interleaved RB
 
-**Readers:** operator, agent. Run heralded paired two-qubit RB and interpret gg/ee return survival alongside CZ-interleaved decay fits.
+**Readers:** operator, agent. Compare gg- and ee-conditioned returns and decide whether a shared-decay fit constrains the CZ error.
 
-**Last updated:** 2026-11-20, per-depth seed spread
+Select `two_qubit/rb_heralded`. Use the calibrated point, bindings, pulses and Local Z pair in [Before run](guide.md#before-run). The Form fields and their initial values are the same as in ordinary RB except for Reset. Leave Reset blank to omit preparation, or select an ordinary reset. Heralded RB always performs its own herald read and does not accept a herald reset module. Open and Defaults reload the captured settings. Refresh keeps the draft and checks it against the new capture.
 
-Cfg schema 3.0 requires `x180_f1` and `x180_f2`.
+## Expanded pulse and readout fields
 
-Select `two_qubit/rb_heralded`. Calibrate X90 and X180 on both roles, full mux
-readout, both CZ pulses and ordered local-Z corrections as described in the
-[ordinary RB guide](guide.md). Open or Reset captures the same module slots.
-The cfg deduplicates and sorts both `depth` and `seed` so that the saved cfg
-matches the data axes. Refresh preserves authored inputs.
+Frequency and Mixer freq are absolute frequencies in MHz, not offsets from the mixer. Gain is a fraction of DAC full scale; Phase is in degrees. Gen ch selects a DAC generator, NQZ its Nyquist zone, and Ro ch selects an ADC channel. Tone order in the saved Mux readout, not ADC channel order, determines the positions used by the bound qubits. Keep the waveform, channel routing and mixer settings from the calibrations. A blank drive Mixer freq leaves it unspecified.
+
+Pulse Length is the envelope duration. Pre-delay and Post-delay wait before and after that pulse. In Mux readout, Length is the readout pulse duration and RO length is the ADC integration window. Pre-delay sets when the DAC pulse starts and Trig offset sets when the ADC window starts, both from the start of the readout step. All these times are in µs. A tone Label is an optional display name, not a qubit binding.
+
+Use GE and GE Post for each tone's circle classifier. The G and E centers are complex IQ coordinates in normalized ADC units (integrated ADC value divided by integration length, without offset subtraction). Radius uses the same units. The classifier picks the closer center if the distance is less than Radius. Equal distances or neither center within Radius give other. The optional confusion matrix records calibration results; RB does not use it to correct counts.
 
 ## Shot sequence
 
-Each shot emits optional reset, herald, the paired Clifford sequence with
-its own recovery, then terminal readout. Set `reset=None` to omit reset.
-Herald and terminal emit the same full mux module with tags `herald` and
-`terminal`. The two reads cannot use different gains or integration lengths.
-The recovered sequence has net logical identity. A herald gg state should
-return to gg, and an ee state should return to ee.
+Each shot uses optional reset → joint herald readout → random Clifford prefix → recovery Clifford → joint terminal readout. Both reads use the same Mux readout, timing and classifiers. Both qubit tones need calibrated circle centers and radii from GE and GE Post. Repeat those calibrations after changing readout settings.
 
-Both F1 and F2 tones require circle classifiers with radius from GE Post.
-Missing calibration, missing radius or linear classification fails before Run.
-Repeat GE and Post after changing readout settings. Classification happens
-during acquisition for both tagged reads, with g, e and other outcomes.
+The recovery inverts the full sequence. For a shot classified as gg by the herald, the expected terminal result is gg. For ee herald, it is ee. The order is Qubit1, Qubit2 in both reads. These are classified return probabilities, not direct state preparation purity or gate fidelity. The classifier's other category does not identify a particular leakage state.
 
 ## Wait after herald
 
-Set the readout's `post_delay` before Run so photons in the resonator can
-decay before the qubit drive. Herald and terminal readout share this value
-([ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)).
-The wait starts when the readout generator waveform ends, without waiting for
-the ADC integration window to end
-([ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)).
-The `mux/onetone` Form seeds this field from the linewidth. FIT does not
-calibrate the wait.
+Set Mux readout's post-delay (µs) to let resonator photons decay before the Clifford sequence. The wait starts at the end of the readout waveform. Herald and terminal readout share the setting. Residual photons can shift the transition and reduce the effect of an Xπ pulse.
 
-If the wait is too short, leftover photons shift the qubit transition
-frequency and cause dephasing. A nominal Xπ after herald may barely flip
-the qubit. A separate conditional-phase scan may show no π crossing; RB
-does not measure that crossing.
-
-Use each resonator's `kappa` from the `mux/onetone` FIT. It is the full
-width at half maximum (FWHM) in MHz. Start at `5 / (2π · κ)` µs, five photon
-decay times and the same formula used for the ring-up seed. For a shared
-`post_delay`, use the smallest κ so the slowest resonator has time to empty.
-
-In a low-SNR FTF example, R2's linewidth was about 1.2 MHz. Five photon
-decay times are about 0.66 µs, and 2 µs is about 15 times one photon decay
-time. After gg herald and a nominal F2 Xπ, F2's terminal e fraction was
-11.6% at 0 µs and 92.9% at 2 µs. These fractions do not subtract the I
-baseline. The 2 µs value was a comparison point, not a minimum or an optimum.
-
-In `two_qubit/joint_readout`, choose `reset/mux_herald` in Reset. Set
-`keep` to g for both role tones, keyed by their positions in the full readout.
-Use the same full mux readout for herald and terminal. After Run, inspect the
-4×9 row-normalized probability matrix in FIT. Find the row with nominal Xπ
-on the target and I on the other qubit.
-Sum the columns where the target's terminal class is e. Compare with the
-gg row for an I baseline if needed. This is the terminal e fraction among
-shots that passed gg herald, not gate fidelity. Lengthen only `post_delay`
-and repeat Run and FIT. If the longer wait still raises the terminal e
-fraction, adjust `post_delay` before running RB.
+Start at `5 / (2πκ)` µs using the smallest readout linewidth κ in MHz from mux Onetone. For example, 1.2 MHz gives about 0.66 µs. To check the wait, use [`two_qubit/joint_readout`](../joint_readout/guide.md) with gg mux-herald reset. In the row with a nominal Xπ on the target, add the columns with terminal e on that qubit. Compare that sum at two waits. If it still rises at the longer wait, increase the post-delay before repeating RB. This sum is a classified e fraction among gg-accepted shots, not a gate fidelity.
 
 ## Sequences and cost
 
-Each seed draws the deepest random sequence once. Reference and interleaved
-play the same Clifford prefixes, with one CZ after each draw in the interleaved
-arm. Each depth and arm gets its own recovery. Decomposition minimizes CZs,
-then physical X90 and X180 pulses. Virtual Z90 and local-Z corrections advance
-each role's frame. Both X pulses play at their configured phase minus that frame.
-Both qubits finish each Clifford before the next one starts, as in ordinary RB.
-X180 can change pulse timing in either arm. Do not pool these estimates with
-runs from older schedules.
-
-Run compiles one program per seed and arm before acquisition. After optional
-reset and herald, each shot plays the shared prefix up to its selected depth.
-Other depths skip that point's recovery. The selected shot plays its recovery,
-waits for its end and jumps to the common terminal readout. The deepest shot
-continues to terminal readout without the final jump.
-
-If any program exceeds PMEM, Run stops before taking data. The error gives the
-seed, arm, number of depths, largest depth, words used and board limit. Reduce
-the largest depth or use fewer points. In a 4,096-word compile example with
-synthetic pulses and no reset, the [ordinary RB program](guide.md#sequences-and-cost)
-did not fit both arms for 201 points from 0 to 200, but fit both for 21 points
-from 0 to 400. Compile with your own settings; this version also emits herald.
+Each seed draws the reference sequence once. Both arms use its prefixes at the selected Random Clifford depths (count), and the interleaved arm inserts one CZ after each random Clifford. Each arm and depth gets its own recovery. See [Sequences and cost](guide.md#sequences-and-cost) for the pulse and frame order. Depth 0 checks the baseline without random Cliffords. Reps (count) sets shots at each depth per round; Rounds (count) sets rounds per seed and arm.
 
 ## Counts and complete seeds
 
-Run acquires each seed/arm program once. `rounds` is the number of acquisition
-rounds per program. QICK visits each depth once per repetition, giving `reps`
-shots per depth per round. The acquisition reducer adds the counts from
-finished rounds.
+Save keeps all joint herald and terminal outcomes for each seed, arm and depth, including ge, eg and other. If stopped, the run retains counts from finished rounds. Load uses the saved cfg and does not change the current Form. Incompatible older formats, including raw-IQ or a separate round axis, need the corresponding older release. Load does not convert or modify them.
 
-Result `sums` has float64 shape `(Nseed, 2, Nd, 3, 3, 3, 3)`. The axes are
-seed, arm, depth, herald F1, herald F2, terminal F1 and terminal F2. Arm 0 is
-reference and arm 1 is CZ-interleaved. Each class axis is ordered g, e, other.
-Save keeps all 81 unnormalized class counts per cell. Neither `reps` nor
-`rounds` adds to the storage size.
-
-Stop keeps counts from finished rounds for the current seed and arm. A cell
-with none stays NaN. Native Load restores the saved run without changing the
-current Form. Load rejects files with a round axis (wrong number of axes) or
-older raw-IQ files without `sums`. It does not convert them.
-
-For each cell, gg survival is the terminal gg count divided by all terminal
-counts for herald gg. The ee ratio uses terminal ee and all terminal counts
-for herald ee. Terminal other remains in both denominators. A cell with
-zero accepted shots has NaN survival even if acquisition ran. A cell with a
-positive count from fewer rounds is usable.
-
-Each herald group uses only seeds with finite survival in both arms at all
-requested depths. The groups need not use the same seeds. The fit weights
-seeds equally and uses each cell's actual accepted shot count to calculate
-the binomial point errors. All-success or all-failure points use a
-finite-shot variance floor of `1/(4*N**2)` before averaging.
+In Analyze, the header identifies the experiment and source run. Reps × Rounds comes from the saved cfg, not the current Form. It does not report how many shots were taken or passed a herald condition.
 
 ## Joint decay and uncertainty
 
-Reference and interleaved each have one fitted decay shared by gg and ee.
-Each herald and arm has its own amplitude A and offset B in
-`A*p**depth+B`. The two fit figures show each herald's equal-seed means,
-seed-spread error bars and joint decay curves. The live plot still shows
-count-weighted gg and ee return survival in both arms.
+- **Conditional return**, the live and first Analyze figure, pools shots across seeds. The two panels show P(gg terminal | gg herald) and P(ee terminal | ee herald). Reference is blue and CZ-interleaved is orange. Each probability divides the number of matching terminal results by all shots with the indicated herald. Terminal other still counts in the denominator. The live caption gives measured seed/arm/depth cells and the total heralded shots across all outcomes, not the number in either fit group.
+- **gg decay fit** and **ee decay fit** show separate equal-seed means and model curves for the two herald states. A fit uses at least four distinct depths and two seeds per herald with a defined return probability at all depths in both arms. The gg and ee groups can use different seeds. Each arm has one fitted decay `p` shared by both groups; amplitude and offset in `A p^depth + B` are separate. Check both groups before trusting the shared ratio.
 
-At each depth, the live and fit bars extend one sample standard deviation
-(`ddof=1`) across seeds on either side of the point. A point with only one
-seed has no bar. The spread includes sequence-to-sequence variation and shot
-noise. For survival probability `P` and `N` accepted shots for that seed and
-herald, shot noise is about `√(P(1−P)/N)`. It grows as `P` falls from near one
-toward one-half, so increasing spread with depth does not by itself identify
-coherent error. The fit still uses the propagated binomial standard errors
-as weights, not the plotted seed spread.
+Capped bars on the conditional-return figures show shot SEM. This is the sample standard deviation of the terminal success indicator divided by the square root of the matching herald shot count. A point with fewer than two matching shots has no SEM bar. A zero bar at probability 0 or 1 is not a confidence bound. Pale bars show one sample SD across the available seeds. The bars on the two fit plots show seed SD for the complete seeds in that group's fit. A single seed gives no seed SD bar. The fit uses its existing binomial variance weights, not the plotted seed SD or the pooled shot SEM.
 
-The fit requires at least four distinct depths and at least two valid paired
-seeds per herald. The 95% interval resamples seed identities from the union
-of valid gg and ee seeds. Each herald uses only its valid identities from
-that same draw. Repeated draws retain their multiplicity. A draw with fewer
-than two retained seed entries in either group fails. At least 90% of the
-requested bootstrap fits must succeed, with at least 100 requested draws.
-The default is 1,000 draws with bootstrap seed 42. This interval describes
-statistical seed variation, not readout errors or model systematics.
+The CZ error estimate is `3/4 × (1 − p_interleaved/p_reference)`. The reference error per Clifford is `3/4 × (1 − p_reference)`. Both are unitless. The 95% seed CI resamples whole identities from the union of valid seeds, keeping depths, arms and available herald groups together. The default is 1000 draws with bootstrap seed 42; at least 90% must give valid fits. The interval describes statistical seed variation and does not include readout error or coherent or gate-dependent noise. A negative estimate means the interleaved decay fit falls more slowly than reference. Retain it as a diagnostic, not a physical negative error rate.
 
-The d=4 estimates are `reference_epc=3/4*(1-p_reference)` and
-`gate_error=3/4*(1-p_interleaved/p_reference)`. Negative error estimates
-remain negative. Analyze returns only `estimate`, `fit_quality` and `reason`.
-Fit quality reports separate diagnostics for gg reference/interleaved and ee
-reference/interleaved. For each arm, both heralds report the same value in
-`fit_quality.relative_parameter_errors["decay_time"]` because they share a
-fitted 1/e length. A large value can mean the deepest point does not reach
-the tail. Increase the maximum depth and check again. In the [synthetic
-comparison](guide.md#interpreting-the-result), increasing the maximum depth
-from 30 to 200 lowered relative error from 0.30 to 0.035, although R² was
-already 0.993 at depth 30.
+The fitted 1/e depth and covariance standard error appear as `value ± error` in Clifford counts. Their ratio, error divided by depth, is the relative error. Both heralds have the same depth and error for each arm. R² measures how much of the point variation the model explains. Normalized RMS divides the root-mean-square residual by the observed range. The two heralds have separate residual metrics. No threshold selects a calibration. A depth-window warning names the affected arm and shows the fitted 1/e depth and the bound it reached or crossed, both in Clifford counts. If the window does not resolve the decay, do not use the ratio as a CZ error, even if the fit returns a number. With a first nonzero depth of 1 Clifford and a fitted 1/e depth below 1, adding deeper points alone cannot capture that early drop. Check readout, pulse calibrations and the depth-0/1 contrast. If the sweep instead misses the tail of a resolved decay, add points near three times the fitted 1/e depth, such as depth 60 for a depth of 20. RB does not specify a direction or amount for changing CZ gain or frequency.
 
-The paired seed count refers to the union. Per-herald survival, model curves
-and herald fractions stay inside analysis for plotting. Missing saved cfg,
-insufficient paired data, flat decay, invalid fits or unstable bootstrap
-leave an explicit reason and no estimate. A finite error remains a
-model-dependent diagnostic, not physical calibration acceptance.
+Layout reference: Ding, Fig. 5-13(b) (printed p. 157), separates RB data points and fitted curves. Here the dots represent classified returns conditioned on gg or ee herald, with a shared decay per arm.
 
 ## Herald fractions
 
-The herald figures show all nine herald proportions for each arm and depth,
-from counts pooled across seeds. All herald ge, eg and other outcomes remain
-saved, but do not enter the joint fit. Pass fraction is herald gg counts
-divided by all herald counts. It measures classified acceptance, not
-ground-state purity. Readout errors can accept excited states and reject
-ground states. Post-selection reduces the available shot count.
-
-Compile-only checks do not validate numerical fitting, save/restore or plot
-appearance. Those require the separate offline validation.
+Each arm has a separate **Herald outcome fractions** figure. The three panels fix Qubit1 to g, e or other. In each panel the legend identifies Qubit2's class. All nine probabilities use the same denominator, all heralded shots at that depth in that arm, pooled across seeds. Bars show shot SEM for each outcome. Use these panels to check whether one herald group has few shots or whether other outcomes dominate. For example, doubling Reps at fixed fractions reduces shot SEM by approximately `1/√2`; it does not improve a low gg fraction. If other dominates, check the saved circle calibrations before taking more data. The gg fraction measures classified acceptance, not purity.
 
 ## Notebook
 
-Use a validated `RBHeraldedCfg` as `cfg`. Supply the notebook's existing
-hardware handles, device manager and destination `point_view`.
+Use a validated `RBHeraldedCfg` with the two saved tone positions and your existing SoC, device manager and `point_view`. Notebook does not infer the GUI bindings.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter

@@ -50,13 +50,17 @@ class LookbackCfg(ConfigBase):
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Delay after each shot.",
         ),
@@ -64,7 +68,7 @@ class LookbackCfg(ConfigBase):
     initial_delay: Annotated[
         float,
         FieldMeta(
-            label="Initial delay", unit="us", description="Delay before the first shot."
+            label="Initial delay", unit="µs", description="Delay before the first shot."
         ),
     ] = 1.0
 
@@ -94,7 +98,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         run_cfg = deepcopy(config)
 
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (us)", ylabel="Amplitude")
+        ax.set(xlabel="Time (µs)", ylabel="Amplitude (a.u.)")
         line = live_line(ax)
 
         fig.show()
@@ -184,8 +188,8 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
             ax.axvline(
                 trig_offset + ro_length, color="g", linestyle="--", label="ro end"
             )
-        ax.set_xlabel("Time (us)")
-        ax.set_ylabel("a.u.")
+        ax.set_xlabel("Time (µs)")
+        ax.set_ylabel("Amplitude (a.u.)")
         ax.grid(True)
         ax.legend()
 

@@ -158,6 +158,7 @@ class TabService:
                 source_operation_id=tab.analysis.source_operation_id,
                 result_params=tab.analysis.result_params,
                 figures_replaced=tab.analysis.figures_replaced,
+                summary_lines=tab.analysis.summary_lines,
             ),
             post_analysis=PostAnalysisPaneSnapshot(
                 params=tab.post_analysis.params,

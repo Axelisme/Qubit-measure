@@ -46,19 +46,26 @@ class T1WithToneCfg(ConfigBase):
     pi_pulse: Pulse.Cfg
     test_pulse: Pulse.Cfg
     readout: Readout.Cfg
-    length: SweepCfg
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="µs")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -100,7 +107,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
 
         # 2. Show the mean relaxation contrast during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (us)", ylabel="Amplitude")
+        ax.set(xlabel="Time (µs)", ylabel="Amplitude (a.u.)")
         ax.set_title("T1 relaxation")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
@@ -178,8 +185,8 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
             t1b = 0.0
             t1berr = 0.0
 
-        t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
-        t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us" if dual_exp else "N/A"
+        t1_str = f"{t1:.2f}µs ± {t1err:.2f}µs"
+        t1b_str = f"{t1b:.2f}µs ± {t1berr:.2f}µs" if dual_exp else "N/A"
 
         # 3. Compare the measured decay and fitted components.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
@@ -191,7 +198,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
             ax.set_title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
         else:
             ax.set_title(f"T1 = {t1_str}", fontsize=15)
-        ax.set_xlabel("Time (us)")
+        ax.set_xlabel("Time (µs)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()
         ax.grid(True)

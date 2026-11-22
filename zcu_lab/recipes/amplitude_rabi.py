@@ -47,7 +47,7 @@ class AmplitudeRabiInputs(RecipeInputs):
     )
     pulse_length_us: float | None | Keep = Field(
         KEEP,
-        description="Fixed drive pulse duration in us.",
+        description="Fixed drive pulse duration in µs.",
     )
     gain_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep

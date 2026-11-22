@@ -31,24 +31,29 @@ class LocalZInputs(RecipeInputs):
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     gate_count: list[Annotated[int, Field(strict=True, ge=0)]] | None | Keep = Field(
-        KEEP, description="Consecutive nonnegative CZ gate counts to measure."
+        KEEP,
+        description="Form CZ gates per shot (count): consecutive nonnegative train lengths, including zero.",
     )
     reps: int | None | Keep = Field(
-        KEEP, description="Repetitions per point per round."
+        KEEP,
+        description="Form Reps (count): attempted shots per gate count and projection in one round.",
     )
-    rounds: int | None | Keep = Field(KEEP, description="Acquisition round count.")
+    rounds: int | None | Keep = Field(
+        KEEP,
+        description="Form Rounds (count): acquisitions accumulated at each sweep point.",
+    )
 
 
 class LocalZReport(RecipeReport):
     """Owner's phase-line fits by role, with no shared fit quality."""
 
-    f1: LocalZFit | None = Field(
+    qubit1: LocalZFit | None = Field(
         default=None,
-        description="F1's fit or fit reason; null if Analyze returned no summary.",
+        description="Analyze fits[0]: Qubit1 phase slope, opposite-sign correction, fit quality or failure reason.",
     )
-    f2: LocalZFit | None = Field(
+    qubit2: LocalZFit | None = Field(
         default=None,
-        description="F2's fit or fit reason; null if Analyze returned no summary.",
+        description="Analyze fits[1]: Qubit2 phase slope, opposite-sign correction, fit quality or failure reason.",
     )
 
 
@@ -64,7 +69,7 @@ def _report_fit(fit: LocalZFit) -> LocalZFit:
 
 @recipe(
     "two_qubit_local_z",
-    description="Fit local Z phase for F1 and F2, review the correction pair and save.",
+    description="Fit local Z phase for Qubit1 and Qubit2, review the correction pair and save.",
 )
 async def two_qubit_local_z(
     session: RecipeSession, inputs: LocalZInputs
@@ -94,13 +99,13 @@ async def two_qubit_local_z(
         if analysis.result is None:
             return LocalZReport(analysis_failure=analysis.reason)
 
-        f1, f2 = map(_report_fit, analysis.result.fits)
+        qubit1, qubit2 = map(_report_fit, analysis.result.fits)
         applied = False
-        if f1.correction_deg is not None and f2.correction_deg is not None:
+        if qubit1.correction_deg is not None and qubit2.correction_deg is not None:
             decision = await tab.ask_writeback(stage="primary")
             applied = apply_selected_writeback(tab, decision)
 
-        return LocalZReport(f1=f1, f2=f2, writeback_applied=applied)
+        return LocalZReport(qubit1=qubit1, qubit2=qubit2, writeback_applied=applied)
     finally:
         tab.save()
 

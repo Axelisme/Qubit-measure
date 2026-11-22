@@ -12,7 +12,7 @@ Live plots and Analyze divide each row by its total count before displaying popu
 
 ## Parameter sources
 
-Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1; delay stop uses 5 times the tone T1 time scale. Frequency form sweeps `$resonator.freq` +/- 1.5 * `$resonator.kappa`; gain form sweeps 0 to 1. Each form exposes only one outer axis.
+Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1; delay stop uses 5 times the tone T1 time scale. Frequency form sweeps `$resonator.freq` +/- 1.5 * `$resonator.kappa`; gain form sweeps 0 to 1. Each form exposes only one outer axis.
 
 Readout accepts only the pulse family.
 A mux readout in the library is incompatible.
@@ -22,17 +22,17 @@ Linear has no Other state and is rejected.
 Analyze corrects populations only with the saved readout cfg's confusion matrix.
 Historical cfg without a classifier or matrix skips correction.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
-The tone time scale uses the stored `$qubit.ext.t1_with_tone`, then ordinary T1, then 30 us. Missing or null sources advance to the next choice. An invalid stored tone T1 leaves the required stop empty for correction. Natural relaxation always uses ordinary T1.
+The tone time scale uses the stored `$qubit.ext.t1_with_tone`, then ordinary T1, then 30 µs. Missing or null sources advance to the next choice. An invalid stored tone T1 leaves the required stop empty for correction. Natural relaxation always uses ordinary T1.
 
-T1-derived defaults use the Open/Reset snapshot. A missing or null T1, or an unavailable snapshot, uses 30 us, so the 5*T1 wait starts at 150 us. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
 
 These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
 
 ## Module slots
 
-Pi pulse uses `$qubit.module.x180` or pi_pulse. Probe starts from res_probe. Reset is optional; readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Reset snapshot.
+Pi pulse uses `$qubit.module.x180` or pi_pulse. Probe starts from res_probe. Reset is optional; readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Defaults snapshot.
 
 ## Typical writeback
 

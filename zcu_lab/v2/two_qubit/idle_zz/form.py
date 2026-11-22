@@ -1,40 +1,43 @@
-"""Fixed capture FTF conditional Ramsey form, with editable calibrated pulses."""
+"""Fixed-capture conditional Ramsey Form, with editable calibrated pulses."""
 
-from zcu_tools.cfg_model import Range, Slot
+from zcu_tools.cfg_model import Hidden, Range, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
 )
 
-from .._measure import captured_roles
+from .._measure import TwoQubitForm, captured_qubits
 from .core import IdleZZCfg
 
 
 def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
-    """Lock captured role/tone mapping, seed pulses/readout without model truth.
+    """Seed conditional Ramsey from GUI aliases $qubit1, $qubit2 and $mux.
 
-    Require the same complete FTF roles/group as joint readout, delegating mux
-    relationships to the public validator before building the Form. Missing Xπ
-    or Xπ/2 remains Invalid. Readout may be manually calibrated if no slot exists.
+    The fixed capture seeds hidden tone indices; no $coupler binding is needed.
+    Notebook bindings of the same names are separate. Missing or inconsistent
+    qubit/mux bindings raise ValueError. Missing Xπ or Xπ/2 stays unfilled.
+    Readout may be manually calibrated if no slot exists.
     Optional DC source starts disabled; enabling it requires a direct connected device
     name, working unit and authorized source-coordinate sweep. Open/Reset is the
     only time sources are read; Run and historical analysis never consult it.
     """
-    roles = captured_roles(ctx)
+    qubits = captured_qubits(ctx)
     readout = mux_readout_initial(ctx)
-    return Form(
+    return TwoQubitForm(
         IdleZZCfg,
+        readout_of=lambda cfg: cfg.readout,
         tree={
             "reps": 1000,
             "rounds": 10,
             "relax_delay": 1.0,
-            "roles": roles,
+            "qubit1_tone": Hidden(qubits.qubit1_tone),
+            "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
-            "x180_f1": Slot("$f1.module.x180", copy=True),
-            "x180_f2": Slot("$f2.module.x180", copy=True),
-            "x90_f1": Slot("$f1.module.x90", copy=True),
-            "x90_f2": Slot("$f2.module.x90", copy=True),
+            "x180_qubit1": Slot("$qubit1.module.x180", copy=True),
+            "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
+            "x90_qubit1": Slot("$qubit1.module.x90", copy=True),
+            "x90_qubit2": Slot("$qubit2.module.x90", copy=True),
             "readout": readout,
             "detune": None,
             "delay": Range(0, 10, expts=101),

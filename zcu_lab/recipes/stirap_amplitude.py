@@ -66,7 +66,7 @@ class StirapAmplitudeInputs(RecipeInputs):
     )
     stokes_lead_us: float | None | Keep = Field(
         KEEP,
-        description="Fixed Stokes lead/us, positive starts Stokes first; omitted retains, null reaches owner.",
+        description="Fixed Stokes lead/µs, positive starts Stokes first; omitted retains, null reaches owner.",
     )
     readout_ref: str | None | Keep = Field(
         KEEP,
@@ -78,7 +78,7 @@ class StirapAmplitudeInputs(RecipeInputs):
     )
     relax_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Relaxation after every shot in us; omitted retains, null reaches owner.",
+        description="Relaxation after every shot in µs; omitted retains, null reaches owner.",
     )
 
 

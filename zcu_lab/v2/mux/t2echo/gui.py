@@ -156,7 +156,7 @@ def _get_writeback_items(
             [
                 ParameterWriteback(
                     target_name=f"{qubit}.t2e",
-                    description="t2e coherence time (us)",
+                    description="t2e coherence time (µs)",
                     proposed_value=outcome.t2,
                     selected=note is None,
                     note=note,

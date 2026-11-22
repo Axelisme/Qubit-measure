@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-11-01
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## GUI setup
 
@@ -30,14 +30,14 @@ positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
 out-of-range participants block Run and remain editable for correction.
 
 Selected tones need drives on independent generators, distinct from readout.
-Open/Reset fills selected tones' drive defaults and sets
+Open/Defaults fills selected tones' drive defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
-Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
+Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
 and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
 Alias list elements may use `$` links. A missing, unbound or empty row selects all
-original indices in order. An unbound element in a nonempty list rejects Open/Reset.
+original indices in order. An unbound element in a nonempty list rejects Open/Defaults.
 An out-of-group name stays visible as an invalid Participants draft until corrected.
-Changing aliases requires Reset or reopening; ordinary participant edits keep tone values.
+Changing aliases requires Defaults or reopening; ordinary participant edits keep tone values.
 
 Editing participants preserves every tone value. Fill any newly selected tone's
 missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
@@ -46,7 +46,7 @@ tone still needs valid frequency and ADC identity, even when not selected.
 ## FTF cost example
 
 A two-participant offline Run used 300 shots per preparation, two preparations,
-0.02 us const probe pulses and 0.1 us recovery. Reps and rounds stayed fixed
+0.02 µs const probe pulses and 0.1 µs recovery. Reps and rounds stayed fixed
 at 1. The recorded Run action took 6.118 s for the pair, about 3.06 s per
 preparation. There is no frequency or delay sweep point here.
 This preparation average is not per-shot acquisition latency.
@@ -79,7 +79,7 @@ Analyze fits each tone's probe-off/on clouds. Initial state describes the
 predominant state after reset/init and before probe. It maps analysis rows to g/e
 while preserving the stored data order.
 Options include PCA/center fitting, angle in degrees, log histogram, T1 alignment
-and a dimensionless length ratio.
+and the readout length / T1 ratio (a.u.).
 The length ratio (readout length / T1) is inferred from the decay tail between the two clusters.
 With Length Ratio left empty, two tight clusters without a visible tail make Analyze return `length_ratio: null` and title the IQ plot `GE IQ (length ratio: not identifiable)`.
 This reporting decision does not change centers, fidelity or Post.
@@ -200,7 +200,7 @@ Analyze and preview only calculate results. Each candidate needs its own selecti
 Saved drafts retain invalid field text and Participants for correction.
 Restoration reports dropped fields and keeps the original parameter source.
 Unreadable saved inputs produce a diagnostic and fresh defaults.
-Reset captures current parameters and rebuilds initial values.
+Defaults captures current parameters and rebuilds initial values.
 
 Recipe writes and override paths use dotted strings, for example
 `"tones.0.drive.gain"`. The decimal index addresses the complete tone list.

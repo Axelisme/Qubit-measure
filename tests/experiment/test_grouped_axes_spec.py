@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +9,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     DataVariable,
     load_grouped_labber_data,
+    load_labber_data,
 )
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
@@ -25,6 +26,10 @@ from tests.experiment._grouped_layout_support import (
     assert_mixed_disk_values,
     mixed_record,
     mixed_spec,
+)
+from tests.experiment._optional_variables_support import (
+    diagnostic_record,
+    diagnostic_spec,
 )
 
 
@@ -204,6 +209,63 @@ def test_grouped_save_obeys_declared_layout_for_mixed_rank_variables(
     assert_mixed_disk_values(loaded.variables)
     with pytest.raises(FileExistsError):
         save_labber(source, destination, spec=spec)
+
+
+def test_grouped_labber_projection_keeps_single_log_and_checks_all_variables(
+    tmp_path: Path,
+) -> None:
+    source = diagnostic_record(present=True)
+    spec = replace(diagnostic_spec(), labber_variables=("data",))
+
+    path = tmp_path / "projection.hdf5"
+    save_labber(source, path, spec=spec)
+    exported = load_labber_data(str(path))
+    assert exported.data.name == "data"
+    assert [(axis.name, axis.unit) for axis in exported.axes] == [("Time", "s")]
+    np.testing.assert_allclose(exported.axes[0].values, [1e-6, 2e-6])
+    np.testing.assert_array_equal(exported.z, [1 + 2j, 3 - 4j])
+
+    malformed = replace(
+        source, result=replace(source.result, diagnostics=np.ones((2, 3)))
+    )
+    invalid_path = tmp_path / "malformed.hdf5"
+    with pytest.raises(ValueError, match=r"/vars/diagnostics.*shape"):
+        save_labber(malformed, invalid_path, spec=spec)
+    assert not invalid_path.exists()
+
+    primary, diagnostics = spec.variables
+    statistic, time = diagnostics.axes
+    duplicate_axes = replace(
+        diagnostics, axes=(replace(statistic, label=time.label), time)
+    )
+    invalid_spec = replace(spec, variables=(primary, duplicate_axes))
+    with pytest.raises(ValueError, match=r"/vars/diagnostics.*duplicate axis"):
+        save_labber(source, invalid_path, spec=invalid_spec)
+    assert not invalid_path.exists()
+
+
+@pytest.mark.parametrize("present", [False, True])
+def test_grouped_labber_defaults_to_every_present_variable(
+    tmp_path: Path, *, present: bool
+) -> None:
+    spec = replace(diagnostic_spec(), labber_layout="independent")
+    path = tmp_path / "default.hdf5"
+    save_labber(diagnostic_record(present=present), path, spec=spec)
+    saved = load_grouped_labber_data(str(path))
+    names = ("data", "diagnostics") if present else ("data",)
+    assert spec.required_variables == ("data",)
+    assert tuple(saved.variables) == names
+
+
+def test_grouped_labber_selection_can_export_an_optional_variable_only(
+    tmp_path: Path,
+) -> None:
+    spec = replace(diagnostic_spec(), labber_variables=("diagnostics",))
+    path = tmp_path / "diagnostics.hdf5"
+    save_labber(diagnostic_record(present=True), path, spec=spec)
+    exported = load_labber_data(str(path))
+    assert exported.data.name == "diagnostics"
+    np.testing.assert_array_equal(exported.z, [[2.0, 10.0], [3.0, 16.0]])
 
 
 def test_grouped_save_requires_cfg(tmp_path: Path) -> None:

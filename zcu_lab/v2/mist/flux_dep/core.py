@@ -76,17 +76,24 @@ class FluxDepCfg(ConfigBase):
     flux: SweepCfg
     gain: Annotated[SweepCfg, FieldMeta(label="gain", unit="a.u.")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -143,7 +150,11 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             ylabel="Readout power (a.u.)",
             title="MIST over FLux",
         )
-        line_ax.set(xlabel="Readout power (a.u.)", title="MIST over FLux")
+        line_ax.set(
+            xlabel="Readout power (a.u.)",
+            ylabel="Signal difference (a.u.)",
+            title="MIST over FLux",
+        )
         formatter = ScalarFormatter(useMathText=True)
         formatter.set_powerlimits((-2, 2))
         heat_ax.xaxis.set_major_formatter(formatter)
