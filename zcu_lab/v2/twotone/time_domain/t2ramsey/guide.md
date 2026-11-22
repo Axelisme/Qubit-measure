@@ -6,7 +6,7 @@ Optional **Reset** → calibrated **π/2 pulse** → swept **Free-evolution dela
 
 ## Key settings
 
-- Confirm the π/2 pulse carrier and readout timing before Run. **Free-evolution delay** starts at `0…1.5 × qubit.t2r` in µs; fill **Stop** if T₂* is not stored. Span about **3 × T₂***. A shorter window shows only partial decay and forces extrapolation.
+- Confirm the π/2 pulse carrier and readout timing before Run. For an inline π/2 pulse, **Gain** is signed amplitude as a fraction of DAC full scale, not a rotation angle. **NQZ** selects the generator Nyquist zone; match it to the calibrated output band. **Mixer freq** is the digital mixer setting, not the RF carrier or IF. Leave it blank only when no generator mixer setting is needed. **Phase** is the authored carrier phase in degrees; the ramp adds to it on the second pulse. **Free-evolution delay** starts at `0…1.5 × qubit.t2r` in µs; fill **Stop** if T₂* is not stored. Span about **3 × T₂***. A shorter window shows only partial decay and forces extrapolation.
 - For a fringe fit, take **at least 10 points per fringe**: at `f` MHz, set **Step** ≤ `1/(10f)` µs. Increase **Expts** when extending the window; sparse points can hide cycles or show an aliased, slower fringe.
 - **Detune ratio (fringes/step)** sets the second pulse phase ramp. Positive advances phase, negative reverses it; requested ramp in MHz = ratio ÷ Step (µs). Use a known positive ramp large enough to stay on the positive-frequency branch when calibrating frequency.
 - **Fit fringe** and **Fit phase offset (fringe only)** start on. Turning the latter off fixes the phase to 0° or 180° based on the shortest-delay IQ. On resonance, set the ratio to zero and turn off **Fit fringe** for a decay-only measurement.
