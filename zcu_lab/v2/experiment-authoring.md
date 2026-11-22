@@ -49,7 +49,8 @@ Inputs 繼承 RecipeInputs，框架只作 pydantic／MCP JSON schema 驗證，re
 
 Docstring 的篇幅與範本見 [風格指南](experiment-style.md#3-寫法判斷)。
 Module 與公開函式交代量測、序列、輸入、結果的單位與 shape，以及必要的失敗條件。
-Run 回傳量測資料，擬合值歸 analyze。操作教學、使用範例與環境指引放 leaf 的 `guide.md`。
+Run 回傳量測資料，擬合值歸 analyze。
+Leaf 的 `guide.md` 依 [Gd1–Gd3](figure-style.md#operator-guide) 寫量什麼、序列、物理意義、關鍵參數、怎麼讀圖與下一步。先核對必留項及其他介面是否已提供等價資訊。通用 GUI 操作連到 [操作員共用流程](operator-workflow.md)，實驗專屬的校準與 Run 前檢查留在 guide。
 必要的 lifecycle、rollback 與 caller 責任用一句說明並連到框架契約。
 
 ### 4. 用註解與空行分開階段
@@ -202,7 +203,7 @@ Run 以 explicit RunContext 取得硬體與 devices，回純 Result，由 adapte
 同步 analyze 接 source、typed options 與本次 Plots，數值直接回傳，圖發布到本次 Plots，跨次成功狀態由 record 表達。
 有分析選項時以 `Experiment.Options` 引用既有 options 類別，GE 的 post-analysis 另有 `GE_Exp.PostOptions`。
 類屬性保存型別而非共用 instance，欄位與預設由原 options 擁有。無選項時省略 Options，基底不要求它。
-各 leaf core 定義輸入與結果型別，guide 定義操作與 writeback。
+各 leaf core 定義輸入與結果型別，guide 說明如何用結果、writeback 改哪個值，以及適用的修正式。
 Mux zip acquisition、participants、座標與 partial data 見 [v2 README](README.md#mux-qubit-numeric-cores)。
 Readout power 的八分支 QND、native tag、指標與 gain 選擇見 [Power guide](twotone/ro_optimize/power/guide.md)。
 
