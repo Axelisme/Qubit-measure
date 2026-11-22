@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-22，頻譜模型求值
+**Last updated:** 2026-11-22，短振盪掃描的失敗分類
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -228,6 +228,10 @@ callers不解包positional per-trace covariance。
 `analysis.fitting.base.fit_func` 的 curve_fit optimizer 不收斂時 raise
 `analysis.failure.AnalysisFailed`，保留 backend cause，不再以初猜冒充 fit。
 已知 init_p 的自由參數數目時，資料不足也 raise AnalysisFailed。
+`fit_rabi` 與 `fit_decay_fringe` 的 cosine fitter 先驗證軸、shape 和有限值，
+再按自由參數數目判斷觀測是否足夠。短 trace 不足時在 FFT 前 raise `AnalysisFailed`。
+自動起點沒有對比或需要的頻率區間也使用這個例外，不設弱訊號門檻。
+`fit_rabi` 沒有有限正 π 座標時不回傳估計。非法輸入維持 `ValueError`。
 Model callback 自己的例外保留原型別與物件，不降級成預期 fit 失敗。
 固定參數只在至少一個參數非 None 時啟用。
 FitParameters 的正常 optimizer 輸出為 ndarray，還原固定參數後為 list；FitResult 將參數與 covariance 配對。

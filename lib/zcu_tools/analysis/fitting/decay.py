@@ -248,8 +248,9 @@ def fit_decay_fringe(
     frequency uses inverse delay units, and time uses delay units. Non-None
     fixedparams fixes values. Return time/error, frequency/error in 1/x units,
     curve and (parameters, covariance). Initial free time is clipped; fixed
-    values are unchanged. Invalid grids raise ValueError and numeric fitting
-    failures raise AnalysisFailed.
+    values are unchanged. Invalid inputs raise ValueError. Insufficient
+    observations, no usable FFT seed and numeric fitting failures raise
+    AnalysisFailed.
     """
     pOpt, pCov = fitdecaycos(
         xs,
