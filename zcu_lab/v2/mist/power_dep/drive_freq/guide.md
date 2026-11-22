@@ -1,77 +1,64 @@
+**Readers:** operator, agent. Map how the mean IQ response after a resonator probe depends on its carrier frequency and gain.
+
 # MIST probe frequency and gain
 
-**Readers:** operator, agent. Measure the MIST response over probe frequency and gain from the GUI or MCP.
+Open `mist/power_dep/drive_freq`. Each shot runs optional reset, optional
+qubit preparation, the resonator probe, readout, then the relaxation wait.
+The two sweep axes change the probe only. The readout carrier and gain stay
+fixed. The map locates frequency and gain regions where the probe changes
+the mean readout IQ. It does not determine which state was occupied.
 
-**Last updated:** 2026-10-21
+## Set up and run
 
-## Measurement
+Bind the qubit and resonator, then open the experiment or choose **Defaults**
+to capture current sources. Defaults discards your draft edits.
 
-Open `mist/power_dep/drive_freq` to map the readout response after a probe pulse.
-Each repetition performs reset, the optional initialization pulse, the probe,
-then readout. Both probe frequency and gain sweep on the board.
-The saved result is mean complex IQ shaped [frequency, gain]. Use a
-classified-population experiment for calibrated populations or leakage
-probabilities.
+- **Reset** and **Preparation pulse** start from the qubit's reset and x180
+  modules, respectively. Turn either off to skip that step. Select a
+  preparation pulse for the initial state you want to test.
+- **Resonator probe** starts from the resonator generator and a 1 µs constant
+  envelope. The sweep replaces both the carrier and gain. Keep the probe
+  length fixed when comparing maps.
+- **Readout** uses the resonator's assigned module, or a pulse readout template
+  with its frequency, wiring and time of flight. Confirm the pulse, trigger
+  delay and integration window. Fill any required blanks before Run.
+- **Probe carrier frequency sweep** starts at the resonator frequency
+  ±1.5 linewidths, with 51 points. Start and Stop are carrier frequencies
+  in MHz, not offsets. Set Expts to the number of frequency points.
+- **Probe gain sweep** starts at 0–1 a.u. with 51 points. Pick a verified
+  low-gain starting region and set the end and point count for the sample.
+- **Reps** starts at 1000 shots per frequency and gain pair in each round.
+  **Rounds** starts at 10 complete sweeps. **Relax delay** starts at five
+  times the qubit T1. Missing T1 uses 30 µs, giving 150 µs. An invalid
+  stored T1 leaves the required wait blank.
 
-## Sources and defaults
+## Read the maps
 
-Open and Defaults capture the current aliases, parameter sources and module
-selections. Defaults discards edits and captures sources again. Run uses the
-displayed configuration. Reopen the tab or choose Defaults to apply alias changes.
+The live title counts how many frequency/gain pairs have IQ data. Completed
+rounds appear in acquisition progress. Blank cells have no displayed data.
+Analyze uses the same axes and color scale convention. Each map scales its
+colors to its own data, so compare the colorbar values rather than colors
+between runs. The summary gives Reps × Rounds for the source run.
 
-- Optional reset and initialization use `$qubit.module.reset` and
-  `$qubit.module.x180`. Missing slots leave these modules disabled.
-- Probe starts from the resonator probe template: resonator frequency and
-  generator channel, gain 0.05, and a 1 µs constant waveform.
-- Readout uses `$resonator.module.readout` when available, otherwise the readout
-  template. The template needs resonator frequency, generator/ADC channels and
-  `$resonator.time_of_fly`. Missing required sources stay Invalid.
-- Frequency starts at `$resonator.freq` ± 1.5 times
-  `$resonator.kappa`, with 51 points. Gain starts at 0–1 with 51 points.
-  Both sweep axes override the probe's scalar frequency and gain during Run.
-- Reps starts at 1000 and Rounds at 100. Relax delay starts at five times
-  `$qubit.t1`. Missing/null T1 uses a 30 µs scale, giving 150 µs.
-  Invalid stored T1 leaves the delay empty. All these values remain editable.
+The color shows the magnitude of mean IQ shift in a.u. Both maps subtract
+the same type of complex reference before taking the magnitude: the mean over
+all frequencies and the first 5% of probe gain points, with at least one gain
+point. Start at low gain so the reference samples the weak-drive response.
+This is a two-dimensional map, with no per-point bars or fit.
 
-Review probe duration, channels, gain range, readout and waiting time before Run.
-Set safe ranges using the limits of your hardware. Choose the frequency
-range for the line of interest using measured resonances.
+Look for a band of increased displacement that persists over adjacent
+frequencies and gains. If it reaches a frequency edge, extend that edge to
+see the other side. To resolve a feature between 7189 and 7191 MHz, for
+example, rescan that interval with 41 points for a nominal 0.05 MHz spacing.
+Use the corresponding gain range for a finer map or run a single gain trace
+at a chosen carrier. Check repeated changes with classified readout before
+attributing them to MIST populations.
 
-## Analysis and saving
+Layout reference: Ding Fig. 5-8(b), p. 151, uses a heatmap to locate features
+in a two-axis scan. It sweeps frequency and pulse length and plots population.
+This map sweeps probe frequency and gain and shows IQ displacement.
 
-Analyze subtracts one complex reference pooled over every frequency and the
-first 5% of gain points (at least one), then plots the magnitude as `fit`.
-Gain ordering therefore determines the reference region. The result is a
-response-magnitude map. Calibration parameters remain unchanged. Use a
-classified-population experiment for population calibration.
-
-Save uses the native data format. Frequencies are MHz in memory and Hz on disk.
-Load and Analyze use the saved record while the current form keeps its settings.
-Analysis also accepts records with missing historical configuration.
-
-The `mist_drive_frequency` recipe takes explicit two-endpoint `freq_range`
-(MHz) and `gain_range` (normalized amplitude), plus optional `target` and
-`points`. It uses captured GUI module selections and averaging defaults, runs
-once, saves raw IQ, analyzes and captures a preview. Cancellation stops before
-save and analysis.
-
-## Offline checks
-
-A white-noise simulation exercises pulse execution, acquisition, plots and
-saving with a simulated device. Its output is noise only. Establish physical
-MIST, heating or leakage thresholds with a suitable physical model or hardware
-measurement.
-
-## Four starting situations
-
-1. With an empty kickstart project, Open the Form and inspect its required blanks.
-   Enter the frequency/gain rectangle and verify probe/readout timing. Supply GE calibration where the Form requests it.
-   Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, choose Defaults to recapture those values.
-   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
-   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
-4. Through the agent, call `mist_drive_frequency` after inspecting the same Form errors.
-   freq_range and gain_range are required pairs. points maps to Expts on both axes. Analysis has no operator parameters.
-   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+Save retains complex IQ and both sweep coordinates. Load does not change the
+current Form. The `mist_drive_frequency` recipe runs and saves the map using
+explicit carrier and gain endpoints. Its Analyze step has no display
+parameters and writes back no calibration.

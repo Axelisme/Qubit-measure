@@ -31,6 +31,44 @@ from zcu_lab.v2.support.resonator import (
     fit_resonance,
 )
 
+_RF_LABEL = "Nominal readout RF frequency (MHz)"
+_IQ_LABEL = "|Mean IQ| (a.u.)"
+
+
+def _plot_phase_diagnostics(
+    plots: Plots,
+    index: int,
+    name: str,
+    freqs: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+    fit: ResonanceFit,
+) -> None:
+    """Compare measured and modeled IQ geometry and phase on the fitted span."""
+    fig, _ = plots.subplots(
+        1, 2, num=f"phase_{index}", figsize=(8, 4.5), layout="constrained"
+    )
+    iq_ax, phase_ax = fig.axes
+    params = fit.params
+    grid = np.linspace(freqs[0], freqs[-1], 400)
+    if "Qc" in params:
+        fitted = HangerModel.calc_signals(grid, **params)
+    else:
+        fitted = TransmissionModel.calc_signals(grid, **params)
+    fig.suptitle(f"Mux one-tone spectrum · {name} · Phase and IQ fit")
+    iq_ax.plot(signals.real, signals.imag, "o", ms=3, label="Measured IQ")
+    iq_ax.plot(fitted.real, fitted.imag, label="Model")
+    iq_ax.set(xlabel="Mean I (a.u.)", ylabel="Mean Q (a.u.)")
+    iq_ax.set_aspect("equal", adjustable="datalim")
+    iq_ax.legend()
+    phase = np.rad2deg(np.unwrap(np.angle(signals)))
+    model_phase = np.rad2deg(np.unwrap(np.angle(fitted)))
+    model_phase += 360 * np.round((phase[0] - model_phase[0]) / 360)
+    phase_ax.plot(freqs, phase, "o", ms=3, label="Measured phase")
+    phase_ax.plot(grid, model_phase, label="Model")
+    phase_ax.set(xlabel=_RF_LABEL, ylabel="Unwrapped IQ phase (deg)")
+    phase_ax.set_title(f"Electrical delay = {fit.edelay:.4g} µs")
+    phase_ax.legend()
+
 
 @dataclass(frozen=True)
 class MuxOnetoneResult:
@@ -112,7 +150,14 @@ class MuxFrequencyOffsetCfg(ConfigBase):
     Invalid values raise Pydantic validation errors at construction/assignment.
     """
 
-    df: Annotated[SweepCfg, FieldMeta(label="Frequency offset", unit="MHz")]
+    df: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Frequency offset",
+            unit="MHz",
+            description="Enter the common RF offset from every tone's base readout frequency in MHz.",
+        ),
+    ]
 
 
 class MuxOnetoneCfg(ConfigBase):
@@ -143,7 +188,14 @@ class MuxOnetoneCfg(ConfigBase):
             ),
         ),
     ]
-    df: Annotated[SweepCfg, FieldMeta(label="Frequency offset", unit="MHz")]
+    df: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Frequency offset",
+            unit="MHz",
+            description="Enter the common RF offset from every tone's base readout frequency in MHz.",
+        ),
+    ]
 
     participants: Annotated[
         list[StrictInt],
@@ -297,22 +349,28 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         # 2. Give each selected spectrum its own figure and original tone identity.
         viewers = []
         for index in indices:
+            tone = base_readout.tones[index]
+            name = tone.label or f"Tone {index}"
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(
-                xlabel="Nominal frequency offset (MHz)",
-                ylabel="Magnitude (a.u.)",
-                title=f"{index}: {base_readout.tones[index].label or f'tone {index}'}",
-            )
-            viewers.append(live_line(ax))
+            fig.suptitle(f"Mux one-tone spectrum · {name} · Readout amplitude")
+            ax.set(xlabel=_RF_LABEL, ylabel=_IQ_LABEL)
+            progress = ax.set_title(f"Acquired frequency points: 0 / {dfs.size}")
+            viewer = live_line(ax)
+            ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
+            ax.legend()
+            viewers.append((tone.freq + dfs, viewer, progress))
             fig.show()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]):
-            return tuple(
-                artist
-                for row, viewer in enumerate(viewers)
-                for artist in viewer.set(dfs, np.abs(data[:, row]))
-            )
+            artists = []
+            for row, (freqs, viewer, progress) in enumerate(viewers):
+                measured = data[:, row]
+                progress.set_text(
+                    f"Acquired frequency points: {np.count_nonzero(np.isfinite(measured))} / {dfs.size}"
+                )
+                artists.extend((*viewer.set(freqs, np.abs(measured)), progress))
+            return artists
 
         signals_buffer = SignalBuffer((len(dfs), len(tone_indices)), on_update=update)
 
@@ -385,7 +443,11 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
             tone = cfg.readout.tones[index]
             freqs = tone.freq + source.result.dfs
             signals = source.result.signals[:, column]
-            fig, _ = plots.subplots(num=f"fit_{index}", figsize=(9, 8))
+            name = tone.label or f"Tone {index}"
+            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(7, 5))
+            ax.set(xlabel=_RF_LABEL, ylabel=_IQ_LABEL)
+            fig.suptitle(f"Mux one-tone spectrum · {name} · Readout amplitude")
+            ax.plot(freqs, np.abs(signals), "o", ms=3, label="Measured IQ")
             try:
                 fit = fit_resonance(
                     freqs,
@@ -398,26 +460,6 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                         edelay_max_search_radius=100.0 if seed is None else None,
                     ),
                 )
-                params = fit.params
-                fig.clear()
-                if "Qc" in params:
-                    HangerModel.visualize_fit(
-                        freqs[1:-1],
-                        signals[1:-1],
-                        params,
-                        figure=fig,
-                        fit_bg_amp_slope=options.fit_bg_amp_slope,
-                        fit_bg_phase_curvature=options.fit_bg_phase_curvature,
-                    )
-                else:
-                    TransmissionModel.visualize_fit(
-                        freqs[1:-1],
-                        signals[1:-1],
-                        params,
-                        figure=fig,
-                        fit_bg_amp_slope=options.fit_bg_amp_slope,
-                        fit_bg_phase_curvature=options.fit_bg_phase_curvature,
-                    )
                 if not all(
                     np.isfinite(value)
                     for value in (fit.freq, fit.fwhm, fit.theta0, fit.edelay)
@@ -431,21 +473,43 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                 ArithmeticError,
                 np.linalg.LinAlgError,
             ) as exc:
-                # 3. Keep numerical failures visible as acquired magnitude without stopping other tones.
                 reason = str(exc)
-                fig.clear()
-                axes = fig.subplots()
-                axes.plot(freqs[1:-1], np.abs(signals[1:-1]))
-                axes.set(xlabel="Nominal frequency (MHz)", ylabel="Magnitude (a.u.)")
-                axes.text(
-                    0.02, 0.98, reason, transform=axes.transAxes, va="top", wrap=True
-                )
-                fig.suptitle(
-                    f"tone {index}: {tone.label or f'tone {index}'} — FIT failed"
+                ax.text(
+                    0.02,
+                    0.98,
+                    f"Fit unavailable: {reason}",
+                    transform=ax.transAxes,
+                    va="top",
+                    wrap=True,
                 )
                 outcomes.append(ToneFitFailure(index, tone.label, reason))
-                continue
-            fig.suptitle(f"tone {index}: {tone.label or f'tone {index}'}")
-            outcomes.append(ToneFitSuccess(index, tone.label, fit))
+            else:
+                params = fit.params
+                grid = np.linspace(freqs[1], freqs[-2], 400)
+                if "Qc" in params:
+                    fitted = HangerModel.calc_signals(grid, **params)
+                    model = "Hanger fit"
+                else:
+                    fitted = TransmissionModel.calc_signals(grid, **params)
+                    model = "Transmission fit"
+                ax.plot(grid, np.abs(fitted), label=model)
+                ax.axvline(fit.freq, color="0.4", ls=":", label="Resonance frequency")
+                r2, rms = fit.fit_quality.r2, fit.fit_quality.normalized_residual_rms
+                quality = f"R² = {r2:.3g}" if r2 is not None else "R² unavailable"
+                quality += (
+                    f" · Normalized residual RMS = {rms:.3g}"
+                    if rms is not None
+                    else " · Normalized residual RMS unavailable"
+                )
+                ax.set_title(
+                    f"Resonance frequency = {fit.freq:.8g} MHz · FWHM = {fit.fwhm:.4g} MHz\n{quality}",
+                    fontsize=10,
+                )
+                _plot_phase_diagnostics(
+                    plots, index, name, freqs[1:-1], signals[1:-1], fit
+                )
+                outcomes.append(ToneFitSuccess(index, tone.label, fit))
+            ax.legend()
+            fig.tight_layout()
         # 4. Keep resonance calibration or a fit failure attached to the original readout tone.
         return MuxOnetoneAnalysis(tuple(outcomes))

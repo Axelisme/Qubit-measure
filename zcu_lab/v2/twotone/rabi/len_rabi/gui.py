@@ -160,6 +160,11 @@ def _run(
     return RunRecord(cfg=cfg, result=LenRabiExp().run(cfg, context=context))
 
 
+def _summary_lines(source: LenRabiRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=LenRabiExp.AXES_SPEC,
     make_form=_LenRabi_make_form,
@@ -167,6 +172,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_LenRabi_analyze,
+        summary_lines=_summary_lines,
         options=lambda source, env: LenRabiAnalyzeOptions(),
         writeback=_LenRabi_get_writeback_items,
     ),

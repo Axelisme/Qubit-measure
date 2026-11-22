@@ -10,15 +10,14 @@ After changing a parameter source, use Defaults to recapture initial values. Ref
 
 `twotone/ro_optimize/chain_length` sweeps readout ADC window in µs.
 Each shot reads one PulseReadout 16 times without a drive or reset.
-After a readout pulse ends, the readout's `post_delay` gives cavity photons time to decay before the next readout starts.
+After a readout pulse ends, its post-delay gives cavity photons time to decay. Start at `5/(2πκ)` µs for linewidth κ in MHz. Try a longer wait and check whether the correlations change.
 The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
 The relax delay K follows each shot. Every shot after the first starts K after the previous shot.
-Set `relax_delay` in µs long enough to return to thermal equilibrium.
+Set **Thermal wait K (µs)** long enough for the qubit to return to thermal equilibrium.
 The Form seeds it from 5·T1. The first shot relies on the state before Run.
 There is no additional wait inside the chain beyond the readout's own timing.
 
-Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template.
-The template uses the resonator frequency, wiring and time of flight.
+**Readout pulse and ADC window** uses the captured `$resonator.module.readout` slot or the readout template. The template takes frequency, wiring and time of flight from the resonator. It leaves 0.015 µs of pulse before and after the ADC window at the receiver.
 ADC window starts at 11 points from 0.2 to 2.2 µs. At each point, Run sets the ADC window to the sweep value and the pulse duration to `window + length_margin`. The Form hides the two lengths that Run sets.
 
 **Length margin (µs)** is editable and must be finite and nonnegative. When you open the tab or choose Defaults it starts at the captured readout's `waveform.length − ro_length`. Without a captured readout, it uses the `readout` template’s difference as an uncalibrated starting value. The stock template gives 0.03 µs. If either length cannot be resolved, enter the margin before Run. Refresh keeps the existing input.
@@ -54,16 +53,13 @@ If the best ADC window is at either scan boundary, extend that side and repeat b
 
 ## Live and analysis plots
 
-Live `measurement` and offline `metric` figures have the same three panels:
+Live and Analyze share the same three panels:
 
-- Heuristic score with model-conditional approximate error bars.
-- QND with model-conditional approximate error bars. The axis stays at 0..1; reports retain unmodified QND, even outside that range.
-- M alongside |ρ|. Large M remains visible on this diagnostic axis.
+- **Thermal-chain score** selects the best window. The red dashed line marks the maximum.
+- **Estimated QND** shows the model's QND estimate, without clipping to 0–1. Use it to check the trade-off at the selected window.
+- The diagnostics compare **correlation growth M** and **first-pair |ρ|**. Compare them to see whether correlation growth reduces the score.
 
-Red dashed lines mark the maximum-score setting in every panel.
-The score axis uses score values alone, so large errors do not flatten the curve.
-Error bars can extend beyond that axis and be cut off.
-Acquisition calculates scores after each completed round, then the plot thread draws them.
+The bars on score and QND are approximate error scales conditional on the model, not shot SEM. Overlapping bars do not determine whether settings tie; the ranking uses only the scores. The axes include the displayed bars. The live heading counts settings with completed data and shows the minimum shots per acquired setting. Analyze labels the selected window; the summary reports the source run's Reps × Rounds when its cfg is available.
 Stop keeps settings with a completed round. A stop before any completed round raises an error.
 
 Analysis has no options and can use saved sums without cfg or hardware.
@@ -100,7 +96,7 @@ Native save and restore preserve the moments for reanalysis of score, M and best
 The tag is `twotone/ro_optimize/chain_length` and cfg schema is `6.0`. An older run can still load its saved moments for analysis, but its cfg is not restored.
 
 `ro_optimize_chain_length` accepts optional `length_start_us` and `length_stop_us` in µs, `points`, `relax_delay`, `reps` and `rounds`.
-`points` maps to sweep Expts. Omission keeps the Form value; null passes to the field owner.
+The endpoints and `points` set **ADC window › Start, Stop, Expts**. The recipe can select a library readout in **Readout pulse and ADC window**. Omission keeps the Form value; null passes to the field owner.
 Overrides apply last, then check_ready rejects missing or invalid inputs before Run.
 The recipe runs, analyzes and saves. It proposes no writeback.
 It reports `length_us`, `score`, `score_error`, `qnd`, `qnd_error`, `correlation`, `amplification` and `mist`.

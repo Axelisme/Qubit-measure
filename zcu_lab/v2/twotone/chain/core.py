@@ -129,9 +129,9 @@ class ChainCfg(ConfigBase):
     freq: Annotated[
         SweepCfg,
         FieldMeta(
-            label="Frequency",
+            label="Probe RF frequency",
             unit="MHz",
-            description="Qubit drive frequency sweep.",
+            description="Fill in RF endpoints in MHz and the number of probe frequencies.",
         ),
     ]
     reps: Annotated[
@@ -139,7 +139,7 @@ class ChainCfg(ConfigBase):
         FieldMeta(
             label="Reps",
             unit="count",
-            description="Fast sweeps in each software round.",
+            description="Set the number of readout-chain dwells per frequency in each round.",
         ),
     ] = Field(ge=12)
     rounds: Annotated[
@@ -234,15 +234,20 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         )
 
         # 2. Monitor spectral significance relative to the false-mark threshold.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="Distance from background (sigma)")
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
+        fig, ax = context.plots.subplots(num="measurement", layout="constrained")
+        title = "Two-tone readout chain · qubit probe · spectral significance"
+        ax.set(
+            xlabel="Probe RF frequency (MHz)",
+            ylabel="Evidence above background (σ)",
+            title=title,
+        )
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
         curve_line = live_line(ax)
+        ax.lines[0].set(marker="o", markersize=3, label="Measured")
         (level_line,) = ax.plot(
             [], [], color="gray", linestyle="--", label="5% false-mark level"
         )
-        ax.legend()
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
 
         @context.plots.on_plot_thread
         def update(augmented_sums: NDArray[np.float64]) -> tuple[Artist, ...]:
@@ -255,7 +260,10 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             curve = sweep_curve(sums)
             level_line.set_data([freqs[0], freqs[-1]], [curve.level, curve.level])
             # Set the level first: the curve update rescales the axes to both lines.
-            return (level_line, *curve_line.set(freqs, curve.sigma))
+            progress = ax.set_title(
+                f"{title}\nRetained dwells per RF point: {int(curve.dwell_count.min())} count"
+            )
+            return (progress, level_line, *curve_line.set(freqs, curve.sigma))
 
         fig.show()
         augmented_sums = SignalBuffer(
@@ -326,25 +334,41 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         )
 
         # 2. Assess the selected resonance against competing peaks and the false-mark level.
-        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-        ax.plot(freqs, curve.sigma, label="sigma", marker="o", markersize=3)
+        _, ax = plots.subplots(num="fit", figsize=config.figsize, layout="constrained")
+        ax.plot(freqs, curve.sigma, "o", color="C0", label="Measured", markersize=3)
         ax.axhline(curve.level, color="gray", ls="--", label="5% false-mark level")
-        for peak in fit.peaks:
-            if peak != fit.selected_peak:
-                ax.axvline(
-                    peak.center,
-                    color="gray",
-                    ls=":",
-                    label=f"candidate {peak.center:.5g} MHz",
-                )
-        ax.plot(fit.freqs, fit.fitted, label=f"fit, FWHM≈{fit.fwhm:.2g} MHz")
-        label = f"center = {fit.freq:.5g} ± {fit.freq_err:.1g} MHz"
-        ax.axvline(fit.freq, color="r", ls="--", label=label)
-        ax.set_xlabel("Frequency (MHz)")
-        ax.set_ylabel("Distance from background (sigma)")
-        ax.legend()
-        ax.grid(True)
-        fig.tight_layout()
+        other_peaks = [peak for peak in fit.peaks if peak != fit.selected_peak]
+        if other_peaks:
+            ax.plot(
+                [peak.center for peak in other_peaks],
+                [peak.height for peak in other_peaks],
+                "v",
+                color="0.45",
+                label="Other peak candidates",
+            )
+        model = "Lorentzian" if options.model_type == "lor" else "Sinc"
+        fit_grid_mhz = np.linspace(fit.freqs.min(), fit.freqs.max(), 200)
+        ax.plot(
+            fit_grid_mhz,
+            fit.evaluate(fit_grid_mhz),
+            "-",
+            color="C1",
+            label=f"{model} fit",
+        )
+        ax.axvline(fit.freq, color="C1", linestyle=":", alpha=0.7)
+        quality = ""
+        if fit.selected_peak is not None:
+            quality = f" · Candidate SNR {fit.selected_peak.snr:.3g}"
+        ax.set(
+            xlabel="Probe RF frequency (MHz)",
+            ylabel="Evidence above background (σ)",
+            title=(
+                "Two-tone readout chain · qubit probe · spectral significance\n"
+                f"Peak center = {fit.freq:.7g} ± {fit.freq_err:.2g} MHz\n"
+                f"Sigma-peak FWHM ≈ {fit.fwhm:.4g} ± {fit.fwhm_err:.2g} MHz{quality}"
+            ),
+        )
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
 
         return ChainAnalysis(
             freq=fit.freq,

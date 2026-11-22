@@ -6,6 +6,7 @@ from typing import Annotated, ClassVar, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.analysis.singleshot import (
     Centroid3Summary,
     analyze_centroid3_populations,
@@ -29,7 +30,7 @@ from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 from .._population_peak import first_finite_peak
 from .._pulses import drive_pulse
@@ -155,13 +156,16 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         )
 
         # 2. Monitor g/e/f transfer fractions as the Stokes lead changes.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Stokes lead (µs)", ylabel="Measured fraction")
-        viewer = live_line(ax, num_lines=len(STATE_LABELS))
+        fig, ax = context.plots.subplots(num="measurement", layout="constrained")
+        ax.set(
+            xlabel="Stokes lead (µs)",
+            ylabel="Measured label fraction",
+            title="STIRAP delay · g → f · measured fractions",
+        )
+        viewer = live_errorbar(ax, num_lines=len(STATE_LABELS))
         for line, state in zip(ax.lines, STATE_LABELS, strict=True):
-            line.set_label(state)
-        ax.legend()
-        ax.grid()
+            line.set(marker="o", markersize=3, linestyle="none", label=f"{state} label")
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=3)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
@@ -169,7 +173,13 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
             total = data.sum(axis=-1, keepdims=True)
             fractions = np.full_like(data, np.nan)
             np.divide(data, total, out=fractions, where=total > 0)
-            return viewer.set(leads, fractions.T)
+            covariance = class_probability_covariance(data)
+            sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
+            retained = int(np.nansum(total))
+            title = ax.set_title(
+                f"STIRAP delay · g → f · measured fractions\nRetained shots: {retained:,} count"
+            )
+            return (*viewer.set(leads, fractions.T, sem.T), title)
 
         fig.show()
         counts = SignalBuffer(
@@ -242,36 +252,58 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         raw = counts[complete] / totals[complete, None]
         result = analyze_centroid3_populations(raw, calibration)
 
-        # 2. Compare raw and corrected transfer populations versus Stokes lead.
-        fig, ax = plots.subplots(num="populations")
-        for index, (state, color) in enumerate(
-            zip(STATE_LABELS, ("C0", "C1", "C2"), strict=True)
-        ):
-            ax.plot(
-                leads,
-                result.raw_populations[:, index],
-                "o--",
-                color=color,
-                label=f"{state} raw",
-            )
-            ax.plot(
-                leads,
-                result.corrected_populations[:, index],
-                ".-",
-                color=color,
-                label=f"{state} corrected",
-            )
-        ax.set(
-            xlabel="Stokes lead (µs)",
-            ylabel="Population fraction",
-            title="STIRAP delay",
-        )
-        ax.legend()
-        ax.grid()
-        fig.tight_layout()
+        # 2. Propagate shot-sampling covariance through the fixed readout correction.
+        raw_covariance = class_probability_covariance(counts[complete])
+        correction = np.linalg.inv(result.confusion_matrix.T)
+        corrected_covariance = correction @ raw_covariance @ correction.T
         confusion = summarize_centroid3(result)
         corrected_f = result.corrected_populations[..., 2]
         peak = first_finite_peak(corrected_f)
+
+        fig, _ = plots.subplots(
+            num="populations",
+            nrows=2,
+            sharex=True,
+            layout="constrained",
+            figsize=(7, 7),
+        )
+        raw_ax, corrected_ax = fig.axes
+        fig.suptitle(
+            "STIRAP delay · g → f · preparation-label fractions\n"
+            f"Readout condition number: {confusion.condition_number:.3g} · "
+            f"Minimum singular value: {confusion.minimum_singular_value:.3g}"
+        )
+        for ax, values, covariance, ylabel in (
+            (raw_ax, result.raw_populations, raw_covariance, "Measured label fraction"),
+            (
+                corrected_ax,
+                result.corrected_populations,
+                corrected_covariance,
+                "Corrected label fraction",
+            ),
+        ):
+            sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
+            for index, state in enumerate(STATE_LABELS):
+                ax.errorbar(
+                    leads,
+                    values[:, index],
+                    yerr=sem[:, index],
+                    fmt="o",
+                    markersize=3,
+                    color=f"C{index}",
+                    label=f"{state} label",
+                )
+            ax.set_ylabel(ylabel)
+        raw_ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.16), ncols=3)
+        corrected_ax.set_xlabel("Stokes lead (µs)")
+        if peak is not None:
+            corrected_ax.axvline(leads[peak], color="C2", linestyle=":")
+            f_sem = np.sqrt(max(float(corrected_covariance[peak, 2, 2]), 0.0))
+            uncertainty = f" ± {f_sem:.3f}" if np.isfinite(f_sem) else ""
+            corrected_ax.set_title(
+                f"Peak corrected f fraction = {corrected_f[peak]:.3f}{uncertainty}\n"
+                f"Stokes lead = {leads[peak]:.4g} µs"
+            )
         return StirapDelaySummary(
             confusion_matrix=confusion.confusion_matrix,
             condition_number=confusion.condition_number,

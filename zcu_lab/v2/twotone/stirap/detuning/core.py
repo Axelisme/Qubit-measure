@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.singleshot import (
@@ -227,8 +226,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
             cfg.stokes_detuning.stop,
             cfg.stokes_detuning.expts,
         )
-        x_label = "Pump detuning (MHz)"
-        buffer = SignalBuffer((len(ys), len(xs), len(STATE_LABELS)), dtype=np.float64)
+        buffer = self._live_counts(context.plots, xs, ys)
         # 2. Measure detuning-dependent transfer at fixed drive amplitudes and relative timing.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -270,28 +268,55 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                     ChargeDriveRequirement("Stokes", cfg.stokes_ch),
                 ),
             )
-        result = StirapDetuningResult(xs, ys, buffer.array)
-        # 3. Inspect the acquired f-label fraction across both drive detunings.
-        figure, _ = context.plots.subplots(num="measurement", layout="constrained")
+        return StirapDetuningResult(xs, ys, buffer.array)
 
-        @context.plots.on_plot_thread
-        def draw(_data: None) -> tuple[Figure]:
-            """Add the acquired STIRAP f-fraction map and colorbar to the figure.
+    def _live_counts(
+        self, plots: Plots, xs: NDArray[np.float64], ys: NDArray[np.float64]
+    ) -> SignalBuffer:
+        """Attach measured fraction maps before acquiring the single round."""
+        figure, _ = plots.subplots(
+            num="measurement", ncols=3, figsize=(12, 4), layout="constrained"
+        )
+        title = "STIRAP detuning · g → f · measured fractions"
+        headline = figure.suptitle(title)
+        maps = []
+        for ax, state in zip(figure.axes, STATE_LABELS, strict=True):
+            ax.grid(False)
+            image = ax.pcolormesh(
+                xs,
+                ys,
+                np.full((len(ys), len(xs)), np.nan),
+                shading="nearest",
+                vmin=0,
+                vmax=1,
+            )
+            ax.set(
+                xlabel="Pump detuning (MHz)",
+                ylabel="Stokes detuning (MHz)",
+                title=f"Measured {state} label",
+            )
+            figure.colorbar(
+                image, ax=ax, label="Measured label fraction", ticks=(0, 0.5, 1)
+            )
+            maps.append(image)
 
-            _data is the unused None trigger; counts come from the captured result.
-            Return the changed figure; the trigger does not supply plot data.
-            """
-            ax = figure.axes[0]
-            fractions = result.counts / result.counts.sum(axis=-1, keepdims=True)
-            image = ax.pcolormesh(xs, ys, fractions[..., 2], shading="nearest")
-            figure.colorbar(image, ax=ax, label="Raw f fraction")
-            ax.set(xlabel=x_label, ylabel="Stokes detuning (MHz)")
-            ax.set_title("STIRAP acquired fractions (not fidelity)")
-            return (figure,)
+        @plots.on_plot_thread
+        def update(counts: NDArray[np.float64]):
+            totals = counts.sum(axis=-1, keepdims=True)
+            fractions = np.divide(
+                counts, totals, out=np.full_like(counts, np.nan), where=totals > 0
+            )
+            for label, image in enumerate(maps):
+                image.set_array(fractions[..., label])
+            headline.set_text(
+                f"{title}\nRetained shots: {int(np.nansum(totals)):,} count"
+            )
+            return (*maps, headline)
 
-        draw(None)
         figure.show()
-        return result
+        return SignalBuffer(
+            (len(ys), len(xs), len(STATE_LABELS)), dtype=np.float64, on_update=update
+        )
 
     def analyze(
         self,
@@ -331,49 +356,63 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
             layout="constrained",
         )
 
-        @plots.on_plot_thread
-        def populations(_data: None) -> tuple[Figure]:
-            """Add raw and confusion-corrected STIRAP maps and colorbars to the figure.
-
-            _data is the unused None trigger; populations come from the captured analysis.
-            Return the changed figure; the trigger does not supply plot data.
-            """
-            for row, (values, title) in enumerate(
-                (
-                    (result.raw_populations, "Raw g/e/f fractions"),
-                    (result.corrected_populations, "Corrected g/e/f (unclipped)"),
-                )
-            ):
-                for label, state in enumerate(STATE_LABELS):
-                    ax = figure.axes[row * len(STATE_LABELS) + label]
-                    image = ax.pcolormesh(
-                        source.result.x_values,
-                        source.result.y_values,
-                        values[..., label],
-                        shading="nearest",
-                    )
-                    figure.colorbar(image, ax=ax, label=f"P({state})")
-                    ax.set(
-                        xlabel="Pump detuning (MHz)",
-                        ylabel="Stokes detuning (MHz)",
-                        title=f"{title}: {state}",
-                    )
-            figure.suptitle(
-                f"Saved readout: condition={result.condition_number:.4g}, minimum singular value={result.minimum_singular_value:.4g}\nPreparation-label estimates, not fidelity"
-            )
-            return (figure,)
-
-        populations(None)
-        figure.show()
-        confusion = summarize_centroid3(result)
-        corrected_f = result.corrected_populations[..., 2]
+        corrected = result.corrected_populations
+        corrected_f = corrected[..., 2]
         peak = first_finite_peak(corrected_f)
-        pump_detuning_mhz = None
-        stokes_detuning_mhz = None
+        pump_detuning_mhz = stokes_detuning_mhz = None
         if peak is not None:
             stokes_index, pump_index = divmod(peak, corrected_f.shape[1])
             pump_detuning_mhz = float(source.result.x_values[pump_index])
             stokes_detuning_mhz = float(source.result.y_values[stokes_index])
+        axes = figure.axes
+        for row, (values, label) in enumerate(
+            (
+                (result.raw_populations, "Measured"),
+                (corrected, "Corrected"),
+            )
+        ):
+            for column, state in enumerate(STATE_LABELS):
+                ax = axes[row * len(STATE_LABELS) + column]
+                ax.grid(False)
+                image = ax.pcolormesh(
+                    source.result.x_values,
+                    source.result.y_values,
+                    values[..., column],
+                    shading="nearest",
+                    vmin=min(0.0, float(values.min())),
+                    vmax=max(1.0, float(values.max())),
+                )
+                figure.colorbar(image, ax=ax, label=f"{label} label fraction")
+                ax.set(
+                    xlabel="Pump detuning (MHz)",
+                    ylabel="Stokes detuning (MHz)",
+                    title=f"{label} {state} label",
+                )
+        confusion = summarize_centroid3(result)
+        headline = (
+            "STIRAP detuning · g → f · preparation-label fractions\n"
+            f"Readout condition number: {confusion.condition_number:.3g} · "
+            f"Minimum singular value: {confusion.minimum_singular_value:.3g}"
+        )
+        if (
+            peak is not None
+            and pump_detuning_mhz is not None
+            and stokes_detuning_mhz is not None
+        ):
+            axes[5].plot(
+                pump_detuning_mhz,
+                stokes_detuning_mhz,
+                "x",
+                color="white",
+                markeredgewidth=2,
+            )
+            headline += (
+                f"\nPeak corrected f fraction = {corrected_f.flat[peak]:.3f} · "
+                f"Pump = {pump_detuning_mhz:.4g} MHz · Stokes = {stokes_detuning_mhz:.4g} MHz"
+            )
+        figure.suptitle(headline)
+        figure.show()
+
         return StirapDetuningSummary(
             confusion_matrix=confusion.confusion_matrix,
             condition_number=confusion.condition_number,

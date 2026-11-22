@@ -6,7 +6,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.artist import Artist
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -25,6 +25,12 @@ from zcu_tools.program.v2 import (
 
 from zcu_lab.v2.support import live_heatmap
 
+_TITLE = "MIST frequency map · Resonator probe"
+_FREQ_LABEL = "Probe carrier frequency (MHz)"
+_GAIN_LABEL = "Probe gain (a.u.)"
+_SHIFT_LABEL = "Magnitude of mean IQ shift (a.u.)"
+_CMAP = "viridis"
+
 
 @dataclass(frozen=True)
 class DriveFreqResult:
@@ -36,7 +42,7 @@ class DriveFreqResult:
 
 
 def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Return the real-valued measurement view of complex IQ without changing the input."""
+    """Return distance from the pooled mean IQ of the first 5% of gain points."""
     avg_len = max(int(0.05 * signals.shape[1]), 1)
 
     mist_signals = signals - np.mean(signals[:, :avg_len])
@@ -45,16 +51,56 @@ def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class DriveFreqCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    init_pulse: Pulse.Cfg | None = None
-    probe_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
-    gain: Annotated[SweepCfg, FieldMeta(label="gain", unit="a.u.")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select the reset before each shot, or leave off to skip reset.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Preparation pulse",
+            description="Select the qubit pulse after reset, or leave off to skip preparation.",
+        ),
+    ] = None
+    probe_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Resonator probe",
+            description="Enter the resonator drive played before readout; the two sweeps set its frequency and gain.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated readout that measures complex IQ after the probe.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Probe carrier frequency sweep",
+            unit="MHz",
+            description="Enter the start, stop (MHz) and point count for the probe carrier, not a detuning.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Probe gain sweep",
+            unit="a.u.",
+            description="Enter the start, stop (a.u.) and point count for the resonator probe gain.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per frequency and gain pair in each round.",
         ),
     ]
     rounds: Annotated[
@@ -62,7 +108,7 @@ class DriveFreqCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of complete frequency and gain sweeps to average.",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -71,7 +117,7 @@ class DriveFreqCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the wait after each shot (µs) before the next shot begins.",
         ),
     ]
 
@@ -121,13 +167,19 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
             gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": probe_pulse.ch}
         )
 
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse frequency (MHz)", ylabel="Pulse gain (a.u.)")
-        formatter = ScalarFormatter(useMathText=True)
-        formatter.set_powerlimits((-2, 2))
-        ax.xaxis.set_major_formatter(formatter)
-        ax.yaxis.set_major_formatter(formatter)
+        fig, ax = context.plots.subplots(num="measurement", figsize=(8, 4))
+        total = len(freqs) * len(gains)
+        ax.set(
+            xlabel=_FREQ_LABEL,
+            ylabel=_GAIN_LABEL,
+            title=f"{_TITLE}\n0/{total} points with IQ",
+        )
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+        ax.grid(False)
         viewer = live_heatmap(ax)
+        image = ax.images[0]
+        image.set_cmap(_CMAP)
+        fig.colorbar(image, ax=ax, label=_SHIFT_LABEL)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
@@ -136,7 +188,9 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
             Read the scan-shaped data without changing it. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            return viewer.set(freqs, gains, drivefreq_signal2real(data))
+            acquired = np.count_nonzero(np.isfinite(data))
+            title = ax.set_title(f"{_TITLE}\n{acquired}/{total} points with IQ")
+            return (*viewer.set(freqs, gains, drivefreq_signal2real(data)), title)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -185,15 +239,11 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         real_signals = drivefreq_signal2real(signals)
 
         # 2. Show MIST contrast over probe frequency and gain without a population fit.
-        _, ax = plots.subplots(num="fit", figsize=config.figsize)
-
-        ax.imshow(
-            real_signals.T,
-            extent=(freqs[0], freqs[-1], gains[0], gains[-1]),
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            cmap="RdBu_r",
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+        ax.set(xlabel=_FREQ_LABEL, ylabel=_GAIN_LABEL, title=_TITLE)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+        ax.grid(False)
+        image = ax.pcolormesh(
+            freqs, gains, real_signals.T, shading="nearest", cmap=_CMAP
         )
-        ax.set_xlabel("Pulse frequency (MHz)", fontsize=14)
-        ax.set_ylabel("Pulse gain (a.u.)", fontsize=14)
+        fig.colorbar(image, ax=ax, label=_SHIFT_LABEL)

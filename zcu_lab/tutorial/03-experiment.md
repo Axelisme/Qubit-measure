@@ -65,7 +65,7 @@ Gain 軸省略 scale，預設保留原值。Signal 寫 `AxesSpec.Z("signals", la
 Gain 是 drive amplitude，不是 dBm。之後改量測時，直接在 `run` 寫 pulse 序列與階段註解，
 不要把整段序列藏進 helper，見 [core 中的序列與分析政策](../v2/experiment-authoring.md#1-在-core-直接寫出-pulse-序列與分析政策)。
 
-原範本沒有實作 `analyze`，本篇也不新增 fit。
+原範本的 `analyze` 只重畫來源圖。本篇的 `power_map` 不提供 Analyze，刪掉複製來的 `analyze` 方法。
 若你的實驗需要分析，在 core 實作同步 `analyze(source, options, *, plots)`，
 從 explicit RunRecord 讀資料，回傳數值結果並向本次 Plots 發圖。
 不要從目前表單補歷史 cfg，見 [分析與保存](../v2/experiment-authoring.md#實驗特有的分析與保存)。
@@ -163,7 +163,7 @@ DEFINITION = Adapter(
 )
 ```
 
-這個範例沒有分析，不提供 analysis。不要手填 capabilities、experiment_tag 或 exp_cls。
+這個範例沒有分析；用上面的 `DEFINITION` 取代複製來的 adapter，不保留 `analysis=...`、`_analyze` 或 `_summary_lines`。不要手填 capabilities、experiment_tag 或 exp_cls。
 若新增 core fit，以 `analysis=Analysis(fn=analyze, options=make_options, writeback=writeback)` 接上。
 `make_options(source, env)` 回傳初值物件，框架從其型別生成欄位。
 無參數時省略 options，不宣告空 class。Figures-only 的 fn 回 None，仍保存圖與空摘要，不提出 writeback。
