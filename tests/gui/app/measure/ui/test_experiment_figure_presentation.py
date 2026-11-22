@@ -100,6 +100,7 @@ def PresentationAdapter_run(
     record = AnalysisSavingAdapter.run(cfg, context=context)
     figure, axes = context.plots.subplots(num="signal", layout="constrained")
     figure.set_facecolor("#edf6ff")
+    axes.set_facecolor("#faf5df")
     axes.plot([0, 1, 2], [0, 1, 0], label="Signal")
     axes.set_xlabel("Time")
     axes.legend()
@@ -255,10 +256,12 @@ def test_run_keeps_the_same_complete_figure_in_three_tile_shapes(
             assert left > 100 and top <= 2
         else:
             assert left + top < 50
-        axes_x, axes_y, axes_width, axes_height = flow.plots().axes[0].bounds
+        axes_x, axes_y, axes_width, axes_height = flow.colour_bounds(
+            "#faf5df", object_name=tile
+        )
         relative_axes = (
-            (axes_x - bounds[0] - left) / painted_width,
-            (axes_y - bounds[1] - top) / painted_height,
+            (axes_x - left) / painted_width,
+            (axes_y - top) / painted_height,
             axes_width / painted_width,
             axes_height / painted_height,
         )

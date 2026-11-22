@@ -37,10 +37,14 @@ basis:
 
 ## 留下的問題
 
-診斷圖保留原候選、修正與失敗收據，待確認可取回後才退休舊工作樹。續作仍要把直方圖、同次擬合 SNR 及其誤差與警示、等比例 IQ 和圖名碰撞修正一起驗收。當時的 R7 要求檢查實際 Analysis、Data 的 `View figure`、Save 版面及存檔 PNG；之前的離線例外不延用。續作適用[現行 R7](../../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面)。
+診斷圖保留原候選、修正與失敗收據,待確認可取回後才退休舊工作樹。續作仍要把直方圖、同次擬合 SNR 及其誤差與警示、等比例 IQ 和圖名碰撞修正一起驗收。當時的 R7 要求檢查實際 Analysis、Data 的 `View figure`、Save 版面及存檔 PNG;之前的離線例外不延用。
 
 寫回保護的 `review-done` 只表示這一項驗完，不能當作已合併。寫回保護與 presentation-families 都實際合併後，noise-isotropic 才按原流程驗證和合併。FTF preset 仍等 noise-isotropic；中心距除以共用寬度的定義不變。這次拆分不簽收診斷圖或第 11／12 步。
 
 ## 依據
 
 使用者原先要求：「我需要看那个 histogram，没有 histogram，只看散点图根本看不出什么」。分流沒有改這項要求。[ADR-0072 的實驗分工](../adr/0072-module-boundaries.md#實驗計算與-gui-接線)讓 adapter 決定寫回，分析與繪圖不消費寫回 note。[Families 部分交付](2026-11-22-families-partial-delivery.md)同樣把未驗範圍列為缺口；GE 不同之處是重建一個不含圖的候選，沒有直接採用原合併候選。[Data 閱讀面](2026-11-22-data-figure-reading.md)的判讀契約也不能代替 Analysis 或 Save 的版面驗收。原始離線圖、調查記錄與批次收據未入庫。
+
+## 後記，2026-11-23
+
+診斷圖續作適用[現行 R7](../../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面)：只在存檔 PNG 檢查版面，各 GUI 面驗整張圖等比嵌入、留白及無裁切。直方圖、同次擬合 SNR 與等比例 IQ 的要求不變。

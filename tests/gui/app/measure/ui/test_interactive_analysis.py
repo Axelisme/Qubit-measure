@@ -8,10 +8,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from matplotlib import rc_context
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.transforms import Bbox
-from qtpy.QtCore import QEventLoop, Qt, QTimer
+from qtpy.QtCore import QEventLoop, QPoint, Qt, QTimer
 from qtpy.QtTest import QTest
 from qtpy.QtWidgets import (
     QCheckBox,
@@ -30,7 +30,7 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui._user_input import ComponentDriver
-from tests.gui._user_input.observing import canvas_bbox_on_screen
+from tests.gui._user_input.observing import colour_bounds
 
 
 class _DeferredEnv:
@@ -77,7 +77,9 @@ def _frontend(qapp, *, env: _DeferredEnv | None = None):
         session.dispose()
         return True
 
-    widget = FluxPickFrontend(plugin, session, env, on_finish, on_cancel)
+    # Make the rendered colour fiducials survive downsampling to a narrow tile.
+    with rc_context({"lines.linewidth": 5}):
+        widget = FluxPickFrontend(plugin, session, env, on_finish, on_cancel)
     # Keep pointer coordinates precise when the control panel takes its size hint.
     widget.resize(1100, 700)
     widget.show()
@@ -108,10 +110,14 @@ def _pointer(
     canvas.callbacks.process(name, event)
 
 
-def _qt_click(canvas: FigureCanvasQTAgg, x: float, y: float = 4.5) -> None:
-    px, py = canvas.figure.axes[0].transData.transform((x, y))
-    sx, sy, _, _ = canvas_bbox_on_screen(canvas, Bbox.from_bounds(px, py, 0, 0))
-    ComponentDriver(canvas.window()).click_at(round(sx), round(sy))
+def _qt_click_near_half_line(canvas: FigureCanvasQTAgg, offset: int = 0) -> None:
+    left, _, width, _ = colour_bounds(canvas, "#ff0000")
+    # The blue integer line appears only in the spectrum (upper plot).
+    _, top, _, height = colour_bounds(canvas, "#0000ff")
+    point = canvas.mapToGlobal(
+        QPoint(round(left + width / 2) + offset, round(top + height / 2))
+    )
+    ComponentDriver(canvas.window()).click_at(point.x(), point.y())
 
 
 def test_click_follow_and_click_place_use_latest_committed_state(qapp):
@@ -220,7 +226,7 @@ def test_preview_cancels_on_escape_hide_and_finish_uses_committed_values(qapp):
     start = session.snapshot()
     updates: list[object] = []
     session.subscribe(lambda: updates.append(session.snapshot()))
-    _qt_click(canvas, start.flux_half)
+    _qt_click_near_half_line(canvas)
     assert qapp.focusWidget() is canvas
     _pointer(canvas, "motion_notify_event", start.flux_half + 0.5)
     assert widget.preview_active
@@ -231,10 +237,10 @@ def test_preview_cancels_on_escape_hide_and_finish_uses_committed_values(qapp):
     assert session.snapshot() == start
     _pointer(canvas, "motion_notify_event", start.flux_half + 0.7)
     assert widget.preview_active is False
-    _qt_click(canvas, start.flux_half + 0.7)
+    _qt_click_near_half_line(canvas, offset=30)
     assert session.snapshot() == start
     assert updates == []
-    _qt_click(canvas, start.flux_half)
+    _qt_click_near_half_line(canvas)
     _pointer(canvas, "motion_notify_event", start.flux_half + 0.4)
     assert widget.preview_active
     widget.hide()
@@ -276,6 +282,7 @@ def test_tab_switch_and_focus_loss_cancel_preview_without_canceling_analysis(qap
     stack.addWidget(widget)
     stack.addWidget(other)
     stack.setCurrentWidget(widget)
+    stack.resize(1100, 700)
     stack.show()
     qapp.processEvents()
     canvas.draw()
@@ -283,7 +290,7 @@ def test_tab_switch_and_focus_loss_cancel_preview_without_canceling_analysis(qap
 
     updates: list[object] = []
     session.subscribe(lambda: updates.append(session.snapshot()))
-    _qt_click(canvas, start.flux_half)
+    _qt_click_near_half_line(canvas)
     assert qapp.focusWidget() is canvas
     _pointer(canvas, "motion_notify_event", start.flux_half + 0.4)
     assert widget.preview_active
@@ -293,11 +300,11 @@ def test_tab_switch_and_focus_loss_cancel_preview_without_canceling_analysis(qap
     assert qapp.focusWidget() is control
     assert not widget.preview_active
     assert session.snapshot() == start
-    _qt_click(canvas, start.flux_half + 0.4)
+    _qt_click_near_half_line(canvas, offset=30)
     assert session.snapshot() == start
     assert updates == []
 
-    _qt_click(canvas, start.flux_half)
+    _qt_click_near_half_line(canvas)
     _pointer(canvas, "motion_notify_event", start.flux_half + 0.4)
     assert widget.preview_active
     stack.setCurrentWidget(other)

@@ -226,6 +226,10 @@ class RangeFindFrontend[R](InteractiveFrontend):
         """False: every accepted edit immediately commits to the session."""
         return False
 
+    def present_committed_frame(self) -> None:
+        """Paint the pending spectrum draw before replying to a remote edit."""
+        self._canvas.repaint()
+
     def cancel_preview(self) -> None:
         """No pointer preview is retained by this frontend."""
 

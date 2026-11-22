@@ -32,7 +32,11 @@ class FigurePaneLayout(QStackedWidget):
     presentationChanged = pyqtSignal()
 
     def figure_container(self, placeholder: QWidget) -> FigureContainer:
-        """Attach native Figures as fixed-geometry canvases in this pane."""
+        """Return a container that uses fixed-geometry canvases on later attachments.
+
+        Add ``placeholder`` as page zero before calling on the Qt owner thread.
+        This call wraps the existing pane; it does not attach a Figure.
+        """
         return FigureContainer(self, placeholder, canvas_type=FigureTileCanvas)
 
     def set_tiled(self, *, tiled: bool) -> None:

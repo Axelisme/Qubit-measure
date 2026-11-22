@@ -44,10 +44,9 @@ class FigureTileRaster(QLabel):
         if self._original is None or self._original.isNull():
             self.clear()
             return
-        fitted = _fit_figure(QRectF(self.contentsRect()), QSizeF(self._original.size()))
         self.setPixmap(
             self._original.scaled(
-                fitted.size().toSize(),
+                self.contentsRect().size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -103,6 +102,27 @@ class FigureTileCanvas(FigureCanvasQTAgg):
         super().draw_idle()
         self.update()
 
+    def print_figure(self, *args, **kwargs) -> None:
+        """Export at Matplotlib's requested geometry without moving on-screen axes."""
+        positions = [
+            (
+                axes,
+                axes.get_position(original=True),
+                axes.get_position(),
+                axes.get_in_layout(),
+            )
+            for axes in self.figure.axes
+        ]
+        try:
+            super().print_figure(*args, **kwargs)
+        finally:
+            # savefig lays out the same Figure at its output size. Input can
+            # arrive before Qt paints again, so keep the prior layout in place.
+            for axes, original, active, in_layout in positions:
+                axes.set_position(original, which="original")
+                axes.set_position(active, which="active")
+                axes.set_in_layout(in_layout)
+
     def _copy_frame(self) -> None:
         width, height = self.get_width_height(physical=True)
         rgba = self.buffer_rgba()
@@ -118,8 +138,8 @@ class FigureTileCanvas(FigureCanvasQTAgg):
         self._copy_frame()
 
     def paintEvent(self, event: QPaintEvent | None) -> None:
-        # QtAgg marks its renderer dirty on print_figure. Flush before painting
-        # so visible artists and the pointer transform agree after an export.
+        # QtAgg marks its renderer dirty on print_figure. Flush queued draws
+        # before presenting the next frame.
         if not self.is_saving():
             self._draw_idle()
         painter = QPainter(self)

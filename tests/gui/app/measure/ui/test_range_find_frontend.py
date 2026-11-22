@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from matplotlib import rc_context
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.text import Text
@@ -20,10 +21,24 @@ from zcu_tools.gui.app.measure.range_find_plugin import (
     RangeFindParameters,
     RangeFindPlugin,
 )
+from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.remote.param_spec import validate_params
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._range_find_adapter import SpectrumData, range_application
+
+_AXES_COLOUR = "#f4f1ff"
+_SPECTRUM = "rangeFind.spectrum"
+
+
+@pytest.fixture(autouse=True)
+def spectrum_background() -> Iterator[None]:
+    # A unique rendered rectangle serves as the coordinate ruler; its position
+    # comes from painted pixels, not from the canvas's event transform.
+    with rc_context({"axes.facecolor": _AXES_COLOUR}):
+        yield
 
 
 @pytest.fixture
@@ -55,10 +70,20 @@ def _shots(tmp_path: Path, scenario: str) -> Path:
 
 def _plot_point(ui: ComponentDriver, x: float, y: float) -> tuple[int, int]:
     axes = ui.plots().axes[0]
-    left, top, width, height = axes.bounds
+    canvas = ui.observe(object_name=_SPECTRUM)
+    assert canvas.bounds is not None
+    left, top, width, height = ui.colour_bounds(_AXES_COLOUR, object_name=_SPECTRUM)
     return (
-        round(left + width * (x - axes.xlim[0]) / (axes.xlim[1] - axes.xlim[0])),
-        round(top + height * (axes.ylim[1] - y) / (axes.ylim[1] - axes.ylim[0])),
+        round(
+            canvas.bounds[0]
+            + left
+            + width * (x - axes.xlim[0]) / (axes.xlim[1] - axes.xlim[0])
+        ),
+        round(
+            canvas.bounds[1]
+            + top
+            + height * (axes.ylim[1] - y) / (axes.ylim[1] - axes.ylim[0])
+        ),
     )
 
 
@@ -154,7 +179,10 @@ def test_operator_can_read_picker_and_zoom_then_home(
         ui.click_tooltip("Zoom to rectangle\nx/y fixes axis")
         ui.drag_at(_plot_point(ui, 7000, 2.3), _plot_point(ui, 7300, 0.64))
         ui.screenshot(shots / "03-zoom.png")
-        assert ui.plots().axes[0].xlim == pytest.approx((7000, 7300), abs=15)
+        zoomed = ui.plots().axes[0]
+        # At the smallest window one logical pixel spans about 18 MHz.
+        assert zoomed.xlim == pytest.approx((7000, 7300), abs=35)
+        assert zoomed.ylim == pytest.approx((0.64, 2.3), abs=0.02)
         assert ui.observe(object_name="rangeFind.status").text == selected
         ui.click_tooltip("Reset original view")
         ui.screenshot(shots / "04-home.png")
@@ -162,8 +190,7 @@ def test_operator_can_read_picker_and_zoom_then_home(
         ui.click_tooltip(
             "Left button pans, Right button zooms\nx/y fixes axis, CTRL fixes aspect"
         )
-        bounds = ui.plots().axes[0].bounds
-        start = (round(bounds[0] + bounds[2] / 2), round(bounds[1] + bounds[3] / 2))
+        start = _plot_point(ui, 5500, 1.5)
         ui.drag_at(start, (start[0] + 30, start[1]))
         ui.screenshot(shots / "05-pan.png")
         assert ui.plots().axes[0].xlim != pytest.approx(original.xlim)
@@ -259,6 +286,47 @@ def test_operator_clicks_to_add_remove_and_assigns_out_of_order(
     assert "east @ 5040 MHz" in ui.legends().texts
     assert "west @ 5070 MHz" in ui.legends().texts
     ui.screenshot(shots / "06-finished.png")
+
+
+@pytest.mark.parametrize(
+    ("assign", "include_figure"), [(False, True), (True, True), (True, False)]
+)
+def test_tab_interact_keeps_pointer_aligned_in_the_same_owner_turn(
+    qapp: QApplication, tmp_path: Path, assign: bool, include_figure: bool
+):
+    with range_application(tmp_path, qapp) as app:
+        ui = ComponentDriver(app.window)
+        shots = _shots(tmp_path, f"tab-interact/assign-{assign}-png-{include_figure}")
+        _start(ui, shots)
+        ui.resize_window(1180, 1030)
+        ui.screenshot(shots / "02-resized.png")
+        star = _plot_point(ui, 5020, 0.3)
+        remote = RemoteControlAdapter(
+            app.ctrl,
+            ControlOptions(port=0),
+            app.ctrl.owner_scheduler,
+            render_view=app.window,
+        )
+        params: dict[str, object] = {
+            "tab_id": app.tab_id,
+            "include_figure": include_figure,
+        }
+        if assign:
+            params["payload"] = {
+                "command": "assign_dip",
+                "args": {"index": 1, "component": None},
+            }
+        entry = METHOD_REGISTRY["tab.interact"]
+        reply = entry.handler(remote, validate_params(entry.params, params))
+        # Send the click in the same owner turn, without pumping Qt or grabbing.
+        ui.click_at(*star)
+        ui.screenshot(shots / "03-click-after-tab-interact.png")
+        assert (reply["figure"] is not None) == include_figure
+        assert "west @ 5020 MHz" not in ui.legends().texts
+        assert ui.observe(object_name="rangeFind.selection").text == "5070 MHz"
+        assert ui.observe(object_name="rangeFind.component").text == (
+            "Unassigned" if assign else "east"
+        )
 
 
 @pytest.mark.parametrize(

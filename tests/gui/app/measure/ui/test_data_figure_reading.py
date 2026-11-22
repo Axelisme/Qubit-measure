@@ -8,8 +8,10 @@ from threading import Event
 
 import numpy as np
 import pytest
+from matplotlib import rc_context
 from matplotlib.artist import Artist
 from matplotlib.backend_bases import RendererBase
+from matplotlib.patches import Rectangle
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.context import RunContext
@@ -60,6 +62,16 @@ def _run(
 def _show_run_figure(plots: Plots, *, on_reading_draw: Artist | None = None) -> None:
     figure, axes = plots.subplots(num="signal", layout="constrained")
     figure.set_facecolor("#e1f6e8")
+    figure.add_artist(
+        Rectangle(
+            (0, 0),
+            0.03,
+            0.003,
+            transform=figure.transFigure,
+            color="#b3264b",
+            in_layout=False,
+        )
+    )
     axes.set_facecolor("#eff9ff")
     axes.plot([0.0, 0.4, 0.8], [0.0, 0.8, 0.0], label="Mean I")
     axes.plot([0.0, 0.4, 0.8], [0.0, -0.7, 0.0], label="Mean Q")
@@ -312,13 +324,20 @@ def test_data_reads_run_figure_in_place_and_returns_focus(
     flow.select_tab("Data")
     flow.screenshot(shots / "02-overview.png")
     control = "dataFigureView/run/signal"
-    flow.click(object_name=control)
+    with rc_context({"savefig.bbox": "tight", "savefig.pad_inches": 0}):
+        flow.click(object_name=control)
     assert flow.observe("Run — signal").visible
     assert flow.observe("Save All").enabled
     assert flow.image_center_colour(object_name="dataFigureReadingImage") == "#eff9ff"
     flow.screenshot(shots / "03-reading.png")
     default_view = _reading_viewport(flow)
     _assert_run_reading_fits(flow)
+    left, top, _, height = flow.colour_bounds("#e1f6e8", object_name=_READING_IMAGE)
+    edge_x, edge_y, _, edge_height = flow.colour_bounds(
+        "#b3264b", object_name=_READING_IMAGE
+    )
+    assert edge_x == pytest.approx(left, abs=2)
+    assert edge_y + edge_height == pytest.approx(top + height, abs=2)
     flow.press_key(Qt.Key.Key_Space)
     assert flow.focused_input().object_name == control
     assert flow.observe(object_name="previewGalleryHeader").visible

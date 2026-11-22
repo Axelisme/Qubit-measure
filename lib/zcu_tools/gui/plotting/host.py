@@ -179,6 +179,8 @@ def _attach_figure_canvas(
     fig: Figure,
 ) -> FigureCanvasQTAgg:
     previous_container = _fig_container_registry.get(fig)
+    previous_canvas = fig.canvas
+    canvas = container.canvas_for_figure(fig)
     if previous_container is not None and previous_container is not container:
         # Defense in depth: only detach from the previous container if that entry
         # is genuinely live — the container's stack must still exist (not a
@@ -186,15 +188,15 @@ def _attach_figure_canvas(
         # entry (e.g. the canvas already moved, or the container was torn down)
         # must NOT trigger detach_canvas, which would flip an unrelated
         # container back to its placeholder. If stale, just drop the entry.
-        previous_canvas = fig.canvas
         if isinstance(previous_canvas, QWidget) and previous_container.contains_canvas(
             previous_canvas
         ):
             previous_container.detach_canvas(previous_canvas)
+            if previous_canvas is not canvas:
+                previous_canvas.deleteLater()
         else:
             _fig_container_registry.pop(fig, None)
 
-    canvas = container.canvas_for_figure(fig)
     container.attach_canvas(canvas)
     _fig_container_registry[fig] = container
     return canvas

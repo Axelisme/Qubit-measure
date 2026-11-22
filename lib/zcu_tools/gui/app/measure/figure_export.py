@@ -6,11 +6,11 @@ after rendering; agent screenshots use the shared gui.plotting renderer.
 
 from __future__ import annotations
 
-import io
 import os.path
 
 from matplotlib import rcParams
 from matplotlib.figure import Figure
+from matplotlib.transforms import Bbox
 
 from zcu_tools.gui.plotting.figure_export import render_figure_png
 
@@ -70,17 +70,18 @@ def render_save_figure_png(fig: Figure) -> bytes:
     return render_figure_png(fig, figsize=SAVE_FIGSIZE, dpi=SAVE_DPI)
 
 
-def render_figure_preview_png(fig: Figure) -> bytes:
-    """Render a 640x480 Data Preview with the saved image's logical geometry."""
-    buf = io.BytesIO()
-    _render_with_fixed_size(
+def _render_data_png(fig: Figure, dpi: float) -> bytes:
+    return render_figure_png(
         fig,
-        buf,
-        DATA_PREVIEW_FIGSIZE,
-        DATA_PREVIEW_DPI,
-        format="png",
+        figsize=SAVE_FIGSIZE,
+        dpi=dpi,
+        bbox_inches=Bbox.from_bounds(0, 0, *SAVE_FIGSIZE),
     )
-    return buf.getvalue()
+
+
+def render_figure_preview_png(fig: Figure) -> bytes:
+    """Render the full fixed-geometry Figure as a 640x480 Data Preview."""
+    return _render_data_png(fig, DATA_PREVIEW_DPI)
 
 
 def render_figure_reading_png(fig: Figure) -> bytes:
@@ -90,4 +91,4 @@ def render_figure_reading_png(fig: Figure) -> bytes:
     viewport. Canvas ownership and on-screen size stay unchanged. Rendering
     failures propagate; no file is read or written.
     """
-    return render_figure_png(fig, figsize=SAVE_FIGSIZE, dpi=100.0)
+    return _render_data_png(fig, dpi=100.0)

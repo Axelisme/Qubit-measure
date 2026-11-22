@@ -3,9 +3,8 @@
 from collections.abc import Callable
 from pathlib import Path
 
-import numpy as np
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QSize, Qt
-from PyQt6.QtGui import QColor, QImage, QKeySequence, QMouseEvent
+from PyQt6.QtGui import QKeySequence, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractScrollArea,
     QApplication,
@@ -208,35 +207,19 @@ class ComponentDriver:
 
     def plot_inches(self, *, object_name: str) -> tuple[float, ...]:
         """Read the native Figure's logical size in inches from a visible canvas."""
-        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-
         widget = self._find(None, object_name)
-        if not isinstance(widget, FigureCanvasQTAgg):
-            raise TypeError("Expected a visible Matplotlib canvas")
-        return tuple(float(value) for value in widget.figure.get_size_inches())
+        if not on_screen(widget):
+            raise LookupError("Canvas is not visible")
+        return observing.plot_inches(widget)
 
     def colour_bounds(
         self, colour: str, *, object_name: str
     ) -> tuple[float, float, float, float]:
         """Read the widget-local logical-pixel bounds of an exact visible RGB colour."""
         widget = self._find(None, object_name)
-        pixmap = widget.grab()
-        image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-        pixels = np.frombuffer(
-            image.constBits().asstring(image.sizeInBytes()), dtype=np.uint8
-        ).reshape(image.height(), image.width(), 4)
-        colour_value = QColor(colour)
-        rows, cols = np.nonzero(
-            np.all(pixels[:, :, :3] == colour_value.getRgb()[:3], axis=2)
-        )
-        if not len(cols):
-            raise LookupError(f"No pixels of {colour} on {object_name}")
-        return (
-            cols.min() / pixmap.devicePixelRatio(),
-            rows.min() / pixmap.devicePixelRatio(),
-            (cols.max() - cols.min() + 1) / pixmap.devicePixelRatio(),
-            (rows.max() - rows.min() + 1) / pixmap.devicePixelRatio(),
-        )
+        if not on_screen(widget):
+            raise LookupError("Widget is not visible")
+        return observing.colour_bounds(widget, colour)
 
     def image_center_colour(self, *, object_name: str) -> str:
         """Read the displayed QLabel raster's centre pixel as a hex RGB colour.
@@ -247,16 +230,7 @@ class ComponentDriver:
         widget = self._find(None, object_name)
         if not on_screen(widget):
             raise LookupError("Raster is not visible")
-        if not isinstance(widget, QLabel):
-            raise TypeError("Expected a raster label")
-        pixmap = widget.pixmap()
-        if pixmap.isNull():
-            raise ValueError("Label has no displayed raster")
-        return (
-            pixmap.toImage()
-            .pixelColor(pixmap.width() // 2, pixmap.height() // 2)
-            .name()
-        )
+        return observing.image_center_colour(widget)
 
     def list_rows(self) -> tuple[ListRowObservation, ...]:
         """Observe rows intersecting visible QListWidget viewports in this window."""
