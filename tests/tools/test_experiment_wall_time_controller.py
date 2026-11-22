@@ -139,6 +139,8 @@ def _install_headless_controller(
     adapters: Mapping[str, Path | None],
     on_run: Callable[[_SyntheticController], None],
     on_cancel: Callable[[_SyntheticController], None],
+    *,
+    on_ftf: Callable[[int], None] | None = None,
 ) -> None:
     def open_entry() -> None:
         clock.seconds += 40.0
@@ -174,21 +176,58 @@ def _install_headless_controller(
     monkeypatch.setattr(
         config, "load_ftf", lambda _: SimpleNamespace(with_telemetry=lambda **_: None)
     )
-    monkeypatch.setattr(
-        environment,
-        "ftf",
-        lambda _settings, *, soccfg: SimpleNamespace(
+
+    def make_environment(
+        _settings: object, *, soccfg: object, workers: int = 1
+    ) -> SimpleNamespace:
+        if on_ftf is not None:
+            on_ftf(workers)
+        return SimpleNamespace(
             soc=None,
             soccfg=soccfg,
             devices=None,
             create_device=None,
             close_backend=None,
-        ),
-    )
+        )
+
+    monkeypatch.setattr(environment, "ftf", make_environment)
     monkeypatch.setattr(controller, "Controller", make_controller)
     # The Run's monotonic and UTC observation clocks are not CLI arguments.
     monkeypatch.setattr(experiment_wall_time, "perf_counter", clock.monotonic)
     monkeypatch.setattr(experiment_wall_time, "datetime", clock)
+
+
+@pytest.mark.parametrize(
+    ("worker_args", "expected"), [([], 1), (["--workers", "3"], 3)]
+)
+@pytest.mark.usefixtures("core_app")
+def test_main_configures_ftf_workers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    worker_args: list[str],
+    expected: int,
+) -> None:
+    data_dir, output = tmp_path / "inputs", tmp_path / "output"
+    _headless_inputs(data_dir)
+    workers_seen: list[int] = []
+    _install_headless_controller(
+        monkeypatch,
+        _Clock(),
+        {"fake/frequency": None},
+        lambda ctrl: QTimer.singleShot(0, ctrl.complete),
+        lambda _: pytest.fail("a completed Run must not be cancelled"),
+        on_ftf=workers_seen.append,
+    )
+
+    assert (
+        main(
+            ["--output", str(output), *worker_args],
+            data_dir=data_dir,
+            read_commit=lambda: "abc",
+        )
+        == 0
+    )
+    assert workers_seen == [expected]
 
 
 @pytest.mark.parametrize("orphan", [False, True], ids=["paired", "orphan"])

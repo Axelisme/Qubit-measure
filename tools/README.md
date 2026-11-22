@@ -164,7 +164,9 @@ write_snapshot(
 
 查序列內的脈衝磁通線設定，見 [FTF `flux_lines` 欄位與限制](../zcu_lab/simulation_envs/FTF/field-guide.md#flux-lines序列內磁通校準與濾波)。查 point 裡的 DC 磁通校準，見 [ADR-0082〈Component 保存 offset 與 signed periods〉](../docs/adr/0082-component-flux-frame.md#component-保存-offset-與-signed-periods)。
 
-正式批次在該 worktree 用 `tools/run_heavy.py --exclusive`。先設定 `output` 為新的絕對路徑、`budget_s` 為整批 payload 的秒數預算：
+`--workers N` 設定每列 FTF 環境的平行 worker 數。`N` 必須是正整數，省略時用 1。若要採 GUI 的 worker 策略，指定 `max(1, slot CPU 數 − 1)`，例如 4 核 slot 用 `--workers 3`。`run_heavy.py` 的收據記錄 payload 參數與 `cpus`，可核對 worker 數和 CPU affinity。
+
+完整表或需要排他的正式比較，在已協調的窗口用 `tools/run_heavy.py --exclusive`。先設定 `output` 為新的絕對路徑、`budget_s` 為整批 payload 的秒數預算：
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
@@ -172,16 +174,17 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
   python -m tools.experiment_wall_time --output "$output" > "$output.receipt.json"
 ```
 
-單列 CPU 診斷可用非排他 runner。Linux 上，空的 ICD 目錄停用 OpenCL。cache 留在診斷路徑旁；非排他的秒數不用於正式比較。
+非排他 runner 可用於 CPU 診斷或已核准的子集量測，其秒數不能代替排他比較。Linux 上，空的 ICD 目錄停用 OpenCL。以下用 4 核 slot 選一列，並把 cache 留在 worktree：
 
 ```bash
-scratch="$(dirname "$output")"
-mkdir -p "$scratch/no-opencl"
-OCL_ICD_VENDORS="$scratch/no-opencl" \
-ZCU_TOOLS_CACHE_DIR="$scratch/cache" NUMBA_CACHE_DIR="$scratch/numba" \
+quality="$PWD/.agent_state/quality"
+mkdir -p "$quality/no-opencl"
+OCL_ICD_VENDORS="$quality/no-opencl" \
+ZCU_TOOLS_CACHE_DIR="$quality/cache" NUMBA_CACHE_DIR="$quality/numba" \
 uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
   --wait-limit 60 --log "$output.log" 120 -- \
-  python -m tools.experiment_wall_time --select onetone/freq --output "$output" > "$output.receipt.json"
+  python -m tools.experiment_wall_time --workers 3 --select onetone/freq --output "$output" \
+  > "$output.receipt.json"
 ```
 
 `batch.json` 記錄本批選中的 adapter、Git HEAD、每份輸入的 SHA-256 和 guide 盤點。從乾淨 checkout 執行，才能用 commit 找回執行時的程式。每列在送出 Run 前先寫 `start.json`，記 UTC 時刻與 monotonic 秒數。Run 在期限內到終態時，工具在清理該列資源前寫 `row.json`。逾時則先寫 `row.json`，再等 Run 終態與 Controller idle。`report.json` 和 `summary.md` 從這些落盤紀錄組成，列出已記錄結果的列數、本批涵蓋列數及全 inventory 列數。
@@ -228,11 +231,11 @@ uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
 
 缺 `materialize_s`、`core_s` 或 `core_s_lower_bound` 的舊 `row.json` 會讓重建以 exit 1 結束，不寫報表。請在 `batch.json` 記錄的 commit 執行 `--report-only` 重建舊報表。批次起迄與外層逾時看 `run_heavy.py` 的收據，不用來推算 Run 耗時。要補未派送或未完成的列，使用下方的續跑方式。
 
-續跑使用新的 `--output`，以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。新報表併入來源中已落盤的判定列；`--select` 只派送所選範圍內尚未判定的列。`timeout` 和 `run_failed` 都是已判定列，不會自動重跑。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`：
+續跑使用新的 `--output`，以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。也要沿用來源批次的 `--workers`；工具不把 worker 數寫進 journal，請從來源收據的 payload 參數核對。新報表併入來源中已落盤的判定列；`--select` 只派送所選範圍內尚未判定的列。`timeout` 和 `run_failed` 都是已判定列，不會自動重跑。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`：
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
-  --resume-from "$output" --select mux --output "$continued_output"
+  --resume-from "$output" --workers 3 --select mux --output "$continued_output"
 ```
 
 若要重跑已判定的失敗列，用 `--select` 指定該 adapter，另開新的 `--output`，不要帶入包含該列的 `--resume-from`。若已換 commit，使用新 commit 開新批次，不留用舊列。
