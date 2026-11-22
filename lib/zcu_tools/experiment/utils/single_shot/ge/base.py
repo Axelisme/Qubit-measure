@@ -191,10 +191,13 @@ class GE_FitResult(TypedDict, closed=True):
     when the joint covariance cannot estimate its relative standard error or
     that error exceeds GEFitOptions.length_ratio_max_relative_error. A user-fixed
     length_ratio is returned unchanged. ge_params and length_ratio_g/e retain
-    their fitted values regardless of identifiability.
+    their fitted values regardless of identifiability. length_ratio_standard_error
+    is the joint fit's absolute standard error, or None for a fixed ratio or
+    when the covariance does not give a positive finite error.
     """
 
     length_ratio: float | None
+    length_ratio_standard_error: float | None
     ge_params: tuple[float, float, float, float, float, float, float]
     p0_gg: float
     p0_ge: float
@@ -274,9 +277,9 @@ def fitting_ge_and_plot(
     The returned length_ratio is the dimensionless joint readout length / T1.
     Fixed options.length_ratio is returned unchanged. For a free fit, an
     unavailable joint relative standard error or sigma/|p| greater than
-    options.length_ratio_max_relative_error returns None and labels the plot
-    "not identifiable". Other fitted parameters and quality diagnostics are
-    unchanged by this reporting threshold.
+    options.length_ratio_max_relative_error returns None. This reporting
+    threshold does not affect other fitted parameters, quality diagnostics,
+    or the value and standard error shown on the figure.
     """
     options = GEFitOptions() if options is None else options
     (Ig, Ie), (Qg, Qe) = signals.real, signals.imag
@@ -392,6 +395,11 @@ def fitting_ge_and_plot(
         rotated_g_center * np.exp(-1j * theta),
         rotated_e_center * np.exp(-1j * theta),
     )
+    joint_length_error = (
+        _length_ratio_standard_error(joint_covariance)
+        if options.length_ratio is None
+        else None
+    )
     if plots is not None:
         fig, raw_axes = plots.subplots(
             num=figure_name, nrows=2, ncols=2, figsize=(8, 8)
@@ -428,13 +436,14 @@ def fitting_ge_and_plot(
             logscale=options.logscale,
         )
 
-        length_title = (
-            f"{length_ratio:.1f}"
-            if options.align_t1
-            else f"{l_ratio_g:.1f} / {l_ratio_e:.1f}"
-        )
         title = _diagnostic_title(
-            length_title if identifiable_length_ratio is not None else None,
+            _diagnostic_length_labels(
+                options,
+                length_ratio,
+                joint_length_error,
+                (l_ratio_g, l_ratio_e),
+                (ground_covariance, excited_covariance),
+            ),
             fit_quality["joint"] if annotated else None,
             (sg, se, s),
             joint_covariance,
@@ -452,6 +461,7 @@ def fitting_ge_and_plot(
         populations,
         GE_FitResult(
             length_ratio=identifiable_length_ratio,
+            length_ratio_standard_error=joint_length_error,
             ge_params=ge_params,
             p0_gg=p0_gg,
             p0_ge=p0_ge,
@@ -601,17 +611,49 @@ def _layout_ge_diagnostic(
         fig.subplots_adjust(hspace=0.25, wspace=0.15)
 
 
+def _length_ratio_standard_error(covariance: NDArray[np.float64]) -> float | None:
+    # The length ratio is the last parameter in both histogram models.
+    variance = float(covariance[-1, -1])
+    return math.sqrt(variance) if math.isfinite(variance) and variance > 0.0 else None
+
+
+def _length_ratio_label(ratio: float, standard_error: float | None) -> str | None:
+    return None if standard_error is None else f"{ratio:.3g} ± {standard_error:.3g}"
+
+
+def _diagnostic_length_labels(
+    options: GEFitOptions,
+    joint_ratio: float,
+    joint_error: float | None,
+    preparation_ratios: tuple[float, float],
+    preparation_covariances: tuple[NDArray[np.float64], NDArray[np.float64]],
+) -> tuple[str | None, ...]:
+    if options.align_t1:
+        if options.length_ratio is not None:
+            return (f"{options.length_ratio:.3g}",)
+        return (_length_ratio_label(joint_ratio, joint_error),)
+    if options.length_ratio == 0.0:
+        # With zero decay the per-preparation fits also hold the ratio fixed.
+        return ("0", "0")
+    return tuple(
+        _length_ratio_label(ratio, _length_ratio_standard_error(covariance))
+        for ratio, covariance in zip(
+            preparation_ratios, preparation_covariances, strict=True
+        )
+    )
+
+
 def _diagnostic_title(
-    length_title: str | None,
+    length_labels: tuple[str | None, ...],
     joint_quality: FitQuality | None,
     centers_and_width: tuple[float, float, float],
     joint_covariance: NDArray[np.float64],
 ) -> str:
-    title = (
-        "Readout length: not identifiable"
-        if length_title is None
-        else f"Readout length = {length_title} " + r"$T_1$"
-    )
+    if any(length_labels):
+        values = " / ".join(label or "unavailable" for label in length_labels)
+        title = rf"Readout length = {values} $T_1$"
+    else:
+        title = "Readout length: unavailable"
     if joint_quality is None:
         return title
 

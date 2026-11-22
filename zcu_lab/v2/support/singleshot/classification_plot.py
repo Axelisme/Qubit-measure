@@ -6,6 +6,23 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
 
+def share_ge_preparation_limits(ground: Axes, excited: Axes) -> None:
+    """Link two equal-aspect Post axes at the union of their plotted I/Q limits.
+
+    Call after plotting both IQ clouds and classifier boundaries. Sharing Q as
+    well as I keeps the two IQ boxes the same shape. Matplotlib raises ValueError
+    if excited already shares an axis with a different peer.
+    """
+    g_left, g_right = ground.get_xlim()
+    e_left, e_right = excited.get_xlim()
+    g_bottom, g_top = ground.get_ylim()
+    e_bottom, e_top = excited.get_ylim()
+    excited.sharex(ground)
+    excited.sharey(ground)
+    ground.set_xlim(min(g_left, e_left), max(g_right, e_right))
+    ground.set_ylim(min(g_bottom, e_bottom), max(g_top, e_top))
+
+
 def plot_ge_classification_boundary(
     ax: Axes, g_center: complex, e_center: complex, radius: float
 ) -> None:

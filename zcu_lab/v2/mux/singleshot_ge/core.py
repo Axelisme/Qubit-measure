@@ -69,6 +69,7 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
 )
 from zcu_lab.v2.support.singleshot.classification_plot import (
     plot_ge_classification_boundary,
+    share_ge_preparation_limits,
 )
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state
 
@@ -447,6 +448,7 @@ def _plot_confusion_matrix(
             fontsize=10,
         )
 
+    share_ge_preparation_limits(g_iq, e_iq)
     _plot_post_matrix(populations, confusion.init_matrix)
     populations.set_title("Initial Populations\nPrepared → actual", fontsize=10)
     _plot_post_matrix(classifier, confusion.matrix)

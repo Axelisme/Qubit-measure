@@ -192,10 +192,11 @@ def test_ge_analysis_without_decay_tail_reports_only_fixed_length_ratio(
         assert result["s"] == pytest.approx(0.25, abs=0.03)
         if plots is not None:
             title = " ".join(text.get_text() for text in plots["fit"].texts)
-            if result["length_ratio"] is None:
-                assert "Readout length: not identifiable" in title
-            else:
+            if length_ratio is None:
                 assert "Readout length =" in title
+                assert " ± " in title
+            else:
+                assert r"Readout length = 0 $T_1$" in title
     finally:
         if plots is not None:
             plots.finish(present=False)
@@ -239,11 +240,9 @@ def test_visible_decay_tail_identifies_joint_length_ratio(align_t1, max_relative
         assert result["e_center"].real == pytest.approx(1.0, abs=0.03)
         assert result["s"] == pytest.approx(0.25, abs=0.03)
         title = " ".join(text.get_text() for text in plots["fit"].texts)
-        if result["length_ratio"] is None:
-            assert "Readout length: not identifiable" in title
-        else:
-            assert "Readout length =" in title
-            assert (" / " in title) == (not align_t1)
+        assert "Readout length =" in title
+        assert (" / " in title) == (not align_t1)
+        assert title.count(" ± ") == (1 if align_t1 else 2)
     finally:
         plots.finish(present=False)
         plots.release()
@@ -535,6 +534,7 @@ def test_fitted_snr_keeps_successful_figure_when_standard_error_unavailable(
         assert len(plots["fit"].axes) == 4
         text = " ".join(t.get_text() for t in plots["fit"].texts)
         assert "Fitted SNR = 5 ± unavailable" in text
+        assert "Readout length: unavailable" in text
     finally:
         plots.finish(present=False)
         plots.release()
