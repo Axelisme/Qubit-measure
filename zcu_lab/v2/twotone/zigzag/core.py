@@ -34,6 +34,7 @@ class ZigZagCfg(ConfigBase):
         int,
         FieldMeta(
             label="Max repetitions",
+            unit="count",
             description="Repetition counts run from zero to this value.",
         ),
     ] = Field(ge=0)
@@ -46,17 +47,24 @@ class ZigZagCfg(ConfigBase):
     ] = "X180_pulse"
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -91,7 +99,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
 
         # 2. Monitor repeated-gate contrast on a common IQ projection axis.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Times", ylabel="Signal")
+        ax.set(xlabel="Repetitions (count)", ylabel="Signal (a.u.)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)

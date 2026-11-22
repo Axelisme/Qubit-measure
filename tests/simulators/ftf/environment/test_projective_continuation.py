@@ -1,4 +1,4 @@
-"""One FTF point advances its independent projective histories together."""
+"""FTF follows independent DC nodes within each projective layer."""
 
 import gzip
 import json
@@ -33,6 +33,7 @@ from zcu_tools.simulate.evolution import (
     read_physical_input,
 )
 from zcu_tools.simulators.ftf.environment import FTFSource, plan_template
+from zcu_tools.simulators.ftf.environment.cavity import ProjectiveCapture
 from zcu_tools.simulators.ftf.environment.numeric import resonators
 from zcu_tools.simulators.ftf.physics import CavityDrive, CavityResponse
 
@@ -211,7 +212,7 @@ def _check_history_inputs(
         )
 
 
-def test_point_local_batches_continue_histories_and_keep_seeded_draws(
+def test_point_local_batches_continue_nodes_and_keep_seeded_draws(
     projective_source, exact_cavity_span_hits
 ):
     source, engine, acquire = projective_source
@@ -262,7 +263,7 @@ def test_point_local_batches_continue_histories_and_keep_seeded_draws(
                 )
             )
             if point == 1 and span == (2, 4):
-                memory[1] = memory[0]
+                memory.fill(0)
             _check_history_inputs(
                 rows, np.array(ground, dtype=float), memory, cavities[point], span
             )
@@ -277,12 +278,9 @@ def test_point_local_batches_continue_histories_and_keep_seeded_draws(
         for span, _ in spans
     }
     terminal_ground = np.array([[11 / 32, 7 / 32], [9 / 16, 7 / 16]])
-    expected = adc.ProjectionReadout(
+    expected = adc.ProjectionChain(
         np.array([[0.375, 0.625], initial]),
-        (
-            np.tile(np.eye(2), (2, 1, 1)),
-            np.stack((terminal_ground, 1 - terminal_ground), axis=-1),
-        ),
+        (np.stack((terminal_ground, 1 - terminal_ground), axis=-1),),
     )
     stats = adc.round_statistics(
         expected,
@@ -306,7 +304,7 @@ def test_point_local_batches_continue_histories_and_keep_seeded_draws(
     for ch, raw in expected_raw.materialize(acquire.reps, acquire.avg_level).items():
         np.testing.assert_array_equal(actual_raw[ch], raw)
 
-    # The per-span diagnostics keep Engine row IDs and their history, even
+    # The per-span diagnostics keep Engine row IDs and their states, even
     # though the aggregate diagnostics and warnings refer to acquisition points.
     solve = source.evaluations[0]
     spans_by_location = {
@@ -320,22 +318,60 @@ def test_point_local_batches_continue_histories_and_keep_seeded_draws(
     for point, spans in expected_inputs.items():
         for rows, (span_ns, _) in zip(calls_by_point[point], spans, strict=True):
             diagnostic = spans_by_location[1 - point, span_ns]
-            histories = {
-                int(batch.points[row]): () if len(rows) == 1 else (history,)
-                for history, (batch, row) in enumerate(rows)
+            nodes = {
+                int(batch.points[row]): None if len(rows) == 1 else state
+                for state, (batch, row) in enumerate(rows)
             }
-            assert dict(diagnostic.histories) == histories
-            assert set(diagnostic.point_members["fixture"]) == histories.keys()
+            assert diagnostic.event_index == (None if len(rows) == 1 else 0)
+            assert dict(diagnostic.nodes) == nodes
+            assert set(diagnostic.point_members["fixture"]) == nodes.keys()
             assert {
                 inversion.point for inversion in diagnostic.stark_order_inversions
-            } == histories.keys()
+            } == nodes.keys()
 
-    # Each herald begins with two distinct density rows and the same inherited
+    # Each herald begins with two distinct density rows and the same vacuum
     # field. Only the cavity solve is shared; the rows and their weights are not.
     assert {(0, 2), (2, 4)} <= exact_cavity_span_hits
 
 
-def test_cancel_during_projective_assembly_stops_before_next_history(
+def test_floor_uses_each_points_own_marginal_for_the_same_source_state(projective_case):
+    numeric, readout, acquire = projective_case
+    engine = HistoryEngine()
+    with closing(
+        FTFSource(
+            numeric.model_copy(
+                update={
+                    "numerics": numeric.numerics.model_copy(
+                        update={"projection_weight_floor": 0.4}
+                    )
+                }
+            ),
+            DeviceManager(),
+            soccfg=profile_soccfg("ftf"),
+            readout=readout,
+            engine=engine,
+        )
+    ) as source:
+        result = source.open_acquire(acquire).sample_round(snapshot(), 0)
+        if not isinstance(result, IntegratedRound) or not isinstance(
+            result.raw, adc.ADCRawShots
+        ):
+            raise AssertionError("integrated FTF must return ADC statistics and raw")
+        chain = result.raw.prepared.readout
+        assert isinstance(chain, adc.ProjectionChain)
+        assert chain.initial[0, 0] == 0.375 < 0.4 < chain.initial[1, 0]
+        (terminal,) = chain.transitions
+        # Point 0 keeps ground as ground. At point 1 ground gets evolved.
+        np.testing.assert_array_equal(terminal[:, 0], [[1, 0], [9 / 16, 7 / 16]])
+        np.testing.assert_allclose(
+            source.evaluations[0].projection_identity_weight[0], [0.375]
+        )
+        np.testing.assert_array_equal(
+            result.statistics.state_counts.sum(axis=-1), acquire.reps
+        )
+
+
+def test_cancel_during_projective_assembly_stops_before_next_node(
     projective_source, monkeypatch: pytest.MonkeyPatch
 ):
     source, _, acquire = projective_source
@@ -391,7 +427,7 @@ def test_interrupted_batch_has_no_reusable_preparation(projective_source, error)
     source.open_acquire(later).sample_round(snapshot(), 0)
     assert {*earlier, incomplete} <= set(engine.attempted[interrupted_calls:])
     assert engine.reuse_checks == []
-    assert source.evaluations[0].projection_outcomes == (2, 2)
+    assert source.evaluations[0].projection_continued_states == ((2,), (2,))
 
     # A fully retried preparation can be reused across acquires.
     calls = len(engine.calls)
@@ -483,16 +519,16 @@ def test_equivalent_projective_points_contribute_distinct_routing_usage():
         assert len(history.inventories) > first_inventories
         assert history.usage == expected  # Replayed content must not grow usage.
         identities = {
-            (span.point, span.span_ns, states): row_id
+            (span.point, span.span_ns, state): row_id
             for span in original.projective_spans
-            for row_id, states in span.histories
+            for row_id, state in span.nodes
         }
         assert {point for point, _, _ in identities} == {0, 1}
         assert len(set(identities.values())) == 4  # The two states at each origin.
         assert identities == {
-            (span.point, span.span_ns, states): row_id
+            (span.point, span.span_ns, state): row_id
             for span in source.evaluations[0].projective_spans
-            for row_id, states in span.histories
+            for row_id, state in span.nodes
         }
     finally:
         source.close()
@@ -563,6 +599,38 @@ def captured_projective_source(projective_case, tmp_path, monkeypatch):
         yield source, engine, acquire
 
 
+def test_capture_provenance_cannot_override_span_metadata(captured_projective_source):
+    source, engine, acquire = captured_projective_source
+    source.open_acquire(acquire).sample_round(snapshot(), 0)
+    model, batches = engine.calls[0]
+    buffer = CaptureBuffer()
+    capture = ProjectiveCapture(buffer)
+    span = (0.0, 2.0)
+    nodes = {str(batches[0].points[0]): None}
+    with capture.recording(
+        1,
+        0,
+        span,
+        {
+            "event_index": None,
+            "nodes": nodes,
+            "round_index": 99,
+            "point": 99,
+            "span_ns": (),
+        },
+    ):
+        engine.evolve(model, batches, capture=buffer)
+
+    capture_id = read_capture_metadata(buffer.records[0])["capture_id"]
+    assert capture.spans[capture_id] == {
+        "event_index": None,
+        "nodes": nodes,
+        "round_index": 1,
+        "point": 0,
+        "span_ns": span,
+    }
+
+
 @pytest.mark.parametrize("fail_second_round", [False, True], ids=["success", "failure"])
 def test_debug_capture_joins_each_projective_batch_to_its_origin(
     captured_projective_source, fail_second_round
@@ -573,7 +641,9 @@ def test_debug_capture_joins_each_projective_batch_to_its_origin(
     session.sample_round(first, 0)
     engine.fail = fail_second_round
     if fail_second_round:
-        with pytest.raises(NoValidKernel, match=r"point 0.*\[4, 6\].*\(1,\)") as caught:
+        with pytest.raises(
+            NoValidKernel, match=r"point 0.*\[4, 6\].*event 0 states \[1\]"
+        ) as caught:
             session.sample_round(changed, 1)
         assert caught.value.__cause__ is engine.error
         assert caught.value.points == (0,)
@@ -613,33 +683,34 @@ def test_debug_capture_joins_each_projective_batch_to_its_origin(
             for row, engine_point in enumerate(batch.points):
                 origin = int(batch.tracks[0].start_ns[row] == 2)
                 bounds = (batch.start_ns[row], batch.end_ns[row])
-                history = (
-                    ()
+                state = (
+                    None
                     if origin == 0 and bounds == (0, 2)
-                    else (int(batch.initial_densities[row, 1, 1] == 1),)
+                    else int(batch.initial_densities[row, 1, 1] == 1)
                 )
                 assert span["point"] == origin
                 assert tuple(span["span_ns"]) == bounds
-                assert tuple(span["histories"][str(engine_point)]) == history
-                assert ids.setdefault((origin, history), engine_point) == engine_point
-                position = (origin, bounds, history)
+                assert span["event_index"] == (None if state is None else 0)
+                assert span["nodes"][str(engine_point)] == state
+                assert ids.setdefault((origin, state), engine_point) == engine_point
+                position = (origin, bounds, state)
                 observed[span["round_index"]].add(position)
                 if not metadata["complete"]:
                     incomplete.add((span["round_index"], position))
 
     assert len(ids) == len(set(ids.values())) == 5
     assert observed[0] == {
-        (point, span, (state,))
+        (point, span, state)
         for point, point_spans in (
             (0, ((2, 4), (4, 6), (6, 10))),
             (1, ((0, 2), (2, 4), (4, 8))),
         )
         for span in point_spans
         for state in (0, 1)
-    } | {(0, (0, 2), ())}
+    } | {(0, (0, 2), None)}
     if fail_second_round:
         assert observed[1] <= observed[0]
-        assert incomplete == {(1, (0, (4, 6), state)) for state in ((0,), (1,))}
+        assert incomplete == {(1, (0, (4, 6), state)) for state in (0, 1)}
     else:
         assert observed[1] == observed[0]
         assert not incomplete

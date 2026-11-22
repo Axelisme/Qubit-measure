@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-10-22
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## GUI setup
 
@@ -30,14 +30,14 @@ positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
 out-of-range participants block Run and remain editable for correction.
 
 Selected tones need drives on independent generators, distinct from readout.
-Open/Reset fills selected tones' drive defaults and sets
+Open/Defaults fills selected tones' drive defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
-Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
+Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
 and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
 Alias list elements may use `$` links. A missing, unbound or empty row selects all
-original indices in order. An unbound element in a nonempty list rejects Open/Reset.
+original indices in order. An unbound element in a nonempty list rejects Open/Defaults.
 An out-of-group name stays visible as an invalid Participants draft until corrected.
-Changing aliases requires Reset or reopening; ordinary participant edits keep tone values.
+Changing aliases requires Defaults or reopening; ordinary participant edits keep tone values.
 
 Editing participants preserves every tone value. Fill any newly selected tone's
 missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
@@ -45,9 +45,9 @@ tone still needs valid frequency and ADC identity, even when not selected.
 
 ## FTF cost example
 
-A two-participant offline Run used 16 delays from 0 to 3.75 us, 0.5 MHz
-nominal detune on both tones, 0.5 us const x90 pulses, 300 reps and 1 round.
-Recovery was 1007.509 us; readout and ADC integration were 2 and 1.5 us.
+A two-participant offline Run used 16 delays from 0 to 3.75 µs, 0.5 MHz
+nominal detune on both tones, 0.5 µs const x90 pulses, 300 reps and 1 round.
+Recovery was 1007.509 µs; readout and ADC integration were 2 and 1.5 µs.
 Recorded RPC Run wall time was 19.095 s, about 1.19 s per joint delay point.
 It includes first simulation compilation and Run completion waiting, not just
 acquisition. Analyze and Save are outside that timer.
@@ -64,7 +64,7 @@ Its short-scan fit is not calibration evidence.
 ## Measurement and analysis
 
 Use fixed x90 drives and an individual detune in MHz for each tone.
-All tones share one finite, nonnegative requested-delay range in us.
+All tones share one finite, nonnegative requested-delay range in µs.
 
 The sequence is common reset, simultaneous first x90 pulses, common delay,
 simultaneous phase-ramped final x90 pulses, then mux readout.
@@ -79,7 +79,7 @@ Fit fringe selects damped-cosine fitting; disabling it selects exponential decay
 A fringe fit needs six finite points and decay needs four.
 Fixed fringe phase uses the nearest-zero 0/180-degree policy; Fit phase frees it.
 Decay uses the same model regardless of Fit phase.
-T2* and error are in us; fringe rate and error are in MHz.
+T2* and error are in µs; fringe rate and error are in MHz.
 Each tone returns its index, fit values, selected model and quality, including
 fringe sampling quality when applicable.
 Analysis plots retain the delay coordinates, measured values and fitted curves.
@@ -120,7 +120,7 @@ coupled Q1/Q2 pair; it does not establish that every mux group has this distorti
 In the offline control, Q2 drive gains were already zero. Disabling only RO2
 raised the Q1 fringe fit r2 from 0.632 to 0.953.
 That identifies readout contamination in that configuration, not a calibrated
-change in T2. The scan had only 16 points over 3.75 us.
+change in T2. The scan had only 16 points over 3.75 µs.
 Use mux Ramsey mainly for decay/T2 trends, not precise detuning.
 Prefer reviewing decay candidates; treat frequency candidates conservatively.
 Adequate sampling and automatic initial selection do not prove the absence
@@ -137,7 +137,7 @@ decay/T2 trend; a frequency candidate is not precision-detuning evidence.
 Failed or unavailable checks leave candidates unselected with explanatory notes.
 You may select them manually after reviewing the source and fit.
 
-Each qualifying tone proposes `<qubit>.t2r` in us and a T2R sample at captured bias.
+Each qualifying tone proposes `<qubit>.t2r` in µs and a T2R sample at captured bias.
 A frequency candidate additionally requires source configuration, a fringe fit,
 finite source carrier, finite actual detune and finite fitted fringe rate.
 It uses source carrier + actual detune - fitted fringe rate in MHz.
@@ -150,7 +150,7 @@ Rabi or zigzag, then save and select new numeric modules with the recalibrated
 gains and lengths. Changing only frequency does not calibrate the pulses.
 Calibration writeback, New from a template and `ml_edit` can create modules.
 Template expressions read calibration at creation, not on later Runs.
-Reset downstream tabs after changing module selections. Historical Run/Load
+Choose Defaults in downstream tabs after changing module selections. Historical Run/Load
 sources retain their original pulses.
 
 ## Results and saved sources
@@ -185,7 +185,7 @@ Inspect each output's error when saving fails.
 Saved drafts retain invalid field text and Participants for correction.
 Restoration reports dropped fields and keeps the original parameter source.
 Unreadable saved inputs produce a diagnostic and fresh defaults.
-Reset captures current parameters and rebuilds initial values.
+Defaults captures current parameters and rebuilds initial values.
 
 Recipe writes and override paths use dotted strings, for example
 `"tones.0.drive.gain"`. The decimal index addresses the complete tone list.

@@ -40,7 +40,7 @@ class T1CovInputs(RecipeInputs):
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in us.",
+        description="Delay sweep stop in µs.",
     )
     points: int | None | Keep = Field(
         KEEP,
@@ -69,16 +69,16 @@ class T1CovReport(RecipeReport):
     """T1 results and failure reason; cancellation returns no report."""
 
     t1_us: float | None = Field(
-        description="Relaxation time in us; null means not estimable."
+        description="Relaxation time in µs; null means not estimable."
     )
     t1_err_us: float | None = Field(
-        description="Relaxation uncertainty in us; null means not estimable."
+        description="Relaxation uncertainty in µs; null means not estimable."
     )
     t1b_us: float | None = Field(
-        description="Second relaxation time in us; null without a second fit or when not estimable."
+        description="Second relaxation time in µs; null without a second fit or when not estimable."
     )
     t1b_err_us: float | None = Field(
-        description="Second relaxation uncertainty in us; null without a second fit or when not estimable."
+        description="Second relaxation uncertainty in µs; null without a second fit or when not estimable."
     )
 
 
@@ -94,7 +94,7 @@ async def t1_cov(session: RecipeSession, inputs: T1CovInputs) -> T1CovReport:
     reads. Save the paired second-moment sums, without shot classification.
     Ask before applying the T1 proposal. Skipping the proposal writes nothing.
 
-    points → expts sets the sweep sample count; max_delay_us is in us.
+    points → expts sets the sweep sample count; max_delay_us is in µs.
     skip omits leading fit points; dual_exp fits two decay terms. Omission
     keeps the current value and null passes unchanged to the owner.
     To change the state count, set n_states in the tab's Analysis settings.

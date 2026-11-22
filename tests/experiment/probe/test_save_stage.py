@@ -12,6 +12,10 @@ from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.records import RunRecord
 
 from tests._native_support import native_metadata
+from tests.experiment._optional_variables_support import (
+    diagnostic_record,
+    diagnostic_spec,
+)
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 
 
@@ -177,6 +181,16 @@ def test_scalar_field_restored_as_none_reports_dtype_and_keeps_comparing(
     assert "dtype float64 != object" in estimate_warning
     assert "field=signal" in signal_warning
     assert "value" in signal_warning.lower()
+
+
+def test_optional_array_does_not_compare_equal_to_none() -> None:
+    source = diagnostic_record(present=False).result
+    spec = diagnostic_spec()
+    assert probe.compare_roundtrip(source, replace(source), spec=spec) is True
+    for array in (np.ones((2, 2)), np.array(None, dtype=object)):
+        present = replace(source, diagnostics=array)
+        assert probe.compare_roundtrip(source, present, spec=spec) is False
+        assert probe.compare_roundtrip(present, source, spec=spec) is False
 
 
 def test_scalar_field_none_on_both_sides_is_equal(

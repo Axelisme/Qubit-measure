@@ -2,13 +2,10 @@
 
 import re
 import warnings
-from collections.abc import Sequence
 from dataclasses import replace
-from typing import override
 
 import numpy as np
 import pytest
-from numpy.typing import NDArray
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationCallbacks
 from zcu_tools.simulate.adc import (
@@ -16,9 +13,8 @@ from zcu_tools.simulate.adc import (
     cavity_field_average,
     cavity_fields,
 )
-from zcu_tools.simulate.boundary import CancellationQuery, PulseEnvelope
+from zcu_tools.simulate.boundary import PulseEnvelope
 from zcu_tools.simulate.evolution import (
-    CaptureBuffer,
     Engine,
     EvolutionResult,
     ModelSource,
@@ -273,75 +269,10 @@ def test_acquire_warns_once_for_reversed_stark_order_and_reports_gain_limit(recw
         source.close()
 
 
-class ShiftSensitiveEngine(EngineDouble):
-    """At terminal evolution, distinguish equal pure states by their input shifts."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.shifts: dict[tuple[float, float], tuple[NDArray[np.float64], ...]] = {}
-        self.terminal_calls: list[tuple[tuple[float, float], set[tuple[int, int]]]] = []
-
-    @override
-    def evolve(
-        self,
-        source: ModelSource,
-        batches: Sequence[TimelineBatch],
-        *,
-        budget: float = 1e-3,
-        cancel: CancellationQuery | None = None,
-        telemetry: bool = False,
-        reuse_key: bytes | None = None,
-        capture: CaptureBuffer | None = None,
-    ) -> EvolutionResult:
-        result = super().evolve(
-            source,
-            batches,
-            budget=budget,
-            cancel=cancel,
-            telemetry=telemetry,
-            reuse_key=reuse_key,
-            capture=capture,
-        )
-        rows = [(batch, row) for batch in batches for row in range(len(batch.points))]
-        densities = result.densities.copy()
-        terminal = set()
-        span = None
-        for i, (batch, row) in enumerate(rows):
-            assert batch.start_ns is not None
-            bounds = (float(batch.start_ns[row]), float(batch.end_ns[row]))
-            if bounds in self.shifts:
-                # A repeated projected state can only be identified by the
-                # shift inherited from the first herald's cavity field.
-                (shift,) = batch.segment_shifts[row]
-                assert (shift.start_ns, shift.end_ns) == bounds
-                (first_state,) = (
-                    state
-                    for state, expected in enumerate(self.shifts[bounds])
-                    if np.allclose(
-                        shift.energy_shift_ghz, expected, rtol=1e-10, atol=1e-15
-                    )
-                )
-                second_state = int(densities[i, 1, 1].real == 1.0)
-                np.testing.assert_array_equal(
-                    densities[i], np.diag(np.eye(2)[second_state])
-                )
-                terminal.add((first_state, second_state))
-                assert span is None or span == bounds
-                span = bounds
-                densities[i] = np.diag(np.eye(2)[first_state])
-            elif bounds[1] in {start for start, _ in self.shifts}:
-                # Both next states must remain reachable after each first state.
-                densities[i] = np.diag([0.5, 0.5])
-        if span is not None:
-            assert len(rows) == 4
-            self.terminal_calls.append((span, terminal))
-        return EvolutionResult(result.points[::-1], densities[::-1], result.paths)
-
-
-def test_projective_results_follow_history_when_equal_states_have_different_shifts():
-    engine = ShiftSensitiveEngine()
+def test_projective_continuation_starts_from_vacuum():
+    engine = EngineDouble()
     base, readout = herald_template()
-    # A second herald gives cavity memory a projected continuation boundary.
+    # Drive the cavity at the first herald, then project again before the terminal read.
     terminal = tuple(
         replace(event, start_ticks=event.start_ticks + ticks(0.012))
         for event in base.events[-2:]
@@ -400,53 +331,48 @@ def test_projective_results_follow_history_when_equal_states_have_different_shif
             facts=facts,
             time_base=TIME_BASE,
         )
+        acquire = request(templates=(driven,))
+        source.open_acquire(acquire).sample_round(snapshot(), 0)
+
         model = facts.readout
-        bare = np.array(
-            [
-                numeric.readout.resonators.r1.frequency_ghz,
-                numeric.readout.resonators.r2.frequency_ghz,
-            ]
-        )
-        chi = model.frequencies_ghz - bare
+        chi = model.frequencies_ghz - [
+            numeric.readout.resonators.r1.frequency_ghz,
+            numeric.readout.resonators.r2.frequency_ghz,
+        ]
+        shifts = {}
         for reads, end in zip(plan.projective_reads, plan.batch.end_ns, strict=True):
             first, second = reads
             pulses = (*first.pulses, *second.pulses)
-            fields = cavity_fields(
+            start = second.start_ns
+            prior_fields = cavity_fields(
                 model,
-                pulses,
-                np.array([first.start_ns, second.start_ns]),
+                first.pulses,
+                np.array([first.start_ns, start]),
                 initial_time_ns=first.start_ns,
             )
-            shifts = []
-            for memory in fields[-1]:
-                average = cavity_field_average(
-                    model,
-                    pulses,
-                    second.start_ns,
-                    end,
-                    initial_field=memory,
-                    initial_time_ns=second.start_ns,
-                )
-                shifts.append((chi * average.photons).sum(axis=-1))
-            ground_shift, excited_shift = shifts
-            assert not np.allclose(ground_shift, excited_shift, rtol=1e-10, atol=1e-15)
-            engine.shifts[second.start_ns, float(end)] = (ground_shift, excited_shift)
+            assert np.any(prior_fields[-1]), "the first herald must leave a field"
+            vacuum = cavity_field_average(
+                model, pulses, start, end, initial_time_ns=start
+            )
+            shifts[start, end] = (chi * vacuum.photons).sum(axis=-1)
 
-        acquire = replace(request(templates=(driven,)), reps=1024)
-        stats = expect_statistics(
-            source.open_acquire(acquire).sample_round(snapshot(), 0)
-        )
-        assert len(engine.terminal_calls) == 2
-        assert dict(engine.terminal_calls) == {
-            span: {(0, 0), (0, 1), (1, 0), (1, 1)} for span in engine.shifts
-        }
-        # C-order axes: original point, first herald, second herald, terminal state.
-        # All four histories must be sampled, and the terminal state follows
-        # the first herald's field even for histories sharing a second state.
-        counts = stats.state_counts.reshape(2, 2, 2, 2)
-        assert np.all(counts.sum(axis=-1) > 0)
-        np.testing.assert_array_equal(counts[:, 0, :, 1], 0)
-        np.testing.assert_array_equal(counts[:, 1, :, 0], 0)
+        seen = set()
+        for _, batches in engine.calls:
+            for batch in batches:
+                assert batch.start_ns is not None
+                for row, bounds in enumerate(
+                    zip(batch.start_ns, batch.end_ns, strict=True)
+                ):
+                    if bounds in shifts:
+                        (shift,) = batch.segment_shifts[row]
+                        np.testing.assert_allclose(
+                            shift.energy_shift_ghz,
+                            shifts[bounds],
+                            rtol=1e-10,
+                            atol=1e-15,
+                        )
+                        seen.add(bounds)
+        assert seen == shifts.keys()
     finally:
         source.close()
 

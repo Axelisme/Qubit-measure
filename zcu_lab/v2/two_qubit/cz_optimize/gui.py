@@ -17,7 +17,6 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.plotting.plots import Plots
 
 from .core import (
@@ -42,13 +41,12 @@ def _analyze(
 def _get_writeback_items(
     req: WritebackRequest[_Run, CZOptimizeAnalysis | CZOptimizeUnavailable],
 ) -> Sequence[WritebackItem]:
-    cfg, best = req.run_result.cfg, req.analyze_result
-    if cfg is None or isinstance(best, CZOptimizeUnavailable):
-        return []
     parameters = req.ctx.parameters
     if parameters is None:
         raise ValueError("CZ optimization writeback requires a Run/Load capture")
-    _check_source_roles(cfg, parameters)
+    cfg, best = req.run_result.cfg, req.analyze_result
+    if cfg is None or isinstance(best, CZOptimizeUnavailable):
+        return []
 
     samples = best.render_best()
     key = f"cz_opt_{hash_samples(samples)[:12]}"
@@ -71,13 +69,15 @@ def _get_writeback_items(
             note=note,
         )
     ]
-    for role, pulse in (("f1", cfg.drive.f1), ("f2", cfg.drive.f2)):
-        target = f"$coupler.pulses.cz_{role}"
+    for position, pulse in (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2)):
+        label = position.capitalize()
+        # Pulse library keys: $coupler.pulses.cz_qubit1 and $coupler.pulses.cz_qubit2.
+        target = f"$coupler.pulses.cz_{position}"
         items.extend(
             (
                 ModuleWriteback(
                     target_name=target,
-                    description=f"CZ {role.upper()} pulse with the best envelope",
+                    description=f"CZ {label} pulse with the best envelope",
                     proposal=PulseSpec.model_validate(
                         {**pulse.to_dict(), "waveform": {"style": "arb", "data": key}}
                     ),
@@ -85,8 +85,9 @@ def _get_writeback_items(
                     note=note,
                 ),
                 ParameterWriteback(
-                    target_name=f"$coupler.module.cz_{role}",
-                    description=f"CZ {role.upper()} pulse slot",
+                    # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
+                    target_name=f"$coupler.module.cz_{position}",
+                    description=f"CZ {label} pulse slot",
                     proposed_value=parameters.library_key(target),
                     selected=selected,
                     note=note,
@@ -95,13 +96,16 @@ def _get_writeback_items(
         )
     items.append(
         ParameterWriteback(
+            # Keys: $coupler.ext.cz_phase.qubit1, $coupler.ext.cz_phase.qubit2,
+            # $coupler.ext.cz_phase.correction_qubit1_deg,
+            # $coupler.ext.cz_phase.correction_qubit2_deg.
             target_name="$coupler.ext.cz_phase",
-            description="Best logical Z corrections for F1 and F2 (deg)",
+            description="Best logical Z corrections for Qubit1 and Qubit2 (deg)",
             proposed_value={
-                "f1": cfg.roles.f1,
-                "f2": cfg.roles.f2,
-                "correction_f1_deg": best.best_params[-2],
-                "correction_f2_deg": best.best_params[-1],
+                "qubit1": parameters.resolve_path("$qubit1"),
+                "qubit2": parameters.resolve_path("$qubit2"),
+                "correction_qubit1_deg": best.best_params[-2],
+                "correction_qubit2_deg": best.best_params[-1],
             },
             selected=selected,
             note=note,
@@ -110,23 +114,19 @@ def _get_writeback_items(
     return items
 
 
-def _check_source_roles(cfg: CZOptimizeCfg, parameters: DocumentSetCapture) -> None:
-    """Reject writeback if a captured role differs from the saved run identity."""
-    for role, identity in (
-        ("f1", cfg.roles.f1),
-        ("f2", cfg.roles.f2),
-        ("coupler", cfg.roles.coupler),
-        ("mux", cfg.roles.mux),
-    ):
-        if parameters.resolve_path(f"${role}") != identity:
-            raise ValueError(
-                f"CZ optimization writeback capture must match saved {role} identity"
-            )
-
-
 def run(cfg: CZOptimizeCfg, *, context: RunContext) -> _Run:
     """Run with captured calibration and retain the original cfg, not a candidate."""
     return RunRecord(cfg=cfg, result=CZOptimizeExp().run(cfg, context=context))
+
+
+def _summary_lines(source: _Run) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (
+        f"Reps×Rounds {cfg.reps}×1",
+        f"Applied CZ envelope duration {source.result.duration:.6g} µs",
+    )
 
 
 DEFINITION = Adapter(
@@ -134,5 +134,7 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
+    analysis=Analysis(
+        fn=_analyze, writeback=_get_writeback_items, summary_lines=_summary_lines
+    ),
 )

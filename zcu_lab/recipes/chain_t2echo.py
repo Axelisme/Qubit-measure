@@ -41,7 +41,7 @@ class ChainT2EchoInputs(RecipeInputs):
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Total echo-delay stop in us, not half-delay.",
+        description="Total echo-delay stop in µs, not half-delay.",
     )
     points: int | None | Keep = Field(
         KEEP,
@@ -61,16 +61,16 @@ class ChainT2EchoReport(RecipeReport):
     """Chain echo fit and its checks; cancellation returns no report."""
 
     t2_us: float | None = Field(
-        description="T2 echo from the chain fit in us; null means not estimable."
+        description="T2 echo from the chain fit in µs; null means not estimable."
     )
     t2_err_us: float | None = Field(
-        description="T2 echo uncertainty in us; null means not estimable."
+        description="T2 echo uncertainty in µs; null means not estimable."
     )
     tf_us: float | None = Field(
-        description="Third-state decay time in us; null means not estimable."
+        description="Third-state decay time in µs; null means not estimable."
     )
     tf_err_us: float | None = Field(
-        description="Third-state decay uncertainty in us; null means not estimable."
+        description="Third-state decay uncertainty in µs; null means not estimable."
     )
     within_point: CycleCheck | None = Field(
         description="Within-point check J, df, p; null without analysis."
@@ -82,7 +82,7 @@ class ChainT2EchoReport(RecipeReport):
         description="Curve check J, df, p; null without analysis."
     )
     first_read_t2_us: float | None = Field(
-        description="T2 echo in us of the first-read twotone fit; null means not estimable."
+        description="T2 echo in µs of the first-read twotone fit; null means not estimable."
     )
 
 

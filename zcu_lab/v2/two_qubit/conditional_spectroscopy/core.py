@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
-from matplotlib.lines import Line2D
+from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
@@ -37,20 +37,20 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
-from .._drive import DualLineCfg
-from .._readout import JointRoles, MuxResetCfg
+from .._drive import QubitDriveCfg
+from .._readout import MuxResetCfg
 from .._sums import (
-    marginal_probabilities,
-    validate_classifiers,
+    qubit_marginal_probabilities,
+    validate_qubit_tones,
 )
 
 
 @dataclass(frozen=True)
 class SpectroscopyResult:
-    """Raw float64 sums (DC,2,2,frequency,3,3), terminal F1/F2 g/e/other.
+    """Raw float64 sums (DC,2,2,frequency,3,3), terminal Qubit1/Qubit2 g/e/other.
 
     DC coordinates are device-native, or [0] when inactive. Frequencies are MHz.
-    Preparation axes are fixed [0,1] (g/e), F1 outer. Unmeasured points
+    Preparation axes are fixed [0,1] (g/e), Qubit1 outer. Unmeasured points
     remain NaN; completed acquisition rounds survive cancellation.
     """
 
@@ -62,9 +62,9 @@ class SpectroscopyResult:
 
 @dataclass(frozen=True)
 class SpectroscopyAnalysis:
-    """Count-derived spectra on (DC, prepared_f1, prepared_f2, frequency).
+    """Count-derived spectra on (DC, prepared_qubit1, prepared_qubit2, frequency).
 
-    excitation adds a final F1/F2 axis. acquired_shots is the per-point sum
+    excitation adds a final Qubit1/Qubit2 axis. acquired_shots is the per-point sum
     after any herald selection. complete marks DC/preparation rows with at
     least one completed round at every frequency. Zero totals give NaN
     excitation. Other stays in the denominator; probabilities are not
@@ -81,7 +81,7 @@ class SpectroscopyCfg(ConfigBase):
 
     Frequency is a common MHz hardware sweep; pulses carry explicit waveforms,
     gains and phases (degrees), with timing in us. contrast applies both Xπ
-    pulses after the probe. F1/F2 require circle classifiers with GE Post radii.
+    pulses after the probe. Qubit1/Qubit2 require circle classifiers with GE Post radii.
     rounds accumulate counts at acquisition, not on a host round axis.
     dc_device=None leaves all sources untouched and uses the sentinel axis [0].
     Otherwise sweep the named source in dc_unit, without compensation or restore.
@@ -90,70 +90,138 @@ class SpectroscopyCfg(ConfigBase):
     reset: Annotated[
         MuxResetCfg | None,
         FieldMeta(
-            label="Reset", description="Optional reset at the start of every shot."
+            label="Reset",
+            description="Select a preparation reset or herald filter before each shot; leave blank to omit it.",
         ),
     ] = None
-    x180_f1: Annotated[
+    x180_qubit1: Annotated[
         Pulse.Cfg,
-        FieldMeta(label="F1 Xπ", description="Calibrated F1 preparation pulse."),
+        FieldMeta(
+            label="Qubit1 Xπ",
+            description="Enter the Rabi-calibrated Qubit1 flip for nominal preparation and readout contrast.",
+        ),
     ]
-    x180_f2: Annotated[
+    x180_qubit2: Annotated[
         Pulse.Cfg,
-        FieldMeta(label="F2 Xπ", description="Calibrated F2 preparation pulse."),
+        FieldMeta(
+            label="Qubit2 Xπ",
+            description="Enter the Rabi-calibrated Qubit2 flip for nominal preparation and readout contrast.",
+        ),
     ]
     drive: Annotated[
-        DualLineCfg,
+        QubitDriveCfg,
         FieldMeta(
-            label="Dual-line drive",
-            description="Two charge-line weak probe pulses; confirm gains and durations before Run.",
+            label="Two-qubit spectroscopy probe",
+            description="Enter the two weak pulses applied together on the respective qubit drive lines at the shared RF sweep frequency.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full mux readout; F1/F2 need circle + radius from GE Post.",
+            description="Enter the full mux module used after probe and optional contrast, with GE Post circle radii for both qubits.",
         ),
     ]
-    roles: JointRoles
-    contrast: Annotated[bool, FieldMeta(label="Double Xπ contrast")] = True
-    dc_device: Annotated[DeviceName | None, FieldMeta(label="Coupler DC source")] = None
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based Qubit1 position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based Qubit2 position in the full mux readout.",
+        ),
+    ]
+    contrast: Annotated[
+        bool,
+        FieldMeta(
+            label="Double Xπ contrast",
+            description="Enable an Xπ on each qubit after the probe, immediately before readout.",
+        ),
+    ] = True
+    dc_device: Annotated[
+        DeviceName | None,
+        FieldMeta(
+            label="Coupler DC source",
+            description="Select the connected coupler-bias source by name; leave blank to keep all sources unchanged.",
+        ),
+    ] = None
     dc_unit: Annotated[
-        Literal["A", "V", "native"], FieldMeta(label="DC source working unit")
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="DC source unit",
+            description="Select amperes, volts or the selected source's native unit for the bias sweep.",
+        ),
     ] = "native"
     dc: Annotated[
         SweepCfg,
         FieldMeta(
-            label="DC source values",
-            description="Inactive when source is None; no F1/F2 compensation.",
+            label="Coupler DC bias sweep",
+            description="Enter the sweep in DC source unit (A, V or native); leave the source blank to ignore this sweep.",
         ),
     ] = Field(default_factory=lambda: SweepCfg(start=0, stop=0, step=0, expts=1))
     frequency: Annotated[
         SweepCfg,
         FieldMeta(
             unit="MHz",
-            label="Frequency",
-            description="Common probe frequency scan on both charge lines.",
+            label="Common probe RF frequency",
+            description="Enter the RF sweep (MHz); each point replaces the frequency of both probe pulses.",
         ),
     ]
-    reps: Annotated[int, FieldMeta(label="Reps")] = Field(gt=0)
-    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
-    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
-    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us", decimals=3)]
+    reps: Annotated[
+        int,
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Enter attempted shots per preparation and frequency per round.",
+        ),
+    ] = Field(gt=0)
+    rounds: Annotated[
+        int,
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Enter repeated frequency scans at each DC bias point.",
+        ),
+    ] = Field(default=1, gt=0)
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial wait",
+            unit="µs",
+            description="Enter the wait before the first shot of each round.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relaxation wait",
+            unit="µs",
+            decimals=3,
+            description="Enter the wait after each shot before the next preparation.",
+        ),
+    ]
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
-        """Require calibrated role tones, matched probe lines and finite scans."""
-        validate_classifiers(self.readout, self.roles)
-        if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
-            raise ValueError("Each probe must use its role's calibrated Xπ generator")
+        """Require calibrated qubit tones, matched probe lines and finite scans."""
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
+        if (
+            self.drive.qubit1.ch != self.x180_qubit1.ch
+            or self.drive.qubit2.ch != self.x180_qubit2.ch
+        ):
+            raise ValueError("Each probe must use its qubit's calibrated Xπ generator")
         if self.dc_device is not None and not self.dc_device.strip():
             raise ValueError("DC source must name a connected device or be None")
         return self
 
 
 def summarize_spectra(counts: NDArray[np.float64]) -> SpectroscopyAnalysis:
-    """Compute F1/F2 excitation, accepted totals and all-frequency coverage.
+    """Compute Qubit1/Qubit2 excitation, accepted totals and all-frequency coverage.
 
     counts ends in terminal (3,3), with g/e/other on each axis and frequency
     immediately before them. Counts accumulate over completed rounds. Whole
@@ -170,7 +238,10 @@ def summarize_spectra(counts: NDArray[np.float64]) -> SpectroscopyAnalysis:
     if not np.all(np.isfinite(acquired_shots) | missing):
         raise ValueError("Acquired shots must be nonnegative totals or NaN")
     excitation = np.stack(
-        [marginal_probabilities(counts, target)[..., 1] for target in ("f1", "f2")],
+        [
+            qubit_marginal_probabilities(counts, target)[..., 1]
+            for target in ("qubit1", "qubit2")
+        ],
         axis=-1,
     )
     return SpectroscopyAnalysis(
@@ -194,32 +265,33 @@ def restore_result(data: GroupedLoadData[SpectroscopyCfg]) -> SpectroscopyResult
     )
 
 
-def _plot_excitation(
-    plots: Plots,
-    dc: NDArray[np.float64],
-    frequencies: NDArray[np.float64],
-    excitation: NDArray[np.float64],
-) -> None:
-    """Draw the F1/F2 excitation overlay per nominal preparation and DC point."""
-    # Show the same preparation-resolved overlay as the live plot.
-    for d, value in enumerate(dc):
-        for f1, f2 in np.ndindex(2, 2):
-            _, ax = plots.subplots(
-                num=f"excitation_dc_{d}_prep_{f1}_{f2}", layout="constrained"
-            )
-            preparation = excitation[d, f1, f2]
-            for values, label in zip(preparation.T, ("F1", "F2"), strict=True):
-                ax.plot(frequencies, values, ".", label=label)
-            ax.set(
-                title=f"Nominal preparation ({f1},{f2}) · DC {value:g}",
-                xlabel="Common probe frequency (MHz)",
-                ylabel="Excited-state probability P_e",
-            )
-            ax.legend()
+_PREPARATIONS = ("g,g", "g,e", "e,g", "e,e")
+_QUBITS = ("Qubit1", "Qubit2")
+
+
+def _spectra_title(cfg: SpectroscopyCfg, index: int) -> str:
+    """Name the measured population and active pulse-sequence variant."""
+    title = "Conditional spectroscopy · Qubit1 / Qubit2 · Terminal P(e)"
+    if cfg.dc_device is not None:
+        title += f" · Bias sweep point {index + 1}"
+    variant = "Double Xπ contrast" if cfg.contrast else "No contrast pulses"
+    return f"{title}\n{variant}"
+
+
+def _label_spectra(fig: Figure) -> None:
+    """Apply the common preparation panel order and spectrum axes for Run and Analyze."""
+    for ax, branch in zip(fig.axes, _PREPARATIONS, strict=True):
+        ax.set(
+            title=f"Nominal preparation: {branch}",
+            xlabel="Common probe RF frequency (MHz)",
+            ylabel="Terminal P(e)",
+            ylim=(-0.02, 1.02),
+        )
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
 
 
 class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
-    """Measure F1/F2 excitation versus common probe frequency in four branches."""
+    """Measure Qubit1/Qubit2 excitation versus common probe frequency in four branches."""
 
     AXES_SPEC: ClassVar[GroupedAxesSpec[SpectroscopyResult, SpectroscopyCfg]] = (
         GroupedAxesSpec(
@@ -227,8 +299,12 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                        VariableAxisSpec.generated_arange(
+                            label="terminal_qubit2", unit=""
+                        ),
+                        VariableAxisSpec.generated_arange(
+                            label="terminal_qubit1", unit=""
+                        ),
                         VariableAxisSpec(
                             label="Probe frequency",
                             unit="Hz",
@@ -236,10 +312,16 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                             scale=1e6,
                         ),
                         VariableAxisSpec(
-                            label="Prepared F2", unit="", values=(0, 1), dtype=np.int64
+                            label="Prepared Qubit2",
+                            unit="",
+                            values=(0, 1),
+                            dtype=np.int64,
                         ),
                         VariableAxisSpec(
-                            label="Prepared F1", unit="", values=(0, 1), dtype=np.int64
+                            label="Prepared Qubit1",
+                            unit="",
+                            values=(0, 1),
+                            dtype=np.int64,
                         ),
                         VariableAxisSpec(
                             label="DC source value (inactive if dc_device=null)",
@@ -257,7 +339,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             ),
             result_type=SpectroscopyResult,
             cfg_type=SpectroscopyCfg,
-            cfg_schema_version="6.0",
+            cfg_schema_version="7.0",
             tag="two_qubit/conditional_spectroscopy",
             result_builder=restore_result,
         )
@@ -273,42 +355,49 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         The stop signal carries only stop requests and reason text.
 
         """
-        # 1. Show F1/F2 excitation spectra by nominal preparation and optional DC setting.
+        # 1. Show Qubit1/Qubit2 excitation spectra by nominal preparation and optional DC setting.
         frequencies = sweep2array(config.frequency)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
-        viewers = {}
-        for d, dc in enumerate(dc_values):
-            for f1 in range(2):
-                for f2 in range(2):
-                    fig, ax = context.plots.subplots(
-                        num=f"measurement_dc_{d}_prep_{f1}_{f2}"
-                    )
-                    ax.set(
-                        xlabel="Common probe frequency (MHz)",
-                        ylabel="Excited-state probability P_e",
-                        title=f"Nominal preparation ({f1},{f2}) · DC {dc:g}",
-                    )
-                    viewers[d, f1, f2] = live_line(ax, num_lines=2)
-                    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-                    for line, label in zip(ax.get_lines(), ("F1", "F2"), strict=True):
-                        line.set_label(label)
-                    ax.legend()
-                    fig.show()
+        views = []
+        for index in range(len(dc_values)):
+            fig, _ = context.plots.subplots(
+                num=f"spectra_{index}",
+                nrows=2,
+                ncols=2,
+                figsize=(10, 7),
+                layout="constrained",
+            )
+            _label_spectra(fig)
+            panels = [live_line(ax, num_lines=2) for ax in fig.axes]
+            for ax in fig.axes:
+                for line, label in zip(ax.get_lines(), _QUBITS, strict=True):
+                    line.set(label=label, linestyle="none")
+            fig.legend(
+                fig.axes[0].get_lines(), _QUBITS, loc="outside lower center", ncols=2
+            )
+            title = _spectra_title(config, index)
+            fig.suptitle(
+                f"{title}\n0/{4 * len(frequencies)} preparation-frequency points sampled"
+            )
+            views.append((fig, panels, title))
+            fig.show()
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            f1_pe = marginal_probabilities(sums, "f1")[..., 1]
-            f2_pe = marginal_probabilities(sums, "f2")[..., 1]
-            artists: list[Line2D] = []
-            for (d, f1, f2), viewer in viewers.items():
-                artists.extend(
-                    viewer.set(
-                        frequencies, np.stack((f1_pe[d, f1, f2], f2_pe[d, f1, f2]))
-                    )
+        def update_view(sums: NDArray[np.float64]) -> tuple[Figure, ...]:
+            answer = summarize_spectra(sums)
+            for index, (fig, panels, title) in enumerate(views):
+                for panel, (qubit1, qubit2) in zip(
+                    panels, np.ndindex(2, 2), strict=True
+                ):
+                    panel.set(frequencies, answer.excitation[index, qubit1, qubit2].T)
+                shots = answer.acquired_shots[index]
+                fig.suptitle(
+                    f"{title}\n{np.isfinite(shots).sum()}/{shots.size} preparation-frequency points sampled"
+                    f" · {np.nansum(shots):,.0f} retained shots (count)"
                 )
-            return tuple(artists)
+            return tuple(fig for fig, _, _ in views)
 
         # 2. Set DC on the host; scan preparations and common probe frequency in hardware before contrast/readout.
         buffer = SignalBuffer(
@@ -332,43 +421,43 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     initial_delay=config.initial_delay,
                     relax_delay=config.relax_delay,
                 )
-                builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e (outer)
-                builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e (inner)
+                builder.add_loop("prepared_qubit1", 2)  # 0 = g, 1 = e (outer)
+                builder.add_loop("prepared_qubit2", 2)  # 0 = g, 1 = e (inner)
                 frequency = builder.add_sweep("frequency", config.frequency)
-                x180_f1 = Pulse("prepare_f1", config.x180_f1)
-                x180_f2 = Pulse("prepare_f2", config.x180_f2)
+                x180_qubit1 = Pulse("prepare_qubit1", config.x180_qubit1)
+                x180_qubit2 = Pulse("prepare_qubit2", config.x180_qubit2)
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset, terminal=readout))
-                builder.fork("default", into=["f1", "f2"])
+                builder.fork("default", into=["qubit1", "qubit2"])
                 with (
                     builder.branch(
-                        by="prepared_f1", align_timeline=True, timeline="f1"
+                        by="prepared_qubit1", align_timeline=True, timeline="qubit1"
                     ) as cases,
                     cases.case(1),
                 ):
-                    builder.emit(x180_f1)
+                    builder.emit(x180_qubit1)
                 with (
                     builder.branch(
-                        by="prepared_f2", align_timeline=True, timeline="f2"
+                        by="prepared_qubit2", align_timeline=True, timeline="qubit2"
                     ) as cases,
                     cases.case(1),
                 ):
-                    builder.emit(x180_f2)
-                builder.join("f1", "f2", into="default")
-                builder.fork("default", into=["probe_f1_time", "probe_f2_time"])
+                    builder.emit(x180_qubit2)
+                builder.join("qubit1", "qubit2", into="default")
+                builder.fork("default", into=["probe_qubit1_time", "probe_qubit2_time"])
                 builder.emit(
-                    Pulse("probe_f1", config.drive.f1, freq=frequency),
-                    timeline="probe_f1_time",
+                    Pulse("probe_qubit1", config.drive.qubit1, freq=frequency),
+                    timeline="probe_qubit1_time",
                 )
                 builder.emit(
-                    Pulse("probe_f2", config.drive.f2, freq=frequency),
-                    timeline="probe_f2_time",
+                    Pulse("probe_qubit2", config.drive.qubit2, freq=frequency),
+                    timeline="probe_qubit2_time",
                 )
-                builder.join("probe_f1_time", "probe_f2_time", into="default")
+                builder.join("probe_qubit1_time", "probe_qubit2_time", into="default")
                 if config.contrast:
-                    builder.emit(Pulse("contrast_f1", config.x180_f1))
-                    builder.emit(Pulse("contrast_f2", config.x180_f2))
+                    builder.emit(Pulse("contrast_qubit1", config.x180_qubit1))
+                    builder.emit(Pulse("contrast_qubit2", config.x180_qubit2))
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 step.run_acquire_summed(
@@ -377,8 +466,8 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     reducer=shot_sums(
                         prog,
                         [
-                            Classify("terminal", config.roles.f1_tone),
-                            Classify("terminal", config.roles.f2_tone),
+                            Classify("terminal", config.qubit1_tone),
+                            Classify("terminal", config.qubit2_tone),
                         ],
                     ),
                     rounds=config.rounds,
@@ -394,7 +483,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         *,
         plots: Plots,
     ) -> None:
-        """Plot count-derived F1/F2 P_e with other retained in the denominator."""
+        """Plot count-derived Qubit1/Qubit2 P_e with other retained in the denominator."""
         # 1. Use saved axes for preparation-resolved excitation spectra with other classes in the denominator.
         del options
         data = source.result
@@ -415,90 +504,84 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 "Spectroscopy requires saved axes and sums (DC,2,2,frequency,3,3)"
             )
         answer = summarize_spectra(data.sums)
-        _plot_excitation(plots, dc, frequencies, answer.excitation)
-
-        # 2. Compare preparation-resolved F1/F2 excitation and optional DC maps without fitting.
-        for target, role in enumerate(("F1", "F2")):
+        for index in range(len(dc)):
             fig, _ = plots.subplots(
-                num=f"spectra_{role.lower()}",
+                num=f"spectra_{index}",
                 nrows=2,
                 ncols=2,
-                figsize=(11, 7),
-                squeeze=False,
+                figsize=(10, 7),
                 layout="constrained",
             )
-            fig.suptitle(f"{role} P_e · double Xπ contrast {cfg.contrast}")
-            for f1, f2 in np.ndindex(2, 2):
-                ax = fig.axes[2 * f1 + f2]
-                for d, value in enumerate(dc):
-                    ax.plot(
-                        frequencies,
-                        answer.excitation[d, f1, f2, :, target],
-                        marker=".",
-                        label=f"DC {value:g} {cfg.dc_unit}"
-                        if cfg.dc_device
-                        else "DC inactive",
-                    )
-                ax.set(
-                    title=f"Nominal preparation ({f1},{f2})",
-                    xlabel="Common probe frequency (MHz)",
-                    ylabel=f"{role} P_e",
-                    ylim=(0, 1),
-                )
-                ax.legend(fontsize="small")
-            if cfg.dc_device is not None:
+            _label_spectra(fig)
+            fig.suptitle(_spectra_title(cfg, index))
+            for ax, (qubit1, qubit2) in zip(fig.axes, np.ndindex(2, 2), strict=True):
+                for values, label in zip(
+                    answer.excitation[index, qubit1, qubit2].T, _QUBITS, strict=True
+                ):
+                    ax.plot(frequencies, values, ".", label=label)
+            fig.legend(
+                fig.axes[0].get_lines(), _QUBITS, loc="outside lower center", ncols=2
+            )
+
+        # A map tracks peak motion with bias without overlaying all slices.
+        if cfg.dc_device is not None and len(dc) > 1:
+            bias_unit = "native unit" if cfg.dc_unit == "native" else cfg.dc_unit
+            for target, role in enumerate(_QUBITS):
                 fig, _ = plots.subplots(
                     num=f"map_{role.lower()}",
                     nrows=2,
                     ncols=2,
                     figsize=(11, 7),
-                    squeeze=False,
                     layout="constrained",
                 )
-                for f1, f2 in np.ndindex(2, 2):
-                    ax = fig.axes[2 * f1 + f2]
-                    image = ax.pcolormesh(
+                variant = "Double Xπ contrast" if cfg.contrast else "No contrast pulses"
+                fig.suptitle(
+                    f"Conditional spectroscopy · {role} · Terminal P(e) map\n{variant}"
+                )
+                for ax, index in zip(fig.axes, np.ndindex(2, 2), strict=True):
+                    qubit1, qubit2 = index
+                    ax.pcolormesh(
                         frequencies,
                         dc,
-                        answer.excitation[:, f1, f2, :, target],
+                        answer.excitation[:, qubit1, qubit2, :, target],
                         shading="nearest",
                         vmin=0,
                         vmax=1,
+                        cmap="viridis",
                     )
                     ax.grid(False)
-                    fig.colorbar(image, ax=ax, label=f"{role} P_e")
                     ax.set(
-                        title=f"Nominal preparation ({f1},{f2})",
-                        xlabel="Common probe frequency (MHz)",
-                        ylabel=f"{cfg.dc_device} ({cfg.dc_unit})",
+                        title=f"Nominal preparation: {_PREPARATIONS[2 * qubit1 + qubit2]}",
+                        xlabel="Common probe RF frequency (MHz)",
+                        ylabel=f"Coupler DC bias · {cfg.dc_device} ({bias_unit})",
                     )
-        # 3. Show acquired-shot coverage separately from excitation, including partial counts.
-        fig, _ = plots.subplots(
-            num="shots",
-            nrows=2,
-            ncols=2,
-            figsize=(11, 7),
-            squeeze=False,
-            layout="constrained",
-        )
-        fig.suptitle("Acquired shots per point · partial counts included")
-        for f1, f2 in np.ndindex(2, 2):
-            ax = fig.axes[2 * f1 + f2]
-            for d, value in enumerate(dc):
-                shots = answer.acquired_shots[d, f1, f2]
-                label = f"DC {value:g}; complete={answer.complete[d, f1, f2]}"
-                if np.any(shots == 0):
-                    label += "; no accepted shots at some frequencies"
-                ax.plot(frequencies, shots, label=label)
-            ax.axhline(
-                cfg.reps * cfg.rounds,
-                color="gray",
-                linestyle="--",
-                label="Requested shots",
+                fig.colorbar(
+                    fig.axes[0].collections[0],
+                    ax=fig.axes,
+                    label=f"{role} terminal P(e)",
+                    ticks=np.linspace(0, 1, 6),
+                )
+
+        # Coverage answers whether the measured points have any retained shots.
+        for index, shots in enumerate(answer.acquired_shots):
+            fig, _ = plots.subplots(
+                num=f"coverage_{index}",
+                nrows=2,
+                ncols=2,
+                figsize=(10, 7),
+                layout="constrained",
             )
-            ax.set(
-                title=f"Nominal preparation ({f1},{f2})",
-                xlabel="Common probe frequency (MHz)",
-                ylabel="Shots",
-            )
-            ax.legend(fontsize="small")
+            title = "Conditional spectroscopy · Qubit1 / Qubit2 · Retained shots"
+            if cfg.dc_device is not None:
+                title += f" · Bias sweep point {index + 1}"
+            fig.suptitle(title)
+            for ax, branch, (qubit1, qubit2) in zip(
+                fig.axes, _PREPARATIONS, np.ndindex(2, 2), strict=True
+            ):
+                ax.plot(frequencies, shots[qubit1, qubit2], ".", color="0.3")
+                ax.set(
+                    title=f"Nominal preparation: {branch}",
+                    xlabel="Common probe RF frequency (MHz)",
+                    ylabel="Retained shots (count)",
+                )
+                ax.xaxis.set_major_locator(MaxNLocator(nbins=5))

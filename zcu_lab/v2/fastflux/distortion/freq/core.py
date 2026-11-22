@@ -52,20 +52,27 @@ class FreqCfg(ConfigBase):
     qub_pulse: Pulse.Cfg
     readout: Readout.Cfg
     readout_t: float
-    length: SweepCfg
-    freq: SweepCfg
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="µs")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -112,7 +119,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # 2. Keep the delayed spectroscopy map in wait-major order.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (us)", ylabel="Frequency (MHz)")
+        ax.set(xlabel="Time (µs)", ylabel="Frequency (MHz)")
         formatter = ScalarFormatter(useMathText=True)
         formatter.set_powerlimits((-2, 2))
         ax.xaxis.set_major_formatter(formatter)
@@ -236,7 +243,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         ax.axvspan(end_t - qub_len / 2, end_t + qub_len / 2, color="gray", alpha=0.3)
 
         ax.set_ylabel("Qubit Frequency (MHz)", fontsize=14)
-        ax.set_xlabel("Time (us)", fontsize=14)
+        ax.set_xlabel("Time (µs)", fontsize=14)
         ax.legend(fontsize="x-large")
 
         fig.tight_layout()

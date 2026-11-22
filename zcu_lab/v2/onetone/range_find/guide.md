@@ -4,19 +4,19 @@
 
 `onetone/range_find` 以普通 pulse readout 的 generator 與 ADC 硬體掃頻，一次取得整條絕對 MHz 曲線。單一 Analyze 入口開啟互動 picker，靜態找谷結果只作初始猜測。確認選點與元件對應後按 Done，才產生分析結果與各 resonator 的 `freq` 候選。它不建立 readout module，也不擬合 resonator linewidth 或 electrical delay。找谷的 FWHM 只作候選篩選。
 
-修改 parameter source 後，按 Reset 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Reset 可能覆蓋尚未儲存的輸入。
+修改 parameter source 後，按 Defaults 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Defaults 可能覆蓋尚未儲存的輸入。
 
 ## 準備與輸入
 
 1. 先完成 lookback，確認 ADC window 與 trigger 能接到 readout。確認 generator、mixer、ADC 通道與功率已獲本次量測授權。能開表單不表示硬體設定安全。
-2. 設定 alias `resonator`。Open／Reset 與 `onetone/freq` linear 使用相同的 readout Template、gain 與 timing 初值。ADC window 初值為 0.97 µs。`time_of_fly` 必須可讀。未設 kappa 時只用 time-of-flight；已設 kappa 時再加五個 ringup time。Readout 與 reset 的欄位規則沿用普通 one-tone，不使用 mux generator 或 tone 序號。
-3. 從 New Tab 選 `onetone/range_find`。檢查 generator `gen_ch`、ADC `ro_ch`、mixer、gain、pulse 長度、ADC window 與 trigger。Open／Reset 產生可編輯的 readout 副本，不引用 `$mux` 的 readout 接線。
-4. 展開 Sweep → Frequency。Open／Reset 後 Start／Stop 空白且必填，Expts 初值為 301。填入絕對 MHz 範圍涵蓋所有預期凹陷，不是 mixer offset。用足夠點數讓每個凹陷有數個取樣點。這裡只有 linear sampling，不使用 homophasal 校準參數。
-5. Acquisition 表單沒有 resonator 名單，Run 不需要預先命名。設定 Reps、Rounds 與 Relax delay，必要欄位有效後才按 Run。來源修改後須按 Reset 才重新建立初值。Reset 會丟棄目前 draft。
+2. 設定 alias `resonator`。Open／Defaults 與 `onetone/freq` linear 使用相同的 readout Template、gain 與 timing 初值。ADC window 初值為 0.97 µs。`time_of_fly` 必須可讀。未設 kappa 時只用 time-of-flight；已設 kappa 時再加五個 ringup time。Readout 與 reset 的欄位規則沿用普通 one-tone，不使用 mux generator 或 tone 序號。
+3. 從 New Tab 選 `onetone/range_find`。檢查 generator `gen_ch`、ADC `ro_ch`、mixer、gain、pulse 長度、ADC window 與 trigger。Open／Defaults 產生可編輯的 readout 副本，不引用 `$mux` 的 readout 接線。
+4. 展開 Sweep → Frequency。Open／Defaults 後 Start／Stop 空白且必填，Expts 初值為 301。填入絕對 MHz 範圍涵蓋所有預期凹陷，不是 mixer offset。用足夠點數讓每個凹陷有數個取樣點。這裡只有 linear sampling，不使用 homophasal 校準參數。
+5. Acquisition 表單沒有 resonator 名單，Run 不需要預先命名。設定 Reps、Rounds 與 Relax delay，必要欄位有效後才按 Run。來源修改後須按 Defaults 才重新建立初值。Defaults 會丟棄目前 draft。
 
 ## FTF 成本例
 
-先前的離線 FTF 驗收以 7050 至 7220 MHz、501 點、Reps 2、Rounds 1、Relax delay 1 us 跑一次 Run。Pulse readout 使用 generator 0、ADC 0、gain 0.05、當時的 RO window 0.99 us、trigger 0.798 us。Run wall time 為 0.856 s，CPU slot 為 4–5，BLAS 單執行緒。此例使用 repo FTF preset 與模擬資料，不代表硬體成本或物理校準已通過。
+先前的離線 FTF 驗收以 7050 至 7220 MHz、501 點、Reps 2、Rounds 1、Relax delay 1 µs 跑一次 Run。Pulse readout 使用 generator 0、ADC 0、gain 0.05、當時的 RO window 0.99 µs、trigger 0.798 µs。Run wall time 為 0.856 s，CPU slot 為 4–5，BLAS 單執行緒。此例使用 repo FTF preset 與模擬資料，不代表硬體成本或物理校準已通過。
 
 一個點是一個絕對頻率，不是 resonator 數量乘以點數。計時從點擊 Run 到 Run 按鈕恢復可用，包含設定、編譯、acquisition 與宿主提交，不含 Analyze 或保存。FTF 的編譯與快取會影響時間，成本不保證與 reps 成正比。先用目標設定做短 Run 估成本，再增加點數。不同 CPU slot、設定或快取狀態的時間不能直接比較。
 
@@ -63,7 +63,7 @@ Apply 寫入當下作用中的文件組，GLOBAL 寫 entry，POINT 寫選定 poi
 
 沒有頻率排序依據時，每列 writeback 候選的 description 也顯示「dip 與元件身分配對待確認」。這個提示不封鎖 Apply。先核對 dip 與元件身分，再決定接受哪些列。需要改對應時，重新 Analyze，在 picker 中調整 Component 並按 Done，候選才會更新。
 
-對照圖上的名稱與位置，逐列檢查目的地和頻率。取消不接受的列，再按 Apply Selected。這裡不提出 module、kappa 或 edelay。確認粗頻率後，另開或 Reset `onetone/freq` 做普通 channel 窄掃。需要 mux readout 校準時，另開或 Reset `mux/onetone` 並核對 mux 接線，再執行窄掃。
+對照圖上的名稱與位置，逐列檢查目的地和頻率。取消不接受的列，再按 Apply Selected。這裡不提出 module、kappa 或 edelay。確認粗頻率後，開啟 `onetone/freq` 或在已開的 tab 按 Defaults 做普通 channel 窄掃。需要 mux readout 校準時，開啟 `mux/onetone` 或在已開的 tab 按 Defaults 並核對 mux 接線，再執行窄掃。
 
 ## 保存與讀回
 
@@ -99,13 +99,13 @@ Recipe 在同一個 Analyze operation 傳入必填名單與間距，間距省略
    Done proposes a frequency row for every named dip, even without capture. Apply creates a missing resonator or overwrites its existing frequency.
    Inspect and adjust the picker, then press Done. Cancel first if the label list must change.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `onetone_range_find` after inspecting the same Form errors.
    freq with absolute MHz start/stop, n and nonempty resonators are required. n maps to frequency Expts.
    resonators supplies picker labels and the expected count. Use temporary labels for unidentified dips.
    min_separation sets initial minimum MHz spacing. Inspect through tab_interact and send done before answering writeback.
    The Form chooses module sources. Omission retains values; null is passed to the Form or analysis owner. Overrides apply last, then check_ready validates before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

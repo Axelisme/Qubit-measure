@@ -72,7 +72,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：同一種資料不因屬於 global 或 point 分成兩套型別或方法，選檔用 `point: str | None`（None 是 global），見 [ADR-0063](0063-persistence-ownership.md#同一種資料不因-global-或-point-分兩套)。
 
 - [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：保存權威、Container 讀寫、Run metadata、library 與 component 升級邊界。
-- [0080 — datafile 通用容器格式與獨立介面](0080-datafile-generic-container.md)：只接受 Container major 3 的通用 vars／docs／groups 容器與獨立 API。
+- [0080 — datafile 通用容器格式與獨立介面](0080-datafile-generic-container.md)：只接受 Container major 3 的通用 vars／docs／groups 容器；公開單一 Variable 的無 I/O 結構檢查。
 - [0081 — Global 與 point 資料以磁碟為真相](0081-point-data-disk-sync.md)：Global／point 以磁碟為真相、write-through、watcher 與 revision 樂觀鎖。
 - [0082 — Component flux frame 與明確升級](0082-component-flux-frame.md)：Component offset／signed periods、flux_dev 與明確 v1→v2→v3 升級鏈。
 
@@ -81,6 +81,10 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：一般實驗由取數端加總或平均已完成 rounds，Result 不留 round 軸；這是建議，需要逐輪資料時可把 round 迴圈放在最外層，見 [ADR-0083](0083-program-macros-and-timelines.md#round-在取數端歸約)。
 
 原則：實驗 cfg 可為統一命名改欄位；改名升 schema major，不遷移、不留 alias，舊 run 在結果仍相容時保留 Result 與 metadata，見 [ADR-0069](0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。
+
+原則：adapter 解析元件身分，cfg 收位置數值，分析 options 收顯示名。同一位置不跨層翻譯，實驗只驗所需能力，見 [ADR-0069](0069-experiment-core-and-frontends.md#身分定位與顯示)。
+
+原則：懂物理的操作員不讀程式碼就能判讀實驗。圖只放判讀所需資訊，adapter 提供 GUI 與 MCP 共用摘要，一維逐點誤差用 shot SEM，見 [ADR-0069](0069-experiment-core-and-frontends.md#呈現規範)。
 
 原則：只有準備誤差不移動 gg、ee 兩組共用的參數時，才保留獨立 heralded 實驗，見 [ADR-0074](0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)。
 
@@ -91,14 +95,15 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：Async workflow、operation、Ask、停止、live tunables 與作者保存責任。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。
-- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 配置、classifier、逐 shot sums 與 reducer、herald reset 與逐 shot 遮罩、雙 qubit heralded 分類、單 qubit cov 自校準與 QICK projection。
+- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 配置、classifier、逐 shot sums、選用校正 IQ 矩、herald reset 與逐 shot 遮罩、雙 qubit heralded 分類、單 qubit cov 自校準與 QICK projection。
 - [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：Program macro、具名 timeline、往後跳轉與 label 合併、查表掃描、compiled snapshot 與全面 Timeline 遷移。
 
 ## Analysis / Simulation / Waveform
 
 原則：family 的完整序列最終精度合格就只比耗時，刪除前先補同型態長序列證據，見 [ADR-0078](0078-evolution-module-boundary.md#family-去留合格只比耗時)。
 原則：模擬器分層測試，不做 e2e 測試。只允許一支整實驗 Run 牆鐘工具，kernel／family 比較仍只量 `Engine.evolve`，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
-原則：guard 在整個參數空間不放行超標；速度優化只做有耗時紀錄的瓶頸，修法時程未定時先走慢但對的候選，見 [ADR-0078](0078-evolution-module-boundary.md#先保證正確再優化瓶頸)。
+原則：正常參數先守 180 秒，誤差在 `1e-2` 內選快的；只為守時間才接受超過並記錄，達 `1e-1` 不採用，見 [ADR-0078](0078-evolution-module-boundary.md#歷史控制與精度驗收)。
+原則：優化只量目標實驗前後，先做便宜的正確性對照，再補獨立參考；影響實機、存檔或使用者結果則先驗再落地，見 [ADR-0078](0078-evolution-module-boundary.md#先求效率正確性事後補)。
 原則：評估算法時預算固定為使用者按場景宣告的需求，在固定預算下找算法適合的場景，不為算法放寬預算；長序列預算按 gate 數放寬，見 [ADR-0078](0078-evolution-module-boundary.md#固定預算找適合的場景)。
 原則：模擬算法與機制同時適用 Windows 與 Linux，不依賴單一作業系統的設定或行為，見 [ADR-0078](0078-evolution-module-boundary.md#跨平台不綁作業系統)。
 原則：GPU 是可選功能，沒有 GPU 套件或可用裝置時維持 CPU 行為與逐位相同的結果，見 [ADR-0078](0078-evolution-module-boundary.md#gpu-是可選功能)。

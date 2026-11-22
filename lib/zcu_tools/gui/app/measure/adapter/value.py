@@ -47,6 +47,7 @@ class _PrimaryStage[C: ConfigBase, R, O, A](ABC):
     """Hide only interactive state S, retaining source/options/result linkage."""
 
     options: Callable[[RunRecord[C, R], SessionEnv], O] | None = None
+    summary_lines: Callable[[RunRecord[C, R]], tuple[str, ...]] | None = None
     writeback: (
         Callable[[WritebackRequest[RunRecord[C, R], A]], Sequence[WritebackItem]] | None
     ) = None
@@ -82,6 +83,10 @@ class Analysis[C: ConfigBase, R, O, A](_PrimaryStage[C, R, O, A]):
     source and retains the returned editable object for form/schema generation.
     None means no generator and an empty form, not no analysis capability.
     The value does not cache or rerun it on clicks or schema queries.
+
+    summary_lines, inherited, receives the source RunRecord at publication and
+    returns ordered plain-text operator lines, or () when none apply. None
+    declares no lines. These lines are not part of the saved analysis result.
 
     writeback, also inherited, receives WritebackRequest after successful
     adoption and returns proposal items, not applied resource changes. None
@@ -119,6 +124,10 @@ class Interactive[C: ConfigBase, R, O, A, S](_PrimaryStage[C, R, O, A]):
     generator. The host invokes it once when preparing a successful Run/Load
     source and retains the editable object for form/schema generation. None
     gives an empty form without disabling interactive analysis.
+
+    summary_lines, inherited, receives the source RunRecord at publication and
+    returns ordered plain-text operator lines, or () when none apply. None
+    declares no lines. These lines are not part of the saved analysis result.
 
     writeback, also inherited, receives WritebackRequest after successful result
     adoption and returns proposal items without applying them. None means no
@@ -345,6 +354,18 @@ class Adapter(
         if self.analysis is None or self.analysis.options is None:
             return None
         return self.analysis.options(source, env)
+
+    def get_analysis_summary_lines(
+        self, source: RunRecord[T_Cfg, T_Result]
+    ) -> tuple[str, ...]:
+        """Return authored display lines for this Run/Load, or () without a hook.
+
+        The host calls this at primary analysis publication. The hook reads the
+        retained source, not the live Form; its errors propagate before commit.
+        """
+        if self.analysis is None or self.analysis.summary_lines is None:
+            return ()
+        return self.analysis.summary_lines(source)
 
     def analyze(
         self,

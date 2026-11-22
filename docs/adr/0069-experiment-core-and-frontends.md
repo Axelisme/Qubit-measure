@@ -72,6 +72,38 @@ GUI 插件自行定義 typed 成功輸出的欄位。插件決定是否輸出選
 
 實驗跨入 zcu_tools 時使用公開絕對 import，預設置頂。只有具體重型依賴或初始化限制才延遲，不藉此外移模組或建立設定式 discovery。
 
+### 身分、定位與顯示
+
+#### 綁定身分留在 adapter
+
+**規則。** GUI adapter 從固定 capture 解析角色綁定的元件名。Run metadata 保存該次來源，寫回時由 adapter 核對元件名及順序。量測 cfg 與表單欄位不保存角色身分。Adapter 把位置推導成普通數值填進 cfg。需要顯示元件名的實驗以自己的 analyze `options` 接收標籤，GUI adapter 從同次 capture 提供顯示預設。Core 與分析不解析角色身分。
+
+**例子。** `$qubit1` 綁 QA，QA 在完整 mux readout 的第二個位置，adapter 把 `qubit1_tone=1` 交給 core。Local Z 分析只印出 options 裡的 QA，寫回則由 adapter 用來源身分比對而不用圖例。
+
+**邊界。** Notebook 使用者以自己的上下文綁定元件，手動提供同樣的 tone index、校準值與標籤。不透過 adapter 也能呼叫 core。標籤不是身分，不用來決定寫回目標。
+
+**依據。** 2026-11-20，使用者答「A」，並說「我目前姑且的想法是，可能 analyze 开放一个参数接口，可以让 adapter 填之类的。」「其實gui顯示的options與core要的options是解耦的」。見[身分與中性位置的討論](../discussions/2026-11-22-two-qubit-identity-and-neutral-positions.md)。
+
+#### 只驗實驗所需的能力
+
+**規則。** 實驗不因範例樣品而限制元件的物理子種類。需要驗證物理種類時，先指出序列或分析依賴的能力，再由該實驗的表單推導拒絕不相容的種類。
+
+**例子。** Two-qubit 不要求 fluxonium 或 transmon。兩個位置須是 `$mux.qubits` 中不同的成員，並遵守 [ADR-0072 的有序 mux 綁定](0072-module-boundaries.md#mux-group-是實驗室的-component-定義)。Open／Defaults 檢查 owner 大類、對應順序與已綁 readout；提交時再用同一次 capture 核對實際 readout 的完整 tone 數。需要 CZ 校準時才要求 coupler 綁定，不要求特定 coupler 種類。
+
+**邊界。** Owner 大類、連結存在與順序是 mux 拓撲契約，不是物理子種類限制。相同 tone 數不能證明 readout 的物理順序，仍由操作員核對。沒有固定 group 的 core 不猜測這項關係。
+
+**依據。** 2026-11-21，使用者答「1a，沒有理由限制就不要限制 2a」。同日追認種類中性化的共用規則：「啊，其余大部分都没有问题啊，整批追认。」Two-qubit 的兩次驗證由 designer 於 2026-11-22 代裁，使用者未覆核。見[身分與中性位置](../discussions/2026-11-22-two-qubit-identity-and-neutral-positions.md)及[mux 綁定檢查](../discussions/2026-11-22-two-qubit-mux-binding-checks.md)。
+
+#### 同一位置不跨層翻譯
+
+**規則。** 同一位置從 alias、recipe、cfg、表單到預設顯示只用一個名字。衍生欄位沿用該位置名，不為了在兩套名稱間對照而加轉換。
+
+**例子。** Two-qubit 使用 repo 已有的 `qubit1`、`qubit2`。第一個位置的 tone index 叫 `qubit1_tone`，配對的 CZ slot 叫 `cz_qubit1`，預設圖例叫 Qubit1。
+
+**邊界。** GUI point aliases 與 Notebook 內建角色名稱相同，綁定仍獨立。位置名不是實際元件名，顯示時可用 options 換成元件名。變長的 mux 選取沿用既有 index 契約。舊 point 按[操作指南](../../zcu_lab/v2/two_qubit/guide.md#重綁舊-point)一次重綁，不設舊名 alias。
+
+**依據。** 2026-11-21，使用者追認 designer 代裁：「策零零七一追认代采」。沿 [ADR-0079](0079-form-field-transitions.md#remote-與-recipe) 2026-10-18 的原話：「既然核心是用index，那就用適合核心的方案，不要加一堆難維護的轉換邏輯」。見[身分與中性位置的討論](../discussions/2026-11-22-two-qubit-identity-and-neutral-positions.md)。
+
 ### Notebook 中斷與部分結果
 
 NotebookAdapter 在 main thread 執行 core.run 期間替換 SIGINT handler。第一次中斷設定 stop 與 reason，並啟動計時器。Core 在期限內正常返回就取消計時器並照常發布；到期或真的收到第二次中斷時，handler 拋 KeyboardInterrupt，不發布 record。Schedule 與 AcquisitionRunner 不吞 KeyboardInterrupt，作者自行決定如何組成可返回的資料。
@@ -125,6 +157,29 @@ Presentation owner 保留明確的呈現使用期與 release 責任，不能複�
 
 GUI application 持有結果與具名圖集合，保存不反向依賴 Qt widget。前端持有 canvas 與選圖狀態。截圖取目前選圖，分析圖保存涵蓋整個集合；不新增多圖排版編輯器。
 
+### 呈現規範
+
+**規則。** [實驗呈現指南](../../zcu_lab/v2/figure-style.md)定義圖、表單文字、guide 與 recipe 說明的寫法。R0 是共同的驗收原則。懂物理但不熟悉實作的操作員，只看表單、guide、liveplot 與 Analyze 圖，就能說出實驗量什麼、每個參數做什麼、每個圖形元素代表什麼，以及如何判讀結果。
+
+圖只放物理量、模型、擬合結果與判讀所需的標註。Run 身分放在可見的 Analyze 摘要，不印在圖上。Adapter 用該次 cfg 的 Reps×Rounds 與實驗已回傳的實際施加值提供摘要行。GUI 與 MCP 的 [`AnalysisPresentation`](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation) 顯示同一份行，不各自組裝。摘要行不經 [[0062]]〈一個 run 的 operation〉的 workflow operation wire。圖的標題與圖例由各實驗 core 編寫，不建立共用 formatter。Run 頁的按鈕名為 `Defaults`，表單的物理欄位仍用 `Reset`。
+
+R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Data 頁的縮圖用來辨識與選取各 stage 的具名圖；Data 的 R7 在 [`View figure` 閱讀面](../../lib/zcu_tools/gui/app/measure/ui/README.md)檢查同一張當前原生 Figure 依閱讀尺度重繪後的畫面，放不下就捲動，不縮小字級。
+
+對數值大小敏感的一維資料點畫 shot SEM；看峰位的 spectrum 和二維圖不畫逐點 error bar。Shot SEM 是每發樣本標準差除以保留 shot 數的平方根，表示該點平均值的預期誤差。顯示用時間寫 `µs`，gain、amplitude 與倍率寫 `a.u.`，機率寫出機率名稱，計數寫 `count`。存檔單位照[保存、發現與範圍](#保存發現與範圍)，不受顯示詞彙影響。
+
+**例子。** T2 Ramsey 的 Analyze 圖按規範畫量測點、密網格 fit 與「T2* = 值 ± 誤差 µs」。cfg 的 Reps×Rounds 和實際施加的 detune 放在摘要。Rabi 和 T1 的 shot SEM 表達各點平均值的預期誤差，two-tone spectrum 不加逐點 error bar。
+
+**邊界。** 採集摘要不列完成輪數、是否提前停或 shot 數，不擴充 `RunMetadata`，也不改 [[0062]] 的 Schedule facts 規則。各實驗決定是否保存實際施加值。重開檔案缺某個值就不顯示，不能用現行表單補值。Shot SEM 估計器歸 `zcu_tools.analysis`；fit 參數誤差與 RB 的跨 seed 標準差留在原 owner。只存平均的實驗在家族修正時加二階 moment，不移除舊欄位；舊檔仍可 Load，缺資料時不畫 error bar。除此之外，呈現修正沿用現有資料，不改取數。指南的 fit 品質、population 軸、分支標籤，以及表單、guide 與 recipe 文字細則是 designer 代裁，使用者未覆核。Ding 博論只作版式與標註參考，不把相近的圖視為同一實驗。
+
+**依據。** 見[呈現規範討論](../discussions/2026-11-22-presentation-rules.md)與[摘要及誤差棒的責任分工](../discussions/2026-11-22-shared-presentation-facts.md)。原始問答未入庫。
+
+- 2026-11-20，使用者：「實驗不是能用就行，至少要一個對實作無知的使用者角度，從cfg與guide以及liveplot與分析圖，搭配物理專業名詞就能完整理解這個實驗，包含gui/recipe。」使用者以「1A 2A，統一度量衡 3採用」採用單位方案 A 和整份 R0–R9 清單，並說「gain的單位名應該寫a.u.而不是冗長的dimensionless」。
+- 2026-11-22，使用者：「1我以為圖的名字已經足夠定位」。重整選項後回答：「1可以，圖應該放純理論實作者關注的重點，而不是實驗作者關注的資訊。2我有考慮給部分實驗的點加上errorbar，通常是比如rabi/t1之類的一維數據，對數據值的大小比較敏感的。spectrum之類的或是二維圖就不用」。
+- 2026-11-22，使用者：「關於實驗liveplot與分析圖，我認為可以參考ding博倫的格式，這才是人看的圖。」
+- 2026-11-22，使用者對摘要和按鈕答「1a, 存檔看有沒有需求 2a」，分別採用現有值與 `Defaults`。
+- 2026-11-22，Data 頁保留縮圖選圖、改以閱讀面驗 R7，是 designer 依夜間授權代裁，使用者未覆核。使用者同日要求：「那注意排版啊，那个 GUI 的版面配置可能不是正规的四乘三或者什么的，然后字体大小之类的要注意缩放，比如说在 Save 页面可能会变得比较窄」。見[在 Measure Data 頁讀原圖](../discussions/2026-11-22-data-figure-reading.md)。
+- 2026-11-22，使用者在 shot SEM 與輪間散布之間選「A」，補充「像我其实更想要设计的，其实应该是平均标准差，也就是这个点的预期误差。」數值估計器放 analysis、標題與圖例留在 core 是 designer 代裁，使用者未覆核。
+
 ### 三種分析生命週期
 
 - T1 提供同步 analyze，消費 explicit RunRecord 與 typed options。Notebook 成功後發布 AnalysisRecord；GUI 發布插件定義的 typed 分析輸出、來源與圖。
@@ -155,6 +210,16 @@ Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 ex
 
 所有實驗與 caller 都使用這套核心與前端契約，不保留 pyplot 相容層或舊協議 fallback。Executor、動畫框架、acquisition、排程與硬體鎖機制不在本篇範圍。
 
+#### Native 可選變數與 Labber 投影
+
+**規則。** `GroupedAxesSpec` 至少宣告一個必填變數。`VariableSpec(required=False)` 只在整個 Result z 欄位為 `None` 時略寫；讀檔缺可選變數時不交給 builder，也不補資料。缺必填、缺 Result 欄位或已有變數不合宣告仍拒絕。實驗層把現有變數映射到 SI，先用 [[0080]] 的單一 Variable 驗證器檢查，再按 spec 投影 Labber 選集。單檔匯出與 artifacts 共用這個準備過程。
+
+**例子。** 傳統 Amp Rabi 保留原 `data` 的 Gain 軸和平均 complex IQ，有六矩才另存 `iq_moments`。Labber 明選原 `data`，普通 reader 仍讀單一 log。只有平均 IQ 的舊檔與校準產物用同一 spec 重開，不畫逐點誤差棒。
+
+**邊界。** `required=False` 只管 native 變數可否缺席，不決定哪些變數匯出。未明定 Labber 選集時匯出所有已存在的變數；不因選集自動切換 grid layout。不放寬既有 tag、cfg schema、軸或 dtype 驗證，也不新增歷史 reader。Datafile 與 Labber writer 不判讀實驗語意。
+
+**依據。** 2026-11-22，designer 依「这个点的预期误差」所定的 shot SEM 方向代裁單一 spec 與獨立選集，使用者未覆核這兩項保存細節。比較與驗證見 [Amp Rabi 的 shot moments](../discussions/2026-11-22-amp-rabi-shot-moments.md)。
+
 ### Cfg 欄位改名與 schema 版本
 
 為了讓同一角色用同一名稱，可以改既有實驗的持久 cfg 欄位。改名時提升 `cfg_schema_version` 的 major，不遷移舊 cfg，也不提供 alias。只要舊 run 的 tag 與結果資料仍相容，Load 就保留 Result 與 metadata，令 `RunRecord.cfg=None`。需要 cfg 的分析不會改用新預設值繼續跑。
@@ -162,6 +227,16 @@ Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 ex
 例如 `two_qubit/local_z` 將掃描欄位 `gate_counts` 改為 `gate_count` 並提升 cfg schema major，Result 欄位與存檔軸維持原樣。若只改 guide、表單標籤或圖上的文字就能達到目的，保留 cfg 欄位與版本。若必須保留舊 run 依原 cfg 重新分析的能力，先不改名；相容方案要另外裁定。
 
 使用者在 2026-11-19 對以單數改名為先例、不提供 alias 的提案回覆「全采用建议」。選項與首批範圍見[實驗命名與顯示討論](../discussions/2026-11-20-experiment-naming-and-display.md)。
+
+#### 只有模擬測試資料時的舊結果格式
+
+**規則。** 確認只有模擬器測試資料的家族更改 native 結果格式時，不為不相容的舊 layout 新增 reader。保留原檔，不改寫或遷移。相容 layout 仍沿用既有 cfg fallback。
+
+**例子。** Two-qubit joint readout 的新檔使用 `terminal_qubit1`、`terminal_qubit2`。舊軸與現行宣告不符時 Load 拒絕，要讀原檔使用對應的舊版。
+
+**邊界。** 有實機資料的家族沿用本 ADR 的載入相容規則。不確定某家族有沒有實機資料，先問使用者。這項例外不授權刪除舊檔，也不要求其他家族改格式。
+
+**依據。** 2026-11-22，使用者答「我沒有舊資料，可以直接換到新格式」，並補充「像是chain/herald/two_qubit等實驗，我都沒在真實硬體上跑過，只有測試用的模擬器數據，後者不重要，所以這些都不用在意舊格式數據的載入問題」。見[two-qubit native 軸名討論](../discussions/2026-11-22-two-qubit-native-axis-cutover.md)。
 
 ## 顯式 cfg 與裝置環境
 

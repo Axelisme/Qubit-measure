@@ -110,14 +110,21 @@ class MuxT2EchoCfg(ConfigBase):
     readout: MuxReadoutCfg
     tones: Annotated[list[MuxEchoToneCfg], FieldMeta(element_label="name")]
     participants: list[StrictInt]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ] = Field(gt=0)
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = Field(default=1, gt=0)
     earlystop_snr: Annotated[
         float | None,
@@ -130,7 +137,7 @@ class MuxT2EchoCfg(ConfigBase):
         float,
         FieldMeta(
             label="Initial delay",
-            unit="us",
+            unit="µs",
             description="Delay before the first repetition.",
         ),
     ] = Field(default=1.0, ge=0, allow_inf_nan=False)
@@ -138,7 +145,7 @@ class MuxT2EchoCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -216,7 +223,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         for index, tone_cfg in zip(indices, tones, strict=True):
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             ax.set(
-                xlabel="Requested delay (us)",
+                xlabel="Requested delay (µs)",
                 ylabel="Magnitude (a.u.)",
                 title=f"{index}: {tone_cfg.name}",
             )
@@ -337,7 +344,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 int(raw_index), source.result.times, source.result.signals[row], skip=1
             )
             fig, ax = plots.subplots(num=f"fit_{trace.index}", figsize=(8, 5))
-            ax.set(xlabel="Requested delay (us)", ylabel="Signal real (a.u.)")
+            ax.set(xlabel="Requested delay (µs)", ylabel="Signal real (a.u.)")
             fig.suptitle(f"echo tone {trace.index}")
             try:
                 # Source detune, not a fitted oscillation, determines fringe eligibility.
@@ -384,7 +391,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 ax.plot(trace.times, real, "o", label="measured")
                 ax.plot(trace.times, fitted, label="primary fit")
                 ax.set_title(
-                    f"T2 = {outcome.t2:.4g} ± {outcome.t2_err:.2g} us; "
+                    f"T2 = {outcome.t2:.4g} ± {outcome.t2_err:.2g} µs; "
                     f"fringe = {outcome.detune:.4g} MHz"
                 )
                 outcomes.append(outcome)
