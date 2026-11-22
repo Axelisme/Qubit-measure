@@ -96,9 +96,9 @@ are visible before opening a figure. Each thumbnail aspect-fits its label withou
 cropping as the gallery resizes.
 Use `View figure` on a card, or Tab to the button and press Space, to read that
 stage and member without leaving Data. Long headings wrap without widening the
-reading pane. The pane fits the whole raster at 4:3 and centers it without
-cropping. `Back to previews` or Escape returns to the selected card and restores
-its focus and page.
+reading pane. The reader renders the same 12×9 in layout as the figure tiles.
+The pane scales and centers the whole raster without cropping. `Back to previews`
+or Escape returns to the selected card and restores its focus and page.
 
 `ExperimentFigureArea` resolves the request against the current native Figure on
 its Qt thread. The gallery holds only the raster. It discards that raster on a
