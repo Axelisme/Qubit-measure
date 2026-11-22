@@ -12,7 +12,7 @@ Bind the `mux` alias to a `group/mux` with matching qubits and resonators in rea
 
 **Tones** chooses what to edit. **Participants** takes a nonempty list of unique zero-based positions in run order, e.g. `[2, 0]`. It selects both drives and emitted readout tones. The `participants` alias seeds those positions; if absent, unbound, or empty, the form starts with all tones. Editing the selection preserves tone values. Fill required pulse and sweep fields for any newly selected tone, using distinct drive generators separate from readout.
 
-Use calibrated π/2 and π pulses on the same generator for each qubit. **Detune** is the final π/2 phase ramp in MHz, not a change to the drive carrier. Choose a **Delay** window of about 3 × expected T2E. For fringes, choose at least 10 points per cycle at the fastest expected rate. A short window shows only part of the envelope, leaving the fit to extrapolate; sparse points can hide or alias fringes.
+Use calibrated π/2 and π pulses on the same generator for each qubit. **Applied phase-ramp detune** (MHz) adds `360° × detune × total delay` to the final π/2 phase, without changing the drive carrier. Choose a **Delay** window of about 3 × expected T2E. For fringes, choose at least 10 points per cycle at the fastest expected rate. A short window shows only part of the envelope, leaving the fit to extrapolate; sparse points can hide or alias fringes.
 
 **Fit method** defaults to decay; zero detune forces decay even with fringe selected. Fringe needs known nonzero source detune, or saved actual detune if source cfg is unavailable. **Fit phase offset (fringe only)** frees the phase, which otherwise stays at zero. Analyze drops the original first point; allow at least six remaining finite points for fringe or four for decay.
 
@@ -20,7 +20,11 @@ In `mux_t2echo`, omission retains settings. Null `participants` leaves a missing
 
 ## Read the plots
 
-Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Both show the signed principal-axis projection of mean IQ (a.u.) against requested total delay. Analyze omits the first requested point. If the fit fails, `fit_i` shows the remaining acquired points and the failure reason instead of a fitted curve. With fewer than two finite points, the plot uses the I axis. The projection is not population. The ± on T2 is fit uncertainty, not a shot SEM bar. R² measures explained variation and normalized residual RMS measures mismatch relative to signal range.
+Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Both show signed principal-axis mean IQ (a.u.), not population, against requested total echo delay. Live connects acquired points and tracks points and accumulated shots per point. Analyze omits the first requested point and draws a solid model line; the dotted line marks T2 echo within the fitted window. If the fit fails, Analyze connects the remaining points and shows the reason instead of a model. The plot uses the I axis when fewer than two points are available for the projection.
+
+Shot SEM bars show the expected error of each projected mean: the sample standard deviation of the same shots that gave that point, divided by the square root of their count. They are not single-shot scatter, round-to-round scatter or fit uncertainty. Fewer than two shots give no bar. After reloading a data file, rerunning Analyze gives no bars because only the mean was saved; saved figures still show their original bars.
+
+The ± on T2 echo or fringe rate is the fitted parameter's standard error. R² measures explained variation; normalized residual RMS is the residual RMS divided by the observed signal span. Match the experiment and Run ID in the Analyze summary to see the Run's configured Reps×Rounds and the actual quantized applied detune, not the nominal Form detune.
 
 ### Multi-tone readout control
 

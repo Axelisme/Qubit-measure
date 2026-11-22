@@ -3,10 +3,12 @@
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.cfg_model import FieldMeta
+from zcu_tools.program.v2 import Pulse, SweepCfg
 
 from .mux_sweep_cfg import MuxAcquisition, MuxDriveToneCfg, validate_mux_tones
 
@@ -22,7 +24,21 @@ class MuxCoherenceToneCfg(MuxDriveToneCfg):
     and rejects duplicate names in the complete list.
     """
 
-    detune: float = 0.0
+    drive: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="π/2 pulse",
+            description="Enter the calibrated x90 pulse used at both ends of the sequence; nonparticipants may leave it blank.",
+        ),
+    ] = None
+    detune: Annotated[
+        float,
+        FieldMeta(
+            label="Applied phase-ramp detune",
+            unit="MHz",
+            description="Enter the signed final π/2 phase slope versus total delay, not the RF carrier or the quantized slope.",
+        ),
+    ] = 0.0
 
 
 def validate_coherence_scan(
@@ -64,6 +80,9 @@ class MuxCoherenceResult:
     source_frequencies: float64 (K,), MHz from each source x90 pulse before ramp.
     Full pulse cfg and inactive tones remain in RunRecord.cfg. Cancellation and
     acquisition error status belong to the RunContext StopSignal, not these data.
+    iq_moments: optional float64 (K,P,6) aligned with signals, in columns
+    [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] after ADC offset correction. Only the in-memory
+    Run carries these completed-round sums; Native and Labber retain mean IQ.
     """
 
     tone_indices: NDArray[np.int64]
@@ -71,6 +90,7 @@ class MuxCoherenceResult:
     signals: NDArray[np.complex128]
     actual_detunes: NDArray[np.float64]
     source_frequencies: NDArray[np.float64]
+    iq_moments: NDArray[np.float64] | None = None
 
 
 def validate_coherence_result(result: MuxCoherenceResult) -> None:
