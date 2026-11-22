@@ -18,8 +18,6 @@ from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fitting import expfunc, fit_decay
 from zcu_tools.analysis.readout_chain import (
-    CycleCheck,
-    CycleNuisances,
     CycleSums,
     cycle_curves,
     fit_cycle,
@@ -43,41 +41,46 @@ from zcu_tools.program.v2 import (
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
-    checks_text,
     cycle_sums_variables,
     first_read_projection,
     restore_cycle_sums,
 )
 from zcu_lab.v2.support import live_errorbar, live_line
 
+from .._joint import joint_residual_fields, joint_residuals_text, plot_joint_residuals
+
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
 _SWEEP_LABEL = "Total echo wait (µs)"
 _IQ_TITLE = "K-cycle T2 echo · Qubit · First-read IQ"
 _IQ_LABEL = "Projected mean IQ (a.u.)"
+_JOINT_LABEL = "Joint projection\n(SEM units)"
 
 
 @dataclass(frozen=True)
 class ChainT2EchoAnalysis:
-    """Echo fit of all 65 numbers, its checks and its starting value.
+    """Joint echo estimates and scalar diagnostics of all 65 features.
 
-    t2 and t2_err are the fitted echo decay time in us and its Wald error.
-    tf and tf_err are the third state's decay time in us and its Wald error.
-    within_point, sharing and curve are the three lack-of-fit checks of
-    fit_cycle (sharing has no p). J and df are the joint weighted residual and
-    its degrees of freedom. first_read_t2 is the T2 echo in us of the
-    twotone/t2echo decay fit of the first read, which started both t2 and tf.
+    t2 and tf are the echo and third-state decay times in µs. t2_err and
+    tf_err are their Wald standard errors in µs. first_read_t2 is the
+    first-read decay time in µs used to initialize both t2 and tf.
+    J is the squared norm of the final whitened residual; df is the number
+    of features over all delays minus the number of fitted parameters.
+    j_per_df is J / df, expected_band_low and expected_band_high are the
+    approximate chi-square reference limits, and tail_fraction is the
+    fraction of whitened components with |r| > 3.
     """
 
     t2: float
     t2_err: float
     tf: float
     tf_err: float
-    within_point: CycleCheck
-    sharing: CycleCheck
-    curve: CycleCheck
+    first_read_t2: float
     J: float
     df: int
-    first_read_t2: float
+    j_per_df: float
+    expected_band_low: float
+    expected_band_high: float
+    tail_fraction: float
 
 
 class ChainT2EchoCfg(ConfigBase):
@@ -170,7 +173,7 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         )
         ax, diagnostic_ax = fig.axes
         ax.set(title=_IQ_TITLE, ylabel=_IQ_LABEL)
-        diagnostic_ax.set(xlabel=_SWEEP_LABEL, ylabel="Joint projection\n(SEM units)")
+        diagnostic_ax.set(xlabel=_SWEEP_LABEL, ylabel=_JOINT_LABEL)
         diagnostic_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         iq_points = live_errorbar(ax)
         diagnostic_line = live_line(diagnostic_ax)
@@ -250,14 +253,14 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
     ) -> ChainT2EchoAnalysis:
         """Fit all 65 numbers with echo curves, starting from the first read.
 
-        First skip the first delay, project the first read IQ and fit a pure
-        decay. Publish "fit";
-        its T2 echo starts both t2 and tf. Then fit_cycle fits the saved sums
-        with t2_echo_model and publishes "populations": per-delay first-read
-        populations with error bars and the fitted curves. Return t2 and tf
-        with Wald errors and the three checks. t2 is the time constant of the
-        most populated state's row, g in thermal equilibrium. The source cfg
-        may be None. Fitting failures of either fit propagate.
+        The "fit" figure shows the first-read IQ decay, excluding the first
+        delay from its fit. Its time seeds both time constants of the joint
+        echo model. The "joint-residuals" figure uses the live all-feature
+        projection to compare measurements with the model and show their
+        signed difference at each delay. Return both time constants, Wald
+        standard errors and scalar joint residual diagnostics. The most
+        populated thermal row identifies the echo decay. The source cfg may
+        be None. Residual diagnostics do not accept or reject the fit.
         """
         del options  # This analysis has no configurable options.
         sums = source.result
@@ -330,66 +333,34 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
                 fit.parameters["tf"],
                 fit.errors["tf"],
             )
-        population_dense = np.linspace(delays.min(), delays.max(), 400)
-        assert isinstance(fit.nuisances, CycleNuisances)
-        population_fitted = model.populations(
-            population_dense, fit.parameters, fit.nuisances
-        )
-        population_fig, _ = plots.subplots(
-            num="populations",
-            nrows=3,
+        fig, _ = plots.subplots(
+            num="joint-residuals",
+            nrows=2,
             sharex=True,
-            figsize=(6.4, 7.4),
+            figsize=(8, 6),
             layout="constrained",
         )
-        population_fig.suptitle(
-            "K-cycle T2 echo · Qubit · First-read populations\n"
+        projection_ax, residual_ax = fig.axes
+        plot_joint_residuals(projection_ax, residual_ax, sums, model, fit)
+        fig.suptitle(
+            "K-cycle T2 echo · Qubit · All 65 features\n"
             f"T2 echo = {t2:.4g} ± {t2_err:.2g} µs\n"
             f"Third-state decay time = {tf:.4g} ± {tf_err:.2g} µs\n"
-            f"Joint J/df = {fit.J:.2g}/{fit.df}\n{checks_text(fit)}",
-            fontsize=10,
+            f"{joint_residuals_text(fit)}",
         )
-        population_axes = population_fig.axes
-        population_order = range(3)
-        for rank, (population_ax, state) in enumerate(
-            zip(population_axes, population_order, strict=True)
-        ):
-            color = f"C{rank}"
-            thermal = fit.nuisances.thermal[state]
-            population_ax.errorbar(
-                delays,
-                fit.populations[:, state],
-                yerr=fit.population_errors[:, state],
-                fmt=".",
-                color=color,
-                label="Point estimate ± Wald SE",
-            )
-            population_ax.plot(
-                population_dense,
-                population_fitted[:, state],
-                color=color,
-                label="Joint fit",
-            )
-            if delays.min() <= t2 <= delays.max():
-                population_ax.axvline(t2, ls="--", color="0.35", linewidth=1)
-            population_ax.set(
-                ylabel=f"P(state {rank + 1})",
-                title=f"State {rank + 1} · Thermal population {thermal:.2f}",
-            )
-        handles, labels = population_axes[0].get_legend_handles_labels()
-        population_fig.legend(handles, labels, loc="outside lower center", ncols=2)
-        population_axes[-1].set_xlabel(_SWEEP_LABEL)
-        population_axes[-1].xaxis.set_major_locator(MaxNLocator(nbins=4))
+        if delays.min() <= t2 <= delays.max():
+            projection_ax.axvline(t2, ls="--", color="0.35", linewidth=1)
+        projection_ax.set_ylabel(_JOINT_LABEL)
+        residual_ax.set(xlabel=_SWEEP_LABEL, ylabel="Measured − model\n(SEM units)")
+        residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        handles, labels = projection_ax.get_legend_handles_labels()
+        fig.legend(handles, labels, loc="outside lower center", ncols=2)
 
         return ChainT2EchoAnalysis(
             t2=t2,
             t2_err=t2_err,
             tf=tf,
             tf_err=tf_err,
-            within_point=fit.within_point,
-            sharing=fit.sharing,
-            curve=fit.curve,
-            J=fit.J,
-            df=fit.df,
             first_read_t2=first_read_t2,
+            **joint_residual_fields(fit),
         )

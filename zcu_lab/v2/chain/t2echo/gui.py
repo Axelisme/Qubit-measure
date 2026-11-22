@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field
-from zcu_tools.analysis.readout_chain import CycleCheck, CycleSums
+from pydantic import Field
+from zcu_tools.analysis.readout_chain import CycleSums
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -17,18 +17,18 @@ from zcu_lab.v2.chain.t2echo.core import (
 from zcu_lab.v2.chain.t2echo.form import make_form
 
 
-class ChainT2EchoSummary(BaseModel):
+from .._joint import JointResidualSummary
+
+
+class ChainT2EchoSummary(JointResidualSummary):
     """Recipe JSON view of the analysis in native units; null is unavailable."""
 
-    t2: float | None = Field(description="T2 echo in us.")
-    t2_err: float | None = Field(description="Wald error of T2 echo in us.")
-    tf: float | None = Field(description="Third-state decay time in us.")
-    tf_err: float | None = Field(description="Wald error of tf in us.")
-    within_point: CycleCheck = Field(description="Within-point check J, df, p.")
-    sharing: CycleCheck = Field(description="Sharing check J, df; p is null.")
-    curve: CycleCheck = Field(description="Curve check J, df, p.")
+    t2: float | None = Field(description="T2 echo (µs).")
+    t2_err: float | None = Field(description="T2 echo Wald standard error (µs).")
+    tf: float | None = Field(description="Third-state decay time (µs).")
+    tf_err: float | None = Field(description="Third-state decay time Wald standard error (µs).")
     first_read_t2: float | None = Field(
-        description="T2 echo in us of the first-read twotone fit, the starting value."
+        description="First-read T2 echo (µs), used to start the joint fit."
     )
 
 

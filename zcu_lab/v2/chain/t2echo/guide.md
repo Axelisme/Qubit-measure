@@ -1,4 +1,4 @@
-**Readers:** operator, agent. Run the readout-chain T2 Hahn echo from the GUI or MCP and read its live curves, joint fit and checks.
+**Readers:** operator, agent. Run the readout-chain T2 Hahn echo from the GUI or MCP and read its live curves, joint fit and residuals.
 
 # K-cycle readout-chain T2 echo
 
@@ -40,15 +40,11 @@ The first Analyze figure (`fit`) repeats the first-read live points (blue) and a
 The first-read exponential fit excludes the first sweep point, shown in grey. The IQ projection direction is fitted on the remaining points in Run and Analyze. The dashed marker gives the first-read echo time if it lies in the scan; the solid curve starts the joint fit.
 In the first-read figure, R² is the fraction of variation explained by the fit; the normalized residual RMS divides residual RMS by the signal range. A negative R² means the curve fits worse than a constant at the mean. A smaller normalized residual RMS indicates closer agreement. Neither metric sets a selection threshold. The traces need enough contrast and sweep coverage to distinguish the fit from noise.
 
-The `populations` figure tests whether a single physical model explains all 65 features across the sweep. Each panel shows one model-inferred first-read state population, not a classifier count. The points allow the operation to vary independently by sweep point. Their bars are one **Wald standard error**, taken from the local fit covariance, not shot SEM. The solid lines use the joint fit. The panel title gives the fitted thermal population before the drive. The plotted populations are after the drive. The y axes autoscale separately.
-The joint echo model uses the total wait in its exponential envelope, with a separate third-state decay. If the fitted third-state row is more thermally populated than the g model row, the reported times exchange roles; the most populated thermal state defines the qubit-branch choice. The dashed line marks the reported T2 echo when in range.
-State numbers are fit labels, not independently identified levels. The joint weighted residual J is reported with its degrees of freedom (df). The separate checks report their own J/df and give p where available:
+The upper panel of `joint-residuals` shows the measured points and solid joint model curve for the same all-65-feature projection as the lower live panel. It is a projected signal, not an inferred state population. The lower panel shows measured minus model at each total echo wait in the same SEM units. Look for residual patterns such as a drift or fringe that the model curve does not explain. The pooled noise scale does not give a shot-SEM bar for each delay.
 
-- **within-point** asks whether a free three-state model explains the data at each point.
-- **sharing** checks whether sharing readout parameters worsens the fit relative to fitting points separately. It has no p-value.
-- **curve** checks the constrained sweep model against a free operation at each point.
+The figure lists T2 echo and the third-state decay time with their Wald standard errors in µs. The joint model uses total echo wait in its exponential envelope. The most populated thermal row identifies the qubit branch. If the model's third row is more populated than the qubit rows, the two fitted times exchange roles in the report. The dashed line marks the reported T2 echo when it lies in the sweep.
 
-Compare the points and the model before interpreting the numbers. Large J relative to df or a small reported p indicates a mismatch to investigate; no check selects a calibration automatically. Missing diagnostics are not a pass. The Analyze summary identifies the run and gives its saved Reps×Rounds setting, not the number of rounds that finished.
+The scalar diagnostics use all 65 whitened residual components at every delay, not just the projection shown in the panels. `J` is their sum of squares. `df` is 65 times the number of delays minus the number of fitted parameters. The figure and summary give `J/df` and the numeric endpoints of the approximate χ² reference band `1 ± 2√(2/df)`. The tail fraction is the share of whitened components with `|r| > 3`. The band and tail fraction help put the residuals in context. Neither is an acceptance threshold or proof of accurate decay times. The Analyze summary identifies the run and gives its saved Reps×Rounds setting, not the number of rounds that finished.
 
 ## What to do next
 
@@ -61,4 +57,4 @@ Layout reference: Ding, *Novel Gates with Superconducting Fluxonium Qubits*, Fig
 
 Native Save retains the total echo wait axis, per-point cycle count and 65 feature sums, and the 65 × 65 product sums pooled across points for the live joint projection. Load keeps the same data and can reproduce the analysis; the first-read shot SEM uses moments already present in these files.
 
-`chain_t2echo` can set π/2 pulse, π pulse and Readout library references, Total echo wait › Stop/Expts, Reps and Rounds. Use an override on `relax_delay` for Cycle thermalisation wait K. Omitted inputs keep the form values, overrides apply last, and null is passed to the form as an explicit clear where accepted. The recipe runs, analyzes and saves, with no writeback.
+`chain_t2echo` can set π/2 pulse, π pulse and Readout library references, Total echo wait › Stop/Expts, Reps and Rounds. Use an override on `relax_delay` for Cycle thermalisation wait K. Omitted inputs keep the form values, overrides apply last, and null is passed to the form as an explicit clear where accepted. The recipe runs, analyzes and saves, with no writeback. Its report includes the decay times, their standard errors, the first-read seed estimate, and the same scalar joint residual diagnostics as Analyze. The per-delay projection stays in the figure.

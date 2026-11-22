@@ -13,7 +13,7 @@
 - 設計 liveplot 與 Analyze 圖、檢查操作員能否判讀：讀 [實驗呈現指南](figure-style.md)。
 - [Two-qubit bring-up 與 CZ 校準](two_qubit/guide.md) 說明 Qubit1、Qubit2 的單 qubit 校準、位置綁定、舊 point 重綁與資料保存。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
   - 一般入口用 reset 選擇 herald。只有 RB 與 conditional phase 另有 g,g／e,e 聯合分析入口，見下方[完整清單](#two-qubit-實驗清單)。
-- [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與三項檢查。
+- [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與 joint residual 的判讀方式。
 - [`twotone/t1_cov`](twotone/time_domain/t1_cov/guide.md) 用兩次單 tone 讀出的二階矩自校準，擬合狀態改變機率以估計 T1。可選脈衝 reset，不需 classifier。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records 與資料形狀，新實驗從[寫法慣例](experiment-authoring.md#寫法慣例)選 cfg、分析與圖 API 的寫法。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
@@ -88,9 +88,9 @@ Rπ 的 rpi_power／rpi_freq／rpi_length 各自在 `run()` 寫出掃描與 R→
 三者各自在 core 畫 score 與診斷圖；[\_rpi_common.py](twotone/ro_optimize/_rpi_common.py) 只保留共用的 `rpi_sums` 解碼、選點與格式化。
 
 K-cycle 讀出鏈實驗各自在 `run()` 寫出 (D(x), 讀, 讀) × 8 的 `builder.repeat("cycle", BLOCKS_PER_CYCLE)` 迴圈；
-Amp/Len Rabi、Echo 與 Ramsey 的 core 直接呼叫 first-read 數值 fitter，明示 phase、skip 與 envelope 政策，並畫自己的 fit 與 populations 分析圖。
+各 chain core 用 first-read fit 提供起點，再聯合擬合全部 65 個特徵。Analyze 畫出沿 live 方向的實測點、聯合模型曲線及有正負號的逐點殘差。圖與摘要都呈現 `J`、`df`、`J/df`、χ² 期望帶的數值端點與白化殘差的 `|r| > 3` 比例。逐點序列只用於畫圖，這些數值不作為接受或拒絕擬合的門檻。
 五個 core 各自在 `run()` 建立及更新 all-number 與 first-read 的 live 曲線。
-[chain/\_cycle.py](chain/_cycle.py) 保留共用的 CycleSums 存檔變數、IQ 投影與檢查文字格式，模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
+[chain/\_cycle.py](chain/_cycle.py) 保留共用的 CycleSums 存檔變數與第一讀 IQ 投影。[`chain/_joint.py`](chain/_joint.py) 提供 joint residual 的欄位與圖元，各實驗決定圖面配置。模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化與 SNR 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 
