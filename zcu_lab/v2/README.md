@@ -74,8 +74,7 @@ AC Stark spectroscopy 的 [core.py](twotone/ac_stark/core.py) 對應 `twotone/ac
 [ramsey_core.py](twotone/ac_stark/ramsey_core.py) 對應 `twotone/ac_stark_ramsey`。
 註冊位置與 Ramsey guide 見 [Lab 組裝與註冊](../README.md#lab-組裝與註冊)。
 Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot` 擁有。
-兩個 core 都以 `plots=None` 呼叫 `singleshot_ge_analysis` 做擬合，不畫共用 helper 的模型 histogram。
-可選的診斷圖見 [experiment 的 GE 模型診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷)。
+兩個 core 在 Analyze 都啟用 [共用 GE 診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷)。擬合成功時，Single 發布 `diagnostic`，mux 以原始 tone 序號發布 `diagnostic_i`；各 core 仍另外產生 Fit 圖。
 各實驗的 `core.py` 自行選擇分析資料並繪製分類圖，數值擬合工具由 `zcu_tools.analysis.fitting` 擁有。
 跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
 mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
