@@ -15,7 +15,7 @@ For an existing point, bind the new aliases. Rename both CZ slots and their libr
 
 Calibrate Xπ, X90 and the complete mux readout first. Each qubit tone needs a circle classifier with radius from mux singleshot GE Post. Missing calibration, linear classification or missing radius stops Run with a GE Post prompt. Other mux tones need no classifier.
 
-Readout references `$mux.module.readout` when present. Without a slot, fill all required fields in the blank mux template. Open or Reset captures calibrated pulses and sets two hidden tone indices from `$mux.qubits`. Refresh keeps the draft and rechecks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture. Use Reset to replace the draft with initial values from the new source, then check them again.
+Readout references `$mux.module.readout` when present. Without a slot, fill all required fields in the blank mux template. Opening the tab or choosing Defaults captures calibrated pulses and sets two hidden tone indices from `$mux.qubits`. Refresh keeps the draft and rechecks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture. Use Defaults to replace the draft with initial values from the new source, then check them again.
 
 The Form copies `$coupler.module.cz_qubit1` and `cz_qubit2` into editable pulses. Missing CZ slots remain required. CZ, Xπ and X90 must use the generator for that qubit. The two CZ lines require different generators, equal finite frequency, equal envelope duration and equal pre-delay. Signed gains, relative phase, waveform and individual post-delays remain explicit. Playback starts both lines together and waits for both to finish. The coupler stays DC-biased.
 
@@ -36,7 +36,21 @@ slopes, crossings, counts and herald fractions stay inside analysis for plotting
 
 For each target projection, `sigma=(N_e-N_g)/N_total`. Other remains in the denominator. Contrast is `hypot(sigma_X,sigma_Y)`; phase is `atan2(sigma_Y,sigma_X)` in degrees, wrapped to `[-180,180)`. Analysis does not project mean IQ or reclassify shots.
 
-The phase plot shows contrast and logical phase for each spectator state and gate count. The quadratures plot shows classified X/Y sigma. The slopes plot shows the fitted phase per gate for actual spectator g and e.
+Use the live X/Y panels to check contrast as trains start. Analyze begins
+with the latest started train, even if it stopped before completing all
+rounds. If none started, the first figure says so. Each planned gate count
+still has its own quadrature and contrast/wrapped-phase figures.
+Read X and Y by nominal spectator preparation. Their bars are ±1 shot SEM
+from the classified (e-g) indicator, with other contributing zero.
+The denominator is the retained count at that point.
+
+The Slopes figure shows phase per CZ with fit standard error, not shot SEM.
+The lower panel shows reduced χ² at each frequency for the same spectator
+series. The fit divides each residual by its fit error, sums the squares,
+then divides by the residual degrees of freedom. A value near 1 means the residual size
+is consistent with those errors. No point means the fit or reduced χ² is
+unavailable, not zero. There is no reduced χ² selection threshold. Use the
+π crossing figure to choose the common frequency.
 
 The fit uses X=A cos(n·slope+φ) and Y=A sin(n·slope+φ), with one amplitude A and phase offset φ per spectator and frequency. There is no quadrature DC offset. Count-derived sigma variances weight the fit. Other counts remain in the denominator. Zero contrast has no diagnostic phase, and unmeasured points block the corresponding slope fit.
 
@@ -46,7 +60,7 @@ Use at least two distinct gate counts whose differences have gcd=1. The default 
 
 Conditional phase is the fitted per-gate slope_e−slope_g, not the total phase of a selected train. Analysis unwraps adjacent frequency points and interpolates its π modulo 2π crossings inside the scan. This assumes sufficiently fine frequency sampling. A missing slope, no crossing, multiple crossings, a flat π segment or an ambiguous adjacent half-turn prevents a proposal. An endpoint crossing counts once. The interpolation does not assign a frequency uncertainty.
 
-FIT proposes source pulses at `$coupler.pulses.cz_qubit1` and `cz_qubit2`, replacing only their common frequency. Gains, phases, waveforms and timing stay unchanged. Separate `$coupler.module.cz_qubit1` and `cz_qubit2` slot rows point to these keys. Both destinations use the original Run or Load capture, even if you change aliases afterward. Writeback fails without that capture. Preview each row before Apply Selected. Rows apply independently, so partial selection can update one line only. Reset the next Form to capture accepted pulses.
+FIT proposes source pulses at `$coupler.pulses.cz_qubit1` and `cz_qubit2`, replacing only their common frequency. Gains, phases, waveforms and timing stay unchanged. Separate `$coupler.module.cz_qubit1` and `cz_qubit2` slot rows point to these keys. Both destinations use the original Run or Load capture, even if you change aliases afterward. Writeback fails without that capture. Preview each row before Apply Selected. Rows apply independently, so partial selection can update one line only. Choose Defaults in the next form to capture accepted pulses.
 
 Amplitude and local-Z calibration remain separate steps. Recalibrate after changing shape or operating point.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -526,8 +527,9 @@ def test_tab_refresh_reset_edit_and_run_with_component_driver(
     qapp: QApplication, tmp_path: Path, source_window: MainWindow
 ) -> None:
     driver = ComponentDriver(source_window)
-    images = tmp_path / "refresh-reset"
+    images = Path(os.environ.get("RUN_DEFAULTS_EVIDENCE", str(tmp_path)))
     driver.screenshot(images / "01-open.png")
+    defaults = driver.observe(object_name="resetButton")
     assert (
         driver.observe(object_name="form.input.gain").text == "general.ext.amount * 1.5"
     )
@@ -552,21 +554,28 @@ def test_tab_refresh_reset_edit_and_run_with_component_driver(
     )
     driver.screenshot(images / "04-ran.png")
     driver.select_tab("Run")
-    # Real dialog confirmation is delivered by a queued keyboard click.
+    driver.screenshot(images / "05-before-defaults.png")
+    # A queued user click answers the real modal confirmation.
     from qtpy.QtCore import QTimer
     from qtpy.QtWidgets import QMessageBox
 
     def confirm_reset() -> None:
         box = qapp.activeModalWidget()
         assert isinstance(box, QMessageBox)
-        ComponentDriver(box).click("&Yes")
+        dialog = ComponentDriver(box)
+        dialog.screenshot(images / "06-confirmation.png")
+        dialog.click("&Yes")
 
     QTimer.singleShot(0, confirm_reset)
-    driver.click("Reset")
-    driver.screenshot(images / "05-reset.png")
+    driver.click(object_name="resetButton")
+    driver.screenshot(images / "07-restored-defaults.png")
     assert driver.observe(object_name="form.input.gain").text == "general.ext.amount"
     assert any(item.text == "= 0.5" for item in driver.visible().widgets)
     assert driver.observe("Run").enabled
+    assert (defaults.text, defaults.tooltip) == (
+        "Defaults",
+        "Discard edits and reload defaults from current sources.",
+    )
 
 
 def test_detach_stops_following_the_resource(

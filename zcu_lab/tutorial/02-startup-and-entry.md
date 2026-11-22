@@ -62,7 +62,7 @@ cp zcu_lab/kickstart/FTF/startup.py \
 
 ## 綁定 alias rows
 
-FTF 範本先放 `qubit: Q1`，再放 `resonator: $qubit.resonator`。後一列讀取 Q1 的 resonator 欄位，得到 `R1`。表單在 Open／Reset 從 `$qubit.flux_dev` 取得 `f1_bias`，不需要 flux 裝置 alias。軟連結只能引用排在前面的 alias，不能引用自己或後面的列。
+FTF 範本先放 `qubit: Q1`，再放 `resonator: $qubit.resonator`。後一列讀取 Q1 的 resonator 欄位，得到 `R1`。表單在 Open／Defaults 從 `$qubit.flux_dev` 取得 `f1_bias`，不需要 flux 裝置 alias。軟連結只能引用排在前面的 alias，不能引用自己或後面的列。
 
 Aliases 的 Value 欄接受具體名稱或前列 alias 的欄位連結，兩者的差別如下：
 
@@ -74,7 +74,7 @@ Aliases 的 Value 欄接受具體名稱或前列 alias 的欄位連結，兩者�
 
 要讓 `qubit` 與 `qubit1` 指向同一元件，兩列都填具體名稱 `Q1`。不要填 `qubit1: $qubit`，Aliases 不接受裸 alias 作為另一列的連結。`$qubit.resonator` 才是可接受的欄位連結，而且 `qubit` 必須排在 `resonator` 前面。這是 Aliases 的儲存語法，不是表單 expression 中裸 `$alias` 的求值語法。
 
-在 GUI 開啟 Inspect 的 Aliases 頁，Destination 選 initial，把 `qubit` 的 Value 改成 `Q2`，按 Enter 完成編輯。有效編輯會立即保存，沒有另一個 Apply 按鈕。`resonator` 會解析成 `R2`。重新 Open／Reset 後，flux 表單從 Q2 的 flux_dev 取得 `f2_bias`。`mux: MG12` 仍指向同一個 group，不隨 `qubit` 切換。元件的 source 欄位與表單的裝置名稱都不會連線或建立 device。
+在 GUI 開啟 Inspect 的 Aliases 頁，Destination 選 initial，把 `qubit` 的 Value 改成 `Q2`，按 Enter 完成編輯。有效編輯會立即保存，沒有另一個 Apply 按鈕。`resonator` 會解析成 `R2`。重新 Open／Defaults 後，flux 表單從 Q2 的 flux_dev 取得 `f2_bias`。`mux: MG12` 仍指向同一個 group，不隨 `qubit` 切換。元件的 source 欄位與表單的裝置名稱都不會連線或建立 device。
 
 程式的 `apply_alias_rows(rows, point=None)` 預設保存 global aliases.yaml。傳 `point="initial"` 才保存目前 focus 的 initial point；其他 label 會報錯。Inspect 的 Destination 選 Global 時固定編輯 global 表，即使已選 point 也不改該 point。切到另一個 point 會載入另一張表，缺檔時是空表，不回退到 entry 表。未開 entry 時呼叫 `apply_alias_rows` 會以 no_context 拒絕，不暫存或自動建立 entry。
 
@@ -91,7 +91,7 @@ def startup(ctx):
 
 這個例子要求 my-entry 已存在，且 Q1 是之後要使用的元件名稱。保存 alias 不會建立元件或連線硬體。若要保留先前編輯的表，不要在每次啟動時重新套用 rows。Alias 解析與保存細節見 [context 與 Run snapshot](../../lib/zcu_tools/gui/session/README.md#contextsession-environment-與-run-snapshot)。
 
-既有 tab 不會因 alias 改變而更新 input。重新 Open 或 Reset，表單才會從新的 alias 表擷取初值。Alias rows 也不是 `Template.bindings`，不替表單補模板佔位符。範本與初值的 author 契約見 [measure adapter authoring](../v2/measure-authoring.md#目錄佈局)。
+既有 tab 不會因 alias 改變而更新 input。重新開啟 tab 或按 Defaults，表單才會從新的 alias 表擷取初值。Alias rows 也不是 `Template.bindings`，不替表單補模板佔位符。範本與初值的 author 契約見 [measure adapter authoring](../v2/measure-authoring.md#目錄佈局)。
 
 ## 關閉後再開一次
 

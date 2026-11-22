@@ -5,8 +5,8 @@
 ## Inputs and sequence
 
 Choose `two_qubit/conditional_phase_heralded`. This experiment has its own saved cfg and Result. Bind `qubit1`, `qubit2`, `coupler` and `mux` as in the [ordinary guide](guide.md#prepare-the-inputs), which also explains how to rebind an existing point.
-Notebook uses the same built-in position names, but does not bind the GUI aliases. Open or Reset sets two hidden tone indices from `$mux.qubits`.
-Both qubit tones need a circle classifier with a GE Post radius before Run. Other tones need no classifier. Reset the Form after changing captured sources.
+Notebook uses the same built-in position names, but does not bind the GUI aliases. Opening the tab or choosing Defaults sets two hidden tone indices from `$mux.qubits`.
+Both qubit tones need a circle classifier with a GE Post radius before Run. Other tones need no classifier. Choose Defaults after changing captured sources.
 
 Every shot emits optional reset, herald mux readout, the original preparation/CZ/projection sequence, then terminal mux readout. Set reset=None to skip reset. Herald and terminal use the same mux object, tones, gain, integration and classifier settings.
 
@@ -60,9 +60,36 @@ Analysis uses both herald (g,g) and (e,e). In the ee group, target sigma reverse
 
 Count-derived sigma variances weight both groups, with other in each denominator. Zero acceptance and unavailable positive variances remove points. Each group must retain at least two gate counts with difference gcd=1. Unmeasured axes or aliased groups retain diagnostic phases and a reason, but do not authorize joint writeback. Never combine two herald groups' gate-count sets to hide an alias. Odd-only counts such as [1,3,5] are rejected before Run.
 
-The phase and quadratures plots show gg and sign-corrected ee by actual spectator. Slopes and conditional-phase plots compare the joint fit with the independent gg fit. Writeback uses only the joint slope_e−slope_g crossing. A missing, flat, ambiguous or nonunique crossing prevents a proposal; there is no gg fallback. Frequency interpolation supplies no uncertainty.
+The live quadratures show herald (g,g) for the current CZ train and identify
+the actual spectator state. Analyze starts with (g,g) for the latest train
+with any acquired counts, even if it is incomplete or has no retained (g,g)
+shots. If no train started, the first figure says so. Analyze keeps (g,g),
+sign-corrected (e,e), and contrast/wrapped-phase figures for every planned
+gate count, including the empty ones.
 
-The herald figure shows all nine herald fractions for each scan row. Its (g,g) cell is pass fraction, not ground-state purity. A low pass fraction reduces accepted sample size. Inspect it alongside contrast and fit diagnostics before applying calibration.
+The (g,g) panels show P(e) − P(g). The sign-corrected (e,e) panels show
+P(g) − P(e). Other terminal outcomes contribute zero. The X/Y bars are ±1
+shot SEM from the retained shots in the displayed herald group. Negating the
+(e,e) signal does not change its SEM.
+
+Slopes show the joint and independent (g,g) fits with fit standard errors,
+not shot SEM. The lower panel shows reduced χ² per frequency for the same
+series. The fit divides each residual by its fit error, sums the squares,
+then divides by the residual degrees of freedom. Values near 1 are consistent with those
+errors. Missing points mean the fit or reduced χ² is unavailable, not zero.
+Reduced χ² does not set a selection threshold. Use the π crossing figure to
+compare the fits. Writeback uses only the joint slope_e−slope_g crossing.
+A missing, flat, ambiguous or nonunique crossing prevents a proposal. There
+is no gg fallback. Frequency interpolation supplies no uncertainty.
+
+The herald heatmap panels split nominal spectator preparation (g or e) and
+target projection (X or Y). Across each panel, columns follow the saved
+frequency scan in MHz. Down the panel, each band is one planned CZ gate
+count, in scan order. Within the band, read the nine herald classes from top
+to bottom in the order printed below the panels: Qubit1 changes slowest and
+Qubit2 changes fastest. Gray cells have no probability. The (g,g) fraction
+is the pass fraction, not ground-state purity. Check it alongside contrast
+and fit diagnostics; a low pass fraction leaves fewer shots in the fit group.
 
 Spectator, quadrature and frequency use hardware loops. Gate count stays on the host because it changes the sequence structure. Both read tags share one mux object within each freshly built program.
 

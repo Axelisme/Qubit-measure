@@ -10,7 +10,7 @@
 先完成 qubit 頻率、X90 與 readout 校準，再於全域 aliases 綁定
 `qubit` 與 `resonator`。量測期間 DC flux 裝置保持原位。
 
-Open 與 Reset 使用固定來源選初值。Reset 會清除本 tab 的編輯並重新捕捉來源。
+Open 與 Defaults 使用固定來源選初值。Defaults 會清除本 tab 的編輯並重新捕捉來源。
 X90 優先取 `$qubit.module.x90`，readout 優先取
 `$resonator.module.readout`。缺少時顯示可編輯範本。
 Reset module 為選填，來源是 `$qubit.module.reset`。

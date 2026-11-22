@@ -59,6 +59,7 @@ def _get_writeback_items(
     if snapshot is None or phase is None or not np.isfinite(phase):
         return []
     coupler = parameters.resolve_path("$coupler")
+    # Grep bridge for the pulse proposal: $coupler.pulses.cz_qubit2
     target = f"{coupler}.pulses.cz_qubit2"
     key = parameters.library_key(target)
     return [
@@ -69,6 +70,7 @@ def _get_writeback_items(
             field_updates=(("phase", float(snapshot.drive.qubit1.phase) + phase),),
         ),
         ParameterWriteback(
+            # Grep bridge for the slot proposal: $coupler.module.cz_qubit2
             target_name=f"{coupler}.module.cz_qubit2",
             description="Qubit2 CZ pulse slot, independent Apply row",
             proposed_value=key,
@@ -83,10 +85,19 @@ def run(
     return RunRecord(cfg=cfg, result=ConstructivePhaseExp().run(cfg, context=context))
 
 
+def _summary_lines(source: ConstructivePhaseRun) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=ConstructivePhaseExp.AXES_SPEC,
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
+    analysis=Analysis(
+        fn=_analyze, writeback=_get_writeback_items, summary_lines=_summary_lines
+    ),
 )

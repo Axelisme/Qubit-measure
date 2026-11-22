@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-21, device-time readout pairing, shared ADC span reuse and FTF Stop
+**Last updated:** 2026-11-22, cavity segment shift diagnostics
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -633,7 +633,9 @@ branch for a superposition is a semiclassical approximation, not a description
 of quantum cavity-state entanglement.
 
 FTF averages Stark energy shifts and driven dephasing over each span and passes
-neutral `SegmentShift` values to evolution. Evolution propagates only that span
+neutral `SegmentShift` values to evolution in `TimelineBatch.segment_shifts`.
+See [Common-frame guard diagnostics](../../../simulate/evolution/README.md#common-frame-guard-diagnostics)
+for the guard query and capture entry point. Evolution propagates only that span
 from the preceding output density, without normalizing or clipping it. Absolute
 control coordinates, carrier phases and pulse-local envelopes keep their common
 origin. Within a span, evolution uses the averages rather than instantaneous

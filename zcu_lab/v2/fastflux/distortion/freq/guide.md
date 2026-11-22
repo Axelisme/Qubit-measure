@@ -23,8 +23,8 @@
 - `readout_t` 初始為 2 µs。它設定平行分支的最短等待時間，實際 readout 時刻由最晚結束的分支決定。
 - Reps 與 Rounds 初始各為 100，relax delay 為 1 µs。這些初值僅供編輯，硬體安全設定及充分的熱化時間須依實際設備確認。
 
-Open 與 Reset 捕捉當時的 alias 和 library。修改全域來源後，按 Reset 才會重新取初值。
-Reset 會丟棄目前表單修改。執行前用 preview cfg 核對掃描、pulse duration、pre-delay 與 readout。
+Open 與 Defaults 捕捉當時的 alias 和 library。修改全域來源後，按 Defaults 才會重新取初值。
+Defaults 會丟棄目前表單修改。執行前用 preview cfg 核對掃描、pulse duration、pre-delay 與 readout。
 
 ## Run 與分析
 

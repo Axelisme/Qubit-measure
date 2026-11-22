@@ -74,7 +74,7 @@ Adapter 以 `guide=Path(__file__).with_name("guide.md")` 宣告 operator guide�
 不需轉換時也在本地宣告 run 並配對同次 cfg 與 Result。額外驗證放在 run 開頭，硬體 I/O 前失敗。
 Run 不重新讀目前的 point、library 或 alias。所有 Run 都需要 SoC，框架不提供額外 preflight hook。
 
-Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Refresh 也重建 Form 定義，
+Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Run 頁的按鈕叫 Defaults，RPC 仍叫 `tab.reset_cfg`。Refresh 也重建 Form 定義，
 但保留 authored input、explicit selections 與既有初值，不重新套 defaults。
 `ctx.has(ref)` 用固定來源選 Slot 或 Template，缺參照回 False，來源故障 raise。
 單音 readout module 與 `module.readout` slot 由 resonator 擁有。單 qubit 表單透過 `resonator: $qubit.resonator` alias 讀取 `$resonator.module.readout`，沒有 slot 時使用 `Template("readout")`，不讀 qubit 上的舊 slot。
@@ -151,7 +151,7 @@ Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
 1. Kickstart entry 只有接線與 nominal values，沒有 module slot。
    記錄哪些欄位有 seed、哪些欄位必填空白，以及 uncalibrated 候選。
 2. 加入必要 frequency，仍不加入 readout slot。
-   比較 Open、Refresh、Reset；Refresh 保留舊輸入，Reset 依新 capture 重新取初值。
+   比較 Open、Refresh、Defaults。Refresh 保留舊輸入，Defaults 依新 capture 重新取初值。
 3. 使用包含 readout slot 的 project 副本。
    分開列出 slot 是否存在，以及表單尚缺哪些 pulse、drive、timing 或 GE calibration。
 4. 核對對應的 agent recipe。
@@ -159,11 +159,10 @@ Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
    沒有 recipe 的表單在 guide 說明使用 GUI／RPC，不假設 recipe 覆蓋所有實驗。
 
 每個 GUI 情境保存 get_cfg 的 input、values、errors、diagnostics 與實際欄位順序。
-用 ComponentDriver 操作 Open／Refresh／Reset，保存截圖並審閱可見 label、單位與錯誤。
+用 ComponentDriver 開啟 tab、操作 Refresh 與 Defaults，保存截圖並審閱可見 label、單位與錯誤。
 在 guide 寫出各情境的起手步驟與仍需取得的校準。
 預演不呼叫 Run、不連硬體，也不操作使用者正在使用的桌面 GUI，除非另有明確授權。
-Guide 必須提醒來源修改後需 Reset；Refresh 只更新 source／choice，
-Reset 可能覆蓋尚未儲存的輸入。
+Guide 必須提醒操作員：來源修改後，按 Defaults 重取初值，確認後會丟棄表單編輯。Refresh 只更新 source／choice，保留輸入。
 
 ## Recipe 撰寫
 
@@ -331,8 +330,8 @@ history 的固定來源。同 entry 有 point 時讀該 point 的現存持久值
 分析與 writeback 只讀 record，不讀 current Form input。
 
 作者宣告 `Adapter(spec, make_form, run, guide, analysis=None, post_analysis=None)`。
-Primary 只可為 `Analysis(fn, options=None, writeback=None)`、
-`Interactive(plugin, frontend, options=None, writeback=None)` 或 None，互斥由型別表達。
+Primary 只可為 `Analysis(fn, options=None, writeback=None, summary_lines=None)`、
+`Interactive(plugin, frontend, options=None, writeback=None, summary_lines=None)` 或 None，互斥由型別表達。
 第二層使用 `PostAnalysis(fn, options=None, writeback=None)`。
 Capabilities 由值推導，不手填。一般 gui.py 只需 import Adapter 與 Analysis。
 
@@ -342,12 +341,14 @@ MCP schema 與 JSON 重建使用同一物件型別，不重新讀歷史。編輯
 沒有 options 時仍能分析，表單為空。現有三個歷史預設生成器接入此機制；
 現有 16 個分析時讀歷史的 wrapper 仍保留，其清理另行處理。
 Figures-only 分析回 None，仍保存具名圖與空摘要，不提出 writeback。
+`summary_lines(source)` 可從固定來源提供操作員文字；缺少來源值時省略該行。
+GUI 和 MCP 共用這些行，不把它們寫入原生 JSON。見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
 
 Framework 依 RunRecord/spec 提供 `data_item` 與 `analysis_item`，作者不覆寫 artifact hooks。
 只保存已提交輸出與歷史分析輸入，不取草稿或目前表單。缺 cfg 不補值；
 準備失敗只使該 data output 失敗，不阻塞獨立的圖與分析，檔案寫入由保存流程負責。
 Host 將 native 分析結果交給 `summarize_analysis`，Save／MCP 共用這個入口。
-實驗端不再提供 `to_summary_dict` 或 summary 投影，也不繼承已退休的結果 base。
+實驗端不提供 `to_summary_dict` 或原生 JSON 投影，也不繼承已退休的結果 base。
 結果根須為 dataclass、pydantic model 或字串 key 的 Mapping，summary 固定為 strict JSON object。
 Key 使用原生結果欄位名，recipe／workflow 依這些欄位讀取，不提供舊 key alias，也不重寫舊存檔。
 Converter 將非有限數值轉為 null，Live RPC 的 `invalid` 列出路徑。

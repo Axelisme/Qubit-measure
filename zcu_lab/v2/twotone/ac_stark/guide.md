@@ -6,7 +6,7 @@
 
 ## 設定與量測
 
-先完成 readout 與 qubit spectroscopy 校準。確認 `qubit`、`resonator` aliases 指向正確元件，並檢查 wiring、readout 與 reset。Open／Reset 從固定來源建立初值。之後若變更 alias，按 Reset 才重新取初值。Run 使用畫面上的設定。
+先完成 readout 與 qubit spectroscopy 校準。確認 `qubit`、`resonator` aliases 指向正確元件，並檢查 wiring、readout 與 reset。Open／Defaults 從固定來源建立初值。之後若變更 alias，按 Defaults 才重新取初值。Run 使用畫面上的設定。
 
 - Stark resonator tone 使用 `res_probe` 範本，頻率取 `$resonator.freq`，起始長度為 1 µs，與預設 qubit probe 同長。
 - Qubit spectroscopy probe 使用 `qub_probe` 範本，起始長度為 1 µs。
@@ -17,7 +17,7 @@
 
 每點先 reset，再啟動 Stark tone，於 Stark tone 持續期間執行 qubit probe，最後 readout。請檢查兩個 pulse 的 pre/post delay 與長度，確認所需的重疊及 readout 時間。1 µs 是可編輯的初值，硬體安全仍須依功率與時序審核。若加長 Stark tone，必須同步檢查 probe 與 readout 時序，避免同一 generator 的 pulse 衝突。真實硬體 Run 前必須審核功率、接線及時序。
 
-檢查表單設定，再按 Run。Measurement 圖顯示每條頻譜正規化後的訊號與 current trace。Reset 會重新捕捉來源並以初值取代手改值。
+檢查表單設定，再按 Run。Measurement 圖顯示每條頻譜正規化後的訊號與 current trace。Defaults 會重新捕捉來源並以初值取代手改值。
 
 ## 分析與寫回
 

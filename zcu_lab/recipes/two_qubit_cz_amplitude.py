@@ -25,22 +25,28 @@ class CZAmplitudeInputs(RecipeInputs):
 
     target: TwoQubitTarget | None = Field(
         default=None,
-        description="Position bindings for this Reset. Omitted or null positions keep the current aliases.",
+        description="Point bindings for Qubit1, Qubit2, CZ pulse owner and Mux readout. Omit to keep aliases.",
     )
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     scale_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
     ) = Field(
-        KEEP, description="Start and stop of the dimensionless common gain multiplier."
+        KEEP,
+        description="Common CZ gain multiplier → Start/Stop (a.u.). Include 0 and one full cycle; null clears bounds.",
     )
     scale_points: int | None | Keep = Field(
-        KEEP, description="Number of scale samples, mapped to Form Expts."
+        KEEP,
+        description="Common CZ gain multiplier → Expts (count), including both endpoints.",
     )
     reps: int | None | Keep = Field(
-        KEEP, description="Repetitions per point per round."
+        KEEP,
+        description="Form Reps (count): attempted shots at each multiplier in one round.",
     )
-    rounds: int | None | Keep = Field(KEEP, description="Acquisition round count.")
+    rounds: int | None | Keep = Field(
+        KEEP,
+        description="Rounds (count): complete sweeps to accumulate. Omit to keep the Form value; null passes through.",
+    )
 
 
 class CZAmplitudeReport(RecipeReport):
@@ -48,14 +54,15 @@ class CZAmplitudeReport(RecipeReport):
 
     scale: float | None = Field(
         default=None,
-        description="Dimensionless first-return scale within the measured span.",
+        description="First positive return (a.u.), within the measured span; null when no proposal.",
     )
     period: float | None = Field(
         default=None,
-        description="Fitted period in gain-scale units, even without a valid return.",
+        description="Fitted period (a.u.), even without a valid first return.",
     )
     error: float | None = Field(
-        default=None, description="One-sigma period uncertainty in gain-scale units."
+        default=None,
+        description="Fitted period standard error (a.u.), not point shot SEM.",
     )
     offset: float | None = Field(default=None, description="Fitted probability offset.")
     contrast: float | None = Field(
@@ -69,7 +76,7 @@ class CZAmplitudeReport(RecipeReport):
 
 @recipe(
     "two_qubit_cz_amplitude",
-    description="Scan common CZ gain, fit the first joint return, review pulse writeback and save.",
+    description="Sweep both signed CZ gains by the Common CZ gain multiplier, fit P(g,g) after double Xπ, review the first positive return and optionally apply pulse writeback. Save even if no return is selected.",
 )
 async def two_qubit_cz_amplitude(
     session: RecipeSession, inputs: CZAmplitudeInputs
@@ -77,7 +84,7 @@ async def two_qubit_cz_amplitude(
     """Sweep both CZ gains by one multiplier and fit the joint return.
 
     See [Fit the first complete return](../v2/two_qubit/cz_amplitude/guide.md#fit-the-first-complete-return).
-    Set dimensionless scale_range and scale_points (scale.n → Expts).
+    Set scale_range in a.u. and scale_points (Common CZ gain multiplier → Expts).
     Omission keeps the Reset value. Null endpoints clear the sweep bounds;
     other nulls pass to the Form. Use overrides for pulses, readout and reset.
     Ask before writing the selected Primary candidates when a return exists.

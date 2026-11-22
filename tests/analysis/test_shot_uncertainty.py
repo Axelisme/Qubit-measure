@@ -1,0 +1,119 @@
+import numpy as np
+import pytest
+from zcu_tools.analysis import shot_uncertainty
+
+
+def test_iq_sem_projects_cross_moment_and_uses_retained_count() -> None:
+    # IQ shots (0, 0) and (3, 4) project to 0 and 5. The second point
+    # retains the same two shots twice, even if both points started with 4 shots.
+    moments = np.array(
+        [
+            [2, 3, 4, 9, 12, 16],
+            [4, 6, 8, 18, 24, 32],
+            [1, 3, 4, 9, 12, 16],
+            [0, 0, 0, 0, 0, 0],
+            [np.nan] * 6,
+        ],
+        dtype=np.float64,
+    )
+    sem = shot_uncertainty.iq_shot_sem(moments, direction=(0.6, 0.8))
+
+    np.testing.assert_allclose(sem, [2.5, 1.4433756729740645, np.nan, np.nan, np.nan])
+
+
+@pytest.mark.parametrize("count", [-1.0, 1.5, np.inf, -np.inf])
+def test_iq_sem_rejects_invalid_counts_even_with_missing_sums(count: float) -> None:
+    with pytest.raises(ValueError, match="count"):
+        shot_uncertainty.iq_shot_sem(
+            np.array([count, np.nan, 0, 0, 0, 0]), direction=(1, 0)
+        )
+
+
+def test_iq_sem_leaves_missing_points_undefined_but_rejects_infinite_moments() -> None:
+    missing = np.array([3, 2, 0, 2, np.nan, 0])
+    assert np.isnan(shot_uncertainty.iq_shot_sem(missing, direction=(1, 0)))
+    with pytest.raises(ValueError, match="infinite"):
+        shot_uncertainty.iq_shot_sem(
+            np.array([1, 2, 0, 4, np.nan, np.inf]), direction=(1, 0)
+        )
+
+
+def test_iq_sem_clips_only_rounding_scale_negative_centered_sums() -> None:
+    rounded = np.array([2, 2, 0, np.nextafter(2.0, 0.0), 0, 0])
+    assert shot_uncertainty.iq_shot_sem(rounded, direction=(1, 0)) == 0
+    with pytest.raises(ValueError, match="centered"):
+        shot_uncertainty.iq_shot_sem(
+            np.array([2, 0, 0, 2, 4, 2]), direction=(0.5, -0.5)
+        )
+
+
+@pytest.mark.parametrize(
+    "moments",
+    [
+        [2.0, 0.0, 4.0, 2.0, 0.0, 2.0],  # Q has a negative centered sum.
+        [2.0, 2.0, 2.0, 4.0, -1.0, 4.0],  # Centered cross sum -3 exceeds 2.
+    ],
+)
+def test_iq_sem_rejects_impossible_statistics_even_off_projection(
+    moments: list[float],
+) -> None:
+    with pytest.raises(ValueError, match="centered"):
+        shot_uncertainty.iq_shot_sem(np.array(moments), direction=(1, 0))
+
+
+def test_iq_sem_accepts_rounding_in_unprojected_statistics() -> None:
+    # Two shots (0, -2) and (2, -2) have zero Q variance and zero covariance.
+    moments = np.array(
+        [2, 2, -4, 4, np.nextafter(-4.0, -np.inf), np.nextafter(8.0, 0.0)]
+    )
+    assert shot_uncertainty.iq_shot_sem(moments, direction=(1, 0)) == pytest.approx(1)
+
+
+def test_iq_sem_keeps_large_finite_rank_one_moments_accurate() -> None:
+    # Shots (4e153, 4e153) and (1e154, 1e154). The raw sum squared and the
+    # product of centered diagonal sums overflow even though the SEM is finite.
+    moments = np.array([2, 1.4e154, 1.4e154, 1.16e308, 1.16e308, 1.16e308])
+    assert shot_uncertainty.iq_shot_sem(moments, direction=(1, 0)) == pytest.approx(
+        3e153
+    )
+
+
+def test_class_counts_give_binomial_sem_and_multinomial_cross_covariance() -> None:
+    binary = shot_uncertainty.class_probability_covariance(
+        np.array([1, 3], dtype=np.int64)
+    )
+    # A one-hot sample with three successes and one failure has sample SD 0.5.
+    np.testing.assert_allclose(np.sqrt(np.diag(binary)), [0.25, 0.25])
+
+    # Identical fractions, but twice as many retained shots at the second point.
+    counts = np.array([[2, 1, 1], [4, 2, 2], [0, 0, 0]], dtype=np.float64)
+    covariance = shot_uncertainty.class_probability_covariance(counts)
+    one_hot = np.eye(3)[[0, 0, 1, 2]]
+    np.testing.assert_allclose(covariance[0], np.cov(one_hot, rowvar=False) / 4)
+    doubled = np.repeat(one_hot, 2, axis=0)
+    np.testing.assert_allclose(covariance[1], np.cov(doubled, rowvar=False) / 8)
+    assert np.isnan(covariance[2]).all()
+
+
+def test_class_covariance_requires_at_least_two_retained_shots() -> None:
+    covariance = shot_uncertainty.class_probability_covariance(
+        np.array([[1, 0], [2, 0]], dtype=np.int64)
+    )
+    assert np.isnan(covariance[0]).all()
+    np.testing.assert_array_equal(covariance[1], np.zeros((2, 2)))
+
+
+def test_class_covariance_rejects_nonfinite_total_of_finite_counts() -> None:
+    limit = np.finfo(np.float64).max
+    with pytest.raises(ValueError, match="total shot count"):
+        shot_uncertainty.class_probability_covariance(np.array([limit, limit]))
+
+
+@pytest.mark.parametrize("count", [-1.0, 1.5, np.inf, -np.inf])
+def test_class_covariance_rejects_invalid_counts_even_with_missing_classes(
+    count: float,
+) -> None:
+    missing = shot_uncertainty.class_probability_covariance(np.array([np.nan, 3]))
+    assert np.isnan(missing).all()
+    with pytest.raises(ValueError, match="count"):
+        shot_uncertainty.class_probability_covariance(np.array([count, np.nan]))

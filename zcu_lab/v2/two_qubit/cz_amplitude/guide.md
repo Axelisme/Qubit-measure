@@ -11,15 +11,15 @@ Bind `coupler` to the component that stores their CZ pulses.
 Notebook uses the same built-in position names, but does not bind the GUI aliases.
 For an existing point, bind the new aliases. Rename both CZ slots and their library keys to
 `cz_qubit1` and `cz_qubit2`. Make each slot point to its renamed key.
-Open or Reset captures aliases, parameters and library once. Refresh keeps the draft and checks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
-After changing bindings or calibrations, Reset and check the whole Form again.
+Opening the tab or choosing Defaults captures aliases, parameters and library once. Refresh keeps the draft and checks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
+After changing bindings or calibrations, choose Defaults and check the whole Form again.
 
 ## Preparation and inputs
 
 Supply calibrated `$qubit1.module.x180`, `$qubit2.module.x180`, and the complete mux
 readout. Readout references `$mux.module.readout` when present.
 Without that slot, fill every required field in the blank mux template.
-Keep all tones in their original order. Open or Reset sets hidden tone indices from `$mux.qubits`.
+Keep all tones in their original order. Opening the tab or choosing Defaults sets hidden tone indices from `$mux.qubits`.
 
 Both qubit tones require circle classifiers with radius. Missing classifiers,
 linear classifiers and missing radii make the cfg invalid before Run.
@@ -33,24 +33,49 @@ Both pulses need matching frequency, duration and pre-delay on independent
 generators. Their post-delays may differ; the sequence waits for both.
 Only the two charge lines are driven. The coupler stays DC-biased.
 
-Both Forms list reset, Qubit1/Qubit2 Xπ, dual-line drive and mux readout first.
-The `scale` sweep and acquisition settings follow.
-Enter a finite, nonnegative, strictly increasing common gain-scale range in `scale`.
-The scan multiplies both original signed gains by that scale.
-Frequency, waveform, duration, relative phase and signed gain ratio stay fixed.
-Set Reps, Rounds and relaxation time for the acquisition budget.
-Rounds accumulate counts at acquisition, without a host round loop.
+The Form lists Reset, Qubit1/Qubit2 Xπ, Two-line CZ drive and Mux readout
+before the sweep and acquisition fields. Use the calibrated pulse library
+entries or inspect the Inline fields. Gen ch is the wired generator channel.
+Frequency is the RF carrier; Mixer freq is the digital mixer offset, if set.
+Keep NQZ, the Nyquist zone, from the source pulse or confirm it for the wired
+channel. Waveform Length is the envelope duration, not the delays. Phase sets
+the carrier angle. Pre-delay and Post-delay place the pulse in the sequence.
+Keep the relative CZ phase when varying the scale.
+
+For Common CZ gain multiplier, enter nonnegative Start and Stop and choose
+Expts, the number of points including both endpoints. The scan multiplies
+both signed gains by each scale. It does not change RF, relative phase or
+waveform length. Reps is the attempted shot count at each scale per round;
+Rounds repeats and accumulates complete sweeps. Initial delay waits before
+the first shot and Relaxation delay waits after each shot.
 
 ## Run and inspect
 
-The ordinary sequence is
-`optional reset → B11 → simultaneous CZ → Xπ⊗Xπ → terminal mux`.
-B11 applies both Xπ pulses to the initial population. Without reset, thermal
-population remains in the ensemble.
+The sequence is `optional reset → paired Xπ preparation → simultaneous CZ
+→ paired Xπ contrast → terminal mux`. The preparation is called B(11): both
+qubits receive Xπ, so both flip if they start in g. In each paired Xπ block,
+the two pulse timelines start together and the sequence waits for both to end.
+A pulse's own pre-delay can shift its envelope within the block. Without
+reset, thermal population remains in the ensemble. This is a gain scan,
+not a frequency scan.
 
-The live figure shows P00 from accumulated terminal counts.
-FIT displays all nine same-shot joint probabilities over g, e and other.
-P00 is the g,g count divided by the total of all nine classes.
+The live figure shows terminal P(g,g), the number of scale points with data,
+and the accumulated retained shots per point. Full point coverage can occur
+before all requested rounds have run. Without herald or cancellation, the
+final retained count per point equals Reps × Rounds. With herald, compare the
+retained count with that attempted-shot budget; they need not match.
+P(g,g) divides the terminal (g,g) count by the total of all nine classes.
+Analyze shows the measured P(g,g) points and the first-return fit on one
+figure. The joint-outcome panels show all nine terminal probabilities over
+g, e and other; use them to tell which outcomes gain population as
+P(g,g) falls. Qubit1 is the first entry in P(a,b). Five outcomes contain
+`other`: two in the g/e panels and three in the other panel. A point that
+looks like zero at this scale is not proof of zero counts or zero leakage.
+Each measured probability bar is ±1 shot SEM from the retained classified
+shots at that scale: √[p(1−p)/(N−1)] for at least two retained shots. For
+mux herald, N counts only the shots that passed. The fit uses Jeffreys-smoothed weights at endpoints; these
+weights are not the plotted bars. Period standard error is a separate fit
+uncertainty.
 No per-shot IQ or mean-IQ diagnostic is stored or plotted.
 
 The return is a leakage proxy, not physical gate fidelity.
@@ -59,6 +84,12 @@ Other denotes classifier rejection; it is not a calibrated higher-level populati
 A high return alone does not establish a π conditional phase.
 
 ## Fit the first complete return
+
+Layout reference: Ding, Fig. 5-9(a,d) (printed p. 152), shows the sequence
+and marks a candidate drive amplitude. Ding sweeps drive voltage (V) and
+plots the |101⟩ population. Here the scan is the common CZ gain multiplier
+(a.u.) for both drive lines and the response is terminal P(g,g) after
+double Xπ.
 
 Analyze returns `fit`, the first-return fit summary.
 It contains `scale`, `period`, `error`, `offset`, `contrast`, `fit_quality` and
@@ -78,7 +109,12 @@ Use enough points to resolve the oscillation; sparse sampling can alias a faster
 
 The figure overlays the fit and labels the candidate or failure reason.
 The summary includes offset, contrast, period, period standard error and
-`fit_quality`. Numeric failure, zero contrast, a degenerate model,
+fit quality. R² is the fraction of the measured return variation explained
+by the fit. Normalized RMS is the root mean square of the fit residuals
+divided by the observed probability span. Each relative fit SE is that
+parameter's standard error divided by its absolute fitted value. These
+metrics have no separate numeric selection threshold.
+Numeric failure, zero contrast, a degenerate model,
 nonfinite uncertainty or incomplete coverage stops the proposal.
 
 Finite identifiable fits remain eligible with low nonzero contrast.
@@ -104,7 +140,7 @@ Writeback fails without that capture.
 
 Select the rows you accept, then press Apply Selected.
 Pulse rows and slot rows apply independently. Apply each required slot explicitly.
-Reset other open forms to capture accepted calibrations.
+Choose Defaults in other open forms to capture accepted calibrations.
 Alternate amplitude and conditional-phase/frequency manually.
 After changing pulse shape, duration, phase, gain, frequency or bias,
 recheck CZ and remeasure both local-Z corrections.

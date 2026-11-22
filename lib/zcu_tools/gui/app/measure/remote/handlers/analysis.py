@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.adapter.analyze_params import (
@@ -15,14 +15,12 @@ from zcu_tools.gui.app.measure.services import TabAction
 from zcu_tools.gui.app.measure.summary import summarize_analysis
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
-from ..analysis_types import AnalysisPresentation
+from ..analysis_types import project_analysis_presentation
 from ..save_types import project_raw_data_state
 from ._common import follow_tab, require_tab_admission
 from .tab import tab_operation_state
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.services.ports import TabSnapshot
-
     from ..service import RemoteControlAdapter
 
 
@@ -60,18 +58,6 @@ def _updated_params(
         ) from exc
 
 
-def _presentation(
-    snapshot: TabSnapshot, stage: Literal["primary", "post"]
-) -> AnalysisPresentation:
-    pane = snapshot.analysis if stage == "primary" else snapshot.post_analysis
-    return AnalysisPresentation(
-        run_id=None if snapshot.run is None else snapshot.run.acquisition_run_id,
-        stage=stage,
-        figure_names=list(() if pane is None else pane.figures or ()),
-        figures_replaced=False if pane is None else pane.figures_replaced,
-    )
-
-
 def h_tab_get_analyze_result(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -92,7 +78,7 @@ def h_tab_get_analyze_result(
         snap = control.get_tab_snapshot(tab_id)
         pane = snap.analysis
         reply.update(
-            presentation=_presentation(snap, "primary"),
+            presentation=project_analysis_presentation(snap, "primary"),
             params=_params_to_wire(None if pane is None else pane.result_params),
             operation_id=operation_id,
             operation_state=tab_operation_state(adapter, tab_id),
@@ -166,7 +152,7 @@ def h_tab_get_post_analyze_result(
         snap = control.get_tab_snapshot(tab_id)
         pane = snap.post_analysis
         reply.update(
-            presentation=_presentation(snap, "post"),
+            presentation=project_analysis_presentation(snap, "post"),
             params=_params_to_wire(None if pane is None else pane.result_params),
             operation_id=operation_id,
             operation_state=tab_operation_state(adapter, tab_id),
