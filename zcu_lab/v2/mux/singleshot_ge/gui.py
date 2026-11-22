@@ -98,15 +98,32 @@ class GEPostSummary(BaseModel):
     )
 
 
+def _center_error_reasons(quality: FitQuality) -> list[str]:
+    """Report center measurements that fail or cannot support the gate."""
+    reasons: list[str] = []
+    invalid_paths = {issue.path for issue in quality.invalid}
+    for name, label in (("sg", "g-center"), ("se", "e-center")):
+        error = quality.relative_parameter_errors.get(name)
+        if error is None or not math.isfinite(error):
+            reasons.append(f"relative {label} error unavailable (required <=0.5)")
+        elif f"relative_parameter_errors.{name}" in invalid_paths:
+            reasons.append(f"relative {label} error={error} (required <=0.5)")
+        elif error > 0.5:
+            reasons.append(f"relative {label} error={error} >0.5")
+    return reasons
+
+
 def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
     """Explain manual selection for mux GE model-derived calibrations.
 
-    Joint histogram r2 must be >=0.9, normalized RMS <=0.1 and relative width
-    error <=0.5. These dimensionless gates also guard empirical assignment and
-    centers because a poor model is not calibration evidence. Required missing /
-    nonfinite metrics or their invalid issues prevent preselection. Unrelated
-    fixed-zero parameter issues do not. None means these review gates passed,
-    not that preparation or pure-state readout fidelity has been established.
+    The primary analysis's joint histogram fit must have r2 >=0.9, normalized
+    residual RMS <=0.1, relative width (s) error <=0.5, and relative center
+    errors (sg and se) each <=0.5. Missing or nonfinite required metrics and
+    invalid issues for required metrics prevent preselection. The note gives
+    the reason, value, and required limit for each finite but invalid center
+    error. Unrelated fixed-zero parameter issues do not block preselection.
+    None means these checks passed, not that preparation or pure-state
+    readout fidelity was established.
     """
     quality = None if primary.fit_quality is None else primary.fit_quality.get("joint")
     if quality is None:
@@ -115,7 +132,13 @@ def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
         f"joint {issue.path}: {issue.reason}"
         for issue in quality.invalid
         if issue.path
-        in {"r2", "normalized_residual_rms", "relative_parameter_errors.s"}
+        in {
+            "r2",
+            "normalized_residual_rms",
+            "relative_parameter_errors.s",
+            "relative_parameter_errors.sg",
+            "relative_parameter_errors.se",
+        }
     ]
     if quality.r2 is None or not math.isfinite(quality.r2):
         reasons.append("joint r² unavailable")
@@ -131,6 +154,7 @@ def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
         reasons.append("relative width error unavailable")
     elif width_error > 0.5:
         reasons.append(f"relative width error={width_error:.4g} >0.5")
+    reasons.extend(_center_error_reasons(quality))
     return "Review required: " + "; ".join(reasons) if reasons else None
 
 
