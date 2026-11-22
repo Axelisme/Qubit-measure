@@ -52,8 +52,9 @@ Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的�
 ## UI 驗證
 
 框架 UI 改動依下方元件情境驗收。`zcu_lab/` 實驗定義改動，包含 live plot 與分析圖的畫面改動，依下方離線 probe 驗收，不要求 ComponentDriver 走查。同時修改兩者時，分別完成兩種驗收。
-框架 UI 驗收需要判讀圖面時，依 [R7](../zcu_lab/v2/figure-style.md#r7用-gui-與存檔的實際尺寸檢查版面)
-區分 Data 縮圖、`View figure` 閱讀面與存檔 PNG。
+依 [R7](../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面)，只在固定幾何的 PNG 檢查圖面版面。
+框架 UI 圖磚的驗收核對等比縮放、留白和無裁切，包含 Data 縮圖與 `View figure` 閱讀面。
+互動畫布另核對縮放後的指標資料座標。
 
 ### 框架 UI
 
@@ -66,6 +67,7 @@ Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的�
 
 判定只讀 driver 的具名可見狀態快照，包括底部 status、元件 enabled／visible／tooltip、
 可見對話框及其文字、欄位顯示值、圖例文字、圖上軸標與可見曲線數。
+圖磚驗收也可讀可見 Figure 的邏輯尺寸與渲染圖像的像素邊界。
 曲線觀察只讀公開 Matplotlib artist 的可見狀態，仍須看 PNG 確認外觀，不拿結果資料當判定。
 不讀 Controller、state store 或私有屬性。
 背景工作依下方的 [Qt owner-loop 等待](#qt-owner-loop-等待)規則，用公開終局條件等待。

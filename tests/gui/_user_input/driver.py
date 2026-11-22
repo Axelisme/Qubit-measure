@@ -205,6 +205,22 @@ class ComponentDriver:
         widget = self._find(text, object_name)
         return observing.observe_widget(widget)
 
+    def plot_inches(self, *, object_name: str) -> tuple[float, ...]:
+        """Read the native Figure's logical size in inches from a visible canvas."""
+        widget = self._find(None, object_name)
+        if not on_screen(widget):
+            raise LookupError("Canvas is not visible")
+        return observing.plot_inches(widget)
+
+    def colour_bounds(
+        self, colour: str, *, object_name: str
+    ) -> tuple[float, float, float, float]:
+        """Read the widget-local logical-pixel bounds of an exact visible RGB colour."""
+        widget = self._find(None, object_name)
+        if not on_screen(widget):
+            raise LookupError("Widget is not visible")
+        return observing.colour_bounds(widget, colour)
+
     def image_center_colour(self, *, object_name: str) -> str:
         """Read the displayed QLabel raster's centre pixel as a hex RGB colour.
 
@@ -214,16 +230,7 @@ class ComponentDriver:
         widget = self._find(None, object_name)
         if not on_screen(widget):
             raise LookupError("Raster is not visible")
-        if not isinstance(widget, QLabel):
-            raise TypeError("Expected a raster label")
-        pixmap = widget.pixmap()
-        if pixmap.isNull():
-            raise ValueError("Label has no displayed raster")
-        return (
-            pixmap.toImage()
-            .pixelColor(pixmap.width() // 2, pixmap.height() // 2)
-            .name()
-        )
+        return observing.image_center_colour(widget)
 
     def list_rows(self) -> tuple[ListRowObservation, ...]:
         """Observe rows intersecting visible QListWidget viewports in this window."""
