@@ -177,7 +177,8 @@ Picker 可調五個找谷 controls、增刪選點與任意調整元件對應。�
 Recipe 等待 agent 透過 `tab_interact` 確認並送出 done，才詢問 writeback。
 操作與判讀見 [range find guide](onetone/range_find/guide.md)。
 
-`mux/onetone` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
+`mux/onetone` 使用 `readout/mux`。**Frequency offset** 是選定 tone 共用、可編輯的 MHz 偏移；每個 sweep 點把名目偏移加到各 tone 的基準 RF。
+Open／Defaults 的 `df` 初值由 [`mux/onetone/form.py` 的 `make_form`](mux/onetone/form.py) 定義。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
 Tone label 是可重複的顯示文字，不是 component 名稱，也不改變資料軸。
 `mux/onetone` adapter 從 group 的 resonators 產生 readout tones。

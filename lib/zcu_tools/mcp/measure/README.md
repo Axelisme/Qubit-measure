@@ -628,6 +628,10 @@ Owner 在同一個 tracked Primary／Post operation 驗證並套用更新，不�
 `done` 加入原 operation 的完成，不另建 analysis runner。
 Recipe 的 done 跳過剛完成 operation 的舊 interactive 快照，回原 recipe 的下一個 handoff 或終局；standalone 則完成自己的 execution。
 純讀與 command 都要求 holder，owner-loop commit 依序生效，沒有自動 retry。
+純讀回傳 PNG 不會發布原生 frame。Range Find 非終結命令的重畫時機與後續點擊座標，
+見 [Measure：Figure presentation](../../gui/app/measure/README.md#figure-presentation)。
+用 `h_tab_interact`、`RangeFindFrontend._refresh` 與 `FigureTileCanvas.draw` 可定位實作；
+提交與事件邊界見 [ADR-0067〈Adapter capability 與事件〉](../../../../docs/adr/0067-gui-application.md#adapter-capability-與事件)。
 
 GUI 將 analysis summary 的非有限數字投影為 null，以 invalid 記路徑與原因。
 MCP 保留同一份 owner-native summary，不重算 fit_quality、不套 recipe 的 summary 宣告，
