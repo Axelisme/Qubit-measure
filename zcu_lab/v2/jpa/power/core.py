@@ -255,7 +255,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         best_jpa_power = jpa_powers[max_idx]
 
         # 2. Mark the best power without connecting randomized pump settings.
-        _, ax = plots.subplots(num="fit", figsize=config.figsize)
+        fig, ax = plots.subplots(
+            num="fit", figsize=config.figsize, layout="constrained"
+        )
         ax.set(
             title="JPA sweep · pump power · g/e separation score",
             xlabel="JPA pump source power (dBm)",
@@ -270,5 +272,5 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             label=f"Peak pump source power = {best_jpa_power:.2f} dBm",
         )
         ax.margins(y=0.25)
-        ax.legend(loc="upper center")
+        fig.legend(loc="outside lower center")
         return PowerAnalysis(best_power=float(best_jpa_power))
