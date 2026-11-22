@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-22，Analyze 摘要通道與 Run 停止來源
+**Last updated:** 2026-11-22，Data 頁讀圖
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -321,7 +321,9 @@ Run、Analysis、Post-analysis、Workflow 與 Data 的具名圖預覽，四張�
 Run／Analysis／Post-analysis 的 RPC screenshot 與 `get_current_figure_for_pane`
 讀取這張原生 Figure。Workflow 的 `get_current_figure()` 提供同樣的唯讀查詢。
 同一 FigureCollection 重送時保留頁次與目前圖，清空時隱藏分頁列。
-Data 預覽只保存圖名與 raster cache，分頁不移動原始 canvas。
+Data gallery 用縮圖辨識各 stage 和具名圖。`View figure` 在同一頁從目前原生 Figure
+繪製一張可捲動 raster，不移動 canvas，也不新增 Save 工件。Run Save 只保存資料。
+操作、焦點與清理規則見 [Measure Qt views](ui/README.md)。
 Workflow 共用這組平鋪與分頁列，不顯示圖名下拉選單。
 
 ## Workflow hosting
