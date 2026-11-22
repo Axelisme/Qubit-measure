@@ -16,7 +16,7 @@ Each shot runs **optional Reset → Xπ on both qubits → simultaneous two-line
 
 ## Read the figures
 
-- **Run and Analyze maps:** terminal P(g,g) over relative phase and duration, out of all nine retained classes. Run shows progress. The **terminal probabilities** trace uses the measured phase nearest the proposal (first measured phase if none) and combines all outcomes except g,g and e,e into one trace. It does not identify any one higher-level state.
+- **Run and Analyze maps:** terminal P(g,g) over relative phase and duration, out of all nine retained classes. Run shows progress. The connected points in **terminal probabilities** show the measured probabilities, not a fit. The trace uses the measured phase nearest the proposal (first measured phase if none) and combines all outcomes except g,g and e,e into one trace. It does not identify any one higher-level state.
 - **Duration slices** compare measured return and cosine fits. Each trace needs data with retained shots at all durations. Measured probabilities here and in the terminal trace use ±1 shot SEM (sample SD of the class indicator / √N retained shots), not fit SE or round variation. Maps have no cell bars.
 - **Duration-fit rates**: a rate below 1/duration span is marked unresolved and excluded from the interference fit. Fit SE bars on selected rates are in MHz; a missing fit is not rate zero. **Rate² versus relative phase** uses the propagated bars `2 × rate × rate SE` in MHz² for display, not for weighting.
 

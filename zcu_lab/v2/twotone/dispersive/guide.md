@@ -12,6 +12,6 @@
 
 ## 讀圖與下一步
 
-Run 與第一張 Analyze 圖的橫軸是 readout RF 頻率（MHz），縱軸是平均 complex IQ 的模長（a.u.），不是布居。藍色不打 π，紅色打 π；Analyze 疊加兩條模型及共振線。此掃描用來定位共振，不畫逐點 shot SEM。
+Run 與第一張 Analyze 圖的橫軸是 readout RF 頻率（MHz），縱軸是平均 complex IQ 的模長（a.u.），不是布居。藍色不打 π，紅色打 π；Run 用折線連接測點。Analyze 不連接測點，另以實線顯示兩條模型，並標出共振。只存平均 IQ，沒有逐點 shot SEM；模型不提供參數誤差或選取門檻。
 
 第二張 Analyze 圖以扣除背景且正規化的 I 和 Q 比對量測點與模型圓。若有連續點偏離圓，檢查 π pulse 與背景模型；若共振撞邊，擴大掃描。χ/2π = 兩個共振頻率的絕對差 ÷ 2，例如相差 1.50 MHz 即 0.75 MHz；κ/2π = 兩條 FWHM 的平均。確認 preparation 品質後再使用這些結果。Analyze 不寫回。

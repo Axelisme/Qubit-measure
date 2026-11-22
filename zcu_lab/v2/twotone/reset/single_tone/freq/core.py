@@ -217,7 +217,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             max(freqs.min(), freq - 2 * fwhm), min(freqs.max(), freq + 2 * fwhm), 200
         )
         dense = np.unique(np.concatenate((dense, local)))
-        ax.plot(freqs, real_signals, ".-", label="Measured", markersize=5)
+        ax.plot(freqs, real_signals, ".", label="Measured", markersize=5)
         ax.plot(dense, lorfunc(dense, *parameters), "-", label="Lorentzian fit")
         ax.axvline(
             freq,

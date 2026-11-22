@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-22, acquire-local raw plans and isotropic receiver noise
+**Last updated:** 2026-11-22, acquire-local raw plans, isotropic receiver noise, and unentered acquire timings
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -59,8 +59,8 @@ bounded `routing-*.jsonl` row after each admitted acquire. Set `directory` to
 choose the output directory; null selects project-root `.sim_telemetry`.
 Direct evolution and every projective continuation enable Engine telemetry.
 The row contains compile, evolution, ADC/readout and in-acquire raw materialization
-time. It includes failed calls through their failure and leaves unentered stages
-at `0.0`. Successful materialization from a later raw getter appends a
+time, including elapsed time through failures. See the shared contract below
+for unentered stages. Successful materialization from a later raw getter appends a
 [supplemental timing record](../../README.md#acquire-telemetry).
 `complete` comes from the binding's `AcquireOutcome`: normal partial Stop is true,
 while exceptions are false. Writer I/O failures warn once and do not change the

@@ -275,7 +275,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         fig.suptitle("ADC window sweep · Resonator · IQ separation")
         raw = np.abs(signals)
-        ax.plot(lengths, raw, "o", color="C0", label="Measured SNR")
+        ax.plot(lengths, raw, "o-", color="C0", label="Measured SNR")
         if not np.array_equal(raw, snrs, equal_nan=True):
             ax.plot(lengths, snrs, color="C1", label="Selection SNR")
         ax.axvline(max_length, color="C3", ls="--", label="Selected setting")

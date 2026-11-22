@@ -15,10 +15,10 @@ For each gain and exposure time: optional **Reset** → no pulse for g preparati
 
 ## How to read the results
 
-Live shows g/e/Other fractions for both preparations. Analyze drops incomplete outer rows, applies only the saved readout correction if available, and shows six population maps above the rate panels. Map colors do not show shot SEM. The log-scale rate bars (every fifth point) come from the rate-fit covariance, not shot SEM or run-to-run variation.
+Run shows six population maps (preparation by column, final class by row) versus probe gain and duration. The bottom two panels connect the measured fractions versus probe duration at the current gain, one per preparation.
+
+Analyze drops incomplete outer rows and applies the saved readout correction if available. Its six population maps put g and e preparations in separate rows, and final g/e/Other in columns. Color shows population, not shot SEM. The bottom panels compare Γ₀L with Γ₀₁, Γ₁L with Γ₁₀, then Γ₁L with Γ₀L. Lines join rates fitted separately at each sweep point on log-scale axes. Bars at the first and every fifth point after it are the rates' fit SE from their covariance, not shot SEM or run-to-run variation. The Analyze maps and rates use the same outer coordinate; if transformed as above, do not read it as raw gain.
 
 ## Next step
 
 If the populations have not approached a plateau, extend **Probe length** and keep enough early points to resolve the slope. Compare rates only where both preparations constrain the fit. No calibration is written. Older files without class counts cannot be converted on Load.
-
-For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).

@@ -14,6 +14,6 @@ For tab setup, refreshing sources, applying and saving, see [`zcu_lab/v2/operato
 
 ## Read the search and choose a setting
 
-The four panels show the same points by evaluation order, bias, RF and power. Color is search stage. Use order to see if scores improve late and the other panels to check whether the best point is at a bound. Analyze marks the same best joint setting in all four panels with a red star. There is no fit or shot SEM.
+The four panels show the same points by evaluation order, bias, RF and power. Color is search stage. Live counts sampled candidates and retained shots. The order panel connects scores to show whether they improve late. The three setting panels are scatter views of the same joint search, not independent sweeps; check if the best point is at a bound. Analyze marks the same best joint setting in all four panels with a red star. There is no fit or shot SEM.
 
 The devices remain at the **last evaluated** setting, not necessarily the best one. Verify the best tuple together; do not combine axis values from different points. Repeat with narrower bounds around a stable interior best candidate. Apply stores the selected `$jpa.flux`, `$jpa.pump_freq` and `$jpa.pump_power` proposals, without commanding the devices.

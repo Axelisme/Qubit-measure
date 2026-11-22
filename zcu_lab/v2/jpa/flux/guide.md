@@ -15,6 +15,6 @@ For tab setup, refreshing sources, applying and saving, see [`zcu_lab/v2/operato
 
 The score divides g/e IQ-center separation by the pooled width along the separation axis. **IQ shape penalty** downweights unequal widths or skew. This is not assignment fidelity or state population.
 
-Live shows measured scores. Analyze overlays a Gaussian smooth of one scan step and marks the sampled bias at its peak. The smooth is not a fit. There is no shot SEM for this score. If the loaded cfg is missing, the axis shows native units rather than assuming A or V.
+Live counts sampled settings and shots. Live and Analyze connect the measured scores. Analyze overlays a dashed Gaussian smooth with a standard deviation of one scan step and marks the sampled bias at its peak. The smooth is not a fit. There is no shot SEM for this score. If the loaded cfg is missing, the axis shows native units rather than assuming A or V.
 
 Use data taken with bias control. Check that the smooth peaks near a measured feature and away from the scan edge. Refine between its neighboring samples. The bias correction is selected minus previous bias in the source unit. Apply updates `$jpa.flux` without changing the device.

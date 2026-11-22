@@ -18,8 +18,8 @@ Each shot runs **optional Reset → Xπ on both qubits → simultaneous CZ drive
 
 ## Read the figures
 
-- **Run** plots terminal P(g,g) against the gain multiplier. Check both covered points and retained shots: full point coverage can precede the final round, and herald can reduce the retained count below the attempted count.
-- **Analyze** overlays the first-return fit and marks the selected return with a dashed vertical line or reports why there is no candidate. The joint-outcome panels fix Qubit1 to g, e or other and show three Qubit2 series per panel on the same gain-multiplier axis as Run. Use them to see which classes rise as P(g,g) falls. Five series contain `other`: one for each of the g and e panels and all three in the other panel. All nine count in the denominator. `Other` is circle rejection, not a measured higher-level population.
+- **Run** connects measured terminal P(g,g) versus gain multiplier. Check both covered points and retained shots: full point coverage can precede the final round, and herald can reduce the retained count below the attempted count.
+- **Analyze** shows measured points without a joining line when it draws the first-return fit. Without a fit, the line joins measured points. The dashed vertical line marks a selected return, not a fit. The joint-outcome panels connect measured probabilities on the same gain-multiplier axis as Run. Each panel fixes Qubit1 to g, e or other and shows three Qubit2 series. Use them to see which classes rise as P(g,g) falls. Five series contain `other`: one for each of the g and e panels and all three in the other panel. All nine count in the denominator. `Other` is circle rejection, not a measured higher-level population.
 - In Run and both Analyze figures, measured probability points use ±1 shot SEM, `√[p(1−p)/(N−1)]` for `N ≥ 2` retained shots. In the joint-outcome panels a bar may be smaller than its marker at that probability scale. A near-zero point does not establish zero counts. Shot SEM is not single-shot spread, round-to-round variation or fit uncertainty. Period SE is a separate fit uncertainty.
 
 ## Fit the first complete return

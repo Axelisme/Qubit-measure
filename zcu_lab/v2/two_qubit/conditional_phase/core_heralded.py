@@ -37,6 +37,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
 
+from .._phase_plot import wrapped_phase_plot_data
 from .._sums import herald_probabilities, qubit_sigma, terminal_counts
 from .core import (
     ConditionalPhaseAnalysis,
@@ -134,7 +135,7 @@ def _plot_terminal_quadratures(
                 frequencies,
                 values[b, q],
                 yerr=sem[b, q],
-                fmt=".",
+                fmt=".-",
                 color=f"C{q}",
                 label=f"{projection} ± shot SEM",
             )
@@ -160,7 +161,7 @@ def _start_live_view(
         ax.ticklabel_format(useOffset=False)
         viewers.append(live_errorbar(ax, num_lines=2))
         for line, projection in zip(ax.lines, ("X", "Y"), strict=True):
-            line.set(label=f"{projection} ± shot SEM", linestyle="none")
+            line.set(label=f"{projection} ± shot SEM")
     fig.legend(
         *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
     )
@@ -549,8 +550,13 @@ def _plot_phase_crossing(
 ) -> None:
     """Mark existing interpolated roots of the wrapped conditional phase."""
     fig, ax = plots.subplots(num="phase", figsize=(7, 4.8), layout="constrained")
-    ax.plot(xs, conditional, ".", color="C0", label="Joint (g,g)/(e,e)")
-    ax.plot(xs, gg_only, ".", color="C1", label="(g,g) only")
+    ax.plot(
+        *wrapped_phase_plot_data(xs, conditional),
+        ".-",
+        color="C0",
+        label="Joint (g,g)/(e,e)",
+    )
+    ax.plot(*wrapped_phase_plot_data(xs, gg_only), ".-", color="C1", label="(g,g) only")
     ax.axhline(-180, color="0.45", linestyle="--", label="π modulo 360°")
     ax.axhline(180, color="0.45", linestyle="--")
     if crossings.frequencies_mhz:
@@ -593,13 +599,16 @@ def _plot_slopes(
     ax, quality_ax = fig.axes
     for b, state in enumerate(("g", "e")):
         for fit_group, marker, label in (
-            (fitted, ".", f"Joint spectator {state}"),
-            (gg_only, "x", f"(g,g) only, spectator {state}"),
+            (fitted, ".-", f"Joint spectator {state}"),
+            (gg_only, "x-", f"(g,g) only, spectator {state}"),
         ):
+            x, slopes, errors = wrapped_phase_plot_data(
+                xs, fit_group.slopes_deg[b], fit_group.errors_deg[b]
+            )
             ax.errorbar(
-                xs,
-                fit_group.slopes_deg[b],
-                yerr=fit_group.errors_deg[b],
+                x,
+                slopes,
+                yerr=errors,
                 fmt=marker,
                 color=f"C{b}",
                 label=label,
@@ -647,8 +656,8 @@ def _plot_phase_diagnostics(
     contrast_ax, phase_ax = fig.axes
     for b, state in enumerate(("g", "e")):
         for label, marker, rows in (
-            ("(g,g) ", ".", phases),
-            ("(e,e) ", "x", ee_phases),
+            ("(g,g) ", ".-", phases),
+            ("(e,e) ", "x-", ee_phases),
         ):
             points = rows[b]
             contrast_ax.plot(
@@ -658,14 +667,12 @@ def _plot_phase_diagnostics(
                 color=f"C{b}",
                 label=f"{label}spectator {state}",
             )
+            phase_deg = [
+                np.nan if p.logical_phase_deg is None else p.logical_phase_deg
+                for p in points
+            ]
             phase_ax.plot(
-                xs,
-                [
-                    np.nan if p.logical_phase_deg is None else p.logical_phase_deg
-                    for p in points
-                ],
-                marker,
-                color=f"C{b}",
+                *wrapped_phase_plot_data(xs, phase_deg), marker, color=f"C{b}"
             )
     contrast_ax.set_ylabel("Classified contrast")
     contrast_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)

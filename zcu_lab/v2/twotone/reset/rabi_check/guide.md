@@ -13,8 +13,8 @@ Optional **Reset** → **Rabi pulse** at the swept gain → one of three branche
 
 Live and the three fit panels project mean IQ on the before-reset principal axis (I if unavailable). Bars are shot SEM: sample SD along that axis divided by √(retained shots), not fit error or round-to-round scatter. Mean-only files show no bars.
 
-Analyze overlays fits using the before-reset frequency f; the reset-plus-Rabi fit adds 2f. Compare residual oscillation after reset with contrast recovered by the second pulse. The after/before amplitude ratio is relative IQ contrast, not fidelity. Phase is referenced to zero gain and may be unavailable when the fundamental is unresolved; this is not a zero offset.
+Live connects measured means. In the three fitted Analyze panels, only the model has a solid line; measured means retain their points and SEM. All fits use the before-reset frequency f; the reset-plus-Rabi fit adds 2f. Compare residual oscillation after reset with contrast recovered by the second pulse. The after/before amplitude ratio is relative IQ contrast, not fidelity. Phase is referenced to zero gain and may be unavailable when the fundamental is unresolved; this is not a zero offset.
 
-**Fit residuals** shows measured minus fitted IQ; RMS gives the typical mismatch in a.u. Structured residuals suggest the model missed a feature, and the 2f term alone does not identify its cause. Confirm a promising setting with a population measurement. There is no writeback.
+**Fit residuals** connects measured minus fitted IQ in gain order with the same shot SEM as the measured means. RMS gives the typical mismatch in a.u. Structured residuals suggest the model missed a feature, and the 2f term alone does not identify its cause. Confirm a promising setting with a population measurement. There is no writeback.
 
 Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).

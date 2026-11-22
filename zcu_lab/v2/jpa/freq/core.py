@@ -128,11 +128,11 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         jpa_freqs = sweep2array(cfg.jpa_freq, allow_array=True)
         np.random.default_rng(cfg.seed).shuffle(jpa_freqs[1:-1])
 
-        # Show independent points because neighboring samples need not be nearby.
+        # Draw in coordinate order while keeping acquisition randomized.
+        plot_order = np.argsort(jpa_freqs)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="JPA Frequency (MHz)", ylabel="g/e SNR (a.u.)")
         line = live_line(ax)
-        ax.lines[0].set_linestyle("None")
         ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
@@ -142,7 +142,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             Read the scan-shaped data without changing it. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            return line.set(jpa_freqs, np.abs(data))
+            return line.set(jpa_freqs[plot_order], np.abs(data[plot_order]))
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -214,9 +214,16 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         max_idx = np.nanargmax(real_signals)
         best_jpa_freq = jpa_freqs[max_idx]
 
-        # 2. Mark the best frequency without connecting randomized pump settings.
+        # 2. Connect neighboring pump settings and mark the best sampled point.
+        plot_order = np.argsort(jpa_freqs)
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-        ax.scatter(jpa_freqs, real_signals, label="Measured g/e SNR", s=2)
+        ax.plot(
+            jpa_freqs[plot_order],
+            real_signals[plot_order],
+            "o-",
+            ms=3,
+            label="Measured g/e SNR",
+        )
         ax.axvline(
             best_jpa_freq,
             color="r",

@@ -14,7 +14,7 @@
 
 ## 讀圖與選擇
 
-- **Run** 圓點為實測目標，虛線為目前最佳實測值。最大 `|I+iQ|` 超過 1 的候選標記為零，不取數也不進入最佳值。已處理候選數不等於已取數；Stop 時未完成候選的 shots 計入 shot 總數，不算已完成評估。
+- **Run** 與 **Analyze fit** 的折線連接實測目標。Run 的虛線為截至各候選的最佳實測值。最大 `|I+iQ|` 超過 1 的候選標記為零，不取數也不進入最佳值。已處理候選數不等於已取數；Stop 時未完成候選的 shots 計入 shot 總數，不算已完成評估。
 - **Analyze fit** 比較各已量目標、最大值與起點，沒有 survival 曲線擬合。兩圖的實測點棒是由各 seed 的 retained-shot 二項 variance 傳播到等權平均所得的 shot SEM，不是 seed SD、輪間散布或 fit error。
 - **Envelopes** 比較最佳與起點的 normalized I/Q 對包絡時間。摘要依序列 I1… I6、Q1… Q6、Qubit1／Qubit2 local Z。Load 後由保存的時長重建波形，不需原資產；原 cfg 重跑仍需它。缺 cfg 或有效評估就不選最佳。
 

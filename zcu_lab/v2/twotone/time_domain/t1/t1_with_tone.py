@@ -191,7 +191,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
         # 3. Compare the measured decay and fitted components.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(xs, real_signals, label="meas", ls="none", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")
         if dual_exp:
             ax.plot(xs, ft.expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")

@@ -16,7 +16,7 @@ Each shot runs **optional Reset → Xπ on both qubits → simultaneous two-line
 ## Read the figures
 
 - **Run and Analyze chevrons:** joint return against duration (µs) and drive frequency (MHz), with probability as color. Run marks measured cells. Analyze's white cross is the lowest finite measured return; it selects a slice, not a proposal. The nine terminal maps show which outcomes replace g,g. The denominator includes `other`, a classifier outcome, not identified leakage. Heatmaps have no cell error bars.
-- **Duration slices:** first and last frequencies plus the cross's frequency (or the middle index if no point is available), without duplicates. Compare measured return with the cosine fit. Bars on measured points are ±1 shot SEM: binomial sample SD divided by √N retained shots, not fit uncertainty or round spread.
+- **Duration slices:** first and last frequencies plus the cross's frequency (or the middle index if no point is available), without duplicates. Compare measured return with the cosine fit. If a slice has no fit, the line joins the measured points instead. Bars on measured points are ±1 shot SEM: binomial sample SD divided by √N retained shots, not fit uncertainty or round spread.
 - **Duration-fit rates:** a cosine gives the rate at each usable frequency. A rate below the inverse duration span is unresolved (crosses); bars for selected rates are fit SE in MHz. A failed fit does not give rate zero. R² is the explained variation; normalized RMS is residual RMS divided by the observed probability range. Neither is a selection threshold. A duration trace needs retained shots at every point; it can reach that coverage before the planned rounds finish.
 
 ## Next step

@@ -8,7 +8,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shar
 
 ## Read the plots
 
-Run and Analyze show projected mean IQ (a.u.) by ordered gate pair, not population. A calibrated sequence gives a staircase for ground, equator and excited states. One error bar is one shot SEM on the plotted IQ axis: retained-shot sample SD divided by √(retained shots). It is not shot spread, round-to-round scatter or fit uncertainty. Mean-only files plot without bars.
+Run and Analyze show projected mean IQ (a.u.) by ordered gate pair, not population. The pairs are categories, so the measured points are not joined. A calibrated sequence gives a staircase for ground, equator and excited states. One error bar is one shot SEM on the plotted IQ axis: retained-shot sample SD divided by √(retained shots). It is not shot spread, round-to-round scatter or fit uncertainty. Mean-only files plot without bars.
 
 Analyze overlays the coherent-error model. **Amplitude error** is relative drive error (+0.02 means 2% too much rotation); `detune_param` is the model's detuning parameter in a.u. The `power_err` and `detune_err` values are mean absolute Bloch-z deviations caused by each error over the 21 pairs (ground +1, excited −1). Ground and excited levels are fitted, not fixed to the measured extremes.
 

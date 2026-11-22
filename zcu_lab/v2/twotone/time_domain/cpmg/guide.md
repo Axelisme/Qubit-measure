@@ -15,7 +15,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the s
 
 Both maps show normalized IQ contrast (not population) versus total delay (µs) and pulse count in acquisition order. Columns are equally spaced even for uneven counts. Repeated counts carry an acquisition index, e.g. `4 (#3)`. Blank cells lack data. Live compares the latest and previous counts on their own delay grids.
 
-The Analyze right panel shows T₂ against numerical pulse count on log-log axes. Bars are lifetime fit errors, not shot SEM. Optional Ramsey T₂ and 2 × T₁ lines are references, not fit inputs. An incomplete row has no lifetime. A row must have resolved decay within its time window, fit error below half the lifetime, and contrast above four times the mean absolute smoothed residual. If no row passes or the fitter raises, Analyze fails.
+The Analyze right panel shows T₂ against numerical pulse count on log-log axes. The lifetime points connect only when there is no T₂(N) fit. Bars are lifetime fit errors, not shot SEM. Optional Ramsey T₂ and 2 × T₁ lines are references, not fit inputs. An incomplete row has no lifetime. A row must have resolved decay within its time window, fit error below half the lifetime, and contrast above four times the mean absolute smoothed residual. If no row passes or the fitter raises, Analyze fails.
 
 ## Next step
 

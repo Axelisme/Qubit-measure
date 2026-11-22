@@ -16,12 +16,14 @@ Each shot runs **optional Reset → spectator I/Xπ → target Xπ/2 → n two-l
 
 ## Read phase and quadratures
 
-- **X/Y panels** plot `σ=(N_e−N_g)/N_total` versus carrier by spectator and train length. Other contributes zero and stays in the denominator. Bars are the retained-shot sample SD of this indicator divided by √N, not fit SE or round spread. Run and the first Analyze panel show the current or latest started train, even if incomplete. Planned trains also have separate panels.
+- **X/Y panels** connect measured `σ=(N_e−N_g)/N_total` versus carrier by spectator and train length. Other contributes zero and stays in the denominator. Bars are the retained-shot sample SD of this indicator divided by √N, not fit SE or round spread. Run and the first Analyze panel show the current or latest started train, even if incomplete. Planned trains also have separate panels.
 - **Contrast and wrapped phase:** `hypot(σ_X,σ_Y)` and `atan2(σ_Y,σ_X)` in degrees; no angle for zero contrast. Each projection must have all Reps × Rounds to enter the phase calculation. Counts from completed rounds remain visible after Stop; incomplete frequencies can have slope diagnostics but block crossing selection.
 - **Slopes:** X and Y fit `A cos(n·slope+φ)`, `A sin(n·slope+φ)` with no DC term, separately by spectator and frequency. Effective fit groups still need difference gcd 1 after dropping unusable points. Bars are slope fit SE; reduced χ² is the sum of squared normalized residuals divided by residual degrees of freedom. Near 1 is consistent with the fit errors, not a selection threshold. A missing fit or χ² is not zero.
 
+In the wrapped phase, per-CZ slope and π-crossing panels, a break between adjacent samples can mark the ±180° cut or an ambiguous half-turn: angles separated by 180° or more are not joined. A frequency with no available value has no point or bridging line.
+
 ## Select a frequency and apply
 
-**π crossing** plots the difference of spectator slopes, e minus g, not the phase of a chosen train. Analyze unwraps adjacent frequencies and linearly interpolates one π-modulo-360° crossing. Missing slopes, no root, multiple roots, a flat π segment or a half-turn ambiguity block the proposal. A boundary root counts once; interpolation gives no frequency uncertainty.
+**π crossing** plots the difference of spectator slopes, e minus g, not the phase of a chosen train. Analyze unwraps adjacent frequencies and linearly interpolates one π-modulo-360° crossing. Missing slopes, no root, multiple roots, a flat π segment or a half-turn ambiguity block the proposal. The red marker shows the interpolated crossing. A boundary root counts once; interpolation gives no frequency uncertainty.
 
 Writeback replaces only the common frequency of both source CZ pulses with that crossing and offers independent coupler slot rows. Recheck amplitude after accepting a new carrier and then measure [Local Z](../local_z/guide.md). Phase analysis requires the saved cfg; see the [legacy load note](../guide.md#opendefaults-與人工-apply). For common GUI actions, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).

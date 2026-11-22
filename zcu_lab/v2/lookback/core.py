@@ -243,8 +243,8 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
             xlabel=_TIME_LABEL,
             ylabel="Mean IQ (a.u.)",
         )
-        iq_ax.plot(Ts, np.real(signals), color="C0", label="I (in-phase)")
-        iq_ax.plot(Ts, np.imag(signals), color="C1", label="Q (quadrature)")
+        iq_ax.plot(Ts, np.real(signals), ".-", color="C0", label="I (in-phase)")
+        iq_ax.plot(Ts, np.imag(signals), ".-", color="C1", label="Q (quadrature)")
         iq_fig.legend(loc="outside lower center", ncols=2)
 
         return LookbackAnalysis(predict_offset=offset)

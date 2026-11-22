@@ -14,7 +14,7 @@ Optional **Reset** → **Preparation pulse** at the swept RF frequency → **Opt
 
 ## How to read the results
 
-Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. Later library or form edits do not alter that result's correction. Compare the three traces versus preparation RF frequency; this peak-location spectrum does not draw per-point shot SEM bars.
+Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. Later library or form edits do not alter that result's correction. Compare the three traces versus preparation RF frequency. The lines join measured fractions, not fits. Bars show ±1 shot SEM from the g/e/Other counts at each point, not fit error or round-to-round scatter. Analyze propagates the sampling covariance through the correction when applied. Fewer than two shots or missing counts leave no bar.
 
 ## Next step
 

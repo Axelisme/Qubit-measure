@@ -447,7 +447,9 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
             fig, ax = plots.subplots(num=f"fit_{index}", figsize=(7, 5))
             ax.set(xlabel=_RF_LABEL, ylabel=_IQ_LABEL)
             fig.suptitle(f"Mux one-tone spectrum · {name} · Readout amplitude")
-            ax.plot(freqs, np.abs(signals), "o", ms=3, label="Measured IQ")
+            (measured,) = ax.plot(
+                freqs, np.abs(signals), "o", ms=3, label="Measured IQ"
+            )
             try:
                 fit = fit_resonance(
                     freqs,
@@ -473,6 +475,7 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                 ArithmeticError,
                 np.linalg.LinAlgError,
             ) as exc:
+                measured.set_linestyle("-")
                 reason = str(exc)
                 ax.text(
                     0.02,

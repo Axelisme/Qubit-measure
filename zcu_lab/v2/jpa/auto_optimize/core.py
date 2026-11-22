@@ -40,7 +40,7 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.jpa.auto_optimize.optimizer import JPAOptimizer
-from zcu_lab.v2.support import live_scatter
+from zcu_lab.v2.support import live_line, live_scatter
 from zcu_lab.v2.support.device import set_flux, set_rf_frequency, set_rf_power
 
 
@@ -485,6 +485,8 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
     ) -> Callable[[_JPALiveSnapshot], None]:
         """Show acquired candidates and retained-shot progress on the plot owner."""
         figure, axes = self._search_panels(context.plots, "measurement", unit)
+        progression = live_line(axes[0])
+        axes[0].lines[0].set(marker="None", color="0.5", zorder=1)
         viewers = [live_scatter(ax) for ax in axes]
         colorbar = figure.colorbar(
             axes[0].collections[0], ax=axes, label="Search stage (count)"
@@ -505,18 +507,15 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
 
             stages = result.phases[measured].astype(np.float64)
             colorbar.set_ticks(np.unique(stages).tolist())
-            artists: list[Artist] = [progress]
+            candidates = np.arange(1, len(measured) + 1, dtype=np.float64)
+            scores = np.abs(result.signals)
+            artists: list[Artist] = [progress, *progression.set(candidates, scores)]
             for viewer, xs in zip(
                 viewers,
-                (
-                    np.arange(1, len(measured) + 1, dtype=np.float64)[measured],
-                    *result.params[measured].T,
-                ),
+                (candidates[measured], *result.params[measured].T),
                 strict=True,
             ):
-                (scatter,) = viewer.set(
-                    xs, np.abs(result.signals[measured]), colors=stages
-                )
+                (scatter,) = viewer.set(xs, scores[measured], colors=stages)
                 scatter.set_sizes(np.array([32.0]))
                 artists.append(scatter)
             return artists
@@ -555,6 +554,8 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         unit = "a.u." if unit == "native" else unit
         fig, axes = self._search_panels(plots, "fit", unit)
         measured = np.isfinite(snrs)
+        candidates = np.arange(1, len(snrs) + 1)
+        axes[0].plot(candidates, snrs, "-", color="0.5", zorder=1)
         stages = phases[measured]
         norm = Normalize(vmin=float(stages.min()), vmax=float(stages.max()))
         best_labels = (
@@ -565,7 +566,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         )
         for ax, xs, best_value, label in zip(
             axes,
-            (np.arange(1, len(snrs) + 1), *params.T),
+            (candidates, *params.T),
             (max_id + 1, *best_params),
             best_labels,
             strict=True,

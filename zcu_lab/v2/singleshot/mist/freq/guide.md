@@ -14,7 +14,7 @@ Optional **Reset** → optional **Initial preparation pulse** → **MIST tone** 
 
 ## How to read the results
 
-Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. Compare the three traces on the same RF axis to locate resonances or loss features. The peak-location spectrum has no per-point shot SEM bars.
+Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. Compare the three traces on the same RF axis to locate resonances or loss features. The lines join measured fractions, not fits. Bars show ±1 shot SEM from the g/e/Other counts at each point, not fit error or round-to-round scatter. Analyze propagates the sampling covariance through the correction when applied. Fewer than two shots or missing counts leave no bar.
 
 ## Next step
 

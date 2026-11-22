@@ -285,7 +285,7 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
         ax_score, ax_reasons = fig.axes
         fig.suptitle("R–π gain sweep · Resonator · Alternating contrast")
         scores = valid_values(analyses, "score")
-        ax_score.plot(gains, scores, "o", color="C0")
+        ax_score.plot(gains, scores, "o-", color="C0")
         ax_score.set_ylabel(SCORE_LABEL)
         if best is not None:
             setting = float(gains[best])
@@ -335,7 +335,7 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
             ),
             strict=True,
         ):
-            ax.plot(gains, valid_values(analyses, name), "o", color="C0")
+            ax.plot(gains, valid_values(analyses, name), "o-", color="C0")
             ax.set_ylabel(ylabel)
             if best is not None:
                 ax.axvline(float(gains[best]), color="C3", ls="--")

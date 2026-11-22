@@ -165,7 +165,7 @@ def test_binding_records_body_exception_and_sums_failed_compile_scopes(
     assert observed[0].wall_s == 5.0
     with binding.acquire() as sequence:
         assert sequence == 1
-    assert observed[1].compile_wall_s == 0.0
+    assert observed[1].compile_wall_s is None
 
 
 def test_completion_observer_sees_all_rounds_and_cannot_mask_execution_failure(caplog):
@@ -553,7 +553,7 @@ def test_failed_preparation_consumes_no_sequence_or_outcome(failing_hook):
     with binding.acquire() as sequence:
         assert sequence == 1
     assert len(observed) == 2
-    assert observed[0].compile_wall_s == 0.0
+    assert observed[0].compile_wall_s is None
 
 
 @pytest.mark.parametrize("body_fails", [False, True])

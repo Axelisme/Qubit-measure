@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-21, receiver flight time in readout routing and raw materialization timing
+**Last updated:** 2026-11-22, unentered acquire timings
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -70,8 +70,8 @@ bounded `routing-*.jsonl` row after each admitted acquire. Set `directory` to
 choose the output directory; null selects project-root `.sim_telemetry`.
 All six sources, routed groups and projective spans contribute to one row.
 The row contains compile, evolution, ADC/readout and in-acquire raw materialization
-time. It includes failed calls through their failure and leaves unentered stages
-at `0.0`. Successful materialization from a later raw getter appends a
+time, including elapsed time through failures. See the shared contract below
+for unentered stages. Successful materialization from a later raw getter appends a
 [supplemental timing record](../../README.md#acquire-telemetry).
 `complete` comes from the binding's `AcquireOutcome`: normal partial Stop is true,
 while exceptions are false. Writer I/O failures warn once and do not change the

@@ -13,9 +13,9 @@
 
 ## Phase 與 slope
 
-- **Run 與 quadratures**：按 target 看 X/Y 的 `σ=(N_e−N_g)/N_total` 對 n；other 記零並留在分母。棒是保留 shots 的樣本標準差除以 √N，不是 fit SE 或輪間散布。Run 顯示已完成點；沒有有效投影時不產生 phase。
-- **Phase points** 比較向量長度（contrast）與 `atan2(σ_Y,σ_X)` 的 wrapped phase。兩投影都須完成必要取數，保留數與 contrast 都不可為零。微弱但非零的 contrast 仍可能給 fit，先對照 X/Y 棒。
-- **Phase** 顯示相鄰 unwrap 後的角度與計數加權直線 `intercept + slope × n`。Slope 是每 CZ 的 logical Bloch phase；缺點、半圈歧義或無正值 phase variance 不給該 correction。± 為 slope fit SE；R² 為解釋的相位變異，normalized RMS 是殘差 RMS／實測相位範圍，relative SE 是參數 SE／參數絕對值，沒有額外選取門檻。GUI 有 Run／Load capture 時可列元件名，位置仍是 Qubit1、Qubit2。
+- **Run 與 quadratures**：按 target 連接實測 X/Y 的 `σ=(N_e−N_g)/N_total` 對 n；other 記零並留在分母。棒是保留 shots 的樣本標準差除以 √N，不是 fit SE 或輪間散布。Run 顯示已完成點；沒有有效投影時不產生 phase。
+- **Phase points** 比較向量長度（contrast）與 `atan2(σ_Y,σ_X)` 的 wrapped phase。兩投影都須完成必要取數，保留數與 contrast 都不可為零。相鄰 wrapped phase 相差至少 180° 時保留兩端的點，不連線；沒有點表示未測或無可用相位。這只影響圖面，不改下一張圖的 unwrap 條件。微弱但非零的 contrast 仍可能給 fit，先對照 X/Y 棒。
+- **Phase** 顯示相鄰 unwrap 後的角度點（不連線）與計數加權直線 `intercept + slope × n`。Slope 是每 CZ 的 logical Bloch phase；缺點、半圈歧義或無正值 phase variance 不給該 correction。± 為 slope fit SE；R² 為解釋的相位變異，normalized RMS 是殘差 RMS／實測相位範圍，relative SE 是參數 SE／參數絕對值，沒有額外選取門檻。GUI 有 Run／Load capture 時可列元件名，位置仍是 Qubit1、Qubit2。
 
 ## Preview 與 Apply
 

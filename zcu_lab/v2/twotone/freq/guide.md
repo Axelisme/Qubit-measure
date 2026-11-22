@@ -12,9 +12,9 @@ See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shar
 
 ## Read the spectrum
 
-Run shows the magnitude after subtracting the median complex IQ, in a.u., versus probe RF frequency in MHz. A peak indicates a change in readout response, not population. There are no pointwise shot SEM bars; center and FWHM uncertainties are fit errors. Candidate SNR measures height above the median in noise units, not fit quality.
+Run connects measured points of the mean IQ magnitude after subtracting the median complex IQ (a.u.), versus probe RF frequency (MHz). A peak indicates a change in readout response, not population. The spectrum saves mean IQ only, so there are no pointwise shot SEM bars. The center and FWHM uncertainties are fit errors in MHz. Candidate SNR measures height above the median in noise units, not fit quality.
 
-Analyze shades the fitted interval, with a zoom if it spans at most half the scan. The window starts at ± six half-widths about the selected peak, clips at neighboring midpoints and expands if needed to include six samples. Gray triangles mark other candidates; the dotted line is the fitted center. Check the curve against both shoulders. A candidate flagged `truncated` has a half-prominence crossing outside the scan. Widen or recenter before using its width.
+Analyze shades the fitted interval, with a zoom if it spans at most half the scan. In the fit panel, only the model has a solid line. The overview, when separate from the fit, connects the measured points. The window starts at ± six half-widths about the selected peak, clips at neighboring midpoints and expands if needed to include six samples. Gray triangles mark other candidates; the dotted line is the fitted center. Check the curve against both shoulders. A candidate flagged `truncated` has a half-prominence crossing outside the scan. Widen or recenter before using its width.
 
 ## Next step
 
