@@ -62,8 +62,8 @@ def live_heatmap(
     Colormap object. An unknown name raises ValueError before attachment.
     In _live_format.py, HeatmapFormat.attach_ax (uniform) and
     NonUniformHeatmapFormat.attach_ax (nonuniform) initialize the colormap.
-    The nonuniform path loads placeholder data during attachment, so
-    NonUniformImage rejects colormap changes even before the first set call.
+    The nonuniform image's colormap cannot change after attachment,
+    even before the first set call.
     AttachedHeatmap.set changes data, not the colormap. It validates real
     nonempty 1D axes and signals shaped (len(xs), len(ys)) before mutation
     and returns the image artist. All columns use the same ys grid. No refresh

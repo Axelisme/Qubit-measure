@@ -71,7 +71,8 @@ Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 [scan_t1_with_tone.py](twotone/time_domain/t1/scan_t1_with_tone.py) 各放固定 tone 與 gain sweep。
 兩者共用基本 T1 的 Result、Analysis 或訊號轉換，不增加 GUI adapter。
 AC Stark spectroscopy 的 [core.py](twotone/ac_stark/core.py) 對應 `twotone/ac_stark`，
-[ramsey_core.py](twotone/ac_stark/ramsey_core.py) 對應 `twotone/ac_stark_ramsey`。兩個 key 由 [definitions.py](../definitions.py) 註冊，Ramsey 操作見 [AC Stark Ramsey guide](twotone/ac_stark/guide.ramsey.md#設定與量測)。
+[ramsey_core.py](twotone/ac_stark/ramsey_core.py) 對應 `twotone/ac_stark_ramsey`。
+註冊位置與 Ramsey guide 見 [Lab 組裝與註冊](../README.md#lab-組裝與註冊)。
 Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot` 擁有。
 各實驗的 `core.py` 自行選擇分析資料並繪圖，數值擬合工具由 `zcu_tools.analysis.fitting` 擁有。
 跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
@@ -144,6 +145,8 @@ fig.show()
 `live_errorbar(ax).set(xs, signals, yerr)` 更新點與對稱誤差棒；NaN 誤差只省略誤差棒，保留資料點。
 作者直接在 axes 設 ticks、顏色與標題。掃描歷史線由作者在另一個 axes 建立並更新。
 Reference marker 與動畫錄影不在這些工具中。
+
+共用的 `live_heatmap` 讓所有欄共用一組 `ys` 座標。[CPMG core](twotone/time_domain/cpmg/core.py) 的 Live 與 Analyze 都用 `_count_map`，讓每個 pulse count 欄各用自己的 delay grid，不呼叫 `live_heatmap`。
 
 Singleshot Check 在自己的 `analyze` 畫分類 IQ／區域圖；GE 的專屬分類圖在 `singleshot/ge/core.py`。
 Amp／Len Rabi 在各自的 core 畫 joint-fit population、histogram 與 confusion 圖，
@@ -245,7 +248,7 @@ Amp Rabi 也只編譯一個 program，在共用的 `point` 硬體 loop 同步掃
 共同 reset 後，TimelineBuilder 以 fork／emit 讓 drives 同時起跑，再以 join 取得當點最長結尾，
 接著做共同 mux readout。不補齊末端，不以全 sweep 最大長度 padding。
 Amp Rabi 的 shot count 與 IQ moments 由 [Program 的 summed acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition) 累加。
-這些 sums 不含不確定度估計；從 sums 推導不確定度時，見 [analysis〈子模組〉](../../lib/zcu_tools/analysis/README.md#子模組)。
+需要用 sums 估計逐點不確定度時，見 [analysis〈逐點 shot SEM〉](../../lib/zcu_tools/analysis/README.md#逐點-shot-sem)。
 七個 mux qubit adapters 已註冊在 catalog，透過各 leaf 的 native `form.py` 生成完整
 固定具名 tones 及獨立 Participants 輸入。元素 picker 只選編輯對象；名稱 readonly。
 普通改名、增刪及重排由公開 FixedElements owner 原子拒絕。

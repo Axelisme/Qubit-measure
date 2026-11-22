@@ -116,8 +116,8 @@ y 軸與色階預設依資料範圍自動縮放。跨圖比較才用固定尺度
 
 在 GUI 各繪圖頁以實際顯示尺寸看圖。字級跟著顯示尺寸縮放，最小字級 10 pt。tick 標籤不能重疊，legend 不能蓋資料。一張圖最多 6 個 panel。
 
-Data 頁的縮圖只用來選圖。按 `View figure` 在 Data 頁打開閱讀面，不會存檔。按閱讀面的實際尺寸檢查。放不下整張圖時捲動查看，不縮小字級。
-Run Save 只保存資料。要驗收存檔版面，另開 Analysis Save 寫出的 PNG，按 PNG 的實際尺寸檢查。
+Data 頁的縮圖只用來選圖。按 `View figure` 在 Data 頁打開閱讀面，不會存檔。按閱讀面的實際尺寸檢查。放不下整張圖時捲動查看，不縮小字級。閱讀面由 [Measure〈Figure presentation〉](../../lib/zcu_tools/gui/app/measure/README.md#figure-presentation) 說明。
+Run Save 只保存資料。另開所有匯出的 PNG，包含 Analysis 與 Post-analysis 匯出的圖，逐張按 PNG 的實際尺寸檢查。
 
 - 壞例：放大 Run 頁才讀得清楚。在 Data 頁打開 `View figure` 後仍讀不清 tick 標籤，存檔 PNG 的 colorbar 又擠到標題。
 - 好例：Ding 圖 5-7（頁 150）的四分支分成 2×2 panel。採用這種分組後，仍要在 GUI 和匯出的 PNG 核對字級、tick、legend 與資料位置。
