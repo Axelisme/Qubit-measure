@@ -1,44 +1,24 @@
-## Behavior
+**Readers:** operator, agent. Measure spin-echo coherence time T₂E after refocusing slow dephasing.
 
-**Readers:** operator, agent. T2 echo (spin/Hahn echo): a pi/2 → delay → pi → delay → pi/2 sequence with the total free-evolution delay swept; the refocusing pi pulse cancels low-frequency dephasing, and the decay fit yields the echo coherence time T2E. Runs on real hardware. Run after both pi and pi/2 pulses are calibrated; T2E is typically longer than the Ramsey T2*.
+## Sequence and key settings
 
-**Last updated:** 2026-10-21
+Optional **Reset** → calibrated **Pi/2 Pulse** → half delay → calibrated **Pi Pulse** → half delay → final π/2 → calibrated **Readout**. Sweep the total free-evolution delay. T₂E is the decay time of the echo envelope and is often longer than Ramsey T₂*.
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+- **Delay** starts at `0…1.5 × qubit.t2e` (µs). Span about **3 × T₂E** for a well-resolved decay. Too short a scan leaves the tail unseen and makes the fit depend on extrapolation.
+- **Detune ratio (fringes/step)** sets the final π/2 phase ramp; requested MHz is ratio ÷ Step (µs). For a fringe fit, use at least **10 points per period**, so Step ≤ `1/(10f)` µs for fringe frequency f in MHz. Increase **Expts** with the window; sparse points can hide cycles or show an aliased fringe.
+- **Fit method** defaults to `decay`. For a standard echo use ratio 0. Choose `fringe` for a nonzero source detune; **Fit phase offset (fringe only)** frees the phase. Zero source detune forces decay. A fringe request without captured cfg detune or a finite saved actual detune fails Analyze; decay remains available.
+- **Relax delay** starts at `5 × qubit.t1` (150 µs when absent). Check both pulses and readout timing before Run.
 
-## Parameter sources
+See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the shared GUI steps.
 
-Total delay runs 0 to 1.5 * qubit.t2e µs over 101 points. Detune ratio is fringes per sweep step; native MHz detune is ratio / step. Relax delay is 5 * qubit.t1 µs. Other missing required calibration leaves the affected fields empty and Invalid.
+## Read the plots
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+Live shows rotated mean IQ amplitude (a.u.), not population, against total delay in µs. Its detune title reports the applied ramp. Analyze plots that IQ projection with the decay or fringe fit and omits the first measured point from the fit. The lifetime uncertainty is a fit error; neither plot has pointwise shot SEM.
 
-## Module slots
+R² compares residuals with data variation. Normalized residual RMS gives a residual scale relative to the measured signal span. Review the decay envelope and fit uncertainty, especially when it barely falls in the measured window.
 
-Readout uses the qubit.module.readout slot captured at Open/Defaults, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. Drive slots use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
+## Next step
 
-## Typical writeback
+Writeback proposes `qubit.t2e` and an independent bias sample when available; it does not change RF frequency or module slots. T₂/sample proposals are preselected only with positive finite T₂, finite nonnegative relative error ≤ 0.5, R² ≥ 0.9 and normalized residual RMS ≤ 0.1. Failed, invalid or unavailable checks leave candidates unselected for manual review.
 
-Initial T2/sample selection requires positive finite T2, r2 at least 0.9,
-normalized residual RMS at most 0.1 and relative T2 error at most 0.5.
-Failed or unavailable checks leave candidates unselected with explanatory notes.
-You may select them manually after reviewing the source and fit.
-
-Proposes fitted qubit.t2e (µs) to the captured qubit and working point, including loaded data with IQ only. Frequency and module slots stay unchanged. Proposals keep the qubit and working point captured for this result even after focus changes. An independent t2e_us/t2e_err_us sample uses the captured Run bias when device evidence is available.
-
-## Recommended
-
-Enable Fit phase offset to fit a free fringe phase; it defaults to fixed phase and applies to fringe fits only. Set the 'Detune ratio (fringes/step)' input (default 0.1). This is the number of fringe periods per delay-sweep step; the absolute detune (MHz) applied to the final pi/2 pulse phase is detune_ratio / sweep step, leaving a residual oscillation on the echo decay. Analysis 'Fit method' defaults to 'decay'. Select 'fringe' explicitly only for nonzero source detune; choosing 'decay' remains valid. Zero source detune forces decay even when fringe is selected. Analysis uses the saved cfg detune, or finite saved actual detune without cfg. A fringe request without either source reports a missing-detune error; explicit decay still works. Set the ratio to 0 for a standard echo (pure exponential decay → T2E). A total-delay sweep reaching a few T2E lets the echo decay; the first sweep point is dropped in the fit.
-
-## Four starting situations
-
-1. With an empty kickstart project, Open the Form and inspect its required blanks.
-   Obtain calibrated pi and pi/2 pulses. Confirm the total-delay window, detune_ratio and readout timing.
-   Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, choose Defaults to recapture those values.
-   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
-   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
-4. Through the agent, call `t2echo` after inspecting the same Form errors.
-   points maps to total-delay Expts; max_delay_us sets the stop. fit_method and fit_phase change only analysis.
-   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+For `t2echo`, null disables **Reset**. Null Readout, π or π/2 pulse selectors fail during selection, before overrides. Null delay Stop/Expts, detune ratio, Reps or Rounds leaves a blank; required blanks left after overrides fail readiness before Run. Null for **Fit method** or **Fit phase offset (fringe only)** fails at Analyze.

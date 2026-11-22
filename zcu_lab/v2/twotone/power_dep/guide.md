@@ -1,17 +1,17 @@
-**Readers:** operator, agent. Find a qubit-probe gain that reveals a transition without obscuring nearby lines.
+**Readers:** operator, agent. Find a probe gain that reveals a qubit line without merging it with nearby features.
 
-## Run the scan
+## Sequence and key settings
 
-At each **Probe gain**, Run sweeps **Probe RF frequency** and measures resonator IQ. A shot applies the optional reset and preparation, plays the qubit probe, reads out the resonator, then waits **Relax delay**. The scan changes the drive setting, not the resonator readout power. Gain in a.u. is a DAC full-scale fraction, not power in dBm.
+Optional **Reset** and preparation → qubit **Probe Pulse** → resonator **Readout** → **Relax delay**. Run sweeps **Probe RF frequency** at each **Probe gain**. Gain is a DAC full-scale fraction, not readout power or dBm.
 
-Bind the qubit and resonator. Open or press **Defaults** to take new starting values; **Refresh** preserves edits. The probe template uses the bound qubit's carrier and generator. The gain sweep starts at 0.001–1.0 a.u. with 101 points; choose a lower maximum if the line already broadens at low gain. Fill or verify the RF endpoints in MHz around a transition measured in `twotone/freq`. Select the calibrated **Readout** from the bound resonator; the template is a starting point when no slot is set. Leave **Reset** blank to omit reset. The default form uses 1000 reps per RF point per round, 10 rounds at each gain and 1 µs of relaxation after each shot.
+Use calibrated readout, bind the qubit and resonator, and set RF endpoints in MHz around a known transition. Lower the top **Probe gain** if the line already broadens at small gain. **Reps** is per RF point per round; **Rounds** is per gain.
 
-## Read the map
+See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shared GUI steps.
 
-After **Run** or a successful **Load**, press **Analyze** to redraw the selected run's map and gain spectra. Loading does not open a plot. Analyze shows the source run's **Reps × Rounds** if its settings are available. Older files without those settings still plot, but omit that summary line.
+## Read the map and choose a gain
 
-The map gives RF frequency versus probe gain. Color is the magnitude of the mean IQ after subtracting the median complex IQ of the same spectrum. It is in a.u., not a transition probability. Blank cells have no data. During Run, the row counter shows gains with data, including any gain still averaging. The adjacent axes compare the latest gain spectrum with the preceding gain row on that same contrast scale.
+Run maps RF frequency versus probe gain. Color is the magnitude of mean IQ after subtracting the median complex IQ in that spectrum (a.u.), not probability. Blank cells lack data. The row count includes a gain still averaging. Adjacent axes compare the latest and previous spectra. This two-dimensional map does not report shot SEM.
 
-Look for a ridge that persists across multiple gain rows. A ridge that shifts or broadens with gain warns against applying the high-gain center or linewidth as a weak-drive calibration. Choose the smallest sampled gain at which the line is reproducible, then use `twotone/freq` to fit a finer scan around the observed center. For example, if the ridge is clear at 0.05 a.u. but has merged with a neighboring line by 0.15 a.u., start the follow-up at 0.05 a.u. rather than 0.15 a.u. If the line reaches the frequency boundary, widen the RF endpoints before comparing widths. This is a two-dimensional spectrum; do not infer shot SEM from the color scale.
+Analyze redraws the selected run's map and spectra, including after Load; Load alone does not open a figure. **Reps × Rounds** is omitted if the loaded settings are unavailable.
 
-Analyze does not fit or propose writeback. Use the map and spectra to choose the gain yourself. This experiment has no dedicated recipe. Save preserves the gain and RF grids with the complex IQ. Loading a saved run does not replace the current form.
+Choose the smallest gain with a clear ridge across nearby gain rows. If the ridge is clear at 0.05 a.u. but merges by 0.15 a.u., start the follow-up at 0.05 a.u. Widen the RF window if the ridge meets an edge. Use `twotone/freq` for a finer scan around the observed center; this experiment does not fit or write back.
