@@ -153,6 +153,10 @@
 - 2026-11-20 [板上 RB 程式改寫](2026-11-20-rb-depth-program.md)：刪除或收窄。每個 seed、arm 保留一支 program，recovery 內嵌，PMEM 超量就報錯。
 - 2026-11-20 [RB 取數歸約與衰減擬合品質](2026-11-20-rb-round-reduction-and-fit-quality.md)：資料格式。取數端歸約 rounds，Result 以 (seed, arm, depth) 開頭，two-qubit fit quality 回報衰減長度相對誤差。
 
+## Measure UI
+
+- 2026-11-22 [在 Measure Data 頁讀原圖](2026-11-22-data-figure-reading.md)：圖形呈現。縮圖用來選圖，`View figure` 用當前原生 Figure 在同頁重繪一張可捲動的圖，不改 Save 工件。
+
 ## Cfg 與表單
 
 - 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導，說明與初值各有 owner，決策見 [ADR-0073](../adr/0073-measure-form-derivation.md)。

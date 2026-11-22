@@ -1,10 +1,11 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-11-17
+**Last updated:** 2026-11-22，Form description 與 Display 來源
 
 **讀者：** framework-dev。Form 草稿的 Qt 呈現、輸入與錯誤處理契約。
 
 `FormEditor` 借用 caller-owned `FormState` 與 host 捕捉的 `FormEnv`。Editor 讀取 `state.describe(path, env)` 與完整 `preview`，由 Core 解析 annotation、union 與選項匹配。Core 擁有 choices、active option、固定欄位與 lone ordinary wrapper 攤平規則。攤平只改版面，controls 的完整 path 仍含 wrapper。
+欄位的顯示單位與群組來自 Form description；生成表單的來源見 [form adapter 的 `Display` 投影](../../form_adapter/README.md#依賴方向)。
 
 Editor 初次只建立可見層與初始展開的 model rows。每層依宣告順序交錯排列普通欄位與 group，group 位於首個可見成員的位置。Refresh、state publication 與 Reset 保持這個順序，不將保留的 group 附加到末尾。分組依 `FieldMeta.group` 翻譯的 `Display.group`，不依欄位名稱。Modules 與其他一般 group 預設折疊。Sweep group 與其軸預設展開。Sweep group 只有一個可展開且非 nullable 的欄位時，Qt 將軸直接畫成「Sweep · 軸名」，不再畫 group 標題。多軸保留「Sweep → 軸」兩層。合併保留軸的 commands、selector 與 canonical path，例如 `scan_window.start`。合併標題的 objectName 是 `form.fold.scan_window`。
 
