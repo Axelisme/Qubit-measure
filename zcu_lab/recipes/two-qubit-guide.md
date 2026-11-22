@@ -47,7 +47,7 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 
 `two_qubit_cz_amplitude` 執行一次 `two_qubit/cz_amplitude`。
 量測前依 [adapter 的準備說明](../v2/two_qubit/cz_amplitude/guide.md#preparation-and-inputs) 確認 Xπ 脈衝、兩路 CZ 脈衝與 mux readout。
-`scale_range: [start, stop]` 填無單位的共同 gain 倍率範圍。`scale_points` 寫入 Form 的 Expts。
+`scale_range: [start, stop]` 對應 Form 的 Common CZ gain multiplier → Start、Stop（a.u.）。`scale_points` 寫入該掃描的 Expts；`reps`、`rounds` 分別對應 Reps、Rounds。
 要估計第一個正回返，從 0 掃到涵蓋至少一個完整週期。
 省略掃描欄位保留 Reset 值；Reset 沒有預填端點，需用具名欄位或 overrides 提供。
 
@@ -74,7 +74,8 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 
 `two_qubit_local_z` 執行一次 `two_qubit/local_z`。`target` 用 `qubit1`、`qubit2`、`coupler`、`mux` 綁定本次 Open／Reset。
 量測前依 [adapter 的準備說明](../v2/two_qubit/local_z/guide.md#run-前) 檢查兩顆 qubit 的 Xπ/2 脈衝與 CZ 脈衝。
-`gate_count` 填連續的非負整數，至少三個，例如 `[0, 1, 2, 3, 4]`。省略就保留 Reset 值；填 null 將 null 交給 Form 驗證。
+`gate_count` 對應 Form 的 CZ gates per shot (count)，填連續的非負整數，至少三個，例如 `[0, 1, 2, 3, 4]`。省略就保留 Reset 值；填 null 將 null 交給 Form 驗證。
+`reps` 和 `rounds` 分別設定 Reps (count) 和 Rounds (count)。
 
 報告的 `qubit1` 和 `qubit2` 各有 `intercept_deg`、`slope_deg`、`correction_deg`、`slope_error_deg`、`reason` 和 `fit_quality`。
 `slope_deg` 和它的 1σ 不確定度 `slope_error_deg` 都按每個 CZ gate 計。`correction_deg` 是不重新 wrap 的負斜率。
@@ -87,8 +88,9 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 
 `two_qubit_constructive_phase` 執行一次 `two_qubit/constructive_phase`。
 依 [adapter 的準備說明](../v2/two_qubit/constructive_phase/guide.md#prepare-the-form) 確認兩路脈衝的共同頻率與掃描範圍。
-`relative_phase_range: [start, stop]` 填 Qubit2 減 Qubit1 的相位範圍，單位 deg。`duration_range: [start, stop]` 填兩路共同脈衝長度，單位 us，兩端都必須大於零。
-`relative_phase_points` 和 `duration_points` 寫入各自的 Form Expts。省略保留 Reset 值；Reset 未預填兩軸端點，須用具名欄位或 overrides 提供。
+`relative_phase_range: [start, stop]` 設定 Qubit2 relative to Qubit1 drive phase 的 Start 和 Stop (deg)。`duration_range: [start, stop]` 設定 Common waveform envelope duration 的 Start 和 Stop (µs)，兩端都必須大於零。
+`relative_phase_points` 和 `duration_points` 分別設定兩軸的 Expts (count)。`reps` 和 `rounds` 分別設定 Reps (count) 和 Rounds (count)。
+省略保留 Reset 值；Reset 未預填兩軸端點，須用具名欄位或 overrides 提供。
 
 報告的 `relative_phase_deg` 是最大擬合速率對應的相對相位。找不到相位時，此欄為 null，`reason` 說明原因。
 頂層 `fit_quality` 轉交速率平方的干涉擬合診斷，不回報個別脈衝長度曲線的擬合品質。
@@ -100,10 +102,11 @@ Qubit2 的新 phase 是來源 Qubit1 phase 加上擬合的相對相位。參見 
 
 `two_qubit_conditional_phase` 執行一次 `two_qubit/conditional_phase`。
 先依 [adapter 的準備說明](../v2/two_qubit/conditional_phase/guide.md#prepare-the-inputs) 確認兩顆 qubit 的脈衝與 mux 分類器。
-`ramsey_role` 填 `"qubit1"` 或 `"qubit2"`，寫入 Form 的 `target`，另一顆是 spectator。
+`ramsey_role` 填 `"qubit1"` 或 `"qubit2"`，寫入 Form 的 Ramsey target，另一顆是 spectator。
 Recipe 的 `target` 物件仍用來綁定 aliases。
-`gate_count` 填至少兩個不重複的正整數。
-`frequency_range: [start, stop]` 填遞增的 MHz 端點，`frequency_points` 設定 Expts。
+`gate_count` 對應 Form 的 CZ gates per shot (count)，填至少兩個不重複的正整數，差值的 gcd 必須為 1。
+`frequency_range: [start, stop]` 設定 Common CZ drive frequency 的 Start 和 Stop (MHz)，由低到高。`frequency_points` 設定該掃描的 Expts (count)。
+`reps` 和 `rounds` 分別設定 Reps (count) 和 Rounds (count)。
 省略具名欄位會保留 Reset 值。Reset 沒有預填頻率端點，需用具名欄位或 overrides 提供。
 
 ```json
@@ -140,9 +143,11 @@ Recipe 的 `target` 物件仍用來綁定 aliases。
 `target` 用 `qubit1`、`qubit2`、`coupler`、`mux` 綁定本次 Open／Reset。
 Form 檢查 `$coupler.ext.cz_phase` 的元件名是否依序符合 `qubit1`、`qubit2`。不符就指出位置，符合才帶入兩個修正角度。
 
-`depths` 填非負整數，單位是每個序列的隨機 Clifford 數，不含 recovery。
-`seeds` 填 0 到 2147483647 的整數序列 ID，兩臂共用同一批 ID。
-省略時保留 Reset 值。明填 null 由 Form 驗證，不會改用預設。
+`depths` 設定 Random Clifford depths (count)，不含 recovery。
+`seeds` 設定 Sequence seeds，兩臂共用 0 到 2147483647 的序列 ID。
+`reps` 設定 Reps (count)，即每個 depth 每輪的 shots；`rounds` 設定 Rounds (count)，即每個 seed 和 arm 的採集輪數。
+`reuse_tab_id` 指定要重用的 tab。`overrides` 在具名欄位設定後套用額外表單操作。
+省略這四個量測輸入會保留表單值。明填 null 由 Form 驗證，不會改用預設。
 兩份清單由 Form 去重並排序。範例：
 
 ```json
@@ -171,8 +176,8 @@ Form 檢查 `$coupler.ext.cz_phase` 的元件名是否依序符合 `qubit1`、`q
 如需更換 X90 或 X180 波形，同樣對 `x90_qubit1`、`x90_qubit2`、`x180_qubit1` 或 `x180_qubit2` 的 pulse 路徑和其 `.waveform` 操作。
 這些覆寫不改 library。
 
-報告轉交 `p_reference`、`p_interleaved`、`reference_epc`、`gate_error`、
-`error_ci_low`、`error_ci_high`、`n_paired_seeds`、`bootstrap_successes` 和 `warning`。
+報告的 `gate_error` 是 Analyze 的 CZ error estimate，`error_ci_low` 後接 `error_ci_high` 是 95% seed CI 的上下界。這些值與 `p_reference`、`p_interleaved`、`reference_epc` 都是無單位比值。
+`n_paired_seeds` 與 `bootstrap_successes` 分別是配對 seed 數和有效 bootstrap fit 數，單位為 count。`warning` 交代模型限制。
 用 [adapter 的報告判讀](../v2/two_qubit/rb/guide.md#interpreting-the-result) 檢查誤差和兩臂的衰減。
 兩臂診斷各在 `reference_fit_quality` 和 `interleaved_fit_quality`。基底 `fit_quality` 為 null。
 沒有估計時，估計欄位為 null，`reason` 說明原因。分析拋錯時，執行回失敗與原錯誤。
