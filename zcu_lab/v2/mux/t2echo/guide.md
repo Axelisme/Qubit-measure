@@ -32,4 +32,4 @@ A Participants change alters both drives and emitted readout tones. To test a su
 
 ## Next step
 
-Writeback proposes `t2e` and a T2E sample at captured bias, not frequency. T2/sample preselection requires positive finite T2E, valid nonnegative relative T2 error ≤ 0.5, R² ≥ 0.9 and normalized residual RMS ≤ 0.1. Missing, nonfinite or invalid required values leave the candidate unselected. Check the decay and reject a contaminated estimate even if the fit converges. For shared controls see [zcu_lab/v2/operator-workflow.md](../../operator-workflow.md).
+Writeback proposes `t2e` and a T2E sample at captured bias, not frequency. Read the Writeback review note for why a candidate was or was not preselected. Check the decay and reject a contaminated estimate even if the fit converges. For shared controls see [zcu_lab/v2/operator-workflow.md](../../operator-workflow.md).
