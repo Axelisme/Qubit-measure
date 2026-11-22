@@ -333,8 +333,19 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             ),
         )
 
-        # 2. Assess the selected resonance against competing peaks and the false-mark level.
-        _, ax = plots.subplots(num="fit", figsize=config.figsize, layout="constrained")
+        # 2. Show the full scan and give a relatively short fit window its own panel.
+        lo, hi = float(fit.freqs.min()), float(fit.freqs.max())
+        if 2 * (hi - lo) <= np.ptp(freqs):
+            fig, _ = plots.subplots(
+                nrows=2, num="fit", figsize=(config.figsize[0], 6), layout="constrained"
+            )
+            ax, zoom = fig.axes
+        else:
+            fig, ax = plots.subplots(
+                num="fit", figsize=config.figsize, layout="constrained"
+            )
+            zoom = ax
+
         ax.plot(freqs, curve.sigma, "o", color="C0", label="Measured", markersize=3)
         ax.axhline(curve.level, color="gray", ls="--", label="5% false-mark level")
         other_peaks = [peak for peak in fit.peaks if peak != fit.selected_peak]
@@ -346,29 +357,43 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
                 color="0.45",
                 label="Other peak candidates",
             )
+        if zoom is not ax:
+            ax.axvspan(lo, hi, color="tab:blue", alpha=0.12, label="Fit window")
+            zoom.plot(fit.freqs, fit.observed, "o", color="C0", markersize=3)
+            zoom.axhline(curve.level, color="gray", ls="--")
+            zoom.set_title("Fit window (zoom)", fontsize=10)
         model = "Lorentzian" if options.model_type == "lor" else "Sinc"
-        fit_grid_mhz = np.linspace(fit.freqs.min(), fit.freqs.max(), 200)
-        ax.plot(
+        fit_grid_mhz = np.linspace(lo, hi, 200)
+        zoom.plot(
             fit_grid_mhz,
             fit.evaluate(fit_grid_mhz),
             "-",
             color="C1",
             label=f"{model} fit",
         )
-        ax.axvline(fit.freq, color="C1", linestyle=":", alpha=0.7)
+        zoom.axvline(fit.freq, color="C1", linestyle=":", alpha=0.7)
         quality = ""
         if fit.selected_peak is not None:
-            quality = f" · Candidate SNR {fit.selected_peak.snr:.3g}"
-        ax.set(
-            xlabel="Probe RF frequency (MHz)",
-            ylabel="Evidence above background (σ)",
-            title=(
-                "Two-tone readout chain · qubit probe · spectral significance\n"
-                f"Peak center = {fit.freq:.7g} ± {fit.freq_err:.2g} MHz\n"
-                f"Sigma-peak FWHM ≈ {fit.fwhm:.4g} ± {fit.fwhm_err:.2g} MHz{quality}"
-            ),
+            quality = f"\nCandidate SNR {fit.selected_peak.snr:.3g}"
+        fig.suptitle(
+            "Two-tone readout chain · qubit probe\n"
+            f"Peak center = {fit.freq:.7g} ± {fit.freq_err:.2g} MHz\n"
+            f"Sigma-peak FWHM ≈ {fit.fwhm:.4g} ± {fit.fwhm_err:.2g} MHz{quality}",
+            fontsize=10,
         )
-        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
+        zoom.set_xlabel("Probe RF frequency (MHz)")
+        zoom.xaxis.set_major_locator(MaxNLocator(nbins=5))
+        legend_handles, legend_labels = ax.get_legend_handles_labels()
+        if zoom is ax:
+            ax.set_ylabel("Evidence above background (σ)")
+        else:
+            fig.supylabel("Evidence above background (σ)", fontsize=10)
+            ax.set_title("Full scan (MHz)", fontsize=10)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+            handles, labels = zoom.get_legend_handles_labels()
+            legend_handles.extend(handles)
+            legend_labels.extend(labels)
+        fig.legend(legend_handles, legend_labels, loc="outside lower center", ncols=2)
 
         return ChainAnalysis(
             freq=fit.freq,

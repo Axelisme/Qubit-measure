@@ -33,16 +33,16 @@ class MuxT2RamseyInputs(RecipeInputs):
     overrides: Overrides
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Sets Participants: original tone indices (zero-based) for drives and readout, in run order.",
+        description="Unique original indices in acquisition order; selects drives and corresponding mux readout tones.",
     )
 
     fit_fringe: bool | None | Keep = Field(
         default=KEEP,
-        description="Sets Analysis › Fit fringe to fit damped oscillations instead of a pure decay.",
+        description="Fit oscillations instead of a pure decay. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_phase: bool | None | Keep = Field(
         default=KEEP,
-        description="Sets Analysis › Fit phase offset (fringe only) to estimate the constant fringe phase.",
+        description="Fit the phase offset when fitting fringes. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 
@@ -64,7 +64,7 @@ class MuxT2RamseyToneReport(MuxFitToneReport):
         default=None, description="One-sigma Ramsey time uncertainty in µs."
     )
     detune: float | None = Field(
-        default=None, description="Fitted fringe rate (MHz), not the applied detune."
+        default=None, description="Fitted Ramsey fringe rate in MHz."
     )
     detune_err: float | None = Field(
         default=None, description="One-sigma fringe rate uncertainty in MHz."

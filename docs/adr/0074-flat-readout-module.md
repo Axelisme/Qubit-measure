@@ -93,7 +93,7 @@ status: accepted
 
 **規則。** 作者在建置 `MuxReadout` 前依參與順序選取 active tones，再以 `mux_iq_sums(prog, read)` 明示需要每個 tone 的校正六矩。Reducer 按該 cfg 的 tone 順序回傳 `(*point_dims, tones, 6)`，不按 ADC 編號排序。每個 ADC 使用自己的積分長度和當輪 QICK／PFB offset；只加總完成的 rounds。
 
-**例子。** Mux Ramsey 先選原 tone 2 再選原 tone 0 時，第一列平均及線性投影 SEM 同取 tone 2 的校正 shots。SEM 使用完成 shots 的 N；N 小於 2 時不顯示誤差棒。
+**例子。** Mux T1 先選原 tone 1 再選原 tone 0 時，第一列平均及線性投影 SEM 同取 tone 1 的校正 shots。SEM 使用完成 shots 的 N；N 小於 2 時不顯示誤差棒。
 
 **邊界。** 選取的 mux readout 在每發只做一次無條件積分。程式不含其他 ADC 讀取、edge counting 或 shot masks。此 reducer 不取跨 tone 外積，不放寬單 ADC opt-in，不改原生取數或分類。FTF 使用同一輪既有 required raw 路徑，不為了補誤差棒另取一批 shots。不要求同 seed 的 compact 與 required raw mean 逐值相同。
 

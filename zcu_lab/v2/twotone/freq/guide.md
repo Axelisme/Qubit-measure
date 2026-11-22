@@ -68,7 +68,7 @@ samples. Overlapping transitions can still bias a single-peak fit.
 The Lorentzian fit starts from the detected positive peak's center and width.
 Its baseline may lie below the window minimum because the edges still contain
 peak tails.
-Analysis shades the actual fitted interval. The dotted line marks the fitted center and gray triangles mark other candidates. Check that the fit follows the measured points inside the shaded interval, including the peak shoulders. Candidate SNR is the selected candidate's height above the median in noise sigma, not a goodness-of-fit score.
+Analysis shades the actual fitted interval. If it spans at most half the measured scan, a second panel zooms into it. The dotted line marks the fitted center and gray triangles mark other candidates. Check that the fit follows the measured points inside the shaded interval, including the peak shoulders. Candidate SNR is the selected candidate's height above the median in noise sigma, not a goodness-of-fit score.
 Candidate center and width are sampled estimates, not fitted frequency or FWHM.
 `truncated=True` means the scan clips a half-prominence crossing.
 Widen or recenter that scan before using its linewidth.

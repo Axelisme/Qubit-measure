@@ -29,13 +29,13 @@ MistTraceRunResult: TypeAlias = RunRecord[PowerDepCfg, PowerDepResult]
 class MistTraceAnalyzeParams:
     """IQ references as Python complex strings (e.g. 1+2j), or None to omit.
 
-    g0=None uses the first gain point as the reference. e0 only sets the visual y-limit.
+    g0=None uses the first measured IQ. e0 only sets the vertical display range.
     ac_coeff=None keeps gain on the x-axis; a supplied coefficient maps gain
     squared to photon number. Invalid complex strings fail analysis.
     """
 
-    g0: Annotated[str | None, ParamMeta(label="Reference IQ (a.u.)")] = None
-    e0: Annotated[str | None, ParamMeta(label="Comparison IQ (a.u.)")] = None
+    g0: Annotated[str | None, ParamMeta(label="Ground IQ (empty = first point)")] = None
+    e0: Annotated[str | None, ParamMeta(label="Excited IQ (optional y-limit)")] = None
     ac_coeff: Annotated[
         float | None, ParamMeta(label="Photon number / gain squared", decimals=6)
     ] = None
@@ -68,21 +68,12 @@ def run(
     return RunRecord(cfg=cfg, result=PowerDepExp().run(cfg, context=context))
 
 
-def _summary_lines(source: MistTraceRunResult) -> tuple[str, ...]:
-    cfg = source.cfg
-    if cfg is None:
-        return ()
-    return (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
-
-
 DEFINITION = Adapter(
     spec=PowerDepExp.AXES_SPEC,
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze,
-        options=lambda source, env: MistTraceAnalyzeParams(),
-        summary_lines=_summary_lines,
+        fn=_analyze, options=lambda source, env: MistTraceAnalyzeParams()
     ),
 )
