@@ -50,6 +50,13 @@ class _GridSums(NamedTuple):
     uniform: bool
 
 
+class _ProjectedPrefix(NamedTuple):
+    """Eligible states map to packed cumulative rows; -1 uses direct sums."""
+
+    state_rows: NDArray[np.int64]
+    rows: NDArray[np.complex128]
+
+
 @njit(nogil=True, cache=False)
 def _exp2(matrix, duration):
     """Exact scalar or two-dimensional exponential, including defective modes."""
@@ -117,7 +124,17 @@ def _flat_baselines(a, v, pulse, coupling, safe, times):
 
 
 @njit(nogil=True, cache=False)
-def _segment_sums(a, scattering, grid, wave, shots, right):
+def _build_projected_prefix(a, scattering, grid):
+    rows = np.zeros((len(grid.times) + 1, len(scattering)), dtype=np.complex128)
+    for i, time in enumerate(grid.times):
+        propagator = _exp2(-a, time - grid.times[0])
+        rows[i + 1] = rows[i] + grid.oscillator[i] * (scattering @ propagator)
+    return rows
+
+
+@njit(nogil=True, cache=False)
+def _segment_sums(a, scattering, grid, wave, step, projected=None):
+    shots, right, _ = step
     times, oscillator, prefix, _, powers, sums, uniform = grid
     states, left, memory = wave
     output = np.zeros(len(shots), dtype=np.complex128)
@@ -140,6 +157,11 @@ def _segment_sums(a, scattering, grid, wave, shots, right):
                 bit += 1
                 count >>= 1
             output[index] -= oscillator[first] * (scattering @ total)
+        elif projected is not None and projected.state_rows[state] >= 0:
+            rows = projected.rows[projected.state_rows[state]]
+            # Factor E(t-left) as E(t-reference) E(reference-left).
+            at_reference = _exp2(-a[state], times[0] - left[shot]) @ memory[shot]
+            output[index] -= (rows[last] - rows[first]) @ at_reference
         else:
             for sample in range(first, last):
                 field = _exp2(-a[state], times[sample] - left[shot]) @ memory[shot]
@@ -186,7 +208,8 @@ class IntegratedPaths:
     blocks. Other envelopes use one DOP853 dense vacuum solve for all states,
     never an ODE per shot or an artificial jump-time interpolation grid. Prefix
     sums contain only the actual ADC sample coordinates. Uniform grids use exact
-    binary geometric sums, irregular grids sum exact homogeneous exponentials.
+    binary geometric sums; irregular grids factor homogeneous exponentials when
+    the memory work saved by a projected prefix pays for building it.
 
     model/pulses/grids retain the constructor inputs for this workspace's lifetime.
     v/scattering are complex128 (cavity,) drive/output couplings; a is (state,cavity,cavity)
@@ -195,7 +218,8 @@ class IntegratedPaths:
     no earlier than start. path_fields holds a shaped vacuum solver or None
     per carrier. couplings holds each guarded flat driven solution (state,cavity)
     and its (state,) acceptance mask. plans holds one noiseless _GridSums per
-    read. No shot state survives evaluate.
+    read; eligible projected rows stay with those grids. No shot state survives
+    evaluate.
     Solver failures raise RuntimeError. Invalid envelopes and unresolved
     floating-point transition times raise ValueError without partial results.
     """
@@ -232,6 +256,10 @@ class IntegratedPaths:
                 for detuning in model.frequencies_ghz - model.reference_frequency_ghz
             ]
         )
+        # All states have the same real symmetric damping matrix. Its maximum
+        # row sum bounds the growth rate of backwards memory propagation.
+        self._damping_bound = float(self.a[0].real.sum(axis=1).max())
+        self._projected_rows: dict[tuple[int, int], NDArray[np.complex128]] = {}
         delay = model.receiver.time_of_flight_ns
         self.times = tuple(
             adc_to_device_time_ns(grid.times_ns, time_of_flight_ns=delay)
@@ -347,6 +375,44 @@ class IntegratedPaths:
                 )
         return fields
 
+    def _projected_prefix(self, read, wave, shots, right) -> _ProjectedPrefix | None:
+        grid = self.plans[read]
+        times = grid.times
+        # Bound backwards amplification by exp(8) to avoid subtracting tiny
+        # late propagators from a prefix dominated by early samples.
+        if (
+            grid.uniform
+            or len(shots) < 3
+            or self._damping_bound * (times[-1] - times[0]) > 8
+        ):
+            return None
+        has_memory = np.any(wave.memory[shots] != 0, axis=1)
+        first = np.searchsorted(times, wave.left[shots[has_memory]])
+        last = np.searchsorted(times, right[has_memory])
+        saved = np.bincount(
+            wave.states[shots[has_memory]],
+            weights=np.maximum(last - first - 1, 0),
+            minlength=len(self.a),
+        )
+        # Require twice the build's exponential count to cover row math and
+        # selection overhead. This wave pays on its own, even in a cold acquire.
+        states = np.flatnonzero(saved >= 2 * len(times))
+        if not len(states):
+            return None
+        state_rows = np.full(len(self.a), -1, dtype=np.int64)
+        state_rows[states] = np.arange(len(states))
+        rows = []
+        for state in states:
+            key = (read, int(state))
+            row = self._projected_rows.get(key)
+            if row is None:
+                row = _build_projected_prefix(self.a[state], self.scattering, grid)
+                # Concurrent evaluations may build the same row independently.
+                # Only publish completed arrays; neither evaluator mutates them.
+                row = self._projected_rows.setdefault(key, row)
+            rows.append(row)
+        return _ProjectedPrefix(state_rows, np.stack(rows))
+
     def evaluate(
         self, paths: JumpPaths, *, traces: bool = False
     ) -> tuple[RealArray, ...]:
@@ -367,17 +433,21 @@ class IntegratedPaths:
             )
             for grid in self.grids
         ]
-        for step in paths.steps:
+        for index, step in enumerate(paths.steps):
             active, right, targets = step
             for read, grid in enumerate(self.plans):
                 if traces:
                     _segment_traces(
                         self.a, self.scattering, grid, wave, step, output[read]
                     )
-                else:
-                    output[read][active] += _segment_sums(
-                        self.a, self.scattering, grid, wave, active, right
-                    )
+                    continue
+                # All shots still have vacuum memory on the first wave.
+                projected = (
+                    self._projected_prefix(read, wave, active, right) if index else None
+                )
+                output[read][active] += _segment_sums(
+                    self.a, self.scattering, grid, wave, step, projected
+                )
             moving = targets >= 0
             shots, jumps, destinations = active[moving], right[moving], targets[moving]
             if len(shots):
