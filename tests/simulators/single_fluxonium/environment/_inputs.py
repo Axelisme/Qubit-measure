@@ -58,7 +58,7 @@ def settings() -> SingleFluxoniumSettings:
                     "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                     "ro_ch": 0,
                     "gain": 1,
-                    "noise_psd_adc2_ns": [[0, 0], [0, 0]],
+                    "noise_psd_adc2_ns": 0.0,
                 },
             },
             "numerics": {

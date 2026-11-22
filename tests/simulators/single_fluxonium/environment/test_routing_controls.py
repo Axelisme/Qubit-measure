@@ -24,7 +24,7 @@ def routing_settings():
     values["chip"]["temperature_k"] = 0.05
     values["numerics"]["truncation"]["levels"] = 2
     values["numerics"]["time_scale"] = 0
-    values["readout"]["adc"]["noise_psd_adc2_ns"] = [[0.01, 0], [0, 0.01]]
+    values["readout"]["adc"]["noise_psd_adc2_ns"] = 0.01
     return parse_single_fluxonium(values)
 
 

@@ -22,7 +22,8 @@ class FTFReceiverConfig:
     ro_ch: nonnegative integer logical ADC channel with no fixed upper bound,
         not its output position.
     gain: signed field-to-ADC amplitude gain; phase_deg: additive IQ phase.
-    noise_psd_adc2_ns: symmetric positive-semidefinite two-sided noise PSD.
+    noise_psd_adc2_ns: nonnegative two-sided white noise PSD per I/Q component
+        in ADC²·ns. I and Q are independent; zero disables noise.
     offset_adc: per-sample I/Q offset. time_of_flight_ns: nonnegative line delay.
     ripple_depth: finite reflected amplitude in [0,1), default zero.
     ripple_period_mhz: required finite positive standing-wave period in MHz.
@@ -39,7 +40,7 @@ class FTFReceiverConfig:
 
     ro_ch: int
     gain: float
-    noise_psd_adc2_ns: tuple[tuple[float, float], tuple[float, float]]
+    noise_psd_adc2_ns: float
     phase_deg: float = 0.0
     offset_adc: tuple[float, float] = (0.0, 0.0)
     time_of_flight_ns: float = 0.0
@@ -67,18 +68,11 @@ class FTFReceiverConfig:
         if self.time_of_flight_ns < 0:
             raise ValueError("receiver time_of_flight_ns must be nonnegative")
         offset = np.asarray(self.offset_adc)
-        noise = np.asarray(self.noise_psd_adc2_ns)
         if offset.shape != (2,) or not np.isfinite(offset).all():
             raise ValueError("receiver offset_adc must be a finite I/Q pair")
-        if noise.shape != (2, 2) or not np.isfinite(noise).all():
-            raise ValueError("receiver noise PSD must be a finite 2x2 matrix")
-        roundoff = 8 * np.finfo(float).eps * float(np.max(np.abs(noise)))
-        if (
-            not np.array_equal(noise, noise.T)
-            or np.linalg.eigvalsh(noise).min() < -roundoff
-        ):
+        if not np.isfinite(self.noise_psd_adc2_ns) or self.noise_psd_adc2_ns < 0:
             raise ValueError(
-                "receiver noise PSD must be symmetric positive semidefinite"
+                "receiver noise_psd_adc2_ns must be finite and nonnegative"
             )
 
 

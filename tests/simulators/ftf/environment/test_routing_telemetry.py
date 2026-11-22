@@ -161,6 +161,7 @@ def test_layer_walls_sum_public_work_across_rounds_and_continuations(
     assert record["rounds"] == 3
     assert record["complete"] is True
     assert record["compile_wall_s"] == 0.0
+    assert record["materialize_wall_s"] == 0.0
     assert record["evolve_wall_s"] == work_clock.evolve
     assert record["readout_wall_s"] == work_clock.readout
     assert record["wall_s"] == work_clock.now
@@ -194,11 +195,28 @@ def test_failed_numeric_stage_keeps_elapsed_work_and_writes_one_false_row(
     (record,) = routing_rows(tmp_path)
     assert record["complete"] is False
     assert record["rounds"] == rounds
-    assert record["compile_wall_s"] == 0.0
+    assert record["compile_wall_s"] is None
+    assert record["materialize_wall_s"] is None
     assert record["evolve_wall_s"] == work_clock.evolve
-    assert record["readout_wall_s"] == work_clock.readout
     if failure == "evolve" and rounds == 1:
-        assert record["readout_wall_s"] == 0.0
+        assert record["readout_wall_s"] is None
+    else:
+        assert record["readout_wall_s"] == work_clock.readout
+
+
+def test_failed_acquire_retains_measured_zero(tmp_path, bound_source, work_clock):
+    _, binding = bound_source()
+    with (
+        pytest.raises(RuntimeError, match="compile failed"),
+        binding.acquire(),
+        binding.compiling(),
+    ):
+        raise RuntimeError("compile failed")
+    (record,) = routing_rows(tmp_path)
+    assert record["complete"] is False
+    assert record["compile_wall_s"] == 0.0
+    assert record["evolve_wall_s"] is None
+    assert record["materialize_wall_s"] is None
 
 
 @pytest.mark.sim
@@ -241,8 +259,8 @@ def test_finish_acquire_projects_binding_outcome_without_numeric_work(
         assert rows[0]["points"] == 0
         assert rows[0]["rounds"] == 0
         assert rows[0]["families"] == {}
-        assert rows[0]["evolve_wall_s"] == 0.0
-        assert rows[0]["readout_wall_s"] == 0.0
+        assert rows[0]["evolve_wall_s"] == (0.0 if complete else None)
+        assert rows[0]["readout_wall_s"] == (0.0 if complete else None)
     finally:
         source.close()
         devices.close_all_devices()
@@ -253,7 +271,9 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
     directory = tmp_path / "enabled"
     try:
         observed = ftf(
-            settings().with_telemetry(enabled=True, directory=directory),
+            settings().with_telemetry(
+                enabled=True, directory=directory, commit="fixture-commit", dirty=False
+            ),
             soccfg=profile_soccfg("ftf"),
             time_scale=0,
         )
@@ -305,6 +325,8 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
         assert record["points"] == 1
         assert record["rounds"] == 3
         assert record["complete"] is True
+        assert record["commit"] == "fixture-commit"
+        assert record["dirty"] is False
         for stage in ("compile_wall_s", "evolve_wall_s", "readout_wall_s"):
             assert type(record[stage]) is float
             assert record[stage] >= 0.0

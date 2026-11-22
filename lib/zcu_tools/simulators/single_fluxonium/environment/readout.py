@@ -92,9 +92,9 @@ def prepare_readout(
     """Assemble one ADC's conditional sums and raw inputs for the whole request.
 
     plans align with request.templates and share physical's DC state order.
-    settings supplies the one receiver; PSD converts to per-sample covariance
-    using the declared sample rate. Absolute grid timing and pulse-local phase
-    conversion remain owned by readout_plan. ADC computes all conditional sums.
+    settings supplies one receiver. The PSD divided by the sample period in ns
+    gives the variance of each independent I/Q component. readout_plan owns
+    absolute grid timing and pulse-local phase. ADC computes all conditional sums.
     Returned content indices use request point-major order, not template order.
     Unequal sample rates across templates raise ValueError. ADC shape/solver
     errors propagate; no sampling, normalization or QICK averaging occurs here.
@@ -111,7 +111,7 @@ def prepare_readout(
         adc.gain,
         float(np.deg2rad(adc.phase_deg)),
         np.array(adc.offset_adc),
-        np.array(adc.noise_psd_adc2_ns) / request.time_base.ns(period),
+        (adc.noise_psd_adc2_ns / request.time_base.ns(period)) * np.eye(2),
         time_of_flight_ns=adc.time_of_flight_ns,
         ripple_depth=adc.background.ripple_depth,
         ripple_period_ghz=adc.background.ripple_period_mhz / 1000,

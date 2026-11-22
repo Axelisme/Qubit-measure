@@ -51,9 +51,11 @@ Bare cavity frequency and charge coupling use GHz.
 External and internal linewidths are kappa/(2*pi) in MHz.
 Incident readout amplitude is sqrt(photons/ns) per gain.
 Receiver gain maps sqrt(photons/ns) to ADC sample units.
-Offset is an I/Q pair. Noise PSD is a two-sided 2-by-2 I/Q covariance in
-ADC units squared times ns. Time of flight uses ns. Receiver phase uses degrees;
-resonator mismatch phase uses radians.
+Offset is an I/Q pair. Set `noise_psd_adc2_ns` to one finite nonnegative
+two-sided white PSD in ADC²·ns. I and Q are independent and each has variance
+PSD divided by the sample period in ns. Use zero to disable receiver noise.
+The loader rejects a 2-by-2 matrix. Time of flight uses ns. Receiver phase uses
+degrees; resonator mismatch phase uses radians.
 The required receiver `background` object multiplies each carrier's microwave
 I+iQ line response before receiver gain and phase. It uses the absolute incident
 frequency, not the ADC demodulation frequency. Supply period and pivot even

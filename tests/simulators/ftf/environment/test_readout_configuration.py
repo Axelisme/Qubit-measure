@@ -70,7 +70,7 @@ def test_readout_configuration_preserves_pulse_without_mux() -> None:
     expected = ftf_module.FTFReceiverConfig(
         ro_ch=0,
         gain=10000.0,
-        noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0)),
+        noise_psd_adc2_ns=0.0,
         ripple_period_mhz=1000.0,
         pivot_ghz=0.0,
     )
@@ -95,7 +95,7 @@ def test_readout_configuration_preserves_both_paths_and_all_calibrations() -> No
             gain=1000.0,
             phase_deg=10.0,
             offset_adc=(0.1, -0.2),
-            noise_psd_adc2_ns=((1.0, 0.0), (0.0, 2.0)),
+            noise_psd_adc2_ns=1.0,
             time_of_flight_ns=20.0,
             ripple_period_mhz=1000.0,
             pivot_ghz=0.0,
@@ -105,7 +105,7 @@ def test_readout_configuration_preserves_both_paths_and_all_calibrations() -> No
             gain=1001.0,
             phase_deg=11.0,
             offset_adc=(1.1, -0.2),
-            noise_psd_adc2_ns=((2.0, 0.0), (0.0, 2.0)),
+            noise_psd_adc2_ns=2.0,
             time_of_flight_ns=21.0,
             ripple_period_mhz=1000.0,
             pivot_ghz=0.0,
@@ -198,7 +198,7 @@ def mux_configuration(channels: tuple[int, ...] = (4, 1)):
             ftf_module.FTFReceiverConfig(
                 ro_ch=ch,
                 gain=1.0,
-                noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0)),
+                noise_psd_adc2_ns=0.0,
                 ripple_period_mhz=1000.0,
                 pivot_ghz=0.0,
             )
@@ -246,7 +246,7 @@ def test_detached_readout_rejects_receiver_shared_by_pulse_and_mux() -> None:
     pulse = ftf_module.FTFReceiverConfig(
         ro_ch=4,
         gain=1.0,
-        noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0)),
+        noise_psd_adc2_ns=0.0,
         ripple_period_mhz=1000.0,
         pivot_ghz=0.0,
     )

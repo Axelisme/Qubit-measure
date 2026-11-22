@@ -74,6 +74,7 @@ class ProjectionRunner:
     Densities never cross a plan or span; ADC CTMC jumps do not feed back.
     paths retains completed span diagnostics even when prepare raises.
     evolve_wall_s sums every Engine call's wall seconds, including a failed call.
+    It is None until the first timed call.
     """
 
     def __init__(
@@ -90,7 +91,7 @@ class ProjectionRunner:
         self.floor, self.cancel = floor, cancel
         self.capture = capture
         self.paths: list[PathDiagnostics] = []
-        self.evolve_wall_s = 0.0
+        self.evolve_wall_s: float | None = None
         self.keys: list[bytes] = []
 
     def _advance(
@@ -131,7 +132,7 @@ class ProjectionRunner:
                 capture=self.capture,
             )
         finally:
-            self.evolve_wall_s += monotonic() - started
+            self.evolve_wall_s = (self.evolve_wall_s or 0.0) + (monotonic() - started)
         self.keys.append(reuse_key)
         self.paths.append(result.paths)
         indices = {int(point): index for index, point in enumerate(result.points)}
