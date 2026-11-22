@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-21，scalar gain override validation
+**Last updated:** 2026-11-22，readout mixer frequency requirements
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -210,6 +210,11 @@ checking exact scalar re-encoding on the same profile.
   contract without enabling the timing bounds checks.
 
 ## Readout configuration
+
+When declaring a native generator or using [readout frequency-word conversion](../README.md#頻率-word-解碼)
+with mixer settings, supply `mixer_freq` (MHz) if the selected generator's
+`has_mixer` is true. Otherwise, you can leave it unset. Leaving it unset does not
+turn off an external LO.
 
 Native conversion preserves the optional classifier on pulse readout and each
 mux tone. The shared cfg_model schemas define circle/linear calibration in

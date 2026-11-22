@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-22，Data 頁讀圖
+**Last updated:** 2026-11-22，Data 頁讀圖與 R7
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -105,7 +105,8 @@ If draw reenters the owner, only the current reading request can update the view
 A draw failure shows an inline error for that figure and does not disable Save.
 The reader does not load a saved image, write an artifact, or attach a canvas.
 Run Save still writes data only. Analysis Save still uses the existing 1800×1350
-PNG encoder.
+PNG encoder. Use [R7](../../../../../../zcu_lab/v2/figure-style.md#r7用-gui-與存檔的實際尺寸檢查版面)
+to check readability in the reading pane and in the saved PNG separately.
 
 The app-local plot host passes the
 operation's original named collection through the render-host port after canvas

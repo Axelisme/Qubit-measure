@@ -34,7 +34,7 @@ Length 設定 probe 前等待，flux pulse 長度由 Flux pulse 模組槽設定�
 Live measurement 圖顯示時間與頻率的 IQ 投影。
 
 按 Analyze 後，分析逐列以 Lorentzian 擬合共振頻率，跳過含 NaN 的列。
-含有限資料列的 Lorentzian 擬合若失敗，整次 Analyze 失敗，不發布部分成功圖；已採資料與 Live 圖保留供檢查。
+任何一列的 Lorentzian 擬合若失敗，整次 Analyze 中止，不產生新的分析圖。已採資料與 Live 圖保留供檢查。
 圖的時間座標加上半個 probe 長度，表示 probe 中心。
 黑點是擬合共振，綠色 Ideal 曲線只是依 flux pulse 時間與資料估計的參考。
 灰色區域表示 pulse 邊緣附近的 probe 時間寬度。
