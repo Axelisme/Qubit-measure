@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, TypeAlias
 
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
+    FluxPickState,
+    analyze_flux_pick,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import RunMetadataContent
@@ -21,7 +23,6 @@ from zcu_tools.gui.app.measure.flux_pick_frontend import make_flux_pick_frontend
 from zcu_tools.gui.app.measure.flux_pick_plugin import (
     FluxPickPlugin,
     make_flux_pick_plugin,
-    render_flux_pick,
 )
 from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickParams,
@@ -69,13 +70,23 @@ def _FluxDep_make_interactive_plugin(
             metadata.device_snapshot,
         )
     )
+
+    def finish(
+        inputs: FluxPickInputs, state: FluxPickState, plots: Plots
+    ) -> FluxPickResult:
+        selection = analyze_flux_pick(inputs, state)
+        FreqFluxExp().plot_pick(req.run_result, selection, plots=plots)
+        return FluxPickResult(
+            selection.flux_half, selection.flux_int, selection.flux_period
+        )
+
     return make_flux_pick_plugin(
         inputs,
         flux_half=None if points is None else points.half,
         flux_int=None if points is None else points.integer,
         force_magnitude=False,
         plots=plots,
-        result_builder=render_flux_pick,
+        result_builder=finish,
     )
 
 
@@ -96,6 +107,11 @@ def _run(
     return RunRecord(cfg=cfg, result=FreqFluxExp().run(cfg, context=context))
 
 
+def _summary_lines(source: FluxDepRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=FreqFluxExp.AXES_SPEC,
     make_form=_FluxDep_make_form,
@@ -106,5 +122,6 @@ DEFINITION = Adapter(
         frontend=make_flux_pick_frontend,
         options=lambda source, env: FluxPickParams(),
         writeback=_FluxDep_get_writeback_items,
+        summary_lines=_summary_lines,
     ),
 )

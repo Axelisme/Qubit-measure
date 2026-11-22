@@ -18,43 +18,46 @@ from zcu_lab.v2.lookback.gui import LookbackSummary
 
 
 class LookbackInputs(RecipeInputs):
-    """Inputs for lookback; all units and null policies are declared per field."""
+    """Lookback Run and Analyze inputs; see the guide for null handling."""
 
-    target: SingleTarget
+    target: SingleTarget = Field(
+        default_factory=lambda: KEEP,
+        description="Open/Defaults for this qubit and its resonator. Omit or use null to keep the current aliases.",
+    )
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key. Sources are chosen by the Form.",
+        description="Select a Readout module first. Omit to keep it. Schema allows null; required Readout rejects it.",
     )
     frequency_mhz: float | None | Keep = Field(
         KEEP,
-        description="Readout frequency in MHz.",
+        description="Readout › Frequency (MHz). Copies a library Readout to Inline before editing; no library writeback.",
     )
     readout_length_us: float | None | Keep = Field(
         KEEP,
-        description="Set Readout › RO length (µs), the ADC acquisition window.",
+        description="Readout › RO length (µs). Copies a library Readout to Inline before editing; no library writeback.",
     )
     trigger_offset_us: float | None | Keep = Field(
         KEEP,
-        description="Set Readout › Trig offset (µs), the ADC trigger offset.",
+        description="Readout › Trig offset (µs). Copies a library Readout to Inline before editing; no library writeback.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Averaging rounds (count), the number of one-shot traces to average.",
     )
 
     ratio: float | None | Keep = Field(
         KEEP,
-        description="Threshold ratio. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Arrival threshold / peak (a.u.). Omit to keep it; Analyze rejects null.",
     )
     smooth: float | None | Keep = Field(
         KEEP,
-        description="Smooth sigma. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Gaussian smoothing width (samples). Omit to keep it; Analyze rejects null.",
     )
     plot_fit: bool | None | Keep = Field(
         KEEP,
-        description="Plot fit. Analysis only; omitted keeps value, null passes to owner.",
+        description="Set Analyze › Show arrival markers only. Omit to keep it; Analyze rejects null.",
     )
 
 
@@ -62,24 +65,25 @@ class LookbackReport(RecipeReport):
     """Lookback results and failure reason; cancellation returns no report."""
 
     trigger_offset_us: float | None = Field(
-        description="Proposed ADC trigger offset in µs; null means not estimable."
+        description="Estimated readout arrival (µs); null means analysis returned no value."
     )
 
 
 @recipe(
     "lookback",
-    description="Capture readout arrival timing in lookback; analyze, ask before writeback, and save.",
+    description="Capture the ADC trace and estimate arrival. Analyze rejects null after Run, before analysis starts. The recipe still attempts to save the trace. Confirm before writing arrival to the resonator.",
 )
 async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackReport:
     """Capture the readout pulse's arrival and ADC time envelope.
 
     Read out at a fixed frequency without reset or initialization pulses.
-    Primary estimates the trigger offset from the rising signal envelope.
-    Ask before applying the timing proposal, then save raw trace and analysis.
+    Analyze estimates readout arrival from the rising magnitude envelope.
+    Ask before applying any timing proposal. After Run, attempt Save even if
+    Analyze rejects its inputs.
 
-    No n → expts input: acquisition uses the readout duration and rounds.
-    Analysis controls: ratio, smooth, plot_fit. Omission retains each analysis value; null is passed to its owner.
-    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
+    Named Readout field edits copy the selected library Readout to Inline first.
+    Omit Analyze inputs to retain their values. Analyze validates and rejects
+    null updates after Run and before starting analysis.
     """
     tab = session.open_tab(
         "lookback",

@@ -184,7 +184,7 @@ Slot.set 初值只套用到 copy，這項設定本身不把 reference 改成 cop
 Live artists 與多面板格式依 [v2 README](README.md#即時圖工具)。
 實驗自行決定座標、labels 與圖名。show 前可填資料，show 後的修改也經 plot-thread callback。
 選 y 軸要畫的物理量時看 [R12：y 軸畫物理 observable](figure-style.md#r12y-軸畫物理-observable)，標示方式見[〈單位〉](figure-style.md#單位)。
-一維建圖與 update 見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)，熱圖與 current trace 見 `twotone/power_dep/core.py:111-142`。
+一維建圖與 update 見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)，熱圖與最近兩條切線見 [PowerExp 的 live plot](twotone/power_dep/core.py)。
 
 ## 目錄佈局
 
@@ -347,7 +347,7 @@ Const／flat-top length 可查表，flat-top 只改 flat 段；其他 waveform �
 ### Host loop、device setup 與時間取樣
 
 Host loop 用 sched.scan／repeat，program loop 用 add_sweep／add_loop。
-Host 掃描與逐列取數參考 `twotone/power_dep/core.py:144-164`。
+Host 掃描與逐列取數參考 [PowerExp.run](twotone/power_dep/core.py)。
 需重用各點 program 時，run 維護 dict cache，miss 才建新 builder 並 build，每次仍由 step 取數。
 Device setup 留在 run，先 set_*_in_dev_cfg，再用 setup_devices 初始化掃描起點。
 傳 context.devices、progress=True、cancel_signal=context.scope.stop，helper 到 driver 邊界才轉 Event。

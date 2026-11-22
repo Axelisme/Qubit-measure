@@ -55,14 +55,16 @@ Use Defaults to replace unsaved input with initial values from the new source.
 Analyze returns only `relative_phase_deg`, `reason` and `interference_quality`.
 Per-phase rates, populations and interference curves stay inside analysis for plotting.
 
-The live and Analyze interference maps show P00 after double Xπ contrast.
-P00 is the terminal (g,g) count divided by all nine terminal class counts.
-The return figure shows three fractions: both qubits in g, both in e, and
+Use the live and Analyze interference maps to locate the fastest oscillation.
+Both show terminal P(g,g) after the final double Xπ, divided by all nine
+terminal class counts. The live title shows acquisition progress. Use the
+return figure to check classification at one phase. It shows three fractions:
+both qubits in g, both in e, and
 anything else (the other seven joint outcomes). They add up to one at each
 duration. It shows the measured phase closest to the proposed relative phase,
 or the first measured phase when no proposal is available. The title gives the
-plotted phase in degrees. The corner note names the largest individual outcome
-within anything else and its peak fraction over the plotted durations.
+plotted phase in degrees. The grouped curve cannot identify which of its
+seven individual outcomes contributes most.
 These figures include preparation and readout errors.
 They do not measure gate fidelity or resolve physical leakage by themselves.
 There are no mean-IQ diagnostics or saved IQ clouds.
@@ -70,8 +72,14 @@ There are no mean-IQ diagnostics or saved IQ clouds.
 Each fully acquired duration trace with nonzero selected counts uses an
 undamped cosine fit.
 Rates below 1 divided by the saved duration span are unresolved.
-Failed or degenerate fits report a reason rather than a zero rate.
-Compare the measured return traces with the fitted curves.
+Duration-fit rates marks them at their fitted MHz values below the labeled
+threshold line. Bars on identifiable rates show the duration cosine's fit SE
+in MHz. A failed or degenerate fit shows a reason, not a zero rate. Use Duration slices
+to compare measured duration points with the dense cosine fit.
+The duration points and the grouped terminal probabilities show ±1 shot SEM
+from the corresponding class indicator and that point's retained count.
+This is counting noise, not the uncertainty of the fitted rate. The 2D map
+has no per-cell bars.
 Choose spacing so the expected rate is below `1/(2 × duration spacing)`.
 Check aliasing manually. Thermal mixtures may contain more than one rate.
 
@@ -79,7 +87,16 @@ Identifiable rates use `rate² = A + B cosφ + C sinφ`.
 The proposed relative phase is `atan2(C,B)` in degrees, the maximum-rate branch.
 More than three identifiable phase slices and full-rank phase coverage are
 needed for finite uncertainty. Zero modulation or nonfinite uncertainty prevents
-a proposal. This phase is not a logical local-Z correction.
+a proposal. The interference plot shows the dense rate-squared fit and its
+maximum. The rate² points use ±1 propagated fit SE, 2 × rate × rate fit SE,
+in MHz². These are for display only and do not weight the interference fit.
+They differ from the rate fit SE in MHz and from the shot SEM on the
+underlying classified projection P(g,g). R² measures how much observed
+rate-squared variation the fit explains.
+Normalized RMS is the residual RMS divided by the measured rate-squared span.
+The summary also reports each parameter's standard error relative to its
+absolute fitted value. These metrics have no additional selection threshold.
+This phase is not a logical local-Z correction.
 
 ## Save and load
 
@@ -90,9 +107,9 @@ Every class axis is ordered g, e, other.
 Rounds accumulate during acquisition without normalization.
 File size does not grow with repetitions or rounds.
 Completed rounds survive cancellation; unmeasured points remain NaN.
-A point with counts from at least one completed round can enter the fit if it has accepted shots.
-Fits require all requested shots at every point of a duration trace.
-Always check the execution status before accepting partial results.
+A duration trace can enter the fit only when every duration has retained
+counts. A trace may meet that condition before the requested final round.
+Check the execution status and retained counts before accepting partial results.
 
 Load leaves the current Form unchanged. Analysis uses the saved cfg (schema 5.0) and counts.
 Native Load rejects older results whose axis names do not match this layout. Keep the original file and use the matching older version to read it.

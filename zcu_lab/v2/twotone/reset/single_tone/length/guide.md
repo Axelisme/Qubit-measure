@@ -1,8 +1,6 @@
-## Behavior
+**Readers:** operator, agent. Sweep the duration of a sideband reset at its calibrated carrier and fixed gain. Each shot applies the optional preparation reset and preparation pulse, then the tested sideband pulse, then readout.
 
-**Readers:** operator, agent. Single-tone sideband-reset length sweep: holds the tested pulse-reset at its calibrated sideband frequency and sweeps its duration, showing how the residual excitation decays with reset length. Runs on real hardware. Run after the reset frequency is found, to pick the shortest length that fully resets the qubit.
-
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-22
 
 ## Parameter sources
 
@@ -14,10 +12,18 @@ Open and Defaults capture the T1 used for starting values. A missing or null T1,
 
 Tested reset starts as an editable copy of the reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
 
+## Acquisition and figures
+
+Reps starts at 1000 per sweep point and branch in each acquisition round; Rounds starts at 10. Check the requested Reps × Rounds in Analyze before comparing runs.
+
+Live and Analyze plot mean IQ projected onto the principal variation axis of the sweep (raw I if fewer than two means are available). This is not population or reset fidelity. Compare the change with duration, not the sign of the projected value. Each vertical bar is the per-point shot SEM: sample standard deviation along that same IQ axis divided by the square root of the retained shot count. It measures uncertainty of the mean, not shot scatter or fit-parameter uncertainty. Files saved before shot moments were recorded still load and show points without bars.
+
+For manual duration selection, look for the earliest acquired duration at which the response reaches a plateau and stays there within the point errors. If the trace is still changing at the right edge, extend Stop; if it starts on the plateau, lower Start or use finer steps around its onset. Enter the chosen duration in the tested pulse or saved reset module. Confirm the state with a separate preparation/readout calibration before calling it fully reset.
+
 ## Typical writeback
 
 Analysis plots the length response for manual selection. Calibration stays unchanged until you update it. The single-tone frequency experiment proposes the tested reset module.
 
 ## Recommended
 
-A length sweep from ~0.1 µs to a few times the expected reset time captures the full decay; shorten the span once the plateau is clear. Allow a long relax delay between shots so the qubit fully relaxes before each reset.
+Use a duration range that reaches beyond the first sustained plateau. Keep the preparation and readout the same while refining the range.
