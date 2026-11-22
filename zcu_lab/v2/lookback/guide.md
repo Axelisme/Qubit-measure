@@ -29,4 +29,4 @@ To repeat Lookback, place Trig offset about 0.100 µs before a reliable estimate
 
 In the `lookback` recipe, `readout_ref: null` fails at the required selector before other Run edits.
 Any supplied `frequency_mhz`, `readout_length_us` or `trigger_offset_us`, including `null`, edits the selected Readout as Inline without changing its library source. Omit these inputs or `rounds` to keep their values. Explicit `null` clears the corresponding required value; readiness stops before acquisition if overrides leave it blank.
-Analyze inputs `ratio`, `smooth` and `plot_fit` reject `null` after Run, before analysis starts. The recipe still attempts Save, but has no estimate or writeback question. Correct the options and Analyze the completed Run without acquiring it again. Use `plot_fit: false` to hide markers.
+If the recipe rejects an Analyze option, there is no arrival estimate or writeback question. Correct the options and Analyze the completed Run without acquiring it again. Use `plot_fit: false` to hide markers.

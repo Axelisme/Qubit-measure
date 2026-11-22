@@ -126,7 +126,7 @@ SweepCfg 的座標與 step 繼承 unit，點數不繼承掃描量的物理單位
 既有 cfg key 不因顯示文字改名，例如 `delays`、`delay` 與 `length` 都可顯示 Delay。
 共用但物理量不同的 range 必須說明單位由哪張實驗決定。
 Form 的 flux 掃描輸入使用 `flux_unit` 指定的裝置輸入單位，不用它推定 Result 或保存軸的單位。
-例如 [JPA bias survey](jpa/flux_onetone/guide.md#read-the-plots) 的圖上 bias 軸與保存的 `fluxes` 軸都使用裝置原生 a.u.，不隨 Form 的 A／V／native 選項改標籤或換算。
+例如 [JPA bias survey](jpa/flux_onetone/guide.md#read-the-map-and-cuts) 的圖上 bias 軸與保存的 `fluxes` 軸都使用裝置原生 a.u.，不隨 Form 的 A／V／native 選項改標籤或換算。
 Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數。
 
 初值依來源處理。來源可推導時，用 Expr 或固定 capture，寫明來源路徑與單位。

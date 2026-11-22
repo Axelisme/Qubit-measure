@@ -16,7 +16,7 @@ Each independent branch starts with optional **Reset** and then applies one of t
 
 Compare the three panels at the same gain, especially the intended π gain. The reset-only panel reports mean and maximum sampled P(e); also check the maximum Other and the worst sampled gain. Other includes shots outside both circles or tied. Neither Other nor branch contrast establishes leakage or reset-channel fidelity.
 
-Live shows raw fractions. Analyze uses only the selected result's saved confusion matrix for correction; files with counts but no compatible calibration show classified fractions. Bars are one shot SEM from the retained counts (absent below two shots); Analyze propagates count covariance through any correction. These are not fit errors, histogram intervals or round-to-round variation.
+Live shows raw fractions. Analyze uses only the selected result's saved confusion matrix for correction; files with counts but no compatible calibration show classified fractions. Bars show one shot SEM from the retained counts at each gain, estimating the sampling uncertainty of the class probabilities. Analyze propagates count covariance through any correction. Fewer than two retained shots give no bar. The bars do not show fit errors, histogram intervals or round-to-round variation.
 
 ## Next step
 

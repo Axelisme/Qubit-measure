@@ -14,7 +14,7 @@ Optional **Reset** → **Qubit drive pulse** at the swept gain → **Readout**. 
 
 ## How to read the results
 
-Use Live to check population contrast and Analyze to compare class fractions with the joint-fit curves and locate π and π/2. Bars are one shot SEM of the retained class fractions, absent with fewer than two shots. They are not fit errors, histogram widths or round-to-round variation.
+Use Live to check population contrast and Analyze to compare class fractions with the joint-fit curves and locate π and π/2. Bars show one shot SEM from the retained class counts at each gain. They estimate the sampling uncertainty of that point's class probabilities. Fewer than two retained shots give no bar. The bars do not show fit errors, histogram widths or round-to-round variation.
 
 Use the projected IQ histogram and fitted confusion matrix to check g/e separation. Negative log-likelihood is the fit objective, not a population error or acceptance threshold. The matrix's Other row is fixed by the model; Other is a rejected class, not an identified leakage level.
 

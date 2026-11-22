@@ -18,7 +18,7 @@
 
 ## Herald reset 與獨立 heralded 入口
 
-一般入口的 **Reset** 留空則無 reset。在支援 mux herald 的入口，選 `reset/mux_herald` 並用與終端相同的完整讀出；`keep` 的鍵是完整 tone 的零起算位置（不是 ADC），例如所選位置為 0、1 才填 `{'0': g, '1': g}`。一般入口只計通過篩選的終端分布。獨立 heralded RB 與 conditional phase 自帶 herald，分別用 gg 與 ee 組；不再加一層 herald reset。**Pass fraction** 是 herald gg 數除以所有取得的 shots，不是純度。
+一般入口的 **Reset** 留空則無 reset。在支援 mux herald 的入口，選 `reset/mux_herald` 並用與終端相同的完整讀出；`keep` 的鍵是完整 tone 的零起算位置（不是 ADC），例如所選位置為 0、1 才填 `{'0': g, '1': g}`。一般入口只計通過篩選的終端分布。獨立 heralded RB 與獨立 heralded conditional phase 都自帶 herald，各自按 herald 結果分出 gg、ee 兩組做聯合分析，不再加一層 herald reset。**Pass fraction** 是 herald gg 數除以所有取得的 shots，不是純度。
 
 從 `post_delay = 5/(2π·κ)` µs 開始。κ 是 [mux Onetone](../mux/onetone/guide.md) 量得的 linewidth（FWHM，MHz），共用等待取讀出中最小的 κ。等待從讀出波形結尾起算，不等 ADC 積分窗；herald 與終端共用此值。先用 [Joint readout](joint_readout/guide.md) 選 gg herald，對每顆取「該顆名目 Xπ、另一顆 I」的列，加總該顆終端為 e 的機率。只延長等待再比較。若較長等待仍提高 e 比例，先調等待再做 heralded 掃描；比例不是 gate fidelity。
 

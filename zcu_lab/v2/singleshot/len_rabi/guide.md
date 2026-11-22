@@ -14,7 +14,7 @@ Optional **Reset** → **Qubit drive pulse** at the swept duration → **Readout
 
 ## How to read the results
 
-Look for oscillations in Live and compare each measured population curve with the joint fit in Analyze. Bars are one shot SEM of retained class fractions (absent below two shots), not histogram width, fit error or round-to-round variation.
+Look for oscillations in Live and compare each measured population curve with the joint fit in Analyze. Bars show one shot SEM from the retained class counts at each duration. They estimate the sampling uncertainty of that point's class probabilities. Fewer than two retained shots give no bar. The bars do not show histogram widths, fit errors or round-to-round variation.
 
 Check the projected IQ histogram and fitted confusion matrix for separation. Negative log-likelihood is a fitting objective, not an acceptance threshold. Other is a rejected class, and its matrix row is fixed by the model.
 
