@@ -247,15 +247,15 @@ Notebook 使用 `CfgEnv(ml, device_manager)` 借用固定 library snapshot 與 c
 
 CfgEnv 與 RunContext 分工不同。前者可跨次組裝重用；後者只有單次執行能力，不讓核心取得 point、library 或 registry 管理權。底層 `assemble_experiment_cfg` 接顯式 validation context，不讀硬體。Run 不重新組裝 cfg、不重連、不補裝置。需要新的參數或 library 資訊時，caller 明確讀取來源、重建 CfgEnv，再次呼叫 make_cfg。Driver mapping 不是資源 lease，也不凍結 driver 狀態。Notebook 初始化 cell 重跑就重建，不探查 namespace 或自動重用，舊連線仍由使用者明確關閉。GUI 的固定來源、CfgRef／revision 與 acceptance 不因 Notebook 入口而重新查詢硬體。
 
-模擬 builder 回傳具名 `SimulationEnvironment`，包含已綁定 soc、匹配 soccfg、同一 DeviceManager 與公開描述。一般可信 Python loader 仍支援零參數 `build_environment()`；FTF startup 與 Notebook 直接呼叫公開 `experiment.ftf.ftf(...)`。
+模擬 builder 回傳具名 `SimulationEnvironment`，包含已綁定 soc、匹配 soccfg、同一 DeviceManager 與公開描述。一般可信 Python loader 仍支援零參數 `build_environment()`。FTF startup 與 Notebook 用 `from zcu_tools.simulators.ftf.environment import ftf` 匯入公開 builder，再直接呼叫 `ftf(...)`。設定載入與呼叫範例見[模擬器 README〈Physical simulator models〉](../../lib/zcu_tools/simulators/README.md#physical-simulator-models)。
 
 GUI 不載入 environment，由選定的 startup 腳本經一般 facets 安裝 SoC 並逐一 register drivers。一般 soc_changed 不建立 device，不保留動態切換入口。成功回傳後由 caller 安排清理；只有 register 成功的 driver 才交給 GUI 關閉，失敗與未交付資源由腳本清理。資源交接與 `on_close` 時序見 [[0064]]。部分清理失敗保留資源與原錯誤，不假裝 ready。
 
-FTF Notebook 範例在組裝時明確傳 `warmup=True`，worker 數保留兩顆 host CPUs，至少使用一個。FTF GUI startup 明確傳共用策略選出的 CPU 數減一個 worker，至少一個，並傳 `warmup=True`。Factory 不等 CPU 數值準備與 GPU 預編譯就返回，兩者在背景執行。`experiment.ftf` 擁有代表性數值工作與 process-wide single-flight；`SimulationEnvironment` 暴露進度、future 與 ready 等待。直接呼叫 `ftf()` 預設 `workers=1, warmup=False`。背景工作不接觸正式 devices、RNG stream 或 resident Engine。Program binding 只知道通用 ready callback。Acquire 在 admission 後、消耗 sequence 前等準備完成。失敗由 environment 回報並退回 on-demand 編譯。外部計時 owner 先等 ready 再開始計時；GUI 狀態顯示由前端接線，不由數值層更新。依賴沿用 C8、C9、C10、C12，沒有新增反向依賴。
+FTF Notebook 範例在組裝時明確傳 `warmup=True`，worker 數保留兩顆 host CPUs，至少使用一個。FTF GUI startup 明確傳共用策略選出的 CPU 數減一個 worker，至少一個，並傳 `warmup=True`。Factory 不等 CPU 數值準備與 GPU 預編譯就返回，兩者在背景執行。`zcu_tools.simulators.ftf.environment.warmup` 擁有代表性數值工作與 process-wide single-flight；`SimulationEnvironment` 暴露進度、future 與 ready 等待。直接呼叫 `ftf()` 預設 `workers=1, warmup=False`。背景工作不接觸正式 devices、RNG stream 或 resident Engine。Program binding 只知道通用 ready callback。Acquire 在 admission 後、消耗 sequence 前等準備完成。失敗由 environment 回報並退回 on-demand 編譯。外部計時 owner 先等 ready 再開始計時；GUI 狀態顯示由前端接線，不由數值層更新。依賴沿用 C8、C9、C10、C12，沒有新增反向依賴。
 
 2026-11-18，使用者說：「这个 ADR 0069不预编译的裁决，我怎么没印象呢？我好像没有。…我预期 GUI 启动时会预编译啊。」對兩案「A：GUI 傳 `warmup=True`，CPU 準備與 GPU 預編譯都在背景做；B：只預編譯 GPU」答「A」。原先「GUI 不預編譯」由 2026-10-20 的 `4302e30d8` 改入，沒有使用者裁決紀錄。使用者希望「使用者体感到的执行模拟速度才不会不一致」。代價是新機器或 Numba／OpenCL 快取失效後，factory 一返回就 acquire，第一次就得等全部準備。Intel Arc、d=24、7 workers 的冷快取量測中，立即 acquire 花 76.9 s，不預編譯花 22.3 s，等準備完成再 acquire 花 3.3 s。量測條件見[討論紀錄](../discussions/2026-11-18-ftf-gpu-dop853-backend.md#留下的問題)。
 
-FTF 的 YAML 由 resources 驗證；experiment.ftf 擁有接線、裝置與逐 round snapshot，simulate 只收數值並提供 joint model、evolution、population conversion 與 ADC。初值只在 startup 套用，每 round 讀當下 device 值；讀取失敗不降級。正常 metadata 只保留 I/Q 與公開 provenance，不含模型真值。舊 TLS 執行機制不留相容層。依賴由 .importlinter C8、C9、C10、C12 約束；完整物理限制與 readout 起點凍結近似見 [模擬環境契約](draft/simulation-environments.md)。
+`zcu_tools.simulators.ftf` 擁有具體 FTF 模型。其 `config` 驗證模型 YAML，`environment` 負責接線、裝置與逐 round snapshot，`physics` 提供 joint model。`simulate` 只收數值並提供通用的 evolution、population conversion 與 ADC。分工見 [[0072]]〈模組定位〉。初值只在 startup 套用，每 round 讀當下 device 值；讀取失敗不降級。正常 metadata 只保留 I/Q 與公開 provenance，不含模型真值。舊 TLS 執行機制不留相容層。依賴由 .importlinter C8、C9、C10、C12 約束；完整物理限制與 readout 起點凍結近似見 [模擬環境契約](draft/simulation-environments.md)。
 
 可信 Python 不是硬體 sandbox。使用者自行隔離主機資源，不新增模擬專用裝置黑名單或自動斷線政策，也不預建 plugin registry 或空 backend。
 
