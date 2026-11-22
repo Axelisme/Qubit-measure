@@ -359,13 +359,9 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             )
         if zoom is not ax:
             ax.axvspan(lo, hi, color="tab:blue", alpha=0.12, label="Fit window")
-            zoom.plot(
-                fit.freqs, fit.observed, "o", color="C0", label="Measured", markersize=3
-            )
-            zoom.axhline(
-                curve.level, color="gray", ls="--", label="5% false-mark level"
-            )
-            zoom.set_title("Fit window (zoom)")
+            zoom.plot(fit.freqs, fit.observed, "o", color="C0", markersize=3)
+            zoom.axhline(curve.level, color="gray", ls="--")
+            zoom.set_title("Fit window (zoom)", fontsize=10)
         model = "Lorentzian" if options.model_type == "lor" else "Sinc"
         fit_grid_mhz = np.linspace(lo, hi, 200)
         zoom.plot(
@@ -378,25 +374,26 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         zoom.axvline(fit.freq, color="C1", linestyle=":", alpha=0.7)
         quality = ""
         if fit.selected_peak is not None:
-            quality = f" · Candidate SNR {fit.selected_peak.snr:.3g}"
-        title = (
-            "Two-tone readout chain · qubit probe · spectral significance\n"
+            quality = f"\nCandidate SNR {fit.selected_peak.snr:.3g}"
+        fig.suptitle(
+            "Two-tone readout chain · qubit probe\n"
             f"Peak center = {fit.freq:.7g} ± {fit.freq_err:.2g} MHz\n"
-            f"Sigma-peak FWHM ≈ {fit.fwhm:.4g} ± {fit.fwhm_err:.2g} MHz{quality}"
+            f"Sigma-peak FWHM ≈ {fit.fwhm:.4g} ± {fit.fwhm_err:.2g} MHz{quality}",
+            fontsize=10,
         )
-        panels = (ax,)
+        zoom.set_xlabel("Probe RF frequency (MHz)")
+        zoom.xaxis.set_major_locator(MaxNLocator(nbins=5))
+        legend_handles, legend_labels = ax.get_legend_handles_labels()
         if zoom is ax:
-            ax.set_title(title)
+            ax.set_ylabel("Evidence above background (σ)")
         else:
-            fig.suptitle(title)
-            ax.set_title("Full scan")
-            panels = (ax, zoom)
-        for panel in panels:
-            panel.set(
-                xlabel="Probe RF frequency (MHz)",
-                ylabel="Evidence above background (σ)",
-            )
-            panel.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
+            fig.supylabel("Evidence above background (σ)", fontsize=10)
+            ax.set_title("Full scan (MHz)", fontsize=10)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+            handles, labels = zoom.get_legend_handles_labels()
+            legend_handles.extend(handles)
+            legend_labels.extend(labels)
+        fig.legend(legend_handles, legend_labels, loc="outside lower center", ncols=2)
 
         return ChainAnalysis(
             freq=fit.freq,

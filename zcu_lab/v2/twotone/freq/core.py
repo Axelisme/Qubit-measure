@@ -346,10 +346,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             )
         ax.axvspan(lo, hi, color="tab:blue", alpha=0.12, label="Fit window")
         if zoom is not ax:
-            zoom.plot(
-                fit.freqs, fit.observed, "o", color="C0", label="Measured", markersize=3
-            )
-            zoom.set_title("Fit window (zoom)")
+            zoom.plot(fit.freqs, fit.observed, "o", color="C0", markersize=3)
+            zoom.set_title("Fit window (zoom)", fontsize=10)
         model = "Lorentzian" if options.model_type == "lor" else "Sinc"
         fit_grid_mhz = np.linspace(lo, hi, 200)
         zoom.plot(
@@ -367,21 +365,25 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
         quality = ""
         if fit.selected_peak is not None:
-            quality = f" · Candidate SNR {fit.selected_peak.snr:.3g}"
-        title = (
-            "Two-tone spectrum · qubit probe · resonance\n"
+            quality = f"\nCandidate SNR {fit.selected_peak.snr:.3g}"
+        fig.suptitle(
+            "Two-tone spectrum · qubit resonance\n"
             f"Qubit frequency = {freq:.7g} ± {freq_err:.2g} MHz\n"
-            f"FWHM = {fwhm:.4g} ± {fwhm_err:.2g} MHz{quality}"
+            f"FWHM = {fwhm:.4g} ± {fwhm_err:.2g} MHz{quality}",
+            fontsize=10,
         )
-        panels = (ax,)
+        zoom.set_xlabel("Probe RF frequency (MHz)")
+        zoom.xaxis.set_major_locator(MaxNLocator(nbins=5))
+        legend_handles, legend_labels = ax.get_legend_handles_labels()
         if zoom is ax:
-            ax.set_title(title)
+            ax.set_ylabel(ylabel)
         else:
-            fig.suptitle(title)
-            ax.set_title("Full scan")
-            panels = (ax, zoom)
-        for panel in panels:
-            panel.set(xlabel="Probe RF frequency (MHz)", ylabel=ylabel)
-            panel.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
+            fig.supylabel(ylabel, fontsize=10)
+            ax.set_title("Full scan (MHz)", fontsize=10)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+            handles, labels = zoom.get_legend_handles_labels()
+            legend_handles.extend(handles)
+            legend_labels.extend(labels)
+        fig.legend(legend_handles, legend_labels, loc="outside lower center", ncols=2)
 
         return FreqAnalysis(freq, freq_err, fwhm, fwhm_err, fit.peaks)
