@@ -50,7 +50,8 @@ Coupler 使用 `SquidDrift`，只接受 `q_cap`、`aphi`，拒絕 `q_ind` 與 `x
 
 `numerics.time_scale` 是有限非負的物理時間倍率。省略為 1.0，0.1 為十倍速，0 關閉補等。每 round 的目標秒數為 `time_scale × reps × Σ(各點 timeline 長度 + relax_delay) × 1e-6`，長度與 delay 使用 us。Binding 扣掉計算耗時，只等待正餘量，Stop 可中斷等待。成功 round 仍向共用時鐘補入 unscaled physical duration 的正差額，所以 `time_scale=0` 不會停止漂移時間；閒置時間也照常推進。Builder 提供 `ftf(settings, soccfg=soccfg, time_scale=0)` 覆寫，無須改寫 YAML。舊欄位 `min_round_duration_s` 會報錯並指出新名稱。
 
-`numerics.projection_weight_floor` 接受有限的 `[0, 1)` 機率，必填，範本明填 `1e-9`。
+`numerics.projection_weight_floor` 接受有限的 `[0, 1)` 機率，必填。
+樣板值與套用步驟見 [FTF 工作副本與調參](../../../../../zcu_lab/simulation_envs/FTF/README.md#工作副本與調參)。
 FTF 在每點的每次 projective 轉移各自套用門檻。若來源能階目前的邊際機率低於門檻，FTF 跳過該列演化，改用 identity 列。
 權重留在原能階，不移轉、不丟失，也不重新正規化。設為 `0` 時不因門檻跳過任何列，包含零權重列。
 [Routing telemetry](../environment/README.md#routing-telemetry) 記錄續演化的能階數與 identity 列的總權重。

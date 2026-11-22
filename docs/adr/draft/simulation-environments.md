@@ -133,7 +133,8 @@ Run／QICK round loop、hooks、分類、normalization 與 averaging 沿用取�
 Raw 與 decimated 每發沿 `ProjectionChain` 逐 event 抽投影狀態，再為各 event 抽 CTMC path。觀測同一 event 的 ADC 共用 path，receiver noise 各自獨立。
 Integrated 以逐態 multinomial flow 抽各 event 的 state histogram，再用累積邊界編成共用 category 軸，每點最多 `1+Σ(S_e−1)` 個，不隨 reps 成長。每個讀出的 noiseless total 由對應事件的 counts 乘條件均值後加總。Flow 保留各事件 occupancy 的聯合分佈，但 bins 只編碼各事件邊際，不代表真實 shot 路徑或跨事件物理 joint。Herald 期間的 CTMC transitions 只影響該次 IQ，不回饋後續密度演化。投影不依 IQ 可分辨性聚類，不支援 MIST 或資料相依 feedback／active reset。
 
-Single／six 的 `numerics.projection_prune_floor` 與 FTF 的 `numerics.projection_weight_floor` 都接受有限 `0 <= floor < 1`，預設 `1e-9`。
+Single／six 的 `numerics.projection_prune_floor` 與 FTF 的 `numerics.projection_weight_floor` 都接受有限 `0 <= floor < 1`，且都必填。
+Single／six 樣板明填 `1e-9`。FTF 的樣板值見 [FTF 工作副本與調參](../../../zcu_lab/simulation_envs/FTF/README.md#工作副本與調參)連結的 YAML。
 三種環境按點、按轉移套 floor。來源態機率低於 floor 時用 identity 列，留在原態；其餘來源態用 solver 的轉移列。這項近似不丟機率、不重新正規化。Floor 為零時不套這項近似。Single／six 每個 plan 對至少一點需要的狀態聯集演化一次；某點不需要的列即使算過也不用。
 Diagnostics 記每點每轉移實際續演化的來源態數，以及 identity 列的近似機率和。FTF 稱後者為 `ftf.projection_identity_weight`，single／six 稱為 `uncontinued_probability`。一點的路徑 total variation 不超過它跨轉移的 identity 列機率總和，不含 solver 誤差。`evolution_calls` 記含 prefix 的實際呼叫，不能由採用數換算。表示與代裁見 [[0078]]。
 沒有 projective read 的 template 保留原 raw、integrated、decimated 輸出。Continuation density 與完整 preparation 重用的區別見 [[0078]]。
