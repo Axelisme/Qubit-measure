@@ -17,6 +17,7 @@ from ._dop853 import (
 )
 from ._dop853_intervals import row_intervals
 
+# A smaller seed reduces first-step retries observed in CPU DP5(4) profiling.
 _DP54_INITIAL_STEP_NS = 0.05
 
 
