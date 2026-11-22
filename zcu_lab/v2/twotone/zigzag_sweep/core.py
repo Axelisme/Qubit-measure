@@ -356,7 +356,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             gate = " · X90 pairs" if cfg.repeat_on == "X90_pulse" else " · X180"
         fig.colorbar(image, ax=[ax1, ax2], label="IQ projection (a.u.)")
         ax1.set(title=f"ZigZag sweep{gate}", ylabel="Gate repetitions (count)")
-        ax2.plot(values, loss, ".", label="Smoothed IQ variation")
+        ax2.plot(values, loss, ".-", label="Smoothed IQ variation")
         ax2.axvline(
             min_value,
             color="red",

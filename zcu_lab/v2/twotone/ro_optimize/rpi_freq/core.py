@@ -310,7 +310,7 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
         ax_score, ax_reasons = fig.axes
         fig.suptitle("R–π frequency sweep · Resonator · Alternating contrast")
         scores = valid_values(analyses, "score")
-        ax_score.plot(freqs, scores, "o", color="C0")
+        ax_score.plot(freqs, scores, "o-", color="C0")
         ax_score.set_ylabel(SCORE_LABEL)
         if best is not None:
             setting = float(freqs[best])
@@ -360,7 +360,7 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
             ),
             strict=True,
         ):
-            ax.plot(freqs, valid_values(analyses, name), "o", color="C0")
+            ax.plot(freqs, valid_values(analyses, name), "o-", color="C0")
             ax.set_ylabel(ylabel)
             if best is not None:
                 ax.axvline(float(freqs[best]), color="C3", ls="--")

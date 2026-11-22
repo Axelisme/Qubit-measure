@@ -52,6 +52,12 @@ is consistent with those errors. No point means the fit or reduced χ² is
 unavailable, not zero. There is no reduced χ² selection threshold. Use the
 π crossing figure to choose the common frequency.
 
+In the wrapped phase, π crossing, and phase-per-CZ plots, a gap with a point
+on each side can mark the ±180° cut or an ambiguous half-turn. The plot does
+not join adjacent angles that differ by 180° or more. A frequency with no
+plotted point has no available value; no line spans it. The red π marker still
+shows the crossing from the phase interpolation.
+
 The fit uses X=A cos(n·slope+φ) and Y=A sin(n·slope+φ), with one amplitude A and phase offset φ per spectator and frequency. There is no quadrature DC offset. Count-derived sigma variances weight the fit. Other counts remain in the denominator. Zero contrast has no diagnostic phase, and unmeasured points block the corresponding slope fit.
 
 Use at least two distinct gate counts whose differences have gcd=1. The default is [1,2,3]. Odd-only counts such as [1,3,5] have a π slope alias and are rejected before Run. After zero acceptance or unavailable positive variances remove points, each effective fit group must still satisfy this rule. An aliased group retains its diagnostic plots and reason, but no fit or writeback. Slopes use a representative of their unavoidable 2π period.

@@ -328,7 +328,7 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
         ax_score, ax_reasons = fig.axes
         fig.suptitle("R–π ADC window sweep · Resonator · Alternating contrast")
         scores = valid_values(analyses, "score")
-        ax_score.plot(lengths, scores, "o", color="C0")
+        ax_score.plot(lengths, scores, "o-", color="C0")
         ax_score.set_ylabel(SCORE_LABEL)
         if best is not None:
             setting = float(lengths[best])
@@ -378,7 +378,7 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
             ),
             strict=True,
         ):
-            ax.plot(lengths, valid_values(analyses, name), "o", color="C0")
+            ax.plot(lengths, valid_values(analyses, name), "o-", color="C0")
             ax.set_ylabel(ylabel)
             if best is not None:
                 ax.axvline(float(lengths[best]), color="C3", ls="--")

@@ -334,7 +334,14 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             )
             zoom = ax
 
-        ax.plot(freqs, real_signals, "o", color="C0", label="Measured", markersize=3)
+        ax.plot(
+            freqs,
+            real_signals,
+            "o" if zoom is ax else "o-",
+            color="C0",
+            label="Measured",
+            markersize=3,
+        )
         other_peaks = [peak.center for peak in fit.peaks if peak != fit.selected_peak]
         if other_peaks:
             ax.plot(

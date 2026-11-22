@@ -165,9 +165,9 @@ GUI application 持有結果與具名圖集合，保存不反向依賴 Qt widget
 
 R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Data 頁的縮圖用來辨識與選取各 stage 的具名圖；Data 的 R7 在 [`View figure` 閱讀面](../../lib/zcu_tools/gui/app/measure/ui/README.md)檢查同一張當前原生 Figure 依閱讀尺度重繪後的畫面，放不下就捲動，不縮小字級。
 
-對數值大小敏感的一維資料點畫 shot SEM；看峰位的 spectrum 和二維圖不畫逐點 error bar。Shot SEM 是每發樣本標準差除以保留 shot 數的平方根，表示該點平均值的預期誤差。顯示用時間寫 `µs`，gain、amplitude 與倍率寫 `a.u.`，機率寫出機率名稱，計數寫 `count`。存檔單位照[保存、發現與範圍](#保存發現與範圍)，不受顯示詞彙影響。
+一維系列若能用現有 shot 資料估計 SEM，就畫逐點 shot SEM，spectrum 也一樣。IQ 散點及二維圖不畫逐點 error bar。Shot SEM 是每發樣本標準差除以保留 shot 數的平方根，表示該點平均值的預期誤差。Run 與 Analyze 的一維連續掃描，沒有擬合曲線時連接量測點，有擬合曲線時只留量測點及可用的誤差棒。類別軸不連線。顯示用時間寫 `µs`，gain、amplitude 與倍率寫 `a.u.`，機率寫出機率名稱，計數寫 `count`。存檔單位照[保存、發現與範圍](#保存發現與範圍)，不受顯示詞彙影響。
 
-**例子。** T2 Ramsey 的 Analyze 圖按規範畫量測點、密網格 fit 與「T2* = 值 ± 誤差 µs」。cfg 的 Reps×Rounds 和實際施加的 detune 放在摘要。Rabi 和 T1 的 shot SEM 表達各點平均值的預期誤差，two-tone spectrum 不加逐點 error bar。
+**例子。** T2 Ramsey 的 Analyze 圖按規範畫量測點、密網格 fit 與「T2* = 值 ± 誤差 µs」。cfg 的 Reps×Rounds 和實際施加的 detune 放在摘要。Rabi 和 T1 的 shot SEM 表達各點平均值的預期誤差。Two-tone spectrum 有 shot SEM 時也畫誤差棒，沒有擬合曲線時連接量測點。
 
 **邊界。** 採集摘要不列完成輪數、是否提前停或 shot 數，不擴充 `RunMetadata`，也不改 [[0062]] 的 Schedule facts 規則。各實驗決定是否保存實際施加值。重開檔案缺某個值就不顯示，不能用現行表單補值。Shot SEM 估計器歸 `zcu_tools.analysis`；fit 參數誤差與 RB 的跨 seed 標準差留在原 owner。只存平均的實驗在家族修正時加二階 moment，不移除舊欄位；舊檔仍可 Load，缺資料時不畫 error bar。除此之外，呈現修正沿用現有資料，不改取數。指南的 fit 品質、population 軸、分支標籤，以及表單、guide 與 recipe 文字細則是 designer 代裁，使用者未覆核。Ding 博論只作版式與標註參考，不把相近的圖視為同一實驗。
 
@@ -179,6 +179,7 @@ R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Data 頁的�
 - 2026-11-22，使用者對摘要和按鈕答「1a, 存檔看有沒有需求 2a」，分別採用現有值與 `Defaults`。
 - 2026-11-22，Data 頁保留縮圖選圖、改以閱讀面驗 R7，是 designer 依夜間授權代裁，使用者未覆核。使用者同日要求：「那注意排版啊，那个 GUI 的版面配置可能不是正规的四乘三或者什么的，然后字体大小之类的要注意缩放，比如说在 Save 页面可能会变得比较窄」。見[在 Measure Data 頁讀原圖](../discussions/2026-11-22-data-figure-reading.md)。
 - 2026-11-22，使用者在 shot SEM 與輪間散布之間選「A」，補充「像我其实更想要设计的，其实应该是平均标准差，也就是这个点的预期误差。」數值估計器放 analysis、標題與圖例留在 core 是 designer 代裁，使用者未覆核。
+- 2026-11-22，使用者：「如果拟合曲线本身就是连线的，那数据点就不用。但如果没有拟合曲线，那就要连线。」使用者選「全面套用」，並要求 spectrum 也畫可用的 shot SEM。見[量測點何時連線與 spectrum 的 error bar](../discussions/2026-11-22-data-point-lines.md)。
 
 ### 三種分析生命週期
 

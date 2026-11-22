@@ -46,3 +46,5 @@ RunMetadata 沒有完成輪數、提前停、實際 shot 數或施加值。Sched
 ## 依據
 
 調查、獨立 challenge 與使用者原始問答未入庫。最終的 [Analyze 投影](../../lib/zcu_tools/gui/app/measure/remote/analysis_types.py)、[數值估計器](../../lib/zcu_tools/analysis/shot_uncertainty.py) 與 [figure-style](../../zcu_lab/v2/figure-style.md) 保留機制及驗收入口。
+
+後記（2026-11-22）：[後續裁決](2026-11-22-data-point-lines.md)擴大 shot SEM 的適用範圍，spectrum 有現成資料可估時也畫；數值與呈現的分工不變。

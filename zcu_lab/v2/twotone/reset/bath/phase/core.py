@@ -302,11 +302,11 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         fig, ax = plots.subplots(num="fit")
 
         if result.iq_moments is None:
-            ax.plot(phases, real_signals, ".-", markersize=5, label="Measured")
+            ax.plot(phases, real_signals, ".", markersize=5, label="Measured")
         else:
             sem = iq_shot_sem(result.iq_moments, direction=_projection(signals))
             ax.errorbar(
-                phases, real_signals, yerr=sem, fmt=".-", markersize=5, label="Measured"
+                phases, real_signals, yerr=sem, fmt=".", markersize=5, label="Measured"
             )
         ax.plot(full_phase, y_fit, "-", label="360° cosine fit")
         # Draw each equivalent phase in the turn nearest the observed scan.

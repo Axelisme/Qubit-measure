@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
@@ -30,7 +31,7 @@ from zcu_tools.program.v2.modules.readout import (
     require_circle_classifiers,
 )
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
@@ -185,25 +186,29 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             "MIST preparation spectrum · qubit · classified populations"
         )
         ax.set(xlabel="Preparation RF frequency (MHz)", ylabel="Outcome probability")
-        viewer = live_line(ax, num_lines=POPULATION_COUNT)
-        for line, label, color in zip(
+        viewer = live_errorbar(ax, num_lines=POPULATION_COUNT)
+        for line, bars, label, color in zip(
             ax.lines,
+            ax.collections,
             ("P(g)", "P(e)", "P(other)"),
             ("tab:blue", "tab:red", "tab:green"),
             strict=True,
         ):
             line.set(label=label, color=color, marker="o", markersize=3)
+            bars.set_color(color)
         ax.legend(loc="best")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
-            """Display acquired fractions and completed scan positions."""
+            """Display acquired fractions, their shot SEM and scan progress."""
             totals = data.sum(axis=-1)
             progress.set_text(
                 f"MIST preparation spectrum · qubit · classified populations\n"
                 f"{np.count_nonzero(totals > 0)}/{totals.size} points acquired"
             )
-            return (progress, *viewer.set(freqs, (data / totals[..., None]).T))
+            covariance = class_probability_covariance(data)
+            sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
+            return (progress, *viewer.set(freqs, (data / totals[..., None]).T, sem.T))
 
         figure.show()
         buffer = SignalBuffer(
@@ -263,6 +268,13 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             )
 
         populations = correct_populations(populations, options.confusion_matrix)
+        covariance = class_probability_covariance(result.counts)
+        if options.confusion_matrix is not None:
+            jacobian = np.linalg.solve(
+                options.confusion_matrix.T, np.eye(POPULATION_COUNT)
+            )
+            covariance = jacobian @ covariance @ jacobian.T
+        sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
 
         # 2. Isolate preparation-frequency dependence with the later probe held fixed.
         _, ax = plots.subplots(num="fit", figsize=(7, 5), layout="constrained")
@@ -273,10 +285,11 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
                 strict=True,
             )
         ):
-            ax.plot(
+            ax.errorbar(
                 freqs,
                 populations[:, index],
-                marker="o",
+                yerr=sem[:, index],
+                fmt="o-",
                 markersize=3,
                 label=label,
                 color=color,

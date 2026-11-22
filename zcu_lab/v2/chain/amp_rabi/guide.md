@@ -39,7 +39,7 @@ The sign of the first curve follows the second, so both oscillate together. Stop
 
 ## Analysis
 
-Analysis needs no options. It first fits the first read's mean IQ with the `twotone/rabi/amp_rabi` fit and publishes that experiment's `fit` figure; its π gain x_π gives the starting frequency f = 1 / (2 x_π).
+Analysis needs no options. It first fits the first read's mean IQ with the `twotone/rabi/amp_rabi` fit. The `fit` figure shows unconnected IQ points, shot SEM from the first-read moments, and the fit curve. If those moments cannot give a shot SEM, the legend reports it as unavailable and the points have no bars. Analyze still uses the first-read fit to seed the joint fit. The fitted π gain x_π gives the starting frequency f = 1 / (2 x_π).
 It then fits all 65 numbers at all gains jointly with a three-state model whose readout and population nuisances are shared across gains.
 The drive row for each starting state interpolates between two free population endpoints, D_i(x) = [1 − f_i(x)] × endpoint_i0 + f_i(x) × endpoint_i1.
 The curve weights are sin²(π f x) for g, cos²(π f x) for e and sin²(π f x) for the third state.
