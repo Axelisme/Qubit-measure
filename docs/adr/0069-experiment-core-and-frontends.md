@@ -181,6 +181,16 @@ R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Data 頁的�
 - 2026-11-22，使用者在 shot SEM 與輪間散布之間選「A」，補充「像我其实更想要设计的，其实应该是平均标准差，也就是这个点的预期误差。」數值估計器放 analysis、標題與圖例留在 core 是 designer 代裁，使用者未覆核。
 - 2026-11-22，使用者：「如果拟合曲线本身就是连线的，那数据点就不用。但如果没有拟合曲线，那就要连线。」使用者選「全面套用」，並要求 spectrum 也畫可用的 shot SEM。見[量測點何時連線與 spectrum 的 error bar](../discussions/2026-11-22-data-point-lines.md)。
 
+#### 平均 IQ 的投影慣例
+
+**規則。** 平均 IQ 的一維圖預設畫帶正負號的主軸投影（PCA，例如 `rotate2real`）。二維 flux／頻率圖沿頻率軸逐個 bias 扣掉該列 IQ 背景，再取幅值（例如 `minus_background`）。同類實驗沿用同一種轉換。另用幅值、相位、I 或 Q 時，在程式旁寫明理由。
+
+**例子。** Mux Ramsey／Echo 的 Live 與擬合失敗圖沿用成功擬合及單 qubit Ramsey 的主軸投影。IQ 沿切線擺動時，直接取幅值可能看不到條紋。
+
+**邊界。** 二維 flux map 扣除背景後取幅值，不必選固定投影方向。若相位本身就是待測量，例如 Conditional Phase 的條件相位，就直接畫相位。本規則不改取數與持久化的 IQ。
+
+**依據。** 2026-11-23，使用者：「B，這種投影方式應該作為慣例存在，沒有獨特理由就保持一致」。見[平均 IQ 圖的投影慣例](../discussions/2026-11-23-mean-iq-plot-projection.md)。原始問答未入庫。
+
 ### 三種分析生命週期
 
 - T1 提供同步 analyze，消費 explicit RunRecord 與 typed options。Notebook 成功後發布 AnalysisRecord；GUI 發布插件定義的 typed 分析輸出、來源與圖。

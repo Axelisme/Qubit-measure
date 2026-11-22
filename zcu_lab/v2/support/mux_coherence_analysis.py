@@ -75,6 +75,23 @@ def prepare_coherence_trace(
     return MuxCoherenceTrace(index, times[skip:][finite], signal[finite])
 
 
+def project_coherence_for_plot(signal: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Project a tone's mean IQ onto its principal axis for display.
+
+    Keep one value per delay and mark nonfinite IQ as NaN. Use the I axis
+    when fewer than two finite points remain or the axis cannot be solved.
+    Unlike the fit input, this display trace has no minimum fit point count.
+    """
+    # ADR-0069: show the same mean-IQ direction as the fit on partial traces.
+    finite_signal: NDArray[np.complex128] = np.where(
+        np.isfinite(signal), signal, np.complex128(np.nan)
+    )
+    try:
+        return rotate2real(finite_signal).real
+    except np.linalg.LinAlgError:
+        return finite_signal.real
+
+
 def project_coherence_trace(
     trace: MuxCoherenceTrace, *, minimum_points: int
 ) -> NDArray[np.float64]:

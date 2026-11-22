@@ -20,7 +20,7 @@ In `mux_t2ramsey`, omission retains settings. Null `participants` leaves a missi
 
 ## Measurement and analysis
 
-Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Live shows **Magnitude**, the magnitude of mean IQ; Analyze fits **Signal real**, the signed projection of mean IQ against the same requested delay. Neither is population. The two ordinates need not match. There are no pointwise shot SEM bars in these views; the ± on T2 is fit uncertainty.
+Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Both show the signed principal-axis projection of mean IQ (a.u.) against requested delay. If the fit fails, `fit_i` shows the acquired points and the failure reason instead of a fitted curve. With fewer than two finite points, the plot uses the I axis. The projection is not population. There are no pointwise shot SEM bars; the ± on T2 is fit uncertainty.
 
 R² is explained variation and normalized residual RMS is mismatch relative to signal range. A weak fit, unresolved fringe or cross-tone contamination makes a correction unreliable. Sampling uses `1 / (largest delay gap × max(|fitted fringe rate|, |actual detune|))`; adequate means at least 10 points per cycle and a full cycle, not proof against unknown aliases. Changing Participants changes both drives and readout; a single-participant trace does not isolate drive effects.
 

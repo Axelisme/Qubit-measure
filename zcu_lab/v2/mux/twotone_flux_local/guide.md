@@ -18,7 +18,7 @@ In `mux_twotone_flux_local`, omitted Form inputs keep their values. Null `partic
 
 ## Read the plots and use the result
 
-Live shows DC bias versus drive RF (MHz), colored by mean IQ magnitude, with the latest and previous complete spectra for comparison. There are no per-point shot SEM bars. An interrupted bias point has no complete spectrum; **Stop** stops the whole scan and leaves earlier complete bias points. Picking needs at least five complete bias points and two distinct frequencies.
+Live shows DC bias versus drive RF (MHz). At each bias, subtract the spectrum's median complex IQ before taking the magnitude (a.u.). The map and the latest and previous complete spectra show this same contrast. There are no per-point shot SEM bars. An interrupted bias point has no complete spectrum; **Stop** stops the whole scan and leaves earlier complete bias points. Picking needs at least five complete bias points and two distinct frequencies.
 
 In Analysis choose **Tone** by its original index (initially the first acquired one). The picker shows GHz and starts in phase-aware mode. Move the half- and integer-flux lines onto supported landmarks; **Done** produces a result and **Cancel** does not. If the feature or its landmarks are not resolved in the bias window, extend or redo the scan instead of writing back.
 
