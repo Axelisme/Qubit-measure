@@ -104,7 +104,11 @@ def test_finish_projects_original_binding_outcome(
         assert record["wall_s"] == 7.0
         assert record["compile_wall_s"] == 2.0
         assert record["complete"] is complete
-        assert record["evolve_wall_s"] == record["readout_wall_s"] == 0.0
+        assert (
+            record["evolve_wall_s"]
+            == record["readout_wall_s"]
+            == (0.0 if complete else None)
+        )
     finally:
         source.close()
         devices.close_all_devices()
