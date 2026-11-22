@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-21, device-time conversion, exact flat span reuse and raw sampling Stop
+**Last updated:** 2026-11-22, Markov and raw sampling links
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -187,9 +187,9 @@ at least one observed grid across its events.
 column, separately for every content. `content_index` selects each point's row.
 None means identity order. Explicit rows must be complete int64 permutations.
 `ConditionalSums` retains event-major sums, traces and `event_indices`, and carries
-the same output permutation. Integrated sampling expands the physical event's
-joint populations before reordering conditional means and drawing output totals.
-Raw and decimated sampling reorder after the shared paths and receiver noise.
+the same output permutation. Integrated sampling uses each read's logical
+event to select conditional means in output-column order. Raw and decimated
+sampling reorder after the shared paths and receiver noise.
 This preserves chronological physics while restoring the original channel-local
 trigger emission order, even when it differs between points.
 `ConditionalReadout` computes state-conditioned responses once
@@ -273,6 +273,8 @@ traces. Multiple incident carriers superpose their vacuum fields and retain
 one cavity memory on the same path. Integrated direct means retain conditional
 moments and nearest-even shot rounding variance. Acquisition averaging belongs to program.
 
+## Projection readout and sampling
+
 `ProjectionReadout(weights, populations)` owns outcome weights with shape
 `(*point_dims, K)` and one `(*point_dims, K, states)` population array per event.
 It validates and copies these arrays without clipping or normalization.
@@ -281,20 +283,30 @@ and one event. A single outcome consumes no extra outcome RNG draw. Its raw,
 trace and integrated outputs retain the previous single-event RNG order,
 including shared-event multi-grid and multi-ADC arrangements.
 
+<a id="projection-chain-sampling"></a>
+
 `ProjectionChain(initial, transitions)` represents rank-1 projective reads
 without enumerating outcome histories. `initial` has shape `(*point_dims, S)`.
 Each subsequent event supplies one `(*point_dims, S, S)` transition array,
 indexed `[previous_projection_state, next_projection_state]`. Construction
 copies arrays read-only and validates every row without clipping or normalization.
-An empty transition tuple represents one event. `ProjectionReadout` remains
-the outcome-mixture input for FTF and `unprojected` readout.
+An empty transition tuple represents one event.
+[FTF projective chain construction](../../simulators/ftf/environment/README.md#projective-chain-construction)
+builds these rows and applies the projection floor before handing them to ADC.
+Non-projective FTF readout still uses `ProjectionReadout.unprojected`. The adoption does not retire FTF's retained
+outcome-mixture path or the shared `ProjectionReadout` interface.
 
-Raw and trace sampling follow each shot's chain, sharing projection states and
-each event's CTMC path across ADCs and grids. The next projection depends on
-the previous projection state, not on the readout CTMC endpoint. Chain sampling
-uses its own draw order. Equal inputs and identities reproduce results within
-the same numeric/RNG version; no bitwise parity with enumerated histories is
-promised. The existing single-event `ProjectionReadout` RNG order stays unchanged.
+Raw and trace sampling each draw a chain per shot. Reads at the same shot
+index stay paired across events and ADCs. ADCs and grids that observe the same
+event share its CTMC path. The next projection depends on the previous
+projection state, not on the readout CTMC endpoint. Raw and trace paths are
+sampled separately from compact flow counts. No compact bin identifies a shot.
+Chain sampling uses its own draw order. Equal inputs and identities reproduce
+results within the same numeric/RNG version; no bitwise parity with enumerated
+histories is promised. The existing single-event `ProjectionReadout` RNG order
+stays unchanged.
+
+<a id="integrated-chain-statistics"></a>
 
 Integrated chain sampling draws first-event occupancy with a multinomial.
 For each next event and source state it draws multinomial destination flows,
@@ -306,17 +318,30 @@ All histograms use the same point shape and total per point. Each total must
 be in `[0, 2**63-1]`, inclusive; larger totals raise `ValueError` before boundary
 encoding. Counts and indices remain int64, without clipping or normalization.
 The shared width is `1+sum(S_e-1)`, independent of reps; duplicate boundaries
-remain zero-count bins. Each read uses its `event_indices` entry and content-specific
-`column_order` to select means on these bins. These categories preserve marginal
-moments, not a joint state distribution or real shot paths. The same encoder
-can combine independent cavity histograms with different category counts.
-Receiver Gaussian noise and nearest-even rounding variance remain unchanged.
+remain zero-count bins. Each read uses its `event_indices` entry and
+content-specific column order to select means on these bins. An ADC that skips
+a herald emits no column for it and keeps the later event indices. The terminal
+event contributes to the bins even if no ADC emits a terminal column. The same
+encoder can combine independent cavity histograms with different category counts.
 
-The experiment runtime supplies projection probabilities in the retained DC
-energy basis. ADC neither chooses projection times nor applies the pruning floor. It does not
-group states by IQ distinguishability. ADC transitions during
-a herald event affect that event's IQ only. They do not feed back into the
-populations supplied for later events.
+For FTF projective reads, the bins are the shared `state_counts`, partitioning
+reps at each point. They encode each event's marginal histogram, not a joint
+distribution over herald history and terminal state. Each read's
+`conditional_sums` holds its noiseless per-shot mean for each bin. Summing
+`state_counts * conditional_sums` over bins gives the noiseless total for
+each I/Q component. The common flow draw preserves the correlations between
+these totals due to event occupancies. It does not yield the joint IQ
+distribution of paired reads, CTMC trajectory variance, or cross-read
+receiver-noise covariance. ADC adds Gaussian noise to each read total
+independently, including the nearest-even rounding variance term. See [FTF compact statistics](../../simulators/ftf/environment/README.md#compact-statistics)
+for the environment's output and the [Program statistics contract](../../program/v2/simulation/README.md#compact-timelines-and-statistics)
+for the acquisition handoff.
+
+The environment supplies projection probabilities in the retained DC energy
+basis. ADC samples the supplied rows, including identity rows, without applying
+another floor or choosing projection times. It does not group states by IQ
+distinguishability. ADC transitions during a herald event affect that event's
+IQ only. They do not feed back into the populations supplied for later events.
 
 `PreparedRawShots(readout, batches, reps=...)` owns noiseless probabilities
 and per-channel ReadoutBatch inputs. `bind(identity)` returns an `ADCRawShots`
@@ -370,15 +395,54 @@ integrated sampling inputs. For `ProjectionReadout` it draws counts on the C-ord
 `(outcome, terminal state)` axis with probabilities `weights[k] * final[k, s]`.
 Earlier-event conditional sums average that event's populations for each outcome,
 then repeat across terminal states. Terminal-event conditional sums depend on
-the terminal state and repeat across outcomes. Every ADC/read uses those joint
-counts. Preparation expands conditional means and factors each ADC's noise
-covariance once. `draw(seed=..., acquire_sequence=..., round_index=...)`
+the terminal state and repeat across outcomes. Every ADC/read uses the same
+joint counts over `(outcome, terminal state)`. Preparation expands conditional
+means and factors each ADC's noise covariance once.
+`draw(seed=..., acquire_sequence=..., round_index=...)`
 validates a fresh identity and uses the same count/noise algorithm as
 `round_statistics`. `ProjectionChain` uses flow counts and the cumulative-boundary
 encoding described above. The preparation retains no noisy results or identities.
 The public `round_statistics` still validates arbitrary inputs by building a plan
 for that call. FTF retains plans with noiseless preparations; no RNG draws or
 deferred raw materialization move into preparation.
+
+### Raw sampling
+
+A change in representation alone must preserve the joint distribution of raw
+I/Q across reads and ADCs at the same shot index, not just the distribution of
+each read by itself. With the same physical model and inputs and no projection
+floor approximation, sampling a `ProjectionChain` and sampling the enumeration
+of those same paths are equal in distribution. This does not establish parity
+with an FTF history model that retains cavity memory or uses a different floor.
+The [chain's RNG boundary](#projection-chain-sampling) does not promise bitwise
+parity for the same seed across representations. See ADR-0078 for
+[raw ownership](../../../../docs/adr/0078-evolution-module-boundary.md#integrated-raw-由環境生成介面由-program-擁有)
+and the [Markov representation](../../../../docs/adr/0078-evolution-module-boundary.md#projective-read-的-markov-chain-表示).
+
+On the simulated ADC path, these callers use raw rather than compact counts:
+
+- Shot reducers use `acquire_summed`, including through `run_acquire_summed`.
+  In `twotone/ro_optimize`, this includes Auto (`auto_optimize`) and the
+  `freq`, `freq_gain`, and `length` scans. In `jpa`, `auto_optimize`, `flux`,
+  `freq`, and `power` use raw for SNR. `Classify` axes passed to `shot_sums`, as
+  in `two_qubit/joint_readout` and heralded `conditional_phase`, classify the
+  reducer's per-shot IQ.
+- In `SimulationAcquireMixin`, a registered shot mask (including `HeraldReset`)
+  or a native QICK `threshold` requires raw during an otherwise averaged
+  acquire. Direct `SimulationSoc.start_readout` also requires raw for `poll_data`.
+- `get_raw` and `get_shot_result` request the last completed round's raw.
+  `run_acquire_shots` reaches it through `get_shot_result`; mux single-shot g/e
+  reaches `get_raw` through `collect_raw_iq`. These getters only materialize
+  the retained round if its raw is not already available.
+
+See [Program's raw materialization contract](../../program/v2/simulation/README.md#raw-materialization)
+for when a round requires raw and when getters materialize it later.
+
+To locate the callers, use:
+
+```bash
+git grep -nE '\b(run_acquire_summed|acquire_summed|Classify|HeraldReset|register_shot_mask_source|SimulationAcquireMixin|start_readout|run_acquire_shots|get_shot_result|collect_raw_iq|get_raw)\b' -- '*.py' ':!tests/**'
+```
 
 ## Joint-Fock validation limits
 

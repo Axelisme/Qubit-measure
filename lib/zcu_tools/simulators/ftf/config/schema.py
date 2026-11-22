@@ -388,8 +388,11 @@ class Numerics(RoundPacing):
     time_scale: finite nonnegative physical-time multiplier per binding round,
     default 1.0; zero disables pacing.
     telemetry: local acquire-summary policy; omitted settings enable logging.
-    projection_weight_floor: required finite probability in [0, 1);
-        outcome histories below it are removed and survivors renormalized.
+    projection_weight_floor: required finite probability in [0, 1). At each
+        point and transition, a source state's row skips evolution if its
+        current marginal is below the floor. The identity row leaves that
+        weight in the same state without discarding or renormalizing it.
+        Zero skips no rows, including rows for zero-weight states.
     """
 
     truncation: Truncation

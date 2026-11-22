@@ -470,8 +470,11 @@ Cov(sample) = noise_psd_adc2_ns / dt_ns
 | `solver.atol` | DOP853 absolute local error tolerance | Solver state 的數值尺度，有限數，> 0 | 必填 |
 | `solver.max_step_ns` | 積分最大步長 | ns，有限數，> 0 | 必填 |
 | `solver.bath_segment_ns` | 固定 bath 更新區間 | ns，有限數，> 0 | 必填；實際取最近的 2 ns，halfway ties to even，至少一個 2 ns tick |
-| `projection_weight_floor` | Projective outcome pruning threshold | 無因次，有限數，0 ≤ floor < 1 | 必填，0 關閉剪枝 |
+| `projection_weight_floor` | Projective 轉移的來源能階邊際機率門檻 | 無因次，有限數，0 ≤ floor < 1 | 必填，0 不因門檻跳過演化 |
 | `seed` | Root RNG seed | 無單位，整數 ≥ 0 | 必填；`null` 在環境啟動時產生一次 root seed，不是每 round 重新產生 |
+
+每點的每次 projective 轉移獨立套用門檻。若來源能階目前的邊際機率低於門檻，FTF 跳過該轉移列的演化，改用 identity 列。
+權重留在原能階，不移轉、不丟失，也不重新正規化。填 `0` 時連零權重的列都不因門檻跳過。
 
 FTF 預設走分段引擎的快速算法，不是所有演化都逐步執行 DOP853。這些 solver 欄位控制需要數值積分的路徑，無法代替截斷或物理模型的適用性檢查。調小 tolerance、縮短 step 或 bath segment 之後，仍須比較輸出確認精度。明寫 seed 有助於固定抽樣身份；跨 dependency 或 RNG 版本不保證相同結果。
 

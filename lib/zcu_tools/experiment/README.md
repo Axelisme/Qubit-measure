@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-22，Labber 投影前的 Variable 檢查
+**Last updated:** 2026-11-22，projective readout chain
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -125,16 +125,20 @@ counts and per-ADC/event grid counts across templates in one numeric preparation
 Conflicts name the templates and layouts. Six applies this rule per routed
 physical source, not across independent cavities. Single's public `preflight`
 validates a cavity's complete ADC observation set; `prepare_readouts` builds one
-shared projection history. Six preflights all routed sources before preparing any.
+shared projection chain. Six preflights all routed sources before preparing any.
 All ADCs retain the same logical-event axis, using empty grids for events they
 do not observe. No ADC must observe terminal, but each must observe some event.
 
-Environment runtimes project the density at each triggered nonterminal block's
-start and continue each rank-1 DC energy outcome through evolution. ADC samples
-one complete outcome history per shot and shares it between herald and terminal
-reads. Integrated counts flatten the outcome and terminal-state axes. ADC CTMC
-jumps during herald affect IQ only, not later density evolution. This excludes
-MIST, IQ-clustered projection and data-dependent feedback for active reset.
+Environment runtimes apply rank-1 DC energy projections at the start of each
+triggered nonterminal readout block. FTF resets the cavity field to vacuum at
+each projection and continues each DC state whose probability meets the floor
+once per point and layer. ADC samples one chain per shot for raw
+and trace, keeping herald and terminal reads paired. Compact integrated bins
+encode per-event state counts, not a physical joint across events. Program uses
+single-shot IQ for masks, classification and reducers when those require shots.
+ADC CTMC jumps during herald affect IQ only, not later density evolution. The
+projective model excludes MIST, IQ-clustered projection and data-dependent
+feedback for active reset.
 Pruning thresholds and diagnostics belong to the
 [single](../simulators/single_fluxonium/environment/README.md#complete-timelines),
 [six](../simulators/six_fluxonium/environment/README.md#routing-and-acquisition) and
