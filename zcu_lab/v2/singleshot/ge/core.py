@@ -9,6 +9,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.patches import Polygon
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -322,6 +323,8 @@ def _plot_classified_iq(
         )
 
     ax.set_aspect("equal")
+    # Use the available I-axis width and prefer coarse steps on tall IQ panels.
+    ax.xaxis.set_major_locator(MaxNLocator(nbins="auto", steps=[1, 2, 4, 5, 10]))
     ax.set_xlabel("IQ in-phase I (a.u.)")
     ax.set_ylabel("IQ quadrature Q (a.u.)")
 
@@ -640,10 +643,10 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         n_gg, n_ge, n_go = confusion.g_classification
         n_eg, n_ee, n_eo = confusion.e_classification
         ax1.set_title(
-            f"g preparation\nP(g) {n_gg:.1%} · P(e) {n_ge:.1%} · P(other) {n_go:.1%}"
+            f"g preparation\nP(g) {n_gg:.1%} · P(e) {n_ge:.1%}\nP(other) {n_go:.1%}"
         )
         ax2.set_title(
-            f"e preparation\nP(g) {n_eg:.1%} · P(e) {n_ee:.1%} · P(other) {n_eo:.1%}"
+            f"e preparation\nP(g) {n_eg:.1%} · P(e) {n_ee:.1%}\nP(other) {n_eo:.1%}"
         )
 
         im = ax4.imshow(confusion.init_matrix, cmap="Blues", vmin=0, vmax=1)
