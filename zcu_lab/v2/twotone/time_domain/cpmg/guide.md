@@ -24,13 +24,13 @@ Relax delay starts at 5 times the captured `$qubit.t1`. A missing or null T1 use
 
 ## Run and analyze
 
-Run displays normalized IQ versus pulse count and time. Save the raw data, then Analyze to fit a decay for each count. The fit figure compares accepted T_CPMG values with pulse count on log axes. Optional Ramsey T2 and T1 references add horizontal T2R and 2*T1 lines in µs; the fit uses the measured decay independently of these references.
+Run shows the Live heatmap and adds traces for the latest and previous acquisitions as data arrives. Save the raw data, then Analyze to fit a decay for each count. The Analyze figure shows the contrast heatmap on the left and fitted lifetimes on the right. See [Reading the plots](#reading-the-plots) for the axes in each panel. Optional Ramsey T2 and T1 references add horizontal T2R and 2*T1 lines in µs. The fit does not use these references.
 
-The heatmap and T_CPMG points remain visible. Incomplete or rejected rows have no T2 point. Analysis fails only when every row fails the per-row fit checks. Extend the time window if the decay is unresolved. Calibration stays unchanged.
+Analyze skips incomplete rows and omits lifetimes for rows that fail the fit checks. A fit figure requires at least one row to pass. If no row passes or a fitter raises an error, Analyze fails without producing a new fit figure. A fitter error stops Analyze even if another row passed. Extend the time window if the decay is unresolved. Calibration stays unchanged.
 
 The summary fits T2(n) = T2_1 * n^gamma by weighted linear regression of log T2 against log n. Usable rows pass the per-row checks and have finite positive n, T2 and T2 uncertainty. Weights are T2/t2err, so the log-space standard error is t2err/T2. The fit treats these as absolute uncertainties and uses unscaled covariance, without reduced-chi-square scaling. T2_1's standard error is T2_1 times the intercept standard error. The exponent error is the slope standard error.
 
-The summary reports t2_1_us, t2_1_err_us, gamma, gamma_err and fit_rows. With at least three usable rows, the log-log T2 plot overlays the power law and its title reports gamma. With fewer than three usable rows, including zero, all four fit values are null and fit_rows records the usable count. Analysis still succeeds if any per-row fit passed. Zero-error rows remain plotted but do not enter the summary fit. There is no unweighted fallback or artificial uncertainty floor. Per-count T2 values stay in the figure, not the summary.
+The summary reports t2_1_us, t2_1_err_us, gamma, gamma_err and fit_rows. With at least three usable rows, the log-log T2 plot overlays the power law and its title reports gamma. With fewer than three usable rows, including zero, all four fit values are null and fit_rows records the usable count. Zero-error rows remain plotted but do not enter the summary fit. There is no unweighted fallback or artificial uncertainty floor. Per-count T2 values stay in the figure, not the summary.
 
 The cpmg recipe follows the same Run, Analyze and Save steps and reports the same five summary fields. An analysis failure reports null fit values, fit_rows=0 and the failure reason. Use max_n with points for Log input, or times for an explicit list. min_length_us, max_length_us and length_points set the shared time window. Reusing a tab resets it before applying overrides.
 
@@ -50,10 +50,13 @@ The cpmg recipe follows the same Run, Analyze and Save steps and reports the sam
 
 ## Reading the plots
 
-The Live and Analyze heatmaps put each acquisition in an equal-width column, in the order you entered the counts. Equal column widths do not mean the counts are equally spaced. Each tick labels the actual π pulse count. If a count repeats, the label also shows its acquisition position, starting from 1. For example, `4 (#3)` means that the third acquisition used four π pulses.
+Both heatmaps put each acquisition in an equal-width column in scan order. Column spacing shows acquisition order, not the numerical distance between counts. Each tick labels the actual π pulse count. If a count repeats, its tick also shows its acquisition position, starting from 1. For example, `4 (#3)` means that the third acquisition used four π pulses.
 
-Each column uses its own measured total evolution delays in µs. Its color shows IQ scaled to that column's observed contrast range, not a population. Unmeasured cells stay blank. Live also plots the latest and previous traces against their own delay grids.
+Each column in both heatmaps uses its own total evolution delays in µs. Its color shows IQ scaled to that column's observed contrast range, not a population. Unmeasured cells stay blank.
 
-The lifetime plot shows T₂ versus the numerical refocusing count on log axes. Each bar is the standard error of that row's fit, not shot SEM. The two-dimensional IQ map and these derived lifetimes are not one-dimensional shot means.
+- **Live right panel:** The latest and previous acquisitions each show normalized IQ against their own delay grid.
+- **Analyze right panel:** The fit plots T₂ against the numerical pulse count on log-log axes, not the heatmap's acquisition positions. Repeated counts share the same x position. Error bars show the standard error of each fit, not shot SEM. Incomplete or rejected rows leave no lifetime point.
+
+For implementation, see the [live plotting tools for experiment authors](../../../README.md#即時圖工具).
 
 Rows must have resolved decay within the measured window, fit error below half the lifetime, and fitted contrast above four times the mean absolute smoothed residual. Missing or rejected rows do not contribute to the power law. Widen the total-delay window if a fitted lifetime reaches the grid span; increase Reps or Rounds if the decay is obscured by noise. The Analyze summary reports configured Reps × Rounds.
