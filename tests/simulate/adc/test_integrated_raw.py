@@ -1,5 +1,6 @@
 """Deferred ADC shots: physical paths, independent means and QICK layouts."""
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from threading import Event
 
@@ -246,8 +247,126 @@ def test_deferred_raw_does_not_change_statistics_stream_or_retain_noisy_results(
     )
 
 
+def test_raw_rounds_reuse_noiseless_setup_only_in_the_active_batch():
+    calls = 0
+
+    def envelope(_ns: float) -> complex:
+        nonlocal calls
+        calls += 1
+        return 1.0 + 0j
+
+    content = batch(model(receiver=adc.Receiver(noise_covariance=np.eye(2) * 4)))
+    (event,) = content.events[0]
+    (pulse,) = event.pulses
+    event = replace(event, pulses=(replace(pulse, envelope=envelope),))
+    content = replace(content, events=((event,),))
+    chain = adc.ProjectionChain(np.array([0.1, 0.2, 0.7]), ())
+    prepared = adc.PreparedRawShots(chain, {0: content}, reps=5)
+    round_1 = SamplingIdentity(12, (3, 0, 1))
+    round_2 = SamplingIdentity(12, (3, 1, 1))
+    owner = adc.RawPlanOwner()
+    assert calls == 0
+    owner.bind(prepared, round_1)
+    source = owner.bind(prepared, round_1)
+    assert calls == 0, "binding without taking raw ran envelope setup"
+    first = source.materialize(5, 0)[0]
+    del source
+    setup_calls = calls
+    assert setup_calls > 0
+    second = owner.bind(prepared, round_2).materialize(5, 0)[0]
+    # With no CTMC jumps, the opaque envelope is only needed for noiseless setup.
+    assert calls == setup_calls, "a later round repeated noiseless envelope setup"
+    assert not np.array_equal(first, second)
+
+    shifted = replace(event, pulses=(replace(event.pulses[0], amplitude=0.4j),))
+    changed = replace(content, events=((shifted,),))
+    new_prepared = adc.PreparedRawShots(chain, {0: changed}, reps=5)
+    different = owner.bind(new_prepared, round_2).materialize(5, 0)[0]
+    assert calls > setup_calls
+    assert not np.array_equal(second, different)
+
+    after_b = calls
+    replay = owner.bind(prepared, round_1).materialize(5, 0)[0]
+    assert calls > after_b, "returning to A revived the retired generation"
+    assert_array_equal(replay, first)
+
+    # The original bind is always cold, even while the same batch has a memo.
+    after_replay = calls
+    assert_array_equal(prepared.bind(round_2).materialize(5, 0)[0], second)
+    assert calls > after_replay
+
+
+def test_retiring_a_batch_during_raw_setup_does_not_publish_its_late_plan():
+    watchdog = 30
+    building_or_done = Event()
+    proceed = Event()
+    a_calls = 0
+    b_calls = 0
+
+    def first_envelope(_ns: float) -> complex:
+        nonlocal a_calls
+        a_calls += 1
+        if a_calls == 1:
+            building_or_done.set()
+            # Once notified, the test retires A and releases this worker in finally.
+            assert proceed.wait(timeout=watchdog), (
+                "retirement blocked on the raw solver"
+            )
+        return 1 + 0j
+
+    def next_envelope(_ns: float) -> complex:
+        nonlocal b_calls
+        b_calls += 1
+        return 0.3j
+
+    original = batch(model())
+    (event,) = original.events[0]
+    (pulse,) = event.pulses
+
+    def prepared(envelope):
+        content = replace(
+            original,
+            events=((replace(event, pulses=(replace(pulse, envelope=envelope),)),),),
+        )
+        return prepare(np.array([1.0, 0, 0]), {0: content}, reps=1)
+
+    owner = adc.RawPlanOwner()
+    identity = SamplingIdentity(1)
+    old = owner.bind(prepared(first_envelope), identity)
+    next_batch = prepared(next_envelope)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(old.materialize, 1, 0)
+        # Materialization signals on envelope entry or, if it exits early, via the future.
+        pending.add_done_callback(lambda _: building_or_done.set())
+        try:
+            assert building_or_done.wait(timeout=watchdog), (
+                "raw worker made no progress"
+            )
+            if pending.done():
+                new = None
+            else:
+                next_source = owner.bind(next_batch, identity)
+                proceed.set()  # Let A finish while B materializes.
+                new = next_source.materialize(1, 0)[0]
+        finally:
+            proceed.set()
+            previous = pending.result(timeout=watchdog)[0]
+
+    assert new is not None, "raw finished before entering envelope setup"
+
+    assert not np.array_equal(new, previous)
+    b_setup = b_calls
+    assert b_setup > 0
+    assert_array_equal(owner.bind(next_batch, identity).materialize(1, 0)[0], new)
+    assert b_calls == b_setup, "retired setup disturbed the current generation"
+    a_setup = a_calls
+    assert_array_equal(old.materialize(1, 0)[0], previous)
+    assert a_calls > a_setup, "late setup refilled the retired generation"
+
+
 @pytest.mark.parametrize("stop_at", ["entry", "during-event"])
-def test_raw_stop_does_not_observe_later_events(stop_at):
+@pytest.mark.parametrize("with_owner", [False, True])
+def test_raw_stop_does_not_observe_later_events(stop_at, with_owner):
     cancel = Event()
 
     def first_envelope(_ns):
@@ -271,7 +390,9 @@ def test_raw_stop_does_not_observe_later_events(stop_at):
     prepared = adc.PreparedRawShots(
         adc.ProjectionReadout(np.ones(1), (p, p)), {0: content}, reps=1
     )
-    source = prepared.bind(SamplingIdentity(1))
+    identity = SamplingIdentity(1)
+    owner = adc.RawPlanOwner()
+    source = owner.bind(prepared, identity) if with_owner else prepared.bind(identity)
     if stop_at == "entry":
         cancel.set()
     with pytest.raises(Cancelled):
