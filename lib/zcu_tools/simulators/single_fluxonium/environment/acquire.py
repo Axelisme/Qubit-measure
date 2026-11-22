@@ -11,6 +11,7 @@ from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.adc import (
     ChannelReadout,
     PreparedRawShots,
+    RawPlanOwner,
     round_statistics,
     sample_traces,
 )
@@ -82,10 +83,16 @@ class SingleFluxoniumAcquire:
         self._source = source
         self.request = request
         self._active = True
+        self._raw_plans = RawPlanOwner()
 
     def invalidate(self) -> None:
         """Reject later rounds; idempotent, without invalidating delivered raw."""
         self._active = False
+        self.retire_raw_plans()
+
+    def retire_raw_plans(self) -> None:
+        """Retire the raw memo without changing preparation or diagnostics."""
+        self._raw_plans.retire()
 
     def sample_round(
         self,
@@ -120,7 +127,8 @@ class SingleFluxoniumAcquire:
                     round_index=index,
                 )
                 result = IntegratedRound(
-                    statistics, prepared.raw.bind(statistics.raw_identity)
+                    statistics,
+                    self._raw_plans.bind(prepared.raw, statistics.raw_identity),
                 )
             else:
                 traces = sample_traces(
