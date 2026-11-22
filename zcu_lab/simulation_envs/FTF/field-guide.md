@@ -271,10 +271,9 @@ Flux 線不可與另一 flux loop、任一 `drive_lines`、`readout.drive` 或�
 濾波不承接前一 shot 的記憶，也不從校準值推定增益適用範圍。
 Program 提供 pulse envelope、gain 與時間，DC snapshot 仍由 `dc_bias` 決定。
 
-標準 preset 宣告 F1 與 F2 的快磁通線。這兩條線從各自的 generator 取得 pulse。Coupler 不使用序列內磁通線。
+標準 preset 啟用 F1/gen1 與 F2/gen4。Entry 範本把 Q1／Q2 的 `wiring.lo_flux_ch` 指向這兩個 generator。Coupler 預設只有 DC source，沒有序列內磁通線。
 
-樣板只以註解附上此範例，不改現有 generator 數量或 entry wiring。
-要使用 flux pulse，另在 program 指定相符的 generator，並自行核對 entry 的快速 flux 接線。
+手寫 program 時指定相符的 generator。既有 entry 不會隨範本更新，請核對 [entry 接線](#generatoradc-與-entry-接線對照)。
 
 連續 waveform 使用 2 ns DAC 格點與線性內插，pulse 端點各自取最近的 2 ns，平手取偶數。
 Bath schedule 以每個區間中點相對 snapshot DC 的偏移量量化，間距為 `1e-3 Phi0`，平手取偶數。
@@ -489,17 +488,16 @@ FTF 預設走分段引擎的快速算法，不是所有演化都逐步執行 DOP
 | Pulse readout drive | `readout.drive.gen_ch: 0` | `R1.wiring.ch: 0`、`R2.wiring.ch: 0` |
 | Pulse ADC | `readout.adc.ro_ch: 0` | `R1.wiring.ro_ch: 0`、`R2.wiring.ro_ch: 0` |
 | Mux readout drive | `readout.mux.gen_ch: 7` | `MG12.wiring.gen_ch: 7` |
-| Mux R1 receiver | `readout.mux.adc[0].ro_ch: 2` | `MG12.wiring.ro_ch[0]: 2`，對應 `MG12.resonators[0]: R1` |
-| Mux R2 receiver | `readout.mux.adc[1].ro_ch: 3` | `MG12.wiring.ro_ch[1]: 3`，對應 `MG12.resonators[1]: R2` |
+| Mux R1 receiver | `readout.mux.adc[0].ro_ch: 2` | Library 第一個 tone 與 `MG12.wiring.ro_ch[0]` 在範本均為 2，對應 R1 |
+| Mux R2 receiver | `readout.mux.adc[1].ro_ch: 3` | Library 第二個 tone 與 `MG12.wiring.ro_ch[1]` 在範本均為 3，對應 R2 |
 | Resonator 身分 | `readout.resonators.r1`、`.r2` | `R1`、`R2`；`Q1.resonator: R1`、`Q2.resonator: R2` |
 
-本環境的 entry 範本保留 R1／R2 的 pulse wiring，另在 MG12 填 mux `gen_ch: 7`、`ro_ch: [2, 3]`。Kickstart 範本不隨這次切板更新。`ro_ch` 列表必須與 resonators 等長、同序。八張 mux 表單缺 slot 時從這些欄位補通道，tone gain 補 0.1。`MG12.module.readout` 指向 [entry-library.yaml](entry-library.yaml) 中的 mux 模組。此欄位只接受 library key，不接受內嵌 readout 設定。
+本環境的 entry 範本保留 R1／R2 的 pulse wiring，並在 MG12 填 `gen_ch: 7`、`ro_ch: [2, 3]`。Kickstart 範本不隨這次切板更新。`ro_ch` 列表必須與 resonators 等長、同序。Startup 將 `mux` alias 指向 MG12；`MG12.module.readout` 指向工作點 library 的 mux 模組。此欄位只接受 library key，不接受內嵌設定。
 
-MG12 的 `mixer_freq: 7135` MHz 是 group LO 設定，無 slot 表單從 `$mux.mixer_freq` 取初值，缺值留空必填。它不依賴 tone 頻率或 κ。
-`MG12.time_of_fly` 提供 mux 路徑的飛行時間。R1／R2 的 `time_of_fly` 供 pulse ADC 路徑使用，不供 mux 使用。Kickstart 的 TOF 保留 null。
-Mux onetone 缺 slot 時，trigger 候選是 `$mux.time_of_fly + 5/(2π·min κ)`，ro_length 固定 1.0 us，length 是 trigger 加 ro_length。Group TOF 或任一 κ 缺值時，trigger 與 length 留空必填。這些初值未經裝置確認，有 slot 時保留既有 mixer 與 timing 規則。
+- 一般 mux 表單有 slot 時，保留 [library 模組](entry-library.yaml)的 tones、ADC、generator、mixer 與 timing。修改 MG12 wiring 不會覆寫這個 slot。缺 slot 時，才按 MG12 的 wiring 與 resonator 順序補通道和 tones，tone gain 初值為 0.1。Mixer 由 `$mux.mixer_freq` 提供，缺值留空必填。
+- Mux onetone 及其 local／global flux 掃描使用 ring-up 規則。有 slot 時，表單複製 library 模組，以 MG12 與 resonator 順序重建 tones，包含 ADC。它保留 slot 的 generator、mixer 與 ADC 積分長度，並依 κ 調整 timing。缺 slot 時，trigger 候選是 `$mux.time_of_fly + 5/(2π·min κ)`，`ro_length` 為 1.0 µs，`length` 為兩者之和。Group TOF 或任一 κ 缺值時，trigger 和 length 留空。這些初值仍須核對裝置。
 
-Startup 將 `mux` alias 指向 MG12，並在 initial point 提供其 readout 模組。Open／Defaults 時，mux 表單以 MG12 的 wiring 和 resonator 順序配對 ADC。表單中的手動修改不會更新 library。Module 的時間欄位使用 µs，receiver 的 YAML 延遲使用 ns。
+`MG12.time_of_fly` 是 mux 飛行時間。R1／R2 的 `time_of_fly` 只供 pulse ADC 路徑使用。Kickstart 的 TOF 保留 null。表單手動修改不會更新 library。Module 的時間欄位使用 µs，receiver 的 YAML 延遲使用 ns。
 
 Entry 範本的 coupler 只有靜態 DC source，沒有預填 `lo_flux_ch`。需要 coupler flux pulse 時，另在 `flux_lines.coupler` 宣告 generator，不從 `coupler.flux_dev` 推導。兩條 charge line 的 coupler 串擾係數仍會作用於模型中的 coupler，與是否宣告獨立 flux pulse channel 分開。
 

@@ -55,12 +55,13 @@ status: accepted
 
 **例子。** 比較兩個 checkout 的序列總耗時時，成對計時直接呼叫 `Engine.evolve`，不經 acquire。精度案例與指標見[測試文件](../../tests/README.md#evolution-精度矩陣)。
 
-**邊界。** 各層都重現不了使用者回報的錯時，可以跑一次 e2e 定位。腳本不入庫，不當驗收門檻。整實驗只允許 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 入庫：它以現行表單預設跑完整 Run，記錄 Run 牆鐘與分項，不當測試、gate 或精度證據。優化指標是模擬器核心耗時，即該 Run 各次 acquire 的編譯、演化、讀出與 raw materialize 四項之和。Controller、表單、Qt、繪圖、Analyze、Save 與 `ShotReducer` 等 host 處理不計入核心。Raw materialize 由呼叫它的模擬 binding 計時，寫進 [acquire telemetry](../../lib/zcu_tools/simulators/README.md#acquire-telemetry)，工具只彙總。不另建凍結的核心場景：改了實驗就重跑那一列；比較模擬器改動時，前後兩次在同一版實驗上跑。完整核心、下限與 180 秒判定的規則見[工具說明](../../tools/README.md#實驗-run-牆鐘)。工具用固定模擬輸入，在 `time_scale=0` 下只計送出 Run 到終態，不呼叫 Analyze 或 Save。
+**邊界。** 各層都重現不了使用者回報的錯時，可以跑一次 e2e 定位。腳本不入庫，不當驗收門檻。整實驗只允許 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 入庫：它只量 manifest 中由維護者選入的場景，不以註冊清單決定列數。每個場景使用工具自持的 FTF 設定和乾淨 point，開現行 Form，套用場景覆寫，再跑完整 Run。它記錄 Run 牆鐘與分項，不當測試、gate 或精度證據。優化指標是模擬器核心耗時，即該 Run 各次 acquire 的編譯、演化、讀出與 raw materialize 四項之和。Controller、表單、Qt、繪圖、Analyze、Save 與 `ShotReducer` 等 host 處理不計入核心。Raw materialize 由呼叫它的模擬 binding 計時，寫進 [acquire telemetry](../../lib/zcu_tools/simulators/README.md#acquire-telemetry)，工具只彙總。不另建凍結的核心場景：改了實驗就重跑那一列；比較模擬器改動時，前後兩次在同一版實驗上跑。完整核心、下限與 180 秒判定的規則見[工具說明](../../tools/README.md#實驗-run-牆鐘)。工具在 `time_scale=0` 下只計送出 Run 到終態，不呼叫 Analyze 或 Save，也不做整庫 guide 盤點。180 秒判定只涵蓋已選場景；如果引用的 adapter 已不存在，該場景保留未量列。
 
 **依據。**
 - 2026-11-15，使用者：「我會預期模擬器測試腳本只會依賴模擬器模塊，後端與前端分開測，kernel與dispatch也分開測，不該有e2e的測試需求」。對「整條序列的最終誤差放哪一層」答「A」，即加序列層；同意只為定位而跑一次 e2e，答「我選B」。見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
 - 2026-11-20，使用者問：「為什麼要用不入庫的 scratch 腳本量?而不是入庫的？」2026-11-21，對工具入庫而不當 gate 答「都採用建議」。見[實驗 Run 牆鐘工具](../discussions/2026-11-21-experiment-run-wall-time.md)。
 - 2026-11-21，使用者更正指標：「大头是模拟器本身，所以量模拟器速度就好了」。比較凍結核心場景與跑完整 Run 時，使用者問：「你觉得哪一种比较简单？是直接跑完整的1:1比较简单，还是复制场景比较简单？请你从维护性跟那个扩充性来考虑。」designer 建議照舊跑完整 Run、從 telemetry 讀核心並補 raw materialize、不建凍結場景，核心不計 host 處理；使用者答「那就采用建议吧」。`time_scale=0`、不呼叫 Analyze 或 Save，以及延後 materialize 的補充紀錄、核心下限與 180 秒判定的規則，是 designer 代裁，使用者未覆核。見[模擬器核心耗時](../discussions/2026-11-21-simulator-core-time.md)。
+- 2026-11-23，使用者：「它其实不是量现在实验室有每个实验的时间，它是量特挑的场景模拟的时间。」對 guide 盤點答「A，不要做多餘的事，想檢查格式是否合理應該是其他工具負責，不是計時工具，類似的工具都該遵守KISS原則」。見[牆鐘工具量手選場景](../discussions/2026-11-23-curated-wall-time-scenes.md)。
 
 ### 每個 kernel 的量測場景只有一段
 

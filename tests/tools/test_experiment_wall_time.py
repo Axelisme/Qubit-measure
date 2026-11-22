@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,30 +22,41 @@ from tools.experiment_wall_time import (
 if TYPE_CHECKING:
     from tools.experiment_wall_time import Run
 
-_GUIDE = "zcu_lab/v2/fake/frequency/guide.md"
-_FREQUENCY = {"fake/frequency": _GUIDE}
-_ADAPTERS = {**_FREQUENCY, "fake/power": None, "other": None}
+_FREQUENCY = {"fake/frequency"}
+_ADAPTERS = _FREQUENCY | {"fake/power", "other"}
+
+
+def _write_scenes(directory: Path, *scenes: str | dict[str, object]) -> Path:
+    path = directory / "case-inputs.json"
+    path.write_text(
+        json.dumps(
+            {
+                "entry": "demo",
+                "point": "initial",
+                "unpinned": {"form": "current Form", "point": "fixture point"},
+                "scenes": [
+                    {"scene_id": scene, "adapter": scene, "basis": "test workload"}
+                    if isinstance(scene, str)
+                    else scene
+                    for scene in scenes
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
     """Supply minimal hashed inputs for tests which replace the Run edge."""
     data_dir = tmp_path / "inputs"
-    data_dir.mkdir()
-    (data_dir / "default.yaml").write_bytes(b"settings")
-    (data_dir / "entry-template.yaml").write_bytes(b"components and aliases")
-    (data_dir / "entry-library.yaml").write_bytes(b"modules")
+    documents = data_dir / "fixture/result/demo/points/initial"
+    documents.mkdir(parents=True)
+    (documents / "library.yaml").write_bytes(b"modules")
+    (data_dir / "ftf-settings.yaml").write_bytes(b"settings")
     (data_dir / "board-profile.yaml").write_bytes(b"profile")
-    (data_dir / "overrides.json").write_bytes(b"[]")
-    (data_dir / "case-inputs.json").write_text(
-        json.dumps(
-            {
-                "entry": "demo",
-                "point": "initial",
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_scenes(data_dir, *sorted(_ADAPTERS))
     return data_dir
 
 
@@ -88,8 +99,7 @@ class _FailedRun(_CompletedRun):
 
 
 def _inventory(
-    adapters: Mapping[str, str | None],
-    guides: Sequence[str],
+    adapters: Collection[str],
     measure: Callable[[WallTimeCase, Path, Path], float | FormErrors],
 ) -> Inventory:
     def prepare(
@@ -103,7 +113,7 @@ def _inventory(
             result if isinstance(result, FormErrors) else _CompletedRun(result)
         )
 
-    return Inventory(adapters, guides, prepare)
+    return Inventory(adapters, prepare)
 
 
 def test_main_keeps_committed_rows_when_interrupted_before_the_next_run(
@@ -123,8 +133,7 @@ def test_main_keeps_committed_rows_when_interrupted_before_the_next_run(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: _inventory(_ADAPTERS, [_GUIDE], measure),
+            discover=lambda: _inventory(_ADAPTERS, measure),
             read_commit=lambda: "abc",
         )
         == 3
@@ -142,6 +151,7 @@ def test_main_keeps_committed_rows_when_interrupted_before_the_next_run(
 def test_interrupted_run_has_a_persisted_start_but_no_measured_time(
     tmp_path: Path, data_dir: Path
 ) -> None:
+    _write_scenes(data_dir, *sorted(_FREQUENCY))
     output = tmp_path / "output"
     cancelled = False
 
@@ -184,8 +194,7 @@ def test_interrupted_run_has_a_persisted_start_but_no_measured_time(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: Inventory(_FREQUENCY, [_GUIDE], measure),
+            discover=lambda: Inventory(_FREQUENCY, measure),
             read_commit=lambda: "abc",
         )
         == 3
@@ -226,8 +235,7 @@ def test_report_only_recovers_from_persisted_facts_after_a_hard_stop(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: Inventory(_ADAPTERS, [_GUIDE], measure),
+            discover=lambda: Inventory(_ADAPTERS, measure),
             read_commit=lambda: "abc",
         )
     assert not (output / "report.json").exists()
@@ -253,10 +261,10 @@ def test_report_only_recovers_from_persisted_facts_after_a_hard_stop(
     for row in (incomplete, unstarted):
         assert row["wall_s"] is None
         assert row["wall_s_lower_bound"] is None
-    assert report["coverage"] == {"resolved": 1, "selected": 3, "registered": 3}
+    assert report["coverage"] == {"resolved": 1, "selected": 3, "manifest": 3}
     summary = (output / "summary.md").read_text(encoding="utf-8")
-    assert "| fake/power | — |" in summary
-    assert "| other | — |" in summary
+    assert "| fake/power | fake/power | — |" in summary
+    assert "| other | other | — |" in summary
 
 
 @pytest.mark.parametrize("recover", ["report-only", "resume-from"])
@@ -265,6 +273,7 @@ def test_report_only_recovers_from_persisted_facts_after_a_hard_stop(
     [
         (None, "Invalid JSON"),
         ({"adapter": "other"}, "adapter"),
+        ({"scene_id": "wrong-scout"}, "expected scene"),
         ({"status": "ok", "wall_s": None}, "wall_s"),
         ({"status": "missing_breakdown", "wall_s": None}, "wall_s"),
         ({"wall_s": -1.0}, "wall_s"),
@@ -284,19 +293,19 @@ def test_invalid_row_journal_is_a_tool_error_not_a_usage_error(
     corruption: dict[str, object] | None,
     diagnostic: str,
 ) -> None:
+    _write_scenes(data_dir, *sorted(_FREQUENCY))
     source = tmp_path / "original"
 
     def measure(_case: WallTimeCase, _data_dir: Path, _telemetry: Path) -> float:
         return 2.0
 
     def discover() -> Inventory:
-        return _inventory(_FREQUENCY, [_GUIDE], measure)
+        return _inventory(_FREQUENCY, measure)
 
     assert (
         main(
             ["--output", str(source)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
             discover=discover,
             read_commit=lambda: "abc",
         )
@@ -319,7 +328,6 @@ def test_invalid_row_journal_is_a_tool_error_not_a_usage_error(
         main(
             argv,
             data_dir=data_dir,
-            ftf_dir=data_dir,
             discover=discover,
             read_commit=lambda: "abc",
         )
@@ -327,17 +335,36 @@ def test_invalid_row_journal_is_a_tool_error_not_a_usage_error(
     assert not continued.exists()
 
 
+def test_report_only_tells_legacy_batches_to_use_their_original_commit(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "batch.json").write_text(
+        json.dumps(
+            {
+                "commit": "prior-revision",
+                "inputs": {},
+                "cases": {"fake/power": "cases/001"},
+                "adapters": {"fake/power": None},
+                "guides": [],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match=r"Legacy.*--report-only.*prior-revision"):
+        main(["--report-only", "--output", str(tmp_path)], data_dir=tmp_path / "absent")
+    assert not (tmp_path / "report.json").exists()
+
+
 def test_report_only_rejects_a_journal_without_core_fields(
     tmp_path: Path,
     data_dir: Path,
 ) -> None:
+    _write_scenes(data_dir, *sorted(_FREQUENCY))
     output = tmp_path / "original"
     assert (
         main(
             ["--output", str(output)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: _inventory(_FREQUENCY, [_GUIDE], lambda *_: 2.0),
+            discover=lambda: _inventory(_FREQUENCY, lambda *_: 2.0),
             read_commit=lambda: "abc",
         )
         == 0
@@ -356,7 +383,17 @@ def test_report_only_rejects_a_journal_without_core_fields(
     assert not (output / "summary.md").exists()
 
 
-@pytest.mark.parametrize("change", [None, "commit", "input"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        None,
+        "commit",
+        "case-inputs.json",
+        "board-profile.yaml",
+        "ftf-settings.yaml",
+        "fixture/result/demo/points/initial/library.yaml",
+    ],
+)
 def test_resume_reuses_only_matching_committed_rows_and_marks_the_first_new_run_cold(
     tmp_path: Path,
     data_dir: Path,
@@ -375,8 +412,7 @@ def test_resume_reuses_only_matching_committed_rows_and_marks_the_first_new_run_
         main(
             ["--output", str(source)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: _inventory(_ADAPTERS, [_GUIDE], original),
+            discover=lambda: _inventory(_ADAPTERS, original),
             read_commit=lambda: "abc",
         )
         == 3
@@ -389,19 +425,20 @@ def test_resume_reuses_only_matching_committed_rows_and_marks_the_first_new_run_
         return 2.0
 
     commit = "def" if change == "commit" else "abc"
-    if change == "input":
-        (data_dir / "entry-library.yaml").write_bytes(b"different modules")
+    if change not in {None, "commit"}:
+        assert change is not None
+        path = data_dir / change
+        path.write_bytes(path.read_bytes() + b"\n")
     argv = ["--output", str(output), "--resume-from", str(source), "--select", "fake"]
 
     def discover() -> Inventory:
-        return _inventory(_ADAPTERS, [_GUIDE], continued)
+        return _inventory(_ADAPTERS, continued)
 
     if change is not None:
         with pytest.raises(SystemExit) as raised:
             main(
                 argv,
                 data_dir=data_dir,
-                ftf_dir=data_dir,
                 discover=discover,
                 read_commit=lambda: commit,
             )
@@ -417,7 +454,6 @@ def test_resume_reuses_only_matching_committed_rows_and_marks_the_first_new_run_
         main(
             argv,
             data_dir=data_dir,
-            ftf_dir=data_dir,
             discover=discover,
             read_commit=lambda: commit,
         )
@@ -438,7 +474,7 @@ def test_resume_reuses_only_matching_committed_rows_and_marks_the_first_new_run_
         False,
     )
     assert measured["cold_start"] is True
-    assert report["coverage"] == {"resolved": 2, "selected": 2, "registered": 3}
+    assert report["coverage"] == {"resolved": 2, "selected": 2, "manifest": 3}
 
 
 @pytest.mark.parametrize(
@@ -480,8 +516,7 @@ def test_failed_run_is_journaled_before_idle_check_and_never_timed(
     code = main(
         ["--output", str(output), "--select", selection],
         data_dir=data_dir,
-        ftf_dir=data_dir,
-        discover=lambda: Inventory(_ADAPTERS, [_GUIDE], measure),
+        discover=lambda: Inventory(_ADAPTERS, measure),
         read_commit=lambda: "abc",
     )
 
@@ -527,15 +562,14 @@ def test_summary_groups_identical_diagnostics_and_lists_each_failure_record(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: Inventory(_ADAPTERS, [_GUIDE], measure),
+            discover=lambda: Inventory(_ADAPTERS, measure),
             read_commit=lambda: "abc",
         )
         == 0
     )
 
     summary = (output / "summary.md").read_text()
-    failures = summary.split("Run failures:\n", 1)[1].split("\nAdapters", 1)[0]
+    failures = summary.split("Run failures:\n", 1)[1]
     assert failures.count(shared) == 1
     assert failures.count(distinct) == 1
     groups = ("\n" + failures).split("\n- ")[1:]
@@ -565,12 +599,11 @@ def test_resume_keeps_a_failed_run_and_its_original_diagnostic_without_retrying(
         return main(
             ["--output", str(output), "--select", "fake/frequency", *options],
             data_dir=data_dir,
-            ftf_dir=data_dir,
             discover=discover,
             read_commit=lambda: "abc",
         )
 
-    assert run_at(source, lambda: Inventory(_FREQUENCY, [_GUIDE], measure)) == 0
+    assert run_at(source, lambda: Inventory(_FREQUENCY, measure)) == 0
 
     def no_retry(*_args: object) -> None:
         pytest.fail("an already resolved Run must not be prepared")
@@ -578,7 +611,7 @@ def test_resume_keeps_a_failed_run_and_its_original_diagnostic_without_retrying(
     assert (
         run_at(
             resumed,
-            lambda: Inventory(_FREQUENCY, [_GUIDE], no_retry),
+            lambda: Inventory(_FREQUENCY, no_retry),
             "--resume-from",
             str(source),
         )
@@ -628,8 +661,7 @@ def test_main_selects_exact_experiment(tmp_path: Path, data_dir: Path) -> None:
                 str(output),
             ],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: _inventory(_ADAPTERS, [_GUIDE], measure),
+            discover=lambda: _inventory(_ADAPTERS, measure),
             read_commit=lambda: "abc",
         )
         == 0
@@ -638,57 +670,118 @@ def test_main_selects_exact_experiment(tmp_path: Path, data_dir: Path) -> None:
     assert [row["adapter"] for row in report["rows"]] == ["fake/frequency"]
 
 
-def test_main_reports_every_adapter_and_both_guide_gaps(
+def test_main_selects_scenes_before_adapter_families_and_keeps_same_adapter_runs(
     tmp_path: Path, data_dir: Path
 ) -> None:
-    variant_guide = "zcu_lab/v2/fake/frequency/guide.variant.md"
-    unmatched_guide = "zcu_lab/v2/fake/variant/guide.md"
-    missing_guide = "zcu_lab/v2/fake/outside/notes.md"
-    adapters = {
-        "fake/no-guide": None,
-        "fake/variant": variant_guide,
-        "fake/outside": missing_guide,
-        "fake/frequency": _GUIDE,
-    }
+    _write_scenes(
+        data_dir,
+        {
+            "scene_id": "fake",
+            "adapter": "fake/frequency",
+            "basis": "narrow scout",
+            "overrides": [{"path": ["freq", "n"], "value": 3, "basis": "short scan"}],
+        },
+        {
+            "scene_id": "wide",
+            "adapter": "fake/frequency",
+            "basis": "wide scout",
+            "overrides": [{"path": ["freq", "n"], "value": 9, "basis": "longer scan"}],
+        },
+    )
+    seen: list[object] = []
 
-    def measure(_case: WallTimeCase, _data_dir: Path, _telemetry: Path) -> float:
-        return 5.0
+    def measure(case: WallTimeCase, _inputs: Path, _telemetry: Path) -> float:
+        seen.append((case.adapter, case.overrides.get(("freq", "n"))))
+        return 2.0
 
-    output = tmp_path / "output"
-    assert (
-        main(
-            ["--output", str(output)],
+    def run(output: Path, *args: str) -> list[tuple[str, str]]:
+        assert (
+            main(
+                ["--output", str(output), *args],
+                data_dir=data_dir,
+                discover=lambda: _inventory(_ADAPTERS, measure),
+                read_commit=lambda: "abc",
+            )
+            == 0
+        )
+        report = json.loads((output / "report.json").read_text())
+        return [(row["scene_id"], row["adapter"]) for row in report["rows"]]
+
+    source = tmp_path / "exact"
+    assert run(source, "--select", "fake") == [("fake", "fake/frequency")]
+    assert run(tmp_path / "all", "--resume-from", str(source)) == [
+        ("fake", "fake/frequency"),
+        ("wide", "fake/frequency"),
+    ]
+    assert seen == [("fake/frequency", 3), ("fake/frequency", 9)]
+
+
+def test_stale_scene_is_unmeasured_and_resume_retries_it_after_adapter_returns(
+    tmp_path: Path, data_dir: Path
+) -> None:
+    stale, active = "old-scout", "second-scout"
+    _write_scenes(
+        data_dir,
+        {"scene_id": stale, "adapter": "scan/retired", "basis": "kept workload"},
+        {"scene_id": active, "adapter": "scan/current", "basis": "live workload"},
+    )
+    seen: list[str] = []
+
+    def measure(case: WallTimeCase, _inputs: Path, _telemetry: Path) -> float:
+        seen.append(case.adapter)
+        return 2.0
+
+    source, continued = tmp_path / "source", tmp_path / "continued"
+
+    def run(output: Path, adapters: tuple[str, ...], *args: str) -> int:
+        return main(
+            ["--output", str(output), "--select", "scan", *args],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: _inventory(
-                adapters, [_GUIDE, variant_guide, unmatched_guide], measure
-            ),
+            discover=lambda: _inventory(dict.fromkeys(adapters), measure),
             read_commit=lambda: "abc",
         )
+
+    assert run(source, ("scan/current",)) == 3
+    assert seen == ["scan/current"]
+    report_path = source / "report.json"
+    report = json.loads(report_path.read_text())
+    missing, measured = report["rows"]
+    assert (missing["scene_id"], missing["adapter"], missing["status"]) == (
+        stale,
+        "scan/retired",
+        "missing_adapter",
+    )
+    assert "scan/retired" in missing["reason"] and "manifest" in missing["reason"]
+    assert missing["started_at"] is None and missing["wall_s"] is None
+    assert missing["wall_s_lower_bound"] is None and missing["case_directory"] is None
+    assert measured["wall_s"] == 2.0
+    assert report["coverage"] == {"resolved": 1, "selected": 2, "manifest": 2}
+    report_path.unlink()
+    assert (
+        main(
+            ["--report-only", "--output", str(source)],
+            data_dir=tmp_path / "absent",
+            discover=lambda: pytest.fail("report-only must not load the registry"),
+        )
+        == 3
+    )
+    assert json.loads(report_path.read_text()) == report
+
+    assert (
+        run(continued, ("scan/current", "scan/retired"), "--resume-from", str(source))
         == 0
     )
-    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
-    assert [(row["adapter"], row["guide"]) for row in report["rows"]] == [
-        ("fake/frequency", _GUIDE),
-        ("fake/no-guide", None),
-        ("fake/outside", missing_guide),
-        ("fake/variant", variant_guide),
-    ]
-    assert report["adapters_without_guides"] == ["fake/no-guide"]
-    assert report["declared_guides_not_in_inventory"] == {"fake/outside": missing_guide}
-    assert report["guides_without_adapters"] == [unmatched_guide]
-    table = (output / "summary.md").read_text(encoding="utf-8")
-    assert "Adapters without declared guides: `fake/no-guide`" in table
-    assert (
-        f"Declared guides not in inventory: `fake/outside` → `{missing_guide}`" in table
-    )
-    assert f"Guides without adapters: `{unmatched_guide}`" in table
+    assert seen == ["scan/current", "scan/retired"]
+    retried, reused = json.loads((continued / "report.json").read_text())["rows"]
+    assert (retried["scene_id"], retried["reused"]) == (stale, False)
+    assert (reused["scene_id"], reused["reused"]) == (active, True)
 
 
 def test_main_flags_only_unrounded_core_seconds_above_180(
     tmp_path: Path, data_dir: Path
 ) -> None:
     evolve = {"fake/at": 174.0, "fake/above": 174.0001}
+    _write_scenes(data_dir, *evolve)
 
     def measure(case: WallTimeCase, _data_dir: Path, telemetry: Path) -> float:
         record = {
@@ -707,8 +800,7 @@ def test_main_flags_only_unrounded_core_seconds_above_180(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: _inventory(dict.fromkeys(evolve), [], measure),
+            discover=lambda: _inventory(dict.fromkeys(evolve), measure),
             read_commit=lambda: "abc",
         )
         == 0
@@ -722,10 +814,16 @@ def test_main_flags_only_unrounded_core_seconds_above_180(
 def test_main_reports_known_ftf_exclusions_without_trying_run(
     tmp_path: Path, data_dir: Path
 ) -> None:
-    fixture = data_dir / "case-inputs.json"
-    cfg = json.loads(fixture.read_text(encoding="utf-8"))
-    cfg["ftf_exclusions"] = {"fake/jpa": "FTF has no JPA pump device"}
-    fixture.write_text(json.dumps(cfg), encoding="utf-8")
+    _write_scenes(
+        data_dir,
+        "fake/frequency",
+        {
+            "scene_id": "fake/jpa",
+            "adapter": "fake/jpa",
+            "basis": "pump scan",
+            "ftf_exclusion": "FTF has no JPA pump device",
+        },
+    )
 
     def measure(case: WallTimeCase, _data_dir: Path, _telemetry: Path) -> float:
         if case.adapter == "fake/jpa":
@@ -737,10 +835,7 @@ def test_main_reports_known_ftf_exclusions_without_trying_run(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: _inventory(
-                {**_FREQUENCY, "fake/jpa": None}, [_GUIDE], measure
-            ),
+            discover=lambda: _inventory(_FREQUENCY | {"fake/jpa"}, measure),
             read_commit=lambda: "abc",
         )
         == 0
@@ -756,48 +851,49 @@ def test_main_reports_known_ftf_exclusions_without_trying_run(
     )
 
 
-def test_main_routes_overrides_only_to_the_named_adapter(
+def test_select_merges_family_with_overlapping_exact_scene(
     tmp_path: Path, data_dir: Path
 ) -> None:
-    path = data_dir / "overrides.json"
-    path.write_text(
-        '[{"adapter":"fake/frequency","path":["tones",0,"frequency"],'
-        '"value":23.5,"basis":"Independently measured carrier"}]',
-        encoding="utf-8",
+    _write_scenes(
+        data_dir,
+        "narrow",
+        {
+            "scene_id": "wide",
+            "adapter": "scan/frequency",
+            "basis": "wide scout",
+        },
+        {
+            "scene_id": "survey",
+            "adapter": "scan/power",
+            "basis": "power map",
+        },
     )
+    ran: list[str] = []
 
-    def measure(case: WallTimeCase, _data_dir: Path, _telemetry: Path) -> float:
-        if case.adapter == "fake/frequency":
-            assert case.overrides == {("tones", 0, "frequency"): 23.5}
-        else:
-            assert case.overrides == {}
+    def measure(case: WallTimeCase, _inputs: Path, _telemetry: Path) -> float:
+        ran.append(case.scene_id)
         return 4.0
 
     output = tmp_path / "output"
     assert (
         main(
-            ["--select", "fake", "--select", "fake/frequency", "--output", str(output)],
+            ["--select", "wide", "--select", "scan", "--output", str(output)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: _inventory(_ADAPTERS, [_GUIDE], measure),
+            discover=lambda: _inventory(
+                {"scan/frequency", "scan/power", "narrow"}, measure
+            ),
             read_commit=lambda: "abc",
         )
         == 0
     )
-    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
-    assert [row["adapter"] for row in report["rows"]] == [
-        "fake/frequency",
-        "fake/power",
-    ]
-    assert (
-        report["inputs"]["overrides.json"]
-        == "fcf0ea2e8aae15515313d46bd3564c3d653515603f74d5adc17214f9ef58f18d"
-    )
+    assert ran == ["survey", "wide"]
 
 
 def test_main_retains_unresolved_form_fields_and_slots_in_their_row(
     tmp_path: Path, data_dir: Path
 ) -> None:
+    _write_scenes(data_dir, "fake/blocked", "fake/frequency")
+
     def measure(
         case: WallTimeCase, _data_dir: Path, _telemetry: Path
     ) -> float | FormErrors:
@@ -815,10 +911,7 @@ def test_main_retains_unresolved_form_fields_and_slots_in_their_row(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: _inventory(
-                {**_FREQUENCY, "fake/blocked": None}, [_GUIDE], measure
-            ),
+            discover=lambda: _inventory(_FREQUENCY | {"fake/blocked"}, measure),
             read_commit=lambda: "abc",
         )
         == 0
@@ -841,6 +934,8 @@ def test_main_retains_unresolved_form_fields_and_slots_in_their_row(
 def test_main_propagates_non_experiment_failures(
     tmp_path: Path, data_dir: Path, failure: str, expected: type[Exception]
 ) -> None:
+    _write_scenes(data_dir, *sorted(_FREQUENCY))
+
     def measure(_case: WallTimeCase, _data_dir: Path, telemetry: Path) -> float:
         if failure == "setup":
             raise OSError("simulation setup failed")
@@ -857,8 +952,7 @@ def test_main_propagates_non_experiment_failures(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: _inventory(_FREQUENCY, [_GUIDE], measure),
+            discover=lambda: _inventory(_FREQUENCY, measure),
             read_commit=lambda: "abc",
         )
     assert not (output / "report.json").exists()
@@ -867,6 +961,7 @@ def test_main_propagates_non_experiment_failures(
 def test_main_keeps_run_wall_when_telemetry_is_missing(
     tmp_path: Path, data_dir: Path
 ) -> None:
+    _write_scenes(data_dir, *sorted(_FREQUENCY))
     output = tmp_path / "output"
 
     def measure(_case: WallTimeCase, _data_dir: Path, _telemetry: Path) -> float:
@@ -876,8 +971,7 @@ def test_main_keeps_run_wall_when_telemetry_is_missing(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
-            ftf_dir=data_dir,
-            discover=lambda: _inventory(_FREQUENCY, [_GUIDE], measure),
+            discover=lambda: _inventory(_FREQUENCY, measure),
             read_commit=lambda: "abc",
         )
         == 0

@@ -1,7 +1,7 @@
 ---
 date: 2026-11-22
-status: active
-superseded_by: null
+status: superseded
+superseded_by: 2026-11-23-curated-wall-time-scenes.md
 related:
   - 2026-11-21-simulator-core-time.md
   - 2026-11-21-wall-time-coverage.md

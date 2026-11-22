@@ -15,24 +15,14 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from hashlib import sha256
-from os.path import abspath
 from pathlib import Path
+from shutil import copytree
 from time import perf_counter
 from types import FrameType
-from typing import TYPE_CHECKING, Annotated, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import yaml
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    JsonValue,
-    StrictInt,
-    StrictStr,
-    StringConstraints,
-    TypeAdapter,
-)
+from pydantic import JsonValue
 from zcu_tools.gui.form import FormErrors, FormWritePath
 
 if TYPE_CHECKING:
@@ -41,6 +31,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 
+from tools._experiment_wall_time_inputs import Manifest, Sources, read_manifest
 from tools._experiment_wall_time_report import (
     BatchPlan,
     JournalUsageError,
@@ -60,7 +51,6 @@ from tools.analyze_routing_telemetry import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DATA_DIR = _REPO_ROOT / "tools" / "data" / "experiment_wall_time"
-_FTF_DIR = _REPO_ROOT / "zcu_lab" / "simulation_envs" / "FTF"
 _OUTPUT_ROOT = _REPO_ROOT / ".agent_state" / "benchmark" / "wall-time"
 _DEFAULT_ROW_TIMEOUT_S = 360.0
 _MIN_ROW_TIMEOUT_S = 180.0
@@ -69,52 +59,15 @@ _QT_TIMER_MAX_S = _QT_TIMER_MAX_MS / 1000
 _CANCEL_GRACE_S = 30.0
 
 
-class _CaseInputs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    entry: str
-    point: str
-    ftf_exclusions: dict[str, Annotated[str, StringConstraints(min_length=1)]] = {}
-
-
-_GUIDE_ROOT = _REPO_ROOT / "zcu_lab" / "v2"
-
-
-class _Override(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    adapter: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-    path: Annotated[tuple[StrictStr | StrictInt, ...], Field(min_length=1)]
-    value: JsonValue
-    basis: str
-
-
-def _load_overrides(
-    raw: bytes, adapters: Collection[str]
-) -> dict[str, dict[FormWritePath, JsonValue]]:
-    by_adapter: dict[str, dict[FormWritePath, JsonValue]] = {}
-    for override in TypeAdapter(list[_Override]).validate_json(raw):
-        if override.adapter not in adapters:
-            raise ValueError(
-                f"Override references unregistered adapter {override.adapter!r}"
-            )
-        paths = by_adapter.setdefault(override.adapter, {})
-        if override.path in paths:
-            raise ValueError(
-                f"Duplicate override for {override.adapter!r} at {override.path!r}"
-            )
-        paths[override.path] = override.value
-    return by_adapter
-
-
 @dataclass(frozen=True)
 class WallTimeCase:
-    """Registered adapter key, project labels and raw Form writes for this Run.
+    """Curated scene, project labels and raw Form writes for this Run.
 
     overrides maps canonical field paths to JSON values. Empty keeps all Open
     defaults. Apply a nonempty mapping as one atomic Form write.
     """
 
+    scene_id: str
     adapter: str
     entry: str
     point: str
@@ -179,11 +132,7 @@ type _RecordAttempt = Callable[[Run | FormErrors], None]
 
 @dataclass(frozen=True)
 class Inventory:
-    """Registered adapter guide declarations, operator guides, and the Run boundary.
-
-    adapters maps each registered key to its declared path (None if undeclared).
-    guides lists discovered operator guide paths, independent of selection. Use
-    repo-relative paths for both, except external declarations stay absolute.
+    """Registered exact adapter keys and the Run boundary.
 
     measure(case, data_dir, telemetry, record_attempt) prepares exactly one Run
     with read-only case inputs in data_dir. It calls record_attempt
@@ -193,8 +142,7 @@ class Inventory:
     propagate without calling record_attempt.
     """
 
-    adapters: Mapping[str, str | None]
-    guides: Sequence[str]
+    adapters: Collection[str]
     measure: Callable[[WallTimeCase, Path, Path, _RecordAttempt], None]
 
 
@@ -299,17 +247,6 @@ def summarize_acquires(directory: Path, *, live: bool = False) -> AcquireCoreTot
     return totals
 
 
-def _input_hashes(data_dir: Path, ftf_dir: Path) -> dict[str, str]:
-    paths = {
-        name: data_dir / name
-        for name in ("board-profile.yaml", "case-inputs.json", "overrides.json")
-    } | {
-        (_FTF_DIR.relative_to(_REPO_ROOT) / name).as_posix(): ftf_dir / name
-        for name in ("default.yaml", "entry-template.yaml", "entry-library.yaml")
-    }
-    return {key: sha256(path.read_bytes()).hexdigest() for key, path in paths.items()}
-
-
 def _current_commit() -> str:
     return subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT, text=True
@@ -339,30 +276,6 @@ def _add_breakdown(
         remainder_s=totals.remainder_s if available else None,
         breakdown="complete" if complete else "partial" if available else "missing",
     )
-
-
-def _relative_repo_path(path: Path) -> str:
-    absolute = Path(abspath(path))
-    return (
-        absolute.relative_to(_REPO_ROOT)
-        if absolute.is_relative_to(_REPO_ROOT)
-        else absolute
-    ).as_posix()
-
-
-def _raise_io(error: OSError) -> None:
-    raise error
-
-
-def _operator_guides() -> tuple[str, ...]:
-    guides: list[str] = []
-    for parent, _, files in _GUIDE_ROOT.walk(on_error=_raise_io):
-        for name in files:
-            if name.startswith(("guide.", "guide_")) and name.endswith(".md"):
-                path = parent / name
-                if path.is_file():
-                    guides.append(_relative_repo_path(path))
-    return tuple(sorted(guides))
 
 
 class _ControllerRun:
@@ -473,7 +386,6 @@ class _ControllerRun:
 
 @dataclass
 class _RunOwner:
-    ftf_dir: Path = _FTF_DIR
     workers: int = 1
     commit: str | None = None
     dirty: bool | None = None
@@ -512,27 +424,20 @@ def _measure_run(
     from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
-    from zcu_tools.gui.app.measure.startup_context import (
-        OwnerCalls,
-        StartupParameters,
-        StartupSetup,
-    )
     from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.session.context_types import EntryRequest
     from zcu_tools.program import build_soccfg
-    from zcu_tools.resources.entry import load_entry_template
     from zcu_tools.simulators.ftf.config import load_ftf
     from zcu_tools.simulators.ftf.environment import ftf
 
-    from zcu_lab.simulation_envs.FTF.startup import seed_demo_point
-
     app = owner.application()
+    sources = Sources(data_dir)
     # Run writes an acquired ledger event. Only the disposable project is writable.
     with ExitStack() as cleanup:
         project = telemetry.parent / "project"
-        project.mkdir()
-        profile = data_dir / "board-profile.yaml"
-        soccfg = build_soccfg(yaml.safe_load(profile.read_text(encoding="utf-8")))
-        settings = load_ftf(owner.ftf_dir / "default.yaml").with_telemetry(
+        copytree(sources.fixture, project)
+        soccfg = build_soccfg(yaml.safe_load(sources.board.read_text(encoding="utf-8")))
+        settings = load_ftf(sources.settings).with_telemetry(
             enabled=True,
             directory=telemetry.resolve(),
             commit=owner.commit,
@@ -556,16 +461,8 @@ def _measure_run(
             raise
         cleanup.callback(_close_controller, ctrl, cleanup, owner)
         ctrl.session_services.soc_connection.install_soc(env.soc, env.soccfg)
-        calls = OwnerCalls(ctrl.owner_scheduler, ctrl.get_bus())
-        setup = StartupSetup(calls, ctrl.entry_control)
-        setup.new_entry(case.entry)
-        seed_demo_point(
-            setup,
-            StartupParameters(calls, ctrl.context_control),
-            load_entry_template(owner.ftf_dir / "entry-template.yaml"),
-            owner.ftf_dir / "entry-library.yaml",
-            point=case.point,
-        )
+        ctrl.entry_control.open_entry(EntryRequest(case.entry))
+        ctrl.entry_control.use_point(case.point)
         tab = ctrl.tab_control.new_tab(case.adapter)
         form = ctrl.cfg_resources.lookup(tab)
         if case.overrides:
@@ -585,7 +482,7 @@ def _measure_run(
                 owner.retained.append(cleanup.pop_all())
 
 
-def _discover(owner: _RunOwner) -> Inventory:
+def _register_lab() -> Registry:
     from zcu_tools.gui.app.measure import Registry
     from zcu_tools.resources.entry.registry import component_registry
 
@@ -596,12 +493,20 @@ def _discover(owner: _RunOwner) -> Inventory:
     lab.register_components(component_registry)
     registry = Registry(templates=lab.templates)
     lab.register_experiments(registry)
-    adapters = {
-        name: _relative_repo_path(path)
-        if (path := registry.create(name).guide_path) is not None
-        else None
-        for name in registry.list_names()
-    }
+    return registry
+
+
+def _discover(
+    owner: _RunOwner, registry_factory: Callable[[], Registry] = _register_lab
+) -> Inventory:
+    owner.dirty = bool(
+        subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=normal"],
+            cwd=_REPO_ROOT,
+            text=True,
+        )
+    )
+    registry = registry_factory()
 
     def measure(
         case: WallTimeCase,
@@ -611,21 +516,7 @@ def _discover(owner: _RunOwner) -> Inventory:
     ) -> None:
         _measure_run(registry, case, data_dir, telemetry, owner, record_attempt)
 
-    return Inventory(adapters, _operator_guides(), measure)
-
-
-def _select_adapters(adapters: Collection[str], selectors: Sequence[str]) -> list[str]:
-    selected: set[str] = set()
-    for selector in selectors:
-        matches = (
-            {selector}
-            if selector in adapters
-            else {name for name in adapters if name.partition("/")[0] == selector}
-        )
-        if not matches:
-            raise ValueError(f"unknown adapter or family: {selector!r}")
-        selected.update(matches)
-    return sorted(selected if selectors else adapters)
+    return Inventory(frozenset(registry.list_names()), measure)
 
 
 class _RunCannotContinue(Exception):
@@ -675,6 +566,7 @@ def _finish_failed_run(run: Run, location: Path, row: Row, reason: str) -> None:
     write_json(
         path,
         {
+            "scene_id": row["scene_id"],
             "adapter": row["adapter"],
             "started_at": row["started_at"],
             "finished_at": row["finished_at"],
@@ -694,7 +586,6 @@ def _case_row(
     batch: _Batch,
     directory: str,
 ) -> None:
-    guide = inventory.adapters[case.adapter]
     location = batch.output / directory
     telemetry = location / "telemetry"
     telemetry.mkdir(parents=True)
@@ -708,11 +599,17 @@ def _case_row(
                 for path, message in prepared.messages.items()
             ]
             row = new_row(
-                case.adapter, guide, directory, "missing_defaults", "; ".join(reasons)
+                case.scene_id,
+                case.adapter,
+                directory,
+                "missing_defaults",
+                "; ".join(reasons),
             )
             write_json(location / "row.json", row)
         else:
-            row = new_row(case.adapter, guide, directory, "missing_breakdown", None)
+            row = new_row(
+                case.scene_id, case.adapter, directory, "missing_breakdown", None
+            )
             _measure_attempt(prepared, location, row, batch)
 
     inventory.measure(case, data_dir, telemetry, record_attempt)
@@ -788,33 +685,41 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     data_dir: Path = _DATA_DIR,
-    ftf_dir: Path = _FTF_DIR,
     discover: Callable[[], Inventory] | None = None,
+    registry_factory: Callable[[], Registry] = _register_lab,
     read_commit: Callable[[], str] = _current_commit,
 ) -> int:
     """Write report.json, summary.md and isolated telemetry for selected Runs.
 
     None argv reads sys.argv; see --help for CLI options. data_dir holds the
-    board profile, case declarations and overrides. ftf_dir holds the preset,
-    entry template and library; it defaults to the standard FTF source. discover
-    supplies an Inventory instead of the offline Controller. read_commit supplies
-    the batch revision (Git HEAD by default); the Controller stamps it and the
+    board profile, scene manifest, FTF settings and clean project fixture.
+    registry_factory supplies registered adapters for the offline Controller;
+    by default it uses the lab assembly. discover can replace both registration
+    and the offline Controller with an Inventory. read_commit supplies the
+    batch revision (Git HEAD by default); the Controller stamps it and the
     pre-dispatch dirty status on acquire telemetry.
 
-    Return 0 if all rows are resolved (including timeout and run_failed) or 3
-    for any incomplete or not_run rows. KeyboardInterrupt stops and reports from
+    Return 0 if all rows are resolved (including timeout and run_failed), or 3
+    for incomplete, not_run or missing_adapter rows. KeyboardInterrupt stops and reports from
     the journal under the same rule. Usage errors exit 2; setup and I/O errors
     propagate. --report-only rebuilds reports without discovery or dispatch.
     --resume-from retains resolved rows with matching commit and input hashes.
     """
-    owner = _RunOwner(ftf_dir=ftf_dir)
-    return _main(argv, data_dir, discover, read_commit, _Interruption(), owner)
+
+    def make_inventory(owner: _RunOwner) -> Inventory:
+        return (
+            discover() if discover is not None else _discover(owner, registry_factory)
+        )
+
+    return _main(
+        argv, data_dir, make_inventory, read_commit, _Interruption(), _RunOwner()
+    )
 
 
 def _main(
     argv: Sequence[str] | None,
     data_dir: Path,
-    discover: Callable[[], Inventory] | None,
+    make_inventory: Callable[[_RunOwner], Inventory],
     read_commit: Callable[[], str],
     stop: _Interruption,
     owner: _RunOwner,
@@ -824,7 +729,7 @@ def _main(
         "--output", type=Path, help="new directory for the report and telemetry"
     )
     parser.add_argument(
-        "--select", action="append", help="adapter key or family, repeatable"
+        "--select", action="append", help="exact scene ID or adapter family, repeatable"
     )
     parser.add_argument(
         "--row-timeout",
@@ -860,59 +765,67 @@ def _main(
                 "--report-only requires --output and does not accept --select or --resume-from"
             )
         return _recover_report(args.output)
-    owner.workers = args.workers
-    commit = read_commit()
-    if discover is None:
-        owner.commit = commit
-        owner.dirty = bool(
-            subprocess.check_output(
-                ["git", "status", "--porcelain", "--untracked-files=normal"],
-                cwd=_REPO_ROOT,
-                text=True,
-            )
-        )
-        inventory = _discover(owner)
-    else:
-        inventory = discover()
+    sources = Sources(data_dir)
+    manifest_bytes = sources.manifest.read_bytes()
     try:
-        selected = _select_adapters(inventory.adapters, args.select or ())
+        manifest = read_manifest(manifest_bytes)
+        selected = manifest.select(args.select or ())
     except ValueError as exc:
         parser.error(str(exc))
+    owner.workers = args.workers
+    commit = owner.commit = read_commit()
+    inventory = make_inventory(owner)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
     output = args.output or (_OUTPUT_ROOT / f"{commit}-{timestamp}")
-    point = _CaseInputs.model_validate_json(
-        (data_dir / "case-inputs.json").read_bytes()
-    )
-    overrides = _load_overrides(
-        (data_dir / "overrides.json").read_bytes(), inventory.adapters
-    )
+    by_id = {scene.scene_id: scene for scene in manifest.scenes}
+    available = {
+        scene.scene_id: scene.adapter
+        for scene in manifest.scenes
+        if scene.adapter in inventory.adapters
+    }
     plan = BatchPlan(
+        format_version=2,
         commit=commit,
-        inputs=_input_hashes(data_dir, owner.ftf_dir),
-        cases={},
-        adapters=dict(inventory.adapters),
-        guides=list(inventory.guides),
+        inputs=sources.hashes(manifest_bytes=manifest_bytes),
+        manifest_scenes=len(by_id),
+        scenes={},
     )
     try:
         reused = (
-            {} if args.resume_from is None else reusable_rows(args.resume_from, plan)
+            {}
+            if args.resume_from is None
+            else reusable_rows(args.resume_from, plan, available)
         )
     except JournalUsageError as exc:
         parser.error(str(exc))
-    adapters = sorted(set(selected) | reused.keys())
-    plan["cases"] = {
-        adapter: f"cases/{index:03d}" for index, adapter in enumerate(adapters, start=1)
+    plan["scenes"] = {
+        scene_id: {
+            "adapter": by_id[scene_id].adapter,
+            "directory": f"cases/{index:03d}",
+        }
+        for index, scene_id in enumerate(sorted(selected | reused.keys()), start=1)
     }
     output.mkdir(parents=True)
     write_json(output / "batch.json", plan)
-    for adapter, row in reused.items():
-        directory = output / plan["cases"][adapter]
-        directory.mkdir(parents=True)
-        write_json(directory / "row.json", row)
+    for scene_id, planned in plan["scenes"].items():
+        row = reused.get(scene_id)
+        if scene_id not in available:
+            adapter = planned["adapter"]
+            row = new_row(
+                scene_id,
+                adapter,
+                None,
+                "missing_adapter",
+                f"Exact adapter {adapter!r} is not registered. "
+                "Maintainer: update or remove the stale scene in the manifest.",
+            )
+        if row is not None:
+            location = output / planned["directory"]
+            location.mkdir(parents=True)
+            write_json(location / "row.json", row)
     return _run_batch(
         inventory,
-        point,
-        overrides,
+        manifest,
         data_dir,
         _Batch(output, plan, args.row_timeout, stop),
     )
@@ -929,31 +842,33 @@ class _Batch:
 
 def _run_batch(
     inventory: Inventory,
-    point: _CaseInputs,
-    overrides: Mapping[str, Mapping[FormWritePath, JsonValue]],
+    manifest: Manifest,
     data_dir: Path,
     batch: _Batch,
 ) -> int:
     output = batch.output
+    by_id = {scene.scene_id: scene for scene in manifest.scenes}
     try:
-        for adapter, directory in batch.plan["cases"].items():
+        for scene_id, planned in batch.plan["scenes"].items():
             if batch.stop.requested():
                 break
+            directory = planned["directory"]
             if (output / directory / "row.json").is_file():
                 continue
-            if adapter in point.ftf_exclusions:
+            scene = by_id[scene_id]
+            if scene.ftf_exclusion is not None:
                 row = new_row(
-                    adapter,
-                    inventory.adapters[adapter],
-                    None,
-                    "not_runnable",
-                    point.ftf_exclusions[adapter],
+                    scene_id, scene.adapter, None, "not_runnable", scene.ftf_exclusion
                 )
                 (output / directory).mkdir(parents=True)
                 write_json(output / directory / "row.json", row)
             else:
                 case = WallTimeCase(
-                    adapter, point.entry, point.point, overrides.get(adapter, {})
+                    scene_id,
+                    scene.adapter,
+                    manifest.entry,
+                    manifest.point,
+                    {override.path: override.value for override in scene.overrides},
                 )
                 _case_row(inventory, case, data_dir, batch, directory)
     except KeyboardInterrupt:
@@ -979,7 +894,7 @@ def _cli() -> int:
         sig: signal.signal(sig, stop.request) for sig in (signal.SIGINT, signal.SIGTERM)
     }
     try:
-        code = _main(None, _DATA_DIR, None, _current_commit, stop, owner)
+        code = _main(None, _DATA_DIR, _discover, _current_commit, stop, owner)
     except Exception:
         if owner.retained:
             traceback.print_exc()
