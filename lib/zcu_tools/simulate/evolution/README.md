@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-22, segment shift and capture entry points
+**Last updated:** 2026-11-23, frozen scene and reference solver routes
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -242,12 +242,12 @@ owns the OpenCL context and releases it on `close()` after active work ends.
 
 ## Frozen numeric inputs and references
 
-`FROZEN_PHYSICAL_VERSION` owns the physical decoding contract for manifests
-and standalone inputs. It changes when fields, units, dtypes, defaults or
-Engine-input reconstruction change. `SCENE_CACHE_VERSION` owns the index JSON
-and cache-directory revision. Both are currently 1. Consumers compare both
-without parsing storage layout. `SEGMENT_NUMERIC_VERSION` records numerical
-algorithm semantics, not input-format compatibility.
+[`FROZEN_PHYSICAL_VERSION`](frozen.py) owns the physical decoding contract for
+manifests and standalone inputs. It changes when fields, units, dtypes, defaults
+or Engine-input reconstruction change. [`SCENE_CACHE_VERSION`](scene_cache.py)
+owns the index JSON and cache-directory revision. Both are currently 1.
+Consumers compare both without parsing storage layout. `SEGMENT_NUMERIC_VERSION`
+records numerical algorithm semantics, not input-format compatibility.
 
 The public codec snapshots a `ModelSource` and one `TimelineBatch` without
 running an Engine or a solver. `write_frozen_input(path, source, batch)` writes
@@ -275,8 +275,9 @@ identity-free hashes allow oracle sharing. Neither hash is a reference key.
 version-1 canonical JSON inside stdlib gzip. `FrozenRecord(name, physical,
 metadata=None)` keeps caller metadata opaque. Its `physical_sha256` and
 `oracle_sha256` properties calculate the complete and identity-free hashes.
-The writer calculates both hashes; `read_frozen_manifest(path)` verifies them
-and returns a tuple in original order. Both reject duplicate names. The gzip
+The writer calculates both hashes. `read_frozen_manifest(path)` checks the
+version and both hashes, then returns a tuple in original order. Both reject
+duplicate names. The gzip
 header has mtime=0 and no filename, so identical records produce identical bytes
 at different paths. Reconstruct a source separately with
 `read_physical_input(record.physical)` and close it after use. The container
@@ -296,14 +297,14 @@ publish with replace, preserving existing pins on a pre-publication failure.
 order and verifies their full identities, including opaque metadata. A missing
 file raises FileNotFoundError with the record name and hashes. None of these APIs
 constructs a model, runs an Engine/solver, resolves Git or deletes old cache files.
-Callers own cache locations and producer instructions. `SCENE_CACHE_VERSION` is
-1; callers negotiating a shared numeric format can compare it without parsing
-cache filenames or containers.
+For the scene-cache location and producer commands, see
+[Freeze numeric scenes](../../../../tools/README.md#freeze-numeric-scenes).
 
-`reference_key(source, batch)` preserves the historical key formula. It hashes
-version 1, identity-free physics, coarse tolerances 2e-10/2e-12, fine tolerances
-2e-12/2e-14 and convergence limit 2e-6. Callers can override both tolerance
-records. Solver identity and routing history do not enter the key.
+[`reference_key(source, batch)`](reference_cache.py) identifies a cached NPZ
+result. It hashes the key's own version 1, identity-free physics, coarse
+tolerances 2e-10/2e-12, fine tolerances 2e-12/2e-14 and convergence limit 2e-6.
+Callers can override both tolerance records. Solver identity and routing history
+do not enter the key.
 `load_reference(cache_dir, source, batch)` only reads the matching NPZ, without
 pickle or directory creation. A miss raises `FileNotFoundError`; it never solves.
 `write_reference` atomically publishes `density` and `convergence_error` under
@@ -318,7 +319,10 @@ an explicit scene cache. `--scenario NAME` requires one matching row across the
 supplied indexes before reading payloads. Zero or multiple matches fail without
 solving; other rows need no payload. Without a scenario, all indexed rows remain
 selected. All selected numeric files load before any solver runs. Metadata
-and scene names do not select the solver. Both solvers stay in tests. The codec imports neither tests nor tools.
+and scene names do not select the solver. See
+[Reference solver limits](#reference-solver-limits) for the bath inputs both
+solvers use. Both solvers stay in tests. The codec imports neither tests nor
+tools.
 See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
 
 ## Dispatch inspection
@@ -1022,7 +1026,11 @@ The earlier 8.066669e-3 edge is replaced, not retained as an expected failure.
 Both independent timeline solvers,
 [lab-frame `reference_timeline`](../../../../tests/simulate/evolution/contract/reference.py)
 and [interaction-picture `interaction_density`](../../../../tests/simulate/evolution/contract/interaction_reference.py),
-reject batches with `segment_shifts`. The matrix does not certify shifted spans.
+build their dissipative terms from the secular bath's `rates_per_ns` and
+`dephasing_per_ns`. They integrate the drive without a rotating-wave
+approximation, but neither replays a full Lindblad superoperator (full L).
+Both reject batches with `segment_shifts`. The matrix does not certify shifted
+spans.
 For the FTF producer and guard query, see [Common-frame guard diagnostics](#common-frame-guard-diagnostics).
 
 ### Constant-pair guard evidence
