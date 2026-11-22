@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-22, cavity segment shift diagnostics
+**Last updated:** 2026-11-22, Markov chain construction and telemetry
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -45,6 +45,7 @@ and source-owned history. These controls are not physical YAML or program cfg.
   - [Flux pulses](#flux-pulses)
   - [Cavity drives](#cavity-drives)
   - [Readout and sampling](#readout-and-sampling)
+  - [Projective migration evidence](#projective-migration-evidence)
   - [Known approximations](#known-approximations)
   - [Physical applicability](#physical-applicability)
 
@@ -67,10 +68,12 @@ Profiling overrides and the caller's board-loading example belong to
 
 ## Cooperative Stop
 
-FTF reads the acquire's Stop query before advancing each projective outcome.
+FTF checks Stop before building each projective transition layer and before
+advancing each node in a span. An observed Stop cancels the preparation without
+publishing a partial result.
 [Evolution](../../../simulate/evolution/README.md#accuracy-failures-and-lifecycle)
 checks during geometry and WorkPlan construction and at execution boundaries.
-When the current integrated round requires raw shots, [ADC](../../../simulate/adc/README.md)
+When the current integrated round requires raw shots, [ADC](../../../simulate/adc/README.md#projection-readout-and-sampling)
 checks while sampling and before handing the shots back. The
 [program adapter](../../../program/v2/simulation/README.md#numeric-contract-and-extension-points)
 handles publication and retains completed rounds on Stop.
@@ -80,7 +83,7 @@ sets five seconds as the design target between checks under normal parameters,
 not a deadline or a gate. Waiting for startup warmup does not check Stop and
 can take longer with empty caches. Cold raw sampling can also exceed the target
 between the first event check and the first point-group check. A single-point
-sample does not cover larger sweeps or more retained projection outcomes.
+sample does not establish Stop latency for larger sweeps or more nodes.
 
 ## Debug capture
 
@@ -94,17 +97,18 @@ execution failed after its snapshot. If no snapshot was taken, read
 `admission_settings` instead. `sampling` shows the actual seed and sequence
 when a round snapshot exists.
 
-FTF owns `metadata.ftf.projective_spans`. Join an input record's Engine
-`capture_id` to this map, then use its Engine point ID (a decimal-string key in
-`histories`) to find the ordered projected states. Each entry gives the original
-C-order acquisition `point`, absolute `span_ns`, and software `round_index`.
-Use the capture ID rather than the Engine point ID alone: the same row identity
-can appear in several spans and rounds. Recorded failed calls have the same
-lookup. A reused preparation issues no new evolve and adds no entry.
+FTF owns `metadata.ftf.projective_spans`. Look up an input record's Engine
+`capture_id` to find the original C-order acquisition `point`, absolute
+`span_ns`, software `round_index`, and zero-based source `event_index`.
+The entry's `nodes` maps decimal-string Engine row IDs to DC energy-state
+indices. Before the first projection, both the event index and the node's
+state are `null`. The same row ID can appear in several spans and rounds,
+so use the capture ID first. Recorded failed calls use the same lookup.
+A reused preparation issues no new evolve and adds no entry.
 
 When telemetry is enabled, use `capture_file` in `routing-*.jsonl` to match the
-manifest to its acquire row. The row shows family totals, stage timings and
-projection outcomes and pruned weights. Capture writes run before summary
+manifest to its acquire row. The row shows family totals, stage timings,
+continued-state counts and identity weights. Capture writes run before summary
 construction and outside binding's measured wall time.
 See the [shared switch contract](../../README.md#debug-capture) for empty
 captures, retention and the cache directory.
@@ -140,7 +144,7 @@ projects its builder-only `compile_wall_s`, in-acquire raw-shot
 `complete` means the acquire body and cleanup returned normally, including partial
 Stop results. An escaping error is false.
 `evolve_wall_s` sums each `Engine.evolve` call, including dimension pilots,
-cavity-memory spans and projective outcome continuations across software rounds.
+cavity-memory spans and projective node continuations across software rounds.
 `readout_wall_s` sums cavity field propagation, population conversion, conditional
 ADC preparation and integrated or decimated sampling. These scopes do not overlap
 evolution. A failing call contributes time through its exception; a stage never
@@ -173,12 +177,17 @@ A price skip has an estimate and no error. An accuracy rejection has an estimate
 and a completed verification error above `1e-3`. A reused N carries no pilot estimate
 from the earlier acquire.
 
-Projection values live only in `extras`:
-`ftf.projection_outcomes` counts retained outcome histories per C-order point in the
-latest solved round. `ftf.projection_pruned_weight` gives each point's cumulative
-removed probability before redistribution. Both arrays are empty for
-terminal-only templates or when no solve completed. Reused preparations retain
-these values. They do not count the semiclassical cavity main state.
+Projection diagnostics live in `extras` for the latest solved round. Both
+arrays are indexed by flattened C-order point and then by transition in
+logical-event order, including the transition to the terminal event.
+
+- `ftf.projection_continued_states` counts the DC source states solved for that transition.
+- `ftf.projection_identity_weight` sums the source marginal assigned to identity
+  rows for that transition. FTF does not discard this weight.
+
+Both arrays are empty for terminal-only templates or when no solve completed.
+Reused preparations retain these values. The counts exclude the pre-projection
+prefix and do not count semiclassical cavity branches.
 
 The writer caps its `routing-*.jsonl` files at **50 MiB**. Before each append it
 deletes oldest files by modification time, breaking ties by filename, until the
@@ -597,21 +606,35 @@ projective counts and each ADC's per-event grid counts. A difference raises
 `ValueError` naming both templates and layouts, even when total reads match.
 This check belongs to environment preparation, not the program frontend.
 
-At each projective start, runtime replaces the DC density with rank-1 energy
-outcomes and weights them by its normalized diagonal. It retains the complete
-outcome history across later reads. Each outcome has its own density and cavity
-field. The projective pulse drives that outcome's cavity during continuation.
-A later projection copies the incoming cavity field before continuing each new
-outcome. Projection uses all retained energy levels, not IQ-resolvability clusters.
-ADC CTMC transitions during a herald affect its IQ only. They do not change the
-outcome's later quantum evolution. This approximation excludes active reset and
+<a id="projective-chain-construction"></a>
+
+FTF projective acquisitions build a `ProjectionChain` for
+[ADC projection-chain sampling](../../../simulate/adc/README.md#projection-chain-sampling).
+The first projection uses the normalized diagonal of the incoming DC density.
+At each projective start, FTF continues each selected DC energy state once
+from its rank-1 density and a vacuum cavity field. The projective pulse drives the
+cavity during continuation. FTF uses the normalized diagonal at the next
+event start as that state's transition row. The state axis uses retained
+physical energy levels, not IQ classification groups. ADC starts each readout
+event from vacuum too. Its herald CTMC jumps affect that event's IQ and do not
+feed back into the quantum transition rows. The model excludes active reset and
 measurement-induced state transitions.
 
-`numerics.projection_weight_floor` defaults to `1e-9`. Runtime removes global
-history weights below this value and renormalizes surviving weights proportionally.
-Zero disables pruning, including zero-weight histories. Removing all histories
-raises `ValueError` naming the point and floor. The schema accepts finite values
-in `[0, 1)`. Telemetry records retained counts and removed probability.
+`N_occ` refers to the number of occupied DC energy levels at a point and event.
+The old `ftf.projection_outcomes` diagnostic counted retained outcome histories,
+which the chain does not enumerate. In [routing telemetry](#routing-telemetry),
+`ftf.projection_continued_states` counts the source levels selected for evolution
+by the floor at each transition. This count includes zero-weight levels when
+the floor is zero.
+
+FTF applies `numerics.projection_weight_floor` when building transition rows.
+The setting is required and accepts finite values in `[0, 1)`. The templates
+set it to `1e-9`. At each point and transition, a source state with current
+marginal below the floor skips evolution and gets
+an identity row. FTF keeps that weight in the same state without redistributing
+or renormalizing it. Even an all-identity layer keeps all probability. Floor
+zero solves every state, including zero-weight states, and removes the identity
+approximation within this vacuum-reset model.
 
 `simulate.adc` solves the linear, state-conditioned cavity fields. The incident
 amplitude uses the same `input_per_gain` conversion as terminal readout.
@@ -623,12 +646,12 @@ dephasing, including shared-line interference and independent internal losses.
 These driven contributions are separate from residual thermal-photon dephasing.
 
 FTF queries evolution's final spans, then advances density and cavity memory
-sequentially. All state-conditioned fields start each span from the previous
-main branch's final field. The first span starts from vacuum. The main branch
-has the largest population in the span-start DC density; exact ties select the
-lowest energy. Each span supplies ADC's `initial_field` and absolute
-`initial_time_ns`; the first supplies zero at 0 ns. Fields retain ringdown after
-pulse switch-off. Selecting one
+sequentially. The first span and each projection start from vacuum. Otherwise,
+all state-conditioned fields start from the previous main branch's final
+field. The main branch has the largest population in the span-start DC density;
+exact ties select the lowest energy. Each span supplies ADC's `initial_field`
+and absolute `initial_time_ns`. Fields retain ringdown after pulse switch-off.
+Selecting one
 branch for a superposition is a semiclassical approximation, not a description
 of quantum cavity-state entanglement.
 
@@ -642,37 +665,24 @@ origin. Within a span, evolution uses the averages rather than instantaneous
 fields. Templates with neither cavity drives nor projective reads retain their
 original single-evolve path.
 
-Projective continuation sends one point's ready histories through its current
-absolute span in one `Engine.evolve` call. FTF derives a nonnegative 63-bit Engine
-row ID from the SHA-256 hash of the original point and its ordered history. The
-same pair keeps its ID across spans, rounds and preparations. Within one
-preparation, FTF checks for collisions across all points and spans, including
-points with identical numerical inputs. If two different pairs produce the same
-ID, FTF raises `ValueError` naming the colliding pair, without merging the rows
-or returning a partial result.
+FTF batches the nodes of one point and event layer in one `Engine.evolve`
+call per span. A node's Engine row ID identifies the original point, source
+event, and DC energy state. FTF checks for collisions within the preparation
+and matches returned densities by row ID, independent of Engine row order.
 
-FTF does not check for collisions across preparations. Such a collision can
-cause Engine to skip counting a batch's routing usage only if two different
-pairs share an ID and the rest of their batches' Engine inputs match bit for bit.
-A lower usage count can change the selected kernel. The same density accuracy
-budget still applies.
-
-The result returns to its history by ID before the next span starts. Engine row
-order does not change the original order of histories used for sampling.
-
-`FTFNumericUse.projective_spans` gives each solved span's row IDs and histories,
-Engine path class membership, and Stark inversions. Aggregate path classes and
-Stark warnings still refer to the original point. Each point counts once per
-class across the acquire. If Engine rejects rows with `NoValidKernel`, FTF reports
-the original point, absolute span, and rejected histories, with the Engine
-exception as the cause. Other Engine exceptions retain their type and an FTF
-note for the batch; cancellation is unchanged. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#黑盒邊界是-simulateevolution)
+`FTFNumericUse.projective_spans` lists each solved span's event and row-to-state
+mapping, Engine path class membership, and Stark inversions. Aggregate path
+classes and Stark warnings refer to the original point. If Engine rejects rows
+with `NoValidKernel`, FTF reports the original point, absolute span, source
+event, and rejected states, with the Engine exception as its cause. Other
+Engine exceptions retain their type and get a note with the batch context.
+See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#黑盒邊界是-simulateevolution)
 and [Debug capture](#debug-capture).
 
 Each cavity-driven preparation retains all span reuse keys. Cache hits check
-every key through `Engine.reuse`. Projective continuation keys identify the
-original point, ordered histories, initial densities and span shifts. A failed
-or cancelled batch publishes no partial preparation.
+every key through `Engine.reuse`. Projective span keys include the node row
+IDs, initial densities and span shifts. A failed or cancelled batch publishes
+no partial preparation.
 
 One ADC `CavityAverageCache` serves each cavity span composition. FTF sets a
 512 MiB budget per composition. Its g/e points share the owner; different bias
@@ -680,29 +690,20 @@ models do not. ADC's library default remains 64 MiB.
 Both projective and non-projective paths call `CavityAverageCache.span`.
 An exact key match reuses flat second moments and all-state endpoint fields.
 FTF selects the main branch, builds each `SegmentShift`, and passes the selected
-field to the next span. Projective continuation does these steps separately for
-each history, without a second memo. Neither path caches shaped inputs. ADC owns
+field to the next span. Projective continuation does these steps separately
+for each node, without a second memo. Neither path caches shaped inputs. ADC owns
 keys, arrays and admission. Composition clears all entries on return or
 exception; Engine and the long-lived source do not retain the owner.
 
-In the fixed projective prefixes, `chain/amp_rabi` and `chain/len_rabi` gain no
-hits above 64 MiB. For `chain_length` at 2.2 µs, the 64, 128, 256 and 512 MiB
-budgets give 5,686, 8,284, 14,392 and 19,346 exact hits in 29,921 spans. Each
-doubling adds more than 10% of the 19,346 cross-history repeat opportunities.
-At 512 MiB the memo admits every distinct key in the prefix, so a larger budget
-adds no hits there. The peak memo holds 475,546,067 B. The process peak RSS is
-385 MiB higher than at 64 MiB, the largest increase of the three prefixes.
-
-A complete `mist/flux_dep` Run gives 20,200 exact hits and no declines at either
-64 or 512 MiB. The largest owner holds 8,991,628 B in both runs. The observed
-process peak RSS is 3.49 MiB lower at 512 MiB, within the 512 MiB increase limit
-for sharing the budget across both FTF paths.
+The [span cache capacity measurements](../../../../../docs/discussions/2026-11-21-projective-span-reuse.md#結果)
+cover the earlier history-based projective route and a MIST Run. The projective
+prefix measurements do not describe node-based continuation.
 
 When a cavity-drive Stark shift reverses two adjacent state energies, FTF
 continues with the same dispersive calculation and keeps the original state order.
 At acquire completion, it emits one `UserWarning` per reversed pair, naming the
 states, first point and segment, and total affected points and segments. Repeated
-observations of the same segment across rounds or projection histories count once.
+observations of the same segment across rounds or projection nodes count once.
 
 The warning gives the tightest upper limit on a common multiplier of the configured
 cavity-drive gain magnitudes. It holds gain ratios and the observed cavity histories
@@ -714,15 +715,14 @@ not model MIST onset.
 
 Readout uses the DC model and populations in its energy basis. Terminal-only
 preparations call ADC's `normalize_populations` once after `batch_populations`,
-before conditional responses or sampling. Projective preparations normalize the
-diagonal at each projection and each retained terminal outcome. ADC owns the
-1e-6 row-sum tolerance, clipping of all negative entries and row normalization.
-Invalid rows fail without sampling. ADC raises `PopulationValidationError` with `rejected_rows` for the
-reported validation rule. FTF catches only that type, retains its count in
-`FTFNumericUse.rejected_rows`, then re-raises without sampling. Successful
-preparations retain zero rejected rows. The source retains the latest
-evolve diagnostics even when this preparation fails, including the engine's
-report-only maximum trace error. Raw evolution densities remain unchanged.
+before conditional responses or sampling. Projective preparations normalize
+the first-event diagonal and each solved transition row, including rows into
+the terminal event. ADC owns the 1e-6 row-sum tolerance, clipping of negative
+entries and row normalization. Invalid rows fail without sampling. For
+terminal-only population validation failures, FTF records the count in
+`FTFNumericUse.rejected_rows` alongside the solve diagnostics and re-raises
+`PopulationValidationError`. Successful preparations record zero rejected
+rows. Normalization does not modify the evolution densities.
 Drive-line controls evolve up to the terminal pulse start, including earlier
 control portions after a herald. With active pulses, the pulse path requires
 exactly one terminal pulse per point, including mutually exclusive slots. If
@@ -790,10 +790,13 @@ receiver offset and noise without adding a projection or solving a cavity field.
 If the layout cannot represent that window, planning reports the ADC, trigger
 and reason.
 
-Empty grids mean the ADC does not observe the event or emit a read column. All ADCs may omit
-terminal observations; the terminal event and evolution endpoint remain in the
-plan. Each ADC must still observe at least one event. Projective plans retain
-point-local event contents. Terminal-only plans deduplicate when every point
+Empty grids mean the ADC does not observe the event or emit a read column.
+For example, a terminal-only ADC skips the herald columns and keeps the
+terminal's original logical event index. If no ADC observes the terminal event,
+FTF still evolves to its start and includes its transition and marginal in
+compact counts. No ADC gains a terminal column. Each ADC must still observe at
+least one event. Projective plans retain point-local event contents.
+Terminal-only plans deduplicate when every point
 has just its owner block or every point has empty pulses. Earlier members or
 mixed field and baseline membership require point-local rows. Integrated flat,
 common-start mux batches use ADC's carrier-wise linear sums. Each carrier keeps
@@ -806,25 +809,71 @@ then calibrate once per receiver. Single-carrier fast paths and evolution are un
 
 The receiver noise PSD is two-sided, in ADC sample units squared times ns.
 Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
-does not scale noise. Integrated acquisition returns `IntegratedRound` with pure
-`RoundStatistics` and an ADC-owned RawShots source. Counts remain shared across
-all ADCs/reads, with separate direct totals. ADC retains noiseless model/pulse/grid
-inputs for delayed raw; no shot paths or noisy outputs enter retained preparations.
-The raw source retains its round's physical inputs and sampling identity after
-later rounds, preparation eviction and `FTFSource.close()`. A program getter
-uses that source without capturing devices or rerunning evolution/readout
-preparation. It cannot switch to another program's more recent round.
-The same physical inputs feed ADC's required batch-based trace interface in
-decimated mode. Each shot selects one complete projection history. Integrated
-counts flatten its outcome and terminal-state axes. Herald conditional sums use
-the corresponding history state; terminal sums use the terminal state. Each
-logical event has its own CTMC path, shared across its carriers, ADCs and grids.
-An ADC that omits a herald keeps the terminal's original logical event index. Decimated acquisition returns `RoundSignals`,
-reordering point-major samples into QICK loop order. ADC owns integrated raw generation, noise, rounding and loop layout. Program
-owns detached buffers, declaration order and acquisition averaging. All channels at the same shot
-index share one sampled joint state; receiver noise is independent. There is no
-extra tone axis: each declared ADC has its own raw-shot array. Output follows
-program ADC declaration order, which is mux tone order, not sorted channel index.
+does not scale noise.
+
+<a id="compact-statistics"></a>
+
+Integrated acquisition returns `IntegratedRound` with compact
+`RoundStatistics` and a separate ADC-owned `RawShots` source.
+For FTF projective reads, ADC draws one set of transition flows per point.
+The `state_counts` partition that point's reps over shared cumulative-count
+bins that encode each logical event's marginal histogram. These bins do not
+encode the joint distribution over herald history and terminal state used by the
+retained history-based `ProjectionReadout` path.
+
+For each ADC read, `conditional_sums` gives the noiseless per-shot I/Q mean of
+that read's event state in each bin. Multiply each bin's mean by its
+`state_counts` and sum over bins to get that read's noiseless total, before
+receiver noise and rounding variance. The shared flow draw preserves
+correlations between these totals due to event occupancies. The bins do not
+encode paired IQ shots, CTMC trajectory variance, or cross-read receiver-noise
+covariance. See [ADC integrated chain statistics](../../../simulate/adc/README.md#integrated-chain-statistics)
+for how ADC builds the bins and the [Program statistics contract](../../../program/v2/simulation/README.md#compact-timelines-and-statistics)
+for how acquisition uses them.
+
+Raw and decimated sampling each draw a projection chain per shot. The
+herald and terminal reads stay paired at the same shot index. Each event has
+its own CTMC path; the event's carriers, ADCs and grids
+share it, while receiver noise is independent. ADC samples these shots
+separately from compact counts. There is no mapping from a shot to a compact
+bin. Herald selection, IQ classification, masks, thresholds, reducers, and raw
+getters still use the existing single-shot IQ path when they need shots. A
+matching seed does not guarantee the same shots as the old history sampler.
+
+ADC retains the round's noiseless model, pulses, grids and sampling identity
+for delayed raw, even after later rounds, preparation eviction, or
+`FTFSource.close()`. Preparations hold no sampled paths or noisy outputs. The
+program getter uses its own retained round without capturing devices or
+rerunning evolution or readout preparation. Decimated acquisition uses the same
+physical inputs and returns `RoundSignals` in QICK loop order. ADC owns raw
+sampling and rounding. Program owns detached buffers and acquisition averaging.
+There is one output array per ADC in program declaration order, which is mux
+tone order rather than sorted channel index. There is no extra tone axis.
+
+The non-projective path is unchanged and still uses
+`ProjectionReadout.unprojected`. Switching the projective caller to
+`ProjectionChain` does not remove the retained history-based FTF path or ADC's
+`ProjectionReadout` input.
+
+### Projective migration evidence
+
+Four reduced workloads compare the chain at floor `1e-5` with the prior
+vacuum-reset route and with the same chain at floor `0`. For both comparisons,
+the maximum absolute differences in final density and per-event populations
+are within the `1e-2` migration bound for candidate commit `e602f0dc6`.
+Floor zero removes the chain's floor approximation. It is not an independent
+accuracy reference. Independent comparisons for the same four reduced workloads
+passed at both floors for 41 of 75 keys (read populations or full final
+density). The remaining 34 keys were not independently verified. The reference
+checks cover only the frozen inputs in the vacuum-reset model, not other
+points, larger basis sizes or ADC classification.
+
+These comparisons do not establish IQ classification agreement or validate
+pre-reducer compact statistics across versions. The comparisons have only one
+shared root seed. The earlier heralded conditional-phase run lacks matched
+per-event compact means and totals before reduction. The classification
+comparison rules are not yet fixed and the counts remain unopened.
+Reduced workloads do not establish complete-Run speed or latency.
 
 ### Known approximations
 
