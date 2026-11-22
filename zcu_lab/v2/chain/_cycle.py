@@ -11,11 +11,7 @@ second read starts after the first ADC window and the next D after the second.
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.analysis.readout_chain import (
-    CYCLE_FEATURE_COUNT,
-    CycleFit,
-    CycleSums,
-)
+from zcu_tools.analysis.readout_chain import CYCLE_FEATURE_COUNT, CycleSums
 from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
@@ -104,19 +100,3 @@ def first_read_projection(
     return (signals * np.exp(-1j * angle)).real, iq_shot_sem(
         first_read_iq_moments(sums), direction=(np.cos(angle), np.sin(angle))
     )
-
-
-def checks_text(fit: CycleFit) -> str:
-    """Return one line per lack-of-fit check, with p where fit gives one."""
-    parts = []
-    for name, check in (
-        ("within-point", fit.within_point),
-        ("sharing", fit.sharing),
-        ("curve", fit.curve),
-    ):
-        if not np.isfinite(check.J):
-            parts.append(f"{name}: J unavailable (df={check.df})")
-            continue
-        p = "" if check.p is None else f", p={check.p:.2g}"
-        parts.append(f"{name} J/df={check.J:.3g}/{check.df}{p}")
-    return "\n".join(parts)

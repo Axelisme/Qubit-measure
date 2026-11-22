@@ -75,7 +75,7 @@ def test_fitdecaycos_recovers_amplitude_above_observed_half_range():
 @pytest.mark.parametrize("decay", [False, True])
 @pytest.mark.parametrize("initial_phase,true_phase", [(355.0, 2.0), (-355.0, 358.0)])
 def test_cosine_phase_can_cross_wrap_boundary(
-    decay: bool, initial_phase: float, true_phase: float
+    *, decay: bool, initial_phase: float, true_phase: float
 ) -> None:
     x = np.linspace(0.03, 1.89, 161)
     truth = [0.1, 0.7, 2.0, true_phase]
@@ -96,7 +96,9 @@ def test_cosine_phase_can_cross_wrap_boundary(
 
 
 @pytest.mark.parametrize("decay", [False, True])
-def test_cosine_auto_initialization_accepts_descending_coordinates(decay: bool) -> None:
+def test_cosine_auto_initialization_accepts_descending_coordinates(
+    *, decay: bool
+) -> None:
     x = np.linspace(0.03, 8.03, 201)[::-1]
     truth = [1.1, 0.7, 2.0, 20.0]
     if decay:
@@ -173,13 +175,16 @@ def test_fit_func_reports_insufficient_observations() -> None:
     assert isinstance(failure.value, AnalysisFailed)
 
 
-def test_fit_func_preserves_model_programming_errors() -> None:
-    error = RuntimeError("broken model")
+@pytest.mark.parametrize("error_type", [RuntimeError, ValueError, ZeroDivisionError])
+def test_fit_func_preserves_model_programming_errors(
+    error_type: type[Exception],
+) -> None:
+    error = error_type("broken model")
 
-    def model(x, amplitude):
+    def model(_x, _amplitude):
         raise error
 
-    with pytest.raises(RuntimeError) as failure:
+    with pytest.raises(error_type) as failure:
         fit_func(np.array([0.0, 1.0]), np.array([1.0, 2.0]), model, init_p=[1.0])
     assert failure.value is error
 
@@ -189,7 +194,7 @@ def test_fit_func_preserves_jacobian_programming_errors(method: str) -> None:
     error = RuntimeError("broken Jacobian")
     x = np.linspace(0.0, 2.0, 5)
 
-    def jacobian(x, slope, intercept):
+    def jacobian(_x, _slope, _intercept):
         raise error
 
     with pytest.raises(Exception, match="broken Jacobian") as failure:
