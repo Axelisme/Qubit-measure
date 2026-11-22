@@ -239,10 +239,6 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         Native QICK threshold/angle returns excited fractions in I and zero Q.
         With shot masks, IQ is Σ m·x / N, where N counts every shot in completed
         rounds. A non-None threshold is incompatible with shot masks.
-        charge_requirements is a tuple of simulate.boundary.ChargeDriveRequirement
-        records. The simulation entry forwards it for environment validation;
-        hardware consumes the keyword without checking physical roles or passing
-        it to QICK. Operators remain responsible for real wiring.
         Other options follow QICK and the acquisition mixins; pass them by keyword.
 
         Omitted or False step_rounds runs to completion and returns one float64

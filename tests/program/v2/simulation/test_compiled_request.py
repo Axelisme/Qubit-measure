@@ -10,9 +10,8 @@ from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
-from zcu_tools.simulate.boundary import ChargeDriveRequirement, TimeBase
+from zcu_tools.simulate.boundary import TimeBase
 
 from tests.program._profiles import GEN_MAXV, RO_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timeline import compile_modules
@@ -186,30 +185,6 @@ def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
         )
     finally:
         env.devices.close_all_devices()
-
-
-@pytest.mark.parametrize("mode", ["integrated", "decimated"])
-def test_compiled_request_preserves_call_local_charge_requirements(mode):
-    prog, env = program(lambda p: p.pulse(0, "p"))
-    requirements = (
-        ChargeDriveRequirement("pump", 1),
-        ChargeDriveRequirement("probe", 0),
-    )
-    result = build_compiled_request(
-        prog,
-        mode,
-        env.soc.binding,
-        7,
-        routes=env.soc.routes,
-        charge_requirements=requirements,
-    )
-    assert result.charge_requirements == requirements
-    ordinary = build_compiled_request(
-        prog, mode, env.soc.binding, 8, routes=env.soc.routes
-    )
-    assert ordinary.charge_requirements == ()
-    assert result.charge_requirements == requirements
-    assert env.soc.binding.last_request is None
 
 
 def test_native_sweep_shell_preserves_two_axes_wave_and_register_updates():

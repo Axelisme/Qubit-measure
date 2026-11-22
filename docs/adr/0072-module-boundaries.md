@@ -67,11 +67,11 @@ status: accepted
 
 ### 真實 acquire 與模擬邊界
 
-**規則。** 真實硬體 acquire 不執行模擬模組，包括 `simulate` 及 `program.v2.simulation` 的排程器。共用估時留在中性的 `program` 工具。模擬 caller 明示 generator 必須綁到 charge drive line 時，由知道實體線路的 environment 驗證。Program 只將需求傳進 `AcquireRequest.charge_requirements`；`simulators.replay` 保存同一種 boundary record，不重做驗證。
+**規則。** 真實硬體 acquire 不執行模擬。Program 只經 `SimulationAcquireMixin` 進入模擬路徑。Caller 使用相同的 Program 取數介面，不傳模擬專用的線路要求。模擬環境依自身接線與編譯後的 generator 事件決定路由。
 
-**例子。** STIRAP 以 `ChargeDriveRequirement` 傳入診斷名稱和 generator index。名稱不是 role registry key，caller 不查環境設定或判斷線路成員。Single-fluxonium 每次 acquire 在 waveform 建構、preparation reuse 與 evolution 之前用 `drive_lines` 驗證；已綁 flux 或 readout 不算 charge，也不改其他合法 fast-flux 路由。見 [program 的模擬入口](../../lib/zcu_tools/program/v2/simulation/README.md)與 [single environment](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md)。
+**例子。** STIRAP 編譯 Pump 與 Stokes 的 generator、載波與 envelope，使用同一個 `Schedule.run_acquire_summed` 呼叫在 FTF 或 Single-fluxonium 取數。模擬以環境設定中的通道與線路運算，不從脈衝名稱推斷角色。見 [Program 的模擬入口](../../lib/zcu_tools/program/v2/simulation/README.md)與 [Single-fluxonium 的完整時間軸](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#complete-timelines)。
 
-**邊界。** 硬體入口取走 keyword，不轉送 QICK、不建模擬 request、不做物理驗證；operator 核對實機線路。`white_noise` 沒有物理線路，接受但不驗證。Six 與 FTF 等不支援此需求的物理環境在 evolution 前拒絕非空需求，空需求不改流程。不清空需求、不從 waveform 猜角色、不擴張 `QubitWiringSchema`，也不另加 Protocol 或 `RunContext` capability。Program、experiment、simulators 與 lab 可 import `simulate.boundary` 的 record；載入型別不執行模擬，`simulate` 初始化只載入 numpy。C8、C9、C12、`simulate-closed` 與 `program-simulation-entry` 檢查依賴，program class 只能經入口使用模擬 frontend、timeline 與 adapter。真實 acquire 是否執行模擬仍要審閱執行路徑。
+**邊界。** Operator 核對實機接線。模擬環境仍驗證自己支援的 generator 與 ADC 路由。這條規則不取消路由驗證，也不改 experiment 層的來源紀錄或 lab 使用的數值模型。真實 acquire 是否執行模擬仍要審閱執行路徑。
 
 **依據。** 2026-10-26，使用者：「我不太希望真实 acquire 还会走模拟的模块。」2026-10-30，advisor 依授權「可以按需排task，我授權你代理」代裁：「驗證 owner 是 single_fluxonium 環境，在既有拒絕 unbound generator 的 preflight 位置一起檢查，早於任何 evolution。」未見使用者覆核這項代裁的紀錄。原裁決未附入庫討論，見 Git `d657120b9`。
 

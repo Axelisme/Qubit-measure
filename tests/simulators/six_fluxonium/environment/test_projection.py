@@ -17,7 +17,6 @@ from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate import adc
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
-    ChargeDriveRequirement,
     PointTimeline,
     PulseEvent,
     ReadoutWindow,
@@ -35,44 +34,6 @@ from tests.simulators._sources import six_engines as six_engines
 from tests.simulators.six_fluxonium.config._data import six_document
 
 pytestmark = [pytest.mark.sim, pytest.mark.usefixtures("six_engines")]
-
-
-def test_routing_rejects_unsupported_charge_requirements_before_preparation():
-    settings = parse_six_fluxonium(six_document())
-    window = ReadoutWindow(
-        0,
-        0,
-        4,
-        TIME_BASE.period_ticks(1000),
-        tick_tuple((0.018,)),
-        frequency_mhz=(6800,),
-        phase_deg=(0,),
-        generator_channels=(0,),
-    )
-    timeline = PointTimeline(
-        (),
-        (PulseEvent(0, ticks(0.016), ticks(0.008), 6800, 0, 0.1),),
-        (window,),
-        ticks(0.024),
-        time_base=TIME_BASE,
-    )
-    ordinary = AcquireRequest(
-        "integrated",
-        (1,),
-        0,
-        (window,),
-        123,
-        0,
-        "test",
-        templates=(single_point_template(timeline),),
-        time_base=TIME_BASE,
-    )
-    assert len(route_request(settings, ordinary)) == 1
-    requested = replace(
-        ordinary, charge_requirements=(ChargeDriveRequirement("control", 1),)
-    )
-    with pytest.raises(ValueError, match="six-fluxonium.*charge.*not supported"):
-        route_request(settings, requested)
 
 
 def test_pulse_routing_uses_q1_receiver_delay_even_for_q2_tones() -> None:

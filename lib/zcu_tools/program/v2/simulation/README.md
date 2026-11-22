@@ -72,15 +72,8 @@ even under warning-as-error filters. Observer `BaseException`s propagate and
 retain an original acquire error as context. Admission releases in either case.
 An omitted `on_end` avoids acquire stage clock reads. An omitted
 `on_materialize` avoids timing deferred access.
-Integrated `acquire(..., charge_requirements=(ChargeDriveRequirement(name, gen_ch), ...))`
-passes named physical charge requirements through the simulation request. The
-record lives in `simulate.boundary`; names are diagnostics, not dispatch keys.
-Single-fluxonium validates membership before evolution. White noise accepts
-requirements without physical checks because it has no physical line model.
-Six-fluxonium and FTF reject nonempty requirements before evolution until they
-support this contract. Empty requirements retain each environment's behavior.
-The entry consumes this keyword without forwarding it on hardware calls; hardware
-wiring roles remain the operator's responsibility. Requirements are call-local.
+Callers do not supply simulation-only wiring requirements to acquire.
+Physical environments route compiled generator events using their own wiring.
 Other SoC objects use the original path. Integrated simulation configures the
 compiled program and readouts without serializing DAC/weight arrays for
 transport. Requested uploads validate int16 envelope and weight dtypes and
@@ -112,8 +105,6 @@ Hardware acquisition does not call the binding or this clock.
 
 `simulation.compiled.build_compiled_request(prog, mode, binding, sequence, routes=soc.routes)`
 reads `prog.compiled_stream` and returns detached numeric slots without calling a backend.
-Its optional `charge_requirements` keyword preserves caller requirements in the
-request for environment-owned physical validation, without inferring drive roles.
 It predecodes the snapshot once and evaluates scan points as independent array
 lanes. `LOOP_START` provides resolved register/wave start and step words.
 Its `tables` map associates WMEM word addresses and field indexes with rotated
