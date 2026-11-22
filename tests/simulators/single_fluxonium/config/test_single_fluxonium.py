@@ -53,7 +53,7 @@ readout:
     ro_ch: 0
     gain: 100.0
     background: {ripple_period_mhz: 1000.0, pivot_ghz: 0.0}
-    noise_psd_adc2_ns: [[1.0, 0.5], [0.5, 0.25]]
+    noise_psd_adc2_ns: 1.0
 numerics:
   slow_envelope_segments_per_period: 20
   projection_prune_floor: 1.0e-9
@@ -231,7 +231,7 @@ def test_parse_returns_named_immutable_settings_and_replayable_values() -> None:
     assert settings.dc_bias.source.flux_per_unit == 100.0
     assert settings.drive_lines["mw"].charge_drive_ghz_per_gain.imag == -0.02
     assert _bound_flux(settings).distortion_terms[0].amplitude == -0.1
-    assert settings.readout.adc.noise_psd_adc2_ns == ((1.0, 0.5), (0.5, 0.25))
+    assert settings.readout.adc.noise_psd_adc2_ns == 1.0
     assert settings.numerics.truncation.levels == 4
     assert _parse(settings.model_dump(mode="json")) == settings
     with pytest.raises(ValidationError, match="frozen"):
@@ -287,13 +287,8 @@ def test_load_reads_utf8_and_honors_yaml_merge_overrides(tmp_path: Path) -> None
             "readout.resonator.kappa_external_mhz",
         ),
         (
-            "[[1.0, 0.5], [0.5, 0.25]]",
-            "[[1, 2], [2, 1]]",
-            "readout.adc.noise_psd_adc2_ns",
-        ),
-        (
-            "[[1.0, 0.5], [0.5, 0.25]]",
-            "[[1, 0], [1, 1]]",
+            "noise_psd_adc2_ns: 1.0",
+            "noise_psd_adc2_ns: -1.0",
             "readout.adc.noise_psd_adc2_ns",
         ),
         ("levels: 4", "levels: 13", "numerics.truncation.levels"),

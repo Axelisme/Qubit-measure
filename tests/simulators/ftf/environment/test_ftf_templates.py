@@ -433,7 +433,7 @@ def test_trigger_before_first_pulse_observes_it_at_its_delayed_arrival() -> None
     receiver = FTFReceiverConfig(
         0,
         1000.0,
-        ((0.0, 0.0), (0.0, 0.0)),
+        0.0,
         time_of_flight_ns=1.0,
         ripple_period_mhz=1000.0,
         pivot_ghz=0.0,
@@ -468,7 +468,7 @@ def test_window_before_all_pulses_keeps_receiver_baseline_without_projection() -
     receiver = FTFReceiverConfig(
         0,
         1000.0,
-        ((0.0, 0.0), (0.0, 0.0)),
+        0.0,
         offset_adc=(11.0, -7.0),
         ripple_period_mhz=1000.0,
         pivot_ghz=0.0,
@@ -644,7 +644,7 @@ def test_pulseless_readout_samples_only_receiver_offset_and_noise(
         events += (replace(readout, active=np.zeros(2, dtype=bool)),)
     pulseless = replace(base, events=events)
     offset = (11.0, -7.0)
-    noise_psd = ((4.0, 0.5), (0.5, 2.0)) if inactive_slot else ((0.0, 0.0), (0.0, 0.0))
+    noise_psd = 4.0 if inactive_slot else 0.0
     config = FTFReadoutConfig(
         FTFReceiverConfig(
             0,
@@ -691,7 +691,9 @@ def test_pulseless_readout_samples_only_receiver_offset_and_noise(
         if inactive_slot:
             # This fixture's sample period is 1 ns; its sample covariance equals the PSD.
             np.testing.assert_allclose(observations.mean(axis=0), offset, atol=0.09)
-            np.testing.assert_allclose(np.cov(observations.T), noise_psd, atol=0.2)
+            np.testing.assert_allclose(
+                np.cov(observations.T), noise_psd * np.eye(2), atol=0.2
+            )
         else:
             np.testing.assert_array_equal(
                 observations, np.broadcast_to(offset, observations.shape)

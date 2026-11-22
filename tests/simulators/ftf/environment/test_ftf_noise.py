@@ -1,4 +1,4 @@
-"""Receiver PSD conversion and public rounded ADC noise, independent of truth."""
+"""Receiver PSD conversion and ADC sampling, independent of physical truth."""
 
 import numpy as np
 import pytest
@@ -9,6 +9,7 @@ from zcu_tools.simulate.boundary import (
     PointTimeline,
     PulseEvent,
     ReadoutWindow,
+    SamplingIdentity,
 )
 from zcu_tools.simulators.ftf.config import parse_ftf
 
@@ -40,7 +41,7 @@ def test_execution_grid_converts_spectral_density_to_sample_covariance() -> None
                     "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                     "ro_ch": 0,
                     "gain": 0.0,
-                    "noise_psd_adc2_ns": [[10.0, 2.0], [2.0, 20.0]],
+                    "noise_psd_adc2_ns": 10.0,
                 },
             }
         }
@@ -71,7 +72,7 @@ def test_execution_grid_converts_spectral_density_to_sample_covariance() -> None
     )
     np.testing.assert_allclose(
         plan.readouts[0].batch.model.receiver.noise_covariance,
-        [[1.0, 0.2], [0.2, 2.0]],
+        np.eye(2),
         atol=1e-12,
         rtol=0,
     )
@@ -148,10 +149,10 @@ def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> N
         env.devices.close_all_devices()
 
 
-def test_public_decimated_receiver_noise_psd_and_offset() -> None:
-    from zcu_tools.simulators.ftf.environment import ftf
+def test_scalar_receiver_psd_draws_isotropic_adc_samples() -> None:
+    from zcu_tools.simulate.adc import ADC, PopulationInput
+    from zcu_tools.simulators.ftf.environment import plan_template
 
-    psd = np.array([[400.0, 100.0], [100.0, 900.0]])
     settings = parse_ftf(
         ftf_document()
         | {
@@ -162,43 +163,37 @@ def test_public_decimated_receiver_noise_psd_and_offset() -> None:
                     "ro_ch": 0,
                     "gain": 0.0,
                     "offset_adc": [10.0, -20.0],
-                    "noise_psd_adc2_ns": psd.tolist(),
+                    "noise_psd_adc2_ns": 400.0,
                 },
             }
         }
     )
-    env = ftf(settings, soccfg=profile_soccfg("ftf"))
-    try:
-        readout = PulseReadoutCfg(
-            gen_ch=0,
-            ro_ch=0,
-            nqz=1,
-            freq=6000.0,
-            gain=0.0,
-            waveform=ConstWaveformCfg(length=0.04),
-            ro_length=0.06,
-            trig_offset=0.01,
-        )
-        program = compile_modules(
-            env.soccfg,
-            modules=[readout.build("ro")],
-            reps=256,
-        )
-        acquired = program.acquire_decimated(env.soc, progress=False)
-        assert acquired is not None
-        values = np.asarray(acquired[0]).reshape(-1, 2)
-        request = env.soc.binding.last_request
-        if request is None:
-            raise AssertionError("completed simulation retains its numeric request")
-        rate = 1000 / request.time_base.ns(
-            request.materialize_point(0).readouts[0].sample_period_ticks
-        )
-        assert len(values) >= 4096
-        np.testing.assert_allclose(values.mean(axis=0), [10.0, -20.0], atol=0.7)
-        # Integer ADC rounding contributes <=1/12 to each diagonal, negligible
-        # compared with this fixture's covariance; it does not alter correlation.
-        np.testing.assert_allclose(
-            np.cov(values.T), psd * rate / 1000, rtol=0.08, atol=0.2
-        )
-    finally:
-        env.devices.close_all_devices()
+    # At 100 MHz each sample spans 10 ns, so 400 ADC²·ns gives variance 40.
+    window = ReadoutWindow(
+        0, 0, 8, TIME_BASE.period_ticks(100.0), (0,), (6000.0,), (0.0,), (0,)
+    )
+    timeline = PointTimeline((), (), (window,), ticks(0.1), time_base=TIME_BASE)
+    plan = plan_template(
+        settings,
+        EnvironmentSnapshot("ftf-v2", "test", (("bias", 0.2),)),
+        single_point_template(timeline),
+        soccfg=profile_soccfg("ftf"),
+        time_base=TIME_BASE,
+    )
+    (readout,) = plan.readouts
+    model = readout.batch.model
+    (event,) = readout.batch.events[0]
+    (grid,) = event.grids
+    populations = np.zeros(len(model.state_labels))
+    populations[0] = 1.0
+    samples = ADC(model).sample(
+        PopulationInput(model.state_labels, populations),
+        event.pulses,
+        grid,
+        SamplingIdentity(123),
+        shots=2048,
+    )
+    iq = samples.traces.reshape(-1, 2)
+    np.testing.assert_allclose(iq.mean(axis=0), [10.0, -20.0], atol=0.2)
+    np.testing.assert_allclose(iq.var(axis=0), [40.0, 40.0], rtol=0, atol=1.5)
+    np.testing.assert_allclose(np.corrcoef(iq.T), np.eye(2), rtol=0, atol=0.03)
