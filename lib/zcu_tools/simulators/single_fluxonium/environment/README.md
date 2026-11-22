@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-22, acquire-local raw plans, isotropic receiver noise, and unentered acquire timings
+**Last updated:** 2026-11-23, acquisition routing
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -76,11 +76,6 @@ analysis setup and file budget are described in the
 A null or omitted `settings.flux_line` keeps flux fixed at the live DC value.
 It binds no fast-flux generator and rejects foreign controls.
 Each `drive_lines` generator maps to its own named track, including overlapping events on different generators. Each source multiplies the full charge operator by its own complex calibration. Readout, fast-flux and microwave generator bindings must be distinct. Generator count is the largest bound index plus one; holes remain unbound. Unknown event generators fail in preflight with their event path and channel.
-Acquisition may carry named `ChargeDriveRequirement` records in its request.
-Preflight requires every requested generator to belong to `drive_lines`, rejecting
-flux, readout and unbound generators before waveform construction or evolution.
-Other legal fast-flux events keep their ordinary routing. Names are diagnostics,
-not role keys. An empty requirement tuple preserves ordinary planning.
 Pass the originating request's `time_base` to interpret integer tick arrays.
 It converts QICK ticks/MHz/degrees into ns/GHz/radians. `TimeBase.ns` owns exact
 nearest-2-ns support rounding, ties even. Readout grids combine trigger and sample

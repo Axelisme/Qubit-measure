@@ -9,7 +9,6 @@ from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     StoppedPartialAcquireError,
 )
-from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
 from tests.program._acquisition_soc import make_chunk_acquisition
 
@@ -22,16 +21,6 @@ def test_invalid_shot_mask_index_fails_at_registration():
         program.register_shot_mask_source({0: [True]}, lambda iq: iq[0][..., 0, 0] > 0)
 
     assert not program.has_shot_mask_sources
-
-
-def test_hardware_acquire_does_not_forward_or_validate_charge_requirements():
-    soc, program = make_chunk_acquisition(reps=2, reads=1)
-    actual = program.acquire(
-        soc,
-        progress=False,
-        charge_requirements=(ChargeDriveRequirement("caller drive", 999),),
-    )
-    np.testing.assert_array_equal(actual[0], [[0, 0]])
 
 
 def test_decimated_rejects_herald_before_transport(

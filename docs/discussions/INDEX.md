@@ -199,6 +199,7 @@
 - 2026-10-20 [框架去具體化：alias、模板、predictor 與一晶片一 qubit 假設](2026-10-20-framework-decoupling.md)：領域 alias、模板與模型認知留在 zcu_lab，框架的 owner 邊界見 [ADR-0072](../adr/0072-module-boundaries.md)。
 - 2026-11-22 [Two-qubit 的身分、定位與中性位置名](2026-11-22-two-qubit-identity-and-neutral-positions.md)：職責歸屬。Adapter 解析身分並傳定位數值，分析 options 接收標籤，位置沿用 `qubit1/qubit2`。
 - 2026-11-22 [頻譜擬合模型的求值 owner](2026-11-22-spectrum-fit-evaluation-owner.md)：擬合邊界。Fitting 重用同次係數，實驗 caller 決定窗內網格與呈現。
+- 2026-11-23 [Program 的模擬邏輯只在 mixin 內](2026-11-23-program-simulation-mixin.md)：依賴邊界。單輪模擬估時移入模擬子包，lab 不再傳模擬專用線路要求。
 
 ## 測試與驗證
 

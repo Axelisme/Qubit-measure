@@ -1,10 +1,10 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-23, deferred raw shots and plan lifetime
+**Last updated:** 2026-11-23, round pacing, acquisition routing and deferred raw shots
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
-[ADR-0072](../../../../../docs/adr/0072-module-boundaries.md) separates hardware acquisition, simulation binding and physical environment validation.
+[ADR-0072](../../../../../docs/adr/0072-module-boundaries.md#真實-acquire-與模擬邊界) separates hardware acquisition, simulation binding and physical environment validation.
 [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md) assigns the RawShots interface to program and raw generation to numeric owners.
 [ADR-0083](../../../../../docs/adr/0083-program-macros-and-timelines.md) defines compiled snapshots and the simulation frontend boundary.
 [ADR-0084](../../../../../docs/adr/0084-simulation-integer-time-base.md) defines the common integer request time base and pacing conversion.
@@ -19,26 +19,33 @@ Admission calls readiness, then `on_begin`, before consuming the sequence or
 constructing a request. Either failure releases admission and propagates without
 calling `on_end`; the environment callback owns any optional startup-compilation fallback. External timers must wait at the environment's
 ready interface before starting if startup time should be excluded.
+
+<a id="round-pacing"></a>
+
 `SimulationBinding(..., timing=SimulationTiming(time_scale=0.0))` optionally paces each round to
-`time_scale × program.request_round_time_s(request)` seconds. That owner sums
-integer template durations and relaxation, multiplies by reps, and delegates the
-single seconds conversion to TimeBase. Aggregate totals may exceed int64 and the
-per-request ns bound without rejecting a long acquisition.
+`time_scale × request_round_time_s(request)` seconds. The helper in [`round_time.py`](round_time.py)
+sums template durations and relaxation as Python integers, multiplies by reps,
+and converts the total to seconds once via `TimeBase.seconds`. Aggregate totals
+may exceed int64 and the per-request ns bound without rejecting a long acquisition.
 Timeline durations include readout, pre/post delays and pending ADC activity;
 structural templates cover every scan point once. The binding subtracts snapshot
-and execution wall time, then sleeps only for a positive remainder. Failures
-during snapshot capture or execution do not wait. Pacing checks the same Stop query as the backend at intervals of at
-most 10 ms. If Stop interrupts pacing after numeric execution returns, integrated
-acquisition discards that round and decimated acquisition keeps its trace.
-Neither starts another round.
+and execution wall time, then sleeps only for a positive remainder. Startup
+preparation, program construction, raw materialization and round hooks are
+outside this budget. Failures during snapshot capture or execution do not wait.
+Pacing checks the same Stop query as the backend at intervals of at most 10 ms.
+If Stop interrupts pacing after numeric execution returns, integrated acquisition
+discards that round and decimated acquisition keeps its trace. Neither starts
+another round.
+
 A finite nonnegative `time_scale` of 1.0 follows physical time, 0.1 is ten times
 faster, and zero disables pacing. Without an injected clock, zero also skips
-round clock reads. Generic bindings default
-to zero; FTF, single- and six-fluxonium environments default to 1.0. The environment
-builder owns this policy, not the GUI. For a 2 us timeline with zero relaxation,
-100 reps and 10 rounds target 2 ms total. For 25 points averaging 20 us plus
-500 us relaxation, 100 reps target 1.3 s per round. Actual wall time can exceed
-the target when numeric work dominates.
+round clock reads. The environment builder owns this default, not the GUI.
+Generic bindings default to zero; single- and six-fluxonium environments default
+to 1.0. See [FTF's round pacing settings](../../../simulators/ftf/environment/README.md#round-pacing).
+For a 2 us timeline with zero relaxation, 100 reps and 10 rounds target 2 ms
+total. For 25 points averaging 20 us plus 500 us relaxation, 100 reps target
+1.3 s per round. Actual wall time can exceed the target when numeric work dominates.
+
 `SimulationBinding(..., callbacks=SimulationCallbacks(on_end=callback))` optionally observes each admitted
 acquire after all software rounds, including partial or failed acquisitions.
 The callback receives one frozen `AcquireOutcome`. Its `rounds` tuple contains
@@ -74,15 +81,8 @@ even under warning-as-error filters. Observer `BaseException`s propagate and
 retain an original acquire error as context. Admission releases in either case.
 An omitted `on_end` avoids acquire stage clock reads. An omitted
 `on_materialize` avoids timing deferred access.
-Integrated `acquire(..., charge_requirements=(ChargeDriveRequirement(name, gen_ch), ...))`
-passes named physical charge requirements through the simulation request. The
-record lives in `simulate.boundary`; names are diagnostics, not dispatch keys.
-Single-fluxonium validates membership before evolution. White noise accepts
-requirements without physical checks because it has no physical line model.
-Six-fluxonium and FTF reject nonempty requirements before evolution until they
-support this contract. Empty requirements retain each environment's behavior.
-The entry consumes this keyword without forwarding it on hardware calls; hardware
-wiring roles remain the operator's responsibility. Requirements are call-local.
+Callers do not supply simulation-only wiring requirements to acquire.
+Physical environments route compiled generator events using their own wiring.
 Other SoC objects use the original path. Integrated simulation configures the
 compiled program and readouts without serializing DAC/weight arrays for
 transport. Requested uploads validate int16 envelope and weight dtypes and
@@ -95,6 +95,8 @@ not limited by raw-buffer capacity. QICK retains first-compilation ownership.
 Hardware and decimated paths keep their original configuration. Shot processing,
 hooks, normalization, averaging and Stop still belong to that pipeline.
 
+<a id="completed-round-credit"></a>
+
 `SimulationBinding(..., timing=SimulationTiming(clock=SimulationClock(...)))` optionally tracks physical
 time independently of pacing speed. One environment shares one clock. Credit
 is `max(0, unscaled physical round seconds - elapsed wall seconds)`. The elapsed
@@ -104,7 +106,9 @@ the binding applies credit only after transport validation, raw materialization
 and the final Stop check. Failed or cancelled raw work adds no credit. Between
 rounds and acquisitions, wall time advances naturally.
 The clock's `monotonic` callable can supply synthetic wall seconds. Generic
-bindings do not create a clock; single-fluxonium environments own one.
+bindings do not create a clock; single-fluxonium environments own one. See
+[FTF's acquisition clock](../../../simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)
+for how that environment supplies and uses its clock.
 `SimulationCallbacks(on_begin=...)` runs after readiness and before request
 construction. Single-fluxonium uses it to freeze losses once per acquisition.
 Preparation failures propagate and release admission without consuming a sequence.
@@ -114,8 +118,6 @@ Hardware acquisition does not call the binding or this clock.
 
 `simulation.compiled.build_compiled_request(prog, mode, binding, sequence, routes=soc.routes)`
 reads `prog.compiled_stream` and returns detached numeric slots without calling a backend.
-Its optional `charge_requirements` keyword preserves caller requirements in the
-request for environment-owned physical validation, without inferring drive roles.
 It predecodes the snapshot once and evaluates scan points as independent array
 lanes. `LOOP_START` provides resolved register/wave start and step words.
 Its `tables` map associates WMEM word addresses and field indexes with rotated
@@ -585,6 +587,10 @@ or MCP metadata. Physical environments can publish a separate [debug capture](..
 
 General program classes depend on the public mixin entry, not frontend, binding,
 signal-packing or SoC internals. `.importlinter` enforces that direct dependency
-boundary while allowing the entry to delegate internally. `experiment.simulation`
+boundary while allowing the entry to delegate internally. The
+`program-simulation-imports` contract prevents the rest of Program from importing
+`zcu_tools.simulate` or `zcu_tools.simulators` directly. The framework-wide
+`framework-no-simulators` contract still forbids dependencies on
+`zcu_tools.simulators`, including from this package. `experiment.simulation`
 composes program and device capabilities. Numeric backends depend on core records,
 not on program or GUI owners.
