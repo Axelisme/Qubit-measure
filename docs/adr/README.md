@@ -72,7 +72,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：同一種資料不因屬於 global 或 point 分成兩套型別或方法，選檔用 `point: str | None`（None 是 global），見 [ADR-0063](0063-persistence-ownership.md#同一種資料不因-global-或-point-分兩套)。
 
 - [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：保存權威、Container 讀寫、Run metadata、library 與 component 升級邊界。
-- [0080 — datafile 通用容器格式與獨立介面](0080-datafile-generic-container.md)：只接受 Container major 3 的通用 vars／docs／groups 容器與獨立 API。
+- [0080 — datafile 通用容器格式與獨立介面](0080-datafile-generic-container.md)：只接受 Container major 3 的通用 vars／docs／groups 容器；公開單一 Variable 的無 I/O 結構檢查。
 - [0081 — Global 與 point 資料以磁碟為真相](0081-point-data-disk-sync.md)：Global／point 以磁碟為真相、write-through、watcher 與 revision 樂觀鎖。
 - [0082 — Component flux frame 與明確升級](0082-component-flux-frame.md)：Component offset／signed periods、flux_dev 與明確 v1→v2→v3 升級鏈。
 
@@ -82,22 +82,28 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：實驗 cfg 可為統一命名改欄位；改名升 schema major，不遷移、不留 alias，舊 run 在結果仍相容時保留 Result 與 metadata，見 [ADR-0069](0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。
 
+原則：adapter 解析元件身分，cfg 收位置數值，分析 options 收顯示名。同一位置不跨層翻譯，實驗只驗所需能力，見 [ADR-0069](0069-experiment-core-and-frontends.md#身分定位與顯示)。
+
+原則：懂物理的操作員不讀程式碼就能判讀實驗。圖只放判讀所需資訊，adapter 提供 GUI 與 MCP 共用摘要，一維逐點誤差用 shot SEM，見 [ADR-0069](0069-experiment-core-and-frontends.md#呈現規範)。
+
 原則：只有準備誤差不移動 gg、ee 兩組共用的參數時，才保留獨立 heralded 實驗，見 [ADR-0074](0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)。
 
 原則：Timeline 編譯器推算每發 ADC 讀取數，每個 Branch 出口與作者 label 都逐 ADC 對齊，見 [ADR-0083](0083-program-macros-and-timelines.md#每發-adc-讀取數)。
 原則：Timeline program 提供通用跳轉，builder 只轉交同名動作。只往後跳，迭代用 Repeat 或 sweep。見 [ADR-0083](0083-program-macros-and-timelines.md#往後跳轉與-label-合併)。
 原則：增加的量測能力不抵第二條路徑的可讀性成本時，保留一條路徑，超限就報錯。見 [ADR-0083](0083-program-macros-and-timelines.md#量測能力不抵可讀性成本時不加分支)。
+原則：模擬的零輪中斷由 Program 的 `EarlyStopMixin` 統一判定；simulation mixin 只回報中斷，見 [ADR-0083](0083-program-macros-and-timelines.md#compiled-snapshot-與-simulation-入口)。
 
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：Async workflow、operation、Ask、停止、live tunables 與作者保存責任。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。
-- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 配置、classifier、逐 shot sums 與 reducer、herald reset 與逐 shot 遮罩、雙 qubit heralded 分類、單 qubit cov 自校準與 QICK projection。
+- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 配置、classifier、逐 shot sums、選用校正 IQ 矩、herald reset 與逐 shot 遮罩、雙 qubit heralded 分類、單 qubit cov 自校準與 QICK projection。
 - [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：Program macro、具名 timeline、往後跳轉與 label 合併、查表掃描、compiled snapshot 與全面 Timeline 遷移。
 
 ## Analysis / Simulation / Waveform
 
 原則：family 的完整序列最終精度合格就只比耗時，刪除前先補同型態長序列證據，見 [ADR-0078](0078-evolution-module-boundary.md#family-去留合格只比耗時)。
 原則：模擬器分層測試，不做 e2e 測試。只允許一支整實驗 Run 牆鐘工具，kernel／family 比較仍只量 `Engine.evolve`，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
-原則：guard 在整個參數空間不放行超標；速度優化只做有耗時紀錄的瓶頸，修法時程未定時先走慢但對的候選，見 [ADR-0078](0078-evolution-module-boundary.md#先保證正確再優化瓶頸)。
+原則：正常參數先守 180 秒，誤差在 `1e-2` 內選快的；只為守時間才接受超過並記錄，達 `1e-1` 不採用，見 [ADR-0078](0078-evolution-module-boundary.md#歷史控制與精度驗收)。
+原則：優化只量目標實驗前後，先做便宜的正確性對照，再補獨立參考；影響實機、存檔或使用者結果則先驗再落地，見 [ADR-0078](0078-evolution-module-boundary.md#先求效率正確性事後補)。
 原則：評估算法時預算固定為使用者按場景宣告的需求，在固定預算下找算法適合的場景，不為算法放寬預算；長序列預算按 gate 數放寬，見 [ADR-0078](0078-evolution-module-boundary.md#固定預算找適合的場景)。
 原則：模擬算法與機制同時適用 Windows 與 Linux，不依賴單一作業系統的設定或行為，見 [ADR-0078](0078-evolution-module-boundary.md#跨平台不綁作業系統)。
 原則：GPU 是可選功能，沒有 GPU 套件或可用裝置時維持 CPU 行為與逐位相同的結果，見 [ADR-0078](0078-evolution-module-boundary.md#gpu-是可選功能)。
@@ -111,6 +117,9 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：kernel 的量測場景只有一段，重複就是同一段接 N 次，見 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)。
 原則：場景照約化參數軸宣告覆蓋，不為個別實驗加專屬場景，見 [ADR-0078](0078-evolution-module-boundary.md#場景覆蓋靠約化的參數空間)。
 原則：量測 agent 以量測取得初值與裁定；模擬器真值只在使用者為 debug 明確授權時讀，數字記為 debug 對照，見 [模擬環境草稿](draft/simulation-environments.md#固定訊號契約與重現)。
+原則：ADC 擁有 `t−τ` 的 ADC 時間至裝置時間的換算；planner 逐窗以裝置時間和 block interval 配對，最後相交 block 為 owner。grid 與投影時間不移動。同 ADC、同 owner 的有場事件使用各窗交集 blocks 的 pulse 聯集（designer 代裁，使用者未覆核），見 [ADR-0078](0078-evolution-module-boundary.md#ftf-讀出窗依裝置時間配對)。
+原則：FTF Stop 採合作式檢查點，正常參數下以相鄰檢查區段 5 秒內作放點依據，不設硬上限或延遲 gate，見 [ADR-0078](0078-evolution-module-boundary.md#ftf-stop-用合作式檢查點設計上-5-秒內)。
+原則（designer 代裁，使用者未覆核）：FTF 只有在當輪需要 raw 時才借用取消查詢；SoC 驗證 raw 並通過最後查詢後才入帳、發佈和前移輪次，見 [ADR-0078](0078-evolution-module-boundary.md#integrated-raw-由環境生成介面由-program-擁有)與 [ADR-0083](0083-program-macros-and-timelines.md#compiled-snapshot-與-simulation-入口)。
 
 - [0085 — 實驗數值工具的 fitting owner](0085-numerical-fitting-owners.md)：六組純數值工具由 fitting 持有，lab 保留選資料、herald、維度換算、live 與畫圖。
 

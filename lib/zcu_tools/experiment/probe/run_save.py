@@ -93,7 +93,10 @@ def _validate_dtypes(
         (*spec.axes, spec.z)
         if isinstance(spec, AxesSpec)
         else tuple(
-            item for variable in spec.variables for item in (*variable.axes, variable.z)
+            item
+            for variable in spec.variables
+            if not variable.is_omitted(result)
+            for item in (*variable.axes, variable.z)
         )
     )
     for declaration in declarations:
@@ -122,9 +125,10 @@ def run_stage(
     current figure size, 100 dpi, under live-{URL-escaped name}.png keys.
     Missing AXES_SPEC raises ValueError. Acquisition, plotting and rendering
     errors propagate unchanged. Result shape must agree with AXES_SPEC or native
-    validation raises ValueError. Field-backed axes and signal arrays must have
-    the exact declared NumPy memory dtype; mismatches raise ValueError naming
-    the field. This stage neither saves nor calls analyze.
+    validation raises ValueError. Field-backed axes and signals of present
+    variables must have the exact declared NumPy memory dtype; mismatches raise
+    ValueError naming the field. Optional variables with a None z field are
+    skipped. This stage neither saves nor calls analyze.
     """
     if experiment.AXES_SPEC is None:
         raise ValueError("run_stage requires experiment.AXES_SPEC")

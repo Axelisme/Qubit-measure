@@ -243,6 +243,10 @@ class CancellationQuery(Protocol):
         ...
 
 
+class Cancelled(Exception):
+    """Numeric work observed Stop at a cooperative check and returned no result."""
+
+
 @dataclass(frozen=True)
 class SamplingIdentity:
     """Explicit deterministic shot/noise stream identity, without global RNG.

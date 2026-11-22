@@ -96,6 +96,7 @@ def delayed_readout_template():
             replace(window, trigger_ticks=window.trigger_ticks + shift[:, None])
             for window in base.readouts
         ),
+        duration_ticks=base.duration_ticks + shift,
     )
 
 
@@ -434,9 +435,11 @@ def test_lru_budget_close_and_failed_preparation_release_residents():
         ordinary = request()
         (first,) = ordinary.templates
         (window,) = first.readouts
-        early = replace(window, trigger_ticks=window.trigger_ticks - 1)
-        invalid = replace(ordinary, templates=(replace(first, readouts=(early,)),))
-        with pytest.raises(ValueError, match="trigger must not precede"):
+        wrong_gen = replace(window, generator_channels=window.generator_channels + 1)
+        invalid = replace(ordinary, templates=(replace(first, readouts=(wrong_gen,)),))
+        with pytest.raises(
+            ValueError, match="ADC timing and its bound readout generator"
+        ):
             draw(source, invalid)
         assert cache.resident_bytes == 0
         draw(source)

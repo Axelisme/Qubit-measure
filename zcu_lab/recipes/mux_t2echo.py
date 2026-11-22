@@ -55,10 +55,10 @@ class MuxT2EchoToneReport(MuxFitToneReport):
     """
 
     t2: float | None = Field(
-        default=None, description="Fitted Echo coherence time in us."
+        default=None, description="Fitted Echo coherence time in µs."
     )
     t2_err: float | None = Field(
-        default=None, description="One-sigma Echo time uncertainty in us."
+        default=None, description="One-sigma Echo time uncertainty in µs."
     )
     detune: float | None = Field(
         default=None, description="Fitted fringe rate in MHz; zero for decay fits."

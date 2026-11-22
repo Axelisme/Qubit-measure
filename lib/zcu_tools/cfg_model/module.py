@@ -55,11 +55,11 @@ class _PulseFields[WaveformT](_ModuleFields):
     ] = 0.0
     pre_delay: Annotated[
         float | QickParam,
-        FieldMeta(label="Pre-delay", unit="us", decimals=3, group="Advanced"),
+        FieldMeta(label="Pre-delay", unit="µs", decimals=3, group="Advanced"),
     ] = 0.0
     post_delay: Annotated[
         float | QickParam,
-        FieldMeta(label="Post-delay", unit="us", decimals=3, group="Advanced"),
+        FieldMeta(label="Post-delay", unit="µs", decimals=3, group="Advanced"),
     ] = 0.0
     mixer_freq: Annotated[
         float | None,
@@ -95,8 +95,8 @@ class _PulseReadoutFields[WaveformT](_ModuleFields):
     freq is the shared generator/ADC frequency in MHz; mixer_freq is an optional
     generator mixer frequency in MHz. Gain is the DAC full-scale fraction in
     a.u., within [-1, 1]. Phase is degrees.
-    pre_delay/post_delay are generator delays in us; ro_length is the integration
-    window in us and trig_offset is the trigger delay in us. Frequency, gain,
+    pre_delay/post_delay are generator delays in µs; ro_length is the integration
+    window in µs and trig_offset is the trigger delay in µs. Frequency, gain,
     phase and timing accept QICK sweeps in materialized cfgs, not persistent Specs.
     classifier stores offset-free normalized ADC calibration; None means no
     calibration is available. The readout module does not apply classification.
@@ -111,10 +111,10 @@ class _PulseReadoutFields[WaveformT](_ModuleFields):
     gain: Annotated[Gain | QickParam, FieldMeta(label="Gain", unit="a.u.", decimals=4)]
     ro_ch: Annotated[int, FieldMeta(label="RO ch")]
     ro_length: Annotated[
-        float | QickParam, FieldMeta(label="RO length", unit="us", decimals=3)
+        float | QickParam, FieldMeta(label="RO length", unit="µs", decimals=3)
     ]
     trig_offset: Annotated[
-        float | QickParam, FieldMeta(label="Trig offset", unit="us", decimals=3)
+        float | QickParam, FieldMeta(label="Trig offset", unit="µs", decimals=3)
     ] = 0.0
     classifier: Annotated[
         ReadoutClassifier | None, FieldMeta(label="Classifier", group="Advanced")
@@ -130,11 +130,11 @@ class _PulseReadoutFields[WaveformT](_ModuleFields):
     ] = None
     pre_delay: Annotated[
         float | QickParam,
-        FieldMeta(label="Pre-delay", unit="us", decimals=3, group="Advanced"),
+        FieldMeta(label="Pre-delay", unit="µs", decimals=3, group="Advanced"),
     ] = 0.0
     post_delay: Annotated[
         float | QickParam,
-        FieldMeta(label="Post-delay", unit="us", decimals=3, group="Advanced"),
+        FieldMeta(label="Post-delay", unit="µs", decimals=3, group="Advanced"),
     ] = 0.0
 
 
@@ -146,7 +146,7 @@ class PulseReadoutCfg(_PulseReadoutFields[WaveformCfg], AbsReadoutCfg):
     """Materialized readout; waveform is an expanded, validated WaveformCfg."""
 
     def set_param(self, name: str, value: float | QickParam) -> None:
-        """Set freq (MHz), gain, phase (deg), length or ro_length (us); otherwise raise ValueError.
+        """Set freq (MHz), gain, phase (deg), length or ro_length (µs); otherwise raise ValueError.
 
         freq supplies both generator and ADC. Waveform length restrictions apply.
         """
@@ -190,9 +190,9 @@ class _MuxReadoutFields(_ModuleFields):
     gen_ch is the explicit nonnegative integer generator channel (not bool).
     nqz must be integer 1 or 2, and mixer_freq is required finite MHz. tones is
     an ordered list of 1..8 MuxReadoutTone values, each carrying its own ro_ch.
-    length is the common positive const-playback duration in us; ro_length is
-    the common positive ADC window in us. pre_delay/post_delay bracket playback,
-    and trig_offset delays the common ADC trigger, all finite nonnegative us.
+    length is the common positive const-playback duration in µs; ro_length is
+    the common positive ADC window in µs. pre_delay/post_delay bracket playback,
+    and trig_offset delays the common ADC trigger, all finite nonnegative µs.
     desc is optional prose; tone labels are display-only strings. Execution
     fields accept only numeric scalars, not references, expressions, waveforms,
     QICK sweeps or register words.
@@ -210,14 +210,14 @@ class _MuxReadoutFields(_ModuleFields):
         FieldMeta(element_label="label"),
     ]
     length: Annotated[
-        float, Field(gt=0), FieldMeta(label="Length", unit="us", decimals=3)
+        float, Field(gt=0), FieldMeta(label="Length", unit="µs", decimals=3)
     ]
     ro_length: Annotated[
-        float, Field(gt=0), FieldMeta(label="RO length", unit="us", decimals=3)
+        float, Field(gt=0), FieldMeta(label="RO length", unit="µs", decimals=3)
     ]
-    pre_delay: Annotated[float, Field(ge=0)] = 0.0
-    post_delay: Annotated[float, Field(ge=0)] = 0.0
-    trig_offset: Annotated[float, Field(ge=0)] = 0.0
+    pre_delay: Annotated[float, Field(ge=0), FieldMeta(unit="µs")] = 0.0
+    post_delay: Annotated[float, Field(ge=0), FieldMeta(unit="µs")] = 0.0
+    trig_offset: Annotated[float, Field(ge=0), FieldMeta(unit="µs")] = 0.0
 
     @field_validator("nqz", mode="before")
     @classmethod

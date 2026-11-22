@@ -105,7 +105,7 @@ class ChainT2RamseyCfg(ConfigBase):
         SweepCfg,
         FieldMeta(
             label="Delay",
-            unit="us",
+            unit="µs",
             description="Free-evolution wait x between the two π/2 pulses.",
         ),
     ]
@@ -115,13 +115,14 @@ class ChainT2RamseyCfg(ConfigBase):
             label="Detune",
             unit="MHz",
             decimals=3,
-            description="Second π/2 phase ramp in fringes per us, without changing the drive frequency.",
+            description="Second π/2 phase ramp in fringes per µs, without changing the drive frequency.",
         ),
     ] = 0.0
     reps: Annotated[
         int,
         FieldMeta(
             label="Reps",
+            unit="count",
             description="Cycles per point in each round, at least 66.",
         ),
     ] = Field(ge=66)
@@ -129,6 +130,7 @@ class ChainT2RamseyCfg(ConfigBase):
         int,
         FieldMeta(
             label="Rounds",
+            unit="count",
             description="Software acquisition rounds.",
         ),
     ] = 1
@@ -136,7 +138,7 @@ class ChainT2RamseyCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
         ),
@@ -169,7 +171,7 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         # 1. Delay axis and the live plot.
         delays = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Delay (us)", ylabel="Projected signal (sigma)")
+        ax.set(xlabel="Delay (µs)", ylabel="Projected signal (sigma)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         lines = live_line(ax, num_lines=2)
@@ -281,12 +283,12 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
             markersize=3,
         )
         seed_ax.plot(seed_lengths, seed_y_fit, label="fit")
-        seed_t2r_str = f"{seed_t2r:.2f}us ± {seed_t2rerr:.2f}us"
+        seed_t2r_str = f"{seed_t2r:.2f}µs ± {seed_t2rerr:.2f}µs"
         seed_detune_str = f"{seed_detune:.2f}MHz ± {seed_detune_err * 1000.0:.2f}kHz"
         seed_ax.set_title(
             f"T2 fringe = {seed_t2r_str},\ndetune = {seed_detune_str}", fontsize=15
         )
-        seed_ax.set_xlabel("Delay Time (us)")
+        seed_ax.set_xlabel("Delay Time (µs)")
         seed_ax.set_ylabel("Signal Real (a.u.)")
         seed_ax.legend()
         seed_ax.grid(True)
@@ -331,10 +333,10 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
                 population_fitted[:, population_state],
                 color=f"C{population_state}",
             )
-        population_ax.set_xlabel("Delay (us)")
+        population_ax.set_xlabel("Delay (µs)")
         population_ax.set_ylabel("First-read population")
         population_ax.set_title(
-            f"{f'T2 = {t2:.4g} ± {t2_err:.2g} us, detuning = {detuning:.4g} ± {detuning_err:.2g} MHz, third state {tf:.3g} ± {tf_err:.2g} us, R = {reliability_text}'}\n{checks_text(fit)}",
+            f"{f'T2 = {t2:.4g} ± {t2_err:.2g} µs, detuning = {detuning:.4g} ± {detuning_err:.2g} MHz, third state {tf:.3g} ± {tf_err:.2g} µs, R = {reliability_text}'}\n{checks_text(fit)}",
             fontsize=9,
         )
         population_ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))

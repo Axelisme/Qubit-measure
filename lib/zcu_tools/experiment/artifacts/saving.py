@@ -205,7 +205,7 @@ def _save_data(
             if output.format == "labber":
                 write_labber(
                     output.path,
-                    member.data.container,
+                    member.data.to_labber_container(),
                     metadata=replace(
                         member.data.labber_metadata,
                         comment=encode_labber_comment(

@@ -92,6 +92,15 @@ def _T2Ramsey_analyze(
     )
 
 
+def _summary_lines(source: T2RamseyRunResult) -> tuple[str, ...]:
+    lines: list[str] = []
+    if source.cfg is not None:
+        lines.append(f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}")
+    if source.result.true_activate_detune is not None:
+        lines.append(f"Applied detune: {source.result.true_activate_detune:g} MHz")
+    return tuple(lines)
+
+
 def _T2Ramsey_get_writeback_items(
     req: WritebackRequest[T2RamseyRunResult, T2RamseyAnalyzeResult],
 ) -> Sequence[WritebackItem]:
@@ -121,7 +130,7 @@ def _T2Ramsey_get_writeback_items(
     items: list[WritebackItem] = [
         ParameterWriteback(
             target_name="$qubit.t2r",
-            description="T2 Ramsey time (us)",
+            description="T2 Ramsey time (µs)",
             proposed_value=result.t2r,
         ),
     ]
@@ -212,6 +221,7 @@ DEFINITION = Adapter(
     analysis=Analysis(
         fn=_T2Ramsey_analyze,
         options=lambda source, env: T2RamseyAnalyzeOptions(),
+        summary_lines=_summary_lines,
         writeback=_T2Ramsey_get_writeback_items,
     ),
 )

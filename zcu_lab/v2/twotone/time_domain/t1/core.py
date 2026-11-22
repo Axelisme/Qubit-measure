@@ -64,7 +64,7 @@ class T1Analysis:
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
+    """Rotate mean complex IQ and return its real component for the plot."""
     return rotate2real(signals).real  # (times, signals)
 
 
@@ -72,14 +72,21 @@ class T1Cfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
     sampling: Literal["linear", "decay"] = "linear"
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     earlystop_snr: Annotated[
         float | None,
@@ -92,7 +99,7 @@ class T1Cfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -139,7 +146,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         # 2. Monitor relaxation contrast during uniform-delay averaging.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (us)", ylabel="Amplitude")
+        ax.set(xlabel="Time (µs)", ylabel="Rotated IQ real (a.u.)")
         ax.set_title("T1 relaxation")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
@@ -191,7 +198,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lengths = table.times_us
         # 2. Monitor relaxation contrast at the nonuniform sampled delays.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (us)", ylabel="Amplitude")
+        ax.set(xlabel="Time (µs)", ylabel="Rotated IQ real (a.u.)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
@@ -273,9 +280,9 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
         ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
 
-        t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
+        t1_str = f"{t1:.2f}µs ± {t1err:.2f}µs"
         if options.dual_exp:
-            t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
+            t1b_str = f"{t1b:.2f}µs ± {t1berr:.2f}µs"
             ax.plot(
                 xs, ft.expfunc(xs, *fit.params[:3]), linestyle="--", label="t1b fit"
             )
@@ -283,8 +290,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         else:
             title = f"$T_1$ = {t1_str}"
         ax.set_title(title, fontsize=14)
-        ax.set_xlabel("Delay Time (us)", fontsize=14)
-        ax.set_ylabel("Signal (a.u.)", fontsize=14)
+        ax.set_xlabel("Delay Time (µs)", fontsize=14)
+        ax.set_ylabel("Rotated IQ real (a.u.)", fontsize=14)
         ax.legend(loc="upper right")
         ax.grid(True)
 

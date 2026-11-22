@@ -105,7 +105,7 @@ Cavity coupling 0.10 GHz is distinct from charge-drive calibration 1 GHz/gain.
    than reading the model spectrum.
 
 The [spectroscopy guide](../../v2/twotone/freq/guide.md) explains fitting and
-writeback. After editing source parameters or library slots, Reset recaptures
+writeback. After editing source parameters or library slots, Defaults recaptures
 them and may replace unsaved Form inputs. Refresh preserves authored inputs.
 A visible Form is not proof of a valid cfg or a calibrated preparation.
 
@@ -127,7 +127,7 @@ Each STIRAP Form lets Pump and Stokes independently select gauss, cosine, drag
 or arb waveforms. Each waveform supplies its own duration.
 
 Complete spectroscopy in the order above before entering their carriers.
-Apply the acquired reference readout, then Open or Reset STIRAP/Raman so the
+Apply the acquired reference readout, then open the STIRAP/Raman tab or choose Defaults there so the
 next Run captures it. Analysis uses that Run's saved centroid3 readout, not a
 later library edit. Missing inputs remain Invalid instead of using model values.
 

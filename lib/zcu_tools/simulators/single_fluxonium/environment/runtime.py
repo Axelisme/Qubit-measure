@@ -539,8 +539,9 @@ class SingleFluxoniumSource:
         must contain that same receiver set. Classification uses all triggers;
         each ADC may omit events, including terminal. Its per-event grid counts
         must agree across templates. Layout conflicts name ADC and templates.
-        Empty templates, receiver mismatch or untriggered cavity drives raise
-        ValueError. No model construction, density propagation or ADC solve runs.
+        Empty templates, receiver mismatch, unbound charge drive requirements
+        or untriggered cavity drives raise ValueError. No model construction,
+        density propagation or ADC solve runs.
         Treat returned plans as read-only. Keep request arrays unchanged until
         prepare_readouts returns. Closed sources raise RuntimeError.
         """
@@ -556,6 +557,14 @@ class SingleFluxoniumSource:
             raise ValueError(
                 "single fluxonium requires the complete calibrated receiver set"
             )
+        drive_channels = {line.gen_ch for line in self.settings.drive_lines.values()}
+        for requirement in request.charge_requirements:
+            if requirement.gen_ch not in drive_channels:
+                raise ValueError(
+                    f"{requirement.name}: generator {requirement.gen_ch} requires a "
+                    "declared charge drive line"
+                )
+        delays = {receiver.ro_ch: receiver.time_of_flight_ns for receiver in receivers}
         observations = []
         for receiver in receivers:
             settings = self.settings.model_copy(
@@ -571,7 +580,7 @@ class SingleFluxoniumSource:
                     snapshot,
                     template,
                     readout_kind=self._readout_kind,
-                    charge_requirements=request.charge_requirements,
+                    receiver_delays_ns=delays,
                     time_base=request.time_base,
                 )
                 for template in request.templates

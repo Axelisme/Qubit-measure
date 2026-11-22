@@ -60,11 +60,11 @@ class CPMGInputs(RecipeInputs):
     )
     min_length_us: float | None | Keep = Field(
         KEEP,
-        description="Shared minimum total evolution time in us.",
+        description="Shared minimum total evolution time in µs.",
     )
     max_length_us: float | None | Keep = Field(
         KEEP,
-        description="Shared maximum total evolution time in us.",
+        description="Shared maximum total evolution time in µs.",
     )
     length_points: int | None | Keep = Field(
         KEEP,
@@ -72,7 +72,7 @@ class CPMGInputs(RecipeInputs):
     )
     detune_ratio: float | None | Keep = Field(
         KEEP,
-        description="Final-pulse phase-ramp ratio, dimensionless.",
+        description="Set Detune ratio (fringes/step) for the final-pulse phase ramp.",
     )
     reps: int | None | Keep = Field(
         KEEP,
@@ -89,11 +89,11 @@ class CPMGInputs(RecipeInputs):
     )
     t2r: float | None | Keep = Field(
         KEEP,
-        description="Ramsey T2 reference (us). Analysis only; omitted keeps value, null passes to owner.",
+        description="Ramsey T2 reference (µs). Analysis only; omitted keeps value, null passes to owner.",
     )
     t1: float | None | Keep = Field(
         KEEP,
-        description="T1 reference (us). Analysis only; omitted keeps value, null passes to owner.",
+        description="T1 reference (µs). Analysis only; omitted keeps value, null passes to owner.",
     )
 
 
@@ -102,13 +102,13 @@ class CPMGReport(RecipeReport):
 
     t2_1_us: float | None = Field(
         default=None,
-        description="Power-law T2 at n=1 in us; null without a summary fit.",
+        description="Power-law T2 at n=1 in µs; null without a summary fit.",
     )
     t2_1_err_us: float | None = Field(
-        default=None, description="Propagated standard error of T2 at n=1 in us."
+        default=None, description="Propagated standard error of T2 at n=1 in µs."
     )
     gamma: float | None = Field(
-        default=None, description="Dimensionless exponent in T2(n)=T2_1*n**gamma."
+        default=None, description="Power-law exponent gamma in T2(n)=T2_1*n**gamma."
     )
     gamma_err: float | None = Field(
         default=None, description="Standard error of the power-law exponent."

@@ -22,7 +22,7 @@ RBHeraldedRun: TypeAlias = RunRecord[RBHeraldedCfg, RBHeraldedResult]
 
 
 def make_form(ctx: FormContext) -> Form[RBHeraldedCfg]:
-    """Capture roles, X90/CZ/readout and named corrections; reset starts None."""
+    """Capture tone indices, X90/CZ/readout and ordered corrections; reset starts None."""
     return rb_form(ctx, RBHeraldedCfg)
 
 
@@ -37,10 +37,17 @@ def _analyze(
     return RBHeraldedExp().analyze(req.run_result, RBOptions(), plots=plots)
 
 
+def _summary_lines(source: RBHeraldedRun) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=RBHeraldedExp.AXES_SPEC,
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide_heralded.md"),
-    analysis=Analysis(fn=_analyze),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

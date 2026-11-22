@@ -1,9 +1,11 @@
 """Driven Stark shifts and branch-distinguishability dephasing at the FTF seam."""
 
 from dataclasses import replace
+from typing import override
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from scipy.integrate import trapezoid
 from scipy.linalg import expm
 from zcu_tools.simulate import adc
@@ -201,6 +203,45 @@ def test_short_cavity_continuation_from_a_shared_field_produces_a_valid_shift(ca
     rates += np.sum(np.abs(delta) ** 2 * model.kappa_internal_per_ns / 2, axis=-1)
     expected = trapezoid(rates, times, axis=0) / (end - start)
     np.testing.assert_allclose(shift.dephasing_per_ns, expected, rtol=0, atol=5e-18)
+
+
+def test_cavity_shift_rejects_negative_dephasing_beyond_roundoff(cavity):
+    class CacheWithInvalidMoments(adc.CavityAverageCache):
+        @override
+        def span(
+            self,
+            model: adc.ReadoutModel,
+            pulses: tuple[ReadoutPulse, ...],
+            start_ns: float,
+            end_ns: float,
+            *,
+            initial_field: NDArray[np.complex128] | None = None,
+            initial_time_ns: float = 0.0,
+        ) -> adc.CavitySpanResult:
+            span = super().span(
+                model,
+                pulses,
+                start_ns,
+                end_ns,
+                initial_field=initial_field,
+                initial_time_ns=initial_time_ns,
+            )
+            # Unit cross terms with zero diagonals violate PSD beyond roundoff.
+            products = span.average.field_products
+            products[0, 0, 1, 0] = products[1, 0, 0, 0] = 1.0
+            return span
+
+    joint, resonators, _, _ = cavity
+    drive = ftf.CavityDrive(joint, resonators, (), cache=CacheWithInvalidMoments())
+    start, end = 10.0, 11.0
+    response, _ = drive.advance(
+        start, end, np.array([1.0, 0.0, 0.0]), np.zeros(2, dtype=np.complex128)
+    )
+
+    with pytest.raises(
+        ValueError, match="shift dephasing must be nonnegative with zero diagonal"
+    ):
+        SegmentShift(start, end, response.stark_shift_ghz, response.dephasing_per_ns)
 
 
 def test_cavity_segment_average_retains_ringdown_and_integrates_rates(cavity):

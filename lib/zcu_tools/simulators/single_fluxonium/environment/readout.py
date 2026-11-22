@@ -146,7 +146,16 @@ def prepare_readout(
             ),
         ),
     )
-    reference = plans[0].readout.pulses[0][0].frequency_ghz
+    reference = next(
+        (
+            pulses[0].frequency_ghz
+            for plan in plans
+            for event in reversed(plan.read_events)
+            for pulses in event.pulses
+            if pulses
+        ),
+        physical.reference_frequency_ghz,
+    )
     model = replace(physical, receiver=receiver, reference_frequency_ghz=reference)
     solver = ConditionalReadout(
         model,

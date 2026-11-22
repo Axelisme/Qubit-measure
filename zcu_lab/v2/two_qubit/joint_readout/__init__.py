@@ -5,7 +5,6 @@ from .core import (
     JointReadoutCfg,
     JointReadoutExp,
     JointReadoutResult,
-    JointRoles,
 )
 
 __all__ = [
@@ -13,5 +12,4 @@ __all__ = [
     "JointReadoutCfg",
     "JointReadoutExp",
     "JointReadoutResult",
-    "JointRoles",
 ]

@@ -7,6 +7,7 @@ acquisition normalization belongs to program.
 """
 
 from .. import _numba_cache  # Bootstrap before any dispatcher is created.
+from ._time import adc_to_device_time_ns
 from .cavity import (
     CavityAverageCache,
     CavityFieldAverage,

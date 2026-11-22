@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-10-31
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## GUI setup
 
@@ -31,14 +31,14 @@ out-of-range participants block Run and remain editable for correction.
 
 Selected tones need drives on independent generators, distinct from readout.
 Set each tone's `length.start` and `length.stop` bounds. All tones share Expts.
-Open/Reset fills selected tones' drive and per-tone length defaults and sets
+Open/Defaults fills selected tones' drive and per-tone length defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
-Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
+Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
 and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
 Alias list elements may use `$` links. A missing, unbound or empty row selects all
-original indices in order. An unbound element in a nonempty list rejects Open/Reset.
+original indices in order. An unbound element in a nonempty list rejects Open/Defaults.
 An out-of-group name stays visible as an invalid Participants draft until corrected.
-Changing aliases requires Reset or reopening; ordinary participant edits keep tone values.
+Changing aliases requires Defaults or reopening; ordinary participant edits keep tone values.
 
 Editing participants preserves every tone value. Fill any newly selected tone's
 missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
@@ -46,8 +46,8 @@ tone still needs valid frequency and ADC identity, even when not selected.
 
 ## FTF cost example
 
-A two-participant offline Run used 8 requested lengths from 0.02 to 0.16 us,
-const pulses at gain 0.1, 100 reps, 1 round and 0.1 us recovery.
+A two-participant offline Run used 8 requested lengths from 0.02 to 0.16 µs,
+const pulses at gain 0.1, 100 reps, 1 round and 0.1 µs recovery.
 The recorded Run action took 2.006 s, about 0.25 s per joint sweep point.
 These short, uncalibrated inputs demonstrate execution, not a pi-length calibration.
 Keep the hardware-rounded coordinates when reviewing the result.
@@ -68,7 +68,7 @@ tones. Inactive drives may be blank.
 For flat_top, total length includes both ramps and must exceed their duration.
 Switch an arb source to a supported waveform explicitly before Run.
 
-Each tone supplies positive Start and Stop lengths in us. Expts follows Tones
+Each tone supplies positive Start and Stop lengths in µs. Expts follows Tones
 and sets one shared positive point count for all tones (default 101).
 When all participants use const or flat_top, one program sweeps their length
 tables in a shared hardware loop. If any participant uses a sampled waveform,
@@ -91,7 +91,7 @@ round count.
 Each tone uses its own rounded requested-length axis and needs six finite IQ points.
 Decay defaults to a damped cosine and can be disabled.
 Fit phase defaults to fixed 0 degrees with signed amplitude. Enable it for a free
-phase. Lengths and one-sigma errors are in us; Rabi frequency and error are in MHz.
+phase. Lengths and one-sigma errors are in µs; Rabi frequency and error are in MHz.
 Review the curve and fit quality, especially for small-truncation simulations.
 
 ## Writeback
@@ -133,7 +133,7 @@ Analyze and preview only calculate results. Each candidate needs its own selecti
 Saved drafts retain invalid field text and Participants for correction.
 Restoration reports dropped fields and keeps the original parameter source.
 Unreadable saved inputs produce a diagnostic and fresh defaults.
-Reset captures current parameters and rebuilds initial values.
+Defaults captures current parameters and rebuilds initial values.
 
 Recipe writes and override paths use dotted strings, for example
 `"tones.0.drive.gain"`. The decimal index addresses the complete tone list.

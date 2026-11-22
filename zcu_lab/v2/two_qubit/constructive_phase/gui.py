@@ -44,33 +44,35 @@ def _analyze(
 def _get_writeback_items(
     req: WritebackRequest[ConstructivePhaseRun, ConstructivePhaseAnalysis],
 ) -> Sequence[WritebackItem]:
-    """Propose only F2 phase and its independent coupler slot from saved cfg.
+    """Propose only Qubit2 phase and its independent coupler slot from saved cfg.
 
-    F2.phase is source F1.phase plus the identifiable maximum-rate relative
-    phase. Preserve F2 frequency, signed gain, waveform and all other fields.
-    Missing cfg or unresolved phase returns no proposal. A valid proposal
-    requires the Run/Load parameter capture to resolve its concrete library
-    key; it never reads current pulse values. No writes or atomic pair Apply.
+    Qubit2.phase is source Qubit1.phase plus the identifiable maximum-rate relative
+    phase. Preserve Qubit2 frequency, signed gain, waveform and all other fields.
+    Missing Run/Load parameter capture raises ValueError. Missing cfg or
+    unresolved phase returns no proposal. The capture supplies the coupler; it never reads current pulse values. No writes or atomic pair Apply.
     """
+    parameters = req.ctx.parameters
+    if parameters is None:
+        raise ValueError("Constructive phase writeback requires captured parameters")
     snapshot = req.run_result.cfg
     phase = req.analyze_result.relative_phase_deg
     if snapshot is None or phase is None or not np.isfinite(phase):
         return []
-    parameters = req.ctx.parameters
-    if parameters is None:
-        raise ValueError("Constructive phase writeback requires captured parameters")
-    target = f"{snapshot.roles.coupler}.pulses.cz_f2"
+    coupler = parameters.resolve_path("$coupler")
+    # Grep bridge for the pulse proposal: $coupler.pulses.cz_qubit2
+    target = f"{coupler}.pulses.cz_qubit2"
     key = parameters.library_key(target)
     return [
         module_writeback(
-            snapshot.drive.f2,
+            snapshot.drive.qubit2,
             target=target,
-            description="Constructive F2 charge pulse, source F1 phase reference",
-            field_updates=(("phase", float(snapshot.drive.f1.phase) + phase),),
+            description="Constructive Qubit2 charge pulse, source Qubit1 phase reference",
+            field_updates=(("phase", float(snapshot.drive.qubit1.phase) + phase),),
         ),
         ParameterWriteback(
-            target_name=f"{snapshot.roles.coupler}.module.cz_f2",
-            description="F2 CZ pulse slot, independent Apply row",
+            # Grep bridge for the slot proposal: $coupler.module.cz_qubit2
+            target_name=f"{coupler}.module.cz_qubit2",
+            description="Qubit2 CZ pulse slot, independent Apply row",
             proposed_value=key,
         ),
     ]
@@ -83,10 +85,19 @@ def run(
     return RunRecord(cfg=cfg, result=ConstructivePhaseExp().run(cfg, context=context))
 
 
+def _summary_lines(source: ConstructivePhaseRun) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=ConstructivePhaseExp.AXES_SPEC,
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
+    analysis=Analysis(
+        fn=_analyze, writeback=_get_writeback_items, summary_lines=_summary_lines
+    ),
 )

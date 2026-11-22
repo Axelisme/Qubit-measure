@@ -74,8 +74,8 @@ MG12 的 `mixer_freq: 7135` 是 mux LO 初值，缺值時 mixer 留空必填，�
 模擬範本的 `MG12.time_of_fly: 0.4` us 對應 `ftf.yaml` 的 mux receivers 400 ns。R1／R2 的頂層 `time_of_fly: 0.4` us 則對應 pulse ADC 的 400 ns。Kickstart 的 group 與 resonator TOF 保留 null，等待各自路徑的量測。
 `mux/onetone` 缺 slot 時，trigger 初值取 group TOF 加 `5/(2π·min κ)`，length 取 trigger 加固定 1.0 us ADC window。Group TOF 或任一 κ 缺值時，trigger 與 length 留空必填，mixer 不受影響。有 slot 時沿用 slot mixer 與既有 timing 規則。
 R1／R2 的 wiring 保留 pulse gen0／ADC0。MG12 的 mux wiring 填 `gen_ch: 7`、`ro_ch: [2, 3]`，依序對應 R1／R2，不讀 resonator 的 pulse ADC。
-範本不附 library assets，也不預填 module key。八張 mux 表單缺 readout slot 時，Open／Reset 從已知的 group wiring 補通道，tone gain 補 0.1。文件允許 `wiring: {}`；`ro_ch` 未知時，各 tone ADC 留空必填，其餘缺失的必填輸入仍保持 Invalid。有 slot 時沿既有 library 路徑，細節與核對步驟見[接線對照](field-guide.md#generatoradc-與-entry-接線對照)。
-初始 alias `qubit` 指向 Q1，`resonator` 讀取其 resonator。把 `qubit` 改為 Q2 後，`resonator` 跟著切換。重新 Open／Reset 後，scalar flux 表單從 `$qubit.flux_dev` 取得 Q2 的 DC 裝置名稱，不需要 flux 裝置 alias。`qubit1`、`qubit2` 分別指向 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。
+範本不附 library assets，也不預填 module key。八張 mux 表單缺 readout slot 時，Open／Defaults 從已知的 group wiring 補通道，tone gain 補 0.1。文件允許 `wiring: {}`；`ro_ch` 未知時，各 tone ADC 留空必填，其餘缺失的必填輸入仍保持 Invalid。有 slot 時沿既有 library 路徑，細節與核對步驟見[接線對照](field-guide.md#generatoradc-與-entry-接線對照)。
+初始 alias `qubit` 指向 Q1，`resonator` 讀取其 resonator。把 `qubit` 改為 Q2 後，`resonator` 跟著切換。重新 Open／Defaults 後，scalar flux 表單從 `$qubit.flux_dev` 取得 Q2 的 DC 裝置名稱，不需要 flux 裝置 alias。`qubit1`、`qubit2` 分別指向 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。
 
 ## 設計初猜與 predictor
 

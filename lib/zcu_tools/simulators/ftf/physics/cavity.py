@@ -193,7 +193,12 @@ class CavityDrive:
                 + np.abs(products[rows, :, cols, :])
                 + np.abs(products[cols, :, rows, :])
             )
+            # Combine the rate's external and internal weights only for the bound.
+            # Keep the rate's original contraction order to preserve positive values.
             weights = (np.outer(v, v) + np.diag(self._model.kappa_internal_per_ns)) / 2
+            # 8 * eps is 16 unit roundoffs for the moment sums, weighted
+            # contractions, and input rounding. This caps the correction;
+            # it does not bound ADC integration error.
             roundoff = (
                 8
                 * np.finfo(np.float64).eps

@@ -4,11 +4,12 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from itertools import chain
-from typing import Literal
 
 import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
+
+from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
 
 from ._capture import CaptureRound
 from ._carrier_plan import populate_carrier_plan, ramp_families_for_rows
@@ -56,35 +57,29 @@ from .secular import ModelSource
 from .workplan import WorkPlan
 
 
-def create_work_plan(
+def populate_work_plan(
     table: SegmentTable,
     source: ModelSource,
+    plan: WorkPlan,
     budget: float = 1e-3,
     *,
-    telemetry: bool = False,
-    content_key: bytes = b"",
-    history_mode: Literal["record", "project"] = "record",
-) -> WorkPlan:
-    """Create ownership for the complete evolve before prefix/worker planning.
+    cancel: CancellationQuery | None = None,
+) -> None:
+    """Populate a caller-owned plan for the full immutable geometry.
 
-    table is the full immutable geometry and source owns model identity.
-    The plan retains table for lazy multitone and common-frame inventories.
-    Algorithm-specific group planners populate this plan before workers start;
-    budget is the numerical admission budget for cold mixed gate plans.
-    telemetry enables calling-thread CPU accounting before those plans build.
-    history_mode records complete usage for evolve or projects it without
-    changing history for dispatch queries. Neither mode changes cost formulas.
+    Run the group planners before workers start. budget is the numerical
+    admission budget for cold mixed gate plans; source owns model identity
+    and routing history. Raise Cancelled before recording any routing usage
+    if cancel is set between inventory and single-gate planning. The caller
+    closes the plan on success and on every failure.
     """
-    plan = WorkPlan(
-        content_key=content_key, complete_table=table, history_mode=history_mode
-    )
-    plan.routing.enabled = telemetry
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
     populate_gate_inventory(table, source, plan)
+    if cancel is not None and cancel.is_set():
+        raise Cancelled()
     populate_single_gate_plan(table, source, plan, budget)
     populate_multitone_inventory(table, source, plan, budget)
-    return plan
 
 
 def _domains(geometry: Geometry) -> dict[str, NDArray[np.bool_]]:

@@ -1,5 +1,6 @@
 # Source project: ftf-cz-recalibration-20261120 (FTF simulation); copied 2026-11-21.
 # Point: ftf-demo/initial; source document revision (SHA-256): 78818af1db4f9920dee510c15d0276703b4f9300c7f0f0147df6afceb5008537
+# Fixture uses cz_qubit1/cz_qubit2 slot names in place of cz_f1/cz_f2.
 format: zcu.parameter-container
 schema_version: 3
 format_version: '2.0'
@@ -41,8 +42,8 @@ components:
     kind: qubit/transmon
     ext: {}
     module:
-      cz_f2: coupler.pulses.cz_f2
-      cz_f1: coupler.pulses.cz_f1
+      cz_qubit2: coupler.pulses.cz_qubit2
+      cz_qubit1: coupler.pulses.cz_qubit1
     wiring: {}
     freq:
     flux:
@@ -106,5 +107,5 @@ metadata:
   Q2.module.x180: {}
   Q2.module.x90: {}
   MG12.module.readout: {}
-  coupler.module.cz_f2: {}
-  coupler.module.cz_f1: {}
+  coupler.module.cz_qubit2: {}
+  coupler.module.cz_qubit1: {}

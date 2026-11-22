@@ -6,17 +6,17 @@ Single-shot classification check: takes 'shots' single-shot readouts of the prep
 
 ## Parameter sources
 
-Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. The fresh probe template uses `$qubit.freq` and `$qubit.wiring.ch`.
+Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. The fresh probe template uses `$qubit.freq` and `$qubit.wiring.ch`.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
-T1-derived defaults use the Open/Reset snapshot. A missing or null T1, or an unavailable snapshot, uses 30 us, so the 5*T1 wait starts at 150 us. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
 
 These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
 
 ## Module slots
 
-Optional init/reset use `$qubit.module.x180`/reset. Probe starts from qub_probe. Readout uses `$resonator.module.readout` or the readout template. Run uses the Open/Reset snapshot.
+Optional init/reset use `$qubit.module.x180`/reset. Probe starts from qub_probe. Readout uses `$resonator.module.readout` or the readout template. Run uses the Open/Defaults snapshot.
 
 ## Typical writeback
 

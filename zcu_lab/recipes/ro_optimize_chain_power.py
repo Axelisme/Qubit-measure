@@ -44,7 +44,7 @@ class RoOptimizeChainPowerInputs(RecipeInputs):
         description="Gain sample count, at least 2.",
     )
     relax_delay: float | None | Keep = Field(
-        KEEP, description="K: thermal relaxation between 16-read shots, in us."
+        KEEP, description="K: thermal relaxation between 16-read shots, in µs."
     )
     reps: int | None | Keep = Field(
         KEEP,
@@ -81,7 +81,7 @@ async def ro_optimize_chain_power(
     Save keeps shot counts, all 107 sums and analysis. No writeback is proposed.
 
     points → expts sets the gain sample count. Settings are a.u..
-    relax_delay sets K in us. Omission retains the Form value; null goes to its owner.
+    relax_delay sets K in µs. Omission retains the Form value; null goes to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(

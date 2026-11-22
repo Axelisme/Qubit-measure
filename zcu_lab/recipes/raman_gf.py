@@ -74,7 +74,7 @@ class RamanGFInputs(RecipeInputs):
     )
     relax_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Relaxation interval in us for ground preparation.",
+        description="Relaxation interval in µs for ground preparation.",
     )
 
 
@@ -103,7 +103,7 @@ async def raman_gf(session: RecipeSession, inputs: RamanGFInputs) -> RamanGFRepo
     raises the single carrier by detuning/2. Frequency mode holds gain_start;
     gain mode holds detuning_start_mhz; frequency_gain scans both axes.
     detuning_n/gain_n set Form n, lowered to cfg expts. Gain is a DAC full-scale
-    fraction (a.u.), not a calibrated rotation angle. Relaxation timing uses us.
+    fraction (a.u.), not a calibrated rotation angle. Relaxation timing uses µs.
 
     Omission (Python KEEP, not a JSON value) retains the Form value and source.
     Explicit null is passed unchanged to the Form owner, including overrides.

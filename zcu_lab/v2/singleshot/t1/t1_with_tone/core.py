@@ -78,20 +78,27 @@ class T1WithToneCfg(ConfigBase):
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
     sampling: Literal["linear", "decay"] = "decay"
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -130,10 +137,8 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         axes = figure.axes
         lines = [live_line(ax, num_lines=POPULATION_COUNT) for ax in axes]
         for ax in axes:
-            ax.set(xlabel="Time (us)", ylabel="Amplitude", ylim=(0.0, 1.0))
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
+            ax.set(xlabel="Time (µs)", ylabel="P(g), P(e), P(other)", ylim=(0.0, 1.0))
+            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
             ax.legend()
 
@@ -311,7 +316,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         )
         ax1, ax2 = fig.axes
 
-        fig.suptitle(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")
+        fig.suptitle(f"T_1 = {t1:.1f} µs, T_1_b = {t1_b:.1f} µs")
 
         ax1.plot(lens, fit_pops1[:, 0], color="blue", ls="--", label="Ground Fit")
         ax1.plot(lens, fit_pops1[:, 1], color="red", ls="--", label="Excited Fit")
@@ -319,7 +324,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         ax1.scatter(lens, populations1[:, 0], color="blue", label="Ground", s=1)
         ax1.scatter(lens, populations1[:, 1], color="red", label="Excited", s=1)
         ax1.scatter(lens, populations1[:, 2], color="green", label="Other", s=1)
-        ax1.set_ylabel("Population")
+        ax1.set_ylabel("P(g), P(e), P(other)")
         ax1.legend(loc=4)
         ax1.set_ylim(0, 1)
         ax1.grid(True)
@@ -330,8 +335,8 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         ax2.scatter(lens, populations2[:, 0], color="blue", label="Ground", s=1)
         ax2.scatter(lens, populations2[:, 1], color="red", label="Excited", s=1)
         ax2.scatter(lens, populations2[:, 2], color="green", label="Other", s=1)
-        ax2.set_xlabel("Time (μs)")
-        ax2.set_ylabel("Population")
+        ax2.set_xlabel("Time (µs)")
+        ax2.set_ylabel("P(g), P(e), P(other)")
         ax2.legend(loc=4)
         ax2.set_ylim(0, 1)
         ax2.grid(True)

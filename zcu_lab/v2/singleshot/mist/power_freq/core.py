@@ -65,17 +65,24 @@ class FreqPowerCfg(ConfigBase):
     gain: Annotated[SweepCfg, FieldMeta(label="Probe gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Probe freq", unit="MHz")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -242,16 +249,16 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         ax_g.set_title("Ground State Population")
         ax_g.set_xlabel("Drive Gain (a.u.)")
         ax_g.set_ylabel("Drive Frequency (MHz)")
-        fig.colorbar(im_g, ax=ax_g, label="Population (a.u.)")
+        fig.colorbar(im_g, ax=ax_g, label="P(g)")
 
         im_e = ax_e.pcolormesh(gains, freqs, populations[..., 1].T, shading="nearest")
         ax_e.set_title("Excited State Population")
         ax_e.set_xlabel("Drive Gain (a.u.)")
         ax_e.set_ylabel("Drive Frequency (MHz)")
-        fig.colorbar(im_e, ax=ax_e, label="Population (a.u.)")
+        fig.colorbar(im_e, ax=ax_e, label="P(e)")
 
         im_o = ax_o.pcolormesh(gains, freqs, populations[..., 2].T, shading="nearest")
         ax_o.set_title("Other States Population")
         ax_o.set_xlabel("Drive Gain (a.u.)")
         ax_o.set_ylabel("Drive Frequency (MHz)")
-        fig.colorbar(im_o, ax=ax_o, label="Population (a.u.)")
+        fig.colorbar(im_o, ax=ax_o, label="P(other)")

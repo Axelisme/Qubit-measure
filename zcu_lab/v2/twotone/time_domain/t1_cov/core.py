@@ -102,12 +102,12 @@ class T1CovCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
     sampling: Literal["linear", "decay"] = "linear"
-    reps: Annotated[int, FieldMeta(label="Reps")] = 1000
-    rounds: Annotated[int, FieldMeta(label="Rounds")] = 10
+    reps: Annotated[int, FieldMeta(label="Reps", unit="count")] = 1000
+    rounds: Annotated[int, FieldMeta(label="Rounds", unit="count")] = 10
     relax_delay: Annotated[
-        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
+        float, FieldMeta(label="Relax delay", unit="µs", decimals=3)
     ] = 1.0
 
 
@@ -187,7 +187,7 @@ class T1CovExp(Experiment[T1CovResult, T1CovCfg]):
         prog = builder.build()
 
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Delay (us)", ylabel="Change probability C")
+        ax.set(xlabel="Delay (µs)", ylabel="Change probability C")
         update = live_transfer(context.plots, ax, times)
         fig.show()
         buffer = SignalBuffer((len(times), 6, 6), dtype=np.float64, on_update=update)
@@ -233,10 +233,10 @@ class T1CovExp(Experiment[T1CovResult, T1CovCfg]):
         fig, ax = plots.subplots(num="fit")
         ax.plot(xs, ys, "o-", label=f"C, π̂={transfer.populations.round(3).tolist()}")
         ax.plot(xs, fit.curve, label="Fit", color="orange")
-        title = rf"$T_1$ = {t1:.2f} ± {t1_err:.2f} us"
+        title = rf"$T_1$ = {t1:.2f} ± {t1_err:.2f} µs"
         if t1b is not None and t1b_err is not None:
-            title += "\n" + rf"$T_{{1b}}$ = {t1b:.2f} ± {t1b_err:.2f} us"
-        ax.set(title=title, xlabel="Delay (us)", ylabel="Change probability C")
+            title += "\n" + rf"$T_{{1b}}$ = {t1b:.2f} ± {t1b_err:.2f} µs"
+        ax.set(title=title, xlabel="Delay (µs)", ylabel="Change probability C")
         ax.legend(loc="upper right")
         ax.grid(True)
         fig.tight_layout()

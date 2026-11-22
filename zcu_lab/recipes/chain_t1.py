@@ -37,7 +37,7 @@ class ChainT1Inputs(RecipeInputs):
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in us.",
+        description="Delay sweep stop in µs.",
     )
     points: int | None | Keep = Field(
         KEEP,
@@ -57,16 +57,16 @@ class ChainT1Report(RecipeReport):
     """Chain T1 fit and its checks; cancellation returns no report."""
 
     t1_us: float | None = Field(
-        description="T1 in us, the larger-amplitude eigen time; null means not estimable."
+        description="T1 in µs, the larger-amplitude eigen time; null means not estimable."
     )
     t1_err_us: float | None = Field(
-        description="T1 uncertainty in us; null means not estimable."
+        description="T1 uncertainty in µs; null means not estimable."
     )
     secondary_time_us: float | None = Field(
-        description="The other eigen time in us; null means not estimable."
+        description="The other eigen time in µs; null means not estimable."
     )
     secondary_time_err_us: float | None = Field(
-        description="Secondary time uncertainty in us; null means not estimable."
+        description="Secondary time uncertainty in µs; null means not estimable."
     )
     within_point: CycleCheck | None = Field(
         description="Within-point check J, df, p; null without analysis."

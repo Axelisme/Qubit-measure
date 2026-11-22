@@ -62,17 +62,24 @@ class OnetoneFluxGlobalCfg(ConfigBase):
     )
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     initial_delay: Annotated[
         float,
         FieldMeta(
             label="Initial delay",
-            unit="us",
+            unit="µs",
             description="Delay before the first repetition.",
         ),
     ] = 1.0
@@ -80,7 +87,7 @@ class OnetoneFluxGlobalCfg(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -116,7 +123,7 @@ def _plot_flux_maps_and_make_updater(
         fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
-        line_ax.set_xlabel("Frequency (MHz)")
+        line_ax.set(xlabel="Frequency (MHz)", ylabel="Magnitude (a.u.)")
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         line_ax.grid()
         heatmaps.append(live_heatmap(heat_ax, uniform=False))

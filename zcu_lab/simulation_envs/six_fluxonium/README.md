@@ -118,7 +118,7 @@ Q1 through Q6, R1 through R6, local current-source components `Q1_bias` through
 `Q6_bias`, shared `coil_bias` and the `MG123456` mux group. Each Qi references
 Ri and its own `Qi_bias`. The group references `coil_bias`. Aliases bind `mux`
 to `MG123456`, `qubit` to `Q1` and `resonator` to `$qubit.resonator`.
-Scalar flux forms read `$qubit.flux_dev` on Open/Reset without a device alias.
+Scalar flux forms read `$qubit.flux_dev` on Open/Defaults without a device alias.
 The template uses `schema_version: 3`. Each qubit owns `flux.offset` in Phi0
 and `flux.period.Qn_bias` / `flux.period.coil_bias` in A/Phi0.
 Component offset is `-local_offset/local_period - coil_offset/coil_period`,
@@ -168,7 +168,7 @@ to 0. Set `MG123456.wiring.gen_ch` to 7 and `wiring.ro_ch` to
 Review saved readout modules, pulse modules and form inputs for explicit old
 channel IDs. Update pulse routes to gen0/ADC0 and mux routes to gen7/ADC2..7;
 do not add a drive mixer setting. Restart to load the working YAML, then reopen
-or Reset forms before Run. A new project root can seed a fresh entry from
+or choose Defaults before Run. A new project root can seed a fresh entry from
 `entry-template.yaml`, but it does not migrate saved calibrations or modules.
 The loader has no old-board fallback.
 
@@ -196,7 +196,7 @@ Changing the scalar form's selected local-source current affects that qubit only
 `(I_coil - coil_offset)/coil_period + (I_local - offset)/period`, with all
 currents, offsets and periods in A. The [settings guide](field-guide.md#dc-and-control-units)
 lists both sets of physical coefficients. The lines have no crosstalk.
-Reopen or Reset a form after changing its source values or aliases.
+Reopen or choose Defaults after changing its source values or aliases.
 Do not treat the physical YAML's parameters as a measured calibration.
 
 The template intentionally leaves calibration-dependent inputs incomplete.

@@ -19,16 +19,28 @@ class T2RamseyInput(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
     detune_ratio: Annotated[
-        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
+        float,
+        FieldMeta(
+            label="Detune ratio (fringes/step)",
+            description="Enter the number of fringes per delay step for the final-pulse phase ramp.",
+            decimals=3,
+        ),
     ] = 0.05
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ] = 1
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     earlystop_snr: Annotated[
         float | None,
@@ -41,7 +53,7 @@ class T2RamseyInput(ConfigBase):
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),

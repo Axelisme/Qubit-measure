@@ -278,6 +278,7 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     assert metadata_from_container(stored).snapshot == session.metadata.snapshot
     variable = next(iter(stored.vars.values()))
     np.testing.assert_allclose(variable.axes[0].values, [1e9, 1.001e9, 1.002e9])
+    np.testing.assert_array_equal(variable.values, [1 + 2j, 3 - 4j, 5 + 6j])
     second = session.save(origin=CommandOrigin("mcp"))
     assert second.run_id == first.run_id
     assert second.outputs[0].output.path == native.output.path
@@ -707,6 +708,12 @@ def test_save_all_writes_all_members_and_resaves_saved_artifacts(
     assert all(
         item.status == "saved" and item.output.path.is_file() for item in first.outputs
     )
+    assert {
+        item.output.path.name
+        for item in first.outputs
+        if item.output.format == "png"
+        and item.output.path.is_relative_to(session.entry.database_path)
+    } == {"analysis_results_fit.png", "analysis_results_residual.png"}
     sections = session.state.get_artifact_snapshots("tab")
     assert [section.section for section in sections] == [
         "run",

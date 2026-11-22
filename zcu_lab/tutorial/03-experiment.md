@@ -21,7 +21,7 @@ cp -R zcu_lab/v2/twotone/power_dep zcu_lab/v2/twotone/power_map
 | 檔案 | 要改的位置 | 完成後的狀態與契約 |
 | --- | --- | --- |
 | `core.py` | cfg、Result、experiment 類別、`AXES_SPEC`、`run`，以及是否需要 `analyze` | 核心與持久化名稱獨立，見 [新 experiment 檢查清單](../v2/experiment-authoring.md#寫新-experiment-時的檢查清單)。 |
-| `form.py` | `PowerCfg` import、Form 型別、初值樹、角色引用、Template／Slot | Open／Reset 能建立新 cfg 的輸入樹，見 [Form 與固定來源](../v2/measure-authoring.md#目錄佈局)。 |
+| `form.py` | `PowerCfg` import、Form 型別、初值樹、角色引用、Template／Slot | Open／Defaults 能建立新 cfg 的輸入樹，見 [Form 與固定來源](../v2/measure-authoring.md#目錄佈局)。 |
 | `gui.py` | core import、RunRecord alias、Adapter 值與選填分析／writeback | GUI 能建立核心並配對同次 cfg／Result，見 [GUI ownership](../v2/gui-contracts.md#ownership)。 |
 | `guide.md` | 量測目的、必要校準、操作、結果判讀、writeback | operator 能知道何時能 Run，見 [operator guide 約束](../v2/measure-authoring.md#operator-workflow-guide-約束)。 |
 | `__init__.py` | package 說明，若有 exports 也要更新 | import package 不啟動 GUI 或量測，見 [實驗目錄佈局](../v2/experiment-authoring.md#目錄佈局)。 |
@@ -44,9 +44,9 @@ class PowerMapCfg(ConfigBase):
     readout: Readout.Cfg
     gain: Annotated[SweepCfg, FieldMeta(unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(unit="MHz")]
-    reps: int = 1
-    rounds: int = 1
-    relax_delay: Annotated[float, FieldMeta(unit="us")] = 1.0
+    reps: Annotated[int, FieldMeta(unit="count")] = 1
+    rounds: Annotated[int, FieldMeta(unit="count")] = 1
+    relax_delay: Annotated[float, FieldMeta(unit="µs")] = 1.0
 ```
 
 這段示範頂層型別與單位，複製的 power map 仍需保留其他實驗欄位。
@@ -80,7 +80,7 @@ frequency 點數改為 `101`。這些只是新表單的起始值，不代表硬�
 逐項核對原本的初值樹：
 
 - `"$qubit.freq"` 與 `"1.5 * $qubit.kappa"` 決定 frequency centre／span。
-  它們讀取 Open／Reset 的固定來源。缺校準時欄位保持 Invalid，不填猜測數字。
+  它們讀取 Open／Defaults 的固定來源。缺校準時欄位保持 Invalid，不填猜測數字。
 - `Template("qub_probe", bindings={"qubit": "$qubit"}, ...)` 產生 inline probe。
   保留 freq／gain 的 `Hidden(0.0)`，因為 `run` 會用 sweep 座標覆寫它們。
 - `Slot("$resonator.module.readout")` 使用綁定 resonator 已選的 library module。
@@ -207,7 +207,7 @@ Catalog 明列 Adapter 值，不掃描 class 或目錄自動註冊。完整規�
 2. 選 `power_map`，確認出現 modules、gain／frequency sweep 與 averaging 輸入。
    展開頂層 Gain，起始範圍應為 0.001 到 0.2，共 31 點。
 3. 切到 Guide tab，確認顯示新 `guide.md`，沒有指回舊實驗。
-4. 缺少校準時，補 entry／library 資料後按 Reset 重新捕捉來源。
+4. 缺少校準時，補 entry／library 資料後按 Defaults 重新捕捉來源。
    能開表單不表示 cfg 有效，也不表示已取得硬體執行授權。
 
 若 New Tab 沒有新項目，先核對 definitions 的 import／key 與載入錯誤。
