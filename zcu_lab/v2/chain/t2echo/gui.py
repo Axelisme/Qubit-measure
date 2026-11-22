@@ -16,7 +16,6 @@ from zcu_lab.v2.chain.t2echo.core import (
 )
 from zcu_lab.v2.chain.t2echo.form import make_form
 
-
 from .._joint import JointResidualSummary
 
 
@@ -26,9 +25,11 @@ class ChainT2EchoSummary(JointResidualSummary):
     t2: float | None = Field(description="T2 echo (µs).")
     t2_err: float | None = Field(description="T2 echo Wald standard error (µs).")
     tf: float | None = Field(description="Third-state decay time (µs).")
-    tf_err: float | None = Field(description="Third-state decay time Wald standard error (µs).")
+    tf_err: float | None = Field(
+        description="Third-state decay time Wald standard error (µs)."
+    )
     first_read_t2: float | None = Field(
-        description="First-read T2 echo (µs), used to start the joint fit."
+        description="First-read T2 echo (µs), used to start the joint fit; null if unavailable."
     )
 
 

@@ -85,8 +85,9 @@ async def chain_t2echo(
     """Sweep the total echo wait with one K-cycle per rep: K, then (pi/2, x/2, pi, x/2, pi/2, read, read) x 8.
 
     relax_delay is the thermalisation wait K; the Form starts it at 5 T1 and
-    overrides can change it. Primary fits the first read with the twotone
-    echo decay fit for the starting value, then fits all 65 numbers jointly.
+    overrides can change it. Primary uses the first-read decay time to start
+    one joint fit of all 65 numbers. With no first-read estimate, the joint
+    fit starts from the saved wait span and first_read_t2_us is null.
     It reports T2 echo and the third-state decay time with Wald errors, J,
     df, J/df, its chi-square reference limits and the fraction of whitened
     components with |r| > 3. The per-delay projection stays in the figure.
