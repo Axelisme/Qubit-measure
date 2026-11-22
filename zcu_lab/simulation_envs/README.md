@@ -34,10 +34,10 @@ Seed 與 occupation 可以明填 `null`，分別表示 startup 選一次與使�
 | --- | --- | --- |
 | single_fluxonium | gen0 pulse readout、gen1 charge、gen2 fast flux，皆為 v6 | dyn ro0 |
 | integer_fluxonium | gen0 pulse readout、gen1 pump、gen2 Stokes，皆為 v6 | dyn ro0 |
-| FTF | gen0 pulse readout、gen2／3 charge、gen7 mux | dyn ro0、PFB ro2／3，依 resonator 順序 |
+| FTF | gen0 pulse readout、gen1／4 fast flux、gen2／3 charge、gen7 mux | dyn ro0、PFB ro2／3，依 resonator 順序 |
 | six_fluxonium | gen0 pulse readout、gen1..6 charge，七個皆為 v6；gen7 mux | dyn ro0、PFB ro2..7，依 Q1..Q6 順序 |
 
-FTF 的 fast-flux 範例仍是模型 YAML 中的註解，不在預設接線中。
+FTF 的 [canonical preset](FTF/default.yaml) 啟用 F1/gen1 與 F2/gen4 快磁通線，[demo entry 範本](FTF/entry-template.yaml) 的 Q1／Q2 對應到這兩路。接線係數是模型示意值，不是實機校準。
 Six 的 v6 drive 不要求額外填 `mixer_freq`；既有 mux mixer 設定保持不變。
 
 共用 v2 YAML 的 gen7 與 dyn ro0／1 共用 tProc wave-output port 7，分別以
@@ -86,7 +86,7 @@ Gauss、cosine、drag、arb 與 flat-top 兩端使用 product 刻度。
 完整係數與韌體出處見 [frontend 契約](../../lib/zcu_tools/program/v2/simulation/README.md#output-amplitude-scale)。
 
 模型 YAML 的 charge、flux 與 incident-field 係數仍以 DDS 輸出為基準，不加補償。
-各 entry 範本沒有 envelope π gain 或 pulse library，無須把物理係數翻倍。
+FTF 的 [demo library](FTF/entry-library.yaml) 提供 Q1／Q2 的 cosine π 與 π/2 pulse。表單從 library 取得 program gain，不調整模型 YAML 的物理係數。這些模組提供示範初值，不表示本次重新量測或校準。
 舊版模擬中用 envelope 校過的 program gain，等效新值約為舊值的
 `65536/32766 = 2.0001220777635353` 倍，另受 gain-word 取整影響。
 重新檢查 library pulse 的 gain、waveform 與是否超過 gain 上限。

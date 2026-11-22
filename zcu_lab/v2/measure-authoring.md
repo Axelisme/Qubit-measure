@@ -597,7 +597,7 @@ Form 明確選擇倍率或場景並組結構，不把校準政策放進 generic 
 
 實驗可以用專用初值。[Single-tone reset 頻掃的 Form](twotone/reset/single_tone/freq/form.py) 用 `$qubit.ext.reset_f` 和 `$qubit.ext.reset_fwhm` 決定掃描窗。`reset_fwhm` 是 reset 側帶的半高全寬，不是 qubit 躍遷的 `kappa`。
 
-[牆鐘工具](../../tools/experiment_wall_time.py) 在 Open 建好表單後，以 `form.write(case.overrides)` 套用該 adapter 的[案例覆寫](../../tools/data/experiment_wall_time/overrides.json)，再驗證表單並決定是否送出 Run。例如 `twotone/freq` 覆寫 `freq.start` 和 `freq.stop`，用 Q1 在該 fixture 的功率展寬（power-broadened）頻譜選掃描窗。覆寫只改該案例的表單，不補來源資料，也不把功率展寬的線寬當成 `kappa` 校準值。
+[牆鐘工具](../../tools/README.md#實驗-run-牆鐘)在 Open 建好表單後，依[場景清單](../../tools/data/experiment_wall_time/case-inputs.json)套用該場景明列的覆寫，再驗證表單並決定是否送出 Run。例如 `twotone/freq` 場景用有功率展寬的 Q1 頻譜選擇 `freq.start` 和 `freq.stop`。覆寫只改該場景的表單，不補來源資料，也不把功率展寬當成 `kappa` 校準值。
 
 ### T1 與等待
 

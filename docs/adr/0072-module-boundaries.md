@@ -173,7 +173,9 @@ Lab 定義改動（含畫面）以 `experiment.probe` 分別驗 `run_stage`、`s
 
 **規則。** GUI、MCP 組合根和開發工具需要 lab 宣告時，只直接 import `zcu_lab.assembly`，不重組其內部定義。固定 optimizer benchmark 的核心 pulse 序列與每個場景的模型值由工具持有，不 import lab 或讀可變的 lab YAML。入庫且持續使用的模擬量測工具與測試不讀 `zcu_lab/simulation_envs/`；一次性研究可讀已提交的環境參數。
 
-**例子。** `apps/measure.py` 用 `lab_definitions()`，不 import `zcu_lab.v2.twotone.freq.core`，lab 可在入口後調整實驗、元件、recipe 與 workflow 的佈局。固定量表場景可重複核心序列以便直接閱讀，lab 改序列不會自動更新量表。量表有公開 program 編譯的場景、直接用 `SingleFluxoniumModel` 的單段場景，以及用公開 FTF 模型和多段 `TimelineBatch` 的 gate 場景。它們共用 producer CLI；固定設定、builder、`numeric_builder`、資源生命週期及路徑見 [Tools README](../../tools/README.md#fixed-scenarios-companions-and-reference-cache) 和 [Freeze numeric scenes](../../tools/README.md#freeze-numeric-scenes)。
+**例子。** `apps/measure.py` 用 `lab_definitions()`，不 import `zcu_lab.v2.twotone.freq.core`，lab 可在入口後調整實驗、元件、recipe 與 workflow 的佈局。[實驗 Run 牆鐘](../../tools/README.md#實驗-run-牆鐘)也只從 assembly 取得宣告。工具持有場景清單、FTF 設定及乾淨 point；每列開現行 Form 並派送 Controller Run。Lab 改標準 preset 或加 adapter 不會改場景；改已選實驗的 Form，工具會用新的 Form。
+
+固定 optimizer benchmark 可重複核心序列以便直接閱讀，lab 改序列不會自動更新量表。量表有公開 program 編譯的場景、直接用 `SingleFluxoniumModel` 的單段場景，以及用公開 FTF 模型和多段 `TimelineBatch` 的 gate 場景。它們共用 producer CLI；固定設定、builder、`numeric_builder`、資源生命週期及路徑見 [Tools README](../../tools/README.md#fixed-scenarios-companions-and-reference-cache) 和 [Freeze numeric scenes](../../tools/README.md#freeze-numeric-scenes)。
 
 **邊界。** `migrations/` 可直接識別舊實驗格式；若改成不同 lab 共用的框架，就改用 assembly。這不保證刪除 lab 後現有組合根仍可啟動，也不新增位置字串或 Python entry point 註冊。需要真實 lab 宣告的品質檢查仍走 assembly，不複製 lab。
 
@@ -184,6 +186,7 @@ Lab 定義改動（含畫面）以 `experiment.probe` 分別驗 `run_stage`、`s
 - 2026-11-14，使用者：「其实应该是 B， 因为我对这个 repo 的期望是，我把 [zcu_lab] 删掉，也可以正常运作。而 [zcu_lab] 是使用者自由的、控制的、写的、安排结构的模块。」並澄清：「我的意思是 ，Script 的定位与 [zcu_lab] 比较像，而 Tool 的定位是用于开发。我不确定该不该让它依赖 Lab。MCP 需要发现、实验，而也确实是需要一种正规的方法来宣告你有哪些实验。我不确定要怎么好的结合两者，让 MCP 尽量不依赖[zcu_lab]。」對註冊取捨說：「但是呢，我又不想把注册逻辑搞得太复杂，导致实作行数太多。有简单的方法吗？还是我就放弃？我就是让它可以依赖，但是只依赖局部的部分的档案。」對 assembly 入口和 migrations 例外答「好，甲」。引文以 `[zcu_lab]` 代替語音輸入的 lab 名稱。
 - 2026-11-15，使用者：「但腳本也不應該依賴於我的模擬器環境參數設定，而是自己為每個場景設定的固定環境」，並界定範圍：「研究的话就没差，都可以用。但是如果你要持久的工具的话，麻烦请不要依赖于作者可能会改到的东西。」以上三日的比較見 [Lab 依賴邊界討論](../discussions/2026-11-14-lab-dependency-boundary.md)。
 - 2026-11-16，使用者：「檔案大就請不要入庫，用類似快取的方式來減少重複計算，記得考慮跨worktree也能復用的方案」；對範圍與釘住方式答「1a 2a」，對共用快取提案答「R」。見[凍結場景存放](../discussions/2026-11-16-frozen-scene-storage.md)。
+- 2026-11-22，使用者：「沒有，我還是覺得工具應該自備一份」。2026-11-23 對完整 Run 是否複製演化序列，使用者以維護為先，裁決「就照你的建议，以呼叫实验定义来聊就好了。」見[牆鐘工具量手選場景](../discussions/2026-11-23-curated-wall-time-scenes.md)。
 
 ### 開發工具的數值交接
 
