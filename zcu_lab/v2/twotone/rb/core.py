@@ -16,6 +16,7 @@ from zcu_tools.analysis.fitting import (
     project_arm_means,
 )
 from zcu_tools.analysis.fitting import RBAnalysis as ReferenceRBAnalysis
+from zcu_tools.analysis.fitting.base import expfunc
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -109,25 +110,35 @@ class RBCfg(ConfigBase):
 
 
 def _live_plot(
-    plots: Plots, depths: NDArray[np.int64], n_arms: int
+    plots: Plots, depths: NDArray[np.int64], target: TargetGate | None
 ) -> Callable[[NDArray[np.complex128]], None]:
     """Show one live line per arm and return its owner-dispatched IQ update."""
-    fig, ax = plots.subplots(num="measurement")
-    ax.set(xlabel="Random Clifford depth (count)", ylabel="Signal (a.u.)")
+    fig, ax = plots.subplots(num="measurement", layout="constrained")
+    experiment = "Reference RB" if target is None else f"Interleaved RB · {target}"
+    labels = (
+        ("Reference",) if target is None else ("Reference", f"Interleaved {target}")
+    )
+    ax.set(
+        title=experiment,
+        xlabel="Random Clifford depth (count)",
+        ylabel="IQ projection (a.u.)",
+    )
     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-    ax.grid()
-    viewer = live_errorbar(ax, num_lines=n_arms)
-    labels = ("Reference", "Interleaved")[:n_arms]
+    viewer = live_errorbar(ax, num_lines=len(labels))
     for line, label in zip(ax.lines, labels, strict=True):
-        line.set_label(label)
-    ax.legend()
+        line.set_label(f"{label} ± seed SD")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncols=len(labels))
 
     xs = depths.astype(np.float64)
 
     @plots.on_plot_thread
     def update(data: NDArray[np.complex128]):
         projection = project_arm_means(data)
-        return viewer.set(xs, projection.mean_signals, projection.seed_std)
+        complete = int(np.isfinite(data).all(axis=(1, 2)).sum())
+        title = ax.set_title(
+            f"{experiment} · {complete}/{data.shape[0]} seeds complete"
+        )
+        return (*viewer.set(xs, projection.mean_signals, projection.seed_std), title)
 
     fig.show()
     return update
@@ -174,7 +185,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             ],
             dtype=np.int64,
         )
-        update = _live_plot(context.plots, depths, len(arms))
+        update = _live_plot(context.plots, depths, cfg.target_gate)
         buffer = SignalBuffer(
             (len(seeds), len(arms), len(depths)),
             on_update=update,
@@ -316,15 +327,23 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         # 1. Select the estimate based on the saved arms, not on current settings.
         del options
         result = source.result
+        lo, hi = int(result.depths.min()), int(result.depths.max())
+        dense = np.linspace(lo, hi, 200)
         if len(result.arms) == 1:
             fit = analyze_reference_rb(result.depths, result.signals)
             analysis = fit.summary
             labels = ("Reference",)
+            # Evaluate the existing exponential from p and its two endpoint values.
+            y_lo = fit.fit_signals[0, result.depths.argmin()]
+            y_hi = fit.fit_signals[0, result.depths.argmax()]
+            log_p = np.log(analysis.p_reference)
+            fraction = np.expm1(log_p * (dense - lo)) / np.expm1(log_p * (hi - lo))
+            curves = [y_lo + (y_hi - y_lo) * fraction]
+            fit_labels = ("Reference fit",)
             title = (
-                f"Reference decay: p = {analysis.p_reference:.6f}, "
-                f"error per Clifford = {analysis.reference_epc:.6f}\n"
-                f"95% seed bootstrap EPC: [{analysis.epc_ci_low:.6f}, "
-                f"{analysis.epc_ci_high:.6f}] (statistical only)"
+                f"Reference RB · Error per Clifford = {analysis.reference_epc:.6f}\n"
+                f"95% seed bootstrap interval [{analysis.epc_ci_low:.6f}, "
+                f"{analysis.epc_ci_high:.6f}]"
             )
         else:
             fit = analyze_irb(result.depths, result.signals)
@@ -332,30 +351,40 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             target = source.cfg.target_gate if source.cfg is not None else None
             name = "target" if target is None else target
             labels = ("Reference", f"Interleaved {name}")
+            curves = [expfunc(dense, *arm.params) for arm in fit.arm_fits]
+            fit_labels = tuple(
+                f"{label} fit (R² = {r2:.3f})" if r2 is not None else f"{label} fit"
+                for label, arm in zip(labels, fit.arm_fits, strict=True)
+                for r2 in (arm.quality.r2,)
+            )
             title = (
-                f"{name} fidelity estimate: {analysis.gate_fidelity:.6f}\n"
-                f"95% seed bootstrap: [{analysis.fidelity_ci_low:.6f}, "
-                f"{analysis.fidelity_ci_high:.6f}] (statistical only)"
+                f"Interleaved RB · {name} fidelity = {analysis.gate_fidelity:.6f}\n"
+                f"95% paired-seed interval [{analysis.fidelity_ci_low:.6f}, "
+                f"{analysis.fidelity_ci_high:.6f}]"
             )
 
         # 2. Plot the observed and fitted decay in the same IQ projection.
         fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(labels):
-            (line,) = ax.plot(result.depths, fit.mean_signals[arm], "o", label=label)
-            ax.errorbar(
+            points = ax.errorbar(
                 result.depths,
                 fit.mean_signals[arm],
                 yerr=fit.seed_std[arm],
-                fmt="none",
-                ecolor=line.get_color(),
+                fmt="o",
+                label=f"{label} ± seed SD",
             )
-            ax.plot(result.depths, fit.fit_signals[arm], color=line.get_color())
+            line, _, _ = points.lines
+            ax.plot(
+                dense,
+                curves[arm],
+                color=line.get_color(),
+                label=fit_labels[arm],
+            )
         ax.set(
             xlabel="Random Clifford depth (count)",
-            ylabel="Projected IQ (a.u.)",
+            ylabel="IQ projection (a.u.)",
             title=title,
         )
         ax.legend()
-        ax.grid(True)
         fig.tight_layout()
         return analysis

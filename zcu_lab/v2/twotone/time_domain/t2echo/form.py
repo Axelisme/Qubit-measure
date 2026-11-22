@@ -16,11 +16,42 @@ from zcu_lab.v2.support.measure.seed_metadata import (
 class T2EchoInput(ConfigBase):
     """Captured pulses, delay sweep and phase advance in fringes per step."""
 
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Optional preparation before the first π/2 pulse.",
+        ),
+    ] = None
+    pi2_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="π/2 pulse",
+            description="Select the calibrated pulse used to start and end the echo.",
+        ),
+    ]
+    pi_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Refocusing π pulse",
+            description="Select the calibrated rotation at the midpoint of the total delay.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Select the pulse and integration window that measure IQ after the final rotation.",
+        ),
+    ]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Total free-evolution delay",
+            unit="µs",
+            description="Sweep the sum of the two waits on either side of the π pulse.",
+        ),
+    ]
     detune_ratio: Annotated[
         float,
         FieldMeta(

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
-from matplotlib.ticker import MaxNLocator, ScalarFormatter
+from matplotlib.axes import Axes
+from matplotlib.collections import PolyCollection
+from matplotlib.colors import Normalize
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -43,8 +47,6 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.process import rotate2real
-
-from zcu_lab.v2.support import live_heatmap, live_line
 
 
 @dataclass(frozen=True)
@@ -85,10 +87,10 @@ class CPMGAnalysis:
 
 
 def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
+    """Project mean IQ and scale each count's observed range, keeping NaN holes."""
     real_signals = rotate2real(signals).real
-    max_vals = np.max(real_signals, axis=1, keepdims=True)
-    min_vals = np.min(real_signals, axis=1, keepdims=True)
+    max_vals = np.fmax.reduce(real_signals, axis=1, keepdims=True, initial=np.nan)
+    min_vals = np.fmin.reduce(real_signals, axis=1, keepdims=True, initial=np.nan)
     return (real_signals - min_vals) / np.clip(max_vals - min_vals, 1e-12, None)
 
 
@@ -303,50 +305,173 @@ def _prepare_delays(
     return windows, lengths
 
 
-def _live_plot(
-    plots: Plots, times: NDArray[np.int64]
-) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64], float]], None]:
-    """Show the count/time map and return its plot-thread update callback.
+def _delay_edges(delays: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Bound each delay cell by midpoints on its own sweep, in us."""
+    if delays.shape[1] == 1:
+        return delays + np.array([-0.5, 0.5])
+    half_steps = 0.5 * np.diff(delays, axis=1)
+    return np.concatenate(
+        (
+            delays[:, :1] - half_steps[:, :1],
+            delays[:, :-1] + half_steps,
+            delays[:, -1:] + half_steps[:, -1:],
+        ),
+        axis=1,
+    )
 
-    Pass the run plots and pi-pulse counts. The callback consumes a time axis in
-    us, normalized (count, time) contrast and the current SNR as a flat payload.
-    It updates the heatmap, two recent rows and SNR title; inputs are unchanged.
+
+def _count_map(
+    ax: Axes,
+    counts: NDArray[np.int64],
+    delays: NDArray[np.float64],
+    contrast: NDArray[np.float64],
+) -> PolyCollection:
+    """Draw equally wide count slots; each slot uses its own delay cells and colors."""
+    slots = np.arange(counts.size)
+    edges = _delay_edges(delays)
+    left = np.broadcast_to(slots[:, None] - 0.5, delays.shape)
+    right = left + 1
+    start, end = edges[:, :-1], edges[:, 1:]
+    corners = np.stack(
+        (
+            np.stack((left, start), axis=-1),
+            np.stack((right, start), axis=-1),
+            np.stack((right, end), axis=-1),
+            np.stack((left, end), axis=-1),
+        ),
+        axis=-2,
+    )
+    # Adjacent columns can have different y boundaries; no cell spans their join.
+    image = PolyCollection(
+        list(corners.reshape(-1, 4, 2)),
+        array=contrast.ravel(),
+        norm=Normalize(0, 1),
+        cmap="RdBu_r",
+        edgecolors="none",
+        antialiaseds=False,
+    )
+    ax.add_collection(image, autolim=False)
+    duplicates = Counter(counts.tolist())
+    ticks = np.linspace(0, counts.size - 1, min(counts.size, 6), dtype=int)
+    labels = [
+        f"{counts[i]}\n(#{i + 1})" if duplicates[counts[i]] > 1 else str(counts[i])
+        for i in ticks
+    ]
+    ax.set_xticks(ticks, labels=labels)
+    ax.set(xlim=(-0.5, counts.size - 0.5), ylim=(edges.min(), edges.max()))
+    ax.grid(False)
+    return image
+
+
+def _live_plot(
+    plots: Plots, times: NDArray[np.int64], delays: NDArray[np.float64]
+) -> Callable[[tuple[NDArray[np.float64], float]], None]:
+    """Show each count's delay grid; return an owner-thread contrast/SNR updater.
+
+    The callback receives normalized (count, time) contrast and current SNR.
+    It updates the map, two recent traces and titles without changing inputs.
     """
-    fig, _ = plots.subplots(1, 2, num="measurement")
+    fig, _ = plots.subplots(1, 2, num="measurement", layout="constrained")
     heat_ax, line_ax = fig.axes
-    heat_ax.set(xlabel="Pi pulses (count)", ylabel="Time idxs")
-    line_ax.set(xlabel="Time idxs", ylabel="Signal (a.u.)")
-    formatter = ScalarFormatter(useMathText=True)
-    formatter.set_powerlimits((-2, 2))
-    heat_ax.xaxis.set_major_formatter(formatter)
-    heat_ax.yaxis.set_major_formatter(formatter)
-    heatmap = live_heatmap(heat_ax, uniform=True)
+    heat_ax.set(
+        title="CPMG acquisition",
+        xlabel="π pulses (count)",
+        ylabel="Total evolution delay (µs)",
+    )
+    line_ax.set(
+        xlabel="Total evolution delay (µs)", ylabel="Normalized IQ projection (a.u.)"
+    )
+    heatmap = _count_map(heat_ax, times, delays, np.full_like(delays, np.nan))
+    fig.colorbar(heatmap, ax=heat_ax, label="Normalized IQ (a.u.)")
     line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-    line_ax.grid()
-    lines = live_line(line_ax, num_lines=2)
-    for artist in line_ax.lines[:-1]:
-        artist.set(marker="None", alpha=0.3, color="red")
-    line_ax.lines[-1].set(label="current line", marker=".", color="C0")
-    line_ax.legend()
+    (previous,) = line_ax.plot(
+        [], [], "-", alpha=0.6, color="C1", label="Previous count"
+    )
+    (latest,) = line_ax.plot(
+        [], [], ".-", markersize=5, color="C0", label="Latest count"
+    )
+    line_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18))
 
     @plots.on_plot_thread
-    def update(data: tuple[NDArray[np.float64], NDArray[np.float64], float]):
-        """Refresh the map, recent rows and SNR title; return changed artists."""
-        ys, real, snr = data
+    def update(data: tuple[NDArray[np.float64], float]):
+        """Refresh the map, recent traces and SNR title; return changed artists."""
+        real, snr = data
         valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
         current = int(valid[-1]) if valid.size else -1
-        history = np.full((2, len(ys)), np.nan)
-        for offset in range(min(2, current + 1)):
-            history[-offset - 1] = real[current - offset]
-        artists = heatmap.set(times.astype(np.float64), ys, real)
-        artists = (*artists, *lines.set(ys, history))
-        title = f"snr = {snr:.1f}" if snr else None
-        if title is not None:
-            return (*artists, heat_ax.set_title(title))
-        return artists
+        heatmap.set_array(real.ravel())
+        for line, slot in ((previous, current - 1), (latest, current)):
+            if slot >= 0:
+                line.set_data(delays[slot], real[slot])
+            else:
+                line.set_data([], [])
+        line_ax.relim()
+        line_ax.autoscale_view()
+
+        title = f"CPMG · {valid.size}/{times.size} counts measured"
+        row = f"Latest: {times[current]} π pulses" if current >= 0 else "Awaiting data"
+        if snr:
+            row += f" · SNR {snr:.1f}"
+        return (
+            heatmap,
+            previous,
+            latest,
+            heat_ax.set_title(title),
+            line_ax.set_title(row),
+        )
 
     fig.show()
     return update
+
+
+def _plot_coherence(
+    plots: Plots,
+    result: CPMG_Result,
+    lifetimes: NDArray[np.float64],
+    errors: NDArray[np.float64],
+    summary: CPMGAnalysis,
+    options: CPMGAnalyzeOptions,
+) -> None:
+    """Compare the IQ map with the accepted row fits and optional T1/T2* references."""
+    counts, delays = result.ns, result.delays
+    contrast = cpmg_signal2real(result.signals)
+    fig, _ = plots.subplots(num="fit", nrows=1, ncols=2, figsize=(9, 4))
+    ax1, ax2 = fig.axes
+
+    image = _count_map(ax1, counts, delays, contrast)
+    fig.colorbar(image, ax=ax1, label="Normalized IQ (a.u.)")
+    ax1.set(
+        title="CPMG contrast",
+        xlabel="π pulses (count)",
+        ylabel="Total evolution delay (µs)",
+    )
+
+    ax2.set_title(f"CPMG coherence · {summary.fit_rows}/{counts.size} fits")
+    ax2.errorbar(
+        counts, lifetimes, yerr=errors, label="T₂ ± fit error", color="red", fmt="."
+    )
+    if summary.t2_1_us is not None and summary.gamma is not None:
+        fit_ns = np.geomspace(counts.min(), counts.max(), 200)
+        ax2.plot(
+            fit_ns,
+            summary.t2_1_us * fit_ns**summary.gamma,
+            label=r"$T_{2,1} n^{\gamma}$",
+            color="black",
+        )
+        ax2.set_title(f"CPMG coherence · γ = {summary.gamma:.3g}")
+    if options.t1 is not None:
+        ax2.axhline(2 * options.t1, color="blue", linestyle="--", label=r"$2T_1$")
+    if options.t2r is not None:
+        ax2.axhline(options.t2r, color="green", linestyle="--", label=r"$T_{2r}$")
+    ax2.set_xscale("log")
+    if counts.size <= 5:
+        ax2.set_xticks(counts, labels=[str(n) for n in counts])
+    ax2.tick_params(axis="x", which="minor", bottom=False, labelbottom=False)
+    ax2.set_yscale("log")
+    ax2.legend()
+    ax2.set_xlabel("π pulses (count)")
+    ax2.set_ylabel("CPMG coherence time T₂ (µs)")
+
+    fig.tight_layout()
 
 
 class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
@@ -396,8 +521,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             nonlocal current_snr
             current_snr = snr
 
-        update = _live_plot(context.plots, times)
-        current_length_idx = 0
+        update = _live_plot(context.plots, times, lengths)
         signals_buffer = SignalBuffer(
             (len(times), len(length_idxs)),
             on_update=lambda data: update_viewer(data),
@@ -406,15 +530,11 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         with Schedule(signals_buffer, scope=context.scope) as sched:
 
             def update_viewer(data: NDArray[np.complex128]) -> None:
-                """Refresh the count map and history using the current time grid and SNR."""
-                update(
-                    (lengths[current_length_idx], cpmg_signal2real(data), current_snr)
-                )
+                """Refresh contrast and recent traces on their own time grids."""
+                update((cpmg_signal2real(data), current_snr))
 
             # Scan pi-pulse counts on the host; sweep evolution time on the board.
             for idx, (time_value, step) in enumerate(sched.scan("count", times)):
-                current_length_idx = idx
-
                 time = int(time_value)
                 pi2_pulse = cfg.pi2_pulse
                 pi_pulse = cfg.pi_pulse
@@ -501,12 +621,11 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         """
         # 1. Separate real-IQ decay fits from normalized contrast used to compare pulse counts.
         result = source.result
-        fit_fringe, t2r, t1 = options.fit_fringe, options.t2r, options.t1
+        fit_fringe = options.fit_fringe
 
         times, lengths, signals2D = result.ns, result.delays, result.signals
 
         real_signals2D = rotate2real(signals2D).real
-        norm_signals = cpmg_signal2real(signals2D)
 
         def is_good_fit(
             *,
@@ -563,36 +682,5 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
 
         summary = _summarize_t2(times, t2s, t2errs)
 
-        # 3. Compare decay times across pulse counts without treating IQ as population.
-        fig, _ = plots.subplots(num="fit", nrows=1, ncols=2, figsize=(8, 3))
-        ax1, ax2 = fig.axes
-
-        X = np.broadcast_to(times[None, :], norm_signals.T.shape)
-        Y = lengths.T
-        ax1.pcolormesh(X, Y, norm_signals.T, shading="nearest")
-        ax1.set_xlabel("Pi pulses (count)")
-        ax1.set_ylabel("Time (µs)")
-
-        ax2.errorbar(times, t2s, yerr=t2errs, label=r"$T_{CPMG}$", color="red", fmt=".")
-        if summary.t2_1_us is not None and summary.gamma is not None:
-            fit_ns = np.geomspace(times.min(), times.max(), 200)
-            ax2.plot(
-                fit_ns,
-                summary.t2_1_us * fit_ns**summary.gamma,
-                label=r"$T_{2,1} n^{\gamma}$",
-                color="black",
-            )
-            ax2.set_title(rf"$\gamma = {summary.gamma:.3g}$")
-        if t1 is not None:
-            ax2.axhline(2 * t1, color="blue", linestyle="--", label=r"$2T_1$")
-        if t2r is not None:
-            ax2.axhline(t2r, color="green", linestyle="--", label=r"$T_{2r}$")
-        ax2.set_xlim(0.3, None)
-        ax2.set_xscale("log")
-        ax2.set_yscale("log")
-        ax2.legend()
-        ax2.set_xlabel("Pi pulses (count)")
-        ax2.set_ylabel("T2 (µs)")
-
-        fig.tight_layout()
+        _plot_coherence(plots, result, t2s, t2errs, summary, options)
         return summary
