@@ -12,6 +12,7 @@ from zcu_tools.plotting.plots import Plots
 
 from .base import GE_FitResult, GEFitOptions, GENumericalError, fidelity_func
 from .center import fit_ge_by_center
+from .density import plot_ge_iq_density
 from .manual import fit_ge_manual
 from .pca import fit_ge_by_pca
 
@@ -168,6 +169,8 @@ __all__ = [
     "fit_ge_manual",
     # pca
     "fit_ge_by_pca",
+    # density
+    "plot_ge_iq_density",
     # singleshot
     "singleshot_ge_analysis",
     "singleshot_visualize",

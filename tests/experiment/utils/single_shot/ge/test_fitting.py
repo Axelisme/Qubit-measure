@@ -372,6 +372,53 @@ def _known_joint_fit(
     return np.asarray([sg + noise + 0.1j, se + noise - 0.1j])
 
 
+def test_ge_diagnostic_colors_bins_by_raw_preparation_majority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    angle = 0.7
+    signals = _known_joint_fit(monkeypatch, np.eye(3)) * np.exp(-1j * angle)
+    # Each winning bin also contains shots from the other preparation.
+    ground_wins, excited_wins, tied = 2 + 5j, 4 - 10j, 3 + 2j
+    shots = np.array(
+        [
+            [ground_wins] * 6 + [excited_wins, tied, tied],
+            [ground_wins] + [excited_wins] * 6 + [tied, tied],
+        ]
+    )
+    plots = Plots(NonPresentingHost())
+    try:
+        singleshot_ge_analysis(
+            np.concatenate((signals, shots), axis=1),
+            angle=angle,
+            options=GEFitOptions(centers_identifiable=lambda _: True),
+            plots=plots,
+        )
+        images = [img for ax in plots["fit"].axes for img in ax.get_images()]
+        assert len(images) == 1, "GE diagnostic does not render binned IQ"
+        image = images[0]
+        rgba = np.asarray(image.get_array())
+        i0, i1, q0, q1 = image.get_extent()
+
+        def color_at(point: complex) -> NDArray[np.float64]:
+            column = min(
+                int((point.real - i0) / (i1 - i0) * rgba.shape[1]), rgba.shape[1] - 1
+            )
+            row = min(
+                int((point.imag - q0) / (q1 - q0) * rgba.shape[0]), rgba.shape[0] - 1
+            )
+            return rgba[row, column]
+
+        g_color, e_color, tie_color = map(color_at, (ground_wins, excited_wins, tied))
+        np.testing.assert_array_equal(g_color[:3], (0, 0, 1))
+        np.testing.assert_array_equal(e_color[:3], (1, 0, 0))
+        np.testing.assert_array_equal(tie_color[:3], (0.5, 0, 0.5))
+        assert g_color[3] == e_color[3] > tie_color[3] > 0
+        assert color_at(1 - 9j)[3] == 0
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
 @pytest.mark.parametrize("identifiable", [True, False])
 def test_fitted_snr_uses_joint_covariance_and_preserves_the_fit(
     monkeypatch: pytest.MonkeyPatch, *, identifiable: bool

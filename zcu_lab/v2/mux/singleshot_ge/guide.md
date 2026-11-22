@@ -114,7 +114,7 @@ Invalid option indices, source shapes, shot/preparation axes or cfg associations
 raise before fitting. Both operations accept `source.cfg=None`.
 The caller must retain the primary's source association: another source with the
 same indices cannot be detected. Use fresh plots for another analysis; duplicate
-`fit_i` or `post_i` names are rejected.
+`fit_i`, `diagnostic_i` or `post_i` names are rejected.
 Numerical failures retain the original exception as `GENumericalError.__cause__`.
 
 `MuxGEResult` contains complex128 `signals (K,2,shots)`, int64 `tone_indices (K,)`
@@ -201,12 +201,36 @@ Failed tones keep their old classifiers and still require recalibration.
 Run draws one `measurement_i` IQ scatter per participant.
 Blue and red shots distinguish the g (probe-off) and e (probe-on) preparations.
 These preparations may contain state mixtures; they are not classified shots.
-Analyze draws each participant's raw IQ clouds in `fit_i`.
-Analyze uses the selected Run/Load source. Use the Analysis figure picker for
-`fit_i` and the Post figure picker for `post_i`.
+Analyze draws each participant's raw IQ clouds in `fit_i` and adds one
+`diagnostic_i` for every successful fit. Analyze uses the selected Run/Load
+source. Use the Analysis figure picker for `fit_i` or `diagnostic_i` and the
+Post figure picker for `post_i`.
 Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.
 Summary rows retain that order and show values, quality or a failure reason.
 A missing source configuration leaves the name unavailable.
+
+The diagnostic has four panels:
+
+- Top left shows the raw IQ plane at equal I/Q scale and marks the fitted centers.
+  Each bin is blue if it contains more g-preparation shots, red if it contains
+  more e-preparation shots, and purple for a tie. More shots make the bin
+  more opaque; empty bins are transparent.
+- Bottom left overlays the projected preparation histograms and their fits.
+  Each preparation is normalized separately. `Fraction per bin` is the
+  fraction of that preparation's shots in the bin, not a count or a density.
+  The prepared and ideal-model assignment scores appear between the rows.
+- The right panels show the g preparation above and the e preparation below.
+  Compare the fitted components with the bars and read the g, e and other
+  fractions above each panel.
+
+**Fitted SNR** divides the distance between the fitted peaks by their shared
+Gaussian width. The number after ± is the standard error from the same joint
+fit, not a confidence interval. `unavailable` replaces an estimate the fit
+cannot supply. `not identifiable` on the SNR line means at least one fitted
+center failed the relative-error check. Passing that check alone does not
+make a candidate eligible for writeback preselection.
+
+Open a saved diagnostic in Data with **View figure** for a larger view.
 
 Use Data to save measurement data and analysis artifacts.
 Load Data selects a native file or saved run and preserves current Form inputs.

@@ -6,27 +6,30 @@ from zcu_tools.analysis.fitting import FitQuality
 
 _CENTER_LABELS = {"sg": "g-center", "se": "e-center"}
 _MAX_RELATIVE_ERROR = 0.5
-GE_CENTER_ERROR_PATHS = frozenset(
-    f"relative_parameter_errors.{name}" for name in _CENTER_LABELS
-)
 
 
 def ge_center_relative_error_reasons(quality: FitQuality) -> list[str]:
-    """Report missing, invalid or excessive center errors in g/e order.
+    """Explain joint relative center errors that fail the <=0.5 gate.
 
-    For a finite invalid error, report the value and requirement without
-    judging the value against the threshold. Callers include invalid issues
-    from GE_CENTER_ERROR_PATHS separately to preserve their joint issue order.
+    Report each center in g/e order, listing its relative-error issues before
+    its value or unavailability. Issues on the standard errors alone do not
+    count. The returned list is empty when both centers pass.
     """
-    invalid_paths = {issue.path for issue in quality.invalid}
     reasons: list[str] = []
     for name, label in _CENTER_LABELS.items():
+        path = f"relative_parameter_errors.{name}"
+        issues = [
+            f"joint {issue.path}: {issue.reason}"
+            for issue in quality.invalid
+            if issue.path == path
+        ]
+        reasons.extend(issues)
         error = quality.relative_parameter_errors.get(name)
         if error is None or not math.isfinite(error):
             reasons.append(
                 f"relative {label} error unavailable (required <={_MAX_RELATIVE_ERROR})"
             )
-        elif f"relative_parameter_errors.{name}" in invalid_paths:
+        elif issues:
             reasons.append(
                 f"relative {label} error={error} (required <={_MAX_RELATIVE_ERROR})"
             )
@@ -37,7 +40,4 @@ def ge_center_relative_error_reasons(quality: FitQuality) -> list[str]:
 
 def ge_centers_identifiable(quality: FitQuality) -> bool:
     """Check only the two joint relative center errors, not overall fit quality."""
-    return not (
-        any(issue.path in GE_CENTER_ERROR_PATHS for issue in quality.invalid)
-        or ge_center_relative_error_reasons(quality)
-    )
+    return not ge_center_relative_error_reasons(quality)

@@ -25,6 +25,8 @@ from zcu_tools.analysis.fitting.singleshot import (
 )
 from zcu_tools.plotting.plots import Plots
 
+from .density import plot_ge_iq_density
+
 
 class GENumericalError(RuntimeError):
     """GE fitting or classification failed numerically; __cause__ is the original error.
@@ -123,7 +125,7 @@ def hist(
                 weights=weights,
                 label=label,
             )
-        ax.set_ylabel("Fraction per bin", fontsize=12)
+        ax.set_ylabel("Counts", fontsize=14)
         ax.set_xlabel("I [ADC levels]", fontsize=14)
         ax.legend(loc="upper right")
         if title is not None:
@@ -222,9 +224,10 @@ class GEFitOptions:
     None; a fixed length_ratio bypasses this check. The default 1.0 corresponds
     to fit_tools' sigma(ln p) > 1 weak-parameter rule. Nonpositive or nonfinite
     thresholds raise ValidationError at construction.
-    centers_identifiable optionally checks both centers using the joint
-    FitQuality. Only a plotted fit calls it and adds fitted SNR with a
-    first-order standard error and a warning when the check fails.
+    centers_identifiable opts into the four-panel GE diagnostic with raw IQ,
+    fitted SNR and first-order standard error. Only a plotted fit calls this
+    joint FitQuality predicate. A false result labels the SNR not identifiable.
+    None keeps the default rotated IQ figure and does not check the centers.
     """
 
     numbins: int | str = "auto"
@@ -385,56 +388,45 @@ def fitting_ge_and_plot(
     except (ValueError, RuntimeError, ArithmeticError, np.linalg.LinAlgError) as exc:
         raise GENumericalError(str(exc)) from exc
 
+    centers = (
+        rotated_g_center * np.exp(-1j * theta),
+        rotated_e_center * np.exp(-1j * theta),
+    )
     if plots is not None:
         fig, raw_axes = plots.subplots(
             num=figure_name, nrows=2, ncols=2, figsize=(8, 8)
         )
         # tolerated(cast): Plots keeps a native 2x2 object array, not typed Axes rows.
         axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
-        scatter_ge_plot(axs[0][0], (Ig, Ie), (Qg, Qe), "Rotated")
-        hist(Ig, Ie, options.numbins, axs[1][0])
-        axs[0][1].hist(xs, bins=bins.tolist(), weights=g_pdfs, color="b", alpha=0.5)
-        axs[1][1].hist(xs, bins=bins.tolist(), weights=e_pdfs, color="r", alpha=0.5)
+        annotated = options.centers_identifiable is not None
+        iq, ground = axs[0]
+        combined, excited = axs[1]
+        if annotated:
+            _plot_raw_ge_iq(iq, signals, centers)
+        else:
+            scatter_ge_plot(iq, (Ig, Ie), (Qg, Qe), "Rotated")
+            _mark_rotated_centers(iq, (rotated_g_center, rotated_e_center))
+            iq.set_xlim(np.min(bins), np.max(bins))
+            iq.axvline(threshold, color="0.2", linestyle="--")
 
-        axs[0][0].plot(
-            rotated_g_center.real,
-            rotated_g_center.imag,
-            markerfacecolor="b",
-            color="r",
-            linestyle=":",
-            marker="o",
-            markersize=5,
-        )
-        axs[0][0].plot(
-            rotated_e_center.real,
-            rotated_e_center.imag,
-            markerfacecolor="r",
-            color="b",
-            linestyle=":",
-            marker="o",
-            markersize=5,
-        )
-        axs[0][0].set_xlim(np.min(bins), np.max(bins))
-
-        _plot_population_histogram(
-            axs[0][1],
-            xs,
+        _plot_ge_histograms(
+            (combined, ground, excited),
+            bins,
             ge_params,
-            _PopulationHistogram(g_pdfs, fit_g_pdfs, p0_gg, p0_ge, True),
-            show_ideal=length_ratio != 0.0,
-        )
-        _plot_population_histogram(
-            axs[1][1],
-            xs,
-            ge_params,
-            _PopulationHistogram(e_pdfs, fit_e_pdfs, p0_eg, p0_ee, False),
-            show_ideal=length_ratio != 0.0,
+            (
+                _PopulationHistogram(g_pdfs, fit_g_pdfs, p0_gg, p0_ge, True),
+                _PopulationHistogram(e_pdfs, fit_e_pdfs, p0_eg, p0_ee, False),
+            ),
+            annotated=annotated,
         )
 
-        axs[1][0].plot(xs, fit_g_pdfs, "b-", label="g")
-        axs[1][0].plot(xs, fit_e_pdfs, "r-", label="e")
-
-        _format_ge_fit_axes(axs, threshold, g_pdfs, e_pdfs, logscale=options.logscale)
+        _format_ge_fit_axes(
+            (combined, ground, excited),
+            threshold,
+            g_pdfs,
+            e_pdfs,
+            logscale=options.logscale,
+        )
 
         length_title = (
             f"{length_ratio:.1f}"
@@ -450,10 +442,10 @@ def fitting_ge_and_plot(
         )
         _layout_ge_diagnostic(
             fig,
-            axs[1][0],
+            combined,
             title,
             (fid, ideal_fid),
-            annotated=options.centers_identifiable is not None,
+            annotated=annotated,
         )
 
     return (
@@ -471,11 +463,92 @@ def fitting_ge_and_plot(
             length_ratio_e=l_ratio_e,
             theta=theta,
             threshold=threshold,
-            g_center=rotated_g_center * np.exp(-1j * theta),
-            e_center=rotated_e_center * np.exp(-1j * theta),
+            g_center=centers[0],
+            e_center=centers[1],
             fit_quality=fit_quality,
         ),
     )
+
+
+def _plot_raw_ge_iq(
+    ax: Axes, signals: NDArray[np.complex128], centers: tuple[complex, complex]
+) -> None:
+    plot_ge_iq_density(ax, signals[0], signals[1])
+    ax.scatter([], [], marker="s", color="b", label="g prep")
+    ax.scatter([], [], marker="s", color="r", label="e prep")
+    ax.scatter(
+        [z.real for z in centers],
+        [z.imag for z in centers],
+        color=["navy", "darkred"],
+        marker="x",
+        s=26,
+        linewidths=1.5,
+        label="Fitted centers",
+    )
+    ax.set(xlabel="I [ADC levels]", ylabel="Q [ADC levels]")
+    # Keep the key above the axes so it cannot cover either IQ cloud when the tile shrinks.
+    ax.set_title("Raw IQ with fitted g/e centers", fontsize=8, pad=16)
+    ax.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1),
+        ncols=3,
+        fontsize=6,
+        handlelength=1,
+        handletextpad=0.35,
+        columnspacing=0.8,
+        borderpad=0.25,
+        frameon=False,
+    )
+    ax.grid(False)
+
+
+def _mark_rotated_centers(ax: Axes, centers: tuple[complex, complex]) -> None:
+    for center, face, color in zip(centers, ("b", "r"), ("r", "b"), strict=True):
+        ax.plot(
+            center.real,
+            center.imag,
+            markerfacecolor=face,
+            color=color,
+            linestyle=":",
+            marker="o",
+            markersize=5,
+        )
+
+
+def _plot_ge_histograms(
+    axes: tuple[Axes, Axes, Axes],
+    bins: NDArray[np.float64],
+    ge_params: tuple[float, float, float, float, float, float, float],
+    histograms: tuple[_PopulationHistogram, _PopulationHistogram],
+    *,
+    annotated: bool,
+) -> None:
+    combined, ground, excited = axes
+    xs = 0.5 * (bins[:-1] + bins[1:])
+    for panel, histogram, color, label in zip(
+        (ground, excited), histograms, ("b", "r"), ("g", "e"), strict=True
+    ):
+        for ax in (combined, panel):
+            ax.hist(
+                xs,
+                bins=bins.tolist(),
+                weights=histogram.observed,
+                color=color,
+                label=label if ax is combined else None,
+                alpha=0.5,
+                edgecolor="none" if annotated else None,
+                linewidth=0 if annotated else None,
+            )
+        _plot_population_histogram(
+            panel, xs, ge_params, histogram, show_ideal=ge_params[-1] != 0.0
+        )
+    combined.legend(loc="upper right", fontsize=6 if annotated else None)
+    combined.plot(xs, histograms[0].fitted, "b-", label="g")
+    combined.plot(xs, histograms[1].fitted, "r-", label="e")
+    combined.set_ylabel(
+        "Fraction per bin" if annotated else "Counts", fontsize=8 if annotated else 14
+    )
+    combined.set_xlabel("I [ADC levels]", fontsize=8 if annotated else 14)
 
 
 def _layout_ge_diagnostic(
@@ -487,16 +560,28 @@ def _layout_ge_diagnostic(
     annotated: bool,
 ) -> None:
     prepared, ideal = scores
-    separator = "\n" if annotated else " "
-    assignment.set_title(
-        f"Prepared assignment: {prepared:.1%};{separator}ideal model: {ideal:.1%}",
-        fontsize=10 if annotated else 12,
-    )
     if annotated:
-        fig.suptitle(title, fontsize=11)
-        # Reflow the two-line header and the panels when the tile is resized.
-        fig.set_layout_engine("constrained")
+        fig.suptitle(title, fontsize=10)
+        # The lower-left title reserves vertical space between rows and is
+        # centered over the data, clear of the y label left of the panel.
+        assignment.set_title(
+            f"Prepared assignment: {prepared:.1%}\nIdeal model: {ideal:.1%}",
+            fontsize=8,
+            pad=5,
+        )
+        for ax in fig.axes:
+            ax.tick_params(labelsize=7)
+            ax.xaxis.label.set_fontsize(8)
+            ax.yaxis.label.set_fontsize(8)
+        for ax in (fig.axes[1], fig.axes[3]):
+            ax.title.set_fontsize(8)
+            ax.legend(loc="upper right", fontsize=6, labelspacing=0.2)
+        fig.set_layout_engine("constrained", hspace=0.08)
     else:
+        assignment.set_title(
+            f"Prepared assignment: {prepared:.1%}; ideal model: {ideal:.1%}",
+            fontsize=12,
+        )
         fig.suptitle(title)
         fig.tight_layout()
         fig.subplots_adjust(hspace=0.25, wspace=0.15)
@@ -616,7 +701,7 @@ def _plot_population_histogram(
 
 
 def _format_ge_fit_axes(
-    axs: tuple[tuple[Axes, Axes], tuple[Axes, Axes]],
+    axes: tuple[Axes, Axes, Axes],
     threshold: float,
     g_pdfs: NDArray[np.float64],
     e_pdfs: NDArray[np.float64],
@@ -624,15 +709,11 @@ def _format_ge_fit_axes(
     logscale: bool,
 ) -> None:
     """Apply the shared threshold and optional histogram logarithmic limits."""
-    for row in axs:
-        for ax in row:
-            ax.axvline(threshold, color="0.2", linestyle="--")
+    for ax in axes:
+        ax.axvline(threshold, color="0.2", linestyle="--")
 
     if logscale:
-        axs[0][1].set_yscale("log")
-        axs[1][0].set_yscale("log")
-        axs[1][1].set_yscale("log")
         y_max, y_min = 1.5 * np.max([g_pdfs, e_pdfs]), np.min([g_pdfs, e_pdfs]) + 1e-4
-        axs[0][1].set_ylim(y_min, y_max)
-        axs[1][0].set_ylim(y_min, y_max)
-        axs[1][1].set_ylim(y_min, y_max)
+        for ax in axes:
+            ax.set_yscale("log")
+            ax.set_ylim(y_min, y_max)

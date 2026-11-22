@@ -86,10 +86,33 @@ With Length Ratio left empty, two tight clusters without a visible tail make Ana
 This reporting decision does not change centers, fidelity or Post-Analysis.
 If you set Length Ratio manually, Analyze returns the supplied value.
 Run once the qubit pi-pulse and the readout are both calibrated.
-Run and Analyze each show one IQ scatter, with blue g-preparation and red e-preparation shots.
-The live labels mean probe off/on; Analyze maps them using Initial State.
-Histogram fitting remains internal, so histogram log scale does not change the scatter.
-Two separated IQ clouds indicate readout separation.
+Run and Analyze show raw IQ. The live labels mean probe off/on; Analyze maps
+those acquisitions using Initial State. Each successful Analyze also shows
+`diagnostic`.
+
+The diagnostic has four panels:
+
+- Top left shows the raw IQ plane at equal I/Q scale and marks the fitted centers.
+  Each bin is blue if it contains more g-preparation shots, red if it contains
+  more e-preparation shots, and purple for a tie. More shots make the bin
+  more opaque; empty bins are transparent.
+- Bottom left overlays the projected preparation histograms and their fits.
+  Each preparation is normalized separately. `Fraction per bin` is the
+  fraction of that preparation's shots in the bin, not a count or a density.
+  The prepared and ideal-model assignment scores appear between the rows.
+- The right panels show the g preparation above and the e preparation below.
+  Compare the fitted components with the bars and read the g, e and other
+  fractions above each panel.
+
+**Fitted SNR** divides the distance between the fitted peaks by their shared
+Gaussian width. The number after ± is the standard error from the same joint
+fit, not a confidence interval. `unavailable` replaces an estimate the fit
+cannot supply. `not identifiable` on the SNR line means at least one fitted
+center failed the relative-error check. Passing that check alone does not
+make a candidate eligible for writeback preselection.
+
+Histogram log scale changes the diagnostic histograms, not the IQ scatter.
+Open the saved diagnostic in Data with **View figure** for a larger view.
 Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
 
 **Last updated:** 2026-11-01

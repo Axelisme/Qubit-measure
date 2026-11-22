@@ -777,13 +777,13 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         # 1. Match GE fit overrides to original tone identities before inspecting probe-off/on pairs.
         _validate_source(source)
         indices = [int(i) for i in source.result.tone_indices]
+        if any(type(i) is not int or i not in indices for i in options.overrides):
+            raise ValueError("GE overrides must name active original tone indices")
         names = {f"{kind}_{i}" for i in indices for kind in ("fit", "diagnostic")}
         if collisions := plots.keys() & names:
             raise ValueError(
                 f"GE figure names already exist: {', '.join(sorted(collisions))}"
             )
-        if any(type(i) is not int or i not in indices for i in options.overrides):
-            raise ValueError("GE overrides must name active original tone indices")
         selected = [options.overrides.get(i, options.default) for i in indices]
         outcomes: list[MuxGEAnalysis | MuxFitFailure] = []
         # 2. Inspect state-ordered IQ clouds and reject incomplete preparation pairs per tone.
