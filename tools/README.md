@@ -164,6 +164,8 @@ write_snapshot(
 
 工具選用 `ftf-demo/initial` 並以 Open 建立表單。Open 固定表單的來源 capture，見 [Measure services 的開表 owner](../lib/zcu_tools/gui/app/measure/services/README.md#操作-owners)。Open 成功後，工具才透過 `form.write` 套用[覆寫表](data/experiment_wall_time/overrides.json)中該 adapter 的欄位；覆寫只改表單值，不會補回 Open 時缺少的來源。每筆覆寫記 adapter key、表單 cfg 路徑與 JSON 值。`basis` 記供人閱讀的覆寫依據，不影響執行。路徑使用欄位名及從 0 開始的清單索引，例如 `['delay', 'n']` 是線性掃描的點數。表單通過檢查才派送 Run；Run 的 admission、輸入快照與終態見 [ADR-0066〈問題與決策〉](../docs/adr/0066-operation-lifecycle.md#問題與決策)。
 
+查掃頻窗的校準來源、可編輯的表單初值與案例覆寫的分工，見[作者指南〈校準初值政策〉](../zcu_lab/v2/measure-authoring.md#校準初值政策)。
+
 查 CZ pulse、slot 與相位配對的來源，從 [Joint readout 到 local Z 的校準路線](../zcu_lab/v2/two_qubit/guide.md#joint-readout-到-local-z-的校準路線)看校準順序。`ftf-demo/initial` 存有 CZ pulse 與 slot，但沒有 `$coupler.ext.cz_phase`。量到 local-Z correction 不等於把配對寫入來源；配對的身分檢查和寫回見 [Local Z〈Preview 與 Apply〉](../zcu_lab/v2/two_qubit/local_z/guide.md#preview-與-apply)。
 
 查序列內的脈衝磁通線設定，見 [FTF `flux_lines` 欄位與限制](../zcu_lab/simulation_envs/FTF/field-guide.md#flux-lines序列內磁通校準與濾波)。查 point 裡的 DC 磁通校準，見 [ADR-0082〈Component 保存 offset 與 signed periods〉](../docs/adr/0082-component-flux-frame.md#component-保存-offset-與-signed-periods)。

@@ -69,6 +69,8 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 
 模擬用 `entry-template.yaml` 省略 qubit energies，但預填 `ftf.yaml` 的 resonator 頻率 7190／7080 MHz、總 linewidth 1.1 MHz 與 DC 線校準。這些值標為 simulated-truth，不是量測結果。DC 校準以 `schema_version: 3` 的 qubit `flux: {offset, period}` 保存。Offset 是零輸出時的 Φ0，各主線 period 是係數的倒數，單位為原生儀器單位／Φ0。不使用 `design` 猜值。既有 v1／v2 entry 須先用[長期升級入口](../../../docs/parameter-upgrades.md)轉換，startup 不自動升級。獨立 `design` 的 `flux_half` 等欄位不變，startup 將它們換算成 predictor v2 的 flux frame。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。量測前仍須填入有效的 qubit 頻率與其他輸入，範本不提供 module library。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 用於從接線開始的走查。若修改工作副本的物理值或接線，也要調整 entry 範本或已建立的 entry。
 
+Demo 的 qubit 範本不預填 `kappa`。掃頻窗如何從校準帶入、何時直接填表單的起訖值，見[作者指南〈校準初值政策〉](../../v2/measure-authoring.md#校準初值政策)。
+
 Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
 MG12 的 `mixer_freq: 7135` 是 mux LO 初值，缺值時 mixer 留空必填，不由 tone 頻率或 κ 推算。
 模擬範本的 `MG12.time_of_fly: 0.4` us 對應 `ftf.yaml` 的 mux receivers 400 ns。R1／R2 的頂層 `time_of_fly: 0.4` us 則對應 pulse ADC 的 400 ns。Kickstart 的 group 與 resonator TOF 保留 null，等待各自路徑的量測。
