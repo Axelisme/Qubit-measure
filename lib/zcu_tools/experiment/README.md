@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-23，離線 probe 的圖形產物
+**Last updated:** 2026-11-23，離線 probe 的圖形產物與 GE 模型診斷
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -280,3 +280,13 @@ Package root 保留公開 exports，只有存取對應名稱時才載入其 owne
 GUI 的 Library、Inspect 與 module writeback 共用 `gui.form` 與 `gui.form_adapter`，直接提交持久 Spec，不經 experiment 的第二套編輯樹。ModuleWriteback 的 proposal 是 ModuleSpec；experiment 仍只接收執行用 typed cfg。跨宿主契約見 ADR-0065、ADR-0008。
 
 - [v2](v2/README.md)：program/v2 的通用 runtime、量化與 SNR 工具。[runtime](v2/runtime/README.md) 說明 Schedule、buffer、run_acquire 與 executor 的執行機制。具體實驗與前端附件由使用者套件提供，組合根注入 catalog，不由框架反向載入。
+- [GE 模型診斷](#ge-模型診斷)：`singleshot_ge_analysis` 的入口與 `fitting_ge_and_plot` 的診斷圖。
+
+### GE 模型診斷
+
+Singleshot GE 與 mux GE 的 core 都呼叫 [`singleshot_ge_analysis`](utils/single_shot/ge/__init__.py)。
+各旋轉方式都委派給 [`fitting_ge_and_plot`](utils/single_shot/ge/base.py)。它回傳擬合品質，並在 caller 傳入 `Plots` 時繪製 GE 模型 histogram。
+
+品質欄位的定義見 [fitting helpers 的 `FitQuality`](../analysis/fitting/README.md#fitting-helpers)。
+`GEFitOptions.length_ratio_max_relative_error` 只用於模型診斷，決定自由擬合的 joint readout length／T1 能否以 `length_ratio` 回報。
+它不是 writeback 初選門檻。初選與理由見 [Readout 分析與 writeback](../../../zcu_lab/v2/measure-authoring.md#readout-分析與-writeback)。

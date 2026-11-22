@@ -526,6 +526,13 @@ Core 回傳分析品質，圖依 [R3b](figure-style.md#r3b結果旁寫-fit-品�
 GUI 的 [`AnalyzeService`](../../lib/zcu_tools/gui/app/measure/services/analyze.py) 呼叫 `get_writeback_items` 後，
 才把 proposals 交給 `WritebackService.create_draft`。`analysis_stage` 只呼叫 core，不經這個接縫。
 
+[Singleshot GE adapter](singleshot/ge/gui.py) 與 [mux GE adapter](mux/singleshot_ge/gui.py) 各以
+`ge_calibration_review_note` 判斷 Analyze 的初選與理由。它讀取 joint `FitQuality`，包括
+`relative_parameter_errors` 裡的寬度 `s` 和中心 `sg`、`se` 的相對誤差。
+`ge_post_review_note` 沿用這項判斷，並檢查 Post 混淆矩陣的 condition number。
+這些初選判斷與 [GE 模型診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷) 的
+`length_ratio_max_relative_error` 分開。
+
 ro-optimize 與 reset 的 peak-picking adapter 以 `smooth_method` 提供 `wavelet` / `gaussian`
 選擇，預設 `wavelet`；`smooth` 在 GUI 標為 smoothing strength，不再只代表 Gaussian sigma。
 twotone `ro_optimize/length` 的 GUI analyze param 對外命名為 `duration_t0`，表示
