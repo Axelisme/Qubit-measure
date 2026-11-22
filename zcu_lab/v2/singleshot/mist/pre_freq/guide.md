@@ -1,57 +1,23 @@
-## Behavior
+# MIST preparation-frequency sweep
 
-**Readers:** operator, agent. How to measure MIST populations versus preparation frequency from the GUI or MCP and interpret the results.
+**Readers:** operator, agent. Measure how a variable-frequency preparation changes populations under a fixed MIST drive.
 
-Sweep the preparation pulse frequency, then apply the optional pi pulse, the fixed MIST probe and readout. Reset precedes each sequence when enabled. This differs from singleshot/mist/freq, which sweeps the MIST probe itself.
+## What is measured
 
-The live plot shows Ground, Excited and Other versus preparation frequency in MHz. Other is the unclassified remainder; calibrated leakage requires separate characterization. Analyze reads an optional confusion matrix from the saved readout cfg and publishes a population plot for operator interpretation. Calibration parameters stay unchanged.
+Optional **Reset** → **Preparation pulse** at the swept RF frequency → **Optional π pulse** → fixed **MIST tone** → **Readout**. Unlike the MIST probe-frequency sweep, the MIST tone is not scanned. Other includes shots outside both decision circles or tied, not identified leakage.
 
-## Starting values
+## Key settings
 
-Open and Defaults take a snapshot of aliases, parameters and module choices. The preparation pulse starts from the qub_probe template. Its sweep spans `$qubit.freq +/- 1.5 * $qubit.kappa` with 51 points. The fixed MIST probe starts from res_probe at `$resonator.freq`. Check both pulse gains and lengths before Run.
+- Before Run, use Pulse **Readout** (not Mux) with a circle and positive radius under **Advanced**. A linear classifier cannot report Other; obtain a missing radius from [GE Post-Analysis](../../ge/guide.md).
+- **Preparation RF frequency** starts at qubit frequency ± 1.5 × qubit linewidth, at 51 points. The **MIST tone** starts at resonator frequency. Check both pulse gains and durations; enable **Optional π pulse** only for the intended preparation, using a calibrated π pulse.
+- **Relax delay** starts at 5 × ordinary T1 (150 µs if absent; blank if invalid). Adding reset does not shorten it automatically.
 
-Optional reset and pi pulse use `$qubit.module.reset` and `$qubit.module.x180`. Missing optional slots start disabled. Readout uses `$resonator.module.readout` when available, otherwise the readout template. Missing wiring or frequencies remain Invalid. Run also requires a complete circle classifier with radius on every readout ADC.
+## How to read the results
 
-Readout accepts only the pulse family.
-A mux readout in the library is incompatible.
-Classification uses the readout's circle classifier under Readout → Advanced.
-Run requires a positive radius; missing radius prompts singleshot GE Post.
-Linear has no Other state and is rejected.
-Analyze corrects populations only with the saved readout cfg's confusion matrix.
-Historical cfg without a classifier or matrix skips correction.
+Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. Later library or form edits do not alter that result's correction. Compare the three traces versus preparation RF frequency; this peak-location spectrum does not draw per-point shot SEM bars.
 
-Relax delay starts at five times the captured T1. Missing or null T1 uses a 30 µs time scale, giving 150 µs. An invalid stored T1 leaves the required delay empty. Defaults remain editable and separate from calibration writeback. Reps starts at 1000 and rounds at 10.
+## Next step
 
-## Operator workflow
+If the feature touches a frequency limit, recenter at its RF frequency and extend until the neighboring baseline is visible. No calibration is written. Load cannot convert older files without class counts; acquire again.
 
-1. Select the qubit and resonator aliases, then Open singleshot/mist/pre_freq.
-2. Check preparation, pi, MIST probe and readout settings. Enable the pi pulse only when it is part of the intended sequence.
-3. Set the preparation-frequency span and shot count. Defaults rebuilds defaults from a fresh source snapshot.
-4. Preview the configuration, then Run. Analyze shows the corrected populations when a confusion matrix is available.
-5. Save the run and figures. Saved data retain the rounded preparation-frequency axis and measured G/E/Other fractions shaped Nfreq by 3.
-
-Analyze reads the confusion matrix from that result's saved readout cfg. Later alias, library or form edits do not change its correction.
-
-Load displays native populations offline and keeps the current form unchanged. Correction uses only the file's saved readout classifier. Missing historical cfg, classifier or matrix skips correction. No live point supplies a fallback.
-
-The operator chooses pulse conditions and interprets the population curves manually; calibration parameters stay unchanged.
-
-## Saved counts
-
-Save keeps `counts` shaped `(Nfreq, 3)` in `[g,e,other]` order, with
-`population_states=[0,1,2]`. Other counts shots outside the accepted circles
-or tied between them. It is not a calibrated leakage population.
-Each point sums to the shots acquired across completed rounds. Live plots and
-Analyze divide each point by its total before displaying populations or applying
-the saved confusion matrix. Sweep coordinates and units are unchanged. Cfg schema
-remains 3.0.
-
-Old files storing `signals` instead of `counts` are unsupported. Load reports
-the missing `counts` variable. Acquire a new run; Load does not convert stored
-fractions to counts.
-
-## Reading the figures
-
-The live and analysis spectra show how the g/e/Other fractions respond to the preparation RF frequency. This is a peak-location spectrum, so the points do not use shot SEM bars. If a feature hits the frequency limit, use its RF frequency as the new center and extend the scan until the neighboring baseline is visible.
-
-**Last updated:** 2026-11-22
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).
