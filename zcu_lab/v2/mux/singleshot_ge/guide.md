@@ -155,15 +155,18 @@ Primary candidates are initially selected only when the joint histogram fit pass
 - Normalized residual RMS is at most 0.1.
 - Relative width error (`s`) is at most 0.5.
 - Relative center errors (`sg` for g and `se` for e) are each at most 0.5.
+  Each is the center's standard error divided by the absolute value of the
+  fitted center.
 
 Post radius and confusion inherit the primary review and also require a finite
-condition number of at most 10. A failed check, missing or nonfinite required
-metric, or invalid issue for a required metric leaves the candidate unselected
-with a note. For a center error above the limit or marked invalid, the note
-gives the reason, the value if finite, and the limit. If the error is missing
-or nonfinite, the note reports it as unavailable. Unrelated fixed-zero
-parameter issues do not block selection. You may select a candidate manually
-after inspecting the model and raw IQ.
+condition number of at most 10. A failed check leaves the candidate unselected
+with a note. A required metric fails if it is missing, nonfinite, or itself
+marked invalid. For a center error above the limit or itself marked invalid,
+the note gives the reason, the value if finite, and the limit. If the error is
+missing or nonfinite, the note reports it as unavailable. An issue on a
+center's standard error alone does not block preselection. A relative center
+error of 0.0 does not mean the center is precisely known. You may select a
+candidate manually after inspecting the model and raw IQ.
 
 A successful, finite primary row must pass the GE calibration validity check.
 Each phase proposes one complete library mux readout replacement, resolved from
