@@ -17,9 +17,7 @@ from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fitting import expfunc, fit_decay
 from zcu_tools.analysis.readout_chain import (
-    CycleCheck,
     CycleSums,
-    RateNuisances,
     cycle_curves,
     fit_cycle,
     t1_model,
@@ -47,12 +45,13 @@ from zcu_tools.program.v2 import (
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
-    checks_text,
     cycle_sums_variables,
     first_read_projection,
     restore_cycle_sums,
 )
 from zcu_lab.v2.support import live_errorbar, live_line
+
+from .._joint import joint_residual_fields, joint_residuals_text, plot_joint_residuals
 
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
 _SWEEP_LABEL = "Wait after π pulse (µs)"
@@ -62,25 +61,27 @@ _IQ_LABEL = "Projected mean IQ (a.u.)"
 
 @dataclass(frozen=True)
 class ChainT1Analysis:
-    """Rate-equation fit of all 65 numbers and its checks.
+    """Rate-equation fit of all 65 numbers and its scalar residual diagnostics.
 
     t1 and t1_err are T1 in us and its Wald error: T1 is the eigen time of the
     relaxation with the larger amplitude. secondary_time and secondary_time_err
     are the other eigen time in us and its Wald error. An eigen time with a
-    zero decay rate is infinite, and so is its error. within_point, sharing
-    and curve are the three lack-of-fit checks of fit_cycle (sharing has no
-    p). J and df are the joint weighted residual and its degrees of freedom.
+    zero decay rate is infinite, and so is its error.
+    J is the sum of squared whitened residuals, df is the nominal degrees of
+    freedom, and j_per_df is their ratio. The expected band endpoints are
+    1 ± 2√(2/df). tail_fraction is the fraction with |r| > 3.
     """
 
     t1: float
     t1_err: float
     secondary_time: float
     secondary_time_err: float
-    within_point: CycleCheck
-    sharing: CycleCheck
-    curve: CycleCheck
     J: float
     df: int
+    j_per_df: float
+    expected_band_low: float
+    expected_band_high: float
+    tail_fraction: float
 
 
 class ChainT1Cfg(ConfigBase):
@@ -238,10 +239,11 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         """Fit all 65 numbers with the rate-equation T1 model.
 
         Publish the first-read IQ and its single-decay fit in "fit". This
-        decay time seeds fit_cycle; "populations" shows the joint fit and
-        standardized residuals. Return T1 and the secondary time with Wald errors and the
-        three checks. The source cfg may be None. Failures of either fit
-        propagate.
+        decay time seeds the joint rate fit. "joint-residuals" shows the
+        measured and modeled signals along the live all-feature direction.
+        Return T1, the secondary time, their Wald errors, and the joint
+        residual diagnostics. The source cfg may be None. The joint fit
+        determines convergence; the residual diagnostics do not reject it.
         """
         del options  # This analysis has no configurable options.
         sums = source.result
@@ -290,76 +292,34 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         model = t1_model()
         fit = fit_cycle(sums, model, {"t1": first_read_t1})
         relaxation = fit.relaxation
-        nuisances = fit.nuisances
-        # A RateModel fit always has relaxation and RateNuisances.
-        assert relaxation is not None and isinstance(nuisances, RateNuisances)
+        assert relaxation is not None  # A RateModel fit always has relaxation.
 
-        population_dense = np.linspace(delays.min(), delays.max(), 400)
-        population_curves = model.populations(
-            population_dense, fit.parameters, nuisances
-        )
-        population_at_points = model.populations(delays, fit.parameters, nuisances)
-        population_residuals = (
-            fit.populations - population_at_points
-        ) / fit.population_errors
-        population_fig, _ = plots.subplots(
-            num="populations",
-            nrows=4,
+        joint_fig, _ = plots.subplots(
+            num="joint-residuals",
+            nrows=2,
             sharex=True,
-            figsize=(6.4, 8.6),
+            figsize=(8, 5.6),
             layout="constrained",
         )
-        population_fig.suptitle(
-            "K-cycle T1 · Qubit · First-read populations\n"
+        projection_ax, residual_ax = joint_fig.axes
+        plot_joint_residuals(projection_ax, residual_ax, sums, model, fit)
+        joint_fig.suptitle("K-cycle T1 · Qubit · Joint fit")
+        projection_ax.set_title(
             f"T1 = {relaxation.t1:.4g} ± {relaxation.t1_error:.2g} µs\n"
             f"Secondary time = {relaxation.secondary_time:.4g} ± {relaxation.secondary_error:.2g} µs\n"
-            f"Joint J/df = {fit.J:.2g}/{fit.df}\n{checks_text(fit)}",
+            f"{joint_residuals_text(fit)}",
+            loc="left",
             fontsize=10,
         )
-        population_axes = population_fig.axes[:3]
-        residual_ax = population_fig.axes[3]
-        population_order = np.argsort(nuisances.thermal)[::-1]
-        for rank, (population_ax, state) in enumerate(
-            zip(population_axes, population_order, strict=True)
-        ):
-            color = f"C{rank}"
-            thermal = nuisances.thermal[state]
-            population_ax.errorbar(
-                delays,
-                fit.populations[:, state],
-                yerr=fit.population_errors[:, state],
-                fmt=".",
-                color=color,
-                label="Point estimate ± Wald SE",
-            )
-            population_ax.plot(
-                population_dense,
-                population_curves[:, state],
-                color=color,
-                label="Joint fit",
-            )
-            if delays.min() <= relaxation.t1 <= delays.max():
-                population_ax.axvline(relaxation.t1, ls="--", color="0.35", linewidth=1)
-            population_ax.set(
-                ylabel=f"P({'gef'[rank]})",
-                title=f"{'gef'[rank]} · thermal rank {rank + 1} · Thermal population {thermal:.2f}",
-            )
-            residual_ax.plot(delays, population_residuals[:, state], ".", color=color)
-        handles, labels = population_axes[0].get_legend_handles_labels()
-        population_fig.legend(handles, labels, loc="outside lower center", ncols=2)
-        residual_ax.axhspan(-1.96, 1.96, color="0.9", zorder=0)
-        residual_ax.axhline(0.0, color="0.4", linewidth=0.8)
-        residual_ax.set(xlabel=_SWEEP_LABEL, ylabel="Residual / Wald SE")
+        residual_ax.set_xlabel(_SWEEP_LABEL)
         residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        handles, labels = projection_ax.get_legend_handles_labels()
+        joint_fig.legend(handles, labels, loc="outside lower center", ncols=2)
 
         return ChainT1Analysis(
             t1=relaxation.t1,
             t1_err=relaxation.t1_error,
             secondary_time=relaxation.secondary_time,
             secondary_time_err=relaxation.secondary_error,
-            within_point=fit.within_point,
-            sharing=fit.sharing,
-            curve=fit.curve,
-            J=fit.J,
-            df=fit.df,
+            **joint_residual_fields(fit),
         )
