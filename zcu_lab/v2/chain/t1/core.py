@@ -254,9 +254,10 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
 
         # 1. Fit the first-read IQ to seed the joint model.
         seed_signal, seed_sem = first_read_projection(sums)
+        # ADR-0075: recover only from the seed fitter's numerical failure.
         try:
             seed_fit = fit_decay(delays, seed_signal)
-        except AnalysisFailed:  # ADR-0075: recover only from the seed fitter's numerical failure.
+        except AnalysisFailed:
             seed_fit = None
 
         seed_fig, seed_ax = plots.subplots(
@@ -311,9 +312,10 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
             num="joint-residuals",
             nrows=2,
             sharex=True,
-            figsize=(8, 5.6),
+            figsize=(8, 6.2),
             layout="constrained",
         )
+        joint_fig.align_ylabels()
         projection_ax, residual_ax = joint_fig.axes
         plot_joint_residuals(projection_ax, residual_ax, sums, model, fit)
         joint_fig.suptitle("K-cycle T1 · Qubit · Joint fit")
