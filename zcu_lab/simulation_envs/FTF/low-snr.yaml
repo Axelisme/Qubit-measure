@@ -169,7 +169,7 @@ readout:
         low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
     offset_adc: [0.0, 0.0] # I, Q
     # Two-sided white PSD in ADC^2*ns. Sample covariance = PSD / dt_ns.
-    noise_psd_adc2_ns: [[84000.0, 16800.0], [16800.0, 84000.0]]
+    noise_psd_adc2_ns: 84000.0
   mux:
     gen_ch: 7
     input_per_gain: 10.0 # sqrt(photons/ns)/gain
@@ -192,7 +192,7 @@ readout:
           band_edges:
             low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
         offset_adc: [0.0, 0.0]
-        noise_psd_adc2_ns: [[84000.0, 16800.0], [16800.0, 84000.0]]
+        noise_psd_adc2_ns: 84000.0
       - ro_ch: 3
         gain: 100.0
         phase_deg: 0.0
@@ -211,7 +211,7 @@ readout:
           band_edges:
             low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
         offset_adc: [0.0, 0.0]
-        noise_psd_adc2_ns: [[84000.0, 16800.0], [16800.0, 84000.0]]
+        noise_psd_adc2_ns: 84000.0
 
 numerics:
   # Increase native/local dimensions and the joint upper bound independently

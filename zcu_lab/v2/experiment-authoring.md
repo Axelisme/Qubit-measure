@@ -329,6 +329,7 @@ Timeline 範圍只切換預設名字，reference 與控制流契約見 [ADR-0083
 錄製或編譯後保持 module 與 cfg 不變，不同掃描設定建不同物件。
 同 program 多次 emit 同物件只宣告一次，每次時間與 tag 獨立，重複 readout 用不同 tag，如 herald／terminal。
 不同物件重複占用 ADC／register 時，編譯指出兩個物件；Pulse 家族既有 generator／template 共用規則仍適用。
+Pulse／Mux Readout 的 generator 與 ADC 宣告、讀取時序與 IQ 取數見 [Program 的 Readout configuration](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration)。
 
 ### Sweep 參數與 cfg 的歸屬
 

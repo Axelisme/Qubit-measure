@@ -110,6 +110,9 @@ Runner 遇到用法錯誤、非 Linux、不在已提交的 Git worktree、少於
 | `residual_killed` | 直接子程序結束後仍找到同 process group 的存活程序時設為 `true`，超時本身的整組清理只記在 `timed_out` |
 | `log` | 記錄命令輸出 log 的路徑 |
 
+收據記錄工作樹與執行身分，不記錄 probe 的輸入內容。相同 HEAD 不代表相同輸入。
+要核對 cfg、seed 或來源陣列，請比較 [Probe snapshots](#probe-snapshots) 的輸入指紋。
+
 全樹測試沿用 [tests/README.md 的完整選集命令](../tests/README.md#執行測試套件)，保留 marker、rootdir 與 failure log 選項。
 Full Pyright 將下方的全樹比較命令包進 runner，讓排隊與收據套用到整次比較：
 
@@ -142,6 +145,7 @@ write_snapshot(
 環境設定或來源陣列；writer 不發現實驗或讀取環境私有狀態。
 每個 label 寫入新目錄，保存 `arrays.npz`、PNG 與 `inputs.json`。既存 label 拒絕寫入，
 重跑時選新 output root。輸入指紋包含陣列的 shape、dtype 與內容，不只記形狀。
+指紋只涵蓋 caller 提供的輸入。要核對工作樹與執行身分，請另看[重計算執行器的收據](#重計算執行器)。
 
 同一支 script 在兩個 worktree 各以自己的 `uv run --directory <worktree> --no-sync --`
 執行一次，分別寫 A、B，再執行上表 compare 命令。工具不啟動其他 worktree 或儀器。

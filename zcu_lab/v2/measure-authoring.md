@@ -84,6 +84,9 @@ Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Run �
 宣告 choices 的文字或數值 leaf 沿用既有初值求值能力，以可接受的 direct 值保存，不開放 authored Expr input。Literal、Enum、bool 與 InputPolicy 禁用 expression 的 leaf 不新增初值求值能力。使用者輸入的 expression 仍保留原文交一般驗證。
 必要來源缺少時留 Invalid，不由 framework 補數字。實驗可在 `make_form` 明確選擇已定案的首次初值，見下節。Reset 重新捕捉並可換形狀，Run 使用畫面上的值。
 
+Form lowering 將表單結果轉成 adapter 的具名輸入，失敗時回報欄位或模型錯誤。
+Qt 呈現框架的 [Tab admission 決定](../../lib/zcu_tools/gui/app/measure/README.md#tab-admission)，另處理編輯器中尚未提交的解析錯誤。
+
 組合根以 `Registry(templates=TEMPLATES)` 注入預設持久範本，Library 新建選單也讀這份 catalog。chain_length 與 rpi_length 的 Form factory 由 `register_all` 綁定 `registry.templates`，讓長度差初值與 Form 展開使用同一份範本。
 範本儲存 Spec defaults 與 seeds，不維護另一份角色 shape／blank／ref 表。
 Library、writeback 與 Inspect 也使用 gui.form／FormEditor，透過 gui.form_adapter
@@ -122,7 +125,8 @@ Adapter 使用獨立輸入型別時，預設順序由該型別決定。
 SweepCfg 的座標與 step 繼承 unit，點數不繼承掃描量的物理單位。
 既有 cfg key 不因顯示文字改名，例如 `delays`、`delay` 與 `length` 都可顯示 Delay。
 共用但物理量不同的 range 必須說明單位由哪張實驗決定。
-Flux 軸從 `flux_unit` 取得單位，不寫成固定單位。
+Form 的 flux 掃描輸入使用 `flux_unit` 指定的裝置輸入單位，不用它推定 Result 或保存軸的單位。
+例如 [JPA bias survey](jpa/flux_onetone/guide.md#read-the-plots) 的圖上 bias 軸與保存的 `fluxes` 軸都使用裝置原生 a.u.，不隨 Form 的 A／V／native 選項改標籤或換算。
 Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數。
 
 初值依來源處理。來源可推導時，用 Expr 或固定 capture，寫明來源路徑與單位。
@@ -144,6 +148,7 @@ Hidden 只用於 Run 會覆寫或計算的值，不用來藏起 required input�
 有作者說明的必填空白錯誤會附上該欄位與父欄位的 label／description，保留原 path。
 Recipe preflight 沿用這些 message 與 typed paths，不從 generic error 猜物理設定。
 Readout slot found 與 form valid 必須分開判讀；slot 存在不代表 drive、GE centers 或掃描範圍齊全。
+Pulse／Mux Readout 的 generator、ADC 與 classifier 契約見 [Program 的 Readout configuration](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration)。
 Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
 
 新實驗交付前，以 `QT_QPA_PLATFORM=offscreen` 預演下列情境：

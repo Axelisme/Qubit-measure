@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-22, unentered acquire timings
+**Last updated:** 2026-11-22, Markov chain, acquire-local raw plans, isotropic receiver noise, and unentered acquire timings
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -816,9 +816,9 @@ envelopes. Opaque callbacks and unsupported timing retain the field solver. Flat
 decimated batches superpose vacuum-start carrier fields through the same line,
 then calibrate once per receiver. Single-carrier fast paths and evolution are unchanged.
 
-The receiver noise PSD is two-sided, in ADC sample units squared times ns.
-Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
-does not scale noise.
+The receiver takes one two-sided white noise PSD in ADC²·ns. At ADC sample
+period `dt_ns`, independent I and Q samples each have variance `PSD/dt_ns`.
+Receiver gain does not scale noise.
 
 <a id="compact-statistics"></a>
 
@@ -913,7 +913,7 @@ The signed differences are approximation minus reference. The table gives the
 largest Euclidean I/Q difference in each comparison. Signal, difference, g/e
 separation and noise all use ADC sample-sum units. The separation compares
 owner g and e in the reference while fixing the predecessor. Noise is the
-receiver-only RMS of the integrated I/Q vector, `sqrt(trace(N × PSD / dt_ns))`,
+receiver-only RMS of the integrated I/Q vector, `sqrt(2 × N × PSD / dt_ns)`,
 for `N` independent samples. It excludes state mixture, jumps and rounding.
 
 The `chain/t1` comparison (R5) changes only the field at the start of the

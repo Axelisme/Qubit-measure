@@ -100,6 +100,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Analysis / Simulation / Waveform
 
+原則：模型設定只接受等向接收雜訊的單一 PSD，見[等向接收雜訊](draft/simulation-environments.md#等向接收雜訊)。
 原則：family 的完整序列最終精度合格就只比耗時，刪除前先補同型態長序列證據，見 [ADR-0078](0078-evolution-module-boundary.md#family-去留合格只比耗時)。
 原則：模擬器分層測試，不做 e2e 測試。只允許一支整實驗 Run 牆鐘工具，kernel／family 比較仍只量 `Engine.evolve`，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 原則：正常參數先守 180 秒，誤差在 `1e-2` 內選快的；只為守時間才接受超過並記錄，達 `1e-1` 不採用，見 [ADR-0078](0078-evolution-module-boundary.md#歷史控制與精度驗收)。

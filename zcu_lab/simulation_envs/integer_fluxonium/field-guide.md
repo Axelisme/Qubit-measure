@@ -115,8 +115,7 @@ support the 80/20 default only within their recorded controls.
 | Incident field | 0.1 sqrt(photons/ns) |
 | Readout input_per_gain | 1 sqrt(photons/ns)/gain |
 | ADC gain | 1000 |
-| Diagonal noise PSD | 400 ADC² ns per quadrature |
-| Off-diagonal noise PSD | 0 |
+| Receiver noise PSD (`noise_psd_adc2_ns`) | 400 ADC²·ns per independent I/Q component |
 | Propagation delay and receiver phase | 0 ns, 0 degrees |
 
 The 0.10 GHz cavity coupling is not the 1 GHz/gain microwave calibration.
