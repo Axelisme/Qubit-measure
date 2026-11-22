@@ -334,8 +334,8 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         fidelity, which includes preparation mixing and is not pure-state readout
         fidelity. Poor histogram fit quality makes model populations and post
         population correction unreliable. Publish raw g/e IQ scatter to plots
-        as "fit", including on numerical failure. Histogram fitting stays
-        internal. cfg=None is supported.
+        as "fit", including on numerical failure, and the fitted histogram
+        diagnostic as "diagnostic" on success. cfg=None is supported.
 
         Rotation/classification, histogram fitting, fitted population/center
         validation and fidelity calculations wrap ValueError, RuntimeError,
@@ -372,7 +372,8 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
                 align_t1=options.align_t1,
                 length_ratio=options.length_ratio,
             ),
-            plots=None,
+            plots=plots,
+            figure_name="diagnostic",
         )
         # 3. Validate the calibration and label an unidentifiable length ratio.
         analysis = GEAnalysis(

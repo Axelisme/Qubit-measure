@@ -100,8 +100,8 @@ Override keys are original active indices, not positions in Participants.
 Invalid option indices, source shapes, shot/preparation axes or cfg associations
 raise before fitting. Both operations accept `source.cfg=None`.
 The caller must retain the primary's source association: another source with the
-same indices cannot be detected. Use fresh plots for another analysis; duplicate
-`fit_i` or `post_i` names are rejected.
+same indices cannot be detected. Use fresh plots for another analysis; a figure
+cannot reuse an existing `fit_i`, `diagnostic_i`, or `post_i` name.
 Numerical failures retain the original exception as `GENumericalError.__cause__`.
 
 `MuxGEResult` contains complex128 `signals (K,2,shots)`, int64 `tone_indices (K,)`
@@ -185,8 +185,11 @@ Run draws one `measurement_i` IQ scatter per participant.
 Blue and red shots distinguish the g (probe-off) and e (probe-on) preparations.
 These preparations may contain state mixtures; they are not classified shots.
 Analyze draws each participant's raw IQ clouds in `fit_i`.
+For each successful fit, `diagnostic_i` shows rotated IQ, projected preparation histograms, and fitted components.
+Check whether the fitted components separate and follow the measured histograms. Read the fitted populations above the preparation panels and the readout length relative to T1 at the top.
 Analyze uses the selected Run/Load source. Use the Analysis figure picker for
-`fit_i` and the Post figure picker for `post_i`.
+`fit_i` and `diagnostic_i`, and the Post figure picker for `post_i`.
+If an Analysis tile clips labels, open the diagnostic in Data with **View figure**.
 Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.
 Summary rows retain that order and show values, quality or a failure reason.
 A missing source configuration leaves the name unavailable.

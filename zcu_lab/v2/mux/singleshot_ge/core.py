@@ -697,7 +697,8 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
 
         options selects GE fitting settings by original tone index. Return each
         tone's calibration and fit quality, or its failure reason, and draw fit_i
-        in plots. Incomplete pairs do not fit. Source cfg may be absent; malformed
+        in plots. Successful fits also draw diagnostic_i at the original tone index.
+        Incomplete pairs do not fit. Source cfg may be absent; malformed
         axes, mismatched cfg or invalid options raise before fitting.
 
         """
@@ -737,6 +738,8 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                 continue
             try:
                 # 3. Calibrate each complete GE pair with its selected backend and alignment policy.
+                # Configured tones: diagnostic_0, diagnostic_1, diagnostic_2, diagnostic_3,
+                # diagnostic_4, diagnostic_5, diagnostic_6, diagnostic_7.
                 fidelity, init_pops, fit = singleshot_ge_analysis(
                     signals,
                     angle=option.angle,
@@ -746,7 +749,8 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                         align_t1=option.align_t1,
                         length_ratio=option.length_ratio,
                     ),
-                    plots=None,
+                    plots=plots,
+                    figure_name=f"diagnostic_{index}",
                 )
                 primary = GEAnalysis(
                     initial_state=option.initial_state,

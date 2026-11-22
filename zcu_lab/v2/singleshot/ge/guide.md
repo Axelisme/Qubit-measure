@@ -82,10 +82,12 @@ With Length Ratio left empty, two tight clusters without a visible tail make Ana
 This reporting decision does not change centers, fidelity or Post-Analysis.
 If you set Length Ratio manually, Analyze returns the supplied value.
 Run once the qubit pi-pulse and the readout are both calibrated.
-Run and Analyze each show one IQ scatter, with blue g-preparation and red e-preparation shots.
+Run and Analyze show raw IQ scatter with blue g-preparation and red e-preparation shots.
 The live labels mean probe off/on; Analyze maps them using Initial State.
-Histogram fitting remains internal, so histogram log scale does not change the scatter.
-Two separated IQ clouds indicate readout separation.
+A successful Analyze also shows `diagnostic`: rotated IQ, projected preparation histograms, and fitted components.
+Check whether the fitted components separate and follow the measured histograms. Read the fitted populations above the preparation panels and the readout length relative to T1 at the top.
+Histogram log scale changes the diagnostic histograms, not the scatter.
+If the Analysis tile clips labels, open the diagnostic in Data with **View figure**.
 Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
 
 **Last updated:** 2026-11-01
