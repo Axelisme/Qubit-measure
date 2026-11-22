@@ -12,11 +12,7 @@ from zcu_tools.analysis.fitting.multi_decay import (
     fit_dual_transition_rates,
     model_func,
 )
-from zcu_tools.analysis.shot_uncertainty import (
-    class_probability_covariance,
-    corrected_population_sem,
-)
-from zcu_tools.analysis.singleshot import correct_populations
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -41,6 +37,10 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.singleshot.population_analysis import (
+    circle_readout_series,
+    plot_t1_classified_fractions,
+)
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
@@ -346,12 +346,13 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         options: T1WithToneAnalyzeOptions,
         *,
         plots: Plots,
-    ) -> T1WithToneAnalysis:
+    ) -> T1WithToneAnalysis | None:
         """Fit transitions between G, E and Other during the applied probe tone.
 
         Normalize source counts per row after options.skip, optionally corrected by the
         supplied confusion matrix. Fit both I/pi preparations together, return
         the two decay times in us, and publish their population curves to plots.
+        For an unsolvable correction, publish only classified fractions and return None.
         """
         # 1. Select durations and correct readout populations for both preparations.
         result = source.result
@@ -365,8 +366,21 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         lens = lens[skip:]
         populations = populations[skip:]
 
-        populations = correct_populations(populations, confusion_matrix, clip=False)
-        sem = corrected_population_sem(result.counts[skip:], confusion_matrix)
+        series = circle_readout_series(
+            populations, result.counts[skip:], confusion_matrix
+        )
+        if series.correction_unavailable:
+            plot_t1_classified_fractions(
+                plots,
+                lens,
+                series,
+                _PANELS,
+                title="T1 with tone",
+                xlabel="Probe exposure time (µs)",
+            )
+            return None
+
+        populations, sem = series.values, series.sem
 
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e

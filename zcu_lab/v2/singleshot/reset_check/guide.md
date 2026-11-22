@@ -18,6 +18,8 @@ Compare the three panels at the same gain, especially the intended π gain. The 
 
 Live shows raw fractions. Analyze uses only the selected result's saved confusion matrix for correction; files with counts but no compatible calibration show classified fractions. Bars show one shot SEM from the retained counts at each gain, estimating the sampling uncertainty of the class probabilities. Analyze does not clip the corrected estimates to [0, 1]. It propagates shot-count covariance with the saved calibration matrix treated as known. Fewer than two retained shots give no bar. The bars do not show fit errors, histogram intervals or round-to-round variation.
 
+If the saved matrix cannot produce finite corrected fractions, Analyze shows **Readout correction unavailable** and only the G/E/Other classified fractions from this Run, with shot SEM where available. These are counts after classification, before correction. No reset statistics are reported. When only a corrected bar is unavailable, the corrected point remains.
+
 ## Next step
 
 If P(e) is low in the no-tested-reset branch at the intended π gain, check the π pulse before judging reset. No calibration is written. Load cannot convert old files without counts; collect raw IQ separately if you need to refit readout.

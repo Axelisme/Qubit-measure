@@ -22,7 +22,7 @@ SsResetCheckRunResult = RunRecord[ResetCheckCfg, ResetCheckResult]
 
 def _analyze(
     req: AnalyzeRequest[SsResetCheckRunResult, None], *, plots: Plots
-) -> ResetCheckAnalysis:
+) -> ResetCheckAnalysis | None:
     return ResetCheckExp().analyze(
         req.run_result,
         ResetCheckAnalyzeOptions(

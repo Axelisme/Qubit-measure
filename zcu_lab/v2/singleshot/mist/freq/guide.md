@@ -16,6 +16,8 @@ Optional **Reset** → optional **Initial preparation pulse** → **MIST tone** 
 
 Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. Compare the three traces on the same RF axis to locate resonances or loss features. The lines join measured fractions, not fits. Bars show ±1 shot SEM from the g/e/Other counts at each point, not fit error or round-to-round scatter. Analyze uses the linear correction without clipping, so estimates can be below 0 or above 1. It propagates shot-count covariance with the saved calibration matrix treated as known. Fewer than two shots or missing counts leave no bar.
 
+If the saved matrix cannot produce finite corrected fractions, Analyze shows **Readout correction unavailable** and only the G/E/Other classified fractions from this Run, with shot SEM where available. These are counts after classification, before correction. When only a corrected bar is unavailable, the corrected point remains.
+
 ## Next step
 
 If a feature hits a frequency limit, center the next sweep on its RF frequency and extend the window until neighboring baselines are visible. No calibration is written. Load cannot convert older files without class counts; acquire again.

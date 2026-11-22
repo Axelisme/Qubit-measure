@@ -7,11 +7,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
-from zcu_tools.analysis.shot_uncertainty import (
-    class_probability_covariance,
-    corrected_population_sem,
-)
-from zcu_tools.analysis.singleshot import correct_populations
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -35,6 +31,11 @@ from zcu_tools.program.v2.modules.readout import (
 )
 
 from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.singleshot.population_analysis import (
+    CLASSIFIED_FIGURE,
+    UNAVAILABLE_NOTICE,
+    circle_readout_series,
+)
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
@@ -257,13 +258,16 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
                 "Acquire a new run."
             )
 
-        populations = correct_populations(
-            populations, options.confusion_matrix, clip=False
+        series = circle_readout_series(
+            populations, result.counts, options.confusion_matrix
         )
-        sem = corrected_population_sem(result.counts, options.confusion_matrix)
 
         # 2. Show all three populations versus probe frequency, without a spectral fit.
-        _, ax = plots.subplots(num="fit", figsize=(7, 5), layout="constrained")
+        _, ax = plots.subplots(
+            num=CLASSIFIED_FIGURE if series.correction_unavailable else "fit",
+            figsize=(7, 5),
+            layout="constrained",
+        )
         for index, (label, color) in enumerate(
             zip(
                 ("P(g)", "P(e)", "P(other)"),
@@ -273,8 +277,8 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
         ):
             ax.errorbar(
                 freqs,
-                populations[:, index],
-                yerr=sem[:, index],
+                series.values[:, index],
+                yerr=series.sem[:, index],
                 fmt="o-",
                 markersize=3,
                 label=label,
@@ -285,9 +289,13 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
             if options.confusion_matrix is None
             else "readout-corrected populations"
         )
+        if series.correction_unavailable:
+            quantity = f"classified fractions\n{UNAVAILABLE_NOTICE}"
         ax.set(
             title=f"MIST probe spectrum · qubit · {quantity}",
             xlabel="MIST drive RF frequency (MHz)",
-            ylabel="Outcome probability",
+            ylabel="Classified fraction"
+            if series.correction_unavailable
+            else "Outcome probability",
         )
         ax.legend(loc="best")

@@ -12,11 +12,7 @@ from zcu_tools.analysis.fitting.multi_decay import (
     fit_dual_transition_rates,
     model_func,
 )
-from zcu_tools.analysis.shot_uncertainty import (
-    class_probability_covariance,
-    corrected_population_sem,
-)
-from zcu_tools.analysis.singleshot import correct_populations
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -39,6 +35,10 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.singleshot.population_analysis import (
+    circle_readout_series,
+    plot_t1_classified_fractions,
+)
 from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 POPULATION_STATES = (0, 1, 2)
@@ -304,7 +304,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         source supplies delay times in us and G/E/Other counts, normalized per row. Skip the first
         options.skip points, optionally correct readout with the saved cfg classifier's
         confusion matrix, and fit the two traces together. Publish the fit in
-        plots; fitting errors propagate.
+        plots; fitting errors propagate. For an unsolvable correction, publish
+        only classified fractions without fitting.
         """
         # 1. Select delays and correct measured G/E/Other populations.
         result = source.result
@@ -321,8 +322,21 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lens = lens[skip:]
         populations = populations[skip:]
 
-        populations = correct_populations(populations, confusion_matrix, clip=False)
-        sem = corrected_population_sem(result.counts[skip:], confusion_matrix)
+        series = circle_readout_series(
+            populations, result.counts[skip:], confusion_matrix
+        )
+        if series.correction_unavailable:
+            plot_t1_classified_fractions(
+                plots,
+                lens,
+                series,
+                _PANELS,
+                title="Single-shot T1",
+                xlabel="Free evolution time (µs)",
+            )
+            return
+
+        populations, sem = series.values, series.sem
 
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e
