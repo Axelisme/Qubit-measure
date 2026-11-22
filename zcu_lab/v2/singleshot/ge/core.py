@@ -185,23 +185,30 @@ def _annotate_primary(ax: Axes, analysis: GEAnalysis) -> None:
     )
     ax.set(xlim=xlim, ylim=ylim)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2)
-    joint = None if analysis.fit_quality is None else analysis.fit_quality.get("joint")
-    quality = "Joint histogram fit quality unavailable"
-    if joint is not None:
-        r2 = "unavailable" if joint.r2 is None else f"{joint.r2:.3g}"
-        rms = joint.normalized_residual_rms
+    lines = [
+        f"Prepared-label assignment fidelity = {analysis.fidelity:.1%}",
+        f"IQ rotation angle = {analysis.theta:.3g} rad · Rotated I threshold = {analysis.threshold:.3g} a.u.",
+    ]
+    for name in ("joint", "ground", "excited"):
+        label = f"{name.capitalize()} histogram fit"
+        quality = (
+            None if analysis.fit_quality is None else analysis.fit_quality.get(name)
+        )
+        if quality is None:
+            lines.append(f"{label} quality unavailable")
+            continue
+        r2 = "unavailable" if quality.r2 is None else f"{quality.r2:.3g}"
+        rms = quality.normalized_residual_rms
         rms_label = "unavailable" if rms is None else f"{rms:.3g}"
-        width = joint.relative_parameter_errors.get("s")
-        width_label = "unavailable" if width is None else f"{width:.3g}"
-        quality = f"Joint histogram fit: R² {r2} · normalized RMS {rms_label} · relative width error {width_label}"
-    ax.set_title(
-        f"Prepared-label assignment fidelity = {analysis.fidelity:.1%}\n"
-        f"IQ rotation angle = {analysis.theta:.3g} rad · Rotated I threshold = {analysis.threshold:.3g} a.u.\n"
-        f"{quality}",
-        fontsize=10,
-    )
+        line = f"{label}: R² {r2} · normalized RMS {rms_label}"
+        if name == "joint":
+            width = quality.relative_parameter_errors.get("s")
+            width_label = "unavailable" if width is None else f"{width:.3g}"
+            line += f" · relative width error {width_label}"
+        lines.append(line)
     if note := ge_calibration_review_note(analysis):
-        ax.set_title(ax.get_title() + "\n" + "\n".join(note.split("; ")), fontsize=10)
+        lines.extend(note.split("; "))
+    ax.set_title("\n".join(lines), fontsize=10)
 
 
 def _plot_projection(
@@ -254,7 +261,7 @@ def _plot_classified_iq(
 
     signals is a nonempty 1D complex shot vector. g_center/e_center and radius
     follow analysis.singleshot.classify_result; max_point limits downsampling
-    and must be positive. Mutates ax, adds labels/legend/equal aspect, and
+    and must be positive. Mutates ax, adds labels and equal aspect, and
     returns None. Invalid classification geometry raises ValueError; Matplotlib
     errors propagate. The caller owns the axes and figure lifecycle."""
     mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)
@@ -282,7 +289,7 @@ def _plot_classified_iq(
         g_center.real,
         g_center.imag,
         markerfacecolor="b",
-        label="Ground",
+        label="Ground circle center",
         linestyle=":",
         color="k",
         marker="o",
@@ -292,7 +299,7 @@ def _plot_classified_iq(
         e_center.real,
         e_center.imag,
         markerfacecolor="r",
-        label="Excited",
+        label="Excited circle center",
         linestyle=":",
         color="k",
         marker="o",
@@ -315,7 +322,6 @@ def _plot_classified_iq(
         )
 
     ax.set_aspect("equal")
-    ax.legend(title="Decision circle centers")
     ax.set_xlabel("IQ in-phase I (a.u.)")
     ax.set_ylabel("IQ quadrature Q (a.u.)")
 
@@ -612,20 +618,24 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         ) as exc:
             raise GENumericalError(str(exc)) from exc
         # 2. Display preparation mixing alongside classified IQ and confusion.
-        g_signals, e_signals = signals
         g_center, e_center = primary.g_center, primary.e_center
-        fig, _ = plots.subplots(
-            num="post", nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
-        )
+        fig, _ = plots.subplots(num="post", nrows=2, ncols=2, figsize=(8, 8))
+        fig.set_layout_engine("constrained", h_pad=0.10)
         ax1, ax4, ax2, ax3 = fig.axes
 
-        fig.suptitle(
-            f"Single-shot GE · qubit readout · circle classification\n"
-            f"Classification radius = {confusion.radius:.3g} a.u."
-        )
+        heading = [
+            "Single-shot GE · qubit readout · circle classification",
+            f"Classification radius = {confusion.radius:.3g} a.u.",
+        ]
+        if note := ge_post_review_note(primary, confusion.condition_number):
+            heading.extend(note.split("; "))
+        fig.suptitle("\n".join(heading))
         g_label, e_label, l_label = "g", "e", "other"
+        model_rows = [g_label, e_label, "other\n(model only)"]
         _plot_classified_iq(ax1, g_signals, g_center, e_center, confusion.radius)
         _plot_classified_iq(ax2, e_signals, g_center, e_center, confusion.radius)
+        handles, labels = ax1.get_legend_handles_labels()
+        fig.legend(handles, labels, loc="outside lower center", ncols=2)
 
         n_gg, n_ge, n_go = confusion.g_classification
         n_eg, n_ee, n_eo = confusion.e_classification
@@ -655,7 +665,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         ax4.set_xticks([0, 1, 2])
         ax4.set_yticks([0, 1, 2])
         ax4.set_xticklabels([g_label, e_label, l_label])
-        ax4.set_yticklabels([g_label, e_label, l_label])
+        ax4.set_yticklabels(model_rows)
         ax4.set_xlabel("Model state")
         ax4.set_ylabel("Preparation label")
         ax4.set_title("Fitted preparation populations")
@@ -679,12 +689,10 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         ax3.set_xticks([0, 1, 2])
         ax3.set_yticks([0, 1, 2])
         ax3.set_xticklabels([g_label, e_label, l_label])
-        ax3.set_yticklabels([g_label, e_label, l_label])
+        ax3.set_yticklabels(model_rows)
         ax3.set_xlabel("Assigned outcome")
         ax3.set_ylabel("Model state")
         ax3.set_title(
-            f"Corrected confusion · condition {confusion.condition_number:.2g}"
+            f"Corrected confusion\nCondition number {confusion.condition_number:.2g}"
         )
-        if note := ge_post_review_note(primary, confusion.condition_number):
-            fig.text(0.02, 0.005, note, fontsize=10, wrap=True)
         return GEPostAnalysis(confusion=confusion)
