@@ -33,13 +33,13 @@
     "adapter": "mux/t2ramsey",
     "path": ["tones", 0, "detune"],
     "value": 0.05,
-    "basis": "First fixture tone (Q1): deliberately set a 20 us period, sampled at 40 steps/period before residual detuning."
+    "basis": "First demo tone (Q1): deliberately set a 20 us period, sampled at 40 steps/period before residual detuning."
   },
   {
     "adapter": "mux/t2ramsey",
     "path": ["tones", 1, "detune"],
     "value": 0.05,
-    "basis": "Second fixture tone (Q2): use the same 20 us programmed period and 40 steps/period before residual detuning."
+    "basis": "Second demo tone (Q2): use the same 20 us programmed period and 40 steps/period before residual detuning."
   },
   {
     "adapter": "twotone/t2echo",
@@ -57,7 +57,7 @@
     "adapter": "mux/t2echo",
     "path": ["delay", "stop"],
     "value": 465.0,
-    "basis": "Three times the longer single-qubit decay-only diagnostic in the two-tone fixture: Q1 155 ± 129 us (20261120T120426Z-d61050), Q2 80 ± 36 us (20261120T120456Z-45adf2). Keep the mux Echo guide's decay-only default; not a measured mux T2."
+    "basis": "Three times the longer single-qubit decay-only diagnostic in the historical two-tone case: Q1 155 ± 129 us (20261120T120426Z-d61050), Q2 80 ± 36 us (20261120T120456Z-45adf2). Keep the mux Echo guide's decay-only default; not a measured mux T2."
   },
   {
     "adapter": "chain/t2echo",
@@ -99,49 +99,49 @@
     "adapter": "mux/twotone_flux_local",
     "path": ["tones", 0, "freq", "start"],
     "value": 275.742,
-    "basis": "Q1: 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa); use an operator window of about 10 measured widths on each side for the local bias map."
+    "basis": "Time the local DC map across about ten historical widths on each side, not the Form's narrow kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "mux/twotone_flux_local",
     "path": ["tones", 0, "freq", "stop"],
     "value": 319.742,
-    "basis": "Q1: 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa); use an operator window of about 10 measured widths on each side for the local bias map."
+    "basis": "Time the local DC map across about ten historical widths on each side, not the Form's narrow kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "mux/twotone_flux_local",
     "path": ["tones", 1, "freq", "start"],
     "value": 213.72,
-    "basis": "Q2: 0.7358 MHz Q2 scan width from FTF run 20261120T113210Z-414e9e (power broadened, not intrinsic kappa); use an operator window of about 10 measured widths on each side for the local bias map."
+    "basis": "Time the local DC map across about ten historical widths on each side, not the Form's narrow kappa window. Q2 history: FTF run 20261120T113210Z-414e9e gave a power-broadened width of 0.7358 MHz, not intrinsic kappa."
   },
   {
     "adapter": "mux/twotone_flux_local",
     "path": ["tones", 1, "freq", "stop"],
     "value": 229.72,
-    "basis": "Q2: 0.7358 MHz Q2 scan width from FTF run 20261120T113210Z-414e9e (power broadened, not intrinsic kappa); use an operator window of about 10 measured widths on each side for the local bias map."
+    "basis": "Time the local DC map across about ten historical widths on each side, not the Form's narrow kappa window. Q2 history: FTF run 20261120T113210Z-414e9e gave a power-broadened width of 0.7358 MHz, not intrinsic kappa."
   },
   {
     "adapter": "mux/twotone_spectrum",
     "path": ["tones", 0, "freq", "start"],
     "value": 294.447,
-    "basis": "Q1: 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa); use the form's 1.5-linewidth half-span around the captured f01."
+    "basis": "Time Q1's bounded spectroscopy band at about 1.5 historical widths on either side of the captured f01, not the Form's kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "mux/twotone_spectrum",
     "path": ["tones", 0, "freq", "stop"],
     "value": 301.037,
-    "basis": "Q1: 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa); use the form's 1.5-linewidth half-span around the captured f01."
+    "basis": "Time Q1's bounded spectroscopy band at about 1.5 historical widths on either side of the captured f01, not the Form's kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "mux/twotone_spectrum",
     "path": ["tones", 1, "freq", "start"],
     "value": 220.616,
-    "basis": "Q2: 0.7358 MHz Q2 scan width from FTF run 20261120T113210Z-414e9e (power broadened, not intrinsic kappa); use the form's 1.5-linewidth half-span around the captured f01."
+    "basis": "Time Q2's bounded spectroscopy band at about 1.5 historical widths on either side of the captured f01, not the Form's kappa window. Q2 history: FTF run 20261120T113210Z-414e9e gave a power-broadened width of 0.7358 MHz, not intrinsic kappa."
   },
   {
     "adapter": "mux/twotone_spectrum",
     "path": ["tones", 1, "freq", "stop"],
     "value": 222.824,
-    "basis": "Q2: 0.7358 MHz Q2 scan width from FTF run 20261120T113210Z-414e9e (power broadened, not intrinsic kappa); use the form's 1.5-linewidth half-span around the captured f01."
+    "basis": "Time Q2's bounded spectroscopy band at about 1.5 historical widths on either side of the captured f01, not the Form's kappa window. Q2 history: FTF run 20261120T113210Z-414e9e gave a power-broadened width of 0.7358 MHz, not intrinsic kappa."
   },
   {
     "adapter": "onetone/range_find",
@@ -159,7 +159,7 @@
     "adapter": "singleshot/ac_stark",
     "path": ["stark_pulse2", "module", "mixer_freq"],
     "value": null,
-    "basis": "Captured Q1 x180 has no mixer frequency and the gen 2 board profile has no mixer. Use the direct form value None instead of evaluating the missing optional mixer source."
+    "basis": "On this board profile Q1 gen 2 needs no mixer. The Open expression for the optional Q1 x180 mixer leaves this template field invalid, even when the source key is explicitly null. Set direct null for this case only; it does not supply the readout classifier needed at Run."
   },
   {
     "adapter": "singleshot/len_rabi",
@@ -171,13 +171,13 @@
     "adapter": "singleshot/mist/pre_freq",
     "path": ["freq", "start"],
     "value": 294.447,
-    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+    "basis": "Choose a bounded preparation search at about 1.5 historical widths on each side of Q1 f01; the Form keeps its own kappa-based seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "singleshot/mist/pre_freq",
     "path": ["freq", "stop"],
     "value": 301.037,
-    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+    "basis": "Choose a bounded preparation search at about 1.5 historical widths on each side of Q1 f01; the Form keeps its own kappa-based seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "singleshot/t1_tone",
@@ -249,13 +249,13 @@
     "adapter": "two_qubit/conditional_phase_heralded",
     "path": ["frequency", "start"],
     "value": 5798,
-    "basis": "FTF recalibration's 5799.976979 MHz installed pair and ding-cz Round 27's measured 5798–5802 MHz bracket give a narrow phase-scan window; retain the captured pulse pair."
+    "basis": "FTF recalibration's 5799.976979 MHz installed pair and ding-cz Round 27's measured 5798–5802 MHz bracket give a bounded heralded phase scan; retain the captured pulse pair."
   },
   {
     "adapter": "two_qubit/conditional_phase_heralded",
     "path": ["frequency", "stop"],
     "value": 5802,
-    "basis": "FTF recalibration's 5799.976979 MHz installed pair and ding-cz Round 27's measured 5798–5802 MHz bracket give a narrow phase-scan window; retain the captured pulse pair."
+    "basis": "FTF recalibration's 5799.976979 MHz installed pair and ding-cz Round 27's measured 5798–5802 MHz bracket give a bounded heralded phase scan; retain the captured pulse pair."
   },
   {
     "adapter": "two_qubit/conditional_spectroscopy",
@@ -268,18 +268,6 @@
     "path": ["frequency", "stop"],
     "value": 5816,
     "basis": "Ding-cz Round 22 repeated 5784–5816 MHz and resolved responses near 5785 and 5800 MHz. Use its MHz window with the current Form point count."
-  },
-  {
-    "adapter": "two_qubit/constructive_phase",
-    "path": ["relative_phase", "start"],
-    "value": -180,
-    "basis": "The constructive phase guide calls for comparing constructive and destructive phases; use one full relative phase turn, as sampled around the near-0° maximum and near-180° minimum in ding-cz Round 23."
-  },
-  {
-    "adapter": "two_qubit/constructive_phase",
-    "path": ["relative_phase", "stop"],
-    "value": 180,
-    "basis": "The constructive phase guide calls for comparing constructive and destructive phases; use one full relative phase turn, as sampled around the near-0° maximum and near-180° minimum in ding-cz Round 23."
   },
   {
     "adapter": "two_qubit/constructive_phase",
@@ -315,25 +303,25 @@
     "adapter": "twotone/ac_stark",
     "path": ["freq", "start"],
     "value": 294.447,
-    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+    "basis": "Time a bounded Stark spectroscopy band at about 1.5 historical widths on each side of Q1 f01; it is wider than the Form's kappa seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "twotone/ac_stark",
     "path": ["freq", "stop"],
     "value": 301.037,
-    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+    "basis": "Time a bounded Stark spectroscopy band at about 1.5 historical widths on each side of Q1 f01; it is wider than the Form's kappa seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "twotone/chain",
     "path": ["freq", "start"],
     "value": 253.812,
-    "basis": "Use 20 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01, preserving the form's wide-search policy."
+    "basis": "Time a wide scout at about 20 historical widths on either side of Q1 f01; the Form keeps its own kappa-based seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "twotone/chain",
     "path": ["freq", "stop"],
     "value": 341.672,
-    "basis": "Use 20 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01, preserving the form's wide-search policy."
+    "basis": "Time a wide scout at about 20 historical widths on either side of Q1 f01; the Form keeps its own kappa-based seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "twotone/flux_dep",
@@ -351,25 +339,25 @@
     "adapter": "twotone/freq",
     "path": ["freq", "start"],
     "value": 253.812,
-    "basis": "Use 20 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01, preserving the form's wide-search policy."
+    "basis": "Time the 87.860 MHz wide scout centered at Q1 f01, not the Form's roughly 0.11723 MHz kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "twotone/freq",
     "path": ["freq", "stop"],
     "value": 341.672,
-    "basis": "Use 20 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01, preserving the form's wide-search policy."
+    "basis": "Time the 87.860 MHz wide scout centered at Q1 f01, not the Form's roughly 0.11723 MHz kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "twotone/power_dep",
     "path": ["freq", "start"],
     "value": 294.447,
-    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+    "basis": "Time a bounded power map at about 1.5 historical widths on each side of Q1 f01; it is wider than the Form's kappa seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "twotone/power_dep",
     "path": ["freq", "stop"],
     "value": 301.037,
-    "basis": "Use 1.5 × 2.1965 MHz Q1 scan width from FTF run 20261120T113145Z-bd0fe4 (power broadened, not intrinsic kappa) on each side of the captured Q1 f01 as the form/guide requests."
+    "basis": "Time a bounded power map at about 1.5 historical widths on each side of Q1 f01; it is wider than the Form's kappa seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
   },
   {
     "adapter": "twotone/rabi/len_rabi",
@@ -381,12 +369,12 @@
     "adapter": "twotone/reset/single_tone/freq",
     "path": ["freq", "start"],
     "value": 6867.239,
-    "basis": "The single-tone reset guide permits a rough resonator-minus-qubit sideband estimate. Center at fixture R1 − Q1 = 6892.239 MHz with a widened ±25 MHz scout window; not a measured reset frequency."
+    "basis": "The guide permits an operator-chosen resonator-minus-qubit sideband scout. Center this case at the historical R1 − Q1 estimate of 6892.239 MHz with a bounded ±25 MHz window; not a measured reset frequency."
   },
   {
     "adapter": "twotone/reset/single_tone/freq",
     "path": ["freq", "stop"],
     "value": 6917.239,
-    "basis": "The single-tone reset guide permits a rough resonator-minus-qubit sideband estimate. Center at fixture R1 − Q1 = 6892.239 MHz with a widened ±25 MHz scout window; not a measured reset frequency."
+    "basis": "The guide permits an operator-chosen resonator-minus-qubit sideband scout. Center this case at the historical R1 − Q1 estimate of 6892.239 MHz with a bounded ±25 MHz window; not a measured reset frequency."
   }
 ]

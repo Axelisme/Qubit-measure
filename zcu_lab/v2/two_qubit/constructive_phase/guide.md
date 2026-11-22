@@ -42,10 +42,12 @@ conditional spectroscopy and the duration window using chevron.
 Only common envelope duration changes within each trace.
 
 The Form lists reset, Xπ preparation pulses, dual-line drive and readout in
-playback order. Set the outer relative phase
-sweep before the inner duration sweep. Repetitions, rounds and acquisition
-delays appear last.
-Enter finite scan endpoints and strictly positive durations.
+playback order. Open and Defaults start the outer relative phase sweep at
+−180° to 180° with 25 points. Edit the endpoints or point count as needed.
+This full-turn sweep does not estimate the CZ phase.
+Set both endpoints of the inner duration sweep in µs. The Form leaves them
+blank and starts with 101 points. Enter finite endpoints and strictly positive
+durations. Repetitions, rounds and acquisition delays appear last.
 Review repetitions, rounds, optional reset and timing before Run.
 Refresh keeps authored inputs and rechecks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
 Use Defaults to replace unsaved input with initial values from the new source.

@@ -164,6 +164,10 @@ write_snapshot(
 
 工具在每列的新 project 重用 [GUI/MCP 的 FTF startup 資料](../zcu_lab/simulation_envs/FTF/README.md#建立-entry-與啟動)，從標準 entry template 與 library 建立 `ftf-demo/initial` 的元件、模組和 aliases，再以 Open 建立表單。Open 固定表單的來源 capture，見 [Measure services 的開表 owner](../lib/zcu_tools/gui/app/measure/services/README.md#操作-owners)。Open 成功後，工具才透過 `form.write` 套用[覆寫表](data/experiment_wall_time/overrides.json)中該 adapter 的欄位；覆寫只改表單值，不會補回 Open 時缺少的來源。每筆覆寫記 adapter key、表單 cfg 路徑與 JSON 值。`basis` 記供人閱讀的覆寫依據，不影響執行。路徑使用欄位名及從 0 開始的清單索引，例如 `['delay', 'n']` 是線性掃描的點數。表單通過檢查才派送 Run；Run 的 admission、輸入快照與終態見 [ADR-0066〈問題與決策〉](../docs/adr/0066-operation-lifecycle.md#問題與決策)。
 
+覆寫表只保留操作者本來要選的欄位，或用於限制計時工作量的時域、板型與掃描範圍。[Constructive phase](../zcu_lab/v2/two_qubit/constructive_phase/guide.md#prepare-the-form) 的 Form 自帶可編輯的 −180° 至 180°、25 點相對相位掃描。計時案例只指定其 duration 端點。`singleshot/ac_stark` 的 Q1 pulse source 不能在 Open 提供有效的 mixer 初值；板型不需要 mixer，此案例才直接填 `null`。
+
+Fresh FTF point 的 `qubit.kappa` 是模型線寬，單位是 MHz。用 Q1 的 κ 開 `twotone/freq`，全寬約 0.11723 MHz；這不是覆寫表的 87.860 MHz 寬尋峰。要找峰請按用途調整掃窗。不要把有界計時窗當成 Form 初值或校準值。
+
 查 CZ pulse、slot 與相位配對的來源，從 [Joint readout 到 local Z 的校準路線](../zcu_lab/v2/two_qubit/guide.md#joint-readout-到-local-z-的校準路線)看校準順序。`ftf-demo/initial` 存有 CZ pulse 與 slot，但沒有 `$coupler.ext.cz_phase`。量到 local-Z correction 不等於把配對寫入來源；配對的身分檢查和寫回見 [Local Z〈Preview 與 Apply〉](../zcu_lab/v2/two_qubit/local_z/guide.md#preview-與-apply)。
 
 查序列內的脈衝磁通線設定，見 [FTF `flux_lines` 欄位與限制](../zcu_lab/simulation_envs/FTF/field-guide.md#flux-lines序列內磁通校準與濾波)。查 point 裡的 DC 磁通校準，見 [ADR-0082〈Component 保存 offset 與 signed periods〉](../docs/adr/0082-component-flux-frame.md#component-保存-offset-與-signed-periods)。
@@ -207,9 +211,9 @@ Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆�
 
 Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`，再落盤 `run_failed` 列。該列記 Run 起點、收到失敗事件的時刻，以及 Controller 提供的錯誤類型與訊息。`failure_record` 是相對於該列 `case_directory` 的診斷檔路徑。失敗列不填 Run 或核心秒數。工具寫完該列才檢查 Controller 是否 idle；若仍有活動中的操作，就停止派送。摘要分別計數成功計時、`timeout` 與 `run_failed`。`Run failures` 按完全相同的 Controller 診斷分組，每組列出 adapter key 與診斷檔路徑。工具不推斷根因。
 
-若 Open 成功，但表單仍有錯誤（例如覆寫後還缺欄位或 slot），`missing_defaults` 列出錯誤，不送出 Run。報表中的「FTF 不能跑」是 `not_runnable`，只適用於[固定案例宣告](data/experiment_wall_time/case-inputs.json)明列排除的 adapter。工具寫下該列的原因，不建立 project，也不派送 Open 或 Run。缺初值不一定是排除，請看各列的原因。
+若 Open 成功，但表單仍有錯誤（例如覆寫後還缺欄位或 slot），`missing_defaults` 列出錯誤，不送出 Run。報表中的「FTF 不能跑」是 `not_runnable`，只適用於[固定案例宣告](data/experiment_wall_time/case-inputs.json)明列排除的 adapter。工具寫下該列的原因，不建立 project，也不派送 Open 或 Run。缺初值不一定是排除，請看各列的原因。標準 demo 不附讀出 classifiers。需要帶 radius 的 circle classifier 時，先依各自 guide 在相同讀出設定下做 GE 和 GE Post，再套用結果。例如 `two_qubit/constructive_phase` 在 Form 驗證時檢查，`singleshot/ac_stark` 則在 Run 時檢查。這是上游校準前置，不是 FTF 不支援。
 
-新版輸入雜湊與舊 fixture 批次不同，不能用舊批次續跑或直接把時間差歸因給 simulator 效能。Projection floor 從 `1e-9` 改為標準 `1e-5`，可能改變剪枝和耗時。舊場景的簇位移與 reset 成本見 [FTF 標準 preset 與牆鐘工具的輸入](../docs/discussions/2026-11-22-ftf-standard-wall-time-inputs.md#已知風險)，不是新版的量測結果。
+新版輸入雜湊與舊 fixture 批次不同，不能用舊批次續跑。來源或掃描工作量變動時，不能直接把時間差歸因給 simulator 效能。Projection floor 從 `1e-9` 改為標準 `1e-5`，可能改變剪枝和耗時。舊場景的簇位移與 reset 成本見 [FTF 標準 preset 與牆鐘工具的輸入](../docs/discussions/2026-11-22-ftf-standard-wall-time-inputs.md#已知風險)，不是新版的量測結果。
 
 固定案例列出兩類排除：六個 JPA 入口沒有模型或裝置；`two_qubit/rb`、`two_qubit/rb_heralded`、`two_qubit/cz_optimize` 在 `ftf-demo/initial` 缺 Open 所需的 Q1／Q2 有序 Local Z 配對 `$coupler.ext.cz_phase`。後三列需上游校準，未計時，不表示 FTF 不支援這些實驗。
 
