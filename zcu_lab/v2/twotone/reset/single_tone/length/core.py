@@ -35,9 +35,9 @@ from zcu_tools.program.v2 import (
     shot_sums,
     split_sums,
 )
-from zcu_tools.utils.process import find_rotate_angle
 
 from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.twotone.reset._projection import principal_iq_direction
 
 
 @dataclass(frozen=True)
@@ -50,18 +50,9 @@ class LengthResult:
     iq_moments: NDArray[np.float64] | None = None
 
 
-def _projection(signals: NDArray[np.complex128]) -> tuple[float, float]:
-    """Return the common IQ projection direction, or I for insufficient data."""
-    try:
-        angle = find_rotate_angle(signals)
-    except ValueError:
-        return (1.0, 0.0)
-    return (float(np.cos(angle)), float(np.sin(angle)))
-
-
 def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     """Project the mean IQ along the sweep's principal axis, or I if unavailable."""
-    a, b = _projection(signals)
+    a, b = principal_iq_direction(signals)
     return a * signals.real + b * signals.imag
 
 
@@ -215,7 +206,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
             """Update the matching point means and shot SEM from completed rounds."""
             signals = split_sums(moments)[1]
-            direction = _projection(signals)
+            direction = principal_iq_direction(signals)
             contrast = direction[0] * signals.real + direction[1] * signals.imag
             sem = iq_shot_sem(moments, direction=direction)
             shots = int(np.nan_to_num(moments[..., 0]).max())
@@ -276,7 +267,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             ax.plot(lens, real_signals, ".-", markersize=5)
         else:
             sem = iq_shot_sem(
-                result.iq_moments[val_mask], direction=_projection(signals)
+                result.iq_moments[val_mask], direction=principal_iq_direction(signals)
             )
             ax.errorbar(lens, real_signals, yerr=sem, fmt=".-", markersize=5)
         ax.set(xlabel=_XLABEL, ylabel=_YLABEL, title=_TITLE)
