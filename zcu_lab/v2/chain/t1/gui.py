@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field
-from zcu_tools.analysis.readout_chain import CycleCheck, CycleSums
+from pydantic import Field
+from zcu_tools.analysis.readout_chain import CycleSums
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -12,8 +12,10 @@ from zcu_tools.plotting.plots import Plots
 from zcu_lab.v2.chain.t1.core import ChainT1Analysis, ChainT1Cfg, ChainT1Exp
 from zcu_lab.v2.chain.t1.form import make_form
 
+from .._joint import JointResidualSummary
 
-class ChainT1Summary(BaseModel):
+
+class ChainT1Summary(JointResidualSummary):
     """Recipe JSON view of the analysis in native units; null is unavailable."""
 
     t1: float | None = Field(
@@ -26,9 +28,6 @@ class ChainT1Summary(BaseModel):
     secondary_time_err: float | None = Field(
         description="Wald error of the secondary time in us."
     )
-    within_point: CycleCheck = Field(description="Within-point check J, df, p.")
-    sharing: CycleCheck = Field(description="Sharing check J, df; p is null.")
-    curve: CycleCheck = Field(description="Curve check J, df, p.")
 
 
 def _summary_lines(source: RunRecord[ChainT1Cfg, CycleSums]) -> tuple[str, ...]:
