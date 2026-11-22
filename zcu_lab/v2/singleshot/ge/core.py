@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -8,9 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.legend import Legend
 from matplotlib.patches import Polygon
-from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -121,135 +118,6 @@ class GEPostAnalysis:
     confusion: GEConfusionResult
 
 
-def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
-    """Explain manual selection for single/mux GE model-derived calibrations.
-
-    Joint histogram r2 must be >=0.9, normalized RMS <=0.1 and relative width
-    error <=0.5. These dimensionless gates also guard empirical assignment and
-    centers because a poor model is not calibration evidence. Required missing /
-    nonfinite metrics or their invalid issues prevent preselection. Unrelated
-    fixed-zero parameter issues do not. None means these review gates passed,
-    not that preparation or pure-state readout fidelity has been established.
-    """
-    quality = None if primary.fit_quality is None else primary.fit_quality.get("joint")
-    if quality is None:
-        return "Review required: joint histogram quality unavailable"
-    reasons = [
-        f"joint {issue.path}: {issue.reason}"
-        for issue in quality.invalid
-        if issue.path
-        in {"r2", "normalized_residual_rms", "relative_parameter_errors.s"}
-    ]
-    if quality.r2 is None or not math.isfinite(quality.r2):
-        reasons.append("joint r² unavailable")
-    elif quality.r2 < 0.9:
-        reasons.append(f"joint r²={quality.r2:.4g} <0.9")
-    rms = quality.normalized_residual_rms
-    if rms is None or not math.isfinite(rms):
-        reasons.append("joint normalized RMS unavailable")
-    elif rms > 0.1:
-        reasons.append(f"joint normalized RMS={rms:.4g} >0.1")
-    width_error = quality.relative_parameter_errors.get("s")
-    if width_error is None or not math.isfinite(width_error):
-        reasons.append("relative width error unavailable")
-    elif width_error > 0.5:
-        reasons.append(f"relative width error={width_error:.4g} >0.5")
-    return "Review required: " + "; ".join(reasons) if reasons else None
-
-
-def ge_post_review_note(primary: GEAnalysis, condition_number: float) -> str | None:
-    """Guard radius/confusion by primary GE quality and finite condition <=10.
-
-    The condition is dimensionless. Manual draft selection remains possible;
-    None means the review gates passed, not that the correction is reliable.
-    """
-    primary_note = ge_calibration_review_note(primary)
-    reasons = [] if primary_note is None else [primary_note]
-    if not math.isfinite(condition_number):
-        reasons.append("post condition number unavailable")
-    elif condition_number > 10:
-        reasons.append(f"post condition number={condition_number:.4g} >10")
-    return "; ".join(reasons) if reasons else None
-
-
-def _annotate_primary(ax: Axes, analysis: GEAnalysis) -> None:
-    """Overlay the fitted decision boundary and existing calibration diagnostics."""
-    direction = np.exp(-1j * analysis.theta)
-    anchor = analysis.threshold * direction
-    tangent = anchor + 1j * direction
-    xlim, ylim = ax.get_xlim(), ax.get_ylim()
-    ax.axline(
-        (float(anchor.real), float(anchor.imag)),
-        (float(tangent.real), float(tangent.imag)),
-        color="black",
-        linestyle="--",
-        label="Rotated I threshold",
-    )
-    ax.set(xlim=xlim, ylim=ylim)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2)
-    lines = [
-        f"Prepared-label assignment fidelity = {analysis.fidelity:.1%}",
-        f"IQ rotation angle = {analysis.theta:.3g} rad · Rotated I threshold = {analysis.threshold:.3g} a.u.",
-    ]
-    for name in ("joint", "ground", "excited"):
-        label = f"{name.capitalize()} histogram fit"
-        quality = (
-            None if analysis.fit_quality is None else analysis.fit_quality.get(name)
-        )
-        if quality is None:
-            lines.append(f"{label} quality unavailable")
-            continue
-        r2 = "unavailable" if quality.r2 is None else f"{quality.r2:.3g}"
-        rms = quality.normalized_residual_rms
-        rms_label = "unavailable" if rms is None else f"{rms:.3g}"
-        line = f"{label}: R² {r2} · normalized RMS {rms_label}"
-        if name == "joint":
-            width = quality.relative_parameter_errors.get("s")
-            width_label = "unavailable" if width is None else f"{width:.3g}"
-            line += f" · relative width error {width_label}"
-        lines.append(line)
-    if note := ge_calibration_review_note(analysis):
-        lines.extend(note.split("; "))
-    ax.set_title("\n".join(lines), fontsize=10)
-
-
-def _plot_projection(
-    plots: Plots,
-    signals: NDArray[np.complex128],
-    analysis: GEAnalysis,
-    *,
-    logarithmic: bool,
-) -> None:
-    """Compare the measured rotated-I distributions on common bins."""
-    rotated = (signals * np.exp(1j * analysis.theta)).real
-    bins = np.histogram_bin_edges(rotated[np.isfinite(rotated)], bins=50)
-    _, ax = plots.subplots(num="projection", layout="constrained")
-    for row, label, color in zip(
-        rotated,
-        ("g preparation", "e preparation"),
-        ("tab:blue", "tab:orange"),
-        strict=True,
-    ):
-        ax.hist(
-            row[np.isfinite(row)],
-            bins=bins.tolist(),
-            histtype="step",
-            linewidth=1.5,
-            color=color,
-            label=label,
-        )
-    ax.axvline(
-        analysis.threshold, color="black", linestyle="--", label="Rotated I threshold"
-    )
-    ax.set(
-        title="Single-shot GE · qubit readout · measured IQ projection",
-        xlabel="Rotated IQ in-phase I (a.u.)",
-        ylabel="Shots per bin (count)",
-        yscale="log" if logarithmic else "linear",
-    )
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2)
-
-
 def _plot_classified_iq(
     ax: Axes,
     signals: NDArray[np.complex128],
@@ -263,7 +131,7 @@ def _plot_classified_iq(
 
     signals is a nonempty 1D complex shot vector. g_center/e_center and radius
     follow analysis.singleshot.classify_result; max_point limits downsampling
-    and must be positive. Mutates ax, adds labels and equal aspect, and
+    and must be positive. Mutates ax, adds labels/legend/equal aspect, and
     returns None. Invalid classification geometry raises ValueError; Matplotlib
     errors propagate. The caller owns the axes and figure lifecycle."""
     mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)
@@ -291,7 +159,7 @@ def _plot_classified_iq(
         g_center.real,
         g_center.imag,
         markerfacecolor="b",
-        label="Ground circle center",
+        label="Ground",
         linestyle=":",
         color="k",
         marker="o",
@@ -301,7 +169,7 @@ def _plot_classified_iq(
         e_center.real,
         e_center.imag,
         markerfacecolor="r",
-        label="Excited circle center",
+        label="Excited",
         linestyle=":",
         color="k",
         marker="o",
@@ -324,49 +192,17 @@ def _plot_classified_iq(
         )
 
     ax.set_aspect("equal")
-    # Use the available I-axis width and prefer coarse steps on tall IQ panels.
-    ax.xaxis.set_major_locator(MaxNLocator(nbins="auto", steps=[1, 2, 4, 5, 10]))
-    ax.set_xlabel("IQ in-phase I (a.u.)")
-    ax.set_ylabel("IQ quadrature Q (a.u.)")
+    ax.legend()
+    ax.set_xlabel("I value (a.u.)")
+    ax.set_ylabel("Q value (a.u.)")
 
 
 class GE_Cfg(ConfigBase):
-    reset: Annotated[
-        Reset.Cfg | None,
-        FieldMeta(
-            label="Reset",
-            description="Select the reset module applied before preparation, or leave empty to skip reset.",
-        ),
-    ] = None
-    init_pulse: Annotated[
-        Pulse.Cfg | None,
-        FieldMeta(
-            label="Initial preparation pulse",
-            description="Select the pulse applied before the probe, or leave empty to omit it.",
-        ),
-    ] = None
-    probe_pulse: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="π probe pulse",
-            description="Enter the calibrated g↔e π pulse applied only in the probe-on preparation.",
-        ),
-    ]
-    readout: Annotated[
-        PulseReadout.Cfg,
-        FieldMeta(
-            label="Readout",
-            description="Enter the readout module applied at the end of the shot.",
-        ),
-    ]
-    shots: Annotated[
-        int,
-        FieldMeta(
-            label="Shots per preparation",
-            unit="count",
-            description="Enter the number of IQ readouts for each of the π probe-off and probe-on preparations.",
-        ),
-    ]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    shots: Annotated[int, FieldMeta(label="Shots", unit="count")]
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -422,8 +258,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
 
-        figure, axes = context.plots.subplots(num="measurement", layout="constrained")
-        legend: Legend | None = None
+        figure, axes = context.plots.subplots(num="measurement")
 
         @context.plots.on_plot_thread
         def update(clouds: NDArray[np.complex128]):
@@ -432,28 +267,20 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
             Read scan-shaped samples without changing them. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            nonlocal legend
             axes.clear()
             for cloud, label, color in zip(
                 clouds,
-                ("π probe off", "π probe on"),
-                ("tab:blue", "tab:orange"),
+                ("g preparation (probe off)", "e preparation (probe on)"),
+                ("tab:blue", "tab:red"),
                 strict=True,
             ):
                 axes.scatter(
                     cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
                 )
-
-            off, on = np.count_nonzero(np.isfinite(clouds), axis=1)
-            axes.set(
-                xlabel="IQ in-phase I (a.u.)",
-                ylabel="IQ quadrature Q (a.u.)",
-                title="Single-shot GE · qubit readout · IQ clouds",
-            )
+            axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
             axes.set_aspect("equal", adjustable="datalim")
-            if legend is None:
-                legend = figure.legend(loc="outside lower center", ncols=2)
-            legend.set_title(f"Accumulated shots: {off} off, {on} on (count)")
+            axes.grid()
+            axes.legend()
             return (figure,)
 
         figure.show()
@@ -507,8 +334,8 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         fidelity, which includes preparation mixing and is not pure-state readout
         fidelity. Poor histogram fit quality makes model populations and post
         population correction unreliable. Publish raw g/e IQ scatter to plots
-        as "fit", including on numerical failure. Publish the measured 1D
-        histogram as "projection" after a valid fit. cfg=None is supported.
+        as "fit", including on numerical failure. Histogram fitting stays
+        internal. cfg=None is supported.
 
         Rotation/classification, histogram fitting, fitted population/center
         validation and fidelity calculations wrap ValueError, RuntimeError,
@@ -521,27 +348,20 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
 
         if "fit" in plots:
             raise ValueError("Figure already exists: fit")
-        figure, axes = plots.subplots(num="fit", figsize=(8, 6), layout="constrained")
-        ground_prepared = options.initial_state == "ground"
+        _, axes = plots.subplots(num="fit")
         for cloud, label, color in zip(
-            source.result.signals,
-            (
-                "π probe off · g preparation"
-                if ground_prepared
-                else "π probe off · e preparation",
-                "π probe on · e preparation"
-                if ground_prepared
-                else "π probe on · g preparation",
-            ),
-            ("tab:blue", "tab:orange"),
+            signals,
+            ("g preparation", "e preparation"),
+            ("tab:blue", "tab:red"),
             strict=True,
         ):
             axes.scatter(
                 cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
             )
-        figure.suptitle("Single-shot GE · qubit readout · IQ discrimination")
-        axes.set(xlabel="IQ in-phase I (a.u.)", ylabel="IQ quadrature Q (a.u.)")
+        axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
         axes.set_aspect("equal", adjustable="datalim")
+        axes.grid()
+        axes.legend()
         # 2. Fit readout separation and preparation mixing in physical g/e order.
         fidelity, init_pops, fit = singleshot_ge_analysis(
             signals,
@@ -568,8 +388,11 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
             fit_quality=fit["fit_quality"],
         )
         analysis.validate_calibration()
-        _annotate_primary(axes, analysis)
-        _plot_projection(plots, signals, analysis, logarithmic=options.logscale)
+        axes.set_title(
+            "GE IQ (length ratio: not identifiable)"
+            if analysis.length_ratio is None
+            else f"GE IQ (length ratio = {analysis.length_ratio:.2f})"
+        )
         return analysis
 
     def post_analyze(
@@ -623,37 +446,31 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         ) as exc:
             raise GENumericalError(str(exc)) from exc
         # 2. Display preparation mixing alongside classified IQ and confusion.
+        g_signals, e_signals = signals
         g_center, e_center = primary.g_center, primary.e_center
-        fig, _ = plots.subplots(num="post", nrows=2, ncols=2, figsize=(8, 8))
-        fig.set_layout_engine("constrained", h_pad=0.10)
+        fig, _ = plots.subplots(
+            num="post", nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
+        )
         ax1, ax4, ax2, ax3 = fig.axes
 
-        heading = [
-            "Single-shot GE · qubit readout · circle classification",
-            f"Classification radius = {confusion.radius:.3g} a.u.",
-        ]
-        if note := ge_post_review_note(primary, confusion.condition_number):
-            heading.extend(note.split("; "))
-        fig.suptitle("\n".join(heading))
-        g_label, e_label, l_label = "g", "e", "other"
-        model_rows = [g_label, e_label, "other\n(model only)"]
+        g_label = r"$|0\rangle$"
+        e_label = r"$|1\rangle$"
+        l_label = r"$|L\rangle$"
         _plot_classified_iq(ax1, g_signals, g_center, e_center, confusion.radius)
         _plot_classified_iq(ax2, e_signals, g_center, e_center, confusion.radius)
-        handles, labels = ax1.get_legend_handles_labels()
-        fig.legend(handles, labels, loc="outside lower center", ncols=2)
 
         n_gg, n_ge, n_go = confusion.g_classification
         n_eg, n_ee, n_eo = confusion.e_classification
         ax1.set_title(
-            f"g preparation\nP(g) {n_gg:.1%} · P(e) {n_ge:.1%}\nP(other) {n_go:.1%}"
+            f"{g_label}: {n_gg:.1%}, {e_label}: {n_ge:.1%}, {l_label}: {n_go:.1%}"
         )
         ax2.set_title(
-            f"e preparation\nP(g) {n_eg:.1%} · P(e) {n_ee:.1%}\nP(other) {n_eo:.1%}"
+            f"{g_label}: {n_eg:.1%}, {e_label}: {n_ee:.1%}, {l_label}: {n_eo:.1%}"
         )
+        ax1.set_xlabel("")
 
         im = ax4.imshow(confusion.init_matrix, cmap="Blues", vmin=0, vmax=1)
-        ax4.grid(False)
-        fig.colorbar(im, ax=ax4, label="Probability (0–1)", shrink=0.8)
+        fig.colorbar(im, cax=ax4.inset_axes((1.04, 0, 0.06, 1)))
         for i in range(confusion.init_matrix.shape[0]):
             for j in range(confusion.init_matrix.shape[1]):
                 val = confusion.init_matrix[i, j]
@@ -670,14 +487,13 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         ax4.set_xticks([0, 1, 2])
         ax4.set_yticks([0, 1, 2])
         ax4.set_xticklabels([g_label, e_label, l_label])
-        ax4.set_yticklabels(model_rows)
-        ax4.set_xlabel("Model state")
-        ax4.set_ylabel("Preparation label")
-        ax4.set_title("Fitted preparation populations")
+        ax4.set_yticklabels([g_label, e_label, l_label])
+        ax4.set_xlabel("Actual State")
+        ax4.set_ylabel("Prepared State")
+        ax4.set_title("Initial Populations")
 
         im = ax3.imshow(confusion.matrix, cmap="Blues", vmin=0, vmax=1)
-        ax3.grid(False)
-        fig.colorbar(im, ax=ax3, label="Probability (0–1)", shrink=0.8)
+        fig.colorbar(im, cax=ax3.inset_axes((1.04, 0, 0.06, 1)))
         for i in range(confusion.matrix.shape[0]):
             for j in range(confusion.matrix.shape[1]):
                 val = confusion.matrix[i, j]
@@ -694,10 +510,8 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         ax3.set_xticks([0, 1, 2])
         ax3.set_yticks([0, 1, 2])
         ax3.set_xticklabels([g_label, e_label, l_label])
-        ax3.set_yticklabels(model_rows)
-        ax3.set_xlabel("Assigned outcome")
-        ax3.set_ylabel("Model state")
-        ax3.set_title(
-            f"Corrected confusion\nCondition number {confusion.condition_number:.2g}"
-        )
+        ax3.set_yticklabels([g_label, e_label, l_label])
+        ax3.set_xlabel("Measured State")
+        ax3.set_ylabel("Actual State")
+        ax3.set_title(f"Confusion Matrix (cond: {confusion.condition_number:.1f})")
         return GEPostAnalysis(confusion=confusion)

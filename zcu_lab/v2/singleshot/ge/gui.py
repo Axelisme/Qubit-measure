@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,12 +34,6 @@ from zcu_lab.v2.singleshot.ge.core import (
     GEPostAnalysis,
     GEPostAnalyzeOptions,
 )
-from zcu_lab.v2.singleshot.ge.core import (
-    ge_calibration_review_note as ge_calibration_review_note,
-)
-from zcu_lab.v2.singleshot.ge.core import (
-    ge_post_review_note as ge_post_review_note,
-)
 from zcu_lab.v2.singleshot.ge.form import make_form
 
 GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
@@ -47,21 +42,15 @@ GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
 @dataclass
 class GEAnalyzeParams:
     initial_state: Annotated[
-        Literal["ground", "excited"], ParamMeta(label="State before π probe")
+        Literal["ground", "excited"], ParamMeta(label="Initial State")
     ] = "ground"
     # ``backend`` selects the primary rotation/threshold fit. Post-analysis uses
     # the resulting centres and does not choose or run another fit backend.
-    backend: Annotated[
-        Literal["pca", "center"], ParamMeta(label="IQ rotation method")
-    ] = "pca"
-    logscale: Annotated[
-        bool, ParamMeta(label="Log scale for projected shot counts")
-    ] = False
-    align_t1: Annotated[
-        bool, ParamMeta(label="Share decay ratio across histogram fits")
-    ] = True
+    backend: Annotated[Literal["pca", "center"], ParamMeta(label="Backend")] = "pca"
+    logscale: Annotated[bool, ParamMeta(label="Log Scale")] = False
+    align_t1: Annotated[bool, ParamMeta(label="Align T1")] = True
     length_ratio: Annotated[
-        float | None, ParamMeta(label="Readout length / T1 (a.u.)", decimals=4)
+        float | None, ParamMeta(label="Length ratio (a.u.)", decimals=4)
     ] = None
 
 
@@ -72,15 +61,15 @@ class GESummary(BaseModel):
         description="Owner joint, ground and excited fit diagnostics; null when unavailable."
     )
     fidelity: float | None = Field(
-        description="Prepared-label assignment fidelity (fraction); null when unavailable."
+        description="Owner fidelity in dimensionless; null retains an unavailable estimate."
     )
 
     theta: float | None = Field(
-        description="IQ rotation angle (rad); null when unavailable."
+        description="Owner theta in rad; null retains an unavailable estimate."
     )
 
     threshold: float | None = Field(
-        description="Rotated I threshold (a.u.); null when unavailable."
+        description="Owner threshold in ADC units; null retains an unavailable estimate."
     )
 
 
@@ -104,6 +93,57 @@ class GEPostSummary(BaseModel):
     confusion: GEConfusionSummary = Field(
         description="Radius, confusion matrix and condition diagnostic from the core."
     )
+
+
+def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
+    """Explain manual selection for single/mux GE model-derived calibrations.
+
+    Joint histogram r2 must be >=0.9, normalized RMS <=0.1 and relative width
+    error <=0.5. These dimensionless gates also guard empirical assignment and
+    centers because a poor model is not calibration evidence. Required missing /
+    nonfinite metrics or their invalid issues prevent preselection. Unrelated
+    fixed-zero parameter issues do not. None means these review gates passed,
+    not that preparation or pure-state readout fidelity has been established.
+    """
+    quality = None if primary.fit_quality is None else primary.fit_quality.get("joint")
+    if quality is None:
+        return "Review required: joint histogram quality unavailable"
+    reasons = [
+        f"joint {issue.path}: {issue.reason}"
+        for issue in quality.invalid
+        if issue.path
+        in {"r2", "normalized_residual_rms", "relative_parameter_errors.s"}
+    ]
+    if quality.r2 is None or not math.isfinite(quality.r2):
+        reasons.append("joint r² unavailable")
+    elif quality.r2 < 0.9:
+        reasons.append(f"joint r²={quality.r2:.4g} <0.9")
+    rms = quality.normalized_residual_rms
+    if rms is None or not math.isfinite(rms):
+        reasons.append("joint normalized RMS unavailable")
+    elif rms > 0.1:
+        reasons.append(f"joint normalized RMS={rms:.4g} >0.1")
+    width_error = quality.relative_parameter_errors.get("s")
+    if width_error is None or not math.isfinite(width_error):
+        reasons.append("relative width error unavailable")
+    elif width_error > 0.5:
+        reasons.append(f"relative width error={width_error:.4g} >0.5")
+    return "Review required: " + "; ".join(reasons) if reasons else None
+
+
+def ge_post_review_note(primary: GEAnalysis, condition_number: float) -> str | None:
+    """Guard radius/confusion by primary GE quality and finite condition <=10.
+
+    The condition is dimensionless. Manual draft selection remains possible;
+    None means the review gates passed, not that the correction is reliable.
+    """
+    primary_note = ge_calibration_review_note(primary)
+    reasons = [] if primary_note is None else [primary_note]
+    if not math.isfinite(condition_number):
+        reasons.append("post condition number unavailable")
+    elif condition_number > 10:
+        reasons.append(f"post condition number={condition_number:.4g} >10")
+    return "; ".join(reasons) if reasons else None
 
 
 def _analyze(
@@ -180,13 +220,6 @@ def _post_writeback(
     return [item]
 
 
-def _summary_lines(source: GERunResult) -> tuple[str, ...]:
-    cfg = source.cfg
-    if cfg is None:
-        return ()
-    return (f"Reps×Rounds: {cfg.shots}×1 per preparation",)
-
-
 def _run(cfg: GE_Cfg, *, context: RunContext) -> RunRecord[GE_Cfg, GE_Result]:
     return RunRecord(cfg=cfg, result=GE_Exp().run(cfg, context=context))
 
@@ -197,10 +230,7 @@ DEFINITION = Adapter(
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze,
-        options=lambda source, env: GEAnalyzeParams(),
-        writeback=_writeback,
-        summary_lines=_summary_lines,
+        fn=_analyze, options=lambda source, env: GEAnalyzeParams(), writeback=_writeback
     ),
     post_analysis=PostAnalysis(fn=_post_analyze, writeback=_post_writeback),
 )

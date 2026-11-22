@@ -6,7 +6,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.ticker import MaxNLocator
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -39,9 +39,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules.readout import require_circle_classifiers
 from zcu_tools.progress_bar import make_pbar
 
-from zcu_lab.v2.support import live_heatmap
-
-_RF_XLABEL = "Probe RF frequency (MHz)"
+from zcu_lab.v2.support import live_heatmap, live_line
 
 
 @dataclass(frozen=True)
@@ -104,15 +102,14 @@ def _plot_transition_rates(
     ax_To.errorbar(xs, R_eo, yerr=Rerr_eo, label=r"$\Gamma_{1L}$", color="darkorange")
     ax_To.errorbar(xs, R_go, yerr=Rerr_go, label=r"$\Gamma_{0L}$", color="dodgerblue")
 
+    max_rate = np.nanmax([R_go, R_ge, R_eo, R_eg]).item()
     for ax in (ax_Tg, ax_Te, ax_To):
         ax.legend()
+        ax.grid(True)
         ax.set_xlabel(xlabel)
-        ax.set_ylabel("Transition rate (µs⁻¹)")
         ax.set_yscale("log")
+        ax.set_ylim(1e-3, 2 * max_rate)
         ax.set_xlim(xs[0], xs[-1])
-        if xlabel == _RF_XLABEL:
-            ax.xaxis.set_major_locator(MaxNLocator(nbins=3))
-            ax.ticklabel_format(axis="x", style="plain", useOffset=False)
 
 
 def _require_positive_lengths(lengths: NDArray[np.float64]) -> None:
@@ -152,50 +149,12 @@ def _fit_transition_rates(
 
 
 class T1WithToneSweepCfg(ConfigBase):
-    reset: Annotated[
-        Reset.Cfg | None,
-        FieldMeta(
-            label="Reset",
-            description="Select the reset module applied before preparation, or leave empty to skip reset.",
-        ),
-    ] = None
-    pi_pulse: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="g↔e π pulse",
-            description="Enter the calibrated π pulse used only for the e preparation.",
-        ),
-    ]
-    probe_pulse: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="Probe tone",
-            description="Enter the tone applied before readout; its duration and one of gain or RF frequency are swept.",
-        ),
-    ]
-    readout: Annotated[
-        PulseReadout.Cfg,
-        FieldMeta(
-            label="Readout",
-            description="Enter the readout module applied at the end of the shot.",
-        ),
-    ]
-    gain: Annotated[
-        SweepCfg | None,
-        FieldMeta(
-            label="Probe gain",
-            unit="a.u.",
-            description="Set the outer probe gain sweep in a.u. for the gain variant.",
-        ),
-    ] = None
-    freq: Annotated[
-        SweepCfg | None,
-        FieldMeta(
-            label="Probe RF frequency",
-            unit="MHz",
-            description="Set the outer probe RF frequency sweep in MHz for the frequency variant.",
-        ),
-    ] = None
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[SweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
+    freq: Annotated[SweepCfg | None, FieldMeta(label="Frequency", unit="MHz")] = None
     delay: Annotated[
         SweepCfg,
         FieldMeta(
@@ -291,35 +250,42 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         )
         return sweep_name, xs
 
-    def _make_viewers(self, plots: Plots, xlabel: str):
-        """Set up comparable probability maps for every preparation and outcome."""
+    def _make_viewers(self, plots: Plots, sweep_name: str):
+        """Show six population heatmaps and two current-trace panels; return their viewers.
+
+        Use plots to own the figure and sweep_name to label gain or frequency.
+        Return six heatmap viewers in initial-state-major order, followed by
+        two three-population line viewers. Plot errors propagate.
+        """
         figure, _ = plots.subplots(
-            nrows=2,
-            ncols=3,
-            num="measurement",
-            figsize=(11, 6),
-            layout="constrained",
+            nrows=4, ncols=2, num="measurement", figsize=(12, 10)
         )
-        progress = figure.suptitle("T1 tone sweep · qubit · classified populations")
+        # Row-major grid: columns are initial g/e; rows are g/e/other and current.
+        cells = figure.axes
         heatmaps = []
-        for index, ax in enumerate(figure.axes):
-            prep = ("No π pulse", "With π pulse")[index // 3]
-            state = ("g", "e", "other")[index % 3]
+        for column in (0, 1):
+            for row in (0, 1, 2):
+                ax = cells[2 * row + column]
+                ax.set(
+                    xlabel="Probe gain (a.u.)"
+                    if sweep_name == "gain"
+                    else "Probe frequency (MHz)",
+                    ylabel="Time (µs)" if column == 0 else "",
+                )
+                heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
+        lines = []
+        for column, ax in enumerate(cells[6:]):
             ax.set(
-                title=f"{prep} · P({state})",
-                xlabel=xlabel,
-                ylabel="Probe exposure time (µs)",
+                xlabel="Time (µs)",
+                ylabel="P(g), P(e), P(other)" if column == 0 else "",
+                ylim=(0.0, 1.0),
             )
-            ax.grid(False)
-            if xlabel == _RF_XLABEL:
-                ax.xaxis.set_major_locator(MaxNLocator(nbins=3))
-                ax.ticklabel_format(axis="x", style="plain", useOffset=False)
-            heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
-        figure.colorbar(
-            figure.axes[0].images[0], ax=figure.axes, label="Probability (0–1)"
-        )
+            lines.append(live_line(ax, num_lines=3))
+            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
+                line.set_label(label)
+            ax.legend()
         figure.show()
-        return progress, heatmaps
+        return (*heatmaps, *lines)
 
     def run(
         self, cfg: T1WithToneSweepCfg, *, context: RunContext
@@ -352,28 +318,25 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
             )
         _require_positive_lengths(lengths)
 
-        # 2. Display the same probability scale for all six preparation/outcome pairs.
-        xlabel = _RF_XLABEL if sweep_name == "freq" else "Probe gain (a.u.)"
-        progress, heatmaps = self._make_viewers(context.plots, xlabel)
+        # 2. Display populations for both preparations and the current scan row.
+        gg_2d, ge_2d, go_2d, eg_2d, ee_2d, eo_2d, g_1d, e_1d = self._make_viewers(
+            context.plots, sweep_name
+        )
+        current_index = 0
 
         @context.plots.on_plot_thread
         def plot_fn(counts: NDArray[np.float64]):
-            """Publish the current maps and count acquired sweep cells."""
-            totals = counts.sum(axis=-1)
-            populations = counts / totals[..., None]
-            progress.set_text(
-                "T1 tone sweep · qubit · classified populations\n"
-                f"{np.count_nonzero(totals > 0)}/{totals.size} preparation–time points acquired"
-            )
+            populations = counts / counts.sum(axis=-1, keepdims=True)
+            i = current_index
             return (
-                progress,
-                *(
-                    artist
-                    for index, viewer in enumerate(heatmaps)
-                    for artist in viewer.set(
-                        xs, lengths, populations[:, index // 3, :, index % 3]
-                    )
-                ),
+                *gg_2d.set(xs, lengths, populations[:, 0, :, 0]),
+                *ge_2d.set(xs, lengths, populations[:, 0, :, 1]),
+                *go_2d.set(xs, lengths, populations[:, 0, :, 2]),
+                *g_1d.set(lengths, populations[i, 0].T),
+                *eg_2d.set(xs, lengths, populations[:, 1, :, 0]),
+                *ee_2d.set(xs, lengths, populations[:, 1, :, 1]),
+                *eo_2d.set(xs, lengths, populations[:, 1, :, 2]),
+                *e_1d.set(lengths, populations[i, 1].T),
             )
 
         buffer = SignalBuffer(
@@ -384,9 +347,12 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
 
         # 3. Scan gain/frequency on the host; GE and length loops run on-board.
         with Schedule(buffer, scope=context.scope) as sched:
-            for value, step in sched.scan(sweep_name, xs.tolist()):
+            for value_idx, (value, step) in enumerate(
+                sched.scan(sweep_name, xs.tolist())
+            ):
                 probe_cfg = cfg.probe_pulse.model_copy(deep=True)
                 probe_cfg.set_param(sweep_name, value)
+                current_index = value_idx
 
                 # Read out at each actual probe end, without longest-point padding.
                 builder = TimelineBuilder(
@@ -461,52 +427,49 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         # 2. Fit both preparations together, then choose the displayed outer axis.
         rates, rate_Covs = _fit_transition_rates(Ts, populations)
 
-        # The RF adapter supplies its label even when a Load could not restore cfg.
-        if not xlabel:
-            xlabel = (
-                _RF_XLABEL
-                if source.cfg is not None and source.cfg.freq is not None
-                else "Probe gain (a.u.)"
-            )
-
-        fig, _ = plots.subplots(
-            num="fit",
-            nrows=2,
-            ncols=3,
-            figsize=(11, 6),
-            layout="constrained",
-        )
-        quantity = (
-            "classified populations"
-            if confusion_matrix is None
-            else "readout-corrected populations"
-        )
-        fig.suptitle(f"T1 tone sweep · qubit · {quantity}")
-        for index, ax in enumerate(fig.axes):
-            prep = ("No π pulse", "With π pulse")[index // 3]
-            state = ("g", "e", "other")[index % 3]
-            ax.set(
-                title=f"{prep} · P({state})",
-                xlabel=xlabel,
-                ylabel="Probe exposure time (µs)",
-            )
-            ax.grid(False)
-            if xlabel == _RF_XLABEL:
-                ax.xaxis.set_major_locator(MaxNLocator(nbins=3))
-                ax.ticklabel_format(axis="x", style="plain", useOffset=False)
-            viewer = live_heatmap(ax, uniform=False, clim=(0.0, 1.0))
-            viewer.set(xs, Ts, populations[:, index // 3, :, index % 3])
-        fig.colorbar(fig.axes[0].images[0], ax=fig.axes, label="Probability (0–1)")
-
         if ac_coeff is not None:
             xs = ac_coeff * xs**2
-            xlabel = "Mean cavity photon number (count)"
-        rates_fig, _ = plots.subplots(
-            num="rates",
-            ncols=3,
-            figsize=(11, 4),
-            layout="constrained",
-        )
-        rates_fig.suptitle("T1 tone sweep · qubit · fitted transition rates")
-        ax_g, ax_e, ax_other = rates_fig.axes
-        _plot_transition_rates(xs, rates, rate_Covs, (ax_g, ax_e, ax_other), xlabel)
+
+        # default the rate-panel x-label to the photon-number symbol when xs is in
+        # photon units (matches the MIST overnight plot's r"$\bar n$" axis)
+        if not xlabel:
+            xlabel = r"$\bar n$" if ac_coeff is not None else "probe gain (a.u.)"
+
+        # 3. Show the six population maps above the transition-rate panels.
+        fig = Figure(figsize=(12, 8))
+        plots.adopt("fit", fig)
+        grid_spec = fig.add_gridspec(3, 3)
+        ax_gg = fig.add_subplot(grid_spec[0, 0])
+        ax_ge = fig.add_subplot(grid_spec[0, 1])
+        ax_go = fig.add_subplot(grid_spec[0, 2])
+        ax_eg = fig.add_subplot(grid_spec[1, 0])
+        ax_ee = fig.add_subplot(grid_spec[1, 1])
+        ax_eo = fig.add_subplot(grid_spec[1, 2])
+        ax_Tg = fig.add_subplot(grid_spec[2, 0])
+        ax_Te = fig.add_subplot(grid_spec[2, 1])
+        ax_To = fig.add_subplot(grid_spec[2, 2])
+
+        def _plot_population(ax, pop, label):
+            ax.scatter([], [], s=0, label=label)
+            ax.imshow(
+                pop.T,
+                aspect="auto",
+                cmap="RdBu_r",
+                extent=(xs[0], xs[-1], Ts[-1], Ts[0]),
+            )
+            ax.legend()
+
+        _plot_population(ax_gg, populations[:, 0, :, 0], "Ground")
+        _plot_population(ax_ge, populations[:, 0, :, 1], "Excited")
+        _plot_population(ax_go, populations[:, 0, :, 2], "Other")
+        _plot_population(ax_eg, populations[:, 1, :, 0], "Ground")
+        _plot_population(ax_ee, populations[:, 1, :, 1], "Excited")
+        _plot_population(ax_eo, populations[:, 1, :, 2], "Other")
+
+        _plot_transition_rates(xs, rates, rate_Covs, (ax_Tg, ax_Te, ax_To), xlabel)
+
+        ax_gg.set_ylabel("Time (µs)")
+        ax_eg.set_ylabel("Time (µs)")
+        ax_Tg.set_ylabel("Rate (µs⁻¹)")
+
+        fig.tight_layout()

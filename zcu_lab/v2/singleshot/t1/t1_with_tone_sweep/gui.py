@@ -48,11 +48,7 @@ def _analyze(
     # number; ``confusion_matrix`` readout-corrects; both are md inputs, not
     # user knobs. ``xlabel`` labels the rate plots with this adapter's outer
     # axis.
-    ac_coeff = (
-        read_analysis_float(req.parameters, "$qubit.ext.ac_stark_coeff")
-        if xlabel == "Probe gain (a.u.)"
-        else None
-    )
+    ac_coeff = read_analysis_float(req.parameters, "$qubit.ext.ac_stark_coeff")
     confusion = readout_confusion_matrix(
         None if req.run_result.cfg is None else req.run_result.cfg.readout
     )
@@ -72,13 +68,6 @@ def _analyze_gain(
     _analyze(req, plots=plots, xlabel="Probe gain (a.u.)")
 
 
-def _summary_lines(source: SsT1ToneSweepRunResult) -> tuple[str, ...]:
-    cfg = source.cfg
-    if cfg is None:
-        return ()
-    return (f"Reps×Rounds: {cfg.reps}×{cfg.rounds}",)
-
-
 def _run_gain(
     cfg: T1WithToneSweepCfg, *, context: RunContext
 ) -> RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult]:
@@ -90,14 +79,14 @@ GAIN_DEFINITION = Adapter(
     make_form=make_form_gain,
     run=_run_gain,
     guide=Path(__file__).with_name("guide.gain.md"),
-    analysis=Analysis(fn=_analyze_gain, summary_lines=_summary_lines),
+    analysis=Analysis(fn=_analyze_gain),
 )
 
 
 def _analyze_freq(
     req: AnalyzeRequest[SsT1ToneSweepRunResult, None], *, plots: Plots
 ) -> None:
-    _analyze(req, plots=plots, xlabel="Probe RF frequency (MHz)")
+    _analyze(req, plots=plots, xlabel="Probe frequency (MHz)")
 
 
 def _run_freq(
@@ -111,5 +100,5 @@ FREQ_DEFINITION = Adapter(
     make_form=make_form_freq,
     run=_run_freq,
     guide=Path(__file__).with_name("guide.freq.md"),
-    analysis=Analysis(fn=_analyze_freq, summary_lines=_summary_lines),
+    analysis=Analysis(fn=_analyze_freq),
 )

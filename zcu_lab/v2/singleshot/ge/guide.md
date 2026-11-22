@@ -1,48 +1,97 @@
-**Readers:** operator, agent. Calibrate single-shot ground/excited readout and interpret Primary and Post.
+## Behavior
 
-# Single-shot GE
+**Readers:** operator, agent. How to calibrate ground/excited single-shot readout from the GUI or MCP and interpret the results.
 
-## Run
+Single-shot ground/excited readout: measures with the probe pi-pulse off and on, takes 'shots' single-shot readouts of each, and fits the two IQ clusters to extract the assignment fidelity, rotation angle and threshold. Runs on real hardware with rounds=1 and reps=shots. Each run acquires readout shots twice, with the probe off and on.
 
-Repeat `optional Reset → optional initial preparation pulse → π probe off or on → Readout → Relax delay`. The two preparations differ only by the calibrated g↔e π probe pulse. Each produces a cloud of integrated single-shot complex IQ. The I and Q values are in normalized ADC units (a.u.).
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
-| Run field | What to enter or check |
-| --- | --- |
-| Reset | Select the reset module before both preparations, or leave it empty. Reset is a pulse-sequence choice; Defaults reloads form values. |
-| Initial preparation pulse | Select a pulse before the probe, or leave it empty to start from the relaxed state. If the pulse prepares e, select excited for **State before π probe**. |
-| π probe pulse | Select the g↔e π pulse calibrated by Rabi on this qubit. The probe-on branch applies it once. |
-| Readout | Select the resonator readout used for both clouds. Check RF frequency, gain and integration window. Readout duration and alignment affect cloud separation and relaxation during the window. A starting point for the post-readout cavity wait is 5/(2π·κ). |
-| Shots per preparation (count) | Number of IQ shots **in each** branch, not divided between them. Open/Defaults starts at 100,000 each. |
-| Relax delay (µs) | Wait after each repetition so the starting state can recover. Defaults uses five times the captured qubit T1. Missing T1 gives 150 µs; invalid stored T1 leaves this field blank. |
+## Parameter sources
 
-Open or Defaults captures the bound qubit, its resonator and their module choices. The π probe comes from the qubit's x180 slot, and Readout comes from the resonator's readout slot. If a slot is missing, the corresponding template supplies starting values from the captured frequency and wiring. Check unfilled timing and drive gain before Run. Refresh keeps the current draft; use Defaults to capture new calibration sources. For a readout template, leave 0.015 µs before and after the integration window within the RF pulse, starting from the measured time of flight.
+Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. The probe template uses `$qubit.freq` and `$qubit.wiring.ch`.
 
-The live IQ scatter uses blue for π probe off and orange for π probe on. The shot counts show which branch has arrived. The same colors, I and Q axes, and markers appear in Primary. Neither branch is guaranteed to be a pure energy state.
+Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
-## Primary
+T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
 
-| Primary field | What it does |
-| --- | --- |
-| State before π probe | ground maps off/on to g/e preparation; excited swaps that mapping. This changes interpretation, not acquisition. |
-| IQ rotation method | pca uses the pooled axis of largest IQ spread; center uses the direction between the two centers. Both rotate IQ to separate the clouds along I. |
-| Log scale for projected shot counts | Use a logarithmic count axis to inspect sparse tails. This changes only the measured histogram display, not the fit or IQ scatter. |
-| Share decay ratio across histogram fits | Fit the two preparation histograms with a shared readout-length to relaxation-time ratio when enabled. |
-| Readout length / T1 (a.u.) | Enter the known ratio of integration time to T1, or leave blank to estimate it from the data. Example: 1 µs / 20 µs = 0.05. |
+These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
 
-Primary adds the dashed decision boundary where the real part of IQ rotated by the shown angle equals **Rotated I threshold**. On either side, it assigns the dominant preparation label. **Prepared-label assignment fidelity** is the average of the correct-label fractions across the two preparations (equal weight). It includes preparation mixing, so it is not pure-state readout fidelity. In the measured IQ projection, compare the shot-count distributions on the rotated I axis. Substantial overlap at the dashed threshold means more ambiguous assignments. The steps show measured counts, not fitted curves.
+## Module slots
 
-Use the Analyze summary's run ID and **Reps×Rounds** to identify the data. For example, 4096×1 per preparation means 4096 configured repeats in each branch, one round. An interrupted run can contain fewer retained shots; check the live counts.
+Uses `$qubit.module.x180` for optional init and required probe, `$qubit.module.reset` for optional reset, and `$resonator.module.readout` for readout. Missing required slots use pi_pulse/readout templates; missing optional slots stay disabled. Run uses the Open/Defaults snapshot.
 
-The fit plot reports R² and normalized RMS for the joint fit and for each preparation histogram (ground and excited). R² measures the fraction of observed variance explained by the model. Normalized RMS is the residual RMS divided by the observed count range for that fit diagnostic. The two preparation values help locate a poor fit; they have no separate thresholds. Relative width error is the uncertainty of the fitted width divided by the fitted width. Primary leaves the proposed calibration unchecked when joint R² is below 0.9, joint normalized RMS exceeds 0.1, relative width error exceeds 0.5, or one of these checks is unavailable. The plot gives the failed check; a high empirical assignment score does not override it.
+## Assignment and model quality
 
-## Post and next steps
+Fidelity is the empirical, equal-weight assignment of the two prepared labels at
+the best projected-IQ histogram boundary. Probe off/on are preparation labels,
+not guaranteed pure g/e states. Thermal mixing and imperfect pulses remain in
+this score. A threshold can also exploit small differences inside one cluster;
+a high prepared-label score does not establish pure-state readout fidelity.
 
-Post takes the Primary centers and populations without running another fit. The two scatter panels show classification around the g and e centers: blue for g, red for e, green for other. Dashed circles show the radius. In an overlap the nearer center wins; outside both circles the result is other. Other is not an identified leakage level. Post does not apply the Primary threshold.
+Initial populations come from the fitted histogram model. Post-analysis instead
+classifies shots by nearest-center regions and a radius, then solves the fitted
+population matrix to remove preparation mixing. It does not reuse the primary
+histogram threshold. These outputs need not equal the prepared-label score.
+Low joint r2 means the histogram model does not describe the observations;
+then fitted populations and population-corrected post results are not reliable
+calibration evidence. Inspect raw clusters, residuals and uncertainty before
+using centers, width or the confusion matrix.
 
-Compare the two matrices on a 0–1 scale. **Fitted preparation populations** has preparation rows and model-state columns. **Corrected confusion** has model-state rows and assigned-outcome columns. It uses the fitted preparation mixing to undo preparation contamination. Both matrices label the `other` row as model only: the model isolates that row as `0%, 0%, 100%`. No third preparation was measured. This assumption does not replace the `other` column, which gives the model fraction or assigned outcome for each row.
+## Typical writeback
 
-Diagonal entries near one support discrimination only if both the histogram fit and the correction are credible. Post also leaves the proposal unchecked if the condition number of the **corrected confusion matrix** exceeds 10 or is unavailable. A large value means that errors in the assigned fractions can grow when you use that matrix to infer populations. It does not describe the earlier solve that removes preparation mixing.
+Primary candidates are initially selected only when joint r2 is at least 0.9,
+normalized residual RMS at most 0.1 and relative width error at most 0.5.
+Post radius/confusion also require a finite condition number at most 10.
+Required missing/nonfinite metrics or their invalid issues leave candidates
+unselected with notes. Unrelated fixed-zero parameter issues do not reject them.
+You may select a candidate manually after inspecting the model and raw IQ.
 
-If cloud overlap is high, do not write back the calibration just because the fit returned a threshold. Check the π calibration first if the off/on clouds have similar weights. If the prepared clouds are distinct but broad, vary the readout RF frequency, gain or integration window one at a time and repeat GE with the same preparation and shot count. Prefer the setting that improves the equal-weight assignment score without degrading joint fit quality or increasing Other. The IQ plots alone do not give a signed frequency correction. After comparing settings, apply the selected centers in Primary and radius/confusion in Post to the chosen Readout module. Neither action changes the qubit π pulse.
+Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
 
-There is no per-point shot SEM in these IQ scatters or matrix views. A point is a single shot, not a swept mean. The recipe `singleshot_ge` uses the same fields and asks before applying either writeback.
+Load uses the parameter and library content saved in data.h5, without reading the historical point or live Form. Preview and Apply target the GUI's currently selected point. Select a point before applying.
+
+Writeback resolves the Run's `$resonator.module.readout` slot to its library module. Primary proposes a circle classifier with g/e centers. Post proposes centers, radius and the 3x3 prepared-to-measured confusion matrix. Centers and radius use raw ADC sums divided by integration length without IQ-offset subtraction. Fidelity and sigma are not stored. The proposal preserves waveform keys and rejects readout settings that differ from the captured library module, apart from classifier. Equal materialized settings are accepted even if the Run used an inline copy or another key.
+
+In MCP, `singleshot_ge` analyzes Primary and asks about its candidates before starting Post. It applies the selected Primary candidates if accepted, then analyzes Post and asks about its candidates separately. You may skip Primary and still accept Post. The report lists confirmed writes in `primary_writeback_applied` and `post_writeback_applied`.
+The report's `fit_quality` comes from the joint histogram fit.
+`ground_fit_quality` and `excited_fit_quality` come from the individual fits.
+
+A batch applies Primary before Post and leaves the complete classifier. Separate Apply calls use the last replacement. Applying Primary after Post clears radius and matrix; apply Post again before a measurement that needs radius. Old point calibration values are not read or migrated. Re-run GE after this update.
+
+Changing readout settings does not clear or automatically invalidate the stored classifier.
+After a readout change, re-run GE and Post-Analysis, then Apply the new calibration before using classification.
+The proposal's settings comparison prevents writing new calibration to different settings; it does not check whether an existing classifier is still valid.
+
+## Recommended
+
+Set Initial State to the predominant state after reset/init and before the probe pi-pulse.
+This labels the two acquisitions; each can contain a mixture of states.
+Use a large 'shots' (~1e5) so the IQ histograms are well sampled.
+The default analysis method is 'pca'.
+Analysis also exposes histogram log scale, T1 alignment, and an optional shared length ratio.
+The length ratio (a.u., readout length / T1) is inferred from the decay tail between the two clusters.
+With Length Ratio left empty, two tight clusters without a visible tail make Analyze return `length_ratio: null` and title the IQ plot `GE IQ (length ratio: not identifiable)`.
+This reporting decision does not change centers, fidelity or Post-Analysis.
+If you set Length Ratio manually, Analyze returns the supplied value.
+Run once the qubit pi-pulse and the readout are both calibrated.
+Run and Analyze each show one IQ scatter, with blue g-preparation and red e-preparation shots.
+The live labels mean probe off/on; Analyze maps them using Initial State.
+Histogram fitting remains internal, so histogram log scale does not change the scatter.
+Two separated IQ clouds indicate readout separation.
+Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
+
+**Last updated:** 2026-11-01
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Obtain a calibrated pi pulse and verify readout timing. Primary fits the two clouds; Post derives classification diagnostics.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `singleshot_ge` after inspecting the same Form errors.
+   shots sets each cloud size, not Expts. initial_state, backend, logscale, align_t1 and length_ratio update Primary analysis. Post has no independent controls.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
