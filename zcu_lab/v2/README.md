@@ -267,6 +267,10 @@ Mux 實驗每個參與 tone 各有一張 `measurement_i`，
 不把多 tone 疊在同一 axis。每張圖保留自己的 actual x，delay 類使用共用
 requested-delay 軸。
 
+[Mux Ramsey](mux/t2ramsey/core.py) 與 [Mux Echo](mux/t2echo/core.py) 的 `analyze` 各自把作圖用的密網格 `curve_times` 傳給 [`fit_coherence_trace`](support/mux_coherence_analysis.py)。
+Helper 用取得的資料擬合並評估品質，再在 `curve_times` 上計算同次模型的曲線。
+密網格只用來畫模型，不是擬合的量測點，也不是 shot SEM 的來源。
+
 Mux GE Live（`measurement_i`）以藍／紅區分 probe off／on 取數列，不讀 Analyze 的 **Initial State**。
 Analyze Fit（`fit_i`）用 [`ge_signals_by_state`](support/singleshot/util.py) 依 **Initial State** 將同一批 IQ 排成 g／e 準備（藍／紅），圖例標出各準備對應的 probe row。
 `diagnostic_i` 也用準備色。Post（`post_i`）沿用所選來源的 Primary 準備映射，將 g／e 密度分格畫出。準備色不代表分類結果。
