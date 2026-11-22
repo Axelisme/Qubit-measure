@@ -221,6 +221,63 @@ def _empty_numeric_input(loops: int, size: int = 2) -> evolution.FrozenInput:
     return evolution.FrozenInput(source, batch)
 
 
+@pytest.mark.parametrize(
+    "field",
+    [[], None, [[[1, 0]]], [[[0, {"real": True, "imag": 0}], [0, 0]]]],
+    ids=["empty", "null", "wrong-shape", "nonnumeric"],
+)
+def test_explicit_invalid_collapse_is_rejected_even_with_correct_hashes(
+    tmp_path: Path,
+    field: object,
+) -> None:
+    fixture = _empty_numeric_input(1)
+    with closing(fixture.source):
+        physical = json.loads(
+            evolution.canonical_json(
+                evolution.physical_input(fixture.source, fixture.batch)
+            )
+        )
+    physical["models"][0]["collapse_operators"] = field
+    record = evolution.FrozenRecord("invalid-loss", physical)
+    manifest = tmp_path / "scenes.json.gz"
+    with pytest.raises(ValueError, match="collapse_operators"):
+        evolution.write_frozen_manifest(manifest, (record,))
+    assert not manifest.exists()
+
+    # An external producer can supply matching digests for malformed physics.
+    payload = {
+        "version": evolution.FROZEN_PHYSICAL_VERSION,
+        "physical": physical,
+        "physical_sha256": record.physical_sha256,
+    }
+    standalone = tmp_path / "input.json"
+    standalone.write_text(evolution.canonical_json(payload), encoding="utf-8")
+    manifest.write_bytes(
+        gzip.compress(
+            evolution.canonical_json(
+                {
+                    "version": evolution.FROZEN_PHYSICAL_VERSION,
+                    "inputs": [
+                        {
+                            **payload,
+                            "name": record.name,
+                            "metadata": record.metadata,
+                            "oracle_sha256": record.oracle_sha256,
+                        }
+                    ],
+                }
+            ).encode()
+        )
+    )
+    for decode in (
+        lambda: evolution.read_physical_input(physical),
+        lambda: evolution.read_frozen_input(standalone),
+        lambda: evolution.read_frozen_manifest(manifest),
+    ):
+        with pytest.raises(ValueError, match="collapse_operators"):
+            decode()
+
+
 @pytest.mark.parametrize("loops", [1, 2])
 def test_zero_point_waveform_round_trip_preserves_loop_shape(
     tmp_path: Path, loops: int

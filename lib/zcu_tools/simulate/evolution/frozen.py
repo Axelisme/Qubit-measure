@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .engine import DriveTrack, EnvelopeSpec, TimelineBatch
 from .secular import (
@@ -27,7 +28,7 @@ from .secular import (
     SegmentShift,
 )
 
-FROZEN_PHYSICAL_VERSION = 1
+FROZEN_PHYSICAL_VERSION = 2
 """Physical decoding contract shared by manifests and standalone inputs.
 
 Bump when fields, units, dtypes, defaults or Engine-input reconstruction change.
@@ -116,10 +117,14 @@ def physical_input(
         {tuple(int(v) for v in row) for row in batch.flux.level}
         | {(0,) * batch.flux.level.shape[1]}
     )
-    models = [asdict(source.model(level)) for level in levels]
-    if not include_identity:
-        for model in models:
+    models = []
+    for level in levels:
+        model = asdict(source.model(level))
+        if not model["collapse_operators"]:
+            model.pop("collapse_operators")
+        if not include_identity:
             model.pop("identity")
+        models.append(model)
     return {
         "batch": asdict(batch),
         "initial_density": source.initial_density,
@@ -132,9 +137,49 @@ def physical_input(
 
 
 def _complex_object(value: dict[str, Any]) -> object:
-    if value.keys() == {"real", "imag"}:
+    if value.keys() == {"real", "imag"} and all(
+        type(part) in (int, float) for part in value.values()
+    ):
         return complex(value["real"], value["imag"])
     return value
+
+
+def _collapse_operators(model: dict[str, Any]) -> tuple[NDArray[np.complex128], ...]:
+    """Decode or validate an optional canonical list of full L matrices."""
+    if "collapse_operators" not in model:
+        return ()
+    field = model["collapse_operators"]
+    if not isinstance(field, (list, tuple)) or not field:
+        raise ValueError("collapse_operators must be omitted or a nonempty list")
+    size = len(model["energies_ghz"])
+    jumps = []
+    for matrix in field:
+        entries = np.asarray(matrix, dtype=object)
+        values = [
+            _complex_object(item) if isinstance(item, dict) else item
+            for item in entries.flat
+        ]
+        if entries.shape != (size, size) or any(
+            type(item) not in (int, float, complex) for item in values
+        ):
+            raise ValueError(
+                f"collapse_operators must contain numeric ({size}, {size}) matrices"
+            )
+        jump = np.asarray(values, dtype=np.complex128).reshape(size, size)
+        if not np.isfinite(jump).all():
+            raise ValueError("collapse_operators must be finite")
+        jumps.append(jump)
+    return tuple(jumps)
+
+
+def _validate_frozen_collapse(value: dict[str, object]) -> None:
+    models = value["models"]
+    if not isinstance(models, (list, tuple)):
+        raise ValueError("frozen models must be a list")
+    for model in models:
+        if not isinstance(model, dict):
+            raise ValueError("frozen model must be an object")
+        _collapse_operators(model)
 
 
 def _track(value: dict[str, Any]) -> DriveTrack:
@@ -219,6 +264,7 @@ def _model(value: dict[str, Any]) -> SecularModel:
         ),
         np.asarray(value["rates_per_ns"]),
         np.asarray(value["dephasing_per_ns"]),
+        collapse_operators=_collapse_operators(value),
     )
 
 
@@ -286,6 +332,8 @@ def write_frozen_manifest(
     """
     records = tuple(records)
     _unique_names(records)
+    for record in records:
+        _validate_frozen_collapse(record.physical)
     payload: dict[str, object] = {
         "version": FROZEN_PHYSICAL_VERSION,
         "inputs": [
@@ -328,6 +376,7 @@ def read_frozen_manifest(path: Path) -> tuple[FrozenRecord, ...]:
             raise ValueError(f"frozen manifest physical hash mismatch: {record.name}")
         if record.oracle_sha256 != stored["oracle_sha256"]:
             raise ValueError(f"frozen manifest oracle hash mismatch: {record.name}")
+        _validate_frozen_collapse(record.physical)
     return records
 
 
@@ -338,6 +387,7 @@ def write_frozen_input(path: Path, source: ModelSource, batch: TimelineBatch) ->
     and I/O errors propagate. No solver or Engine work runs.
     """
     physical = physical_input(source, batch)
+    _validate_frozen_collapse(physical)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         canonical_json(

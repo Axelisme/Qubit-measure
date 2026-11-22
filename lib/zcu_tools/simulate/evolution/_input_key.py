@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 
 from ._validation import shape
 from .engine import TimelineBatch
+from .kernel import SegmentTable
 from .secular import ModelSource
 
 
@@ -42,8 +43,22 @@ class _InputDigest:
             self.array(batch.initial_densities)
 
 
+def _model_identity(
+    digest: _InputDigest, source: ModelSource, table: SegmentTable
+) -> None:
+    digest.text(source.model((0,) * table.level.shape[1]).content_identity)
+    if np.any(table.full_loss):
+        digest.text("explicit collapse operators")
+        for level in np.unique(table.level[table.full_loss], axis=0):
+            digest.array(level)
+            digest.text(source.model(tuple(int(v) for v in level)).content_identity)
+
+
 def input_key(
-    source: ModelSource, batches: Sequence[TimelineBatch], budget: float
+    source: ModelSource,
+    batches: Sequence[TimelineBatch],
+    budget: float,
+    table: SegmentTable,
 ) -> bytes:
     """Digest full input records before geometry/planning, with source identity.
 
@@ -56,8 +71,7 @@ def input_key(
     a persistent or cross-engine key namespace.
     """
     digest = _InputDigest()
-    loops = batches[0].flux.level.shape[1]
-    digest.text(source.model((0,) * loops).identity)
+    _model_identity(digest, source, table)
     digest.array(source.initial_density)
     digest.text(float(budget).hex())
     digest.text(str(source.slow_envelope_segments_per_period))

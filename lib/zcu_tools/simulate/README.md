@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-21, cooperative cancellation in planning and required raw sampling
+**Last updated:** 2026-11-22, explicit collapse operators and physical v2
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -99,7 +99,7 @@ A failed bootstrap propagates its error and is retried on the next tool import.
 Without `NUMBA_CACHE_DIR`, it uses `<user-cache-root>/numba/<digest>/`.
 The simulator resolves this root with `_numba_cache.user_cache_root()` without
 importing `utils.cache`. The debug capture writer uses the same resolver for
-`simulator-debug/v1`; see [capture persistence](evolution/README.md#capture-persistence).
+`simulator-debug/v2`; see [capture persistence](evolution/README.md#capture-persistence).
 `ZCU_TOOLS_CACHE_DIR` must be a non-empty absolute path; invalid values raise
 `ValueError`. Without this override, the root is
 `platformdirs.user_cache_dir("zcu_tools", "zcu_tools")`. If platform lookup fails,
@@ -139,7 +139,8 @@ policy changes.
 
 Import records and functions from `zcu_tools.simulate.evolution`.
 `SecularModel` supplies energy-basis Hamiltonians, drive quadratures, directional
-rates and pure dephasing. `ModelSource` provides these models at quantized flux
+rates and pure dephasing. It can also supply full complex collapse operators
+for fixed-flux CPU `dop853`. `ModelSource` provides these models at quantized flux
 levels. Energies use H/h in GHz, time is ns and phase is radians.
 
 `Engine.evolve` takes a `ModelSource` with the initial DC density and a sequence

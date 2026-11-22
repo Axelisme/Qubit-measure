@@ -122,7 +122,7 @@ def canonical_key(table: SegmentTable, row: int, context: KernelContext) -> byte
 
 
 def canonical_keys(table: SegmentTable, context: KernelContext) -> tuple[bytes, ...]:
-    """Return table-aligned physics hashes, with b'' for undriven rows.
+    """Return table-aligned physics hashes, empty for undriven or full-loss rows.
 
     Planner, guards and preparation share these unchanged canonical hashes.
     Exact row bytes group equal physical inputs before hashing representatives.
@@ -132,7 +132,7 @@ def canonical_keys(table: SegmentTable, context: KernelContext) -> tuple[bytes, 
     key = FactKey(("covariant-gate-keys", TableIdentity(table), context.source), tuple)
 
     def build() -> tuple[bytes, ...]:
-        rows = np.flatnonzero(table.tones > 0)
+        rows = np.flatnonzero((table.tones > 0) & ~table.full_loss)
         result = [b""] * len(table.timeline)
         if not len(rows):
             return tuple(result)

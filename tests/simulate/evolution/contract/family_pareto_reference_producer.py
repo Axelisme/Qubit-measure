@@ -44,7 +44,8 @@ def prepare_references(
     None selects the entire index. Zero/multiple matches raise ValueError.
     Read only selected record names and physical; metadata never selects a solver.
     Existing keys are loaded cache-only. Only a missing key triggers the given
-    solver, without trying another solver after failure. Each decoded source
+    solver for secular-bath inputs, without trying another solver after failure.
+    A miss for explicit collapse operators raises ValueError. Each decoded source
     is closed on success or failure; earlier writes remain after later failure.
     Container, numeric, solver and I/O errors propagate. Run separately under
     approved compute limits, never during timing.
@@ -99,6 +100,14 @@ def _prepare_records(
             try:
                 load_reference(cache, frozen.source, frozen.batch)
             except FileNotFoundError:
+                levels = {tuple(int(v) for v in row) for row in frozen.batch.flux.level}
+                levels.add((0,) * frozen.batch.flux.level.shape[1])
+                if any(
+                    frozen.source.model(level).collapse_operators for level in levels
+                ):
+                    raise ValueError(
+                        f"{record.name}: the reference solvers do not support explicit collapse operators"
+                    ) from None
                 result = solver(frozen.source, frozen.batch)
                 write_reference(cache, frozen.source, frozen.batch, result)
             prepared[record.name] = reference_key(frozen.source, frozen.batch)
@@ -116,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     name, hashes and producer command, then fails without running a solver.
 
     Each solver option accepts one path and may repeat. At least one is required.
+    The solvers support only secular baths; a full-L cache miss raises ValueError.
     argv omits the executable name. Print name/key JSON; argparse handles invalid
     options/help. Input, solver and I/O failures propagate without solver fallback.
     """

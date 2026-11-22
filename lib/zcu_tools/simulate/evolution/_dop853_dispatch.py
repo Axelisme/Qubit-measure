@@ -51,6 +51,7 @@ def opencl_rows(
         return None
     eligible = (
         (plan.frame == "interaction")
+        & ~table.full_loss
         & table.complete_pulses
         & (table.tones == 2)
         & (table.duration_ns >= _MIN_OPENCL_DURATION_NS)
@@ -233,7 +234,7 @@ def direct_plans(
             frame[rows[selected & ~members]] = "interaction"
             frame.setflags(write=False)
             dp54 = np.zeros(size, dtype=bool)
-            selected_rows = rows[selected]
+            selected_rows = rows[selected & ~table.full_loss[rows]]
             dp54[selected_rows] = cpu_dp54_rows(
                 table.duration_ns[selected_rows], budget
             )

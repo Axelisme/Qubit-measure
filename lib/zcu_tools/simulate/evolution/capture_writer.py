@@ -8,17 +8,17 @@ from uuid import uuid4
 
 from .._numba_cache import user_cache_root
 from ._capture import CaptureBuffer
-from .frozen import write_frozen_manifest
+from .frozen import FROZEN_PHYSICAL_VERSION, write_frozen_manifest
 
 
 def capture_directory() -> Path:
-    """Return the absolute shared cache directory for v1 debug captures.
+    """Return the absolute cache directory for the current physical version.
 
-    Resolve the same cache root as Numba, then append simulator-debug/v1.
+    Resolve the same cache root as Numba, then append simulator-debug/v<VERSION>.
     No directory is created. Invalid ZCU_TOOLS_CACHE_DIR (empty or relative)
     raises ValueError; see user_cache_root for platform fallback behavior.
     """
-    return user_cache_root() / "simulator-debug" / "v1"
+    return user_cache_root() / "simulator-debug" / f"v{FROZEN_PHYSICAL_VERSION}"
 
 
 def write_capture(

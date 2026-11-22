@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cached_property
 from hashlib import sha256
 from threading import Lock
 from typing import ClassVar, Literal
@@ -127,11 +128,11 @@ class SecularDrive:
 
 @dataclass(frozen=True)
 class SecularModel:
-    """One flux level's secular Lindblad data, in its own H0 eigenbasis.
+    """One flux level's Lindblad model, in its own H0 eigenbasis.
 
     level: quantized flux, one integer per loop; zero is round DC.
-    identity: nonempty content key including level and all model parameters;
-        equal identities promise numerically identical data.
+    identity: caller's nonempty namespace for the level and all model data
+        other than explicit collapse operators. See content_identity for keys.
     energies_ghz: float64 (M,), H0/h eigenvalues in cycles/ns. A physical
         model must be ascending. ModelSource.shifted_model keeps the physical
         indices even when its corrected energies no longer ascend.
@@ -142,6 +143,8 @@ class SecularModel:
         population generator is R - diag(R.sum(axis=0)).
     dephasing_per_ns: nonnegative symmetric float64 (M,M), zero diagonal;
         coherence decay is (R.sum(0)[i]+R.sum(0)[j])/2 + dephasing[i,j].
+    collapse_operators: optional full Lindblad matrices L (M,M) in this same
+        eigenbasis, in ns**(-1/2). Applied in addition to the rates and dephasing.
     Arrays own read-only copies. Shape, ordering, Hermiticity or unitary errors
     raise ValueError (matrix absolute tolerance 1e-10). Secular applicability
     and complete positivity of pure dephasing remain the builder's contract.
@@ -159,6 +162,8 @@ class SecularModel:
     drives: tuple[SecularDrive, ...]
     rates_per_ns: NDArray[np.float64]
     dephasing_per_ns: NDArray[np.float64]
+
+    collapse_operators: tuple[NDArray[np.complex128], ...] = ()
 
     _requires_ascending_energies: ClassVar[bool] = True
 
@@ -191,6 +196,13 @@ class SecularModel:
                 raise ValueError(f"{name} must be nonnegative with zero diagonal")
         if not np.allclose(gamma, gamma.T, rtol=0, atol=1e-10):
             raise ValueError("dephasing must be symmetric")
+        collapse = tuple(
+            owned(matrix, np.complex128, "collapse operator")
+            for matrix in self.collapse_operators
+        )
+        for matrix in collapse:
+            shape(matrix, (size, size), "collapse operator")
+        object.__setattr__(self, "collapse_operators", collapse)
         for name, value in (
             ("energies_ghz", energies),
             ("eigenvectors", vectors),
@@ -198,6 +210,20 @@ class SecularModel:
             ("dephasing_per_ns", gamma),
         ):
             object.__setattr__(self, name, value)
+
+    @cached_property
+    def content_identity(self) -> str:
+        """Model key including the ordered, complex collapse matrices.
+
+        With no explicit operators this is the caller's identity unchanged.
+        A shifted model also includes the registered correction fingerprint.
+        """
+        if not self.collapse_operators:
+            return self.identity
+        digest = sha256()
+        for jump in self.collapse_operators:
+            digest.update(jump.astype("<c16", copy=False).tobytes())
+        return f"{self.identity}:collapse:{len(self.energies_ghz)}:{digest.hexdigest()}"
 
 
 class _ShiftedSecularModel(SecularModel):
@@ -316,7 +342,7 @@ class FluxWaveform:
 class ModelSource:
     """Round-local, thread-safe model cache owned by the numerical engine API.
 
-    initial_density: complex128 (M,M) Gibbs density in the DC eigenbasis;
+    initial_density: complex128 (M,M) initial density in the DC eigenbasis;
         owned/read-only, Hermitian and positive with trace one (atol 1e-8).
     build: pure callable supplied by the model package; returns a SecularModel
         for each requested level. It owns physics/device-limit validation.
@@ -369,7 +395,7 @@ class ModelSource:
 
     @property
     def initial_density(self) -> NDArray[np.complex128]:
-        """Read-only DC Gibbs density, complex128 (M,M) in its eigenbasis."""
+        """Read-only initial density, complex128 (M,M) in the DC eigenbasis."""
         return self._initial_density
 
     @property
@@ -421,8 +447,8 @@ class ModelSource:
 
         Adds the registered GHz energies and ns^-1 coherence-pair dephasing to
         model(level) and includes content in the returned model's identity.
-        Physical level, eigenvectors, drive quadratures, transition rates and
-        initial_density stay unchanged; no state reordering or basis rotation
+        Physical level, eigenvectors, drive quadratures, transition rates,
+        collapse operators and initial_density stay unchanged; no state reordering or basis rotation
         occurs. Successful shifted models are cached per (level, content), with
         serialized cache access. close() clears this cache and registrations.
 
@@ -448,6 +474,7 @@ class ModelSource:
                     drives=model.drives,
                     rates_per_ns=model.rates_per_ns,
                     dephasing_per_ns=model.dephasing_per_ns + shift.dephasing_per_ns,
+                    collapse_operators=model.collapse_operators,
                 )
             return self._shift_models[identity]
 

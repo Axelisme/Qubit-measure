@@ -51,7 +51,7 @@ def period_gain_coordinates(
     need at least two distinct gains before removing spectral candidates.
     """
     groups: dict[tuple[ModelIdentity, int, float], set[float]] = {}
-    rows = np.flatnonzero(table.tones == 1)
+    rows = np.flatnonzero((table.tones == 1) & ~table.full_loss)
     rows = rows[table.constant_envelopes(rows)]
     for row in rows:
         frequency = float(table.tone_frequency_ghz[row, 0])
@@ -136,7 +136,7 @@ def _plan_cf4_carriers(
     table: SegmentTable, source: ModelSource, plan: WorkPlan
 ) -> None:
     inventories: dict[tuple[ModelIdentity, int, float], set[float]] = {}
-    rows = np.flatnonzero(table.tones == 1)
+    rows = np.flatnonzero((table.tones == 1) & ~table.full_loss)
     rows = rows[table.constant_envelopes(rows)]
     gain_groups = {
         (ModelIdentity(g.level, g.shift_content), g.port, g.frequency_ghz)

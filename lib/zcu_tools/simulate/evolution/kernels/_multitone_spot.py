@@ -23,7 +23,7 @@ def sampled_candidates(table: SegmentTable, context: KernelContext) -> tuple[int
     )
 
     def build() -> tuple[int, ...]:
-        pairs = np.flatnonzero(table.tones == 2)
+        pairs = np.flatnonzero((table.tones == 2) & ~table.full_loss)
         rows = pairs[~table.constant_envelopes(pairs)]
         return tuple(
             int(row) for row in rows[admit_multitone_rows(table, rows, context)]

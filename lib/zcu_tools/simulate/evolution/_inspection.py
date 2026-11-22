@@ -94,15 +94,18 @@ class DispatchInspection:
 
 
 def needs_prefix_input(table: SegmentTable) -> NDArray[np.bool_]:
-    """Mark driven certified prefixes that evolve resolves before classification."""
-    return np.array(
-        [
-            group is not None
-            and not table.prefix_no_drive[group]
-            and group not in table.prefix_inputs
-            for group in (table.prefix_group or (None,) * len(table.timeline))
-        ],
-        dtype=bool,
+    """Mark driven certified prefixes whose routing needs an input density."""
+    return (
+        np.array(
+            [
+                group is not None
+                and not table.prefix_no_drive[group]
+                and group not in table.prefix_inputs
+                for group in (table.prefix_group or (None,) * len(table.timeline))
+            ],
+            dtype=bool,
+        )
+        & ~table.full_loss
     )
 
 

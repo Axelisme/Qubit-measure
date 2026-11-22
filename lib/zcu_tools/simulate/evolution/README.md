@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-22, segment shift and capture entry points
+**Last updated:** 2026-11-22, full collapse operators and frozen physical v2
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -68,8 +68,21 @@ and [state.py](state.py).
 
 Units are ns, GHz and rad. `SecularModel` supplies energies, drive quadratures,
 directional rates and pure dephasing in each quantized flux level's energy
-basis. The model builder owns physical applicability. Records own read-only
-array copies and reject invalid shapes or numeric invariants.
+basis. The optional `collapse_operators` tuple supplies full complex `L` matrices
+in that basis, in ns⁻½. CPU `dop853` adds each `LρL† − {L†L,ρ}/2` to the
+secular bath and transforms it with the Hamiltonian into the integration frame.
+Keep the coherent components of one physical jump in one matrix. Use `()` when
+there are no explicit operators; the existing secular routes are unchanged.
+The model builder owns physical applicability. Records own read-only copies
+and reject invalid shapes or nonfinite operators. `SecularModel.content_identity`
+combines the builder's `identity` with the ordered matrices and equals `identity`
+when the tuple is empty.
+
+For a row with explicit operators, `dop853` is the only candidate. The timeline
+must stay at a fixed flux level without a supplied flux waveform. `families=` can
+exclude `dop853`, in which case both inspection and evolution raise
+`NoValidKernel`; neither falls back to a secular approximation. Explicit
+operators never use OpenCL, including on an Engine configured for that device.
 
 `TimelineBatch.segment_boundaries` adds point-aligned absolute ns boundaries.
 `segment_spans(batch)` is a pure query of the same final partition used by
@@ -78,7 +91,8 @@ average external energy shifts and dephasing over these spans, then attach
 point-aligned `SegmentShift` values through `segment_shifts`. Each supplied span
 must match one queried span exactly; missing spans have zero shift. Shifts do
 not add boundaries, rotate bases or change physical `FluxLevel` values. Model,
-prepare and gate-usage identities include shift content. Without shifts,
+prepare and gate-usage identities include shift content. Shifts keep explicit
+collapse matrices in the unchanged eigenbasis. Without shifts,
 the original model source, initial state and reuse semantics remain unchanged.
 
 A shift may reverse the order of two adjacent physical state energies. Evolution
@@ -117,8 +131,8 @@ duration_ns, budget=1e-3)` from the package root. Supply the row's `SecularModel
 at fixed flux, including any segment shifts, and a drive port name. Frequency
 is any finite signed GHz, including zero. Amplitude is signed dimensionless
 gain, and duration is nonnegative ns. All numeric inputs must be finite and
-budget must be positive. Unknown ports, negative duration and nonfinite inputs
-raise `ValueError`.
+budget must be positive. Explicit collapse operators, unknown ports, negative
+duration and nonfinite inputs raise `ValueError`.
 Numerical construction failures propagate. The query does not evolve a density,
 select a family or modify routing history. It releases its temporary facts
 before returning.
@@ -245,13 +259,14 @@ owns the OpenCL context and releases it on `close()` after active work ends.
 `FROZEN_PHYSICAL_VERSION` owns the physical decoding contract for manifests
 and standalone inputs. It changes when fields, units, dtypes, defaults or
 Engine-input reconstruction change. `SCENE_CACHE_VERSION` owns the index JSON
-and cache-directory revision. Both are currently 1. Consumers compare both
+and supplied cache-directory layout. The physical version is 2; the scene
+cache version is 1. Consumers compare both
 without parsing storage layout. `SEGMENT_NUMERIC_VERSION` records numerical
 algorithm semantics, not input-format compatibility.
 
 The public codec snapshots a `ModelSource` and one `TimelineBatch` without
 running an Engine or a solver. `write_frozen_input(path, source, batch)` writes
-version 1, a complete `physical` record and its `physical_sha256`.
+physical version 2, a complete `physical` record and its `physical_sha256`.
 `read_frozen_input(path)` checks the version and hash, then returns a
 `FrozenInput(source, batch)`. The caller closes the returned source.
 
@@ -262,8 +277,11 @@ continuous-flux expansion when used, slow-envelope subdivisions and complete
 batch data. Point order, complex128/float64/int64/bool record dtypes, segment
 corrections and continuation fields survive the round trip. The reconstructed
 source has a fresh owned history and a finite level-to-model mapping. Unlisted
-levels raise `KeyError`. Python builders, devices and registered source shifts
-are not serialized.
+levels raise `KeyError`. A model omits `collapse_operators` when it has none.
+Otherwise it records the ordered complex matrices. An explicitly empty field,
+an invalid matrix or a v1 container fails validation, even with matching hashes.
+No-jump snapshots keep their v1 physical and oracle hashes. Python builders,
+devices and registered source shifts are not serialized.
 
 `canonical_json` uses sorted keys, compact separators, nested array lists and
 real/imag objects for complex values. It rejects nonfinite values. `digest`
@@ -272,7 +290,7 @@ model namespaces. Complete physical hashes include those namespaces;
 identity-free hashes allow oracle sharing. Neither hash is a reference key.
 
 `write_frozen_manifest(path, records)` writes ordered `FrozenRecord` values as
-version-1 canonical JSON inside stdlib gzip. `FrozenRecord(name, physical,
+physical-version-2 canonical JSON inside stdlib gzip. `FrozenRecord(name, physical,
 metadata=None)` keeps caller metadata opaque. Its `physical_sha256` and
 `oracle_sha256` properties calculate the complete and identity-free hashes.
 The writer calculates both hashes; `read_frozen_manifest(path)` verifies them
@@ -314,7 +332,9 @@ The independent preparation entry point is
 [`family_pareto_reference_producer.py`](../../../../tests/simulate/evolution/contract/family_pareto_reference_producer.py).
 It reads only frozen record names and physics. The caller explicitly maps each
 index to the independent lab-frame or interaction-picture solver and supplies
-an explicit scene cache. `--scenario NAME` requires one matching row across the
+an explicit scene cache. The current solvers reject cache misses for models
+with explicit collapse operators instead of publishing a secular approximation.
+`--scenario NAME` requires one matching row across the
 supplied indexes before reading payloads. Zero or multiple matches fail without
 solving; other rows need no payload. Without a scenario, all indexed rows remain
 selected. All selected numeric files load before any solver runs. Metadata
@@ -384,9 +404,9 @@ duration_ns, budget=1e-3)` from the package root. Supply the fixed-flux row's
 `SecularModel`, including segment shifts, and three aligned length-two tuples.
 `ports` names known model drives, `frequencies_ghz` contains finite signed GHz,
 and `amplitudes` contains finite signed dimensionless gains. Duration is finite
-nonnegative ns, and budget is finite and positive. Unknown ports, wrong tuple
-lengths, nonfinite inputs, negative duration and invalid budget raise
-`ValueError`. Numerical construction failures propagate.
+nonnegative ns, and budget is finite and positive. Explicit collapse operators,
+unknown ports, wrong tuple lengths, nonfinite inputs, negative duration and
+invalid budget raise `ValueError`. Numerical construction failures propagate.
 
 The frozen `MultitoneRWADiagnostic` uses the same `RWAGuardMetric` and
 `RWAUncomputed` leaves as the single-tone query. It has no `reason` field.
@@ -437,8 +457,8 @@ values, and duration is finite nonnegative ns.
 Optional `EnvelopeSpec` values describe the complete envelopes. The default is
 unity. Full-envelope peak and slope bounds apply even when the row slices a
 pulse. Phase, offsets and initial density do not affect these indicators.
-Unknown ports, invalid tuple lengths, nonfinite values and negative duration
-raise `ValueError`.
+Explicit collapse operators, unknown ports, invalid tuple lengths, nonfinite
+values and negative duration raise `ValueError`.
 
 The frozen `CommonFrameDiagnostic` reports `accepted` and `reason` from the
 numerical guard. It does not predict which family wins dispatch pricing.
@@ -558,14 +578,16 @@ and publishes a new `capture-<uuid4 hex>.json.gz` file. Rewriting the same
 buffer keeps earlier records in a different file. An empty buffer produces
 a zero-record manifest, not None. Read it with `read_frozen_manifest(path)`.
 Optional JSON `metadata` describes the whole capture and is readable in the
-manifest. `read_frozen_manifest` returns only the Engine records. The format
-version and physical hashes do not change.
+manifest. `read_frozen_manifest` returns only the Engine records and requires
+the current physical version.
 
 `capture_directory() -> Path` returns the absolute
-`<user-cache-root>/simulator-debug/v1` directory without creating it.
+`<user-cache-root>/simulator-debug/v2` directory without creating it.
 The writer and Numba use the same resolver. Set `ZCU_TOOLS_CACHE_DIR` before
 use to select another non-empty absolute cache root. Without an override,
 platformdirs selects the root, with the system temporary directory as fallback.
+The writer leaves old files untouched. To inspect a v1 capture, run the v1
+checkout's inspector and pass the path to that capture.
 
 The writer serializes into a same-directory temporary file and publishes it
 with `os.replace`. It attempts to remove temporary files on failure.
@@ -574,7 +596,7 @@ publication. Publication OSError and codec ValueError/TypeError emit at most
 one RuntimeWarning per call, then return None, even under warnings-as-errors.
 Nonfinite and unsupported JSON values cannot be recorded. Other errors propagate.
 
-V1 has no automatic size limit, truncation or eviction. Files persist across
+The writer has no automatic size limit, truncation or eviction. Files persist across
 tasks until the user deletes them, for example by unlinking selected paths from
 `capture_directory().glob("capture-*.json.gz")`.
 During acquire, memory grows with the recorded evolves and their frozen inputs
@@ -974,7 +996,7 @@ and the original route.
 | [`multitone_gate`](kernels/multitone_gate.py), full-drive dual-phase gates | `multiple` | Two tones, fixed flux, positive duration, at least one sampled envelope. Four D(h/2)·U·D(h/2) quarters with complete drive, no RWA or pruning. Each key fits one 5×6 Fourier grid without refinement, at endpoint rtol/atol 2.75e-7/2.75e-9. Keys omit start and both phases. Dispatch compares cold build and playback costs before construction. Dispatch builds each selected key at most once per evolve and uses that product without a numerical admission probe. Numerical failures propagate without fallback. A pin skips pricing, not structural checks. | [Four envelopes and mixed waveform keys](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py), [per-key routing](../../../../tests/simulate/evolution/contract/test_shared_multitone_routing.py) | Small-model contracts; long-sequence qualification separate |
 | [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two` for distinct-port constant pairs; two-tone `multiple` | Fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad, with retained real dimension ≤ 256. For sampled pairs, slope and curvature do not reject rows. For a group selected for comparison, choose the row with maximum `abs(gain) × envelope peak` for each tone, deduplicate rows and require agreement with full-drive `dop853` at ≤ 0.1 × B. Sampled rows have a 4 ns step ceiling and no kick. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle and use summed first-order endpoint kicks with a 16 ns step ceiling. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports the constant metrics. | [`joint_constant`, `joint_gate_inventory`, `cheap_sampled_nearby`, `sampled_multitone_short_sweep_32`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [sampled spot edge and phase sequence fallback](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py) | PASS for admitted rows; rejected groups use fallback |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. DOP853 local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B). CPU and [eligible OpenCL](#gpu-backend) rows with d ≤ 10,000 ns and B ≥ 1e-3 use DP5(4) at one third of both tolerances. Other rows use DOP853. | [`shaped_complex`, `two_carriers`, `joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [CPU and OpenCL DP5(4) cases](#cpu-dp54-accuracy) | PASS |
+| [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate; `full_loss`, sole candidate | No RWA. Stops at active control knots. DOP853 local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B). Secular-only CPU and [eligible OpenCL](#gpu-backend) rows with d ≤ 10,000 ns and B ≥ 1e-3 use DP5(4) at one third of both tolerances. Explicit collapse operators require fixed flux with no waveform; run CPU DOP853 even at the default budget. | [`shaped_complex`, `two_carriers`, `joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [CPU and OpenCL DP5(4) cases](#cpu-dp54-accuracy); [complete jump density](../../../../tests/simulate/evolution/test_collapse_operators.py) | PASS |
 
 For dissipative DC rows, [slow dispatch](_slow_dispatch.py) charges channel
 construction as `3.8 * (M/32)^6` seconds, divided by the exact prepare key's
@@ -1147,7 +1169,7 @@ checks both densities when accumulated inventory changes the default route from
 
 ### CPU DP5(4) accuracy
 
-The `dop853` family uses DP5(4) on CPU for rows up to and including 10 µs
+The `dop853` family uses DP5(4) on CPU for secular-only rows up to and including 10 µs
 when the evolve budget is at least `1e-3`. The spike covered durations up to
 10 µs at the default budget; it did not cover tighter budgets. Dividing both
 local tolerances by three kept all six spike cells below `1e-3` full-density
@@ -1423,7 +1445,7 @@ class's methods.
 | Secular coherence decay and split-step maps | [kernels/_secular.py](kernels/_secular.py) provides decay to static, split, modal and direct propagators. `multitone_gate`, `gate_cache` and `single_tone_gate` use its population and coherence half-step maps with their own durations. |
 | Density basis conversion | `transform_density` in [state.py](state.py), shared by population conversion, scheduler boundaries, Dyson input bounds and compiled DOP853 chains. Callers retain basis selection and traversal. |
 | Adaptive DOP853 and DP5(4) tableaux, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
-| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. CPU `dop853` rows, `t6` direct rows, period fractional tails and sampled multitone RWA probes share this entry point, supplying explicit frames and budgets. The CPU `dop853` plan selects DP5(4) and its tighter local tolerances for eligible rows. [OpenCL `dop853`](#gpu-backend) uses the same tableaux and tolerance rule in its device runner. |
+| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive density equation and exact return to the model eigenbasis. CPU `dop853` rows, `t6` direct rows, period fractional tails and sampled multitone RWA probes share this entry point, supplying explicit frames and budgets. The CPU `dop853` plan selects DP5(4) and its tighter local tolerances for eligible rows. [OpenCL `dop853`](#gpu-backend) uses the same tableaux and tolerance rule in its device runner. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node, [adaptive single-phase](kernels/gate_phase.py) and [dual-phase](kernels/_multitone_gate_phase.py) builders. Single-tone integration is unchanged. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py) owns period builds and trajectories, with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. [kernels/_period_channel.py](kernels/_period_channel.py) owns complete secular-channel playback. Separate from two-tone Floquet frames. |
@@ -1556,7 +1578,7 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v14`. Engine captures and paired
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v15`. Engine captures and paired
 benchmark reports record the numeric version. Evolution does not persist
 densities or offline tables across processes or Engine lifetimes.
 

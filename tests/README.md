@@ -139,7 +139,7 @@ CPU lane 明確加 `not requires_opencl`，例如 `-m "sim and not requires_open
 Guard edge、sweep、history 與 multisegment accuracy 案例仍由下面的精度矩陣擁有，不從工具 producer 反向取得。
 
 準備參考解時，呼叫端明示每份 index 的 solver，並傳入顯式 `--scene-cache` 路徑。
-Git 只留名稱與三個 hash 的兩份小清單。數值放 repo 共用的 scenes/v1 快取，不隨 task 清理。
+Git 只留名稱與三個 hash 的兩份小清單。數值放 repo 共用的 `scenes/v1-physical-v2` 快取，不隨 task 清理。
 首次遷移只核既有 payload 身份、point order 與 reference key，不是 builders 冷重建。
 量測與成對工具共用每筆 name、physical_sha256、oracle_sha256、metadata_sha256 身份，不用 manifest 路徑或檔案 SHA。
 求解必須先取得成本授權，並套用當次 heavy runner 與鎖的規則。這不是量測 preflight，也不保證既有 cache 已涵蓋全部場景。
@@ -153,6 +153,7 @@ uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contra
 ```
 
 `--converged` 與 `--interaction` 可重複指定。Producer 只讀 record 的 name、physical，既有 key 命中就讀取，只有 missing key 才用指定 solver 求解。
+目前兩個 solver 只支援 secular bath。若 cache miss 的模型帶完整 collapse operators，producer 報錯，不發布參考解。
 它不讀 metadata、不維護場景名稱清單，也不在失敗後換 solver。
 
 Interaction solver 適用於每個 shot 只有一個 schedule level 的靜態 schedule，各 point 的 level 可以不同。

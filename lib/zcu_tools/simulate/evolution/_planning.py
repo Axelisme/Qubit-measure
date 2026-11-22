@@ -20,7 +20,9 @@ class Geometry:
 
     table contains global rows and optional engine-computed prefix certificates.
     points maps timeline indices to unique caller point IDs.
-    flux_drive marks continuous motion, plus driven quantized flux changes.
+    flux_drive marks continuous motion and driven quantized flux changes.
+    For explicit collapse operators it also marks any retained flux-level
+    change or supplied flux waveform on the same timeline.
     prefix_paths maps computed prefix IDs to diagnostics adopted by timelines.
     initial_densities optionally supplies point-aligned DC input matrices; None
     uses the common source input and enables shared-prefix/input preparation.
@@ -347,6 +349,20 @@ def _batch_geometry(
     flux_drive |= _waveform_varies(batch, point, start, end)
     port, frequency, amplitude, theta, envelope_index, offset = columns
     shift_content, inversions = _shift_contents(batch, point, start, level, source)
+    levels, level_index = np.unique(level, axis=0, return_inverse=True)
+    full_loss = np.array(
+        [
+            bool(source.model(tuple(int(v) for v in lev)).collapse_operators)
+            for lev in levels
+        ],
+        dtype=bool,
+    )[level_index]
+    if np.any(full_loss):
+        changed = (point[1:] == point[:-1]) & np.any(level[1:] != level[:-1], axis=1)
+        moving_points = point[1:][changed]
+        flux_drive |= full_loss & (
+            (batch.flux_waveform is not None) | np.isin(point, moving_points)
+        )
     table = SegmentTable(
         point,
         start,
@@ -363,6 +379,7 @@ def _batch_geometry(
         batch.flux_waveform,
         shift_content=shift_content,
         complete_pulses=complete,
+        full_loss=full_loss,
     )
     return Geometry(table, batch.points, flux_drive, stark_order_inversions=inversions)
 
@@ -470,6 +487,7 @@ def _merge_geometries(
         tones=np.concatenate(columns["tones"]),
         shift_content=np.concatenate(columns["shift_content"]),
         complete_pulses=np.concatenate(columns["complete_pulses"]),
+        full_loss=np.concatenate(columns["full_loss"]),
         tone_port=np.concatenate(columns["tone_port"]),
         tone_frequency_ghz=np.concatenate(columns["tone_frequency_ghz"]),
         tone_amplitude=np.concatenate(columns["tone_amplitude"]),
