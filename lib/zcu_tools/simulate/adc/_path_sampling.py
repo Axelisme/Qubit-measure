@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from itertools import groupby
 from math import prod
+from threading import Lock
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -22,18 +23,46 @@ if TYPE_CHECKING:
     from .readout_batch import ReadoutBatch
 
 
+type _EventPlans = dict[tuple[int, int], IntegratedPaths]
+
+
+class EventPlanMemo:
+    """Publish only complete event plans for one live batch generation."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._events: dict[int, _EventPlans] | None = {}
+
+    def retire(self) -> None:
+        with self._lock:
+            self._events = None
+
+    def plans(self, prepared: "PreparedRawShots", event_index: int) -> _EventPlans:
+        with self._lock:
+            if self._events is not None and event_index in self._events:
+                return self._events[event_index]
+        plans = _build_event_plans(prepared, event_index)
+        with self._lock:
+            # A late solve uses its own result without refilling a retired memo.
+            if self._events is not None:
+                return self._events.setdefault(event_index, plans)
+        return plans
+
+
 def physical_shots(
     prepared: "PreparedRawShots",
     rng: np.random.Generator,
     *,
     traces: bool = False,
     cancel: CancellationQuery | None = None,
+    memo: EventPlanMemo | None = None,
 ) -> dict[int, RealArray]:
     """Observe one outcome per shot, with an independent CTMC per read event.
 
     Return owned float64 (points,reps,reads[,samples],IQ) arrays. Within each
     event all ADCs and grids share initial states and paths; noise is independent
     per receiver/read/sample. Traces require equal sample counts per ADC.
+    For integrated raw, memo is the source's batch generation; traces omit it.
     Raise Cancelled at event or point-group checkpoints if cancel is set.
     """
     readout = prepared.readout
@@ -66,18 +95,11 @@ def physical_shots(
     for event_index, states in enumerate(_event_states(readout, reps, rng)):
         if cancel is not None and cancel.is_set():
             raise Cancelled()
-        plans = {
-            (channel, content): IntegratedPaths(
-                batch.model,
-                events[event_index].pulses,
-                events[event_index].grids,
-                prepared.rtol,
-                prepared.atol,
-            )
-            for channel, batch in batches
-            for content, events in enumerate(batch.events)
-            if events[event_index].grids and events[event_index].pulses
-        }
+        plans = (
+            _build_event_plans(prepared, event_index)
+            if memo is None
+            else memo.plans(prepared, event_index)
+        )
         for key, group in groupby(ordered, key=keys.__getitem__):
             points = np.array(list(group), dtype=np.int64)
             observers = [
@@ -125,6 +147,18 @@ def physical_shots(
             axis=2,
         )
     return output
+
+
+def _build_event_plans(prepared: "PreparedRawShots", event_index: int) -> _EventPlans:
+    """Prepare noiseless observers for one logical event, keyed by ADC and content."""
+    return {
+        (channel, content): IntegratedPaths(
+            batch.model, event.pulses, event.grids, prepared.rtol, prepared.atol
+        )
+        for channel, batch in prepared.batches
+        for content, events in enumerate(batch.events)
+        if (event := events[event_index]).grids and event.pulses
+    }
 
 
 def _event_states(
