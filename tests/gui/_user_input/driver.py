@@ -883,6 +883,8 @@ class ComponentDriver:
         widget = self._find(None, object_name)
         if not isinstance(widget, QScrollArea):
             raise TypeError(f"{object_name!r} is not a QScrollArea")
+        if not on_screen(widget):
+            return ScrollObservation(vertical_scrollable=False, viewport_size=None)
         bar = widget.verticalScrollBar()
         viewport = widget.viewport()
         # A viewport filled by its content can have an empty visibleRegion.

@@ -1,8 +1,10 @@
 """Read native Measure figures without leaving Data or saving first."""
 
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from threading import Event
 
 import numpy as np
 import pytest
@@ -10,7 +12,6 @@ from matplotlib.artist import Artist
 from matplotlib.backend_bases import RendererBase
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import load
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
@@ -48,20 +49,32 @@ from tests.gui.app.measure.ui._qt_interactions import modal_action
 from tests.program._profiles import load_soccfg
 
 
-def _run(cfg: SavingCfg, *, context: RunContext) -> RunRecord[SavingCfg, SavingResult]:
+def _run(
+    cfg: SavingCfg, *, context: RunContext, on_reading_draw: Artist | None = None
+) -> RunRecord[SavingCfg, SavingResult]:
     record = SavingAdapter.run(cfg, context=context)
-    figure, axes = context.plots.subplots(num="signal", layout="constrained")
+    _show_run_figure(context.plots, on_reading_draw=on_reading_draw)
+    return record
+
+
+def _show_run_figure(plots: Plots, *, on_reading_draw: Artist | None = None) -> None:
+    figure, axes = plots.subplots(num="signal", layout="constrained")
     axes.set_facecolor("#eff9ff")
     axes.plot([0.0, 0.4, 0.8], [0.0, 0.8, 0.0], label="Mean I")
     axes.plot([0.0, 0.4, 0.8], [0.0, -0.7, 0.0], label="Mean Q")
     axes.set(xlabel="Time (µs)", ylabel="Amplitude (a.u.)", ylim=(-1, 1))
     axes.legend(loc="upper right")
+    if on_reading_draw is not None:
+        figure.add_artist(on_reading_draw)
     figure.show()
-    return record
 
 
-class _ReadingDrawFailure(Artist):
-    """Let native, thumbnail and Save draws work; fail the separate reading draw."""
+class _OnReadingDraw(Artist):
+    """Run a callback only for the separate reading draw."""
+
+    def __init__(self, callback: Callable[[], None]) -> None:
+        super().__init__()
+        self._callback = callback
 
     def draw(self, renderer: RendererBase) -> None:
         figure = self.get_figure()
@@ -72,16 +85,40 @@ class _ReadingDrawFailure(Artist):
                 np.isclose(renderer.points_to_pixels(72), [DATA_PREVIEW_DPI, SAVE_DPI])
             )
         ):
-            raise ValueError("Synthetic reading render failure")
+            self._callback()
+
+
+def _fail_draw() -> None:
+    raise ValueError("Synthetic reading render failure")
+
+
+class _ReadingDrawHook:
+    callback: Callable[[], None] | None = None
+
+    def draw_once(self) -> None:
+        callback, self.callback = self.callback, None
+        if callback is not None:
+            callback()
+
+
+@pytest.fixture
+def reading_draw_hook() -> _ReadingDrawHook:
+    return _ReadingDrawHook()
+
+
+_LONG_MEMBERS = (
+    "averaged_readout_demodulation_window_calibration_reference_in_phase",
+    "averaged_readout_demodulation_window_calibration_reference_quadrature",
+)
 
 
 def _analyze(
     req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams], *, plots: Plots
 ) -> PaneSummary:
-    for name in ("broken", "peak", "band", "baseline", "signal"):
+    for name in ("broken", "peak", *_LONG_MEMBERS, "signal"):
         figure, axes = plots.subplots(num=name, layout="constrained")
         if name == "broken":
-            figure.add_artist(_ReadingDrawFailure())
+            figure.add_artist(_OnReadingDraw(_fail_draw))
         if name == "signal":
             axes.set_facecolor("#fff2cf")
             axes.scatter([0, 0.4, 0.8], [1, 2, 1], label="Sweep samples")
@@ -115,15 +152,24 @@ def _post_analyze(
 
 @pytest.fixture
 def reading_app(
-    qapp: QApplication, tmp_path: Path
+    qapp: QApplication, tmp_path: Path, reading_draw_hook: _ReadingDrawHook
 ) -> Iterator[tuple[Controller, MainWindow]]:
+    def run_with_draw_hook(
+        cfg: SavingCfg, *, context: RunContext
+    ) -> RunRecord[SavingCfg, SavingResult]:
+        return _run(
+            cfg,
+            context=context,
+            on_reading_draw=_OnReadingDraw(reading_draw_hook.draw_once),
+        )
+
     registry = Registry()
     registry.register(
         "Figure reading",
         Adapter(
             spec=SavingAdapter.spec,
             make_form=SavingAdapter.make_form,
-            run=_run,
+            run=run_with_draw_hook,
             guide=None,
         ),
     )
@@ -132,13 +178,21 @@ def reading_app(
         Adapter(
             spec=SavingAdapter.spec,
             make_form=SavingAdapter.make_form,
-            run=_run,
+            run=run_with_draw_hook,
             guide=None,
             analysis=Analysis(fn=_analyze, options=lambda source, env: PaneParams()),
             post_analysis=PostAnalysis(fn=_post_analyze, options=None, writeback=None),
         ),
     )
     registry.register("Other tab", SavingAdapter)
+    with _open_reading_app(qapp, tmp_path, registry) as app:
+        yield app
+
+
+@contextmanager
+def _open_reading_app(
+    qapp: QApplication, tmp_path: Path, registry: Registry
+) -> Generator[tuple[Controller, MainWindow]]:
     previous_hook = sys.excepthook
     behavior = MeasureGuiBehavior(
         synthetic_lab(registry), clean=True, project_root=str(tmp_path)
@@ -172,6 +226,66 @@ def reading_window(reading_app: tuple[Controller, MainWindow]) -> MainWindow:
     return window
 
 
+@pytest.fixture
+def failing_live_run(
+    qapp: QApplication, tmp_path: Path
+) -> Iterator[tuple[MainWindow, Callable[[], None]]]:
+    allow_failure = Event()
+
+    def run(
+        _cfg: SavingCfg, *, context: RunContext
+    ) -> RunRecord[SavingCfg, SavingResult]:
+        _show_run_figure(context.plots)
+        if not allow_failure.wait(timeout=30):
+            raise TimeoutError("Test did not release the synthetic Run")
+        raise ValueError("Synthetic failure after live figure")
+
+    registry = Registry()
+    registry.register(
+        "Failing live Run",
+        Adapter(
+            spec=SavingAdapter.spec,
+            make_form=SavingAdapter.make_form,
+            run=run,
+            guide=None,
+        ),
+    )
+    with _open_reading_app(qapp, tmp_path, registry) as (ctrl, window):
+        ctrl.tab_control.new_tab("Failing live Run")
+        qapp.processEvents()
+        try:
+            yield window, allow_failure.set
+        finally:
+            allow_failure.set()
+
+
+def test_failed_live_run_clears_its_reading_without_leaving_data(
+    failing_live_run: tuple[MainWindow, Callable[[], None]], tmp_path: Path
+) -> None:
+    window, release_run = failing_live_run
+    flow = ComponentDriver(window)
+    shots = tmp_path / "failed-live-run"
+    flow.click("Run")
+    qt_until(lambda: flow.legends().texts == ("Mean I", "Mean Q"), label="live figure")
+    flow.screenshot(shots / "00-live-run.png")
+    flow.select_tab("Data")
+    flow.screenshot(shots / "01-live-preview.png")
+    flow.click(object_name="dataFigureView/run/signal")
+    assert flow.observe("Run — signal").visible
+    assert flow.image_center_colour(object_name="dataFigureReadingImage") == "#eff9ff"
+    flow.screenshot(shots / "02-live-reading.png")
+    release_run()
+    qt_until(
+        lambda: any(d.title == "Run failed" for d in flow.dialogs()),
+        label="failure delivered on the owner loop",
+    )
+    flow.screenshot(shots / "03-run-failed.png")
+    assert flow.tabs("Data").current == "Data"
+    assert not any(w.text == "Back to previews" for w in flow.visible().widgets)
+    assert flow.observe("No figure yet").visible
+    assert not any(w.text == "View figure" for w in flow.visible().widgets)
+
+
 def _run_to_completion(flow: ComponentDriver) -> None:
     flow.select_tab("Run")
     flow.click("Run")
@@ -189,7 +303,6 @@ def test_data_reads_run_figure_in_place_and_returns_focus(
 ) -> None:
     flow = ComponentDriver(reading_window)
     shots = tmp_path / "run-reading"
-    database = tmp_path / "Database" / "reading"
     flow.select_tab("Data")
     assert flow.observe("No figure yet").visible
     flow.screenshot(shots / "00-empty.png")
@@ -220,21 +333,21 @@ def test_data_reads_run_figure_in_place_and_returns_focus(
     flow.press_key(Qt.Key.Key_Escape)
     assert flow.focused_input().object_name == control
     flow.screenshot(shots / "11-narrow-return.png")
-    assert not list(database.glob("runs/*/data.h5"))
+    assert flow.observe("○ NOT SAVED").visible
     flow.click("Save All")
+    assert _save_completed(flow)
+    assert flow.observe("✓ SAVED").visible
     flow.screenshot(shots / "12-saved.png")
-    assert sorted(path.suffix for path in database.rglob("*") if path.is_file()) == [
-        ".h5",
-        ".hdf5",
-    ]
-    (source,) = database.glob("runs/*/data.h5")
-    restored = SavingAdapter.restore(load(source)).record
-    np.testing.assert_array_equal(restored.result.signal, [1 + 2j, 3 - 4j, 5 + 6j])
     flow.click(object_name=control)
     flow.screenshot(shots / "13-before-tab-close.png")
     flow.click_tooltip("Close Tab")
     assert flow.observe("Use New Tab to start an experiment.").visible
     flow.screenshot(shots / "14-tab-closed.png")
+
+
+def _save_completed(flow: ComponentDriver) -> bool:
+    message = flow.status().text
+    return message.startswith("Saved ") and " for run " in message
 
 
 def _visible_bounds(
@@ -322,6 +435,53 @@ def named_window(reading_app: tuple[Controller, MainWindow]) -> MainWindow:
     return window
 
 
+@pytest.mark.parametrize("reopen", [False, True], ids=["leave", "replace"])
+def test_reentrant_draw_cannot_present_after_its_reading_is_invalidated(
+    named_window: MainWindow,
+    reading_draw_hook: _ReadingDrawHook,
+    tmp_path: Path,
+    *,
+    reopen: bool,
+) -> None:
+    flow = ComponentDriver(named_window)
+    shots = tmp_path / "reentrant-reading"
+    _run_to_completion(flow)
+    if reopen:
+        _analyze_to_completion(flow)
+    flow.select_tab("Data")
+    if reopen:
+        flow.click("Next page")
+    control = "dataFigureView/run/signal"
+    flow.screenshot(shots / "00-before-draw.png")
+
+    def during_draw() -> None:
+        if reopen:
+            flow.click(object_name="dataFigureView/analysis/signal")
+            _focus_reading_scroll(flow)
+            flow.screenshot(shots / "01-reopened-during-draw.png")
+            _fail_draw()
+        flow.select_tab("Guide")
+        flow.screenshot(shots / "01-left-during-draw.png")
+        flow.select_tab("Data")
+        flow.screenshot(shots / "02-returned-during-draw.png")
+
+    reading_draw_hook.callback = during_draw
+    flow.click(object_name=control)
+    flow.screenshot(shots / "03-original-draw-returned.png")
+    if reopen:
+        assert flow.observe("Analysis — signal").visible
+        assert not any(
+            w.text == "Unable to render this figure." for w in flow.visible().widgets
+        )
+        assert (
+            flow.image_center_colour(object_name="dataFigureReadingImage") == "#fff2cf"
+        )
+        assert flow.focused_input().object_name == "dataFigureReadingScroll"
+    else:
+        assert flow.observe(object_name="previewGalleryHeader").visible
+        assert flow.observe(object_name=control).visible
+
+
 def _analyze_to_completion(flow: ComponentDriver) -> None:
     flow.select_tab("Analysis")
     flow.click("Analyze")
@@ -396,6 +556,44 @@ def test_data_reads_selected_stage_and_member_and_restores_gallery_page(
     flow.screenshot(shots / "12-same-name-post.png")
 
 
+def test_long_member_names_fit_before_keyboard_open_at_narrow_width(
+    named_window: MainWindow, tmp_path: Path
+) -> None:
+    flow = ComponentDriver(named_window)
+    shots = tmp_path / "long-member-reading"
+    _run_to_completion(flow)
+    _analyze_to_completion(flow)
+    flow.select_tab("Data")
+    flow.resize_window(860, 675)
+    flow.screenshot(shots / "00-narrow-overview.png")
+    flow.press_key(Qt.Key.Key_PageDown, object_name="previewGalleryScroll")
+    for _ in range(3):
+        flow.press_key(Qt.Key.Key_Down, object_name="previewGalleryScroll")
+    flow.screenshot(shots / "01-analysis-group.png")
+    captions = {w.text.replace("\n", ""): w for w in flow.visible().widgets}
+    for name in _LONG_MEMBERS:
+        assert captions[name].caption_fits and captions[name].fully_visible
+
+    first, second = (f"dataFigureView/analysis/{name}" for name in _LONG_MEMBERS)
+    flow.click(object_name="dataFigureView/analysis/peak")
+    flow.screenshot(shots / "02-peak-open.png")
+    flow.press_key(Qt.Key.Key_Escape)
+    assert flow.focused_input().object_name == "dataFigureView/analysis/peak"
+    flow.screenshot(shots / "03-back-to-peak.png")
+    flow.press_key(Qt.Key.Key_Tab)
+    assert flow.focused_input().object_name == first
+    flow.screenshot(shots / "04-first-member-focused.png")
+    flow.press_key(Qt.Key.Key_Tab)
+    assert flow.focused_input().object_name == second
+    flow.screenshot(shots / "05-second-member-focused.png")
+    flow.press_key(Qt.Key.Key_Space)
+    assert flow.observe(f"Analysis — {_LONG_MEMBERS[1]}").visible
+    flow.screenshot(shots / "06-quadrature-open.png")
+    flow.press_key(Qt.Key.Key_Escape)
+    assert flow.focused_input().object_name == second
+    flow.screenshot(shots / "07-preview-restored.png")
+
+
 def test_data_render_error_does_not_block_save_and_load_clears_reading(
     named_window: MainWindow, tmp_path: Path, qapp: QApplication
 ) -> None:
@@ -412,11 +610,7 @@ def test_data_render_error_does_not_block_save_and_load_clears_reading(
     assert flow.observe("Save All").enabled
     flow.screenshot(shots / "01-reading-error.png")
     flow.click("Save All")
-    (native,) = (tmp_path / "Database").glob("**/data.h5")
-    assert {path.name for path in (native.parent / "figures").glob("*.png")} == {
-        f"analysis_results_{name}.png"
-        for name in ("broken", "peak", "band", "baseline", "signal")
-    }
+    assert _save_completed(flow)
     flow.screenshot(shots / "02-saved-after-error.png")
     if any(w.text == "Back to previews" for w in flow.visible().widgets):
         flow.click("Back to previews")

@@ -13,7 +13,7 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 
 from ..figure_export import render_figure_reading_png
-from .data_figure_preview_gallery import DataFigurePreviewGallery
+from .data_figure_preview_gallery import DataFigurePreviewGallery, FigureStage
 from .figure_pager import FigurePager
 from .figure_pane_layout import FigurePaneLayout
 from .interactive_frontend import InteractiveFrontend
@@ -330,6 +330,11 @@ class ExperimentFigureArea(QWidget):
             raise RuntimeError(f"tab {self.tab_id!r} canvas has no matplotlib figure")
         return figure
 
+    def clear_run_preview(self) -> None:
+        """Forget a failed Run after its plot host has released its canvases."""
+        self._run_figures = None
+        self._data_gallery.clear_run_preview()
+
     def clear_all_figures(self) -> None:
         """Clear all figure panes (used for LoadData and Run start invalidation)."""
         self._run_container.clear_dynamic_canvases()
@@ -463,7 +468,7 @@ class ExperimentFigureArea(QWidget):
         """Release the reading raster and retire its controls on tab detach."""
         self._data_gallery.retire_reading()
 
-    def _render_data_figure(self, stage: str, member: str | None) -> bytes:
+    def _render_data_figure(self, stage: FigureStage, member: str | None) -> bytes:
         if not self._data_active:
             raise RuntimeError("Data figure reading requires the active Data pane")
         current = self._read_figure(stage)
@@ -477,7 +482,7 @@ class ExperimentFigureArea(QWidget):
         return render_figure_reading_png(collection[member])
 
     def _data_named_figures(
-        self, stage: str, current: Figure | None
+        self, stage: FigureStage, current: Figure | None
     ) -> FigureCollection | None:
         if current is None:
             return None

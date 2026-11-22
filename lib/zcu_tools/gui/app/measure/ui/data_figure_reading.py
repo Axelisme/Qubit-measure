@@ -1,6 +1,5 @@
 """One scrollable reading surface for the Measure Data gallery."""
 
-import logging
 from collections.abc import Callable
 
 from qtpy.QtCore import Qt
@@ -8,8 +7,6 @@ from qtpy.QtGui import QKeySequence, QPixmap, QShortcut
 from qtpy.QtWidgets import QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from zcu_tools.gui.lifetime import LifetimeScope
-
-logger = logging.getLogger(__name__)
 
 
 class DataFigureReading(QWidget):
@@ -48,20 +45,11 @@ class DataFigureReading(QWidget):
         self._scroll.setWidget(self._image)
         layout.addWidget(self._scroll, stretch=1)
 
-    def show_figure(self, caption: str, render: Callable[[], bytes]) -> None:
-        """Show `caption` and render once on the calling Qt thread, without I/O.
-
-        `render` returns PNG bytes. Draw or decode errors display an inline
-        notice without raising to the gallery or blocking the rest of Data.
-        """
+    def show_figure(self, caption: str, pixmap: QPixmap | None) -> None:
+        """Present the raster, or a local render error when no pixmap is supplied."""
         self.clear()
         self._caption.setText(caption)
-        try:
-            pixmap = QPixmap()
-            if not pixmap.loadFromData(render(), "PNG"):
-                raise ValueError("Figure reading renderer returned invalid PNG")
-        except Exception:
-            logger.exception("Could not render Data figure %s", caption)
+        if pixmap is None:
             self._error.show()
             return
         self._image.setPixmap(pixmap)

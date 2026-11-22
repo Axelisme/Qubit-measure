@@ -41,10 +41,18 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
 
 from qtpy.QtCore import QEvent, QObject, QSize, Qt
-from qtpy.QtGui import QHideEvent, QPixmap, QResizeEvent, QShowEvent
+from qtpy.QtGui import (
+    QHideEvent,
+    QPixmap,
+    QResizeEvent,
+    QShowEvent,
+    QTextLayout,
+    QTextOption,
+)
 from qtpy.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -85,6 +93,58 @@ OUTER_MARGIN = 6
 WIDE_THRESHOLD = 2 * MIN_CARD_WIDTH + LAYOUT_SPACING  # 450 for inner viewport
 
 
+type FigureStage = Literal["run", "analysis", "post_analysis"]
+
+
+@dataclass(frozen=True)
+class _ReadingRequest:
+    stage: FigureStage
+    button: QPushButton
+
+
+class _MemberCaption(QLabel):
+    """Wrap a member name to the tile width, including unbroken identifiers."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self._name = name
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
+        self._wrap_name()
+
+    def changeEvent(self, a0: QEvent | None) -> None:
+        super().changeEvent(a0)
+        if a0 is not None and a0.type() == QEvent.Type.FontChange:
+            self._wrap_name()
+
+    def _wrap_name(self) -> None:
+        width = self.contentsRect().width()
+        if width <= 0:
+            return
+        name = self._name
+        if self.fontMetrics().horizontalAdvance(name) > width:
+            breakable = name.replace("_", "_\u200b")
+            layout = QTextLayout(breakable, self.font())
+            option = QTextOption()
+            option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+            layout.setTextOption(option)
+            # Qt line offsets count UTF-16 code units, not Python characters.
+            encoded = breakable.encode("utf-16-le")
+            parts: list[str] = []
+            layout.beginLayout()
+            while (line := layout.createLine()).isValid():
+                line.setLineWidth(width)
+                start = 2 * line.textStart()
+                end = start + 2 * line.textLength()
+                parts.append(encoded[start:end].decode("utf-16-le"))
+            layout.endLayout()
+            name = "\n".join(parts).replace("\u200b", "")
+        if self.text() != name:
+            self.setText(name)
+
+
 class _PreviewCard(QWidget):
     """Single named source preview card (header + raster/empty/error)."""
 
@@ -93,6 +153,8 @@ class _PreviewCard(QWidget):
         source_key: str,
         display_name: str,
         parent: QWidget | None = None,
+        *,
+        named_member: bool = False,
     ) -> None:
         super().__init__(parent)
         self._source_key = source_key
@@ -112,10 +174,9 @@ class _PreviewCard(QWidget):
         # Header
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        title = QLabel(display_name)
+        title = _MemberCaption(display_name) if named_member else QLabel(display_name)
         title.setTextFormat(Qt.TextFormat.PlainText)
         title.setObjectName(f"previewTitle_{source_key}")
-        self._title = title
         title.setToolTip(display_name)
         header.addWidget(title, stretch=1)
         outer.addLayout(header)
@@ -206,14 +267,11 @@ class _PreviewCard(QWidget):
     def bind_view(
         self,
         scope: LifetimeScope,
-        stage: str,
+        stage: FigureStage,
         member: str | None,
         open_reading: Callable[[QPushButton], None],
     ) -> None:
         if member is not None:
-            self._title.setSizePolicy(
-                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
-            )
             self._image_label.setMinimumHeight(72)
         self._view.setObjectName(f"dataFigureView/{stage}/{member or ''}")
         self._view.setAccessibleName(f"View figure: {stage} {member or ''}".rstrip())
@@ -227,6 +285,7 @@ class _PreviewCard(QWidget):
 
     def show_named_figures(
         self,
+        stage: FigureStage,
         figures: FigureCollection,
         render: Callable[[_PreviewCard, Figure], None],
         open_reading: Callable[[str, QPushButton], None] | None,
@@ -248,14 +307,14 @@ class _PreviewCard(QWidget):
                 child.deleteLater()
         self._named_names = tuple(figures)
         for name, figure in figures.items():
-            card = _PreviewCard(f"{self._source_key}_member", name)
+            card = _PreviewCard(f"{self._source_key}_member", name, named_member=True)
             # Only stage cards keep the mosaic minimum; members fit their tile.
             card.setMinimumWidth(0)
             card._image_label.setMinimumWidth(0)
             render(card, figure)
             self._named_stack.addWidget(card)
             if open_reading is not None:
-                self._bind_member_view(card, name, open_reading)
+                self._bind_member_view(card, stage, name, open_reading)
         index = (
             self._named_names.index(selected) if selected in self._named_names else 0
         )
@@ -267,6 +326,7 @@ class _PreviewCard(QWidget):
     def _bind_member_view(
         self,
         card: _PreviewCard,
+        stage: FigureStage,
         name: str,
         open_reading: Callable[[str, QPushButton], None],
     ) -> None:
@@ -274,7 +334,6 @@ class _PreviewCard(QWidget):
             self._named_stack.setCurrentWidget(card)
             open_reading(name, button)
 
-        stage = "post_analysis" if self._source_key == "post" else self._source_key
         card.bind_view(self._member_scope, stage, name, selected)
         card.set_view_available(available=True)
 
@@ -435,7 +494,7 @@ class DataFigurePreviewGallery(QWidget):
         parent: QWidget | None = None,
         *,
         renderer: Callable[[Figure], bytes] | None = None,
-        read_png: Callable[[str, str | None], bytes] | None = None,
+        read_png: Callable[[FigureStage, str | None], bytes] | None = None,
     ) -> None:
         """Build preview groups and optional synchronous reading actions.
 
@@ -474,7 +533,7 @@ class DataFigurePreviewGallery(QWidget):
 
         self._read_png = read_png
         self._scope = LifetimeScope(self)
-        self._return_focus: QPushButton | None = None
+        self._reading_request: _ReadingRequest | None = None
         self.setObjectName("dataFigurePreviewGallery")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -529,7 +588,7 @@ class DataFigurePreviewGallery(QWidget):
 
     def _open_reading(
         self,
-        stage: str,
+        stage: FigureStage,
         member: str | None,
         button: QPushButton,
     ) -> None:
@@ -539,23 +598,44 @@ class DataFigurePreviewGallery(QWidget):
         caption = self._cards[stage].stage_title()
         if member is not None:
             caption = f"{caption} — {member}"
-        self._return_focus = button
-        self._reading.show_figure(caption, lambda: read_png(stage, member))
+        request = _ReadingRequest(stage, button)
+        self._reading_request = request
+        try:
+            png = read_png(stage, member)
+            pixmap = QPixmap()
+            if not pixmap.loadFromData(png, "PNG"):
+                raise ValueError("Figure reading renderer returned invalid PNG")
+        # tolerated: Open draw callbacks and PNG decoding can fail independently of Save.
+        except Exception:
+            pixmap = None
+            logger.exception("Could not render Data figure %s", caption)
+
+        # ADR-0067: a synchronous draw can reenter the owner, close this
+        # scope, dismiss reading, or start a new request from the same button.
+        if self._scope.closed or self._reading_request is not request:
+            return
+        self._reading.show_figure(caption, pixmap)
         self._pages.setCurrentWidget(self._reading)
         self._reading.focus_back()
 
     def _return_to_preview(self) -> None:
-        button = self._return_focus
+        request = self._reading_request
         self.dismiss_reading()
-        if button is not None:
-            button.setFocus()
+        if request is not None:
+            request.button.setFocus()
 
     def dismiss_reading(self) -> None:
         """Clear the reading raster and return to the overview without moving focus."""
-        if self._return_focus is not None:
-            self._return_focus = None
+        if self._reading_request is not None:
+            self._reading_request = None
             self._reading.clear()
             self._pages.setCurrentWidget(self._overview)
+
+    def clear_run_preview(self) -> None:
+        """Clear the Run card and only a reading request borrowed from Run."""
+        if self._reading_request is not None and self._reading_request.stage == "run":
+            self.dismiss_reading()
+        self._update_card("run", None)
 
     def retire_reading(self) -> None:
         """Disconnect reading controls and drop their raster before tab teardown."""
@@ -582,9 +662,8 @@ class DataFigurePreviewGallery(QWidget):
         self._scroll.setWidget(self._inner)
 
     def _build_cards(self) -> None:
-        """Create capability-selected cards in display order, retaining the post alias."""
-        # Cards — Run always, Analysis/Post per capability
-        self._cards: dict[str, _PreviewCard] = {}
+        """Create capability-selected cards in display order."""
+        self._cards: dict[FigureStage, _PreviewCard] = {}
 
         run_card = _PreviewCard("run", "Run")
         self._cards["run"] = run_card
@@ -597,20 +676,15 @@ class DataFigurePreviewGallery(QWidget):
 
         if self._has_post:
             post_card = _PreviewCard("post", "Post-Analysis")
-            # Normalize key: use "post_analysis" externally but "post" internally.
             self._cards["post_analysis"] = post_card
-            # Also expose alias "post" for convenience
-            self._cards["post"] = post_card
             self._ordered_cards.append(post_card)
 
-        for stage in ("run", "analysis", "post_analysis"):
-            card = self._cards.get(stage)
-            if card is not None:
-                self._scope.add_cleanup(card.close_member_actions)
-                if self._read_png is not None:
-                    self._bind_stage_view(stage, card)
+        for stage, card in self._cards.items():
+            self._scope.add_cleanup(card.close_member_actions)
+            if self._read_png is not None:
+                self._bind_stage_view(stage, card)
 
-    def _bind_stage_view(self, stage: str, card: _PreviewCard) -> None:
+    def _bind_stage_view(self, stage: FigureStage, card: _PreviewCard) -> None:
         card.bind_view(
             self._scope,
             stage,
@@ -618,7 +692,9 @@ class DataFigurePreviewGallery(QWidget):
             lambda button: self._open_reading(stage, None, button),
         )
 
-    def _member_reader(self, stage: str) -> Callable[[str, QPushButton], None] | None:
+    def _member_reader(
+        self, stage: FigureStage
+    ) -> Callable[[str, QPushButton], None] | None:
         if self._read_png is None:
             return None
         return lambda member, button: self._open_reading(stage, member, button)
@@ -756,36 +832,24 @@ class DataFigurePreviewGallery(QWidget):
 
     def has_card(self, key: str) -> bool:
         """Return True if a card for ``key`` exists (run|analysis|post_analysis|post)."""
-        norm = "post_analysis" if key == "post" else key
-        if norm == "post_analysis" and "post_analysis" in self._cards:
-            return True
-        return key in self._cards
+        return self.find_card(key) is not None
 
     def card_state(self, key: str) -> str:
         """Return card state: 'available' | 'empty' | 'unavailable'."""
-        card = self._cards.get(key)
-        if card is None and key == "post":
-            card = self._cards.get("post_analysis")
-        if card is None and key == "post_analysis":
-            card = self._cards.get("post")
+        card = self.find_card(key)
         if card is None:
             raise KeyError(f"no preview card for {key!r}")
         return card.current_state()
 
     def card_text(self, key: str) -> str:
         """Return visible text for the card's current state (empty/error)."""
-        card = self._cards.get(key)
-        if card is None and key == "post":
-            card = self._cards.get("post_analysis")
-        if card is None and key == "post_analysis":
-            card = self._cards.get("post")
+        card = self.find_card(key)
         if card is None:
             raise KeyError(f"no preview card for {key!r}")
         return card.current_text()
 
     def card_count(self) -> int:
         """Return number of distinct preview cards (Run + optional)."""
-        # Deduplicate alias — count ordered cards.
         return len(self._ordered_cards)
 
     def update_collections(
@@ -801,15 +865,16 @@ class DataFigurePreviewGallery(QWidget):
         stays local. Names, page selection and raster widgets are presentation cache only.
         """
         self.dismiss_reading()
-        for key, figures in (
+        stages: tuple[tuple[FigureStage, FigureCollection | None], ...] = (
             ("run", run),
             ("analysis", analysis),
             ("post_analysis", post_analysis),
-        ):
+        )
+        for key, figures in stages:
             card = self._cards.get(key)
             if card is not None and figures:
                 card.show_named_figures(
-                    figures, self._render_card, self._member_reader(key)
+                    key, figures, self._render_card, self._member_reader(key)
                 )
         self.refresh_layout()
 
@@ -843,14 +908,8 @@ class DataFigurePreviewGallery(QWidget):
         if self._has_post:
             self._update_card("post_analysis", post_analysis)
 
-    def _update_card(self, key: str, fig: Figure | None) -> None:
+    def _update_card(self, key: FigureStage, fig: Figure | None) -> None:
         card = self._cards.get(key)
-        if card is None:
-            # Try alias
-            if key == "post_analysis":
-                card = self._cards.get("post")
-            elif key == "post":
-                card = self._cards.get("post_analysis")
         if card is None:
             # Unsupported card — do nothing (S4).
             return
@@ -889,10 +948,11 @@ class DataFigurePreviewGallery(QWidget):
 
     def find_card(self, key: str) -> _PreviewCard | None:
         """Return the card widget for ``key`` (or None if unsupported)."""
-        card = self._cards.get(key)
-        if card is None and key in ("post", "post_analysis"):
-            card = self._cards.get("post_analysis") or self._cards.get("post")
-        return card
+        if key == "post":
+            key = "post_analysis"
+        if key == "run" or key == "analysis" or key == "post_analysis":
+            return self._cards.get(key)
+        return None
 
     def card_viewport_size(self, key: str) -> QSize | None:
         """Return image viewport size for card ``key`` (test helper)."""

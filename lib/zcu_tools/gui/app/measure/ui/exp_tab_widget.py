@@ -182,6 +182,14 @@ class ExpTabWidget(QWidget):
         dialog_presenter: DialogPresenter | None = None,
         preview_renderer: Callable[[Figure], bytes] | None = None,
     ) -> None:
+        """Build the Measure tab and its owned figure area.
+
+        By default the Data gallery uses the production fixed-size PNG preview
+        renderer. An override runs synchronously on the Qt owner thread and
+        returns PNG bytes for one thumbnail. A draw error or invalid PNG marks
+        only that thumbnail unavailable. The override does not render the
+        reading pane or Save outputs.
+        """
         super().__init__(parent)
         self._init_lifetime()
         self.tab_id = tab_id
@@ -266,6 +274,7 @@ class ExpTabWidget(QWidget):
             preview_renderer=preview_renderer,
         )
         self._splitter.addWidget(self._figure_area)
+        # ADR-0067: retire Data reading callbacks before Qt deletes the child.
         self._scope.add_cleanup(self._figure_area.retire_data_reading)
 
     def _build_run_panel(self) -> None:
@@ -732,6 +741,10 @@ class ExpTabWidget(QWidget):
         reader dynamically and isolate each pane's synchronous failure.
         """
         return self._figure_area.get_current_figure_for_pane(pane)
+
+    def clear_run_preview(self) -> None:
+        """Drop the failed Run's Data preview without changing the selected pane."""
+        self._figure_area.clear_run_preview()
 
     def clear_all_figures(self) -> None:
         """Clear all figure panes (used for LoadData and Run start invalidation)."""
