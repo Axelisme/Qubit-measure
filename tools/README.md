@@ -110,6 +110,9 @@ Runner 遇到用法錯誤、非 Linux、不在已提交的 Git worktree、少於
 | `residual_killed` | 直接子程序結束後仍找到同 process group 的存活程序時設為 `true`，超時本身的整組清理只記在 `timed_out` |
 | `log` | 記錄命令輸出 log 的路徑 |
 
+收據記錄工作樹與執行身分，不記錄 probe 的輸入內容。相同 HEAD 不代表相同輸入。
+要核對 cfg、seed 或來源陣列，請比較 [Probe snapshots](#probe-snapshots) 的輸入指紋。
+
 全樹測試沿用 [tests/README.md 的完整選集命令](../tests/README.md#執行測試套件)，保留 marker、rootdir 與 failure log 選項。
 Full Pyright 將下方的全樹比較命令包進 runner，讓排隊與收據套用到整次比較：
 
@@ -142,6 +145,7 @@ write_snapshot(
 環境設定或來源陣列；writer 不發現實驗或讀取環境私有狀態。
 每個 label 寫入新目錄，保存 `arrays.npz`、PNG 與 `inputs.json`。既存 label 拒絕寫入，
 重跑時選新 output root。輸入指紋包含陣列的 shape、dtype 與內容，不只記形狀。
+指紋只涵蓋 caller 提供的輸入。要核對工作樹與執行身分，請另看[重計算執行器的收據](#重計算執行器)。
 
 同一支 script 在兩個 worktree 各以自己的 `uv run --directory <worktree> --no-sync --`
 執行一次，分別寫 A、B，再執行上表 compare 命令。工具不啟動其他 worktree 或儀器。
@@ -187,13 +191,13 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
   > "$output.receipt.json"
 ```
 
-`batch.json` 記錄本批選中的 adapter、Git HEAD、每份輸入的 SHA-256 和 guide 盤點。從乾淨 checkout 執行，才能用 commit 找回執行時的程式。每列在送出 Run 前先寫 `start.json`，記 UTC 時刻與 monotonic 秒數。Run 在期限內到終態時，工具在清理該列資源前寫 `row.json`。逾時則先寫 `row.json`，再等 Run 終態與 Controller idle。`report.json` 和 `summary.md` 從這些落盤紀錄組成，列出已記錄結果的列數、本批涵蓋列數及全 inventory 列數。
+`batch.json` 記錄本批選中的 adapter、Git HEAD、每份輸入的 SHA-256 和 guide 盤點。工具也在本批派送前讀取 Git 的 dirty 狀態，將 HEAD 與 dirty 一起交給每列的 telemetry writer。從乾淨 checkout 執行，才能用 commit 找回執行時的程式。每列在送出 Run 前先寫 `start.json`，記 UTC 時刻與 monotonic 秒數。Run 在期限內到終態時，工具在清理該列資源前寫 `row.json`。逾時則先寫 `row.json`，再等 Run 終態與 Controller idle。`report.json` 和 `summary.md` 從這些落盤紀錄組成，列出已記錄結果的列數、本批涵蓋列數及全 inventory 列數。
 
 工具在送出 Run 及收到 Controller 終態事件時各取一次時間。`wall_s` 是兩次 monotonic clock 的差，UTC 時刻供閱讀。環境組裝、Open、覆寫及派送前落盤都不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留 fixture 副本與 acquired ledger，不寫回入庫輸入。
 
 工具從 [acquire telemetry](../lib/zcu_tools/simulators/README.md#acquire-telemetry) 加總各階段秒數。`core_s` 是 `compile_s`、`evolve_s`、`readout_s` 和 `materialize_s` 四項之和。`materialize_s` 含 acquire 內產生 raw shots 的時間，也含依 `acquire_id` 配對的延後 materialize。`remainder_s` 從 acquire 牆鐘扣除該牆鐘內的四項工作。延後 materialize 在 acquire 之外，不再從 remainder 扣除。`ShotReducer` 等 host 處理不計入核心。
 
-Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆鐘和四個分項、每筆補充紀錄都有主紀錄配對時，才填 `core_s`。缺 materialize 的舊 telemetry 不補 0。配不到主紀錄的補充紀錄不計秒數或 acquire 次數，並使分項不完整。成功但分項不全的 `missing_breakdown` 列保留 Run 秒數，四個分項與 remainder 寫 `null`。分項不全或逾時時，`core_s` 寫 `null`，`core_s_lower_bound` 只加總分項齊全的主紀錄與配對到它們的補充紀錄。沒有分項齊全的主紀錄時，下限也寫 `null`。
+Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆鐘和四個分項、每筆補充紀錄都有主紀錄配對時，才填 `core_s`。缺 materialize 的舊 telemetry 或未走到階段的 `null` 都不補 0。配不到主紀錄的補充紀錄不計秒數或 acquire 次數，並使分項不完整。成功但分項不全的 `missing_breakdown` 列保留 Run 秒數，四個分項與 remainder 寫 `null`。分項不全或逾時時，`core_s` 寫 `null`，`core_s_lower_bound` 只加總分項齊全的主紀錄與配對到它們的補充紀錄。沒有分項齊全的主紀錄時，下限也寫 `null`。
 
 完整只表示現存 telemetry 的分項齊全。Writer 採盡力寫入；工具無法察覺整筆主紀錄或補充紀錄遺失。若該 Run 期間出現保留上限刪檔或寫入失敗的警告，不要用該列的 `core_s` 斷言達標。
 
@@ -1326,8 +1330,10 @@ those stages. The analyzer ignores supplemental `event: "materialize"` records
 when counting acquires and aggregating these three stages.
 
 A row contributes wall totals only when all four wall fields are JSON numbers.
-Missing or null wall fields make it excluded from wall totals, including in the
-unknown group. Included plus excluded across groups equals `records`.
+Missing or null values in those four fields exclude the row from wall totals,
+including in the unknown group. A failed acquire may not have reached a stage.
+A null `materialize_wall_s` alone does not exclude it: that stage is not part of
+this breakdown. The analyzer does not filter by `commit` or `dirty`. Included plus excluded across groups equals `records`.
 All valid main rows still count toward family statistics. Supplemental records
 do not contribute family statistics. Non-null `complete` accepts
 only JSON booleans. Non-null wall fields accept only JSON numbers, not booleans or

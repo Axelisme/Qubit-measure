@@ -34,7 +34,7 @@ Open／Defaults 捕捉當下來源。變更 aliases、儲存的 module 或校準
 3. 完成後按 Analyze。`Fit background amplitude slope` 預設關閉；背景明顯傾斜時可啟用後重做分析。
 4. 首張 Analyze 圖在兩組量測點上疊加兩條模型與共振垂直線。以兩個共振頻率差的一半取 χ/2π，兩個 FWHM 的平均取 κ/2π。例如中心相差 1.50 MHz 代表 χ/2π = 0.75 MHz。另一張 IQ 診斷圖比較扣除背景並正規化後的兩組 I、Q 點與模型圓。點若有連續偏離圓的區段或共振落在邊界，擴大掃描，或檢查 π 脈衝與背景模型再重測。
 
-Analyze 摘要列該次 Run 的 Reps × Rounds。圖中平均 IQ 模長不是布居；掃描用來定位共振，因此不畫逐點 shot SEM。數值模型沒有回傳用於這兩條曲線的選取門檻或參數誤差。Analyze 不寫回校準，這個入口目前沒有獨立 recipe。
+Analyze 摘要列該次 Run 的 Reps × Rounds。圖上是平均 IQ 的模長，不是布居。保存結果只有平均 IQ，沒有逐點 shot SEM。數值模型沒有回傳用於這兩條曲線的選取門檻或參數誤差。Analyze 不寫回校準，這個入口目前沒有獨立 recipe。
 
 ## 保存與載入
 

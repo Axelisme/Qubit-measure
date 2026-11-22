@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-22, acquire-local raw plans
+**Last updated:** 2026-11-22, acquire-local raw plans, isotropic receiver noise, and unentered acquire timings
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -59,8 +59,8 @@ bounded `routing-*.jsonl` row after each admitted acquire. Set `directory` to
 choose the output directory; null selects project-root `.sim_telemetry`.
 Direct evolution and every projective continuation enable Engine telemetry.
 The row contains compile, evolution, ADC/readout and in-acquire raw materialization
-time. It includes failed calls through their failure and leaves unentered stages
-at `0.0`. Successful materialization from a later raw getter appends a
+time, including elapsed time through failures. See the shared contract below
+for unentered stages. Successful materialization from a later raw getter appends a
 [supplemental timing record](../../README.md#acquire-telemetry).
 `complete` comes from the binding's `AcquireOutcome`: normal partial Stop is true,
 while exceptions are false. Writer I/O failures warn once and do not change the
@@ -162,8 +162,9 @@ Evolution returns densities in DC energy coordinates. The source supplies
 explicit `Basis` records to `batch_populations`, then calls
 `normalize_populations` as the sole probability repair. Readout state order is
 the retained DC energy order. Cavity frequencies include the model owner's
-dressed shifts at that DC point. Receiver PSD converts to sample covariance
-using the ADC sample interval. One scattering phase is always supplied explicitly.
+dressed shifts at that DC point. The scalar receiver PSD divided by the sample
+interval in ns gives the variance of each independent I/Q component. One
+scattering phase is always supplied explicitly.
 
 `preflight(request, snapshot, receivers=...)` plans the complete observation set
 of one physical cavity. Pass every ADC's `resources.simulation_schema.Receiver`

@@ -16,7 +16,7 @@
 
 ## 讀 Run 與 Analyze 圖
 
-兩個 qubit 的 P(e) 都是該 qubit 判為 e 的次數除以當點保留的終端 shots。分母包含 g、e 和 other。這是分類後的邊際機率，不是平均 IQ，也不是純態、經混淆校正的激發布居。頻譜主要比較峰谷位置，因此不畫逐點 shot SEM。
+兩個 qubit 的 P(e) 都是該 qubit 判為 e 的次數除以當點保留的終端 shots。分母包含 g、e 和 other。這是分類後的邊際機率，不是平均 IQ，也不是純態、經混淆校正的激發布居。Run 與 Analyze 的一維頻譜用折線連接量測點，並以同一頻點保留 shots 的分類計數估計 P(e) 的 shot SEM。少於兩發時不畫誤差棒。
 
 - **Terminal P(e)** 每個 bias 點一張，四個 panel 分別是 g,g、g,e、e,g、e,e。橫軸是兩線共用的 RF (MHz)，兩種顏色是 Qubit1 和 Qubit2。看同一顆 qubit 的峰谷是否隨另一顆的名目準備改變。Run 和第一張 Analyze 用同一組座標、顏色與比較尺度。Run 另列已取樣的準備／頻率點數與保留 shots；有取樣但沒有通過 herald 時，該點仍不畫機率。
 - **Terminal P(e) map** 在掃過多個 bias 點時，分開畫 Qubit1、Qubit2。橫軸是 RF，縱軸是 DC source 座標。四個準備分支共用 0–1 色階，可沿著亮帶或暗帶追蹤同一條頻線隨 bias 的移動。

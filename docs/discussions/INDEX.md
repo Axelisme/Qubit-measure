@@ -23,6 +23,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-22 [舊實測數字當現況](2026-11-22-stale-measured-numbers.md)：量測新鮮度。引用數字附 commit、輸入與範圍，驅動決策前查被測路徑的後續改動；未完成列未走到的階段記 null。
+- 2026-11-22 [模擬器接收雜訊只保留等向設定](2026-11-22-isotropic-receiver-noise.md)：刪除或收窄。模型 YAML 每個 receiver 改填單一 PSD，I 和 Q 獨立且變異數相同。
 - 2026-11-22 [FTF 樣板的 projective floor](2026-11-22-ftf-projection-weight-floor.md)：精度取捨。FTF 樣板 floor 改為 `1e-5`；舊 history 模型下原設定第一點的 1,800 s 參考缺口，在 Markov 同模型驗收後不再適用。
 - 2026-11-22 [ADC raw plan 由誰持有](2026-11-22-adc-raw-plan-acquire-owner.md)：快取歸屬。FTF 與 standalone single 的 acquire session 持有 ADC plan；換 batch 或結束就退役，舊 raw 可冷重算。
 - 2026-11-22 [FTF projective 從真空續演化並改用 Markov chain](2026-11-22-ftf-projective-markov.md)：表示與資料格式。投影後逐 DC 態續演化，raw 保留單發配對，compact 只給逐事件邊際；獨立參考兩 floor 驗過 41／75 個 key。
@@ -165,6 +167,7 @@
 - 2026-11-22 [在 Measure Data 頁讀原圖](2026-11-22-data-figure-reading.md)：圖形呈現。縮圖用來選圖，`View figure` 用當前原生 Figure 在同頁重繪一張可捲動的圖，不改 Save 工件。
 - 2026-11-22 [Live-only 實驗的 figures-only Analyze](2026-11-22-figures-only-analyze.md)：Analyze 能力。四個 leaf 只從明確來源重畫具名圖，不增加數值結果或寫回。
 - 2026-11-22 [非均勻熱圖在建構時選色盤](2026-11-22-nonuniform-heatmap-cmap.md)：繪圖介面。作者在建構期傳入具名 cmap，預設與其他熱圖行為不變。
+- 2026-11-22 [GE 寫回保護先於診斷圖交付](2026-11-22-ge-gate-split-from-diagnostic.md)：交付切分。窄磚上診斷圖標籤仍相碰，寫回初選的中心檢查先獨立落地，直方圖與擬合 SNR 整批延到續作。
 
 ## Cfg 與表單
 
@@ -177,6 +180,7 @@
 - 2026-11-21 [Gain 固定範圍：表單只驗純量，掃描留給 Run](2026-11-21-form-gain-range.md)：刪除或收窄。表單以既有 annotation 限制純量 gain；一般掃描保留 `SweepCfg`，超界點在 acquisition 前被拒。
 - 2026-11-21 [readout 時序預設：固定長度差與光子衰減等待](2026-11-21-readout-timing-defaults.md)：初值與預設值。範本前後各留 0.015 µs，chain／Rπ length 改用可編輯長度差（schema 6.0／4.0），mux post_delay 種子取 5/(2π·κ)；範本差值讀注入的 catalog。
 - 2026-11-22 [實驗呈現規範：圖、摘要與讀者檢查](2026-11-22-presentation-rules.md)：呈現規範。圖只放理論重點，採集設定進摘要，對數值大小敏感的一維資料畫 error bar，規範集中在 `figure-style.md`。
+- 2026-11-22 [量測點何時連線與 spectrum 的 error bar](2026-11-22-data-point-lines.md)：呈現規則。無擬合曲線的一維圖連線、有擬合只畫點；有 shot 資料就畫 SEM，spectrum 不再例外；wrapped phase 只斷跨切口、恰半圈與缺值的線段。
 - 2026-11-22 [Analyze 摘要與逐點誤差棒的責任分工](2026-11-22-shared-presentation-facts.md)：呈現責任。GUI 與 MCP 共用 adapter 摘要行，analysis 計算 shot SEM，實驗 core 寫標題與圖例。
 - 2026-11-22 [Two-qubit mux 綁定與編輯後的檢查](2026-11-22-two-qubit-mux-binding-checks.md)：驗證位置。Open／Reset 驗有序元件連結，提交時按同次 capture 驗實際 readout tone 數。
 

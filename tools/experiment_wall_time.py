@@ -230,7 +230,11 @@ class AcquireCoreTotals:
         )
 
     def add_acquire(self, record: AcquireInput) -> bool:
-        """Count a main row and return whether all its wall times were summed."""
+        """Sum a main row only if all five wall times are measured.
+
+        Count a row with any missing or null duration as excluded and return
+        False. Keep numeric zero as a measurement. Return True for summed rows.
+        """
         if (
             record.wall_s is None
             or record.compile_wall_s is None
@@ -322,6 +326,7 @@ def _current_commit() -> str:
 def _add_breakdown(
     row: Row, totals: AcquireCoreTotals, *, timed_out: bool = False
 ) -> None:
+    # Only acquires with every wall time present can support a core lower bound.
     covered = totals.included > 0
     complete = (
         covered
@@ -476,6 +481,8 @@ class _ControllerRun:
 @dataclass
 class _RunOwner:
     workers: int = 1
+    commit: str | None = None
+    dirty: bool | None = None
     app: QCoreApplication | None = None
     retained: list[ExitStack] = field(default_factory=list)
 
@@ -528,7 +535,10 @@ def _measure_run(
             )
         )
         settings = load_ftf(data_dir / "ftf-settings.yaml").with_telemetry(
-            enabled=True, directory=telemetry.resolve()
+            enabled=True,
+            directory=telemetry.resolve(),
+            commit=owner.commit,
+            dirty=owner.dirty,
         )
         env = ftf(settings, soccfg=soccfg, workers=owner.workers)
         if env.close_backend is not None:
@@ -784,8 +794,10 @@ def main(
     FTF settings, fixture, case declarations and overrides. discover lists the
     adapters and guides and supplies a runner. With no discover override, use
     the offline Controller and pass --workers (a positive integer, default 1)
-    to each simulated FTF environment. read_commit supplies the checkout revision before
-    Run; by default read Git HEAD. Input, Run and output errors propagate. Bad
+    to each simulated FTF environment. read_commit supplies the batch revision;
+    by default read Git HEAD. The default runner stamps each telemetry row with
+    that revision and Git's dirty status captured once before dispatch. Input,
+    Run and output errors propagate. Bad
     CLI arguments exit with usage status. --report-only rebuilds both reports
     from the existing --output, without discovery or dispatch. A start without
     a result is incomplete and provides no duration or lower bound. --resume-from
@@ -848,12 +860,23 @@ def _main(
             )
         return _recover_report(args.output)
     owner.workers = args.workers
-    inventory = _discover(owner) if discover is None else discover()
+    commit = read_commit()
+    if discover is None:
+        owner.commit = commit
+        owner.dirty = bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain", "--untracked-files=normal"],
+                cwd=_REPO_ROOT,
+                text=True,
+            )
+        )
+        inventory = _discover(owner)
+    else:
+        inventory = discover()
     try:
         selected = _select_adapters(inventory.adapters, args.select or ())
     except ValueError as exc:
         parser.error(str(exc))
-    commit = read_commit()
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
     output = args.output or (_OUTPUT_ROOT / f"{commit}-{timestamp}")
     point = _CaseInputs.model_validate_json(

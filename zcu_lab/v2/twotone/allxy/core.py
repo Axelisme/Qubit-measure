@@ -251,6 +251,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             ylabel="IQ projection (a.u.)",
         )
         viewer = live_errorbar(ax)
+        ax.lines[0].set_linestyle("none")
         ax.set_xticks(
             np.arange(len(ALLXY_SEQUENCE)), _GATE_PAIR_LABELS, rotation=90, fontsize=10
         )
@@ -377,7 +378,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         ax.plot(
             fit.predict_signals,
             marker="x",
-            linestyle="-",
+            linestyle="none",
             color="red",
             label="Coherent-error model",
         )

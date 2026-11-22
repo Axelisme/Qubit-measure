@@ -180,12 +180,13 @@ def test_design_rejects_invalid_values_at_the_field(field: str, value: object) -
         parse_ftf(ftf_document() | {"design": {"Q1": record}})
 
 
-def test_singular_receiver_spectral_density_is_legal() -> None:
+def test_loader_rejects_legacy_receiver_noise_matrix(tmp_path: Path) -> None:
     document = ftf_document()
-    _set_field(document, "readout.adc.gain", 0.0)
-    _set_field(document, "readout.adc.noise_psd_adc2_ns", [[1.0, 0.1], [0.1, 0.01]])
-    config = parse_ftf(document)
-    assert config.readout.receivers[0].noise_psd_adc2_ns == ((1.0, 0.1), (0.1, 0.01))
+    _set_field(document, "readout.adc.noise_psd_adc2_ns", [[1.0, 0.2], [0.2, 1.0]])
+    path = tmp_path / "legacy-noise.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"readout\.adc\.noise_psd_adc2_ns"):
+        load_ftf(path)
 
 
 def test_ftf_loads_detached_named_settings(tmp_path: Path) -> None:
@@ -198,7 +199,7 @@ def test_ftf_loads_detached_named_settings(tmp_path: Path) -> None:
     document.clear()
     assert config.chip.g_f1_f2_ghz == -0.02
     assert config.dc_bias.sources["bias"].unit == "V"
-    assert config.readout.receivers[0].noise_psd_adc2_ns == ((0.0, 0.0), (0.0, 0.0))
+    assert config.readout.receivers[0].noise_psd_adc2_ns == 0.0
     assert config.chip.coupler.ng == 0
     assert config.dc_bias.sources["bias"].flux_per_unit.coupler == 0.1
     assert config.dc_bias.offset_phi0.f2 == 0.4
@@ -305,7 +306,7 @@ def _set_field(document: dict[str, object], path: str, value: object) -> None:
         ),
         (
             "readout.adc.noise_psd_adc2_ns",
-            [[1, 2], [2, 1]],
+            -1.0,
             "readout.adc.noise_psd_adc2_ns",
         ),
         ("numerics.solver.rtol", 0, "numerics.solver.rtol"),
@@ -481,7 +482,7 @@ def test_removed_readout_kind_reports_migration_error(
                     "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                     "ro_ch": ch,
                     "gain": 1.0,
-                    "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+                    "noise_psd_adc2_ns": 0.0,
                 }
                 for ch in range(1, 10)
             ],
@@ -494,7 +495,7 @@ def test_removed_readout_kind_reports_migration_error(
                     "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                     "ro_ch": 1,
                     "gain": 1.0,
-                    "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+                    "noise_psd_adc2_ns": 0.0,
                 }
             ]
             * 2,
@@ -507,7 +508,7 @@ def test_removed_readout_kind_reports_migration_error(
                     "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                     "ro_ch": 0,
                     "gain": 1.0,
-                    "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+                    "noise_psd_adc2_ns": 0.0,
                 }
             ],
             "readout.mux.adc",
@@ -521,7 +522,7 @@ def test_removed_readout_kind_reports_migration_error(
                     "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                     "ro_ch": 1,
                     "gain": 1.0,
-                    "noise_psd_adc2_ns": [[1.0, 2.0], [2.0, 1.0]],
+                    "noise_psd_adc2_ns": float("inf"),
                 }
             ],
             "readout.mux.adc.0.noise_psd_adc2_ns",
@@ -567,7 +568,7 @@ def test_dual_readout_channel_indices_require_nonnegative_integers(
                 "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                 "ro_ch": value,
                 "gain": 1.0,
-                "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+                "noise_psd_adc2_ns": 0.0,
             }
         ]
         error_path += ".0.ro_ch"

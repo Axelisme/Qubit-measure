@@ -8,6 +8,7 @@ with a Rabi curve, using the first-read fit or a start from the saved gains.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
@@ -26,6 +27,7 @@ from zcu_tools.analysis.readout_chain import (
     fit_cycle,
     rabi_model,
 )
+from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec, config
 from zcu_tools.experiment.context import RunContext
@@ -40,13 +42,14 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     chain_cycle_sums,
 )
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.process import find_rotate_angle, rotate2real
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
     cycle_sums_variables,
     first_read_iq,
+    first_read_iq_moments,
     restore_cycle_sums,
 )
 from zcu_lab.v2.chain._joint import JointResidualDiagnostics, plot_joint_residuals
@@ -211,7 +214,8 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         f = 1 / (2 x_π) in the joint fit. If the seed fitter reports no
         estimate, start from f = 3 / (4 max(abs(gain))) instead. Publish the
         live-direction projection and residuals as "joint residuals" and
-        first-read data and any seed fit as "fit".
+        first-read data and any seed fit as "fit". First-read moments that
+        cannot supply a shot SEM leave the measured points without error bars.
         Return π gain and f with Wald errors, R and scalar joint diagnostics.
         The source cfg may be None. Invalid input and joint fit errors
         propagate. There are no retries or fit-quality cutoffs.
@@ -221,7 +225,8 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         gains = sums.axis
 
         # 1. Seed from the first-read IQ using this experiment's fit policy.
-        seed_real_signals = rotate2real(first_read_iq(sums)).real
+        seed_iq = first_read_iq(sums)
+        seed_real_signals = rotate2real(seed_iq).real
         seed_zero_signal = seed_real_signals[np.argmin(np.abs(gains))]
         if seed_zero_signal > 0.5 * (
             np.max(seed_real_signals) + np.min(seed_real_signals)
@@ -309,7 +314,7 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
             projection_ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1))
             projection_ax.set_title(diagnostics)
             fig.suptitle(title)
-        _plot_first_read_fit(plots, gains, seed_real_signals, seed_fit)
+        _plot_first_read_fit(plots, sums, seed_iq, seed_real_signals, seed_fit)
 
         return ChainAmpRabiAnalysis(
             pi_amp=pi_amp,
@@ -329,19 +334,39 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
 
 def _plot_first_read_fit(
     plots: Plots,
-    gains: NDArray[np.float64],
+    sums: CycleSums,
+    iq: NDArray[np.complex128],
     signal: NDArray[np.float64],
     fit: RabiFit | None,
 ) -> None:
+    gains = sums.axis
     fig, ax = plots.subplots(num="fit", figsize=config.figsize, layout="constrained")
-    ax.plot(
-        gains,
-        signal,
-        label="Measured · first read",
-        ls="-" if fit is None else "none",
-        marker="o",
-        ms=4,
-    )
+    linestyle = "-" if fit is None else "none"
+    angle = find_rotate_angle(iq)
+    moments = first_read_iq_moments(sums)
+    direction = (np.cos(angle), np.sin(angle))
+    try:
+        sem = iq_shot_sem(moments, direction=direction)
+    except ValueError as exc:
+        logging.getLogger(__name__).warning("First-read shot SEM unavailable: %s", exc)
+        ax.plot(
+            gains,
+            signal,
+            "o",
+            markersize=4,
+            linestyle=linestyle,
+            label="First-read mean (shot SEM unavailable)",
+        )
+    else:
+        ax.errorbar(
+            gains,
+            signal,
+            yerr=sem,
+            fmt="o",
+            markersize=4,
+            linestyle=linestyle,
+            label="First-read mean ± shot SEM",
+        )
     title = "First-read fit unavailable"
     if fit is not None:
         grid = np.linspace(gains.min(), gains.max(), 400)

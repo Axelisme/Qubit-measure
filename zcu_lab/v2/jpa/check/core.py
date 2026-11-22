@@ -203,7 +203,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         # 2. Overlay both pump states on the same readout-frequency axis.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
         for values in real_signals:
-            ax.plot(freqs, values, linestyle="None")
+            ax.plot(freqs, values, linestyle="-")
         self._style_pump_states(outputs, ax.lines)
 
         ax.set(

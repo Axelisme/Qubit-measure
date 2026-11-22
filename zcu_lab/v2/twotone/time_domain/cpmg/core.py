@@ -385,7 +385,7 @@ def _live_plot(
     fig.colorbar(heatmap, ax=heat_ax, label="Normalized IQ (a.u.)")
     line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
     (previous,) = line_ax.plot(
-        [], [], "-", alpha=0.6, color="C1", label="Previous count"
+        [], [], "s-", markersize=3, alpha=0.6, color="C1", label="Previous count"
     )
     (latest,) = line_ax.plot(
         [], [], ".-", markersize=5, color="C0", label="Latest count"
@@ -446,18 +446,25 @@ def _plot_coherence(
     )
 
     ax2.set_title(f"CPMG coherence · {summary.fit_rows}/{counts.size} fits")
+    t2_1, gamma = summary.t2_1_us, summary.gamma
+    has_fit = t2_1 is not None and gamma is not None
     ax2.errorbar(
-        counts, lifetimes, yerr=errors, label="T₂ ± fit error", color="red", fmt="."
+        counts,
+        lifetimes,
+        yerr=errors,
+        label="T₂ ± fit error",
+        color="red",
+        fmt="." if has_fit else ".-",
     )
-    if summary.t2_1_us is not None and summary.gamma is not None:
+    if has_fit:
         fit_ns = np.geomspace(counts.min(), counts.max(), 200)
         ax2.plot(
             fit_ns,
-            summary.t2_1_us * fit_ns**summary.gamma,
+            t2_1 * fit_ns**gamma,
             label=r"$T_{2,1} n^{\gamma}$",
             color="black",
         )
-        ax2.set_title(f"CPMG coherence · γ = {summary.gamma:.3g}")
+        ax2.set_title(f"CPMG coherence · γ = {gamma:.3g}")
     if options.t1 is not None:
         ax2.axhline(2 * options.t1, color="blue", linestyle="--", label=r"$2T_1$")
     if options.t2r is not None:

@@ -68,7 +68,7 @@ from zcu_tools.simulators.six_fluxonium.environment.routing import (
     receiver_calibration,
     route_request,
 )
-from zcu_tools.simulators.telemetry import RoutingTelemetry
+from zcu_tools.simulators.telemetry import RoutingTelemetry, sum_stage_seconds
 
 
 def _reduced_flux(
@@ -148,7 +148,8 @@ class SixFluxoniumSource:
     unknown names raise on construction, unavailable domains raise on acquire.
     workers selects each source Engine's parallel width across timelines (default 1).
     Values below 1 raise ValueError. Sources are still prepared serially.
-    readout_wall_s sums six-owner ADC sampling and result assembly seconds;
+    readout_wall_s sums six-owner ADC sampling and result assembly seconds
+    (None until the first timed call);
     source-owned ADC preparation and Engine counters are added at finish_acquire.
     capture is the current acquire's shared CaptureBuffer, or None when the
     top-level debug_capture is disabled. begin_acquire gives every source this
@@ -175,12 +176,14 @@ class SixFluxoniumSource:
             RoutingTelemetry(
                 (Path(__file__).resolve().parents[5] / ".sim_telemetry")
                 if policy.directory is None
-                else policy.directory.resolve()
+                else policy.directory.resolve(),
+                commit=policy.commit,
+                dirty=policy.dirty,
             )
             if policy.enabled
             else None
         )
-        self.readout_wall_s = 0.0
+        self.readout_wall_s: float | None = None
         self._clock = SimulationClock() if clock is None else clock
         self._session = uuid4().hex
         self._truth_log = (
@@ -285,7 +288,7 @@ class SixFluxoniumSource:
         for source in self.sources:
             source.begin_acquire(seed=seed)
             source.capture = self.capture
-        self.readout_wall_s = 0.0
+        self.readout_wall_s = None
         self._request = None
         self._pending_acquire = True
 
@@ -310,11 +313,15 @@ class SixFluxoniumSource:
                     "wall_s": outcome.wall_s,
                     "compile_wall_s": outcome.compile_wall_s,
                     "materialize_wall_s": outcome.materialize_wall_s,
-                    "evolve_wall_s": sum(
+                    "evolve_wall_s": sum_stage_seconds(
                         source.evolve_wall_s for source in self.sources
                     ),
-                    "readout_wall_s": self.readout_wall_s
-                    + sum(source.readout_wall_s for source in self.sources),
+                    "readout_wall_s": sum_stage_seconds(
+                        (
+                            self.readout_wall_s,
+                            *(source.readout_wall_s for source in self.sources),
+                        )
+                    ),
                     "complete": outcome.complete,
                     "extras": {},
                     "capture_file": None if capture_file is None else capture_file.name,
@@ -493,7 +500,9 @@ class SixFluxoniumSource:
                             len(group.points), request.reps, *shape
                         )
             finally:
-                self.readout_wall_s += monotonic() - started
+                self.readout_wall_s = (self.readout_wall_s or 0.0) + (
+                    monotonic() - started
+                )
         return self._combine_round(round_request, tuple(rounds), traces)
 
     def _combine_round(
@@ -531,7 +540,7 @@ class SixFluxoniumSource:
                 )
             )
         finally:
-            self.readout_wall_s += monotonic() - started
+            self.readout_wall_s = (self.readout_wall_s or 0.0) + (monotonic() - started)
 
     def close(self) -> None:
         """Release six numeric backends and reject later work, leaving DC untouched.

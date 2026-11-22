@@ -1,6 +1,6 @@
 # Components
 
-**Last updated:** 2026-11-17，global 參數文件名稱
+**Last updated:** 2026-11-22，mux wiring 必填範圍
 
 **讀者：** lab-author、agent。查詢 component kind、角色與字串引用。
 
@@ -51,12 +51,12 @@ Qubit 的 `flux` 使用 `QubitFluxSchema`，預設為 `{offset: null, period: {}
 | --- | --- | --- |
 | `resonator` | `ch`、`ro_ch` | 單 tone generator 與 ADC。 |
 | `qubit/fluxonium`、`qubit/transmon` | `ch`、`lo_flux_ch` | Drive generator 與 local flux channel，由 `QubitBaseSchema` 宣告。 |
-| `group/mux` | `gen_ch`、`ro_ch` 列表 | Mux generator 與逐 tone ADC，`ro_ch[i]` 對應 `resonators[i]`，長度必須相同。 |
+| `group/mux` | 選填 `gen_ch`、`ro_ch` 列表 | Mux generator 與逐 tone ADC。提供 `ro_ch` 列表時，`ro_ch[i]` 對應 `resonators[i]`，兩個列表必須等長。 |
 | `amplifier/jpa`、`device/current_source` | 無 | 表單從元件的 flux_dev／rf_source 推導裝置名稱，再使用選定的已連線 driver，不讀 component channel。 |
 
-Mux wiring 不從各 resonator 的單 tone wiring 推導。FTF 的 R1／R2 使用 pulse ADC0，MG12 則使用 mux ADC1／ADC2。
+Mux 讀出用 group 的 wiring，單 tone pulse 讀出用各 resonator 的 wiring。Mux 通道不從 pulse 通道推導。FTF 的 MG12 與 R1／R2 通道值見 [FTF 模擬環境〈建立 entry 與啟動〉](../simulation_envs/FTF/README.md#建立-entry-與啟動)。
 
-Mux generator 未知時可省略 `gen_ch` 或填 null，但 group 必須提供 wiring 與等長的 `ro_ch` 列表。未宣告的 wiring 輸入沿既有規則移到 `ext.migrated`，不會成為有效通道。設計依據見 [ADR-0072](../../docs/adr/0072-module-boundaries.md#使用者元件與模擬環境的放置)。
+Group 必須提供 `wiring`。依 [`MuxWiringSchema`](mux.py)，`gen_ch` 與 `ro_ch` 未知時各自可省略或填 `null`，兩者未知可填 `wiring: {}`。缺 ADC wiring 時，從 wiring 產生的各 tone `ro_ch` 初值留空，Run 前須填入。未宣告的 wiring 輸入沿既有規則移到 `ext.migrated`，不會成為有效通道。見 [ADR-0072 的 mux group 契約](../../docs/adr/0072-module-boundaries.md#mux-group-是實驗室的-component-定義)。
 
 ## 角色與引用
 

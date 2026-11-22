@@ -255,7 +255,7 @@ def _draw_metric(
         xs,
         [point.score for point in settings],
         yerr=[point.score_error for point in settings],
-        fmt="o",
+        fmt="o-",
         capsize=3,
         color="C0",
         label="Model error scale",
@@ -264,14 +264,16 @@ def _draw_metric(
         xs,
         [point.qnd for point in settings],
         yerr=[point.qnd_error for point in settings],
-        fmt="o",
+        fmt="o-",
         capsize=3,
         color="C0",
         label="Model error scale",
     )
-    ax_m.plot(xs, [point.mist for point in settings], "o", label="Correlation growth M")
     ax_m.plot(
-        xs, [abs(point.correlation) for point in settings], "s", label="First-pair |ρ|"
+        xs, [point.mist for point in settings], "o-", label="Correlation growth M"
+    )
+    ax_m.plot(
+        xs, [abs(point.correlation) for point in settings], "s-", label="First-pair |ρ|"
     )
     for ax in axes:
         ax.axvline(best.setting, color="C3", ls="--")

@@ -9,7 +9,7 @@ def test_receiver_background_roundtrips_optional_line_structure():
     values = {
         "ro_ch": 0,
         "gain": 1.0,
-        "noise_psd_adc2_ns": ((0.0, 0.0), (0.0, 0.0)),
+        "noise_psd_adc2_ns": 0.0,
         "background": {
             "ripple_period_mhz": 1000.0,
             "pivot_ghz": 0.0,
@@ -31,7 +31,7 @@ def test_receiver_background_defaults_disable_ripple_and_slope():
         "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
         "ro_ch": 0,
         "gain": 1.0,
-        "noise_psd_adc2_ns": ((0.0, 0.0), (0.0, 0.0)),
+        "noise_psd_adc2_ns": 0.0,
     }
     receiver = Receiver.model_validate(values)
     assert receiver.background.ripple_depth == 0.0
@@ -143,7 +143,7 @@ def test_receiver_schema_names_invalid_optional_background_fields(background, fi
             {
                 "ro_ch": 0,
                 "gain": 1.0,
-                "noise_psd_adc2_ns": ((0.0, 0.0), (0.0, 0.0)),
+                "noise_psd_adc2_ns": 0.0,
                 "background": {
                     "ripple_period_mhz": 1000.0,
                     "pivot_ghz": 0.0,
@@ -164,7 +164,7 @@ def test_receiver_schema_rejects_out_of_range_background_depth(depth):
             {
                 "ro_ch": 0,
                 "gain": 1.0,
-                "noise_psd_adc2_ns": ((0.0, 0.0), (0.0, 0.0)),
+                "noise_psd_adc2_ns": 0.0,
                 "background": {
                     "ripple_period_mhz": 1000.0,
                     "pivot_ghz": 0.0,

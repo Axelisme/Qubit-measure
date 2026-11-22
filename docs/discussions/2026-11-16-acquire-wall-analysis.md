@@ -77,3 +77,5 @@ family 統計沿用公開診斷的 CPU 與成本語意。
 公開行為測試放在 [analyzer tests](../../tests/tools/test_analyze_routing_telemetry.py)，
 從同 process 的 `main(argv)` 讀合成 JSONL，核對輸出與壞行警告。
 原始工作裁決未入庫，本篇保留缺值、型別、分組與目錄操作的結論。
+
+後記（2026-11-22）：`complete=false` 的列改將未走到的階段寫為 `null`；正常返回未進入的階段及實測零仍寫 `0.0`。見[舊實測數字當現況](2026-11-22-stale-measured-numbers.md)。
