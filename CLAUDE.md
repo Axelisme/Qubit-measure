@@ -119,7 +119,7 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 
 `/tmp` 是 RAM-backed tmpfs，不讓平行 lanes 共用具名路徑。
 
-`.agent_state/` 最上層只有 `plans`、`maps`、`archives`、`worktrees`、`backlog`、`measurement-tasks`、`ratchet`、`benchmark` 與 `quality`，不放散檔，也不放沒有主人的 scratch。調查與研究的產出放在提出問題的 task 或 map 的 scratch；要留存的寫成討論紀錄。每個 worktree 有主人與移除時機：票的 lane 在收票或放棄時、integration 在落地後、spike 在報告被接受時、小修改在合併後。移除包含 worktree、分支與空掉的上層目錄。保留下來的證據以能重新核對結論為準，原始大檔在 task 封存時刪除。
+`.agent_state/` 最上層只有 `plans`、`maps`、`archives`、`worktrees`、`backlog`、`measurement-tasks`、`ratchet`、`benchmark` 與 `quality`，不放散檔，也不放沒有主人的 scratch。調查與研究的產出放在提出問題的 task 或 map 的 scratch；要留存的寫成討論紀錄。每個 worktree 有主人與移除時機：票的 lane 在收票或放棄時、integration 在落地後、spike 在報告被接受時、小修改在合併後。移除包含 worktree、分支、設定 `PYTHONPYCACHEPREFIX` 時其下對應該 worktree 絕對路徑的 bytecode 目錄，與空掉的上層目錄。保留下來的證據以能重新核對結論為準，原始大檔在 task 封存時刪除。
 
 ### 5. 完成前驗證
 

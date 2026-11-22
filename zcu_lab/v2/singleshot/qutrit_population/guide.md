@@ -65,11 +65,13 @@ Training confusion includes preparation contamination, so correction reports pre
 
 ## Quality and failure conditions
 
-For the short-reference integer-fluxonium setting, inspect minimum pooled Mahalanobis separation >=2, macro preparation-label error <=3%, each label error <=6%, training confusion 2-norm condition <=1.5 and minimum singular value >=0.8.
+**Minimum centroid separation (shared σ)** is the closest pair of training centroids' IQ distance divided by one common noise width. The width is the square root of the mean I and Q variances after pooling the within-label training variances.
+For the short-reference integer-fluxonium setting, inspect macro preparation-label error <=3%, each label error <=6%, training confusion 2-norm condition <=1.5 and minimum singular value >=0.8.
+The earlier separation threshold used a different distance metric and does not establish a cutoff for this score.
 These thresholds characterize this synthetic reference setting, not strong STIRAP/Raman drives or hardware.
 An independent fixed-seed acquisition is needed to validate a selected readout configuration.
 
-Analysis rejects nonfinite/partial IQ, fewer than six shots per row, invalid labels, indistinguishable centers, singular pooled IQ covariance or singular confusion.
+Analysis rejects nonfinite/partial IQ, fewer than six shots per row, invalid labels, indistinguishable centers, zero or nonfinite shared σ, or singular confusion.
 It never substitutes simulator populations, a density matrix or replay truth.
 Poor separation or high label error requires checking spectroscopy, pulse calibrations and receiver settings before interpreting correction.
 A small matrix condition number alone does not establish state purity.
