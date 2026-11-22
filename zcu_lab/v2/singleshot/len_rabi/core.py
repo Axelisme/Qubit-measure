@@ -31,7 +31,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.singleshot.util import (
     rabi_preview_classifier,
     raw_shots_to_signal,
@@ -374,7 +374,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             progress = figure.suptitle(
                 "Single-shot length Rabi · qubit · classified populations"
             )
-            viewer = live_line(ax, num_lines=3)
+            viewer = live_errorbar(ax, num_lines=3)
             for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
             ax.legend()
@@ -390,12 +390,20 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             if viewer is None or classifier is None or classifier.radius is None:
                 return ()
             acquired_rows = np.all(np.isfinite(raw_iq), axis=1)
-            populations = classify_rabi_iq(
+            masks = classify_result(
                 raw_iq, classifier.g_center, classifier.e_center, classifier.radius
             )
-            populations[~acquired_rows] = np.nan
+            counts = np.stack([mask.sum(axis=1) for mask in masks], axis=1).astype(
+                np.float64
+            )
+            counts[~acquired_rows] = np.nan
+            populations = counts[:, :2] / raw_iq.shape[1]
             other = 1.0 - populations.sum(axis=1)
-            artists = viewer.set(lengths, np.column_stack((populations, other)).T)
+            covariance = class_probability_covariance(counts)
+            sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
+            artists = viewer.set(
+                lengths, np.column_stack((populations, other)).T, sem.T
+            )
             if progress is None:
                 return artists
             progress.set_text(

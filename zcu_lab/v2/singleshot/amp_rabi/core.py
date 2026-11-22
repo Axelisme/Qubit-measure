@@ -31,7 +31,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.singleshot.util import (
     rabi_preview_classifier,
     raw_shots_to_signal,
@@ -410,20 +410,15 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             progress = figure.suptitle(
                 "Single-shot amplitude Rabi · qubit · classified populations"
             )
-            viewer = live_line(ax, num_lines=3)
-            for line, kwargs in zip(
+            viewer = live_errorbar(ax, num_lines=3)
+            for line, bars, (label, color) in zip(
                 ax.lines,
-                [
-                    {"label": label, "color": color}
-                    for label, color in (
-                        ("P(g)", "blue"),
-                        ("P(e)", "red"),
-                        ("P(other)", "green"),
-                    )
-                ],
+                ax.collections,
+                (("P(g)", "blue"), ("P(e)", "red"), ("P(other)", "green")),
                 strict=True,
             ):
-                line.set(**kwargs)
+                line.set(label=label, color=color)
+                bars.set_color(color)
             ax.legend()
             figure.show()
 
@@ -438,22 +433,30 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 return ()
             shots = _flatten_round_shots(raw)
             complete = np.all(np.isfinite(shots), axis=0)
+            n_shots = int(np.count_nonzero(complete))
             populations = np.full((gains.size, 2), np.nan)
-            if np.any(complete):
-                populations = classify_rabi_iq(
+            counts = np.full((gains.size, 3), np.nan)
+            if n_shots:
+                masks = classify_result(
                     shots[:, complete],
                     classifier.g_center,
                     classifier.e_center,
                     classifier.radius,
                 )
+                counts = np.stack([mask.sum(axis=1) for mask in masks], axis=1)
+                populations = counts[:, :2] / n_shots
+            covariance = class_probability_covariance(counts)
+            sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
             artists = viewer.set(
-                gains, np.column_stack((populations, 1 - populations.sum(axis=1))).T
+                gains,
+                np.column_stack((populations, 1 - populations.sum(axis=1))).T,
+                sem.T,
             )
             if progress is None:
                 return artists
             progress.set_text(
                 "Single-shot amplitude Rabi · qubit · classified populations\n"
-                f"Accumulated shots per gain: {np.count_nonzero(complete)} count"
+                f"Accumulated shots per gain: {n_shots} count"
             )
             return (progress, *artists)
 

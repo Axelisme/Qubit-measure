@@ -45,6 +45,8 @@ Run 'singleshot/ge', apply Primary and Post to the readout module, then choose D
 
 ## Reading the figures
 
+Run shows raw class probabilities. Each bar is one shot SEM from the counts retained at that point. Fewer than two retained shots give no bar.
+
 Compare g-prepared and e-prepared traces and their fitted curves in Analyze. If neither approaches a plateau, increase the Delay stop to several times the provisional T1 and preserve enough early points to resolve the initial slope. Compare reduced χ² with the residuals visible in the plot; it measures residual size relative to the model's assumed errors and does not itself establish the validity of the rate model.
 
 Bars are shot SEM from retained class counts for each preparation and delay. Saved readout correction, when available, propagates their covariance. Fit uncertainty in the reported time constants is separate from those bars.

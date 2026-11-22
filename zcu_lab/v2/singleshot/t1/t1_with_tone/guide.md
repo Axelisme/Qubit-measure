@@ -44,6 +44,8 @@ Run singleshot/ge Primary and Post, then Apply to the selected readout module. U
 
 ## Reading the figures
 
+Run shows raw class probabilities. Each bar is one shot SEM from the counts retained at that point. Fewer than two retained shots give no bar.
+
 Compare both preparations against the dual-transition-rate fit. If the populations are still changing at the longest exposure, extend the Delay stop to several times the provisional T1. A reduced χ² far from one warrants checking model residuals and the noise assumptions before using the fitted T1. The data bars are shot SEM from retained counts per preparation and exposure. When readout correction is available, Analyze propagates the covariance through that correction.
 
 **Last updated:** 2026-11-22
