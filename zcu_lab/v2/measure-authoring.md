@@ -573,6 +573,14 @@ Open／Reset 從固定 capture 產生可覆寫的初值。具 Eval 能力的 lea
 [`support/measure/`](support/measure/README.md) 的具名 helper 擁有。
 Form 明確選擇倍率或場景並組結構，不把校準政策放進 generic framework。
 
+### 頻率掃描窗
+
+[`QubitBaseSchema.kappa`](../components/qubit.py) 保存 qubit 躍遷的校準線寬（MHz），不是掃描窗的寬度。以 [`twotone/freq` 的 Form](twotone/freq/form.py) 為例，`Range.around` 以 `$qubit.freq` 為中心，用 `$qubit.kappa` 推出半寬。倍率與點數由該 Form 定義。起訖值可在表單編輯；缺線寬時可直接填有依據的起訖值，不必把掃描窗寫成 `kappa`。
+
+實驗可以用專用初值。[Single-tone reset 頻掃的 Form](twotone/reset/single_tone/freq/form.py) 用 `$qubit.ext.reset_f` 和 `$qubit.ext.reset_fwhm` 決定掃描窗。`reset_fwhm` 是 reset 側帶的半高全寬，不是 qubit 躍遷的 `kappa`。
+
+[牆鐘工具](../../tools/experiment_wall_time.py) 在 Open 建好表單後，以 `form.write(case.overrides)` 套用該 adapter 的[案例覆寫](../../tools/data/experiment_wall_time/overrides.json)，再驗證表單並決定是否送出 Run。例如 `twotone/freq` 覆寫 `freq.start` 和 `freq.stop`，用 Q1 在該 fixture 的功率展寬（power-broadened）頻譜選掃描窗。覆寫只改該案例的表單，不補來源資料，也不把功率展寬的線寬當成 `kappa` 校準值。
+
 ### T1 與等待
 
 T1 有效值是非 bool 的有限正實數。Leaf 缺失／null 或沒有 capture 時，
