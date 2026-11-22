@@ -4,13 +4,13 @@
 
 ## Parameter sources
 
-Uses the resonator and jpa (`amplifier/jpa`) aliases. Bounds use `$resonator.freq`, `$resonator.kappa` and `$jpa.flux`. Opening or resetting the form reads the required JPA flux device from `$jpa.flux_dev`; a missing source leaves it empty and marks the form Invalid. The direct device name remains editable. `flux_unit` starts as A, and the device receives the entered values unchanged. The qubit alias supplies an optional reset module.
+Uses the resonator and jpa (`amplifier/jpa`) aliases. Bounds use `$resonator.freq`, `$resonator.kappa` and `$jpa.flux`. Opening the tab or choosing Defaults reads the required JPA flux device from `$jpa.flux_dev`; a missing source leaves it empty and marks the form Invalid. The direct device name remains editable. `flux_unit` starts as A, and the device receives the entered values unchanged. The qubit alias supplies an optional reset module.
 
 The JPA flux axis and saved values use device-native `a.u.` without scaling. This label does not assert a physical current or voltage unit; review the selected device and `flux_unit` separately.
 
 ## Module slots
 
-Readout starts from the readout template. Its pulse uses `$resonator.freq` and `$resonator.wiring.ch`; acquisition uses `$resonator.freq`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 us. The sweep sets both frequencies during the run. You can also select a saved readout module. Optional reset uses `$qubit.module.reset`; an empty slot disables reset.
+Readout starts from the readout template. Its pulse uses `$resonator.freq` and `$resonator.wiring.ch`; acquisition uses `$resonator.freq`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs. The sweep sets both frequencies during the run. You can also select a saved readout module. Optional reset uses `$qubit.module.reset`; an empty slot disables reset.
 
 ## Typical writeback
 

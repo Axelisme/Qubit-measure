@@ -55,6 +55,7 @@ class MainWindowEventHost(Protocol):
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None: ...
     def clear_tab_plot(self, tab_id: str) -> None: ...
+    def clear_tab_run_preview(self, tab_id: str) -> None: ...
 
     def refresh_tab_interaction(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -76,6 +77,7 @@ class _TabReaction(Enum):
     POST_FIGURE = auto()
     INTERACTION = auto()
     CLEAR_PLOT = auto()
+    CLEAR_FAILED_RUN_PREVIEW = auto()
 
 
 _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
@@ -246,8 +248,19 @@ class MainWindowEventCoordinator:
 
     def _on_run_finished(self, payload: RunFinishedPayload) -> None:
         """Refresh terminal state without changing the user's selected pane."""
-        self._react_to_tab(payload.tab_id, (_TabReaction.INTERACTION,))
+        reactions = (_TabReaction.INTERACTION,)
+        if payload.outcome == "failed":
+            reactions = (_TabReaction.CLEAR_FAILED_RUN_PREVIEW, *reactions)
+        self._react_to_tab(payload.tab_id, reactions)
         self._host.refresh_run_lock(self._ctrl.tab_control.get_running_tab_id())
+
+    def _clear_failed_run_preview(self, tab_id: str, snapshot: TabSnapshot) -> None:
+        interaction = snapshot.interaction
+        assert interaction is not None
+        # A delayed terminal notification may follow a new Run's start.
+        # A ledger failure can also leave a published, saveable Run.
+        if not interaction.is_running and not interaction.has_run_result:
+            self._host.clear_tab_run_preview(tab_id)
 
     def _on_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
@@ -294,6 +307,9 @@ class MainWindowEventCoordinator:
                 tab_id, snapshot
             ),
             _TabReaction.CLEAR_PLOT: lambda: self._host.clear_tab_plot(tab_id),
+            _TabReaction.CLEAR_FAILED_RUN_PREVIEW: lambda: (
+                self._clear_failed_run_preview(tab_id, snapshot)
+            ),
         }
         for reaction in reactions:
             actions[reaction]()

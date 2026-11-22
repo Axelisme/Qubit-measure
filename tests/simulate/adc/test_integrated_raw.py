@@ -1,12 +1,14 @@
 """Deferred ADC shots: physical paths, independent means and QICK layouts."""
 
 from dataclasses import replace
+from threading import Event
 
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose, assert_array_equal
 from zcu_tools.simulate import adc
 from zcu_tools.simulate.boundary import SamplingIdentity
+from zcu_tools.simulate.evolution import Cancelled
 
 
 def model(rates=None, *, receiver=None):
@@ -234,10 +236,93 @@ def test_deferred_raw_does_not_change_statistics_stream_or_retain_noisy_results(
     after = sampler.draw(**arguments)
     assert_array_equal(before.state_counts, after.state_counts)
     assert_array_equal(before.channels[0].sums, after.channels[0].sums)
-    assert_array_equal(prepared.bind(after.raw_identity).materialize(13, 0)[0], first)
+    source = prepared.bind(after.raw_identity)
+    assert (
+        source.materialize_cancellable(13, 0, cancel=Event())[0].tobytes()
+        == first.tobytes()
+    )
     assert not np.array_equal(
         prepared.bind(SamplingIdentity(13)).materialize(13, 0)[0], first
     )
+
+
+@pytest.mark.parametrize("stop_at", ["entry", "during-event"])
+def test_raw_stop_does_not_observe_later_events(stop_at):
+    cancel = Event()
+
+    def first_envelope(_ns):
+        if stop_at == "entry":
+            pytest.fail("pre-cancelled raw must not evaluate the first envelope")
+        cancel.set()
+        return 1.0 + 0j
+
+    def later_envelope(_ns):
+        pytest.fail("interrupted raw must not evaluate a later event's envelope")
+
+    content = batch(model())
+    (event,) = content.events[0]
+    (pulse,) = event.pulses
+    events = tuple(
+        replace(event, pulses=(replace(pulse, envelope=envelope),))
+        for envelope in (first_envelope, later_envelope)
+    )
+    content = replace(content, events=(events,))
+    p = np.array([[1.0, 0.0, 0.0]])
+    prepared = adc.PreparedRawShots(
+        adc.ProjectionReadout(np.ones(1), (p, p)), {0: content}, reps=1
+    )
+    source = prepared.bind(SamplingIdentity(1))
+    if stop_at == "entry":
+        cancel.set()
+    with pytest.raises(Cancelled):
+        source.materialize_cancellable(1, 0, cancel=cancel)
+    assert cancel.is_set()
+
+
+def test_raw_stop_at_receiver_only_group_prevents_later_path_sampling():
+    class StopDuringFirstGroup:
+        def __init__(self):
+            self.checkpoints = iter(("entry", "event"))
+
+        def is_set(self):
+            # Entry and the logical event precede point groups. Stop becomes
+            # pending after entering the event, before leaving its first group.
+            return next(self.checkpoints, None) is None
+
+    # Only the second group has a physical path. Its rate makes the first
+    # transition shorter than the floating-point resolution at pulse start.
+    content = batch(model(np.array([[0, 0, 0], [1e24, 0, 0], [0, 0, 0]])))
+    (event,) = content.events[0]
+    content = replace(
+        content,
+        events=((replace(event, pulses=()),), (event,)),
+        content_index=np.array([0, 1], dtype=np.int64),
+    )
+    source = prepare(np.array([[1.0, 0, 0], [1.0, 0, 0]]), {0: content}, reps=1).bind(
+        SamplingIdentity(1)
+    )
+
+    with pytest.raises(ValueError, match="transition times.*resolution"):
+        source.materialize(1, 0)
+    with pytest.raises(Cancelled):
+        source.materialize_cancellable(1, 0, cancel=StopDuringFirstGroup())
+
+
+def test_raw_stop_before_empty_delivery_returns_no_arrays():
+    class StopAfterEntry:
+        def __init__(self):
+            self.requested = False
+
+        def is_set(self):
+            requested = self.requested
+            self.requested = True
+            return requested
+
+    source = prepare(np.array([1.0, 0, 0]), {0: batch(model())}, reps=0).bind(
+        SamplingIdentity(3)
+    )
+    with pytest.raises(Cancelled):
+        source.materialize_cancellable(0, 0, cancel=StopAfterEntry())
 
 
 @pytest.mark.parametrize(

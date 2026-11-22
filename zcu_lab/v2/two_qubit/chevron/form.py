@@ -10,21 +10,24 @@ from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
 )
 
-from .._measure import captured_roles
+from .._measure import TwoQubitForm, captured_qubits
 from .core import ChevronCfg
 
 
 def make_form(ctx: FormContext) -> Form[ChevronCfg]:
-    """Capture roles and pulses; scan endpoints require operator input.
+    """Seed the chevron from GUI aliases $qubit1, $qubit2, $mux and $coupler.
 
-    Existing CZ slots are editable source pairs, not certified gate settings.
-    Missing slots offer explicit cosine templates on captured role wiring.
-    Missing or linear role-tone classifiers, or missing radii, stay Invalid. Run GE Post first. Open/Reset never performs acquisition.
+    Missing or inconsistent bindings raise ValueError on Open/Reset. Notebook
+    bindings of the same names are separate. Tone indices are hidden. Copy
+    the coupler's cz_qubit1/cz_qubit2 slots when present, otherwise offer
+    cosine templates on captured qubit wiring. Scan endpoints and missing
+    calibration must be supplied before Run.
     """
-    roles = captured_roles(ctx)
+    qubits = captured_qubits(ctx, require_coupler=True)
     drive = {}
-    for role in ("f1", "f2"):
-        slot = f"$coupler.module.cz_{role}"
+    for position in ("qubit1", "qubit2"):
+        # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
+        slot = f"$coupler.module.cz_{position}"
         # Run replaces both line frequencies with the common scan coordinate.
         node = source(
             ctx,
@@ -32,7 +35,7 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
             Template(
                 "pulse:blank",
                 set={
-                    "ch": Expr(f"${role}.wiring.ch"),
+                    "ch": Expr(f"${position}.wiring.ch"),
                     "nqz": None,
                     "freq": Hidden(0.0),
                     "gain": None,
@@ -43,18 +46,20 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
         )
         if isinstance(node, Slot):
             node = replace(node, copy=True, set={"freq": Hidden(0.0)})
-        drive[role] = node
+        drive[position] = node
     readout = mux_readout_initial(ctx)
-    return Form(
+    return TwoQubitForm(
         ChevronCfg,
+        readout_of=lambda cfg: cfg.readout,
         tree={
             "reps": 1000,
             "rounds": 10,
             "relax_delay": 1.0,
-            "roles": roles,
+            "qubit1_tone": Hidden(qubits.qubit1_tone),
+            "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
-            "x180_f1": Slot("$f1.module.x180", copy=True),
-            "x180_f2": Slot("$f2.module.x180", copy=True),
+            "x180_qubit1": Slot("$qubit1.module.x180", copy=True),
+            "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
             "readout": readout,
             "drive": drive,
             "frequency": Range(None, None, expts=25),

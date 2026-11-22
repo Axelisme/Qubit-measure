@@ -51,7 +51,7 @@ from zcu_lab.v2.twotone.ro_optimize._rpi_common import (
 )
 
 LENGTH_AXIS = SweepAxis(
-    setting_name="window", label="ADC window (us)", unit="us", digits=5
+    setting_name="window", label="ADC window (µs)", unit="µs", digits=5
 )
 
 
@@ -120,7 +120,7 @@ class RPiLengthCfg(ConfigBase):
         SweepCfg,
         FieldMeta(
             label="ADC window",
-            unit="us",
+            unit="µs",
             description="ADC window sweep.",
         ),
     ]
@@ -136,6 +136,7 @@ class RPiLengthCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
+            unit="count",
             description="Cycles of 64 R-π pairs in each round.",
         ),
     ] = Field(ge=1)
@@ -143,6 +144,7 @@ class RPiLengthCfg(ConfigBase):
         int,
         FieldMeta(
             label="Rounds",
+            unit="count",
             description="Software rounds, each followed by a live update.",
         ),
     ] = Field(default=1, ge=1)

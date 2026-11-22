@@ -82,8 +82,8 @@ def make_form(ctx: FormContext) -> Form[TwotoneFluxLocalCfg]:
     for field, description in (
         ("reps", "Fixed 1000 repetitions per round candidate"),
         ("rounds", "Fixed 10 software rounds candidate"),
-        ("relax_delay", "Fixed 1.0 us recovery delay candidate"),
-        ("initial_delay", "Fixed 1.0 us initial delay candidate"),
+        ("relax_delay", "Fixed 1.0 µs recovery delay candidate"),
+        ("initial_delay", "Fixed 1.0 µs initial delay candidate"),
         ("settle", "Fixed 0.1 s DC settling candidate; confirm for each driver"),
         ("expts", "Shared 301-point hardware frequency scan candidate"),
         ("flux_expts", "Shared 101-point zipped local DC scan candidate"),
@@ -91,7 +91,7 @@ def make_form(ctx: FormContext) -> Form[TwotoneFluxLocalCfg]:
         metadata[(field,)] = seed_metadata(description, fallback=True)
     for index, name in enumerate(names):
         metadata[("tones", index, "drive")] = seed_metadata(
-            f"qub_probe template bound to {name}; gain 0.1 and length 1.0 us candidates",
+            f"qub_probe template bound to {name}; gain 0.1 and length 1.0 µs candidates",
             fallback=True,
         )
         metadata[("tones", index, "flux_dev")] = FieldMeta(

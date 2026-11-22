@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from textwrap import fill
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from matplotlib.lines import Line2D
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.fitting import FitQuality
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -35,26 +37,29 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
-from .._drive import DualLineCfg
-from .._readout import JointRoles, MuxResetCfg
+from .._drive import QubitDriveCfg
+from .._rabi_analysis import cosine
+from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
 from .._sums import (
     joint_probabilities,
-    validate_classifiers,
+    validate_qubit_tones,
 )
 from .fit import CZReturnFit, fit_return
 
-OUTCOME_LABELS = tuple(
-    f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
-)
+_X_LABEL = "Common CZ gain multiplier (a.u.)"
+_RETURN_LABEL = "P(g,g) after double Xπ"
+_TITLE = "CZ amplitude · Qubit1 / Qubit2"
+_OUTCOMES = ("g", "e", "other")
+_OUTCOME_COLORS = (("C0", "C1", "C4"), ("C2", "C3", "C5"), ("C6", "C7", "C8"))
 
 
 @dataclass(frozen=True)
 class CZAmplitudeResult:
     """scales is the gain multiplier; sums is float64 (Ns,3,3) raw counts.
 
-    Class axes are terminal F1/F2, each ordered g/e/other. Rounds add without
+    Class axes are terminal Qubit1/Qubit2, each ordered g/e/other. Rounds add without
     averaging. Unmeasured scales remain NaN; completed rounds survive stop.
     """
 
@@ -64,7 +69,7 @@ class CZAmplitudeResult:
 
 @dataclass(frozen=True)
 class CZReturnData:
-    """counts/probabilities are (Ns,3,3), F1/F2 classes ordered g/e/other.
+    """counts/probabilities are (Ns,3,3), Qubit1/Qubit2 classes ordered g/e/other.
 
     complete marks scales with finite, positive counts from completed rounds.
     acquired_shots and analyzed_shots are the saved terminal totals, including
@@ -115,10 +120,10 @@ class CZAmplitudeAnalysis:
 class CZAmplitudeCfg(ConfigBase):
     """Optional reset → B11 → simultaneous CZ → Xπ⊗Xπ → terminal mux.
 
-    roles fixes captured identities and original full-mux tone positions.
+    The two tone indices address positions in the full mux readout.
     drive uses MHz, µs, degrees and signed gains. scale is a finite, increasing
     nonnegative common gain multiplier; phase, waveform and gain ratio stay fixed.
-    F1/F2 need circle classifiers with radius from GE Post. reps is shots per
+    Qubit1/Qubit2 need circle classifiers with radius from GE Post. reps is shots per
     round; rounds accumulate counts at acquisition. reset=None emits no reset.
     No bias device, confusion inversion or pure-state assumption is used.
     """
@@ -126,66 +131,90 @@ class CZAmplitudeCfg(ConfigBase):
     reset: Annotated[
         MuxResetCfg | None,
         FieldMeta(
-            label="Reset", description="Optional reset at the start of every shot."
+            label="Reset",
+            description="Optionally prepare or herald the initial state before the two Xπ pulses. Leave unset to omit reset.",
         ),
     ] = None
-    x180_f1: Annotated[
+    x180_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F1 Xπ",
-            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit1 Xπ",
+            description="Calibrated Qubit1 Xπ pulse for preparation and contrast. Enter the RF carrier, signed gain and envelope duration.",
         ),
     ]
-    x180_f2: Annotated[
+    x180_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F2 Xπ",
-            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit2 Xπ",
+            description="Calibrated Qubit2 Xπ pulse for preparation and contrast. Enter the RF carrier, signed gain and envelope duration.",
         ),
     ]
     drive: Annotated[
-        DualLineCfg,
+        QubitDriveCfg,
         FieldMeta(
-            label="Dual-line drive",
-            description="F1/F2 charge-line CZ pulses from the calibrated coupler slots.",
+            label="Two-line CZ drive",
+            description="Simultaneous CZ pulses on the two qubit charge lines. Multiply their signed source gains by the common sweep multiplier; keep their relative phase fixed.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full-group mux readout with calibrated frequencies, gains and timing.",
+            description="Full-group mux readout with calibrated frequencies, gains and timing. "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
-    roles: JointRoles
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based Qubit1 position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based Qubit2 position in the full mux readout.",
+        ),
+    ]
     scale: Annotated[
         SweepCfg,
         FieldMeta(
-            label="Gain scale",
-            unit="dimensionless",
-            description="Common gain-scale sweep for the selected CZ pulse.",
+            label="Common CZ gain multiplier",
+            unit="a.u.",
+            description="Multiply both signed CZ gains by each value; 0 omits drive and 1 uses the source gains. Include 0 and scan through the first positive return.",
         ),
     ]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Shots attempted per gain point in each round, before any herald selection.",
+        ),
     ] = Field(gt=0)
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of complete gain sweeps whose class counts are added.",
+        ),
     ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
             label="Initial delay",
-            unit="us",
+            unit="µs",
             description="Delay before the first repetition.",
         ),
     ] = 1.0
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
-            unit="us",
+            label="Relaxation delay",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -194,9 +223,14 @@ class CZAmplitudeCfg(ConfigBase):
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Reject tone/line mismatches and invalid or degenerate gain axes before I/O."""
-        validate_classifiers(self.readout, self.roles)
-        if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
-            raise ValueError("Each CZ line must use its role's calibrated Xπ generator")
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
+        if (
+            self.drive.qubit1.ch != self.x180_qubit1.ch
+            or self.drive.qubit2.ch != self.x180_qubit2.ch
+        ):
+            raise ValueError(
+                "Each CZ line must use its qubit's calibrated Xπ generator"
+            )
         scales = sweep2array(self.scale)
         if len(scales) < 2 or np.any(scales < 0) or np.any(np.diff(scales) <= 0):
             raise ValueError(
@@ -276,8 +310,12 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                        VariableAxisSpec.generated_arange(
+                            label="terminal_qubit2", unit=""
+                        ),
+                        VariableAxisSpec.generated_arange(
+                            label="terminal_qubit1", unit=""
+                        ),
                         VariableAxisSpec(
                             label="Common gain scale", unit="", field_name="scales"
                         ),
@@ -292,7 +330,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             ),
             result_type=CZAmplitudeResult,
             cfg_type=CZAmplitudeCfg,
-            cfg_schema_version="5.0",
+            cfg_schema_version="6.0",
             tag="two_qubit/cz_amplitude",
             result_builder=restore_result,
         )
@@ -310,15 +348,32 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         scales = sweep2array(config.scale)
         # 2. Track joint gg return after the nominal B11 preparation and double-Xpi contrast.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Common gain scale", ylabel="Terminal P(g,g)")
-        viewer = live_line(ax)
+        ax.set(
+            xlabel=_X_LABEL,
+            ylabel=_RETURN_LABEL,
+            title=f"{_TITLE}\nWaiting for retained shots",
+        )
+        viewer = live_errorbar(ax)
+        ax.lines[0].set(linestyle="none")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         fig.show()
 
         @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            counts = sums
-            return viewer.set(scales, joint_probabilities(counts)[..., 0, 0])
+        def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
+            totals = sums.sum(axis=(-2, -1))
+            measured = totals[np.isfinite(totals)]
+            if measured.size:
+                low, high = int(measured.min()), int(measured.max())
+                shots = str(low) if low == high else f"{low}–{high}"
+                ax.set_title(
+                    f"{_TITLE}\n{measured.size}/{scales.size} points · retained shots/point: {shots} count"
+                )
+            covariance = class_probability_covariance(sums.reshape(-1, 9))
+            errors = np.sqrt(covariance[:, 0, 0])
+            return (
+                *viewer.set(scales, joint_probabilities(sums)[:, 0, 0], errors),
+                ax.title,
+            )
 
         # 3. Sweep gains in hardware between simultaneous preparation and contrast; sum terminal class counts.
         buffer = SignalBuffer(
@@ -331,32 +386,46 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             relax_delay=config.relax_delay,
         )
         scale = builder.add_sweep("scale", config.scale)
-        drive_f1 = Pulse(
-            "cz_f1", config.drive.f1, gain=float(config.drive.f1.gain) * scale
+        drive_qubit1 = Pulse(
+            "cz_qubit1",
+            config.drive.qubit1,
+            gain=float(config.drive.qubit1.gain) * scale,
         )
-        drive_f2 = Pulse(
-            "cz_f2", config.drive.f2, gain=float(config.drive.f2.gain) * scale
+        drive_qubit2 = Pulse(
+            "cz_qubit2",
+            config.drive.qubit2,
+            gain=float(config.drive.qubit2.gain) * scale,
         )
         readout = MuxReadout("readout", config.readout)
         if config.reset is not None:
             builder.emit(Reset("reset", config.reset, terminal=readout))
-        builder.fork("default", into=["prepare_f1_time", "prepare_f2_time"])
-        builder.emit(Pulse("prepare_f1", config.x180_f1), timeline="prepare_f1_time")
-        builder.emit(Pulse("prepare_f2", config.x180_f2), timeline="prepare_f2_time")
-        builder.join("prepare_f1_time", "prepare_f2_time", into="default")
-        builder.fork("default", into=["drive_f1_time", "drive_f2_time"])
-        builder.emit(drive_f1, timeline="drive_f1_time")
-        builder.emit(drive_f2, timeline="drive_f2_time")
-        builder.join("drive_f1_time", "drive_f2_time", into="default")
-        builder.fork("default", into=["contrast_f1_time", "contrast_f2_time"])
-        builder.emit(Pulse("contrast_f1", config.x180_f1), timeline="contrast_f1_time")
-        builder.emit(Pulse("contrast_f2", config.x180_f2), timeline="contrast_f2_time")
-        builder.join("contrast_f1_time", "contrast_f2_time", into="default")
+        builder.fork("default", into=["prepare_qubit1_time", "prepare_qubit2_time"])
+        builder.emit(
+            Pulse("prepare_qubit1", config.x180_qubit1), timeline="prepare_qubit1_time"
+        )
+        builder.emit(
+            Pulse("prepare_qubit2", config.x180_qubit2), timeline="prepare_qubit2_time"
+        )
+        builder.join("prepare_qubit1_time", "prepare_qubit2_time", into="default")
+        builder.fork("default", into=["drive_qubit1_time", "drive_qubit2_time"])
+        builder.emit(drive_qubit1, timeline="drive_qubit1_time")
+        builder.emit(drive_qubit2, timeline="drive_qubit2_time")
+        builder.join("drive_qubit1_time", "drive_qubit2_time", into="default")
+        builder.fork("default", into=["contrast_qubit1_time", "contrast_qubit2_time"])
+        builder.emit(
+            Pulse("contrast_qubit1", config.x180_qubit1),
+            timeline="contrast_qubit1_time",
+        )
+        builder.emit(
+            Pulse("contrast_qubit2", config.x180_qubit2),
+            timeline="contrast_qubit2_time",
+        )
+        builder.join("contrast_qubit1_time", "contrast_qubit2_time", into="default")
         builder.emit(readout, tag="terminal")
         prog = builder.build()
         axes = [
-            Classify("terminal", config.roles.f1_tone),
-            Classify("terminal", config.roles.f2_tone),
+            Classify("terminal", config.qubit1_tone),
+            Classify("terminal", config.qubit2_tone),
         ]
         with Schedule(buffer, scope=context.scope) as sched:
             sched.run_acquire_summed(
@@ -392,44 +461,98 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             raise ValueError("CZ return scales must match saved cfg")
         terminal = analyze_return(result.scales, result.sums)
 
-        # Show the same return probability as in the live plot before all-class diagnostics.
-        _, ax = plots.subplots(num="terminal_gg", layout="constrained")
-        ax.plot(result.scales, terminal.data.probabilities[..., 0, 0], ".")
-        ax.set(xlabel="Common gain scale", ylabel="Terminal P(g,g)")
-
-        # 2. Compare all terminal populations with the zero-phase return fit; this is not gate fidelity.
-        _, ax = plots.subplots(
-            num="joint_return", figsize=(10, 5), layout="constrained"
-        )
-        for index, label in enumerate(OUTCOME_LABELS):
-            ax.plot(
-                result.scales,
-                terminal.data.probabilities.reshape(-1, 9)[:, index],
-                ".-",
-                label=label,
-            )
-        ax.set(
-            xlabel="Common gain scale",
-            ylabel="Same-shot joint probability",
-            title="B11 → CZ → Xπ⊗Xπ · classified return, not gate fidelity",
-        )
-        if np.any(np.isfinite(terminal.fit.curve)):
-            ax.plot(result.scales, terminal.fit.curve, "k-", label="Zero-phase P00 fit")
-        diagnostic = (
-            terminal.fit.reason
-            or f"First positive return scale = {terminal.fit.scale:.6g} ± {terminal.fit.error:.2g}"
-        )
-        if np.any(terminal.data.analyzed_shots == 0):
-            diagnostic += "\nNo accepted shots at one or more scales"
-        ax.text(
-            0.02,
-            0.02,
-            diagnostic,
-            transform=ax.transAxes,
-            fontsize="small",
-            bbox={"facecolor": "white", "alpha": 0.85},
-        )
-        ax.legend()
-
-        # 3. Keep the first positive return-scale proposal or its coverage/numerical failure diagnostics.
+        _plot_first_return(plots, result.scales, terminal)
+        _plot_joint_outcomes(plots, result.scales, terminal.data)
         return summarize_return(terminal.fit)
+
+
+def _plot_first_return(
+    plots: Plots, scales: NDArray[np.float64], terminal: CZAmplitudeData
+) -> None:
+    """Overlay the existing cosine fit and selected first return on shot SEM points."""
+    fig, ax = plots.subplots(num="terminal_gg", figsize=(7, 4.8), layout="constrained")
+    fit = terminal.fit
+    cov = class_probability_covariance(terminal.data.counts.reshape(-1, 9))
+    ax.errorbar(
+        scales,
+        terminal.data.probabilities[:, 0, 0],
+        yerr=np.sqrt(cov[:, 0, 0]),
+        fmt=".",
+        markersize=5,
+        color="C0",
+        label="Measured ± shot SEM",
+    )
+    finite = np.isfinite(fit.curve)
+    if (
+        fit.period is not None
+        and fit.offset is not None
+        and fit.contrast is not None
+        and finite.any()
+    ):
+        xs = np.linspace(scales[finite][0], scales[finite][-1], 401)
+        ax.plot(
+            xs,
+            cosine(xs, fit.offset, fit.contrast, 1 / fit.period, 0),
+            "k-",
+            label="Fixed-phase cosine fit",
+        )
+    if fit.scale is not None:
+        ax.axvline(fit.scale, color="C3", ls="--", label="Selected first return")
+    if fit.scale is not None and fit.error is not None:
+        diagnostic = f"First positive return = {fit.scale:.5g} ± {fit.error:.2g} a.u."
+    else:
+        diagnostic = fill(f"No return proposal: {fit.reason}", width=52)
+        if fit.period is not None:
+            diagnostic += f"\nFitted period = {fit.period:.5g} a.u."
+    if fit.fit_quality is not None:
+        quality = fit.fit_quality
+        r2, rms = quality.r2, quality.normalized_residual_rms
+        scores = [
+            f"R² = {r2:.3g}" if r2 is not None else "R² unavailable",
+            f"Normalized RMS = {rms:.3g}"
+            if rms is not None
+            else "Normalized RMS unavailable",
+        ]
+        errors = [
+            f"{name} {error:.2%}" if error is not None else f"{name} unavailable"
+            for name, error in quality.relative_parameter_errors.items()
+        ]
+        diagnostic += "\n" + " · ".join(scores)
+        diagnostic += "\nRelative fit SE: " + ", ".join(errors)
+    ax.set(xlabel=_X_LABEL, ylabel=_RETURN_LABEL, title=diagnostic)
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24), ncols=2)
+    fig.suptitle(_TITLE)
+
+
+def _plot_joint_outcomes(
+    plots: Plots, scales: NDArray[np.float64], data: CZReturnData
+) -> None:
+    """Compare classified outcomes grouped by the first qubit at a shared scale."""
+    fig, _ = plots.subplots(
+        num="joint_return",
+        nrows=3,
+        figsize=(7, 8),
+        sharex=True,
+        sharey=True,
+        layout="constrained",
+    )
+    covariance = class_probability_covariance(data.counts.reshape(-1, 9))
+    errors = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1)).reshape(-1, 3, 3)
+    # Shared vertical scale lets the operator compare the same probabilities across panels.
+    for i, ax in enumerate(fig.axes):
+        for j, state in enumerate(_OUTCOMES):
+            ax.errorbar(
+                scales,
+                data.probabilities[:, i, j],
+                yerr=errors[:, i, j],
+                fmt=".",
+                color=_OUTCOME_COLORS[i][j],
+                label=f"P({_OUTCOMES[i]},{state})",
+            )
+        ax.set(ylabel="Joint probability")
+        ax.set_title(f"Qubit1 classified {_OUTCOMES[i]}", pad=28)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1), ncols=3)
+        ax.margins(y=0.12)
+    fig.axes[-1].set_xlabel(_X_LABEL)
+    fig.suptitle(f"{_TITLE}\nTerminal outcomes after double Xπ")

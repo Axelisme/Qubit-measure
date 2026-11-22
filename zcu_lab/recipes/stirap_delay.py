@@ -18,7 +18,7 @@ from zcu_lab.v2.twotone.stirap.delay.core import StirapDelaySummary
 
 
 class StirapDelayInputs(RecipeInputs):
-    """Measured carriers in MHz, signed gains and software lead bounds in us.
+    """Measured carriers in MHz, signed gains and software lead bounds in µs.
 
     Positive lead starts Stokes first. n maps to Form stokes_lead.n and cfg
     stokes_lead.expts. Omitted optional fields keep Form values; null passes to
@@ -30,10 +30,10 @@ class StirapDelayInputs(RecipeInputs):
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     start_us: float = Field(
-        description="First Stokes lead in us; negative starts Pump first."
+        description="First Stokes lead in µs; negative starts Pump first."
     )
     stop_us: float = Field(
-        description="Last Stokes lead in us; positive starts Stokes first."
+        description="Last Stokes lead in µs; positive starts Stokes first."
     )
     n: int = Field(ge=1, description="Lead point count, mapped to cfg expts.")
     pump_freq_mhz: float = Field(gt=0, description="Measured 0–3 Pump carrier in MHz.")
@@ -68,7 +68,7 @@ class StirapDelayInputs(RecipeInputs):
     )
     relax_delay_us: float | None | Keep = Field(
         default=KEEP,
-        description="Inter-shot relaxation in us; omission keeps Form, null goes to owner.",
+        description="Inter-shot relaxation in µs; omission keeps Form, null goes to owner.",
     )
 
 
@@ -81,7 +81,7 @@ class StirapDelayReport(RecipeReport):
     )
     stokes_lead_us: float | None = Field(
         default=None,
-        description="Stokes lead in us at the grid peak; null when unavailable.",
+        description="Stokes lead in µs at the grid peak; null when unavailable.",
     )
 
     condition_number: float | None = Field(
@@ -103,7 +103,7 @@ async def stirap_delay(
 ) -> StirapDelayReport:
     """Play Pump/Stokes at each lead, join, read out, analyze and Save.
 
-    n sets stokes_lead.n, lowered to cfg stokes_lead.expts. Bounds use us,
+    n sets stokes_lead.n, lowered to cfg stokes_lead.expts. Bounds use µs,
     carriers use MHz, gains retain their sign. Pump/Stokes each select gauss,
     cosine, drag or arb. Optional omission retains Form values; explicit null
     goes unchanged to its owner. Overrides are applied last.

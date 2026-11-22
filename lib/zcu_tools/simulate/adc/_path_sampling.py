@@ -8,9 +8,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
+
 from ._integrated_paths import IntegratedPaths
 from ._jump_paths import JumpPaths
 from ._noise import noise_root
+from ._time import adc_to_device_time_ns
 from .model import RealArray
 from .projection import ProjectionChain, ProjectionReadout
 
@@ -24,12 +27,14 @@ def physical_shots(
     rng: np.random.Generator,
     *,
     traces: bool = False,
+    cancel: CancellationQuery | None = None,
 ) -> dict[int, RealArray]:
     """Observe one outcome per shot, with an independent CTMC per read event.
 
     Return owned float64 (points,reps,reads[,samples],IQ) arrays. Within each
     event all ADCs and grids share initial states and paths; noise is independent
     per receiver/read/sample. Traces require equal sample counts per ADC.
+    Raise Cancelled at event or point-group checkpoints if cancel is set.
     """
     readout = prepared.readout
     point_dims = (
@@ -59,6 +64,8 @@ def physical_shots(
     ordered = sorted(range(len(keys)), key=keys.__getitem__)
     offsets = dict.fromkeys((channel for channel, _ in batches), 0)
     for event_index, states in enumerate(_event_states(readout, reps, rng)):
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
         plans = {
             (channel, content): IntegratedPaths(
                 batch.model,
@@ -78,31 +85,35 @@ def physical_shots(
                 for (channel, _), content in zip(batches, key, strict=True)
                 if (channel, content) in plans
             ]
-            if not observers:
-                continue
-            # Receiver-only windows still bound the shared physical event.
-            # Retuning one ADC must not shorten paths or shift receiver-noise draws.
-            end = max(
-                max(observer.end for _, observer in observers),
-                max(
-                    float(grid.times_ns[-1]) - batch.model.receiver.time_of_flight_ns
-                    for (_, batch), content in zip(batches, key, strict=True)
-                    for grid in batch.events[content][event_index].grids
-                ),
-            )
-            paths = JumpPaths(
-                states[points].ravel(),
-                min(observer.start for _, observer in observers),
-                end,
-                batches[0][1].model.rates_per_ns,
-                rng,
-            )
-            for channel, observer in observers:
-                values = np.stack(observer.evaluate(paths, traces=traces), axis=1)
-                offset = offsets[channel]
-                output[channel][points, :, offset : offset + values.shape[1]] = (
-                    values.reshape((len(points), reps, *values.shape[1:]))
+            if observers:
+                # Receiver-only windows still bound the shared physical event.
+                # Retuning one ADC must not shorten paths or shift receiver-noise draws.
+                end = max(
+                    max(observer.end for _, observer in observers),
+                    max(
+                        adc_to_device_time_ns(
+                            float(grid.times_ns[-1]),
+                            time_of_flight_ns=batch.model.receiver.time_of_flight_ns,
+                        )
+                        for (_, batch), content in zip(batches, key, strict=True)
+                        for grid in batch.events[content][event_index].grids
+                    ),
                 )
+                paths = JumpPaths(
+                    states[points].ravel(),
+                    min(observer.start for _, observer in observers),
+                    end,
+                    batches[0][1].model.rates_per_ns,
+                    rng,
+                )
+                for channel, observer in observers:
+                    values = np.stack(observer.evaluate(paths, traces=traces), axis=1)
+                    offset = offsets[channel]
+                    output[channel][points, :, offset : offset + values.shape[1]] = (
+                        values.reshape((len(points), reps, *values.shape[1:]))
+                    )
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
         for channel, batch in batches:
             offsets[channel] += len(batch.events[0][event_index].grids)
     _add_receiver_noise(prepared, output, rng, traces=traces)

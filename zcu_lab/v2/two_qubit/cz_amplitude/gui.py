@@ -55,40 +55,32 @@ def amplitude_writeback(
 
     Only source pulse gains change, multiplied by the same valid fitted scale.
     Preserve generator, waveform, frequency, timing, phases and signed ratio.
-    Missing cfg or an invalid fit returns no items. Nonempty proposals require
-    the Run/Load's capture with matching role identities; absent/mismatched
-    capture raises ValueError. Read no current library calibration, perform
+    Missing Run/Load capture raises ValueError. With a capture, missing cfg
+    or an invalid fit returns no items. Read no current library calibration, perform
     no hardware or persistent writes, and leave source cfg untouched.
     """
-    if cfg is None or fit.scale is None:
-        return []
     if parameters is None:
         raise ValueError("CZ amplitude writeback requires captured parameters")
-    for role, identity in (
-        ("f1", cfg.roles.f1),
-        ("f2", cfg.roles.f2),
-        ("coupler", cfg.roles.coupler),
-        ("mux", cfg.roles.mux),
-    ):
-        if parameters.resolve_path(f"${role}") != identity:
-            raise ValueError(
-                "CZ amplitude writeback capture must match saved source roles"
-            )
+    if cfg is None or fit.scale is None:
+        return []
+    coupler = parameters.resolve_path("$coupler")
     items: list[WritebackItem] = []
-    for role, pulse in (("f1", cfg.drive.f1), ("f2", cfg.drive.f2)):
-        target = f"$coupler.pulses.cz_{role}"
+    for role, pulse in (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2)):
+        # Pulse library keys: $coupler.pulses.cz_qubit1 and $coupler.pulses.cz_qubit2.
+        target = f"{coupler}.pulses.cz_{role}"
         items.append(
             module_writeback(
                 pulse,
                 target=target,
-                description=f"CZ {role.upper()} first-cycle amplitude",
+                description=f"CZ {role.capitalize()} first-cycle amplitude",
                 field_updates=(("gain", float(pulse.gain) * fit.scale),),
             )
         )
         items.append(
             ParameterWriteback(
-                target_name=f"$coupler.module.cz_{role}",
-                description=f"CZ {role.upper()} pulse slot",
+                # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
+                target_name=f"{coupler}.module.cz_{role}",
+                description=f"CZ {role.capitalize()} pulse slot",
                 proposed_value=parameters.library_key(target),
             )
         )
@@ -102,10 +94,19 @@ def run(
     return RunRecord(cfg=cfg, result=CZAmplitudeExp().run(cfg, context=context))
 
 
+def _summary_lines(source: CZAmplitudeRun) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=CZAmplitudeExp.AXES_SPEC,
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
+    analysis=Analysis(
+        fn=_analyze, writeback=_get_writeback_items, summary_lines=_summary_lines
+    ),
 )

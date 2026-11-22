@@ -107,7 +107,7 @@ def _plot_initial_histogram(
         )
         title = "Initial-point projected IQ histogram"
         if effective_t1_us is not None:
-            title += f"\nEffective $T_1$ = {effective_t1_us:.3g} μs"
+            title += f"\nEffective $T_1$ = {effective_t1_us:.3g} µs"
         ax.set_title(title, fontsize=10)
         if (
             classified_distribution is not None
@@ -134,7 +134,7 @@ def _plot_initial_histogram(
             fontsize=10,
         )
     ax.set_xlabel("Pooled PCA projection (a.u.)")
-    ax.set_ylabel("Counts")
+    ax.set_ylabel("Shots (count)")
     ax.legend(fontsize=8, loc="lower left")
     ax.grid(True)
 
@@ -178,19 +178,19 @@ class LenRabiCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
-    shots: Annotated[int, FieldMeta(label="Shots")]
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="µs")]
+    shots: Annotated[int, FieldMeta(label="Shots", unit="count")]
     initial_delay: Annotated[
         float,
         FieldMeta(
-            label="Initial delay", unit="us", description="Delay before the first shot."
+            label="Initial delay", unit="µs", description="Delay before the first shot."
         ),
     ] = 1.0
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Delay after each shot.",
         ),
@@ -257,12 +257,10 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         viewer = None
         if classifier is not None:
             figure, ax = context.plots.subplots(num="measurement")
-            ax.set(xlabel="Length (us)", ylabel="Signal")
+            ax.set(xlabel="Length (µs)", ylabel="P(g), P(e), P(other)")
             viewer = live_line(ax, num_lines=3)
             ax.set_ylim(0.0, 1.0)
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
+            for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
             ax.legend()
             figure.show()
@@ -385,13 +383,13 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             )
         if fit.backend.valid:
             ax.set_title(
-                f"$\\Omega$={fit.omega:.3g} rad/μs, "
+                f"$\\Omega$={fit.omega:.3g} rad/µs, "
                 f"phase={np.degrees(fit.phase):.2f}°, cond={fit.condition_number:.3g}"
             )
         else:
             ax.set_title("Rabi joint fit invalid")
-        ax.set_xlabel("Pulse length (μs)")
-        ax.set_ylabel("Population")
+        ax.set_xlabel("Pulse length (µs)")
+        ax.set_ylabel("P(0), P(1), P(L)")
         ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)

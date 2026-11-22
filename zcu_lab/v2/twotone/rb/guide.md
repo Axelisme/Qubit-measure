@@ -21,17 +21,17 @@ then the optional interleaved arm. The live plot shows one line per arm.
 ## Set the starting values
 
 Calibrate qubit frequency, the X90 and X180 pulse amplitudes, and readout before
-Run. Open and Reset take the X90 and X180 pulses from the qubit's module slots
+Run. Open and Defaults take the X90 and X180 pulses from the qubit's module slots
 and readout from the resonator's readout slot. If a slot is empty or points to a
 missing module, the form uses the corresponding `pi2_pulse`, `pi_pulse` or
 `readout` template. The templates use the captured frequency and wiring.
-The readout template uses the resonator's time of flight plus 0.015 us.
+The readout template uses the resonator's time of flight plus 0.015 µs.
 Missing required calibration leaves the affected input Invalid. You can select
 a saved module instead. The reset module comes from the qubit's reset slot and
 stays off when that slot is empty.
 
-Open and Reset set Relax delay to five times the captured qubit T1. If T1 or
-the capture is absent, the starting value is 150 us. An invalid stored T1
+Open and Defaults set Relax delay to five times the captured qubit T1. If T1 or
+the capture is absent, the starting value is 150 µs. An invalid stored T1
 leaves the input Invalid. Active reset does not change this wait. Check the
 modules, readout timing and relax delay before starting.
 

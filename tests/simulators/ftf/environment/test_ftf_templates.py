@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from scipy.integrate import solve_ivp
 from zcu_tools.device import DeviceManager
+from zcu_tools.simulate.adc import ConditionalReadout
 from zcu_tools.simulate.boundary import (
     CancellationQuery,
     RoundSignals,
@@ -355,32 +356,32 @@ def test_later_readout_pulse_arriving_after_herald_window_stays_in_its_event() -
         np.testing.assert_allclose(terminal_grid.times_ns, 2310.801 + np.arange(200))
 
 
-def test_later_readout_pulse_arriving_inside_herald_window_shares_its_event() -> None:
-    # With a shorter flight time, the same terminal emission arrives at 1300 ns,
-    # before the final herald sample at 1309.801 ns.
+def test_window_crossing_a_block_boundary_uses_the_later_event() -> None:
+    # Device-time samples run from 1010.801 to 1209.801 ns and reach terminal.
     plan = _plan_cross_block_readout(time_of_flight_ns=100.0)
-    assert tuple(
-        tuple(read.start_ns for read in reads) for reads in plan.projective_reads
-    ) == (
-        (0,),
-        (0,),
+    np.testing.assert_array_equal(plan.batch.end_ns, [1200, 1200])
+    assert plan.projective_reads == ((), ())
+    batch = plan.readouts[0].batch
+    for content in batch.content_index:
+        (terminal,) = batch.events[content]
+        assert {p.start_ns for p in terminal.pulses} == {0, 1200}
+        assert len(terminal.grids) == 2
+        np.testing.assert_allclose(
+            terminal.grids[0].times_ns, 1110.801 + np.arange(200)
+        )
+
+
+def test_readout_window_belongs_to_the_in_flight_herald_pulse() -> None:
+    plan = _plan_cross_block_readout(
+        time_of_flight_ns=387.370, first_trigger_us=1.27906
     )
     batch = plan.readouts[0].batch
     for content in batch.content_index:
         herald, terminal = batch.events[content]
-        assert tuple(p.start_ns for p in herald.pulses) == (0, 1200)
-        assert terminal.pulses == herald.pulses[1:]
-        assert len(herald.grids) == len(terminal.grids) == 1
-
-
-def test_readout_rejects_an_omitted_in_flight_pulse() -> None:
-    # The first trigger follows the second emission (1200 ns), yet all samples
-    # lie in the first pulse's arrival interval (387.370 to 1587.370 ns).
-    with pytest.raises(
-        ValueError,
-        match=r"ADC 0 window 0.*gen 0.*0 ns.*pairs triggers by emission time",
-    ):
-        _plan_cross_block_readout(time_of_flight_ns=387.370, first_trigger_us=1.27906)
+        assert tuple(p.start_ns for p in herald.pulses) == (0,)
+        assert tuple(p.start_ns for p in terminal.pulses) == (1200,)
+        (grid,) = herald.grids
+        np.testing.assert_allclose(grid.times_ns, 1279.06 + np.arange(200))
 
 
 def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
@@ -414,24 +415,87 @@ def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
             assert tuple(p.frequency_ghz for p in terminal.pulses) == (6.0, 6.08)
 
 
-@pytest.mark.parametrize("trigger_ticks", [ticks(0.008) - 1, 0])
-def test_readout_rejects_trigger_before_an_active_pulse_block(
-    trigger_ticks,
-) -> None:
+def test_trigger_before_first_pulse_observes_it_at_its_delayed_arrival() -> None:
+    from zcu_tools.simulators.ftf.environment import plan_template
+
+    base = template()
+    first = replace(base.events[0], duration_ticks=tick_array([0.004, 0.004]))
+    terminal = replace(first, start_ticks=first.start_ticks + ticks(0.012))
+    window = replace(
+        base.readouts[0],
+        trigger_ticks=np.column_stack(
+            (first.start_ticks - ticks(0.001), terminal.start_ticks + ticks(0.001))
+        ),
+        frequency_mhz=np.full((2, 2), 6000.0),
+        phase_deg=np.full((2, 2), 45.0),
+        generator_channels=np.zeros((2, 2), dtype=np.int64),
+    )
+    receiver = FTFReceiverConfig(
+        0,
+        1000.0,
+        ((0.0, 0.0), (0.0, 0.0)),
+        time_of_flight_ns=1.0,
+        ripple_period_mhz=1000.0,
+        pivot_ghz=0.0,
+    )
+    plan = plan_template(
+        settings(),
+        snapshot(),
+        replace(base, events=(first, terminal), readouts=(window,)),
+        readout=FTFReadoutConfig(receiver, None),
+        soccfg=profile_soccfg("ftf"),
+        time_base=TIME_BASE,
+    )
+    batch = plan.readouts[0].batch
+    for point, (start_ns, index) in enumerate(
+        zip((8, 10), batch.content_index, strict=True)
+    ):
+        (projection,) = plan.projective_reads[point]
+        assert projection.start_ns == start_ns
+        (trigger,) = projection.triggers
+        assert (trigger.read_index, trigger.trigger_ns) == (0, start_ns - 1)
+        herald, terminal_event = batch.events[index]
+        assert tuple(p.start_ns for p in herald.pulses) == (start_ns,)
+        assert tuple(p.start_ns for p in terminal_event.pulses) == (start_ns + 12,)
+        (grid,) = herald.grids
+        np.testing.assert_array_equal(grid.times_ns, start_ns + np.arange(-1, 3))
+
+
+def test_window_before_all_pulses_keeps_receiver_baseline_without_projection() -> None:
     from zcu_tools.simulators.ftf import environment as ftf
 
     base = template()
-    window = replace(
-        base.readouts[0], trigger_ticks=np.full((2, 1), trigger_ticks, dtype=np.int64)
+    receiver = FTFReceiverConfig(
+        0,
+        1000.0,
+        ((0.0, 0.0), (0.0, 0.0)),
+        offset_adc=(11.0, -7.0),
+        ripple_period_mhz=1000.0,
+        pivot_ghz=0.0,
     )
-    with pytest.raises(ValueError, match="trigger"):
+    early = replace(base.readouts[0], trigger_ticks=np.zeros((2, 1), dtype=np.int64))
+    normal, lookback = (
         ftf.plan_template(
             settings(),
             snapshot(),
             replace(base, readouts=(window,)),
+            readout=FTFReadoutConfig(receiver, None),
             soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
+        for window in (base.readouts[0], early)
+    )
+    assert lookback.projective_reads == normal.projective_reads == ((), ())
+    np.testing.assert_array_equal(lookback.batch.end_ns, normal.batch.end_ns)
+    batch = lookback.readouts[0].batch
+    for events in batch.events:
+        (event,) = events
+        assert event.pulses == ()
+        (grid,) = event.grids
+        np.testing.assert_array_equal(grid.times_ns, [0, 1, 2, 3])
+    sums = ConditionalReadout(batch.model).responses(batch).sums
+    np.testing.assert_array_equal(sums[..., 0], 44.0)
+    np.testing.assert_array_equal(sums[..., 1], -28.0)
 
 
 def test_readout_rejects_missing_pulse_at_only_some_points() -> None:
@@ -734,7 +798,8 @@ def test_template_wires_receiver_delay_and_mismatch_without_delaying_evolution()
         getattr(plan.readouts[0].batch.model, "mismatch_phase_rad", None), [0.6, -0.4]
     )
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
-    assert plan.readouts[0].batch.events[0][0].pulses[0].start_ns == 8.0
+    # At this delay, the unchanged grid samples before the first pulse arrives.
+    assert plan.readouts[0].batch.events[0][0].pulses == ()
     np.testing.assert_array_equal(
         plan.readouts[0].batch.events[0][0].grids[0].times_ns, [8, 9, 10, 11]
     )

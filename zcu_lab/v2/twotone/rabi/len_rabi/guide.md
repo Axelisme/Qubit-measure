@@ -4,25 +4,25 @@
 
 **Last updated:** 2026-10-21
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Parameter sources
 
-Length runs 0.03 to 4 * qubit.module.x180.waveform.length us over 101 points; Run overwrites drive length. Relax delay is 5 * qubit.t1 us. Other missing required calibration leaves the affected fields empty and Invalid.
+Length runs 0.03 to 4 * qubit.module.x180.waveform.length µs over 101 points; Run overwrites drive length. Relax delay is 5 * qubit.t1 µs. Other missing required calibration leaves the affected fields empty and Invalid.
 
 Run rejects an arbitrary (arb) drive waveform before preparing the scan or plots because its length comes from the saved asset. Select a waveform with an editable length for Length Rabi. Const and flat-top pulses sweep on the FPGA; other editable-length shapes scan on the host. Run does not resize or resample arb assets.
 
-The length sweep starts at 0.03 us and stops at 4*pi_len, using the stored x180 waveform length as pi_len. A missing or null pi_len, including an arbitrary waveform with no stored numeric length, uses a 1 us stop. An invalid stored pi_len leaves stop empty. Enter a finite positive numeric length. An existing x180 keeps its saved module selection and gain; if x180 is absent, qub_probe starts at gain=1. Starting values use stored calibration only.
+The length sweep starts at 0.03 µs and stops at 4*pi_len, using the stored x180 waveform length as pi_len. A missing or null pi_len, including an arbitrary waveform with no stored numeric length, uses a 1 µs stop. An invalid stored pi_len leaves stop empty. Enter a finite positive numeric length. An existing x180 keeps its saved module selection and gain; if x180 is absent, qub_probe starts at gain=1. Starting values use stored calibration only.
 
-Open and Reset capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 us, giving a 150 us wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 
 ## Module slots
 
-Readout uses the `$resonator.module.readout` slot captured at Open/Reset; an unset slot, missing module or unbound alias uses a fresh 'readout' template. That fallback still needs its required parameter sources. Reset uses qubit.module.reset and stays disabled when absent. The drive uses the sources described above, with qubit.module.x180 when present and qub_probe when absent. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 us; missing required calibration remains Invalid.
+Readout uses the `$resonator.module.readout` slot captured at Open/Defaults; an unset slot, missing module or unbound alias uses a fresh 'readout' template. That fallback still needs its required parameter sources. Reset uses qubit.module.reset and stays disabled when absent. The drive uses the sources described above, with qubit.module.x180 when present and qub_probe when absent. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
 
 ## Typical writeback
 
-Proposes qubit.ext.rabi_freq in MHz from the fit. With acquired run settings, copies the drive pulse into captured qubit.pulses.pi_len and pi2_len, replacing waveform.length with fitted pi and pi/2 lengths. Separately proposes qubit.module.x180/x90 pointing to those saved pulses, even when already bound to them, plus qubit.ext.pi_product = source gain * fitted pi length (a.u. * us). Every item is independently selectable. For data with IQ only, rabi_freq is the sole proposal. Pulse updates use the acquired run settings, with fitted lengths stored in the pulse copies. The pi_amp/pi2_amp gain-calibration pulses remain unchanged.
+Proposes qubit.ext.rabi_freq in MHz from the fit. With acquired run settings, copies the drive pulse into captured qubit.pulses.pi_len and pi2_len, replacing waveform.length with fitted pi and pi/2 lengths. Separately proposes qubit.module.x180/x90 pointing to those saved pulses, even when already bound to them, plus qubit.ext.pi_product = source gain * fitted pi length (a.u. * µs). Every item is independently selectable. For data with IQ only, rabi_freq is the sole proposal. Pulse updates use the acquired run settings, with fitted lengths stored in the pulse copies. The pi_amp/pi2_amp gain-calibration pulses remain unchanged.
 
 ## Recommended
 
@@ -33,11 +33,11 @@ Phase defaults to fixed 0/180 degrees; enable Fit phase offset when pulse shapin
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Set a fixed drive frequency and gain, plus readout timing. A prior pi calibration is not required for this sweep.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `time_rabi` after inspecting the same Form errors.
    points maps to length Expts; max_length_us sets the stop. frequency_mhz and gain override the fixed drive. decay and fit_phase change the existing analysis model.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

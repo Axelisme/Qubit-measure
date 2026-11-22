@@ -76,6 +76,22 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
 
         logger.debug("ASM:\n%s", self.asm())
 
+    def native_readout_iq_offset(self, channel: int) -> float:
+        """Resolve QICK's DC subtraction for one compiled integrated ADC.
+
+        channel is the physical ADC channel, not its declaration position.
+        For a static PFB, call after QICK configures the ADC for the current
+        acquire, or raise RuntimeError. Unknown channels raise KeyError.
+        This does not acquire or modify data.
+        """
+        readout = self.ro_chs[channel]
+        registers = readout.get("ro_config")
+        if "pfb_nout" in self.soccfg["readouts"][channel] and (
+            registers is None or "pfb_ch" not in registers
+        ):
+            raise RuntimeError(f"ADC {channel} requires configured PFB registers")
+        return float(self._ro_offset(channel, registers))
+
     def add_pulse(self, ch: int | list[int], name: str, **kwargs: object) -> None:
         """Declare a QICK pulse after checking its normalized gain.
 

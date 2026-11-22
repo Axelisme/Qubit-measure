@@ -4,15 +4,15 @@
 
 **Last updated:** 2026-11-16, local peak selection and fit window
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Parameter sources
 
-Open and Reset fill editable starting values from captured calibration. The frequency sweep starts with 301 points at `$qubit.freq` ± 20 * `$qubit.kappa`, in MHz. The endpoints and point count remain editable. Existing edits persist until Reset evaluates the starting values again. The fresh probe reads `$qubit.freq` and `$qubit.wiring.ch`; its gain is 0.1 and waveform length is 1.0 us, independent of the calibrated x180 pulse length. The readout template reads `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch` for its tones and channels, and `$resonator.time_of_fly` + 0.015 us for trigger timing. Missing or invalid required parameter sources leave the affected fields empty and Invalid. Supply valid calibration or direct values before Run. For a first qubit search, supply the frequency window yourself. Review the hardware-safe passband and enter a user-approved wide sweep.
+Open and Defaults fill editable starting values from captured calibration. The frequency sweep starts with 301 points at `$qubit.freq` ± 20 * `$qubit.kappa`, in MHz. The endpoints and point count remain editable. Existing edits persist until Defaults evaluates the starting values again. The fresh probe reads `$qubit.freq` and `$qubit.wiring.ch`; its gain is 0.1 and waveform length is 1.0 µs, independent of the calibrated x180 pulse length. The readout template reads `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch` for its tones and channels, and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Missing or invalid required parameter sources leave the affected fields empty and Invalid. Supply valid calibration or direct values before Run. For a first qubit search, supply the frequency window yourself. Review the hardware-safe passband and enter a user-approved wide sweep.
 
 ## Module slots
 
-The drive starts with a fresh 'qub_probe' constant pulse for spectroscopy. Readout uses the `$resonator.module.readout` slot captured at Open/Reset; an unset slot, missing module or unbound alias uses a fresh 'readout' template with a constant waveform. That fallback still needs its required parameter sources. Reset uses the optional `$qubit.module.reset` slot; an unset slot, missing module or unbound alias leaves it disabled and Valid. Init Pulse starts disabled (None). Enable it to select a calibrated library pulse or enter an inline preparation pulse. Run applies reset, Init Pulse, the swept Probe Pulse, then readout. Leave Init Pulse disabled for ground-state spectroscopy.
+The drive starts with a fresh 'qub_probe' constant pulse for spectroscopy. Readout uses the `$resonator.module.readout` slot captured at Open/Defaults; an unset slot, missing module or unbound alias uses a fresh 'readout' template with a constant waveform. That fallback still needs its required parameter sources. Reset uses the optional `$qubit.module.reset` slot; an unset slot, missing module or unbound alias leaves it disabled and Valid. Init Pulse starts disabled (None). Enable it to select a calibrated library pulse or enter an inline preparation pulse. Run applies reset, Init Pulse, the swept Probe Pulse, then readout. Leave Init Pulse disabled for ground-state spectroscopy.
 
 Bind `resonator: $qubit.resonator` so the readout follows the selected qubit's resonator. Existing points are not migrated: rerun onetone/freq and Apply its module and slot updates, or manually set `R1.module.readout` to an existing library module; otherwise this form uses the readout template. It does not read old qubit readout slots.
 
@@ -26,7 +26,7 @@ it for preparation. In this Form enable Init Pulse, choose that π03 library
 pulse or enter its measured frequency, channel, gain and waveform inline.
 Sweep Probe Pulse to find 3–2 after that preparation. The Init Pulse frequency
 stays fixed while the probe frequency follows the sweep.
-Enter its calibrated frequency in MHz and its duration in us.
+Enter its calibrated frequency in MHz and its duration in µs.
 
 Keep π01, π03 and π32 calibration records separate. Do not Apply a 0–3 or
 prepared 3–2 fit to the generic qubit.freq slot as though it were 0–1.
@@ -96,11 +96,11 @@ Standard flow at a freshly calibrated actual integer-flux bias: first run a wide
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Supply an approved qubit-frequency window. Check drive gain/length and the readout frequency/timing.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `twotone_spectrum` after inspecting the same Form errors.
    center_mhz, span_mhz and points are required. points maps to frequency Expts. model_type selects lor/sinc; analysis always draws the fitted overlay.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

@@ -53,17 +53,24 @@ class RabiCheckCfg(ConfigBase):
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -105,7 +112,7 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         # 2. Project all three mean-IQ curves onto the before-reset IQ axis.
         plots = context.plots
         fig, ax = plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse gain", ylabel="Amplitude")
+        ax.set(xlabel="Pulse gain (a.u.)", ylabel="Amplitude (a.u.)")
         viewer = live_line(ax, num_lines=3)
 
         @plots.on_plot_thread

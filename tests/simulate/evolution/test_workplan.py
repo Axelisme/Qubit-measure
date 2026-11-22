@@ -1,15 +1,17 @@
 """Evolve-local publication and ownership through injected kernel collaborators."""
 
+from collections.abc import Mapping
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Barrier, Event, Lock
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Cancelled, Engine
+from zcu_tools.simulate.evolution import Cancelled, Engine, EnvelopeSpec, RoutingHistory
 from zcu_tools.simulate.evolution.kernel import KernelContext
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
-from ._engine import RecordingKernel, batch, source
+from ._engine import RecordingKernel, batch, source, track
 
 
 @dataclass(frozen=True)
@@ -106,6 +108,47 @@ def test_evolve_releases_open_resources_on_every_exit(outcome):
         kernel.handles[0].get(lambda: Bounds(np.zeros(1)))
 
 
+def test_stop_during_work_plan_releases_geometry_without_counting_gate_usage(
+    monkeypatch,
+):
+    from zcu_tools.simulate.evolution import _dispatch
+
+    stop = Event()
+    plans: list[WorkPlan] = []
+    inventory = _dispatch.populate_gate_inventory
+
+    def request_stop(table, src, plan):
+        result = inventory(table, src, plan)
+        plans.append(plan)
+        stop.set()
+        return result
+
+    # The Engine exposes neither a Stop trigger nor the owned plan in this phase.
+    monkeypatch.setattr(_dispatch, "populate_gate_inventory", request_stop)
+    recorded: list[bytes] = []
+
+    class RecordingHistory(RoutingHistory):
+        def record_gate_usage(
+            self, inventory: Mapping[bytes, int], *, content: bytes
+        ) -> dict[bytes, int]:
+            recorded.append(content)
+            return super().record_gate_usage(inventory, content=content)
+
+    dc = source(history=RecordingHistory())
+    shaped = EnvelopeSpec("sampled", np.array([0, 0.3, 0.6]), np.array([0, 1, 3]))
+    timeline = replace(batch(1), tracks=(track(1, shaped),))
+    with (
+        closing(dc),
+        closing(Engine(1, backend="cpu")) as engine,
+        pytest.raises(Cancelled),
+    ):
+        engine.evolve(dc, (timeline,), cancel=stop)
+
+    assert not recorded
+    assert len(plans) == 1
+    assert plans[0].complete_table is None
+
+
 def test_sealed_resource_releases_after_last_actual_handoff():
     class SealingKernel(ContextKernel):
         def guard(self, table, rows, context, *legacy):
@@ -151,8 +194,6 @@ def test_carrier_workspace_is_shared_until_close_and_isolated_between_evolves():
     import gc
     import weakref
     from concurrent.futures import ThreadPoolExecutor
-
-    from zcu_tools.simulate.evolution.workplan import WorkPlan
 
     plan = WorkPlan()
     plan.publish_carrier_families(())

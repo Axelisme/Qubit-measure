@@ -117,17 +117,24 @@ class AllXYCfg(ConfigBase):
     X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -168,7 +175,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
 
         # 2. Track the staircase with gate-pair labels in acquisition order.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Gate", ylabel="Signal")
+        ax.set(xlabel="Gate", ylabel="Signal (a.u.)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
@@ -314,7 +321,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         ax.set_xticks(np.arange(len(sequence)))
         ax.set_xticklabels([f"{g1}-{g2}" for g1, g2 in sequence], rotation=45)
 
-        ax.set_ylabel("Signal")
+        ax.set_ylabel("Signal (a.u.)")
         ax.legend()
         ax.grid(True)
 

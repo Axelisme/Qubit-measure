@@ -7,7 +7,7 @@ from math import prod
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.simulate.boundary import SamplingIdentity
+from zcu_tools.simulate.boundary import CancellationQuery, Cancelled, SamplingIdentity
 from zcu_tools.simulate.rounding import shot_layout
 
 from ._path_sampling import physical_shots
@@ -150,6 +150,24 @@ class ADCRawShots:
         grids, including multi-jump tails and gaps. Different events draw
         independent paths. No raw is shifted to fit round sums.
         """
+        return self._materialize(reps, avg_level, cancel=None)
+
+    def materialize_cancellable(
+        self, reps: int, avg_level: int, *, cancel: CancellationQuery
+    ) -> dict[int, NDArray[np.int64]]:
+        """Produce the same shots as materialize, or raise Cancelled without data.
+
+        reps and avg_level have the same layout contract as materialize. The
+        read-only cancel query is borrowed for this call, not retained. A later
+        call can regenerate the entire round with or without a new query.
+        """
+        return self._materialize(reps, avg_level, cancel=cancel)
+
+    def _materialize(
+        self, reps: int, avg_level: int, *, cancel: CancellationQuery | None
+    ) -> dict[int, NDArray[np.int64]]:
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
         prepared = self.prepared
         point_dims = (
             prepared.readout.initial.shape[:-1]
@@ -165,8 +183,11 @@ class ADCRawShots:
                 np.random.SeedSequence((self.identity.seed, *self.identity.stream))
             )
         )
-        shots = physical_shots(prepared, rng)
-        return {
+        shots = physical_shots(prepared, rng, cancel=cancel)
+        result = {
             channel: shot_layout(values, point_dims, reps, avg_level)
             for channel, values in shots.items()
         }
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+        return result

@@ -23,11 +23,17 @@
 
 ## 模擬量測環境
 
+- 2026-11-22 [FTF projective 從真空續演化並改用 Markov chain](2026-11-22-ftf-projective-markov.md)：表示與資料格式。投影後逐 DC 態續演化，raw 保留單發配對，compact 只給逐事件邊際；獨立參考兩 floor 驗過 41／75 個 key。
+- 2026-11-22 [模擬器的時間門檻與驗證成本](2026-11-22-simulator-speed-first-verification.md)：取捨原則。正常參數先守 180 秒，精度以 `1e-2` 為目標；優化先做局部對照，獨立參考與全表不再是每次落地關卡。
+
 - 2026-11-21 [Projective 腔場改走 ADC flat span 合併解](2026-11-21-projective-span-reuse.md)：快取歸屬。Projective 與 MIST 都向 ADC 取 flat 二階矩與各 state 端點場，只在 exact key 命中時重用，FTF 仍逐 history 選態與建 shift；兩路共用 512 MiB，`CavityDrive` 只留 `cache=`；三個固定前綴同 seed density 相等、獨立端點解歸零。
 
 - 2026-11-21 [FTF Stop：合作式檢查點與取消傳輸](2026-11-21-ftf-stop-checkpoints.md)：停止與取消。不設上限、設計上檢查間隔 5 秒；取消經 SimulationSoc request 生命週期到兩個 QICK round 入口，零輪拋既有停止例外；cold 首跑與 Engine 內剩餘區段未達 5 秒，另開 task 承接。
+- 2026-11-21 [當輪必需 raw 的取消檢查與發佈](2026-11-21-required-raw-stop-publication.md)：取消與發佈（designer 代裁，使用者未覆核）。只在當輪需要 raw 時按呼叫借用 query；SoC 驗證 raw、通過最後查詢後才入帳並發布，statistics-only 與已完成輪 getter 保持 lazy。
 
 - 2026-11-21 [FTF 合法讀出時序的 ADC image、drive admission 與到達時間缺口](2026-11-21-ftf-legal-readout-timing.md)：時序邊界。具名 ADC config 保留物理 image、無來源 raw 字按 DDS 同餘類解調，純 drive DAC 由 `drive_generators` admission；在途漏配明確拒絕，完整到達時間模型與 E2E 留待落地後排他重測。
+- 2026-11-21 [FTF 讀出窗依裝置時間配對](2026-11-21-ftf-readout-device-time-pairing.md)：事件時序。ADC 擁有 `t−τ` 換算；planner 逐窗按裝置時間配對 block，最後相交 block 為 owner，投影與 ADC grid 不移動，跨 event 殘場仍是已知近似。
+- 2026-11-21 [同 owner 的讀出窗共用脈衝歷史](2026-11-21-shared-owner-readout-membership.md)：事件成員（designer 代裁，待覆核）。同 ADC／owner event 用各窗交集 block 的 pulse 聯集，保留逐窗交集，不從其他 ADC 或 owner 借入 pulse。
 
 - 2026-11-21 [raw ADC 頻率字改成編譯時拒絕](2026-11-21-raw-adc-word-reject.md)：刪除或收窄。無具名來源的 raw ADC 字編譯時拒絕，拿掉 DDS 同餘類與 Six 同餘選路。
 
@@ -150,6 +156,10 @@
 - 2026-11-20 [板上 RB 程式改寫](2026-11-20-rb-depth-program.md)：刪除或收窄。每個 seed、arm 保留一支 program，recovery 內嵌，PMEM 超量就報錯。
 - 2026-11-20 [RB 取數歸約與衰減擬合品質](2026-11-20-rb-round-reduction-and-fit-quality.md)：資料格式。取數端歸約 rounds，Result 以 (seed, arm, depth) 開頭，two-qubit fit quality 回報衰減長度相對誤差。
 
+## Measure UI
+
+- 2026-11-22 [在 Measure Data 頁讀原圖](2026-11-22-data-figure-reading.md)：圖形呈現。縮圖用來選圖，`View figure` 用當前原生 Figure 在同頁重繪一張可捲動的圖，不改 Save 工件。
+
 ## Cfg 與表單
 
 - 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導，說明與初值各有 owner，決策見 [ADR-0073](../adr/0073-measure-form-derivation.md)。
@@ -160,6 +170,9 @@
 - 2026-11-21 [表單預設超過板子限制，錯誤解析放知識庫](2026-11-21-form-board-limits.md)：文件邊界。指南描述實驗行為，知識庫說明板子限制與錯誤；修正 `reset_check` 的 gain 和 CPMG 的 Minimum time 預設值，決策見 [ADR-0073](../adr/0073-measure-form-derivation.md)、[ADR-0075](../adr/0075-agent-interface-layers.md#判讀依據放知識庫)。
 - 2026-11-21 [Gain 固定範圍：表單只驗純量，掃描留給 Run](2026-11-21-form-gain-range.md)：刪除或收窄。表單以既有 annotation 限制純量 gain；一般掃描保留 `SweepCfg`，超界點在 acquisition 前被拒。
 - 2026-11-21 [readout 時序預設：固定長度差與光子衰減等待](2026-11-21-readout-timing-defaults.md)：初值與預設值。範本前後各留 0.015 µs，chain／Rπ length 改用可編輯長度差（schema 6.0／4.0），mux post_delay 種子取 5/(2π·κ)；範本差值讀注入的 catalog。
+- 2026-11-22 [實驗呈現規範：圖、摘要與讀者檢查](2026-11-22-presentation-rules.md)：呈現規範。圖只放理論重點，採集設定進摘要，對數值大小敏感的一維資料畫 error bar，規範集中在 `figure-style.md`。
+- 2026-11-22 [Analyze 摘要與逐點誤差棒的責任分工](2026-11-22-shared-presentation-facts.md)：呈現責任。GUI 與 MCP 共用 adapter 摘要行，analysis 計算 shot SEM，實驗 core 寫標題與圖例。
+- 2026-11-22 [Two-qubit mux 綁定與編輯後的檢查](2026-11-22-two-qubit-mux-binding-checks.md)：驗證位置。Open／Reset 驗有序元件連結，提交時按同次 capture 驗實際 readout tone 數。
 
 ## 模組邊界
 
@@ -167,6 +180,7 @@
 - 2026-11-17 [封閉 simulate 的搬遷順序](2026-11-17-simulate-closure-expand-order.md)：搬遷順序。被 contract 擋住的暫時轉出改放在允許的方向（新位置轉出舊定義），分批改 importer，最後一票才搬定義，main 不出現 re-export。
 - 2026-11-14 [Lab 依賴只經 assembly 入口](2026-11-14-lab-dependency-boundary.md)：依賴邊界。組合根與開發工具只直接 import assembly，migrations 保留格式遷移所需的直接依賴，決策見 [ADR-0072](../adr/0072-module-boundaries.md)。
 - 2026-10-20 [框架去具體化：alias、模板、predictor 與一晶片一 qubit 假設](2026-10-20-framework-decoupling.md)：領域 alias、模板與模型認知留在 zcu_lab，框架的 owner 邊界見 [ADR-0072](../adr/0072-module-boundaries.md)。
+- 2026-11-22 [Two-qubit 的身分、定位與中性位置名](2026-11-22-two-qubit-identity-and-neutral-positions.md)：職責歸屬。Adapter 解析身分並傳定位數值，分析 options 接收標籤，位置沿用 `qubit1/qubit2`。
 
 ## 測試與驗證
 
@@ -187,6 +201,8 @@
 - 2026-11-19 [Point 與 library 資料流的摩擦](2026-11-19-point-library-frictions.md)：便利功能取捨。Ramsey 頻率寫回、回滾、過時 tab 都不改，crosstalk 只做純函式；小功能要多次遇到才加，原則見 [ADR-0075](../adr/0075-agent-interface-layers.md#先做簡單設計再按需加法)。
 - 2026-11-19 [單 qubit RB 與 IRB 合併成 twotone/rb](2026-11-19-single-qubit-rb-irb-merge.md)：實驗合併與資料格式。`target_gate=None` 只跑 reference，指定 gate 才跑兩臂；Result 改為 (round, seed, arm, depth)；`twotone/irb` 移除不留 alias，舊 run 只保留原檔。
 - 2026-11-20 [用 writeback 發布 CZ 的 arb 資產](2026-11-20-arb-asset-writeback.md)：資產發布。Apply 先發布不覆寫的 entry 資產，再寫引用該 key 的 library 提案。
+- 2026-11-22 [Two-qubit 新 native 軸名與舊格式](2026-11-22-two-qubit-native-axis-cutover.md)：資料格式。只有模擬測試資料的家族不新增不相容舊 layout 的 reader，原檔保留。
+- 2026-11-22 [Amp Rabi 的 shot moments](2026-11-22-amp-rabi-shot-moments.md)：資料格式。同批校正 IQ 保留既有平均，native 可選 moments；驗所有現有變數後，Labber 仍只匯出原單 log。
 
 ## 量測策略
 
@@ -200,6 +216,7 @@
 - 2026-11-15 [Two-qubit RB 的兩組都同時打單 qubit gates](2026-11-15-two-qubit-rb-simultaneous-gates.md)：並行排程。普通與heralded兩版的reference／interleaved都用每qubit時間線，在CZ共同同步，保留原frame與reset政策。
 - 2026-11-20 [Herald 改為 reset 模塊與逐 shot 遮罩](2026-11-20-herald-reset-shot-masks.md)：推翻放置選擇。Herald 改成既有 reset 欄位的模塊選項，取數層以逐 shot bool 遮罩篩選、所有下游統一收遮罩，tracker 改成顯式 reducer，FTF 沿用逐 shot 抽樣，決策見 [ADR-0074](../adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)。
 - 2026-11-20 [只為共用參數保留獨立 heralded 實驗](2026-11-20-heralded-experiment-pruning.md)：刪除或收窄。只保留 RB 與 conditional phase 的獨立入口，其餘七個用 mux herald reset 篩選 gg。
+- 2026-11-19 [Integer fluxonium 的 MIST：與 half-flux 的差異及 erasure check 的注意事項](2026-11-19-integer-fluxonium-mist.md)：物理研究。Φ=0 的 e/f 是 parity 相反的計算態加 erasure 態，MIST 線成對、e/f 不經 k=0 交換但 10⁻³ Φ₀ 偏磁即破；check 宜讓 g、f 都暗，最糟後果是 e→g/f 或漏到不被標記的高態；重複 check 的 Stark 相位與磁通雜訊會相乘累積；An 的 check 期間 T1(e→g) 變短無法以閉系統 MIST 或平滑浴解釋。
 - 2026-11-20 [T1 二階矩實驗以 t1_cov 恢復](2026-11-20-t1-cov-restore.md)：恢復已刪除的概念。2026-11-09 誤刪的是二階矩方法，不是 post-selection；先恢復 T1，改稱 cov，讀出叫 pre_readout／post_readout，加可選脈衝 reset，舊資料不載入。
 - 2026-11-20 [Two-qubit RB 在 Clifford 邊界對齊兩條時間線](2026-11-20-rb-clifford-barrier.md)：排程修正。2026-11-15 的並行排程只在 CZ 同步，reference 組相鄰 Clifford 會重疊，interleaved 組不會；改為兩組都在 Clifford 邊界 join，interleaved 時序不變、reference 變長，新舊資料不混比。
 - 2026-11-20 [RB 每個 depth 的誤差棒](2026-11-20-rb-errorbars.md)：圖上診斷。畫 seed 間標準差，不加 shot noise 參考線，不改 Analyze 回傳；RB 與 IRB 數值工具合併。

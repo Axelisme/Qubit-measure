@@ -37,8 +37,9 @@ PROFILE_PATH = Path(__file__).resolve().parents[1] / "profiles" / "qick_216_v2.y
 def startup(ctx: StartupContext) -> None:
     """Select ftf-demo/initial, seeding it from the template on first use.
 
-    The template binds f1=Q1, f2=Q2, coupler=coupler and mux=MG12 for FTF
-    forms. Existing entries keep their aliases; add missing roles in Aliases.
+    The template binds qubit1=Q1, qubit2=Q2, coupler=coupler and mux=MG12
+    for two-qubit forms. Existing entries keep their aliases; update the point's
+    Aliases if the current bindings are missing.
     The template seeds pulse gen0/ADC0, charge gen2/gen3 and MG12 mux
     gen7/ADCs [2, 3] in resonator order on the shared v2 board.
     The GUI is then ready for the user to open experiment tabs.

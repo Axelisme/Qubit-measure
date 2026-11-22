@@ -121,7 +121,7 @@ def _plot_initial_histogram(
         )
         title = "Initial-point projected IQ histogram"
         if effective_t1_us is not None:
-            title += f"\nEffective $T_1$ = {effective_t1_us:.3g} μs"
+            title += f"\nEffective $T_1$ = {effective_t1_us:.3g} µs"
         ax.set_title(title, fontsize=10)
         if (
             classified_distribution is not None
@@ -148,7 +148,7 @@ def _plot_initial_histogram(
             fontsize=10,
         )
     ax.set_xlabel("Pooled PCA projection (a.u.)")
-    ax.set_ylabel("Counts")
+    ax.set_ylabel("Shots (count)")
     ax.legend(fontsize=8, loc="lower left")
     ax.grid(True)
 
@@ -222,17 +222,24 @@ class AmpRabiCfg(ConfigBase):
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -293,7 +300,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         viewer = None
         if classifier is not None:
             figure, ax = context.plots.subplots(num="measurement")
-            ax.set(xlabel="Pulse gain (a.u.)", ylabel="Classified population")
+            ax.set(xlabel="Pulse gain (a.u.)", ylabel="P(g), P(e), P(other)")
             viewer = live_line(ax, num_lines=3)
             ax.set_ylim(-0.02, 1.02)
             for line, kwargs in zip(
@@ -301,9 +308,9 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 [
                     {"label": label, "color": color}
                     for label, color in (
-                        ("Ground", "blue"),
-                        ("Excited", "red"),
-                        ("Other", "green"),
+                        ("P(g)", "blue"),
+                        ("P(e)", "red"),
+                        ("P(other)", "green"),
                     )
                 ],
                 strict=True,
@@ -445,7 +452,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         else:
             ax.set_title("Rabi joint fit invalid")
         ax.set_xlabel("Pulse gain (a.u.)")
-        ax.set_ylabel("Population")
+        ax.set_ylabel("P(0), P(1), P(L)")
         ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)

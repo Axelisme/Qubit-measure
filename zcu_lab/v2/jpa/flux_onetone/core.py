@@ -54,17 +54,24 @@ class OneToneFluxCfg(ConfigBase):
     ]
     freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -115,7 +122,7 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="JPA Flux value (a.u.)", ylabel="Readout frequency (MHz)")
-        line_ax.set_xlabel("Readout frequency (MHz)")
+        line_ax.set(xlabel="Readout frequency (MHz)", ylabel="Magnitude (a.u.)")
         heatmap = live_heatmap(heat_ax, uniform=True)
         lines = live_line(line_ax, num_lines=5)
         for artist in line_ax.lines[:-1]:

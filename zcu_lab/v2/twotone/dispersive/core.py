@@ -74,17 +74,24 @@ class DispersiveCfg(ConfigBase):
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -125,7 +132,7 @@ def _plot_circle_fit(
     ax.axhline(0, color="k", linestyle="--")
     ax.set_aspect("equal")
     ax.grid(True)
-    ax.set_ylabel(r"$Im[S_{21}]$", fontsize=14)
+    ax.set_ylabel(r"$Im[S_{21}]$ (a.u.)", fontsize=14)
     ax.yaxis.set_label_position("right")
     ax.legend()
 
@@ -175,7 +182,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
 
         # 2. Monitor the readout resonance contrast of both preparations.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
+        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude (a.u.)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax, num_lines=2)
@@ -313,6 +320,6 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         # 5. Check each complex-IQ circle against its resonance fit.
         _plot_circle_fit(ax_g, freqs, g_signals, dict(g_params), "b", "Ground")
         _plot_circle_fit(ax_e, freqs, e_signals, dict(e_params), "r", "Excited")
-        ax_e.set_xlabel(r"$Re[S_{21}]$", fontsize=14)
+        ax_e.set_xlabel(r"$Re[S_{21}]$ (a.u.)", fontsize=14)
 
         return DispersiveAnalysis(chi, avg_fwhm)

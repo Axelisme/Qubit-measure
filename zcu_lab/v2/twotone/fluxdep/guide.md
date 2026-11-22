@@ -6,15 +6,15 @@ The outer sweep steps the external flux device; the inner sweep changes drive fr
 
 **Last updated:** 2026-10-21
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Parameter sources
 
-Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 us from the sources captured at Open/Reset. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Open and Reset leave both frequency endpoints blank and required, with 1001 points. Enter a reviewed drive-frequency window before Run. Flux spans 10% beyond the selected device's actual integer and half over 101 points. The helper uses qubit.flux and other contributors' detached Form device values. Missing selected calibration leaves endpoints Invalid; invalid contributors raise an error. Both sweeps remain editable. Existing edits persist until Reset restores these starting values.
+Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs from the sources captured at Open/Defaults. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Open and Defaults leave both frequency endpoints blank and required, with 1001 points. Enter a reviewed drive-frequency window before Run. Flux spans 10% beyond the selected device's actual integer and half over 101 points. The helper uses qubit.flux and other contributors' detached Form device values. Missing selected calibration leaves endpoints Invalid; invalid contributors raise an error. Both sweeps remain editable. Existing edits persist until Defaults restores these starting values.
 
 ## Module slots
 
-Readout uses the qubit.module.readout slot captured at Open/Reset, or a fresh readout template when the slot is unset or points to a missing module. Optional qubit.module.reset stays disabled when absent. Saved modules remain selectable; sweeps replace only the swept fields at Run. Open/Reset fill flux_dev from the captured `$qubit.flux_dev`; the direct name remains editable, and a missing source leaves it empty and Invalid. Choose flux_unit explicitly in the connected device's units; values keep that unit throughout the run.
+Readout uses the qubit.module.readout slot captured at Open/Defaults, or a fresh readout template when the slot is unset or points to a missing module. Optional qubit.module.reset stays disabled when absent. Saved modules remain selectable; sweeps replace only the swept fields at Run. Open/Defaults fill flux_dev from the captured `$qubit.flux_dev`; the direct name remains editable, and a missing source leaves it empty and Invalid. Choose flux_unit explicitly in the connected device's units; values keep that unit throughout the run.
 
 ## Typical writeback
 
@@ -49,11 +49,11 @@ without writeback. Save retains raw data and completed analysis artifacts.
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Supply both sweep axes and confirm the cached native flux unit. Check qubit probe and readout settings.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `twotone_flux_dep` after inspecting the same Form errors.
    center_mhz, span_mhz, freq_points, flux_device, flux_unit, flux_range and flux_points are required. Both counts map to their sweep Expts. The interactive picker uses the existing GUI parameters.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

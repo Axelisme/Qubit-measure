@@ -14,7 +14,7 @@ class RabiScanResult:
 
     coordinates are relative phase degrees or common MHz frequency, as named by
     the leaf AXES_SPEC. sums is (Nc,Nd,3,3) after any herald selection.
-    Class order is g/e/other, with terminal F1 before F2. Unmeasured points
+    Class order is g/e/other, with terminal Qubit1 before Qubit2. Unmeasured points
     remain NaN; completed rounds survive
     cancellation. There is no shot axis or IQ. The RunContext stop signal carries
     only a stop request and reason. Execution errors propagate from run as

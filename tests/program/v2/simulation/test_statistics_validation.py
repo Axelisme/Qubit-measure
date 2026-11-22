@@ -4,6 +4,7 @@ import re
 from copy import deepcopy
 from dataclasses import replace
 from fractions import Fraction
+from threading import Event
 
 import numpy as np
 import pytest
@@ -19,6 +20,7 @@ from zcu_tools.simulate.boundary import (
     SamplingIdentity,
     TimeBase,
 )
+from zcu_tools.simulate.evolution import Cancelled
 from zcu_tools.simulate.white_noise import WhiteNoiseRawShots
 
 from tests.program._profiles import load_soccfg
@@ -177,6 +179,57 @@ def test_statistics_contract_after_successful_round(compact_round, kind):
         second = delivery.statistics
         assert_detached(second, changed)
         assert not np.shares_memory(first.channels[0].sums, second.channels[0].sums)
+
+
+@pytest.mark.parametrize("failure", ["cancel", "bad-layout"])
+def test_qick_start_readout_publishes_only_validated_raw(compact_round, failure):
+    soc, request, record = compact_round
+    stop = Event()
+    executed = []
+    sampled = []
+    soc.install_request(request, cancel=stop)
+
+    class Raw:
+        def __init__(self, index):
+            self.index = index
+
+        def materialize(self, reps, avg_level):
+            pytest.fail("required raw must pass the installed cancellation query")
+
+        def materialize_cancellable(self, reps, avg_level, *, cancel):
+            assert cancel is stop
+            sampled.append(self.index)
+            values = np.full((reps, 1, 2), self.index + 1, dtype=np.int64)
+            if len(sampled) == 2:
+                if failure == "bad-layout":
+                    return {0: values[..., :1]}
+                stop.set()  # The SoC's final query must reject this whole round.
+            return {0: values}
+
+    def execute(round_request):
+        executed.append(round_request.index)
+        return IntegratedRound(record, Raw(round_request.index))
+
+    soc.binding.execute = execute
+    soc.start_readout(request.reps, 0, [0], [1])
+    assert sampled == [0]
+    (message,) = soc.poll_data()
+    count, (channels, _) = message
+    assert count == request.reps
+    np.testing.assert_array_equal(channels[0], np.ones((request.reps, 2)))
+    assert soc.poll_data() == []
+    if failure == "cancel":
+        with pytest.raises(Cancelled):
+            soc.start_readout(request.reps, 0, [0], [1])
+    else:
+        with pytest.raises(ValueError, match="int64 shape"):
+            soc.start_readout(request.reps, 0, [0], [1])
+    assert soc.poll_data() == []
+    np.testing.assert_array_equal(soc.get_accumulated(0, 0, 1), [[1, 1]])
+    stop.clear()
+    soc.start_readout(request.reps, 0, [0], [1])
+    np.testing.assert_array_equal(soc.get_accumulated(0, 0, 1), [[2, 2]])
+    assert executed == sampled == [0, 1, 1]
 
 
 def numeric_round() -> tuple[AcquireRequest, RoundStatistics]:

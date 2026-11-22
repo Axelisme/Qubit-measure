@@ -73,7 +73,7 @@ def test_history_form_failure_and_reset_are_visible(
     run = ui.observe("Run")
     assert not run.enabled and reason in run.tooltip
     ui.screenshot(tmp_path / f"history-{variant}-before.png")
-    ui.click("Reset")
+    ui.click("Defaults")
     if variant == "success":
         assert ui.observe(object_name="form.input.gain").text == "0.25"
         assert ui.observe("Run").enabled

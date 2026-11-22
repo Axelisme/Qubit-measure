@@ -235,9 +235,7 @@ class EarlyStopMixin(TypedAcquireMixin):
             CancelFlagProtocol | None, self.acquire_params.get("cancel_flag")
         )
         if cancel_flag is not None and cancel_flag.is_set():
-            self._cleanup_prepared_round()
-            self._close_rounds_pbar()
-            return False
+            return self._stop_interrupted_round()
 
         if self.acquire_params["type"] == "accumulated" and cancel_flag is not None:
             return self._finish_accumulated_round(cancel_flag)
@@ -253,12 +251,29 @@ class EarlyStopMixin(TypedAcquireMixin):
         return not_finish
 
     def finish_acquire(self):
-        if self._is_stopped_before_first_completed_round():
-            self._close_rounds_pbar()
-            raise StoppedPartialAcquireError(
-                "acquire stopped before the first round completed"
-            )
+        params = self.acquire_params
+        if params is not None:
+            stopped_early = params.get("_stopped_early") is True
+            # tolerated(cast): QICK's heterogeneous params lose the cancel flag protocol.
+            cancel_flag = cast(CancelFlagProtocol | None, params.get("cancel_flag"))
+            if (
+                stopped_early or (cancel_flag is not None and cancel_flag.is_set())
+            ) and self._completed_round_count() == 0:
+                if not stopped_early:
+                    self._close_rounds_pbar()
+                raise StoppedPartialAcquireError(
+                    "acquire stopped before the first round completed"
+                )
         return super().finish_acquire()
+
+    def _stop_interrupted_round(self) -> bool:
+        """Clean up the interrupted round and close progress; return False to stop."""
+        assert self.acquire_params is not None
+        self._cleanup_prepared_round()
+        self._close_rounds_pbar()
+        # ADR-0083: the params are new for each acquire; leave the caller's flag alone.
+        self.acquire_params["_stopped_early"] = True
+        return False
 
     def _finish_decimated_round(self) -> bool:
         return super().finish_round()
@@ -411,19 +426,6 @@ class EarlyStopMixin(TypedAcquireMixin):
     def _close_rounds_pbar(self) -> None:
         if self.rounds_pbar is not None:
             self.rounds_pbar.close()
-
-    def _is_stopped_before_first_completed_round(self) -> bool:
-        if self.acquire_params is None:
-            return False
-        # tolerated(cast): finish_acquire reads the same QICK-owned flag entry to distinguish no completed data from a valid partial result.
-        cancel_flag = cast(
-            CancelFlagProtocol | None, self.acquire_params.get("cancel_flag")
-        )
-        return (
-            cancel_flag is not None
-            and cancel_flag.is_set()
-            and self._completed_round_count() == 0
-        )
 
 
 class RoundHookMixin(TypedAcquireMixin):

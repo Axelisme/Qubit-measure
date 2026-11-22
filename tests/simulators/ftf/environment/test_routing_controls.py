@@ -78,7 +78,7 @@ def test_source_passes_projective_spans_and_honors_engine_reuse_answer():
             snapshot = source.snapshot()
             source.execute(RoundRequest(request, snapshot, 0))
             first = source.evaluations[0]
-            assert first.projection_outcomes
+            assert first.projection_continued_states
             assert len(controlled_engine(source.engine).calls) >= 2
             assert all(
                 model.history is history

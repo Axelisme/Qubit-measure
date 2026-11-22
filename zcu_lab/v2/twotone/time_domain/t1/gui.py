@@ -100,7 +100,7 @@ def _T1_get_writeback_items(
     items: list[WritebackItem] = [
         ParameterWriteback(
             target_name="$qubit.t1",
-            description="T1 relaxation time (us)",
+            description="T1 relaxation time (µs)",
             proposed_value=result.t1,
             stderr=result.t1_err,
         ),
