@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-22, integrated statistics handoff
+**Last updated:** 2026-11-22, Markov and raw sampling contracts
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -283,15 +283,17 @@ and one event. A single outcome consumes no extra outcome RNG draw. Its raw,
 trace and integrated outputs retain the previous single-event RNG order,
 including shared-event multi-grid and multi-ADC arrangements.
 
+### Projection-chain sampling
+
 `ProjectionChain(initial, transitions)` represents rank-1 projective reads
 without enumerating outcome histories. `initial` has shape `(*point_dims, S)`.
 Each subsequent event supplies one `(*point_dims, S, S)` transition array,
 indexed `[previous_projection_state, next_projection_state]`. Construction
 copies arrays read-only and validates every row without clipping or normalization.
 An empty transition tuple represents one event.
-[FTF projective readout](../../simulators/ftf/environment/README.md#readout-and-sampling)
-uses `ProjectionChain`. Non-projective FTF readout still uses
-`ProjectionReadout.unprojected`. The adoption does not retire FTF's retained
+[FTF projective chain construction](../../simulators/ftf/environment/README.md#cavity-drives)
+builds these rows and applies the projection floor before handing them to ADC.
+Non-projective FTF readout still uses `ProjectionReadout.unprojected`. The adoption does not retire FTF's retained
 outcome-mixture path or the shared `ProjectionReadout` interface.
 
 Raw and trace sampling each draw a chain per shot. Reads at the same shot
@@ -336,10 +338,10 @@ for the environment's output and the [Program statistics contract](../../program
 for the acquisition handoff.
 
 The environment supplies projection probabilities in the retained DC energy
-basis. ADC neither chooses projection times nor applies the identity floor.
-It does not group states by IQ distinguishability. ADC transitions during a
-herald event affect that event's IQ only. They do not feed back into the
-populations supplied for later events.
+basis. ADC samples the supplied rows, including identity rows, without applying
+another floor or choosing projection times. It does not group states by IQ
+distinguishability. ADC transitions during a herald event affect that event's
+IQ only. They do not feed back into the populations supplied for later events.
 
 `PreparedRawShots(readout, batches, reps=...)` owns noiseless probabilities
 and per-channel ReadoutBatch inputs. `bind(identity)` returns an `ADCRawShots`
@@ -403,6 +405,41 @@ encoding described above. The preparation retains no noisy results or identities
 The public `round_statistics` still validates arbitrary inputs by building a plan
 for that call. FTF retains plans with noiseless preparations; no RNG draws or
 deferred raw materialization move into preparation.
+
+### Raw sampling
+
+A change in representation alone must preserve the joint distribution of raw
+I/Q across reads and ADCs at the same shot index, not just the distribution of
+each read by itself. With the same physical model and inputs and no projection
+floor approximation, sampling a `ProjectionChain` and sampling the enumeration
+of those same paths are equal in distribution. This does not establish parity
+with an FTF history model that retains cavity memory or uses a different floor.
+The [chain's RNG boundary](#projection-chain-sampling) does not promise bitwise
+parity for the same seed across representations. See ADR-0078 for
+[raw ownership](../../../../docs/adr/0078-evolution-module-boundary.md#integrated-raw-由環境生成介面由-program-擁有)
+and the [Markov representation](../../../../docs/adr/0078-evolution-module-boundary.md#projective-read-的-markov-chain-表示).
+
+On the simulated ADC path, these callers use raw rather than compact counts:
+
+- Shot reducers use `acquire_summed`, including through `run_acquire_summed`.
+  In `twotone/ro_optimize`, this includes Auto (`auto_optimize`) and the
+  `freq`, `freq_gain`, and `length` scans. In `jpa`, `auto_optimize`, `flux`,
+  `freq`, and `power` use raw for SNR. `Classify` axes passed to `shot_sums`, as
+  in `two_qubit/joint_readout` and heralded `conditional_phase`, classify the
+  reducer's per-shot IQ.
+- In `SimulationAcquireMixin`, a registered shot mask (including `HeraldReset`)
+  or a native QICK `threshold` requires raw during an otherwise averaged
+  acquire. Direct `SimulationSoc.start_readout` also requires raw for `poll_data`.
+- `get_raw` and `get_shot_result` request the last completed round's raw.
+  `run_acquire_shots` reaches it through `get_shot_result`; mux single-shot g/e
+  reaches `get_raw` through `collect_raw_iq`. These getters only materialize
+  the retained round if its raw is not already available.
+
+To locate the callers, use:
+
+```bash
+git grep -nE '\b(run_acquire_summed|acquire_summed|Classify|HeraldReset|register_shot_mask_source|SimulationAcquireMixin|start_readout|run_acquire_shots|get_shot_result|collect_raw_iq|get_raw)\b' -- '*.py' ':!tests/**'
+```
 
 ## Joint-Fock validation limits
 
