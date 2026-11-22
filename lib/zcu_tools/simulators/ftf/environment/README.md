@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-22, Markov chain, acquire-local raw plans, isotropic receiver noise, and unentered acquire timings
+**Last updated:** 2026-11-23, acquisition routing
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -206,10 +206,8 @@ These statistics use main rows only.
 limits without restoring startup values. Source identities survive session
 registry disconnects and name changes. Reconnection retrieves the original
 class-retained driver, preserving V/A units and current values.
-`execute` consumes detached templates.
-`open_acquire` rejects nonempty `AcquireRequest.charge_requirements` with
-`ValueError` before evolution. This environment does not yet support explicit
-charge admission. Empty requirements preserve ordinary acquisition.
+`execute` consumes detached templates. FTF routes their generator events using
+its configured drive, fast-flux and readout lines.
 
 ### Acquisition clock and loss drift
 

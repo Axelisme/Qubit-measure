@@ -4,7 +4,7 @@
 
 Start Pump and Stokes with the chosen lead → wait for both pulse ends → one calibrated **Readout** → **Relax delay**. Run sweeps Pump gain outside Stokes gain in one round.
 
-- Measure **Pump carrier 0–3** and **Stokes carrier 3–2** independently in MHz. Use separate charge-drive lines for overlap. Set signed **Pump gain** and **Stokes gain** ranges within [−1, 1] a.u.; neither is a calibrated rotation angle.
+- Measure **Pump carrier 0–3** and **Stokes carrier 3–2** independently in MHz. On hardware, use separate charge-drive lines for overlap. In simulation, select generators bound by the environment's wiring. Set signed **Pump gain** and **Stokes gain** ranges within [−1, 1] a.u.; neither is a calibrated rotation angle.
 - Choose each waveform and duration independently. An arbitrary waveform takes its duration from the asset. Positive **Stokes lead** starts Stokes first and delays Pump; negative reverses the order. Zero starts both together.
 - Use a pulse readout with three saved g/e/f centers and a training confusion matrix from `singleshot/qutrit_population` at the same settings. Choose **Shots per point** for the needed precision.
 

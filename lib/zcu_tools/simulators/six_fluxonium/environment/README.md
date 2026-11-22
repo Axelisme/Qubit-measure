@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-22, unentered acquire timings
+**Last updated:** 2026-11-23, acquisition routing
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -109,11 +109,6 @@ cavity enter its existing single-cavity ADC model together. ADCs observing the
 same cavity at the same point share state populations and jump histories.
 Independent cavities draw separate streams. QICK retains ADC declaration order,
 normalization, software-round averaging and companion sums from decimated traces.
-
-Nonempty `AcquireRequest.charge_requirements` raises `ValueError` during routing,
-before projection or evolution. This environment does not yet support explicit
-charge admission; it does not discard requirements when projecting local requests.
-Empty requirements preserve the existing routing and acquisition behavior.
 
 A request uses either the pulse route or mux routes. All reads of one ADC at one
 point must select the same cavity. Untriggered cavity drives, missing terminal

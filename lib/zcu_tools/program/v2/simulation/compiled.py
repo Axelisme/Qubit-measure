@@ -9,12 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from zcu_tools.simulate.boundary import (
-    AcquireRequest,
-    AcquisitionMode,
-    ChargeDriveRequirement,
-    TimeBase,
-)
+from zcu_tools.simulate.boundary import AcquireRequest, AcquisitionMode, TimeBase
 
 from ..base import MyProgramV2
 from ..ir.instructions import (
@@ -713,15 +708,12 @@ def build_compiled_request(
     sequence: int,
     *,
     routes: Sequence[tuple[int, int]],
-    charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
 ) -> AcquireRequest:
     """Detach compiled instructions into numeric slots without calling a backend.
 
     prog is a compiled native v2 program. routes is the SimulationSoc's
     explicit (generator, ADC) wiring, not program declarations. mode chooses sums
-    or traces; binding and sequence supply sampling identity. charge_requirements
-    is forwarded unchanged for environment-owned physical validation; the builder
-    does not infer drive roles from names or instructions. Unsupported effects,
+    or traces; binding and sequence supply sampling identity. Unsupported effects,
     malformed/missing loop definitions, cross-shot state or pending config carry,
     and ambiguous routing raise ValueError with instruction or readout context.
     If the runtime ADC frequency word effective at a window trigger has no
@@ -770,5 +762,4 @@ def build_compiled_request(
         int(prog.us2cycles(prog.relax_delay))
         * time_base.period_ticks(prog.tproccfg["f_time"]),
         time_base=time_base,
-        charge_requirements=charge_requirements,
     )

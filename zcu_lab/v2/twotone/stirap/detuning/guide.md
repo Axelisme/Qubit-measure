@@ -4,7 +4,7 @@
 
 Start the two drives with **Fixed Stokes lead** → wait until both finish → calibrated **Readout** → **Relax delay**. Positive lead delays Pump; negative delays Stokes. Run steps Pump detuning within each Stokes detuning in one round.
 
-- Measure **Pump carrier 0–3** and **Stokes carrier 3–2** separately; enter both in MHz. Use independent charge-drive lines, signed gains in [−1, 1] and independent envelopes. Arbitrary envelopes take their duration from the asset.
+- Measure **Pump carrier 0–3** and **Stokes carrier 3–2** separately; enter both in MHz. On hardware, use independent charge-drive lines. In simulation, select generators bound by the environment's wiring. Use signed gains in [−1, 1] and independent envelopes. Arbitrary envelopes take their duration from the asset.
 - Set **Pump detuning** and **Stokes detuning** endpoints in MHz and point counts. Each offset adds to its own carrier. Cover the expected offsets without losing resolution near the carrier pair.
 - Use a pulse readout with saved centroid3 centers and confusion matrix from `singleshot/qutrit_population` at the same settings. Circle **Other** is not f. **Relax delay** initially uses `5 × qubit.t1` (150 µs if absent).
 

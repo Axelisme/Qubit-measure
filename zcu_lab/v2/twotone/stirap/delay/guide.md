@@ -4,7 +4,7 @@
 
 Start Pump and Stokes with the swept **Stokes lead** → wait for the later pulse end → calibrated **Readout** → **Relax delay**. Lead is the offset between pulse starts, not centers or ends. At +0.10 µs Pump starts 0.10 µs after Stokes; negative starts Pump first; zero starts both together.
 
-- Enter measured **Pump carrier 0–3** and **Stokes carrier 3–2** in MHz. Choose separate charge-drive lines, signed gains in [−1, 1] and independent envelopes. For arbitrary envelopes, duration comes from the assets. Choose lead endpoints that cover the expected overlap.
+- Enter measured **Pump carrier 0–3** and **Stokes carrier 3–2** in MHz. On hardware, use separate charge-drive lines. In simulation, select generators bound by the environment's wiring. Use signed gains in [−1, 1] and independent envelopes. For arbitrary envelopes, duration comes from the assets. Choose lead endpoints that cover the expected overlap.
 - Select a calibrated pulse readout with saved centroid3 centers and a 3×3 training confusion matrix from `singleshot/qutrit_population`. This scan does not train a classifier. **Shots per point** sets the sample count in the single acquisition round.
 
 See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the shared GUI steps.
