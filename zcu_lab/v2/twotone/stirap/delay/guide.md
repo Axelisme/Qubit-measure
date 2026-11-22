@@ -4,7 +4,14 @@
 
 Start Pump and Stokes with the swept **Stokes lead** → wait for the later pulse end → calibrated **Readout** → **Relax delay**. Lead is the offset between pulse starts, not centers or ends. At +0.10 µs Pump starts 0.10 µs after Stokes; negative starts Pump first; zero starts both together.
 
-- Enter measured **Pump carrier 0–3** and **Stokes carrier 3–2** in MHz. Choose separate charge-drive lines, signed gains in [−1, 1] and independent envelopes. For arbitrary envelopes, duration comes from the assets. Choose lead endpoints that cover the expected overlap.
+- Enter measured **Pump carrier 0–3** and **Stokes carrier 3–2** in MHz. On hardware, check that Pump and Stokes are wired to separate charge-drive lines. Use signed gains in [−1, 1] and independent envelopes. For arbitrary envelopes, duration comes from the assets. Choose lead endpoints that cover the expected overlap.
+- In simulation, set **Pump generator** and **Stokes generator** to the `gen_ch`
+  values of two drive lines for the qubit under test. The [Integer-fluxonium preset](../../../../simulation_envs/integer_fluxonium/field-guide.md#circuit-bath-and-routing)
+  assigns Pump to 1 and Stokes to 2. In FTF, look up the generators in
+  [`drive_lines`](../../../../simulation_envs/FTF/field-guide.md#drive-linescharge-與小訊號-flux-校準).
+  Choose charge drive lines that couple to that qubit. Do not use generators
+  in `flux_lines`, which play fast-flux pulses. The environment routes pulses
+  by generator number and does not check the intended Pump or Stokes role.
 - Select a calibrated pulse readout with saved centroid3 centers and a 3×3 training confusion matrix from `singleshot/qutrit_population`. This scan does not train a classifier. **Shots per point** sets the sample count in the single acquisition round.
 
 See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the shared GUI steps.

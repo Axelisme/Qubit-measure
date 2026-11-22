@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-23, resonator drive and loss boundaries
+**Last updated:** 2026-11-23, acquisition request, resonator drive and loss boundaries
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -17,8 +17,7 @@ optimizing speed, follow the [simulator maintenance rules](maintenance.md).
 shared by the frontend and environments. Import `TimeBase`, `AcquireRequest`,
 `RoundRequest`, timeline slots, signals and statistics from this module.
 `TimeBase` owns the rational common clock and integer-tick conversion.
-`ChargeDriveRequirement` carries caller-supplied charge-line requirements;
-physical environments validate membership. Records define units, array shapes
+Records define units, array shapes
 and borrow lifetimes without importing drivers, Module objects or GUI code.
 See the [program simulation contract](../program/v2/simulation/README.md) for
 frontend admission, round execution and ADC transport.

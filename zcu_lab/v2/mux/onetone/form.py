@@ -21,7 +21,7 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
 
     Generate one editable readout slot per group resonator. Preserve captured
     readout scalar settings when present, otherwise use the blank template.
-    Capture $participants in resonator order and 101 offsets from -1 to 1 MHz.
+    Capture $participants in resonator order and 101 offsets from -4 to 4 MHz.
     Missing/unbound aliases select all original indices. If the group
     names qubits, invalid pairings raise at Open/Reset. Groups without qubits
     still support resonator bring-up. With a slot, add five ringup times from
@@ -54,7 +54,7 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
             "relax_delay": 1.0,
             "reset": Hidden(),
             "readout": readout,
-            "df": Range(-1.0, 1.0, expts=101),
+            "df": Range(-4.0, 4.0, expts=101),
             "initial_delay": Hidden(),
         },
         fixed_elements=(READOUT_ELEMENTS,),

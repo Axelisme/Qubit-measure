@@ -28,7 +28,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
-from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
 from zcu_lab.v2.support import live_errorbar
 
@@ -64,7 +63,7 @@ class StirapDelaySummary(Centroid3Summary):
 class StirapDelayCfg(ConfigBase):
     """Measured carriers in MHz, signed gains and independent drive envelopes.
 
-    Pump addresses 0–3; Stokes addresses 2–3 on different charge generators.
+    Pump addresses 0–3; Stokes addresses 2–3 on different generators.
     Each waveform owns its duration in us. stokes_lead is a software sweep in
     us: positive starts Stokes first, negative starts Pump first, zero overlaps
     their starts. readout follows both drive ends and requires centroid3.
@@ -135,8 +134,8 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         """Software-sweep lead, play both branches, join, then classify one read.
 
         Positive lead starts Stokes first. Each drive retains its own envelope,
-        duration, measured carrier and signed gain. Both must bind charge lines
-        in physical simulation. One round collects cfg.shots at each lead.
+        duration, measured carrier and signed gain. One round collects cfg.shots
+        at each lead.
         Return requested lead coordinates and unnormalized g/e/f counts.
         Cancellation leaves unfinished points NaN; acquisition errors propagate.
         Missing centroid3 calibration fails before acquisition.
@@ -211,10 +210,6 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
                     rounds=1,
                     options=RunOptions(
                         converter=lambda sums: sums.reshape(len(STATE_LABELS))
-                    ),
-                    charge_requirements=(
-                        ChargeDriveRequirement("pump", cfg.pump_ch),
-                        ChargeDriveRequirement("stokes", cfg.stokes_ch),
                     ),
                 )
         return StirapDelayResult(stokes_leads=leads, counts=counts.data)

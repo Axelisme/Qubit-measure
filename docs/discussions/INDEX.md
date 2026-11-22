@@ -116,6 +116,7 @@
 - 2026-11-21 [牆鐘工具如何記錄 Run 失敗](2026-11-21-wall-time-run-failed.md)：失敗隔離。Controller 回報失敗時先寫列；idle 才續跑；exit status 區分未判定列與工具錯誤。
 - 2026-11-21 [牆鐘報表如何重建中斷列](2026-11-21-wall-time-interrupted-rows.md)：刪除或收窄。派送前 journal 不能證明 Run 耗時，重建不填秒數或下限。
 - 2026-11-22 [固定 FTF fixture 缺路由的十列](2026-11-22-wall-time-fixture-flux-routing.md)：量測邊界。固定 fixture 缺快磁通與共用 coil 的十列明示未量，不借示意係數或其他場景的 coil。
+- 2026-11-23 [牆鐘工具量手選場景](2026-11-23-curated-wall-time-scenes.md)：資料與量測邊界。工具自備 FTF 設定和乾淨 point，由維護者選場景，派送現行實驗，不掃描 guide。
 - 2026-11-21 [模擬器核心耗時：從完整 Run 讀，不建凍結場景](2026-11-21-simulator-core-time.md)：量測指標。3 分鐘目標讀完整 Run 中的編譯、演化、讀出與 raw materialize；延後的 raw 以 acquire 身分補列；不完整列只報下限，下限嚴格大於 180 秒才判超標；錄製重播與手寫場景因維護成本否決。
 
 - 2026-11-15 [模擬器測試與量測的分層](2026-11-15-simulator-test-measurement-layering.md)：分層。Kernel、dispatch、序列、前端與 environment 分開驗，退休 acquire e2e 量測，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
@@ -171,6 +172,9 @@
 - 2026-11-22 [Live-only 實驗的 figures-only Analyze](2026-11-22-figures-only-analyze.md)：Analyze 能力。四個 leaf 只從明確來源重畫具名圖，不增加數值結果或寫回。
 - 2026-11-22 [非均勻熱圖在建構時選色盤](2026-11-22-nonuniform-heatmap-cmap.md)：繪圖介面。作者在建構期傳入具名 cmap，預設與其他熱圖行為不變。
 - 2026-11-22 [GE 寫回保護先於診斷圖交付](2026-11-22-ge-gate-split-from-diagnostic.md)：交付切分。窄磚上診斷圖標籤仍相碰，寫回初選的中心檢查先獨立落地，直方圖與擬合 SNR 整批延到續作。
+- 2026-11-22 [GE 診斷圖保留四格](2026-11-22-ge-diagnostic-layout.md)：圖面取捨。assignment 移到兩列之間；當時採多數準備取色，後記說明改為銳化混色。
+- 2026-11-22 [GE Post 的準備顏色與分類邊界](2026-11-22-ge-post-preparation-majority.md)：讀圖語意。當時採準備共格取色；後記說明回到分格，分類邊界仍與上色分工。
+- 2026-11-23 [Mux GE Fit 用準備色，圖例標出 probe 來源](2026-11-22-mux-fit-preparation-color.md)：讀圖語意。Fit 與 Diagnostic 同用準備色；從 Fit 圖例追溯 Live 的取數列。
 - 2026-11-22 [實驗 guide 只寫操作者需要的內容](2026-11-22-guide-content.md)：文件範圍。改寫規則並清理 111 份 guide，通用操作移到共用頁，排錯與可重用判讀留在知識庫。
 
 ## Cfg 與表單
@@ -197,6 +201,7 @@
 - 2026-10-20 [框架去具體化：alias、模板、predictor 與一晶片一 qubit 假設](2026-10-20-framework-decoupling.md)：領域 alias、模板與模型認知留在 zcu_lab，框架的 owner 邊界見 [ADR-0072](../adr/0072-module-boundaries.md)。
 - 2026-11-22 [Two-qubit 的身分、定位與中性位置名](2026-11-22-two-qubit-identity-and-neutral-positions.md)：職責歸屬。Adapter 解析身分並傳定位數值，分析 options 接收標籤，位置沿用 `qubit1/qubit2`。
 - 2026-11-22 [頻譜擬合模型的求值 owner](2026-11-22-spectrum-fit-evaluation-owner.md)：擬合邊界。Fitting 重用同次係數，實驗 caller 決定窗內網格與呈現。
+- 2026-11-23 [Program 的模擬邏輯只在 mixin 內](2026-11-23-program-simulation-mixin.md)：依賴邊界。單輪模擬估時移入模擬子包，lab 不再傳模擬專用線路要求。
 
 ## 測試與驗證
 
