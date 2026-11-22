@@ -8,6 +8,8 @@ from qtpy.QtWidgets import QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidge
 
 from zcu_tools.gui.lifetime import LifetimeScope
 
+from .figure_caption import FigureCaption
+
 
 class DataFigureReading(QWidget):
     """Display one owner-rendered raster at native pixel size, or a local error.
@@ -30,7 +32,7 @@ class DataFigureReading(QWidget):
         escape.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         owner_scope.connect(escape.activated, on_dismiss)
 
-        self._caption = QLabel()
+        self._caption = FigureCaption()
         self._caption.setTextFormat(Qt.TextFormat.PlainText)
         self._caption.setWordWrap(True)
         layout.addWidget(self._caption)
@@ -48,7 +50,7 @@ class DataFigureReading(QWidget):
     def show_figure(self, caption: str, pixmap: QPixmap | None) -> None:
         """Present the raster, or a local render error when no pixmap is supplied."""
         self.clear()
-        self._caption.setText(caption)
+        self._caption.set_caption(caption)
         if pixmap is None:
             self._error.show()
             return
@@ -62,7 +64,7 @@ class DataFigureReading(QWidget):
 
     def clear(self) -> None:
         """Drop the displayed raster and error and reset scroll for the next figure."""
-        self._caption.clear()
+        self._caption.set_caption("")
         self._image.clear()
         self._scroll.hide()
         self._error.hide()

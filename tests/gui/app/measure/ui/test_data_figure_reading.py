@@ -556,7 +556,7 @@ def test_data_reads_selected_stage_and_member_and_restores_gallery_page(
     flow.screenshot(shots / "12-same-name-post.png")
 
 
-def test_long_member_names_fit_before_keyboard_open_at_narrow_width(
+def test_long_member_names_fit_in_gallery_and_reading_at_narrow_width(
     named_window: MainWindow, tmp_path: Path
 ) -> None:
     flow = ComponentDriver(named_window)
@@ -577,6 +577,7 @@ def test_long_member_names_fit_before_keyboard_open_at_narrow_width(
     first, second = (f"dataFigureView/analysis/{name}" for name in _LONG_MEMBERS)
     flow.click(object_name="dataFigureView/analysis/peak")
     flow.screenshot(shots / "02-peak-open.png")
+    short_caption_width, _ = _reading_viewport(flow)
     flow.press_key(Qt.Key.Key_Escape)
     assert flow.focused_input().object_name == "dataFigureView/analysis/peak"
     flow.screenshot(shots / "03-back-to-peak.png")
@@ -587,8 +588,14 @@ def test_long_member_names_fit_before_keyboard_open_at_narrow_width(
     assert flow.focused_input().object_name == second
     flow.screenshot(shots / "05-second-member-focused.png")
     flow.press_key(Qt.Key.Key_Space)
-    assert flow.observe(f"Analysis — {_LONG_MEMBERS[1]}").visible
     flow.screenshot(shots / "06-quadrature-open.png")
+    long_caption_width, _ = _reading_viewport(flow)
+    assert long_caption_width == short_caption_width
+    heading = f"Analysis — {_LONG_MEMBERS[1]}"
+    caption = next(
+        w for w in flow.visible().widgets if w.text.replace("\n", "") == heading
+    )
+    assert caption.caption_fits and caption.fully_visible
     flow.press_key(Qt.Key.Key_Escape)
     assert flow.focused_input().object_name == second
     flow.screenshot(shots / "07-preview-restored.png")

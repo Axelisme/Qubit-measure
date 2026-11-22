@@ -92,9 +92,10 @@ while stage cards retain their minimum width. Long names wrap so their endings
 are visible before opening a figure. Each thumbnail aspect-fits its label without
 cropping as the gallery resizes.
 Use `View figure` on a card, or Tab to the button and press Space, to read that
-stage and member without leaving Data. The reading pane shows one new raster
-at its rendered size. Scroll inside the pane when it does not fit. `Back to
-previews` or Escape returns to the selected card and restores its focus and page.
+stage and member without leaving Data. Long headings wrap without widening the
+reading pane. The pane shows one new raster at its rendered size. Scroll inside
+the pane when it does not fit. `Back to previews` or Escape returns to the
+selected card and restores its focus and page.
 
 `ExperimentFigureArea` resolves the request against the current native Figure on
 its Qt thread. The gallery holds only the raster. It discards that raster on a

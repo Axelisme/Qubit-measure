@@ -45,14 +45,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from qtpy.QtCore import QEvent, QObject, QSize, Qt
-from qtpy.QtGui import (
-    QHideEvent,
-    QPixmap,
-    QResizeEvent,
-    QShowEvent,
-    QTextLayout,
-    QTextOption,
-)
+from qtpy.QtGui import QHideEvent, QPixmap, QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -72,6 +65,7 @@ from zcu_tools.gui.widgets import secondary_colour, set_foreground
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .data_figure_reading import DataFigureReading
+from .figure_caption import FigureCaption
 from .figure_pager import FigurePager
 from .figure_pane_layout import FigurePaneLayout
 
@@ -100,49 +94,6 @@ type FigureStage = Literal["run", "analysis", "post_analysis"]
 class _ReadingRequest:
     stage: FigureStage
     button: QPushButton
-
-
-class _MemberCaption(QLabel):
-    """Wrap a member name to the tile width, including unbroken identifiers."""
-
-    def __init__(self, name: str) -> None:
-        super().__init__(name)
-        self._name = name
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-
-    def resizeEvent(self, a0: QResizeEvent | None) -> None:
-        super().resizeEvent(a0)
-        self._wrap_name()
-
-    def changeEvent(self, a0: QEvent | None) -> None:
-        super().changeEvent(a0)
-        if a0 is not None and a0.type() == QEvent.Type.FontChange:
-            self._wrap_name()
-
-    def _wrap_name(self) -> None:
-        width = self.contentsRect().width()
-        if width <= 0:
-            return
-        name = self._name
-        if self.fontMetrics().horizontalAdvance(name) > width:
-            breakable = name.replace("_", "_\u200b")
-            layout = QTextLayout(breakable, self.font())
-            option = QTextOption()
-            option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
-            layout.setTextOption(option)
-            # Qt line offsets count UTF-16 code units, not Python characters.
-            encoded = breakable.encode("utf-16-le")
-            parts: list[str] = []
-            layout.beginLayout()
-            while (line := layout.createLine()).isValid():
-                line.setLineWidth(width)
-                start = 2 * line.textStart()
-                end = start + 2 * line.textLength()
-                parts.append(encoded[start:end].decode("utf-16-le"))
-            layout.endLayout()
-            name = "\n".join(parts).replace("\u200b", "")
-        if self.text() != name:
-            self.setText(name)
 
 
 class _PreviewCard(QWidget):
@@ -174,7 +125,7 @@ class _PreviewCard(QWidget):
         # Header
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        title = _MemberCaption(display_name) if named_member else QLabel(display_name)
+        title = FigureCaption(display_name) if named_member else QLabel(display_name)
         title.setTextFormat(Qt.TextFormat.PlainText)
         title.setObjectName(f"previewTitle_{source_key}")
         title.setToolTip(display_name)
