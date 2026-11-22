@@ -894,9 +894,11 @@ Reduced workloads do not establish complete-Run speed or latency.
   jumps within an event, but does not switch states at the projection boundary.
 
 The table compares noiseless I/Q sums on the same ADC grids and phases. It uses
-ADC 0, the `ftf-demo/initial` R1 readout and the board and FTF settings in
-[`tools/data/experiment_wall_time`](../../../../../tools/data/experiment_wall_time/).
-The receiver flight time is 400 ns, and R1's photon decay rate is
+ADC 0 and the `ftf-demo/initial` R1 readout. The board, point and FTF settings
+are the historical `tools/data/experiment_wall_time/` files at the report
+candidate `a8ece4a3d7089a9dca7abce793ffc0e9ea86dbea`, not the current wall-time
+fixture. See the [original comparison](../../../../../docs/discussions/2026-11-21-ftf-readout-device-time-pairing.md)
+for scope and provenance. The receiver flight time is 400 ns, and R1's photon decay rate is
 `κ = 2π × 1.1 MHz`. Each comparison uses four fixed predecessor/owner histories
 from the same two DC states, `joint-0` and `joint-2`, corresponding to F1 g and e
 with the coupler and F2 in their ground states. These are conditional simulations
