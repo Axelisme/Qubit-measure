@@ -536,6 +536,12 @@ class MainWindow(QMainWindow):
         if tab_w is not None:
             tab_w.clear_all_figures()
 
+    def clear_tab_run_preview(self, tab_id: str) -> None:
+        """Clear the Data preview for a failed Run whose canvases were released."""
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is not None:
+            tab_w.clear_run_preview()
+
     def _set_tab_activity_marker(self, tab_id: str, *, active: bool) -> None:
         """Project Run activity on one top-level tab without storing busy state."""
         tab_w = self._tab_widgets.get(tab_id)

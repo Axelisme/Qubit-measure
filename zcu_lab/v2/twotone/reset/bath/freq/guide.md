@@ -1,8 +1,6 @@
-## Behavior
+**Readers:** operator, agent. Find the cavity RF frequency and gain that maximize bath-reset tomography contrast. Each shot uses optional preparation reset and preparation pulse, then simultaneous cavity and qubit drives, followed by a tomography π/2 pulse after the cavity tone and readout.
 
-**Readers:** operator, agent. Bath-reset cavity frequency/gain map: a 2D sweep of the bath reset's cavity-tone frequency × gain, with a 4-point pi/2 tomography phase cycle at each frequency/gain pair, imaging the residual coherence to locate the (freq, gain) pair that best dumps the excitation into the cavity bath. Runs on real hardware.
-
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-22
 
 ## Parameter sources
 
@@ -13,6 +11,16 @@ Open and Defaults capture the T1 used for starting values. A missing or null T1,
 ## Module slots
 
 Tested reset starts as an editable copy of the bath_reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. The pi/2 tone requires `$qubit.module.x90`; missing calibration leaves it Invalid. An editable copy starts with a 90-degree tomography offset. The saved module stays unchanged. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+
+## Acquisition and figures
+
+Reps starts at 1000 per sweep point and branch in each acquisition round; Rounds starts at 10. Check the requested Reps × Rounds in Analyze before comparing runs.
+
+At each cell, the tomography pulse uses 0°, 90°, 180° and 270° relative to the phase in Tested reset. The color value is |S180−S0|² + |S270−S90|², where S is the mean complex IQ at the indicated phase offset. Its unit is a.u.². This contrast detects phase-dependent response, not reset probability. The live title counts acquired cells; a 2D map has no per-cell shot SEM.
+
+Analyze uses the same raw contrast and marks the maximum of the smoothed contrast with a star. Use its cavity gain and RF as the fixed settings for the next duration and phase sweeps. For an edge maximum, move the corresponding scan window toward the star within the permitted settings and recheck for an interior peak. Layout reference: Ding, Fig. 5-8(b) (printed p. 151) uses a heatmap of population versus drive frequency and pulse plateau. Here the color is an IQ-derived contrast and the axes are separate controls of the tested reset.
+
+In Analyze, Peak selection filter chooses wavelet or Gaussian smoothing. Filter strength multiplies the wavelet threshold in a.u.; for Gaussian it is the standard deviation in sample steps. The star can move when these options change, although the plotted raw map stays the same.
 
 ## Typical writeback
 

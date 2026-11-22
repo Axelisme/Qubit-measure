@@ -57,11 +57,15 @@ def _caption_fits(widget: QWidget) -> bool:
             widget.fontMetrics().horizontalAdvance(widget.currentText())
             <= text_rect.width()
         )
-    if isinstance(widget, QLabel) and widget.wordWrap():
+    if isinstance(widget, QLabel) and (widget.wordWrap() or "\n" in widget.text()):
+        flags = Qt.TextFlag.TextWordWrap if widget.wordWrap() else Qt.TextFlag(0)
         bounds = widget.fontMetrics().boundingRect(
-            widget.contentsRect(), Qt.TextFlag.TextWordWrap, widget.text()
+            widget.contentsRect(), flags, widget.text()
         )
-        return bounds.height() <= widget.contentsRect().height()
+        return (
+            bounds.width() <= widget.contentsRect().width()
+            and bounds.height() <= widget.contentsRect().height()
+        )
     if isinstance(widget, (QAbstractButton, QLabel)):
         return (
             widget.fontMetrics().horizontalAdvance(widget.text())

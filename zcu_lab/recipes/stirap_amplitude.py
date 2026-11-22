@@ -29,56 +29,48 @@ class StirapAmplitudeInputs(RecipeInputs):
     target: SingleTarget
     reuse_tab_id: ReuseTabId
     overrides: Overrides
-    pump_freq_mhz: float = Field(description="Measured Pump 0–3 carrier in MHz.")
-    stokes_freq_mhz: float = Field(description="Measured Stokes 3–2 carrier in MHz.")
-    pump_start: float = Field(
-        description="First signed Pump gain in a.u., within [-1, 1]."
+    pump_freq_mhz: float = Field(
+        description="Set Pump carrier 0–3 (MHz) to the measured transition frequency."
     )
-    pump_stop: float = Field(
-        description="Last signed Pump gain in a.u., within [-1, 1]."
+    stokes_freq_mhz: float = Field(
+        description="Set Stokes carrier 3–2 (MHz) to the measured transition frequency."
     )
-    pump_n: int = Field(
-        ge=2, description="Pump gain samples, mapped to pump_gain.expts."
-    )
-    stokes_start: float = Field(
-        description="First signed Stokes gain in a.u., within [-1, 1]."
-    )
-    stokes_stop: float = Field(
-        description="Last signed Stokes gain in a.u., within [-1, 1]."
-    )
-    stokes_n: int = Field(
-        ge=2, description="Stokes gain samples, mapped to stokes_gain.expts."
-    )
+    pump_start: float = Field(description="Set Pump gain › Start (a.u.).")
+    pump_stop: float = Field(description="Set Pump gain › Stop (a.u.).")
+    pump_n: int = Field(ge=2, description="Set Pump gain › Expts (count).")
+    stokes_start: float = Field(description="Set Stokes gain › Start (a.u.).")
+    stokes_stop: float = Field(description="Set Stokes gain › Stop (a.u.).")
+    stokes_n: int = Field(ge=2, description="Set Stokes gain › Expts (count).")
     pump_ch: int | None | Keep = Field(
-        KEEP, description="Pump charge generator; omitted retains, null reaches owner."
+        KEEP, description="Set Pump generator (channel)."
     )
     stokes_ch: int | None | Keep = Field(
         KEEP,
-        description="Stokes charge generator, distinct from Pump; omitted retains, null reaches owner.",
+        description="Set Stokes generator (channel).",
     )
     pump_waveform_ref: str | None | Keep = Field(
         KEEP,
-        description="Pump envelope library key or inline option; omitted retains, null reaches owner.",
+        description="Set Pump waveform to a library key or exact inline option.",
     )
     stokes_waveform_ref: str | None | Keep = Field(
         KEEP,
-        description="Stokes envelope library key or inline option; omitted retains, null reaches owner.",
+        description="Set Stokes waveform to a library key or exact inline option.",
     )
     stokes_lead_us: float | None | Keep = Field(
         KEEP,
-        description="Fixed Stokes lead/µs, positive starts Stokes first; omitted retains, null reaches owner.",
+        description="Set Stokes lead (µs); positive starts Stokes first.",
     )
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key with centroid3 calibration; omitted retains, null reaches owner.",
+        description="Set Readout to a module with saved centroid3 calibration.",
     )
     shots: int | None | Keep = Field(
         KEEP,
-        description="Repetitions at each gain pair in one round; omitted retains, null reaches owner.",
+        description="Set Shots per point (count).",
     )
     relax_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Relaxation after every shot in µs; omitted retains, null reaches owner.",
+        description="Set Relax delay (µs).",
     )
 
 
@@ -87,7 +79,7 @@ class StirapAmplitudeReport(RecipeReport):
 
     f_population_estimate: float | None = Field(
         default=None,
-        description="Largest finite corrected f population (unitless, unclipped) on this grid, not fidelity or a global optimum. Null when unavailable.",
+        description="Peak corrected f fraction (unitless and unclipped) on the sampled grid; null when unavailable.",
     )
     pump_gain: float | None = Field(
         default=None,

@@ -1,14 +1,10 @@
-## Behavior
-
-**Readers:** operator, agent. Two-tone qubit spectroscopy: drives a qubit probe tone while reading out the resonator, sweeps the drive frequency, and fits the qubit response (Lorentzian or sinc) to extract the qubit transition frequency and its linewidth. Runs on the configured SoC, including an explicitly launched offline environment. In hardware first bring-up, run it after onetone/flux_dep has found the scanned device's integer reference in `$qubit.flux` and onetone/freq has re-calibrated the resonator at that flux.
-
-**Last updated:** 2026-11-16, local peak selection and fit window
+**Readers:** operator, agent. Sweep the qubit drive RF frequency, identify a transition and fit its center and linewidth.
 
 After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Parameter sources
 
-Open and Defaults fill editable starting values from captured calibration. The frequency sweep starts with 301 points at `$qubit.freq` ± 20 * `$qubit.kappa`, in MHz. The endpoints and point count remain editable. Existing edits persist until Defaults evaluates the starting values again. The fresh probe reads `$qubit.freq` and `$qubit.wiring.ch`; its gain is 0.1 and waveform length is 1.0 µs, independent of the calibrated x180 pulse length. The readout template reads `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch` for its tones and channels, and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Missing or invalid required parameter sources leave the affected fields empty and Invalid. Supply valid calibration or direct values before Run. For a first qubit search, supply the frequency window yourself. Review the hardware-safe passband and enter a user-approved wide sweep.
+Open and Defaults fill editable starting values from captured calibration. **Probe RF frequency** starts with 301 points at `$qubit.freq` ± 20 * `$qubit.kappa`, in MHz. The endpoints and point count remain editable. Existing edits persist until Defaults evaluates the starting values again. The fresh probe reads `$qubit.freq` and `$qubit.wiring.ch`; its gain is 0.1 and waveform length is 1.0 µs, independent of the calibrated x180 pulse length. The readout template reads `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch` for its tones and channels, and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Missing or invalid required parameter sources leave the affected fields empty and Invalid. Supply valid calibration or direct values before Run. For a first qubit search, supply the frequency window yourself. Review the hardware-safe passband and enter a user-approved wide sweep.
 
 ## Module slots
 
@@ -33,6 +29,12 @@ prepared 3–2 fit to the generic qubit.freq slot as though it were 0–1.
 Use the measured 0–3 and 3–2 carriers as Pump and Stokes inputs in subsequent
 experiments. See the [integer-fluxonium environment](../../../simulation_envs/integer_fluxonium/README.md)
 for offline settings, units and reference-only limits.
+
+## Read the spectrum
+
+Run shows the magnitude after subtracting the median complex IQ from each acquired spectrum. Its horizontal axis is the probe RF frequency in MHz and its vertical axis is background-subtracted IQ magnitude in a.u. A peak locates a change in the resonator response, not a qubit population. Run shows the acquired RF points. Analyze uses the same observable for a Lorentzian fit. The sinc option instead uses a signed IQ principal-axis projection so negative sidelobes remain visible. The Analyze acquisition summary gives Reps × Rounds from the selected Run or Load. Reps is the shot count per frequency per round, Rounds is the number of averaging passes and Relax delay is the wait after each shot. Defaults start at 1000, 10 and 1 µs. Leave Early-stop SNR empty to use all rounds.
+
+The scan locates a peak, so it does not show pointwise shot SEM. The uncertainties next to **Qubit frequency** and **FWHM** are fit parameter errors in MHz, not uncertainties on each shot average. Use a narrow scan around the detected peak and resolve several samples per linewidth before using the width. For example, if five megahertz of the scan sits between samples and the line fits to a one-megahertz FWHM, use a step much smaller than one megahertz and retake the spectrum before writing back.
 
 ## Peak selection
 
@@ -66,9 +68,7 @@ samples. Overlapping transitions can still bias a single-peak fit.
 The Lorentzian fit starts from the detected positive peak's center and width.
 Its baseline may lie below the window minimum because the edges still contain
 peak tails.
-Analysis shades the actual fitted interval and labels its bounds in MHz.
-It draws the fitted curve and the red line at the fitted center.
-Dotted gray lines mark other candidates.
+Analysis shades the actual fitted interval. The dotted line marks the fitted center and gray triangles mark other candidates. Check that the fit follows the measured points inside the shaded interval, including the peak shoulders. Candidate SNR is the selected candidate's height above the median in noise sigma, not a goodness-of-fit score.
 Candidate center and width are sampled estimates, not fitted frequency or FWHM.
 `truncated=True` means the scan clips a half-prominence crossing.
 Widen or recenter that scan before using its linewidth.
@@ -89,7 +89,7 @@ supplied center and span.
 
 ## Recommended
 
-Standard flow at a freshly calibrated actual integer-flux bias: first run a wide survey over the user-approved passband to find a real qubit feature, and use the measured response as the evidence. Predictor output and simulator truth are not evidence of a measured qubit line. Then run a narrower scan around the observed feature and fit it. Analysis defaults to the Lorentzian fit ('lor'); switch to 'sinc' for power-broadened or saturated lines. If the scan looks like noise, widen/re-centre and check readout/gain before concluding there is no qubit.
+Standard flow at a freshly calibrated actual integer-flux bias: first run a wide survey over the user-approved passband to find a real qubit feature, and use the measured response as the evidence. Predictor output and simulator truth are not evidence of a measured qubit line. Then run a narrower scan around the observed feature and fit it. Analysis defaults to the Lorentzian fit ('lor'); switch to 'sinc' when a finite-duration probe produces visible signed sidelobes. If the scan looks like noise, widen/re-centre and check readout/gain before concluding there is no qubit.
 
 ## Four starting situations
 

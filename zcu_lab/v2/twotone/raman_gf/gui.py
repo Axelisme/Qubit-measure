@@ -26,10 +26,24 @@ def _analyze(
     return RamanGFExp().analyze(req.run_result, None, plots=plots)
 
 
+def _summary_lines(source: RunRecord[RamanGFCfg, RamanGFResult]) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    lines = [f"Reps × Rounds: {cfg.shots} × 1"]
+    if cfg.scan_mode == "frequency":
+        lines.append(f"Applied drive gain: {source.result.gains[0]:.6g} a.u.")
+    elif cfg.scan_mode == "gain":
+        lines.append(
+            f"Applied two-photon detuning: {source.result.detunings[0]:.6g} MHz"
+        )
+    return tuple(lines)
+
+
 DEFINITION = Adapter(
     spec=RamanGFExp.AXES_SPEC,
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )
