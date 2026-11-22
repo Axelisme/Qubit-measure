@@ -49,7 +49,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.single_shot.ge import (
     GEFitOptions,
     GENumericalError,
-    plot_ge_classification_boundary,
     plot_ge_iq_density,
     singleshot_ge_analysis,
 )
@@ -69,7 +68,9 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     validate_participants,
 )
-from zcu_lab.v2.support.singleshot.center_quality import ge_centers_identifiable
+from zcu_lab.v2.support.singleshot.classification_plot import (
+    plot_ge_classification_boundary,
+)
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state
 
 
@@ -359,12 +360,11 @@ def _failure_plot(plots: Plots, name: str, reason: str) -> None:
 
 
 def _probe_iq_legend(ax: Axes) -> None:
-    markers, _ = ax.get_legend_handles_labels()
+    """Label the Live IQ density on ax by acquisition row, not preparation."""
     ax.legend(
         handles=[
             Patch(color="blue", label="Probe off"),
             Patch(color="red", label="Probe on"),
-            *markers,
         ]
     )
 
@@ -385,7 +385,6 @@ def _mark_ge_fit(ax: Axes, fit: GEAnalysis) -> None:
         marker="x",
         label="Fitted centers",
     )
-    _probe_iq_legend(ax)
     ratio = (
         "Integration window / T1 unavailable"
         if fit.length_ratio is None
@@ -405,7 +404,7 @@ def _mark_ge_fit(ax: Axes, fit: GEAnalysis) -> None:
                 parts.append(f"{name}: R² {r2}, normalized RMS {rms}")
         if parts:
             title += "\n" + "\n".join(parts)
-    ax.set_title(title, fontsize=10)
+    ax.set_title(title, fontsize=10, pad=46)
 
 
 def _plot_confusion_matrix(
@@ -416,6 +415,7 @@ def _plot_confusion_matrix(
     plots: Plots,
     figure_name: str,
 ) -> None:
+    """Draw one tone's ordered g/e IQ, classifier and both Post matrices."""
     fig, _ = plots.subplots(
         num=figure_name,
         nrows=2,
@@ -460,6 +460,7 @@ def _plot_confusion_matrix(
 
 
 def _plot_post_matrix(ax: Axes, matrix: NDArray[np.float64]) -> None:
+    """Draw a 3×3 g/e/Other fraction matrix as labeled percentages on ax."""
     ax.imshow(matrix, cmap="Blues", aspect="auto")
     ax.grid(False)
     states = ("g", "e", "Other")
@@ -620,6 +621,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                 ylabel="Q per shot (a.u.)",
                 title="Acquired shots: 0 count",
             )
+            ax.grid(False)
             _probe_iq_legend(ax)
             image = plot_ge_iq_density(ax, empty, empty)
             live_frames.append((fig, ax, image))
@@ -719,53 +721,71 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             )
             cfg = source.cfg
             tone = f"Tone {index}" if cfg is None else cfg.tones[index].name
-            figure, axes = plots.subplots(num=name, figsize=(7, 5))
+            figure, axes = plots.subplots(
+                num=name, figsize=(7, 5), layout="constrained"
+            )
             figure.suptitle(f"Mux single-shot GE · {tone} · Readout IQ")
-            off, on = source.result.signals[row]
-            plot_ge_iq_density(axes, off, on)
+            plot_ge_iq_density(axes, signals[0], signals[1])
             axes.set(xlabel="I per shot (a.u.)", ylabel="Q per shot (a.u.)")
-            _probe_iq_legend(axes)
+            axes.grid(False)
             if not np.isfinite(signals).all():
                 reason = "GE fit requires both complete probe-off/on preparations"
                 _failure_plot(plots, name, reason)
                 outcomes.append(MuxFitFailure(index, reason))
-                continue
-            try:
-                # 3. Calibrate each complete GE pair with its selected backend and alignment policy.
-                # Configured tones: diagnostic_0, diagnostic_1, diagnostic_2, diagnostic_3,
-                # diagnostic_4, diagnostic_5, diagnostic_6, diagnostic_7.
-                fidelity, init_pops, fit = singleshot_ge_analysis(
-                    signals,
-                    angle=option.angle,
-                    backend=option.backend,
-                    options=GEFitOptions(
-                        logscale=option.logscale,
-                        align_t1=option.align_t1,
-                        length_ratio=option.length_ratio,
-                        centers_identifiable=ge_centers_identifiable,
-                    ),
-                    plots=plots,
-                    figure_name=f"diagnostic_{index}",
-                )
-                primary = GEAnalysis(
-                    initial_state=option.initial_state,
-                    fidelity=fidelity,
-                    theta=fit["theta"],
-                    threshold=fit["threshold"],
-                    ge_s=fit["s"],
-                    g_center=fit["g_center"],
-                    e_center=fit["e_center"],
-                    init_pops=init_pops,
-                    length_ratio=fit["length_ratio"],
-                    fit_quality=fit["fit_quality"],
-                )
-                primary.validate_calibration()
-                _mark_ge_fit(axes, primary)
-                figure.tight_layout()
-                outcomes.append(MuxGEAnalysis(index, primary))
-            except (GENumericalError, AnalysisFailed) as exc:
-                _failure_plot(plots, name, str(exc))
-                outcomes.append(MuxFitFailure(index, str(exc)))
+            else:
+                try:
+                    # 3. Calibrate each complete GE pair with its selected backend and alignment policy.
+                    # Configured tones: diagnostic_0, diagnostic_1, diagnostic_2, diagnostic_3,
+                    # diagnostic_4, diagnostic_5, diagnostic_6, diagnostic_7.
+                    fidelity, init_pops, fit = singleshot_ge_analysis(
+                        signals,
+                        angle=option.angle,
+                        backend=option.backend,
+                        options=GEFitOptions(
+                            logscale=option.logscale,
+                            align_t1=option.align_t1,
+                            length_ratio=option.length_ratio,
+                            raw_iq_diagnostic=True,
+                        ),
+                        plots=plots,
+                        figure_name=f"diagnostic_{index}",
+                    )
+                    primary = GEAnalysis(
+                        initial_state=option.initial_state,
+                        fidelity=fidelity,
+                        theta=fit["theta"],
+                        threshold=fit["threshold"],
+                        ge_s=fit["s"],
+                        g_center=fit["g_center"],
+                        e_center=fit["e_center"],
+                        init_pops=init_pops,
+                        length_ratio=fit["length_ratio"],
+                        fit_quality=fit["fit_quality"],
+                    )
+                    primary.validate_calibration()
+                    _mark_ge_fit(axes, primary)
+                    outcomes.append(MuxGEAnalysis(index, primary))
+                except (GENumericalError, AnalysisFailed) as exc:
+                    _failure_plot(plots, name, str(exc))
+                    outcomes.append(MuxFitFailure(index, str(exc)))
+
+            # Name the same two rows used by the fit without conflating prep with classification.
+            g_probe, e_probe = (
+                ("off", "on") if option.initial_state == "ground" else ("on", "off")
+            )
+            markers, _ = axes.get_legend_handles_labels()
+            axes.legend(
+                handles=[
+                    Patch(color="blue", label=f"g prep (probe {g_probe})"),
+                    Patch(color="red", label=f"e prep (probe {e_probe})"),
+                    *markers,
+                ],
+                loc="lower center",
+                bbox_to_anchor=(0.5, 1),
+                ncols=2,
+                frameon=False,
+                fontsize=10,
+            )
         # 4. Keep per-tone GE calibrations and quality, including incomplete-pair or numerical failures.
         return tuple(outcomes)
 

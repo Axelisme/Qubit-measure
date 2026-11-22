@@ -24,7 +24,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.single_shot.ge import (
     GEFitOptions,
     GENumericalError,
-    plot_ge_classification_boundary,
     plot_ge_iq_density,
     singleshot_ge_analysis,
 )
@@ -33,7 +32,9 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, PulseReadout, Reset, TimelineBuilder
 
-from zcu_lab.v2.support.singleshot.center_quality import ge_centers_identifiable
+from zcu_lab.v2.support.singleshot.classification_plot import (
+    plot_ge_classification_boundary,
+)
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to_signal
 
 
@@ -127,6 +128,7 @@ def _plot_post(
     signals: tuple[NDArray[np.complex128], NDArray[np.complex128]],
     plots: Plots,
 ) -> None:
+    """Draw ordered g/e IQ, the fitted classifier and both Post matrices."""
     fig, _ = plots.subplots(
         num="post",
         nrows=2,
@@ -171,6 +173,7 @@ def _plot_post(
 
 
 def _plot_post_matrix(ax: Axes, matrix: NDArray[np.float64]) -> None:
+    """Draw a 3×3 g/e/Other fraction matrix as labeled percentages on ax."""
     ax.imshow(matrix, cmap="Blues", aspect="auto")
     ax.grid(False)
     states = ("g", "e", "Other")
@@ -253,7 +256,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
 
         figure, axes = context.plots.subplots(num="measurement")
         axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
-        axes.grid()
+        axes.grid(False)
         axes.legend(
             handles=[
                 Patch(color="blue", label="g preparation (probe off)"),
@@ -338,7 +341,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         _, axes = plots.subplots(num="fit")
         plot_ge_iq_density(axes, signals[0], signals[1])
         axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
-        axes.grid()
+        axes.grid(False)
         axes.legend(
             handles=[
                 Patch(color="blue", label="g preparation"),
@@ -354,7 +357,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
                 logscale=options.logscale,
                 align_t1=options.align_t1,
                 length_ratio=options.length_ratio,
-                centers_identifiable=ge_centers_identifiable,
+                raw_iq_diagnostic=True,
             ),
             plots=plots,
             figure_name="diagnostic",

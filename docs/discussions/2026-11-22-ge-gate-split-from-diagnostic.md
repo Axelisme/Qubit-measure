@@ -44,3 +44,7 @@ basis:
 ## 依據
 
 使用者原先要求：「我需要看那个 histogram，没有 histogram，只看散点图根本看不出什么」。分流沒有改這項要求。[ADR-0072 的實驗分工](../adr/0072-module-boundaries.md#實驗計算與-gui-接線)讓 adapter 決定寫回，分析與繪圖不消費寫回 note。[Families 部分交付](2026-11-22-families-partial-delivery.md)同樣把未驗範圍列為缺口；GE 不同之處是重建一個不含圖的候選，沒有直接採用原合併候選。[Data 閱讀面](2026-11-22-data-figure-reading.md)的判讀契約也不能代替 Analysis 或 Save 的版面驗收。原始離線圖、調查記錄與批次收據未入庫。
+
+## 後記（2026-11-23）
+
+續作恢復四格圖與同次 SNR 標準誤。使用者撤回圖上的中心門檻判定；寫回保護照舊。見 [四格版面討論的後記](2026-11-22-ge-diagnostic-layout.md#後記2026-11-23)。

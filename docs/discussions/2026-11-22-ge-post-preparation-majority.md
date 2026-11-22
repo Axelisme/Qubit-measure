@@ -38,4 +38,8 @@ Designer 裁定兩個 GE Post 各用一張原始 IQ 圖。每格按 g／e 準備
 
 ## 依據
 
-2026-11-22 的裁定與原始討論未入庫。操作者的讀圖入口為[單 tone GE guide](../../zcu_lab/v2/singleshot/ge/guide.md#read-the-post-figure)與 [mux GE guide](../../zcu_lab/v2/mux/singleshot_ge/guide.md#read-the-post-figure)。舊圖與分類計算見上述基準 commit 的兩個 GE core 與 [singleshot 數值工具](../../lib/zcu_tools/analysis/singleshot.py)。
+2026-11-22 的裁定與原始討論未入庫。操作者的讀圖入口為[單 tone GE guide](../../zcu_lab/v2/singleshot/ge/guide.md#how-to-read-the-results)與 [mux GE guide](../../zcu_lab/v2/mux/singleshot_ge/guide.md#read-the-plots-and-use-the-result)。舊圖與分類計算見上述基準 commit 的兩個 GE core 與 [singleshot 數值工具](../../lib/zcu_tools/analysis/singleshot.py)。
+
+## 後記（2026-11-23）
+
+使用者確認 Post 依原本配置分開兩種準備：「我认为 post 图片原本就是分开的，那就用分开的。」共格多數取色未採用。左上只畫 g 準備的藍色密度，左下只畫 e 準備的紅色密度；兩格都疊分類線，右欄保留兩個矩陣。原討論未入庫，[現行圖形規則](../../zcu_lab/v2/figure-style.md#r4尺度跟著資料走)說明顏色與分類的分工。

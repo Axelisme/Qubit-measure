@@ -1,6 +1,6 @@
-# Single-shot GE readout calibration
-
 **Readers:** operator, agent. Calibrate readout from two IQ clouds acquired with the π probe off and on.
+
+# Single-shot GE readout calibration
 
 ## What is measured
 
@@ -19,14 +19,13 @@ Primary rotates the IQ plane and fits the projected histograms to estimate the g
 ## How to read the results
 
 - **Live** uses blue for probe off and red for probe on. **Analyze Fit** maps the same I/Q shots (a.u.) to g preparation in blue and e preparation in red using **Initial State**. Each IQ bin mixes blue and red using the sixth powers of the two shot fractions, normalized to sum to one. A 60:40 split gives about 92:8 in color; equal counts give purple. Opacity rises with the log of the total shot count, and empty bins are transparent. These are shot distributions, not means with shot SEM bars.
-- **Diagnostic** shows raw, equal-scale I/Q and the fitted centers at top left. The bottom left overlays projected histograms with the fitted curves; `Fraction per bin` is normalized separately for each preparation. The text between the rows gives the prepared-label and ideal-model assignment scores. On the right, compare the fitted components and fractions for g preparation above and e preparation below. **Fitted SNR** is the projected center separation divided by the fitted common width; ± is the standard error from the same joint fit. `unavailable` means that error cannot be estimated, and `not identifiable` means a center failed the relative-error check.
-- For the joint histogram fit, R² measures explained variation, normalized residual RMS measures the size of the mismatch, and the relative width and center errors compare fitted standard errors with the magnitudes of the fitted values. A poor fit makes inferred preparation mixtures and the Post correction unreliable, even if an assignment score is available.
+- **Diagnostic** shows raw, equal-scale I/Q and the fitted centers at top left. The bottom left overlays projected histograms with the fitted curves; `Fraction per bin` is normalized separately for each preparation. The text between the rows gives the prepared-label and ideal-model assignment scores. On the right, compare the fitted components and fractions for g preparation above and e preparation below. **Fitted SNR** is the projected center separation divided by the fitted common width; ± is the standard error from the same joint fit. `unavailable` marks an estimate the fit cannot report.
+- For the joint histogram fit, R² measures explained variation, normalized residual RMS measures mismatch relative to the histogram range, and the relative width and center errors compare fitted standard errors with the magnitudes of the fitted values. A poor fit makes inferred preparation mixtures and the Post correction unreliable, even if an assignment score is available.
 - **Post-Analysis** classifies by nearest center inside its radius, not by the Primary threshold. Its left column shows raw, equal-scale I/Q for g preparation in blue above and e preparation in red below. Opacity follows the log of the shot count in each bin; color does not indicate the classified label. Both panels mark the fitted centers, radius boundaries and the boundary midway between the centers where the disks overlap. Read the observed g/e/Other fractions above each panel before comparing the matrices: **Initial Populations** estimates the mixture for each preparation, and **Classifier confusion** estimates measured outcomes by state after removing that mixture. The condition number measures how sensitive the correction is to input errors. Other (`|L⟩`) is a rejected class, not an identified leakage level.
 
 ## Next step
 
-Primary is preselected only if the joint fit has R² ≥ 0.9, normalized residual RMS ≤ 0.1, relative width error ≤ 0.5, and g/e relative center errors each ≤ 0.5; if any check fails or a required metric is missing, nonfinite or marked invalid, it is not preselected.
-Post also requires a finite condition number ≤ 10 for preselection. A candidate left unchecked is still selectable. Inspect IQ separation and fit quality before accepting either proposal; if the clouds overlap, check preparation and readout before rerunning.
+Primary preselection checks joint-fit quality. If it is unchecked, read the **Writeback** note. Post must also have a finite condition number ≤ 10 for preselection. A candidate left unchecked is still selectable. Inspect IQ separation and fit quality before accepting either proposal; if the clouds overlap, check preparation and readout before rerunning.
 
 Writeback replaces the Run's bound readout module classifier: Primary writes g/e centers, and Post adds radius and the 3×3 confusion matrix. Primary applied *after* Post clears the radius and matrix. Post can be accepted on its own; the recipe asks separately for each stage. Writeback requires the measured readout settings to match the captured library module apart from its classifier. Changing readout settings does not invalidate the stored classifier automatically; rerun GE and Post before using it for the new settings.
 

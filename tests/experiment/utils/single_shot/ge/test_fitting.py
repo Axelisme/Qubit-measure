@@ -9,7 +9,6 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import ValidationError
 from scipy.special import ndtri
-from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.fitting.singleshot import calc_population_pdf
 from zcu_tools.experiment.utils.single_shot import ge
 from zcu_tools.experiment.utils.single_shot.ge import (
@@ -390,7 +389,7 @@ def test_ge_diagnostic_sharpens_binned_raw_preparation_colors(
         singleshot_ge_analysis(
             np.concatenate((signals, shots), axis=1),
             angle=angle,
-            options=GEFitOptions(centers_identifiable=lambda _: True),
+            options=GEFitOptions(raw_iq_diagnostic=True),
             plots=plots,
         )
         images = [img for ax in plots["fit"].axes for img in ax.get_images()]
@@ -459,23 +458,13 @@ def test_ge_iq_density_refreshes_the_blank_image_and_rescales_to_current_shots()
     assert ax.get_title() == "Live GE"
 
 
-@pytest.mark.parametrize("identifiable", [True, False])
 def test_fitted_snr_uses_joint_covariance_and_preserves_the_fit(
-    monkeypatch: pytest.MonkeyPatch, *, identifiable: bool
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     signals = _known_joint_fit(
         monkeypatch,
         np.array([[0.25, 0.06, 0.02], [0.06, 0.16, -0.01], [0.02, -0.01, 0.04]]),
     )
-    received: list[FitQuality] = []
-
-    def center_check(quality: FitQuality) -> bool:
-        received.append(quality)
-        return identifiable
-
-    def unexpected_check(_quality: FitQuality) -> bool:
-        pytest.fail("fit-only analysis called its plot predicate")
-
     plots = Plots(NonPresentingHost())
     try:
         baseline = singleshot_ge_analysis(signals, angle=0.0, plots=plots)
@@ -483,12 +472,12 @@ def test_fitted_snr_uses_joint_covariance_and_preserves_the_fit(
         fit_only = singleshot_ge_analysis(
             signals,
             angle=0.0,
-            options=GEFitOptions(centers_identifiable=unexpected_check),
+            options=GEFitOptions(raw_iq_diagnostic=True),
         )
         annotated = singleshot_ge_analysis(
             signals,
             angle=0.0,
-            options=GEFitOptions(centers_identifiable=center_check),
+            options=GEFitOptions(raw_iq_diagnostic=True),
             plots=plots,
             figure_name="diagnostic",
         )
@@ -509,36 +498,30 @@ def test_fitted_snr_uses_joint_covariance_and_preserves_the_fit(
         )
         # J C J^T = 1.59. A diagonal-only estimate would display 1.19.
         assert "Fitted SNR = 5 ± 1.26" in title
-        assert ("not identifiable" in title) is not identifiable
-        assert received == [annotated[2]["fit_quality"]["joint"]]
     finally:
         plots.finish(present=False)
         plots.release()
 
 
 @pytest.mark.parametrize(
-    ("covariance", "identifiable"),
+    "covariance",
     [
         pytest.param(
             [[1.0, np.nan, 0.0], [np.nan, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            False,
             id="nonfinite-cross-term",
         ),
-        pytest.param(np.diag([-0.1, 1.0, 1.0]), True, id="negative-diagonal"),
-        pytest.param(np.zeros((3, 3)), True, id="zero-variance"),
+        pytest.param(np.diag([-0.1, 1.0, 1.0]), id="negative-diagonal"),
+        pytest.param(np.zeros((3, 3)), id="zero-variance"),
         pytest.param(
             [[1.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 0.01]],
-            True,
             id="negative-projection",
         ),
-        pytest.param(np.diag([1.0, 1.0, 1e308]), True, id="overflowing-projection"),
+        pytest.param(np.diag([1.0, 1.0, 1e308]), id="overflowing-projection"),
     ],
 )
 def test_fitted_snr_keeps_successful_figure_when_standard_error_unavailable(
     monkeypatch: pytest.MonkeyPatch,
     covariance: NDArray[np.float64] | list[list[float]],
-    *,
-    identifiable: bool,
 ) -> None:
     signals = _known_joint_fit(monkeypatch, np.asarray(covariance))
     plots = Plots(NonPresentingHost())
@@ -547,12 +530,11 @@ def test_fitted_snr_keeps_successful_figure_when_standard_error_unavailable(
             signals,
             angle=0.0,
             plots=plots,
-            options=GEFitOptions(centers_identifiable=lambda _: identifiable),
+            options=GEFitOptions(raw_iq_diagnostic=True),
         )
         assert len(plots["fit"].axes) == 4
         text = " ".join(t.get_text() for t in plots["fit"].texts)
         assert "Fitted SNR = 5 ± unavailable" in text
-        assert ("unavailable (not identifiable)" in text) is not identifiable
     finally:
         plots.finish(present=False)
         plots.release()

@@ -38,3 +38,7 @@ A 為 assignment 留出列間空間，不用移除分解或縮短 `Fraction per 
 ## 依據
 
 版面與上色由使用者於 2026-11-22 裁定，參考 PNG 與原討論未入庫。操作者的讀圖入口為 [單 tone GE guide](../../zcu_lab/v2/singleshot/ge/guide.md) 和 [mux GE guide](../../zcu_lab/v2/mux/singleshot_ge/guide.md)。等比例與柱子的畫法記在 [圖形呈現指南](../../zcu_lab/v2/figure-style.md#r4尺度跟著資料走)。
+
+## 後記（2026-11-23）
+
+版面 A 保留。使用者看取色比較後說「我认为伽马等于6的效果最好」。原始 IQ 改用 γ=6 銳化混色，不再取多數色。使用者也撤回圖上的門檻判定，並確認「我認同判斷標準是『事實』還是『判斷』」。因此總標題列 SNR、標準誤與同次 joint fit 品質；中心相對誤差不過門檻的理由仍由 Writeback note 說明。原討論未入庫，現行取色與讀法見上列指南。

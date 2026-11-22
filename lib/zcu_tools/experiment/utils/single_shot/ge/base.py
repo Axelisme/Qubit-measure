@@ -8,6 +8,7 @@ from typing import Any, cast
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -224,10 +225,9 @@ class GEFitOptions:
     None; a fixed length_ratio bypasses this check. The default 1.0 corresponds
     to fit_tools' sigma(ln p) > 1 weak-parameter rule. Nonpositive or nonfinite
     thresholds raise ValidationError at construction.
-    centers_identifiable opts into the four-panel GE diagnostic with raw IQ,
-    fitted SNR and first-order standard error. Only a plotted fit calls this
-    joint FitQuality predicate. A false result labels the SNR not identifiable.
-    None keeps the default rotated IQ figure and does not check the centers.
+    raw_iq_diagnostic shows raw IQ, fitted SNR with first-order standard error,
+    and joint fit quality. False retains the default rotated IQ figure. This
+    option affects only plotted fits.
     """
 
     numbins: int | str = "auto"
@@ -240,7 +240,7 @@ class GEFitOptions:
     length_ratio_max_relative_error: float = Field(
         default=1.0, gt=0.0, allow_inf_nan=False
     )
-    centers_identifiable: Callable[[FitQuality], bool] | None = None
+    raw_iq_diagnostic: bool = False
 
 
 def fitting_ge_and_plot(
@@ -398,7 +398,7 @@ def fitting_ge_and_plot(
         )
         # tolerated(cast): Plots keeps a native 2x2 object array, not typed Axes rows.
         axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
-        annotated = options.centers_identifiable is not None
+        annotated = options.raw_iq_diagnostic
         iq, ground = axs[0]
         combined, excited = axs[1]
         if annotated:
@@ -435,14 +435,13 @@ def fitting_ge_and_plot(
         )
         title = _diagnostic_title(
             length_title if identifiable_length_ratio is not None else None,
-            options.centers_identifiable,
-            fit_quality["joint"],
+            fit_quality["joint"] if annotated else None,
             (sg, se, s),
             joint_covariance,
         )
         _layout_ge_diagnostic(
             fig,
-            combined,
+            (iq, combined, ground, excited),
             title,
             (fid, ideal_fid),
             annotated=annotated,
@@ -486,13 +485,12 @@ def _plot_raw_ge_iq(
         label="Fitted centers",
     )
     ax.set(xlabel="I [ADC levels]", ylabel="Q [ADC levels]")
-    # Keep the key above the axes so it cannot cover either IQ cloud when the tile shrinks.
-    ax.set_title("Raw IQ with fitted g/e centers", fontsize=8, pad=16)
+    ax.set_title("Raw IQ with fitted g/e centers", fontsize=10, pad=23)
     ax.legend(
         loc="lower center",
         bbox_to_anchor=(0.5, 1),
         ncols=3,
-        fontsize=6,
+        fontsize=10,
         handlelength=1,
         handletextpad=0.35,
         columnspacing=0.8,
@@ -542,43 +540,57 @@ def _plot_ge_histograms(
         _plot_population_histogram(
             panel, xs, ge_params, histogram, show_ideal=ge_params[-1] != 0.0
         )
-    combined.legend(loc="upper right", fontsize=6 if annotated else None)
+    combined.legend(
+        loc="lower center" if annotated else "upper right",
+        bbox_to_anchor=(0.5, 1) if annotated else None,
+        ncols=2 if annotated else 1,
+        fontsize=10 if annotated else None,
+        frameon=False if annotated else None,
+    )
     combined.plot(xs, histograms[0].fitted, "b-", label="g")
     combined.plot(xs, histograms[1].fitted, "r-", label="e")
     combined.set_ylabel(
-        "Fraction per bin" if annotated else "Counts", fontsize=8 if annotated else 14
+        "Fraction per bin" if annotated else "Counts", fontsize=10 if annotated else 14
     )
-    combined.set_xlabel("I [ADC levels]", fontsize=8 if annotated else 14)
+    combined.set_xlabel("I [ADC levels]", fontsize=10 if annotated else 14)
 
 
 def _layout_ge_diagnostic(
     fig: Figure,
-    assignment: Axes,
+    axes: tuple[Axes, Axes, Axes, Axes],
     title: str,
     scores: tuple[float, float],
     *,
     annotated: bool,
 ) -> None:
+    iq, combined, ground, excited = axes
     prepared, ideal = scores
     if annotated:
         fig.suptitle(title, fontsize=10)
-        # The lower-left title reserves vertical space between rows and is
-        # centered over the data, clear of the y label left of the panel.
-        assignment.set_title(
+        combined.set_title(
             f"Prepared assignment: {prepared:.1%}\nIdeal model: {ideal:.1%}",
-            fontsize=8,
-            pad=5,
+            fontsize=10,
+            pad=23,
         )
-        for ax in fig.axes:
-            ax.tick_params(labelsize=7)
-            ax.xaxis.label.set_fontsize(8)
-            ax.yaxis.label.set_fontsize(8)
-        for ax in (fig.axes[1], fig.axes[3]):
-            ax.title.set_fontsize(8)
-            ax.legend(loc="upper right", fontsize=6, labelspacing=0.2)
+        for ax in axes:
+            ax.tick_params(labelsize=10)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=5, min_n_ticks=2))
+        iq.xaxis.label.set_fontsize(10)
+        iq.yaxis.label.set_fontsize(10)
+        for panel, prep in ((ground, "g"), (excited, "e")):
+            panel.set_title(f"{prep} prep · {panel.get_title()}", fontsize=10, pad=40)
+            panel.legend(
+                loc="lower center",
+                bbox_to_anchor=(0.5, 1),
+                ncols=3,
+                fontsize=10,
+                columnspacing=1,
+                handlelength=1.5,
+                frameon=False,
+            )
         fig.set_layout_engine("constrained", hspace=0.08)
     else:
-        assignment.set_title(
+        combined.set_title(
             f"Prepared assignment: {prepared:.1%}; ideal model: {ideal:.1%}",
             fontsize=12,
         )
@@ -589,8 +601,7 @@ def _layout_ge_diagnostic(
 
 def _diagnostic_title(
     length_title: str | None,
-    centers_identifiable: Callable[[FitQuality], bool] | None,
-    joint_quality: FitQuality,
+    joint_quality: FitQuality | None,
     centers_and_width: tuple[float, float, float],
     joint_covariance: NDArray[np.float64],
 ) -> str:
@@ -599,12 +610,17 @@ def _diagnostic_title(
         if length_title is None
         else f"Readout length = {length_title} " + r"$T_1$"
     )
-    if centers_identifiable is None:
+    if joint_quality is None:
         return title
 
-    identifiable = centers_identifiable(joint_quality)
     snr = _fitted_snr_title(*centers_and_width, joint_covariance[:3, :3])
-    return title + "\n" + snr + ("" if identifiable else " (not identifiable)")
+    if joint_quality.r2 is not None:
+        quality = f"R² {joint_quality.r2:.3g}"
+    elif joint_quality.normalized_residual_rms is not None:
+        quality = f"normalized RMS {joint_quality.normalized_residual_rms:.3g}"
+    else:
+        quality = "R² unavailable"
+    return f"{title}\n{snr} · Joint {quality}"
 
 
 def _fitted_snr_title(
