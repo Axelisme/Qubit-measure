@@ -27,7 +27,7 @@ class ChainAmpRabiSummary(JointResidualSummary):
     f_err: float | None = Field(description="Wald error of f.")
     reliability: float | None = Field(description="Diagnostic R, no threshold.")
     first_read_pi_amp: float | None = Field(
-        description="Pi gain of the first-read twotone fit, the starting value."
+        description="Pi gain of the first-read fit; null when no first-read estimate is available."
     )
 
 

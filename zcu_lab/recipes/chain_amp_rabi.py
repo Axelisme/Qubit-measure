@@ -84,7 +84,7 @@ class ChainAmpRabiReport(RecipeReport, JointResidualSummary):
         description="Diagnostic R of the frequency error, no threshold."
     )
     first_read_pi_gain: float | None = Field(
-        description="Pi gain of the first-read twotone fit; null means not estimable."
+        description="Pi gain of the first-read fit; null when no first-read estimate is available."
     )
 
 
@@ -98,9 +98,10 @@ async def chain_amp_rabi(
     """Sweep drive gain with one K-cycle per rep: K, then (pulse, read, read) x 8.
 
     relax_delay is the thermalisation wait K; the Form starts it at 5 T1 and
-    overrides can change it. Primary fits the first read with the twotone Rabi
-    fit for the starting value, then fits all 65 numbers jointly. It reports
-    π gain and Rabi frequency with Wald standard errors, R, J, df, J/df,
+    overrides can change it. Primary fits all 65 numbers jointly once. If the
+    first-read fit gives no estimate, the joint fit starts from the saved gain
+    axis and first_read_pi_gain stays null. The report gives the joint π gain
+    and Rabi frequency with Wald standard errors, R, J, df, J/df,
     the chi-square reference band and the fraction of whitened components
     with |r| > 3. These numbers do not decide acceptance or validate physical
     parameters. The live-direction residual series stays in the figure, not

@@ -40,7 +40,8 @@ The sign of the first curve follows the second, so both oscillate together. Stop
 ## Analysis
 
 Analysis needs no options. It fits a cosine to the mean IQ projection of the first read. The seed π gain x_π gives the start f = 1 / (2 x_π).
-It then fits all 65 numbers at all gains jointly with a three-state model whose readout and population parameters are shared across gains.
+If the first-read fit gives no estimate, for example because the trace has too few points or no contrast, Analyze starts at f = 3 / (4 × largest absolute saved gain).
+This start is not a measured frequency. Analyze fits all 65 numbers at all gains jointly once, with a three-state model whose readout and population parameters are shared across gains.
 The drive row for each starting state interpolates between two free population endpoints, D_i(x) = [1 − f_i(x)] × endpoint_i0 + f_i(x) × endpoint_i1.
 The curve weights are sin²(π f x) for g, cos²(π f x) for e and sin²(π f x) for the third state.
 The third-state row can vary with x. Equal endpoints give a flat row; distinct endpoints allow an oscillating response.
@@ -57,8 +58,9 @@ The header and summary report the joint π gain and its Wald standard error, R a
 - `tail_fraction` is the fraction of all whitened components with |r| > 3. The header shows it as a percentage. These are the 65-component residuals used by the joint fit, not the one-dimensional residuals in the lower panel.
 
 The summary also reports the fitted frequency and its Wald error, and the first-read π gain. R = 1 / (2π × gain span × frequency standard error) measures how the frequency error compares with the finite gain span. The analysis uses no cutoff on these numbers.
-The `fit` figure shows the cosine used to seed the joint fit. Its dashed lines mark the seed π and π/2 gains, and the shaded bands show their parameter standard errors. Its R² compares the seed fit with the first-read data only.
-If the seed or joint fit fails, the live plot and saved sums remain. There is no secondary diagnostic fit.
+The `fit` figure shows the first-read points and, when available, the cosine used to seed the joint fit. Its dashed lines mark the seed π and π/2 gains, and the shaded bands show their parameter standard errors. Its R² compares the seed fit with the first-read data only.
+When the first-read fit is unavailable, the figure keeps the points and omits the curve, markers and R². The summary gives `first_read_pi_amp: null`.
+Invalid inputs and joint fit errors still stop Analyze. The live plot and saved sums remain.
 
 This experiment proposes no writeback. Compare `pi_amp` with `first_read_pi_amp`, and calibrate x180 with `twotone/rabi/amp_rabi`.
 
@@ -75,9 +77,8 @@ This emission law is not a general model of multiple jumps during integration or
 Transitions during a long gap after integration need not produce the IQ tail that this model assigns to a read transition.
 A small residual does not establish unbiased physical parameters. The reported Wald errors measure local fit uncertainty. Low state contrast or few cycles can make them understate uncertainty.
 
-The first-read mean must support the starting fit. Weak or absent first-read contrast can make that fit fail or supply an uninformative seed even when later reads have correlations.
-The joint fit starts from the first-read curve parameters. It does not try multiple curve seeds or guarantee the correct basin.
-There is no manual initial value or fallback.
+Weak first-read contrast can produce an uninformative estimate even when later reads have correlations.
+The joint fit uses one start. It does not try alternate frequencies or guarantee the correct solution.
 
 ## Saved data
 
@@ -89,5 +90,5 @@ The product sum sets the pooled noise scale for the live curve and the Analyze p
 `chain_amp_rabi` takes `gain_range`, `points`, `reps`, `rounds`, `frequency_mhz`, `pulse_length_us`, `drive_ref` and `readout_ref`; points maps to gain Expts.
 Set Relax delay with an override on `relax_delay`.
 The recipe runs, analyzes and saves. It never asks for writeback.
-The report gives `pi_gain`, `pi_gain_err`, `frequency_per_gain`, `frequency_per_gain_err`, `reliability`, `first_read_pi_gain` and the six residual fields listed above. The projected residuals at each gain stay in the figure.
+The report gives `pi_gain`, `pi_gain_err`, `frequency_per_gain`, `frequency_per_gain_err`, `reliability`, `first_read_pi_gain` and the six residual fields listed above. If the first-read fit gives no estimate, `first_read_pi_gain` is `null` even when the joint fit succeeds. The projected residuals at each gain stay in the figure.
 Omitted inputs retain Form values; overrides apply last, then check_ready reports missing or invalid fields before Run.

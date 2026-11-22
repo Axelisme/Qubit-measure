@@ -3,7 +3,7 @@
 One cycle is one rep: the thermalisation wait K (relax_delay), then eight
 blocks of (Rabi pulse at gain x, read, read). The host reduces each cycle to
 65 numbers and keeps only running sums. Analysis fits all 65 numbers jointly
-with a Rabi curve, starting from the usual twotone fit of the first read.
+with a Rabi curve, using the first-read fit or a start from the saved gains.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import RabiFit, cosfunc, fit_rabi
 from zcu_tools.analysis.readout_chain import (
     CycleSums,
@@ -63,7 +64,8 @@ class ChainAmpRabiAnalysis:
     f and f_err are the Rabi frequency in cycles per gain unit and its Wald SE.
     An unidentifiable frequency has NaN standard errors and reliability=None.
     Otherwise reliability is R = 1 / (2π × gain span × f_err), without a cutoff.
-    first_read_pi_amp is the π gain of the first-read fit that seeded f.
+    first_read_pi_amp is the π gain of the first-read fit that seeded f,
+    or None if that fit did not give an estimate.
     J is the sum of squared joint whitened residuals, df the nominal degrees of
     freedom and j_per_df their ratio. expected_band_low and expected_band_high
     give its approximate chi-square reference band, not acceptance limits.
@@ -75,7 +77,7 @@ class ChainAmpRabiAnalysis:
     f: float
     f_err: float
     reliability: float | None
-    first_read_pi_amp: float
+    first_read_pi_amp: float | None
     J: float
     df: int
     j_per_df: float
@@ -217,11 +219,13 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
 
         First project the first read IQ and fit a nondecaying Rabi oscillation.
         The near-zero gain selects 0° or 180° phase. Its π gain x_π seeds
-        f = 1 / (2 x_π) in the joint fit. Publish the live-direction projection
-        and residuals as "joint residuals", and the first-read seed as "fit".
+        f = 1 / (2 x_π) in the joint fit. If the seed fitter reports no
+        estimate, start from f = 3 / (4 max(abs(gain))) instead. Publish the
+        live-direction projection and residuals as "joint residuals" and
+        first-read data and any seed fit as "fit".
         Return π gain and f with Wald errors, R and scalar joint diagnostics.
-        The source cfg may be None. Seed or joint fit errors propagate; there
-        are no secondary diagnostic fits or fit-quality cutoffs.
+        The source cfg may be None. Invalid input and joint fit errors
+        propagate. There are no retries or fit-quality cutoffs.
         """
         del options  # This analysis has no configurable options.
         sums = source.result
@@ -236,14 +240,21 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
             seed_init_phase = 0.0
         else:
             seed_init_phase = 180.0
-        seed_fit = fit_rabi(
-            gains, seed_real_signals, decay=False, init_phase=seed_init_phase
-        )
-        first_read_pi_amp = float(seed_fit.pi_x)
+        try:
+            seed_fit = fit_rabi(
+                gains, seed_real_signals, decay=False, init_phase=seed_init_phase
+            )
+        except AnalysisFailed:
+            seed_fit = None
+            first_read_pi_amp = None
+            seed_frequency = 3 / (4 * float(np.max(np.abs(gains))))
+        else:
+            first_read_pi_amp = seed_fit.pi_x
+            seed_frequency = 1 / (2 * first_read_pi_amp)
 
         # 2. Joint fit of all 65 numbers with the Rabi curve.
         model = rabi_model()
-        fit = fit_cycle(sums, model, {"f": 1 / (2 * first_read_pi_amp)})
+        fit = fit_cycle(sums, model, {"f": seed_frequency})
 
         # 3. The π gain is half a period of sin²(π f x).
         f, f_err = fit.parameters["f"], fit.errors["f"]
@@ -287,22 +298,31 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
 
 
 def _plot_first_read_fit(
-    plots: Plots, gains: NDArray[np.float64], signal: NDArray[np.float64], fit: RabiFit
+    plots: Plots,
+    gains: NDArray[np.float64],
+    signal: NDArray[np.float64],
+    fit: RabiFit | None,
 ) -> None:
     fig, ax = plots.subplots(num="fit", figsize=config.figsize, layout="constrained")
-    grid = np.linspace(gains.min(), gains.max(), 400)
     ax.plot(gains, signal, label="Measured · first read", ls="none", marker="o", ms=4)
-    ax.plot(grid, cosfunc(grid, *fit.params), label="Seed fit", ls="-")
-    for name, gain, error, color in (
-        ("π", fit.pi_x, fit.pi_x_err, "C2"),
-        ("π/2", fit.pi2_x, fit.pi2_x_err, "C3"),
-    ):
-        ax.axvline(
-            gain, ls="--", color=color, label=f"{name} = {gain:.4g} ± {error:.2g} a.u."
-        )
-        ax.axvspan(gain - error, gain + error, color=color, alpha=0.2)
-    r2 = fit.quality.r2
-    fit_quality = "R² unavailable" if r2 is None else f"R² = {r2:.4g}"
-    fig.suptitle(f"K-cycle amplitude Rabi · First-read seed    {fit_quality}")
+    title = "First-read fit unavailable"
+    if fit is not None:
+        grid = np.linspace(gains.min(), gains.max(), 400)
+        ax.plot(grid, cosfunc(grid, *fit.params), label="Seed fit", ls="-")
+        for name, gain, error, color in (
+            ("π", fit.pi_x, fit.pi_x_err, "C2"),
+            ("π/2", fit.pi2_x, fit.pi2_x_err, "C3"),
+        ):
+            ax.axvline(
+                gain,
+                ls="--",
+                color=color,
+                label=f"{name} = {gain:.4g} ± {error:.2g} a.u.",
+            )
+            ax.axvspan(gain - error, gain + error, color=color, alpha=0.2)
+        r2 = fit.quality.r2
+        fit_quality = "R² unavailable" if r2 is None else f"R² = {r2:.4g}"
+        title = f"First-read seed    {fit_quality}"
+    fig.suptitle(f"K-cycle amplitude Rabi · {title}")
     ax.set(xlabel="Pulse gain (a.u.)", ylabel="Projected first-read IQ (a.u.)")
     ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1))
