@@ -66,6 +66,8 @@ Demo point 的 qubit 頻率與 `kappa` 提供頻譜掃描的中心與頻窗。`w
 MG12 的 `flux_dev` 選擇兩顆 qubit 共用的 DC source `coil`。Q1／Q2 的 `flux.period.coil` 使用 A／Φ0，供 global flux 表單換算掃描範圍。
 既有 v1／v2 entry 須先用[長期升級入口](../../../docs/parameter-upgrades.md)轉換。Startup 不自動升級。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 用於從接線開始的走查。若修改工作副本的物理值或接線，也要核對 entry 範本及已建立的 entry。
 
+Demo 的 qubit 範本不預填 `kappa`。掃頻窗如何從校準帶入、何時直接填表單的起訖值，見[作者指南〈校準初值政策〉](../../v2/measure-authoring.md#校準初值政策)。
+
 Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
 MG12 的 `mixer_freq: 7135` 是 mux LO 初值，缺值時 mixer 留空必填，不由 tone 頻率或 κ 推算。
 `MG12.time_of_fly` 用於 mux 路徑，R1／R2 頂層的 `time_of_fly` 用於各自的 pulse ADC。Kickstart 的 group 與 resonator TOF 保留 null。

@@ -517,6 +517,24 @@ Wheel 收錄 `zcu_lab` 下的 Markdown、PNG 與 JPG。新增或刪除實驗時�
 
 ## Readout 分析與 writeback
 
+Core 回傳分析品質，圖依 [R3b](figure-style.md#r3b結果旁寫-fit-品質) 呈現已回傳的品質值。
+有既有判準時，由 adapter 決定 proposal 的初選與理由。Draft 複製這兩個欄位，
+[writeback preview](../../lib/zcu_tools/gui/app/measure/writeback/README.md#initial-selection-and-notes) 顯示結果，不重判品質。
+
+若只改 adapter 的寫回政策，在 scratch 呼叫對應階段的公開 hook，核對 proposal 的 `selected` 與 `note`，不執行 Apply。
+
+- Analyze：用來源 `RunRecord`、Analyze 結果與固定 context 組成 `WritebackRequest`，呼叫 `adapter.get_writeback_items`。GUI 的 [`AnalyzeService`](../../lib/zcu_tools/gui/app/measure/services/analyze.py) 使用這個接縫。
+- PostAnalyze：用同一組輸入加上 PostAnalyze 結果組成 `PostWritebackRequest`，呼叫 `adapter.get_post_writeback_items`。GUI 的 [`PostAnalyzeService`](../../lib/zcu_tools/gui/app/measure/services/post_analyze.py) 使用這個接縫。
+
+兩個 service 都把 proposals 交給 `WritebackService.create_draft`。`analysis_stage` 只呼叫 core，不經 adapter，也不建立 draft。
+
+[Singleshot GE adapter](singleshot/ge/gui.py) 與 [mux GE adapter](mux/singleshot_ge/gui.py) 各以
+`ge_calibration_review_note` 判斷 Analyze 的初選與理由。它讀取 joint `FitQuality`，包括
+`relative_parameter_errors` 裡的寬度 `s` 和中心 `sg`、`se` 的相對誤差。
+`ge_post_review_note` 沿用這項判斷，並檢查 Post 混淆矩陣的 condition number。
+這些初選判斷與 [GE 模型診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷) 的
+`length_ratio_max_relative_error` 分開。
+
 ro-optimize 與 reset 的 peak-picking adapter 以 `smooth_method` 提供 `wavelet` / `gaussian`
 選擇，預設 `wavelet`；`smooth` 在 GUI 標為 smoothing strength，不再只代表 Gaussian sigma。
 twotone `ro_optimize/length` 的 GUI analyze param 對外命名為 `duration_t0`，表示
@@ -572,6 +590,14 @@ Open／Reset 從固定 capture 產生可覆寫的初值。具 Eval 能力的 lea
 單一實驗的政策留在 `form.py`；多個 Form 共用的 T1／Rabi 政策由
 [`support/measure/`](support/measure/README.md) 的具名 helper 擁有。
 Form 明確選擇倍率或場景並組結構，不把校準政策放進 generic framework。
+
+### 頻率掃描窗
+
+[`QubitBaseSchema.kappa`](../components/qubit.py) 保存 qubit 躍遷的校準線寬（MHz），不是掃描窗的寬度。以 [`twotone/freq` 的 Form](twotone/freq/form.py) 為例，`Range.around` 以 `$qubit.freq` 為中心，用 `$qubit.kappa` 推出半寬。倍率與點數由該 Form 定義。起訖值可在表單編輯；缺線寬時可直接填有依據的起訖值，不必把掃描窗寫成 `kappa`。
+
+實驗可以用專用初值。[Single-tone reset 頻掃的 Form](twotone/reset/single_tone/freq/form.py) 用 `$qubit.ext.reset_f` 和 `$qubit.ext.reset_fwhm` 決定掃描窗。`reset_fwhm` 是 reset 側帶的半高全寬，不是 qubit 躍遷的 `kappa`。
+
+[牆鐘工具](../../tools/experiment_wall_time.py) 在 Open 建好表單後，以 `form.write(case.overrides)` 套用該 adapter 的[案例覆寫](../../tools/data/experiment_wall_time/overrides.json)，再驗證表單並決定是否送出 Run。例如 `twotone/freq` 覆寫 `freq.start` 和 `freq.stop`，用 Q1 在該 fixture 的功率展寬（power-broadened）頻譜選掃描窗。覆寫只改該案例的表單，不補來源資料，也不把功率展寬的線寬當成 `kappa` 校準值。
 
 ### T1 與等待
 
