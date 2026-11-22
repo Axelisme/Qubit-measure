@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -88,50 +87,6 @@ class T2EchoAnalysis:
     detune: float
     detune_err: float
     fit_quality: Mapping[str, FitQuality] | None = None
-    review_note: str | None = None
-    """Reasons the T₂ writeback is not preselected; None if it passes existing limits."""
-
-
-def _coherence_review_note(
-    t2: float, t2_err: float, quality: FitQuality | None
-) -> str | None:
-    """Explain why an Echo fit is not preselected for writeback.
-
-    Times/errors are in us. Initial selection requires positive finite T2,
-    nonnegative finite error/T2 <=0.5, r2 >=0.9 and normalized residual RMS <=0.1.
-    Missing/nonfinite required metrics or their invalid issues require review.
-    Unrelated fixed-zero parameter issues do not reject the result. None means
-    these review gates passed, not that a calibration is physically established.
-    """
-    reasons = _coherence_fit_review_reasons(quality)
-    if not math.isfinite(t2) or t2 <= 0:
-        reasons.append("T2 must be finite and positive")
-    elif not math.isfinite(t2_err) or t2_err < 0:
-        reasons.append("T2 error must be finite and nonnegative")
-    elif t2_err / t2 > 0.5:
-        reasons.append(f"T2 relative error={t2_err / t2:.4g} >0.5")
-    return "; ".join(reasons) if reasons else None
-
-
-def _coherence_fit_review_reasons(quality: FitQuality | None) -> list[str]:
-    if quality is None:
-        return ["fit quality unavailable"]
-    reasons = [
-        f"{issue.path}: {issue.reason}"
-        for issue in quality.invalid
-        if issue.path
-        in {"r2", "normalized_residual_rms", "relative_parameter_errors.decay_time"}
-    ]
-    if quality.r2 is None or not math.isfinite(quality.r2):
-        reasons.append("r² unavailable")
-    elif quality.r2 < 0.9:
-        reasons.append(f"r²={quality.r2:.4g} <0.9")
-    rms = quality.normalized_residual_rms
-    if rms is None or not math.isfinite(rms):
-        reasons.append("normalized RMS unavailable")
-    elif rms > 0.1:
-        reasons.append(f"normalized RMS={rms:.4g} >0.1")
-    return reasons
 
 
 def _direction(signals: NDArray[np.complex128]) -> tuple[float, float]:
@@ -419,7 +374,6 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             )
         label = "Fringe fit" if fit_method == "fringe" else "Decay fit"
         quality = fit.quality
-        review_note = _coherence_review_note(t2e, t2eerr, quality)
         if quality.r2 is not None:
             label += f" (R² = {quality.r2:.3f})"
         ax.plot(dense, y_fit, label=label)
@@ -436,20 +390,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             ylabel="IQ projection (a.u.)",
         )
         ax.legend()
-        if review_note is not None:
-            fig.text(
-                0.5,
-                0.02,
-                "Not preselected for writeback:\n" + review_note.replace("; ", "\n"),
-                ha="center",
-                va="bottom",
-                fontsize=8,
-            )
-            fig.tight_layout(
-                rect=(0, min(0.31, 0.12 + 0.04 * review_note.count(";")), 1, 1)
-            )
-        else:
-            fig.tight_layout()
+        fig.tight_layout()
 
         return T2EchoAnalysis(
             t2e=float(t2e),
@@ -457,5 +398,4 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             detune=float(detune),
             detune_err=float(detune_err),
             fit_quality={"fit": quality},
-            review_note=review_note,
         )

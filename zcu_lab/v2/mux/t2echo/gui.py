@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import math
-import textwrap
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -110,17 +109,6 @@ def _analyze(
         req.analyze_params,
         plots=plots,
     )
-    for outcome in outcomes:
-        if isinstance(outcome, MuxFitFailure):
-            continue
-        review = coherence_review_note(outcome.t2, outcome.t2_err, outcome.quality)
-        if review is not None:
-            figure = plots[f"fit_{outcome.index}"]
-            wrapped = "\n".join(
-                textwrap.fill(line, width=83) for line in review.splitlines()
-            )
-            figure.suptitle(f"{figure.get_suptitle()}\n{wrapped}", fontsize=10)
-            figure.tight_layout()
     snapshot = req.run_result.cfg
     return MuxT2EchoAnalyzeResult(
         outcomes,
