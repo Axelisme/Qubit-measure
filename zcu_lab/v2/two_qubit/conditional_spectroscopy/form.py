@@ -29,6 +29,7 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
     qubits = captured_qubits(ctx)
     drive = {}
     for position in ("qubit1", "qubit2"):
+        # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
         slot = f"$coupler.module.cz_{position}"
         # The run overrides both pulse frequencies with the common sweep.
         node = source(

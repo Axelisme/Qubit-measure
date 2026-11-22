@@ -4,21 +4,21 @@
 
 Single-shot ground/excited readout: measures with the probe pi-pulse off and on, takes 'shots' single-shot readouts of each, and fits the two IQ clusters to extract the assignment fidelity, rotation angle and threshold. Runs on real hardware with rounds=1 and reps=shots. Each run acquires readout shots twice, with the probe off and on.
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Parameter sources
 
-Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. The probe template uses `$qubit.freq` and `$qubit.wiring.ch`.
+Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. The probe template uses `$qubit.freq` and `$qubit.wiring.ch`.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
-T1-derived defaults use the Open/Reset snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
 
 These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
 
 ## Module slots
 
-Uses `$qubit.module.x180` for optional init and required probe, `$qubit.module.reset` for optional reset, and `$resonator.module.readout` for readout. Missing required slots use pi_pulse/readout templates; missing optional slots stay disabled. Run uses the Open/Reset snapshot.
+Uses `$qubit.module.x180` for optional init and required probe, `$qubit.module.reset` for optional reset, and `$resonator.module.readout` for readout. Missing required slots use pi_pulse/readout templates; missing optional slots stay disabled. Run uses the Open/Defaults snapshot.
 
 ## Assignment and model quality
 
@@ -87,11 +87,11 @@ Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic d
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Obtain a calibrated pi pulse and verify readout timing. Primary fits the two clouds; Post derives classification diagnostics.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `singleshot_ge` after inspecting the same Form errors.
    shots sets each cloud size, not Expts. initial_state, backend, logscale, align_t1 and length_ratio update Primary analysis. Post has no independent controls.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

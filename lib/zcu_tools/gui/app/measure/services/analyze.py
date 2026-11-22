@@ -422,6 +422,7 @@ class AnalyzeService(StagedAnalyzeService):
         adapter = captured_inputs.adapter
         analyze_params = captured_inputs.params
         plots = captured_inputs.plots
+        summary_lines = adapter.get_analysis_summary_lines(run_result)
 
         proposal_items: list[Any] = []
         if analyze_result is not None:
@@ -455,6 +456,7 @@ class AnalyzeService(StagedAnalyzeService):
                     params=analyze_params,
                     writeback_draft=draft,
                     source_operation_id=self._active_tokens[tab_id],
+                    summary_lines=summary_lines,
                 ),
                 plan_layout=self._plan_layout,
             )

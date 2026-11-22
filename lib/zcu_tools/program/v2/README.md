@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-21，模擬編譯拒絕無具名來源的 ADC 頻率字
+**Last updated:** 2026-11-22，校正 IQ 軸的取數前置條件、`shot_sums` 的分析用途
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -157,6 +157,9 @@ Request、數值契約與環境組裝見 [simulation](simulation/README.md)，st
 框架用 `start(points)` 建立 state 並保存它；round hook 與最終結果都從 reducer 的 `output(state)` 取得。
 `shot_sums(prog, axes)` 在 compile 後以 emit tag 或未標記 module 名稱解析 `Classify` 與 `IQ` 軸。
 Label、讀取索引與讀取數以移除遮罩來源消耗的讀取後的資料為準。
+`IQ(read, offset_corrected=True)` 在加總前對單 ADC、單次積分讀取扣除 QICK IQ offset；其餘 IQ 軸仍使用未扣 offset 的正規化 IQ。
+Static PFB 在 reducer 處理該輪時讀當次 acquisition 的 ADC 設定；缺設定拋 `RuntimeError`。
+校正零點與 opt-in 邊界見 [ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#選用校正後的-iq-矩)，使用限制見 [summed acquisition](../README.md#summed-acquisition)。
 `chain_sweep_sums(prog, read)` 處理單一 fixed Repeat 內的 PulseReadout，回傳每點 12 × 12 augmented sums。
 `thermal_chain_sums(prog, read)` 處理同一 PulseReadout 的 16 次連讀，可展開或放在單一 fixed Repeat。
 每點回傳 108 欄：shot count 與 107 個 sums，跨保留的 reps 與已完成的 rounds 只加總。
@@ -173,6 +176,8 @@ reducer 不檢查 π 校準，也無法偵測 cycle 內未觀察到的物理斷�
 
 這些 reducer 在編譯後解析 label；pulse 與 mux readout owners 一起判定唯一性。
 Read-count 限制、外積總和與取消契約見 [summed acquisition](../README.md#summed-acquisition)。
+`shot_sums` 等 reducer 回傳的 sums 與 moments 是分析輸入，不是誤差估計。
+框架不提供通用的 uncertainty estimator；各分析 consumer 依模型選擇估計方法，見[分析子模組](../../analysis/README.md#子模組)。
 
 `readout_observation.observe_readouts(prog)` 由 program owner 解包 compiler wrappers，提供 readout provenance、Trigger 順序及控制 scope。
 它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。

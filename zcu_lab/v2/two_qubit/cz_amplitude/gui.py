@@ -66,6 +66,7 @@ def amplitude_writeback(
     coupler = parameters.resolve_path("$coupler")
     items: list[WritebackItem] = []
     for role, pulse in (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2)):
+        # Pulse library keys: $coupler.pulses.cz_qubit1 and $coupler.pulses.cz_qubit2.
         target = f"{coupler}.pulses.cz_{role}"
         items.append(
             module_writeback(
@@ -77,6 +78,7 @@ def amplitude_writeback(
         )
         items.append(
             ParameterWriteback(
+                # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
                 target_name=f"{coupler}.module.cz_{role}",
                 description=f"CZ {role.capitalize()} pulse slot",
                 proposed_value=parameters.library_key(target),
@@ -92,10 +94,19 @@ def run(
     return RunRecord(cfg=cfg, result=CZAmplitudeExp().run(cfg, context=context))
 
 
+def _summary_lines(source: CZAmplitudeRun) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=CZAmplitudeExp.AXES_SPEC,
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
+    analysis=Analysis(
+        fn=_analyze, writeback=_get_writeback_items, summary_lines=_summary_lines
+    ),
 )

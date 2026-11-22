@@ -79,6 +79,16 @@ status: accepted
 - 2026-11-19，使用者說「可以加回來，應該說，我刪掉的不是cov版，而是heralding版」，並要求「把前一种基于共变因素的实验，把它纠正其义，不要再叫其 hurdling，呃，改成加上什么 COV 的 postfit 之类的。」2026-11-20，對先恢復 T1 答「舊題都採用建議」；對名稱、readout 與 reset 答「關於t1_cov，1A，名字叫pre_readout/post_readout比較明確。2採用建議。3我認為可以加可選reset，作為穩定ge分佈使用。」見 [T1 二階矩實驗以 t1_cov 恢復](../discussions/2026-11-20-t1-cov-restore.md)。該討論也記錄 2026-11-09 使用者說「舊 heralding 我完全沒用過也沒讀過，可以直接刪掉。」2026-10-29 舊實驗組的成員及 writeback 不再適用，見 [早期討論](../discussions/2026-10-29-heralding-post-selection.md) 與 Git `188409d1d`。
 - 2026-11-20，使用者將 tracker 與 processor 的重疊分工改成顯式 reducer 與 state。語音原話：「Jiki 基本没问题，但我有发现一个设计上的取舍。我发现有 processor 机制之后，我好像不需要 tracker 机制，后者是不是可以删掉了？」「但这两个东西的定位重复了，我不是很想要重复定位的东西出现在城市里，这对于使用者跟维护者来说都是负担。无单调缺可，就必须放弃。一些不可加的统计能力，比如说 K-means，K-means，所以这是我烦恼的。」「那我觉得还是用比较显示的方法比较好，也就是一个 reducer，然后再一个 stage，然后者是状态，前者是累加器，这个抽象会比较合理一点，比较自然一点。」其中「Jiki」讀作「幾題」，「城市」是「程式」，「stage」是 state，「显示」是「顯式」。對一併實作與採用關鍵字 `reducer=` 答「采用建议」。見 [tracker 與 processor 的討論](../discussions/2026-11-20-herald-reset-shot-masks.md#tracker-與-processor-的定位重複)。
 
+#### 選用校正後的 IQ 矩
+
+**規則。** 作者用 `IQ("readout", offset_corrected=True)` 明示需要原生 QICK 平均的零點。Program 解析編譯後的 logical read，以讀出積分長度正規化每發 I、Q，再依 QICK 的 offset policy 各扣同一 scalar，最後加總 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]`。靜態 PFB 由該 ADC 的取數設定決定倍率；處理當輪時缺設定就報錯，不猜 offset。
+
+**例子。** 傳統 Amp Rabi 用一個 summed slot。若原平均為 `5+7j`，QICK 要求各扣 `2`，就用 `3+5j` 作為 live、SNR 早停及最終 `signals` 的平均。`iq_moments` 留在同一零點，SEM 使用完成 rounds 中保留的 N，不用 cfg 補算。
+
+**邊界。** 此 opt-in 只接受單一可見 ADC、每發一次積分讀出、單一二階 IQ 軸，涵蓋 Pulse 與單 tone Mux。不支援 edge counting、多 tone、多 read、遮罩或額外矩軸。未 opt-in 的 IQ、分類、遮罩與原生取數預設不變。模擬在同一輪使用原有 raw source，只物化一次，不重跑 backend，不改普通 compact 路徑。只存平均而無矩的舊資料仍可讀，保存規則由 [[0069]] 擁有。
+
+**依據。** 2026-11-22，designer 代裁，使用者未覆核。比較、非零 offset 驗證及前例見 [Amp Rabi 的 shot moments](../discussions/2026-11-22-amp-rabi-shot-moments.md)。
+
 #### Herald reset 與逐 shot 遮罩
 
 **規則。** 只需篩選初態時，使用既有 `reset` 欄位選 herald，不另設欄位或實驗入口，也不做 FPGA active reset。Herald 與終端發射共用 readout 設定。Module 或作者只註冊遮罩來源，`program` 的取數層在每個完成 round 算遮罩，與 round hook 同層。所有 ADC 共用同一張 bool `(points, reps)` 遮罩，沒有讀取軸。多個來源依註冊順序執行，以 AND 合併；沒有來源時全為 True，取數結果逐位不變。註冊位置與 owner 見 [[0083]]〈Builder 與 Schedule 的職責〉。取數時檢查索引未超出編譯後的讀取數，宣告與形狀見 [Registered shot masks](../../lib/zcu_tools/program/README.md#registered-shot-masks)。

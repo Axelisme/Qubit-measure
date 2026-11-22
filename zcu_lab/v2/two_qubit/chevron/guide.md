@@ -8,7 +8,7 @@ Scan common drive frequency in MHz and common envelope duration in us.
 Each shot emits optional reset, nominal B11 preparation, simultaneous two-line
 drive, double Xπ contrast and one terminal mux readout.
 `reset=None` emits no reset. Set a reset cfg only after reviewing its pulse
-and timing against the authorized limits. The Form's Reset action recaptures
+and timing against the authorized limits. The Defaults button recaptures
 inputs; it does not emit a reset pulse.
 
 Both qubit tones require circle classifiers with g/e centers and radius.
@@ -23,7 +23,7 @@ In the point's Aliases table, bind `$qubit1` and `$qubit2` to distinct component
 Bind `$mux` to their mux group and `$coupler` to the component that stores
 the pair's CZ pulses. Rebind older points in the same table. GUI aliases
 and Notebook's built-in roles of the same names are separate.
-Open or Reset uses `$mux.qubits` to set two hidden tone indices.
+Opening the tab or choosing Defaults uses `$mux.qubits` to set two hidden tone indices.
 If the capture has no `$coupler` binding, the form reports it before Run.
 Check both Xπ pulses and all mux tones, ADC routes and scalar timing.
 Readout references `$mux.module.readout` when present. Otherwise fill the blank
@@ -50,25 +50,49 @@ delays appear last.
 Enter finite scan endpoints and strictly positive durations.
 Review repetitions, rounds, optional reset and timing before Run.
 Refresh keeps authored inputs and rechecks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
-Use Reset to replace unsaved input with initial values from the new source.
+Use Defaults to replace unsaved input with initial values from the new source.
 
 ## Read the figures
 
 Analyze publishes these figures and returns `None`. Per-frequency rates, counts
 and curves stay inside analysis; frequency and duration selection remain manual.
 
-The live and Analyze chevron maps show P00 after double Xπ contrast.
-P00 is the terminal (g,g) count divided by all nine terminal class counts.
-The return figure shows all nine g/e/other joint outcomes.
+Use the live and Analyze chevron maps to locate a return valley. Both show
+terminal P(g,g) after the final double Xπ; the live title reports how many
+cells have completed. P(g,g) divides the terminal (g,g) count by all nine
+terminal class counts. The terminal-outcome panels show the same map for
+each joint g/e/other outcome. The color scale is a probability, not IQ.
 These figures include preparation and readout errors.
 They do not measure gate fidelity or resolve physical leakage by themselves.
 There are no mean-IQ diagnostics or saved IQ clouds.
 
+The white cross marks the lowest finite measured P(g,g) point. It only
+chooses the frequency of one Duration slices panel. The other panels use the
+first and last scan frequencies, without repeating a frequency. If no
+finite point is available, the middle scan index replaces the marked slice.
+The cross is not a calibration candidate.
+
+Layout reference: Ding, Fig. 5-8(b) (printed p. 151), maps the |101⟩
+population against drive frequency and pulse plateau length. This experiment
+shows terminal P(g,g) after double Xπ against common CZ drive frequency (MHz)
+and common waveform envelope duration (µs), not plateau length.
+
 Each fully acquired duration trace with nonzero selected counts uses an
 undamped cosine fit.
-Rates below 1 divided by the saved duration span are unresolved.
-Failed or degenerate fits report a reason rather than a zero rate.
-Compare the measured return traces with the fitted curves.
+Use Duration-fit rates to compare frequencies. The plot marks unresolved fitted
+rates with crosses at their fitted MHz values and labels the inverse of the
+saved duration span in MHz. A fitted rate below that line is unresolved.
+Identifiable rates show their fit SE. Failed or degenerate fits report a
+reason rather than a zero rate.
+Use Duration slices to check measured points against the dense cosine fit.
+R² measures the fraction of the observed probability variation explained by
+the fit and can be negative. Normalized RMS is the root-mean-square fit
+residual divided by the observed probability range. Neither metric sets a
+new selection threshold.
+At a measured point, the bar is one shot SEM from the binomial (g,g)
+indicator, using only the retained shots at that point. The bar measures
+counting noise, not the uncertainty of the fitted rate. The 2D maps have
+no per-cell bars.
 Choose spacing so the expected rate is below `1/(2 × duration spacing)`.
 Check aliasing manually. Thermal mixtures may contain more than one rate.
 
@@ -84,9 +108,9 @@ Every class axis is ordered g, e, other.
 Rounds accumulate during acquisition without normalization.
 File size does not grow with repetitions or rounds.
 Completed rounds survive cancellation; unmeasured points remain NaN.
-A point with counts from at least one completed round can enter the fit if it has accepted shots.
-Fits require all requested shots at every point of a duration trace.
-Always check the execution status before accepting partial results.
+A duration trace can enter the fit only when every duration has retained
+counts. A trace may meet that condition before the requested final round.
+Check the execution status and retained counts before accepting partial results.
 
 Cfg schema is 5.0. Load leaves the current form unchanged, and analysis uses the
 saved cfg and counts. The current Load rejects older files whose axis names no

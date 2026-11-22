@@ -1,5 +1,6 @@
 """Run-stage contracts through caller-owned synthetic experiments."""
 
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -8,12 +9,18 @@ import matplotlib
 import numpy as np
 import pytest
 from matplotlib import image as mpl_image
-from zcu_tools.experiment import probe
+from zcu_tools.experiment import Experiment, probe
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.plotting.plots import Plots
 
+from tests.experiment._optional_variables_support import (
+    DiagnosticCfg,
+    DiagnosticResult,
+    diagnostic_record,
+    diagnostic_spec,
+)
 from tests.experiment._probe_support import ProbeExperiment
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.program._profiles import load_soccfg
@@ -104,6 +111,42 @@ def test_run_rejects_result_dtype_that_disagrees_with_axes(
 
     with pytest.raises(ValueError, match=rf"{field}.*dtype|dtype.*{field}"):
         probe.run_stage(WrongDtype(), SavingCfg(), environment)
+
+
+@pytest.mark.parametrize(
+    "case", ["absent", "valid", "wrong-optional", "wrong-required"]
+)
+def test_run_checks_exact_dtypes_only_for_present_optional_variables(
+    environment: SimulationEnvironment,
+    case: str,
+) -> None:
+    class OptionalDiagnostic(Experiment[DiagnosticResult, DiagnosticCfg]):
+        AXES_SPEC = diagnostic_spec()
+
+        def run(
+            self, cfg: DiagnosticCfg, /, *, context: RunContext
+        ) -> DiagnosticResult:
+            del cfg, context
+            result = diagnostic_record(
+                present=case in {"valid", "wrong-optional"}
+            ).result
+            if case == "wrong-optional":
+                assert result.diagnostics is not None
+                return replace(
+                    result, diagnostics=result.diagnostics.astype(np.float32)
+                )
+            if case == "wrong-required":
+                return replace(result, signal=result.signal.astype(np.complex64))
+            return result
+
+    experiment = OptionalDiagnostic()
+    if case.startswith("wrong"):
+        field = "diagnostics" if case == "wrong-optional" else "signal"
+        with pytest.raises(ValueError, match=rf"{field}.*dtype"):
+            probe.run_stage(experiment, DiagnosticCfg(), environment)
+    else:
+        run = probe.run_stage(experiment, DiagnosticCfg(), environment)
+        assert (run.record.result.diagnostics is None) == (case == "absent")
 
 
 @pytest.mark.parametrize("failure", ["run", "live"])

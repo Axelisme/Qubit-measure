@@ -8,17 +8,19 @@ grid has 113 time samples in us, with a knot every 16 intervals.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, Self, override
 
 import cma
 import numpy as np
-from matplotlib.lines import Line2D
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from scipy.interpolate import CubicSpline
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.core.waveform_format import WaveformSamples, decode_npz
 from zcu_tools.experiment import Experiment, RunRecord
@@ -47,7 +49,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import ArbWaveformCfg, MuxReadout
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 from .._cz_phase import CZPhasePair
 from .._drive import QubitDriveCfg
@@ -132,6 +134,13 @@ def _targets(result: CZOptimizeResult) -> NDArray[np.float64]:
     return np.where((result.peak <= 1.0) & finite, targets, np.nan)
 
 
+def _objective_sem(counts: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Propagate independent retained-shot P(g,g) SEMs through an equal seed mean."""
+    seed_count = counts.shape[-3]
+    covariance = class_probability_covariance(counts.reshape(*counts.shape[:-2], 9))
+    return np.sqrt(covariance[..., 0, 0].sum(axis=-1)) / seed_count
+
+
 class CZOptimizeCfg(ConfigBase):
     """Calibrated X90/X180, shared-arb two-line CZ, local Z and full mux readout.
 
@@ -142,28 +151,51 @@ class CZOptimizeCfg(ConfigBase):
 
     reset: Annotated[
         ResetWithHeraldCfg | None,
-        FieldMeta(description="Optional reset or mux herald before each sequence."),
+        FieldMeta(
+            label="Reset",
+            description="Optionally prepare or herald the initial state before the random Clifford sequence.",
+        ),
     ] = None
     x90_qubit1: Annotated[
-        Pulse.Cfg, FieldMeta(description="Calibrated Qubit1 X90 pulse.")
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit1 Xπ/2",
+            description="Coherent half-turn for Qubit1 Clifford compilation and recovery.",
+        ),
     ]
     x90_qubit2: Annotated[
-        Pulse.Cfg, FieldMeta(description="Calibrated Qubit2 X90 pulse.")
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit2 Xπ/2",
+            description="Coherent half-turn for Qubit2 Clifford compilation and recovery.",
+        ),
     ]
     x180_qubit1: Annotated[
-        Pulse.Cfg, FieldMeta(description="Calibrated Qubit1 X180 pulse.")
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit1 Xπ",
+            description="Full turn for Qubit1 Clifford compilation and recovery.",
+        ),
     ]
     x180_qubit2: Annotated[
-        Pulse.Cfg, FieldMeta(description="Calibrated Qubit2 X180 pulse.")
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit2 Xπ",
+            description="Full turn for Qubit2 Clifford compilation and recovery.",
+        ),
     ]
     drive: Annotated[
         QubitDriveCfg,
-        FieldMeta(description="Calibrated CZ pulses sharing one arb asset."),
+        FieldMeta(
+            label="Two-line CZ drive",
+            description="Use a common arbitrary waveform asset on both CZ drives. Its initial I/Q shape is candidate 0.",
+        ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
-            description="Full mux readout with Qubit1/Qubit2 classifiers. "
+            label="Mux readout",
+            description="Terminal mux readout and Qubit1/Qubit2 classifiers. "
             + POINT_ALIAS_DESCRIPTION,
         ),
     ]
@@ -182,44 +214,87 @@ class CZOptimizeCfg(ConfigBase):
         ),
     ]
     phase_pair: Annotated[
-        CZPhasePair, FieldMeta(description="Ordered local Z corrections in degrees.")
+        CZPhasePair,
+        FieldMeta(
+            label="Local Z correction pair",
+            description="Set the two logical frames after each CZ. These are optimized alongside the shape.",
+        ),
     ]
-    depth: Annotated[int, FieldMeta(description="Random Cliffords per sequence.")] = (
-        Field(strict=True, ge=1)
-    )
+    depth: Annotated[
+        int,
+        FieldMeta(
+            label="Interleaved Clifford depth",
+            unit="count",
+            description="Number of random Cliffords, each followed by one CZ, before recovery.",
+        ),
+    ] = Field(strict=True, ge=1)
     seed: Annotated[
         list[Annotated[int, Field(strict=True, ge=0, le=2**31 - 1)]],
-        FieldMeta(description="Distinct Clifford sequence seeds."),
+        FieldMeta(
+            label="Clifford sequence seeds",
+            description="Enter 3–5 distinct integer seeds. Reuse the same sequences for every CZ candidate.",
+        ),
     ] = Field(min_length=3, max_length=5)
-    generations: Annotated[int, FieldMeta(description="Number of CMA generations.")] = (
-        Field(strict=True, ge=1)
-    )
-    popsize: Annotated[int, FieldMeta(description="Candidates per CMA generation.")] = (
-        Field(default=4 + math.floor(3 * math.log(_PARAM_COUNT)), strict=True, ge=2)
-    )
+    generations: Annotated[
+        int,
+        FieldMeta(
+            label="Optimizer generations",
+            unit="count",
+            description="How many complete CMA-ES candidate batches to evaluate after the starting waveform.",
+        ),
+    ] = Field(strict=True, ge=1)
+    popsize: Annotated[
+        int,
+        FieldMeta(
+            label="Candidates per generation",
+            unit="count",
+            description="How many CZ shapes to compare in each complete CMA-ES batch.",
+        ),
+    ] = Field(default=4 + math.floor(3 * math.log(_PARAM_COUNT)), strict=True, ge=2)
     sigma_knot: Annotated[
         float,
         FieldMeta(
-            description="Initial normalized standard deviation of each I/Q knot."
+            label="Initial I/Q control-point spread",
+            unit="a.u.",
+            description="Initial standard deviation of each I/Q envelope control point around the baseline.",
         ),
     ] = Field(gt=0, allow_inf_nan=False)
     sigma_z_deg: Annotated[
         float,
         FieldMeta(
-            unit="deg", description="Initial standard deviation of each local Z angle."
+            label="Initial local Z spread",
+            unit="deg",
+            description="Initial standard deviation of each candidate's logical Z angle.",
         ),
     ] = Field(gt=0, allow_inf_nan=False)
     cma_seed: Annotated[
-        int, FieldMeta(description="Seed for CMA candidate sampling.")
+        int,
+        FieldMeta(
+            label="Optimizer random seed",
+            description="Enter an integer to reproduce the CMA-ES sampling sequence.",
+        ),
     ] = Field(strict=True, ge=0)
-    reps: Annotated[int, FieldMeta(description="Shots per evaluation and seed.")] = (
-        Field(gt=0)
-    )
+    reps: Annotated[
+        int,
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Shots attempted per candidate and Clifford seed, before herald selection.",
+        ),
+    ] = Field(gt=0)
     initial_delay: Annotated[
-        float, FieldMeta(unit="us", description="Delay before the first shot.")
+        float,
+        FieldMeta(
+            label="Initial delay", unit="µs", description="Delay before the first shot."
+        ),
     ] = 1.0
     relax_delay: Annotated[
-        float, FieldMeta(unit="us", description="Relaxation delay after each shot.")
+        float,
+        FieldMeta(
+            label="Relaxation delay",
+            unit="µs",
+            description="Wait after each shot before starting the next.",
+        ),
     ]
 
     @model_validator(mode="after")
@@ -364,6 +439,47 @@ def _measure_candidate(
     return float(joint_probabilities(step.array_data)[..., 0, 0].mean())
 
 
+def _start_live_view(
+    plots: Plots, indices: NDArray[np.float64]
+) -> Callable[[tuple[NDArray[np.float64], int]], None]:
+    """Create the live chart and return its owner-thread refresh callback."""
+    # 2. Show the measured objective, its shot SEM, and the running best.
+    fig, ax = plots.subplots(num="measurement", layout="constrained")
+    ax.set(xlabel="Candidate evaluation (count)", ylabel="Mean terminal P(g,g)")
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    viewer = live_errorbar(ax)
+    ax.lines[0].set(label="Measured ± shot SEM", linestyle="none")
+    (best_line,) = ax.plot([], [], "--", color="C1", label="Best measured so far")
+    (skipped_line,) = ax.plot(
+        [], [], "x", color="0.45", label="Envelope exceeds DAC limit"
+    )
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
+    title = "CZ optimization · Qubit1 / Qubit2"
+    fig.suptitle(f"{title}\n0/{len(indices)} candidates processed · 0 retained shots")
+    fig.show()
+
+    @plots.on_plot_thread
+    def update(frame: tuple[NDArray[np.float64], int]) -> tuple[Artist, ...]:
+        """Refresh the measured objective and skipped evaluations without assigning skipped points an SEM."""
+        data, retained_shots = frame
+        values, best, errors, peaks = data
+        skipped = peaks > 1.0
+        best_line.set_data(indices, best)
+        skipped_line.set_data(indices[skipped], values[skipped])
+        count = int(np.count_nonzero(np.isfinite(values)))
+        heading = fig.suptitle(
+            f"{title}\n{count}/{len(indices)} candidates processed · {retained_shots:,} retained shots"
+        )
+        return (
+            *viewer.set(indices, np.where(skipped, np.nan, values), errors),
+            best_line,
+            skipped_line,
+            heading,
+        )
+
+    return update
+
+
 class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
     """Acquire fixed-depth interleaved RB, then compare measured CZ proposals."""
 
@@ -470,22 +586,17 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
         best = np.full(evaluations, np.nan)
         indices = np.arange(evaluations, dtype=np.float64)
 
-        # 2. Show each objective and the running best measured objective.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(
-            xlabel="Evaluation", ylabel="Mean joint g,g survival", ylim=(-0.03, 1.03)
-        )
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        viewer = live_line(ax, num_lines=2)
-        ax.lines[0].set(label="Evaluation", marker="o")
-        ax.lines[1].set(label="Best measured", marker="", linestyle="--")
-        ax.legend()
-        fig.show()
+        update = _start_live_view(context.plots, indices)
 
-        @context.plots.on_plot_thread
-        def update(values: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            """Refresh evaluation and best-so-far curves for the recorded objectives."""
-            return viewer.set(indices, values)
+        def publish_progress() -> None:
+            # Skipped candidates and unmeasured seeds have no count table in the buffer.
+            retained = int(np.nansum(buffer.array))
+            update(
+                (
+                    np.stack((targets, best, _objective_sem(buffer.array), peak)),
+                    retained,
+                )
+            )
 
         # 3. Measure evaluation 0 without a CMA update, then tell only complete populations.
         population: list[NDArray[np.float64]] = []
@@ -505,10 +616,11 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
                     candidate = _candidate_cfg(cfg, samples, params[index])
                     target = _measure_candidate(cfg, context, step, arms, candidate)
                     if not np.isfinite(target):
-                        break  # Stop before a complete row; keep any counts already acquired.
+                        publish_progress()  # A stopped row can contain shots, but no objective.
+                        break
                     best_target = float(np.fmax(best_target, target))
                 targets[index], best[index] = target, best_target
-                update(np.stack((targets, best)))
+                publish_progress()
                 if index > 0:
                     losses.append(1.0 - target)
                     if len(losses) == cfg.popsize:
@@ -549,16 +661,62 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
         duration = source.result.duration
 
         # 2. Compare measured objectives and overlay the rendered I/Q envelopes.
-        fig, _ = plots.subplots(1, 2, num="fit", figsize=(10, 4), layout="constrained")
-        target_ax, envelope_ax = fig.axes
-        target_ax.set(xlabel="Evaluation", ylabel="Mean joint g,g survival")
-        target_ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        target_ax.plot(targets, marker="o", label="Measured")
-        target_ax.plot(
-            index, targets[index], "*", markersize=12, label=f"Best: {index}"
+        form = source.result
+        evaluations = np.arange(len(targets))
+        errors = _objective_sem(form.sums)
+        fig, target_ax = plots.subplots(
+            num="fit", figsize=(7, 4.8), layout="constrained"
         )
-        target_ax.legend()
-        envelope_ax.set(xlabel="Time (µs)", ylabel="Normalized envelope")
+        target_ax.set(
+            xlabel="Candidate evaluation (count)", ylabel="Mean terminal P(g,g)"
+        )
+        target_ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        target_ax.errorbar(
+            evaluations,
+            targets,
+            yerr=errors,
+            fmt=".",
+            color="C0",
+            label="Measured ± shot SEM",
+        )
+        target_ax.plot(
+            evaluations,
+            np.fmax.accumulate(targets),
+            "--",
+            color="C1",
+            label="Best measured so far",
+        )
+        skipped = evaluations[form.peak > 1.0]
+        if skipped.size:
+            target_ax.plot(
+                skipped,
+                np.zeros_like(skipped),
+                "x",
+                color="0.45",
+                label="Envelope exceeds DAC limit (1 a.u.)",
+            )
+        target_ax.plot(
+            index,
+            targets[index],
+            "*",
+            color="C3",
+            markersize=12,
+            label="Selected evaluation",
+        )
+        error = f" ± {errors[index]:.2g}" if np.isfinite(errors[index]) else ""
+        target_ax.set_title(
+            f"Evaluation {index} · Mean terminal P(g,g) = {targets[index]:.5g}{error}"
+        )
+        target_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
+        fig.suptitle("CZ optimization · Qubit1 / Qubit2 · selection")
+
+        fig, envelope_ax = plots.subplots(
+            num="envelopes", figsize=(7, 4.6), layout="constrained"
+        )
+        envelope_ax.set(xlabel="CZ envelope time (µs)", ylabel="Envelope gain (a.u.)")
+        fig.suptitle(
+            "CZ optimization · Qubit1 / Qubit2 · starting and selected envelopes"
+        )
         for label, params, linestyle in (
             ("Start", start_params, "--"),
             ("Best", best_params, "-"),
@@ -579,7 +737,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
             envelope_ax.plot(
                 samples.time, qdata, color="C1", linestyle=linestyle, label=f"{label} Q"
             )
-        envelope_ax.legend()
+        envelope_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=4)
         fig.show()
         return CZOptimizeAnalysis(
             best_evaluation=index,

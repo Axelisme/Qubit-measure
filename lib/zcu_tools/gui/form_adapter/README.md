@@ -1,6 +1,6 @@
 # gui/form_adapter — 從輸入型別生成 Form
 
-**Last updated:** 2026-11-11
+**Last updated:** 2026-11-22，FieldMeta 與表單呈現入口
 
 **讀者：** framework-dev。Adapter 輸入型別與持久 Spec 的表單推導與轉換契約。
 
@@ -194,6 +194,11 @@ Log→List 帶入實際清單，List→Log 回填最大值與清單長度。切�
 本 package 依賴 `cfg_model`、`program`、`resources`、`gui.form` 與 `gui.session.parameters`。Host、widgets、remote、experiment、MCP、Qt 與 lab 組合位於上層；`.importlinter` 的 `form-adapter-no-host` contract 與 C16 檢查依賴方向。
 
 `gui.form` 提供通用 Pydantic 輸入核心。本 package 擁有 core cfg 推導與 module materialization。
+
+Adapter 將 [`FieldMeta`](../../cfg_model/README.md#cfg_model--共享配置核心) 投影成 `Display`。
+`Display.unit` 是表單顯示提示，不是磁碟軸單位。
+[Qt FormEditor](../widgets/form/README.md#guiwidgetsform--form-draft-view) 用 Form description 呈現欄位。
+[MCP workflow](../../mcp/measure/README.md#workflow-tools) 序列化指定路徑的一層 Form description，不展開整棵表單。
 
 設計背景見 [ADR-0073 measure 表單推導](../../../../docs/adr/0073-measure-form-derivation.md) 與 [`gui/form` README](../form/README.md)。
 
