@@ -342,6 +342,16 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 
 **依據。** 2026-10-20，使用者答「1-1」，並問：「基本認同丙，但我質疑有需要進core嗎？」介面放到 program 後答「同意」。2026-11-21，designer 依既有授權代裁當輪可選取消能力、required-raw 發佈邊界與 QICK／clock 接線，**使用者未覆核**；使用者的既有方向是「3C，但設計上5秒內」及「我认为能及时中断也是一个挺重要的功能。」比較與未覆蓋條件見 [required raw 討論](../discussions/2026-11-21-required-raw-stop-publication.md)。原裁決未附討論紀錄。
 
+### ADC raw plan 的 owner 與壽命
+
+**規則。** ADC 擁有 `IntegratedPaths` 等確定性 raw plan，也判斷 prepared batch 的身分。FTF 與 standalone single-fluxonium 的 acquire session 各持有一個 owner。每輪 integrated bind 傳入當前的 `PreparedRawShots`。換物件就退役舊 plan，A→B→A 不復活第一個 A。只有 materialize 到達某個 logical event 時才建該事件的 plan。不快取 RNG、counts、抽樣路徑、noise、結果或 Stop query。ADC 同步查找、發佈與退役，建構和求值不持 memo lock。兩個環境用既有的 `SimulationBinding.on_end` 在正常結束、Stop 或拋錯時退役 plan，即使診斷關閉也執行。Direct caller 沿用 matching finish、換 request 或 close。舊 raw source 用原輸入與 identity 冷重算，不讀其他代或回填退役的 memo。Plan 不進 source preparation、LRU 或 process 全域。
+
+**例子。** `chain_power` 的固定 fixture 在一次 acquire 取 10 個 gain 點，共 320 輪。同一 prepared batch 的各輪重用已建立的事件 plan，換 prepared 物件才重建，不以 gain 點當失效邊界。用同一 fixture、非排他 1 worker 比較 `e602f0dc6` 與 `a4cd9f1bd`，`chain_power` core 為 350.160 → 165.755 s，materialize 為 343.737 → 159.082 s；Auto core 為 257.464 → 106.475 s。
+
+**邊界。** 只在同一 active batch 的輪間重用。不採用跨內容的數值鍵或其他快取的 byte cap。若要擴大重用範圍，先驗證等價鍵及保留量。Six-fluxonium、decimated 與無 owner 的 `bind(identity)` 照舊。同 seed 輸出逐位元不變，不改既有 Stop 檢查點與 raw 發佈。
+
+**依據。** 2026-11-22，designer 代裁，使用者未覆核。使用者當天說「好維護與模擬效率是唯二考量，其他都只是建議」與「b，但我重點想放acquire內」。取捨與實測條件見 [ADC raw plan 由誰持有](../discussions/2026-11-22-adc-raw-plan-acquire-owner.md)；原始工作檔未入庫。
+
 ## 取捨
 
 內部接縫隔離排程與數值表示，不保證換 kernel 時 dispatch 完全不用改。Guard 拒絕可以換候選，prepare 或 apply 的數值失敗直接傳給呼叫端。事後 accuracy exceedance 只記錄並警告，不因它修正 density、重算或重新分類；回傳 density 的合法性是[另一項檢查](#evolution-輸出合法-density)。
