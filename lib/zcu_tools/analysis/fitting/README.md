@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-23，擬合品質型別入口
+**Last updated:** 2026-11-23，擬合品質型別與 phase slope 契約
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -10,11 +10,18 @@ Caller 畫完圖後可用 `summarize_rabi_joint_fit(result)` 產生 `RabiJointFi
 
 ## Phase regressions
 
-`phase_slopes.fit_phase_slopes(n, quadratures, variances, acquired_shots)` fits
-X/Y observations from independent groups with a shared slope per channel and
+[`phase_slopes.fit_phase_slopes(n, quadratures, variances, acquired_shots)`](phase_slopes.py)
+fits X/Y observations from independent groups with a shared slope per channel and
 coordinate slice. It delegates optimization and residual-scaled covariance to
 `shared`. Each group must independently resolve the integer-axis gcd alias.
 `PhaseSlopeFit` owns slopes, standard errors, backend results and failure reasons.
+Its `slopes_deg` values are in degrees per integer step: degrees per gate when
+`n` counts gates. Each fitted slope uses a representative in `[-180, 180]` of
+its 360° period. The guide's
+[single-point wrapped phase](../../../../zcu_lab/v2/two_qubit/conditional_phase/guide.md#read-phase-and-quadratures)
+is an angle in `[-180, 180)`, not a per-gate change. The experiment, not the
+fitter, uses the slopes for
+[π crossing selection](../../../../zcu_lab/v2/two_qubit/conditional_phase/guide.md#select-a-frequency-and-apply).
 
 `phase_modulation.fit_phase_modulation(phases, squared_rates)` fits
 `A + B cos(phase) + C sin(phase)`. `PhaseModulationFit` owns the coefficients,

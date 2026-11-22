@@ -141,6 +141,11 @@ Z 各維度須匹配軸長，固定軸也計入；load 不將固定值寫進 Res
 
 Native HDF5 的變數名（`VariableSpec.variable` 或 `AxesSpec.data_variable`）與存檔軸的 `label` 都是結果格式的一部分，不是圖上的標籤。Cfg 改名與舊檔相容性見 [ADR-0069〈Cfg 欄位改名與 schema 版本〉](../../docs/adr/0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。現行例子見 [Two-qubit 持久名稱](README.md#two-qubit-持久名稱)。
 
+各 K-cycle core 宣告 sweep 軸，用 [chain/\_cycle.py](chain/_cycle.py) 的 `cycle_sums_variables` 與 `restore_cycle_sums` 保存與還原 `CycleSums.axis`。
+[round_zcu.py](../../lib/zcu_tools/experiment/v2/utils/round_zcu.py) 的 `sweep2array` 展開量化座標。軸量化或存檔成功，不保證 first-read 的 `fit_rabi` 或 `fit_decay_fringe` 能取得 FFT 初猜。
+對 joint 擬合而言，first-read 估計只提供起點；無估計時由 caller 用保存軸另取起點。
+能否畫出 live 方向的投影，見 [analysis〈Readout chain K-cycle〉](../../lib/zcu_tools/analysis/README.md#readout-chain-k-cycle) 的 `cycle_residual_projection`。這個投影不是 joint 估計的前提。
+
 ### 分析選項自行驗證，fit 結果用屬性讀取
 
 分析選項用 pydantic dataclass 的欄位限制驗證，GUI 沿用此驗證。
