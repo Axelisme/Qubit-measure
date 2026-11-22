@@ -58,7 +58,7 @@ class ChainT2RamseyInputs(RecipeInputs):
 
 
 class ChainT2RamseyReport(RecipeReport, JointResidualSummary):
-    """Joint Ramsey estimates and scalar residuals; cancellation returns no report."""
+    """Joint Ramsey estimates and scalar residuals, or the Analyze failure reason."""
 
     t2_us: float | None = Field(description="T2* (µs); null if unavailable.")
     t2_err_us: float | None = Field(
@@ -95,8 +95,9 @@ async def chain_t2ramsey(
 
     The second pi/2 has opposite phase plus the detune ramp. relax_delay is
     the thermalisation wait K; the Form starts it at 5 T1 and overrides can
-    change it. Primary fits the first read with the twotone Ramsey fit for
-    the starting values, then fits all 65 numbers jointly. It reports T2,
+    change it. Primary starts from the first-read fit or, if that fit has no
+    estimate, uses one start from the saved waits and reports null for the
+    first-read T2*. Primary fits all 65 numbers jointly. It reports T2*,
     the fringe frequency and the third-state decay time with Wald errors. It
     also reports R, J, df, J/df, the chi-square reference band endpoints and
     the fraction of whitened components with |r| > 3. These numbers do not

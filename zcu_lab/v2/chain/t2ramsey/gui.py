@@ -30,10 +30,10 @@ class ChainT2RamseySummary(JointResidualSummary):
     tf_err: float | None = Field(description="Wald error of tf in us.")
     reliability: float | None = Field(description="Diagnostic R, no threshold.")
     first_read_t2: float | None = Field(
-        description="T2 in us of the first-read twotone fit, the starting value."
+        description="T2* (µs) from the first-read fit; null if that fit has no estimate."
     )
     first_read_detuning: float | None = Field(
-        description="Fringe MHz of the first-read twotone fit, the starting value."
+        description="Fringe frequency (MHz) from the first-read fit; null if unavailable."
     )
 
 

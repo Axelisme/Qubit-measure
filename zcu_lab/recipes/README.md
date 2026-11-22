@@ -208,7 +208,7 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | `chain_len_rabi` | `chain/len_rabi` | 掃 const／flat_top drive 的長度，`max_length_us`、`points`。Cycle 與 `reps` 同上。起點取自 `twotone/rabi/len_rabi` 的第一讀擬合。回報 π 長度、Rabi 頻率（MHz）與 Wald 誤差、R、三項檢查，不提出 writeback。 |
 | `t1_cov` | `twotone/t1_cov` | 用單 tone pulse readout 讀取 π 與掃描等待前後的 IQ。`use_reset` 選讀取前的脈衝 reset，`points` 設 Expts。回報狀態改變機率擬合的 T1 與誤差，詢問 `$qubit.t1` 寫回並保存二階矩總和。 |
 | `chain_t1` | `chain/t1` | 掃 π 後的等待，`max_delay_us`、`points`。每個 block 是 (π, 等待, 讀, 讀)。起點取自第一讀的單指數擬合，聯合擬合用 rate-equation 模型。回報 T1（振幅較大的 eigen time）、secondary time 與 Wald 誤差、三項檢查，不提出 writeback。 |
-| `chain_t2ramsey` | `chain/t2ramsey` | 掃 Ramsey 等待，`max_delay_us`、`points`、`detune_mhz`（第二個 π/2 的相位斜率）。每個 block 是 (π/2, 等待, 反相 π/2, 讀, 讀)。起點取自 `twotone/t2ramsey` 的第一讀擬合。回報 T2、fringe 頻率、第三態衰減時間與 Wald 誤差、R、三項檢查，不提出 writeback。 |
+| `chain_t2ramsey` | `chain/t2ramsey` | 掃 Ramsey 等待，`max_delay_us`、`points`、`detune_mhz`（第二個 π/2 的相位斜率）。每個 block 是 (π/2, 等待, 反相 π/2, 讀, 讀)。第一讀無估計時，從保存的等待座標選一個 joint fit 起點。回報 T2*、fringe 頻率、第三態衰減時間與 Wald 誤差、R、第一讀 T2*（無估計為 null）、J、df、J/df、χ² 參考帶與尾端比例。不提出 writeback。 |
 | `chain_t2echo` | `chain/t2echo` | 掃總 echo 等待，`max_delay_us`（總長）、`points`。每個 block 是 (π/2, x/2, π, x/2, π/2, 讀, 讀)。起點取自 `twotone/t2echo` 的第一讀擬合。回報 T2 echo、第三態衰減時間與 Wald 誤差、三項檢查，不提出 writeback。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 | [`two_qubit_cz_amplitude`](two-qubit-guide.md#two_qubit_cz_amplitude) | `two_qubit/cz_amplitude` | `scale_range`、`scale_points` 掃兩路共同 gain 倍率。回報第一個 return scale 與擬合診斷。有候選才問 Primary 寫回；完成 Run 後保存。 |
