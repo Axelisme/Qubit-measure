@@ -38,6 +38,7 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.twotone.reset._projection import principal_iq_direction
 
 
 @dataclass(frozen=True)
@@ -225,7 +226,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         flux pulse, after-reset pi off/on, and the same readout. Both switches
         use pi_pulse unchanged. Keep flux gain and pre/post delays fixed.
         Return rounded lengths (us) and IQ shaped (2, 2, N), switches [0, 1].
-        Live curves show I only, without choosing a population direction.
+        Live uses the no-π branch's principal IQ axis for all four branches.
         """
         # 1. Quantize flux-reset hold lengths and monitor all four before/after-pi branches.
         cfg = deepcopy(cfg)
@@ -237,7 +238,11 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         )
         plots = context.plots
         fig, ax = plots.subplots(num="measurement", layout="constrained")
-        ax.set(xlabel=_XLABEL, ylabel=_I_LABEL, title=f"{_TITLE} · IQ")
+        ax.set(
+            xlabel=_XLABEL,
+            ylabel="Mean IQ on no-π principal axis (a.u.)",
+            title=f"{_TITLE} · IQ projection",
+        )
         viewer = live_errorbar(ax, num_lines=4)
         for line, label in zip(ax.lines, _BRANCH_LABELS, strict=True):
             line.set_label(label)
@@ -245,15 +250,17 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         @plots.on_plot_thread
         def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
-            """Show branch means, shot SEM of I and retained counts."""
+            """Show branch means and shot SEM on the same reference axis."""
             signals = split_sums(moments)[1]
-            sem = iq_shot_sem(moments, direction=(1.0, 0.0))
+            direction = principal_iq_direction(signals[0, 0])
+            projected = direction[0] * signals.real + direction[1] * signals.imag
+            sem = iq_shot_sem(moments, direction=direction)
             shots = int(np.nan_to_num(moments[..., 0]).max())
             title = ax.set_title(
-                f"{_TITLE} · IQ\nRetained shots per point and branch: {shots} count"
+                f"{_TITLE} · IQ projection\nRetained shots per point and branch: {shots} count"
             )
             return (
-                *viewer.set(lengths, signals.real.reshape(4, -1), sem.reshape(4, -1)),
+                *viewer.set(lengths, projected.reshape(4, -1), sem.reshape(4, -1)),
                 title,
             )
 
@@ -383,6 +390,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         )
         i_ax, q_ax, ratio_ax, residual_ax = fig.axes
         fig.suptitle(f"{_TITLE} · IQ and residual estimate")
+        # Keep both readout quadratures to diagnose branch motion hidden by a single axis.
         for ax, values, direction in (
             (i_ax, signals.real, (1.0, 0.0)),
             (q_ax, signals.imag, (0.0, 1.0)),
