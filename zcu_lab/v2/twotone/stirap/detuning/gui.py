@@ -30,10 +30,17 @@ def _analyze(
     return StirapDetuningExp().analyze(req.run_result, None, plots=plots)
 
 
+def _summary_lines(
+    source: RunRecord[StirapDetuningCfg, StirapDetuningResult],
+) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.shots} × 1",)
+
+
 DEFINITION = Adapter(
     spec=StirapDetuningExp.AXES_SPEC,
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

@@ -64,6 +64,19 @@ error. The raw clouds remain evidence of acquisition, not accepted fidelity.
 
 ## Measurement and analysis
 
+Use the live IQ figure to check the shot counts and whether the probe-off and
+probe-on clouds occupy distinct regions. The first Analyze figure preserves
+the raw clouds and adds fitted centers and the threshold line in the original
+IQ plane. The threshold is perpendicular to the fitted projection axis.
+Inspect cloud overlap before using it for classification. The Post figure
+shows g, e and other assignments; other does not identify a specific leakage
+state.
+
+The plots show individual shots, not uncertainty bars on a mean-IQ sweep.
+R² and normalized residual RMS summarize the internal histogram fits. R²
+measures explained variation. Normalized residual RMS measures the typical
+mismatch relative to the histogram range.
+
 The Form exposes shots, not reps or rounds. The core uses reps=shots and rounds=1.
 Shots sets the number of raw acquisitions in each probe-off/on preparation.
 Each tone's optional init pulse runs in both preparations on its drive generator.
@@ -81,7 +94,7 @@ while preserving the stored data order.
 Options include PCA/center fitting, angle in degrees, log histogram, T1 alignment
 and the readout length / T1 ratio (a.u.).
 The length ratio (readout length / T1) is inferred from the decay tail between the two clusters.
-With Length Ratio left empty, two tight clusters without a visible tail make Analyze return `length_ratio: null` and title the IQ plot `GE IQ (length ratio: not identifiable)`.
+With Length ratio left empty, two tight clusters without a visible tail can make Analyze report that the integration window / T1 is unavailable.
 This reporting decision does not change centers, fidelity or Post.
 If you set Length Ratio manually, Analyze returns the supplied value.
 Incomplete pairs and numerical fitting/classification failures retain a reason;

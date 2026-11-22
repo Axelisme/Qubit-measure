@@ -10,6 +10,8 @@ from zcu_tools.analysis.fitting import (
     assess_fringe_sampling,
     compute_fit_quality,
     decay_time_bounds,
+    decaycos,
+    expfunc,
     fit_decay,
     fit_decay_fringe,
 )
@@ -49,11 +51,13 @@ class MuxCoherenceTrace:
     index is the original full-readout position. times is the requested delay
     in us, shape (N,). signal is matching complex mean IQ, shape (N,). Both arrays
     contain only acquired points; N may be zero for an incomplete measurement.
+    iq_moments is the matching (N,6) shot sums, or None for mean-only data.
     """
 
     index: int
     times: NDArray[np.float64]
     signal: NDArray[np.complex128]
+    iq_moments: NDArray[np.float64] | None = None
 
 
 def prepare_coherence_trace(
@@ -62,27 +66,33 @@ def prepare_coherence_trace(
     signal: NDArray[np.complex128],
     *,
     skip: int,
+    iq_moments: NDArray[np.float64] | None = None,
 ) -> MuxCoherenceTrace:
     """Omit skip leading positions, then retain finite IQ with its requested delay.
 
     index is the original tone position. times (us) and signal (mean complex IQ)
     are matching one-dimensional arrays from a validated MuxCoherenceResult.
-    skip is a nonnegative point count. No rotation, fitting or mutation occurs.
+    skip is a nonnegative point count. Optional iq_moments has the same point
+    axis and six shot sums per point. No rotation, fitting or mutation occurs.
     """
     # Omit by position before filtering so missing IQ cannot shift the omission.
     signal = signal[skip:]
     finite = np.isfinite(signal)
-    return MuxCoherenceTrace(index, times[skip:][finite], signal[finite])
+    return MuxCoherenceTrace(
+        index,
+        times[skip:][finite],
+        signal[finite],
+        None if iq_moments is None else iq_moments[skip:][finite],
+    )
 
 
 def project_coherence_trace(
     trace: MuxCoherenceTrace, *, minimum_points: int
 ) -> NDArray[np.float64]:
-    """Rotate acquired IQ to its real principal axis after checking point count.
+    """Project a trace's mean IQ onto its real principal axis for a fit.
 
-    minimum_points is the fit's required observation count. Return one real
-    value per trace time. Raise ValueError for too few acquired observations;
-    rotation errors propagate so the caller can report a per-tone fit failure.
+    minimum_points is the required observation count. Return one real value
+    per trace time. Raise ValueError for too few acquired observations.
     """
     if len(trace.times) < minimum_points:
         raise ValueError("Insufficient acquired points for coherence fit")
@@ -96,6 +106,7 @@ def fit_coherence_trace(
     fit_fringe: bool,
     phase: float | None,
     expected_frequency_mhz: float | None,
+    curve_times: NDArray[np.float64],
 ) -> tuple[MuxCoherenceFit, NDArray[np.float64]]:
     """Fit projected IQ to a damped cosine or exponential and return its curve.
 
@@ -104,8 +115,9 @@ def fit_coherence_trace(
     its phase in degrees; None fits phase freely. Fixed phase is excluded from
     uncertainty invalid diagnostics, not from reported parameters. Decay ignores
     phase and has no fixed fringe parameters. Return
-    T2/error in us, fringe rate/error in MHz and fit quality, plus the predicted
-    real IQ at each trace time. expected_frequency_mhz is a finite known alias-risk
+    T2/error in us, fringe rate/error in MHz and fit quality, plus predicted
+    real IQ evaluated at curve_times (requested µs). Quality still uses the acquired
+    trace. expected_frequency_mhz is a finite known alias-risk
     lower bound in MHz, or None when unknown; decay ignores it. Fringe sampling
     quality uses the fitted trace's masked delays, not the full raw delay grid.
     Numeric fit errors propagate; nonfinite estimates
@@ -118,9 +130,11 @@ def fit_coherence_trace(
             real,
             fixedparams=None if phase is None else [None, None, None, phase, None],
         )
+        model = decaycos
         detune, detune_error = fit.freq, fit.freq_err
     else:
         fit = fit_decay(trace.times, real)
+        model = expfunc
         detune, detune_error = 0.0, 0.0
     t2, error = fit.decay_time, fit.decay_time_err
     fitted, params, covariance = fit.curve, fit.params, fit.cov
@@ -154,5 +168,5 @@ def fit_coherence_trace(
             if fit_fringe
             else None,
         ),
-        fitted,
+        model(curve_times, *params),
     )

@@ -42,7 +42,7 @@ class MuxOnetoneFluxLocalInputs(MuxOnetoneFluxInputs):
     overrides: Overrides
     flux_sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
-        description="Native local DC start/stop for every tone in original order. No per-tone point count.",
+        description="Sets Tones › DC bias › Start and Stop in Flux unit for every original tone.",
     )
 
 

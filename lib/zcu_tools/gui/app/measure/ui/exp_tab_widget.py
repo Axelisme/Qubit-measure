@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import (
@@ -179,8 +180,16 @@ class ExpTabWidget(QWidget):
         parent: QWidget | None = None,
         *,
         dialog_presenter: DialogPresenter | None = None,
-        preview_renderer: Any | None = None,
+        preview_renderer: Callable[[Figure], bytes] | None = None,
     ) -> None:
+        """Build the Measure tab and its owned figure area.
+
+        By default the Data gallery uses the production fixed-size PNG preview
+        renderer. An override runs synchronously on the Qt owner thread and
+        returns PNG bytes for one thumbnail. A draw error or invalid PNG marks
+        only that thumbnail unavailable. The override does not render the
+        reading pane or Save outputs.
+        """
         super().__init__(parent)
         self._init_lifetime()
         self.tab_id = tab_id
@@ -245,13 +254,7 @@ class ExpTabWidget(QWidget):
 
         splitter.addWidget(self._left_tabs)
 
-        self._figure_area = ExperimentFigureArea(
-            tab_id,
-            capabilities,
-            lambda pane: self.get_current_figure_for_pane(pane),
-            preview_renderer=preview_renderer,
-        )
-        splitter.addWidget(self._figure_area)
+        self._mount_figure_area(preview_renderer)
 
         splitter.setCollapsible(0, True)
         self._update_left_panel_controls()
@@ -260,6 +263,19 @@ class ExpTabWidget(QWidget):
         self._scope.connect(self._left_tabs.currentChanged, self._on_left_tab_changed)
         # Initially show Run
         self._on_left_tab_changed(self._left_tabs.currentIndex())
+
+    def _mount_figure_area(
+        self, preview_renderer: Callable[[Figure], bytes] | None
+    ) -> None:
+        self._figure_area = ExperimentFigureArea(
+            self.tab_id,
+            self._capabilities,
+            lambda pane: self.get_current_figure_for_pane(pane),
+            preview_renderer=preview_renderer,
+        )
+        self._splitter.addWidget(self._figure_area)
+        # ADR-0067: retire Data reading callbacks before Qt deletes the child.
+        self._scope.add_cleanup(self._figure_area.retire_data_reading)
 
     def _build_run_panel(self) -> None:
         # ── Tab: Run (always) ──────────────────────────────────────
@@ -725,6 +741,10 @@ class ExpTabWidget(QWidget):
         reader dynamically and isolate each pane's synchronous failure.
         """
         return self._figure_area.get_current_figure_for_pane(pane)
+
+    def clear_run_preview(self) -> None:
+        """Drop the failed Run's Data preview without changing the selected pane."""
+        self._figure_area.clear_run_preview()
 
     def clear_all_figures(self) -> None:
         """Clear all figure panes (used for LoadData and Run start invalidation)."""

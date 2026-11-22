@@ -21,3 +21,7 @@ Analysis reports results for review; calibration stays unchanged. The summary re
 ## Recommended
 
 Analysis picks the sweep value whose signal changes least across repetitions (smoothed sum of step differences). Set 'Search from' / 'Search to' to ignore edges of the sweep. Keep n_times small (~6); the sweep multiplies the run time.
+
+## Reading the plots
+
+The maps show projected mean IQ in a.u. by gate repetitions and repeated gate RF frequency in MHz, in the same orientation. The Analyze curve is the smoothed sum of absolute differences in IQ between adjacent repetition counts, not a measured one-dimensional IQ series or a fitted gate fidelity. No shot SEM is drawn on the map or this derived loss. The marker shows the lowest loss in the selected search interval. Refine the scan around that RF carrier if the minimum is interior. A minimum at the edge asks for a shifted or widened interval before adopting the value. The summary shows configured Reps × Rounds.
