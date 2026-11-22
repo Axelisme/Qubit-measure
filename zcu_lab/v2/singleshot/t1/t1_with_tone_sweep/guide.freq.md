@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. How to map single-shot T1 transition rates versus probe frequency from the GUI or MCP and interpret the results.
 
-Single-shot T1-with-tone, probe-frequency sweep: at each probe frequency it sweeps the wait-plus-probe length from both |g> and |e> initial states (Branch), classifies each shot during acquisition against the |g>/|e> centres, fits the dual transition rates per frequency, and renders the 3×3 rate landscape over (freq, time). Runs on real hardware.
+At each probe frequency, Run sweeps the wait-plus-probe length from both |g> and |e> initial states. It classifies each shot against the |g>/|e> centers. Analyze fits the transition rates at each frequency using both preparations. Runs on real hardware.
 
 ## Saved counts
 
@@ -34,9 +34,17 @@ These starting values remain editable and separate from calibration writeback. A
 
 Pi pulse uses `$qubit.module.x180` or pi_pulse. Probe starts from res_probe. Reset is optional; readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Defaults snapshot.
 
+## Read the plots
+
+Run shows six population maps. The columns are the initial g and e states, and the rows show the final g, e and Other fractions. The x-axis is probe frequency (MHz) and the y-axis is probe duration (µs). The bottom row shows the three fractions versus probe duration at the current frequency, one panel per preparation.
+
+In Analyze, the first two rows each contain three population maps, ordered Ground, Excited and Other. The first row starts in g and the second starts in e. The y-axis is probe duration (µs); color shows the population. The x-axis is the same outer coordinate used in the rate panels. It is probe frequency (MHz) unless `ac_stark_coeff` is available. If that coefficient is supplied, Analyze plots the coefficient times the squared frequency; the rate-panel label still reads Probe frequency (MHz).
+
+The bottom three panels show transition rates in µs⁻¹ on logarithmic y-axes. From left to right they compare g→Other with g→e, e→Other with e→g, and e→Other with g→Other. Each line joins rates fitted separately at the outer sweep points. Bars at the first and every fifth point after it show each rate's own fit standard error, the square root of that rate's covariance diagonal entry. They are not shot SEM.
+
 ## Typical writeback
 
-This is a diagnostic only. Read the rate landscape from the grid; calibration parameters stay unchanged.
+This is a diagnostic only. Analyze does not change calibration parameters.
 
 ## Recommended
 

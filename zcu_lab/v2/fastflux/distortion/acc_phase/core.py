@@ -276,7 +276,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         fig, ax = plots.subplots(num="detuning", layout="constrained")
         fig.suptitle("Fast-flux transient · Qubit · Detuning response")
         ax.set(xlabel="First π/2 pulse center (µs)", ylabel="Detuning (MHz)")
-        ax.plot(lengths, detunes, "k.", label="Phase-derived detuning")
+        ax.plot(lengths, detunes, "k.-", label="Phase-derived detuning")
         ax.plot(
             ideal_lengths, ideal_curve, color="green", label="Rectangular reference"
         )

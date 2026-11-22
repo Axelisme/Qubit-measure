@@ -274,7 +274,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         fig.suptitle("Readout frequency sweep · Resonator · IQ separation")
         raw = np.abs(signals)
-        ax.plot(freqs, raw, "o", color="C0", label="Measured SNR")
+        ax.plot(freqs, raw, "o-", color="C0", label="Measured SNR")
         if not np.array_equal(raw, snrs, equal_nan=True):
             ax.plot(freqs, snrs, color="C1", label="Selection SNR")
         ax.axvline(max_freq, color="C3", ls="--", label="Selected setting")

@@ -321,7 +321,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # 2. Compare the live first-read contrast with the manual selection.
         fig, ax = plots.subplots(num="contrast")
         fig.suptitle("Paired-read gain sweep · Resonator · First-read contrast")
-        ax.plot(result.gains, _r1_contrast(result.sums), "o", color="C0")
+        ax.plot(result.gains, _r1_contrast(result.sums), "o-", color="C0")
         ax.set(xlabel="Readout gain (a.u.)", ylabel="R1 mean IQ difference (a.u.)")
         if options.gain is not None:
             ax.axvline(options.gain, color="C3", ls="--")
@@ -389,7 +389,7 @@ def _draw_gain_diagnostics(
         ),
         strict=True,
     ):
-        ax.plot(gains, arrays[name], "o", color="C0")
+        ax.plot(gains, arrays[name], "o-", color="C0")
         ax.set_ylabel(ylabel)
     fig.axes[-1].set_xlabel("Readout gain (a.u.)")
     fig.tight_layout()
@@ -417,10 +417,10 @@ def _draw_gain_diagnostics(
         strict=True,
     ):
         if name == "retention_from_covariance":
-            ax.plot(gains, arrays[name], "o", color="C0", label="R1 on")
+            ax.plot(gains, arrays[name], "o-", color="C0", label="R1 on")
         else:
-            ax.plot(gains, arrays[name + "_on"], "o", color="C0", label="R1 on")
-            ax.plot(gains, arrays[name + "_off"], "s", color="C1", label="R1 off")
+            ax.plot(gains, arrays[name + "_on"], "o-", color="C0", label="R1 on")
+            ax.plot(gains, arrays[name + "_off"], "s-", color="C1", label="R1 off")
         ax.set_ylabel(ylabel)
     for ax in fig.axes[-2:]:
         ax.set_xlabel("Readout gain (a.u.)")
