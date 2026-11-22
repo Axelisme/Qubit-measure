@@ -80,11 +80,11 @@ ALLXY_GATE1_IDX = [GATE_LIST.index(g1) for g1, _ in ALLXY_SEQUENCE]
 ALLXY_GATE2_IDX = [GATE_LIST.index(g2) for _, g2 in ALLXY_SEQUENCE]
 
 _GATE_NAME = {
-    "I": "$I$",
-    "X90": "$X_{90}$",
-    "Y90": "$Y_{90}$",
-    "X180": "$X_{180}$",
-    "Y180": "$Y_{180}$",
+    "I": "I",
+    "X90": "X₉₀",
+    "Y90": "Y₉₀",
+    "X180": "X₁₈₀",
+    "Y180": "Y₁₈₀",
 }
 _GATE_PAIR_LABELS = [f"{_GATE_NAME[g1]}–{_GATE_NAME[g2]}" for g1, g2 in ALLXY_SEQUENCE]
 
@@ -390,8 +390,10 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
 
         ax.set_title(
             f"AllXY · Relative drive error {fit.amplitude_error:+.2%}\n"
-            f"Amplitude / detuning deviations: {fit.power_err:.3f} / {fit.detune_err:.3f} in Bloch z\n"
-            f"Residual RMS: {fit.residual_rms:.3f} in Bloch z"
+            f"Amplitude deviation: {fit.power_err:.3f} in Bloch z\n"
+            f"Detuning deviation: {fit.detune_err:.3f} in Bloch z\n"
+            f"Residual RMS: {fit.residual_rms:.3f} in Bloch z",
+            fontsize=10,
         )
 
         fig.tight_layout()

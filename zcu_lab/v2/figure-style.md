@@ -84,7 +84,7 @@
 
 - 壞例：實驗沒有選取判準，繪圖端自行以 R² < 0.9 標成未通過。
 - 好例（repo 現例）：[Reset Rabi check](twotone/reset/rabi_check/core.py) 的殘差子圖在 legend 使用[各分支擬合回傳的 RMS](twotone/reset/rabi_check/fit.py)，不重算 RMS，也不標通過與否。[Guide](twotone/reset/rabi_check/guide.md) 說明這些診斷共用同一個 IQ 投影軸，並請操作員比較擬合殘差。
-- 好例（本地改寫示例）：[T2 Echo 的 GUI adapter](twotone/time_domain/t2echo/gui.py) 已決定寫回候選是否預先勾選，並提供未勾選的理由。若把這份既有判定呈現到圖上，可寫「未通過選取判準：R² = 0.774，須 ≥ 0.9；正規化殘差 RMS = 0.113，須 ≤ 0.1；T2 相對誤差 = 0.83，須 ≤ 0.5」。這是呈現寫法，並非現行圖上的標註。Core 和繪圖端不另套這些條件。
+- 好例（repo 現例）：[Hahn echo core](twotone/time_domain/t2echo/core.py) 在 fit 圖上列 R² 和正規化殘差 RMS。[GUI adapter](twotone/time_domain/t2echo/gui.py) 決定寫回是否預先勾選，並在寫回審查列出原因，例如「R² = 0.774，須 ≥ 0.9」。Core 不用寫回門檻判定圖上的 fit。
 
 ### R4：尺度跟著資料走
 
