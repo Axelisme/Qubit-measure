@@ -51,17 +51,12 @@ and source-owned history. These controls are not physical YAML or program cfg.
 
 ## Round pacing
 
-`numerics.time_scale` is a finite nonnegative physical-time multiplier in both
-acquisition modes. It defaults to 1.0; 0.1 runs ten times faster and zero skips
-waiting. Each round targets `time_scale * reps * sum(timeline duration + relax_delay)`,
-with timeline us converted to seconds. Readout and pre/post delays are included.
-Snapshot capture and numeric execution consume this budget; only the positive
-remainder sleeps. Slow rounds and failures during numeric execution add no wait.
-Raw materialization is outside the pacing budget. Stop interrupts pacing
-at checkpoints at most 10 ms apart. Integrated acquisition discards that round;
-decimated acquisition keeps the completed trace and stops before the next round.
-Startup preparation, program construction and round hooks are outside this
-budget. No GUI field is added; final plot-buffer flushing is unchanged.
+Set `numerics.time_scale` in FTF's environment YAML. It is a finite nonnegative
+multiplier for both acquisition modes and defaults to 1.0. Use zero to skip
+waiting without disabling the [acquisition clock](#acquisition-clock-and-loss-drift).
+The [Program binding's round pacing contract](../../../program/v2/simulation/README.md#round-pacing)
+defines the wait budget and what integrated and decimated acquisition return
+when Stop interrupts pacing.
 
 Profiling overrides and the caller's board-loading example belong to
 [environment setup](../../../../../zcu_lab/simulation_envs/README.md#關閉補等與-telemetry).
@@ -218,12 +213,9 @@ creates one per environment. A caller-owned clock must not be shared between
 independent environments. The builder shares it between acquisition admission and
 completed-round duration accounting; no hardware clock is read or changed.
 
-`SimulationClock` returns monotonic wall seconds plus a nondecreasing offset.
-After each successful round it adds `max(0, physical_s - elapsed_s)` to the offset.
-`physical_s` is unscaled; `elapsed_s` includes snapshot, execution and pacing sleep.
-Failed or cancelled rounds add no credit. Even with `time_scale=0`, successful
-rounds account for unscaled simulated physical time. Idle time between acquisitions
-advances the wall-clock part naturally.
+FTF uses that clock for the elapsed time between drift updates. Even at
+`time_scale=0`, the [Program binding credits completed rounds](../../../program/v2/simulation/README.md#completed-round-credit)
+using their unscaled physical duration.
 
 Optional `settings.drift` freezes independent f1, coupler and f2 log-OU losses
 at `begin_acquire(seed=...)`. Root seed and loop key derive separate streams.

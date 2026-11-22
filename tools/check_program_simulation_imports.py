@@ -6,6 +6,7 @@ from grimp import ImportGraph
 from importlinter.application import output
 from importlinter.domain.contract import Contract, ContractCheck
 
+# ADR-0072: Keep Program's direct simulation imports inside its mixin package.
 _PROGRAM = "zcu_tools.program"
 _MIXIN_PACKAGE = f"{_PROGRAM}.v2.simulation"
 _SIMULATION_TARGETS = ("zcu_tools.simulate", "zcu_tools.simulators")

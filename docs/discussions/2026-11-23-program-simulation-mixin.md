@@ -46,7 +46,9 @@ Metadata 方案把只供驗證的角色搬進 IR，讓多個 package 為同一�
 
 模擬環境的 generator／ADC 路由驗證與 `SimulationSoc.install_request` 的路由綁定檢查不變。Experiment 的 [Run 來源紀錄](../../lib/zcu_tools/experiment/acquisition.py)使用 `SimulationSoc` 來填 metadata，不是 Program 取數。Lab 使用 [`simulate.fluxonium` 的擬合與 predictor](../../lib/zcu_tools/simulate/fluxonium/README.md)，用的是物理模型而非模擬取數 runtime。兩者不在這次裁決範圍。
 
-使用者尚未追認代裁，也未核准 ADR-0072 裡的原則草稿措辭。
+使用者尚未追認代裁。
+
+> 待使用者核准措辭：拿掉 `SimulationAcquireMixin` 後，Program 不留模擬邏輯、參數或型別。Docstring 可說明模擬時的行為。Lab 不向 Program 傳模擬專用參數。
 
 ## 依據
 

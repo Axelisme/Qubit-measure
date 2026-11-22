@@ -75,8 +75,6 @@ status: accepted
 
 **依據。** 2026-10-26，使用者：「我不太希望真实 acquire 还会走模拟的模块。」2026-11-22，使用者：「据我所知啦，模拟器这个功能啊，应该只局限在一个 mixin 内，也就是说，如果把这个 mixin 拿掉，我的 program 就没有模拟功能。这个是解耦的设计。」「我认为这两处可能有违背了我的设计理念。对我来说，只要把这个 mixin 拿掉，我的 program 就不会有模拟的逻辑存在了。」Designer 依 2026-11-23 的授權代裁，移除僅供模擬端驗證的線路要求，並用 import contract 守住 Program 邊界，待使用者追認。比較與舊裁決見 [Program 的模擬邏輯只在 mixin 內](../discussions/2026-11-23-program-simulation-mixin.md)。
 
-> 原則草稿，待使用者核准措辭：拿掉 `SimulationAcquireMixin` 後，Program 不留模擬邏輯、參數或型別。Docstring 可說明模擬時的行為。Lab 不向 Program 傳模擬專用參數。
-
 ### Mux PFB channel 查詢與 carrier selection 的 owner
 
 **規則。** Program 擁有 QICK PFB channel assignment 的查詢；FTF 只做 event／carrier selection，不組 QICK register 結構或重做 folding 算式。
