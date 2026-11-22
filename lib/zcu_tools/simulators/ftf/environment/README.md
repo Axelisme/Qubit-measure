@@ -634,13 +634,16 @@ by the floor at each transition. This count includes zero-weight levels when
 the floor is zero.
 
 FTF applies `numerics.projection_weight_floor` when building transition rows.
-The setting is required and accepts finite values in `[0, 1)`. The templates
-set it to `1e-9`. At each point and transition, a source state with current
-marginal below the floor skips evolution and gets
-an identity row. FTF keeps that weight in the same state without redistributing
-or renormalizing it. Even an all-identity layer keeps all probability. Floor
-zero solves every state, including zero-weight states, and removes the identity
-approximation within this vacuum-reset model.
+The setting is required and accepts finite values in `[0, 1)`. See the template
+values in [default.yaml](../../../../../zcu_lab/simulation_envs/FTF/default.yaml) and
+[low-snr.yaml](../../../../../zcu_lab/simulation_envs/FTF/low-snr.yaml).
+At each point and transition, a source state with current marginal below the
+floor skips evolution and gets an identity row. FTF keeps that weight in the
+same state without redistributing or renormalizing it. Even an all-identity
+layer keeps all probability. Floor zero solves every state, including zero-weight
+states, and removes the identity approximation within this vacuum-reset model.
+
+In the Markov model, six same-seed comparisons of the template floor against floor zero, including the original first point of chain amp_rabi, found maximum differences of 6.921e-6 in the full final density and 6.964e-6 in per-readout populations (commit cc6b252c0). This checks the floor within the model, not accuracy against an independent reference.
 
 `simulate.adc` solves the linear, state-conditioned cavity fields. The incident
 amplitude uses the same `input_per_gain` conversion as terminal readout.

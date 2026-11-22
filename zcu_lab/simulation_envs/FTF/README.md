@@ -102,6 +102,9 @@ MCP 先呼叫 `predictor.list_files` 發現檔案，再使用
 
 ## 工作副本與調參
 
+樣板更新不會自動改動既有的 `ftf.yaml`。要採用樣板的 projective 剪枝門檻，請從 [default.yaml](default.yaml) 或 [low-snr.yaml](low-snr.yaml) 讀取 `numerics.projection_weight_floor`。
+只更新工作副本中的這個欄位，保留其他設定，再重建模擬環境。
+
 要練習低 SNR 讀出，先備份既有工作副本，再把 [low-snr.yaml](low-snr.yaml) 複製成 `ftf.yaml` 並重建環境。
 它與 [default.yaml](default.yaml) 的唯一差別是 pulse ADC 和兩個 mux receiver 的 `noise_psd_adc2_ns` 都從 `1.0` 改為 `84000.0`。
 這個數值是每個 I/Q 分量的雙邊白雜訊 PSD。I 和 Q 的雜訊獨立，變異數相同。

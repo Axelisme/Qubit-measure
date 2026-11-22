@@ -216,7 +216,7 @@ readout:
 numerics:
   # Increase native/local dimensions and the joint upper bound independently
   # to check convergence.
-  projection_weight_floor: 1.0e-9
+  projection_weight_floor: 1.0e-5
   truncation:
     f1:
       native_cutoff: 24

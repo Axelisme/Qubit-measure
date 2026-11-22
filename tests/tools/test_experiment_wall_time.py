@@ -574,6 +574,15 @@ def test_main_rejects_an_invalid_row_deadline_before_discovery(seconds: str) -> 
     assert raised.value.code == 2
 
 
+def test_main_rejects_zero_workers_before_discovery() -> None:
+    def unexpected_discovery() -> Inventory:
+        pytest.fail("invalid worker count must fail before experiment discovery or Run")
+
+    with pytest.raises(SystemExit) as raised:
+        main(["--workers", "0"], discover=unexpected_discovery)
+    assert raised.value.code == 2
+
+
 def test_main_selects_exact_experiment(tmp_path: Path, data_dir: Path) -> None:
     output = tmp_path / "output"
 
