@@ -32,7 +32,7 @@
         {
           "path": ["delay", "stop"],
           "value": 465,
-          "basis": "Same Q1 diagnostic as twotone/t2echo: 3 × the 155 us decay-only fit (20261120T120426Z-d61050). Q1 has no saved T2e; this is a window, not calibration."
+          "basis": "Keep the same bounded delay stop as twotone/t2echo so both echo workloads cover the same waiting window. This is a timing input, not a Q1 T2e calibration."
         }
       ]
     },
@@ -44,7 +44,7 @@
         {
           "path": ["delay", "stop"],
           "value": 180,
-          "basis": "Same Q1 joint-bias diagnostic as twotone/t2ramsey (20261120T115030Z-3da45b): 3 × 60.1 us, rounded to 180 us because Q1 has no saved T2r."
+          "basis": "Keep the same bounded delay stop as twotone/t2ramsey so both Ramsey workloads cover the same waiting window. This is a timing input, not a Q1 T2r calibration."
         },
         {
           "path": ["detune"],
@@ -150,12 +150,12 @@
         {
           "path": ["tones", 0, "freq", "start"],
           "value": 275.742,
-          "basis": "Time the local DC map across about ten historical widths on each side, not the Form's narrow kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep the fixed wide Q1 band for the local DC map. The workload scouts across bias rather than timing the narrow Form seed around the reference point."
         },
         {
           "path": ["tones", 0, "freq", "stop"],
           "value": 319.742,
-          "basis": "Time the local DC map across about ten historical widths on each side, not the Form's narrow kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep the fixed wide Q1 band for the local DC map. The workload scouts across bias rather than timing the narrow Form seed around the reference point."
         },
         {
           "path": ["tones", 1, "freq", "start"],
@@ -177,12 +177,12 @@
         {
           "path": ["tones", 0, "freq", "start"],
           "value": 294.447,
-          "basis": "Time Q1's bounded spectroscopy band at about 1.5 historical widths on either side of the captured f01, not the Form's kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep a fixed, bounded Q1 band around the captured f01 for mux spectroscopy. It is a workload window, not a model linewidth or a calibration."
         },
         {
           "path": ["tones", 0, "freq", "stop"],
           "value": 301.037,
-          "basis": "Time Q1's bounded spectroscopy band at about 1.5 historical widths on either side of the captured f01, not the Form's kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep a fixed, bounded Q1 band around the captured f01 for mux spectroscopy. It is a workload window, not a model linewidth or a calibration."
         },
         {
           "path": ["tones", 1, "freq", "start"],
@@ -245,12 +245,12 @@
         {
           "path": ["freq", "start"],
           "value": 294.447,
-          "basis": "Choose a bounded preparation search at about 1.5 historical widths on each side of Q1 f01; the Form keeps its own kappa-based seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep a bounded frequency search around the captured Q1 f01 for the preparation pulse. The Form keeps its narrower kappa-based seed."
         },
         {
           "path": ["freq", "stop"],
           "value": 301.037,
-          "basis": "Choose a bounded preparation search at about 1.5 historical widths on each side of Q1 f01; the Form keeps its own kappa-based seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep a bounded frequency search around the captured Q1 f01 for the preparation pulse. The Form keeps its narrower kappa-based seed."
         }
       ]
     },
@@ -446,12 +446,12 @@
         {
           "path": ["freq", "start"],
           "value": 294.447,
-          "basis": "Time a bounded Stark spectroscopy band at about 1.5 historical widths on each side of Q1 f01; it is wider than the Form's kappa seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep a bounded Stark spectroscopy band around the captured Q1 f01. It is wider than the Form seed so the workload includes off-center probe frequencies."
         },
         {
           "path": ["freq", "stop"],
           "value": 301.037,
-          "basis": "Time a bounded Stark spectroscopy band at about 1.5 historical widths on each side of Q1 f01; it is wider than the Form's kappa seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep a bounded Stark spectroscopy band around the captured Q1 f01. It is wider than the Form seed so the workload includes off-center probe frequencies."
         }
       ]
     },
@@ -463,12 +463,12 @@
         {
           "path": ["freq", "start"],
           "value": 253.812,
-          "basis": "Time a wide scout at about 20 historical widths on either side of Q1 f01; the Form keeps its own kappa-based seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep the same fixed wide Q1 scout as twotone/freq to time the chained sweep rather than the Form's narrow seed."
         },
         {
           "path": ["freq", "stop"],
           "value": 341.672,
-          "basis": "Time a wide scout at about 20 historical widths on either side of Q1 f01; the Form keeps its own kappa-based seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep the same fixed wide Q1 scout as twotone/freq to time the chained sweep rather than the Form's narrow seed."
         }
       ]
     },
@@ -503,12 +503,12 @@
         {
           "path": ["freq", "start"],
           "value": 253.812,
-          "basis": "Time the 87.860 MHz wide scout centered at Q1 f01, not the Form's roughly 0.11723 MHz kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep the fixed 87.860 MHz scout around the captured Q1 f01. This benchmarks a wide search, not the Form's narrow kappa window or a calibration."
         },
         {
           "path": ["freq", "stop"],
           "value": 341.672,
-          "basis": "Time the 87.860 MHz wide scout centered at Q1 f01, not the Form's roughly 0.11723 MHz kappa window. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep the fixed 87.860 MHz scout around the captured Q1 f01. This benchmarks a wide search, not the Form's narrow kappa window or a calibration."
         }
       ]
     },
@@ -520,12 +520,12 @@
         {
           "path": ["freq", "start"],
           "value": 294.447,
-          "basis": "Time a bounded power map at about 1.5 historical widths on each side of Q1 f01; it is wider than the Form's kappa seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep a bounded frequency band around the captured Q1 f01 for the power map. The sweep probes off-center frequencies instead of using the narrow Form seed."
         },
         {
           "path": ["freq", "stop"],
           "value": 301.037,
-          "basis": "Time a bounded power map at about 1.5 historical widths on each side of Q1 f01; it is wider than the Form's kappa seed. Q1 history: FTF narrow run 20261120T113120Z-0cb847 (gain 0.23, 1.5 us; original execution commit not located) gave a power-broadened width of 2.1965 MHz, not intrinsic kappa."
+          "basis": "Keep a bounded frequency band around the captured Q1 f01 for the power map. The sweep probes off-center frequencies instead of using the narrow Form seed."
         }
       ]
     },
@@ -650,12 +650,12 @@
         {
           "path": ["delay", "stop"],
           "value": 465.0,
-          "basis": "Three times the Q1 155 ± 129 us decay-only diagnostic (cz-measure, 2026-11-20, run 20261120T120426Z-d61050). This was a short-window fit, not accepted calibration."
+          "basis": "Keep a fixed upper delay bound for the decay-only echo workload. The 465 us stop sets the workload, not the Q1 T2e calibration."
         },
         {
           "path": ["detune_ratio"],
           "value": 0.0,
-          "basis": "Use the decay-only setting of run 20261120T120426Z-d61050; no programmed fringe to sample."
+          "basis": "Keep the echo workload decay-only. A zero detune ratio adds no programmed fringe."
         }
       ]
     },
@@ -667,12 +667,12 @@
         {
           "path": ["delay", "stop"],
           "value": 180.0,
-          "basis": "Three times the Q1 60.1 ± 20.9 us short-window diagnostic at the joint bias (cz-measure, 2026-11-20, run 20261120T115030Z-3da45b); not accepted as a calibration."
+          "basis": "Keep a fixed upper delay bound for the Ramsey fringe workload. The 180 us stop sets the workload, not the Q1 T2r calibration."
         },
         {
           "path": ["delay", "n"],
           "value": 361,
-          "basis": "0–180 us inclusive gives 0.5 us steps. The programmed 0.05 MHz fringe rate gives 40 steps per period, leaving margin for residual detuning (the Q1 independent-model comparison differed by about 0.068 MHz)."
+          "basis": "With 361 points from 0 to 180 us inclusive, the interval is 0.5 us. The programmed 0.05 MHz fringe has 40 intervals per period."
         },
         {
           "path": ["detune_ratio"],

@@ -62,11 +62,12 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 可將 `startup.py`、`entry-template.yaml`、`entry-library.yaml` 與工作副本 `ftf.yaml` 複製到自己的目錄，再指定該處的 startup。Entry 範本與模型設定按 startup 檔案位置定位，不跟隨 shell cwd。板子另由 `PROFILE_PATH` 定位；複製 startup 到其他目錄後，須把它改成共用板子 YAML 的實際路徑。
 要改 entry、point 或 tab 名稱，編輯自己的 startup 副本。
 
-Demo point 的 qubit 頻率與 `kappa` 提供頻譜掃描的中心與頻窗。`wiring.lo_flux_ch` 選擇各 qubit 的序列內磁通線。Q1 的 `ext.flux_reset_gain` 和 `ext.flux_reset_length` 是 flux reset 表單的起點。
+Demo point 的 qubit 頻率提供頻譜掃描中心。Q1／Q2 的 `qubit.kappa` 是從 half-flux 模型的 `1/(π·T2)` 推導的線寬，單位為 MHz。表單以 κ 取得窄掃描初值，不代表量測校準或操作者尋峰需要的寬度。
+`wiring.lo_flux_ch` 選擇各 qubit 的序列內磁通線。Q1 的 `ext.flux_reset_gain` 和 `ext.flux_reset_length` 是 flux reset 表單的起點。
 MG12 的 `flux_dev` 選擇兩顆 qubit 共用的 DC source `coil`。Q1／Q2 的 `flux.period.coil` 使用 A／Φ0，供 global flux 表單換算掃描範圍。
 既有 v1／v2 entry 須先用[長期升級入口](../../../docs/parameter-upgrades.md)轉換。Startup 不自動升級。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 用於從接線開始的走查。若修改工作副本的物理值或接線，也要核對 entry 範本及已建立的 entry。
 
-Demo 的 qubit 範本不預填 `kappa`。掃頻窗如何從校準帶入、何時直接填表單的起訖值，見[作者指南〈校準初值政策〉](../../v2/measure-authoring.md#校準初值政策)。
+掃頻窗如何從校準帶入、何時直接填表單的起訖值，見[作者指南〈校準初值政策〉](../../v2/measure-authoring.md#校準初值政策)。
 
 Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
 MG12 的 `mixer_freq: 7135` 是 mux LO 初值，缺值時 mixer 留空必填，不由 tone 頻率或 κ 推算。

@@ -315,11 +315,14 @@ class JournalUsageError(ValueError):
 def reusable_rows(
     source: Path, plan: BatchPlan, available: dict[str, str]
 ) -> dict[str, Row]:
-    """Read resolved rows for a new plan with the same commit and input hashes.
+    """Read resolved rows from the source batch for the new plan.
 
-    Paths in the retained rows refer to the original artifacts. Raise
-    JournalUsageError for different provenance; missing or malformed journals
-    propagate errors.
+    The source and plan must have the same commit and input hashes, or raise
+    JournalUsageError. Missing or malformed journal data propagate errors.
+    Supply available as the mapping from current scene IDs to their exact
+    registered adapter keys. Silently skip rows whose scene is absent from
+    that mapping or whose adapter differs. Paths in retained rows refer to
+    the original artifacts.
     """
     previous = read_plan(source)
     if previous["commit"] != plan["commit"]:

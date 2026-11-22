@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -53,6 +54,7 @@ class _SyntheticController:
         on_point: Callable[[Path], None] | None,
         on_run: Callable[[_SyntheticController], None],
         on_cancel: Callable[[_SyntheticController], None],
+        on_write: Callable[[object], None] | None,
     ) -> None:
         self.bus = bus
         self.telemetry = Path(project_root).with_name("telemetry")
@@ -86,7 +88,7 @@ class _SyntheticController:
             get_tab_snapshot=lambda _tab: SimpleNamespace(run=None),
         )
         self.cfg_resources = SimpleNamespace(
-            lookup=lambda _tab: SimpleNamespace(result=object)
+            lookup=lambda _tab: SimpleNamespace(write=on_write, result=object)
         )
         self.session_services = SimpleNamespace(
             soc_connection=SimpleNamespace(install_soc=lambda *_args: None)
@@ -173,6 +175,7 @@ def _install_headless_controller(
     *,
     on_ftf: Callable[[int, FTFSettings, float | None], None] | None = None,
     on_point: Callable[[Path], None] | None = None,
+    on_write: Callable[[object], None] | None = None,
 ) -> Callable[[], Registry]:
     def open_entry() -> None:
         clock.seconds += 40.0
@@ -181,7 +184,7 @@ def _install_headless_controller(
         *, bus: BaseEventBus, project_root: str, **_options: object
     ) -> _SyntheticController:
         return _SyntheticController(
-            bus, project_root, open_entry, on_point, on_run, on_cancel
+            bus, project_root, open_entry, on_point, on_run, on_cancel, on_write
         )
 
     def register() -> Registry:
@@ -272,6 +275,74 @@ def test_main_prepares_run_from_a_disposable_copy_of_the_manifest_point(
     assert (
         data_dir / "fixture" / point_path / "library.yaml"
     ).read_text() == "library-token"
+
+
+@pytest.mark.parametrize(
+    ("notes", "basis"),
+    [
+        pytest.param({}, {}, id="omitted"),
+        pytest.param(
+            {"unpinned": {"form": "", "point": " "}}, {"basis": ""}, id="blank"
+        ),
+        pytest.param({"unpinned": None}, {"basis": []}, id="opaque"),
+    ],
+)
+@pytest.mark.usefixtures("core_app")
+def test_main_applies_selected_overrides_without_reading_review_notes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    notes: dict[str, object],
+    basis: dict[str, object],
+) -> None:
+    data_dir, output = tmp_path / "inputs", tmp_path / "output"
+    _headless_inputs(data_dir)
+    source = data_dir / "case-inputs.json"
+    raw = json.dumps(
+        {
+            "entry": "demo",
+            "point": "initial",
+            **notes,
+            "scenes": [
+                {"scene_id": "other", "adapter": "fake/power", **basis},
+                {
+                    "scene_id": "scout",
+                    "adapter": "fake/frequency",
+                    **basis,
+                    "overrides": [
+                        {"path": ["delay", "stop"], "value": 3, **basis},
+                        {"path": ["delay", "n"], "value": 5, **basis},
+                    ],
+                },
+            ],
+        },
+        indent=2,
+    ).encode()
+    source.write_bytes(raw)
+    writes: list[object] = []
+    register = _install_headless_controller(
+        monkeypatch,
+        _Clock(),
+        ("fake/frequency", "fake/power"),
+        lambda ctrl: QTimer.singleShot(0, ctrl.complete),
+        lambda _: pytest.fail("a completed Run must not be cancelled"),
+        on_write=writes.append,
+    )
+    assert (
+        main(
+            ["--select", "scout", "--output", str(output)],
+            data_dir=data_dir,
+            registry_factory=register,
+            read_commit=lambda: "abc",
+        )
+        == 0
+    )
+    assert writes == [{("delay", "stop"): 3, ("delay", "n"): 5}]
+    report = json.loads((output / "report.json").read_text())
+    assert [(row["scene_id"], row["adapter"]) for row in report["rows"]] == [
+        ("scout", "fake/frequency")
+    ]
+    plan = json.loads((output / "batch.json").read_text())
+    assert plan["inputs"][source.name] == sha256(raw).hexdigest()
 
 
 @pytest.mark.parametrize(

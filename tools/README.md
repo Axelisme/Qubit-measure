@@ -158,9 +158,11 @@ write_snapshot(
 
 ## 實驗 Run 牆鐘
 
-[`case-inputs.json`](data/experiment_wall_time/case-inputs.json) 決定全表。首版 62 列包含先前手選的 52 個工作量（選集 commit `4a2dea87690bfcb2764886b2e5feb0b2113510c9`），另有 10 個快磁通或共用 coil 的派送驗收場景。維護者新增場景時須填唯一 `scene_id`、精確 adapter key、選入理由，以及有界 Form 覆寫的 path、值與理由。同一 adapter 可對應不同場景。Lab 新增 adapter 不會自動增加列。
+[`case-inputs.json`](data/experiment_wall_time/case-inputs.json) 決定全表。首版 62 列包含先前手選的 52 個工作量（選集 commit `4a2dea87690bfcb2764886b2e5feb0b2113510c9`），另有 10 個快磁通或共用 coil 的派送驗收場景。每個場景填唯一 `scene_id`、精確 adapter key，以及有界 Form 覆寫的 path 和值。同一 adapter 可對應不同場景。Lab 新增 adapter 不會自動增加列。
 
-省略 `--select` 會選整份 manifest。指定時先比對精確 scene ID，再比對 manifest 中 adapter key 的第一段家族名。例如 `--select twotone/freq` 選一個場景，`--select mux` 選出 manifest 裡的 mux 場景。不同 selector 可以重疊，同一場景只跑一次。重複 selector、找不到的 selector、無效 manifest、重複 scene ID 或重複覆寫 path 都是用法錯誤。省略 `--output` 時，工具在 `.agent_state/benchmark/wall-time/` 建立有時間戳的新目錄。量測指定的輸出目錄必須尚未存在。
+入庫審閱時，維護者核對場景與覆寫的 `basis` 理由及 `unpinned.form`／`point` 的來源說明。CLI 不檢查這些註記的有無或內容。`ftf_exclusion` 會影響派送。對仍有註冊 adapter 的場景填非空理由時，工具不開表也不派送 Run。報表以該理由將該列標為 `not_runnable`。
+
+省略 `--select` 會選整份 manifest。指定時先比對精確 scene ID，再比對 manifest 中 adapter key 的第一段家族名。例如 `--select twotone/freq` 選一個場景，`--select mux` 選出 manifest 裡的 mux 場景。不同 selector 可以重疊，同一場景只跑一次。重複或找不到的 selector、無效 JSON 或執行輸入、重複 scene ID、同場景重複或重疊的覆寫 path 都是用法錯誤。父子路徑如 `["delay"]` 與 `["delay", "stop"]` 不可同時覆寫；工具在建立批次或派送任何列之前拒絕。省略 `--output` 時，工具在 `.agent_state/benchmark/wall-time/` 建立有時間戳的新目錄。量測指定的輸出目錄必須尚未存在。
 
 使用有 Qt 與 QICK 的 worktree 環境。工具用 `Controller(view=None)` 和 Qt 事件迴圈，不開視窗、遠端服務或硬體連線。每列使用工具自持的 [FTF 設定](data/experiment_wall_time/ftf-settings.yaml)、[board profile](data/experiment_wall_time/board-profile.yaml) 與[乾淨 fixture](data/experiment_wall_time/fixture/)。首版在離線從已驗的標準資料建立，不同步 lab 的 preset 或工作點。工具只從 `zcu_lab.assembly` 取得元件和實驗宣告，不讀 lab 模擬檔或 startup。它用 `time_scale=0` 停用模擬等待。
 
@@ -247,9 +249,9 @@ uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
 
 舊 adapter-key 格式不能用新版續跑或重建。請在 `batch.json` 所記的原 commit 執行 `--report-only`。批次起迄與外層逾時看 `run_heavy.py` 的收據，不用來推算 Run 耗時。要補未派送或未完成的列，使用下方的續跑方式。
 
-續跑會派送 Run，仍由 `run_heavy.py` 配置 CPU slot、寫 log 和收據。以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。呼叫端也要沿用來源批次的 worker 數。工具不把 worker 數寫入 journal，也不檢查是否一致。請查來源收據的 `command`：有 `--workers 3` 就沿用 3，沒有 `--workers` 就用預設的 1。
+續跑會派送 Run，仍由 `run_heavy.py` 配置 CPU slot、寫 log 和收據。以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。Manifest 的 SHA-256 使用整份原始 bytes，只改審閱註記也會使雜湊不同。呼叫端也要沿用來源批次的 worker 數。工具不把 worker 數寫入 journal，也不檢查是否一致。請查來源收據的 `command`：有 `--workers 3` 就沿用 3，沒有 `--workers` 就用預設的 1。
 
-新報表併入來源中已落盤的判定列。`--select` 只派送所選範圍內尚未判定的列。`timeout` 和 `run_failed` 都是已判定列，不會自動重跑。`missing_adapter` 不留用，選中時會再次核對註冊。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`。
+新報表併入來源中已落盤的判定列。`--select` 只派送所選範圍內尚未判定的列。`timeout` 和 `run_failed` 都是已判定列，不會自動重跑。只留用現有 scene ID 和已註冊 adapter key 都與來源列相符的結果。`missing_adapter` 不留用，選中時會再次核對註冊。留用列標 `reused`，其 `case_directory` 指向原始產物。新程序第一個送出的 Run 標 `cold start`。
 
 下例續跑來源使用 3 個 workers 的非排他批次。保留 `output` 為來源目錄，另設定新的絕對路徑 `continued_output` 及本次 payload 的秒數預算 `budget_s`。先建立 `continued_output` 的父目錄，並確認新輸出、log 和收據路徑未被使用。若來源未指定 worker 數，改用 `workers=1`；若來源停用了 OpenCL，沿用上例的 ICD 與 cache 設定。若來源是排他的批次，在協調的窗口為 runner 加上 `--exclusive`。
 

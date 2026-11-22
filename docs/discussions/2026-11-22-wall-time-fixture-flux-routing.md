@@ -47,7 +47,7 @@ Designer 依 2026-11-21 的使用者授權代裁。使用者尚未覆核此裁�
 
 ## 被否決的選項與理由
 
-- 啟用 [`low-snr.yaml`](../../zcu_lab/simulation_envs/FTF/low-snr.yaml) 的 F1/gen1 示意 `+0.02 Φ0/gain`。這會改變波形和演化，不是補一個不影響量測的欄位。另做示意診斷也只回答示意輸入的成本。
+- 啟用 `low-snr.yaml`（`git show 6602f8985376b94a1d5055cb703699bbd5c64c93:zcu_lab/simulation_envs/FTF/low-snr.yaml`） 的 F1/gen1 示意 `+0.02 Φ0/gain`。這會改變波形和演化，不是補一個不影響量測的欄位。另做示意診斷也只回答示意輸入的成本。
 - 借用 local source、coupler trim 或 six-fluxonium 的 coil。它們不提供 MG12 在本 FTF 場景對 Q1／Q2 的具名 route 和校準。
 - 當時就另建校準場景。當時沒有同場景可追溯的校準輸入，新工作點還要獨立驗收。
 - 將十列列為 `not_runnable` 或新增報表狀態。前者略過 Open，遮掉欄位錯誤。後者要改 journal 和續跑契約，逐列覆蓋摘要已能指出缺口。

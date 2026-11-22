@@ -60,7 +60,10 @@ def test_main_rejects_ambiguous_or_nonfinite_override_values_before_registration
     [
         ("duplicate_scene", "Duplicate scene ID"),
         ("duplicate_override", "Duplicate override"),
+        ("parent_before_child", "Overlapping override"),
+        ("child_before_parent", "Overlapping override"),
         ("invalid_override", "overrides.0.path"),
+        ("blank_exclusion", "ftf_exclusion"),
         ("unknown_selector", "unknown scene ID or adapter family"),
         ("duplicate_selector", "duplicate selector"),
     ],
@@ -85,8 +88,16 @@ def test_invalid_manifest_or_selector_fails_before_registration(
         argv += ["--select", "sweep", "--select", "sweep"]
     elif issue == "duplicate_override":
         scene["overrides"] = [override, override | {"value": 3}]
+    elif issue in {"parent_before_child", "child_before_parent"}:
+        parent = override | {"path": ["delay"], "value": {"stop": 2}}
+        child = override | {"path": ["delay", "stop"], "value": 3}
+        scene["overrides"] = (
+            [parent, child] if issue == "parent_before_child" else [child, parent]
+        )
     elif issue == "invalid_override":
         scene["overrides"] = [override | {"path": ["tones", -1]}]
+    elif issue == "blank_exclusion":
+        scene["ftf_exclusion"] = " "
     _write_scenes(
         tmp_path, *([scene, scene] if issue == "duplicate_scene" else [scene])
     )

@@ -38,45 +38,52 @@ class _ManifestItem(BaseModel):
 
 
 class Override(_ManifestItem):
-    """One bounded Form write and its rationale."""
+    """One bounded Form write. The optional basis is for review only."""
 
     path: Annotated[tuple[_Field | _Index, ...], Field(min_length=1)]
     value: JsonValue
-    basis: _Text
+    basis: object = None
 
 
 class Scene(_ManifestItem):
-    """A scene's stable identity, live adapter and authored work."""
+    """A scene's stable identity, live adapter and authored work.
+
+    The optional basis is for review only. A nonempty ftf_exclusion skips Run
+    and supplies the report reason.
+    """
 
     scene_id: _Key
     adapter: _Key
-    basis: _Text
+    basis: object = None
     overrides: list[Override] = Field(default_factory=list)
     ftf_exclusion: _Text | None = None
 
     @model_validator(mode="after")
     def validate_paths(self) -> Scene:
-        paths = set()
+        paths: set[tuple[str | int, ...]] = set()
         for override in self.overrides:
             if override.path in paths:
                 raise ValueError(
                     f"Duplicate override for {self.scene_id!r} at {override.path!r}"
                 )
             paths.add(override.path)
+        for override in self.overrides:
+            for length in range(1, len(override.path)):
+                parent = override.path[:length]
+                if parent in paths:
+                    raise ValueError(
+                        f"Overlapping override for {self.scene_id!r}: "
+                        f"{parent!r} is a parent of {override.path!r}"
+                    )
         return self
 
 
-class _Unpinned(_ManifestItem):
-    form: _Text
-    point: _Text
-
-
 class Manifest(_ManifestItem):
-    """Shared Working Point and hand-selected wall-time workloads."""
+    """Shared Working Point and workloads. Unpinned notes are for review only."""
 
     entry: _Label
     point: _Label
-    unpinned: _Unpinned
+    unpinned: object = None
     scenes: Annotated[list[Scene], Field(min_length=1)]
 
     @model_validator(mode="after")
