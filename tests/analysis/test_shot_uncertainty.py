@@ -136,6 +136,17 @@ def test_nearly_singular_calibration_retains_large_finite_sem() -> None:
     np.testing.assert_allclose(sem, [2.0**29, 2.0**29])
 
 
+def test_corrected_population_sem_does_not_require_representable_variance() -> None:
+    # One Other shot out of two gives a raw SEM of 0.5. Calibration scales
+    # that coordinate by 1e160, so its SEM fits in float64 but its variance does not.
+    counts = np.array([1, 0, 1], dtype=np.int64)
+    matrix = np.diag([1.0, 1.0, 1e-160])
+
+    sem = shot_uncertainty.corrected_population_sem(counts, matrix)
+
+    np.testing.assert_allclose(sem, [0.5, 0.0, 5e159])
+
+
 def test_class_covariance_rejects_nonfinite_total_of_finite_counts() -> None:
     limit = np.finfo(np.float64).max
     with pytest.raises(ValueError, match="total shot count"):

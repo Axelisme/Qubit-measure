@@ -42,7 +42,13 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_errorbar
 
 from .._drive import QubitDriveCfg
-from .._phase import QuadraturePhase, count_phase, phase_variance, qubit_sigma_variance
+from .._phase import (
+    QuadraturePhase,
+    count_phase,
+    phase_display_sem,
+    phase_variance,
+    qubit_sigma_variance,
+)
 from .._phase_plot import wrapped_phase_plot_data
 from .._readout import POINT_ALIAS_DESCRIPTION
 from .._sums import qubit_sigma, validate_qubit_tones
@@ -600,11 +606,10 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         )
         quadratures = np.where(complete, quadratures, np.nan)
         phases = phase_points(quadratures)
-        phase_sem = np.sqrt(
-            phase_variance(
-                quadratures[:, 0], quadratures[:, 1], variances[:, 0], variances[:, 1]
-            )
+        phase_var = phase_variance(
+            quadratures[:, 0], quadratures[:, 1], variances[:, 0], variances[:, 1]
         )
+        phase_sem = phase_display_sem(phase_var, acquired[:, 0], acquired[:, 1])
         # 2. Fit shared X/Y gate-count slopes and require a unique conditional pi crossing.
         fitted = fit_phase_slopes(
             data.gate_counts,
@@ -785,7 +790,7 @@ def _plot_phase_diagnostics(
         if unavailable.any():
             logger.warning(
                 "Omitting %d phase error bars for %s, n=%d, spectator %s: "
-                "zero contrast or unavailable X/Y phase variance",
+                "zero contrast, fewer than two retained shots, or unavailable X/Y phase variance",
                 np.count_nonzero(unavailable),
                 target,
                 n,

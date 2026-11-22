@@ -42,7 +42,13 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_errorbar
 
 from .._drive import QubitDriveCfg
-from .._phase import QuadraturePhase, count_phase, phase_variance, qubit_sigma_variance
+from .._phase import (
+    QuadraturePhase,
+    count_phase,
+    phase_display_sem,
+    phase_variance,
+    qubit_sigma_variance,
+)
 from .._phase_plot import wrapped_phase_plot_data
 from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
 from .._sums import qubit_sigma, validate_qubit_tones
@@ -475,7 +481,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         phase_var = phase_variance(
             quadratures[:, 0], quadratures[:, 1], variances[:, 0], variances[:, 1]
         )
-        phase_sem = np.sqrt(phase_var)
+        phase_sem = phase_display_sem(phase_var, totals[:, 0], totals[:, 1])
         targets: list[tuple[QuadraturePhase, ...]] = []
         fits: list[PhaseLineFit] = []
         # 2. Require complete phase rows before unwrapping and count-weighted slope fitting.
@@ -629,7 +635,7 @@ def _plot_contrast(
         if unavailable.any():
             logger.warning(
                 "Omitting %d phase error bars for %s: "
-                "zero contrast or unavailable X/Y phase variance",
+                "zero contrast, fewer than two retained shots, or unavailable X/Y phase variance",
                 np.count_nonzero(unavailable),
                 label,
             )

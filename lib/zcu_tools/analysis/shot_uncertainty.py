@@ -153,7 +153,9 @@ def corrected_population_sem(
     wrongly shaped matrix or invalid counts raise ValueError.
     """
     covariance = class_probability_covariance(counts)
-    if confusion_matrix is not None:
+    if confusion_matrix is None:
+        sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
+    else:
         classes = counts.shape[-1]
         if confusion_matrix.shape != (classes, classes):
             raise ValueError("confusion matrix must match both class axes")
@@ -165,11 +167,22 @@ def corrected_population_sem(
         except np.linalg.LinAlgError:
             logger.warning("Omitting corrected shot SEMs: singular confusion matrix")
             return np.full(counts.shape, np.nan)
+        # Each class pair contributes a rank-one covariance with weight -Σ[i, j]
+        # along the difference of their one-hot vectors. Take the norm of the
+        # projected square-root factors so a representable SEM need not be squared.
+        i, j = np.triu_indices(classes, k=1)
+        scale = np.sqrt(-covariance[..., None, i, j])
+        left, right = jacobian[:, i], jacobian[:, j]
         with np.errstate(over="ignore", invalid="ignore"):
-            covariance = jacobian @ covariance @ jacobian.T
-    variance = np.diagonal(covariance, axis1=-2, axis2=-1)
-    finite = np.isfinite(variance)
+            difference = left - right
+            projected = np.where(
+                np.isfinite(difference),
+                scale * difference,
+                scale * left - scale * right,
+            )
+            sem = np.hypot.reduce(projected, axis=-1)
+    finite = np.isfinite(sem)
     missing = finite.size - np.count_nonzero(finite)
     if missing:
         logger.warning("Omitting %d shot SEMs: nonfinite sampling variance", missing)
-    return np.sqrt(np.where(finite, np.maximum(variance, 0.0), np.nan))
+    return np.where(finite, sem, np.nan)

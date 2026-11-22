@@ -73,7 +73,7 @@ def _plot_classified_fractions(
             delays,
             series.values[:, prep, outcome],
             yerr=series.sem[:, prep, outcome],
-            fmt="o",
+            fmt="o-",
             markersize=3,
             capsize=2,
             color=color,

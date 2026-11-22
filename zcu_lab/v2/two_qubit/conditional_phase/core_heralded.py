@@ -39,7 +39,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
 
-from .._phase import QuadraturePhase, phase_variance
+from .._phase import QuadraturePhase, phase_display_sem, phase_variance
 from .._phase_plot import wrapped_phase_plot_data
 from .._sums import herald_probabilities, qubit_sigma, terminal_counts
 from .core import (
@@ -407,14 +407,14 @@ class ConditionalPhaseHeraldedExp(
         phases = (phase_points(gg_values), phase_points(ee_values))
         quadratures = np.stack((gg_values, ee_values))
         variances = np.stack((gg_stats.variances, ee_stats.variances))
-        phase_sem = np.sqrt(
-            phase_variance(
-                quadratures[:, :, 0],
-                quadratures[:, :, 1],
-                variances[:, :, 0],
-                variances[:, :, 1],
-            )
+        phase_var = phase_variance(
+            quadratures[:, :, 0],
+            quadratures[:, :, 1],
+            variances[:, :, 0],
+            variances[:, :, 1],
         )
+        retained = np.stack((gg_stats.acquired, ee_stats.acquired))
+        phase_sem = phase_display_sem(phase_var, retained[:, :, 0], retained[:, :, 1])
         # 2. Share sign-corrected gg/ee slopes by actual spectator; retain gg-only comparison.
         fitted = fit_phase_slopes(
             data.gate_counts,
@@ -689,7 +689,7 @@ def _plot_phase_diagnostics(
             if unavailable.any():
                 logger.warning(
                     "Omitting %d phase error bars for %s, n=%d, herald %s, spectator %s: "
-                    "zero contrast or unavailable X/Y phase variance",
+                    "zero contrast, fewer than two retained shots, or unavailable X/Y phase variance",
                     np.count_nonzero(unavailable),
                     target,
                     n,
