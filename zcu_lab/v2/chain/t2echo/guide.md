@@ -1,64 +1,39 @@
-**Readers:** operator, agent. Run the readout-chain T2 Hahn echo from the GUI or MCP and read its live curves, joint fit and residuals.
+**Readers:** operator, agent. Measure Hahn echo decay in the joint chain response and compare it with first-read IQ.
 
 # K-cycle readout-chain T2 echo
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+For opening, refreshing and saving, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-## Behavior
+Each rep is one 16-read cycle: `wait K → (π/2 → Delay/2 → π → Delay/2 → π/2 → readout → same readout) × 8`. There is no reset or phase ramp. With all pulses on the same axis, zero delay gives a 2π rotation.
 
-`chain/t2echo` sweeps the total echo wait like `twotone/t2echo`, but every repetition is one cycle of 16 reads instead of one read.
-A cycle waits Cycle thermalisation wait K, then plays eight blocks of π/2 pulse, half the Delay, π pulse, the other half, π/2 pulse again and two reads of the same Readout, with no reset inside the cycle.
-With the π pulse on the π/2 pulse's axis, a zero-delay block is a full 2π rotation and returns the qubit to its start. There is no phase ramp.
-Use at least 5 × T1 for K, including before the first cycle, to start near thermal equilibrium.
-After a readout pulse ends, its `post_delay` sets the wait before the second readout or the next π/2 pulse.
-For cavity ring-down, start with a wait of 5/(2πκ), with κ the readout linewidth in MHz and the result in µs. The fallback readout template leaves 0.015 µs of arriving drive on both sides of the ADC window.
-The delay loop runs outside the cycle. Delay is the total wait; both halves are rounded to the hardware time grid. Reps sets the cycles at every delay in one round, and Rounds sets the number of rounds.
+## Set the sweep
 
-The host reduces each cycle to 65 numbers: the IQ of the 16 reads, their I², IQ, Q² summed over three read groups, and IQ products between read pairs summed over six groups set by the number of echo blocks and reads between them.
-For a fixed sweep, the saved sums and the accumulator across rounds have fixed size, independent of the number of cycles.
-Temporary arrays within one acquisition round grow with points × Reps. Increasing Reps therefore uses more temporary memory; increasing Rounds does not enlarge those per-round arrays.
+Bind the qubit and its resonator. Select a calibrated single-tone pulse Readout; mux is not supported. Check frequency, drive gain and the readout trigger and integration window before Run. Fill any required blanks. Use calibrated x90 and x180 pulses.
+- Total echo wait starts at `0…1.5 × T2e`; supply the range if T2e is missing. Delay is the sum of the two waits; each half is rounded to the hardware time grid.
+- Use a window near 3 × the expected echo time. A short window leaves only shallow decay and forces extrapolation. The fit assumes no fringe. If you see ripple, take at least 10 points per period to resolve it and check pulse calibration before treating it as decay.
+- **Cycle thermalisation wait K** starts at 5 × the captured T1, or 150 µs if T1 is missing. Use at least 5 × T1 for a near-thermal start, including the first cycle.
+- Readout `post_delay` runs from pulse end, not ADC close. Check that windows on the same ADC do not overlap and that the next drive has enough ring-down time. Start at `5/(2π·κ)` µs for linewidth κ in MHz; compare with a longer wait before interpreting changes as qubit dynamics. The fallback readout template leaves 0.015 µs of arriving drive on each side of the ADC window.
+- Reps counts cycles per point per round. Use at least 66, so a round has at least 65 within-point noise degrees of freedom even for one sweep point. Rounds counts passes through the sweep.
 
-## Parameter sources
+## Read the plots
 
-The Form uses the `twotone/t2echo` sources: the `$qubit.module.x90` slot or a fresh `pi2_pulse` template, the `$qubit.module.x180` slot or a fresh `pi_pulse` template, and the `$resonator.module.readout` slot or a fresh `readout` template.
-Select a single-tone pulse readout, not a mux module. The cycle has no Reset.
-Total echo wait runs from 0 to 1.5 × `$qubit.t2e` over 101 points; it stays empty when T2e is missing.
-Cycle thermalisation wait K starts at 5 * `$qubit.t1` µs, or 150 µs when T1 is missing.
-Every cycle contains eight echoes, so one cycle lasts about Cycle thermalisation wait K + 8 × (delay + π length + 2 × π/2 length + 2 × readout length).
-Reps starts at 100 and Rounds at 100. Reps must be at least 66, so that even a single delay gives the first round 65 cycles beyond its mean to estimate the noise of the 65 numbers.
-Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
+Run shows first-read IQ on its dominant sweep axis in a.u. (I if too few points define an axis). The lower panel uses all 65 features, centered by their across-sweep median and scaled by pooled noise. It has no shot-SEM bars. The header counts cycles per point after each completed round. Stop keeps completed rounds. Stopping before any round finishes fails Run.
+The first-read `fit` figure and upper live panel use shot SEM: the projected single-cycle standard deviation divided by √(retained cycles at that point). Each cycle contributes its first read once. These bars are not fit errors or round-to-round scatter.
 
-Open this experiment with the qubit and its resonator bound in the selected point. Choose or expand the pulse and readout modules, check Total echo wait › Start, Stop and Expts, the number of sampled values, then Run. In `linrange`, enter endpoints and a point count. `center` uses a midpoint and span instead of endpoints. The `_step` variants use spacing instead of a point count. Missing inputs must be filled before Run.
-Frequency is the RF carrier (MHz). Leave Mixer freq blank when no mixer setting is needed. Gen ch selects the drive output and NQZ its Nyquist zone. Gain, when shown, is the signed DAC full-scale fraction (a.u.). Phase sets the rotation axis in degrees. The waveform style and Length set the envelope. Pre-delay waits before playback and Post-delay waits after playback, both in µs.
-For Readout, use the resonator's calibrated RF frequency, gain and phase. RO ch selects the receiver. RO length sets its integration window and Trig offset places that window, both in µs. An optional classifier stores state-calibration data but this sequence does not classify or filter shots.
+Analyze fits all 65 IQ and correlation statistics jointly across the sweep once. The separate first-read exponential fit excludes the first point, shown in gray, and seeds both joint decay times.
+Run and Analyze set the first-read projection from the remaining points. The dashed first-read marker shows the seed decay time when it lies in range. In the first-read figure, R² below zero means a worse fit than the mean. Normalized residual RMS is residual RMS divided by the signal range. Neither sets a selection threshold.
+With fewer than two distinct waits after the first point, or no seed estimate, the first-read figure says "First-read fit unavailable", connects the points and keeps any available shot SEM. Joint Analyze uses all saved waits and still attempts one fit. Its starts are not results; if it succeeds, `first_read_t2` is null. A joint fit error fails Analyze.
 
-## Run and Analyze
+The joint figure comes first. Its upper panel overlays measured points and the model along the live all-feature direction; its lower panel plots measured minus model against the sweep. The scale is the pooled standard error of a point mean, not population or per-point shot SEM. Look for ranges where the residuals keep the same sign.
+If the projection is unavailable, Analyze still reports the joint values and diagnostics without these curves and keeps the first-read figure.
 
-During Run, the upper live panel shows the mean IQ of the first read in each cycle. The I and Q weights follow the direction of greatest variation across the sweep; the projected signal is in a.u., not a classified state probability. With too few points to estimate that direction, the plot uses I. The lower panel combines the 65 features into a joint projection. It subtracts the across-sweep median and scales by noise estimated within each sweep point. Its unit is one point-mean standard error. It helps you see whether the joint data also resolve the decay; there are no shot-SEM bars on this pooled, noise-normalized diagnostic. The header advances once per completed round and shows cycles accumulated per point. Stop retains completed rounds.
+`J` sums squared residuals whitened by the model covariance across all 65 features. `df` is 65 × the point count minus the joint parameter count. Read `J/df` against the approximate χ² band `1 ± 2√(2/df)` and the fraction of whitened components with `|r| > 3`. These are not the residuals in the lower panel. Neither diagnostic sets a fit acceptance threshold.
 
-Analyze fits the 65 statistics jointly across all waits once. The separate first-read figure (`fit`) repeats the first-read live points. The vertical bars on both first-read plots are one **shot SEM**: the projected single-cycle sample standard deviation divided by the square root of the retained cycles at that point. Each cycle contributes its first read once. The bars come from the saved I, Q, I², IQ and Q² sums, not from round-to-round scatter or the uncertainty of a fitted parameter.
-The first-read exponential fit excludes the first sweep point, shown in grey. Run and Analyze use the remaining points to set the IQ projection direction. When the first-read fit supplies an estimate, the orange curve shows the model and a dashed marker shows its echo time if it lies in the scan. That time starts both joint decay times.
-If fewer than two distinct waits remain after excluding the first point, Analyze skips the first-read fit. If the fit is skipped or cannot estimate a decay time, the figure connects the measured points, keeps any available shot SEM and shows “First-read fit unavailable” without a curve, marker or fit statistics. Analyze still attempts the joint fit once using all saved waits. It starts the echo time at one third of the full saved wait span and the third-state time at the full span. Those starts are not estimates. The summary reports `first_read_t2` as null if the joint fit succeeds without a first-read estimate.
+The joint model uses total echo wait in its exponential decay. The most populated thermal row identifies the qubit branch. If the third row is more populated than either qubit row, the two fitted times exchange roles in the report. The dashed joint line marks the reported T2 echo within the scan.
+The model assumes independent thermalized cycles, Markov transitions, and three shared IQ centers with one isotropic noise width. It does not resolve multiple jumps during readout, cavity transients or the identity of a leakage level. The quoted Wald standard errors measure local parameter uncertainty, not shot SEM or systematic bias.
 
-When the first-read fit is available, R² is the fraction of variation explained by the fit; the normalized residual RMS divides residual RMS by the signal range. A negative R² means the curve fits worse than a constant at the mean. A smaller normalized residual RMS indicates closer agreement. Neither metric sets a selection threshold. The traces need enough contrast and sweep coverage to distinguish the fit from noise.
+## Use the result
 
-The upper panel of `joint-residuals` shows the measured points and solid joint model curve for the same all-65-feature projection as the lower live panel. It is a projected signal, not an inferred state population. The lower panel shows measured minus model at each total echo wait in the same SEM units. Look for residual patterns such as a drift or fringe that the model curve does not explain. The pooled noise scale does not give a shot-SEM bar for each delay.
+Check that the data resolve the decay and that the residuals do not show a persistent ripple. This experiment proposes no writeback. Use [`twotone/t2echo`](../../twotone/time_domain/t2echo/guide.md) for a separate qubit calibration.
 
-Analyze lists the joint figure first. If the saved statistics cannot support the live projection, the figure says “Live-direction projection unavailable” and shows the joint estimates and residual diagnostics without curves. The first-read figure remains available.
-
-The figure lists T2 echo and the third-state decay time with their Wald standard errors in µs. The joint model uses total echo wait in its exponential envelope. The most populated thermal row identifies the qubit branch. If the model's third row is more populated than the qubit rows, the two fitted times exchange roles in the report. The dashed line marks the reported T2 echo when it lies in the sweep.
-
-The scalar diagnostics use all 65 whitened residual components at every delay, not just the projection shown in the panels. `J` is their sum of squares. `df` is 65 times the number of delays minus the number of fitted parameters. The figure and summary give `J/df` and the numeric endpoints of the approximate χ² reference band `1 ± 2√(2/df)`. The tail fraction is the share of whitened components with `|r| > 3`. The band and tail fraction help put the residuals in context. Neither is an acceptance threshold or proof of accurate decay times. The Analyze summary identifies the run and gives its saved Reps×Rounds setting, not the number of rounds that finished.
-
-## What to do next
-
-Set Total echo wait › Stop near 3 × the tentative decay time, for example about 45 µs for a 15 µs estimate. A short window leaves only a shallow part of the decay so the time depends on extrapolation. Echo fits no intentional fringe. If residual fringes are visible, sample at least 10 points per period to resolve them and check pulse calibration rather than interpreting aliased ripple as decay. For an observed 2 µs period use steps no larger than 0.2 µs. Sparse points can hide or alias a ripple. Use `twotone/t2echo` for a separate calibration.
-This experiment does not propose writeback. The model assumes independent thermalised cycles, Markov transitions between three states and three shared IQ centers with one isotropic noise width. A read that changes the state places its IQ between the initial and final centers. This does not identify multiple jumps within a read, cavity transients or a physical leakage level. Large Wald errors or negligible thermal population of a state can leave its dynamics poorly determined. Fit convergence or a small residual is not proof of unbiased parameters.
-
-Layout reference: Ding, *Novel Gates with Superconducting Fluxonium Qubits*, Fig. 5-9(b,e) (printed p. 152), uses pulse-sequence context to read a phase trace. Here the echo refocuses phase and the decay is measured against total wait, not an applied phase axis.
-
-## Saved data and MCP recipe
-
-Native Save retains the total echo wait axis, per-point cycle count and 65 feature sums, and the 65 × 65 product sums pooled across points for the live joint projection. Load keeps the same data and can reproduce the analysis; the first-read shot SEM uses moments already present in these files.
-
-`chain_t2echo` can set π/2 pulse, π pulse and Readout library references, Total echo wait › Stop/Expts, Reps and Rounds. Use an override on `relax_delay` for Cycle thermalisation wait K. Omitted inputs keep the form values, overrides apply last, and null is passed to the form as an explicit clear where accepted. The recipe runs, analyzes and saves, with no writeback. Its report includes the decay times, their standard errors, `first_read_t2_us` (null without a first-read estimate), and the same scalar joint residual diagnostics as Analyze. The per-delay projection stays in the figure.
+`chain_t2echo` rejects `null` for `readout_ref`, `pi_ref` and `pi2_ref` at the required Form selector, before Run. For `max_delay_us`, `points`, `reps` and `rounds`, omission keeps the Form value and `null` clears the required value. The readiness check stops before acquisition if it is still blank after overrides. Set K with an override on `relax_delay`.
