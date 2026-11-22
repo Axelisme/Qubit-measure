@@ -31,7 +31,6 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.patches import Patch
-from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -438,7 +437,6 @@ def _plot_confusion_matrix(
         ax.set_title(f"Observed: g {g:.1%}, e {e:.1%}, Other {other:.1%}", fontsize=10)
         ax.set_xlabel("I (a.u.)", fontsize=10)
         ax.set_ylabel("Q (a.u.)", fontsize=10)
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=2))
         ax.tick_params(labelsize=10)
         ax.grid(False)
         ax.legend(

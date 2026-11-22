@@ -573,10 +573,10 @@ def _layout_ge_diagnostic(
         )
         for ax in axes:
             ax.tick_params(labelsize=10)
-            ax.xaxis.set_major_locator(MaxNLocator(nbins=5, min_n_ticks=2))
         iq.xaxis.label.set_fontsize(10)
         iq.yaxis.label.set_fontsize(10)
         for histogram in (combined, ground, excited):
+            histogram.xaxis.set_major_locator(MaxNLocator(nbins=5, min_n_ticks=2))
             histogram.set_xlabel("Projected I (a.u.)", fontsize=10)
         for panel, prep in ((ground, "g"), (excited, "e")):
             panel.set_title(f"{prep} prep · {panel.get_title()}", fontsize=10, pad=40)

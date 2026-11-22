@@ -1,8 +1,12 @@
 """Preparation density colors for GE IQ clouds."""
 
+from collections.abc import Sequence
+
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.axis import XAxis
 from matplotlib.image import AxesImage
+from matplotlib.ticker import AutoLocator, MaxNLocator
 from numpy.typing import NDArray
 
 
@@ -20,7 +24,8 @@ def plot_ge_iq_density(
     the bin count raised to the sixth power, then normalizing the weights.
     A tie is purple. Pass an empty cloud for the other preparation to show
     just one color. Opacity rises with the log of the combined count; empty
-    bins and frames without finite shots are transparent.
+    bins and frames without finite shots are transparent. Major ticks follow
+    the displayed IQ box size so narrow axes can use fewer labels.
 
     To update a dedicated live IQ axes, pass its previously returned image.
     Reuse that artist and rescale from the current frame if autoscaling is on.
@@ -45,7 +50,30 @@ def plot_ge_iq_density(
     )
     # Shrink the axes box to keep I/Q scale exact after a constrained-layout resize.
     ax.set_adjustable("box")
+    for axis in (ax.xaxis, ax.yaxis):
+        axis.set_major_locator(_RawIQTickLocator())
     return image
+
+
+class _RawIQTickLocator(AutoLocator):
+    def __call__(self) -> Sequence[float]:
+        axis = self.axis
+        assert axis is not None
+        # Budget against the drawn box, not the subplot slot. Horizontal
+        # decimal labels can need more than Matplotlib's three-em estimate.
+        space = axis.get_tick_space()
+        bins = space // 2 if isinstance(axis, XAxis) else space
+        if bins >= 9:
+            return super().__call__()
+
+        lo, hi = sorted(axis.get_view_interval())
+        ticks = MaxNLocator(nbins=max(1, bins), min_n_ticks=1).tick_values(lo, hi)
+        if bins > 0:
+            return ticks
+        # Even both end ticks can collide when there is no room for one interval.
+        visible = (tick for tick in ticks if lo <= tick <= hi)
+        center = 0.5 * lo + 0.5 * hi
+        return [min(visible, key=lambda tick: abs(tick - center), default=center)]
 
 
 def _density_frame(
