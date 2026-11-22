@@ -183,6 +183,7 @@ Slot.set 初值只套用到 copy，這項設定本身不把 reference 改成 cop
 建圖、預設樣式、show、owner-thread 更新與 finish／release 依 [plotting README](../../lib/zcu_tools/plotting/README.md)。
 Live artists 與多面板格式依 [v2 README](README.md#即時圖工具)。
 實驗自行決定座標、labels 與圖名。show 前可填資料，show 後的修改也經 plot-thread callback。
+選 y 軸要畫的物理量時看 [R12：y 軸畫物理 observable](figure-style.md#r12y-軸畫物理-observable)，標示方式見[〈單位〉](figure-style.md#單位)。
 一維建圖與 update 見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)，熱圖與 current trace 見 `twotone/power_dep/core.py:111-142`。
 
 ## 目錄佈局
