@@ -22,7 +22,7 @@ If the saved matrix cannot produce finite corrected fractions, Analyze shows **R
 
 ## Next step
 
-Writeback proposes the shorter model decay time under the probe tone in µs at `$qubit.ext.t1_with_tone`. After Apply, the fixed-tone, tone gain, and tone frequency forms use five times the saved value as their initial exposure Stop. This starting window may miss the tail. Check the last points of both preparations and extend Stop if either trace is still changing. Ordinary `$qubit.t1` is not updated.
+Writeback proposes the shorter model decay time under the probe tone in µs at `$qubit.ext.t1_with_tone`. After Apply, the fixed-tone, tone gain, and tone frequency forms use five times the saved value as their [initial exposure Stop](../../../measure-authoring.md#t1-與等待). This starting window may miss the tail. Check the last points of both preparations and extend Stop if either trace is still changing. Ordinary `$qubit.t1` is not updated.
 
 Older files without class counts cannot be converted on Load; acquire again.
 

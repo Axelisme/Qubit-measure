@@ -177,7 +177,8 @@ Picker 可調五個找谷 controls、增刪選點與任意調整元件對應。�
 Recipe 等待 agent 透過 `tab_interact` 確認並送出 done，才詢問 writeback。
 操作與判讀見 [range find guide](onetone/range_find/guide.md)。
 
-`mux/onetone` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
+`mux/onetone` 使用 `readout/mux`。**Frequency offset** 是選定 tone 共用、可編輯的 MHz 偏移；每個 sweep 點把名目偏移加到各 tone 的基準 RF。
+Open／Defaults 的 `df` 初值由 [`mux/onetone/form.py` 的 `make_form`](mux/onetone/form.py) 定義。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
 Tone label 是可重複的顯示文字，不是 component 名稱，也不改變資料軸。
 `mux/onetone` adapter 從 group 的 resonators 產生 readout tones。
@@ -264,7 +265,14 @@ Amp Rabi 的 shot count 與 IQ moments 由 [Program 的 summed acquisition](../.
 
 Mux 實驗每個參與 tone 各有一張 `measurement_i`，
 不把多 tone 疊在同一 axis。每張圖保留自己的 actual x，delay 類使用共用
-requested-delay 軸。Mux GE Live 的 IQ 密度以藍／紅區分 probe off/on 取數列，Fit 則按 g/e 準備著色。
+requested-delay 軸。
+
+Mux GE Live（`measurement_i`）以藍／紅區分 probe off／on 取數列，不讀 Analyze 的 **Initial State**。
+Analyze Fit（`fit_i`）用 [`ge_signals_by_state`](support/singleshot/util.py) 依 **Initial State** 將同一批 IQ 排成 g／e 準備（藍／紅），圖例標出各準備對應的 probe row。
+`diagnostic_i` 也用準備色。Post（`post_i`）沿用所選來源的 Primary 準備映射，將 g／e 密度分格畫出。準備色不代表分類結果。
+讀圖見 [Mux GE guide](mux/singleshot_ge/guide.md#read-the-plots-and-use-the-result) 與
+[單 qubit GE guide](singleshot/ge/guide.md#how-to-read-the-results)，IQ 密度的取色規則見 [figure-style R4](figure-style.md#r4尺度跟著資料走)。
+
 單 qubit 與 mux GE 的 Live 更新先複製 IQ，
 再經公開的 `@plots.on_plot_thread` 在 host owner 繪圖。Worker 不持有 active artists，
 partial NaN 不補零。Mux GE 逐 tone 直接呼叫數值工具，不委派單 qubit 實驗的分析。

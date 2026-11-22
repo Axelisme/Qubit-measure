@@ -444,6 +444,7 @@ is ADC declaration order; channels are not sorted. The fixed mux compile profile
 comes from caller-owned YAML through `program.build_soccfg`, with 1..8 explicit
 ADC routes per mux block. Numeric environments
 must separately bind every requested route and supply any physical mux response.
+For ordinary `Pulse` overlap rules, see [Program: Native operations and named timelines](../README.md#原生寫法與具名-timeline).
 
 `ReadoutWindow` keeps ADC sample counts and integer sample periods independent
 of generator duration. Per-point

@@ -125,8 +125,11 @@ finally:
 ```
 
 `FitSummary` 應直接 import 分析 owner 的具名 summary，不在 recipe 重宣告鏡像。
-例如 twotone/freq 匯出 `TwotoneSpectrumSummary`，figure-only MIST 直接用 owner 的空結果型別。
-框架用 `TypeAdapter` 解碼 summary，欄位缺失或型別不合會失敗，不補值。
+例如 twotone/freq 匯出 `TwotoneSpectrumSummary`。
+框架用 `TypeAdapter(result)` 按作者傳入的 `result` 型別驗證 summary，欄位缺失或型別不合會失敗，不補值。
+Figures-only Analyze 成功時，RPC 回傳的 `summary` 是空物件 `{}`。`AnalysisResult.result` 是驗證後的值，例如 `mist_drive_frequency.py` 傳 `result=dict`，得到空 dict。
+這是成功結果，不走下方的子層取消分支。
+Adapter 發布圖與空摘要的規則見 [Capability 宣告與實作](../v2/gui-contracts.md#capability-宣告與實作)。
 可照著操作的完整骨架見 [Recipe 撰寫](../v2/measure-authoring.md#recipe-撰寫)。
 `report_number` 只把不可估計或非有限的 fit scalar 轉成 null，不改擬合或 writeback 政策。
 

@@ -325,6 +325,7 @@ Run／Analysis／Post-analysis 的 RPC screenshot 與 `get_current_figure_for_pa
 互動畫布把滑鼠位置轉回 Figure 座標。`tab_interact` 純讀回圖時保留原先的軸位置，
 所以 Qt 還沒重畫時，點擊仍對準已顯示的圖。Range Find 的非終結命令提交後，
 在回覆前繪出新畫面。不論回覆有無 PNG，下一個點擊都使用這個新畫面的座標。
+工具讀取與命令提交方式見 [MCP Measure〈分析、互動與寫回〉](../../../mcp/measure/README.md#分析互動與寫回)。
 Data gallery 用 640×480 縮圖辨識各 stage 和具名圖。`View figure` 以相同的 Figure 幾何
 繪製目前的原生 Figure，再將 raster 等比放入 Data 閱讀面，不移動 canvas，也不新增 Save 工件。
 縮圖和閱讀圖保留整張 Figure，不使用 Matplotlib 的 tight 裁框。
