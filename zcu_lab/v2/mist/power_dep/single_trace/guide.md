@@ -6,12 +6,25 @@ Use this scan to locate changes in readout response as you increase the resonato
 
 For general operation, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).
 
+## Set up the pulses
+
+Bind the qubit and resonator. **Reset** and **Preparation pulse** start from the bound reset and x180 slots. Missing slots leave those steps off. Select the calibrated pulses for the state you want to prepare.
+
+For inline **Resonator probe** and **Readout** (`Inline: readout/pulse`), set each **Gen ch** to its transmit generator. **Frequency** is the RF target in MHz. Set the probe carrier separately from the readout frequency, which is shared by readout transmission and ADC demodulation. Choose each generator's **NQZ** (Nyquist zone 1 or 2) from the calibration. **Phase** is the transmit pulse phase in degrees, not the Analyze IQ reference. **Mixer freq** is the generator's digital mixer frequency in MHz, not the RF target or the IF. In either section, leave it blank only if the generator needs no mixer frequency setting. Blank does not turn off an external LO.
+
+For each pulse, **Pre-delay** runs from that segment's start to RF playback. **Waveform › Length** sets how long the RF plays, and **Post-delay** starts when playback ends. In **Readout**, **RO ch** selects the ADC and **RO length** sets its integration time. Set **Trig offset** so the ADC window opens when the readout signal reaches it. Measure that offset from the readout segment's start, not from the end of **Pre-delay**. **Post-delay** does not extend the ADC window. All these times are in µs.
+
+Only the probe gain is swept. **Readout › Gain** stays fixed. The terminal **Classifier**, including its centers, radius and confusion matrix, does not contribute to the mean IQ or set the Ground IQ reference.
+
 ## Set the gain window
 
-- Bind the qubit and resonator. **Reset** and **Preparation pulse** start from the bound reset and x180 slots. Missing slots leave those steps off. Select the calibrated pulses for the state you want to prepare.
-- Set **Resonator probe** to the intended RF carrier and pulse duration. In **Probe gain sweep** set **Start**, **Stop** and **Expts** (point count). Start in the weak-probe region if you want the default reference to represent weak drive. A descending scan still uses its first points, not the points at the lowest gain.
-- Check **Readout** against the resonator calibration. For the Inline fallback, check **Gen ch** (transmit channel), **RO ch** (ADC channel), RF carrier, pulse duration and **RO length** (ADC integration window). Include readout flight time in **Trig offset**, which sets when that window opens. The readout gain stays fixed and this scan does not use the classifier. Leave **Mixer freq** blank only when no digital mixer frequency needs to be set; blank does not turn off an external LO.
-- Set **Reps** for shots per gain point in each full sweep and **Rounds** for repeated sweeps averaged in IQ. **Relaxation wait** starts at 5 × captured T1 or 150 µs if T1 is missing. An invalid T1 leaves the wait blank. Set a wait long enough to limit carryover between shots.
+In **Probe gain sweep**, the visible child fields show how the sweep is set. **Start** and **Stop** mean Range, while **Center** and **Span** specify the midpoint and signed full width. **Expts** is the point count, while **Step** is a signed gain increment. There is no mode dropdown on the sweep row. If a Form printout leaves the parent value blank, read the active child fields instead of using the printed Choices as menu items.
+
+To change which fields you edit, right-click the **Probe gain sweep** heading. Use **Switch to Center / Span** or **Switch to Range** to change coordinates, and **Switch to Step** or **Switch to Expts** to change sampling. Enter valid values in the fields used by the switch first.
+
+With **Start**, **Stop** and **Expts** active, the sweep includes both endpoints. For more than one point the nominal step is `(Stop − Start) / (Expts − 1)` in a.u. A descending sweep has a negative step and still uses its first points for the default reference. Start in the weak-probe region if that reference should represent weak drive.
+
+Set **Reps** for shots per gain point in each full sweep and **Rounds** for repeated sweeps averaged in IQ. **Relaxation wait** starts at 5 × captured T1 or 150 µs if T1 is missing. An invalid T1 leaves the wait blank. Set a wait long enough to limit carryover between shots.
 
 ## Read the trace
 
