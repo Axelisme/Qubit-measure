@@ -130,7 +130,7 @@ Adapter 只交 data_item、analysis_item 與結果內容，不挑格式或路徑
 
 LoadService 讀 native 檔及比對 tag，交 `adapter.restore(stored)`，由 adapter 依 spec 呼叫 `restore_run`。框架只讀 `RestoredRun` 的 envelope、metadata 及 `cfg_issue`。無可用 cfg 仍可成功 Load，回覆的 `cfg_issue` 是原因文字或 null，不另給 `has_cfg_snapshot`。讀檔、restore 或建立歷史來源失敗時保留舊成果。Load 不回填表單；離線可用 `datafile.load` 把 native cfg 讀為 Container，或用 Results browser 唯讀檢視。`open_tab_from_file` 是唯一隔離 `make_form` 失敗的建 tab 路徑，保留明確無 Form 狀態與錯誤，不造空 Form 或回填 cfg。範本綁定、defaults 及 Load 失敗仍傳出；Load 失敗移除新 tab 並還原焦點。無 Form 的 Reset 準備失敗更新原錯呈現並拋出該次例外，有 Form 的 Reset 失敗則保留舊 Form。保存與 typed restore 見 [[0063]]、[[0069]]，Factory 與 Reset 見 [[0073]]。
 
-Guide 盤點用唯讀 `Adapter.guide_path`，None 表示未宣告，不讀檔或檢查存在。呈現用 `Adapter.guide()` 讀 Markdown，失敗原樣拋出。見[牆鐘報表的 guide 與輸入](../discussions/2026-11-21-wall-time-coverage.md)。
+`Adapter.guide_path` 回傳唯讀的宣告路徑，None 表示未宣告，不讀檔或檢查存在。呈現用 `Adapter.guide()` 讀 Markdown，失敗原樣拋出。
 
 `gui.interactive` 有單層 undo、沒有 redo。App 持有已提交 plugin session 並負責終結和 operation settle，Qt 可有未提交 pointer preview，不另建分析狀態。`.importlinter` 的 `interactive-below-apps`（C17）禁止共用層反向依賴 app policy。`tab.interact` 的讀取與命令都要求 RPC holder，保留 active-session、command、terminal 驗證；accepted commands 按 owner loop 提交順序生效，不存 last-operator 或 plugin revision。MCP 的 `tab_interact` 只轉送一個 read 或 command；read 不切焦點，驗證過的 command 切到 Analysis pane，PNG 以記憶體 image content 回傳，不建 session 暫存檔。見 [[0070]]、[Interactive README](../../lib/zcu_tools/gui/interactive/README.md) 與 [Measure app](../../lib/zcu_tools/gui/app/measure/README.md)。
 

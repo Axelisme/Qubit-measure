@@ -4,7 +4,14 @@
 
 Start the two drives with **Fixed Stokes lead** → wait until both finish → calibrated **Readout** → **Relax delay**. Positive lead delays Pump; negative delays Stokes. Run steps Pump detuning within each Stokes detuning in one round.
 
-- Measure **Pump carrier 0–3** and **Stokes carrier 3–2** separately; enter both in MHz. Use independent charge-drive lines, signed gains in [−1, 1] and independent envelopes. Arbitrary envelopes take their duration from the asset.
+- Measure **Pump carrier 0–3** and **Stokes carrier 3–2** separately; enter both in MHz. On hardware, check that Pump and Stokes are wired to separate charge-drive lines. Use signed gains in [−1, 1] and independent envelopes. Arbitrary envelopes take their duration from the asset.
+- In simulation, set **Pump generator** and **Stokes generator** to the `gen_ch`
+  values of two drive lines for the qubit under test. The [Integer-fluxonium preset](../../../../simulation_envs/integer_fluxonium/field-guide.md#circuit-bath-and-routing)
+  assigns Pump to 1 and Stokes to 2. In FTF, look up the generators in
+  [`drive_lines`](../../../../simulation_envs/FTF/field-guide.md#drive-linescharge-與小訊號-flux-校準).
+  Choose charge drive lines that couple to that qubit. Do not use generators
+  in `flux_lines`, which play fast-flux pulses. The environment routes pulses
+  by generator number and does not check the intended Pump or Stokes role.
 - Set **Pump detuning** and **Stokes detuning** endpoints in MHz and point counts. Each offset adds to its own carrier. Cover the expected offsets without losing resolution near the carrier pair.
 - Use a pulse readout with saved centroid3 centers and confusion matrix from `singleshot/qutrit_population` at the same settings. Circle **Other** is not f. **Relax delay** initially uses `5 × qubit.t1` (150 µs if absent).
 

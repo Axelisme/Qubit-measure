@@ -1,7 +1,7 @@
 ---
 date: 2026-11-21
-status: active
-superseded_by: null
+status: superseded
+superseded_by: 2026-11-23-curated-wall-time-scenes.md
 related:
   - ../adr/0067-gui-application.md
   - ../adr/0072-module-boundaries.md

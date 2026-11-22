@@ -47,7 +47,14 @@ from .._observations import (
 )
 from . import collections, input, menus, observing
 from .input import key_click, mouse_click, mouse_double_click, type_text
-from .selection import can_interact, display_text, on_screen, unique
+from .selection import (
+    LiveWidgetSnapshot,
+    can_interact,
+    display_text,
+    is_live_widget,
+    on_screen,
+    unique,
+)
 
 
 class ComponentDriver:
@@ -69,29 +76,34 @@ class ComponentDriver:
     def __init__(self, window: QWidget) -> None:
         self._window = window
 
-    def _widgets(self) -> list[QWidget]:
-        return [self._window, *self._window.findChildren(QWidget)]
-
     def _find(
         self, text: str | None, object_name: str | None, *, editable: bool = False
     ) -> QWidget:
         if (text is None) == (object_name is None):
             raise ValueError("Supply exactly one of text or object_name")
+        snapshot = LiveWidgetSnapshot()
+        widgets = snapshot.descendants(self._window, QWidget, include_root=True)
         candidates = []
-        for widget in self._widgets():
+        for widget in widgets:
             if editable and not isinstance(widget, QLineEdit):
                 continue
             if object_name is not None:
                 matches = widget.objectName() == object_name
             else:
-                caption = (
-                    self._field_label(widget) if editable else display_text(widget)
+                matches = snapshot.on_screen(widget) and (
+                    (
+                        self._field_label(widget, widgets, snapshot)
+                        if editable
+                        else display_text(widget)
+                    )
+                    == text
                 )
-                matches = on_screen(widget) and caption == text
             if matches:
                 candidates.append(widget)
         if object_name is not None:
-            visible_matches = [widget for widget in candidates if on_screen(widget)]
+            visible_matches = [
+                widget for widget in candidates if snapshot.on_screen(widget)
+            ]
             if visible_matches:
                 candidates = visible_matches
         descriptions = [
@@ -100,14 +112,17 @@ class ComponentDriver:
         ]
         return unique(text or object_name or "", candidates, descriptions)
 
-    def _field_label(self, field: QWidget) -> str:
-        for widget in self._widgets():
+    @staticmethod
+    def _field_label(
+        field: QWidget, widgets: list[QWidget], snapshot: LiveWidgetSnapshot
+    ) -> str:
+        for widget in widgets:
             if isinstance(widget, QLabel) and widget.buddy() is field:
                 return widget.text()
             layout = widget.layout()
             if isinstance(layout, QFormLayout):
                 label = layout.labelForField(field)
-                if isinstance(label, QLabel):
+                if isinstance(label, QLabel) and snapshot.contains(label):
                     return label.text()
         return ""
 
@@ -194,7 +209,7 @@ class ComponentDriver:
         A hidden window raises LookupError rather than supplying unseen geometry.
         This is an observation only; it never resizes the window.
         """
-        if not self._window.isVisible():
+        if not is_live_widget(self._window) or not self._window.isVisible():
             raise LookupError("window is not visible")
         return self._window.size()
 
@@ -205,6 +220,22 @@ class ComponentDriver:
         widget = self._find(text, object_name)
         return observing.observe_widget(widget)
 
+    def plot_inches(self, *, object_name: str) -> tuple[float, ...]:
+        """Read the native Figure's logical size in inches from a visible canvas."""
+        widget = self._find(None, object_name)
+        if not on_screen(widget):
+            raise LookupError("Canvas is not visible")
+        return observing.plot_inches(widget)
+
+    def colour_bounds(
+        self, colour: str, *, object_name: str
+    ) -> tuple[float, float, float, float]:
+        """Read the widget-local logical-pixel bounds of an exact visible RGB colour."""
+        widget = self._find(None, object_name)
+        if not on_screen(widget):
+            raise LookupError("Widget is not visible")
+        return observing.colour_bounds(widget, colour)
+
     def image_center_colour(self, *, object_name: str) -> str:
         """Read the displayed QLabel raster's centre pixel as a hex RGB colour.
 
@@ -214,16 +245,7 @@ class ComponentDriver:
         widget = self._find(None, object_name)
         if not on_screen(widget):
             raise LookupError("Raster is not visible")
-        if not isinstance(widget, QLabel):
-            raise TypeError("Expected a raster label")
-        pixmap = widget.pixmap()
-        if pixmap.isNull():
-            raise ValueError("Label has no displayed raster")
-        return (
-            pixmap.toImage()
-            .pixelColor(pixmap.width() // 2, pixmap.height() // 2)
-            .name()
-        )
+        return observing.image_center_colour(widget)
 
     def list_rows(self) -> tuple[ListRowObservation, ...]:
         """Observe rows intersecting visible QListWidget viewports in this window."""
@@ -251,8 +273,9 @@ class ComponentDriver:
         QApplication.processEvents()
 
     def _visible_list_row(self, text: str) -> tuple[QListWidget, QListWidgetItem]:
+        snapshot = LiveWidgetSnapshot()
         matches: list[tuple[QListWidget, QListWidgetItem]] = []
-        for listing in self._window.findChildren(QListWidget):
+        for listing in snapshot.descendants(self._window, QListWidget):
             if not can_interact(listing):
                 continue
             viewport = listing.viewport()
@@ -470,10 +493,11 @@ class ComponentDriver:
         Missing or ambiguous matches raise LookupError. Disabled, clipped or
         modal-blocked controls are no-ops, just as with caption-based click.
         """
+        snapshot = LiveWidgetSnapshot()
         candidates = [
             widget
-            for widget in self._widgets()
-            if on_screen(widget) and widget.toolTip() == tooltip
+            for widget in snapshot.descendants(self._window, QWidget, include_root=True)
+            if snapshot.on_screen(widget) and widget.toolTip() == tooltip
         ]
         widget = unique(tooltip, candidates, [w.objectName() for w in candidates])
         if can_interact(widget):
@@ -484,10 +508,13 @@ class ComponentDriver:
         if (text is None) == (object_name is None):
             raise ValueError("Supply exactly one of text or object_name")
         if text is not None:
+            snapshot = LiveWidgetSnapshot()
+            widgets = snapshot.descendants(self._window, QWidget, include_root=True)
             fields = [
                 widget
-                for widget in self._widgets()
-                if on_screen(widget) and self._field_label(widget) == text
+                for widget in widgets
+                if snapshot.on_screen(widget)
+                and self._field_label(widget, widgets, snapshot) == text
             ]
             if fields:
                 return unique(text, fields, [widget.objectName() for widget in fields])
@@ -645,8 +672,13 @@ class ComponentDriver:
             raise FileNotFoundError(path)
         if not path.is_file():
             raise ValueError(f"Not a file: {path}")
-        matches = [w for w in self._widgets() if display_text(w) == opener]
-        visible = [w for w in matches if on_screen(w)]
+        snapshot = LiveWidgetSnapshot()
+        matches = [
+            w
+            for w in snapshot.descendants(self._window, QWidget, include_root=True)
+            if display_text(w) == opener
+        ]
+        visible = [w for w in matches if snapshot.on_screen(w)]
         candidates = visible or matches
         button = unique(
             opener,
@@ -792,8 +824,9 @@ class ComponentDriver:
         popup = QApplication.activePopupWidget()
         if popup is None:
             raise LookupError("No visible calendar popup")
-        calendar = unique("calendar", popup.findChildren(QCalendarWidget), [])
-        view = unique("calendar view", calendar.findChildren(QTableView), [])
+        snapshot = LiveWidgetSnapshot()
+        calendar = unique("calendar", snapshot.descendants(popup, QCalendarWidget), [])
+        view = unique("calendar view", snapshot.descendants(calendar, QTableView), [])
         model = view.model()
         viewport = view.viewport()
         assert model is not None and viewport is not None
@@ -843,10 +876,11 @@ class ComponentDriver:
         QApplication.processEvents()
 
     def _tab_bar(self, caption: str) -> QTabBar:
+        snapshot = LiveWidgetSnapshot()
         bars = [
             bar
-            for bar in self._window.findChildren(QTabBar)
-            if on_screen(bar) and caption in self._tab_captions(bar)
+            for bar in snapshot.descendants(self._window, QTabBar)
+            if snapshot.on_screen(bar) and caption in self._tab_captions(bar)
         ]
         return unique(caption, bars, [repr(self._tab_captions(bar)) for bar in bars])
 
@@ -890,7 +924,9 @@ class ComponentDriver:
         # A viewport filled by its content can have an empty visibleRegion.
         viewport_size = (
             (viewport.width(), viewport.height())
-            if viewport is not None and viewport.isVisible()
+            if viewport is not None
+            and is_live_widget(viewport)
+            and viewport.isVisible()
             else None
         )
         return ScrollObservation(

@@ -98,7 +98,9 @@ def PresentationAdapter_run(
     cfg: SavingCfg, *, context: RunContext
 ) -> RunRecord[SavingCfg, SavingResult]:
     record = AnalysisSavingAdapter.run(cfg, context=context)
-    figure, axes = context.plots.subplots(num="signal")
+    figure, axes = context.plots.subplots(num="signal", layout="constrained")
+    figure.set_facecolor("#edf6ff")
+    axes.set_facecolor("#faf5df")
     axes.plot([0, 1, 2], [0, 1, 0], label="Signal")
     axes.set_xlabel("Time")
     axes.legend()
@@ -215,6 +217,58 @@ def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         app.controller.tab_control.new_tab("layout")
         app.window.resize(1440, 900)
         yield app.window
+
+
+def test_run_keeps_the_same_complete_figure_in_three_tile_shapes(
+    presentation_window: QWidget, tmp_path: Path
+) -> None:
+    flow = ComponentDriver(presentation_window)
+    shots = tmp_path / "fixed-run"
+    flow.click("Close")
+    flow.screenshot(shots / "01-ready.png")
+    flow.click("Run")
+    qt_until(
+        lambda: any(w.text == "Run" and w.enabled for w in flow.visible().widgets),
+        label="synthetic run settled",
+    )
+    tile = "figures.tile.run.0"
+    original_axes = None
+    for shape, width, height in (
+        ("narrow", 920, 1100),
+        ("wide", 1560, 650),
+        ("balanced", 1275, 655),
+    ):
+        flow.resize_window(width, height)
+        flow.screenshot(shots / f"02-{shape}.png")
+        assert flow.plot_inches(object_name=tile) == (12, 9)
+        bounds = flow.observe(object_name=tile).bounds
+        assert bounds is not None
+        _, _, tile_width, tile_height = bounds
+        left, top, painted_width, painted_height = flow.colour_bounds(
+            "#edf6ff", object_name=tile
+        )
+        assert painted_width / painted_height == pytest.approx(4 / 3, abs=0.012)
+        assert left == pytest.approx(tile_width - left - painted_width, abs=2)
+        assert top == pytest.approx(tile_height - top - painted_height, abs=2)
+        if shape == "narrow":
+            assert top > 100 and left <= 2
+        elif shape == "wide":
+            assert left > 100 and top <= 2
+        else:
+            assert left + top < 50
+        axes_x, axes_y, axes_width, axes_height = flow.colour_bounds(
+            "#faf5df", object_name=tile
+        )
+        relative_axes = (
+            (axes_x - left) / painted_width,
+            (axes_y - top) / painted_height,
+            axes_width / painted_width,
+            axes_height / painted_height,
+        )
+        if original_axes is None:
+            original_axes = relative_axes
+        assert relative_axes == pytest.approx(original_axes, abs=0.005)
+        assert flow.legends().texts == ("Signal",)
 
 
 @pytest.mark.parametrize("pane", ["Run", "Analysis", "Data"])

@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-22，Data 頁讀圖與 R7
+**Last updated:** 2026-11-23，Data 縮圖對齊
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -82,20 +82,24 @@ with an i / N label instead of a named selector. `named_figure_presentation` kee
 the hidden name model and current tile in sync for experiment and workflow panes.
 Changing pages selects its first figure; clicking a canvas tile selects that
 figure for screenshots and current-figure reads. Re-presenting the same collection
-retains the page and current figure. Data groups raster previews by source stage
+retains the page and current figure. The shared figure tile lays out the native
+Figure at 12×9 in. A resize fits the whole figure to the tile and centers it,
+leaving blank space rather than reflowing the figure. Matplotlib receives pointer
+coordinates in the original renderer pixel space. Data groups raster previews by source stage
 and applies the same paging rule within each group. Gallery layout depends only
 on viewport width, including named groups. Narrow viewports stack stage cards
 in one column. Wide viewports place two cards side by side; with three cards,
 Run spans the left column and Analysis/Post-Analysis stack on the right.
 A single card fills the width in either mode. Named members fit in their tiles,
 while stage cards retain their minimum width. Long names wrap so their endings
-are visible before opening a figure. Each thumbnail aspect-fits its label without
-cropping as the gallery resizes.
+are visible before opening a figure. Each thumbnail fits without cropping or
+changing its aspect ratio. It sits at the top of its image area, with spare
+height below it.
 Use `View figure` on a card, or Tab to the button and press Space, to read that
 stage and member without leaving Data. Long headings wrap without widening the
-reading pane. The pane shows one new raster at its rendered size. Scroll inside
-the pane when it does not fit. `Back to previews` or Escape returns to the
-selected card and restores its focus and page.
+reading pane. The reader renders the same 12×9 in layout as the figure tiles.
+The pane scales and centers the whole raster without cropping. `Back to previews`
+or Escape returns to the selected card and restores its focus and page.
 
 `ExperimentFigureArea` resolves the request against the current native Figure on
 its Qt thread. The gallery holds only the raster. It discards that raster on a
@@ -104,9 +108,10 @@ that fails clears its own preview and reading without changing the selected pane
 If draw reenters the owner, only the current reading request can update the view.
 A draw failure shows an inline error for that figure and does not disable Save.
 The reader does not load a saved image, write an artifact, or attach a canvas.
-Run Save still writes data only. Analysis Save still uses the existing 1800×1350
-PNG encoder. Use [R7](../../../../../../zcu_lab/v2/figure-style.md#r7用-gui-與存檔的實際尺寸檢查版面)
-to check readability in the reading pane and in the saved PNG separately.
+Run Save writes data only. Analysis Save encodes 1800×1350 PNGs at 150 dpi.
+Use [R7](../../../../../../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面) to check
+layout in the fixed-geometry PNG. In the GUI, verify the full figure fits,
+preserves its aspect ratio, and is not cropped.
 
 The app-local plot host passes the
 operation's original named collection through the render-host port after canvas

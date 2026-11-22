@@ -709,6 +709,13 @@ class MainWindow(QMainWindow):
             return None
         return widget.figure, widget.preview_active
 
+    def present_committed_interactive_frame(self, tab_id: str) -> None:
+        """Let the mounted frontend publish its frame after a remote command."""
+        tab_w = self._tab_widgets.get(tab_id)
+        widget = tab_w.interactive_frontend() if tab_w is not None else None
+        if widget is not None:
+            widget.present_committed_frame()
+
     def discard_interactive_preview(self, tab_id: str) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         widget = tab_w.interactive_frontend() if tab_w is not None else None

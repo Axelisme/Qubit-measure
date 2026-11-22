@@ -8,7 +8,6 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
-from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -30,6 +29,11 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules.readout import require_circle_classifiers
 
 from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.singleshot.population_analysis import (
+    CLASSIFIED_FIGURE,
+    UNAVAILABLE_NOTICE,
+    circle_readout_series,
+)
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
@@ -272,12 +276,13 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         options: ResetCheckAnalyzeOptions,
         *,
         plots: Plots,
-    ) -> ResetCheckAnalysis:
+    ) -> ResetCheckAnalysis | None:
         """Summarize reset-only excited and Other populations across sampled gains.
 
         Apply options.confusion_matrix when supplied, otherwise use classified
         fractions normalized per row from source.result.counts. Return reset-only
-        mean/worst sampled populations, and plot all three corrected G/E/Other branches.
+        mean/worst sampled populations, and plot all three G/E/Other branches.
+        For an unsolvable correction, publish only classified fractions and return None.
         Invalid axes or no finite reset-only samples raise ValueError.
         """
         # 1. Check population axes before optional readout-confusion correction.
@@ -288,30 +293,30 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
                 "Reset check requires (gain, branch, G/E/Other) populations"
             )
         populations = result.counts / result.counts.sum(axis=-1, keepdims=True)
-        populations = correct_populations(populations, confusion_matrix)
+        series = circle_readout_series(populations, result.counts, confusion_matrix)
+        populations, sem = series.values, series.sem
 
         # 2. Summarize finite reset-only samples, not reset-channel fidelity.
-        reset_e = populations[:, 1, 1]
-        valid = np.isfinite(result.gains) & np.isfinite(populations[:, 1]).all(axis=-1)
-        if not valid.any():
-            raise ValueError("No finite reset-only populations to analyze")
-        worst = np.flatnonzero(valid)[np.argmax(reset_e[valid])]
-        analysis = ResetCheckAnalysis(
-            float(np.mean(reset_e[valid])),
-            float(reset_e[worst]),
-            float(np.max(populations[valid, 1, 2])),
-            float(result.gains[worst]),
-            int(valid.sum()),
-        )
+        analysis = None
+        if not series.correction_unavailable:
+            reset_e = populations[:, 1, 1]
+            valid = np.isfinite(result.gains) & np.isfinite(populations[:, 1]).all(
+                axis=-1
+            )
+            if not valid.any():
+                raise ValueError("No finite reset-only populations to analyze")
+            worst = np.flatnonzero(valid)[np.argmax(reset_e[valid])]
+            analysis = ResetCheckAnalysis(
+                float(np.mean(reset_e[valid])),
+                float(reset_e[worst]),
+                float(np.max(populations[valid, 1, 2])),
+                float(result.gains[worst]),
+                int(valid.sum()),
+            )
 
         # 3. Compare the three branches, with upward/downward shot sampling errors.
-        covariance = class_probability_covariance(result.counts)
-        if confusion_matrix is not None:
-            jacobian = np.linalg.solve(confusion_matrix.T, np.eye(3))
-            covariance = jacobian @ covariance @ jacobian.T
-        sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
         fig, _ = plots.subplots(
-            num="populations",
+            num=CLASSIFIED_FIGURE if series.correction_unavailable else "populations",
             ncols=3,
             figsize=(10, 4.5),
             layout="constrained",
@@ -321,6 +326,8 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             if confusion_matrix is None
             else "readout-corrected populations"
         )
+        if series.correction_unavailable:
+            quantity = f"classified fractions\n{UNAVAILABLE_NOTICE}"
         fig.suptitle(f"Reset check · qubit · {quantity}")
         order = np.argsort(result.gains)
         for branch, ax in enumerate(fig.axes):
@@ -337,10 +344,15 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
                 )
             ax.set(
                 xlabel="Qubit drive gain (a.u.)",
-                ylabel="Outcome probability",
+                ylabel="Classified fraction"
+                if series.correction_unavailable
+                else "Outcome probability",
                 title=BRANCH_LABELS[branch],
             )
             ax.legend(loc="best", title="Data ± shot SEM")
+
+        if analysis is None:
+            return None
         ax_reset = fig.axes[1]
         ax_reset.axvline(analysis.worst_sample_gain, color="0.35", linestyle=":")
         ax_reset.set_title(

@@ -10,7 +10,7 @@
 
 將 `mux` alias 綁到 `group/mux`。完整 **Readout** 的 tone、resonator 與 ADC 依位置對應。只量 resonator 時可不綁 qubits；若提供，qubit 必須與 resonator 依序配對。**Participants** 用不重複的原始零起算序號指定量測順序；`[2,0]` 先 R3 後 R1。缺少、未綁或空的 `participants` alias 預選全組；編輯選取不重設 tones。
 
-**Frequency offset** 是所有選定 tone 共用的 MHz 偏移，不是絕對頻率。核對每個 tone 的基準 RF，選範圍覆蓋共振兩側的背景。即使 tone 不參與，仍須確認完整 **Readout** 的頻率與 ADC 身分；Run 前核對 mixer、接線、功率和 ADC 窗。
+**Frequency offset** 是所有選定 tone 共用的 MHz 偏移，不是絕對頻率。Open／Defaults 在模擬與實機都初填 −4 至 +4 MHz、101 點，名目間隔為 80 kHz。核對每個 tone 的基準 RF，選範圍覆蓋共振兩側的背景。窄線可縮小掃描窗或增加點數；接近裝置可掃邊界時，調整端點。即使 tone 不參與，仍須確認完整 **Readout** 的頻率與 ADC 身分；Run 前核對 mixer、接線、功率和 ADC 窗。
 
 ### 無 readout slot 的候選來源
 

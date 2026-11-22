@@ -69,6 +69,15 @@ def _sigma_variance(
     )
 
 
+def phase_display_sem(
+    variance: NDArray[np.float64],
+    x_shots: NDArray[np.float64],
+    y_shots: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Mask display bars unless both projections retain at least two shots."""
+    return np.sqrt(np.where((x_shots >= 2) & (y_shots >= 2), variance, np.nan))
+
+
 def phase_variance(
     x: NDArray[np.float64],
     y: NDArray[np.float64],

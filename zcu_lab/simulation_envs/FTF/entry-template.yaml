@@ -1,33 +1,45 @@
-# Entry working values for the illustrative ftf.yaml model; no module library.
-# simulated-truth: DC offset is offset_phi0 with every source at zero.
-# Each period is the inverse of the loop's source coefficient, in A/Phi0.
-# Resonator freq/kappa and route TOF come from readout settings, not measurements.
+# FTF demo entry components and slots. The modules are in entry-library.yaml.
 format: zcu.entry-template
 format_version: "1.0"
 schema_version: 3
 components:
   Q1:
     kind: qubit/fluxonium
-    freq: null # Bias-dependent; not given by the physical settings.
+    freq: 297.74211811095904
+    kappa: 0.00293084474558
     resonator: R1
     flux_dev: f1_bias
     flux:
       offset: 0.48
       period:
         f1_bias: 0.0078003120124804995
+        coil: 0.00909090909090909
     wiring:
       ch: 2
+      lo_flux_ch: 1
+    ext:
+      flux_reset_gain: 0.32
+      flux_reset_length: 20.0
+    module:
+      x180: Q1.pulses.pi_amp
+      x90: Q1.pulses.pi2_amp
   Q2:
     kind: qubit/fluxonium
-    freq: null
+    freq: 221.7199297947328
+    kappa: 0.0028679733424
     resonator: R2
     flux_dev: f2_bias
     flux:
       offset: 0.49
       period:
         f2_bias: 0.00819672131147541
+        coil: -0.01
     wiring:
-      ch: 3 # F2 charge line; coupler crosstalk is real 0.01 GHz/gain.
+      ch: 3
+      lo_flux_ch: 4
+    module:
+      x180: Q2.pulses.pi_amp
+      x90: Q2.pulses.pi2_amp
   coupler:
     kind: qubit/transmon
     freq: null
@@ -36,19 +48,26 @@ components:
       offset: 0.2
       period:
         coupler_bias: 0.008
+    module:
+      cz_qubit1: coupler.pulses.cz_qubit1
+      cz_qubit2: coupler.pulses.cz_qubit2
   R1:
     kind: resonator
-    freq: 7190.0 # MHz; readout.resonators.r1.frequency_ghz * 1000.
-    kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
-    time_of_fly: 0.4 # us; pulse ADC time_of_flight_ns / 1000.
+    freq: 7189.980642392195
+    kappa: 1.0364404809952892
+    time_of_fly: 0.3873697916666667
+    module:
+      readout: R1.readout.readout_rf
     wiring:
       ch: 0
       ro_ch: 0
   R2:
     kind: resonator
-    freq: 7080.0 # MHz; readout.resonators.r2.frequency_ghz * 1000.
-    kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
-    time_of_fly: 0.4 # us; pulse ADC time_of_flight_ns / 1000.
+    freq: 7079.687937293966
+    kappa: 1.205073976271586
+    time_of_fly: 0.3873697916666667
+    module:
+      readout: R2.readout.readout_rf
     wiring:
       ch: 0
       ro_ch: 0
@@ -58,10 +77,12 @@ components:
     time_of_fly: 0.4 # us; mux route, separate from resonator pulse routes.
     resonators: [R1, R2]
     qubits: [Q1, Q2]
+    flux_dev: coil
+    module:
+      readout: MG12.readout.readout_rf
     wiring:
       gen_ch: 7
       ro_ch: [2, 3] # R1/R2 mux ADCs; pulse wiring remains gen0/ADC0.
-    # No module slot is supplied because this template carries no library assets.
 aliases:
   format: zcu.aliases
   format_version: "1.0"

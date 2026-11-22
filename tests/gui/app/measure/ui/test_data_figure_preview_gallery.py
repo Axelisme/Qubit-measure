@@ -14,6 +14,7 @@ from PIL import Image, ImageChops
 from qtpy.QtCore import QCoreApplication, QEvent, QRect, QSize
 from qtpy.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.figure_export import render_figure_reading_png
 from zcu_tools.gui.app.measure.ui.data_figure_preview_gallery import (
     DataFigurePreviewGallery,
 )
@@ -514,6 +515,76 @@ def test_gallery_member_rasters_fit_after_resize(
         assert (
             abs(row.raster_bounds.width() * 3 - row.raster_bounds.height() * 4) <= 4
         ), detail
+
+
+_FIRST_THUMBNAIL_COLOURS = {"run": "#edf6ff", "analysis": "#faf5df"}
+
+
+@pytest.fixture
+def uneven_gallery(qapp) -> Iterator[ComponentDriver]:
+    """Show two Run figures next to four Analysis figures, as in the wide Data view."""
+    groups = {key: FigureCollection() for key in ("run", "analysis")}
+    for key, title, count in (("run", "Run", 2), ("analysis", "Analysis", 4)):
+        group = groups[key]
+        for index in range(1, count + 1):
+            name = f"{title} tone {index}"
+            figure = Figure(
+                facecolor=_FIRST_THUMBNAIL_COLOURS[key] if index == 1 else "white"
+            )
+            axes = figure.subplots()
+            axes.plot([0, 1, 2], [0, index, 0])
+            axes.set(title=name, xlabel="Time (s)", ylabel="Signal")
+            group.adopt(name, figure)
+        group.seal()
+
+    def read_png(stage: str, member: str | None) -> bytes:
+        assert member is not None
+        return render_figure_reading_png(groups[stage][member])
+
+    run, analysis = groups["run"], groups["analysis"]
+    gallery = DataFigurePreviewGallery(
+        AdapterCapabilities(analysis=AnalysisMode.FIT), read_png=read_png
+    )
+    try:
+        gallery.update_figures(run["Run tone 1"], analysis["Analysis tone 1"])
+        gallery.update_collections(run, analysis)
+        gallery.resize(1560, 650)
+        gallery.show()
+        QApplication.processEvents()
+        yield ComponentDriver(gallery)
+    finally:
+        gallery.close()
+        gallery.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_gallery_aligns_first_thumbnail_across_uneven_named_groups(
+    uneven_gallery: ComponentDriver, tmp_path: Path
+) -> None:
+    driver = uneven_gallery
+    path = Path(os.environ.get("GALLERY_ALIGNMENT_PNG", str(tmp_path / "gallery.png")))
+    png = driver.screenshot(path)
+    window = driver.observe(object_name="dataFigurePreviewGallery")
+    assert window.bounds is not None
+    with Image.open(png) as screenshot:
+        image = screenshot.convert("RGB")
+    offsets: dict[str, int] = {}
+    for key, colour in _FIRST_THUMBNAIL_COLOURS.items():
+        difference = ImageChops.difference(image, Image.new("RGB", image.size, colour))
+        mask = difference.convert("L").point([255] + [0] * 255)
+        bounds = mask.getbbox()
+        assert bounds is not None, f"{key} thumbnail is not visible"
+        offsets[key] = (
+            bounds[1] + window.bounds[1] - _visible_card_bounds(driver, key).top()
+        )
+    assert offsets["run"] == offsets["analysis"], offsets
+
+    driver.click(object_name="dataFigureView/run/Run tone 1")
+    assert driver.observe("Run — Run tone 1").visible
+    driver.screenshot(path.with_stem(f"{path.stem}-reading"))
+    driver.click("Back to previews")
+    assert driver.observe("Run tone 1").visible
+    driver.screenshot(path.with_stem(f"{path.stem}-returned"))
 
 
 def test_gallery_narrow_single_column_three_cards(qapp):

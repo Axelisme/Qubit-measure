@@ -34,7 +34,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
-from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
 from .._population_peak import first_finite_peak
 from .._pulses import drive_pulse
@@ -72,7 +71,7 @@ class StirapAmplitudeSummary(Centroid3Summary):
 class StirapAmplitudeCfg(ConfigBase):
     """Measured carriers/MHz, independent gain ranges and fixed Stokes lead/us.
 
-    Pump drives 0–3 and Stokes drives 2–3 on different charge generators.
+    Pump drives 0–3 and Stokes drives 2–3 on different generators.
     Each gain axis sweeps independently; envelope shapes and durations stay
     fixed. Positive stokes_lead starts Stokes first. shots repetitions per gain
     pair produce g/e/f counts in one hardware acquisition round. relax_delay/us
@@ -181,9 +180,8 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         Two independent hardware gain loops form a Pump-by-Stokes grid. Positive
         lead delays Pump; negative lead delays Stokes. Shapes and durations stay
         fixed. Count cfg.shots repetitions per pair in one round. Require
-        centroid3 before acquisition and pass both charge-drive requirements to
-        the backend. Hardware wiring remains operator-owned. Cancellation
-        before a complete round leaves counts NaN.
+        centroid3 before acquisition. Cancellation before a complete round
+        leaves counts NaN.
         """
         # 1. Require calibrated g/e/f readout before planning the pump-Stokes gain map.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
@@ -281,10 +279,6 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                 context.soc,
                 reducer=reducer,
                 rounds=1,
-                charge_requirements=(
-                    ChargeDriveRequirement("Pump", cfg.pump_ch),
-                    ChargeDriveRequirement("Stokes", cfg.stokes_ch),
-                ),
             )
         return StirapAmplitudeResult(
             pump_gains=pump_gains, stokes_gains=stokes_gains, counts=counts.array

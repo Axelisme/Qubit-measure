@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 
 import pytest
+from matplotlib import rc_context
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from PIL import Image
@@ -39,7 +40,8 @@ def test_data_preview_uses_save_logical_geometry_at_small_raster_size():
         ),
     )
     try:
-        png = render_figure_preview_png(fig)
+        with rc_context({"savefig.bbox": "tight"}):
+            png = render_figure_preview_png(fig)
         img = Image.open(io.BytesIO(png))
         assert img.size == _PREVIEW_PX == (640, 480)
         assert drawn_sizes[-1] == SAVE_FIGSIZE

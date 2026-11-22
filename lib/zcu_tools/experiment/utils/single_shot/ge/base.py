@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -22,6 +25,8 @@ from zcu_tools.analysis.fitting.singleshot import (
     gauss_func,
 )
 from zcu_tools.plotting.plots import Plots
+
+from .density import plot_ge_iq_density
 
 
 class GENumericalError(RuntimeError):
@@ -186,10 +191,13 @@ class GE_FitResult(TypedDict, closed=True):
     when the joint covariance cannot estimate its relative standard error or
     that error exceeds GEFitOptions.length_ratio_max_relative_error. A user-fixed
     length_ratio is returned unchanged. ge_params and length_ratio_g/e retain
-    their fitted values regardless of identifiability.
+    their fitted values regardless of identifiability. length_ratio_standard_error
+    is the joint fit's absolute standard error, or None for a fixed ratio or
+    when the covariance does not give a positive finite error.
     """
 
     length_ratio: float | None
+    length_ratio_standard_error: float | None
     ge_params: tuple[float, float, float, float, float, float, float]
     p0_gg: float
     p0_ge: float
@@ -220,6 +228,9 @@ class GEFitOptions:
     None; a fixed length_ratio bypasses this check. The default 1.0 corresponds
     to fit_tools' sigma(ln p) > 1 weak-parameter rule. Nonpositive or nonfinite
     thresholds raise ValidationError at construction.
+    raw_iq_diagnostic shows raw IQ, fitted SNR with first-order standard error,
+    and joint fit quality. False retains the default rotated IQ figure. This
+    option affects only plotted fits.
     """
 
     numbins: int | str = "auto"
@@ -232,6 +243,7 @@ class GEFitOptions:
     length_ratio_max_relative_error: float = Field(
         default=1.0, gt=0.0, allow_inf_nan=False
     )
+    raw_iq_diagnostic: bool = False
 
 
 def fitting_ge_and_plot(
@@ -265,9 +277,9 @@ def fitting_ge_and_plot(
     The returned length_ratio is the dimensionless joint readout length / T1.
     Fixed options.length_ratio is returned unchanged. For a free fit, an
     unavailable joint relative standard error or sigma/|p| greater than
-    options.length_ratio_max_relative_error returns None and labels the plot
-    "not identifiable". Other fitted parameters and quality diagnostics are
-    unchanged by this reporting threshold.
+    options.length_ratio_max_relative_error returns None. This reporting
+    threshold does not affect other fitted parameters, quality diagnostics,
+    or the value and standard error shown on the figure.
     """
     options = GEFitOptions() if options is None else options
     (Ig, Ie), (Qg, Qe) = signals.real, signals.imag
@@ -379,79 +391,77 @@ def fitting_ge_and_plot(
     except (ValueError, RuntimeError, ArithmeticError, np.linalg.LinAlgError) as exc:
         raise GENumericalError(str(exc)) from exc
 
+    centers = (
+        rotated_g_center * np.exp(-1j * theta),
+        rotated_e_center * np.exp(-1j * theta),
+    )
+    joint_length_error = (
+        _length_ratio_standard_error(joint_covariance)
+        if options.length_ratio is None
+        else None
+    )
     if plots is not None:
         fig, raw_axes = plots.subplots(
             num=figure_name, nrows=2, ncols=2, figsize=(8, 8)
         )
         # tolerated(cast): Plots keeps a native 2x2 object array, not typed Axes rows.
         axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
-        scatter_ge_plot(axs[0][0], (Ig, Ie), (Qg, Qe), "Rotated")
-        hist(Ig, Ie, options.numbins, axs[1][0])
-        axs[0][1].hist(xs, bins=bins.tolist(), weights=g_pdfs, color="b", alpha=0.5)
-        axs[1][1].hist(xs, bins=bins.tolist(), weights=e_pdfs, color="r", alpha=0.5)
+        annotated = options.raw_iq_diagnostic
+        iq, ground = axs[0]
+        combined, excited = axs[1]
+        if annotated:
+            _plot_raw_ge_iq(iq, signals, centers)
+        else:
+            scatter_ge_plot(iq, (Ig, Ie), (Qg, Qe), "Rotated")
+            _mark_rotated_centers(iq, (rotated_g_center, rotated_e_center))
+            iq.set_xlim(np.min(bins), np.max(bins))
+            iq.axvline(threshold, color="0.2", linestyle="--")
 
-        axs[0][0].plot(
-            rotated_g_center.real,
-            rotated_g_center.imag,
-            markerfacecolor="b",
-            color="r",
-            linestyle=":",
-            marker="o",
-            markersize=5,
-        )
-        axs[0][0].plot(
-            rotated_e_center.real,
-            rotated_e_center.imag,
-            markerfacecolor="r",
-            color="b",
-            linestyle=":",
-            marker="o",
-            markersize=5,
-        )
-        axs[0][0].set_xlim(np.min(bins), np.max(bins))
-
-        _plot_population_histogram(
-            axs[0][1],
-            xs,
+        _plot_ge_histograms(
+            (combined, ground, excited),
+            bins,
             ge_params,
-            _PopulationHistogram(g_pdfs, fit_g_pdfs, p0_gg, p0_ge, True),
-            show_ideal=length_ratio != 0.0,
-        )
-        _plot_population_histogram(
-            axs[1][1],
-            xs,
-            ge_params,
-            _PopulationHistogram(e_pdfs, fit_e_pdfs, p0_eg, p0_ee, False),
-            show_ideal=length_ratio != 0.0,
+            (
+                _PopulationHistogram(g_pdfs, fit_g_pdfs, p0_gg, p0_ge, True),
+                _PopulationHistogram(e_pdfs, fit_e_pdfs, p0_eg, p0_ee, False),
+            ),
+            annotated=annotated,
         )
 
-        axs[1][0].plot(xs, fit_g_pdfs, "b-", label="g")
-        axs[1][0].plot(xs, fit_e_pdfs, "r-", label="e")
-
-        axs[1][0].set_title(
-            f"Prepared assignment: {fid:.1%}; ideal model: {ideal_fid:.1%}", fontsize=12
+        _format_ge_fit_axes(
+            (combined, ground, excited),
+            threshold,
+            g_pdfs,
+            e_pdfs,
+            logscale=options.logscale,
         )
 
-        _format_ge_fit_axes(axs, threshold, g_pdfs, e_pdfs, logscale=options.logscale)
-
-        length_title = (
-            f"{length_ratio:.1f}"
-            if options.align_t1
-            else f"{l_ratio_g:.1f} / {l_ratio_e:.1f}"
+        title = _diagnostic_title(
+            _diagnostic_length_labels(
+                options,
+                length_ratio,
+                joint_length_error,
+                (l_ratio_g, l_ratio_e),
+                (ground_covariance, excited_covariance),
+            ),
+            fit_quality["joint"] if annotated else None,
+            (sg, se, s),
+            joint_covariance,
         )
-        fig.suptitle(
-            "Readout length: not identifiable"
-            if identifiable_length_ratio is None
-            else f"Readout length = {length_title} " + r"$T_1$"
+        _layout_ge_diagnostic(
+            fig,
+            (iq, combined, ground, excited),
+            title,
+            (fid, ideal_fid),
+            annotated=annotated,
         )
-        fig.tight_layout()
-        fig.subplots_adjust(hspace=0.25, wspace=0.15)
 
     return (
         fid,
         populations,
         GE_FitResult(
             length_ratio=identifiable_length_ratio,
+            length_ratio_standard_error=joint_length_error,
             ge_params=ge_params,
             p0_gg=p0_gg,
             p0_ge=p0_ge,
@@ -462,11 +472,225 @@ def fitting_ge_and_plot(
             length_ratio_e=l_ratio_e,
             theta=theta,
             threshold=threshold,
-            g_center=rotated_g_center * np.exp(-1j * theta),
-            e_center=rotated_e_center * np.exp(-1j * theta),
+            g_center=centers[0],
+            e_center=centers[1],
             fit_quality=fit_quality,
         ),
     )
+
+
+def _plot_raw_ge_iq(
+    ax: Axes, signals: NDArray[np.complex128], centers: tuple[complex, complex]
+) -> None:
+    plot_ge_iq_density(ax, signals[0], signals[1])
+    ax.scatter([], [], marker="s", color="b", label="g prep")
+    ax.scatter([], [], marker="s", color="r", label="e prep")
+    ax.scatter(
+        [z.real for z in centers],
+        [z.imag for z in centers],
+        color=["navy", "darkred"],
+        marker="x",
+        s=26,
+        linewidths=1.5,
+        label="Fitted centers",
+    )
+    ax.set(xlabel="I (a.u.)", ylabel="Q (a.u.)")
+    ax.set_title("Raw IQ with fitted g/e centers", fontsize=10, pad=23)
+    ax.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1),
+        ncols=3,
+        fontsize=10,
+        handlelength=1,
+        handletextpad=0.35,
+        columnspacing=0.8,
+        borderpad=0.25,
+        frameon=False,
+    )
+    ax.grid(False)
+
+
+def _mark_rotated_centers(ax: Axes, centers: tuple[complex, complex]) -> None:
+    for center, face, color in zip(centers, ("b", "r"), ("r", "b"), strict=True):
+        ax.plot(
+            center.real,
+            center.imag,
+            markerfacecolor=face,
+            color=color,
+            linestyle=":",
+            marker="o",
+            markersize=5,
+        )
+
+
+def _plot_ge_histograms(
+    axes: tuple[Axes, Axes, Axes],
+    bins: NDArray[np.float64],
+    ge_params: tuple[float, float, float, float, float, float, float],
+    histograms: tuple[_PopulationHistogram, _PopulationHistogram],
+    *,
+    annotated: bool,
+) -> None:
+    combined, ground, excited = axes
+    xs = 0.5 * (bins[:-1] + bins[1:])
+    for panel, histogram, color, label in zip(
+        (ground, excited), histograms, ("b", "r"), ("g", "e"), strict=True
+    ):
+        for ax in (combined, panel):
+            ax.hist(
+                xs,
+                bins=bins.tolist(),
+                weights=histogram.observed,
+                color=color,
+                label=label if ax is combined else None,
+                alpha=0.5,
+                edgecolor="none" if annotated else None,
+                linewidth=0 if annotated else None,
+            )
+        _plot_population_histogram(
+            panel, xs, ge_params, histogram, show_ideal=ge_params[-1] != 0.0
+        )
+    combined.legend(
+        loc="lower center" if annotated else "upper right",
+        bbox_to_anchor=(0.5, 1) if annotated else None,
+        ncols=2 if annotated else 1,
+        fontsize=10 if annotated else None,
+        frameon=False if annotated else None,
+    )
+    combined.plot(xs, histograms[0].fitted, "b-", label="g")
+    combined.plot(xs, histograms[1].fitted, "r-", label="e")
+    combined.set_ylabel(
+        "Fraction per bin" if annotated else "Counts", fontsize=10 if annotated else 14
+    )
+
+
+def _layout_ge_diagnostic(
+    fig: Figure,
+    axes: tuple[Axes, Axes, Axes, Axes],
+    title: str,
+    scores: tuple[float, float],
+    *,
+    annotated: bool,
+) -> None:
+    iq, combined, ground, excited = axes
+    prepared, ideal = scores
+    if annotated:
+        fig.suptitle(title, fontsize=10)
+        combined.set_title(
+            f"Prepared assignment: {prepared:.1%}\nIdeal model: {ideal:.1%}",
+            fontsize=10,
+            pad=23,
+        )
+        for ax in axes:
+            ax.tick_params(labelsize=10)
+        iq.xaxis.label.set_fontsize(10)
+        iq.yaxis.label.set_fontsize(10)
+        for histogram in (combined, ground, excited):
+            histogram.xaxis.set_major_locator(MaxNLocator(nbins=5, min_n_ticks=2))
+            histogram.set_xlabel("Projected I (a.u.)", fontsize=10)
+        for panel, prep in ((ground, "g"), (excited, "e")):
+            panel.set_title(f"{prep} prep · {panel.get_title()}", fontsize=10, pad=40)
+            panel.legend(
+                loc="lower center",
+                bbox_to_anchor=(0.5, 1),
+                ncols=3,
+                fontsize=10,
+                columnspacing=1,
+                handlelength=1.5,
+                frameon=False,
+            )
+        fig.set_layout_engine("constrained", hspace=0.08)
+    else:
+        combined.set_xlabel("I [ADC levels]", fontsize=14)
+        combined.set_title(
+            f"Prepared assignment: {prepared:.1%}; ideal model: {ideal:.1%}",
+            fontsize=12,
+        )
+        fig.suptitle(title)
+        fig.tight_layout()
+        fig.subplots_adjust(hspace=0.25, wspace=0.15)
+
+
+def _length_ratio_standard_error(covariance: NDArray[np.float64]) -> float | None:
+    # The length ratio is the last parameter in both histogram models.
+    variance = float(covariance[-1, -1])
+    return math.sqrt(variance) if math.isfinite(variance) and variance > 0.0 else None
+
+
+def _length_ratio_label(ratio: float, standard_error: float | None) -> str | None:
+    return None if standard_error is None else f"{ratio:.3g} ± {standard_error:.3g}"
+
+
+def _diagnostic_length_labels(
+    options: GEFitOptions,
+    joint_ratio: float,
+    joint_error: float | None,
+    preparation_ratios: tuple[float, float],
+    preparation_covariances: tuple[NDArray[np.float64], NDArray[np.float64]],
+) -> tuple[str | None, ...]:
+    if options.align_t1:
+        if options.length_ratio is not None:
+            return (f"{options.length_ratio:.3g}",)
+        return (_length_ratio_label(joint_ratio, joint_error),)
+    if options.length_ratio == 0.0:
+        # With zero decay the per-preparation fits also hold the ratio fixed.
+        return ("0", "0")
+    return tuple(
+        _length_ratio_label(ratio, _length_ratio_standard_error(covariance))
+        for ratio, covariance in zip(
+            preparation_ratios, preparation_covariances, strict=True
+        )
+    )
+
+
+def _diagnostic_title(
+    length_labels: tuple[str | None, ...],
+    joint_quality: FitQuality | None,
+    centers_and_width: tuple[float, float, float],
+    joint_covariance: NDArray[np.float64],
+) -> str:
+    if any(length_labels):
+        values = " / ".join(label or "unavailable" for label in length_labels)
+        title = rf"Readout length = {values} $T_1$"
+    else:
+        title = "Readout length: unavailable"
+    if joint_quality is None:
+        return title
+
+    snr = _fitted_snr_title(*centers_and_width, joint_covariance[:3, :3])
+    if joint_quality.r2 is not None:
+        quality = f"R² {joint_quality.r2:.3g}"
+    elif joint_quality.normalized_residual_rms is not None:
+        quality = f"normalized RMS {joint_quality.normalized_residual_rms:.3g}"
+    else:
+        quality = "R² unavailable"
+    return f"{title}\n{snr} · Joint {quality}"
+
+
+def _fitted_snr_title(
+    sg: float, se: float, width: float, covariance: NDArray[np.float64]
+) -> str:
+    separation = se - sg
+    ratio = abs(separation) / width
+    if not math.isfinite(ratio):
+        return "Fitted SNR = unavailable"
+
+    title = f"Fitted SNR = {ratio:.3g} ± "
+    if (
+        separation == 0.0
+        or not np.isfinite(covariance).all()
+        or np.any(covariance.diagonal() < 0.0)
+    ):
+        return title + "unavailable"
+
+    # Propagate the full joint covariance in physical (sg, se, width) order.
+    slope = math.copysign(1.0, separation) / width
+    gradient = np.array([-slope, slope, -ratio / width])
+    with np.errstate(over="ignore", invalid="ignore", under="ignore"):
+        variance = float(gradient @ covariance @ gradient)
+    if not math.isfinite(variance) or variance <= 0.0:
+        return title + "unavailable"
+    return title + f"{math.sqrt(variance):.3g}"
 
 
 def _identifiable_length_ratio(
@@ -537,7 +761,7 @@ def _plot_population_histogram(
 
 
 def _format_ge_fit_axes(
-    axs: tuple[tuple[Axes, Axes], tuple[Axes, Axes]],
+    axes: tuple[Axes, Axes, Axes],
     threshold: float,
     g_pdfs: NDArray[np.float64],
     e_pdfs: NDArray[np.float64],
@@ -545,15 +769,11 @@ def _format_ge_fit_axes(
     logscale: bool,
 ) -> None:
     """Apply the shared threshold and optional histogram logarithmic limits."""
-    for row in axs:
-        for ax in row:
-            ax.axvline(threshold, color="0.2", linestyle="--")
+    for ax in axes:
+        ax.axvline(threshold, color="0.2", linestyle="--")
 
     if logscale:
-        axs[0][1].set_yscale("log")
-        axs[1][0].set_yscale("log")
-        axs[1][1].set_yscale("log")
         y_max, y_min = 1.5 * np.max([g_pdfs, e_pdfs]), np.min([g_pdfs, e_pdfs]) + 1e-4
-        axs[0][1].set_ylim(y_min, y_max)
-        axs[1][0].set_ylim(y_min, y_max)
-        axs[1][1].set_ylim(y_min, y_max)
+        for ax in axes:
+            ax.set_yscale("log")
+            ax.set_ylim(y_min, y_max)

@@ -52,8 +52,9 @@ Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的�
 ## UI 驗證
 
 框架 UI 改動依下方元件情境驗收。`zcu_lab/` 實驗定義改動，包含 live plot 與分析圖的畫面改動，依下方離線 probe 驗收，不要求 ComponentDriver 走查。同時修改兩者時，分別完成兩種驗收。
-框架 UI 驗收需要判讀圖面時，依 [R7](../zcu_lab/v2/figure-style.md#r7用-gui-與存檔的實際尺寸檢查版面)
-區分 Data 縮圖、`View figure` 閱讀面與存檔 PNG。
+依 [R7](../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面)，只在固定幾何的 PNG 檢查圖面版面。
+框架 UI 圖磚的驗收核對等比縮放、留白和無裁切，包含 Data 縮圖與 `View figure` 閱讀面。
+互動畫布另核對縮放後的指標資料座標。
 
 ### 框架 UI
 
@@ -66,6 +67,7 @@ Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的�
 
 判定只讀 driver 的具名可見狀態快照，包括底部 status、元件 enabled／visible／tooltip、
 可見對話框及其文字、欄位顯示值、圖例文字、圖上軸標與可見曲線數。
+圖磚驗收也可讀可見 Figure 的邏輯尺寸與渲染圖像的像素邊界。
 曲線觀察只讀公開 Matplotlib artist 的可見狀態，仍須看 PNG 確認外觀，不拿結果資料當判定。
 不讀 Controller、state store 或私有屬性。
 背景工作依下方的 [Qt owner-loop 等待](#qt-owner-loop-等待)規則，用公開終局條件等待。
@@ -870,15 +872,9 @@ Program v2 的 compile regression 先找 `test_modules_integration.py` 中同一
 
 ## Cfg 解析測試的 import 注意事項
 
-`ModuleCfgFactory`／`WaveformCfgFactory` 由 `cfg_model` 擁有，按 Spec 與成品 cfg 的 union 驗證並遞迴展開引用。測試從 schema owner 的 package 入口 import，避免直接碰 leaf base class：
+驗證持久 Spec 的解析與引用展開時，從 `zcu_tools.cfg_model` 匯入 `ModuleCfgFactory` 或 `WaveformCfgFactory`。
+呼叫 `ModuleCfgFactory.from_raw(raw, context=...)` 將 Spec 解析為共用 cfg。`CfgValidationContext` 明示固定的 module resolver 與 asset capability；不需要這些依賴的 inline cfg 可省略 context。
 
-```python
-from zcu_tools.cfg_model import ModuleCfgFactory   # 使用 schema owner 的 package 入口
-# 不要從 program runtime 或 schema leaf 匯入 factory
-
-cfg = ModuleCfgFactory.from_raw({"type": "readout/direct", "ro_ch": 0, ...})
-```
-
-呼叫 `ModuleCfgFactory.from_raw(raw, context=...)` 進行解析。`CfgValidationContext` 明示固定的 module resolver 與 asset capability；dependency-free inline cfg 可省略 context。
+驗證 native program cfg 與共用 cfg／Spec 的轉換時，從 `zcu_tools.program.v2.modules` 匯入 `ModuleCfgFactory`。
 
 **測試一個非 `Literal` 的 cfg（負面測試）**：若要在測試裡定義 `class UnknownCfg(AbsReadoutCfg): type: str = "unknown"` 來驗證 factory 錯誤路徑，重點是它不在 `ModuleCfg` Union 裡，因此 `ModuleCfgFactory.from_raw()` 不會 dispatch 到它。

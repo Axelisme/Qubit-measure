@@ -10,9 +10,16 @@ from zcu_tools.analysis.flux import DevicePeriod, offset_for_flux
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.format_version import YamlMap
-from zcu_tools.gui.app.measure.startup_context import StartupContext, simulation_workers
+from zcu_tools.gui.app.measure.startup_context import (
+    StartupContext,
+    StartupParameters,
+    StartupSetup,
+    simulation_workers,
+)
 from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.program import build_soccfg
+from zcu_tools.resources.context.library import ModuleLibrary
 from zcu_tools.resources.entry import (
     DestinationExistsError,
     EntryTemplate,
@@ -40,9 +47,9 @@ def startup(ctx: StartupContext) -> None:
     The template binds qubit1=Q1, qubit2=Q2, coupler=coupler and mux=MG12
     for two-qubit forms. Existing entries keep their aliases; update the point's
     Aliases if the current bindings are missing.
-    The template seeds pulse gen0/ADC0, charge gen2/gen3 and MG12 mux
-    gen7/ADCs [2, 3] in resonator order on the shared v2 board.
-    The GUI is then ready for the user to open experiment tabs.
+    The template seeds the half-flux components and module slots. The script
+    installs the demo library in the entry's global documents before creating
+    the point, so `initial` inherits both the components and their modules.
 
     ctx is the GUI's typed startup capability, called on its background worker
     after lab components/adapters are registered. Use the GUI's data project
@@ -79,7 +86,12 @@ def startup(ctx: StartupContext) -> None:
         ctx.setup.use_point("initial")
     else:
         ctx.progress("Seeding FTF demo entry from template")
-        _seed_entry(ctx, template)
+        seed_demo_point(
+            ctx.setup,
+            ctx.context,
+            template,
+            Path(__file__).with_name("entry-library.yaml"),
+        )
 
     ctx.progress("Building offline FTF resources")
     soccfg = build_soccfg(yaml.safe_load(PROFILE_PATH.read_text()))
@@ -175,18 +187,51 @@ def _seed_predictors(
             save_predictor_file(path, predictor)
 
 
-def _seed_entry(ctx: StartupContext, template: EntryTemplate) -> None:
-    """Seed global components, then create initial and save its aliases."""
+def seed_demo_point(
+    setup: StartupSetup,
+    context: StartupParameters,
+    template: EntryTemplate,
+    library_path: Path,
+    *,
+    point: str = "initial",
+) -> None:
+    """Populate a new open entry and select its demo point without starting FTF.
+
+    Install the authored components and library in global documents, then
+    inherit them into point and install its aliases. Use a fresh entry;
+    validation and owner failures propagate without rolling back earlier writes.
+    """
+    library = ModuleLibrary(library_path).snapshot()
+    if invalid := library.document().invalid_entries:
+        raise ValueError(f"Invalid FTF demo module library: {invalid}")
     for name, component in template.components.items():
         fields = TypeAdapter(YamlMap).validate_python(
             component.model_dump(exclude_unset=True)
         )
         fields.pop("kind")
-        ctx.context.add_component(name, component.kind, fields, point=None)
-    ctx.setup.new_point("initial")
-    ctx.context.apply_alias_rows(
+        context.add_component(name, component.kind, fields, point=None)
+
+    def install_library() -> None:
+        control = context.control
+        target = control.read_context()
+        for key in library.module_keys():
+            control.apply_library_change(
+                target,
+                LibraryChange("module", "put", key, module=library.module_spec(key)),
+            )
+        for key in library.waveform_keys():
+            control.apply_library_change(
+                target,
+                LibraryChange(
+                    "waveform", "put", key, waveform=library.waveform_spec(key)
+                ),
+            )
+
+    context.calls.call(install_library)
+    setup.new_point(point)
+    context.apply_alias_rows(
         tuple(
             AliasRow(name, value) for name, value in template.aliases.aliases.items()
         ),
-        point="initial",
+        point=point,
     )

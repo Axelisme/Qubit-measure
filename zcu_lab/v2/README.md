@@ -74,12 +74,12 @@ AC Stark spectroscopy 的 [core.py](twotone/ac_stark/core.py) 對應 `twotone/ac
 [ramsey_core.py](twotone/ac_stark/ramsey_core.py) 對應 `twotone/ac_stark_ramsey`。
 註冊位置與 Ramsey guide 見 [Lab 組裝與註冊](../README.md#lab-組裝與註冊)。
 Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot` 擁有。
-兩個 core 都以 `plots=None` 呼叫 `singleshot_ge_analysis` 做擬合，不畫共用 helper 的模型 histogram。
-可選的診斷圖見 [experiment 的 GE 模型診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷)。
+兩個 core 在 Analyze 都啟用 [共用 GE 診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷)。擬合成功時，Single 發布 `diagnostic`，mux 以原始 tone 序號發布 `diagnostic_i`；各 core 仍另外產生 Fit 圖。
 各實驗的 `core.py` 自行選擇分析資料並繪製分類圖，數值擬合工具由 `zcu_tools.analysis.fitting` 擁有。
 跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
 mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
 AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/resonance.py)。
+兩個 GE core 各自排 Post 版面，並用 [support/singleshot/classification_plot.py](support/singleshot/classification_plot.py) 疊分類線與中心，再將兩格準備圖的 I/Q 範圍對齊。
 Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
 [\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩個實驗各自在 `analyze()` 畫自己的圖，
@@ -153,7 +153,7 @@ Reference marker 與動畫錄影不在這些工具中。
 
 共用的 `live_heatmap` 讓所有欄共用一組 `ys` 座標。[CPMG core](twotone/time_domain/cpmg/core.py) 的 Live 與 Analyze 都用 `_count_map`，讓每個 pulse count 欄各用自己的 delay grid，不呼叫 `live_heatmap`。
 
-Singleshot Check 在自己的 `analyze` 畫分類 IQ／區域圖；GE 的專屬分類圖在 `singleshot/ge/core.py`。
+Singleshot Check 在自己的 `analyze` 畫分類 IQ／區域圖；GE 的 Post 版面在 `singleshot/ge/core.py`。
 Amp／Len Rabi 在各自的 core 畫 joint-fit population、histogram 與 confusion 圖，
 分析計算仍由原分析 owner 負責。
 
@@ -264,8 +264,8 @@ Amp Rabi 的 shot count 與 IQ moments 由 [Program 的 summed acquisition](../.
 
 Mux 實驗每個參與 tone 各有一張 `measurement_i`，
 不把多 tone 疊在同一 axis。每張圖保留自己的 actual x，delay 類使用共用
-requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩個 preparation。
-單 qubit 與 mux GE 各自用 matplotlib 畫 IQ scatter，live 更新先複製 IQ，
+requested-delay 軸。Mux GE Live 的 IQ 密度以藍／紅區分 probe off/on 取數列，Fit 則按 g/e 準備著色。
+單 qubit 與 mux GE 的 Live 更新先複製 IQ，
 再經公開的 `@plots.on_plot_thread` 在 host owner 繪圖。Worker 不持有 active artists，
 partial NaN 不補零。Mux GE 逐 tone 直接呼叫數值工具，不委派單 qubit 實驗的分析。
 

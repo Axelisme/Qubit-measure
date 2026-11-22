@@ -8,7 +8,9 @@ from collections.abc import Callable, Iterator
 import pytest
 from matplotlib.backend_bases import FigureManagerBase
 from matplotlib.backends.backend_qt import FigureManagerQT
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from qtpy import sip
 from qtpy.QtCore import QCoreApplication, QEvent
 from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
 from zcu_tools.gui.plotting import (
@@ -20,11 +22,13 @@ from zcu_tools.gui.plotting import (
 )
 
 
-def _make_container() -> tuple[FigureContainer, QStackedWidget]:
+def _make_container(
+    canvas_type: type[FigureCanvasQTAgg] = FigureCanvasQTAgg,
+) -> tuple[FigureContainer, QStackedWidget]:
     stack = QStackedWidget()
     placeholder = QLabel("(placeholder)")
     stack.addWidget(placeholder)
-    return FigureContainer(stack, placeholder), stack
+    return FigureContainer(stack, placeholder, canvas_type=canvas_type), stack
 
 
 @pytest.fixture
@@ -60,8 +64,10 @@ def make_container(
     """Own presentation cleanup even when an attachment assertion fails."""
     owned: list[tuple[FigureContainer, QStackedWidget]] = []
 
-    def make() -> tuple[FigureContainer, QStackedWidget]:
-        presentation = _make_container()
+    def make(
+        canvas_type: type[FigureCanvasQTAgg] = FigureCanvasQTAgg,
+    ) -> tuple[FigureContainer, QStackedWidget]:
+        presentation = _make_container(canvas_type)
         owned.append(presentation)
         return presentation
 
@@ -90,6 +96,29 @@ def test_attach_existing_figure_to_container(make_container, make_figure):
     assert get_figure_container(fig) is container
 
     plt.close(fig)
+
+
+@pytest.mark.parametrize("compatible", (True, False))
+def test_moving_figure_reuses_compatible_canvas_and_retires_replaced_canvas(
+    make_container, compatible
+):
+    class OtherCanvas(FigureCanvasQTAgg):
+        pass
+
+    source, source_stack = make_container()
+    target, target_stack = make_container(
+        FigureCanvasQTAgg if compatible else OtherCanvas
+    )
+    figure = Figure()
+    old_canvas = attach_existing_figure_to_container(figure, source)
+    new_canvas = attach_existing_figure_to_container(figure, target)
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+
+    assert source_stack.currentIndex() == 0
+    assert target_stack.currentWidget() is new_canvas
+    assert figure.canvas is new_canvas
+    assert (new_canvas is old_canvas) == compatible
+    assert sip.isdeleted(old_canvas) == (not compatible)
 
 
 def test_plot_state_snapshot_and_invariants(make_container, make_figure):

@@ -84,8 +84,9 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：adapter 解析元件身分，cfg 收位置數值，分析 options 收顯示名。同一位置不跨層翻譯，實驗只驗所需能力，見 [ADR-0069](0069-experiment-core-and-frontends.md#身分定位與顯示)。
 
-原則：懂物理的操作員不讀程式碼就能判讀實驗。圖只放判讀所需資訊，adapter 提供 GUI 與 MCP 共用摘要，一維逐點誤差用 shot SEM，見 [ADR-0069](0069-experiment-core-and-frontends.md#呈現規範)。
+原則：懂物理的操作員不讀程式碼就能判讀實驗。圖只放判讀所需的事實，預選理由留在 Writeback；adapter 提供 GUI 與 MCP 共用摘要。一維逐點誤差包含 shot SEM 及可從 shot 共變異推得的反演標準誤，見 [ADR-0069](0069-experiment-core-and-frontends.md#呈現規範)。
 
+原則：Measure 圖磚以 12×9 in 排版，只等比縮放整張圖；R7 在存檔 PNG 檢查版面，見 [ADR-0069](0069-experiment-core-and-frontends.md#圖以固定存檔幾何排版)。
 原則：平均 IQ 的一維圖預設用主軸投影，二維 flux／頻率圖用逐 bias 扣背景後的幅值，改用其他量須寫明理由，見 [ADR-0069](0069-experiment-core-and-frontends.md#平均-iq-的投影慣例)。
 
 原則：只有準備誤差不移動 gg、ee 兩組共用的參數時，才保留獨立 heralded 實驗，見 [ADR-0074](0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)。
@@ -104,7 +105,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：模型設定只接受等向接收雜訊的單一 PSD，見[等向接收雜訊](draft/simulation-environments.md#等向接收雜訊)。
 原則：family 的完整序列最終精度合格就只比耗時，刪除前先補同型態長序列證據，見 [ADR-0078](0078-evolution-module-boundary.md#family-去留合格只比耗時)。
-原則：模擬器分層測試，不做 e2e 測試。只允許一支整實驗 Run 牆鐘工具，kernel／family 比較仍只量 `Engine.evolve`，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
+原則：模擬器分層測試，不做 e2e 測試。只允許一支量手選場景的整實驗 Run 牆鐘工具，kernel／family 比較仍只量 `Engine.evolve`，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 原則：正常參數先守 180 秒，誤差在 `1e-2` 內選快的；只為守時間才接受超過並記錄，達 `1e-1` 不採用，見 [ADR-0078](0078-evolution-module-boundary.md#歷史控制與精度驗收)。
 原則：優化只量目標實驗前後，先做便宜的正確性對照，再補獨立參考；影響實機、存檔或使用者結果則先驗再落地，見 [ADR-0078](0078-evolution-module-boundary.md#先求效率正確性事後補)。
 原則：評估算法時預算固定為使用者按場景宣告的需求，在固定預算下找算法適合的場景，不為算法放寬預算；長序列預算按 gate 數放寬，見 [ADR-0078](0078-evolution-module-boundary.md#固定預算找適合的場景)。

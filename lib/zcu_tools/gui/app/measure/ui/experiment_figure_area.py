@@ -72,8 +72,8 @@ class ExperimentFigureArea(QWidget):
             self._analysis_placeholder = QLabel("(no plot yet)")
             self._analysis_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._analysis_stack.addWidget(self._analysis_placeholder)
-            self._analysis_container = FigureContainer(
-                self._analysis_stack, self._analysis_placeholder
+            self._analysis_container = self._analysis_stack.figure_container(
+                self._analysis_placeholder
             )
             self._analysis_figures: FigureCollection | None = None
             self._analysis_panel_right = QWidget()
@@ -98,8 +98,8 @@ class ExperimentFigureArea(QWidget):
             self._post_placeholder = QLabel("(no plot yet)")
             self._post_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._post_stack.addWidget(self._post_placeholder)
-            self._post_container = FigureContainer(
-                self._post_stack, self._post_placeholder
+            self._post_container = self._post_stack.figure_container(
+                self._post_placeholder
             )
             self._post_figures: FigureCollection | None = None
             self._post_panel_right = QWidget()
@@ -126,7 +126,7 @@ class ExperimentFigureArea(QWidget):
         self._run_placeholder = QLabel("(no plot yet)")
         self._run_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._run_stack.addWidget(self._run_placeholder)
-        self._run_container = FigureContainer(self._run_stack, self._run_placeholder)
+        self._run_container = self._run_stack.figure_container(self._run_placeholder)
         self._run_figures: FigureCollection | None = None
         self._run_panel_right = QWidget()
         run_right = QVBoxLayout(self._run_panel_right)

@@ -103,6 +103,50 @@ def test_class_covariance_requires_at_least_two_retained_shots() -> None:
     np.testing.assert_array_equal(covariance[1], np.zeros((2, 2)))
 
 
+def test_corrected_population_sem_propagates_multinomial_shot_error() -> None:
+    # The first two labels mix; p_g = 4 * (measured_g - 0.5) when no f
+    # labels are present. The raw SEM is 0.25 for one g shot out of four.
+    matrix = np.array([[0.75, 0.25, 0], [0.5, 0.5, 0], [0, 0, 1]])
+    counts = np.array([[1, 3, 0], [1, 0, 0], [0, 4, 0]], dtype=np.int64)
+
+    sem = shot_uncertainty.corrected_population_sem(counts, matrix)
+
+    np.testing.assert_allclose(sem, [[1, 1, 0], [np.nan] * 3, [0, 0, 0]])
+
+
+def test_singular_calibration_leaves_no_corrected_sem_and_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    counts = np.array([[1, 1], [2, 0]], dtype=np.int64)
+    matrix = np.full((2, 2), 0.5)
+
+    sem = shot_uncertainty.corrected_population_sem(counts, matrix)
+
+    assert np.isnan(sem).all()
+    assert "singular" in caplog.text
+
+
+def test_nearly_singular_calibration_retains_large_finite_sem() -> None:
+    contrast = 2.0**-30
+    matrix = np.array([[0.5 + contrast, 0.5 - contrast], [0.5, 0.5]])
+    counts = np.array([1, 1], dtype=np.int64)
+
+    sem = shot_uncertainty.corrected_population_sem(counts, matrix)
+
+    np.testing.assert_allclose(sem, [2.0**29, 2.0**29])
+
+
+def test_corrected_population_sem_does_not_require_representable_variance() -> None:
+    # One Other shot out of two gives a raw SEM of 0.5. Calibration scales
+    # that coordinate by 1e160, so its SEM fits in float64 but its variance does not.
+    counts = np.array([1, 0, 1], dtype=np.int64)
+    matrix = np.diag([1.0, 1.0, 1e-160])
+
+    sem = shot_uncertainty.corrected_population_sem(counts, matrix)
+
+    np.testing.assert_allclose(sem, [0.5, 0.0, 5e159])
+
+
 def test_class_covariance_rejects_nonfinite_total_of_finite_counts() -> None:
     limit = np.finfo(np.float64).max
     with pytest.raises(ValueError, match="total shot count"):
