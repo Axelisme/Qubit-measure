@@ -205,6 +205,8 @@ Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`
 
 若 Open 成功，但表單仍有錯誤（例如覆寫後還缺欄位或 slot），`missing_defaults` 列出錯誤，不送出 Run。報表中的「FTF 不能跑」是 `not_runnable`，只適用於[固定案例宣告](data/experiment_wall_time/case-inputs.json)明列排除的 adapter。工具寫下該列的原因，不複製 project，也不派送 Open 或 Run。缺初值不一定是排除，請看各列的原因。
 
+固定 FTF fixture 沒有 Q1 的快磁通線，也沒有 MG12 具名的共用 DC coil。`fastflux/{distortion/acc_phase,distortion/freq,distortion/phase,mist,t1,twotone}`、`twotone/reset/flux/{gain,length}`、`mux/{onetone_flux_global,twotone_flux_global}` 這十列的 `missing_defaults` 記為「缺 fixture 路由／校準，未量」，與「需上游輸出，未量」、JPA 無模型、逾時分開計數；不表示 FTF 不能跑這些實驗。要補，需同一 FTF 場景可追溯的 generator／loop 或共用 DC route、單位與校準，以及該實驗的正常輸入（例如 `fastflux/twotone`、`fastflux/distortion/freq` 另需 Q1 的 `kappa` 或有依據的掃頻窗）；示意係數（例如 `low-snr.yaml` 註解中的 gen1 `+0.02 Φ0/gain`）不算校準。
+
 固定案例列出兩類排除：六個 JPA 入口沒有模型或裝置；`two_qubit/rb`、`two_qubit/rb_heralded`、`two_qubit/cz_optimize` 在 `ftf-demo/initial` 缺 Open 所需的 Q1／Q2 有序 Local Z 配對 `$coupler.ext.cz_phase`。後三列需上游校準，未計時，不表示 FTF 不支援這些實驗。
 
 工具例外、未知 Run outcome、環境組裝、journal 錯誤與 telemetry 格式錯誤會中止指令，不轉成案例狀態。重建與續跑都拒絕 adapter key 不符的結果列，以及沒有有效 Run 秒數的 `ok` 或 `missing_breakdown` 列。
