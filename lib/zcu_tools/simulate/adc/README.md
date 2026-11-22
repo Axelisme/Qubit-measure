@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-22, Markov and raw sampling contracts
+**Last updated:** 2026-11-22, Markov and raw sampling links
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -283,7 +283,7 @@ and one event. A single outcome consumes no extra outcome RNG draw. Its raw,
 trace and integrated outputs retain the previous single-event RNG order,
 including shared-event multi-grid and multi-ADC arrangements.
 
-### Projection-chain sampling
+<a id="projection-chain-sampling"></a>
 
 `ProjectionChain(initial, transitions)` represents rank-1 projective reads
 without enumerating outcome histories. `initial` has shape `(*point_dims, S)`.
@@ -291,7 +291,7 @@ Each subsequent event supplies one `(*point_dims, S, S)` transition array,
 indexed `[previous_projection_state, next_projection_state]`. Construction
 copies arrays read-only and validates every row without clipping or normalization.
 An empty transition tuple represents one event.
-[FTF projective chain construction](../../simulators/ftf/environment/README.md#cavity-drives)
+[FTF projective chain construction](../../simulators/ftf/environment/README.md#projective-chain-construction)
 builds these rows and applies the projection floor before handing them to ADC.
 Non-projective FTF readout still uses `ProjectionReadout.unprojected`. The adoption does not retire FTF's retained
 outcome-mixture path or the shared `ProjectionReadout` interface.
@@ -434,6 +434,9 @@ On the simulated ADC path, these callers use raw rather than compact counts:
   `run_acquire_shots` reaches it through `get_shot_result`; mux single-shot g/e
   reaches `get_raw` through `collect_raw_iq`. These getters only materialize
   the retained round if its raw is not already available.
+
+See [Program's raw materialization contract](../../program/v2/simulation/README.md#raw-materialization)
+for when a round requires raw and when getters materialize it later.
 
 To locate the callers, use:
 

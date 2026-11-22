@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-22, Markov producer and sampler handoff
+**Last updated:** 2026-11-22, Markov chain construction and telemetry
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -606,6 +606,8 @@ projective counts and each ADC's per-event grid counts. A difference raises
 `ValueError` naming both templates and layouts, even when total reads match.
 This check belongs to environment preparation, not the program frontend.
 
+<a id="projective-chain-construction"></a>
+
 FTF projective acquisitions build a `ProjectionChain` for
 [ADC projection-chain sampling](../../../simulate/adc/README.md#projection-chain-sampling).
 The first projection uses the normalized diagonal of the incoming DC density.
@@ -618,11 +620,12 @@ event from vacuum too. Its herald CTMC jumps affect that event's IQ and do not
 feed back into the quantum transition rows. The model excludes active reset and
 measurement-induced state transitions.
 
-`N_occ` counts occupied DC energy levels at a point and event, not outcome
-histories. The old `ftf.projection_outcomes` diagnostic counted retained
-histories. The chain does not enumerate them: `ftf.projection_continued_states`
-counts source levels solved at each transition, including zero-weight levels
-when the floor is zero.
+`N_occ` refers to the number of occupied DC energy levels at a point and event.
+The old `ftf.projection_outcomes` diagnostic counted retained outcome histories,
+which the chain does not enumerate. In [routing telemetry](#routing-telemetry),
+`ftf.projection_continued_states` counts the source levels selected for evolution
+by the floor at each transition. This count includes zero-weight levels when
+the floor is zero.
 
 FTF applies `numerics.projection_weight_floor` when building transition rows.
 The setting is required and accepts finite values in `[0, 1)`. The templates
@@ -631,8 +634,7 @@ marginal below the floor skips evolution and gets
 an identity row. FTF keeps that weight in the same state without redistributing
 or renormalizing it. Even an all-identity layer keeps all probability. Floor
 zero solves every state, including zero-weight states, and removes the identity
-approximation within this vacuum-reset model. See [Routing telemetry](#routing-telemetry)
-for the node counts and skipped marginal.
+approximation within this vacuum-reset model.
 
 `simulate.adc` solves the linear, state-conditioned cavity fields. The incident
 amplitude uses the same `input_per_gain` conversion as terminal readout.
