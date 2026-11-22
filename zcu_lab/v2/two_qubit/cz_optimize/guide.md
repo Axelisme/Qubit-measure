@@ -40,9 +40,9 @@ CMA-ES 調 I、Q 各 6 個內部控制點，以及 Qubit1、Qubit2 各一個 loc
 
 ## 成本、停止與保存
 
-總共嘗試 `1 + generations × popsize` 次評估。每次可行評估對每個 seed 編譯並取數一支 program，最多取 `評估數 × seed 數 × reps` 發。例如 2 代、每代 4 個候選、3 seeds、256 reps，最多 27 支 program、6912 發。離線 FTF 在 depth 5 和 4 workers 時，每支約 10 秒，可用 program 數估算等待時間。實機時間還受 depth、reps、編譯與等待設定影響。
+總共嘗試 `1 + generations × popsize` 次評估。每次可行評估對每個 seed 編譯並取數一支 program，最多取 `評估數 × seed 數 × reps` 發。例如 2 代、每代 4 個候選、3 seeds、256 reps，最多 27 支 program、6912 發。用候選數、seed 數、depth 和每個候選的 Reps 估算成本。
 
-Run 把候選樣條放在記憶體內播放，不為候選建立 library 資產。如果樣本的最大 `|I+iQ|` 大於 1，跳過取數並將目標 0 回報給 CMA。Live 圖的橫軸是評估序號，圓點是本次目標，虛線是到目前為止最佳的**實測**目標。跳過的候選顯示為 0，但不進入最佳值。
+Run 把候選樣條放在記憶體內播放，不為候選建立 library 資產。如果樣本的最大 `|I+iQ|` 大於 1，跳過取數並將目標 0 回報給 CMA。Live 圖的橫軸是評估序號，圓點是本次目標，虛線是到目前為止最佳的**實測**目標。標成超出 DAC 限制的候選記為 0，不進入最佳值。Live title 分開顯示已處理的候選數與實際保留的 shots。超限候選計入已處理數，但不增加 shots。若在候選中途停止，已留存的 shots 計入總數，該未完成候選不計入已處理數。實測點的 ±1 shot SEM 先用各 seed 保留的 shots 計算 P(g,g) 的二項 variance，再依等權平均傳播；不是各 seed 間的標準差。
 
 Stop 保留已取得的計數，不把未完成的世代回報給 CMA。Save 記錄本次 cfg、各次評估的 14 個參數、峰值、每個 seed 的 3×3 終端計數，以及 Run 開始時讀到的起點資產時長。未取得的計數為 NaN。結果檔不含候選波形樣本。Load 後，Analyze 和寫回提案用保存的時長重建形狀，不讀起點波形檔。若要用原 cfg 再 Run，仍需要起點資產。
 
@@ -50,7 +50,7 @@ Cfg schema 為 3.0。新版 Load 拒絕軸名不相容的舊結果檔，不改�
 
 ## Analyze 與寫回
 
-用 Analyze 讀取目前 Run 或 Load 的結果。圖 `fit` 左側顯示實測的目標和最高點，略過不可行或未完成的評估。右側疊加最佳及起點的 normalized I、Q，橫軸是 µs。摘要列出最佳序號、最佳及起點的目標，以及依 I1… I6、Q1… Q6、Qubit1／Qubit2 local Z 排序的 14 個數字。若缺少 cfg 或沒有可用評估，摘要回報原因，不選最佳。
+用 Analyze 讀取目前 Run 或 Load 的結果。圖 `fit` 用實測目標值與 shot SEM 比較候選，標出最高點及其相對起點的變化。圖 `envelopes` 用 normalized I、Q 比較最佳和起點形狀，橫軸是共同波形的完整時長（µs）。這個實驗不對存活率做曲線擬合。摘要列出最佳序號、最佳及起點的目標，以及依 I1… I6、Q1… Q6、Qubit1／Qubit2 local Z 排序的 14 個數字。若缺少 cfg 或沒有可用評估，摘要回報原因，不選最佳。
 
 有可用的最佳評估時，writeback pane 會列出六筆提案：
 
