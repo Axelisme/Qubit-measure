@@ -246,6 +246,43 @@ def test_deferred_raw_does_not_change_statistics_stream_or_retain_noisy_results(
     )
 
 
+def test_raw_rounds_reuse_noiseless_setup_only_within_one_preparation():
+    calls = 0
+
+    def envelope(_ns: float) -> complex:
+        nonlocal calls
+        calls += 1
+        return 1.0 + 0j
+
+    content = batch(model(receiver=adc.Receiver(noise_covariance=np.eye(2) * 4)))
+    (event,) = content.events[0]
+    (pulse,) = event.pulses
+    event = replace(event, pulses=(replace(pulse, envelope=envelope),))
+    content = replace(content, events=((event,),))
+    chain = adc.ProjectionChain(np.array([0.1, 0.2, 0.7]), ())
+    prepared = adc.PreparedRawShots(chain, {0: content}, reps=5)
+    round_1 = SamplingIdentity(12, (3, 0, 1))
+    round_2 = SamplingIdentity(12, (3, 1, 1))
+    first = prepared.bind(round_1).materialize(5, 0)[0]
+    setup_calls = calls
+    assert setup_calls > 0
+    second = prepared.bind(round_2).materialize(5, 0)[0]
+    # With no CTMC jumps, the opaque envelope is only needed for noiseless setup.
+    assert calls == setup_calls, "a later round repeated noiseless envelope setup"
+    assert not np.array_equal(first, second)
+
+    shifted = replace(event, pulses=(replace(event.pulses[0], amplitude=0.4j),))
+    changed = replace(content, events=((shifted,),))
+    new_prepared = adc.PreparedRawShots(chain, {0: changed}, reps=5)
+    different = new_prepared.bind(round_2).materialize(5, 0)[0]
+    assert calls > setup_calls
+    assert not np.array_equal(second, different)
+
+    fresh = adc.PreparedRawShots(chain, {0: content}, reps=5)
+    assert_array_equal(fresh.bind(round_2).materialize(5, 0)[0], second)
+    assert_array_equal(prepared.bind(round_1).materialize(5, 0)[0], first)
+
+
 @pytest.mark.parametrize("stop_at", ["entry", "during-event"])
 def test_raw_stop_does_not_observe_later_events(stop_at):
     cancel = Event()

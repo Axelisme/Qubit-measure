@@ -66,18 +66,7 @@ def physical_shots(
     for event_index, states in enumerate(_event_states(readout, reps, rng)):
         if cancel is not None and cancel.is_set():
             raise Cancelled()
-        plans = {
-            (channel, content): IntegratedPaths(
-                batch.model,
-                events[event_index].pulses,
-                events[event_index].grids,
-                prepared.rtol,
-                prepared.atol,
-            )
-            for channel, batch in batches
-            for content, events in enumerate(batch.events)
-            if events[event_index].grids and events[event_index].pulses
-        }
+        plans = _build_event_plans(prepared, event_index)
         for key, group in groupby(ordered, key=keys.__getitem__):
             points = np.array(list(group), dtype=np.int64)
             observers = [
@@ -125,6 +114,20 @@ def physical_shots(
             axis=2,
         )
     return output
+
+
+def _build_event_plans(
+    prepared: "PreparedRawShots", event_index: int
+) -> dict[tuple[int, int], IntegratedPaths]:
+    """Prepare noiseless observers for one logical event, keyed by ADC and content."""
+    return {
+        (channel, content): IntegratedPaths(
+            batch.model, event.pulses, event.grids, prepared.rtol, prepared.atol
+        )
+        for channel, batch in prepared.batches
+        for content, events in enumerate(batch.events)
+        if (event := events[event_index]).grids and event.pulses
+    }
 
 
 def _event_states(
