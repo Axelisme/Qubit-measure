@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-22，校正 IQ 矩與 static PFB 前置條件
+**Last updated:** 2026-11-23，shot time 與模擬 round pacing 的 owner
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -256,7 +256,7 @@ Retry, progress and stop conditions follow the other Schedule run methods.
 `PulseReadoutCfg.nominal_duration_us()` 以 `pre_delay + waveform.length + post_delay` 估算 readout 的 generator 結尾。
 此估值不含 ADC 視窗或時脈取整。Timeline readout 不等待 ADC 才開始後續 pulse，但每個 shot 收尾仍等待所有 ADC。
 後一個 trigger 帶 timeline 時，同 ADC 視窗重疊或無法證明不重疊會在編譯期報錯。純原生 trigger 保留 QICK 行為。
-`request_round_time_s(request)` 從整數 request 計算一輪 pacing 秒數。它以 Python 整數加總各點與 relax，再乘 reps，由 TimeBase 一次換成秒。整輪總和不套用單一 request 時間的 ns 精確界限。模擬 binding 只呼叫此入口，不累計 acquisition 的硬體總時間。既有 µs API 與硬體路徑不變。
+整數 request 的[單輪 pacing](v2/simulation/README.md#round-pacing)由 `program.v2.simulation` 負責，不經 `shot_time_s`。
 
 ## Conditional readout
 

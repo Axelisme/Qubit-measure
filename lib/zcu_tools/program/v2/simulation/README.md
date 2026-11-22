@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-22, unentered acquire timings
+**Last updated:** 2026-11-23, simulation round pacing owner
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -19,11 +19,12 @@ Admission calls readiness, then `on_begin`, before consuming the sequence or
 constructing a request. Either failure releases admission and propagates without
 calling `on_end`; the environment callback owns any optional startup-compilation fallback. External timers must wait at the environment's
 ready interface before starting if startup time should be excluded.
+<a id="round-pacing"></a>
 `SimulationBinding(..., timing=SimulationTiming(time_scale=0.0))` optionally paces each round to
-`time_scale × program.request_round_time_s(request)` seconds. That owner sums
-integer template durations and relaxation, multiplies by reps, and delegates the
-single seconds conversion to TimeBase. Aggregate totals may exceed int64 and the
-per-request ns bound without rejecting a long acquisition.
+`time_scale × request_round_time_s(request)` seconds. The helper in [`round_time.py`](round_time.py)
+sums template durations and relaxation as Python integers, multiplies by reps,
+and converts the total to seconds once via `TimeBase.seconds`. Aggregate totals
+may exceed int64 and the per-request ns bound without rejecting a long acquisition.
 Timeline durations include readout, pre/post delays and pending ADC activity;
 structural templates cover every scan point once. The binding subtracts snapshot
 and execution wall time, then sleeps only for a positive remainder. Failures
@@ -578,6 +579,8 @@ or MCP metadata. Physical environments can publish a separate [debug capture](..
 
 General program classes depend on the public mixin entry, not frontend, binding,
 signal-packing or SoC internals. `.importlinter` enforces that direct dependency
-boundary while allowing the entry to delegate internally. `experiment.simulation`
-composes program and device capabilities. Numeric backends depend on core records,
+boundary while allowing the entry to delegate internally. The
+`program-simulation-imports` contract prevents the rest of Program from importing
+`simulate` or `simulators` directly. `experiment.simulation` composes program and
+device capabilities. Numeric backends depend on core records,
 not on program or GUI owners.

@@ -30,7 +30,7 @@ TimeBase 的頻率為約分後的有理數 `F = num / den`，單位為 ticks/μs
 - ADC 網格先在整數域組成 `trigger + k * period`，再交給 ns。Readout plan 與環境 template 呼叫這個入口，不各自展開換算迴圈或浮點乘除。
 - Num 必須能在 float64 精確表示。Request 的時間輸入與中間結果須在 int64 範圍內，另限制 `abs(ticks * 1000 * den) <= 2**53`。超出範圍報 `OverflowError`，不截斷、不溢位回繞。
 - Relax delay 沿用 QICK 真正編譯時的 tProc-cycle 捨入，再映射到公共整數時基。它不以 raw 作者參數套用手建 fixture 的格點限制。
-- `program.shot_time.request_round_time_s` 擁有整數 request 的 round 時長公式，binding 只呼叫這個入口。它用 Python 整數加總各點、relax delay 與 reps，再由 `TimeBase.seconds` 以有理數換成秒。整輪總和不套用單一 request 的 int64 或 ns 精確界限，不因總時長而新拒絕長 acquisition。2026-10-31，advisor 依代理授權裁定此 owner 與範圍。既有 us API 與硬體路徑不變。
+- `program.v2.simulation.round_time.request_round_time_s` 擁有整數 request 的 round 時長公式，binding 呼叫這個入口。它用 Python 整數加總各點與 relax delay，再乘以 reps，由 `TimeBase.seconds` 以有理數換成秒。整輪總和不套用單一 request 的 int64 或 ns 精確界限，不因總時長而新拒絕長 acquisition。2026-10-31，advisor 依代理授權裁定公式原先的 owner 與計算範圍。既有 µs API 與硬體路徑不變。
 
 Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envelope 週期為 100、112、140、7 ticks。ADC output 為 76.8 MHz 的 FTF 配置，其 ADC 週期為 560 ticks。
 
