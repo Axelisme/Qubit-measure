@@ -199,6 +199,8 @@ T_Input 預設為實驗 cfg，四個可選分析槽預設 None，由具名參數
 建值時驗必要輸入，不做 I/O；registry 只接受 Adapter、檢查名稱非空與不重複。
 異質 registry 的型別抹除集中於註冊處，不加入 class/value 相容路徑。
 Figures-only 分析回 None，具名圖與空數值摘要照常保留，不提出 writeback。
+即使沒有數值結果，已發布的圖也可讓 `has_analyze_result` 成立。
+RPC 的空摘要見 [Analysis presentation](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation)；recipe 如何接收空結果，見 [作者可呼叫的操作](../recipes/README.md#作者可呼叫的操作)。
 `onetone/power_dep`、`twotone/power_dep`、`twotone/zigzag` 與 `jpa/flux_onetone` 從明確的 Run／Load 來源提供 figures-only Analyze。Load 不自動畫圖。按 Analyze 發布具名圖與有來源 cfg 時的 Reps × Rounds，不回傳數值 Analysis 或 writeback。
 
 ## 修改原則
