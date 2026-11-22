@@ -112,6 +112,9 @@ class ScrollObservation:
     """Visible scroll affordances of one scroll area."""
 
     vertical_scrollable: bool  # Visible vertical scrollbar has a nonempty range.
+    viewport_size: (
+        tuple[int, int] | None
+    )  # Visible viewport width and height in pixels.
 
 
 @dataclass(frozen=True)
