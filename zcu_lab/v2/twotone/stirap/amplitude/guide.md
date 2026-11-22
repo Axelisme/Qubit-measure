@@ -4,7 +4,14 @@
 
 Start Pump and Stokes with the chosen lead → wait for both pulse ends → one calibrated **Readout** → **Relax delay**. Run sweeps Pump gain outside Stokes gain in one round.
 
-- Measure **Pump carrier 0–3** and **Stokes carrier 3–2** independently in MHz. Use separate charge-drive lines for overlap. Set signed **Pump gain** and **Stokes gain** ranges within [−1, 1] a.u.; neither is a calibrated rotation angle.
+- Measure **Pump carrier 0–3** and **Stokes carrier 3–2** independently in MHz. On hardware, check that Pump and Stokes are wired to separate charge-drive lines so their pulses can overlap. Set signed **Pump gain** and **Stokes gain** ranges within [−1, 1] a.u.; neither is a calibrated rotation angle.
+- In simulation, set **Pump generator** and **Stokes generator** to the `gen_ch`
+  values of two drive lines for the qubit under test. The [Integer-fluxonium preset](../../../../simulation_envs/integer_fluxonium/field-guide.md#circuit-bath-and-routing)
+  assigns Pump to 1 and Stokes to 2. In FTF, look up the generators in
+  [`drive_lines`](../../../../simulation_envs/FTF/field-guide.md#drive-linescharge-與小訊號-flux-校準).
+  Choose charge drive lines that couple to that qubit. Do not use generators
+  in `flux_lines`, which play fast-flux pulses. The environment routes pulses
+  by generator number and does not check the intended Pump or Stokes role.
 - Choose each waveform and duration independently. An arbitrary waveform takes its duration from the asset. Positive **Stokes lead** starts Stokes first and delays Pump; negative reverses the order. Zero starts both together.
 - Use a pulse readout with three saved g/e/f centers and a training confusion matrix from `singleshot/qutrit_population` at the same settings. Choose **Shots per point** for the needed precision.
 

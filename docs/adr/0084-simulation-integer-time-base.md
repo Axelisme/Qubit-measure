@@ -30,9 +30,18 @@ TimeBase 的頻率為約分後的有理數 `F = num / den`，單位為 ticks/μs
 - ADC 網格先在整數域組成 `trigger + k * period`，再交給 ns。Readout plan 與環境 template 呼叫這個入口，不各自展開換算迴圈或浮點乘除。
 - Num 必須能在 float64 精確表示。Request 的時間輸入與中間結果須在 int64 範圍內，另限制 `abs(ticks * 1000 * den) <= 2**53`。超出範圍報 `OverflowError`，不截斷、不溢位回繞。
 - Relax delay 沿用 QICK 真正編譯時的 tProc-cycle 捨入，再映射到公共整數時基。它不以 raw 作者參數套用手建 fixture 的格點限制。
-- `program.shot_time.request_round_time_s` 擁有整數 request 的 round 時長公式，binding 只呼叫這個入口。它用 Python 整數加總各點、relax delay 與 reps，再由 `TimeBase.seconds` 以有理數換成秒。整輪總和不套用單一 request 的 int64 或 ns 精確界限，不因總時長而新拒絕長 acquisition。2026-10-31，advisor 依代理授權裁定此 owner 與範圍。既有 us API 與硬體路徑不變。
 
 Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envelope 週期為 100、112、140、7 ticks。ADC output 為 76.8 MHz 的 FTF 配置，其 ADC 週期為 560 ticks。
+
+### 模擬 round 時長
+
+**規則。** 整數 request 的單輪時長歸 `program.v2.simulation.round_time.request_round_time_s`，只由模擬 binding 使用。`zcu_tools.program` 不再匯出這個函式。公式不變：以 Python 整數加總所有掃描點的 duration ticks，每點計入一次 relax delay，再乘以 reps。最後由 `TimeBase.seconds` 將有理數時間換成秒。
+
+**例子。** 單點時長 2 µs、無 relax delay、100 reps，單輪時長是 200 µs。Binding 用這個物理時長做 [round pacing 及時鐘補時](../../lib/zcu_tools/program/v2/simulation/README.md#round-pacing)。
+
+**邊界。** 單一 request 的 int64 與 ns 換算界限不套用到整輪加總；總時長不會因此讓長 acquisition 報錯。`shot_time_s` 仍在 Program，沿用 µs 輸入供一般估時。硬體取數路徑與公共時基不變。
+
+**依據。** 2026-10-31，advisor 依代理授權裁定原先的 owner 與計算契約。Designer 依 2026-11-23 的授權代裁，只改 owner 與 Program 的公開匯出，保留計算契約，待使用者追認。依據是使用者 2026-11-22 的界線：「我认为这两处可能有违背了我的设计理念。对我来说，只要把这个 mixin 拿掉，我的 program 就不会有模拟的逻辑存在了。」見 [ADR-0072〈真實 acquire 與模擬邊界〉](0072-module-boundaries.md#真實-acquire-與模擬邊界)與 [Program 的模擬邏輯只在 mixin 內](../discussions/2026-11-23-program-simulation-mixin.md)。
 
 ## 取捨與範圍
 
@@ -44,6 +53,6 @@ Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envel
 
 ## 依賴與驗證
 
-沿用 [[0072]] 的分層與 `.importlinter` C8、C9、C12、C19。Program 與 experiment 使用 `simulate.boundary` 的資料契約；`simulate-closed` contract 禁止 simulate import 其他 zcu_tools package。TimeBase 只使用標準庫與 NumPy。Compiled frontend 的入口與 snapshot owner 維持 [[0083]]。
+沿用 [[0072]] 的分層與 `.importlinter` C8、C9、C12、C19。Program 的模擬子包與 experiment 使用 `simulate.boundary` 的資料契約；`simulate-closed` contract 禁止 simulate import 其他 zcu_tools package。TimeBase 只使用標準庫與 NumPy。Compiled frontend 的入口與 snapshot owner 維持 [[0083]]。
 
 公開測試驗證兩組時鐘的整數週期、時間組合順序、scalar／array 的逐位正確捨入、非整數時基、格點拒絕及精確範圍邊界。文件由直接審閱確認，不以靜態文字斷言測試。

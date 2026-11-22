@@ -19,6 +19,7 @@ root_packages =
 include_external_packages = True
 contract_types =
     experiment-imports: tools.check_experiment_imports.ExperimentImportsContract
+    program-simulation-imports: tools.check_program_simulation_imports.ProgramSimulationImportsContract
 
 [importlinter:contract:experiment-directories-independent]
 name = Experiment directories do not import other experiments or foreign family helpers
@@ -523,6 +524,11 @@ forbidden_modules =
     zcu_tools.gui
     zcu_tools.mcp
     zcu_tools.notebook
+
+# ADR-0072: direct simulation imports belong inside the Program simulation mixin package.
+[importlinter:contract:program-simulation-imports]
+name = Only the Program simulation mixin package directly imports simulation packages
+type = program-simulation-imports
 
 [importlinter:contract:program-simulation-entry]
 name = Program classes use the simulation entry, not frontend or adapter internals
