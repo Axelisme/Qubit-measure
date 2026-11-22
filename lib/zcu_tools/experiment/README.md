@@ -289,4 +289,4 @@ Singleshot GE 與 mux GE 的 Analyze 傳入 `Plots` 並啟用 `GEFitOptions.raw_
 
 品質欄位的定義見 [fitting helpers 的 `FitQuality`](../analysis/fitting/README.md#fitting-helpers)。
 `GEFitOptions.length_ratio_max_relative_error` 只用於模型診斷，決定自由擬合的 joint readout length／T1 能否以 `length_ratio` 回報。
-它不是 writeback 初選門檻。初選與理由見 [Readout 分析與 writeback](../../../zcu_lab/v2/measure-authoring.md#readout-分析與-writeback)。
+圖上的估值與標準誤不套這個門檻。它也不是 writeback 初選門檻。初選與理由見 [Readout 分析與 writeback](../../../zcu_lab/v2/measure-authoring.md#readout-分析與-writeback)。
