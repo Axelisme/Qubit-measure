@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-22, compact statistics references
+**Last updated:** 2026-11-22, integrated statistics handoff
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -362,16 +362,17 @@ A changed snapshot requires a new evolution. See [FTF preparation reuse](../../.
 Each readout state's conditional mean response is computed once per distinct
 readout content; populations combine these means linearly.
 
-Integrated statistics sample category counts that sum to reps at each point.
-The counts retain projection noise, but categories need not represent physical
-shot paths. Each read and category has noiseless per-shot sums. Gaussian
-receiver noise uses the covariance of the sum over reps. Environments deliver
-an independent RawShots source with retained noiseless inputs and a local round
-identity.
+Integrated statistics carry category counts in `RoundStatistics`. The counts
+sum to reps at each point and retain projection noise, but categories need not
+represent physical shot paths. Each read and category has noiseless per-shot sums.
+Gaussian receiver noise uses the covariance of the sum over reps. Environments
+deliver an independent `RawShots` source with retained noiseless inputs and a local
+round identity. A joint IQ distribution across reads uses I/Q values paired by
+shot index from `RawShots`, not the compact counts or per-read sums.
 Requesting shots calls that source without rerunning evolution or the backend.
 Raw ADC values remain int64, and round indices select distinct sampling streams.
 See [FTF compact statistics](../../../simulators/ftf/environment/README.md#compact-statistics)
-for the environment's output and [ADC projection sampling](../../../simulate/adc/README.md#projection-readout-and-sampling)
+for the environment's output and [ADC integrated chain statistics](../../../simulate/adc/README.md#integrated-chain-statistics)
 for how the event marginals become category counts and conditional sums.
 
 Python loop counts do not grow with shots or sweep points. Template construction,

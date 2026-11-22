@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-22, FTF projective readout chain
+**Last updated:** 2026-11-22, integrated statistics handoff
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -304,6 +304,8 @@ results within the same numeric/RNG version; no bitwise parity with enumerated
 histories is promised. The existing single-event `ProjectionReadout` RNG order
 stays unchanged.
 
+<a id="integrated-chain-statistics"></a>
+
 Integrated chain sampling draws first-event occupancy with a multinomial.
 For each next event and source state it draws multinomial destination flows,
 then sums the incoming flows to obtain that event's histogram. No shot array
@@ -321,15 +323,15 @@ event contributes to the bins even if no ADC emits a terminal column. The same
 encoder can combine independent cavity histograms with different category counts.
 
 For FTF projective reads, the bins are the shared `state_counts`, partitioning
-reps at each point. They encode each event's marginal histogram, not the
-physical joint of herald history and terminal state. Each read's
+reps at each point. They encode each event's marginal histogram, not a joint
+distribution over herald history and terminal state. Each read's
 `conditional_sums` holds its noiseless per-shot mean for each bin. Summing
 `state_counts * conditional_sums` over bins gives the noiseless total for
 each I/Q component. The common flow draw preserves the correlations between
-these totals due to event occupancies. It does not yield a shot-level IQ joint,
-CTMC trajectory variance, or cross-read receiver-noise covariance. ADC adds
-Gaussian noise to each read total independently, including the nearest-even
-rounding variance term. See [FTF compact statistics](../../simulators/ftf/environment/README.md#compact-statistics)
+these totals due to event occupancies. It does not yield the joint IQ
+distribution of paired reads, CTMC trajectory variance, or cross-read
+receiver-noise covariance. ADC adds Gaussian noise to each read total
+independently, including the nearest-even rounding variance term. See [FTF compact statistics](../../simulators/ftf/environment/README.md#compact-statistics)
 for the environment's output and the [Program statistics contract](../../program/v2/simulation/README.md#compact-timelines-and-statistics)
 for the acquisition handoff.
 
@@ -391,9 +393,10 @@ integrated sampling inputs. For `ProjectionReadout` it draws counts on the C-ord
 `(outcome, terminal state)` axis with probabilities `weights[k] * final[k, s]`.
 Earlier-event conditional sums average that event's populations for each outcome,
 then repeat across terminal states. Terminal-event conditional sums depend on
-the terminal state and repeat across outcomes. Every ADC/read uses those joint
-counts. Preparation expands conditional means and factors each ADC's noise
-covariance once. `draw(seed=..., acquire_sequence=..., round_index=...)`
+the terminal state and repeat across outcomes. Every ADC/read uses the same
+joint counts over `(outcome, terminal state)`. Preparation expands conditional
+means and factors each ADC's noise covariance once.
+`draw(seed=..., acquire_sequence=..., round_index=...)`
 validates a fresh identity and uses the same count/noise algorithm as
 `round_statistics`. `ProjectionChain` uses flow counts and the cumulative-boundary
 encoding described above. The preparation retains no noisy results or identities.

@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-22, projective readout chain
+**Last updated:** 2026-11-22, integrated statistics handoff
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -807,8 +807,9 @@ Integrated acquisition returns `IntegratedRound` with compact
 `RoundStatistics` and a separate ADC-owned `RawShots` source.
 For FTF projective reads, ADC draws one set of transition flows per point.
 The `state_counts` partition that point's reps over shared cumulative-count
-bins that encode each logical event's marginal histogram. The category axis
-is not a physical joint of herald history and terminal state.
+bins that encode each logical event's marginal histogram. These bins do not
+encode the joint distribution over herald history and terminal state used by the
+retained history-based `ProjectionReadout` path.
 
 For each ADC read, `conditional_sums` gives the noiseless per-shot I/Q mean of
 that read's event state in each bin. Multiply each bin's mean by its
@@ -816,8 +817,9 @@ that read's event state in each bin. Multiply each bin's mean by its
 receiver noise and rounding variance. The shared flow draw preserves
 correlations between these totals due to event occupancies. The bins do not
 encode paired IQ shots, CTMC trajectory variance, or cross-read receiver-noise
-covariance. See [ADC projection sampling](../../../simulate/adc/README.md#projection-readout-and-sampling)
-and the [Program statistics contract](../../../program/v2/simulation/README.md#compact-timelines-and-statistics).
+covariance. See [ADC integrated chain statistics](../../../simulate/adc/README.md#integrated-chain-statistics)
+for how ADC builds the bins and the [Program statistics contract](../../../program/v2/simulation/README.md#compact-timelines-and-statistics)
+for how acquisition uses them.
 
 Raw and decimated sampling each draw a projection chain per shot. The
 herald and terminal reads stay paired at the same shot index. Each event has
