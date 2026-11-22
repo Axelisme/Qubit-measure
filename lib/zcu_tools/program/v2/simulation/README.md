@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-22, unentered acquire timings
+**Last updated:** 2026-11-23, deferred raw shots and plan lifetime
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -47,6 +47,9 @@ readiness, `on_begin` and observer work. The mixin wraps only
 `build_compiled_request` in `binding.compiling()`; its elapsed seconds accumulate
 in `compile_wall_s` even if construction raises. Installation and execution do
 not contribute to compile time. No entered compile scope gives `None`.
+
+<a id="raw-materialization-timing"></a>
+
 `materialize_wall_s` sums the seconds spent generating and detaching raw shots
 inside the acquire, including failed calls. It is `None` when no materialization
 was attempted. It excludes downstream shot processing. Both fields preserve
@@ -371,6 +374,10 @@ deliver an independent `RawShots` source with retained noiseless inputs and a lo
 round identity. A joint IQ distribution across reads uses I/Q values paired by
 shot index from `RawShots`, not the compact counts or per-read sums.
 Requesting shots calls that source without rerunning evolution or the backend.
+For ADC-backed rounds, retaining the round inputs does not keep the acquire-local
+plan memo active. A getter that needs raw shots can rebuild the plan after the
+memo retires. See [ADC integrated raw shots](../../../simulate/adc/README.md#integrated-raw-shots)
+for the sampling contract and plan lifetime.
 Raw ADC values remain int64, and round indices select distinct sampling streams.
 See [FTF compact statistics](../../../simulators/ftf/environment/README.md#compact-statistics)
 for the environment's output and [ADC integrated chain statistics](../../../simulate/adc/README.md#integrated-chain-statistics)

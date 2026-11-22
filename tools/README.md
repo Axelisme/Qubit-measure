@@ -164,6 +164,8 @@ write_snapshot(
 
 工具選用 `ftf-demo/initial` 並以 Open 建立表單。Open 固定表單的來源 capture，見 [Measure services 的開表 owner](../lib/zcu_tools/gui/app/measure/services/README.md#操作-owners)。Open 成功後，工具才透過 `form.write` 套用[覆寫表](data/experiment_wall_time/overrides.json)中該 adapter 的欄位；覆寫只改表單值，不會補回 Open 時缺少的來源。每筆覆寫記 adapter key、表單 cfg 路徑與 JSON 值。`basis` 記供人閱讀的覆寫依據，不影響執行。路徑使用欄位名及從 0 開始的清單索引，例如 `['delay', 'n']` 是線性掃描的點數。表單通過檢查才派送 Run；Run 的 admission、輸入快照與終態見 [ADR-0066〈問題與決策〉](../docs/adr/0066-operation-lifecycle.md#問題與決策)。
 
+查掃頻窗的校準來源、可編輯的表單初值與案例覆寫的分工，見[作者指南〈校準初值政策〉](../zcu_lab/v2/measure-authoring.md#校準初值政策)。
+
 查 CZ pulse、slot 與相位配對的來源，從 [Joint readout 到 local Z 的校準路線](../zcu_lab/v2/two_qubit/guide.md#joint-readout-到-local-z-的校準路線)看校準順序。`ftf-demo/initial` 存有 CZ pulse 與 slot，但沒有 `$coupler.ext.cz_phase`。量到 local-Z correction 不等於把配對寫入來源；配對的身分檢查和寫回見 [Local Z〈Preview 與 Apply〉](../zcu_lab/v2/two_qubit/local_z/guide.md#preview-與-apply)。
 
 查序列內的脈衝磁通線設定，見 [FTF `flux_lines` 欄位與限制](../zcu_lab/simulation_envs/FTF/field-guide.md#flux-lines序列內磁通校準與濾波)。查 point 裡的 DC 磁通校準，見 [ADR-0082〈Component 保存 offset 與 signed periods〉](../docs/adr/0082-component-flux-frame.md#component-保存-offset-與-signed-periods)。
@@ -196,6 +198,8 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
 工具在送出 Run 及收到 Controller 終態事件時各取一次時間。`wall_s` 是兩次 monotonic clock 的差，UTC 時刻供閱讀。環境組裝、Open、覆寫及派送前落盤都不在計時內。工具不呼叫 Analyze 或 Save，也不量它們。每列的 `case_directory` 指向自己的 `project/` 和 `telemetry/`。`project/` 保留 fixture 副本與 acquired ledger，不寫回入庫輸入。
 
 工具從 [acquire telemetry](../lib/zcu_tools/simulators/README.md#acquire-telemetry) 加總各階段秒數。`core_s` 是 `compile_s`、`evolve_s`、`readout_s` 和 `materialize_s` 四項之和。`materialize_s` 含 acquire 內產生 raw shots 的時間，也含依 `acquire_id` 配對的延後 materialize。`remainder_s` 從 acquire 牆鐘扣除該牆鐘內的四項工作。延後 materialize 在 acquire 之外，不再從 remainder 扣除。`ShotReducer` 等 host 處理不計入核心。
+
+何時在 acquire 內計時、何時由 getter 回報耗時，見 [Program simulation 的計時說明](../lib/zcu_tools/program/v2/simulation/README.md#raw-materialization-timing)。Raw shots 的取樣契約見 [ADC〈Integrated raw shots〉](../lib/zcu_tools/simulate/adc/README.md#integrated-raw-shots)，實作可搜尋 `ADCRawShots`。
 
 Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆鐘和四個分項、每筆補充紀錄都有主紀錄配對時，才填 `core_s`。缺 materialize 的舊 telemetry 或未走到階段的 `null` 都不補 0。配不到主紀錄的補充紀錄不計秒數或 acquire 次數，並使分項不完整。成功但分項不全的 `missing_breakdown` 列保留 Run 秒數，四個分項與 remainder 寫 `null`。分項不全或逾時時，`core_s` 寫 `null`，`core_s_lower_bound` 只加總分項齊全的主紀錄與配對到它們的補充紀錄。沒有分項齊全的主紀錄時，下限也寫 `null`。
 
@@ -1131,10 +1135,9 @@ separate from Engine time. This change does not choose storage or sharing policy
 The scene producer snapshots complete numeric physics through
 `freeze_records`, which returns public `simulate.evolution.FrozenRecord` values.
 Scene reason, targets, companions and provenance are opaque tools metadata.
-Simulate owns the version-1 index and single-record gzip codec, hash validation,
-file naming and same-directory temporary-file plus replace publication.
-Each filename contains the name and the first 16 characters of its physical and
-metadata hashes. Unknown index/container versions fail without fallback.
+Evolution owns the index and single-record gzip codec. See
+[Frozen numeric inputs and references](../lib/zcu_tools/simulate/evolution/README.md#frozen-numeric-inputs-and-references)
+for the physical record version, scene-cache version and reference key.
 Every frozen scene needs a tracked builder in this producer. A scene built only by an untracked prototype cannot enter an index.
 
 Git contains only `frozen-synthetic.index.json` and `frozen-real.index.json`.
@@ -1143,6 +1146,11 @@ Each ordered row pins `name`, `physical_sha256`, `oracle_sha256` and
 The 19 existing payloads were migrated without changing identities, point order
 or reference keys. Numeric gzip files are no longer tracked at the tip.
 The old gzip files are not reachable from the landed history. The migration did not validate a complete cold builder rebuild.
+
+Without `--scene-cache`, [`scene_cache_directory`](family_pareto_storage.py)
+resolves `.agent_state/benchmark/family_pareto/scenes/v<SCENE_CACHE_VERSION>`
+relative to the parent of Git's common directory. An explicit override must be
+absolute.
 
 Run model construction only with approved compute and the current runner/lock
 policy. This command rebuilds and checks the pinned inventory, outside measurement
@@ -1206,8 +1214,10 @@ coordinates and the distinction between repeated supports and exact-key reuse.
 The shared cache is not task scratch. Task cleanup must not delete it.
 Manual cleanup is confined to the scene-cache prefix.
 
-Independent reference production stays in tests. After separate solver-cost
-approval, supply explicit index-to-solver mappings and a scene cache:
+Independent reference production stays in tests. See
+[Reference solver limits](../lib/zcu_tools/simulate/evolution/README.md#reference-solver-limits)
+for the bath inputs both solvers use. After separate solver-cost approval,
+supply explicit index-to-solver mappings and a scene cache:
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contract.family_pareto_reference_producer \

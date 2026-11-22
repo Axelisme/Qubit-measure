@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-22，短振盪掃描的失敗分類
+**Last updated:** 2026-11-23，擬合品質型別與 phase slope 契約
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -10,11 +10,18 @@ Caller 畫完圖後可用 `summarize_rabi_joint_fit(result)` 產生 `RabiJointFi
 
 ## Phase regressions
 
-`phase_slopes.fit_phase_slopes(n, quadratures, variances, acquired_shots)` fits
-X/Y observations from independent groups with a shared slope per channel and
+[`phase_slopes.fit_phase_slopes(n, quadratures, variances, acquired_shots)`](phase_slopes.py)
+fits X/Y observations from independent groups with a shared slope per channel and
 coordinate slice. It delegates optimization and residual-scaled covariance to
 `shared`. Each group must independently resolve the integer-axis gcd alias.
 `PhaseSlopeFit` owns slopes, standard errors, backend results and failure reasons.
+Its `slopes_deg` values are in degrees per integer step: degrees per gate when
+`n` counts gates. Each fitted slope uses a representative in `[-180, 180]` of
+its 360° period. The guide's
+[single-point wrapped phase](../../../../zcu_lab/v2/two_qubit/conditional_phase/guide.md#read-phase-and-quadratures)
+is an angle in `[-180, 180)`, not a per-gate change. The experiment, not the
+fitter, uses the slopes for
+[π crossing selection](../../../../zcu_lab/v2/two_qubit/conditional_phase/guide.md#select-a-frequency-and-apply).
 
 `phase_modulation.fit_phase_modulation(phases, squared_rates)` fits
 `A + B cos(phase) + C sin(phase)`. `PhaseModulationFit` owns the coefficients,
@@ -177,7 +184,7 @@ Cosine 與 damped-cosine fitting 在 optimizer 內不限制 phase 的週期表�
 自動初猜先將下降座標轉成上升順序，讓 FFT 的頻率篩選及 decay 初值使用正的
 座標跨度；參數仍以原始座標定義，呼叫者不需翻轉傳入的資料。
 
-`compute_fit_quality` 使用實際 optimizer observations、同座標的 model values、具名參數與 covariance，回傳 `FitQuality`。三個 array 參數必須已是 float64，缺失 covariance 可用 None。它計算未 clamp 的 r2、以 observations peak-to-peak 正規化的 residual RMS，以及具名參數相對誤差。已知不可估欄位為 None，`invalid` 保留欄位路徑與直接原因。Covariance 缺失、對角非有限、自由參數 stderr 為零或非有限，以及預測範圍小於 observations 範圍的 1e-8，都會留下 invalid 診斷，不改三項指標的數值。只有非對角非有限時，marginal errors 仍可用。Caller 以 `fixed_parameters` 明列刻意固定的參數，owner 不對它們的 stderr 或 relative error 加 invalid，但保留原數值。Mux fringe 固定 phase 時傳入該名稱，純 decay 不傳固定的 fringe 參數。dtype、形狀或名稱誤用直接 ValueError。Calibration 與 accept 的有效性仍由 caller 決定。
+`compute_fit_quality` 使用實際 optimizer observations、同座標的 model values、具名參數與 covariance，回傳 [`FitQuality`](quality.py)。三個 array 參數必須已是 float64，缺失 covariance 可用 None。它計算未 clamp 的 r2、以 observations peak-to-peak 正規化的 residual RMS，以及具名參數相對誤差。已知不可估欄位為 None，`invalid` 保留欄位路徑與直接原因。Covariance 缺失、對角非有限、自由參數 stderr 為零或非有限，以及預測範圍小於 observations 範圍的 1e-8，都會留下 invalid 診斷，不改三項指標的數值。只有非對角非有限時，marginal errors 仍可用。Caller 以 `fixed_parameters` 明列刻意固定的參數，owner 不對它們的 stderr 或 relative error 加 invalid，但保留原數值。Mux fringe 固定 phase 時傳入該名稱，純 decay 不傳固定的 fringe 參數。dtype、形狀或名稱誤用直接 ValueError。Calibration 與 accept 的有效性仍由 caller 決定。
 
 `fit_decay`、`fit_dual_decay` 與 `fit_decay_fringe` 將自由衰減時間限制在 `decay_time_bounds` 的區間。下限為第一個正 delay 與最小正取樣間距的較小者，上限為十倍掃描窗長。固定參數不被裁切。Caller 將同一區間傳入 `compute_fit_quality(..., decay_bounds=...)`；時間貼界或越界時，`invalid` 的原因列出參數名稱、擬合值、lower／upper bound 與端點值，並保留「窗口內無法解析衰減時間」。Mux T1、Echo 與 Ramsey summary 沿用 owner 的原因，不重做判斷。其他模型不啟用這組界限。
 
