@@ -1,19 +1,23 @@
-**Readers:** operator, agent. Sweep JPA pump source power and choose a measured setting using qubit readout separation.
+## Behavior
 
-# JPA pump power sweep
+**Readers:** operator, agent. Calibrate the JPA pump power from the GUI or MCP using g/e readout SNR. A pi pulse switches the qubit preparation between g and e. The run sweeps pump power in dBm and measures the g/e SNR (a.u.) to find the power with the highest SNR. WARNING: this run commands the selected JPA RF device on real hardware. Review that device and the power sweep before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
 
-Set the JPA flux bias and pump RF frequency first. At each source power, the run takes two sets of shots: optional reset → no pulse → readout (g), or optional reset → qubit π pulse → readout (e). It changes power at the source, not the attenuation from the source to the chip, and does not toggle pump output.
+## Parameter sources
 
-## Set up the scan
+Uses the qubit (`qubit/*`), resonator and jpa (`amplifier/jpa`) aliases. The pump-power bounds use `$jpa.pump_power`. Opening the tab or choosing Defaults reads the RF default from `$jpa.rf_source`; a missing source leaves the field empty and Invalid. The direct device name remains editable. Select the connected JPA RF device in the form. Missing required aliases or calibration marks the form Invalid.
 
-Choose the qubit, resonator and JPA aliases at the current point, then choose **Defaults**. **JPA pump RF source** starts from `$jpa.rf_source`; select the connected source if the field is empty. **JPA pump source power** starts at `$jpa.pump_power` ± 5 dBm, with 101 points. Review the output state and narrow the bounds to powers safe for this device. **Scan-order seed** repeats the shuffled interior order for a nonnegative integer. Leave it blank for a new order; the endpoints stay first and last. Normal completion leaves the source at Stop.
+Relax delay starts at 1*T1 using the parameters captured when you open the tab or choose Defaults. T1 must be a finite positive real number; Boolean values count as invalid. Missing/null T1 or an unavailable parameter snapshot gives a 30 µs initial delay. An invalid stored T1 leaves the required wait field empty, and parameter-source failures report an error. Edit the delay in the form as needed; the stored T1 stays unchanged.
 
-Choose **Reps** for the shots per preparation and setting in each round, then **Rounds** for the number of such rounds. Defaults are 1000 × 10. The Analyze summary shows the Reps × Rounds from its source run. **Relaxation wait** starts at the qubit T1, or 30 µs if T1 is missing, and lets the system relax between shots. An invalid stored T1 leaves the wait blank; enter a calibrated delay.
+## Module slots
 
-Select **Qubit π pulse** from the qubit's X180 calibration and **Readout** from the resonator's readout calibration. Without a saved slot, Defaults uses the qubit RF frequency and drive channel for the π pulse, and the resonator frequency and readout channels for the resonator pulse. The readout trigger starts at the resonator flight time plus 0.015 µs. **Reset** is an optional pulse module before preparation. Leave it empty to rely on relaxation between shots.
+Module slots use `$qubit.module.x180`, `$resonator.module.readout` and optional `$qubit.module.reset`. Empty pi/readout slots use the pi_pulse/readout templates. The pi pulse uses `$qubit.freq` and `$qubit.wiring.ch`; readout uses resonator frequency/wiring and `$resonator.time_of_fly` + 0.015 µs. An empty reset slot disables reset. Missing calibration required by these templates marks the form Invalid.
 
-## Choose a source power
+## Typical writeback
 
-The separation SNR is the distance between the g and e IQ means divided by their pooled width along the line joining the means. **IQ shape penalty** defaults to zero. Increasing it downweights unequal widths or skew along that axis. The resulting g/e separation score (a.u.) is neither a state population nor an assignment fidelity.
+Analysis proposes the SNR-maximizing JPA pump power as a draft for `$jpa.pump_power` in dBm. Accept the draft to update the stored parameter. Writeback changes stored calibration only; device settings and the current-source value stay unchanged.
 
-Live shows points as they arrive and counts sampled settings and retained shots. Analyze overlays the dashed line at the sampled power with the highest score. There are no pointwise shot-SEM bars or fitted errors. The analysis selects a measured peak and does not fit a model; an SEM of the mean IQ would not estimate uncertainty in the separation score. Rescan between the adjacent power samples around a repeatable interior peak. If the highest dot sits at a boundary, check whether the scan covers the peak before accepting it. For a flat or unstable trace, verify the pump and g/e preparation first. Subtract the previous source power from the selected power; a positive dB difference calls for an increase. Accepting the writeback updates `$jpa.pump_power` in dBm without changing the device.
+## Recommended
+
+Review the selected RF device and power sweep bounds before every run. The seeded range is a conservative low-power survey and only a starting point. Analyze selects the sampled setting with the highest g/e SNR.
+
+**Last updated:** 2026-10-21
