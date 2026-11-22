@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import (
     FitTrace,
@@ -168,67 +167,96 @@ def _plot_resonance_maps(
     g_freq, e_freq = fit_result.values["g_res_freq"], fit_result.values["e_res_freq"]
     g_params = (baseline, 0.0, scale, g_freq, width)
     e_params = (baseline, 0.0, scale, e_freq, width)
-    g_fit_freqs = lorfunc(res_freqs, *g_params)
-    e_fit_freqs = lorfunc(res_freqs, *e_params)
+    dense = np.linspace(float(res_freqs.min()), float(res_freqs.max()), 240)
+    g_fit_freqs = lorfunc(dense, *g_params)
+    e_fit_freqs = lorfunc(dense, *e_params)
 
-    fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, figsize=(8, 6), sharex=True)
-    ax1, ax2 = fig.axes
-
+    fig, _ = plots.subplots(
+        num="fit", nrows=2, figsize=(8, 7), sharex=True, layout="constrained"
+    )
     fig.suptitle(
-        rf"$\chi/(2\pi): {chi:.3f}\pm {chi_err:.3f}\ MHz,\ \ \kappa/(2\pi): {kappa:.3f}\pm {kappa_err:.3f}\ MHz$",
-        fontsize=14,
+        "CKP spectroscopy · resonator and qubit · shared ridge fit\n"
+        f"χ/2π = {chi:.4g} ± {chi_err:.2g} MHz · κ/2π = {kappa:.4g} ± {kappa_err:.2g} MHz\n"
+        f"Resonator drive estimate = {res_freq:.6g} MHz · Fit EDM = {fit_result.diagnostics.edm:.3g}"
     )
-
-    factor = 1.0
-    if np.max(amps[0]) + np.min(amps[0]) < 2 * np.median(amps[0]):
-        factor = -1.0
-
-    ax1.imshow(
-        factor * amps[0].T,
-        extent=(res_freqs[0], res_freqs[-1], qub_freqs[0], qub_freqs[-1]),
-        aspect="auto",
-        origin="lower",
-        interpolation="none",
-        cmap="RdBu_r",
-    )
-    ax1.scatter(g_res_freqs, g_qub_freqs, color="b", s=5)
-    ax1.plot(res_freqs, g_fit_freqs, color="b", label="Ground")
-    ax1.plot(res_freqs, e_fit_freqs, color="r", label="Excited", linestyle="--")
-    ax1.axvline(g_freq, color="b")
-    ax1.axvline(e_freq, color="r", linestyle="--")
-    ax1.axvline(res_freq, color="k", linestyle=":")
-    ax1.set_ylabel("Qubit Probe Frequency (MHz)")
-    ax1.legend()
-
-    ax2.imshow(
-        factor * amps[1].T,
-        extent=(res_freqs[0], res_freqs[-1], qub_freqs[0], qub_freqs[-1]),
-        aspect="auto",
-        origin="lower",
-        interpolation="none",
-        cmap="RdBu_r",
-    )
-    ax2.scatter(e_res_freqs, e_qub_freqs, color="r", s=5)
-    ax2.plot(res_freqs, e_fit_freqs, color="r", label="Excited")
-    ax2.plot(res_freqs, g_fit_freqs, color="b", label="Ground", linestyle="--")
-    ax2.axvline(e_freq, color="r")
-    ax2.axvline(g_freq, color="b", linestyle="--")
-    ax2.axvline(res_freq, color="k", linestyle=":")
-    ax2.set_xlabel("Resonator Drive Frequency (MHz)")
-    ax2.set_ylabel("Qubit Probe Frequency (MHz)")
-    ax2.legend()
-
-    fig.tight_layout()
+    for branch, ax in enumerate(fig.axes):
+        preparation, color, rx, qy, model, center = (
+            ("No π pulse", "C0", g_res_freqs, g_qub_freqs, g_fit_freqs, g_freq)
+            if branch == 0
+            else ("With π pulse", "C3", e_res_freqs, e_qub_freqs, e_fit_freqs, e_freq)
+        )
+        ax.set(
+            ylabel="Qubit probe RF frequency (MHz)",
+            title=f"{preparation} · Fit center {center:.6g} MHz",
+        )
+        ax.grid(False)
+        (image,) = live_heatmap(ax, uniform=False, clim=(0, 1), cmap="viridis").set(
+            res_freqs, qub_freqs, amps[branch]
+        )
+        fig.colorbar(
+            image, ax=ax, label="Row-normalized IQ projection (a.u.)", ticks=(0, 0.5, 1)
+        )
+        ax.plot(
+            rx,
+            qy,
+            "o",
+            color="white",
+            markeredgecolor="0.2",
+            markersize=4,
+            label="Measured ridge centers",
+        )
+        ax.plot(dense, model, color=color, label="Shared fit")
+        ax.axvline(center, color=color, linestyle=":")
+        ax.axvline(res_freq, color="0.25", linestyle="--", label="Resonator estimate")
+        # Drop the live image's placeholder bounds from the fitted map.
+        ax.relim()
+        ax.autoscale_view()
+        # Leave room for the shared x label above the lower legend.
+        legend_y = -0.23 if branch == 1 else -0.13
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, legend_y), ncols=3)
+    fig.axes[1].set_xlabel("Resonator drive RF frequency (MHz)")
 
 
 class CKP_Cfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    res_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Resonator Drive Pulse")]
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Pulse")]
+    pi_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit π preparation pulse",
+            description="Fill in the calibrated π pulse used only for the nominal excited-state map.",
+        ),
+    ]
+    res_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Resonator Drive Pulse",
+            description="Fill in the cavity drive applied alongside the qubit probe; the RF sweep sets its carrier.",
+        ),
+    ]
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit Probe Pulse",
+            description="Fill in the spectroscopy pulse applied during the resonator drive.",
+        ),
+    ]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    res_freq: Annotated[SweepCfg, FieldMeta(label="Resonator drive freq", unit="MHz")]
-    qub_freq: Annotated[SweepCfg, FieldMeta(label="Qubit probe freq", unit="MHz")]
+    res_freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Resonator drive RF frequency",
+            unit="MHz",
+            description="Fill in the cavity drive RF endpoints (MHz) and sample count.",
+        ),
+    ]
+    qub_freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Qubit probe RF frequency",
+            unit="MHz",
+            description="Fill in the qubit probe RF endpoints (MHz) and sample count.",
+        ),
+    ]
 
     reps: Annotated[
         int,
@@ -316,26 +344,43 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         )
 
         # 2. Compare ground- and excited-prepared resonance maps as the grid fills.
-        figure, _ = context.plots.subplots(num="measurement", ncols=2, figsize=(10, 4))
+        figure, _ = context.plots.subplots(
+            num="measurement",
+            nrows=2,
+            figsize=(8, 7),
+            sharex=True,
+            layout="constrained",
+        )
+        title = "CKP spectroscopy · resonator and qubit · IQ contrast"
+        headline = figure.suptitle(title)
         ax_ground, ax_excited = figure.axes
-        for ax, title in ((ax_ground, "Ground State"), (ax_excited, "Excited State")):
-            ax.set(
-                xlabel="Resonator Drive Frequency (MHz)",
-                ylabel="Qubit Probe Frequency (MHz)",
-                title=title,
+        ground = live_heatmap(ax_ground, uniform=False, clim=(0, 1), cmap="viridis")
+        excited = live_heatmap(ax_excited, uniform=False, clim=(0, 1), cmap="viridis")
+        for ax, heatmap, prep in zip(
+            figure.axes, (ground, excited), ("No π pulse", "With π pulse"), strict=True
+        ):
+            ax.set(ylabel="Qubit probe RF frequency (MHz)", title=prep)
+            ax.grid(False)
+            (image,) = heatmap.set(
+                res_freqs, qub_freqs, np.full((len(res_freqs), len(qub_freqs)), np.nan)
             )
-            formatter = ScalarFormatter(useMathText=True)
-            formatter.set_powerlimits((-2, 2))
-            ax.xaxis.set_major_formatter(formatter)
-            ax.yaxis.set_major_formatter(formatter)
-        ground = live_heatmap(ax_ground)
-        excited = live_heatmap(ax_excited)
+            figure.colorbar(
+                image,
+                ax=ax,
+                label="Row-normalized IQ projection (a.u.)",
+                ticks=(0, 0.5, 1),
+            )
+        ax_excited.set_xlabel("Resonator drive RF frequency (MHz)")
 
         @context.plots.on_plot_thread
         def plot_fn(data: NDArray[np.complex128]):
             """Refresh the measurement artists from the current acquired data."""
             real_signal = ckp_signal2real(data)
+            headline.set_text(
+                f"{title}\nPreparation / RF pairs with data: {np.count_nonzero(np.isfinite(data))}/{data.size}"
+            )
             return (
+                headline,
                 *ground.set(res_freqs, qub_freqs, real_signal[0]),
                 *excited.set(res_freqs, qub_freqs, real_signal[1]),
             )

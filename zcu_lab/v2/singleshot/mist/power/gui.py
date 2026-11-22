@@ -52,6 +52,13 @@ def _analyze(
     return
 
 
+def _summary_lines(source: MistPowerRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds: {cfg.reps}×{cfg.rounds}",)
+
+
 def _run(cfg: PowerCfg, *, context: RunContext) -> RunRecord[PowerCfg, PowerResult]:
     return RunRecord(cfg=cfg, result=PowerExp().run(cfg, context=context))
 
@@ -62,6 +69,8 @@ DEFINITION = Adapter(
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze, options=lambda source, env: MistPowerAnalyzeParams()
+        fn=_analyze,
+        options=lambda source, env: MistPowerAnalyzeParams(),
+        summary_lines=_summary_lines,
     ),
 )

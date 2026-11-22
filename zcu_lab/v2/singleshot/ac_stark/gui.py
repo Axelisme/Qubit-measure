@@ -66,6 +66,13 @@ def _writeback(
     ]
 
 
+def _summary_lines(source: SsAcStarkRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds: {cfg.reps}×{cfg.rounds}",)
+
+
 def _run(
     cfg: AcStarkCfg, *, context: RunContext
 ) -> RunRecord[AcStarkCfg, AcStarkResult]:
@@ -77,5 +84,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_writeback),
+    analysis=Analysis(fn=_analyze, writeback=_writeback, summary_lines=_summary_lines),
 )

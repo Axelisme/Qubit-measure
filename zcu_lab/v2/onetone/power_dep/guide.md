@@ -1,42 +1,24 @@
-## Behavior
+**Readers:** operator, agent. Locate a resonator's drive-dependent frequency shift with a readout gain sweep.
 
-**Readers:** operator, agent. How to measure one-tone resonator power dependence from the GUI or MCP and read the punch-out map.
+# One-tone power dependence
 
-The 2D sweep varies readout gain and readout frequency to map how the resonator response shifts with drive strength. Use it to find the punch-out or high-power transition and choose a low-power readout gain. The measurement runs on real hardware and requires a SoC connection.
+Run sets a readout gain and sweeps the readout RF frequency. Each shot plays one readout pulse and integrates its demodulated I and Q over the ADC window. Run averages the complex IQ at each gain and frequency, then steps to the next gain. Look for the notch or peak moving toward the bare resonator frequency as the stronger drive changes the dispersive response. Gain is a fraction of DAC full-scale amplitude, not a power calibration in watts or dBm.
 
-**Last updated:** 2026-10-21
+## Set up the sweep
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+1. Bind the resonator and run [lookback](../../lookback/guide.md) for flight time and [one-tone spectroscopy](../freq/guide.md) for the low-gain center and linewidth. Open or Defaults captures the sources once. Refresh preserves authored values; Defaults can replace them.
+2. Check **Readout**. The inline template takes the generator and ADC channels from the resonator wiring and starts with a constant envelope. This experiment supplies both readout frequency and gain, so the fixed module values do not appear. The ADC window starts at 0.97 µs, 0.03 µs shorter than the 1.0 µs template pulse. Trigger offset starts at flight time plus `5/(2π·κ)` µs for linewidth κ in MHz, or flight time alone if κ is absent. Pulse length starts at the larger of 1.0 µs and trigger plus the ADC window. Missing flight time leaves trigger and pulse length blank and required. Check the window against the arriving pulse. Post-delay lets the resonator empty after readout; start at `5/(2π·κ)` µs, rather than assuming the default zero is sufficient.
+3. **Readout gain** starts at 0.001 to 1.0 a.u. with 101 points. Replace the bounds with the range approved for the setup before running. **Readout RF frequency** starts at the captured center ± 1.5 linewidths, with 201 points. Enter absolute MHz, not mixer offsets. Expts is the point count on either axis. Capture both flanks of the resonance at low and high gain. Widen the frequency window if the feature leaves the first map.
+4. **Reps**, **Rounds** and **Relax delay** start at 1000 shots per frequency per round, 10 rounds per gain and 1 µs after each shot. **Early-stop SNR** is blank by default, which uses all the rounds unless you stop Run. A positive value stops only the current gain trace when its estimated signal-to-noise ratio reaches that value. Subsequent gain settings still run. Different columns can therefore use different numbers of shots.
 
-## Parameter sources
+## Read the map and choose the next gain
 
-The tab uses a fixed copy of the resonator parameters taken when it was opened or reset. `resonator.freq` and `resonator.kappa` seed the frequency sweep. `resonator.wiring.ch` and `resonator.wiring.ro_ch` seed the generator and ADC channels. The ADC window starts at 0.97 µs. Trigger timing reads the top-level `$resonator.time_of_fly`, adding `5/(2π·kappa)` µs when kappa is set. Missing or null TOF leaves trigger and pulse length required and blank. Pulse length starts at the larger of 1.0 µs and trigger plus the ADC window. Missing or null calibration and unbound aliases leave required fields Invalid until valid values are supplied. Other source failures are reported as errors.
+The upper panel maps readout gain (a.u.) and acquired readout RF frequency (MHz). For each gain separately, the figure takes `|mean(I + iQ)|`, subtracts its median over frequency, and divides by the standard deviation over frequency. The colorbar gives this normalized magnitude in a.u. Compare where the notch or peak lies across gain, not how large the raw response is between columns. A dark or bright color is not a state probability. Blank cells have no plotted value. During Run, the title counts gain settings with data, including the current one as it averages. The lower panel overlays up to ten frequency cuts on the same normalized magnitude scale. The latest plottable gain is blue; preceding cuts are muted red. Missing cuts are left blank, not backfilled with earlier gains. During Run only, the latest cut shows its SNR when early-stop estimation is active. Use the cuts to locate the spectral feature, not to compare absolute amplitudes. Neither panel uses per-point shot SEM.
 
-## Readout module
+Follow the notch frequency as gain rises. To refine a punch-out bracket, set the next gain Start and Stop to the last gain on the low-power branch and the first gain on the shifted branch. For example, if the notch moves between 0.12 and 0.15 a.u., sweep that interval again rather than treating 0.15 a.u. as a calibrated threshold. For low-power readout, choose a candidate below the shift, then check the absolute frequency with [one-tone spectroscopy](../freq/guide.md). Confirm state separation in a separate readout calibration; this map alone does not establish it.
 
-The readout starts as a fresh inline pulse with a `const` waveform. Configure its pulse settings directly in the tab.
-
-## Results
-
-The run produces a 2D map for visual inspection. Read the punch-out power and low-power frequency from the map, then update parameters in a separate calibration step. Analysis and calibration updates are manual for this measurement.
+After Run or Load, select **Analyze** to redraw the map and its final cuts from that source. Load alone does not draw the figures. Analyze does not replay the live SNR or fit the data. Its summary lists the source's configured Reps × Rounds, not the completed shots. If a saved cfg cannot be restored, Analyze still draws the map and omits that line. It does not use the current form. Choose any calibration changes yourself; Analyze does not propose or apply writeback. Save the raw complex IQ map to retain the unnormalized response.
 
 ## MCP recipe
 
-Supply `center_mhz` and `span_mhz` together to set numeric endpoints at center ± span/2. Omitting both retains the Form's captured sweep. Supplying only one returns `needs_parameters` naming the other; the recipe does not infer it from calibration. Explicit null clears the endpoints. Omitting the sample count retains the Form count.
-
-## Recommended use
-
-A typical sweep uses gain from about 0.001 to 0.5 over about 101 points, ordered from low to high power. Sweep frequency around `resonator.freq` by a few linewidths over about 201 points. `earlystop_snr` starts disabled. Leave it blank (`None`) to keep early stopping disabled. Zero and negative thresholds are rejected by the Form. Set it positive to stop a column early once the signal-to-noise target is reached. Narrow the gain range once you have located the transition.
-## Four starting situations
-
-1. With an empty kickstart project, Open the Form and inspect its required blanks.
-   Supply resonator frequency/linewidth or explicit center_mhz/span_mhz. Check readout timing and both sweep axes.
-   Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, choose Defaults to recapture those values.
-   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
-   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
-4. Through the agent, call `onetone_spectrum_over_power` after inspecting the same Form errors.
-   freq_points and gain_points map to their sweep Expts. Supply gain_range when changing its endpoints. This recipe does not Analyze or write back.
-   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+`onetone_spectrum_over_power` sets the same controls, returns the Run preview and saves the raw map. Set `gain_range` and `gain_points` for Readout gain Start, Stop and Expts. Supply `center_mhz` and `span_mhz` as a pair to set Readout RF frequency endpoints at center ± half the full span. `freq_points` sets the frequency count. `readout_ref`, `reps` and `rounds` set Readout and the acquisition counts. Omitting an input leaves its form value in place; null goes to the owning field. The report's `map_acquired` flag means the recipe reached the save step; check the save receipt for successful outputs.

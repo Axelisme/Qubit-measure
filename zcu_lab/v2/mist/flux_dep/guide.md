@@ -1,75 +1,76 @@
+**Readers:** operator, agent. Map resonator probe response over DC flux bias and probe gain.
+
 # MIST over flux
 
-**Readers:** operator, agent. Measure the MIST response over flux and probe gain from the GUI or MCP.
+Open `mist/flux_dep` to find where a gain-dependent readout response changes
+with flux bias. At each bias the pulse sequence is optional reset, optional
+qubit preparation, the gain-swept resonator probe, readout, then a relaxation
+wait. The bias holds still during each gain sweep. The readout sees mean IQ,
+not individually classified qubit states.
 
-**Last updated:** 2026-11-12
+## Set up and run
 
-## Prepare and open
+Bind the qubit and resonator. Open the experiment or choose **Defaults**
+to recapture their values and discard draft edits.
 
-Open `mist/flux_dep` from the measure catalog. Calibrate the resonator and
-readout first. Bind `qubit` and `resonator` before opening the tab or choosing Defaults.
-Open/Defaults reads `$qubit.flux_dev` into an editable direct device name. The form
-keeps that name until the next Open or Defaults.
+- **Flux device** starts from the chosen qubit's DC source. Confirm its name
+  and **Flux-bias unit**. The sweep sends values directly in A, V or native
+  device units, with no conversion.
+- **Flux-bias sweep** starts from calibrated integer flux to half flux with
+  101 points, including endpoints. If the calibration is missing, fill
+  Start and Stop in the selected device unit. Confirm both endpoints.
+- **Reset** and **Preparation pulse** use the qubit's reset and x180 modules
+  if assigned. Turn off either one to omit it, or select a calibrated module
+  for the intended preparation.
+- **Resonator probe** starts from the resonator's frequency and generator
+  and a 1 µs constant envelope. **Probe gain sweep** replaces its gain. It
+  starts at 0–0.5 a.u. with 101 points. Choose a low-gain starting region
+  for the reference and confirm the stop gain before Run.
+- **Readout** uses the resonator's assigned module or the pulse readout
+  template. Check its frequency, gain, timing and integration window.
+- **Reps** starts at 1000 shots per gain and bias in one round. **Rounds**
+  starts at 10 sweeps per bias. **Relax delay** starts at five times the qubit
+  T1. Missing T1 uses 30 µs, giving 150 µs. An invalid T1 leaves the wait blank.
 
-Reset and the initial x180 pulse use optional module slots. Missing slots
-leave those pulses disabled. The probe starts from the resonator-probe template.
-Readout uses the captured readout slot when present, otherwise its template.
-Review probe frequency, generator, duration and readout settings before Run.
+The device stays at the last applied bias. Restore your working bias explicitly
+after the scan.
 
-## Review and run
+## Read the figures
 
-Flux starts at the qubit's integer-flux device value and ends at its half-flux
-value, with 101 points. Missing calibration leaves the sweep invalid. Gain starts
-at 0 and ends at 0.5, with 101 points. These are editable starting values.
-Set safe ranges using the limits of your hardware. Relaxation starts at five T1,
-using a 30 µs scale only when T1 is missing. Reps/rounds start at 1000/10.
+In Run, the left map shows how many bias rows have IQ. Completed averaging
+rounds appear in acquisition progress. The right panel shows the most recent
+row in blue with its bias above the axis, and up to three earlier rows in
+gray. Compare their rises to see whether the response changes smoothly as
+the bias moves. Blank map cells have no displayed data.
 
-Check the direct flux device name and set flux_unit to its actual A, V or native
-coordinate. The sweep sends values directly in that coordinate. Review device
-limits and both sweep directions before Run. The host sets each bias, then the
-board resets, applies the optional init pulse, applies the gain-swept probe and
-reads IQ.
-The device remains at the last acquired bias after Run. Set a safe bias
-explicitly when the measurement finishes.
+Each bias row has its own complex IQ reference, the mean of its first 5% of
+gain points with at least one point. The map and trace show the magnitude of
+mean IQ shift from that reference, in a.u. To keep outliers from setting the
+entire color scale, the display clips values at ten times the median of the
+lower half of the displacement values. Equal colors at the upper limit can
+therefore hide stronger responses. Save retains unmodified mean complex IQ.
+The map does not use per-cell error bars and there is no fit.
 
-## Analyze and save
+Analyze shows the same map with optional axis calibrations. The summary
+records the source run's Reps × Rounds. **Half-flux bias (device units)** and
+**Flux period (device units / Φ₀)** start from the qubit calibration captured
+for that Run. With both present, the bottom axis shows calibrated flux in
+Φ₀ and the top shows the corresponding device values. Clear either to keep
+only device units. **Photon number / gain squared** changes the vertical
+axis to coefficient × gain². Leave it blank without a gain-to-photon
+calibration. **Full acquired range** limits the view to acquired endpoints.
 
-The live map subtracts each flux row's mean IQ over its first 5% of gains
-(at least one point), takes the magnitude and clips strong outliers for display.
-The saved data retains raw complex IQ, native flux values and hardware-rounded
-gains. The transform affects only the display.
+Find a band of changing response that repeats across nearby biases and gains.
+Rescan a candidate window rather than choosing a single bright cell. If
+the change spans 0.20–0.24 a.u., 41 gain points across that window give a
+nominal 0.001 a.u. step. Compare the IQ map to a classified measurement before
+assigning a state transition or population.
 
-Primary analysis creates the native `fit` map. The analysis controls are
-half-flux device value, flux period, photon coefficient and full acquired range.
-Half-flux and period start from the Run's captured qubit calibration for the
-scanned device. Missing calibration or historical configuration leaves both blank.
-You can edit or clear either value. With both values, the bottom axis shows φ
-and the top ticks show device values. If either is blank, only the bottom
-device-value axis is shown.
-Photon coefficient optionally maps gain squared to photon number; otherwise
-the vertical axis shows probe gain. Full acquired range uses the acquired
-endpoints. These controls affect only analysis of the acquired or loaded data.
+Layout reference: Ding Fig. 5-8(b), p. 151, uses a heatmap for frequency
+and pulse length versus population. This map uses flux bias and probe gain
+versus an IQ displacement.
 
-Analysis produces a response map, with calibration parameters left unchanged.
-Use a classified-population experiment for calibrated state populations. Save
-raw data and the analysis figure through the normal Data/Save controls. Native
-Load keeps the saved record as the data source and preserves the current form.
-The `mist_fluxdep` workflow is a separate measurement procedure.
-
-The `mist_flux_dep` recipe runs one map with explicit native flux/gain ranges
-and the captured probe/readout selections. It saves raw data and Primary analysis
-and leaves calibration parameters unchanged.
-
-## Four starting situations
-
-1. With an empty kickstart project, Open the Form and inspect its required blanks.
-   Enter native flux and gain endpoints. Confirm the cached flux unit and supply GE calibration where requested.
-   Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, choose Defaults to recapture those values.
-   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
-   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
-4. Through the agent, call `mist_flux_dep` after inspecting the same Form errors.
-   flux_device, flux_unit, flux_range and gain_range are required. points maps to Expts on both axes. flux_half, flux_period, ac_coeff and auto_range update only analysis.
-   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+Load uses the saved run, not today's settings. The `mist_flux_dep` recipe
+runs one map using explicit native flux and gain ranges, saves and analyzes
+it, and leaves calibration unchanged. The adaptive `mist_fluxdep` workflow
+is a separate procedure.

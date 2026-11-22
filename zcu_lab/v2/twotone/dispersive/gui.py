@@ -44,12 +44,19 @@ def _run(
     return RunRecord(cfg=cfg, result=DispersiveExp().run(cfg, context=context))
 
 
+def _summary_lines(source: DispersiveRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=DispersiveExp.AXES_SPEC,
     make_form=_Dispersive_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_Dispersive_analyze, options=lambda source, env: DispersiveAnalyzeOptions()
+        fn=_Dispersive_analyze,
+        options=lambda source, env: DispersiveAnalyzeOptions(),
+        summary_lines=_summary_lines,
     ),
 )

@@ -48,4 +48,8 @@ Old files storing `populations` instead of `counts` are unsupported. Load report
 the missing `counts` variable. Acquire a new run; Load does not convert stored
 fractions to counts.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+Read the **Classified populations** live maps on the common 0–1 scale. In Analyze, the P(e) ridge marks the selected qubit resonance at each gain. The separate fit compares those points with the linear shift versus gain² and reports R². R² measures how much variation the line explains, not the accuracy of a particular peak. If the picked ridge reaches a frequency limit, recenter the sweep on the ridge and extend that limit before using the coefficient. Do not use it when several comparable ridges make the qubit line ambiguous. The maps and the peak-location points do not use per-point shot SEM.
+
+**Last updated:** 2026-11-22

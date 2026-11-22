@@ -77,6 +77,13 @@ def _RoOptFreq_make_form(ctx: FormContext) -> Form[FreqCfg]:
     return make_form(ctx)
 
 
+def _summary_lines(source: RoOptFreqRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 def _run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]:
     """Acquire a trace and retain the experiment configuration with its result."""
     return RunRecord(cfg=cfg, result=FreqExp().run(cfg, context=context))
@@ -89,6 +96,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_RoOptFreq_analyze,
+        summary_lines=_summary_lines,
         options=lambda source, env: RoOptFreqAnalyzeParams(),
         writeback=_RoOptFreq_get_writeback_items,
     ),

@@ -55,12 +55,49 @@ class PreFreqAnalyzeOptions:
 
 
 class PreFreqCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Preparation pulse")]
-    pi_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Pi pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="MIST probe pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Preparation freq", unit="MHz")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select the reset module applied before preparation, or leave empty to skip reset.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Preparation pulse",
+            description="Enter the qubit pulse with the RF frequency swept before the MIST tone.",
+        ),
+    ]
+    pi_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Optional π pulse",
+            description="Select a calibrated g↔e π pulse after preparation, or leave empty to skip it.",
+        ),
+    ] = None
+    probe_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="MIST tone",
+            description="Enter the cavity drive applied after preparation and before the classification readout.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the readout module applied at the end of the shot.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Preparation RF frequency",
+            unit="MHz",
+            description="Set the preparation pulse RF sweep in MHz before the fixed MIST tone.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
@@ -143,24 +180,30 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
 
         # 3. Show the measured G/E/Other fractions in classifier order.
 
-        figure, ax = context.plots.subplots(num="measurement")
-        ax.set(
-            xlabel="Preparation pulse frequency (MHz)", ylabel="P(g), P(e), P(other)"
+        figure, ax = context.plots.subplots(num="measurement", layout="constrained")
+        progress = figure.suptitle(
+            "MIST preparation spectrum · qubit · classified populations"
         )
+        ax.set(xlabel="Preparation RF frequency (MHz)", ylabel="Outcome probability")
         viewer = live_line(ax, num_lines=POPULATION_COUNT)
-        ax.set_ylim(0.0, 1.0)
-        for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
-            line.set_label(label)
-        ax.legend()
+        for line, label, color in zip(
+            ax.lines,
+            ("P(g)", "P(e)", "P(other)"),
+            ("tab:blue", "tab:red", "tab:green"),
+            strict=True,
+        ):
+            line.set(label=label, color=color, marker="o", markersize=3)
+        ax.legend(loc="best")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
-            """Draw acquired shot counts on the measurement axes; return changed artists.
-
-            Read scan-shaped samples without changing them. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            return viewer.set(freqs, (data / data.sum(axis=-1, keepdims=True)).T)
+            """Display acquired fractions and completed scan positions."""
+            totals = data.sum(axis=-1)
+            progress.set_text(
+                f"MIST preparation spectrum · qubit · classified populations\n"
+                f"{np.count_nonzero(totals > 0)}/{totals.size} points acquired"
+            )
+            return (progress, *viewer.set(freqs, (data / totals[..., None]).T))
 
         figure.show()
         buffer = SignalBuffer(
@@ -222,38 +265,30 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         populations = correct_populations(populations, options.confusion_matrix)
 
         # 2. Isolate preparation-frequency dependence with the later probe held fixed.
-        _, ax = plots.subplots(num="fit", figsize=(6, 6))
-
-        ax.plot(
-            freqs,
-            populations[:, 0],
-            color="blue",
-            label="P(g)",
-            ls="-",
-            marker="o",
-            markersize=1,
+        _, ax = plots.subplots(num="fit", figsize=(7, 5), layout="constrained")
+        for index, (label, color) in enumerate(
+            zip(
+                ("P(g)", "P(e)", "P(other)"),
+                ("tab:blue", "tab:red", "tab:green"),
+                strict=True,
+            )
+        ):
+            ax.plot(
+                freqs,
+                populations[:, index],
+                marker="o",
+                markersize=3,
+                label=label,
+                color=color,
+            )
+        quantity = (
+            "classified populations"
+            if options.confusion_matrix is None
+            else "readout-corrected populations"
         )
-        ax.plot(
-            freqs,
-            populations[:, 1],
-            color="red",
-            label="P(e)",
-            ls="-",
-            marker="o",
-            markersize=1,
+        ax.set(
+            title=f"MIST preparation spectrum · qubit · {quantity}",
+            xlabel="Preparation RF frequency (MHz)",
+            ylabel="Outcome probability",
         )
-        ax.plot(
-            freqs,
-            populations[:, 2],
-            color="green",
-            label="P(other)",
-            ls="-",
-            marker="o",
-            markersize=1,
-        )
-        ax.set_xlabel("Frequency (MHz)", fontsize=14)
-        ax.set_ylabel("P(g), P(e), P(other)", fontsize=14)
-        ax.legend()
-        ax.grid(True)
-        ax.tick_params(axis="both", which="major", labelsize=12)
-        ax.set_ylim(0, 1)
+        ax.legend(loc="best")

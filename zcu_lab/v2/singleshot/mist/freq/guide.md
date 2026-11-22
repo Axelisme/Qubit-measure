@@ -48,4 +48,8 @@ Old files storing `signals` instead of `counts` are unsupported. Load reports
 the missing `counts` variable. Acquire a new run; Load does not convert stored
 fractions to counts.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+Read the three populations on the same axis to locate a transition or loss peak. Analyze labels classified versus corrected fractions. The spectrum is for locating peaks, so it does not show per-point shot SEM. If the feature hits a sweep limit, use its frequency as the next sweep center and extend both sides until the off-feature baseline is visible.
+
+**Last updated:** 2026-11-22

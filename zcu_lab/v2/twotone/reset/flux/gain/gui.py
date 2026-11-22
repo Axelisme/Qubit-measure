@@ -51,10 +51,17 @@ def _writeback(
     )
 
 
+def _summary_lines(source: RunRecord[GainCfg, GainResult]) -> tuple[str, ...]:
+    """Report the saved configuration's requested repetitions and rounds."""
+    if source.cfg is None:
+        return ()
+    return (f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=GainExp.AXES_SPEC,
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_writeback),
+    analysis=Analysis(fn=_analyze, writeback=_writeback, summary_lines=_summary_lines),
 )

@@ -63,6 +63,21 @@ before increasing point count or rounds.
 
 ## Measurement and analysis
 
+Use the live figure to see which drive gains have been measured. The first
+Analyze figure uses the same gain axis and principal-axis projection of mean IQ.
+The dots are measured IQ, not a calibrated excited-state probability. The solid
+cosine is the fitted model; the vertical marker shows the π gain when it is
+inside the scan. Compare the marked gain and its uncertainty with the scan
+window before accepting it. The reported π/2 gain is half the fitted π gain.
+
+R² measures the fit's explanation of variation in the included points.
+Normalized residual RMS measures the typical residual relative to the signal
+range. The ± values describe fitted parameters, not point noise. In Live and Analyze, the
+vertical bars show the standard error of the mean (shot SEM): the sample
+standard deviation of the same projected shots divided by the square root of
+the acquired shot count. Older mean-only files still load and fit without bars.
+Points with fewer than two shots have no bar.
+
 Each tone supplies a gain range in normalized units within `[-1, 1]`.
 Set each tone's Start and Stop in gain units. Expts follows Tones and sets one
 shared positive point count, for selected tones (default 51).

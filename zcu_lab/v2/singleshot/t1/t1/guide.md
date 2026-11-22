@@ -8,7 +8,7 @@ Single-shot T1: applies a π pulse, waits for a variable delay, reads out, and c
 
 The saved `counts` array has axes `(delay, initial state, population state)`. The final axis contains class counts `[g,e,other]` summed over acquired rounds, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
 
-Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema is 4.0 after renaming the time window to delay and uniform to sampling.
+Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema is 5.0. If a file retains native counts but lacks compatible cfg, Analyze cannot use its readout correction.
 
 ## Parameter sources
 
@@ -43,4 +43,12 @@ T1 appears in the plot title; calibration parameters stay unchanged. Use 'single
 
 Run 'singleshot/ge', apply Primary and Post to the readout module, then choose Defaults in this tab to capture that calibration. A delay sweep reaching ~5*T1 lets the decay flatten. Missing T1 starts delay stop and relax delay at 150 µs; stored invalid T1 leaves both required and empty. Set 'sampling="linear"' to sweep linearly; leave 'sampling="decay"' to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
 
-**Last updated:** 2026-10-29
+## Reading the figures
+
+Run shows raw class probabilities. Each bar is one shot SEM from the counts retained at that point. Fewer than two retained shots give no bar.
+
+Compare g-prepared and e-prepared traces and their fitted curves in Analyze. If neither approaches a plateau, increase the Delay stop to several times the provisional T1 and preserve enough early points to resolve the initial slope. Compare reduced χ² with the residuals visible in the plot; it measures residual size relative to the model's assumed errors and does not itself establish the validity of the rate model.
+
+Bars are shot SEM from retained class counts for each preparation and delay. Saved readout correction, when available, propagates their covariance. Fit uncertainty in the reported time constants is separate from those bars.
+
+**Last updated:** 2026-11-22

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Annotated, ClassVar
@@ -21,6 +21,7 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.run_acquire import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, TimelineBuilder
@@ -110,21 +111,23 @@ class RangeFindCfg(ConfigBase):
         PulseReadout.Cfg,
         FieldMeta(
             label="Readout",
-            description="Resonator readout 設定與 timing（µs）。",
+            description="Set the pulse and ADC window used together at each survey frequency.",
         ),
     ]
     freq: Annotated[
         SweepCfg,
         FieldMeta(
-            label="Frequency",
+            label="Readout RF frequency",
             unit="MHz",
-            description="Absolute MHz 掃描起訖值。",
+            description="Enter absolute readout RF endpoints in MHz covering the expected notches.",
         ),
     ]
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per frequency in each averaging round.",
         ),
     ]
     rounds: Annotated[
@@ -132,7 +135,7 @@ class RangeFindCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter how many times to repeat and average the entire survey.",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -141,7 +144,7 @@ class RangeFindCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the relaxation wait in µs after each shot.",
         ),
     ]
 
@@ -171,21 +174,33 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         cfg = deepcopy(config)
         freqs = linear_freqs(cfg.freq, cfg.readout, context=context)
         # 2. Preview magnitude dips while preserving complex IQ for dip detection.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude (a.u.)")
+        fig, ax = context.plots.subplots(num="measurement", layout="constrained")
+        fig.suptitle("One-tone survey · Resonators · IQ magnitude")
+        ax.set(
+            xlabel="Readout RF frequency (MHz)", ylabel="Magnitude of mean IQ (a.u.)"
+        )
+        progress = ax.set_title(f"Averaging round 0 / {cfg.rounds}", fontsize=11)
         line = live_line(ax)
+        signals = SignalBuffer((len(freqs),))
+        rounds_done = 0
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
-            """Draw acquired complex IQ on the measurement axes; return changed artists.
+        def update(completed: int) -> Iterable[Artist]:
+            """Plot the cumulative mean and nominal shot count at a completed round."""
+            progress.set_text(
+                f"Averaging round {completed} / {cfg.rounds} · "
+                f"{completed * cfg.reps:,} nominal shots/point"
+            )
+            return (*line.set(freqs, np.abs(signals.array)), progress)
 
-            Read the scan-shaped data without changing it. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            return line.set(freqs, np.abs(data))
+        def show_round() -> bool:
+            """Observe completed rounds without asking the acquisition to stop."""
+            nonlocal rounds_done
+            rounds_done += 1
+            update(rounds_done)
+            return False
 
         fig.show()
-        signals = SignalBuffer((len(freqs),), on_update=update)
         # 3. Reset and read out each board-swept survey frequency.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -197,7 +212,12 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
-            sched.run_acquire(builder.build(), context.soc, rounds=cfg.rounds)
+            sched.run_acquire(
+                builder.build(),
+                context.soc,
+                rounds=cfg.rounds,
+                options=RunOptions(stop_condition=show_round),
+            )
 
         return RangeFindResult(freqs=freqs, signals=signals.array)
 
@@ -221,8 +241,8 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         ranks depth / FWHM and enforces min_separation in actual MHz. Selected
         dips receive the given names in frequency order. Edge minima are excluded.
 
-        plots receives one measured-magnitude curve with red stars at the dips,
-        annotated by name, MHz frequency, depth, FWHM and score.
+        plots receives one measured-magnitude curve with selected dip stars
+        annotated by name and measured MHz frequency.
         Return requested named dips and the actual factor. Insufficient
         named dips raise ValueError naming the available count;
         no partial success or proposals are produced here.
@@ -279,42 +299,68 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
             for position, dip in enumerate(sorted(selected, key=lambda dip: dip.freq))
         )
 
-        # 3. Label the selected dips by name, frequency, width, depth, and score.
-        fig, ax = plots.subplots(nrows=1, num="fit", figsize=(9, 4.5))
-
-        @plots.on_plot_thread
-        def draw(_: None) -> Iterable[Artist]:
-            """Draw the measured spectrum and named dip markers on the supplied axes."""
-            ax.plot(freqs, magnitude, label="Measured magnitude")
-            for dip in dips:
-                label = dip.name
-                measured = magnitude[np.searchsorted(freqs, dip.freq)]
-                ax.plot(
-                    dip.freq,
-                    measured,
-                    marker="*",
-                    color="red",
-                    markersize=14,
-                    linestyle="none",
-                    label=(
-                        f"{label}: {dip.freq:.6g} MHz, depth {dip.depth:.4g}, "
-                        f"FWHM {dip.fwhm:.4g} MHz, score {dip.score:.4g} a.u./MHz"
-                    ),
-                )
-                ax.annotate(
-                    label,
-                    (dip.freq, measured),
-                    xytext=(8, 8),
-                    textcoords="offset points",
-                )
-            fig.suptitle(
-                f"Prominence noise factor: {dip_options.prominence_factor:.6g}"
-            )
-            ax.set_xlabel("Frequency (MHz)")
-            ax.set_ylabel("Magnitude (a.u.)")
-            ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), fontsize="small")
-            fig.tight_layout()
-            return (fig,)
-
-        draw(None)
+        self.plot_dips(
+            freqs,
+            magnitude,
+            [(dip.name, dip.freq) for dip in dips],
+            candidates=(),
+            prominence_factor=dip_options.prominence_factor,
+            plots=plots,
+        )
         return RangeFindDetection(dips, dip_options.prominence_factor)
+
+    @staticmethod
+    def plot_dips(
+        freqs: NDArray[np.float64],
+        magnitude: NDArray[np.float64],
+        selected: Sequence[tuple[str | None, float]],
+        *,
+        candidates: Sequence[float],
+        prominence_factor: float,
+        plots: Plots,
+    ) -> None:
+        """Plot sorted MHz samples, candidate frequencies and accepted (name, MHz) pairs.
+
+        None denotes an unassigned selection. Use the magnitude of the original
+        complex means, not the detection algorithm's smoothed data. The noise
+        factor is the actual dimensionless multiplier used to find candidates.
+        """
+        fig, ax = plots.subplots(num="fit", layout="constrained")
+        fig.suptitle("One-tone survey · Resonators · IQ magnitude")
+        ax.set(
+            xlabel="Readout RF frequency (MHz)",
+            ylabel="Magnitude of mean IQ (a.u.)",
+            title=f"Prominence noise factor: {prominence_factor:.4g}",
+        )
+        ax.plot(freqs, magnitude, ".", color="C0", label="Measured samples")
+        if candidates:
+            ax.plot(
+                candidates,
+                np.interp(candidates, freqs, magnitude),
+                "o",
+                color="0.6",
+                label="Automatic candidates",
+            )
+        frequencies = [freq for _, freq in selected]
+        heights = np.interp(frequencies, freqs, magnitude)
+        ax.plot(
+            frequencies,
+            heights,
+            "*",
+            color="crimson",
+            markersize=11,
+            label="Selected dips",
+        )
+        for row, ((name, freq), y) in enumerate(zip(selected, heights, strict=True), 1):
+            ax.annotate(
+                f"{name or 'Unassigned'}: {freq:.6f} MHz",
+                (freq, y),
+                xytext=(freq, 0.1 + 0.5 * row / (len(selected) + 1)),
+                textcoords=("data", "axes fraction"),
+                ha="right" if freq > (freqs[0] + freqs[-1]) / 2 else "left",
+                fontsize=10,
+                arrowprops={"arrowstyle": "-", "color": "0.35"},
+                bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.85},
+            )
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncols=3, fontsize=10)
+        fig.show()

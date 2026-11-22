@@ -58,12 +58,50 @@ class FreqPowerAnalyzeOptions:
 
 
 class FreqPowerCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Probe gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Probe freq", unit="MHz")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select the reset module applied before preparation, or leave empty to skip reset.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Initial preparation pulse",
+            description="Select the pulse applied before the probe, or leave empty to omit it.",
+        ),
+    ] = None
+    probe_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="MIST tone",
+            description="Enter the cavity drive applied after preparation and before the classification readout.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the readout module applied at the end of the shot.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="MIST drive gain",
+            unit="a.u.",
+            description="Set the MIST tone gain sweep in a.u.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="MIST drive RF frequency",
+            unit="MHz",
+            description="Set the MIST tone RF sweep in MHz.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
@@ -156,27 +194,45 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
-        # 3. Display the measured G/E/Other fractions in classifier order.
+        # 3. Use the same probability scale for all outcomes.
         figure, _ = context.plots.subplots(
-            nrows=3, ncols=1, num="measurement", figsize=(12, 6)
+            ncols=3,
+            num="measurement",
+            figsize=(11, 4),
+            layout="constrained",
+        )
+        progress = figure.suptitle(
+            "MIST gain–frequency map · qubit · classified populations"
         )
         viewers = []
-        for state, ax in zip(("ground", "excited", "other"), figure.axes, strict=True):
-            ax.set(xlabel="gain (a.u.)", ylabel="freq (MHz)", title=state.capitalize())
-            viewers.append(live_heatmap(ax, uniform=False))
+        for state, ax in zip(("g", "e", "other"), figure.axes, strict=True):
+            ax.set(
+                xlabel="MIST drive gain (a.u.)",
+                ylabel="MIST drive RF frequency (MHz)",
+                title=f"P({state})",
+            )
+            ax.grid(False)
+            viewers.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
+        figure.colorbar(
+            figure.axes[0].images[0], ax=figure.axes, label="Probability (0–1)"
+        )
 
         @context.plots.on_plot_thread
         def plot_fn(counts: NDArray[np.float64]):
-            """Draw acquired shot counts on the measurement axes; return changed artists.
-
-            Read scan-shaped samples without changing them. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            populations = counts / counts.sum(axis=-1, keepdims=True)
-            return tuple(
-                artist
-                for i, viewer in enumerate(viewers)
-                for artist in viewer.set(gains, freqs, populations[..., i])
+            """Render class fractions and report acquired cells."""
+            totals = counts.sum(axis=-1)
+            populations = counts / totals[..., None]
+            progress.set_text(
+                "MIST gain–frequency map · qubit · classified populations\n"
+                f"{np.count_nonzero(totals > 0)}/{totals.size} gain–frequency points acquired"
+            )
+            return (
+                progress,
+                *(
+                    artist
+                    for i, viewer in enumerate(viewers)
+                    for artist in viewer.set(gains, freqs, populations[..., i])
+                ),
             )
 
         figure.show()
@@ -240,25 +296,24 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         populations = correct_populations(populations, options.confusion_matrix)
 
         fig, _ = plots.subplots(
-            num="fit", nrows=3, ncols=1, figsize=(8, 10), layout="constrained"
+            num="fit", ncols=3, figsize=(11, 4), layout="constrained"
         )
-        ax_g, ax_e, ax_o = fig.axes
-
-        # 2. Stored populations are (gain, frequency, state); display frequency rows.
-        im_g = ax_g.pcolormesh(gains, freqs, populations[..., 0].T, shading="nearest")
-        ax_g.set_title("Ground State Population")
-        ax_g.set_xlabel("Drive Gain (a.u.)")
-        ax_g.set_ylabel("Drive Frequency (MHz)")
-        fig.colorbar(im_g, ax=ax_g, label="P(g)")
-
-        im_e = ax_e.pcolormesh(gains, freqs, populations[..., 1].T, shading="nearest")
-        ax_e.set_title("Excited State Population")
-        ax_e.set_xlabel("Drive Gain (a.u.)")
-        ax_e.set_ylabel("Drive Frequency (MHz)")
-        fig.colorbar(im_e, ax=ax_e, label="P(e)")
-
-        im_o = ax_o.pcolormesh(gains, freqs, populations[..., 2].T, shading="nearest")
-        ax_o.set_title("Other States Population")
-        ax_o.set_xlabel("Drive Gain (a.u.)")
-        ax_o.set_ylabel("Drive Frequency (MHz)")
-        fig.colorbar(im_o, ax=ax_o, label="P(other)")
+        quantity = (
+            "classified populations"
+            if options.confusion_matrix is None
+            else "readout-corrected populations"
+        )
+        fig.suptitle(f"MIST gain–frequency map · qubit · {quantity}")
+        for index, (state, ax) in enumerate(
+            zip(("g", "e", "other"), fig.axes, strict=True)
+        ):
+            ax.set(
+                xlabel="MIST drive gain (a.u.)",
+                ylabel="MIST drive RF frequency (MHz)",
+                title=f"P({state})",
+            )
+            ax.grid(False)
+            live_heatmap(ax, uniform=False, clim=(0.0, 1.0)).set(
+                gains, freqs, populations[..., index]
+            )
+        fig.colorbar(fig.axes[0].images[0], ax=fig.axes, label="Probability (0–1)")

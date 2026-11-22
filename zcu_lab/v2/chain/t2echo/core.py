@@ -16,7 +16,7 @@ import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.fitting import fit_decay
+from zcu_tools.analysis.fitting import expfunc, fit_decay
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
     CycleNuisances,
@@ -39,19 +39,21 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     chain_cycle_sums,
 )
-from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
     checks_text,
     cycle_sums_variables,
-    first_read_iq,
+    first_read_projection,
     restore_cycle_sums,
 )
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar, live_line
 
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
+_SWEEP_LABEL = "Total echo wait (µs)"
+_IQ_TITLE = "K-cycle T2 echo · Qubit · First-read IQ"
+_IQ_LABEL = "Projected mean IQ (a.u.)"
 
 
 @dataclass(frozen=True)
@@ -82,30 +84,30 @@ class ChainT2EchoCfg(ConfigBase):
     pi2_pulse: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="Pi/2 Pulse",
-            description="Calibrated π/2 pulse played at the start and at the end of each echo.",
+            label="π/2 pulse",
+            description="Select the calibrated π/2 pulse played at the start and end of each echo.",
         ),
     ]
     pi_pulse: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="Pi Pulse",
-            description="Calibrated π pulse on the π/2 pulse's axis, played halfway through each wait.",
+            label="π pulse",
+            description="Select the calibrated π pulse on the π/2 pulse's axis, played halfway through the total wait.",
         ),
     ]
     readout: Annotated[
         PulseReadout.Cfg,
         FieldMeta(
             label="Readout",
-            description="Pulse readout played twice after each second π/2.",
+            description="Select the single-tone pulse readout used twice after the final π/2 pulse.",
         ),
     ]
     delay: Annotated[
         SweepCfg,
         FieldMeta(
-            label="Delay",
+            label="Total echo wait",
             unit="µs",
-            description="Total free-evolution wait x, split into two halves around the π pulse.",
+            description="Enter Start and Stop (µs) and Expts, the number of waits (count).",
         ),
     ]
     reps: Annotated[
@@ -113,7 +115,7 @@ class ChainT2EchoCfg(ConfigBase):
         FieldMeta(
             label="Reps",
             unit="count",
-            description="Cycles per point in each round, at least 66.",
+            description="Enter the number of cycles at each sweep point in one round (at least 66).",
         ),
     ] = Field(ge=66)
     rounds: Annotated[
@@ -121,16 +123,16 @@ class ChainT2EchoCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Software acquisition rounds.",
+            description="Enter the number of rounds; each round measures all sweep points.",
         ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Cycle thermalisation wait K",
             unit="µs",
             decimals=3,
-            description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
+            description="Enter the wait before each cycle (µs); use at least 5 × T1 to start near thermal equilibrium.",
         ),
     ]
 
@@ -163,20 +165,30 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         delays = sweep2array(
             cfg.delay, "time", {"soccfg": context.soccfg, "scaler": 0.5}
         )
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Total delay (µs)", ylabel="Projected signal (sigma)")
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
-        lines = live_line(ax, num_lines=2)
-        ax.lines[0].set_label("all 65 numbers")
-        ax.lines[1].set_label("first read")
-        ax.legend()
+        fig, _ = context.plots.subplots(
+            num="measurement", nrows=2, sharex=True, layout="constrained"
+        )
+        ax, diagnostic_ax = fig.axes
+        ax.set(title=_IQ_TITLE, ylabel=_IQ_LABEL)
+        diagnostic_ax.set(xlabel=_SWEEP_LABEL, ylabel="Joint projection\n(SEM units)")
+        diagnostic_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        iq_points = live_errorbar(ax)
+        diagnostic_line = live_line(diagnostic_ax)
+        progress = fig.suptitle("Waiting for the first round")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
-            curves = cycle_curves(CycleSums.from_augmented(delays, data))
-            return lines.set(
-                delays, np.stack([curves.main_sigma, curves.first_read_sigma])
+            sums = CycleSums.from_augmented(delays, data)
+            signal, sem = first_read_projection(sums, skip=1)
+            joint = cycle_curves(sums)
+            shots = int(joint.cycle_count.min())
+            progress.set_text(
+                f"Round {shots // cfg.reps}/{cfg.rounds} · {shots} cycles per point (count)"
+            )
+            return (
+                *iq_points.set(delays, signal, sem),
+                *diagnostic_line.set(delays, joint.main_sigma),
+                progress,
             )
 
         fig.show()
@@ -251,28 +263,52 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         sums = source.result
         delays = sums.axis
 
-        # 1. Seed from the first-read IQ using this experiment's fit policy.
-        seed_xs = delays[1:]
-        seed_real_signals = rotate2real(first_read_iq(sums)[1:]).real
-        seed_fit = fit_decay(seed_xs, seed_real_signals)
-        seed_t2e, seed_t2eerr, seed_y_fit = (
-            seed_fit.decay_time,
-            seed_fit.decay_time_err,
-            seed_fit.curve,
+        # 1. Fit the first-read IQ to seed the joint model.
+        seed_signal, seed_sem = first_read_projection(sums, skip=1)
+        seed_fit = fit_decay(delays[1:], seed_signal[1:])
+        first_read_t2 = float(seed_fit.decay_time)
+        seed_dense = np.linspace(delays[1:].min(), delays.max(), 400)
+        seed_fig, seed_ax = plots.subplots(
+            num="fit", figsize=config.figsize, layout="constrained"
         )
-        seed_fig, seed_ax = plots.subplots(num="fit", figsize=config.figsize)
+        seed_fig.suptitle(_IQ_TITLE)
+        seed_ax.errorbar(
+            delays[1:],
+            seed_signal[1:],
+            yerr=seed_sem[1:],
+            fmt=".",
+            color="C0",
+            label="First-read mean ± shot SEM",
+        )
+        seed_ax.errorbar(
+            delays[:1],
+            seed_signal[:1],
+            yerr=seed_sem[:1],
+            fmt=".",
+            color="0.5",
+            label="Excluded from first-read fit",
+        )
         seed_ax.plot(
-            seed_xs, seed_real_signals, label="data", ls="-", marker="o", markersize=5
+            seed_dense,
+            expfunc(seed_dense, *seed_fit.params),
+            color="C1",
+            label="First-read fit",
         )
-        seed_ax.plot(seed_xs, seed_y_fit, label="fit", c="orange", zorder=1)
-        seed_t2e_str = f"{seed_t2e:.2f}µs ± {seed_t2eerr:.2f}µs"
-        seed_ax.set_title("$T_{2echo}$ decay = " + seed_t2e_str, fontsize=14)
-        seed_ax.set_xlabel("Delay Time (µs)", fontsize=14)
-        seed_ax.set_ylabel("Signal (a.u.)", fontsize=14)
-        seed_ax.legend(loc="upper right")
-        seed_ax.grid(True)
-        seed_fig.tight_layout()
-        first_read_t2 = float(seed_t2e)
+        if delays.min() <= seed_fit.decay_time <= delays.max():
+            seed_ax.axvline(seed_fit.decay_time, ls="--", color="0.35", linewidth=1)
+        r2 = seed_fit.quality.r2
+        residual = seed_fit.quality.normalized_residual_rms
+        r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
+        residual_text = "unavailable" if residual is None else f"{residual:.3g}"
+        seed_ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+        seed_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        seed_ax.set_title(
+            f"First-read T2 echo = {seed_fit.decay_time:.4g} ± {seed_fit.decay_time_err:.2g} µs\n"
+            f"R² = {r2_text} · Normalized residual RMS = {residual_text}",
+            loc="left",
+            fontsize=10,
+        )
+        seed_fig.legend(loc="outside lower center")
 
         # 2. Joint fit of all 65 numbers; the third state starts from the same T2.
         model = t2_echo_model()
@@ -299,34 +335,51 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         population_fitted = model.populations(
             population_dense, fit.parameters, fit.nuisances
         )
-        population_fig, population_ax = plots.subplots(
-            num="populations", figsize=config.figsize
+        population_fig, _ = plots.subplots(
+            num="populations",
+            nrows=3,
+            sharex=True,
+            figsize=(6.4, 7.4),
+            layout="constrained",
         )
-        for population_state in range(3):
-            population_thermal = fit.nuisances.thermal[population_state]
+        population_fig.suptitle(
+            "K-cycle T2 echo · Qubit · First-read populations\n"
+            f"T2 echo = {t2:.4g} ± {t2_err:.2g} µs\n"
+            f"Third-state decay time = {tf:.4g} ± {tf_err:.2g} µs\n"
+            f"Joint J/df = {fit.J:.2g}/{fit.df}\n{checks_text(fit)}",
+            fontsize=10,
+        )
+        population_axes = population_fig.axes
+        population_order = range(3)
+        for rank, (population_ax, state) in enumerate(
+            zip(population_axes, population_order, strict=True)
+        ):
+            color = f"C{rank}"
+            thermal = fit.nuisances.thermal[state]
             population_ax.errorbar(
                 delays,
-                fit.populations[:, population_state],
-                yerr=fit.population_errors[:, population_state],
-                fmt="o",
-                markersize=3,
-                color=f"C{population_state}",
-                label=f"state {population_state}, thermal {population_thermal:.2f}",
+                fit.populations[:, state],
+                yerr=fit.population_errors[:, state],
+                fmt=".",
+                color=color,
+                label="Point estimate ± Wald SE",
             )
             population_ax.plot(
                 population_dense,
-                population_fitted[:, population_state],
-                color=f"C{population_state}",
+                population_fitted[:, state],
+                color=color,
+                label="Joint fit",
             )
-        population_ax.set_xlabel("Total delay (µs)")
-        population_ax.set_ylabel("First-read population")
-        population_ax.set_title(
-            f"{f'T2 echo = {t2:.4g} ± {t2_err:.2g} µs, third state {tf:.3g} ± {tf_err:.2g} µs'}\n{checks_text(fit)}",
-            fontsize=9,
-        )
-        population_ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
-        population_ax.grid(True)
-        population_fig.tight_layout()
+            if delays.min() <= t2 <= delays.max():
+                population_ax.axvline(t2, ls="--", color="0.35", linewidth=1)
+            population_ax.set(
+                ylabel=f"P(state {rank + 1})",
+                title=f"State {rank + 1} · Thermal population {thermal:.2f}",
+            )
+        handles, labels = population_axes[0].get_legend_handles_labels()
+        population_fig.legend(handles, labels, loc="outside lower center", ncols=2)
+        population_axes[-1].set_xlabel(_SWEEP_LABEL)
+        population_axes[-1].xaxis.set_major_locator(MaxNLocator(nbins=4))
 
         return ChainT2EchoAnalysis(
             t2=t2,

@@ -32,27 +32,27 @@ class CPMGInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key. Sources are chosen by the Form.",
+        description="Select the Readout library module that integrates IQ.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Reset module option.",
+        description="Select Reset before the pulse sequence; null disables it.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key.",
+        description="Select Pi Pulse, the calibrated π rotation.",
     )
     pi2_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi/2-pulse library key.",
+        description="Select Pi/2 Pulse, the calibrated π/2 rotation.",
     )
     max_n: int | None | Keep = Field(
         KEEP,
-        description="Maximum positive refocusing count for a geometric count grid; supply together with points.",
+        description="Set the endpoint of a geometric grid for Pi pulse counts; supply points too.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Geometric count points with max_n; rounding/dedup may reduce count. max_n=1 allows one point.",
+        description="Set the count of geometric grid entries for Pi pulse counts; rounding may merge entries.",
     )
     times: list[int] | None | Keep = Field(
         KEEP,
@@ -76,11 +76,11 @@ class CPMGInputs(RecipeInputs):
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count.",
+        description="Set Reps (count), shots per point in each round.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Rounds (count), the acquisition rounds to average.",
     )
 
     fit_fringe: bool | None | Keep = Field(

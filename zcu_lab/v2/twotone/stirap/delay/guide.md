@@ -1,13 +1,10 @@
-# STIRAP delay
-
 **Readers:** operator, lab-author, agent. Sweep the relative start time of Pump and Stokes and inspect saved three-state counts.
 
 ## Before Run
 
 Open `twotone/stirap/delay` in Measure GUI, or call MCP recipe `stirap_delay`.
 Provide the measured Pump 0–3 and Stokes 3–2 carrier frequencies in MHz.
-Choose two different charge-drive generators.
-Pump and Stokes envelopes overlap, and one channel cannot play both arbitrary-waveform carrier frequencies at the same time.
+Choose separate Pump and Stokes charge-drive lines for the overlap.
 Set each signed gain within [-1, 1]. The sign is preserved during playback.
 
 Select a readout with saved `centroid3` centers and a 3×3 training confusion matrix.
@@ -30,25 +27,21 @@ Lead is in µs. Positive lead starts Stokes first. Negative lead starts Pump fir
 Zero starts both together. For example, +0.1 µs starts Pump 0.1 µs after Stokes.
 Lead describes pulse starts, not their centers or ends.
 
-The host builds and acquires one program per lead coordinate.
 Both drives retain their own carrier, signed gain, envelope and length throughout the scan.
 Readout starts after the later drive end, even when the lengths differ.
 `shots` controls repetitions per coordinate in one acquisition round.
 `relax_delay` is the inter-shot wait in µs.
-Physical simulation requires both selected drive generators to bind charge lines.
-The zero-noise offline probe checks compiled playback without physical evolution.
 
 The live figure shows measured g/e/f fractions against Stokes lead in µs.
 The saved Result contains requested lead coordinates with shape `(N,)` and float64 g/e/f counts with shape `(N, 3)`.
 It stores counts, not normalized fractions. Stopped scans leave unfinished counts as NaN.
-Lead coordinates retain their requested values; hardware quantizes playback times to its clocks.
+Lead coordinates record the requested offsets.
 
 ## Analyze and Save
 
 Analyze uses only the Run's saved centroid3 readout, not current Form or library calibration.
 It skips unfinished and zero-count points.
-The single `populations` figure shows raw fractions as dashed curves and confusion-corrected fractions as solid curves.
-Each state has the same color in both curves. The horizontal axis is Stokes lead in µs.
+The `populations` figure separates measured and corrected fractions into two panels, with the same color for each state in both panels. The horizontal axis is Stokes lead in µs. Points have one shot SEM above and below the mean. For a measured fraction p from N retained shots, the estimated SEM is √[p(1−p)/(N−1)] for N > 1. Analyze propagates the full three-label count covariance through the saved confusion correction for the corrected panel. These bars do not include uncertainty in the training classifier. Unfinished, empty or single-shot points do not have shot SEM.
 The vertical axis shows the preparation-label fractions for g, e, and f.
 Corrected fractions are not clipped to [0, 1].
 
@@ -57,7 +50,7 @@ The summary and recipe report give `f_population_estimate`, the largest finite
 corrected f population on this grid, and `stokes_lead_us`.
 Ties go to the first acquired point. If no finite value is available, the peak
 and its coordinates are null. The estimate is unclipped and does not identify
-a global optimum.
+a global optimum. The dotted marker locates the selected lead in the corrected panel. Choose a lead in a range with consistently high corrected f and low corrected e. If the largest f value is at +0.10 µs (the sweep endpoint), extend the positive endpoint and keep the original overlap in the scan before claiming a maximum.
 A large condition number warns that correction can amplify count noise.
 These diagnostics do not measure transfer fidelity or prove state purity.
 Missing saved cfg, missing calibration, no completed points or a singular matrix makes analysis fail.
@@ -78,6 +71,3 @@ Explicit null goes to the field owner and may be rejected.
 Use `overrides` to enter parameters for the chosen envelope, for example `pump_waveform.length`.
 For an existing referenced envelope, issue the public Form `to_inline` command before editing its scalar parameters.
 The recipe applies overrides last and checks readiness before Run.
-
-Offline structural acceptance does not establish physical transfer accuracy or real-device calibration.
-The full-Hamiltonian reference comparison is separate work and has not been run for this leaf.

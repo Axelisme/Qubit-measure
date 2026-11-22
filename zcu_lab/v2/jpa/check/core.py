@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.artist import Artist
+from matplotlib.lines import Line2D
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -25,7 +26,7 @@ from zcu_lab.v2.support.device import set_output
 class CheckResult:
     """Pump labels (0 off, 1 on), MHz frequencies, and complex IQ [output, freq]."""
 
-    outputs: NDArray[np.float64]
+    outputs: NDArray[np.int_]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
 
@@ -36,20 +37,41 @@ def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class CheckCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select a qubit reset before readout; leave empty to skip it.",
+        ),
+    ] = None
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Frequency-swept readout",
+            description="Select the resonator pulse and IQ integration; the sweep sets the RF frequency.",
+        ),
+    ]
     jpa_rf_dev: Annotated[
         DeviceName,
         FieldMeta(
-            label="JPA RF device",
-            description="Connected RF device whose output is toggled off then on.",
+            label="JPA pump RF source",
+            description="Select the RF source to switch the JPA pump off, then on.",
         ),
     ] = ""
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Readout RF frequency",
+            unit="MHz",
+            description="Enter Start and Stop in absolute probe RF MHz and Expts as the number of frequency samples (count).",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per frequency at each pump state in one round.",
         ),
     ]
     rounds: Annotated[
@@ -57,16 +79,16 @@ class CheckCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of acquisition rounds per pump state.",
         ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Relaxation wait",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the wait after readout for relaxation before the next shot (µs).",
         ),
     ]
 
@@ -111,8 +133,16 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         )
 
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency (MHz)", ylabel="Magnitude (a.u.)")
+        title = "JPA pump check · readout resonator · reflection"
+        ax.set(
+            title=title,
+            xlabel="Readout RF frequency (MHz)",
+            ylabel="Magnitude of mean IQ (a.u.)",
+        )
+        ax.ticklabel_format(axis="x", style="plain", useOffset=False)
         line = live_line(ax, num_lines=2)
+        self._style_pump_states(outputs, ax.lines)
+        ax.legend(loc="upper center", ncols=2)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
@@ -121,7 +151,10 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
             Read the scan-shaped data without changing it. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            return line.set(freqs, check_signal2real(data))
+            progress = ax.set_title(
+                f"{title}\n{np.count_nonzero(np.isfinite(data))}/{data.size} spectrum points sampled"
+            )
+            return (*line.set(freqs, check_signal2real(data)), progress)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -169,17 +202,29 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
 
         # 2. Overlay both pump states on the same readout-frequency axis.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
-        for i, output in enumerate(outputs):
-            ax.plot(
-                freqs,
-                real_signals[i, :],
-                label=f"JPA {self.OUTPUT_MAP[output]}",
-                marker="o",
-                markersize=4,
-                linestyle="-",
-            )
+        for values in real_signals:
+            ax.plot(freqs, values, linestyle="None")
+        self._style_pump_states(outputs, ax.lines)
 
-        ax.set_xlabel("Frequency (MHz)")
-        ax.set_ylabel("Signal Magnitude (a.u.)")
-        ax.legend()
-        ax.grid(True)
+        ax.set(
+            title="JPA pump check · readout resonator · reflection",
+            xlabel="Readout RF frequency (MHz)",
+            ylabel="Magnitude of mean IQ (a.u.)",
+        )
+        ax.ticklabel_format(axis="x", style="plain", useOffset=False)
+        ax.margins(y=0.25)
+        ax.legend(loc="upper center", ncols=2)
+
+    def _style_pump_states(
+        self, outputs: NDArray[np.int_], lines: Iterable[Line2D]
+    ) -> None:
+        """Give overlapping pump-on and pump-off data distinguishable markers."""
+        for output, artist in zip(outputs, lines, strict=True):
+            pump_off = output == 0
+            artist.set(
+                label=f"Pump {self.OUTPUT_MAP[output]}",
+                color="C0" if pump_off else "C1",
+                marker="o" if pump_off else "+",
+                markersize=7 if pump_off else 5,
+                markerfacecolor="none",
+            )

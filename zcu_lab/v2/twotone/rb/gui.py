@@ -33,10 +33,15 @@ def _run(cfg: RBCfg, *, context: RunContext) -> RunRecord[RBCfg, RB_Result]:
     return RunRecord(cfg=cfg, result=RB_Exp().run(cfg, context=context))
 
 
+def _summary_lines(source: RBRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=RB_Exp.AXES_SPEC,
     make_form=_RB_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_RB_analyze),
+    analysis=Analysis(fn=_RB_analyze, summary_lines=_summary_lines),
 )

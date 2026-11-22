@@ -182,12 +182,22 @@ def run(cfg: MuxT1Cfg, *, context: RunContext) -> RunRecord[MuxT1Cfg, MuxT1Resul
     return RunRecord(cfg=cfg, result=MuxT1Exp().run(cfg, context=context))
 
 
+def _summary_lines(source: RunRecord[MuxT1Cfg, MuxT1Result]) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=replace(MuxT1Exp.AXES_SPEC, save_stem=mux_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze, options=_MuxT1_options, writeback=_get_writeback_items
+        summary_lines=_summary_lines,
+        fn=_analyze,
+        options=_MuxT1_options,
+        writeback=_get_writeback_items,
     ),
 )

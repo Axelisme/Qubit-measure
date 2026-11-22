@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from matplotlib.figure import Figure
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -33,26 +32,10 @@ from zcu_lab.v2.jpa.auto_optimize.form import make_form
 JpaAutoRunResult = RunRecord[JPAOptCfg, JPAOptimizeResult]
 
 
-def _relabel_auto_figure(fig: Figure) -> None:
-    """Neutral 'JPA flux device value' wording on the GUI review figure.
-
-    The core auto-optimize analysis figure labels its flux subplot 'JPA Flux
-    value (a.u.)'; the GUI review figure must use the neutral vocabulary of
-    the selected flux device without claiming a physical-unit migration. Only
-    the flux axis is relabelled — the frequency and power axes keep their own
-    quantities.
-    """
-    for ax in fig.axes:
-        if "Flux" in ax.get_xlabel():
-            ax.set_xlabel("JPA flux device value")
-
-
 def _analyze(
     req: AnalyzeRequest[JpaAutoRunResult, None], *, plots: Plots
 ) -> JPAOptimizeAnalysis:
-    analysis = AutoOptimizeExp().analyze(req.run_result, None, plots=plots)
-    _relabel_auto_figure(plots["fit"])
-    return analysis
+    return AutoOptimizeExp().analyze(req.run_result, None, plots=plots)
 
 
 def _get_writeback_items(
@@ -78,6 +61,11 @@ def _get_writeback_items(
     ]
 
 
+def _summary_lines(source: JpaAutoRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 def run(
     cfg: JPAOptCfg, *, context: RunContext
 ) -> RunRecord[JPAOptCfg, JPAOptimizeResult]:
@@ -90,5 +78,7 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
+    analysis=Analysis(
+        fn=_analyze, writeback=_get_writeback_items, summary_lines=_summary_lines
+    ),
 )

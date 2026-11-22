@@ -12,6 +12,8 @@ Native arb waveforms have an asset-derived length and raise ValueError before sc
 
 Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1. Length sweep is 0.03 µs to 4 * `$qubit.module.x180.waveform.length`.
 
+When the Live preview is enabled, its bars show one shot SEM of the raw class fractions from the same shots. Fewer than two retained shots give no bar.
+
 Raw acquisition and joint fitting require one ADC: Pulse or a single-tone Mux. Live preview uses that readout's circle classifier under Readout → Advanced. Without a classifier, Run still collects raw IQ and Analyze still fits; only the population preview is skipped. A supplied linear classifier cannot show Other; a circle without radius prompts singleshot GE Post.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
@@ -40,4 +42,10 @@ Analysis returns fitted parameters, pre-pulse `initial_populations`, the fixed 3
 
 Set Initial State to the predominant state before the swept drive pulse even when the first sweep point is nonzero. Fit phase offset allows a correction within +/-90 degrees of that initial-state direction; the extrapolated zero-length population can then differ from the pre-pulse population. It is disabled by default. A prior singleshot/ge calibration is optional for raw acquisition. A sweep spanning a few pi lengths captures a full oscillation. Review the measured population curves and overlaid joint-fit curves before applying the complete module proposal.
 
-**Last updated:** 2026-11-01
+## Reading the figures
+
+The live view checks that populations change across the drive-duration sweep. In Analyze, use the dense fit against the acquired points to locate π and π/2. If the fitted π duration lies beyond the sweep, extend the stop to cover a full oscillation before using it. Check the projected-IQ fit and fitted confusion matrix before updating the classifier. The negative log-likelihood is the fitting objective, not a population error or a pass threshold.
+
+Population bars use the shot SEM of the retained IQ shots classified at each duration. This is not the width of the projected IQ histogram or the fit uncertainty of π duration. For the error-bar layout, see Ding Fig. 5-13(a), p. 157; that plot varies CZ pulse width and shows fidelity, not single-qubit populations.
+
+**Last updated:** 2026-11-22

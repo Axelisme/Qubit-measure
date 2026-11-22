@@ -28,31 +28,31 @@ class T1CovInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Single-tone pulse-readout library key.",
+        description="Select the Readout library module that integrates IQ.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Preparation reset library key. Null clears the selection.",
+        description="Select Reset before the pulse sequence; null disables it.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key.",
+        description="Select Pi Pulse, the calibrated π rotation.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in µs.",
+        description="Set Relaxation delay › Stop (µs), the delay sweep endpoint.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count.",
+        description="Set Relaxation delay › Expts (count), including both endpoints.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count.",
+        description="Set Reps (count), shots per point in each round.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count.",
+        description="Set Rounds (count), the acquisition rounds to average.",
     )
 
     dual_exp: bool | None | Keep = Field(

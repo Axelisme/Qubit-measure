@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-20，RB 與 IRB 的 seed 間標準差
+**Last updated:** 2026-11-22，頻譜模型求值
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -114,7 +114,11 @@ Prominence 須同時超過相對 ptp 門檻與 `min_snr * σ`。
 未指定中心時仍取最顯著候選。窗口以選中中心左右各六個半高寬為起點。
 `PeakCandidate.width` 是半 prominence 的全寬，因此窗口半徑為 `3 * width`。
 鄰峰中點裁切窗口後，補入離中心最近的六點，允許跨越中點，不因鄰峰過近拒絕擬合。
-輸入總數不足六點仍失敗。結果的 `freqs`、`observed`、`fitted` 給出實際窗口。
+輸入總數不足六點仍失敗。結果的 `freqs`、`observed`、`fitted` 保留實際擬合樣本。
+`SpectrumFit.evaluate(freqs_mhz)` 用同次擬合的模型在呼叫端指定的座標求值，不重擬合或插值。
+傳入有限的一維 float64 MHz 陣列，座標須在實際擬合取樣的最小值和最大值之間，含端點。
+結果保留座標的形狀與順序，單位與 `observed` 相同。無效座標拋出 `ValueError`。
+呼叫端決定網格與畫法。
 局部 Lorentzian 的 baseline 允許低於窗口最小值，避免有限窗口的峰尾使線寬偏小。
 局部 sinc 從偵測到的主峰寬度初始化，避免以裁切後的 span 初始化到錯誤窄峰。
 無附近候選的 `AnalysisFailed` 列出候選數及門檻，不改擬合遠處的峰。

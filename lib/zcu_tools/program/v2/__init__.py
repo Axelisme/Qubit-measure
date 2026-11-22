@@ -38,6 +38,7 @@ from .modules import (
     WaveformCfg,
     WaveformCfgFactory,
 )
+from .mux_iq import mux_iq_sums
 from .read_axes import (
     IQ,
     Classify,

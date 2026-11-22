@@ -52,12 +52,19 @@ def _run(inp: CPMGInput, *, context: RunContext) -> RunRecord[CPMG_Cfg, CPMG_Res
     return RunRecord(cfg=cfg, result=CPMG_Exp().run(cfg, context=context))
 
 
+def _summary_lines(source: CPMGRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=CPMG_Exp.AXES_SPEC,
     make_form=_CPMG_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_CPMG_analyze, options=lambda source, env: CPMGAnalyzeOptions()
+        fn=_CPMG_analyze,
+        options=lambda source, env: CPMGAnalyzeOptions(),
+        summary_lines=_summary_lines,
     ),
 )
