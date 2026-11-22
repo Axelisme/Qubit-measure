@@ -19,6 +19,7 @@ from zcu_tools.gui.app.measure import controller
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.simulators.ftf import config, environment
+from zcu_tools.simulators.ftf.config.schema import FTFSettings, Numerics
 
 from tools import experiment_wall_time
 from tools.experiment_wall_time import main
@@ -58,11 +59,13 @@ class _SyntheticController:
         self.idle = True
         self.on_run = on_run
         self.on_cancel = on_cancel
+        self.owner_scheduler = SimpleNamespace(is_owner_thread=lambda: True)
+        self.context_control = SimpleNamespace()
         self.run_analyze_control = SimpleNamespace(
             start_run=self.start_run, cancel_run=self.cancel_run
         )
         self.entry_control = SimpleNamespace(
-            open_entry=lambda _request: on_open(), use_point=lambda _point: None
+            new_entry=lambda _request: on_open(), new_point=lambda _point: None
         )
         self.tab_control = SimpleNamespace(
             new_tab=lambda adapter: adapter,
@@ -124,11 +127,14 @@ def core_app() -> Iterator[QCoreApplication]:
 
 
 def _headless_inputs(directory: Path) -> None:
-    fixture = directory / "fixture"
-    fixture.mkdir(parents=True)
-    (fixture / "point.txt").write_text("abc")
+    directory.mkdir(parents=True)
     (directory / "board-profile.yaml").write_text("{}")
-    (directory / "ftf-settings.yaml").write_text("{}")
+    (directory / "default.yaml").write_text("{}")
+    (directory / "entry-template.yaml").write_text(
+        'format: zcu.entry-template\nformat_version: "1.0"\nschema_version: 1\n'
+        'components: {}\naliases: {format: zcu.aliases, format_version: "1.0", aliases: {}}\n'
+    )
+    (directory / "entry-library.yaml").write_text("{}")
     (directory / "case-inputs.json").write_text('{"entry":"demo","point":"initial"}')
     (directory / "overrides.json").write_text("[]")
 
@@ -140,7 +146,7 @@ def _install_headless_controller(
     on_run: Callable[[_SyntheticController], None],
     on_cancel: Callable[[_SyntheticController], None],
     *,
-    on_ftf: Callable[[int, SimpleNamespace], None] | None = None,
+    on_ftf: Callable[[int, FTFSettings, float | None], None] | None = None,
 ) -> None:
     def open_entry() -> None:
         clock.seconds += 40.0
@@ -164,6 +170,14 @@ def _install_headless_controller(
         raising=False,
     )
     monkeypatch.setitem(sys.modules, "zcu_lab.assembly", assembly)
+    seed = ModuleType("zcu_lab.simulation_envs.FTF.startup")
+    monkeypatch.setattr(
+        seed,
+        "seed_demo_point",
+        lambda setup, _context, _template, _library, *, point: setup.new_point(point),
+        raising=False,
+    )
+    monkeypatch.setitem(sys.modules, seed.__name__, seed)
     monkeypatch.setattr(
         measure,
         "Registry",
@@ -173,9 +187,12 @@ def _install_headless_controller(
         ),
     )
     monkeypatch.setattr(program, "build_soccfg", lambda _: object())
-    monkeypatch.setattr(
-        config, "load_ftf", lambda _: SimpleNamespace(with_telemetry=SimpleNamespace)
+    preset = FTFSettings.model_construct(
+        numerics=Numerics.model_construct(
+            time_scale=1.5, seed=42, projection_weight_floor=0.0002
+        )
     )
+    monkeypatch.setattr(config, "load_ftf", lambda _: preset)
     # Supply a synthetic dirty checkout at the subprocess boundary.
     monkeypatch.setattr(
         experiment_wall_time,
@@ -193,10 +210,14 @@ def _install_headless_controller(
         )
 
     def observe_environment(
-        settings: SimpleNamespace, *, soccfg: object, workers: int = 1
+        settings: FTFSettings,
+        *,
+        soccfg: object,
+        workers: int = 1,
+        time_scale: float | None = None,
     ) -> SimpleNamespace:
         if on_ftf is not None:
-            on_ftf(workers, settings)
+            on_ftf(workers, settings, time_scale)
         return make_environment(soccfg)
 
     # The CLI report does not expose the factory argument. Delegate to the existing
@@ -220,10 +241,14 @@ def test_main_configures_ftf_workers_and_stamps_batch_telemetry(
 ) -> None:
     data_dir, output = tmp_path / "inputs", tmp_path / "output"
     _headless_inputs(data_dir)
-    settings_seen: list[tuple[int, str, bool]] = []
+    workers_seen: list[int] = []
+    settings_seen: list[tuple[FTFSettings, float | None]] = []
 
-    def observe_ftf(workers: int, settings: SimpleNamespace) -> None:
-        settings_seen.append((workers, settings.commit, settings.dirty))
+    def observe_ftf(
+        workers: int, settings: FTFSettings, time_scale: float | None
+    ) -> None:
+        workers_seen.append(workers)
+        settings_seen.append((settings, time_scale))
 
     _install_headless_controller(
         monkeypatch,
@@ -238,11 +263,19 @@ def test_main_configures_ftf_workers_and_stamps_batch_telemetry(
         main(
             ["--output", str(output), *worker_args],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             read_commit=lambda: "abc",
         )
         == 0
     )
-    assert settings_seen == [(expected, "abc", True)]
+    assert workers_seen == [expected]
+    ((settings, time_scale),) = settings_seen
+    assert time_scale == 0.0
+    assert settings.numerics.time_scale == 1.5
+    assert settings.numerics.seed == 42
+    assert settings.numerics.projection_weight_floor == 0.0002
+    assert settings.numerics.telemetry.commit == "abc"
+    assert settings.numerics.telemetry.dirty is True
 
 
 @pytest.mark.parametrize("orphan", [False, True], ids=["paired", "orphan"])
@@ -328,16 +361,18 @@ def test_main_times_only_dispatch_to_terminal_and_sums_its_acquires(
     )
 
     assert (
-        main(["--output", str(output)], data_dir=data_dir, read_commit=lambda: "abc")
+        main(
+            ["--output", str(output)],
+            data_dir=data_dir,
+            ftf_dir=data_dir,
+            read_commit=lambda: "abc",
+        )
         == 0
     )
 
     report = json.loads((output / "report.json").read_text())
     [row] = report["rows"]
     assert report["commit"] == "abc"
-    assert report["inputs"]["fixture/point.txt"] == (
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    )
     assert row["wall_s"] == 8.0
     assert row["started_at"] == "2026-11-21T00:00:52+00:00"
     assert row["finished_at"] == "2026-11-21T00:01:00+00:00"
@@ -422,6 +457,7 @@ def test_timeout_continues_only_when_terminal_and_idle_are_observed_in_grace(
         main(
             ["--output", str(output), "--row-timeout", "180"],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             read_commit=lambda: "abc",
         )
         == expected_exit
@@ -515,6 +551,7 @@ def test_timeout_judges_only_the_measured_core_lower_bound(
         main(
             ["--output", str(output), "--row-timeout", "200"],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             read_commit=lambda: "abc",
         )
         == 0

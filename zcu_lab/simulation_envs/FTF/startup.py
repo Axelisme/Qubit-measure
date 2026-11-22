@@ -10,7 +10,12 @@ from zcu_tools.analysis.flux import DevicePeriod, offset_for_flux
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.format_version import YamlMap
-from zcu_tools.gui.app.measure.startup_context import StartupContext, simulation_workers
+from zcu_tools.gui.app.measure.startup_context import (
+    StartupContext,
+    StartupParameters,
+    StartupSetup,
+    simulation_workers,
+)
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.program import build_soccfg
@@ -81,7 +86,12 @@ def startup(ctx: StartupContext) -> None:
         ctx.setup.use_point("initial")
     else:
         ctx.progress("Seeding FTF demo entry from template")
-        _seed_entry(ctx, template)
+        seed_demo_point(
+            ctx.setup,
+            ctx.context,
+            template,
+            Path(__file__).with_name("entry-library.yaml"),
+        )
 
     ctx.progress("Building offline FTF resources")
     soccfg = build_soccfg(yaml.safe_load(PROFILE_PATH.read_text()))
@@ -177,9 +187,21 @@ def _seed_predictors(
             save_predictor_file(path, predictor)
 
 
-def _seed_entry(ctx: StartupContext, template: EntryTemplate) -> None:
-    """Install global defaults before inheriting them into the initial point."""
-    library = ModuleLibrary(Path(__file__).with_name("entry-library.yaml")).snapshot()
+def seed_demo_point(
+    setup: StartupSetup,
+    context: StartupParameters,
+    template: EntryTemplate,
+    library_path: Path,
+    *,
+    point: str = "initial",
+) -> None:
+    """Populate a new open entry and select its demo point without starting FTF.
+
+    Install the authored components and library in global documents, then
+    inherit them into point and install its aliases. Use a fresh entry;
+    validation and owner failures propagate without rolling back earlier writes.
+    """
+    library = ModuleLibrary(library_path).snapshot()
     if invalid := library.document().invalid_entries:
         raise ValueError(f"Invalid FTF demo module library: {invalid}")
     for name, component in template.components.items():
@@ -187,10 +209,10 @@ def _seed_entry(ctx: StartupContext, template: EntryTemplate) -> None:
             component.model_dump(exclude_unset=True)
         )
         fields.pop("kind")
-        ctx.context.add_component(name, component.kind, fields, point=None)
+        context.add_component(name, component.kind, fields, point=None)
 
     def install_library() -> None:
-        control = ctx.context.control
+        control = context.control
         target = control.read_context()
         for key in library.module_keys():
             control.apply_library_change(
@@ -205,11 +227,11 @@ def _seed_entry(ctx: StartupContext, template: EntryTemplate) -> None:
                 ),
             )
 
-    ctx.calls.call(install_library)
-    ctx.setup.new_point("initial")
-    ctx.context.apply_alias_rows(
+    context.calls.call(install_library)
+    setup.new_point(point)
+    context.apply_alias_rows(
         tuple(
             AliasRow(name, value) for name, value in template.aliases.aliases.items()
         ),
-        point="initial",
+        point=point,
     )

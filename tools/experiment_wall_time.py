@@ -18,7 +18,6 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from os.path import abspath
 from pathlib import Path
-from shutil import copytree
 from time import perf_counter
 from types import FrameType
 from typing import TYPE_CHECKING, Annotated, Protocol
@@ -61,6 +60,7 @@ from tools.analyze_routing_telemetry import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DATA_DIR = _REPO_ROOT / "tools" / "data" / "experiment_wall_time"
+_FTF_DIR = _REPO_ROOT / "zcu_lab" / "simulation_envs" / "FTF"
 _OUTPUT_ROOT = _REPO_ROOT / ".agent_state" / "benchmark" / "wall-time"
 _DEFAULT_ROW_TIMEOUT_S = 360.0
 _MIN_ROW_TIMEOUT_S = 180.0
@@ -109,7 +109,7 @@ def _load_overrides(
 
 @dataclass(frozen=True)
 class WallTimeCase:
-    """Registered adapter key, fixture labels and raw Form writes for this Run.
+    """Registered adapter key, project labels and raw Form writes for this Run.
 
     overrides maps canonical field paths to JSON values. Empty keeps all Open
     defaults. Apply a nonempty mapping as one atomic Form write.
@@ -186,7 +186,7 @@ class Inventory:
     repo-relative paths for both, except external declarations stay absolute.
 
     measure(case, data_dir, telemetry, record_attempt) prepares exactly one Run
-    with read-only FTF inputs and fixture in data_dir. It calls record_attempt
+    with read-only case inputs in data_dir. It calls record_attempt
     once with the prepared Run, or with FormErrors if defaults do not resolve.
     The prepared Run writes acquires into the given existing telemetry directory.
     Keep the Run's resources alive until record_attempt returns. Setup failures
@@ -299,22 +299,18 @@ def summarize_acquires(directory: Path, *, live: bool = False) -> AcquireCoreTot
     return totals
 
 
-def _input_hashes(data_dir: Path) -> dict[str, str]:
-    paths = [
-        data_dir / "ftf-settings.yaml",
-        data_dir / "board-profile.yaml",
-        data_dir / "case-inputs.json",
-        data_dir / "overrides.json",
-        *sorted(
-            parent / name
-            for parent, _, files in (data_dir / "fixture").walk(on_error=_raise_io)
-            for name in files
-        ),
-    ]
-    return {
-        p.relative_to(data_dir).as_posix(): sha256(p.read_bytes()).hexdigest()
-        for p in paths
+def _input_hashes(data_dir: Path, ftf_dir: Path) -> dict[str, str]:
+    paths = {
+        name: data_dir / name
+        for name in ("board-profile.yaml", "case-inputs.json", "overrides.json")
     }
+    paths.update(
+        {
+            (_FTF_DIR.relative_to(_REPO_ROOT) / name).as_posix(): ftf_dir / name
+            for name in ("default.yaml", "entry-template.yaml", "entry-library.yaml")
+        }
+    )
+    return {key: sha256(path.read_bytes()).hexdigest() for key, path in paths.items()}
 
 
 def _current_commit() -> str:
@@ -480,6 +476,7 @@ class _ControllerRun:
 
 @dataclass
 class _RunOwner:
+    ftf_dir: Path = _FTF_DIR
     workers: int = 1
     commit: str | None = None
     dirty: bool | None = None
@@ -518,29 +515,36 @@ def _measure_run(
     from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
+    from zcu_tools.gui.app.measure.startup_context import (
+        OwnerCalls,
+        StartupParameters,
+        StartupSetup,
+    )
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.session.context_types import EntryRequest
     from zcu_tools.program import build_soccfg
+    from zcu_tools.resources.entry import load_entry_template
     from zcu_tools.simulators.ftf.config import load_ftf
     from zcu_tools.simulators.ftf.environment import ftf
+
+    from zcu_lab.simulation_envs.FTF.startup import seed_demo_point
 
     app = owner.application()
     # Run writes an acquired ledger event. Only the disposable project is writable.
     with ExitStack() as cleanup:
         project = telemetry.parent / "project"
-        copytree(data_dir / "fixture", project)
+        project.mkdir()
         soccfg = build_soccfg(
             yaml.safe_load(
                 (data_dir / "board-profile.yaml").read_text(encoding="utf-8")
             )
         )
-        settings = load_ftf(data_dir / "ftf-settings.yaml").with_telemetry(
+        settings = load_ftf(owner.ftf_dir / "default.yaml").with_telemetry(
             enabled=True,
             directory=telemetry.resolve(),
             commit=owner.commit,
             dirty=owner.dirty,
         )
-        env = ftf(settings, soccfg=soccfg, workers=owner.workers)
+        env = ftf(settings, soccfg=soccfg, workers=owner.workers, time_scale=0.0)
         if env.close_backend is not None:
             cleanup.callback(env.close_backend)
         try:
@@ -558,8 +562,16 @@ def _measure_run(
             raise
         cleanup.callback(_close_controller, ctrl, cleanup, owner)
         ctrl.session_services.soc_connection.install_soc(env.soc, env.soccfg)
-        ctrl.entry_control.open_entry(EntryRequest(case.entry))
-        ctrl.entry_control.use_point(case.point)
+        calls = OwnerCalls(ctrl.owner_scheduler, ctrl.get_bus())
+        setup = StartupSetup(calls, ctrl.entry_control)
+        setup.new_entry(case.entry)
+        seed_demo_point(
+            setup,
+            StartupParameters(calls, ctrl.context_control),
+            load_entry_template(owner.ftf_dir / "entry-template.yaml"),
+            owner.ftf_dir / "entry-library.yaml",
+            point=case.point,
+        )
         tab = ctrl.tab_control.new_tab(case.adapter)
         form = ctrl.cfg_resources.lookup(tab)
         if case.overrides:
@@ -782,6 +794,7 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     data_dir: Path = _DATA_DIR,
+    ftf_dir: Path = _FTF_DIR,
     discover: Callable[[], Inventory] | None = None,
     read_commit: Callable[[], str] = _current_commit,
 ) -> int:
@@ -791,8 +804,9 @@ def main(
     and --output (a new directory). None reads sys.argv. With no selectors,
     measure every registered adapter. With no output, create a timestamped path
     under the repository's wall-time output root. data_dir holds the board,
-    FTF settings, fixture, case declarations and overrides. discover lists the
-    adapters and guides and supplies a runner. With no discover override, use
+    case declarations and overrides. ftf_dir holds the FTF preset, entry
+    template and module library, defaulting to the standard FTF source directory.
+    discover lists the adapters and guides and supplies a runner. With no discover override, use
     the offline Controller and pass --workers (a positive integer, default 1)
     to each simulated FTF environment. read_commit supplies the batch revision;
     by default read Git HEAD. The default runner stamps each telemetry row with
@@ -807,7 +821,14 @@ def main(
     incomplete or not_run rows. KeyboardInterrupt stops the batch and reports
     from its journal under the same exit status rule.
     """
-    return _main(argv, data_dir, discover, read_commit, _Interruption(), _RunOwner())
+    return _main(
+        argv,
+        data_dir,
+        discover,
+        read_commit,
+        _Interruption(),
+        _RunOwner(ftf_dir=ftf_dir),
+    )
 
 
 def _main(
@@ -887,7 +908,7 @@ def _main(
     )
     plan = BatchPlan(
         commit=commit,
-        inputs=_input_hashes(data_dir),
+        inputs=_input_hashes(data_dir, owner.ftf_dir),
         cases={},
         adapters=dict(inventory.adapters),
         guides=list(inventory.guides),

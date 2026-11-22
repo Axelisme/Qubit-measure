@@ -31,10 +31,10 @@ _ADAPTERS = {**_FREQUENCY, "fake/power": None, "other": None}
 def data_dir(tmp_path: Path) -> Path:
     """Supply minimal hashed inputs for tests which replace the Run edge."""
     data_dir = tmp_path / "inputs"
-    fixture = data_dir / "fixture" / "result" / "demo" / "points" / "initial"
-    fixture.mkdir(parents=True)
-    (fixture / "parameters.yaml").write_bytes(b"abc")
-    (data_dir / "ftf-settings.yaml").write_bytes(b"settings")
+    data_dir.mkdir()
+    (data_dir / "default.yaml").write_bytes(b"settings")
+    (data_dir / "entry-template.yaml").write_bytes(b"components and aliases")
+    (data_dir / "entry-library.yaml").write_bytes(b"modules")
     (data_dir / "board-profile.yaml").write_bytes(b"profile")
     (data_dir / "overrides.json").write_bytes(b"[]")
     (data_dir / "case-inputs.json").write_text(
@@ -123,6 +123,7 @@ def test_main_keeps_committed_rows_when_interrupted_before_the_next_run(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: _inventory(_ADAPTERS, [_GUIDE], measure),
             read_commit=lambda: "abc",
         )
@@ -183,6 +184,7 @@ def test_interrupted_run_has_a_persisted_start_but_no_measured_time(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: Inventory(_FREQUENCY, [_GUIDE], measure),
             read_commit=lambda: "abc",
         )
@@ -224,6 +226,7 @@ def test_report_only_recovers_from_persisted_facts_after_a_hard_stop(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: Inventory(_ADAPTERS, [_GUIDE], measure),
             read_commit=lambda: "abc",
         )
@@ -293,6 +296,7 @@ def test_invalid_row_journal_is_a_tool_error_not_a_usage_error(
         main(
             ["--output", str(source)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=discover,
             read_commit=lambda: "abc",
         )
@@ -312,7 +316,13 @@ def test_invalid_row_journal_is_a_tool_error_not_a_usage_error(
         else ["--resume-from", str(source), "--output", str(continued)]
     )
     with pytest.raises(ValueError, match=diagnostic):
-        main(argv, data_dir=data_dir, discover=discover, read_commit=lambda: "abc")
+        main(
+            argv,
+            data_dir=data_dir,
+            ftf_dir=data_dir,
+            discover=discover,
+            read_commit=lambda: "abc",
+        )
     assert not (source / "report.json").exists()
     assert not continued.exists()
 
@@ -326,6 +336,7 @@ def test_report_only_rejects_a_journal_without_core_fields(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: _inventory(_FREQUENCY, [_GUIDE], lambda *_: 2.0),
             read_commit=lambda: "abc",
         )
@@ -364,6 +375,7 @@ def test_resume_reuses_only_matching_committed_rows_and_marks_the_first_new_run_
         main(
             ["--output", str(source)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: _inventory(_ADAPTERS, [_GUIDE], original),
             read_commit=lambda: "abc",
         )
@@ -378,7 +390,7 @@ def test_resume_reuses_only_matching_committed_rows_and_marks_the_first_new_run_
 
     commit = "def" if change == "commit" else "abc"
     if change == "input":
-        (data_dir / "board-profile.yaml").write_bytes(b"different profile")
+        (data_dir / "entry-library.yaml").write_bytes(b"different modules")
     argv = ["--output", str(output), "--resume-from", str(source), "--select", "fake"]
 
     def discover() -> Inventory:
@@ -386,7 +398,13 @@ def test_resume_reuses_only_matching_committed_rows_and_marks_the_first_new_run_
 
     if change is not None:
         with pytest.raises(SystemExit) as raised:
-            main(argv, data_dir=data_dir, discover=discover, read_commit=lambda: commit)
+            main(
+                argv,
+                data_dir=data_dir,
+                ftf_dir=data_dir,
+                discover=discover,
+                read_commit=lambda: commit,
+            )
         assert raised.value.code == 2
         assert (
             "commit differs" if change == "commit" else "input SHA-256 differs"
@@ -396,7 +414,13 @@ def test_resume_reuses_only_matching_committed_rows_and_marks_the_first_new_run_
         return
 
     assert (
-        main(argv, data_dir=data_dir, discover=discover, read_commit=lambda: commit)
+        main(
+            argv,
+            data_dir=data_dir,
+            ftf_dir=data_dir,
+            discover=discover,
+            read_commit=lambda: commit,
+        )
         == 0
     )
     assert ran == ["fake/power"]
@@ -456,6 +480,7 @@ def test_failed_run_is_journaled_before_idle_check_and_never_timed(
     code = main(
         ["--output", str(output), "--select", selection],
         data_dir=data_dir,
+        ftf_dir=data_dir,
         discover=lambda: Inventory(_ADAPTERS, [_GUIDE], measure),
         read_commit=lambda: "abc",
     )
@@ -502,6 +527,7 @@ def test_summary_groups_identical_diagnostics_and_lists_each_failure_record(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: Inventory(_ADAPTERS, [_GUIDE], measure),
             read_commit=lambda: "abc",
         )
@@ -539,6 +565,7 @@ def test_resume_keeps_a_failed_run_and_its_original_diagnostic_without_retrying(
         return main(
             ["--output", str(output), "--select", "fake/frequency", *options],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=discover,
             read_commit=lambda: "abc",
         )
@@ -601,6 +628,7 @@ def test_main_selects_exact_experiment(tmp_path: Path, data_dir: Path) -> None:
                 str(output),
             ],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: _inventory(_ADAPTERS, [_GUIDE], measure),
             read_commit=lambda: "abc",
         )
@@ -631,6 +659,7 @@ def test_main_reports_every_adapter_and_both_guide_gaps(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: _inventory(
                 adapters, [_GUIDE, variant_guide, unmatched_guide], measure
             ),
@@ -678,6 +707,7 @@ def test_main_flags_only_unrounded_core_seconds_above_180(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: _inventory(dict.fromkeys(evolve), [], measure),
             read_commit=lambda: "abc",
         )
@@ -707,6 +737,7 @@ def test_main_reports_known_ftf_exclusions_without_trying_run(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: _inventory(
                 {**_FREQUENCY, "fake/jpa": None}, [_GUIDE], measure
             ),
@@ -747,6 +778,7 @@ def test_main_routes_overrides_only_to_the_named_adapter(
         main(
             ["--select", "fake", "--select", "fake/frequency", "--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: _inventory(_ADAPTERS, [_GUIDE], measure),
             read_commit=lambda: "abc",
         )
@@ -783,6 +815,7 @@ def test_main_retains_unresolved_form_fields_and_slots_in_their_row(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: _inventory(
                 {**_FREQUENCY, "fake/blocked": None}, [_GUIDE], measure
             ),
@@ -824,6 +857,7 @@ def test_main_propagates_non_experiment_failures(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: _inventory(_FREQUENCY, [_GUIDE], measure),
             read_commit=lambda: "abc",
         )
@@ -842,6 +876,7 @@ def test_main_keeps_run_wall_when_telemetry_is_missing(
         main(
             ["--output", str(output)],
             data_dir=data_dir,
+            ftf_dir=data_dir,
             discover=lambda: _inventory(_FREQUENCY, [_GUIDE], measure),
             read_commit=lambda: "abc",
         )
