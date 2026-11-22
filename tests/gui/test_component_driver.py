@@ -231,6 +231,10 @@ def test_visible_snapshot_ignores_mistyped_native_child(surface) -> None:
     assert "internal_text_control" not in {
         widget.object_name for widget in snapshot.widgets
     }
+    with pytest.raises(LookupError):
+        _user_input.ComponentDriver(surface).observe(
+            object_name="internal_text_control"
+        )
 
 
 def test_only_visible_legend_text_is_observed(surface, qapp) -> None:
