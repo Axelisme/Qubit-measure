@@ -113,9 +113,11 @@ product sum。`cycle_curves` 從這份 record 算出 live plot 的全 feature �
 `CycleModel` 持有作者的三態曲線、解析導數、參數名與 bounds。Rabi、T2 echo 與
 T2 Ramsey 使用這個模型。`t1_model()` 回傳 `RateModel`，以 `D₀ exp(Gx)` 表示
 自由 stochastic 初始 drive 與 detailed-balance relaxation。`fit_cycle` 從必填的 init
-以模型共變異數加權的 GMM 聯合擬合 65 個特徵。它回傳參數、Wald 誤差與
-共用 nuisances，並用最後一階段的白化殘差 `r` 計算 `J`、`df`、`J/df`、
-期望帶 `1 ± 2√(2/df)` 和 `|r| > 3` 的比例。這些數值不決定擬合是否成功。
+以模型共變異數加權的 GMM 聯合擬合 65 個特徵，只跑主擬合，不跑巢狀診斷擬合。
+它回傳參數、Wald 誤差與共用 nuisances，並用最後一階段的白化殘差 `r` 計算 `J`、
+`df`、`J/df`、期望帶 `1 ± 2√(2/df)` 和 `|r| > 3` 的比例。Analyze 照實顯示數值，
+不據此拒絕擬合或標示模型合不合格。五族目前不提議寫回；日後若新增寫回，
+以這些殘差診斷決定是否預選或推薦，不改變 Analyze 的結果。
 T1 的 init 是 `{"t1": textbook_time}`；`CycleFit.relaxation` 保存兩個 eigen time，
 並以 thermal 加權的 L1 population 變化振幅較大者作為 T1。
 

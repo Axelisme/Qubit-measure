@@ -59,10 +59,10 @@ The header and summary report the joint π gain and its Wald standard error, R a
 - `j_per_df` is J/df. `expected_band_low` and `expected_band_high` are the endpoints of the approximate χ² reference band 1 ± 2√(2/df).
 - `tail_fraction` is the fraction of all whitened components with |r| > 3. The header shows it as a percentage. These are the 65-component residuals used by the joint fit, not the one-dimensional residuals in the lower panel.
 
-The summary also reports the fitted frequency and its Wald error, and the first-read π gain. R = 1 / (2π × gain span × frequency standard error) measures how the frequency error compares with the finite gain span. The analysis uses no cutoff on these numbers.
+The summary also reports the fitted frequency and its Wald error, and the first-read π gain. R = 1 / (2π × gain span × frequency standard error) measures how the frequency error compares with the finite gain span. Analyze shows these values without a pass/fail label or cutoff.
 The `fit` figure shows the first-read IQ projection and, when available, the cosine used to seed the joint fit. Error bars are pointwise shot SEM from the saved first-read IQ moments along that projection. If the moments cannot supply a shot SEM, the legend says so and the points have no bars.
 With a seed fit, measured points are not connected. The dashed lines mark the seed π and π/2 gains, and the shaded bands show their parameter standard errors. R² compares the seed fit with the first-read data only.
-When the first-read fit is unavailable, the figure connects the measured points, keeps any available shot SEM, and omits the fit curve, estimate markers and R². The summary gives `first_read_pi_amp: null`.
+If the first-read fit gives no estimate, `fit` says “First-read fit unavailable,” connects the measured points and keeps any available shot SEM. It omits the fit curve, estimate markers and R². If the joint fit succeeds, the summary gives `first_read_pi_amp: null`.
 Invalid inputs and joint fit errors still stop Analyze. The live plot and saved sums remain.
 
 This experiment proposes no writeback. Compare `pi_amp` with `first_read_pi_amp`, and calibrate x180 with `twotone/rabi/amp_rabi`.
