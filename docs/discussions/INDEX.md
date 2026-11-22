@@ -228,6 +228,7 @@
 - 2026-11-22 [Amp Rabi 的 shot moments](2026-11-22-amp-rabi-shot-moments.md)：資料格式。同批校正 IQ 保留既有平均，native 可選 moments；驗所有現有變數後，Labber 仍只匯出原單 log。
 - 2026-11-22 [Mux 逐 tone 校正 IQ 矩與 R11](2026-11-22-mux-iq-moments-and-r11.md)：資料格式。Reducer 按參與 tone 順序計算完成輪的同批校正六矩，保留既有平均與舊檔。
 - 2026-11-23 [Labber scalar 匯出的索引軸](2026-11-23-labber-scalar-index-axis.md)：資料格式。匯出時為無軸 scalar 加一點的索引軸，native 結果與 reader 不變。
+- 2026-11-23 [Coherence 的 shot SEM 只隨當次 Run 交接](2026-11-23-coherence-run-only-shot-sem.md)：資料入庫。Mux Ramsey／Echo 與單 qubit Echo 不把矩寫入 Native 或 Labber，重載後重算不畫棒。
 
 ## 量測策略
 
@@ -253,3 +254,4 @@
 - 2026-11-21 [Chain length 掃描固定 pulse 與 ADC window 的長度差](2026-11-21-chain-length-fixed-margin.md)：讀出時序。每點 pulse 長度為當點 ADC window 加上可編輯的長度差，不在 cfg 另填飛行時間。
 - 2026-11-21 [Rπ length 沿用讀出模組的長度差](2026-11-21-rpi-length-fixed-margin.md)：讀出時序。Rπ 的 ADC window 掃描沿用可編輯的模組長度差，保留交替脈衝序列與結果形狀。
 - 2026-11-21 [讀出範本在 ADC 窗口前後各留 0.015 µs](2026-11-21-readout-template-window-margin.md)：預設時序。範本、DPM 寫回與普通 onetone 表單共用 0.03 µs 的長度差。
+- 2026-11-23 [MIST single trace 保留平均 IQ 的位移大小](2026-11-23-mist-single-trace-observable.md)：讀圖語意。Live 與預設 Analyze 用同一掃描前段複數參考，畫幅值而不套用 shot SEM。

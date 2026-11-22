@@ -197,12 +197,26 @@ def run(
     return RunRecord(cfg=cfg, result=MuxT2EchoExp().run(cfg, context=context))
 
 
+def _summary_lines(source: MuxT2EchoRunResult) -> tuple[str, ...]:
+    cfg, result = source.cfg, source.result
+    lines = [] if cfg is None else [f"Reps×Rounds {cfg.reps}×{cfg.rounds}"]
+    for row, index in enumerate(result.tone_indices):
+        tone = f"Tone {index}" if cfg is None else cfg.tones[int(index)].name
+        detune = result.actual_detunes[row]
+        if np.isfinite(detune):
+            lines.append(f"{tone} · Applied detune = {detune:.6f} MHz")
+    return tuple(lines)
+
+
 DEFINITION = Adapter(
     spec=replace(MuxT2EchoExp.AXES_SPEC, save_stem=mux_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze, options=_MuxT2Echo_options, writeback=_get_writeback_items
+        fn=_analyze,
+        options=_MuxT2Echo_options,
+        writeback=_get_writeback_items,
+        summary_lines=_summary_lines,
     ),
 )
