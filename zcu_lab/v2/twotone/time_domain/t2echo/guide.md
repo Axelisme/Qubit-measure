@@ -21,4 +21,4 @@ R² compares residuals with data variation. Normalized residual RMS gives a resi
 
 Writeback proposes `qubit.t2e` and an independent bias sample when available; it does not change RF frequency or module slots. T₂/sample proposals are preselected only with positive finite T₂, finite nonnegative relative error ≤ 0.5, R² ≥ 0.9 and normalized residual RMS ≤ 0.1. Failed, invalid or unavailable checks leave candidates unselected for manual review.
 
-For `t2echo`, null disables **Reset** or clears the named Readout, π or π/2 pulse, delay Stop/Expts, detune ratio, Reps or Rounds. Required blanks left after overrides fail readiness before Run. Null for **Fit method** or **Fit phase offset (fringe only)** fails at Analyze.
+For `t2echo`, null disables **Reset**. Null Readout, π or π/2 pulse selectors fail during selection, before overrides. Null delay Stop/Expts, detune ratio, Reps or Rounds leaves a blank; required blanks left after overrides fail readiness before Run. Null for **Fit method** or **Fit phase offset (fringe only)** fails at Analyze.

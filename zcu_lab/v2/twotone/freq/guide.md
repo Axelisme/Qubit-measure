@@ -20,4 +20,4 @@ Analyze shades the fitted interval, with a zoom if it spans at most half the sca
 
 Only adopt writeback if the feature is the intended qubit line. It proposes fitted `qubit.freq` and `qubit.kappa` (FWHM), plus an independent frequency sample when Run bias evidence is available. Module slots stay unchanged. For a prepared 3–2 or a ground-state 0–3 scan, record the measured carrier separately rather than writing it to a 0–1 calibration.
 
-For `twotone_spectrum`, null disables **Reset** or clears the named Readout, Probe Pulse, Gain, Length, Reps or Rounds. Unresolved required blanks after overrides fail readiness before Run. Null **Model type** fails at Analyze; omit it to keep the existing choice.
+For `twotone_spectrum`, null disables **Reset**. Null **Readout** or **Probe Pulse** fails during selection, before overrides. Null Gain, Length, Reps or Rounds leaves a blank; unresolved required blanks fail readiness before Run. Null **Model type** fails at Analyze; omit it to keep the existing choice.

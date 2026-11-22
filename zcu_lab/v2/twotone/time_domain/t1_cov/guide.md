@@ -20,4 +20,4 @@ Analyze overlays the decay and reports T₁ and its fit standard error, not poin
 
 Writeback proposes `$qubit.t1`. Check that the fit covers the decay and that its uncertainty supports the lifetime. Load accepts native paired-readout records, not older experiment tags.
 
-For `t1_cov`, null disables **Reset** or clears the named Readout, Pi Pulse, sweep Stop/Expts, Reps or Rounds. Required blanks left after overrides fail readiness before Run. Null **Dual exponential** or **Skip leading points** fails at Analyze. Set **Number of states** on the tab; the recipe does not override it.
+For `t1_cov`, null disables **Reset**. Null **Readout** or **Pi Pulse** fails during selection, before overrides. Null sweep Stop/Expts, Reps or Rounds leaves a blank; required blanks left after overrides fail readiness before Run. Null **Dual exponential** or **Skip leading points** fails at Analyze. Set **Number of states** on the tab; the recipe does not override it.

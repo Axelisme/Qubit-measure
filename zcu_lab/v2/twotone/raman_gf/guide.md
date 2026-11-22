@@ -6,7 +6,7 @@ One **Raman drive** pulse → calibrated **Readout** → **Relax delay**. There 
 
 - Measure f₀₃ from ground, then f₃₂ after calibrated π₀₃ preparation. Enter **Carrier center** = `(f₀₃ − f₃₂)/2` in MHz; it starts blank. Actual drive RF = carrier center + **Two-photon detuning**/2. Use the measured values, not model predictions.
 - **Scan mode** `frequency` holds **Drive gain › Start**; `gain` holds **Two-photon detuning › Start**; `frequency_gain` sweeps both. Gain is a signed DAC full-scale fraction in [−1, 1], not a rotation angle or a common pulse area across waveforms.
-- **Raman drive › Waveform** starts at arbitrary and needs an asset; select another available shape to set duration directly. Check generator, gain and timing. Set **Shots per point** for the desired precision and allow enough **Relax delay** for ground preparation.
+- **Raman drive › Waveform** starts at arbitrary and needs an asset; select another available shape to set duration directly. For a sampled √sin envelope, use a peak-normalized asset with `√sin(πt/T)` for `0 ≤ t ≤ T`. Check generator, gain and timing. Set **Shots per point** for the desired precision and allow enough **Relax delay** for ground preparation.
 - Calibrate **Readout** with `singleshot/qutrit_population` at the same readout settings. Run needs the acquired centroid3 classifier, and Analyze needs its confusion matrix. A circle/linear classifier cannot identify f. Recalibrate after changing readout settings.
 
 See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shared GUI steps.
@@ -25,4 +25,4 @@ Look for consistently high corrected f and low e. If the peak is at +0.8 MHz two
 
 Older raw-shot files cannot load. Older 3.x count files can expose counts but cannot restore a typed cfg for Analyze; the current calibration does not fill the gap.
 
-For `raman_gf`, explicit null clears named Form inputs, unlike omission. `waveform_asset` edits the asset of an existing arbitrary waveform: null clears it, and using this input on another waveform family can fail the edit before readiness. For a sampled √sin envelope, use a normalized asset with `√sin(πt/T)` over `0 ≤ t ≤ T`; the sweep does not generate that envelope. Unresolved required fields for the selected mode after overrides fail readiness before Run; a missing centroid3 blocks acquisition. After a successful Run, Analyze failure still leaves the counts available to save.
+For `raman_gf`, null **Readout** or **Raman drive** fails during selection, before overrides. Other nulls clear the named value rather than keeping it. `waveform_asset` edits the asset of an arbitrary waveform; on another shape the edit can fail before readiness. Required blanks for the selected mode fail readiness before Run; a missing centroid3 blocks acquisition. After a successful Run, Analyze failure still leaves the counts available to save.

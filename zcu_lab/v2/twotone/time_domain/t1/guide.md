@@ -19,4 +19,4 @@ Analyze overlays the decay curve and reports T₁ with fit standard error; a dua
 
 Writeback proposes `qubit.t1` and its fit error, plus an independent T₁ sample when Run bias evidence is available. It does not change module slots. Review the curve and uncertainty before adopting it.
 
-For `t1`, null disables **Reset**, or clears the named Readout, Pi Pulse, sweep Stop/Expts, Reps or Rounds. Required blanks left after overrides fail readiness before Run. Null **Dual exponential** or **Skip leading points** fails at Analyze.
+For `t1`, null disables **Reset**. Null **Readout** or **Pi Pulse** fails during selection, before overrides. Null sweep Stop/Expts, Reps or Rounds leaves a blank; required blanks left after overrides fail readiness before Run. Null **Dual exponential** or **Skip leading points** fails at Analyze.

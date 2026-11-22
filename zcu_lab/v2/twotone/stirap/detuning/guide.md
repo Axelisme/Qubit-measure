@@ -16,4 +16,4 @@ Run shows measured g/e/f fractions, with requested Pump detuning on x and Stokes
 
 The cross marks the largest finite corrected f sampled on the grid; ties use the first acquired point. Look for a stable high-f, low-e region. If it centers on Pump +0.5 MHz and Stokes −0.4 MHz, refine around those offsets, or add them to the respective carriers and center the next detuning scan at zero. No writeback is proposed.
 
-For `stirap_detuning`, null clears the corresponding detuning endpoints or counts, carriers, channels, gains, waveform or Readout selections, lead, shots or relaxation wait. Unresolved required fields after overrides fail readiness before Run; missing saved readout calibration blocks acquisition. A completed Run can still save if Analyze fails.
+For `stirap_detuning`, null waveform or **Readout** selectors fail during selection, before overrides. Null detuning endpoints/counts, carriers, channels, gains, lead, shots or relax delay leaves a blank; required blanks after overrides fail readiness before Run. Missing centroid3 blocks acquisition. A completed Run can still save if Analyze fails.

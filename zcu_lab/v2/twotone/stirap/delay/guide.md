@@ -21,4 +21,4 @@ A large matrix condition number or small minimum singular value means the correc
 
 The dotted marker is the largest finite sampled corrected f, not a global optimum. Ties use the first acquired point; no finite point yields no peak. Choose a region of high corrected f and low e. If the marker is at the +0.10 µs endpoint, extend that endpoint while retaining the original overlap, then repeat. No writeback is proposed.
 
-For `stirap_delay`, null clears generator channels, waveform or Readout selections, shots or relaxation wait. Unresolved required fields after overrides fail readiness before Run; missing saved readout calibration blocks acquisition. A completed Run can still save if Analyze fails.
+For `stirap_delay`, null waveform or **Readout** selectors fail during selection, before overrides. Null channels, shots or relax delay leaves a blank; required blanks after overrides fail readiness before Run. Missing centroid3 blocks acquisition. A completed Run can still save if Analyze fails.

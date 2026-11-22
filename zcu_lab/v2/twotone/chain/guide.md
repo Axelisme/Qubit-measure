@@ -22,4 +22,4 @@ Analyze refits the same curve. Gray triangles are other candidates; the dotted l
 
 Read **Peak center** and **Sigma-peak FWHM** in MHz with their fit errors. Noise-floor clipping can make a weak peak appear narrower. To calibrate `$qubit.freq` and `$qubit.kappa`, run `twotone/freq` around the center; this experiment offers no writeback.
 
-For `twotone_chain`, null disables **Reset** but clears the selected **Readout** or **Probe Pulse** or the named Gain, Length, Reps or Rounds. Unresolved required inputs after overrides fail readiness before Run. Null **Expected center** selects the most prominent peak at Analyze.
+For `twotone_chain`, null disables **Reset** but null for **Readout** or **Probe Pulse** fails during selection, before overrides. Null Gain, Length, Reps or Rounds leaves a blank; unresolved required blanks fail readiness before Run. Null **Expected center** selects the most prominent peak at Analyze.

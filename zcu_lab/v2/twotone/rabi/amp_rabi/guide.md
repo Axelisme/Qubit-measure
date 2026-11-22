@@ -20,4 +20,4 @@ Analyze overlays a cosine. π and π/2 are the gains for half and quarter of a R
 
 Writeback proposes `pi_amp`/`pi2_amp` pulse copies with fitted gains, separate `qubit.module.x180/x90` assignments, and `qubit.ext.pi_product = fitted π gain × source pulse length`; it needs acquired Run settings. For a prepared 3–2 scan, record the gain with its carrier, channel and duration instead of replacing your 0–1 pulses.
 
-For `amplitude_rabi`, null disables **Reset**, clears **Readout** or **Rabi Pulse**, or clears the named frequency, length, both `gain_range` endpoints, Expts, Reps or Rounds. It is not omission. Unresolved required blanks after overrides fail readiness before Run. Null **Skip points** fails at Analyze.
+For `amplitude_rabi`, null disables **Reset**. Null **Readout** or **Rabi Pulse** fails during selection, before overrides. Null frequency, length, `gain_range` (both endpoints), Expts, Reps or Rounds leaves a blank; unresolved required blanks fail readiness before Run. Null **Skip points** fails at Analyze.

@@ -20,4 +20,4 @@ Analyze draws the fitted oscillation and marks π and π/2, the durations for ha
 
 Writeback offers `qubit.ext.rabi_freq`; with source settings it also offers `pi_len`/`pi2_len` pulse copies with fitted lengths, separate X180/X90 slot assignments and `qubit.ext.pi_product = source gain × fitted π length`. It does not edit `pi_amp`/`pi2_amp`.
 
-For `time_rabi`, null disables **Reset** or clears the named Readout, Rabi Pulse, Frequency, Gain, length Stop/Expts, Reps or Rounds. Unresolved required blanks after overrides fail readiness before Run. Null **Fit decay envelope** or **Fit phase offset** fails at Analyze.
+For `time_rabi`, null disables **Reset**. Null **Readout** or **Rabi Pulse** fails during selection, before overrides. Null Frequency, Gain, length Stop/Expts, Reps or Rounds leaves a blank; unresolved required blanks fail readiness before Run. Null **Fit decay envelope** or **Fit phase offset** fails at Analyze.

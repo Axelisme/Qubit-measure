@@ -18,4 +18,4 @@ Analyze shows measured fractions above corrected fractions, using the Run's save
 
 The corrected f cross marks the largest finite sampled estimate; ties go to the first acquired point, and no finite value gives no peak. Select a broad region of high f and low e, then refine the grid. If it reaches an edge, extend within the approved range before adopting the gains. No writeback is proposed.
 
-For `stirap_amplitude`, null clears optional recipe inputs rather than retaining the Form values: the waveform and Readout selectors, generator channels, Stokes lead, shots or relaxation wait. Unresolved required fields after overrides fail readiness before Run; a missing saved readout calibration blocks acquisition. A successful Run can save even if Analyze fails.
+For `stirap_amplitude`, null waveform or **Readout** selectors fail during selection, before overrides. Null channels, lead, shots or relax delay leaves a blank; required blanks after overrides fail readiness before Run. Missing centroid3 blocks acquisition. A successful Run can save even if Analyze fails.
