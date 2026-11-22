@@ -2,6 +2,8 @@
 
 **Readers:** operator, agent. Calibrate the JPA pump frequency from the GUI or MCP using g/e readout SNR. A pi pulse switches the qubit preparation between g and e. The run sweeps pump frequency and measures the g/e SNR (a.u.) to find the frequency with the highest SNR. WARNING: this run commands the selected JPA RF device on real hardware. Review that device and the pump sweep before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
 
+The FTF simulator provides neither a JPA pump RF device nor a JPA response to pump frequency. The [fixed offline experiment wall-time cases](../../../../tools/README.md#實驗-run-牆鐘) therefore exclude `jpa/freq`. That exclusion does not apply to the real-hardware run with a connected JPA RF device.
+
 ## Parameter sources
 
 Uses the qubit (`qubit/*`), resonator and jpa (`amplifier/jpa`) aliases. The pump-frequency bounds use `$jpa.pump_freq`. Opening the tab or choosing Defaults reads the RF default from `$jpa.rf_source`; a missing source leaves the optional field empty. The direct device name remains editable. Select the connected JPA RF device in the form. Missing required aliases or calibration marks the form Invalid.
