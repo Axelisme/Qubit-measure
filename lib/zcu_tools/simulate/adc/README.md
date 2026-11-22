@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-22, Markov, raw sampling links, and acquire-local plans
+**Last updated:** 2026-11-23, projected propagator prefixes for raw sampling
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -354,7 +354,10 @@ outcome shared by the whole shot, or following the chain's projection states.
 Each receiver adds
 independent noise. Zero jumps use direct vacuum sums. Jumped shots use compiled exact homogeneous propagation and discrete
 sample sums. Uniform samples use binary geometric sums; irregular samples keep
-their original coordinates. Flat baselines use singular-safe phi1 propagation.
+their original coordinates. When a jump wave saves enough work to pay for setup,
+ADC sums cavity memory using a difference of per-state projected propagator prefixes
+at the actual sample times and one propagation per segment.
+Flat baselines use singular-safe phi1 propagation.
 Shaped and opaque envelopes retain the existing DOP853 vacuum-baseline tolerances.
 There is no ODE per shot, jump-time LUT, path-count conditioning or tail cutoff.
 Windows within one event share its path through ringdown and gaps. Offset is
