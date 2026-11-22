@@ -74,6 +74,7 @@
 
 - 壞例：只畫 fit，或用同一組 marker 畫模型與資料。
 - 好例：Ding 圖 5-13(b)（頁 157）可直接對照 RB 的量測點與模型線。本地作圖時，分列各組的量測與模型 legend，並用至少 200 點算模型線，讓模型網格不受量測點疏密限制。
+- 頻譜要先選峰再畫 fit 時，用 [fitting 的 Peak candidates](../../lib/zcu_tools/analysis/fitting/README.md#peak-candidates) 對照 `twotone/freq` 的局部策略與 `twotone/chain` 的預設策略。
 
 ### R3：結果寫在圖上
 
@@ -209,7 +210,9 @@ Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二�
 用一句短句寫填什麼、單位（如適用）與來源（如前置實驗），必填欄位用「填入 …」開頭。只在 label 看不出來時補寫效果，例如頻率是 RF、IF 還是相對量，選項開關做什麼，或留空代表什麼。推導、理由和操作步驟留在 guide。
 
 - 壞例：`Frequency` 的說明只寫「頻率」；`Mixer freq` 的說明沒有交代留空的意思。
-- 好例：Ramsey 的必填 `Pi/2 Pulse` 寫「填入經 Rabi 校準的 π/2 脈衝。」two-tone 的 RF 掃描起點寫「填入驅動 RF 頻率 (MHz)。」可選的 `Mixer freq` 寫「指定混頻器頻率 (MHz)，留空表示不經 mixer。」
+- 好例：Ramsey 的必填 `Pi/2 Pulse` 寫「填入經 Rabi 校準的 π/2 脈衝。」two-tone 的 RF 掃描起點寫「填入驅動 RF 頻率 (MHz)。」若 generator 不要求填寫數位 mixer 頻率，`Mixer freq` 可寫「指定數位 mixer 頻率 (MHz)，留空表示不設定數位 mixer。」
+
+留空不會關閉外部 LO；需要數位 mixer 的 generator 必須填值。見 [Program 的 Readout configuration](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration)。
 
 ### F4：module 與 slot 寫出序列中的角色
 

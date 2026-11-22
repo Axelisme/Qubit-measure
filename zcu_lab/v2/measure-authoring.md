@@ -125,7 +125,8 @@ Adapter 使用獨立輸入型別時，預設順序由該型別決定。
 SweepCfg 的座標與 step 繼承 unit，點數不繼承掃描量的物理單位。
 既有 cfg key 不因顯示文字改名，例如 `delays`、`delay` 與 `length` 都可顯示 Delay。
 共用但物理量不同的 range 必須說明單位由哪張實驗決定。
-Flux 軸從 `flux_unit` 取得單位，不寫成固定單位。
+Form 的 flux 掃描輸入使用 `flux_unit` 指定的裝置輸入單位，不用它推定 Result 或保存軸的單位。
+例如 [JPA bias survey](jpa/flux_onetone/guide.md#read-the-plots) 的圖上 bias 軸與保存的 `fluxes` 軸都使用裝置原生 a.u.，不隨 Form 的 A／V／native 選項改標籤或換算。
 Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數。
 
 初值依來源處理。來源可推導時，用 Expr 或固定 capture，寫明來源路徑與單位。
@@ -147,6 +148,7 @@ Hidden 只用於 Run 會覆寫或計算的值，不用來藏起 required input�
 有作者說明的必填空白錯誤會附上該欄位與父欄位的 label／description，保留原 path。
 Recipe preflight 沿用這些 message 與 typed paths，不從 generic error 猜物理設定。
 Readout slot found 與 form valid 必須分開判讀；slot 存在不代表 drive、GE centers 或掃描範圍齊全。
+Pulse／Mux Readout 的 generator、ADC 與 classifier 契約見 [Program 的 Readout configuration](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration)。
 Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
 
 新實驗交付前，以 `QT_QPA_PLATFORM=offscreen` 預演下列情境：
