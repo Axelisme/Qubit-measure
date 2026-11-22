@@ -12,19 +12,21 @@ from pydantic import Field, StrictFloat, TypeAdapter
 CORE_TARGET_S = 180.0
 
 
+class PlannedScene(TypedDict):
+    """Exact adapter and journal location for one planned scene."""
+
+    adapter: str
+    directory: str
+
+
 class BatchPlan(TypedDict):
-    """The revision, fixed input hashes, case locations and guide inventory.
+    """Revision, input identities and planned scene journals."""
 
-    cases maps selected adapters to directories relative to the batch output.
-    adapters maps all registered names to their declared guide, or None.
-    guides lists the discovered operator guides.
-    """
-
+    format_version: Literal[2]
     commit: str
     inputs: dict[str, str]
-    cases: dict[str, str]
-    adapters: dict[str, str | None]
-    guides: list[str]
+    manifest_scenes: int
+    scenes: dict[str, PlannedScene]
 
 
 class RunStart(TypedDict):
@@ -39,6 +41,7 @@ type RowStatus = Literal[
     "ok",
     "missing_breakdown",
     "missing_defaults",
+    "missing_adapter",
     "not_runnable",
     "not_run",
     "incomplete",
@@ -50,7 +53,7 @@ type RowStatus = Literal[
 class Row(TypedDict):
     """One report row and its measured or unavailable Run facts.
 
-    adapter and guide identify the experiment and its declared operator guide.
+    scene_id identifies the workload; adapter records its exact experiment key.
     case_directory is relative to the output (or absolute for retained evidence),
     or None when there are no case artifacts. Timestamps are UTC ISO-8601 strings;
     wall_s is exact measured seconds, and wall_s_lower_bound is used instead for
@@ -71,8 +74,8 @@ class Row(TypedDict):
     unstarted rows. reused is true when this batch retained another batch's row.
     """
 
+    scene_id: str
     adapter: str
-    guide: str | None
     case_directory: str | None
     started_at: str | None
     finished_at: str | None
@@ -95,16 +98,16 @@ class Row(TypedDict):
 
 
 def new_row(
+    scene_id: str,
     adapter: str,
-    guide: str | None,
     directory: str | None,
     status: RowStatus,
     reason: str | None,
 ) -> Row:
     """Make a row with an identity and classification, before attaching timings."""
     return {
+        "scene_id": scene_id,
         "adapter": adapter,
-        "guide": guide,
         "case_directory": directory,
         "started_at": None,
         "finished_at": None,
@@ -148,6 +151,7 @@ def _summary_row(row: Row) -> str:
         "ok": "OK",
         "missing_breakdown": "分項缺",
         "missing_defaults": "推不出預設",
+        "missing_adapter": "missing_adapter",
         "not_runnable": "FTF 不能跑",
         "not_run": "not_run",
         "incomplete": "incomplete",
@@ -159,7 +163,6 @@ def _summary_row(row: Row) -> str:
     if row["reason"] is not None:
         reason = " ".join(row["reason"].splitlines()).replace("|", r"\|")
         status = f"{status}: {reason}"
-    guide = f"`{row['guide']}`" if row["guide"] else "—"
     acquires = "—" if row["acquires"] is None else str(row["acquires"])
     lower_bound = row["wall_s_lower_bound"]
     wall = _seconds(row["wall_s"])
@@ -177,26 +180,14 @@ def _summary_row(row: Row) -> str:
         or "—"
     )
     return (
-        f"| {row['adapter']} | {wall} | {stages} | {core} | {remainder} | "
-        f"{acquires} | {status} | {guide} | {source} |\n"
+        f"| {row['scene_id']} | {row['adapter']} | {wall} | {stages} | {core} | "
+        f"{remainder} | {acquires} | {status} | {source} |\n"
     )
 
 
 def _write_report(
     output: Path, rows: list[Row], plan: BatchPlan, resolved: int
 ) -> None:
-    guides_by_adapter = plan["adapters"]
-    guide_paths = plan["guides"]
-    no_guide = sorted(
-        adapter for adapter, guide in guides_by_adapter.items() if guide is None
-    )
-    inventoried = set(guide_paths)
-    missing = {
-        adapter: guide
-        for adapter, guide in sorted(guides_by_adapter.items())
-        if guide is not None and guide not in inventoried
-    }
-    no_adapter = sorted(inventoried.difference(guides_by_adapter.values()))
     write_json(
         output / "report.json",
         {
@@ -206,29 +197,19 @@ def _write_report(
             "coverage": {
                 "resolved": resolved,
                 "selected": len(rows),
-                "registered": len(guides_by_adapter),
+                "manifest": plan["manifest_scenes"],
             },
-            "adapters_without_guides": no_guide,
-            "declared_guides_not_in_inventory": missing,
-            "guides_without_adapters": no_adapter,
         },
     )
     (output / "summary.md").write_text(
-        f"Coverage: {resolved}/{len(rows)} selected rows resolved; "
-        f"{len(guides_by_adapter)} registered adapters.\n\n"
+        f"Coverage: {resolved}/{len(rows)} selected scenes resolved; "
+        f"{plan['manifest_scenes']} manifest scenes.\n\n"
         + _run_summary(rows)
-        + "| Experiment | Run (s) | Compile (s) | Evolve (s) | Readout (s) | Materialize (s) | Core (s) | Remainder (s) | Acquires | Status | Guide | Source |\n"
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |\n"
+        + "| Scene | Adapter | Run (s) | Compile (s) | Evolve (s) | Readout (s) | Materialize (s) | Core (s) | Remainder (s) | Acquires | Status | Source |\n"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |\n"
         + "".join(map(_summary_row, rows))
         + _core_summary(rows)
-        + _failure_list(rows)
-        + f"\nAdapters without declared guides: {_format_names(no_guide)}\n"
-        + "\nDeclared guides not in inventory: "
-        + (
-            ", ".join(f"`{adapter}` → `{guide}`" for adapter, guide in missing.items())
-            or "—"
-        )
-        + f"\n\nGuides without adapters: {_format_names(no_adapter)}\n",
+        + _failure_list(rows),
         encoding="utf-8",
     )
 
@@ -238,14 +219,14 @@ def _core_summary(rows: list[Row]) -> str:
     lower_bound_over_target: list[str] = []
     undetermined: list[str] = []
     for row in rows:
-        adapter = row["adapter"]
+        scene_id = row["scene_id"]
         if (core := row["core_s"]) is not None:
             if core > CORE_TARGET_S:
-                over_target.append(adapter)
+                over_target.append(scene_id)
         elif (bound := row["core_s_lower_bound"]) is not None and bound > CORE_TARGET_S:
-            lower_bound_over_target.append(adapter)
+            lower_bound_over_target.append(scene_id)
         else:
-            undetermined.append(adapter)
+            undetermined.append(scene_id)
     return (
         f"\nCore >{CORE_TARGET_S:g} s: {_format_names(over_target)}\n"
         f"Core 已知至少超標: {_format_names(lower_bound_over_target)}\n"
@@ -269,10 +250,10 @@ def _failure_list(rows: list[Row]) -> str:
         directory = row["case_directory"]
         record = row.get("failure_record")
         if not reason or directory is None or not record:
-            raise ValueError(f"Run failure for {row['adapter']!r} lacks diagnostics")
+            raise ValueError(f"Run failure for {row['scene_id']!r} lacks diagnostics")
         record = (Path(directory) / record).as_posix()
         by_reason.setdefault(reason, []).append(
-            f"  - `{row['adapter']}` — `{record}`\n"
+            f"  - `{row['scene_id']}` — `{record}`\n"
         )
     groups = (
         f"- {' '.join(reason.splitlines())}\n{''.join(entries)}"
@@ -292,16 +273,32 @@ def write_json(path: Path, value: object) -> None:
 
 def read_plan(output: Path) -> BatchPlan:
     """Load a wall-time journal's plan, raising on absent or malformed data."""
-    return TypeAdapter(BatchPlan).validate_json((output / "batch.json").read_bytes())
+    raw = (output / "batch.json").read_bytes()
+    document = json.loads(raw)
+    if (
+        isinstance(document, dict)
+        and "format_version" not in document
+        and "cases" in document
+    ):
+        commit = document.get("commit")
+        original = f" ({commit})" if isinstance(commit, str) else ""
+        raise ValueError(
+            f"Legacy wall-time journal; use --report-only at the original batch commit{original}"
+        )
+    return TypeAdapter(BatchPlan).validate_json(raw)
 
 
-def _read_row(location: Path, adapter: str) -> Row | None:
+def _read_row(location: Path, scene_id: str, adapter: str) -> Row | None:
     path = location / "row.json"
     try:
         data = path.read_bytes()
     except FileNotFoundError:
         return None
     row = TypeAdapter(Row).validate_json(data)
+    if row["scene_id"] != scene_id:
+        raise ValueError(
+            f"{path}: expected scene {scene_id!r}, got {row['scene_id']!r}"
+        )
     if row["adapter"] != adapter:
         raise ValueError(
             f"{path}: expected adapter {adapter!r}, got {row['adapter']!r}"
@@ -315,12 +312,17 @@ class JournalUsageError(ValueError):
     """The supplied arguments cannot recover or reuse a wall-time journal."""
 
 
-def reusable_rows(source: Path, plan: BatchPlan) -> dict[str, Row]:
-    """Read resolved rows for a new plan with the same commit and input hashes.
+def reusable_rows(
+    source: Path, plan: BatchPlan, available: dict[str, str]
+) -> dict[str, Row]:
+    """Read resolved rows from the source batch for the new plan.
 
-    Paths in the retained rows refer to the original artifacts. Raise
-    JournalUsageError for different provenance; missing or malformed journals
-    propagate errors.
+    The source and plan must have the same commit and input hashes, or raise
+    JournalUsageError. Missing or malformed journal data propagate errors.
+    Supply available as the mapping from current scene IDs to their exact
+    registered adapter keys. Silently skip rows whose scene is absent from
+    that mapping or whose adapter differs. Paths in retained rows refer to
+    the original artifacts.
     """
     previous = read_plan(source)
     if previous["commit"] != plan["commit"]:
@@ -332,22 +334,19 @@ def reusable_rows(source: Path, plan: BatchPlan) -> dict[str, Row]:
             "resume source input SHA-256 differs from the current inputs"
         )
     rows: dict[str, Row] = {}
-    for adapter, directory in previous["cases"].items():
-        row = _read_row(source / directory, adapter)
-        if row is not None and _resolved(row):
-            if adapter not in plan["adapters"]:
-                raise ValueError(
-                    f"resume source adapter is not registered: {adapter!r}"
-                )
+    for scene_id, scene in previous["scenes"].items():
+        adapter = scene["adapter"]
+        row = _read_row(source / scene["directory"], scene_id, adapter)
+        if row is not None and _resolved(row) and available.get(scene_id) == adapter:
             if (artifact := row["case_directory"]) is not None:
                 row["case_directory"] = (source.resolve() / artifact).as_posix()
             row["reused"] = True
-            rows[adapter] = row
+            rows[scene_id] = row
     return rows
 
 
 def _resolved(row: Row) -> bool:
-    return row["status"] not in {"incomplete", "not_run"}
+    return row["status"] not in {"incomplete", "not_run", "missing_adapter"}
 
 
 def assemble_report(output: Path, plan: BatchPlan) -> bool:
@@ -357,13 +356,12 @@ def assemble_report(output: Path, plan: BatchPlan) -> bool:
     establish a Run duration. Malformed or unreadable journal data propagate.
     """
     rows = []
-    for adapter, directory in plan["cases"].items():
+    for scene_id, scene in plan["scenes"].items():
+        directory, adapter = scene["directory"], scene["adapter"]
         location = output / directory
-        row = _read_row(location, adapter)
+        row = _read_row(location, scene_id, adapter)
         if row is None:
-            row = _uncommitted_row(
-                adapter, plan["adapters"][adapter], directory, location
-            )
+            row = _uncommitted_row(scene_id, adapter, directory, location)
         rows.append(row)
     resolved = sum(_resolved(row) for row in rows)
     _write_report(output, rows, plan, resolved)
@@ -371,17 +369,17 @@ def assemble_report(output: Path, plan: BatchPlan) -> bool:
 
 
 def _uncommitted_row(
+    scene_id: str,
     adapter: str,
-    guide: str | None,
     directory: str,
     location: Path,
 ) -> Row:
     try:
         data = (location / "start.json").read_bytes()
     except FileNotFoundError:
-        return new_row(adapter, guide, None, "not_run", None)
+        return new_row(scene_id, adapter, None, "not_run", None)
     start = TypeAdapter(RunStart).validate_json(data)
-    row = new_row(adapter, guide, directory, "incomplete", None)
+    row = new_row(scene_id, adapter, directory, "incomplete", None)
     row.update(
         started_at=start["started_at"],
         cold_start=start["cold_start"],

@@ -71,7 +71,7 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 | `readout` | `drive`、`resonators`、`adc` 與可選 `mux` | 必填，pulse drive／ADC object 與兩個 resonator 皆必填；mux 段另含 generator、刻度與 receiver list |
 | `numerics` | `truncation`、`solver`、`seed` 與 `projection_weight_floor` | 必填 |
 
-`dc_bias.sources` 與 `drive_lines` 的 map key 是非空字串名稱。前者成為 live device 名稱，後者識別微波線，兩類名稱不可重複。`f1_bias`、`coupler_bias`、`f2_bias`、`f1_charge`、`f2_charge` 是樣板選用的名稱，不是新增的 YAML 欄位。
+`dc_bias.sources` 與 `drive_lines` 的 map key 是非空字串名稱。前者成為 live device 名稱，後者識別微波線，兩類名稱不可重複。`f1_bias`、`coupler_bias`、`f2_bias`、`coil`、`f1_charge`、`f2_charge` 是樣板選用的名稱，不是新增的 YAML 欄位。
 
 下表的接線與校準 map 都必須含 `f1`、`coupler`、`f2`，沒有作用也要明寫零。`drift` 與 `flux_lines` 不受此規則限制，可以只選部分迴路。這三個 key 指受影響的迴路，不是另外三條線。各 map 的單位由外層欄位決定：
 
@@ -200,7 +200,7 @@ MCP 透過 `predictor.list_files` 找檔，再用 `predictor.predict` 查初猜�
 
 ## DC bias：live 電源與靜態磁通掃描
 
-`dc_bias.offset_phi0` 與 `dc_bias.sources` 都必填。`sources` 是具名電源 map，schema 允許空 map，此時磁通只剩 offset。樣板建立三個獨立 live 電源，每個電源都可能透過串擾影響三個迴路。
+`dc_bias.offset_phi0` 與 `dc_bias.sources` 都必填。`sources` 是具名電源 map，schema 允許空 map，此時磁通只剩 offset。樣板建立三個 local 電源與共用的 `coil`。每個電源都能影響三個迴路。`coil` 供 MG12 的 global flux 表單掃描。
 
 | 欄位 | 用途 | 單位與合法範圍 | 必填／省略語意 |
 | --- | --- | --- | --- |
@@ -219,7 +219,7 @@ loop_flux_phi0 = offset_phi0 + sum(live_source_value * flux_per_unit)
 
 例如樣板的 `f1_bias` 是 A 單位。若把它設成 0.001 A，F1 增加 0.1282 Phi0，coupler 增加 0.002 Phi0，F2 減少 0.001 Phi0。其他 source 的貢獻再加上去。`f1_bias` 不是「只作用於 F1」的保證。
 
-樣板三個電源的 limits 都是 `[-0.02, 0.02]` A，等於 ±20 mA。`ramp_step: 0.000001` A 等於 0.001 mA。一般靜態掃描改的是 live source 值，不必為每個點重寫 `initial`。同一 round 內的快速磁通波形不在這個介面內。
+樣板電源的 limits 都是 `[-0.02, 0.02]` A，等於 ±20 mA。`ramp_step: 0.000001` A 等於 0.001 mA。一般靜態掃描改的是 live source 值，不必為每個點重寫 `initial`。同一 round 內的快速磁通波形不在這個介面內。
 
 ## Drive lines：charge 與小訊號 flux 校準
 
@@ -238,7 +238,7 @@ loop_flux_phi0 = offset_phi0 + sum(live_source_value * flux_per_unit)
 
 Flux operator 在每 round 的 live DC 工作點用解析導數求值，經固定 local basis 與 retained joint basis 投影。Fluxonium 使用固定 oscillator 座標，H/h 的 Josephson 項是 `-EJ*cos(phi+2*pi*f)`，導數為 `2*pi*EJ*sin(phi+2*pi*f)`。非對稱 SQUID 使用 fixed theta，導數為 `pi*EJmax*[sin(pi*f)*cos(theta)+d*cos(pi*f)*sin(theta)]`。它不是單純相位算符，也不能在 asymmetry 非零時省略 SQUID 的 sin(theta) 項。
 
-這是 DC 附近的小訊號線性近似，drive 期間不隨振幅重算 H(Phi(t)) 或 basis。大振幅 fast-flux 不屬於 `DriveLine` 的契約，另以 `flux_lines` 宣告。DC 校準仍由 `dc_bias.sources` 提供，樣板不預設啟用 flux pulse。
+這是 DC 附近的小訊號線性近似，drive 期間不隨振幅重算 H(Phi(t)) 或 basis。大振幅 fast-flux 不屬於 `DriveLine` 的契約，另以 `flux_lines` 宣告。DC 校準仍由 `dc_bias.sources` 提供。
 
 樣板的兩條 charge line 各對主迴路填 real 0.1、對 coupler 填 real 0.01、對另一 fluxonium 填 0，imag 全為 0，單位 GHz/gain。這些是模擬假設，不是實測校準。把某迴路兩個分量都填 0 才表示不驅動該迴路。Frequency、phase、signed gain 與 waveform 由 program 提供。
 
@@ -271,22 +271,9 @@ Flux 線不可與另一 flux loop、任一 `drive_lines`、`readout.drive` 或�
 濾波不承接前一 shot 的記憶，也不從校準值推定增益適用範圍。
 Program 提供 pulse envelope、gain 與時間，DC snapshot 仍由 `dc_bias` 決定。
 
-以下只宣告 F1，其他兩個迴路不受 pulse 作用。
-這是示意校準，不是已收斂或實測的數值：
+標準 preset 啟用 F1/gen1 與 F2/gen4。Entry 範本把 Q1／Q2 的 `wiring.lo_flux_ch` 指向這兩個 generator。Coupler 預設只有 DC source，沒有序列內磁通線。
 
-```yaml
-flux_lines:
-  f1:
-    name: f1_flux
-    gen_ch: 1 # Unbound v6 generator on the shared v2 board.
-    flux_phi0_per_gain: 0.02
-    delay_ns: 0.0
-    tau_ns: 0.0
-    distortion_terms: []
-```
-
-樣板只以註解附上此範例，不改現有 generator 數量或 entry wiring。
-要使用 flux pulse，另在 program 指定相符的 generator，並自行核對 entry 的快速 flux 接線。
+手寫 program 時指定相符的 generator。既有 entry 不會隨範本更新，請核對 [entry 接線](#generatoradc-與-entry-接線對照)。
 
 連續 waveform 使用 2 ns DAC 格點與線性內插，pulse 端點各自取最近的 2 ns，平手取偶數。
 Bath schedule 以每個區間中點相對 snapshot DC 的偏移量量化，間距為 `1e-3 Phi0`，平手取偶數。
@@ -484,42 +471,39 @@ FTF 預設走分段引擎的快速算法，不是所有演化都逐步執行 DOP
 
 `gen_ch` 與 `ro_ch` 屬於不同索引空間，可以同為 0。每個 generator 只能綁一條 charge、flux 或 readout line。共用線上的兩個元件共用同一個綁定，不是再綁兩次。模型 YAML 擁有這些物理接線與校準，caller 要讓索引與所需型別符合獨立板子 YAML。索引通過模型 schema 不代表任意 pulse 都符合該板子的能力。
 
-樣板使用 pulse gen0／ADC0、f1_charge gen2、f2_charge gen3，以及 mux gen7／PFB readout 2、3。共用板子 YAML 提供 8 個 generator 與 10 個 readout。Gen0–6 為 v6，gen7 為 mixmux8，dyn readout 0、1 與 gen7 共用 wave port，以 `tmux_ch` 區分。PFB readout 2–9 共用一個 ADC，decimation 為 2，所有 readout 使用 tport trigger。空出的 v6 gen1 可供上方 fast-flux 註解範例使用。這是 caller 的範例設定，不是 engine 的固定通道上限。更換接線時也要核對板子 YAML，不能只改模型 YAML。使用未綁定 generator 仍按既有行為拒絕。
+樣板使用 pulse gen0／ADC0、f1_charge gen2、f2_charge gen3，以及 mux gen7／PFB readout 2、3。共用板子 YAML 提供 8 個 generator 與 10 個 readout。Gen0–6 為 v6，gen7 為 mixmux8，dyn readout 0、1 與 gen7 共用 wave port，以 `tmux_ch` 區分。PFB readout 2–9 共用一個 ADC，decimation 為 2，所有 readout 使用 tport trigger。F1 與 F2 的快磁通線分別使用 gen1 和 gen4。這是 caller 的範例設定，不是 engine 的固定通道上限。更換接線時也要核對板子 YAML，不能只改模型 YAML。使用未綁定 generator 仍按既有行為拒絕。
 
 [Entry 範本](entry-template.yaml) 的具體對照如下，entry 路徑以 `components` 下的元件為起點。
 
 | 用途 | FTF YAML | Entry 欄位或引用 |
 | --- | --- | --- |
-| F1 live DC | `dc_bias.sources.f1_bias`，`unit: A` | `Q1.flux_dev: f1_bias`，校準在 `Q1.flux.f1_bias`，原生單位 A |
-| Coupler live DC | `dc_bias.sources.coupler_bias`，`unit: A` | `coupler.flux_dev: coupler_bias`，校準在 `coupler.flux.coupler_bias`，原生單位 A |
-| F2 live DC | `dc_bias.sources.f2_bias`，`unit: A` | `Q2.flux_dev: f2_bias`，校準在 `Q2.flux.f2_bias`，原生單位 A |
+| F1 live DC | `dc_bias.sources.f1_bias`，`unit: A` | `Q1.flux_dev: f1_bias`，`Q1.flux.period.f1_bias` |
+| Coupler live DC | `dc_bias.sources.coupler_bias`，`unit: A` | `coupler.flux_dev: coupler_bias`，`coupler.flux.period.coupler_bias` |
+| F2 live DC | `dc_bias.sources.f2_bias`，`unit: A` | `Q2.flux_dev: f2_bias`，`Q2.flux.period.f2_bias` |
+| 共用 live DC | `dc_bias.sources.coil`，`unit: A` | `MG12.flux_dev: coil`，`Q1.flux.period.coil`、`Q2.flux.period.coil` |
+| F1 fast flux | `flux_lines.f1.gen_ch: 1` | `Q1.wiring.lo_flux_ch: 1` |
+| F2 fast flux | `flux_lines.f2.gen_ch: 4` | `Q2.wiring.lo_flux_ch: 4` |
 | F1 charge line | `drive_lines.f1_charge.gen_ch: 2` | `Q1.wiring.ch: 2` |
 | F2 charge line | `drive_lines.f2_charge.gen_ch: 3` | `Q2.wiring.ch: 3` |
 | Pulse readout drive | `readout.drive.gen_ch: 0` | `R1.wiring.ch: 0`、`R2.wiring.ch: 0` |
 | Pulse ADC | `readout.adc.ro_ch: 0` | `R1.wiring.ro_ch: 0`、`R2.wiring.ro_ch: 0` |
 | Mux readout drive | `readout.mux.gen_ch: 7` | `MG12.wiring.gen_ch: 7` |
-| Mux R1 receiver | `readout.mux.adc[0].ro_ch: 2` | `MG12.wiring.ro_ch[0]: 2`，對應 `MG12.resonators[0]: R1` |
-| Mux R2 receiver | `readout.mux.adc[1].ro_ch: 3` | `MG12.wiring.ro_ch[1]: 3`，對應 `MG12.resonators[1]: R2` |
+| Mux R1 receiver | `readout.mux.adc[0].ro_ch: 2` | Library 第一個 tone 與 `MG12.wiring.ro_ch[0]` 在範本均為 2，對應 R1 |
+| Mux R2 receiver | `readout.mux.adc[1].ro_ch: 3` | Library 第二個 tone 與 `MG12.wiring.ro_ch[1]` 在範本均為 3，對應 R2 |
 | Resonator 身分 | `readout.resonators.r1`、`.r2` | `R1`、`R2`；`Q1.resonator: R1`、`Q2.resonator: R2` |
 
-本環境的 entry 範本保留 R1／R2 的 pulse wiring，另在 MG12 填 mux `gen_ch: 7`、`ro_ch: [2, 3]`。Kickstart 範本不隨這次切板更新。`ro_ch` 列表必須與 resonators 等長、同序。八張 mux 表單缺 slot 時從這些欄位補通道，tone gain 補 0.1。範本不附 mux module 或 library key；`module.readout` 是既有 library key，不接受內嵌 readout 設定。
+本環境的 entry 範本保留 R1／R2 的 pulse wiring，並在 MG12 填 `gen_ch: 7`、`ro_ch: [2, 3]`。Kickstart 範本不隨這次切板更新。`ro_ch` 列表必須與 resonators 等長、同序。Startup 將 `mux` alias 指向 MG12；`MG12.module.readout` 指向工作點 library 的 mux 模組。此欄位只接受 library key，不接受內嵌設定。
 
-MG12 的 `mixer_freq: 7135` MHz 是 group LO 設定，無 slot 表單從 `$mux.mixer_freq` 取初值，缺值留空必填。它不依賴 tone 頻率或 κ。
-模擬範本的頂層 `MG12.time_of_fly: 0.4` us 來自 mux receivers 的 `time_of_flight_ns: 400`。R1／R2 的頂層 `time_of_fly: 0.4` us 來自 pulse ADC 的 400 ns，不供 mux 使用。這些值是 simulated-truth；kickstart 的 TOF 保留 null。
-Mux onetone 缺 slot 時，trigger 候選是 `$mux.time_of_fly + 5/(2π·min κ)`，ro_length 固定 1.0 us，length 是 trigger 加 ro_length。Group TOF 或任一 κ 缺值時，trigger 與 length 留空必填。這些初值未經裝置確認，有 slot 時保留既有 mixer 與 timing 規則。
+- 一般 mux 表單有 slot 時，保留 [library 模組](entry-library.yaml)的 tones、ADC、generator、mixer 與 timing。修改 MG12 wiring 不會覆寫這個 slot。缺 slot 時，才按 MG12 的 wiring 與 resonator 順序補通道和 tones，tone gain 初值為 0.1。Mixer 由 `$mux.mixer_freq` 提供，缺值留空必填。
+- Mux onetone 及其 local／global flux 掃描使用 ring-up 規則。有 slot 時，表單複製 library 模組，以 MG12 與 resonator 順序重建 tones，包含 ADC。它保留 slot 的 generator、mixer 與 ADC 積分長度，並依 κ 調整 timing。缺 slot 時，trigger 候選是 `$mux.time_of_fly + 5/(2π·min κ)`，`ro_length` 為 1.0 µs，`length` 為兩者之和。Group TOF 或任一 κ 缺值時，trigger 和 length 留空。這些初值仍須核對裝置。
 
-需要沿用完整校準模組時，另做以下設定：
-
-1. 在 Library 建立 `readout/mux` 模組。設 `gen_ch: 7`，依 R1／R2 順序填兩筆 tones，`ro_ch` 分別為 2／3，初始 `freq` 可用 7190／7080 MHz。填入有效的 `nqz`、`mixer_freq`、各 tone gain／phase、共用 `length`、`ro_length` 與 `trig_offset`。時間欄位使用 us，receiver 的 YAML 延遲使用 ns，不可直接照抄數字。
-2. 在 Inspect 把該 library key 填入 `MG12.module.readout`。Startup 已把 `mux` alias 指向 MG12，不需更改 R1／R2 的 pulse wiring。
-3. 開啟 `mux/twotone_spectrum` 或按 Defaults 時，Readout 沿 `$mux.module.readout` 引用完整模組。缺 slot 時使用 blank 模組加 group tones，通道來自 MG12 wiring，gain 為 0.1；其餘必填輸入仍須補齊。量測前另填有效 qubit frequency 與 drive／sweep 輸入。
-4. 開啟 `mux/onetone` 或按 Defaults 時，有 slot 會複製模組 scalar 設定，但按 group 重新產生 tones，沿既有路徑設 `ro_ch` 初值 0／1。缺 slot 則從 MG12 wiring 補 2／3，gain 為 0.1。每次都要核對 R1→2、R2→3，必要時修正，再確認 frequency、gain 與 timing。有 slot 的副本不沿用 library tones 的通道；Run 前的手動修改不會更新 library。
+`MG12.time_of_fly` 是 mux 飛行時間。R1／R2 的 `time_of_fly` 只供 pulse ADC 路徑使用。Kickstart 的 TOF 保留 null。表單手動修改不會更新 library。Module 的時間欄位使用 µs，receiver 的 YAML 延遲使用 ns。
 
 Entry 範本的 coupler 只有靜態 DC source，沒有預填 `lo_flux_ch`。需要 coupler flux pulse 時，另在 `flux_lines.coupler` 宣告 generator，不從 `coupler.flux_dev` 推導。兩條 charge line 的 coupler 串擾係數仍會作用於模型中的 coupler，與是否宣告獨立 flux pulse channel 分開。
 
 FTF YAML 和 entry 是兩份獨立文件，loader 不自動互改或互相比對。修改 source 名稱、unit、gen_ch 或 ro_ch 時，必須同步修改使用中的 entry 引用與 wiring。
 
-模擬 entry 範本省略 EJ/EC/EL、EJmax/EC/d 與 R1／R2.freq，物理模型仍從 FTF YAML 讀取這些值。Kickstart entry 範本另有示意 energies，單位為 GHz，並預填 R1／R2.freq 為 7190／7080 MHz，對應 `default.yaml` 的 `r1/r2.frequency_ghz` 7.19／7.08 GHz。若使用中的 entry 有這些欄位，修改模型後須自行核對或更新，loader 不會同步。兩份範本的 qubit frequency 都保留 `null`；該頻率隨 bias 改變，不能直接拿 EJ 當 transition frequency。
+物理模型從 FTF YAML 讀取 circuit energies。Demo point 的 qubit 頻率與 `kappa` 是表單的掃描起點。修改模型或 DC 工作點後，請核對這些欄位；loader 不會重新計算或寫入 entry。
 
 ## 採用 v2 與調參順序
 

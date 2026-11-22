@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-23，固定圖磚幾何
+**Last updated:** 2026-11-23，Data 縮圖對齊
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -92,8 +92,9 @@ in one column. Wide viewports place two cards side by side; with three cards,
 Run spans the left column and Analysis/Post-Analysis stack on the right.
 A single card fills the width in either mode. Named members fit in their tiles,
 while stage cards retain their minimum width. Long names wrap so their endings
-are visible before opening a figure. Each thumbnail aspect-fits its label without
-cropping as the gallery resizes.
+are visible before opening a figure. Each thumbnail fits without cropping or
+changing its aspect ratio. It sits at the top of its image area, with spare
+height below it.
 Use `View figure` on a card, or Tab to the button and press Space, to read that
 stage and member without leaving Data. Long headings wrap without widening the
 reading pane. The reader renders the same 12×9 in layout as the figure tiles.
