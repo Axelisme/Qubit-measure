@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-22, compact statistics references
+**Last updated:** 2026-11-22, integrated statistics and raw materialization
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -362,16 +362,17 @@ A changed snapshot requires a new evolution. See [FTF preparation reuse](../../.
 Each readout state's conditional mean response is computed once per distinct
 readout content; populations combine these means linearly.
 
-Integrated statistics sample category counts that sum to reps at each point.
-The counts retain projection noise, but categories need not represent physical
-shot paths. Each read and category has noiseless per-shot sums. Gaussian
-receiver noise uses the covariance of the sum over reps. Environments deliver
-an independent RawShots source with retained noiseless inputs and a local round
-identity.
+Integrated statistics carry category counts in `RoundStatistics`. The counts
+sum to reps at each point and retain projection noise, but categories need not
+represent physical shot paths. Each read and category has noiseless per-shot sums.
+Gaussian receiver noise uses the covariance of the sum over reps. Environments
+deliver an independent `RawShots` source with retained noiseless inputs and a local
+round identity. A joint IQ distribution across reads uses I/Q values paired by
+shot index from `RawShots`, not the compact counts or per-read sums.
 Requesting shots calls that source without rerunning evolution or the backend.
 Raw ADC values remain int64, and round indices select distinct sampling streams.
 See [FTF compact statistics](../../../simulators/ftf/environment/README.md#compact-statistics)
-for the environment's output and [ADC projection sampling](../../../simulate/adc/README.md#projection-readout-and-sampling)
+for the environment's output and [ADC integrated chain statistics](../../../simulate/adc/README.md#integrated-chain-statistics)
 for how the event marginals become category counts and conditional sums.
 
 Python loop counts do not grow with shots or sweep points. Template construction,
@@ -496,10 +497,10 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   hit. Certificates live with the SoC and do not cross the acquisition/backend boundary.
   Fixed request layouts and integrated normalization metadata are prepared once
   per acquire; this never freezes snapshots or certifies later backend values.
-  Without registered shot masks, a reducer or a threshold, it divides totals
-  by reps and readout length, removes QICK offsets and moves reads first without
-  allocating `acc_buf`. Program requests raw shots for thresholding, registered
-  shot masks or a reducer. Masked rounds use the same
+  <a id="raw-materialization"></a>Without registered shot masks, a reducer or a
+  threshold, it divides totals by reps and readout length, removes QICK offsets
+  and moves reads first without allocating `acc_buf`. Program requests raw shots
+  for thresholding, registered shot masks or a reducer. Masked rounds use the same
   [host masked average](../../README.md#registered-shot-masks) as hardware.
   Hooks receive the running mean of completed rounds. `acquire_summed` uses the
   same stateful reducer as hardware. Each completed round supplies visible ADCs as
@@ -519,7 +520,8 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   Wrong reps/layout, invalid values and overflow raise ValueError. Numeric solver
   failures may raise RuntimeError. Raw is not shifted to fit the independently
   drawn direct totals. Getters cache the detached last-round arrays and never
-  rerun a backend.
+  rerun a backend. See [ADC raw sampling](../../../simulate/adc/README.md#raw-sampling)
+  for the sampling contract and callers.
 - Decimated IQ has shape `(execution, read, sample, 2)` and contains float64 ADC
   samples. Last axis is I/Q. Backend arrays are borrowed until the adapter copies
   them. Missing, duplicate or extra ADCs, wrong shapes and nonfinite values fail.

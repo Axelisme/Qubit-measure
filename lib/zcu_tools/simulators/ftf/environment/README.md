@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-22, projective readout chain
+**Last updated:** 2026-11-22, Markov chain, telemetry, and acquire-local raw plans
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -402,7 +402,13 @@ outcome's terminal state or sampled herald result. Immutable outcome weights,
 event populations and conditional sums follow the complete-preparation reuse
 rules below. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
 A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sums,
-content mappings, path diagnostics and integrated sampling plans across acquires.
+content mappings, path diagnostics and deferred raw inputs across acquires.
+The acquire session owns the [ADC raw plan memo](../../../simulate/adc/README.md#integrated-raw-shots).
+It retires that memo on batch invalidation, managed acquire exit, matching
+direct finish, a new acquire or close. The binding's completion callback
+retires the memo even when telemetry and debug capture are both disabled.
+It runs finish diagnostics only if either is enabled. A preparation cache hit
+in a new acquire starts without a raw plan.
 A later acquire can reuse either a pilot round's split preparation or a full-batch
 preparation. Both retain the selected N. A separate 256-entry LRU remembers N for
 that same content after the preparation is evicted. On a preparation miss with a
@@ -606,10 +612,13 @@ projective counts and each ADC's per-event grid counts. A difference raises
 `ValueError` naming both templates and layouts, even when total reads match.
 This check belongs to environment preparation, not the program frontend.
 
-FTF projective acquisitions pass a `ProjectionChain` to ADC. The first
-projection uses the normalized diagonal of the incoming DC density. At each
-projective start, FTF continues each selected DC energy state once from its
-rank-1 density and a vacuum cavity field. The projective pulse drives the
+<a id="projective-chain-construction"></a>
+
+FTF projective acquisitions build a `ProjectionChain` for
+[ADC projection-chain sampling](../../../simulate/adc/README.md#projection-chain-sampling).
+The first projection uses the normalized diagonal of the incoming DC density.
+At each projective start, FTF continues each selected DC energy state once
+from its rank-1 density and a vacuum cavity field. The projective pulse drives the
 cavity during continuation. FTF uses the normalized diagonal at the next
 event start as that state's transition row. The state axis uses retained
 physical energy levels, not IQ classification groups. ADC starts each readout
@@ -617,14 +626,21 @@ event from vacuum too. Its herald CTMC jumps affect that event's IQ and do not
 feed back into the quantum transition rows. The model excludes active reset and
 measurement-induced state transitions.
 
-`numerics.projection_weight_floor` is required and accepts finite values in
-`[0, 1)`. The templates set it to `1e-9`. At each point and transition, a
-source state with current marginal below the floor skips evolution and gets
+`N_occ` refers to the number of occupied DC energy levels at a point and event.
+The old `ftf.projection_outcomes` diagnostic counted retained outcome histories,
+which the chain does not enumerate. In [routing telemetry](#routing-telemetry),
+`ftf.projection_continued_states` counts the source levels selected for evolution
+by the floor at each transition. This count includes zero-weight levels when
+the floor is zero.
+
+FTF applies `numerics.projection_weight_floor` when building transition rows.
+The setting is required and accepts finite values in `[0, 1)`. The templates
+set it to `1e-9`. At each point and transition, a source state with current
+marginal below the floor skips evolution and gets
 an identity row. FTF keeps that weight in the same state without redistributing
 or renormalizing it. Even an all-identity layer keeps all probability. Floor
 zero solves every state, including zero-weight states, and removes the identity
-approximation within this vacuum-reset model. See [Routing telemetry](#routing-telemetry)
-for the node counts and skipped marginal.
+approximation within this vacuum-reset model.
 
 `simulate.adc` solves the linear, state-conditioned cavity fields. The incident
 amplitude uses the same `input_per_gain` conversion as terminal readout.
@@ -807,8 +823,9 @@ Integrated acquisition returns `IntegratedRound` with compact
 `RoundStatistics` and a separate ADC-owned `RawShots` source.
 For FTF projective reads, ADC draws one set of transition flows per point.
 The `state_counts` partition that point's reps over shared cumulative-count
-bins that encode each logical event's marginal histogram. The category axis
-is not a physical joint of herald history and terminal state.
+bins that encode each logical event's marginal histogram. These bins do not
+encode the joint distribution over herald history and terminal state used by the
+retained history-based `ProjectionReadout` path.
 
 For each ADC read, `conditional_sums` gives the noiseless per-shot I/Q mean of
 that read's event state in each bin. Multiply each bin's mean by its
@@ -816,8 +833,9 @@ that read's event state in each bin. Multiply each bin's mean by its
 receiver noise and rounding variance. The shared flow draw preserves
 correlations between these totals due to event occupancies. The bins do not
 encode paired IQ shots, CTMC trajectory variance, or cross-read receiver-noise
-covariance. See [ADC projection sampling](../../../simulate/adc/README.md#projection-readout-and-sampling)
-and the [Program statistics contract](../../../program/v2/simulation/README.md#compact-timelines-and-statistics).
+covariance. See [ADC integrated chain statistics](../../../simulate/adc/README.md#integrated-chain-statistics)
+for how ADC builds the bins and the [Program statistics contract](../../../program/v2/simulation/README.md#compact-timelines-and-statistics)
+for how acquisition uses them.
 
 Raw and decimated sampling each draw a projection chain per shot. The
 herald and terminal reads stay paired at the same shot index. Each event has
