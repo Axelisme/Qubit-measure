@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-22, Markov chain, acquire-local raw plans, isotropic receiver noise, and unentered acquire timings
+**Last updated:** 2026-11-23, control and projective readout boundaries
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -495,8 +495,10 @@ charge n or the derivative of the existing
 fixed-coordinate Hamiltonian at that round's DC point. Omitted operator means
 charge. Charge calibration uses GHz/gain; flux calibration uses Phi0/gain and
 multiplies the derivative in GHz/Phi0. Signed complex crosstalk uses
-Re[c*z] = Re(c)*Re(z) - Im(c)*Im(z) for either operator.
-Flux drives keep that linearized DC operator throughout the round, including
+`Re[c*z] = Re(c)*Re(z) - Im(c)*Im(z)` for either operator. FTF's `drive_sources`
+builds both quadrature operators. The shared [quantum resonator builder](../../../simulate/README.md#quantum-resonator-mode)
+drives through the real envelope component only and sets the imaginary
+quadrature operator to zero. Flux drives keep that linearized DC operator throughout the round, including
 secular energy-basis rotations. They do not activate the shared engine's
 large-amplitude flux controls, filtering or flux-tail paths. Version 2 settings
 group physical values, named DC/drive lines, readout and numerics. Version 1 is
@@ -541,8 +543,9 @@ nonzero rates. Those rates affect coherence decay only; this kernel models no
 interlevel transitions. The engine does not check the adiabatic condition.
 Neglecting population relaxation on a ramp is reasonable only when the ramp is
 much shorter than T1. A ramp near T1 underestimates relaxation on this route.
-With microwaves, continuous flux rows use `flux_dop853`.
-There is no separate sudden/adiabatic switch.
+With microwaves, continuous flux rows use [Evolution's `flux_dop853`](../../../simulate/evolution/README.md#flux-dop853).
+It integrates the continuous `H(flux(t))` with a fixed secular bath for each row
+at that row's quantized flux level. There is no separate sudden/adiabatic switch.
 
 The Hamiltonian uses the existing exact flux expansion inside the retained
 fixed-DC projection. Large excursions can leave that subspace. Users must check
@@ -722,6 +725,13 @@ not model MIST onset.
 
 ### Readout and sampling
 
+For a projective acquire, `evolve_projection_chain` builds the
+[projection transition rows](#projective-chain-construction) and
+`_readout_distribution` hands ADC a `ProjectionChain`. With no projections,
+`_readout_distribution` uses the single-event `ProjectionReadout.unprojected`.
+`evolve_projective_plans` is the historical outcome-history enumerator. It
+remains in the module, but acquisition does not call it. See [ADR-0078's Markov chain decision](../../../../../docs/adr/0078-evolution-module-boundary.md#projective-read-的-markov-chain-表示).
+
 Readout uses the DC model and populations in its energy basis. Terminal-only
 preparations call ADC's `normalize_populations` once after `batch_populations`,
 before conditional responses or sampling. Projective preparations normalize
@@ -827,8 +837,7 @@ Integrated acquisition returns `IntegratedRound` with compact
 For FTF projective reads, ADC draws one set of transition flows per point.
 The `state_counts` partition that point's reps over shared cumulative-count
 bins that encode each logical event's marginal histogram. These bins do not
-encode the joint distribution over herald history and terminal state used by the
-retained history-based `ProjectionReadout` path.
+encode the joint distribution over herald history and terminal state.
 
 For each ADC read, `conditional_sums` gives the noiseless per-shot I/Q mean of
 that read's event state in each bin. Multiply each bin's mean by its
@@ -858,11 +867,6 @@ physical inputs and returns `RoundSignals` in QICK loop order. ADC owns raw
 sampling and rounding. Program owns detached buffers and acquisition averaging.
 There is one output array per ADC in program declaration order, which is mux
 tone order rather than sorted channel index. There is no extra tone axis.
-
-The non-projective path is unchanged and still uses
-`ProjectionReadout.unprojected`. Switching the projective caller to
-`ProjectionChain` does not remove the retained history-based FTF path or ADC's
-`ProjectionReadout` input.
 
 ### Projective migration evidence
 

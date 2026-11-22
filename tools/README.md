@@ -1135,10 +1135,9 @@ separate from Engine time. This change does not choose storage or sharing policy
 The scene producer snapshots complete numeric physics through
 `freeze_records`, which returns public `simulate.evolution.FrozenRecord` values.
 Scene reason, targets, companions and provenance are opaque tools metadata.
-Simulate owns the version-1 index and single-record gzip codec, hash validation,
-file naming and same-directory temporary-file plus replace publication.
-Each filename contains the name and the first 16 characters of its physical and
-metadata hashes. Unknown index/container versions fail without fallback.
+Evolution owns the index and single-record gzip codec. See
+[Frozen numeric inputs and references](../lib/zcu_tools/simulate/evolution/README.md#frozen-numeric-inputs-and-references)
+for the physical record version, scene-cache version and reference key.
 Every frozen scene needs a tracked builder in this producer. A scene built only by an untracked prototype cannot enter an index.
 
 Git contains only `frozen-synthetic.index.json` and `frozen-real.index.json`.
@@ -1147,6 +1146,11 @@ Each ordered row pins `name`, `physical_sha256`, `oracle_sha256` and
 The 19 existing payloads were migrated without changing identities, point order
 or reference keys. Numeric gzip files are no longer tracked at the tip.
 The old gzip files are not reachable from the landed history. The migration did not validate a complete cold builder rebuild.
+
+Without `--scene-cache`, [`scene_cache_directory`](family_pareto_storage.py)
+resolves `.agent_state/benchmark/family_pareto/scenes/v<SCENE_CACHE_VERSION>`
+relative to the parent of Git's common directory. An explicit override must be
+absolute.
 
 Run model construction only with approved compute and the current runner/lock
 policy. This command rebuilds and checks the pinned inventory, outside measurement
@@ -1210,8 +1214,10 @@ coordinates and the distinction between repeated supports and exact-key reuse.
 The shared cache is not task scratch. Task cleanup must not delete it.
 Manual cleanup is confined to the scene-cache prefix.
 
-Independent reference production stays in tests. After separate solver-cost
-approval, supply explicit index-to-solver mappings and a scene cache:
+Independent reference production stays in tests. See
+[Reference solver limits](../lib/zcu_tools/simulate/evolution/README.md#reference-solver-limits)
+for the bath inputs both solvers use. After separate solver-cost approval,
+supply explicit index-to-solver mappings and a scene cache:
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contract.family_pareto_reference_producer \

@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-22, Markov, raw sampling links, and acquire-local plans
+**Last updated:** 2026-11-23, readout rates and the FTF projection handoff
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -16,6 +16,8 @@ conversions at the `simulate` root do not initialize it. See the
 isolation, fail-fast storage and process-global effects. Raw-path dispatchers
 with `cache=False` still compile in each process.
 
+<a id="readout-model"></a>
+
 `ReadoutModel` supports 1 or 2 cavities on a shared transmission line.
 `cavity_count` comes from the frequency array's second axis. Other counts raise
 `ValueError` at model construction. Frequencies have shape `(state,cavity)`;
@@ -25,6 +27,14 @@ callers must supply a one-element phase array, including `np.zeros(1)` for zero
 mismatch. Receiver I/Q offset and noise covariance remain `(2,)` and `(2,2)`.
 The scalar path propagator is exact; two-cavity paths retain the existing 2x2
 closed form. Constant, sampled and opaque drives share these model dimensions.
+
+`ReadoutModel.rates_per_ns` follows the model's state-label order, with
+`[target, source]` entries in 1/ns. Raw and trace sampling use these rates to
+draw continuous-time Markov chain (CTMC) jumps within each event with an
+incident field. These rates are separate from the between-event
+[projection transition probabilities](#projection-chain-sampling). FTF's
+[`readout_model`](../../simulators/ftf/physics/README.md#readout-and-floquet-paths)
+supplies the rates in retained DC energy-state order.
 
 `cavity_fields` returns complex `(time,state,cavity)` fields in fixed joint-state
 order, without population mixing or receiver calibration. Its optional complex `(cavity,)`
@@ -293,8 +303,10 @@ copies arrays read-only and validates every row without clipping or normalizatio
 An empty transition tuple represents one event.
 [FTF projective chain construction](../../simulators/ftf/environment/README.md#projective-chain-construction)
 builds these rows and applies the projection floor before handing them to ADC.
-Non-projective FTF readout still uses `ProjectionReadout.unprojected`. The adoption does not retire FTF's retained
-outcome-mixture path or the shared `ProjectionReadout` interface.
+FTF passes a `ProjectionChain` for projective acquires and uses the single-event
+`ProjectionReadout.unprojected` without projections. The general `ProjectionReadout`
+outcome-mixture input remains available to ADC callers, but FTF does not use it
+as a projective fallback. See [ADR-0078's Markov chain decision](../../../../docs/adr/0078-evolution-module-boundary.md#projective-read-的-markov-chain-表示).
 
 Raw and trace sampling each draw a chain per shot. Reads at the same shot
 index stay paired across events and ADCs. ADCs and grids that observe the same

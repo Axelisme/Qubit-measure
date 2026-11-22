@@ -90,6 +90,7 @@
 - 壞例：實驗沒有選取判準，繪圖端自行以 R² < 0.9 標成未通過。
 - 好例（repo 現例）：[Reset Rabi check](twotone/reset/rabi_check/core.py) 的殘差子圖在 legend 使用[各分支擬合回傳的 RMS](twotone/reset/rabi_check/fit.py)，不重算 RMS，也不標通過與否。[Guide](twotone/reset/rabi_check/guide.md) 說明這些診斷共用同一個 IQ 投影軸，並請操作員比較擬合殘差。
 - 好例（本地改寫示例）：[T2 Echo 的 GUI adapter](twotone/time_domain/t2echo/gui.py) 已決定寫回候選是否預先勾選，並提供未勾選的理由。若把這份既有判定呈現到圖上，可寫「未通過選取判準：R² = 0.774，須 ≥ 0.9；正規化殘差 RMS = 0.113，須 ≤ 0.1；T2 相對誤差 = 0.83，須 ≤ 0.5」。這是呈現寫法，並非現行圖上的標註。Core 和繪圖端不另套這些條件。
+  初選與理由如何顯示，見 [writeback preview](../../lib/zcu_tools/gui/app/measure/writeback/README.md#initial-selection-and-notes)。
 
 ### R4：尺度跟著資料走
 
@@ -118,6 +119,9 @@ y 軸與色階預設依資料範圍自動縮放。跨圖比較才用固定尺度
 
 Data 頁的縮圖只用來選圖。按 `View figure` 在 Data 頁打開閱讀面，不會存檔。按閱讀面的實際尺寸檢查。放不下整張圖時捲動查看，不縮小字級。閱讀面由 [Measure〈Figure presentation〉](../../lib/zcu_tools/gui/app/measure/README.md#figure-presentation) 說明。
 Run Save 只保存資料。另開所有匯出的 PNG，包含 Analysis 與 Post-analysis 匯出的圖，逐張按 PNG 的實際尺寸檢查。
+
+[Analyze-only 離線 probe](../../tests/README.md#實驗定義) 的 Agg PNG 按原圖尺寸輸出，可檢查該圖的 legend 等改動。
+這張 PNG 不代表 Data 閱讀面、其他 GUI 繪圖面或匯出 PNG 的檢查結果。
 
 - 壞例：放大 Run 頁才讀得清楚。在 Data 頁打開 `View figure` 後仍讀不清 tick 標籤，存檔 PNG 的 colorbar 又擠到標題。
 - 好例：Ding 圖 5-7（頁 150）的四分支分成 2×2 panel。採用這種分組後，仍要在 GUI 和匯出的 PNG 核對字級、tick、legend 與資料位置。
