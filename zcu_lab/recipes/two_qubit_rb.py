@@ -24,7 +24,7 @@ class RBReport(RBEstimateReport):
 
 @recipe(
     "two_qubit_rb",
-    description="Run paired reference/CZ-interleaved two-qubit RB, report both fits and save without writing back.",
+    description="Compare classified joint ground return for reference and CZ-interleaved two-qubit RB, report the CZ error estimate, and save without writeback.",
 )
 async def two_qubit_rb(session: RecipeSession, inputs: RBRecipeInputs) -> RBReport:
     """Fit the two paired RB arms and report their CZ error estimate.

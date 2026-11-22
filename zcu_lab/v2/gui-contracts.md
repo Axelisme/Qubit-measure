@@ -1,6 +1,6 @@
 # Measure GUI contracts
 
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-22
 
 **讀者：** lab-author、framework-dev、agent。查閱 concrete adapter 的來源、分析、writeback 與 capability 契約。
 
@@ -47,17 +47,17 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   `t1_initial_time` 共用固定 capture 的來源分類 mechanics。有效 T1 回傳
   `Expr("<倍率> * <來源路徑>")` tree seed，保留呼叫端的名稱或 alias；Form
   以既有機制求值，`seed_sources` 保存 expression 與 available 狀態。
-  缺值用 `倍率 × 30 us` 字面值，無效值留空必填，來源故障傳遞 owner 的原錯誤。
+  缺值用 `倍率 × 30 µs` 字面值，無效值留空必填，來源故障傳遞 owner 的原錯誤。
   初值可覆寫，不寫回校準。純反射的 `flux_onetone` / `check` 等待維持
-  `0.1 us` / `0.5 us`，六個 adapter 的 `reps` / `rounds` 不變；
-  未使用的 `initial_delay` 不宣告為實驗欄位，builder 沿用 1.0 us 預設。auto optimizer 的 sweep `expts`
+  `0.1 µs` / `0.5 µs`，六個 adapter 的 `reps` / `rounds` 不變；
+  未使用的 `initial_delay` 不宣告為實驗欄位，builder 沿用 1.0 µs 預設。auto optimizer 的 sweep `expts`
   是 allocation resolution hint，flux 則使用中性 device-value contract。完整家族
   契約見 `measure-authoring.md`。
 - `support/measure/` 是公開支援 package，提供至少被兩個 concrete adapters 共用的 mechanics。
   已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，例如 T1 時間尺度、Rabi 候選與讀出掃描的長度差。
   T1 helper 的 tone 掃描先選 `ext.t1_with_tone`，僅缺失或 null 才改選普通 `t1`。
   已存無效 tone T1 不下探。Mux recovery 在建 Form 時比較各顆的捕捉初值，
-  保留最大者的 seed。缺 T1 以 30 us 參與比較，缺值勝出時仍為 150 us 字面值。
+  保留最大者的 seed。缺 T1 以 30 µs 參與比較，缺值勝出時仍為 150 µs 字面值。
   任一無效 T1 留空。
   各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
   本 package 不擁有 registry order，也不 import concrete adapter。
@@ -79,8 +79,8 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
 | `Adapter(spec, make_form, run, guide, analysis=None, post_analysis=None)` | 接上保存 spec、表單、Run 與 guide，不宣告 capability 或 artifact hooks。 |
 | `make_form(ctx)` | 回傳 Form[T_Input]，型別可不同於實驗 cfg。Open／Reset 用固定來源建 fresh input；Refresh 保留輸入與已解析初值。 |
 | `run(inp, *, context)` | 接收 Form 輸出，自行轉成實驗 cfg、呼叫 core 並回傳 RunRecord。沒有轉換也宣告本地 run。Host 保留 record 與實際 cfg，不另外包 record。額外驗證在 run 開頭進行。 |
-| `Analysis(fn, options=None, writeback=None)` | 同步分析接既有 typed request。options(source, env) 生成初值物件；其型別提供欄位。 |
-| `Interactive(plugin, frontend, options=None, writeback=None)` | 與 Analysis 使用同一 primary 欄位，互斥只靠型別。Host 擁有 session 與 operation。 |
+| `Analysis(fn, options=None, writeback=None, summary_lines=None)` | 同步分析接既有 typed request。options(source, env) 生成初值物件；其型別提供欄位。 |
+| `Interactive(plugin, frontend, options=None, writeback=None, summary_lines=None)` | 與 Analysis 使用同一 primary 欄位，互斥只靠型別。Host 擁有 session 與 operation。 |
 | `PostAnalysis(fn, options=None, writeback=None)` | 接已採用 primary 結果；options 另收該結果，writeback 使用獨立 draft。 |
 | `restore`、`data_item`、`analysis_item` | Framework 依 spec 提供，作者不覆寫。不做 I/O、不讀目前表單或重捕歷史。 |
 
@@ -89,6 +89,9 @@ Primary options 在成功 Run／Load 後建立表單時生成一次，post 在 p
 Schema 查詢、JSON 重建與分析點擊不重跑生成函式。使用者編輯後的物件交給 fn。
 無 options 時表單為空但分析仍可用。既有三個歷史預設生成器已接入；
 16 個分析執行時讀歷史的 wrapper 尚保留，後續清理才會移到 options 生成階段。
+Primary 發布時呼叫 `summary_lines(source)`。回傳有序的純文字 tuple；缺少來源值就省略該行。
+GUI Analysis 與 MCP 從 [AnalysisPresentation](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation)
+顯示這些行，Save 不將它們放入原生分析 JSON。採集設定的範圍見[呈現指南](figure-style.md#r10圖放理論重點採集設定放摘要)。
 Save／MCP 將 native 分析結果交給單一 `summarize_analysis`，不再呼叫實驗 serializer，也不要求結果 base。
 結果根須為 dataclass、pydantic model 或字串 key 的 Mapping，summary 固定為 strict JSON object。
 Converter 依原生欄位名轉換，非有限數值轉為 null。Live RPC 的 `invalid` 回報對應路徑，
@@ -115,7 +118,7 @@ Module proposal 從完整 run readout 建立，只換成功 active 的 freq；�
 Apply 模組列與 slot 列後，slot 指向該 library root，下次開表單沿既有 slot 來源讀取。
 Capture 為 None 時保留 module 與原有 scalar 提案。
 Adapter 從 Run／Load capture 公開 lookup 取得 `$mux.resonators`，長度須等於完整 N，不是 active K。成功 tone i 以 resonators[i] 提 freq、kappa、ext.theta0 和可 persist 的 route-qualified ext.edelay，每個參數獨立一列。Resonators 長度不符時，保留 readout module 與 capture 可解析的 readout slot 提案，省略逐 resonator scalar，summary 顯示原因。Alias／來源故障仍傳播，不以長度不符掩蓋。
-Prior 同樣只查 capture 的 resonator.ext.edelay，按原始 tone 的 generator／ADC route 比對。`edelay` 單位為 us，留空時每個 active tone 各自使用有限的 route-matched prior 作 branch seed；沒有匹配時，該 tone 使用內部固定 100 us 上限作 global 搜尋。明填有限數字時，所有 active tones 共用此 branch seed，0 與負數也有效。Seed 是擬合起點，不是固定 delay。非有限或非數字的 `edelay` 輸入會拒絕整次 FIT。Delay 只有 seeded 或非等距 grid 才可 persist，沿單 tone 政策。無 capture 仍可純計算，非空 Apply 沿既有拒絕。Load 使用同 entry 檔案 history 的 point／roles capture，不讀當前 aliases。Duplicate resonators 不去重，由既有 Apply 的重複 destination 驗證處理。
+Prior 同樣只查 capture 的 resonator.ext.edelay，按原始 tone 的 generator／ADC route 比對。`edelay` 單位為 µs，留空時每個 active tone 各自使用有限的 route-matched prior 作 branch seed；沒有匹配時，該 tone 使用內部固定 100 µs 上限作 global 搜尋。明填有限數字時，所有 active tones 共用此 branch seed，0 與負數也有效。Seed 是擬合起點，不是固定 delay。非有限或非數字的 `edelay` 輸入會拒絕整次 FIT。Delay 只有 seeded 或非等距 grid 才可 persist，沿單 tone 政策。無 capture 仍可純計算，非空 Apply 沿既有拒絕。Load 使用同 entry 檔案 history 的 point／roles capture，不讀當前 aliases。Duplicate resonators 不去重，由既有 Apply 的重複 destination 驗證處理。
 
 ## OneTone、TwoTone 與 Lookback
 
@@ -129,7 +132,7 @@ OneTone FluxDep 的 run 將同次 cfg 與純 Result 配成 RunRecord，interacti
 GE 的 FIT／post 分別發布 `fit`／`post` 具名圖，post 使用已採用的 primary FIT；
 OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed state 呼叫 Qt-free kernel 與原生圖 builder，產生 GUI-owned 數值結果與 `pick` 圖。Qt 畫布只負責預覽。TwoTone FluxDep 的 run 也回傳 RunRecord，plugin 從 explicit source 捕捉 inputs，保留 phase 投影並共用這條終止 renderer。TwoTone Freq 的 FIT 回傳頻率與線寬及其誤差，fit 圖另交 Plots；TwoTone PowerDep 只提供 run 與 canonical records，不提供 analysis。Lookback FIT 只輸出 predict_offset scalar，具名 fit 另由 Plots 發布；GUI ratio0.1／smooth1.0 與 timeFly writeback 不變。其餘 adapters 同樣使用 explicit records，framework 不提供 pyplot 或舊簽名 fallback。
 TwoTone AmpRabi／LenRabi 的 run 回傳 RunRecord，FIT 以 explicit source 與 typed options 分析，結果包含 scalar 與 core fit_quality，`fit` 圖交給 Plots。Gain／length／Rabi frequency 的 scalar writeback 不依賴 cfg；校準 pulse module writeback 只從該 source.cfg 複製 qub_pulse，缺 cfg 時略過 module items。
-T2Echo／T2Ramsey 的 Form 使用具名 Input；adapter.run 將頂層 detune_ratio 轉成實際 cfg.detune，並回傳同次 cfg／Result 的 RunRecord。Analysis 回傳 scalar 與 core fit_quality，並發布具名 fit。Ramsey q_f writeback 必須具有來源 cfg、實際 detune 與已提交的 fringe fit；canonical load 缺實際 detune 時只提供 t2r。
+T2Echo／T2Ramsey 的 Form 使用具名 Input；adapter.run 將頂層 detune_ratio 轉成要求的 `cfg.detune`，並回傳同次 cfg／Result 的 RunRecord。Analysis 回傳 scalar 與 core fit_quality，並發布具名 fit。Ramsey 的操作員摘要從該次 cfg 讀 Reps × Rounds，從 Result 讀實際 detune。Ramsey q_f writeback 必須具有來源 cfg、實際 detune 與已提交的 fringe fit；canonical load 缺實際 detune 時省略此摘要行，寫回只提 t2r。
 CKP 的 run 配對 cfg 與純 Result 為 RunRecord，兩張 measurement 熱圖分別呈現 ground／excited。FIT 只提交 chi／kappa／res_freq scalar與具名 fit 圖，保留 chi／rf_w／readout_f writeback。
 
 ## Reset adapters

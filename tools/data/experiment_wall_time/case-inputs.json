@@ -7,6 +7,9 @@
     "jpa/flux": "FTF does not model a JPA or expose a JPA flux device.",
     "jpa/flux_onetone": "FTF does not model a JPA or expose a JPA flux device.",
     "jpa/freq": "FTF has no pump RF device or JPA response to pump frequency.",
-    "jpa/power": "FTF has no pump RF device or JPA response to pump power."
+    "jpa/power": "FTF has no pump RF device or JPA response to pump power.",
+    "two_qubit/cz_optimize": "Requires upstream calibration; not measured: fixed ftf-demo/initial lacks the ordered Q1/Q2 Local Z pair at $coupler.ext.cz_phase.",
+    "two_qubit/rb": "Requires upstream calibration; not measured: fixed ftf-demo/initial lacks the ordered Q1/Q2 Local Z pair at $coupler.ext.cz_phase.",
+    "two_qubit/rb_heralded": "Requires upstream calibration; not measured: fixed ftf-demo/initial lacks the ordered Q1/Q2 Local Z pair at $coupler.ext.cz_phase."
   }
 }

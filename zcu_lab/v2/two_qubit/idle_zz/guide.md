@@ -1,68 +1,44 @@
+**讀者：** operator、agent。設定 conditional Ramsey，用兩個 spectator 分支估計 idle ZZ 頻差。
+
 # Conditional Ramsey 與 idle ZZ
 
-**讀者：** operator、agent。設定 conditional Ramsey，判讀 idle ZZ 擬合頻差與限制。
+選一顆 qubit 做 Ramsey，另一顆當 spectator。每發依序做「可選 reset → spectator I 或 Xπ → target π/2 → 自由演化 → target π/2 相位投影 → mux 終端讀出」。比較兩個名目 spectator 分支的 Ramsey 條紋頻率。若 Reset 留空，spectator I 或 Xπ 都作用在原來的熱布居上，不保證對應純 g 或 e 態。
 
-Cfg 掃描欄位使用 `dc`，此實驗的 cfg schema 為 6.0。載入舊主版本的 run 時保留 Result 與 metadata，cfg 為 None，並發出 `CfgUnavailableWarning`。這些舊 run 不支援重新分析，也不提供 cfg 遷移或欄位 alias。
+## 設定表單
 
-`two_qubit/idle_zz` 比較 spectator I、Xπ 的兩個名目分支。Target 使用小寫 `f1` 或 `f2`。每個 shot 做可選 reset → spectator I/Xπ → target π/2 → delay → phase projection → terminal mux readout。reset 留空時不發射 reset。
+1. 綁定 `$qubit1`、`$qubit2` 到不同元件，`$mux` 到包含兩者的 MuxGroup。舊 point 要補位置 aliases；不需要 `$coupler`。[依家族導覽核對 qubit 與 resonator 的順序](../guide.md#綁定位置與讀出-tones)。Refresh 保留原稿並重查來源；Defaults 從目前 aliases 和 library 重建初值。
+2. **Ramsey target** 初值是 Qubit1。選中的 qubit 播兩個 Xπ/2，另一顆的 Xπ 用於 spectator Xπ 分支。兩顆的 **Xπ**、**Xπ/2** 分別從各自的 `x180`、`x90` slot 複製；缺 slot 時留空。使用 amplitude／length Rabi 校準的脈衝。同一顆的兩個脈衝必須在同一 drive channel，兩顆使用不同 channel。頻率用 MHz、signed gain 用 a.u.、時間用 µs。
+3. **Mux readout** 從 `$mux.module.readout` 引用完整讀出。缺 slot 時填好 blank mux。保留原有 tone 順序，並用同次讀出條件的 [mux GE 和 GE Post](../../mux/singleshot_ge/guide.md) 為兩顆 qubit 設定各自的 g/e circle center 與 radius。**Reset** 留空時略過；選已校準的準備 reset 或下述 herald filter，會在兩個分支發出。
+4. **Ramsey free-evolution delay** 初值為 0–10 µs、101 點。實際量到的延遲必須等距、有正跨度且至少六個不同點。**Programmed Ramsey detuning** 初值空白。第二個 π/2 的相位是第一個 π/2 的相位加上 `360° × detuning (MHz) × actual delay (µs)`。這是相位斜率，不是改 pulse 的 RF。從近期 Ramsey 頻率誤差和預期的 `|ζ|` 估算，選絕對值明顯大於兩者之和的非零 detuning，讓兩分支條紋在同一頻率符號側。
+5. 檢查取樣間距和掃描跨度。起點可用每個預期最快條紋週期至少 10 點，即間距小於 `1 / (10 × |f_max|)` µs。至少涵蓋數個週期；若還要用衰減包絡檢查模型，窗口可先取約 `3 × T2*`。例如預期最快條紋 2 MHz，間距不超過 0.05 µs。太疏可能把高頻看成低頻，窗太短時會看見不足一個週期或良好擬合但頻率誤差很大。
+6. **Coupler DC source** 初值空白，此時不動任何 DC。要掃 bias 時選連接的 source，設定 **DC source unit**（安培、伏特或 native）及同單位的 **Coupler DC bias sweep**。初值是停用的單點 0；啟用前填已核對的區間。實驗不另換單位、不補償其他 loop，結束或取消後不恢復 bias。
+7. **Reps** 是每個分支和時間點每輪嘗試的 shots，初值 1000。**Rounds** 在每個 bias 點重複整個延遲掃描並疊加計數，初值 10。**Initial wait** 是每輪開始等待，**Relaxation wait** 是兩發之間等待，兩者初值 1 µs。按量過的弛豫與讀出腔放空時間設定。
 
-## 開啟前確認
+## 讀 Run 與 Analyze 圖
 
-先依 [FTF bring-up 指南](../guide.md) 校準 F1/F2 的 Xπ、Xπ/2 與 mux readout。Aliases `f1`、`f2` 指向不同 fluxonium，`coupler` 指向本對 transmon，`mux` 指向含 F1/F2 的 MuxGroup。Group 的有序 qubits 與 resonators 必須逐項對應。
+每個延遲和 spectator 分支有九類終端聯合計數。縱軸 `P(e) − P(g) = (N_e − N_g) / N_total` 是 target 的分類對比。`other` 包含在分母，單發對比值為 0；e 記 +1，g 記 −1。這不是 IQ 實部，也不做讀出誤差修正。每點誤差棒是這組單發值的樣本標準差除以 `√N_total`。`N_total` 只含保留的 shots。少於兩發時不畫棒。這不是單發散布或擬合參數誤差。擬合沿用原先的計數加權和飽和點 `1/N_total` 權重誤差下限，圖上的 shot SEM 不使用該下限。
 
-Open／Reset 固定捕捉角色與原始 tone 位置。每個角色的 Xπ 與 Xπ/2 使用同一 generator，F1/F2 使用不同 generator。Readout 引用完整 `$mux.module.readout` slot，缺 slot 時手填 blank mux 範本。F1/F2 必須有含 radius 的 circle classifier，缺少時先完成 GE Post。其他 tone 保留原順序，不要求 classifier。
+- **Run 的 Ramsey contrast** 每個 bias 點一張，兩種顏色各代表 spectator I 和 Xπ。橫軸是實際延遲 (µs)。看兩支條紋是否已出現，以及標題中的分支時間點取樣數和保留 shots 計數。沒有保留 shot 的點不畫對比。
+- **Analyze 的 Ramsey contrast** 保留同樣的量測點和誤差棒。實線是各自的衰減餘弦，不是額外取樣。圖下列各分支條紋頻率及其 1σ 擬合誤差。R² 用來衡量模型解釋量測起伏的程度。Normalized residual RMS 是殘差 RMS 除以量測對比的峰對峰範圍；越接近 0，模型殘差相對越小。Relative frequency error 是頻率 1σ 誤差除以頻率絕對值。沒有 R² 或殘差的自動通過門檻；對照實線、點和殘差是否有系統差異。圖下另列兩分支的 ζ 與誤差。
+- **Conditional fringe shift** 在有多個 bias 點時顯示 ζ 對 bias 的關係，編號對應各張條紋圖。縱向誤差是兩分支頻率擬合誤差的平方和開根，不是該 bias 點的 shot SEM。缺 ζ 時回看該分支未能辨識的原因。
 
-Refresh 更新來源與選項，保留已填輸入。修改來源或 aliases 後按 Reset 重新取得初值，並核對角色、pulses 與 tone 對應。Reset 可能覆蓋尚未保存的輸入。
+版式參考：Ding 圖 5-9(b,e)（頁 152）把 Ramsey 類序列和相位判讀放在一起。本實驗沿自由演化時間畫兩分支的終端分類對比，用條紋頻差估計 ζ，不掃 CZ 驅動頻率，也不提 π 相位的位置。
 
-## 設定與 Run
+## 決定是否採用頻差
 
-表單先列 reset、Xπ、X90 與 mux readout，再列角色與 target。
-外層 DC 的 device、unit、values 在內層 delay 前。Detune 接在 delay 後，取數欄位在最後。
+在同側假設下，`f = sign(detuning) × |f|`，`ζ = f(Xπ) − f(I)`。共同的人工相位斜率在兩頻相減時抵消。例如 detuning 為負，兩分支 `|f|` 為 1.80 與 2.10 MHz 時，ζ 是 `−2.10 − (−1.80) = −0.30 MHz`。不能只減兩個絕對值。若 `|f|` 到 0 或 `2 × |detuning|` 的距離不超過 `max(1/時間跨度, 頻率 1σ 誤差)`，原分析不給 signed `f` 或 ζ。圖上會列原因和辨識界限；有 fit 線也不代表頻率符號已辨識。
 
-1. 選 target `f1` 或 `f2`，另一個是 spectator。需要 reset 時填入已校準的 reset cfg。
-2. 人工填 signed detune，單位 MHz。其絕對值須明顯大於預期 abs(ζ) 加 qubit 頻率誤差，使兩分支留在 detune 選定的同側。單一 projection 的資料不能證明此前提。
-3. 設 delay 的 µs 範圍及點數。分析至少需要 6 個不同、等距的實際 delay，正的時間跨度，並解析數個 fringe 週期。量化後 delay 不可重複。
-4. 只掃 delay 時，DC source 留空，各 source 不變。結果的單點 DC 座標 0 代表該軸停用。要掃 DC 時，填直接 device 名稱、driver 的 working unit 與已授權的 source values 範圍。支援 A、V、native，不做單位轉換或 F1/F2 補償。
-5. 核對 reps、rounds、等待時間與完整 mux 積分窗口，再 Run。每個 DC 點用一支 program 在硬體掃 spectator_states 與 delay。DC 要設定外部儀器，因此留在 host。硬體 delay sweep 會產生逐點等待差。若編譯指出收尾 WAIT slack 大於 relax_delay，增加 relax_delay 後再 Run，不把 delay 改回 host scan。Live 每條線是一個 DC／branch 的 target ⟨σ⟩。
+若窗長限制辨識，例如 3 µs 的跨度讓 `1/span ≈ 0.33 MHz`，要把此項降到 0.10 MHz，延長到至少 10 µs，並保留原取樣間距。若兩分支可能跨過零頻，先用新校準的 target RF 頻率降低已知誤差，或在仍可充分取樣的範圍內增大 detuning 的絕對值。若條紋可見但單頻模型有系統偏差，先檢查熱布居和兩顆的 Xπ 校準。ζ 是名目分支的單頻估計，不能由此排除混合頻率或宣稱量到純 Hamiltonian ZZ。多 bias 點可先用 `|ζ|` 和擬合誤差挑較小且已量過的候選，再在該 bias 複測；不從個別 ζ 自動推算偏壓步進或寫回校準。
 
-DC 操作也可能影響其他 loop。工作點與補償由操作員設定並記錄。結束後 source 維持最後設定，取消或失敗後先核對裝置狀態。
+## 篩選、部分取數與保存
 
-## FIT 與符號
+在 Reset 選 `reset/mux_herald` 可只分析通過 herald 的 shots。用與終端相同的完整讀出，`keep` 的鍵填完整讀出的 zero-based tone 位置，不填 ADC 編號。位置 0、1 的 pair 可填 `{'0': g, '1': g}`。此時所有終端機率都以通過篩選的 shots 為分母；通過率不是純度。
 
-第二個 target π/2 的 phase 是第一個 pulse 的 phase 加上 `360 * detune * actual_delay`，單位 degree。取數時分類 terminal F1、F2 的 g/e/other，每點保存 9 類計數。分析以目標 qubit 的 `⟨σ⟩ = (N_e − N_g) / N_total` 對 delay 做 free-phase decay cosine fit。Other 留在分母，不旋轉或重分類 IQ。擬合用計數推得的 shot-noise error 加權，飽和點的 error 下限為 1/N。
-
-Fitter 給非負 fringe magnitude m，單位 MHz。在兩分支同側的前提下，`f = sign(detune) * m`，`ζ = f_Xπ − f_I`。負 detune 也使用 signed frequency 求差。共同人工 phase ramp 在頻差中抵消。
-
-每個 DC 點有兩分支 Ramsey／fit 圖，另有 ζ 圖。ζ error 是兩支 frequency errors 的平方和開根號。Analyze 只發布圖並回傳 `None`。逐 DC 的 branch fits、ζ、誤差與原因只在分析內供畫圖使用。
-
-ζ 是名目分支的單頻模型擬合頻差，不是純化的 Hamiltonian ZZ。熱 population 可能混合多個 conditional 頻率。操作員須比較量測曲線與擬合曲線，並檢查 ζ 圖的誤差和不可用原因。有限 fit 不代表模型偏差已排除，不套自動統計拒絕門檻。
-
-### 符號辨識限制
-
-正負 detune 都在 magnitude 座標比較 m 距離 0 與 `2 * abs(detune)`。距任一邊界不超過 `max(1/span, frequency_1σ_error)` 時，signed frequency 與 ζ 不可辨識。span 是實際 delay 最大值減最小值，單位 µs，1/span 是 MHz。
-
-Detune 為 0、點數不足、span 非正、無 Ramsey contrast、非有限不確定度或數值 fit 失敗，也會保留原因而不給 ζ。先保存圖與原因，再人工調整範圍或校準。
-
-## 取消、保存與重分析
-
-Result 的 sums 是 float64 `DC × spectator_states × delay × 3 × 3` 原始計數。spectator_states 存整數 [0, 1]，分別是 spectator I、Xπ。末兩軸是 terminal F1/F2，各為 g/e/other。Rounds 在取數端累加，不除以 reps 或 rounds，不保存個別 shots 或 IQ。
-
-取消保留已完成 rounds 的計數，未量點保持 NaN。Live 可見部分曲線，fit 要求分支上的每個 delay 都至少取到一輪，且有 shot 通過篩選。兩支 fit 可用時才算 ζ。總數為 0 的比例是 NaN。
-
-Save 保存 sums、全部座標與本次 cfg。Native Load 不改目前表單。Analyze 只用所載 cfg，不用目前 library；缺 cfg 時拒絕分析。普通版 cfg schema 為 5.0，target 的舊大寫值不作相容轉換。舊 raw-IQ 檔缺少 sums 時明確報錯。
-
-本實驗不寫回 calibration，也不自動調整 detune 或 DC。
-
-## 用 mux herald 篩選 shot
-
-Reset 選 `reset/mux_herald`，readout 與終端讀取用同一份設定。F1、F2 位於完整 readout 的第 0、1 個 tone 時，填 `keep: {'0': g, '1': g}`。用原始 tone 位置，不用 ADC 編號。
-
-機率是通過 herald 的 shot 裡的條件機率，分母是該格的計數總和。接受率等於計數總和除以 reps × rounds，不代表基態純度。沒有 shot 通過時，該格機率為 NaN。中途停止仍可用已完成 rounds 的計數。原本獨立 heralded 實驗的存檔已無法載入。
+停止時保留已完成 rounds，未量點留空。任一分支的必要延遲缺資料或沒有通過篩選的 shot，就不給該分支的頻率。Analyze 摘要顯示來源 run 與保存的 Reps×Rounds，圖分析使用保存的 cfg 和計數。沒有可還原的 cfg 時不以當前表單代替。Save 保留全部實際延遲與終端九類計數，不保存原始 IQ。不相容的舊位置軸或獨立 heralded 實驗的檔案須用寫出檔案的版本開啟。
 
 ## Notebook
 
-`cfg` 使用與表單相同的 IdleZZCfg。經 NotebookAdapter 保留 RunRecord 與保存流程。
-`point_view` 是儲存目的地已綁定的 `ParameterView`。保存時以本次 `run()` 回傳的 `record` 作為 `source`。
+以 `IdleZZCfg` 從完整讀出順序填 `qubit1_tone`、`qubit2_tone`，index 從 0 起算。經 NotebookAdapter 保留 RunRecord，`point_view` 是保存目的地。
 
 ```python
 from zcu_tools.notebook import NotebookAdapter
@@ -74,13 +50,3 @@ record = exp.run(cfg)
 exp.analyze(None)
 exp.save_run(point_view, source=record)
 ```
-
-## Calibration order and field units
-
-Calibrate each role's Xπ and Xπ/2 slots with amplitude and length Rabi before using them.
-Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
-Use lookback to set mux timing, then mux onetone to set frequencies and gains.
-Confirm readout timing in us and gains in [-1, 1].
-
-Before choosing the signed artificial detune, calibrate the qubit frequency with twotone spectroscopy and measure T2 Ramsey.
-Keep its magnitude greater than the expected |ζ| plus the frequency error, as required above.

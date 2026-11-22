@@ -13,14 +13,14 @@ The board scans probe gain; probe frequency and duration stay fixed. Use
 
 ## Starting configuration
 
-Open and Reset capture aliases, parameter sources and module selections.
+Open and Defaults capture aliases, parameter sources and module selections.
 Reset and initialization use optional `$qubit.module.reset` and
 `$qubit.module.x180` slots.
 Missing optional slots stay disabled. Disable initialization for ground-state
 preparation, or select a calibrated pulse to prepare another state.
 
 Probe starts from the `res_probe` template using `$resonator.freq` and
-`$resonator.wiring.ch`, with a 1 us constant pulse. Readout uses
+`$resonator.wiring.ch`, with a 1 µs constant pulse. Readout uses
 `$resonator.module.readout` when present, otherwise the `readout` template. The
 readout template needs resonator frequency, generator/ADC wiring and
 `$resonator.time_of_fly`. Missing required sources stay Invalid; select a
@@ -28,7 +28,7 @@ valid module or fill the inline fields before Run.
 
 The initial gain range is 0 to 1 with 151 points. Reps starts at 1000 and Rounds
 at 100. Relax delay starts at 5 times the captured `$qubit.t1`. Missing/null T1
-uses 30 us, giving a 150 us wait; invalid T1 leaves the required wait empty.
+uses 30 µs, giving a 150 µs wait; invalid T1 leaves the required wait empty.
 These are editable starting values. Set safe ranges using the limits of your
 hardware. Review gain, frequency, pulse length, readout and state preparation
 before running.
@@ -73,11 +73,11 @@ measurement.
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Set probe gain endpoints and verify probe/readout timing. Supply GE calibration where the Form requests it.
    Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, Reset to recapture those values.
+2. With frequencies but no module slots, choose Defaults to recapture those values.
    Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, Reset and review the captured module and remaining errors separately.
+3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `mist_power_trace` after inspecting the same Form errors.
    The captured Form supplies gain Expts. probe_ref/readout_ref select modules. g0, e0 and ac_coeff update the existing display analysis.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
+   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.

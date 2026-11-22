@@ -92,17 +92,24 @@ class AcStarkCfg(ConfigBase):
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -168,7 +175,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
-        line_ax.set_xlabel("Frequency (MHz)")
+        line_ax.set(xlabel="Frequency (MHz)", ylabel="Signal (a.u.)")
         heatmap = live_heatmap(heat_ax, uniform=False)
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         line_ax.grid()

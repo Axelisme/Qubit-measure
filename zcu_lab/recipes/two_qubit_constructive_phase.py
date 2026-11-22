@@ -1,4 +1,4 @@
-"""Sweep relative phase and pulse duration, then review the F2 phase update."""
+"""Sweep relative phase and pulse duration, then review the Qubit2 phase update."""
 
 from typing import Annotated
 
@@ -25,30 +25,37 @@ class ConstructivePhaseInputs(RecipeInputs):
 
     target: TwoQubitTarget | None = Field(
         default=None,
-        description="Role bindings for this Reset. Omitted or null roles keep the current aliases.",
+        description="Position bindings for this Reset. Omitted or null positions keep the current aliases.",
     )
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     relative_phase_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
     ) = Field(
-        KEEP, description="Start and stop of the F2 minus F1 phase sweep, in deg."
+        KEEP,
+        description="Start and Stop (deg) of Form Qubit2 relative to Qubit1 drive phase.",
     )
     relative_phase_points: int | None | Keep = Field(
-        KEEP, description="Number of relative phase samples, mapped to Form Expts."
+        KEEP,
+        description="Expts (count) under Form Qubit2 relative to Qubit1 drive phase.",
     )
     duration_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
     ) = Field(
-        KEEP, description="Start and stop of the common pulse duration sweep, in us."
+        KEEP,
+        description="Start and Stop (µs) of Form Common waveform envelope duration.",
     )
     duration_points: int | None | Keep = Field(
-        KEEP, description="Number of common duration samples, mapped to Form Expts."
+        KEEP, description="Expts (count) under Form Common waveform envelope duration."
     )
     reps: int | None | Keep = Field(
-        KEEP, description="Repetitions per point per round."
+        KEEP,
+        description="Form Reps (count): attempted shots per sweep point in one round.",
     )
-    rounds: int | None | Keep = Field(KEEP, description="Acquisition round count.")
+    rounds: int | None | Keep = Field(
+        KEEP,
+        description="Form Rounds (count): acquisitions accumulated at each sweep point.",
+    )
 
 
 class ConstructivePhaseReport(RecipeReport):
@@ -56,22 +63,22 @@ class ConstructivePhaseReport(RecipeReport):
 
     relative_phase_deg: float | None = Field(
         default=None,
-        description="Maximum-rate F2 minus F1 phase, in deg; null if unavailable.",
+        description="Analyze relative_phase_deg: Qubit2 minus Qubit1 drive phase at the rate maximum (deg).",
     )
     reason: str | None = Field(
         default=None,
-        description="Owner reason when no relative phase can be identified.",
+        description="Analyze reason for no relative-phase proposal.",
     )
 
 
 @recipe(
     "two_qubit_constructive_phase",
-    description="Scan F2 relative phase and common duration, review F2 phase writeback and save.",
+    description="Scan Qubit2 relative phase and common duration, review Qubit2 phase writeback and save.",
 )
 async def two_qubit_constructive_phase(
     session: RecipeSession, inputs: ConstructivePhaseInputs
 ) -> ConstructivePhaseReport:
-    """Find the F2 minus F1 phase of maximum fitted rate.
+    """Find the Qubit2 minus Qubit1 phase of maximum fitted rate.
 
     See [Read the figures](../v2/two_qubit/constructive_phase/guide.md#read-the-figures).
     Set relative_phase_range in deg and duration_range in us. Both point

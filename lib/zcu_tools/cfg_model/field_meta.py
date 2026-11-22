@@ -21,7 +21,7 @@ class FieldMeta:
     label:
         Human-readable field name, without the unit suffix.
     unit:
-        Unit of the stored value, such as "MHz" or "us"; does not convert values.
+        Display unit for the cfg value, such as "MHz" or "µs"; does not convert values.
     decimals:
         Suggested number of fractional decimal places for numeric display.
         Use a non-negative integer, or None for the consumer's default precision.

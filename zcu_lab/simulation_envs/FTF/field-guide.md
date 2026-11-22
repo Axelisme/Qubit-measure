@@ -509,8 +509,8 @@ Mux onetone 缺 slot 時，trigger 候選是 `$mux.time_of_fly + 5/(2π·min κ)
 
 1. 在 Library 建立 `readout/mux` 模組。設 `gen_ch: 7`，依 R1／R2 順序填兩筆 tones，`ro_ch` 分別為 2／3，初始 `freq` 可用 7190／7080 MHz。填入有效的 `nqz`、`mixer_freq`、各 tone gain／phase、共用 `length`、`ro_length` 與 `trig_offset`。時間欄位使用 us，receiver 的 YAML 延遲使用 ns，不可直接照抄數字。
 2. 在 Inspect 把該 library key 填入 `MG12.module.readout`。Startup 已把 `mux` alias 指向 MG12，不需更改 R1／R2 的 pulse wiring。
-3. Open 或 Reset `mux/twotone_spectrum` 時，Readout 沿 `$mux.module.readout` 引用完整模組。缺 slot 時使用 blank 模組加 group tones，通道來自 MG12 wiring，gain 為 0.1；其餘必填輸入仍須補齊。量測前另填有效 qubit frequency 與 drive／sweep 輸入。
-4. Open 或 Reset `mux/onetone` 時，有 slot 會複製模組 scalar 設定，但按 group 重新產生 tones，沿既有路徑設 `ro_ch` 初值 0／1。缺 slot 則從 MG12 wiring 補 2／3，gain 為 0.1。每次都要核對 R1→2、R2→3，必要時修正，再確認 frequency、gain 與 timing。有 slot 的副本不沿用 library tones 的通道；Run 前的手動修改不會更新 library。
+3. 開啟 `mux/twotone_spectrum` 或按 Defaults 時，Readout 沿 `$mux.module.readout` 引用完整模組。缺 slot 時使用 blank 模組加 group tones，通道來自 MG12 wiring，gain 為 0.1；其餘必填輸入仍須補齊。量測前另填有效 qubit frequency 與 drive／sweep 輸入。
+4. 開啟 `mux/onetone` 或按 Defaults 時，有 slot 會複製模組 scalar 設定，但按 group 重新產生 tones，沿既有路徑設 `ro_ch` 初值 0／1。缺 slot 則從 MG12 wiring 補 2／3，gain 為 0.1。每次都要核對 R1→2、R2→3，必要時修正，再確認 frequency、gain 與 timing。有 slot 的副本不沿用 library tones 的通道；Run 前的手動修改不會更新 library。
 
 Entry 範本的 coupler 只有靜態 DC source，沒有預填 `lo_flux_ch`。需要 coupler flux pulse 時，另在 `flux_lines.coupler` 宣告 generator，不從 `coupler.flux_dev` 推導。兩條 charge line 的 coupler 串擾係數仍會作用於模型中的 coupler，與是否宣告獨立 flux pulse channel 分開。
 

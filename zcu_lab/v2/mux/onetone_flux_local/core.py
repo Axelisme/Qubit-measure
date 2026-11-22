@@ -82,11 +82,11 @@ class OnetoneFluxLocalCfg(ConfigBase):
     reps: Annotated[int, FieldMeta(description="Number of repetitions per round.")]
     rounds: Annotated[int, FieldMeta(description="Number of software rounds.")] = 1
     initial_delay: Annotated[
-        float, FieldMeta(unit="us", description="Delay before the first repetition.")
+        float, FieldMeta(unit="µs", description="Delay before the first repetition.")
     ] = 1.0
     relax_delay: Annotated[
         float,
-        FieldMeta(unit="us", decimals=3, description="Delay after each repetition."),
+        FieldMeta(unit="µs", decimals=3, description="Delay after each repetition."),
     ]
 
     @model_validator(mode="after")
@@ -127,7 +127,7 @@ def _plot_flux_maps_and_make_updater(
         fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
-        line_ax.set_xlabel("Frequency (MHz)")
+        line_ax.set(xlabel="Frequency (MHz)", ylabel="Magnitude (a.u.)")
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         line_ax.grid()
         heatmaps.append(live_heatmap(heat_ax, uniform=False))

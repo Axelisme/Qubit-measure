@@ -107,7 +107,7 @@ Linear 是線性格點，decay 將同一時間窗的點集中在衰減段，這�
 Workflow 從自己的 settings 傳 retry 給取數 helper，core cfg 不承接 workflow retry。
 
 Readout 用實驗接受的最窄型別：pulse 用 `PulseReadout.Cfg`，mux 用 `MuxReadout.Cfg`，兩者都支援才用 `Readout.Cfg`。
-其他 module 同樣用自己的 `.Cfg`。宣告順序參考 `twotone/rabi/amp_rabi/core.py:56-89`。
+其他 module 同樣用自己的 `.Cfg`。宣告順序參考 [`AmpRabiCfg`](twotone/rabi/amp_rabi/core.py)。
 Module 建構子的 keyword 覆寫產生有效 cfg，caller cfg 保持不變，None 表示沿用原值。
 Pulse 支援 freq、gain、phase、length；PulseReadout 支援 freq、gain、length、ro_length。
 Reset 參數見 [module 建構參數表](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides)。
@@ -121,7 +121,7 @@ Cfg 從 `zcu_tools.cfg_model` import `ConfigBase`，modules 與掃描欄位平�
 Module 保留 selector 與子表單，掃描保留 SweepCfg 子表單，FieldMeta 提供 label、unit 等提示。
 Pulse Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay、Mixer freq 的既有摺疊。
 Tone lists 保留逐元素結構。只宣告實驗會使用的取數欄位。
-Initial delay 需編輯或驗證時才宣告，否則沿用 program 的 1.0 us。
+Initial delay 需編輯或驗證時才宣告，否則沿用 program 的 1.0 µs。
 平鋪 cfg 使用 `cfg_schema_version="3.0"`，後續契約變更依各實驗提升版本。
 Load 保留舊 major 的資料與 metadata，回 `record.cfg=None` 與 `cfg_issue`，不轉換舊巢狀 cfg。
 Core 按需 import 實際使用的 module、SweepCfg 與硬體指令。
@@ -136,17 +136,20 @@ Scale 定義為 `disk = memory * scale`，MHz→Hz 用 1e6，us→s 用 1e-6，�
 Z 各維度須匹配軸長，固定軸也計入；load 不將固定值寫進 Result。
 `GroupedAxesSpec` 的 `VariableAxisSpec` 全用 keyword，`VariableZSpec` 只有 field_name 可用位置參數。
 `VariableAxisSpec.generated_arange(label=..., unit=...)` 也用 keyword。
-單變數映射見 `twotone/power_dep/core.py:67-77`，二維硬體掃描見 `twotone/ro_optimize/freq_gain/core.py` 的 `FreqGainExp.AXES_SPEC`。
+可選 native 變數與 Labber 選集各自宣告，見 [ADR-0069](../../docs/adr/0069-experiment-core-and-frontends.md#native-可選變數與-labber-投影)。
+單變數映射見 [PowerExp.AXES_SPEC](twotone/power_dep/core.py)，二維硬體掃描見 [FreqGainExp.AXES_SPEC](twotone/ro_optimize/freq_gain/core.py)。
+
+Native HDF5 的變數名（`VariableSpec.variable` 或 `AxesSpec.data_variable`）與存檔軸的 `label` 都是結果格式的一部分，不是圖上的標籤。Cfg 改名與舊檔相容性見 [ADR-0069〈Cfg 欄位改名與 schema 版本〉](../../docs/adr/0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。現行例子見 [Two-qubit 持久名稱](README.md#two-qubit-持久名稱)。
 
 ### 分析選項自行驗證，fit 結果用屬性讀取
 
 分析選項用 pydantic dataclass 的欄位限制驗證，GUI 沿用此驗證。
 負 skip 在建構時拒絕，GUI 顯示表單錯誤，remote 回 `INVALID_PARAMS`。
-實例見 `twotone/rabi/amp_rabi/core.py:37-39`；新增檢查的授權依 [風格指南](experiment-style.md#3-寫法判斷)。
+實例見 [`AmpRabiAnalyzeOptions`](twotone/rabi/amp_rabi/core.py)；新增檢查的授權依 [風格指南](experiment-style.md#3-寫法判斷)。
 `fit_decay`、`fit_dual_decay`、`fit_rabi`、`fit_decay_fringe` 回傳具名結果。
 新程式碼讀屬性，tuple 解構僅保留既有 caller。`fit_decay` 的時間與誤差沿用輸入時間單位。
 輸入 delays 與 real_signals 是同長一維 float64 陣列，delays 非負。
-讀屬性的範本見 `twotone/rabi/amp_rabi/core.py:198-205`。
+讀屬性的範本見 [`AmpRabiExp.analyze`](twotone/rabi/amp_rabi/core.py)。
 
 ### Analysis 回傳值只放摘要
 
@@ -182,7 +185,8 @@ Slot.set 初值只套用到 copy，這項設定本身不把 reference 改成 cop
 建圖、預設樣式、show、owner-thread 更新與 finish／release 依 [plotting README](../../lib/zcu_tools/plotting/README.md)。
 Live artists 與多面板格式依 [v2 README](README.md#即時圖工具)。
 實驗自行決定座標、labels 與圖名。show 前可填資料，show 後的修改也經 plot-thread callback。
-一維建圖與 update 見 `twotone/rabi/amp_rabi/core.py:127-141`，熱圖與 current trace 見 `twotone/power_dep/core.py:111-142`。
+選 y 軸要畫的物理量時看 [R12：y 軸畫物理 observable](figure-style.md#r12y-軸畫物理-observable)，標示方式見[〈單位〉](figure-style.md#單位)。
+一維建圖與 update 見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)，熱圖與 current trace 見 `twotone/power_dep/core.py:111-142`。
 
 ## 目錄佈局
 
@@ -309,7 +313,7 @@ Scheduled timing analysis 不驗證 CPU 等待或跨 shot 實機排程。
 
 ### Builder 與 module 的生命週期
 
-一維序列與取數見 `twotone/rabi/amp_rabi/core.py:144-166`，以 branch 比較 g/e 的二維掃描見 `twotone/ro_optimize/freq_gain/core.py` 的 `FreqGainExp.run`。
+一維序列與取數見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)，以 branch 比較 g/e 的二維掃描見 `twotone/ro_optimize/freq_gain/core.py` 的 `FreqGainExp.run`。
 Builder 明傳 reps、relax_delay 與需要的 initial_delay，取數時另傳 rounds。
 `add_sweep` 同時宣告 loop 並回 QickParam，獨立成行，loops 按宣告順序外到內。
 `add_loop` 搭 LoadValue 用於整數 selector 或候選 pulse 選擇。
@@ -368,10 +372,12 @@ Mux Len Rabi 同 point loop 中每個參與者有自己的 length 表。
 ### 用 run_acquire* 寫入與停止
 
 SignalBuffer 接完整 array 的 on_update，Schedule 接 scope=context.scope 並把轉換資料寫入 slot。
-一維接線見 `twotone/rabi/amp_rabi/core.py:138-166`，buffer、retry、partial 與 lifecycle 見 [runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md)。
+一維接線見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)。它把同一份校正 IQ 矩用於 live update、SNR 停止條件和最終結果。
+Buffer、retry、partial 與 lifecycle 見 [runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md)。
 Integrated、summed、decimated 三個 slot 入口用 RunOptions(converter=...) 轉形狀或算 conditional mean。
-Summed 先 build，再 `shot_sums(prog, [IQ("terminal")])`，將 count／sum I／sum Q 寫入 float64 slot。
-分類軸與 split_sums 見 [summed acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition)。
+Summed 先 build，再 `shot_sums(prog, [IQ("terminal")])`，將 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]` 寫入 float64 slot。
+若與 native 平均 IQ 共用零點，且符合單 ADC、單積分讀出與無 mask 的前提，傳 `IQ("terminal", offset_corrected=True)`。
+分類軸、校正的前置條件與 split_sums 見 [summed acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition)。
 多 ADC mux 須提供符合 slot shape 的 converter；`MuxReadout.collect_raw_iq(prog)` 在 completed-round hook 讀 raw buffers。
 逐 shot IQ 必須來自 raw buffer，不能以累積 averaged IQ 代替。
 Decimated 不用 sweep，caller 按 rounded readout window 配 trace buffer，shape 匹配 backend repetitions／samples，可附 on_update。
@@ -410,7 +416,7 @@ None／0.0 都是純平滑 SNR argmax。
 
 ## v2 工具與實驗輔助
 
-Sweep 座標參考 `twotone/rabi/amp_rabi/core.py:121-125`，量化契約由 [round_zcu.py](../../lib/zcu_tools/experiment/v2/utils/round_zcu.py) 擁有。
+Sweep 座標參考 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py) 的 `sweep2array` 呼叫，量化契約由 [round_zcu.py](../../lib/zcu_tools/experiment/v2/utils/round_zcu.py) 擁有。
 `round_zcu_*` 處理單點，`round_sweep_dict` 處理規則 sweep，`sweep2array` 展開座標。
 目前 time／frequency 依 QICK start/span 與 signed-step 量化，gain 將 start／derived step 各自截斷成 words。
 量化後多點 step 為零或相鄰碰撞時 fast-fail，要求加大 span 或減少 expts。

@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import pairwise
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from matplotlib.lines import Line2D
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.fitting.phase_line import PhaseLineFit, fit_phase_line
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -36,20 +38,20 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
-from .._drive import DualLineCfg
-from .._phase import QuadraturePhase, count_phase, phase_variance, sigma_variance
-from .._readout import JointRoles, MuxResetCfg
-from .._sums import sigma, validate_classifiers
+from .._drive import QubitDriveCfg
+from .._phase import QuadraturePhase, count_phase, phase_variance, qubit_sigma_variance
+from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
+from .._sums import qubit_sigma, validate_qubit_tones
 
 
 @dataclass(frozen=True)
 class LocalZResult:
     """Summed counts with target × quadrature × n leading axes.
 
-    Fixed targets [0,1] denote F1/F2; quadratures [0,1] denote X/Y.
-    sums is float64 with terminal F1/F2 g/e/other class axes, each length 3.
+    Fixed targets [0,1] denote Qubit1/Qubit2; quadratures [0,1] denote X/Y.
+    sums is float64 with terminal Qubit1/Qubit2 g/e/other class axes, each length 3.
     Rounds add without averaging. Unmeasured points remain NaN.
     """
 
@@ -76,17 +78,25 @@ class LocalZFit:
 
 
 @dataclass(frozen=True)
+class LocalZOptions:
+    """Display labels for the first and second targets in the analysis figures."""
+
+    qubit1_label: str = "Qubit1"
+    qubit2_label: str = "Qubit2"
+
+
+@dataclass(frozen=True)
 class LocalZAnalysis:
-    """Fixed F1/F2 phase-line summaries in target order; no scan arrays."""
+    """Fixed Qubit1/Qubit2 phase-line summaries in target order; no scan arrays."""
 
     fits: tuple[LocalZFit, ...]
 
 
 class LocalZCfg(ConfigBase):
-    """Independent X/Y projections with acquisition-side F1/F2 classification.
+    """Independent X/Y projections with acquisition-side Qubit1/Qubit2 classification.
 
     Frequencies are MHz, phases degrees and delays us. reps is shots per round;
-    rounds accumulate counts at acquisition. F1/F2 require circle classifiers
+    rounds accumulate counts at acquisition. Qubit1/Qubit2 require circle classifiers
     with GE Post radii. reset=None skips reset; otherwise reset starts each shot.
     Both targets use consecutive nonnegative gate_count values, including n=0.
     """
@@ -95,58 +105,86 @@ class LocalZCfg(ConfigBase):
         MuxResetCfg | None,
         FieldMeta(label="Reset", description="Optional reset before each shot."),
     ] = None
-    x90_f1: Annotated[
+    x90_qubit1: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F1 Xπ/2",
-            description="Calibrated F1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit1 Xπ/2",
+            description="Prepare and project Qubit1 coherence to measure its logical phase.",
         ),
     ]
-    x90_f2: Annotated[
+    x90_qubit2: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="F2 Xπ/2",
-            description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
+            label="Qubit2 Xπ/2",
+            description="Prepare and project Qubit2 coherence to measure its logical phase.",
         ),
     ]
     drive: Annotated[
-        DualLineCfg,
+        QubitDriveCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="F1/F2 charge-line CZ pulses from the calibrated coupler slots.",
+            description="Use both calibrated CZ drive lines for each gate in the Ramsey train.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="Full-group mux readout with calibrated frequencies, gains and timing.",
+            description="Full-group mux readout with calibrated frequencies, gains and timing. "
+            + POINT_ALIAS_DESCRIPTION,
         ),
     ]
-    roles: JointRoles
-    gate_count: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
-        default_factory=lambda: [0, 1, 2, 3, 4], min_length=3
-    )
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based position in the full mux readout.",
+        ),
+    ]
+    gate_count: Annotated[
+        list[Annotated[int, Field(strict=True, ge=0)]],
+        FieldMeta(
+            label="CZ gates per shot",
+            unit="count",
+            description="Include zero and enter consecutive train lengths to measure phase per CZ.",
+        ),
+    ] = Field(default_factory=lambda: [0, 1, 2, 3, 4], min_length=3)
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Attempted shots per sweep point in one round, before herald selection.",
+        ),
     ] = Field(gt=0)
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of acquisitions accumulated at each sweep point.",
+        ),
     ] = 1
     initial_delay: Annotated[
         float,
         FieldMeta(
             label="Initial delay",
-            unit="us",
+            unit="µs",
             description="Delay before the first repetition.",
         ),
     ] = 1.0
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
-            unit="us",
+            label="Relaxation delay",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -155,13 +193,13 @@ class LocalZCfg(ConfigBase):
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Require full readout, correct role generators and consecutive train lengths."""
-        validate_classifiers(self.readout, self.roles)
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
         for drive, x90 in (
-            (self.drive.f1, self.x90_f1),
-            (self.drive.f2, self.x90_f2),
+            (self.drive.qubit1, self.x90_qubit1),
+            (self.drive.qubit2, self.x90_qubit2),
         ):
             if drive.ch != x90.ch:
-                raise ValueError("CZ and X90 must use the same captured role generator")
+                raise ValueError("CZ and X90 must use the same target generator")
             if not isinstance(x90.phase, (int, float)) or not np.isfinite(x90.phase):
                 raise ValueError("X90 phase must be a finite scalar")
         if any(b - a != 1 for a, b in pairwise(self.gate_count)):
@@ -200,16 +238,64 @@ def restore_result(data: GroupedLoadData[LocalZCfg]) -> LocalZResult:
     )
 
 
+def _start_live_view(
+    plots: Plots, config: LocalZCfg
+) -> Callable[[NDArray[np.float64]], None]:
+    """Create the live chart and return its owner-thread refresh callback."""
+    fig, _ = plots.subplots(
+        num="measurement", nrows=2, sharex=True, layout="constrained"
+    )
+    ns = np.asarray(config.gate_count, dtype=np.float64)
+    viewers = []
+    fig.suptitle("Local Z · waiting for shots")
+    for ax, label in zip(fig.axes, ("Qubit1", "Qubit2"), strict=True):
+        ax.set(title=label, ylabel="Target P(e) − P(g)")
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        viewers.append(live_errorbar(ax, num_lines=2))
+        for line, projection in zip(ax.lines, ("X", "Y"), strict=True):
+            line.set(label=f"{projection} ± shot SEM", linestyle="none")
+    fig.legend(
+        *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
+    )
+    fig.axes[-1].set_xlabel("CZ gates per shot (count)")
+    fig.show()
+
+    @plots.on_plot_thread
+    def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
+        counts = np.moveaxis(sums, 0, 2)
+        totals = counts.sum(axis=(-2, -1))
+        finite = np.isfinite(totals)
+        if finite.any():
+            measured = totals[finite]
+            fig.suptitle(
+                f"Local Z · {np.count_nonzero(finite)}/{finite.size} projections measured\n"
+                f"{int(measured.min())}–{int(measured.max())} retained shots per projection point"
+            )
+        values = np.stack(
+            (qubit_sigma(counts[0], "qubit1"), qubit_sigma(counts[1], "qubit2"))
+        )
+        sem = _projection_sem(counts)
+        return tuple(
+            artist
+            for t, viewer in enumerate(viewers)
+            for artist in viewer.set(ns, values[t], sem[t])
+        )
+
+    return update_view
+
+
 class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
     """Independent classified local-Z experiment."""
+
+    Options: ClassVar[type[LocalZOptions]] = LocalZOptions
 
     AXES_SPEC: ClassVar[GroupedAxesSpec[LocalZResult, LocalZCfg]] = GroupedAxesSpec(
         variables=(
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
-                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit1", unit=""),
                     VariableAxisSpec(
                         label="CZ gate count",
                         unit="",
@@ -223,7 +309,10 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                         dtype=np.int64,
                     ),
                     VariableAxisSpec(
-                        label="Target F1 or F2", unit="", values=(0, 1), dtype=np.int64
+                        label="Target Qubit1 or Qubit2",
+                        unit="",
+                        values=(0, 1),
+                        dtype=np.int64,
                     ),
                 ),
                 z=VariableZSpec(
@@ -236,7 +325,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         ),
         result_type=LocalZResult,
         cfg_type=LocalZCfg,
-        cfg_schema_version="5.0",
+        cfg_schema_version="6.0",
         tag="two_qubit/local_z",
         result_builder=restore_result,
     )
@@ -249,17 +338,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
 
         """
         # 1. Track each target's X/Y sigma versus CZ gate count for local phase accumulation.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="CZ gate count", ylabel="Target ⟨σ⟩")
-        viewer = live_line(ax, num_lines=4)
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        fig.show()
-
-        @context.plots.on_plot_thread
-        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            counts = np.moveaxis(sums, 0, 2)
-            values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
-            return viewer.set(np.array(config.gate_count), values.reshape(4, -1))
+        update_view = _start_live_view(context.plots, config)
 
         # 2. Rebuild each host CZ train; select target and projection quadrature in hardware.
         buffer = SignalBuffer(
@@ -276,52 +355,55 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                     initial_delay=config.initial_delay,
                     relax_delay=config.relax_delay,
                 )
-                builder.add_loop("target", 2)  # 0 = F1, 1 = F2
+                builder.add_loop("target", 2)  # 0 = Qubit1, 1 = Qubit2
                 quadrature = builder.add_sweep(
                     "quadrature", SweepCfg(start=0, stop=90, expts=2, step=90)
                 )
-                prepare_f1 = Pulse("prepare_f1", config.x90_f1)
-                prepare_f2 = Pulse("prepare_f2", config.x90_f2)
-                projection_f1 = Pulse(
-                    "projection_f1",
-                    config.x90_f1,
-                    phase=config.x90_f1.phase + quadrature,
+                prepare_qubit1 = Pulse("prepare_qubit1", config.x90_qubit1)
+                prepare_qubit2 = Pulse("prepare_qubit2", config.x90_qubit2)
+                projection_qubit1 = Pulse(
+                    "projection_qubit1",
+                    config.x90_qubit1,
+                    phase=config.x90_qubit1.phase + quadrature,
                 )
-                projection_f2 = Pulse(
-                    "projection_f2",
-                    config.x90_f2,
-                    phase=config.x90_f2.phase + quadrature,
+                projection_qubit2 = Pulse(
+                    "projection_qubit2",
+                    config.x90_qubit2,
+                    phase=config.x90_qubit2.phase + quadrature,
                 )
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset, terminal=readout))
                 with builder.branch(by="target", align_timeline=True) as cases:
                     with cases.case(0):
-                        builder.emit(prepare_f1)
+                        builder.emit(prepare_qubit1)
                     with cases.case(1):
-                        builder.emit(prepare_f2)
+                        builder.emit(prepare_qubit2)
                 drive = (
-                    Pulse("cz_f1", config.drive.f1),
-                    Pulse("cz_f2", config.drive.f2),
+                    Pulse("cz_qubit1", config.drive.qubit1),
+                    Pulse("cz_qubit2", config.drive.qubit2),
                 )
                 for gate_index in range(n):
                     builder.fork(
                         "default",
-                        into=[f"drive_f1_{gate_index}", f"drive_f2_{gate_index}"],
+                        into=[
+                            f"drive_qubit1_{gate_index}",
+                            f"drive_qubit2_{gate_index}",
+                        ],
                     )
-                    builder.emit(drive[0], timeline=f"drive_f1_{gate_index}")
-                    builder.emit(drive[1], timeline=f"drive_f2_{gate_index}")
+                    builder.emit(drive[0], timeline=f"drive_qubit1_{gate_index}")
+                    builder.emit(drive[1], timeline=f"drive_qubit2_{gate_index}")
                     builder.join(
-                        f"drive_f1_{gate_index}",
-                        f"drive_f2_{gate_index}",
+                        f"drive_qubit1_{gate_index}",
+                        f"drive_qubit2_{gate_index}",
                         into="default",
                     )
                 builder.delay_by_timeline()  # finish the common train before target projection
                 with builder.branch(by="target", align_timeline=True) as cases:
                     with cases.case(0):
-                        builder.emit(projection_f1)
+                        builder.emit(projection_qubit1)
                     with cases.case(1):
-                        builder.emit(projection_f2)
+                        builder.emit(projection_qubit2)
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 step.run_acquire_summed(
@@ -330,8 +412,8 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                     reducer=shot_sums(
                         prog,
                         [
-                            Classify("terminal", config.roles.f1_tone),
-                            Classify("terminal", config.roles.f2_tone),
+                            Classify("terminal", config.qubit1_tone),
+                            Classify("terminal", config.qubit2_tone),
                         ],
                     ),
                     rounds=config.rounds,
@@ -347,13 +429,25 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
     def analyze(
         self,
         source: RunRecord[LocalZCfg, LocalZResult],
-        options: None,
+        options: LocalZOptions | None = None,
         *,
         plots: Plots,
     ) -> LocalZAnalysis:
-        """Fit complete classified phase rows with count-propagated WLS weights."""
+        """Fit classified phase rows with count-propagated WLS weights.
+
+        Use the two positional labels when options is None. Raise ValueError
+        if the saved cfg is absent or the counts do not match its axes.
+        """
+        labels = options if options is not None else LocalZOptions()
+        qubit1, qubit2 = (
+            position if name == position else f"{position} · {name}"
+            for position, name in (
+                ("Qubit1", labels.qubit1_label),
+                ("Qubit2", labels.qubit2_label),
+            )
+        )
+        target_labels = (qubit1, qubit2)
         # 1. Require saved gate-count axes before deriving complete X/Y quadratures for both targets.
-        del options
         cfg, data = source.cfg, source.result
         if cfg is None:
             raise ValueError("Phase analysis requires saved source cfg")
@@ -362,15 +456,19 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         if data.sums.shape != (2, 2, len(cfg.gate_count), 3, 3):
             raise ValueError("Expected target × quadrature × gate_count × 3 × 3 counts")
         counts = data.sums
-        quadratures = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
+        quadratures = np.stack(
+            (qubit_sigma(counts[0], "qubit1"), qubit_sigma(counts[1], "qubit2"))
+        )
         variances = np.stack(
-            (sigma_variance(counts[0], "f1"), sigma_variance(counts[1], "f2"))
+            (
+                qubit_sigma_variance(counts[0], "qubit1"),
+                qubit_sigma_variance(counts[1], "qubit2"),
+            )
         )
         totals = counts.sum(axis=(-2, -1))
         complete = np.isfinite(totals) & (totals > 0)
         quadratures = np.where(complete, quadratures, np.nan)
         targets: list[tuple[QuadraturePhase, ...]] = []
-        phase_rows: list[NDArray[np.float64]] = []
         fits: list[PhaseLineFit] = []
         # 2. Require complete phase rows before unwrapping and count-weighted slope fitting.
         for t in range(2):
@@ -380,7 +478,6 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             )
             values = [p.logical_phase_deg for p in points]
             targets.append(points)
-            phase_rows.append(np.array(values, dtype=np.float64))
             reason = (
                 "No accepted shots at one or more quadratures"
                 if np.any(totals[t] == 0)
@@ -391,7 +488,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                 if None in values
                 else fit_phase_line(
                     np.array(cfg.gate_count, dtype=np.float64),
-                    phase_rows[t],
+                    np.array(values, dtype=np.float64),
                     phase_variance(
                         quadratures[t, 0],
                         quadratures[t, 1],
@@ -402,69 +499,129 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             )
         summaries = tuple(map(summarize_fit, fits))
 
-        # 3. Compare contrast, wrapped phase and weighted unwrapped fits to diagnose local-Z corrections.
-        _, axes = plots.subplots(num="quadratures", figsize=(10, 5))
-        for t in range(2):
-            for q, projection in enumerate(("X", "Y")):
-                axes.plot(
-                    data.gate_counts,
-                    quadratures[t, q],
-                    ".",
-                    label=f"F{t + 1} {projection}",
-                )
-        axes.set(xlabel="CZ gate count", ylabel="Target ⟨σ⟩")
-        axes.legend()
-
-        fig, _ = plots.subplots(
-            num="phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
+        _plot_quadratures(
+            plots, data.gate_counts, target_labels, quadratures, _projection_sem(counts)
         )
-        fig.suptitle("Both targets · independent classified X/Y acquisitions")
-        for t, role in enumerate((cfg.roles.f1, cfg.roles.f2)):
-            fig.axes[0].plot(
-                data.gate_counts,
-                [p.contrast for p in targets[t]],
-                ".-",
-                label=f"F{t + 1} {role}",
-            )
-            fig.axes[1].plot(
-                data.gate_counts,
-                phase_rows[t],
-                ".-",
-                label=f"F{t + 1} {role}",
-            )
-            fit = fits[t]
-            if fit.unwrapped_deg is not None and fit.fit_curve is not None:
-                fig.axes[2].plot(
-                    data.gate_counts,
-                    fit.unwrapped_deg,
-                    ".",
-                    label=f"F{t + 1} {role} unwrapped",
-                )
-                fig.axes[2].plot(
-                    data.gate_counts,
-                    fit.fit_curve,
-                    "-",
-                    label=f"F{t + 1} WLS; correction={summaries[t].correction_deg:.5g} ± {fit.slope_error_deg:.2g} deg (1σ)",
-                )
-        fig.axes[2].set_title(
-            "\n".join(
-                f"F{t + 1}: {fit.reason}" for t, fit in enumerate(fits) if fit.reason
-            )
-            or "Complete-row WLS with intercept; correction = −slope"
-        )
-        for ax, label in zip(
-            fig.axes,
-            (
-                "Classified quadrature contrast",
-                "Logical phase (deg, wrapped)",
-                "Logical phase (deg, unwrapped)",
-            ),
-            strict=True,
-        ):
-            ax.set(xlabel="CZ gate count", ylabel=label)
-            ax.set_xlim(data.gate_counts[0], data.gate_counts[-1])
-            if ax.get_legend_handles_labels()[0]:
-                ax.legend()
+        _plot_phase(plots, data.gate_counts, target_labels, fits, summaries)
+        _plot_contrast(plots, data.gate_counts, target_labels, targets)
 
         # 4. Keep each target's negative-slope correction and uncertainty, or its unresolved-fit reason.
         return LocalZAnalysis(summaries)
+
+
+def _projection_sem(counts: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Use the target's retained g/e/other counts for e-minus-g sample SEM."""
+    marginal = np.stack((counts[0].sum(axis=-1), counts[1].sum(axis=-2)))
+    cov = class_probability_covariance(marginal)
+    return np.sqrt(np.maximum(0, cov[..., 0, 0] + cov[..., 1, 1] - 2 * cov[..., 0, 1]))
+
+
+def _plot_quadratures(
+    plots: Plots,
+    ns: NDArray[np.int64],
+    labels: tuple[str, str],
+    values: NDArray[np.float64],
+    sem: NDArray[np.float64],
+) -> None:
+    """Compare the retained-shot X/Y projections for each individual target."""
+    fig, _ = plots.subplots(
+        num="quadratures", nrows=2, sharex=True, figsize=(7, 6.4), layout="constrained"
+    )
+    fig.suptitle("Local Z · classified Ramsey projections")
+    for t, ax in enumerate(fig.axes):
+        ax.set(
+            title=labels[t],
+            ylabel="Target P(e) − P(g)",
+        )
+        for q, projection in enumerate(("X", "Y")):
+            ax.errorbar(
+                ns,
+                values[t, q],
+                yerr=sem[t, q],
+                fmt=".",
+                color=f"C{q}",
+                label=f"{projection} ± shot SEM",
+            )
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    fig.legend(
+        *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
+    )
+    fig.axes[-1].set_xlabel("CZ gates per shot (count)")
+
+
+def _plot_phase(
+    plots: Plots,
+    ns: NDArray[np.int64],
+    labels: tuple[str, str],
+    fits: list[PhaseLineFit],
+    summaries: tuple[LocalZFit, ...],
+) -> None:
+    """Draw the fitted phase line and correction on a dense grid without refitting."""
+    fig, _ = plots.subplots(
+        num="phase", nrows=2, sharex=True, figsize=(7, 7), layout="constrained"
+    )
+    fig.suptitle("Local Z · unwrapped phase and weighted fit")
+    xs = np.linspace(ns[0], ns[-1], 401)
+    for ax, label, fit, summary in zip(fig.axes, labels, fits, summaries, strict=True):
+        ax.set(ylabel="Unwrapped phase (deg)")
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        if (
+            fit.unwrapped_deg is None
+            or summary.intercept_deg is None
+            or summary.slope_deg is None
+        ):
+            ax.set_title(f"{label}: {fit.reason}")
+            continue
+        ax.plot(ns, fit.unwrapped_deg, ".", color="C0", label="Measured phase")
+        ax.plot(
+            xs,
+            summary.intercept_deg + summary.slope_deg * xs,
+            "k-",
+            label="Weighted phase fit",
+        )
+        diagnostic = f"{label} Z correction = {summary.correction_deg:.5g} ± {summary.slope_error_deg:.2g} deg"
+        quality = summary.fit_quality
+        if (
+            quality is not None
+            and quality.r2 is not None
+            and quality.normalized_residual_rms is not None
+        ):
+            diagnostic += f"\nR² = {quality.r2:.3g} · Normalized RMS = {quality.normalized_residual_rms:.3g}"
+        ax.set_title(diagnostic)
+    handles = next(
+        (ax.get_legend_handles_labels() for ax in fig.axes if ax.lines), None
+    )
+    if handles is not None:
+        fig.legend(*handles, loc="outside lower center", ncols=2)
+    fig.axes[-1].set_xlabel("CZ gates per shot (count)")
+
+
+def _plot_contrast(
+    plots: Plots,
+    ns: NDArray[np.int64],
+    labels: tuple[str, str],
+    targets: list[tuple[QuadraturePhase, ...]],
+) -> None:
+    """Expose contrast and wrapped phase before applying the linear fit."""
+    fig, _ = plots.subplots(
+        num="phase_points", nrows=2, sharex=True, figsize=(7, 5.8), layout="constrained"
+    )
+    contrast_ax, phase_ax = fig.axes
+    for t, (label, points) in enumerate(zip(labels, targets, strict=True)):
+        contrast_ax.plot(
+            ns, [p.contrast for p in points], ".", color=f"C{t}", label=label
+        )
+        phase_ax.plot(
+            ns,
+            [
+                np.nan if p.logical_phase_deg is None else p.logical_phase_deg
+                for p in points
+            ],
+            ".",
+            color=f"C{t}",
+        )
+    contrast_ax.set_ylabel("Classified contrast")
+    contrast_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncols=2)
+    phase_ax.set(xlabel="CZ gates per shot (count)", ylabel="Wrapped phase (deg)")
+    phase_ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    fig.suptitle("Local Z · X/Y contrast and wrapped phase")

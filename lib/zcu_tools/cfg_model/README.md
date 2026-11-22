@@ -1,6 +1,6 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-11-20，arb 資產存在查詢與 herald reset cfg
+**Last updated:** 2026-11-22，FieldMeta 呈現與存檔軸單位
 
 **讀者：** framework-dev。配置模型、持久 Spec 與 materialization 邊界速查。
 
@@ -16,6 +16,8 @@ Caller 從 package root import 公開名稱。
 - `ConfigBase` 提供 Pydantic 欄位驗證、巢狀更新與序列化。非 module consumer 的行為保持不變。
 - `DeviceName` 是帶 `DeviceNameHint` 的字串 annotation，表示非空、非全空白且不含 ASCII `.` 的儀器名稱。點號用於 component 路徑與 record 攤平欄名的分隔。公開的 `validate_device_name(name: str) -> str` 回傳有效名稱的原字串，無效名稱則拋出指出名稱的 `ValueError`。DeviceName 與 DeviceManager 註冊共用這項規則，不查詢儀器、不做 I/O、不改序列化。有效名稱不 trim，前後空白、大小寫、Unicode 與其他字元維持原樣，不增加其他字元限制。可選名稱寫 `DeviceName | None`。Form adapter 將標記轉為固定捕捉的建議清單，Core 不依賴 GUI。
 - `FieldMeta` 在 core 與持久 Spec 欄位承載 label、unit、decimals、description、group、readonly 與 element_label，不改 cfg 驗證或序列化的值。group 是 MCP schema 可用的前端中立分類名稱 hint。前端用 `get_field_meta` 讀取，並決定實際的 widget、排版與折疊行為。`readonly=True` 由上層 Form core 強制執行，同值寫入通過，不同值拒絕；element_label 提供 picker label。選填 calibration 接受 uncalibrated／None，供 Form 的逐位置 seed metadata 宣告校準狀態；None 表示未知。它不驗證 calibration 數值，也不推論缺值的校準狀態。
+  `FieldMeta.unit` 只標示 cfg 值的顯示單位，不換算數值，也不指定磁碟軸單位。表單呈現見 [form adapter 的 `Display` 投影](../gui/form_adapter/README.md#依賴方向)；磁碟單位與換算由[存檔軸的 `unit`／`scale`](../../../zcu_lab/v2/experiment-authoring.md#存檔軸用關鍵字固定座標不塞進-result)定義。
+  表單的欄位推導與唯讀規則見 [ADR-0073〈Form 的形狀與初值〉](../../../docs/adr/0073-measure-form-derivation.md#form-的形狀與初值)。
 - `Expr`、`Range`、`LogPoints`、`Hidden`、`Slot` 與 `Template` 是前端中立的起始值宣告。求值與來源讀取由 Form consumer 負責。`Hidden(value)` 攜帶 core 單位的 literal，包含明填 None；Form 隱藏欄位並保留 core 驗證。`Hidden()` 保留普通 core 欄位的 default 還原語意。`Template.set`／`Slot.set` 接受 dotted Spec 路徑的 `Hidden(value)`，不宣告值的來源或更動 Run。`LogPoints.include_zero` 預設 True，False 請求正值 Log／List；分支與產生規則由 form_adapter 擁有。固定欄位使用初值與 readonly。FormNode 的 list 按位置提供 model 元素或 scalar list 的初值，各位置的唯讀值可以不同。`TemplateDef` 的持久 Spec 目錄由呼叫者注入，Form 保留各範本的非 lock 初值與 input projection，不以單值 Literal 實作 lock。還原保留唯讀欄位的存檔值，不重算宣告初值。Core cfg 自有的單值 Literal 仍保留其固定值語意。
 - `Template.set`／`Slot.set` 可提供 typed model-list 初值。List 元素以原 Spec 欄位名對應 literal 或 Expr 等 seed，consumer 按原 schema 遞迴驗證，不改 annotation。它不把 scalar list 擴成逐項編輯，也不產生 mux group 或校準政策。
 - Pulse 與 Pulse readout 依模型宣告結構排列主要欄位，順序為 Waveform、Gen ch、Frequency、Gain。Pulse、pulse readout 與 mux tone 的 Frequency 單位為 MHz，Gain 單位為 a.u.，表示 DAC full-scale fraction，範圍為 [-1, 1]。`Gain` 以欄位的 ge／le 限制驗證固定值。QICK sweep gain 不在 cfg 層檢查範圍。Form 不另設前端排序表。Pulse 的持久欄位仍為 `ch`，Pulse readout 仍為 `gen_ch`；儲存形狀與驗證不因排版改變。Mux readout 沒有 waveform，不新增該欄位。

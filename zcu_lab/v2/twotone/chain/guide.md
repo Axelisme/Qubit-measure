@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-11-16, independent peak options and midpoint window
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
 ## Behavior
 
@@ -25,17 +25,17 @@ The distance uses the IQ means, second moments and read-to-read correlations, so
 ## Parameter sources
 
 Calibrate the readout with `onetone/freq` first, as for `twotone/freq`. Enter the drive window directly for a first search.
-The Form uses the same sources and starting values as `twotone/freq`: 301 points at `$qubit.freq` ± 20 * `$qubit.kappa` in MHz, a fresh `qub_probe` pulse with gain 0.1 and length 1.0 us, and the `$resonator.module.readout` slot or a fresh `readout` template.
+The Form uses the same sources and starting values as `twotone/freq`: 301 points at `$qubit.freq` ± 20 * `$qubit.kappa` in MHz, a fresh `qub_probe` pulse with gain 0.1 and length 1.0 µs, and the `$resonator.module.readout` slot or a fresh `readout` template.
 Readout must be a pulse readout; a mux readout module is rejected by the Form.
 Reset uses the optional `$qubit.module.reset` slot. Init Pulse starts disabled; when enabled it plays once per dwell, before the chain.
-Choose a calibrated fixed-frequency preparation pulse, with frequency in MHz and duration in us.
+Choose a calibrated fixed-frequency preparation pulse, with frequency in MHz and duration in µs.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
 
 Reps starts at 100 and Rounds at 100, which is 10 000 fast sweeps in total.
 Reps must be at least 12, regardless of the number of frequency points.
 Each fast sweep dwells once at every frequency, so 12 fast sweeps per round give the first live curve enough dwells to estimate the noise.
 Each round acquires points × reps × 48 reads, so a smaller Reps gives more frequent live updates and less memory per round.
-One dwell lasts about 48 × (probe length + readout length) plus Relax delay, about 100 us with the starting values.
+One dwell lasts about 48 × (probe length + readout length) plus Relax delay, about 100 µs with the starting values.
 
 ## Live plot
 

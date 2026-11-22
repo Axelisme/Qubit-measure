@@ -76,7 +76,7 @@ class OnetoneSpectrumInputs(RecipeInputs):
     )
     edelay: float | None | Keep = Field(
         KEEP,
-        description="Electrical delay seed (us; blank = auto). Analysis only; omitted keeps value, null passes to owner.",
+        description="Electrical delay seed (µs; blank = auto). Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

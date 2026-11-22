@@ -93,17 +93,17 @@ class StirapAmplitudeCfg(ConfigBase):
         EnvelopeWaveformCfg,
         FieldMeta(
             label="Pump waveform",
-            description="Select the Pump 0–3 envelope from the waveform library or inline parameters, with durations in us.",
+            description="Select the Pump 0–3 envelope from the waveform library or inline parameters, with durations in µs.",
         ),
     ]
     stokes_waveform: Annotated[
         EnvelopeWaveformCfg,
         FieldMeta(
             label="Stokes waveform",
-            description="Select the Stokes 3–2 envelope from the waveform library or inline parameters, with durations in us.",
+            description="Select the Stokes 3–2 envelope from the waveform library or inline parameters, with durations in µs.",
         ),
     ]
-    stokes_lead: Annotated[float, FieldMeta(label="Stokes lead", unit="us")] = 0.05
+    stokes_lead: Annotated[float, FieldMeta(label="Stokes lead", unit="µs")] = 0.05
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     pump_gain: Annotated[
         SweepCfg,
@@ -121,10 +121,10 @@ class StirapAmplitudeCfg(ConfigBase):
             description="Fill the inner signed Stokes gain range in a.u. and point count from the intended drive settings.",
         ),
     ]
-    shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
+    shots: Annotated[int, FieldMeta(label="Shots per point", unit="count")] = Field(
         default=4096, ge=1
     )
-    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us")] = Field(
+    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="µs")] = Field(
         ge=0
     )
 

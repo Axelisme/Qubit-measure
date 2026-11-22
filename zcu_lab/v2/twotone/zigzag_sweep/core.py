@@ -69,6 +69,7 @@ class ZigZagScanCfg(ConfigBase):
         int,
         FieldMeta(
             label="Max repetitions",
+            unit="count",
             description="Repetition counts run from zero to this value.",
         ),
     ]
@@ -81,17 +82,24 @@ class ZigZagScanCfg(ConfigBase):
     ] = "X180_pulse"
 
     reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+        int,
+        FieldMeta(
+            label="Reps", unit="count", description="Number of repetitions per round."
+        ),
     ]
     rounds: Annotated[
         int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Number of software acquisition rounds.",
+        ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
             label="Relax delay",
-            unit="us",
+            unit="µs",
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
@@ -171,7 +179,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
 
         # 2. Track mean IQ on the count-by-parameter grid.
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Times", ylabel=x_info["name"])
+        ax.set(xlabel="Repetitions (count)", ylabel=x_info["name"])
         formatter = ScalarFormatter(useMathText=True)
         formatter.set_powerlimits((-2, 2))
         ax.xaxis.set_major_formatter(formatter)
@@ -287,7 +295,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             origin="lower",
             interpolation="none",
         )
-        ax1.set_ylabel("Number of gate")
+        ax1.set_ylabel("Gate repetitions (count)")
         ax2.plot(values, loss, marker=".")
         ax2.axvline(
             x=min_value, color="red", linestyle="--", label=f"x = {min_value:.3f}"

@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-19，Results Browser 索引
+**Last updated:** 2026-11-22，Data 頁讀圖
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -71,7 +71,10 @@ cleanup together. Data activation refreshes previews before switching pages,
 then reflows the visible gallery. The tab's overridable public figure reader
 remains the preview source; each failed pane read leaves only that preview empty.
 Figure/container methods on the tab delegate to this owner. Results and Save
-policy stay with their existing owners.
+policy stay with their existing owners. When Primary has a result, the left
+Analysis panel shows the adapter name and the published Run ID if available.
+It clears that source label when the result is cleared. The label is separate
+from the adapter summary lines shared with MCP.
 
 Run, Analysis, Post-Analysis and Workflow share a two-column tiled layout with
 up to four figures per page. Larger sets show Previous page and Next page controls
@@ -84,9 +87,26 @@ and applies the same paging rule within each group. Gallery layout depends only
 on viewport width, including named groups. Narrow viewports stack stage cards
 in one column. Wide viewports place two cards side by side; with three cards,
 Run spans the left column and Analysis/Post-Analysis stack on the right.
-A single card fills the width in either mode. Named members and their raster
-labels shrink to the tile width, while stage cards retain their minimum width.
-Each raster aspect-fits its label without cropping as the gallery resizes.
+A single card fills the width in either mode. Named members fit in their tiles,
+while stage cards retain their minimum width. Long names wrap so their endings
+are visible before opening a figure. Each thumbnail aspect-fits its label without
+cropping as the gallery resizes.
+Use `View figure` on a card, or Tab to the button and press Space, to read that
+stage and member without leaving Data. Long headings wrap without widening the
+reading pane. The pane shows one new raster at its rendered size. Scroll inside
+the pane when it does not fit. `Back to previews` or Escape returns to the
+selected card and restores its focus and page.
+
+`ExperimentFigureArea` resolves the request against the current native Figure on
+its Qt thread. The gallery holds only the raster. It discards that raster on a
+figure refresh, when Data is hidden, or when the tab closes. An unpublished Run
+that fails clears its own preview and reading without changing the selected pane.
+If draw reenters the owner, only the current reading request can update the view.
+A draw failure shows an inline error for that figure and does not disable Save.
+The reader does not load a saved image, write an artifact, or attach a canvas.
+Run Save still writes data only. Analysis Save still uses the existing 1800×1350
+PNG encoder.
+
 The app-local plot host passes the
 operation's original named collection through the render-host port after canvas
 attachment. It does not rename figures, copy their
@@ -189,7 +209,7 @@ the greyed-out date edits; either their text area or arrow opens the calendar.
 新 tab 的 Load 使用既有 application owner。缺少 analysis source 的原因同時顯示在瀏覽器結果與載入後的 tab。
 A history tab whose form factory failed shows its original reason in the form
 area. Run shows that reason unless an earlier domain prerequisite fails, such
-as missing active context. Reset can replace that notice with a real editor;
+as missing active context. The Run page's Defaults button can replace that notice with a real editor;
 a failed retry leaves the notice and shows the current preparation error.
 
 `ArtifactSaveCenter` shows each output on two lines: the filename, status and
