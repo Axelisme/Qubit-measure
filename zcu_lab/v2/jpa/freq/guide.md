@@ -1,25 +1,17 @@
-## Behavior
+**Readers:** operator, agent. Sweep JPA pump RF to find the sampled frequency that best separates g and e in readout IQ.
 
-**Readers:** operator, agent. Calibrate the JPA pump frequency from the GUI or MCP using g/e readout SNR. A pi pulse switches the qubit preparation between g and e. The run sweeps pump frequency and measures the g/e SNR (a.u.) to find the frequency with the highest SNR. WARNING: this run commands the selected JPA RF device on real hardware. Review that device and the pump sweep before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
+# JPA pump frequency
 
-The FTF simulator provides neither a JPA pump RF device nor a JPA response to pump frequency. The [fixed offline experiment wall-time cases](../../../../tools/README.md#實驗-run-牆鐘) therefore exclude `jpa/freq`. That exclusion does not apply to the real-hardware run with a connected JPA RF device.
+At each pump RF setting, compare optional reset → readout (g) with optional reset → calibrated π pulse → readout (e). The g/e SNR divides the IQ-center separation by the pooled width along the separation axis. **Skew penalty** weights the score down for distorted IQ clouds.
 
-## Parameter sources
+## Set the sweep
 
-Uses the qubit (`qubit/*`), resonator and jpa (`amplifier/jpa`) aliases. The pump-frequency bounds use `$jpa.pump_freq`. Opening the tab or choosing Defaults reads the RF default from `$jpa.rf_source`; a missing source leaves the optional field empty. The direct device name remains editable. Select the connected JPA RF device in the form. Missing required aliases or calibration marks the form Invalid.
+- Bind the qubit, resonator and JPA. Verify **JPA RF device** (initially `$jpa.rf_source`) and the approved frequency bounds. If left empty, Run records sweep coordinates without commanding a pump. **JPA pump freq** starts at 0.98–1.02 × `$jpa.pump_freq` in absolute MHz.
+- Check **Pi pulse**, **Readout** and optional **Reset**. Use calibrated slots or fill the templates. The fallback readout trigger starts at flight time + 0.015 µs. **Relax delay** starts at the captured T1, or 30 µs if missing; an invalid stored T1 leaves it blank.
+- **Scan-order seed** holds the shuffled order of the interior settings fixed across repeated runs. Leave it blank for a new order.
 
-Relax delay starts at 1*T1 using the parameters captured when you open the tab or choose Defaults. T1 must be a finite positive real number; Boolean values count as invalid. Missing/null T1 or an unavailable parameter snapshot gives a 30 µs initial delay. An invalid stored T1 leaves the required wait field empty, and parameter-source failures report an error. Edit the delay in the form as needed; the stored T1 stays unchanged.
+For tab setup, refreshing sources, applying and saving, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-## Module slots
+## Read the score and update calibration
 
-Module slots use `$qubit.module.x180`, `$resonator.module.readout` and optional `$qubit.module.reset`. Empty pi/readout slots use the pi_pulse/readout templates. The pi pulse uses `$qubit.freq` and `$qubit.wiring.ch`; readout uses resonator frequency/wiring and `$resonator.time_of_fly` + 0.015 µs. An empty reset slot disables reset. Missing calibration required by these templates marks the form Invalid.
-
-## Typical writeback
-
-Analysis proposes the SNR-maximizing JPA pump frequency as a draft for `$jpa.pump_freq` in MHz. Accept the draft to update the stored parameter. Writeback changes stored calibration only; the current-source value stays unchanged.
-
-## Recommended
-
-Review the selected RF device and sweep bounds before every run. The seeded range around `$jpa.pump_freq` is only a starting point. Analyze selects the sampled setting with the highest g/e SNR.
-
-**Last updated:** 2026-10-21
+Compare the sampled g/e SNR against pump RF in Live and Analyze. Analyze marks the sampled maximum; it is not a fit and has no shot SEM. Recheck an interior peak on a finer grid before using it. The correction is selected minus previous pump frequency in MHz. Apply updates `$jpa.pump_freq`; it does not retune the source.
