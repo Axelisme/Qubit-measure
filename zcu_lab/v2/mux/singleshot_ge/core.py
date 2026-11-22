@@ -30,7 +30,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.patches import Polygon
+from matplotlib.patches import Patch, Polygon
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -49,6 +49,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.single_shot.ge import (
     GEFitOptions,
     GENumericalError,
+    plot_ge_iq_density,
     singleshot_ge_analysis,
 )
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
@@ -356,6 +357,17 @@ def _failure_plot(plots: Plots, name: str, reason: str) -> None:
         update(reason)
 
 
+def _probe_iq_legend(ax: Axes) -> None:
+    markers, _ = ax.get_legend_handles_labels()
+    ax.legend(
+        handles=[
+            Patch(color="blue", label="Probe off"),
+            Patch(color="red", label="Probe on"),
+            *markers,
+        ]
+    )
+
+
 def _mark_ge_fit(ax: Axes, fit: GEAnalysis) -> None:
     """Show the projected threshold on the original IQ plane and report fit quality."""
     axis_i, axis_q = np.cos(fit.theta), -np.sin(fit.theta)
@@ -372,7 +384,7 @@ def _mark_ge_fit(ax: Axes, fit: GEAnalysis) -> None:
         marker="x",
         label="Fitted centers",
     )
-    ax.legend()
+    _probe_iq_legend(ax)
     ratio = (
         "Integration window / T1 unavailable"
         if fit.length_ratio is None
@@ -674,7 +686,8 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         shots = np.arange(cfg.shots, dtype=np.int64)
 
         # Show paired preparations without averaging away their IQ spread.
-        figures = []
+        empty = np.empty(0, dtype=np.complex128)
+        live_frames = []
         for index in indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             fig.suptitle(f"Mux single-shot GE · {cfg.tones[index].name} · Readout IQ")
@@ -683,31 +696,19 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                 ylabel="Q per shot (a.u.)",
                 title="Acquired shots: 0 count",
             )
-            figures.append(fig)
+            _probe_iq_legend(ax)
+            image = plot_ge_iq_density(ax, empty, empty)
+            live_frames.append((fig, ax, image))
             fig.show()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]):
-            for row, figure in enumerate(figures):
-                axes = figure.axes[0]
-                axes.clear()
-                for cloud, label, color in zip(
-                    data[:, :, row],
-                    ("Probe off", "Probe on"),
-                    ("tab:blue", "tab:red"),
-                    strict=True,
-                ):
-                    axes.scatter(
-                        cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
-                    )
-                axes.set(
-                    xlabel="I per shot (a.u.)",
-                    ylabel="Q per shot (a.u.)",
-                    title=f"Acquired shots: {np.count_nonzero(np.isfinite(data[:, :, row]))} / {2 * cfg.shots} count",
-                )
-                axes.set_aspect("equal", adjustable="datalim")
-                axes.legend()
-            return tuple(figures)
+            for row, (_, axes, image) in enumerate(live_frames):
+                off, on = data[:, :, row]
+                plot_ge_iq_density(axes, off, on, image=image)
+                count = np.count_nonzero(np.isfinite(data[:, :, row]))
+                axes.set_title(f"Acquired shots: {count} / {2 * cfg.shots} count")
+            return tuple(fig for fig, _, _ in live_frames)
 
         buffer = SignalBuffer((2, cfg.shots, len(indices)), on_update=update)
         with Schedule(buffer, scope=context.scope) as sched:
@@ -796,18 +797,10 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             tone = f"Tone {index}" if cfg is None else cfg.tones[index].name
             figure, axes = plots.subplots(num=name, figsize=(7, 5))
             figure.suptitle(f"Mux single-shot GE · {tone} · Readout IQ")
-            for cloud, label, color in zip(
-                source.result.signals[row],
-                ("Probe off", "Probe on"),
-                ("tab:blue", "tab:red"),
-                strict=True,
-            ):
-                axes.scatter(
-                    cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
-                )
+            off, on = source.result.signals[row]
+            plot_ge_iq_density(axes, off, on)
             axes.set(xlabel="I per shot (a.u.)", ylabel="Q per shot (a.u.)")
-            axes.set_aspect("equal", adjustable="datalim")
-            axes.legend()
+            _probe_iq_legend(axes)
             if not np.isfinite(signals).all():
                 reason = "GE fit requires both complete probe-off/on preparations"
                 _failure_plot(plots, name, reason)

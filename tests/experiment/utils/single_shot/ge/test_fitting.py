@@ -419,6 +419,36 @@ def test_ge_diagnostic_colors_bins_by_raw_preparation_majority(
         plots.release()
 
 
+def test_ge_iq_density_refreshes_the_blank_image_and_rescales_to_current_shots():
+    ax = Figure().subplots()
+    ax.set_title("Live GE")
+    missing = np.array([complex(np.nan)])
+    image = ge.plot_ge_iq_density(ax, missing, missing)
+    assert not np.asarray(image.get_array())[..., 3].any()
+
+    ground = np.array([-5 + 3j, -3 + 2j])
+    excited = np.array([4 - 4j, 5 - 3j])
+    updated = ge.plot_ge_iq_density(ax, ground, excited, image=image)
+    assert list(ax.get_images()) == [image] and updated is image
+    rgba = np.asarray(image.get_array())
+    np.testing.assert_array_equal(rgba[-1, 0], (0, 0, 1, 1))
+    i0, i1 = ax.get_xlim()
+    q0, q1 = ax.get_ylim()
+    assert i0 <= -5 and i1 >= 5 and q0 <= -4 and q1 >= 3
+
+    # A later, tighter frame replaces the old data limits, not just the pixels.
+    smaller_ground = np.array([-2.5 + 1.5j, -1.5 + 1j])
+    smaller_excited = np.array([2 - 2j, 2.5 - 1.5j])
+    updated = ge.plot_ge_iq_density(ax, smaller_ground, smaller_excited, image=image)
+    assert list(ax.get_images()) == [image] and updated is image
+    i0, i1 = ax.get_xlim()
+    q0, q1 = ax.get_ylim()
+    assert -5 < i0 <= -2.5 and 2.5 <= i1 < 5
+    assert -4 < q0 <= -2 and 1.5 <= q1 < 3
+    assert ax.get_aspect() == 1.0
+    assert ax.get_title() == "Live GE"
+
+
 @pytest.mark.parametrize("identifiable", [True, False])
 def test_fitted_snr_uses_joint_covariance_and_preserves_the_fit(
     monkeypatch: pytest.MonkeyPatch, *, identifiable: bool

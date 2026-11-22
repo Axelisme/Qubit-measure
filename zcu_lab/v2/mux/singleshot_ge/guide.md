@@ -72,7 +72,7 @@ Inspect cloud overlap before using it for classification. The Post figure
 shows g, e and other assignments; other does not identify a specific leakage
 state.
 
-The plots show individual shots, not uncertainty bars on a mean-IQ sweep.
+The IQ colors summarize shot counts by bin, not uncertainty on mean IQ.
 R² and normalized residual RMS summarize the internal histogram fits. R²
 measures explained variation. Normalized residual RMS measures the typical
 mismatch relative to the histogram range.
@@ -198,11 +198,12 @@ Failed tones keep their old classifiers and still require recalibration.
 
 ## Results and saved sources
 
-Run draws one `measurement_i` IQ scatter per participant.
-Blue and red shots distinguish the g (probe-off) and e (probe-on) preparations.
-These preparations may contain state mixtures; they are not classified shots.
-Analyze draws each participant's raw IQ clouds in `fit_i` and adds one
-`diagnostic_i` for every successful fit. Analyze uses the selected Run/Load
+Run draws one raw IQ plane, `measurement_i`, per participant. Analyze draws
+the raw IQ in `fit_i` and adds one `diagnostic_i` for every successful fit.
+For live and `fit_i`, each bin is blue for more probe-off shots and red for
+more probe-on shots. A tie is purple. Opacity rises with the log of the
+total shot count; empty bins are transparent. The colors label acquisitions,
+not individual shots' physical states. Analyze uses the selected Run/Load
 source. Use the Analysis figure picker for `fit_i` or `diagnostic_i` and the
 Post figure picker for `post_i`.
 Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.
@@ -211,10 +212,8 @@ A missing source configuration leaves the name unavailable.
 
 The diagnostic has four panels:
 
-- Top left shows the raw IQ plane at equal I/Q scale and marks the fitted centers.
-  Each bin is blue if it contains more g-preparation shots, red if it contains
-  more e-preparation shots, and purple for a tie. More shots make the bin
-  more opaque; empty bins are transparent.
+- Top left shows equal-scale raw IQ and marks the fitted centers. The same bin
+  rule applies, but Initial State maps the acquisitions to g (blue) and e (red).
 - Bottom left overlays the projected preparation histograms and their fits.
   Each preparation is normalized separately. `Fraction per bin` is the
   fraction of that preparation's shots in the bin, not a count or a density.

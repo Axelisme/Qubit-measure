@@ -86,16 +86,16 @@ With Length Ratio left empty, two tight clusters without a visible tail make Ana
 This reporting decision does not change centers, fidelity or Post-Analysis.
 If you set Length Ratio manually, Analyze returns the supplied value.
 Run once the qubit pi-pulse and the readout are both calibrated.
-Run and Analyze show raw IQ. The live labels mean probe off/on; Analyze maps
-those acquisitions using Initial State. Each successful Analyze also shows
-`diagnostic`.
+Run and Analyze show raw IQ at equal I/Q scale. In each IQ bin, blue means
+more probe-off shots and red means more probe-on shots on the live plot.
+Analyze maps the acquisitions to g (blue) and e (red) using Initial State.
+A tie is purple. Opacity rises with the log of the total shot count; empty
+bins are transparent. Each successful Analyze also shows `diagnostic`.
 
 The diagnostic has four panels:
 
-- Top left shows the raw IQ plane at equal I/Q scale and marks the fitted centers.
-  Each bin is blue if it contains more g-preparation shots, red if it contains
-  more e-preparation shots, and purple for a tie. More shots make the bin
-  more opaque; empty bins are transparent.
+- Top left uses the same raw IQ colors as the Analyze fit and marks the fitted
+  centers.
 - Bottom left overlays the projected preparation histograms and their fits.
   Each preparation is normalized separately. `Fraction per bin` is the
   fraction of that preparation's shots in the bin, not a count or a density.

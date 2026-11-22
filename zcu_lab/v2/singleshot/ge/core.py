@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.patches import Polygon
+from matplotlib.patches import Patch, Polygon
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -24,6 +24,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.single_shot.ge import (
     GEFitOptions,
     GENumericalError,
+    plot_ge_iq_density,
     singleshot_ge_analysis,
 )
 from zcu_tools.experiment.v2.runtime import RunOptions
@@ -260,29 +261,20 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         cfg = deepcopy(config)
 
         figure, axes = context.plots.subplots(num="measurement")
+        axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
+        axes.grid()
+        axes.legend(
+            handles=[
+                Patch(color="blue", label="g preparation (probe off)"),
+                Patch(color="red", label="e preparation (probe on)"),
+            ]
+        )
+        empty = np.empty(0, dtype=np.complex128)
+        image = plot_ge_iq_density(axes, empty, empty)
 
         @context.plots.on_plot_thread
         def update(clouds: NDArray[np.complex128]):
-            """Draw acquired raw complex IQ on the measurement axes; return changed artists.
-
-            Read scan-shaped samples without changing them. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            axes.clear()
-            for cloud, label, color in zip(
-                clouds,
-                ("g preparation (probe off)", "e preparation (probe on)"),
-                ("tab:blue", "tab:red"),
-                strict=True,
-            ):
-                axes.scatter(
-                    cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
-                )
-            axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
-            axes.set_aspect("equal", adjustable="datalim")
-            axes.grid()
-            axes.legend()
-            return (figure,)
+            return (plot_ge_iq_density(axes, clouds[0], clouds[1], image=image),)
 
         figure.show()
 
@@ -353,19 +345,15 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         # 1. Acquisition order is always probe off/on; fit in physical g/e order.
         signals = ge_signals_by_state(source.result.signals, options.initial_state)
         _, axes = plots.subplots(num="fit")
-        for cloud, label, color in zip(
-            signals,
-            ("g preparation", "e preparation"),
-            ("tab:blue", "tab:red"),
-            strict=True,
-        ):
-            axes.scatter(
-                cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
-            )
+        plot_ge_iq_density(axes, signals[0], signals[1])
         axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
-        axes.set_aspect("equal", adjustable="datalim")
         axes.grid()
-        axes.legend()
+        axes.legend(
+            handles=[
+                Patch(color="blue", label="g preparation"),
+                Patch(color="red", label="e preparation"),
+            ]
+        )
         # 2. Fit readout separation and preparation mixing in physical g/e order.
         fidelity, init_pops, fit = singleshot_ge_analysis(
             signals,
