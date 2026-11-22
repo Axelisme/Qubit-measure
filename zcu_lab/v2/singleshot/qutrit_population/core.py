@@ -223,7 +223,7 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         ax.text(
             0,
             0.95,
-            f"Training / evaluation shots per label: {result.training_shots} / {result.evaluation_shots}\n\nMinimum pooled Mahalanobis: {result.minimum_separation:.5f}\nConfusion condition (2-norm): {result.condition_number:.5f}\nMinimum singular value: {result.minimum_singular_value:.5f}\n\nMacro preparation-label error: {result.macro_error:.3%}\nPer-label errors (g, e, f):\n"
+            f"Training / evaluation shots per label: {result.training_shots} / {result.evaluation_shots}\n\nMinimum centroid separation (shared σ): {result.minimum_separation:.5f}\nConfusion condition (2-norm): {result.condition_number:.5f}\nMinimum singular value: {result.minimum_singular_value:.5f}\n\nMacro preparation-label error: {result.macro_error:.3%}\nPer-label errors (g, e, f):\n"
             + ", ".join(f"{error:.3%}" for error in result.label_errors)
             + "\n\nIncludes preparation contamination.\nNot pure-state readout fidelity.\nCorrection retains negative and >1 values.",
             va="top",

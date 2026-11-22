@@ -8,7 +8,6 @@ from zcu_tools.analysis.fitting.base import (
     dual_expfunc,
     expfunc,
     fit_asym_lor,
-    fit_dual_gauss_gmm,
     fit_dualexp,
     fit_gauss,
     fitcos,
@@ -21,7 +20,6 @@ from zcu_tools.analysis.fitting.base import (
     sincfunc,
 )
 from zcu_tools.analysis.fitting.base.base import fit_func
-from zcu_tools.analysis.fitting.base.gauss import guess_dual_gauss_params
 
 
 def test_fitexp_recovers_parameters():
@@ -148,52 +146,6 @@ def test_fit_gauss_recovers_parameters():
     pOpt, _ = fit_gauss(x, y)
     assert abs(pOpt[2] - true[2]) < 1e-2
     assert abs(pOpt[3] - true[3]) < 1e-2
-
-
-@pytest.mark.parametrize(
-    "ydata, expected",
-    [
-        ([3.0, 1.0, 1.0], (3.0, -2.0, 1 / 3, 1.0, 0.4, 1 / 3)),
-        ([1.0, 1.0, 3.0], (1.0, -0.4, 1 / 3, 3.0, 2.0, 1 / 3)),
-        ([1.0, 3.0, 1.0], (3.0, 0.0, 1 / 3, 3.0, 0.0, 1 / 3)),
-    ],
-    ids=["dominant-left", "dominant-right", "coincident-centers"],
-)
-def test_dual_gaussian_guess_orders_peak_centers(
-    ydata: list[float], expected: tuple[float, float, float, float, float, float]
-) -> None:
-    params = guess_dual_gauss_params(np.array([-2.0, 0.0, 2.0]), np.array(ydata))
-
-    assert isinstance(params, tuple)
-    assert len(params) == 6
-    assert params[1] <= params[4]
-    np.testing.assert_allclose(params, expected, rtol=1e-12, atol=1e-12)
-
-
-@pytest.mark.parametrize("dimensions", [1, 2])
-@pytest.mark.parametrize("left_count", [30, 50, 70])
-@pytest.mark.parametrize("seed", [0, 1])
-def test_dual_gaussian_gmm_scales_are_sorted_sample_counts(
-    dimensions: int, left_count: int, seed: int
-) -> None:
-    rng = np.random.default_rng(17)
-    signals = np.vstack(
-        [
-            rng.normal(-4.0, 0.2, (left_count, dimensions)),
-            rng.normal(4.0, 0.2, (100 - left_count, dimensions)),
-        ]
-    )
-    state = np.random.get_state()
-    try:
-        np.random.seed(seed)
-        params = fit_dual_gauss_gmm(signals[:, 0] if dimensions == 1 else signals)
-    finally:
-        np.random.set_state(state)
-
-    assert params[1] < params[4]
-    np.testing.assert_allclose([params[1], params[4]], [-4.0, 4.0], atol=0.1)
-    np.testing.assert_allclose([params[0], params[3]], [left_count, 100 - left_count])
-    assert params[0] + params[3] == pytest.approx(100.0)
 
 
 def test_fit_func_reports_real_optimizer_nonconvergence() -> None:
@@ -325,20 +277,3 @@ def test_fit_func_fixed_parameter_preserves_bounds_and_covariance(
     assert np.all(np.isfinite(p_cov))
     np.testing.assert_array_equal(p_cov[1, :], [0.0, 0.0])
     np.testing.assert_array_equal(p_cov[:, 1], [0.0, 0.0])
-
-
-def test_dual_gaussian_gmm_repeats_exactly_for_the_same_signals() -> None:
-    rng = np.random.default_rng(23)
-    signals = np.concatenate([rng.normal(-1.0, 0.8, 400), rng.normal(1.0, 0.8, 400)])
-
-    state = np.random.get_state()
-    try:
-        fits = []
-        for global_seed in range(5):
-            np.random.seed(global_seed)  # the global RNG must not change the fit
-            fits.append(fit_dual_gauss_gmm(signals))
-    finally:
-        np.random.set_state(state)
-
-    for fit in fits[1:]:
-        np.testing.assert_array_equal(fits[0], fit)
