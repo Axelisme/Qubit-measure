@@ -484,7 +484,7 @@ def _plot_raw_ge_iq(
         linewidths=1.5,
         label="Fitted centers",
     )
-    ax.set(xlabel="I [ADC levels]", ylabel="Q [ADC levels]")
+    ax.set(xlabel="I (a.u.)", ylabel="Q (a.u.)")
     ax.set_title("Raw IQ with fitted g/e centers", fontsize=10, pad=23)
     ax.legend(
         loc="lower center",
@@ -552,7 +552,6 @@ def _plot_ge_histograms(
     combined.set_ylabel(
         "Fraction per bin" if annotated else "Counts", fontsize=10 if annotated else 14
     )
-    combined.set_xlabel("I [ADC levels]", fontsize=10 if annotated else 14)
 
 
 def _layout_ge_diagnostic(
@@ -577,6 +576,8 @@ def _layout_ge_diagnostic(
             ax.xaxis.set_major_locator(MaxNLocator(nbins=5, min_n_ticks=2))
         iq.xaxis.label.set_fontsize(10)
         iq.yaxis.label.set_fontsize(10)
+        for histogram in (combined, ground, excited):
+            histogram.set_xlabel("Projected I (a.u.)", fontsize=10)
         for panel, prep in ((ground, "g"), (excited, "e")):
             panel.set_title(f"{prep} prep · {panel.get_title()}", fontsize=10, pad=40)
             panel.legend(
@@ -590,6 +591,7 @@ def _layout_ge_diagnostic(
             )
         fig.set_layout_engine("constrained", hspace=0.08)
     else:
+        combined.set_xlabel("I [ADC levels]", fontsize=14)
         combined.set_title(
             f"Prepared assignment: {prepared:.1%}; ideal model: {ideal:.1%}",
             fontsize=12,

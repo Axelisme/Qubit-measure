@@ -255,12 +255,18 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         cfg = deepcopy(config)
 
         figure, axes = context.plots.subplots(num="measurement")
-        axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
+        probe_labels = ("Probe off", "Probe on")
+        total_shots = 2 * cfg.shots
+        axes.set(
+            xlabel="I (a.u.)",
+            ylabel="Q (a.u.)",
+            title=f"GE IQ\nAcquired shots: 0 / {total_shots:,} · no branches yet",
+        )
         axes.grid(False)
         axes.legend(
             handles=[
-                Patch(color="blue", label="g preparation (probe off)"),
-                Patch(color="red", label="e preparation (probe on)"),
+                Patch(color=color, label=label)
+                for color, label in zip(("blue", "red"), probe_labels, strict=True)
             ]
         )
         empty = np.empty(0, dtype=np.complex128)
@@ -268,7 +274,18 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
 
         @context.plots.on_plot_thread
         def update(clouds: NDArray[np.complex128]):
-            return (plot_ge_iq_density(axes, clouds[0], clouds[1], image=image),)
+            density = plot_ge_iq_density(axes, clouds[0], clouds[1], image=image)
+            counts = np.count_nonzero(np.isfinite(clouds), axis=1)
+            acquired = ", ".join(
+                label
+                for label, count in zip(probe_labels, counts, strict=True)
+                if count
+            )
+            title = axes.set_title(
+                f"GE IQ\nAcquired shots: {counts.sum():,} / {total_shots:,}"
+                f" · {acquired or 'no branches yet'}"
+            )
+            return density, title
 
         figure.show()
 
