@@ -257,7 +257,7 @@ Notebook 使用 `CfgEnv(ml, device_manager)` 借用固定 library snapshot 與 c
 
 CfgEnv 與 RunContext 分工不同。前者可跨次組裝重用；後者只有單次執行能力，不讓核心取得 point、library 或 registry 管理權。底層 `assemble_experiment_cfg` 接顯式 validation context，不讀硬體。Run 不重新組裝 cfg、不重連、不補裝置。需要新的參數或 library 資訊時，caller 明確讀取來源、重建 CfgEnv，再次呼叫 make_cfg。Driver mapping 不是資源 lease，也不凍結 driver 狀態。Notebook 初始化 cell 重跑就重建，不探查 namespace 或自動重用，舊連線仍由使用者明確關閉。GUI 的固定來源、CfgRef／revision 與 acceptance 不因 Notebook 入口而重新查詢硬體。
 
-模擬 builder 回傳具名 `SimulationEnvironment`，包含已綁定 soc、匹配 soccfg、同一 DeviceManager 與公開描述。一般可信 Python loader 仍支援零參數 `build_environment()`。FTF startup 與 Notebook 用 `from zcu_tools.simulators.ftf.environment import ftf` 匯入公開 builder，再直接呼叫 `ftf(...)`。設定載入與呼叫範例見[模擬器 README〈Physical simulator models〉](../../lib/zcu_tools/simulators/README.md#physical-simulator-models)。
+模擬 builder 回傳具名 `SimulationEnvironment`，包含已綁定 soc、匹配 soccfg、同一 DeviceManager 與公開描述。一般可信 Python loader 仍支援零參數 `build_environment()`。FTF startup 與 Notebook 用 `from zcu_tools.simulators.ftf.environment import ftf` 匯入公開 builder，再直接呼叫 `ftf(..., soccfg=soccfg)`。設定載入與呼叫範例見[模擬器 README〈Physical simulator models〉](../../lib/zcu_tools/simulators/README.md#physical-simulator-models)。
 
 GUI 不載入 environment，由選定的 startup 腳本經一般 facets 安裝 SoC 並逐一 register drivers。一般 soc_changed 不建立 device，不保留動態切換入口。成功回傳後由 caller 安排清理；只有 register 成功的 driver 才交給 GUI 關閉，失敗與未交付資源由腳本清理。資源交接與 `on_close` 時序見 [[0064]]。部分清理失敗保留資源與原錯誤，不假裝 ready。
 
