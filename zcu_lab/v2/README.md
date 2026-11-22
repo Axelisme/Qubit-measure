@@ -120,7 +120,9 @@ Host 路徑先合併各長度已完成的 shot 矩，再除以保留 shot 數求
 ## 即時圖工具
 
 `zcu_lab.v2.support` 匯出 `live_line`、`live_errorbar`、`live_scatter` 與 `live_heatmap`。
-顯示、owner 更新與 artist 回傳規則見[圖的建立、顯示與更新](experiment-authoring.md#圖的建立顯示與更新)。
+實驗的呼叫順序見[圖的建立、顯示與更新](experiment-authoring.md#圖的建立顯示與更新)。
+`@plots.on_plot_thread` 的 owner 執行、artist 歸屬驗證與 refresh 規則見
+[plotting〈原生 matplotlib 更新〉](../../lib/zcu_tools/plotting/README.md#原生-matplotlib-更新)。
 
 ```python
 fig, ax = context.plots.subplots(num="signal")
@@ -136,7 +138,7 @@ def update(data):
 fig.show()
 ```
 
-`support/live.py` 提供掛到 axes 的工具，`_live_attached.py` 擁有資料檢查與 artists，
+[`support/live.py`](support/live.py) 提供掛到 axes 的工具，`_live_attached.py` 擁有資料檢查與 artists，
 `_live_format.py` 處理格式。`support.live.AttachedLine` 可用於作者的型別標註。
 `live_errorbar(ax).set(xs, signals, yerr)` 更新點與對稱誤差棒；NaN 誤差只省略誤差棒，保留資料點。
 作者直接在 axes 設 ticks、顏色與標題。掃描歷史線由作者在另一個 axes 建立並更新。
