@@ -123,6 +123,7 @@ class PreparedRawShots:
         return ADCRawShots(self, identity)
 
 
+# ADR-0078: ADC owns batch identity and plan reuse; the acquire session owns retirement.
 class RawPlanOwner:
     """Reuse deterministic integrated raw plans for one acquire's current batch.
 

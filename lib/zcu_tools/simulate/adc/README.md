@@ -363,8 +363,10 @@ An acquire that reuses a prepared batch calls
 `RawPlanOwner.bind(prepared, identity)` instead of `prepared.bind(identity)`.
 ADC compares prepared objects by identity and retains plans for only the current
 batch. It builds each logical event's plan on demand during raw materialization.
-FTF and standalone single-fluxonium retire the plans when the batch changes or
-the acquire ends, without moving plans into the source preparation cache.
+[FTF](../../simulators/ftf/environment/README.md#preparation-reuse) and
+[standalone single-fluxonium](../../simulators/single_fluxonium/environment/README.md#reuse-and-lifetime)
+retire the plans when the batch changes or the acquire ends, without moving
+plans into the source preparation cache.
 After retirement, previously delivered sources recompute their plans without
 filling either the old or the current memo. Direct `bind(identity)` and decimated
 traces do not use an owner.

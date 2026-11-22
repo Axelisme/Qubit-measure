@@ -52,6 +52,7 @@ def raw_environment(request, monkeypatch):
 
     # The environment factory does not return the source for direct callers.
     monkeypatch.setattr(runtime, source_name, build_source)
+    # Neither builder accepts an Engine; constructing a source directly bypasses on_end wiring.
     monkeypatch.setattr(runtime, "Engine", EngineDouble)
     env = getattr(runtime, name)(config, soccfg=profile_soccfg(name))
     try:
@@ -177,6 +178,7 @@ def test_managed_acquire_retires_the_plan_with_diagnostics_off(
         if ending == "exception":
             raise RuntimeError("processor failed after raw")
 
+    # Program getters expose published shots, not the raw source of an unpublished round.
     monkeypatch.setattr(binding, "execute", observe)
 
     def acquire():

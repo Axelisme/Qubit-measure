@@ -297,7 +297,8 @@ def test_raw_rounds_reuse_noiseless_setup_only_in_the_active_batch():
 
 
 def test_retiring_a_batch_during_raw_setup_does_not_publish_its_late_plan():
-    building = Event()
+    watchdog = 30
+    building_or_done = Event()
     proceed = Event()
     a_calls = 0
     b_calls = 0
@@ -306,8 +307,11 @@ def test_retiring_a_batch_during_raw_setup_does_not_publish_its_late_plan():
         nonlocal a_calls
         a_calls += 1
         if a_calls == 1:
-            building.set()
-            assert proceed.wait(timeout=5), "retirement blocked on the raw solver"
+            building_or_done.set()
+            # Once notified, the test retires A and releases this worker in finally.
+            assert proceed.wait(timeout=watchdog), (
+                "retirement blocked on the raw solver"
+            )
         return 1 + 0j
 
     def next_envelope(_ns: float) -> complex:
@@ -329,16 +333,26 @@ def test_retiring_a_batch_during_raw_setup_does_not_publish_its_late_plan():
     owner = adc.RawPlanOwner()
     identity = SamplingIdentity(1)
     old = owner.bind(prepared(first_envelope), identity)
+    next_batch = prepared(next_envelope)
     with ThreadPoolExecutor(max_workers=1) as pool:
         pending = pool.submit(old.materialize, 1, 0)
+        # Materialization signals on envelope entry or, if it exits early, via the future.
+        pending.add_done_callback(lambda _: building_or_done.set())
         try:
-            assert building.wait(timeout=5), "raw never entered envelope setup"
-            next_batch = prepared(next_envelope)
-            next_source = owner.bind(next_batch, identity)
+            assert building_or_done.wait(timeout=watchdog), (
+                "raw worker made no progress"
+            )
+            if pending.done():
+                new = None
+            else:
+                next_source = owner.bind(next_batch, identity)
+                proceed.set()  # Let A finish while B materializes.
+                new = next_source.materialize(1, 0)[0]
         finally:
             proceed.set()
-        new = next_source.materialize(1, 0)[0]
-        previous = pending.result(timeout=5)[0]
+            previous = pending.result(timeout=watchdog)[0]
+
+    assert new is not None, "raw finished before entering envelope setup"
 
     assert not np.array_equal(new, previous)
     b_setup = b_calls
