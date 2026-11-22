@@ -330,7 +330,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         *,
         plots: Plots,
     ) -> None:
-        """Plot relaxation fits and T1/T1_b from both preparation populations.
+        """Plot both preparation populations, their joint fit, and its two decay times.
 
         source supplies delay times in us and G/E/Other counts, normalized per row. Skip the first
         options.skip points, optionally correct readout with the saved cfg classifier's
@@ -389,7 +389,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         diagnostics = fit_result.diagnostics
         fig.suptitle(
             f"{title}\n"
-            f"Slow T₁ = {t1:.3g} µs · Fast T₁ = {t1_b:.3g} µs · "
+            f"Relaxation times (short to long) = {t1:.3g}, {t1_b:.3g} µs · "
             f"Reduced χ² = {diagnostics.reduced_chi_square:.3g}"
         )
         dense_time = np.linspace(float(lens.min()), float(lens.max()), 250)

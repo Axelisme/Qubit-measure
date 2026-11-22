@@ -107,6 +107,12 @@ class T1WithToneAnalyzeOptions:
 
 @dataclass(frozen=True)
 class T1WithToneAnalysis:
+    """Two model decay times under the probe tone, which can be equal.
+
+    t1: Shorter decay time in µs (1 / lambdas[2]).
+    t1_b: Longer decay time in µs (1 / lambdas[1]).
+    """
+
     t1: float
     t1_b: float
 
@@ -433,7 +439,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         diagnostics = fit_result.diagnostics
         fig.suptitle(
             f"{title}\n"
-            f"Slow T₁ = {t1:.3g} µs · Fast T₁ = {t1_b:.3g} µs · "
+            f"Relaxation times (short to long) = {t1:.3g}, {t1_b:.3g} µs · "
             f"Reduced χ² = {diagnostics.reduced_chi_square:.3g}"
         )
         dense_time = np.linspace(float(lens.min()), float(lens.max()), 250)
