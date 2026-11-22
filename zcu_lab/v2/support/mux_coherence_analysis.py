@@ -15,7 +15,6 @@ from zcu_tools.analysis.fitting import (
     fit_decay,
     fit_decay_fringe,
 )
-from zcu_tools.utils.process import rotate2real
 
 
 @dataclass(frozen=True)
@@ -84,19 +83,6 @@ def prepare_coherence_trace(
         signal[finite],
         None if iq_moments is None else iq_moments[skip:][finite],
     )
-
-
-def project_coherence_trace(
-    trace: MuxCoherenceTrace, *, minimum_points: int
-) -> NDArray[np.float64]:
-    """Project a trace's mean IQ onto its real principal axis for a fit.
-
-    minimum_points is the required observation count. Return one real value
-    per trace time. Raise ValueError for too few acquired observations.
-    """
-    if len(trace.times) < minimum_points:
-        raise ValueError("Insufficient acquired points for coherence fit")
-    return rotate2real(trace.signal).real
 
 
 def fit_coherence_trace(

@@ -56,28 +56,21 @@ of the sweep; the line between them is not a fit.
 Both Run and the default Analyze figure use the first measured gain point as
 the complex IQ reference. Each dot shows the magnitude of the difference
 between that reference and the mean IQ at the dot's gain, in a.u. The first
-point is zero by definition. Analyze shows just the measured points and
-error bars. Its summary identifies the source run and that run's configured
-Reps × Rounds, not the current Form settings.
+point is zero by definition. Analyze shows just the measured points. Its
+summary identifies the source run and that run's configured Reps × Rounds,
+not the current Form settings.
 
-Each bar is one shot standard error of the mean (SEM). The analysis projects
-the individual IQ fluctuations along the direction from the reference to
-that point's mean IQ, then uses their sample standard deviation divided
-by the square root of the shot count. This first-order estimate treats the
-reference as fixed. It does not include uncertainty in a measured reference,
-and it is less useful when the bar is large compared with the displacement.
-There is no bar at zero displacement, where the direction is undefined,
-at points with fewer than two shots, or on old mean-only files. A zero or
-very small SEM can be hidden by its dot. A symmetric bar can extend below
-zero, even though the measured magnitude cannot.
+Neither plot shows error bars. The magnitude of the difference between two
+means is nonlinear. A shot standard error for an IQ projection does not
+measure the uncertainty of that magnitude.
 
 Find a rise that spans adjacent gains and repeats when you rerun the sweep.
-Do not treat one point with a large bar as an onset. If a rise starts between
+Do not treat a single isolated point as an onset. If a rise starts between
 two gains, repeat with those gains as Start and Stop and a smaller step.
 For example, 21 points between 0.12 and 0.14 a.u. give a nominal 0.001 a.u.
 step. If the whole trace is flat, the sweep has not located an onset. If
 the reference looks suspect, repeat with a lower Start or use an independently
-measured reference. Repeat with more shots if the bars obscure the change.
+measured reference.
 This analysis does not fit or write back an onset.
 
 ## Change the Analyze display
@@ -85,7 +78,7 @@ This analysis does not fit or write back an onset.
 - **Reference IQ (a.u.)** sets the complex reference. Enter a value such as
   `1+2j` measured with the same readout, or leave it blank to use the first point.
 - **Comparison IQ (a.u.)** sets the y-axis upper limit to 1.1 times its distance
-  from Reference IQ. It does not change the dots or bar lengths and may hide
+  from Reference IQ. It does not change the dots and may hide
   points above the limit. Leave it blank for automatic limits.
 - **Photon number / gain squared** replaces the gain axis with the coefficient
   times gain squared. Leave it blank without an independent calibration.

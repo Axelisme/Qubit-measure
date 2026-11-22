@@ -9,7 +9,6 @@ from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
-from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import (
@@ -37,7 +36,7 @@ from zcu_tools.program.v2 import (
     split_sums,
 )
 
-from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support import live_line
 
 _TITLE = "MIST gain sweep · Resonator probe"
 _GAIN_LABEL = "Probe gain (a.u.)"
@@ -70,28 +69,6 @@ class PowerDepAnalyzeOptions:
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     """Return the magnitude of mean IQ displacement from the first gain point."""
     return np.abs(signals - signals[0])
-
-
-def _displacement_sem(
-    delta: NDArray[np.complex128], moments: NDArray[np.float64]
-) -> NDArray[np.float64]:
-    """Linearize |delta| along each nonzero displacement, holding its reference fixed."""
-    magnitude = np.abs(delta)
-    direction = np.divide(
-        delta,
-        magnitude,
-        out=np.zeros_like(delta),
-        where=np.isfinite(magnitude) & (magnitude > 0),
-    )
-    return np.asarray(
-        [
-            iq_shot_sem(sums, direction=(float(unit.real), float(unit.imag))).item()
-            if unit != 0
-            else np.nan
-            for unit, sums in zip(direction, moments, strict=True)
-        ],
-        dtype=np.float64,
-    )
 
 
 class PowerDepCfg(ConfigBase):
@@ -238,17 +215,15 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             title=f"{_TITLE}\n0 shots per gain point",
         )
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        viewer = live_errorbar(ax)
+        viewer = live_line(ax)
 
         @context.plots.on_plot_thread
         def update(moments: NDArray[np.float64]) -> Iterable[Artist]:
-            """Update the IQ displacement, shot SEM, and accumulated shot count."""
+            """Update the IQ displacement and accumulated shot count."""
             counts, signals = split_sums(moments)
-            delta = signals - signals[0]
-            sem = _displacement_sem(delta, moments)
             shots = np.nanmax(counts, initial=0)
             title = ax.set_title(f"{_TITLE}\n{shots:,.0f} shots per gain point")
-            return (*viewer.set(gains, np.abs(delta), sem), title)
+            return (*viewer.set(gains, mist_signal2real(signals)), title)
 
         fig.show()
         moments_buffer = SignalBuffer(
@@ -284,11 +259,9 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
     ) -> None:
         """Plot the IQ displacement from ``options.g0`` using ``source`` data.
 
-        If g0 is None, use the first gain point as in the live view. With
-        moments, show the per-point shot SEM along the displacement direction,
-        holding the reference fixed. ``ac_coeff`` maps gain squared to photon
-        number; ``e0`` only sets the vertical display range. Return no fit or
-        calibrated population estimate.
+        If g0 is None, use the first gain point as in the live view.
+        ``ac_coeff`` maps gain squared to photon number; ``e0`` only sets the
+        vertical display range. Return no fit or calibrated population estimate.
         """
         # 1. Measure IQ displacement from g0, defaulting to the first gain sample.
         result = source.result
@@ -314,10 +287,6 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.set(xlabel=xlabel, ylabel=_SHIFT_LABEL, title=_TITLE)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        if result.iq_moments is None:
-            ax.plot(xs, amp_diff, ".", markersize=5)
-        else:
-            sem = _displacement_sem(delta, result.iq_moments)
-            ax.errorbar(xs, amp_diff, yerr=sem, fmt=".", markersize=5)
+        ax.plot(xs, amp_diff, ".", markersize=5)
         if e0 is not None:
             ax.set_ylim(0, 1.1 * np.abs(g0 - e0))
