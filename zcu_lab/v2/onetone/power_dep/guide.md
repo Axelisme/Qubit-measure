@@ -19,7 +19,7 @@ The upper map normalizes `|mean(I + iQ)|` separately at each gain: subtract the 
 
 Refine a shift between the last gain on the low-drive branch and the first gain on the shifted branch. For low-power readout, choose a candidate below that bracket and measure its absolute center and g/e separation separately.
 
-Analyze redraws the selected Run or Load without live SNR, fitting or writeback. Missing saved cfg does not block a valid map; it removes the configured Reps × Rounds line.
+Analyze redraws the selected Run or Load without live SNR and fits each gain spectrum in complex IQ. The side panels show fitted center (f₀) and linewidth (FWHM) versus gain so you can compare shift and broadening. The per-gain spectra show measured magnitude, the fitted magnitude curve, and the fitted values. Normalized residual RMS divides the RMS error across the real and imaginary IQ samples by their combined observed range. A fit failure leaves the measured data in the map but omits that gain from the fit plots and logs a warning. The fits are display only: Analyze does not select a gain or write back. Missing saved cfg does not block Analyze; it removes the configured Reps × Rounds line.
 
 ## Recipe inputs
 
