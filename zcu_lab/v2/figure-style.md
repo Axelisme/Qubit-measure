@@ -118,7 +118,14 @@ Data／Save 頁的縮圖只用來選圖。按 `View figure` 打開閱讀面，�
 
 ### R8：圖型對應資料，liveplot 標明進度
 
-離散結果分布用長條圖，連續掃描用點加 fit 線，二維掃描用熱圖。liveplot 讓讀者看出哪些部分已取完、累積多少 shots、目前估計值。liveplot 可連接量測點來顯示進度。
+離散結果分布用長條圖，二維掃描用熱圖。liveplot 讓讀者看出哪些部分已取完、累積多少 shots、目前估計值。
+
+Run 和 Analyze 的一維掃描用相同規則：沒有擬合曲線，就用折線連接量測點；有擬合曲線，量測資料只畫點和可用的誤差棒，只有擬合曲線用實線。類別軸（例如 gg、ge、eg、ee 或 AllXY gate 名稱）的量測點不連線。這條規則不適用於 IQ 散點和二維圖。
+
+Wrapped phase 的折線只連掃描順序中相鄰的有效點。圖上角度相差大於 180° 時，線會跨過分支切口；恰為 180° 時，無法判定方向。兩種情況都斷開該線段，保留兩個點和既有誤差棒。缺值也要斷線，不補插值點。
+
+- Rabi 的 live 圖用點、折線和 shot SEM。Analyze 加上擬合曲線後，量測資料只留點和 shot SEM。
+- Local Z 的 live 圖用點和折線顯示 X/Y 投影隨 CZ gate 數的變化。Analyze 的相位圖已有線性擬合，因此量測相位只畫點。
 
 曲線圖沿用[共用樣式](../../lib/zcu_tools/plotting/experiment.mplstyle)的 `axes.grid: True`，不另外呼叫 `grid()`。影像與熱圖在 liveplot 和 Analyze 都明確呼叫 `grid(False)`。
 
@@ -141,11 +148,11 @@ Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summar
 - 壞例：Ramsey 圖標題塞了 run id 和初始設定，摘要卻只重複表單初值，沒寫實驗回傳的實際 detune。
 - 好例（本地改寫示例）：圖上只保留判讀條紋和 T2* 需要的量與標註。同次 Analyze 摘要在實驗名與 run id 旁列「Reps×Rounds 1000×10；實際 detune 0.400 MHz」。Ding 圖 5-9(e)（頁 152）的相位圖集中在判讀所需的 180° 參考線與候選頻率。
 
-### R11：對數值大小敏感的一維資料畫 error bar
+### R11：有 shot SEM 的一維資料畫 error bar
 
-Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二維圖不畫逐點 error bar。其他實驗依同一判準決定，並在 guide 寫明 error bar 的來源。
+已有 shot SEM 的一維系列畫逐點 error bar，包括用來判讀峰位的 spectrum。二維圖不畫逐點 error bar。Guide 寫明 error bar 的來源。
 
-逐點 shot SEM 估計該點平均值的標準差，代表這個平均值的預期誤差。shot SEM = 每發樣本標準差 ÷ √(保留 shot 數)。被 mask 的 shot 不算。它不是單發散布 σ、輪間散布或 fit 參數誤差。RB 的跨 seed 標準差也不是 shot SEM。估計器在 [`zcu_tools.analysis`](../../lib/zcu_tools/analysis/README.md)。只存平均的實驗在家族修正時新增二階 moment 欄位。舊檔仍可 Load，缺少估計所需資料時不畫 error bar。
+逐點 shot SEM 估計該點平均值的標準差，代表這個平均值的預期誤差。shot SEM = 每發樣本標準差 ÷ √(保留 shot 數)。被 mask 的 shot 不算。它不是單發散布 σ、輪間散布或 fit 參數誤差。RB 的跨 seed 標準差也不是 shot SEM。估計器在 [`zcu_tools.analysis`](../../lib/zcu_tools/analysis/README.md)。只存平均或舊檔缺少估計所需資料時不畫 shot SEM。不為了套用連線規則改存檔格式；需要二階 moment 時留到家族取數修正。
 
 - 壞例：T1 只報 `T1 = 80 ± 5 µs`，不顯示每個量測點的不確定度。
 - 好例：Rabi 的逐點布居用 shot SEM 畫 error bar。Ding 圖 5-13(a)（頁 157）的 CZ fidelity 對脈衝寬度圖可作逐點誤差棒的版式參考；圖 5-8(b)（頁 151）的二維掃描則用熱圖。
@@ -238,7 +245,7 @@ Ding 博論有相近的圖時，以「版式參考」引圖號和印刷頁碼。
 
 ### Gd3：解釋誤差棒與 fit 品質
 
-依 [R11](#r11對數值大小敏感的一維資料畫-error-bar) 寫明 error bar 的來源。依 [R3b](#r3b結果旁寫-fit-品質) 解釋 core 或分析已回傳的品質指標。有既有判準才列出判準，guide 不另訂門檻。
+依 [R11](#r11有-shot-sem-的一維資料畫-error-bar) 寫明 error bar 的來源。依 [R3b](#r3b結果旁寫-fit-品質) 解釋 core 或分析已回傳的品質指標。有既有判準才列出判準，guide 不另訂門檻。
 
 - 壞例：「誤差如圖，R² 越大越好。」讀者不知道誤差棒來自哪裡，也不知道分析如何使用 R²。
 - 好例：reference RB 寫「每個 Clifford depth 的誤差棒是跨 seeds 的一個樣本標準差，不是平均值的標準誤。」T2 Echo 可寫「R² 是擬合所用量測點的決定係數；R² 低於 0.9 時，寫回候選不會預先勾選，須人工審查。這是既有的選取條件之一。」

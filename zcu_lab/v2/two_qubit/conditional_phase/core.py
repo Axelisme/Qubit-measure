@@ -42,6 +42,7 @@ from zcu_lab.v2.support import live_errorbar
 
 from .._drive import QubitDriveCfg
 from .._phase import QuadraturePhase, count_phase, qubit_sigma_variance
+from .._phase_plot import wrapped_phase_plot_data
 from .._readout import POINT_ALIAS_DESCRIPTION
 from .._sums import qubit_sigma, validate_qubit_tones
 from .crossing import PhaseCrossings, phase_crossings
@@ -352,7 +353,7 @@ def _plot_terminal_quadratures(
                 frequencies,
                 values[b, q],
                 yerr=sem[b, q],
-                fmt=".",
+                fmt=".-",
                 color=f"C{q}",
                 label=f"{projection} ± shot SEM",
             )
@@ -381,7 +382,7 @@ def _start_live_view(
         ax.ticklabel_format(useOffset=False)
         viewers.append(live_errorbar(ax, num_lines=2))
         for line, projection in zip(ax.lines, ("X", "Y"), strict=True):
-            line.set(label=f"{projection} ± shot SEM", linestyle="none")
+            line.set(label=f"{projection} ± shot SEM")
     fig.legend(
         *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
     )
@@ -663,7 +664,12 @@ def _plot_phase_crossing(
 ) -> None:
     """Mark existing interpolated roots of the wrapped conditional phase."""
     fig, ax = plots.subplots(num="phase", figsize=(7, 4.8), layout="constrained")
-    ax.plot(xs, conditional, ".", color="C0", label="Spectator e minus g")
+    ax.plot(
+        *wrapped_phase_plot_data(xs, conditional),
+        ".-",
+        color="C0",
+        label="Spectator e minus g",
+    )
 
     ax.axhline(-180, color="0.45", linestyle="--", label="π modulo 360°")
     ax.axhline(180, color="0.45", linestyle="--")
@@ -703,11 +709,14 @@ def _plot_slopes(
     )
     ax, quality_ax = fig.axes
     for b, state in enumerate(("g", "e")):
+        x, slopes, errors = wrapped_phase_plot_data(
+            xs, fitted.slopes_deg[b], fitted.errors_deg[b]
+        )
         ax.errorbar(
-            xs,
-            fitted.slopes_deg[b],
-            yerr=fitted.errors_deg[b],
-            fmt=".",
+            x,
+            slopes,
+            yerr=errors,
+            fmt=".-",
             color=f"C{b}",
             label=f"spectator {state}",
         )
@@ -717,7 +726,7 @@ def _plot_slopes(
                 fit.diagnostics.reduced_chi_square if fit is not None else np.nan
                 for fit in fitted.fits[b]
             ],
-            ".",
+            ".-",
             color=f"C{b}",
         )
 
@@ -749,24 +758,20 @@ def _plot_phase_diagnostics(
     )
     contrast_ax, phase_ax = fig.axes
     for b, state in enumerate(("g", "e")):
-        for label, marker, rows in (("", ".", phases),):
+        for label, style, rows in (("", ".-", phases),):
             points = rows[b]
             contrast_ax.plot(
                 xs,
                 [p.contrast for p in points],
-                marker,
+                style,
                 color=f"C{b}",
                 label=f"{label}spectator {state}",
             )
-            phase_ax.plot(
-                xs,
-                [
-                    np.nan if p.logical_phase_deg is None else p.logical_phase_deg
-                    for p in points
-                ],
-                marker,
-                color=f"C{b}",
-            )
+            phase_deg = [
+                np.nan if p.logical_phase_deg is None else p.logical_phase_deg
+                for p in points
+            ]
+            phase_ax.plot(*wrapped_phase_plot_data(xs, phase_deg), style, color=f"C{b}")
     contrast_ax.set_ylabel("Classified contrast")
     contrast_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
     phase_ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Wrapped phase (deg)")

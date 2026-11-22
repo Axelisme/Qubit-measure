@@ -10,6 +10,7 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -34,7 +35,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.device import set_flux
 
 from .._drive import QubitDriveCfg
@@ -269,6 +270,17 @@ _PREPARATIONS = ("g,g", "g,e", "e,g", "e,e")
 _QUBITS = ("Qubit1", "Qubit2")
 
 
+def _excitation_sem(counts: NDArray[np.float64]) -> NDArray[np.float64]:
+    # Sum over the other qubit's terminal classes; keep g, e and other in N.
+    return np.stack(
+        [
+            np.sqrt(class_probability_covariance(counts.sum(axis=axis))[..., 1, 1])
+            for axis in (-1, -2)
+        ],
+        axis=-1,
+    )
+
+
 def _spectra_title(cfg: SpectroscopyCfg, index: int) -> str:
     """Name the measured population and active pulse-sequence variant."""
     title = "Conditional spectroscopy · Qubit1 / Qubit2 · Terminal P(e)"
@@ -370,10 +382,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 layout="constrained",
             )
             _label_spectra(fig)
-            panels = [live_line(ax, num_lines=2) for ax in fig.axes]
-            for ax in fig.axes:
-                for line, label in zip(ax.get_lines(), _QUBITS, strict=True):
-                    line.set(label=label, linestyle="none")
+            panels = [live_errorbar(ax, num_lines=2) for ax in fig.axes]
             fig.legend(
                 fig.axes[0].get_lines(), _QUBITS, loc="outside lower center", ncols=2
             )
@@ -387,11 +396,16 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Figure, ...]:
             answer = summarize_spectra(sums)
+            sem = _excitation_sem(sums)
             for index, (fig, panels, title) in enumerate(views):
                 for panel, (qubit1, qubit2) in zip(
                     panels, np.ndindex(2, 2), strict=True
                 ):
-                    panel.set(frequencies, answer.excitation[index, qubit1, qubit2].T)
+                    panel.set(
+                        frequencies,
+                        answer.excitation[index, qubit1, qubit2].T,
+                        sem[index, qubit1, qubit2].T,
+                    )
                 shots = answer.acquired_shots[index]
                 fig.suptitle(
                     f"{title}\n{np.isfinite(shots).sum()}/{shots.size} preparation-frequency points sampled"
@@ -504,6 +518,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 "Spectroscopy requires saved axes and sums (DC,2,2,frequency,3,3)"
             )
         answer = summarize_spectra(data.sums)
+        sem = _excitation_sem(data.sums)
         for index in range(len(dc)):
             fig, _ = plots.subplots(
                 num=f"spectra_{index}",
@@ -515,12 +530,17 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             _label_spectra(fig)
             fig.suptitle(_spectra_title(cfg, index))
             for ax, (qubit1, qubit2) in zip(fig.axes, np.ndindex(2, 2), strict=True):
-                for values, label in zip(
-                    answer.excitation[index, qubit1, qubit2].T, _QUBITS, strict=True
+                for values, errors, label in zip(
+                    answer.excitation[index, qubit1, qubit2].T,
+                    sem[index, qubit1, qubit2].T,
+                    _QUBITS,
+                    strict=True,
                 ):
-                    ax.plot(frequencies, values, ".", label=label)
+                    ax.errorbar(frequencies, values, yerr=errors, fmt=".-", label=label)
             fig.legend(
-                fig.axes[0].get_lines(), _QUBITS, loc="outside lower center", ncols=2
+                *fig.axes[0].get_legend_handles_labels(),
+                loc="outside lower center",
+                ncols=2,
             )
 
         # A map tracks peak motion with bias without overlaying all slices.
@@ -578,7 +598,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             for ax, branch, (qubit1, qubit2) in zip(
                 fig.axes, _PREPARATIONS, np.ndindex(2, 2), strict=True
             ):
-                ax.plot(frequencies, shots[qubit1, qubit2], ".", color="0.3")
+                ax.plot(frequencies, shots[qubit1, qubit2], ".-", color="0.3")
                 ax.set(
                     title=f"Nominal preparation: {branch}",
                     xlabel="Common probe RF frequency (MHz)",
