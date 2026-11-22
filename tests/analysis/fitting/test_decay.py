@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from zcu_tools.analysis import fitting
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import compute_fit_quality, decay_time_bounds
 from zcu_tools.analysis.fitting.base import decaycos, dual_expfunc, expfunc
 from zcu_tools.analysis.fitting.decay import (
@@ -173,6 +174,54 @@ def test_fit_decay_does_not_clip_fixed_amplitude_to_observed_range(sign: float) 
     np.testing.assert_array_equal(result.cov[:, 1], 0.0)
 
 
+@pytest.mark.parametrize("level", [0.5, 0.1])
+def test_flat_decay_has_no_automatic_free_amplitude_estimate(level: float) -> None:
+    delays = np.arange(8.0)
+    with pytest.raises(AnalysisFailed, match="no contrast"):
+        fit_decay(delays, np.full_like(delays, level))
+
+
+@pytest.mark.parametrize(
+    "invalid", ["shape", "nonfinite-y", "negative-x", "initial", "fixed"]
+)
+def test_flat_decay_does_not_mask_invalid_inputs(invalid: str) -> None:
+    delays = np.arange(8.0)
+    observations = np.full_like(delays, 0.5)
+    initial = None
+    fixed = None
+    if invalid == "shape":
+        observations = observations[:-1]
+    elif invalid == "nonfinite-y":
+        observations[0] = np.nan
+    elif invalid == "negative-x":
+        delays[0] = -1
+    elif invalid == "initial":
+        initial = (np.nan, 0.0, 1.0)
+    else:
+        fixed = (None, None, np.inf)
+
+    with pytest.raises(ValueError, match="shape|finite|nonnegative"):
+        fit_decay(delays, observations, fit_params=initial, fixedparams=fixed)
+
+
+@pytest.mark.parametrize("fixed_amplitude", [None, 0.0])
+def test_flat_decay_accepts_supplied_amplitude_configuration(
+    fixed_amplitude: float | None,
+) -> None:
+    delays = np.arange(8.0)
+    observations = np.full_like(delays, 0.5)
+    result = fit_decay(
+        delays,
+        observations,
+        fit_params=(0.5, 0.1, 2.0),
+        fixedparams=(None, fixed_amplitude, 2.0),
+    )
+    np.testing.assert_allclose(result.curve, observations, atol=1e-7)
+    assert result.params[2] == 2.0
+    if fixed_amplitude is not None:
+        assert result.params[1] == fixed_amplitude
+
+
 def test_fit_decay_recovers_T1():
     xs = np.linspace(0, 20, 300)
     true = (0.1, 1.0, 5.0)
@@ -219,7 +268,7 @@ def test_unresolved_fast_decay_stays_at_sampling_lower_bound() -> None:
 
 
 @pytest.mark.parametrize("fringe", [False, True])
-def test_decay_time_is_bounded_by_the_observation_window(fringe: bool) -> None:
+def test_decay_time_is_bounded_by_the_observation_window(*, fringe: bool) -> None:
     xs = np.linspace(0.5, 5.0, 100)
     if fringe:
         ys = decaycos(xs, 0.2, 1.0, 0.5, 0.0, 1e6)
@@ -378,6 +427,46 @@ def test_fringe_named_result_preserves_frequency_and_quality(
     assert_frozen_fields(
         result, ("decay_time", "freq", "params", "cov", "curve", "quality")
     )
+
+
+@pytest.mark.parametrize("descending", [False, True])
+def test_short_ramsey_with_repeated_first_wait_reports_insufficient_observations(
+    *,
+    descending: bool,
+) -> None:
+    delays = np.array([0.0, 0.0, 3.0])
+    observations = np.array([0.7, 0.6, 0.3])
+    order = slice(None, None, -1 if descending else 1)
+    with pytest.raises(AnalysisFailed, match="Insufficient observations"):
+        fit_decay_fringe(delays[order], observations[order])
+
+
+@pytest.mark.parametrize("decay", [False, True])
+def test_rabi_still_requires_a_positive_first_step_when_short(*, decay: bool) -> None:
+    with pytest.raises(ValueError, match="first step"):
+        fitting.fit_rabi(
+            np.array([0.0, 0.0, 3.0]), np.array([0.7, 0.6, 0.3]), decay=decay
+        )
+
+
+def test_gaussian_fringe_still_requires_a_positive_first_step_when_short() -> None:
+    with pytest.raises(ValueError, match="first step"):
+        fitting.fit_gauss_decay_fringe(
+            np.array([0.0, 0.0, 3.0]), np.array([0.7, 0.6, 0.3])
+        )
+
+
+def test_ramsey_still_requires_a_positive_first_step_with_enough_observations() -> None:
+    with pytest.raises(ValueError, match="first step"):
+        fit_decay_fringe(np.array([0.0, 0.0, 1.0, 2.0, 3.0]), np.linspace(0.2, 0.7, 5))
+
+
+def test_ramsey_with_explicit_initial_values_does_not_require_fft_first_step() -> None:
+    delays = np.array([0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    parameters = (0.2, 0.8, 0.3, 15.0, 3.0)
+    observations = decaycos(delays, *parameters)
+    result = fit_decay_fringe(delays, observations, fit_params=parameters)
+    np.testing.assert_allclose(result.curve, observations)
 
 
 def test_fit_decay_fringe_recovers_T2_and_detune():

@@ -37,11 +37,13 @@
 
 **掃描。** QICK 能掃的參數用 `builder.add_sweep`，在同一個 program 裡掃完：頻率、gain、const 與 flat-top 的長度。硬體每個 round 把所有點輪一遍，慢漂移會被平均掉，也不必每點重新編譯。電腦端迴圈（`sched.scan`）用在硬體掃不了的參數，或需要逐列更新即時圖的外層，例如 `power_dep` 的 gain。
 
-**Cfg 欄位的 description。** 用一句短語說明欄位作用。它會顯示在 GUI 表單上，操作的人照它填值。操作步驟、推導與理由寫在實驗的 `guide.md`。新實驗從上方範本沿用命名。既有 cfg 欄位改名時，依[單數改名先例](experiment-authoring.md#cfg-名稱順序與取數欄位)提升 cfg schema major，不遷移舊 cfg，也不提供 alias。舊 run 仍可載入 Result 與 metadata，但 cfg 為 None，不能重新分析。範例見 [`AmpRabiCfg.init_pulse`](twotone/rabi/amp_rabi/core.py)：
+**Cfg 欄位的 description。** 用一句短語說明欄位作用。它會顯示在 GUI 表單上，操作的人照它填值。新實驗從上方範本沿用命名。既有 cfg 欄位改名時，依[單數改名先例](experiment-authoring.md#cfg-名稱順序與取數欄位)提升 cfg schema major，不遷移舊 cfg，也不提供 alias。舊 run 仍可載入 Result 與 metadata，但 cfg 為 None，不能重新分析。範例見 [`AmpRabiCfg.init_pulse`](twotone/rabi/amp_rabi/core.py)：
 
 ```python
 description="Fixed preparation pulse before each gain-swept Rabi pulse; None skips preparation."
 ```
+
+Guide 依 [Gd1–Gd3](figure-style.md#operator-guide) 寫六項內容及適用的必留項。只有操作員需要初值來源來設定關鍵參數，且 GUI 沒有等價說明時，才在 guide 留最短公式。通用 GUI 操作連到 [操作員共用流程](operator-workflow.md)，實驗專屬的步驟留在 guide。
 
 **預設值。** cfg 類別與 GUI 表單分開處理：
 

@@ -1,89 +1,24 @@
 # Single-qubit randomized benchmarking
 
-**Readers:** operator, agent. Run reference RB or target-interleaved RB and read the decay fits.
+**Readers:** operator, agent. Measure Clifford decay, and optionally estimate a target gate's error by comparing reference and interleaved decay.
 
-**Last updated:** 2026-11-20, per-depth seed spread
+## Sequence and key settings
 
-## Choose a target
+For each seed and depth: optional **Reset** → random Cliffords → inverse of the complete sequence → **Readout**. With a **Target gate** (X90, X180, Y90 or Y180), Run also measures a paired arm inserting that gate after every random Clifford. Both arms share the random sequence; each has its own inverse. Depth counts random Cliffords, not physical pulses.
 
-Open `twotone/rb`. Leave **Target gate** at None to measure the reference decay.
-Select X90, X180, Y90 or Y180 to measure the reference and interleaved decays in
-the same run. Both arms use the same random Clifford sequences. The interleaved
-arm inserts the target after every random Clifford. Each arm applies its own
-full inverse before readout. Depth counts random Cliffords, not physical pulses
-or inserted targets.
+- Calibrate frequency, X90, X180 and readout. Check repeatable initialization and readout timing. **Relax delay** starts at `5 × qubit.t1` (150 µs if absent) even with active reset.
+- **Clifford depths** in Log mode include zero and max; rounding can merge points. Check **Effective points** or enter distinct nonnegative depths in List order. Use at least four distinct depths that span the decay. Aim for 20 or more independent sequences and use **Random seed** to reproduce them. Start with a short run to verify execution.
 
-The board sweeps depth and runs the repetitions for each seed and arm.
-`rounds` is the number of acquisition rounds per program. Acquisition
-averages IQ across `reps` and finished rounds. Each seed runs reference first,
-then the optional interleaved arm. The live plot shows one line per arm.
+See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shared GUI steps.
 
-## Set the starting values
+## Read the results
 
-Calibrate qubit frequency, the X90 and X180 pulse amplitudes, and readout before
-Run. Open and Defaults take the X90 and X180 pulses from the qubit's module slots
-and readout from the resonator's readout slot. If a slot is empty or points to a
-missing module, the form uses the corresponding `pi2_pulse`, `pi_pulse` or
-`readout` template. The templates use the captured frequency and wiring.
-The readout template uses the resonator's time of flight plus 0.015 µs.
-Missing required calibration leaves the affected input Invalid. You can select
-a saved module instead. The reset module comes from the qubit's reset slot and
-stays off when that slot is empty.
+Live shows mean projected IQ (a.u.) per depth for each arm and counts complete seeds in the title. Stop keeps completed rounds; empty cells stay blank. Run uses finite seeds per depth and arm; Analyze needs at least two seeds finite at every depth in all arms. Each bar is one sample SD across contributing seeds in the same projection, not shot SEM, fit error or round spread. There is no bar with fewer than two seeds. Increasing spread alone does not identify coherent error.
 
-Open and Defaults set Relax delay to five times the captured qubit T1. If T1 or
-the capture is absent, the starting value is 150 µs. An invalid stored T1
-leaves the input Invalid. Active reset does not change this wait. Check the
-modules, readout timing and relax delay before starting.
+Analyze fits `A × p^depth + B`. Reference error per Clifford = `(1 − p_ref)/2`. Target error estimate = `(1 − p_interleaved/p_ref)/2`; target fidelity is one minus that error. The 95% intervals resample seeds, paired where applicable. They do not account for gate-dependent/coherent noise or model bias. Negative target errors or fidelities above one are not clipped.
 
-Depth starts in Log mode with max 128 and nine points:
-`[0, 1, 2, 4, 8, 16, 32, 64, 128]`. Log includes zero and max, and rounds
-and removes duplicate depths. Effective points displays the count after
-deduplication. Use List mode to enter distinct nonnegative integer depths in
-the order you want to run them. Switching back to Log may resample the list.
+## Next step
 
-The form starts at seed 42 with 20 sequences. Start with a short run to check
-execution. For analysis, use at least four distinct depths that span the decay
-and aim for 20 or more independent seeds. Reuse the seed to reproduce the
-random sequences.
+Check that the deepest points approach the fitted offset. Paired Analyze reports R² when available; the reference-only figure does not. A high R² alone cannot constrain a decay whose tail is outside the scan. Extend depth and recheck with independent seeds before adopting a calibration. Analyze does not write back.
 
-## Read the result
-
-Native data stores averaged IQ `signals` in (seed, arm, depth) order. Arm 0 is
-reference. Arm 1 is present only when a target is selected. Stop keeps the
-average of completed rounds for the current seed and arm. Cells without any
-completed round stay NaN. Analyze keeps seeds with finite IQ in all arms
-at every depth. It weights them equally and needs at least two complete seeds.
-
-Analyze fits `A * p**depth + B` on one IQ projection and plots the observations
-and fitted curves. Reference-only mode reports decay `p`, error per Clifford
-`(1 - p) / 2` and its 95% seed-bootstrap interval. In paired mode it reports
-both decays, reference error per Clifford and the target error estimate
-`(1 - p_interleaved / p_reference) / 2`. The target fidelity is one minus that
-error, with a 95% paired-seed bootstrap interval.
-
-Live uses the seeds with finite IQ at each arm and depth. Analyze uses only
-seeds with finite IQ at every depth and, in paired mode, in both arms. The bar
-is one sample standard deviation (`ddof=1`) across those seeds in the same IQ
-projection as the point. A point with fewer than two contributing seeds has
-no bar. The spread combines sequence variation and shot noise. Growing spread
-with depth alone does not identify coherent error.
-
-These intervals describe seed variation. They do not account for bias from
-gate-dependent or coherent noise. A negative target error or fidelity above one
-remains visible. Review the curves and interval before using the estimate.
-Analyze does not write back calibration.
-
-Check that the deepest points approach the fitted offset before using the
-decay estimate. Paired Analyze labels each fit with its R² when available.
-Reference-only Analyze does not report R². The
-[two-qubit RB guide](../../two_qubit/rb/guide.md#interpreting-the-result)
-shows how a short scan can have R² of 0.993 while the decay length has 30%
-relative error.
-
-Load rejects older files with a round axis (wrong number of axes). It does
-not convert these files or previous standalone RB and IRB runs. Re-enter the
-settings and Run to save the current format.
-
-## Reading the plots
-
-The live title counts complete seeds. The Analyze markers show the means of eligible seeds in the IQ projection. The bars are seed SD, not shot SEM. The Analyze summary shows configured Reps × Rounds for each arm and seed.
+Load rejects older files with a round axis and does not convert old standalone RB/IRB files.

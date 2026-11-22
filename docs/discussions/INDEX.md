@@ -169,6 +169,7 @@
 - 2026-11-22 [Live-only 實驗的 figures-only Analyze](2026-11-22-figures-only-analyze.md)：Analyze 能力。四個 leaf 只從明確來源重畫具名圖，不增加數值結果或寫回。
 - 2026-11-22 [非均勻熱圖在建構時選色盤](2026-11-22-nonuniform-heatmap-cmap.md)：繪圖介面。作者在建構期傳入具名 cmap，預設與其他熱圖行為不變。
 - 2026-11-22 [GE 寫回保護先於診斷圖交付](2026-11-22-ge-gate-split-from-diagnostic.md)：交付切分。窄磚上診斷圖標籤仍相碰，寫回初選的中心檢查先獨立落地，直方圖與擬合 SNR 整批延到續作。
+- 2026-11-22 [實驗 guide 只寫操作者需要的內容](2026-11-22-guide-content.md)：文件範圍。改寫規則並清理 111 份 guide，通用操作移到共用頁，排錯與可重用判讀留在知識庫。
 
 ## Cfg 與表單
 
@@ -220,6 +221,7 @@
 
 ## 量測策略
 
+- 2026-11-22 [K-cycle chain 只留主擬合](2026-11-22-chain-joint-fit-only.md)：刪除或收窄。移除巢狀擬合與 `CycleCheck`，用白化殘差和 live 方向投影判讀，不讓第一讀估計或投影缺席蓋掉 joint 結果。
 - 2026-11-22 [Fast-flux 頻譜擬合失敗](2026-11-22-fastflux-distortion-fit-failure.md)：失敗語意。保留整次 Analyze 失敗，不用部分成功圖掩蓋不可辨識的掃描。
 - 2026-10-27 [T1/T2 over flux 量測策略：哪些機制有效](2026-10-27-coherence-strategy-levers.md)：自適應 flux 選點無增益，穩健 delay 取樣讓每條曲線的 σ 約為原來 0.73 倍。
 - 2026-10-29 [Heralding：取數層 post-selection，不做 FPGA active reset](2026-10-29-heralding-post-selection.md)：在 host 取數層依 herald 篩選再平均，不做 FPGA active reset，決策見 [ADR-0074](../adr/0074-flat-readout-module.md)。

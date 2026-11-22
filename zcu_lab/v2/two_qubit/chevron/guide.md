@@ -1,164 +1,26 @@
 # Rabi chevron
 
-**Readers:** operator, agent. Run `two_qubit/chevron` and interpret its count-derived return.
+**Readers:** operator, agent. Use the joint-return chevron to choose CZ frequency and duration windows.
 
 ## Sequence and calibration
 
-Scan common drive frequency in MHz and common envelope duration in us.
-Each shot emits optional reset, nominal B11 preparation, simultaneous two-line
-drive, double Xπ contrast and one terminal mux readout.
-`reset=None` emits no reset. Set a reset cfg only after reviewing its pulse
-and timing against the authorized limits. The Defaults button recaptures
-inputs; it does not emit a reset pulse.
+Each shot runs **optional Reset → Xπ on both qubits → simultaneous two-line drive → double Xπ contrast → terminal mux readout**. The observable is terminal P(g,g) after double Xπ. It includes thermal population, preparation and readout effects; a valley alone does not identify leakage or set a gate.
 
-Both qubit tones require circle classifiers with g/e centers and radius.
-Run mux singleshot GE Post under these readout conditions before Run.
-Missing classifiers, linear classifiers and missing radii make the cfg invalid.
-Classification happens during acquisition, not during analysis.
-The three classes are g, e and other. Other stays in the denominator.
+## Prepare the form
 
-## Prepare the Form
-
-In the point's Aliases table, bind `$qubit1` and `$qubit2` to distinct components.
-Bind `$mux` to their mux group and `$coupler` to the component that stores
-the pair's CZ pulses. Rebind older points in the same table. GUI aliases
-and Notebook's built-in roles of the same names are separate.
-Opening the tab or choosing Defaults uses `$mux.qubits` to set two hidden tone indices.
-If the capture has no `$coupler` binding, the form reports it before Run.
-Check both Xπ pulses and all mux tones, ADC routes and scalar timing.
-Readout references `$mux.module.readout` when present. Otherwise fill the blank
-mux template, including classifiers. Missing sources remain required inputs.
-
-The coupler's `cz_qubit1` and `cz_qubit2` slots seed editable charge pulses
-in `drive.qubit1` and `drive.qubit2`. On an older point, set these slot names
-and use the same new names for their pulse library keys.
-If a slot is missing, enter signed gain, envelope length and Nyquist zone in
-the cosine template. The channel comes from that qubit's captured wiring.
-The common scan sets both frequencies.
-Only Qubit1/Qubit2 charge lines play the drive; the coupler stays DC-biased.
-Both source frequencies, envelope lengths and pre-delays must match.
-The sequence waits for both drive pulses, including their individual post-delays.
-Keep the signed gain ratio fixed.
-At each frequency coordinate, both frequencies change together.
-Individual phases remain fixed; choose relative phase with constructive_phase first.
-Only common envelope duration changes within each trace.
-
-The Form lists reset, Xπ preparation pulses, dual-line drive and readout in
-playback order. Set the outer common frequency sweep before the inner
-duration sweep. Repetitions, rounds and acquisition
-delays appear last.
-Enter finite scan endpoints and strictly positive durations.
-Review repetitions, rounds, optional reset and timing before Run.
-Refresh keeps authored inputs and rechecks the [mux tone count](../guide.md#綁定位置與讀出-tones) against the new capture.
-Use Defaults to replace unsaved input with initial values from the new source.
+- Use calibrated **Qubit1 Xπ**, **Qubit2 Xπ** and full **Mux readout** with GE circles and GE Post radii on the two positions. Check the [bindings and tone order](../guide.md#綁定位置與讀出-tones).
+- **Dual-line drive** starts from the coupler's `cz_qubit1` and `cz_qubit2` slots. Without them, set signed gain, envelope length and NQZ in the cosine template; channels come from the qubits' wiring. Use independent generators and matching envelope length and pre-delay; the sequence waits for both post-delays. The shared frequency sweep supplies both carriers. Keep the signed gain ratio and relative phase fixed; use [constructive phase](../constructive_phase/guide.md) to choose that phase.
+- Center **Common CZ drive frequency** (MHz) on a measured spectroscopy feature. **Common waveform envelope duration** (µs) is the full envelope, not the plateau; use strictly positive endpoints and spacing < `1/(2 × fastest expected rate)`. Span at least one expected oscillation to distinguish it from a slope. The scan changes both frequencies and durations together, not phase or gain.
+- Blank **Reset** omits reset; for mux herald, use the [same readout and keep keys](../guide.md#herald-reset-與獨立-heralded-入口). Check Reps × Rounds against the retained counts before using partial data.
 
 ## Read the figures
 
-Analyze publishes these figures and returns `None`. Per-frequency rates, counts
-and curves stay inside analysis; frequency and duration selection remain manual.
+- **Run and Analyze chevrons:** joint return against duration (µs) and drive frequency (MHz), with probability as color. Run marks measured cells. Analyze's white cross is the lowest finite measured return; it selects a slice, not a proposal. The nine terminal maps show which outcomes replace g,g. The denominator includes `other`, a classifier outcome, not identified leakage. Heatmaps have no cell error bars.
+- **Duration slices:** first and last frequencies plus the cross's frequency (or the middle index if no point is available), without duplicates. Compare measured return with the cosine fit. If a slice has no fit, the line joins the measured points instead. Bars on measured points are ±1 shot SEM: binomial sample SD divided by √N retained shots, not fit uncertainty or round spread.
+- **Duration-fit rates:** a cosine gives the rate at each usable frequency. A rate below the inverse duration span is unresolved (crosses); bars for selected rates are fit SE in MHz. A failed fit does not give rate zero. R² is the explained variation; normalized RMS is residual RMS divided by the observed probability range. Neither is a selection threshold. A duration trace needs retained shots at every point; it can reach that coverage before the planned rounds finish.
 
-Use the live and Analyze chevron maps to locate a return valley. Both show
-terminal P(g,g) after the final double Xπ; the live title reports how many
-cells have completed. P(g,g) divides the terminal (g,g) count by all nine
-terminal class counts. The terminal-outcome panels show the same map for
-each joint g/e/other outcome. The color scale is a probability, not IQ.
-These figures include preparation and readout errors.
-They do not measure gate fidelity or resolve physical leakage by themselves.
-There are no mean-IQ diagnostics or saved IQ clouds.
+## Next step
 
-The white cross marks the lowest finite measured P(g,g) point. It only
-chooses the frequency of one Duration slices panel. The other panels use the
-first and last scan frequencies, without repeating a frequency. If no
-finite point is available, the middle scan index replaces the marked slice.
-The cross is not a calibration candidate.
+Use a resolved return valley and neighboring traces to choose the test carrier and envelope window for [CZ amplitude](../cz_amplitude/guide.md), then measure conditional phase. Chevron does not write back. After changing waveform or bias, recheck the gate and local Z.
 
-Layout reference: Ding, Fig. 5-8(b) (printed p. 151), maps the |101⟩
-population against drive frequency and pulse plateau length. This experiment
-shows terminal P(g,g) after double Xπ against common CZ drive frequency (MHz)
-and common waveform envelope duration (µs), not plateau length.
-
-Each fully acquired duration trace with nonzero selected counts uses an
-undamped cosine fit.
-Use Duration-fit rates to compare frequencies. The plot marks unresolved fitted
-rates with crosses at their fitted MHz values and labels the inverse of the
-saved duration span in MHz. A fitted rate below that line is unresolved.
-Identifiable rates show their fit SE. Failed or degenerate fits report a
-reason rather than a zero rate.
-Use Duration slices to check measured points against the dense cosine fit.
-R² measures the fraction of the observed probability variation explained by
-the fit and can be negative. Normalized RMS is the root-mean-square fit
-residual divided by the observed probability range. Neither metric sets a
-new selection threshold.
-At a measured point, the bar is one shot SEM from the binomial (g,g)
-indicator, using only the retained shots at that point. The bar measures
-counting noise, not the uncertainty of the fitted rate. The 2D maps have
-no per-cell bars.
-Choose spacing so the expected rate is below `1/(2 × duration spacing)`.
-Check aliasing manually. Thermal mixtures may contain more than one rate.
-
-Frequency and duration selection remain manual. A valley only identifies a
-window for later amplitude and phase calibration.
-
-## Save and load
-
-Native save keeps the complete source cfg, coordinate and duration axes, and
-float64 `sums` with shape `(Nc,Nd,3,3)`.
-Class axes are terminal Qubit1, terminal Qubit2.
-Every class axis is ordered g, e, other.
-Rounds accumulate during acquisition without normalization.
-File size does not grow with repetitions or rounds.
-Completed rounds survive cancellation; unmeasured points remain NaN.
-A duration trace can enter the fit only when every duration has retained
-counts. A trace may meet that condition before the requested final round.
-Check the execution status and retained counts before accepting partial results.
-
-Cfg schema is 5.0. Load leaves the current form unchanged, and analysis uses the
-saved cfg and counts. The current Load rejects older files whose axis names no
-longer match. Use the matching older version to read the original file. No cfg
-or file conversion runs on Load.
-
-## Select shots with mux herald
-
-Choose `reset/mux_herald` in Reset. Use the same mux readout as the terminal
-readout. Set `keep: {'0': g, '1': g}` if Qubit1 and Qubit2 occupy positions 0 and 1.
-Use their original tone positions from the full readout, not their ADC numbers.
-
-Probabilities are conditional on passing herald. Divide each terminal class
-count by the point's total count. Acceptance is the total divided by
-reps × rounds, not ground-state purity. A point with no accepted shots has
-NaN probabilities. Completed rounds remain usable when Run stops early.
-Files saved under the former separate heralded experiment no longer load.
-After amplitude/frequency selection, measure conditional phase and local Z.
-Repeat calibration after changing pulse shapes or the pair's working point.
-Validate the actual FTF control chain separately from offline compile checks.
-
-## Notebook
-
-Supply a complete cfg. Set `qubit1_tone` and `qubit2_tone` to zero-based
-positions in the full readout.
-`point_view` is the bound ParameterView for the save destination.
-
-```python
-from zcu_tools.notebook import NotebookAdapter
-from zcu_lab.v2.two_qubit.chevron.core import ChevronExp
-
-nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
-exp = nb_adapter(ChevronExp())
-record = exp.run(cfg)
-exp.analyze(None)
-exp.save_run(point_view, source=record)
-```
-
-The coordinate is a hardware sweep. Constant and flat-top pulse durations also
-use a hardware sweep in the same program. Sampled cosine, Gaussian and DRAG
-waveforms reject swept lengths, so only their duration uses a host loop.
-
-Fits use count-weighted binomial errors. Endpoint probabilities use
-Jeffreys-smoothed variance so observations at zero or one retain finite weight.
-
-## Calibration order and field units
-
-Calibrate each qubit's Xπ slot with amplitude and length Rabi before using it.
-Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
-Use conditional spectroscopy to choose the charge-line frequency.
-The operator must confirm the common duration range in us before Run.
+For older files see the [family load note](../guide.md#opendefaults-與人工-apply). For common GUI actions, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).

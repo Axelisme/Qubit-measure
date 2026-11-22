@@ -1,180 +1,37 @@
+**讀者：** operator、agent。用共同頻率偏移掃描 mux 共振腔，找出共振頻率與線寬。
+
 # Mux onetone
 
-**讀者：** operator、agent。從 GUI 或 MCP 掃描 mux resonator 的共同頻率偏移，分析並套用校準結果。
+同時量多個 resonator 的複數平均 IQ；擬合給出共振 RF、半高全寬 κ 和背景相位等參數。
 
-**Last updated:** 2026-10-23
+**序列：** 每個偏移點先做共用 reset，再送 mux readout 並讀取選定的 ADC。
 
-每個 sweep 點的名目頻率是原始 tone 的 base frequency 加上共同 offset。
-圖與擬合都使用這個名目座標，DDS 實際量化頻率可能有差異。
+## 關鍵參數
 
-修改 parameter source 後，按 Defaults 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Defaults 可能覆蓋尚未儲存的輸入。
+將 `mux` alias 綁到 `group/mux`。完整 **Readout** 的 tone、resonator 與 ADC 依位置對應。只量 resonator 時可不綁 qubits；若提供，qubit 必須與 resonator 依序配對。**Participants** 用不重複的原始零起算序號指定量測順序；`[2,0]` 先 R3 後 R1。缺少、未綁或空的 `participants` alias 預選全組；編輯選取不重設 tones。
 
-## 準備輸入
-
-1. 在 Inspect 的 Parameters 建立 `kind: group/mux` 元件，例如 `MG12`。設定有序 `resonators: [R1, R2, R3]`、mux generator `wiring.gen_ch`，以及同序的各 tone ADC `wiring.ro_ch`。若已有 `readout/mux` library key，可把 module 槽 `module.readout` 指向它。完整 tones[i] 對應 resonators[i]，綁定依據是位置。
-2. 在 Aliases 設定 scalar alias `mux = MG12`。Open／Defaults 時，Readout 複製 `$mux.module.readout` 的 scalar 設定，tones 由 group resonators 校準值產生。缺 slot 時使用 blank mux 範本加 group tones，generator 取自 `$mux.wiring.gen_ch`，第 i 個 tone 的 ADC 從固定 capture 的 `group.wiring.ro_ch[i]` 取整數初值，各 tone gain 填 0.1。這些是可編輯的初值，不代表硬體設定已確認。有 slot 時，共同 trigger 在原值上增加最小已設 kappa 對應的五倍 ringup 等待，pulse 至少涵蓋 ADC window。缺 slot 的 mixer／timing 候選來源見下表。
-3. 核對 generator、mixer、每個 tone 的 ADC channel、frequency、gain，以及共用播放長度、ADC window 和 trigger timing。範本的 scalar 初值只供編輯。Run 前由操作員確認硬體安全值。
-4. 可選已有的 readout/mux key，或用 Convert to inline 複製內容再修改。Tones 是單行 JSON，例如 `[{"freq":5980,"gain":0.1,"ro_ch":4,"label":"R1"},{"freq":6020,"gain":0.1,"ro_ch":5,"label":"R2"},{"freq":6040,"gain":0.1,"ro_ch":6}]`。此例只示範格式，硬體值須另行確認。
-5. Participants 輸入原始序號 JSON list。Open／Defaults 將 Aliases 的 `participants: [R3, R1]` 依同次捕捉的 `$mux.resonators` 位置轉成 `[2, 0]`。清單元素可用 `$` 軟連結。缺列、未綁或空清單預設全部原始序號；非空清單內的未綁元素報錯，不退回全部。外群名稱保留在標紅的 Participants 草稿，改成合法索引後清錯。例如 `[0,2]` 量第一及第三個 tone，`[2,0]` 則依第三、第一的順序執行、畫圖與保存 columns。序號須為唯一、有效範圍內的整數。空 list、重複、越界、bool 或非整數會在 Run 診斷中報錯並阻擋執行。請查看診斷內容判斷問題欄位。
-6. 設定 Frequency offset 的 Start、Stop、Expts，以及 Reps、Rounds、Relax delay。執行前確認所有欄位有效。
+**Frequency offset** 是所有選定 tone 共用的 MHz 偏移，不是絕對頻率。核對每個 tone 的基準 RF，選範圍覆蓋共振兩側的背景。即使 tone 不參與，仍須確認完整 **Readout** 的頻率與 ADC 身分；Run 前核對 mixer、接線、功率和 ADC 窗。
 
 ### 無 readout slot 的候選來源
 
-Open／Defaults 固定填入 `ro_length = 1.0 µs`，不依賴 `kappa`。
-Mixer 從 group 的 `mixer_freq` 取初值，不依賴 `kappa` 或 tone frequency。
-所有 group resonators 都有有效 `kappa` 時，Open／Defaults 估算五個光子衰減時間。Group 的 `time_of_fly` 另用於 trigger 與 pulse 長度。
-`kappa` 與 tone frequency 的單位為 MHz，時間的單位為 µs。
+- **Readout** 沒有 slot 時，generator 與 ADC 取組別接線，tone RF 取 resonator 校準，gain 初填 0.1；**Mixer freq** 取 group 的 mixer 校準（缺值則留空必填），**RO length** 固定初填 1 µs。
+- 共用等待 `w = 5/(2π·min κ)` µs，κ 用 MHz。**Trig offset** 取 group flight time + w，**Length** 取 trigger + 積分窗。缺 flight time 或任一 κ 就留空 trigger 和 length；只有 κ 都有值時才把 **Post delay** 初填 w，否則保留 0 µs。
+- 有 slot 則沿用其 mixer 和 ADC 窗，只用已知 κ 算 w 加到原 trigger，必要時延長 pulse；**Post delay** 取原值與 w 較大者。沒有可用 κ 則不加等待。這些都是初值，不是路徑校準。
 
-| 欄位 | 初值來源 |
-| --- | --- |
-| `mixer_freq` | `$mux.mixer_freq`，單位 MHz。缺失或 null 時留空必填。 |
-| `ro_length` | 固定 1.0 µs 的 ADC 積分窗候選，不依賴 `kappa` 或 `time_of_fly`。 |
-| `trig_offset` | `$mux.time_of_fly` 加上五倍 ringup 時間 `5 / (2π · min kappa)`，不讀 resonator 的 pulse 路徑 TOF。 |
-| `length` | `trig_offset + ro_length`，讓 pulse 覆蓋 ADC window。 |
-| `post_delay` | `5 / (2π · min kappa)`，即五個光子衰減時間，不依賴 `time_of_fly`。 |
+**Model type** 選 hanger、transmission 或 auto。**Electrical delay seed (µs; blank = auto)** 留空時，各 tone 使用與 generator／ADC 路徑相符的校準 seed，無匹配才全域搜尋（上限 100 µs）；明填有限值則共用該 seed，仍擬合 delay。
 
-任一 resonator 的 `kappa` 缺失或 null 時，不從其餘成員推導等待。`post_delay` 保留範本的 0 µs，`trig_offset` 與 `length` 留空必填。
-Group 的 `time_of_fly` 缺失或 null 時，只讓 `trig_offset` 與 `length` 留空必填。
-`readout/mux:blank` 本身不預填 `trig_offset`，缺少推導來源時不會退回 0。
-上述缺值情境仍填入 `ro_length = 1.0 µs`。
-已設的 kappa 須為有限正數，mixer 頻率須為有限數，group time_of_fly 須為有限非負數。
-無效的已設來源會讓 Open／Defaults 報錯。
-本節逐項列出這些來源。
-候選**未經裝置確認**，不是 mux route timing 校準，也不保證所有 tone 符合硬體通帶。
-Run 邊界沿既有 capability 檢查拒絕不支援的 generator、ADC 或頻率設定。
-Run 前核對 mixer、接線、功率與 timing，必要時修改候選。
+在 `mux_onetone` 中，省略保留表單與分析設定。Null `participants`、`df`（清除掃描端點）、`n`、`reps`、`rounds` 若未用 override 補齊，會在 Run 前的 readiness 檢查報錯。Null `model_type`、`fit_bg_amp_slope` 或 `fit_bg_phase_curvature` 會在採集後的 Analyze 被拒絕；null `edelay` 選自動 seed。見 [mux recipe 輸入](../../../recipes/mux-guide.md#mux_onetone)。
 
-已有 readout slot 時，沿用其 mixer 與 ADC window。
-Trigger 仍在 slot 原值上加最小已設 kappa 對應的 ringup 等待，pulse 只在不足以覆蓋 window 時延長。
-`post_delay` 取原值與同一個等待時間的較大值。此路徑忽略缺失或 null 的 kappa，全部未設時保留原有 `post_delay`，也不增加 trigger 的等待。
+## 怎麼讀圖
 
-Group 可選填 `qubits: [Q1, Q2, Q3]`。省略或 null 適用於 resonator bring-up。
-提供時，qubits 必須與完整 resonators 等長，且每個 qubit 唯一。
-Open／Defaults 檢查每個元件是否存在、kind 是否正確，以及 `Q1.resonator == R1` 等逐項對應。
-缺失或 null 元件會報錯。錯誤列出欄位、index 與實際值，修正來源後重新開啟或按 Defaults。
-配對保留原始順序。Resonators 可以重複。
+Live 橫軸為基準 RF + 名目 offset (MHz)，縱軸為平均 IQ 幅度，不是布居。Analyze 去掉首尾點，幅度圖的標線指共振中心；用相位與 IQ 圖確認同一模型也符合複數軌跡。頻譜不畫逐點 shot SEM；± 是 fit 參數誤差，R² 是解釋變異的比例，正規化殘差 RMS 是相對訊號範圍的偏差。以原始 tone 序號辨認 `fit_i`；label 可能重複。
 
-需要 `kind: group/mux` 元件與指向它的 scalar alias `mux`。
-缺少 group 或 alias 時，開表單會報錯。先修正綁定，再重新開啟表單。
+## 下一步
 
-## FTF 成本例
+Writeback 更新成功 tone 的 readout RF，另提 readout slot 與對應 resonator 的 freq、κ、背景相位和適用的路徑 delay；失敗或未量 tone 原值不變。完整 resonator 數和 readout 數不符時沒有逐 resonator 提案。重複目的地須只選一列。Load 缺歷史 cfg 時無法 FIT；沒有該 Run/Load 的參數來源時可檢查結果，但不能套用候選。
 
-一次雙 tone 離線 Run 掃共同 offset −2 至 2 MHz，共 12 點，100 reps、1 round。
-Readout 長 1 µs，ADC 積分窗 0.5 µs，recovery 為 0.1 µs。
-Driver 的 Run action 實測 2.807 s，除以共同掃描點數約為每點 0.23 s。
-這是短掃描的成本量級，不代表 readout 校準已通過。
+用這份 readout 做 herald 前，從 `post_delay = 5/(2π·min κ)` µs 起步。κ 用 MHz，等待從 readout 波形結束起算。等待太短時，殘留腔光子會使名目 Xπ 失準。
+在 [Joint readout](../../two_qubit/joint_readout/guide.md) 用同一份完整 readout 做 g,g herald，對目標 qubit 打名目 Xπ、另一顆打 I。將該列目標 qubit 分到 e 的欄位加總，得到 herald 通過後的終端 e 比例。
+只延長 `post_delay` 再比較；若比例仍上升，先調整等待再做 heralded 掃描。FIT 不會校準這段等待。
 
-計時包含按 Run、等待終局與截圖，不是純 acquisition，也不含 Analyze 或 Save。
-不可拿不同 slot 或不同實驗的秒數作速度比較。
-共同 offset 每點同時量 active tones，不是各 tone 點數的乘積。
-點數、active tone 數、readout 長度、積分窗與 recovery 都會改變成本。
-硬體會隨 reps、rounds 增加重複 acquisition。
-FTF 的編譯與快取可能主導時間，不能假設成本與 reps 成正比，也不能視增加 reps 為免費。
-先用目標 readout 設定做短 Run，再估完整掃描的預算。
-
-## Run 與圖形
-
-Run 使用 tab 在 Open 或 Defaults 時捕捉的參數來源。
-其後修改 aliases、group resonators 或 library，現有 draft 仍保留原來源。
-需要新來源時按 Defaults 或重新開啟 tab，這會重建初值。Participants 只決定本次量測範圍，完整 readout 保留全部 tones。一般編輯 Participants 不重設任何 tone 值。
-
-每個參與的 tone 各有一張 live 圖。橫軸是 readout tone 的基準 RF 頻率加上表單的共同 offset (MHz)。
-縱軸是平均 IQ 的幅度 (a.u.)，不是態布居。檢查已取得的頻點是不是蓋住共振。
-標題使用 tone 的 label；空 label 顯示原始 tone 序號。Label 可以重複。
-資料軸使用原始 tone 序號。停止後保留已取得資料，未取得點保持 NaN。
-Acquisition 例外直接傳出，當次不發布新 record。
-停止請求不代表資料可用性，Analyze 前須由作者確認已取得資料。
-
-## 保存與讀回
-
-保存當次量測的完整設定與原始資料，包含全部 base tones、labels、participants 與 sweep。
-檔案保存量測設定；resonators 與 group 綁定由 Run／Load 的參數來源提供。
-Native 讀回使用檔案設定，現有 draft 及其固定來源保持原樣。
-Labber 匯出保留共同 offset、原始 tone 序號與複數訊號，columns 與 tone_indices 同序。
-
-同 entry 且有 point 的 Load 可建立分析參數來源。
-跨 entry 或缺少 point 的 Load 只提供資料。
-檔案設定缺失或無法恢復時，仍可讀取原始資料，FIT 會報錯並要求有效歷史設定。
-
-## FIT
-
-Analyze 的幅度圖以量測圓點與模型曲線對照，標線定位共振頻率。用相位與 IQ 圖檢查模型
-能否同時解釋複數軌跡與相位變化，再採用標出的共振頻率。頻譜要定位共振，不畫逐點
-shot SEM。圖上 ± 是擬合參數誤差。R² 表示模型解釋量測變異的比例；正規化殘差 RMS
-表示相對於訊號範圍的典型偏差。
-
-所有 active tones 共用 onetone/freq 的四欄設定。
-Model type 可選 hanger `hm`、transmission `t` 或 `auto`，預設 `hm`。
-Fit amplitude background 預設開啟，Fit phase curvature 預設關閉，兩者可獨立切換。
-
-Electrical delay seed 單位為 µs，預設留空。
-留空時，每個 tone 使用對應 resonator.ext.edelay 中符合 generator／ADC route 的有限校準值作 branch seed。
-缺少匹配時，該 tone 使用固定 100 µs 上限作 global 搜尋。
-明填有限數字時，所有 active tones 共用此 branch seed，0 與負值也有效。
-Seed 選擇擬合起點，模型仍會擬合 delay。非有限或非數字輸入會拒絕整次 FIT。
-
-FIT 處理 active columns，以檔案原始 base frequency 加共同名目 offset 作 MHz 座標，並去掉首尾點。
-設定、selection、tone_indices 或 shape 不符時整次報錯。
-單一 tone 的數值擬合失敗會留下原因與診斷圖，其餘 tone 繼續。
-
-圖名使用原始 tone 序號。例如 `[2,0]` 產生 `fit_2`、`fit_0`，重複 label 仍保留各自圖形。
-Summary 列出每個 active tone 的成功 scalars 或失敗原因。
-`fit_quality` 比較去端點後的原始 IQ 與模型，以串接 I、Q 的實數向量計算殘差。
-模型參數的相對誤差為 null 並附 `covariance_unavailable`，表示此擬合未提供 covariance。
-Quality 供操作員審閱；是否提出候選值依成功擬合結果判定。
-
-## Writeback
-
-成功 FIT 提出完整 readout/mux module，只更新成功 active tone 的 freq。
-Inactive 或失敗 tone 保留原值，全部失敗時省略 module 候選。
-固定 target 是 `$mux.readout.readout_rf`，描述列出 active tone 的頻率變化或失敗。
-
-有 Run／Load 參數來源時，另一列候選將 `$mux.module.readout` 指向同份來源解析的 module root。
-Apply 模組列與 slot 列後，library 保存擬合後的 readout，slot 指向該 root。
-下次開表單沿 slot 讀取該 library 模組。請分別選取要套用的列。
-
-逐 resonator 候選使用當次 Run／Load 來源中的 `$mux.resonators`。
-Resonators 長度須等於完整 readout 的 N。
-成功 tone i 透過 resonators[i] 各提一列 freq、kappa、ext.theta0，可以逐列取消。
-使用 seed 或非等距 grid 時，delay 才提出帶 generator／ADC route 的 ext.edelay 候選。
-Inactive 或失敗 tone 的單一參數保持原值。
-
-省略 qubits 的 bring-up 可在 resonators 長度不符時 Run。
-長度不符時，summary 列出實際數量與完整 N。
-有效 fit 的 readout module 及可解析的 readout slot 候選仍保留，逐 resonator scalar 候選省略。
-Alias 未綁或來源故障會報告各自錯誤。
-若所選候選有重複 destination，Apply 會在寫入前拒絕。取消重複列後再套用。
-
-Run 固定捕捉 module alias 與 resonator 資料，其後修改全域 aliases，提案仍使用當次來源。
-同 entry 的 Load 依檔案 history 的 point／roles 讀取目前持久值。
-可用的歷史值以已保存內容為準。
-缺少分析參數來源的 Load 可以純計算並列 module 候選；選取非空候選後 Apply 會報錯。
-套用前檢查目的地、頻率變化與 fit quality。
-
-## Herald 後的等待
-
-Open／Defaults 給 `post_delay` 初值，FIT 不校準這段等待。Module 提案保留 Run 輸入的值。Apply module 與 readout slot 後，後續實驗會使用保存的值。用這份 readout 做 heralded 實驗前，先設定 `post_delay`，讓腔內光子在後續 qubit drive 前衰減。Herald 和 terminal 共用這個值（[ADR-0074](../../../../docs/adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)）。等待從 readout generator 的波形結束算起，不等 ADC 積分窗結束（[ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)）。
-
-用 FIT 取得各 resonator 的 `kappa`，也就是以 MHz 記的半高全寬。從 `5 / (2π · κ)` µs 開始，這是五個光子衰減時間，也是表單估算 ring-up 等待的公式。共用一個 `post_delay` 時，用最小的 κ，讓線寬最窄的腔有時間放空。
-
-等待太短時，殘留的腔光子會讓 qubit 轉移頻率偏移並造成退相干。Herald 後的名目 Xπ 可能幾乎不翻轉，conditional phase 掃描也可能找不到 π 交點。
-
-在 FTF 的低 SNR 例子中，R2 的線寬約 1.2 MHz。五個光子衰減時間約 0.66 µs；2 µs 約是單個光子衰減時間的 15 倍。gg herald 後打名目 F2 Xπ，等待 0 µs 時，F2 的終端 e 比例為 11.6%；等待 2 µs 時為 92.9%。比例未扣除 I 基線。2 µs 只是當時的比較值，不是最短或最佳等待。
-
-在 `two_qubit/joint_readout` 的 Reset 欄位選 `reset/mux_herald`。在 `keep` 用 `qubit1`、`qubit2` 在完整 mux readout 的 tone index 作鍵，兩個值都填 g。Herald 和 terminal 使用同一份完整 mux readout。Run 後看 FIT 的 4×9 列正規化機率矩陣。取目標 qubit 打名目 Xπ、另一顆打 I 的那一列，把目標 qubit 的 terminal 分類為 e 的欄位加總。也可與兩顆都打 I 的 gg 列比較。這是通過 gg herald 的 shots 中，目標 qubit 的 terminal e 比例，不是 gate fidelity。只延長 `post_delay`，其餘設定不變，再 Run 和 FIT。若比例仍隨等待延長而上升，先調整等待再跑 heralded 掃描。
-
-## MCP recipe
-
-呼叫 `mux_onetone`，`target` 可指定這次 Reset 的 mux alias，`reuse_tab_id` 可重用 idle matching tab。
-`participants` 收完整 readout 的原始索引，例如 `[2, 0]`。順序就是量測順序。
-空清單、重複、負數或越界索引會回欄位錯誤，不以 display label 查名稱。
-`participants` 省略時保留捕捉的選取，null 清空選取。
-`df:{start,stop}` 是所有 tone 共用的 MHz offset，`n` 是共用點數，不是絕對頻率。
-`reps`、`rounds` 可覆寫 acquisition 次數。省略保留表單值，null 清空欄位。
-省略分析輸入保留設定，明填 null 交分析 owner 處理。
-Form 在 Open／Defaults 選來源，recipe 不再提供通用 `library` 或 `inline` 輸入。
-`overrides` 最後逐筆執行。Path 用點分字串，例如 `"df.start"`。
-十進位索引指完整 tone 清單的原始位置，不依 participants 重編。
-Run 前呼叫 `check_ready()`，缺值列出欄位路徑與原因，不回滾先前編輯。
-Run 後 Analyze，回覆每 tone 的 index、name、label、freq、kappa、fit_quality 與失敗原因，以及 `resonators_diagnostic`。
-再詢問 writeback，只套用回答選定的候選。略過不寫入。最後保存 raw data 與分析。
+共用操作見 [zcu_lab/v2/operator-workflow.md](../../operator-workflow.md)。

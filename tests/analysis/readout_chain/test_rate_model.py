@@ -7,6 +7,8 @@ from zcu_tools.analysis.readout_chain import (
     CycleFit,
     CycleSums,
     RateNuisances,
+    cycle_curves,
+    cycle_residual_projection,
     fit_cycle,
     t1_model,
 )
@@ -40,26 +42,24 @@ def test_exact_moments_recover_both_modes_and_larger_amplitude_t1(
     np.testing.assert_allclose(
         relaxation.eigen_time_errors, oracle_time_errors(result), rtol=1e-6
     )
-    assert result.curve.J < 1e-7
-    assert result.curve.df == 69
     assert result.reliability is None
-    assert result.populations.shape == result.population_errors.shape == (13, 3)
-    nuisance = expect_rate_nuisances(result)
-    predicted = rate_moments(sums.axis, result.parameters, nuisance)
-    np.testing.assert_allclose(predicted.means, sums.feature_sums / 3000, atol=1e-7)
-    # Geometric labels may move; both fitted and independently fitted populations
-    # must follow the same state order, and equal the exact truth on exact moments.
+    assert result.J < 1e-7
+    assert result.df == 13 * 65 - 23
+    assert result.j_per_df == pytest.approx(result.J / 822)
+    assert result.expected_band == pytest.approx((0.9013473, 1.0986527))
+    assert result.tail_fraction == 0.0
     np.testing.assert_allclose(
-        result.populations,
-        t1_model().populations(sums.axis, result.parameters, nuisance),
-        atol=1e-6,
+        result.predicted_means, sums.feature_sums / 3000, atol=1e-7
     )
-    assert np.isfinite(result.population_errors).all()
-    assert result.within_point.df == 45 * 13
-    assert result.sharing.p is None
+    projected = cycle_residual_projection(
+        sums, t1_model(), result, model_axis=sums.axis
+    )
+    np.testing.assert_allclose(
+        projected.model_sigma, cycle_curves(sums).main_sigma, atol=1e-4
+    )
 
 
-def test_zero_delays_leave_rates_unidentified_but_populations_estimable() -> None:
+def test_zero_delays_leave_rates_and_eigen_times_unidentified() -> None:
     axis = np.zeros(3)
     nuisance = coordinate_nuisance(oracle_coordinates())
     parameters: dict[str, float] = dict(
@@ -77,13 +77,6 @@ def test_zero_delays_leave_rates_unidentified_but_populations_estimable() -> Non
     assert np.isnan(relaxation.t1_error)
     assert np.isnan(relaxation.secondary_error)
     assert result.reliability is None
-    assert np.isfinite(result.population_errors).all()
-    assert (result.population_errors > 0).all()
-    np.testing.assert_allclose(
-        result.populations,
-        t1_model().populations(axis, result.parameters, expect_rate_nuisances(result)),
-        atol=1e-6,
-    )
 
 
 def oracle_time_errors(fit: CycleFit) -> np.ndarray:
@@ -265,29 +258,3 @@ def test_simulated_shots_give_t1_within_three_wald_errors(seed: int) -> None:
     truth = times[int(np.argmax(amplitudes))]
     # Five fixed replicates guard the local Wald scale on shots, not precise coverage.
     assert abs(relaxation.t1 - truth) < 3 * relaxation.t1_error
-
-
-@pytest.mark.slow
-def test_unavailable_within_check_preserves_rate_fit_and_independent_check() -> None:
-    result = shot_fit(3101)
-
-    relaxation = result.relaxation
-    assert relaxation is not None
-    assert np.isfinite(relaxation.t1)
-    assert relaxation.t1_error > 0
-    assert np.isfinite(list(result.parameters.values())).all()
-    assert np.isfinite(list(result.errors.values())).all()
-    assert np.isnan(result.within_point.J)
-    assert result.within_point.p is None
-    assert result.within_point.df == 45 * 13
-    assert np.isnan(result.sharing.J)
-    assert result.sharing.p is None
-    assert result.sharing.df == 14 * 12
-    assert np.isfinite(result.curve.J)
-    assert result.curve.p is not None
-    assert result.curve.df == 69
-    assert result.reliability is None
-    assert result.populations.shape == (13, 3)
-    assert np.isfinite(result.populations).all()
-    assert np.isfinite(result.population_errors).all()
-    np.testing.assert_allclose(result.populations.sum(axis=1), 1)

@@ -119,6 +119,12 @@ FTF 的 `DriveLine.operator: flux` 仍只在 DC 附近線性化。Fast-flux 線�
 
 [Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder，並用 `closing_environment` 關閉引擎與裝置。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們。Callback 先關閉引擎，再移除這些借用並關閉尚未交付的 driver。引擎清理失敗時仍會清理裝置。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 
+### 整數 fluxonium 的三態參考驗收
+
+[Qutrit reference populations](../../v2/singleshot/qutrit_population/guide.md) 的短參考案例使用一套特定模擬接線，不是 `default.yaml` 的通用預設。Pump、Stokes、readout 分別使用 gen1、gen2、gen0；3–2 走 charge drive。名目 readout 為 7460 MHz、0.4 µs const pulse、gain 0.1、0.4 µs ADC 積分、trigger offset 0 µs。轉移頻率仍須由光譜量測取得，不由表單從模擬器回填。FTF 每個 repetition 從設定的熱態開始，這不驗證硬體 reset。
+
+這個短參考案例的驗收指標是平均 preparation-label error ≤ 3%、每個 label error ≤ 6%、training confusion 2-norm condition number ≤ 1.5、最小奇異值 ≥ 0.8。用另一固定 seed 獨立量測驗證選定的讀出設定。早期的 separation 門檻用不同距離量，不能當作 shared-σ 分數的門檻。這些數字不適用於強 STIRAP／Raman drive，也不是實機校準標準。
+
 ## 啟用跨 acquisition 漂移
 
 `default.yaml` 的頂層 `drift` 範例預設註解，省略或 `drift: null` 都關閉漂移。

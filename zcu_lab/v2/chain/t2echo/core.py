@@ -3,25 +3,28 @@
 One cycle is one rep: the thermalisation wait K (relax_delay), then eight
 blocks of (π/2, wait x/2, π, wait x/2, π/2, read, read). The host
 reduces each cycle to 65 numbers and keeps only running sums. Analysis fits
-all 65 numbers jointly with echo curves, starting from the usual twotone fit
-of the first read.
+all 65 numbers jointly with echo curves. The starting values come from the
+first-read fit when available, or from the saved wait span otherwise.
 """
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.fitting import expfunc, fit_decay
+from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.analysis.fitting import DecayFit, expfunc, fit_decay
 from zcu_tools.analysis.readout_chain import (
-    CycleCheck,
-    CycleNuisances,
+    CycleProjectionUnavailable,
     CycleSums,
     cycle_curves,
+    cycle_residual_projection,
     fit_cycle,
     t2_echo_model,
 )
@@ -43,41 +46,42 @@ from zcu_tools.program.v2 import (
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
-    checks_text,
     cycle_sums_variables,
     first_read_projection,
     restore_cycle_sums,
 )
 from zcu_lab.v2.support import live_errorbar, live_line
 
+from .._joint import JointResidualDiagnostics, plot_joint_residuals
+
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
 _SWEEP_LABEL = "Total echo wait (µs)"
 _IQ_TITLE = "K-cycle T2 echo · Qubit · First-read IQ"
 _IQ_LABEL = "Projected mean IQ (a.u.)"
+_JOINT_LABEL = "Joint projection\n(SEM units)"
+
+
+def _estimate_text(value: float, error: float) -> str:
+    if np.isfinite(error):
+        return f"{value:.4g} ± {error:.2g} µs"
+    return f"{value:.4g} µs (SE unavailable)"
 
 
 @dataclass(frozen=True)
-class ChainT2EchoAnalysis:
-    """Echo fit of all 65 numbers, its checks and its starting value.
+class ChainT2EchoAnalysis(JointResidualDiagnostics):
+    """Joint echo estimates and scalar diagnostics of all 65 features.
 
-    t2 and t2_err are the fitted echo decay time in us and its Wald error.
-    tf and tf_err are the third state's decay time in us and its Wald error.
-    within_point, sharing and curve are the three lack-of-fit checks of
-    fit_cycle (sharing has no p). J and df are the joint weighted residual and
-    its degrees of freedom. first_read_t2 is the T2 echo in us of the
-    twotone/t2echo decay fit of the first read, which started both t2 and tf.
+    t2 and tf are the echo and third-state decay times in µs. t2_err and
+    tf_err are their Wald standard errors in µs. first_read_t2 is the fitted
+    first-read decay time in µs used to initialize both t2 and tf, or None
+    when the first read did not supply an estimate.
     """
 
     t2: float
     t2_err: float
     tf: float
     tf_err: float
-    within_point: CycleCheck
-    sharing: CycleCheck
-    curve: CycleCheck
-    J: float
-    df: int
-    first_read_t2: float
+    first_read_t2: float | None
 
 
 class ChainT2EchoCfg(ConfigBase):
@@ -170,7 +174,7 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         )
         ax, diagnostic_ax = fig.axes
         ax.set(title=_IQ_TITLE, ylabel=_IQ_LABEL)
-        diagnostic_ax.set(xlabel=_SWEEP_LABEL, ylabel="Joint projection\n(SEM units)")
+        diagnostic_ax.set(xlabel=_SWEEP_LABEL, ylabel=_JOINT_LABEL)
         diagnostic_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         iq_points = live_errorbar(ax)
         diagnostic_line = live_line(diagnostic_ax)
@@ -248,73 +252,42 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         *,
         plots: Plots,
     ) -> ChainT2EchoAnalysis:
-        """Fit all 65 numbers with echo curves, starting from the first read.
+        """Fit all 65 numbers with echo curves at the saved waits, in µs.
 
-        First skip the first delay, project the first read IQ and fit a pure
-        decay. Publish "fit";
-        its T2 echo starts both t2 and tf. Then fit_cycle fits the saved sums
-        with t2_echo_model and publishes "populations": per-delay first-read
-        populations with error bars and the fitted curves. Return t2 and tf
-        with Wald errors and the three checks. t2 is the time constant of the
-        most populated state's row, g in thermal equilibrium. The source cfg
-        may be None. Fitting failures of either fit propagate.
+        The "fit" figure shows first-read IQ with shot SEM. The first-read
+        fit excludes the first sweep point and seeds both joint times. If
+        fewer than two distinct waits remain or the seed fit raises
+        AnalysisFailed, use one start from the full wait span S (t2=S/3,
+        tf=S). Other seed errors and all joint errors propagate unchanged.
+        The "joint-residuals" figure uses the live all-feature
+        projection to compare measurements with the model and show their
+        signed difference at each delay. Return both time constants, Wald
+        standard errors and scalar joint residual diagnostics. The most
+        populated thermal row identifies the echo decay. The source cfg may
+        be None. Residual diagnostics do not accept or reject the fit.
         """
         del options  # This analysis has no configurable options.
         sums = source.result
         delays = sums.axis
 
-        # 1. Fit the first-read IQ to seed the joint model.
+        # 1. Fit the first-read IQ only if the selection spans two distinct waits.
         seed_signal, seed_sem = first_read_projection(sums, skip=1)
-        seed_fit = fit_decay(delays[1:], seed_signal[1:])
-        first_read_t2 = float(seed_fit.decay_time)
-        seed_dense = np.linspace(delays[1:].min(), delays.max(), 400)
-        seed_fig, seed_ax = plots.subplots(
-            num="fit", figsize=config.figsize, layout="constrained"
-        )
-        seed_fig.suptitle(_IQ_TITLE)
-        seed_ax.errorbar(
-            delays[1:],
-            seed_signal[1:],
-            yerr=seed_sem[1:],
-            fmt=".",
-            color="C0",
-            label="First-read mean ± shot SEM",
-        )
-        seed_ax.errorbar(
-            delays[:1],
-            seed_signal[:1],
-            yerr=seed_sem[:1],
-            fmt=".",
-            color="0.5",
-            label="Excluded from first-read fit",
-        )
-        seed_ax.plot(
-            seed_dense,
-            expfunc(seed_dense, *seed_fit.params),
-            color="C1",
-            label="First-read fit",
-        )
-        if delays.min() <= seed_fit.decay_time <= delays.max():
-            seed_ax.axvline(seed_fit.decay_time, ls="--", color="0.35", linewidth=1)
-        r2 = seed_fit.quality.r2
-        residual = seed_fit.quality.normalized_residual_rms
-        r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
-        residual_text = "unavailable" if residual is None else f"{residual:.3g}"
-        seed_ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
-        seed_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        seed_ax.set_title(
-            f"First-read T2 echo = {seed_fit.decay_time:.4g} ± {seed_fit.decay_time_err:.2g} µs\n"
-            f"R² = {r2_text} · Normalized residual RMS = {residual_text}",
-            loc="left",
-            fontsize=10,
-        )
-        seed_fig.legend(loc="outside lower center")
+        seed_fit = None
+        if np.unique(delays[1:]).size >= 2:
+            with suppress(AnalysisFailed):
+                seed_fit = fit_decay(delays[1:], seed_signal[1:])
+        first_read_t2 = None if seed_fit is None else float(seed_fit.decay_time)
 
-        # 2. Joint fit of all 65 numbers; the third state starts from the same T2.
+        # 2. Fit all 65 numbers at every wait from one start.
+        if first_read_t2 is None:
+            span = float(np.ptp(delays))
+            initial = {"t2": span / 3, "tf": span}
+        else:
+            initial = {"t2": first_read_t2, "tf": first_read_t2}
         model = t2_echo_model()
-        fit = fit_cycle(sums, model, {"t2": first_read_t2, "tf": first_read_t2})
+        fit = fit_cycle(sums, model, initial)
 
-        # 3. g is the most populated state, which tells the g row from the third.
+        # 3. Identify the echo decay by the most populated state and plot joint residuals.
         thermal = fit.nuisances.thermal
         if thermal[2] > max(thermal[0], thermal[1]):
             t2, t2_err, tf, tf_err = (
@@ -330,66 +303,119 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
                 fit.parameters["tf"],
                 fit.errors["tf"],
             )
-        population_dense = np.linspace(delays.min(), delays.max(), 400)
-        assert isinstance(fit.nuisances, CycleNuisances)
-        population_fitted = model.populations(
-            population_dense, fit.parameters, fit.nuisances
+        title = (
+            "K-cycle T2 echo · Qubit · All 65 features\n"
+            f"T2 echo = {_estimate_text(t2, t2_err)}\n"
+            f"Third-state decay time = {_estimate_text(tf, tf_err)}"
         )
-        population_fig, _ = plots.subplots(
-            num="populations",
-            nrows=3,
-            sharex=True,
-            figsize=(6.4, 7.4),
-            layout="constrained",
+        band_low, band_high = fit.expected_band
+        diagnostics = (
+            f"J = {fit.J:.5g}    df = {fit.df}    J/df = {fit.j_per_df:.5g}\n"
+            f"χ² reference = [{band_low:.4f}, {band_high:.4f}]    Fraction |r| > 3: {fit.tail_fraction:.3%}"
         )
-        population_fig.suptitle(
-            "K-cycle T2 echo · Qubit · First-read populations\n"
-            f"T2 echo = {t2:.4g} ± {t2_err:.2g} µs\n"
-            f"Third-state decay time = {tf:.4g} ± {tf_err:.2g} µs\n"
-            f"Joint J/df = {fit.J:.2g}/{fit.df}\n{checks_text(fit)}",
-            fontsize=10,
-        )
-        population_axes = population_fig.axes
-        population_order = range(3)
-        for rank, (population_ax, state) in enumerate(
-            zip(population_axes, population_order, strict=True)
-        ):
-            color = f"C{rank}"
-            thermal = fit.nuisances.thermal[state]
-            population_ax.errorbar(
+        grid = np.linspace(delays.min(), delays.max(), 400)
+        try:
+            view = cycle_residual_projection(sums, model, fit, model_axis=grid)
+        except CycleProjectionUnavailable:
+            fig = Figure(figsize=(8, 2.4), layout="constrained")
+            fig.suptitle(title)
+            fig.text(
+                0.5,
+                0.28,
+                f"{diagnostics}\n\nLive-direction projection unavailable",
+                ha="center",
+                va="center",
+            )
+            plots.adopt("joint-residuals", fig)
+        else:
+            fig, _ = plots.subplots(
+                num="joint-residuals",
+                nrows=2,
+                sharex=True,
+                figsize=(8, 6),
+                layout="constrained",
+            )
+            projection_ax, residual_ax = fig.axes
+            plot_joint_residuals(
+                projection_ax,
+                residual_ax,
                 delays,
-                fit.populations[:, state],
-                yerr=fit.population_errors[:, state],
-                fmt=".",
-                color=color,
-                label="Point estimate ± Wald SE",
+                grid,
+                view,
+                ("Measured · all 65 numbers", "Joint model"),
             )
-            population_ax.plot(
-                population_dense,
-                population_fitted[:, state],
-                color=color,
-                label="Joint fit",
-            )
+            fig.suptitle(f"{title}\n{diagnostics}")
             if delays.min() <= t2 <= delays.max():
-                population_ax.axvline(t2, ls="--", color="0.35", linewidth=1)
-            population_ax.set(
-                ylabel=f"P(state {rank + 1})",
-                title=f"State {rank + 1} · Thermal population {thermal:.2f}",
-            )
-        handles, labels = population_axes[0].get_legend_handles_labels()
-        population_fig.legend(handles, labels, loc="outside lower center", ncols=2)
-        population_axes[-1].set_xlabel(_SWEEP_LABEL)
-        population_axes[-1].xaxis.set_major_locator(MaxNLocator(nbins=4))
+                projection_ax.axvline(t2, ls="--", color="0.35", linewidth=1)
+            projection_ax.set_ylabel(_JOINT_LABEL)
+            residual_ax.set(xlabel=_SWEEP_LABEL, ylabel="Measured − model\n(SEM units)")
+            residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+            handles, labels = projection_ax.get_legend_handles_labels()
+            fig.legend(handles, labels, loc="outside lower center", ncols=2)
+        _plot_first_read(plots, delays, seed_signal, seed_sem, seed_fit)
 
         return ChainT2EchoAnalysis(
             t2=t2,
             t2_err=t2_err,
             tf=tf,
             tf_err=tf_err,
-            within_point=fit.within_point,
-            sharing=fit.sharing,
-            curve=fit.curve,
+            first_read_t2=first_read_t2,
             J=fit.J,
             df=fit.df,
-            first_read_t2=first_read_t2,
+            j_per_df=fit.j_per_df,
+            expected_band_low=band_low,
+            expected_band_high=band_high,
+            tail_fraction=fit.tail_fraction,
         )
+
+
+def _plot_first_read(
+    plots: Plots,
+    delays: NDArray[np.float64],
+    signal: NDArray[np.float64],
+    sem: NDArray[np.float64],
+    seed_fit: DecayFit | None,
+) -> None:
+    """Draw projected IQ and shot SEM at each wait, with a seed curve only when fitted."""
+    fig, ax = plots.subplots(num="fit", figsize=config.figsize, layout="constrained")
+    fig.suptitle(_IQ_TITLE)
+    ax.errorbar(
+        delays[1:],
+        signal[1:],
+        yerr=sem[1:],
+        fmt=".",
+        color="C0",
+        label="First-read mean ± shot SEM",
+    )
+    ax.errorbar(
+        delays[:1],
+        signal[:1],
+        yerr=sem[:1],
+        fmt=".",
+        color="0.5",
+        label="First sweep point"
+        if seed_fit is None
+        else "Excluded from first-read fit",
+    )
+    if seed_fit is None:
+        ax.plot(delays, signal, color="C0", zorder=1)
+        title = "First-read fit unavailable"
+    else:
+        dense = np.linspace(delays[1:].min(), delays.max(), 400)
+        ax.plot(
+            dense, expfunc(dense, *seed_fit.params), color="C1", label="First-read fit"
+        )
+        if delays.min() <= seed_fit.decay_time <= delays.max():
+            ax.axvline(seed_fit.decay_time, ls="--", color="0.35", linewidth=1)
+        r2 = seed_fit.quality.r2
+        residual = seed_fit.quality.normalized_residual_rms
+        r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
+        residual_text = "unavailable" if residual is None else f"{residual:.3g}"
+        title = (
+            f"First-read T2 echo = {seed_fit.decay_time:.4g} ± {seed_fit.decay_time_err:.2g} µs\n"
+            f"R² = {r2_text} · Normalized residual RMS = {residual_text}"
+        )
+    ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax.set_title(title, loc="left", fontsize=10)
+    fig.legend(loc="outside lower center")
