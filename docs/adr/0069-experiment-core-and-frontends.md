@@ -163,7 +163,7 @@ GUI application 持有結果與具名圖集合，保存不反向依賴 Qt widget
 
 圖只放物理量、模型、擬合結果與判讀所需的標註。Run 身分放在可見的 Analyze 摘要，不印在圖上。Adapter 用該次 cfg 的 Reps×Rounds 與實驗已回傳的實際施加值提供摘要行。GUI 與 MCP 的 [`AnalysisPresentation`](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation) 顯示同一份行，不各自組裝。摘要行不經 [[0062]]〈一個 run 的 operation〉的 workflow operation wire。圖的標題與圖例由各實驗 core 編寫，不建立共用 formatter。Run 頁的按鈕名為 `Defaults`，表單的物理欄位仍用 `Reset`。
 
-R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Data 頁的縮圖用來辨識與選取各 stage 的具名圖；Data 的 R7 在 [`View figure` 閱讀面](../../lib/zcu_tools/gui/app/measure/ui/README.md)檢查同一張當前原生 Figure 依閱讀尺度重繪後的畫面，放不下就捲動，不縮小字級。
+[R7](../../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面) 只在 12×9 in、150 dpi 的 PNG 檢查版面。Measure 的 Run、Analysis、Post-analysis、Workflow 和 Data 以 12×9 in 排版原生 Figure，再將整張圖等比放入圖磚，其餘空間留白。磚形不改變 Figure 排版。Data 保留選圖縮圖；[`View figure` 閱讀面](../../lib/zcu_tools/gui/app/measure/ui/README.md)以同樣的幾何等比顯示全圖。GUI 只驗圖完整嵌入、等比和無裁切，互動畫布另驗縮放後的資料座標。
 
 一維系列若能用現有 shot 資料估計 SEM，就畫逐點 shot SEM，spectrum 也一樣。IQ 散點及二維圖不畫逐點 error bar。Shot SEM 是每發樣本標準差除以保留 shot 數的平方根，表示該點平均值的預期誤差。Run 與 Analyze 的一維連續掃描，沒有擬合曲線時連接量測點，有擬合曲線時只留量測點及可用的誤差棒。類別軸不連線。顯示用時間寫 `µs`，gain、amplitude 與倍率寫 `a.u.`，機率寫出機率名稱，計數寫 `count`。存檔單位照[保存、發現與範圍](#保存發現與範圍)，不受顯示詞彙影響。
 

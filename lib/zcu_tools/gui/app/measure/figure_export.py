@@ -86,8 +86,8 @@ def render_figure_preview_png(fig: Figure) -> bytes:
 def render_figure_reading_png(fig: Figure) -> bytes:
     """Render a fresh, full 12×9 inch Figure at 100 pixels per inch for reading.
 
-    Call on the Qt owner thread only. The view shows pixels at their rendered
-    size, scrolling when necessary. Canvas ownership and on-screen size stay
-    unchanged. Rendering failures propagate; no file is read or written.
+    Call on the Qt owner thread only. The reader fits the whole raster in its
+    viewport. Canvas ownership and on-screen size stay unchanged. Rendering
+    failures propagate; no file is read or written.
     """
-    return render_figure_png(fig, figsize=(12.0, 9.0), dpi=100.0)
+    return render_figure_png(fig, figsize=SAVE_FIGSIZE, dpi=100.0)

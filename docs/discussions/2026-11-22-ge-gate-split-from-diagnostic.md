@@ -37,7 +37,7 @@ basis:
 
 ## 留下的問題
 
-診斷圖保留原候選、修正與失敗收據，待確認可取回後才退休舊工作樹。續作仍要把直方圖、同次擬合 SNR 及其誤差與警示、等比例 IQ 和圖名碰撞修正一起驗收。依 [R7](../../zcu_lab/v2/figure-style.md#r7用-gui-與存檔的實際尺寸檢查版面) 檢查實際 Analysis、Data 的 `View figure`、Save 版面及存檔 PNG；之前的離線例外不延用。
+診斷圖保留原候選、修正與失敗收據，待確認可取回後才退休舊工作樹。續作仍要把直方圖、同次擬合 SNR 及其誤差與警示、等比例 IQ 和圖名碰撞修正一起驗收。當時的 R7 要求檢查實際 Analysis、Data 的 `View figure`、Save 版面及存檔 PNG；之前的離線例外不延用。續作適用[現行 R7](../../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面)。
 
 寫回保護的 `review-done` 只表示這一項驗完，不能當作已合併。寫回保護與 presentation-families 都實際合併後，noise-isotropic 才按原流程驗證和合併。FTF preset 仍等 noise-isotropic；中心距除以共用寬度的定義不變。這次拆分不簽收診斷圖或第 11／12 步。
 

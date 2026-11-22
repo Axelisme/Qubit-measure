@@ -130,6 +130,7 @@ def test_operator_can_read_picker_and_zoom_then_home(
         ui.click("Analyze")
         ui.screenshot(shots / "01-initial.png")
         assert (ui.window_size().width(), ui.window_size().height()) == (width, height)
+        assert ui.plot_inches(object_name="rangeFind.spectrum") == (12, 9)
         canvas = ui.observe(object_name="rangeFind.spectrum")
         component = ui.observe(object_name="rangeFind.component")
         assert canvas.bounds is not None and component.bounds is not None
@@ -241,6 +242,8 @@ def test_operator_clicks_to_add_remove_and_assigns_out_of_order(
     ui.click_at(*_plot_point(ui, 5020, 0.3))
     assert "west" not in " ".join(ui.legends().texts)
     ui.screenshot(shots / "02-remove.png")
+    ui.resize_window(1180, 1030)
+    ui.screenshot(shots / "02b-resized.png")
     ui.click_at(*_plot_point(ui, 5040, 0.8))
     assert ui.observe(object_name="rangeFind.selection").text == "5040 MHz"
     ui.screenshot(shots / "03-add.png")

@@ -112,15 +112,16 @@ y 軸與色階預設依資料範圍自動縮放。跨圖比較才用固定尺度
 - 壞例：標題 `terminal_gg · herald=True`，軸名 `df`。
 - 好例：Ding 圖 5-8(b)（頁 151）寫出驅動頻率、脈衝平台（plateau）長度與色階所指的態。[本地 CZ Chevron](two_qubit/chevron/guide.md) 掃的是兩路共用的驅動頻率與波形包絡長度，不是論文的 plateau。改寫時，標題可用「CZ Chevron · Q1/Q2 · P(g,g)」，軸標「共用驅動頻率 (MHz)」和「共用波形包絡長度 (µs)」，色棒標「雙 Xπ 後的 P(g,g)」。
 
-### R7：用 GUI 與存檔的實際尺寸檢查版面
+### R7：在固定存檔幾何檢查版面
 
-在 GUI 各繪圖頁以實際顯示尺寸看圖。字級跟著顯示尺寸縮放，最小字級 10 pt。tick 標籤不能重疊，legend 不能蓋資料。一張圖最多 6 個 panel。
+逐張在 12×9 in、150 dpi 的 PNG（1800×1350 px）檢查版面。字級至少 10 pt，tick 標籤不能重疊，legend 不能蓋資料。一張圖最多 6 個 panel。Analysis 與 Post-analysis 開啟匯出的 PNG 檢查。Run Save 只保存資料；驗收 Run 圖時，以相同幾何輸出供檢查的 PNG。
 
-Data 頁的縮圖只用來選圖。按 `View figure` 在 Data 頁打開閱讀面，不會存檔。按閱讀面的實際尺寸檢查。放不下整張圖時捲動查看，不縮小字級。閱讀面由 [Measure〈Figure presentation〉](../../lib/zcu_tools/gui/app/measure/README.md#figure-presentation) 說明。
-Run Save 只保存資料。另開所有匯出的 PNG，包含 Analysis 與 Post-analysis 匯出的圖，逐張按 PNG 的實際尺寸檢查。
+Run、Analysis、Post-analysis、Workflow 和 Data 都以 12×9 in 排版 Figure，再把整張圖等比放入圖磚。不依圖磚形狀重排。圖與字一起縮放，多餘空間留白。GUI 只驗整張圖等比嵌入、留白及無裁切，不在各磚形重驗字級或版面。
 
-- 壞例：放大 Run 頁才讀得清楚。在 Data 頁打開 `View figure` 後仍讀不清 tick 標籤，存檔 PNG 的 colorbar 又擠到標題。
-- 好例：Ding 圖 5-7（頁 150）的四分支分成 2×2 panel。採用這種分組後，仍要在 GUI 和匯出的 PNG 核對字級、tick、legend 與資料位置。
+Data 縮圖用來選圖。`View figure` 在 Data 頁把同一張圖等比放入較大的閱讀面，不寫檔。見 [Measure〈Figure presentation〉](../../lib/zcu_tools/gui/app/measure/README.md#figure-presentation)。
+
+- 壞例：存檔 PNG 的 colorbar 擠到標題，或 legend 遮住量測資料。
+- 好例：Ding 圖 5-7（頁 150）的四分支分成 2×2 panel。採用這種分組後，在固定幾何的 PNG 核對字級、tick、legend 與資料位置。
 
 ### R8：圖型對應資料，liveplot 標明進度
 

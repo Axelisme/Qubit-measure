@@ -5,7 +5,6 @@ from collections.abc import Callable
 import numpy as np
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from qtpy.QtGui import QResizeEvent
@@ -25,6 +24,7 @@ from zcu_tools.gui.app.measure.range_find_plugin import (
     RangeFindPlugin,
     RangeFindState,
 )
+from zcu_tools.gui.app.measure.ui.figure_tile import FigureTileCanvas
 from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontend,
     InteractiveFrontendEnv,
@@ -115,8 +115,8 @@ class RangeFindFrontend[R](InteractiveFrontend):
         self._plugin, self._session = plugin, session
         self._request_finish, self._request_cancel = request_finish, request_cancel
         self._read_only = False
-        self._figure = Figure(figsize=(8, 5))
-        self._canvas = FigureCanvasQTAgg(self._figure)
+        self._figure = Figure()
+        self._canvas = FigureTileCanvas(self._figure)
         self._canvas.setObjectName("rangeFind.spectrum")
         self._fields: dict[str, QLineEdit] = {}
         self._toolbar = NavigationToolbar2QT(self._canvas, self)

@@ -1,12 +1,13 @@
 """Tile small figure sets without changing FigureContainer stack membership."""
 
-from matplotlib.backend_bases import ResizeEvent
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.layout_engine import PlaceHolderLayoutEngine, TightLayoutEngine
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QEvent, QObject, QRect
 from qtpy.QtGui import QResizeEvent, QShowEvent
 from qtpy.QtWidgets import QStackedWidget, QWidget
+
+from zcu_tools.gui.plotting.container import FigureContainer
+
+from .figure_tile import FigureTileCanvas
 
 MAX_TILED_FIGURES = 4
 
@@ -30,20 +31,17 @@ class FigurePaneLayout(QStackedWidget):
 
     presentationChanged = pyqtSignal()
 
-    def set_tiled(self, *, tiled: bool) -> None:
-        """Enable paged tiling, or disable it for an interactive presentation.
+    def figure_container(self, placeholder: QWidget) -> FigureContainer:
+        """Attach native Figures as fixed-geometry canvases in this pane."""
+        return FigureContainer(self, placeholder, canvas_type=FigureTileCanvas)
 
-        Multi-figure canvases without an active layout engine reflow labels on
-        resize. Authored layout engines and ordinary single-widget mode remain
-        unchanged.
-        """
+    def set_tiled(self, *, tiled: bool) -> None:
+        """Enable paged tiling, or disable it for an interactive presentation."""
         self._tiled = tiled
         for index in range(1, self.count()):
             widget = self.widget(index)
             if widget is not None:
                 widget.installEventFilter(self)
-                if isinstance(widget, FigureCanvasQTAgg):
-                    widget.mpl_connect("resize_event", self._fit_tile_labels)
         self._presentation_changed()
 
     def page_count(self) -> int:
@@ -113,29 +111,11 @@ class FigurePaneLayout(QStackedWidget):
             elif visible:
                 widget.setGeometry(self.rect())
 
-    def _fit_tile_labels(self, event: ResizeEvent) -> None:
-        widget = event.canvas
-        if (
-            not self._tiled
-            or self.count() <= 2
-            or not isinstance(widget, FigureCanvasQTAgg)
-            or self.indexOf(widget) < 1
-        ):
-            return
-        engine = widget.figure.get_layout_engine()
-        if engine is None or isinstance(engine, PlaceHolderLayoutEngine):
-            # Matplotlib has applied the Qt size, including deferred shows.
-            # Fixed fractional margins shrink with the tile, but glyphs do not.
-            # Reflow once at this canvas size;
-            # keep authored active engines and single-widget mode unchanged.
-            TightLayoutEngine().execute(widget.figure)
-            widget.draw_idle()
-
     def event(self, e: QEvent | None) -> bool:
         handled = super().event(e)
         if e is not None and e.type() == QEvent.Type.LayoutRequest:
-            # Raster resize changes size hints; QStackedLayout then expands its
-            # current child again. Reapply the peer layout after that delivery.
+            # QStackedLayout may expand its current child when a size hint changes.
+            # Reapply the peer layout after that delivery.
             self._arrange()
         return handled
 

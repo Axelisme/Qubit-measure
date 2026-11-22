@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from qtpy.QtCore import QEventLoop, QPoint, Qt, QTimer
+from matplotlib.transforms import Bbox
+from qtpy.QtCore import QEventLoop, Qt, QTimer
 from qtpy.QtTest import QTest
 from qtpy.QtWidgets import (
     QCheckBox,
@@ -29,6 +30,7 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui._user_input import ComponentDriver
+from tests.gui._user_input.observing import canvas_bbox_on_screen
 
 
 class _DeferredEnv:
@@ -108,12 +110,8 @@ def _pointer(
 
 def _qt_click(canvas: FigureCanvasQTAgg, x: float, y: float = 4.5) -> None:
     px, py = canvas.figure.axes[0].transData.transform((x, y))
-    # tolerated: PyQt6 stubs add self to the class-level QTest.mouseClick API.
-    QTest.mouseClick(  # pyright: ignore[reportCallIssue]
-        canvas,
-        Qt.MouseButton.LeftButton,
-        pos=QPoint(int(px), canvas.height() - int(py)),
-    )
+    sx, sy, _, _ = canvas_bbox_on_screen(canvas, Bbox.from_bounds(px, py, 0, 0))
+    ComponentDriver(canvas.window()).click_at(round(sx), round(sy))
 
 
 def test_click_follow_and_click_place_use_latest_committed_state(qapp):

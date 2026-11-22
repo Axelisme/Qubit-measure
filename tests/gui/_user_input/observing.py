@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.transforms import Bbox
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtWidgets import (
     QAbstractButton,
@@ -235,15 +237,7 @@ def plots(window: QWidget) -> PlotObservation:
                     curves,
                     (float(xmin), float(xmax)),
                     (float(ymin), float(ymax)),
-                    (
-                        canvas.mapToGlobal(QPoint()).x()
-                        + axes.bbox.x0 / canvas.device_pixel_ratio,
-                        canvas.mapToGlobal(QPoint()).y()
-                        + (canvas.figure.bbox.height - axes.bbox.y1)
-                        / canvas.device_pixel_ratio,
-                        axes.bbox.width / canvas.device_pixel_ratio,
-                        axes.bbox.height / canvas.device_pixel_ratio,
-                    ),
+                    canvas_bbox_on_screen(canvas, axes.bbox),
                     tuple(
                         t.get_text()
                         for t in axes.texts
@@ -252,6 +246,23 @@ def plots(window: QWidget) -> PlotObservation:
                 )
             )
     return PlotObservation(tuple(observed))
+
+
+def canvas_bbox_on_screen(
+    canvas: FigureCanvasQTAgg, bbox: Bbox
+) -> tuple[float, float, float, float]:
+    """Project a native canvas pixel box to global Qt logical pixels, without input."""
+    origin = canvas.mapToGlobal(QPoint())
+    left, top = canvas.mouseEventCoords(QPoint())
+    right, bottom = canvas.mouseEventCoords(QPoint(canvas.width(), canvas.height()))
+    scale_x = canvas.width() / (right - left)
+    scale_y = canvas.height() / (top - bottom)
+    return (
+        origin.x() + (bbox.x0 - left) * scale_x,
+        origin.y() + (top - bbox.y1) * scale_y,
+        bbox.width * scale_x,
+        bbox.height * scale_y,
+    )
 
 
 def plot_label_bounds(window: QWidget) -> tuple[PlotLabelBoundsObservation, ...]:
