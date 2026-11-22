@@ -6,6 +6,8 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.failure import AnalysisFailed
+
 from .base import FitResult, assign_init_p, fit_func
 
 
@@ -14,6 +16,33 @@ def expfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
     """p = [y0, yscale, decay_time]"""
     y0, yscale, decay_time = p
     return y0 + yscale * np.exp(-x / decay_time)
+
+
+def _validate_exp_inputs(
+    xdata: NDArray[np.float64],
+    ydata: NDArray[np.float64],
+    fitparams: Sequence[float | None],
+    fixedparams: Sequence[float | None] | None,
+) -> None:
+    if fixedparams is not None and len(fixedparams) != 3:
+        raise ValueError(
+            "Fixed parameters must be a list of three elements: [y0, yscale, decay_time]"
+        )
+    if len(fitparams) != 3:
+        raise ValueError(
+            "Initial parameters must have three entries: [y0, yscale, decay_time]"
+        )
+    if xdata.ndim != 1 or xdata.shape != ydata.shape:
+        raise ValueError(
+            "Decay coordinates and observations require matching 1-D shapes"
+        )
+    if not (np.isfinite(xdata).all() and np.isfinite(ydata).all()):
+        raise ValueError("Decay coordinates and observations must be finite")
+    if any(
+        p is not None and not np.isfinite(p)
+        for p in (*fitparams, *(fixedparams if fixedparams is not None else ()))
+    ):
+        raise ValueError("Decay initial and fixed parameters must be finite")
 
 
 def fitexp(
@@ -31,19 +60,28 @@ def fitexp(
     the absolute supplied amplitude guess when larger. Fixed values are unchanged.
     Optional decay_bounds=(lower, upper) constrains free decay time in x units
     and clips its initial guess. None keeps the unconstrained positive time.
-    Numeric fitting failures raise AnalysisFailed; invalid bounds raise ValueError.
+    Numeric fitting failures and flat traces without a fixed amplitude or
+    nonzero amplitude guess raise AnalysisFailed. Invalid inputs raise ValueError.
     """
     if fitparams is None:
         fitparams = [None] * 3
     fitparams = list(fitparams)
 
-    if fixedparams is not None and len(fixedparams) != 3:
-        raise ValueError(
-            "Fixed parameters must be a list of three elements: [y0, yscale, decay_time]"
-        )
+    _validate_exp_inputs(xdata, ydata, fitparams, fixedparams)
+
+    lower, upper = (0.0, np.inf) if decay_bounds is None else decay_bounds
+    if (fixedparams is None or fixedparams[2] is None) and not lower < upper:
+        raise ValueError("Decay time bounds must be increasing")
+    if (
+        ydata.size > 0
+        and (fixedparams is None or fixedparams[1] is None)
+        and fitparams[1] in (None, 0.0)
+        and np.all(ydata == ydata[0])
+    ):
+        raise AnalysisFailed("Decay trace has no contrast")
 
     # guess initial parameters
-    if any([p is None for p in fitparams]):
+    if any(p is None for p in fitparams):
         y0 = np.mean(ydata[-5:]).item()
         yscale = ydata[0] - y0
         x_2 = xdata[np.argmin(np.abs(ydata - (y0 + yscale / 2)))]
@@ -54,7 +92,6 @@ def fitexp(
     # tolerated(cast): reportArgumentType: Baseline/amplitude/decay guesses fill unset slots and preserve supplied values; mutation cannot narrow the list type.
     fitparams = cast(list[float], fitparams)
 
-    lower, upper = (0.0, np.inf) if decay_bounds is None else decay_bounds
     if decay_bounds is not None:
         fitparams[2] = min(max(fitparams[2], lower), upper)
     amplitude_bound = max(2 * np.ptp(ydata), abs(fitparams[1]))

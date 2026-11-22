@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.failure import AnalysisFailed
+
 from .base import cosfunc, decaycos, fitcos, fitdecaycos
 from .quality import compute_fit_quality
 from .results import RabiFit
@@ -35,9 +37,9 @@ def fit_rabi(
     phase_degrees[, decay_time]); covariance follows that order. Fitted samples
     follow the input order.
 
-    Invalid data can raise ValueError from initialization or fitting. Optimizer
-    non-convergence raises AnalysisFailed. A zero fitted frequency cannot yield
-    finite pulse coordinates and can raise ZeroDivisionError.
+    Invalid data raise ValueError. Insufficient observations, no usable seed,
+    optimizer nonconvergence or no finite positive pi coordinate raise
+    AnalysisFailed.
     """
 
     # choose fitting function
@@ -57,7 +59,9 @@ def fit_rabi(
 
     fit_signals = cos_func(xs, *pOpt)
 
-    freq: float = pOpt[2]
+    freq = float(pOpt[2])
+    if not np.isfinite(freq) or freq <= 0.0:
+        raise AnalysisFailed("Rabi fit has no finite positive π coordinate")
     phase: float = pOpt[3] % 360
 
     var_freq = float(pCov[2, 2])
@@ -74,6 +78,8 @@ def fit_rabi(
         A_pi, A_pi2 = 1.0, 0.75
 
     pi_x = (A_pi - phase / 360) / freq
+    if not np.isfinite(pi_x) or pi_x <= 0.0:
+        raise AnalysisFailed("Rabi fit has no finite positive π coordinate")
     pi2_x = (A_pi2 - phase / 360) / freq
 
     # error propagation: x = (A - phase/360) / freq

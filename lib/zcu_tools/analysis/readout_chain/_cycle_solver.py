@@ -14,7 +14,7 @@ from ._cycle_coordinates import (
     joint_table,
     nuisance_bounds,
 )
-from ._cycle_emission import simplex, simplex_coordinates, simplex_gradient
+from ._cycle_emission import simplex, simplex_coordinates
 from ._cycle_engine import covariance, mean_jacobian
 from ._cycle_layout import (
     CENTERS,
@@ -22,8 +22,6 @@ from ._cycle_layout import (
     LANDING,
     NUISANCE_SIZE,
     RETENTION,
-    TABLE_DRIVE,
-    TABLE_SHARED,
     THERMAL,
     VARIANCE,
 )
@@ -32,6 +30,8 @@ if TYPE_CHECKING:
     from .model import CycleModel
 
 _INFORMATION_RCOND = 1e-12
+_ASSIGNMENT_EVALUATIONS = 200
+_JOINT_EVALUATIONS = 1_000
 
 
 @dataclass
@@ -67,9 +67,8 @@ class ScaledInformation:
 @dataclass
 class JointSolution:
     q: np.ndarray
-    covariance: np.ndarray
-    weights: np.ndarray
-    J: float
+    predicted_means: np.ndarray
+    residual: np.ndarray
     information: ScaledInformation
 
 
@@ -78,22 +77,11 @@ def apply_weights(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
     return np.einsum("nij,nj...->ni...", weights, values)
 
 
-def scaled_covariance(weighted: np.ndarray) -> np.ndarray:
-    """Invert information after column normalization, then restore coordinate units.
-
-    weighted has shape (..., observations, parameters). Use the same relative
-    normal-matrix cutoff (1e-12) for a single joint fit or batched local fits.
-    The cutoff then describes collinearity rather than parameter units.
-    """
-    scale, normal = _scaled_normal_matrix(weighted)
-    return _covariance_from_normal(scale, normal)
-
-
 def scaled_information(weighted: np.ndarray) -> ScaledInformation:
-    """Retain the numerical null space alongside the scaled generalized inverse.
+    """Invert column-normalized information and retain its numerical null space.
 
-    weighted has shape (..., observations, parameters). The null projection
-    uses the same relative normal-matrix cutoff as scaled_covariance.
+    weighted has shape (observations, parameters). Apply the same 1e-12 cutoff
+    to the normal-matrix inverse and the null space, then restore covariance units.
     """
     scale, normal = _scaled_normal_matrix(weighted)
     values, vectors = np.linalg.eigh(normal)
@@ -105,7 +93,7 @@ def scaled_information(weighted: np.ndarray) -> ScaledInformation:
 
 
 def _scaled_normal_matrix(weighted: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Share column scaling and normal matrix for covariance and information."""
+    """Build the normal matrix after scaling each Jacobian column to unit norm."""
     scale = np.linalg.norm(weighted, axis=-2)
     scale = np.where(scale == 0, 1.0, scale)
     scaled = weighted / scale[..., None, :]
@@ -113,7 +101,7 @@ def _scaled_normal_matrix(weighted: np.ndarray) -> tuple[np.ndarray, np.ndarray]
 
 
 def _covariance_from_normal(scale: np.ndarray, normal: np.ndarray) -> np.ndarray:
-    """Restore units for both scaled_covariance and scaled_information."""
+    """Restore the parameter units of the generalized inverse."""
     inverse = np.linalg.pinv(normal, rcond=_INFORMATION_RCOND, hermitian=True)
     return inverse / (scale[..., :, None] * scale[..., None, :])
 
@@ -196,8 +184,8 @@ def solve_joint(
     _cycle_layout. With curve parameters held at q, fit the nuisances for each
     of the six assignments of geometric states to curve rows; run two joint
     model-covariance weight stages from the lowest-objective assignment. Return
-    the estimate, its column-normalized inverse-information covariance, the last
-    weights and J, without changing the inputs. Raise RuntimeError if a joint
+    the estimate, its normalized information, predicted means and last-stage
+    whitened residual without changing the inputs. Raise RuntimeError if a joint
     stage does not converge; numpy.linalg.LinAlgError propagates from a model
     covariance that is not positive definite.
     """
@@ -224,9 +212,7 @@ def solve_joint(
     weighted = apply_weights(weights, jac).reshape(-1, len(q))
     information = scaled_information(weighted)
     residual = apply_weights(weights, means - predicted)
-    return JointSolution(
-        q, information.covariance, weights, float(np.sum(residual**2)), information
-    )
+    return JointSolution(q, predicted, residual, information)
 
 
 def assigned_seed(q: np.ndarray, order: tuple[int, ...]) -> np.ndarray:
@@ -282,7 +268,11 @@ def _joint_stage(
         )
 
     result = bounded_least_squares(
-        residual, q[fixed:], derivative, (lo[fixed:], hi[fixed:]), 200
+        residual,
+        q[fixed:],
+        derivative,
+        (lo[fixed:], hi[fixed:]),
+        nuisance_only=nuisance_only,
     )
     # Assignment scoring needs a feasible seed, not a converged nuisance fit.
     # Keep its last iterate at the budget cap; joint stages must still converge.
@@ -296,9 +286,8 @@ def bounded_least_squares(
     start: np.ndarray,
     jac: Callable[[np.ndarray], np.ndarray],
     bounds: tuple[np.ndarray, np.ndarray],
-    budget: int,
     *,
-    stopping_tolerance: float = 1e-9,
+    nuisance_only: bool,
 ) -> OptimizeResult:
     """Minimize the sum of squared residuals within coordinate bounds using SciPy.
 
@@ -307,14 +296,11 @@ def bounded_least_squares(
     jac maps the same parameter vector to the residual Jacobian of shape
     (m, n). bounds contains lower and upper arrays of shape (n,), with each
     lower bound strictly below its upper bound; use infinities for unbounded
-    coordinates. budget is a positive maximum number of fun evaluations,
-    passed as max_nfev, not an iteration limit.
+    coordinates. nuisance_only selects the smaller evaluation budget for
+    state-assignment seeding instead of the joint-stage budget.
 
-    stopping_tolerance sets both ftol (relative cost-change tolerance) and
-    xtol (step-size tolerance), defaulting to 1e-9. The gradient tolerance
-    gtol stays fixed at 1e-9. SciPy uses x_scale="jac" to scale coordinates
-    by inverse Jacobian column norms and its default trust-region reflective
-    method. Changing stopping_tolerance does not change gtol or the budget.
+    SciPy uses x_scale="jac", trust-region reflective steps and 1e-9 for
+    ftol, xtol and gtol.
 
     Return SciPy's OptimizeResult with the final x (n,), fun (m,), jac
     (m, n), cost, status, success and message. If SciPy stops because the
@@ -333,28 +319,8 @@ def bounded_least_squares(
         jac=analytic,
         bounds=bounds,
         x_scale="jac",
-        ftol=stopping_tolerance,
-        xtol=stopping_tolerance,
+        ftol=1e-9,
+        xtol=1e-9,
         gtol=1e-9,
-        max_nfev=budget,
+        max_nfev=_ASSIGNMENT_EVALUATIONS if nuisance_only else _JOINT_EVALUATIONS,
     )
-
-
-def local_table(drive: np.ndarray, rows: np.ndarray) -> np.ndarray:
-    coordinates = np.array([[simplex_coordinates(p) for p in d] for d in drive])
-    return np.c_[coordinates.reshape(len(drive), TABLE_DRIVE.stop), rows]
-
-
-def local_drive(table: np.ndarray) -> np.ndarray:
-    return np.array(
-        [[simplex(*p) for p in t[TABLE_DRIVE].reshape(3, 2)] for t in table]
-    )
-
-
-def local_mean_jacobian(table: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    means, jac = mean_jacobian(local_drive(table), table[:, TABLE_SHARED])
-    for state in range(3):
-        block = slice(2 * state, 2 * state + 2)
-        grad = np.array([simplex_gradient(*r[block])[:2] for r in table])
-        jac[:, :, block] = jac[:, :, block] @ grad
-    return means, jac

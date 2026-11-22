@@ -4,7 +4,6 @@ Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 """
 
 from pydantic import Field
-from zcu_tools.analysis.readout_chain import CycleCheck
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -18,6 +17,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
+from zcu_lab.v2.chain._joint import JointResidualSummary
 from zcu_lab.v2.chain.t1.gui import ChainT1Summary
 
 
@@ -53,8 +53,8 @@ class ChainT1Inputs(RecipeInputs):
     )
 
 
-class ChainT1Report(RecipeReport):
-    """Chain T1 fit and its checks; cancellation returns no report."""
+class ChainT1Report(RecipeReport, JointResidualSummary):
+    """Chain T1 estimates and joint residuals; cancellation returns no report."""
 
     t1_us: float | None = Field(
         description="T1 (µs), the larger-amplitude eigen time; null if unavailable."
@@ -68,34 +68,30 @@ class ChainT1Report(RecipeReport):
     secondary_time_err_us: float | None = Field(
         description="Secondary time Wald standard error (µs); null if unavailable."
     )
-    within_point: CycleCheck | None = Field(
-        description="Within-point check J, df, p; null without analysis."
-    )
-    sharing: CycleCheck | None = Field(
-        description="Sharing check J, df, p; null without analysis."
-    )
-    curve: CycleCheck | None = Field(
-        description="Curve check J, df, p; null without analysis."
-    )
 
 
 @recipe(
     "chain_t1",
-    description="Sweep wait after π pulse in K-cycle T1; use the first-read fit to seed a joint three-state fit, then save without writeback.",
+    description="Sweep wait after π in K-cycle T1, fit all 65 features jointly, and save the sums, decay times and residual diagnostics without writeback.",
 )
 async def chain_t1(session: RecipeSession, inputs: ChainT1Inputs) -> ChainT1Report:
     """Sweep the wait after a pi pulse with one K-cycle per rep: K, then (pi, wait, read, read) x 8.
 
     relax_delay is the thermalisation wait K; the Form starts it at 5 T1 and
-    overrides can change it. Primary fits the first read with a single decay
-    for the starting value, then fits all 65 numbers jointly with the
-    rate-equation model. It reports T1, the eigen time with the larger
-    amplitude, and the other eigen time as the secondary time, with Wald errors
-    and three checks. No writeback is proposed or requested. Save keeps the
-    running sums and the analysis.
+    overrides can change it. Primary fits all 65 numbers jointly with the
+    rate-equation model. It starts at the first-read decay time if available.
+    If the first-read fit has no estimate, Primary tries one joint fit from
+    one third of the saved wait span, with a minimum of 0.001 µs. This start
+    is not reported as an estimate. Primary reports T1, the eigen time with
+    the larger amplitude, and the other eigen time as the secondary time.
+    Both are in µs with Wald standard errors. It reports J, df, J/df, the numerical χ²
+    reference band and the fraction of whitened residuals with |r| > 3.
+    These numbers do not determine acceptance. The live-direction residual
+    series stays in the figure. Save keeps the sums and analysis without writeback.
 
-    points → expts sets the sweep sample count.
-    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
+    points → expts sets the sweep sample count. Omission keeps the Form value;
+    explicit null is passed to the Form. Missing Form values stop before
+    acquisition. Save keeps completed Run data even when Analyze fails.
     """
     tab = session.open_tab(
         "chain/t1",
@@ -120,9 +116,12 @@ async def chain_t1(session: RecipeSession, inputs: ChainT1Inputs) -> ChainT1Repo
                 t1_err_us=None,
                 secondary_time_us=None,
                 secondary_time_err_us=None,
-                within_point=None,
-                sharing=None,
-                curve=None,
+                J=None,
+                df=None,
+                j_per_df=None,
+                expected_band_low=None,
+                expected_band_high=None,
+                tail_fraction=None,
                 analysis_failure=analysis.reason,
             )
         return ChainT1Report(
@@ -130,9 +129,12 @@ async def chain_t1(session: RecipeSession, inputs: ChainT1Inputs) -> ChainT1Repo
             t1_err_us=report_number(analysis.result.t1_err),
             secondary_time_us=report_number(analysis.result.secondary_time),
             secondary_time_err_us=report_number(analysis.result.secondary_time_err),
-            within_point=analysis.result.within_point,
-            sharing=analysis.result.sharing,
-            curve=analysis.result.curve,
+            J=analysis.result.J,
+            df=analysis.result.df,
+            j_per_df=analysis.result.j_per_df,
+            expected_band_low=analysis.result.expected_band_low,
+            expected_band_high=analysis.result.expected_band_high,
+            tail_fraction=analysis.result.tail_fraction,
         )
     finally:
         tab.save()

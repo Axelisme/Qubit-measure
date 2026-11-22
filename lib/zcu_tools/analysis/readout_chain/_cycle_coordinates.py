@@ -63,13 +63,6 @@ def nuisance_bounds() -> tuple[np.ndarray, np.ndarray]:
     return lo, hi
 
 
-def table_bounds() -> tuple[np.ndarray, np.ndarray]:
-    """Bounds of a per-point table row: drive pairs in [0, 1], shared as above."""
-    lo, hi = nuisance_bounds()
-    drive = TABLE_DRIVE.stop - TABLE_DRIVE.start
-    return np.r_[np.zeros(drive), lo[SHARED]], np.r_[np.ones(drive), hi[SHARED]]
-
-
 def curve_values(
     curve: "Curve", axis: np.ndarray, names: tuple[str, ...], theta: np.ndarray
 ) -> np.ndarray:
