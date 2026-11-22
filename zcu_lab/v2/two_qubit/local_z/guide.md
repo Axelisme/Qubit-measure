@@ -59,7 +59,11 @@ Reset 選 `reset/mux_herald`，readout 與終端讀取用同一份設定。Qubit
 
 Use a validated `LocalZCfg` as `cfg` and fill `qubit1_tone` and `qubit2_tone` with the zero-based positions in the full readout. Notebook roles use `qubit1` and `qubit2`, but are separate from GUI aliases and do not bind them automatically. Supply the notebook's existing handles and device manager. `point_view` selects the save destination.
 
-The GUI uses the Run or Load capture's component names in the analysis legends. If the run has no captured qubit pair, analysis uses `Qubit1` and `Qubit2`, but writeback still requires the fixed bindings. Notebook analysis uses the same position labels by default. Supply `LocalZExp.Options(qubit1_label=..., qubit2_label=...)` for custom labels.
+The quadrature, phase and phase-points figures always show the `Qubit1` and
+`Qubit2` positions. The GUI adds the component names from the Run or Load
+capture when available. Writeback still requires the fixed bindings.
+Notebook analysis shows only the positions by default. Supply
+`LocalZExp.Options(qubit1_label=..., qubit2_label=...)` to add component names.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter

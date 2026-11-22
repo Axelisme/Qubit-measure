@@ -439,7 +439,14 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         if the saved cfg is absent or the counts do not match its axes.
         """
         labels = options if options is not None else LocalZOptions()
-        target_labels = (labels.qubit1_label, labels.qubit2_label)
+        qubit1, qubit2 = (
+            position if name == position else f"{position} · {name}"
+            for position, name in (
+                ("Qubit1", labels.qubit1_label),
+                ("Qubit2", labels.qubit2_label),
+            )
+        )
+        target_labels = (qubit1, qubit2)
         # 1. Require saved gate-count axes before deriving complete X/Y quadratures for both targets.
         cfg, data = source.cfg, source.result
         if cfg is None:
@@ -523,9 +530,7 @@ def _plot_quadratures(
     fig.suptitle("Local Z · classified Ramsey projections")
     for t, ax in enumerate(fig.axes):
         ax.set(
-            title=f"{('Qubit1', 'Qubit2')[t]} · {labels[t]}"
-            if labels[t] != ("Qubit1", "Qubit2")[t]
-            else labels[t],
+            title=labels[t],
             ylabel="Target P(e) − P(g)",
         )
         for q, projection in enumerate(("X", "Y")):

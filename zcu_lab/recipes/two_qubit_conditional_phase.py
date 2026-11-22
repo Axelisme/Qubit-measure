@@ -35,7 +35,7 @@ class ConditionalPhaseInputs(RecipeInputs):
     )
     gate_count: list[Annotated[int, Field(strict=True, ge=1)]] | None | Keep = Field(
         KEEP,
-        description="Form CZ gates per shot: consecutive positive CZ train lengths.",
+        description="Form CZ gates per shot (count): consecutive positive CZ train lengths.",
     )
     frequency_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
@@ -43,13 +43,15 @@ class ConditionalPhaseInputs(RecipeInputs):
         KEEP, description="Start and Stop (MHz) of Form Common CZ drive frequency."
     )
     frequency_points: int | None | Keep = Field(
-        KEEP, description="Expts under Form Common CZ drive frequency."
+        KEEP, description="Expts (count) under Form Common CZ drive frequency."
     )
     reps: int | None | Keep = Field(
-        KEEP, description="Form Reps: attempted shots per sweep point in one round."
+        KEEP,
+        description="Form Reps (count): attempted shots per sweep point in one round.",
     )
     rounds: int | None | Keep = Field(
-        KEEP, description="Form Rounds: acquisitions accumulated at each sweep point."
+        KEEP,
+        description="Form Rounds (count): acquisitions accumulated at each sweep point.",
     )
 
 

@@ -193,19 +193,20 @@ def _draw_distributions(fig: Figure, counts: NDArray[np.float64]) -> None:
         np.diagonal(class_probability_covariance(rows), axis1=-2, axis2=-1)
     )
     xs = np.arange(OUTCOME_COUNT)
+    fig.supxlabel("Hatched bar: terminal class matches the nominal preparation")
     for ax, prepared, row, sem in zip(
         fig.axes, PREPARED_LABELS, probabilities, errors, strict=True
     ):
         ax.clear()
-        ax.bar(
+        bars = ax.bar(
             xs,
             row,
             yerr=sem,
-            color=[
-                "C0" if outcome == prepared else "0.65" for outcome in OUTCOME_LABELS
-            ],
+            color="0.65",
             error_kw={"ecolor": "0.15", "capsize": 2},
         )
+        match = bars.patches[OUTCOME_LABELS.index(prepared)]
+        match.set(hatch="///", edgecolor="0.25")
         ax.set(
             title=f"Nominal preparation: {prepared}",
             ylabel="Terminal class probability",

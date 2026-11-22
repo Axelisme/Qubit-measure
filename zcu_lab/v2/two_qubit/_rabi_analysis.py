@@ -36,6 +36,8 @@ class RabiRate:
     cosine's offset, signed contrast, frequency (MHz), and phase (deg), or None
     on failure. It retains a finite rejected low-rate fit for display. quality
     reports diagnostics calculated on the actual fit observations.
+    minimum_rate_mhz is the inverse measured duration span in MHz when a finite
+    fitted rate is rejected by that criterion, otherwise None.
     """
 
     rate: float | None
@@ -43,6 +45,7 @@ class RabiRate:
     reason: str | None
     parameters: tuple[float, float, float, float] | None
     quality: FitQuality | None
+    minimum_rate_mhz: float | None = None
 
 
 def fit_duration_rates(
@@ -166,6 +169,7 @@ def _fit_duration_rate(
             f"Fitted rate {abs(frequency):.4g} MHz < {minimum_rate:.4g} MHz (inverse duration span)",
             model,
             quality,
+            minimum_rate_mhz=float(minimum_rate),
         )
     return RabiRate(abs(frequency), error, None, model, quality)
 

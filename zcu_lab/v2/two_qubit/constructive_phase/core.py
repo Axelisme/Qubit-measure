@@ -677,12 +677,19 @@ def _plot_phase_modulation(plots: Plots, analysis: ConstructivePhaseData) -> Non
     fig, ax = plots.subplots(
         num="constructive_phase", figsize=(7, 4.8), layout="constrained"
     )
-    ax.plot(
+    # First-order propagation of each duration fit's SE, for display only.
+    squared_rate_se = [
+        2 * rate.rate * rate.uncertainty if rate.uncertainty is not None else np.nan
+        for rate in analysis.rates
+        if rate.rate is not None
+    ]
+    ax.errorbar(
         analysis.phases,
         analysis.squared_rates,
-        ".",
+        yerr=squared_rate_se,
+        fmt=".",
         color="C0",
-        label="Eligible fitted duration rates²",
+        label="Eligible rates² ± propagated fit SE",
     )
     prediction = modulation.prediction
     if prediction is None:
@@ -732,13 +739,20 @@ def _plot_duration_rates(
         label="Selected rates ± fit SE",
     )
     rejected = [
-        (x, abs(rate.parameters[2]))
+        (x, abs(rate.parameters[2]), rate.minimum_rate_mhz)
         for x, rate in zip(coordinates, rates, strict=True)
-        if rate.rate is None and rate.parameters is not None
+        if rate.parameters is not None and rate.minimum_rate_mhz is not None
     ]
     if rejected:
-        x, y = zip(*rejected, strict=True)
-        ax.plot(x, y, "x", color="C3", label="Below inverse duration span")
+        x, y, criteria = zip(*rejected, strict=True)
+        ax.plot(x, y, "x", color="C3", label="Unresolved fitted rates")
+        floor = criteria[0]  # The owner uses the common duration span for every slice.
+        ax.axhline(
+            floor,
+            color="0.45",
+            ls="--",
+            label=f"Inverse duration span: {floor:.4g} MHz",
+        )
     missing = sum(rate.rate is None and rate.parameters is None for rate in rates)
     fig.suptitle(f"{_MAP_TITLE}\nDuration-fit rates")
     ax.set(

@@ -519,8 +519,13 @@ class RBExp(Experiment[RBResult, RBCfg]):
                     f"{label}: 1/e depth = {arm.decay_time:.3g} ± {arm.decay_time_err:.2g} count; "
                     f"R² {r2}; normalized RMS {rms_label}"
                 )
-                if any(issue.path == "decay_time" for issue in quality_item.invalid):
-                    report.append(f"{label}: depth window does not resolve the decay.")
+                # Keep the owner's bound and value; the heading translates its conclusion.
+                report.extend(
+                    f"{label}: decay unresolved in depth window (count)\n"
+                    + issue.reason.removesuffix(": 窗口內無法解析衰減時間")
+                    for issue in quality_item.invalid
+                    if issue.path == "decay_time"
+                )
         elif reason is not None:
             report.append(f"No RB estimate: {reason}")
         fig.supxlabel("\n".join(report), fontsize=10)

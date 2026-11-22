@@ -66,12 +66,29 @@ These figures include preparation and readout errors.
 They do not measure gate fidelity or resolve physical leakage by themselves.
 There are no mean-IQ diagnostics or saved IQ clouds.
 
+The white cross marks the lowest finite measured P(g,g) point. It only
+chooses the frequency of one Duration slices panel. The other panels use the
+first and last scan frequencies, without repeating a frequency. If no
+finite point is available, the middle scan index replaces the marked slice.
+The cross is not a calibration candidate.
+
+Layout reference: Ding, Fig. 5-8(b) (printed p. 151), maps the |101⟩
+population against drive frequency and pulse plateau length. This experiment
+shows terminal P(g,g) after double Xπ against common CZ drive frequency (MHz)
+and common waveform envelope duration (µs), not plateau length.
+
 Each fully acquired duration trace with nonzero selected counts uses an
 undamped cosine fit.
-Use Duration-fit rates to compare frequencies. Rates below 1 divided by the
-saved duration span are unresolved; the rate chart marks them separately.
-Failed or degenerate fits report a reason rather than a zero rate.
+Use Duration-fit rates to compare frequencies. The plot marks unresolved fitted
+rates with crosses at their fitted MHz values and labels the inverse of the
+saved duration span in MHz. A fitted rate below that line is unresolved.
+Identifiable rates show their fit SE. Failed or degenerate fits report a
+reason rather than a zero rate.
 Use Duration slices to check measured points against the dense cosine fit.
+R² measures the fraction of the observed probability variation explained by
+the fit and can be negative. Normalized RMS is the root-mean-square fit
+residual divided by the observed probability range. Neither metric sets a
+new selection threshold.
 At a measured point, the bar is one shot SEM from the binomial (g,g)
 indicator, using only the retained shots at that point. The bar measures
 counting noise, not the uncertainty of the fitted rate. The 2D maps have

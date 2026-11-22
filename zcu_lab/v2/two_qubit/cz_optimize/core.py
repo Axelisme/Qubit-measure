@@ -441,7 +441,7 @@ def _measure_candidate(
 
 def _start_live_view(
     plots: Plots, indices: NDArray[np.float64]
-) -> Callable[[NDArray[np.float64]], None]:
+) -> Callable[[tuple[NDArray[np.float64], int]], None]:
     """Create the live chart and return its owner-thread refresh callback."""
     # 2. Show the measured objective, its shot SEM, and the running best.
     fig, ax = plots.subplots(num="measurement", layout="constrained")
@@ -454,25 +454,27 @@ def _start_live_view(
         [], [], "x", color="0.45", label="Envelope exceeds DAC limit"
     )
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
-    fig.suptitle("CZ optimization · Qubit1 / Qubit2\nWaiting for candidates")
+    title = "CZ optimization · Qubit1 / Qubit2"
+    fig.suptitle(f"{title}\n0/{len(indices)} candidates processed · 0 retained shots")
     fig.show()
 
     @plots.on_plot_thread
-    def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+    def update(frame: tuple[NDArray[np.float64], int]) -> tuple[Artist, ...]:
         """Refresh the measured objective and skipped evaluations without assigning skipped points an SEM."""
+        data, retained_shots = frame
         values, best, errors, peaks = data
         skipped = peaks > 1.0
         best_line.set_data(indices, best)
         skipped_line.set_data(indices[skipped], values[skipped])
         count = int(np.count_nonzero(np.isfinite(values)))
-        title = fig.suptitle(
-            f"CZ optimization · Qubit1 / Qubit2\n{count}/{len(indices)} candidates processed"
+        heading = fig.suptitle(
+            f"{title}\n{count}/{len(indices)} candidates processed · {retained_shots:,} retained shots"
         )
         return (
             *viewer.set(indices, np.where(skipped, np.nan, values), errors),
             best_line,
             skipped_line,
-            title,
+            heading,
         )
 
     return update
@@ -586,6 +588,16 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
 
         update = _start_live_view(context.plots, indices)
 
+        def publish_progress() -> None:
+            # Skipped candidates and unmeasured seeds have no count table in the buffer.
+            retained = int(np.nansum(buffer.array))
+            update(
+                (
+                    np.stack((targets, best, _objective_sem(buffer.array), peak)),
+                    retained,
+                )
+            )
+
         # 3. Measure evaluation 0 without a CMA update, then tell only complete populations.
         population: list[NDArray[np.float64]] = []
         losses: list[float] = []
@@ -604,10 +616,11 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
                     candidate = _candidate_cfg(cfg, samples, params[index])
                     target = _measure_candidate(cfg, context, step, arms, candidate)
                     if not np.isfinite(target):
-                        break  # Stop before a complete row; keep any counts already acquired.
+                        publish_progress()  # A stopped row can contain shots, but no objective.
+                        break
                     best_target = float(np.fmax(best_target, target))
                 targets[index], best[index] = target, best_target
-                update(np.stack((targets, best, _objective_sem(buffer.array), peak)))
+                publish_progress()
                 if index > 0:
                     losses.append(1.0 - target)
                     if len(losses) == cfg.popsize:

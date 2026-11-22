@@ -311,6 +311,17 @@ def _projected_sem(counts: NDArray[np.float64], target: str) -> NDArray[np.float
     return np.sqrt(np.maximum(0, cov[..., 0, 0] + cov[..., 1, 1] - 2 * cov[..., 0, 1]))
 
 
+def started_trains(train_sums: NDArray[np.float64]) -> NDArray[np.intp]:
+    """Return scan-order indices with any finite count, with train axis first.
+
+    Zero counts still mean the train started. NaN-only trains did not start.
+    Use the original count table, before any completeness or herald mask.
+    """
+    return np.flatnonzero(
+        np.isfinite(train_sums).any(axis=tuple(range(1, train_sums.ndim)))
+    )
+
+
 def _plot_terminal_quadratures(
     plots: Plots,
     frequencies: NDArray[np.float64],
@@ -327,7 +338,11 @@ def _plot_terminal_quadratures(
         figsize=(7, 6.6),
         layout="constrained",
     )
-    fig.suptitle(f"Conditional phase · {target} · {n} CZ gates")
+    title = f"Conditional phase · {target} · {n} CZ gates"
+    if not np.isfinite(values).any():
+        title += "\nNo retained projection data"
+        fig.axes[-1].set_xlim(frequencies[0], frequencies[-1])
+    fig.suptitle(title)
     for b, ax in enumerate(fig.axes):
         ax.set(
             title=f"Spectator preparation {('g', 'e')[b]}", ylabel="Target P(e) − P(g)"
@@ -375,9 +390,7 @@ def _start_live_view(
 
     @plots.on_plot_thread
     def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
-        active = np.flatnonzero(
-            np.any(np.isfinite(sums.reshape(len(config.gate_count), -1)), axis=1)
-        )
+        active = started_trains(sums)
         if active.size == 0:
             return ()
         j = int(active[-1])
@@ -597,19 +610,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             crossings.reason,
         )
 
-        # Show the same classified projection as the latest live frame first.
-        sem = _projected_sem(data.sums, cfg.target)
-        measured = qubit_sigma(data.sums, cfg.target)
-        for j, n in reversed(tuple(enumerate(data.gate_counts))):
-            _plot_terminal_quadratures(
-                plots,
-                frequencies,
-                int(n),
-                cfg.target.capitalize(),
-                measured[:, :, j],
-                sem[:, :, j],
-            )
-
+        _plot_train_projections(plots, data, cfg)
         _plot_phase_crossing(
             plots, frequencies, cfg.target.capitalize(), conditional, crossings
         )
@@ -625,6 +626,32 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             )
         # 4. Propose a frequency only for a unique fitted crossing; otherwise retain its rejection reason.
         return answer
+
+
+def _plot_train_projections(
+    plots: Plots, data: ConditionalPhaseResult, cfg: ConditionalPhaseCfg
+) -> None:
+    """Start with the latest live train and keep the empty planned diagnostics."""
+    active = set(started_trains(np.moveaxis(data.sums, 2, 0)))
+    if not active:
+        _, ax = plots.subplots(num="measurement", layout="constrained")
+        ax.set_axis_off()
+        ax.set_title(
+            f"Conditional phase · {cfg.target.capitalize()}\nNo CZ trains started"
+        )
+    sem = _projected_sem(data.sums, cfg.target)
+    measured = qubit_sigma(data.sums, cfg.target)
+    for j in sorted(
+        range(len(data.gate_counts)), key=lambda j: (j in active, j), reverse=True
+    ):
+        _plot_terminal_quadratures(
+            plots,
+            data.frequencies,
+            int(data.gate_counts[j]),
+            cfg.target.capitalize(),
+            measured[:, :, j],
+            sem[:, :, j],
+        )
 
 
 def _plot_phase_crossing(
@@ -670,8 +697,11 @@ def _plot_slopes(
     target: str,
     fitted: phase_slopes.PhaseSlopeFit,
 ) -> None:
-    """Compare spectator-resolved phase slopes and their fit errors."""
-    fig, ax = plots.subplots(num="slopes", figsize=(7, 4.6), layout="constrained")
+    """Compare spectator-resolved phase slopes, fit errors and residual quality."""
+    fig, _ = plots.subplots(
+        num="slopes", nrows=2, sharex=True, figsize=(7, 6), layout="constrained"
+    )
+    ax, quality_ax = fig.axes
     for b, state in enumerate(("g", "e")):
         ax.errorbar(
             xs,
@@ -681,11 +711,24 @@ def _plot_slopes(
             color=f"C{b}",
             label=f"spectator {state}",
         )
+        quality_ax.plot(
+            xs,
+            [
+                fit.diagnostics.reduced_chi_square if fit is not None else np.nan
+                for fit in fitted.fits[b]
+            ],
+            ".",
+            color=f"C{b}",
+        )
 
-    ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")
-    ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
-    ax.ticklabel_format(useOffset=False)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
+    ax.set_ylabel("Phase slope (deg/gate)")
+    quality_ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Reduced χ²")
+    quality_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    quality_ax.ticklabel_format(useOffset=False)
+    if not any(np.isfinite(line.get_ydata()).any() for line in quality_ax.lines):
+        quality_ax.set_title("Reduced χ² unavailable")
+        quality_ax.set_xlim(xs[0], xs[-1])
+    fig.legend(*ax.get_legend_handles_labels(), loc="outside lower center", ncols=2)
     fig.suptitle(f"Conditional phase · {target} · slope ± fit SE")
 
 

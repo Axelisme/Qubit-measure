@@ -85,6 +85,12 @@ A high return alone does not establish a π conditional phase.
 
 ## Fit the first complete return
 
+Layout reference: Ding, Fig. 5-9(a,d) (printed p. 152), shows the sequence
+and marks a candidate drive amplitude. Ding sweeps drive voltage (V) and
+plots the |101⟩ population. Here the scan is the common CZ gain multiplier
+(a.u.) for both drive lines and the response is terminal P(g,g) after
+double Xπ.
+
 Analyze returns `fit`, the first-return fit summary.
 It contains `scale`, `period`, `error`, `offset`, `contrast`, `fit_quality` and
 `reason`. Counts, probabilities and curves stay inside analysis

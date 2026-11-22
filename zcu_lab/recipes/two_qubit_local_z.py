@@ -32,14 +32,15 @@ class LocalZInputs(RecipeInputs):
     overrides: Overrides
     gate_count: list[Annotated[int, Field(strict=True, ge=0)]] | None | Keep = Field(
         KEEP,
-        description="Form CZ gates per shot: consecutive nonnegative train lengths, including zero.",
+        description="Form CZ gates per shot (count): consecutive nonnegative train lengths, including zero.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Form Reps: attempted shots per gate count and projection in one round.",
+        description="Form Reps (count): attempted shots per gate count and projection in one round.",
     )
     rounds: int | None | Keep = Field(
-        KEEP, description="Form Rounds: acquisitions accumulated at each sweep point."
+        KEEP,
+        description="Form Rounds (count): acquisitions accumulated at each sweep point.",
     )
 
 

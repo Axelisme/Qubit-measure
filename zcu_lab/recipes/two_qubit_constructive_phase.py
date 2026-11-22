@@ -36,7 +36,8 @@ class ConstructivePhaseInputs(RecipeInputs):
         description="Start and Stop (deg) of Form Qubit2 relative to Qubit1 drive phase.",
     )
     relative_phase_points: int | None | Keep = Field(
-        KEEP, description="Expts under Form Qubit2 relative to Qubit1 drive phase."
+        KEEP,
+        description="Expts (count) under Form Qubit2 relative to Qubit1 drive phase.",
     )
     duration_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
@@ -45,13 +46,15 @@ class ConstructivePhaseInputs(RecipeInputs):
         description="Start and Stop (µs) of Form Common waveform envelope duration.",
     )
     duration_points: int | None | Keep = Field(
-        KEEP, description="Expts under Form Common waveform envelope duration."
+        KEEP, description="Expts (count) under Form Common waveform envelope duration."
     )
     reps: int | None | Keep = Field(
-        KEEP, description="Form Reps: attempted shots per sweep point in one round."
+        KEEP,
+        description="Form Reps (count): attempted shots per sweep point in one round.",
     )
     rounds: int | None | Keep = Field(
-        KEEP, description="Form Rounds: acquisitions accumulated at each sweep point."
+        KEEP,
+        description="Form Rounds (count): acquisitions accumulated at each sweep point.",
     )
 
 

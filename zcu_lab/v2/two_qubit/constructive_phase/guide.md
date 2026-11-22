@@ -72,8 +72,9 @@ There are no mean-IQ diagnostics or saved IQ clouds.
 Each fully acquired duration trace with nonzero selected counts uses an
 undamped cosine fit.
 Rates below 1 divided by the saved duration span are unresolved.
-Duration-fit rates distinguish unresolved fitted rates from identifiable rates.
-A failed or degenerate fit shows a reason, not a zero rate. Use Duration slices
+Duration-fit rates marks them at their fitted MHz values below the labeled
+threshold line. Bars on identifiable rates show the duration cosine's fit SE
+in MHz. A failed or degenerate fit shows a reason, not a zero rate. Use Duration slices
 to compare measured duration points with the dense cosine fit.
 The duration points and the grouped terminal probabilities show ±1 shot SEM
 from the corresponding class indicator and that point's retained count.
@@ -87,7 +88,11 @@ The proposed relative phase is `atan2(C,B)` in degrees, the maximum-rate branch.
 More than three identifiable phase slices and full-rank phase coverage are
 needed for finite uncertainty. Zero modulation or nonfinite uncertainty prevents
 a proposal. The interference plot shows the dense rate-squared fit and its
-maximum. R² measures how much measured rate-squared variation the fit explains.
+maximum. The rate² points use ±1 propagated fit SE, 2 × rate × rate fit SE,
+in MHz². These are for display only and do not weight the interference fit.
+They differ from the rate fit SE in MHz and from the shot SEM on the
+underlying classified projection P(g,g). R² measures how much observed
+rate-squared variation the fit explains.
 Normalized RMS is the residual RMS divided by the measured rate-squared span.
 The summary also reports each parameter's standard error relative to its
 absolute fitted value. These metrics have no additional selection threshold.

@@ -524,9 +524,22 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         row = len(coordinates) // 2
         if usable.any():
             row, col = np.unravel_index(
-                np.nanargmin(answer.populations[..., 0]), usable.shape
+                np.argmin(np.where(usable, answer.populations[..., 0], np.inf)),
+                usable.shape,
             )
-            ax.plot(durations[col], coordinates[row], "w+", markersize=10)
+            ax.plot(
+                durations[col],
+                coordinates[row],
+                "w+",
+                markersize=10,
+                label="Lowest measured return · selects duration slice",
+            )
+            ax.legend(
+                loc="upper center",
+                bbox_to_anchor=(0.5, -0.2),
+                facecolor="0.25",
+                labelcolor="white",
+            )
         _plot_population_maps(plots, durations, coordinates, answer.populations)
         rates = fit_duration_rates(durations, answer)
         _plot_duration_rates(plots, coordinates, rates)
@@ -585,13 +598,20 @@ def _plot_duration_rates(
         label="Selected rates ± fit SE",
     )
     rejected = [
-        (x, abs(rate.parameters[2]))
+        (x, abs(rate.parameters[2]), rate.minimum_rate_mhz)
         for x, rate in zip(coordinates, rates, strict=True)
-        if rate.rate is None and rate.parameters is not None
+        if rate.parameters is not None and rate.minimum_rate_mhz is not None
     ]
     if rejected:
-        x, y = zip(*rejected, strict=True)
-        ax.plot(x, y, "x", color="C3", label="Below inverse duration span")
+        x, y, criteria = zip(*rejected, strict=True)
+        ax.plot(x, y, "x", color="C3", label="Unresolved fitted rates")
+        floor = criteria[0]  # The owner uses the common duration span for every slice.
+        ax.axhline(
+            floor,
+            color="0.45",
+            ls="--",
+            label=f"Inverse duration span: {floor:.4g} MHz",
+        )
     missing = sum(rate.rate is None and rate.parameters is None for rate in rates)
     fig.suptitle(f"{_MAP_TITLE}\nDuration-fit rates")
     ax.set(

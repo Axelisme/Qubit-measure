@@ -6,6 +6,8 @@ from typing import ClassVar
 
 import numpy as np
 from matplotlib.artist import Artist
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit, fit_phase_slopes
@@ -44,6 +46,7 @@ from .core import (
     count_quadratures,
     fitted_crossings,
     phase_points,
+    started_trains,
 )
 
 
@@ -105,9 +108,13 @@ def _plot_terminal_quadratures(
     title: str,
     values: NDArray[np.float64],
     sem: NDArray[np.float64],
-    herald_label: str,
+    *,
+    sign_corrected_ee: bool,
 ) -> None:
     """Show both X/Y projections in separate spectator panels for one CZ train."""
+    herald_label = (
+        "Herald (e,e), sign corrected" if sign_corrected_ee else "Herald (g,g)"
+    )
     fig, _ = plots.subplots(
         num=f"{herald_label}_{title}",
         nrows=2,
@@ -119,8 +126,9 @@ def _plot_terminal_quadratures(
         herald_label += " · No retained projection data"
         fig.axes[-1].set_xlim(frequencies[0], frequencies[-1])
     fig.suptitle(f"{title}\n{herald_label}")
+    ylabel = "Target P(g) − P(e)" if sign_corrected_ee else "Target P(e) − P(g)"
     for b, ax in enumerate(fig.axes):
-        ax.set(title=f"Actual spectator {('g', 'e')[b]}", ylabel="Target P(e) − P(g)")
+        ax.set(title=f"Actual spectator {('g', 'e')[b]}", ylabel=ylabel)
         for q, projection in enumerate(("X", "Y")):
             ax.errorbar(
                 frequencies,
@@ -161,9 +169,7 @@ def _start_live_view(
 
     @plots.on_plot_thread
     def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
-        active = np.flatnonzero(
-            np.any(np.isfinite(sums.reshape(len(config.gate_count), -1)), axis=1)
-        )
+        active = started_trains(sums)
         if active.size == 0:
             return ()
         j = int(active[-1])
@@ -423,27 +429,29 @@ class ConditionalPhaseHeraldedExp(
             crossings.reason,
         )
 
-        # Show the same classified projection as the latest live frame first.
-        gg_sem = _projected_sem(gg, cfg.target)
-        ee_sem = _projected_sem(ee, cfg.target)
-        for j, n in reversed(tuple(enumerate(data.gate_counts))):
-            _plot_terminal_quadratures(
-                plots,
-                frequencies,
-                f"Heralded conditional phase · {cfg.target.capitalize()} · {n} CZ gates",
-                gg_stats.values[:, :, j],
-                gg_sem[:, :, j],
-                "Herald (g,g)",
+        active = set(started_trains(np.moveaxis(data.sums, 2, 0)))
+        if not active:
+            _, ax = plots.subplots(num="measurement", layout="constrained")
+            ax.set_axis_off()
+            ax.set_title(
+                f"Heralded conditional phase · {cfg.target.capitalize()} · herald (g,g)\nNo CZ trains started"
             )
-        for j, n in reversed(tuple(enumerate(data.gate_counts))):
-            _plot_terminal_quadratures(
-                plots,
-                frequencies,
-                f"Heralded conditional phase · {cfg.target.capitalize()} · {n} CZ gates",
-                -ee_stats.values[:, :, j],
-                ee_sem[:, :, j],
-                "Herald (e,e), sign corrected",
-            )
+        order = sorted(
+            range(len(data.gate_counts)), key=lambda j: (j in active, j), reverse=True
+        )
+        for sign_corrected, values, sem in (
+            (False, gg_stats.values, _projected_sem(gg, cfg.target)),
+            (True, -ee_stats.values, _projected_sem(ee, cfg.target)),
+        ):
+            for j in order:
+                _plot_terminal_quadratures(
+                    plots,
+                    data.frequencies,
+                    f"Heralded conditional phase · {cfg.target.capitalize()} · {data.gate_counts[j]} CZ gates",
+                    values[:, :, j],
+                    sem[:, :, j],
+                    sign_corrected_ee=sign_corrected,
+                )
         _plot_phase_crossing(
             plots,
             frequencies,
@@ -464,27 +472,71 @@ class ConditionalPhaseHeraldedExp(
                 tuple(row[j] for row in ee_phases),
             )
 
-        fig, axes = plots.subplots(num="herald", figsize=(8, 5), layout="constrained")
-        image = axes.imshow(
-            np.ma.masked_invalid(herald_matrix.reshape(-1, 9)),
-            vmin=0,
-            vmax=1,
-            cmap="Blues",
-            aspect="auto",
-        )
-        axes.set(
-            xticks=range(9),
-            xticklabels=[
-                f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")
-            ],
-            xlabel="Herald class (Qubit1, Qubit2)",
-            ylabel="Scan row (count)",
-            title="Heralded conditional phase · Qubit1 / Qubit2\nInitial readout class distribution",
-        )
-        axes.grid(False)
-        fig.colorbar(image, ax=axes, label="Herald probability (0–1)")
+        _plot_herald_map(plots, data.gate_counts, data.frequencies, herald_matrix)
         # 4. Propose only the unique joint-fit pi crossing; retain the reason when it is unresolved.
         return answer
+
+
+def _plot_herald_map(
+    plots: Plots,
+    ns: NDArray[np.int64],
+    frequencies: NDArray[np.float64],
+    probabilities: NDArray[np.float64],
+) -> None:
+    """Facet nominal spectator and X/Y; within each count band show nine herald classes."""
+    fig, _ = plots.subplots(
+        num="herald",
+        nrows=2,
+        ncols=2,
+        sharex=True,
+        sharey=True,
+        figsize=(9, 6.5),
+        layout="constrained",
+    )
+    fig.suptitle(
+        "Heralded conditional phase · Qubit1 / Qubit2\nInitial readout class distribution"
+    )
+    # Each band reads top to bottom in Qubit1-major g/e/other order.
+    rows = np.arange(9 * len(ns))
+    bands = np.arange(len(ns)) * 9
+    columns = np.arange(len(frequencies))
+    ticks = np.linspace(0, len(frequencies) - 1, min(len(frequencies), 4), dtype=int)
+    norm = Normalize(0, 1)
+    for i, (ax, values) in enumerate(
+        zip(
+            fig.axes,
+            probabilities.reshape(4, len(ns), len(frequencies), 9),
+            strict=True,
+        )
+    ):
+        pixels = values.transpose(0, 2, 1).reshape(len(rows), len(frequencies))
+        # Categorical columns preserve the exact scanned frequencies as well as one-point scans.
+        ax.pcolormesh(columns, rows, pixels, shading="nearest", norm=norm, cmap="Blues")
+        ax.set_xticks(ticks, [f"{frequencies[j]:.7g}" for j in ticks])
+        ax.set_yticks(bands + 4, [str(n) for n in ns])
+        ax.set_ylim(len(rows) - 0.5, -0.5)
+        ax.set(
+            title=f"Spectator {('g', 'e')[i // 2]} preparation · {('X', 'Y')[i % 2]}",
+            ylabel="CZ gates (count)",
+        )
+        if i >= 2:
+            ax.set_xlabel("Common CZ frequency (MHz)")
+        ax.grid(False)
+        ax.set_facecolor("0.9")  # Distinguish a masked cell from a measured zero.
+        ax.tick_params(axis="y", labelleft=True)
+        ax.hlines(
+            bands[1:] - 0.5, -0.5, len(frequencies) - 0.5, color="0.45", linewidth=0.7
+        )
+    fig.supxlabel(
+        "Within each count band, top to bottom (Qubit1, Qubit2):\n"
+        "g,g · g,e · g,other · e,g · e,e · e,other · other,g · other,e · other,other",
+        fontsize=10,
+    )
+    fig.colorbar(
+        ScalarMappable(norm=norm, cmap="Blues"),
+        ax=fig.axes,
+        label="Herald probability (0–1)",
+    )
 
 
 def _plot_phase_crossing(
@@ -534,34 +586,45 @@ def _plot_slopes(
     fitted: PhaseSlopeFit,
     gg_only: PhaseSlopeFit,
 ) -> None:
-    """Compare spectator-resolved phase slopes and their fit errors."""
-    fig, ax = plots.subplots(num="slopes", figsize=(7, 4.6), layout="constrained")
+    """Compare spectator-resolved phase slopes, fit errors and residual quality."""
+    fig, _ = plots.subplots(
+        num="slopes", nrows=2, sharex=True, figsize=(7, 6), layout="constrained"
+    )
+    ax, quality_ax = fig.axes
     for b, state in enumerate(("g", "e")):
-        ax.errorbar(
-            xs,
-            fitted.slopes_deg[b],
-            yerr=fitted.errors_deg[b],
-            fmt=".",
-            color=f"C{b}",
-            label=f"Joint spectator {state}",
-        )
-        ax.errorbar(
-            xs,
-            gg_only.slopes_deg[b],
-            yerr=gg_only.errors_deg[b],
-            fmt="x",
-            color=f"C{b}",
-            label=f"(g,g) only, spectator {state}",
-        )
-    ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")
-    ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
-    ax.ticklabel_format(useOffset=False)
+        for fit_group, marker, label in (
+            (fitted, ".", f"Joint spectator {state}"),
+            (gg_only, "x", f"(g,g) only, spectator {state}"),
+        ):
+            ax.errorbar(
+                xs,
+                fit_group.slopes_deg[b],
+                yerr=fit_group.errors_deg[b],
+                fmt=marker,
+                color=f"C{b}",
+                label=label,
+            )
+            quality_ax.plot(
+                xs,
+                [
+                    fit.diagnostics.reduced_chi_square if fit is not None else np.nan
+                    for fit in fit_group.fits[b]
+                ],
+                marker,
+                color=f"C{b}",
+            )
+    ax.set_ylabel("Phase slope (deg/gate)")
+    quality_ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Reduced χ²")
+    quality_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    quality_ax.ticklabel_format(useOffset=False)
     if not (
         np.isfinite(fitted.slopes_deg).any() or np.isfinite(gg_only.slopes_deg).any()
     ):
         ax.set_title("No identifiable slopes")
-        ax.set_xlim(xs[0], xs[-1])
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
+    if not any(np.isfinite(line.get_ydata()).any() for line in quality_ax.lines):
+        quality_ax.set_title("Reduced χ² unavailable")
+        quality_ax.set_xlim(xs[0], xs[-1])
+    fig.legend(*ax.get_legend_handles_labels(), loc="outside lower center", ncols=2)
     fig.suptitle(f"Heralded conditional phase · {target} · slope ± fit SE")
 
 
