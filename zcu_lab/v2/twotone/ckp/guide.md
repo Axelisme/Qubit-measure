@@ -1,17 +1,21 @@
-**Readers:** operator, agent. Compare qubit resonance under a resonator drive with and without a qubit π preparation pulse. Use both branches to estimate the dispersive shift, resonator linewidth and readout frequency.
+**Readers:** operator, agent. Compare qubit frequency shifts with and without π preparation to estimate resonator linewidth, dispersive shift and readout frequency.
 
-## Prepare and run
+## Sequence and key settings
 
-First calibrate the readout, qubit frequency, π pulse and resonator linewidth. Each shot runs optional **Reset**, skips or applies **Qubit π preparation pulse**, starts both probe tones, waits for both to finish, then reads out. The two branches indicate pulse preparation, not known pure g and e states.
+Optional **Reset** → skip or apply **Qubit π preparation pulse** → start both probe tones → wait for both ends → readout. The two branches label the preparation, not pure g and e states.
 
-Check both aliases before opening the form. **Defaults** captures fresh calibration and replaces unsaved values; **Refresh** preserves edits. The form uses `$qubit.module.x180` and `$resonator.module.readout`, or editable templates when those slots are empty. An empty reset slot leaves reset off. The resonator and qubit drives start from independent templates. Resonator kappa sets the starting resonator drive length and qubit probe delays. Confirm the timing and both drives' gains before Run.
+- Calibrate readout, qubit frequency, π pulse and resonator linewidth first. Bind the qubit and resonator correctly. Check independently the two drive gains and pulse timing; with resonator κ in MHz, initial **Resonator Drive Pulse** length is `1.5 + 5.1/(2πκ)` µs; **Qubit Probe Pulse** pre- and post-delay start at `5/(2πκ)` and `3.1/(2πκ)` µs.
+- **Resonator drive RF frequency** starts at `$resonator.freq ± 1.5 × $resonator.kappa`. **Qubit probe RF frequency** starts at `$qubit.freq − 10 MHz … $qubit.freq + 5 MHz`. Set the windows to cover both branches and fill any required blanks before Run.
+- **Relax delay** starts at `5 × qubit.t1` (150 µs if absent). **Reps** is per frequency pair and preparation per round.
 
-**Resonator drive RF frequency** starts at `$resonator.freq` ± 1.5 × `$resonator.kappa`, with 101 points. **Qubit probe RF frequency** starts at `$qubit.freq` − 10 MHz to `$qubit.freq` + 5 MHz, also with 101 points. Missing required calibration leaves fields empty until you supply values. **Reps** is the number of shots per RF-frequency pair and preparation per round. **Rounds** is the number of averaging passes. Defaults use 1000 × 10. **Relax delay** waits after each shot. The initial wait is five times T1, or 150 µs when no T1 is stored; invalid stored T1 leaves the input empty.
+See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shared GUI steps.
 
 ## Read the maps and shared fit
 
-Run shows two qubit-frequency versus resonator-frequency maps, one per preparation. Color is the mean IQ projected and scaled within each resonator-frequency slice to 0–1 a.u.; it is not a population. The same color in the two maps does not imply the same absolute IQ. The counter shows RF pairs and preparations with data. Blank regions have not been acquired. There are no pointwise shot error bars on these 2D spectra.
+Run shows qubit RF versus resonator RF for each preparation. Color is projected mean IQ scaled within each resonator-frequency slice to 0–1 a.u., not population. Equal colors across slices do not imply equal IQ. Blank cells lack data. These maps do not show pointwise shot SEM.
 
-Analyze puts the extracted qubit resonance centers and continuous shared model on those maps. It needs at least five usable centers in each preparation and a valid fit covariance. Fit EDM is the optimizer's estimated distance from the minimum of its objective, not a measure of whether the Lorentzian follows the ridge. The fitter checks convergence and covariance; the plot does not add an EDM cutoff. Compare the points with the model on both sides of each ridge before using the result; a weak slice or a clipped window can shift the center. If the ridge hits a qubit RF edge, move that edge past the last visible center and leave room for both shoulders. For example, if the ridge exits at 620 MHz with a 2 MHz FWHM, extend the edge by at least 2 MHz and verify the next map includes the full line. Read χ/2π as half the separation of the two fitted resonator centers and κ/2π as the fitted resonator FWHM. The parameter errors describe the shared fit covariance, not shot SEM. The vertical marker is the proposed readout frequency; it need not be one of the two centers.
+Analyze overlays qubit ridge centers and a shared model. It needs at least five usable centers in each preparation and valid covariance. Fit EDM is the optimizer's estimated distance from its objective minimum, not evidence that the model follows either ridge. The parameter errors come from the shared fit covariance. χ/2π is half the fitted resonator-center separation; κ/2π is the fitted resonator FWHM. A vertical line marks the proposed readout frequency, not necessarily either fitted center.
 
-Check Reps × Rounds in the Analyze summary for the selected Run or Load. Apply only after judging both maps. Apply writes `$qubit.ext.chi`, `$resonator.kappa` and `$resonator.freq`; it does not change a module. There is no dedicated CKP recipe. Save retains the two preparation grids and complex IQ. Load uses the native saved record for Analyze and keeps the current form inputs.
+## Next step
+
+Check both ridges against the shared curves. If a ridge meets a qubit RF edge, extend it past the visible center by at least roughly a linewidth and check both shoulders in the next map. If the fit is supported, writeback proposes `$qubit.ext.chi`, `$resonator.kappa`, and `$resonator.freq`; modules stay unchanged.

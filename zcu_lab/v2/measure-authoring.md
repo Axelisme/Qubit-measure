@@ -118,7 +118,7 @@ Adapter 使用獨立輸入型別時，預設順序由該型別決定。
 指定欄位依 tuple 順序前移，未列欄位保留原相對順序，nested model 不變。
 `tree` 的寫入順序不控制畫面。未知或重複欄位會在 Form 建構時 raise `ValueError`，
 持久 Spec 的 Form 也不接受非空 `field_order`。
-在 guide 依實際可見順序寫操作步驟，預演時核對繼承欄位與例外排序。
+預演時核對繼承欄位與例外排序。Guide 提到實驗專屬欄位時，沿用實際可見的 label 與單位。
 
 在宣告模型的 `FieldMeta` 指定可見 label／unit，照[表單文字 F1–F4](figure-style.md#表單文字)及
 [單位表](figure-style.md#單位)撰寫，例如「自由演化時間 (µs)」和「驅動增益 (a.u.)」。
@@ -126,7 +126,7 @@ SweepCfg 的座標與 step 繼承 unit，點數不繼承掃描量的物理單位
 既有 cfg key 不因顯示文字改名，例如 `delays`、`delay` 與 `length` 都可顯示 Delay。
 共用但物理量不同的 range 必須說明單位由哪張實驗決定。
 Form 的 flux 掃描輸入使用 `flux_unit` 指定的裝置輸入單位，不用它推定 Result 或保存軸的單位。
-例如 [JPA bias survey](jpa/flux_onetone/guide.md#read-the-plots) 的圖上 bias 軸與保存的 `fluxes` 軸都使用裝置原生 a.u.，不隨 Form 的 A／V／native 選項改標籤或換算。
+例如 [JPA bias survey](jpa/flux_onetone/guide.md#read-the-map-and-cuts) 的圖上 bias 軸與保存的 `fluxes` 軸都使用裝置原生 a.u.，不隨 Form 的 A／V／native 選項改標籤或換算。
 Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數。
 
 初值依來源處理。來源可推導時，用 Expr 或固定 capture，寫明來源路徑與單位。
@@ -165,9 +165,8 @@ Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
 
 每個 GUI 情境保存 get_cfg 的 input、values、errors、diagnostics 與實際欄位順序。
 用 ComponentDriver 開啟 tab、操作 Refresh 與 Defaults，保存截圖並審閱可見 label、單位與錯誤。
-在 guide 寫出各情境的起手步驟與仍需取得的校準。
+在 guide 寫出各情境仍需取得的校準與該實驗 Run 前的檢查。通用 Open／Defaults／Refresh 操作連到 [操作員共用流程](operator-workflow.md)。
 預演不呼叫 Run、不連硬體，也不操作使用者正在使用的桌面 GUI，除非另有明確授權。
-Guide 必須提醒操作員：來源修改後，按 Defaults 重取初值，確認後會丟棄表單編輯。Refresh 只更新 source／choice，保留輸入。
 
 ## Recipe 撰寫
 
@@ -475,7 +474,8 @@ Dotted 的 device value／period NaN cell 視為缺席，inf／bool 仍拒絕。
 ## Operator guide 格式
 
 Adapter guide 是 prose，不是 machine contract。內容放在實驗同目錄的 UTF-8 Markdown 檔。
-Markdown 章節可自由安排，內容檢查表見 [Operator guide Gd1–Gd3](figure-style.md#operator-guide)。
+Markdown 章節可自由安排。內容依 [Gd1–Gd3](figure-style.md#operator-guide) 的六項、保留條件與必留項撰寫。表單只有初值而沒有等價來源說明時，只為操作員必須自行設定的關鍵參數補最短的來源公式。
+通用 GUI 操作連到 [操作員共用流程](operator-workflow.md)。Recipe 留空語意與確切失敗階段若已由已發布的 `Field.description` 或 schema 完整說明，guide 不重述；兩者不等價時保留必要說明。
 Adapter 明確宣告檔案，不依 class 名稱推導路徑：
 
 ```python

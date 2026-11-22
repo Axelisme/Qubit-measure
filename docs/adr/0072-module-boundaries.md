@@ -130,7 +130,7 @@ GUI 為 writeback 檢查有限值或整理摘要不算分析。發布前 `summar
 
 **規則。** `twotone/freq` 暴露 Model type、Expected center 和 Min SNR。`analysis.fitting.spectrum.fit_spectrum` 以明填 `local_peak=True` 負責數值選峰與窗口。Lab 留下選項、IQ 投影與圖上的實際窗口標示，數值工具不讀 lab options。
 
-**例子。** 同一廣掃有強 transition 與一個高度不到它 0.2 的弱 transition 時，可用 Expected center 選附近最高的局部極大值，而不因全譜 range 比例拒絕。中心空白時選最顯著峰。Min SNR 仍可拒絕弱峰；失敗回報候選數與門檻，不改擬合遠處強峰。預設 SNR 5、左右各六個半高寬、中點裁切但至少取最近六點的契約見 [frequency guide](../../zcu_lab/v2/twotone/freq/guide.md#peak-selection)。
+**例子。** 同一廣掃有強 transition 與一個高度不到它 0.2 的弱 transition 時，可用 Expected center 選附近最高的局部極大值，而不因全譜 range 比例拒絕。中心空白時選最顯著峰。Min SNR 仍可拒絕弱峰；失敗回報候選數與門檻，不改擬合遠處強峰。預設 SNR 5 見 frequency guide 的[序列與設定](../../zcu_lab/v2/twotone/freq/guide.md#sequence-and-key-settings)；左右各六個半高寬、中點裁切但至少取最近六點的契約見[頻譜判讀](../../zcu_lab/v2/twotone/freq/guide.md#read-the-spectrum)。
 
 **邊界。** 只改 `twotone/freq`。`SpectrumFitOptions` 保留欄位，`twotone/chain` 仍用最近候選與中點窗口；Notebook fluxdep 與 workflow calibration 不改。其他 caller 自行明選門檻或窗口，不繼承 freq 的 GUI 選項。C8、C9、C15、C16 下仍是 lab → analysis。
 

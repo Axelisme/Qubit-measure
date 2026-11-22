@@ -1,169 +1,27 @@
+**Readers:** operator, agent. Measure energy relaxation for each selected mux qubit.
+
 # Mux T1
 
-**Readers:** operator, agent. Run mux T1 from the GUI or MCP and read its results.
+Measure mean IQ after a calibrated π pulse and variable wait. T1 is the exponential energy-relaxation time; a second fitted time is a model component, not evidence by itself of another state.
 
-**Last updated:** 2026-10-23
+**Sequence:** common reset → simultaneous π pulses → common delay beginning after the longest pulse branch → mux readout.
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+## Key settings
 
-## GUI setup
+Bind the `mux` alias to a `group/mux` with matching qubits and resonators in readout order. Check the full **Readout** module, including frequencies and ADCs for inactive tones. If there is no readout slot, the inline starting values use group wiring and resonator calibrations; verify gain and timing before Run.
 
-Create a `kind: group/mux` component and bind scalar alias `mux` to it, then
-open `mux/t1` from **New Tab**. Without this group and alias, opening the
-form reports an error.
-The captured parameter source must contain every qubit and its matching resonator
-in readout order. Readout references the module slot `$mux.module.readout` when
-present, preserving the library's tones and scalar settings. Use a mux-family
-module with the full group tone count. If the slot is empty, Readout starts
-inline from the blank mux template with group calibration tones.
-Pulse length, ADC window and trigger offset remain blank and required, even
-when the group has a time of flight. This form does not derive readout timing.
-Enter confirmed values or use a calibrated readout slot.
-The generator comes from `$mux.wiring.gen_ch`. Tone i's ADC channel is an
-integer seed from the fixed capture's `group.wiring.ro_ch[i]`, in the group's
-resonator order. Each tone starts
-with gain 0.1. These values are editable initial inputs, not verified hardware
-settings. Complete the remaining required fields and confirm wiring, gain and
-timing before running.
+**Tones** chooses what to edit. **Participants** takes a nonempty list of unique zero-based positions in run order, e.g. `[2, 0]`. It selects both drives and emitted readout tones. The `participants` alias seeds those positions; if absent, unbound, or empty, the form starts with all tones. Editing the selection preserves tone values. Fill required pulse and sweep fields for any newly selected tone, using distinct drive generators separate from readout.
 
-The Tones picker selects the element to edit. Participants selects the qubits to
-run. Tone names, count and order stay fixed. Set Participants to a nonempty JSON
-list of unique original indices, for example `[2, 0]`. This runs original
-positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
-out-of-range participants block Run and remain editable for correction.
+Choose **Delay** in µs to resolve the initial change and reach a baseline. The stop starts at the shared **Relax delay**, the largest five-T1 recovery seed over the full group (150 µs per missing T1, using a 30 µs T1 seed). A short window without a tail makes T1 depend on extrapolation. Choose **Sampling** `decay` to concentrate points within the same bounds; the rounded times must stay distinct. Linear plots use requested times, decay sampling uses the quantized times.
 
-Selected tones need drives on independent generators, distinct from readout.
-Open/Defaults fills selected tones' drive defaults and sets
-these fields to None on other tones. The nullable fields remain editable.
-Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
-and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
-Alias list elements may use `$` links. A missing, unbound or empty row selects all
-original indices in order. An unbound element in a nonempty list rejects Open/Defaults.
-An out-of-group name stays visible as an invalid Participants draft until corrected.
-Changing aliases requires Defaults or reopening; ordinary participant edits keep tone values.
+**Skip leading points** excludes early delays before filtering nonfinite data. Use **Dual exponential** only when the trace resolves two components.
 
-Editing participants preserves every tone value. Fill any newly selected tone's
-missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
-tone still needs valid frequency and ADC identity, even when not selected.
+In `mux_t1`, omitted inputs retain settings. Null `participants` leaves a missing selection at the pre-Run readiness check unless an override fills it. Null `dual_exp` or `skip` is rejected by Analyze, after acquisition. See the [mux recipe inputs](../../../recipes/mux-guide.md#mux_t1).
 
-## FTF cost example
+## Read the plots and use the result
 
-A two-participant offline Run used 11 equally spaced requested delays from
-0.02383 to 0.25635 µs, 0.02 µs const drive pulses, 50 reps, 2 rounds and
-0.1 µs recovery. Readout used 0.1 µs pulse and integration windows, with a
-0.4 µs trigger offset. The hardware-sweep Run took 1.152 s on CPUs 4 and 5 after
-warming the simulation caches.
-This window only checks execution. It does not constrain a physical T1.
+Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Live shows delay coverage after each completed round. Analyze adds the exponential and marks T1 if inside the scan. Compare the contrast, tail and baseline; the principal-axis mean IQ is not excited-state probability.
 
-The timer includes the ComponentDriver button action and terminal wait.
-It is not acquisition-only time and excludes screenshots, Analyze and Save.
-Do not compare it with timings from other slots or experiments as a speed test.
-Long-delay T1 scans can cost much more than this short example because the
-simulated evolution window changes. Delay point count and range, drive duration,
-participants, reset, recovery and readout windows all affect cost.
-Reps and rounds repeat acquisitions on hardware. FTF compilation and cached
-evolution can dominate instead of scaling with reps. Time a short scan that
-includes the intended longest delay before budgeting the full scan.
+Bars in Live and Analyze are shot SEM: the projected shot sample standard deviation divided by √(shot count). They describe uncertainty of the point mean, not fit error, shot spread or round-to-round spread. Mean-only files still fit without bars, and fewer than two shots give no bar. R² measures explained variation, normalized residual RMS measures mismatch relative to signal range, and the reported ± is fit uncertainty.
 
-## Measurement and analysis
-
-Use the live figure to check delay coverage. Analyze overlays the exponential
-model and marks T1 when it is inside the measured window. Compare the baseline,
-contrast and tail with the fit before recording T1. A short window that does not
-show the tail can leave T1 mostly determined by extrapolation. A second decay
-time is a model component, not evidence on its own for a second physical state.
-
-Both views show a principal-axis projection of mean IQ, not excited-state
-probability. R² measures explained variation. Normalized residual RMS measures
-typical model mismatch relative to the signal range. The ± value is the
-uncertainty of the fitted time, not point noise. In Live and Analyze, the
-vertical bars show the standard error of the mean (shot SEM): the sample
-standard deviation of the same projected shots divided by the square root of
-the acquired shot count. Older mean-only files still load and fit without bars.
-Points with fewer than two shots have no bar.
-The Analyze legend sits below the data area. It identifies Measured IQ, the exponential fit and the T1 marker, and lists Shot SEM when available, without covering points or bars or changing the plotted ranges.
-
-Use calibrated fixed pi pulses. All qubits share one delay axis in µs,
-executed by one program's hardware loop. Requested window endpoints and the
-linear input axis must be finite, nonnegative and strictly increasing.
-
-`sampling` defaults to `"linear"`. Select `"decay"` to concentrate delay
-samples within the same `delay: SweepCfg` start/stop window, using the same
-sampling policy as single-qubit T1. Every participant uses the same cycle table.
-Nonuniform samples must remain distinct and increasing after hardware
-quantization; otherwise Run reports an error before acquisition.
-
-The sequence is common reset, simultaneous pi pulses, common delay, then mux
-readout. The delay starts after the longest pulse branch, including pre/post delays.
-With zero pulse delays, a shorter pulse waits an extra `max_len - len_i`.
-That fixed wait changes an exponential decay's amplitude while preserving T1.
-With uniform sampling, plots and fits retain requested delays; hardware timing
-may differ by a few ticks. With nonuniform sampling, plots, fits and native
-files retain the quantized delays. Choose a window that constrains both decay
-and baseline.
-
-Skip removes leading points before finite-IQ filtering.
-Choose the single- or dual-exponential model and inspect quality and uncertainty.
-T1 and errors are in µs.
-Each tone returns its index, fit values and quality as an analysis summary.
-Analysis plots retain the delay coordinates, measured values and fitted curves.
-The returned summary does not include these arrays.
-
-## Writeback
-
-Each qualifying row proposes its captured qubit's `t1` in µs with fitted error,
-plus a T1 sample at the captured bias.
-Review the model, uncertainty and captured destination before Apply.
-
-## Results and saved sources
-
-Run draws one `measurement_i` figure per participant, without a shared overlay.
-Each figure uses the common recorded-delay axis.
-The index `i` is the original tone position in the saved configuration.
-Analyze uses the selected Run/Load source. Use the Analysis figure picker for
-`fit_i`.
-Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.
-Summary rows retain that order and show values, quality or a failure reason.
-A missing source configuration leaves the name unavailable.
-
-Use Data to save measurement data and analysis artifacts.
-Load Data selects a native file or saved run and preserves current Form inputs.
-The selected source fixes the historical pulse, binding and writeback destination.
-Live plots update after each completed round across the full delay axis.
-Cancellation retains completed-round averages across that axis.
-Before the first completed round, signals remain NaN.
-Acquisition errors propagate, and that run publishes no new record.
-A stop request does not determine whether returned data is usable for analysis.
-Only successful, fully finite rows qualify for calibration candidates.
-Missing captured bindings suppress candidates; inconsistent bindings report an error.
-Read each Writeback destination, value, quality and uncertainty.
-Deselect unwanted items, then use **Apply Selected** to write the selected items.
-Analyze and preview only calculate results. Each candidate needs its own selection.
-
-## Drafts and MCP inputs
-
-Saved drafts retain invalid field text and Participants for correction.
-Restoration reports dropped fields and keeps the original parameter source.
-Unreadable saved inputs produce a diagnostic and fresh defaults.
-Defaults captures current parameters and rebuilds initial values.
-
-Recipe writes and override paths use dotted strings, for example
-`"tones.0.drive.gain"`. The decimal index addresses the complete tone list.
-Omission retains a Form input; null clears it. Analysis inputs also use
-omission to retain settings and pass explicit null to their owner.
-The recipe applies overrides last, then calls `check_ready()` before Run.
-See the [mux recipe guide](../../../recipes/mux-guide.md#mux_t1) for dotted-path overrides,
-parameter origins and explicit writeback decisions.
-
-The MCP recipe is `mux_t1`. Set the generated Form field through an override
-such as `{"path": "sampling", "value": "decay"}`. The recipe applies overrides
-before `check_ready()`; omission keeps the current value.
-
-## Simulation limits
-
-For an offline FTF run, use the [FTF mux readout settings](../../../simulation_envs/FTF/field-guide.md#readoutdrive--物理-resonators--adc).
-Set `readout.mux` and list the receivers under `readout.mux.adc`. Bind each
-qubit drive independently of the mux readout generator.
-Enable `numerics.debug_capture` to inspect the [FTF capture manifest](../../../../lib/zcu_tools/simulators/ftf/environment/README.md#debug-capture).
-Small truncations and short smoke runs demonstrate execution only.
-Establish convergence and calibrate pulses before using fitted values.
+Writeback proposes the qubit's `t1` with its fitted error and a T1 sample at the captured bias. Use a supported T1 estimate to choose recovery and timing for later runs. For shared controls see [zcu_lab/v2/operator-workflow.md](../../operator-workflow.md).
