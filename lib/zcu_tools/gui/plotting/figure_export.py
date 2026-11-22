@@ -6,6 +6,7 @@ import io
 import math
 
 from matplotlib.figure import Figure
+from matplotlib.transforms import BboxBase
 
 
 def render_figure_png(
@@ -13,12 +14,14 @@ def render_figure_png(
     *,
     figsize: tuple[float, float] = (6.4, 4.8),
     dpi: float = 100.0,
+    bbox_inches: BboxBase | None = None,
 ) -> bytes:
     """Render PNG bytes at fixed geometry without changing Figure ownership.
 
     figsize is a pair of positive finite sizes in inches; dpi is positive finite
     dots per inch. Defaults produce 640 x 480 pixels with Matplotlib's default
-    savefig settings, independent of window size. Invalid geometry raises ValueError
+    savefig settings, independent of window size. Pass an explicit inch-space
+    bbox to override the ambient savefig crop. Invalid geometry raises ValueError
     before changing the Figure. Native rendering failures propagate unchanged.
 
     The caller must exclusively own rendering; use the owner thread for a live
@@ -36,7 +39,10 @@ def render_figure_png(
     output = io.BytesIO()
     try:
         figure.set_size_inches(*figsize, forward=False)
-        figure.savefig(output, format="png", dpi=dpi)
+        if bbox_inches is None:
+            figure.savefig(output, format="png", dpi=dpi)
+        else:
+            figure.savefig(output, format="png", dpi=dpi, bbox_inches=bbox_inches)
     finally:
         figure.set_size_inches(*original_size, forward=False)
     return output.getvalue()

@@ -8,7 +8,6 @@ from math import isfinite
 from typing import cast
 
 from matplotlib.backend_bases import MouseButton, MouseEvent
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtCore import QEvent, QObject, Qt
 from qtpy.QtGui import QHideEvent, QKeyEvent
@@ -26,6 +25,7 @@ from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import FluxPickState
 from zcu_tools.gui.app.measure.flux_pick_plugin import FluxPickPlugin
 from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickResult
+from zcu_tools.gui.app.measure.ui.figure_tile import FigureTileCanvas
 from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontend,
     InteractiveFrontendEnv,
@@ -64,8 +64,8 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
         self._env = env
         self._request_finish = request_finish
         self._request_cancel = request_cancel
-        self._figure = Figure(figsize=(8, 5))
-        self._canvas = FigureCanvasQTAgg(self._figure)
+        self._figure = Figure()
+        self._canvas = FigureTileCanvas(self._figure)
         self._canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         state = session.snapshot()
         inputs = plugin.inputs

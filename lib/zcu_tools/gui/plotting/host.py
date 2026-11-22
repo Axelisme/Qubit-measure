@@ -178,19 +178,9 @@ def _attach_figure_canvas(
     container: FigureContainer,
     fig: Figure,
 ) -> FigureCanvasQTAgg:
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-    from qtpy import sip
-
-    canvas = fig.canvas
-    # ``fig.canvas`` can be a dead Qt wrapper if a previous render path deleted
-    # the canvas widget while matplotlib still holds the Python reference. Reusing
-    # it would crash at the first C++ call (e.g. stack.indexOf). Treat a deleted
-    # wrapper as "no usable canvas" and rebuild a fresh one. This keeps the system
-    # self-healing even if some path deletes a canvas out from under its figure.
-    if not isinstance(canvas, FigureCanvasQTAgg) or sip.isdeleted(canvas):
-        canvas = FigureCanvasQTAgg(fig)
-
     previous_container = _fig_container_registry.get(fig)
+    previous_canvas = fig.canvas
+    canvas = container.canvas_for_figure(fig)
     if previous_container is not None and previous_container is not container:
         # Defense in depth: only detach from the previous container if that entry
         # is genuinely live — the container's stack must still exist (not a
@@ -198,8 +188,12 @@ def _attach_figure_canvas(
         # entry (e.g. the canvas already moved, or the container was torn down)
         # must NOT trigger detach_canvas, which would flip an unrelated
         # container back to its placeholder. If stale, just drop the entry.
-        if previous_container.contains_canvas(canvas):
-            previous_container.detach_canvas(canvas)
+        if isinstance(previous_canvas, QWidget) and previous_container.contains_canvas(
+            previous_canvas
+        ):
+            previous_container.detach_canvas(previous_canvas)
+            if previous_canvas is not canvas:
+                previous_canvas.deleteLater()
         else:
             _fig_container_registry.pop(fig, None)
 

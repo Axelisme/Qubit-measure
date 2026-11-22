@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-22，Data 頁讀圖與 R7
+**Last updated:** 2026-11-23，固定圖磚幾何
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -321,10 +321,16 @@ Run、Analysis、Post-analysis、Workflow 與 Data 的具名圖預覽，四張�
 Run／Analysis／Post-analysis 的 RPC screenshot 與 `get_current_figure_for_pane`
 讀取這張原生 Figure。Workflow 的 `get_current_figure()` 提供同樣的唯讀查詢。
 同一 FigureCollection 重送時保留頁次與目前圖，清空時隱藏分頁列。
-Data gallery 用縮圖辨識各 stage 和具名圖。`View figure` 在同一頁從目前原生 Figure
-繪製一張可捲動 raster，不移動 canvas，也不新增 Save 工件。Run Save 只保存資料。
-操作、焦點與清理規則見 [Measure Qt views](ui/README.md)。
-圖面可讀性依 [R7](../../../../../zcu_lab/v2/figure-style.md#r7用-gui-與存檔的實際尺寸檢查版面) 檢查 GUI 與存檔 PNG。
+五個面共用 12×9 in 的 Figure 排版。圖磚只等比縮放整張圖並置中留白，不依磚形重排。
+互動畫布把滑鼠位置轉回 Figure 座標。`tab_interact` 純讀回圖時保留原先的軸位置，
+所以 Qt 還沒重畫時，點擊仍對準已顯示的圖。Range Find 的非終結命令提交後，
+在回覆前繪出新畫面。不論回覆有無 PNG，下一個點擊都使用這個新畫面的座標。
+Data gallery 用 640×480 縮圖辨識各 stage 和具名圖。`View figure` 以相同的 Figure 幾何
+繪製目前的原生 Figure，再將 raster 等比放入 Data 閱讀面，不移動 canvas，也不新增 Save 工件。
+縮圖和閱讀圖保留整張 Figure，不使用 Matplotlib 的 tight 裁框。
+Measure 的存檔 PNG 仍是 1800×1350 px、150 dpi。Run Save 只保存資料。
+[R7](../../../../../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面) 在固定幾何的 PNG 檢查版面，
+GUI 只驗等比嵌入、留白和無裁切。操作與清理見 [Measure Qt views](ui/README.md)。
 Workflow 共用這組平鋪與分頁列，不顯示圖名下拉選單。
 
 ## Workflow hosting

@@ -163,7 +163,7 @@ GUI application 持有結果與具名圖集合，保存不反向依賴 Qt widget
 
 圖只放物理量、模型、擬合結果與判讀所需的標註。Run 身分放在可見的 Analyze 摘要，不印在圖上。Adapter 用該次 cfg 的 Reps×Rounds 與實驗已回傳的實際施加值提供摘要行。GUI 與 MCP 的 [`AnalysisPresentation`](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation) 顯示同一份行，不各自組裝。摘要行不經 [[0062]]〈一個 run 的 operation〉的 workflow operation wire。圖的標題與圖例由各實驗 core 編寫，不建立共用 formatter。Run 頁的按鈕名為 `Defaults`，表單的物理欄位仍用 `Reset`。
 
-R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Data 頁的縮圖用來辨識與選取各 stage 的具名圖；Data 的 R7 在 [`View figure` 閱讀面](../../lib/zcu_tools/gui/app/measure/ui/README.md)檢查同一張當前原生 Figure 依閱讀尺度重繪後的畫面，放不下就捲動，不縮小字級。
+[R7](../../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面) 只在 12×9 in、150 dpi 的 PNG 檢查版面。Measure 的 Run、Analysis、Post-analysis、Workflow 和 Data 以 12×9 in 排版原生 Figure，再將整張圖等比放入圖磚，其餘空間留白。磚形不改變 Figure 排版。Data 保留選圖縮圖；[`View figure` 閱讀面](../../lib/zcu_tools/gui/app/measure/ui/README.md)以同樣的幾何等比顯示全圖。GUI 只驗圖完整嵌入、等比和無裁切，互動畫布另驗縮放後的資料座標。
 
 一維系列若能用現有 shot 資料估計 SEM，就畫逐點 shot SEM，spectrum 也一樣。IQ 散點及二維圖不畫逐點 error bar。Shot SEM 是每發樣本標準差除以保留 shot 數的平方根，表示該點平均值的預期誤差。Run 與 Analyze 的一維連續掃描，沒有擬合曲線時連接量測點，有擬合曲線時只留量測點及可用的誤差棒。類別軸不連線。顯示用時間寫 `µs`，gain、amplitude 與倍率寫 `a.u.`，機率寫出機率名稱，計數寫 `count`。存檔單位照[保存、發現與範圍](#保存發現與範圍)，不受顯示詞彙影響。
 
@@ -177,9 +177,18 @@ R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Data 頁的�
 - 2026-11-22，使用者：「1我以為圖的名字已經足夠定位」。重整選項後回答：「1可以，圖應該放純理論實作者關注的重點，而不是實驗作者關注的資訊。2我有考慮給部分實驗的點加上errorbar，通常是比如rabi/t1之類的一維數據，對數據值的大小比較敏感的。spectrum之類的或是二維圖就不用」。
 - 2026-11-22，使用者：「關於實驗liveplot與分析圖，我認為可以參考ding博倫的格式，這才是人看的圖。」
 - 2026-11-22，使用者對摘要和按鈕答「1a, 存檔看有沒有需求 2a」，分別採用現有值與 `Defaults`。
-- 2026-11-22，Data 頁保留縮圖選圖、改以閱讀面驗 R7，是 designer 依夜間授權代裁，使用者未覆核。使用者同日要求：「那注意排版啊，那个 GUI 的版面配置可能不是正规的四乘三或者什么的，然后字体大小之类的要注意缩放，比如说在 Save 页面可能会变得比较窄」。見[在 Measure Data 頁讀原圖](../discussions/2026-11-22-data-figure-reading.md)。
 - 2026-11-22，使用者在 shot SEM 與輪間散布之間選「A」，補充「像我其实更想要设计的，其实应该是平均标准差，也就是这个点的预期误差。」數值估計器放 analysis、標題與圖例留在 core 是 designer 代裁，使用者未覆核。
 - 2026-11-22，使用者：「如果拟合曲线本身就是连线的，那数据点就不用。但如果没有拟合曲线，那就要连线。」使用者選「全面套用」，並要求 spectrum 也畫可用的 shot SEM。見[量測點何時連線與 spectrum 的 error bar](../discussions/2026-11-22-data-point-lines.md)。
+
+#### 圖以固定存檔幾何排版
+
+**規則。** Measure 的 Run、Analysis、Post-analysis、Workflow 和 Data 共用 12×9 in 的 Figure 排版。圖磚的長寬只決定整張圖的等比縮放倍率和留白。字隨圖縮放，磚形不改變圖的排版。Data 保留縮圖選圖與 `View figure` 入口，閱讀面也以固定幾何等比顯示整張圖。
+
+**例子。** 同一張 GE 診斷圖放進 360×375 的窄磚時，上下留白。放進比 4:3 更寬的磚時，左右留白。兩種磚形都不移動 tick、標題或 legend 在圖中的位置。
+
+**邊界。** [R7](../../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面) 只在 12×9 in、150 dpi 的 PNG 檢查 10 pt 字級下限、刻度重疊及圖例是否遮住資料。GUI 驗整圖等比嵌入、留白和無裁切。互動畫布另驗縮放後的資料座標，包含 `tab_interact` 的點擊與縮放。存檔 PNG 的幾何與 dpi 不變。
+
+**依據。** 2026-11-23，使用者說：「我主要要求就是这图片显示啊，在不同的显示格式或者形状下能够一致。一个可行的做法就是不要强制对齐边框，而是给多余的部分留白，缩小到刚好能嵌入，然后其余部分就是留白。」「我是倾向于字可以小啦，不要占版面」。談到存檔標準時說：「一个固定的大小作为标准…后者好像比较好」。在 A／B 之間選擇：「那我会选 A， 这样的话就不需要考虑各种形状的显示。」這次裁決取代 Data 閱讀面按閱讀尺度重繪並捲動的做法，也取消 R7 在各 GUI 實際尺寸檢查版面的要求。選圖與閱讀入口不變。比較見[圖磚沿用存檔幾何](../discussions/2026-11-23-figure-fixed-geometry.md)。
 
 #### 平均 IQ 的投影慣例
 
