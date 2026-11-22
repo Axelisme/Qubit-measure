@@ -75,6 +75,8 @@
 - 壞例：只畫 fit，或用同一組 marker 畫模型與資料。
 - 好例：Ding 圖 5-13(b)（頁 157）可直接對照 RB 的量測點與模型線。本地作圖時，分列各組的量測與模型 legend，並用至少 200 點算模型線，讓模型網格不受量測點疏密限制。
 - 頻譜要先選峰再畫 fit 時，用 [fitting 的 Peak candidates](../../lib/zcu_tools/analysis/fitting/README.md#peak-candidates) 對照 `twotone/freq` 的局部策略與 `twotone/chain` 的預設策略。
+- 時域 fit 的具名欄位見 [fitting 的 Named fitting results](../../lib/zcu_tools/analysis/fitting/README.md#named-fitting-results)。
+  [單 qubit Ramsey](twotone/time_domain/t2ramsey/core.py) 的 `fit_decay_fringe` 用量測點擬合，再用 `decaycos(fit_delays, *fit.params)` 在密網格上計算同次擬合的曲線，不重跑 fit。
 
 ### R3：結果寫在圖上
 
