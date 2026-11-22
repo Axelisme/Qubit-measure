@@ -7,7 +7,6 @@ from qtpy.QtCore import QEvent, QObject, Qt
 from qtpy.QtWidgets import QCheckBox, QComboBox, QLabel, QVBoxLayout, QWidget
 
 from zcu_tools.experiment.workflows import WorkflowPlots
-from zcu_tools.gui.plotting.container import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.ports import OwnerScheduler
 
@@ -52,7 +51,7 @@ class WorkflowFigures(QWidget):
         )
         layout.addWidget(FigurePager(self._stack, "workflow"))
         layout.addWidget(self._stack, 1)
-        self._container = FigureContainer(self._stack, placeholder)
+        self._container = self._stack.figure_container(placeholder)
         self._host = QtPlotHost(self._container, owner)
 
     def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:

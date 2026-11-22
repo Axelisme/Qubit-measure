@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
+import numpy as np
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QColor, QImage
 from PyQt6.QtWidgets import (
     QAbstractButton,
     QApplication,
@@ -235,15 +238,6 @@ def plots(window: QWidget) -> PlotObservation:
                     curves,
                     (float(xmin), float(xmax)),
                     (float(ymin), float(ymax)),
-                    (
-                        canvas.mapToGlobal(QPoint()).x()
-                        + axes.bbox.x0 / canvas.device_pixel_ratio,
-                        canvas.mapToGlobal(QPoint()).y()
-                        + (canvas.figure.bbox.height - axes.bbox.y1)
-                        / canvas.device_pixel_ratio,
-                        axes.bbox.width / canvas.device_pixel_ratio,
-                        axes.bbox.height / canvas.device_pixel_ratio,
-                    ),
                     tuple(
                         t.get_text()
                         for t in axes.texts
@@ -252,6 +246,44 @@ def plots(window: QWidget) -> PlotObservation:
                 )
             )
     return PlotObservation(tuple(observed))
+
+
+def plot_inches(widget: QWidget) -> tuple[float, ...]:
+    """Read the shown canvas's native Figure size in inches."""
+    if not isinstance(widget, FigureCanvasQTAgg):
+        raise TypeError("Expected a Matplotlib canvas")
+    return tuple(float(value) for value in widget.figure.get_size_inches())
+
+
+def colour_bounds(widget: QWidget, colour: str) -> tuple[float, float, float, float]:
+    """Locate exact painted RGB pixels in widget-local Qt logical coordinates."""
+    pixmap = widget.grab()
+    image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+    pixels = np.frombuffer(
+        image.constBits().asstring(image.sizeInBytes()), dtype=np.uint8
+    ).reshape(image.height(), image.width(), 4)
+    rows, cols = np.nonzero(
+        np.all(pixels[:, :, :3] == QColor(colour).getRgb()[:3], axis=2)
+    )
+    if not len(cols):
+        raise LookupError(f"No pixels of {colour} on {widget.objectName()}")
+    dpr = pixmap.devicePixelRatio()
+    return (
+        cols.min() / dpr,
+        rows.min() / dpr,
+        (cols.max() - cols.min() + 1) / dpr,
+        (rows.max() - rows.min() + 1) / dpr,
+    )
+
+
+def image_center_colour(widget: QWidget) -> str:
+    """Read the displayed raster's centre pixel as a hex RGB colour."""
+    if not isinstance(widget, QLabel):
+        raise TypeError("Expected a raster label")
+    pixmap = widget.pixmap()
+    if pixmap.isNull():
+        raise ValueError("Label has no displayed raster")
+    return pixmap.toImage().pixelColor(pixmap.width() // 2, pixmap.height() // 2).name()
 
 
 def plot_label_bounds(window: QWidget) -> tuple[PlotLabelBoundsObservation, ...]:

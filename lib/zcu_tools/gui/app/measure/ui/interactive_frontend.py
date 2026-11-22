@@ -33,6 +33,13 @@ class InteractiveFrontend(QWidget):
         """Drop local edits before the service finishes from committed state."""
         raise NotImplementedError
 
+    def present_committed_frame(self) -> None:
+        """Optionally publish a frame synchronously after an owner-thread RPC edit.
+
+        Frontends that opt in must paint only their own canvas; do not pump the
+        event loop. The default leaves ordinary frontend scheduling unchanged.
+        """
+
     def teardown(self) -> None:
         """Retire registered callbacks and presentation borrows without closing the session.
 

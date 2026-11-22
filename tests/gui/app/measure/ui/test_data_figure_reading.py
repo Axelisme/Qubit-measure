@@ -8,8 +8,10 @@ from threading import Event
 
 import numpy as np
 import pytest
+from matplotlib import rc_context
 from matplotlib.artist import Artist
 from matplotlib.backend_bases import RendererBase
+from matplotlib.patches import Rectangle
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.context import RunContext
@@ -59,6 +61,17 @@ def _run(
 
 def _show_run_figure(plots: Plots, *, on_reading_draw: Artist | None = None) -> None:
     figure, axes = plots.subplots(num="signal", layout="constrained")
+    figure.set_facecolor("#e1f6e8")
+    figure.add_artist(
+        Rectangle(
+            (0, 0),
+            0.03,
+            0.003,
+            transform=figure.transFigure,
+            color="#b3264b",
+            in_layout=False,
+        )
+    )
     axes.set_facecolor("#eff9ff")
     axes.plot([0.0, 0.4, 0.8], [0.0, 0.8, 0.0], label="Mean I")
     axes.plot([0.0, 0.4, 0.8], [0.0, -0.7, 0.0], label="Mean Q")
@@ -311,12 +324,20 @@ def test_data_reads_run_figure_in_place_and_returns_focus(
     flow.select_tab("Data")
     flow.screenshot(shots / "02-overview.png")
     control = "dataFigureView/run/signal"
-    flow.click(object_name=control)
+    with rc_context({"savefig.bbox": "tight", "savefig.pad_inches": 0}):
+        flow.click(object_name=control)
     assert flow.observe("Run — signal").visible
     assert flow.observe("Save All").enabled
     assert flow.image_center_colour(object_name="dataFigureReadingImage") == "#eff9ff"
     flow.screenshot(shots / "03-reading.png")
     default_view = _reading_viewport(flow)
+    _assert_run_reading_fits(flow)
+    left, top, _, height = flow.colour_bounds("#e1f6e8", object_name=_READING_IMAGE)
+    edge_x, edge_y, _, edge_height = flow.colour_bounds(
+        "#b3264b", object_name=_READING_IMAGE
+    )
+    assert edge_x == pytest.approx(left, abs=2)
+    assert edge_y + edge_height == pytest.approx(top + height, abs=2)
     flow.press_key(Qt.Key.Key_Space)
     assert flow.focused_input().object_name == control
     assert flow.observe(object_name="previewGalleryHeader").visible
@@ -328,8 +349,10 @@ def test_data_reads_run_figure_in_place_and_returns_focus(
     flow.screenshot(shots / "06-narrow-reading.png")
     narrow_view = _reading_viewport(flow)
     _record_viewports(shots, default_view, narrow_view)
-    _focus_reading_scroll(flow)
-    _walk_narrow_image(flow, shots, start=7)
+    _assert_run_reading_fits(flow)
+    flow.resize_window(1480, 650)
+    flow.screenshot(shots / "07-wide-reading.png")
+    _assert_run_reading_fits(flow)
     flow.press_key(Qt.Key.Key_Escape)
     assert flow.focused_input().object_name == control
     flow.screenshot(shots / "11-narrow-return.png")
@@ -358,10 +381,22 @@ def _visible_bounds(
     return widget.bounds
 
 
+_READING_IMAGE = "dataFigureReadingImage"
+
+
+def _assert_run_reading_fits(flow: ComponentDriver) -> None:
+    assert flow.observe(object_name=_READING_IMAGE).fully_visible
+    tile_width, tile_height = _reading_viewport(flow)
+    left, top, width, height = flow.colour_bounds("#e1f6e8", object_name=_READING_IMAGE)
+    assert width / height == pytest.approx(4 / 3, abs=0.015)
+    assert left == pytest.approx(tile_width - left - width, abs=2)
+    assert top == pytest.approx(tile_height - top - height, abs=2)
+    assert min(left, top) <= 2
+
+
 def _reading_viewport(flow: ComponentDriver) -> tuple[int, int]:
-    viewport = flow.scroll_area(object_name="dataFigureReadingScroll").viewport_size
-    assert viewport is not None
-    return viewport
+    _, _, width, height = _visible_bounds(flow, _READING_IMAGE)
+    return width, height
 
 
 def _record_viewports(
@@ -372,36 +407,6 @@ def _record_viewports(
         f"reading viewport (width, height)\ndefault={default_view}\nnarrow={narrow_view}\n",
         encoding="utf-8",
     )
-
-
-def _focus_reading_scroll(flow: ComponentDriver) -> None:
-    flow.press_key(Qt.Key.Key_Tab)
-    assert flow.focused_input().object_name == "dataFigureReadingScroll"
-
-
-def _pan(flow: ComponentDriver, key: Qt.Key, times: int) -> None:
-    for _ in range(times):
-        flow.press_key(key)
-
-
-def _walk_narrow_image(flow: ComponentDriver, shots: Path, *, start: int) -> None:
-    assert flow.scroll_area(object_name="dataFigureReadingScroll").vertical_scrollable
-    image_name = "dataFigureReadingImage"
-    left, top, _, _ = _visible_bounds(flow, image_name)
-    _pan(flow, Qt.Key.Key_Down, 11)
-    assert _visible_bounds(flow, image_name)[1] < top
-    flow.screenshot(shots / f"{start - 1:02d}b-narrow-middle-left.png")
-    _pan(flow, Qt.Key.Key_PageDown, 2)
-    flow.screenshot(shots / f"{start:02d}-narrow-bottom-left.png")
-    _pan(flow, Qt.Key.Key_Right, 24)
-    flow.screenshot(shots / f"{start + 1:02d}-narrow-bottom-middle.png")
-    _pan(flow, Qt.Key.Key_Right, 60)
-    assert _visible_bounds(flow, image_name)[0] < left
-    flow.screenshot(shots / f"{start + 2:02d}-narrow-bottom-right.png")
-    _pan(flow, Qt.Key.Key_Up, 11)
-    flow.screenshot(shots / f"{start + 2:02d}b-narrow-middle-right.png")
-    _pan(flow, Qt.Key.Key_PageUp, 2)
-    flow.screenshot(shots / f"{start + 3:02d}-narrow-top-right.png")
 
 
 def test_switching_experiment_tabs_dismisses_data_reading(
@@ -454,10 +459,15 @@ def test_reentrant_draw_cannot_present_after_its_reading_is_invalidated(
     control = "dataFigureView/run/signal"
     flow.screenshot(shots / "00-before-draw.png")
 
+    focus_during = None
+
     def during_draw() -> None:
+        nonlocal focus_during
         if reopen:
             flow.click(object_name="dataFigureView/analysis/signal")
-            _focus_reading_scroll(flow)
+            flow.press_key(Qt.Key.Key_Tab)
+            focus_during = flow.focused_input()
+            assert focus_during.text != "Back to previews"
             flow.screenshot(shots / "01-reopened-during-draw.png")
             _fail_draw()
         flow.select_tab("Guide")
@@ -476,7 +486,8 @@ def test_reentrant_draw_cannot_present_after_its_reading_is_invalidated(
         assert (
             flow.image_center_colour(object_name="dataFigureReadingImage") == "#fff2cf"
         )
-        assert flow.focused_input().object_name == "dataFigureReadingScroll"
+        assert focus_during is not None
+        assert flow.focused_input() == focus_during
     else:
         assert flow.observe(object_name="previewGalleryHeader").visible
         assert flow.observe(object_name=control).visible
@@ -510,12 +521,8 @@ def test_data_reads_selected_stage_and_member_and_restores_gallery_page(
     assert flow.observe("Analysis — signal").visible
     assert flow.image_center_colour(object_name="dataFigureReadingImage") == "#fff2cf"
     flow.screenshot(shots / "02-analysis-signal.png")
-    _focus_reading_scroll(flow)
-    _pan(flow, Qt.Key.Key_Right, 60)
-    flow.screenshot(shots / "03-analysis-legend.png")
     flow.resize_window(860, 675)
-    _pan(flow, Qt.Key.Key_Right, 60)
-    flow.screenshot(shots / "03b-narrow-analysis-legend.png")
+    flow.screenshot(shots / "03b-narrow-analysis.png")
     flow.resize_window(1280, 750)
     flow.screenshot(shots / "03c-default-width-restored.png")
     flow.click("Back to previews")
@@ -625,15 +632,10 @@ def test_data_render_error_does_not_block_save_and_load_clears_reading(
     assert flow.observe("Analysis — peak").visible
     flow.screenshot(shots / "03-other-member.png")
     default_view = _reading_viewport(flow)
-    _focus_reading_scroll(flow)
-    _pan(flow, Qt.Key.Key_Right, 60)
-    flow.screenshot(shots / "04-heatmap-colourbar.png")
     flow.resize_window(860, 675)
-    _pan(flow, Qt.Key.Key_Left, 60)
     flow.screenshot(shots / "05-narrow-heatmap.png")
     narrow_view = _reading_viewport(flow)
     _record_viewports(shots, default_view, narrow_view)
-    _walk_narrow_image(flow, shots, start=6)
 
     def choose(dialog: RunLoadDialog) -> None:
         chooser = ComponentDriver(dialog)
