@@ -30,7 +30,10 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.patches import Patch, Polygon
+from matplotlib.legend_handler import HandlerTuple
+from matplotlib.patches import Patch
+from matplotlib.ticker import MaxNLocator
+from matplotlib.transforms import blended_transform_factory
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -41,7 +44,6 @@ from zcu_tools.analysis.singleshot import (
     GECalibration,
     GEConfusionResult,
     calc_confusion_matrix,
-    classify_result,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
@@ -49,6 +51,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.single_shot.ge import (
     GEFitOptions,
     GENumericalError,
+    plot_ge_classification_boundary,
     plot_ge_iq_density,
     singleshot_ge_analysis,
 )
@@ -415,144 +418,93 @@ def _plot_confusion_matrix(
     plots: Plots,
     figure_name: str,
 ) -> None:
-    """Publish IQ classifications and preparation/confusion matrices to plots.
-
-    g_signals and e_signals are physical ground/excited one-dimensional shot IQ;
-    primary supplies their centers. confusion supplies classification fractions,
-    radius and the initial/confusion matrices. Return None without mutating inputs.
-    figure_name must be unused. plots owns the new figure; plotting errors propagate.
-    """
     fig, _ = plots.subplots(
-        num=figure_name, nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
+        num=figure_name,
+        nrows=2,
+        ncols=2,
+        figsize=(8, 8),
+        gridspec_kw={"width_ratios": (1, 1.32)},
+        layout="constrained",
     )
-    g_iq_ax, initial_populations_ax, e_iq_ax, confusion_matrix_ax = fig.axes
-
-    g_label = r"$|0\rangle$"
-    e_label = r"$|1\rangle$"
-    l_label = "Other"
-    _plot_classified(g_iq_ax, g_signals, primary, confusion.radius)
-    _plot_classified(e_iq_ax, e_signals, primary, confusion.radius)
-
-    n_gg, n_ge, n_go = confusion.g_classification
-    n_eg, n_ee, n_eo = confusion.e_classification
-    g_iq_ax.set_title(f"g prep · g {n_gg:.1%}, e {n_ge:.1%}, other {n_go:.1%}")
-    e_iq_ax.set_title(f"e prep · g {n_eg:.1%}, e {n_ee:.1%}, other {n_eo:.1%}")
-    for matrix_ax, matrix in (
-        (initial_populations_ax, confusion.init_matrix),
-        (confusion_matrix_ax, confusion.matrix),
-    ):
-        im = matrix_ax.imshow(matrix, cmap="Blues", vmin=0, vmax=1)
-        matrix_ax.grid(False)
-        cbar = fig.colorbar(im, cax=matrix_ax.inset_axes((1.04, 0, 0.06, 1)))
-        cbar.set_label("Probability (0–1)")
-        for i in range(matrix.shape[0]):
-            for j in range(matrix.shape[1]):
-                val = matrix[i, j]
-                matrix_ax.text(
-                    j,
-                    i,
-                    f"{val:.2%}",
-                    fontsize=10,
-                    ha="center",
-                    va="center",
-                    color="white" if val > 0.5 else "black",
-                )
-
-    initial_populations_ax.set_xticks([0, 1, 2])
-    initial_populations_ax.set_yticks([0, 1, 2])
-    initial_populations_ax.set_xticklabels([g_label, e_label, l_label])
-    initial_populations_ax.set_yticklabels([g_label, e_label, l_label])
-    initial_populations_ax.set_xlabel("Actual State")
-    initial_populations_ax.set_ylabel("Prepared State")
-    initial_populations_ax.set_title("Initial Populations")
-
-    confusion_matrix_ax.set_xticks([0, 1, 2])
-    confusion_matrix_ax.set_yticks([0, 1, 2])
-    confusion_matrix_ax.set_xticklabels([g_label, e_label, l_label])
-    confusion_matrix_ax.set_yticklabels([g_label, e_label, l_label])
-    confusion_matrix_ax.set_xlabel("Measured State")
-    confusion_matrix_ax.set_ylabel("Actual State")
-    confusion_matrix_ax.set_title(
-        f"Classifier confusion · condition number {confusion.condition_number:.1f}"
+    iq, populations, observed, classifier = fig.axes
+    plot_ge_iq_density(iq, g_signals, e_signals)
+    g_marker, e_marker, boundary = plot_ge_classification_boundary(
+        iq, primary.g_center, primary.e_center, confusion.radius
     )
+    iq.set_title("Preparation majority", fontsize=10)
+    iq.set_xlabel("I (a.u.)", fontsize=10)
+    iq.set_ylabel("Q (a.u.)", fontsize=10)
+    iq.xaxis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=2))
+    iq.tick_params(labelsize=10)
+    iq.grid(False)
 
+    observed.set_axis_off()
+    gg, ge, go = confusion.g_classification
+    eg, ee, eo = confusion.e_classification
+    # Use a stable left margin even when the equal-aspect IQ box moves.
+    left_margin = 0.035
+    caption = observed.set_title(
+        "Observed %\n"
+        "g / e / Other\n"
+        f"g prep {100 * gg:.1f}  {100 * ge:.1f}  {100 * go:.1f}\n"
+        f"e prep {100 * eg:.1f}  {100 * ee:.1f}  {100 * eo:.1f}",
+        loc="left",
+        x=left_margin,
+        fontsize=10,
+    )
+    caption.set_transform(
+        blended_transform_factory(fig.transFigure, caption.get_transform())
+    )
+    legend = iq.legend(
+        handles=[
+            Patch(color="blue"),
+            Patch(color="red"),
+            Patch(color="purple"),
+            (g_marker, e_marker),
+            boundary,
+        ],
+        labels=["g majority", "e majority", "Tie", "g/e centers", "Boundary"],
+        handler_map={tuple: HandlerTuple(ndivide=None)},
+        loc="upper left",
+        bbox_to_anchor=(left_margin, 1),
+        bbox_transform=blended_transform_factory(fig.transFigure, observed.transAxes),
+        borderaxespad=0,
+        frameon=False,
+        fontsize=10,
+        handlelength=1.8,
+        labelspacing=0.3,
+        markerscale=1.3,
+    )
+    legend.set_in_layout(False)
 
-def _plot_classified(
-    ax: Axes,
-    signals: NDArray[np.complex128],
-    primary: GEAnalysis,
-    radius: float,
-) -> None:
-    """Draw one tone's classified shots and nearest-center radius boundaries.
-
-    signals is a nonempty one-dimensional shot IQ array; primary supplies ground
-    and excited centers. radius is the classification-circle radius in IQ units.
-    Add sampled points, centers, boundaries, labels and a legend to caller-owned ax.
-    Return None without changing signals or primary.
-    """
-    g_center, e_center = primary.g_center, primary.e_center
-    max_point = 5000
-    mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)
-
-    colors = np.full(signals.shape, "gray", dtype=object)
-    colors[mask_g] = "blue"
-    colors[mask_e] = "red"
-    colors[mask_o] = "green"
-
-    # plot shots
-    num_sample = signals.shape[0]
-    downsample_num = min(max_point, num_sample)
-    downsample_mask = np.arange(0, num_sample, max(1, num_sample // downsample_num))
-    downsample_signals = signals[downsample_mask]
-    ax.scatter(
-        downsample_signals.real,
-        downsample_signals.imag,
-        c=colors[downsample_mask].tolist(),
-        s=1,
-        alpha=0.5,
+    _plot_post_matrix(populations, confusion.init_matrix)
+    populations.set_title("Initial Populations\nPrepared → actual", fontsize=10)
+    _plot_post_matrix(classifier, confusion.matrix)
+    classifier.set_title(
+        f"Classifier confusion\nActual → measured\n"
+        f"Cond. number\n{confusion.condition_number:.3g}",
+        fontsize=10,
     )
 
-    # plot centers with circle
-    ax.plot(
-        g_center.real,
-        g_center.imag,
-        markerfacecolor="b",
-        label="Ground",
-        linestyle=":",
-        color="k",
-        marker="o",
-        markersize=5,
-    )
-    ax.plot(
-        e_center.real,
-        e_center.imag,
-        markerfacecolor="r",
-        label="Excited",
-        linestyle=":",
-        color="k",
-        marker="o",
-        markersize=5,
-    )
-    separation = abs(e_center - g_center)
-    axis = (e_center - g_center) / separation
-    cut_angle = np.arccos(separation / (2 * radius)) if radius > separation / 2 else 0.0
-    angles = np.linspace(cut_angle, 2 * np.pi - cut_angle, 361)
-    for center, direction, color in ((g_center, axis, "b"), (e_center, -axis, "r")):
-        boundary = center + direction * radius * np.exp(1j * angles)
-        ax.add_patch(
-            Polygon(
-                np.column_stack((boundary.real, boundary.imag)),
-                closed=True,
-                color=color,
-                fill=False,
-                linestyle="--",
-            )
+
+def _plot_post_matrix(ax: Axes, matrix: NDArray[np.float64]) -> None:
+    ax.imshow(matrix, cmap="Blues", aspect="auto")
+    ax.grid(False)
+    states = ("g", "e", "Other")
+    ax.set_xticks([0, 1, 2], labels=states, fontsize=10)
+    ax.set_yticks([0, 1, 2], labels=states, fontsize=10)
+    # Leave the cell width for percentages rather than a colorbar.
+    for (i, j), value in np.ndenumerate(matrix):
+        percent = f"{100 * value:.1f}".removesuffix(".0")
+        ax.text(
+            j,
+            i,
+            f"{percent}%",
+            fontsize=10,
+            ha="center",
+            va="center",
+            color="white" if value > 0.5 else "black",
         )
-
-    ax.set_aspect("equal")
-    ax.legend()
-    ax.set_xlabel("I per shot (a.u.)")
-    ax.set_ylabel("Q per shot (a.u.)")
 
 
 def _validate_fixed_pulse(pulse: Pulse.Cfg) -> None:
@@ -918,7 +870,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             )
             cfg = source.cfg
             tone = f"Tone {item.index}" if cfg is None else cfg.tones[item.index].name
-            plots[name].suptitle(f"Mux single-shot GE · {tone} · Classifier outcomes")
+            plots[name].suptitle(f"Mux GE · {tone}", fontsize=12)
             outcomes.append(MuxGEPostAnalysis(item.index, GEPostAnalysis(confusion)))
         # 5. Keep radius-based per-tone confusion diagnostics without refitting or a joint assignment model.
         return tuple(outcomes)

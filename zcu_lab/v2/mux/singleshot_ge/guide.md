@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run simultaneous mux GE readout from the GUI or MCP and read its results.
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-22
 
 After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
 
@@ -68,9 +68,7 @@ Use the live IQ figure to check the shot counts and whether the probe-off and
 probe-on clouds occupy distinct regions. The first Analyze figure preserves
 the raw clouds and adds fitted centers and the threshold line in the original
 IQ plane. The threshold is perpendicular to the fitted projection axis.
-Inspect cloud overlap before using it for classification. The Post figure
-shows g, e and other assignments; other does not identify a specific leakage
-state.
+Inspect cloud overlap before using it for classification. Use the [Post figure](#read-the-post-figure) to compare preparation density and inspect the radius classifier.
 
 The IQ colors summarize shot counts by bin, not uncertainty on mean IQ.
 R² and normalized residual RMS summarize the internal histogram fits. R²
@@ -172,8 +170,8 @@ A successful, finite primary row must pass the GE calibration validity check.
 Each phase proposes one complete library mux readout replacement, resolved from
 `$mux.module.readout` in the Run/Load capture. Primary replaces each successful
 tone's classifier with a circle containing only g/e centers. Post replaces it
-with the same centers plus radius and the 3x3 prepared-to-measured confusion
-matrix. Failed tones retain their library classifiers. Fidelity and sigma are
+with the same centers plus radius and the 3x3 population-corrected
+`Classifier confusion` matrix from that tone's `post_i`. Failed tones retain their library classifiers. Fidelity and sigma are
 not written to point parameters. Any successful tone's review note leaves the
 whole module unselected; review all included tones before selecting it.
 
@@ -230,6 +228,31 @@ center failed the relative-error check. Passing that check alone does not
 make a candidate eligible for writeback preselection.
 
 Open a saved diagnostic in Data with **View figure** for a larger view.
+
+### Read the Post figure
+
+Each `post_i` shows one tone. On the left, both physical preparations share
+one raw, equal-scale I/Q plane. Blue and red mark bins with a majority of g-
+and e-preparation shots, respectively. Equal counts are purple. Opacity rises
+with the log of the combined count; empty bins are transparent. The colors do
+not show classification, purity or error rate. They do not tell you how
+individual shots from a bin's minority preparation were classified.
+
+The markers show the g and e centers. Dashed lines mark the radius boundaries
+and, where they overlap, the segment midway between the centers. The classifier
+chooses the nearer center only inside its radius. Equidistant shots and shots
+on or outside the radius boundary are Other. Other is independent of a purple
+preparation tie and does not identify a specific leakage state.
+
+Read `Observed %` across each preparation row for the fraction of shots
+classified as g, e or Other before correcting for preparation mixing.
+**Initial Populations** maps prepared-state rows to estimated actual-state
+columns. **Classifier confusion** maps actual-state rows to measured-label
+columns after solving for preparation mixing. The condition number indicates
+how sensitive inversion of the classifier matrix is, not how well separated
+the prepared clouds are.
+
+### Save and load
 
 Use Data to save measurement data and analysis artifacts.
 Load Data selects a native file or saved run and preserves current Form inputs.

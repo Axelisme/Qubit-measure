@@ -62,7 +62,7 @@ Analysis and writeback use the fixed parameter source of the selected Run or Loa
 
 Load uses the parameter and library content saved in data.h5, without reading the historical point or live Form. Preview and Apply target the GUI's currently selected point. Select a point before applying.
 
-Writeback resolves the Run's `$resonator.module.readout` slot to its library module. Primary proposes a circle classifier with g/e centers. Post proposes centers, radius and the 3x3 prepared-to-measured confusion matrix. Centers and radius use raw ADC sums divided by integration length without IQ-offset subtraction. Fidelity and sigma are not stored. The proposal preserves waveform keys and rejects readout settings that differ from the captured library module, apart from classifier. Equal materialized settings are accepted even if the Run used an inline copy or another key.
+Writeback resolves the Run's `$resonator.module.readout` slot to its library module. Primary proposes a circle classifier with g/e centers. Post proposes centers, radius and the 3x3 population-corrected `Classifier confusion` matrix from `post`. Centers and radius use raw ADC sums divided by integration length without IQ-offset subtraction. Fidelity and sigma are not stored. The proposal preserves waveform keys and rejects readout settings that differ from the captured library module, apart from classifier. Equal materialized settings are accepted even if the Run used an inline copy or another key.
 
 In MCP, `singleshot_ge` analyzes Primary and asks about its candidates before starting Post. It applies the selected Primary candidates if accepted, then analyzes Post and asks about its candidates separately. You may skip Primary and still accept Post. The report lists confirmed writes in `primary_writeback_applied` and `post_writeback_applied`.
 The report's `fit_quality` comes from the joint histogram fit.
@@ -113,9 +113,30 @@ make a candidate eligible for writeback preselection.
 
 Histogram log scale changes the diagnostic histograms, not the IQ scatter.
 Open the saved diagnostic in Data with **View figure** for a larger view.
-Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
+## Read the Post figure
 
-**Last updated:** 2026-11-01
+The left panel of `post` shows both preparations on the same raw, equal-scale
+I/Q plane. Each bin is blue if it contains more g-preparation shots, red if it
+contains more e-preparation shots, and purple if the counts tie. Opacity rises
+with the log of the total count; empty bins are transparent. The colors do not
+show purity or how the classifier labeled a shot. A bin's majority color
+cannot tell you how individual shots from the minority preparation were classified.
+
+The markers show the g and e centers. Dashed lines show the radius boundaries
+and, where the disks overlap, the shared segment midway between the centers.
+The classifier chooses the nearer center only inside its radius. Equidistant
+shots and shots on or outside the radius boundary are Other. A purple bin is
+a preparation count tie, not an Other classification.
+
+Read `Observed %` across each preparation row for the shots classified as g,
+e or Other. These percentages are measured before correcting for preparation
+mixing. In **Initial Populations**, rows are prepared states and columns are
+estimated actual states. In **Classifier confusion**, rows are actual states
+and columns are measured labels after solving for preparation mixing.
+The condition number indicates how sensitive inversion of the classifier
+matrix is. It is not a fidelity score.
+
+**Last updated:** 2026-11-22
 
 ## Four starting situations
 
