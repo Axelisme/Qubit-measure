@@ -58,10 +58,15 @@ def live_heatmap(
 
     uniform=True spans endpoints evenly; False accepts monotonic uneven centers
     in either direction. clim fixes (min, max); None rescales to finite data.
-    cmap names a registered Matplotlib colormap for either mode. An unknown
-    name raises ValueError before the image is attached.
-    AttachedHeatmap.set validates real nonempty 1D axes and signals shaped
-    (len(xs), len(ys)) before mutation and returns the image artist. No refresh
+    Set cmap at construction to a registered Matplotlib colormap name, not a
+    Colormap object. An unknown name raises ValueError before attachment.
+    In _live_format.py, HeatmapFormat.attach_ax (uniform) and
+    NonUniformHeatmapFormat.attach_ax (nonuniform) initialize the colormap.
+    The nonuniform path loads placeholder data during attachment, so
+    NonUniformImage rejects colormap changes even before the first set call.
+    AttachedHeatmap.set changes data, not the colormap. It validates real
+    nonempty 1D axes and signals shaped (len(xs), len(ys)) before mutation
+    and returns the image artist. All columns use the same ys grid. No refresh
     or dispatch is performed; Matplotlib errors propagate.
     """
     return AttachedHeatmap(axes, uniform=uniform, clim=clim, cmap=cmap)
