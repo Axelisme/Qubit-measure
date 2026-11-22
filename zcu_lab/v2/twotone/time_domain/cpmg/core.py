@@ -385,7 +385,7 @@ def _live_plot(
     fig.colorbar(heatmap, ax=heat_ax, label="Normalized IQ (a.u.)")
     line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
     (previous,) = line_ax.plot(
-        [], [], "-", alpha=0.6, color="C1", label="Previous count"
+        [], [], "s-", markersize=3, alpha=0.6, color="C1", label="Previous count"
     )
     (latest,) = line_ax.plot(
         [], [], ".-", markersize=5, color="C0", label="Latest count"

@@ -50,6 +50,9 @@ fractions to counts.
 
 ## Reading the figures
 
-Read the three populations on the same axis to locate a transition or loss peak. Analyze labels classified versus corrected fractions. The spectrum is for locating peaks, so it does not show per-point shot SEM. If the feature hits a sweep limit, use its frequency as the next sweep center and extend both sides until the off-feature baseline is visible.
+Read the three populations on the same axis to locate a transition or loss peak.
+Each bar shows ±1 shot SEM for that fraction, estimated from the G/E/Other counts at that frequency. Run shows classified fractions. When Analyze corrects the fractions, it propagates the sampling covariance through the linear confusion-matrix correction. Bars describe uncertainty of the mean from shot sampling, not scatter between rounds or uncertainty of a fitted peak. Fewer than two shots or missing counts leave the SEM undefined, so those points have no bar.
+
+If the feature hits a sweep limit, use its frequency as the next sweep center and extend both sides until the off-feature baseline is visible.
 
 **Last updated:** 2026-11-22

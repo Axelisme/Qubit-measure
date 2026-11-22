@@ -81,6 +81,13 @@ def first_read_iq(sums: CycleSums) -> NDArray[np.complex128]:
     return (sums.feature_sums[:, 0] + 1j * sums.feature_sums[:, 1]) / sums.cycle_count
 
 
+def first_read_iq_moments(sums: CycleSums) -> NDArray[np.float64]:
+    """Return per-point [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] for the first read."""
+    return np.column_stack(
+        (sums.cycle_count, sums.feature_sums[:, :2], sums.feature_sums[:, 32:35])
+    )
+
+
 def first_read_projection(
     sums: CycleSums, *, skip: int = 0
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -94,11 +101,8 @@ def first_read_projection(
     signals = first_read_iq(sums)
     axis_samples = signals[skip:]
     angle = find_rotate_angle(axis_samples) if len(axis_samples) >= 2 else 0.0
-    moments = np.column_stack(
-        (sums.cycle_count, sums.feature_sums[:, :2], sums.feature_sums[:, 32:35])
-    )
     return (signals * np.exp(-1j * angle)).real, iq_shot_sem(
-        moments, direction=(np.cos(angle), np.sin(angle))
+        first_read_iq_moments(sums), direction=(np.cos(angle), np.sin(angle))
     )
 
 

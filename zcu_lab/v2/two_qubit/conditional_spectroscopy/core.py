@@ -41,6 +41,7 @@ from zcu_lab.v2.support.device import set_flux
 from .._drive import QubitDriveCfg
 from .._readout import MuxResetCfg
 from .._sums import (
+    qubit_marginal_axis,
     qubit_marginal_probabilities,
     validate_qubit_tones,
 )
@@ -272,13 +273,11 @@ _QUBITS = ("Qubit1", "Qubit2")
 
 def _excitation_sem(counts: NDArray[np.float64]) -> NDArray[np.float64]:
     # Sum over the other qubit's terminal classes; keep g, e and other in N.
-    return np.stack(
-        [
-            np.sqrt(class_probability_covariance(counts.sum(axis=axis))[..., 1, 1])
-            for axis in (-1, -2)
-        ],
-        axis=-1,
-    )
+    errors = []
+    for target in ("qubit1", "qubit2"):
+        marginal = counts.sum(axis=qubit_marginal_axis(target))
+        errors.append(np.sqrt(class_probability_covariance(marginal)[..., 1, 1]))
+    return np.stack(errors, axis=-1)
 
 
 def _spectra_title(cfg: SpectroscopyCfg, index: int) -> str:

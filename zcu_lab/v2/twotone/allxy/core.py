@@ -378,7 +378,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         ax.plot(
             fit.predict_signals,
             marker="x",
-            linestyle="-",
+            linestyle="none",
             color="red",
             label="Coherent-error model",
         )
