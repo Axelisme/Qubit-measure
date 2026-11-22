@@ -850,8 +850,11 @@ vacuum-reset route and with the same chain at floor `0`. For both comparisons,
 the maximum absolute differences in final density and per-event populations
 are within the `1e-2` migration bound for candidate commit `e602f0dc6`.
 Floor zero removes the chain's floor approximation. It is not an independent
-accuracy reference. The separate reference comparisons do not cover every
-key, so independent full-sequence accuracy remains unverified.
+accuracy reference. Independent comparisons for the same four reduced workloads
+passed at both floors for 41 of 75 keys (read populations or full final
+density). The remaining 34 keys were not independently verified. The reference
+checks cover only the frozen inputs in the vacuum-reset model, not other
+points, larger basis sizes or ADC classification.
 
 These comparisons do not establish IQ classification agreement or validate
 pre-reducer compact statistics across versions. The comparisons have only one
