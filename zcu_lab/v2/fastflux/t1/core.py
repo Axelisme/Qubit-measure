@@ -283,15 +283,15 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         )
         fig.suptitle("Fast-flux relaxation · Qubit · Fitted T1")
         ax_t1, ax_r2, ax_residual = fig.axes
-        ax_t1.errorbar(gains, t1s, yerr=t1errs, fmt="k.", label="T1 ± fit SE")
+        ax_t1.errorbar(gains, t1s, yerr=t1errs, fmt="k.-", label="T1 ± fit SE")
         ax_t1.set(
             ylabel="T1 (µs)",
             title=f"{len(rejected_gains)}/{gains.size} fits rejected by contrast checks",
         )
         ax_t1.legend(loc="lower right")
-        ax_r2.plot(gains, r2s, "k.")
+        ax_r2.plot(gains, r2s, "k.-")
         ax_r2.set_ylabel("Fit R²")
-        ax_residual.plot(gains, residuals, "k.")
+        ax_residual.plot(gains, residuals, "k.-")
         ax_residual.set(
             xlabel="Flux pulse gain (a.u.)", ylabel="Normalized\nresidual RMS"
         )
@@ -311,9 +311,9 @@ def _plot_rejected_decays(
     fig, ax = plots.subplots(num="rejected_decay_fits", layout="constrained")
     fig.suptitle("Fast-flux relaxation · Qubit · Rejected fits")
     spans, half_spans, residual_bounds = zip(*rejected_contrasts, strict=True)
-    ax.plot(rejected_gains, spans, "k.", label="Fitted span")
-    ax.plot(rejected_gains, half_spans, "C0x", label="Half of measured span")
-    ax.plot(rejected_gains, residual_bounds, "C1+", label="Mean |smoothed residual|")
+    ax.plot(rejected_gains, spans, "k.-", label="Fitted span")
+    ax.plot(rejected_gains, half_spans, "C0x-", label="Half of measured span")
+    ax.plot(rejected_gains, residual_bounds, "C1+-", label="Mean |smoothed residual|")
     ax.set(
         xlabel="Flux pulse gain (a.u.)",
         ylabel="IQ contrast (a.u.)",

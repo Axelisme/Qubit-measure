@@ -664,7 +664,7 @@ class MuxLenRabiExp(Experiment[MuxRabiResult, MuxLenRabiCfg]):
             real, sem = project_iq(
                 signal, None if moments is None else moments[row, finite]
             )
-            ax.plot(xs, real, "o", ms=3, label="Measured IQ")
+            (measured,) = ax.plot(xs, real, "o", ms=3, label="Measured IQ")
             if sem is not None and np.any(np.isfinite(sem)):
                 ax.errorbar(
                     xs, real, yerr=sem, fmt="none", ecolor="C0", label="Shot SEM"
@@ -710,6 +710,7 @@ class MuxLenRabiExp(Experiment[MuxRabiResult, MuxLenRabiCfg]):
                 np.linalg.LinAlgError,
             ) as exc:
                 # 4. Keep the failure reason without hiding acquired IQ or stopping other fits.
+                measured.set_linestyle("-")
                 ax.text(
                     0.02,
                     0.98,

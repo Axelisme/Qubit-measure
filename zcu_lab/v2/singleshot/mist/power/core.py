@@ -281,7 +281,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 xs,
                 populations[:, index],
                 yerr=sem[:, index],
-                fmt="o",
+                fmt="o-",
                 markersize=3,
                 capsize=2,
                 label=label,

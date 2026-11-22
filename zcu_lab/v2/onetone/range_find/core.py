@@ -332,7 +332,7 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
             ylabel="Magnitude of mean IQ (a.u.)",
             title=f"Prominence noise factor: {prominence_factor:.4g}",
         )
-        ax.plot(freqs, magnitude, ".", color="C0", label="Measured samples")
+        ax.plot(freqs, magnitude, ".-", color="C0", label="Measured samples")
         if candidates:
             ax.plot(
                 candidates,
