@@ -86,10 +86,19 @@ def run(cfg: LocalZCfg, *, context: RunContext) -> RunRecord[LocalZCfg, LocalZRe
     return RunRecord(cfg=cfg, result=LocalZExp().run(cfg, context=context))
 
 
+def _summary_lines(source: LocalZRun) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=LocalZExp.AXES_SPEC,
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
+    analysis=Analysis(
+        fn=_analyze, writeback=_get_writeback_items, summary_lines=_summary_lines
+    ),
 )

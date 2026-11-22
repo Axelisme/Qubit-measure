@@ -121,6 +121,9 @@ class RecordingHost:
     def clear_tab_plot(self, tab_id: str) -> None:
         self._log.add("host", "clear_tab_plot", tab_id)
 
+    def clear_tab_run_preview(self, tab_id: str) -> None:
+        self._log.add("host", "clear_tab_run_preview", tab_id)
+
     def refresh_tab_roles(self, tab_id: str, snapshot: object) -> None:
         self._log.add("host", "refresh_tab_roles", tab_id, snapshot)
 
@@ -429,6 +432,45 @@ def test_run_finished_refreshes_without_focus_or_navigation(
         ]
         assert all(entry.method != "focus_run_result_panel" for entry in log.calls)
         assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
+
+
+@pytest.mark.parametrize(
+    ("is_running", "has_run_result", "clear_preview"),
+    [
+        (False, False, True),
+        (True, False, False),  # The same tab has already started another Run.
+        (
+            False,
+            True,
+            False,
+        ),  # A published result may still be saved after a ledger failure.
+    ],
+)
+def test_failed_run_terminal_only_clears_the_unpublished_run_preview(
+    *, is_running: bool, has_run_result: bool, clear_preview: bool
+) -> None:
+    snapshot = _snapshot(is_running=is_running, has_run_result=has_run_result)
+    coordinator, log, ctrl, _host = _coordinator(snapshot)
+    ctrl.tab_control.running_tab_id = "tab-1" if is_running else None
+    bus = BaseEventBus()
+    try:
+        coordinator.bind(bus)
+        bus.emit(RunFinishedPayload("tab-1", outcome="failed"))
+
+        expected = [
+            call("host", "has_tab_widget", "tab-1"),
+            call("ctrl", "get_tab_snapshot", "tab-1"),
+        ]
+        if clear_preview:
+            expected.append(call("host", "clear_tab_run_preview", "tab-1"))
+        assert log.calls == [
+            *expected,
+            call("host", "refresh_tab_interaction", "tab-1", snapshot),
+            call("ctrl", "get_running_tab_id"),
+            call("host", "refresh_run_lock", ctrl.tab_control.running_tab_id),
+        ]
     finally:
         coordinator.close()
 
