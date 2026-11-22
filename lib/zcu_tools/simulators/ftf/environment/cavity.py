@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.simulate.adc import (
     CavityAverageCache,
+    ProjectionChain,
     ProjectionReadout,
     normalize_populations,
 )
@@ -51,8 +52,24 @@ class ProjectiveCapture:
         round_index: int,
         point: int,
         span: tuple[float, float],
-        histories: tuple[tuple[int, tuple[int, ...]], ...],
+        provenance: dict[str, object],
     ) -> Generator[None]:
+        """Associate one Engine.evolve's recording with its FTF origin.
+
+        round_index is the zero-based software round. point is the original
+        flattened C-order acquisition index. span gives the absolute start and
+        end in ns.
+
+        provenance uses decimal-string Engine row IDs. The history route maps
+        them to tuples of DC state indices under histories. The chain route
+        supplies a zero-based event_index and maps them to DC state indices
+        under nodes. Before the first projection, the event and node state
+        are both None.
+
+        On exit, including failure, use the capture ID from the first row
+        appended in this scope. With no new row, write nothing. The explicit
+        round_index, point and span_ns take precedence over provenance keys.
+        """
         before = len(self._buffer.records)
         try:
             yield
@@ -61,12 +78,10 @@ class ProjectiveCapture:
             if len(records) > before:
                 capture_id = read_capture_metadata(records[before])["capture_id"]
                 self.spans[capture_id] = {
+                    **provenance,
                     "round_index": round_index,
                     "point": point,
                     "span_ns": span,
-                    "histories": {
-                        str(row_id): history for row_id, history in histories
-                    },
                 }
 
 
@@ -76,7 +91,7 @@ class CavityEvolutionOptions:
 
     key: Complete caller preparation digest, including downstream ADC inputs.
     telemetry: Whether evolution collects per-family CPU and routing reports.
-    cancel: Read-only query checked before each projective outcome advances and
+    cancel: Read-only query checked before each projective node advances and
         at Engine checkpoints, or None to disable Stop. Cancellation raises
         Cancelled and returns no partial composition.
     evolving: Scope around each Engine.evolve, including failed calls.
@@ -270,7 +285,9 @@ def _project_outcomes(
             density[0, state, state] = 1
             expanded.append(
                 _Outcome(
-                    replace(timeline, density=density, fields=timeline.fields.copy()),
+                    replace(
+                        timeline, density=density, fields=np.zeros_like(timeline.fields)
+                    ),
                     weight,
                     (*outcome.history, state),
                 )
@@ -287,11 +304,11 @@ def _project_outcomes(
 
 
 def _point_paths(
-    paths: PathDiagnostics, identities: dict[int, tuple[int, tuple[int, ...]]]
+    paths: PathDiagnostics, row_points: Mapping[int, int]
 ) -> PathDiagnostics:
-    """Attribute row membership and warnings to acquisition points, not histories."""
+    """Attribute row membership and warnings to acquisition points."""
     members = {
-        name: tuple(sorted({identities[row_id][0] for row_id in ids}))
+        name: tuple(sorted({row_points[row_id] for row_id in ids}))
         for name, ids in paths.point_members.items()
     }
     return replace(
@@ -299,7 +316,7 @@ def _point_paths(
         points_by_class={name: len(ids) for name, ids in members.items()},
         point_members=members,
         stark_order_inversions=tuple(
-            replace(entry, point=identities[entry.point][0])
+            replace(entry, point=row_points[entry.point])
             for entry in paths.stark_order_inversions
         ),
     )
@@ -369,7 +386,10 @@ def _evolve_outcomes(
             nullcontext()
             if options.projective_capture is None
             else options.projective_capture.recording(
-                options.round_index, point, span, histories
+                options.round_index,
+                point,
+                span,
+                {"histories": {str(row_id): states for row_id, states in histories}},
             )
         )
         with recording, options.evolving(), engine.defer_stark_order_warnings():
@@ -505,7 +525,8 @@ def evolve_projective_plans(
                 )
             densities[point] += outcome.weight * outcome.timeline.density[0]
     paths = _point_paths(
-        merge_path_diagnostics([span.paths for span in spans]), projection.identities
+        merge_path_diagnostics([span.paths for span in spans]),
+        {row_id: identity[0] for row_id, identity in projection.identities.items()},
     )
     return ProjectionEvolution(
         EvolutionResult(points, densities, paths),
@@ -514,6 +535,293 @@ def evolve_projective_plans(
         tuple(map(len, rows)),
         tuple(pruned),
         tuple(span.diagnostic for span in spans),
+    )
+
+
+@dataclass(frozen=True)
+class ProjectiveNodeSpan:
+    """Engine diagnostics for one point and span of one logical event layer.
+
+    point and span_ns locate the solve in caller coordinates. event_index is
+    the zero-based source event, or None for the prefix before any projection.
+    nodes maps Engine row IDs to DC energy states (None for the prefix).
+    Membership and Stark inversions use those same Engine row IDs.
+    """
+
+    point: int
+    span_ns: tuple[float, float]
+    event_index: int | None
+    nodes: tuple[tuple[int, int | None], ...]
+    point_members: Mapping[str, tuple[int, ...]]
+    stark_order_inversions: tuple[StarkOrderInversion, ...]
+
+
+@dataclass(frozen=True)
+class ProjectionChainEvolution:
+    """FTF projective result in result.points order.
+
+    result includes the full density at terminal read start before projection.
+    readout includes the terminal event even if no ADC observes it. reuse_keys
+    cover each Engine solve. continued_states and identity_weight record the
+    number of solved source states and total skipped marginal per point and
+    transition, respectively. spans gives provenance for each Engine solve.
+    """
+
+    result: EvolutionResult
+    readout: ProjectionChain
+    reuse_keys: tuple[bytes, ...]
+    continued_states: tuple[tuple[int, ...], ...]
+    identity_weight: tuple[tuple[float, ...], ...]
+    spans: tuple[ProjectiveNodeSpan, ...]
+
+
+@dataclass
+class _NodeLayer:
+    point: int
+    event: int | None
+    # Keyed by the Engine identity so returned row order is immaterial.
+    nodes: Mapping[int, tuple[int | None, _CavityTimeline]]
+
+
+@dataclass
+class _ChainSolves:
+    engine: Engine
+    facts: FTFModelFacts
+    options: CavityEvolutionOptions
+    keys: list[bytes] = field(default_factory=list)
+    paths: list[PathDiagnostics] = field(default_factory=list)
+    spans: list[ProjectiveNodeSpan] = field(default_factory=list)
+    identities: dict[int, tuple[int, int | None, int | None]] = field(
+        default_factory=dict
+    )
+
+    def row_id(self, point: int, event: int | None, state: int | None) -> int:
+        identity = (point, event, state)
+        coordinates = np.asarray(
+            [item if item is not None else -1 for item in identity], dtype="<i8"
+        )
+        digest = sha256(b"ftf-projective-node\0" + coordinates.tobytes()).digest()
+        row_id = int.from_bytes(digest[:8], "little") >> 1
+        if self.identities.setdefault(row_id, identity) != identity:
+            raise ValueError(f"FTF projective row ID collision for {identity}")
+        return row_id
+
+    def advance(
+        self, layer: _NodeLayer, spans: tuple[tuple[float, float], ...], steps: range
+    ) -> None:
+        if not layer.nodes:
+            return  # All rows are identity; there is nothing to solve.
+        for step in steps:
+            self._advance_span(layer, step, spans[step])
+
+    def _advance_span(
+        self, layer: _NodeLayer, step: int, span: tuple[float, float]
+    ) -> None:
+        options = self.options
+        point = layer.point
+        nodes = tuple((row_id, state) for row_id, (state, _) in layer.nodes.items())
+        batches = []
+        with options.reading():
+            for row_id, (_, timeline) in layer.nodes.items():
+                if options.cancel is not None and options.cancel.is_set():
+                    raise Cancelled()
+                batches.append(
+                    timeline.advance(step, points=np.array([row_id], dtype=np.int64))
+                )
+        start, end = span
+        key = _span_key(options.key, step, tuple(batches))
+        recording = (
+            nullcontext()
+            if options.projective_capture is None
+            else options.projective_capture.recording(
+                options.round_index,
+                point,
+                span,
+                {
+                    "event_index": layer.event,
+                    "nodes": {str(row_id): state for row_id, state in nodes},
+                },
+            )
+        )
+        engine = self.engine
+        location = f"FTF projective point {point} span [{start:g}, {end:g}] ns event {layer.event}"
+        with recording, options.evolving(), engine.defer_stark_order_warnings():
+            try:
+                result = engine.evolve(
+                    self.facts.source,
+                    batches,
+                    budget=EVOLUTION_BUDGET,
+                    cancel=options.cancel,
+                    telemetry=options.telemetry,
+                    capture=options.capture,
+                    reuse_key=key,
+                )
+            except Cancelled:
+                raise
+            except NoValidKernel as error:
+                states = [state for row_id, state in nodes if row_id in error.points]
+                raise NoValidKernel(
+                    f"{location} states {states}: {error}",
+                    domain=error.domain,
+                    points=(point,),
+                    segments=error.segments,
+                    attempted=error.attempted,
+                ) from error
+            except Exception as error:
+                error.add_note(
+                    f"{location} batch states {[state for _, state in nodes]}"
+                )
+                raise
+        for row_id, density in zip(result.points, result.densities, strict=True):
+            layer.nodes[row_id][1].density = density[None]
+        self.keys.append(key)
+        self.paths.append(result.paths)
+        self.spans.append(
+            ProjectiveNodeSpan(
+                point,
+                span,
+                layer.event,
+                nodes,
+                result.paths.point_members,
+                result.paths.stark_order_inversions,
+            )
+        )
+
+
+@dataclass(frozen=True)
+class _PointChain:
+    initial: NDArray[np.float64]
+    transitions: tuple[NDArray[np.float64], ...]
+    density: NDArray[np.complex128]
+    continued: tuple[int, ...]
+    skipped: tuple[float, ...]
+
+
+def _project_chain_point(
+    solves: _ChainSolves,
+    timeline: _CavityTimeline,
+    read_starts: tuple[float, ...],
+    floor: float,
+) -> _PointChain:
+    spans = timeline.spans[0]
+    starts = {start: step for step, (start, _) in enumerate(spans)}
+    boundaries = tuple(starts[start] for start in read_starts)
+    point = int(timeline.batch.points[0])
+    prefix_id = solves.row_id(point, None, None)
+    solves.advance(
+        _NodeLayer(point, None, {prefix_id: (None, timeline)}),
+        spans,
+        range(boundaries[0]),
+    )
+    with solves.options.reading():
+        initial = normalize_populations(timeline.density[0].diagonal().real)
+    marginal = initial
+    transitions = []
+    continued = []
+    skipped = []
+    density = timeline.density[0]
+    identities = np.eye(len(initial))
+    for event, (start, stop) in enumerate(
+        zip(boundaries, (*boundaries[1:], len(spans)), strict=True)
+    ):
+        if solves.options.cancel is not None and solves.options.cancel.is_set():
+            raise Cancelled()
+        adopted = marginal >= floor
+        continued.append(int(np.count_nonzero(adopted)))
+        skipped.append(float(marginal[~adopted].sum()))
+        timelines = {
+            int(state): replace(
+                timeline,
+                density=np.diag(identities[state]).astype(np.complex128)[None],
+                fields=np.zeros_like(timeline.fields),
+            )
+            for state in np.flatnonzero(adopted)
+        }
+        nodes = {
+            solves.row_id(point, event, state): (state, node)
+            for state, node in timelines.items()
+        }
+        solves.advance(_NodeLayer(point, event, nodes), spans, range(start, stop))
+        with solves.options.reading():
+            transition = identities.copy()
+            density = np.diag(np.where(adopted, 0, marginal)).astype(np.complex128)
+            for state, node in timelines.items():
+                output = node.density[0]
+                transition[state] = normalize_populations(output.diagonal().real)
+                density += marginal[state] * output
+            transitions.append(transition)
+            marginal = marginal @ transition
+    return _PointChain(
+        initial, tuple(transitions), density, tuple(continued), tuple(skipped)
+    )
+
+
+def evolve_projection_chain(
+    engine: Engine,
+    plans: tuple[FTFTemplatePlan, ...],
+    facts: FTFModelFacts,
+    settings: FTFSettings,
+    *,
+    options: CavityEvolutionOptions,
+) -> ProjectionChainEvolution:
+    """Evolve each point's ordered projective layers into ADC transition rows.
+
+    Plans have a common topology with at least one nonterminal projection per
+    point. At each projection, reset the cavity to vacuum and continue once
+    per retained DC energy state with marginal at least projection_weight_floor.
+    Other states use identity without dropping their probability. The last
+    transition ends at the terminal event, observed or not. ADC trajectories
+    do not feed back into these density solves. Engine errors retain span and
+    node context. A Stop observed at a node boundary or by Engine raises
+    Cancelled without returning a partial preparation.
+    """
+    points = np.concatenate([plan.batch.points for plan in plans])
+    solves = _ChainSolves(engine, facts, options)
+    rows = []
+    cache = CavityAverageCache(max_bytes=_CAVITY_SPAN_CACHE_BYTES)
+    try:
+        pair = resonators(settings)
+        for plan in plans:
+            for point, reads in enumerate(plan.projective_reads):
+                batch = _point_batch(plan.batch, point)
+                pulses = (
+                    *plan.cavity_drives[point],
+                    *(p for read in reads for p in read.pulses),
+                )
+                timeline = _CavityTimeline(
+                    batch,
+                    segment_spans(batch),
+                    (CavityDrive(facts.joint, pair, pulses, cache=cache),),
+                    facts.source.initial_density[None].copy(),
+                    np.zeros((1, 2), dtype=np.complex128),
+                )
+                rows.append(
+                    _project_chain_point(
+                        solves,
+                        timeline,
+                        tuple(read.start_ns for read in reads),
+                        settings.numerics.projection_weight_floor,
+                    )
+                )
+    finally:
+        cache.clear()
+    paths = _point_paths(
+        merge_path_diagnostics(solves.paths),
+        {row_id: identity[0] for row_id, identity in solves.identities.items()},
+    )
+    return ProjectionChainEvolution(
+        EvolutionResult(points, np.stack([row.density for row in rows]), paths),
+        ProjectionChain(
+            np.stack([row.initial for row in rows]),
+            tuple(
+                np.stack(layer)
+                for layer in zip(*(row.transitions for row in rows), strict=True)
+            ),
+        ),
+        tuple(solves.keys),
+        tuple(row.continued for row in rows),
+        tuple(row.skipped for row in rows),
+        tuple(solves.spans),
     )
 
 

@@ -30,7 +30,7 @@ from .populations import (
     normalize_populations,
 )
 from .projection import ProjectionChain, ProjectionReadout
-from .raw import ADCRawShots, PreparedRawShots
+from .raw import ADCRawShots, PreparedRawShots, RawPlanOwner
 from .readout_batch import (
     ChannelReadout,
     ConditionalSums,
