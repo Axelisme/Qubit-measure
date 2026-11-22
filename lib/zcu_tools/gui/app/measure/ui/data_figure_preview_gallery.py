@@ -488,9 +488,6 @@ class DataFigurePreviewGallery(QWidget):
         layout.addWidget(self._pages)
         self._overview = QWidget()
         self._pages.addWidget(self._overview)
-        self._reading = DataFigureReading(self._scope, self._return_to_preview)
-        self._pages.addWidget(self._reading)
-        self._scope.add_cleanup(self.dismiss_reading)
 
         outer = QVBoxLayout(self._overview)
         outer.setContentsMargins(OUTER_MARGIN, OUTER_MARGIN, OUTER_MARGIN, OUTER_MARGIN)
@@ -525,6 +522,10 @@ class DataFigurePreviewGallery(QWidget):
         except RuntimeError:
             # A deleted Qt viewport must not prevent gallery construction.
             pass
+
+        self._reading = DataFigureReading(self._scope, self._return_to_preview)
+        self._pages.addWidget(self._reading)
+        self._scope.add_cleanup(self.dismiss_reading)
 
     def _open_reading(
         self,

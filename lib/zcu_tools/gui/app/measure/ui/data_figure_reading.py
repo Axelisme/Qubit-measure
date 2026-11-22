@@ -43,9 +43,6 @@ class DataFigureReading(QWidget):
         self._scroll = QScrollArea()
         self._scroll.setObjectName("dataFigureReadingScroll")
         self._scroll.setAccessibleName("Figure image; scroll to see the full figure")
-        viewport = self._scroll.viewport()
-        if viewport is not None:
-            viewport.setObjectName("dataFigureReadingViewport")
         self._image = QLabel()
         self._image.setObjectName("dataFigureReadingImage")
         self._scroll.setWidget(self._image)
