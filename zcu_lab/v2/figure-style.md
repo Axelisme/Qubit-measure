@@ -47,8 +47,8 @@
 | 類別 | 缺陷或限制 | 例子 |
 | --- | --- | --- |
 | A | 圖與摘要無法辨認 run 身分或判讀所需的採集設定 | 只見表單初值，不知該次 cfg 的 Reps×Rounds 或實際施加的 detune。見 R10。 |
-| B | 缺逐點不確定度 | 機率點沒有用 shot SEM 畫 error bar，只報了 fit 參數的誤差。見 R11。 |
-| C | 缺已回傳的 fit 品質值、指標解釋，或既有選取判準的說明 | 圖列了殘差 RMS，guide 沒說這個數值代表什麼。若候選未通過既有選取判準，圖沒指出未通過的指標與門檻也算缺陷。沒有既有判準不算缺陷。見 R3b、Gd3。 |
+| B | 缺可估計的逐點不確定度 | 讀出校正布居可傳遞 shot 共變異卻沒有誤差棒，只報了 fit 參數的誤差。見 R11。 |
+| C | 缺已回傳的 fit 品質值或指標解釋 | 圖列了殘差 RMS，guide 沒說這個數值代表什麼。見 R3b、Gd3。 |
 | D | 表單欄位的語意或單位不清 | `Frequency` 沒說是 RF 還是 IF；`Reset` 欄位與 Reset 按鈕混淆。 |
 | E | 圖上的標題、圖例或軸量不清 | y 軸只寫 `Real Signal`，沒說投影與單位。見 R6、R7。 |
 | F | liveplot 與 Analyze 圖不一致 | 同一訊號在兩處用了不同的軸名，讀者無法對照。見 R9。 |
@@ -85,12 +85,10 @@
 
 ### R3b：結果旁寫 fit 品質
 
-在結果旁列出 core 或分析已回傳的品質值，例如 `FitQuality` 的 R²、正規化殘差 RMS 或參數相對誤差。繪圖端不重算品質值。若已有選取判準，沿用負責選取的程式給出的結論與未通過理由。只有既有判定未通過時，才標「未通過選取判準」並列出未通過的指標、數值與門檻。繪圖端不重做選取，也不自訂門檻。沒有既有判準時只列數值。guide 依 [Gd3](#gd3解釋誤差棒與-fit-品質) 解釋各指標與既有判準。
+在結果旁列出 core 或分析已回傳的品質值，例如 `FitQuality` 的 R²、正規化殘差 RMS 或參數相對誤差。繪圖端不重算品質值。擬合失敗或某個標準誤算不出來時，可以如實標註。圖不寫指標是否通過門檻。寫回預選與否及理由由 adapter 在 Writeback review note 說明，作為給操作員的建議。Guide 依 [Gd3](#gd3解釋誤差棒與-fit-品質) 解釋指標的意義。
 
-- 壞例：實驗沒有選取判準，繪圖端自行以 R² < 0.9 標成未通過。
-- 好例（repo 現例）：[Reset Rabi check](twotone/reset/rabi_check/core.py) 的殘差子圖在 legend 使用[各分支擬合回傳的 RMS](twotone/reset/rabi_check/fit.py)，不重算 RMS，也不標通過與否。[Guide](twotone/reset/rabi_check/guide.md) 說明這些診斷共用同一個 IQ 投影軸，並請操作員比較擬合殘差。
-- 好例（本地改寫示例）：[T2 Echo 的 GUI adapter](twotone/time_domain/t2echo/gui.py) 已決定寫回候選是否預先勾選，並提供未勾選的理由。若把這份既有判定呈現到圖上，可寫「未通過選取判準：R² = 0.774，須 ≥ 0.9；正規化殘差 RMS = 0.113，須 ≤ 0.1；T2 相對誤差 = 0.83，須 ≤ 0.5」。這是呈現寫法，並非現行圖上的標註。Core 和繪圖端不另套這些條件。
-  初選與理由如何顯示，見 [writeback preview](../../lib/zcu_tools/gui/app/measure/writeback/README.md#initial-selection-and-notes)。
+- 壞例：T2 Echo 圖把 R² = 0.774 標成「未通過選取判準」，即使這個判定來自 Writeback。初選與理由留在 [Writeback preview](../../lib/zcu_tools/gui/app/measure/writeback/README.md#initial-selection-and-notes)。
+- 好例：[Reset Rabi check](twotone/reset/rabi_check/core.py) 的殘差子圖在 legend 使用[各分支擬合回傳的 RMS](twotone/reset/rabi_check/fit.py)，不重算 RMS，也不標通過與否。[Guide](twotone/reset/rabi_check/guide.md) 說明這些診斷共用同一個 IQ 投影軸，並請操作員比較擬合殘差。
 
 ### R4：尺度跟著資料走
 
@@ -164,13 +162,16 @@ Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summar
 - 壞例：Ramsey 圖標題塞了 run id 和初始設定，摘要卻只重複表單初值，沒寫實驗回傳的實際 detune。
 - 好例（本地改寫示例）：圖上只保留判讀條紋和 T2* 需要的量與標註。同次 Analyze 摘要在實驗名與 run id 旁列「Reps×Rounds 1000×10；實際 detune 0.400 MHz」。Ding 圖 5-9(e)（頁 152）的相位圖集中在判讀所需的 180° 參考線與候選頻率。
 
-### R11：有 shot SEM 的一維資料畫 error bar
+### R11：一維資料的逐點誤差棒
 
-已有 shot SEM 的一維系列畫逐點 error bar，包括用來判讀峰位的 spectrum。二維圖不畫逐點 error bar。Guide 寫明 error bar 的來源。
+一維系列有逐點 shot SEM 時就畫誤差棒，包括用來判讀峰位的 spectrum。對逐發平均，shot SEM = 每發樣本標準差 ÷ √(保留 shot 數)。被 mask 的 shot 不算。棒表示該點平均值的抽樣誤差，不是單發散布、輪間散布或 fit 參數誤差。RB 的跨 seed 標準差也不是 shot SEM。估計器在 [`zcu_tools.analysis`](../../lib/zcu_tools/analysis/README.md#逐點-shot-sem)。
 
-逐點 shot SEM 估計該點平均值的標準差，代表這個平均值的預期誤差。shot SEM = 每發樣本標準差 ÷ √(保留 shot 數)。被 mask 的 shot 不算。它不是單發散布 σ、輪間散布或 fit 參數誤差。RB 的跨 seed 標準差也不是 shot SEM。估計器在 [`zcu_tools.analysis`](../../lib/zcu_tools/analysis/README.md)。只存平均或舊檔缺少估計所需資料時不畫 shot SEM。不為了套用連線規則改存檔格式；需要二階 moment 時留到家族取數修正。
+一維反演量若能從原始量的 shot 共變異矩陣以一階誤差傳遞求出有限的逐點標準誤，也畫棒。以反演的 Jacobian `J` 和原始估計量的共變異矩陣 `Σ` 計算 `√diag(J Σ Jᵀ)`。有校正矩陣時視為已知，棒只含本次 shot 的抽樣誤差。讀出校正的一維布居用同一個不截斷的線性估計畫圖和擬合，可低於 0 或高於 1。Wrapped phase 的棒跨 ±180° 時，依圖軸截斷顯示。
 
-- 壞例：T1 只報 `T1 = 80 ± 5 µs`，不顯示每個量測點的不確定度。
+缺必要統計量（例如舊檔只存平均）時不畫棒，guide 寫明缺哪一項。反演無法求得有限標準誤時略過該棒並記錄數值原因；若點仍有限，就保留該點。不另設矩陣條件數或相位 contrast 門檻。不在呈現層補造缺少的統計量或改存檔。不能把 score 當逐發平均來套 shot SEM。IQ 散點與二維圖不畫逐點誤差棒，二維校正不變。
+
+- 壞例：T1 有逐點標準誤，卻只報 `T1 = 80 ± 5 µs`，不畫量測點的誤差棒。
+- 好例：T1 的讀出校正估計為 `P(e) = −0.004 ± 0.006` 時，圖保留負值與跨過 0 的棒，擬合也使用 `−0.004`。
 - 好例：Rabi 的逐點布居用 shot SEM 畫 error bar。Ding 圖 5-13(a)（頁 157）的 CZ fidelity 對脈衝寬度圖可作逐點誤差棒的版式參考；圖 5-8(b)（頁 151）的二維掃描則用熱圖。
 - 好例：多維取數的一維 fit panel 可以用外層掃描座標當橫軸，而不是擬合用的時間軸。
   [CPMG](twotone/time_domain/cpmg/core.py) 對每個 π 脈衝數沿演化時間擬合衰減，再以脈衝數為橫軸畫 T₂。誤差棒是各次衰減擬合的 T₂ 標準誤（`decay_time_err`）。
@@ -179,7 +180,7 @@ Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summar
 
 ### R12：y 軸畫物理 observable
 
-現有 Result 已有物理上有效的 population 時才畫它，例如既有分類結果的態機率。值域是 0–1，軸名或色階標籤要寫明是哪個態。顯示範圍照 R4 選，不因值域是 0–1 就固定尺度。只有平均訊號時，寫明 IQ 投影方式與單位 `a.u.`，並在 guide 說明為何它不是 population。博論只作版式與標註參考。不為了改圖加跑校準或改變取數。
+現有 Result 已有物理上有效的 population 時才畫它，例如既有分類結果的態機率。分類比例在 0–1 之間；一維讀出校正布居依 [R11](#r11一維資料的逐點誤差棒) 保留不截斷的估計。軸名或色階標籤要寫明是哪個態。顯示範圍照 R4 選，不因機率值域是 0–1 就固定尺度。只有平均訊號時，寫明 IQ 投影方式與單位 `a.u.`，並在 guide 說明為何它不是 population。博論只作版式與標註參考。不為了改圖加跑校準或改變取數。
 
 平均 IQ 的一維圖與二維 flux／頻率圖如何選擇投影，見 [ADR-0069〈平均 IQ 的投影慣例〉](../../docs/adr/0069-experiment-core-and-frontends.md#平均-iq-的投影慣例)。
 
@@ -256,14 +257,14 @@ Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summar
 
 ### Gd2：先核對操作員能在哪裡看到同一資訊
 
-刪除下列內容前，逐項確認負責的介面或文件已向操作員呈現等價資訊。程式碼、文件標題或連結存在都不算。沒有可見替代時，在 guide 的對應項目留最短的必要說明。
+刪除下列內容前，逐項確認負責的介面或文件已向操作員呈現等價資訊。程式碼、文件標題或連結存在都不算。除下表另有說明外，沒有可見替代時，在 guide 的對應項目留最短的必要說明。
 
 | 內容 | 到哪裡核對 |
 | --- | --- |
 | 存檔格式、舊檔行為 | 存檔或載入介面，或負責該格式與相容性的文件。只留操作員需要的保存或載入限制，不抄內部資料結構。 |
 | Recipe 留空行為 | 逐輸入核對已發布的 `Field.description` 或 schema 是否說清留空（`null`）的效果，以及確切的失敗階段。若缺 recipe 專屬的失敗時點，留在 guide。 |
 | 通用 GUI 操作 | 連到 [`zcu_lab/v2/operator-workflow.md`](operator-workflow.md)，不重抄點擊流程。Guide 的連結文字寫出這個 repo 路徑，讓 GUI 操作員能從 checkout 開啟；Guide pane 不解析相對 Markdown 連結。 |
-| 一般 writeback 門檻 | 在結果或 writeback preview 核對是否看得到同一規則。不能用只在失敗時出現的 note 取代完整規則；GE 的例外見 Gd3。 |
+| 既有 Writeback 門檻說明 | 刪除前，確認操作員能在 Writeback preview 或 review info 核對同一規則。若缺資訊，交由 Writeback owner 補齊。不要在 guide 重列門檻，也不要把判定移到結果或圖上。 |
 
 表單顯示初值不等於說明初值來源。只有操作員要用此來源設定關鍵參數，且 GUI 沒有等價的來源說明時，才在「關鍵參數」保留最短公式，例如 T2 Echo 視窗初值 `0…1.5·t2e`。
 
@@ -271,9 +272,9 @@ Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summar
 
 ### Gd3：解釋誤差棒與 fit 品質
 
-依 [R11](#r11有-shot-sem-的一維資料畫-error-bar) 寫明誤差棒的來源。逐點 shot SEM 是單發樣本標準差除以保留 shot 數的平方根，代表該點平均值的抽樣誤差，不是 fit 誤差、單發散布或輪間散布。若圖用的是其他統計量，例如 RB 的跨 seed 標準差，按實際量說明。
+依 [R11](#r11一維資料的逐點誤差棒) 說明誤差棒的來源和意義。寫清它是逐發平均的 shot SEM、反演傳遞後的標準誤，還是其他統計量，例如 RB 的跨 seed 標準差。反演棒只含本次 shot 的抽樣誤差，若用到校正矩陣則寫明視為已知。若反演量因現有資料不足而不畫棒，寫明缺哪一項。
 
-依 [R3b](#r3b結果旁寫-fit-品質) 解釋已回傳的品質指標及既有判準如何影響下一步。門檻依 Gd2 分工，guide 不另訂門檻。[Mux GE](mux/singleshot_ge/guide.md) 與 [single-shot GE](singleshot/ge/guide.md) 各留一行完整的 Primary 預選規則：聯合擬合的 R² ≥ 0.9、正規化殘差 RMS ≤ 0.1、相對寬度誤差 ≤ 0.5、g/e 相對中心誤差各 ≤ 0.5；四項全過才預選，任一不過或必要指標缺失、非有限或標為無效就不預選。只有 GUI 與 MCP writeback preview 都對成功和失敗顯示完整規則，才移除這一行。不在 guide 展開 note 格式或零方差等排錯細節。
+依 [R3b](#r3b結果旁寫-fit-品質) 說明各品質指標在衡量什麼，不寫這些指標的選取或寫回預選門檻。例如正規化殘差 RMS 衡量模型與量測的差異相對於資料的變化幅度有多大。
 
 逐一核對每個 family 適用的必留項，不以篇幅為由省略：
 

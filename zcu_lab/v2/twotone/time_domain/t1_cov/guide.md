@@ -12,7 +12,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the s
 
 ## Read the plots
 
-The live plot says **Calibrating** until the two-state calibration succeeds; a failed update keeps the previous plot and acquisition continues. Analyze recalibrates on all measured points. The plotted quantity is `C = 1 − tr(J)`, where J is the joint state probability inferred from paired IQ moments. C is not a classified shot count or gate fidelity. Finite-sample C can lie outside [0, 1]; check IQ separation and the shared-center assumption instead of clipping it. The plot does not use binomial shot SEM.
+The live plot says **Calibrating** until the two-state calibration succeeds; a failed update keeps the previous plot and acquisition continues. Analyze recalibrates on all measured points. The plotted quantity is `C = 1 − tr(J)`, where J is the joint state probability inferred from paired IQ moments. C is not a classified shot count or gate fidelity. Finite-sample C can lie outside [0, 1]; check IQ separation and the shared-center assumption instead of clipping it. The plot has no pointwise bars. The saved paired IQ moments do not give the sampling covariance of the paired-read products used to infer C, even if the shared calibration is held fixed.
 
 Analyze overlays the decay and reports T₁ and its fit standard error, not pointwise uncertainty. `pi_hat` lists populations inferred after the first read, ordered by population rather than labeled g/e/f. The fit's R² compares residual and measured variation; it does not validate the IQ calibration.
 
