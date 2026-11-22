@@ -36,7 +36,21 @@ slopes, crossings, counts and herald fractions stay inside analysis for plotting
 
 For each target projection, `sigma=(N_e-N_g)/N_total`. Other remains in the denominator. Contrast is `hypot(sigma_X,sigma_Y)`; phase is `atan2(sigma_Y,sigma_X)` in degrees, wrapped to `[-180,180)`. Analysis does not project mean IQ or reclassify shots.
 
-The phase plot shows contrast and logical phase for each spectator state and gate count. The quadratures plot shows classified X/Y sigma. The slopes plot shows the fitted phase per gate for actual spectator g and e.
+Use the live X/Y panels to check contrast as trains start. Analyze begins
+with the latest started train, even if it stopped before completing all
+rounds. If none started, the first figure says so. Each planned gate count
+still has its own quadrature and contrast/wrapped-phase figures.
+Read X and Y by nominal spectator preparation. Their bars are ±1 shot SEM
+from the classified (e-g) indicator, with other contributing zero.
+The denominator is the retained count at that point.
+
+The Slopes figure shows phase per CZ with fit standard error, not shot SEM.
+The lower panel shows reduced χ² at each frequency for the same spectator
+series. The fit divides each residual by its fit error, sums the squares,
+then divides by the residual degrees of freedom. A value near 1 means the residual size
+is consistent with those errors. No point means the fit or reduced χ² is
+unavailable, not zero. There is no reduced χ² selection threshold. Use the
+π crossing figure to choose the common frequency.
 
 The fit uses X=A cos(n·slope+φ) and Y=A sin(n·slope+φ), with one amplitude A and phase offset φ per spectator and frequency. There is no quadrature DC offset. Count-derived sigma variances weight the fit. Other counts remain in the denominator. Zero contrast has no diagnostic phase, and unmeasured points block the corresponding slope fit.
 

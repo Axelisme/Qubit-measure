@@ -1,8 +1,6 @@
-## Behavior
+**Readers:** operator, agent. Choose a gain pair for two simultaneous reset tones at calibrated carriers. The sequence is optional preparation reset → optional preparation pulse → both reset tones → readout after the longer tone.
 
-**Readers:** operator, agent. Dual-tone reset gain map: a 2D sweep of the two reset-tone gains (pulse1 × pulse2 of the tested two-pulse reset) at the calibrated sideband frequencies, imaging the residual excitation to pick the gain pair that resets most completely. Runs on real hardware.
-
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-22
 
 ## Parameter sources
 
@@ -13,6 +11,16 @@ Open and Defaults capture the T1 used for starting values. A missing or null T1,
 ## Module slots
 
 Tested reset starts as an editable copy of the two_pulse_reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+
+## Acquisition and figures
+
+Reps starts at 1000 per sweep point and branch in each acquisition round; Rounds starts at 10. Check the requested Reps × Rounds in Analyze before comparing runs.
+
+Both figures show the magnitude of mean IQ minus the IQ at the minimum-gain corner. Analyze smooths the complex map to pick a gain pair, then marks it with a star on the unsmoothed map. It selects an extremum of the smoothed contrast depending on the first corner relative to the map mean; in a reversed scan the first corner need not be the minimum-gain corner. These are differences between mean IQ values, not classified populations. A 2D map does not show per-cell SEM; the live title gives the number of acquired cells.
+
+Read the marked tone 1 and tone 2 gains in axis order (a.u.). If a candidate lies at an edge of a permitted range, check that it persists on a nearby repeat; move or extend that axis only within safe calibrated bounds. Confirm state preparation separately before applying a module. Layout reference: Ding, Fig. 5-8(b) (printed p. 151) uses a heatmap of population versus drive frequency and pulse plateau. Here the color is an IQ-derived contrast and the axes are separate controls of the tested reset.
+
+In Analyze, Peak selection filter chooses wavelet or Gaussian smoothing. Filter strength multiplies the wavelet threshold in a.u.; for Gaussian it is the standard deviation in sample steps. The star can move when these options change, although the plotted raw map stays the same.
 
 ## Typical writeback
 

@@ -1,8 +1,6 @@
-## Behavior
+**Readers:** operator, agent. Measure the duration dependence of two simultaneous reset tones at calibrated RF frequencies and gains. The sequence is optional preparation reset → optional preparation pulse → both reset tones → readout after the longer tone.
 
-**Readers:** operator, agent. Dual-tone reset length sweep: holds the tested two-pulse reset at its calibrated sideband frequencies and gains and sweeps its duration (both tones together), showing how the residual excitation decays with reset length. Runs on real hardware. Run last, to pick the shortest length that fully resets the qubit.
-
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-22
 
 ## Parameter sources
 
@@ -14,10 +12,18 @@ Open and Defaults capture the T1 used for starting values. A missing or null T1,
 
 Tested reset starts as an editable copy of the two_pulse_reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
 
+## Acquisition and figures
+
+Reps starts at 1000 per sweep point and branch in each acquisition round; Rounds starts at 10. Check the requested Reps × Rounds in Analyze before comparing runs.
+
+The horizontal coordinate is tone 1 duration. At each point, tone 2 uses tone 1 duration plus the difference between their durations in the form; set Start high enough that both pulses have positive duration. Live and Analyze show the mean IQ projected onto its principal variation axis, falling back to I for fewer than two available means. The projection is a readout contrast rather than a population. Each vertical bar is the per-point shot SEM: sample standard deviation along that same IQ axis divided by the square root of the retained shot count. It measures uncertainty of the mean, not shot scatter or fit-parameter uncertainty. Files saved before shot moments were recorded still load and show points without bars.
+
+Choose the shortest sampled duration on a sustained plateau within the error bars. Extend Stop if the response is still changing at the endpoint. Once it levels off, refine Start and Stop around the first plateau transition and keep the configured tone duration difference. Check state preparation separately before applying that duration.
+
 ## Typical writeback
 
 Analysis plots the length response for manual selection. Calibration stays unchanged until you update it. The dual-tone power experiment proposes the tested reset module.
 
 ## Recommended
 
-A length sweep from ~0.05 µs to a few times the expected reset time captures the full decay; shorten the span once the plateau is clear.
+Use a duration range that reaches beyond the first sustained plateau. Keep the preparation and readout the same while refining the range.

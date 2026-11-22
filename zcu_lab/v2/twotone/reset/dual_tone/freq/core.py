@@ -27,11 +27,15 @@ from zcu_tools.utils.process import (
     SmoothingOptions,
     SmoothMethod,
     minus_background,
-    rotate2real,
     smooth_signal_nd,
 )
 
 from zcu_lab.v2.support import live_heatmap, live_line
+
+_TITLE = "Dual-tone reset carriers · qubit · IQ contrast"
+_XLABEL = "Tone 1 RF frequency (MHz)"
+_YLABEL = "Tone 2 RF frequency (MHz)"
+_COLOR_LABEL = "|Mean IQ − median IQ| (a.u.)"
 
 
 @dataclass(frozen=True)
@@ -64,18 +68,58 @@ def dual_reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 class FreqCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    freq1: Annotated[SweepCfg, FieldMeta(label="Freq1", unit="MHz")]
-    freq2: Annotated[SweepCfg, FieldMeta(label="Freq2", unit="MHz")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select a preparation reset before each shot, or leave blank to skip it.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Preparation pulse",
+            description="Select the pulse after preparation reset, such as calibrated Xπ, or leave blank to skip it.",
+        ),
+    ] = None
+    tested_reset: Annotated[
+        TwoPulseReset.Cfg,
+        FieldMeta(
+            label="Tested reset",
+            description="Fill in the two simultaneous reset pulses at fixed gains and durations.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Fill in the calibrated resonator readout for the end of each shot.",
+        ),
+    ]
+    freq1: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Tone 1 RF frequency",
+            unit="MHz",
+            description="Enter the RF range for pulse 1 of the tested reset (MHz).",
+        ),
+    ]
+    freq2: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Tone 2 RF frequency",
+            unit="MHz",
+            description="Enter the RF range for pulse 2 of the tested reset (MHz).",
+        ),
+    ]
     method: Literal["soft", "hard"] = "soft"
 
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per sweep point and sequence branch in each acquisition round (count).",
         ),
     ]
     rounds: Annotated[
@@ -83,7 +127,7 @@ class FreqCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of acquisition rounds to average (count).",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -92,7 +136,7 @@ class FreqCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the delay after each shot to let the qubit relax (µs).",
         ),
     ]
 
@@ -160,11 +204,15 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # 1. Track the dual-tone contrast map and the current tone-1 frequency trace.
         fig, _ = plots.subplots(nrows=1, ncols=2, num="measurement")
         map_ax, line_ax = fig.axes
-        map_ax.set(xlabel="Frequency1 (MHz)", ylabel="Frequency2 (MHz)")
-        line_ax.set(xlabel="Frequency1 (MHz)", ylabel="Signal (a.u.)")
+        map_ax.set(
+            xlabel=_XLABEL, ylabel=_YLABEL, title="Dual-tone reset · IQ contrast map"
+        )
+        line_ax.set(xlabel=_XLABEL, ylabel=_COLOR_LABEL, title="Current tone 2 row")
         viewer = live_heatmap(map_ax)
+        fig.colorbar(map_ax.images[0], ax=map_ax, label=_COLOR_LABEL)
+        map_ax.grid(False)
         line = live_line(line_ax)
-        line_ax.lines[0].set(label="current line", marker=".", color="C0")
+        line_ax.lines[0].set(marker=".", color="C0")
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
@@ -172,7 +220,21 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             real = dual_reset_signal2real(data.T)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=0))
             current = real[:, valid[-1]] if valid.size else np.full(len(freqs1), np.nan)
-            return (*viewer.set(freqs1, freqs2, real), *line.set(freqs1, current))
+            count = int(np.count_nonzero(np.isfinite(data)))
+            title = map_ax.set_title(
+                f"Dual-tone reset · IQ contrast map\nAcquired cells: {count}/{data.size} count"
+            )
+            row = line_ax.set_title(
+                f"Tone 2 RF = {freqs2[valid[-1]]:.3f} MHz"
+                if valid.size
+                else "Current tone 2 row"
+            )
+            return (
+                *viewer.set(freqs1, freqs2, real),
+                *line.set(freqs1, current),
+                title,
+                row,
+            )
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -216,13 +278,19 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         plots = context.plots
         # 1. Monitor dual-tone reset contrast across the hardware frequency grid.
         fig, ax = plots.subplots(num="measurement")
-        ax.set(xlabel="Frequency1 (MHz)", ylabel="Frequency2 (MHz)")
+        ax.set(xlabel=_XLABEL, ylabel=_YLABEL, title=_TITLE)
         viewer = live_heatmap(ax)
+        fig.colorbar(ax.images[0], ax=ax, label=_COLOR_LABEL)
+        ax.grid(False)
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            return viewer.set(freqs1, freqs2, dual_reset_signal2real(data))
+            acquired = int(np.count_nonzero(np.isfinite(data)))
+            title = ax.set_title(
+                f"{_TITLE}\nAcquired cells: {acquired}/{data.size} count"
+            )
+            return (*viewer.set(freqs1, freqs2, dual_reset_signal2real(data)), title)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -294,22 +362,27 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # 3. Assess the selected pair on the original, unsmoothed IQ map.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        ax.imshow(
-            rotate2real(signals.T).real,
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            extent=(freqs1[0], freqs1[-1], freqs2[0], freqs2[-1]),
+        viewer = live_heatmap(ax)
+        (image,) = viewer.set(freqs1, freqs2, dual_reset_signal2real(signals))
+        left, right, bottom, top = image.get_extent()
+        ax.set(xlim=(left, right), ylim=(bottom, top))
+        fig.colorbar(image, ax=ax, label=_COLOR_LABEL)
+        ax.grid(False)
+        ax.scatter(
+            freq1_opt,
+            freq2_opt,
+            color="white",
+            edgecolors="black",
+            s=64,
+            marker="*",
+            label=f"Selected RF pair = ({freq1_opt:.3f}, {freq2_opt:.3f}) MHz",
         )
-        peak_label = f"({freq1_opt:.1f}, {freq2_opt:.1f}) MHz"
-        ax.scatter(freq1_opt, freq2_opt, color="r", s=40, marker="*", label=peak_label)
-        if options.xname is not None:
-            ax.set_xlabel(f"{options.xname} Frequency (MHz)", fontsize=14)
-        if options.yname is not None:
-            ax.set_ylabel(f"{options.yname} Frequency (MHz)", fontsize=14)
-        ax.legend(fontsize="x-large")
-        ax.tick_params(axis="both", which="major", labelsize=12)
-
+        ax.set(
+            xlabel=_XLABEL if options.xname is None else f"{options.xname} · {_XLABEL}",
+            ylabel=_YLABEL if options.yname is None else f"{options.yname} · {_YLABEL}",
+            title=_TITLE,
+        )
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16))
         fig.tight_layout()
 
         return FreqAnalysis(freq1=float(freq1_opt), freq2=float(freq2_opt))

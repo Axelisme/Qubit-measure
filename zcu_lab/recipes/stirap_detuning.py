@@ -25,75 +25,75 @@ class StirapDetuningInputs(RecipeInputs):
     overrides: Overrides
     pump_start_mhz: float | None | Keep = Field(
         default=KEEP,
-        description="Pump detuning start in MHz, added to the measured carrier.",
+        description="Set Pump detuning › Start (MHz).",
     )
     pump_stop_mhz: float | None | Keep = Field(
         default=KEEP,
-        description="Pump detuning stop in MHz.",
+        description="Set Pump detuning › Stop (MHz).",
     )
     pump_n: int | None | Keep = Field(
         default=KEEP,
-        description="Pump-axis sample count: Form n to cfg expts.",
+        description="Set Pump detuning › Expts (count).",
     )
     stokes_start_mhz: float | None | Keep = Field(
         default=KEEP,
-        description="Stokes detuning start in MHz.",
+        description="Set Stokes detuning › Start (MHz).",
     )
     stokes_stop_mhz: float | None | Keep = Field(
         default=KEEP,
-        description="Stokes detuning stop in MHz.",
+        description="Set Stokes detuning › Stop (MHz).",
     )
     stokes_n: int | None | Keep = Field(
         default=KEEP,
-        description="Stokes-axis sample count: Form n to cfg expts.",
+        description="Set Stokes detuning › Expts (count).",
     )
     pump_freq_mhz: float | None | Keep = Field(
         default=KEEP,
-        description="Operator-measured 0-3 Pump carrier in MHz, never inferred from a model.",
+        description="Set Pump carrier 0–3 (MHz) to the measured transition frequency.",
     )
     stokes_freq_mhz: float | None | Keep = Field(
         default=KEEP,
-        description="Operator-measured 3-2 Stokes carrier in MHz, never inferred from a model.",
+        description="Set Stokes carrier 3–2 (MHz) to the measured transition frequency.",
     )
     pump_ch: int | None | Keep = Field(
         default=KEEP,
-        description="Pump generator, separately bound from Stokes.",
+        description="Set Pump generator (channel).",
     )
     stokes_ch: int | None | Keep = Field(
         default=KEEP,
-        description="Stokes generator, separately bound from Pump.",
+        description="Set Stokes generator (channel).",
     )
     pump_gain: float | None | Keep = Field(
         default=KEEP,
-        description="Signed Pump gain in native units.",
+        description="Set Pump gain (a.u.).",
     )
     stokes_gain: float | None | Keep = Field(
         default=KEEP,
-        description="Signed Stokes gain in native units.",
+        description="Set Stokes gain (a.u.).",
     )
     pump_waveform_ref: str | None | Keep = Field(
         default=KEEP,
-        description="Pump library key or Inline: gauss/cosine/drag/arb. Overrides set shape parameters.",
+        description="Set Pump waveform to a library key or exact inline option.",
     )
     stokes_waveform_ref: str | None | Keep = Field(
         default=KEEP,
-        description="Stokes library key or Inline: gauss/cosine/drag/arb, independent of Pump.",
+        description="Set Stokes waveform to a library key or exact inline option.",
     )
     stokes_lead_us: float | None | Keep = Field(
         default=KEEP,
-        description="Fixed lead in µs; positive means Stokes first.",
+        description="Set Fixed Stokes lead (µs); positive starts Stokes first.",
     )
     readout_ref: str | None | Keep = Field(
         default=KEEP,
-        description="Readout library key with acquired centroid3 calibration.",
+        description="Set Readout to a module with saved centroid3 calibration.",
     )
     shots: int | None | Keep = Field(
         default=KEEP,
-        description="Repetitions per scan point, classified into saved g/e/f counts.",
+        description="Set Shots per point (count).",
     )
     relax_delay_us: float | None | Keep = Field(
         default=KEEP,
-        description="Relaxation interval in µs for ground preparation.",
+        description="Set Relax delay (µs).",
     )
 
 
@@ -102,7 +102,7 @@ class StirapDetuningReport(RecipeReport):
 
     f_population_estimate: float | None = Field(
         default=None,
-        description="Largest finite corrected f population (unitless, unclipped) on this grid, not fidelity or a global optimum. Null when unavailable.",
+        description="Peak corrected f fraction (unitless and unclipped) on the sampled grid; null when unavailable.",
     )
     pump_detuning_mhz: float | None = Field(
         default=None,

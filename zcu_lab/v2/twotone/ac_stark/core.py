@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.artist import Artist
-from matplotlib.image import NonUniformImage
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -84,12 +84,50 @@ def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 class AcStarkCfg(ConfigBase):
     reset: Reset.Cfg | None = None
-    stark_tone: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
-    probe: Annotated[Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe")]
-    readout: Readout.Cfg
-    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Probe frequency", unit="MHz")]
-    earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
+    stark_tone: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Stark resonator tone",
+            description="Fill in the resonator drive pulse at the readout RF; the gain sweep sets its amplitude.",
+        ),
+    ]
+    probe: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit spectroscopy probe",
+            description="Fill in the qubit drive pulse applied with the Stark tone; the RF sweep sets its carrier.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Fill in the resonator readout applied after the spectroscopy probe.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Stark tone gain",
+            unit="a.u.",
+            description="Fill in the resonator drive gain endpoints (a.u.) and number of spectra.",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Probe RF frequency",
+            unit="MHz",
+            description="Fill in the qubit drive RF endpoints (MHz) and points per spectrum.",
+        ),
+    ]
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(
+            label="Early-stop SNR",
+            description="Set an SNR target to stop averaging one spectrum; blank uses all rounds.",
+        ),
+    ] = None
 
     reps: Annotated[
         int,
@@ -171,44 +209,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             nonlocal current_snr
             current_snr = snr
 
-        # 2. Track the Stark-shift map, recent frequency traces and early-stop SNR.
-        fig, _ = context.plots.subplots(1, 2, num="measurement")
-        heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
-        line_ax.set(xlabel="Frequency (MHz)", ylabel="Signal (a.u.)")
-        heatmap = live_heatmap(heat_ax, uniform=False)
-        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        line_ax.grid()
-        lines = live_line(line_ax, num_lines=2)
-        for artist in line_ax.lines[:-1]:
-            artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
-        line_ax.legend()
-
-        @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            """Refresh the Stark contrast map, two recent traces and SNR title.
-
-            data is complex IQ shaped (gain, frequency); NaN marks unmeasured points.
-            Return the changed artists without modifying the input array.
-            """
-            real = acstark_signal2real(data)
-            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
-            current = int(valid[-1]) if valid.size else -1
-            history = np.full((2, len(freqs)), np.nan)
-            for offset in range(min(2, current + 1)):
-                history[-offset - 1] = real[current - offset]
-            artists = heatmap.set(gains, freqs, real)
-            artists = (*artists, *lines.set(freqs, history))
-            title = f"snr = {current_snr:.1f}" if current_snr else None
-            if title is not None:
-                return (*artists, heat_ax.set_title(title))
-            return artists
-
-        fig.show()
-        signals_buffer = SignalBuffer(
-            (len(gains), len(freqs)),
-            on_update=update,
+        signals_buffer = self._live_spectra(
+            context.plots, gains, freqs, lambda: current_snr
         )
 
         # 3. Acquire one frequency trace per Stark gain, retaining its SNR early stop.
@@ -246,6 +248,65 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
 
         # 4. Preserve the gain-frequency grid for photon calibration.
         return AcStarkResult(gains, freqs, signals_buffer.array)
+
+    def _live_spectra(
+        self,
+        plots: Plots,
+        gains: NDArray[np.float64],
+        freqs: NDArray[np.float64],
+        snr_now: Callable[[], float],
+    ) -> SignalBuffer:
+        """Attach the map and recent spectra to the run's live buffer."""
+        # 2. Track the Stark-shift map, recent frequency traces and early-stop SNR.
+        fig, _ = plots.subplots(
+            1, 2, num="measurement", figsize=(10, 4.8), layout="constrained"
+        )
+        fig.suptitle("AC Stark spectroscopy · qubit probe · IQ contrast")
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(xlabel="Stark tone gain (a.u.)", ylabel="Probe RF frequency (MHz)")
+        contrast_label = "Row-normalized IQ projection (a.u.)"
+        line_ax.set(xlabel="Probe RF frequency (MHz)", ylabel=contrast_label)
+        heat_ax.grid(False)
+        heatmap = live_heatmap(heat_ax, uniform=False, cmap="viridis")
+        (image,) = heatmap.set(gains, freqs, np.full((len(gains), len(freqs)), np.nan))
+        fig.colorbar(image, ax=heat_ax, label=contrast_label)
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        lines = live_line(line_ax, num_lines=2)
+        line_ax.lines[0].set(
+            label="Previous gain", marker="o", markersize=3, color="0.55"
+        )
+        line_ax.lines[1].set(label="Latest gain", marker="o", markersize=3, color="C0")
+        line_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncols=2)
+
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the Stark contrast map, two recent traces and SNR title.
+
+            data is complex IQ shaped (gain, frequency); NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
+            real = acstark_signal2real(data)
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((2, len(freqs)), np.nan)
+            for offset in range(min(2, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            artists = heatmap.set(gains, freqs, real)
+            artists = (*artists, *lines.set(freqs, history))
+            progress = heat_ax.set_title(
+                f"Gain rows with data: {len(valid)}/{len(gains)}"
+            )
+            if current >= 0:
+                current_snr = snr_now()
+                snr = f" · SNR {current_snr:.1f}" if current_snr else ""
+                line_ax.set_title(f"Latest gain: {gains[current]:.4g} a.u.{snr}")
+            return (*artists, progress)
+
+        fig.show()
+        return SignalBuffer(
+            (len(gains), len(freqs)),
+            on_update=update,
+        )
 
     def analyze(
         self,
@@ -287,7 +348,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         s_gains2 = s_gains**2
 
         # 2. Fit the Stark shift versus gain squared, allowing optional curvature.
-        x2_fit = np.linspace(min(gains2), max(gains2), 100)
+        x2_fit = np.linspace(min(gains2), max(gains2), 240)
         if deg == 1:
             b, c = np.polyfit(s_gains2, s_freqs, 1)
             y_fit = b * x2_fit + c
@@ -299,43 +360,37 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         eta = kappa**2 / (kappa**2 + chi**2)
         ac_coeff = abs(b) / (2 * eta * chi)
 
-        # plot the data and the fitted polynomial
-        avg_n = ac_coeff * gains2
-
-        # 4. Assess the photon calibration against the measured resonance ridge.
-        fig, ax1 = plots.subplots(num="fit", figsize=config.figsize)
-
-        im = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
-        im.set_data(avg_n, freqs, amps.T)
-        im.set_extent((avg_n[0], avg_n[-1], freqs[0], freqs[-1]))
-        ax1.add_image(im)
-
-        ax1.set_xlim(avg_n[0], avg_n[-1])
-        ax1.set_ylim(freqs[0], freqs[-1])
-
-        ax1.plot(ac_coeff * s_gains2, s_freqs, ".", c="k")
-
-        label = r"$\bar n$" + f" = {ac_coeff:.2g} " + r"$gain^2$"
-        n_fit = ac_coeff * x2_fit
-        ax1.plot(n_fit, y_fit, "-", label=label)
-
-        ax2 = ax1.twiny()
-
-        ax1.set_xticks(ax1.get_xticks())
-        ax1.set_xlabel(r"Average Photon Number ($\bar n$)", fontsize=14)
-
-        # 5. Relate the calibrated photon axis to the readout gain on the upper axis.
-        avgn_ticks = ax1.get_xticks()
-        gain_ticks = np.sqrt(avgn_ticks / ac_coeff)
-        ax2.set_xlim(ax1.get_xlim())
-        ax2.set_xticks(avgn_ticks)
-        ax2.set_xticklabels([f"{gain:.2g}" for gain in gain_ticks])
-        ax2.set_xlabel("Readout Gain (a.u.)", fontsize=14)
-
-        ax1.set_ylabel("Qubit Frequency (MHz)", fontsize=14)
-        ax1.legend(fontsize="x-large")
-        ax1.tick_params(axis="both", which="major", labelsize=12)
-
-        fig.tight_layout()
+        # 4. Overlay the tracked ridge and its gain-squared polynomial on the Run map.
+        fig, ax = plots.subplots(
+            num="fit", figsize=config.figsize, layout="constrained"
+        )
+        ax.set(
+            xlabel="Stark tone gain (a.u.)",
+            ylabel="Probe RF frequency (MHz)",
+            title=(
+                "AC Stark spectroscopy · qubit probe · photon calibration\n"
+                f"Photons per squared gain = {ac_coeff:.3g} a.u.⁻²\n"
+                f"Centers used: {len(s_freqs)}/{len(gains)}"
+            ),
+        )
+        ax.grid(False)
+        (image,) = live_heatmap(ax, uniform=False, cmap="viridis").set(
+            gains, freqs, amps
+        )
+        fig.colorbar(image, ax=ax, label="Row-normalized IQ projection (a.u.)")
+        ax.plot(
+            s_gains,
+            s_freqs,
+            "o",
+            color="white",
+            markeredgecolor="0.25",
+            markersize=4,
+            label="Measured ridge centers",
+        )
+        ax.plot(np.sqrt(x2_fit), y_fit, color="C1", label="Polynomial in gain²")
+        # Drop the live image's placeholder bounds from the fitted map.
+        ax.relim()
+        ax.autoscale_view()
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
 
         return AcStarkAnalysis(ac_coeff)

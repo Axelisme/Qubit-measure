@@ -111,7 +111,9 @@ y 軸與色階預設依資料範圍自動縮放。跨圖比較才用固定尺度
 
 在 GUI 各頁面以實際顯示尺寸看圖，也按存檔 PNG 的實際尺寸檢查。面板不是固定格子，Save 頁面較窄。字級跟著顯示尺寸縮放，最小字級 10 pt。tick 標籤不能重疊，legend 不能蓋資料。一張圖最多 6 個 panel。
 
-- 壞例：放大 Run 頁才讀得清楚，切到較窄的 Save 頁就看不清 tick 標籤；存檔後 colorbar 又擠到標題。
+Data／Save 頁的縮圖只用來選圖。按 `View figure` 打開閱讀面，再依 R7 檢查；放不下整張圖時捲動查看，不縮小字級。
+
+- 壞例：放大 Run 頁才讀得清楚，切到較窄的 Data 頁，打開 `View figure` 後仍讀不清 tick 標籤；存檔後 colorbar 又擠到標題。
 - 好例：Ding 圖 5-7（頁 150）的四分支分成 2×2 panel。採用這種分組後，仍要在 GUI 和匯出的 PNG 核對字級、tick、legend 與資料位置。
 
 ### R8：圖型對應資料，liveplot 標明進度
@@ -134,7 +136,7 @@ y 軸與色階預設依資料範圍自動縮放。跨圖比較才用固定尺度
 
 圖上放物理量、模型、擬合結果與判讀所需的標註。不要把 run 身分或採集設定印在圖上。存檔路徑已有實驗名與 run id。除了定位 run 的實驗名與 run id，GUI 與 MCP 的可見 Analyze 摘要只由 adapter 補上該次 cfg 的 Reps×Rounds，以及實驗已回傳的實際施加值，例如 detune。不列完成輪數、是否提前停或 shot 數。liveplot 的進度仍按 R8 顯示。
 
-Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summary`，也不擴充 `RunMetadata`。各實驗依需要決定是否在 Result 保存實際施加值。MCP 的 Analyze 回覆沿用 [RPC handler 提供的 `presentation`](../../lib/zcu_tools/gui/app/measure/remote/handlers/analysis.py)，獨立傳遞來源 run id。原生結果欄位的命名見 [S2](#s2report-的數值沿用-analyze-摘要名稱)。
+Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summary`，也不擴充 `RunMetadata`。各實驗依需要決定是否在 Result 保存實際施加值。MCP 的 Analyze 回覆沿用 [RPC handler 提供的 `presentation`](../../lib/zcu_tools/gui/app/measure/remote/handlers/analysis.py)，獨立傳遞來源 run id。GUI 與 MCP 共用的摘要讀取契約見 [Analysis presentation](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation)。原生結果欄位的命名見 [S2](#s2report-的數值沿用-analyze-摘要名稱)。
 
 - 壞例：Ramsey 圖標題塞了 run id 和初始設定，摘要卻只重複表單初值，沒寫實驗回傳的實際 detune。
 - 好例（本地改寫示例）：圖上只保留判讀條紋和 T2* 需要的量與標註。同次 Analyze 摘要在實驗名與 run id 旁列「Reps×Rounds 1000×10；實際 detune 0.400 MHz」。Ding 圖 5-9(e)（頁 152）的相位圖集中在判讀所需的 180° 參考線與候選頻率。
@@ -147,6 +149,10 @@ Rabi、T1 等一維掃描應畫逐點 error bar。看峰位的 spectrum 和二�
 
 - 壞例：T1 只報 `T1 = 80 ± 5 µs`，不顯示每個量測點的不確定度。
 - 好例：Rabi 的逐點布居用 shot SEM 畫 error bar。Ding 圖 5-13(a)（頁 157）的 CZ fidelity 對脈衝寬度圖可作逐點誤差棒的版式參考；圖 5-8(b)（頁 151）的二維掃描則用熱圖。
+- 好例：多維取數的一維 fit panel 可以用外層掃描座標當橫軸，而不是擬合用的時間軸。
+  [CPMG](twotone/time_domain/cpmg/core.py) 對每個 π 脈衝數沿演化時間擬合衰減，再以脈衝數為橫軸畫 T₂。誤差棒是各次衰減擬合的 T₂ 標準誤（`decay_time_err`）。
+  [`t1_with_tone_sweep`](singleshot/t1/t1_with_tone_sweep/core.py) 對每個外層掃描點沿探測脈衝長度擬合轉移速率。速率圖的橫軸是外層掃描座標（增益或頻率，也可換算成光子數）。速率誤差棒是擬合共變異數矩陣中相應對角元素的平方根。
+  guide 要寫明各 panel 的座標與誤差棒的來源，區分擬合參數的不確定度與逐點 shot SEM。
 
 ### R12：y 軸畫物理 observable
 

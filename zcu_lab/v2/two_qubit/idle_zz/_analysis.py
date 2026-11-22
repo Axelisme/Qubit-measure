@@ -25,8 +25,9 @@ class IdleBranchFit:
     dc_index/branch selects DC and nominal spectator I/Xπ. acquired_shots
     counts accepted shots across all delays. complete marks branches with
     acquired counts at every delay. trace is the T-point target (N_e-N_g)/N_total,
-    retaining NaN at unmeasured or zero-acceptance points. fit_curve is the decay-cosine
-    model or None when unavailable. magnitude_mhz is nonnegative; signed_mhz
+    retaining NaN at unmeasured or zero-acceptance points. fit_curve evaluates
+    the decay-cosine at the measured delays; dense_curve holds the model delay
+    grid in µs and its model values for display. Both are None when unavailable. magnitude_mhz is nonnegative; signed_mhz
     assumes both branches stay on the side selected by the operator's detune.
     error_mhz is the fitted frequency's covariance 1σ error. resolution_mhz is
     max(1/actual delay span in µs, error_mhz). reason explains why signed_mhz is
@@ -49,6 +50,7 @@ class IdleBranchFit:
     resolution_mhz: float | None = None
     reason: str | None = None
     fit_quality: FitQuality | None = None
+    dense_curve: tuple[NDArray[np.float64], NDArray[np.float64]] | None = None
 
 
 @dataclass(frozen=True)
@@ -129,7 +131,7 @@ def fit_traces(
     span = float(np.ptp(delays))
     reason = None
     if not all(f.complete for f in fits):
-        reason = "Required branch is incomplete; all delays and rounds are needed"
+        reason = "No completed acquisition at one or more required delays"
     elif not all(np.all(np.isfinite(f.trace)) for f in fits):
         reason = "No accepted shots at one or more required delays"
     elif (
@@ -202,6 +204,7 @@ def _fit_complete_traces(
     elif detune == 0 or min(frequency, abs(frequency - 2 * abs(detune))) <= resolution:
         reason = "Sign unidentifiable near 0 or 2*abs(detune); possible zero-frequency folding"
     answers = []
+    dense_delays = np.linspace(delays.min(), delays.max(), max(201, len(delays)))
     for fit, trace in zip(fits, traces, strict=True):
         values = {name: shared.values[name] for name in trace.parameter_names}
         curve = decaycos(delays, *values.values())
@@ -217,6 +220,7 @@ def _fit_complete_traces(
             replace(
                 fit,
                 fit_curve=curve,
+                dense_curve=(dense_delays, decaycos(dense_delays, *values.values())),
                 magnitude_mhz=frequency,
                 signed_mhz=None if reason else float(np.sign(detune) * frequency),
                 error_mhz=error if np.isfinite(error) else None,
