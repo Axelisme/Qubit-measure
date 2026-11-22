@@ -211,7 +211,9 @@ def _plot_resonance_maps(
         # Drop the live image's placeholder bounds from the fitted map.
         ax.relim()
         ax.autoscale_view()
-        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncols=3)
+        # Leave room for the shared x label above the lower legend.
+        legend_y = -0.23 if branch == 1 else -0.13
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, legend_y), ncols=3)
     fig.axes[1].set_xlabel("Resonator drive RF frequency (MHz)")
 
 
