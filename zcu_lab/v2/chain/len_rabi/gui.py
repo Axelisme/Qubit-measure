@@ -28,7 +28,7 @@ class ChainLenRabiSummary(JointResidualSummary):
     f_err: float | None = Field(description="Wald error of f in MHz.")
     reliability: float | None = Field(description="Diagnostic R, no threshold.")
     first_read_pi_len: float | None = Field(
-        description="Pi length in us of the first-read twotone fit, the starting value."
+        description="First-read π duration (µs); null when the seed fit has no estimate."
     )
 
 

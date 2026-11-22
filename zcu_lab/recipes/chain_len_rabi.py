@@ -95,9 +95,10 @@ async def chain_len_rabi(
 
     The FPGA sweeps the length, so the drive must be const or flat_top.
     relax_delay is the thermalisation wait K; the Form starts it at 5 T1 and
-    overrides can change it. Primary fits the first read with the twotone Rabi
-    fit for the starting value, then fits all 65 numbers jointly. The report
-    gives π duration and Rabi frequency with Wald standard errors, R, J, df,
+    overrides can change it. Primary uses the first-read Rabi fit to start one
+    joint fit of all 65 numbers. If the first read gives no estimate, Primary
+    starts from the saved duration axis and reports a null first-read π duration.
+    The report gives joint π duration and Rabi frequency with Wald errors, R, J, df,
     J/df, the chi-square reference band and the fraction of whitened residual
     components with |r| > 3. These numbers do not decide fit acceptance. Save
     keeps the running sums and analysis. The recipe does not write back.

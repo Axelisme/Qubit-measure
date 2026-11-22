@@ -3,7 +3,7 @@
 One cycle is one rep: the thermalisation wait K (relax_delay), then eight
 blocks of (Rabi pulse of length x, read, read). The host reduces each cycle to
 65 numbers and keeps only running sums. Analysis fits all 65 numbers jointly
-with a Rabi curve, starting from the usual twotone fit of the first read.
+with a Rabi curve, seeded by the first-read fit or the saved length sweep.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import decaycos, fit_rabi
 from zcu_tools.analysis.readout_chain import (
     CycleSums,
@@ -57,12 +58,13 @@ _JOINT_LABEL = "Joint projection\n(SEM units)"
 
 @dataclass(frozen=True)
 class ChainLenRabiAnalysis:
-    """Joint Rabi estimates, first-read start and scalar residual diagnostics.
+    """Joint estimates, optional first-read π duration and residual diagnostics.
 
     pi_len = 1/(2f) is in µs; f is in MHz. The errors are Wald standard errors,
     and reliability is the inverse phase uncertainty from f_err over the sweep.
-    first_read_pi_len (µs) seeds the joint fit. J and df summarize the whitened
-    residuals with their ratio, chi-square reference band and |r| > 3 fraction.
+    first_read_pi_len (µs) seeds the joint fit when available; otherwise it is
+    None. J and df summarize the whitened residuals with their ratio,
+    chi-square reference band and |r| > 3 fraction.
     """
 
     pi_len: float
@@ -70,7 +72,7 @@ class ChainLenRabiAnalysis:
     f: float
     f_err: float
     reliability: float | None
-    first_read_pi_len: float
+    first_read_pi_len: float | None
     J: float
     df: int
     j_per_df: float
@@ -227,14 +229,13 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
         *,
         plots: Plots,
     ) -> ChainLenRabiAnalysis:
-        """Fit all 65 numbers with a Rabi curve, starting from the first read.
+        """Fit all 65 numbers jointly, even if the first read gives no estimate.
 
-        The first-read fit uses a damped cosine with phase fixed at zero.
-        Its π length x_π seeds f = 1/(2 x_π). The joint fit uses the saved sums
-        and reports π length, f, their Wald errors, R and scalar residual
-        diagnostics without a quality threshold. The figures show the seed fit
-        and the joint model and residuals in the live projection direction.
-        The source cfg may be None.
+        Use the first-read damped cosine's π length x_π to seed f = 1/(2 x_π).
+        If that fit cannot estimate π, use 3/(4 max|length|) from the saved axis
+        for the one joint fit. The first-read figure still shows data and SEM.
+        Report joint π length, f, Wald errors, R and residual diagnostics without
+        a quality threshold. Other input and joint fit errors propagate.
         """
         del options  # This analysis has no configurable options.
         sums = source.result
@@ -242,10 +243,16 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
 
         # 1. Fit the first-read IQ to seed the joint model.
         seed_signal, seed_sem = first_read_projection(sums)
-        seed_fit = fit_rabi(lengths, seed_signal, decay=True, init_phase=0.0)
-        first_read_pi_len = float(seed_fit.pi_x)
-        seed_dense = np.linspace(lengths.min(), lengths.max(), 400)
-        offset, amplitude, frequency, phase, decay = seed_fit.params
+        try:
+            seed_fit = fit_rabi(lengths, seed_signal, decay=True, init_phase=0.0)
+        except AnalysisFailed:
+            seed_fit = None
+            first_read_pi_len = None
+            start_f = 0.75 / float(np.max(np.abs(lengths)))
+        else:
+            first_read_pi_len = float(seed_fit.pi_x)
+            start_f = 1 / (2 * first_read_pi_len)
+
         seed_fig, seed_ax = plots.subplots(
             num="fit", figsize=config.figsize, layout="constrained"
         )
@@ -258,43 +265,47 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
             color="C0",
             label="First-read mean ± shot SEM",
         )
-        seed_ax.plot(
-            seed_dense,
-            decaycos(seed_dense, offset, amplitude, frequency, phase, decay),
-            color="C1",
-            label="First-read fit",
-        )
-        for coordinate, label, style in (
-            (seed_fit.pi_x, "π", "--"),
-            (seed_fit.pi2_x, "π/2", ":"),
-        ):
-            if lengths.min() <= coordinate <= lengths.max():
-                seed_ax.axvline(coordinate, ls=style, color="0.35", linewidth=1)
-                seed_ax.annotate(
-                    label,
-                    (coordinate, 0.02),
-                    xycoords=("data", "axes fraction"),
-                    xytext=(3, 0),
-                    textcoords="offset points",
-                )
-        r2 = seed_fit.quality.r2
-        residual = seed_fit.quality.normalized_residual_rms
-        r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
-        residual_text = "unavailable" if residual is None else f"{residual:.3g}"
+        if seed_fit is None:
+            seed_ax.set_title("First-read fit unavailable", loc="left", fontsize=10)
+        else:
+            seed_dense = np.linspace(lengths.min(), lengths.max(), 400)
+            seed_ax.plot(
+                seed_dense,
+                decaycos(seed_dense, *seed_fit.params),
+                color="C1",
+                label="First-read fit",
+            )
+            for coordinate, label, style in (
+                (seed_fit.pi_x, "π", "--"),
+                (seed_fit.pi2_x, "π/2", ":"),
+            ):
+                if lengths.min() <= coordinate <= lengths.max():
+                    seed_ax.axvline(coordinate, ls=style, color="0.35", linewidth=1)
+                    seed_ax.annotate(
+                        label,
+                        (coordinate, 0.02),
+                        xycoords=("data", "axes fraction"),
+                        xytext=(3, 0),
+                        textcoords="offset points",
+                    )
+            r2 = seed_fit.quality.r2
+            residual = seed_fit.quality.normalized_residual_rms
+            r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
+            residual_text = "unavailable" if residual is None else f"{residual:.3g}"
+            seed_ax.set_title(
+                f"First-read π duration = {seed_fit.pi_x:.4g} ± {seed_fit.pi_x_err:.2g} µs\n"
+                f"First-read π/2 duration = {seed_fit.pi2_x:.4g} ± {seed_fit.pi2_x_err:.2g} µs\n"
+                f"R² = {r2_text} · Normalized residual RMS = {residual_text}",
+                loc="left",
+                fontsize=10,
+            )
         seed_ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
         seed_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        seed_ax.set_title(
-            f"First-read π duration = {seed_fit.pi_x:.4g} ± {seed_fit.pi_x_err:.2g} µs\n"
-            f"First-read π/2 duration = {seed_fit.pi2_x:.4g} ± {seed_fit.pi2_x_err:.2g} µs\n"
-            f"R² = {r2_text} · Normalized residual RMS = {residual_text}",
-            loc="left",
-            fontsize=10,
-        )
         seed_fig.legend(loc="outside lower center", ncols=2)
 
         # 2. Joint fit of all 65 numbers with the Rabi curve.
         model = rabi_model()
-        fit = fit_cycle(sums, model, {"f": 1 / (2 * first_read_pi_len)})
+        fit = fit_cycle(sums, model, {"f": start_f})
 
         # 3. The π length is half a period of sin²(π f x).
         f, f_err = fit.parameters["f"], fit.errors["f"]
