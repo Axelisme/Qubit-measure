@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-22, full collapse operators and frozen physical v2
+**Last updated:** 2026-11-22, collapse operators with driven continuous flux
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -69,20 +69,29 @@ and [state.py](state.py).
 Units are ns, GHz and rad. `SecularModel` supplies energies, drive quadratures,
 directional rates and pure dephasing in each quantized flux level's energy
 basis. The optional `collapse_operators` tuple supplies full complex `L` matrices
-in that basis, in ns⁻½. CPU `dop853` adds each `LρL† − {L†L,ρ}/2` to the
-secular bath and transforms it with the Hamiltonian into the integration frame.
-Keep the coherent components of one physical jump in one matrix. Use `()` when
-there are no explicit operators; the existing secular routes are unchanged.
-The model builder owns physical applicability. Records own read-only copies
-and reject invalid shapes or nonfinite operators. `SecularModel.content_identity`
-combines the builder's `identity` with the ordered matrices and equals `identity`
-when the tuple is empty.
+in that basis, in ns⁻½. CPU direct integration adds each `LρL† − {L†L,ρ}/2`
+to the secular bath. Keep the coherent components of one physical jump in one
+matrix. Use `()` when there are no explicit operators; the existing secular routes
+are unchanged. The model builder owns physical applicability. Records own
+read-only copies and reject invalid shapes or nonfinite operators.
+`SecularModel.content_identity` combines the builder's `identity` with the
+ordered matrices and equals `identity` when the tuple is empty.
 
-For a row with explicit operators, `dop853` is the only candidate. The timeline
-must stay at a fixed flux level without a supplied flux waveform. `families=` can
-exclude `dop853`, in which case both inspection and evolution raise
-`NoValidKernel`; neither falls back to a secular approximation. Explicit
-operators never use OpenCL, including on an Engine configured for that device.
+For a row with explicit operators, the sole candidate is CPU `dop853` at fixed
+flux without a waveform. With an active tone and a waveform for that point,
+the sole candidate is CPU `flux_dop853`. It requires a `FluxExpansion` in the
+same fixed coordinates as the model bases, with the same dimension and term
+loops present in the waveform. It transforms continuous H(t) into each row's
+basis and keeps the supplied L matrices constant in that basis. It retains
+absolute drive phase and stops at flux and active envelope knots. At a row
+boundary it switches the state to the next row's basis. It does not accept
+arbitrary L(t).
+
+Waveform rows without an active tone and changing-level timelines without a
+waveform still reject explicit operators. If no candidate passes or the
+allowlist excludes it, both inspection and evolution raise `NoValidKernel`.
+Neither falls back to a secular approximation. Explicit operators never use
+OpenCL, including on an Engine configured for that device.
 
 `TimelineBatch.segment_boundaries` adds point-aligned absolute ns boundaries.
 `segment_spans(batch)` is a pure query of the same final partition used by
@@ -982,7 +991,7 @@ and the original route.
 | --- | --- | --- | --- | --- |
 | [`t4`](kernels/t4.py), static idle evolution | `idle` | Exact secular population semigroup and coherence phases/decay. Guard requires zero tones; no approximation threshold. | [`idle_coherence`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`adiabatic_map`](kernels/adiabatic_map.py), undriven flux transport | `adiabatic` | Preserve ordered populations, integrate dynamical/gauge phases and decay coherences. Requires waveform samples. Quadrature doubles from 4 to 4096 nodes per knot interval until phase-factor change ≤ B/10; overlap < 0.25 forces refinement. This does not check nonadiabatic transitions, degeneracy or crossings. | [`adiabatic_ramp`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`flux_dop853`](kernels/flux_dop853.py), driven continuous flux | `flux` | Integrate full H(flux(t)) with a fixed quantized secular bath per row, stopping at active flux/envelope knots. Requires tones and waveform samples. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py). | [`continuous_flux`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`flux_dop853`](kernels/flux_dop853.py), driven continuous flux | `flux`, `full_loss_flux` | Integrate full H(flux(t)) with the secular bath and any full collapse operators in a fixed basis per row, stopping at active flux/envelope knots. Requires an active tone and waveform samples for that point; full collapse operators also require a matching expansion. CPU DOP853 local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py). | [`continuous_flux`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [moving flux with complete jumps](../../../../tests/simulate/evolution/test_moving_flux_collapse.py) | PASS |
 | [`slow_envelope`](kernels/slow_envelope.py), low-carrier constant drive | `slow`, carrier magnitude strictly below 30 MHz | Nonzero carriers use midpoint-held full Hamiltonians with Strang bath half-steps, default 20 holds per period. Dissipative DC uses the exact constant Lindblad channel without splitting, storing O(M⁴) complex values for M levels. Bath-free DC uses one unitary. Dispatch and kernel guard share the strict absolute-carrier < 30 MHz comparison; exactly ±30 MHz belongs to plateau. No budget adaptation; historical population calibration is separate from this density measurement. | [`low_carrier`, `dephasing_pump`, `raman_decay`, `raman_weak_legs`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [boundary contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS |
 | [`dyson`](kernels/dyson.py), weak constant drive | `plateau` | Second-order full-carrier modal Dyson. Calibrated guards require r ≤ min(0.1, 0.25B^(1/3)), r2 ≤ 0.05, and second-order population indicator B2 + B/8 ≤ min(0.02, (1.5B)^(2/3)). Certified shared no-drive prefixes omit the B2 check. B/8 reserves path pruning; this is not a multilevel remainder proof. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`single_tone_rwa`](kernels/single_tone_rwa.py), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with first/second-order population-transfer restoration at 5.8e-3, including forward edges and adjoints. Final admission uses kappa2 = spectral norm of sum_sign abs(c/d) over the resolved omitted edges, ≤ 0.08, in place of the remaining transfer comparison. Full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms; phase-graph pruning is separate. Cross-component density entries below 1e-5 after the initial kick are dropped. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at kappa2 inner edge: 3.061429e-13 |
@@ -996,7 +1005,7 @@ and the original route.
 | [`multitone_gate`](kernels/multitone_gate.py), full-drive dual-phase gates | `multiple` | Two tones, fixed flux, positive duration, at least one sampled envelope. Four D(h/2)·U·D(h/2) quarters with complete drive, no RWA or pruning. Each key fits one 5×6 Fourier grid without refinement, at endpoint rtol/atol 2.75e-7/2.75e-9. Keys omit start and both phases. Dispatch compares cold build and playback costs before construction. Dispatch builds each selected key at most once per evolve and uses that product without a numerical admission probe. Numerical failures propagate without fallback. A pin skips pricing, not structural checks. | [Four envelopes and mixed waveform keys](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py), [per-key routing](../../../../tests/simulate/evolution/contract/test_shared_multitone_routing.py) | Small-model contracts; long-sequence qualification separate |
 | [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two` for distinct-port constant pairs; two-tone `multiple` | Fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad, with retained real dimension ≤ 256. For sampled pairs, slope and curvature do not reject rows. For a group selected for comparison, choose the row with maximum `abs(gain) × envelope peak` for each tone, deduplicate rows and require agreement with full-drive `dop853` at ≤ 0.1 × B. Sampled rows have a 4 ns step ceiling and no kick. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle and use summed first-order endpoint kicks with a 16 ns step ceiling. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports the constant metrics. | [`joint_constant`, `joint_gate_inventory`, `cheap_sampled_nearby`, `sampled_multitone_short_sweep_32`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [sampled spot edge and phase sequence fallback](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py) | PASS for admitted rows; rejected groups use fallback |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate; `full_loss`, sole candidate | No RWA. Stops at active control knots. DOP853 local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B). Secular-only CPU and [eligible OpenCL](#gpu-backend) rows with d ≤ 10,000 ns and B ≥ 1e-3 use DP5(4) at one third of both tolerances. Explicit collapse operators require fixed flux with no waveform; run CPU DOP853 even at the default budget. | [`shaped_complex`, `two_carriers`, `joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [CPU and OpenCL DP5(4) cases](#cpu-dp54-accuracy); [complete jump density](../../../../tests/simulate/evolution/test_collapse_operators.py) | PASS |
+| [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate; `full_loss`, sole candidate | No RWA. Stops at active control knots. DOP853 local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B). Secular-only CPU and [eligible OpenCL](#gpu-backend) rows with d ≤ 10,000 ns and B ≥ 1e-3 use DP5(4) at one third of both tolerances. For explicit collapse operators at fixed flux without a waveform, this family uses CPU DOP853 even at the default budget. | [`shaped_complex`, `two_carriers`, `joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [CPU and OpenCL DP5(4) cases](#cpu-dp54-accuracy); [complete jump density](../../../../tests/simulate/evolution/test_collapse_operators.py) | PASS |
 
 For dissipative DC rows, [slow dispatch](_slow_dispatch.py) charges channel
 construction as `3.8 * (M/32)^6` seconds, divided by the exact prepare key's
@@ -1445,6 +1454,7 @@ class's methods.
 | Secular coherence decay and split-step maps | [kernels/_secular.py](kernels/_secular.py) provides decay to static, split, modal and direct propagators. `multitone_gate`, `gate_cache` and `single_tone_gate` use its population and coherence half-step maps with their own durations. |
 | Density basis conversion | `transform_density` in [state.py](state.py), shared by population conversion, scheduler boundaries, Dyson input bounds and compiled DOP853 chains. Callers retain basis selection and traversal. |
 | Adaptive DOP853 and DP5(4) tableaux, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
+| Complete collapse-operator dissipator | `full_dissipator` in [kernels/_dop853_data.py](kernels/_dop853_data.py), used by CPU `dop853` and `flux_dop853` with the row-basis density. |
 | Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive density equation and exact return to the model eigenbasis. CPU `dop853` rows, `t6` direct rows, period fractional tails and sampled multitone RWA probes share this entry point, supplying explicit frames and budgets. The CPU `dop853` plan selects DP5(4) and its tighter local tolerances for eligible rows. [OpenCL `dop853`](#gpu-backend) uses the same tableaux and tolerance rule in its device runner. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node, [adaptive single-phase](kernels/gate_phase.py) and [dual-phase](kernels/_multitone_gate_phase.py) builders. Single-tone integration is unchanged. |
@@ -1578,7 +1588,7 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v15`. Engine captures and paired
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v16`. Engine captures and paired
 benchmark reports record the numeric version. Evolution does not persist
 densities or offline tables across processes or Engine lifetimes.
 

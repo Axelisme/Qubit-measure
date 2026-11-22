@@ -117,6 +117,20 @@ def pack_models(models: list[SecularModel]) -> Models:
     return packed
 
 
+@njit(nogil=True, cache=True)
+def full_dissipator(rho, models: Models, model: int):
+    """Return all explicit jump contributions for Hermitian rho in its row basis.
+
+    models holds packed operators in the same basis as rho. The selected
+    model index must have at least one explicit jump; secular loss is separate.
+    """
+    loss = models.loss[model] @ rho
+    result = -0.5 * (loss + loss.conj().T)
+    for index in range(models.jump_offsets[model], models.jump_offsets[model + 1]):
+        result += models.jumps[index] @ rho @ models.jumps_adjoint[index]
+    return result
+
+
 def pack_segments(table: SegmentTable, *, include_flux: bool = False) -> Segments:
     """Pack envelopes and optionally flux knots for continuous-flux integration.
 

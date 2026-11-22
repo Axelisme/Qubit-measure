@@ -14,7 +14,7 @@ from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
 from ._capture import CaptureRound
 from ._carrier_plan import populate_carrier_plan, ramp_families_for_rows
 from ._common_frame_dispatch import preferred as common_frame_preferred
-from ._dop853_dispatch import direct_plans, opencl_rows
+from ._dop853_dispatch import direct_plans, full_loss_candidates, opencl_rows
 from ._gain_plan import plan_gain_groups
 from ._inspection import DispatchCandidate, GuardDecision, needs_prefix_input
 from ._multitone_dispatch import (
@@ -632,7 +632,7 @@ class Classifier:
         """Raise the domain and point failure for nonempty exhausted rows."""
         reason = {
             "full_loss": "; collapse operators require CPU dop853",
-            "full_loss_flux": "; collapse operators require fixed flux and no supplied flux waveform",
+            "full_loss_flux": "; collapse operators require fixed flux without a waveform or a driven row with a waveform and matching expansion on CPU flux_dop853",
         }.get(domain, "")
         points = np.unique(self.geometry.points[self.table.timeline[rows]]).tolist()
         raise NoValidKernel(
@@ -703,9 +703,8 @@ class Classifier:
 
     def classify(self) -> Dispatch:
         rows = np.flatnonzero(self.scope)
-        full = rows[self.table.full_loss[rows]]
-        self.accept("full_loss_flux", full[self.geometry.flux_drive[full]], ())
-        self.accept("full_loss", full, ("dop853",))
+        for domain, selected, candidates in full_loss_candidates(self.geometry, rows):
+            self.accept(domain, selected, candidates)
         self.accept("idle", rows[self.domains["idle"][rows]], ("t4",))
         self.accept(
             "adiabatic", rows[self.domains["adiabatic"][rows]], ("adiabatic_map",)

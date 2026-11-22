@@ -43,7 +43,7 @@ from .telemetry import (
 )
 
 # Numerical algorithm revision used by capture, reporting, and simulator caches.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v15"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v16"
 
 
 @dataclass(frozen=True)
