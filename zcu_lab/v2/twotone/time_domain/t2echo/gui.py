@@ -58,20 +58,10 @@ class T2EchoSummary(BaseModel):
     )
 
 
-def _T2Echo_analyze(
-    req: AnalyzeRequest[T2EchoRunResult, T2EchoAnalyzeOptions], *, plots: Plots
-) -> T2EchoAnalysis:
-    return T2EchoExp().analyze(
-        req.run_result,
-        req.analyze_params,
-        plots=plots,
-    )
-
-
-def _coherence_review_note(
+def coherence_review_note(
     t2: float, t2_err: float, quality: FitQuality | None
 ) -> str | None:
-    """Explain why an Echo fit is not preselected for writeback.
+    """Explain why single/mux Echo or mux Ramsey T2 needs manual selection.
 
     Times/errors are in us. Initial selection requires positive finite T2,
     nonnegative finite error/T2 <=0.5, r2 >=0.9 and normalized residual RMS <=0.1.
@@ -86,7 +76,7 @@ def _coherence_review_note(
         reasons.append("T2 error must be finite and nonnegative")
     elif t2_err / t2 > 0.5:
         reasons.append(f"T2 relative error={t2_err / t2:.4g} >0.5")
-    return "; ".join(reasons) if reasons else None
+    return "Review required: " + "; ".join(reasons) if reasons else None
 
 
 def _coherence_fit_review_reasons(quality: FitQuality | None) -> list[str]:
@@ -108,6 +98,16 @@ def _coherence_fit_review_reasons(quality: FitQuality | None) -> list[str]:
     elif rms > 0.1:
         reasons.append(f"normalized RMS={rms:.4g} >0.1")
     return reasons
+
+
+def _T2Echo_analyze(
+    req: AnalyzeRequest[T2EchoRunResult, T2EchoAnalyzeOptions], *, plots: Plots
+) -> T2EchoAnalysis:
+    return T2EchoExp().analyze(
+        req.run_result,
+        req.analyze_params,
+        plots=plots,
+    )
 
 
 def _T2Echo_get_writeback_items(
@@ -135,8 +135,7 @@ def _T2Echo_get_writeback_items(
         logging.warning("no device snapshot")
     result = req.analyze_result
     quality = None if result.fit_quality is None else result.fit_quality.get("fit")
-    review = _coherence_review_note(result.t2e, result.t2e_err, quality)
-    note = None if review is None else f"Review required: {review}"
+    note = coherence_review_note(result.t2e, result.t2e_err, quality)
     items: list[WritebackItem] = [
         ParameterWriteback(
             target_name="$qubit.t2e",
@@ -206,15 +205,6 @@ def _run(
     return RunRecord(cfg=cfg, result=result)
 
 
-def _summary_lines(source: T2EchoRunResult) -> tuple[str, ...]:
-    lines: list[str] = []
-    if source.cfg is not None:
-        lines.append(f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}")
-    if source.result.true_activate_detune is not None:
-        lines.append(f"Applied detune: {source.result.true_activate_detune:g} MHz")
-    return tuple(lines)
-
-
 DEFINITION = Adapter(
     spec=T2EchoExp.AXES_SPEC,
     make_form=_T2Echo_make_form,
@@ -222,7 +212,6 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_T2Echo_analyze,
-        summary_lines=_summary_lines,
         options=lambda source, env: T2EchoAnalyzeOptions(),
         writeback=_T2Echo_get_writeback_items,
     ),

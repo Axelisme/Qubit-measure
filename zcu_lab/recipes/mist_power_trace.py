@@ -1,6 +1,6 @@
 """Acquire and save an averaged-IQ MIST probe-gain trace."""
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -15,37 +15,32 @@ from zcu_tools.mcp.measure.recipe_api import (
 
 
 class MistPowerTraceInputs(RecipeInputs):
-    """Choose the MIST gain trace target, pulse modules and Analyze display."""
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "description": "Omit Form inputs to keep their values. Null works only as described for each input."
-        }
-    )
+    """Inputs for mist power trace; all units and null policies are declared per
+    field."""
 
     target: SingleTarget
     reuse_tab_id: ReuseTabId
     overrides: Overrides
     probe_ref: str | None | Keep = Field(
         KEEP,
-        description="Resonator probe library key. Omit to keep the selection. Recipe parses null; Form rejects it.",
+        description="Probe library key.",
     )
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key. Omit to keep the selection. Recipe parses null; Form rejects it.",
+        description="Readout library key.",
     )
 
     g0: str | None | Keep = Field(
         KEEP,
-        description="Set Analyze › Reference IQ (a.u.) as complex text, e.g. 1+2j. Null uses the first gain point.",
+        description="Ground IQ (empty = first point). Analysis only; omitted keeps value, null passes to owner.",
     )
     e0: str | None | Keep = Field(
         KEEP,
-        description="Set Analyze › Comparison IQ (a.u.) as complex text. Null uses automatic y-limits.",
+        description="Excited IQ (optional y-limit). Analysis only; omitted keeps value, null passes to owner.",
     )
     ac_coeff: float | None | Keep = Field(
         KEEP,
-        description="Set Analyze › Photon number / gain squared. Omit to retain it; null keeps the gain axis in a.u.",
+        description="Photon number / gain squared. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 
@@ -61,19 +56,15 @@ class MistPowerTraceReport(RecipeReport):
 
 @recipe(
     "mist_power_trace",
-    description="Measure the mean IQ shift versus resonator probe gain. Analyze the trace and save gain, complex IQ and available shot moments without writeback.",
+    description="Acquire MIST mean IQ versus probe gain, save raw data and plot.",
 )
 async def mist_power_trace(
     session: RecipeSession, inputs: MistPowerTraceInputs
 ) -> MistPowerTraceReport:
     """Probe across gain, save mean complex IQ and plot its displacement.
 
-    Omit probe_ref or readout_ref to keep the corresponding Form selection.
-    Recipe input parsing accepts explicit null and passes it unchanged to the Form.
-    The Form requires both modules and rejects null before Run.
-
-    Probe gain sweep supplies Start, Stop and Expts. Use overrides for a different grid or averaging count.
-    The Analyze inputs change the displayed reference or axes, not the acquisition.
+    No n → expts input: the captured Form supplies the gain grid.
+    Analysis controls: g0, e0, ac_coeff. Omission retains each analysis value; null is passed to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(
