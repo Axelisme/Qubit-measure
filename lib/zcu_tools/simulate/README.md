@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-21, cooperative cancellation in planning and required raw sampling
+**Last updated:** 2026-11-23, resonator drive and loss boundaries
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -205,8 +205,12 @@ Its fixed coordinates are that dressed basis, so `eigenvectors` is identity.
 For example, subtract the energies at `(2, 0)` and `(1, 0)` to get their
 dressed transition frequency.
 Resonator loss keeps only energy-lowering matrix elements of a.
-Qubit loss projects each parent jump into the joint basis.
-Pure dephasing is zero.
+Qubit loss projects each parent jump into the joint basis. The builder reduces
+these dressed jump amplitudes to directional rates, which do not encode
+collective coherence recycling. Pure dephasing is zero. See the
+[Evolution model contracts](evolution/README.md#public-entry-points) for
+`SecularModel` inputs through `ModelSource` and the separate fixed-coordinate
+`NumericModel` record.
 The model identity uses public `simulate.evolution.digest` on all input fields,
 including numeric arrays, port names, retained labels, cutoff and flux level.
 Canonical JSON sorts mapping keys, so drive insertion order does not affect it.
