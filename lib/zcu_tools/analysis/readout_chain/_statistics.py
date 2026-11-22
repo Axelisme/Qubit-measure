@@ -25,6 +25,17 @@ def whiten(
     estimating per-dwell covariance with sum(N)-F degrees of freedom.
     Raise ValueError when that covariance is not positive definite.
     """
+    lower = pooled_whitening_factor(means, counts, products)
+    centered = means - np.median(means, axis=0)
+    return solve_triangular(lower, centered.T, lower=True).T * np.sqrt(counts[:, None])
+
+
+def pooled_whitening_factor(
+    means: NDArray[np.float64],
+    counts: NDArray[np.float64],
+    products: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Return the lower factor of the pooled within-point covariance, or raise ValueError."""
     covariance = (products - means.T @ (counts[:, None] * means)) / (
         counts.sum() - len(counts)
     )
@@ -33,11 +44,9 @@ def whiten(
     if not np.allclose(covariance, covariance.T):
         raise ValueError("within-point covariance must be symmetric positive definite")
     try:
-        lower = np.linalg.cholesky(covariance)
+        return np.linalg.cholesky(covariance)
     except np.linalg.LinAlgError as exc:
         raise ValueError("within-point covariance must be positive definite") from exc
-    centered = means - np.median(means, axis=0)
-    return solve_triangular(lower, centered.T, lower=True).T * np.sqrt(counts[:, None])
 
 
 def block_distances(

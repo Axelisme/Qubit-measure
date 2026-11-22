@@ -81,25 +81,3 @@ def test_shot_fits_resolve_t2_and_detuning_with_longitudinal_relaxation(
         )
     else:
         assert result.reliability is None
-
-
-@pytest.mark.slow
-def test_unavailable_within_check_preserves_t2_fit_and_independent_check() -> None:
-    result = shot_fit(t2_echo_model(), 1.8, 2000, 9101)
-
-    assert abs(result.parameters["t2"] - 1.2) < 4 * result.errors["t2"]
-    assert result.errors["t2"] > 0
-    assert np.isnan(result.within_point.J)
-    assert result.within_point.p is None
-    assert result.within_point.df == 45 * 13
-    assert np.isnan(result.sharing.J)
-    assert result.sharing.p is None
-    assert result.sharing.df == 14 * 12
-    assert np.isfinite(result.curve.J)
-    assert result.curve.p is not None
-    assert result.curve.df == 64
-    assert result.reliability is None
-    assert result.populations.shape == (13, 3)
-    assert np.isfinite(result.populations).all()
-    assert np.isfinite(result.population_errors).all()
-    np.testing.assert_allclose(result.populations.sum(axis=1), 1)

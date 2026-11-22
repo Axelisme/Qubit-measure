@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-22，qutrit 參考 IQ 的共用等向寬度
+**Last updated:** 2026-11-22，K-cycle joint 殘差
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -113,12 +113,17 @@ product sum。`cycle_curves` 從這份 record 算出 live plot 的全 feature �
 `CycleModel` 持有作者的三態曲線、解析導數、參數名與 bounds。Rabi、T2 echo 與
 T2 Ramsey 使用這個模型。`t1_model()` 回傳 `RateModel`，以 `D₀ exp(Gx)` 表示
 自由 stochastic 初始 drive 與 detailed-balance relaxation。`fit_cycle` 從必填的 init
-以模型共變異數加權的 GMM 聯合擬合 65 個數，回傳參數與 Wald 誤差、共用
-nuisances、三項 lack-of-fit 檢查與逐點布居，不做接受或拒絕。T1 的 init 是
-`{"t1": textbook_time}`。其結果 `CycleFit.relaxation` 保存兩個 eigen time，並以
-thermal 加權的 L1 population 變化振幅較大者作為 T1。所有擬合導數皆為解析式。欄位版面、座標、限制與失敗條件見
-[cycle.py](readout_chain/cycle.py)、[model.py](readout_chain/model.py)、
-[fit.py](readout_chain/fit.py) 與 [curve_models.py](readout_chain/curve_models.py) 的 docstring。
+以模型共變異數加權的 GMM 聯合擬合 65 個特徵。它回傳參數、Wald 誤差與
+共用 nuisances，並用最後一階段的白化殘差 `r` 計算 `J`、`df`、`J/df`、
+期望帶 `1 ± 2√(2/df)` 和 `|r| > 3` 的比例。這些數值不決定擬合是否成功。
+T1 的 init 是 `{"t1": textbook_time}`；`CycleFit.relaxation` 保存兩個 eigen time，
+並以 thermal 加權的 L1 population 變化振幅較大者作為 T1。
+
+`cycle_residual_projection` 將實測與 joint model 預測投影到 live 全 feature 的同一方向。
+投影用實測的 pooled 共變異數和 median，與 `J` 使用的模型共變異數不同。可指定密集
+座標來畫模型曲線，不需重跑擬合。投影陣列只供畫圖，不放進分析摘要。
+欄位與失敗條件見 [cycle.py](readout_chain/cycle.py)、[model.py](readout_chain/model.py)、
+[fit.py](readout_chain/fit.py) 與 [curve_models.py](readout_chain/curve_models.py)。
 
 ## Stationary Rπ 讀出調參
 

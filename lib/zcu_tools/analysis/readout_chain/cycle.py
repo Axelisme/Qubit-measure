@@ -1,11 +1,18 @@
 """Saved cycle records and live-plot projections."""
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.linalg import solve_triangular
 
-from ._statistics import whiten
+from ._statistics import pooled_whitening_factor
+from .model import CycleModel, CycleNuisances
+from .rate_model import RateModel, RateNuisances
+
+if TYPE_CHECKING:
+    from .fit import CycleFit
 
 # Numbers kept per cycle: I,Q of 16 reads, 9 same-read sums, 24 pair sums.
 CYCLE_FEATURE_COUNT = 65
@@ -128,10 +135,101 @@ def cycle_curves(sums: CycleSums) -> CycleCurves:
     Directions estimated on the same points inflate pure-noise variance at
     finite F; sigma units refer to the within-point standard errors.
     """
+    projection = _live_projection(sums)
+    return CycleCurves(
+        projection.measured_sigma, projection.first_read_sigma, sums.cycle_count.copy()
+    )
+
+
+@dataclass(frozen=True)
+class CycleResidualProjection:
+    """Measured and joint model projections in live point-mean sigma units.
+
+    measured_sigma: Observations at the acquired sweep points, shape (F,).
+    predicted_sigma: Joint model at those same points, shape (F,). Subtract it
+        from measured_sigma to obtain the signed projected residual per point.
+    model_sigma: The same joint model on the requested plotting axis, or at the
+        acquired points when no plotting axis was requested.
+    """
+
+    measured_sigma: NDArray[np.float64]
+    predicted_sigma: NDArray[np.float64]
+    model_sigma: NDArray[np.float64]
+
+
+def cycle_residual_projection(
+    sums: CycleSums,
+    model: CycleModel | RateModel,
+    fit: "CycleFit",
+    *,
+    model_axis: NDArray[np.float64] | None = None,
+) -> CycleResidualProjection:
+    """Project observations and one existing joint fit along the live all-feature axis.
+
+    Pass the same sums and model used for fit_cycle. Use the measured pooled
+    whitening, median background, PCA direction and first-read sign alignment
+    from cycle_curves for both the observations and predictions. With a finite
+    model_axis in the model's domain, evaluate the joint model on that axis
+    without fitting. Scale grid values by sqrt of the linearly interpolated
+    cycle counts (average counts at repeated coordinates; nearest at edges).
+    Without model_axis, model_sigma is the acquired-point prediction.
+    Arrays are in input axis order and do not alter the inputs. Raise ValueError
+    for malformed data, non-positive-definite pooled covariance, incompatible
+    prediction shapes, or mismatched model and fit types when using model_axis.
+    This projection does not determine joint-fit convergence or J.
+    """
+    projection = _live_projection(sums)
+    if fit.predicted_means.shape != sums.feature_sums.shape:
+        raise ValueError("joint fit predictions must match the acquired feature shape")
+    predicted_sigma = projection.project(fit.predicted_means, sums.cycle_count)
+    if model_axis is None:
+        return CycleResidualProjection(
+            projection.measured_sigma, predicted_sigma, predicted_sigma
+        )
+    grid_means = _model_feature_means(model, fit, model_axis)
+    axis, groups = np.unique(sums.axis, return_inverse=True)
+    counts = np.bincount(groups, weights=sums.cycle_count) / np.bincount(groups)
+    grid_counts = np.interp(model_axis, axis, counts)
+    return CycleResidualProjection(
+        projection.measured_sigma,
+        predicted_sigma,
+        projection.project(grid_means, grid_counts),
+    )
+
+
+def _model_feature_means(
+    model: CycleModel | RateModel, fit: "CycleFit", axis: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    nuisance = fit.nuisances
+    if isinstance(model, CycleModel) and isinstance(nuisance, CycleNuisances):
+        return model.feature_means(axis, fit.parameters, nuisance)
+    if isinstance(model, RateModel) and isinstance(nuisance, RateNuisances):
+        return model.feature_means(axis, fit.parameters, nuisance)
+    raise ValueError("joint fit nuisance type does not match the cycle model")
+
+
+@dataclass(frozen=True)
+class _LiveProjection:
+    measured_sigma: NDArray[np.float64]
+    first_read_sigma: NDArray[np.float64]
+    loadings: NDArray[np.float64]
+    background: NDArray[np.float64]
+
+    def project(
+        self, means: NDArray[np.float64], counts: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
+        return ((means - self.background) @ self.loadings) * np.sqrt(counts)
+
+
+def _live_projection(sums: CycleSums) -> _LiveProjection:
     validate_cycle_sums(sums)
     counts = sums.cycle_count
     means = sums.feature_sums / counts[:, None]
-    whitened = whiten(means, counts, sums.product_sum)
+    lower = pooled_whitening_factor(means, counts, sums.product_sum)
+    background = np.median(means, axis=0)
+    whitened = solve_triangular(lower, (means - background).T, lower=True).T * np.sqrt(
+        counts[:, None]
+    )
     main_axis = np.linalg.svd(whitened - whitened.mean(axis=0), full_matrices=False)[2][
         0
     ]
@@ -155,4 +253,7 @@ def cycle_curves(sums: CycleSums) -> CycleCurves:
         first_read_sigma - first_read_sigma.mean()
     ) < 0:
         main_sigma = -main_sigma
-    return CycleCurves(main_sigma, first_read_sigma, counts.copy())
+        main_axis = -main_axis
+    # Pull the signed PC back to the raw feature coordinates: aᵀL⁻¹ = (L⁻ᵀa)ᵀ.
+    loadings = solve_triangular(lower.T, main_axis)
+    return _LiveProjection(main_sigma, first_read_sigma, loadings, background)

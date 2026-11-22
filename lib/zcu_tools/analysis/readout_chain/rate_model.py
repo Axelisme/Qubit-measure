@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._cycle_coordinates import pack_nuisance
+from ._cycle_engine import mean_jacobian
 from ._cycle_layout import SHARED
 from ._rate_coordinates import (
     RATE_MAX,
@@ -116,6 +117,19 @@ class RateModel:
         """
         coordinates, q = self._coordinates(axis, parameters, nuisances)
         return np.einsum("i,xij->xj", nuisances.thermal, coordinates.table(q)[0])
+
+    def feature_means(
+        self, axis: Array, parameters: Mapping[str, float], nuisances: RateNuisances
+    ) -> Array:
+        """Predict per-cycle feature means on nonnegative delays without fitting.
+
+        Columns follow CycleSums in feature units, shape (F,65). Axis, rates
+        and nuisances have the same contract as for populations. Invalid inputs
+        raise ValueError; inputs are unchanged.
+        """
+        coordinates, q = self._coordinates(axis, parameters, nuisances)
+        means, _ = mean_jacobian(*coordinates.table(q))
+        return means
 
     def _coordinates(
         self, axis: Array, parameters: Mapping[str, float], nuisances: RateNuisances

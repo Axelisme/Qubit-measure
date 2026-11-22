@@ -12,6 +12,7 @@ from ._cycle_coordinates import (
     pack_nuisance,
     parameter_vector,
 )
+from ._cycle_engine import mean_jacobian
 
 Array = NDArray[np.float64]
 
@@ -155,9 +156,26 @@ class CycleModel:
         state order of nuisances. Raise ValueError for invalid inputs. Inputs
         are not changed.
         """
+        drive, _ = self._table(axis, parameters, nuisances)
+        return np.einsum("i,xij->xj", nuisances.thermal, drive)
+
+    def feature_means(
+        self, axis: Array, parameters: Mapping[str, float], nuisances: CycleNuisances
+    ) -> Array:
+        """Predict per-cycle means on a finite nonempty axis with no additional fit.
+
+        Columns follow CycleSums in feature units, shape (F,65). Parameters
+        and nuisances have the same contract as for populations. Invalid inputs
+        raise ValueError; inputs are unchanged.
+        """
+        means, _ = mean_jacobian(*self._table(axis, parameters, nuisances))
+        return means
+
+    def _table(
+        self, axis: Array, parameters: Mapping[str, float], nuisances: CycleNuisances
+    ) -> tuple[Array, Array]:
         _validate_axis(axis)
         _validate_nuisances(nuisances)
         theta = parameter_vector(self, parameters)
         q = np.concatenate([theta, pack_nuisance(nuisances)])
-        drive, _ = joint_table(self, axis, q)
-        return np.einsum("i,xij->xj", nuisances.thermal, drive)
+        return joint_table(self, axis, q)

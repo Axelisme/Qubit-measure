@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+import zcu_tools.analysis.readout_chain as chain
 from scipy.optimize import linear_sum_assignment
 from zcu_tools.analysis.readout_chain import (
     CycleFit,
@@ -97,14 +98,11 @@ def test_exact_moments_recover_curve_and_joint_predictions(kind: str) -> None:
         assert fit.reliability is None
     assert fit.covariance.shape == (len(fit.parameter_names),) * 2
     assert fit.J < 1e-7
-    assert np.isfinite(fit.within_point.J)
-    assert fit.within_point.p is not None
-    assert np.isfinite(fit.sharing.J)
-    assert fit.sharing.J >= 0
-    assert fit.sharing.p is None
-    assert fit.curve.p is not None
-    assert fit.populations.shape == fit.population_errors.shape == (9, 3)
-    np.testing.assert_allclose(fit.populations.sum(axis=1), 1)
+    assert fit.df == 9 * 65 - 27
+    assert fit.j_per_df == pytest.approx(fit.J / 558)
+    assert fit.expected_band == pytest.approx((0.88026313, 1.11973687))
+    assert fit.tail_fraction == 0.0
+    np.testing.assert_allclose(fit.predicted_means, sums.feature_sums / 3000, atol=1e-6)
     # A simultaneous latent-state permutation leaves the model unchanged.
     distances = np.sum(
         (nuisance.centers[:, None] - fit.nuisances.centers[None]) ** 2, axis=2
@@ -128,9 +126,64 @@ def test_exact_moments_recover_curve_and_joint_predictions(kind: str) -> None:
         fit.nuisances.read_landing[order], nuisance.read_landing, atol=1e-4
     )
     np.testing.assert_allclose(fit.nuisances.variance, nuisance.variance, atol=1e-5)
-    # The free pointwise fit's populations match the curve model's at the truth.
-    truth_populations = model.populations(sums.axis, {name: 1.2}, nuisance)
-    np.testing.assert_allclose(fit.populations[:, order], truth_populations, atol=1e-5)
+
+
+def test_joint_predictions_use_the_signed_live_projection_on_points_and_grid() -> None:
+    model, nuisance = planted_model("rabi")
+    axis = np.array([1.1, 0.05, 3.0, 0.7, 1.9])
+    counts = 1000 + 500 * axis
+    measured = curve_moments(model, axis, {"frequency": 1.2}, nuisance).means.copy()
+    measured[0, 2] += 18 / np.sqrt(counts[0])
+    # Give the recorded features known unequal pooled noise scales.
+    sigma = np.linspace(0.4, 2.0, 65)
+    sums = CycleSums(
+        axis,
+        counts,
+        counts[:, None] * measured,
+        measured.T @ (counts[:, None] * measured)
+        + (counts.sum() - len(counts)) * np.diag(sigma**2),
+    )
+    fit = fit_cycle(sums, model, {"frequency": 1.1})
+    grid = np.linspace(axis.min(), axis.max(), 201)
+
+    projection = chain.cycle_residual_projection(sums, model, fit, model_axis=grid)
+
+    live = chain.cycle_curves(sums).main_sigma
+    np.testing.assert_allclose(projection.measured_sigma, live, atol=1e-9)
+
+    fitted_nuisance = expect_curve_nuisances(fit)
+    moments = curve_moments(model, axis, fit.parameters, fitted_nuisance)
+    # On this almost noise-free fixture, the covariance at the returned fit
+    # approximates the frozen last-stage covariance, not the pooled live metric.
+    delta = (measured - moments.means) * np.sqrt(counts[:, None])
+    residual = np.linalg.solve(np.linalg.cholesky(moments.covariance), delta[..., None])
+    assert pytest.approx(np.sum(residual**2), rel=0.01) == fit.J
+    assert fit.tail_fraction == pytest.approx(
+        np.count_nonzero(np.abs(residual) > 3) / 325
+    )
+    assert fit.tail_fraction > 0
+    assert fit.j_per_df > fit.expected_band[1]
+    # Recover the known-covariance PCA from the feature scatter eigenvectors.
+    observed = measured / sigma * np.sqrt(counts[:, None])
+    background = np.median(measured, axis=0)
+    observed -= background / sigma * np.sqrt(counts[:, None])
+    _, eigenvectors = np.linalg.eigh(np.cov(observed, rowvar=False))
+    loading = eigenvectors[:, -1]
+    loading *= np.sign(live @ (observed @ loading))
+    difference = (measured - fit.predicted_means) @ (loading / sigma)
+    np.testing.assert_allclose(
+        projection.measured_sigma - projection.predicted_sigma,
+        difference * np.sqrt(counts),
+        atol=1e-8,
+    )
+    sample = grid[[0, 100, -1]]
+    grid_means = curve_moments(model, sample, fit.parameters, fitted_nuisance).means
+    assert projection.model_sigma.shape == grid.shape
+    np.testing.assert_allclose(
+        projection.model_sigma[[0, 100, -1]],
+        ((grid_means - background) @ (loading / sigma)) * np.sqrt(1000 + 500 * sample),
+        atol=1e-8,
+    )
 
 
 def test_per_state_curves_fit_their_parameters_jointly() -> None:
@@ -195,12 +248,9 @@ def test_confounded_frequency_has_nan_error_and_no_reliability() -> None:
     np.testing.assert_allclose(
         result.parameters["frequency"] + result.parameters["offset"], 1.2, rtol=1e-5
     )
-    # Curve-coordinate ambiguity does not remove pointwise population information.
-    assert np.isfinite(result.population_errors).all()
-    assert (result.population_errors > 0).all()
 
 
-def test_endpoint_rank_loss_preserves_frequency_and_population_errors() -> None:
+def test_endpoint_rank_loss_preserves_frequency_error() -> None:
     rabi, nuisance = planted_model("rabi")
 
     def curve(x, p):
@@ -224,17 +274,6 @@ def test_endpoint_rank_loss_preserves_frequency_and_population_errors() -> None:
     assert result.reliability == pytest.approx(
         1 / (2 * np.pi * np.ptp(sums.axis) * result.errors["frequency"])
     )
-    assert np.isfinite(result.population_errors).all()
-    assert (result.population_errors > 0).all()
-    distances = np.sum(
-        (nuisance.centers[:, None] - result.nuisances.centers[None]) ** 2, axis=2
-    )
-    order = linear_sum_assignment(distances)[1]
-    np.testing.assert_allclose(
-        result.populations[:, order],
-        model.populations(sums.axis, {"frequency": 1.2}, nuisance),
-        atol=1e-5,
-    )
 
 
 def test_wald_weights_do_not_use_pooled_measured_products() -> None:
@@ -245,24 +284,41 @@ def test_wald_weights_do_not_use_pooled_measured_products() -> None:
         replace(sums, product_sum=np.zeros((65, 65))), model, {"tau": 1.1}
     )
     np.testing.assert_allclose(original.covariance, changed.covariance)
-    np.testing.assert_allclose(original.population_errors, changed.population_errors)
+    assert original.errors == changed.errors
+    assert original.J == changed.J
+    assert original.tail_fraction == changed.tail_fraction
 
 
-def test_three_point_fit_returns_finite_nested_checks() -> None:
+def test_low_contrast_fit_returns_joint_estimate_and_residual_numbers() -> None:
     model, nuisance = planted_model()
+    nuisance = replace(
+        nuisance,
+        variance=1.0,
+        centers=np.array([[0.0, 0.0], [0.35, 0.0], [-0.014, 0.49]]),
+    )
     sums = sampled_sums(
-        model, nuisance, np.linspace(0.05, 3.0, 3), {"tau": 1.2}, 500, 761
+        model, nuisance, np.linspace(0.05, 3.0, 5), {"tau": 1.2}, 500, 761
     )
 
     result = fit_cycle(sums, model, {"tau": 1.1})
 
-    assert np.isfinite(result.within_point.J)
-    assert np.isfinite(result.sharing.J)
-    assert np.isfinite(result.curve.J)
-    assert result.within_point.p is not None
-    assert np.isfinite(result.within_point.p)
-    assert result.curve.p is not None
-    assert np.isfinite(result.curve.p)
+    assert 0.2 <= result.parameters["tau"] <= 5.0
+    assert 0 < result.J < np.inf
+    assert result.df == 298
+    assert result.j_per_df == pytest.approx(result.J / 298)
+    assert 0 <= result.tail_fraction <= 1
+    assert np.isfinite(result.predicted_means).all()
+
+
+def test_fit_raises_when_the_joint_model_covariance_is_numerically_singular() -> None:
+    model, nuisance = planted_model()
+    # At this ADC offset the shot variance of the second moments cannot be
+    # resolved by subtracting their raw quadratic moments in float64.
+    nuisance = replace(nuisance, centers=nuisance.centers + 1e8)
+    sums = exact_sums(model, nuisance, points=3)
+
+    with pytest.raises(np.linalg.LinAlgError):
+        fit_cycle(sums, model, {"tau": 1.1})
 
 
 def shot_fit(kind: str, contrast: float, count: int, seed: int) -> tuple[str, CycleFit]:
@@ -294,30 +350,6 @@ def test_fixed_seed_shot_wald_intervals_in_identifiable_regimes(
 
     # Four fixed replicates per regime check local Wald scale, not precise calibration.
     assert abs(result.parameters[name] - 1.2) < 1.96 * result.errors[name]
-    assert result.within_point.df == 45 * 13
-    assert result.sharing.p is None
-    assert np.isfinite(result.population_errors).all()
-
-
-@pytest.mark.slow
-def test_unavailable_within_check_preserves_curve_fit_and_independent_check() -> None:
-    name, result = shot_fit("t1", 1.76, 500, 761)
-
-    assert abs(result.parameters[name] - 1.2) < 1.96 * result.errors[name]
-    assert np.isnan(result.within_point.J)
-    assert result.within_point.p is None
-    assert result.within_point.df == 45 * 13
-    assert np.isnan(result.sharing.J)
-    assert result.sharing.p is None
-    assert result.sharing.df == 14 * 12
-    assert np.isfinite(result.curve.J)
-    assert result.curve.p is not None
-    assert result.curve.df == 65
-    assert result.reliability is None
-    assert result.populations.shape == (13, 3)
-    assert np.isfinite(result.populations).all()
-    assert np.isfinite(result.population_errors).all()
-    np.testing.assert_allclose(result.populations.sum(axis=1), 1)
 
 
 @pytest.mark.parametrize("init", [{}, {"tau": 0.01}, {"tau": np.nan}])
