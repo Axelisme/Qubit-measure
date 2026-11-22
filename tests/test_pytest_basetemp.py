@@ -25,6 +25,7 @@ def checkout(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> Path
         "__init__.py",
         "conftest.py",
         "_cache_environment.py",
+        "_failure_log.py",
         "_temp_directory_guard.py",
     ):
         shutil.copyfile(repo / "tests" / name, tests / name)
