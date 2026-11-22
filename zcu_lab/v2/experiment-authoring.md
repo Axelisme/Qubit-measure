@@ -139,6 +139,8 @@ Z 各維度須匹配軸長，固定軸也計入；load 不將固定值寫進 Res
 可選 native 變數與 Labber 選集各自宣告，見 [ADR-0069](../../docs/adr/0069-experiment-core-and-frontends.md#native-可選變數與-labber-投影)。
 單變數映射見 [PowerExp.AXES_SPEC](twotone/power_dep/core.py)，二維硬體掃描見 [FreqGainExp.AXES_SPEC](twotone/ro_optimize/freq_gain/core.py)。
 
+Native HDF5 的變數名（`VariableSpec.variable` 或 `AxesSpec.data_variable`）與存檔軸的 `label` 都是結果格式的一部分，不是圖上的標籤。Cfg 改名與舊檔相容性見 [ADR-0069〈Cfg 欄位改名與 schema 版本〉](../../docs/adr/0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。現行例子見 [Two-qubit 持久名稱](README.md#two-qubit-持久名稱)。
+
 ### 分析選項自行驗證，fit 結果用屬性讀取
 
 分析選項用 pydantic dataclass 的欄位限制驗證，GUI 沿用此驗證。

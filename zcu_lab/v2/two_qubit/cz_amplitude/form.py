@@ -27,6 +27,7 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
     qubits = captured_qubits(ctx, require_coupler=True)
     drive = {}
     for role in ("qubit1", "qubit2"):
+        # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
         slot = f"$coupler.module.cz_{role}"
         node = source(
             ctx,
