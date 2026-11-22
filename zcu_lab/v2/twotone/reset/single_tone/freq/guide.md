@@ -1,31 +1,21 @@
-**Readers:** operator, agent. Find the sideband carrier of one reset tone. Each shot applies the optional preparation reset and preparation pulse, then the frequency-swept sideband drive at fixed gain and duration, then readout.
+**Readers:** operator, agent. Locate the sideband carrier of a single reset pulse from the averaged-IQ spectrum.
 
-**Last updated:** 2026-11-22
+## Sequence
 
-## Parameter sources
+Optional **Reset** → optional **Preparation pulse** → frequency-swept reset pulse at fixed gain and duration → **Readout**.
 
-Seeds 201 frequency points at `$qubit.ext.reset_f` +/- 1.5 * `$qubit.ext.reset_fwhm`. The tested pulse has gain 0.3, length 5.0 µs, and post-delay 5.0 / (2 * pi * `$resonator.kappa`) µs. Relax delay starts at 5*T1. Open and Defaults fill editable starting values from the selected aliases and calibration. Qubit pulse templates read `$qubit.freq` and `$qubit.wiring.ch`. Readout templates read `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
+## Key settings
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+- Verify preparation (if used) and readout. **Reset drive RF frequency** starts at `$qubit.ext.reset_f` ± 1.5 × `$qubit.ext.reset_fwhm`. Widen the window if the center is only a rough estimate.
+- Check **Tested reset** gain and duration. For cavity ringdown, start its `post_delay` at 5/(2πκ) µs for resonator linewidth κ in MHz. For readout timing, calibrate with herald → nominal Xπ and compare a longer wait.
+- **Relax delay** starts at 5 × T1 (150 µs if absent); enter the wait if T1 is invalid.
 
-## Module slots
+## Read the figures and choose the carrier
 
-Tested reset starts as an editable copy of the reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+Live counts acquired RF points. Both plots show mean IQ on its principal variation axis (I until two valid means are available). The contrast is in a.u., not excited-state probability; there is no shot SEM.
 
-## Acquisition and figures
+Analyze overlays the Lorentzian and its center. The center and FWHM ± values are 1σ fit errors. Confirm measured points on both sides of the feature. Recenter a clipped feature and use center ± 1.5 × FWHM once resolved. Reduce the step if the fitted width is about one frequency step.
 
-Reps starts at 1000 per sweep point and branch in each acquisition round; Rounds starts at 10. Check the requested Reps × Rounds in Analyze before comparing runs.
+The proposal updates `$qubit.ext.reset_f` and `$qubit.ext.reset_fwhm`; when the tested cfg and calibration are available from that Run, it also proposes `$qubit.reset.reset_10` with only the frequency changed and an optional `$qubit.module.reset` selection. Sweep duration separately.
 
-Live and Analyze plot mean complex IQ projected onto its principal variation axis, falling back to raw I when fewer than two valid means are available. This is a readout contrast in a.u., not an excited-state probability. The live title counts acquired RF points. This spectrum locates a resonance; it does not show shot SEM.
-
-Analyze adds the Lorentzian and its center line. The legend reports the center and full width at half maximum (FWHM) with 1σ fit errors; these are not shot errors. Inspect the measured points on both sides of the feature before accepting the fit. If the feature is at an edge, recenter the next sweep at the fitted RF and capture both sides. Once resolved, a practical next window is center ± 1.5 × FWHM. If the width is comparable to one frequency step, reduce the step before treating the width as measured.
-
-## Typical writeback
-
-Proposes fitted frequency and FWHM to `$qubit.ext.reset_f` and `$qubit.ext.reset_fwhm`. With acquired run settings and captured calibration, proposes `$qubit.reset.reset_10` from the tested reset, replacing only its frequency with this analysis. All other tested fields remain. An optional `$qubit.module.reset` row selects that saved reset module.
-
-The proposal uses only this Run's tested reset and captured parameters, not current aliases, ext values or an older library module. Missing saved cfg or parameter capture leaves only the scalar proposals. Source and Apply errors still propagate. Applying the library rows without the optional reset-slot row leaves the selected reset unchanged.
-
-## Recommended
-
-A sweep of ~201 points spanning a couple of linewidths around the expected sideband captures the dip cleanly; widen the span if `$qubit.ext.reset_f` is only a rough resonator-minus-qubit estimate. The reset-pulse length is held fixed here. Sweep it separately afterwards.
+Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../../operator-workflow.md).
