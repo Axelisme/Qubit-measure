@@ -75,8 +75,11 @@ of this projection do not make it a population. The solid curve in Analyze
 is the selected fit, and the vertical marker shows T2* when it is within the
 scan. R² measures the fraction of the variation explained by the fit.
 Normalized residual RMS measures the typical mismatch relative to the signal
-range. The ± values are fit parameter errors. Averaged IQ records do not
-provide per-point shot SEM.
+range. The ± values are fit parameter errors, not point noise. In Live and Analyze, the
+vertical bars show the standard error of the mean (shot SEM): the sample
+standard deviation of the same projected shots divided by the square root of
+the acquired shot count. Older mean-only files still load and fit without bars.
+Points with fewer than two shots have no bar.
 
 Layout reference: Ding Fig. 5-9(b,e) (printed p. 152) couples a Ramsey-like
 sequence to phase interpretation. Mux Ramsey scans free-evolution time and

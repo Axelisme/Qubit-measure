@@ -31,12 +31,12 @@ from zcu_lab.v2.support.measure.mux_results import (
 )
 from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
-from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
+from zcu_lab.v2.support.mux import MuxFitFailure, MuxRabiResult
 
 from .core import LenRabiAnalyzeOptions, MuxLenRabiCfg, MuxLenRabiExp, MuxLenRabiFit
 from .form import make_form
 
-MuxLenRabiRunResult: TypeAlias = RunRecord[MuxLenRabiCfg, MuxSweepResult]
+MuxLenRabiRunResult: TypeAlias = RunRecord[MuxLenRabiCfg, MuxRabiResult]
 
 
 class MuxLenRabiFitSummary(MuxSummaryTone):
@@ -184,14 +184,12 @@ def _get_writeback_items(
     return items
 
 
-def run(
-    cfg: MuxLenRabiCfg, *, context: RunContext
-) -> RunRecord[MuxLenRabiCfg, MuxSweepResult]:
+def run(cfg: MuxLenRabiCfg, *, context: RunContext) -> MuxLenRabiRunResult:
     """Run the experiment and retain its actual configuration."""
     return RunRecord(cfg=cfg, result=MuxLenRabiExp().run(cfg, context=context))
 
 
-def _summary_lines(source: RunRecord[MuxLenRabiCfg, MuxSweepResult]) -> tuple[str, ...]:
+def _summary_lines(source: MuxLenRabiRunResult) -> tuple[str, ...]:
     cfg = source.cfg
     if cfg is None:
         return ()

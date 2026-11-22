@@ -10,6 +10,8 @@ from numpy.typing import NDArray
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.program.v2 import PulseCfg, SweepCfg
 
+from zcu_lab.v2.mux._moments import validate_iq_moments
+
 from .mux_sweep_cfg import MuxAcquisition, MuxDriveToneCfg, validate_mux_tones
 
 
@@ -80,6 +82,7 @@ class MuxCoherenceResult:
     source_frequencies: float64 (K,), MHz from each source x90 pulse before ramp.
     Full pulse cfg and inactive tones remain in RunRecord.cfg. Cancellation and
     acquisition error status belong to the RunContext StopSignal, not these data.
+    iq_moments: float64 (K,P,6), [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²], or None for mean-only data.
     """
 
     tone_indices: NDArray[np.int64]
@@ -87,6 +90,7 @@ class MuxCoherenceResult:
     signals: NDArray[np.complex128]
     actual_detunes: NDArray[np.float64]
     source_frequencies: NDArray[np.float64]
+    iq_moments: NDArray[np.float64] | None = None
 
 
 def validate_coherence_result(result: MuxCoherenceResult) -> None:
@@ -124,6 +128,7 @@ def validate_coherence_result(result: MuxCoherenceResult) -> None:
         raise ValueError("signals must be complex128 (K,P)")
     if np.any(np.isinf(result.signals)):
         raise ValueError("signals may contain NaN partial data, not infinity")
+    validate_iq_moments(result.iq_moments, result.signals)
 
     # An unavailable rounded detune stays NaN; source carriers must be known.
     detunes, frequencies = result.actual_detunes, result.source_frequencies

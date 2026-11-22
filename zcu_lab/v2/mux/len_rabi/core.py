@@ -26,13 +26,12 @@ Program modules perform native conversion and averaging.
 
 Results and cancellation
 ------------------------
-MuxSweepResult.tone_indices is int64 (K,) in participant order. Coordinates are
+MuxRabiResult.tone_indices is int64 (K,) in participant order. Coordinates are
 float64 (K,P) on each drive's own rounded grid. Signals are complex128 (K,P),
-ADC-length-normalized average IQ in a.u. The measurement_i magnitude plots use
-original tone indices and each tone's own coordinates, so duplicate labels retain
-distinct plots. Hardware acquisition updates the full sweep after each round.
-Host acquisition updates each measured point and averages its available rounds.
-Cancellation keeps acquired values and leaves unmeasured points NaN.
+corrected average IQ in a.u. Live and fit figures show projected IQ and
+same-direction shot SEM for each original tone. Hardware acquisition updates
+the full sweep after each round. Host acquisition combines all shots in completed
+rounds for each point. Cancellation leaves unmeasured points NaN.
 
 Length scan contract
 --------------------
@@ -99,10 +98,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from functools import partial
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -121,16 +120,19 @@ from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
-from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import estimate_snr
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.acquisition import ShotReducer
 from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
     TableParam,
     TimelineBuilder,
     TimelineProgramV2,
+    mux_iq_sums,
+    split_sums,
 )
 from zcu_tools.program.v2.modules import (
     MuxReadout,
@@ -139,14 +141,14 @@ from zcu_tools.program.v2.modules import (
 )
 from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.mux._moments import project_iq, validate_iq_moments
+from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.mux import (
     MuxFitFailure,
-    MuxSweepResult,
-    averaged_mux_signal,
+    MuxRabiResult,
     validate_mux_result,
 )
-from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
+from zcu_lab.v2.support.mux_persistence import mux_rabi_spec
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     ToneRangeCfg,
@@ -349,7 +351,38 @@ def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxLengthS
     return MuxLengthScan(indices, np.asarray(coordinates, dtype=np.float64))
 
 
-class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
+def _plot_len_fit(
+    ax: Axes,
+    xs: NDArray[np.float64],
+    params: tuple[float, ...],
+    outcome: MuxLenRabiFit,
+    *,
+    decay: bool,
+) -> None:
+    pi, pierr = outcome.pi_len, outcome.pi_len_err
+    pi2, pi2err = outcome.pi2_len, outcome.pi2_len_err
+    freq, freqerr = outcome.rabi_f, outcome.rabi_f_err
+    model = decaycos if decay else cosfunc
+    label = "Damped cosine" if decay else "Cosine fit"
+    for value, marker, color in ((pi, "π length", "C2"), (pi2, "π/2 length", "C3")):
+        if xs.min() <= value <= xs.max():
+            ax.axvline(value, ls=":", color=color, label=marker)
+    result_label = f"π length = {pi:.4g} ± {pierr:.2g} µs · π/2 length = {pi2:.4g} ± {pi2err:.2g} µs"
+    result_label += f"\nRabi rate = {freq:.4g} ± {freqerr:.2g} MHz"
+    curve = np.linspace(xs.min(), xs.max(), 400)
+    ax.plot(curve, model(curve, *params), color="C1", label=label)
+    r2 = outcome.quality.r2
+    rms = outcome.quality.normalized_residual_rms
+    quality_label = f"R² = {r2:.3g}" if r2 is not None else "R² unavailable"
+    quality_label += (
+        f" · Normalized residual RMS = {rms:.3g}"
+        if rms is not None
+        else " · Normalized residual RMS unavailable"
+    )
+    ax.set_title(f"{result_label}\n{quality_label}", fontsize=10)
+
+
+class MuxLenRabiExp(Experiment[MuxRabiResult, MuxLenRabiCfg]):
     """Measure Rabi oscillations by sweeping simultaneous qubit pulse lengths.
 
     Each point resets, starts the selected drives together, waits for the longest
@@ -357,19 +390,17 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
     length axis in us and average complex IQ; fits estimate pi and pi/2 lengths.
     """
 
-    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxSweepResult, MuxLenRabiCfg]] = (
-        mux_sweep_spec(
-            MuxLenRabiCfg,
-            tag="mux/rabi/len",
-            coordinate_label="Pulse length",
-            unit="s",
-            scale=1e-6,
-        )
+    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxRabiResult, MuxLenRabiCfg]] = mux_rabi_spec(
+        MuxLenRabiCfg,
+        tag="mux/rabi/len",
+        coordinate_label="Pulse length",
+        unit="s",
+        scale=1e-6,
     )
 
     Options: ClassVar[type[LenRabiAnalyzeOptions]] = LenRabiAnalyzeOptions
 
-    def run(self, config: MuxLenRabiCfg, *, context: RunContext) -> MuxSweepResult:
+    def run(self, config: MuxLenRabiCfg, *, context: RunContext) -> MuxRabiResult:
         """Reset, sweep simultaneous drive lengths, and acquire mux readout IQ.
 
         config supplies full tones, ordered participants and shared averaging
@@ -381,8 +412,8 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
 
         All const/flat_top participants use hardware tables. Any sampled drive
         selects a host scan for all participants, with one compiled program per
-        point reused across rounds. Host programs run rounds=1; the host averages
-        available rounds per point and checks earlystop_snr after each full scan.
+        point reused across rounds. Host programs run rounds=1; the host adds
+        shot moments from available rounds per point and checks earlystop_snr after each full scan.
         Native arb assets raise ValueError before coordinates or compilation.
 
         context supplies soc/soccfg, plots and a fresh stop signal. Cancellation
@@ -405,7 +436,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
 
     def _run_for_flat(
         self, cfg: MuxLenRabiCfg, scan: MuxLengthScan, *, context: RunContext
-    ) -> MuxSweepResult:
+    ) -> MuxRabiResult:
         """Sweep all const/flat-top length tables in one hardware program."""
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[index] for index in scan.indices]
@@ -416,28 +447,35 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
             fig.suptitle(f"Mux length Rabi · {cfg.tones[index].name} · IQ contrast")
             ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
             progress = ax.set_title(f"Acquired length points: 0 / {cfg.expts}")
-            viewer = live_line(ax)
-            ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
+            viewer = live_errorbar(ax)
+            ax.lines[0].set(marker="o", markersize=3, label="Measured IQ ± shot SEM")
             ax.legend()
             viewers.append((viewer, progress))
             fig.show()
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]):
+        def update(data: NDArray[np.float64]):
+            _, mean = split_sums(data)
             artists = []
             for row, (viewer, progress) in enumerate(viewers):
-                measured = data[:, row]
+                measured = mean[:, row]
                 acquired = np.isfinite(measured)
-                real = rotate2real(np.where(acquired, measured, np.nan)).real
+                real, sem = project_iq(
+                    np.where(acquired, measured, np.nan), data[:, row]
+                )
                 progress.set_text(
                     f"Acquired length points: {np.count_nonzero(acquired)} / {cfg.expts}"
                 )
-                artists.extend((*viewer.set(scan.coordinates[row], real), progress))
+                artists.extend(
+                    (*viewer.set(scan.coordinates[row], real, sem), progress)
+                )
             return artists
 
         # 1. One hardware point loop selects all participants' length tables.
-        signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
-        with Schedule(signals, scope=context.scope) as sched:
+        moments = SignalBuffer(
+            (*scan.coordinates.T.shape, 6), dtype=np.float64, on_update=update
+        )
+        with Schedule(moments, scope=context.scope) as sched:
             drives = [
                 Pulse(
                     f"drive_{index}",
@@ -463,29 +501,26 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
             builder.join(*timelines, into="default")
             # Consume this point's common end before readout to release runtime registers.
             builder.delay_by_timeline()
-            readout_module = MuxReadout("readout", readout)
-            builder.emit(readout_module)
+            builder.emit(MuxReadout("readout", readout))
             prog = builder.build()
 
             # 2. Publish the full point/tone matrix after each completed round.
-            _ = sched.run_acquire(
+            _ = sched.run_acquire_summed(
                 prog,
                 context.soc,
-                options=RunOptions(
-                    converter=partial(averaged_mux_signal, prog, readout_module)
-                ),
                 rounds=cfg.rounds,
+                reducer=mux_iq_sums(prog, "readout"),
             )
-        signals.trigger_update(flush=True)
-        return MuxSweepResult(
-            np.asarray(scan.indices, dtype=np.int64),
-            scan.coordinates,
-            signals.array.T.copy(),
+        moments.trigger_update(flush=True)
+        tone_sums = np.swapaxes(moments.array, 0, 1).copy()
+        _, mean = split_sums(tone_sums)
+        return MuxRabiResult(
+            np.asarray(scan.indices, dtype=np.int64), scan.coordinates, mean, tone_sums
         )
 
     def _run_for_arb(
         self, cfg: MuxLenRabiCfg, scan: MuxLengthScan, *, context: RunContext
-    ) -> MuxSweepResult:
+    ) -> MuxRabiResult:
         """Scan sampled waveforms on the host; native arb assets stay unsupported."""
         # 1. Show each participant's length response and average only measured round/point pairs.
         rounds = cfg.rounds
@@ -494,44 +529,51 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[index] for index in scan.indices]
         )
-        programs: dict[int, TimelineProgramV2] = {}
-        readouts: dict[int, MuxReadout] = {}
+        programs: dict[
+            int, tuple[TimelineProgramV2, ShotReducer[NDArray[np.float64]]]
+        ] = {}
         viewers = []
         for index in scan.indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             fig.suptitle(f"Mux length Rabi · {cfg.tones[index].name} · IQ contrast")
             ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
             progress = ax.set_title(f"Acquired length points: 0 / {cfg.expts}")
-            viewer = live_line(ax)
-            ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
+            viewer = live_errorbar(ax)
+            ax.lines[0].set(marker="o", markersize=3, label="Measured IQ ± shot SEM")
             ax.legend()
             viewers.append((viewer, progress))
             fig.show()
 
-        def average_round(data: NDArray[np.complex128]) -> NDArray[np.complex128]:
-            # Average only measured entries; untouched point/tone pairs stay NaN.
-            counts = np.sum(~np.isnan(data), axis=0)
-            mean = np.full(data.shape[1:], np.nan, dtype=np.complex128)
-            np.divide(np.nansum(data, axis=0), counts, out=mean, where=counts > 0)
-            return mean
+        def sum_host_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
+            # Ignore unfinished round/point slots, without turning untouched points into zeros.
+            sums = np.nansum(data, axis=0)
+            sums[np.isnan(data[..., 0]).all(axis=0)] = np.nan
+            return sums
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]):
+        def update(data: NDArray[np.float64]):
+            sums = sum_host_rounds(data)
+            _, mean = split_sums(sums)
             artists = []
-            mean = average_round(data)
             for row, (viewer, progress) in enumerate(viewers):
                 measured = mean[:, row]
                 acquired = np.isfinite(measured)
-                real = rotate2real(np.where(acquired, measured, np.nan)).real
+                real, sem = project_iq(
+                    np.where(acquired, measured, np.nan), sums[:, row]
+                )
                 progress.set_text(
                     f"Acquired length points: {np.count_nonzero(acquired)} / {cfg.expts}"
                 )
-                artists.extend((*viewer.set(scan.coordinates[row], real), progress))
+                artists.extend(
+                    (*viewer.set(scan.coordinates[row], real, sem), progress)
+                )
             return artists
 
         # 2. Reuse each point's reset/simultaneous-drive/readout program across host rounds.
-        signals = SignalBuffer((rounds, *scan.coordinates.T.shape), on_update=update)
-        with Schedule(signals, scope=context.scope) as sched:
+        moments = SignalBuffer(
+            (rounds, *scan.coordinates.T.shape, 6), dtype=np.float64, on_update=update
+        )
+        with Schedule(moments, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", rounds):
                 for point, step in rep.scan("point", list(range(cfg.expts))):
                     if point not in programs:
@@ -557,23 +599,15 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
                                 timeline=timeline,
                             )
                         builder.join(*timelines, into="default")
-                        readout_module = MuxReadout("readout", readout)
-                        builder.emit(readout_module)
-                        programs[point] = builder.build()
-                        readouts[point] = readout_module
-                    prog = programs[point]
-                    _ = step.run_acquire(
-                        prog,
-                        context.soc,
-                        options=RunOptions(
-                            converter=partial(
-                                averaged_mux_signal, prog, readouts[point]
-                            )
-                        ),
-                        rounds=1,
+                        builder.emit(MuxReadout("readout", readout))
+                        prog = builder.build()
+                        programs[point] = prog, mux_iq_sums(prog, "readout")
+                    prog, reducer = programs[point]
+                    _ = step.run_acquire_summed(
+                        prog, context.soc, reducer=reducer, rounds=1
                     )
                 # Check every tone only after a complete host-side point scan.
-                mean = average_round(signals.array)
+                _, mean = split_sums(sum_host_rounds(moments.array))
                 if (
                     cfg.earlystop_snr is not None
                     and np.all(np.isfinite(mean))
@@ -583,17 +617,17 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
                     )
                 ):
                     break
-        signals.trigger_update(flush=True)
-        # 3. Keep available-round means on the planned length grids; untouched points remain NaN.
-        return MuxSweepResult(
-            np.asarray(scan.indices, dtype=np.int64),
-            scan.coordinates,
-            average_round(signals.array).T.copy(),
+        moments.trigger_update(flush=True)
+        # 3. Keep available rounds on the planned grids; untouched points remain NaN.
+        tone_sums = np.swapaxes(sum_host_rounds(moments.array), 0, 1).copy()
+        _, mean = split_sums(tone_sums)
+        return MuxRabiResult(
+            np.asarray(scan.indices, dtype=np.int64), scan.coordinates, mean, tone_sums
         )
 
     def analyze(
         self,
-        source: RunRecord[MuxLenRabiCfg, MuxSweepResult],
+        source: RunRecord[MuxLenRabiCfg, MuxRabiResult],
         options: LenRabiAnalyzeOptions,
         *,
         plots: Plots,
@@ -610,6 +644,8 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         # 1. Fit acquired length points per tone, with optional damping and a fixed or free phase.
         result = source.result
         validate_mux_result(result)
+        moments = result.iq_moments
+        validate_iq_moments(moments, result.signals)
         outcomes: list[MuxLenRabiFit | MuxFitFailure] = []
         # 2. Drop missing IQ per tone without substituting points from another length grid.
         for row, raw_index in enumerate(result.tone_indices):
@@ -623,13 +659,20 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
             fig, ax = plots.subplots(num=f"fit_{index}", figsize=(7, 5))
             ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
             fig.suptitle(f"Mux length Rabi · {tone} · IQ contrast")
+            real, sem = project_iq(
+                signal, None if moments is None else moments[row, finite]
+            )
+            ax.plot(xs, real, "o", ms=3, label="Measured IQ")
+            if sem is not None and np.any(np.isfinite(sem)):
+                ax.errorbar(
+                    xs, real, yerr=sem, fmt="none", ecolor="C0", label="Shot SEM"
+                )
             try:
                 if len(xs) < 6:
                     raise ValueError(
                         "Len Rabi fit requires at least six acquired points"
                     )
                 # 3. Project IQ before fitting the selected damped/undamped cosine and phase policy.
-                real = rotate2real(signal).real
                 fit = fit_rabi(
                     xs,
                     real,
@@ -664,8 +707,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
                 ArithmeticError,
                 np.linalg.LinAlgError,
             ) as exc:
-                # 4. Keep a failed tone's acquired magnitude and reason without stopping other fits.
-                ax.plot(xs, rotate2real(signal).real, "o", ms=3, label="Measured IQ")
+                # 4. Keep the failure reason without hiding acquired IQ or stopping other fits.
                 ax.text(
                     0.02,
                     0.98,
@@ -676,28 +718,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
                 )
                 outcomes.append(MuxFitFailure(index, str(exc)))
             else:
-                ax.plot(xs, real, "o", ms=3, label="Measured IQ")
-                model = decaycos if options.decay else cosfunc
-                label = "Damped cosine" if options.decay else "Cosine fit"
-                for value, marker, color in (
-                    (pi, "π length", "C2"),
-                    (pi2, "π/2 length", "C3"),
-                ):
-                    if xs.min() <= value <= xs.max():
-                        ax.axvline(value, ls=":", color=color, label=marker)
-                result_label = f"π length = {pi:.4g} ± {pierr:.2g} µs · π/2 length = {pi2:.4g} ± {pi2err:.2g} µs"
-                result_label += f"\nRabi rate = {freq:.4g} ± {freqerr:.2g} MHz"
-                curve = np.linspace(xs.min(), xs.max(), 400)
-                ax.plot(curve, model(curve, *params), color="C1", label=label)
-                r2 = quality.r2
-                rms = quality.normalized_residual_rms
-                quality_label = f"R² = {r2:.3g}" if r2 is not None else "R² unavailable"
-                quality_label += (
-                    f" · Normalized residual RMS = {rms:.3g}"
-                    if rms is not None
-                    else " · Normalized residual RMS unavailable"
-                )
-                ax.set_title(f"{result_label}\n{quality_label}", fontsize=10)
+                _plot_len_fit(ax, xs, params, outcome, decay=options.decay)
                 outcomes.append(outcome)
             ax.legend()
             fig.tight_layout()

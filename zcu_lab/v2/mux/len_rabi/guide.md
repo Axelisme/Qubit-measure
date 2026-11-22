@@ -72,7 +72,11 @@ ramps when setting a new total length.
 Both figures show mean IQ projected onto its principal axis, not a classified
 excited-state probability. R² measures explained variation. Normalized residual
 RMS measures typical fit mismatch relative to the signal range. The ± values
-are fit uncertainties. The averaged IQ records do not provide shot SEM.
+are fit uncertainties, not point noise. In Live and Analyze, the
+vertical bars show the standard error of the mean (shot SEM): the sample
+standard deviation of the same projected shots divided by the square root of
+the acquired shot count. Older mean-only files still load and fit without bars.
+Points with fewer than two shots have no bar.
 
 Use const, flat_top or sampled drives such as cosine, gauss or DRAG for selected
 tones. Inactive drives may be blank.

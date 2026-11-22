@@ -2,6 +2,7 @@
 
 import numpy as np
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     US_TO_S,
@@ -12,6 +13,8 @@ from zcu_tools.experiment import (
     VariableZSpec,
 )
 
+from zcu_lab.v2.mux._moments import iq_moments_variable, restore_iq_moments
+
 from .mux_coherence import MuxCoherenceResult, validate_coherence_result
 
 
@@ -21,13 +24,19 @@ def coherence_spec[T: ConfigBase](
     """Map Ramsey/Echo IQ versus delay and per-tone frequencies to saved grids.
 
     cfg_type restores the full leaf cfg; tag identifies Ramsey or Echo. Memory
-    uses us/MHz, disk uses seconds/Hz. Labber uses independent variable grids.
-    Requested delay is stored once as the IQ axis, never reconstructed from
-    current cfg. No I/O occurs. Invalid declarations or mismatched loaded tone
-    axes raise ValueError via native persistence.
+    uses us/MHz, disk uses seconds/Hz. Labber keeps independent IQ and frequency
+    grids and excludes optional Native moments. The loaded delay is never
+    reconstructed from current cfg. No I/O occurs. Invalid declarations or
+    mismatched grids raise ValueError via native persistence.
     """
     tone = VariableAxisSpec(
         label="Tone", unit="", field_name="tone_indices", dtype=np.int64
+    )
+    iq_axes = (
+        VariableAxisSpec(
+            label="Requested delay", unit="s", field_name="times", scale=US_TO_S
+        ),
+        tone,
     )
 
     def build(data: GroupedLoadData[T]) -> MuxCoherenceResult:
@@ -49,6 +58,7 @@ def coherence_spec[T: ConfigBase](
             signals.z.astype(np.complex128),
             detunes.z.astype(np.float64),
             frequencies.z.astype(np.float64),
+            restore_iq_moments(data.variables.get(DataVariable("iq_moments")), signals),
         )
         validate_coherence_result(result)
         return result
@@ -58,15 +68,7 @@ def coherence_spec[T: ConfigBase](
         variables=(
             VariableSpec(
                 variable="signals",
-                axes=(
-                    VariableAxisSpec(
-                        label="Requested delay",
-                        unit="s",
-                        field_name="times",
-                        scale=US_TO_S,
-                    ),
-                    tone,
-                ),
+                axes=iq_axes,
                 z=VariableZSpec(
                     field_name="signals",
                     label="Signal",
@@ -91,6 +93,7 @@ def coherence_spec[T: ConfigBase](
                     ("source_frequencies", "Source frequency"),
                 )
             ],
+            iq_moments_variable(iq_axes),
         ),
         result_type=MuxCoherenceResult,
         cfg_type=cfg_type,
@@ -99,4 +102,5 @@ def coherence_spec[T: ConfigBase](
         result_validator=validate_coherence_result,
         cfg_schema_version="3.0",
         labber_layout="independent",
+        labber_variables=("signals", "actual_detunes", "source_frequencies"),
     )

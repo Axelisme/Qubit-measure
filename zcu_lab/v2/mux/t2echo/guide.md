@@ -75,7 +75,11 @@ projected onto its principal axis, not an excited-state probability. Analyze
 overlays the model and marks T2E within the scan window. R² is the fraction
 of variation explained by the model. Normalized residual RMS measures typical
 fit mismatch relative to the signal range. The ± values describe fit parameters,
-not point noise. Averaged IQ records do not provide shot SEM.
+not point noise. In Live and Analyze, the
+vertical bars show the standard error of the mean (shot SEM): the sample
+standard deviation of the same projected shots divided by the square root of
+the acquired shot count. Older mean-only files still load and fit without bars.
+Points with fewer than two shots have no bar.
 
 Each tone needs a fixed x90 drive and x180 pi pulse on the same generator.
 The two pulses may have different waveforms, carriers, gains and phases.
@@ -179,12 +183,15 @@ Deselect unwanted items, then use **Apply Selected** to write the selected items
 Analyze and preview only calculate results. Each candidate needs its own selection.
 
 Native and Labber outputs preserve IQ on the delay/tone grid and detune/source
-frequency on the tone-only grid. Check that both outputs report `saved`.
-Inspect each output's error when saving fails.
+frequency on the tone-only grid. Native also stores shot moments for the error
+bars. Labber exports only the original signals and frequencies. Check that both
+outputs report `saved`. Inspect each output's error when saving fails.
 
 For core callers, `MuxCoherenceResult` stores original `tone_indices (K,)`,
 requested total `times (P,)` in µs, `signals (K,P)` in ADC-length-normalized units,
 and `actual_detunes (K,)` / x90 `source_frequencies (K,)` in MHz.
+`iq_moments (K,P,6)` contains count and corrected per-shot IQ sums. Older
+files leave `iq_moments` as `None`.
 A nonzero detune without any positive rounded delay can yield NaN actual detune.
 Do not replace it with zero or nominal detune, or infer a frequency correction.
 Full source cfg retains inactive tones. Native disk units are seconds and Hz.

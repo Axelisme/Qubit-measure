@@ -118,7 +118,9 @@ Malformed source shapes or options raise instead of becoming fit failures.
 Inspect quality and uncertainty before using a fitted value as calibration.
 
 Native save/load preserve full cfg, original indices, complex IQ and the one
-recorded delay axis. Time is seconds on disk and microseconds in memory. Always pass
+recorded delay axis; optional IQ moments support the projected shot SEM
+(ADR-0069). Labber still writes only the `data` log. Time is seconds on disk
+and microseconds in memory. Always pass
 the captured `RunRecord`; changing a current cfg does not change the saved source.
 Canonical saving requires cfg. External `save_run`/`load_run` use native HDF5;
 `save_labber(source, path, spec=MuxT1Exp.AXES_SPEC)` exports Labber separately.
@@ -131,7 +133,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from functools import partial
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
@@ -150,7 +151,15 @@ from zcu_tools.analysis.fitting import (
     fit_dual_decay,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.datafile import DataVariable
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
@@ -163,17 +172,24 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
     TimelineBuilder,
+    mux_iq_sums,
+    split_sums,
 )
 from zcu_tools.program.v2.modules import (
     MuxReadout,
     MuxReadoutCfg,
     Pulse,
 )
-from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.acquire import mux_snr_checker
-from zcu_lab.v2.support.mux import MuxFitFailure, averaged_mux_signal
+from zcu_lab.v2.mux._moments import (
+    iq_moments_variable,
+    project_iq,
+    restore_iq_moments,
+    validate_iq_moments,
+)
+from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.acquire import mux_mean_snr_checker
+from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveToneCfg, validate_mux_tones
 
 
@@ -186,12 +202,14 @@ class MuxT1Result:
     in participants order.
     signals is complex128 (K,P), I+jQ in ADC-length-normalized a.u. Unwritten
     entries remain NaN; completed-round means survive cancellation. The caller
-    must check the RunContext stop signal before declaring success.
+    must check the RunContext stop signal before declaring success. iq_moments
+    is float64 (K,P,6), [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²], or None for mean-only data.
     """
 
     times: NDArray[np.float64]
     tone_indices: NDArray[np.int64]
     signals: NDArray[np.complex128]
+    iq_moments: NDArray[np.float64] | None = None
 
 
 @validated_dataclass(frozen=True)
@@ -375,23 +393,24 @@ def _show_live_t1(plots: Plots, cfg: MuxT1Cfg, times: NDArray[np.float64]):
         fig.suptitle(f"Mux T1 · {cfg.tones[index].name} · IQ contrast")
         ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
         progress = ax.set_title(f"Acquired delay points: 0 / {times.size}")
-        viewer = live_line(ax)
-        ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
+        viewer = live_errorbar(ax)
+        ax.lines[0].set(marker="o", markersize=3, label="Measured IQ ± shot SEM")
         ax.legend()
         viewers.append((viewer, progress))
         fig.show()
 
     @plots.on_plot_thread
-    def update(data: NDArray[np.complex128]):
+    def update(data: NDArray[np.float64]):
+        _, mean = split_sums(data)
         artists = []
         for row, (viewer, progress) in enumerate(viewers):
-            measured = data[:, row]
+            measured = mean[:, row]
             acquired = np.isfinite(measured)
-            real = rotate2real(np.where(acquired, measured, np.nan)).real
+            real, sem = project_iq(np.where(acquired, measured, np.nan), data[:, row])
             progress.set_text(
                 f"Acquired delay points: {np.count_nonzero(acquired)} / {times.size}"
             )
-            artists.extend((*viewer.set(times, real), progress))
+            artists.extend((*viewer.set(times, real, sem), progress))
         return artists
 
     return update
@@ -400,7 +419,6 @@ def _show_live_t1(plots: Plots, cfg: MuxT1Cfg, times: NDArray[np.float64]):
 def _plot_t1_fit(
     ax: Axes,
     xs: NDArray[np.float64],
-    real: NDArray[np.float64],
     params: Sequence[float],
     outcome: MuxT1Fit,
 ) -> None:
@@ -409,7 +427,6 @@ def _plot_t1_fit(
     quality = (
         None if outcome.fit.fit_quality is None else outcome.fit.fit_quality["fit"]
     )
-    ax.plot(xs, real, "o", ms=3, label="Measured IQ")
     model = dual_expfunc if t1b is not None else expfunc
     label = "Double exponential" if t1b is not None else "Exponential decay"
     if xs.min() <= t1 <= xs.max():
@@ -452,6 +469,8 @@ def fit_and_plot_t1(
     display names when the saved configuration is available. No hardware is read.
     """
     _validate_result(result)
+    moments = result.iq_moments
+    validate_iq_moments(moments, result.signals)
     times, indices, signals = result.times, result.tone_indices, result.signals
     outcomes: list[MuxT1Fit | MuxFitFailure] = []
     for row, raw_index in enumerate(indices):
@@ -464,12 +483,16 @@ def fit_and_plot_t1(
         fig, ax = plots.subplots(num=f"fit_{index}", figsize=(7, 5))
         ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
         fig.suptitle(f"Mux T1 · {tone} · IQ contrast")
+        real, sem = project_iq(
+            signal, None if moments is None else moments[row, options.skip :][finite]
+        )
+        ax.plot(xs, real, "o", ms=3, label="Measured IQ")
+        if sem is not None and np.any(np.isfinite(sem)):
+            ax.errorbar(xs, real, yerr=sem, fmt="none", ecolor="C0", label="Shot SEM")
         try:
             minimum = 6 if options.dual_exp else 4
             if len(xs) < minimum:
                 raise ValueError(f"T1 fit requires at least {minimum} acquired points")
-            # Project acquired IQ onto its principal contrast axis.
-            real = rotate2real(signal).real
             if options.dual_exp:
                 fit = fit_dual_decay(xs, real)
                 t1, err = fit.decay_time1, fit.decay_time1_err
@@ -509,7 +532,6 @@ def fit_and_plot_t1(
             np.linalg.LinAlgError,
         ) as exc:
             outcomes.append(MuxFitFailure(index, str(exc)))
-            ax.plot(xs, rotate2real(signal).real, "o", ms=3, label="Measured IQ")
             ax.text(
                 0.02,
                 0.98,
@@ -519,11 +541,28 @@ def fit_and_plot_t1(
                 wrap=True,
             )
         else:
-            _plot_t1_fit(ax, xs, real, tuple(params), outcome)
+            _plot_t1_fit(ax, xs, tuple(params), outcome)
             outcomes.append(outcome)
         ax.legend()
         fig.tight_layout()
     return tuple(outcomes)
+
+
+_T1_AXES = (
+    VariableAxisSpec(label="Delay", unit="s", field_name="times", scale=1e-6),
+    VariableAxisSpec(label="Tone", unit="", field_name="tone_indices", dtype=np.int64),
+)
+
+
+def _restore_t1(data: GroupedLoadData[MuxT1Cfg]) -> MuxT1Result:
+    mean = data.variable("data")
+    times, indices = mean.axes
+    moments = restore_iq_moments(data.variables.get(DataVariable("iq_moments")), mean)
+    return MuxT1Result(times, indices, mean.z, moments)
+
+
+def _validate_t1_moments(result: MuxT1Result) -> None:
+    validate_iq_moments(result.iq_moments, result.signals)
 
 
 class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
@@ -534,16 +573,24 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
     recorded delays, original tone indices, complex IQ and the full cfg.
     """
 
-    AXES_SPEC: ClassVar[AxesSpec[MuxT1Result, MuxT1Cfg]] = AxesSpec(
-        axes=(
-            AxesSpec.Axis("times", label="Delay", unit="s", scale=1e-6),
-            AxesSpec.Axis("tone_indices", label="Tone", unit="", dtype=np.int64),
+    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxT1Result, MuxT1Cfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "data",
+                _T1_AXES,
+                VariableZSpec(
+                    "signals", label="Signal", unit="a.u.", dtype=np.complex128
+                ),
+            ),
+            iq_moments_variable(_T1_AXES),
         ),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=MuxT1Result,
         cfg_type=MuxT1Cfg,
         cfg_schema_version="4.0",
         tag="mux/t1",
+        result_builder=_restore_t1,
+        result_validator=_validate_t1_moments,
+        labber_variables=("data",),
     )
 
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
@@ -574,7 +621,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
 
     def _run_linear(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
         """Acquire the common linear delay sweep and return tone-major IQ."""
-        # 1. Show each participant's decay magnitude on the common requested delay axis.
+        # 1. Show each participant's projected IQ on the common requested delay axis.
         times = sweep2array(cfg.delay, "none")
         indices = list(cfg.participants)
         readout = cfg.readout.with_updates(
@@ -583,8 +630,10 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         update = _show_live_t1(context.plots, cfg, times)
 
         # 2. Sweep the shared wait after all pi branches finish, then acquire mux readout.
-        signals = SignalBuffer((len(times), len(indices)), on_update=update)
-        with Schedule(signals, scope=context.scope) as sched:
+        moments = SignalBuffer(
+            (len(times), len(indices), 6), dtype=np.float64, on_update=update
+        )
+        with Schedule(moments, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
                 reps=cfg.reps,
@@ -604,25 +653,25 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
             builder.join(*timelines, into="default")
             builder.timeline_inc(delay)
             builder.delay_by_timeline()
-            readout_module = MuxReadout("readout", readout)
-            builder.emit(readout_module)
+            builder.emit(MuxReadout("readout", readout))
             prog = builder.build()
-            sched.run_acquire(
+            sched.run_acquire_summed(
                 prog,
                 context.soc,
                 rounds=cfg.rounds,
+                reducer=mux_iq_sums(prog, "readout"),
                 options=RunOptions(
-                    converter=partial(averaged_mux_signal, prog, readout_module),
-                    stop_condition=mux_snr_checker(
-                        signals, cfg.earlystop_snr, tone_axis=1
-                    ),
+                    stop_condition=mux_mean_snr_checker(
+                        lambda: split_sums(moments.array)[1],
+                        cfg.earlystop_snr,
+                        tone_axis=1,
+                    )
                 ),
             )
-        signals.trigger_update(flush=True)
-        # 3. Keep completed-round IQ for every delay; NaN marks no completed round.
-        return MuxT1Result(
-            times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
-        )
+        moments.trigger_update(flush=True)
+        tone_sums = np.swapaxes(moments.array, 0, 1).copy()
+        _, mean = split_sums(tone_sums)
+        return MuxT1Result(times, np.asarray(indices, dtype=np.int64), mean, tone_sums)
 
     def _run_decay(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
         """Acquire the nonuniform delay table and return tone-major IQ."""
@@ -636,8 +685,10 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         update = _show_live_t1(context.plots, cfg, times)
 
         # 2. Step the hardware delay table after all pi branches finish, then acquire mux readout.
-        signals = SignalBuffer((len(times), len(indices)), on_update=update)
-        with Schedule(signals, scope=context.scope) as sched:
+        moments = SignalBuffer(
+            (len(times), len(indices), 6), dtype=np.float64, on_update=update
+        )
+        with Schedule(moments, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
                 reps=cfg.reps,
@@ -658,25 +709,26 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
             # Start the shared delay after the full pulse branches, including post.
             builder.delay_by_timeline()
             builder.emit(DelayAuto("t1_delay", t=delay))
-            readout_module = MuxReadout("readout", readout)
-            builder.emit(readout_module)
+            builder.emit(MuxReadout("readout", readout))
             prog = builder.build()
-            sched.run_acquire(
+            sched.run_acquire_summed(
                 prog,
                 context.soc,
                 rounds=cfg.rounds,
+                reducer=mux_iq_sums(prog, "readout"),
                 options=RunOptions(
-                    converter=partial(averaged_mux_signal, prog, readout_module),
-                    stop_condition=mux_snr_checker(
-                        signals, cfg.earlystop_snr, tone_axis=1
-                    ),
+                    stop_condition=mux_mean_snr_checker(
+                        lambda: split_sums(moments.array)[1],
+                        cfg.earlystop_snr,
+                        tone_axis=1,
+                    )
                 ),
             )
-        signals.trigger_update(flush=True)
-        # 3. Retain actual table delays and completed-round IQ without filling missing values.
-        return MuxT1Result(
-            times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
-        )
+        moments.trigger_update(flush=True)
+        # Retain completed rounds on the actual table delays.
+        tone_sums = np.swapaxes(moments.array, 0, 1).copy()
+        _, mean = split_sums(tone_sums)
+        return MuxT1Result(times, np.asarray(indices, dtype=np.int64), mean, tone_sums)
 
     def analyze(
         self,

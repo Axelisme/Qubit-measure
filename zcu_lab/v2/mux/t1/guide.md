@@ -76,7 +76,11 @@ time is a model component, not evidence on its own for a second physical state.
 Both views show a principal-axis projection of mean IQ, not excited-state
 probability. R² measures explained variation. Normalized residual RMS measures
 typical model mismatch relative to the signal range. The ± value is the
-uncertainty of the fitted time. Averaged IQ records do not provide shot SEM.
+uncertainty of the fitted time, not point noise. In Live and Analyze, the
+vertical bars show the standard error of the mean (shot SEM): the sample
+standard deviation of the same projected shots divided by the square root of
+the acquired shot count. Older mean-only files still load and fit without bars.
+Points with fewer than two shots have no bar.
 
 Use calibrated fixed pi pulses. All qubits share one delay axis in µs,
 executed by one program's hardware loop. Requested window endpoints and the

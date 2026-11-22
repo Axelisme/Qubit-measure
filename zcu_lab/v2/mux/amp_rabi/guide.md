@@ -72,8 +72,11 @@ window before accepting it. The reported π/2 gain is half the fitted π gain.
 
 R² measures the fit's explanation of variation in the included points.
 Normalized residual RMS measures the typical residual relative to the signal
-range. The ± values describe fitted parameters, not point noise. These records
-contain shot averages, not enough information to estimate shot SEM.
+range. The ± values describe fitted parameters, not point noise. In Live and Analyze, the
+vertical bars show the standard error of the mean (shot SEM): the sample
+standard deviation of the same projected shots divided by the square root of
+the acquired shot count. Older mean-only files still load and fit without bars.
+Points with fewer than two shots have no bar.
 
 Each tone supplies a gain range in normalized units within `[-1, 1]`.
 Set each tone's Start and Stop in gain units. Expts follows Tones and sets one
