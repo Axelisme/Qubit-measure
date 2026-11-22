@@ -1,49 +1,23 @@
-## Behavior
+**Readers:** operator, agent. Sweep pulse duration at fixed gain and measured carrier to calibrate π and π/2 lengths.
 
-**Readers:** operator, agent. Length Rabi: drives the qubit at its known frequency and sweeps the drive-pulse length, fitting the Rabi oscillation to find the pi and pi/2 pulse lengths. Runs on real hardware. Run once you know the qubit frequency, to calibrate a pi pulse by duration (the pulse gain stays fixed).
+## Sequence and key settings
 
-**Last updated:** 2026-10-21
+Optional **Reset** and preparation → length-swept **Rabi Pulse** → calibrated **Readout**. Check the carrier, gain and readout timing before Run. A prior π pulse is not required if you set these directly.
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+- **Pulse length** starts at `0.03 µs…4 × stored X180 waveform length`. No numeric length gives a 1 µs stop; a stored invalid length leaves Stop empty. Enter a positive stop long enough to see at least one period.
+- Use an editable waveform length. Run rejects an arbitrary asset before scanning or plotting; the sweep does not resize or resample its saved samples. Const and flat-top sweep on the FPGA; other editable envelopes are stepped by the host.
+- **Relax delay** starts at `5 × qubit.t1` (150 µs if absent). Use **Fit decay envelope** if the oscillation damps. Enable **Fit phase offset** if the data do not match a fixed 0° or 180° phase.
 
-## Parameter sources
+See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the shared GUI steps.
 
-Length runs 0.03 to 4 * qubit.module.x180.waveform.length µs over 101 points; Run overwrites drive length. Relax delay is 5 * qubit.t1 µs. Other missing required calibration leaves the affected fields empty and Invalid.
+## Read the plots
 
-Run rejects an arbitrary (arb) drive waveform before preparing the scan or plots because its length comes from the saved asset. Select a waveform with an editable length for Length Rabi. Const and flat-top pulses sweep on the FPGA; other editable-length shapes scan on the host. Run does not resize or resample arb assets.
+Both plots show projected mean IQ (a.u.), not population, versus pulse length (µs). One bar is one shot SEM: retained-shot sample SD on the plotted axis divided by √(retained shot count). It is not shot spread, round-to-round scatter or fit error. Bars do not weight the fit; mean-only files load and fit without bars.
 
-The length sweep starts at 0.03 µs and stops at 4*pi_len, using the stored x180 waveform length as pi_len. A missing or null pi_len, including an arbitrary waveform with no stored numeric length, uses a 1 µs stop. An invalid stored pi_len leaves stop empty. Enter a finite positive numeric length. An existing x180 keeps its saved module selection and gain; if x180 is absent, qub_probe starts at gain=1. Starting values use stored calibration only.
+Analyze draws the fitted oscillation and marks π and π/2, the durations for half and quarter of a cycle. Marker shading and ± values are fit standard errors. The title gives Rabi frequency and its fit error. R² compares residuals with measured variation. Check that the fit follows a full oscillation and the markers sit inside the scan; otherwise extend the window or change the fixed gain.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+## Next step
 
-## Module slots
+Writeback offers `qubit.ext.rabi_freq`; with source settings it also offers `pi_len`/`pi2_len` pulse copies with fitted lengths, separate X180/X90 slot assignments and `qubit.ext.pi_product = source gain × fitted π length`. It does not edit `pi_amp`/`pi2_amp`.
 
-Readout uses the `$resonator.module.readout` slot captured at Open/Defaults; an unset slot, missing module or unbound alias uses a fresh 'readout' template. That fallback still needs its required parameter sources. Reset uses qubit.module.reset and stays disabled when absent. The drive uses the sources described above, with qubit.module.x180 when present and qub_probe when absent. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
-
-## Typical writeback
-
-Proposes qubit.ext.rabi_freq in MHz from the fit. With acquired run settings, copies the drive pulse into captured qubit.pulses.pi_len and pi2_len, replacing waveform.length with fitted pi and pi/2 lengths. Separately proposes qubit.module.x180/x90 pointing to those saved pulses, even when already bound to them, plus qubit.ext.pi_product = source gain * fitted pi length (a.u. * µs). Every item is independently selectable. For data with IQ only, rabi_freq is the sole proposal. Pulse updates use the acquired run settings, with fitted lengths stored in the pulse copies. The pi_amp/pi2_amp gain-calibration pulses remain unchanged.
-
-## Recommended
-
-Phase defaults to fixed 0/180 degrees; enable Fit phase offset when pulse shaping shifts the length oscillation. Analysis defaults to fitting a decay envelope on the oscillation; keep it on when the Rabi oscillation visibly damps over the sweep, turn it off for a pure undamped cosine fit. A length sweep spanning a few pi lengths (up to 4*pi_len when calibrated) captures a full oscillation; widen it if no full period is visible.
-
-## Four starting situations
-
-1. With an empty kickstart project, Open the Form and inspect its required blanks.
-   Set a fixed drive frequency and gain, plus readout timing. A prior pi calibration is not required for this sweep.
-   Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, choose Defaults to recapture those values.
-   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
-   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
-4. Through the agent, call `time_rabi` after inspecting the same Form errors.
-   points maps to length Expts; max_length_us sets the stop. frequency_mhz and gain override the fixed drive. decay and fit_phase change the existing analysis model.
-   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
-
-## Reading the plots
-
-The horizontal axis is pulse length (µs); both plots show mean IQ projected onto its principal axis (a.u.). This is not population. One bar is one shot SEM: the retained shots' sample standard deviation along that axis divided by the square root of their count. An older mean-only file loads and fits without bars. The fit is not weighted by the bars.
-
-Analyze draws the fitted oscillation on a dense grid and marks the π and π/2 lengths. Shading and the ± numbers on those markers are fit standard errors, not shot SEM. The title gives Rabi frequency and its fit error in MHz. R² compares model residuals with the measured variation. Check that the fitted curve follows a complete oscillation and the calibration markers lie within the scan; otherwise extend the upper length or refine the gain. The Analyze summary reports the configured Reps × Rounds.
+For `time_rabi`, null disables **Reset** or clears the named Readout, Rabi Pulse, Frequency, Gain, length Stop/Expts, Reps or Rounds. Unresolved required blanks after overrides fail readiness before Run. Null **Fit decay envelope** or **Fit phase offset** fails at Analyze.
