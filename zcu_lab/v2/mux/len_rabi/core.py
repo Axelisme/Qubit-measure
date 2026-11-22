@@ -656,7 +656,9 @@ class MuxLenRabiExp(Experiment[MuxRabiResult, MuxLenRabiCfg]):
             signal = signal[finite]
             cfg = source.cfg
             tone = f"Tone {index}" if cfg is None else cfg.tones[index].name
-            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(7, 5))
+            fig, ax = plots.subplots(
+                num=f"fit_{index}", figsize=(7, 5), layout="constrained"
+            )
             ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
             fig.suptitle(f"Mux length Rabi · {tone} · IQ contrast")
             real, sem = project_iq(
@@ -720,7 +722,6 @@ class MuxLenRabiExp(Experiment[MuxRabiResult, MuxLenRabiCfg]):
             else:
                 _plot_len_fit(ax, xs, params, outcome, decay=options.decay)
                 outcomes.append(outcome)
-            ax.legend()
-            fig.tight_layout()
+            fig.legend(loc="outside lower center", ncols=3)
         # 6. Preserve each tone's pi/pi2 lengths, frequency and quality, or its failure reason.
         return tuple(outcomes)

@@ -377,13 +377,15 @@ class MuxAmpRabiExp(Experiment[MuxRabiResult, MuxAmpRabiCfg]):
         # Keep live traces on each drive's own quantized gain axis.
         viewers = []
         for index in scan.indices:
-            fig, ax = context.plots.subplots(num=f"measurement_{index}")
+            fig, ax = context.plots.subplots(
+                num=f"measurement_{index}", layout="constrained"
+            )
             fig.suptitle(f"Mux amplitude Rabi · {cfg.tones[index].name} · IQ contrast")
             ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
             progress = ax.set_title(f"Acquired gain points: 0 / {cfg.expts}")
             viewer = live_errorbar(ax)
             ax.lines[0].set(marker="o", markersize=3, label="Measured IQ ± shot SEM")
-            ax.legend()
+            fig.legend(loc="outside lower center")
             viewers.append((viewer, progress))
             fig.show()
 
