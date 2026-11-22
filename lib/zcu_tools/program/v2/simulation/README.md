@@ -47,6 +47,9 @@ readiness, `on_begin` and observer work. The mixin wraps only
 `build_compiled_request` in `binding.compiling()`; its elapsed seconds accumulate
 in `compile_wall_s` even if construction raises. Installation and execution do
 not contribute to compile time. No entered compile scope gives `None`.
+
+<a id="raw-materialization-timing"></a>
+
 `materialize_wall_s` sums the seconds spent generating and detaching raw shots
 inside the acquire, including failed calls. It is `None` when no materialization
 was attempted. It excludes downstream shot processing. Both fields preserve

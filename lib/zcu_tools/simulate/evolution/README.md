@@ -1027,8 +1027,10 @@ Both independent timeline solvers,
 [lab-frame `reference_timeline`](../../../../tests/simulate/evolution/contract/reference.py)
 and [interaction-picture `interaction_density`](../../../../tests/simulate/evolution/contract/interaction_reference.py),
 build their dissipative terms from the secular bath's `rates_per_ns` and
-`dephasing_per_ns`. They integrate the drive without a rotating-wave
-approximation, but neither replays a full Lindblad superoperator (full L).
+`dephasing_per_ns`. On inputs both support, they integrate the same Lindblad
+equation with this secular bath and retain all Hamiltonian drive terms, without
+a rotating-wave approximation. Neither accepts non-secular collapse operators
+or a full Lindblad superoperator (full L) as input.
 Both reject batches with `segment_shifts`. The matrix does not certify shifted
 spans.
 For the FTF producer and guard query, see [Common-frame guard diagnostics](#common-frame-guard-diagnostics).

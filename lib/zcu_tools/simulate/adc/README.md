@@ -29,10 +29,17 @@ The scalar path propagator is exact; two-cavity paths retain the existing 2x2
 closed form. Constant, sampled and opaque drives share these model dimensions.
 
 `ReadoutModel.rates_per_ns` follows the model's state-label order, with
-`[target, source]` entries in 1/ns. Raw and trace sampling use these rates to
-draw continuous-time Markov chain (CTMC) jumps within each event with an
-incident field. These rates are separate from the between-event
-[projection transition probabilities](#projection-chain-sampling). FTF's
+`[target, source]` entries in 1/ns. In raw and trace sampling,
+`_build_event_plans` creates an observer for an ADC/content pair only when the
+event has both incident pulses and observation grids for that pair. A
+receiver-only window does not create an observer. For each content group in an
+event, sampling builds one shared `JumpPaths` to draw continuous-time Markov
+chain (CTMC) jumps from these rates if the group has at least one observer. A
+group with no observer skips this step. Between-event
+[projection transition probabilities](#projection-chain-sampling) are separate
+from these within-event jumps.
+
+FTF's
 [`readout_model`](../../simulators/ftf/physics/README.md#readout-and-floquet-paths)
 supplies the rates in retained DC energy-state order.
 

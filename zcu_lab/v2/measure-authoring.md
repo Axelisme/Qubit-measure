@@ -521,10 +521,12 @@ Core 回傳分析品質，圖依 [R3b](figure-style.md#r3b結果旁寫-fit-品�
 有既有判準時，由 adapter 決定 proposal 的初選與理由。Draft 複製這兩個欄位，
 [writeback preview](../../lib/zcu_tools/gui/app/measure/writeback/README.md#initial-selection-and-notes) 顯示結果，不重判品質。
 
-若只改 adapter 的寫回政策，在 scratch 用來源 `RunRecord`、分析結果與固定 context 組成 `WritebackRequest`，
-呼叫公開的 `adapter.get_writeback_items`，核對 proposal 的 `selected` 與 `note`，不執行 Apply。
-GUI 的 [`AnalyzeService`](../../lib/zcu_tools/gui/app/measure/services/analyze.py) 呼叫 `get_writeback_items` 後，
-才把 proposals 交給 `WritebackService.create_draft`。`analysis_stage` 只呼叫 core，不經這個接縫。
+若只改 adapter 的寫回政策，在 scratch 呼叫對應階段的公開 hook，核對 proposal 的 `selected` 與 `note`，不執行 Apply。
+
+- Analyze：用來源 `RunRecord`、Analyze 結果與固定 context 組成 `WritebackRequest`，呼叫 `adapter.get_writeback_items`。GUI 的 [`AnalyzeService`](../../lib/zcu_tools/gui/app/measure/services/analyze.py) 使用這個接縫。
+- PostAnalyze：用同一組輸入加上 PostAnalyze 結果組成 `PostWritebackRequest`，呼叫 `adapter.get_post_writeback_items`。GUI 的 [`PostAnalyzeService`](../../lib/zcu_tools/gui/app/measure/services/post_analyze.py) 使用這個接縫。
+
+兩個 service 都把 proposals 交給 `WritebackService.create_draft`。`analysis_stage` 只呼叫 core，不經 adapter，也不建立 draft。
 
 [Singleshot GE adapter](singleshot/ge/gui.py) 與 [mux GE adapter](mux/singleshot_ge/gui.py) 各以
 `ge_calibration_review_note` 判斷 Analyze 的初選與理由。它讀取 joint `FitQuality`，包括

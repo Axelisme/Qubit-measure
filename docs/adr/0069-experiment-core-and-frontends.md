@@ -255,7 +255,7 @@ FTF Notebook 範例在組裝時明確傳 `warmup=True`，worker 數保留兩顆 
 
 2026-11-18，使用者說：「这个 ADR 0069不预编译的裁决，我怎么没印象呢？我好像没有。…我预期 GUI 启动时会预编译啊。」對兩案「A：GUI 傳 `warmup=True`，CPU 準備與 GPU 預編譯都在背景做；B：只預編譯 GPU」答「A」。原先「GUI 不預編譯」由 2026-10-20 的 `4302e30d8` 改入，沒有使用者裁決紀錄。使用者希望「使用者体感到的执行模拟速度才不会不一致」。代價是新機器或 Numba／OpenCL 快取失效後，factory 一返回就 acquire，第一次就得等全部準備。Intel Arc、d=24、7 workers 的冷快取量測中，立即 acquire 花 76.9 s，不預編譯花 22.3 s，等準備完成再 acquire 花 3.3 s。量測條件見[討論紀錄](../discussions/2026-11-18-ftf-gpu-dop853-backend.md#留下的問題)。
 
-`zcu_tools.simulators.ftf` 擁有具體 FTF 模型。其 `config` 驗證模型 YAML，`environment` 負責接線、裝置與逐 round snapshot，`physics` 提供 joint model。`simulate` 只收數值並提供通用的 evolution、population conversion 與 ADC。分工見 [ADR-0072〈模組定位〉](0072-module-boundaries.md#模組定位)。初值只在 startup 套用，每 round 讀當下 device 值；讀取失敗不降級。正常 metadata 只保留 I/Q 與公開 provenance，不含模型真值。舊 TLS 執行機制不留相容層。依賴由 .importlinter C8、C9、C10、C12 約束；完整物理限制與 readout 起點凍結近似見 [模擬環境契約](draft/simulation-environments.md)。
+`zcu_tools.simulators.ftf` 擁有具體 FTF 模型。其 `config` 驗證模型 YAML，`environment` 負責接線、裝置與逐 round snapshot，`physics` 提供 joint model。`simulate` 只收數值並提供通用的 evolution、population conversion 與 ADC。分工見 [[0072]]〈模組定位〉。初值只在 startup 套用，每 round 讀當下 device 值；讀取失敗不降級。正常 metadata 只保留 I/Q 與公開 provenance，不含模型真值。舊 TLS 執行機制不留相容層。依賴由 .importlinter C8、C9、C10、C12 約束；完整物理限制與 readout 起點凍結近似見 [模擬環境契約](draft/simulation-environments.md)。
 
 可信 Python 不是硬體 sandbox。使用者自行隔離主機資源，不新增模擬專用裝置黑名單或自動斷線政策，也不預建 plugin registry 或空 backend。
 

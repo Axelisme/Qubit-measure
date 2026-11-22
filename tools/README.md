@@ -199,7 +199,7 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
 
 工具從 [acquire telemetry](../lib/zcu_tools/simulators/README.md#acquire-telemetry) 加總各階段秒數。`core_s` 是 `compile_s`、`evolve_s`、`readout_s` 和 `materialize_s` 四項之和。`materialize_s` 含 acquire 內產生 raw shots 的時間，也含依 `acquire_id` 配對的延後 materialize。`remainder_s` 從 acquire 牆鐘扣除該牆鐘內的四項工作。延後 materialize 在 acquire 之外，不再從 remainder 扣除。`ShotReducer` 等 host 處理不計入核心。
 
-何時在 acquire 內計時、何時由 getter 回報耗時，見 [Program simulation 的計時說明](../lib/zcu_tools/program/v2/simulation/README.md#explicit-acquisition-environments)。Raw shots 的取樣契約見 [ADC〈Integrated raw shots〉](../lib/zcu_tools/simulate/adc/README.md#integrated-raw-shots)，實作可搜尋 `ADCRawShots`。
+何時在 acquire 內計時、何時由 getter 回報耗時，見 [Program simulation 的計時說明](../lib/zcu_tools/program/v2/simulation/README.md#raw-materialization-timing)。Raw shots 的取樣契約見 [ADC〈Integrated raw shots〉](../lib/zcu_tools/simulate/adc/README.md#integrated-raw-shots)，實作可搜尋 `ADCRawShots`。
 
 Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆鐘和四個分項、每筆補充紀錄都有主紀錄配對時，才填 `core_s`。缺 materialize 的舊 telemetry 或未走到階段的 `null` 都不補 0。配不到主紀錄的補充紀錄不計秒數或 acquire 次數，並使分項不完整。成功但分項不全的 `missing_breakdown` 列保留 Run 秒數，四個分項與 remainder 寫 `null`。分項不全或逾時時，`core_s` 寫 `null`，`core_s_lower_bound` 只加總分項齊全的主紀錄與配對到它們的補充紀錄。沒有分項齊全的主紀錄時，下限也寫 `null`。
 

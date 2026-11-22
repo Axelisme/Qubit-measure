@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-22，實驗呈現指南
+**Last updated:** 2026-11-23，實驗呈現指南與 GE 診斷
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -74,7 +74,8 @@ AC Stark spectroscopy 的 [core.py](twotone/ac_stark/core.py) 對應 `twotone/ac
 [ramsey_core.py](twotone/ac_stark/ramsey_core.py) 對應 `twotone/ac_stark_ramsey`。
 註冊位置與 Ramsey guide 見 [Lab 組裝與註冊](../README.md#lab-組裝與註冊)。
 Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot` 擁有。
-兩個 core 都呼叫 `singleshot_ge_analysis`，由 `fitting_ge_and_plot` 繪製 [GE 模型 histogram](../../lib/zcu_tools/experiment/README.md#ge-模型診斷)。
+兩個 core 都以 `plots=None` 呼叫 `singleshot_ge_analysis` 做擬合，不畫共用 helper 的模型 histogram。
+可選的診斷圖見 [experiment 的 GE 模型診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷)。
 各實驗的 `core.py` 自行選擇分析資料並繪製分類圖，數值擬合工具由 `zcu_tools.analysis.fitting` 擁有。
 跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
 mux IQ 平均轉換在 [support/mux.py](support/mux.py)，

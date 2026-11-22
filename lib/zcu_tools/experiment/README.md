@@ -284,7 +284,7 @@ GUI 的 Library、Inspect 與 module writeback 共用 `gui.form` 與 `gui.form_a
 
 ### GE 模型診斷
 
-Singleshot GE 與 mux GE 的 core 都呼叫 [`singleshot_ge_analysis`](utils/single_shot/ge/__init__.py)。
+Singleshot GE 與 mux GE 的 core 都以 `plots=None` 呼叫 [`singleshot_ge_analysis`](utils/single_shot/ge/__init__.py)，各自處理分類與呈現。
 各旋轉方式都委派給 [`fitting_ge_and_plot`](utils/single_shot/ge/base.py)。它回傳擬合品質，並在 caller 傳入 `Plots` 時繪製 GE 模型 histogram。
 
 品質欄位的定義見 [fitting helpers 的 `FitQuality`](../analysis/fitting/README.md#fitting-helpers)。

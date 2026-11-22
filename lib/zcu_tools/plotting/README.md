@@ -80,8 +80,8 @@ Release 還原帶框架 manager 的 Agg canvas，並解除 manager 對舊 Plots 
 框架與 lab 的分工見 [ADR-0072〈即時圖工具與機制〉](../../../docs/adr/0072-module-boundaries.md#即時圖工具與機制)。
 Qt 呈現的責任見 [ADR-0067〈繪圖與限制〉](../../../docs/adr/0067-gui-application.md#繪圖與限制)。
 Singleshot 的專屬分類圖留在 lab。
-[Amp Rabi](../../../zcu_lab/v2/singleshot/amp_rabi/core.py) 與 [Len Rabi](../../../zcu_lab/v2/singleshot/len_rabi/core.py) 在各自的 core 畫 joint-fit 診斷圖。
-[GE 模型 histogram](../experiment/README.md#ge-模型診斷) 由 experiment 的 `fitting_ge_and_plot` 繪製，不屬於 Rabi joint-fit 診斷圖移入 lab 的範圍。
+找 joint-fit 診斷圖，從 [Amp Rabi core](../../../zcu_lab/v2/singleshot/amp_rabi/core.py) 或 [Len Rabi core](../../../zcu_lab/v2/singleshot/len_rabi/core.py) 進入。
+找 GE 模型 histogram，見 [experiment 的 GE 模型診斷](../experiment/README.md#ge-模型診斷)。
 獨立 liveplot plotter／backend、reference marker 與動畫錄影已退休。
 
 [fluxdep](fluxdep/README.md) 保留 Notebook 與 GUI 共用的搜尋、頻譜與選點診斷圖。
