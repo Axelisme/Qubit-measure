@@ -27,6 +27,11 @@ from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signa
 
 from zcu_lab.v2.support import live_heatmap
 
+_TITLE = "Dual-tone reset gains · qubit · IQ contrast"
+_XLABEL = "Tone 1 gain (a.u.)"
+_YLABEL = "Tone 2 gain (a.u.)"
+_COLOR_LABEL = "|Mean IQ − low-gain corner IQ| (a.u.)"
+
 
 @dataclass(frozen=True)
 class PowerResult:
@@ -54,17 +59,57 @@ class PowerAnalysis:
 
 
 class PowerCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain1: Annotated[SweepCfg, FieldMeta(label="Gain1", unit="a.u.")]
-    gain2: Annotated[SweepCfg, FieldMeta(label="Gain2", unit="a.u.")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select a preparation reset before each shot, or leave blank to skip it.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Preparation pulse",
+            description="Select the pulse after preparation reset, such as calibrated Xπ, or leave blank to skip it.",
+        ),
+    ] = None
+    tested_reset: Annotated[
+        TwoPulseReset.Cfg,
+        FieldMeta(
+            label="Tested reset",
+            description="Fill in the two simultaneous reset pulses at calibrated RF frequencies and fixed durations.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Fill in the calibrated resonator readout for the end of each shot.",
+        ),
+    ]
+    gain1: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Tone 1 gain",
+            unit="a.u.",
+            description="Enter the signed drive gain range for pulse 1 (a.u.).",
+        ),
+    ]
+    gain2: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Tone 2 gain",
+            unit="a.u.",
+            description="Enter the signed drive gain range for pulse 2 (a.u.).",
+        ),
+    ]
 
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per sweep point and sequence branch in each acquisition round (count).",
         ),
     ]
     rounds: Annotated[
@@ -72,7 +117,7 @@ class PowerCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of acquisition rounds to average (count).",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -81,7 +126,7 @@ class PowerCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the delay after each shot to let the qubit relax (µs).",
         ),
     ]
 
@@ -130,8 +175,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # 2. Display contrast relative to the minimum-gain corner in either scan direction.
         plots = context.plots
         fig, ax = plots.subplots(num="measurement")
-        ax.set(xlabel="Gain1 (a.u.)", ylabel="Gain2 (a.u.)")
+        ax.set(xlabel=_XLABEL, ylabel=_YLABEL, title=_TITLE)
         viewer = live_heatmap(ax)
+        fig.colorbar(ax.images[0], ax=ax, label=_COLOR_LABEL)
+        ax.grid(False)
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
@@ -140,7 +187,11 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             ref_i = 0 if gains1[0] < gains1[-1] else -1
             ref_j = 0 if gains2[0] < gains2[-1] else -1
             contrast = np.abs(data - data[ref_i, ref_j])
-            return viewer.set(gains1, gains2, contrast)
+            acquired = int(np.count_nonzero(np.isfinite(data)))
+            title = ax.set_title(
+                f"{_TITLE}\nAcquired cells: {acquired}/{data.size} count"
+            )
+            return (*viewer.set(gains1, gains2, contrast), title)
 
         fig.show()
         signals_buffer = SignalBuffer((len(gains1), len(gains2)), on_update=update)
@@ -206,27 +257,31 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         else:
             gain1_opt = gains1[np.argmin(np.min(amp2D, axis=1))]
             gain2_opt = gains2[np.argmin(np.min(amp2D, axis=0))]
-            amp2D = np.mean(amp2D) - amp2D
 
         # 3. Inspect the selected gain pair on the smoothed reset-contrast map.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        ax.imshow(
-            amp2D.T,
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            extent=(gains1[0], gains1[-1], gains2[0], gains2[-1]),
+        viewer = live_heatmap(ax)
+        (image,) = viewer.set(gains1, gains2, np.abs(signals - signals[ref_i, ref_j]))
+        left, right, bottom, top = image.get_extent()
+        ax.set(xlim=(left, right), ylim=(bottom, top))
+        fig.colorbar(image, ax=ax, label=_COLOR_LABEL)
+        ax.grid(False)
+        ax.scatter(
+            gain1_opt,
+            gain2_opt,
+            color="white",
+            edgecolors="black",
+            s=64,
+            marker="*",
+            label=f"Selected gain pair = ({gain1_opt:.4g}, {gain2_opt:.4g}) a.u.",
         )
-        peak_label = f"({gain1_opt:.1f}, {gain2_opt:.1f}) a.u."
-        ax.scatter(gain1_opt, gain2_opt, color="r", s=40, marker="*", label=peak_label)
-        if options.xname is not None:
-            ax.set_xlabel(f"{options.xname} gain (a.u.)", fontsize=14)
-        if options.yname is not None:
-            ax.set_ylabel(f"{options.yname} gain (a.u.)", fontsize=14)
-        ax.legend(fontsize="x-large")
-        ax.tick_params(axis="both", which="major", labelsize=12)
-
+        ax.set(
+            xlabel=_XLABEL if options.xname is None else f"{options.xname} · {_XLABEL}",
+            ylabel=_YLABEL if options.yname is None else f"{options.yname} · {_YLABEL}",
+            title=_TITLE,
+        )
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16))
         fig.tight_layout()
 
         return PowerAnalysis(gain1=float(gain1_opt), gain2=float(gain2_opt))

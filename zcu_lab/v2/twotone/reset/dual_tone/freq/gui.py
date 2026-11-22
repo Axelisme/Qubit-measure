@@ -34,9 +34,11 @@ DualToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 @dataclass
 class DualToneFreqAnalyzeParams:
     smooth_method: Annotated[
-        Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
+        Literal["wavelet", "gaussian"], ParamMeta(label="Peak selection filter")
     ] = "wavelet"
-    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
+    smooth: Annotated[
+        float, ParamMeta(label="Filter strength (sample steps or a.u.)", decimals=2)
+    ] = 1.0
 
 
 def _DualToneFreq_analyze(
@@ -83,6 +85,13 @@ def _run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]
     return RunRecord(cfg=cfg, result=FreqExp().run(cfg, context=context))
 
 
+def _summary_lines(source: RunRecord[FreqCfg, FreqResult]) -> tuple[str, ...]:
+    """Report the saved configuration's requested repetitions and rounds."""
+    if source.cfg is None:
+        return ()
+    return (f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=FreqExp.AXES_SPEC,
     make_form=_DualToneFreq_make_form,
@@ -92,5 +101,6 @@ DEFINITION = Adapter(
         fn=_DualToneFreq_analyze,
         options=lambda source, env: DualToneFreqAnalyzeParams(),
         writeback=_DualToneFreq_get_writeback_items,
+        summary_lines=_summary_lines,
     ),
 )

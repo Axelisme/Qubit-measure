@@ -484,6 +484,32 @@ def test_file_chooser_enters_existing_path_through_real_modal_events(
     assert driver.dialogs() == ()
 
 
+def test_scroll_viewport_is_observable_only_when_its_area_is_on_screen(
+    surface, qapp
+) -> None:
+    outer = QScrollArea()
+    outer.setObjectName("outer_scroll")
+    content = QWidget()
+    content.setFixedSize(500, 1200)
+    inner = QScrollArea(content)
+    inner.setObjectName("inner_scroll")
+    inner.setGeometry(10, 960, 220, 180)
+    image = QLabel("Figure")
+    image.setFixedSize(200, 400)
+    inner.setWidget(image)
+    outer.setWidget(content)
+    surface.setCentralWidget(outer)
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+
+    clipped = driver.scroll_area(object_name="inner_scroll")
+    assert clipped.viewport_size is None and not clipped.vertical_scrollable
+    for _ in range(3):
+        driver.press_key(Qt.Key.Key_PageDown, object_name="outer_scroll")
+    visible = driver.scroll_area(object_name="inner_scroll")
+    assert visible.viewport_size is not None and visible.vertical_scrollable
+
+
 def test_viewport_clipped_widgets_cannot_be_observed_or_operated(surface, qapp) -> None:
     scroll = QScrollArea()
     content = QWidget()

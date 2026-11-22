@@ -97,10 +97,21 @@ def _run(cfg: PhaseCfg, *, context: RunContext) -> RunRecord[PhaseCfg, PhaseResu
     return RunRecord(cfg=cfg, result=PhaseExp().run(cfg, context=context))
 
 
+def _summary_lines(source: RunRecord[PhaseCfg, PhaseResult]) -> tuple[str, ...]:
+    """Report the saved configuration's requested repetitions and rounds."""
+    if source.cfg is None:
+        return ()
+    return (f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=PhaseExp.AXES_SPEC,
     make_form=_BathPhase_make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_BathPhase_analyze, writeback=_BathPhase_get_writeback_items),
+    analysis=Analysis(
+        fn=_BathPhase_analyze,
+        writeback=_BathPhase_get_writeback_items,
+        summary_lines=_summary_lines,
+    ),
 )
