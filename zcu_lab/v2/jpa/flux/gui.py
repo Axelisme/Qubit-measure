@@ -10,7 +10,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TypeAlias
 
-from matplotlib.figure import Figure
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -29,32 +28,10 @@ from zcu_lab.v2.jpa.flux.form import make_form
 JpaFluxRunResult: TypeAlias = RunRecord[FluxCfg, FluxResult]
 
 
-def _relabel_flux_figure(fig: Figure, best_flux: float) -> None:
-    """Neutral JPA flux device value wording on the GUI review figure.
-
-    The core analysis figure still labels its flux axis and the optimum legend
-    with 'a.u.'; the GUI review figure must use the neutral 'JPA flux device
-    value' vocabulary (A6) without claiming a physical-unit migration. The
-    relabel happens at the adapter analysis boundary, in place, so the review
-    figure wording is adapter-owned while the core figure stays untouched.
-    """
-    for ax in fig.axes:
-        ax.set_xlabel("JPA flux device value")
-        for line in ax.get_lines():
-            label = line.get_label()
-            if isinstance(label, str) and label.startswith("best JPA flux"):
-                line.set_label(f"best JPA flux device value = {best_flux:#.3g}")
-        legend = ax.get_legend()
-        if legend is not None:
-            ax.legend()
-
-
 def _analyze(
     req: AnalyzeRequest[JpaFluxRunResult, None], *, plots: Plots
 ) -> FluxAnalysis:
-    answer = FluxExp().analyze(req.run_result, None, plots=plots)
-    _relabel_flux_figure(plots["fit"], answer.best_flux)
-    return answer
+    return FluxExp().analyze(req.run_result, None, plots=plots)
 
 
 def _get_writeback_items(
@@ -69,6 +46,11 @@ def _get_writeback_items(
     ]
 
 
+def _summary_lines(source: JpaFluxRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 def run(cfg: FluxCfg, *, context: RunContext) -> RunRecord[FluxCfg, FluxResult]:
     """Acquire with cfg and retain it as the analysis and save source."""
     return RunRecord(cfg=cfg, result=FluxExp().run(cfg, context=context))
@@ -79,5 +61,7 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
+    analysis=Analysis(
+        fn=_analyze, writeback=_get_writeback_items, summary_lines=_summary_lines
+    ),
 )

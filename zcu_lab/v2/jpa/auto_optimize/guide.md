@@ -1,25 +1,25 @@
-## Behavior
+**Readers:** operator, agent. Search a bounded range of JPA settings for a measured candidate with high qubit readout separation.
 
-**Readers:** operator, agent. Run joint JPA optimization from the GUI or MCP and interpret the results. A pi pulse switches the qubit preparation between g and e. The optimizer searches the JPA flux device value, pump frequency and pump power jointly to maximize the g/e signal difference. Each evaluated point commands the selected RF and flux devices on real hardware. The devices remain at the last evaluated point. WARNING: review the selected devices and search bounds before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
+# JPA joint search
 
-## Parameter sources
+Each candidate sets JPA DC bias, absolute pump RF frequency and pump source power together. It compares optional reset → no pulse → resonator readout (g) with optional reset → qubit π pulse → resonator readout (e). The search uses the score from one candidate to choose later settings. It leaves the devices at the last evaluated candidate, which may not be the best one.
 
-Uses the qubit (`qubit/*`), resonator and jpa (`amplifier/jpa`) aliases. Search bounds use `$jpa.flux`, `$jpa.pump_freq` and `$jpa.pump_power`. Opening the tab or choosing Defaults reads the required JPA flux device from `$jpa.flux_dev` and the RF default from `$jpa.rf_source`. Both direct names remain editable. A missing flux or RF source leaves its field empty and marks the form Invalid. Select the connected RF device in the form. `flux_unit` starts as A, and the device receives the entered values unchanged. Missing required aliases or calibration marks the form Invalid.
+## Set up the search
 
-Relax delay starts at 1*T1 using the parameters captured when you open the tab or choose Defaults. T1 must be a finite positive real number; Boolean values count as invalid. Missing/null T1 or an unavailable parameter snapshot gives a 30 µs initial delay. An invalid stored T1 leaves the required wait field empty, and parameter-source failures report an error. Edit the delay in the form as needed; the stored T1 stays unchanged.
+Choose the qubit, resonator and JPA aliases at the selected point, then choose **Defaults**.
 
-The JPA flux axis and saved values use device-native `a.u.` without scaling. This label does not assert a physical current or voltage unit; review the selected device and `flux_unit` separately.
+- Select **JPA flux-bias source** and **JPA pump RF source**. Their initial values come from `$jpa.flux_dev` and `$jpa.rf_source`. Confirm output and safe bounds before Run. **JPA bias unit** starts at A; match it to the DC source. No conversion is performed.
+- Set bounds for **JPA flux-bias value**, **JPA pump RF frequency**, and **JPA pump source power**. The initial ranges are `$jpa.flux` ± 0.005 in the bias unit, 0.98 to 1.02 times `$jpa.pump_freq` in MHz, and `$jpa.pump_power` ± 5 dBm. The three **Expts** values start at 101. Their ratios guide initial sample allocation; they are not a Cartesian scan or the total number measured.
+- **Candidate budget** is the total number of evaluations, at least 4, initially 1001. **Optimizer seed** accepts a nonnegative integer. Equal seeds and measured score histories give equal choices; leave the seed empty for a new search.
 
-## Module slots
+Choose **Reps** for the shots per preparation and setting in each round, then **Rounds** for the number of such rounds. Defaults are 1000 × 10. The Analyze summary shows the Reps × Rounds from its source run. **Relaxation wait** starts at the qubit T1, or 30 µs if T1 is missing, and lets the system relax between shots. An invalid stored T1 leaves the wait blank; enter a calibrated delay.
 
-Module slots use `$qubit.module.x180`, `$resonator.module.readout` and optional `$qubit.module.reset`. Empty pi/readout slots use the pi_pulse/readout templates. The pi pulse uses `$qubit.freq` and `$qubit.wiring.ch`; readout uses resonator frequency/wiring and `$resonator.time_of_fly` + 0.015 µs. An empty reset slot disables reset. Missing calibration required by these templates marks the form Invalid.
+Select **Qubit π pulse** from the qubit's X180 calibration and **Readout** from the resonator's readout calibration. Without a saved slot, Defaults uses the qubit RF frequency and drive channel for the π pulse, and the resonator frequency and readout channels for the resonator pulse. The readout trigger starts at the resonator flight time plus 0.015 µs. **Reset** is an optional pulse module before preparation. Leave it empty to rely on relaxation between shots.
 
-## Typical writeback
+## Choose a measured candidate
 
-Analysis proposes the signal-maximizing settings as three separate drafts: `$jpa.flux` in `$jpa.flux_unit` coordinates, `$jpa.pump_freq` in MHz and `$jpa.pump_power` in dBm. You can accept, cancel or retarget each draft independently. Accept a draft to update its stored parameter. Writeback changes stored parameters only; device settings and the current-source value stay unchanged.
+The separation SNR is the distance between the g and e IQ means divided by their pooled width along the line joining the means. **IQ shape penalty** defaults to zero. Increasing it downweights unequal widths or skew along that axis. The resulting g/e separation score (a.u.) is neither a state population nor an assignment fidelity.
 
-## Recommended
+The four panels show the same candidates by evaluation order, bias, pump RF frequency and source power. Color shows the search stage number, not a pulse phase or score. The order panel shows whether better candidates appear late. The three setting panels show coverage and whether the best point lies at a bound; they are projections of a joint search, not independent sweeps. Live reports sampled candidates and retained shots. Analyze adds a red star for the same best joint candidate in each panel and labels all three settings and the score. There is no fit or shot-SEM bar; the score is not a per-shot average.
 
-For each sweep, start/stop set the search bounds and expts gives a relative resolution hint. The optimizer compares all three hints to allocate its phase-1 flux slices and points per slice; the actual sample counts follow that allocation. Global optimizer points (`num_points`, at least 4, default 1001) sets the total evaluation budget. Raise it for wider bounds or lower it for a quick search. Optimizer seed fixes the Latin hypercube sampler and the Bayesian optimizer: with the same seed and the same measured SNRs, a run proposes the same points; leave it empty to draw a new search each run. Analysis reports the best evaluated point using fixed settings.
-
-**Last updated:** 2026-11-01
+Recheck the complete selected tuple together, rather than mixing settings from different points. If the best repeatable setting is interior, narrow the bounds around it and repeat. Do not infer a global optimum from a boundary candidate or a run without stable separation. Subtract each previous setting from the selected one to obtain the adjustments in bias units, MHz and dB. Writeback offers `$jpa.flux`, `$jpa.pump_freq` and `$jpa.pump_power` separately; accepting them only updates the stored calibration.
