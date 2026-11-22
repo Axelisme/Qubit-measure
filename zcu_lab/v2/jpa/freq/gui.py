@@ -46,11 +46,6 @@ def _get_writeback_items(
     ]
 
 
-def _summary_lines(source: JpaFreqRunResult) -> tuple[str, ...]:
-    cfg = source.cfg
-    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
-
-
 def run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]:
     """Acquire with cfg and retain it as the analysis and save source."""
     return RunRecord(cfg=cfg, result=FreqExp().run(cfg, context=context))
@@ -61,7 +56,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(
-        fn=_analyze, writeback=_get_writeback_items, summary_lines=_summary_lines
-    ),
+    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
 )

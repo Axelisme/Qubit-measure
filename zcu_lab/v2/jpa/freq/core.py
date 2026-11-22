@@ -45,49 +45,23 @@ class FreqAnalysis:
 
 
 class FreqCfg(ConfigBase):
-    reset: Annotated[
-        Reset.Cfg | None,
-        FieldMeta(
-            label="Reset",
-            description="Select a qubit reset before readout; leave empty to skip it.",
-        ),
-    ] = None
-    pi_pulse: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="Qubit π pulse",
-            description="Select the calibrated g→e pulse for the excited preparation only.",
-        ),
-    ]
-    readout: Annotated[
-        Readout.Cfg,
-        FieldMeta(
-            label="Readout",
-            description="Select the calibrated resonator pulse and IQ integration for both preparations.",
-        ),
-    ]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     jpa_rf_dev: Annotated[
         DeviceName | None,
         FieldMeta(
-            label="JPA pump RF source",
-            description="Select the RF source that drives the JPA pump; leave empty to scan coordinates without tuning it.",
+            label="JPA RF device",
+            description="Connected RF device name; None skips RF control.",
         ),
     ] = ""
-    jpa_freq: Annotated[
-        SweepCfg,
-        FieldMeta(
-            label="JPA pump RF frequency",
-            unit="MHz",
-            description="Enter Start and Stop in absolute pump RF MHz and Expts as the number of frequency samples (count).",
-        ),
-    ]
+    jpa_freq: Annotated[SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz")]
     skew_penalty: Annotated[
         float,
         FieldMeta(
-            label="IQ shape penalty",
-            unit="a.u.",
+            label="Skew penalty",
             decimals=3,
-            description="Enter a nonnegative weight for unequal IQ widths and skew; 0 uses separation SNR alone.",
+            description="Nonnegative SNR skew penalty.",
         ),
     ] = Field(default=0.0, ge=0.0)
     seed: Annotated[
@@ -95,17 +69,15 @@ class FreqCfg(ConfigBase):
         FieldMeta(
             label="Scan-order seed",
             description=(
-                "Enter a nonnegative integer to repeat the shuffled interior order; "
-                "leave blank for a new order."
+                "Fixes the shuffled order of interior frequencies; empty draws a new "
+                "order each run."
             ),
         ),
     ] = None
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps",
-            unit="count",
-            description="Enter the shots per preparation at each setting in one round.",
+            label="Reps", unit="count", description="Number of repetitions per round."
         ),
     ]
     rounds: Annotated[
@@ -113,16 +85,16 @@ class FreqCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Enter the number of acquisition rounds per setting.",
+            description="Number of software acquisition rounds.",
         ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relaxation wait",
+            label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Enter the wait after readout for relaxation before the next shot (µs).",
+            description="Relaxation delay after each repetition.",
         ),
     ]
 
@@ -158,16 +130,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # Show independent points because neighboring samples need not be nearby.
         fig, ax = context.plots.subplots(num="measurement")
-        title = "JPA sweep · pump frequency · g/e separation score"
-        ax.set(
-            title=title,
-            xlabel="JPA pump RF frequency (MHz)",
-            ylabel="g/e separation score (a.u.)",
-        )
-        ax.ticklabel_format(axis="x", style="plain", useOffset=False)
+        ax.set(xlabel="JPA Frequency (MHz)", ylabel="g/e SNR (a.u.)")
         line = live_line(ax)
-        ax.lines[0].set(linestyle="None", marker="o", markersize=4, color="C0")
-        retained_shots = np.zeros(len(jpa_freqs), dtype=np.int64)
+        ax.lines[0].set_linestyle("None")
+        ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> Iterable[Artist]:
@@ -176,11 +142,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             Read the scan-shaped data without changing it. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            progress = ax.set_title(
-                f"{title}\n{np.count_nonzero(np.isfinite(data))}/{len(jpa_freqs)} settings sampled"
-                f" · {retained_shots.sum():,} retained shots"
-            )
-            return (*line.set(jpa_freqs, np.abs(data)), progress)
+            return line.set(jpa_freqs, np.abs(data))
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -191,9 +153,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # 2. Tune the external pump once per host-side scan point.
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            for index, (jpa_freq, step) in enumerate(
-                sched.scan("Pump RF frequency", jpa_freqs.tolist())
-            ):
+            for jpa_freq, step in sched.scan("JPA Frequency", jpa_freqs.tolist()):
                 if cfg.jpa_rf_dev is not None:
                     set_rf_frequency(context.devices[cfg.jpa_rf_dev], jpa_freq * 1e6)
 
@@ -216,19 +176,16 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 builder.delay_by_timeline()
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
-
-                def score(
-                    sums: NDArray[np.float64], *, point: int = index
-                ) -> NDArray[np.float64]:
-                    """Track cumulative retained shots from both preparations and return SNR."""
-                    retained_shots[point] = int(sums[..., 0].sum())
-                    return snr_as_signal(sums, skew_penalty=cfg.skew_penalty)
-
                 step.run_acquire_summed(
                     prog,
                     soc,
                     reducer=shot_sums(prog, [IQ("readout", order=3)]),
-                    options=RunOptions(converter=score),
+                    options=RunOptions(
+                        converter=lambda sums: snr_as_signal(
+                            sums,
+                            skew_penalty=cfg.skew_penalty,
+                        ),
+                    ),
                     rounds=cfg.rounds,
                 )
 
@@ -258,22 +215,19 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         best_jpa_freq = jpa_freqs[max_idx]
 
         # 2. Mark the best frequency without connecting randomized pump settings.
-        _, ax = plots.subplots(num="fit", figsize=config.figsize)
-        ax.set(
-            title="JPA sweep · pump frequency · g/e separation score",
-            xlabel="JPA pump RF frequency (MHz)",
-            ylabel="g/e separation score (a.u.)",
-        )
-        ax.ticklabel_format(axis="x", style="plain", useOffset=False)
-        ax.plot(
-            jpa_freqs, real_signals, "o", color="C0", markersize=4, label="Measured"
-        )
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+        ax.scatter(jpa_freqs, real_signals, label="Measured g/e SNR", s=2)
         ax.axvline(
             best_jpa_freq,
-            color="C3",
-            linestyle="--",
-            label=f"Peak pump RF frequency = {best_jpa_freq:.3f} MHz",
+            color="r",
+            ls="--",
+            label=f"best JPA frequency = {best_jpa_freq:.2f} MHz",
         )
-        ax.margins(y=0.25)
-        ax.legend(loc="upper center")
+        ax.set_xlabel("JPA Frequency (MHz)")
+        ax.ticklabel_format(axis="x", useOffset=False)
+        ax.set_ylabel("g/e SNR (a.u.)")
+        ax.legend()
+        ax.grid(True)
+        fig.tight_layout()
+
         return FreqAnalysis(best_freq=float(best_jpa_freq))
