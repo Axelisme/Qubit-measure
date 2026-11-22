@@ -530,7 +530,7 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
                     qubfreq_signal2real(signal, model_type=options.model_type)
                     if signal.size
                     else signal.real,
-                    "o",
+                    "o-",
                     ms=3,
                     label="Measured IQ",
                 )

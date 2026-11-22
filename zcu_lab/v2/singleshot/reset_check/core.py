@@ -329,7 +329,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
                     result.gains[order],
                     populations[order, branch, outcome],
                     yerr=sem[order, branch, outcome],
-                    fmt="o",
+                    fmt="o-",
                     markersize=3,
                     capsize=2,
                     label=f"P({state})",

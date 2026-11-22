@@ -162,7 +162,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         )
         ax.ticklabel_format(axis="x", style="plain", useOffset=False)
         line = live_line(ax)
-        ax.lines[0].set(linestyle="None", marker="o", markersize=4, color="C0")
+        ax.lines[0].set(marker="o", markersize=4, color="C0")
         retained_shots = np.zeros(len(jpa_fluxs), dtype=np.int64)
 
         @context.plots.on_plot_thread
@@ -273,12 +273,12 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         ax.plot(
             jpa_fluxs,
             np.abs(result.signals),
-            "o",
+            "o-",
             color="C0",
             markersize=4,
             label="Measured",
         )
-        ax.plot(jpa_fluxs, snrs, "-", color="C1", label="Gaussian smooth (1 point)")
+        ax.plot(jpa_fluxs, snrs, "--", color="C1", label="Gaussian smooth (1 point)")
         ax.axvline(
             best_jpa_flux,
             color="C3",

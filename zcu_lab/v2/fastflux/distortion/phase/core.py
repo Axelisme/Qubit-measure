@@ -271,7 +271,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         fig, ax = plots.subplots(num="phase_response", layout="constrained")
         fig.suptitle("Fast-flux transient · Qubit · Phase response")
         ax.set(xlabel="π/2 pair midpoint (µs)", ylabel="Local phase (deg)")
-        ax.plot(lengths, init_phases, "k.", label="Phase from IQ fringe")
+        ax.plot(lengths, init_phases, "k.-", label="Phase from IQ fringe")
         ax.plot(
             ideal_lengths, ideal_curve, color="green", label="Rectangular reference"
         )
