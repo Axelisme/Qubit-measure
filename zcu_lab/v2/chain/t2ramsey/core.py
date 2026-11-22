@@ -127,6 +127,12 @@ def _plot_first_read(
     fig.legend(loc="outside lower center", ncols=2)
 
 
+def _estimate_with_se(value: float, error: float, unit: str) -> str:
+    if not np.isfinite(error):
+        return f"{value:.4g} {unit} (SE unavailable)"
+    return f"{value:.4g} ± {error:.2g} {unit}"
+
+
 class ChainT2RamseyCfg(ConfigBase):
     pi2_pulse: Annotated[
         Pulse.Cfg,
@@ -354,7 +360,7 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
             nrows=2,
             sharex=True,
             figsize=(8, 6.5),
-            gridspec_kw={"height_ratios": (2, 1)},
+            gridspec_kw={"height_ratios": (2, 1), "hspace": 0.18},
             layout="constrained",
         )
         projection_ax, residual_ax = fig.axes
@@ -365,9 +371,9 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
             )
         fig.suptitle(
             "K-cycle T2 Ramsey · Qubit · Joint fit\n"
-            f"T2* = {t2:.4g} ± {t2_err:.2g} µs · R = {reliability_text}\n"
-            f"Fringe frequency = {detuning:.4g} ± {detuning_err:.2g} MHz\n"
-            f"Third-state decay time = {tf:.4g} ± {tf_err:.2g} µs"
+            f"T2* = {_estimate_with_se(t2, t2_err, 'µs')} · R = {reliability_text}\n"
+            f"Fringe frequency = {_estimate_with_se(detuning, detuning_err, 'MHz')}\n"
+            f"Third-state decay time = {_estimate_with_se(tf, tf_err, 'µs')}"
         )
         projection_ax.set_title(joint_residuals_text(fit), fontsize=10)
         residual_ax.set_xlabel(_SWEEP_LABEL)
