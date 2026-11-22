@@ -208,6 +208,9 @@ def _plot_resonance_maps(
         ax.plot(dense, model, color=color, label="Shared fit")
         ax.axvline(center, color=color, linestyle=":")
         ax.axvline(res_freq, color="0.25", linestyle="--", label="Resonator estimate")
+        # Drop the live image's placeholder bounds from the fitted map.
+        ax.relim()
+        ax.autoscale_view()
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncols=3)
     fig.axes[1].set_xlabel("Resonator drive RF frequency (MHz)")
 

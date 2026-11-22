@@ -388,6 +388,9 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             label="Measured ridge centers",
         )
         ax.plot(np.sqrt(x2_fit), y_fit, color="C1", label="Polynomial in gain²")
+        # Drop the live image's placeholder bounds from the fitted map.
+        ax.relim()
+        ax.autoscale_view()
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
 
         return AcStarkAnalysis(ac_coeff)
