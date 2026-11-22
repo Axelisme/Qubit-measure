@@ -52,7 +52,10 @@ def _writeback(
     return [
         ParameterWriteback(
             target_name="$qubit.ext.t1_with_tone",
-            description="T1 with probe tone (µs)",
+            description=(
+                "Shorter model decay time under the probe tone (µs). "
+                "Stop starts at 5 × this value."
+            ),
             proposed_value=result.t1,
         ),
     ]

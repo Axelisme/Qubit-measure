@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-22，校正 IQ 矩的取數契約與分析用途
+**Last updated:** 2026-11-23，arb 寫回提案的 Spec 轉換
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -301,5 +301,7 @@ Lowering 的 `SR` 加 `AND value_mask` 清除符號擴展，算術或邏輯 shif
 
 `ArbWaveformCfg` 保存邏輯 data key 與必填本機絕對 path，length 是該 NPZ 的 `time[-1]`，不另存播放長度。
 `ModuleCfgFactory.from_core` 透過明示 `context.assets.path_for` 轉換 nested arb，成品不持有 provider。
+從 native cfg 建立 library 提案時，`ModuleCfgFactory.to_spec` 保留 arb 的 data key，不帶本機播放 path。
+它不讀 NPZ，不修改來源 cfg，Run 存檔仍保留 path。
 Program 與 sim 從 path 讀 bytes，交 `core.waveform_format` 解碼 samples，不查 global DB 或解讀 formula。
 `ArbWaveform.make_iqdata` 在完整 reference time axis 插值到硬體 timing，不伸縮或裁切。覆寫同 path 會改變之後播放內容。

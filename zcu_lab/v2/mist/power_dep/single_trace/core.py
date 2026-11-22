@@ -13,12 +13,17 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.run_acquire import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.support import live_line
+
+_TITLE = "MIST · Resonator probe · IQ displacement"
+_GAIN_LABEL = "Probe gain (a.u.)"
+_IQ_LABEL = "Mean IQ displacement (a.u.)"
 
 
 @dataclass(frozen=True)
@@ -36,25 +41,60 @@ class PowerDepAnalyzeOptions:
     ac_coeff: float | None = None
 
 
+def _reference_iq(signals: NDArray[np.complex128]) -> complex:
+    points = max(len(signals) // 20, 1)
+    return complex(signals[:points].mean())
+
+
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Return the real-valued measurement view of complex IQ without changing the input."""
-    avg_len = max(int(0.05 * len(signals)), 1)
-
-    mist_signals = signals - np.mean(signals[:avg_len])
-
-    return np.abs(mist_signals)
+    """Return mean IQ distances from the complex mean of the first 5% of scan points (at least one)."""
+    # ADR-0069: distance preserves probe-induced shifts orthogonal to a fixed IQ axis.
+    return np.abs(signals - _reference_iq(signals))
 
 
 class PowerDepCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    init_pulse: Pulse.Cfg | None = None
-    probe_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    gain: Annotated[SweepCfg, FieldMeta(label="gain", unit="a.u.")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select a reset before preparation, or leave off to skip it.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Preparation pulse",
+            description="Select a qubit pulse played before the resonator probe, or leave off to skip preparation.",
+        ),
+    ] = None
+    probe_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Resonator probe",
+            description="Enter the resonator drive played before readout; Probe gain sweep sets its gain.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated readout that measures complex IQ after the probe.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Probe gain sweep",
+            unit="a.u.",
+            description="Enter the start and stop gains (a.u.) and the number of scan points.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the number of shots per gain point per round.",
         ),
     ]
     rounds: Annotated[
@@ -62,16 +102,16 @@ class PowerDepCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter how many times to acquire the full gain sweep and average its IQ.",
         ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Relaxation wait",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the wait (µs) after each shot's readout before the next shot.",
         ),
     ]
 
@@ -114,25 +154,34 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         )
 
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse gain (a.u.)", ylabel="Signal difference (a.u.)")
+        fig.suptitle(_TITLE)
+        ax.set(xlabel=_GAIN_LABEL, ylabel=_IQ_LABEL)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(False)
+        progress = ax.set_title(f"Averaging round 0 / {cfg.rounds}")
         viewer = live_line(ax)
+        signals_buffer = SignalBuffer((len(gains),))
+        rounds_done = 0
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
-            """Draw acquired complex IQ on the measurement axes; return changed artists.
+        def update(completed: int) -> Iterable[Artist]:
+            """Draw the cumulative mean IQ displacement and completed-round progress."""
+            progress.set_text(
+                f"Averaging round {completed} / {cfg.rounds} · "
+                f"{completed * cfg.reps:,} nominal shots/point"
+            )
+            return (
+                *viewer.set(gains, mist_signal2real(signals_buffer.array)),
+                progress,
+            )
 
-            Read the scan-shaped data without changing it. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            return viewer.set(gains, mist_signal2real(data))
+        def show_round() -> bool:
+            """Observe a completed round without asking acquisition to stop."""
+            nonlocal rounds_done
+            rounds_done += 1
+            update(rounds_done)
+            return False
 
         fig.show()
-        signals_buffer = SignalBuffer(
-            (len(gains),),
-            on_update=update,
-        )
 
         # 2. Bind the board gain sweep without changing the other probe settings.
         with Schedule(signals_buffer, scope=context.scope) as sched:
@@ -151,6 +200,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
                 prog,
                 soc,
                 rounds=cfg.rounds,
+                options=RunOptions(stop_condition=show_round),
             )
 
         # 4. Preserve complex IQ so analysis can choose its own reference.
@@ -165,36 +215,32 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
     ) -> None:
         """Plot the IQ displacement from ``options.g0`` using ``source`` data.
 
-        If g0 is None, use the first measured IQ, not the live view's mean
-        over the first 5% of gains. ``ac_coeff`` maps gain squared to photon
-        number when supplied; ``e0`` only sets the vertical display range.
+        If g0 is None, use the complex mean of the first 5% of scan points
+        (at least one), just as Live does. ``ac_coeff`` maps gain squared to
+        photon number when supplied; ``e0`` only sets the vertical display range.
         Return no fit or calibrated population estimate.
         """
-        # 1. Measure IQ displacement from g0, defaulting to the first gain sample.
+        # 1. Measure IQ displacement from the explicit or default scan reference.
         result = source.result
         g0, e0, ac_coeff = options.g0, options.e0, options.ac_coeff
-
         gains, signals = result.gains, result.signals
-
-        if g0 is None:
-            g0 = signals[0]
-
-        amp_diff = np.abs(signals - g0)
+        reference = _reference_iq(signals) if g0 is None else g0
+        displacement = np.abs(signals - reference)
 
         # 2. Use photon number only when a gain-squared calibration is supplied.
         if ac_coeff is None:
             xs = gains
-            xlabel = "probe gain (a.u.)"
+            xlabel = _GAIN_LABEL
         else:
             xs = ac_coeff * gains**2
-            xlabel = r"$\bar n$"
+            xlabel = "Mean photon number"
 
-        # 3. Show MIST contrast with optional e0-based vertical scaling.
-        _, ax = plots.subplots(num="fit", figsize=config.figsize)
-        ax.plot(xs, amp_diff.T, marker=".")
-        ax.set_xlabel(xlabel, fontsize=14)
-        ax.set_ylabel("Signal difference (a.u.)", fontsize=14)
-        ax.grid(True)
-        ax.tick_params(axis="both", which="major", labelsize=12)
+        # 3. Connect the measured points; the norm of a mean difference is
+        # not a shot average, so do not put shot-SEM bars on this observable.
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+        fig.suptitle(_TITLE)
+        ax.set(xlabel=xlabel, ylabel=_IQ_LABEL)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.plot(xs, displacement, ".-")
         if e0 is not None:
-            ax.set_ylim(0, 1.1 * np.abs(g0 - e0))
+            ax.set_ylim(0, 1.1 * np.abs(reference - e0))
