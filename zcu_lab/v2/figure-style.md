@@ -26,6 +26,10 @@
 
 優先取同一次 run 的 liveplot、Analyze 圖與摘要。記錄來源、run、擷取階段與條件供歸類時核對，別用這份擷取紀錄替產品補答案。若表單是 point 初值、liveplot 是低 reps probe、Analyze 圖又來自另一個保存 run，點數與訊號不同可能只是包組錯了。先核對來源；必要時重做同源讀者包再判 A 或 F。若產品沒有足夠的身分或設定讓操作員區分來源，仍記為 A。
 
+若家族驗收指定同一次 FTF Run，liveplot 的進度與末格、Analyze 圖與摘要都取自該次 Run。
+[離線 stage probe](../../tests/README.md#實驗定義) 可以獨立驗各階段，通過不等於完成 R0 讀者包。
+要確認 GUI 如何建立 Analyze options 和發布摘要，見 [共用 lifecycle hooks](gui-contracts.md#共用-lifecycle-hooks)。
+
 ### 派讀者並收答卷
 
 請一位懂實驗物理、沒看過該實作的 agent 只看讀者包。它不能讀程式碼（包含分析源碼）、包外文件或 raw data，也不能向作者確認答案。請它用自己的話交下列五節，無法確定時寫「不知道」並指出缺少什麼；不要把猜測寫成答案。
@@ -109,11 +113,12 @@ y 軸與色階預設依資料範圍自動縮放。跨圖比較才用固定尺度
 
 ### R7：用 GUI 與存檔的實際尺寸檢查版面
 
-在 GUI 各頁面以實際顯示尺寸看圖，也按存檔 PNG 的實際尺寸檢查。面板不是固定格子，Save 頁面較窄。字級跟著顯示尺寸縮放，最小字級 10 pt。tick 標籤不能重疊，legend 不能蓋資料。一張圖最多 6 個 panel。
+在 GUI 各繪圖頁以實際顯示尺寸看圖。字級跟著顯示尺寸縮放，最小字級 10 pt。tick 標籤不能重疊，legend 不能蓋資料。一張圖最多 6 個 panel。
 
-Data／Save 頁的縮圖只用來選圖。按 `View figure` 打開閱讀面，再依 R7 檢查；放不下整張圖時捲動查看，不縮小字級。
+Data 頁的縮圖只用來選圖。按 `View figure` 在 Data 頁打開閱讀面，不會存檔。按閱讀面的實際尺寸檢查。放不下整張圖時捲動查看，不縮小字級。
+Run Save 只保存資料。要驗收存檔版面，另開 Analysis Save 寫出的 PNG，按 PNG 的實際尺寸檢查。
 
-- 壞例：放大 Run 頁才讀得清楚，切到較窄的 Data 頁，打開 `View figure` 後仍讀不清 tick 標籤；存檔後 colorbar 又擠到標題。
+- 壞例：放大 Run 頁才讀得清楚。在 Data 頁打開 `View figure` 後仍讀不清 tick 標籤，存檔 PNG 的 colorbar 又擠到標題。
 - 好例：Ding 圖 5-7（頁 150）的四分支分成 2×2 panel。採用這種分組後，仍要在 GUI 和匯出的 PNG 核對字級、tick、legend 與資料位置。
 
 ### R8：圖型對應資料，liveplot 標明進度
@@ -128,6 +133,7 @@ Data／Save 頁的縮圖只用來選圖。按 `View figure` 打開閱讀面，�
 ### R9：liveplot 與 Analyze 盡量一致
 
 能共用就沿用相同的量、座標軸、軸標、單位、圖型與顏色。相同的量測點用同樣的 marker，同一張熱圖用同樣的 colormap。Analyze 第一張圖以 liveplot 最後一格為底，疊上 fit 與結果標註。其他 Analyze 圖依 R1 說明各自支援的判斷。
+GUI 依 adapter 的 [capability](gui-contracts.md#capability-宣告與實作) 決定是否建立 Analyze 控制項。
 
 - 壞例：同次 Ramsey 的 liveplot y 軸寫 `Real Signal`，Analyze 先開殘差圖，再另以 `Signal (a.u.)` 畫原訊號。
 - 好例（本地示例）：liveplot 與第一張 Analyze 圖都以自由演化時間 (µs) 為 x 軸、IQ 實部 (a.u.) 為 y 軸，量測點樣式相同。Analyze 疊上擬合與 T2*，另用診斷圖判斷殘差是否有系統偏差。

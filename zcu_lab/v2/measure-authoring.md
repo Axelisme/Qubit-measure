@@ -84,6 +84,9 @@ Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Run �
 宣告 choices 的文字或數值 leaf 沿用既有初值求值能力，以可接受的 direct 值保存，不開放 authored Expr input。Literal、Enum、bool 與 InputPolicy 禁用 expression 的 leaf 不新增初值求值能力。使用者輸入的 expression 仍保留原文交一般驗證。
 必要來源缺少時留 Invalid，不由 framework 補數字。實驗可在 `make_form` 明確選擇已定案的首次初值，見下節。Reset 重新捕捉並可換形狀，Run 使用畫面上的值。
 
+Form lowering 將表單結果轉成 adapter 的具名輸入，失敗時回報欄位或模型錯誤。
+Qt 呈現框架的 [Tab admission 決定](../../lib/zcu_tools/gui/app/measure/README.md#tab-admission)，另處理編輯器中尚未提交的解析錯誤。
+
 組合根以 `Registry(templates=TEMPLATES)` 注入預設持久範本，Library 新建選單也讀這份 catalog。chain_length 與 rpi_length 的 Form factory 由 `register_all` 綁定 `registry.templates`，讓長度差初值與 Form 展開使用同一份範本。
 範本儲存 Spec defaults 與 seeds，不維護另一份角色 shape／blank／ref 表。
 Library、writeback 與 Inspect 也使用 gui.form／FormEditor，透過 gui.form_adapter
