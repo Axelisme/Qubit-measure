@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-22, Markov chain, telemetry, and acquire-local raw plans
+**Last updated:** 2026-11-22, unentered acquire timings
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -147,9 +147,9 @@ Stop results. An escaping error is false.
 cavity-memory spans and projective node continuations across software rounds.
 `readout_wall_s` sums cavity field propagation, population conversion, conditional
 ADC preparation and integrated or decimated sampling. These scopes do not overlap
-evolution. A failing call contributes time through its exception; a stage never
-entered contributes `0.0`. Reusing a preparation adds no evolution wall, but still
-counts fresh round sampling. Preparation and pacing remain in total wall's
+evolution. A failing call contributes time through its exception. The writer
+follows the shared contract above for stages never entered. Reusing a
+preparation adds no evolution wall, but still counts fresh round sampling. Preparation and pacing remain in total wall's
 remainder. If a later getter materializes retained raw and returns successfully,
 the writer appends a [supplemental timing record](../../README.md#acquire-telemetry).
 The supplement carries the original `acquire_id` and materialization time, not

@@ -47,6 +47,7 @@ def test_wall_groups_include_only_measured_rows_without_losing_family_work(
             compile_wall_s=1,
             evolve_wall_s=2,
             readout_wall_s=1,
+            materialize_wall_s=None,
         ),
         dict(
             complete=False,

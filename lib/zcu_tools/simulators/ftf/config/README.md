@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-11-22, projective transition floor
+**Last updated:** 2026-11-22, telemetry provenance
 
 `numerics.debug_capture` is optional and defaults to false. True records one
 acquire's Engine inputs and routes using the
@@ -75,7 +75,7 @@ env = ftf(settings.with_telemetry(enabled=False), soccfg=soccfg)
 
 使用完畢後，caller 呼叫 `env.devices.close_all_devices()`。相同 acquisition 情境沿用這份 `soccfg`，不從模型接線重建板子。
 
-`numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False), soccfg=soccfg)` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../environment/README.md#routing-telemetry)。
+`numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False), soccfg=soccfg)` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。在擷取啟動時傳入 `commit` 與 `dirty` 可將版本與工作樹狀態寫到每列；省略則寫 `null`。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../environment/README.md#routing-telemetry)。
 
 錯誤包含欄位路徑。未知欄位、重複 source 名稱或 generator 綁定、非 A/V 的電源單位、無效 limits／dimensions，以及非 positive-semidefinite 的 ADC noise PSD 都在建立資源前拒絕。Loader 要求 v2 文件，對 v1 明確報錯並保留本機工作副本與既有 entry。
 

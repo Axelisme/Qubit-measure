@@ -106,7 +106,11 @@ def test_finish_projects_original_binding_outcome(
         assert record["wall_s"] == 7.0
         assert record["compile_wall_s"] == 2.0
         assert record["complete"] is complete
-        assert record["evolve_wall_s"] == record["readout_wall_s"] == 0.0
+        assert (
+            record["evolve_wall_s"]
+            == record["readout_wall_s"]
+            == (0.0 if complete else None)
+        )
     finally:
         source.close()
         devices.close_all_devices()
@@ -335,7 +339,8 @@ def test_numeric_failure_still_writes_incomplete_record(
     assert record["complete"] is False
     assert record["rounds"] == 1
     assert record["evolve_wall_s"] == (4.0 if seam == "continuation" else 2.0)
-    assert record["readout_wall_s"] == (8.0 if seam == "adc" else 0.0)
+    assert record["readout_wall_s"] == (8.0 if seam == "adc" else None)
+    assert record["materialize_wall_s"] is None
     assert record["families"].get("fixture", {}).get("rows", 0) == (
         0 if seam == "evolve" else 1
     )

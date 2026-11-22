@@ -62,9 +62,9 @@ class AcquireOutcome:
         wall_s: Monotonic seconds after sequence admission through body and
             mixin cleanup, before the observer, including pacing.
         compile_wall_s: Sum of compiling scope seconds, including failed builds;
-            zero when no compiling scope ran.
+            None when no compiling scope was entered.
         materialize_wall_s: Sum of in-acquire raw-shot materialization seconds,
-            including failed calls; zero when no raw shots were materialized.
+            including failed calls; None when no materialization was attempted.
         complete: True when the body and cleanup returned without an escaping
             BaseException, including a normally returned partial Stop result.
             This does not mean all requested rounds completed.
@@ -73,10 +73,10 @@ class AcquireOutcome:
 
     rounds: tuple[RoundRequest, ...]
     wall_s: float
-    compile_wall_s: float
+    compile_wall_s: float | None
     complete: bool
     acquire_id: str
-    materialize_wall_s: float = 0.0
+    materialize_wall_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -203,8 +203,8 @@ class SimulationBinding:
         self._active_sequence: int | None = None
         self._observer_warned = False
         self._acquire_started = 0.0
-        self._compile_wall_s = 0.0
-        self._materialize_wall_s = 0.0
+        self._compile_wall_s: float | None = None
+        self._materialize_wall_s: float | None = None
         policy = SimulationTiming() if timing is None else timing
         self._time_scale = policy.time_scale
         self._clock = policy.clock
@@ -249,8 +249,8 @@ class SimulationBinding:
             sequence = self._sequence
             self._sequence += 1
             self.rounds = ()
-            self._compile_wall_s = 0.0
-            self._materialize_wall_s = 0.0
+            self._compile_wall_s = None
+            self._materialize_wall_s = None
             if self._on_end is not None:
                 self._acquire_started = time.monotonic()
             self._active_sequence = sequence
@@ -280,7 +280,9 @@ class SimulationBinding:
         try:
             yield
         finally:
-            self._compile_wall_s += time.monotonic() - started
+            self._compile_wall_s = (self._compile_wall_s or 0.0) + (
+                time.monotonic() - started
+            )
 
     def materialize_raw(
         self,
@@ -313,7 +315,7 @@ class SimulationBinding:
         finally:
             elapsed = time.monotonic() - started
             if active:
-                self._materialize_wall_s += elapsed
+                self._materialize_wall_s = (self._materialize_wall_s or 0.0) + elapsed
         if not active and observer is not None:
             notify = partial(
                 self._notify,
