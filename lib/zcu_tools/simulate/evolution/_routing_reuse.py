@@ -39,7 +39,9 @@ class RoutingSnapshot:
     direct: frozenset[int]
 
     @classmethod
-    def build(cls, table: SegmentTable, context: KernelContext) -> "RoutingSnapshot":
+    def build(
+        cls, table: SegmentTable, context: KernelContext, caller_source: ModelSource
+    ) -> "RoutingSnapshot":
         source, plan, budget = context.source, context.work_plan, context.budget
         inventory, single = single_gate_costs(table, source, plan, budget)
         multiple = populate_multitone_inventory(table, source, plan, budget)
@@ -52,7 +54,7 @@ class RoutingSnapshot:
         selected = tuple(sorted({key for choice in choices for key in choice.keys}))
         direct = populate_multitone_plan(table, source, plan, budget)
         return cls(
-            ref(source),
+            ref(caller_source),
             source.history.generation,
             budget,
             plan.content_key,
@@ -107,11 +109,16 @@ class RoutingReuse:
         self.resident_bytes = 0
 
     def snapshot(
-        self, key: bytes | None, table: SegmentTable, context: KernelContext
+        self,
+        key: bytes | None,
+        table: SegmentTable,
+        context: KernelContext,
+        caller_source: ModelSource,
     ) -> RoutingSnapshot | None:
         if key is None or not self.limit:
             return None
-        return RoutingSnapshot.build(table, context)
+        # The numerical source can be a temporary view; reuse is caller-owned.
+        return RoutingSnapshot.build(table, context, caller_source)
 
     def add(self, key: bytes | None, snapshot: RoutingSnapshot | None) -> None:
         if key is None or snapshot is None:

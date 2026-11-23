@@ -11,6 +11,12 @@ from zcu_tools.simulate.evolution.kernel import GuardResult, KernelContext
 from ._engine import RecordingKernel, TimelineKernel, batch, run, source, track
 
 
+def _multitone_tracks(n: int, *, duration: float = 3.0):
+    """Provide three distinct carriers so dispatch keeps the multitone route."""
+    pulse = track(n, EnvelopeSpec("constant"), duration=duration)
+    return tuple(replace(pulse, frequency_ghz=np.full(n, f)) for f in (0.1, 0.13, 0.16))
+
+
 @pytest.mark.parametrize(
     ("repeated", "name"),
     [(False, "t4"), (False, "dop853"), (True, "t4"), (True, "flux_dop853")],
@@ -58,9 +64,7 @@ def test_timeline_local_payloads_are_released_before_the_next_timeline(repeated,
             ),
         )
     if name != "t4":
-        b = replace(
-            b, tracks=tuple(track(n, EnvelopeSpec("constant")) for _ in range(3))
-        )
+        b = replace(b, tracks=_multitone_tracks(n))
     kernel = LifetimeKernel()
     src = source()
     result = run(Engine(1, kernels=(kernel,), chunks_per_worker=1), src, (b,))
@@ -102,12 +106,7 @@ def test_local_singletons_keep_shared_apply_waves_and_release_each_payload():
                 return payload
 
         idle, driven = Idle(), RecordingKernel("dop853")
-        b = replace(
-            batch(8),
-            tracks=tuple(
-                track(8, EnvelopeSpec("constant"), duration=1) for _ in range(3)
-            ),
-        )
+        b = replace(batch(8), tracks=_multitone_tracks(8, duration=1))
         result = run(
             Engine(workers, kernels=(idle, driven), chunks_per_worker=1),
             source(),

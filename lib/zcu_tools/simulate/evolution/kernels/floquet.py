@@ -47,6 +47,7 @@ from scipy.integrate import solve_ivp
 from scipy.linalg import eig, schur
 from scipy.optimize import linear_sum_assignment
 
+from .._carrier_fold import FoldedDrive
 from ..kernel import (
     ApplyContext,
     GuardPreparation,
@@ -81,7 +82,7 @@ class _Entry:
     omitted: NDArray[np.float64]
     strengths: NDArray[np.float64]
     bath_omitted: float
-    convergence: float
+    convergence: NDArray[np.float64]
     frame_error: float
     lam: NDArray[np.complex128]
     modes: NDArray[np.complex128]
@@ -103,6 +104,7 @@ class _Entry:
                 self.y,
                 self.omitted,
                 self.strengths,
+                self.convergence,
                 self.lam,
                 self.modes,
                 self.inverse,
@@ -274,8 +276,8 @@ def _fourier_averages(samples: NDArray[np.complex128]):
     return fourier, coarse_zero
 
 
-def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
-    """Transform each sample once and return full harmonics and convergence."""
+def _averages(model: SecularModel, rotations: NDArray[np.complex128], stark_port: int):
+    """Return harmonics and the zero-mode convergence bound for each probe port."""
     count, size, _ = rotations.shape
     loss = model.rates_per_ns.sum(axis=0)
     gamma = coherence_decay(model)
@@ -309,12 +311,16 @@ def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
     del baths
     x, coarse_x = _fourier_averages(xs)
     y, coarse_y = _fourier_averages(ys)
-    convergence = float(
-        max(
-            np.linalg.norm(bath[0] - coarse_bath, 2),
-            np.max(abs(x[0] - coarse_x)),
-            np.max(abs(y[0] - coarse_y)),
-        )
+    errors = np.maximum(
+        np.max(abs(x[0] - coarse_x), axis=(1, 2)),
+        np.max(abs(y[0] - coarse_y), axis=(1, 2)),
+    )
+    # Keep the original bound for physical ports. A virtual port from another
+    # row must not affect this frame unless used as the Stark or probe drive.
+    common = np.array([not isinstance(drive, FoldedDrive) for drive in model.drives])
+    common[stark_port] = True
+    convergence = np.maximum(
+        errors, max(np.linalg.norm(bath[0] - coarse_bath, 2), np.max(errors[common]))
     )
     return bath, x, y, convergence
 
@@ -345,7 +351,7 @@ def _build(
     )
     if not (residual <= 1e-9 and overlap >= 0.5):
         return None
-    bath, x, y, convergence = _averages(model, rotations)
+    bath, x, y, convergence = _averages(model, rotations, port)
     l0 = _comm(np.diag(energies).astype(complex)) + bath[0]
     decomposition = eig(l0)
     lam = np.asarray(decomposition[0], dtype=np.complex128)
@@ -393,6 +399,7 @@ def _build(
         y_zero,
         omitted,
         strengths,
+        convergence,
         lam,
         modes,
         inverse,
@@ -461,7 +468,11 @@ def _admission(
     sideband = (
         (~legacy)
         & entry.valid
-        & (entry.convergence * parameters[:, 0] + entry.frame_error <= budget / 40)
+        & (
+            entry.convergence[parameters[:, 6].astype(np.int64)] * parameters[:, 0]
+            + entry.frame_error
+            <= budget / 40
+        )
         # This existing sideband refusal does not apply to legacy accepts.
         & ~(np.ptp(entry.lam.real) * parameters[:, 0] > 14)
     )

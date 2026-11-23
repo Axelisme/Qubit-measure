@@ -816,7 +816,7 @@ class Engine:
                     PathDiagnostics(),
                 )
             frontend_started = time.thread_time() if telemetry else 0.0
-            geometry = plan(source, batches, cancel=cancel)
+            geometry, planned = plan(source, batches, cancel=cancel)
             if cancel.is_set():
                 raise Cancelled()
             content_key = input_key(source, batches, budget, geometry.table)
@@ -835,13 +835,13 @@ class Engine:
             ) as work_plan:
                 work_plan.routing.enabled = telemetry
                 populate_work_plan(
-                    geometry.table, source, work_plan, budget, cancel=cancel
+                    geometry.table, planned, work_plan, budget, cancel=cancel
                 )
                 frontend_cpu_s = (
                     time.thread_time() - frontend_started if telemetry else 0.0
                 )
                 context = KernelContext(
-                    source,
+                    planned,
                     budget,
                     work_plan,
                     self._families,
@@ -850,7 +850,7 @@ class Engine:
                     probe_memo=probe_memo,
                 )
                 reuse_snapshot = self._routing_reuse.snapshot(
-                    reuse_key, geometry.table, context
+                    reuse_key, geometry.table, context, source
                 )
                 kernels = self._kernels
                 context = with_opencl(context, self._opencl)
@@ -939,7 +939,7 @@ class Engine:
             self._check_evolve_ready(budget, cancel)
             if not batches or not any(len(batch.points) for batch in batches):
                 return DispatchInspection(())
-            geometry = plan(source, batches, cancel=cancel)
+            geometry, planned = plan(source, batches, cancel=cancel)
             if cancel.is_set():
                 raise Cancelled()
             trace: dict[int, dict[str, DispatchCandidate]] = {}
@@ -951,7 +951,7 @@ class Engine:
                 )
             ) as work_plan:
                 populate_work_plan(
-                    geometry.table, source, work_plan, budget, cancel=cancel
+                    geometry.table, planned, work_plan, budget, cancel=cancel
                 )
                 # ADR-0078: expose observations, not a second dispatch entry point.
                 workers = (
@@ -961,7 +961,7 @@ class Engine:
                 )
                 context = with_opencl(
                     KernelContext(
-                        source, budget, work_plan, self._families, workers=workers
+                        planned, budget, work_plan, self._families, workers=workers
                     ),
                     self._opencl,
                 )

@@ -211,7 +211,10 @@ def populate_multitone_inventory(
         for row, key in zip(rows, physics, strict=True):
             model = table.model(source, row)
             identity = sha256(
-                b"multitone-cold" + model.identity.encode() + key.tobytes()
+                b"multitone-cold"
+                + model.identity.encode()
+                + key.tobytes()
+                + table.folded_channel_key(int(row))
             ).digest()
             keys.append(identity)
             inventory[identity] = inventory.get(identity, 0) + 1

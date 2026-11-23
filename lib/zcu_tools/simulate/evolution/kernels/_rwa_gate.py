@@ -109,8 +109,13 @@ def canonical_key(table: SegmentTable, row: int, context: KernelContext) -> byte
     for a in (model.energies_ghz, model.rates_per_ns, model.dephasing_per_ns):
         digest.update(a.tobytes())
     digest.update(np.array([count, table.duration_ns[row]], dtype="<f8").tobytes())
+    ports = table.tone_port[row, :count].astype("<f8")
+    for group in table.carrier_groups.get(row, ()):
+        if group.folded_identity:
+            # The stable recipe below replaces the acquire-local virtual index.
+            ports[group.slots[0]] = -1
+    digest.update(ports.tobytes())
     for a in (
-        table.tone_port,
         table.tone_frequency_ghz,
         table.tone_amplitude,
         table.tone_envelope_offset_ns,
@@ -118,6 +123,7 @@ def canonical_key(table: SegmentTable, row: int, context: KernelContext) -> byte
         digest.update(a[row, :count].astype("<f8").tobytes())
     for env in table.tone_envelope[row, :count]:
         digest.update(table.envelopes[env].identity.encode())
+    digest.update(table.folded_channel_key(row))
     return digest.digest()
 
 
