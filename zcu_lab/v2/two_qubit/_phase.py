@@ -1,12 +1,16 @@
 """Logical phase from independently acquired X90/Y90 projection shots."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit, fit_phase_slopes
 
-from ._sums import qubit_marginal_probabilities
+from ._sums import qubit_marginal_probabilities, qubit_sigma
 
 
 @dataclass(frozen=True)
@@ -20,6 +24,144 @@ class QuadraturePhase:
     contrast: float
     logical_phase_deg: float | None
     reason: str | None = None
+
+
+@dataclass(frozen=True)
+class CountQuadratures:
+    """Aligned classified projection reductions on the leading axes of the counts.
+
+    Values are dimensionless sigma; variances are count-derived sigma variances.
+    Acquired is each projection's retained shot count. Empty counts give NaN
+    values/variances. Incomplete projections in a fit group have NaN acquired.
+    """
+
+    values: NDArray[np.float64]
+    variances: NDArray[np.float64]
+    acquired: NDArray[np.float64]
+
+    def for_fit(self, complete: NDArray[np.bool_]) -> CountQuadratures:
+        """Mask X/Y and acquired shots with the matching completion array.
+
+        Variances and original inputs stay intact.
+        """
+        return CountQuadratures(
+            np.where(complete, self.values, np.nan),
+            self.variances,
+            np.where(complete, self.acquired, np.nan),
+        )
+
+
+@dataclass(frozen=True)
+class PhaseCrossings:
+    """All interpolated π modulo 2π frequencies in MHz and an identifiability reason.
+
+    A unique finite crossing has reason=None. No/multiple crossings, incomplete
+    phase or a degenerate π plateau retain a reason; no preferred root is chosen.
+    No uncertainty is inferred from interpolation without an uncertainty model.
+    """
+
+    frequencies_mhz: tuple[float, ...]
+    reason: str | None
+
+
+def count_quadratures(
+    counts: NDArray[np.float64], target: Literal["qubit1", "qubit2"]
+) -> CountQuadratures:
+    """Reduce terminal (...,3,3) g/e/other counts for the selected qubit.
+
+    Return sigma, count variance and retained shots on the preceding axes.
+    Counts are unchanged; an invalid target raises ValueError.
+    """
+    return CountQuadratures(
+        qubit_sigma(counts, target),
+        qubit_sigma_variance(counts, target),
+        counts.sum(axis=(-2, -1)),
+    )
+
+
+def fit_count_phase_slopes(
+    n: NDArray[np.int64], *groups: CountQuadratures
+) -> PhaseSlopeFit:
+    """Fit one shared per-gate slope per spectator/frequency from masked groups.
+
+    Supply the int64 CZ counts and at least one group in observation order.
+    Each group's float64 values, variances and acquired shots must share the
+    shape (2, 2, len(n), Nf): spectator (g/e) × X/Y × n × frequency.
+    NaN acquired shots mark incomplete projections. Preserve fit SE and failure reasons.
+    """
+    return fit_phase_slopes(
+        n,
+        np.stack([group.values for group in groups]),
+        np.stack([group.variances for group in groups]),
+        np.stack([group.acquired for group in groups]),
+    )
+
+
+def complete_projections(
+    shots: NDArray[np.float64], expected_shots: int
+) -> NDArray[np.bool_]:
+    """Mark projections whose total across all classes matches the planned shots."""
+    return np.isclose(shots, expected_shots, rtol=8 * np.finfo(float).eps, atol=0)
+
+
+def update_complete_frequency_phases(
+    sums: NDArray[np.float64],
+    expected_shots: int,
+    processed: NDArray[np.bool_],
+    phase_deg: NDArray[np.float64],
+    fit: Callable[[NDArray[np.float64]], PhaseSlopeFit],
+) -> NDArray[np.bool_]:
+    """Fit newly complete frequencies and return the per-projection completion mask.
+
+    Cumulative sums axes are n × spectator × X/Y × frequency × count classes.
+    Fit receives newly complete frequencies in spectator × X/Y × n × frequency
+    × count classes order. A frequency is complete when all its projections
+    have the expected shots. Update the caller's phase_deg and processed arrays
+    in place, once per frequency. No plot operation runs here.
+    """
+    nominal_shots = sums.sum(axis=tuple(range(4, sums.ndim)))
+    complete = complete_projections(nominal_shots, expected_shots)
+    added = complete.all(axis=(0, 1, 2)) & ~processed
+    if added.any():
+        phase_deg[added] = conditional_phase_deg(
+            fit(np.moveaxis(sums[:, :, :, added], 0, 2))
+        )
+        processed[added] = True
+    return complete
+
+
+def conditional_phase_deg(fit: PhaseSlopeFit) -> NDArray[np.float64]:
+    """Return e minus g slope in degrees per CZ, in [-180,180) for crossing."""
+    return (fit.slopes_deg[1] - fit.slopes_deg[0] + 180) % 360 - 180
+
+
+def phase_near(
+    phase_deg: NDArray[np.float64], reference_deg: float | NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Choose the 360° representative in [reference-180, reference+180).
+
+    Reference is a scalar or aligned angle array, all in degrees. NaN inputs
+    stay NaN. This representation does not fit, smooth or fill measured data.
+    """
+    return reference_deg + (phase_deg - reference_deg + 180) % 360 - 180
+
+
+def reference_frequency_index(
+    frequencies: NDArray[np.float64],
+    phase_deg: NDArray[np.float64],
+    crossings: PhaseCrossings,
+) -> int:
+    """Index the sample nearest the selected root or the fitted phase nearest π.
+
+    Supply a nonempty MHz sweep and its aligned conditional phase in degrees.
+    Use the middle sample when no fitted phase is available.
+    """
+    if crossings.reason is None:
+        return int(np.argmin(np.abs(frequencies - crossings.frequencies_mhz[0])))
+    phase = phase_near(phase_deg, 180)
+    if np.isfinite(phase).any():
+        return int(np.nanargmin(np.abs(phase - 180)))
+    return len(frequencies) // 2
 
 
 def wrap_phase(degrees: float) -> float:
@@ -76,6 +218,21 @@ def phase_display_sem(
 ) -> NDArray[np.float64]:
     """Mask display bars unless both projections retain at least two shots."""
     return np.sqrt(np.where((x_shots >= 2) & (y_shots >= 2), variance, np.nan))
+
+
+def quadrature_phase_sem(group: CountQuadratures) -> NDArray[np.float64]:
+    """Return pointwise shot SEM of phase in degrees for batched X/Y reductions.
+
+    Group axes are series × X/Y × scan axes. The result omits the X/Y axis.
+    Missing phase or fewer than two retained shots in either projection yield NaN.
+    """
+    variances = phase_variance(
+        group.values[:, 0],
+        group.values[:, 1],
+        group.variances[:, 0],
+        group.variances[:, 1],
+    )
+    return phase_display_sem(variances, group.acquired[:, 0], group.acquired[:, 1])
 
 
 def phase_variance(
