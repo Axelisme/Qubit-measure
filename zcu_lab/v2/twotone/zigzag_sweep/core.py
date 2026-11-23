@@ -152,12 +152,8 @@ def _live_plot(
         data is complex IQ shaped (repeat count, swept value).
         Return the changed artists without modifying the input array.
         """
-        measured = int(np.any(np.isfinite(data), axis=0).sum())
-        title = ax.set_title(
-            f"ZigZag sweep · {gate} · {measured}/{len(values)} settings"
-        )
         real = zigzag_signal2real(data)
-        return (*heatmap.set(values, times.astype(np.float64), real.T), title)
+        return heatmap.set(values, times.astype(np.float64), real.T)
 
     fig.show()
     return update

@@ -209,11 +209,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            acquired = int(np.count_nonzero(np.isfinite(data).all(axis=0)))
-            title = ax.set_title(
-                f"{_TITLE}\nAcquired cells: {acquired}/{len(freqs) * len(gains)} count"
-            )
-            return (*viewer.set(freqs, gains, bathreset_signal2real(data).T), title)
+            return viewer.set(freqs, gains, bathreset_signal2real(data).T)
 
         fig.show()
         signals_buffer = SignalBuffer((4, len(gains), len(freqs)), on_update=update)

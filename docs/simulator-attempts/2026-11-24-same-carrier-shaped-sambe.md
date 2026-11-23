@@ -14,7 +14,7 @@ superseded_by: null
 
 ## 核心思路
 
-[同頻多線摺成單 tone](./2026-11-23-same-carrier-drive-merge.md)要求包絡同形。這個原型保留兩線各自的 I/Q 算符、複數包絡與相位。目標是省掉直接積分逐步解析載波振盪的工作。在同一載波座標中加總兩線的 Fourier block，再沿時間插值 frozen-envelope propagator。原型只在固定 `families=("shaped_sambe",)` 的測試中加入候選。
+[同頻多線摺成單 tone](./2026-11-23-same-carrier-merge.md)要求包絡同形。這個原型保留兩線各自的 I/Q 算符、複數包絡與相位。目標是省掉直接積分逐步解析載波振盪的工作。在同一載波座標中加總兩線的 Fourier block，再沿時間插值 frozen-envelope propagator。原型只在固定 `families=("shaped_sambe",)` 的測試中加入候選。
 
 ## 實測
 

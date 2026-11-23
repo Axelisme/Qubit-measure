@@ -251,15 +251,11 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
             history = np.full((2, len(freqs)), np.nan)
             for offset, row in enumerate(valid[-2:][::-1]):
                 history[-offset - 1] = real[row]
-            progress = heat_ax.set_title(
-                f"Bias rows with data: {len(valid)}/{len(dev_values)}"
-            )
             if current >= 0:
                 line_ax.set_title(f"Latest DC bias: {dev_values[current]:.6g} {unit}")
             return (
                 *heatmap.set(dev_values, freqs, real),
                 *lines.set(freqs, history),
-                progress,
             )
 
         fig.show()

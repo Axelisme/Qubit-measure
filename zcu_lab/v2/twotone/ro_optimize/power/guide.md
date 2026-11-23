@@ -15,7 +15,7 @@ Optional **Reset** → preparation I/π → R1 off/on → wait → middle I/π �
 ## Read the figures and choose a gain
 
 1. **First-read contrast** is |IQπ−IQI| at R1 on and middle I, against gain (a.u.).
-   Live reports accumulated shots per branch and gain. Analyze marks a manual selection with a red dashed line.
+   Analyze marks a manual selection with a red dashed line.
    Both views show ±1 shot SEM from the same shots as each point.
    The moments pool retained shots across rounds and include projection noise.
    Changes in the round means contribute to the pooled scatter; the bars neither estimate nor remove drift.

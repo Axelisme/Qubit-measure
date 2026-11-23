@@ -13,7 +13,7 @@ For tab setup, refreshing sources and saving, see [`zcu_lab/v2/operator-workflow
 
 ## Read the decay and fit diagnostics
 
-- Live and the first Analyze heatmap show mean IQ projected along the largest scan variation. The Live sample count tracks coverage; completed rounds track averaging. The map has no shot SEM.
+- Live and the first Analyze heatmap show mean IQ projected along the largest scan variation. The map has no shot SEM.
 - Analyze refits each gain's exponential with a shared baseline from preliminary usable fits. **Rejected fits** compares fitted span with half the measured span and the mean absolute smoothed residual. A point at or below either bound fails; this is not an R² cutoff.
 - **Fitted T1** omits rejected values. Its error bars are standard errors of the fitted 1/e time, not errors of mean IQ or variations across rounds. R² compares the fixed-baseline fit with the mean predictor; normalized residual RMS gives the typical mismatch as a fraction of measured span. Those diagnostics include rejected gains. A valid map can still be analyzed without historical cfg.
 

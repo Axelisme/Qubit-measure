@@ -300,37 +300,25 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         fig.suptitle(_TITLE)
         ax.set(xlabel=_GAIN_LABEL, ylabel=_IQ_LABEL)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        progress = ax.set_title(f"Averaging round 0 / {cfg.rounds}")
         viewer = live_errorbar(ax)
         moments_buffer = SignalBuffer(
             (len(gains), len(_MOMENT_COLUMNS)), dtype=np.float64
         )
-        rounds_done = 0
 
         @context.plots.on_plot_thread
-        def update(completed: int) -> Iterable[Artist]:
-            """Draw cumulative IQ displacement, its shot SEM and round progress."""
-            moments = moments_buffer.array
+        def update(moments: NDArray[np.float64]) -> Iterable[Artist]:
+            """Draw cumulative IQ displacement and its shot SEM."""
             _, signals = split_sums(moments)
             delta = signals - _reference_iq(signals)
             distance = np.abs(delta)
             sem = _distance_sem(
                 delta, distance, moments, reference_size=_reference_size(signals)
             )
-            progress.set_text(
-                f"Averaging round {completed} / {cfg.rounds} · "
-                f"{completed * cfg.reps:,} nominal shots/point"
-            )
-            return (
-                *viewer.set(gains, distance, sem),
-                progress,
-            )
+            return viewer.set(gains, distance, sem)
 
         def show_round() -> bool:
             """Observe a completed round without asking acquisition to stop."""
-            nonlocal rounds_done
-            rounds_done += 1
-            update(rounds_done)
+            update(moments_buffer.array)
             return False
 
         fig.show()

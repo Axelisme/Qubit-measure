@@ -274,8 +274,8 @@ def _show_live(plots: Plots, cfg: MuxT2RamseyCfg, times: NDArray[np.float64]):
     """Show one live figure per cfg participant and return its shared updater.
 
     times contains requested free-evolution delays in µs. The updater takes completed-round
-    sums shaped (delays, participants, 6) and returns the changed data, SEM and
-    progress artists. Projection and plot update errors propagate.
+    sums shaped (delays, participants, 6) and returns the changed data and SEM
+    artists. Projection and plot update errors propagate.
     """
     viewers = []
     empty = times[:0]
@@ -283,30 +283,21 @@ def _show_live(plots: Plots, cfg: MuxT2RamseyCfg, times: NDArray[np.float64]):
         fig, ax = plots.subplots(num=f"measurement_{index}", layout="constrained")
         fig.suptitle(f"Mux Ramsey · {cfg.tones[index].name} · IQ contrast")
         ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
-        progress = ax.set_title(
-            f"Acquired points: 0 / {times.size} · 0 shots per point"
-        )
         viewer = live_errorbar(ax)
         for artist in viewer.set(empty, empty, empty):
             if isinstance(artist, Line2D):
                 artist.set(marker="o", markersize=4, label="Measured IQ ± shot SEM")
         fig.legend(loc="outside lower center")
-        viewers.append((viewer, progress))
+        viewers.append(viewer)
         fig.show()
 
     @plots.on_plot_thread
     def update(data: NDArray[np.float64]):
-        counts, means = split_sums(data)
+        _, means = split_sums(data)
         artists = []
-        for row, (viewer, progress) in enumerate(viewers):
-            acquired = np.isfinite(means[:, row])
+        for row, viewer in enumerate(viewers):
             real, sem = project_iq(means[:, row], data[:, row])
-            shots = int(counts[acquired, row].min()) if acquired.any() else 0
-            progress.set_text(
-                f"Acquired points: {np.count_nonzero(acquired)} / {times.size} · "
-                f"{shots:,} shots per point"
-            )
-            artists.extend((*viewer.set(times, real, sem), progress))
+            artists.extend(viewer.set(times, real, sem))
         return artists
 
     return update

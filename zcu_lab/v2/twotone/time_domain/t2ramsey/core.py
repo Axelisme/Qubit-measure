@@ -226,15 +226,11 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
 
         @context.plots.on_plot_thread
         def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
-            """Refresh projected mean IQ, its shot SEM and count from this round."""
-            counts, mean = split_sums(moments)
+            """Refresh projected mean IQ and its shot SEM."""
+            _, mean = split_sums(moments)
             i, q = _direction(mean)
             sem = iq_shot_sem(moments, direction=(i, q))
-            retained = np.nanmax(counts, initial=0)
-            title = ax.set_title(
-                f"Ramsey fringes · {retained:.0f} retained shots/point"
-            )
-            return (*viewer.set(lengths, mean.real * i + mean.imag * q, sem), title)
+            return viewer.set(lengths, mean.real * i + mean.imag * q, sem)
 
         fig.show()
         signals_buffer = SignalBuffer(

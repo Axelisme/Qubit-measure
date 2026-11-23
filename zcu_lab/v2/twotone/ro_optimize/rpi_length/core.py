@@ -237,25 +237,19 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
 
         @context.plots.on_plot_thread
         def draw(
-            payload: tuple[NDArray[np.float64], list[RPiAnalysis], int],
+            payload: tuple[NDArray[np.float64], list[RPiAnalysis]],
         ) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            windows, analyses, reads = payload
-            status = not_plotted_title(analyses, LENGTH_AXIS.setting_name)
-            progress = (
-                f"{len(analyses)}/{len(lengths)} settings acquired\n"
-                f"Minimum reads per acquired setting: {reads} count"
-            )
-            ax.set_title(f"{progress}\n{status}" if status else progress)
-            return (*viewer.set(windows, valid_values(analyses, "score")), ax.title)
+            windows, analyses = payload
+            status = ax.set_title(not_plotted_title(analyses, LENGTH_AXIS.setting_name))
+            return (*viewer.set(windows, valid_values(analyses, "score")), status)
 
         def update(records: NDArray[np.float64]) -> None:
             # Analyze here, on the acquisition thread, so the GUI thread only draws.
             """Refresh the measurement artists from the current acquired data."""
             finished = _finished(records)
             completed = records[finished]
-            reads = int(min(completed[:, 1], default=0))
-            draw((lengths[finished], analyze_records(completed), reads))
+            draw((lengths[finished], analyze_records(completed)))
 
         fig.show()
         record_sums = SignalBuffer(

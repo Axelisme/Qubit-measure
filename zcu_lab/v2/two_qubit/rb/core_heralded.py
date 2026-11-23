@@ -534,6 +534,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         )
         depths = np.array(config.depth, dtype=np.int64)
         fig.suptitle("Heralded RB · Qubit1/Qubit2 · Conditional return")
+        fig.supxlabel("Capped: shot SEM · Pale: seed SD", fontsize=10)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -542,13 +543,6 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 bars.remove()
             ax.relim()
             _draw_pooled_survival(ax, depths, sums)
-            cells = np.isfinite(sums[..., 0, 0, 0, 0])
-            fig.supxlabel(
-                f"Measured seed/arm/depth cells: {cells.sum()}/{cells.size} count\n"
-                f"Total heralded shots (all outcomes): {np.nansum(sums):,.0f} count\n"
-                "Capped: shot SEM · Pale: seed SD",
-                fontsize=10,
-            )
             return (fig,)
 
         # 2. Compile all arms before acquiring any shots.

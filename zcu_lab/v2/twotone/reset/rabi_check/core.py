@@ -223,11 +223,7 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
             rotation = _rotation(signals)
             contrast = (signals * rotation).real
             sem = iq_shot_sem(moments, direction=(rotation.real, -rotation.imag))
-            shots = int(np.nan_to_num(moments[..., 0]).max())
-            title = ax.set_title(
-                f"{_TITLE}\nRetained shots per point and branch: {shots} count"
-            )
-            return (*viewer.set(gains, contrast, sem), title)
+            return viewer.set(gains, contrast, sem)
 
         fig.show()
         buffer = SignalBuffer(

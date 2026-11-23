@@ -14,7 +14,7 @@ For tab setup, refreshing sources and saving, see [`zcu_lab/v2/operator-workflow
 
 ## Read the maps and phase response
 
-Live and the first Analyze heatmap use the pair midpoint (wait + one π/2 duration) and Projection phase. Color is mean IQ projected along the scan's largest IQ variation, not state population. Acquired points and completed rounds track coverage and averaging separately.
+Live and the first Analyze heatmap use the pair midpoint (wait + one π/2 duration) and Projection phase. Color is mean IQ projected along the scan's largest IQ variation, not state population.
 
 Analyze extracts the fringe phase and unwraps it along time. The black line connects phase estimates, not a fit. The green rectangle compares the programmed interval with levels from the lowest and highest fifths by absolute extracted phase. Gray bands span one π/2 duration on either side of each edge, where the pair can sample across the edge. The 2D map has no shot SEM. Each cell stores only mean IQ, without the shot covariance needed to propagate uncertainty to the extracted phase. The phase estimates have no error bars or automatic quality threshold. Analyze requires the source cfg for pulse timing.
 

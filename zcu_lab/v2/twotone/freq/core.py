@@ -219,14 +219,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             data is complex IQ in frequency order; NaN marks unmeasured points.
             Return the changed artists without modifying the input array.
             """
-            points = np.count_nonzero(np.isfinite(data))
-            title = ax.set_title(
-                f"Two-tone spectrum · qubit probe · IQ contrast\nRF points with data: {points}/{len(freqs)}"
-            )
-            return (
-                *viewer.set(freqs, qubfreq_signal2real(data, model_type="lor")),
-                title,
-            )
+            return viewer.set(freqs, qubfreq_signal2real(data, model_type="lor"))
 
         ax.set_title("Two-tone spectrum · qubit probe · IQ contrast")
         fig.show()

@@ -388,17 +388,16 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
                 f"Mux two-tone spectrum · {cfg.tones[index].name} · IQ contrast"
             )
             ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
-            progress = ax.set_title(f"Acquired frequency points: 0 / {cfg.expts}")
             viewer = live_line(ax)
             ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
             ax.legend()
-            viewers.append((viewer, progress))
+            viewers.append(viewer)
             fig.show()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]):
             artists = []
-            for row, (viewer, progress) in enumerate(viewers):
+            for row, viewer in enumerate(viewers):
                 measured = data[:, row]
                 acquired = np.isfinite(measured)
                 real = (
@@ -406,10 +405,7 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
                     if acquired.any()
                     else measured.real
                 )
-                progress.set_text(
-                    f"Acquired frequency points: {np.count_nonzero(acquired)} / {cfg.expts}"
-                )
-                artists.extend((*viewer.set(scan.coordinates[row], real), progress))
+                artists.extend(viewer.set(scan.coordinates[row], real))
             return artists
 
         # 3. A shared DAC register loop advances the independent frequency ranges.

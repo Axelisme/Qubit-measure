@@ -151,10 +151,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
             Read the scan-shaped data without changing it. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            progress = ax.set_title(
-                f"{title}\n{np.count_nonzero(np.isfinite(data))}/{data.size} spectrum points sampled"
-            )
-            return (*line.set(freqs, check_signal2real(data)), progress)
+            return line.set(freqs, check_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer(
