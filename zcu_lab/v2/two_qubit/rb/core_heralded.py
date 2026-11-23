@@ -1,5 +1,6 @@
 """Paired RB with gg/ee herald groups and shared return-survival decays."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -189,6 +190,17 @@ def _draw_count_bars(
     ax.xaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
 
 
+def _group_decay_curve(
+    params: Mapping[str, float],
+    decay: NDArray[np.float64],
+    *,
+    herald_index: int,
+    arm: int,
+) -> NDArray[np.float64]:
+    """Apply the group's amplitude and offset to the arm's precomputed p**depth."""
+    return params[f"A_{herald_index}_{arm}"] * decay + params[f"B_{herald_index}_{arm}"]
+
+
 def _draw_pooled_survival(
     ax: Axes,
     depths: NDArray[np.int64],
@@ -221,15 +233,18 @@ def _draw_pooled_survival(
     _draw_count_bars(ax, depths, survival, sem, seed_std, fit_overlay=fit is not None)
 
     if fit is not None:
-        xs = np.union1d(depths, np.linspace(depths.min(), depths.max(), 201))
+        xs = np.asarray(
+            np.union1d(depths, np.linspace(depths.min(), depths.max(), 201)),
+            dtype=np.float64,
+        )
         params = fit.fit.values
         for arm, label in enumerate(("Reference", "CZ interleaved")):
             measured = pooled_trials[arm] > 0
             gg_fraction = pooled_gg[arm, measured] / pooled_trials[arm, measured]
             weight = np.interp(xs, depths[measured], gg_fraction)
             decay = params[f"p_{arm}"] ** xs
-            gg_curve = params[f"A_0_{arm}"] * decay + params[f"B_0_{arm}"]
-            ee_curve = params[f"A_1_{arm}"] * decay + params[f"B_1_{arm}"]
+            gg_curve = _group_decay_curve(params, decay, herald_index=0, arm=arm)
+            ee_curve = _group_decay_curve(params, decay, herald_index=1, arm=arm)
             ax.plot(
                 xs,
                 weight * gg_curve + (1 - weight) * ee_curve,
@@ -266,9 +281,8 @@ def _draw_return_survival(
         )
         if fit is not None:
             params = fit.fit.values
-            curve = (
-                params[f"A_{herald}_{arm}"] * params[f"p_{arm}"] ** xs
-                + params[f"B_{herald}_{arm}"]
+            curve = _group_decay_curve(
+                params, params[f"p_{arm}"] ** xs, herald_index=herald, arm=arm
             )
             ax.plot(xs, curve, color=color, label=f"{label} fit")
     state = ("gg", "ee")[herald]
@@ -300,9 +314,22 @@ def _plot_pooled_survival(
                 f"CZ error estimate = {estimate.gate_error:.3g}; 95% seed CI "
                 f"[{estimate.error_ci_low:.3g}, {estimate.error_ci_high:.3g}]",
                 f"Joint decay p: Reference {estimate.p_reference:.4g} · "
-                f"CZ interleaved {estimate.p_interleaved:.4g} · Fit quality: see gg/ee diagnostics",
+                f"CZ interleaved {estimate.p_interleaved:.4g}",
             )
         )
+        if analysis.fit_quality is not None:
+            rms = [
+                "unavailable"
+                if item.normalized_residual_rms is None
+                else f"{item.normalized_residual_rms:.3g}"
+                for item in analysis.fit_quality
+            ]
+            report.extend(
+                (
+                    "Grouped fit normalized residual RMS (Reference / CZ interleaved)",
+                    f"gg: {rms[0]} / {rms[1]} · ee: {rms[2]} / {rms[3]}",
+                )
+            )
     elif analysis.reason is not None:
         report.append(f"No RB estimate: {analysis.reason}")
     fig.supxlabel("\n".join(report), fontsize=10)
@@ -643,13 +670,13 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 bounds = decay_time_bounds(data.depths.astype(np.float64))
                 quality = tuple(
                     compute_fit_quality(
-                        means[h, arm],
-                        joint_fit.curves[h, arm],
+                        means[herald_index, arm],
+                        joint_fit.curves[herald_index, arm],
                         {"decay_time": tau},
                         np.array([[variance]]),
                         decay_bounds=bounds,
                     )
-                    for h in range(2)
+                    for herald_index in range(2)
                     for arm, (tau, variance) in enumerate(decays)
                 )
         # 3. Show the pooled return and joint-fit overlay before the group diagnostics.
