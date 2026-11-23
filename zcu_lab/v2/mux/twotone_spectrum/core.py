@@ -562,7 +562,7 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
                 ax.set_title(f"{result_label}\n{quality_label}", fontsize=10)
                 outcomes.append(outcome)
             if options.model_type == "sinc":
-                ax.set_ylabel("Principal-axis background-subtracted IQ (a.u.)")
+                ax.set_ylabel("Background-subtracted IQ projection (a.u.)")
             ax.legend()
             fig.tight_layout()
         # 2. Keep transition frequency, linewidth and quality, or a failure under the original tone identity.

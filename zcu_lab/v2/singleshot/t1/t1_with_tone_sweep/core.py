@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -483,5 +484,10 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         ax_gg.set_ylabel("Time (µs)")
         ax_eg.set_ylabel("Time (µs)")
         ax_Tg.set_ylabel("Rate (µs⁻¹)")
+
+        if source.cfg is not None and source.cfg.freq is not None and ac_coeff is None:
+            # Full MHz labels need more space in each of the three columns.
+            for ax in fig.axes:
+                ax.xaxis.set_major_locator(MaxNLocator(nbins=3))
 
         fig.tight_layout()
