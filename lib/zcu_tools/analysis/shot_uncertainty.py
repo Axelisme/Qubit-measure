@@ -93,10 +93,12 @@ def iq_mean_covariance(moments: NDArray[np.float64]) -> NDArray[np.float64]:
     ``[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]``. Return ``(..., 2, 2)`` matrices in
     I/Q order and squared IQ units, using sample covariance (ddof=1) divided
     by N. Fewer than two shots or any NaN sum gives a NaN matrix. Rounding-scale
-    excesses are clipped to keep the matrix positive semidefinite. Invalid
-    moment shape, counts, infinite moments or negative squared sums at
-    defined points raise ValueError. Invalid centered covariance or overflow
-    raises IQCovarianceError (a ValueError).
+    excesses are clipped to keep the matrix positive semidefinite. The raw
+    sums use the same bounded, retained-count rounding tolerance as
+    ``iq_shot_sem``; the matrix repair and direct projection can differ near
+    the boundary. Invalid moment shape, counts, infinite moments or negative
+    squared sums at defined points raise ValueError. Invalid centered covariance
+    or overflow raises IQCovarianceError (a ValueError).
     """
     n = _iq_defined_counts(moments)
     sums = np.moveaxis(moments[..., 1:], -1, 0)
@@ -156,8 +158,10 @@ def iq_shot_sem(
     Invalid shape, nonfinite weights, invalid counts, infinite moments or
     negative squared sums at defined points raise ValueError. At defined points,
     the centered moments must describe a valid covariance up to rounding, even
-    outside the projection direction. Inconsistent centered moments or
-    overflow that prevents estimation raise IQCovarianceError (a ValueError).
+    outside the projection direction. The raw sums use the same retained-count
+    tolerance as ``iq_mean_covariance``; the projection has its own rounding
+    check. Inconsistent centered moments or overflow that prevents estimation
+    raise IQCovarianceError (a ValueError).
     """
     n = _iq_defined_counts(moments)
     a, b = (np.asarray(weight, dtype=np.float64) for weight in direction)

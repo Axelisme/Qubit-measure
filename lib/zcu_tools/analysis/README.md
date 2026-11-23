@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-23，平均 IQ 共變異與 shot SEM
+**Last updated:** 2026-11-23，共用 IQ 六矩捨入界
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -46,9 +46,12 @@ I/Q 投影權重可固定或逐點給定。`propagated_iq_shot_sem` 用逐點梯
 它不估計校正矩陣本身的誤差。算不出有限 SEM 時以 NaN 回傳並記錄警告；接近奇異不另設門檻。
 兩者都以實際保留的 shots 為分母，不估計輪間散布、RB 的 seed 散布或擬合參數誤差。
 少於兩發或缺測（NaN）時，該點誤差未定。負、非整數、無窮計數及其加總溢位會報錯。
-IQ 估計也拒絕無窮矩、超過捨入誤差的負中心平方和，以及不可能的中心共變異，不受選定的投影方向影響。
-有限矩無法支持共變異估計時會拋出 `IQCovarianceError`（`ValueError` 的子型別）。
-`readout_metrics.first_read_contrast` 只隔離這類逐點估計失敗：保留 R1 均值距離，省略該點 SEM 並記錄原因。
+兩個 IQ 估計入口用同一個有上限的原始六矩捨入界。界線取決於實收 shot 數，不用名目 Reps × Rounds。
+容差內的負中心量可歸零，不截斷小的正估計。矩陣修復與直接投影的檢查不同，同一組矩通過原始矩檢查不保證任意投影可估。
+超界中心平方和或交叉共變異與估計溢位會拋出 `IQCovarianceError`（`ValueError` 的子型別）。
+無窮矩等不合法輸入不屬於這類估計失敗。
+`readout_metrics.first_read_contrast` 保留 R1 均值距離，只省略該點不可估的 SEM 並記錄原因。
+MIST Live／Analyze 也保留有限距離，只省略依賴不可估共變異的棒，不替換參考。
 
 ## 雙讀出矩的自校準
 

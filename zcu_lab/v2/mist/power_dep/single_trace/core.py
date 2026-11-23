@@ -10,7 +10,7 @@ from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
-from zcu_tools.analysis.shot_uncertainty import iq_mean_covariance
+from zcu_tools.analysis.shot_uncertainty import IQCovarianceError, iq_mean_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import (
@@ -85,6 +85,26 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals - _reference_iq(signals))
 
 
+def _point_covariances(moments: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Estimate the scan in one batch, isolating only numerical failures."""
+    try:
+        return iq_mean_covariance(moments)
+    except IQCovarianceError:
+        # The batch validated the input contract. Retry row by row to preserve
+        # other estimates and report the numerical reason at the failing gain.
+        covariance = np.full((len(moments), 2, 2), np.nan)
+        for index, point in enumerate(moments):
+            try:
+                covariance[index] = iq_mean_covariance(point)
+            except IQCovarianceError as error:
+                logger.warning(
+                    "Shot covariance unavailable for propagated SEM at gain index %d: %s",
+                    index,
+                    error,
+                )
+        return covariance
+
+
 def _distance_sem(
     delta: NDArray[np.complex128],
     distance: NDArray[np.float64],
@@ -93,12 +113,23 @@ def _distance_sem(
     reference_size: int,
 ) -> NDArray[np.float64]:
     """Propagate shot covariance to each distance; zero reference_size fixes g0."""
-    covariance = iq_mean_covariance(moments)
+    if moments.shape != (*distance.shape, len(_MOMENT_COLUMNS)):
+        raise ValueError("IQ moments must have shape (number of gains, 6)")
+    covariance = _point_covariances(moments)
     if reference_size:
         # For the scan-start mean, Cov(z_i, r) = Σ_i/m for its own points.
         reference_cov = (covariance[:reference_size] / reference_size**2).sum(axis=0)
         covariance[:reference_size] *= 1 - 2 / reference_size
         covariance += reference_cov
+        if (
+            reference_size == 1
+            and len(moments)
+            and moments[0, 0] >= 2
+            and np.isfinite(moments[0]).all()
+        ):
+            # The self-difference is identically zero even if its shot
+            # covariance failed estimation. Other gains still need that covariance.
+            covariance[0] = 0
 
     defined = np.isfinite(distance) & np.isfinite(covariance).all(axis=(1, 2))
     nonzero = defined & (distance > 0)
@@ -344,7 +375,9 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         (at least one), just as Live does. ``ac_coeff`` maps gain squared to
         photon number when supplied; ``e0`` only sets the vertical display range.
         Show propagated shot SEM wherever the retained moments define one.
-        Return no fit or calibrated population estimate.
+        Log unavailable covariance and omit only dependent bars. Invalid moment
+        shape, counts or infinite moments raise ValueError. Return no fit or
+        calibrated population estimate.
         """
         # 1. Measure IQ displacement from the explicit or default scan reference.
         result = source.result

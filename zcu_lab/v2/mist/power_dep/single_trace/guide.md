@@ -34,9 +34,9 @@ Live and default Analyze use the complex mean of the first 5% of gain points in 
 
 Live updates the error bars after each round. The bars show one shot standard error, estimated by propagating the uncertainty of the mean IQ into the distance. They include projection noise from the retained shots but do not estimate drift between rounds. The scan-start reference uses those same data, so its uncertainty and its correlation with the scan points contribute to the bars. A reference you enter is treated as exact.
 
-The first-order estimate can be too small near zero displacement. At exactly zero, no radial direction is defined, so the bar uses the largest directional standard error of the IQ difference. If the reference is one scan point, that point is compared with itself and its bar is zero. Do not use a small displacement by itself to claim a signal above noise.
+The first-order estimate can be too small near zero displacement. At exactly zero, no radial direction is defined, so the bar uses the largest directional standard error of the IQ difference. Do not use a small displacement by itself to claim a signal above noise.
 
-A point needs at least two retained shots and their IQ moments for a bar. When the scan-start reference lacks the moments needed to estimate its uncertainty, the bars that depend on it are omitted. A mean-only file still shows the distance, without bars.
+A point needs at least two retained shots and complete IQ moments for a bar. If the moments cannot support a covariance estimate, Live and Analyze log the gain index and the reason. The plot keeps the finite distances and omits only the bars that need that covariance. If the scan-start reference is affected, the plot does not replace it. With a one-point reference and complete moments for at least two shots, the self-comparison bar stays zero: it does not depend on the shot covariance. A mean-only file still shows the distance without bars.
 
 Analyze controls use the source Run without taking new data:
 
