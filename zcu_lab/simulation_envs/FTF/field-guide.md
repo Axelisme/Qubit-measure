@@ -327,7 +327,11 @@ CKP 兩個 preparation 分支的腔中心分裂由 χ/κ 決定。κ ≫ χ 時�
 
 此模型可用於半古典趨勢與量測流程驗證，不應把 finite-drive CKP 的中心精度視為完整 Lindblad 結果或校準依據。目前沒有已證明能保證通過此精度驗收的 χ/κ、驅動強度或脈衝時序數值適用界。
 
-模型假設 weak dispersive coupling，不包含 MIST 躍遷或其 onset。只施加腔驅動、沒有 qubit drive 時，這些新增頻移與去相位不改變能階 populations。若 Stark 頻移讓能量排序反轉，演化會報錯並指出 point 與 segment，不重排能階。未報錯不代表強驅動、截斷或色散近似已通過適用性驗證。
+模型假設 weak dispersive coupling，不包含 MIST 躍遷或其 onset。只施加腔驅動、沒有 qubit drive 時，這些新增頻移與去相位不改變能階 populations。
+
+若腔驅動的 Stark 頻移讓相鄰能階的能量順序反轉，FTF 保留原有能階順序，不中止 acquire。
+Acquire 結束時，FTF 對每對反轉的能階彙整發出一則 `UserWarning`。警告內容見 [FTF 腔驅動契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#cavity-drives)。
+沒有出現這項警告，不代表模型在強驅動下仍適用，也不代表截斷或色散近似已通過驗證。
 
 ### Pulse drive
 
