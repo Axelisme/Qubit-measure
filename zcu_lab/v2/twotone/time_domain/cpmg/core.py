@@ -368,7 +368,7 @@ def _live_plot(
     """Show each count's delay grid; return an owner-thread contrast/SNR updater.
 
     The callback receives normalized (count, time) contrast and current SNR.
-    It updates the map, two recent traces and titles without changing inputs.
+    It updates the map, two recent traces and latest-trace title without changing inputs.
     """
     fig, _ = plots.subplots(1, 2, num="measurement", layout="constrained")
     heat_ax, line_ax = fig.axes
@@ -408,7 +408,6 @@ def _live_plot(
         line_ax.relim()
         line_ax.autoscale_view()
 
-        title = f"CPMG · {valid.size}/{times.size} counts measured"
         row = f"Latest: {times[current]} π pulses" if current >= 0 else "Awaiting data"
         if snr:
             row += f" · SNR {snr:.1f}"
@@ -416,7 +415,6 @@ def _live_plot(
             heatmap,
             previous,
             latest,
-            heat_ax.set_title(title),
             line_ax.set_title(row),
         )
 

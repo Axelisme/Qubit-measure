@@ -338,20 +338,17 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 def _live_search_plot(
     plots: Plots,
     point_indices: NDArray[np.float64],
-) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64], int]], None]:
+) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64]]], None]:
     """Show the search's four SNR panels and return a snapshot-based update.
 
-    Pass run plots and zero-based iteration coordinates. The returned callback
-    takes a flat payload of scores, sampled parameter rows (MHz, gain, us), and
-    the current index and returns None. Its body changes all four lines and the
-    iteration title in one refresh, returning changed artists to the plot
-    dispatcher. Inputs remain unchanged.
+    Pass run plots and zero-based candidate coordinates. The callback receives
+    the scores and sampled parameter rows (MHz, gain, µs). It updates all
+    four lines in one refresh without modifying the input arrays.
     """
     figure, initial_ax = plots.subplots(num="measurement", figsize=(9, 7))
     initial_ax.remove()
     figure.suptitle("Readout search · Resonator · IQ separation")
     grid = figure.add_gridspec(2, 2)
-    axes = []
     lines = []
     for xlabel, cell in (
         ("Candidate index (count)", grid[0, 0]),
@@ -362,21 +359,20 @@ def _live_search_plot(
         ax = figure.add_subplot(cell)
         ax.set(xlabel=xlabel, ylabel="g/e IQ separation SNR")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        lines.append(live_line(ax))
-        ax.lines[0].set(linestyle="none" if axes else "-", marker="o")
-        axes.append(ax)
+        line = live_line(ax)
+        ax.lines[0].set(linestyle="none" if lines else "-", marker="o")
+        lines.append(line)
 
     figure.show()
 
     @plots.on_plot_thread
     def update(
-        payload: tuple[NDArray[np.float64], NDArray[np.float64], int],
+        payload: tuple[NDArray[np.float64], NDArray[np.float64]],
     ) -> list[Artist]:
         """Refresh SNR panels from the score/parameter snapshot and return artists."""
-        data, sampled_params, idx = payload
+        data, sampled_params = payload
         snrs = np.abs(data)
-        title = f"{np.isfinite(snrs).sum()}/{len(snrs)} candidates scored\nCandidate index: {idx}"
-        artists: list[Artist] = [axes[0].set_title(title)]
+        artists: list[Artist] = []
         for line, xs in zip(
             lines,
             (
@@ -431,13 +427,12 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         point_indices = np.arange(num_points, dtype=np.float64)
 
-        # 2. Show search progress and the sampled score along each readout coordinate.
+        # 2. Show sampled scores along each readout coordinate.
         update = _live_search_plot(context.plots, point_indices)
-        current_index = 0
 
         def plot_fn(data: NDArray[np.float64]) -> None:
             """Refresh the measurement artists from the current acquired data."""
-            update((data, params, current_index))
+            update((data, params))
 
         signals_buffer = SignalBuffer(
             (num_points,),
@@ -448,8 +443,6 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         # 3. Feed back the previous score before asking for the next candidate.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for idx, (_, step) in enumerate(sched.scan("Iteration", range(num_points))):
-                current_index = idx
-
                 last_snr = None
                 if idx > 0:
                     last_snr = np.abs(signals_buffer.array[idx - 1])

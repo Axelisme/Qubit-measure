@@ -168,21 +168,15 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         diagnostic_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         iq_points = live_errorbar(ax)
         diagnostic_line = live_line(diagnostic_ax)
-        progress = fig.suptitle("Waiting for the first round")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
             sums = CycleSums.from_augmented(delays, data)
             signal, sem = first_read_projection(sums)
             joint = cycle_curves(sums)
-            shots = int(joint.cycle_count.min())
-            progress.set_text(
-                f"Round {shots // cfg.reps}/{cfg.rounds} · {shots} cycles per point (count)"
-            )
             return (
                 *iq_points.set(delays, signal, sem),
                 *diagnostic_line.set(delays, joint.main_sigma),
-                progress,
             )
 
         fig.show()

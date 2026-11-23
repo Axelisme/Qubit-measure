@@ -67,7 +67,7 @@ def certify(table: SegmentTable) -> SegmentTable:
                 table.envelopes[i].identity.encode()
                 for i in table.tone_envelope[row, :count]
             )
-        signatures.append(b"".join(key))
+        signatures.append(b"".join((*key, table.folded_channel_key(row))))
     matches: dict[tuple[bytes, ...], list[int]] = {}
     starts = np.searchsorted(table.timeline, table.timeline[candidates], side="left")
     for row, first in zip(candidates, starts, strict=True):
@@ -125,6 +125,13 @@ def _representative(geometry: Geometry, first: int, stop: int) -> Geometry:
         table,
         **columns,
         timeline=np.zeros(stop - first, dtype=np.int64),
+        carrier_groups={
+            row - first: table.carrier_groups[row]
+            for row in range(first, stop)
+            if row in table.carrier_groups
+        }
+        if table.carrier_groups
+        else {},
         prefix_group=table.prefix_group[first:stop]
         if table.prefix_group is not None
         else None,

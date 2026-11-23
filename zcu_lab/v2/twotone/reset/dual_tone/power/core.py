@@ -187,11 +187,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             ref_i = 0 if gains1[0] < gains1[-1] else -1
             ref_j = 0 if gains2[0] < gains2[-1] else -1
             contrast = np.abs(data - data[ref_i, ref_j])
-            acquired = int(np.count_nonzero(np.isfinite(data)))
-            title = ax.set_title(
-                f"{_TITLE}\nAcquired cells: {acquired}/{data.size} count"
-            )
-            return (*viewer.set(gains1, gains2, contrast), title)
+            return viewer.set(gains1, gains2, contrast)
 
         fig.show()
         signals_buffer = SignalBuffer((len(gains1), len(gains2)), on_update=update)

@@ -106,8 +106,6 @@ def _survey_plot(
     plots: Plots,
     fluxes: NDArray[np.float64],
     freqs: NDArray[np.float64],
-    *,
-    show_progress: bool,
 ) -> tuple[Figure, Callable[[NDArray[np.complex128]], Iterable[Artist]]]:
     """Set up the bias map and five adjacent spectra for Run and Analyze."""
     fig, _ = plots.subplots(2, 1, num="measurement", figsize=(7, 7))
@@ -148,12 +146,6 @@ def _survey_plot(
         if current >= 0:
             artists.append(
                 line_ax.set_title(f"Latest bias: {fluxes[current]:.6g} a.u.")
-            )
-        if show_progress:
-            artists.append(
-                fig.suptitle(
-                    f"{title}\n{len(valid)}/{len(fluxes)} bias spectra sampled"
-                )
             )
         return artists
 
@@ -201,7 +193,7 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
             allow_array=True,
         )
 
-        fig, draw = _survey_plot(context.plots, jpa_fluxs, freqs, show_progress=True)
+        fig, draw = _survey_plot(context.plots, jpa_fluxs, freqs)
         update = context.plots.on_plot_thread(draw)
         fig.show()
         signals_buffer = SignalBuffer(
@@ -253,5 +245,5 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
         """
         del options
         result = source.result
-        _, draw = _survey_plot(plots, result.fluxes, result.freqs, show_progress=False)
+        _, draw = _survey_plot(plots, result.fluxes, result.freqs)
         draw(result.signals)

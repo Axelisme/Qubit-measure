@@ -12,7 +12,7 @@ Optional **Reset** → optional **Preparation pulse** → simultaneous cavity an
 
 ## Read the figures and choose the next settings
 
-Live counts acquired cells. Live and Analyze show |S180−S0|² + |S270−S90|² in a.u.²; S is mean complex IQ at each relative phase. This is tomography contrast, not reset probability, and the map shows no per-cell shot SEM.
+Live and Analyze show |S180−S0|² + |S270−S90|² in a.u.²; S is mean complex IQ at each relative phase. This is tomography contrast, not reset probability, and the map shows no per-cell shot SEM.
 
 The Analyze star marks the maximum after smoothing, on the raw map. **Peak selection filter** and **Filter strength** can move the star without changing the colors; strength scales the wavelet threshold or sets Gaussian width in sample steps. If the star is on an edge, shift that axis within the calibrated range and repeat.
 

@@ -23,6 +23,7 @@
 
 ## 模擬量測環境
 
+- 2026-11-23 [同頻多線在 Evolution 的表示](2026-11-23-same-carrier-merge.md)：模擬器路由。保留原 slots 的對照，同載波同形線摺成單 tone，異形線保留多 tone 路由。
 - 2026-11-23 [模擬器優化嘗試記在哪裡](2026-11-23-simulator-attempts-log.md)：文件組織。優化嘗試一檔一筆，依主題索引，並補登過去採用和未採用的做法。
 - 2026-11-23 [FTF sampled RWA 探針的快取壽命](2026-11-23-ftf-rwa-probe-memo.md)：快取壽命。一次 FTF preparation 重用精確的探針證明；每次 evolve 仍選路、記帳、演化與發佈 capture。
 
@@ -208,6 +209,7 @@
 - 2026-11-22 [量測點何時連線與 spectrum 的 error bar](2026-11-22-data-point-lines.md)：呈現規則。無擬合曲線的一維圖連線、有擬合只畫點；有 shot 資料就畫 SEM，spectrum 不再例外；wrapped phase 只斷跨切口、恰半圈與缺值的線段。
 - 2026-11-22 [Analyze 摘要與逐點誤差棒的責任分工](2026-11-22-shared-presentation-facts.md)：呈現責任。GUI 與 MCP 共用 adapter 摘要行，analysis 計算 shot SEM，實驗 core 寫標題與圖例。
 - 2026-11-23 [平均 IQ 圖的投影慣例](2026-11-23-mean-iq-plot-projection.md)：呈現規則。同類實驗沿用同一 IQ 轉換，一維預設用主軸投影，二維 flux／頻率圖逐 bias 扣背景再取幅值。
+- 2026-11-23 [Live 圖不顯示進度計數](2026-11-23-live-no-progress.md)：圖形呈現。進度只由 GUI progress bar 顯示；Live 保留描述資料與判讀的標註。
 - 2026-11-22 [Two-qubit mux 綁定與編輯後的檢查](2026-11-22-two-qubit-mux-binding-checks.md)：驗證位置。Open／Reset 驗有序元件連結，提交時按同次 capture 驗實際 readout tone 數。
 - 2026-11-23 [掃描初值至少 31 點、用奇數](2026-11-23-scan-defaults-min-31-odd.md)：預設值。等距掃描初值每軸 ≥31 點，以中心為準者用奇數；只改初值不擋輸入，離散 protocol 序列除外。
 - 2026-11-23 [表單預設引用 library](2026-11-23-form-ref-not-copy.md)：表單預設。只在表單改了 Run 不會覆寫的欄位時複製，試調先 Convert to inline。

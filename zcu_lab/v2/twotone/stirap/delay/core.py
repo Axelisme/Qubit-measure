@@ -198,11 +198,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
             np.divide(data, total, out=fractions, where=total > 0)
             covariance = class_probability_covariance(data)
             sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
-            retained = int(np.nansum(total))
-            title = ax.set_title(
-                f"STIRAP delay · g → f · measured fractions\nRetained shots: {retained:,} count"
-            )
-            return (*viewer.set(leads, fractions.T, sem.T), title)
+            return viewer.set(leads, fractions.T, sem.T)
 
         fig.show()
         counts = SignalBuffer(

@@ -14,6 +14,6 @@ For tab setup, refreshing sources and saving, see [`zcu_lab/v2/operator-workflow
 
 ## Read the map and choose a follow-up
 
-Live and Analyze share the gain–RF heatmap. Color is mean complex IQ projected along the scan's largest IQ variation, in a.u., not a population. Live counts acquired IQ points and completed rounds separately. There is no shot SEM. A valid saved map can still plot without historical cfg.
+Live and Analyze share the gain–RF heatmap. Color is mean complex IQ projected along the scan's largest IQ variation, in a.u., not a population. There is no shot SEM. A valid saved map can still plot without historical cfg.
 
 Follow a continuous ridge to locate a candidate transition at the gain of interest. If it hits the boundary, extend that RF endpoint without coarsening the grid. For overlapping bands, narrow the gain window and compare with lower probe gain to check power broadening. The map does not identify or fit a transition and does not write back calibration.

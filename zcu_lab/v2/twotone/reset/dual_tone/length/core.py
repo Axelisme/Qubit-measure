@@ -228,9 +228,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             direction = principal_iq_direction(signals)
             contrast = direction[0] * signals.real + direction[1] * signals.imag
             sem = iq_shot_sem(moments, direction=direction)
-            shots = int(np.nan_to_num(moments[..., 0]).max())
-            title = ax.set_title(f"{_TITLE}\nRetained shots per point: {shots} count")
-            return (*viewer.set(lengths, contrast, sem), title)
+            return viewer.set(lengths, contrast, sem)
 
         fig.show()
         buffer = SignalBuffer(

@@ -10,7 +10,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shar
 
 ## Read the map and choose a gain
 
-Run maps RF frequency versus probe gain. Color is the magnitude of mean IQ after subtracting the median complex IQ in that spectrum (a.u.), not probability. Blank cells lack data. The row count includes a gain still averaging. Adjacent axes compare the latest and previous spectra. This two-dimensional map does not report shot SEM.
+Run maps RF frequency versus probe gain. Color is the magnitude of mean IQ after subtracting the median complex IQ in that spectrum (a.u.), not probability. Blank cells lack data. Adjacent axes compare the latest and previous spectra. This two-dimensional map does not report shot SEM.
 
 Analyze redraws the selected run's map and spectra, including after Load; Load alone does not open a figure. **Reps × Rounds** is omitted if the loaded settings are unavailable.
 
