@@ -23,7 +23,7 @@ def pytest_runtest_makereport(
 ) -> Generator[None, pytest.TestReport, pytest.TestReport]:
     """Report visible windows only after pytest has torn down all fixtures."""
     report = yield
-    if call.when == "teardown" and QApplication.instance() is not None:
+    if call.when == "teardown" and isinstance(QApplication.instance(), QApplication):
         windows = [
             f"{type(window).__name__}(objectName={window.objectName()!r}, "
             f"title={window.windowTitle()!r})"
@@ -44,11 +44,15 @@ def pytest_runtest_makereport(
 
 
 @pytest.fixture(scope="session")
-def qapp():
+def qapp() -> QApplication:
     """Provide a single QApplication with a headless-safe platform."""
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
+    if not isinstance(app, QApplication):
+        raise RuntimeError(
+            f"GUI tests require a QApplication, got {type(app).__name__}"
+        )
     return app
 
 

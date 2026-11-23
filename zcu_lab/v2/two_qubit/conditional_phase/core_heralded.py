@@ -454,7 +454,8 @@ def _plot_herald_map(
     bands = np.arange(len(ns)) * 9
     columns = np.arange(len(frequencies))
     ticks = np.linspace(0, len(frequencies) - 1, min(len(frequencies), 4), dtype=int)
-    norm = Normalize(0, 1)
+    norm = Normalize()
+    norm.autoscale(np.ma.masked_invalid(probabilities))
     for i, (ax, values) in enumerate(
         zip(
             fig.axes,
@@ -488,7 +489,7 @@ def _plot_herald_map(
     fig.colorbar(
         ScalarMappable(norm=norm, cmap="Blues"),
         ax=fig.axes,
-        label="Herald probability (0–1)",
+        label="Herald probability",
     )
 
 

@@ -29,7 +29,7 @@ The joint fit shares a phase slope per gate for each actual spectator and freque
 
 - **Herald gg / Herald ee, sign corrected** show X/Y by actual spectator for each train. **Phase points** shows each group's contrast and wrapped single-train angle. X/Y bars show ±1 retained-shot SEM; angle bars propagate each group's X/Y count variance. A calculable angle can have no bar if either projection retains fewer than two shots. Missing X/Y or zero contrast leaves no angle.
 - **Slope diagnostics** compares joint and gg-only spectator slopes, their fit SE and reduced χ². The bottom panel compares both conditional-phase curves in the 0–360° view. Each individual group needs usable gate counts with difference gcd 1; combining two aliased sets does not fix either.
-- **Herald** splits the initial readout distribution by nominal spectator and X/Y. Each gate-count band lists nine herald classes in Qubit1-major order. Gray means no probability is available. The gg fraction measures acceptance, not ground-state purity. Compare it with the quadrature contrast before trusting the slope.
+- **Herald** splits the initial readout distribution by nominal spectator and X/Y. Each gate-count band lists nine herald classes in Qubit1-major order. All panels share the measured range. Gray means no probability is available. The gg fraction measures acceptance, not ground-state purity. Compare it with the quadrature contrast before trusting the slope.
 
 ## Next step
 
