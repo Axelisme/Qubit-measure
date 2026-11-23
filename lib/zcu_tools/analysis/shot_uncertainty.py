@@ -57,13 +57,16 @@ def _validate_centered_iq(
 
 
 def iq_shot_sem(
-    moments: NDArray[np.float64], *, direction: tuple[float, float]
+    moments: NDArray[np.float64],
+    *,
+    direction: tuple[float | NDArray[np.float64], float | NDArray[np.float64]],
 ) -> NDArray[np.float64]:
     """Estimate the standard error of the mean of ``a*I + b*Q`` per point.
 
     ``moments`` has shape ``(..., 6)`` in shot-sums order (ADR-0074):
     ``[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]``. The sums include only the ``N`` retained
-    shots at each point. ``direction=(a, b)`` gives finite linear weights.
+    shots at each point. ``direction=(a, b)`` gives finite I/Q weights. Each
+    weight is a scalar or an array broadcastable to the point shape ``(...)``.
     Holding those weights fixed, the result has shape ``(...)`` and the units
     of the projected observable. It is the sample standard deviation (ddof=1)
     divided by sqrt(N).
@@ -77,9 +80,16 @@ def iq_shot_sem(
     """
     if moments.shape[-1:] != (6,):
         raise ValueError("IQ moments must have shape (..., 6)")
-    a, b = np.asarray(direction, dtype=np.float64)
-    if not np.isfinite(direction).all():
+    a, b = (np.asarray(weight, dtype=np.float64) for weight in direction)
+    if not (np.isfinite(a).all() and np.isfinite(b).all()):
         raise ValueError("IQ projection weights must be finite")
+    try:
+        a = np.broadcast_to(a, moments.shape[:-1])
+        b = np.broadcast_to(b, moments.shape[:-1])
+    except ValueError as error:
+        raise ValueError(
+            "IQ projection weights must broadcast to the point shape"
+        ) from error
 
     n, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
     _validate_counts(n)
@@ -104,6 +114,45 @@ def iq_shot_sem(
     if np.any(centered < -_ROUNDING_RTOL * scale):
         raise ValueError("IQ moments give a negative centered sum of squares")
     return np.asarray(np.sqrt(np.maximum(centered, 0)) / np.sqrt(n) / np.sqrt(n - 1))
+
+
+def propagated_iq_shot_sem(
+    moments: NDArray[np.float64], *, gradients: NDArray[np.complex128]
+) -> NDArray[np.float64]:
+    """Combine first-order shot SEM for independent IQ means at each point.
+
+    ``moments`` has shape ``(..., groups, 6)`` with at least one group and
+    the shot-sums order and validation of ``iq_shot_sem``. ``gradients`` has
+    shape ``(..., groups)``; each complex entry holds the real observable's
+    partial derivatives with respect to that group's mean I and Q. Evaluate
+    these derivatives at the observed means. Preserve I/Q covariance within
+    each group and add independent group variances. Return ``(...)`` in the
+    observable's units. Missing group statistics leave the point's SEM NaN.
+    Nonfinite gradients or propagated SEM leave NaN and log a warning.
+    Mismatched shapes or invalid shot statistics raise ValueError.
+    """
+    if (
+        moments.ndim < 2
+        or moments.shape[-2] == 0
+        or moments.shape[:-1] != gradients.shape
+    ):
+        raise ValueError("IQ gradients must match the point and group shape of moments")
+    finite = np.isfinite(gradients)
+    i = np.where(finite, gradients.real, 0.0)
+    q = np.where(finite, gradients.imag, 0.0)
+    # Normalize before projecting so a finite but large derivative is not squared.
+    scale = np.maximum(np.abs(i), np.abs(q))
+    divisor = np.where(scale == 0, 1.0, scale)
+    unit_sem = iq_shot_sem(moments, direction=(i / divisor, q / divisor))
+    with np.errstate(over="ignore"):
+        sem = np.hypot.reduce(unit_sem * scale, axis=-1)
+    unavailable = ~finite.all(axis=-1) | np.isinf(sem)
+    if np.any(unavailable):
+        logger.warning(
+            "Nonfinite IQ gradients or propagated shot SEM at %d point(s)",
+            np.count_nonzero(unavailable),
+        )
+    return np.where(unavailable, np.nan, sem)
 
 
 def class_probability_covariance(

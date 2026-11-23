@@ -21,6 +21,31 @@ def test_iq_sem_projects_cross_moment_and_uses_retained_count() -> None:
     np.testing.assert_allclose(sem, [2.5, 1.4433756729740645, np.nan, np.nan, np.nan])
 
 
+def test_iq_sem_propagates_each_points_iq_weights() -> None:
+    # The same two shots (0, 0) and (3, 4) at each point project to 0
+    # and [5, 2, -1] with these weights. SEM is half the absolute difference.
+    moments = np.tile([2.0, 3, 4, 9, 12, 16], (2, 3, 1))
+    moments[1, 1] = np.nan
+    sem = shot_uncertainty.iq_shot_sem(moments, direction=(np.array([3.0, 2, 1]), -1.0))
+    np.testing.assert_allclose(sem, [[2.5, 1, 0.5], [2.5, np.nan, 0.5]])
+
+
+def test_independent_iq_sem_combines_groups_with_pointwise_gradients() -> None:
+    # Group 0 has shots (0, 0) and (2, -2); group 1 has (0, 0) and (6, 0).
+    # At the first point their projections differ by 8 and 6: SEMs 4 and 3.
+    moments = np.tile([[2.0, 2, -2, 4, -4, 4], [2.0, 6, 0, 36, 0, 0]], (3, 1, 1))
+    moments[1, 1] = np.nan
+    gradients = np.array([[2 - 2j, 1], [1, 1], [1, np.inf]], dtype=np.complex128)
+    sem = shot_uncertainty.propagated_iq_shot_sem(moments, gradients=gradients)
+    np.testing.assert_allclose(sem, [5.0, np.nan, np.nan])
+
+
+def test_iq_sem_rejects_weights_with_extra_point_axes() -> None:
+    moments = np.array([[2.0, 3, 4, 9, 12, 16]])
+    with pytest.raises(ValueError, match="broadcast"):
+        shot_uncertainty.iq_shot_sem(moments, direction=(np.ones((2, 1)), 0.0))
+
+
 @pytest.mark.parametrize("count", [-1.0, 1.5, np.inf, -np.inf])
 def test_iq_sem_rejects_invalid_counts_even_with_missing_sums(count: float) -> None:
     with pytest.raises(ValueError, match="count"):
