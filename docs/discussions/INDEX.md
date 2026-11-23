@@ -198,6 +198,7 @@
 - 2026-11-22 [Analyze 摘要與逐點誤差棒的責任分工](2026-11-22-shared-presentation-facts.md)：呈現責任。GUI 與 MCP 共用 adapter 摘要行，analysis 計算 shot SEM，實驗 core 寫標題與圖例。
 - 2026-11-23 [平均 IQ 圖的投影慣例](2026-11-23-mean-iq-plot-projection.md)：呈現規則。同類實驗沿用同一 IQ 轉換，一維預設用主軸投影，二維 flux／頻率圖逐 bias 扣背景再取幅值。
 - 2026-11-22 [Two-qubit mux 綁定與編輯後的檢查](2026-11-22-two-qubit-mux-binding-checks.md)：驗證位置。Open／Reset 驗有序元件連結，提交時按同次 capture 驗實際 readout tone 數。
+- 2026-11-23 [掃描初值至少 31 點、用奇數](2026-11-23-scan-defaults-min-31-odd.md)：預設值。等距掃描初值每軸 ≥31 點，以中心為準者用奇數；只改初值不擋輸入，離散 protocol 序列除外。
 
 ## 模組邊界
 
