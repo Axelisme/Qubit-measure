@@ -55,8 +55,8 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   契約見 `measure-authoring.md`。
 - `support/measure/` 是公開支援 package，提供至少被兩個 concrete adapters 共用的 mechanics。
   已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，例如 T1 時間尺度、Rabi 候選與讀出掃描的長度差。
-  T1 helper 的 tone 掃描先選 `ext.t1_with_tone`，僅缺失或 null 才改選普通 `t1`。
-  已存無效 tone T1 不下探。Mux recovery 在建 Form 時比較各顆的捕捉初值，
+  Tone 掃描的 Stop 來源與初值政策見 [T1 與等待](measure-authoring.md#t1-與等待)。
+  Mux recovery 在建 Form 時比較各顆的捕捉初值，
   保留最大者的 seed。缺 T1 以 30 µs 參與比較，缺值勝出時仍為 150 µs 字面值。
   任一無效 T1 留空。
   各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
@@ -89,6 +89,8 @@ Primary options 在成功 Run／Load 後建立表單時生成一次，post 在 p
 Schema 查詢、JSON 重建與分析點擊不重跑生成函式。使用者編輯後的物件交給 fn。
 無 options 時表單為空但分析仍可用。既有三個歷史預設生成器已接入；
 16 個分析執行時讀歷史的 wrapper 尚保留，後續清理才會移到 options 生成階段。
+要核對已發布的 Primary 結果使用哪些 options，見 [Completion and provenance](../../lib/zcu_tools/gui/app/measure/remote/README.md#completion-and-provenance) 的
+`result_params`、`source_operation_id` 與帶 `operation_id` 的 `tab.get_analyze_result`。
 Primary 發布時呼叫 `summary_lines(source)`。回傳有序的純文字 tuple；缺少來源值就省略該行。
 GUI Analysis 與 MCP 從 [AnalysisPresentation](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation)
 顯示這些行，Save 不將它們放入原生分析 JSON。採集設定的範圍見[呈現指南](figure-style.md#r10圖放理論重點採集設定放摘要)。
@@ -127,10 +129,10 @@ OneTone Freq 提供 route-qualified delay calibration 與 readout writeback。
 Apply 模組列與 slot 列後，resonator 的 readout slot 指向該 library root，不需要 `$qubit` alias。
 單 qubit 表單透過 `resonator: $qubit.resonator` alias 讀取 `$resonator.module.readout`，缺 slot 時使用 readout 範本，不讀 qubit 上的舊 slot。
 Capture 為 None 時保留原有 scalar 與 module 提案，alias／來源故障沿 owner 契約傳播。
-PowerDep 把 SNR stop control 放進 typed cfg，不提供 analysis。
+OneTone PowerDep 把 SNR stop control 放進 typed cfg。
 OneTone FluxDep 的 run 將同次 cfg 與純 Result 配成 RunRecord，interactive plugin 明確取該 source 的資料並捕捉成唯讀 inputs。
 GE 的 FIT／post 分別發布 `fit`／`post` 具名圖，post 使用已採用的 primary FIT；
-OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed state 呼叫 Qt-free kernel 與原生圖 builder，產生 GUI-owned 數值結果與 `pick` 圖。Qt 畫布只負責預覽。TwoTone FluxDep 的 run 也回傳 RunRecord，plugin 從 explicit source 捕捉 inputs，保留 phase 投影並共用這條終止 renderer。TwoTone Freq 的 FIT 回傳頻率與線寬及其誤差，fit 圖另交 Plots；TwoTone PowerDep 只提供 run 與 canonical records，不提供 analysis。Lookback FIT 只輸出 predict_offset scalar，具名 fit 另由 Plots 發布；GUI ratio0.1／smooth1.0 與 timeFly writeback 不變。其餘 adapters 同樣使用 explicit records，framework 不提供 pyplot 或舊簽名 fallback。
+OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed state 呼叫 Qt-free kernel 與原生圖 builder，產生 GUI-owned 數值結果與 `pick` 圖。Qt 畫布只負責預覽。TwoTone FluxDep 的 run 也回傳 RunRecord，plugin 從 explicit source 捕捉 inputs，保留 phase 投影並共用這條終止 renderer。TwoTone Freq 的 FIT 回傳頻率與線寬及其誤差，fit 圖另交 Plots；TwoTone PowerDep 的 run 回傳 canonical records。Lookback FIT 只輸出 predict_offset scalar，具名 fit 另由 Plots 發布；GUI ratio0.1／smooth1.0 與 timeFly writeback 不變。其餘 adapters 同樣使用 explicit records，framework 不提供 pyplot 或舊簽名 fallback。
 TwoTone AmpRabi／LenRabi 的 run 回傳 RunRecord，FIT 以 explicit source 與 typed options 分析，結果包含 scalar 與 core fit_quality，`fit` 圖交給 Plots。Gain／length／Rabi frequency 的 scalar writeback 不依賴 cfg；校準 pulse module writeback 只從該 source.cfg 複製 qub_pulse，缺 cfg 時略過 module items。
 T2Echo／T2Ramsey 的 Form 使用具名 Input；adapter.run 將頂層 detune_ratio 轉成要求的 `cfg.detune`，並回傳同次 cfg／Result 的 RunRecord。Analysis 回傳 scalar 與 core fit_quality，並發布具名 fit。Ramsey 的操作員摘要從該次 cfg 讀 Reps × Rounds，從 Result 讀實際 detune。Ramsey q_f writeback 必須具有來源 cfg、實際 detune 與已提交的 fringe fit；canonical load 缺實際 detune 時省略此摘要行，寫回只提 t2r。
 CKP 的 run 配對 cfg 與純 Result 為 RunRecord，兩張 measurement 熱圖分別呈現 ground／excited。FIT 只提交 chi／kappa／res_freq scalar與具名 fit 圖，保留 chi／rf_w／readout_f writeback。
@@ -163,7 +165,7 @@ Readout optimize Freq／FreqGain／Length／Power adapters 將 cfg／Result 配�
 
 ## JPA adapters
 
-JPA Freq／Flux／Power／Check／OneToneFlux 的 run 配對 cfg／Result。四個 FIT 使用 explicit source 與本次 Plots，前三者只回傳最佳 scalar，Check 為空數值結果。Flux／Power 保留 GUI 圖軸重標政策與 best_jpa_* writeback，缺 cfg 也可離線分析；OneToneFlux 沒有 analysis 或 writeback。AutoOptimize 也以 RunRecord 傳遞 grouped 結果，num_points 進 typed cfg；FIT 保留 phase 色彩與 neutral flux label，三個 best_jpa_* writeback 只取該來源的最佳 scalar。
+JPA Freq／Flux／Power／Check／OneToneFlux 的 run 配對 cfg／Result。前四個 primary 使用 explicit source 與本次 Plots，前三者只回傳最佳 scalar，Check 為空數值結果。Flux／Power 保留 GUI 圖軸重標政策與 best_jpa_* writeback，缺 cfg 也可離線分析。AutoOptimize 也以 RunRecord 傳遞 grouped 結果，num_points 進 typed cfg；FIT 保留 phase 色彩與 neutral flux label，三個 best_jpa_* writeback 只取該來源的最佳 scalar。
 
 ## 分析輸出與 Form cfg
 
@@ -198,7 +200,10 @@ Adapter 有七個型別槽，配對實驗 cfg、raw Result、primary options／r
 T_Input 預設為實驗 cfg，四個可選分析槽預設 None，由具名參數推導，不手寫泛型。
 建值時驗必要輸入，不做 I/O；registry 只接受 Adapter、檢查名稱非空與不重複。
 異質 registry 的型別抹除集中於註冊處，不加入 class/value 相容路徑。
-Figures-only 分析回 None，具名圖與空摘要照常保留，不提出 writeback。
+Figures-only 分析回 None，具名圖與空數值摘要照常保留，不提出 writeback。
+即使沒有數值結果，已發布的圖也可讓 `has_analyze_result` 成立。
+RPC 的空摘要見 [Analysis presentation](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation)；recipe 如何接收空結果，見 [作者可呼叫的操作](../recipes/README.md#作者可呼叫的操作)。
+`onetone/power_dep`、`twotone/power_dep`、`twotone/zigzag` 與 `jpa/flux_onetone` 從明確的 Run／Load 來源提供 figures-only Analyze。Load 不自動畫圖。按 Analyze 發布具名圖與有來源 cfg 時的 Reps × Rounds，不回傳數值 Analysis 或 writeback。
 
 ## 修改原則
 

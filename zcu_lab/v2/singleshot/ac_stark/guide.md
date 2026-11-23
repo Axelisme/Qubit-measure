@@ -1,51 +1,25 @@
-## Behavior
+# Single-shot AC-Stark calibration
 
-**Readers:** operator, agent. How to calibrate the single-shot AC-Stark response from the GUI or MCP and interpret the results.
+**Readers:** operator, agent. Measure the qubit resonance shift versus cavity drive gain and calibrate mean photon number.
 
-Single-shot AC-Stark calibration: drives a cavity Stark tone and a qubit probe tone while sweeping cavity gain and qubit frequency (2D), classifying each shot during acquisition against the |g>/|e> IQ-cluster centres. Fits the Stark-shifted resonance versus gain² to extract the AC-Stark coefficient (photon number per gain²). Runs on real hardware.
+## What is measured
 
-## Parameter sources
+Optional **Reset** and **Initial preparation pulse** → overlapping **Cavity Stark tone** and **Qubit probe tone** → **Readout**. Sweep cavity gain and qubit probe RF frequency; classify the shots as g, e or Other. Other means outside both accepted circles or tied, not an identified higher level.
 
-Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1. Qubit sweep is `$qubit.freq` - 700 to `$qubit.freq` + 100 MHz. Qubit probe length/mixer use `$qubit.module.x180.waveform.length` and `$qubit.module.x180.mixer_freq`. Pre/post delay are 1.0/`$resonator.kappa` and 0.5/`$resonator.kappa`; cavity tone length adds 1.0/`$resonator.kappa` to the pi length.
+## Key settings
 
-Readout accepts only the pulse family.
-A mux readout in the library is incompatible.
-Classification uses the readout's circle classifier under Readout → Advanced.
-Run requires a positive radius; missing radius prompts singleshot GE Post.
-Linear has no Other state and is rejected.
-Analyze corrects populations only with the saved readout cfg's confusion matrix.
-Historical cfg without a classifier or matrix skips correction.
+- Before Run, select Pulse **Readout** (not Mux) with a circle classifier and positive radius under **Advanced**. Obtain the radius from [GE Post-Analysis](../ge/guide.md). Measure dispersive shift `$qubit.ext.chi` and resonator linewidth `$resonator.kappa` before Analyze.
+- **Qubit probe RF frequency** starts at stored qubit frequency − 700 to + 100 MHz. Center it on the expected line and leave room for the shift across the **Cavity Stark gain** scan. Probe length and mixer start from the stored π pulse. For κ in MHz, the cavity tone starts from the π length plus 1/κ µs, with pre/post delays of 1/κ and 0.5/κ µs.
+- **Relax delay** starts at 5 × stored ordinary T1 (150 µs if absent; blank if invalid). Shorten it only when independently justified; adding reset does not do so automatically.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+## How to read the results
 
-T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+Compare the g/e/Other maps on the common 0–1 scale. Analyze applies readout correction only with the confusion matrix in the selected result's saved cfg; without it, the maps show classified fractions. Old files without class counts cannot be converted on Load; acquire again.
 
-These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
+In the fit, points mark resonance frequencies extracted from the baseline-subtracted g/e contrast, and the line plots their shift versus gain². R² is the fraction of resonance variation explained by the line. Neither map colors nor resonance locations carry shot SEM bars. Check for a single ridge fully within the span; extend the frequency limit if the selected ridge hits it.
 
-## Module slots
+## Next step
 
-Reset and init start disabled. Cavity/qubit tones start from res_probe/pi_pulse with calibrated timing. Readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Defaults snapshot.
+A well-resolved linear shift yields the coefficient `c` in photons per gain². Writeback proposes `$qubit.ext.ac_stark_coeff`; MIST uses `mean photon number = c × gain²` when that conversion is available.
 
-## Typical writeback
-
-Proposes the fitted AC-Stark coefficient at `$qubit.ext.ac_stark_coeff`, in photon number per gain². MIST uses it to rescale the x-axis to photon number.
-
-## Recommended
-
-Calibrate the readout with singleshot/ge Primary and Post; run after the dispersive-shift experiment has set '`$qubit.ext.chi`' / '`$resonator.kappa`'. Sweep the Stark gain across the onset and the probe frequency around the qubit line.
-
-## Saved counts
-
-Save keeps `counts` shaped `(Ngain, Nfreq, 3)` in `[g,e,other]` order, with
-`population_states=[0,1,2]`. Other counts shots outside the accepted circles
-or tied between them. It is not a calibrated leakage population.
-Each point sums to the shots acquired across completed rounds. Live plots and
-Analyze divide each point by its total before displaying populations or applying
-the saved confusion matrix. Sweep coordinates and units are unchanged. Cfg schema
-remains 3.0.
-
-Old files storing `populations` instead of `counts` are unsupported. Load reports
-the missing `counts` variable. Acquire a new run; Load does not convert stored
-fractions to counts.
-
-**Last updated:** 2026-10-29
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).

@@ -64,7 +64,7 @@ def ftf_document() -> dict[str, object]:
                 "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                 "ro_ch": 0,
                 "gain": 10000.0,
-                "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+                "noise_psd_adc2_ns": 0.0,
             },
         },
         "numerics": {
@@ -102,7 +102,7 @@ def dual_readout_document(channels: tuple[int, ...] = (4, 1)) -> dict[str, objec
                 "gain": 1000.0 + i,
                 "phase_deg": 10.0 + i,
                 "offset_adc": [0.1 + i, -0.2],
-                "noise_psd_adc2_ns": [[1.0 + i, 0.0], [0.0, 2.0]],
+                "noise_psd_adc2_ns": 1.0 + i,
                 "time_of_flight_ns": 20.0 + i,
             }
             for i, ch in enumerate(channels)
@@ -125,7 +125,7 @@ def mux_document(channels=(4, 1)) -> dict[str, object]:
                 "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                 "ro_ch": ch,
                 "gain": 10000.0 + 1000 * i,
-                "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+                "noise_psd_adc2_ns": 0.0,
             }
             for i, ch in enumerate(channels)
         ],

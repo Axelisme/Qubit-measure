@@ -448,7 +448,7 @@ def _start_live_view(
     ax.set(xlabel="Candidate evaluation (count)", ylabel="Mean terminal P(g,g)")
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     viewer = live_errorbar(ax)
-    ax.lines[0].set(label="Measured ± shot SEM", linestyle="none")
+    ax.lines[0].set(label="Measured ± shot SEM")
     (best_line,) = ax.plot([], [], "--", color="C1", label="Best measured so far")
     (skipped_line,) = ax.plot(
         [], [], "x", color="0.45", label="Envelope exceeds DAC limit"
@@ -550,6 +550,8 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
             cfg_schema_version="3.0",
             tag="two_qubit/cz_optimize",
             result_builder=_restore_result,
+            labber_layout="independent",
+            labber_variables=("params", "peak"),
         )
     )
 
@@ -675,7 +677,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
             evaluations,
             targets,
             yerr=errors,
-            fmt=".",
+            fmt=".-",
             color="C0",
             label="Measured ± shot SEM",
         )

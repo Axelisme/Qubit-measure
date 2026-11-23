@@ -3,23 +3,25 @@
 from __future__ import annotations
 
 import json
-import sys
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
+from hashlib import sha256
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 from qtpy import QtCore
 from qtpy.QtCore import QCoreApplication, QTimer
 from zcu_tools import program
-from zcu_tools.gui.app import measure
-from zcu_tools.gui.app.measure import controller
+from zcu_tools.gui.app.measure import Registry, controller
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.simulators.ftf import config, environment
+from zcu_tools.simulators.ftf.config.schema import FTFSettings, Numerics
 
+from tests.gui.app.measure._synthetic import SampleAdapter
 from tools import experiment_wall_time
 from tools.experiment_wall_time import main
 
@@ -49,8 +51,10 @@ class _SyntheticController:
         bus: BaseEventBus,
         project_root: str,
         on_open: Callable[[], None],
+        on_point: Callable[[Path], None] | None,
         on_run: Callable[[_SyntheticController], None],
         on_cancel: Callable[[_SyntheticController], None],
+        on_write: Callable[[object], None] | None,
     ) -> None:
         self.bus = bus
         self.telemetry = Path(project_root).with_name("telemetry")
@@ -58,18 +62,33 @@ class _SyntheticController:
         self.idle = True
         self.on_run = on_run
         self.on_cancel = on_cancel
+        self.project = Path(project_root)
+        self.entry: Path | None = None
+
+        def open_entry(request: EntryRequest) -> None:
+            self.entry = self.project / "result" / request.name
+            if not self.entry.is_dir():
+                raise FileNotFoundError(self.entry)
+            on_open()
+
+        def use_point(label: str) -> None:
+            assert self.entry is not None
+            point = self.entry / "points" / label
+            if not point.is_dir():
+                raise FileNotFoundError(point)
+            if on_point is not None:
+                on_point(point)
+
         self.run_analyze_control = SimpleNamespace(
             start_run=self.start_run, cancel_run=self.cancel_run
         )
-        self.entry_control = SimpleNamespace(
-            open_entry=lambda _request: on_open(), use_point=lambda _point: None
-        )
+        self.entry_control = SimpleNamespace(open_entry=open_entry, use_point=use_point)
         self.tab_control = SimpleNamespace(
             new_tab=lambda adapter: adapter,
             get_tab_snapshot=lambda _tab: SimpleNamespace(run=None),
         )
         self.cfg_resources = SimpleNamespace(
-            lookup=lambda _tab: SimpleNamespace(result=object)
+            lookup=lambda _tab: SimpleNamespace(write=on_write, result=object)
         )
         self.session_services = SimpleNamespace(
             soc_connection=SimpleNamespace(install_soc=lambda *_args: None)
@@ -123,58 +142,71 @@ def core_app() -> Iterator[QCoreApplication]:
     yield QCoreApplication.instance() or QCoreApplication([])
 
 
-def _headless_inputs(directory: Path) -> None:
-    fixture = directory / "fixture"
-    fixture.mkdir(parents=True)
-    (fixture / "point.txt").write_text("abc")
+def _headless_inputs(directory: Path, *adapters: str) -> None:
+    directory.mkdir(parents=True)
     (directory / "board-profile.yaml").write_text("{}")
     (directory / "ftf-settings.yaml").write_text("{}")
-    (directory / "case-inputs.json").write_text('{"entry":"demo","point":"initial"}')
-    (directory / "overrides.json").write_text("[]")
+    (directory / "case-inputs.json").write_text(
+        json.dumps(
+            {
+                "entry": "demo",
+                "point": "initial",
+                "unpinned": {"form": "current Form", "point": "fixture point"},
+                "scenes": [
+                    {"scene_id": key, "adapter": key, "basis": "test workload"}
+                    for key in adapters or ("fake/frequency",)
+                ],
+            }
+        )
+    )
+    point = directory / "fixture/result/demo/points/initial"
+    point.mkdir(parents=True)
+    (point / "parameters.yaml").write_text("parameter-token")
+    (point / "library.yaml").write_text("library-token")
+    (point / "aliases.yaml").write_text("aliases-token")
 
 
 def _install_headless_controller(
     monkeypatch: pytest.MonkeyPatch,
     clock: _Clock,
-    adapters: Mapping[str, Path | None],
+    adapters: tuple[str, ...],
     on_run: Callable[[_SyntheticController], None],
     on_cancel: Callable[[_SyntheticController], None],
     *,
-    on_ftf: Callable[[int], None] | None = None,
-) -> None:
+    on_ftf: Callable[[int, FTFSettings, float | None], None] | None = None,
+    on_point: Callable[[Path], None] | None = None,
+    on_write: Callable[[object], None] | None = None,
+) -> Callable[[], Registry]:
     def open_entry() -> None:
         clock.seconds += 40.0
 
     def make_controller(
         *, bus: BaseEventBus, project_root: str, **_options: object
     ) -> _SyntheticController:
-        return _SyntheticController(bus, project_root, open_entry, on_run, on_cancel)
+        return _SyntheticController(
+            bus, project_root, open_entry, on_point, on_run, on_cancel, on_write
+        )
 
-    # main's default composition has no public injection for lab, FTF or Controller.
-    # Substitute only those collaborators; keep the tool, bus and Qt loop real.
-    assembly = ModuleType("zcu_lab.assembly")
-    monkeypatch.setattr(
-        assembly,
-        "lab_definitions",
-        lambda: SimpleNamespace(
-            templates={},
-            register_components=lambda _: None,
-            register_experiments=lambda _: None,
-        ),
-        raising=False,
-    )
-    monkeypatch.setitem(sys.modules, "zcu_lab.assembly", assembly)
-    monkeypatch.setattr(
-        measure,
-        "Registry",
-        lambda **_: SimpleNamespace(
-            list_names=lambda: list(adapters),
-            create=lambda key: SimpleNamespace(guide_path=adapters[key]),
-        ),
-    )
+    def register() -> Registry:
+        registry = Registry()
+        for adapter in adapters:
+            registry.register(adapter, SampleAdapter)
+        return registry
+
+    # Keep the registry, CLI, bus and Qt loop real. Replace FTF, the Controller
+    # and the clocks so tests can exercise dispatch and cancellation without evolution.
     monkeypatch.setattr(program, "build_soccfg", lambda _: object())
+    preset = FTFSettings.model_construct(
+        numerics=Numerics.model_construct(
+            time_scale=1.5, seed=42, projection_weight_floor=0.0002
+        )
+    )
+    monkeypatch.setattr(config, "load_ftf", lambda _: preset)
+    # Supply a synthetic dirty checkout at the subprocess boundary.
     monkeypatch.setattr(
-        config, "load_ftf", lambda _: SimpleNamespace(with_telemetry=lambda **_: None)
+        experiment_wall_time,
+        "subprocess",
+        SimpleNamespace(check_output=lambda *a, **kw: "?? example\n"),
     )
 
     def make_environment(soccfg: object) -> SimpleNamespace:
@@ -187,10 +219,14 @@ def _install_headless_controller(
         )
 
     def observe_environment(
-        _settings: object, *, soccfg: object, workers: int = 1
+        settings: FTFSettings,
+        *,
+        soccfg: object,
+        workers: int = 1,
+        time_scale: float | None = None,
     ) -> SimpleNamespace:
         if on_ftf is not None:
-            on_ftf(workers)
+            on_ftf(workers, settings, time_scale)
         return make_environment(soccfg)
 
     # The CLI report does not expose the factory argument. Delegate to the existing
@@ -200,13 +236,120 @@ def _install_headless_controller(
     # The Run's monotonic and UTC observation clocks are not CLI arguments.
     monkeypatch.setattr(experiment_wall_time, "perf_counter", clock.monotonic)
     monkeypatch.setattr(experiment_wall_time, "datetime", clock)
+    return register
+
+
+@pytest.mark.usefixtures("core_app")
+def test_main_prepares_run_from_a_disposable_copy_of_the_manifest_point(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_dir, output = tmp_path / "inputs", tmp_path / "output"
+    _headless_inputs(data_dir)
+    point_path = Path("result/demo/points/initial")
+    received: list[tuple[str, ...]] = []
+
+    def inspect_point(point: Path) -> None:
+        names = ("parameters.yaml", "library.yaml", "aliases.yaml")
+        received.append(tuple((point / name).read_text() for name in names))
+        (point / "library.yaml").write_text("run-local-change")
+
+    register = _install_headless_controller(
+        monkeypatch,
+        _Clock(),
+        ("fake/frequency",),
+        lambda ctrl: QTimer.singleShot(0, ctrl.complete),
+        lambda _: pytest.fail("a completed Run must not be cancelled"),
+        on_point=inspect_point,
+    )
+    assert (
+        main(
+            ["--output", str(output)],
+            data_dir=data_dir,
+            registry_factory=register,
+            read_commit=lambda: "abc",
+        )
+        == 0
+    )
+    assert received == [("parameter-token", "library-token", "aliases-token")]
+    assert (
+        data_dir / "fixture" / point_path / "library.yaml"
+    ).read_text() == "library-token"
+
+
+@pytest.mark.parametrize(
+    ("notes", "basis"),
+    [
+        pytest.param({}, {}, id="omitted"),
+        pytest.param(
+            {"unpinned": {"form": "", "point": " "}}, {"basis": ""}, id="blank"
+        ),
+        pytest.param({"unpinned": None}, {"basis": []}, id="opaque"),
+    ],
+)
+@pytest.mark.usefixtures("core_app")
+def test_main_applies_selected_overrides_without_reading_review_notes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    notes: dict[str, object],
+    basis: dict[str, object],
+) -> None:
+    data_dir, output = tmp_path / "inputs", tmp_path / "output"
+    _headless_inputs(data_dir)
+    source = data_dir / "case-inputs.json"
+    raw = json.dumps(
+        {
+            "entry": "demo",
+            "point": "initial",
+            **notes,
+            "scenes": [
+                {"scene_id": "other", "adapter": "fake/power", **basis},
+                {
+                    "scene_id": "scout",
+                    "adapter": "fake/frequency",
+                    **basis,
+                    "overrides": [
+                        {"path": ["delay", "stop"], "value": 3, **basis},
+                        {"path": ["delay", "n"], "value": 5, **basis},
+                    ],
+                },
+            ],
+        },
+        indent=2,
+    ).encode()
+    source.write_bytes(raw)
+    writes: list[object] = []
+    register = _install_headless_controller(
+        monkeypatch,
+        _Clock(),
+        ("fake/frequency", "fake/power"),
+        lambda ctrl: QTimer.singleShot(0, ctrl.complete),
+        lambda _: pytest.fail("a completed Run must not be cancelled"),
+        on_write=writes.append,
+    )
+    assert (
+        main(
+            ["--select", "scout", "--output", str(output)],
+            data_dir=data_dir,
+            registry_factory=register,
+            read_commit=lambda: "abc",
+        )
+        == 0
+    )
+    assert writes == [{("delay", "stop"): 3, ("delay", "n"): 5}]
+    report = json.loads((output / "report.json").read_text())
+    assert [(row["scene_id"], row["adapter"]) for row in report["rows"]] == [
+        ("scout", "fake/frequency")
+    ]
+    plan = json.loads((output / "batch.json").read_text())
+    assert plan["inputs"][source.name] == sha256(raw).hexdigest()
 
 
 @pytest.mark.parametrize(
     ("worker_args", "expected"), [([], 1), (["--workers", "3"], 3)]
 )
 @pytest.mark.usefixtures("core_app")
-def test_main_configures_ftf_workers(
+def test_main_configures_ftf_workers_and_stamps_batch_telemetry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     worker_args: list[str],
@@ -215,24 +358,40 @@ def test_main_configures_ftf_workers(
     data_dir, output = tmp_path / "inputs", tmp_path / "output"
     _headless_inputs(data_dir)
     workers_seen: list[int] = []
-    _install_headless_controller(
+    settings_seen: list[tuple[FTFSettings, float | None]] = []
+
+    def observe_ftf(
+        workers: int, settings: FTFSettings, time_scale: float | None
+    ) -> None:
+        workers_seen.append(workers)
+        settings_seen.append((settings, time_scale))
+
+    register = _install_headless_controller(
         monkeypatch,
         _Clock(),
-        {"fake/frequency": None},
+        ("fake/frequency",),
         lambda ctrl: QTimer.singleShot(0, ctrl.complete),
         lambda _: pytest.fail("a completed Run must not be cancelled"),
-        on_ftf=workers_seen.append,
+        on_ftf=observe_ftf,
     )
 
     assert (
         main(
             ["--output", str(output), *worker_args],
             data_dir=data_dir,
+            registry_factory=register,
             read_commit=lambda: "abc",
         )
         == 0
     )
     assert workers_seen == [expected]
+    ((settings, time_scale),) = settings_seen
+    assert time_scale == 0.0
+    assert settings.numerics.time_scale == 1.5
+    assert settings.numerics.seed == 42
+    assert settings.numerics.projection_weight_floor == 0.0002
+    assert settings.numerics.telemetry.commit == "abc"
+    assert settings.numerics.telemetry.dirty is True
 
 
 @pytest.mark.parametrize("orphan", [False, True], ids=["paired", "orphan"])
@@ -309,25 +468,27 @@ def test_main_times_only_dispatch_to_terminal_and_sums_its_acquires(
 
     data_dir, output = tmp_path / "inputs", tmp_path / "output"
     _headless_inputs(data_dir)
-    _install_headless_controller(
+    register = _install_headless_controller(
         monkeypatch,
         clock,
-        {"fake/frequency": None},
+        ("fake/frequency",),
         run,
         lambda _: pytest.fail("a completed Run must not be cancelled"),
     )
 
     assert (
-        main(["--output", str(output)], data_dir=data_dir, read_commit=lambda: "abc")
+        main(
+            ["--output", str(output)],
+            data_dir=data_dir,
+            registry_factory=register,
+            read_commit=lambda: "abc",
+        )
         == 0
     )
 
     report = json.loads((output / "report.json").read_text())
     [row] = report["rows"]
     assert report["commit"] == "abc"
-    assert report["inputs"]["fixture/point.txt"] == (
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    )
     assert row["wall_s"] == 8.0
     assert row["started_at"] == "2026-11-21T00:00:52+00:00"
     assert row["finished_at"] == "2026-11-21T00:01:00+00:00"
@@ -353,7 +514,7 @@ def test_main_times_only_dispatch_to_terminal_and_sums_its_acquires(
         )
     ] == [1.0, 2.75, 1.5, 0.75, 6.0, None, 1.0]
     assert (
-        "| fake/frequency | 8.000 | 1.000 | 2.750 | 1.500 | 0.750 | 6.000 | 1.000 | 2 |"
+        "| fake/frequency | fake/frequency | 8.000 | 1.000 | 2.750 | 1.500 | 0.750 | 6.000 | 1.000 | 2 |"
         in summary
     )
 
@@ -403,15 +564,16 @@ def test_timeout_continues_only_when_terminal_and_idle_are_observed_in_grace(
         QTimer.singleShot(0, settle)
 
     data_dir, output = tmp_path / "inputs", tmp_path / "output"
-    _headless_inputs(data_dir)
-    _install_headless_controller(
-        monkeypatch, clock, {"fake/frequency": None, "fake/power": None}, run, cancel
+    _headless_inputs(data_dir, "fake/frequency", "fake/power")
+    register = _install_headless_controller(
+        monkeypatch, clock, ("fake/frequency", "fake/power"), run, cancel
     )
 
     assert (
         main(
             ["--output", str(output), "--row-timeout", "180"],
             data_dir=data_dir,
+            registry_factory=register,
             read_commit=lambda: "abc",
         )
         == expected_exit
@@ -452,8 +614,10 @@ def test_timeout_judges_only_the_measured_core_lower_bound(
     _use_virtual_deadline(monkeypatch, clock)
 
     def run(ctrl: _SyntheticController) -> None:
-        legacy = {
-            "acquire_id": "legacy",
+        unreached = {
+            "acquire_id": "unreached",
+            "complete": False,
+            "materialize_wall_s": None,
             "families": {},
             "wall_s": 10,
             "compile_wall_s": 1,
@@ -461,14 +625,19 @@ def test_timeout_judges_only_the_measured_core_lower_bound(
             "readout_wall_s": 1,
         }
         records = [
-            legacy,
-            {"event": "materialize", "acquire_id": "legacy", "materialize_wall_s": 0.5},
+            unreached,
+            {
+                "event": "materialize",
+                "acquire_id": "unreached",
+                "materialize_wall_s": 0.5,
+            },
         ]
         if evolve_s is not None:
             records += [
                 {
-                    **legacy,
+                    **unreached,
                     "acquire_id": "raw",
+                    "complete": True,
                     "wall_s": 185,
                     "evolve_wall_s": evolve_s,
                     "readout_wall_s": 4,
@@ -487,10 +656,10 @@ def test_timeout_judges_only_the_measured_core_lower_bound(
 
     data_dir, output = tmp_path / "inputs", tmp_path / "output"
     _headless_inputs(data_dir)
-    _install_headless_controller(
+    register = _install_headless_controller(
         monkeypatch,
         clock,
-        {"fake/frequency": None},
+        ("fake/frequency",),
         run,
         lambda ctrl: QTimer.singleShot(0, lambda: ctrl.complete("cancelled")),
     )
@@ -498,6 +667,7 @@ def test_timeout_judges_only_the_measured_core_lower_bound(
         main(
             ["--output", str(output), "--row-timeout", "200"],
             data_dir=data_dir,
+            registry_factory=register,
             read_commit=lambda: "abc",
         )
         == 0

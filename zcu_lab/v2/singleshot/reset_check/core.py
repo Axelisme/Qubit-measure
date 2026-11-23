@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
-from zcu_tools.analysis.singleshot import correct_populations
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -28,14 +28,19 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.readout import require_circle_classifiers
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.singleshot.population_analysis import (
+    CLASSIFIED_FIGURE,
+    UNAVAILABLE_NOTICE,
+    circle_readout_series,
+)
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
 
 BRANCH_LABELS = ("Before reset", "Reset only", "Reset + Rabi")
 BRANCH_COUNT = len(BRANCH_LABELS)
-BRANCH_LINESTYLES = ("-", "--", ":")
+_STATES = (("g", "tab:blue"), ("e", "tab:red"), ("other", "tab:green"))
 
 
 @dataclass(frozen=True)
@@ -65,21 +70,43 @@ class ResetCheckAnalysis:
     analyzed_reset_points: int
 
 
-def _population_line_kwargs() -> list[dict[str, str]]:
-    """Return branch/state labels and styles in the flattened count-axis order."""
-    return [
-        {"label": f"{label}: P({state})", "color": color, "linestyle": style}
-        for label, style in zip(BRANCH_LABELS, BRANCH_LINESTYLES, strict=True)
-        for state, color in (("g", "blue"), ("e", "red"), ("other", "green"))
-    ]
-
-
 class ResetCheckCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
-    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select the reset module applied before preparation, or leave empty to skip reset.",
+        ),
+    ] = None
+    rabi_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit drive pulse",
+            description="Enter the resonant drive that prepares the starting population and tests re-excitation.",
+        ),
+    ]
+    tested_reset: Annotated[
+        Reset.Cfg,
+        FieldMeta(
+            label="Tested reset",
+            description="Enter the reset module inserted after the first qubit drive in the two reset branches.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the readout module applied at the end of the shot.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Qubit drive gain",
+            unit="a.u.",
+            description="Set the gain sweep in a.u. for both applications of the qubit drive.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
@@ -160,26 +187,45 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
 
         # 2. Show G/E/Other for all three independent preparations.
 
-        figure, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse gain (a.u.)", ylabel="P(g), P(e), P(other)")
-        viewer = live_line(ax, num_lines=BRANCH_COUNT * POPULATION_COUNT)
-        ax.set_ylim(-0.02, 1.02)
-        for line, kwargs in zip(ax.lines, _population_line_kwargs(), strict=True):
-            line.set(**kwargs)
-        ax.legend()
+        figure, _ = context.plots.subplots(
+            ncols=3,
+            num="measurement",
+            figsize=(10, 4.5),
+            layout="constrained",
+        )
+        progress = figure.suptitle("Reset check · qubit · classified populations")
+        viewers = [live_errorbar(ax, num_lines=POPULATION_COUNT) for ax in figure.axes]
+        for ax, branch in zip(figure.axes, BRANCH_LABELS, strict=True):
+            ax.set(
+                xlabel="Qubit drive gain (a.u.)",
+                ylabel="Outcome probability",
+                title=branch,
+            )
+            for line, bars, (state, color) in zip(
+                ax.lines, ax.collections, _STATES, strict=True
+            ):
+                line.set(label=f"P({state})", color=color, marker="o", markersize=3)
+                bars.set_color(color)
+            ax.legend(loc="best")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
-            """Draw acquired shot counts on the measurement axes; return changed artists.
-
-            Read scan-shaped samples without changing them. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            return viewer.set(
-                gains,
-                (data / data.sum(axis=-1, keepdims=True))
-                .reshape(gains.size, BRANCH_COUNT * POPULATION_COUNT)
-                .T,
+            """Render one branch per panel and count the acquired gain/branch cells."""
+            totals = data.sum(axis=-1)
+            progress.set_text(
+                "Reset check · qubit · classified populations\n"
+                f"{np.count_nonzero(totals > 0)}/{totals.size} gain–branch points acquired"
+            )
+            populations = data / totals[..., None]
+            covariance = class_probability_covariance(data)
+            sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
+            return (
+                progress,
+                *(
+                    artist
+                    for i, viewer in enumerate(viewers)
+                    for artist in viewer.set(gains, populations[:, i].T, sem[:, i].T)
+                ),
             )
 
         figure.show()
@@ -230,12 +276,13 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         options: ResetCheckAnalyzeOptions,
         *,
         plots: Plots,
-    ) -> ResetCheckAnalysis:
+    ) -> ResetCheckAnalysis | None:
         """Summarize reset-only excited and Other populations across sampled gains.
 
         Apply options.confusion_matrix when supplied, otherwise use classified
         fractions normalized per row from source.result.counts. Return reset-only
-        mean/worst sampled populations, and plot all three corrected G/E/Other branches.
+        mean/worst sampled populations, and plot all three G/E/Other branches.
+        For an unsolvable correction, publish only classified fractions and return None.
         Invalid axes or no finite reset-only samples raise ValueError.
         """
         # 1. Check population axes before optional readout-confusion correction.
@@ -246,48 +293,72 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
                 "Reset check requires (gain, branch, G/E/Other) populations"
             )
         populations = result.counts / result.counts.sum(axis=-1, keepdims=True)
-        populations = correct_populations(populations, confusion_matrix)
+        series = circle_readout_series(populations, result.counts, confusion_matrix)
+        populations, sem = series.values, series.sem
 
         # 2. Summarize finite reset-only samples, not reset-channel fidelity.
-        reset_e = populations[:, 1, 1]
-        valid = np.isfinite(result.gains) & np.isfinite(populations[:, 1]).all(axis=-1)
-        if not valid.any():
-            raise ValueError("No finite reset-only populations to analyze")
-        worst = np.flatnonzero(valid)[np.argmax(reset_e[valid])]
-        analysis = ResetCheckAnalysis(
-            float(np.mean(reset_e[valid])),
-            float(reset_e[worst]),
-            float(np.max(populations[valid, 1, 2])),
-            float(result.gains[worst]),
-            int(valid.sum()),
-        )
-
-        # 3. Compare the independent preparations on the same gain axis.
-        _, ax = plots.subplots(num="populations", figsize=(10, 6))
-        order = np.argsort(result.gains)
-        for values, kwargs in zip(
-            populations[order]
-            .reshape(result.gains.size, BRANCH_COUNT * POPULATION_COUNT)
-            .T,
-            _population_line_kwargs(),
-            strict=True,
-        ):
-            ax.plot(
-                result.gains[order],
-                values,
-                marker=".",
-                label=kwargs["label"],
-                color=kwargs["color"],
-                linestyle=kwargs["linestyle"],
+        analysis = None
+        if not series.correction_unavailable:
+            reset_e = populations[:, 1, 1]
+            valid = np.isfinite(result.gains) & np.isfinite(populations[:, 1]).all(
+                axis=-1
             )
-        ax.set(
-            xlabel="Pulse gain (a.u.)",
-            ylabel="Corrected P(g), P(e), P(other)"
-            if confusion_matrix is not None
-            else "Classified P(g), P(e), P(other)",
-            ylim=(-0.02, 1.02),
-            title=f"Reset excited: mean {analysis.reset_mean_excited_population:.2%}, worst sampled {analysis.reset_max_excited_population:.2%}\nOther is not calibrated leakage; populations are not reset-channel fidelity",
+            if not valid.any():
+                raise ValueError("No finite reset-only populations to analyze")
+            worst = np.flatnonzero(valid)[np.argmax(reset_e[valid])]
+            analysis = ResetCheckAnalysis(
+                float(np.mean(reset_e[valid])),
+                float(reset_e[worst]),
+                float(np.max(populations[valid, 1, 2])),
+                float(result.gains[worst]),
+                int(valid.sum()),
+            )
+
+        # 3. Compare the three branches, with upward/downward shot sampling errors.
+        fig, _ = plots.subplots(
+            num=CLASSIFIED_FIGURE if series.correction_unavailable else "populations",
+            ncols=3,
+            figsize=(10, 4.5),
+            layout="constrained",
         )
-        ax.legend(ncol=3, fontsize=8)
-        ax.grid(True)
+        quantity = (
+            "classified populations"
+            if confusion_matrix is None
+            else "readout-corrected populations"
+        )
+        if series.correction_unavailable:
+            quantity = f"classified fractions\n{UNAVAILABLE_NOTICE}"
+        fig.suptitle(f"Reset check · qubit · {quantity}")
+        order = np.argsort(result.gains)
+        for branch, ax in enumerate(fig.axes):
+            for outcome, (state, color) in enumerate(_STATES):
+                ax.errorbar(
+                    result.gains[order],
+                    populations[order, branch, outcome],
+                    yerr=sem[order, branch, outcome],
+                    fmt="o-",
+                    markersize=3,
+                    capsize=2,
+                    label=f"P({state})",
+                    color=color,
+                )
+            ax.set(
+                xlabel="Qubit drive gain (a.u.)",
+                ylabel="Classified fraction"
+                if series.correction_unavailable
+                else "Outcome probability",
+                title=BRANCH_LABELS[branch],
+            )
+            ax.legend(loc="best", title="Data ± shot SEM")
+
+        if analysis is None:
+            return None
+        ax_reset = fig.axes[1]
+        ax_reset.axvline(analysis.worst_sample_gain, color="0.35", linestyle=":")
+        ax_reset.set_title(
+            f"Reset only\nMean P(e) = {analysis.reset_mean_excited_population:.2%}\n"
+            f"Worst P(e) = {analysis.reset_max_excited_population:.2%} "
+            f"at {analysis.worst_sample_gain:.3g} a.u.",
+            fontsize=10,
+        )
         return analysis

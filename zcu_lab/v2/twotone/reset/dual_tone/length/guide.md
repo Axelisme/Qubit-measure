@@ -1,23 +1,19 @@
-## Behavior
+**Readers:** operator, agent. Find a duration for two simultaneous reset tones from the averaged-IQ response.
 
-**Readers:** operator, agent. Dual-tone reset length sweep: holds the tested two-pulse reset at its calibrated sideband frequencies and gains and sweeps its duration (both tones together), showing how the residual excitation decays with reset length. Runs on real hardware. Run last, to pick the shortest length that fully resets the qubit.
+## Sequence
 
-**Last updated:** 2026-10-21
+Optional **Reset** → optional **Preparation pulse** → both reset tones → **Readout** after the longer tone.
 
-## Parameter sources
+## Key settings
 
-Tested frequencies read `$qubit.ext.reset_f1` and `$qubit.ext.reset_f2`; gains read `$qubit.ext.reset_gain1` and `$qubit.ext.reset_gain2`. Seeds 51 length points from 0.05 to 40.0 µs, with relax delay starting at 5*T1. Open and Defaults fill editable starting values from the selected aliases and calibration. Qubit pulse templates read `$qubit.freq` and `$qubit.wiring.ch`. Readout templates read `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
+- Check preparation (if used) and readout. In **Tested reset**, use calibrated carriers and gains; the starting values are `$qubit.ext.reset_f1`, `$qubit.ext.reset_f2`, `$qubit.ext.reset_gain1` and `$qubit.ext.reset_gain2`.
+- Sweep **Tone 1 pulse duration** through the expected plateau. Tone 2 duration = swept duration + the configured tone 2 minus tone 1 duration. Set **Start** so both are positive.
+- **Relax delay** starts at 5 × T1 (150 µs if absent); enter the wait if T1 is invalid.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+## Read the figures and choose a duration
 
-## Module slots
+Live and Analyze show mean IQ on its principal variation axis (I until two means are available). It is contrast, not population. Bars are shot SEM: sample SD along that axis divided by √(retained shots), not fit error or round-to-round scatter. Mean-only files show no bars.
 
-Tested reset starts as an editable copy of the two_pulse_reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+Choose the shortest acquired duration on a sustained plateau within the point errors. Extend **Stop** if the trace is still changing; refine around the first transition while keeping the tone duration difference. Enter the chosen duration manually and verify the state preparation separately. There is no writeback.
 
-## Typical writeback
-
-Analysis plots the length response for manual selection. Calibration stays unchanged until you update it. The dual-tone power experiment proposes the tested reset module.
-
-## Recommended
-
-A length sweep from ~0.05 µs to a few times the expected reset time captures the full decay; shorten the span once the plateau is clear.
+Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../../operator-workflow.md).

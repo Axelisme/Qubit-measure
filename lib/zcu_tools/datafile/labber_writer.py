@@ -24,7 +24,8 @@ def write_labber(
 
     NumPy-ordered axes convert to Labber's inner-first order. Variable keys become
     channel names and grouped identities; grouped names obey Labber's lowercase
-    snake-case identity contract. At least one real step axis is required.
+    snake-case identity contract. A variable without a step axis raises
+    ValueError before file creation.
     Caller explicitly supplies comment/tags/project/user/creation_time through
     metadata; no JSON documents are interpreted. Use encode_labber_comment at
     the caller when a cfg comment envelope is wanted.

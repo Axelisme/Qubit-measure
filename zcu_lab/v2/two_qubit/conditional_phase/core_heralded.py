@@ -1,7 +1,9 @@
 """Joint gg/ee heralded conditional phase."""
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from textwrap import fill
 from typing import ClassVar
 
 import numpy as np
@@ -37,17 +39,20 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
 
+from .._phase import QuadraturePhase, phase_display_sem, phase_variance
+from .._phase_plot import wrapped_phase_plot_data
 from .._sums import herald_probabilities, qubit_sigma, terminal_counts
 from .core import (
     ConditionalPhaseAnalysis,
     ConditionalPhaseCfg,
     PhaseCrossings,
-    QuadraturePhase,
     count_quadratures,
     fitted_crossings,
     phase_points,
     started_trains,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -134,7 +139,7 @@ def _plot_terminal_quadratures(
                 frequencies,
                 values[b, q],
                 yerr=sem[b, q],
-                fmt=".",
+                fmt=".-",
                 color=f"C{q}",
                 label=f"{projection} ± shot SEM",
             )
@@ -160,7 +165,7 @@ def _start_live_view(
         ax.ticklabel_format(useOffset=False)
         viewers.append(live_errorbar(ax, num_lines=2))
         for line, projection in zip(ax.lines, ("X", "Y"), strict=True):
-            line.set(label=f"{projection} ± shot SEM", linestyle="none")
+            line.set(label=f"{projection} ± shot SEM")
     fig.legend(
         *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
     )
@@ -399,12 +404,22 @@ class ConditionalPhaseHeraldedExp(
             np.where(complete, gg_stats.values, np.nan),
             np.where(complete[::-1], -ee_stats.values, np.nan),
         )
-        phases, ee_phases = phase_points(gg_values), phase_points(ee_values)
+        phases = (phase_points(gg_values), phase_points(ee_values))
+        quadratures = np.stack((gg_values, ee_values))
+        variances = np.stack((gg_stats.variances, ee_stats.variances))
+        phase_var = phase_variance(
+            quadratures[:, :, 0],
+            quadratures[:, :, 1],
+            variances[:, :, 0],
+            variances[:, :, 1],
+        )
+        retained = np.stack((gg_stats.acquired, ee_stats.acquired))
+        phase_sem = phase_display_sem(phase_var, retained[:, :, 0], retained[:, :, 1])
         # 2. Share sign-corrected gg/ee slopes by actual spectator; retain gg-only comparison.
         fitted = fit_phase_slopes(
             data.gate_counts,
-            np.stack((gg_values, ee_values)),
-            np.stack((gg_stats.variances, ee_stats.variances)),
+            quadratures,
+            variances,
             np.stack(
                 (
                     np.where(complete, gg_stats.acquired, np.nan),
@@ -468,8 +483,8 @@ class ConditionalPhaseHeraldedExp(
                 frequencies,
                 int(n),
                 cfg.target.capitalize(),
-                tuple(row[j] for row in phases),
-                tuple(row[j] for row in ee_phases),
+                tuple(tuple(row[j] for row in group) for group in phases),
+                phase_sem[:, :, j],
             )
 
         _plot_herald_map(plots, data.gate_counts, data.frequencies, herald_matrix)
@@ -549,8 +564,13 @@ def _plot_phase_crossing(
 ) -> None:
     """Mark existing interpolated roots of the wrapped conditional phase."""
     fig, ax = plots.subplots(num="phase", figsize=(7, 4.8), layout="constrained")
-    ax.plot(xs, conditional, ".", color="C0", label="Joint (g,g)/(e,e)")
-    ax.plot(xs, gg_only, ".", color="C1", label="(g,g) only")
+    ax.plot(
+        *wrapped_phase_plot_data(xs, conditional),
+        ".-",
+        color="C0",
+        label="Joint (g,g)/(e,e)",
+    )
+    ax.plot(*wrapped_phase_plot_data(xs, gg_only), ".-", color="C1", label="(g,g) only")
     ax.axhline(-180, color="0.45", linestyle="--", label="π modulo 360°")
     ax.axhline(180, color="0.45", linestyle="--")
     if crossings.frequencies_mhz:
@@ -564,7 +584,9 @@ def _plot_phase_crossing(
     result = (
         f"Selected π crossing = {crossings.frequencies_mhz[0]:.7g} MHz"
         if crossings.reason is None
-        else crossings.reason
+        else "\n".join(
+            fill(reason, width=60) for reason in crossings.reason.split("; ")
+        )
     )
     ax.set(
         xlabel="Common CZ frequency (MHz)",
@@ -593,13 +615,16 @@ def _plot_slopes(
     ax, quality_ax = fig.axes
     for b, state in enumerate(("g", "e")):
         for fit_group, marker, label in (
-            (fitted, ".", f"Joint spectator {state}"),
-            (gg_only, "x", f"(g,g) only, spectator {state}"),
+            (fitted, ".-", f"Joint spectator {state}"),
+            (gg_only, "x-", f"(g,g) only, spectator {state}"),
         ):
+            x, slopes, errors = wrapped_phase_plot_data(
+                xs, fit_group.slopes_deg[b], fit_group.errors_deg[b]
+            )
             ax.errorbar(
-                xs,
-                fit_group.slopes_deg[b],
-                yerr=fit_group.errors_deg[b],
+                x,
+                slopes,
+                yerr=errors,
                 fmt=marker,
                 color=f"C{b}",
                 label=label,
@@ -633,8 +658,8 @@ def _plot_phase_diagnostics(
     xs: NDArray[np.float64],
     n: int,
     target: str,
-    phases: tuple[tuple[QuadraturePhase, ...], ...],
-    ee_phases: tuple[tuple[QuadraturePhase, ...], ...],
+    phases: tuple[tuple[tuple[QuadraturePhase, ...], ...], ...],
+    phase_sem: NDArray[np.float64],
 ) -> None:
     """Show contrast and phase before gate-count slope fitting, by spectator."""
     fig, _ = plots.subplots(
@@ -646,37 +671,50 @@ def _plot_phase_diagnostics(
     )
     contrast_ax, phase_ax = fig.axes
     for b, state in enumerate(("g", "e")):
-        for label, marker, rows in (
-            ("(g,g) ", ".", phases),
-            ("(e,e) ", "x", ee_phases),
-        ):
-            points = rows[b]
+        for h, (herald, marker) in enumerate((("(g,g)", ".-"), ("(e,e)", "x-"))):
+            points = phases[h][b]
             contrast_ax.plot(
                 xs,
                 [p.contrast for p in points],
                 marker,
                 color=f"C{b}",
-                label=f"{label}spectator {state}",
+                label=f"{herald} spectator {state}",
             )
-            phase_ax.plot(
-                xs,
-                [
-                    np.nan if p.logical_phase_deg is None else p.logical_phase_deg
-                    for p in points
-                ],
-                marker,
-                color=f"C{b}",
+            phase_deg = [
+                np.nan if p.logical_phase_deg is None else p.logical_phase_deg
+                for p in points
+            ]
+            sem = phase_sem[h, b]
+            unavailable = ~np.isfinite(sem)
+            if unavailable.any():
+                logger.warning(
+                    "Omitting %d phase error bars for %s, n=%d, herald %s, spectator %s: "
+                    "zero contrast, fewer than two retained shots, or unavailable X/Y phase variance",
+                    np.count_nonzero(unavailable),
+                    target,
+                    n,
+                    herald,
+                    state,
+                )
+            x, phase, errors = wrapped_phase_plot_data(
+                xs, phase_deg, np.where(unavailable, np.nan, sem)
             )
+            phase_ax.errorbar(x, phase, yerr=errors, fmt=marker, color=f"C{b}")
     contrast_ax.set_ylabel("Classified contrast")
     contrast_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
-    phase_ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Wrapped phase (deg)")
+    phase_ax.set(
+        xlabel="Common CZ frequency (MHz)",
+        ylabel="Wrapped phase (deg)",
+        ylim=(-180, 180),
+    )
     phase_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
     phase_ax.ticklabel_format(useOffset=False)
     title = f"Heralded conditional phase · {target} · {n} CZ gates"
     if not any(
         np.isfinite(point.contrast)
-        for group in (*phases, *ee_phases)
-        for point in group
+        for group in phases
+        for row in group
+        for point in row
     ):
         phase_ax.set_xlim(xs[0], xs[-1])
         title += "\nNo retained contrast data"

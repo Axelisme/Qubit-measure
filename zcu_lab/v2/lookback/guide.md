@@ -1,50 +1,32 @@
-**Readers:** operator, agent. How to measure readout time of flight from the GUI or MCP and use the result to calibrate the trigger offset.
+**Readers:** operator, agent. Measure the arrival time of a readout pulse and use it to place the ADC window.
 
-**Last updated:** 2026-10-23
+# Lookback
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+For opening, refreshing, applying and saving, see [`zcu_lab/v2/operator-workflow.md`](../operator-workflow.md).
 
-## Behavior
+Lookback measures the time-resolved, demodulated ADC waveform. Each shot plays one readout pulse while capturing the full ADC window, then waits before repeating. There is no qubit drive, reset, or classification. Reps is fixed at 1; each averaging round contributes one full ADC trace.
 
-Lookback fires the readout pulse and captures the decimated ADC trace versus time. The trace shows when the signal arrives at the digitizer. Acquisition uses real hardware with `reps` fixed at 1. Averaging uses software rounds, initially 10. Run this first when bringing up a new readout chain or after changing cabling.
+## Place the capture window
 
-## Parameter sources
+- Bind the qubit and verify its resonator and generator/ADC wiring. Check Readout frequency and gain before Run, especially the uncalibrated Inline gain of 1.0. Inline starts at resonator frequency plus linewidth, or plus 1 MHz if the linewidth is missing.
+- **Trig offset** starts at stored flight time − 0.100 µs, or 0 µs when unknown. An invalid stored time leaves it blank. Open the ADC early enough to see a quiet baseline and extend **RO length** through the falling edge.
+- Keep Readout **Pre-delay** at zero when calibrating flight time. Time is measured from the block start, so a programmed Pre-delay shifts the observed edge.
+- Increase **Averaging rounds** if noise obscures the edge. If repeat traces carry field from the previous pulse, increase the inter-shot wait. When setting Readout `post_delay` for cavity ring-down, start at `5/(2π·κ)` µs for linewidth κ in MHz and compare the trace with a longer wait.
 
-Defaults use the tab's fixed resonator selection, captured when the form opens or resets. The `$resonator` alias identifies that resonator.
+## Read the plots
 
-The recipe retains the Form's initial frequency unless `frequency_mhz` is supplied. `check_ready` reports missing or invalid Form fields before Run. Invalid selected sources are not replaced with calibration fallbacks.
+- **Run magnitude** is `|mean IQ|` in a.u. versus time from the readout block start. The first sample is at Trig offset. The rounds bar counts completed averages; the exported figure does not include it.
+- **Analyze magnitude** overlays that trace and the magnitude after Gaussian smoothing of I and Q. The dotted threshold is the chosen fraction of the filtered peak. The arrival diamond marks the last sample strictly below threshold before the peak. If none exists, it marks **Window start fallback**, not a measured arrival.
+- **Analyze quadratures** display signed I and Q of the unsmoothed average. A change in I and Q at roughly constant magnitude can indicate phase motion. If the signed samples clip, reduce Readout gain and repeat before accepting the estimate.
 
-- Pulse and ADC frequency start at `resonator.freq + resonator.kappa` in MHz. Missing or null `kappa` uses 1 MHz. Both stored values must be positive, finite real numbers, with booleans excluded. Missing or null frequency, invalid frequency or linewidth, or an absent resonator capture leaves frequency required and blank.
-- `resonator.wiring.ch` and `resonator.wiring.ro_ch` supply the generator and ADC channels through the readout slot.
-- Missing or null `resonator.time_of_fly` starts the trigger offset at 0 µs. A valid time of flight is a finite real number >= 0, with booleans excluded. The trigger offset starts at `time_of_fly - 0.1` µs, including negative results. Invalid stored time of flight leaves the trigger offset required and blank.
-- The ADC window starts at 1.5 µs. Extend it when the arrival time plus pulse duration exceeds this window.
+Adjust **Arrival threshold / peak** above the pre-pulse noise. Raising it moves a clean rising-edge estimate later. Increase **Gaussian smoothing width** only as needed: smoothing can broaden the edge and shift the estimate. Turning off **Show arrival markers** hides the marks without changing the estimate or writeback. There is no fitted model, fit error, or shot SEM.
 
-Alias, path, or parameter-source lookup failures appear as errors. Other missing required calibration leaves the form Invalid. Initial values remain editable; calibration changes require writeback.
+## Use the arrival
 
-## Module slots
+Adopt **Estimated readout arrival** only with a clear baseline and edge on an unclipped trace. Writeback proposes the flight time for the source resonator, not a readout module edit. The ordinary readout template then uses `trigger offset = flight time + 0.015 µs` and `RO length = pulse length − 0.030 µs`.
 
-The readout slot uses the captured resonator as its parameter source. Its initial gain is 1.0, with frequency, ADC window, and trigger offset set as described above. The form exposes only readout; Reset and Init pulse are hidden.
+To repeat Lookback, place Trig offset about 0.100 µs before a reliable estimate. For a fallback, move Trig offset earlier by 0.100 µs and extend RO length by the same amount to keep the window end fixed. Extend the end separately if it cuts off the pulse.
 
-## Typical writeback
-
-Analysis proposes the detected arrival time in µs for `$resonator.time_of_fly`. The destination is the resonator captured for that analysis, even if the current selection changes. Writeback updates only this parameter; module and waveform definitions stay unchanged.
-
-## Recommended
-
-Analysis starts with `ratio=0.1`, `smooth=1.0`, and Plot fit enabled. The offset is the latest time before the peak where the magnitude remains below 10% of the maximum. If every pre-peak sample is at or above the threshold, analysis returns the first sample time. Check the trace before accepting this result as the arrival time.
-
-Use a wide readout window to capture the full pulse arrival. Increase `smooth`, the Gaussian width in samples, if noise makes the offset jitter. Lower `ratio` if baseline ripple triggers the estimate too early.
-
-## Four starting situations
-
-1. With an empty kickstart project, Open the Form and inspect its required blanks.
-   Check the ADC window and trigger offset. Reset and Init pulse stay hidden.
-   Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, choose Defaults to recapture those values.
-   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
-   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
-4. Through the agent, call `lookback` after inspecting the same Form errors.
-   No scan count is exposed; use frequency_mhz when no frequency source exists. Analysis controls are ratio, smooth and plot_fit.
-   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+In the `lookback` recipe, `readout_ref: null` fails at the required selector before other Run edits.
+Any supplied `frequency_mhz`, `readout_length_us` or `trigger_offset_us`, including `null`, edits the selected Readout as Inline without changing its library source. Omit these inputs or `rounds` to keep their values. Explicit `null` clears the corresponding required value; readiness stops before acquisition if overrides leave it blank.
+If the recipe rejects an Analyze option, there is no arrival estimate or writeback question. Correct the options and Analyze the completed Run without acquiring it again. Use `plot_fit: false` to hide markers.

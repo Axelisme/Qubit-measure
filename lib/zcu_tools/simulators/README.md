@@ -1,6 +1,6 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-22, physical v2 capture directory
+**Last updated:** 2026-11-23, telemetry provenance and physical v2 capture
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
@@ -60,8 +60,8 @@ row per admitted acquire, including numeric failures. Six aggregates all sources
 and routed groups before writing; individual sources do not write rows.
 
 Call `RoutingTelemetry(directory).write(summary, paths=paths)` once at the acquire
-boundary. `AcquireTelemetry` requires the first eleven fields below.
-`RoutingRecord` inherits them and adds the four writer-generated fields.
+boundary. `AcquireTelemetry` supplies the fields through `capture_file`.
+`RoutingRecord` adds the writer fields and encodes the stage measurements.
 
 | Field | Meaning |
 | --- | --- |
@@ -72,17 +72,21 @@ boundary. `AcquireTelemetry` requires the first eleven fields below.
 | `compile_wall_s` | Compilation wall seconds from the binding's frozen `AcquireOutcome`. |
 | `evolve_wall_s` | Sum of every `Engine.evolve` call's wall seconds across rounds and continuations. |
 | `readout_wall_s` | Sum of ADC/readout wall seconds, including preparation and integrated or decimated sampling. |
-| `materialize_wall_s` | Wall seconds spent generating and detaching raw shots within the acquire, from `AcquireOutcome`. No raw materialization contributes `0.0`. |
+| `materialize_wall_s` | Wall seconds spent generating and detaching raw shots within the acquire, from `AcquireOutcome`. |
 | `complete` | `true` when the acquire body and cleanup returned normally, including a partial Stop result. `false` when an exception escaped. |
 | `extras` | Simulator-prefixed keys with JSON values, or `{}` when absent. |
 | `capture_file` | Capture basename, or `null` when recording is off or publication fails. |
 | `timestamp` | Writer-generated UTC ISO timestamp. |
+| `commit` | Checkout revision supplied when the caller starts the capture, or `null` if not supplied. |
+| `dirty` | Caller-supplied checkout modification flag, or `null` if not supplied. |
 | `frontend_cpu_s` | Geometry and work-plan calling-thread CPU seconds. |
 | `estimated_cost_unit` | `relative scheduling units`, the label for family scheduling costs. |
 | `families` | Engine family names mapped to merged routing counters, CPU seconds and optional OpenCL detection error. |
 
-All five wall fields are floats. A failed call retains elapsed time through its
-exception; a stage not entered contributes `0.0`. `complete` comes from the binding
+`wall_s` is always numeric. The four stage durations include elapsed time through
+an exception and retain measured zeros. For stages never entered, pass `None` in
+`AcquireTelemetry`. The writer records `null` if `complete=false` and `0.0` if
+`complete=true` because that stage was not needed. `complete` comes from the binding
 and does not mean every requested round ran. FTF measures cavity-memory spans and
 projective continuations. Single and six also include projective prefixes and
 continuations. Unmeasured parts of `wall_s` include environment preparation,
@@ -92,7 +96,7 @@ When a later getter produces retained raw shots and returns successfully, the
 same writer appends a separate JSONL record:
 
 ```json
-{"event":"materialize","acquire_id":"opaque-acquire-id","materialize_wall_s":0.25,"timestamp":"2026-11-21T10:15:00+00:00"}
+{"event":"materialize","acquire_id":"opaque-acquire-id","materialize_wall_s":0.25,"timestamp":"2026-11-21T10:15:00+00:00","commit":null,"dirty":null}
 ```
 
 Match it to the original acquire by `acquire_id`. The supplemental duration
@@ -117,7 +121,9 @@ bookkeeping. It is not wall time.
 
 `numerics.telemetry.enabled` defaults to true in all three environments.
 Their default `numerics.telemetry.directory=null` selects the same project-root
-`.sim_telemetry` directory. To analyze environments separately, set a different
+`.sim_telemetry` directory. Set `commit` and `dirty` on `TelemetrySettings` at
+capture startup to copy those values to every main and supplemental row. The
+writer does not query Git. To analyze environments separately, set a different
 `telemetry.directory` under each environment's `numerics`, then run the analyzer
 once per directory. Passing multiple directories to one invocation merges them
 into one report. No path, filename, family or backend version identifies a row's

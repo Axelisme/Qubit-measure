@@ -7,7 +7,6 @@ and nonfinite numbers. Energies are H/h in GHz, physical time is ns.
 from collections.abc import Mapping
 from typing import Annotated, Self
 
-import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 Finite = Annotated[float, Field(allow_inf_nan=False, strict=True)]
@@ -173,9 +172,11 @@ class Receiver(Values):
     gain: finite signed ADC sample units / sqrt(photons/ns), may be zero.
 
     phase_deg: additive receiver phase (default 0). offset_adc: per-sample I/Q
-    offset (default zero). noise_psd_adc2_ns: required symmetric PSD 2x2 spectral
-    density ADC²*ns, two-sided white noise convention Cov(sample)=PSD/dt_ns.
-    Zero/singular matrices are supported. This is not per-sample covariance.
+    offset (default zero).
+    noise_psd_adc2_ns: required finite nonnegative scalar, the two-sided white
+    noise PSD of each I/Q component in ADC²·ns. I and Q are independent with
+    variance PSD/dt_ns at sample period dt_ns. Zero disables receiver noise.
+    A matrix is invalid and raises a validation error naming this field.
     time_of_flight_ns: finite nonnegative total readout-line delay in ns, default
     zero. Delays the waveform and gives exp(-2πi*f*delay) at absolute frequency f;
     there is no independent electronic-delay parameter. Calibration/noise follow
@@ -191,28 +192,7 @@ class Receiver(Values):
     time_of_flight_ns: Nonnegative = 0.0
     background: ReceiverBackground
     offset_adc: tuple[Finite, Finite] = (0.0, 0.0)
-    noise_psd_adc2_ns: tuple[tuple[Finite, Finite], tuple[Finite, Finite]]
-
-    @model_validator(mode="after")
-    def covariance(self) -> Self:
-        """Return this receiver, or reject a nonsymmetric/non-PSD noise matrix.
-
-        Singular and zero PSDs are valid. ValueError names noise_psd_adc2_ns;
-        eigenvalues within relative floating-point roundoff count as zero.
-        No array is stored or modified.
-        """
-        matrix = np.array(self.noise_psd_adc2_ns)
-        # Rank-one PSD matrices can acquire a negative eigenvalue of roundoff
-        # size. This is a relative machine-precision test, not a noise floor.
-        roundoff = 8 * np.finfo(float).eps * float(np.max(np.abs(matrix)))
-        if (
-            not np.array_equal(matrix, matrix.T)
-            or np.linalg.eigvalsh(matrix).min() < -roundoff
-        ):
-            raise ValueError(
-                "noise_psd_adc2_ns: must be symmetric positive semidefinite"
-            )
-        return self
+    noise_psd_adc2_ns: Nonnegative
 
 
 class Solver(Values):

@@ -1,43 +1,25 @@
-## Behavior
+# Single-shot length Rabi
 
-**Readers:** operator, agent. How to run single-shot length Rabi calibration from the GUI or MCP and interpret the results.
+**Readers:** operator, agent. Sweep the qubit drive duration and measure Rabi oscillations from single-shot IQ.
 
-Single-shot Length Rabi sweeps the qubit-drive pulse length, preserves every raw IQ shot, and derives ground / excited / other population curves during live view and analysis. Runs on real hardware.
+## What is measured
 
-Const, flat_top and sampled waveforms such as cosine, gauss and DRAG use the same host-side scan. Each length compiles one program and acquires one cloud of Shots raw IQ values. The result has shape (number of lengths, Shots), without averaging across shots or software rounds. Completed length rows survive cancellation; unmeasured rows remain NaN. Analyze uses the existing joint Rabi and readout-distribution fit.
+Optional **Reset** → **Qubit drive pulse** at the swept duration → **Readout**. Each duration has one cloud of **Shots per length** raw IQ values. Analyze jointly fits the oscillation and the g/e readout distributions; π and π/2 lengths are half and a quarter of the fitted period, respectively.
 
-Native arb waveforms have an asset-derived length and raise ValueError before scanning. Choose a waveform with an editable length for this experiment.
+## Key settings
 
-## Parameter sources
+- Use a waveform with editable length; native arbitrary waveforms have asset-defined duration and are rejected before scanning. **Drive envelope length** starts at 0.03 µs and ends at 4 × stored π length. If no scalar π length is stored, Stop starts at 1 µs; an invalid stored length leaves Stop blank. The selected π pulse keeps its gain, or the probe starts at gain 1 if there is no stored π pulse. Verify gain and scan at least a full oscillation.
+- Use one ADC: Pulse or one-tone Mux **Readout**. Raw acquisition and fitting need no classifier; Live population preview requires a circle with positive radius under **Advanced**. Linear has no Other; obtain a missing radius from [GE Post-Analysis](../ge/guide.md).
+- **Initial State** is the predominant state before the drive, even if the first length is nonzero. **Fit phase offset** allows a phase within ±90° of that preparation (off by default); the fitted zero-length population can then differ from the pre-pulse population. **Relax delay** starts at 5 × ordinary T1 (150 µs if absent; blank if invalid). Reset does not shorten it automatically.
 
-Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1. Length sweep is 0.03 µs to 4 * `$qubit.module.x180.waveform.length`.
+## How to read the results
 
-Raw acquisition and joint fitting require one ADC: Pulse or a single-tone Mux. Live preview uses that readout's circle classifier under Readout → Advanced. Without a classifier, Run still collects raw IQ and Analyze still fits; only the population preview is skipped. A supplied linear classifier cannot show Other; a circle without radius prompts singleshot GE Post.
+Look for oscillations in Live and compare each measured population curve with the joint fit in Analyze. Bars show one shot SEM from the retained class counts at each duration. They estimate the sampling uncertainty of that point's class probabilities. Fewer than two retained shots give no bar. The bars do not show histogram widths, fit errors or round-to-round variation.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+Check the projected IQ histogram and fitted confusion matrix for separation. Negative log-likelihood is a fitting objective, not an acceptance threshold. Other is a rejected class, and its matrix row is fixed by the model.
 
-The length sweep runs from 0.03 µs to 4*pi_len. A missing or null stored pi_len uses a 1 µs stop, including for arbitrary waveforms whose scalar length is absent. An invalid stored pi_len leaves the required stop empty for correction. A valid pi_len is a finite positive number, with booleans treated as invalid.
+## Next step
 
-An existing x180 stays selected through its module slot and keeps its gain. If x180 is absent, the qub_probe template starts at gain=1. The default stop depends only on the stored scalar length.
+Extend the sweep if π is beyond the measured range or there is no full oscillation. A valid joint fit with finite calibration can propose a complete circle classifier on the bound readout module (on the sole tone for Mux); it does not write the drive length. The measured readout settings must match that captured module apart from its classifier.
 
-T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
-
-These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
-
-## Module slots
-
-The qubit pulse uses the x180 module when present and the qub_probe template when absent, with the starting values described above. Reset uses optional `$qubit.module.reset`; readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Defaults snapshot.
-
-## Typical writeback
-
-A backend-valid joint fit with finite centers, radius and confusion matrix proposes one complete readout-module replacement at `$resonator.module.readout`. Pulse updates `classifier`; a single-tone Mux updates `tones.0.classifier`. The proposal preserves library waveform keys and rejects differences in other tested settings. Missing saved cfg or parameter capture fails explicitly. Invalid or nonfinite fits produce no proposal.
-
-## Analysis summary
-
-Analysis returns fitted parameters, pre-pulse `initial_populations`, the fixed 3×3 `confusion_matrix` and circle-classification calibration. Backend diagnostics retain parameter names, fitted values, marginal standard deviations, validity and negative log-likelihood. Population curves, projected shots, histograms and the full covariance stay local to analysis for plotting and uncertainty calculations. They are not part of the returned summary.
-
-## Recommended
-
-Set Initial State to the predominant state before the swept drive pulse even when the first sweep point is nonzero. Fit phase offset allows a correction within +/-90 degrees of that initial-state direction; the extrapolated zero-length population can then differ from the pre-pulse population. It is disabled by default. A prior singleshot/ge calibration is optional for raw acquisition. A sweep spanning a few pi lengths captures a full oscillation. Review the measured population curves and overlaid joint-fit curves before applying the complete module proposal.
-
-**Last updated:** 2026-11-01
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).

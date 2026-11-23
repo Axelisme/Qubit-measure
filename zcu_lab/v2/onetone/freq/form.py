@@ -37,9 +37,30 @@ class HomophasalInput(HomophasalSamplingCfg, FormModel):
     """Equal phase spacing using the core's required, positive fit parameters."""
 
     kind: Literal["Homophasal"] = "Homophasal"
-    r_f: Annotated[float, Display(label="Resonance frequency", unit="MHz")]
-    rf_w: Annotated[float, Display(label="Linewidth", unit="MHz")]
-    theta0: Annotated[float, Display(label="Phase offset", unit="rad")]
+    r_f: Annotated[
+        float,
+        Display(
+            label="Resonance frequency",
+            unit="MHz",
+            description="Enter the center from a previous resonator fit.",
+        ),
+    ]
+    rf_w: Annotated[
+        float,
+        Display(
+            label="Linewidth (FWHM)",
+            unit="MHz",
+            description="Enter the full linewidth from that fit.",
+        ),
+    ]
+    theta0: Annotated[
+        float,
+        Display(
+            label="Circle phase offset",
+            unit="rad",
+            description="Enter the resonator-circle phase offset from that fit.",
+        ),
+    ]
 
     @classmethod
     def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
@@ -59,7 +80,10 @@ class SamplingInput(FormModel):
     sampling: Annotated[
         LinearInput | HomophasalInput,
         Field(discriminator="kind"),
-        Display(label="Sampling mode"),
+        Display(
+            label="Sampling mode",
+            description="Choose equal frequency steps (Linear) or equal resonator-circle phase steps (Homophasal).",
+        ),
     ] = Field(default_factory=LinearInput)
 
     @classmethod
@@ -102,21 +126,23 @@ class FreqInput(ConfigBase, SamplingInput):
         PulseReadoutCfg,
         FieldMeta(
             label="Readout",
-            description="Resonator readout 設定與 timing（µs）。",
+            description="Set the pulse and ADC window used together at each frequency.",
         ),
     ]
     freq: Annotated[
         SweepCfg,
         FieldMeta(
-            label="Frequency",
+            label="Readout RF frequency",
             unit="MHz",
-            description="Absolute MHz 掃描起訖值。",
+            description="Enter the absolute readout RF sweep endpoints in MHz, not mixer offsets.",
         ),
     ]
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per frequency in each averaging round.",
         ),
     ]
     rounds: Annotated[
@@ -124,7 +150,7 @@ class FreqInput(ConfigBase, SamplingInput):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter how many times to repeat and average the entire sweep.",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -133,7 +159,7 @@ class FreqInput(ConfigBase, SamplingInput):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the relaxation wait in µs after each shot.",
         ),
     ]
 

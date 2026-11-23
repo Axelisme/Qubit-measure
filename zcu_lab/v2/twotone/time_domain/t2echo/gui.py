@@ -110,6 +110,15 @@ def _T2Echo_analyze(
     )
 
 
+def _summary_lines(source: T2EchoRunResult) -> tuple[str, ...]:
+    lines: list[str] = []
+    if source.cfg is not None:
+        lines.append(f"Reps × Rounds: {source.cfg.reps} × {source.cfg.rounds}")
+    if source.result.true_activate_detune is not None:
+        lines.append(f"Applied detune: {source.result.true_activate_detune:g} MHz")
+    return tuple(lines)
+
+
 def _T2Echo_get_writeback_items(
     req: WritebackRequest[T2EchoRunResult, T2EchoAnalysis],
 ) -> Sequence[WritebackItem]:
@@ -214,5 +223,6 @@ DEFINITION = Adapter(
         fn=_T2Echo_analyze,
         options=lambda source, env: T2EchoAnalyzeOptions(),
         writeback=_T2Echo_get_writeback_items,
+        summary_lines=_summary_lines,
     ),
 )

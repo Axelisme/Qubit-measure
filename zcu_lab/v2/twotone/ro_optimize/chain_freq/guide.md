@@ -1,103 +1,27 @@
 # Thermal-chain readout frequency sweep
 
-**Readers:** operator, agent. Run the no-drive frequency sweep and read its heuristic score, QND and correlation-growth diagnostic.
+**Readers:** operator, agent. Rank frequency settings by the correlations across a chain of readouts, without a calibrated π pulse.
 
-**Last updated:** 2026-11-10
+## Sequence and key settings
 
-After changing a parameter source, use Defaults to recapture initial values. Refresh updates sources and choices while preserving authored inputs. Defaults can overwrite unsaved inputs.
+Each shot makes 16 reads, without drive or reset. Only the readout's timing separates reads. **Thermal wait K** follows each shot and starts at 5 × T1; set it long enough for thermal equilibrium. The first shot starts in the pre-Run state. The measurement needs thermal g/e contrast, not the population reached under repeated readout.
 
-## Shot and parameters
+- Set **Readout frequency** around the expected resonance. The range starts at the captured resonator frequency ± one linewidth. Enter RF with a mixer, DDS frequency without one. Run replaces both generator and ADC frequency.
+- Use **Readout pulse and ADC window** to set timing. A new pulse can start before the previous ADC window closes; keep windows on the same ADC disjoint. Start readout `post_delay` at `5/(2πκ)` µs for linewidth κ in MHz, then compare a longer wait. To calibrate the delay separately, compare herald → nominal Xπ at both waits.
 
-`twotone/ro_optimize/chain_freq` sweeps readout frequency in MHz.
-Each shot reads one PulseReadout 16 times without a drive or reset.
-After a readout pulse ends, the readout's `post_delay` gives cavity photons time to decay before the next readout starts.
-The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
-The relax delay K follows each shot. Every shot after the first starts K after the previous shot.
-Set `relax_delay` in µs long enough to return to thermal equilibrium.
-The Form seeds it from 5·T1. The first shot relies on the state before Run.
-There is no additional wait inside the chain beyond the readout's own timing.
+## Read the figures and choose a setting
 
-Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template.
-The template uses the resonator frequency, wiring and time of flight.
-By default, the sweep uses 11 points from one linewidth below the resonator frequency to one linewidth above it. Run replaces both generator and ADC frequency, so the Form hides readout frequency.
-Reps defaults to 2000 shots per setting per round. Rounds defaults to 320, giving 640 000 shots per setting.
-Missing or invalid sources leave fields Invalid. Supply them before Run.
+Live and Analyze plot the same three panels versus frequency (MHz):
+- **Thermal-chain score** combines first-pair correlation ρ and modeled amplification G, with a penalty for positive correlation growth M: ρ²·G·[|ρ|/(|ρ|+max(M,0))]²; zero at ρ = 0. The dashed line marks the highest score; exact ties keep acquisition order.
+- **Estimated QND** uses the decay of the early cross covariances. It is not clipped to [0,1]. Check the trade-off at the selected setting.
+- **Correlation diagnostics** compares M and |ρ|. M can rise even with two-state redistribution; it is not a leakage or MIST probability. The score is neither calibrated g/e SNR nor a direct measure of information.
 
-This experiment needs thermal g/e contrast, not a calibrated π pulse.
-The state after K is not the readout-driven steady state. A measured 60:40 readout-driven population does not specify the population before the first read.
-Traditional `ro_optimize` experiments keep their drive-based preparation and analysis.
+The score and QND bars are approximate model-conditional error scales, not shot SEM or confidence intervals. They hold M and the main IQ axis fixed. The selection uses the score only, not its error bars. Live counts settings with completed data and reports minimum acquired shots. Stop keeps only settings with a completed round; stopping before any do causes Run to fail.
 
-## Score and selection
+Extend a boundary peak and repeat. There is no writeback. Enter the selected frequency in the readout module.
 
-Analysis projects early covariances onto their main IQ axis.
-It estimates ρ as the first-pair covariance divided by R1 variance, and QND from the decay of the first four R1 cross covariances.
-G is a restricted two-state, 15-lag information amplification proxy.
-It averages the model information ratio over determinant 0..1 with a fixed 24-point quadrature.
-It targets a symmetric driven ...DRDRDR... model. It does not assert that this model and K R^16 have the same physical information.
-An unequal initial thermal population reduces the effective contrast. The inferred contrast is not a calibrated g/e SNR.
+## MCP recipe
 
-M measures within-chain correlation growth.
-Analysis centres each read separately, symmetrises each adjacent covariance matrix, and weights pairs r=1..15 by (r−8)/20.
-It takes the largest eigenvalue of the summed matrix and divides by R1 variance.
-M is a diagnostic, not an identified leakage probability or physical MIST amount.
-Physical MIST means leaving g/e. Pure two-state repopulation can also increase M and incur a penalty.
+`ro_optimize_chain_freq`: `freq_start_mhz`, `freq_stop_mhz` and `points` set **Readout frequency › Start, Stop, Expts**. Omit `readout_ref`, those three inputs, `relax_delay`, `reps` or `rounds` to keep the Form value. Explicit null does not keep it: `readout_ref: null` is rejected by the required module selector; null numeric edits pass to the field owner, and unfilled required fields fail the readiness check before Run. Overrides apply before that check. The recipe saves completed Run data even if Analyze fails.
 
-The combined score is ρ²·G·[|ρ|/(|ρ|+max(M,0))]².
-At ρ=0 the score and its error scale are zero.
-Only the maximum score selects the best setting. Exact ties keep acquisition order.
-Errors do not affect ranking, and no second threshold excludes settings.
-If the best frequency is at either scan boundary, extend that side and repeat before using it.
-
-## Live and analysis plots
-
-Live `measurement` and offline `metric` figures have the same three panels:
-
-- Heuristic score with model-conditional approximate error bars.
-- QND with model-conditional approximate error bars. The axis stays at 0..1; reports retain unmodified QND, even outside that range.
-- M alongside |ρ|. Large M remains visible on this diagnostic axis.
-
-Red dashed lines mark the maximum-score setting in every panel.
-The score axis uses score values alone, so large errors do not flatten the curve.
-Error bars can extend beyond that axis and be cut off.
-Acquisition calculates scores after each completed round, then the plot thread draws them.
-Stop keeps settings with a completed round. A stop before any completed round raises an error.
-
-Analysis has no options and can use saved sums without cfg or hardware.
-The summary is `best`, a SettingScore containing `setting` in MHz, `score`, `score_error`, `qnd`, `qnd_error`, `correlation`, `amplification` and `mist`.
-The API name `mist` holds M, with the diagnostic meaning above.
-There is no fit, no-signal classification or third-state population estimate.
-Invalid projected variance or zero early covariance norm raises ValueError rather than inventing a QND value.
-
-## Errors and known limits
-
-The error scales are model-conditional approximations, not general one-sigma errors or calibrated confidence intervals.
-Score propagation holds M and the main axis fixed and propagates only ρ and QND.
-It ignores their shared covariance, M uncertainty, main-axis uncertainty and selection of the maximum.
-G uses clipped QND and effective contrast to remain finite.
-At and beyond clipping, propagation uses the model slope at the clipped coordinates, not the true derivative of the clipped output.
-
-Real K R^16 data have not yet validated this score.
-A rare, distant thermal third state or correlated read noise can raise the score without raising M.
-A third state overlapping g or e in IQ may hide leakage. Anisotropic noise can select the wrong main axis.
-Pure two-state drift can increase M when the initial thermal state differs from the driven steady state. The penalty does not separate this from leakage.
-Fixed pair weights retain that false-penalty limitation.
-For an increase confined to the last pair, the independent isotropic low-SNR model predicts about 59% of the endpoint-difference detection SNR. This is a model result, not a device measurement.
-Finite-shot noise can give a positive score even without useful g/e contrast.
-Vanishing g/e contrast alone does not force score to zero if a third state remains visible.
-ρ uses R1 variance rather than both endpoints' standard deviations, so arbitrary nonstationary moments have no promised global score bound.
-Approximate errors do not guarantee selection of the true best setting.
-
-## Saved data and MCP recipe
-
-The record is ThermalChainSums with the sweep axis, shot count and 107 float64 sums per setting.
-It keeps I/Q sums of R1..R16, R1 I²/IQ/Q², all four cross components of all 15 adjacent pairs, and the R1,R3 through R1,R5 pairs.
-No weighted M aggregate replaces those pairs.
-Native save and restore preserve the moments for reanalysis of score, M and best setting.
-The tag is `twotone/ro_optimize/chain_freq` and cfg schema is `4.0`. There is no earlier-schema compatibility path.
-
-`ro_optimize_chain_freq` accepts optional `freq_start_mhz` and `freq_stop_mhz` in MHz, `points`, `relax_delay`, `reps` and `rounds`.
-`points` maps to sweep Expts. Omission keeps the Form value; null passes to the field owner.
-Overrides apply last, then check_ready rejects missing or invalid inputs before Run.
-The recipe runs, analyzes and saves. It proposes no writeback.
-It reports `freq_mhz`, `score`, `score_error`, `qnd`, `qnd_error`, `correlation`, `amplification` and `mist`.
-Enter the chosen frequency in the readout module yourself.
+Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).

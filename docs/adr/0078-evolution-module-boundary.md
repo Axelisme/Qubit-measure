@@ -55,12 +55,13 @@ status: accepted
 
 **例子。** 比較兩個 checkout 的序列總耗時時，成對計時直接呼叫 `Engine.evolve`，不經 acquire。精度案例與指標見[測試文件](../../tests/README.md#evolution-精度矩陣)。
 
-**邊界。** 各層都重現不了使用者回報的錯時，可以跑一次 e2e 定位。腳本不入庫，不當驗收門檻。整實驗只允許 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 入庫：它以現行表單預設跑完整 Run，記錄 Run 牆鐘與分項，不當測試、gate 或精度證據。優化指標是模擬器核心耗時，即該 Run 各次 acquire 的編譯、演化、讀出與 raw materialize 四項之和。Controller、表單、Qt、繪圖、Analyze、Save 與 `ShotReducer` 等 host 處理不計入核心。Raw materialize 由呼叫它的模擬 binding 計時，寫進 [acquire telemetry](../../lib/zcu_tools/simulators/README.md#acquire-telemetry)，工具只彙總。不另建凍結的核心場景：改了實驗就重跑那一列；比較模擬器改動時，前後兩次在同一版實驗上跑。完整核心、下限與 180 秒判定的規則見[工具說明](../../tools/README.md#實驗-run-牆鐘)。工具用固定模擬輸入，在 `time_scale=0` 下只計送出 Run 到終態，不呼叫 Analyze 或 Save。
+**邊界。** 各層都重現不了使用者回報的錯時，可以跑一次 e2e 定位。腳本不入庫，不當驗收門檻。整實驗只允許 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 入庫：它只量 [manifest](../../tools/data/experiment_wall_time/case-inputs.json) 中由維護者選入的場景，不以註冊清單決定列數。每個場景使用工具自持的 FTF 設定和乾淨 point，開現行 Form，套用場景覆寫，再跑完整 Run。它記錄 Run 牆鐘與分項，不當測試、gate 或精度證據。優化指標是模擬器核心耗時，即該 Run 各次 acquire 的編譯、演化、讀出與 raw materialize 四項之和。Controller、表單、Qt、繪圖、Analyze、Save 與 `ShotReducer` 等 host 處理不計入核心。Raw materialize 由呼叫它的模擬 binding 計時，寫進 [acquire telemetry](../../lib/zcu_tools/simulators/README.md#acquire-telemetry)，工具只彙總。不另建凍結的核心場景：改了實驗就重跑那一列；比較模擬器改動時，前後兩次在同一版實驗上跑。完整核心、下限與 180 秒判定的規則見[工具說明](../../tools/README.md#實驗-run-牆鐘)。工具在 `time_scale=0` 下只計送出 Run 到終態，不呼叫 Analyze 或 Save，也不做整庫 guide 盤點。180 秒判定只涵蓋已選場景；如果引用的 adapter 已不存在，該場景保留未量列。
 
 **依據。**
 - 2026-11-15，使用者：「我會預期模擬器測試腳本只會依賴模擬器模塊，後端與前端分開測，kernel與dispatch也分開測，不該有e2e的測試需求」。對「整條序列的最終誤差放哪一層」答「A」，即加序列層；同意只為定位而跑一次 e2e，答「我選B」。見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
 - 2026-11-20，使用者問：「為什麼要用不入庫的 scratch 腳本量?而不是入庫的？」2026-11-21，對工具入庫而不當 gate 答「都採用建議」。見[實驗 Run 牆鐘工具](../discussions/2026-11-21-experiment-run-wall-time.md)。
 - 2026-11-21，使用者更正指標：「大头是模拟器本身，所以量模拟器速度就好了」。比較凍結核心場景與跑完整 Run 時，使用者問：「你觉得哪一种比较简单？是直接跑完整的1:1比较简单，还是复制场景比较简单？请你从维护性跟那个扩充性来考虑。」designer 建議照舊跑完整 Run、從 telemetry 讀核心並補 raw materialize、不建凍結場景，核心不計 host 處理；使用者答「那就采用建议吧」。`time_scale=0`、不呼叫 Analyze 或 Save，以及延後 materialize 的補充紀錄、核心下限與 180 秒判定的規則，是 designer 代裁，使用者未覆核。見[模擬器核心耗時](../discussions/2026-11-21-simulator-core-time.md)。
+- 2026-11-23，使用者：「它其实不是量现在实验室有每个实验的时间，它是量特挑的场景模拟的时间。」對 guide 盤點答「A，不要做多餘的事，想檢查格式是否合理應該是其他工具負責，不是計時工具，類似的工具都該遵守KISS原則」。見[牆鐘工具量手選場景](../discussions/2026-11-23-curated-wall-time-scenes.md)。
 
 ### 每個 kernel 的量測場景只有一段
 
@@ -235,9 +236,9 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 - **GUI 條件下不出現。** 原清單的空 Numba／ZCU cache、warmup 關閉首個 cold chunk 為 5.412／8.460 秒。保留磁碟 cache、`warmup=True` 的離線 GUI 設定樣本中，首個 chunk 為 0.007628 秒。這只代表該 retained-cache 首段，不代表其他 cache 狀態、後續 chunks 或 GUI 終態。
 - **GUI 條件下不出現。** 同一個 retained-cache 樣本的首個 production WorkPlan 為 0.002580 秒；原空-cache、warmup 關閉的 cold WorkPlan 為 6.055 秒。這只覆蓋一個 segment row，不代表 #9 的大批次 WorkPlan。
 - **GUI 條件下不出現 >5 秒，但空 cache 仍未達成。** Retained-cache 樣本的 `wait_ready` 為 1.962915 秒。另一個 `warmup=True` 的空-cache 樣本等待 115.738108 秒，期間沒有查 Stop；它不是 retained-cache GUI 工作路徑的重測。若要改啟動等待或取消行為，須另行取捨。
-- **仍未達成（原因：尺寸未覆蓋）。** Engine 後的 compact populations、讀出分布、ADC／statistics／raw 準備、compact draw 與成功收尾，只在 1 點、554 outcomes、24 states、16 reads、ADC 0、每窗口 304 samples、100 reps 的 low-snr 副本成功跑完，沒有送 Stop。各段分別為 0.045507、0.001328、0.015142、0.006093、0.000057、0.001970、0.006212 秒；前六段間隔為 0.205343 秒。51 點首輪與 floor `1e-9` 尺寸未覆蓋，不用這些數字宣稱達成或外推。
-- **已補檢查（附診斷值）；仍未達成（原因：冷段與大尺寸未覆蓋）。** 必需 raw 現在在 ADC 的入口、logical event、point group、交付前及 SoC 發佈前查詢。單點 raw 的原相鄰查詢間隔為 5.035913 秒；送 Stop 的樣本中，event 內第一次查詢到第一群結束的查詢為 3.216835 秒，該輪沒有交付、完成輪數為零。另一個未送 Stop 的冷樣本，同一段查詢間隔為 5.296475 秒，raw 全段為 5.392256 秒；收據未分解 event preparation、群內執行與 JIT。不能據此宣稱冷 raw 已符合目標。51 點首輪、floor `1e-9` 與 GUI retained-cache raw 都未覆蓋。
-- **仍未達成（原因：只量到外層）。** 另兩個空-cache、warmup 關閉的首個 evolve 樣本分別有 5.483342 秒與 8.105711 秒的未分解區段，收據沒有定位子段，不能據此另加檢查點或改寫 retained-cache 結論。
+- **仍未達成（原因：尺寸未覆蓋）。** 在診斷 commit `0aeff3a658ddc1a02f656943f54d1e0c77cbfa98`，以 `ChainAmpRabiExp` 跑舊低 SNR preset 的工作副本，覆寫 projection floor 為 `1e-5`。這次非排他 CPU 診斷使用空快取、關閉 warmup 和 pacing，只跑原 Form 第一個 gain 點（−0.3）的首輪，沒有送 Stop。該輪有 554 outcomes、24 states、16 reads、ADC 0、每窗口 304 samples、100 reps。Engine 後的 compact populations、讀出分布、ADC 準備、statistics 準備、raw 準備、compact draw 與成功收尾分別量到 0.045507、0.001328、0.015142、0.006093、0.000057、0.001970、0.006212 秒；涵蓋前六段的相鄰查詢間隔為 0.205343 秒。51 點首輪與 floor `1e-9` 尺寸未覆蓋，不用這些數字宣稱達成或外推。
+- **已補檢查（附診斷值）；仍未達成（原因：冷段與大尺寸未覆蓋）。** 必需 raw 現在在 ADC 的入口、logical event、point group、交付前及 SoC 發佈前查詢。上述單點診斷中，raw 的原相鄰查詢間隔為 5.035913 秒；送 Stop 的樣本中，event 內第一次查詢到第一群結束的查詢為 3.216835 秒，該輪沒有交付、完成輪數為零。另一個未送 Stop 的冷樣本，同一段查詢間隔為 5.296475 秒，raw 全段為 5.392256 秒；收據未分解 event preparation、群內執行與 JIT。不能據此宣稱冷 raw 已符合目標。51 點首輪、floor `1e-9` 與 GUI retained-cache raw 都未覆蓋。
+- **仍未達成（原因：只量到外層）。** 上述單點診斷的首個 evolve 有兩個未分解區段，分別為 5.483342 秒與 8.105711 秒。收據沒有定位子段，不能據此另加檢查點或改寫 retained-cache 結論。
 
 通用 Cancel 與 terminal 所有權遵循 [ADR-0066](0066-operation-lifecycle.md#取消與互動)。當輪 raw 的資料 owner 與 query 邊界見[Integrated raw 規則](#integrated-raw-由環境生成介面由-program-擁有)及 [required raw 討論](../discussions/2026-11-21-required-raw-stop-publication.md)。
 
@@ -249,9 +250,9 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 
 **例子。** FTF、single 與 six 每次 acquire 以共用 writer 寫一行總 wall、編譯、演化、讀出與各 family 的分項，模擬器特有的欄位放在 `extras`。見[共用 telemetry](../../lib/zcu_tools/simulators/README.md#acquire-telemetry)。
 
-**邊界。** 共用介面可以帶中性的模擬知識，不把 FTF 的腔記憶或 six 的 scatter 放成共用 hook。調試者就是模擬器維護者，介面可暴露內部資訊，不另為外部使用者承諾穩定 API。[模擬器的 debug capture](../../lib/zcu_tools/simulators/README.md#debug-capture)共用錄製與體檢介面，保存凍結輸入與實際選路。直接用 `ModelSource` 呼叫引擎仍能錄製與體檢，但沒有前端和讀出的耗時。
+**邊界。** Acquire telemetry 的量測 commit 與 dirty 標記由啟動擷取的呼叫端提供；lib 不查 Git。未提供的值寫 `null`。共用介面可以帶中性的模擬知識，不把 FTF 的腔記憶或 six 的 scatter 放成共用 hook。調試者就是模擬器維護者，介面可暴露內部資訊，不另為外部使用者承諾穩定 API。[模擬器的 debug capture](../../lib/zcu_tools/simulators/README.md#debug-capture)共用錄製與體檢介面，保存凍結輸入與實際選路。直接用 `ModelSource` 呼叫引擎仍能錄製與體檢，但沒有前端和讀出的耗時。
 
-**依據。** 2026-11-16，使用者：「優化手段要看模擬器是否實作功能，應該是要規範模擬器應該帶有用於調試的通用接口，類似基類或protocol的概念」。對資料形狀答：「可以，但我認為這個資料不一定要完全強型別，可以用多餘資訊的接口，比如dict屬性，放值得記錄的資訊」。對使用者答：「可以，調試者應該就是模擬器維護者，我沒有意向去解耦合兩者責任」。對共通部分答：「中性的模擬知識是沒有問題的。場景特化的才不建議」。原始討論未入庫；實例見[共用 acquire telemetry writer](../discussions/2026-11-16-shared-acquire-telemetry.md)與 [Engine capture 的逐輪選路事件](../discussions/2026-11-17-engine-capture-events.md)。
+**依據。** 2026-11-16，使用者：「優化手段要看模擬器是否實作功能，應該是要規範模擬器應該帶有用於調試的通用接口，類似基類或protocol的概念」。對資料形狀答：「可以，但我認為這個資料不一定要完全強型別，可以用多餘資訊的接口，比如dict屬性，放值得記錄的資訊」。對使用者答：「可以，調試者應該就是模擬器維護者，我沒有意向去解耦合兩者責任」。對共通部分答：「中性的模擬知識是沒有問題的。場景特化的才不建議」。原始討論未入庫；實例見[共用 acquire telemetry writer](../discussions/2026-11-16-shared-acquire-telemetry.md)與 [Engine capture 的逐輪選路事件](../discussions/2026-11-17-engine-capture-events.md)。2026-11-22，使用者對由呼叫端提供量測 commit／dirty 及收窄未完成列的規則答「可以。」見[舊實測數字當現況](../discussions/2026-11-22-stale-measured-numbers.md)。
 
 ### 優化優先於周邊約定；除錯靠 dump，不靠重算
 

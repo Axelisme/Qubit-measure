@@ -16,23 +16,56 @@ from zcu_lab.v2.support.measure.seed_metadata import (
 class T2EchoInput(ConfigBase):
     """Captured pulses, delay sweep and phase advance in fringes per step."""
 
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="µs")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose a reset before the first π/2 pulse, or leave empty to skip it.",
+        ),
+    ] = None
+    pi2_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Pi/2 Pulse",
+            description="Enter the Rabi-calibrated π/2 pulse for preparation and final projection.",
+        ),
+    ]
+    pi_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Pi Pulse",
+            description="Enter the Rabi-calibrated π pulse that refocuses the echo at mid-delay.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated single-tone readout after the final π/2 pulse.",
+        ),
+    ]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Total echo delay",
+            unit="µs",
+            description="Enter the sum of both free-evolution intervals (µs).",
+        ),
+    ]
     detune_ratio: Annotated[
         float,
         FieldMeta(
             label="Detune ratio (fringes/step)",
-            description="Enter the number of fringes per delay step for the final-pulse phase ramp.",
+            description="Enter the fringe advance per delay step for the final π/2 pulse, or 0 to disable its phase ramp.",
             decimals=3,
         ),
     ] = 0.1
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the shots per delay in each round (count).",
         ),
     ] = 1
     rounds: Annotated[
@@ -40,14 +73,14 @@ class T2EchoInput(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the maximum number of complete sweeps to average (count).",
         ),
     ] = 1
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(
             label="Early-stop SNR",
-            description="Stop averaging after a completed round reaches this SNR; None disables.",
+            description="Enter the trace SNR to stop averaging after a complete sweep, or leave empty to run all rounds.",
         ),
     ] = Field(default=None, gt=0)
     relax_delay: Annotated[
@@ -56,7 +89,7 @@ class T2EchoInput(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the relaxation wait after each shot (µs).",
         ),
     ] = 1.0
 

@@ -66,6 +66,13 @@ def _writeback(
     )
 
 
+def _summary_lines(source: SsLenRabiRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds: {cfg.shots}×1 per pulse length",)
+
+
 def _run(
     cfg: LenRabiCfg, *, context: RunContext
 ) -> RunRecord[LenRabiCfg, LenRabiResult]:
@@ -80,6 +87,7 @@ DEFINITION = Adapter(
     analysis=Analysis(
         fn=_analyze,
         options=lambda source, env: SsLenRabiAnalyzeParams(),
+        summary_lines=_summary_lines,
         writeback=_writeback,
     ),
 )

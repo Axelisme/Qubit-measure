@@ -70,7 +70,7 @@ def t2_echo_model() -> CycleModel:
     after the last pi/2; it is not an extra fitted parameter or fixed input.
     T2 includes the transverse contribution of T1. Third-state decay lands
     incoherently in the qubit subspace. Pulse errors or more complex leakage
-    can violate this curve family; fit_cycle reports checks, not corrections.
+    can produce larger joint residuals; fit_cycle does not correct the model.
     Equal t2/tf or vanishing row contrast can lose identification; Wald errors
     then need not be calibrated. The g curve is affine in exp(-x/t2), the same
     family as the third curve, so with a small third-state population the fit
@@ -110,7 +110,7 @@ def t2_ramsey_model() -> CycleModel:
     longitudinal baseline after the analyzer. T2 includes T1's transverse
     contribution; no separate T1 input or parameter is used. Third-state
     decay lands incoherently in the qubit subspace. Pulse errors and more
-    complex leakage can cause misfit, reported by fit_cycle's checks.
+    complex leakage can produce larger joint residuals.
 
     ``oscillation_frequency`` is ``detuning`` so CycleFit reports reliability.
     Zero detuning, vanishing contrast and frequency aliases can invalidate

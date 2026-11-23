@@ -67,13 +67,13 @@ status: accepted
 
 ### 真實 acquire 與模擬邊界
 
-**規則。** 真實硬體 acquire 不執行模擬模組，包括 `simulate` 及 `program.v2.simulation` 的排程器。共用估時留在中性的 `program` 工具。模擬 caller 明示 generator 必須綁到 charge drive line 時，由知道實體線路的 environment 驗證。Program 只將需求傳進 `AcquireRequest.charge_requirements`；`simulators.replay` 保存同一種 boundary record，不重做驗證。
+**規則。** 真實硬體 acquire 不執行模擬。`MyProgramV2` 只經 `SimulationAcquireMixin` 接入模擬，模擬專用的邏輯、參數與型別留在 `program.v2.simulation`。拿掉 `SimulationAcquireMixin`，Program 不留任何模擬邏輯、參數或型別；docstring 說明模擬時的行為可留；lab 不傳模擬專用參數給 Program。模擬環境依自己的接線與編譯所得的 generator 事件決定路由。
 
-**例子。** STIRAP 以 `ChargeDriveRequirement` 傳入診斷名稱和 generator index。名稱不是 role registry key，caller 不查環境設定或判斷線路成員。Single-fluxonium 每次 acquire 在 waveform 建構、preparation reuse 與 evolution 之前用 `drive_lines` 驗證；已綁 flux 或 readout 不算 charge，也不改其他合法 fast-flux 路由。見 [program 的模擬入口](../../lib/zcu_tools/program/v2/simulation/README.md)與 [single environment](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md)。
+**例子。** `request_round_time_s` 移進 `program/v2/simulation/`，只供模擬 binding 使用，見 [ADR-0084〈模擬 round 時長〉](0084-simulation-integer-time-base.md#模擬-round-時長)。`charge_requirements` 刪除，STIRAP 用同一個 `Schedule.run_acquire_summed` 呼叫在 FTF 或 Single-fluxonium 取數。編譯所得的 Pump 與 Stokes 事件已有 generator、載波與 envelope。模擬環境用這些事件與自身接線運算，不從脈衝名稱推斷角色，見 [Single-fluxonium 的完整時間軸](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#complete-timelines)。Import contract 守住 Program 其他模組不直接 import 模擬套件。
 
-**邊界。** 硬體入口取走 keyword，不轉送 QICK、不建模擬 request、不做物理驗證；operator 核對實機線路。`white_noise` 沒有物理線路，接受但不驗證。Six 與 FTF 等不支援此需求的物理環境在 evolution 前拒絕非空需求，空需求不改流程。不清空需求、不從 waveform 猜角色、不擴張 `QubitWiringSchema`，也不另加 Protocol 或 `RunContext` capability。Program、experiment、simulators 與 lab 可 import `simulate.boundary` 的 record；載入型別不執行模擬，`simulate` 初始化只載入 numpy。C8、C9、C12、`simulate-closed` 與 `program-simulation-entry` 檢查依賴，program class 只能經入口使用模擬 frontend、timeline 與 adapter。真實 acquire 是否執行模擬仍要審閱執行路徑。
+**邊界。** `program-simulation-imports` 禁止 `zcu_tools.program` 在 `zcu_tools.program.v2.simulation` 之外直接 import `zcu_tools.simulate` 或 `zcu_tools.simulators`，包括兩者的子模組。既有 [`framework-no-simulators`](#分層) 不變，整個框架仍不得依賴 `zcu_tools.simulators`，mixin 也不例外。直接 import 檢查不取代執行路徑的審閱。環境仍檢查 generator 與 ADC 路由，operator 仍核對實機接線。Experiment 層的 Run provenance 記錄 `SimulationSoc`，以及 lab 用 `simulate.fluxonium` 做物理擬合，都不算 Program 的模擬邏輯。
 
-**依據。** 2026-10-26，使用者：「我不太希望真实 acquire 还会走模拟的模块。」2026-10-30，advisor 依授權「可以按需排task，我授權你代理」代裁：「驗證 owner 是 single_fluxonium 環境，在既有拒絕 unbound generator 的 preflight 位置一起檢查，早於任何 evolution。」未見使用者覆核這項代裁的紀錄。原裁決未附入庫討論，見 Git `d657120b9`。
+**依據。** 2026-10-26，使用者：「我不太希望真实 acquire 还会走模拟的模块。」2026-11-22，使用者：「据我所知啦，模拟器这个功能啊，应该只局限在一个 mixin 内，也就是说，如果把这个 mixin 拿掉，我的 program 就没有模拟功能。这个是解耦的设计。」「我认为这两处可能有违背了我的设计理念。对我来说，只要把这个 mixin 拿掉，我的 program 就不会有模拟的逻辑存在了。」Designer 依 2026-11-23 的授權代裁，移除僅供模擬端驗證的線路要求，並用 import contract 守住 Program 邊界。使用者於 2026-11-23 追認做法並核准原則措辭：「0242採用建議」。比較與舊裁決見 [Program 的模擬邏輯只在 mixin 內](../discussions/2026-11-23-program-simulation-mixin.md)。
 
 ### Mux PFB channel 查詢與 carrier selection 的 owner
 
@@ -130,7 +130,7 @@ GUI 為 writeback 檢查有限值或整理摘要不算分析。發布前 `summar
 
 **規則。** `twotone/freq` 暴露 Model type、Expected center 和 Min SNR。`analysis.fitting.spectrum.fit_spectrum` 以明填 `local_peak=True` 負責數值選峰與窗口。Lab 留下選項、IQ 投影與圖上的實際窗口標示，數值工具不讀 lab options。
 
-**例子。** 同一廣掃有強 transition 與一個高度不到它 0.2 的弱 transition 時，可用 Expected center 選附近最高的局部極大值，而不因全譜 range 比例拒絕。中心空白時選最顯著峰。Min SNR 仍可拒絕弱峰；失敗回報候選數與門檻，不改擬合遠處強峰。預設 SNR 5、左右各六個半高寬、中點裁切但至少取最近六點的契約見 [frequency guide](../../zcu_lab/v2/twotone/freq/guide.md#peak-selection)。
+**例子。** 同一廣掃有強 transition 與一個高度不到它 0.2 的弱 transition 時，可用 Expected center 選附近最高的局部極大值，而不因全譜 range 比例拒絕。中心空白時選最顯著峰。Min SNR 仍可拒絕弱峰；失敗回報候選數與門檻，不改擬合遠處強峰。預設 SNR 5 見 frequency guide 的[序列與設定](../../zcu_lab/v2/twotone/freq/guide.md#sequence-and-key-settings)；左右各六個半高寬、中點裁切但至少取最近六點的契約見[頻譜判讀](../../zcu_lab/v2/twotone/freq/guide.md#read-the-spectrum)。
 
 **邊界。** 只改 `twotone/freq`。`SpectrumFitOptions` 保留欄位，`twotone/chain` 仍用最近候選與中點窗口；Notebook fluxdep 與 workflow calibration 不改。其他 caller 自行明選門檻或窗口，不繼承 freq 的 GUI 選項。C8、C9、C15、C16 下仍是 lab → analysis。
 
@@ -142,7 +142,7 @@ GUI 為 writeback 檢查有限值或整理摘要不算分析。發布前 `summar
 
 **例子。** `live_line(ax)` 掛在指定 axes，作者在 decorator 本體回傳 `line.set(xs, signals)` 的 changed artists。Show 前只修改 artists，不 refresh 或載入 ipympl。後續 `fig.show()` 或 `finish(present=True)` 呈現最新圖。Lifetime、deepcopy、artist 歸屬、refresh 及失敗行為見[原生 matplotlib 更新](../../lib/zcu_tools/plotting/README.md#原生-matplotlib-更新)；其他 live 工具和資料格式見 [lab 的即時圖工具](../../zcu_lab/v2/README.md#即時圖工具)。
 
-**邊界。** Lab helper 在 caller thread 更新，不建圖、不加標籤或標題、不 refresh、不 present，也不綁 Plots lifetime。Helper 與 decorator 不登記 axes 或檢查佔用；共用 axes 由作者協調 artists、autoscale 和色階。混合回傳只 refresh 已呈現的圖；外來圖即使未呈現也拒絕。Notebook／Qt host 的 refresh 前提不變。Fluxdep 的非均勻底圖由其私有 renderer 處理，不依賴 lab 工具；singleshot 專屬分類與 joint-fit 診斷留在 lab，數值 owner 不搬動。獨立 liveplot plotter／backend、reference marker、錄影以及 LiveUpdate、字串圖名 draw 和舊 helper 均不再使用。依賴仍為 lab → plotting，由 C8、C15、C16 保護。
+**邊界。** Lab helper 在 caller thread 更新，不建圖、不加標籤或標題、不 refresh、不 present，也不綁 Plots lifetime。Helper 與 decorator 不登記 axes 或檢查佔用；共用 axes 由作者協調 artists、autoscale 和色階。混合回傳只 refresh 已呈現的圖；外來圖即使未呈現也拒絕。Notebook／Qt host 的 refresh 前提不變。Fluxdep 的非均勻底圖由其私有 renderer 處理，不依賴 lab 工具；Singleshot 專屬分類圖留在 lab，Amp／Len Rabi 的 joint-fit 診斷圖由各自的 lab core 擁有，數值 owner 不搬動。[GE 模型 histogram](../../lib/zcu_tools/experiment/README.md#ge-模型診斷) 由 experiment 的 `fitting_ge_and_plot` 繪製，不屬於 Rabi joint-fit 診斷圖移入 lab 的範圍。獨立 liveplot plotter／backend、reference marker、錄影以及 LiveUpdate、字串圖名 draw 和舊 helper 均不再使用。依賴仍為 lab → plotting，由 C8、C15、C16 保護。
 
 **依據。** 2026-10-24，使用者：「框架與機制留在lib可以，live_line的定位應該是工具，可按需求擴充，但放在lib裡很難改。以及liveplot模塊應該可以考慮刪除，我以為plotting已經取代他了。」2026-10-30，使用者：「畫圖採用建議，但名字叫live不太好懂」、「@plots.on_plot_thread好了，隱藏執行線程的機制資訊可能在某些時候造成難以發現的bug」和「我也傾向後者，live_line只是本地執行緒的」。2026-11-01，全實驗完成 owner 更新和 lab helper 遷移。原裁決未附入庫討論，見 Git `8ba70ea3b`、`0a56d4bac` 與 `f44a7c8e9`。
 
@@ -171,7 +171,9 @@ Lab 定義改動（含畫面）以 `experiment.probe` 分別驗 `run_stage`、`s
 
 **規則。** GUI、MCP 組合根和開發工具需要 lab 宣告時，只直接 import `zcu_lab.assembly`，不重組其內部定義。固定 optimizer benchmark 的核心 pulse 序列與每個場景的模型值由工具持有，不 import lab 或讀可變的 lab YAML。入庫且持續使用的模擬量測工具與測試不讀 `zcu_lab/simulation_envs/`；一次性研究可讀已提交的環境參數。
 
-**例子。** `apps/measure.py` 用 `lab_definitions()`，不 import `zcu_lab.v2.twotone.freq.core`，lab 可在入口後調整實驗、元件、recipe 與 workflow 的佈局。固定量表場景可重複核心序列以便直接閱讀，lab 改序列不會自動更新量表。量表有公開 program 編譯的場景、直接用 `SingleFluxoniumModel` 的單段場景，以及用公開 FTF 模型和多段 `TimelineBatch` 的 gate 場景。它們共用 producer CLI；固定設定、builder、`numeric_builder`、資源生命週期及路徑見 [Tools README](../../tools/README.md#fixed-scenarios-companions-and-reference-cache) 和 [Freeze numeric scenes](../../tools/README.md#freeze-numeric-scenes)。
+**例子。** `apps/measure.py` 用 `lab_definitions()`，不 import `zcu_lab.v2.twotone.freq.core`，lab 可在入口後調整實驗、元件、recipe 與 workflow 的佈局。[實驗 Run 牆鐘](../../tools/README.md#實驗-run-牆鐘)也只從 assembly 取得宣告。工具持有場景清單、FTF 設定及乾淨 point；每列開現行 Form 並派送 Controller Run。Lab 改標準 preset 或加 adapter 不會改場景；改已選實驗的 Form，工具會用新的 Form。
+
+固定 optimizer benchmark 可重複核心序列以便直接閱讀，lab 改序列不會自動更新量表。量表有公開 program 編譯的場景、直接用 `SingleFluxoniumModel` 的單段場景，以及用公開 FTF 模型和多段 `TimelineBatch` 的 gate 場景。它們共用 producer CLI；固定設定、builder、`numeric_builder`、資源生命週期及路徑見 [Tools README](../../tools/README.md#fixed-scenarios-companions-and-reference-cache) 和 [Freeze numeric scenes](../../tools/README.md#freeze-numeric-scenes)。
 
 **邊界。** `migrations/` 可直接識別舊實驗格式；若改成不同 lab 共用的框架，就改用 assembly。這不保證刪除 lab 後現有組合根仍可啟動，也不新增位置字串或 Python entry point 註冊。需要真實 lab 宣告的品質檢查仍走 assembly，不複製 lab。
 
@@ -182,6 +184,7 @@ Lab 定義改動（含畫面）以 `experiment.probe` 分別驗 `run_stage`、`s
 - 2026-11-14，使用者：「其实应该是 B， 因为我对这个 repo 的期望是，我把 [zcu_lab] 删掉，也可以正常运作。而 [zcu_lab] 是使用者自由的、控制的、写的、安排结构的模块。」並澄清：「我的意思是 ，Script 的定位与 [zcu_lab] 比较像，而 Tool 的定位是用于开发。我不确定该不该让它依赖 Lab。MCP 需要发现、实验，而也确实是需要一种正规的方法来宣告你有哪些实验。我不确定要怎么好的结合两者，让 MCP 尽量不依赖[zcu_lab]。」對註冊取捨說：「但是呢，我又不想把注册逻辑搞得太复杂，导致实作行数太多。有简单的方法吗？还是我就放弃？我就是让它可以依赖，但是只依赖局部的部分的档案。」對 assembly 入口和 migrations 例外答「好，甲」。引文以 `[zcu_lab]` 代替語音輸入的 lab 名稱。
 - 2026-11-15，使用者：「但腳本也不應該依賴於我的模擬器環境參數設定，而是自己為每個場景設定的固定環境」，並界定範圍：「研究的话就没差，都可以用。但是如果你要持久的工具的话，麻烦请不要依赖于作者可能会改到的东西。」以上三日的比較見 [Lab 依賴邊界討論](../discussions/2026-11-14-lab-dependency-boundary.md)。
 - 2026-11-16，使用者：「檔案大就請不要入庫，用類似快取的方式來減少重複計算，記得考慮跨worktree也能復用的方案」；對範圍與釘住方式答「1a 2a」，對共用快取提案答「R」。見[凍結場景存放](../discussions/2026-11-16-frozen-scene-storage.md)。
+- 2026-11-22，使用者：「沒有，我還是覺得工具應該自備一份」。2026-11-23 對完整 Run 是否複製演化序列，使用者以維護為先，裁決「就照你的建议，以呼叫实验定义来聊就好了。」見[牆鐘工具量手選場景](../discussions/2026-11-23-curated-wall-time-scenes.md)。
 
 ### 開發工具的數值交接
 
@@ -218,7 +221,7 @@ Lab 定義改動（含畫面）以 `experiment.probe` 分別驗 `run_stage`、`s
 
 **規則。** `zcu_lab.components` 以 `base.py` 放基礎元件、共用欄位與 resonator wiring 型別，以 `qubit.py` 放共用 qubit 定義與轉換；Fluxonium、transmon、resonator、JPA 和 mux 各有子模組。入口顯式匯出並提供 `register_all()`，不在 import 時註冊。GUI／Notebook 共用的模擬參數與 startup 放 `zcu_lab/simulation_envs/`。每個 startup 與 kickstart 各持同目錄的 `entry-template.yaml`。
 
-**例子。** Resonator 自宣告 `WiringSchema(ch, ro_ch)`；qubit 經 `QubitBaseSchema` 用 `QubitWiringSchema(ch, lo_flux_ch)`；JPA 與 current source 沒有通道讀取者就不宣告 wiring。Mux 用自己 schema 的 `gen_ch` 和有序 `ro_ch`，不從單 tone resonator 推導。有值時檢查 ADC 與 resonators 等長，unknown wiring 的契約見 [Components README](../../zcu_lab/components/README.md#wiring)。GUI 執行 caller 選定的可信 startup，不探索目錄；Notebook 可直接呼叫 `experiment.ftf.ftf(...)`，FTF 不設離線建庫入口。`zcu_lab/kickstart/<env>/` 只建 entry、元件參數及 alias，不連 SoC 或 device；改一份 template 只影響使用該腳本的新 entry。
+**例子。** Resonator 自宣告 `WiringSchema(ch, ro_ch)`；qubit 經 `QubitBaseSchema` 用 `QubitWiringSchema(ch, lo_flux_ch)`；JPA 與 current source 沒有通道讀取者就不宣告 wiring。Mux 用自己 schema 的 `gen_ch` 和有序 `ro_ch`，不從單 tone resonator 推導。有值時檢查 ADC 與 resonators 等長，unknown wiring 的契約見 [Components README](../../zcu_lab/components/README.md#wiring)。GUI 執行 caller 選定的可信 startup，不探索目錄；Notebook 可直接呼叫 `zcu_tools.simulators.ftf.environment.ftf(...)`，模型 YAML 與板子設定見 [Notebook 範例](../../notebook_md/single_qubit.md#load-the-environment)。FTF 不設離線建庫入口。`zcu_lab/kickstart/<env>/` 只建 entry、元件參數及 alias，不連 SoC 或 device；改一份 template 只影響使用該腳本的新 entry。
 
 **邊界。** `BuiltinComponent` 只給 `ext`、`module` 與 unsupported-field migration。C14、C16 禁止框架反向 import 使用者定義。Workflow 自組 program 並呼叫 runner，可沿用實驗 core 的 Cfg、Result 與 `AXES_SPEC` 存檔，不借用其他實驗的取數和分析。專屬 helper 留 workflow 目錄，共用 helper 放 `zcu_lab/workflows/common/`，不把客製需求放進 core 或 lib。`@recipe` 與 `@workflow` 同形；recipe 由 `zcu_lab/recipes` 顯式登記。Startup、recipe 和 workflow 的作者慣例見 [lab policy](../../zcu_lab/POLICY.md)。
 

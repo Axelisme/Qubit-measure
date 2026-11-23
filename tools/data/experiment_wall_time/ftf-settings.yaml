@@ -1,7 +1,3 @@
-# Source: zcu_lab/simulation_envs/FTF/low-snr.yaml, copied 2026-11-21.
-# Keep the physical and readout settings. Omit the unused design guesses.
-# Initial DC currents: ftf-cz-recalibration-20261120, Round 05 joint working
-# point (2026-11-20): F1 156.63 uA, F2 83.34 uA, coupler 0 uA.
 # Illustrative F1-coupler-F2 settings. Truncation convergence is not guaranteed.
 # Circuit energies, couplings and resonator frequencies: Device A, Table 5.1,
 # Chapter 5, FTF Architecture for Quantum Computing. Other values are local settings.
@@ -38,6 +34,44 @@ chip:
   g_f1_f2_ghz: 0.055
   temperature_k: 0.05
 
+# Optional acquisition-frozen drift. Uncomment to enable; omitted/null drift is off.
+# Every selected chip loss above must be positive, not null or zero.
+# sigma is the stationary standard deviation of ln(loss); tau_s is in seconds.
+# The first acquisition uses chip values; later acquisitions follow independent log-OU streams.
+# Omitted loops/targets stay constant. q_ind never drifts; coupler has no xqp.
+# drift:
+#   f1:
+#     q_cap: {sigma: 0.1, tau_s: 300.0}
+#     xqp: {sigma: 0.2, tau_s: 600.0}
+#     aphi: {sigma: 0.1, tau_s: 300.0}
+#   coupler:
+#     q_cap: {sigma: 0.1, tau_s: 300.0}
+#     aphi: {sigma: 0.1, tau_s: 300.0}
+#   f2:
+#     q_cap: {sigma: 0.1, tau_s: 300.0}
+#     xqp: {sigma: 0.2, tau_s: 600.0}
+#     aphi: {sigma: 0.1, tau_s: 300.0}
+
+# Author's design guesses, not simulator truth or calibrated measurement values.
+# Native flux-source units; all affine values are independent nominal inputs.
+design:
+  Q1:
+    ej_ghz: 6.1
+    ec_ghz: 1.45
+    el_ghz: 0.78
+    flux_unit: A
+    flux_half: 0.0002
+    flux_period: 0.008
+    flux_bias: 0.0
+  Q2:
+    ej_ghz: 5.6
+    ec_ghz: 1.35
+    el_ghz: 0.60
+    flux_unit: A
+    flux_half: 0.0001
+    flux_period: 0.0084
+    flux_bias: 0.0
+
 dc_bias:
   offset_phi0: { f1: 0.48, coupler: 0.2, f2: 0.49 }
   # Loop flux = offset + sum(source current * flux_per_unit).
@@ -47,7 +81,7 @@ dc_bias:
     f1_bias:
       unit: A
       limits: [-0.02, 0.02] # -20 to +20 mA
-      initial: 0.00015663
+      initial: 0.00015664
       ramp_step: 0.000001 # A, equivalent to 0.001 mA
       flux_per_unit: { f1: 128.2, coupler: 2, f2: -1 }
     coupler_bias:
@@ -59,9 +93,15 @@ dc_bias:
     f2_bias:
       unit: A
       limits: [-0.02, 0.02]
-      initial: 0.00008334
+      initial: 0.00008324
       ramp_step: 0.000001
       flux_per_unit: { f1: -1, coupler: 2, f2: 122.0 }
+    coil:
+      unit: A
+      limits: [-0.02, 0.02]
+      initial: 0.0
+      ramp_step: 0.000001
+      flux_per_unit: { f1: 110.0, coupler: 120.0, f2: -100.0 }
 
 drive_lines:
   # Illustrative simulation assumptions, not measured line calibrations.
@@ -80,6 +120,12 @@ drive_lines:
       f1: { real: 0.0, imag: 0.0 }
       coupler: { real: 0.01, imag: 0.0 }
       f2: { real: 0.1, imag: 0.0 }
+
+# Fast-flux routes are separate from linearized drive_lines operator: flux.
+# Each loop is optional; its generator must not overlap drive or readout.
+flux_lines:
+  f1: { name: f1_flux, gen_ch: 1, flux_phi0_per_gain: 0.25 }
+  f2: { name: f2_flux, gen_ch: 4, flux_phi0_per_gain: 0.25 }
 
 readout:
   drive:
@@ -120,7 +166,7 @@ readout:
         low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
     offset_adc: [0.0, 0.0] # I, Q
     # Two-sided white PSD in ADC^2*ns. Sample covariance = PSD / dt_ns.
-    noise_psd_adc2_ns: [[84000.0, 16800.0], [16800.0, 84000.0]]
+    noise_psd_adc2_ns: 11400000.0
   mux:
     gen_ch: 7
     input_per_gain: 10.0 # sqrt(photons/ns)/gain
@@ -143,7 +189,7 @@ readout:
           band_edges:
             low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
         offset_adc: [0.0, 0.0]
-        noise_psd_adc2_ns: [[84000.0, 16800.0], [16800.0, 84000.0]]
+        noise_psd_adc2_ns: 11400000.0
       - ro_ch: 3
         gain: 100.0
         phase_deg: 0.0
@@ -162,12 +208,12 @@ readout:
           band_edges:
             low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
         offset_adc: [0.0, 0.0]
-        noise_psd_adc2_ns: [[84000.0, 16800.0], [16800.0, 84000.0]]
+        noise_psd_adc2_ns: 48000000.0
 
 numerics:
   # Increase native/local dimensions and the joint upper bound independently
   # to check convergence.
-  projection_weight_floor: 1.0e-9
+  projection_weight_floor: 1.0e-5
   truncation:
     f1:
       native_cutoff: 24
@@ -186,4 +232,4 @@ numerics:
     max_step_ns: 0.1
     bath_segment_ns: 2.0 # nearest 2 ns, at least one tick
   seed: 123
-  time_scale: 0
+  time_scale: 1.0

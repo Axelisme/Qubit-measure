@@ -7,11 +7,10 @@ from typing import Annotated, ClassVar
 import numpy as np
 from matplotlib.artist import Artist
 from matplotlib.image import NonUniformImage
-from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, config
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -39,7 +38,12 @@ class MistResult:
 @pydantic_dataclass(frozen=True)
 class MistAnalyzeOptions:
     ac_coeff: Annotated[
-        float | None, FieldMeta(label="Photon number / gain squared")
+        float | None,
+        FieldMeta(
+            label="Photon calibration coefficient",
+            unit="photons / (a.u.)²",
+            description="Enter a separately calibrated coefficient to convert squared MIST gain to photon number, or leave blank.",
+        ),
     ] = None
 
 
@@ -49,17 +53,63 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class MistCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    init_pulse: Pulse.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    mist_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    flux_gain: Annotated[SweepCfg, FieldMeta(label="flux gain", unit="a.u.")]
-    mist_gain: Annotated[SweepCfg, FieldMeta(label="mist gain", unit="a.u.")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the reset module before each shot, or leave it disabled.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Preparation pulse",
+            description="Choose the qubit pulse before the flux and resonator drives, or leave it disabled.",
+        ),
+    ] = None
+    flux_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Flux pulse",
+            description="Enter the flux pulse with duration and timing; Flux pulse gain supplies the swept gain.",
+        ),
+    ]
+    mist_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="MIST pulse",
+            description="Enter the resonator drive with its carrier and duration; MIST pulse gain supplies the swept gain.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated resonator readout used after both drives finish.",
+        ),
+    ]
+    flux_gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Flux pulse gain",
+            unit="a.u.",
+            description="Enter the signed DAC gain scan of the flux pulse.",
+        ),
+    ]
+    mist_gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="MIST pulse gain",
+            unit="a.u.",
+            description="Enter the DAC gain scan of the resonator drive.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the number of shots per scan point in each round.",
         ),
     ]
     rounds: Annotated[
@@ -67,7 +117,7 @@ class MistCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of times to acquire and average the full scan.",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -76,7 +126,7 @@ class MistCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the time for relaxation after each shot.",
         ),
     ]
 
@@ -126,22 +176,23 @@ class MistExp(Experiment[MistResult, MistCfg]):
         )
 
         # 2. Display the averaged response without classifying individual shots.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Mist Pulse Gain (a.u.)")
-        formatter = ScalarFormatter(useMathText=True)
-        formatter.set_powerlimits((-2, 2))
-        ax.xaxis.set_major_formatter(formatter)
-        ax.yaxis.set_major_formatter(formatter)
+        fig, ax = context.plots.subplots(num="measurement", layout="constrained")
+        fig.suptitle("Fast-flux MIST · Qubit · Readout contrast")
+        ax.set(xlabel="Flux pulse gain (a.u.)", ylabel="MIST pulse gain (a.u.)")
+        ax.set_title(f"0/{flux_gains.size * mist_gains.size} scan points with IQ")
+        ax.grid(False)
         viewer = live_heatmap(ax)
+        (image,) = viewer.set(
+            flux_gains, mist_gains, np.full((flux_gains.size, mist_gains.size), np.nan)
+        )
+        fig.colorbar(image, ax=ax, label="Mean IQ real projection (a.u.)")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
-            """Draw acquired complex IQ on the measurement axes; return changed artists.
-
-            Read the scan-shaped data without changing it. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            return viewer.set(flux_gains, mist_gains, mist_signal2real(data))
+            """Display available IQ on the scan grid without changing the buffer."""
+            count = np.count_nonzero(np.isfinite(data))
+            title = ax.set_title(f"{count}/{data.size} scan points with IQ")
+            return (*viewer.set(flux_gains, mist_gains, mist_signal2real(data)), title)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -196,15 +247,22 @@ class MistExp(Experiment[MistResult, MistCfg]):
 
         real_signals = mist_signal2real(signals2D)
 
-        # 2. Map contrast against flux gain and MIST gain squared, optionally photons.
-        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+        # 2. Preserve the Run view before showing the transformed scan axis.
+        fig, ax = plots.subplots(num="fit", layout="constrained")
+        fig.suptitle("Fast-flux MIST · Qubit · Readout contrast")
+        ax.set(xlabel="Flux pulse gain (a.u.)", ylabel="MIST pulse gain (a.u.)")
+        ax.grid(False)
+        (image,) = live_heatmap(ax).set(flux_gains, mist_gains, real_signals)
+        fig.colorbar(image, ax=ax, label="Mean IQ real projection (a.u.)")
 
+        fig, ax = plots.subplots(num="probe_power", layout="constrained")
+        fig.suptitle("Fast-flux MIST · Qubit · Probe power")
         if options.ac_coeff is not None:
             mist_photons = options.ac_coeff * mist_gains**2
-            ylabel = "Photon Number (a.u.)"
+            ylabel = "Estimated photon number (count)"
         else:
             mist_photons = mist_gains**2
-            ylabel = "Mist Pulse Gain^2 (a.u.)"
+            ylabel = "Squared MIST pulse gain ((a.u.)²)"
 
         im = NonUniformImage(ax, interpolation="nearest", cmap="RdBu_r")
         im.set_data(flux_gains, mist_photons, real_signals.T)
@@ -212,7 +270,6 @@ class MistExp(Experiment[MistResult, MistCfg]):
             (flux_gains[0], flux_gains[-1], mist_photons[0], mist_photons[-1])
         )
         ax.add_artist(im)
-        ax.set_xlabel("Flux Pulse Gain (a.u.)")
-        ax.set_ylabel(ylabel)
-
-        fig.tight_layout()
+        ax.set(xlabel="Flux pulse gain (a.u.)", ylabel=ylabel)
+        ax.grid(False)
+        fig.colorbar(im, ax=ax, label="Mean IQ real projection (a.u.)")

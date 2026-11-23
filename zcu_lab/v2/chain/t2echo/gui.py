@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field
-from zcu_tools.analysis.readout_chain import CycleCheck, CycleSums
+from pydantic import Field
+from zcu_tools.analysis.readout_chain import CycleSums
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -16,20 +16,26 @@ from zcu_lab.v2.chain.t2echo.core import (
 )
 from zcu_lab.v2.chain.t2echo.form import make_form
 
+from .._joint import JointResidualSummary
 
-class ChainT2EchoSummary(BaseModel):
+
+class ChainT2EchoSummary(JointResidualSummary):
     """Recipe JSON view of the analysis in native units; null is unavailable."""
 
-    t2: float | None = Field(description="T2 echo in us.")
-    t2_err: float | None = Field(description="Wald error of T2 echo in us.")
-    tf: float | None = Field(description="Third-state decay time in us.")
-    tf_err: float | None = Field(description="Wald error of tf in us.")
-    within_point: CycleCheck = Field(description="Within-point check J, df, p.")
-    sharing: CycleCheck = Field(description="Sharing check J, df; p is null.")
-    curve: CycleCheck = Field(description="Curve check J, df, p.")
-    first_read_t2: float | None = Field(
-        description="T2 echo in us of the first-read twotone fit, the starting value."
+    t2: float | None = Field(description="T2 echo (µs).")
+    t2_err: float | None = Field(description="T2 echo Wald standard error (µs).")
+    tf: float | None = Field(description="Third-state decay time (µs).")
+    tf_err: float | None = Field(
+        description="Third-state decay time Wald standard error (µs)."
     )
+    first_read_t2: float | None = Field(
+        description="First-read T2 echo (µs), used to start the joint fit; null if unavailable."
+    )
+
+
+def _summary_lines(source: RunRecord[ChainT2EchoCfg, CycleSums]) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
 
 
 def _analyze(
@@ -53,5 +59,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

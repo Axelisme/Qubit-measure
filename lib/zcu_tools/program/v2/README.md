@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-22，校正 IQ 軸的取數前置條件、`shot_sums` 的分析用途
+**Last updated:** 2026-11-23，arb 寫回提案的 Spec 轉換、timeline 與模擬輸出契約連結
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -32,7 +32,9 @@
 帶 timeline 的 pulse／trigger 在結尾加 t 發射。Readout 的作者結尾只含 generator waveform 與 pre/post delay，ADC 視窗留在 ADC channel，shot 收尾仍等待全部 ADC。
 未帶 timeline 且未進範圍的原生輸出保留 QICK 行為。
 `pulse_by_reg` 選到 timeline 時，須提供配對的 `selection` metadata。
-同 generator 的 pulse 重疊不能靠另一條 timeline 豁免。帶 timeline 的後一個 trigger 必須證明不與同 ADC 前一視窗重疊，否則在 build 時報錯。
+兩個普通 `Pulse` 的實際播放在同一個 generator 上重疊時，編譯器會以 `pulse overlap` 拒絕，分到不同 timeline 也一樣。
+`TwoPulseReset.lower` 的兩條子 timeline 共用原點。每個子 pulse 在共用原點加上各自的 `pre_delay` 後發射，仍受同一項重疊檢查。
+帶 timeline 的後一個 trigger 必須證明不與同 ADC 前一視窗重疊，否則在 build 時報錯。
 原生 `t=None` 無法定位 ADC 起點，會使後一個同 ADC timeline trigger 無法證明不重疊。此未知標記不捏造 shot 收尾的 runtime 結尾。
 Branch 的每個 case 從入口的 ADC 狀態開始編譯。任一 case 在出口的 ADC 結尾未知，Branch 後的同 ADC timeline trigger 就會在編譯時報錯。
 Builder 原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
@@ -62,7 +64,8 @@ Timeline module 不自動保護 route，明確呼叫 `protect_readout_routes` �
 跨 owner 與控制流契約見 [ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md)，其中包含
 [timeline 與 reference](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)、
 [runtime 範圍證明](../../../../docs/adr/0083-program-macros-and-timelines.md#runtime-end-與範圍證明)、
-[branch／repeat 邊界](../../../../docs/adr/0083-program-macros-and-timelines.md#forkjoin-與-repeat-邊界) 與
+[branch／repeat 邊界](../../../../docs/adr/0083-program-macros-and-timelines.md#forkjoin-與-repeat-邊界)、
+[並行序列與 reference 守衛](../../../../docs/adr/0083-program-macros-and-timelines.md#並行序列與-reference-守衛) 與
 [收尾 WAIT／slack](../../../../docs/adr/0083-program-macros-and-timelines.md#收尾-wait-與-slack-護欄)。
 公開方法的參數與錯誤契約另見 [builder.py](builder.py) 與 [timeline.py](timeline.py)。
 
@@ -185,6 +188,16 @@ Read-count 限制、外積總和與取消契約見 [summed acquisition](../READM
 兩種 observation 皆以 `repeat_counts` 保留由外至內的 Repeat 次數，整數代表固定次數，字串代表 count register。
 Path 保留 Repeat scope 與未宣告的空 case，不改 flatten traversal。Consumer 保留 module identity、label、read-count 與取數驗證，不自行解析 wrappers。
 
+### Mux IQ sums
+
+**規則。** 作者在建置 `MuxReadout` 前依參與順序選取 active tones，再以 `mux_iq_sums(prog, read)` 明示需要每個 tone 的校正六矩。Reducer 按該 cfg 的 tone 順序回傳 `(*point_dims, tones, 6)`，不按 ADC 編號排序。每個 ADC 使用自己的積分長度和當輪 QICK／PFB offset；只加總完成的 rounds。
+
+**例子。** Mux T1 先選原 tone 1 再選原 tone 0 時，第一列平均及線性投影 SEM 同取 tone 1 的校正 shots。SEM 使用完成 shots 的 N；N 小於 2 時不顯示誤差棒。
+
+**邊界。** 選取的 mux readout 在每發只做一次無條件積分。程式不含其他 ADC 讀取、edge counting 或 shot masks。此 reducer 不取跨 tone 外積，不放寬單 ADC opt-in，不改原生取數或分類。FTF 使用同一輪既有 required raw 路徑，不為了補誤差棒另取一批 shots。不要求同 seed 的 compact 與 required raw mean 逐值相同。
+
+**依據。** 2026-11-22，該點不確定度遵循使用者所說：「像我其实更想要设计的，其实应该是平均标准差，也就是这个点的预期误差。」Mux reducer 與矩保存細節由 designer 代裁，使用者未覆核。原始討論未入庫；取捨見 [Mux 逐 tone 校正 IQ 矩與 R11](../../../../docs/discussions/2026-11-22-mux-iq-moments-and-r11.md)。點平均的不確定度口徑見 [ADR-0069〈呈現規範〉](../../../../docs/adr/0069-experiment-core-and-frontends.md#呈現規範)；完成輪與模擬 raw 發佈邊界見 [ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md)。
+
 <a id="timeline-rounding"></a>
 
 ## Timeline 取整
@@ -291,5 +304,10 @@ Lowering 的 `SR` 加 `AND value_mask` 清除符號擴展，算術或邏輯 shif
 
 `ArbWaveformCfg` 保存邏輯 data key 與必填本機絕對 path，length 是該 NPZ 的 `time[-1]`，不另存播放長度。
 `ModuleCfgFactory.from_core` 透過明示 `context.assets.path_for` 轉換 nested arb，成品不持有 provider。
+從 native cfg 建立 library 提案時，`ModuleCfgFactory.to_spec` 保留 arb 的 data key，不帶本機播放 path。
+它不讀 NPZ，不修改來源 cfg，Run 存檔仍保留 path。
 Program 與 sim 從 path 讀 bytes，交 `core.waveform_format` 解碼 samples，不查 global DB 或解讀 formula。
 `ArbWaveform.make_iqdata` 在完整 reference time axis 插值到硬體 timing，不伸縮或裁切。覆寫同 path 會改變之後播放內容。
+
+模擬的 [`build_compiled_request`](simulation/README.md#compiled-request-builder) 讀取 `compiled_stream`，不從 waveform 類別推斷支援範圍。若出現 `mode=periodic cannot be represented`，在該段核對有限事件的限制。編譯器與模擬器的分工見 [ADR-0083〈Compiled snapshot 與 simulation 入口〉](../../../../docs/adr/0083-program-macros-and-timelines.md#compiled-snapshot-與-simulation-入口)。
+DDS 的 unity envelope 與 DDS × envelope 的振幅比例見 [Output amplitude scale](simulation/README.md#output-amplitude-scale)。[Numeric contract and extension points](simulation/README.md#numeric-contract-and-extension-points) 說明 `MuxReadout` 如何在同一個 generator 產生同時的多個 `EventSlot`。這是 compiled mux tones 的表示，不是普通 `Pulse` 重疊的例外。

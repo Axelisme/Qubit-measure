@@ -1,51 +1,25 @@
-## Behavior
+# MIST probe-frequency sweep
 
-**Readers:** operator, agent. How to measure MIST populations versus probe frequency from the GUI or MCP and interpret the results.
+**Readers:** operator, agent. Locate changes in single-shot g/e/Other probabilities versus the MIST tone's RF frequency.
 
-MIST probe-frequency sweep: drives a probe pulse whose frequency is swept and classifies each shot during acquisition against the |g>/|e> single-shot centres, plotting the ground/excited/other populations versus probe frequency. Runs on real hardware. Inspect the acquired populations directly.
+## What is measured
 
-## Parameter sources
+Optional **Reset** → optional **Initial preparation pulse** → **MIST tone** at the swept frequency → **Readout**. Other includes shots outside both decision circles or tied; it does not identify a leaked level.
 
-Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. Probe sweep is `$resonator.freq` +/- 1.5 * `$resonator.kappa`.
+## Key settings
 
-Readout accepts only the pulse family.
-A mux readout in the library is incompatible.
-Classification uses the readout's circle classifier under Readout → Advanced.
-Run requires a positive radius; missing radius prompts singleshot GE Post.
-Linear has no Other state and is rejected.
-Analyze corrects populations only with the saved readout cfg's confusion matrix.
-Historical cfg without a classifier or matrix skips correction.
+- Before Run, use Pulse **Readout** (not Mux) with a circle and positive radius under **Advanced**. A linear classifier cannot report Other; obtain a missing radius from [GE Post-Analysis](../../ge/guide.md).
+- **MIST drive RF frequency** starts at resonator frequency ± 1.5 × stored resonator linewidth. Include off-feature points on both sides. Set **Reps** and **Rounds** to sample each probability sufficiently.
+- **Relax delay** starts at 5 × ordinary T1 (150 µs if absent; blank if invalid). Adding reset does not shorten it automatically.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+## How to read the results
 
-T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. Compare the three traces on the same RF axis to locate resonances or loss features. The lines join measured fractions, not fits. Bars show ±1 shot SEM from the g/e/Other counts at each point, not fit error or round-to-round scatter. Analyze uses the linear correction without clipping, so estimates can be below 0 or above 1. It propagates shot-count covariance with the saved calibration matrix treated as known. Fewer than two shots or missing counts leave no bar.
 
-These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
+If the saved matrix cannot produce finite corrected fractions, Analyze shows **Readout correction unavailable** and only the G/E/Other classified fractions from this Run, with shot SEM where available. These are counts after classification, before correction. When only a corrected bar is unavailable, the corrected point remains.
 
-## Module slots
+## Next step
 
-Probe starts from res_probe. Optional init/reset use `$qubit.module.x180`/reset. Readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Defaults snapshot.
+If a feature hits a frequency limit, center the next sweep on its RF frequency and extend the window until neighboring baselines are visible. No calibration is written. Load cannot convert older files without class counts; acquire again.
 
-## Typical writeback
-
-This is a diagnostic only. Read the population curves from the plot; calibration parameters stay unchanged.
-
-## Recommended
-
-Run singleshot/ge Primary and Post, then Apply to the selected readout module. A frequency span around the resonator line captures the MIST response; use a large enough shot count (reps) for clean populations.
-
-## Saved counts
-
-Save keeps `counts` shaped `(Nfreq, 3)` in `[g,e,other]` order, with
-`population_states=[0,1,2]`. Other counts shots outside the accepted circles
-or tied between them. It is not a calibrated leakage population.
-Each point sums to the shots acquired across completed rounds. Live plots and
-Analyze divide each point by its total before displaying populations or applying
-the saved confusion matrix. Sweep coordinates and units are unchanged. Cfg schema
-remains 3.0.
-
-Old files storing `signals` instead of `counts` are unsupported. Load reports
-the missing `counts` variable. Acquire a new run; Load does not convert stored
-fractions to counts.
-
-**Last updated:** 2026-10-29
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).

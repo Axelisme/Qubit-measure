@@ -1,61 +1,21 @@
-# Fast flux phase distortion
+**Readers:** operator, agent. Move a pair of π/2 pulses through a flux transient to separate a local phase response from fringe contrast loss.
 
-**Readers:** operator, agent. Set up a fast-flux phase scan from the GUI or MCP and inspect the transient response.
+# Fast-flux local phase
 
-**Last updated:** 2026-10-21
+After optional Reset, start Flux pulse, wait → π/2 → π/2, and Minimum readout wait together. Sweep the second pulse's carrier phase without an extra gap between the pulses. Read out after all branches finish.
 
-## Prepare the pulses
+## Set pulses and scans
 
-Use this experiment after readout and the qubit X90 pulse are calibrated at the
-working flux. Bind the qubit and resonator aliases before opening the tab.
-Open and Defaults capture the current sources. After changing aliases, use Defaults
-to refresh the displayed inputs.
+- Bind the qubit and resonator. Check a calibrated **π/2 pulse** and **Readout** at the working flux. Check the **Flux pulse** channel and allowed gain. Pre-delay sets the leading edge; waveform length sets the trailing edge.
+- Set **π/2 pair wait** to cover the flux edges, pre-pulse baseline and tail. Cover one cycle with distinct **Projection phase** values. Set **Minimum readout wait** beyond the latest pulse end and desired settling if readout time must stay fixed.
+- **Relax delay** starts at five times captured T1, or 150 µs without T1.
 
-The form selects `$qubit.module.x90` and `$resonator.module.readout` when present.
-Otherwise it opens editable pulse templates. Reset is optional and uses
-`$qubit.module.reset`. The Flux pulse module slot uses the `flux_pulse` template.
-It starts with a const waveform, gain 1.0, frequency 0 MHz, Nyquist zone 2 and channel from
-`$qubit.wiring.lo_flux_ch`. This form starts its waveform duration at 1 µs.
-A missing channel leaves the form Invalid until you supply a confirmed channel.
-These values are editing seeds. Establish the flux calibration and safe operating
-gain separately. Set the gain and duration for the intended transient and check
-the channel, frequency and delays against the actual wiring before Run.
+For tab setup, refreshing sources and saving, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).
 
-## Choose the scan
+## Read the maps and phase response
 
-- Length is the wait before the first X90, in µs. The initial range is 0 to 1 µs
-  with 101 points. Set it to cover the transient and a background region.
-- Phase is the second X90 projection phase, in degrees. The initial range is
-  −180 to 180° with 61 points. Use enough distinct phases to resolve a sinusoid.
-- Readout t is a minimum parallel-branch duration in µs, initially 2 µs.
-  Readout starts after the longest branch finishes. Set it long enough for the
-  intended flux settling.
-- Reps and Rounds control averaging. Relax delay starts at five times the
-  captured T1, or 150 µs if T1 is missing, and can be edited.
+Live and the first Analyze heatmap use the pair midpoint (wait + one π/2 duration) and Projection phase. Color is mean IQ projected along the scan's largest IQ variation, not state population. Acquired points and completed rounds track coverage and averaging separately.
 
-Review the resolved cfg before Run. The initial scan and timing values are
-editing seeds. Confirm hardware safety limits separately.
+Analyze extracts the fringe phase and unwraps it along time. The black line connects phase estimates, not a fit. The green rectangle compares the programmed interval with levels from the lowest and highest fifths by absolute extracted phase. Gray bands span one π/2 duration on either side of each edge, where the pair can sample across the edge. The 2D map has no shot SEM. Each cell stores only mean IQ, without the shot covariance needed to propagate uncertainty to the extracted phase. The phase estimates have no error bars or automatic quality threshold. Analyze requires the source cfg for pulse timing.
 
-## Run and inspect
-
-After reset, the flux pulse runs alongside a wait followed by two adjacent
-X90 pulses, and alongside the Readout t wait. The second X90 starts immediately
-after the first. Readout starts after the longest branch finishes.
-
-The measurement heatmap shows rotated real IQ against pair-start time and
-projection phase. Analyze fits sine and cosine coefficients at each time and
-plots unwrapped phase in degrees against the pair midpoint in µs. The
-rectangular overlay marks the programmed flux interval. It is a timing
-reference. Transfer-function fitting and pulse correction require separate work.
-
-Inspect the heatmap for contrast and the phase trace for the transient before
-changing pulse compensation. Analysis produces plots only; calibration parameters
-and modules retain their values.
-
-## Save and load
-
-Save preserves the cfg, scan axes and complex IQ array.
-In memory the signal shape is (wait, phase), time is in µs and phase is in
-degrees. Native files store the time axis in seconds. Load keeps the current
-form unchanged. Analyze uses the loaded run's cfg for pulse timing and reports
-an error if that source cfg is missing or unusable.
+Check fringe contrast before trusting a phase jump. If usable contrast remains but phase has not returned to baseline, extend **π/2 pair wait** without coarsening the steps. The plot does not estimate a transfer function or write back compensation.

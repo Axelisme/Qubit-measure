@@ -1,98 +1,38 @@
+**Readers:** operator, agent. Measure relaxation after a π pulse and compare the chain estimate with first-read IQ.
+
 # K-cycle readout-chain T1
 
-**Readers:** operator, agent. Run the readout-chain T1 from the GUI or MCP and read its live curves, joint fit and checks.
+For opening, refreshing and saving, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-**Last updated:** 2026-11-09
+Each rep is one 16-read cycle: `wait K → (π pulse → swept wait → readout → same readout) × 8`. There is no reset inside the cycle.
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+## Set the sweep
 
-## Behavior
+Bind the qubit and its resonator. Select a calibrated single-tone pulse Readout; mux is not supported. Check frequency, drive gain and the readout trigger and integration window before Run. Fill any required blanks. Use a calibrated x180.
+- Wait after π pulse starts at 0 and stops at 5 × the captured T1, or 150 µs when T1 is missing. Keep points near zero and extend the window to about 3 × tentative T1 if only the start of the decay is visible.
+- **Cycle thermalisation wait K** starts at 5 × the captured T1, or 150 µs if T1 is missing. Use at least 5 × T1 for a near-thermal start, including the first cycle.
+- Readout `post_delay` runs from pulse end, not ADC close. Check that windows on the same ADC do not overlap and that the next drive has enough ring-down time. Start at `5/(2π·κ)` µs for linewidth κ in MHz; compare with a longer wait before interpreting changes as qubit dynamics. The fallback readout template leaves 0.015 µs of arriving drive on each side of the ADC window.
+- Reps counts cycles per point per round. Use at least 66, so a round has at least 65 within-point noise degrees of freedom even for one sweep point. Rounds counts passes through the sweep.
 
-`chain/t1` sweeps the wait after a π pulse like `twotone/t1`, but every repetition is one cycle of 16 reads instead of one read.
-A cycle waits Relax delay, then plays eight blocks of the Pi Pulse, the swept Delay and two reads of the same Readout, with no reset inside the cycle.
-Relax delay is the thermalisation wait K, including before the first cycle. Set it to at least 5 T1 for the model's thermal-equilibrium start.
-After a readout pulse ends, its `post_delay` sets the wait before the second readout or the next Pi Pulse.
-The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
-The delay loop runs outside the cycle. Reps sets the cycles at every delay in one round, and Rounds sets the number of rounds.
+## Read the plots
 
-The host reduces each cycle to 65 numbers: the IQ of the 16 reads, their I², IQ, Q² summed over three read groups, and IQ products between read pairs summed over six groups set by the number of π pulses and reads between them.
-For a fixed sweep, the saved sums and the accumulator across rounds have fixed size, independent of the number of cycles.
-Temporary arrays within one acquisition round grow with points × Reps. Increasing Reps therefore uses more temporary memory; increasing Rounds does not enlarge those per-round arrays.
+Run shows first-read IQ on its dominant sweep axis in a.u. (I if too few points define an axis). The lower panel uses all 65 features, centered by their across-sweep median and scaled by pooled noise. It has no shot-SEM bars. The header counts cycles per point after each completed round. Stop keeps completed rounds. Stopping before any round finishes fails Run.
+The first-read `fit` figure and upper live panel use shot SEM: the projected single-cycle standard deviation divided by √(retained cycles at that point). Each cycle contributes its first read once. These bars are not fit errors or round-to-round scatter.
 
-## Parameter sources
+Analyze fits all 65 IQ and correlation statistics jointly across the sweep once. The separate first-read single-exponential fit supplies a start, not the reported T1.
+When available, the seed curve tracks the first-read points and its dashed marker shows the seed decay time within the scan. In the first-read figure, R² below zero means a worse fit than the mean. Normalized residual RMS is residual RMS divided by the signal range. Neither sets a selection threshold.
+Without a seed, the first-read figure says "First-read fit unavailable", connects the points and keeps any available shot SEM. Analyze starts the joint fit from the saved wait span and still fits once. A joint fit error fails Analyze.
 
-The Form uses the `twotone/t1` sources: the `$qubit.module.x180` slot or a fresh `pi_pulse` template, and the `$resonator.module.readout` slot or a fresh `readout` template.
-Readout must be a pulse readout; a mux readout module is rejected by the Form. The cycle has no Reset.
-Relax delay starts at 5 * `$qubit.t1` µs, or 150 µs when T1 is missing. Delay runs from 0 to the same value over 101 points.
-Every cycle contains eight delays, so one cycle lasts about Relax delay + 8 × (delay + π length + 2 × readout length). A shorter delay range shortens long-delay cycles.
-Reps starts at 100 and Rounds at 100. Reps must be at least 66, so that even a single delay gives the first round 65 cycles beyond its mean to estimate the noise of the 65 numbers.
-Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
+The joint figure comes first. Its upper panel overlays measured points and the model along the live all-feature direction; its lower panel plots measured minus model against the sweep. The scale is the pooled standard error of a point mean, not population or per-point shot SEM. Look for ranges where the residuals keep the same sign.
+If the projection is unavailable, Analyze still reports the joint values and diagnostics without these curves and keeps the first-read figure.
 
-## Live plot
+`J` sums squared residuals whitened by the model covariance across all 65 features. `df` is 65 × the point count minus the joint parameter count. Read `J/df` against the approximate χ² band `1 ± 2√(2/df)` and the fraction of whitened components with `|r| > 3`. These are not the residuals in the lower panel. Neither diagnostic sets a fit acceptance threshold.
 
-After every round the `measurement` plot shows two curves from all completed rounds, both in standard errors of the point means (sigma):
+The three-state rate model relaxes toward thermal populations. T1 is the eigen time with the larger amplitude of population change, not necessarily the longer one. The secondary time is the other eigen time. Both times are in µs.
+The model assumes independent thermalized cycles, Markov transitions, and three shared IQ centers with one isotropic noise width. It does not resolve multiple jumps during readout, cavity transients or the identity of a leakage level. The quoted Wald standard errors measure local parameter uncertainty, not shot SEM or systematic bias.
 
-- `all 65 numbers`: the 65 numbers relative to their median over delays, whitened by the noise within a delay and projected onto the direction that changes most across the sweep.
-- `first read`: the mean IQ of read 0 relative to its median, projected onto its principal axis; this is the familiar single-read T1 curve.
+## Use the result
 
-The sign of the first curve follows the second, so both decay together. Stop keeps the sums of completed rounds. A stop before the first round finishes keeps nothing and the Run fails with that message.
+Compare the two decay modes across repeats. When their amplitudes are close their order can switch, and the fit errors do not include that choice. This experiment proposes no writeback. Use a dedicated [`twotone/t1`](../../twotone/time_domain/t1/guide.md) run to update the qubit calibration.
 
-## Analysis
-
-Analysis needs no options. It first fits the first read's mean IQ with a single decay. That T1 only starts the joint fit and has no figure of its own.
-It then fits all 65 numbers at all delays jointly with a three-state rate-equation model whose readout and population nuisances are shared across delays.
-
-The operation at delay x is D(x) = D₀ exp(G x). D₀ is a free stochastic matrix: what the π pulse does at zero delay.
-G holds three non-negative pair rates in detailed balance with the fitted thermal populations, so the populations relax towards thermal equilibrium.
-
-G has two relaxation modes, each with an eigen time and an amplitude. The amplitude is the population change the mode carries from the state after D₀, summed over starting states with their thermal weights.
-
-- `T1` is the eigen time with the larger amplitude. It is the time scale that carries most of the population change after the π pulse, and it can be the shorter of the two times.
-- The `secondary time` is the other eigen time.
-
-When the two amplitudes or the two times are close, which one is called T1 can change between runs, and the Wald errors do not include that choice. A mode with a zero decay rate has an infinite time and error, which the summary reports as null.
-
-The `populations` figure is the only analysis figure. Its upper panel shows, per delay, the first-read populations of a fit with a free operation at each delay, with Wald error bars, and the fitted model as lines.
-States are named by their fitted thermal population: g is the most populated, then e, then f. The legend gives each thermal population.
-The lower panel shows (point − curve) / error for each state. The grey band is ±1.96, the 95% range of a standard normal residual. Residuals that keep one sign over a range of delays show where the curves miss the points.
-The title gives T1, the secondary time and the three lack-of-fit checks as J/df:
-
-- `within-point`: the free three-state model at each delay, with p.
-- `sharing`: shared readout nuisances against fully separate delays; it has no p.
-- `curve`: the rate-equation curves against a free operation at each delay, with p.
-
-The summary reports `t1` and `t1_err`, `secondary_time` and `secondary_time_err` in µs, the three checks, and the joint `J` and `df`.
-Errors are Wald errors from the joint fit. At low state contrast and few cycles per delay they can understate the uncertainty.
-A fit failure in either step produces an analysis failure; the live plot and the saved sums remain.
-
-This experiment proposes no writeback. Calibrate `$qubit.t1` with `twotone/t1`.
-
-### Model assumptions and starting fit
-
-The fit assumes independent thermalised cycles and Markov state transitions within each cycle.
-It shares the three IQ centers, one isotropic Gaussian noise variance, the thermal populations and the read-transition matrix across sweep points.
-Gaussian noise is independent between reads and cycles. The model does not fit a separate noise width or ellipse for each state.
-
-The read matrix is R = diag(r) + outer(1 − r, landing), with three retention values r and one landing population vector.
-For a transition i → j, the conditional IQ center lies on the line between the two state centers, at c_j + u × (c_i − c_j).
-The model draws u from a truncated exponential on [0, 1] with rate −log(1 − R[i,j]). A read without a transition uses c_i.
-This emission law is not a general model of multiple jumps during integration or resonator dynamics.
-Transitions during a long gap after integration need not produce the IQ tail that this model assigns to a read transition.
-Passing the lack-of-fit checks does not establish unbiased physical parameters.
-
-The first-read mean must support the starting fit. Weak or absent first-read contrast can make that fit fail or supply an uninformative seed even when later reads have correlations.
-The joint fit starts from the first-read curve parameters. It does not try multiple curve seeds or guarantee the correct basin.
-There is no manual initial value or fallback.
-
-## Saved data
-
-The saved record contains the delay axis, the cycle count and the 65 sums at each delay, and one 65 × 65 product sum added over all delays.
-Delays are us in memory and seconds in the file. The product sum feeds only the live plot. Loading the file and analyzing it again gives the same summary.
-
-## MCP recipe
-
-`chain_t1` takes `max_delay_us`, `points`, `reps`, `rounds`, `pi_ref` and `readout_ref`; points maps to delay Expts.
-Set Relax delay with an override on `relax_delay`.
-The recipe runs, analyzes and saves. It never asks for writeback.
-The report gives `t1_us`, `t1_err_us`, `secondary_time_us`, `secondary_time_err_us` and the checks `within_point`, `sharing` and `curve` (each J, df, p).
-Omitted inputs retain Form values; overrides apply last, then check_ready reports missing or invalid fields before Run.
+`chain_t1` rejects `null` for `readout_ref` and `pi_ref` at the required Form selector, before Run. For `max_delay_us`, `points`, `reps` and `rounds`, omission keeps the Form value and `null` clears the required value. The readiness check stops before acquisition if it is still blank after overrides. Set K with an override on `relax_delay`.

@@ -134,6 +134,21 @@ def make_interactive_plugin(
         inputs: FluxPickInputs, state: FluxPickState, plots: Plots
     ) -> MuxFluxPickResult:
         picked = render_flux_pick(inputs, state, plots)
+        unit = "device units" if cfg.flux_unit == "native" else cfg.flux_unit
+        observable = (
+            "Smoothed |mean IQ|"
+            if state.magnitude_only
+            else "Normalized phase-aware contrast"
+        )
+        figure = plots["pick"]
+        figure.suptitle(
+            f"Mux one-tone · Local DC scan · {names[tone]} · {observable}\n"
+            f"Half flux = {picked.flx_half:.5g} {unit} · "
+            f"Integer flux = {picked.flx_int:.5g} {unit} · "
+            f"Flux period = {picked.flx_period:.5g} {unit}",
+            fontsize=10,
+        )
+        figure.tight_layout()
         return MuxFluxPickResult(
             picked.flx_half, picked.flx_int, picked.flx_period, tone, names[tone]
         )
@@ -212,12 +227,22 @@ def run(
     return RunRecord(cfg=cfg, result=OnetoneFluxLocalExp().run(cfg, context=context))
 
 
+def _summary_lines(
+    source: RunRecord[OnetoneFluxLocalCfg, MuxFluxResult],
+) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=replace(OnetoneFluxLocalExp.AXES_SPEC, save_stem=mux_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Interactive(
+        summary_lines=_summary_lines,
         plugin=make_interactive_plugin,
         frontend=make_flux_pick_frontend,
         options=get_analyze_params,

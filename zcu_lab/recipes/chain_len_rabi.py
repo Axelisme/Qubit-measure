@@ -4,7 +4,6 @@ Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 """
 
 from pydantic import Field
-from zcu_tools.analysis.readout_chain import CycleCheck
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -18,6 +17,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
+from zcu_lab.v2.chain._joint import JointResidualSummary
 from zcu_lab.v2.chain.len_rabi.gui import ChainLenRabiSummary
 
 
@@ -29,73 +29,64 @@ class ChainLenRabiInputs(RecipeInputs):
     overrides: Overrides
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse readout library key. Sources are chosen by the Form.",
+        description="Set Readout to a library key for the single-tone pulse readout played twice per cycle block.",
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
-        description="Drive library key with a const or flat_top waveform.",
+        description="Set Drive pulse to a library pulse with a constant or flat-top waveform.",
     )
     frequency_mhz: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse frequency in MHz.",
+        description="Set Drive pulse › Frequency (MHz), the fixed RF carrier; the pulse switches to inline editing.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse amplitude in native gain units.",
+        description="Set Drive pulse › Gain (a.u.), the fixed signed drive gain.",
     )
     max_length_us: float | None | Keep = Field(
         KEEP,
-        description="Pulse-length sweep stop in µs.",
+        description="Set Drive duration › Stop (µs), the last drive duration.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count.",
+        description="Set Drive duration › Expts (count), the number of sweep points.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Cycles per length in each round, at least 66.",
+        description="Set Reps (count), the number of cycles at every sweep point in one round; at least 66.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Round count; the live plot updates after each round.",
+        description="Set Rounds (count), the planned number of passes through the sweep.",
     )
 
 
-class ChainLenRabiReport(RecipeReport):
-    """Chain Rabi fit and its checks; cancellation returns no report."""
+class ChainLenRabiReport(RecipeReport, JointResidualSummary):
+    """Joint Rabi estimates and scalar residual diagnostics."""
 
     pi_length_us: float | None = Field(
-        description="Pi length from the chain fit in µs; null means not estimable."
+        description="π duration (µs); null if unavailable."
     )
     pi_length_err_us: float | None = Field(
-        description="Pi length uncertainty in µs; null means not estimable."
+        description="π duration Wald standard error (µs); null if unavailable."
     )
     rabi_frequency_mhz: float | None = Field(
-        description="Rabi frequency in MHz; null means not estimable."
+        description="Rabi frequency (MHz); null if unavailable."
     )
     rabi_frequency_err_mhz: float | None = Field(
-        description="Rabi frequency uncertainty in MHz; null means not estimable."
+        description="Rabi frequency Wald standard error (MHz); null if unavailable."
     )
     reliability: float | None = Field(
-        description="Diagnostic R of the frequency error, no threshold."
-    )
-    within_point: CycleCheck | None = Field(
-        description="Within-point check J, df, p; null without analysis."
-    )
-    sharing: CycleCheck | None = Field(
-        description="Sharing check J, df, p null; null without analysis."
-    )
-    curve: CycleCheck | None = Field(
-        description="Curve check J, df, p; null without analysis."
+        description="R, the inverse phase uncertainty from the frequency error over the sweep (no threshold); null if unavailable."
     )
     first_read_pi_length_us: float | None = Field(
-        description="Pi length in µs of the first-read twotone fit; null means not estimable."
+        description="First-read π duration (µs); null if unavailable."
     )
 
 
 @recipe(
     "chain_len_rabi",
-    description="Run one K-cycle readout-chain length Rabi, fit all 65 numbers, save sums and analysis.",
+    description="Sweep drive duration in K-cycle length Rabi, fit all 65 numbers jointly, and save the sums, estimates and residual diagnostics without writeback.",
 )
 async def chain_len_rabi(
     session: RecipeSession, inputs: ChainLenRabiInputs
@@ -104,11 +95,13 @@ async def chain_len_rabi(
 
     The FPGA sweeps the length, so the drive must be const or flat_top.
     relax_delay is the thermalisation wait K; the Form starts it at 5 T1 and
-    overrides can change it. Primary fits the first read with the twotone Rabi
-    fit for the starting value, then fits all 65 numbers jointly. It reports
-    the pi length and Rabi frequency with Wald errors, R and three checks. No
-    writeback is proposed or requested. Save keeps the running sums and the
-    analysis.
+    overrides can change it. Primary uses the first-read Rabi fit to start one
+    joint fit of all 65 numbers. If the first read gives no estimate, Primary
+    starts from the saved duration axis and reports a null first-read π duration.
+    The report gives joint π duration and Rabi frequency with Wald errors, R, J, df,
+    J/df, the chi-square reference band and the fraction of whitened residual
+    components with |r| > 3. These numbers do not decide fit acceptance. Save
+    keeps the running sums and analysis. The recipe does not write back.
 
     points → expts sets the sweep sample count.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
@@ -141,9 +134,12 @@ async def chain_len_rabi(
                 rabi_frequency_mhz=None,
                 rabi_frequency_err_mhz=None,
                 reliability=None,
-                within_point=None,
-                sharing=None,
-                curve=None,
+                J=None,
+                df=None,
+                j_per_df=None,
+                expected_band_low=None,
+                expected_band_high=None,
+                tail_fraction=None,
                 first_read_pi_length_us=None,
                 analysis_failure=analysis.reason,
             )
@@ -153,9 +149,12 @@ async def chain_len_rabi(
             rabi_frequency_mhz=report_number(analysis.result.f),
             rabi_frequency_err_mhz=report_number(analysis.result.f_err),
             reliability=report_number(analysis.result.reliability),
-            within_point=analysis.result.within_point,
-            sharing=analysis.result.sharing,
-            curve=analysis.result.curve,
+            J=analysis.result.J,
+            df=analysis.result.df,
+            j_per_df=analysis.result.j_per_df,
+            expected_band_low=analysis.result.expected_band_low,
+            expected_band_high=analysis.result.expected_band_high,
+            tail_fraction=analysis.result.tail_fraction,
             first_read_pi_length_us=report_number(analysis.result.first_read_pi_len),
         )
     finally:

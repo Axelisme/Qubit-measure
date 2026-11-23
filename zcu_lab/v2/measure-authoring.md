@@ -84,6 +84,9 @@ Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Run �
 宣告 choices 的文字或數值 leaf 沿用既有初值求值能力，以可接受的 direct 值保存，不開放 authored Expr input。Literal、Enum、bool 與 InputPolicy 禁用 expression 的 leaf 不新增初值求值能力。使用者輸入的 expression 仍保留原文交一般驗證。
 必要來源缺少時留 Invalid，不由 framework 補數字。實驗可在 `make_form` 明確選擇已定案的首次初值，見下節。Reset 重新捕捉並可換形狀，Run 使用畫面上的值。
 
+Form lowering 將表單結果轉成 adapter 的具名輸入，失敗時回報欄位或模型錯誤。
+Qt 呈現框架的 [Tab admission 決定](../../lib/zcu_tools/gui/app/measure/README.md#tab-admission)，另處理編輯器中尚未提交的解析錯誤。
+
 組合根以 `Registry(templates=TEMPLATES)` 注入預設持久範本，Library 新建選單也讀這份 catalog。chain_length 與 rpi_length 的 Form factory 由 `register_all` 綁定 `registry.templates`，讓長度差初值與 Form 展開使用同一份範本。
 範本儲存 Spec defaults 與 seeds，不維護另一份角色 shape／blank／ref 表。
 Library、writeback 與 Inspect 也使用 gui.form／FormEditor，透過 gui.form_adapter
@@ -115,15 +118,17 @@ Adapter 使用獨立輸入型別時，預設順序由該型別決定。
 指定欄位依 tuple 順序前移，未列欄位保留原相對順序，nested model 不變。
 `tree` 的寫入順序不控制畫面。未知或重複欄位會在 Form 建構時 raise `ValueError`，
 持久 Spec 的 Form 也不接受非空 `field_order`。
-在 guide 依實際可見順序寫操作步驟，預演時核對繼承欄位與例外排序。
+預演時核對繼承欄位與例外排序。Guide 提到實驗專屬欄位時，沿用實際可見的 label 與單位。
 
 在宣告模型的 `FieldMeta` 指定可見 label／unit，照[表單文字 F1–F4](figure-style.md#表單文字)及
 [單位表](figure-style.md#單位)撰寫，例如「自由演化時間 (µs)」和「驅動增益 (a.u.)」。
 SweepCfg 的座標與 step 繼承 unit，點數不繼承掃描量的物理單位。
 既有 cfg key 不因顯示文字改名，例如 `delays`、`delay` 與 `length` 都可顯示 Delay。
 共用但物理量不同的 range 必須說明單位由哪張實驗決定。
-Flux 軸從 `flux_unit` 取得單位，不寫成固定單位。
+Form 的 flux 掃描輸入使用 `flux_unit` 指定的裝置輸入單位，不用它推定 Result 或保存軸的單位。
+例如 [JPA bias survey](jpa/flux_onetone/guide.md#read-the-map-and-cuts) 的圖上 bias 軸與保存的 `fluxes` 軸都使用裝置原生 a.u.，不隨 Form 的 A／V／native 選項改標籤或換算。
 Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數。
+清單各位置共用元素模型宣告的 `FieldMeta`；起始樹可按位置提供不同初值。兩者的分工見 [Native model lists](../../lib/zcu_tools/gui/form_adapter/README.md#native-model-lists)。
 
 初值依來源處理。來源可推導時，用 Expr 或固定 capture，寫明來源路徑與單位。
 有 operator-authored slot 時沿用 slot，並說明它不是本次已驗證的校準。
@@ -144,6 +149,7 @@ Hidden 只用於 Run 會覆寫或計算的值，不用來藏起 required input�
 有作者說明的必填空白錯誤會附上該欄位與父欄位的 label／description，保留原 path。
 Recipe preflight 沿用這些 message 與 typed paths，不從 generic error 猜物理設定。
 Readout slot found 與 form valid 必須分開判讀；slot 存在不代表 drive、GE centers 或掃描範圍齊全。
+Pulse／Mux Readout 的 generator、ADC 與 classifier 契約見 [Program 的 Readout configuration](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration)。
 Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
 
 新實驗交付前，以 `QT_QPA_PLATFORM=offscreen` 預演下列情境：
@@ -160,9 +166,8 @@ Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
 
 每個 GUI 情境保存 get_cfg 的 input、values、errors、diagnostics 與實際欄位順序。
 用 ComponentDriver 開啟 tab、操作 Refresh 與 Defaults，保存截圖並審閱可見 label、單位與錯誤。
-在 guide 寫出各情境的起手步驟與仍需取得的校準。
+在 guide 寫出各情境仍需取得的校準與該實驗 Run 前的檢查。通用 Open／Defaults／Refresh 操作連到 [操作員共用流程](operator-workflow.md)。
 預演不呼叫 Run、不連硬體，也不操作使用者正在使用的桌面 GUI，除非另有明確授權。
-Guide 必須提醒操作員：來源修改後，按 Defaults 重取初值，確認後會丟棄表單編輯。Refresh 只更新 source／choice，保留輸入。
 
 ## Recipe 撰寫
 
@@ -470,7 +475,11 @@ Dotted 的 device value／period NaN cell 視為缺席，inf／bool 仍拒絕。
 ## Operator guide 格式
 
 Adapter guide 是 prose，不是 machine contract。內容放在實驗同目錄的 UTF-8 Markdown 檔。
-Markdown 章節可自由安排，內容檢查表見 [Operator guide Gd1–Gd3](figure-style.md#operator-guide)。
+Markdown 章節可自由安排。內容依 [Gd1–Gd3](figure-style.md#operator-guide) 的六項、保留條件與必留項撰寫。表單只有初值而沒有等價來源說明時，只為操作員必須自行設定的關鍵參數補最短的來源公式。
+通用 GUI 操作連到 [操作員共用流程](operator-workflow.md)。Recipe 留空語意與確切失敗階段若已由已發布的 `Field.description` 或 schema 完整說明，guide 不重述；兩者不等價時保留必要說明。
+
+撰寫 inline pulse 的時序說明時，從 [Program modules 的原生寫法](../../lib/zcu_tools/program/v2/modules/README.md#原生寫法) 查播放結尾，再到 [`Pulse`](../../lib/zcu_tools/program/v2/modules/pulse.py) 查 `pre_delay` 與 `post_delay`。要區分 Readout 的播放結尾與 ADC window，查 [Readout configuration](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration) 的 `PulseReadout` 段，搜尋 `pre_delay`、`post_delay` 與 `trig_offset`。
+
 Adapter 明確宣告檔案，不依 class 名稱推導路徑：
 
 ```python
@@ -511,6 +520,24 @@ GUI 只把外部連結交給系統瀏覽器，相對的 `.md` 連結不解析。
 Wheel 收錄 `zcu_lab` 下的 Markdown、PNG 與 JPG。新增或刪除實驗時同步維護 guide 與資源。
 
 ## Readout 分析與 writeback
+
+Core 回傳分析品質，圖依 [R3b](figure-style.md#r3b結果旁寫-fit-品質) 呈現已回傳的品質值。
+有既有判準時，由 adapter 決定 proposal 的初選與理由。Draft 複製這兩個欄位，
+[writeback preview](../../lib/zcu_tools/gui/app/measure/writeback/README.md#initial-selection-and-notes) 顯示結果，不重判品質。
+
+若只改 adapter 的寫回政策，在 scratch 呼叫對應階段的公開 hook，核對 proposal 的 `selected` 與 `note`，不執行 Apply。
+
+- Analyze：用來源 `RunRecord`、Analyze 結果與固定 context 組成 `WritebackRequest`，呼叫 `adapter.get_writeback_items`。GUI 的 [`AnalyzeService`](../../lib/zcu_tools/gui/app/measure/services/analyze.py) 使用這個接縫。
+- PostAnalyze：用同一組輸入加上 PostAnalyze 結果組成 `PostWritebackRequest`，呼叫 `adapter.get_post_writeback_items`。GUI 的 [`PostAnalyzeService`](../../lib/zcu_tools/gui/app/measure/services/post_analyze.py) 使用這個接縫。
+
+兩個 service 都把 proposals 交給 `WritebackService.create_draft`。`analysis_stage` 只呼叫 core，不經 adapter，也不建立 draft。
+
+[Singleshot GE adapter](singleshot/ge/gui.py) 與 [mux GE adapter](mux/singleshot_ge/gui.py) 各以
+`ge_calibration_review_note` 判斷 Analyze 的初選與理由。它讀取 joint `FitQuality`，包括
+`relative_parameter_errors` 裡的寬度 `s` 和中心 `sg`、`se` 的相對誤差。
+`ge_post_review_note` 沿用這項判斷，並檢查 Post 混淆矩陣的 condition number。
+這些初選判斷與 [GE 模型診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷) 的
+`length_ratio_max_relative_error` 分開。
 
 ro-optimize 與 reset 的 peak-picking adapter 以 `smooth_method` 提供 `wavelet` / `gaussian`
 選擇，預設 `wavelet`；`smooth` 在 GUI 標為 smoothing strength，不再只代表 Gaussian sigma。
@@ -568,6 +595,14 @@ Open／Reset 從固定 capture 產生可覆寫的初值。具 Eval 能力的 lea
 [`support/measure/`](support/measure/README.md) 的具名 helper 擁有。
 Form 明確選擇倍率或場景並組結構，不把校準政策放進 generic framework。
 
+### 頻率掃描窗
+
+[`QubitBaseSchema.kappa`](../components/qubit.py) 保存 qubit 躍遷的校準線寬（MHz），不是掃描窗的寬度。以 [`twotone/freq` 的 Form](twotone/freq/form.py) 為例，`Range.around` 以 `$qubit.freq` 為中心，用 `$qubit.kappa` 推出半寬。倍率與點數由該 Form 定義。起訖值可在表單編輯；缺線寬時可直接填有依據的起訖值，不必把掃描窗寫成 `kappa`。
+
+實驗可以用專用初值。[Single-tone reset 頻掃的 Form](twotone/reset/single_tone/freq/form.py) 用 `$qubit.ext.reset_f` 和 `$qubit.ext.reset_fwhm` 決定掃描窗。`reset_fwhm` 是 reset 側帶的半高全寬，不是 qubit 躍遷的 `kappa`。
+
+[牆鐘工具](../../tools/README.md#實驗-run-牆鐘)在 Open 建好表單後，依[場景清單](../../tools/data/experiment_wall_time/case-inputs.json)套用該場景明列的覆寫，再驗證表單並決定是否送出 Run。例如 `twotone/freq` 場景用有功率展寬的 Q1 頻譜選擇 `freq.start` 和 `freq.stop`。覆寫只改該場景的表單，不補來源資料，也不把功率展寬當成 `kappa` 校準值。
+
 ### T1 與等待
 
 T1 有效值是非 bool 的有限正實數。Leaf 缺失／null 或沒有 capture 時，
@@ -589,6 +624,11 @@ T1 with tone 的掃描終點依序使用歷史 t1_with_tone、普通 T1、30 µs
 只有缺值才下探下一來源；tone T1 無效時留空，不跳過它。
 自然等待仍用普通 T1，不用 tone T1。這些初值不保證熱平衡或指定保真度。
 Reps、rounds、shots、點數與其他特殊時序不因等待政策改動。
+
+固定 tone T1 的[寫回](singleshot/t1/t1_with_tone/guide.md#next-step)提供 `ext.t1_with_tone`。
+三個表單用這個值作為 Stop 初值來源：[固定 tone 的 Probe exposure time Stop](singleshot/t1/t1_with_tone/guide.md#key-settings)，
+以及[增益掃描的 Probe length Stop](singleshot/t1/t1_with_tone_sweep/guide.gain.md#key-settings)與[頻率掃描的 Probe length Stop](singleshot/t1/t1_with_tone_sweep/guide.freq.md#key-settings)。
+在程式中搜尋 `ext.t1_with_tone` 找寫回與來源選擇，搜尋 `with_tone=True` 找表單呼叫點。
 
 ### Probe 與 Rabi
 

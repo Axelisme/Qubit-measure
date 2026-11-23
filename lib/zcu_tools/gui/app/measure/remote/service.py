@@ -80,8 +80,8 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     ``adapter.writeback_control``, other app commands through ``adapter.ctrl``,
     context commands through ``adapter.context_control``, device commands through
     ``adapter.device_control``, predictor commands through ``adapter.predictor_control``,
-    and the canvas-bearing View's pure-read surface through ``adapter.render_view``
-    (figures / snapshot).
+    and the canvas-bearing View's render reads and explicit presentation commands
+    through ``adapter.render_view``.
     ``render_view`` is None in a headless process; render handlers fail-fast then.
     """
 

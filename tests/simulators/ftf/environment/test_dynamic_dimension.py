@@ -190,7 +190,8 @@ def test_equal_acquire_reuses_pilot_preparation_with_fresh_sampling(
         assert extras["ftf.pilot_point"] is None
         assert extras["ftf.pilot_wall_s"] == 0.0
     assert reused["evolve_wall_s"] == reused_full["evolve_wall_s"] == 0.0
-    assert repriced["evolve_wall_s"] > 0.0
+    evolve_s = repriced["evolve_wall_s"]
+    assert evolve_s is not None and evolve_s > 0.0
     np.testing.assert_array_equal(second.state_counts, expected.state_counts)
     np.testing.assert_array_equal(second.channels[0].sums, expected.channels[0].sums)
     assert not np.array_equal(first.channels[0].sums, second.channels[0].sums)
@@ -221,7 +222,8 @@ def test_evicted_pilot_preparation_evolves_the_full_selected_batch(
     assert extras["ftf.dimension_reused"] is True
     assert extras["ftf.pilot_point"] is None
     assert extras["ftf.pilot_wall_s"] == 0.0
-    assert row["evolve_wall_s"] > 0.0
+    evolve_s = row["evolve_wall_s"]
+    assert evolve_s is not None and evolve_s > 0.0
 
 
 @pytest.mark.parametrize(

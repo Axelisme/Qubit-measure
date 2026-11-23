@@ -13,7 +13,9 @@ from .core import ConstructivePhaseCfg
 
 
 def make_form(ctx: FormContext) -> Form[ConstructivePhaseCfg]:
-    """Seed pulses and hidden tone positions; scan endpoints require operator input.
+    """Seed pulses, hidden tone positions and a full turn of relative phase.
+
+    Relative phase stays editable. The operator supplies both duration endpoints.
 
     Existing CZ slots are editable source pairs, not certified gate settings.
     Missing slots offer explicit cosine templates on captured qubit wiring.
@@ -61,7 +63,7 @@ def make_form(ctx: FormContext) -> Form[ConstructivePhaseCfg]:
             "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
             "readout": readout,
             "drive": drive,
-            "relative_phase": Range(None, None, expts=25),
+            "relative_phase": Range(-180.0, 180.0, expts=25),
             "duration": Range(None, None, expts=101),
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

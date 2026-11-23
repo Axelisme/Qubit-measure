@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
-from zcu_tools.analysis.singleshot import correct_populations
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -30,7 +30,12 @@ from zcu_tools.program.v2.modules.readout import (
     require_circle_classifiers,
 )
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.singleshot.population_analysis import (
+    CLASSIFIED_FIGURE,
+    UNAVAILABLE_NOTICE,
+    circle_readout_series,
+)
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
@@ -57,11 +62,42 @@ class PowerAnalyzeOptions:
 
 
 class PowerCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Probe gain", unit="a.u.")]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Select the reset module applied before preparation, or leave empty to skip reset.",
+        ),
+    ] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Initial preparation pulse",
+            description="Select the pulse applied before the probe, or leave empty to omit it.",
+        ),
+    ] = None
+    probe_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="MIST tone",
+            description="Enter the cavity drive applied after preparation and before the classification readout.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the readout module applied at the end of the shot.",
+        ),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="MIST drive gain",
+            unit="a.u.",
+            description="Set the MIST tone gain sweep in a.u. while holding its RF frequency fixed.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
@@ -138,22 +174,32 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         # 3. Show the measured G/E/Other fractions in classifier order.
 
-        figure, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Pulse gain (a.u.)", ylabel="P(g), P(e), P(other)")
-        viewer = live_line(ax, num_lines=POPULATION_COUNT)
-        ax.set_ylim(0.0, 1.0)
-        for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
-            line.set_label(label)
-        ax.legend()
+        figure, ax = context.plots.subplots(num="measurement", layout="constrained")
+        progress = figure.suptitle("MIST gain scan · qubit · classified populations")
+        ax.set(xlabel="MIST drive gain (a.u.)", ylabel="Outcome probability")
+        viewer = live_errorbar(ax, num_lines=POPULATION_COUNT)
+        for line, bars, label, color in zip(
+            ax.lines,
+            ax.collections,
+            ("P(g)", "P(e)", "P(other)"),
+            ("tab:blue", "tab:red", "tab:green"),
+            strict=True,
+        ):
+            line.set(label=label, color=color, marker="o", markersize=3)
+            bars.set_color(color)
+        figure.legend(loc="outside lower center", ncols=3)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
-            """Draw acquired shot counts on the measurement axes; return changed artists.
-
-            Read scan-shaped samples without changing them. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            return viewer.set(gains, (data / data.sum(axis=-1, keepdims=True)).T)
+            """Display acquired fractions and completed scan positions."""
+            totals = data.sum(axis=-1)
+            progress.set_text(
+                f"MIST gain scan · qubit · classified populations\n"
+                f"{np.count_nonzero(totals > 0)}/{totals.size} points acquired"
+            )
+            covariance = class_probability_covariance(data)
+            sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
+            return (progress, *viewer.set(gains, (data / totals[..., None]).T, sem.T))
 
         figure.show()
         buffer = SignalBuffer(
@@ -211,51 +257,55 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 "Acquire a new run."
             )
 
-        populations = correct_populations(populations, options.confusion_matrix)
+        series = circle_readout_series(
+            populations, result.counts, options.confusion_matrix
+        )
 
         # 2. Use gain coordinates unless a photon-number calibration is supplied.
         if options.ac_coeff is None:
             xs = gains
-            xlabel = "probe gain (a.u.)"
+            xlabel = "MIST drive gain (a.u.)"
         else:
             xs = options.ac_coeff * gains**2
-            xlabel = r"$\bar n$"
+            xlabel = "Mean cavity photon number (count)"
 
         # 3. Show probe-induced populations with optional logarithmic gain/photon axis.
-        _, ax = plots.subplots(num="fit", figsize=(6, 6))
-
-        ax.plot(
-            xs,
-            populations[:, 0],
-            color="blue",
-            label="P(g)",
-            ls="-",
-            marker="o",
-            markersize=1,
+        _, ax = plots.subplots(
+            num=CLASSIFIED_FIGURE if series.correction_unavailable else "fit",
+            figsize=(7, 5),
+            layout="constrained",
         )
-        ax.plot(
-            xs,
-            populations[:, 1],
-            color="red",
-            label="P(e)",
-            ls="-",
-            marker="o",
-            markersize=1,
+        for index, (label, color) in enumerate(
+            zip(
+                ("P(g)", "P(e)", "P(other)"),
+                ("tab:blue", "tab:red", "tab:green"),
+                strict=True,
+            )
+        ):
+            ax.errorbar(
+                xs,
+                series.values[:, index],
+                yerr=series.sem[:, index],
+                fmt="o-",
+                markersize=3,
+                capsize=2,
+                label=label,
+                color=color,
+            )
+        quantity = (
+            "classified populations"
+            if options.confusion_matrix is None
+            else "readout-corrected populations"
         )
-        ax.plot(
-            xs,
-            populations[:, 2],
-            color="green",
-            label="P(other)",
-            ls="-",
-            marker="o",
-            markersize=1,
+        if series.correction_unavailable:
+            quantity = f"classified fractions\n{UNAVAILABLE_NOTICE}"
+        ax.set(
+            title=f"MIST gain scan · qubit · {quantity}",
+            xlabel=xlabel,
+            ylabel="Classified fraction"
+            if series.correction_unavailable
+            else "Outcome probability",
         )
-        ax.set_xlabel(xlabel, fontsize=14)
-        ax.set_ylabel("P(g), P(e), P(other)", fontsize=14)
-        ax.legend()
-        ax.grid(True)
-        ax.tick_params(axis="both", which="major", labelsize=12)
-        ax.set_ylim(0, 1)
+        ax.legend(loc="best", title="Data ± shot SEM")
         if options.log_scale:
             ax.set_xscale("log")

@@ -132,6 +132,8 @@ def h_tab_interact(
                 "operation_id": operation_id,
             }
         plugin.execute_command(session, name, args)
+        if adapter.render_view is not None:
+            adapter.render_view.present_committed_interactive_frame(tab_id)
     state = plugin.project_state(session.snapshot())
     presentation = (
         adapter.render_view.interactive_presentation(tab_id)

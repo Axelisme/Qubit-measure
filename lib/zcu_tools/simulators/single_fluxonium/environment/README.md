@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-22, acquire-local raw plans
+**Last updated:** 2026-11-23, acquisition routing
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -59,8 +59,8 @@ bounded `routing-*.jsonl` row after each admitted acquire. Set `directory` to
 choose the output directory; null selects project-root `.sim_telemetry`.
 Direct evolution and every projective continuation enable Engine telemetry.
 The row contains compile, evolution, ADC/readout and in-acquire raw materialization
-time. It includes failed calls through their failure and leaves unentered stages
-at `0.0`. Successful materialization from a later raw getter appends a
+time, including elapsed time through failures. See the shared contract below
+for unentered stages. Successful materialization from a later raw getter appends a
 [supplemental timing record](../../README.md#acquire-telemetry).
 `complete` comes from the binding's `AcquireOutcome`: normal partial Stop is true,
 while exceptions are false. Writer I/O failures warn once and do not change the
@@ -76,11 +76,6 @@ analysis setup and file budget are described in the
 A null or omitted `settings.flux_line` keeps flux fixed at the live DC value.
 It binds no fast-flux generator and rejects foreign controls.
 Each `drive_lines` generator maps to its own named track, including overlapping events on different generators. Each source multiplies the full charge operator by its own complex calibration. Readout, fast-flux and microwave generator bindings must be distinct. Generator count is the largest bound index plus one; holes remain unbound. Unknown event generators fail in preflight with their event path and channel.
-Acquisition may carry named `ChargeDriveRequirement` records in its request.
-Preflight requires every requested generator to belong to `drive_lines`, rejecting
-flux, readout and unbound generators before waveform construction or evolution.
-Other legal fast-flux events keep their ordinary routing. Names are diagnostics,
-not role keys. An empty requirement tuple preserves ordinary planning.
 Pass the originating request's `time_base` to interpret integer tick arrays.
 It converts QICK ticks/MHz/degrees into ns/GHz/radians. `TimeBase.ns` owns exact
 nearest-2-ns support rounding, ties even. Readout grids combine trigger and sample
@@ -162,8 +157,9 @@ Evolution returns densities in DC energy coordinates. The source supplies
 explicit `Basis` records to `batch_populations`, then calls
 `normalize_populations` as the sole probability repair. Readout state order is
 the retained DC energy order. Cavity frequencies include the model owner's
-dressed shifts at that DC point. Receiver PSD converts to sample covariance
-using the ADC sample interval. One scattering phase is always supplied explicitly.
+dressed shifts at that DC point. The scalar receiver PSD divided by the sample
+interval in ns gives the variance of each independent I/Q component. One
+scattering phase is always supplied explicitly.
 
 `preflight(request, snapshot, receivers=...)` plans the complete observation set
 of one physical cavity. Pass every ADC's `resources.simulation_schema.Receiver`

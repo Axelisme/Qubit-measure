@@ -40,10 +40,10 @@ from .rate_model import CycleRelaxation, RateNuisances, validate_delays
 
 @dataclass(frozen=True)
 class RateSolution:
-    """Joint solution and the D0 chart used by its covariance."""
+    """Joint solution with covariance column names and physical estimates."""
 
     joint: JointSolution
-    coordinates: RateCoordinates
+    parameter_names: tuple[str, ...]
     nuisances: RateNuisances
     relaxation: CycleRelaxation
 
@@ -76,11 +76,10 @@ def solve_rate(
     predicted, jacobian = layout.mean_jacobian(q)
     weighted = apply_weights(weights, jacobian).reshape(-1, SIZE)
     information = scaled_information(weighted)
-    cov = information.covariance
-    J = float(np.sum(apply_weights(weights, means - predicted) ** 2))
-    joint = JointSolution(q, cov, weights, J, information)
+    residual = apply_weights(weights, means - predicted)
+    joint = JointSolution(q, predicted, residual, information)
     return RateSolution(
-        joint, layout, _nuisances(layout, q), _relaxation(layout, q, information)
+        joint, layout.names, _nuisances(layout, q), _relaxation(layout, q, information)
     )
 
 
@@ -113,7 +112,11 @@ def _stage(
         return -apply_weights(weights, jacobian).reshape(-1, len(v))
 
     result = bounded_least_squares(
-        residual, q[fixed:], derivative, (lo[fixed:], hi[fixed:]), 200
+        residual,
+        q[fixed:],
+        derivative,
+        (lo[fixed:], hi[fixed:]),
+        nuisance_only=bool(fixed),
     )
     if not result.success and not fixed:
         raise RuntimeError(f"joint rate cycle fit did not converge: {result.message}")

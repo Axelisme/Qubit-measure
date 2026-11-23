@@ -68,7 +68,7 @@ readout:
       band_edges:
         low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
     offset_adc: [0.0, 0.0]
-    noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]] # ADC^2*ns, two-sided PSD.
+    noise_psd_adc2_ns: 1.0 # ADC^2*ns, two-sided PSD.
 
 numerics:
   # Midpoint full-Hamiltonian steps per carrier period below 30 MHz.

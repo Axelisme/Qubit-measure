@@ -21,16 +21,16 @@ then active mux readout. Branches start together; short branches wait for the
 longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
 All participants share reps, rounds, initial_delay and relax_delay.
-Program modules perform native conversion and averaging.
+The Program reducer applies each active ADC's native correction before forming
+shot sums (ADR-0074).
 
 Results and cancellation
 ------------------------
-MuxSweepResult.tone_indices is int64 (K,) in participant order. Coordinates are
+MuxRabiResult.tone_indices is int64 (K,) in participant order. Coordinates are
 float64 (K,P) on each drive's actual hardware-quantized gain grid. Signals are
-complex128 (K,P), ADC-length-normalized average IQ in a.u. The measurement_i magnitude plots use
-original tone indices and each tone's own coordinates, so duplicate labels retain
-distinct plots. Cancellation preserves completed-round averages across the full
-sweep. If no round completes, all signals remain NaN.
+complex128 (K,P), corrected average IQ in a.u. Live and fit figures show each
+original tone's real-axis projection with same-direction shot SEM. Cancellation
+preserves completed-round sums; no completed round leaves NaN.
 
 Amplitude scan and analysis
 --------------------------
@@ -47,7 +47,8 @@ DAC full-scale fractions in a.u. within [-1, 1]. FitQuality describes the numeri
 alone does not establish calibration quality.
 
 Native persistence retains the full cfg, original indices, independent gain axes
-and complex IQ. The source pulse and its scalar length remain available to a
+and complex IQ plus optional shot sums (ADR-0069). Labber keeps coordinates
+and signals on their original common grid. The source pulse and its scalar length remain available to a
 calibration caller for pulse-copy and pi-product proposals.
 
 Calling and ownership
@@ -74,26 +75,37 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from functools import partial
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    compute_fit_quality,
+    cosfunc,
+    fit_rabi,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
-from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Reset, ResetCfg, TimelineBuilder
+from zcu_tools.program.v2 import (
+    Reset,
+    ResetCfg,
+    TimelineBuilder,
+    mux_iq_sums,
+    split_sums,
+)
 from zcu_tools.program.v2.modules import (
     MuxReadout,
     MuxReadoutCfg,
@@ -101,21 +113,23 @@ from zcu_tools.program.v2.modules import (
     PulseCfg,
 )
 from zcu_tools.program.v2.utils import sweep2param
-from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.mux._moments import project_iq, validate_iq_moments
+from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.mux import (
     MuxFitFailure,
-    MuxSweepResult,
-    averaged_mux_signal,
+    MuxRabiResult,
     validate_mux_result,
 )
-from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
+from zcu_lab.v2.support.mux_persistence import mux_rabi_spec
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     ToneRangeCfg,
     validate_mux_scan,
 )
+
+_SWEEP_LABEL = "Drive pulse gain (a.u.)"
+_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
 
 
 @validated_dataclass(frozen=True)
@@ -161,7 +175,14 @@ class MuxPulseScan:
 class MuxAmpRabiToneCfg(MuxDriveToneCfg):
     """One named drive and its independent gain bounds in gain a.u.."""
 
-    gain: Annotated[ToneRangeCfg | None, FieldMeta(unit="a.u.")] = None
+    gain: Annotated[
+        ToneRangeCfg | None,
+        FieldMeta(
+            label="Gain",
+            unit="a.u.",
+            description="Enter this tone's Rabi pulse gain range in a.u.",
+        ),
+    ] = None
 
     def require_gain(self) -> ToneRangeCfg:
         """Return active gain bounds, or raise ValueError naming this tone."""
@@ -184,16 +205,33 @@ class MuxAmpRabiCfg(ConfigBase):
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
+    reset: Annotated[
+        ResetCfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the common preparation reset; leave blank to omit it.",
+        ),
+    ] = None
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated multiplexed readout used after the qubit drive sequence.",
+        ),
+    ]
     tones: Annotated[list[MuxAmpRabiToneCfg], FieldMeta(element_label="name")]
-    expts: int = Field(
+    expts: Annotated[int, FieldMeta(label="Expts", unit="count")] = Field(
         strict=True,
         gt=0,
         title="Expts",
         description="Hardware scan point count shared by all tones.",
     )
-    participants: list[StrictInt]
+    participants: Annotated[
+        list[StrictInt],
+        FieldMeta(
+            description="Enter the original zero-based tone indices in measurement order."
+        ),
+    ]
 
     reps: Annotated[
         int,
@@ -270,7 +308,32 @@ def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPuls
     return MuxPulseScan(indices, np.asarray(coordinates, dtype=np.float64), points)
 
 
-class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
+def _plot_amp_fit(
+    ax: Axes,
+    xs: NDArray[np.float64],
+    params: tuple[float, ...],
+    outcome: MuxAmpRabiFit,
+) -> None:
+    pi, pierr = outcome.pi_gain, outcome.pi_gain_err
+    pi2, pi2err = outcome.pi2_gain, outcome.pi2_gain_err
+    for value, marker, color in ((pi, "π gain", "C2"), (pi2, "π/2 gain", "C3")):
+        if xs.min() <= value <= xs.max():
+            ax.axvline(value, ls=":", color=color, label=marker)
+    result_label = f"π gain = {pi:.4g} ± {pierr:.2g} a.u. · π/2 gain = {pi2:.4g} ± {pi2err:.2g} a.u."
+    curve = np.linspace(xs.min(), xs.max(), 400)
+    ax.plot(curve, cosfunc(curve, *params), color="C1", label="Cosine fit")
+    r2 = outcome.quality.r2
+    rms = outcome.quality.normalized_residual_rms
+    quality_label = f"R² = {r2:.3g}" if r2 is not None else "R² unavailable"
+    quality_label += (
+        f" · Normalized residual RMS = {rms:.3g}"
+        if rms is not None
+        else " · Normalized residual RMS unavailable"
+    )
+    ax.set_title(f"{result_label}\n{quality_label}", fontsize=10)
+
+
+class MuxAmpRabiExp(Experiment[MuxRabiResult, MuxAmpRabiCfg]):
     """Measure each participant's Rabi oscillation versus drive gain.
 
     Reset precedes simultaneous drives and a shared mux readout at each point.
@@ -278,19 +341,17 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
     complex IQ and original index; saved data also retains the complete cfg.
     """
 
-    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxSweepResult, MuxAmpRabiCfg]] = (
-        mux_sweep_spec(
-            MuxAmpRabiCfg,
-            tag="mux/rabi/amp",
-            coordinate_label="Pulse gain",
-            unit="",
-            scale=1.0,
-        )
+    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxRabiResult, MuxAmpRabiCfg]] = mux_rabi_spec(
+        MuxAmpRabiCfg,
+        tag="mux/rabi/amp",
+        coordinate_label="Pulse gain",
+        unit="",
+        scale=1.0,
     )
 
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
 
-    def run(self, config: MuxAmpRabiCfg, *, context: RunContext) -> MuxSweepResult:
+    def run(self, config: MuxAmpRabiCfg, *, context: RunContext) -> MuxRabiResult:
         """Sweep participant gains together and measure their averaged complex IQ.
 
         config supplies reset, readout, drives, gain sweeps and averaging controls;
@@ -316,27 +377,42 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
         # Keep live traces on each drive's own quantized gain axis.
         viewers = []
         for index in scan.indices:
-            fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(
-                xlabel="Pulse gain (a.u.)",
-                ylabel="Magnitude (a.u.)",
-                title=f"{index}: {cfg.tones[index].name}",
+            fig, ax = context.plots.subplots(
+                num=f"measurement_{index}", layout="constrained"
             )
-            viewers.append(live_line(ax))
+            fig.suptitle(f"Mux amplitude Rabi · {cfg.tones[index].name} · IQ contrast")
+            ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+            progress = ax.set_title(f"Acquired gain points: 0 / {cfg.expts}")
+            viewer = live_errorbar(ax)
+            ax.lines[0].set(marker="o", markersize=3, label="Measured IQ ± shot SEM")
+            fig.legend(loc="outside lower center")
+            viewers.append((viewer, progress))
             fig.show()
 
         @context.plots.on_plot_thread
-        def update(data: NDArray[np.complex128]):
-            return tuple(
-                artist
-                for row, viewer in enumerate(viewers)
-                for artist in viewer.set(scan.coordinates[row], np.abs(data[:, row]))
-            )
+        def update(data: NDArray[np.float64]):
+            _, mean = split_sums(data)
+            artists = []
+            for row, (viewer, progress) in enumerate(viewers):
+                measured = mean[:, row]
+                acquired = np.isfinite(measured)
+                real, sem = project_iq(
+                    np.where(acquired, measured, np.nan), data[:, row]
+                )
+                progress.set_text(
+                    f"Acquired gain points: {np.count_nonzero(acquired)} / {cfg.expts}"
+                )
+                artists.extend(
+                    (*viewer.set(scan.coordinates[row], real, sem), progress)
+                )
+            return artists
 
         # Advance each drive gain in the same tProc point loop.
         # 2. Sweep gains in one hardware loop with simultaneous drives after reset.
-        signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
-        with Schedule(signals, scope=context.scope) as sched:
+        moments = SignalBuffer(
+            (*scan.coordinates.T.shape, 6), dtype=np.float64, on_update=update
+        )
+        with Schedule(moments, scope=context.scope) as sched:
             drives = []
             for index in scan.indices:
                 tone = cfg.tones[index]
@@ -370,8 +446,7 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
             for drive, timeline in zip(drives, timelines, strict=True):
                 builder.emit(drive, timeline=timeline)
             builder.join(*timelines, into="default")
-            readout_module = MuxReadout("readout", readout)
-            builder.emit(readout_module)
+            builder.emit(MuxReadout("readout", readout))
 
             # Integer register steps can differ from independently rounded points.
             # Keep live plots, analysis and persistence on the compiled gain grid.
@@ -380,27 +455,24 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
                 scan.coordinates[row] = prog.get_pulse_param(
                     f"drive_{index}", "gain", as_array=True
                 )
-            _ = sched.run_acquire(
+            _ = sched.run_acquire_summed(
                 prog,
                 context.soc,
                 rounds=cfg.rounds,
-                options=RunOptions(
-                    converter=partial(averaged_mux_signal, prog, readout_module)
-                ),
+                reducer=mux_iq_sums(prog, "readout"),
             )
 
-        # Publish final plots and return tone-major data, including unmeasured NaNs.
-        signals.trigger_update(flush=True)
-        # 3. Preserve compiled gain coordinates and completed-round IQ; NaN marks no completed round.
-        return MuxSweepResult(
-            np.asarray(scan.indices, dtype=np.int64),
-            scan.coordinates,
-            signals.array.T.copy(),
+        # Preserve compiled coordinates and completed-round IQ; NaN marks no completed round.
+        moments.trigger_update(flush=True)
+        tone_sums = np.swapaxes(moments.array, 0, 1).copy()
+        _, mean = split_sums(tone_sums)
+        return MuxRabiResult(
+            np.asarray(scan.indices, dtype=np.int64), scan.coordinates, mean, tone_sums
         )
 
     def analyze(
         self,
-        source: RunRecord[MuxAmpRabiCfg, MuxSweepResult],
+        source: RunRecord[MuxAmpRabiCfg, MuxRabiResult],
         options: AmpRabiAnalyzeOptions,
         *,
         plots: Plots,
@@ -415,6 +487,8 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
         # 1. Validate saved gain/IQ axes before calibrating the original participant tones.
         result = source.result
         validate_mux_result(result)
+        moments = result.iq_moments
+        validate_iq_moments(moments, result.signals)
         outcomes: list[MuxAmpRabiFit | MuxFitFailure] = []
         # 2. Analyze each tone on its own acquired grid after the requested leading-point skip.
         for row, raw_index in enumerate(result.tone_indices):
@@ -423,16 +497,26 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
             finite = np.isfinite(signal)
             xs = result.coordinates[row, options.skip :][finite]
             signal = signal[finite]
-            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
-            ax.set(xlabel="Pulse gain (a.u.)", ylabel="Signal (a.u.)")
-            fig.suptitle(f"tone {index}")
+            cfg = source.cfg
+            tone = f"Tone {index}" if cfg is None else cfg.tones[index].name
+            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(7, 5))
+            ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+            fig.suptitle(f"Mux amplitude Rabi · {tone} · IQ contrast")
+            real, sem = project_iq(
+                signal,
+                None if moments is None else moments[row, options.skip :][finite],
+            )
+            (measured,) = ax.plot(xs, real, "o", ms=3, label="Measured IQ")
+            if sem is not None and np.any(np.isfinite(sem)):
+                ax.errorbar(
+                    xs, real, yerr=sem, fmt="none", ecolor="C0", label="Shot SEM"
+                )
             try:
                 if len(xs) < 6:
                     raise ValueError(
                         "Amp Rabi fit requires at least six acquired points"
                     )
                 # 3. Project IQ and fix the undamped Rabi phase from the acquired gain nearest zero.
-                real = rotate2real(signal).real
                 zero = real[np.argmin(np.abs(xs))]
                 phase = 0.0 if zero > 0.5 * (np.max(real) + np.min(real)) else 180.0
                 fit = fit_rabi(xs, real, decay=False, init_phase=phase)
@@ -459,24 +543,21 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
                 ArithmeticError,
                 np.linalg.LinAlgError,
             ) as exc:
-                # 4. Isolate each tone's fit failure and show its acquired magnitude for diagnosis.
-                ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
+                # 4. Isolate each tone's fit failure without hiding its acquired IQ.
+                measured.set_linestyle("-")
                 ax.text(
-                    0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True
+                    0.02,
+                    0.98,
+                    f"Fit unavailable: {exc}",
+                    transform=ax.transAxes,
+                    va="top",
+                    wrap=True,
                 )
                 outcomes.append(MuxFitFailure(index, str(exc)))
             else:
-                # 5. Mark pi/pi2 gains and uncertainty bands on the projected Rabi fit.
-                ax.plot(xs, real, "o", label="measured")
-                ax.plot(xs, fitted, label="fit")
-                for value, error, label in ((pi, pierr, "pi"), (pi2, pi2err, "pi/2")):
-                    ax.axvline(
-                        value, ls="--", label=f"{label}={value:.4g} ± {error:.2g}"
-                    )
-                    ax.axvspan(value - error, value + error, alpha=0.2, color="red")
+                _plot_amp_fit(ax, xs, params, outcome)
                 outcomes.append(outcome)
             ax.legend()
-            ax.grid(True)
             fig.tight_layout()
         # 6. Keep pi/pi2 gains or a failure reason under each original tone identity.
         return tuple(outcomes)

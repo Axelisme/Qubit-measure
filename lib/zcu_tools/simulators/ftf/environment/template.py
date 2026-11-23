@@ -556,7 +556,7 @@ def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with 
             adc.gain,
             float(np.deg2rad(adc.phase_deg)),
             np.array(adc.offset_adc),
-            np.array(adc.noise_psd_adc2_ns) / dt,
+            (adc.noise_psd_adc2_ns / dt) * np.eye(2),
             time_of_flight_ns=adc.time_of_flight_ns,
             ripple_depth=adc.ripple_depth,
             ripple_period_ghz=adc.ripple_period_mhz / 1000,

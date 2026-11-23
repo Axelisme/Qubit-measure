@@ -1,146 +1,27 @@
+**Readers:** operator, agent. Calibrate pulse lengths and measure the Rabi rate on a mux group.
+
 # Mux length Rabi
 
-**Readers:** operator, agent. Run mux length Rabi from the GUI or MCP and read its results.
+Sweep each selected tone's total drive length at fixed gain and read the oscillation in mean IQ. The cosine fit gives the π and π/2 lengths and the Rabi frequency at that gain. The optional envelope describes loss of oscillation contrast.
 
-**Last updated:** 2026-10-31
+**Sequence:** common reset → simultaneous drives at one length per tone → mux readout after the longest branch.
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+## Key settings
 
-## GUI setup
+Bind the `mux` alias to a `group/mux` with matching qubits and resonators in readout order. Check the full **Readout** module, including frequencies and ADCs for inactive tones. If there is no readout slot, the inline starting values use group wiring and resonator calibrations; verify gain and timing before Run.
 
-Create a `kind: group/mux` component and bind scalar alias `mux` to it, then
-open `mux/len_rabi` from **New Tab**. Without this group and alias, opening the
-form reports an error.
-The captured parameter source must contain every qubit and its matching resonator
-in readout order. Readout references the module slot `$mux.module.readout` when
-present, preserving the library's tones and scalar settings. Use a mux-family
-module with the full group tone count. If the slot is empty, Readout starts
-inline from the blank mux template with group calibration tones.
-The generator comes from `$mux.wiring.gen_ch`. Tone i's ADC channel is an
-integer seed from the fixed capture's `group.wiring.ro_ch[i]`, in the group's
-resonator order. Each tone starts
-with gain 0.1. These values are editable initial inputs, not verified hardware
-settings. Complete the remaining required fields and confirm wiring, gain and
-timing before running.
+**Tones** chooses what to edit. **Participants** takes a nonempty list of unique zero-based positions in run order, e.g. `[2, 0]`. It selects both drives and emitted readout tones. The `participants` alias seeds those positions; if absent, unbound, or empty, the form starts with all tones. Editing the selection preserves tone values. Fill required pulse and sweep fields for any newly selected tone, using distinct drive generators separate from readout.
 
-The Tones picker selects the element to edit. Participants selects the qubits to
-run. Tone names, count and order stay fixed. Set Participants to a nonempty JSON
-list of unique original indices, for example `[2, 0]`. This runs original
-positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
-out-of-range participants block Run and remain editable for correction.
+Under **Tones → Length**, choose positive **Start** and **Stop** in µs to span an inversion. Stop starts at 4 × the x180 waveform length (1 µs if x180 is missing or Arb); **Expts** is shared. For flat_top, total length includes both ramps and must exceed their duration. Use const, flat_top or a supported sampled waveform, not Arb. If any selected waveform is sampled, Live updates point by point and Stop can leave a partial scan. With only const or flat_top it updates a whole scan per completed round.
 
-Selected tones need drives on independent generators, distinct from readout.
-Set each tone's `length.start` and `length.stop` bounds. All tones share Expts.
-Open/Defaults fills selected tones' drive and per-tone length defaults and sets
-these fields to None on other tones. The nullable fields remain editable.
-Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
-and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
-Alias list elements may use `$` links. A missing, unbound or empty row selects all
-original indices in order. An unbound element in a nonempty list rejects Open/Defaults.
-An out-of-group name stays visible as an invalid Participants draft until corrected.
-Changing aliases requires Defaults or reopening; ordinary participant edits keep tone values.
+Use **Fit decay envelope** for a damped cosine and **Fit phase offset** if the measured phase should float; otherwise it is fixed at 0° with signed amplitude. A fit needs at least six finite points.
 
-Editing participants preserves every tone value. Fill any newly selected tone's
-missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
-tone still needs valid frequency and ADC identity, even when not selected.
+In `mux_len_rabi`, omitted inputs retain settings. Null `participants`, `sweeps` (clears all bounds) or `n` leaves missing required values at the pre-Run readiness check unless an override fills them. Null `decay` or `fit_phase` is rejected by Analyze, after acquisition. See the [mux recipe inputs](../../../recipes/mux-guide.md#mux_len_rabi).
 
-## FTF cost example
+## Read the plots and use the result
 
-A two-participant offline Run used 8 requested lengths from 0.02 to 0.16 µs,
-const pulses at gain 0.1, 100 reps, 1 round and 0.1 µs recovery.
-The recorded Run action took 2.006 s, about 0.25 s per joint sweep point.
-These short, uncalibrated inputs demonstrate execution, not a pi-length calibration.
-Keep the hardware-rounded coordinates when reviewing the result.
+Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Live shows acquired length points. Analyze adds the fit and marks π length if in range. Check that the points support that inversion; projected mean IQ is not population.
 
-The timer includes the ComponentDriver button action, terminal wait and
-screenshots. It is not acquisition-only time and excludes Analyze and Save.
-Do not compare it with timings from other slots or experiments as a speed test.
-Sweeping longer pulses changes the simulated evolution as well as hardware
-playback. Point count, waveform, participants, reset, recovery and readout
-windows also affect cost. Hardware repeats work for reps and rounds.
-FTF compilation and cache reuse can outweigh that repetition, so do not assume
-linear scaling with reps. Time a short Run at the intended pulse lengths first.
+Bars in Live and Analyze are shot SEM: the projected shot sample standard deviation divided by √(shot count). They describe uncertainty of the point mean, not fit error, shot spread or round-to-round spread. Mean-only files still fit without bars, and fewer than two shots give no bar. R² measures explained variation, normalized residual RMS measures mismatch relative to signal range, and the reported ± is fit uncertainty.
 
-## Measurement and analysis
-
-Use const, flat_top or sampled drives such as cosine, gauss or DRAG for selected
-tones. Inactive drives may be blank.
-For flat_top, total length includes both ramps and must exceed their duration.
-Switch an arb source to a supported waveform explicitly before Run.
-
-Each tone supplies positive Start and Stop lengths in µs. Expts follows Tones
-and sets one shared positive point count for all tones (default 101).
-When all participants use const or flat_top, one program sweeps their length
-tables in a shared hardware loop. If any participant uses a sampled waveform,
-the host scans all participants together. It compiles one program per point and
-reuses those programs across all rounds. Each program runs with rounds=1, while
-the host repeats the full scan and averages each point's available rounds.
-At each point, the selected drives use their corresponding lengths together.
-The sequence is common reset, simultaneous drives, then mux readout after that
-point's longest drive. Short drives wait for that branch; pulse pre/post delays
-stay as configured. Hardware rounding can change total playback by a few ticks.
-Nonpositive or overlapping adjacent rounded lengths block Run.
-The hardware path updates live plots after each completed round across the full
-sweep. The host path updates after each measured point. Stop keeps acquired data,
-including partial host scans; unmeasured points remain NaN.
-The core cfg field earlystop_snr applies only to host scans. After a full scan,
-the host stops if every participant's projected trace reaches that threshold.
-The default None disables early stopping. Hardware scans retain their requested
-round count.
-
-Each tone uses its own rounded requested-length axis and needs six finite IQ points.
-Decay defaults to a damped cosine and can be disabled.
-Fit phase defaults to fixed 0 degrees with signed amplitude. Enable it for a free
-phase. Lengths and one-sigma errors are in µs; Rabi frequency and error are in MHz.
-Review the curve and fit quality, especially for small-truncation simulations.
-
-## Writeback
-
-Each qualifying tone proposes `<qubit>.ext.rabi_freq` in MHz.
-With source configuration, candidates copy the measured pulse and
-set fitted pi/pi2 lengths at `<qubit>.pulses.pi_len` and
-`<qubit>.pulses.pi2_len`. Separate candidates set `module.x180` and
-`module.x90` to those keys. The pi_amp/pi2_amp gain-calibration pulses remain
-unchanged.
-The `ext.pi_product` candidate is source gain times fitted pi length.
-Review the source shape, flat_top ramps and each pulse/slot destination.
-
-## Results and saved sources
-
-Run draws one `measurement_i` figure per participant, without a shared overlay.
-Each figure uses that tone's hardware-rounded scan coordinates.
-The index `i` is the original tone position in the saved configuration.
-Analyze uses the selected Run/Load source. Use the Analysis figure picker for
-`fit_i`.
-Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.
-Summary rows retain that order and show values, quality or a failure reason.
-A missing source configuration leaves the name unavailable.
-
-Use Data to save measurement data and analysis artifacts.
-Load Data selects a native file or saved run and preserves current Form inputs.
-The selected source fixes the historical pulse, binding and writeback destination.
-Cancellation retains acquired data and leaves missing data as NaN.
-Acquisition errors propagate, and that run publishes no new record.
-A stop request does not determine whether returned data is usable for analysis.
-Only successful, fully finite rows qualify for calibration candidates.
-Missing captured bindings suppress candidates; inconsistent bindings report an error.
-Read each Writeback destination, value, quality and uncertainty.
-Deselect unwanted items, then use **Apply Selected** to write the selected items.
-Analyze and preview only calculate results. Each candidate needs its own selection.
-
-## Drafts and MCP inputs
-
-Saved drafts retain invalid field text and Participants for correction.
-Restoration reports dropped fields and keeps the original parameter source.
-Unreadable saved inputs produce a diagnostic and fresh defaults.
-Defaults captures current parameters and rebuilds initial values.
-
-Recipe writes and override paths use dotted strings, for example
-`"tones.0.drive.gain"`. The decimal index addresses the complete tone list.
-Omission retains a Form input; null clears it. Analysis inputs also use
-omission to retain settings and pass explicit null to their owner.
-The recipe applies overrides last, then calls `check_ready()` before Run.
-See the [mux recipe guide](../../../recipes/mux-guide.md#mux_len_rabi) for dotted-path overrides,
-parameter origins and explicit writeback decisions.
-
-The MCP recipe is `mux_len_rabi`.
+Writeback proposes `ext.rabi_freq`, π/π2 length pulse copies and their x180/x90 references, plus `ext.pi_product = source gain × π length`. It does not change the amplitude-calibrated pulses. Preserve the ramps when adopting a new total length. For shared controls see [zcu_lab/v2/operator-workflow.md](../../operator-workflow.md).

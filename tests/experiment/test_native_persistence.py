@@ -660,7 +660,7 @@ def test_prepare_rejects_non_text_comment(comment: str) -> None:
         prepare_run_data(single_record(), spec=SINGLE, comment=comment)
 
 
-def test_prepare_scalar_native_data_does_not_add_labber_restrictions(
+def test_scalar_round_trips_in_native_but_cannot_export_to_labber(
     tmp_path: Path,
 ) -> None:
     @dataclass
@@ -676,10 +676,12 @@ def test_prepare_scalar_native_data_does_not_add_labber_restrictions(
     path = tmp_path / "scalar.h5"
     save_run(record, path, spec=spec)
     loaded = load_run_with_metadata(path, spec=spec)
+    assert loaded.result.signal.shape == ()
     np.testing.assert_allclose(loaded.result.signal, 1j)
-    prepared = prepare_run_data(record, spec=spec, comment="scalar")
-    with pytest.raises(ValueError, match="step axis"):
-        write_labber(tmp_path / "no-axis.h5", prepared.container)
+    with pytest.raises(
+        ValueError, match="data: Labber requires at least one step axis"
+    ):
+        save_labber(record, tmp_path / "scalar.hdf5", spec=spec)
 
 
 @pytest.mark.parametrize("started_at", [None, "2026-10-06T01:00:00Z"])

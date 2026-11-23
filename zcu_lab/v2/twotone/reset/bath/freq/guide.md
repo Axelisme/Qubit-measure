@@ -1,23 +1,21 @@
-## Behavior
+**Readers:** operator, agent. Find the cavity RF and gain with the strongest phase-dependent bath-reset response.
 
-**Readers:** operator, agent. Bath-reset cavity frequency/gain map: a 2D sweep of the bath reset's cavity-tone frequency × gain, with a 4-point pi/2 tomography phase cycle at each frequency/gain pair, imaging the residual coherence to locate the (freq, gain) pair that best dumps the excitation into the cavity bath. Runs on real hardware.
+## Sequence
 
-**Last updated:** 2026-10-21
+Optional **Reset** → optional **Preparation pulse** → simultaneous cavity and qubit tones → tomography π/2 after the cavity tone → **Readout**. Each cell adds 0°, 90°, 180° and 270° to the π/2 phase in **Tested reset**.
 
-## Parameter sources
+## Key settings
 
-Seeds 51 frequency points from `$resonator.freq` - 1.2 * `$qubit.ext.rabi_freq` to `$resonator.freq` - 0.8 * `$qubit.ext.rabi_freq`, and 51 gain points from 0.4 to 1.0. Relax delay reads 5.0 * `$qubit.t1`. The pi/2 phase offset starts at the recommended 90 degrees and remains editable. Run adds its four-point tomography phase cycle to the configured offset. Open and Defaults fill editable starting values from the selected aliases and calibration. Qubit pulse templates read `$qubit.freq` and `$qubit.wiring.ch`. Readout templates read `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
+- Calibrate the qubit x90 and readout before Run. The editable π/2 offset starts at 90°; the saved x90 is not changed.
+- **Cavity drive RF frequency** starts at resonator RF minus 0.8–1.2 times the qubit Rabi frequency (`$qubit.ext.rabi_freq`). Center the sweep on the expected sideband. Choose **Cavity drive gain** within the calibrated range.
+- **Relax delay** starts at 5 × T1 (150 µs when T1 is absent). Supply the wait if T1 is invalid; enabling **Reset** does not shorten it.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+## Read the figures and choose the next settings
 
-## Module slots
+Live counts acquired cells. Live and Analyze show |S180−S0|² + |S270−S90|² in a.u.²; S is mean complex IQ at each relative phase. This is tomography contrast, not reset probability, and the map shows no per-cell shot SEM.
 
-Tested reset starts as an editable copy of the bath_reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. The pi/2 tone requires `$qubit.module.x90`; missing calibration leaves it Invalid. An editable copy starts with a 90-degree tomography offset. The saved module stays unchanged. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+The Analyze star marks the maximum after smoothing, on the raw map. **Peak selection filter** and **Filter strength** can move the star without changing the colors; strength scales the wavelet threshold or sets Gaussian width in sample steps. If the star is on an edge, shift that axis within the calibrated range and repeat.
 
-## Typical writeback
+The proposal updates only `$qubit.ext.reset_bath_gain` and `$qubit.ext.reset_bath_freq`. Use those settings for the bath duration and phase sweeps.
 
-Proposes the best cavity gain and frequency to `$qubit.ext.reset_bath_gain` and `$qubit.ext.reset_bath_freq` only. The bath phase experiment proposes the tested ground/excited reset modules; choose reset length manually from the length-response plot.
-
-## Recommended
-
-Analysis denoises the 2D map before picking the peak; wavelet smoothing is the default and Gaussian remains available for comparison. Save writes one 3D HDF5 file with frequency, gain and tomography phase axes.
+Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../../operator-workflow.md).

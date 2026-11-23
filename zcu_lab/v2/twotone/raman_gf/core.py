@@ -7,10 +7,13 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.analysis.singleshot import (
+    Centroid3IQAnalysis,
     Centroid3Summary,
     analyze_centroid3_populations,
     summarize_centroid3,
@@ -39,6 +42,8 @@ from zcu_tools.program.v2 import (
     shot_sums,
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
+
+from zcu_lab.v2.support import live_errorbar, live_heatmap
 
 STATE_LABELS = ("g", "e", "f")
 
@@ -73,7 +78,7 @@ class RamanGFCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="Raman drive",
-            description="Raman pulse on a fixed carrier.",
+            description="Fill in the Raman pulse; the scan supplies its RF frequency and gain.",
         ),
     ]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
@@ -83,14 +88,14 @@ class RamanGFCfg(ConfigBase):
         FieldMeta(
             label="Carrier center",
             unit="MHz",
-            description="Raman carrier frequency.",
+            description="Fill in the measured Raman RF carrier (MHz), half the difference between the 0–3 and 3–2 transition frequencies.",
         ),
     ] = Field(gt=0, allow_inf_nan=False)
     scan_mode: Annotated[
         Literal["frequency", "gain", "frequency_gain"],
         FieldMeta(
             label="Scan mode",
-            description="Frequency holds gain at its start; gain holds detuning at its start; frequency_gain scans both.",
+            description="Choose frequency at the starting gain, gain at the starting detuning, or a grid of both.",
         ),
     ] = "frequency_gain"
     detuning: Annotated[SweepCfg, FieldMeta(label="Two-photon detuning", unit="MHz")]
@@ -181,7 +186,8 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         gains = round_zcu_gain(gains, context.soccfg, cfg.drive.ch)
         point_frequencies = np.repeat(frequencies, len(gains))
         point_gains = np.tile(gains, len(frequencies))
-        counts = SignalBuffer((len(point_gains), len(STATE_LABELS)), dtype=np.float64)
+        actual_detunings = 2 * (frequencies - cfg.carrier_mhz)
+        counts = self._live_counts(context.plots, cfg, actual_detunings, gains)
 
         # 3. Measure Raman preparation labels for each carrier-gain pair with a fixed envelope.
         with Schedule(counts, scope=context.scope) as sched:
@@ -211,40 +217,101 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                     ),
                 )
 
-        result = RamanGFResult(
+        return RamanGFResult(
             counts=counts.array,
-            detunings=2 * (point_frequencies - cfg.carrier_mhz),
+            detunings=np.repeat(actual_detunings, len(gains)),
             gains=point_gains,
         )
-        # 4. Inspect the acquired preparation-label fractions in detuning-major scan order.
-        figure, _ = context.plots.subplots(num="measurement", layout="constrained")
 
-        @context.plots.on_plot_thread
-        def draw(_data: None) -> tuple[Figure]:
-            """Add the acquired Raman preparation fractions to the figure.
-
-            _data is the unused None trigger; counts come from the captured result.
-            Return the changed figure; the trigger does not supply plot data.
-            """
-            ax = figure.axes[0]
-            fractions = result.counts / result.counts.sum(axis=-1, keepdims=True)
-            for label, state in enumerate(STATE_LABELS):
-                ax.plot(
-                    np.arange(len(result.counts)),
-                    fractions[:, label],
-                    "o-",
-                    label=state,
+    def _live_counts(
+        self,
+        plots: Plots,
+        cfg: RamanGFCfg,
+        detunings: NDArray[np.float64],
+        gains: NDArray[np.float64],
+    ) -> SignalBuffer:
+        """Attach measured class fractions to actual coordinates as points arrive."""
+        grid = cfg.scan_mode == "frequency_gain"
+        figure, _ = plots.subplots(
+            num="measurement",
+            ncols=3 if grid else 1,
+            figsize=(11, 4.8) if grid else (7, 5),
+            layout="constrained",
+        )
+        title = "Raman spectroscopy · g → f · measured fractions"
+        headline = figure.suptitle(title)
+        shape = (len(detunings), len(gains))
+        if grid:
+            maps = [
+                live_heatmap(ax, uniform=False, clim=(0, 1), cmap="viridis")
+                for ax in figure.axes
+            ]
+            for ax, heatmap, state in zip(figure.axes, maps, STATE_LABELS, strict=True):
+                ax.set(
+                    xlabel="Drive gain (a.u.)",
+                    ylabel="Two-photon detuning (MHz)",
+                    title=f"{state} label",
                 )
-            ax.set(
-                xlabel="Point (detuning-major, gain-minor)",
-                ylabel="Preparation-label fraction",
-            )
-            ax.legend()
-            return (figure,)
+                ax.grid(False)
+                (image,) = heatmap.set(gains, detunings, np.full(shape[::-1], np.nan))
+                figure.colorbar(
+                    image, ax=ax, label="Measured label fraction", ticks=(0, 0.5, 1)
+                )
 
-        draw(None)
+            @plots.on_plot_thread
+            def update_grid(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+                totals = data.sum(axis=-1, keepdims=True)
+                fractions = np.divide(
+                    data, totals, out=np.full_like(data, np.nan), where=totals > 0
+                )
+                headline.set_text(
+                    f"{title}\nRetained shots: {int(np.nansum(totals)):,} count"
+                )
+                return (
+                    headline,
+                    *(
+                        artist
+                        for index, heatmap in enumerate(maps)
+                        for artist in heatmap.set(
+                            gains, detunings, fractions[:, index].reshape(shape).T
+                        )
+                    ),
+                )
+
+            update = update_grid
+        else:
+            ax = figure.axes[0]
+            frequency = cfg.scan_mode == "frequency"
+            xs = detunings if frequency else gains
+            ax.set(
+                xlabel="Two-photon detuning (MHz)"
+                if frequency
+                else "Drive gain (a.u.)",
+                ylabel="Measured label fraction",
+            )
+            lines = live_errorbar(ax, num_lines=len(STATE_LABELS))
+            for line, state in zip(ax.lines, STATE_LABELS, strict=True):
+                line.set(marker="o", markersize=3, label=f"{state} label")
+            ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncols=3)
+
+            @plots.on_plot_thread
+            def update_trace(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+                totals = data.sum(axis=-1, keepdims=True)
+                fractions = np.divide(
+                    data, totals, out=np.full_like(data, np.nan), where=totals > 0
+                )
+                covariance = class_probability_covariance(data)
+                sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
+                headline.set_text(
+                    f"{title}\nRetained shots: {int(np.nansum(totals)):,} count"
+                )
+                return (headline, *lines.set(xs, fractions.T, sem.T))
+
+            update = update_trace
         figure.show()
-        return result
+        return SignalBuffer(
+            (shape[0] * shape[1], len(STATE_LABELS)), dtype=np.float64, on_update=update
+        )
 
     def analyze(
         self,
@@ -286,61 +353,93 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
             layout="constrained",
         )
 
-        @plots.on_plot_thread
-        def populations(_data: None) -> tuple[Figure]:
-            """Add raw and confusion-corrected Raman population plots to the figure.
-
-            _data is the unused None trigger; populations come from the captured analysis.
-            Return the changed figure; the trigger does not supply plot data.
-            """
-            for row, (values, title) in enumerate(
-                (
-                    (result.raw_populations, "Raw g/e/f fractions"),
-                    (result.corrected_populations, "Corrected g/e/f (unclipped)"),
-                )
-            ):
-                if grid:
-                    shape = (cfg.detuning.expts, cfg.gain.expts)
-                    detunings = source.result.detunings.reshape(shape)[:, 0]
-                    gains = source.result.gains.reshape(shape)[0, :]
-                    for label, state in enumerate(("g", "e leakage label", "f")):
-                        ax = figure.axes[row * len(STATE_LABELS) + label]
-                        image = ax.pcolormesh(
-                            gains,
-                            detunings,
-                            values[:, label].reshape(len(detunings), len(gains)),
-                            shading="nearest",
-                        )
-                        figure.colorbar(image, ax=ax)
-                        ax.set(
-                            xlabel="Drive gain (a.u.)",
-                            ylabel="Two-photon detuning (MHz)",
-                            title=f"{title}: {state}",
-                        )
-                else:
-                    ax = figure.axes[row]
-                    for label, state in enumerate(("g", "e leakage label", "f")):
-                        ax.plot(
-                            source.result.detunings
-                            if cfg.scan_mode == "frequency"
-                            else source.result.gains,
-                            values[:, label],
-                            ".-",
-                            label=state,
-                        )
-                    ax.set(
-                        xlabel="Two-photon detuning (MHz)"
-                        if cfg.scan_mode == "frequency"
-                        else "Drive gain (a.u.)",
-                        ylabel="Preparation-label fraction",
-                        title=title,
-                    )
-                    ax.legend()
-            figure.suptitle(
-                f"Saved readout: condition={result.condition_number:.4g}, minimum singular value={result.minimum_singular_value:.4g}\nPreparation-label estimates, not fidelity"
-            )
-            return (figure,)
-
-        populations(None)
+        if grid:
+            self._draw_maps(figure, source.result, cfg, result)
+        else:
+            self._draw_traces(figure, source.result, cfg, result)
+        figure.suptitle(
+            "Raman spectroscopy · g → f · preparation-label fractions\n"
+            f"Readout condition number: {result.condition_number:.3g} · "
+            f"Minimum singular value: {result.minimum_singular_value:.3g}"
+        )
         figure.show()
         return summarize_centroid3(result)
+
+    def _draw_maps(
+        self,
+        figure: Figure,
+        data: RamanGFResult,
+        cfg: RamanGFCfg,
+        result: Centroid3IQAnalysis,
+    ) -> None:
+        """Draw measured and corrected label fractions on the same scan axes."""
+        shape = (cfg.detuning.expts, cfg.gain.expts)
+        detunings = data.detunings.reshape(shape)[:, 0]
+        gains = data.gains.reshape(shape)[0, :]
+        corrected = result.corrected_populations
+        for row, (values, title, limits) in enumerate(
+            (
+                (result.raw_populations, "Measured", (0.0, 1.0)),
+                (
+                    corrected,
+                    "Corrected",
+                    (
+                        min(0.0, float(corrected.min())),
+                        max(1.0, float(corrected.max())),
+                    ),
+                ),
+            )
+        ):
+            for label, state in enumerate(STATE_LABELS):
+                ax = figure.axes[row * len(STATE_LABELS) + label]
+                ax.grid(False)
+                image = ax.pcolormesh(
+                    gains,
+                    detunings,
+                    values[:, label].reshape(shape),
+                    shading="nearest",
+                    cmap="viridis",
+                    vmin=limits[0],
+                    vmax=limits[1],
+                )
+                ax.set(
+                    xlabel="Drive gain (a.u.)",
+                    ylabel="Two-photon detuning (MHz)",
+                    title=f"{title} {state} label",
+                )
+                figure.colorbar(image, ax=ax, label=f"{title} label fraction")
+
+    def _draw_traces(
+        self,
+        figure: Figure,
+        data: RamanGFResult,
+        cfg: RamanGFCfg,
+        result: Centroid3IQAnalysis,
+    ) -> None:
+        """Draw one-dimensional scans with shot SEM before and after correction."""
+        frequency = cfg.scan_mode == "frequency"
+        xs = data.detunings if frequency else data.gains
+        xlabel = "Two-photon detuning (MHz)" if frequency else "Drive gain (a.u.)"
+        measured_cov = class_probability_covariance(data.counts)
+        correction = np.linalg.inv(result.confusion_matrix.T)
+        corrected_cov = correction @ measured_cov @ correction.T
+        for ax, values, covariance, label in zip(
+            figure.axes,
+            (result.raw_populations, result.corrected_populations),
+            (measured_cov, corrected_cov),
+            ("Measured", "Corrected"),
+            strict=True,
+        ):
+            sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
+            for index, state in enumerate(STATE_LABELS):
+                ax.errorbar(
+                    xs,
+                    values[:, index],
+                    yerr=sem[:, index],
+                    fmt="o-",
+                    color=f"C{index}",
+                    markersize=3,
+                    label=f"{state} label",
+                )
+            ax.set(xlabel=xlabel, ylabel=f"{label} label fraction")
+            ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=3)

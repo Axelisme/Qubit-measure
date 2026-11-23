@@ -1,75 +1,25 @@
 # Two-tone readout-chain sweep
 
-**Readers:** operator, agent. Run the readout-chain qubit frequency sweep from the GUI or MCP and read its sigma curve and peak fit.
+**Readers:** operator, agent. Locate qubit spectral lines that alter the statistics of repeated resonator reads, even when mean IQ changes little.
 
-**Last updated:** 2026-11-16, independent peak options and midpoint window
+## Sequence and key settings
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+One dwell at one drive frequency is **Reset** (optional) → **Init Pulse** (optional, once per dwell) → 48 cycles of **Probe Pulse** then readout without resetting between cycles. The next probe follows the prior readout pulse, its post-delay and the probe pre-delay. Check that integration windows on the same ADC do not overlap. The cycle count is fixed.
 
-## Behavior
+- Calibrate readout first and select a pulse readout, not mux. **Probe RF frequency** starts at `$qubit.freq ± 20 × $qubit.kappa` in MHz; enter the window directly for a first search.
+- A fast sweep visits every RF point once. **Reps** sets fast sweeps per round and must be at least 12, so each RF point has enough dwells for the first live estimate. **Rounds** sets averaging passes. Smaller Reps updates Live more often. **Stop** keeps completed rounds; stopping before the first completes fails the Run.
+- Set **Expected center** to select the nearest candidate, or leave it blank for the most prominent one. Set candidate gates with **Minimum prominence / signal range**, **Minimum height above median / noise sigma**, **Minimum half-prominence width**, and **Minimum peak separation**. Keep **Model type** at `lor`: a nonnegative sigma curve cannot show signed sinc sidelobes.
 
-`twotone/chain` sweeps the qubit drive frequency like `twotone/freq`, but each dwell at one frequency is a chain of reads instead of one read.
-A dwell is one shot: Reset, Init Pulse, then 48 cycles of the frequency-swept Probe Pulse followed by a readout, with no reset between cycles.
-The next Probe Pulse starts after the readout pulse ends and the readout's `post_delay` plus the probe's own pre-delay have elapsed.
-The probe can start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
-The experiment fixes the 48 cycles per dwell; the Form does not offer it.
-The frequency loop runs outside the chain. One fast sweep visits every frequency once.
-Reps sets the fast sweeps per round, and Rounds sets the number of rounds.
+See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shared GUI steps.
 
-The host reduces each dwell to 11 numbers: the IQ means, the IQ second moments and IQ correlations between reads one to fifteen cycles apart.
-Only running sums of these numbers are kept, so memory and the saved file do not grow with the number of sweeps.
-From the sums, each frequency gets a distance from background in sigma.
-The background is the median over frequencies.
-The distance uses the IQ means, second moments and read-to-read correlations, so a line that changes these statistics without moving the mean IQ much, for example between nearly equally populated states, still raises it.
+## Read the plots
 
-## Parameter sources
+Live connects measured evidence above the median background (σ) versus RF frequency. Each estimate pools IQ means, second moments and inter-read correlations; Run counts retained dwells per RF point. The dashed **5% false-mark level** means that in a noise-only scan the chance any point crosses it is about 5%. This is an evidence statistic, not population; there is no pointwise shot SEM.
 
-Calibrate the readout with `onetone/freq` first, as for `twotone/freq`. Enter the drive window directly for a first search.
-The Form uses the same sources and starting values as `twotone/freq`: 301 points at `$qubit.freq` ± 20 * `$qubit.kappa` in MHz, a fresh `qub_probe` pulse with gain 0.1 and length 1.0 µs, and the `$resonator.module.readout` slot or a fresh `readout` template.
-Readout must be a pulse readout; a mux readout module is rejected by the Form.
-Reset uses the optional `$qubit.module.reset` slot. Init Pulse starts disabled; when enabled it plays once per dwell, before the chain.
-Choose a calibrated fixed-frequency preparation pulse, with frequency in MHz and duration in µs.
-Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
+Analyze fits the same statistic. Only a separate overview without the model connects the measured points. The fit panel shows measured points and a separate solid model curve. Gray triangles are other candidates; the dotted line marks **Peak center**. The fit window ends halfway to neighbors and needs at least six samples. If it spans at most half the scan, the overview shades it and a second panel zooms in. Candidate SNR is peak height above the median in noise σ, not fit quality. No candidate passing the gates fails Analyze, not Run.
 
-Reps starts at 100 and Rounds at 100, which is 10 000 fast sweeps in total.
-Reps must be at least 12, regardless of the number of frequency points.
-Each fast sweep dwells once at every frequency, so 12 fast sweeps per round give the first live curve enough dwells to estimate the noise.
-Each round acquires points × reps × 48 reads, so a smaller Reps gives more frequent live updates and less memory per round.
-One dwell lasts about 48 × (probe length + readout length) plus Relax delay, about 100 µs with the starting values.
+## Next step
 
-## Live plot
+Read **Peak center** and **Sigma-peak FWHM** in MHz with their fit errors. Noise-floor clipping can make a weak peak appear narrower. To calibrate `$qubit.freq` and `$qubit.kappa`, run `twotone/freq` around the center; this experiment offers no writeback.
 
-After every round the `measurement` plot shows the distance from background in sigma at each frequency, computed from all completed rounds.
-The dashed line is the 5% false-mark level: with no line anywhere in the sweep, the chance that any point crosses it is about 5%.
-Points above the level are unlikely to be noise; points below it are compatible with noise.
-Stop the run when the peaks are clear. Stop keeps the sums of completed rounds. A stop before the first round finishes keeps nothing and the Run fails with that message.
-
-## Analysis
-
-Analysis recomputes the sigma curve from the saved sums and fits one peak with the shared numerical spectrum fitter.
-This experiment retains its own options: `expected_center_mhz` selects the nearest candidate, blank selects the most prominent, and `min_prominence`, `min_snr`, `min_width_samples` and `min_distance_mhz` gate the candidates.
-The fit window ends halfway to neighbouring candidates and needs at least six samples.
-The local-maximum selection and six-half-width window of `twotone/freq` do not apply here.
-Keep `model_type` at `lor`; the sigma curve is never negative, so it cannot show the opposite-signed sidelobes that the `sinc` model fits.
-The `fit` plot shows the sigma curve, the dashed level, the fitted peak, the fitted centre in red and the other candidates in dotted gray.
-The summary reports `freq`, `freq_err`, `fwhm`, `fwhm_err` in MHz, the `level` in sigma and the candidates in `peaks`.
-The FWHM of a sigma peak approximates the line width. A weak line reads narrower, because points whose distance stays below the noise floor contribute zero sigma.
-A sweep with no candidate above the thresholds produces an analysis failure; the live plot and the saved sums remain.
-
-This experiment proposes no writeback. To calibrate `$qubit.freq` and `$qubit.kappa`, run `twotone/freq` around the centre found here.
-
-## Saved data
-
-The saved record contains the frequency axis, the dwell count and the 11 sums at each frequency, and one 11 × 11 product sum added over all frequencies.
-Reads per dwell is not stored in the file and is not needed to restore the sums.
-Loading the file and recomputing the curve gives the same sigma values as the live plot of the last completed round.
-
-## MCP recipe
-
-`twotone_chain` requires `center_mhz`, `span_mhz` and `points`.
-Span must be positive and points must be at least 2; points maps to frequency Expts.
-`reps` and `rounds` set the fast sweeps per round and the round count.
-`expected_center_mhz` selects the peak to fit; null fits the most prominent.
-The recipe runs, analyzes and saves. It never asks for writeback.
-The report gives `frequency_mhz`, `frequency_err_mhz`, `width_mhz`, `width_err_mhz` and `level_sigma`.
-Omitted inputs retain Form values; overrides apply last, then check_ready reports missing or invalid fields before Run.
+For `twotone_chain`, null disables **Reset** but null for **Readout** or **Probe Pulse** fails during selection, before overrides. Null Gain, Length, Reps or Rounds leaves a blank; unresolved required blanks fail readiness before Run. Null **Expected center** selects the most prominent peak at Analyze.

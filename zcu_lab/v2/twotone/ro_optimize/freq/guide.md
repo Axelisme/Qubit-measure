@@ -1,23 +1,24 @@
-## Behavior
+**Readers:** operator, agent. Find the readout frequency that best separates the nominal g and e preparations.
 
-**Readers:** operator, agent. Readout frequency optimization: with the qubit prepared in g and e (a pi pulse toggles it), sweeps the readout frequency and measures the g/e signal-to-noise ratio (SNR), so you can pick the readout frequency that best distinguishes the two states. Runs on real hardware. One step of readout tuning; usually run after the qubit and a pi pulse are calibrated.
+# Readout frequency sweep
 
-**Last updated:** 2026-10-21
+## Sequence and observable
 
-## Parameter sources
+Optional **Reset** → omit or apply the calibrated **Qubit π pulse** → readout. SNR is the distance between the nominal g/e IQ centroids divided by their pooled single-shot spread along the separation axis. It is not population or measured assignment fidelity.
 
-Seeds 301 frequency points at `$resonator.freq` +/- `$resonator.kappa`. Relax delay reads 5.0 * `$qubit.t1`. Open and Defaults fill editable starting values from the selected aliases and calibration. Qubit pulse templates read `$qubit.freq` and `$qubit.wiring.ch`. Readout templates read `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
+## Key settings
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+- Calibrate the **Qubit π pulse** and hold readout gain and timing fixed. **Readout frequency** starts at the captured resonator frequency ± one linewidth. Enter RF in MHz with a mixer, DDS frequency without one. The sweep replaces the readout frequency.
+- For **Readout pulse and ADC window**, check the timing at the receiver. For readout `post_delay`, start at `5/(2πκ)` µs for linewidth κ in MHz. Compare herald → nominal Xπ at that wait and at a longer one when calibrating this delay.
+- **Qubit relaxation wait** starts at 5 × T1 (150 µs if absent). Enter a wait if T1 is invalid.
+- **IQ skew penalty weight** of 0 ranks by SNR alone. A positive weight lowers the score for unequal spreads or uncancelled skew along the separation axis.
 
-## Module slots
+## Read the figures and choose a setting
 
-The qubit pulse uses the `$qubit.module.x180` slot captured at Open/Defaults, or a fresh pi_pulse template with a constant waveform. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+Live counts scored settings. Live and Analyze plot SNR versus readout frequency (MHz). Analyze keeps the measured points, overlays the selection SNR if different and marks its measured-grid maximum with a dashed line. No shot SEM or pointwise SNR uncertainty is shown.
 
-## Typical writeback
+**Smooth method** and **Smooth strength** affect selection, not the raw measured values. Strength scales the wavelet threshold or sets Gaussian width in sample steps. Missing scores enter smoothing as zeros; check the measured points before using a result from an incomplete sweep.
 
-Proposes the SNR-maximizing readout frequency to `$qubit.ext.best_ro_freq` (MHz). When acquired run settings include pulse readout and `$qubit.ext.best_ro_freq` / `$qubit.ext.best_ro_gain` / `$qubit.ext.best_ro_length` are known from this result plus captured calibration, also proposes `$resonator.readout.readout_dpm`. With a captured parameter source, a following `$resonator.module.readout` proposal points to that optimized module. Apply both updates to replace the selected readout for all later forms using this resonator. The qubit's `best_ro_*` scalar destinations stay unchanged.
+Extend the range if the selection is at an edge. Otherwise narrow around the peak and confirm it. The frequency correction is the selected minus the old frequency. The proposal updates `$qubit.ext.best_ro_freq` and, for a pulse readout with the other calibration coordinates available, the resonator readout module and slot.
 
-## Recommended
-
-Analysis denoises the SNR curve before picking the peak. Wavelet smoothing is the default; Gaussian smoothing provides a sigma-based comparison. A 'smooth' strength around 2 tames noise without washing out the feature.
+Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).

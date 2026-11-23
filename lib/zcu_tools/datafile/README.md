@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-11-22，單一 Variable 的寫前檢查、容器 3.x 與 run metadata 讀取入口
+**Last updated:** 2026-11-23，Labber 匯出拒絕無軸變數
 
 **讀者：** framework-dev。讀寫通用 HDF5 容器，或獨立轉出 Labber。
 
@@ -102,7 +102,8 @@ Labber codec 與容器核心分開。`write_labber(path, container, *, metadata=
 Snapshot 是可選 JSON object；experiment saver 傳入歷史 point 與 roles，與 cfg 並列。
 Codec 只驗有限 JSON，不解讀 snapshot keys，不改 Container 或 wire version。
 
-Labber 至少需要一個 real step axis。單一 var 寫 single log，多個 vars 預設要求 common grid。
+Labber 要求每個 var 至少有一個 step axis；無軸 var 在建立檔案前拋出 `ValueError`。
+單一 var 寫 single log，多個 vars 預設要求 common grid。
 明示 `grouped_layout="independent"` 時，各 rank-1/2 var 寫自己的 root／Log_N，identity 與 log 名稱維持不變。
 三維 var 沿 NumPy 第一軸拆成二維 log，依序寫入 root、`Log_2`、`Log_3` 等。
 每片的 grouped identity 是 `<variable>_<i>`，`i` 從 0 開始。
@@ -110,7 +111,7 @@ log 名稱是 `<stem> - <variable> <第一軸名稱>=<該片軸值>`，軸名與
 第一軸代表 tone 時，每個 tone 因而得到自己的二維 log。
 三維 var 的第一軸為空時，在建立檔案前 raise `ValueError`。
 派生 identity 與任一輸入 var 名稱撞名，或 independent var 超過三維時，也在建立檔案前 raise `ValueError`。
-common layout 與低層讀寫的維度支援不變。
+Common grid 檢查與低層讀寫的維度支援不變。
 內部 helper 直接寫 marker-qualified grouped v1，並標 finalized，不經中介容器檔案。
 
 `read_labber(path)` 回 `(Container, LabberMetadata)`，保留 NumPy 軸順序。

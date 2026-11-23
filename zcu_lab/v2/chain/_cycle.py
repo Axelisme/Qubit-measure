@@ -11,11 +11,8 @@ second read starts after the first ADC window and the next D after the second.
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.analysis.readout_chain import (
-    CYCLE_FEATURE_COUNT,
-    CycleFit,
-    CycleSums,
-)
+from zcu_tools.analysis.readout_chain import CYCLE_FEATURE_COUNT, CycleSums
+from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     GroupedLoadData,
@@ -23,6 +20,7 @@ from zcu_tools.experiment import (
     VariableSpec,
     VariableZSpec,
 )
+from zcu_tools.utils.process import find_rotate_angle
 
 # Eight (D, read, read) blocks give the 16 reads per shot of chain_cycle_sums.
 BLOCKS_PER_CYCLE = 8
@@ -79,14 +77,26 @@ def first_read_iq(sums: CycleSums) -> NDArray[np.complex128]:
     return (sums.feature_sums[:, 0] + 1j * sums.feature_sums[:, 1]) / sums.cycle_count
 
 
-def checks_text(fit: CycleFit) -> str:
-    """Return the three lack-of-fit checks as J/df, with p where fit gives one."""
-    parts = []
-    for name, check in (
-        ("within-point", fit.within_point),
-        ("sharing", fit.sharing),
-        ("curve", fit.curve),
-    ):
-        p = "" if check.p is None else f", p={check.p:.2g}"
-        parts.append(f"{name} J/df={check.J:.0f}/{check.df}{p}")
-    return "; ".join(parts)
+def first_read_iq_moments(sums: CycleSums) -> NDArray[np.float64]:
+    """Return per-point [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] for the first read."""
+    return np.column_stack(
+        (sums.cycle_count, sums.feature_sums[:, :2], sums.feature_sums[:, 32:35])
+    )
+
+
+def first_read_projection(
+    sums: CycleSums, *, skip: int = 0
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return first-read mean IQ and its shot SEM on the same axis, in a.u.
+
+    Use the dominant axis of the sweep-point means after omitting the first
+    skip points from the axis estimate, with the same sign as rotate2real.
+    Project all points, using I if fewer than two points define the axis.
+    CycleSums already preserves the first read's raw per-point second moments.
+    """
+    signals = first_read_iq(sums)
+    axis_samples = signals[skip:]
+    angle = find_rotate_angle(axis_samples) if len(axis_samples) >= 2 else 0.0
+    return (signals * np.exp(-1j * angle)).real, iq_shot_sem(
+        first_read_iq_moments(sums), direction=(np.cos(angle), np.sin(angle))
+    )

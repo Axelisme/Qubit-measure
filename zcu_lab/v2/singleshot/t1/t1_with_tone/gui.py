@@ -32,7 +32,7 @@ SsT1ToneRunResult: TypeAlias = RunRecord[T1WithToneCfg, T1WithToneResult]
 
 def _analyze(
     req: AnalyzeRequest[SsT1ToneRunResult, None], *, plots: Plots
-) -> T1WithToneAnalysis:
+) -> T1WithToneAnalysis | None:
     confusion = readout_confusion_matrix(
         None if req.run_result.cfg is None else req.run_result.cfg.readout
     )
@@ -44,15 +44,28 @@ def _analyze(
 
 
 def _writeback(
-    req: WritebackRequest[SsT1ToneRunResult, T1WithToneAnalysis],
+    req: WritebackRequest[SsT1ToneRunResult, T1WithToneAnalysis | None],
 ) -> Sequence[WritebackItem]:
+    result = req.analyze_result
+    if not isinstance(result, T1WithToneAnalysis):
+        return ()
     return [
         ParameterWriteback(
             target_name="$qubit.ext.t1_with_tone",
-            description="T1 with probe tone (µs)",
-            proposed_value=req.analyze_result.t1,
+            description=(
+                "Shorter model decay time under the probe tone (µs). "
+                "Stop starts at 5 × this value."
+            ),
+            proposed_value=result.t1,
         ),
     ]
+
+
+def _summary_lines(source: SsT1ToneRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds: {cfg.reps}×{cfg.rounds}",)
 
 
 def _run(
@@ -66,5 +79,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, writeback=_writeback),
+    analysis=Analysis(fn=_analyze, writeback=_writeback, summary_lines=_summary_lines),
 )

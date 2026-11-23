@@ -1,64 +1,20 @@
+**Readers:** operator, agent. Measure the qubit's 1/e relaxation time T1 versus fast-flux gain.
+
 # Fast-flux T1
 
-**Readers:** operator, agent. Measure relaxation during fast-flux pulses from the GUI or MCP and inspect gain-dependent T1 estimates.
+Each shot is optional Reset → calibrated π pulse → Flux pulse at the scanned gain and duration → Readout. Each gain has its own duration trace. The observable is mean IQ, not state population; gain needs separate calibration to become flux.
 
-**Last updated:** 2026-10-21
+## Set up the scan
 
-## What this measures
+- Bind qubit and resonator. Check the **π pulse** (x180) and **Readout** calibration. Verify the fast-flux channel and permitted gain. The two scans override the module gain and duration; use a waveform with sweepable duration, such as const or flat_top.
+- **Flux pulse gain** starts at one zero-gain point. Enter a signed DAC range in a.u. to measure gain dependence. **Flux pulse duration** starts at 0.1 µs and ends at five times captured T1; **Relax delay** starts at the same upper limit. Without T1 the limit is 150 µs; invalid stored T1 leaves the derived values blank. Keep durations positive and include the baseline at long times.
 
-Measure relaxation during a fast-flux pulse at each programmed gain. Each sequence
-resets, applies a calibrated pi pulse, applies the flux pulse, then reads out.
-The gain and pulse-length sweeps produce complex IQ shaped (gain, length).
-Gain is normalized DAC amplitude. Converting it to flux requires a separate
-calibration. Length and fitted T1 use µs.
+For tab setup, refreshing sources and saving, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-## Open and Defaults
+## Read the decay and fit diagnostics
 
-Open and Defaults capture the current aliases and library. The pi pulse uses
-`$qubit.module.x180` when available, otherwise the `pi_pulse` template.
-Readout uses `$resonator.module.readout` or the `readout` template. Missing reset
-disables that optional module. Missing required calibration leaves fields Invalid.
+- Live and the first Analyze heatmap show mean IQ projected along the largest scan variation. The Live sample count tracks coverage; completed rounds track averaging. The map has no shot SEM.
+- Analyze refits each gain's exponential with a shared baseline from preliminary usable fits. **Rejected fits** compares fitted span with half the measured span and the mean absolute smoothed residual. A point at or below either bound fails; this is not an R² cutoff.
+- **Fitted T1** omits rejected values. Its error bars are standard errors of the fitted 1/e time, not errors of mean IQ or variations across rounds. R² compares the fixed-baseline fit with the mean predictor; normalized residual RMS gives the typical mismatch as a fraction of measured span. Those diagnostics include rejected gains. A valid map can still be analyzed without historical cfg.
 
-The Flux pulse module slot uses the `flux_pulse` template. It starts with a const
-waveform, gain 1.0, frequency 0 MHz and Nyquist zone 2.
-Its channel comes from `$qubit.wiring.lo_flux_ch`.
-An unresolved channel leaves the form Invalid until you supply a confirmed channel.
-This form seeds a 0.1 µs waveform duration. These values are editing seeds;
-establish the flux calibration separately. Check the channel, waveform, timing
-and wiring before Run.
-
-The gain sweep initially contains one point at zero. **Set the gain sweep**
-to the range you intend to measure. Run replaces the flux pulse's gain
-with this sweep. Set scanned gains in the gain sweep field.
-Run also replaces its pulse length with the length sweep. Use a waveform
-with a sweepable duration, such as const or flat_top. A fixed arb asset has a
-fixed duration and is unsuitable for this length sweep.
-
-Length starts at 0.1 µs and ends at 5 times captured qubit T1 with 101 points.
-The positive start avoids a zero-length pulse, which the generator compiler rejects.
-Check the minimum duration and sweep spacing on the actual generator's clock grid.
-Relax delay uses the same endpoint. Missing or null T1 uses a 30 µs time scale,
-giving 150 µs. Stored invalid T1 leaves the derived fields empty.
-These editable timing estimates affect this form only; stored calibration retains
-its values. Reps start at 1000 and rounds at 10. Defaults refreshes sources and
-discards edits. After editing aliases, use Defaults to refresh an already open form.
-
-## Run and analyze
-
-Calibrate readout and the pi pulse first. Choose a safe flux gain range and a
-length window that resolves the decay. Inspect the live gain-versus-time map.
-A zero-gain run checks wiring and acquisition only. Measuring flux response
-requires an appropriate gain range.
-
-Analyze fits each gain's decay, estimates a common baseline from accepted
-preliminary fits, then refits with that baseline fixed. The named `fit` figure
-overlays T1 and its uncertainty on the IQ map. Rejected estimates are omitted
-from the overlay. A flat, short or noisy trace may yield a rejected fit.
-Inspect the figure before choosing an operating point.
-
-This experiment measures a gain-dependent curve. Analysis publishes only the
-figure; the stored operating-point T1 retains its value. Save preserves gain
-and time axes, complex IQ and source cfg. Load and Analyze use that saved source;
-the current form, alias table and library remain separate. Time is stored in
-seconds and restored to µs. Analyze can use valid saved data even when its cfg
-is missing or unusable.
+Check the decay approaches its baseline. If it does not, extend the window toward three fitted lifetimes while preserving enough early points for fast decays. Repeat before selecting a gain when neighboring lifetimes differ by less than their fit errors. There is no writeback.

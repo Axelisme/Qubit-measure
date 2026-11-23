@@ -80,7 +80,7 @@ from zcu_tools.simulators.single_fluxonium.environment.template import (
     SingleFluxoniumPlan,
     plan_template,
 )
-from zcu_tools.simulators.telemetry import RoutingTelemetry
+from zcu_tools.simulators.telemetry import RoutingTelemetry, sum_stage_seconds
 
 _BACKEND_VERSION = "single-fluxonium-chain-v2"
 
@@ -265,6 +265,7 @@ class SingleFluxoniumSource:
     paths holds this acquire's Engine diagnostics, including completed spans
     before failure and zero-CPU reports for reused preparations. evolve_wall_s
     sums Engine calls; readout_wall_s sums ADC preparation and round sampling.
+    Each total is None until its first timed call.
     begin_acquire resets these counters. telemetry is the optional local writer;
     only finish_acquire writes, using the binding's AcquireOutcome.
     capture is the current acquire's CaptureBuffer, or None when debug_capture
@@ -289,14 +290,16 @@ class SingleFluxoniumSource:
             RoutingTelemetry(
                 (Path(__file__).resolve().parents[5] / ".sim_telemetry")
                 if policy.directory is None
-                else policy.directory.resolve()
+                else policy.directory.resolve(),
+                commit=policy.commit,
+                dirty=policy.dirty,
             )
             if policy.enabled
             else None
         )
         self.paths: list[PathDiagnostics] = []
-        self.evolve_wall_s = 0.0
-        self.readout_wall_s = 0.0
+        self.evolve_wall_s: float | None = None
+        self.readout_wall_s: float | None = None
         self.capture: CaptureBuffer | None = None
         """Current acquire recording; None when debug_capture is disabled."""
         self._capture_settings: AcquireCaptureSettings | None = None
@@ -362,7 +365,7 @@ class SingleFluxoniumSource:
                 )
             self._effective_settings = self._drift.sample(self._clock.now())
         self.paths.clear()
-        self.evolve_wall_s = self.readout_wall_s = 0.0
+        self.evolve_wall_s = self.readout_wall_s = None
         self.capture = CaptureBuffer() if self.settings.numerics.debug_capture else None
         self._capture_settings = (
             None
@@ -547,8 +550,8 @@ class SingleFluxoniumSource:
         must contain that same receiver set. Classification uses all triggers;
         each ADC may omit events, including terminal. Its per-event grid counts
         must agree across templates. Layout conflicts name ADC and templates.
-        Empty templates, receiver mismatch, unbound charge drive requirements
-        or untriggered cavity drives raise ValueError. No model construction,
+        Empty templates, receiver mismatch, unbound event generators or
+        untriggered cavity drives raise ValueError. No model construction,
         density propagation or ADC solve runs.
         Treat returned plans as read-only. Keep request arrays unchanged until
         prepare_readouts returns. Closed sources raise RuntimeError.
@@ -565,13 +568,6 @@ class SingleFluxoniumSource:
             raise ValueError(
                 "single fluxonium requires the complete calibrated receiver set"
             )
-        drive_channels = {line.gen_ch for line in self.settings.drive_lines.values()}
-        for requirement in request.charge_requirements:
-            if requirement.gen_ch not in drive_channels:
-                raise ValueError(
-                    f"{requirement.name}: generator {requirement.gen_ch} requires a "
-                    "declared charge drive line"
-                )
         delays = {receiver.ro_ch: receiver.time_of_flight_ns for receiver in receivers}
         observations = []
         for receiver in receivers:
@@ -655,7 +651,7 @@ class SingleFluxoniumSource:
             )
             return tuple(channels), raw
         finally:
-            self.readout_wall_s += monotonic() - started
+            self.readout_wall_s = (self.readout_wall_s or 0.0) + (monotonic() - started)
 
     def prepare_readouts(
         self,
@@ -739,7 +735,9 @@ class SingleFluxoniumSource:
                 try:
                     projected = runner.prepare(plans, request.point_dims, key)
                 finally:
-                    self.evolve_wall_s += runner.evolve_wall_s
+                    self.evolve_wall_s = sum_stage_seconds(
+                        (self.evolve_wall_s, runner.evolve_wall_s)
+                    )
                     self.paths.extend(runner.paths)
                 readout = projected.readout
                 paths, reuse_keys = projected.paths, projected.reuse_keys
@@ -761,7 +759,9 @@ class SingleFluxoniumSource:
                         capture=self.capture,
                     )
                 finally:
-                    self.evolve_wall_s += monotonic() - started
+                    self.evolve_wall_s = (self.evolve_wall_s or 0.0) + (
+                        monotonic() - started
+                    )
                 self.paths.append(evolved.paths)
                 probabilities = np.empty((prod(request.point_dims), len(basis.labels)))
                 probabilities[evolved.points] = normalize_populations(

@@ -554,19 +554,29 @@ class FTFSettings(Values):
                 self.drift.coupler.validate_losses(self.chip.coupler)
         return self
 
-    def with_telemetry(self, *, enabled: bool, directory: Path | None = None) -> Self:
+    def with_telemetry(
+        self,
+        *,
+        enabled: bool,
+        directory: Path | None = None,
+        commit: str | None = None,
+        dirty: bool | None = None,
+    ) -> Self:
         """Return a detached settings copy with an explicit local logging policy.
 
-        enabled=False disables all routing timers and I/O for profiles/benchmarks.
-        directory optionally overrides the output path; None preserves the current
-        directory. Does not mutate this settings value, perform I/O or change
-        numerical accuracy, round pacing or RNG settings.
+        enabled=False disables routing timers and I/O. directory overrides the
+        output path; None preserves the existing directory. Supply the capture's
+        checkout revision as commit and modification flag as dirty; omitted
+        values become None. Invalid field types raise ValidationError. No I/O
+        occurs and numerical accuracy, pacing and RNG settings are unchanged.
         """
         telemetry = TelemetrySettings(
             enabled=enabled,
             directory=self.numerics.telemetry.directory
             if directory is None
             else directory,
+            commit=commit,
+            dirty=dirty,
         )
         return self.model_copy(
             update={

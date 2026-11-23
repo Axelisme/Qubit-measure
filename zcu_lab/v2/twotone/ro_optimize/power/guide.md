@@ -1,54 +1,28 @@
+**Readers:** operator, agent. Compare g/e separation and state disturbance from paired readouts at different gains.
+
 # Readout gain and QND
 
-**Readers:** operator, agent. Run the paired-readout gain sweep, compare its metrics and choose a gain for writeback.
+## Sequence
 
-## Before running
+Optional **Reset** → preparation I/π → R1 off/on → wait → middle I/π → R2. The three binary choices give eight branches at every gain. I uses the same π pulse at zero gain; R1 off uses zero gain but still triggers the ADC. The R1-to-R2 interval is matched across branches. R1 on and R2 both use the swept gain.
 
-Select the qubit and its resonator. Confirm the qubit pi pulse, readout frequency, readout waveform, integration window and ADC wiring. The optional reset runs before each preparation. The gain sweep overrides the readout gain for both R1 on and R2.
+## Key settings
 
-Set `wait` in µs. The Form starts it at 0.01 times the captured T1 estimate and starts `relax_delay` at 5 times T1. If T1 is missing or null, or no capture exists, the Form uses 30 µs as a first-run time scale. This gives `wait = 0.3 µs` and `relax_delay = 150 µs`; the 30 µs scale is not a calibrated T1 and is not written back as one. A stored but invalid T1 leaves these fields blank and Invalid until you enter values. These starting values do not establish a suitable photon ring-down time.
+- Calibrate **Qubit π pulse** for both rotations. Set the **Readout gain** range. In count-based sweep modes, **Expts** sets the number of gain points. Check frequency and timing in **Readout pulse and ADC window**; keep both ADC windows covered and disjoint.
+- **Wait after R1** is extra time after the generator pulse and its post-delay, not after ADC closure. It starts at 0.01 × T1; **Qubit relaxation wait** after R2 starts at 5 × T1. Without T1, the waits start at 0.3 µs and 150 µs; enter them if T1 is invalid.
+- Start readout `post_delay` at `5/(2πκ)` µs for linewidth κ in MHz. Compare herald → nominal Xπ at that wait and at a longer one when calibrating it.
 
-`wait` starts after the R1 waveform and its configured post-delay, not after the ADC integration window. Set the readout timing and wait so the two ADC windows do not overlap. Include any extra resonator ring-down time you need in this interval.
+## Read the figures and choose a gain
 
-## Sequence and stored data
+1. **First-read contrast** is |IQπ−IQI| at R1 on and middle I, against gain (a.u.). Live reports accumulated shots per branch and gain. Analyze keeps the points and marks a manual selection with a red dashed line.
+2. **R1-on calibration** compares modeled g/e SNR, Gaussian separation Fsep and thermal excitation. Fsep is not measured assignment fidelity, and the population is not a classified shot fraction.
+3. **State disturbance** compares R1 on (circles) with off (squares), using the same R1-on calibration. Retention S and QND Q describe state memory between reads; Q includes relaxation between R1 and R2. The up/down flips and middle π miss are model estimates. Compare mean-based R1-on retention with covariance retention; a mismatch can flag model failure but does not identify leakage.
+4. **Separation versus QND** plots one point per gain, colored by gain. The red frontier and starred table rows are the points for which no other measured gain improves one metric without worsening the other. Use the table for the exact gain.
 
-At every gain, the experiment acquires eight branches:
+Estimates are not clipped; missing shots or degenerate moments leave gaps. The figures have no pointwise uncertainty bars. Some estimates, such as mean-based retention and QND, use means with available sampling covariance. Others, including covariance retention and the flip estimates, also use second moments whose sampling covariance needs higher-order IQ products that the Run does not save. Repeat runs before relying on small differences. Compare adjacent gains before choosing; if the frontier choice is at a scan edge, extend that edge. The gain correction is the table value minus the old gain.
 
-| Branch | Preparation | R1 | Middle pulse |
-| --- | --- | --- | --- |
-| 0 | I | off | I |
-| 1 | I | off | pi |
-| 2 | I | on | I |
-| 3 | I | on | pi |
-| 4 | pi | off | I |
-| 5 | pi | off | pi |
-| 6 | pi | on | I |
-| 7 | pi | on | pi |
+Leave **Selected gain (a.u.)** blank for no proposal. Reanalyze with a finite value in [−1, 1] to propose that exact value, without snapping. The proposal updates `$qubit.ext.best_ro_gain` and, if the Run cfg and other calibration coordinates are available, the resonator DPM readout module and slot.
 
-Each branch runs reset if enabled, preparation, R1, wait, middle pulse and R2 in that order. Both preparation I and middle I play the configured qubit pulse at zero gain. Pi uses its configured gain. I and pi therefore occupy the same native slot, including the waveform and configured pre-delay and post-delay. R1 off also plays a zero-gain readout pulse and still triggers the ADC. R2 always plays at the swept gain.
+Old SNR-only files cannot load as QND runs. See the [power storage history](../../../../../docs/storage-format-history/2026-11-01-readout-power-qnd.md).
 
-All eight branches have the same reset, preparation, R1, wait, middle and R2 positions. Their R1-to-R2 trigger interval is equal across I/pi and R1-on/off choices. The program emits the zero-gain pulses rather than estimating pulse durations and inserting delays.
-
-The live plot shows the magnitude of the R1 mean-IQ difference between preparation pi and I, using branches 6 and 2. It is a contrast in arbitrary ADC units, not SNR or fidelity.
-
-The Result stores `gains` in a.u. and float64 `sums` shaped `(Ngain, 8, 6, 6)`. The two feature axes are R1 and R2, each ordered as `1, I, Q, I², IQ, Q²`. The all-zero moment entry counts shots. Reps and completed rounds add to these sums without normalization. Native files store these sums, not raw shots or only the plotted contrast.
-
-## Reading the analysis
-
-Analyze produces a metric grid and an F_sep versus QND scatter plot. The grid shows:
-
-- SNR, Gaussian separation fidelity F_sep and thermal population p from R1-on calibration.
-- Retention S, QND Q, upward and downward flip probabilities, and middle-pi miss fraction f, each with a solid R1-on curve and dashed R1-off curve.
-- Covariance retention from the R1-on calibration branches as a model check. This curve and the three shared calibration curves have the legend R1 on; they do not have an R1-off estimate.
-
-The plots label each metric by name. Analysis leaves estimates outside the physical range unclipped. Missing shots or degenerate moments give NaN for the affected metrics. The R1-off curves use the R1-on calibration because a zero-gain R1 has no state separation.
-
-QND includes R1 and the waiting interval, so it also includes ordinary relaxation. Compare on and off before attributing a loss to measurement. A discrepancy between mean-based and covariance retention indicates that the two-state, isotropic-noise model may not describe the data. It does not identify or correct leakage. F_sep is a Gaussian separation estimate, not an assignment fidelity measured from labeled shots.
-
-The scatter colors and labels each point by gain. Its red Pareto frontier retains points for which no other finite point has both at least as large F_sep and QND-on, with one strictly larger. Equal points remain on the frontier. Metrics and frontier indices remain local to the plots. The analysis summary contains only the manually selected gain, or null for no writeback. It does not choose an optimum.
-
-## Choosing and saving a gain
-
-Leave `Selected gain (a.u.)` empty to inspect plots without any writeback. Enter a finite gain within `[-1, 1]` and Analyze again to propose that human-selected value. The adapter proposes `$qubit.ext.best_ro_gain`. When the captured best readout frequency and length are also available, it proposes the resonator DPM readout module and its readout slot through the existing writeback path. Missing cfg or calibration coordinates omit the module proposal. Review the proposals before applying them. The chosen value is not snapped to a sweep point.
-
-The GUI experiment key remains `twotone/ro_optimize/power`. Native QND files use tag `twotone/ro_optimize/power_qnd` and cfg schema `1.0`. Load rejects the old SNR-only power tag. Those files lack paired moments and cannot be converted to QND metrics. Keep them for historical analysis with the matching older software.
+Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).

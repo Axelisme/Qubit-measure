@@ -1,186 +1,27 @@
-**Readers:** operator, agent. Run mux twotone maps versus the shared coil and write back one participant's flux calibration.
+**Readers:** operator, agent. Use a mux qubit spectrum to locate half- and integer-flux landmarks with a shared DC source.
 
-# Mux twotone flux global
+# Mux two-tone flux map (global)
 
-## Before Run
+Track the qubit transition frequency against DC bias via the mean IQ response. Half- and integer-flux positions on that track give half a flux period in device units.
 
-Bind alias `mux` to a `group/mux` component. The group must name matching
-ordered qubits and resonators. Tone index i always refers to that full group
-position, even when participants are reordered or omitted.
+**Sequence:** write the shared DC source → wait **Settle time** (s) → for each frequency point, common reset → simultaneous drives → fixed-frequency mux readout. Run leaves the devices at their last written settings.
 
-The group's `flux_dev` names the connected coil driver.
-Choose `flux_unit` to match the driver's stored native unit. No unit conversion,
-mode change or output enabling occurs. Confirm limits, wiring, power and output
-before running on hardware.
+## Key settings
 
-Opening the tab or choosing Defaults captures identities, aliases and library values. Later edits to
-the Library or aliases do not change the captured form. Defaults discards form
-edits and captures sources again.
+Bind `mux` to a `group/mux` with matching qubits and resonators in readout order. **Tones** chooses what to edit, not what to measure. **Participants** selects original zero-based positions in acquisition order; `[2,0]` means Q3 then Q1.
 
-## Form
+**Flux source** starts at the group's connected DC source. **DC bias** is one sweep for all participants. Its initial bounds are the union of the initial group's half-to-integer intervals, each expanded 10% at each end. The intervals use each qubit's flux offset and periods with the other sources held at their captured values; missing other device values count as zero. Missing a needed offset or swept period leaves the bounds blank. Changing Participants does not recompute them.
 
-- `reset` is the optional common reset. `readout` contains the full mux readout.
-- `tones` is one full-list editor. Each `tones[i]` contains its fixed name,
-  drive pulse and `freq.start/stop` bounds in absolute MHz. The tone picker
-  selects which original position to edit, not which tones to measure.
-- `flux_dev` starts from the captured group `flux_dev`.
-- `flux` is one native-unit sweep shared by all participants, initially 101 points.
-  Open/Defaults starts with all Qs selected. It projects each Q's `{offset, period}`
-  onto the group's `flux_dev`, using other devices' detached values.
-  Missing other device values contribute zero; missing offset or selected period
-  leaves the required endpoints blank.
-  It takes the union of expanded actual half-to-integer intervals.
-  Missing selected calibration leaves both endpoints blank; invalid contributors raise an error.
-  Changing participants later does not recompute these starting values.
-- `expts` is the shared hardware frequency point count. All selected drives
-  sweep together in one hardware loop inside each flux point.
-- `participants` selects original tone indices in acquisition and result order.
-- `flux_unit` must match the connected coil's native unit.
-- `settle` is the wait in seconds after each coil write.
-- `reps`, `rounds`, `initial_delay` and `relax_delay` control acquisition counts
-  and timing after the scan fields.
+Choose **Flux unit** to match the connected device; the experiment does not convert values, change mode or enable output. Before Run confirm wiring, output state and safe bounds. Set the **Frequency** bounds in absolute MHz and choose a calibrated probe drive for each participant. The initial bounds use `qubit.freq ± 1.5 × qubit.kappa`; **Expts** is shared and drive frequencies advance together. Confirm the full **Readout**, including inactive tones' ADC identities and RFs. Without a slot, wiring and resonator frequencies seed the inline module but required pulse/ADC lengths are blank.
 
-Readout references the captured group readout slot when present. Without a
-slot, generator and ADCs come from group wiring, mixer from group
-`mixer_freq`, and gain starts at 0.1. Frequency uses each resonator's calibration;
-pulse and ADC durations remain required and blank. Drive defaults use each
-Q's probe template and calibrated frequency/linewidth.
+In `mux_twotone_flux_global`, omitted Form inputs keep their values. Null `participants`, `flux_unit`, `flux_n`, `flux`, `sweeps` or `n` clears the setting or bounds; the pre-Run readiness check rejects missing required values unless later overrides fill them. For the analysis line seeds, see the [mux flux recipe inputs](../../../recipes/mux-guide.md#mux-flux-maps).
 
-These initial values are editable candidates, not confirmed calibrations.
-Averaging starts at 1000 reps and 10 rounds. Reduce both and the sweep point
-counts for an offline smoke.
+## Read the plots and use the result
 
-## Recipe input semantics
+Live shows DC bias versus drive RF (MHz). At each bias, subtract the spectrum's median complex IQ before taking the magnitude (a.u.). The map and the latest and previous complete spectra show this same contrast. There are no per-point shot SEM bars. An interrupted bias point has no complete spectrum; **Stop** stops the whole scan and leaves earlier complete bias points. Picking needs at least five complete bias points and two distinct frequencies.
 
-Omitted Form inputs retain captured values. Explicit null clears a field or
-range bounds. The Form chooses sources at Open/Defaults; recipes do not offer
-separate library/inline input lists. Overrides use dotted paths, run in order
-and run last. Decimal indices keep their original complete-list positions.
-The recipe calls `check_ready()` before acquisition and reports all owner paths
-and reasons without rolling back edits. Analysis null goes to the picker owner.
+In Analysis choose **Tone** by its original index (initially the first acquired one). The picker shows GHz and starts in phase-aware mode. Move the half- and integer-flux lines onto supported landmarks; **Done** produces a result and **Cancel** does not. If the feature or its landmarks are not resolved in the bias window, extend or redo the scan instead of writing back.
 
-## Starting scenarios
+Writeback proposes that qubit's `flux.period.<scanned device>`, `flux.offset` and a record of the picked positions. Period magnitude is `2 × |half − integer|` and preserves the existing sign (positive if unset). Offset is `0.5 − half / swept period − Σ(other device value / other device period)`, using other values captured at Run start; absent device values count as zero. Review and repeat for each acquired tone.
 
-1. **Blank kickstart.** Confirm group wiring, resonator nominal frequencies and
-   the coil source. Missing DC calibration leaves both shared bounds
-   required and blank. Enter deliberate native-unit bounds before Run.
-   Fill each drive-frequency range if qubit frequency or linewidth is absent. Confirm readout mixer, ADC channels, trigger and pulse/ADC durations; a blank readout template does not invent timing.
-2. **Frequencies without a readout slot.** Open the tab or choose Defaults to capture updated
-   frequencies. The readout template takes generator/ADCs from group wiring.
-   Readout timing remains required. Drive bounds derive from each qubit frequency and linewidth only when both exist.
-   Review gain 0.1 and the DC bounds rather than treating seeds as calibrations.
-3. **Captured readout slot.** Open the tab or choose Defaults after assigning the group readout.
-   The form references the stored readout without replacing its timing, gains or tones.
-   Confirm frequency and DC scan bounds. Refresh preserves your edits and the
-   original seed provenance while recapturing validation sources. Defaults
-   discards edits and captures sources again.
-4. **Agent recipe.** Use `mux_twotone_flux_global` with explicit
-   missing DC bounds and drive-frequency bounds. Its inputs must describe the same full identities,
-   native units and frequency ranges as this form. After acquisition, inspect
-   each PendingAnalysis with `tab_interact`, move the native lines and send
-   `done`. Only then use `answer` for the separate writeback question.
-   The [recipe guide](../../../recipes/mux-guide.md#mux-flux-maps) lists inputs,
-   per-Q `flux_half`/`flux_integer` preselections and selected-item writeback.
-
-## Typed cfg and form paths
-
-Python cfg and saved cfg share a flat layout. There is no `spectrum` wrapper.
-Set `reset`, `readout`, full `tones` and `participants: list[int]` at top level.
-Open/Defaults fills selected tones' drive and per-tone sweep defaults and sets
-these fields to None on other tones. The nullable fields remain editable.
-Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
-and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
-Alias list elements may use `$` links. A missing, unbound or empty row selects all
-original indices in order. An unbound element in a nonempty list rejects Open/Defaults.
-An out-of-group name stays visible as an invalid Participants draft until corrected.
-Changing aliases requires Defaults or reopening; ordinary participant edits keep tone values.
-
-Editing participants preserves every tone value. Fill any newly selected tone's
-missing settings at the indicated tone path. Removing a tone keeps its values.
-All readout identities stay required, including unselected positions.
-`reset` is optional; `readout` is the complete numeric mux
-readout. In the form, module selectors expose inline fields below
-`readout.module`; this selector wrapper is not part of Python cfg.
-`tones[i]` contains the fixed name, numeric drive pulse and `freq.start/stop`
-in absolute MHz. `expts` is the shared positive hardware frequency count.
-`flux_dev` names the coil; `flux` is a SweepCfg in native DC units.
-`flux_unit` is `A`, `V` or `native`; no conversion occurs.
-`reps` and `rounds` are positive counts. `initial_delay` and `relax_delay`
-are finite nonnegative microseconds. `settle` is finite nonnegative seconds.
-Every SweepCfg supplies `start`, `stop`, positive `expts` and
-`step = (stop-start)/(expts-1)`; a single point requires equal bounds and zero
-step. Form/recipe range editors use `n` for that point count and derive step.
-
-The form follows the cfg declaration order: reset, readout, tones, flux_dev,
-flux, expts, participants, flux_unit, settle, reps, rounds, initial_delay,
-relax_delay. Source descriptions distinguish captured settings,
-derived candidates and missing required values. Generated candidates are
-marked uncalibrated; a stored value alone is not evidence of calibration.
-All full-list entries must validate even when not selected for acquisition.
-Generated seeds never imply calibration approval. Inspect source descriptions
-and required-field errors before Run.
-
-## Run and Stop
-
-Run sets the coil at each flux point and waits for settle. It then applies
-optional reset, sweeps the selected drives together and performs mux readout. Each `flux_i` figure shows absolute MHz
-against that tone's DC coordinate. Sources retain their final written settings.
-Run does not restore bias automatically.
-
-A flux point is published only after its complete inner spectrum returns.
-Cancelling an inner acquire leaves the entire current flux point NaN, including
-any data already collected there. The scan continues with the next flux point.
-To stop the whole scan, cancel the Run scope. The GUI Stop button does this;
-it interrupts ramps, settle and acquisition. Earlier completed points remain,
-and the interrupted point and later points stay NaN. Analyze needs at least
-five completed flux points and at least two distinct frequency values.
-Device and acquisition failures are errors, not empty
-successful maps.
-
-## Analyze and Writeback
-
-The Analysis parameter `tone` is an original group tone index, not the
-participant-list position. It initially selects the first acquired participant.
-Choose another acquired index and click Analyze to calibrate that Q.
-The shared picker displays GHz. Acquisition and loaded frequency coordinates
-remain MHz; the adapter converts only the picker input.
-The picker starts in phase-aware mode, as in twotone/fluxdep.
-Move the half-flux and integer-flux lines, then click Done. The existing picker
-also provides Swap Lines, Auto Align and Cancel. Period is twice the absolute
-half-to-integer separation. The summary includes the original index and Q name.
-
-Review the resulting proposals before applying Writeback. Destinations use the
-Run/Load capture, not the current form or aliases.
-The proposals separately update that Q's `flux.period.<scanned device>` and
-`flux.offset`. The device is the actual `cfg.flux_dev`, not a reserved `coil` alias.
-Period updates its magnitude and preserves its sign, initially positive.
-The default-selected offset uses `0.5 - half_fit / period_s - Σ V_o / period_o`.
-Other values come from the Run-start snapshot; the swept value is replaced by
-half_fit once. The note lists other present calibrated devices' values and
-contributions, including zero values. Missing devices contribute zero and retain
-their periods. Other periods and Qs are preserved. Simultaneous scans do not
-block the proposal; the experiment author must judge that calibration.
-The accompanying ordinary record stores the raw picked half/integer/positive period, scanned device, complete connected-device Run snapshot and original Run parameter frame.
-Review the period, offset and record items separately. Accepting period does not
-require accepting offset. A missing whole Run snapshot blocks calibration;
-missing individual device values contribute zero. Acceptance never reads live
-devices or current parameters.
-Repeat Analyze and Writeback for each acquired participant. Cancel produces no
-new calibration. Missing historical cfg prevents identity-dependent analysis;
-missing parameter capture permits picking but yields no writeback proposals.
-
-## Saved data
-
-Native data keeps original tone indices, native DC coordinates per tone,
-absolute MHz frequency coordinates per tone, and complex IQ shaped
-`(participants, flux points, frequency points)`. Frequencies use Hz on disk and
-MHz after loading. Stop gaps remain NaN after native round-trip.
-
-The cfg schema is 5.0 because drive-frequency settings now live in the single
-`tones` list and `expts` is top-level. Schema 4.0 files still load their data
-and plots, but their cfg is not restored into the new Form. No cfg migration
-is applied.
-
-Labber export writes each tone's two-dimensional DC/frequency map as a separate
-log in the same file. Inspect each output status before treating a Save as
-complete. Load the native `data.h5` for analysis and writeback.
+Use native `data.h5` for Analyze and writeback. Version-4 cfg data can still be plotted when compatible, but its cfg is not restored and picking requires it. Without the Run/Load parameter capture there are no proposals. For shared controls see [zcu_lab/v2/operator-workflow.md](../../operator-workflow.md).

@@ -1,21 +1,17 @@
-## Behavior
+**Readers:** operator, agent. Find a probe gain that reveals a qubit line without merging it with nearby features.
 
-**Readers:** operator, agent. Two-tone qubit power dependence: a 2D scan sweeping the qubit-drive gain (outer) against the drive frequency (inner), reading out the resonator at each point, to map how the qubit line shifts and broadens with drive power (AC-Stark shift, power broadening, multi-photon lines). Runs on real hardware. Read the 2D map manually.
+## Sequence and key settings
 
-**Last updated:** 2026-10-21
+Optional **Reset** and preparation → qubit **Probe Pulse** → resonator **Readout** → **Relax delay**. Run sweeps **Probe RF frequency** at each **Probe gain**. Gain is a DAC full-scale fraction, not readout power or dBm.
 
-## Parameter sources
+Use calibrated readout, bind the qubit and resonator, and set RF endpoints in MHz around a known transition. Lower the top **Probe gain** if the line already broadens at small gain. **Reps** is per RF point per round; **Rounds** is per gain.
 
-Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs from the sources captured at Open/Defaults. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Frequency sweep is qubit.freq ± 1.5 * qubit.kappa; gain runs 0.001 to 1.0.
+See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shared GUI steps.
 
-## Module slots
+## Read the map and choose a gain
 
-Readout uses the qubit.module.readout slot captured at Open/Defaults, or a fresh readout template when the slot is unset or points to a missing module. Optional qubit.module.reset stays disabled when absent. Saved modules remain selectable; sweeps replace only the swept fields at Run. Qubit probe starts from a template's gain and frequency; both are overwritten by the sweeps.
+Run maps RF frequency versus probe gain. Color is the magnitude of mean IQ after subtracting the median complex IQ in that spectrum (a.u.), not probability. Blank cells lack data. The row count includes a gain still averaging. Adjacent axes compare the latest and previous spectra. This two-dimensional map does not report shot SEM.
 
-## Typical writeback
+Analyze redraws the selected run's map and spectra, including after Load; Load alone does not open a figure. **Reps × Rounds** is omitted if the loaded settings are unavailable.
 
-Inspect the 2D map manually. Enter the observed low-power qubit frequency into 'qubit.freq' after review; calibration stays unchanged until you update it.
-
-## Recommended
-
-Default sweep: gain ~0.001→1.0 over ~101 points, frequency ~201 points spanning 1.5 linewidths around 'qubit.freq'. Start the gain sweep low to find the unsaturated line, then extend the upper bound to watch the AC-Stark shift and power broadening; widen the frequency span if higher-power features fall outside the window.
+Choose the smallest gain with a clear ridge across nearby gain rows. If the ridge is clear at 0.05 a.u. but merges by 0.15 a.u., start the follow-up at 0.05 a.u. Widen the RF window if the ridge meets an edge. Use `twotone/freq` for a finer scan around the observed center; this experiment does not fit or write back.

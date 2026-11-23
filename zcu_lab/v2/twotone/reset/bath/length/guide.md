@@ -1,23 +1,21 @@
-## Behavior
+**Readers:** operator, agent. Sweep the bath-reset duration and find where its phase-dependent IQ contrast settles.
 
-**Readers:** operator, agent. Bath-reset length sweep: holds the tested bath reset at its calibrated cavity frequency and gain and sweeps its duration (cavity and qubit tones together), with a 4-point pi/2 tomography phase cycle at each length, showing how the residual excitation decays with reset length. Runs on real hardware. Run after the cavity freq/gain are found, to pick the shortest fully-resetting length.
+## Sequence
 
-**Last updated:** 2026-10-21
+Optional **Reset** → optional **Preparation pulse** → simultaneous cavity and qubit tones → π/2 at 0°, 90°, 180° or 270° absolute after the cavity tone → **Readout**.
 
-## Parameter sources
+## Key settings
 
-Tested cavity frequency and gain read `$qubit.ext.reset_bath_freq` and `$qubit.ext.reset_bath_gain`. Seeds 201 length points from 0.05 to 15.0 µs, with relax delay starting at 5*T1. Run replaces the pi/2 phase with its tomography cycle. Open and Defaults fill editable starting values from the selected aliases and calibration. Qubit pulse templates read `$qubit.freq` and `$qubit.wiring.ch`. Readout templates read `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
+- Calibrate readout and verify the π/2 in **Tested reset**. The cavity RF and gain start from `$qubit.ext.reset_bath_freq` and `$qubit.ext.reset_bath_gain`; use settings checked in the bath frequency sweep.
+- Set **Qubit-tone duration** to span the rise and a plateau. The cavity duration follows it with the configured cavity-minus-qubit duration difference held fixed. Keep both durations positive.
+- **Relax delay** starts at 5 × T1 (150 µs if T1 is absent). If T1 is invalid, enter the wait. The sweep repeats for each **Rounds** value, and each point within a pass also acquires that many rounds.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+## Read the figures and choose a duration
 
-## Module slots
+Live shows the four phase branches versus qubit-tone duration (µs) on one principal IQ axis estimated from all four branches. This projection is not a population. Analyze shows I and Q separately so you can see both components of the phase differences. Bars are shot SEM along the displayed axis: sample SD divided by √(retained shots), not fit error or round-to-round scatter. Mean-only files show no bars. With unequal shot counts across partial passes, means weight the passes equally and no pooled SEM is shown.
 
-Tested reset starts as an editable copy of the bath_reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. The pi/2 tone uses `$qubit.module.x90`, otherwise a fresh pi2_pulse template. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+The contrast panel shows |S180−S0|² + |S270−S90|² (a.u.²), with S the complex phase-branch mean. It has no direct shot SEM and is not a population or reset fidelity. Compare the acquired points; a flat trace with no resolved response does not establish a plateau.
 
-## Typical writeback
+Choose a duration once contrast has settled after a resolved change; extend **Stop** if contrast is still changing. Enter the duration manually, then verify state preparation in the bath phase step. There is no writeback.
 
-Read the chosen reset length from the decay curve and enter it manually. Register the calibrated 'reset_bath' module in the final phase step.
-
-## Recommended
-
-A length sweep from ~0.05 µs to a few times the expected reset time captures the full decay; shorten the span once the plateau is clear. Allow a long relax delay so the qubit fully relaxes before each reset.
+Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../../operator-workflow.md).

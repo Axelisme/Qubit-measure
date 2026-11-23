@@ -230,12 +230,14 @@ class AttachedHeatmap:
         *,
         uniform: bool = True,
         clim: tuple[float, float] | None = None,
+        cmap: str = "RdBu_r",
     ) -> None:
         """Add a nearest-sample image to axes with fixed or automatic color limits.
 
         uniform=True spans the endpoints evenly; False supports monotonic,
         uneven centers in either scan direction. clim fixes (min, max);
-        None rescales to each update's finite data range.
+        None rescales to each update's finite data range. cmap is a registered
+        Matplotlib name. An unknown name raises ValueError before attachment.
         """
         self._axes = axes
         vmin, vmax = clim if clim is not None else (None, None)
@@ -244,7 +246,7 @@ class AttachedHeatmap:
             if uniform
             else NonUniformHeatmapFormat("", "", vmin=vmin, vmax=vmax)
         )
-        self._format.attach_ax(axes)
+        self._format.attach_ax(axes, cmap=cmap)
 
     def set(
         self,

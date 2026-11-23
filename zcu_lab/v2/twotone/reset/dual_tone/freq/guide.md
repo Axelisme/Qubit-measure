@@ -1,23 +1,20 @@
-## Behavior
+**Readers:** operator, agent. Find two reset carriers from an averaged-IQ contrast map.
 
-**Readers:** operator, agent. Dual-tone reset frequency map: a 2D sweep of the two reset-tone frequencies (pulse1 × pulse2 of the tested two-pulse reset), imaging the qubit response to locate the pair of sideband frequencies that jointly dump the excitation. Runs on real hardware; the hardware sweeps both frequency axes.
+## Sequence
 
-**Last updated:** 2026-10-21
+Optional **Reset** → optional **Preparation pulse** → simultaneous fixed-gain reset tones → **Readout** after the longer tone. The GUI sweeps both RF axes in hardware.
 
-## Parameter sources
+## Key settings
 
-Seeds two 201-point axes at `$qubit.ext.reset_f1` and `$qubit.ext.reset_f2`, each +/- 50 MHz. Tested gains read `$qubit.ext.reset_gain1` and `$qubit.ext.reset_gain2`. Relax delay starts at 5*T1. Open and Defaults fill editable starting values from the selected aliases and calibration. Qubit pulse templates read `$qubit.freq` and `$qubit.wiring.ch`. Readout templates read `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
+- Verify calibrated preparation (if used) and readout. **Tone 1 RF frequency** and **Tone 2 RF frequency** each start at `$qubit.ext.reset_f1` or `$qubit.ext.reset_f2` ± 50 MHz. Center each on its predicted sideband and use enough points to resolve the feature.
+- Check both gains in **Tested reset**, seeded from `$qubit.ext.reset_gain1` and `$qubit.ext.reset_gain2`. **Relax delay** starts at 5 × T1 (150 µs if absent); enter the wait if T1 is invalid.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+## Read the figures and choose carriers
 
-## Module slots
+Live and Analyze show the magnitude of mean IQ minus median background IQ, not population or reset fidelity. Live counts acquired cells; a host-stepped notebook Run also shows the latest acquired tone 2 row. No per-cell shot SEM is shown.
 
-Tested reset starts as an editable copy of the two_pulse_reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+Analyze marks the RF pair picked after smoothing on the raw map. **Peak selection filter** chooses wavelet or Gaussian; **Filter strength** scales the wavelet threshold or sets Gaussian width in sample steps. If the star hits a boundary, shift that axis. If it is interior, tighten both windows until several cells resolve the peak.
 
-## Typical writeback
+The proposal updates only `$qubit.ext.reset_f1` and `$qubit.ext.reset_f2`. Use the carriers in the gain and duration sweeps.
 
-Proposes the fitted frequencies to `$qubit.ext.reset_f1` and `$qubit.ext.reset_f2` only. The dual-tone power experiment proposes the tested reset module after analysing gains; choose reset length manually from the length-response plot.
-
-## Recommended
-
-Keep each axis a tight span (a few MHz) around the predicted sideband; the 2D scan cost grows with both axes. Analysis denoises the map before peak finding; wavelet smoothing is the default and Gaussian remains available for comparison.
+Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../../operator-workflow.md).

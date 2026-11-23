@@ -68,6 +68,7 @@ from .data_figure_reading import DataFigureReading
 from .figure_caption import FigureCaption
 from .figure_pager import FigurePager
 from .figure_pane_layout import FigurePaneLayout
+from .figure_tile import FigureTileRaster
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -169,9 +170,6 @@ class _PreviewCard(QWidget):
         self._stack.addWidget(self._named_page)
         outer.addWidget(self._stack, stretch=1)
 
-        # Presentation cache — original pixmap, never a Figure (S3).
-        self._orig_pixmap: QPixmap | None = None
-
         # Initial state: empty (supported but no figure yet)
         self.show_empty()
 
@@ -181,10 +179,12 @@ class _PreviewCard(QWidget):
         image_page.setObjectName(f"previewImagePage_{self._source_key}")
         img_layout = QVBoxLayout(image_page)
         img_layout.setContentsMargins(0, 0, 0, 0)
-        self._image_label = QLabel()
+        self._image_label = FigureTileRaster()
+        # Shorter groups can have taller tiles; keep the spare height below the image.
+        self._image_label.setAlignment(
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
+        )
         self._image_label.setObjectName(f"previewImage_{self._source_key}")
-        self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._image_label.setScaledContents(False)
         self._image_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -192,9 +192,6 @@ class _PreviewCard(QWidget):
         self._image_label.setMinimumWidth(120)
         img_layout.addWidget(self._image_label)
         self._stack.addWidget(image_page)
-        # Watch image viewport resize so aspect-fit stays within bounds (S3).
-        self._image_label.installEventFilter(self)
-
         return image_page
 
     def _build_message_page(
@@ -289,11 +286,11 @@ class _PreviewCard(QWidget):
         card.set_view_available(available=True)
 
     def show_empty(self) -> None:
-        self._orig_pixmap = None
+        self._image_label.present(None)
         self._stack.setCurrentWidget(self._empty_page)
 
     def show_unavailable(self, detail: str | None = None) -> None:
-        self._orig_pixmap = None
+        self._image_label.present(None)
         if detail:
             self._error_label.setText(
                 f"{self._display_name} — {_UNAVAILABLE_TEXT}\n{detail}"
@@ -303,58 +300,8 @@ class _PreviewCard(QWidget):
         self._stack.setCurrentWidget(self._error_page)
 
     def show_image(self, pixmap: QPixmap) -> None:
-        # Cache original pixmap (presentation cache, S3).
-        self._orig_pixmap = pixmap
-        self.rescale_image_to_viewport()
+        self._image_label.present(pixmap)
         self._stack.setCurrentWidget(self._image_page)
-
-    def rescale_image_to_viewport(self) -> None:
-        """Fit the cached pixmap to the image viewport without cropping.
-
-        Call after a gallery reflow or card resize. Empty/null images are a no-op;
-        a not-yet-laid-out label uses the card width as a provisional viewport.
-        """
-        if self._orig_pixmap is None or self._orig_pixmap.isNull():
-            return
-        # Viewport is the image label's available size.
-        vp = self._image_label.size()
-        # If label not yet laid out (0), fallback to card width or defer.
-        if vp.width() <= 0 or vp.height() <= 0:
-            # Try card size minus margins, or assume minimal viewport.
-            cw = self.width()
-            self.height()
-            # Estimate inner label size: card width minus outer margins (12) and
-            # card inner margins, label min 120.
-            est_w = max(120, cw - 12) if cw > 0 else 396
-            est_h = max(120, vp.height() if vp.height() > 0 else 120)
-            vp = QSize(est_w, est_h)
-        # KeepAspectRatio + SmoothTransformation per spec; ensure does not exceed viewport.
-        scaled = self._orig_pixmap.scaled(
-            vp,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self._image_label.setPixmap(scaled)
-
-    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
-        if a0 is None or a1 is None:
-            return super().eventFilter(a0, a1)
-        if (
-            a0 is self._image_label
-            and a1.type() == QEvent.Type.Resize
-            and self._orig_pixmap is not None
-            and self._stack.currentWidget() is self._image_page
-        ):
-            self.rescale_image_to_viewport()
-        return super().eventFilter(a0, a1)
-
-    def resizeEvent(self, a0: QResizeEvent | None) -> None:
-        super().resizeEvent(a0)
-        if (
-            self._orig_pixmap is not None
-            and self._stack.currentWidget() is self._image_page
-        ):
-            self.rescale_image_to_viewport()
 
     def named_presentation_active(self) -> bool:
         """Return whether this stage currently shows a named figure group."""
@@ -404,7 +351,7 @@ class _PreviewCard(QWidget):
 
     def original_pixmap(self) -> QPixmap | None:
         """Return cached original pixmap (presentation cache)."""
-        return self._orig_pixmap
+        return self._image_label.original_pixmap
 
     def displayed_pixmap(self) -> QPixmap | None:
         """Return currently displayed (scaled) pixmap, or None."""
@@ -739,14 +686,6 @@ class DataFigurePreviewGallery(QWidget):
             self._inner_layout.setColumnStretch(1, 1)
             self._inner_layout.setRowStretch(0, 1)
             self._inner_layout.setRowStretch(1, 1)
-
-        # Ensure each card rescales after reflow (viewport size changed).
-        for card in self._ordered_cards:
-            if (
-                card.original_pixmap() is not None
-                and card.current_state() == "available"
-            ):
-                card.rescale_image_to_viewport()
 
     def resizeEvent(self, a0: QResizeEvent | None) -> None:
         super().resizeEvent(a0)

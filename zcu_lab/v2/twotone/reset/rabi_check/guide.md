@@ -1,23 +1,20 @@
-## Behavior
+**Readers:** operator, agent. Check how much a tested reset erases a Rabi rotation and whether contrast returns after a second pulse.
 
-**Readers:** operator, agent. Reset Rabi check: sweeps the initialisation (rabi) pulse gain and acquires three branches at each gain: the Rabi pulse alone, Rabi followed by the tested reset, and Rabi followed by the tested reset and another Rabi pulse at the same swept gain. Fits the before-reset frequency and uses it for all branches, adding a second harmonic after reset. Reports half peak-to-peak amplitudes, relative contrast, phases, reset-only residual oscillation and residual RMS on one shared IQ axis. These averaged-readout diagnostics describe contrast and oscillation. Reset fidelity requires a separate state-preparation validation. Runs on real hardware.
+## Sequence
 
-**Last updated:** 2026-10-21
+Optional **Reset** → **Rabi pulse** at the swept gain → one of three branches: readout; **Tested reset** then readout; or **Tested reset** then the same Rabi pulse and readout.
 
-## Parameter sources
+## Key settings
 
-Seeds 51 gain points from 0.0 to 1.0, with relax delay starting at 5*T1. Run overwrites the Rabi pulse gain. Open and Defaults fill editable starting values from the selected aliases and calibration. Qubit pulse templates read `$qubit.freq` and `$qubit.wiring.ch`. Readout templates read `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly` + 0.015 µs for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
+- Verify the qubit pulse, tested reset and readout. **Rabi pulse gain** replaces the pulse gain in both rotations. Use at least six finite points per branch and aim for at least one full period. With fitted frequency f in cycles/gain, cover 1/f and keep gain steps below 1/(4f) to resolve the 2f term.
+- **Relax delay** starts at 5 × T1 (150 µs if absent); enter the wait if T1 is invalid. Leave the optional preparation reset disabled until calibrated.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+## Read the figures and decide whether to verify the reset
 
-## Module slots
+Live and the three fit panels project mean IQ on the before-reset principal axis (I if unavailable). Bars are shot SEM: sample SD along that axis divided by √(retained shots), not fit error or round-to-round scatter. Mean-only files show no bars.
 
-Rabi pulse uses `$qubit.module.x180` or a fresh pi_pulse template. Tested reset uses `$qubit.module.reset` or a fresh pulse-reset template; saved reset families remain selectable. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+Live connects measured means. In the three fitted Analyze panels, only the model has a solid line; measured means retain their points and SEM. All fits use the before-reset frequency f; the reset-plus-Rabi fit adds 2f. Compare residual oscillation after reset with contrast recovered by the second pulse. The after/before amplitude ratio is relative IQ contrast, not fidelity. Phase is referenced to zero gain and may be unavailable when the fundamental is unresolved; this is not a zero offset.
 
-## Typical writeback
+**Fit residuals** connects measured minus fitted IQ in gain order with the same shot SEM as the measured means. RMS gives the typical mismatch in a.u. Structured residuals suggest the model missed a feature, and the 2f term alone does not identify its cause. Confirm a promising setting with a population measurement. There is no writeback.
 
-Analysis reports results for review; calibration stays unchanged. Compare relative contrast, reset-only residual oscillation and fit residuals. Second-harmonic amplitude can reflect coherence or reset error. Ground-state preparation requires independent validation even when the reset-only trace is flat.
-
-## Recommended
-
-Use at least six finite points per branch, preferably 51 points spanning a full Rabi period with enough density to resolve 2f. Frequency is in cycles/gain, phases in degrees at gain zero; phase is unavailable when the fundamental is unresolved above residual noise. Partial sweeps spanning less than a period may give poorly constrained fits. relax_delay should be long enough for thermal equilibration (notebook: 5 × T1 for bath reset). The upstream reset is optional; keep it disabled until calibrated.
+Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).

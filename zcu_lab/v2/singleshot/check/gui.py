@@ -27,6 +27,13 @@ def _analyze(req: AnalyzeRequest[CheckRunResult, None], *, plots: Plots) -> None
     CheckExp().analyze(req.run_result, CheckAnalyzeOptions(), plots=plots)
 
 
+def _summary_lines(source: CheckRunResult) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds: {cfg.shots}×1",)
+
+
 def _run(cfg: CheckCfg, *, context: RunContext) -> RunRecord[CheckCfg, CheckResult]:
     return RunRecord(cfg=cfg, result=CheckExp().run(cfg, context=context))
 
@@ -36,5 +43,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

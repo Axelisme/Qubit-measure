@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-22，FTF projective 測試
+**Last updated:** 2026-11-23，實驗圖與寫回提案驗收
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -52,6 +52,9 @@ Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的�
 ## UI 驗證
 
 框架 UI 改動依下方元件情境驗收。`zcu_lab/` 實驗定義改動，包含 live plot 與分析圖的畫面改動，依下方離線 probe 驗收，不要求 ComponentDriver 走查。同時修改兩者時，分別完成兩種驗收。
+依 [R7](../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面)，只在固定幾何的 PNG 檢查圖面版面。
+框架 UI 圖磚的驗收核對等比縮放、留白和無裁切，包含 Data 縮圖與 `View figure` 閱讀面。
+互動畫布另核對縮放後的指標資料座標。
 
 ### 框架 UI
 
@@ -64,6 +67,7 @@ Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的�
 
 判定只讀 driver 的具名可見狀態快照，包括底部 status、元件 enabled／visible／tooltip、
 可見對話框及其文字、欄位顯示值、圖例文字、圖上軸標與可見曲線數。
+圖磚驗收也可讀可見 Figure 的邏輯尺寸與渲染圖像的像素邊界。
 曲線觀察只讀公開 Matplotlib artist 的可見狀態，仍須看 PNG 確認外觀，不拿結果資料當判定。
 不讀 Controller、state store 或私有屬性。
 背景工作依下方的 [Qt owner-loop 等待](#qt-owner-loop-等待)規則，用公開終局條件等待。
@@ -85,6 +89,15 @@ API 契約見 [experiment probe](../lib/zcu_tools/experiment/README.md#offline-e
 `save_stage`，分析改動選 `analysis_stage`。同時影響多個階段時分別驗收。
 API 的輸入、輸出、生成器與比較規則由上述 experiment probe 文件擁有。
 
+Stage probe 驗 core 與資料存檔，不經 adapter 或 GUI lifecycle。
+`analysis_stage` 直接呼叫 `Experiment.analyze`，不驗 GUI 的 [capability](../zcu_lab/v2/gui-contracts.md#capability-宣告與實作)，
+也不驗 [lifecycle hooks](../zcu_lab/v2/gui-contracts.md#共用-lifecycle-hooks) 如何建立 Analyze options 與發布摘要，且不建立 writeback draft。
+階段通過不等於完成 [R0 讀者包](../zcu_lab/v2/figure-style.md#組讀者包)，也不能用不同 Run 的圖和摘要補齊要求同次 Run 的代表驗收。
+
+若只改 adapter 的寫回初選或理由，在 scratch 依
+[作者指南〈Readout 分析與 writeback〉](../zcu_lab/v2/measure-authoring.md#readout-分析與-writeback)
+核對公開 proposal 的 `note` 和 `selected`。框架的寫回測試仍使用合成 adapter。
+
 Agent 在 review-done 前完成下列檢查，將證據留在 task scratch，不新增個別實驗的 durable tests：
 
 1. 保存 Python 腳本、靜態檢查及執行的精確命令與 exit status。
@@ -95,6 +108,8 @@ Agent 在 review-done 前完成下列檢查，將證據留在 task scratch，不
 3. 將選用階段的每張 PNG 保存到 scratch，親自開啟並逐張記錄路徑、預期畫面與實際判讀。
    核對曲線或熱圖、軸標、單位、圖例及本次變更影響的外觀。
    只有檔案存在或數值結果通過不算看圖驗收。預期有圖卻未產生時，記錄為驗收缺口。
+
+Analyze-only probe 的 Agg PNG 可驗收哪些改動，見 [R7〈在固定存檔幾何檢查版面〉](../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面)。
 
 環境建構與清理由 [probe API 契約](../lib/zcu_tools/experiment/README.md#offline-experiment-probe) 規範，腳本須覆蓋失敗路徑。
 離線驗收不代表實機校準或物理模型已獲驗證。
@@ -858,15 +873,9 @@ Program v2 的 compile regression 先找 `test_modules_integration.py` 中同一
 
 ## Cfg 解析測試的 import 注意事項
 
-`ModuleCfgFactory`／`WaveformCfgFactory` 由 `cfg_model` 擁有，按 Spec 與成品 cfg 的 union 驗證並遞迴展開引用。測試從 schema owner 的 package 入口 import，避免直接碰 leaf base class：
+驗證持久 Spec 的解析與引用展開時，從 `zcu_tools.cfg_model` 匯入 `ModuleCfgFactory` 或 `WaveformCfgFactory`。
+呼叫 `ModuleCfgFactory.from_raw(raw, context=...)` 將 Spec 解析為共用 cfg。`CfgValidationContext` 明示固定的 module resolver 與 asset capability；不需要這些依賴的 inline cfg 可省略 context。
 
-```python
-from zcu_tools.cfg_model import ModuleCfgFactory   # 使用 schema owner 的 package 入口
-# 不要從 program runtime 或 schema leaf 匯入 factory
-
-cfg = ModuleCfgFactory.from_raw({"type": "readout/direct", "ro_ch": 0, ...})
-```
-
-呼叫 `ModuleCfgFactory.from_raw(raw, context=...)` 進行解析。`CfgValidationContext` 明示固定的 module resolver 與 asset capability；dependency-free inline cfg 可省略 context。
+驗證 native program cfg 與共用 cfg／Spec 的轉換時，從 `zcu_tools.program.v2.modules` 匯入 `ModuleCfgFactory`。
 
 **測試一個非 `Literal` 的 cfg（負面測試）**：若要在測試裡定義 `class UnknownCfg(AbsReadoutCfg): type: str = "unknown"` 來驗證 factory 錯誤路徑，重點是它不在 `ModuleCfg` Union 裡，因此 `ModuleCfgFactory.from_raw()` 不會 dispatch 到它。

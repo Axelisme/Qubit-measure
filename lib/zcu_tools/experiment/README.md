@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-22，projective readout chain
+**Last updated:** 2026-11-23，離線 probe 的圖形產物與 GE 模型診斷
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -168,7 +168,9 @@ Save 比較不符時回 `roundtrip_equal=False`；I/O 或 restore 失敗仍拋�
 
 Run 與 analysis 的 `pngs` 是 `dict[str, bytes]`，階段不寫圖片或建立暫存目錄。
 Key 是 `live-`／`analysis-` 加 URL-escaped 圖名與 `.png`。
-兩者使用 Agg canvas、NonPresentingHost、figure 目前尺寸與 100 dpi。
+兩者使用 Agg canvas、figure 目前尺寸與 100 dpi。`run_stage` 在 `plots.finish()` 後才編碼 PNG，
+因此每張 Live 圖只回傳末格，不保留中途進度幀。
+[`NonPresentingHost`](../plotting/README.md#操作與呈現) 不開視窗，但仍執行[原生 artist 更新](../plotting/README.md#原生-matplotlib-更新)。
 Caller 自行保存 bytes 並逐張看圖。建立 Plots 前套用[共用樣式](../plotting/README.md#預設外觀)，
 實驗的原生 Matplotlib 參數與 style context 可覆寫外觀。
 Caller 負責環境 backend 與 devices 的清理，階段不更改 seed 或接線。
@@ -278,3 +280,13 @@ Package root 保留公開 exports，只有存取對應名稱時才載入其 owne
 GUI 的 Library、Inspect 與 module writeback 共用 `gui.form` 與 `gui.form_adapter`，直接提交持久 Spec，不經 experiment 的第二套編輯樹。ModuleWriteback 的 proposal 是 ModuleSpec；experiment 仍只接收執行用 typed cfg。跨宿主契約見 ADR-0065、ADR-0008。
 
 - [v2](v2/README.md)：program/v2 的通用 runtime、量化與 SNR 工具。[runtime](v2/runtime/README.md) 說明 Schedule、buffer、run_acquire 與 executor 的執行機制。具體實驗與前端附件由使用者套件提供，組合根注入 catalog，不由框架反向載入。
+- [GE 模型診斷](#ge-模型診斷)：`singleshot_ge_analysis` 的入口與 `fitting_ge_and_plot` 的診斷圖。
+
+### GE 模型診斷
+
+[`singleshot_ge_analysis`](utils/single_shot/ge/__init__.py) 將各種旋轉方式的擬合委派給 [`fitting_ge_and_plot`](utils/single_shot/ge/base.py)。共用 helper 回傳擬合品質；只有傳入 `Plots` 才畫圖。
+Singleshot GE 與 mux GE 的 Analyze 傳入 `Plots` 並啟用 `GEFitOptions.raw_iq_diagnostic`，為每次成功的擬合畫一格原始 IQ 與三格投影 histogram。分類與 Post 版面仍由實驗 core 處理。
+
+品質欄位的定義見 [fitting helpers 的 `FitQuality`](../analysis/fitting/README.md#fitting-helpers)。
+`GEFitOptions.length_ratio_max_relative_error` 只用於模型診斷，決定自由擬合的 joint readout length／T1 能否以 `length_ratio` 回報。
+圖上的估值與標準誤不套這個門檻。它也不是 writeback 初選門檻。初選與理由見 [Readout 分析與 writeback](../../../zcu_lab/v2/measure-authoring.md#readout-分析與-writeback)。

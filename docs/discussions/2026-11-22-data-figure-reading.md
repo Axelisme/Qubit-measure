@@ -1,7 +1,7 @@
 ---
 date: 2026-11-22
-status: active
-superseded_by: null
+status: superseded
+superseded_by: 2026-11-23-figure-fixed-geometry.md
 related:
   - ../adr/0067-gui-application.md#experiment-figure-area
   - ../adr/0069-experiment-core-and-frontends.md#圖形產物與呈現
@@ -41,3 +41,7 @@ basis:
 ## 依據
 
 使用者於 2026-11-22 提出窄 Save 頁的排版要求。既有 gallery 與同頁選圖先例的 Git 版本列在 frontmatter。Figure owner 和回呼生命週期見 [ADR-0067](../adr/0067-gui-application.md#gui-callback-lifetime)；原生 Figure 與保存的分工見 [ADR-0069](../adr/0069-experiment-core-and-frontends.md#圖形產物與呈現)。
+
+## 後記，2026-11-23
+
+[圖磚沿用存檔幾何](2026-11-23-figure-fixed-geometry.md)取代本文的捲動閱讀與當時的 R7 驗收方式。縮圖選圖、分頁和同頁 `View figure` 入口保留。

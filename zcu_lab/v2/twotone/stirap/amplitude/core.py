@@ -34,7 +34,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
-from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
 from .._population_peak import first_finite_peak
 from .._pulses import drive_pulse
@@ -72,7 +71,7 @@ class StirapAmplitudeSummary(Centroid3Summary):
 class StirapAmplitudeCfg(ConfigBase):
     """Measured carriers/MHz, independent gain ranges and fixed Stokes lead/us.
 
-    Pump drives 0–3 and Stokes drives 2–3 on different charge generators.
+    Pump drives 0–3 and Stokes drives 2–3 on different generators.
     Each gain axis sweeps independently; envelope shapes and durations stay
     fixed. Positive stokes_lead starts Stokes first. shots repetitions per gain
     pair produce g/e/f counts in one hardware acquisition round. relax_delay/us
@@ -181,9 +180,8 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         Two independent hardware gain loops form a Pump-by-Stokes grid. Positive
         lead delays Pump; negative lead delays Stokes. Shapes and durations stay
         fixed. Count cfg.shots repetitions per pair in one round. Require
-        centroid3 before acquisition and pass both charge-drive requirements to
-        the backend. Hardware wiring remains operator-owned. Cancellation
-        before a complete round leaves counts NaN.
+        centroid3 before acquisition. Cancellation before a complete round
+        leaves counts NaN.
         """
         # 1. Require calibrated g/e/f readout before planning the pump-Stokes gain map.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
@@ -206,8 +204,11 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             figsize=(12, 4),
             layout="constrained",
         )
+        title = "STIRAP amplitude · g → f · measured fractions"
+        headline = figure.suptitle(title)
         maps = []
         for ax, state in zip(tuple(figure.axes), STATE_LABELS, strict=True):
+            ax.grid(False)
             heatmap = ax.pcolormesh(
                 pump_gains,
                 stokes_gains,
@@ -219,9 +220,11 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             ax.set(
                 xlabel="Pump gain (a.u.)",
                 ylabel="Stokes gain (a.u.)",
-                title=f"Raw {state}",
+                title=f"Measured {state} label",
             )
-            figure.colorbar(heatmap, ax=ax, label="Preparation-label fraction")
+            figure.colorbar(
+                heatmap, ax=ax, label="Measured label fraction", ticks=(0, 0.5, 1)
+            )
             maps.append(heatmap)
 
         @context.plots.on_plot_thread
@@ -233,7 +236,10 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             )
             for state, heatmap in enumerate(maps):
                 heatmap.set_array(raw[:, :, state].T)
-            return tuple(maps)
+            headline.set_text(
+                f"{title}\nRetained shots: {int(np.nansum(total)):,} count"
+            )
+            return (*maps, headline)
 
         figure.show()
         counts = SignalBuffer(
@@ -273,10 +279,6 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                 context.soc,
                 reducer=reducer,
                 rounds=1,
-                charge_requirements=(
-                    ChargeDriveRequirement("Pump", cfg.pump_ch),
-                    ChargeDriveRequirement("Stokes", cfg.stokes_ch),
-                ),
             )
         return StirapAmplitudeResult(
             pump_gains=pump_gains, stokes_gains=stokes_gains, counts=counts.array
@@ -319,13 +321,22 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             figsize=(12, 8),
             layout="constrained",
         )
+        corrected = result.corrected_populations
+        peak = first_finite_peak(corrected[..., 2])
+        pump_gain = stokes_gain = None
+        if peak is not None:
+            pump_index, stokes_index = divmod(peak, corrected.shape[1])
+            pump_gain = float(source.result.pump_gains[pump_index])
+            stokes_gain = float(source.result.stokes_gains[stokes_index])
+        corrected_f_ax = figure.axes[5]
         for row, values, title in zip(
             (figure.axes[: len(STATE_LABELS)], figure.axes[len(STATE_LABELS) :]),
-            (result.raw_populations, result.corrected_populations),
-            ("Raw", "Corrected (unclipped)"),
+            (result.raw_populations, corrected),
+            ("Measured", "Corrected"),
             strict=True,
         ):
             for state, (ax, label) in enumerate(zip(row, STATE_LABELS, strict=True)):
+                ax.grid(False)
                 heatmap = ax.pcolormesh(
                     source.result.pump_gains,
                     source.result.stokes_gains,
@@ -337,22 +348,26 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                 ax.set(
                     xlabel="Pump gain (a.u.)",
                     ylabel="Stokes gain (a.u.)",
-                    title=f"{title} {label}",
+                    title=f"{title} {label} label",
                 )
-                figure.colorbar(heatmap, ax=ax, label="Preparation-label fraction")
-        figure.suptitle(
-            f"Saved readout: condition={result.condition_number:.4g}, minimum singular value={result.minimum_singular_value:.4g}\nPreparation-label estimates, not fidelity"
-        )
-        figure.show()
+                figure.colorbar(heatmap, ax=ax, label=f"{title} label fraction")
         confusion = summarize_centroid3(result)
-        corrected_f = result.corrected_populations[..., 2]
-        peak = first_finite_peak(corrected_f)
-        pump_gain = None
-        stokes_gain = None
-        if peak is not None:
-            pump_index, stokes_index = divmod(peak, corrected_f.shape[1])
-            pump_gain = float(source.result.pump_gains[pump_index])
-            stokes_gain = float(source.result.stokes_gains[stokes_index])
+        corrected_f = corrected[..., 2]
+        headline = (
+            "STIRAP amplitude · g → f · preparation-label fractions\n"
+            f"Readout condition number: {confusion.condition_number:.3g} · "
+            f"Minimum singular value: {confusion.minimum_singular_value:.3g}"
+        )
+        if pump_gain is not None and stokes_gain is not None and peak is not None:
+            corrected_f_ax.plot(
+                pump_gain, stokes_gain, "x", color="white", markeredgewidth=2
+            )
+            headline += (
+                f"\nPeak corrected f fraction = {corrected_f.flat[peak]:.3f} · "
+                f"Pump = {pump_gain:.4g} a.u. · Stokes = {stokes_gain:.4g} a.u."
+            )
+        figure.suptitle(headline)
+        figure.show()
         return StirapAmplitudeSummary(
             confusion_matrix=confusion.confusion_matrix,
             condition_number=confusion.condition_number,

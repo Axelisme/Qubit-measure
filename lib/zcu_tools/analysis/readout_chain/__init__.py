@@ -1,8 +1,16 @@
 """Readout-chain sweep, cycle, thermal and R-pi analysis from saved sums."""
 
+from ._statistics import CycleProjectionUnavailable
 from .curve_models import rabi_model, t1_model, t2_echo_model, t2_ramsey_model
-from .cycle import CYCLE_FEATURE_COUNT, CycleCurves, CycleSums, cycle_curves
-from .fit import CycleCheck, CycleFit, fit_cycle
+from .cycle import (
+    CYCLE_FEATURE_COUNT,
+    CycleCurves,
+    CycleResidualProjection,
+    CycleSums,
+    cycle_curves,
+    cycle_residual_projection,
+)
+from .fit import CycleFit, fit_cycle
 from .model import CycleModel, CycleNuisances
 from .rate_model import CycleRelaxation, RateModel, RateNuisances
 from .rpi import RPiAnalysis, RPiSums, rpi_analysis
@@ -30,7 +38,6 @@ __all__ = [
     "t1_model",
     "t2_echo_model",
     "t2_ramsey_model",
-    "CycleCheck",
     "CycleFit",
     "fit_cycle",
     "RateModel",
@@ -41,7 +48,10 @@ __all__ = [
     "CYCLE_FEATURE_COUNT",
     "CycleSums",
     "CycleCurves",
+    "CycleProjectionUnavailable",
+    "CycleResidualProjection",
     "cycle_curves",
+    "cycle_residual_projection",
     "RPiSums",
     "RPiAnalysis",
     "rpi_analysis",

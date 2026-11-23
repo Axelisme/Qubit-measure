@@ -48,6 +48,7 @@ Templates 發布後不修改其內容；frozen dataclass 不會遞迴凍結範�
 各入口的最小 Protocol 與依賴理由見 [ADR-0072](../docs/adr/0072-module-boundaries.md#lab-定義與組合根)。
 
 Measure behavior 先註冊 components，再以 `lab.templates` 建 Registry，呼叫 `lab.register_experiments` 填入 adapters。
+[definitions.py](definitions.py) 註冊 AC Stark spectroscopy 的 `twotone/ac_stark` 與 Ramsey 的 `twotone/ac_stark_ramsey`。Ramsey 操作見 [AC Stark Ramsey guide](v2/twotone/ac_stark/guide.ramsey.md#序列與設定)。
 Library 新建直接讀 `registry.templates`。`definitions.register_all` 綁同一份 catalog 給 chain_length 與 rpi_length，供兩張表在沒有擷取模組時取得長度差。
 Reload 保留既有範本與元件註冊，不重新 bootstrap components。兩張表的 factory 重新綁到該次註冊收到的 Registry 範本。
 Import 不執行註冊，重複 bootstrap 按接收 registry 的規則報錯。
@@ -100,7 +101,8 @@ Predictor 使用 entry 的 `predictors/*.json` 或手動參數，不從實驗室
 ## 實驗定義的離線驗收
 
 實驗定義改動，包含 live plot 與分析圖的畫面改動，依 [實驗定義驗收規則](../tests/README.md#實驗定義) 執行離線 probe。
-框架 UI 的 ComponentDriver 驗收仍走該頁的框架 UI 分支。
+若只改 adapter 的寫回初選或理由，依[作者指南〈Readout 分析與 writeback〉](v2/measure-authoring.md#readout-分析與-writeback)
+核對公開 proposal 的 `selected` 和 `note`。框架 UI 的 ComponentDriver 驗收仍走測試規則的框架 UI 分支。
 
 ### 準備 Python 檔
 
@@ -134,6 +136,11 @@ output_dir.mkdir(parents=True, exist_ok=True)
 for name, png in analyzed.pngs.items():
     (output_dir / name).write_bytes(png)
 ```
+
+`run_stage` 的 Live PNG 只含末格。若要[組讀者包](v2/figure-style.md#組讀者包)，另取 run 進行中的 Live 幀，不能用末格代替。
+若要核對 PNG 看不出的 artist 屬性，在 scratch 用 caller 建立的 `Plots(NonPresentingHost())` 呼叫公開入口：
+run 使用 `RunContext.plots`，analyze 直接收 `plots=`。從同一個 `Plots` 讀取具名圖的原生 artist。
+Caller 負責[結束繪圖與釋放呈現](../lib/zcu_tools/plotting/README.md#完成與保留)。不為個別實驗新增 durable test。
 
 ### 檢查與執行
 

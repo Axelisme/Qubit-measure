@@ -81,7 +81,7 @@ dc_bias:
     f1_bias:
       unit: A
       limits: [-0.02, 0.02] # -20 to +20 mA
-      initial: 0.0
+      initial: 0.00015664
       ramp_step: 0.000001 # A, equivalent to 0.001 mA
       flux_per_unit: { f1: 128.2, coupler: 2, f2: -1 }
     coupler_bias:
@@ -93,9 +93,15 @@ dc_bias:
     f2_bias:
       unit: A
       limits: [-0.02, 0.02]
-      initial: 0.0
+      initial: 0.00008324
       ramp_step: 0.000001
       flux_per_unit: { f1: -1, coupler: 2, f2: 122.0 }
+    coil:
+      unit: A
+      limits: [-0.02, 0.02]
+      initial: 0.0
+      ramp_step: 0.000001
+      flux_per_unit: { f1: 110.0, coupler: 120.0, f2: -100.0 }
 
 drive_lines:
   # Illustrative simulation assumptions, not measured line calibrations.
@@ -115,20 +121,11 @@ drive_lines:
       coupler: { real: 0.01, imag: 0.0 }
       f2: { real: 0.1, imag: 0.0 }
 
-# Optional fast-flux routes, separate from linearized drive_lines operator: flux.
-# Omitted or {} leaves pulsed flux disabled. Each loop is optional/null.
-# Flux gen_ch must differ from other flux loops, drive_lines and pulse/mux readout.
-# Illustrative calibration only; entry fast-flux wiring is not prefilled.
-# flux_lines:
-#   f1:
-#     name: f1_flux
-#     gen_ch: 1 # Unbound v6 generator on the shared v2 board.
-#     flux_phi0_per_gain: 0.02 # Signed Phi0 per program gain.
-#     delay_ns: 0.0
-#     tau_ns: 0.0 # Instantaneous base response.
-#     distortion_terms: [] # Optional {amplitude: signed weight, tau_ns: positive}.
-#   coupler: null
-#   f2: null
+# Fast-flux routes are separate from linearized drive_lines operator: flux.
+# Each loop is optional; its generator must not overlap drive or readout.
+flux_lines:
+  f1: { name: f1_flux, gen_ch: 1, flux_phi0_per_gain: 0.25 }
+  f2: { name: f2_flux, gen_ch: 4, flux_phi0_per_gain: 0.25 }
 
 readout:
   drive:
@@ -169,7 +166,7 @@ readout:
         low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
     offset_adc: [0.0, 0.0] # I, Q
     # Two-sided white PSD in ADC^2*ns. Sample covariance = PSD / dt_ns.
-    noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+    noise_psd_adc2_ns: 11400000.0
   mux:
     gen_ch: 7
     input_per_gain: 10.0 # sqrt(photons/ns)/gain
@@ -192,7 +189,7 @@ readout:
           band_edges:
             low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
         offset_adc: [0.0, 0.0]
-        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+        noise_psd_adc2_ns: 11400000.0
       - ro_ch: 3
         gain: 100.0
         phase_deg: 0.0
@@ -211,7 +208,7 @@ readout:
           band_edges:
             low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
         offset_adc: [0.0, 0.0]
-        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+        noise_psd_adc2_ns: 48000000.0
 
 numerics:
   # Increase native/local dimensions and the joint upper bound independently

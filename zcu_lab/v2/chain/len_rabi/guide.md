@@ -1,98 +1,39 @@
+**Readers:** operator, agent. Measure Rabi oscillations versus drive duration and compare the joint and first-read π estimates.
+
 # K-cycle readout-chain length Rabi
 
-**Readers:** operator, agent. Run the readout-chain length Rabi from the GUI or MCP and read its live curves, joint fit and checks.
+For opening, refreshing and saving, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-**Last updated:** 2026-11-09
+Each rep is one 16-read cycle: `wait K → (length-swept Drive pulse → readout → same readout) × 8`. There is no reset inside the cycle.
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+## Set the sweep
 
-## Behavior
+Bind the qubit and its resonator. Select a calibrated single-tone pulse Readout; mux is not supported. Check frequency, drive gain and the readout trigger and integration window before Run. Fill any required blanks.
+- Select a const or flat_top Drive pulse. The starting const probe uses uncalibrated gain 1.0, not x180; confirm the gain before Run.
+- Drive duration starts at 0.03 µs and stops at 4 × x180 length (1.0 µs without x180). Extend the window if it misses the first extremum.
+- **Cycle thermalisation wait K** starts at 5 × the captured T1, or 150 µs if T1 is missing. Use at least 5 × T1 for a near-thermal start, including the first cycle.
+- Readout `post_delay` runs from pulse end, not ADC close. Check that windows on the same ADC do not overlap and that the next drive has enough ring-down time. Start at `5/(2π·κ)` µs for linewidth κ in MHz; compare with a longer wait before interpreting changes as qubit dynamics. The fallback readout template leaves 0.015 µs of arriving drive on each side of the ADC window.
+- Reps counts cycles per point per round. Use at least 66, so a round has at least 65 within-point noise degrees of freedom even for one sweep point. Rounds counts passes through the sweep.
 
-`chain/len_rabi` sweeps the Rabi Pulse length like `twotone/rabi/len_rabi`, but every repetition is one cycle of 16 reads instead of one read.
-A cycle waits Relax delay, then plays eight blocks of the length-swept Rabi Pulse followed by two reads of the same Readout, with no reset inside the cycle.
-Relax delay is the thermalisation wait K, including before the first cycle. Set it to at least 5 T1 for the model's thermal-equilibrium start.
-After a readout pulse ends, its `post_delay` sets the wait before the second readout or the next Rabi Pulse.
-The next pulse keeps its own pre-delay but may start before the previous ADC window closes. Set the timing so windows on the same ADC do not overlap.
-The FPGA sweeps the length, so the Rabi Pulse must use a const or flat_top waveform; Run rejects other waveforms before acquisition.
-The length loop runs outside the cycle. Reps sets the cycles at every length in one round, and Rounds sets the number of rounds.
+## Read the plots
 
-The host reduces each cycle to 65 numbers: the IQ of the 16 reads, their I², IQ, Q² summed over three read groups, and IQ products between read pairs summed over six groups set by the number of Rabi pulses and reads between them.
-For a fixed sweep, the saved sums and the accumulator across rounds have fixed size, independent of the number of cycles.
-Temporary arrays within one acquisition round grow with points × Reps. Increasing Reps therefore uses more temporary memory; increasing Rounds does not enlarge those per-round arrays.
+Run shows first-read IQ on its dominant sweep axis in a.u. (I if too few points define an axis). The lower panel uses all 65 features, centered by their across-sweep median and scaled by pooled noise. It has no shot-SEM bars. The header counts cycles per point after each completed round. Stop keeps completed rounds. Stopping before any round finishes fails Run.
+The first-read `fit` figure and upper live panel use shot SEM: the projected single-cycle standard deviation divided by √(retained cycles at that point). Each cycle contributes its first read once. These bars are not fit errors or round-to-round scatter.
 
-## Parameter sources
+Analyze fits all 65 IQ and correlation statistics jointly across the sweep once. The separate first-read damped cosine seeds the joint fit via its π duration.
+With a seed, the first-read figure marks π and π/2 durations inside the scan. In the first-read figure, R² below zero means a worse fit than the mean. Normalized residual RMS is residual RMS divided by the signal range. Neither sets a selection threshold.
+If the seed is unavailable, the first-read figure names the failure, connects the points and keeps any available shot SEM. Joint Analyze uses the saved duration axis for its start and still fits once. A successful joint fit then reports `first_read_pi_len: null`; a joint fit error fails Analyze.
 
-The Rabi Pulse starts from a fresh `qub_probe` const pulse with gain 1.0, not from x180, because x180 usually has a shaped waveform that the FPGA length sweep cannot stretch.
-Its gain is an uncalibrated starting value; confirm it before Run.
-The length sweep accepts const and flat_top drive waveforms.
-Readout uses the `$resonator.module.readout` slot or a fresh `readout` template, and must be a pulse readout; a mux readout module is rejected by the Form.
-The length runs from 0.03 µs to 4 × the x180 length (1.0 µs without x180) over 101 points. The cycle has no Reset or Init Pulse.
-Relax delay starts at 5 * `$qubit.t1` µs, or 150 µs when T1 is missing.
-Reps starts at 100 and Rounds at 100. Reps must be at least 66, so that even a single length gives the first round 65 cycles beyond its mean to estimate the noise of the 65 numbers.
-One cycle lasts about Relax delay + 8 × (pulse length + 2 × readout length).
-Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
+The joint figure comes first. Its upper panel overlays measured points and the model along the live all-feature direction; its lower panel plots measured minus model against the sweep. The scale is the pooled standard error of a point mean, not population or per-point shot SEM. Look for ranges where the residuals keep the same sign.
+If the projection is unavailable, Analyze still reports the joint values and diagnostics without these curves and keeps the first-read figure.
 
-## Live plot
+`J` sums squared residuals whitened by the model covariance across all 65 features. `df` is 65 × the point count minus the joint parameter count. Read `J/df` against the approximate χ² band `1 ± 2√(2/df)` and the fraction of whitened components with `|r| > 3`. These are not the residuals in the lower panel. Neither diagnostic sets a fit acceptance threshold.
 
-After every round the `measurement` plot shows two curves from all completed rounds, both in standard errors of the point means (sigma):
+The joint response for a constant pulse is nondecaying with a sin²(πf × duration) drive weight. The π duration is `1/(2f)`, marked in the joint plot when inside the scan. Flat-top ramps contribute rotation that this zero-phase fit does not account for. `R = 1/(2π × sweep span × frequency standard error)` measures frequency precision over the sweep. Unavailable errors are marked in the figure and returned as null in the summary.
+The model assumes independent thermalized cycles, Markov transitions, and three shared IQ centers with one isotropic noise width. It does not resolve multiple jumps during readout, cavity transients or the identity of a leakage level. The quoted Wald standard errors measure local parameter uncertainty, not shot SEM or systematic bias.
 
-- `all 65 numbers`: the 65 numbers relative to their median over lengths, whitened by the noise within a length and projected onto the direction that changes most across the sweep.
-- `first read`: the mean IQ of read 0 relative to its median, projected onto its principal axis; this is the familiar single-read Rabi curve.
+## Use the result
 
-The sign of the first curve follows the second, so both oscillate together. Stop keeps the sums of completed rounds. A stop before the first round finishes keeps nothing and the Run fails with that message.
+If the estimates agree within the scan and the fit follows the points, center a dedicated [`twotone/rabi/len_rabi`](../../twotone/rabi/len_rabi/guide.md) calibration on the candidate at the same gain. Increase cycles if the shot SEM hides the oscillation. This chain experiment proposes no writeback.
 
-## Analysis
-
-Analysis needs no options. It first fits the first read's mean IQ with the `twotone/rabi/len_rabi` decaying-cosine fit and publishes that experiment's `fit` figure; its π length x_π gives the starting frequency f = 1 / (2 x_π).
-It then fits all 65 numbers at all lengths jointly with a three-state model whose readout and population nuisances are shared across lengths.
-The drive row for each starting state interpolates between two free population endpoints, D_i(x) = [1 − f_i(x)] × endpoint_i0 + f_i(x) × endpoint_i1.
-The curve weights are sin²(π f x) for g, cos²(π f x) for e and sin²(π f x) for the third state.
-The third-state row can vary with x. Equal endpoints give a flat row; distinct endpoints allow an oscillating response.
-f is in MHz, or cycles per µs. The reported π length is 1 / (2 f) in a zero-phase model with no length offset or decay envelope.
-Interpret this value as the π total length only for a const pulse.
-Run still accepts flat_top, but its total length includes ramps whose area adds a length offset.
-The zero-phase model does not account for that offset, so its reported half-period is not a calibrated flat_top π total length.
-
-The `populations` plot shows, per length, the first-read populations of a fit with a free drive at each length, with Wald error bars, and the fitted model as lines.
-State labels are arbitrary; the legend gives each state's fitted thermal population, and the largest one is normally g.
-The title gives the π length and the three lack-of-fit checks as J/df:
-
-- `within-point`: the free three-state model at each length, with p.
-- `sharing`: shared readout nuisances against fully separate lengths; it has no p.
-- `curve`: the Rabi curve against a free drive at each length, with p. A decaying Rabi oscillation raises it.
-
-The summary reports `pi_len` and `pi_len_err` in µs, `f` and `f_err` in MHz, the reliability `R` = 1 / (2π × length span × f_err), the three checks, the joint `J` and `df`, and `first_read_pi_len` from the first-read fit.
-Errors are Wald errors from the joint fit. At low state contrast and few cycles per length they can understate the uncertainty. R is a diagnostic without a threshold.
-A fit failure in either step produces an analysis failure; the live plot and the saved sums remain.
-
-This experiment proposes no writeback. Compare `pi_len` with `first_read_pi_len`, and calibrate x180 with `twotone/rabi/len_rabi`.
-
-### Model assumptions and starting fit
-
-The fit assumes independent thermalised cycles and Markov state transitions within each cycle.
-It shares the three IQ centers, one isotropic Gaussian noise variance, the thermal populations and the read-transition matrix across sweep points.
-Gaussian noise is independent between reads and cycles. The model does not fit a separate noise width or ellipse for each state.
-
-The read matrix is R = diag(r) + outer(1 − r, landing), with three retention values r and one landing population vector.
-For a transition i → j, the conditional IQ center lies on the line between the two state centers, at c_j + u × (c_i − c_j).
-The model draws u from a truncated exponential on [0, 1] with rate −log(1 − R[i,j]). A read without a transition uses c_i.
-This emission law is not a general model of multiple jumps during integration or resonator dynamics.
-Transitions during a long gap after integration need not produce the IQ tail that this model assigns to a read transition.
-Passing the lack-of-fit checks does not establish unbiased physical parameters.
-
-The first-read mean must support the starting fit. Weak or absent first-read contrast can make that fit fail or supply an uninformative seed even when later reads have correlations.
-The joint fit starts from the first-read curve parameters. It does not try multiple curve seeds or guarantee the correct basin.
-There is no manual initial value or fallback.
-
-## Saved data
-
-The saved record contains the length axis, the cycle count and the 65 sums at each length, and one 65 × 65 product sum added over all lengths.
-Lengths are us in memory and seconds in the file. The product sum feeds only the live plot. Loading the file and analyzing it again gives the same summary.
-
-## MCP recipe
-
-`chain_len_rabi` takes `max_length_us`, `points`, `reps`, `rounds`, `frequency_mhz`, `gain`, `drive_ref` and `readout_ref`; points maps to length Expts.
-Set Relax delay with an override on `relax_delay`.
-The recipe runs, analyzes and saves. It never asks for writeback.
-The report gives `pi_length_us`, `pi_length_err_us`, `rabi_frequency_mhz`, `rabi_frequency_err_mhz`, `reliability`, the checks `within_point`, `sharing` and `curve` (each J, df, p), and `first_read_pi_length_us`.
-Omitted inputs retain Form values; overrides apply last, then check_ready reports missing or invalid fields before Run.
+`chain_len_rabi` rejects `null` for `readout_ref` and `drive_ref` at the required Form selector, before Run. For `frequency_mhz`, `gain`, `max_length_us`, `points`, `reps` and `rounds`, omission keeps the Form value and `null` clears the required value. The readiness check stops before acquisition if it is still blank after overrides. Supplying frequency or gain, including `null`, switches the selected Drive pulse to Inline. Set K with an override on `relax_delay`.

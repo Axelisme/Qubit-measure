@@ -1,6 +1,6 @@
 # `zcu_tools.plotting` — 圖管理與 owner 更新
 
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-23
 
 **讀者：** framework-dev。具名原生圖、owner 更新與診斷圖的分工。
 
@@ -58,7 +58,7 @@ Show 前可先呼叫，修改只保留在 artists，不呈現、不 refresh、�
 後續 `fig.show()` 或 `finish(present=True)` 顯示最新內容。回傳混合的圖時只刷新已呈現者，
 但未呈現的外來圖仍拒絕。Decorator 不登記或佔用 axes，本體只應改回傳 artists 所屬的圖。
 
-Lab 的 `live_line(ax)`、`live_errorbar(ax)`、`live_heatmap(ax)` 與 `live_scatter(ax)` 是可選的本地 artist 工具。
+Lab 的 [`live_line(ax)`、`live_errorbar(ax)`、`live_heatmap(ax)` 與 `live_scatter(ax)`](../../../zcu_lab/v2/README.md#即時圖工具) 是可選的本地 artist 工具。
 它們的 `set(...)` 回傳 changed artists，可直接在裝飾後的本體中回傳。
 它們不切執行緒、不 refresh、不 present，也不檢查 axes 佔用。
 
@@ -76,10 +76,12 @@ Release 還原帶框架 manager 的 Agg canvas，並解除 manager 對舊 Plots 
 
 ## 格式與診斷圖的 owner
 
-三個 live 工具及其線圖、熱圖、非均勻熱圖、scatter 格式由
-[lab 支援套件](../../../zcu_lab/v2/README.md#即時圖工具) 擁有。
-Singleshot 分類圖在 lab 的 `singleshot/plot.py`，實驗作者可以直接修改。
-Amp／Len Rabi 在各自的 core 畫 joint-fit 診斷圖。
+線圖、誤差棒、均勻／非均勻熱圖與 scatter 的即時格式由 lab 支援套件擁有。
+框架與 lab 的分工見 [ADR-0072〈即時圖工具與機制〉](../../../docs/adr/0072-module-boundaries.md#即時圖工具與機制)。
+Qt 呈現的責任見 [ADR-0067〈繪圖與限制〉](../../../docs/adr/0067-gui-application.md#繪圖與限制)。
+Singleshot 的專屬分類圖留在 lab。
+找 joint-fit 診斷圖，從 [Amp Rabi core](../../../zcu_lab/v2/singleshot/amp_rabi/core.py) 或 [Len Rabi core](../../../zcu_lab/v2/singleshot/len_rabi/core.py) 進入。
+找 GE 模型 histogram，見 [experiment 的 GE 模型診斷](../experiment/README.md#ge-模型診斷)。
 獨立 liveplot plotter／backend、reference marker 與動畫錄影已退休。
 
 [fluxdep](fluxdep/README.md) 保留 Notebook 與 GUI 共用的搜尋、頻譜與選點診斷圖。

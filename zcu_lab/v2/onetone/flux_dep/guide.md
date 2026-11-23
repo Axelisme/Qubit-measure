@@ -1,63 +1,34 @@
-## Behavior
+**Readers:** operator, agent. Track a resonator notch versus DC bias to locate fluxonium half- and integer-flux symmetry points.
 
-**Readers:** operator, agent. How to measure one-tone resonator flux dependence from the GUI or MCP and locate flux sweet spots.
+# One-tone flux dependence
 
-The 2D sweep varies an external flux-bias device value and readout frequency to trace how the resonator frequency moves with flux. Use the map to locate a Fluxonium's half-flux and integer-flux sweet spots. The measurement runs on real hardware and requires a SoC connection and a configured flux-bias device.
+Set DC bias → sweep absolute readout RF → at each frequency play one readout pulse and integrate its demodulated IQ. Average the shots at each frequency before moving to the next bias.
 
-**Last updated:** 2026-10-21
+## Set the sweep
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+- Bind qubit and resonator. Use [lookback](../../lookback/guide.md) for flight time and [one-tone spectroscopy](../freq/guide.md) for a low-gain center and linewidth. Check the Readout channels and ADC window. **Trig offset** starts at flight time + `5/(2π·κ)` µs for κ in MHz, or flight time alone without κ. Pulse length covers trigger plus **RO length** (template length minus 0.03 µs), and is at least the template length. Without flight time, trigger and pulse length are required blanks.
+- **Post-delay** lets the cavity empty. Start at `5/(2π·κ)` µs; to calibrate this wait, compare herald → nominal Xπ with a longer wait.
+- **Flux-bias device** starts from the qubit binding and **Bias unit** from that source's captured native unit. Verify both. **Flux bias** starts from integer toward half with 10% padding on both sides. The saved offset and periods are evaluated at the other devices' captured values, with missing values counted as zero. Missing offset or selected period leaves the bounds blank. Use approved device-native bounds, not Φ₀.
+- **Readout RF frequency** starts at the captured resonator center ± one linewidth. Use absolute MHz and keep the notch inside the window over the whole bias span. Keep Readout gain below the drive-dependent frequency shift.
 
-## Parameter sources
+For tab setup, refreshing sources, applying and saving, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-Opening a tab or choosing Defaults takes a fixed copy of the current parameters and evaluates starting expressions once into editable input values. The frequency sweep starts with 101 points at `$resonator.freq` ± `$resonator.kappa`, in MHz. The readout uses `$resonator.freq`, `$resonator.wiring.ch`, and `$resonator.wiring.ro_ch` for its frequency and channels. The ADC window starts at 0.97 µs. Trigger timing reads the top-level `$resonator.time_of_fly`, adding `5/(2π·kappa)` µs when kappa is set. Missing or null TOF leaves trigger and pulse length required and blank. Pulse length starts at the larger of 1.0 µs and trigger plus the ADC window.
+## Read the map and pick symmetry points
 
-The flux sweep starts with 101 points between the selected device's actual integer and half, padded by 10% on each side. The lab helper projects `$qubit.flux: {offset, period}` onto the selected device with other devices' detached Form values. Missing other values contribute zero; missing offset or selected period leaves required endpoints blank. Missing or invalid required sources leave the affected fields empty and Invalid, blocking the run until valid values are supplied. For first bring-up before calibration, enter safe, user-approved frequency and flux bounds.
+Live shows `|mean(I + iQ)|` (a.u.) versus bias and absolute RF (MHz), with a cut at the latest bias. Blank columns are unmeasured, not zero. Neither panel shows population or shot SEM.
 
-The sweet-spot picker projects `$qubit.flux` from the selected Run or Load capture onto the acquired cfg's device, using other devices' Run-start snapshot values. Missing values contribute zero; invalid values raise an error. Missing selected calibration uses the picker's default lines. Choose sweet spots from the measured map.
+In the picker, track the notch. Drag the red line to half flux and blue to integer flux. Frequency is shown in GHz there and in MHz on the final map. Lower mirror loss means better local reflection symmetry; it does not identify half versus integer. The initial lines use the analyzed Run or Load capture and other devices' Run-start values, or picker defaults if the selected calibration is absent.
 
-## Readout module
+**Done** plots the accepted lines. **Bias period** is twice their separation in source units, not a fitted parameter with a standard error. If a pick falls at the scan edge, extend the bias range. If the notch is clipped, extend the RF window before picking. Without restorable cfg the final plot uses device units and omits Reps × Rounds.
 
-The readout starts as a fresh inline pulse with a `const` waveform. Configure its pulse settings directly in the tab.
+## Use the calibration
 
-## Calibration updates
+With a compatible capture and Run device snapshot, writeback offers the swept device's signed period, qubit offset, and a raw calibration record. The period keeps its old sign, initially positive. Offset is preselected and uses `0.5 − half_fit/period_s − Σ V_o/period_o`, where the sum uses only other calibrated devices at Run start. Missing values count as zero. The preview lists their contributions; review period and offset separately.
 
-Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
+Recompute the integer bias from the accepted calibration at the other devices' current values. Verify it with a narrow one-tone sweep before two-tone spectroscopy.
 
-For a file from the same opened entry, Load reads the current persisted values at the file's historical point, using its role assignments. It does not use the tab's Open/Defaults aliases or restore an unsaved historical parameter version. Files from another entry or without a point have no parameter source for analysis or writeback. Analysis that needs no such source remains available. Existing proposals stay attached to their captured destination when point or focus changes.
+## Recipe inputs
 
-After the run, drag two lines on the 2D map to mark the half-flux and integer-flux sweet spots, then click Done. This is an interactive pick based on operator or agent judgement of the measured map. With Run capture available, the preview separately proposes `flux.period.<cfg.flux_dev>` and a default-selected `flux.offset`. Period updates its magnitude and preserves its sign, initially positive.
+`onetone_spectrum_over_flux`: the schema requires non-null `flux_device`, `flux_unit`, `flux_range` and `flux_points`. Before Run, the recipe rejects identical bias endpoints or a unit that does not match the usable cached device unit, including explicit `native` where applicable.
 
-Offset uses `0.5 - half_fit / period_s - Σ V_o / period_o`. Other values come from the Run-start snapshot. The swept value is replaced by half_fit once. The note lists other present calibrated devices' values and contributions, including zero values. Missing device values contribute zero, and other periods stay unchanged. An ordinary record stores the raw picked half/integer/positive period, scanned device, complete Run snapshot and original `{offset, period}` frame. Missing the whole snapshot blocks calibration. Review period, offset and record items separately; period can be accepted without offset. Acceptance does not read live devices or current parameters.
-
-## MCP recipe
-
-`onetone_spectrum_over_flux` requires explicit, non-null `flux_device`, `flux_unit`, `flux_range`, and `flux_points`. The range contains two distinct device-native endpoints, and `flux_points` must be at least 2. The unit must exactly match the cached device snapshot, including an explicit `native` when that is the device unit. Supply coordinates in that unit and connect the device before running the recipe.
-
-Supply `center_mhz` and `span_mhz` together to set numeric endpoints at center ± span/2. Omitting both retains the Form's captured sweep. Supplying only one returns `needs_parameters` naming the other; the recipe does not infer it from calibration. Explicit null clears the endpoints. Omitting the sample count retains the Form count.
-
-## Recommended use
-
-Run after lookback and an initial onetone/freq, before any twotone flux mapping, to find the selected device's integer reference and period from the resonator map.
-
-Review `flux_dev`. Opening a tab or choosing Defaults reads `$qubit.flux_dev` once into an editable direct device name. A missing source leaves the required field empty and Invalid. Confirm the device and `flux_unit`, which starts as `A`. The selected unit labels the values as entered. Supply device-native values in that unit.
-
-The calibrated sweep uses 101 flux points across the padded interval between the selected device's actual integer and half, and 101 frequency points at `$resonator.freq` ± `$resonator.kappa` MHz. Start at a low readout gain, about 0.005, to stay below punch-out so the dip tracks cleanly. If poor SNR makes the dip hard to see, raise the gain toward 0.05 while keeping the frequency window tight.
-
-Survey wide, then narrow around a sweet spot. If the resonator's flux dispersion, or dispersive shift, looks small, narrow the frequency window early. For consecutive flux sweeps, reverse the sweep direction by swapping start and stop on the next run. This reduces the current source's return ramp across the full range.
-
-Inspect the 2D map with `gui_tab_get_figure` and `subtab_id='run'` to judge the frequency window, SNR, and shift. After accepting the calibration, recompute the actual integer for other devices' current values and move the scanned device there and rerun onetone/freq at that flux before twotone/freq.
-
-## Four starting situations
-
-1. With an empty kickstart project, Open the Form and inspect its required blanks.
-   Supply resonator frequency/linewidth or explicit center_mhz/span_mhz. Confirm the cached flux device unit and native range.
-   Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, choose Defaults to recapture those values.
-   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
-   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
-4. Through the agent, call `onetone_spectrum_over_flux` after inspecting the same Form errors.
-   flux_device, flux_unit, flux_range and flux_points are required. freq_points and flux_points map to Expts. The interactive picker uses the existing GUI parameters.
-   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+Supply `center_mhz` and `span_mhz` together or omit both. Only one supplied returns `needs_parameters` before Run; if either is null with both supplied, both endpoints clear. Null `gain`, `freq_points`, `reps` or `rounds` passes to the Run Form; any unresolved required input fails readiness after overrides. Null `readout_ref` is rejected selecting the required Readout, before Run.

@@ -1,163 +1,28 @@
-**Readers:** operator, agent. Run a single-carrier two-photon g/f scan and analyze acquired g/e/f counts with saved readout calibration.
+**Readers:** operator, agent. Sweep a single two-photon carrier and estimate its g/e/f preparation-label fractions to tune g-to-f transfer.
 
-# Single-tone Raman g/f scan
+## Sequence and key settings
 
-## Before opening the tab
+One **Raman drive** pulse → calibrated **Readout** → **Relax delay**. There is no reset or same-run reference. This is one carrier, not the two overlapping drives of STIRAP.
 
-Measure the 0–3 transition from ground with spectroscopy. Prepare level 3 with
-the calibrated Pi03 pulse, then measure the 3–2 transition.
-Compute the carrier center as (measured f03 − measured f32) / 2 in MHz.
-The form leaves this field blank. It does not read a simulator spectrum.
+- Measure f₀₃ from ground, then f₃₂ after calibrated π₀₃ preparation. Enter **Carrier center** = `(f₀₃ − f₃₂)/2` in MHz; it starts blank. Actual drive RF = carrier center + **Two-photon detuning**/2. Use the measured values, not model predictions.
+- **Scan mode** `frequency` holds **Drive gain › Start**; `gain` holds **Two-photon detuning › Start**; `frequency_gain` sweeps both. Gain is a signed DAC full-scale fraction in [−1, 1], not a rotation angle or a common pulse area across waveforms.
+- **Raman drive › Waveform** starts at arbitrary and needs an asset; select another available shape to set duration directly. For a sampled √sin envelope, use a peak-normalized asset with `√sin(πt/T)` for `0 ≤ t ≤ T`. Check generator, gain and timing. Set **Shots per point** for the desired precision and allow enough **Relax delay** for ground preparation.
+- Calibrate **Readout** with `singleshot/qutrit_population` at the same readout settings. Run needs the acquired centroid3 classifier, and Analyze needs its confusion matrix. A circle/linear classifier cannot identify f. Recalibrate after changing readout settings.
 
-Choose any supported drive waveform: arb, cosine, gauss, drag, const or flat_top.
-The default editor selects arb and needs a waveform asset.
-To use sqrt(sin(pi*t/T)) for 0 ≤ t ≤ T, select arb and prepare an asset;
-this shape is equivalent to a centered sqrt(cos) pulse.
-For example, a 0.1 µs asset uses the formula
-`sqrt(abs(sin(pi*t/0.1)))` over a single 0.1 µs segment with peak normalization.
-Choose that asset in the Raman drive waveform editor.
-This scan does not generate a second carrier or a pair of Lambda pulses.
-For two-generator Lambda pulses, use the separate STIRAP
-[delay](../stirap/delay/guide.md), [amplitude](../stirap/amplitude/guide.md) or
-[detuning](../stirap/detuning/guide.md) experiment.
-Raman and STIRAP scans remain available as different pulse sequences and tuning entry points.
-The Raman simulation checks predate the current drive-amplitude scale and have not been repeated, so successful STIRAP runs do not replace Raman validation.
+See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shared GUI steps.
 
-Calibrate the readout using singleshot/qutrit_population at the same readout
-settings. The final population analysis requires the saved readout module's
-three-center g/e/f classifier and confusion matrix.
-Apply that acquired reference calibration to the readout library before opening
-or Resetting the Raman tab. Run requires the centroid3 classifier captured
-in this run's cfg and rejects missing, circle and linear classifiers before acquisition.
-Analysis uses the saved confusion matrix. It never substitutes the current library
-or collects new references. Preparation-label fractions are not gate fidelity.
+## Read the plots
 
-## Configure the form
+Run shows measured g/e/f label fractions against actual detuning (MHz) or gain (a.u.), or three maps when both vary. The title counts acquired points and retained shots. Stop keeps completed rows; unfinished rows stay blank.
 
-Open **New Tab → twotone → raman_gf**.
-Choose the Raman drive generator, NQZ, phase and waveform.
-The scan supplies the drive frequency and gain; they are not independent fields.
-Select the readout module, then confirm its generator, ADC, frequency, gain,
-waveform, integration length and trigger offset.
+Analyze separates measured and confusion-corrected fractions using the Run's saved calibration, never the current library. For 1D, each bar is one shot SEM: √[p(1−p)/(N−1)] for measured fraction p and N > 1 retained shots. Corrected bars propagate the retained shots' label-count covariance with the saved calibration matrix treated as known. The bars are not fit errors, shot spread or scatter between rounds. The 2D maps have no pointwise bars.
 
-The form lists drive and readout first, then carrier center, scan mode, ranges,
-shots and relaxation time.
-A kickstart entry supplies wiring and nominal readout candidates, not pulse or
-readout timing calibration. A blank carrier or required timing keeps Run disabled.
-An arb waveform also needs its asset before Run becomes available.
-Entering a spectroscopy carrier alone does not complete the readout.
-An existing readout slot is used on Open or Defaults; its presence does not prove
-that its settings or classifier remain calibrated.
+A large confusion-matrix condition number or small minimum singular value means correction amplifies count noise. The correction is unclipped; fractions outside [0, 1] are possible. Preparation contamination limits these estimates; they are not pure energy-state populations or gate fidelity. Analysis rejects incomplete, nonfinite or empty counts and singular confusion matrices.
 
-The modes use the following ranges:
+## Next step
 
-| Mode | Varied quantities | Held value |
-| --- | --- | --- |
-| frequency | Two-photon detuning | Gain start |
-| gain | Drive gain | Detuning start |
-| frequency_gain | Detuning × gain | None |
+Look for consistently high corrected f and low e. If the peak is at +0.8 MHz two-photon detuning, shift the carrier by +0.4 MHz to place it at zero detuning, then check with a finer scan. No writeback is proposed.
 
-Two-photon detuning is `2*f_drive − 2*carrier_center`, in MHz.
-A positive value raises the single carrier by half that detuning.
-Drive gain is a DAC full-scale fraction (a.u.), not a calibrated rotation angle.
-QICK quantizes the carrier and gain; saved coordinates use those actual values.
-The scan does not calculate a two-photon area or normalize gains between waveforms.
+Older raw-shot files cannot load. Older 3.x count files can expose counts but cannot restore a typed cfg for Analyze; the current calibration does not fill the gap.
 
-Drive gain may be negative, zero or positive, within [-1, 1].
-Confirm shots per point and the relaxation interval for ground preparation before running.
-Each point sends one Raman pulse followed immediately by readout. There is no reset or same-run reference preparation.
-
-## Run and save
-
-Run classifies each point's repetitions into g/e/f counts with shape (points, 3).
-The shots field sets repetitions per point in one round, not a saved shot axis.
-Points are ordered by detuning first, then gain.
-The measurement plot shows counts divided by the total count at each point.
-Stop retains completed rows and leaves unfinished rows as NaN.
-Save keeps counts, actual detuning and gain together with this run's cfg.
-It does not copy a later library change into an existing result.
-
-After changing source parameters or library bindings, Defaults captures them again
-and may replace unsaved input. Refresh updates source choices but preserves
-authored input and previously resolved defaults.
-Reload experiments rebuilds the adapter and restores the existing tab.
-Restart the application after changing a fixed framework dependency.
-
-## Analyze and restore
-
-Open Analysis and click Analyze after Run. The measurement figure retains raw
-g/e/f fractions. Analysis normalizes counts and shows raw and confusion-corrected g/e/f
-estimates separately. Frequency and gain modes show two sets of three curves.
-Frequency-gain mode shows six maps with actual detuning and drive-gain axes.
-The title reports the saved training matrix's condition number and minimum
-singular value. The summary contains only the training confusion matrix and
-these two diagnostics; per-point fractions stay in the figures.
-Correction solves in preparation-label coordinates and keeps
-negative and above-one values. It does not clip or renormalize them.
-
-The e curve is a leakage-label estimate. Preparation contamination remains part
-of the calibration, so these estimates are not pure energy-state populations
-or experimental gate fidelity. A circle classifier's third class is Other, not f.
-Analysis rejects incomplete, nonfinite or empty counts and singular confusion matrices.
-
-Save All preserves g/e/f counts and this run's readout cfg in native data.h5.
-Old raw-shot files are rejected with an error naming the missing counts variable.
-Data → Load Data → File… restores a new 4.0 run for Analyze without recalibration.
-A later live library edit cannot change its classification. Reload experiments
-discards results after confirmation and restores tab inputs, not acquired data.
-A fresh process may restore inputs through the configured startup script.
-Load a native file saved with cfg schema 4.0 to recover its data and cfg for Analyze.
-
-Older 3.x files in `frequency`, `area` and `frequency_area` modes retain their
-raw counts, detuning, gain, area and metadata. The current result restores only
-counts, detuning and gain. The loader does not restore a typed cfg because the
-schema major version differs, so these files cannot be analyzed directly.
-It does not migrate the cfg, rename modes or substitute a current readout calibration.
-
-## MCP recipe
-
-Use `recipe_guide(adapter="twotone/raman_gf")` to read this guide.
-The single `raman_gf` tool runs this adapter through Run, Analyze and Save.
-`carrier_mhz` is the operator-supplied spectroscopy center, not a model value.
-`drive_ref` selects a drive library module. `waveform_asset` supplies an existing
-sampled arbitrary asset key; it converts the drive and waveform to inline while
-preserving their family. Choose an arbitrary waveform source before setting
-that key. The default Raman Form already uses the arbitrary family.
-`readout_ref` selects the acquired centroid3 readout library module.
-
-`scan_mode` accepts frequency, gain and frequency_gain.
-`detuning_start_mhz`, `detuning_stop_mhz` and `detuning_n` set the detuning axis.
-`gain_start`, `gain_stop` and `gain_n` set the signed native gain axis.
-Each `n` maps to its saved cfg `expts`. Frequency holds gain start; gain holds
-detuning start. Detuning is two-photon MHz; a positive offset raises the single
-carrier by half that value. Drive gain uses DAC full-scale fraction (a.u.).
-`shots` sets repetitions per point; `relax_delay_us` uses µs.
-
-Omitted inputs retain Form values and sources; explicit null goes unchanged to
-the owner. Python KEEP marks omission and is not a JSON value. Ordered
-`overrides` apply after named inputs and before validation. Missing or invalid
-Form inputs stop before Run and retain owner paths and reasons.
-
-The report gives the saved confusion matrix condition number and minimum
-singular value. Full raw/corrected g/e/f arrays remain in the analysis summary
-and saved artifacts. There is no writeback proposal or question. Analysis
-failure still saves g/e/f counts; inspect each Save output receipt. Analysis never
-reads live calibration or collects fresh references. Restart the MCP server
-after changing recipe declarations; GUI Reload does not reload that process.
-
-## Interpretation and limits
-
-Changing readout settings requires a new calibration; a stored classifier does
-not automatically become invalid.
-
-Strong-drive simulation requires full-drive non-RWA convergence checks.
-A successful acquisition alone does not establish solver accuracy.
-This adapter neither selects the evolution kernel nor changes solver settings.
-The integer-fluxonium environment defaults to oscillator cutoff 80 and
-20 retained levels. Its [field guide](../../../simulation_envs/integer_fluxonium/field-guide.md)
-records an earlier 12-point Raman characterization, the reference/STIRAP
-regressions and single-point acquire wall times at 80/15 and 80/20.
-Those checks do not validate the current Raman drive-amplitude scale,
-other drives or gate fidelity.
-Existing working YAML files keep their own basis until reviewed and edited;
-restart the environment after changing them.
+For `raman_gf`, null **Readout** or **Raman drive** fails during selection, before overrides. Other nulls clear the named value rather than keeping it. `waveform_asset` edits the asset of an arbitrary waveform; on another shape the edit can fail before readiness. Required blanks for the selected mode fail readiness before Run; a missing centroid3 blocks acquisition. After a successful Run, Analyze failure still leaves the counts available to save.

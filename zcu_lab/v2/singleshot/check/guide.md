@@ -1,29 +1,23 @@
-## Behavior
+# Single-shot classification check
 
-**Readers:** operator, agent. How to check single-shot readout classification from the GUI or MCP and interpret the results.
+**Readers:** operator, agent. Check an existing g/e readout calibration against the IQ cloud of a chosen preparation.
 
-Single-shot classification check: takes 'shots' single-shot readouts of the prepared state and draws the IQ scatter with the |g>/|e> discrimination circles overlaid, reporting the fraction classified ground / excited / other. Runs on real hardware. Acquisition records IQ shots directly and does not require calibration. Analysis uses only the saved readout cfg's sole ADC circle and radius. Missing cfg, missing or linear classifier, or missing radius fails at Analyze; missing radius prompts singleshot GE Post.
+## What is measured
 
-## Parameter sources
+Optional **Reset** → optional **Initial preparation pulse** → **Qubit probe pulse** → **Readout**. Live shows the raw IQ shots. Analyze overlays the selected Run or Load result's decision circles and reports the fractions within each class.
 
-Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. The fresh probe template uses `$qubit.freq` and `$qubit.wiring.ch`.
+## Key settings
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+Choose the preparation you want to test and set **Shots** high enough to see the cloud and its tails (start around 5,000). **Relax delay** starts at 5 × stored ordinary T1 (150 µs if absent; blank if invalid). Reset does not shorten it automatically.
 
-T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+Run can acquire without discrimination calibration. For Analyze, use a readout with one ADC and a circle classifier with a positive radius. A missing saved cfg, missing classifier, linear classifier or missing radius fails at Analyze. Use [GE Post-Analysis](../ge/guide.md) to obtain the radius before collecting shots for this check.
 
-These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
+## How to read the results
 
-## Module slots
+A tight cloud within the expected I/Q decision circle supports discrimination for that preparation. Other counts shots outside both accepted circles or tied between them, not identified leakage. The scatter shows individual shots, not a mean with shot SEM bars.
 
-Optional init/reset use `$qubit.module.x180`/reset. Probe starts from qub_probe. Readout uses `$resonator.module.readout` or the readout template. Run uses the Open/Defaults snapshot.
+## Next step
 
-## Typical writeback
+If the cloud misses the expected circle, check preparation first, then recalibrate readout with GE. This check does not write back calibration.
 
-This is a visual diagnostic of the existing single-shot discrimination. Calibration parameters stay unchanged.
-
-## Recommended
-
-Run after 'singleshot/ge'. Use a large 'shots' (~5000+) for a well-sampled scatter; a tight cluster inside the matching circle indicates good discrimination.
-
-**Last updated:** 2026-10-29
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).

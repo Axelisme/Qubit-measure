@@ -1,226 +1,31 @@
-# Mux singleshot GE
+**Readers:** operator, agent. Calibrate per-tone g/e single-shot readout for a mux group.
 
-**Readers:** operator, agent. Run simultaneous mux GE readout from the GUI or MCP and read its results.
+# Mux single-shot GE
 
-**Last updated:** 2026-11-01
+Measure raw IQ clouds with and without a calibrated qubit probe. The fitted centers locate g/e response; the reported prepared-label fidelity includes thermal mixing and pulse errors and is not pure-state readout fidelity.
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+**Sequence:** common reset → simultaneous tone branches (optional **Preparation pulse** in both acquisitions; π probe only in probe-on) → mux readout after the longest branch. The off and on acquisitions are separate; within each one the shot indices align across active tones.
 
-## GUI setup
+## Key settings
 
-Create a `kind: group/mux` component and bind scalar alias `mux` to it, then
-open `mux/singleshot_ge` from **New Tab**. Without this group and alias, opening the
-form reports an error.
-The captured parameter source must contain every qubit and its matching resonator
-in readout order. Readout references the module slot `$mux.module.readout` when
-present, preserving the library's tones and scalar settings. Use a mux-family
-module with the full group tone count. If the slot is empty, Readout starts
-inline from the blank mux template with group calibration tones.
-The generator comes from `$mux.wiring.gen_ch`. Tone i's ADC channel is an
-integer seed from the fixed capture's `group.wiring.ro_ch[i]`, in the group's
-resonator order. Each tone starts
-with gain 0.1. These values are editable initial inputs, not verified hardware
-settings. Complete the remaining required fields and confirm wiring, gain and
-timing before running.
+Bind the `mux` alias to a `group/mux` with matching qubits and resonators in readout order. Check the full **Readout** module, including frequencies and ADCs for inactive tones. If there is no readout slot, the inline starting values use group wiring and resonator calibrations; verify gain and timing before Run.
 
-The Tones picker selects the element to edit. Participants selects the qubits to
-run. Tone names, count and order stay fixed. Set Participants to a nonempty JSON
-list of unique original indices, for example `[2, 0]`. This runs original
-positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
-out-of-range participants block Run and remain editable for correction.
+**Tones** chooses what to edit. **Participants** takes a nonempty list of unique zero-based positions in run order, e.g. `[2, 0]`. It selects both drives and emitted readout tones. The `participants` alias seeds those positions; if absent, unbound, or empty, the form starts with all tones. Editing the selection preserves tone values. Fill required pulse and sweep fields for any newly selected tone, using distinct drive generators separate from readout.
 
-Selected tones need drives on independent generators, distinct from readout.
-Open/Defaults fills selected tones' drive defaults and sets
-these fields to None on other tones. The nullable fields remain editable.
-Open/Defaults captures the Aliases row `participants`, for example `[Q3, Q1]`,
-and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
-Alias list elements may use `$` links. A missing, unbound or empty row selects all
-original indices in order. An unbound element in a nonempty list rejects Open/Defaults.
-An out-of-group name stays visible as an invalid Participants draft until corrected.
-Changing aliases requires Defaults or reopening; ordinary participant edits keep tone values.
+Set **Shots** per preparation; there is one round and no averaging into mean-IQ points. For classifier writeback, use the library **Readout** in the group's readout slot without changing frequency, ADC or other acquisition settings. A mismatch prevents the replacement proposal.
 
-Editing participants preserves every tone value. Fill any newly selected tone's
-missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
-tone still needs valid frequency and ADC identity, even when not selected.
+**Initial state** labels probe-off as predominantly g or e, not a guaranteed pure state. **Length ratio** is integration length / T1; leave blank to fit it from the decay tail. The diagnostic shows the fitted readout length ± its standard error, or `unavailable` when that error cannot be computed. A missing ratio in the numeric summary does not invalidate the centers, fidelity or Post result. Mux **Post-Analysis** chooses the radius automatically.
 
-## FTF cost example
+In `mux_singleshot_ge`, omission retains settings. Null `participants` leaves a missing selection before Run unless an override fills it. Null `initial_state`, `backend`, `logscale` or `align_t1` is rejected by Primary Analyze after acquisition; null `length_ratio` requests estimation. See the [mux recipe inputs](../../../recipes/mux-guide.md#mux_singleshot_ge).
 
-A two-participant offline Run used 300 shots per preparation, two preparations,
-0.02 µs const probe pulses and 0.1 µs recovery. Reps and rounds stayed fixed
-at 1. The recorded Run action took 6.118 s for the pair, about 3.06 s per
-preparation. There is no frequency or delay sweep point here.
-This preparation average is not per-shot acquisition latency.
+## Read the plots and use the result
 
-The timer includes the ComponentDriver button action, terminal wait and
-screenshots. It is not acquisition-only time and excludes Analyze and Save.
-Do not compare it with timings from other slots or experiments as a speed test.
-Shot count controls raw data volume and hardware repetitions. Preparation count,
-init/probe lengths, participants, reset, recovery and readout windows affect cost.
-FTF compilation and cache reuse can dominate the first Run, so do not extrapolate
-linearly from shots or assume hardware reps/rounds scaling describes simulation.
-Start with a small shot count and inspect both clouds before collecting more.
-Both tone fits failed in this uncalibrated example with an initial-guess bounds
-error. The raw clouds remain evidence of acquisition, not accepted fidelity.
+**Live** shows raw, equal-scale I/Q with **Probe off** in blue, **Probe on** in red and the **Acquired shots** count. **Analyze Fit** shows the same shots in prep colors: blue for g, red for e. The legend names each prep's probe row, as mapped by **Initial state**. Fit overlays the fitted centers and the threshold perpendicular to the projection. Prep colors label how the shots were prepared, not their true states or classifications. Each IQ bin mixes blue and red using the sixth powers of the two shot fractions, normalized to sum to one. A 60:40 split gives about 92:8 in color; equal counts give purple. Opacity rises with the log of the total shot count, and empty bins are transparent. These are shot distributions, not means with error bars.
 
-## Measurement and analysis
+**Diagnostic** shows raw, equal-scale I/Q (a.u.) and the fitted centers at top left. The three histograms use `Projected I (a.u.)`, the I coordinate after rotation. The bottom left overlays both preparations with the fitted curves; `Fraction per bin` is normalized separately for each preparation. The text between the rows gives the prepared-label and ideal-model assignment scores. On the right, compare the fitted components and fractions for g preparation above and e preparation below. **Fitted SNR** is the projected center separation divided by the fitted common width; ± is the standard error from the same joint fit. `unavailable` marks an estimate the fit cannot report. Diagnostic IQ uses the same prep colors as Fit. R² measures explained histogram variation. Normalized residual RMS measures mismatch relative to the histogram range. Relative width and center errors compare standard errors with the magnitudes of the estimates.
 
-The Form exposes shots, not reps or rounds. The core uses reps=shots and rounds=1.
-Shots sets the number of raw acquisitions in each probe-off/on preparation.
-Each tone's optional init pulse runs in both preparations on its drive generator.
+**Post-Analysis** uses the selected source's Primary fit and classifies by nearest center inside its radius, not by the Primary threshold. The left column shows raw I/Q for g preparation above and e preparation below. In both panels, shots classified as g contribute blue, shots classified as e contribute red, and Other contributes gray. A blue bin in the e-preparation panel shows where shots were classified as g. Each bin mixes the three colors using the sixth powers of the class fractions, normalized to sum to one. Opacity follows the log of the total shot count in the bin. The panels share I and Q limits and keep equal I/Q scale. Both panels mark the fitted centers, radius boundaries and the boundary midway between the centers where the disks overlap. Read the observed g/e/Other fractions above each panel before comparing the matrices: **Initial Populations** estimates the mixture for each preparation, and **Classifier confusion** estimates measured outcomes by state after removing that mixture. The condition number measures how sensitive the correction is to input errors. Other does not identify a leakage state, and the matrix is not a joint two-qubit assignment calibration.
 
-Each preparation applies common reset, then simultaneous branches containing init
-followed by probe for the probe-on preparation, then mux readout after the longest
-branch. Probe-off/on data keeps the same shot index across all active tones.
-The two preparations are separate acquisitions.
-These rows describe probe off/on, rather than guaranteed pure ground/excited states.
-The IQ is normalized by each ADC integration length and retains individual shots.
+Primary preselection checks joint-fit quality for every included tone. If it is unchecked, read the **Writeback** note. Post must also have a finite condition number ≤ 10 to be preselected.
 
-Analyze fits each tone's probe-off/on clouds. Initial state describes the
-predominant state after reset/init and before probe. It maps analysis rows to g/e
-while preserving the stored data order.
-Options include PCA/center fitting, angle in degrees, log histogram, T1 alignment
-and the readout length / T1 ratio (a.u.).
-The length ratio (readout length / T1) is inferred from the decay tail between the two clusters.
-With Length Ratio left empty, two tight clusters without a visible tail make Analyze return `length_ratio: null` and title the IQ plot `GE IQ (length ratio: not identifiable)`.
-This reporting decision does not change centers, fidelity or Post.
-If you set Length Ratio manually, Analyze returns the supplied value.
-Incomplete pairs and numerical fitting/classification failures retain a reason;
-other tones continue. Plotting errors report the diagnostic failure.
-
-Post uses primary results from the same selected Run/Load source.
-Radius is automatic when empty, or a finite nonnegative value in normalized ADC
-units. Consider other affects only automatic-radius selection.
-Post shows a per-qubit 3x3 g/e/other diagnostic with an isolated-other row.
-An infinite condition number or unresolved clusters makes it unsuitable for
-calibration. Four-state joint assignment needs a separate calibration.
-
-Core callers use `MuxGEExp.Options(default=GEAnalyzeOptions(...), overrides={...})`
-and `MuxGEExp.PostOptions(default=GEPostAnalyzeOptions(...), overrides={...})`.
-Override keys are original active indices, not positions in Participants.
-Invalid option indices, source shapes, shot/preparation axes or cfg associations
-raise before fitting. Both operations accept `source.cfg=None`.
-The caller must retain the primary's source association: another source with the
-same indices cannot be detected. Use fresh plots for another analysis; duplicate
-`fit_i` or `post_i` names are rejected.
-Numerical failures retain the original exception as `GENumericalError.__cause__`.
-
-`MuxGEResult` contains complex128 `signals (K,2,shots)`, int64 `tone_indices (K,)`
-and int64 `shot_indices=arange(shots)`. The saved preparation axis has fixed
-values `[0,1]` for probe off/on, declared by `AXES_SPEC`.
-ADC channel numbers and duplicate labels do not reorder these axes.
-One round avoids dropping earlier raw rounds because the program retains only
-the last raw buffer. `MuxReadout.collect_raw_iq(prog, read_index=0)` selects the
-same read on all tones without offsets, rotation, classification or averaging.
-A preparation with an incomplete first round remains missing across every tone.
-Framework [run records and persistence](../../../../lib/zcu_tools/experiment/README.md),
-[runtime lifecycle](../../../../lib/zcu_tools/experiment/v2/runtime/README.md) and
-[mux conversion](../../../../lib/zcu_tools/program/v2/README.md) own the remaining
-contracts. Native persistence requires cfg and retains full tones/readout and
-raw IQ; the core does not propose GUI writeback.
-
-## Assignment and model quality
-
-Fidelity assigns the two prepared labels using their best projected-IQ histogram
-boundary, with equal preparation weights. Probe off/on need not be pure g/e
-states. The score includes thermal mixing and pulse errors. A threshold can
-exploit small within-cluster differences; it is not latent pure-state readout
-fidelity.
-
-Initial populations come from the histogram fit. Post-analysis uses nearest-center
-regions and a radius, then solves the fitted population matrix to remove
-preparation mixing. It does not use the primary histogram threshold. Low joint
-r2 makes fitted populations and the corrected post matrix unreliable, even if
-the two raw clusters look separate or the prepared-label score is high.
-Inspect each tone's raw IQ, residuals and uncertainties before applying a
-calibration. A numerical fit alone is not evidence that the model is adequate.
-
-## Writeback
-
-Primary candidates are initially selected only when joint r2 is at least 0.9,
-normalized residual RMS at most 0.1 and relative width error at most 0.5.
-Post radius/confusion also require a finite condition number at most 10.
-Required missing/nonfinite metrics or their invalid issues leave candidates
-unselected with notes. Unrelated fixed-zero parameter issues do not reject them.
-You may select a candidate manually after inspecting the model and raw IQ.
-
-A successful, finite primary row must pass the GE calibration validity check.
-Each phase proposes one complete library mux readout replacement, resolved from
-`$mux.module.readout` in the Run/Load capture. Primary replaces each successful
-tone's classifier with a circle containing only g/e centers. Post replaces it
-with the same centers plus radius and the 3x3 prepared-to-measured confusion
-matrix. Failed tones retain their library classifiers. Fidelity and sigma are
-not written to point parameters. Any successful tone's review note leaves the
-whole module unselected; review all included tones before selecting it.
-
-The proposal retains the original library Spec and its child keys. Only the
-updated `tones.<original index>.classifier` paths are excluded from comparing
-the run readout with the library. Frequency, ADC and other differences reject
-the proposal and name the differing paths. Same-batch Apply orders Primary
-before Post. Separate Applies use the last complete replacement: Post then
-Primary removes radius/matrix, and radius consumers require GE Post again.
-Review cluster separation, quality, confusion diagnostics and destination.
-
-In MCP, `mux_singleshot_ge` analyzes Primary, asks about its candidate and
-applies it if selected and accepted. It then analyzes Post and asks about
-that candidate separately. You may skip Primary and still accept Post.
-The report lists confirmed writes in `primary_writeback_applied` and
-`post_writeback_applied`.
-
-Changing readout settings does not clear or automatically invalidate stored tone classifiers.
-Re-run mux GE and Post-Analysis for the affected tones, then Apply their new calibration before using classification.
-The proposal's settings comparison protects the new writeback, not the validity of existing classifiers.
-Failed tones keep their old classifiers and still require recalibration.
-
-## Results and saved sources
-
-Run draws one `measurement_i` IQ scatter per participant.
-Blue and red shots distinguish the g (probe-off) and e (probe-on) preparations.
-These preparations may contain state mixtures; they are not classified shots.
-Analyze draws each participant's raw IQ clouds in `fit_i`.
-Analyze uses the selected Run/Load source. Use the Analysis figure picker for
-`fit_i` and the Post figure picker for `post_i`.
-Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.
-Summary rows retain that order and show values, quality or a failure reason.
-A missing source configuration leaves the name unavailable.
-
-Use Data to save measurement data and analysis artifacts.
-Load Data selects a native file or saved run and preserves current Form inputs.
-The selected source fixes the historical pulse, binding and writeback destination.
-Cancellation retains acquired data and leaves missing data as NaN.
-Acquisition errors propagate, and that run publishes no new record.
-A stop request does not determine whether returned data is usable for analysis.
-Only successful, fully finite rows qualify for calibration candidates.
-Missing captured bindings suppress candidates; inconsistent bindings report an error.
-Read each Writeback destination, value, quality and uncertainty.
-Deselect unwanted items, then use **Apply Selected** to write the selected items.
-Analyze and preview only calculate results. Each candidate needs its own selection.
-
-## Drafts and MCP inputs
-
-Saved drafts retain invalid field text and Participants for correction.
-Restoration reports dropped fields and keeps the original parameter source.
-Unreadable saved inputs produce a diagnostic and fresh defaults.
-Defaults captures current parameters and rebuilds initial values.
-
-Recipe writes and override paths use dotted strings, for example
-`"tones.0.drive.gain"`. The decimal index addresses the complete tone list.
-Omission retains a Form input; null clears it. Analysis inputs also use
-omission to retain settings and pass explicit null to their owner.
-The recipe applies overrides last, then calls `check_ready()` before Run.
-See the [mux recipe guide](../../../recipes/mux-guide.md#mux_singleshot_ge) for dotted-path overrides,
-parameter origins and explicit writeback decisions.
-
-The MCP recipe is `mux_singleshot_ge`.
-
-## Simulation limits
-
-For an offline physical smoke, use `ftf(configuration, workers=1)` with version 2
-typed YAML. Its optional `readout.mux` section binds a separate generator and
-1..8 receivers, alongside named drive lines. The removed `readout.drive.kind`
-field raises a field-path error at YAML loading.
-Enable `numerics.debug_capture` to inspect the Engine inputs and actual routes
-of a simulation acquire. See [Debug capture](../../../../lib/zcu_tools/simulators/ftf/environment/README.md#debug-capture)
-and [Readout and sampling](../../../../lib/zcu_tools/simulators/ftf/environment/README.md#readout-and-sampling).
-Small truncations and short smoke runs demonstrate execution only.
-Establish convergence and calibrate pulses before using fitted values.
-All receiver IQ at a shot index must come from the same joint-state draw.
+Writeback proposes complete replacements of the captured library readout: Primary adds fitted g/e centers to each successful tone's classifier; Post adds centers, radius and confusion matrix. Failed tones keep their previous classifiers. If applying separately, applying Primary after Post removes radius and matrix. Changing readout settings does not invalidate stored classifiers automatically; run GE and Post again before trusting them. For shared controls see [zcu_lab/v2/operator-workflow.md](../../operator-workflow.md).

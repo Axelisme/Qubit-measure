@@ -10,6 +10,8 @@ from zcu_tools.analysis.fitting import (
     assess_fringe_sampling,
     compute_fit_quality,
     decay_time_bounds,
+    decaycos,
+    expfunc,
     fit_decay,
     fit_decay_fringe,
 )
@@ -75,6 +77,23 @@ def prepare_coherence_trace(
     return MuxCoherenceTrace(index, times[skip:][finite], signal[finite])
 
 
+def project_coherence_for_plot(signal: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Project a tone's mean IQ onto its principal axis for display.
+
+    Keep one value per delay and mark nonfinite IQ as NaN. Use the I axis
+    when fewer than two finite points remain or the axis cannot be solved.
+    Unlike the fit input, this display trace has no minimum fit point count.
+    """
+    # ADR-0069: show the same mean-IQ direction as the fit on partial traces.
+    finite_signal: NDArray[np.complex128] = np.where(
+        np.isfinite(signal), signal, np.complex128(np.nan)
+    )
+    try:
+        return rotate2real(finite_signal).real
+    except np.linalg.LinAlgError:
+        return finite_signal.real
+
+
 def project_coherence_trace(
     trace: MuxCoherenceTrace, *, minimum_points: int
 ) -> NDArray[np.float64]:
@@ -95,6 +114,7 @@ def fit_coherence_trace(
     *,
     fit_fringe: bool,
     phase: float | None,
+    curve_times: NDArray[np.float64],
     expected_frequency_mhz: float | None,
 ) -> tuple[MuxCoherenceFit, NDArray[np.float64]]:
     """Fit projected IQ to a damped cosine or exponential and return its curve.
@@ -104,8 +124,10 @@ def fit_coherence_trace(
     its phase in degrees; None fits phase freely. Fixed phase is excluded from
     uncertainty invalid diagnostics, not from reported parameters. Decay ignores
     phase and has no fixed fringe parameters. Return
-    T2/error in us, fringe rate/error in MHz and fit quality, plus the predicted
-    real IQ at each trace time. expected_frequency_mhz is a finite known alias-risk
+    T2/error in us, fringe rate/error in MHz and fit quality, plus predicted
+    real IQ in the same shape and order as the finite 1D curve_times (requested µs).
+    Fit quality uses acquired observations, not the display grid.
+    expected_frequency_mhz is a finite known alias-risk
     lower bound in MHz, or None when unknown; decay ignores it. Fringe sampling
     quality uses the fitted trace's masked delays, not the full raw delay grid.
     Numeric fit errors propagate; nonfinite estimates
@@ -119,9 +141,11 @@ def fit_coherence_trace(
             fixedparams=None if phase is None else [None, None, None, phase, None],
         )
         detune, detune_error = fit.freq, fit.freq_err
+        model = decaycos
     else:
         fit = fit_decay(trace.times, real)
         detune, detune_error = 0.0, 0.0
+        model = expfunc
     t2, error = fit.decay_time, fit.decay_time_err
     fitted, params, covariance = fit.curve, fit.params, fit.cov
     if not np.all(np.isfinite((t2, error, detune, detune_error))):
@@ -154,5 +178,5 @@ def fit_coherence_trace(
             if fit_fringe
             else None,
         ),
-        fitted,
+        model(curve_times, *params),
     )

@@ -1,5 +1,7 @@
 """Candidate selection and isolated numerical spectrum fitting contracts."""
 
+from typing import Literal
+
 import numpy as np
 import pytest
 from zcu_tools.analysis.failure import AnalysisFailed
@@ -56,6 +58,63 @@ def test_signed_sinc_recovers_center_width_and_negative_sidelobes(
     assert fit.fwhm == pytest.approx(6.0335, rel=0.01)
     np.testing.assert_allclose(fit.fitted, fit.observed, atol=1e-6)
     assert fit.fitted.min() < 0
+
+
+@pytest.mark.parametrize("model_type", ["lor", "sinc"])
+@pytest.mark.parametrize("local_peak", [True, False])
+def test_evaluate_predicts_at_new_coordinates_in_caller_order(
+    model_type: Literal["lor", "sinc"], local_peak: bool
+) -> None:
+    freqs = np.linspace(4960.0, 5040.0, 81)
+    offset = freqs - 5000.0
+    if model_type == "lor":
+        observed = 0.1 + 2 / (1 + (offset / 1.25) ** 2)
+    else:
+        observed = 0.1 + 0.001 * offset + 2 * np.sinc(offset / 5.5)
+
+    fit = fit_spectrum(
+        freqs,
+        observed,
+        SpectrumFitOptions(model_type=model_type, min_prominence=0.5),
+        isolate_peaks=local_peak or model_type == "sinc",
+        local_peak=local_peak,
+    )
+    lo, hi = fit.freqs.min(), fit.freqs.max()
+    query = np.array([5000.5, hi, 4999.5, lo, hi])
+
+    actual = fit.evaluate(query)
+
+    assert actual.dtype == np.float64
+    np.testing.assert_array_equal(fit.evaluate(fit.freqs), fit.fitted)
+    x = query - 5000.0
+    if model_type == "lor":
+        expected = 0.1 + 2 * 1.25**2 / (1.25**2 + x**2)
+        # The legacy whole-window fit bounds the baseline by the sample minimum.
+        tolerance = 0.004
+    else:
+        angle = np.pi * x / 5.5
+        expected = 0.1 + 0.001 * x + 2 * np.sin(angle) / angle
+        tolerance = 1e-6
+    np.testing.assert_allclose(actual, expected, atol=tolerance, rtol=0)
+
+
+def test_evaluate_rejects_nonfinite_nonvector_and_outside_fit_window() -> None:
+    freqs = np.linspace(4960.0, 5040.0, 81)
+    observed = 0.1 + 2 / (1 + ((freqs - 5000.0) / 1.25) ** 2)
+    fit = fit_spectrum(freqs, observed, SpectrumFitOptions(), local_peak=True)
+    lo, hi = fit.freqs.min(), fit.freqs.max()
+    assert freqs.min() < lo < hi < freqs.max()
+
+    for query in (
+        np.array([np.nextafter(lo, -np.inf)]),
+        np.array([np.nextafter(hi, np.inf)]),
+        np.array([lo, np.nan]),
+        np.array([np.inf]),
+        np.array(5000.0),
+        np.array([[5000.0]]),
+    ):
+        with pytest.raises(ValueError, match="MHz"):
+            fit.evaluate(query)
 
 
 def test_supplied_empty_candidates_allow_legacy_whole_window_fit() -> None:

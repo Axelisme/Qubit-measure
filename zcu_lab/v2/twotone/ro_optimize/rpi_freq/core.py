@@ -108,15 +108,28 @@ class RPiFreqCfg(ConfigBase):
     rounds: Software rounds, at least 1.
     """
 
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout pulse and ADC window",
+            description="Select the resonator pulse and ADC timing for the read before every π pulse.",
+        ),
+    ]
     pi_pulse: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="Pi pulse",
-            description="Calibrated g-to-e pi pulse after every readout in the R-pi cycle.",
+            label="Qubit π pulse",
+            description="Select the calibrated g-to-e π pulse applied after each readout.",
         ),
     ]
-    freq: Annotated[SweepCfg, FieldMeta(label="Readout frequency", unit="MHz")]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Readout frequency",
+            unit="MHz",
+            description="Enter the readout RF sweep in MHz when a mixer is set, or the DDS sweep without a mixer.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
@@ -209,21 +222,29 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
 
         # 2. Track valid R-pi readout scores and flag unplottable frequency settings.
         fig, ax = context.plots.subplots(num="measurement")
+        fig.suptitle("R–π frequency sweep · Resonator · Alternating contrast")
         ax.set(xlabel=FREQ_AXIS.label, ylabel=SCORE_LABEL)
-        ax.grid(True)
         fix_sweep_xlim(ax, freqs)
         viewer = live_line(ax)
+        ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
-        def draw(analyses: list[RPiAnalysis]) -> tuple[Artist, ...]:
+        def draw(payload: tuple[list[RPiAnalysis], int]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            ax.set_title(not_plotted_title(analyses, FREQ_AXIS.setting_name))
+            analyses, reads = payload
+            status = not_plotted_title(analyses, FREQ_AXIS.setting_name)
+            progress = (
+                f"{len(analyses)}/{len(freqs)} settings acquired\n"
+                f"Minimum reads per acquired setting: {reads} count"
+            )
+            ax.set_title(f"{progress}\n{status}" if status else progress)
             return (*viewer.set(freqs, valid_values(analyses, "score")), ax.title)
 
         def update(records: NDArray[np.float64]) -> None:
             # Analyze here, on the acquisition thread, so the GUI thread only draws.
             """Refresh the measurement artists from the current acquired data."""
-            draw(analyze_records(records))
+            reads = int(records[:, 1].min())
+            draw((analyze_records(records), reads))
 
         fig.show()
         record_sums = SignalBuffer(
@@ -284,22 +305,32 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
         analyses = analyze_records(source.result.records)
         best = best_index(analyses)
 
-        # 2. Diagnose frequency-dependent score through effective Q, correlation and noise.
-        fig, _ = plots.subplots(3, 2, num="score", sharex=True, figsize=(11, 8))
-        ax_score, ax_reasons, ax_q_eff, ax_q, ax_amplitude, ax_noise = fig.axes
-
-        ax_score.plot(freqs, valid_values(analyses, "score"), "o-", color="C0")
+        # 2. Compare valid scores with the reasons other settings were rejected.
+        fig, _ = plots.subplots(2, 1, num="score", sharex=True, figsize=(8, 6))
+        ax_score, ax_reasons = fig.axes
+        fig.suptitle("R–π frequency sweep · Resonator · Alternating contrast")
+        scores = valid_values(analyses, "score")
+        ax_score.plot(freqs, scores, "o-", color="C0")
         ax_score.set_ylabel(SCORE_LABEL)
-        for ax, name, ylabel in (
-            (ax_q_eff, "q_eff", "Q_eff (includes π error)"),
-            (ax_q, "q", "q = a / σ²"),
-            (ax_amplitude, "amplitude", "Amplitude a (ADC units²)"),
-            (ax_noise, "noise_variance", "Noise variance σ² (ADC units²)"),
-        ):
-            ax.plot(freqs, valid_values(analyses, name), "o-")
-            ax.set_ylabel(ylabel)
+        if best is not None:
+            setting = float(freqs[best])
+            score = scores[best]
+            ax_score.axvline(setting, color="C3", ls="--")
+            ax_score.set_title(
+                f"Selected readout frequency = {setting:.{FREQ_AXIS.digits}g} {FREQ_AXIS.unit}\n"
+                f"Alternating-contrast score = {score:.4g}"
+            )
+        else:
+            ax_score.set_title("No valid frequency to select")
 
-        # 3. Explain rejected settings alongside the best valid readout frequency.
+        reasons = {
+            "gate_failed": "Contrast gate",
+            "q_eff_out_of_range": "Qeff outside 0–1",
+            "nonpositive_amplitude": "Amplitude ≤ 0",
+            "nonpositive_noise_variance": "Noise variance ≤ 0",
+            "zero_denominator": "Missing pair or zero divisor",
+            "nonpositive_same_read_variance": "Same-read variance ≤ 0",
+        }
         rows = sorted(invalid_reason_counts(analyses))
         for row, reason in enumerate(rows):
             rejected = [
@@ -308,24 +339,33 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
                 if reason in analysis.invalid_reasons
             ]
             ax_reasons.plot(rejected, [row] * len(rejected), "x", color="C3")
-        ax_reasons.set_yticks(range(len(rows)), rows)
+        ax_reasons.set_yticks(range(len(rows)), [reasons[reason] for reason in rows])
         ax_reasons.set_ylim(-0.5, max(len(rows), 1) - 0.5)
-        ax_reasons.set_title(f"Invalid reason per {FREQ_AXIS.setting_name}")
+        ax_reasons.set(
+            xlabel=FREQ_AXIS.label,
+            title="Why settings were rejected" if rows else "No settings rejected",
+        )
 
-        for ax in fig.axes:
-            ax.grid(True)
+        # 3. Inspect the two-state model estimates at the valid settings.
+        fig, _ = plots.subplots(2, 2, num="diagnostics", sharex=True, figsize=(8, 6))
+        fig.suptitle("R–π frequency sweep · Resonator · Correlation diagnostics")
+        for ax, name, ylabel in zip(
+            fig.axes,
+            ("q_eff", "q", "amplitude", "noise_variance"),
+            (
+                "Effective retention Qeff",
+                "Amplitude/noise q",
+                "Amplitude (a.u.²)",
+                "Noise variance (a.u.²)",
+            ),
+            strict=True,
+        ):
+            ax.plot(freqs, valid_values(analyses, name), "o-", color="C0")
+            ax.set_ylabel(ylabel)
             if best is not None:
-                ax.axvline(float(freqs[best]), color="r", ls="--")
-        if best is not None:
-            value = f"{float(freqs[best]):.{FREQ_AXIS.digits}g}"
-            ax_score.legend(
-                [ax_score.lines[-1]], [f"largest score = {value} {FREQ_AXIS.unit}"]
-            )
-        ax_amplitude.set_xlabel(FREQ_AXIS.label)
-        ax_noise.set_xlabel(FREQ_AXIS.label)
-        title = not_plotted_title(analyses, FREQ_AXIS.setting_name)
-        if title:
-            fig.suptitle(title)
+                ax.axvline(float(freqs[best]), color="C3", ls="--")
+        for ax in fig.axes[2:]:
+            ax.set_xlabel(FREQ_AXIS.label)
         fig.tight_layout()
 
         return RPiFreqAnalysis(

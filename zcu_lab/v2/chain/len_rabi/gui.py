@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field
-from zcu_tools.analysis.readout_chain import CycleCheck, CycleSums
+from pydantic import Field
+from zcu_tools.analysis.readout_chain import CycleSums
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -16,8 +16,10 @@ from zcu_lab.v2.chain.len_rabi.core import (
 )
 from zcu_lab.v2.chain.len_rabi.form import make_form
 
+from .._joint import JointResidualSummary
 
-class ChainLenRabiSummary(BaseModel):
+
+class ChainLenRabiSummary(JointResidualSummary):
     """Recipe JSON view of the analysis in native units; null is unavailable."""
 
     pi_len: float | None = Field(description="Pi length 1/(2f) in us.")
@@ -25,12 +27,14 @@ class ChainLenRabiSummary(BaseModel):
     f: float | None = Field(description="Rabi frequency in MHz.")
     f_err: float | None = Field(description="Wald error of f in MHz.")
     reliability: float | None = Field(description="Diagnostic R, no threshold.")
-    within_point: CycleCheck = Field(description="Within-point check J, df, p.")
-    sharing: CycleCheck = Field(description="Sharing check J, df; p is null.")
-    curve: CycleCheck = Field(description="Curve check J, df, p.")
     first_read_pi_len: float | None = Field(
-        description="Pi length in us of the first-read twotone fit, the starting value."
+        description="First-read π duration (µs); null when the seed fit has no estimate."
     )
+
+
+def _summary_lines(source: RunRecord[ChainLenRabiCfg, CycleSums]) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
 
 
 def _analyze(
@@ -54,5 +58,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

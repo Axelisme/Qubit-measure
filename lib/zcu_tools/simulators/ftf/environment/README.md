@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-22, Markov chain, telemetry, and acquire-local raw plans
+**Last updated:** 2026-11-23, acquisition routing, control and projective readout
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -51,17 +51,12 @@ and source-owned history. These controls are not physical YAML or program cfg.
 
 ## Round pacing
 
-`numerics.time_scale` is a finite nonnegative physical-time multiplier in both
-acquisition modes. It defaults to 1.0; 0.1 runs ten times faster and zero skips
-waiting. Each round targets `time_scale * reps * sum(timeline duration + relax_delay)`,
-with timeline us converted to seconds. Readout and pre/post delays are included.
-Snapshot capture and numeric execution consume this budget; only the positive
-remainder sleeps. Slow rounds and failures during numeric execution add no wait.
-Raw materialization is outside the pacing budget. Stop interrupts pacing
-at checkpoints at most 10 ms apart. Integrated acquisition discards that round;
-decimated acquisition keeps the completed trace and stops before the next round.
-Startup preparation, program construction and round hooks are outside this
-budget. No GUI field is added; final plot-buffer flushing is unchanged.
+Set `numerics.time_scale` in FTF's environment YAML. It is a finite nonnegative
+multiplier for both acquisition modes and defaults to 1.0. Use zero to skip
+waiting without disabling the [acquisition clock](#acquisition-clock-and-loss-drift).
+The [Program binding's round pacing contract](../../../program/v2/simulation/README.md#round-pacing)
+defines the wait budget and what integrated and decimated acquisition return
+when Stop interrupts pacing.
 
 Profiling overrides and the caller's board-loading example belong to
 [environment setup](../../../../../zcu_lab/simulation_envs/README.md#關閉補等與-telemetry).
@@ -147,9 +142,9 @@ Stop results. An escaping error is false.
 cavity-memory spans and projective node continuations across software rounds.
 `readout_wall_s` sums cavity field propagation, population conversion, conditional
 ADC preparation and integrated or decimated sampling. These scopes do not overlap
-evolution. A failing call contributes time through its exception; a stage never
-entered contributes `0.0`. Reusing a preparation adds no evolution wall, but still
-counts fresh round sampling. Preparation and pacing remain in total wall's
+evolution. A failing call contributes time through its exception. The writer
+follows the shared contract above for stages never entered. Reusing a
+preparation adds no evolution wall, but still counts fresh round sampling. Preparation and pacing remain in total wall's
 remainder. If a later getter materializes retained raw and returns successfully,
 the writer appends a [supplemental timing record](../../README.md#acquire-telemetry).
 The supplement carries the original `acquire_id` and materialization time, not
@@ -206,10 +201,8 @@ These statistics use main rows only.
 limits without restoring startup values. Source identities survive session
 registry disconnects and name changes. Reconnection retrieves the original
 class-retained driver, preserving V/A units and current values.
-`execute` consumes detached templates.
-`open_acquire` rejects nonempty `AcquireRequest.charge_requirements` with
-`ValueError` before evolution. This environment does not yet support explicit
-charge admission. Empty requirements preserve ordinary acquisition.
+`execute` consumes detached templates. FTF routes their generator events using
+its configured drive, fast-flux and readout lines.
 
 ### Acquisition clock and loss drift
 
@@ -220,12 +213,9 @@ creates one per environment. A caller-owned clock must not be shared between
 independent environments. The builder shares it between acquisition admission and
 completed-round duration accounting; no hardware clock is read or changed.
 
-`SimulationClock` returns monotonic wall seconds plus a nondecreasing offset.
-After each successful round it adds `max(0, physical_s - elapsed_s)` to the offset.
-`physical_s` is unscaled; `elapsed_s` includes snapshot, execution and pacing sleep.
-Failed or cancelled rounds add no credit. Even with `time_scale=0`, successful
-rounds account for unscaled simulated physical time. Idle time between acquisitions
-advances the wall-clock part naturally.
+FTF uses that clock for the elapsed time between drift updates. Even at
+`time_scale=0`, the [Program binding credits completed rounds](../../../program/v2/simulation/README.md#completed-round-credit)
+using their unscaled physical duration.
 
 Optional `settings.drift` freezes independent f1, coupler and f2 log-OU losses
 at `begin_acquire(seed=...)`. Root seed and loop key derive separate streams.
@@ -495,8 +485,10 @@ charge n or the derivative of the existing
 fixed-coordinate Hamiltonian at that round's DC point. Omitted operator means
 charge. Charge calibration uses GHz/gain; flux calibration uses Phi0/gain and
 multiplies the derivative in GHz/Phi0. Signed complex crosstalk uses
-Re[c*z] = Re(c)*Re(z) - Im(c)*Im(z) for either operator.
-Flux drives keep that linearized DC operator throughout the round, including
+`Re[c*z] = Re(c)*Re(z) - Im(c)*Im(z)` for either operator. FTF's `drive_sources`
+builds both quadrature operators. The shared [quantum resonator builder](../../../simulate/README.md#quantum-resonator-mode)
+drives through the real envelope component only and sets the imaginary
+quadrature operator to zero. Flux drives keep that linearized DC operator throughout the round, including
 secular energy-basis rotations. They do not activate the shared engine's
 large-amplitude flux controls, filtering or flux-tail paths. Version 2 settings
 group physical values, named DC/drive lines, readout and numerics. Version 1 is
@@ -541,8 +533,9 @@ nonzero rates. Those rates affect coherence decay only; this kernel models no
 interlevel transitions. The engine does not check the adiabatic condition.
 Neglecting population relaxation on a ramp is reasonable only when the ramp is
 much shorter than T1. A ramp near T1 underestimates relaxation on this route.
-With microwaves, continuous flux rows use `flux_dop853`.
-There is no separate sudden/adiabatic switch.
+With microwaves, continuous flux rows use [Evolution's `flux_dop853`](../../../simulate/evolution/README.md#flux-dop853).
+It integrates the continuous `H(flux(t))` with a fixed secular bath for each row
+at that row's quantized flux level. There is no separate sudden/adiabatic switch.
 
 The Hamiltonian uses the existing exact flux expansion inside the retained
 fixed-DC projection. Large excursions can leave that subspace. Users must check
@@ -634,9 +627,8 @@ by the floor at each transition. This count includes zero-weight levels when
 the floor is zero.
 
 FTF applies `numerics.projection_weight_floor` when building transition rows.
-The setting is required and accepts finite values in `[0, 1)`. See the template
-values in [default.yaml](../../../../../zcu_lab/simulation_envs/FTF/default.yaml) and
-[low-snr.yaml](../../../../../zcu_lab/simulation_envs/FTF/low-snr.yaml).
+The setting is required and accepts finite values in `[0, 1)`. The standard
+[FTF preset](../../../../../zcu_lab/simulation_envs/FTF/default.yaml) sets it to `1e-5`.
 At each point and transition, a source state with current marginal below the
 floor skips evolution and gets an identity row. FTF keeps that weight in the
 same state without redistributing or renormalizing it. Even an all-identity
@@ -721,6 +713,13 @@ model's validity. The model has no measurement-induced state transitions and doe
 not model MIST onset.
 
 ### Readout and sampling
+
+For a projective acquire, `evolve_projection_chain` builds the
+[projection transition rows](#projective-chain-construction) and
+`_readout_distribution` hands ADC a `ProjectionChain`. With no projections,
+`_readout_distribution` uses the single-event `ProjectionReadout.unprojected`.
+`evolve_projective_plans` is the historical outcome-history enumerator. It
+remains in the module, but acquisition does not call it. See [ADR-0078's Markov chain decision](../../../../../docs/adr/0078-evolution-module-boundary.md#projective-read-的-markov-chain-表示).
 
 Readout uses the DC model and populations in its energy basis. Terminal-only
 preparations call ADC's `normalize_populations` once after `batch_populations`,
@@ -816,9 +815,9 @@ envelopes. Opaque callbacks and unsupported timing retain the field solver. Flat
 decimated batches superpose vacuum-start carrier fields through the same line,
 then calibrate once per receiver. Single-carrier fast paths and evolution are unchanged.
 
-The receiver noise PSD is two-sided, in ADC sample units squared times ns.
-Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
-does not scale noise.
+The receiver takes one two-sided white noise PSD in ADC²·ns. At ADC sample
+period `dt_ns`, independent I and Q samples each have variance `PSD/dt_ns`.
+Receiver gain does not scale noise.
 
 <a id="compact-statistics"></a>
 
@@ -827,8 +826,7 @@ Integrated acquisition returns `IntegratedRound` with compact
 For FTF projective reads, ADC draws one set of transition flows per point.
 The `state_counts` partition that point's reps over shared cumulative-count
 bins that encode each logical event's marginal histogram. These bins do not
-encode the joint distribution over herald history and terminal state used by the
-retained history-based `ProjectionReadout` path.
+encode the joint distribution over herald history and terminal state.
 
 For each ADC read, `conditional_sums` gives the noiseless per-shot I/Q mean of
 that read's event state in each bin. Multiply each bin's mean by its
@@ -858,11 +856,6 @@ physical inputs and returns `RoundSignals` in QICK loop order. ADC owns raw
 sampling and rounding. Program owns detached buffers and acquisition averaging.
 There is one output array per ADC in program declaration order, which is mux
 tone order rather than sorted channel index. There is no extra tone axis.
-
-The non-projective path is unchanged and still uses
-`ProjectionReadout.unprojected`. Switching the projective caller to
-`ProjectionChain` does not remove the retained history-based FTF path or ADC's
-`ProjectionReadout` input.
 
 ### Projective migration evidence
 
@@ -895,9 +888,11 @@ Reduced workloads do not establish complete-Run speed or latency.
   jumps within an event, but does not switch states at the projection boundary.
 
 The table compares noiseless I/Q sums on the same ADC grids and phases. It uses
-ADC 0, the `ftf-demo/initial` R1 readout and the board and FTF settings in
-[`tools/data/experiment_wall_time`](../../../../../tools/data/experiment_wall_time/).
-The receiver flight time is 400 ns, and R1's photon decay rate is
+ADC 0 and the `ftf-demo/initial` R1 readout. The board, point and FTF settings
+are the historical `tools/data/experiment_wall_time/` files at the report
+candidate `a8ece4a3d7089a9dca7abce793ffc0e9ea86dbea`, not the current wall-time
+fixture. See the [original comparison](../../../../../docs/discussions/2026-11-21-ftf-readout-device-time-pairing.md)
+for scope and provenance. The receiver flight time is 400 ns, and R1's photon decay rate is
 `κ = 2π × 1.1 MHz`. Each comparison uses four fixed predecessor/owner histories
 from the same two DC states, `joint-0` and `joint-2`, corresponding to F1 g and e
 with the coupler and F2 in their ground states. These are conditional simulations
@@ -913,7 +908,7 @@ The signed differences are approximation minus reference. The table gives the
 largest Euclidean I/Q difference in each comparison. Signal, difference, g/e
 separation and noise all use ADC sample-sum units. The separation compares
 owner g and e in the reference while fixing the predecessor. Noise is the
-receiver-only RMS of the integrated I/Q vector, `sqrt(trace(N × PSD / dt_ns))`,
+receiver-only RMS of the integrated I/Q vector, `sqrt(2 × N × PSD / dt_ns)`,
 for `N` independent samples. It excludes state mixture, jumps and rounding.
 
 The `chain/t1` comparison (R5) changes only the field at the start of the

@@ -258,7 +258,13 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             origin="lower",
         )
         ax2.errorbar(
-            gains, t1s, yerr=t1errs, label="Fitting T1", elinewidth=1, capsize=1
+            gains,
+            t1s,
+            yerr=t1errs,
+            fmt=".-",
+            label="Fitting T1",
+            elinewidth=1,
+            capsize=1,
         )
         ax2.set_xlabel("Readout Gain (a.u.)")
         ax2.set_ylabel("T1 (µs)")

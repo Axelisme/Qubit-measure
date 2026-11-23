@@ -1,49 +1,24 @@
-## Measure CPMG coherence
+**Readers:** operator, agent. Measure how the coherence time changes with the number of refocusing pulses.
 
-**Readers:** operator, agent. CPMG measures coherence decay for several pi-pulse counts. Each sequence applies pi/2, a train of n refocusing pi pulses, a final pi/2 projection and readout. Calibrate pi, pi/2 and readout before running. The sequence corrects the end intervals for finite pulse widths. Intervals too short to fit the pulses cause Run to fail; increase the minimum time.
+## Sequence and key settings
 
-**Last updated:** 2026-10-21
+Optional reset → calibrated π/2 → train of N calibrated π refocusing pulses → phase-ramped π/2 → calibrated readout. Scan total free-evolution time at each count. Finite pulse durations matter when setting the time window.
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+- **Pi pulse counts** accepts **Log** or **List**. Log starts at 1, includes the maximum, rounds to integers and removes duplicates. Use two or more requested points if the maximum exceeds 1. Use List for any single count other than 1 or for an explicit sequence of positive integers, e.g. `[1, 2, 4, 8]`.
+- **Minimum time** initially equals `16 × (π/2 duration + π duration)` for the initial maximum count of 16. It stays unchanged when you change counts. It starts blank if a pulse is missing or its duration comes from an arbitrary asset. Fill it and check spacing at the largest count before Run. If pulses do not fit, increase the minimum. **Maximum time** and **Time points** complete the window shared by all counts.
+- **Detune ratio (fringes/step)** sets the final-pulse phase ramp; requested frequency is ratio ÷ delay step in µs. Use **Fit fringes** with a phase ramp; use a zero ratio and disable it for decay only. For fringe fits, take at least 10 points per period and span about three expected lifetimes to see the envelope fall. Short windows leave a weakly constrained decay; sparse sampling can hide or alias fringes.
+- **Relax delay** starts at `5 × qubit.t1` (150 µs if absent). **Early-stop SNR** can complete averaging at each count separately.
 
-## Configure the scan
+See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the shared GUI steps.
 
-Pi pulse counts accepts Log or List input. Log uses a maximum count and requested point count. It starts at 1 and retains the maximum count. It rounds geometrically spaced values to integers and removes duplicates. A maximum greater than 1 requires at least two requested points. A maximum of 1 accepts one point and returns `[1]`. Use List for any other single count. The resulting list may have fewer points than requested. List accepts a nonempty JSON array of positive integers, such as `[1, 2, 4, 8]`. Zero, negative counts and fractional counts are invalid.
+## Read the plots
 
-Minimum time and Maximum time define one shared total-time window in µs for every pulse count. When you open the tab or choose Defaults, Minimum time starts at 16 times the sum of the calibrated π/2 and π pulse durations. The factor 16 is the initial maximum number of refocusing pulses. If either calibrated pulse is missing or uses an arbitrary waveform defined by samples, the form leaves Minimum time blank. Enter it before running. Changing Pi pulse counts does not recalculate Minimum time. Maximum time starts at 100 µs, and Time points starts at 101 samples per row. Increase the minimum time when a large pulse count leaves too little spacing between pulses.
+Both maps show normalized IQ contrast (not population) versus total delay (µs) and pulse count in acquisition order. Columns are equally spaced even for uneven counts. Repeated counts carry an acquisition index, e.g. `4 (#3)`. Blank cells lack data. Live compares the latest and previous counts on their own delay grids.
 
-For Python callers, `CPMG_Cfg.delay` also accepts a list of `SweepCfg`, one delay sweep per pi-pulse count in `count` order. Every sweep must have the same number of points. This lets different pulse counts use different total-time windows. The GUI continues to provide one shared window.
+The Analyze right panel shows T₂ against numerical pulse count on log-log axes. The lifetime points connect only when there is no T₂(N) fit. Bars are lifetime fit errors, not shot SEM. Optional Ramsey T₂ and 2 × T₁ lines are references, not fit inputs. An incomplete row has no lifetime. A row must have resolved decay within its time window, fit error below half the lifetime, and contrast above four times the mean absolute smoothed residual. If no row passes or the fitter raises, Analyze fails.
 
-`Detune ratio (fringes/step)` sets the number of fringe periods per total-time sweep step. The default is 0.1. Use Fit fringes for this phase-ramped acquisition. Set Detune ratio to 0 and disable Fit fringes for a decay-only acquisition. Early-stop SNR optionally ends averaging of each row when its signal is resolved.
+## Next step
 
-## Module sources and waiting
+T₂(N) = T₂₁ × N^γ describes how refocusing changes the lifetime. The guide curve and `gamma` summary require at least three accepted rows with positive finite T₂ and fit error; zero-error points can plot but do not contribute. With fewer than three, the four fit values are null and `fit_rows` still counts usable rows. Widen the delay window for unresolved decay, or increase averaging when noise obscures it. Analyze does not write back.
 
-The form uses the captured `$qubit.module.x180`, `$qubit.module.x90` and `$resonator.module.readout` slots. Missing slots use pi_pulse, pi2_pulse and readout templates. Reset uses `$qubit.module.reset` and stays disabled when absent. Missing calibration in a template remains Invalid until supplied.
-
-Relax delay starts at 5 times the captured `$qubit.t1`. A missing or null T1 uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves the derived input empty. Open and Defaults capture these sources. After alias or calibration edits, use Defaults to refresh the form.
-
-## Run and analyze
-
-Run displays normalized IQ versus pulse count and time. Save the raw data, then Analyze to fit a decay for each count. The fit figure compares accepted T_CPMG values with pulse count on log axes. Optional Ramsey T2 and T1 references add horizontal T2R and 2*T1 lines in µs; the fit uses the measured decay independently of these references.
-
-The heatmap and T_CPMG points remain visible. Incomplete or rejected rows have no T2 point. Analysis fails only when every row fails the per-row fit checks. Extend the time window if the decay is unresolved. Calibration stays unchanged.
-
-The summary fits T2(n) = T2_1 * n^gamma by weighted linear regression of log T2 against log n. Usable rows pass the per-row checks and have finite positive n, T2 and T2 uncertainty. Weights are T2/t2err, so the log-space standard error is t2err/T2. The fit treats these as absolute uncertainties and uses unscaled covariance, without reduced-chi-square scaling. T2_1's standard error is T2_1 times the intercept standard error. The exponent error is the slope standard error.
-
-The summary reports t2_1_us, t2_1_err_us, gamma, gamma_err and fit_rows. With at least three usable rows, the log-log T2 plot overlays the power law and its title reports gamma. With fewer than three usable rows, including zero, all four fit values are null and fit_rows records the usable count. Analysis still succeeds if any per-row fit passed. Zero-error rows remain plotted but do not enter the summary fit. There is no unweighted fallback or artificial uncertainty floor. Per-count T2 values stay in the figure, not the summary.
-
-The cpmg recipe follows the same Run, Analyze and Save steps and reports the same five summary fields. An analysis failure reports null fit values, fit_rows=0 and the failure reason. Use max_n with points for Log input, or times for an explicit list. min_length_us, max_length_us and length_points set the shared time window. Reusing a tab resets it before applying overrides.
-
-## Four starting situations
-
-1. With an empty kickstart project, Open the Form and inspect its required blanks.
-   Obtain calibrated pi and pi/2 pulses. Set positive refocusing counts and the shared evolution-time window.
-   Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, choose Defaults to recapture those values.
-   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
-   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
-4. Through the agent, call `cpmg` after inspecting the same Form errors.
-   max_n/points produces the count grid, or supply times. length_points sets Time points and delay.expts. min_length_us/max_length_us set the time window. fit_fringe changes only analysis.
-   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+For `cpmg`, null disables reset; null pulse or readout selectors fail during selection, before overrides. Null time, count, detune or acquisition inputs leave blanks. Supply only `times`, or both `max_n` and `points`; mixed or incomplete specifications fail before readiness. Null for the selected count input clears the count. Unresolved required fields after overrides fail readiness before Run. Null for **Fit fringes** fails at Analyze; null for either reference omits that line.

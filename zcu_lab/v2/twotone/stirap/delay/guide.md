@@ -1,83 +1,31 @@
-# STIRAP delay
+**Readers:** operator, agent. Sweep the relative start time of Pump and Stokes to tune g-to-f transfer at fixed carriers and gains.
 
-**Readers:** operator, lab-author, agent. Sweep the relative start time of Pump and Stokes and inspect saved three-state counts.
+## Sequence and key settings
 
-## Before Run
+Start Pump and Stokes with the swept **Stokes lead** → wait for the later pulse end → calibrated **Readout** → **Relax delay**. Lead is the offset between pulse starts, not centers or ends. At +0.10 µs Pump starts 0.10 µs after Stokes; negative starts Pump first; zero starts both together.
 
-Open `twotone/stirap/delay` in Measure GUI, or call MCP recipe `stirap_delay`.
-Provide the measured Pump 0–3 and Stokes 3–2 carrier frequencies in MHz.
-Choose two different charge-drive generators.
-Pump and Stokes envelopes overlap, and one channel cannot play both arbitrary-waveform carrier frequencies at the same time.
-Set each signed gain within [-1, 1]. The sign is preserved during playback.
+- Enter measured **Pump carrier 0–3** and **Stokes carrier 3–2** in MHz. On hardware, check that Pump and Stokes are wired to separate charge-drive lines. Use signed gains in [−1, 1] and independent envelopes. For arbitrary envelopes, duration comes from the assets. Choose lead endpoints that cover the expected overlap.
+- In simulation, set **Pump generator** and **Stokes generator** to the `gen_ch`
+  values of two drive lines for the qubit under test. The [Integer-fluxonium preset](../../../../simulation_envs/integer_fluxonium/field-guide.md#circuit-bath-and-routing)
+  assigns Pump to 1 and Stokes to 2. In FTF, look up the generators in
+  [`drive_lines`](../../../../simulation_envs/FTF/field-guide.md#drive-linescharge-與小訊號-flux-校準).
+  Choose charge drive lines that couple to that qubit. Do not use generators
+  in `flux_lines`, which play fast-flux pulses. The environment routes pulses
+  by generator number and does not check the intended Pump or Stokes role.
+- Select a calibrated pulse readout with saved centroid3 centers and a 3×3 training confusion matrix from `singleshot/qutrit_population`. This scan does not train a classifier. **Shots per point** sets the sample count in the single acquisition round.
 
-Select a readout with saved `centroid3` centers and a 3×3 training confusion matrix.
-The readout comes from the captured `$resonator.module.readout` when available.
-A missing calibration blocks acquisition. This experiment does not train a classifier.
+See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the shared GUI steps.
 
-Pump and Stokes each accept Gaussian, cosine, DRAG or arbitrary envelopes.
-Each envelope owns its duration. Gaussian and DRAG use their own length and sigma.
-Arbitrary duration comes from the selected asset. Constant and flat-top envelopes are not offered.
-The Form starts both envelopes as Gaussian with sigma 0.05 µs and length 0.3 µs.
-The core cfg requires both envelopes explicitly.
+## Read the plots
 
-After changing aliases, component parameters or the module library, use Defaults to seed the Form from a new capture.
-Defaults may overwrite unsaved input. Refresh only updates sources and choices; it keeps the current input.
+Live shows measured g/e/f fractions versus requested Stokes lead in µs; unfinished points stay blank. Analyze skips unfinished or empty points and plots measured and corrected fractions in separate panels, using the Run's saved calibration. The corrected values can lie outside [0, 1].
 
-## Lead and acquisition
+One bar is one shot SEM. For measured fraction p from N > 1 retained shots, SEM is √[p(1−p)/(N−1)]. The corrected panel propagates the retained shots' three-label count covariance with the saved calibration matrix treated as known. The bars do not show fit errors or shot or round spread. Missing, empty or single-shot points have no bar.
 
-Set `stokes_lead.start`, `stokes_lead.stop` and `stokes_lead.n` in the Form.
-Lead is in µs. Positive lead starts Stokes first. Negative lead starts Pump first.
-Zero starts both together. For example, +0.1 µs starts Pump 0.1 µs after Stokes.
-Lead describes pulse starts, not their centers or ends.
+A large matrix condition number or small minimum singular value means the correction amplifies count noise. Preparation-label fractions are not transfer fidelity or proof of state purity.
 
-The host builds and acquires one program per lead coordinate.
-Both drives retain their own carrier, signed gain, envelope and length throughout the scan.
-Readout starts after the later drive end, even when the lengths differ.
-`shots` controls repetitions per coordinate in one acquisition round.
-`relax_delay` is the inter-shot wait in µs.
-Physical simulation requires both selected drive generators to bind charge lines.
-The zero-noise offline probe checks compiled playback without physical evolution.
+## Next step
 
-The live figure shows measured g/e/f fractions against Stokes lead in µs.
-The saved Result contains requested lead coordinates with shape `(N,)` and float64 g/e/f counts with shape `(N, 3)`.
-It stores counts, not normalized fractions. Stopped scans leave unfinished counts as NaN.
-Lead coordinates retain their requested values; hardware quantizes playback times to its clocks.
+The dotted marker is the largest finite sampled corrected f, not a global optimum. Ties use the first acquired point; no finite point yields no peak. Choose a region of high corrected f and low e. If the marker is at the +0.10 µs endpoint, extend that endpoint while retaining the original overlap, then repeat. No writeback is proposed.
 
-## Analyze and Save
-
-Analyze uses only the Run's saved centroid3 readout, not current Form or library calibration.
-It skips unfinished and zero-count points.
-The single `populations` figure shows raw fractions as dashed curves and confusion-corrected fractions as solid curves.
-Each state has the same color in both curves. The horizontal axis is Stokes lead in µs.
-The vertical axis shows the preparation-label fractions for g, e, and f.
-Corrected fractions are not clipped to [0, 1].
-
-The summary contains the training confusion matrix, its condition number and its minimum singular value.
-The summary and recipe report give `f_population_estimate`, the largest finite
-corrected f population on this grid, and `stokes_lead_us`.
-Ties go to the first acquired point. If no finite value is available, the peak
-and its coordinates are null. The estimate is unclipped and does not identify
-a global optimum.
-A large condition number warns that correction can amplify count noise.
-These diagnostics do not measure transfer fidelity or prove state purity.
-Missing saved cfg, missing calibration, no completed points or a singular matrix makes analysis fail.
-
-The recipe performs Run, Analyze, then Save. It does not ask for writeback.
-After a successful Run, Save still runs if analysis fails or returns no result.
-A failed Run does not trigger Save. Native data preserves the saved cfg and counts.
-The new leaf does not load or migrate runs from the old combined STIRAP experiment.
-
-## Recipe inputs
-
-`start_us`, `stop_us` and `n` set the lead sweep. `n` maps to cfg `stokes_lead.expts`.
-`pump_freq_mhz`, `stokes_freq_mhz`, `pump_gain` and `stokes_gain` are required.
-Optional generator channels, readout reference, shots and relaxation retain Form values when omitted.
-Explicit null goes to the field owner and may be rejected.
-
-`pump_waveform_ref` and `stokes_waveform_ref` select a library key or an exact Form option such as `Inline: cosine`.
-Use `overrides` to enter parameters for the chosen envelope, for example `pump_waveform.length`.
-For an existing referenced envelope, issue the public Form `to_inline` command before editing its scalar parameters.
-The recipe applies overrides last and checks readiness before Run.
-
-Offline structural acceptance does not establish physical transfer accuracy or real-device calibration.
-The full-Hamiltonian reference comparison is separate work and has not been run for this leaf.
+For `stirap_delay`, null waveform or **Readout** selectors fail during selection, before overrides. Null channels, shots or relax delay leaves a blank; required blanks after overrides fail readiness before Run. Missing centroid3 blocks acquisition. A completed Run can still save if Analyze fails.

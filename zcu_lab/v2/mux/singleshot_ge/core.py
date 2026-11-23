@@ -30,7 +30,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.patches import Polygon
+from matplotlib.patches import Patch
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -41,7 +41,6 @@ from zcu_tools.analysis.singleshot import (
     GECalibration,
     GEConfusionResult,
     calc_confusion_matrix,
-    classify_result,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
@@ -49,6 +48,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.single_shot.ge import (
     GEFitOptions,
     GENumericalError,
+    plot_ge_iq_density,
     singleshot_ge_analysis,
 )
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
@@ -66,6 +66,10 @@ from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     validate_participants,
+)
+from zcu_lab.v2.support.singleshot.classification_plot import (
+    plot_ge_classified_iq,
+    share_ge_preparation_limits,
 )
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state
 
@@ -241,7 +245,13 @@ class MuxGEToneCfg(MuxDriveToneCfg):
     validated only when selected. Nonparticipant settings do not run.
     """
 
-    init_pulse: Pulse.Cfg | None = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Preparation pulse",
+            description="Choose an optional pulse applied in both preparations before the probe.",
+        ),
+    ] = None
 
     def validate_pulses(self) -> MuxGEToneCfg:
         """Reject swept values or shared-branch generators for every element."""
@@ -267,11 +277,35 @@ class MuxGECfg(ConfigBase):
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
+    reset: Annotated[
+        ResetCfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the common preparation reset; leave blank to omit it.",
+        ),
+    ] = None
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated multiplexed readout used after both probe preparations.",
+        ),
+    ]
     tones: Annotated[list[MuxGEToneCfg], FieldMeta(element_label="name")]
-    participants: list[StrictInt]
-    shots: Annotated[StrictInt, FieldMeta(label="Shots", unit="count")] = Field(gt=0)
+    participants: Annotated[
+        list[StrictInt],
+        FieldMeta(
+            description="Enter the original zero-based tone indices in measurement order."
+        ),
+    ]
+    shots: Annotated[
+        StrictInt,
+        FieldMeta(
+            label="Shots",
+            unit="count",
+            description="Enter the shots to acquire per probe preparation.",
+        ),
+    ] = Field(gt=0)
 
     initial_delay: Annotated[
         float,
@@ -325,6 +359,54 @@ def _failure_plot(plots: Plots, name: str, reason: str) -> None:
         update(reason)
 
 
+def _probe_iq_legend(ax: Axes) -> None:
+    """Label the Live IQ density on ax by acquisition row, not preparation."""
+    ax.legend(
+        handles=[
+            Patch(color="blue", label="Probe off"),
+            Patch(color="red", label="Probe on"),
+        ]
+    )
+
+
+def _mark_ge_fit(ax: Axes, fit: GEAnalysis) -> None:
+    """Show the projected threshold on the original IQ plane and report fit quality."""
+    axis_i, axis_q = np.cos(fit.theta), -np.sin(fit.theta)
+    i, q = fit.threshold * axis_i, fit.threshold * axis_q
+    # The threshold line is perpendicular to the direction of projection.
+    ax.axline(
+        (i, q), (i - axis_q, q + axis_i), color="0.3", ls=":", label="GE threshold"
+    )
+    centers = (fit.g_center, fit.e_center)
+    ax.scatter(
+        [z.real for z in centers],
+        [z.imag for z in centers],
+        color="black",
+        marker="x",
+        label="Fitted centers",
+    )
+    ratio = (
+        "Integration window / T1 unavailable"
+        if fit.length_ratio is None
+        else f"Integration window / T1 = {fit.length_ratio:.3g}"
+    )
+    title = f"Readout fidelity = {fit.fidelity:.1%} · {ratio}"
+    if fit.fit_quality is not None:
+        parts = []
+        for key, name in (("joint", "Joint"), ("ground", "g"), ("excited", "e")):
+            if metric := fit.fit_quality.get(key):
+                r2 = "unavailable" if metric.r2 is None else f"{metric.r2:.3g}"
+                rms = (
+                    "unavailable"
+                    if metric.normalized_residual_rms is None
+                    else f"{metric.normalized_residual_rms:.3g}"
+                )
+                parts.append(f"{name}: R² {r2}, normalized RMS {rms}")
+        if parts:
+            title += "\n" + "\n".join(parts)
+    ax.set_title(title, fontsize=10, pad=46)
+
+
 def _plot_confusion_matrix(
     confusion: GEConfusionResult,
     g_signals: NDArray[np.complex128],
@@ -333,148 +415,75 @@ def _plot_confusion_matrix(
     plots: Plots,
     figure_name: str,
 ) -> None:
-    """Publish IQ classifications and preparation/confusion matrices to plots.
-
-    g_signals and e_signals are physical ground/excited one-dimensional shot IQ;
-    primary supplies their centers. confusion supplies classification fractions,
-    radius and the initial/confusion matrices. Return None without mutating inputs.
-    figure_name must be unused. plots owns the new figure; plotting errors propagate.
-    """
+    """Draw one tone's ordered g/e IQ, classifier and both Post matrices."""
     fig, _ = plots.subplots(
-        num=figure_name, nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
+        num=figure_name,
+        nrows=2,
+        ncols=2,
+        figsize=(8, 8),
+        gridspec_kw={"width_ratios": (1, 1.32)},
+        layout="constrained",
     )
-    g_iq_ax, initial_populations_ax, e_iq_ax, confusion_matrix_ax = fig.axes
-
-    g_label = r"$|0\rangle$"
-    e_label = r"$|1\rangle$"
-    l_label = r"$|L\rangle$"
-    _plot_classified(g_iq_ax, g_signals, primary, confusion.radius)
-    _plot_classified(e_iq_ax, e_signals, primary, confusion.radius)
-
-    n_gg, n_ge, n_go = confusion.g_classification
-    n_eg, n_ee, n_eo = confusion.e_classification
-    g_iq_ax.set_title(
-        f"{g_label}: {n_gg:.1%}, {e_label}: {n_ge:.1%}, {l_label}: {n_go:.1%}"
-    )
-    e_iq_ax.set_title(
-        f"{g_label}: {n_eg:.1%}, {e_label}: {n_ee:.1%}, {l_label}: {n_eo:.1%}"
-    )
-    g_iq_ax.set_xlabel("")
-
-    for matrix_ax, matrix in (
-        (initial_populations_ax, confusion.init_matrix),
-        (confusion_matrix_ax, confusion.matrix),
+    g_iq, populations, e_iq, classifier = fig.axes
+    for ax, shots, preparation, (g, e, other) in (
+        (g_iq, g_signals, "g preparation", confusion.g_classification),
+        (e_iq, e_signals, "e preparation", confusion.e_classification),
     ):
-        im = matrix_ax.imshow(matrix, cmap="Blues", vmin=0, vmax=1)
-        fig.colorbar(im, cax=matrix_ax.inset_axes((1.04, 0, 0.06, 1)))
-        for i in range(matrix.shape[0]):
-            for j in range(matrix.shape[1]):
-                val = matrix[i, j]
-                matrix_ax.text(
-                    j,
-                    i,
-                    f"{val:.2%}",
-                    fontsize=8,
-                    ha="center",
-                    va="center",
-                    color="white" if val > 0.5 else "black",
-                )
-
-    initial_populations_ax.set_xticks([0, 1, 2])
-    initial_populations_ax.set_yticks([0, 1, 2])
-    initial_populations_ax.set_xticklabels([g_label, e_label, l_label])
-    initial_populations_ax.set_yticklabels([g_label, e_label, l_label])
-    initial_populations_ax.set_xlabel("Actual State")
-    initial_populations_ax.set_ylabel("Prepared State")
-    initial_populations_ax.set_title("Initial Populations")
-
-    confusion_matrix_ax.set_xticks([0, 1, 2])
-    confusion_matrix_ax.set_yticks([0, 1, 2])
-    confusion_matrix_ax.set_xticklabels([g_label, e_label, l_label])
-    confusion_matrix_ax.set_yticklabels([g_label, e_label, l_label])
-    confusion_matrix_ax.set_xlabel("Measured State")
-    confusion_matrix_ax.set_ylabel("Actual State")
-    confusion_matrix_ax.set_title(
-        f"Confusion Matrix (cond: {confusion.condition_number:.1f})"
-    )
-
-
-def _plot_classified(
-    ax: Axes,
-    signals: NDArray[np.complex128],
-    primary: GEAnalysis,
-    radius: float,
-) -> None:
-    """Draw one tone's classified shots and nearest-center radius boundaries.
-
-    signals is a nonempty one-dimensional shot IQ array; primary supplies ground
-    and excited centers. radius is the classification-circle radius in IQ units.
-    Add sampled points, centers, boundaries, labels and a legend to caller-owned ax.
-    Return None without changing signals or primary.
-    """
-    g_center, e_center = primary.g_center, primary.e_center
-    max_point = 5000
-    mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)
-
-    colors = np.full(signals.shape, "gray", dtype=object)
-    colors[mask_g] = "blue"
-    colors[mask_e] = "red"
-    colors[mask_o] = "green"
-
-    # plot shots
-    num_sample = signals.shape[0]
-    downsample_num = min(max_point, num_sample)
-    downsample_mask = np.arange(0, num_sample, max(1, num_sample // downsample_num))
-    downsample_signals = signals[downsample_mask]
-    ax.scatter(
-        downsample_signals.real,
-        downsample_signals.imag,
-        c=colors[downsample_mask].tolist(),
-        s=1,
-        alpha=0.5,
-    )
-
-    # plot centers with circle
-    ax.plot(
-        g_center.real,
-        g_center.imag,
-        markerfacecolor="b",
-        label="Ground",
-        linestyle=":",
-        color="k",
-        marker="o",
-        markersize=5,
-    )
-    ax.plot(
-        e_center.real,
-        e_center.imag,
-        markerfacecolor="r",
-        label="Excited",
-        linestyle=":",
-        color="k",
-        marker="o",
-        markersize=5,
-    )
-    separation = abs(e_center - g_center)
-    axis = (e_center - g_center) / separation
-    cut_angle = np.arccos(separation / (2 * radius)) if radius > separation / 2 else 0.0
-    angles = np.linspace(cut_angle, 2 * np.pi - cut_angle, 361)
-    for center, direction, color in ((g_center, axis, "b"), (e_center, -axis, "r")):
-        boundary = center + direction * radius * np.exp(1j * angles)
-        ax.add_patch(
-            Polygon(
-                np.column_stack((boundary.real, boundary.imag)),
-                closed=True,
-                color=color,
-                fill=False,
-                linestyle="--",
-            )
+        plot_ge_classified_iq(
+            ax, shots, primary.g_center, primary.e_center, confusion.radius
+        )
+        ax.set_title(
+            f"{preparation}\nObserved: g {g:.1%}, e {e:.1%}, Other {other:.1%}",
+            fontsize=10,
+        )
+        ax.set_xlabel("I (a.u.)", fontsize=10)
+        ax.set_ylabel("Q (a.u.)", fontsize=10)
+        ax.tick_params(labelsize=10)
+        ax.grid(False)
+        ax.legend(
+            handles=[
+                Patch(color="blue", label="g"),
+                Patch(color="red", label="e"),
+                Patch(color="0.5", label="Other"),
+            ],
+            title="Classified as",
+            title_fontsize=10,
+            loc="lower left",
+            bbox_to_anchor=(1, 0),
+            frameon=False,
+            fontsize=10,
         )
 
-    ax.set_aspect("equal")
-    ax.legend()
-    ax.set_xlabel("I value (a.u.)")
-    ax.set_ylabel("Q value (a.u.)")
+    share_ge_preparation_limits(g_iq, e_iq)
+    _plot_post_matrix(populations, confusion.init_matrix)
+    populations.set_title("Initial Populations\nPrepared → actual", fontsize=10)
+    _plot_post_matrix(classifier, confusion.matrix)
+    classifier.set_title(
+        f"Classifier confusion\nActual → measured\n"
+        f"Cond. number\n{confusion.condition_number:.3g}",
+        fontsize=10,
+    )
+
+
+def _plot_post_matrix(ax: Axes, matrix: NDArray[np.float64]) -> None:
+    """Draw a 3×3 g/e/Other fraction matrix as labeled percentages on ax."""
+    ax.imshow(matrix, cmap="Blues", aspect="auto")
+    ax.grid(False)
+    states = ("g", "e", "Other")
+    ax.set_xticks([0, 1, 2], labels=states, fontsize=10)
+    ax.set_yticks([0, 1, 2], labels=states, fontsize=10)
+    # Leave the cell width for percentages rather than a colorbar.
+    for (i, j), value in np.ndenumerate(matrix):
+        percent = f"{100 * value:.1f}".removesuffix(".0")
+        ax.text(
+            j,
+            i,
+            f"{percent}%",
+            fontsize=10,
+            ha="center",
+            va="center",
+            color="white" if value > 0.5 else "black",
+        )
 
 
 def _validate_fixed_pulse(pulse: Pulse.Cfg) -> None:
@@ -608,35 +617,30 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         shots = np.arange(cfg.shots, dtype=np.int64)
 
         # Show paired preparations without averaging away their IQ spread.
-        figures = []
+        empty = np.empty(0, dtype=np.complex128)
+        live_frames = []
         for index in indices:
-            fig, _ = context.plots.subplots(num=f"measurement_{index}")
-            figures.append(fig)
+            fig, ax = context.plots.subplots(num=f"measurement_{index}")
+            fig.suptitle(f"Mux single-shot GE · {cfg.tones[index].name} · Readout IQ")
+            ax.set(
+                xlabel="I per shot (a.u.)",
+                ylabel="Q per shot (a.u.)",
+                title="Acquired shots: 0 count",
+            )
+            ax.grid(False)
+            _probe_iq_legend(ax)
+            image = plot_ge_iq_density(ax, empty, empty)
+            live_frames.append((fig, ax, image))
             fig.show()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]):
-            for row, (index, figure) in enumerate(zip(indices, figures, strict=True)):
-                axes = figure.axes[0]
-                axes.clear()
-                for cloud, label, color in zip(
-                    data[:, :, row],
-                    ("g preparation (probe off)", "e preparation (probe on)"),
-                    ("tab:blue", "tab:red"),
-                    strict=True,
-                ):
-                    axes.scatter(
-                        cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
-                    )
-                axes.set(
-                    xlabel="I (a.u.)",
-                    ylabel="Q (a.u.)",
-                    title=f"{index}: {cfg.tones[index].name}",
-                )
-                axes.set_aspect("equal", adjustable="datalim")
-                axes.grid()
-                axes.legend()
-            return tuple(figures)
+            for row, (_, axes, image) in enumerate(live_frames):
+                off, on = data[:, :, row]
+                plot_ge_iq_density(axes, off, on, image=image)
+                count = np.count_nonzero(np.isfinite(data[:, :, row]))
+                axes.set_title(f"Acquired shots: {count} / {2 * cfg.shots} count")
+            return tuple(fig for fig, _, _ in live_frames)
 
         buffer = SignalBuffer((2, cfg.shots, len(indices)), on_update=update)
         with Schedule(buffer, scope=context.scope) as sched:
@@ -697,17 +701,22 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
 
         options selects GE fitting settings by original tone index. Return each
         tone's calibration and fit quality, or its failure reason, and draw fit_i
-        in plots. Incomplete pairs do not fit. Source cfg may be absent; malformed
+        in plots. Successful fits also draw diagnostic_i at the original tone index.
+        Incomplete pairs do not fit. Source cfg may be absent; malformed
         axes, mismatched cfg or invalid options raise before fitting.
-
+        If any active fit_i or diagnostic_i name already exists, raise
+        ValueError before fitting or drawing any tone.
         """
         # 1. Match GE fit overrides to original tone identities before inspecting probe-off/on pairs.
         _validate_source(source)
         indices = [int(i) for i in source.result.tone_indices]
         if any(type(i) is not int or i not in indices for i in options.overrides):
             raise ValueError("GE overrides must name active original tone indices")
-        if any(f"fit_{i}" in plots for i in indices):
-            raise ValueError("fit_i figures already exist in this operation")
+        names = {f"{kind}_{i}" for i in indices for kind in ("fit", "diagnostic")}
+        if collisions := plots.keys() & names:
+            raise ValueError(
+                f"GE figure names already exist: {', '.join(sorted(collisions))}"
+            )
         selected = [options.overrides.get(i, options.default) for i in indices]
         outcomes: list[MuxGEAnalysis | MuxFitFailure] = []
         # 2. Inspect state-ordered IQ clouds and reject incomplete preparation pairs per tone.
@@ -716,60 +725,73 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             signals = ge_signals_by_state(
                 source.result.signals[row], option.initial_state
             )
-            _, axes = plots.subplots(num=name)
-            for cloud, label, color in zip(
-                signals,
-                ("g preparation", "e preparation"),
-                ("tab:blue", "tab:red"),
-                strict=True,
-            ):
-                axes.scatter(
-                    cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
-                )
-            axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
-            axes.set_aspect("equal", adjustable="datalim")
-            axes.grid()
-            axes.legend()
+            cfg = source.cfg
+            tone = f"Tone {index}" if cfg is None else cfg.tones[index].name
+            figure, axes = plots.subplots(
+                num=name, figsize=(7, 5), layout="constrained"
+            )
+            figure.suptitle(f"Mux single-shot GE · {tone} · Readout IQ")
+            plot_ge_iq_density(axes, signals[0], signals[1])
+            axes.set(xlabel="I per shot (a.u.)", ylabel="Q per shot (a.u.)")
+            axes.grid(False)
             if not np.isfinite(signals).all():
                 reason = "GE fit requires both complete probe-off/on preparations"
                 _failure_plot(plots, name, reason)
                 outcomes.append(MuxFitFailure(index, reason))
-                continue
-            try:
-                # 3. Calibrate each complete GE pair with its selected backend and alignment policy.
-                fidelity, init_pops, fit = singleshot_ge_analysis(
-                    signals,
-                    angle=option.angle,
-                    backend=option.backend,
-                    options=GEFitOptions(
-                        logscale=option.logscale,
-                        align_t1=option.align_t1,
-                        length_ratio=option.length_ratio,
-                    ),
-                    plots=None,
-                )
-                primary = GEAnalysis(
-                    initial_state=option.initial_state,
-                    fidelity=fidelity,
-                    theta=fit["theta"],
-                    threshold=fit["threshold"],
-                    ge_s=fit["s"],
-                    g_center=fit["g_center"],
-                    e_center=fit["e_center"],
-                    init_pops=init_pops,
-                    length_ratio=fit["length_ratio"],
-                    fit_quality=fit["fit_quality"],
-                )
-                primary.validate_calibration()
-                axes.set_title(
-                    "GE IQ (length ratio: not identifiable)"
-                    if primary.length_ratio is None
-                    else f"GE IQ (length ratio = {primary.length_ratio:.2f})"
-                )
-                outcomes.append(MuxGEAnalysis(index, primary))
-            except (GENumericalError, AnalysisFailed) as exc:
-                _failure_plot(plots, name, str(exc))
-                outcomes.append(MuxFitFailure(index, str(exc)))
+            else:
+                try:
+                    # 3. Calibrate each complete GE pair with its selected backend and alignment policy.
+                    # Configured tones: diagnostic_0, diagnostic_1, diagnostic_2, diagnostic_3,
+                    # diagnostic_4, diagnostic_5, diagnostic_6, diagnostic_7.
+                    fidelity, init_pops, fit = singleshot_ge_analysis(
+                        signals,
+                        angle=option.angle,
+                        backend=option.backend,
+                        options=GEFitOptions(
+                            logscale=option.logscale,
+                            align_t1=option.align_t1,
+                            length_ratio=option.length_ratio,
+                            raw_iq_diagnostic=True,
+                        ),
+                        plots=plots,
+                        figure_name=f"diagnostic_{index}",
+                    )
+                    primary = GEAnalysis(
+                        initial_state=option.initial_state,
+                        fidelity=fidelity,
+                        theta=fit["theta"],
+                        threshold=fit["threshold"],
+                        ge_s=fit["s"],
+                        g_center=fit["g_center"],
+                        e_center=fit["e_center"],
+                        init_pops=init_pops,
+                        length_ratio=fit["length_ratio"],
+                        fit_quality=fit["fit_quality"],
+                    )
+                    primary.validate_calibration()
+                    _mark_ge_fit(axes, primary)
+                    outcomes.append(MuxGEAnalysis(index, primary))
+                except (GENumericalError, AnalysisFailed) as exc:
+                    _failure_plot(plots, name, str(exc))
+                    outcomes.append(MuxFitFailure(index, str(exc)))
+
+            # Name the same two rows used by the fit without conflating prep with classification.
+            g_probe, e_probe = (
+                ("off", "on") if option.initial_state == "ground" else ("on", "off")
+            )
+            markers, _ = axes.get_legend_handles_labels()
+            axes.legend(
+                handles=[
+                    Patch(color="blue", label=f"g prep (probe {g_probe})"),
+                    Patch(color="red", label=f"e prep (probe {e_probe})"),
+                    *markers,
+                ],
+                loc="lower center",
+                bbox_to_anchor=(0.5, 1),
+                ncols=2,
+                frameon=False,
+                fontsize=10,
+            )
         # 4. Keep per-tone GE calibrations and quality, including incomplete-pair or numerical failures.
         return tuple(outcomes)
 
@@ -844,6 +866,9 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             _plot_confusion_matrix(
                 confusion, g_signals, e_signals, item.primary, plots, name
             )
+            cfg = source.cfg
+            tone = f"Tone {item.index}" if cfg is None else cfg.tones[item.index].name
+            plots[name].suptitle(f"Mux GE · {tone}", fontsize=12)
             outcomes.append(MuxGEPostAnalysis(item.index, GEPostAnalysis(confusion)))
         # 5. Keep radius-based per-tone confusion diagnostics without refitting or a joint assignment model.
         return tuple(outcomes)

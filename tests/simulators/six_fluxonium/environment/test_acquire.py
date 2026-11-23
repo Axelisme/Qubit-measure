@@ -389,10 +389,7 @@ def test_local_and_coil_currents_add_without_crosstalk_and_keep_native_snapshot(
 def test_different_sweep_sizes_do_not_reuse_cavity_noise(output):
     document = six_document()
     # Pulse ADC6 uses Q1's receiver, even when its frequency selects cavity 1.
-    document["qubits"]["Q1"]["readout"]["adc"]["noise_psd_adc2_ns"] = [
-        [100, 0],
-        [0, 100],
-    ]
+    document["qubits"]["Q1"]["readout"]["adc"]["noise_psd_adc2_ns"] = 100.0
     with environment(document) as env:
         # Both acquires give cavity 1 a single-point partition starting at 0.
         # Extra points visit cavity 0, so only the total request size changes.

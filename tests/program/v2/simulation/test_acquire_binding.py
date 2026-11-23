@@ -12,7 +12,6 @@ from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
@@ -68,21 +67,6 @@ def acquisition() -> Iterator[tuple[SimulationEnvironment, TimelineProgramV2]]:
             rounds=2,
         )
         env.devices.close_all_devices()
-
-
-def test_acquire_transmits_charge_requirements_without_leaking_to_next_call(
-    acquisition,
-):
-    env, prog = acquisition
-    requirements = (
-        ChargeDriveRequirement("Pump", 1),
-        ChargeDriveRequirement("Stokes", 999),
-    )
-    result = prog.acquire(env.soc, progress=False, charge_requirements=requirements)
-    assert result[0].shape[-1] == 2
-    assert request_of(env).charge_requirements == requirements
-    prog.acquire(env.soc, progress=False)
-    assert request_of(env).charge_requirements == ()
 
 
 def test_acquire_reuses_callable_metadata_across_programs_without_retaining_self(

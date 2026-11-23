@@ -161,15 +161,19 @@ GUI application 持有結果與具名圖集合，保存不反向依賴 Qt widget
 
 **規則。** [實驗呈現指南](../../zcu_lab/v2/figure-style.md)定義圖、表單文字、guide 與 recipe 說明的寫法。R0 是共同的驗收原則。懂物理但不熟悉實作的操作員，只看表單、guide、liveplot 與 Analyze 圖，就能說出實驗量什麼、每個參數做什麼、每個圖形元素代表什麼，以及如何判讀結果。
 
-圖只放物理量、模型、擬合結果與判讀所需的標註。Run 身分放在可見的 Analyze 摘要，不印在圖上。Adapter 用該次 cfg 的 Reps×Rounds 與實驗已回傳的實際施加值提供摘要行。GUI 與 MCP 的 [`AnalysisPresentation`](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation) 顯示同一份行，不各自組裝。摘要行不經 [[0062]]〈一個 run 的 operation〉的 workflow operation wire。圖的標題與圖例由各實驗 core 編寫，不建立共用 formatter。Run 頁的按鈕名為 `Defaults`，表單的物理欄位仍用 `Reset`。
+圖只放物理量、模型、擬合結果與判讀所需的事實。結果旁列出 core 或分析已回傳的品質值，繪圖端不重算。圖可以標擬合失敗或標準誤無法估計，不標指標是否通過門檻。寫回預選與否及理由由 adapter 在 Writeback review note 提供，留給操作員決定。Guide 解釋品質指標的意義，不列這些指標的選取或寫回預選門檻。
 
-R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Data 頁的縮圖用來辨識與選取各 stage 的具名圖；Data 的 R7 在 [`View figure` 閱讀面](../../lib/zcu_tools/gui/app/measure/ui/README.md)檢查同一張當前原生 Figure 依閱讀尺度重繪後的畫面，放不下就捲動，不縮小字級。
+Run 身分放在可見的 Analyze 摘要，不印在圖上。Adapter 用該次 cfg 的 Reps×Rounds 與實驗已回傳的實際施加值提供摘要行。GUI 與 MCP 的 [`AnalysisPresentation`](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation) 顯示同一份行，不各自組裝。摘要行不經 [[0062]]〈一個 run 的 operation〉的 workflow operation wire。圖的標題與圖例由各實驗 core 編寫，不建立共用 formatter。Run 頁的按鈕名為 `Defaults`，表單的物理欄位仍用 `Reset`。
 
-對數值大小敏感的一維資料點畫 shot SEM；看峰位的 spectrum 和二維圖不畫逐點 error bar。Shot SEM 是每發樣本標準差除以保留 shot 數的平方根，表示該點平均值的預期誤差。顯示用時間寫 `µs`，gain、amplitude 與倍率寫 `a.u.`，機率寫出機率名稱，計數寫 `count`。存檔單位照[保存、發現與範圍](#保存發現與範圍)，不受顯示詞彙影響。
+[R7](../../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面) 只在 12×9 in、150 dpi 的 PNG 檢查版面。Measure 的 Run、Analysis、Post-analysis、Workflow 和 Data 以 12×9 in 排版原生 Figure，再將整張圖等比放入圖磚，其餘空間留白。磚形不改變 Figure 排版。Data 保留選圖縮圖；[`View figure` 閱讀面](../../lib/zcu_tools/gui/app/measure/ui/README.md)以同樣的幾何等比顯示全圖。GUI 只驗圖完整嵌入、等比和無裁切，互動畫布另驗縮放後的資料座標。
 
-**例子。** T2 Ramsey 的 Analyze 圖按規範畫量測點、密網格 fit 與「T2* = 值 ± 誤差 µs」。cfg 的 Reps×Rounds 和實際施加的 detune 放在摘要。Rabi 和 T1 的 shot SEM 表達各點平均值的預期誤差，two-tone spectrum 不加逐點 error bar。
+一維系列若能用現有 shot 資料估計 SEM，就畫逐點誤差棒，spectrum 也一樣。對逐發平均，shot SEM 是每發樣本標準差除以保留 shot 數的平方根。對反演量，若能從原始量的 shot 共變異矩陣以一階誤差傳遞求出有限的逐點標準誤，也畫棒。校正矩陣視為已知，棒只含本次 shot 的抽樣誤差。一維讀出校正布居的圖與擬合使用同一個不截斷的線性估計。
 
-**邊界。** 採集摘要不列完成輪數、是否提前停或 shot 數，不擴充 `RunMetadata`，也不改 [[0062]] 的 Schedule facts 規則。各實驗決定是否保存實際施加值。重開檔案缺某個值就不顯示，不能用現行表單補值。Shot SEM 估計器歸 `zcu_tools.analysis`；fit 參數誤差與 RB 的跨 seed 標準差留在原 owner。只存平均的實驗在家族修正時加二階 moment，不移除舊欄位；舊檔仍可 Load，缺資料時不畫 error bar。除此之外，呈現修正沿用現有資料，不改取數。指南的 fit 品質、population 軸、分支標籤，以及表單、guide 與 recipe 文字細則是 designer 代裁，使用者未覆核。Ding 博論只作版式與標註參考，不把相近的圖視為同一實驗。
+Run 與 Analyze 的一維連續掃描，沒有擬合曲線時連接量測點，有擬合曲線時只留量測點及可用的誤差棒。類別軸不連線。顯示用時間寫 `µs`，gain、amplitude 與倍率寫 `a.u.`，機率寫出機率名稱，計數寫 `count`。存檔單位照[保存、發現與範圍](#保存發現與範圍)，不受顯示詞彙影響。
+
+**例子。** T2 Ramsey 的 Analyze 圖按規範畫量測點、密網格 fit 與「T2* = 值 ± 誤差 µs」。cfg 的 Reps×Rounds 和實際施加的 detune 放在摘要。Rabi 的 shot SEM 表達各點平均值的預期誤差。讀出校正 T1 的 `P(e) = −0.004 ± 0.006` 保留負值與跨過 0 的棒。T2 Echo 若有已回傳的 R²，圖列該數值，候選未預選的理由留在 Writeback。Two-tone spectrum 有 shot SEM 時也畫誤差棒，沒有擬合曲線時連接量測點。
+
+**邊界。** 採集摘要不列完成輪數、是否提前停或 shot 數，不擴充 `RunMetadata`，也不改 [[0062]] 的 Schedule facts 規則。各實驗決定是否保存實際施加值。重開檔案缺某個值就不顯示，不能用現行表單補值。Shot SEM 估計器歸 `zcu_tools.analysis`；fit 參數誤差與 RB 的跨 seed 標準差留在原 owner。IQ 散點與二維圖不畫逐點誤差棒，二維校正不變。Score 不當作逐發平均來套 shot SEM。只存平均的實驗在家族修正時加二階 moment，不移除舊欄位；舊檔仍可 Load。缺必要統計量就不畫棒，guide 說明缺哪一項；反演點有限但標準誤不可得時，只省略該棒。呈現修正不為補反演棒改取數或存檔。使用者未覆核的 designer 代裁項目包括指南的其餘 fit 品質細則、一般 population 軸、分支標籤，以及其餘表單、guide 與 recipe 文字細則。Ding 博論只作版式與標註參考，不把相近的圖視為同一實驗。
 
 **依據。** 見[呈現規範討論](../discussions/2026-11-22-presentation-rules.md)與[摘要及誤差棒的責任分工](../discussions/2026-11-22-shared-presentation-facts.md)。原始問答未入庫。
 
@@ -177,8 +181,30 @@ R7 在 GUI 實際尺寸檢查版面，包括較窄的 Save 頁面。Data 頁的�
 - 2026-11-22，使用者：「1我以為圖的名字已經足夠定位」。重整選項後回答：「1可以，圖應該放純理論實作者關注的重點，而不是實驗作者關注的資訊。2我有考慮給部分實驗的點加上errorbar，通常是比如rabi/t1之類的一維數據，對數據值的大小比較敏感的。spectrum之類的或是二維圖就不用」。
 - 2026-11-22，使用者：「關於實驗liveplot與分析圖，我認為可以參考ding博倫的格式，這才是人看的圖。」
 - 2026-11-22，使用者對摘要和按鈕答「1a, 存檔看有沒有需求 2a」，分別採用現有值與 `Defaults`。
-- 2026-11-22，Data 頁保留縮圖選圖、改以閱讀面驗 R7，是 designer 依夜間授權代裁，使用者未覆核。使用者同日要求：「那注意排版啊，那个 GUI 的版面配置可能不是正规的四乘三或者什么的，然后字体大小之类的要注意缩放，比如说在 Save 页面可能会变得比较窄」。見[在 Measure Data 頁讀原圖](../discussions/2026-11-22-data-figure-reading.md)。
 - 2026-11-22，使用者在 shot SEM 與輪間散布之間選「A」，補充「像我其实更想要设计的，其实应该是平均标准差，也就是这个点的预期误差。」數值估計器放 analysis、標題與圖例留在 core 是 designer 代裁，使用者未覆核。
+- 2026-11-22，使用者：「如果拟合曲线本身就是连线的，那数据点就不用。但如果没有拟合曲线，那就要连线。」使用者選「全面套用」，並要求 spectrum 也畫可用的 shot SEM。見[量測點何時連線與 spectrum 的 error bar](../discussions/2026-11-22-data-point-lines.md)。
+- 2026-11-23，使用者：「反演出來的量如果可以從變異矩陣推導那也畫。」看過一維校正、適用範圍與矩陣不確定度的選項後，回答「1B 23可以」。見[一維反演量的誤差棒與圖上事實](../discussions/2026-11-23-inverted-error-bars-and-figure-facts.md)。
+- 2026-11-23，使用者：「figure-style 的「圖上呈現既有判定」我想撤回，想聽你的意見，我自己認為這應該是讀者的權利，不是機器的權利，後者只能給建議，但也不是放在圖裡」。討論後確認：「我認同判斷標準是「事實」還是「判斷」」。見同篇[討論](../discussions/2026-11-23-inverted-error-bars-and-figure-facts.md#圖上事實與寫回建議)。
+
+#### 圖以固定存檔幾何排版
+
+**規則。** Measure 的 Run、Analysis、Post-analysis、Workflow 和 Data 共用 12×9 in 的 Figure 排版。圖磚的長寬只決定整張圖的等比縮放倍率和留白。字隨圖縮放，磚形不改變圖的排版。Data 保留縮圖選圖與 `View figure` 入口，閱讀面也以固定幾何等比顯示整張圖。
+
+**例子。** 同一張 GE 診斷圖放進 360×375 的窄磚時，上下留白。放進比 4:3 更寬的磚時，左右留白。兩種磚形都不移動 tick、標題或 legend 在圖中的位置。
+
+**邊界。** [R7](../../zcu_lab/v2/figure-style.md#r7在固定存檔幾何檢查版面) 只在 12×9 in、150 dpi 的 PNG 檢查 10 pt 字級下限、刻度重疊及圖例是否遮住資料。GUI 驗整圖等比嵌入、留白和無裁切。互動畫布另驗縮放後的資料座標，包含 `tab_interact` 的點擊與縮放。存檔 PNG 的幾何與 dpi 不變。
+
+**依據。** 2026-11-23，使用者說：「我主要要求就是这图片显示啊，在不同的显示格式或者形状下能够一致。一个可行的做法就是不要强制对齐边框，而是给多余的部分留白，缩小到刚好能嵌入，然后其余部分就是留白。」「我是倾向于字可以小啦，不要占版面」。談到存檔標準時說：「一个固定的大小作为标准…后者好像比较好」。在 A／B 之間選擇：「那我会选 A， 这样的话就不需要考虑各种形状的显示。」這次裁決取代 Data 閱讀面按閱讀尺度重繪並捲動的做法，也取消 R7 在各 GUI 實際尺寸檢查版面的要求。選圖與閱讀入口不變。比較見[圖磚沿用存檔幾何](../discussions/2026-11-23-figure-fixed-geometry.md)。
+
+#### 平均 IQ 的投影慣例
+
+**規則。** 平均 IQ 的一維圖預設畫帶正負號的主軸投影（PCA，例如 `rotate2real`）。二維 flux／頻率圖沿頻率軸逐個 bias 扣掉該列 IQ 背景，再取幅值（例如 `minus_background`）。同類實驗沿用同一種轉換。另用幅值、相位、I 或 Q 時，在程式旁寫明理由。
+
+**例子。** Mux Ramsey／Echo 的 Live 與擬合失敗圖沿用成功擬合及單 qubit Ramsey 的主軸投影。IQ 沿切線擺動時，直接取幅值可能看不到條紋。
+
+**邊界。** 二維 flux map 扣除背景後取幅值，不必選固定投影方向。若相位本身就是待測量，例如 Conditional Phase 的條件相位，就直接畫相位。本規則不改取數與持久化的 IQ。
+
+**依據。** 2026-11-23，使用者：「B，這種投影方式應該作為慣例存在，沒有獨特理由就保持一致」。見[平均 IQ 圖的投影慣例](../discussions/2026-11-23-mean-iq-plot-projection.md)。原始問答未入庫。
 
 ### 三種分析生命週期
 
@@ -246,15 +272,15 @@ Notebook 使用 `CfgEnv(ml, device_manager)` 借用固定 library snapshot 與 c
 
 CfgEnv 與 RunContext 分工不同。前者可跨次組裝重用；後者只有單次執行能力，不讓核心取得 point、library 或 registry 管理權。底層 `assemble_experiment_cfg` 接顯式 validation context，不讀硬體。Run 不重新組裝 cfg、不重連、不補裝置。需要新的參數或 library 資訊時，caller 明確讀取來源、重建 CfgEnv，再次呼叫 make_cfg。Driver mapping 不是資源 lease，也不凍結 driver 狀態。Notebook 初始化 cell 重跑就重建，不探查 namespace 或自動重用，舊連線仍由使用者明確關閉。GUI 的固定來源、CfgRef／revision 與 acceptance 不因 Notebook 入口而重新查詢硬體。
 
-模擬 builder 回傳具名 `SimulationEnvironment`，包含已綁定 soc、匹配 soccfg、同一 DeviceManager 與公開描述。一般可信 Python loader 仍支援零參數 `build_environment()`；FTF startup 與 Notebook 直接呼叫公開 `experiment.ftf.ftf(...)`。
+模擬 builder 回傳具名 `SimulationEnvironment`，包含已綁定 soc、匹配 soccfg、同一 DeviceManager 與公開描述。一般可信 Python loader 仍支援零參數 `build_environment()`。FTF startup 與 Notebook 用 `from zcu_tools.simulators.ftf.environment import ftf` 匯入公開 builder，再直接呼叫 `ftf(..., soccfg=soccfg)`。設定載入與呼叫範例見[模擬器 README〈Physical simulator models〉](../../lib/zcu_tools/simulators/README.md#physical-simulator-models)。
 
 GUI 不載入 environment，由選定的 startup 腳本經一般 facets 安裝 SoC 並逐一 register drivers。一般 soc_changed 不建立 device，不保留動態切換入口。成功回傳後由 caller 安排清理；只有 register 成功的 driver 才交給 GUI 關閉，失敗與未交付資源由腳本清理。資源交接與 `on_close` 時序見 [[0064]]。部分清理失敗保留資源與原錯誤，不假裝 ready。
 
-FTF Notebook 範例在組裝時明確傳 `warmup=True`，worker 數保留兩顆 host CPUs，至少使用一個。FTF GUI startup 明確傳共用策略選出的 CPU 數減一個 worker，至少一個，並傳 `warmup=True`。Factory 不等 CPU 數值準備與 GPU 預編譯就返回，兩者在背景執行。`experiment.ftf` 擁有代表性數值工作與 process-wide single-flight；`SimulationEnvironment` 暴露進度、future 與 ready 等待。直接呼叫 `ftf()` 預設 `workers=1, warmup=False`。背景工作不接觸正式 devices、RNG stream 或 resident Engine。Program binding 只知道通用 ready callback。Acquire 在 admission 後、消耗 sequence 前等準備完成。失敗由 environment 回報並退回 on-demand 編譯。外部計時 owner 先等 ready 再開始計時；GUI 狀態顯示由前端接線，不由數值層更新。依賴沿用 C8、C9、C10、C12，沒有新增反向依賴。
+FTF Notebook 範例在組裝時明確傳 `warmup=True`，worker 數保留兩顆 host CPUs，至少使用一個。FTF GUI startup 明確傳共用策略選出的 CPU 數減一個 worker，至少一個，並傳 `warmup=True`。Factory 不等 CPU 數值準備與 GPU 預編譯就返回，兩者在背景執行。`zcu_tools.simulators.ftf.environment.warmup` 擁有代表性數值工作與 process-wide single-flight；`SimulationEnvironment` 暴露進度、future 與 ready 等待。直接呼叫 `ftf()` 預設 `workers=1, warmup=False`。背景工作不接觸正式 devices、RNG stream 或 resident Engine。Program binding 只知道通用 ready callback。Acquire 在 admission 後、消耗 sequence 前等準備完成。失敗由 environment 回報並退回 on-demand 編譯。外部計時 owner 先等 ready 再開始計時；GUI 狀態顯示由前端接線，不由數值層更新。依賴沿用 C8、C9、C10、C12，沒有新增反向依賴。
 
 2026-11-18，使用者說：「这个 ADR 0069不预编译的裁决，我怎么没印象呢？我好像没有。…我预期 GUI 启动时会预编译啊。」對兩案「A：GUI 傳 `warmup=True`，CPU 準備與 GPU 預編譯都在背景做；B：只預編譯 GPU」答「A」。原先「GUI 不預編譯」由 2026-10-20 的 `4302e30d8` 改入，沒有使用者裁決紀錄。使用者希望「使用者体感到的执行模拟速度才不会不一致」。代價是新機器或 Numba／OpenCL 快取失效後，factory 一返回就 acquire，第一次就得等全部準備。Intel Arc、d=24、7 workers 的冷快取量測中，立即 acquire 花 76.9 s，不預編譯花 22.3 s，等準備完成再 acquire 花 3.3 s。量測條件見[討論紀錄](../discussions/2026-11-18-ftf-gpu-dop853-backend.md#留下的問題)。
 
-FTF 的 YAML 由 resources 驗證；experiment.ftf 擁有接線、裝置與逐 round snapshot，simulate 只收數值並提供 joint model、evolution、population conversion 與 ADC。初值只在 startup 套用，每 round 讀當下 device 值；讀取失敗不降級。正常 metadata 只保留 I/Q 與公開 provenance，不含模型真值。舊 TLS 執行機制不留相容層。依賴由 .importlinter C8、C9、C10、C12 約束；完整物理限制與 readout 起點凍結近似見 [模擬環境契約](draft/simulation-environments.md)。
+`zcu_tools.simulators.ftf` 擁有具體 FTF 模型。其 `config` 驗證模型 YAML，`environment` 負責接線、裝置與逐 round snapshot，`physics` 提供 joint model。`simulate` 只收數值並提供通用的 evolution、population conversion 與 ADC。分工見 [[0072]]〈模組定位〉。初值只在 startup 套用，每 round 讀當下 device 值；讀取失敗不降級。正常 metadata 只保留 I/Q 與公開 provenance，不含模型真值。舊 TLS 執行機制不留相容層。依賴由 .importlinter C8、C9、C10、C12 約束；完整物理限制與 readout 起點凍結近似見 [模擬環境契約](draft/simulation-environments.md)。
 
 可信 Python 不是硬體 sandbox。使用者自行隔離主機資源，不新增模擬專用裝置黑名單或自動斷線政策，也不預建 plugin registry 或空 backend。
 

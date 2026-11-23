@@ -1,45 +1,27 @@
-## Behavior
+# Single-shot reset check
 
-**Readers:** operator, agent. How to compare single-shot reset branches from the GUI or MCP and interpret the results.
+**Readers:** operator, agent. Compare populations with and without a tested reset across a qubit drive gain sweep.
 
-Hardware gain and three-branch sweep: Rabi / Rabi + reset / Rabi + reset + Rabi. Both pulses share the swept gain. Saves G/E/Other class counts; live view and analysis show Ground / Excited / Other with color for state and solid / dashed / dotted lines for branch.
+## What is measured
 
-## Saved counts
+Each independent branch starts with optional **Reset** and then applies one of three sequences before **Readout**: Rabi; Rabi → **Tested reset**; or Rabi → **Tested reset** → Rabi. The two Rabi pulses use the same swept gain.
 
-The saved `counts` array has axes `(gain, reset branch, population state)`. The final axis contains class counts `[g,e,other]` summed over acquired rounds, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
+## Key settings
 
-Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema remains 3.0 because the configuration fields did not change.
+- Use Pulse **Readout** (not Mux) with a calibrated circle and positive radius under **Advanced**. Use [GE Post-Analysis](../ge/guide.md) to obtain the radius. Linear cannot report Other.
+- Include the intended π gain in **Qubit drive gain**. Stop starts at the smaller of 4 × stored π gain and 1.0. **Reps** are shots per gain per branch per round.
+- **Relax delay** starts at 5 × ordinary T1 (150 µs if absent; blank if invalid). Adding reset does not shorten it automatically. Match preparation and wait conditions across comparisons.
 
-## Parameter sources
+## How to read the results
 
-Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`; Gain → Stop starts at 4 * `$qubit.module.x180.gain` or 1.0, whichever is lower.
+Compare the three panels at the same gain, especially the intended π gain. The reset-only panel reports mean and maximum sampled P(e); also check the maximum Other and the worst sampled gain. Other includes shots outside both circles or tied. Neither Other nor branch contrast establishes leakage or reset-channel fidelity.
 
-Readout accepts only the pulse family.
-A mux readout in the library is incompatible.
-Classification uses the readout's circle classifier under Readout → Advanced.
-Run requires a positive radius; missing radius prompts singleshot GE Post.
-Linear has no Other state and is rejected.
-Analyze corrects populations only with the saved readout cfg's confusion matrix.
-Historical cfg without a classifier or matrix skips correction.
+Live shows raw fractions. Analyze uses only the selected result's saved confusion matrix for correction; files with counts but no compatible calibration show classified fractions. Bars show one shot SEM from the retained counts at each gain, estimating the sampling uncertainty of the class probabilities. Analyze does not clip the corrected estimates to [0, 1]. It propagates shot-count covariance with the saved calibration matrix treated as known. Fewer than two retained shots give no bar. The bars do not show fit errors, histogram intervals or round-to-round variation.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+If the saved matrix cannot produce finite corrected fractions, Analyze shows **Readout correction unavailable** and only the G/E/Other classified fractions from this Run, with shot SEM where available. These are counts after classification, before correction. No reset statistics are reported. When only a corrected bar is unavailable, the corrected point remains.
 
-T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+## Next step
 
-These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
+If P(e) is low in the no-tested-reset branch at the intended π gain, check the π pulse before judging reset. No calibration is written. Load cannot convert old files without counts; collect raw IQ separately if you need to refit readout.
 
-## Module slots
-
-Rabi uses `$qubit.module.x180` or pi_pulse. Tested reset uses `$qubit.module.reset` or reset template. Upstream reset is optional; readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Defaults snapshot.
-
-## Typical writeback
-
-This is a diagnostic only; calibration parameters stay unchanged. It reports the reset-only mean and worst sampled excited population and the maximum Other fraction. Saved data contain class counts, so readout refitting requires a separate raw-IQ acquisition. Interpret these summaries as sampled populations rather than histogram confidence intervals.
-
-The returned analysis summary contains `reset_mean_excited_population`, `reset_max_excited_population`, `reset_max_other_population`, `worst_sample_gain` and `analyzed_reset_points`. Corrected population arrays stay local to analysis for the three-branch plot.
-
-## Recommended
-
-Reps are shots per gain per branch per round; rounds average repeated hardware sweeps and update the live plot. Branches are independent preparations. Other counts shots outside the accepted circle regions or tied between them. Calibrated leakage and reset-channel fidelity require separate characterization.
-
-**Last updated:** 2026-10-29
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).

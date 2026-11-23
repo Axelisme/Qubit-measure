@@ -35,6 +35,9 @@ from zcu_lab.v2.singleshot.ge.core import (
     GEPostAnalyzeOptions,
 )
 from zcu_lab.v2.singleshot.ge.form import make_form
+from zcu_lab.v2.support.singleshot.center_quality import (
+    ge_center_relative_error_reasons,
+)
 
 GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
 
@@ -96,14 +99,17 @@ class GEPostSummary(BaseModel):
 
 
 def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
-    """Explain manual selection for single/mux GE model-derived calibrations.
+    """Explain manual selection for single-shot GE model-derived calibrations.
 
-    Joint histogram r2 must be >=0.9, normalized RMS <=0.1 and relative width
-    error <=0.5. These dimensionless gates also guard empirical assignment and
-    centers because a poor model is not calibration evidence. Required missing /
-    nonfinite metrics or their invalid issues prevent preselection. Unrelated
-    fixed-zero parameter issues do not. None means these review gates passed,
-    not that preparation or pure-state readout fidelity has been established.
+    The primary analysis's joint histogram fit must have r2 >=0.9, normalized
+    residual RMS <=0.1, relative width (s) error <=0.5, and relative center
+    errors (sg and se) each <=0.5. A required metric blocks preselection if it
+    is missing, nonfinite, or itself marked invalid. For a finite center error
+    marked invalid, the note gives the reason, value, and required limit.
+    An issue on standard_errors.sg or standard_errors.se alone does not block
+    preselection. A relative center error of 0.0 does not establish center
+    precision. None means these checks passed, not that preparation or
+    pure-state readout fidelity was established.
     """
     quality = None if primary.fit_quality is None else primary.fit_quality.get("joint")
     if quality is None:
@@ -128,6 +134,7 @@ def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
         reasons.append("relative width error unavailable")
     elif width_error > 0.5:
         reasons.append(f"relative width error={width_error:.4g} >0.5")
+    reasons.extend(ge_center_relative_error_reasons(quality))
     return "Review required: " + "; ".join(reasons) if reasons else None
 
 

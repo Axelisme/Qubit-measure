@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-11-22，Workflow operation wire 與 Analyze 摘要
+**Last updated:** 2026-11-23，Figures-only Analyze 的 RPC 空摘要與 recipe 結果連結
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -240,6 +240,10 @@ nonempty collection in the same Run and pane. It does not report disk writes.
 New Run/Load clears this history; Primary replacement also invalidates Post.
 An old operation-bound read rejects with `result_superseded` after replacement.
 Unbound summary reads retain their summary/invalid shape.
+For Primary, `h_tab_get_analyze_result` returns `summary: {}` when a
+figures-only result has been published, and `summary: null` when there is no
+analysis result. See the [adapter publication contract](../../../../../../zcu_lab/v2/gui-contracts.md#capability-宣告與實作)
+and the [recipe result contract](../../../../../../zcu_lab/recipes/README.md#作者可呼叫的操作).
 Element names and original positions belong to the experiment's summary;
 the remote does not infer element identity from figure names or row offsets.
 
@@ -462,6 +466,13 @@ Run 完成不保存 raw。RPC 呼叫 `tab.save_data` 才保存 raw；recipe work
 提供 `raw_data: {run_id, saved}`。這個 run_id 是固定 Run／Load metadata 的身分，保存前就存在。
 Saved 只反映 measurement_data 在 owner tracker 是否全部保存，不查檔案是否仍存在。
 保存 analysis 不會把 raw 的 saved 改成 true。原本頂層 run_id 仍只在至少一個持久輸出成功後出現。
+
+The [Source Run](#analysis-presentation) identifies the Run/Load, not a particular
+Analyze on that source. To verify a Primary result, compare its native
+`operation_id` with `analysis_state.source_operation_id` in `tab.snapshot`.
+Read `tab.get_analyze_result` with that `operation_id`. The reply's `params` comes
+from `result_params`, the options captured at publication, not the current
+editable values.
 
 Post start receipts include `result_read_timeout_seconds` and a source-bound
 `recovery` RPC envelope. The owner budgets 5 seconds plus 5 per measured tone,

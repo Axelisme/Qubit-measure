@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-22，qutrit 參考 IQ 的共用等向寬度
+**Last updated:** 2026-11-23，K-cycle 數值入口與讀出校正後的 shot SEM
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -34,10 +34,13 @@ Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交�
 
 ## 逐點 shot SEM
 
-[`shot_uncertainty`](shot_uncertainty.py) 依來源提供兩種估計。`iq_shot_sem` 接收
+[`shot_uncertainty`](shot_uncertainty.py) 從保留 shots 的 IQ 總和或分類計數估計抽樣誤差。`iq_shot_sem` 接收
 ADR-0074 的單次讀出 IQ 總和 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]`。它取指定 IQ 投影的樣本標準差，再除以 √N。
+只存平均 IQ 時，缺少逐發的散布資訊，無法估計投影的 shot SEM。
 `class_probability_covariance` 用保留 shots 的 one-hot 樣本共變異除以 N 估計平均機率的共變異。
 對角元素開根號就是各類的二項 SEM。比例為 0 或 1 時樣本變異數為 0，不代表信賴區間。
+`corrected_population_sem` 視讀出校正矩陣為已知，用其轉置的逆傳遞 shot 共變異，取對角元素開根號。
+它不估計校正矩陣本身的誤差。算不出有限 SEM 時以 NaN 回傳並記錄警告；接近奇異不另設門檻。
 兩者都以實際保留的 shots 為分母，不估計輪間散布、RB 的 seed 散布或擬合參數誤差。
 少於兩發或缺測（NaN）時，該點誤差未定。負、非整數、無窮計數及其加總溢位會報錯。
 IQ 估計也拒絕無窮矩、超過捨入誤差的負中心平方和，以及不可能的中心共變異，不受選定的投影方向影響。
@@ -108,17 +111,30 @@ K 後熱布居與 readout-driven steady state 不等同。稀少遠端第三態�
 
 ## Readout chain K-cycle
 
+Lab 的 [K-cycle 套件邊界](../../../zcu_lab/v2/README.md#套件邊界) 說明五個 chain core 的分工。
+以 [Amp Rabi 的 `ChainAmpRabiExp.analyze`](../../../zcu_lab/v2/chain/amp_rabi/core.py) 為例，core 從 first-read 估計或保存軸取得起點，再呼叫 `fit_cycle`。
+First-read 用到的 `fit_rabi`、`fit_decay_fringe` 等工具及其初猜失敗契約見 [fitting〈fitting helpers〉](fitting/README.md#fitting-helpers)。
+
 `CycleSums` 保存 K-cycle 讀出鏈逐點的 cycle count、65 個 feature sums 與跨點加總的
 product sum。`cycle_curves` 從這份 record 算出 live plot 的全 feature 曲線與第一讀曲線。
 `CycleModel` 持有作者的三態曲線、解析導數、參數名與 bounds。Rabi、T2 echo 與
 T2 Ramsey 使用這個模型。`t1_model()` 回傳 `RateModel`，以 `D₀ exp(Gx)` 表示
 自由 stochastic 初始 drive 與 detailed-balance relaxation。`fit_cycle` 從必填的 init
-以模型共變異數加權的 GMM 聯合擬合 65 個數，回傳參數與 Wald 誤差、共用
-nuisances、三項 lack-of-fit 檢查與逐點布居，不做接受或拒絕。T1 的 init 是
-`{"t1": textbook_time}`。其結果 `CycleFit.relaxation` 保存兩個 eigen time，並以
-thermal 加權的 L1 population 變化振幅較大者作為 T1。所有擬合導數皆為解析式。欄位版面、座標、限制與失敗條件見
-[cycle.py](readout_chain/cycle.py)、[model.py](readout_chain/model.py)、
-[fit.py](readout_chain/fit.py) 與 [curve_models.py](readout_chain/curve_models.py) 的 docstring。
+以模型共變異數加權的 GMM 聯合擬合 65 個特徵，只跑主擬合，不跑巢狀診斷擬合。
+它回傳參數、Wald 誤差與共用 nuisances，並用最後一階段的白化殘差 `r` 計算 `J`、
+`df`、`J/df`、期望帶 `1 ± 2√(2/df)` 和 `|r| > 3` 的比例。Analyze 照實顯示數值，
+不據此拒絕擬合或標示模型合不合格。五族目前不提議寫回；日後若新增寫回，
+以這些殘差診斷決定是否預選或推薦，不改變 Analyze 的結果。
+T1 的 init 是 `{"t1": textbook_time}`；`CycleFit.relaxation` 保存兩個 eigen time，
+並以 thermal 加權的 L1 population 變化振幅較大者作為 T1。
+
+`cycle_residual_projection` 將實測與 joint model 預測投影到 live 全 feature 的同一方向。
+投影用實測的 pooled 共變異數和 median，與 `J` 使用的模型共變異數不同。可指定密集
+座標來畫模型曲線，不需重跑擬合。若保存矩只支援降秩而無法沿 live 方向投影，
+函式拋出 `CycleProjectionUnavailable`；呼叫者仍可使用已完成的 joint fit。
+無效輸入與 model callback 錯誤不是投影缺席。投影陣列只供畫圖，不放進分析摘要。
+欄位與失敗條件見 [cycle.py](readout_chain/cycle.py)、[model.py](readout_chain/model.py)、
+[fit.py](readout_chain/fit.py) 與 [curve_models.py](readout_chain/curve_models.py)。
 
 ## Stationary Rπ 讀出調參
 
@@ -204,6 +220,8 @@ Fluxdep native 載入與 dispersive 投影共用此規則。
 radius=None 時由 `optimize_ge_radius` 選半徑。選項預設值與畫圖留在實驗。QICK raw buffer 的 accumulator normalization 留在 caller 的實驗 helper；本模組不讀 program metadata。
 
 `analyze_reference_iq` 只收三組 acquired IQ 與準備標籤。它與 centroid3 processor 共用 `utils.shot_classification.nearest_centroid3` 的 g/e/f 最近中心與等距規則。前半訓練 nearest-centroid classifier 與 confusion matrix，後半獨立計算 raw/corrected fractions 與準備標籤錯誤率。最小分離度是最近兩個中心的 IQ 距離除以共用等向 σ。σ² 為 pooled training covariance 的 trace/2；σ 必須為正且有限。矩陣品質由 training confusion 的 condition number 與最小 singular value 表示。Correction 回到準備標籤座標，保留負值與大於 1 的值，不推論參考態純度。`correct_populations` 的既有預設仍 clipping；caller 可用 `clip=False` 保留線性解。
+
+`try_correct_populations` 為一維 circle 分析提供不裁切的數值解。矩陣奇異或原本有限的分類點反解溢位時，記下原因並回傳 `None`。原先缺測的點不算反解溢位。沒有矩陣時原樣回傳；矩陣形狀不符或含非有限值則拋出 `ValueError`。是否只發布分類比例診斷圖由實驗決定，不改 `correct_populations` 的既有契約。
 
 `classify_reference_iq(signals, centroids)` 將固定三中心套用到任意 scan axes 加最後 shot axis 的 acquired IQ，輸出 scan axes 加 g/e/f fraction axis。它也使用共用 nearest kernel。中心與 IQ 使用相同 ADC 單位，不重訓、不修正。Exact ties 歸最低 label。Caller 用 `correct_populations(..., clip=False)` 套用 reference training confusion；結果仍是 preparation-label 座標，不是 latent energy-state population。
 

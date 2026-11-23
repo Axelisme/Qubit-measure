@@ -1,77 +1,27 @@
+**Readers:** operator, agent. Map the mean IQ response versus resonator probe carrier frequency and gain.
+
 # MIST probe frequency and gain
 
-**Readers:** operator, agent. Measure the MIST response over probe frequency and gain from the GUI or MCP.
+For opening, refreshing and saving, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).
 
-**Last updated:** 2026-10-21
+Each shot applies `optional reset → optional preparation → resonator probe → readout → relaxation wait`. The sweeps change the probe frequency and gain, not the readout settings. The map measures IQ displacement, not state population.
 
-## Measurement
+## Set the scan rectangle
 
-Open `mist/power_dep/drive_freq` to map the readout response after a probe pulse.
-Each repetition performs reset, the optional initialization pulse, the probe,
-then readout. Both probe frequency and gain sweep on the board.
-The saved result is mean complex IQ shaped [frequency, gain]. Use a
-classified-population experiment for calibrated populations or leakage
-probabilities.
+- Bind the qubit and resonator. Select reset and preparation for the intended initial state. They start from the qubit's assigned reset and x180 modules; disable either to skip it.
+- Verify the readout pulse, trigger and integration window. Confirm the probe generator and keep probe duration fixed when comparing maps.
+- **Probe carrier frequency sweep** starts at resonator frequency ± 1.5 × linewidth, in MHz. Set actual carrier endpoints, not offsets.
+- Begin the gain sweep in the weak-drive region. Choose stop gain and point spacing to cover and resolve the feature of interest.
+- **Relax delay** starts at 5 × captured T1, or 150 µs if T1 is missing. Invalid T1 leaves the required wait blank. Choose a wait that limits history from earlier shots.
 
-## Sources and defaults
+## Read the maps
 
-Open and Defaults capture the current aliases, parameter sources and module
-selections. Defaults discards edits and captures sources again. Run uses the
-displayed configuration. Reopen the tab or choose Defaults to apply alias changes.
+Run shows how many frequency/gain pairs have data. Acquisition progress counts rounds. Blank cells have no displayed data.
 
-- Optional reset and initialization use `$qubit.module.reset` and
-  `$qubit.module.x180`. Missing slots leave these modules disabled.
-- Probe starts from the resonator probe template: resonator frequency and
-  generator channel, gain 0.05, and a 1 µs constant waveform.
-- Readout uses `$resonator.module.readout` when available, otherwise the readout
-  template. The template needs resonator frequency, generator/ADC channels and
-  `$resonator.time_of_fly`. Missing required sources stay Invalid.
-- Frequency starts at `$resonator.freq` ± 1.5 times
-  `$resonator.kappa`, with 51 points. Gain starts at 0–1 with 51 points.
-  Both sweep axes override the probe's scalar frequency and gain during Run.
-- Reps starts at 1000 and Rounds at 100. Relax delay starts at five times
-  `$qubit.t1`. Missing/null T1 uses a 30 µs scale, giving 150 µs.
-  Invalid stored T1 leaves the delay empty. All these values remain editable.
+Run and Analyze subtract the complex reference averaged over all frequencies and the first 5% of gain points (at least one), then show the magnitude in a.u. Each map scales to its own data; compare colorbar values rather than colors across runs. There is no fit or per-cell error bar.
 
-Review probe duration, channels, gain range, readout and waiting time before Run.
-Set safe ranges using the limits of your hardware. Choose the frequency
-range for the line of interest using measured resonances.
+## Use the response map
 
-## Analysis and saving
+Look for a band that persists across adjacent frequencies and gains. Extend the window if the band meets an edge. Rescan the feature at smaller steps, or use a single gain trace at a selected carrier. Confirm changes with classified readout before assigning populations. There is no writeback.
 
-Analyze subtracts one complex reference pooled over every frequency and the
-first 5% of gain points (at least one), then plots the magnitude as `fit`.
-Gain ordering therefore determines the reference region. The result is a
-response-magnitude map. Calibration parameters remain unchanged. Use a
-classified-population experiment for population calibration.
-
-Save uses the native data format. Frequencies are MHz in memory and Hz on disk.
-Load and Analyze use the saved record while the current form keeps its settings.
-Analysis also accepts records with missing historical configuration.
-
-The `mist_drive_frequency` recipe takes explicit two-endpoint `freq_range`
-(MHz) and `gain_range` (normalized amplitude), plus optional `target` and
-`points`. It uses captured GUI module selections and averaging defaults, runs
-once, saves raw IQ, analyzes and captures a preview. Cancellation stops before
-save and analysis.
-
-## Offline checks
-
-A white-noise simulation exercises pulse execution, acquisition, plots and
-saving with a simulated device. Its output is noise only. Establish physical
-MIST, heating or leakage thresholds with a suitable physical model or hardware
-measurement.
-
-## Four starting situations
-
-1. With an empty kickstart project, Open the Form and inspect its required blanks.
-   Enter the frequency/gain rectangle and verify probe/readout timing. Supply GE calibration where the Form requests it.
-   Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, choose Defaults to recapture those values.
-   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
-   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
-4. Through the agent, call `mist_drive_frequency` after inspecting the same Form errors.
-   freq_range and gain_range are required pairs. points maps to Expts on both axes. Analysis has no operator parameters.
-   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+The `mist_drive_frequency` recipe rejects null or missing `freq_range` and `gain_range` at input validation. Omit `points` to keep both sweep counts. Null clears both Expts values; readiness stops before acquisition if overrides leave them blank. Analyze has no display parameters.

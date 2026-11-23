@@ -1,25 +1,19 @@
-## Behavior
+**Readers:** operator, agent. Search bias, pump RF and power together for a measured setting with high g/e readout separation.
 
-**Readers:** operator, agent. Run joint JPA optimization from the GUI or MCP and interpret the results. A pi pulse switches the qubit preparation between g and e. The optimizer searches the JPA flux device value, pump frequency and pump power jointly to maximize the g/e signal difference. Each evaluated point commands the selected RF and flux devices on real hardware. The devices remain at the last evaluated point. WARNING: review the selected devices and search bounds before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
+# JPA joint search
 
-## Parameter sources
+At each candidate, set all three JPA device values. Compare optional reset → readout (g) with optional reset → calibrated π pulse → readout (e). The score is g/e IQ-center separation divided by the pooled width along the separation axis. **IQ shape penalty** downweights unequal widths or skew. The score is not state population or assignment fidelity.
 
-Uses the qubit (`qubit/*`), resonator and jpa (`amplifier/jpa`) aliases. Search bounds use `$jpa.flux`, `$jpa.pump_freq` and `$jpa.pump_power`. Opening the tab or choosing Defaults reads the required JPA flux device from `$jpa.flux_dev` and the RF default from `$jpa.rf_source`. Both direct names remain editable. A missing flux or RF source leaves its field empty and marks the form Invalid. Select the connected RF device in the form. `flux_unit` starts as A, and the device receives the entered values unchanged. Missing required aliases or calibration marks the form Invalid.
+## Set the search
 
-Relax delay starts at 1*T1 using the parameters captured when you open the tab or choose Defaults. T1 must be a finite positive real number; Boolean values count as invalid. Missing/null T1 or an unavailable parameter snapshot gives a 30 µs initial delay. An invalid stored T1 leaves the required wait field empty, and parameter-source failures report an error. Edit the delay in the form as needed; the stored T1 stays unchanged.
+- Bind the qubit, resonator and JPA. Check the calibrated **Qubit π pulse**, **Readout** and optional **Reset**. The fallback readout trigger starts at flight time + 0.015 µs. **Relaxation wait** starts at the captured T1, or 30 µs if missing; enter a calibrated wait if an invalid T1 leaves it blank.
+- Confirm **JPA flux-bias source** and **JPA pump RF source**, initially the JPA's stored device names. Match **JPA bias unit** to the source; there is no conversion. Review both devices and the approved bounds before Run.
+- **JPA flux-bias value**, **JPA pump RF frequency**, and **JPA pump source power** start at stored bias ± 0.005 source units, 0.98–1.02 × stored pump frequency, and stored power ± 5 dBm. The ratios of the three **Expts** counts allocate initial samples; they do not define a Cartesian grid. **Candidate budget** sets the total, at least 4. Leave **Optimizer seed** empty for a new search; the same seed and score history give the same choices.
 
-The JPA flux axis and saved values use device-native `a.u.` without scaling. This label does not assert a physical current or voltage unit; review the selected device and `flux_unit` separately.
+For tab setup, refreshing sources, applying and saving, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-## Module slots
+## Read the search and choose a setting
 
-Module slots use `$qubit.module.x180`, `$resonator.module.readout` and optional `$qubit.module.reset`. Empty pi/readout slots use the pi_pulse/readout templates. The pi pulse uses `$qubit.freq` and `$qubit.wiring.ch`; readout uses resonator frequency/wiring and `$resonator.time_of_fly` + 0.015 µs. An empty reset slot disables reset. Missing calibration required by these templates marks the form Invalid.
+The four panels show the same points by evaluation order, bias, RF and power. Color is search stage. Live counts sampled candidates and retained shots. The order panel connects scores to show whether they improve late. The three setting panels are scatter views of the same joint search, not independent sweeps; check if the best point is at a bound. Analyze marks the same best joint setting in all four panels with a red star. There is no fit or shot SEM.
 
-## Typical writeback
-
-Analysis proposes the signal-maximizing settings as three separate drafts: `$jpa.flux` in `$jpa.flux_unit` coordinates, `$jpa.pump_freq` in MHz and `$jpa.pump_power` in dBm. You can accept, cancel or retarget each draft independently. Accept a draft to update its stored parameter. Writeback changes stored parameters only; device settings and the current-source value stay unchanged.
-
-## Recommended
-
-For each sweep, start/stop set the search bounds and expts gives a relative resolution hint. The optimizer compares all three hints to allocate its phase-1 flux slices and points per slice; the actual sample counts follow that allocation. Global optimizer points (`num_points`, at least 4, default 1001) sets the total evaluation budget. Raise it for wider bounds or lower it for a quick search. Optimizer seed fixes the Latin hypercube sampler and the Bayesian optimizer: with the same seed and the same measured SNRs, a run proposes the same points; leave it empty to draw a new search each run. Analysis reports the best evaluated point using fixed settings.
-
-**Last updated:** 2026-11-01
+The devices remain at the **last evaluated** setting, not necessarily the best one. Verify the best tuple together; do not combine axis values from different points. Repeat with narrower bounds around a stable interior best candidate. Apply stores the selected `$jpa.flux`, `$jpa.pump_freq` and `$jpa.pump_power` proposals, without commanding the devices.

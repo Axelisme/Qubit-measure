@@ -3,8 +3,8 @@
 One cycle is one rep: the thermalisation wait K (relax_delay), then eight
 blocks of (π/2, wait x, inverse π/2, read, read). The host reduces each cycle
 to 65 numbers and keeps only running sums. Analysis fits all 65 numbers
-jointly with Ramsey curves, starting from the usual twotone fit of the first
-read.
+jointly with Ramsey curves, starting from the first-read fit or from the
+saved wait coordinates when the first-read fit has no estimate.
 """
 
 from __future__ import annotations
@@ -13,15 +13,17 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.fitting import fit_decay_fringe
+from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.analysis.fitting import DecayFringeFit, decaycos, fit_decay_fringe
 from zcu_tools.analysis.readout_chain import (
-    CycleCheck,
-    CycleNuisances,
+    CycleProjectionUnavailable,
     CycleSums,
     cycle_curves,
+    cycle_residual_projection,
     fit_cycle,
     t2_ramsey_model,
 )
@@ -39,35 +41,34 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     chain_cycle_sums,
 )
-from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
-    checks_text,
     cycle_sums_variables,
-    first_read_iq,
+    first_read_projection,
     restore_cycle_sums,
 )
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar, live_line
+
+from .._joint import JointResidualDiagnostics, plot_joint_residuals
 
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
+_SWEEP_LABEL = "Free-evolution wait (µs)"
+_IQ_TITLE = "K-cycle T2 Ramsey · Qubit · First-read IQ"
+_IQ_LABEL = "Projected mean IQ (a.u.)"
 
 
 @dataclass(frozen=True)
-class ChainT2RamseyAnalysis:
-    """Ramsey fit of all 65 numbers, its checks and its starting values.
+class ChainT2RamseyAnalysis(JointResidualDiagnostics):
+    """Joint Ramsey estimates, scalar residual diagnostics and first-read seeds.
 
-    t2 and t2_err are the fitted Ramsey decay time in us and its Wald error.
-    detuning and detuning_err are the fringe frequency in MHz (cycles per us),
-    including the programmed phase ramp, and its Wald error. tf and tf_err are
-    the third state's decay time in us and its Wald error. reliability is
-    R = 1 / (2π × delay span × detuning_err), a diagnostic without a
-    threshold. within_point, sharing and curve are the three lack-of-fit
-    checks of fit_cycle (sharing has no p). J and df are the joint weighted
-    residual and its degrees of freedom. first_read_t2 and first_read_detuning
-    come from the twotone/t2ramsey fringe fit of the first read; they started
-    t2, tf and detuning.
+    t2 and tf are the Ramsey and third-state decay times in µs. detuning is
+    the fringe frequency in MHz, including the programmed phase ramp. The
+    corresponding errors are Wald standard errors. reliability is
+    R = 1 / (2π × delay span × detuning_err), without a threshold.
+    The first-read estimates, in µs and MHz,
+    are None if that fit has no estimate.
     """
 
     t2: float
@@ -77,45 +78,86 @@ class ChainT2RamseyAnalysis:
     tf: float
     tf_err: float
     reliability: float | None
-    within_point: CycleCheck
-    sharing: CycleCheck
-    curve: CycleCheck
-    J: float
-    df: int
-    first_read_t2: float
-    first_read_detuning: float
+    first_read_t2: float | None
+    first_read_detuning: float | None
+
+
+def _plot_first_read(
+    plots: Plots,
+    delays: NDArray[np.float64],
+    signal: NDArray[np.float64],
+    sem: NDArray[np.float64],
+    fit: DecayFringeFit | None,
+) -> None:
+    fig, ax = plots.subplots(num="fit", figsize=config.figsize, layout="constrained")
+    fig.suptitle(_IQ_TITLE)
+    ax.errorbar(
+        delays,
+        signal,
+        yerr=sem,
+        fmt=".-" if fit is None else ".",
+        color="C0",
+        label="First-read mean ± shot SEM",
+    )
+    ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    if fit is None:
+        ax.set_title("First-read fit unavailable", loc="left", fontsize=10)
+    else:
+        dense = np.linspace(delays.min(), delays.max(), 400)
+        ax.plot(dense, decaycos(dense, *fit.params), color="C1", label="First-read fit")
+        if delays.min() <= fit.decay_time <= delays.max():
+            ax.axvline(fit.decay_time, ls="--", color="0.35", linewidth=1)
+        r2 = fit.quality.r2
+        residual = fit.quality.normalized_residual_rms
+        r2_text = "unavailable" if r2 is None else f"{r2:.3g}"
+        residual_text = "unavailable" if residual is None else f"{residual:.3g}"
+        ax.set_title(
+            f"First-read T2* = {fit.decay_time:.4g} ± {fit.decay_time_err:.2g} µs\n"
+            f"First-read fringe frequency = {fit.freq:.4g} ± {fit.freq_err:.2g} MHz\n"
+            f"R² = {r2_text} · Normalized residual RMS = {residual_text}",
+            loc="left",
+            fontsize=10,
+        )
+    fig.legend(loc="outside lower center", ncols=2)
+
+
+def _estimate_with_se(value: float, error: float, unit: str) -> str:
+    if not np.isfinite(error):
+        return f"{value:.4g} {unit} (SE unavailable)"
+    return f"{value:.4g} ± {error:.2g} {unit}"
 
 
 class ChainT2RamseyCfg(ConfigBase):
     pi2_pulse: Annotated[
         Pulse.Cfg,
         FieldMeta(
-            label="Pi/2 Pulse",
-            description="Calibrated π/2 pulse played before each wait, and again with opposite phase after it.",
+            label="π/2 pulse",
+            description="Select the calibrated π/2 pulse used before and after each wait; the second pulse starts with opposite phase.",
         ),
     ]
     readout: Annotated[
         PulseReadout.Cfg,
         FieldMeta(
             label="Readout",
-            description="Pulse readout played twice after each second π/2.",
+            description="Select the single-tone pulse readout used twice after the final π/2 pulse.",
         ),
     ]
     delay: Annotated[
         SweepCfg,
         FieldMeta(
-            label="Delay",
+            label="Free-evolution wait",
             unit="µs",
-            description="Free-evolution wait x between the two π/2 pulses.",
+            description="Enter Start and Stop (µs) and Expts, the number of waits (count).",
         ),
     ]
     detune: Annotated[
         float,
         FieldMeta(
-            label="Detune",
+            label="Ramsey phase-ramp detune",
             unit="MHz",
             decimals=3,
-            description="Second π/2 phase ramp in fringes per µs, without changing the drive frequency.",
+            description="Enter the phase ramp of the second π/2 pulse (MHz); it adds fringes without changing the drive frequency.",
         ),
     ] = 0.0
     reps: Annotated[
@@ -123,7 +165,7 @@ class ChainT2RamseyCfg(ConfigBase):
         FieldMeta(
             label="Reps",
             unit="count",
-            description="Cycles per point in each round, at least 66.",
+            description="Enter the number of cycles at each sweep point in one round (at least 66).",
         ),
     ] = Field(ge=66)
     rounds: Annotated[
@@ -131,16 +173,16 @@ class ChainT2RamseyCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Software acquisition rounds.",
+            description="Enter the number of rounds; each round measures all sweep points.",
         ),
     ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
-            label="Relax delay",
+            label="Cycle thermalisation wait K",
             unit="µs",
             decimals=3,
-            description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
+            description="Enter the wait before each cycle (µs); use at least 5 × T1 to start near thermal equilibrium.",
         ),
     ]
 
@@ -163,27 +205,37 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         x, a second π/2 and two reads. The second π/2 has the phase of the
         first plus 180 degrees, so at zero delay it undoes the first, plus the
         ramp 360 × detune × x degrees. One round makes cfg.reps cycles at every
-        delay. After each round the live plot shows the all-number and
-        first-read curves in sigma. Return the running sums of all completed
+        delay. The live plot shows projected first-read IQ with shot SEM, the
+        all-feature diagnostic and cycle progress after each round. Return the running sums of all completed
         rounds as CycleSums along the delay axis in us. A stop keeps completed
         rounds; a stop before the first round finishes raises RuntimeError.
         """
         # 1. Delay axis and the live plot.
         delays = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Delay (µs)", ylabel="Projected signal (sigma)")
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
-        lines = live_line(ax, num_lines=2)
-        ax.lines[0].set_label("all 65 numbers")
-        ax.lines[1].set_label("first read")
-        ax.legend()
+        fig, _ = context.plots.subplots(
+            num="measurement", nrows=2, sharex=True, layout="constrained"
+        )
+        ax, diagnostic_ax = fig.axes
+        ax.set(title=_IQ_TITLE, ylabel=_IQ_LABEL)
+        diagnostic_ax.set(xlabel=_SWEEP_LABEL, ylabel="Joint projection\n(SEM units)")
+        diagnostic_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        iq_points = live_errorbar(ax)
+        diagnostic_line = live_line(diagnostic_ax)
+        progress = fig.suptitle("Waiting for the first round")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
-            curves = cycle_curves(CycleSums.from_augmented(delays, data))
-            return lines.set(
-                delays, np.stack([curves.main_sigma, curves.first_read_sigma])
+            sums = CycleSums.from_augmented(delays, data)
+            signal, sem = first_read_projection(sums)
+            joint = cycle_curves(sums)
+            shots = int(joint.cycle_count.min())
+            progress.set_text(
+                f"Round {shots // cfg.reps}/{cfg.rounds} · {shots} cycles per point (count)"
+            )
+            return (
+                *iq_points.set(delays, signal, sem),
+                *diagnostic_line.set(delays, joint.main_sigma),
+                progress,
             )
 
         fig.show()
@@ -250,58 +302,46 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         """Fit all 65 numbers with Ramsey curves, starting from the first read.
 
         First project the first read IQ and fit a decaying fringe with free
-        phase. Publish "fit"; its T2 starts t2 and tf and its fringe frequency
-        starts detuning. Then fit_cycle fits
-        the saved sums with t2_ramsey_model and publishes "populations":
-        per-delay first-read populations with error bars and the fitted
-        curves. Return t2, detuning and tf with Wald errors, R and the three
-        checks. The source cfg may be None. Fitting failures of either fit
-        propagate.
+        phase. Its T2 starts t2 and tf, and its fringe frequency starts
+        detuning. If the numerical fitter cannot estimate the first read, use
+        one starting point based on the saved waits (µs) and show only the data
+        and shot SEM in "fit". Fit the full sums once with the joint Ramsey
+        model. Publish the live-direction projection and signed differences as
+        "joint residuals". Return t2, detuning and tf with Wald errors, R and
+        scalar residual diagnostics. The source cfg may be None. Invalid
+        inputs, callback errors and joint fit failures propagate.
         """
         del options  # This analysis has no configurable options.
         sums = source.result
         delays = sums.axis
 
-        # 1. Seed from the first-read IQ using this experiment's fit policy.
-        seed_lengths = delays
-        seed_real_signals = rotate2real(first_read_iq(sums)).real
-        seed_fit = fit_decay_fringe(seed_lengths, seed_real_signals, fixedparams=None)
-        seed_t2r, seed_t2rerr, seed_detune, seed_detune_err, seed_y_fit = (
-            seed_fit.decay_time,
-            seed_fit.decay_time_err,
-            seed_fit.freq,
-            seed_fit.freq_err,
-            seed_fit.curve,
-        )
-        seed_fig, seed_ax = plots.subplots(num="fit", figsize=config.figsize)
-        seed_ax.plot(
-            seed_lengths,
-            seed_real_signals,
-            label="meas",
-            ls="-",
-            marker="o",
-            markersize=3,
-        )
-        seed_ax.plot(seed_lengths, seed_y_fit, label="fit")
-        seed_t2r_str = f"{seed_t2r:.2f}µs ± {seed_t2rerr:.2f}µs"
-        seed_detune_str = f"{seed_detune:.2f}MHz ± {seed_detune_err * 1000.0:.2f}kHz"
-        seed_ax.set_title(
-            f"T2 fringe = {seed_t2r_str},\ndetune = {seed_detune_str}", fontsize=15
-        )
-        seed_ax.set_xlabel("Delay Time (µs)")
-        seed_ax.set_ylabel("Signal Real (a.u.)")
-        seed_ax.legend()
-        seed_ax.grid(True)
-        seed_fig.tight_layout()
-        first_read_t2, first_read_detuning = (float(seed_t2r), float(seed_detune))
+        # 1. Fit the first-read IQ to seed the joint model.
+        seed_signal, seed_sem = first_read_projection(sums)
+        try:
+            seed_fit = fit_decay_fringe(delays, seed_signal, fixedparams=None)
+        except AnalysisFailed:
+            seed_fit = None
+            first_read_t2 = first_read_detuning = None
+            waits = np.unique(delays)
+            span = float(waits[-1] - waits[0])
+            gap = float(np.diff(waits).max())
+            start = {
+                "t2": span / 3,
+                "tf": span,
+                "detuning": min(5 / span, 1 / (10 * gap)),
+            }
+        else:
+            first_read_t2 = float(seed_fit.decay_time)
+            first_read_detuning = float(seed_fit.freq)
+            start = {
+                "t2": first_read_t2,
+                "tf": first_read_t2,
+                "detuning": first_read_detuning,
+            }
 
-        # 2. Joint fit of all 65 numbers; the third state starts from the same T2.
+        # 2. One joint fit of all 65 numbers using the original wait rows.
         model = t2_ramsey_model()
-        fit = fit_cycle(
-            sums,
-            model,
-            {"t2": first_read_t2, "detuning": first_read_detuning, "tf": first_read_t2},
-        )
+        fit = fit_cycle(sums, model, start)
 
         t2, t2_err = fit.parameters["t2"], fit.errors["t2"]
         detuning, detuning_err = fit.parameters["detuning"], fit.errors["detuning"]
@@ -309,39 +349,60 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         reliability_text = (
             "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
         )
-        population_dense = np.linspace(delays.min(), delays.max(), 400)
-        assert isinstance(fit.nuisances, CycleNuisances)
-        population_fitted = model.populations(
-            population_dense, fit.parameters, fit.nuisances
+        title = (
+            "K-cycle T2 Ramsey · Qubit · Joint fit\n"
+            f"T2* = {_estimate_with_se(t2, t2_err, 'µs')} · R = {reliability_text}\n"
+            f"Fringe frequency = {_estimate_with_se(detuning, detuning_err, 'MHz')}\n"
+            f"Third-state decay time = {_estimate_with_se(tf, tf_err, 'µs')}"
         )
-        population_fig, population_ax = plots.subplots(
-            num="populations", figsize=config.figsize
+        band_low, band_high = fit.expected_band
+        diagnostics = (
+            f"J = {fit.J:.5g}    df = {fit.df}    J/df = {fit.j_per_df:.5g}\n"
+            f"χ² reference = [{band_low:.4f}, {band_high:.4f}]    Fraction |r| > 3: {fit.tail_fraction:.3%}"
         )
-        for population_state in range(3):
-            population_thermal = fit.nuisances.thermal[population_state]
-            population_ax.errorbar(
+        grid = np.linspace(delays.min(), delays.max(), 400)
+        try:
+            view = cycle_residual_projection(sums, model, fit, model_axis=grid)
+        except CycleProjectionUnavailable:
+            fig = Figure(figsize=(8, 2.4), layout="constrained")
+            fig.suptitle(title)
+            fig.text(
+                0.5,
+                0.28,
+                f"{diagnostics}\n\nLive-direction projection unavailable",
+                ha="center",
+                va="center",
+            )
+            plots.adopt("joint residuals", fig)
+        else:
+            fig, _ = plots.subplots(
+                num="joint residuals",
+                nrows=2,
+                sharex=True,
+                figsize=(8, 6.5),
+                gridspec_kw={"height_ratios": (2, 1), "hspace": 0.18},
+                layout="constrained",
+            )
+            projection_ax, residual_ax = fig.axes
+            plot_joint_residuals(
+                projection_ax,
+                residual_ax,
                 delays,
-                fit.populations[:, population_state],
-                yerr=fit.population_errors[:, population_state],
-                fmt="o",
-                markersize=3,
-                color=f"C{population_state}",
-                label=f"state {population_state}, thermal {population_thermal:.2f}",
+                grid,
+                view,
+                ("Measured · all 65 numbers", "Joint model"),
             )
-            population_ax.plot(
-                population_dense,
-                population_fitted[:, population_state],
-                color=f"C{population_state}",
-            )
-        population_ax.set_xlabel("Delay (µs)")
-        population_ax.set_ylabel("First-read population")
-        population_ax.set_title(
-            f"{f'T2 = {t2:.4g} ± {t2_err:.2g} µs, detuning = {detuning:.4g} ± {detuning_err:.2g} MHz, third state {tf:.3g} ± {tf_err:.2g} µs, R = {reliability_text}'}\n{checks_text(fit)}",
-            fontsize=9,
-        )
-        population_ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
-        population_ax.grid(True)
-        population_fig.tight_layout()
+            if delays.min() <= t2 <= delays.max():
+                projection_ax.axvline(
+                    t2, linestyle="--", color="0.35", linewidth=1, label="Joint T2*"
+                )
+            fig.suptitle(title)
+            projection_ax.set_title(diagnostics, fontsize=10)
+            projection_ax.set_ylabel("Joint projection\n(SEM units)")
+            residual_ax.set(xlabel=_SWEEP_LABEL, ylabel="Measured − model\n(SEM units)")
+            residual_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+            fig.legend(loc="outside lower center", ncols=3)
+        _plot_first_read(plots, delays, seed_signal, seed_sem, seed_fit)
 
         return ChainT2RamseyAnalysis(
             t2=t2,
@@ -351,11 +412,12 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
             tf=tf,
             tf_err=tf_err,
             reliability=fit.reliability,
-            within_point=fit.within_point,
-            sharing=fit.sharing,
-            curve=fit.curve,
-            J=fit.J,
-            df=fit.df,
             first_read_t2=first_read_t2,
             first_read_detuning=first_read_detuning,
+            J=fit.J,
+            df=fit.df,
+            j_per_df=fit.j_per_df,
+            expected_band_low=band_low,
+            expected_band_high=band_high,
+            tail_fraction=fit.tail_fraction,
         )

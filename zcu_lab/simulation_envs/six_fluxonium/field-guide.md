@@ -306,8 +306,10 @@ readout effects. Each qubit evolves independently, and each shot starts from
 its configured equilibrium rather than the previous shot's final state.
 
 Readout input uses sqrt(photons/ns) per gain. Receiver gain maps sqrt(photons/ns)
-to ADC units. Offset is an I/Q pair, and the two-sided noise PSD is a 2-by-2 I/Q
-covariance in ADC units squared times ns. Receiver phase uses degrees;
+to ADC units. Offset is an I/Q pair. Set each receiver's `noise_psd_adc2_ns`
+to one finite nonnegative two-sided white PSD in ADC²·ns. I and Q are independent
+and each has variance PSD divided by the sample period in ns. Use zero to disable
+receiver noise. The loader rejects a 2-by-2 matrix. Receiver phase uses degrees;
 resonator mismatch phase uses radians. Time of flight uses ns.
 Program input durations and trigger offsets use us, and frequencies use MHz.
 

@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-22, full collapse operators and frozen physical v2
+**Last updated:** 2026-11-23, fixed-H collapse operators and frozen physical v2
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -256,13 +256,13 @@ owns the OpenCL context and releases it on `close()` after active work ends.
 
 ## Frozen numeric inputs and references
 
-`FROZEN_PHYSICAL_VERSION` owns the physical decoding contract for manifests
-and standalone inputs. It changes when fields, units, dtypes, defaults or
-Engine-input reconstruction change. `SCENE_CACHE_VERSION` owns the index JSON
-and supplied cache-directory layout. The physical version is 2; the scene
-cache version is 1. Consumers compare both
-without parsing storage layout. `SEGMENT_NUMERIC_VERSION` records numerical
-algorithm semantics, not input-format compatibility.
+[`FROZEN_PHYSICAL_VERSION`](frozen.py) owns the physical decoding contract for
+manifests and standalone inputs. It changes when fields, units, dtypes, defaults
+or Engine-input reconstruction change. [`SCENE_CACHE_VERSION`](scene_cache.py)
+owns the index JSON and cache-directory revision. The physical version is 2;
+the scene-cache version is 1. Consumers compare both without parsing storage
+layout. `SEGMENT_NUMERIC_VERSION` records numerical algorithm semantics, not
+input-format compatibility.
 
 The public codec snapshots a `ModelSource` and one `TimelineBatch` without
 running an Engine or a solver. `write_frozen_input(path, source, batch)` writes
@@ -293,8 +293,9 @@ identity-free hashes allow oracle sharing. Neither hash is a reference key.
 physical-version-2 canonical JSON inside stdlib gzip. `FrozenRecord(name, physical,
 metadata=None)` keeps caller metadata opaque. Its `physical_sha256` and
 `oracle_sha256` properties calculate the complete and identity-free hashes.
-The writer calculates both hashes; `read_frozen_manifest(path)` verifies them
-and returns a tuple in original order. Both reject duplicate names. The gzip
+The writer calculates both hashes. `read_frozen_manifest(path)` checks the
+version and both hashes, then returns a tuple in original order. Both reject
+duplicate names. The gzip
 header has mtime=0 and no filename, so identical records produce identical bytes
 at different paths. Reconstruct a source separately with
 `read_physical_input(record.physical)` and close it after use. The container
@@ -314,14 +315,14 @@ publish with replace, preserving existing pins on a pre-publication failure.
 order and verifies their full identities, including opaque metadata. A missing
 file raises FileNotFoundError with the record name and hashes. None of these APIs
 constructs a model, runs an Engine/solver, resolves Git or deletes old cache files.
-Callers own cache locations and producer instructions. `SCENE_CACHE_VERSION` is
-1; callers negotiating a shared numeric format can compare it without parsing
-cache filenames or containers.
+For the scene-cache location and producer commands, see
+[Freeze numeric scenes](../../../../tools/README.md#freeze-numeric-scenes).
 
-`reference_key(source, batch)` preserves the historical key formula. It hashes
-version 1, identity-free physics, coarse tolerances 2e-10/2e-12, fine tolerances
-2e-12/2e-14 and convergence limit 2e-6. Callers can override both tolerance
-records. Solver identity and routing history do not enter the key.
+[`reference_key(source, batch)`](reference_cache.py) identifies a cached NPZ
+result. It hashes the key's own version 1, identity-free physics, coarse
+tolerances 2e-10/2e-12, fine tolerances 2e-12/2e-14 and convergence limit 2e-6.
+Callers can override both tolerance records. Solver identity and routing history
+do not enter the key.
 `load_reference(cache_dir, source, batch)` only reads the matching NPZ, without
 pickle or directory creation. A miss raises `FileNotFoundError`; it never solves.
 `write_reference` atomically publishes `density` and `convergence_error` under
@@ -338,7 +339,10 @@ with explicit collapse operators instead of publishing a secular approximation.
 supplied indexes before reading payloads. Zero or multiple matches fail without
 solving; other rows need no payload. Without a scenario, all indexed rows remain
 selected. All selected numeric files load before any solver runs. Metadata
-and scene names do not select the solver. Both solvers stay in tests. The codec imports neither tests nor tools.
+and scene names do not select the solver. See
+[Reference solver limits](#reference-solver-limits) for the bath inputs both
+solvers use. Both solvers stay in tests. The codec imports neither tests nor
+tools.
 See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
 
 ## Dispatch inspection
@@ -982,7 +986,7 @@ and the original route.
 | --- | --- | --- | --- | --- |
 | [`t4`](kernels/t4.py), static idle evolution | `idle` | Exact secular population semigroup and coherence phases/decay. Guard requires zero tones; no approximation threshold. | [`idle_coherence`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`adiabatic_map`](kernels/adiabatic_map.py), undriven flux transport | `adiabatic` | Preserve ordered populations, integrate dynamical/gauge phases and decay coherences. Requires waveform samples. Quadrature doubles from 4 to 4096 nodes per knot interval until phase-factor change ≤ B/10; overlap < 0.25 forces refinement. This does not check nonadiabatic transitions, degeneracy or crossings. | [`adiabatic_ramp`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`flux_dop853`](kernels/flux_dop853.py), driven continuous flux | `flux` | Integrate full H(flux(t)) with a fixed quantized secular bath per row, stopping at active flux/envelope knots. Requires tones and waveform samples. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py). | [`continuous_flux`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| <a id="flux-dop853"></a>[`flux_dop853`](kernels/flux_dop853.py), driven continuous flux | `flux` | Integrate full H(flux(t)) with a fixed quantized secular bath per row, stopping at active flux/envelope knots. Requires tones and waveform samples. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py). | [`continuous_flux`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`slow_envelope`](kernels/slow_envelope.py), low-carrier constant drive | `slow`, carrier magnitude strictly below 30 MHz | Nonzero carriers use midpoint-held full Hamiltonians with Strang bath half-steps, default 20 holds per period. Dissipative DC uses the exact constant Lindblad channel without splitting, storing O(M⁴) complex values for M levels. Bath-free DC uses one unitary. Dispatch and kernel guard share the strict absolute-carrier < 30 MHz comparison; exactly ±30 MHz belongs to plateau. No budget adaptation; historical population calibration is separate from this density measurement. | [`low_carrier`, `dephasing_pump`, `raman_decay`, `raman_weak_legs`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [boundary contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS |
 | [`dyson`](kernels/dyson.py), weak constant drive | `plateau` | Second-order full-carrier modal Dyson. Calibrated guards require r ≤ min(0.1, 0.25B^(1/3)), r2 ≤ 0.05, and second-order population indicator B2 + B/8 ≤ min(0.02, (1.5B)^(2/3)). Certified shared no-drive prefixes omit the B2 check. B/8 reserves path pruning; this is not a multilevel remainder proof. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`single_tone_rwa`](kernels/single_tone_rwa.py), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with first/second-order population-transfer restoration at 5.8e-3, including forward edges and adjoints. Final admission uses kappa2 = spectral norm of sum_sign abs(c/d) over the resolved omitted edges, ≤ 0.08, in place of the remaining transfer comparison. Full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms; phase-graph pruning is separate. Cross-component density entries below 1e-5 after the initial kick are dropped. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at kappa2 inner edge: 3.061429e-13 |
@@ -1044,7 +1048,13 @@ The earlier 8.066669e-3 edge is replaced, not retained as an expected failure.
 Both independent timeline solvers,
 [lab-frame `reference_timeline`](../../../../tests/simulate/evolution/contract/reference.py)
 and [interaction-picture `interaction_density`](../../../../tests/simulate/evolution/contract/interaction_reference.py),
-reject batches with `segment_shifts`. The matrix does not certify shifted spans.
+build their dissipative terms from the secular bath's `rates_per_ns` and
+`dephasing_per_ns`. On inputs both support, they integrate the same Lindblad
+equation with this secular bath and retain all Hamiltonian drive terms, without
+a rotating-wave approximation. Neither accepts non-secular collapse operators
+or a full Lindblad superoperator (full L) as input.
+Both reject batches with `segment_shifts`. The matrix does not certify shifted
+spans.
 For the FTF producer and guard query, see [Common-frame guard diagnostics](#common-frame-guard-diagnostics).
 
 ### Constant-pair guard evidence

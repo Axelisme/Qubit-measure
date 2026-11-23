@@ -1,68 +1,35 @@
-## Behavior
+**Readers:** operator, agent. Measure the resonator center and full linewidth (FWHM) from a narrow one-tone sweep of complex IQ.
 
-**Readers:** operator, agent. How to run one-tone resonator spectroscopy from the GUI or MCP and review calibration updates.
+# One-tone resonator spectrum
 
-The measurement runs on real hardware. It sweeps readout frequency and fits the resonator response to extract its frequency and linewidth. Run it after a coarse resonator search has placed you near the right frequency.
+Each shot plays one readout pulse → demodulates at that same swept RF → integrates over the ADC window. Each round covers the full RF grid. There is no qubit drive or state classification. Analyze fits both quadratures: the center locates the resonance, and FWHM gives its frequency width.
 
-**Last updated:** 2026-10-25
+## Set up the sweep
 
-After changing the parameter source, use Defaults to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Defaults can overwrite unsaved inputs.
+- Bind `resonator` and measure flight time with [lookback](../../lookback/guide.md). If the center is unknown, start with [range find](../range_find/guide.md). Check **Gen ch**, **RO ch**, **NQZ** (output Nyquist zone), and **Mixer freq** (blank for a route without a mixer) against that wiring. **Gain** is DAC full-scale fraction, not power. Leave **Classifier** at None.
+- **Readout › Phase** rotates the transmitted carrier in degrees; it is not the Homophasal circle phase. **Pre-delay** moves the transmitted pulse but not **Trig offset**. Move the trigger by the same amount if the ADC window should stay at the same place on the pulse.
+- **Trig offset** starts at flight time plus `5/(2π·κ)` µs for linewidth κ in MHz, or flight time alone without κ. The pulse starts no shorter than the template and extends to cover the trigger plus **RO length** (template length minus 0.03 µs). If flight time is missing, fill the required trigger and pulse length. Check the ADC window against the arriving pulse.
+- **Post-delay** lets the cavity empty. Start at `5/(2π·κ)` µs; to calibrate this wait, compare herald → nominal Xπ with a longer wait. **Relax delay** is the separate wait after each shot.
+- **Readout RF frequency** starts at the captured center ± 1.5 linewidths. In `linrange` enter Start/Stop; in `center` enter Center and full Span (endpoints Center ± Span/2). Both use Expts and include the endpoints. The `_step` modes use a Step toward the stop, no larger than the span; a partial final step is dropped. For example, 0.3 MHz over 1 MHz stops 0.9 MHz from the start.
+- Use **Sampling mode › Linear** for a first fit. **Homophasal** keeps the effective endpoints and count but spaces samples in circle phase. Use the prior fitted **Resonance frequency**, **Linewidth (FWHM)** and **Circle phase offset** (rad), not the transmitted pulse phase. If the old calibration is unreliable, return to Linear.
 
-## Parameter sources
+For tab setup, refreshing sources, applying and saving, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-The tab uses a fixed copy of the resonator parameters taken when it was opened or reset. `resonator.freq` and `resonator.kappa` seed the sweep. The ADC window starts at 0.97 µs. Trigger timing reads the top-level `$resonator.time_of_fly`, adding `5/(2π·kappa)` µs when kappa is set. Missing or null TOF leaves trigger and pulse length required and blank. Pulse length starts at the larger of 1.0 µs and trigger plus the ADC window. `resonator.wiring.ch` and `resonator.wiring.ro_ch` seed the channels. Missing or null calibration leaves required fields Invalid until valid values are supplied.
+## Read the plots
 
-The Sampling mode selector offers Linear or Homophasal. Homophasal shows three required fields: `r_f` in MHz, `rf_w` in MHz, and `theta0` in rad. Selecting Homophasal seeds editable values from the saved `resonator.freq`, `resonator.kappa`, and `resonator.ext.theta0`. Missing sources or expression evaluation failures leave the corresponding fields empty. Values that fail measurement validation stay visible with an error and block submission. Override each value directly or with an expression.
+- **Run** plots `|mean(I + iQ)|` (a.u.) versus acquired absolute RF (MHz), with no shot SEM. Widen the scan if either flank is clipped. Increase averaging when noise hides the feature.
+- **Analyze** overlays the fit on the magnitude samples and marks its center, which need not coincide with the notch minimum. The fit excludes the first and last samples. FWHM and center are in MHz, without fit standard errors. Choose **Resonance model** `hm` for a hanger notch, `t` for a transmission peak or `auto` to choose from magnitude. The two background controls allow an amplitude slope and quadratic phase curvature; drop a term if the scan cannot distinguish it from the resonance.
+- **Electrical delay seed** (µs) selects a starting branch, not a fixed delay. Blank uses the saved delay for the same generator/ADC pair or searches within 100 µs without one. Enter a signed seed (including zero) only with independent evidence from calibration or a prior spectrum; ADC flight time is not that evidence.
+- **IQ diagnostics** compares unwrapped phase and the IQ locus against the fit. Check for systematic mismatch even when magnitude agrees. R² compares with the mean predictor (1 exact, 0 as good as the mean, negative worse); normalized residual RMS divides RMS mismatch by the observed range. Both use the interior I and Q, not the magnitude alone. The summary's Reps × Rounds are configured, not completed shots.
 
-Analysis can also use the saved `resonator.ext.edelay` calibration when it matches the readout route.
+## Use the fit
 
-## Readout module
+For a refined scan use `center_fit ± 1.5·FWHM_fit` with several samples per linewidth. The center correction is `center_fit − center_previous`. Confirm state separation separately; a resonance fit does not measure it.
 
-The readout starts as a fresh inline pulse with a `const` waveform. Configure its pulse settings directly in the tab.
+Writeback proposes resonator frequency, linewidth, circle phase, and a readout differing only in RF frequency (accept the module and slot rows together to select it). Delay is proposed only for a known generator/ADC route and a trusted seed or nonuniform grid; a uniform grid alone leaves the branch ambiguous. A native Load without compatible parameter capture can still fit IQ, but does not supply a source for writeback.
 
-Use lookback to measure TOF, then one-tone spectroscopy to measure kappa. Review trigger offset and waveform duration in µs after those calibrations.
-Enter absolute MHz sweep endpoints. The range-find Form does not infer a scan window from a known resonance center.
+## Recipe inputs
 
-## Calibration updates
+`onetone_spectrum`: omit both `center_mhz` and `span_mhz` to keep the sweep. Supplying only one, even null, returns `needs_parameters` before Run. Supplying both with either null clears both endpoints; unless `overrides` restores them, Run readiness fails.
 
-Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
-
-For a file from the same opened entry, Load reads the current persisted values at the file's historical point, using its role assignments. It does not use the tab's Open/Defaults aliases or restore an unsaved historical parameter version. Files from another entry or without a point have no parameter source for analysis or writeback. Analysis that needs no such source remains available. Existing proposals stay attached to their captured destination when point or focus changes.
-
-Analysis proposes fitted values for `resonator.freq`, `resonator.kappa`, and `resonator.ext.theta0`. The selected result's parameter source identifies the destination resonator when that source is available. When the run includes pulse-readout settings, analysis also proposes a `resonator.readout.readout_rf` library module based on those settings. It changes the pulse/readout frequency and preserves gain, lengths, channels, and trigger timing.
-
-When the selected result has a parameter source, an update to the `$resonator.module.readout` slot follows the module proposal. The slot value is the resolved `$resonator.readout.readout_rf` path from that same source. Apply both the module and slot updates to select that library readout for downstream experiments. Scalar and module proposals are also available for runs made without saved parameters.
-
-The resonator owns both the module and its readout slot; this writeback does not require a `$qubit` alias. Single-qubit forms read that slot through the `resonator: $qubit.resonator` alias. Existing points are not migrated: rerun onetone/freq and Apply both updates, or manually set `R1.module.readout` to an existing library module; otherwise the forms use the readout template.
-
-The `resonator.ext.edelay` proposal keeps delay and route together. It requires an identifiable absolute branch or a trusted prior calibration or manual seed.
-
-## MCP recipe
-
-Supply `center_mhz` and `span_mhz` together to set numeric endpoints at center ± span/2. Omitting both retains the Form's captured sweep. Supplying only one returns `needs_parameters` naming the other; the recipe does not infer it from calibration. Explicit null clears the endpoints. Omitting the sample count retains the Form count.
-
-## Recommended use
-
-Analysis defaults to the hanger-model fit, `hm`, with multiplicative amplitude-background fitting on. A sweep spanning a few linewidths around the known resonator frequency usually captures the dip cleanly. Widen it if the resonator has drifted.
-
-Use Homophasal after a fit has written `theta0` when you want equal resonator-circle phase spacing. Select Homophasal to view the saved calibration values and fill any missing fields before Run. The Sampling mode selector controls this directly. Linear uses a linear frequency grid and removes the homophasal fields from the submitted settings. Switching back to Homophasal resets those fields to defaults from the saved parameters, replacing previous edits. To use changed source parameters, reopen the tab or press Defaults.
-
-## Analysis controls
-
-Analysis has four controls: Model type, Fit amplitude background, Fit phase curvature, and Electrical delay seed in µs. Their defaults are `hm`, on, off, and blank.
-
-Leave the delay blank to use a finite route-matched calibration as the branch seed. When a matching prior is absent, analysis searches with a 100 µs cap. Enter a finite delay to seed the fitted branch instead. Valid delay inputs are finite numbers, including zero and negative values. The fit can adjust the seeded delay.
-
-## Four starting situations
-
-1. With an empty kickstart project, Open the Form and inspect its required blanks.
-   Supply a resonator frequency or an explicit center, plus a positive linewidth or explicit span. Check readout timing.
-   Nominal wiring and fallback values are candidates, not measured calibration.
-2. With frequencies but no module slots, choose Defaults to recapture those values.
-   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
-3. With a readout slot, choose Defaults and review the captured module and remaining errors separately.
-   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
-4. Through the agent, call `onetone_spectrum` after inspecting the same Form errors.
-   points maps to frequency Expts. Supply center_mhz/span_mhz together or omit both to retain the Form sweep. Analysis controls are model_type, fit_bg_amp_slope, fit_bg_phase_curvature and edelay.
-   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
-   Missing inputs return needs_parameters before acquisition. Defaults may replace unsaved inputs.
+Null `readout_ref` is rejected when selecting the required Readout, before Run. Supplying `gain` converts Readout to inline before setting the value. Null `gain`, `points`, `reps` or `rounds` goes to the Run Form; unresolved required fields fail readiness after overrides. Null `model_type`, `fit_bg_amp_slope` or `fit_bg_phase_curvature` is rejected at Analyze, after acquisition. Null `edelay` selects the blank/automatic policy above. The recipe saves completed Run data even if Analyze fails.

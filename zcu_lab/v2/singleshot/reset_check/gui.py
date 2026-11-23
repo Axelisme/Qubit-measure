@@ -22,7 +22,7 @@ SsResetCheckRunResult = RunRecord[ResetCheckCfg, ResetCheckResult]
 
 def _analyze(
     req: AnalyzeRequest[SsResetCheckRunResult, None], *, plots: Plots
-) -> ResetCheckAnalysis:
+) -> ResetCheckAnalysis | None:
     return ResetCheckExp().analyze(
         req.run_result,
         ResetCheckAnalyzeOptions(
@@ -32,6 +32,15 @@ def _analyze(
         ),
         plots=plots,
     )
+
+
+def _summary_lines(
+    source: RunRecord[ResetCheckCfg, ResetCheckResult],
+) -> tuple[str, ...]:
+    cfg = source.cfg
+    if cfg is None:
+        return ()
+    return (f"Reps×Rounds: {cfg.reps}×{cfg.rounds}",)
 
 
 def _run(
@@ -45,5 +54,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

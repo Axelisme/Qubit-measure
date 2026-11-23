@@ -156,5 +156,7 @@ class SingleFluxoniumAcquire:
                     )
                 result = RoundSignals(tuple(channels))
         finally:
-            owner.readout_wall_s += monotonic() - started
+            owner.readout_wall_s = (owner.readout_wall_s or 0.0) + (
+                monotonic() - started
+            )
         return result

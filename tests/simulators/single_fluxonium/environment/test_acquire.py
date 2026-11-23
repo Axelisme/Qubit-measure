@@ -15,7 +15,6 @@ from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
     AcquisitionMode,
-    ChargeDriveRequirement,
     ReadoutSlot,
     ReadoutWindow,
     RoundRequest,
@@ -526,59 +525,6 @@ def test_preflight_uses_calibrated_delay_to_pair_a_trigger_after_terminal_start(
         herald, terminal = plan.read_events
         assert herald.read_indices == ((0,), (0,))
         assert terminal.read_indices == ((1,), (1,))
-    finally:
-        source.close()
-        if env.close_backend is not None:
-            env.close_backend()
-        env.devices.close_all_devices()
-
-
-class EvolutionObserver(EngineDouble):
-    """Count calls at the injected evolution boundary without replacing admission."""
-
-    def __init__(self):
-        super().__init__(workers=1)
-        self.evolutions = 0
-
-    def evolve(self, source, batches, **kwargs):
-        self.evolutions += 1
-        return super().evolve(source, batches, **kwargs)
-
-
-def test_new_acquire_rechecks_charge_admission_before_reusing_numeric_preparation():
-    config = physical_settings()
-    env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
-    engine = EvolutionObserver()
-    source = SingleFluxoniumSource(
-        config, env.devices, runtime=SingleFluxoniumRuntimeOptions(engine=engine)
-    )
-    try:
-        ordinary = replace(
-            request_for(source, "rabi", reps=2),
-            charge_requirements=(ChargeDriveRequirement("Stokes", 1),),
-        )
-        snapshot = source.snapshot()
-        first = expect_integrated(
-            source.open_acquire(ordinary).sample_round(snapshot, 0)
-        )
-        np.testing.assert_array_equal(
-            first.statistics.state_counts.sum(axis=-1), [2, 2]
-        )
-        completed_evolutions = engine.evolutions
-        assert completed_evolutions > 0
-        if config.flux_line is None:
-            raise AssertionError("reuse acceptance requires a bound flux generator")
-        wrong_role = replace(
-            ordinary,
-            charge_requirements=(
-                ChargeDriveRequirement("Stokes", config.flux_line.gen_ch),
-            ),
-        )
-        with pytest.raises(
-            ValueError, match=rf"Stokes.*{config.flux_line.gen_ch}.*charge drive line"
-        ):
-            source.open_acquire(wrong_role).sample_round(snapshot, 0)
-        assert engine.evolutions == completed_evolutions
     finally:
         source.close()
         if env.close_backend is not None:

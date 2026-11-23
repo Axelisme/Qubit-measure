@@ -6,7 +6,6 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.artist import Artist
-from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -40,17 +39,64 @@ def phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class PhaseCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    pi2_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    readout_t: float
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="µs")]
-    phase: SweepCfg
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the reset module before each shot, or leave it disabled.",
+        ),
+    ] = None
+    flux_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Flux pulse",
+            description="Enter the flux transient to characterize; its pre-delay places the leading edge.",
+        ),
+    ]
+    pi2_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="π/2 pulse",
+            description="Enter a calibrated qubit π/2 pulse for the delayed pair.",
+        ),
+    ]
+    readout: Annotated[
+        Readout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated resonator readout used after both drives finish.",
+        ),
+    ]
+    readout_t: Annotated[
+        float,
+        FieldMeta(
+            label="Minimum readout wait",
+            unit="µs",
+            description="Enter the minimum time before the final readout branch can start.",
+        ),
+    ]
+    length: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="π/2 pair wait",
+            unit="µs",
+            description="Enter the waiting time before the first pulse of the π/2 pair starts.",
+        ),
+    ]
+    phase: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Projection phase",
+            unit="deg",
+            description="Enter the carrier phase of the second π/2 pulse.",
+        ),
+    ]
     reps: Annotated[
         int,
         FieldMeta(
-            label="Reps", unit="count", description="Number of repetitions per round."
+            label="Reps",
+            unit="count",
+            description="Enter the number of shots per scan point in each round.",
         ),
     ]
     rounds: Annotated[
@@ -58,7 +104,7 @@ class PhaseCfg(ConfigBase):
         FieldMeta(
             label="Rounds",
             unit="count",
-            description="Number of software acquisition rounds.",
+            description="Enter the number of times to acquire and average the full scan.",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -67,7 +113,7 @@ class PhaseCfg(ConfigBase):
             label="Relax delay",
             unit="µs",
             decimals=3,
-            description="Relaxation delay after each repetition.",
+            description="Enter the time for relaxation after each shot.",
         ),
     ]
 
@@ -110,22 +156,24 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         )
 
         # 2. Keep one mean IQ value for each pair-start/projection-phase setting.
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (µs)", ylabel="Phase (deg)")
-        formatter = ScalarFormatter(useMathText=True)
-        formatter.set_powerlimits((-2, 2))
-        ax.xaxis.set_major_formatter(formatter)
-        ax.yaxis.set_major_formatter(formatter)
+        centers = lengths + float(pi2_pulse.waveform.length)
+        fig, ax = context.plots.subplots(num="measurement", layout="constrained")
+        fig.suptitle("Fast-flux transient · Qubit · Local phase")
+        ax.set(xlabel="π/2 pair midpoint (µs)", ylabel="Projection phase (deg)")
+        ax.set_title(f"0/{centers.size * phases.size} scan points with IQ")
+        ax.grid(False)
         viewer = live_heatmap(ax)
+        (image,) = viewer.set(
+            centers, phases, np.full((centers.size, phases.size), np.nan)
+        )
+        fig.colorbar(image, ax=ax, label="Mean IQ real projection (a.u.)")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
-            """Draw acquired complex IQ on the measurement axes; return changed artists.
-
-            Read the scan-shaped data without changing it. Update the live
-            artists over the prepared coordinates; plot errors propagate.
-            """
-            return viewer.set(lengths, phases, phase_signal2real(data))
+            """Display available IQ on the scan grid without changing the buffer."""
+            count = np.count_nonzero(np.isfinite(data))
+            title = ax.set_title(f"{count}/{data.size} scan points with IQ")
+            return (*viewer.set(centers, phases, phase_signal2real(data)), title)
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -213,29 +261,29 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         )
 
         # 4. Compare the phase map and recovered phase with flux-edge timing windows.
-        fig, _ = plots.subplots(
-            num="fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True
+        fig, ax = plots.subplots(num="fit", layout="constrained")
+        fig.suptitle("Fast-flux transient · Qubit · Local phase")
+        ax.set(xlabel="π/2 pair midpoint (µs)", ylabel="Projection phase (deg)")
+        ax.grid(False)
+        (image,) = live_heatmap(ax).set(lengths, phases, real_signals)
+        fig.colorbar(image, ax=ax, label="Mean IQ real projection (a.u.)")
+
+        fig, ax = plots.subplots(num="phase_response", layout="constrained")
+        fig.suptitle("Fast-flux transient · Qubit · Phase response")
+        ax.set(xlabel="π/2 pair midpoint (µs)", ylabel="Local phase (deg)")
+        ax.plot(lengths, init_phases, "k.-", label="Phase from IQ fringe")
+        ax.plot(
+            ideal_lengths, ideal_curve, color="green", label="Rectangular reference"
         )
-        ax1, ax2 = fig.axes
-        ax1.imshow(
-            real_signals.T,
-            extent=(lengths[0], lengths[-1], phases[0], phases[-1]),
-            aspect="auto",
-            interpolation="none",
-            cmap="RdBu_r",
+        edge_half_width = pi2_len
+        ax.axvspan(
+            start_t - edge_half_width,
+            start_t + edge_half_width,
+            color="gray",
+            alpha=0.25,
+            label="Pulse overlaps edge",
         )
-        ax1.set_ylabel("Phase (deg)")
-
-        ax2.plot(ideal_lengths, ideal_curve, "g-", label="Ideal")
-        ax2.plot(lengths, init_phases, ".-")
-        ax2.set_ylabel("Phase (deg)")
-        ax2.set_xlabel("Wait Time (µs)")
-
-        ax2.axvspan(start_t - pi2_len, start_t + pi2_len, color="gray", alpha=0.3)
-        ax1.axvline(start_t, color="black", linestyle="--")
-        ax2.axvspan(end_t - pi2_len, end_t + pi2_len, color="gray", alpha=0.3)
-        ax1.axvline(end_t, color="black", linestyle="--")
-
-        ax2.legend()
-
-        fig.tight_layout()
+        ax.axvspan(
+            end_t - edge_half_width, end_t + edge_half_width, color="gray", alpha=0.25
+        )
+        ax.legend(loc="upper left", bbox_to_anchor=(0, -0.15), ncols=2)

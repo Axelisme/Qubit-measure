@@ -48,27 +48,27 @@ _DEFAULT_MAX_EDELAY_SEARCH_RADIUS = 100.0
 class OneToneFreqAnalyzeParams:
     """Shared resonance fit controls for single-tone and mux analysis."""
 
-    model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")] = (
-        "hm"
-    )
+    model_type: Annotated[
+        Literal["hm", "t", "auto"], ParamMeta(label="Resonance model")
+    ] = "hm"
     """Resonance model: "hm" for hanger, "t" for transmission, or "auto".
 
     "auto" selects the model from the measured magnitude response.
     The default is "hm".
     """
 
-    fit_bg_amp_slope: Annotated[bool, ParamMeta(label="Fit amplitude background")] = (
-        True
-    )
+    fit_bg_amp_slope: Annotated[
+        bool, ParamMeta(label="Fit amplitude background slope")
+    ] = True
     """Fit the background's log-amplitude slope when True, the default.
 
     True fits a frequency-dependent exponential amplitude envelope.
     False keeps the log-amplitude slope at zero, giving a constant envelope.
     """
 
-    fit_bg_phase_curvature: Annotated[bool, ParamMeta(label="Fit phase curvature")] = (
-        False
-    )
+    fit_bg_phase_curvature: Annotated[
+        bool, ParamMeta(label="Fit phase background curvature")
+    ] = False
     """Fit quadratic background phase curvature when True.
 
     True fits a quadratic phase term alongside the electrical-delay phase.
@@ -309,6 +309,12 @@ def run(inp: FreqInput, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult
     return RunRecord(cfg=cfg, result=FreqExp().run(cfg, context=context))
 
 
+def _summary_lines(source: OneToneFreqRunResult) -> tuple[str, ...]:
+    """Report configured averaging from the analyzed Run or Load, if available."""
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
+
+
 DEFINITION = Adapter(
     spec=FreqExp.AXES_SPEC,
     make_form=make_form,
@@ -318,5 +324,6 @@ DEFINITION = Adapter(
         fn=_analyze,
         options=lambda source, env: OneToneFreqAnalyzeParams(),
         writeback=_get_writeback_items,
+        summary_lines=_summary_lines,
     ),
 )

@@ -115,6 +115,8 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
         "extras",
         "capture_file",
         "timestamp",
+        "commit",
+        "dirty",
         "frontend_cpu_s",
         "estimated_cost_unit",
         "families",
@@ -150,6 +152,8 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
             "ftf.projection_pruned_weight": [0.0, 0.01],
         },
     }
+    assert record["commit"] is None
+    assert record["dirty"] is None
     assert record["families"] == {
         "dop853": {
             "rows": 6,
@@ -182,6 +186,19 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
             "actual_cpu_s": 0.375,
         },
     }
+
+
+def test_deferred_row_retains_caller_provenance(tmp_path: Path):
+    from zcu_tools.simulators.telemetry import RoutingTelemetry
+
+    writer = RoutingTelemetry(tmp_path, commit="fixture-commit", dirty=False)
+    writer.write_materialize("fixture-acquire", 0.0)
+    (path,) = tmp_path.glob("routing-*.jsonl")
+    record = json.loads(path.read_text())
+    assert record["event"] == "materialize"
+    assert record["commit"] == "fixture-commit"
+    assert record["dirty"] is False
+    assert record["materialize_wall_s"] == 0.0
 
 
 def test_writer_removes_oldest_routing_files_and_warns_only_once(tmp_path: Path):

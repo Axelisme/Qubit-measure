@@ -93,14 +93,26 @@ def _plot_transition_rates(
         Rerr_eo[i] = np.nan
         Rerr_eg[i] = np.nan
 
-    ax_Tg.errorbar(xs, R_go, yerr=Rerr_go, label=r"$\Gamma_{0L}$", color="dodgerblue")
-    ax_Tg.errorbar(xs, R_ge, yerr=Rerr_ge, label=r"$\Gamma_{01}$", color="blue")
+    ax_Tg.errorbar(
+        xs, R_go, yerr=Rerr_go, fmt=".-", label=r"$\Gamma_{0L}$", color="dodgerblue"
+    )
+    ax_Tg.errorbar(
+        xs, R_ge, yerr=Rerr_ge, fmt=".-", label=r"$\Gamma_{01}$", color="blue"
+    )
 
-    ax_Te.errorbar(xs, R_eo, yerr=Rerr_eo, label=r"$\Gamma_{1L}$", color="darkorange")
-    ax_Te.errorbar(xs, R_eg, yerr=Rerr_eg, label=r"$\Gamma_{10}$", color="red")
+    ax_Te.errorbar(
+        xs, R_eo, yerr=Rerr_eo, fmt=".-", label=r"$\Gamma_{1L}$", color="darkorange"
+    )
+    ax_Te.errorbar(
+        xs, R_eg, yerr=Rerr_eg, fmt=".-", label=r"$\Gamma_{10}$", color="red"
+    )
 
-    ax_To.errorbar(xs, R_eo, yerr=Rerr_eo, label=r"$\Gamma_{1L}$", color="darkorange")
-    ax_To.errorbar(xs, R_go, yerr=Rerr_go, label=r"$\Gamma_{0L}$", color="dodgerblue")
+    ax_To.errorbar(
+        xs, R_eo, yerr=Rerr_eo, fmt=".-", label=r"$\Gamma_{1L}$", color="darkorange"
+    )
+    ax_To.errorbar(
+        xs, R_go, yerr=Rerr_go, fmt=".-", label=r"$\Gamma_{0L}$", color="dodgerblue"
+    )
 
     max_rate = np.nanmax([R_go, R_ge, R_eo, R_eg]).item()
     for ax in (ax_Tg, ax_Te, ax_To):

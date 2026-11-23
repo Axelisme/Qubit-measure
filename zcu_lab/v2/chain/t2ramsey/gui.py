@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field
-from zcu_tools.analysis.readout_chain import CycleCheck, CycleSums
+from pydantic import Field
+from zcu_tools.analysis.readout_chain import CycleSums
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -16,8 +16,10 @@ from zcu_lab.v2.chain.t2ramsey.core import (
 )
 from zcu_lab.v2.chain.t2ramsey.form import make_form
 
+from .._joint import JointResidualSummary
 
-class ChainT2RamseySummary(BaseModel):
+
+class ChainT2RamseySummary(JointResidualSummary):
     """Recipe JSON view of the analysis in native units; null is unavailable."""
 
     t2: float | None = Field(description="T2 Ramsey in us.")
@@ -27,15 +29,17 @@ class ChainT2RamseySummary(BaseModel):
     tf: float | None = Field(description="Third-state decay time in us.")
     tf_err: float | None = Field(description="Wald error of tf in us.")
     reliability: float | None = Field(description="Diagnostic R, no threshold.")
-    within_point: CycleCheck = Field(description="Within-point check J, df, p.")
-    sharing: CycleCheck = Field(description="Sharing check J, df; p is null.")
-    curve: CycleCheck = Field(description="Curve check J, df, p.")
     first_read_t2: float | None = Field(
-        description="T2 in us of the first-read twotone fit, the starting value."
+        description="T2* (µs) from the first-read fit; null if that fit has no estimate."
     )
     first_read_detuning: float | None = Field(
-        description="Fringe MHz of the first-read twotone fit, the starting value."
+        description="Fringe frequency (MHz) from the first-read fit; null if unavailable."
     )
+
+
+def _summary_lines(source: RunRecord[ChainT2RamseyCfg, CycleSums]) -> tuple[str, ...]:
+    cfg = source.cfg
+    return () if cfg is None else (f"Reps×Rounds {cfg.reps}×{cfg.rounds}",)
 
 
 def _analyze(
@@ -59,5 +63,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze),
+    analysis=Analysis(fn=_analyze, summary_lines=_summary_lines),
 )

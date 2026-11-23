@@ -1,23 +1,21 @@
-## Behavior
+**Readers:** operator, agent. Compare qubit frequency shifts with and without π preparation to estimate resonator linewidth, dispersive shift and readout frequency.
 
-**Readers:** operator, agent. CKP ground/excited-resolved spectroscopy: prepares the qubit in g and e, drives resonator and qubit probe tones concurrently over a two-dimensional frequency sweep, and fits the two resonator branches to extract dispersive shift chi, linewidth kappa, and the readout frequency. Runs on real hardware.
+## Sequence and key settings
 
-**Last updated:** 2026-10-21
+Optional **Reset** → skip or apply **Qubit π preparation pulse** → start both probe tones → wait for both ends → readout. The two branches label the preparation, not pure g and e states.
 
-## Parameter sources
+- Calibrate readout, qubit frequency, π pulse and resonator linewidth first. Bind the qubit and resonator correctly. Check independently the two drive gains and pulse timing; with resonator κ in MHz, initial **Resonator Drive Pulse** length is `1.5 + 5.1/(2πκ)` µs; **Qubit Probe Pulse** pre- and post-delay start at `5/(2πκ)` and `3.1/(2πκ)` µs.
+- **Resonator drive RF frequency** starts at `$resonator.freq ± 1.5 × $resonator.kappa`. **Qubit probe RF frequency** starts at `$qubit.freq − 10 MHz … $qubit.freq + 5 MHz`. Set the windows to cover both branches and fill any required blanks before Run.
+- **Relax delay** starts at `5 × qubit.t1` (150 µs if absent). **Reps** is per frequency pair and preparation per round.
 
-Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs from the sources captured at Open/Defaults. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Resonator sweep is resonator.freq ± 1.5 * resonator.kappa. Qubit sweep runs qubit.freq - 10 to qubit.freq + 5 MHz. Probe timing scales inversely with resonator.kappa.
+See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shared GUI steps.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+## Read the maps and shared fit
 
-## Module slots
+Run shows qubit RF versus resonator RF for each preparation. Color is projected mean IQ scaled within each resonator-frequency slice to 0–1 a.u., not population. Equal colors across slices do not imply equal IQ. Blank cells lack data. These maps do not show pointwise shot SEM.
 
-Readout uses the qubit.module.readout slot captured at Open/Defaults, or a fresh readout template when the slot is unset or points to a missing module. Optional qubit.module.reset stays disabled when absent. Saved modules remain selectable; sweeps replace only the swept fields at Run. Pi pulse uses qubit.module.x180 with a pi_pulse template fallback; both probe pulses start from fresh templates.
+Analyze overlays qubit ridge centers and a shared model. It needs at least five usable centers in each preparation and valid covariance. Fit EDM is the optimizer's estimated distance from its objective minimum, not evidence that the model follows either ridge. The parameter errors come from the shared fit covariance. χ/2π is half the fitted resonator-center separation; κ/2π is the fitted resonator FWHM. A vertical line marks the proposed readout frequency, not necessarily either fitted center.
 
-## Typical writeback
+## Next step
 
-Proposes fitted chi into '`$qubit.ext.chi`', fitted kappa into '`$resonator.kappa`', and fitted readout frequency into '`$resonator.freq`'. Proposals update scalar calibration only.
-
-## Recommended
-
-Run only after qubit frequency, pi pulse, resonator frequency, and resonator linewidth are calibrated. Review both g/e maps and fitted branches before applying writeback; a branch-selection or fit failure can produce plausible-looking scalar values.
+Check both ridges against the shared curves. If a ridge meets a qubit RF edge, extend it past the visible center by at least roughly a linewidth and check both shoulders in the next map. If the fit is supported, writeback proposes `$qubit.ext.chi`, `$resonator.kappa`, and `$resonator.freq`; modules stay unchanged.

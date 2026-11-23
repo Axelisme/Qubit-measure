@@ -82,7 +82,13 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_qubit_freq
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    compute_fit_quality,
+    fit_qubit_freq,
+    lorfunc,
+    sincfunc,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
@@ -113,6 +119,9 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     ToneRangeCfg,
     validate_mux_scan,
 )
+
+_SWEEP_LABEL = "Qubit drive RF frequency (MHz)"
+_IQ_LABEL = "|Background-subtracted mean IQ| (a.u.)"
 
 
 @validated_dataclass(frozen=True)
@@ -191,7 +200,14 @@ def qubfreq_signal2real(
 class MuxFreqToneCfg(MuxDriveToneCfg):
     """One named drive and its independent freq bounds in MHz."""
 
-    freq: Annotated[ToneRangeCfg | None, FieldMeta(unit="MHz")] = None
+    freq: Annotated[
+        ToneRangeCfg | None,
+        FieldMeta(
+            label="Frequency",
+            unit="MHz",
+            description="Enter this tone's qubit drive RF frequency range in MHz.",
+        ),
+    ] = None
 
     def require_freq(self) -> ToneRangeCfg:
         """Return active freq bounds, or raise ValueError naming this tone."""
@@ -215,16 +231,33 @@ class MuxFreqCfg(ConfigBase):
     initial_delay/relax_delay are finite nonnegative waits in us.
     """
 
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
+    reset: Annotated[
+        ResetCfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Choose the common preparation reset; leave blank to omit it.",
+        ),
+    ] = None
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Readout",
+            description="Enter the calibrated multiplexed readout used after the qubit drive sequence.",
+        ),
+    ]
     tones: Annotated[list[MuxFreqToneCfg], FieldMeta(element_label="name")]
-    expts: int = Field(
+    expts: Annotated[int, FieldMeta(label="Expts", unit="count")] = Field(
         strict=True,
         gt=0,
         title="Expts",
         description="Hardware scan point count shared by all tones.",
     )
-    participants: list[StrictInt]
+    participants: Annotated[
+        list[StrictInt],
+        FieldMeta(
+            description="Enter the original zero-based tone indices in measurement order."
+        ),
+    ]
 
     reps: Annotated[
         int,
@@ -351,21 +384,33 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         viewers = []
         for index in scan.indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(
-                xlabel="Drive frequency (MHz)",
-                ylabel="Magnitude (a.u.)",
-                title=f"{index}: {cfg.tones[index].name}",
+            fig.suptitle(
+                f"Mux two-tone spectrum · {cfg.tones[index].name} · IQ contrast"
             )
-            viewers.append(live_line(ax))
+            ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+            progress = ax.set_title(f"Acquired frequency points: 0 / {cfg.expts}")
+            viewer = live_line(ax)
+            ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
+            ax.legend()
+            viewers.append((viewer, progress))
             fig.show()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]):
-            return tuple(
-                artist
-                for row, viewer in enumerate(viewers)
-                for artist in viewer.set(scan.coordinates[row], np.abs(data[:, row]))
-            )
+            artists = []
+            for row, (viewer, progress) in enumerate(viewers):
+                measured = data[:, row]
+                acquired = np.isfinite(measured)
+                real = (
+                    qubfreq_signal2real(np.where(acquired, measured, np.nan))
+                    if acquired.any()
+                    else measured.real
+                )
+                progress.set_text(
+                    f"Acquired frequency points: {np.count_nonzero(acquired)} / {cfg.expts}"
+                )
+                artists.extend((*viewer.set(scan.coordinates[row], real), progress))
+            return artists
 
         # 3. A shared DAC register loop advances the independent frequency ranges.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
@@ -444,9 +489,11 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
             finite = np.isfinite(result.signals[row])
             xs = result.coordinates[row, finite]
             signal = result.signals[row, finite]
-            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
-            ax.set(xlabel="Drive frequency (MHz)", ylabel="Signal (a.u.)")
-            fig.suptitle(f"tone {index}")
+            cfg = source.cfg
+            tone = f"Tone {index}" if cfg is None else cfg.tones[index].name
+            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(7, 5))
+            ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
+            fig.suptitle(f"Mux two-tone spectrum · {tone} · IQ contrast")
 
             # Fit only acquired points; six points are needed for the five-parameter model.
             try:
@@ -478,19 +525,45 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
                 ArithmeticError,
                 np.linalg.LinAlgError,
             ) as exc:
-                ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
+                ax.plot(
+                    xs,
+                    qubfreq_signal2real(signal, model_type=options.model_type)
+                    if signal.size
+                    else signal.real,
+                    "o-",
+                    ms=3,
+                    label="Measured IQ",
+                )
                 ax.text(
-                    0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True
+                    0.02,
+                    0.98,
+                    f"Fit unavailable: {exc}",
+                    transform=ax.transAxes,
+                    va="top",
+                    wrap=True,
                 )
                 outcomes.append(MuxFitFailure(index, str(exc)))
             else:
-                ax.plot(xs, real, "o", label="measured")
-                ax.plot(xs, fitted, label=f"FWHM={width:.4g} ± {werr:.2g} MHz")
-                ax.axvline(freq, ls="--", label=f"freq={freq:.7g} ± {ferr:.2g} MHz")
+                ax.plot(xs, real, "o", ms=3, label="Measured IQ")
+                model = lorfunc if options.model_type == "lor" else sincfunc
+                label = "Lorentzian fit" if options.model_type == "lor" else "Sinc fit"
+                ax.axvline(freq, color="0.4", ls=":", label="Transition frequency")
+                result_label = f"Transition frequency = {freq:.7g} ± {ferr:.2g} MHz · FWHM = {width:.4g} ± {werr:.2g} MHz"
+                curve = np.linspace(xs.min(), xs.max(), 400)
+                ax.plot(curve, model(curve, *params), color="C1", label=label)
+                r2 = quality.r2
+                rms = quality.normalized_residual_rms
+                quality_label = f"R² = {r2:.3g}" if r2 is not None else "R² unavailable"
+                quality_label += (
+                    f" · Normalized residual RMS = {rms:.3g}"
+                    if rms is not None
+                    else " · Normalized residual RMS unavailable"
+                )
+                ax.set_title(f"{result_label}\n{quality_label}", fontsize=10)
                 outcomes.append(outcome)
-
+            if options.model_type == "sinc":
+                ax.set_ylabel("Principal-axis background-subtracted IQ (a.u.)")
             ax.legend()
-            ax.grid(True)
             fig.tight_layout()
         # 2. Keep transition frequency, linewidth and quality, or a failure under the original tone identity.
         return tuple(outcomes)

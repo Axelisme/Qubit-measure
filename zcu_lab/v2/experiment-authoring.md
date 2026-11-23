@@ -49,7 +49,8 @@ Inputs 繼承 RecipeInputs，框架只作 pydantic／MCP JSON schema 驗證，re
 
 Docstring 的篇幅與範本見 [風格指南](experiment-style.md#3-寫法判斷)。
 Module 與公開函式交代量測、序列、輸入、結果的單位與 shape，以及必要的失敗條件。
-Run 回傳量測資料，擬合值歸 analyze。操作教學、使用範例與環境指引放 leaf 的 `guide.md`。
+Run 回傳量測資料，擬合值歸 analyze。
+Leaf 的 `guide.md` 依 [Gd1–Gd3](figure-style.md#operator-guide) 寫量什麼、序列、物理意義、關鍵參數、怎麼讀圖與下一步。先核對必留項及其他介面是否已提供等價資訊。通用 GUI 操作連到 [操作員共用流程](operator-workflow.md)，實驗專屬的校準與 Run 前檢查留在 guide。
 必要的 lifecycle、rollback 與 caller 責任用一句說明並連到框架契約。
 
 ### 4. 用註解與空行分開階段
@@ -141,6 +142,11 @@ Z 各維度須匹配軸長，固定軸也計入；load 不將固定值寫進 Res
 
 Native HDF5 的變數名（`VariableSpec.variable` 或 `AxesSpec.data_variable`）與存檔軸的 `label` 都是結果格式的一部分，不是圖上的標籤。Cfg 改名與舊檔相容性見 [ADR-0069〈Cfg 欄位改名與 schema 版本〉](../../docs/adr/0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。現行例子見 [Two-qubit 持久名稱](README.md#two-qubit-持久名稱)。
 
+各 K-cycle core 宣告 sweep 軸，用 [chain/\_cycle.py](chain/_cycle.py) 的 `cycle_sums_variables` 與 `restore_cycle_sums` 保存與還原 `CycleSums.axis`。
+[round_zcu.py](../../lib/zcu_tools/experiment/v2/utils/round_zcu.py) 的 `sweep2array` 展開量化座標。軸量化或存檔成功，不保證 first-read 的 `fit_rabi` 或 `fit_decay_fringe` 能取得 FFT 初猜。
+對 joint 擬合而言，first-read 估計只提供起點；無估計時由 caller 用保存軸另取起點。
+能否畫出 live 方向的投影，見 [analysis〈Readout chain K-cycle〉](../../lib/zcu_tools/analysis/README.md#readout-chain-k-cycle) 的 `cycle_residual_projection`。這個投影不是 joint 估計的前提。
+
 ### 分析選項自行驗證，fit 結果用屬性讀取
 
 分析選項用 pydantic dataclass 的欄位限制驗證，GUI 沿用此驗證。
@@ -184,9 +190,11 @@ Slot.set 初值只套用到 copy，這項設定本身不把 reference 改成 cop
 
 建圖、預設樣式、show、owner-thread 更新與 finish／release 依 [plotting README](../../lib/zcu_tools/plotting/README.md)。
 Live artists 與多面板格式依 [v2 README](README.md#即時圖工具)。
+建立非均勻熱圖（`uniform=False`）時，用 [`live_heatmap`](support/live.py) 的 `cmap` 選色盤，例如 `live_heatmap(ax, uniform=False, cmap="viridis")`。
+`cmap` 接受 Matplotlib 已註冊的色盤名稱，省略時用 `RdBu_r`。熱圖掛載到 axes 後就不能更換色盤。
 實驗自行決定座標、labels 與圖名。show 前可填資料，show 後的修改也經 plot-thread callback。
 選 y 軸要畫的物理量時看 [R12：y 軸畫物理 observable](figure-style.md#r12y-軸畫物理-observable)，標示方式見[〈單位〉](figure-style.md#單位)。
-一維建圖與 update 見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)，熱圖與 current trace 見 `twotone/power_dep/core.py:111-142`。
+一維建圖與 update 見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)，熱圖與最近兩條切線見 [PowerExp 的 live plot](twotone/power_dep/core.py)。
 
 ## 目錄佈局
 
@@ -201,7 +209,7 @@ Run 以 explicit RunContext 取得硬體與 devices，回純 Result，由 adapte
 同步 analyze 接 source、typed options 與本次 Plots，數值直接回傳，圖發布到本次 Plots，跨次成功狀態由 record 表達。
 有分析選項時以 `Experiment.Options` 引用既有 options 類別，GE 的 post-analysis 另有 `GE_Exp.PostOptions`。
 類屬性保存型別而非共用 instance，欄位與預設由原 options 擁有。無選項時省略 Options，基底不要求它。
-各 leaf core 定義輸入與結果型別，guide 定義操作與 writeback。
+各 leaf core 定義輸入與結果型別，guide 說明如何用結果、writeback 改哪個值，以及適用的修正式。
 Mux zip acquisition、participants、座標與 partial data 見 [v2 README](README.md#mux-qubit-numeric-cores)。
 Readout power 的八分支 QND、native tag、指標與 gain 選擇見 [Power guide](twotone/ro_optimize/power/guide.md)。
 
@@ -328,6 +336,7 @@ Timeline 範圍只切換預設名字，reference 與控制流契約見 [ADR-0083
 錄製或編譯後保持 module 與 cfg 不變，不同掃描設定建不同物件。
 同 program 多次 emit 同物件只宣告一次，每次時間與 tag 獨立，重複 readout 用不同 tag，如 herald／terminal。
 不同物件重複占用 ADC／register 時，編譯指出兩個物件；Pulse 家族既有 generator／template 共用規則仍適用。
+Pulse／Mux Readout 的 generator 與 ADC 宣告、讀取時序與 IQ 取數見 [Program 的 Readout configuration](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration)。
 
 ### Sweep 參數與 cfg 的歸屬
 
@@ -349,7 +358,7 @@ Const／flat-top length 可查表，flat-top 只改 flat 段；其他 waveform �
 ### Host loop、device setup 與時間取樣
 
 Host loop 用 sched.scan／repeat，program loop 用 add_sweep／add_loop。
-Host 掃描與逐列取數參考 `twotone/power_dep/core.py:144-164`。
+Host 掃描與逐列取數參考 [PowerExp.run](twotone/power_dep/core.py)。
 需重用各點 program 時，run 維護 dict cache，miss 才建新 builder 並 build，每次仍由 step 取數。
 Device setup 留在 run，先 set_*_in_dev_cfg，再用 setup_devices 初始化掃描起點。
 傳 context.devices、progress=True、cancel_signal=context.scope.stop，helper 到 driver 邊界才轉 Event。

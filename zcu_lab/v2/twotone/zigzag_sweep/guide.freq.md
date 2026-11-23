@@ -1,23 +1,15 @@
-## Behavior
+**Readers:** operator, agent. Sweep the repeated pulse's RF frequency to find the carrier with the least variation across zig-zag repetitions.
 
-**Readers:** operator, agent. Zig-zag frequency scan: runs the zig-zag repetition sequence at each drive frequency of the repeated pulse, and picks the frequency where the signal stays flattest across repetitions. Runs on real hardware. The simulator measures drive phase from the start of each shot, while hardware uses absolute time.
+## Sequence and key settings
 
-**Last updated:** 2026-10-21
+At each frequency: optional **Reset** → X90 preparation → repeat the selected X180 or X90 pair from zero to **Max repetitions** → calibrated **Readout**. Calibrate X90/X180 and check readout first. Start with a small count such as six to limit acquisition time.
 
-## Parameter sources
+**Repeated gate RF frequency** starts at `qubit.freq ± 2 MHz`. Center it on the measured line for the pulse being tuned. **Relax delay** starts at `5 × qubit.t1` (150 µs if absent). In Analyze, **Search from** and **Search to** restrict the interval used to pick the minimum.
 
-The gain scan runs 0.8 to 1.2 * qubit.module.x180.gain; for X90 repetition adjust the window to x90. The frequency scan runs qubit.freq ± 2 MHz. Both use 101 points and maximum repetitions 6. Relax delay is 5 * qubit.t1 µs. Other missing required calibration leaves the affected fields empty and Invalid.
+See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shared GUI steps.
 
-Open and Defaults capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 µs, giving a 150 µs wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
+## Read the plots and refine the carrier
 
-## Module slots
+Run and Analyze map projected mean IQ (a.u.), not population, versus repetition count and repeated-pulse RF frequency in MHz. The Analyze curve is the smoothed sum of absolute IQ differences between adjacent counts. It measures flatness, not a separate IQ measurement or gate fidelity. The map and derived loss have no pointwise shot SEM.
 
-Readout uses the qubit.module.readout slot captured at Open/Defaults, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. Drive slots use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.015 µs; missing required calibration remains Invalid.
-
-## Typical writeback
-
-Analysis reports results for review; calibration stays unchanged. The summary reports 'best_value', the best drive frequency (MHz); update 'qubit.freq' or the pulse module yourself.
-
-## Recommended
-
-Analysis picks the sweep value whose signal changes least across repetitions (smoothed sum of step differences). Set 'Search from' / 'Search to' to ignore edges of the sweep. Keep n_times small (~6); the sweep multiplies the run time.
+The minimum marker and `best_value` identify a candidate within the search interval. If the minimum sits at an edge, shift or widen the search before using it. If it is interior, scan more finely around it and confirm with an independent trace. Update only the intended pulse or qubit frequency after review; there is no writeback.

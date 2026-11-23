@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
 from PyQt6.QtGui import QAction, QImage
 from PyQt6.QtWidgets import (
@@ -203,6 +204,37 @@ def test_visible_snapshot_distinguishes_running_button_from_caption(
         label="synthetic button terminal caption",
     )
     assert driver.observe("Run").enabled
+
+
+def _sip_address(obj: QObject) -> int:
+    # The SIP stub declares None; the runtime API returns a native address.
+    address = sip.unwrapinstance(obj)
+    assert isinstance(address, int)
+    return address
+
+
+def test_visible_snapshot_ignores_mistyped_native_child(surface) -> None:
+    label = QLabel("Selectable device status", surface)
+    label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    label.show()
+    text_control = label.findChild(QObject)
+    assert text_control is not None and not text_control.isWidgetType()
+    text_control.setObjectName("internal_text_control")
+    # Recreate the cached QWidget wrapper for a native QObject seen in the core.
+    assert isinstance(QWidget, sip.wrappertype)
+    wrapper = sip.wrapinstance(_sip_address(text_control), QWidget)
+    assert isinstance(wrapper, QWidget)
+
+    snapshot = _user_input.ComponentDriver(surface).visible()
+
+    assert "Selectable device status" in {widget.text for widget in snapshot.widgets}
+    assert "internal_text_control" not in {
+        widget.object_name for widget in snapshot.widgets
+    }
+    with pytest.raises(LookupError):
+        _user_input.ComponentDriver(surface).observe(
+            object_name="internal_text_control"
+        )
 
 
 def test_only_visible_legend_text_is_observed(surface, qapp) -> None:

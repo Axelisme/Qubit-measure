@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import h5py
 import numpy as np
@@ -225,16 +226,27 @@ def test_common_grid_failure_does_not_affect_native_save(tmp_path: Path) -> None
     )
 
 
-def test_export_refuses_existing_path_and_scalar_before_creation(
-    tmp_path: Path,
-) -> None:
+def test_export_refuses_existing_path(tmp_path: Path) -> None:
     path = tmp_path / "existing.hdf5"
     path.write_bytes(b"original")
     with pytest.raises(FileExistsError):
         datafile.write_labber(path, _container())
     assert path.read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("grouped_layout", ["common", "independent"])
+def test_export_refuses_axisless_variable_before_creation(
+    tmp_path: Path, grouped_layout: Literal["common", "independent"]
+) -> None:
     container = datafile.Container(
-        {"scalar": datafile.Variable(np.array(1), (), "")}, {}, {}, _container().attrs
+        {"scalar": datafile.Variable(np.array(0.25), (), "s")},
+        {},
+        {},
+        _container().attrs,
     )
-    with pytest.raises(ValueError, match="axis|rank"):
-        datafile.write_labber(tmp_path / "scalar.hdf5", container)
+    path = tmp_path / "scalar.hdf5"
+    with pytest.raises(
+        ValueError, match="scalar: Labber requires at least one step axis"
+    ):
+        datafile.write_labber(path, container, grouped_layout=grouped_layout)
+    assert not path.exists()

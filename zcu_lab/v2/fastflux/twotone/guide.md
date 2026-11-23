@@ -1,53 +1,19 @@
-# Fast flux two-tone spectroscopy
+**Readers:** operator, agent. Find candidate qubit transitions as fast-flux pulse gain changes.
 
-**Readers:** operator, agent. Map qubit probe frequency against fast-flux pulse gain from the GUI or MCP and inspect spectral features.
+# Fast-flux two-tone spectroscopy
 
-**Last updated:** 2026-10-21
+After optional Reset, play Flux pulse and the frequency-swept Qubit probe in parallel, then read out after both finish. This changes the pulsed bias, not the DC setting.
 
-## What this measures
+## Choose the scan
 
-Open `fastflux/twotone` to map qubit probe frequency against flux-pulse gain.
-After reset, the flux pulse and qubit probe start together.
-Readout begins after both branches finish.
-The result is mean complex IQ with shape (gain, frequency).
-The live map and Analyze map project IQ onto a real axis.
-They locate spectral features. Transition fitting and flux calibration require
-separate work.
+- Bind qubit and resonator. Check calibrated **Readout** and the **Qubit probe** drive channel, length and gain. The **Qubit probe frequency** scan supplies the probe RF.
+- Check the **Flux pulse** channel, timing and allowed gain. **Flux pulse gain** overrides the module gain and starts at one zero-gain point. Set an approved signed range for a flux dependence; a.u. is DAC full-scale fraction, not flux.
+- Set **Qubit probe frequency** in absolute MHz. The initial window is the captured qubit center ± 1.5 linewidths. Widen it to cover the expected transition shift. Choose a **Relax delay** long enough for repeatable preparation.
 
-## Before Run
+For tab setup, refreshing sources and saving, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
 
-Bind `qubit` and `resonator` to the intended components before Open.
-Defaults captures their current values again.
-The probe starts from `$qubit.freq` and `$qubit.wiring.ch`.
-The frequency sweep initially spans three linewidths around `$qubit.freq`.
-Readout uses `$resonator.module.readout` when available, otherwise the readout template.
-Reset uses `$qubit.module.reset`.
+## Read the map and choose a follow-up
 
-The Flux pulse module slot uses the `flux_pulse` template.
-Its channel comes from `$qubit.wiring.lo_flux_ch`.
-A missing or invalid channel leaves the form Invalid until you supply a confirmed channel.
-The template starts with const waveform, gain 1.0, frequency 0 MHz and Nyquist zone 2.
-This form starts its waveform duration at 1 µs, matching the initial probe duration.
-These values are editing seeds. Establish the flux calibration separately.
-Set the flux pulse frequency, Nyquist zone, waveform, duration and timing for your wiring.
+Live and Analyze share the gain–RF heatmap. Color is mean complex IQ projected along the scan's largest IQ variation, in a.u., not a population. Live counts acquired IQ points and completed rounds separately. There is no shot SEM. A valid saved map can still plot without historical cfg.
 
-**Run replaces the flux pulse gain with the gain sweep.**
-The initial sweep is one point at zero gain.
-Set its gain range and point count explicitly before mapping.
-The sweep determines the acquired gain, overriding the template's gain of 1.0.
-Confirm allowed gain limits, channels, timing, reset, readout and repetition settings before Run.
-Gain is normalized amplitude. Converting it to magnetic flux requires a separate
-calibration. Frequency is MHz; durations are µs.
-Use Preview cfg to review the complete resolved configuration.
-
-## Run and analysis
-
-Run acquires the gain-by-frequency map while the DC flux device stays in place.
-Stop retains partial data; unmeasured points remain NaN.
-Analyze redraws the projected map from the selected Run or Load source.
-Analysis produces a map only; calibration parameters and modules retain their values.
-Review the map yourself before choosing any later calibration.
-
-Save and Load retain frequency and gain axes and complex IQ.
-Frequency is stored in Hz and restored in MHz; gain is unchanged.
-Load keeps the current form unchanged and uses the saved source for historical data.
+Follow a continuous ridge to locate a candidate transition at the gain of interest. If it hits the boundary, extend that RF endpoint without coarsening the grid. For overlapping bands, narrow the gain window and compare with lower probe gain to check power broadening. The map does not identify or fit a transition and does not write back calibration.

@@ -1,45 +1,26 @@
-## Behavior
+# Single-shot T1 under a probe tone: gain sweep
 
-**Readers:** operator, agent. How to map single-shot T1 transition rates versus probe gain from the GUI or MCP and interpret the results.
+**Readers:** operator, agent. Map driven transition rates versus probe gain, using both initial preparations.
 
-Single-shot T1-with-tone, probe-gain sweep: at each probe gain it sweeps the wait-plus-probe length from both |g> and |e> initial states (Branch), classifies each shot during acquisition against the |g>/|e> centres, fits the dual transition rates per gain, and renders the 3×3 rate landscape over (gain, time). Runs on real hardware.
+## What is measured
 
-## Saved counts
+For each gain and exposure time: optional **Reset** → no pulse for g preparation or **Pi Pulse** for e → **Probe Pulse** for the swept length → **Readout**. The joint fit evolves g/e/Other populations and yields transition rates in µs⁻¹. In the rate panels, Γ₀₁ and Γ₁₀ are g→e and e→g; Γ₀L and Γ₁L are rates into the Other class, not rates into a resolved energy level.
 
-The saved `counts` array has axes `(gain, initial state, length, population state)`. The final axis contains class counts `[g,e,other]` summed over acquired rounds, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
+## Key settings
 
-Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema is 4.0 after renaming the time window to delay and uniform to sampling.
+- Before Run, use Pulse **Readout** (not Mux) with a circle classifier and a positive radius under **Advanced**. If the radius is missing, obtain it from [GE Post-Analysis](../../ge/guide.md#next-step) and apply it before Run. Linear cannot report Other. Calibrate the π pulse before comparing preparations.
+- **Gain** starts at 0–1. Confirm the fixed **Probe Pulse** RF frequency. Analyze uses `$qubit.ext.ac_stark_coeff × gain²` when the Run captured a coefficient, even if the rate-panel axis still says **Probe gain (a.u.)**. Keep the outer grid coarse enough to repeat a full exposure sweep at each point.
+- Set a finite, strictly positive **Probe length** Start. Stop starts at 5 × the stored tone T1, falling back to ordinary T1 and then 30 µs as the time scale. An invalid stored value leaves the required Stop blank. **Relax delay** is separate: it starts at 5 × ordinary T1 (150 µs if absent; blank if invalid) and is not shortened automatically by reset.
+- **Sampling** `linear` (default) spaces the exposures evenly; `decay` concentrates points early without changing the window or point count.
 
-## Parameter sources
+## How to read the results
 
-Open and Defaults take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1; delay stop uses 5 times the tone T1 time scale. Frequency form sweeps `$resonator.freq` +/- 1.5 * `$resonator.kappa`; gain form sweeps 0 to 1. Each form exposes only one outer axis.
+Run shows six population maps (preparation by column, final class by row) versus probe gain and duration. The bottom two panels connect the measured fractions versus probe duration at the current gain, one per preparation.
 
-Readout accepts only the pulse family.
-A mux readout in the library is incompatible.
-Classification uses the readout's circle classifier under Readout → Advanced.
-Run requires a positive radius; missing radius prompts singleshot GE Post.
-Linear has no Other state and is rejected.
-Analyze corrects populations only with the saved readout cfg's confusion matrix.
-Historical cfg without a classifier or matrix skips correction.
+Analyze drops incomplete outer rows and applies the saved readout correction if available. Its six population maps put g and e preparations in separate rows, and final g/e/Other in columns. Color shows population, not shot SEM. The bottom panels compare Γ₀L with Γ₀₁, Γ₁L with Γ₁₀, then Γ₁L with Γ₀L. Lines join rates fitted separately at each sweep point on log-scale axes. Bars at the first and every fifth point after it are the rates' fit SE from their covariance, not shot SEM or run-to-run variation. The Analyze maps and rates use the same outer coordinate; if transformed as above, do not read it as raw gain.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.015 µs. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+## Next step
 
-The tone time scale uses the stored `$qubit.ext.t1_with_tone`, then ordinary T1, then 30 µs. Missing or null sources advance to the next choice. An invalid stored tone T1 leaves the required stop empty for correction. Natural relaxation always uses ordinary T1.
+If the populations have not approached a plateau, extend **Probe length** and keep enough early points to resolve the slope. Compare rates only where both preparations constrain the fit. No calibration is written. Older files without class counts cannot be converted on Load.
 
-T1-derived defaults use the Open/Defaults snapshot. A missing or null T1, or an unavailable snapshot, uses 30 µs, so the 5*T1 wait starts at 150 µs. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
-
-These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
-
-## Module slots
-
-Pi pulse uses `$qubit.module.x180` or pi_pulse. Probe starts from res_probe. Reset is optional; readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Defaults snapshot.
-
-## Typical writeback
-
-This is a diagnostic only. Read the rate landscape from the grid; calibration parameters stay unchanged.
-
-## Recommended
-
-Run singleshot/ge Primary and Post, then Apply to the selected readout module. Keep the gain sweep coarse (the inner length sweep multiplies the run time). Provide '`$qubit.ext.ac_stark_coeff`' for a photon-number x-axis. 'sampling="linear"' (default) uses a linear length sweep; set 'sampling="decay"' to cluster points along the expected exponential decay while preserving the configured window and count. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
-
-**Last updated:** 2026-10-29
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).
