@@ -213,10 +213,16 @@ def _complex_single_gate_case(name: str) -> AccuracyCase:
     )
 
 
-def single_gate_diagonal_case(*, inside: bool) -> AccuracyCase:
-    """Return a 64 ns coherent phase test with an off-window diagonal drive."""
+def single_gate_diagonal_case(
+    *, inside: bool, complex_envelope: bool = True
+) -> AccuracyCase:
+    """Build a 64 ns diagonal-spread case for the 1e-3 gate budget.
+
+    Use a spread just inside the bound if inside is true, and a real
+    envelope if complex_envelope is false.
+    """
     a = np.exp(-0.5)
-    q = a / 32
+    q = a / 32 if complex_envelope else 0.0
     envelope = EnvelopeSpec(
         "sampled", np.array([a + 1j * q, 1.0, a - 1j * q]), np.array([0.0, 32.0, 64.0])
     )
@@ -237,8 +243,10 @@ def single_gate_diagonal_case(*, inside: bool) -> AccuracyCase:
         drive_track(batch, envelope, frequency=4.5 / 64, gain=1.0),
         phase_rad=np.array([-np.pi / 2]),
     )
+    shape = "complex" if complex_envelope else "real"
+    case_suffix = ("inside" if complex_envelope else "inside_real") if inside else shape
     return AccuracyCase(
-        "single_gate_diagonal_inside" if inside else "single_gate_diagonal_complex",
+        f"single_gate_diagonal_{case_suffix}",
         coherent_source(model),
         replace(batch, tracks=(pulse,)),
         ("single_tone_gate",) if inside else (),
@@ -709,7 +717,8 @@ def accuracy_case(name: str) -> AccuracyCase:
     two_carriers, continuous_flux, joint_gate_inventory, joint_constant, low_carrier,
     linear_shaped, linear_plateau, nearby_carriers, cheap_sampled_nearby,
     cheap_sampled_separated, adiabatic_ramp, single_tone_sideband,
-    COMPLEX_SINGLE_GATE_CASES, dephasing_pump, raman_decay, raman_weak_legs,
+    COMPLEX_SINGLE_GATE_CASES, single_gate_diagonal_inside_real, dephasing_pump,
+    raman_decay, raman_weak_legs,
     and the OPENCL_CASES.
     Each call
     owns a fresh source/history. The joint gate keeps its 20-point inventory.
@@ -734,6 +743,9 @@ def accuracy_case(name: str) -> AccuracyCase:
         "sampled_multitone_short_sweep_32": sampled_multitone_short_sweep_case,
         "joint_constant": partial(joint_case, constant=True),
         "single_tone_sideband": single_tone_sideband_case,
+        "single_gate_diagonal_inside_real": partial(
+            single_gate_diagonal_case, inside=True, complex_envelope=False
+        ),
     }
     if name in specialized:
         return specialized[name]()
