@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import yaml
 from pydantic import JsonValue
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.form import FormErrors, FormWritePath
 
 if TYPE_CHECKING:
@@ -31,7 +32,13 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 
-from tools._experiment_wall_time_inputs import Manifest, Sources, read_manifest
+from tools._experiment_wall_time_inputs import (
+    Extrapolation,
+    Manifest,
+    Sources,
+    SpeedMetric,
+    read_manifest,
+)
 from tools._experiment_wall_time_report import (
     BatchPlan,
     JournalUsageError,
@@ -43,6 +50,7 @@ from tools._experiment_wall_time_report import (
     reusable_rows,
     write_json,
 )
+from tools._experiment_wall_time_workload import record_workload
 from tools.analyze_routing_telemetry import (
     AcquireInput,
     MaterializeInput,
@@ -64,7 +72,9 @@ class WallTimeCase:
     """Curated scene, project labels and raw Form writes for this Run.
 
     overrides maps canonical field paths to JSON values. Empty keeps all Open
-    defaults. Apply a nonempty mapping as one atomic Form write.
+    defaults. Apply a nonempty mapping as one atomic Form write. metric
+    identifies the speed denominator; extrapolation declares any shortfall
+    from the full workload, or None when no estimate is requested.
     """
 
     scene_id: str
@@ -72,6 +82,8 @@ class WallTimeCase:
     entry: str
     point: str
     overrides: Mapping[FormWritePath, JsonValue]
+    metric: SpeedMetric
+    extrapolation: Extrapolation | None
 
 
 @dataclass(frozen=True)
@@ -119,6 +131,15 @@ class Run(Protocol):
         """Read the Controller's diagnostic on failure, or return None on success.
 
         Raise for a missing or unexpected outcome or unreadable diagnostics.
+        """
+        ...
+
+    def result(self) -> object:
+        """Return the experiment Result from this Run's published RunRecord.
+
+        Call after successful terminal delivery. Raise RuntimeError if no
+        publication matches this Run's operation token, or TypeError if the
+        matching publication does not contain a RunRecord.
         """
         ...
 
@@ -383,6 +404,14 @@ class _ControllerRun:
             )
         return outcome.error
 
+    def result(self) -> object:
+        pane = self.ctrl.tab_control.get_tab_snapshot(self.tab).run
+        if pane is None or self.token is None or pane.source_operation_id != self.token:
+            raise RuntimeError(f"Result was not published by Run {self.token}")
+        if not isinstance(pane.result, RunRecord):
+            raise TypeError(f"Run {self.token} did not publish an experiment RunRecord")
+        return pane.result.result
+
 
 @dataclass
 class _RunOwner:
@@ -610,12 +639,14 @@ def _case_row(
             row = new_row(
                 case.scene_id, case.adapter, directory, "missing_breakdown", None
             )
-            _measure_attempt(prepared, location, row, batch)
+            _measure_attempt(prepared, location, row, batch, case)
 
     inventory.measure(case, data_dir, telemetry, record_attempt)
 
 
-def _measure_attempt(run: Run, location: Path, row: Row, batch: _Batch) -> None:
+def _measure_attempt(
+    run: Run, location: Path, row: Row, batch: _Batch, case: WallTimeCase
+) -> None:
     start = RunStart(
         started_at=datetime.now(UTC).isoformat(),
         monotonic_s=perf_counter(),
@@ -652,6 +683,8 @@ def _measure_attempt(run: Run, location: Path, row: Row, batch: _Batch) -> None:
         return
     row["wall_s"] = observed.monotonic_s - dispatched.monotonic_s
     _add_breakdown(row, summarize_acquires(location / "telemetry"))
+    result = None if case.metric.kind == "shots" else run.result()
+    record_workload(row, result, case.metric, case.extrapolation, case.overrides)
     row["status"] = "ok" if row["breakdown"] == "complete" else "missing_breakdown"
     write_json(location / "row.json", row)
 
@@ -784,7 +817,7 @@ def _main(
         if scene.adapter in inventory.adapters
     }
     plan = BatchPlan(
-        format_version=2,
+        format_version=3,
         commit=commit,
         inputs=sources.hashes(manifest_bytes=manifest_bytes),
         manifest_scenes=len(by_id),
@@ -802,6 +835,7 @@ def _main(
         scene_id: {
             "adapter": by_id[scene_id].adapter,
             "directory": f"cases/{index:03d}",
+            "metric_kind": by_id[scene_id].metric.kind,
         }
         for index, scene_id in enumerate(sorted(selected | reused.keys()), start=1)
     }
@@ -869,6 +903,8 @@ def _run_batch(
                     manifest.entry,
                     manifest.point,
                     {override.path: override.value for override in scene.overrides},
+                    scene.metric,
+                    scene.extrapolation,
                 )
                 _case_row(inventory, case, data_dir, batch, directory)
     except KeyboardInterrupt:

@@ -25,6 +25,6 @@ def make_form(ctx: FormContext) -> Form[ChainPowerCfg]:
             "rounds": 320,
             "readout": readout,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
-            "gain": Range(0.02, 0.2, expts=10),
+            "gain": Range(0.02, 0.2, expts=31),
         },
     )

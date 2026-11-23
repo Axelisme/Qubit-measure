@@ -24,7 +24,7 @@ def make_form(
     only when ctx has no captured readout. An unknown template ID raises
     ValueError. Leave the margin required and blank if either length cannot be
     resolved. The pi pulse is an operator-calibrated input.
-    The ADC window sweep starts at 11 points from 0.2 to 2.2 us.
+    The ADC window sweep starts at 31 points from 0.2 to 2.2 us.
     Reps defaults to 250 cycles of 64 R-pi pairs; rounds defaults to 20.
     """
     readout = source(
@@ -55,7 +55,7 @@ def make_form(
             "$qubit.module.x180",
             Template("pi_pulse", bindings={"qubit": "$qubit"}),
         ),
-        "length": Range(0.2, 2.2, expts=11),
+        "length": Range(0.2, 2.2, expts=31),
     }
     if margin.value is not None:
         tree["length_margin"] = margin.value

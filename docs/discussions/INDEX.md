@@ -28,7 +28,7 @@
 - 2026-11-22 [FTF 樣板的 projective floor](2026-11-22-ftf-projection-weight-floor.md)：精度取捨。FTF 樣板 floor 改為 `1e-5`；舊 history 模型下原設定第一點的 1,800 s 參考缺口，在 Markov 同模型驗收後不再適用。
 - 2026-11-22 [ADC raw plan 由誰持有](2026-11-22-adc-raw-plan-acquire-owner.md)：快取歸屬。FTF 與 standalone single 的 acquire session 持有 ADC plan；換 batch 或結束就退役，舊 raw 可冷重算。
 - 2026-11-22 [FTF projective 從真空續演化並改用 Markov chain](2026-11-22-ftf-projective-markov.md)：表示與資料格式。投影後逐 DC 態續演化，raw 保留單發配對，compact 只給逐事件邊際；獨立參考兩 floor 驗過 41／75 個 key。
-- 2026-11-22 [模擬器的時間門檻與驗證成本](2026-11-22-simulator-speed-first-verification.md)：取捨原則。正常參數先守 180 秒，精度以 `1e-2` 為目標；優化先做局部對照，獨立參考與全表不再是每次落地關卡。
+- 2026-11-22 [模擬器的時間門檻與驗證成本](2026-11-22-simulator-speed-first-verification.md)：取捨原則。當時使用 180 秒目標，精度以 `1e-2` 為目標；優化先做局部對照，獨立參考與全表不再是每次落地關卡。
 - 2026-11-22 [牆鐘工具的 worker 數與量測範圍](2026-11-22-wall-time-worker-policy.md)：量測條件。預設保留單 worker；非排他慢實驗子集按 CPU slot 明示 worker 數，以收據核對。
 
 - 2026-11-21 [Projective 腔場改走 ADC flat span 合併解](2026-11-21-projective-span-reuse.md)：快取歸屬。Projective 與 MIST 都向 ADC 取 flat 二階矩與各 state 端點場，只在 exact key 命中時重用，FTF 仍逐 history 選態與建 shift；兩路共用 512 MiB，`CavityDrive` 只留 `cache=`；三個固定前綴同 seed density 相等、獨立端點解歸零。
@@ -119,7 +119,8 @@
 - 2026-11-21 [牆鐘報表如何重建中斷列](2026-11-21-wall-time-interrupted-rows.md)：刪除或收窄。派送前 journal 不能證明 Run 耗時，重建不填秒數或下限。
 - 2026-11-22 [固定 FTF fixture 缺路由的十列](2026-11-22-wall-time-fixture-flux-routing.md)：量測邊界。固定 fixture 缺快磁通與共用 coil 的十列明示未量，不借示意係數或其他場景的 coil。
 - 2026-11-23 [牆鐘工具量手選場景](2026-11-23-curated-wall-time-scenes.md)：資料與量測邊界。工具自備 FTF 設定和乾淨 point，由維護者選場景，派送現行實驗，不掃描 guide。
-- 2026-11-21 [模擬器核心耗時：從完整 Run 讀，不建凍結場景](2026-11-21-simulator-core-time.md)：量測指標。3 分鐘目標讀完整 Run 中的編譯、演化、讀出與 raw materialize；延後的 raw 以 acquire 身分補列；不完整列只報下限，下限嚴格大於 180 秒才判超標；錄製重播與手寫場景因維護成本否決。
+- 2026-11-21 [模擬器核心耗時：從完整 Run 讀，不建凍結場景](2026-11-21-simulator-core-time.md)：量測指標。從完整 Run 讀編譯、演化、讀出與 raw materialize；不完整列只報下限。記錄當時使用的 180 秒判定，以及不採錄製重播或手寫場景的理由。
+- 2026-11-23 [模擬器速度改按每格點](2026-11-23-simulator-speed-per-point.md)：量測指標。掃描與逐次評估用平均每點 0.1 秒，無軸 shots 保留 180 秒；縮減場景的外推與實測分欄。
 
 - 2026-11-15 [模擬器測試與量測的分層](2026-11-15-simulator-test-measurement-layering.md)：分層。Kernel、dispatch、序列、前端與 environment 分開驗，退休 acquire e2e 量測，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 
@@ -169,6 +170,7 @@
 
 - 2026-11-23 [Single-shot T1 的兩個衰減時間與 tone Stop 初值](2026-11-23-singleshot-t1-relaxation-times.md)：讀圖語意。圖由短到長列出兩個模型衰減時間，寫回仍提議較短值供 tone Stop 取五倍。
 - 2026-11-23 [一維反演量的誤差棒與圖上事實](2026-11-23-inverted-error-bars-and-figure-facts.md)：圖形呈現。可傳遞 shot 共變異的一維反演量也畫棒；圖呈現品質值，寫回建議留在 Writeback。
+- 2026-11-23 [已存統計量的第一層誤差棒](2026-11-23-errorbars-tier1-saved-stats.md)：範圍分層。只畫已存矩可推的棒（reset、chain joint residual、readout power），不改取數與存檔；合併矩不扣 round 間漂移。
 - 2026-11-23 [一維讀出校正無解時保留分類比例](2026-11-23-singular-readout-analysis.md)：Analyze 失敗語意。六個 circle 入口保留同次分類圖，不交付校正數值、擬合或寫回提議。
 - 2026-11-23 [圖磚沿用存檔幾何](2026-11-23-figure-fixed-geometry.md)：圖形呈現。各面以 12×9 in 排版後等比嵌入。R7 只在固定幾何的 PNG 驗版面，Data 保留縮圖選圖與 `View figure`。
 - 2026-11-22 [在 Measure Data 頁讀原圖](2026-11-22-data-figure-reading.md)：圖形呈現。記錄當時用縮圖選圖、在同頁捲動閱讀的做法。現行圖磚與閱讀面見 [Figure presentation](../../lib/zcu_tools/gui/app/measure/README.md#figure-presentation)。
@@ -196,6 +198,7 @@
 - 2026-11-22 [Analyze 摘要與逐點誤差棒的責任分工](2026-11-22-shared-presentation-facts.md)：呈現責任。GUI 與 MCP 共用 adapter 摘要行，analysis 計算 shot SEM，實驗 core 寫標題與圖例。
 - 2026-11-23 [平均 IQ 圖的投影慣例](2026-11-23-mean-iq-plot-projection.md)：呈現規則。同類實驗沿用同一 IQ 轉換，一維預設用主軸投影，二維 flux／頻率圖逐 bias 扣背景再取幅值。
 - 2026-11-22 [Two-qubit mux 綁定與編輯後的檢查](2026-11-22-two-qubit-mux-binding-checks.md)：驗證位置。Open／Reset 驗有序元件連結，提交時按同次 capture 驗實際 readout tone 數。
+- 2026-11-23 [掃描初值至少 31 點、用奇數](2026-11-23-scan-defaults-min-31-odd.md)：預設值。等距掃描初值每軸 ≥31 點，以中心為準者用奇數；只改初值不擋輸入，離散 protocol 序列除外。
 
 ## 模組邊界
 

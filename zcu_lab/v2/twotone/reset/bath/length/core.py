@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
-from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
+from zcu_tools.analysis.shot_uncertainty import iq_shot_sem, propagated_iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import (
@@ -37,7 +37,7 @@ from zcu_tools.program.v2 import (
     split_sums,
 )
 
-from zcu_lab.v2.support import live_errorbar, live_line
+from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.twotone.reset._projection import principal_iq_direction
 
 
@@ -58,6 +58,30 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
         + np.abs(signals[..., 3] - signals[..., 1]) ** 2,
         dtype=np.float64,
     )  # (lengths, )
+
+
+def _contrast_sem(
+    signals: NDArray[np.complex128], moments: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Return first-order contrast shot SEM in a.u.² for each duration.
+
+    signals has shape (duration, phase) in IQ a.u., with phases 0, 90, 180,
+    and 270 degrees in that order. moments has shape (duration, phase, 6)
+    in [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] order for the same branches. Missing
+    moments or fewer than two shots in any branch give NaN. The caller
+    draws no bar where the contrast itself is missing. Nonfinite
+    gradients give NaN and log a warning. Invalid shapes or shot
+    statistics raise ValueError. Neither input is modified.
+    """
+    # Phase branches use separate shots. The gradient of |S₂−S₀|² with
+    # respect to S₂'s I/Q is 2(S₂−S₀), and with respect to S₀ it is its negative.
+    with np.errstate(over="ignore", invalid="ignore"):
+        gradient = 2 * (signals[:, 2:] - signals[:, :2])
+    observed = np.asarray(np.isfinite(signals).all(axis=-1), dtype=np.bool_)
+    gradient = np.where(observed[:, None], gradient, 0j)
+    return propagated_iq_shot_sem(
+        moments, gradients=np.concatenate((-gradient, gradient), axis=-1)
+    )
 
 
 class LengthCfg(ConfigBase):
@@ -251,7 +275,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         contrast_ax, projection_ax = fig.axes
         fig.suptitle(_TITLE)
         contrast_ax.set_ylabel(_CONTRAST_LABEL)
-        contrast = live_line(contrast_ax)
+        contrast = live_errorbar(contrast_ax)
         projection_ax.set(xlabel=_XLABEL, ylabel="Mean IQ on principal axis (a.u.)")
         viewer = live_errorbar(projection_ax, num_lines=4)
         for line, phase in zip(projection_ax.lines, _PHASES, strict=True):
@@ -270,7 +294,11 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                 f"Up to {shots} retained shots per duration and phase (count)"
             )
             return (
-                *contrast.set(lengths, bathreset_signal2real(signals)),
+                *contrast.set(
+                    lengths,
+                    bathreset_signal2real(signals),
+                    _contrast_sem(signals, moments),
+                ),
                 *viewer.set(lengths, projected.T, sem.T),
                 title,
             )
@@ -346,7 +374,14 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         )
         contrast_ax, i_ax, q_ax = fig.axes
         fig.suptitle(_TITLE)
-        contrast_ax.plot(lens, real_signals, ".-", markersize=5)
+        contrast_sem = (
+            None
+            if result.iq_moments is None
+            else _contrast_sem(signals, result.iq_moments)
+        )
+        contrast_ax.errorbar(
+            lens, real_signals, yerr=contrast_sem, fmt=".-", markersize=5
+        )
         contrast_ax.set_ylabel(_CONTRAST_LABEL)
         # Show both readout quadratures so the components behind the invariant contrast remain visible.
         for ax, values, direction in (

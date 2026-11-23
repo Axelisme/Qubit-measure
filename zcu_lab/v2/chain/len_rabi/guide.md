@@ -24,8 +24,11 @@ Analyze fits all 65 IQ and correlation statistics jointly across the sweep once.
 With a seed, the first-read figure marks π and π/2 durations inside the scan. In the first-read figure, R² below zero means a worse fit than the mean. Normalized residual RMS is residual RMS divided by the signal range. Neither sets a selection threshold.
 If the seed is unavailable, the first-read figure names the failure, connects the points and keeps any available shot SEM. Joint Analyze uses the saved duration axis for its start and still fits once. A successful joint fit then reports `first_read_pi_len: null`; a joint fit error fails Analyze.
 
-The joint figure comes first. Its upper panel overlays measured points and the model along the live all-feature direction; its lower panel plots measured minus model against the sweep. The scale is the pooled standard error of a point mean, not population or per-point shot SEM. Look for ranges where the residuals keep the same sign.
-If the projection is unavailable, Analyze still reports the joint values and diagnostics without these curves and keeps the first-read figure.
+The joint figure comes first. Its upper panel overlays measured points and the model along the live all-feature direction. Each bar shows ±1 pooled shot SEM of the projected mean. The estimate pools within-point shot covariance across the sweep and propagates it to the mean using each point's retained cycle count. It treats the projection direction and background as fixed. All bars have the same length in these SEM units. They are not separate noise estimates at each point or fit errors.
+
+The moments pool retained shots across rounds and include projection noise. Changes in the round means contribute to the pooled scatter; the bars neither estimate nor remove drift.
+
+The lower panel shows measured minus model and shades ±1 of the same pooled SEM around zero. Look for ranges where the residuals keep the same sign. If the saved moments cannot support the projection, Analyze still reports the joint fit values and diagnostics and keeps the first-read figure. It draws no joint projection, bars, or residual band.
 
 `J` sums squared residuals whitened by the model covariance across all 65 features. `df` is 65 × the point count minus the joint parameter count. Read `J/df` against the approximate χ² band `1 ± 2√(2/df)` and the fraction of whitened components with `|r| > 3`. These are not the residuals in the lower panel. Neither diagnostic sets a fit acceptance threshold.
 
