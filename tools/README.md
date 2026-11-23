@@ -217,7 +217,7 @@ Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆�
 
 - `{"kind": "scan", "axes": [{"field": "flux_values", "dimension": 1}, {"field": "frequencies", "dimension": 1}]}`。按外到內列出公開 Result 陣列欄位與其掃描維度。`dimension` 從 0 起算，省略時用 0。工具取各軸長的乘積作 `point_count`，不乘 rounds 和 reps，也不計固定分類、同時讀取的 tone 等非掃描維度。目標是 `core_s_per_point ≤ 0.1`。
 - `{"kind": "shots"}`。無掃描軸、只取 shots 的實驗用 `core_s ≤ 180` 的整次目標。`point_count` 和 `core_s_per_point` 為 `null`。
-- `{"kind": "evaluation", "peak_field": "peak", "counts_field": "sums"}`。指定像 CZ optimize 的峰值與計數陣列。`peak > 1` 算拒幅，`NaN` 算未走到，分別報 `rejected_evaluations` 和 `unreached_evaluations`。只將已寫入 seed counts 的合格候選計入 `point_count`，同一候選的多個 seed 不重計。
+- `{"kind": "evaluation", "peak_field": "peak", "counts_field": "sums"}`。指定像 CZ optimize 的峰值與計數陣列。工具讀取期限內成功的 Run Result。有任一筆 seed counts 的候選計入 `point_count`，同一候選的多個 seed 不重計。有峰值但無 counts 表示峰值檢查跳過，計入 `rejected_evaluations`。峰值仍為 `NaN` 的候選計入 `unreached_evaluations`。工具不重做峰值判定。
 - `{"kind": "evaluation", "single_acquire_candidate_field": "params"}`。只用於每個候選恰呼叫一次 acquire、rounds 在該 acquire 內處理且不重試的實驗，例如 `twotone/ro_optimize/auto`。主紀錄數才是分母，補充紀錄不算。參數矩陣全為 `NaN` 的列只計入未走到，不用分數欄推定有無 acquire。若 Result 已進入的候選數與主紀錄數不符，工具在 `workload_issue` 說明差異，不判定速度。拒幅數在此模式為 0。
 
 逐次評估也以每次不超過 0.1 秒為目標。0 次 acquire 不除以 0，不判定達標。Result 欄位或掃描維度不符宣告時，工具報錯，不從 Form cfg、存檔軸或局部 acquire 的 `points` 猜測。`report.json` 的 `core_judgement` 是 `pass`、`over_target`、`lower_bound_over_target` 或 `undetermined`，判定使用未四捨五入的值。摘要的 `Measured core (s)` 對不完整列顯示 `≥` 加下限，沒有下限顯示「—」。有下限而且能證明已超過列的目標，才標 `lower_bound_over_target`。逾時掃描或逐次評估沒有可用的 Result 分母時不判定。Run 秒數和期限不參與核心判定。
@@ -237,7 +237,7 @@ Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆�
 }
 ```
 
-`outer_axis` 只適用 `scan`，對應 `metric.axes` 的第一項。維護者核對縮減的 Form path、完整點數與完整 rounds 的來源，並在 `basis` 記理由。工具不推導完整 Form 預設。工具用 Result 的實測外層軸長和覆寫的實測 rounds 計倍率。這個例子若 Result 有 11 個外層點，估計核心秒數是實測 `core_s × (31/11) × (8/2)`。估計每點以完整格點數作分母。工具只對完整核心耗時外推，並在 `extrapolated_*` 欄分開報完整格點、估計核心耗時、每點及判定。實測欄不受外推影響。核心不完整，或每點指標沒有可用分母時，外推欄為 `null`。
+`outer_axis` 只適用 `scan`，對應 `metric.axes` 的第一項。維護者核對縮減的 Form path、完整點數與完整 rounds 的來源，並在 `basis` 記理由。工具不推導完整 Form 預設。工具用 Result 的實測外層軸長和覆寫的實測 rounds 計倍率。這個例子若 Result 有 11 個外層點，估計核心秒數是實測 `core_s × (31/11) × (8/2)`。估計每點平均是實測每點平均乘以 `8/2`。外層軸點數只改變估計總秒數，不改變每點平均。工具只對完整核心耗時外推，並在 `extrapolated_*` 欄分開報完整格點、估計核心耗時、每點及判定。實測欄不受外推影響。核心不完整，或每點指標沒有可用分母時，外推欄為 `null`。
 
 `--row-timeout SECONDS` 從送出 Run 起算，預設 360 秒。只接受有限且介於 180 到 2,147,483.647 秒的值，兩端都可用。到期時先把所有 Python 執行緒的 stack 寫到該列的 `timeout-stack.txt`，再請 Controller 取消。`timeout` 的精確 `wall_s` 是 `null`，`wall_s_lower_bound` 表示 Run 大於期限。能加總的 acquire 分項標「部分」，沒有可用分項時標「分項缺」。請求取消後，工具先依當下的 telemetry 寫 `row.json`。取消寬限的 30 秒內，工具若觀察到 Run 終態且 Controller idle，就重新讀取 telemetry、更新逾時列，再繼續派送。寬限內未觀察到兩者時，工具保留先寫的列並停止派送，報表將尚未開始的列記為 `not_run`。
 

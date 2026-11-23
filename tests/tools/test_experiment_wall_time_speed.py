@@ -143,10 +143,15 @@ def test_main_judges_scan_core_per_result_grid_point_not_per_round(
 
 
 @pytest.mark.parametrize(
-    "acquired", [True, False], ids=["two-candidates", "no-acquires"]
+    ("peaks", "acquired", "rejected"),
+    [
+        pytest.param([0.75, 1.1, 1.0], True, 1, id="original-peaks"),
+        pytest.param([1.5, 2.2, 2.0], True, 1, id="different-owner-cutoff"),
+        pytest.param([1.1, 1.2, 1.3], False, 3, id="no-acquires"),
+    ],
 )
 def test_main_counts_acquired_evaluations_not_seeds_or_unmeasured_candidates(
-    tmp_path: Path, *, acquired: bool
+    tmp_path: Path, peaks: list[float], *, acquired: bool, rejected: int
 ) -> None:
     counts = np.full((4, 2, 3, 3), np.nan)
     records = []
@@ -163,7 +168,7 @@ def test_main_counts_acquired_evaluations_not_seeds_or_unmeasured_candidates(
                 "counts_field": "sums",
             }
         },
-        SimpleNamespace(peak=np.array([0.75, 1.1, 1.0, np.nan]), sums=counts),
+        SimpleNamespace(peak=np.array([*peaks, np.nan]), sums=counts),
         records,
     )
 
@@ -171,7 +176,7 @@ def test_main_counts_acquired_evaluations_not_seeds_or_unmeasured_candidates(
     assert row["point_count"] == (2 if acquired else 0)
     assert row["core_s_per_point"] == (0.09375 if acquired else None)
     assert row["core_judgement"] == ("pass" if acquired else "undetermined")
-    assert row["rejected_evaluations"] == 1
+    assert row["rejected_evaluations"] == rejected
     assert row["unreached_evaluations"] == 1
 
 
@@ -249,11 +254,48 @@ def test_main_extrapolates_complete_core_separately_from_measured_speed(
     assert row["extrapolated_core_s"] == (9.0 if complete else None)
     assert row["extrapolated_core_s_per_point"] == (0.2 if complete else None)
     assert row["extrapolated_core_judgement"] == ("over_target" if complete else None)
-    summary = (output / "summary.md").read_text()
-    assert "Measured core (s)" in summary
-    assert "Extrapolated core (s)" in summary
     if complete:
-        assert "| 45 | 9.000 | 0.200 | over_target |" in summary
+        assert (
+            "| 45 | 9.000 | 0.200 | over_target |"
+            in (output / "summary.md").read_text()
+        )
 
     assert main(["--report-only", "--output", str(output)]) == 0
     assert report_path.read_text() == report
+
+
+@pytest.mark.parametrize(
+    ("core_s", "per_point", "projected_core_s", "verdict"),
+    [
+        pytest.param(3.0, 0.1, 3.1, "pass", id="at-target"),
+        pytest.param(3.003, 0.1001, 3.1031, "over_target", id="just-over-target"),
+    ],
+)
+def test_main_keeps_per_point_judgement_when_only_the_outer_axis_grows(
+    tmp_path: Path,
+    core_s: float,
+    per_point: float,
+    projected_core_s: float,
+    verdict: str,
+) -> None:
+    output = _run_case(
+        tmp_path,
+        {
+            "metric": {"kind": "scan", "axes": [{"field": "sweep"}]},
+            "overrides": [{"path": ["sweep", "n"], "value": 30}],
+            "extrapolation": {
+                "outer_axis": {"path": ["sweep", "n"], "full_points": 31}
+            },
+        },
+        SimpleNamespace(sweep=np.arange(30)),
+        [_acquire(core_s)],
+    )
+
+    [row] = json.loads((output / "report.json").read_text())["rows"]
+    assert row["point_count"] == 30
+    assert row["core_s_per_point"] == pytest.approx(per_point)
+    assert row["core_judgement"] == verdict
+    assert row["extrapolated_point_count"] == 31
+    assert row["extrapolated_core_s"] == pytest.approx(projected_core_s)
+    assert row["extrapolated_core_judgement"] == verdict
+    assert row["extrapolated_core_s_per_point"] == row["core_s_per_point"]

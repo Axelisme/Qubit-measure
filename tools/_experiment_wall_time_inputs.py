@@ -77,9 +77,10 @@ class ScanMetric(_ManifestItem):
 class EvaluationMetric(_ManifestItem):
     """Count evaluations that acquired, not seeds or planned candidates.
 
-    For peak-gated candidates, set peak_field and counts_field. Peaks above
-    one are rejected; NaN peaks are unreached. Counts start as NaN, with
-    candidates on the first axis. Any written seed counts mark acquisition.
+    For peak-gated candidates, set peak_field and counts_field to arrays with
+    candidates on the first axis. In a successful Run's Result, any written
+    seed counts mark acquisition. A recorded peak with all-NaN counts marks a
+    rejection. A NaN peak marks an unreached candidate.
     Otherwise set single_acquire_candidate_field to the Result matrix of entered
     candidate parameters, with NaN rows for candidates not reached. This mode
     requires one main acquire per entered candidate and no rejections or retries.

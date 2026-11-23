@@ -135,7 +135,12 @@ class Run(Protocol):
         ...
 
     def result(self) -> object:
-        """Return this Run's experiment Result after successful terminal delivery."""
+        """Return the experiment Result from this Run's published RunRecord.
+
+        Call after successful terminal delivery. Raise RuntimeError if no
+        publication matches this Run's operation token, or TypeError if the
+        matching publication does not contain a RunRecord.
+        """
         ...
 
     def is_idle(self) -> bool:

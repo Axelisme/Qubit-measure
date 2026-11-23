@@ -9,6 +9,7 @@ from typing import Annotated, Literal, NotRequired, TypedDict
 
 from pydantic import Field, StrictFloat, TypeAdapter
 
+# ADR-0078: simulator speed targets in seconds per Run or per point.
 _SHOTS_TARGET_S = 180.0
 _POINT_TARGET_S = 0.1
 
@@ -259,32 +260,35 @@ def _report_row(row: Row, metric_kind: MetricKind) -> ReportRow:
     core, bound = row["core_s"], row["core_s_lower_bound"]
     points = row["point_count"]
     average = core / points if core is not None and points else None
-    if metric_kind == "shots":
-        judgement = _core_judgement(core, bound, _SHOTS_TARGET_S)
-    else:
-        per_point_bound = bound / points if bound is not None and points else None
-        judgement = _core_judgement(average, per_point_bound, _POINT_TARGET_S)
-    projected_core = projected_average = projected_judgement = projected_points = None
+    projected_core = projected_average = projected_points = None
     if (factors := row["extrapolation"]) is not None and core is not None:
         projected_core = core * factors["axis_scale"] * factors["rounds_scale"]
         projected_points = factors["point_count"]
-        if projected_points:
-            projected_average = projected_core / projected_points
-        if metric_kind == "shots":
-            projected_judgement = _core_judgement(projected_core, None, _SHOTS_TARGET_S)
-        else:
-            projected_judgement = _core_judgement(
-                projected_average, None, _POINT_TARGET_S
-            )
+        if average is not None:
+            # More outer-axis points add total work, not work per point.
+            projected_average = average * factors["rounds_scale"]
+
+    # ADR-0078: apply the same metric to measured and extrapolated core time.
+    if metric_kind == "shots":
+        measured, measured_bound, projected = core, bound, projected_core
+        target = _SHOTS_TARGET_S
+    else:
+        measured, projected = average, projected_average
+        measured_bound = bound / points if bound is not None and points else None
+        target = _POINT_TARGET_S
     return {
         **row,
         "metric_kind": metric_kind,
         "core_s_per_point": average,
-        "core_judgement": judgement,
+        "core_judgement": _core_judgement(measured, measured_bound, target),
         "extrapolated_point_count": projected_points,
         "extrapolated_core_s": projected_core,
         "extrapolated_core_s_per_point": projected_average,
-        "extrapolated_core_judgement": projected_judgement,
+        "extrapolated_core_judgement": (
+            _core_judgement(projected, None, target)
+            if projected_core is not None
+            else None
+        ),
     }
 
 

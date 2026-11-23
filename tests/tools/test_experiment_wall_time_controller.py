@@ -10,18 +10,20 @@ from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from qtpy import QtCore
 from qtpy.QtCore import QCoreApplication, QTimer
 from zcu_tools import program
 from zcu_tools.gui.app.measure import Registry, controller
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
+from zcu_tools.gui.app.measure.services.ports import RunPaneSnapshot, TabSnapshot
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.simulators.ftf import config, environment
 from zcu_tools.simulators.ftf.config.schema import FTFSettings, Numerics
 
-from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleResult, SampleRun
 from tools import experiment_wall_time
 from tools.experiment_wall_time import main
 
@@ -64,6 +66,7 @@ class _SyntheticController:
         self.on_cancel = on_cancel
         self.project = Path(project_root)
         self.entry: Path | None = None
+        self.published_run: RunPaneSnapshot | None = None
 
         def open_entry(request: EntryRequest) -> None:
             self.entry = self.project / "result" / request.name
@@ -85,7 +88,9 @@ class _SyntheticController:
         self.entry_control = SimpleNamespace(open_entry=open_entry, use_point=use_point)
         self.tab_control = SimpleNamespace(
             new_tab=lambda adapter: adapter,
-            get_tab_snapshot=lambda _tab: SimpleNamespace(run=None),
+            get_tab_snapshot=lambda tab: TabSnapshot(
+                adapter_name=tab, cfg_input={}, tab_id=tab, run=self.published_run
+            ),
         )
         self.cfg_resources = SimpleNamespace(
             lookup=lambda _tab: SimpleNamespace(write=on_write, result=object)
@@ -142,7 +147,11 @@ def core_app() -> Iterator[QCoreApplication]:
     yield QCoreApplication.instance() or QCoreApplication([])
 
 
-def _headless_inputs(directory: Path, *adapters: str) -> None:
+def _headless_inputs(
+    directory: Path, *adapters: str, metric: dict[str, object] | None = None
+) -> None:
+    if metric is None:
+        metric = {"kind": "shots"}
     directory.mkdir(parents=True)
     (directory / "board-profile.yaml").write_text("{}")
     (directory / "ftf-settings.yaml").write_text("{}")
@@ -153,7 +162,7 @@ def _headless_inputs(directory: Path, *adapters: str) -> None:
                 "point": "initial",
                 "unpinned": {"form": "current Form", "point": "fixture point"},
                 "scenes": [
-                    {"scene_id": key, "adapter": key, "metric": {"kind": "shots"}}
+                    {"scene_id": key, "adapter": key, "metric": metric}
                     for key in adapters or ("fake/frequency",)
                 ],
             }
@@ -398,6 +407,73 @@ def test_main_configures_ftf_workers_and_stamps_batch_telemetry(
     assert settings.numerics.projection_weight_floor == 0.0002
     assert settings.numerics.telemetry.commit == "abc"
     assert settings.numerics.telemetry.dirty is True
+
+
+@pytest.mark.parametrize(
+    ("publication_id", "wrapped", "error"),
+    [
+        pytest.param(1, True, None, id="current-run-record"),
+        pytest.param(0, True, RuntimeError, id="stale-publication"),
+        pytest.param(None, True, RuntimeError, id="missing-publication"),
+        pytest.param(1, False, TypeError, id="wrong-record-type"),
+    ],
+)
+@pytest.mark.usefixtures("core_app")
+def test_main_uses_only_the_current_controller_run_record_for_scan_grid_points(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    publication_id: int | None,
+    *,
+    wrapped: bool,
+    error: type[Exception] | None,
+) -> None:
+    data_dir, output = tmp_path / "inputs", tmp_path / "output"
+    _headless_inputs(data_dir, metric={"kind": "scan", "axes": [{"field": "data"}]})
+    result = SampleResult(np.linspace(0.0, 1.0, 5))
+
+    def run(ctrl: _SyntheticController) -> None:
+        (ctrl.telemetry / "routing-scan.jsonl").write_text(
+            '{"families":{},"points":99,"wall_s":1,"compile_wall_s":0,'
+            '"evolve_wall_s":0.375,"readout_wall_s":0,"materialize_wall_s":0}\n'
+        )
+
+        def finish() -> None:
+            if publication_id is not None:
+                ctrl.published_run = RunPaneSnapshot(
+                    result=SampleRun(cfg=None, result=result) if wrapped else result,
+                    source_path=None,
+                    source_operation_id=publication_id,
+                )
+            ctrl.complete()
+
+        QTimer.singleShot(0, finish)
+
+    register = _install_headless_controller(
+        monkeypatch,
+        _Clock(),
+        ("fake/frequency",),
+        run,
+        lambda _: pytest.fail("a completed Run must not be cancelled"),
+    )
+
+    def measure() -> int:
+        return main(
+            ["--output", str(output)],
+            data_dir=data_dir,
+            registry_factory=register,
+            read_commit=lambda: "abc",
+        )
+
+    if error is not None:
+        with pytest.raises(error, match="Run 1"):
+            measure()
+        return
+
+    assert measure() == 0
+    [row] = json.loads((output / "report.json").read_text())["rows"]
+    assert row["point_count"] == 5
+    assert row["core_s_per_point"] == 0.075
+    assert row["core_judgement"] == "pass"
 
 
 @pytest.mark.parametrize("orphan", [False, True], ids=["paired", "orphan"])

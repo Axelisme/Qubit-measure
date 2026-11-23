@@ -64,10 +64,13 @@ def _record_evaluations(row: Row, result: object, metric: EvaluationMetric) -> N
     counts = _result_array(result, metric.counts_field)
     if peak.ndim != 1 or not counts.ndim or counts.shape[0] != len(peak):
         raise ValueError("Result peaks and counts must share a candidate axis")
+    # In an on-time successful CZOptimizeResult, a recorded peak without
+    # seed counts means the experiment skipped that candidate at its peak check.
     acquired = np.any(~np.isnan(counts), axis=tuple(range(1, counts.ndim)))
-    row["point_count"] = int(np.count_nonzero((peak <= 1.0) & acquired))
-    row["rejected_evaluations"] = int(np.count_nonzero(peak > 1.0))
-    row["unreached_evaluations"] = int(np.count_nonzero(np.isnan(peak)))
+    reached = ~np.isnan(peak)
+    row["point_count"] = int(np.count_nonzero(acquired))
+    row["rejected_evaluations"] = int(np.count_nonzero(reached & ~acquired))
+    row["unreached_evaluations"] = int(np.count_nonzero(~reached))
 
 
 def _extrapolation_factors(
