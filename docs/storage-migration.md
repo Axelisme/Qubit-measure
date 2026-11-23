@@ -69,7 +69,9 @@ uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage 
 
 V2 CSV 自帶 `dev_value/dev_unit`，不需 legacy CSV 宣告。假設單位只補缺證據，不能修補非法或互相衝突的明示單位。首次 dry-run 與正式執行使用相同宣告。
 
-Native 轉換所需的歷史 evidence 用 `--run-evidence <file>` 提供。必要內容包括 experiment tag、cfg_type、完整歷史 cfg，以及 variable、axes、signal 的名稱、單位、dtype 與 shape。缺證據的 Labber 原檔仍保留並列 pending。開始時間與 run_id 可以未知；路徑日期、mtime、目前設定與裝置狀態都不能代填歷史事實。Evidence 欄位與驗證規則見[內部規格](../migrations/storage_migration/README.md#native-歷史證據)。
+`--run-evidence <file>` 提供歷史 run 事實，包括 experiment tag、cfg_type 與完整歷史 cfg。開始時間與 run_id 可以未知；路徑日期、mtime、目前設定與裝置狀態都不能代填歷史事實。
+
+工具用歷史 disk schema 將舊 Labber logs 對應到輸出變數。`MigrationMapping.data_schemas` 按歷史 `(tag, cfg_type)` 提供 schema，不填在 run evidence。缺必要證據或找不到對應 schema 時，工具保留 Labber 原檔並列為 pending。對應規則見[遷移規格〈Native 歷史證據〉](../migrations/storage_migration/README.md#native-歷史證據)。
 
 核對 stdout JSON report 中每個來源的去向、pending 原因、備份與目的路徑。確認後移除 `--dry-run`，其餘參數保持相同。
 
@@ -112,9 +114,9 @@ Pending 的重點是缺哪項證據，以及原文保在哪裡。未知但已完
 
 重跑沿用首次的來源、entry 名稱、kind、四個欄位／單位宣告、mapping 版本與已固定的歷史 evidence。尚未固定 native run assignment 的 pending 項可補 evidence，固定後的內容則須一致。
 
-完成後也可用原指令重驗。工具先驗完整備份，再比較 global parameters、points、libraries、分析 JSON、JSONL、processed 正式／companion、figures、raw、Labber 與 native。YAML／JSON 按 owner typed 語意比較，保留 unknown raw，排版差異不算內容變更。Binary／JSONL 比較已驗 SHA256。
+完成後也可用原指令重驗。工具核對來源與目的身分、操作宣告、報告位置與已固定的 run evidence；`mapping_version` 不同，即使已完成也拒絕。工具重驗完整備份及仍存在的來源，再核對 manifest 管理的目的：global parameters、points、libraries、分析 JSON、JSONL、processed 正式／companion、figures、raw、Labber 與 Native。YAML／JSON 按 owner typed 語意比較，保留 unknown raw，排版差異不算內容變更。Binary／JSONL 比較已驗 SHA256。
 
-相同內容不重寫、不追加、不重新分配 ID。報告的 `skipped` 逐項列出 `source`、`destination`、`comparison` 與 `summary`。這些重驗也可使用 `--dry-run`，維持零寫入。
+這是身分與既有產物的比對，不重跑 Labber parser 或 typed Native Load。通過後從既有報告產生略過結果，不重寫 manifest 或磁碟上的報告，也不重寫目的、不追加、不重新分配 ID。回傳報告的 `skipped` 逐項列出 `source`、`destination`、`comparison` 與 `summary`。這些重驗也可使用 `--dry-run`，維持零寫入。完成判定與首次 Native 驗證的分界見[遷移規格〈Publication、重跑與清理〉](../migrations/storage_migration/README.md#publication重跑與清理)。
 
 ## 差異與 exit status
 

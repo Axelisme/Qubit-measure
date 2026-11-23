@@ -46,6 +46,8 @@ I/Q 投影權重可固定或逐點給定。`propagated_iq_shot_sem` 用逐點梯
 它不估計校正矩陣本身的誤差。算不出有限 SEM 時以 NaN 回傳並記錄警告；接近奇異不另設門檻。
 兩者都以實際保留的 shots 為分母，不估計輪間散布、RB 的 seed 散布或擬合參數誤差。
 少於兩發或缺測（NaN）時，該點誤差未定。負、非整數、無窮計數及其加總溢位會報錯。
+[Summed acquisition](../program/README.md#summed-acquisition) 在取數時以
+[`AdditiveShotReducer.add`](../program/shot_processing.py) 累加各完成輪的原始矩，分析時才中心化。
 兩個 IQ 估計入口用同一個有上限的原始六矩捨入界。界線取決於實收 shot 數，不用名目 Reps × Rounds。
 容差內的負中心量可歸零，不截斷小的正估計。矩陣修復與直接投影的檢查不同，同一組矩通過原始矩檢查不保證任意投影可估。
 超界中心平方和或交叉共變異與估計溢位會拋出 `IQCovarianceError`（`ValueError` 的子型別）。
@@ -239,3 +241,5 @@ Lab 的 saved-matrix reader 把奇異矩陣當成缺席並記一筆 warning。`c
 完整的 `Centroid3IQAnalysis` 留給 caller 畫 raw／unclipped corrected fractions。
 `summarize_centroid3(result)` 產生 `Centroid3Summary`，複製 3×3 training confusion，保留 condition number 與 minimum singular value，不重算分析。超出 float64 範圍的診斷值記為 null，原分析結果不變。摘要大小不隨 scan axes 或 shot 數成長，供實驗回傳與 recipe 解碼。
 `Centroid3Summary.from_applied_matrix` 描述這次實際套用的矩陣。沒有校正時，矩陣、condition number 和最小 singular value 都是 null。TypeAdapter 可解碼 null 或重建有限的 float64 3×3 matrix；矩陣內的 null、非有限值與錯 dtype 或 shape 仍拒絕。Saved cfg 不變。
+
+Raman 與 STIRAP 的 saved-counts Analyze 經由 [`correct_saved_centroid3`](../../../zcu_lab/v2/support/singleshot/centroid3_analysis.py) 做選用校正，矩陣由 [`centroid3_confusion_matrix`](../../../zcu_lab/v2/support/singleshot/util.py) 從 saved cfg 讀取。Run lookup 與 Analyze 的 cfg 邊界見 [ADR-0074〈Classifier 隨 readout 保存〉](../../../docs/adr/0074-flat-readout-module.md#classifier-隨-readout-保存)。
