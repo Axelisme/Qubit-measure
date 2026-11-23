@@ -21,12 +21,12 @@
 | `form.md` | 從選定的 point 與綁定推導出的表單。照畫面記錄 label、單位、description、初值或選項、唯讀與必填狀態；留空的欄位保持空白，不補猜測值。不把 Hidden 欄位當成操作員可見的欄位。 |
 | `guide.md` | 實驗的 operator guide 原文。 |
 | `recipe.md` | 已發布的 recipe 說明與完整 input schema；沒有 recipe 就註明「沒有 recipe」。 |
-| `figures/` | 操作員實際看得到的 liveplot 與 Analyze PNG。保留 liveplot 進度畫面與最後一格供比對，別用重新排版或重畫的圖替代。 |
+| `figures/` | 操作員實際看得到的 liveplot 與 Analyze PNG。保留 liveplot 中途畫面與最後一格供比對，別用重新排版或重畫的圖替代。 |
 | `analysis-summary.md` | Analyze 圖同一 run 的實際摘要，包含操作員當時可見的值。 |
 
 優先取同一次 run 的 liveplot、Analyze 圖與摘要。記錄來源、run、擷取階段與條件供歸類時核對，別用這份擷取紀錄替產品補答案。若表單是 point 初值、liveplot 是低 reps probe、Analyze 圖又來自另一個保存 run，點數與訊號不同可能只是包組錯了。先核對來源；必要時重做同源讀者包再判 A 或 F。若產品沒有足夠的身分或設定讓操作員區分來源，仍記為 A。
 
-若家族驗收指定同一次 FTF Run，liveplot 的進度與末格、Analyze 圖與摘要都取自該次 Run。
+若家族驗收指定同一次 FTF Run，liveplot 的中途畫面與末格、Analyze 圖與摘要都取自該次 Run。
 [離線 stage probe](../../tests/README.md#實驗定義) 可以獨立驗各階段，通過不等於完成 R0 讀者包。
 
 若需轉寫 Primary Analyze 控制項，記產生包內 Primary 圖與摘要的那次分析所用的欄值，不用目前的可編輯欄值或表單初值替代。
