@@ -225,6 +225,9 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
 CPMG report 回傳 `t2_1_us`、`t2_1_err_us`、`gamma`、`gamma_err` 與 `fit_rows`。可加權列少於三列時四個擬合值為 null，仍保存圖與原始資料；分析失敗時 `fit_rows=0` 並附原因。
 STIRAP 與 Raman 的 Run 都要求 centroid3 classifier。Analyze 讀已分類的 g/e/f counts，沒有可用校正時只畫分類圖。Report 的 condition number 與 minimum singular value 指本次套用的矩陣；未校正時兩者都是 null。四個 recipe 都不詢問寫回。
+[`RamanGFReport`](raman_gf.py) 從 `Centroid3Summary` 取這兩個診斷值，不回報 f 峰。
+Run lookup 與 Analyze 的 cfg／counts 邊界見 [ADR-0074〈Classifier 隨 readout 保存〉](../../docs/adr/0074-flat-readout-module.md#classifier-隨-readout-保存)。
+`cfg_issue` 是 [Native restore 診斷](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)，不是合法 cfg 缺校正的摘要欄位。
 
 STIRAP 的 `f_population_estimate` 是本次掃描內最大的有限校正 f 值，不裁切到 [0, 1]。未校正時，此值和校正峰座標都為 null；改由 `classified_f_peak` 回報 `f_label_fraction`（0–1）及同名掃描座標。有校正時不報分類峰。兩種峰都取首個最大值，與圖上的 marker 共用，並不代表 fidelity 或全域最佳脈衝。
 
