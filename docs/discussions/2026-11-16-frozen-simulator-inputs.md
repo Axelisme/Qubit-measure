@@ -110,3 +110,7 @@ Tools 解析 Git 共用位置，simulate 持有清單與數值讀寫、hash 驗�
 ## 2026-11-17 後記：歷史清理
 
 落地前核對：落地的歷史不含兩個舊 gzip。本文「歷史 blob 清理仍是另一項落地條件」一句已完成。
+
+## 2026-11-23 後記：Physical v2 的場景根
+
+保留舊 `scenes/v1`，不移動或覆寫舊 payload。Physical v2 使用 `scenes/v1-physical-v2`；場景索引與根內版次仍是 1。遷移取捨見[凍結數值升到 physical v2](2026-11-23-frozen-physical-v2.md)。

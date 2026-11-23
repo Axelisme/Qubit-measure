@@ -211,11 +211,13 @@ def common_frame_diagnostic(
     carrier returns accepted=False, as does a failed SW denominator. Admission
     is independent of the Engine's per-segment budget and pricing; acceptance
     means this row is admissible, not that default dispatch will select it.
-    Unknown ports, invalid lengths, nonfinite values or negative duration raise
-    ValueError. Numerical construction failures propagate. The query builds one
+    Explicit collapse operators, unknown ports, invalid lengths, nonfinite
+    values or negative duration raise ValueError. Numerical construction failures propagate. The query builds one
     temporary coefficient product, evaluates admission once, and does not evolve
     a density, select a family, modify inputs/history or retain preparations.
     """
+    if model.collapse_operators:
+        raise ValueError("common_frame does not support explicit collapse operators")
     if len(ports) != 2 or len(frequencies_ghz) != 2 or len(amplitudes) != 2:
         raise ValueError("common-frame diagnostic requires two tones")
     names = [drive.name for drive in model.drives]

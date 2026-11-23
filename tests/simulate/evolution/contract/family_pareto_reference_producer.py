@@ -25,7 +25,7 @@ from zcu_tools.simulate.evolution import (
 )
 
 from .interaction_reference import interaction_reference
-from .reference import converged_reference
+from .reference import UnsupportedCollapseOperators, converged_reference
 
 Solver = Callable[[ModelSource, TimelineBatch], ReferenceResult]
 
@@ -43,9 +43,11 @@ def prepare_references(
     scenario requires exactly one matching indexed row before reading payloads;
     None selects the entire index. Zero/multiple matches raise ValueError.
     Read only selected record names and physical; metadata never selects a solver.
-    Existing keys are loaded cache-only. Only a missing key triggers the given
-    solver, without trying another solver after failure. Each decoded source
-    is closed on success or failure; earlier writes remain after later failure.
+    Existing keys are loaded cache-only. Only a missing key calls the given
+    solver, without trying another solver after failure. The built-in solvers
+    reject baths with explicit collapse operators; the producer reports the
+    rejection as a ValueError with the scene name. Each decoded source is closed
+    on success or failure; earlier writes remain after later failure.
     Container, numeric, solver and I/O errors propagate. Run separately under
     approved compute limits, never during timing.
     """
@@ -99,7 +101,10 @@ def _prepare_records(
             try:
                 load_reference(cache, frozen.source, frozen.batch)
             except FileNotFoundError:
-                result = solver(frozen.source, frozen.batch)
+                try:
+                    result = solver(frozen.source, frozen.batch)
+                except UnsupportedCollapseOperators as exc:
+                    raise ValueError(f"{record.name}: {exc}") from exc
                 write_reference(cache, frozen.source, frozen.batch, result)
             prepared[record.name] = reference_key(frozen.source, frozen.batch)
     return prepared
@@ -116,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
     name, hashes and producer command, then fails without running a solver.
 
     Each solver option accepts one path and may repeat. At least one is required.
+    The built-in solvers support only secular baths; an explicit jump in the
+    bath of a cache miss raises ValueError with the scenario name.
     argv omits the executable name. Print name/key JSON; argparse handles invalid
     options/help. Input, solver and I/O failures propagate without solver fallback.
     """

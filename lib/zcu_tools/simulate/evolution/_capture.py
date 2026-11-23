@@ -216,7 +216,7 @@ class CaptureBuffer:
                     "families": None if families is None else sorted(families),
                     "source_identity": source.model(
                         (0,) * batch.flux.level.shape[1]
-                    ).identity,
+                    ).content_identity,
                     "segment_numeric_version": SEGMENT_NUMERIC_VERSION,
                     "frozen_physical_version": FROZEN_PHYSICAL_VERSION,
                     "complete": False,

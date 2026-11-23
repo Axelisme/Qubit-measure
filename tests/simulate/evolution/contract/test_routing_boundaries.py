@@ -109,6 +109,30 @@ def test_opencl_dop853_selects_tableau_by_budget(
     np.testing.assert_array_equal(result.densities[:, marker, marker], 1)
 
 
+def test_explicit_collapse_stays_on_cpu_with_an_eligible_opencl_control(
+    stub_opencl: str,
+) -> None:
+    case = accuracy_case("sampled_gaussian_9")
+    model = case.source.model((0,))
+    jump = np.zeros_like(model.eigenvectors)
+    jump[0, 1] = 0.2j
+    with (
+        closing(case.source),
+        closing(coherent_source(replace(model, collapse_operators=(jump,)))) as full,
+        closing(Engine(1, backend="opencl", families=case.families)) as engine,
+    ):
+        control = engine.evolve(case.source, (case.batch,), budget=1e-3, telemetry=True)
+        result = engine.evolve(full, (case.batch,), budget=1e-3, telemetry=True)
+
+    count = len(case.batch.points)
+    assert control.paths.execution_device == stub_opencl
+    assert control.paths.routing["dop853"].opencl_rows == count
+    assert result.paths.execution_device == "cpu"
+    report = result.paths.routing["dop853"]
+    assert report.opencl_rows == report.dp54_rows == 0
+    assert report.dop853_rows == count
+
+
 def test_explicit_opencl_raises_during_construction_without_a_device(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

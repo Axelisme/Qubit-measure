@@ -8,7 +8,9 @@ Pareto 集合包含 1 個 synthetic 場景、15 個完整 real 場景、3 個單
 `frozen-synthetic.index.json` 與 `frozen-real.index.json` 依 category 保存這些身份，也可容納其他已宣告的場景。
 兩份 version 1 清單只存每筆 name、physical_sha256、oracle_sha256 與 metadata_sha256。
 Metadata hash 使用公開 `simulate.evolution.digest(record.metadata)`。
-數值不入庫。每筆 gzip 放在 `<git common dir 上層>/.agent_state/benchmark/family_pareto/scenes/v1`。
+數值不入庫。Physical v2 的每筆 gzip 放在 `<git common dir 上層>/.agent_state/benchmark/family_pareto/scenes/v1-physical-v2`。
+Physical version 由 Evolution codec 擁有。Index 與目錄內的檔案佈局仍為 scene cache v1。
+新根不讀或清除舊 `scenes/v1`。取得授權後，按 producer 指令重建並核對現有 pins，不複製舊 gzip。
 檔名含 name、physical hash 前 16 碼及 metadata hash 前 16 碼。Task 清理不得刪除此共用快取。
 首次從既有兩份 gzip 遷移 19 筆，逐筆核三個 hash、point order 與 reference key 不變，沒有跑 builders 或 solver。
 落地的歷史不含兩個舊 gzip。冷快取完整重建尚未驗證，需另取運算授權。
