@@ -129,6 +129,13 @@ saved = save_stage(record, experiment.AXES_SPEC, output_dir)
 analyzed = analysis_stage(experiment, record, options)
 ```
 
+T2Echo 保存範例：[`T2EchoResult.true_activate_detune`](v2/twotone/time_domain/t2echo/core.py) 是 run-only 欄位，Native 還原後是 `None`。
+若原 record 的該欄有值，分兩次驗收：
+
+1. 用原 record 呼叫 `save_stage`，在 scratch 記錄 `roundtrip_equal=False`，從 WARNING 確認唯一差異是 `true_activate_detune`。
+2. 用 `dataclasses.replace` 複製 record 與 Result，只把副本的 `true_activate_detune` 設為 `None`，不改原 record。`iq_moments` 是 Native 持久欄位，有值就保留在副本中一起比較。
+3. 用副本和另一個輸出目錄重跑 `save_stage`，確認 `roundtrip_equal is True`。在 scratch 記錄並判讀 `cfg_issue`。
+
 Run／analysis 的圖片由腳本保存，例如：
 
 ```python
