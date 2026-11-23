@@ -15,7 +15,7 @@ Lookback measures the time-resolved, demodulated ADC waveform. Each shot plays o
 
 ## Read the plots
 
-- **Run magnitude** is `|mean IQ|` in a.u. versus time from the readout block start. The first sample is at Trig offset. The rounds bar counts completed averages; the exported figure does not include it.
+- **Run magnitude** is `|mean IQ|` in a.u. versus time from the readout block start. The first sample is at Trig offset. The GUI progress bar shows completed averages.
 - **Analyze magnitude** overlays that trace and the magnitude after Gaussian smoothing of I and Q. The dotted threshold is the chosen fraction of the filtered peak. The arrival diamond marks the last sample strictly below threshold before the peak. If none exists, it marks **Window start fallback**, not a measured arrival.
 - **Analyze quadratures** display signed I and Q of the unsmoothed average. A change in I and Q at roughly constant magnitude can indicate phase motion. If the signed samples clip, reduce Readout gain and repeat before accepting the estimate.
 

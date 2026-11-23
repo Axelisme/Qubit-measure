@@ -193,6 +193,8 @@ Live artists 與多面板格式依 [v2 README](README.md#即時圖工具)。
 建立非均勻熱圖（`uniform=False`）時，用 [`live_heatmap`](support/live.py) 的 `cmap` 選色盤，例如 `live_heatmap(ax, uniform=False, cmap="viridis")`。
 `cmap` 接受 Matplotlib 已註冊的色盤名稱，省略時用 `RdBu_r`。熱圖掛載到 axes 後就不能更換色盤。
 實驗自行決定座標、labels 與圖名。show 前可填資料，show 後的修改也經 plot-thread callback。
+取數進度由 GUI progress bar 顯示。Live 圖不畫輪次、累積 shots、完成比例或階段序號，也不為這些計數建立 artist。
+例如，拿掉副標題 `Averaging round 3 / 10`，保留 `One-tone spectrum · Resonator · IQ magnitude` 和持續更新的曲線。
 選 y 軸要畫的物理量時看 [R12：y 軸畫物理 observable](figure-style.md#r12y-軸畫物理-observable)，標示方式見[〈單位〉](figure-style.md#單位)。
 一維建圖與 update 見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)，熱圖與最近兩條切線見 [PowerExp 的 live plot](twotone/power_dep/core.py)。
 

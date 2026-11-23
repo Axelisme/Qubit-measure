@@ -177,10 +177,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            progress = ax.set_title(
-                f"{np.isfinite(data).sum()}/{len(lengths)} settings scored"
-            )
-            return (*line.set(lengths, np.abs(data)), progress)
+            return line.set(lengths, np.abs(data))
 
         fig.show()
         signals_buffer = SignalBuffer(

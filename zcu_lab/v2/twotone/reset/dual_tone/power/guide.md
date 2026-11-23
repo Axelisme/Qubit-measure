@@ -11,7 +11,7 @@ Optional **Reset** → optional **Preparation pulse** → both reset tones → *
 
 ## Read the figures and choose gains
 
-Both maps show the magnitude of mean IQ relative to the minimum-gain corner, not population or fidelity. Live counts acquired cells; there is no per-cell shot SEM. Analyze marks a smoothed-map extremum with a star on the raw map. Its choice of extremum depends on the first scan corner versus the map mean; reversing an axis can change that corner.
+Both maps show the magnitude of mean IQ relative to the minimum-gain corner, not population or fidelity. There is no per-cell shot SEM. Analyze marks a smoothed-map extremum with a star on the raw map. Its choice of extremum depends on the first scan corner versus the map mean; reversing an axis can change that corner.
 
 **Peak selection filter** and **Filter strength** control the smoothing used for selection, not the displayed colors. Strength scales the wavelet threshold or sets Gaussian width in sample steps. Check an edge candidate on a nearby repeat and verify state preparation separately.
 

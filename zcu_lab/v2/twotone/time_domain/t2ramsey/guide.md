@@ -14,7 +14,7 @@ Optional **Reset** → calibrated **π/2 pulse** → swept **Free-evolution dela
 
 ## Read the plots
 
-Live and Analyze plot the principal-axis projection of mean IQ (a.u.; I if the axis is undefined), not population, against delay in µs. The live title counts retained shots per point. Each bar is one **shot SEM**: retained-shot sample standard deviation along that axis divided by √(retained shot count). It is not shot spread, round-to-round scatter or a fit error. Points without shot statistics or with fewer than two shots have no bar; mean-only files can still load and fit.
+Live and Analyze plot the principal-axis projection of mean IQ (a.u.; I if the axis is undefined), not population, against delay in µs. Each bar is one **shot SEM**: retained-shot sample standard deviation along that axis divided by √(retained shot count). It is not shot spread, round-to-round scatter or a fit error. Points without shot statistics or with fewer than two shots have no bar; mean-only files can still load and fit.
 
 Analyze overlays the fitted model and reports T₂* and (for a fringe fit) fringe frequency with fit standard errors. R² compares residuals with measured variation; it is not an acceptance threshold. Check that the fit follows the data across the window and that its uncertainty supports the intended correction. **Applied detune** is the same Run's realized phase ramp after rounding, not the fitted fringe frequency. **Reps × Rounds** is the configured budget.
 
