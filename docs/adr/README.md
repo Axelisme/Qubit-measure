@@ -45,7 +45,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Cfg / Value Model
 
-原則：表單初值用簡單固定的公式，不依板子調整；不依板子的固定上下限在 expression 用 `min` 截斷，見 [ADR-0073](0073-measure-form-derivation.md#自動推導點到為止)。
+原則：表單初值用簡單固定的公式，不依板子調整；可填算好的數值或寫 expression，兩種寫法都遵守與板子無關的固定範圍，見 [ADR-0073](0073-measure-form-derivation.md#自動推導點到為止)。
 原則：初值在一般 point 上就違反實驗自己的規則時，修初值公式，不加檢查；依板子的限制不改初值，見 [ADR-0073](0073-measure-form-derivation.md#預設值的瑕疵就改預設值)。
 原則：依板子而定的限制先不加程式檢查，由 Run 報錯，判讀放知識庫的 judge 條目，見 [ADR-0073](0073-measure-form-derivation.md#板子限制先不加程式檢查)。
 原則：表單只用現成機制做簡單檢查，例如單一欄位 annotation 的固定範圍；需要新增並長期維護的機制不做，交給 Run 或知識庫；防止默默產生錯誤資料的守門不受此限，見 [ADR-0073](0073-measure-form-derivation.md#表單只做現成機制做得到的簡單檢查)。
