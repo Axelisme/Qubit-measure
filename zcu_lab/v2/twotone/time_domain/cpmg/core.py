@@ -9,7 +9,6 @@ from typing import Annotated, Any, ClassVar
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.collections import PolyCollection
-from matplotlib.colors import Normalize
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -345,11 +344,11 @@ def _count_map(
     image = PolyCollection(
         list(corners.reshape(-1, 4, 2)),
         array=contrast.ravel(),
-        norm=Normalize(0, 1),
         cmap="RdBu_r",
         edgecolors="none",
         antialiaseds=False,
     )
+    image.autoscale_None()
     ax.add_collection(image, autolim=False)
     duplicates = Counter(counts.tolist())
     ticks = np.linspace(0, counts.size - 1, min(counts.size, 6), dtype=int)
@@ -399,6 +398,8 @@ def _live_plot(
         valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
         current = int(valid[-1]) if valid.size else -1
         heatmap.set_array(real.ravel())
+        if valid.size:
+            heatmap.autoscale()
         for line, slot in ((previous, current - 1), (latest, current)):
             if slot >= 0:
                 line.set_data(delays[slot], real[slot])
