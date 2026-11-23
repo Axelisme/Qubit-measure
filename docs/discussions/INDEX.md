@@ -23,6 +23,7 @@
 
 ## 模擬量測環境
 
+- 2026-11-23 [模擬器優化嘗試記在哪裡](2026-11-23-simulator-attempts-log.md)：文件組織。優化嘗試一檔一筆，依主題索引，並補登過去採用和未採用的做法。
 - 2026-11-23 [FTF sampled RWA 探針的快取壽命](2026-11-23-ftf-rwa-probe-memo.md)：快取壽命。一次 FTF preparation 重用精確的探針證明；每次 evolve 仍選路、記帳、演化與發佈 capture。
 
 - 2026-11-22 [舊實測數字當現況](2026-11-22-stale-measured-numbers.md)：量測新鮮度。引用數字附 commit、輸入與範圍，驅動決策前查被測路徑的後續改動；未完成列未走到的階段記 null。
