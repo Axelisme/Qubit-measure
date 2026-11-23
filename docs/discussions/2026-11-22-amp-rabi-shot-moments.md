@@ -47,3 +47,5 @@ Native 與 Labber 各有用途，遵循 [ADR-0063](../adr/0063-persistence-owner
 ## 依據
 
 設計時以 `5+7j` 的原平均與兩分量各扣 `2` 的案例區分兩個零點。最終離線 probe 使用真 [Amp Rabi spec](../../zcu_lab/v2/twotone/rabi/amp_rabi/core.py) 與含 offset 23 的合成逐發資料。第一個完成輪保留 300／1200，backend 執行一次且 raw 只物化一次。校正 mean、六矩、SEM 與 SNR 早停均和同批資料相符。公開 Labber 匯出與普通 reader 另外核對單一 `data` log、Gain 及平均 IQ；native probe 核對有矩及 mean-only round trip。公開保存接縫的合成壞軸案例也驗證兩種 data outputs 失敗而其他 artifacts 仍可保存。原始調查、合成資料與 probe 圖未入庫，驗證未操作真實硬體。
+
+後記（2026-11-23）：使用者答「都採用建議」，追認 Native 可選變數與 Labber 選集、校正 IQ 矩，以及公開 `validate_variable` 三項代裁。

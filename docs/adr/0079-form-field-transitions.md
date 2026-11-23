@@ -41,7 +41,7 @@ Qt、remote 與 recipe 要能在同一份 Form 執行同一操作。領域型別
 
 **例子。** Module 子欄位標唯讀時，library key 仍可選。Module 節點本身標唯讀時，ref／inline 選擇與所有子欄位都固定，不論初值是哪一支。
 
-**邊界。** 唯讀只限制被宣告的子樹，不固定祖先。不另設 selector-only 宣告，不強制 inline，也不生成單值 Literal 來實作唯讀。List 各位置可以有不同的唯讀初值。範本的非 lock 初值、input projection 與 cfg-only 分工沿用 [[0073]]，remote 拒絕格式見 [[0065]]。
+**邊界。** 唯讀只限制被宣告的子樹，不固定祖先。不另設 selector-only 宣告或強制 inline 是 [ADR-0073〈Form 的形狀與初值〉](0073-measure-form-derivation.md#form-的形狀與初值) 所記的 designer 實作選擇。唯讀不靠生成單值 Literal 實作。List 各位置可以有不同的唯讀初值。範本的非 lock 初值、input projection 與 cfg-only 分工沿用 [[0073]]，remote 拒絕格式見 [[0065]]。
 
 **依據。** 2026-10-19，使用者問「那為什麼不直接都用ReadOnly就好？」並裁定：「我會選B，lock應該被認知為只對子樹作用。」原始討論未入庫，見 Git `c499c06d9`。
 
