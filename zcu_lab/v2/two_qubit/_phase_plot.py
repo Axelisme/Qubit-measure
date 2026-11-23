@@ -126,21 +126,35 @@ def _label_vectors(
 
 
 def plot_accumulated_phase(
-    ax: Axes, n: NDArray[np.int64], series: Sequence[AccumulatedPhaseSeries]
+    ax: Axes,
+    n: NDArray[np.int64],
+    series: Sequence[AccumulatedPhaseSeries],
+    *,
+    connect_unfitted: bool = False,
 ) -> None:
     """Draw measured angles ± shot SEM and their fitted lines on ax.
 
     N is the common measured count axis. Missing angles have no point; missing
-    SEM has no bar. Plot the supplied model curves without refitting. The
-    caller sets labels, title and legend and owns presentation.
+    SEM has no bar. Plot the supplied model curves without refitting. With
+    connect_unfitted, connect adjacent measured angles only for series without
+    a fit, breaking at missing angles and jumps of at least 180°. By default,
+    all measurements are unconnected. The caller sets labels, title and legend.
     """
     for i, group in enumerate(series):
         color = f"C{i}"
+        marker = ("o", "s")[i % 2]
+        if connect_unfitted and (group.fit_n is None or group.fit_phase_deg is None):
+            counts, phase, sem = wrapped_phase_plot_data(
+                n, group.phase_deg, group.sem_deg
+            )
+            marker += "-"
+        else:
+            counts, phase, sem = n, group.phase_deg, group.sem_deg
         ax.errorbar(
-            n,
-            group.phase_deg,
-            yerr=group.sem_deg,
-            fmt=("o", "s")[i % 2],
+            counts,
+            phase,
+            yerr=sem,
+            fmt=marker,
             color=color,
             label=f"{group.label} data",
         )
@@ -190,12 +204,16 @@ def reference_phase_series(
     xy: NDArray[np.float64],
     sem: NDArray[np.float64],
     idx: int,
+    *,
+    herald_index: int = 0,
 ) -> list[AccumulatedPhaseSeries]:
     """Prepare measured angles and fitted lines for the selected frequency.
 
-    Supply the CZ counts, fitted slopes and the selected sample's X/Y and phase
-    SEM in spectator g/e order. Lift the angles onto fit group 0's branch.
-    The sample index refers to the fitted frequency axis. Do not refit.
+    Supply the CZ counts and the selected sample's X/Y and phase SEM in
+    spectator g/e order for the chosen fit group. The sample index refers to
+    the fitted frequency axis; herald_index selects the group's offset (group
+    0 by default). Lift measured angles onto that group's fitted branch when
+    available. Do not refit.
     """
     series = []
     grid = np.linspace(n.min(), n.max(), 201)
@@ -203,9 +221,11 @@ def reference_phase_series(
         x, y = xy[b]
         angles = np.where(np.hypot(x, y) > 0, np.rad2deg(np.arctan2(y, x)), np.nan)
         measured_fit = fitted.accumulated_phase_deg(
-            n, channel=b, coordinate=idx, group=0
+            n, channel=b, coordinate=idx, group=herald_index
         )
-        fit_deg = fitted.accumulated_phase_deg(grid, channel=b, coordinate=idx, group=0)
+        fit_deg = fitted.accumulated_phase_deg(
+            grid, channel=b, coordinate=idx, group=herald_index
+        )
         fit_label = None
         if measured_fit is not None:
             angles = phase_near(angles, measured_fit)
