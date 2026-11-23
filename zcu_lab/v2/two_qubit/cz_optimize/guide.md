@@ -7,7 +7,7 @@
 ## Run 前
 
 - 核對[位置與完整 mux](../guide.md#綁定位置與讀出-tones)、各 qubit 校準的 Xπ/2 和 Xπ，以及讀出的 circle classifier 和 GE Post 半徑。各 X 脈衝與同位置 CZ pulse 用同一 generator，phase 為有限值。
-- **Two-line CZ drive** 兩支 pulse 都要選同一 arb 資產；兩個路徑不同，即使樣本相同也不收。先核對 I/Q、時長和 normalize，並用該 arb 重測 [CZ amplitude](../cz_amplitude/guide.md) 與 [Local Z](../local_z/guide.md)。**Local Z correction pair** 由 `$coupler.ext.cz_phase` 取有序元件名與兩角，須與本次綁定一致。
+- **Two-line CZ drive** 引用 coupler 的 `cz_qubit1`、`cz_qubit2` slots。兩支 pulse 須用同一 arb 資產；兩個路徑不同，即使樣本相同也不收。若要試另一資產，先對兩支 pulse 按 **Convert to inline** 再切換。先核對 I/Q、時長和 normalize，並用該 arb 重測 [CZ amplitude](../cz_amplitude/guide.md) 與 [Local Z](../local_z/guide.md)。**Local Z correction pair** 由 `$coupler.ext.cz_phase` 取有序元件名與兩角，須與本次綁定一致。
 - **評估 0** 並非原波形複本。從資產以線性內插取六個等距內部節點，以兩端為零的 natural cubic spline 重建原時長波形，並從已校準的 local Z 開始。起點與原資產形狀可能不同。
 - **Interleaved Clifford depth** 選在已量衰減中段；太淺或太深會讓候選分數難以分開。**Clifford sequence seeds** 填 3–5 個不同整數。**Optimizer random seed** 控制候選而非 Clifford 序列。**Initial I/Q control-point spread** 與 **Initial local Z spread** 分別設定 normalized I/Q 和角度（deg）的候選起始標準差。
 - 評估數為 `1 + Optimizer generations × Candidates per generation`，嘗試 shots 至多是評估數 × seed 數 × Reps。**Reset** 留白則略過；若用 mux herald，核對[同一讀出與 keep 鍵](../guide.md#herald-reset-與獨立-heralded-入口)。每個 seed 以實際保留 shots 為分母，包含 other；任一 seed 無保留 shots 時 Run 會報該 seed。

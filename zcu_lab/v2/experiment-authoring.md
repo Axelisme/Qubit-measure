@@ -97,6 +97,7 @@ Form 預設按 cfg 宣告順序顯示，adapter 有獨立輸入型別時按該�
 `tree` 的寫入順序與畫面排序無關。未知或重複欄位在 Form 建構時 raise ValueError。
 持久 Spec 的 Form 只接受空 `field_order`。
 GUI 作者依 [表單設計與預演](measure-authoring.md#表單設計與預演) 核對實際順序。
+選擇 `Slot` 初值時，依 [ADR-0073〈表單預設引用 library，只在改了 Run 不覆寫的欄位時複製〉](../../docs/adr/0073-measure-form-derivation.md#表單預設引用-library只在改了-run-不覆寫的欄位時複製) 判斷是否保留 library 引用。
 
 時間掃描需選取樣方式時用 `sampling: Literal["linear", "decay"]`。
 Linear 是線性格點，decay 將同一時間窗的點集中在衰減段，這類時間掃描只接受這兩種模式。

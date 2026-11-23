@@ -7,11 +7,11 @@
 Select `two_qubit/conditional_phase_heralded` and check these inputs before Run:
 
 - Bind `qubit1` and `qubit2` to distinct qubits in `mux`, and bind `coupler` for the CZ pair. Use the full **Mux readout**. Check the tone for each role against the mux order. Both role tones need GE circle classifiers and GE Post radii calibrated with these readout settings.
-- Supply calibrated Xπ and Xπ/2 pulses for each role and both CZ drives. **Dual-line drive** starts from the coupler's `cz_qubit1` and `cz_qubit2` slots; fill any missing pulse. Each role's pulses share one generator, distinct from the other role's. Match the CZ envelope lengths and pre-delays. See the [ordinary guide](guide.md#prepare-the-inputs) for context.
+- Supply calibrated Xπ and Xπ/2 pulses for each role and both CZ drives. **Dual-line drive** references the coupler's `cz_qubit1` and `cz_qubit2` slots; fill any missing pulse. Each role's pulses share one generator, distinct from the other role's. Match the CZ envelope lengths and pre-delays. See the [ordinary guide](guide.md#prepare-the-inputs) for context.
 
 Each shot runs **optional ordinary Reset → herald mux readout → spectator I/Xπ → target Xπ/2 → n CZ pairs → independent X or Y projection → terminal mux readout**. Both reads use the same full mux settings. Blank Reset omits the optional pulse but not herald; do not select a mux-herald reset module.
 
-Set **Ramsey target**, **CZ gates per shot** (at least two unique positive counts with difference gcd 1, e.g. [1,2,3]) and increasing **Common CZ drive frequency** (MHz) across the expected crossing. [Recipe blank inputs](guide.md#prepare-the-inputs) follow the same rules as ordinary phase.
+Set **Ramsey target**, **CZ gates per shot** (at least two unique positive counts with difference gcd 1, e.g. [1,2,3]) and increasing **Common CZ drive frequency** (MHz) across the expected crossing. This sweep sets both carriers and ignores the frequencies saved in the library. [Recipe blank inputs](guide.md#prepare-the-inputs) follow the same rules as ordinary phase.
 
 ## Wait after herald
 

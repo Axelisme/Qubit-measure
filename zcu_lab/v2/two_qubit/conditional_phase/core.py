@@ -41,7 +41,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
 
-from .._drive import QubitDriveCfg
+from .._drive import SweptQubitDriveCfg
 from .._phase import (
     CountQuadratures,
     PhaseCrossings,
@@ -140,7 +140,7 @@ class ConditionalPhaseCfg(ConfigBase):
         ),
     ]
     drive: Annotated[
-        QubitDriveCfg,
+        SweptQubitDriveCfg,
         FieldMeta(
             label="Dual-line drive",
             description="Use both calibrated CZ drive lines for each gate in the Ramsey train.",
@@ -487,7 +487,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         ),
         result_type=ConditionalPhaseResult,
         cfg_type=ConditionalPhaseCfg,
-        cfg_schema_version="7.0",
+        cfg_schema_version="7.1",
         tag="two_qubit/conditional_phase",
         result_builder=restore_result,
     )
