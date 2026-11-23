@@ -175,6 +175,7 @@
 - 2026-11-22 [GE 寫回保護先於診斷圖交付](2026-11-22-ge-gate-split-from-diagnostic.md)：交付切分。窄磚上診斷圖標籤仍相碰，寫回初選的中心檢查先獨立落地，直方圖與擬合 SNR 整批延到續作。
 - 2026-11-22 [GE 診斷圖保留四格](2026-11-22-ge-diagnostic-layout.md)：圖面取捨。assignment 移到兩列之間；當時採多數準備取色，後記說明改為銳化混色。
 - 2026-11-22 [GE Post 的準備顏色與分類邊界](2026-11-22-ge-post-preparation-majority.md)：讀圖語意。當時採準備共格取色；後記說明回到分格，分類邊界仍與上色分工。
+- 2026-11-23 [GE Post 以分類結果上色](2026-11-23-ge-post-classified-color.md)：讀圖語意。Post 保留準備分格，顏色改表示各發的分類；Analyze 保留準備色。
 - 2026-11-23 [Mux GE Fit 用準備色，圖例標出 probe 來源](2026-11-22-mux-fit-preparation-color.md)：讀圖語意。Fit 與 Diagnostic 同用準備色；從 Fit 圖例追溯 Live 的取數列。
 - 2026-11-22 [實驗 guide 只寫操作者需要的內容](2026-11-22-guide-content.md)：文件範圍。改寫規則並清理 111 份 guide，通用操作移到共用頁，排錯與可重用判讀留在知識庫。
 
@@ -227,7 +228,8 @@
 - 2026-11-22 [Two-qubit 新 native 軸名與舊格式](2026-11-22-two-qubit-native-axis-cutover.md)：資料格式。只有模擬測試資料的家族不新增不相容舊 layout 的 reader，原檔保留。
 - 2026-11-22 [Amp Rabi 的 shot moments](2026-11-22-amp-rabi-shot-moments.md)：資料格式。同批校正 IQ 保留既有平均，native 可選 moments；驗所有現有變數後，Labber 仍只匯出原單 log。
 - 2026-11-22 [Mux 逐 tone 校正 IQ 矩與 R11](2026-11-22-mux-iq-moments-and-r11.md)：資料格式。Reducer 按參與 tone 順序計算完成輪的同批校正六矩，保留既有平均與舊檔。
-- 2026-11-23 [Labber scalar 匯出的索引軸](2026-11-23-labber-scalar-index-axis.md)：資料格式。匯出時為無軸 scalar 加一點的索引軸，native 結果與 reader 不變。
+- 2026-11-23 [Labber scalar 匯出的索引軸](2026-11-23-labber-scalar-index-axis.md)：資料格式（已撤回）。原做法是替無軸 scalar 加一點索引軸。
+- 2026-11-23 [CZ 最佳化的 Labber 選集](2026-11-23-cz-optimize-labber-selection.md)：資料格式。Native 保留 `duration`；Labber 只匯出 `params` 與 `peak`，不替無軸變數加軸。
 - 2026-11-23 [Coherence 的 shot SEM 只隨當次 Run 交接](2026-11-23-coherence-run-only-shot-sem.md)：資料入庫。Mux Ramsey／Echo 與單 qubit Echo 不把矩寫入 Native 或 Labber，重載後重算不畫棒。
 
 ## 量測策略

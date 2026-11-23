@@ -79,7 +79,7 @@ Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot
 跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
 mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
 AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/resonance.py)。
-兩個 GE core 各自排 Post 版面，並用 [support/singleshot/classification_plot.py](support/singleshot/classification_plot.py) 疊分類線與中心，再將兩格準備圖的 I/Q 範圍對齊。
+兩個 GE core 各自排 Post 版面，並用 [support/singleshot/classification_plot.py](support/singleshot/classification_plot.py) 畫分類色的密度、疊分類線與中心，再將兩格準備圖的 I/Q 範圍對齊。
 Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
 [\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩個實驗各自在 `analyze()` 畫自己的圖，
@@ -273,7 +273,7 @@ Helper 用取得的資料擬合並評估品質，再在 `curve_times` 上計算�
 
 Mux GE Live（`measurement_i`）以藍／紅區分 probe off／on 取數列，不讀 Analyze 的 **Initial State**。
 Analyze Fit（`fit_i`）用 [`ge_signals_by_state`](support/singleshot/util.py) 依 **Initial State** 將同一批 IQ 排成 g／e 準備（藍／紅），圖例標出各準備對應的 probe row。
-`diagnostic_i` 也用準備色。Post（`post_i`）沿用所選來源的 Primary 準備映射，將 g／e 密度分格畫出。準備色不代表分類結果。
+`diagnostic_i` 也用準備色。Post（`post_i`）沿用所選來源的 Primary 準備映射，分格畫出 g／e 準備的 IQ；各格的顏色表示 g／e／Other 分類結果。
 讀圖見 [Mux GE guide](mux/singleshot_ge/guide.md#read-the-plots-and-use-the-result) 與
 [單 qubit GE guide](singleshot/ge/guide.md#how-to-read-the-results)，IQ 密度的取色規則見 [figure-style R4](figure-style.md#r4尺度跟著資料走)。
 

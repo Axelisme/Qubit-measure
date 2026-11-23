@@ -67,13 +67,13 @@ status: accepted
 
 ### 真實 acquire 與模擬邊界
 
-**規則。** 真實硬體 acquire 不執行模擬。`MyProgramV2` 只經 `SimulationAcquireMixin` 接入模擬，模擬專用的邏輯、參數與型別留在 `program.v2.simulation`，不進 Program 的共用取數介面。Lab 不向 Program 傳模擬專用參數。模擬環境依自己的接線與編譯所得的 generator 事件決定路由。
+**規則。** 真實硬體 acquire 不執行模擬。`MyProgramV2` 只經 `SimulationAcquireMixin` 接入模擬，模擬專用的邏輯、參數與型別留在 `program.v2.simulation`。拿掉 `SimulationAcquireMixin`，Program 不留任何模擬邏輯、參數或型別；docstring 說明模擬時的行為可留；lab 不傳模擬專用參數給 Program。模擬環境依自己的接線與編譯所得的 generator 事件決定路由。
 
-**例子。** STIRAP 用同一個 `Schedule.run_acquire_summed` 呼叫在 FTF 或 Single-fluxonium 取數。編譯所得的 Pump 與 Stokes 事件已有 generator、載波與 envelope。模擬環境用這些事件與自身接線運算，不從脈衝名稱推斷角色，見 [Single-fluxonium 的完整時間軸](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#complete-timelines)。整數 request 的單輪時長也只供模擬 binding 使用，見 [ADR-0084〈模擬 round 時長〉](0084-simulation-integer-time-base.md#模擬-round-時長)。
+**例子。** `request_round_time_s` 移進 `program/v2/simulation/`，只供模擬 binding 使用，見 [ADR-0084〈模擬 round 時長〉](0084-simulation-integer-time-base.md#模擬-round-時長)。`charge_requirements` 刪除，STIRAP 用同一個 `Schedule.run_acquire_summed` 呼叫在 FTF 或 Single-fluxonium 取數。編譯所得的 Pump 與 Stokes 事件已有 generator、載波與 envelope。模擬環境用這些事件與自身接線運算，不從脈衝名稱推斷角色，見 [Single-fluxonium 的完整時間軸](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#complete-timelines)。Import contract 守住 Program 其他模組不直接 import 模擬套件。
 
-**邊界。** `program-simulation-imports` 禁止 `zcu_tools.program` 在 `zcu_tools.program.v2.simulation` 之外直接 import `zcu_tools.simulate` 或 `zcu_tools.simulators`，包括兩者的子模組。既有 [`framework-no-simulators`](#分層) 不變，整個框架仍不得依賴 `zcu_tools.simulators`，mixin 也不例外。直接 import 檢查不取代執行路徑的審閱；docstring 仍可說明模擬時的行為。環境仍檢查 generator 與 ADC 路由，operator 仍核對實機接線。Experiment 的 Run 來源紀錄和 lab 使用的數值模型不屬於 Program，維持原狀。
+**邊界。** `program-simulation-imports` 禁止 `zcu_tools.program` 在 `zcu_tools.program.v2.simulation` 之外直接 import `zcu_tools.simulate` 或 `zcu_tools.simulators`，包括兩者的子模組。既有 [`framework-no-simulators`](#分層) 不變，整個框架仍不得依賴 `zcu_tools.simulators`，mixin 也不例外。直接 import 檢查不取代執行路徑的審閱。環境仍檢查 generator 與 ADC 路由，operator 仍核對實機接線。Experiment 層的 Run provenance 記錄 `SimulationSoc`，以及 lab 用 `simulate.fluxonium` 做物理擬合，都不算 Program 的模擬邏輯。
 
-**依據。** 2026-10-26，使用者：「我不太希望真实 acquire 还会走模拟的模块。」2026-11-22，使用者：「据我所知啦，模拟器这个功能啊，应该只局限在一个 mixin 内，也就是说，如果把这个 mixin 拿掉，我的 program 就没有模拟功能。这个是解耦的设计。」「我认为这两处可能有违背了我的设计理念。对我来说，只要把这个 mixin 拿掉，我的 program 就不会有模拟的逻辑存在了。」Designer 依 2026-11-23 的授權代裁，移除僅供模擬端驗證的線路要求，並用 import contract 守住 Program 邊界，待使用者追認。比較與舊裁決見 [Program 的模擬邏輯只在 mixin 內](../discussions/2026-11-23-program-simulation-mixin.md)。
+**依據。** 2026-10-26，使用者：「我不太希望真实 acquire 还会走模拟的模块。」2026-11-22，使用者：「据我所知啦，模拟器这个功能啊，应该只局限在一个 mixin 内，也就是说，如果把这个 mixin 拿掉，我的 program 就没有模拟功能。这个是解耦的设计。」「我认为这两处可能有违背了我的设计理念。对我来说，只要把这个 mixin 拿掉，我的 program 就不会有模拟的逻辑存在了。」Designer 依 2026-11-23 的授權代裁，移除僅供模擬端驗證的線路要求，並用 import contract 守住 Program 邊界。使用者於 2026-11-23 追認做法並核准原則措辭：「0242採用建議」。比較與舊裁決見 [Program 的模擬邏輯只在 mixin 內](../discussions/2026-11-23-program-simulation-mixin.md)。
 
 ### Mux PFB channel 查詢與 carrier selection 的 owner
 

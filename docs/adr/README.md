@@ -26,6 +26,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：組合根與開發工具只經 assembly 依賴使用者 lab，固定量表場景則不依賴 lab，見 [ADR-0072](0072-module-boundaries.md#使用者空間的依賴原則)。
 原則：模擬器（`simulate`）是封閉的子模塊，不 import `zcu_tools` 其他 package；具體裝置模型由使用方經聲明介面提供，見 [ADR-0072](0072-module-boundaries.md#模擬器是封閉的子模塊模型由使用方聲明)。
+原則：拿掉 `SimulationAcquireMixin`，Program 不留任何模擬邏輯、參數或型別，見 [ADR-0072〈真實 acquire 與模擬邊界〉](0072-module-boundaries.md#真實-acquire-與模擬邊界)。
 
 - [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：Package 定位、依賴方向、各實驗獨立取數與 analysis 小摘要契約，依賴方向由 `.importlinter` 檢查。
 

@@ -1,9 +1,30 @@
-"""Draw the GE Post classification overlay on a caller-owned IQ axes."""
+"""Draw GE Post classified density and boundaries on caller-owned IQ axes."""
 
 import numpy as np
 from matplotlib import patheffects
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from zcu_tools.analysis.singleshot import classify_result
+from zcu_tools.experiment.utils.single_shot.ge import plot_ge_iq_density
+
+
+def plot_ge_classified_iq(
+    ax: Axes,
+    shots: NDArray[np.complex128],
+    g_center: complex,
+    e_center: complex,
+    radius: float,
+) -> None:
+    """Draw one preparation's 1-D raw IQ shots using the Post classifier.
+
+    Use the fitted g/e centers and radius in the shots' IQ units. Classify by
+    nearest center inside its radius and draw a blue g, red e, gray Other
+    density image with the classifier overlay. The caller supplies labels and
+    layout. Invalid classifier geometry raises ValueError.
+    """
+    g, e, other = classify_result(shots, g_center, e_center, radius)
+    plot_ge_iq_density(ax, shots[g], shots[e], other=shots[other])
+    plot_ge_classification_boundary(ax, g_center, e_center, radius)
 
 
 def share_ge_preparation_limits(ground: Axes, excited: Axes) -> None:

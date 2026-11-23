@@ -41,7 +41,7 @@ Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envel
 
 **邊界。** 單一 request 的 int64 與 ns 換算界限不套用到整輪加總；總時長不會因此讓長 acquisition 報錯。`shot_time_s` 仍在 Program，沿用 µs 輸入供一般估時。硬體取數路徑與公共時基不變。
 
-**依據。** 2026-10-31，advisor 依代理授權裁定原先的 owner 與計算契約。Designer 依 2026-11-23 的授權代裁，只改 owner 與 Program 的公開匯出，保留計算契約，待使用者追認。依據是使用者 2026-11-22 的界線：「我认为这两处可能有违背了我的设计理念。对我来说，只要把这个 mixin 拿掉，我的 program 就不会有模拟的逻辑存在了。」見 [ADR-0072〈真實 acquire 與模擬邊界〉](0072-module-boundaries.md#真實-acquire-與模擬邊界)與 [Program 的模擬邏輯只在 mixin 內](../discussions/2026-11-23-program-simulation-mixin.md)。
+**依據。** 2026-10-31，advisor 依代理授權裁定原先的 owner 與計算契約。Designer 依 2026-11-23 的授權代裁，只改 owner 與 Program 的公開匯出，保留計算契約。使用者於 2026-11-23 追認代裁：「0242採用建議」。依據是使用者 2026-11-22 的界線：「我认为这两处可能有违背了我的设计理念。对我来说，只要把这个 mixin 拿掉，我的 program 就不会有模拟的逻辑存在了。」見 [ADR-0072〈真實 acquire 與模擬邊界〉](0072-module-boundaries.md#真實-acquire-與模擬邊界)與 [Program 的模擬邏輯只在 mixin 內](../discussions/2026-11-23-program-simulation-mixin.md)。
 
 ## 取捨與範圍
 

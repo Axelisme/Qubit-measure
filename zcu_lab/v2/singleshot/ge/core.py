@@ -32,7 +32,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, PulseReadout, Reset, TimelineBuilder
 
 from zcu_lab.v2.support.singleshot.classification_plot import (
-    plot_ge_classification_boundary,
+    plot_ge_classified_iq,
     share_ge_preparation_limits,
 )
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to_signal
@@ -138,23 +138,29 @@ def _plot_post(
         layout="constrained",
     )
     g_iq, populations, e_iq, classifier = fig.axes
-    empty = np.empty(0, dtype=np.complex128)
-    plot_ge_iq_density(g_iq, signals[0], empty)
-    plot_ge_iq_density(e_iq, empty, signals[1])
-    for ax, label, color, (g, e, other) in (
-        (g_iq, "g preparation", "blue", confusion.g_classification),
-        (e_iq, "e preparation", "red", confusion.e_classification),
+    for ax, shots, preparation, (g, e, other) in (
+        (g_iq, signals[0], "g preparation", confusion.g_classification),
+        (e_iq, signals[1], "e preparation", confusion.e_classification),
     ):
-        plot_ge_classification_boundary(
-            ax, primary.g_center, primary.e_center, confusion.radius
+        plot_ge_classified_iq(
+            ax, shots, primary.g_center, primary.e_center, confusion.radius
         )
-        ax.set_title(f"Observed: g {g:.1%}, e {e:.1%}, Other {other:.1%}", fontsize=10)
+        ax.set_title(
+            f"{preparation}\nObserved: g {g:.1%}, e {e:.1%}, Other {other:.1%}",
+            fontsize=10,
+        )
         ax.set_xlabel("I (a.u.)", fontsize=10)
         ax.set_ylabel("Q (a.u.)", fontsize=10)
         ax.tick_params(labelsize=10)
         ax.grid(False)
         ax.legend(
-            handles=[Patch(color=color, label=label)],
+            handles=[
+                Patch(color="blue", label="g"),
+                Patch(color="red", label="e"),
+                Patch(color="0.5", label="Other"),
+            ],
+            title="Classified as",
+            title_fontsize=10,
             loc="lower left",
             bbox_to_anchor=(1, 0),
             frameon=False,
@@ -460,6 +466,6 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
             np.linalg.LinAlgError,
         ) as exc:
             raise GENumericalError(str(exc)) from exc
-        # 2. Keep preparation color separate from observed and corrected classification.
+        # 2. Show assigned classes within each preparation alongside both matrices.
         _plot_post(primary, confusion, signals, plots)
         return GEPostAnalysis(confusion=confusion)
