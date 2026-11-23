@@ -461,7 +461,8 @@ It converts QICK ticks/MHz/degrees into ns/GHz/radians with point arrays.
 sample grids. Preparation keys include the clock. The shared `drive_track`
 converter preserves signed gains, complex sampled envelopes and the common
 carrier origin for evolution. See the [evolution input contract](../../../simulate/evolution/README.md#public-entry-points)
-for `DriveTrack` support and `EnvelopeSpec.values` interpolation.
+for the signed carrier and pulse support in `DriveTrack`, `EnvelopeSpec.values`
+interpolation, and the I/Q operators in `SecularDrive`.
 Readout converts the program's common-origin phase to ADC's pulse-local phase
 by subtracting `2*pi*(f-f_ref)*pulse_start_ns`, with frequencies in GHz. When pulses are
 present, the first terminal carrier sets the model reference and its phase
@@ -642,6 +643,7 @@ states, and removes the identity approximation within this vacuum-reset model.
 
 In the Markov model, six same-seed comparisons of the template floor against floor zero, including the original first point of chain amp_rabi, found maximum differences of 6.921e-6 in the full final density and 6.964e-6 in per-readout populations (commit cc6b252c0). This checks the floor within the model, not accuracy against an independent reference.
 
+`FTFModelFacts.joint` supplies the fixed-DC model for the cavity calculation.
 `simulate.adc` solves the linear, state-conditioned cavity fields. The incident
 amplitude uses the same `input_per_gain` conversion as terminal readout.
 For state s and resonator r, the photon number is `n[s,r] = |alpha[s,r]|²`.
@@ -653,13 +655,21 @@ These driven contributions are separate from residual thermal-photon dephasing.
 
 FTF queries evolution's final spans with [`segment_spans`](../../../simulate/evolution/README.md#public-entry-points),
 then advances density and cavity memory sequentially. The first span and each
-projection start from vacuum. Otherwise, all state-conditioned fields start
-from the previous main branch's final field. The main branch has the largest
-population in the span-start DC density; exact ties select the lowest energy.
-Each span supplies ADC's `initial_field`
-and absolute `initial_time_ns`. Fields retain ringdown after pulse switch-off.
-See [Cavity drive composition](../physics/README.md#cavity-drive-composition)
-for the semiclassical branch selection in `CavityDrive.advance`.
+projection start from vacuum. Otherwise, `CavityDrive.advance` takes the
+previous main branch's final field as `initial_field` for all state-conditioned
+branches. The main branch has the largest population in the span-start DC
+density; exact ties select the lowest energy. Each span supplies the inherited
+field and absolute `initial_time_ns` to ADC. Fields retain ringdown after pulse
+switch-off. See [Cavity drive composition](../physics/README.md#cavity-drive-composition)
+for this semiclassical branch selection.
+
+Production FTF uses semiclassical state-conditioned fields for cavity memory
+and [readout](#readout-and-sampling), without adding photon states to the
+evolution space. [ADC's Joint-Fock validation limits](../../../simulate/adc/README.md#joint-fock-validation-limits)
+describe the opt-in `JointFockDiagnostic` prototype, not an acquisition backend.
+To build a model with explicit photon states, call
+[`build_resonator_mode`](../../../simulate/README.md#quantum-resonator-mode)
+separately. The builder does not connect the model to FTF acquisition.
 
 FTF averages Stark energy shifts and driven dephasing over each span and passes
 neutral `SegmentShift` values to evolution in `TimelineBatch.segment_shifts`.

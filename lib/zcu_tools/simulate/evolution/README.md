@@ -66,11 +66,17 @@ contracts live with their types in [engine.py](engine.py), [secular.py](secular.
 [inspection records](_inspection.py), [controls.py](controls.py), [model.py](model.py)
 and [state.py](state.py).
 
-Units are ns, GHz and rad. `SecularModel` supplies energies, drive quadratures,
-directional rates and pure dephasing in each quantized flux level's energy
-basis. The optional `collapse_operators` tuple supplies full complex `L` matrices
-in that basis, in ns⁻½. CPU `dop853` adds each `LρL† − {L†L,ρ}/2` to the
-secular bath and transforms it with the Hamiltonian into the integration frame.
+Units are ns, GHz and rad. A [`DriveTrack`](engine.py) carries a signed numeric
+carrier in `frequency_ghz`, including zero. This field does not record emitted
+RF. The track's `port` matches a [`SecularDrive`](secular.py) by name. That record
+supplies Hermitian I/Q operators `X` and `Y` in the model's energy basis. For
+complex envelope value `z`, the drive Hamiltonian is `H_drive/h = Re(z)*X + Im(z)*Y`.
+
+`SecularModel` supplies energies, drive quadratures, directional rates and pure
+dephasing in each quantized flux level's energy basis. The optional
+`collapse_operators` tuple supplies full complex `L` matrices in that basis,
+in ns⁻½. CPU `dop853` adds each `LρL† − {L†L,ρ}/2` to the secular bath and
+transforms it with the Hamiltonian into the integration frame.
 Keep the coherent components of one physical jump in one matrix. Use `()` when
 there are no explicit operators; the existing secular routes are unchanged.
 The model builder owns physical applicability. Records own read-only copies
@@ -87,11 +93,11 @@ exclude `dop853`, in which case both inspection and evolution raise
 `NoValidKernel`; neither falls back to a secular approximation. Explicit
 operators never use OpenCL, including on an Engine configured for that device.
 
-[`EnvelopeSpec` and `DriveTrack`](engine.py) separate envelope sampling from
-pulse timing. `EnvelopeSpec.values(local_ns)` returns unity for a constant
-envelope. A sampled envelope linearly interpolates the real and imaginary parts
-at pulse-local ns, using its increasing `sample_ns` grid starting at zero.
-The grid need not be uniform. The final sample is held through pulse end.
+[`EnvelopeSpec`](engine.py) defines envelope sampling independently of
+`DriveTrack` pulse timing. `EnvelopeSpec.values(local_ns)` returns unity for a
+constant envelope. A sampled envelope linearly interpolates the real and
+imaginary parts at pulse-local ns, using its increasing `sample_ns` grid starting
+at zero. The grid need not be uniform. The final sample is held through pulse end.
 Tracks and segments enforce pulse support, not the evaluator.
 `DriveTrack.phase_rad` defines the carrier phase at the shot's absolute time
 zero, not at the start of the pulse or a continuation span.
