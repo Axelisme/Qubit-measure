@@ -259,7 +259,7 @@ class HeraldedSpectroscopyExp(
         ),
         result_type=HeraldedSpectroscopyResult,
         cfg_type=HeraldedSpectroscopyCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="3.1",
         tag="two_qubit/conditional_spectroscopy_heralded",
         result_builder=restore_result,
     )

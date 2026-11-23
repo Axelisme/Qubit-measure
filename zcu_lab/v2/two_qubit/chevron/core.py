@@ -297,7 +297,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         ),
         result_type=ChevronResult,
         cfg_type=ChevronCfg,
-        cfg_schema_version="5.0",
+        cfg_schema_version="5.1",
         tag="two_qubit/chevron",
         result_builder=restore_result,
     )

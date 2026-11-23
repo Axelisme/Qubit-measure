@@ -495,7 +495,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         ),
         result_type=ConditionalPhaseResult,
         cfg_type=ConditionalPhaseCfg,
-        cfg_schema_version="7.0",
+        cfg_schema_version="7.1",
         tag="two_qubit/conditional_phase",
         result_builder=restore_result,
     )

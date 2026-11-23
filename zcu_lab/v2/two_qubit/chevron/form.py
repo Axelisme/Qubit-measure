@@ -1,5 +1,7 @@
 """Fixed-capture duration scan with explicit two-line drive and GE calibration inputs."""
 
+from dataclasses import replace
+
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -26,8 +28,7 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
     for position in ("qubit1", "qubit2"):
         # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
         slot = f"$coupler.module.cz_{position}"
-        # Run replaces both line frequencies with the common scan coordinate.
-        drive[position] = source(
+        pulse = source(
             ctx,
             slot,
             Template(
@@ -35,13 +36,14 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
                 set={
                     "ch": Expr(f"${position}.wiring.ch"),
                     "nqz": None,
-                    "freq": Hidden(0.0),
                     "gain": None,
                     "waveform.style": "cosine",
                     "waveform.length": None,
                 },
             ),
         )
+        # Hide the swept frequency in inline without changing a captured ref.
+        drive[position] = replace(pulse, set={**pulse.set, "freq": Hidden(0.0)})
     readout = mux_readout_initial(ctx)
     return TwoQubitForm(
         ChevronCfg,

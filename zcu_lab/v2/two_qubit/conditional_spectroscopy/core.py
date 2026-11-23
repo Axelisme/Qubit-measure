@@ -338,7 +338,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             ),
             result_type=SpectroscopyResult,
             cfg_type=SpectroscopyCfg,
-            cfg_schema_version="7.0",
+            cfg_schema_version="7.1",
             tag="two_qubit/conditional_spectroscopy",
             result_builder=restore_result,
         )

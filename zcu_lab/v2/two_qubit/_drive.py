@@ -42,10 +42,13 @@ class QubitDriveCfg(_DrivePairCfg):
 class SweptQubitDriveCfg(_DrivePairCfg):
     """Aligned pulses played at a common swept carrier.
 
-    qubit1/qubit2 carry independent signed gain and phase in degrees. The
-    sweep replaces both pulse freq values; their stored carriers are not used
-    and may differ. The envelope durations and pre-delays must match in µs;
-    post-delays may differ. The run validates referenced waveform assets.
+    qubit1 and qubit2 hold the pulses for the two drive lines, each with its
+    own signed gain, phase in degrees, and source carrier in MHz. Both freq
+    fields are required and must be finite scalars. Missing, nonfinite, or
+    swept values fail cfg validation. The stored carriers may differ; Run
+    replaces both with the same sweep frequency and does not play either
+    stored carrier. Envelope durations and pre-delays must match in µs;
+    post-delays may differ. Run validates referenced waveform assets.
     """
 
     @model_validator(mode="after")

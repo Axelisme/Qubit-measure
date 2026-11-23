@@ -48,9 +48,9 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
             "x90_qubit2": Slot("$qubit2.module.x90"),
             "readout": readout,
             "drive": {
-                # Run overrides both CZ frequencies with the common hardware sweep.
-                "qubit1": Slot("$coupler.module.cz_qubit1"),
-                "qubit2": Slot("$coupler.module.cz_qubit2"),
+                # Keep the refs; hide the frequency Run overrides in inline.
+                "qubit1": Slot("$coupler.module.cz_qubit1", set={"freq": Hidden(0.0)}),
+                "qubit2": Slot("$coupler.module.cz_qubit2", set={"freq": Hidden(0.0)}),
             },
             "frequency": Range(None, None, expts=101),
         },
