@@ -81,8 +81,9 @@ class MuxCoherenceResult:
     Full pulse cfg and inactive tones remain in RunRecord.cfg. Cancellation and
     acquisition error status belong to the RunContext StopSignal, not these data.
     iq_moments: optional float64 (K,P,6) aligned with signals, in columns
-    [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] after ADC offset correction. Only the in-memory
-    Run carries these completed-round sums; Native and Labber retain mean IQ.
+    [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] after ADC offset correction. Run and Native
+    carry these completed-round sums when available. Older Native files without
+    this variable restore None. Labber exports the mean IQ without the sums.
     """
 
     tone_indices: NDArray[np.int64]

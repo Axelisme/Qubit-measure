@@ -20,7 +20,15 @@ from zcu_tools.analysis.fitting import (
 )
 from zcu_tools.analysis.shot_uncertainty import iq_shot_sem
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, config
+from zcu_tools.datafile import DataVariable
+from zcu_tools.experiment import Experiment, config
+from zcu_tools.experiment.axes_spec import (
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions
@@ -45,7 +53,7 @@ from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.detune import actual_detune
 
 _DELAY_LABEL = "Total echo delay (µs)"
-_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
+_IQ_LABEL = "IQ projection (a.u.)"
 
 
 @dataclass(frozen=True)
@@ -56,7 +64,8 @@ class T2EchoResult:
     time/phase rounding, not a fitted qubit detuning. It is run-only metadata
     and is None after canonical load. iq_moments contains corrected shot sums
     [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] with shape (len(times), 6) from the same
-    standalone run as signals. It is None after load and for mean-only runs.
+    run as signals. It is None when only mean IQ is available, including when
+    loading Native data saved without shot sums.
     """
 
     times: NDArray[np.float64]
@@ -145,17 +154,56 @@ class T2EchoCfg(ConfigBase):
     ]
 
 
+_TIME_AXIS = VariableAxisSpec(field_name="times", label="Time", unit="s", scale=1e-6)
+_MOMENT_COLUMNS = (0, 1, 2, 3, 4, 5)
+
+
+def _build_result(data: GroupedLoadData[T2EchoCfg]) -> T2EchoResult:
+    """Restore mean IQ and optional moments aligned to the same delays."""
+    signal = data.variable("data")
+    (times,) = signal.axes
+    moments = data.variables.get(DataVariable("iq_moments"))
+    if moments is None:
+        return T2EchoResult(times, signal.z)
+    columns, moment_times = moments.axes
+    if not np.array_equal(times, moment_times):
+        raise ValueError("/vars/iq_moments: Time axis must equal /vars/data Time axis")
+    if not np.array_equal(columns, _MOMENT_COLUMNS):
+        raise ValueError(
+            "/vars/iq_moments: Moment axis must contain columns 0 through 5"
+        )
+    return T2EchoResult(times, signal.z, iq_moments=moments.z)
+
+
 class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
     Options: ClassVar[type[T2EchoAnalyzeOptions]] = T2EchoAnalyzeOptions
 
-    # times stores us in memory, s on disk -> scale=1e-6
-    AXES_SPEC: ClassVar[AxesSpec[T2EchoResult, T2EchoCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("times", label="Time", unit="s", scale=1e-6),),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
+    # ADR-0069: optional Native moments do not change the Labber projection.
+    AXES_SPEC: ClassVar[GroupedAxesSpec[T2EchoResult, T2EchoCfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "data",
+                (_TIME_AXIS,),
+                VariableZSpec(
+                    "signals", label="Signal", unit="a.u.", dtype=np.complex128
+                ),
+            ),
+            VariableSpec(
+                "iq_moments",
+                (
+                    VariableAxisSpec(label="Moment", unit="", values=_MOMENT_COLUMNS),
+                    _TIME_AXIS,
+                ),
+                VariableZSpec("iq_moments", label="IQ moments", unit=""),
+                required=False,
+            ),
+        ),
         result_type=T2EchoResult,
         cfg_type=T2EchoCfg,
         cfg_schema_version="4.0",
         tag="twotone/ge/t2echo",
+        result_builder=_build_result,
+        labber_variables=("data",),
     )
 
     def run(self, cfg: T2EchoCfg, *, context: RunContext) -> T2EchoResult:

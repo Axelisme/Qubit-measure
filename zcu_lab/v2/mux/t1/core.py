@@ -383,7 +383,7 @@ def _validate_result(result: MuxT1Result) -> None:
 
 
 _DELAY_LABEL = "Wait after π pulse (µs)"
-_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
+_IQ_LABEL = "IQ projection (a.u.)"
 
 
 def _show_live_t1(plots: Plots, cfg: MuxT1Cfg, times: NDArray[np.float64]):
