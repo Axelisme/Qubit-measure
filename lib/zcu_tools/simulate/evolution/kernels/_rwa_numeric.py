@@ -1,5 +1,3 @@
-# tolerated(file-size): Shared policies, resolved masks and WorkPlan facts keep
-# admission/retention rule changes here for both kernel guards and diagnostic queries.
 """Shared RWA admission, retention and model/WorkPlan coefficient adapters."""
 
 from dataclasses import dataclass
@@ -46,6 +44,7 @@ RWA_POLICY = (
 )
 
 
+COMPLEX_ENVELOPE_RWA_POLICY = ("complex-envelope-modulus-v1", RWA_POLICY)
 ADAPTIVE_RWA_POLICY = ("omission-strongest-parent-v2", CONSTANT_RWA_POLICY, RWA_POLICY)
 # Full-density calibration supports 0.08 with margin on the fixed candidate
 # acceptance set, not a maximum threshold or arbitrary-input accuracy bound.
@@ -205,19 +204,25 @@ class ConstantRetentions:
     rows: tuple[RWARetention | None, ...]
 
 
-def _smooth(table: SegmentTable, envelope: int, context: KernelContext) -> bool:
+def _smooth(
+    table: SegmentTable, envelope: int, context: KernelContext, *, allow_complex: bool
+) -> bool:
     spec = table.envelopes[envelope]
+    bounds = envelope_bounds(table, context.work_plan)
+    real = bounds.real[envelope]
+    policy = RWA_POLICY if real or not allow_complex else COMPLEX_ENVELOPE_RWA_POLICY
 
     def build() -> bool:
         if spec.kind == "constant":
             return True
-        if len(spec.samples) < 3 or np.any(spec.samples.imag != 0):
+        if len(spec.samples) < 3 or (not real and not allow_complex):
             return False
-        peak = float(np.max(np.abs(spec.samples)))
+        peak = float(bounds.peaks[envelope])
         if peak == 0:
             return True
+        samples = spec.samples.real if real else spec.samples
         spacing = np.diff(spec.sample_ns)
-        slopes = np.diff(spec.samples.real) / spacing
+        slopes = np.diff(samples) / spacing
         curvature = np.diff(slopes) / ((spacing[1:] + spacing[:-1]) / 2)
         return bool(
             np.max(np.abs(slopes)) <= _MAX_SLOPE * peak
@@ -225,7 +230,7 @@ def _smooth(table: SegmentTable, envelope: int, context: KernelContext) -> bool:
         )
 
     return context.work_plan.fact(
-        FactKey(("multitone-rwa-smooth", RWA_POLICY, spec.identity), bool), build
+        FactKey(("multitone-rwa-smooth", policy, spec.identity), bool), build
     )
 
 
@@ -733,9 +738,9 @@ def _admissible_frequencies(
     *,
     adaptive_multitone: bool,
 ) -> NDArray[np.float64] | None:
-    """Check carriers and retain the other families' smoothness requirement."""
+    """Check carriers; only single-tone gates admit smooth complex samples."""
     if not adaptive_multitone and not all(
-        _smooth(table, int(e), context) for e in envs
+        _smooth(table, int(e), context, allow_complex=count == 1) for e in envs
     ):
         return None
     frequencies = np.abs(table.tone_frequency_ghz[row, :count])

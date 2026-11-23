@@ -23,6 +23,7 @@
 
 ## 模擬量測環境
 
+- 2026-11-23 [同頻多線在 Evolution 的表示](2026-11-23-same-carrier-merge.md)：模擬器路由。保留原 slots 的對照，同載波同形線摺成單 tone，異形線保留多 tone 路由。
 - 2026-11-23 [模擬器優化嘗試記在哪裡](2026-11-23-simulator-attempts-log.md)：文件組織。優化嘗試一檔一筆，依主題索引，並補登過去採用和未採用的做法。
 - 2026-11-23 [FTF sampled RWA 探針的快取壽命](2026-11-23-ftf-rwa-probe-memo.md)：快取壽命。一次 FTF preparation 重用精確的探針證明；每次 evolve 仍選路、記帳、演化與發佈 capture。
 

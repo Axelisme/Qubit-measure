@@ -16,6 +16,7 @@ from ._multitone_gate_phase import FULL_DRIVE_GATE_POLICY
 from ._rwa_fourier import RWACoefficients, interaction_hamiltonian
 from ._rwa_graph import RWA_GRAPH_POLICY, PhaseGraph, phase_graph, pruning_admitted
 from ._rwa_numeric import (
+    COMPLEX_ENVELOPE_RWA_POLICY,
     MULTITONE_RETENTION_POLICY,
     RWA_POLICY,
     RWARetention,
@@ -48,6 +49,11 @@ SINGLE_GATE_POLICY = (
     "single-gate-omission-v1",
     GATE_POLICY,
     MULTITONE_RETENTION_POLICY,
+)
+COMPLEX_SINGLE_GATE_POLICY = (
+    SINGLE_GATE_POLICY,
+    COMPLEX_ENVELOPE_RWA_POLICY,
+    "carrier-diagonal-spread-v1",
 )
 
 
@@ -92,9 +98,15 @@ def canonical_key(table: SegmentTable, row: int, context: KernelContext) -> byte
     count = table.tones[row]
     model = table.model(context.source, row)
     retention = _row_retention(table, row, context)
-    policy = SINGLE_GATE_POLICY if retention is not None else GATE_POLICY
+    policy = GATE_POLICY
     if count == 2:
         policy = FULL_DRIVE_GATE_POLICY
+    elif retention is not None:
+        envelope = table.tone_envelope[row, 0]
+        bounds = envelope_bounds(table, context.work_plan)
+        policy = (
+            SINGLE_GATE_POLICY if bounds.real[envelope] else COMPLEX_SINGLE_GATE_POLICY
+        )
     digest = sha256(repr((policy, model.identity, model.level)).encode())
     if count == 2:
         digest.update(table.shift(row))
@@ -109,8 +121,13 @@ def canonical_key(table: SegmentTable, row: int, context: KernelContext) -> byte
     for a in (model.energies_ghz, model.rates_per_ns, model.dephasing_per_ns):
         digest.update(a.tobytes())
     digest.update(np.array([count, table.duration_ns[row]], dtype="<f8").tobytes())
+    ports = table.tone_port[row, :count].astype("<f8")
+    for group in table.carrier_groups.get(row, ()):
+        if group.folded_identity:
+            # The stable recipe below replaces the acquire-local virtual index.
+            ports[group.slots[0]] = -1
+    digest.update(ports.tobytes())
     for a in (
-        table.tone_port,
         table.tone_frequency_ghz,
         table.tone_amplitude,
         table.tone_envelope_offset_ns,
@@ -118,6 +135,7 @@ def canonical_key(table: SegmentTable, row: int, context: KernelContext) -> byte
         digest.update(a[row, :count].astype("<f8").tobytes())
     for env in table.tone_envelope[row, :count]:
         digest.update(table.envelopes[env].identity.encode())
+    digest.update(table.folded_channel_key(row))
     return digest.digest()
 
 
@@ -240,7 +258,7 @@ def _admit_physics(
 ) -> NDArray[np.bool_]:
     """Evaluate RWA and phase-graph validity once per physics key."""
     accepted = (admit_single_rows if single_tone else admit_rows)(table, rows, context)
-    peaks = envelope_bounds(table, context.work_plan).peaks
+    bounds = envelope_bounds(table, context.work_plan)
     for index in np.flatnonzero(accepted):
         row = int(rows[index])
         # SegmentTable owns finite playback support. As for single-tone gates,
@@ -249,13 +267,26 @@ def _admit_physics(
         # interpolation as direct integration; no waveform rewrite is needed.
         graph = _row_graph(table, row, context)
         count = table.tones[row]
-        amplitudes = (
-            np.abs(table.tone_amplitude[row, :count])
-            * peaks[table.tone_envelope[row, :count]]
-        )
-        accepted[index] = pruning_admitted(
-            graph, amplitudes, float(table.duration_ns[row]), context.budget
-        )
+        envelopes = table.tone_envelope[row, :count]
+        amplitudes = np.abs(table.tone_amplitude[row, :count]) * bounds.peaks[envelopes]
+        duration = float(table.duration_ns[row])
+        accepted[index] = pruning_admitted(graph, amplitudes, duration, context.budget)
+        if accepted[index] and single_tone and not bounds.real[envelopes[0]]:
+            drive = table.model(context.source, row).drives[table.tone_port[row, 0]]
+            # A carrier diagonal cannot satisfy q[i]-q[i]=1, even if the
+            # RWA retention window restores it. Bound its omission without
+            # assuming cancellation or relying on the incoming carrier phase.
+            spread_ghz = np.hypot(
+                np.ptp(drive.in_phase_ghz.diagonal().real),
+                np.ptp(drive.quadrature_ghz.diagonal().real),
+            )
+            # Re(z)X + Im(z)Y has diagonal spectral spread <= |z| times
+            # spread_ghz. Scalar identity terms cancel in a commutator.
+            # Duhamel bounds the trace distance from this term alone by
+            # π * GHz * ns (dimensionless), not the total gate/RWA error.
+            accepted[index] = (
+                np.pi * duration * amplitudes[0] * spread_ghz <= context.budget
+            )
     return accepted
 
 

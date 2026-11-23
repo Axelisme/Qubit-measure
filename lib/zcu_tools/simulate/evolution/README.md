@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-24, sampled RWA probe lifetime, t6 direct routing, and simulator optimization index
+**Last updated:** 2026-11-24, same-carrier folding and complex single-tone gates
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -86,9 +86,12 @@ there are no explicit operators; the existing secular routes are unchanged.
 The model builder owns physical applicability. Records own read-only copies
 and reject invalid shapes or nonfinite operators. `SecularModel.identity` is the
 caller's model namespace, not a complete physics key. A shifted model appends
-the correction fingerprint to that namespace. `SecularModel.content_identity`
-adds the ordered complex jump matrices to the namespace and equals `identity`
-when there are no jumps. The Engine uses it for preparation and routing reuse.
+the correction fingerprint to that namespace. An evolve-local model with folded
+ports keeps the original namespace. The virtual port bank is not part of the
+model identity. Keys that outlive the evolve use the row's drive recipe instead.
+`SecularModel.content_identity` adds the ordered complex jump matrices to the
+namespace and equals `identity` when there are no jumps. The Engine uses it for
+preparation and routing reuse.
 The frozen codec stores the namespace and matrices separately.
 
 For a row with explicit operators, `dop853` is the only candidate. The timeline
@@ -826,8 +829,19 @@ are counted once. A family with only rejected work can have zero selected cost.
 ## Decision graph
 
 [Geometry construction](_planning.py) partitions pulse, flux and readout events
-into rows. [Dispatch](_dispatch.py) selects candidates from flux motion, active
-tones, envelope shape, known inputs and acquire-wide prepare-key reuse, not
+into rows. Before dispatch, the planner groups active lines at the same signed
+carrier within each row. A group folds into one effective tone when all lines
+have the same pulse start and duration and their envelopes differ only by a
+complex constant factor. Sampled envelopes must also have elementwise equal
+`sample_ns` grids. The planner compares proportional samples within roundoff
+and does not resample, even when envelopes on different grids have the same
+interpolant. It keeps the common sample grid and combines the I/Q operators at
+the row's flux level using the relative gains and phases. If any line in a group
+is incompatible, the whole group keeps its original tones. The caller's tracks
+and frozen capture input do not change.
+
+[Dispatch](_dispatch.py) selects candidates from flux motion, effective tone
+count, envelope shape, known inputs and acquire-wide prepare-key reuse, not
 experiment names. Numerical guards decide validity separately from cost.
 A rejected guard leaves the row for the next candidate.
 Floquet admission is per row. With the default family set, a refused row
@@ -853,8 +867,11 @@ domain. Dispatch excludes rows that violate a family input precondition, such
 as common-frame carriers with an absolute mean below 1e-10 GHz. The kernel
 owner defines each precondition once. Legal preparation failures still propagate;
 dispatch does not catch them to retry another family.
-The allowlist never changes numerical guards, budget or complete-acquire
-inventory counts. A rejected pinned family cannot select an excluded family.
+The allowlist filters candidates after folding. For example, two lines folded
+into one shaped tone can offer `single_tone_gate`; a two-tone family alone
+cannot route that row. The allowlist never changes numerical guards, budget or
+complete-acquire inventory counts. A rejected pinned family cannot select an
+excluded family.
 If no allowed candidate passes, `NoValidKernel` names the domain, caller point
 IDs and affected segment rows. Its `attempted` tuple lists the allowed candidates
 in the final dispatch round's offer order, including cost-skipped families.
@@ -945,7 +962,9 @@ or certify arbitrary pulse strengths and coherences.
 
 ## Kernel summary
 
-The domains below use the names in [dispatch](_dispatch.py).
+The domains below use the names in [dispatch](_dispatch.py). Tone counts refer
+to effective tones after the planner's [same-carrier fold](#decision-graph),
+not to the number of caller drive lines.
 `idle` has no tones or continuous flux motion. `adiabatic` has flux motion
 without tones; `flux` has flux motion with tones. At fixed flux, `slow` has one
 constant tone with carrier magnitude below 30 MHz. `plateau` has one constant
@@ -1029,7 +1048,7 @@ and the original route.
 | [`single_tone_rwa`](kernels/single_tone_rwa.py), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with first/second-order population-transfer restoration at 5.8e-3, including forward edges and adjoints. Final admission uses kappa2 = spectral norm of sum_sign abs(c/d) over the resolved omitted edges, ≤ 0.08, in place of the remaining transfer comparison. Full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms; phase-graph pruning is separate. Cross-component density entries below 1e-5 after the initial kick are dropped. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at kappa2 inner edge: 3.061429e-13 |
 | [`floquet_period`](kernels/floquet_period.py), full-carrier constant-tone period reuse | `plateau` | Hilbert period trajectories with secular split playback. Requires carrier magnitude ≥ 0.03 GHz and some subdivision count m in 1..64 with dT²ΓV²/m² ≤ 1.0, using this owner's rad/ns drive bound. Below 1 GHz, CF4 or adjacent-cutoff Sambe uses endpoint defect ≤ min(1e-4, 0.1B). Higher carriers use DOP853 rtol min(1e-8, 1e-4B), max step T/4. These are calibrated local controls. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS; largest family error 1.375101e-3 |
 | [`t6`](kernels/t6.py), full dissipative constant-tone evolution | `plateau`, terminal candidate | One constant tone at any strength. Direct integrates each density in the H0 frame with the full secular bath and the shared dop853 policy: local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), without a fixed step ceiling. These are not whole-sequence error bounds. All rows use direct integration, irrespective of key reuse. It does not do RWA or density repair; numerical failure raises rather than reroutes. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`single_tone_gate`](kernels/single_tone_gate.py), phase-covariant shaped RWA gates | `shaped` | Fixed flux, B ≥ 1e-3, real sampled envelope with at least 3 samples, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², carrier magnitude ≥ 50 MHz. Omission restoration requires transfer ≤ 0.0058, residual phase ≤ 0.0045 rad and retained real dimension ≤ 256. Pruning ≤ min(B, 1e-3); adaptive secular split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. [Shared gate owner](kernels/_rwa_gate.py). | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`single_tone_gate`](kernels/single_tone_gate.py), phase-covariant shaped RWA gates | `shaped` | Fixed flux, B ≥ 1e-3, real or complex sampled envelopes with at least 3 samples, carrier magnitude ≥ 50 MHz. Slope and curvature magnitudes divided by the peak envelope modulus must be ≤ 0.025/ns and ≤ 0.003/ns², respectively. Omission restoration requires transfer ≤ 0.0058, residual phase ≤ 0.0045 rad and retained real dimension ≤ 256. Complex samples also require π·duration·abs(gain)·peak·hypot(spread(X), spread(Y)) ≤ B, where spread is the range of the drive diagonal in GHz. This bounds omission of the oscillating diagonal alone, not total density error. Pruning ≤ min(B, 1e-3); adaptive secular split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. [Shared gate owner](kernels/_rwa_gate.py). | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [DRAG, FAST-DRAG and guard edges](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py) | PASS |
 | [`shaped_sambe`](kernels/shaped_sambe.py), frozen-envelope finite-Fourier periods | `shaped` | Nonzero peak, carrier magnitude ≥ 0.03 GHz, subdivisions m ≤ 32, envelope slope ≤ 2·peak·abs(f)·m and peak drive bound ≤ 0.5·abs(f)·m. Subdivision policy limits real/complex motion to 0.01/0.0025 and secular split to 0.01. Compare adjacent harmonic cutoffs 2/3 or 3/4 and use 4 or 8 amplitude nodes; accumulated spectral plus interpolation estimate must be ≤ B/2. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 3.091554e-3; strict xfail |
 | [`gate_cache`](kernels/gate_cache.py), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 9.296548e-3; strict xfail |
 | [`period_table`](kernels/period_table.py), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
@@ -1383,8 +1402,10 @@ Floquet consumes full Fourier averages during frame construction. WorkPlan
 publishes each compact frame and optional sideband candidates once per source
 instance, budget and complete prepare key. Prefix and deferred classifications
 share these facts, including invalid frames and frames whose rows are all
-refused. The complete evolve table determines sideband demand before the first
-build; row-local certificates and admissions are not facts. Model facts include the full
+refused. The complete evolve table determines sideband demand and virtual probe
+ports before the first build. The frame retains all physical ports, its Stark
+port and only virtual probes used with that frame key. Row-local certificates
+and admissions are not facts. Model facts include the full
 physical coordinates in their identity. Table-indexed facts
 also include table identity, so renumbered prefix representatives cannot alias
 the complete table. DOP853 packing also distinguishes flux-inclusive samples.
@@ -1433,7 +1454,11 @@ The kernel registry does not retain this workspace.
 
 ### Evolve-local preparations and caller reuse
 
-The engine deduplicates prepare keys across one evolve. Keys used by distinct
+The engine deduplicates prepare keys across one evolve. Keys for products that
+use the drive recipe distinguish the participating channels and coefficients;
+a virtual port number does that within one evolve. Model-only `dop853` and
+`flux_dop853` keys do not include the recipe. They share prepared model
+operators and use each row's active ports at apply. Keys used by distinct
 timelines enter shared preparation. Local builders and repeated local keys stream
 one timeline at a time, with one static-map exception. A complete classified
 inventory containing only `t4` and `shaped_sambe`, both present and no deferred
@@ -1482,9 +1507,11 @@ The byte cap is not a process RAM limit.
 FTF can lend `SampledRWAProbeMemo` to `Engine.evolve(probe_memo=...)` for
 one [complete preparation](../../simulators/ftf/environment/README.md#preparation-reuse).
 The bounded memo retains only per-probe differences and decisions for exact
-sampled multitone RWA inputs. Each evolve still chooses the probe rows, applies
-the group threshold, records its own routing and capture, and evolves its own
-densities. Dispatch inspection does not borrow the memo. FTF closes it on
+sampled multitone RWA inputs. A folded port that gets a different number in a
+later evolve can miss this memo. The memo also hashes the active drive matrices,
+so a reused number cannot hide different drive physics. Each evolve still chooses
+the probe rows, applies the group threshold, records routing and capture, and
+evolves its own densities. Dispatch inspection does not borrow the memo. FTF closes it on
 completion, cancellation or failure. See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
 
 Engine prepare residency, production exact-result memoization and source ADC
@@ -1602,8 +1629,10 @@ external threadpoolctl users must not change them during active evolves.
 
 `RoutingHistory` owns distinct acquire content's complete row inventories,
 separate from resident preparations and numerical guards. Each numerical input digest
-contributes its canonical gate/multitone key row multiplicities once. Identical
-repeats need no numerical playback, so counting them again would overstate gate
+contributes its canonical gate/multitone key row multiplicities once. History
+and saved routing facts use folded drive recipe digests, not the virtual port
+numbers assigned in each evolve. Identical repeats need no numerical playback,
+so counting them again would overstate gate
 amortization and select unnecessary builds. Distinct contents still accumulate
 all their rows, including rejected or nonresident keys, before prefix work.
 The digest covers model, initial density, budget and full batch content, not
