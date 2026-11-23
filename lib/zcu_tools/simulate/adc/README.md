@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-23, simulator optimization index
+**Last updated:** 2026-11-24, readout rates, FTF projection handoff, projected prefixes for raw sampling, and simulator optimization index
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 

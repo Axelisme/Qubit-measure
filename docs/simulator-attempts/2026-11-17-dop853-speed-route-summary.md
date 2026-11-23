@@ -1,7 +1,7 @@
 ---
 date: 2026-11-17
 status: partial
-commit: 2514d94be
+commit: e399448fa
 modules:
   - lib/zcu_tools/simulate/evolution
 discussion: ../discussions/2026-11-17-dop853-speed-route-summary.md
@@ -18,11 +18,13 @@ superseded_by: null
 
 ## 實測
 
-8 workers 的 wall 加速中位數為 4.002307 倍（`2514d94be`，pinned DOP853 的 64 點 Gaussian 單段，對 1 worker、8 輪 warm_clear_history 的 evolve 配對）。 見[原討論](../discussions/2026-11-17-dop853-speed-route-summary.md#多-worker-的配對結果)。
+既有 worker 路徑在 `2514d94be` 量測。8 workers 的 wall 加速中位數為 4.002307 倍（pinned DOP853 的 64 點 Gaussian 單段，對 1 worker、8 輪 warm_clear_history 的 evolve 配對）。見[多 worker 的配對結果](../discussions/2026-11-17-dop853-speed-route-summary.md#多-worker-的配對結果)。
+
+另以 `e399448fa` 為量測基底，比較既有 DOP853 與未入庫的載波固定網格原型。Frontmatter 記的是這次原型比較的基底，不是 worker 的量測版本。見[載波積分器的有限負結果](../discussions/2026-11-17-dop853-speed-route-summary.md#載波積分器的有限負結果)。
 
 ## 為何採用或否決
 
-只確認指定批次的多 worker 有收益，並未改預設。載波固定網格原型未過精度，完整 GPU 矩陣未量。
+只確認指定批次的多 worker 有收益。載波固定網格原型未過精度，完整 GPU 矩陣未量。這次整理未改 production 路徑或 worker 預設。
 
 ## 留下的線索
 

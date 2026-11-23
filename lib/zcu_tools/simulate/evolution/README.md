@@ -1649,6 +1649,9 @@ densities or offline tables across processes or Engine lifetimes.
 ## Research records
 
 See the [simulator optimization index](../../../../docs/simulator-attempts/INDEX.md) for attempts, rejected alternatives and historical measurements.
+Start with [families and guards](../../../../docs/simulator-attempts/INDEX.md#family-與-guard) for admission and pricing,
+[reference integration](../../../../docs/simulator-attempts/INDEX.md#參考積分) for solver comparisons,
+or [reuse and caching](../../../../docs/simulator-attempts/INDEX.md#跨點重用與快取) for sharing across rows and points.
 
 The shared numerical contract suite is
 [tests/simulate/evolution/contract/kernel_suite.py](../../../../tests/simulate/evolution/contract/kernel_suite.py).

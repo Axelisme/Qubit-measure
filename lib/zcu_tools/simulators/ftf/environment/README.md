@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-23, simulator optimization index
+**Last updated:** 2026-11-24, sampled RWA probe lifetime and simulator optimization index
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 

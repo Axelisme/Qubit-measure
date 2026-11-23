@@ -26,7 +26,7 @@ superseded_by: null
 | `819180c9b`，FTF `two_qubit/chevron`，2×2 gg herald、26 次 evolve | 202.452 → 203.914 s | 64 列從 `multitone_rwa` 轉到 `single_tone_rwa`，128 列 `dop853` 不變 |
 | `819180c9b`，CZ 候選 E0 的模擬器呼叫，d=24、2 次 evolve | 4.889 → 0.250 s | `multitone_gate` 的 32 列轉到 `shaped_sambe`，`multitone_rwa` 的 16 列轉到 `single_tone_rwa` |
 
-用相同輸入對齊演化輸出，兩條路徑的最大完整 density 差依表序為 `2.399e-3`、`2.652e-5`、`3.737e-3`。這是原路徑對原型的差，不是相對獨立參考的精度。原始工作檔未入庫。Frontmatter 的 commit 是首列 RB 的量測版本。
+密度比較只涵蓋相同輸入下對齊的呼叫。原路徑與原型的完整 density 最大元素絕對差，RB 對齊 2 次為 `2.398e-3`，chevron 對齊 26 次為 `2.652e-5`，E0 對齊 2 次為 `3.737e-3`。這些差值不衡量相對獨立參考的精度。原始工作檔未入庫。Frontmatter 的 commit 是首列 RB 的量測版本。
 
 ## 為何採用或否決
 

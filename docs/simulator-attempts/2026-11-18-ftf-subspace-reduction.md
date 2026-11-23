@@ -19,7 +19,7 @@ superseded_by: null
 
 ## 實測
 
-低能 24 態有 15／15 點過預算（`c04fb3823` 上的研究原型，固定 DC、F1 單一常數 tone 的三組五點掃描，相對 32 態的完整 density）。 見[原討論](../discussions/2026-11-18-ftf-subspace-reduction.md#單-tone-ftf-掃描)。
+在 `c04fb3823` 上的研究原型中，固定 DC，對 F1 單一常數 tone 做三組五點掃描。最低能量 24 態相對 32 態的完整 density 最大絕對元素差，15／15 點均 `≤1e-3`。這是該次截斷比較的門檻，不是整體精度目標 `2e-3`。見[原討論](../discussions/2026-11-18-ftf-subspace-reduction.md#單-tone-ftf-掃描)。
 
 ## 為何採用或否決
 

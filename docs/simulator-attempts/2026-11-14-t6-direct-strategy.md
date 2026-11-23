@@ -1,6 +1,6 @@
 ---
 date: 2026-11-14
-status: partial
+status: adopted
 commit: 5214e2275
 modules:
   - lib/zcu_tools/simulate/evolution
@@ -22,7 +22,7 @@ superseded_by: 2026-11-15-t6-channel-removal.md
 
 ## 為何採用或否決
 
-採用 direct 與預算相連的容差。原先保留的 channel 分支後續移除；direct 留下。
+當時採用按完整 acquire 的 key 重用次數在 direct 與 channel 之間擇一。Direct 的局部容差隨每段預算調整。後來才[移除 channel 與定價分支](./2026-11-15-t6-channel-removal.md)，保留 direct。
 
 ## 留下的線索
 
