@@ -401,11 +401,13 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             f"Reduced χ² = {diagnostics.reduced_chi_square:.3g}"
         )
         dense_time = np.linspace(float(lens.min()), float(lens.max()), 250)
+        # The fit uses elapsed time from the first retained sample.
+        relative_time = dense_time - lens[0]
         for index, (ax, (branch, state, color)) in enumerate(
             zip(fig.axes, _PANELS, strict=True)
         ):
             prep, outcome = divmod(index, 3)
-            model = model_func(dense_time, *fit_result.model_parameters(prep + 1))
+            model = model_func(relative_time, *fit_result.model_parameters(prep + 1))
             ax.errorbar(
                 lens,
                 populations[:, prep, outcome],
