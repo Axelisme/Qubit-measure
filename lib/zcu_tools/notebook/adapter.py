@@ -141,6 +141,11 @@ class NotebookAdapter:
         )
 
 
+# Notebook interactive analysis uses Notebook widgets directly, without an
+# availability preflight or backend detection. Errors from creating or using
+# widgets propagate without falling back to inline or headless analysis or
+# automatically selecting Done. The synchronous adapter's non-plotting mode
+# is unchanged and is not a headless interactive workflow.
 class NotebookExperiment(Generic[CoreT]):
     """Retain successful records for one experiment in a bound environment.
 
@@ -278,10 +283,6 @@ class NotebookExperiment(Generic[CoreT]):
         self.analysis_presentation = None
         return record
 
-    # Notebook 互動前端
-    # Notebook 互動分析直接使用 Notebook widget，不做可用性 preflight 或 backend 偵測。
-    # 建立或使用 widget 的錯誤正常傳遞，不自動降級到 inline、無頭分析或自動 Done。
-    # 同步分析的不呈現繪圖模式維持不變，不是無頭互動工作流。
     def analyze(
         self: NotebookExperiment[Experiment[ResultT, CfgT]],
         options: OptionsT,

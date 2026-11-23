@@ -4,7 +4,7 @@ status: superseded
 
 # Operation handle 舊模型
 
-> 摘自 [ADR-0002](../0002-version-table-async-handle-off-main.md#2-operation-handle歷史設計)。以下保留歷史原文；現行規則見 [ADR-0066〈問題與決策〉](../0066-operation-lifecycle.md#問題與決策)。
+> 摘自 [[0002]] 的[〈2. Operation handle（歷史設計）〉](../0002-version-table-async-handle-off-main.md#2-operation-handle歷史設計)。以下保留歷史原文；現行規則見 [[0066]] 的[〈問題與決策〉](../0066-operation-lifecycle.md#問題與決策)。
 
 ## 決策
 

@@ -61,6 +61,8 @@ Dialog 不接控制狀態，也不在 chooser／confirmation 返回後重查 hol
 
 2026-10-18，使用者裁決「1A，可以」，確認 Measure 由主視窗同步唯讀。Measure 的所有具名主選單對話框真正 non-modal，包含啟動時的 Entry。Remote 時使用者可開 Entry、Devices、Inspect 唯讀觀察。控制權變更時，主視窗同步更新仍開著的 Entry、Devices、Inspect 與 ARB Waveforms；交回 Local 即恢復可寫，既有 busy／valid gate 繼續生效。Inspect 的 ARB 入口使用當下的宿主狀態，不保留開窗時的舊值。Dialog 不自行訂閱 authority。
 
+需要選擇的 confirmation、file chooser 與 writeback 編輯保持 modal 保護。Shared dialog lifetime helper 的預設政策與其他 app 不變。
+
 Measure 的無需回答錯誤通知見 [Measure UI README](../../lib/zcu_tools/gui/app/measure/ui/README.md#錯誤通知)。
 
 Wire 仍交付同一診斷，見 [[0068]]；呈現方式不改變 operation 的結果或取消契約。

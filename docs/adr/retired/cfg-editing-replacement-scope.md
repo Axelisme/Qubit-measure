@@ -4,7 +4,7 @@ status: superseded
 
 # Cfg 編輯模型的局部取代範圍
 
-> 摘自 [ADR-0065](../0065-cfg-editing.md#局部取代範圍)。以下保留歷史原文；現行規則見 [ADR-0079〈決策狀態與問題〉](../0079-form-field-transitions.md#決策狀態與問題)。
+> 摘自 [[0065]] 的[〈局部取代範圍〉](../0065-cfg-editing.md#局部取代範圍)。以下保留歷史原文；現行規則見 [[0079]] 的[〈決策狀態與問題〉](../0079-form-field-transitions.md#決策狀態與問題)。
 
 ## 局部取代範圍
 

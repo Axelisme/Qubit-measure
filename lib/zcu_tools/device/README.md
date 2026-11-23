@@ -277,9 +277,9 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 2026-10-19，使用者裁定：「FakeDevice採用以address為分辨的單例模式」，並指定「存在FakeDevice的類容器裡」。只有顯式 address 進入 process 共享的 class 容器。同 address 取回同一個 driver，保留模擬綁定、單位與設定。省略 address 的 anonymous instance 沒有可比較的身分，每次獨立建立，不進容器。真實 driver 不受影響。
 
-使用者說明上限「可以很大」，再修正「可能也不丟了，創建時報錯」。容器最多保留 1024 個 addressed instances，僅防止無限增長。滿額時拒絕新 address，既有 address 仍可取回，不淘汰。測試使用公開 isolation scope，結束時清空測試建立的容器並還原原 scope。
+使用者說明上限「可以很大」，再修正「可能也不丟了，創建時報錯」。容器最多保留 1024 個 addressed instances，僅防止無限增長。滿額時拒絕新 address，既有 address 仍可取回，不淘汰。測試使用公開 isolation scope，結束時清空測試建立的容器並還原原 scope。原始討論未入庫，裁決見 Git `d94f2daa60`。
 
-使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。 原始討論未入庫，覆核見 Git `1f4b16aa0`。
 
 首次建立固定單位與 `fast_mode`；重取保留 value、output、ramp 與模擬綁定。
 Anonymous instance 的 Info address 是 `"none"`，與顯式 address `"none"` 的身分不同。

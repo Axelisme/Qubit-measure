@@ -4,7 +4,7 @@ status: superseded
 
 # Measure 表單推導的局部取代範圍
 
-> 摘自 [ADR-0073](../0073-measure-form-derivation.md#局部取代範圍)。以下保留歷史原文；現行規則見 [ADR-0079〈決策狀態與問題〉](../0079-form-field-transitions.md#決策狀態與問題)。
+> 摘自 [[0073]] 的[〈局部取代範圍〉](../0073-measure-form-derivation.md#局部取代範圍)。以下保留歷史原文；現行規則見 [[0079]] 的[〈決策狀態與問題〉](../0079-form-field-transitions.md#決策狀態與問題)。
 
 ## 局部取代範圍
 

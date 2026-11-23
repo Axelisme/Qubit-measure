@@ -27,7 +27,7 @@ Qt View 和 remote RPC agent 都會操作同一份 GUI 狀態。資源版本記�
 
 ### 2. Operation handle（歷史設計）
 
-已由 ADR-0066 取代，見 [ADR-0066〈問題與決策〉](0066-operation-lifecycle.md#問題與決策)；[原文](retired/operation-handle.md#2-operation-handle歷史設計)僅供追溯。
+已由 [[0066]] 取代，見[〈問題與決策〉](0066-operation-lifecycle.md#問題與決策)；[原文](retired/operation-handle.md#2-operation-handle歷史設計)僅供追溯。
 
 ### 3. off-main blocking handler
 

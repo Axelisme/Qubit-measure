@@ -8,7 +8,7 @@ status: accepted
 
 ## 局部取代範圍
 
-已由 ADR-0079 取代，見 [ADR-0079〈決策狀態與問題〉](0079-form-field-transitions.md#決策狀態與問題)；[原文](retired/measure-form-derivation-replacement-scope.md#局部取代範圍)僅供追溯。
+已由 [[0079]] 取代，見[〈決策狀態與問題〉](0079-form-field-transitions.md#決策狀態與問題)；[原文](retired/measure-form-derivation-replacement-scope.md#局部取代範圍)僅供追溯。
 
 ## 問題
 

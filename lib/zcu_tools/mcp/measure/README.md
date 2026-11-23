@@ -137,7 +137,7 @@ Device setup 保留 pre_read、start、wait、post_read、requested、before/aft
 
 `device_setup` 沒有 timeout 參數，最多等待 300 秒。逾時回 running 與已知 handle，不取消；caller 用 `wait(op)` 續等。需要短等時使用 raw RPC 與 caller 的 wait。Client deadline 必須大於 300 秒並預留 transport/reply overhead。
 
-使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。 原始討論未入庫，覆核見 Git `1f4b16aa0`。
 
 ## Context snapshot
 

@@ -350,7 +350,7 @@ Notebook 不新增 generation／request identity 的發布限制。較早啟動�
 
 ### G6：Notebook 互動前端
 
-Notebook 互動前端的局部規則見 [`notebook/adapter.py`](../../lib/zcu_tools/notebook/adapter.py) 的「Notebook 互動前端」註解。
+Notebook 互動前端的局部規則見 [`notebook/adapter.py`](../../lib/zcu_tools/notebook/adapter.py) 的「Notebook interactive analysis」註解。
 
 ### G7：GUI adapters
 

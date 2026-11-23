@@ -173,7 +173,9 @@ Fluxdep 沒有硬體緊急 Stop，使用者必須先點燈收回再取消。
 
 #### Auto Align 與 search 的等待
 
-Auto Align 與 search 中途沒有 agent 可影響結果的判斷，因此 MCP 輪詢到結束才回，不設整體等待上限。等待時同一 stdio server 不處理其他呼叫。GUI 仍持有 context lifetime、operation、完整 inputs、recorded quality 與 fit freshness。GUI Show 和 MCP 使用同一 fit renderer；MCP 不回過期結果的疊圖，GUI 仍顯示過期與原因。這是 fluxdep 的局部契約，不把 fit 依賴模型升為所有 app 的規則。跨 app 的 MCP 設計原則見 [ADR-0075〈MCP 設計原則〉](../../../../../docs/adr/0075-agent-interface-layers.md#mcp-設計原則)。
+Auto Align 與 search 中途沒有 agent 可影響結果的判斷。兩者沿用 [ADR-0075〈長操作看 agent 中途能否影響結果〉](../../../../../docs/adr/0075-agent-interface-layers.md#長操作看-agent-中途能否影響結果) 的共用等待規則，由 MCP 等到操作結束才回覆。
+
+GUI 持有 context lifetime、operation、完整 inputs、recorded quality 與 fit freshness。GUI Show 和 MCP 使用同一 fit renderer。MCP 不回過期結果的疊圖，GUI 仍顯示過期與原因。
 
 ### 跟隨遠端操作
 

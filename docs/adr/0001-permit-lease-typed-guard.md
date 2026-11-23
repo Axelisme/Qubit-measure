@@ -6,7 +6,7 @@ status: accepted
 
 ## 現況
 
-已由 ADR-0066 取代，見 [ADR-0066〈問題與決策〉](0066-operation-lifecycle.md#問題與決策)；[原文](retired/typed-permit-proof.md#現況)僅供追溯。
+已由 [[0066]] 取代，見[〈問題與決策〉](0066-operation-lifecycle.md#問題與決策)；[原文](retired/typed-permit-proof.md#現況)僅供追溯。
 
 ## 分界與取捨
 

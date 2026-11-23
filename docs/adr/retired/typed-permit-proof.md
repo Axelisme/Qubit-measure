@@ -4,7 +4,7 @@ status: superseded
 
 # Domain guard 的 typed Permit proof
 
-> 摘自 [ADR-0001](../0001-permit-lease-typed-guard.md#現況)。以下保留歷史原文；現行規則見 [ADR-0066〈問題與決策〉](../0066-operation-lifecycle.md#問題與決策)。
+> 摘自 [[0001]] 的[〈現況〉](../0001-permit-lease-typed-guard.md#現況)。以下保留歷史原文；現行規則見 [[0066]] 的[〈問題與決策〉](../0066-operation-lifecycle.md#問題與決策)。
 
 ## 現況
 

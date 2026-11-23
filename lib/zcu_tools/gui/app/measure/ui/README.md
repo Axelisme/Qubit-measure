@@ -217,13 +217,9 @@ below the path and use the shared `gui.widgets.error_colour` rule.
 
 ## 錯誤通知
 
-Measure 的無需回答錯誤通知依控制身份呈現。Remote holder 在線時，主視窗顯示約八秒後自動消失的摘要，內容為標題與首行，完整內容寫入 error log。
+Measure 的無需回答錯誤通知依[控制身份](../../../../../../docs/adr/0070-control-identity.md#rpc-與-gui-寫入)呈現。Remote holder 在線時，主視窗顯示約八秒後自動消失的摘要，內容為標題與首行，完整內容寫入 error log。
 Details… 開啟完整的非模態報告，報告不受摘要計時器影響，保持到手動關閉。後續錯誤取代摘要並重新計時。
 Local 操作或 Remote holder 離線時，非模態報告保持到手動關閉。Info diagnostics 仍顯示於狀態列。
 主視窗在刪除子元件前停止摘要的 lifetime scope 與計時器。
 
-需要選擇的 confirmation、file chooser 與 writeback 編輯保持 modal 保護。Shared dialog lifetime helper 的預設政策與其他 app 不變。
-
-2026-11-02，使用者問「1應該要根據是否處於online操作而決定是否自動關閉彈窗？」，並以「確認」採用上述分工。
-
-Wire 仍交付同一診斷，見 [ADR-0068](../../../../../../docs/adr/0068-remote-transport.md#事件與錯誤)；呈現方式不改變 operation 的結果或取消契約。
+2026-11-02，使用者問「1應該要根據是否處於online操作而決定是否自動關閉彈窗？」，並以「確認」採用上述分工。原始討論未入庫，裁決見 Git `a8c7eb66a5`。

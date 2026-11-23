@@ -99,7 +99,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：模擬的零輪中斷由 Program 的 `EarlyStopMixin` 統一判定；simulation mixin 只回報中斷，見 [ADR-0083](0083-program-macros-and-timelines.md#compiled-snapshot-與-simulation-入口)。
 
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：Async workflow、operation、Ask、停止、live tunables 與作者保存責任。
-- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。局部規則見 [`notebook/adapter.py`](../../lib/zcu_tools/notebook/adapter.py) 的「Notebook 互動前端」註解。
+- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。局部規則見 [`notebook/adapter.py`](../../lib/zcu_tools/notebook/adapter.py) 的「Notebook interactive analysis」註解。
 - [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 配置、classifier、逐 shot sums、選用校正 IQ 矩、herald reset 與逐 shot 遮罩、雙 qubit heralded 分類、單 qubit cov 自校準與 QICK projection。
 - [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：Program macro、具名 timeline、往後跳轉與 label 合併、查表掃描、compiled snapshot 與全面 Timeline 遷移。
 
