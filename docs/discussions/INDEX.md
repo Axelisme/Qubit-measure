@@ -171,6 +171,7 @@
 
 ## Measure UI
 
+- 2026-11-23 [Heralded RB 與 conditional phase 合併顯示 gg、ee](2026-11-23-heralded-pooled-display.md)：圖形呈現。兩個 heralded 入口合併主圖與 Live，分組診斷及原分析不變。
 - 2026-11-23 [CZ phase 的 contrast 標準誤](2026-11-23-phase-contrast-sem.md)：圖形呈現。Live 與 Analyze 傳遞獨立 X/Y 投影的 shot SEM，恰零時取最大方向。
 - 2026-11-23 [Conditional phase 與 Local Z 的圖照推導順序](2026-11-23-phase-figures-physics-order.md)：圖形呈現。主圖從 Bloch 向量、累積相位到條件相位；診斷量另放；Live 只畫已完整頻率。
 - 2026-11-23 [Singleshot T1 以振幅分 T1／T1b](2026-11-23-singleshot-t1-amplitude-naming.md)：讀圖語意。e→e 曲線振幅大的模是 T1、小的是 T1b；兩版都提議寫回主模。
