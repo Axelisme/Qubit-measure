@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-23，in-memory flat-top ramps
+**Last updated:** 2026-11-24，in-memory arbitrary waveforms
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -319,19 +319,15 @@ calls the hook for every declared module, including modules without sources.
 
 ## In-memory arbitrary waveforms
 
-To play samples without writing an asset, construct
-`InMemoryArbWaveformCfg(samples=...)` from `zcu_tools.program.v2`. Pass it as the
-pulse's waveform or as `FlatTopWaveformCfg.raise_waveform`. The cfg copies the
-`WaveformSamples` and plays their full reference duration without reading a file.
+To play samples without writing an asset, pass
+`InMemoryArbWaveformCfg(samples=...)` from `zcu_tools.program.v2` as the pulse's
+waveform. It copies the `WaveformSamples` and plays their full reference
+duration without reading a file. Within one program, pulses on the same
+generator share the memory envelope when their sample hashes match.
 
-A flat-top ramp uses the same even-cycle rounding as an asset ramp. Program
-build fails if either ramp half is shorter than three fabric cycles. Within one
-program, pulses on the same generator share a memory envelope when their sample
-hashes and playback modes (standalone or flat-top ramp) match.
-
-A cfg containing `arb_memory` cannot be serialized, including when the samples
-are nested in a flat-top ramp. To save the waveform in a persistent Spec, store
-the samples as an arb asset and reference the asset key.
+A cfg containing `arb_memory` cannot be serialized. To save the waveform in a
+persistent Spec or use it as a flat-top ramp, store the samples as an arb asset
+and reference the asset key.
 
 ## Pulse length tables and selected playback
 

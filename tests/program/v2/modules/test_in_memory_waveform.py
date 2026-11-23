@@ -25,8 +25,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg, FlatTopWaveformCfg
 
-from tests.program.v2.wave_observations import executed_words
-
 
 @pytest.fixture
 def samples() -> WaveformSamples:
@@ -149,7 +147,7 @@ def _file_arb(tmp_path: Path, samples: WaveformSamples) -> ArbWaveformCfg:
 
 def _flat_top_builder(
     soccfg: QickConfig,
-    ramp: ArbWaveformCfg | InMemoryArbWaveformCfg,
+    ramp: ArbWaveformCfg,
     *lengths: float,
 ) -> TimelineBuilder:
     builder = TimelineBuilder(soccfg)
@@ -160,58 +158,22 @@ def _flat_top_builder(
     return builder
 
 
-def test_flat_top_memory_ramp_compiles_like_asset(
+def test_flat_top_asset_ramp_is_shared_across_plateau_lengths(
     mock_soccfg: QickConfig, tmp_path: Path, samples: WaveformSamples
 ) -> None:
-    lengths = (0.25, 0.4)
-    asset = _flat_top_builder(
-        mock_soccfg, _file_arb(tmp_path, samples), *lengths
-    ).build()
-    memory = _flat_top_builder(
-        mock_soccfg, InMemoryArbWaveformCfg(samples=samples), *lengths
-    ).build()
+    ramp = _file_arb(tmp_path, samples)
+    prog = _flat_top_builder(mock_soccfg, ramp, 0.25, 0.4).build()
 
-    # Different plateau lengths share the ramp but must retain their own playback.
-    asset_table = asset.envelopes[0]["envs"]
-    memory_table = memory.envelopes[0]["envs"]
-    assert isinstance(asset_table, dict) and isinstance(memory_table, dict)
-    (asset_env,) = asset_table.values()
-    (memory_env,) = memory_table.values()
-    np.testing.assert_array_equal(memory_env["data"], asset_env["data"])
-    assert executed_words(memory) == executed_words(asset)
+    table = prog.envelopes[0]["envs"]
+    assert isinstance(table, dict)
+    assert len(table) == 1
 
 
-def test_short_flat_top_memory_ramp_fails_at_build_like_asset(
+def test_short_flat_top_asset_ramp_fails_at_build(
     mock_soccfg: QickConfig, tmp_path: Path, samples: WaveformSamples
 ) -> None:
     length = mock_soccfg.cycles2us(4, gen_ch=0)
     short = replace(samples, time=np.array([0.0, length / 2, length]))
-    asset = _flat_top_builder(mock_soccfg, _file_arb(tmp_path, short), 0.25)
-    with pytest.raises(RuntimeError, match="shorter than the min of 3") as expected:
-        asset.build()
-
-    memory = _flat_top_builder(mock_soccfg, InMemoryArbWaveformCfg(samples=short), 0.25)
-    with pytest.raises(RuntimeError) as actual:
-        memory.build()
-    assert str(actual.value) == str(expected.value)
-
-
-@pytest.mark.parametrize("method", ["to_dict", "model_dump_json"])
-def test_flat_top_memory_ramp_cannot_be_serialized(
-    samples: WaveformSamples, method: str
-) -> None:
-    ramp = InMemoryArbWaveformCfg(samples=samples)
-    plain = PulseCfg(ch=0, nqz=1, freq=80, gain=0.2, waveform=ramp)
-    with pytest.raises(ValueError, match="only exists in memory") as expected:
-        getattr(plain, method)()
-
-    flat_top = PulseCfg(
-        ch=0,
-        nqz=1,
-        freq=80,
-        gain=0.2,
-        waveform=FlatTopWaveformCfg(length=0.25, raise_waveform=ramp),
-    )
-    with pytest.raises(ValueError, match="only exists in memory") as actual:
-        getattr(flat_top, method)()
-    assert str(actual.value) == str(expected.value)
+    builder = _flat_top_builder(mock_soccfg, _file_arb(tmp_path, short), 0.25)
+    with pytest.raises(RuntimeError, match="shorter than the min of 3"):
+        builder.build()
